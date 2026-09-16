@@ -29,6 +29,7 @@ import {
   formatLegPositionShareTotal,
 } from '@/lib/legPositionShare';
 import {
+  addSizingSnapshotLines,
   evaluateCampaignAddSizing,
   formatAddSizingCoinQuantity,
   formatAddSizingNotional,
@@ -561,10 +562,21 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         if (!verdict) return [{ text: '' }];
         if (verdict.status === 'ok') return [{ text: '✓', color: '#C4CAD3', size: 11 }];
         if (verdict.status === 'fail') {
+          // 成交记录带着计算器的计划时，把「计算时 /（下单时）/ 实际成交」并上，再点一句超出从哪来。没有快照的行与之前逐字不变。
+          const snapshot = addSizingSnapshotLines(verdict);
+          const reason = snapshot?.slippage ?? snapshot?.cause ?? null;
           return [
             { text: '✗', color: '#F6465D', bold: true, size: 20 },
             { text: `上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币`, color: '#F6465D', bold: true, size: 11 },
             { text: `≈ ${formatAddSizingNotional(verdict.maxAllowedNotional)} U`, color: '#F6465D', size: 10 },
+            ...(snapshot
+              ? [
+                { text: snapshot.calc, color: '#848E9C', size: 9 },
+                ...(snapshot.order ? [{ text: snapshot.order, color: '#848E9C', size: 9 }] : []),
+                { text: snapshot.actual, color: '#848E9C', size: 9 },
+                ...(reason ? [{ text: reason, color: '#F6465D', bold: true, size: 9 }] : []),
+              ]
+              : []),
           ];
         }
         return [{ text: '—', color: '#C4CAD3', size: 11 }];

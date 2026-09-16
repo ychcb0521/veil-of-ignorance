@@ -6,6 +6,7 @@ import {
   forkReplayTimeline,
   isCoinTimelineClockActive,
   isImplicitReplayFork,
+  isWithinDirectionFlips,
   mergeReplayTimelineRegistries,
   normalizeReplayTimelineRegistry,
   pruneReplayTimelineRegistry,
@@ -175,6 +176,51 @@ describe('兜底分叉判据 isImplicitReplayFork', () => {
 
   it('没有基准（老节点）不判', () => {
     expect(isImplicitReplayFork({ ...base, lastSimTime: null, simTime: 0, realAt: 60_000 })).toBe(false);
+  });
+});
+
+describe('只隔着翻转方向 isWithinDirectionFlips', () => {
+  // a(start) → b(direction) → c(direction) → d(jump) → e(direction)；另有 f(implicit) 挂在 c 下面
+  const chain = (() => {
+    let registry = fork(createReplayTimelineRegistry(), 'a');
+    registry = fork(registry, 'b', { continuing: true, cause: 'direction', direction: -1 });
+    registry = fork(registry, 'c', { continuing: true, cause: 'direction', direction: 1 });
+    const beforeJump = registry;
+    registry = fork(registry, 'd', { continuing: true, cause: 'jump' });
+    registry = fork(registry, 'e', { continuing: true, cause: 'direction', direction: -1 });
+    const withImplicit = fork(beforeJump, 'f', { continuing: true, cause: 'implicit' });
+    return { ...registry, nodes: { ...registry.nodes, f: withImplicit.nodes.f } };
+  })();
+
+  it('同一条、或只隔着翻转方向分出来的时间线：是（翻几次都算）', () => {
+    expect(isWithinDirectionFlips(chain, 'a', 'a')).toBe(true);
+    expect(isWithinDirectionFlips(chain, 'a', 'b')).toBe(true);
+    expect(isWithinDirectionFlips(chain, 'a', 'c')).toBe(true);
+    expect(isWithinDirectionFlips(chain, 'b', 'c')).toBe(true);
+    expect(isWithinDirectionFlips(chain, 'd', 'e')).toBe(true);
+  });
+
+  it('中间隔着跳转 / 兜底分叉，或方向反了、不在一条链上：不是', () => {
+    expect(isWithinDirectionFlips(chain, 'c', 'd')).toBe(false);
+    expect(isWithinDirectionFlips(chain, 'a', 'e')).toBe(false);
+    expect(isWithinDirectionFlips(chain, 'c', 'f')).toBe(false);
+    expect(isWithinDirectionFlips(chain, 'b', 'a')).toBe(false);
+    expect(isWithinDirectionFlips(chain, 'e', 'f')).toBe(false);
+  });
+
+  it('节点找不到（修剪掉、别的设备的章）、父指针成环：不是，也不死循环', () => {
+    expect(isWithinDirectionFlips(chain, 'a', 'missing')).toBe(false);
+    const orphan = { ...chain, nodes: { ...chain.nodes, g: node('g', { cause: 'direction', parentId: 'gone' }) } };
+    expect(isWithinDirectionFlips(orphan, 'a', 'g')).toBe(false);
+    const loop = {
+      ...chain,
+      nodes: {
+        ...chain.nodes,
+        x: node('x', { cause: 'direction', parentId: 'y' }),
+        y: node('y', { cause: 'direction', parentId: 'x' }),
+      },
+    };
+    expect(isWithinDirectionFlips(loop, 'a', 'x')).toBe(false);
   });
 });
 

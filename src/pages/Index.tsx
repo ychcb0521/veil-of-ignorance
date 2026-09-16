@@ -60,6 +60,7 @@ import { Wallet, Crosshair, BookOpen, Tag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { JournalNavMenu } from "@/components/journal/JournalNavMenu";
 import type { PendingOrder, Position, TradeRecord } from "@/types/trading";
+import { clearAddSizingPlan } from "@/lib/addSizingPlan";
 import { calcUnrealizedPnl } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import type { AssetState } from "@/types/assets";
@@ -128,6 +129,7 @@ const Index = () => {
     handlePlaceTpSl,
     applyAttachedTpSl,
     applyMergeSideEffects,
+    judgePlannedAddFill,
     liquidateIsolatedOnCandle,
     applySymbolLeverage,
     settleFillDebit,
@@ -549,6 +551,8 @@ const Index = () => {
           createdTimelineId: order.createdTimelineId,
           filledTimelineId,
           positionId: position.id,
+          // 挂单时带着的加仓计划原样带到成交快照上；没有的与改动前逐字节相同。
+          ...(order.addSizingSnapshot ? { addSizingSnapshot: order.addSizingSnapshot } : {}),
         }));
       /**
        * 合并结果要**带出来**：后面两件事都依赖「到底并没并、并进了谁」。
@@ -557,8 +561,10 @@ const Index = () => {
        * 被吞并方的 id，这张止损从诞生起就指向一个不存在的仓位，永不触发。
        */
       const mergeOut: { current: PositionMergeResult | null } = { current: null };
+      const heldBeforeOut: { current: Position[] } = { current: [] };
       setPositionsMap((prev) => {
         const existing = (prev[symbol] || []).filter(isPositionOpen);
+        heldBeforeOut.current = existing;
         const result = mergeFilledPosition(symbol, existing, position);
         mergeOut.current = result;
         return { ...prev, [symbol]: result.positions };
@@ -566,6 +572,12 @@ const Index = () => {
       // setPositionsMap 是即时包装（updater 同步跑在最新的 ref 上），所以这里拿得到结果。
       const merged = mergeOut.current;
       if (merged) applyMergeSideEffects(symbol, merged);
+      /**
+       * 条件委托触发后在触发价上按 Taker 滑点成交：带着计算器计划的加仓照样按实际成交价复判（参考价 = 触发价），
+       * 与市价单同一个入口。按「限价 @S₂」定的量挂成突破条件单，超限就在这里说出来，而不是等到 Legs 才见红叉。
+       * 状态取合并之前的持仓（上面 updater 里拿到的那一份）。
+       */
+      judgePlannedAddFill(symbol, heldBeforeOut.current, position, entryPrice, order.addSizingSnapshot);
       const nextOrdersMap = {
         ...ordersMapRef.current,
         [symbol]: (ordersMapRef.current[symbol] || []).filter((candidate) => candidate.id !== order.id),
@@ -590,7 +602,7 @@ const Index = () => {
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap, stampClock],
+    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, judgePlannedAddFill, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap, stampClock],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1381,6 +1393,7 @@ const Index = () => {
                 createdTimelineId: matchedOrder.createdTimelineId,
                 filledTimelineId,
                 positionId: position.id,
+                ...(matchedOrder.addSizingSnapshot ? { addSizingSnapshot: matchedOrder.addSizingSnapshot } : {}),
               }));
             // 同标的同方向并成一个仓位（币安单向持仓）。合并后必须改指减仓单，
             // 否则挂在被吞并那笔上的止损会变成永不触发的孤儿。
@@ -1711,6 +1724,8 @@ const Index = () => {
         // 新的回放时间线：同一段行情从这里重新走，哪怕与上一次完全重合。
         // 必须在改钟之前——在跑的钟上重新开始挂在当前时间线下面，从停着的钟起步另起一个根。
         forkReplayTimeline(activeSymbol, "start", startTs, timeDirection);
+        // 新的一场从这里开始：上一场算出的加仓计划（价、S₁、G 都是那一场的）不带过来。同步模式分的是全局那只钟，一并清掉。
+        clearAddSizingPlan(timeMode === "isolated" ? activeSymbol : undefined);
 
         if (timeMode === "isolated") {
           const now = Date.now();
@@ -1807,6 +1822,8 @@ const Index = () => {
       if (timeDirection === -1) setReverseCapTime(startTs);
       // 行情覆盖检查都过了才分叉（失败的跳转不留任何痕迹）。同步模式分全局那只钟，隔离模式只分这个币的。
       forkReplayTimeline(normalized, "jump", startTs, timeDirection);
+      // 跳到信号时刻就是新的一场：上一场的加仓计划不带过来（隔离模式只清这个币的）
+      clearAddSizingPlan(timeMode === "isolated" ? normalized : undefined);
 
       if (timeMode === "isolated") {
         const now = Date.now();
@@ -1912,6 +1929,8 @@ const Index = () => {
     }
     // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束。
     endReplayTimeline("all");
+    // 仓位与挂单都清了：加仓计算器没下出去的计划一并清掉，不漏到下一场（下一场打开计算器会种回它的 S₁ / G）
+    clearAddSizingPlan();
 
     // Full state cleanup — garbage collection
     reset();
@@ -1955,6 +1974,8 @@ const Index = () => {
       }
       // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束这个币的时间线。
       endReplayTimeline(replayTimelineScope("isolated", activeSymbol));
+      // 这个币这一场结束了：加仓计算器没下出去的计划不留给下一场
+      clearAddSizingPlan(activeSymbol);
       setCoinTimelines((prev) => ({
         ...prev,
         [activeSymbol]: {
@@ -1990,6 +2011,8 @@ const Index = () => {
       }
       // 收尾的平仓 / 撤单还盖着旧时间线的章，之后才结束。
       endReplayTimeline("synced");
+      // 所有币这一场都结束了：加仓计算器没下出去的计划一并清掉，不漏到下一场
+      clearAddSizingPlan();
       reset();
       matchCursorRef.current = null;
       clearSimState();
@@ -2143,6 +2166,11 @@ const Index = () => {
           onSymbolChange={handleSymbolChange}
           activeSymbol={activeSymbol}
           activePrice={displayCurrentPrice}
+          // 加仓计算器的 S₂ 要种在引擎成交的基准价上——与 handlePlaceOrderForActiveSymbol 的 freshPrice 同一个式子，
+          // 不是平滑后的 displayCurrentPrice。每次显示价刷新都会重渲染，这个值随之跟上。
+          activeFillBasePrice={latestChartPriceRef.current || priceMap[activeSymbol] || currentPrice}
+          activePricePrecision={chartPricePrecision}
+          activeQuantityPrecision={quantityPrecision}
         />
         <div className="flex items-center gap-3 shrink-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}

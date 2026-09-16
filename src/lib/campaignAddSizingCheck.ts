@@ -27,8 +27,24 @@
  * 成本线越过 S₁ 的那一段折成钱、减掉 G 就是缺口——展开即 X₂·险 − Y₁ − G，与垫子式恒等。
  * 成本线由计算器那边的 evaluatePostAddCostLine 算，与这里的逐刀账本是两套代码；
  * 两条路对不上（某个数错了单位 / 符号，或哪里改坏了）就既不给 ✓ 也不给 ✗，标成 unknown 把两个数都摆出来。
+ *
+ * **S₂ 一律按成交价判，计算器的快照只用来解释。** COMMONUSDT 那一场：用户严格按计算器上限下单，
+ * 这里却判超限 1.57% / 3.70%——计算器读的是下单前的盘面价，市价单按 0.01% + 名义/50亿 滑点成交，
+ * 而（张数 / 名义）上限对 S₂ 的弹性是 S₁/(S₂ − S₁) ≈ 十几倍。判定不能改：真正的风险就在成交价上。
+ * 但成交记录带着计算器当时的计划（record.addSizingSnapshot）时，这里把它原样交出去，再按**本函数自己的**
+ * Y₁ + G 与判定同一个容差，走 attributeAddExcess 说清超出从哪来：
+ *   计划价（市价计划已含预计滑点）→ 下单价（计算后价格变动）→ 成交价（比预计多出来的滑点）。
+ * 只有按下单时的价、计入计划预计的滑点仍合规，才说「超出部分全部来自成交滑点」；
+ * 量本身超过计划、或计算后价格变了，各说各的，不拿滑点顶罪。
+ * 没有快照就什么也不多说：腿上的 pre_entry_price 不能当下单前的价用——
+ * syncTradeRecordCorrectionToJournals 与历史回填都把它改写成 record.entryPrice（成交价）。
  */
-import { evaluatePostAddCostLine } from '@/lib/addSizing';
+import {
+  attributeAddExcess,
+  evaluatePostAddCostLine,
+  formatSignedPct,
+  type AddExcessAttribution,
+} from '@/lib/addSizing';
 import {
   buildTradeRecordPnlCorrection,
   resolveLegExecution,
@@ -43,7 +59,7 @@ import {
   journalOpenOperationTime,
 } from '@/lib/objectiveOperationTime';
 import type { TradeJournal } from '@/types/journal';
-import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+import type { AddSizingSnapshot, CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export type AddSizingStatus = 'ok' | 'fail' | 'unknown';
 
@@ -99,6 +115,18 @@ export interface AddSizingVerdict {
    * 两者对不上即 self_check_mismatch，两个数都留在这里供诊断。
    */
   costLineShortfall: number | null;
+  /** 成交记录带着的计算器计划（下单那一刻的输入与输出）；老记录 / 没经计算器的单子为 null。 */
+  snapshot: AddSizingSnapshot | null;
+  /** 本函数自己的 Y₁ + G 在快照参考价 S₂（市价计划 = 现价、限价计划 = 手填限价、条件委托 = 触发价，不计滑点）上给出的上限（币）；没有快照或参考价没有风险距离为 null。 */
+  snapshotLimitAtRef: number | null;
+  /** 实际成交价相对**这张单的下单参考价**（快照的 s2AtOrder，缺省为计划的下单价）的偏移（%），带符号。 */
+  fillSlippagePct: number | null;
+  /** 只因成交价偏离快照参考价 S₂ 而少掉的额度：snapshotLimitAtRef ÷ maxAllowedCoins − 1（%）。 */
+  slippageOvershootPct: number | null;
+  /** 判超限时超出从哪来（attributeAddExcess）；合规、无法判断或没有快照时为 null。 */
+  excess: AddExcessAttribution | null;
+  /** excess.cause === 'slippage'：超出部分全部来自成交滑点。合规或没有快照时为 null。 */
+  withinSnapshotLimit: boolean | null;
 }
 
 export interface CampaignAddSizingInput {
@@ -160,6 +188,7 @@ function unknown(reason: AddSizingUnknownReason, partial: Partial<AddSizingVerdi
     cushion: null, banked: null, consumedByHeld: null, maxLoss: null, required: null,
     riskPerCoin: null, maxAllowedCoins: null, maxAllowedNotional: null, shortfall: null,
     blendedCost: null, costLineShortfall: null,
+    snapshot: null, snapshotLimitAtRef: null, fillSlippagePct: null, slippageOvershootPct: null, excess: null, withinSnapshotLimit: null,
     ...partial,
     status: 'unknown',
     reason,
@@ -489,9 +518,37 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const tolerance = Math.max(0.01, 1e-6 * Math.max(Math.abs(required), maxLoss));
     const ledgerGap = maxLoss - required;
     const costLineShortfall = costLineGap > tolerance ? costLineGap : 0;
+    /**
+     * 计算器的计划只作解释、不参与判定。方向对不上、价不全的快照不认。
+     * 归因用**本函数**的 Y₁ + G 与同一个容差：某个价上「合规」= 这笔量在那个价上的最大亏损 − (Y₁ + G) ≤ 容差。
+     * 这笔量在别的价上是多少币：币本位张数不变、币数 = 名义 ÷ 价；U 本位币数不变。
+     */
+    const snapshot = execution.record?.addSizingSnapshot ?? null;
+    const usableSnapshot = snapshot && snapshot.side === (d > 0 ? 'LONG' : 'SHORT')
+      && positive(snapshot.s2Ref) && positive(snapshot.s2Fill) ? snapshot : null;
+    const addCoinSettled = (execution.record?.settlementMode ?? add.pre_settlement_mode) === 'coin';
+    const coinsAt = (px: number) => (addCoinSettled ? add.pre_position_size! / px : x2Coins);
+    const riskAt = (px: number) => Math.max(0, (px - s1) * d);
+    const limitAt = (px: number) => (riskAt(px) > 0 ? Math.max(0, required) / riskAt(px) : Number.POSITIVE_INFINITY);
+    const fitsAt = (px: number) => coinsAt(px) * riskAt(px) - required <= tolerance;
+    const snapshotRefRisk = usableSnapshot ? riskAt(usableSnapshot.s2Ref) : 0;
+    const snapshotLimitAtRef = usableSnapshot && snapshotRefRisk > 0 ? Math.max(0, required) / snapshotRefRisk : null;
+    const slippageOvershootPct = snapshotLimitAtRef != null && maxAllowedCoins != null && maxAllowedCoins > 0
+      ? (snapshotLimitAtRef / maxAllowedCoins - 1) * 100
+      : null;
+    const failing = !(required >= maxLoss - tolerance);
+    const excess = usableSnapshot && failing
+      ? attributeAddExcess({ plan: usableSnapshot, fillPrice: s2, coinsAt, limitAt, fitsAt })
+      : null;
+    const snapshotOrderPrice = usableSnapshot
+      ? (positive(usableSnapshot.s2AtOrder) ? usableSnapshot.s2AtOrder : (usableSnapshot.orderKind === 'limit' ? usableSnapshot.s2Fill : usableSnapshot.s2Ref))
+      : null;
+    const fillSlippagePct = snapshotOrderPrice != null ? (s2 / snapshotOrderPrice - 1) * 100 : null;
+    const withinSnapshotLimit = usableSnapshot && failing ? excess?.cause === 'slippage' : null;
     const partial = {
       s1, s2, x1Coins, x2Coins, cushion, banked, consumedByHeld, maxLoss, required,
       riskPerCoin, maxAllowedCoins, maxAllowedNotional, blendedCost, costLineShortfall,
+      snapshot: usableSnapshot, snapshotLimitAtRef, fillSlippagePct, slippageOvershootPct, excess, withinSnapshotLimit,
     };
     if (incomplete) {
       result.set(add.id, unknown('old_leg_incomplete', partial));
@@ -561,7 +618,89 @@ export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
   }
   // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
   const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
-  return verdict.status === 'ok'
-    ? `加仓校验：仓位合规。${detail}`
-    : `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}`;
+  if (verdict.status === 'ok') return `加仓校验：仓位合规。${detail}`;
+  const snapshotText = describeAddSizingSnapshot(verdict);
+  return `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}${snapshotText ? `。${snapshotText}` : ''}`;
+}
+
+/** 带符号百分比：+0.14% / −0.14%；不足 0.005% 时多给两位，不把真实的偏差写成 +0.00%。 */
+export function formatAddSizingSignedPct(value: number | null | undefined): string {
+  return formatSignedPct(value);
+}
+
+export interface AddSizingSnapshotLines {
+  /**
+   * 「计算时 现价 …，预计成交 …（+0.14%），上限 … 币」。s2Ref 按计划的下单方式称呼：
+   * 市价计划是引擎基准价（现价）；限价计划是手填的限价（盘面价不在快照里，不能叫它现价）；条件委托是触发价。
+   */
+  calc: string;
+  /** 「下单时 参考价 …（计算后价格变动 +x%）」——下单价与计划的下单价不同才有。 */
+  order: string | null;
+  /** 「实际成交 …（+0.14%），上限 … 币」——括号里是相对这张单下单参考价的滑点。 */
+  actual: string;
+  /** 「超出部分全部来自成交滑点 +x%」——只在判超限、且按下单时的价计入计划预计的滑点仍合规时有。 */
+  slippage: string | null;
+  /** 判超限但不是滑点：计算后价格变动 / 输入不一致 / 量本身超过计划，各一句。 */
+  cause: string | null;
+}
+
+const fmtSnapshotPx = (v: number | null | undefined) => (v == null || !Number.isFinite(v) ? '—' : Math.abs(v) >= 1 ? v.toFixed(4) : v.toPrecision(6));
+
+/**
+ * 快照的几行话。页面弹窗、PNG、读屏三处同一段文字，各自只决定怎么摆。
+ * 原因只在判超限时给，判据见 attributeAddExcess：只有真是滑点才点名滑点。
+ */
+export function addSizingSnapshotLines(verdict: AddSizingVerdict): AddSizingSnapshotLines | null {
+  const snap = verdict.snapshot;
+  if (!snap) return null;
+  const px = fmtSnapshotPx;
+  const limitPlan = snap.orderKind === 'limit';
+  // 条件委托的计划：参考价是触发价，触发后按市价成交——与市价计划同一条链，只是措辞换成触发价
+  const conditionalPlan = snap.orderKind === 'conditional';
+  // s2Ref 的称呼跟着下单方式走：只有市价计划的 s2Ref 是计算那一刻的盘面价
+  const refWord = limitPlan ? '限价' : conditionalPlan ? '触发价' : '现价';
+  const excess = verdict.status === 'fail' ? verdict.excess : null;
+  const planOrderPrice = limitPlan ? snap.s2Fill : snap.s2Ref;
+  const orderPrice = positive(snap.s2AtOrder) ? snap.s2AtOrder : planOrderPrice;
+  const drifted = Math.abs(orderPrice / planOrderPrice - 1) > 1e-9;
+  // 下单价与计划的下单价不同：市价计划是计算后价格变了；限价计划是挂单价没挂在计划的价上（手改、或取整取反了方向）；
+  // 条件委托计划是触发价没挂在计划的价上
+  const driftWord = limitPlan ? '下单价偏离计划挂单价' : conditionalPlan ? '触发价偏离计划触发价' : '计算后价格变动';
+  let slippage: string | null = null;
+  let cause: string | null = null;
+  switch (excess?.cause) {
+    case 'slippage':
+      slippage = `超出部分全部来自成交滑点 ${formatSignedPct(excess.unexpectedSlippagePct)}`
+        + (limitPlan ? '（计划按限价、不计滑点，这张却是吃单成交）' : `（比计划预计的成交价 ${px(excess.anchorPrice)} 更差）`);
+      break;
+    case 'price_drift':
+      cause = `超出来自${limitPlan ? '下单价偏离计划挂单价' : conditionalPlan ? '触发价偏离计划触发价' : '计算后的价格变动'} ${formatSignedPct(excess.priceDriftPct)}：按下单时的价，上限只有 ${formatAddSizingCoinQuantity(excess.limitAtAnchor)} 币——`
+        + (limitPlan
+          ? '限价要挂在计划的价上（多头只能更低、空头只能更高）'
+          : conditionalPlan ? '触发价要挂在计划的价上，改了触发价就按新触发价重算' : '下单前该按新价重算');
+      break;
+    case 'inputs':
+      cause = `实际量在计算器的上限之内，差在计算器的输入与这里读到的不一致（计算器 S₁ ${px(snap.s1)}，校验 S₁ ${px(verdict.s1)}；或 G / 旧仓不同）`;
+      break;
+    case 'oversize':
+      cause = `实际加仓比计算时的上限多 ${formatSignedPct(excess.planOvershootPct)}——超出来自仓位本身，不是滑点`;
+      break;
+    default:
+      break;
+  }
+  return {
+    calc: `计算时 ${refWord} ${px(snap.s2Ref)}，${limitPlan ? '挂单价' : '预计成交'} ${px(snap.s2Fill)}（${limitPlan ? '限价' : formatSignedPct(snap.slippagePct)}），上限 ${formatAddSizingCoinQuantity(snap.addCoinsMax)} 币`,
+    order: drifted ? `下单时 参考价 ${px(orderPrice)}（${driftWord} ${formatSignedPct((orderPrice / planOrderPrice - 1) * 100)}）` : null,
+    actual: `实际成交 ${px(verdict.s2)}（${formatSignedPct(verdict.fillSlippagePct)}），上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币`,
+    slippage,
+    cause,
+  };
+}
+
+/** 几行话连成一句，给读屏 / aria-label。 */
+export function describeAddSizingSnapshot(verdict: AddSizingVerdict): string {
+  const lines = addSizingSnapshotLines(verdict);
+  if (!lines) return '';
+  const reason = lines.slippage ?? lines.cause;
+  return `${lines.calc}；${lines.order ? `${lines.order}；` : ''}${lines.actual}${reason ? `。${reason}` : ''}`;
 }

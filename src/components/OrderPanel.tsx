@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import type { OrderSide, OrderType } from '@/types/trading';
-import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcUnrealizedPnl } from '@/types/trading';
+import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcSlippage, calcUnrealizedPnl } from '@/types/trading';
+import { consumeAddSizingPrefill, peekAddSizingSnapshotForOrder, useAddSizingPrefill } from '@/lib/addSizingPlan';
+import { roundLimitPriceFavorable } from '@/lib/addSizing';
 import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info, MoreHorizontal } from 'lucide-react';
 import { TradingPreferencesDrawer } from '@/components/TradingPreferencesDrawer';
 import { useNotificationCenter } from '@/lib/notificationCenter';
@@ -616,6 +618,72 @@ export function OrderPanel({
     ? (coinInputUnit === 'CONTRACTS' ? 'CONTRACTS' : 'COIN')
     : (currencyUnit === 'BASE' ? 'BASE' : 'USDT');
 
+  /**
+   * 加仓计算器的「按上限下单」：整张的上限（U 本位是币数）连同下单方式预填进来。
+   * 币本位一律切到「张」档——张数是唯一真源，直接写整张就不会再被另一个价折一次；
+   * 限价计划把挂单价一并填进限价框；条件单计划切到高级槽的「条件委托」并填好触发价。
+   * 只应用一次（consumeAddSizingPrefill），之后用户随便改。
+   * 方向不在面板状态里（开多 / 开空是两个按钮），计划本身带着方向，下单入口按方向匹配。
+   *
+   * 两处取整**只往安全侧**：上限是授权额度，进一那一点是规则没批的量。
+   *   · 限价：多头向下、空头向上取到面板的价格精度（计算器已按同一精度取整定量，这里是兜底）；
+   *   · U 本位币数：按数量精度向下取整（币本位的张数计算器已向下取整）。
+   * 结算方式跟计划走（计划跟被加仓的仓位走）：面板不同就先切过去（仅本会话），切换那一帧会清空数量，
+   * 下一帧再预填；切不过去就说明原因、放弃这次预填，不留一个空数量让人对着按钮发呆。
+   */
+  const addSizingPrefill = useAddSizingPrefill(symbol);
+  const prefillSeq = addSizingPrefill?.seq ?? null;
+  const prefillSwitchRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!addSizingPrefill) return;
+    const { seq, prefill } = addSizingPrefill;
+    if ((prefill.settlement === 'coin') !== isCoinMargined) {
+      if (prefillSwitchRef.current !== seq) {
+        prefillSwitchRef.current = seq;
+        ctx.setSymbolSettlementMode(symbol, prefill.settlement);
+        return;
+      }
+      toast.error('加仓计划未能预填', {
+        description: `计划按${prefill.settlement === 'coin' ? '币本位' : 'U本位'}算（跟被加仓的仓位走），下单面板没能切过去；请手动切换结算方式后按计算器的数下单。`,
+      });
+      consumeAddSizingPrefill(seq, symbol);
+      return;
+    }
+    setActionMode('OPEN');
+    setOrderType(prefill.orderType);
+    if (prefill.orderType === 'CONDITIONAL') setAdvancedType('CONDITIONAL');
+    setPriceSelection(prefill.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET');
+    // 限价挂单价与条件单触发价同一种取整：计算器已按同一精度向有利侧取整定量，这里是兜底
+    const fixPrice = (px: number) => {
+      const safe = roundLimitPriceFavorable(px, pricePrecision, prefill.side);
+      const fixed = Number.isFinite(safe) ? safe.toFixed(pricePrecision) : '';
+      return Number(fixed) > 0 ? fixed : String(Number(px.toPrecision(8)));
+    };
+    if (prefill.orderType === 'LIMIT' && prefill.limitPrice != null && prefill.limitPrice > 0) {
+      setPrice(fixPrice(prefill.limitPrice));
+    }
+    if (prefill.orderType === 'CONDITIONAL' && prefill.triggerPrice != null && prefill.triggerPrice > 0) {
+      setStopPrice(fixPrice(prefill.triggerPrice));
+    }
+    setCurrencyUnit('BASE');
+    setUsdtInputMode('ORDER_VALUE');
+    setShowCurrencySelector(false);
+    if (isCoinMargined) {
+      const contracts = Math.max(0, Math.floor(prefill.contracts ?? 0));
+      setQuantity(contracts > 0 ? String(contracts) : '');
+      lockFoldRef.current = { raw: contracts, price: effectivePrice };
+      setLockedContracts(contracts);
+    } else {
+      const p = Math.max(0, Math.min(12, Math.floor(quantityPrecision)));
+      const scale = 10 ** p;
+      const coins = prefill.coins > 0 ? Math.floor(prefill.coins * scale + 1e-7) / scale : 0;
+      setQuantity(coins > 0 ? coins.toFixed(p) : '');
+    }
+    setPercent(0);
+    consumeAddSizingPrefill(seq, symbol);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillSeq, isCoinMargined, symbol]);
+
   // ===== Snapshot dialog state (intercepts every order placement) =====
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const [snapshotSide, setSnapshotSide] = useState<OrderSide>('LONG');
@@ -674,8 +742,17 @@ export function OrderPanel({
   };
 
   const handleOrder = async (rawSide: OrderSide) => {
-    const params = buildOrderParams(rawSide);
-    if (!params) return;
+    const built = buildOrderParams(rawSide);
+    if (!built) return;
+    /**
+     * 加仓计算器的计划在**点按钮这一刻**就取（只看不消费），随单子参数一路带到下单入口。
+     * 决策模式要先填下单前快照，一填半小时并不稀奇；到提交时再去取，计划早过了保鲜期，
+     * 这张照计算器预填的单就会悄悄不带计划、成交后也不复判。消费仍在下单入口：单子真的挂出 / 成交才清掉这一份。
+     */
+    const planned = peekAddSizingSnapshotForOrder({
+      symbol, side: rawSide, type: built.type, settlement: built.settlementMode,
+    });
+    const params: PlaceOrderParams = planned ? { ...built, addSizingSnapshot: planned } : built;
     // 直接交易模式：跳过快照对话框，直接下单。journal 不会被创建，
     // 因此错题集 / 元监控 不会收录；但 tradeHistory 仍记录，可在战役中归类。
     if (ctx.tradingMode === 'direct') {
@@ -918,6 +995,12 @@ export function OrderPanel({
             <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
           </div>
         )}
+        {/* 市价单的预计成交价：引擎按 0.01% + 名义/50亿 滑点成交（calcSlippage，同一个函数），
+            3,000 万名义就是 0.6%。提前写在这里，而不是等成交后在记录里发现。方向未定，多空各给一个。
+            条件委托触发后同样按市价成交，基准换成触发价（放在触发价那一行下面）。 */}
+        {(orderType === 'MARKET' || orderType === 'MARKET_TP_SL') && currentPrice > 0 && (
+          <ExpectedFillLine base={currentPrice} notional={notionalValue} pricePrecision={pricePrecision} unitLabel={quoteUnitLabel} />
+        )}
 
         {/* Trigger price (TP/SL or conditional types)；跟踪委托此行是「激活价（可选）」 */}
         {(orderType === 'LIMIT_TP_SL' || orderType === 'MARKET_TP_SL' || orderType === 'CONDITIONAL' || orderType === 'TRAILING_STOP') && (
@@ -946,6 +1029,12 @@ export function OrderPanel({
             </button>
             <span className="text-[11px] text-muted-foreground/80 ml-2 shrink-0">{quoteUnitLabel}</span>
           </div>
+        )}
+        {orderType === 'CONDITIONAL' && (parseFloat(stopPrice) || 0) > 0 && (
+          <ExpectedFillLine
+            base={parseFloat(stopPrice)} notional={notionalValue} pricePrecision={pricePrecision} unitLabel={quoteUnitLabel}
+            prefix="触发后预计成交"
+          />
         )}
 
         {/* ===== 跟踪委托：回调率 ===== */}
@@ -1434,3 +1523,22 @@ export function OrderPanel({
 }
 
 // ===== Reusable: Bottom Sheet Overlay =====
+
+/**
+ * 预计成交价一行：引擎的 Taker 滑点（calcSlippage，同一个函数）在基准价上给出多 / 空两个成交价。
+ * 市价单的基准是现价，条件委托的基准是触发价（触发后按市价成交）。
+ */
+function ExpectedFillLine({ base, notional, pricePrecision, unitLabel, prefix = '预计成交' }: {
+  base: number; notional: number; pricePrecision: number; unitLabel: string; prefix?: string;
+}) {
+  const longFill = calcSlippage(base, notional, 'LONG');
+  const shortFill = calcSlippage(base, notional, 'SHORT');
+  const slipPct = (longFill / base - 1) * 100;
+  const fmtFill = (v: number) => (Math.abs(v) >= 1 ? v.toFixed(Math.max(2, Math.min(pricePrecision, 6))) : v.toPrecision(6));
+  return (
+    <div data-testid="order-expected-fill" className="px-1 text-[10px] leading-4 text-muted-foreground/80 tabular-nums">
+      {prefix}（滑点 ±{slipPct.toFixed(2)}%）开多 ≈ {fmtFill(longFill)} · 开空 ≈ {fmtFill(shortFill)}
+      {notional > 0 ? `，名义 ${formatUSDT(notional)} ${unitLabel}` : ''}
+    </div>
+  );
+}

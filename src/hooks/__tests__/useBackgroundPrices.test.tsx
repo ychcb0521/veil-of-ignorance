@@ -1,10 +1,10 @@
 import React from 'react';
-import { act, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBackgroundPrices } from '@/hooks/useBackgroundPrices';
 import { fetchCanonicalTimePriceAt } from '@/lib/canonicalTimePrice';
 import { useTradingContext } from '@/contexts/TradingContext';
-import type { PendingOrder } from '@/types/trading';
+import type { AddSizingSnapshot, PendingOrder, Position } from '@/types/trading';
 
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: vi.fn(),
@@ -172,9 +172,19 @@ describe('useBackgroundPrices', () => {
       triggerDirection: 'DOWN',
     } as PendingOrder);
 
-    async function runFill(affordable = true) {
+    async function runFill(
+      affordable = true,
+      order: PendingOrder = coinOrder(),
+      /**
+       * 成交复判的入口与「成交前的持仓」：给了 held，setPositionsMap 就像真的即时包装那样当场跑 updater，
+       * 复判才读得到合并之前的那一份。
+       */
+      extra: { judgePlannedAddFill?: ReturnType<typeof vi.fn>; held?: Position[] } = {},
+    ) {
       const setBalance = vi.fn();
-      const setPositionsMap = vi.fn();
+      const setPositionsMap = extra.held
+        ? vi.fn((updater: (prev: Record<string, Position[]>) => Record<string, Position[]>) => updater({ NOMUSD: extra.held! }))
+        : vi.fn();
       const setFilledOrders = vi.fn();
       const recordExecutionTrade = vi.fn();
       // 每个标的各有自己的钟：返回值随标的不同，才能验出「用错了钟」。
@@ -191,7 +201,7 @@ describe('useBackgroundPrices', () => {
         activeSymbols: ['ACTIVEUSDT', 'NOMUSD'],
         setPriceMap: vi.fn(),
         markPriceAsOf: vi.fn(),
-        ordersMap: { NOMUSD: [coinOrder()] },
+        ordersMap: { NOMUSD: [order] },
         setOrdersMap: vi.fn(),
         setPositionsMap,
         setBalance,
@@ -203,6 +213,8 @@ describe('useBackgroundPrices', () => {
         recordExecutionTrade,
         executeReduceOnlyTrigger: vi.fn(),
         applyAttachedTpSl: vi.fn(),
+        applyMergeSideEffects: vi.fn(),
+        ...(extra.judgePlannedAddFill ? { judgePlannedAddFill: extra.judgePlannedAddFill } : {}),
       } as unknown as ReturnType<typeof useTradingContext>);
 
       render(<Harness />);
@@ -262,6 +274,58 @@ describe('useBackgroundPrices', () => {
       expect(snap.contracts).toBe(CONTRACTS);
       expect(snap.settlementMode).toBe('coin');
       expect(snap.triggerPrice).toBeCloseTo(TRIGGER, 9);
+    });
+
+    it('【回归 · 二审】带着加仓计划的挂单在后台成交：成交快照与仓位都带上计划，与盘面撮合一致；没有计划的快照不多这个字段', async () => {
+      const plan: AddSizingSnapshot = {
+        at: 1, plan: 'A', side: 'LONG', settlement: 'coin', s1: 0.0101, s2Ref: TRIGGER, s2Fill: TRIGGER, slippagePct: 0,
+        s2AtOrder: TRIGGER, x1: 1_000, sBar: 0.0095, g: 0, gUnit: 'NOM', addCoinsMax: 100_000, contracts: 100, orderKind: 'limit',
+      };
+      const { setFilledOrders, setPositionsMap } = await runFill(true, { ...coinOrder(), addSizingSnapshot: plan });
+      expect(setFilledOrders.mock.calls[0][0]([])[0].addSizingSnapshot).toEqual(plan);
+      expect(setPositionsMap.mock.calls[0][0]({ NOMUSD: [] }).NOMUSD[0].addSizingSnapshot).toEqual(plan);
+    });
+
+    /**
+     * 【回归 · 三审】后台标的上的条件委托触发后按市价成交（Taker，在触发价上加滑点）：带着计划就按实际成交价复判，
+     * 参考价取触发价、持仓取合并之前的那一份——与盘面的条件单触发、市价单同一个入口。挂单价原价成交的限价单不判。
+     */
+    it('【回归 · 三审】带着计划的条件委托在后台触发：按触发价复判一次（合并前的持仓）；限价单成交不判', async () => {
+      const plan: AddSizingSnapshot = {
+        at: 1, plan: 'A', side: 'LONG', settlement: 'coin', s1: 0.0101, s2Ref: TRIGGER, s2Fill: TRIGGER * 1.0001, slippagePct: 0.01,
+        s2AtOrder: TRIGGER, x1: 1_000, sBar: 0.0095, g: 0, gUnit: 'NOM', addCoinsMax: 100_000, contracts: 100, orderKind: 'conditional',
+      };
+      const held = [{
+        id: 'held', side: 'LONG', entryPrice: 0.0095, quantity: 50, contracts: 50, contractSizeUsd: FACE, settlementMode: 'coin',
+        settlementAsset: 'NOM', leverage: LEV, marginMode: 'isolated', margin: 100, openTime: 10,
+      } as Position];
+      const judgePlannedAddFill = vi.fn();
+      const { setPositionsMap } = await runFill(true, { ...coinOrder(), addSizingSnapshot: plan }, { judgePlannedAddFill, held });
+      expect(judgePlannedAddFill).toHaveBeenCalledTimes(1);
+      const [symbol, heldBefore, position, referencePrice, snapshot] = judgePlannedAddFill.mock.calls[0];
+      expect(symbol).toBe('NOMUSD');
+      expect(heldBefore).toEqual(held);
+      expect(referencePrice).toBeCloseTo(TRIGGER, 12);
+      expect(snapshot).toBe(plan);
+      // 成交价是触发价加滑点（Taker），不是触发价本身
+      expect(position.entryPrice).toBeGreaterThan(TRIGGER);
+      expect(position.addSizingSnapshot).toEqual(plan);
+      expect(setPositionsMap).toHaveBeenCalledTimes(1);
+
+      // 限价单（Maker，挂单价原价成交）不走复判
+      cleanup();
+      vi.mocked(fetchCanonicalTimePriceAt).mockResolvedValue({ high: 0.011, low: 0.0102, close: 0.0105 });
+      const judgeLimit = vi.fn();
+      const limitOrder = { ...coinOrder(), id: 'bg-limit', type: 'LIMIT', price: 0.0103, stopPrice: 0, addSizingSnapshot: { ...plan, orderKind: 'limit' } } as PendingOrder;
+      const limitRun = await runFill(true, limitOrder, { judgePlannedAddFill: judgeLimit, held });
+      // 限价单确实成交了（建了仓），只是不复判
+      expect(limitRun.setPositionsMap).toHaveBeenCalledTimes(1);
+      expect(judgeLimit).not.toHaveBeenCalled();
+    });
+
+    it('没有计划的后台成交：快照里没有 addSizingSnapshot 这个键', async () => {
+      const { setFilledOrders } = await runFill();
+      expect('addSizingSnapshot' in setFilledOrders.mock.calls[0][0]([])[0]).toBe(false);
     });
 
     it('【回归】执行力资产收到的名义是 USD 名义,不是 张 × 价', async () => {

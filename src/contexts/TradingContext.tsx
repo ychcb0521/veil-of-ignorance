@@ -49,6 +49,7 @@ import { mergeLiquidationDetails, type LiquidationDetails } from '@/lib/liquidat
 import { calcLiquidationPrice } from '@/types/trading';
 import { toast } from '@/lib/notificationCenter';
 import type {
+  AddSizingSnapshot,
   Position,
   PendingOrder,
   TradeRecord,
@@ -88,6 +89,10 @@ import {
   type ReduceOnlyTriggerExecution,
 } from '@/lib/reduceOnlyOrderExecution';
 import { upsertOrderSnapshot } from '@/lib/orderSnapshotHistory';
+import { clearAddSizingPlan, consumeAddSizingPlan, peekAddSizingSnapshotForOrder, restoreAddSizingPlan } from '@/lib/addSizingPlan';
+import { judgePlannedAddFill as judgePlannedAddFillPure } from '@/lib/addSizingFillGuard';
+import { readHeldPosition } from '@/lib/addSizing';
+import { getCoinMarginedContractSizeUsd } from '@/lib/coinMargined';
 import {
   createReplayTimelineRegistry,
   currentReplayTimeline,
@@ -95,6 +100,7 @@ import {
   forkReplayTimeline as forkReplayTimelineInRegistry,
   isCoinTimelineClockActive,
   isImplicitReplayFork,
+  isWithinDirectionFlips,
   normalizeReplayTimelineRegistry,
   pruneReplayTimelineRegistry,
   recordReplayTimelineStamp,
@@ -234,6 +240,13 @@ interface TradingState {
    */
   applyMergeSideEffects: (symbol: string, merged: PositionMergeResult) => void;
   /**
+   * 按计算器计划下的加仓**吃单成交**之后按实际成交价复判 Plan B，超限进消息中心（只说不拦）。
+   * 市价 / 最优价在 handlePlaceOrder 里自己调；条件委托触发（Index）与后台撮合（useBackgroundPrices）
+   * 在建仓之后、合并之前调它——参考价传触发价，heldBefore 传合并前的持仓。
+   * 没有计划、方向不同、成交前没有同向仓位时立刻返回。
+   */
+  judgePlannedAddFill: (symbol: string, heldBefore: Position[], position: Position, referencePrice: number, snapshot?: AddSizingSnapshot | null) => void;
+  /**
    * 逐根 K 线判定逐仓强平（正放）。由 Index 的撮合循环在每根收线或成形中的 K 线上、
    * 紧跟止盈止损撮合之后调用——与成交共用同一个时钟、同一根 K 线、同一个区间。
    */
@@ -345,6 +358,11 @@ export interface PlaceOrderParams {
   scaledStartPrice?: number;
   scaledEndPrice?: number;
   latestPrice?: number;
+  /**
+   * 加仓计算器的计划。调用方一般不传：handlePlaceOrder 自己从 addSizingPlan 取当前计划
+   * （同标的、同方向、可钉的类型、仍在保鲜期），钉到委托 / 成交上。传了就以传的为准。
+   */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
 // Persist context across Vite HMR to avoid "must be used within Provider" errors
@@ -376,6 +394,36 @@ function calcAvailable(balance: number, positionsMap: PositionsMap): number {
     }
   }
   return balance - totalCrossMargin;
+}
+
+/**
+ * 撤掉一张带着加仓计划的挂单（手动撤单、成交时保证金不足被撤）：把计划放回 addSizingPlan，
+ * 紧接着追价的同向单还带得上。但计划必须仍属于**当前这一场、当前这条仓位**才放回：
+ *   · 这个标的仍持有同方向仓位——计划是给那条仓位加仓用的。停止回放 / 合并时间轴先平掉全部仓位、再撤全部挂单：
+ *     此时放回去的计划会被下一场重新打开的计算器种回 S₁ / G，还会钉到下一场的首笔开仓上；
+ *   · 这条仓位不晚于计划开出（与计算器重新打开时 planSeedOnOpen 同一条规则）：平掉又重开之后，
+ *     上一个持仓周期的计划不是这条仓位的。每笔成交都带真实开仓时刻才判得了，缺一笔就不判；
+ *   · 撤单与挂单在同一场回放里：撤单盖的时间线就是挂单那条，或只隔着「翻转方向」分出来的时间线
+ *     （正放 ↔ 倒放不清计划，仓位与挂单原样带过去）。跳到信号时刻会把旧挂单带进新的一场、钟被拨回会补一条兜底时间线，
+ *     那张单上钉的是上一场的计划。任一边没有章（钟没在跑）就不判，由 addSizingPlan 自己的分场水位兜底。
+ * positions 读 positionsMapRef（写入包装同步推进，刚平掉的仓位这里已经不在）；timelineId 是这次撤单盖的章，
+ * timelines 读 timelineRegistryRef（盖章时刚补出来的兜底时间线也在里面）。
+ */
+function restoreCancelledAddPlan(
+  symbol: string,
+  order: PendingOrder,
+  positions: Position[] | undefined,
+  timelineId: string | null,
+  timelines: ReplayTimelineRegistry,
+): void {
+  const snapshot = order.addSizingSnapshot;
+  if (!snapshot) return;
+  const held = (positions ?? []).filter(p => p.side === order.side && isPositionOpen(p));
+  if (held.length === 0) return;
+  const openedRealAt = readHeldPosition(symbol, held, order.side, getCoinMarginedContractSizeUsd(symbol))?.earliestOpenedRealAt ?? null;
+  if (openedRealAt != null && openedRealAt > snapshot.at) return;
+  if (order.createdTimelineId && timelineId && !isWithinDirectionFlips(timelines, order.createdTimelineId, timelineId)) return;
+  restoreAddSizingPlan(symbol, snapshot);
 }
 
 // ===== Provider =====
@@ -520,6 +568,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     });
   }, [setPositionsMap]);
   const [tradeHistory, setTradeHistory] = usePersistedState<TradeRecord[]>('trade_history', []);
+  // 成交路径要读本场落袋 G（加仓成交复判）；下单回调靠 ref 拿最新值，与 positionsMapRef 同一理由。
+  const tradeHistoryRef = useRef(tradeHistory);
+  useLayoutEffect(() => { tradeHistoryRef.current = tradeHistory; }, [tradeHistory]);
   // 价格精度按当前价位自动推导（低价币更细）。修复两件事：①价格显示更精确；
   // ②图表 Y 轴能贴合行情——klinecharts 的刻度最小步长受精度限制，精度太粗（固定 2 位）
   // 会让 0.12 这种币只能按 0.01 画刻度，把 Y 轴撑成 0.08~0.17 一大片留白、蜡烛挤成一条。
@@ -1532,6 +1583,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       createdTimelineId: order.createdTimelineId,
       cancelledTimelineId,
     }));
+    // 成交时被撤的是按计算器计划挂的加仓单：计划同样放回去（与手动撤单同一规则）
+    restoreCancelledAddPlan(symbol, order, positionsMapRef.current[symbol], cancelledTimelineId, timelineRegistryRef.current);
     toast.error('保证金不足，委托已撤销', {
       description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
     });
@@ -1616,6 +1669,29 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   }, [setOrdersMap]);
 
   /**
+   * 带着计算器计划的加仓吃单成交之后的复判（addSizingFillGuard.judgePlannedAddFill）。
+   * 挂单 / 成交历史读 ref：条件单触发与后台撮合的回调不该因为成交历史变了就换身份。
+   * 从不抛错——这条路径上任何异常都不该影响已经成交的单子（judgeMarketAddFill 自己也兜着）。
+   */
+  const judgePlannedAddFill = useCallback((
+    symbol: string,
+    heldBefore: Position[],
+    position: Position,
+    referencePrice: number,
+    snapshot?: AddSizingSnapshot | null,
+  ) => {
+    if (!snapshot) return;
+    try {
+      judgePlannedAddFillPure({
+        symbol, position, referencePrice, heldBefore, snapshot,
+        ordersMap: ordersMapRef.current, tradeHistory: tradeHistoryRef.current,
+      });
+    } catch (error) {
+      console.error('[加仓成交复判] 判定失败', error);
+    }
+  }, []);
+
+  /**
    * 调整一个标的的杠杆——**持仓、挂单、余额在同一次写入里一起动**。
    *
    * 三件事必须原子完成，任何一种交错都是缺陷：
@@ -1693,9 +1769,39 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       toast.error('无法获取当前价格'); return null;
     }
 
+    /**
+     * 加仓计算器的计划钉在这张单上：同标的、同方向、会开仓的类型、仍在保鲜期才取。
+     * 下单面板在点「开多 / 开空」那一刻已经取好放进 order.addSizingSnapshot（决策模式的下单前快照可能填上半小时，
+     * 到这里再取，计划早过了保鲜期）；没带才在这里自己取。
+     * 先看不消费——下面的校验可能把单子拒掉（余额不足、保护价方向不对），拒了计划得留着；
+     * 单子真的成交 / 挂出时才 commitAddSizingPlan，只消费**这一份**（带来的那份在仓库里还在，就清掉它；
+     * 仓库里若已是别的新计划，不动）。之后它随 executeSettlementFill 落到仓位（这一笔）上，
+     * 挂单则落到委托上、成交时再到仓位，平仓时 buildCloseRecords 把它写进记录——
+     * Legs「加仓校验」靠它说清计算时与成交时各是多少。
+     */
+    const orderSettlement = order.settlementMode ?? getSymbolSettlementMode(symbol);
+    const plannedSnapshot = order.addSizingSnapshot
+      ?? peekAddSizingSnapshotForOrder({ symbol, side: order.side, type: order.type, settlement: orderSettlement });
+    /**
+     * 钉上去的是计划的一份拷贝，补上这张单**自己**的下单参考价 s2AtOrder：
+     * 市价 / 最优价 = 引擎成交的基准价，其余按 orderReferencePrice（限价 = 委托价，条件单 = 触发价）。
+     * 计算后价格可能已经变了、限价也可能不是计划的价——没有它，Legs 校验只能把这些都算成「成交滑点」。
+     */
+    const addSizingSnapshot: AddSizingSnapshot | null = plannedSnapshot
+      ? {
+        ...plannedSnapshot,
+        s2AtOrder: plannedSnapshot.s2AtOrder ?? (
+          order.type === 'MARKET' || order.priceSelection === 'BEST'
+            ? effectiveCurrentPrice
+            : (orderReferencePrice({ ...order, type: order.type } as unknown as PendingOrder, effectiveCurrentPrice).price || effectiveCurrentPrice)
+        ),
+      }
+      : null;
+    const commitAddSizingPlan = () => { if (plannedSnapshot) consumeAddSizingPlan(plannedSnapshot); };
     const normalizedOrder = normalizeSettlementOrder(symbol, {
       ...order,
-      settlementMode: order.settlementMode ?? getSymbolSettlementMode(symbol),
+      settlementMode: orderSettlement,
+      ...(addSizingSnapshot ? { addSizingSnapshot } : {}),
     });
 
     /**
@@ -1754,6 +1860,16 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       };
     };
 
+    /**
+     * 按计算器计划下的市价 / 最优价加仓，成交之后按**实际成交价**复判 Plan B（addSizingFillGuard）。
+     * 只说不拦：超限就进消息中心，单子照旧。只判带着同方向计划的单子——对冲侧的加码、
+     * 没开计算器的第二刀都不是计算器授权的加仓；没有计划或没有同向持仓时在第一道门就返回，几乎不花时间。
+     * 状态取合并**之前**的持仓与当下的挂单 / 成交历史——加仓当下 X₁ / S̄ / S₁ / G 各是多少。
+     */
+    const judgeAddFill = (heldBefore: Position[], position: Position, referencePrice: number, snapshot?: AddSizingSnapshot | null) => {
+      judgePlannedAddFill(symbol, heldBefore, position, referencePrice, snapshot);
+    };
+
     if (normalizedOrder.type === 'CONDITIONAL') {
       const currentP = Number(effectiveCurrentPrice);
       const triggerP = Number(normalizedOrder.stopPrice);
@@ -1789,15 +1905,16 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
        * 先算好再写——setPositionsMap 是即时包装、positionsMapRef 与它同步推进，
        * 在调用前读 ref 与在 updater 里读 prev 等价，而且能把合并结果带出来。
        */
-      const merged = mergeFilledPosition(
-        symbol, (positionsMapRef.current[symbol] || []).filter(isPositionOpen), position,
-      );
+      const heldBefore = (positionsMapRef.current[symbol] || []).filter(isPositionOpen);
+      judgeAddFill(heldBefore, position, effectiveCurrentPrice, normalizedOrder.addSizingSnapshot);
+      const merged = mergeFilledPosition(symbol, heldBefore, position);
       setPositionsMap(prev => ({ ...prev, [symbol]: merged.positions }));
       applyMergeSideEffects(symbol, merged);
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, 'BEST'));
       }
+      commitAddSizingPlan();
       toast.success(`最优价成交: ${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
       /**
        * 并入现有仓位时**不挂**随单止盈止损。
@@ -1832,15 +1949,16 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
        * 先算好再写——setPositionsMap 是即时包装、positionsMapRef 与它同步推进，
        * 在调用前读 ref 与在 updater 里读 prev 等价，而且能把合并结果带出来。
        */
-      const merged = mergeFilledPosition(
-        symbol, (positionsMapRef.current[symbol] || []).filter(isPositionOpen), position,
-      );
+      const heldBefore = (positionsMapRef.current[symbol] || []).filter(isPositionOpen);
+      judgeAddFill(heldBefore, position, effectiveCurrentPrice, normalizedOrder.addSizingSnapshot);
+      const merged = mergeFilledPosition(symbol, heldBefore, position);
       setPositionsMap(prev => ({ ...prev, [symbol]: merged.positions }));
       applyMergeSideEffects(symbol, merged);
       // 执行力资产只奖励做多开仓：做空一律视为辅助对冲单，不计分。
       if (normalizedOrder.side === 'LONG') {
         recordExecutionTrade(tradingModeRef.current, buildExecutionTradeSnapshot(position, normalizedOrder.type));
       }
+      commitAddSizingPlan();
       toast.success(`${normalizedOrder.side === 'LONG' ? '开多' : '开空'} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(position.entryPrice, symbol)}`);
       /**
        * 并入现有仓位时**不挂**随单止盈止损。
@@ -2049,11 +2167,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       conditionalExecType: normalizedOrder.conditionalExecType, conditionalLimitPrice: normalizedOrder.conditionalLimitPrice,
       ...attachedTpSl,
       triggerDirection, operator,
+      // 加仓计划随委托走，成交时 executeSettlementFill 再把它落到仓位上；没有计划的委托与改动前逐字节相同。
+      ...(normalizedOrder.addSizingSnapshot ? { addSizingSnapshot: normalizedOrder.addSizingSnapshot } : {}),
     };
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
+    commitAddSizingPlan();
     toast.info('委托已挂出');
     return { id: newOrder.id };
-  }, [getEffectiveTime, getSymbolSettlementMode, recordExecutionTrade, stampClock]);
+  }, [getEffectiveTime, getSymbolSettlementMode, judgePlannedAddFill, recordExecutionTrade, stampClock]);
 
   // ===== Close Position — supports partial close via percentage (0-1] =====
   const handleClosePosition = useCallback((symbol: string, index: number, percentage: number = 1, method: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation' = 'manual') => {
@@ -2268,9 +2389,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {
     // 撤单即删——删之前先存一份快照（委托价/委托时间/取消时间），供战役页「反向对冲挂单」展示。
     const order = (ordersMap[symbol] || []).find(o => o.id === orderId);
+    const cancelledTimelineId = order ? stampClock(symbol) : null;
     if (order) {
       const cancelledAt = getEffectiveTime(symbol) || Date.now();
-      const cancelledTimelineId = stampClock(symbol);
       const orderPrice = order.price > 0
         ? order.price
         : (order.conditionalLimitPrice && order.conditionalLimitPrice > 0)
@@ -2303,6 +2424,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [symbol]: (prev[symbol] || []).filter(o => o.id !== orderId),
     }));
+    // 撤掉的是按计算器计划挂的加仓单：计划放回去（仍在保鲜期、没有更新的计划、仍持有同向仓位时），紧接着追价的同向单还带得上
+    if (order) restoreCancelledAddPlan(symbol, order, positionsMapRef.current[symbol], cancelledTimelineId, timelineRegistryRef.current);
     toast.info('委托已撤销');
   }, [ordersMap, getEffectiveTime, setCancelledOrders, stampClock]);
 
@@ -2430,6 +2553,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     setTradeHistory(prev => prev.filter(t => t.symbol !== symbol));
     setBalance(prev => Math.round((prev + adjustment) * 1e8) / 1e8);
+    // 这个标的的仓位、挂单、记录都没了：计算器的计划也不该留下来，否则下一场打开计算器会种回它的 S₁ / G
+    clearAddSizingPlan(symbol);
 
     toast.success(`已彻底清除 ${symbol.replace('USDT', '/USDT')} 的所有数据，资产已复原。`);
   }, [tradeHistory]);
@@ -2484,7 +2609,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getSymbolMarginMode, setSymbolMarginMode,
     getSymbolSettlementMode, setSymbolSettlementMode,
     activeSymbols,
-    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, applyMergeSideEffects, liquidateIsolatedOnCandle, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
+    handlePlaceOrder, handleClosePosition, handleCancelOrder, handlePlaceTpSl, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, liquidateIsolatedOnCandle, settleFillDebit, applySymbolLeverage, executeReduceOnlyTrigger,
     handleAdjustMargin, handleClearSymbolData,
     fundingRate: FUNDING_RATE,
     liquidationOpen, liquidationDetails, closeLiquidationModal,

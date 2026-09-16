@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTradingContext } from '@/contexts/TradingContext';
-import type { SettlementMode } from '@/types/trading';
+import type { AddSizingSnapshot, Position, SettlementMode, TradeRecord } from '@/types/trading';
+import { getFreshAddSizingPlan, publishAddSizingPlan, requestAddSizingPrefill, touchAddSizingPlan } from '@/lib/addSizingPlan';
+import { getPriceDecimals } from '@/lib/formatters';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
 import {
   PRE_MAIN_LOOKBACK_MS,
@@ -14,15 +16,22 @@ import {
 } from '@/lib/hedgeLines';
 import {
   coinsToContracts,
+  coinsToContractsFloor,
   computeBankedAdd,
   computeCushionAdd,
   computePlanBCoverageAtS1,
   detectBankedMirrorProfit,
+  expectedFillPrice,
+  isTakerOrderKind,
   pickHeldSide,
   readHeldPosition,
+  roundLimitPriceFavorable,
+  sizeAddAtExpectedFill,
+  type AddOrderKind,
   type AddSide,
   type BankedKnob,
   type CushionAddResult,
+  type HeldPositionSummary,
   crossCheckPostAddR0,
 } from '@/lib/addSizing';
 
@@ -35,6 +44,29 @@ import {
  *
  * 口径与 Legs「加仓校验」严格同一条：加仓上限 = max(0, Y₁ + G) ÷ 每币风险，G 是带符号的本轮落袋净额。
  * G = 0 时 Plan B 与 Plan A 同值，界面照旧以 Plan A 为主角；G ≠ 0（正负都算）时 Plan A 降为来源拆解。
+ *
+ * **所有派生量按预计成交价 S₂′ 算，不按 S₂。** COMMONUSDT 那一场用户严格按上限下单仍被 Legs 判超限 1.57% / 3.70%：
+ * 计算器读的 S₂ 是下单前的盘面价，市价单在引擎里按 0.01% + 名义/50亿 滑点成交（0.14% / 0.29%），
+ * Legs 校验读的是成交价，而上限对 S₂ 的弹性是 S₁/(S₂ − S₁) ≈ 十几倍。
+ * 所以：S₂ 从引擎成交的基准价种下并跟着它走；市价档按基准价解出 S₂′（sizeAddAtExpectedFill，二分，永远收敛），
+ * X₂ 上限、张数、对冲量、R0 复核全部吃同一个上限、同一个 S₂′；限价档 S₂′ = 挂单价。
+ *
+ * **市价单只能在引擎基准价上成交。** 市价档的 S₂ 因此永远跟着基准价、不上锁；手填一个离基准价超过一格的 S₂，
+ * 那只能是一张限价单或条件单——自动切到「限价 @S₂」并写一行说明（一键改成条件单），复位图标回到市价。
+ * 否则计算器会按手填的价给出一张市价计划，「按上限下单」预填的市价单却在基准价上成交，上限差出几倍。
+ *
+ * **条件单 @S₂** 是第三档：S₂ 是触发价，触发后引擎在触发价上按同一个 Taker 滑点成交——突破加仓就是它。
+ * 按限价档定的量挂成条件单，COMMONUSDT 的超限原样重演（0.14% 滑点 → 1.57% 超限），所以它必须单列、按触发价上的滑点定量，
+ * 「按上限下单」预填的也是一张以 S₂ 为触发价的条件委托。
+ *
+ * 重新打开时从仍在保鲜期的计划种回 S₁ / 下单方式（限价 / 条件单计划连同锁住的价）：
+ * 下单面板里已经预填好的那张单还指望着这份计划，打开看一眼不能把它清掉。
+ * 但计划只记得它算出来那一刻：X₁ / S̄ 按计划那一侧的持仓重读，G 按本场落袋重读（变了就换成新的并说明），
+ * 计划早于当前持仓的开仓（上一场回放、平掉又重开）就整个不认。
+ *
+ * **算出来的计划会发布出去（addSizingPlan）**：之后同标的同方向的开仓单会把它钉在单子上，
+ * 成交、平仓一路带到成交记录，Legs「加仓校验」据此说清计算时与成交时各是多少。
+ * 「按上限下单」把整张的上限直接预填进下单面板，省掉手抄——那一场就是手抄币数、面板再按另一个价折张。
  */
 
 interface Props {
@@ -45,9 +77,27 @@ interface Props {
    * 实时现价（Index 的 displayCurrentPrice）。不能读 ctx.priceMap ——
    * 那是 usePersistedState('price_map') 的持久化行情缓存，会留着上一段回放的陈旧价，
    * 于是 S₂ 被预填成完全不相干的数（实测 0.6273 vs 真实 0.012804）。
-   * 全 app 的面板拿的都是这个实时值，计算器也必须同源。
+   * 没有 fillBasePrice 时用它种 S₂。
    */
   currentPrice?: number;
+  /**
+   * 引擎市价成交的**基准价**：Index 的 latestChartPriceRef.current || priceMap[symbol] || currentPrice——
+   * 与下单按钮传给 placeOrder 的 latestPrice 同一个式子。displayCurrentPrice 是经过平滑 / 节流的显示值，
+   * 与引擎拿去撮合的原始收盘价不是同一个变量。S₂ 从这里种下，弹窗打开期间跟着它走，
+   * 直到用户手动改过 S₂（复位图标重新种下并恢复跟随）。
+   */
+  fillBasePrice?: number;
+  /**
+   * 下单面板的价格精度（Index 的 chartPricePrecision，与传给 OrderPanel 的同一个数）。
+   * 限价档的挂单价按它向有利侧取整后再定量——面板只能挂这个精度的价，按没取整的 S₂ 定量，
+   * 挂出去的价一旦被四舍五入抬高，上限就立刻超了。没给就按 S₂ 的量级推（getPriceDecimals，与 context 同一规则）。
+   */
+  pricePrecision?: number;
+  /**
+   * 下单面板的数量精度（Index 的 quantityPrecision）：U 本位「按上限下单」的按钮上写的币数按它向下取整——
+   * 面板预填时就是这么取的，按钮上的数与落进面板的数必须是同一个，而且不能比上限多。
+   */
+  quantityPrecision?: number;
 }
 
 const fmtCoins = (v: number, dp = 2) => (Number.isFinite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: dp }) : '—');
@@ -60,6 +110,92 @@ const tidyCoins = (v: number) => (Number.isFinite(v) ? String(Number(v.toFixed(4
 /** 带符号：正数前面加「+」，负数用「−」，零不带符号。 */
 const signed = (v: number, fmt: (abs: number) => string) =>
   (!Number.isFinite(v) ? '—' : `${v > 0 ? '+' : v < 0 ? '−' : ''}${fmt(Math.abs(v))}`);
+/** 滑点百分比：两位小数、恒带符号（+0.14% / −0.14%），零写 +0.00%。 */
+const fmtSlipPct = (v: number) => (!Number.isFinite(v) ? '—' : `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(2)}%`);
+/** 币数向下取整到 dp 位再显示：授权额度不能被显示时的四舍五入抬高。 */
+const fmtCoinsFloor = (v: number, dp: number) => {
+  if (!Number.isFinite(v)) return '—';
+  const p = Math.max(0, Math.min(12, Math.floor(dp)));
+  const scale = 10 ** p;
+  const floored = Math.floor(v * scale + 1e-7) / scale;
+  return floored.toLocaleString('en-US', { maximumFractionDigits: p });
+};
+/** G 的建议值整理成输入框里的字符串：币本位四位小数、U 本位两位——与一键填入同一个口径。 */
+const tidyGFor = (v: number, coin: boolean) => (coin ? tidyCoins(v) : String(Number(v.toFixed(2))));
+
+const ORDER_KIND_LABEL: Record<AddOrderKind, string> = {
+  market: '市价（含滑点）',
+  limit: '限价 @S₂',
+  conditional: '条件单 @S₂',
+};
+const ORDER_KIND_TITLE: Record<AddOrderKind, string> = {
+  market: '市价单：在引擎基准价上按 Taker 滑点成交，S₂ 跟着基准价走',
+  limit: '限价 / 只做 Maker：按挂单价原价成交，不计滑点',
+  conditional: '条件委托：S₂ 是触发价，触发后按市价成交，定量计入触发价上的滑点（突破加仓用这一档）',
+};
+
+interface PlanSeed {
+  plan: AddSizingSnapshot;
+  side: AddSide;
+  sBar: string;
+  x1: string;
+  g: string;
+  /** G 与计划里的不同（本场落袋在计划之后变了）：计划里的那个数；没变为 null。 */
+  gChangedFrom: number | null;
+}
+
+/**
+ * 重新打开计算器时，仓库里仍在保鲜期的计划还算不算「当前持仓周期、当前 G」下的计划，算的话怎么种回输入框。
+ *
+ * 保鲜期只管真实时间，管不了状态：
+ *   · 计划早于当前持仓最早一笔成交的真实开仓时刻（停止回放后同一段历史又重放了一遍、或平掉又重开）——不是这一场的计划，整个不认；
+ *   · 计划那一侧没有持仓、别的方向却有比计划更新的持仓——同理不认；
+ *   · X₁ / S̄ 按**计划那一侧**的持仓重读（主空战役带着多头对冲腿，pickHeldSide 先看多头，拿它种会把空头计划算成多头腿的数）；
+ *     这一侧没有持仓（空仓预演）才用计划里的数；
+ *   · G：打开时本来就会自动带入本场 G 的情形（这一侧有持仓、每笔成交都有真实开仓时刻、有落袋信号），
+ *     本场 G 与计划里的不同就换成本场的——计划之后又实现了一笔亏损，旧 G 会把上限抬高一倍多；
+ *     其余情形（老仓位、没有落袋信号、看的是另一侧）照计划里的 G。
+ */
+function planSeedOnOpen(args: {
+  plan: AddSizingSnapshot | null;
+  symbol: string;
+  positions: Position[] | undefined;
+  face: number;
+  held: HeldPositionSummary | null;
+  tradeHistory: TradeRecord[] | undefined;
+}): PlanSeed | null {
+  const { plan, symbol, positions, face, held, tradeHistory } = args;
+  if (!plan) return null;
+  const sideHeld = readHeldPosition(symbol, positions, plan.side, face);
+  const newerThanPlan = (h: HeldPositionSummary | null) => h?.earliestOpenedRealAt != null && h.earliestOpenedRealAt > plan.at;
+  if (sideHeld ? newerThanPlan(sideHeld) : newerThanPlan(held)) return null;
+
+  const coin = plan.settlement === 'coin';
+  let g = plan.g !== 0 ? String(plan.g) : '';
+  let gChangedFrom: number | null = null;
+  // 与打开时自动带入本场 G 同一组条件（见下方 effect）：只有它会自动带入，这里才拿本场 G 替换计划里的
+  if (held && held.side === plan.side && held.earliestOpenedRealAt != null) {
+    const banked = detectBankedMirrorProfit(symbol, plan.side, tradeHistory, held.earliestOpenTime ?? null, positions,
+      { earliestOpenedRealAt: held.earliestOpenedRealAt });
+    const suggest = coin ? banked.coin : banked.usd;
+    const signal = banked.count > 0 || (Number.isFinite(suggest) && suggest !== 0);
+    if (signal && Number.isFinite(suggest)) {
+      const tidy = tidyGFor(suggest, coin);
+      if (Number(tidy) !== plan.g) {
+        g = tidy;
+        gChangedFrom = plan.g;
+      }
+    }
+  }
+  return {
+    plan,
+    side: plan.side,
+    sBar: sideHeld ? tidyPx(sideHeld.avgEntry) : String(plan.sBar),
+    x1: sideHeld ? tidyCoins(sideHeld.coins) : String(plan.x1),
+    g,
+    gChangedFrom,
+  };
+}
 
 /**
  * 无解分两档，不能混为一谈：
@@ -95,7 +231,7 @@ function planBMissingNote(side: AddSide, sBar: number, s1: number, s2: number, x
   return `新腿没有风险距离 · ${side === 'LONG' ? '主多' : '主空'}需 S₂ ${side === 'LONG' ? '高于' : '低于'} S₁`;
 }
 
-export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }: Props) {
+export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, fillBasePrice = 0, pricePrecision, quantityPrecision }: Props) {
   const ctx = useTradingContext();
   const positions = ctx.positionsMap[symbol];
   const face = getCoinMarginedContractSizeUsd(symbol);
@@ -107,6 +243,26 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const [sBar, setSBar] = useState('');
   const [s1, setS1] = useState('');
   const [s2, setS2] = useState('');
+  /**
+   * 限价档手动改过 S₂ 就锁住，不再跟盘面走；条件单档一切过去就锁住（触发价跟着现价走就永远是一张立即成交的单）；
+   * 复位图标解锁。市价档不留锁——市价单只能在基准价上成交；
+   * 唯一的例外是还没有基准价可比时手填的值，基准价一到就按「一格」规则收拾（见下方 effect）。
+   */
+  const [s2Locked, setS2Locked] = useState(false);
+  /** 下单方式：默认市价——引擎按滑点成交，定量必须按预计成交价。 */
+  const [orderKind, setOrderKind] = useState<AddOrderKind>('market');
+  /** 市价档里手填了离基准价超过一格的 S₂，被自动切到了限价：显示那一行说明。 */
+  const [autoLimit, setAutoLimit] = useState(false);
+  /**
+   * 重新打开时本场 G 与计划里的不同，已换成本场的：计划里的那个数（说明用）。
+   * 不同的原因可能是计划之后又落袋 / 止损了，也可能是上次手改过 G——说明只陈述「重填了、原来是多少」，不断言原因。
+   */
+  const [gChangedFrom, setGChangedFrom] = useState<number | null>(null);
+  /**
+   * 打开后的种子已经落进输入框。第一帧的输入还是空的（种子在 effect 里才写进去），
+   * 那一帧算出的「没有计划」不能发布——那会把下单面板正指望着的计划清掉。
+   */
+  const [seeded, setSeeded] = useState(false);
   const [x1, setX1] = useState('');
   const [g, setG] = useState('');
   const [knobKind, setKnobKind] = useState<BankedKnob['kind']>('line');
@@ -115,6 +271,8 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const [helpOpen, setHelpOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
   const bankedAutoSeededRef = useRef(false);
+  /** S₂ 的种子：引擎成交基准价优先；没给（老调用方 / 测试）才退到显示价。 */
+  const seedPrice = fillBasePrice > 0 ? fillBasePrice : currentPrice;
 
   /**
    * 结算口径跟**被加仓的那条仓位**走，不跟下单面板。
@@ -132,17 +290,98 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const isCoin = settlement === 'coin';
   const gUnit = isCoin ? coinName : 'USD';
 
-  const seedRef = useRef({ held, currentPrice });
-  seedRef.current = { held, currentPrice };
+  const seedRef = useRef({ held, seedPrice, symbol, positions, face, tradeHistory: ctx.tradeHistory });
+  seedRef.current = { held, seedPrice, symbol, positions, face, tradeHistory: ctx.tradeHistory };
   useEffect(() => {
-    if (!open) return;
-    const { held: h, currentPrice: px } = seedRef.current;
-    setSide(h?.side ?? 'LONG');
-    setSBar(h ? tidyPx(h.avgEntry) : '');
-    setX1(h ? tidyCoins(h.coins) : '');
-    setS2(px > 0 ? tidyPx(px) : '');
-    setS1(''); setG(''); setKnobKind('line'); setKB(''); setX2B(''); setHelpOpen(false); setSideOpen(false);
+    if (!open) {
+      setSeeded(false);
+      return;
+    }
+    const { held: h, seedPrice: px, symbol: sym, positions: pos, face: f, tradeHistory: th } = seedRef.current;
+    /**
+     * 这个标的还有仍在保鲜期、且仍属于当前持仓周期的计划（多半刚「按上限下单」过，面板里正预填着）：
+     * S₁ / 下单方式从它种回，限价 / 条件单计划的价原样锁回去；X₁ / S̄ 按计划那一侧的持仓读，G 按本场落袋读（planSeedOnOpen）。
+     * 持仓、G 与价都没动时算出来的就是同一份计划，不会重新发布；动了就发布新计划（替换，不清空）。
+     * 数字用 String() 原样写回——tidyPx 只留 8 位有效数字，会让计划差出一丝、被当成新计划。
+     * 计划不认（过期、上一场的）就照空白打开：S₁ 为空、没有计划可发布，仓库里那份随之清掉。
+     */
+    const seed = planSeedOnOpen({ plan: getFreshAddSizingPlan(sym), symbol: sym, positions: pos, face: f, held: h, tradeHistory: th });
+    const live = seed?.plan ?? null;
+    setSide(seed?.side ?? h?.side ?? 'LONG');
+    setSBar(seed ? seed.sBar : (h ? tidyPx(h.avgEntry) : ''));
+    setX1(seed ? seed.x1 : (h ? tidyCoins(h.coins) : ''));
+    if (live && live.orderKind !== 'market') {
+      setS2(String(live.s2Ref)); setS2Locked(true); setOrderKind(live.orderKind);
+    } else {
+      setS2(px > 0 ? tidyPx(px) : ''); setS2Locked(false); setOrderKind('market');
+    }
+    setAutoLimit(false);
+    setS1(live ? String(live.s1) : '');
+    setG(seed ? seed.g : '');
+    setGChangedFrom(seed?.gChangedFrom ?? null);
+    // G 已经按计划 / 本场落袋定好了，不再让下面的自动带入再覆盖一次（它这一帧读到的方向还是上一帧的）
+    bankedAutoSeededRef.current = live != null;
+    setKnobKind('line'); setKB(''); setX2B(''); setHelpOpen(false); setSideOpen(false);
+    setSeeded(true);
   }, [open]);
+  /**
+   * 弹窗开着时 S₂ 跟着引擎成交基准价走。它是模态的，要关掉才能下单——
+   * 种下一次就冻结的 S₂ 在回放继续走的那几秒里会陈旧，而上限对 S₂ 的弹性有十几倍。
+   * 种子落定之前不跟：打开那一帧里这里读到的锁还是旧值，会把刚种回的限价挂单价覆盖成现价。
+   */
+  useEffect(() => {
+    if (!open || !seeded || s2Locked || !(seedPrice > 0)) return;
+    setS2(tidyPx(seedPrice));
+  }, [open, seeded, s2Locked, seedPrice]);
+
+  /**
+   * 一格价：面板的价格精度（没给就按基准价的量级推，与 context 同一规则）。
+   * 市价档里手填的 S₂ 与基准价差不到一格，视为同一个价；超过一格，那就只能是限价单。
+   */
+  const tickDecimals = pricePrecision != null && Number.isFinite(pricePrecision) && pricePrecision >= 0
+    ? Math.min(15, Math.floor(pricePrecision))
+    : getPriceDecimals(seedPrice);
+  const priceTick = 10 ** -tickDecimals;
+  const s2OffBase = (v: number) => seedPrice > 0 && !(Number.isFinite(v) && Math.abs(v - seedPrice) <= priceTick * (1 + 1e-9));
+  /** 回到市价：S₂ 重新种在基准价上并恢复跟随（市价单没有别的价可成交）。 */
+  const backToMarket = () => {
+    setOrderKind('market');
+    setAutoLimit(false);
+    if (seedPrice > 0) { setS2(tidyPx(seedPrice)); setS2Locked(false); }
+  };
+  const editS2 = (v: string) => {
+    setS2(v);
+    if (orderKind !== 'market') { setS2Locked(true); return; }
+    // 没有基准价（老调用方）就无从比较：照旧锁住、留在市价
+    if (!(seedPrice > 0)) { setS2Locked(true); return; }
+    // 差不到一格：仍是这张市价单，不上锁，继续跟着基准价
+    if (!s2OffBase(toNum(v))) return;
+    setS2Locked(true);
+    setOrderKind('limit');
+    setAutoLimit(true);
+  };
+  const pickOrderKind = (k: AddOrderKind) => {
+    if (k === 'market') { backToMarket(); return; }
+    setOrderKind(k);
+    setAutoLimit(false);
+    // 条件单的触发价不能跟着现价走（跟着走就永远是一张立即成交的单，引擎会拒）：切过去就锁住，等人填触发价
+    if (k === 'conditional') setS2Locked(true);
+  };
+  const editG = (v: string) => { setG(v); setGChangedFrom(null); };
+  /**
+   * 市价档不留锁：没有基准价时手填的 S₂ 会锁在市价档里，基准价一到就按同一条规则收拾——
+   * 离基准价一格以上切到限价（同一行说明），否则解锁跟随。
+   */
+  useEffect(() => {
+    if (!open || !seeded || orderKind !== 'market' || !s2Locked || !(seedPrice > 0)) return;
+    if (s2OffBase(toNum(s2))) {
+      setOrderKind('limit');
+      setAutoLimit(true);
+    } else {
+      setS2Locked(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, seeded, orderKind, s2Locked, seedPrice, s2, priceTick]);
 
   /** G 带符号；留空按 0。负数照扣——截成 0 会退回 Plan A，与 Legs 校验给出相反的对错号。 */
   const gVal = Number.isFinite(toNum(g)) ? toNum(g) : 0;
@@ -150,14 +389,57 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const gPositive = gVal > 0;
   const fmtG = (v: number) => (isCoin ? `${fmtCoins(v, 4)} ${coinName}` : `${fmtUsd(v)} USD`);
 
+  /**
+   * 预计成交价 S₂′。可用垫 Y₁ + G 与 S₂ 无关，先在定量基准价上按同一条式子取出 available，
+   * 再解上限：上限的名义决定滑点、滑点决定成交价、成交价决定上限——sizeAddAtExpectedFill 用二分解，取在自己成交价上不超的那一端。
+   * 定量基准价：市价 = 引擎成交的基准价本身（市价单只能在它上面成交，引擎在它上面加滑点；
+   * 输入框只留 8 位有效数字，不拿它定量）；限价 = 挂单价，即 S₂ 按面板价格精度向有利侧取整。
+   */
+  const s2Ref = orderKind === 'market' && seedPrice > 0 ? seedPrice : toNum(s2);
+  const priceDecimals = pricePrecision != null && Number.isFinite(pricePrecision) && pricePrecision >= 0
+    ? pricePrecision
+    : getPriceDecimals(s2Ref);
+  /** 挂单价 / 触发价：面板只能挂这个精度的价，向有利侧取整后再定量（条件单的触发价同理，定量就在取整后的触发价上）。 */
+  const limitPx = orderKind !== 'market' ? roundLimitPriceFavorable(s2Ref, priceDecimals, side) : s2Ref;
+  const limitRounded = orderKind !== 'market' && Number.isFinite(limitPx) && limitPx !== s2Ref;
+  const taker = isTakerOrderKind(orderKind);
+  /** 条件单的触发价离基准价不到一格：引擎会当成立即成交的单拒掉，这时不给计划。 */
+  const conditionalAtBase = orderKind === 'conditional' && seedPrice > 0 && !s2OffBase(limitPx);
+  const coverageProbe = useMemo(
+    () => computePlanBCoverageAtS1({ side, settlement, sBar: toNum(sBar), s1: toNum(s1), s2: limitPx, x1: toNum(x1), g: gVal }),
+    [side, settlement, sBar, s1, limitPx, x1, gVal],
+  );
+  const fillPlan = useMemo(
+    () => (coverageProbe
+      ? sizeAddAtExpectedFill({
+        side, settlement, coverage: coverageProbe.available, s1: toNum(s1), s2Ref: limitPx, orderKind,
+        contractFaceUsd: isCoin ? face : null,
+      })
+      : null),
+    [coverageProbe, side, settlement, s1, limitPx, orderKind, isCoin, face],
+  );
+  /**
+   * 所有派生量用的加仓价：市价 = 与上限一起解出的 S₂′，限价 = 挂单价。
+   * 解不出（S₁ 没填、S₂ 没越过 S₁……）时**不**拿零名义的 S₂ × 1.0001 充数：
+   * 那一丝 0.01% 会被当成风险距离，S₁ = S₂ 时算出几十倍于持仓的「上限」。退回定量基准价，
+   * Plan A / B 与 R0 照旧报「新腿没有风险距离」，与限价档一致。
+   */
+  const s2Eff = fillPlan ? fillPlan.s2Fill : limitPx;
+  /** 价格线上显示的 S₂′：没有上限时市价档只含固定的 0.01%——只作显示，不进任何计算。 */
+  const s2Shown = fillPlan ? fillPlan.s2Fill : expectedFillPrice(limitPx, 0, side, orderKind);
+  const slippagePct = !taker
+    ? 0
+    : fillPlan ? fillPlan.slippagePct : (Number.isFinite(s2Shown) ? (s2Shown / limitPx - 1) * 100 : Number.NaN);
+
   const cushion = useMemo(
-    () => computeCushionAdd({ side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2), x1: toNum(x1) }),
-    [side, sBar, s1, s2, x1],
+    () => computeCushionAdd({ side, sBar: toNum(sBar), s1: toNum(s1), s2: s2Eff, x1: toNum(x1) }),
+    [side, sBar, s1, s2Eff, x1],
   );
   const note = cushionNote(cushion, side);
   /**
    * 真正的 Plan B：当前旧仓在 S₁ 的净浮盈（可为负）+ 本轮落袋净额 G（可为负）。
    * 这一步每次都读当前 X₁ / S̄，所以更早加仓在新 S₁ 上的浮亏会自动扣回来。
+   * 按 S₂′ 算——addCoinsMax 与 fillPlan.addCoinsMax 是同一个数。
    */
   const planB = useMemo(
     () => computePlanBCoverageAtS1({
@@ -165,11 +447,11 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
       settlement,
       sBar: toNum(sBar),
       s1: toNum(s1),
-      s2: toNum(s2),
+      s2: s2Eff,
       x1: toNum(x1),
       g: gVal,
     }),
-    [side, settlement, sBar, s1, s2, x1, gVal],
+    [side, settlement, sBar, s1, s2Eff, x1, gVal],
   );
 
   /**
@@ -191,7 +473,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const bankedSuggest = isCoin ? banked.coin : banked.usd;
   /** 有止盈、或者净额不为 0（只有亏损也算）——都要让人看见，负净额不能静默丢掉。 */
   const hasBankedSignal = banked.count > 0 || (Number.isFinite(bankedSuggest) && bankedSuggest !== 0);
-  const tidyG = (v: number) => (isCoin ? tidyCoins(v) : String(Number(v.toFixed(2))));
+  const tidyG = (v: number) => tidyGFor(v, isCoin);
 
   /**
    * 真实操作时间完整时，「这笔 G 属于当前持仓周期」已经是可靠事实，直接默认代入（正负都代入）。
@@ -205,7 +487,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
     if (bankedAutoSeededRef.current || !held || side !== held.side) return;
     if (held.earliestOpenedRealAt == null || !hasBankedSignal || !Number.isFinite(bankedSuggest)) return;
     bankedAutoSeededRef.current = true;
-    setG(isCoin ? tidyCoins(bankedSuggest) : String(Number(bankedSuggest.toFixed(2))));
+    setG(tidyGFor(bankedSuggest, isCoin));
   }, [open, held, side, bankedSuggest, hasBankedSignal, isCoin]);
 
   /**
@@ -223,26 +505,34 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   ), [symbol, ctx.ordersMap, positions, side, held?.earliestOpenTime, isCoin, face]);
 
   // 偏差比对的「盘口线」与 Legs 加仓校验读 S₁ 同一规则：亏损侧离 S₂ 最近、价格回落先被打到的那张。
-  const bookLine = useMemo(() => pickBookLine(hedgeRead.candidates, side, toNum(s2)), [hedgeRead.candidates, side, s2]);
+  const bookLine = useMemo(() => pickBookLine(hedgeRead.candidates, side, s2Eff), [hedgeRead.candidates, side, s2Eff]);
   const s1Deviation = useMemo(() => {
     if (!bookLine || !planB) return null;
     if (sameLine(bookLine.price, toNum(s1))) return null;
     const deviation = evaluateS1Deviation({
-      side, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
+      side, sBar: toNum(sBar), s1: toNum(s1), s2: s2Eff,
       x1: toNum(x1), g: gVal, bookPrice: bookLine.price,
       settlement: isCoin ? 'coin' : 'usdt',
     });
     return deviation && (deviation.typedAdd > 0 || deviation.shouldAdd > 0) ? deviation : null;
-  }, [bookLine, planB, side, sBar, s1, s2, x1, gVal, isCoin]);
+  }, [bookLine, planB, side, sBar, s1, s2Eff, x1, gVal, isCoin]);
 
   const effectiveKB = kB !== '' ? toNum(kB) : toNum(s1);
   const bankedRes = useMemo(() => {
     const knob: BankedKnob = knobKind === 'line' ? { kind: 'line', kB: effectiveKB } : { kind: 'size', x2: toNum(x2B) };
-    return computeBankedAdd({ side, settlement, g: gVal, s2: toNum(s2), s1: toNum(s1), knob });
-  }, [knobKind, effectiveKB, x2B, side, settlement, gVal, s2, s1]);
+    return computeBankedAdd({ side, settlement, g: gVal, s2: s2Eff, s1: toNum(s1), knob });
+  }, [knobKind, effectiveKB, x2B, side, settlement, gVal, s2Eff, s1]);
 
-  /** 规则给出的上限：max(0, Y₁ + G) ÷ 每币风险。**只由规则决定**，旋钮拧到哪都不改它。 */
-  const limitCoins = planB?.addCoinsMax ?? 0;
+  /**
+   * 规则给出的上限：max(0, Y₁ + G) ÷ 每币风险。**只由规则决定**，旋钮拧到哪都不改它。
+   * 有 fillPlan 就用它的上限——那是在它**自己的**成交价 S₂′ 上不超垫子的那个数（二分的下端）；
+   * 大字、张数、R0、快照、「按上限下单」全部读这一个数，不再各算各的。
+   */
+  const limitCoins = fillPlan ? fillPlan.addCoinsMax : (planB?.addCoinsMax ?? 0);
+  /** 上限的整张：币本位直接取 fillPlan 按引擎名义向下取整的张数，与快照、按钮同一个数。 */
+  const limitContractsText = isCoin && fillPlan?.contracts != null
+    ? ` · ${fillPlan.contracts.toLocaleString('en-US')} 张`
+    : null;
   /**
    * 旋钮是否在用：只有 G > 0 才有 B 腿可拧；K_B 留空（= S₁）或定仓没填时，计划加仓就是上限本身。
    */
@@ -258,9 +548,12 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
       : limitCoins;
   const planBHasRoom = planB != null && planB.available > 0 && limitCoins > 0;
   const hedgeCoinsAtS1 = toNum(x1) + (Number.isFinite(plannedAddCoins) ? plannedAddCoins : limitCoins);
+  /** Plan A 大字（G = 0）：有 fillPlan 就是同一个上限；没有才退回 Plan A 自己的代数。 */
+  const planAX2 = fillPlan ? limitCoins : cushion.x2Max;
+  const planAHedge = fillPlan ? toNum(x1) + limitCoins : cushion.hedgeCoinsAtS1;
 
   const bankedProblem = bankedOn && !planB
-    ? planBMissingNote(side, toNum(sBar), toNum(s1), toNum(s2), toNum(x1))
+    ? planBMissingNote(side, toNum(sBar), toNum(s1), s2Eff, toNum(x1))
     : gPositive && planB && !bankedRes.ok
       ? (bankedRes.problem === 'disabled'
         ? (knobKind === 'size' ? '填入 X₂ᴮ 后计算' : '填入 K_B 后计算')
@@ -296,7 +589,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const r0 = useMemo(() => {
     if (!planB || !(plannedAddCoins > 0)) return null;
     const check = crossCheckPostAddR0({
-      side, settlement, sBar: toNum(sBar), s1: toNum(s1), s2: toNum(s2),
+      side, settlement, sBar: toNum(sBar), s1: toNum(s1), s2: s2Eff,
       x1: toNum(x1), addCoins: plannedAddCoins, g: gVal, fills: heldLegs,
     });
     if (!check) return null;
@@ -311,10 +604,68 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
         || Math.abs(check.fills.cushionDelta) > 0.01 * Math.max(Math.abs(check.fills.cushion), Math.abs(check.ledger.cushion))
       ),
     };
-  }, [planB, plannedAddCoins, limitCoins, side, settlement, sBar, s1, s2, x1, gVal, heldLegs]);
+  }, [planB, plannedAddCoins, limitCoins, side, settlement, sBar, s1, s2Eff, x1, gVal, heldLegs]);
 
+  /** 对冲量的张数：四舍五入贴近仓位。 */
   const contracts = (coins: number, price: number) =>
     isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContracts(coins, price, face).toLocaleString('en-US')} 张` : '';
+  /** 加仓量的张数：向下取整——上限是授权额度，与下单面板同规则，绝不进一。 */
+  const addContracts = (coins: number, price: number) =>
+    isCoin && Number.isFinite(coins) && price > 0 ? ` · ${coinsToContractsFloor(coins, price, face).toLocaleString('en-US')} 张` : '';
+
+  /**
+   * 当前计划：上限算得出、且（币本位）至少有一整张时才有。它就是钉到单子上的那份快照（不含发布时刻）。
+   * 上限只由规则决定，旋钮拧出来的「计划加仓」不进这里——快照记的是规则给的上限，实际加了多少看成交。
+   */
+  const s1Num = toNum(s1);
+  const sBarNum = toNum(sBar);
+  const x1Num = toNum(x1);
+  /** 计划记下的参考价：限价 = 手填的 S₂（挂单价在 s2Fill）；市价 = 基准价；条件单 = 取整后的触发价（引擎在它上面加滑点）。 */
+  const planRefPrice = orderKind === 'conditional' ? limitPx : s2Ref;
+  const planSnapshot = useMemo<Omit<AddSizingSnapshot, 'at'> | null>(() => {
+    if (!fillPlan || !planB || !(limitCoins > 0) || conditionalAtBase) return null;
+    if (![s1Num, sBarNum, x1Num, planRefPrice, s2Eff].every(v => Number.isFinite(v) && v > 0)) return null;
+    if (isCoin && !(fillPlan.contracts != null && fillPlan.contracts >= 1)) return null;
+    return {
+      plan: bankedOn ? 'B' : 'A', side, settlement,
+      s1: s1Num, s2Ref: planRefPrice, s2Fill: s2Eff, slippagePct: Number.isFinite(slippagePct) ? slippagePct : 0,
+      x1: x1Num, sBar: sBarNum, g: gVal, gUnit,
+      addCoinsMax: limitCoins, contracts: isCoin ? fillPlan.contracts : null, orderKind,
+    };
+  }, [fillPlan, planB, limitCoins, conditionalAtBase, s1Num, sBarNum, x1Num, planRefPrice, s2Eff, isCoin, bankedOn, side, settlement, slippagePct, gVal, gUnit, orderKind]);
+  // 弹窗开着时把当前计划发布出去；算不出就清掉——关掉弹窗后计划留着，等同标的同方向的开仓单来取。
+  // 种子落定之前不发布：第一帧的输入还是空的，那一帧的「没有计划」不是真的没有。
+  useEffect(() => {
+    if (!open || !seeded) return;
+    publishAddSizingPlan(symbol, planSnapshot);
+  }, [open, seeded, symbol, planSnapshot]);
+  // 关掉（或卸载）时把保鲜期续到此刻：回放暂停时计划不变、不会重新发布，弹窗开过半小时也不能一关就过期。
+  useEffect(() => {
+    if (!open) return undefined;
+    return () => touchAddSizingPlan(symbol);
+  }, [open, symbol]);
+  /** 「按上限下单」：整张的上限（U 本位是币数）连同下单方式交给下单面板预填，然后关掉弹窗。 */
+  const placeAtLimit = () => {
+    if (!planSnapshot) return;
+    requestAddSizingPrefill(symbol, planSnapshot, {
+      contracts: planSnapshot.contracts,
+      coins: limitCoins,
+      orderType: orderKind === 'market' ? 'MARKET' : orderKind === 'limit' ? 'LIMIT' : 'CONDITIONAL',
+      // 限价挂在定量用的那个价上（已按面板精度向有利侧取整），计划、委托、校验三处是同一个数；条件单的触发价同理
+      limitPrice: orderKind === 'limit' ? planSnapshot.s2Fill : null,
+      triggerPrice: orderKind === 'conditional' ? planSnapshot.s2Ref : null,
+      side,
+      settlement,
+    });
+    onClose();
+  };
+  /** 按钮上的量就是落进面板的量：币本位整张；U 本位按面板数量精度向下取整（没给精度按两位）。 */
+  const placeAtLimitQty = planSnapshot == null
+    ? ''
+    : isCoin && planSnapshot.contracts != null
+      ? `${planSnapshot.contracts.toLocaleString('en-US')} 张`
+      : `${fmtCoinsFloor(limitCoins, quantityPrecision != null && Number.isFinite(quantityPrecision) && quantityPrecision >= 0 ? quantityPrecision : 2)} ${coinName}`;
+  const orderKindTitle = orderKind === 'market' ? '市价单' : orderKind === 'limit' ? `限价单 @ ${fmtPx(s2Eff)}` : `条件委托 · 触发价 ${fmtPx(limitPx)}（触发后市价）`;
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
@@ -395,11 +746,79 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             <Field label="S̄ 均价" value={sBar} onChange={setSBar} testId="add-sizing-sbar"
               onReset={held ? () => setSBar(tidyPx(held.avgEntry)) : undefined} />
             <Field label="S₁ 止损线" value={s1} onChange={setS1} testId="add-sizing-s1" accent />
-            <Field label="S₂ 加仓价" value={s2} onChange={setS2} testId="add-sizing-s2"
-              onReset={currentPrice > 0 ? () => setS2(tidyPx(currentPrice)) : undefined} />
+            <Field label="S₂ 加仓价" value={s2} onChange={editS2} testId="add-sizing-s2"
+              onReset={seedPrice > 0 ? backToMarket : undefined} />
             <Field label={`X₁ ${coinName}`} value={x1} onChange={setX1} testId="add-sizing-x1"
               onReset={held ? () => setX1(tidyCoins(held.coins)) : undefined} />
           </div>
+
+          {/* S₂ 的两条线：参考价与预计成交价。市价单在引擎里按 0.01% + 名义/50亿 滑点成交，
+              上限对 S₂ 的弹性是 S₁/(S₂−S₁) ≈ 十几倍——0.14% 的滑点就是 1.6% 的超限。
+              定量一律按 S₂′，S₂ 只是它的来源；限价 @S₂ 原价成交，S₂′ = S₂。 */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
+            <div data-testid="add-sizing-order-kind" className="flex h-6 items-center gap-0.5 rounded bg-secondary p-0.5">
+              {(['market', 'limit', 'conditional'] as AddOrderKind[]).map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  data-testid={`add-sizing-order-kind-${k}`}
+                  aria-pressed={orderKind === k}
+                  title={ORDER_KIND_TITLE[k]}
+                  onClick={() => pickOrderKind(k)}
+                  className={`rounded px-2 py-0.5 transition-colors ${orderKind === k ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {ORDER_KIND_LABEL[k]}
+                </button>
+              ))}
+            </div>
+            <div data-testid="add-sizing-fill-price" className="font-mono tabular-nums text-muted-foreground">
+              <span>{orderKind === 'conditional'
+                ? `触发价 S₂ ${fmtPx(limitPx)}`
+                : s2Locked ? `手填 S₂ ${fmtPx(s2Ref)}（已锁定，不跟盘面）` : `现价 S₂ ${fmtPx(s2Ref)}`}</span>
+              <span className="mx-1.5">→</span>
+              <span className="text-foreground">预计成交 S₂′ {fmtPx(s2Shown)}</span>
+              <span> {orderKind === 'limit'
+                ? `（限价 · 不计滑点${limitRounded ? ` · 挂单价按 ${priceDecimals} 位小数向${side === 'LONG' ? '下' : '上'}取整` : ''}）`
+                : orderKind === 'conditional'
+                  ? `(${fmtSlipPct(slippagePct)} · 触发后市价${limitRounded ? ` · 触发价按 ${priceDecimals} 位小数向${side === 'LONG' ? '下' : '上'}取整` : ''})`
+                  : `(${fmtSlipPct(slippagePct)})`}</span>
+            </div>
+            {/* 把整张的上限直接交给下单面板：不再手抄币数、再让面板按另一个价折一次张。 */}
+            {planSnapshot && (
+              <button
+                type="button"
+                data-testid="add-sizing-place-at-limit"
+                onClick={placeAtLimit}
+                title={`按 Plan B 上限预填下单面板：${orderKindTitle} · ${side === 'LONG' ? '开多' : '开空'}`}
+                className="ml-auto h-6 rounded border border-primary/40 bg-primary/10 px-2 font-medium text-primary transition-colors hover:bg-primary/20"
+              >
+                按上限下单 · {placeAtLimitQty}
+              </button>
+            )}
+          </div>
+          {autoLimit && orderKind === 'limit' && (
+            <div data-testid="add-sizing-s2-limit-note" className="text-[10px] text-amber-600 dark:text-amber-400">
+              手填 S₂ 只能按限价或条件单成交，已切到限价 @S₂；点复位回到市价
+              <button type="button" data-testid="add-sizing-s2-to-conditional" onClick={() => pickOrderKind('conditional')}
+                className="ml-1.5 underline hover:no-underline">突破加仓改按条件单</button>
+            </div>
+          )}
+          {conditionalAtBase && (
+            <div data-testid="add-sizing-conditional-at-base" className="text-[10px] text-amber-600 dark:text-amber-400">
+              条件单的触发价要离现价至少一格（等于现价会被当成立即成交的单拒掉）——在 S₂ 填入触发价
+            </div>
+          )}
+          {/* 敏感度：币数上限的弹性是 S₂′/|S₂′−S₁|，张数 / 名义上限是 S₁/|S₂′−S₁|（多头少 1、空头多 1）。
+              币本位按张下单、Legs 校验的超限幅度跟张数走，所以倍数写张数那一个；U 本位按币下单，写币数那一个。 */}
+          {fillPlan && fillPlan.addCoinsMax > 0 && (
+            <div data-testid="add-sizing-sensitivity" className="text-[10px] text-muted-foreground">
+              成交每不利 0.1%，上限少约 {fmtCoins(fillPlan.sensitivityCoinsPer0_1Pct)} {coinName}
+              {isCoin && fillPlan.sensitivityContractsPer0_1Pct != null ? `（${fillPlan.sensitivityContractsPer0_1Pct.toLocaleString('en-US')} 张）` : ''}
+              {' '}· {isCoin
+                ? `张数上限随成交价变化的倍数 ≈ S₁/(S₂′−S₁) = ${fillPlan.contractElasticity.toFixed(1)}×`
+                : `上限随成交价变化的倍数 ≈ S₂′/(S₂′−S₁) = ${fillPlan.coinElasticity.toFixed(1)}×`}
+            </div>
+          )}
 
           {/* 盘口上真实挂着的对冲线。只摆候选、不预填也不锁定 S₁——
               系统分不出「对冲单」与「试单 / 上一场遗留单」的意图。 */}
@@ -455,7 +874,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             </div>
           )}
 
-          <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={toNum(s2)} />
+          <PriceLadder side={side} sBar={toNum(sBar)} s1={toNum(s1)} s2={s2Eff} s2Label={taker ? 'S₂′' : 'S₂'} />
 
           {/* Plan A：G = 0 时它就是 Plan B 的上限（主角）；G ≠ 0 时只作来源拆解，不给可下单的大字。 */}
           <section data-testid="add-sizing-cushion" className="space-y-2">
@@ -478,14 +897,15 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             {!bankedOn && cushion.ok && (
               <>
                 <div className="grid grid-cols-2 gap-2">
+                  {/* G = 0 时 Plan A 就是 Plan B：大字与对冲读同一个 limitCoins（fillPlan 的上限），与按钮、快照一致 */}
                   <Hero testId="add-sizing-x2" label="加仓上限 X₂"
-                    value={fmtCoins(cushion.x2Max)} unit={coinName}
-                    sub={`${fmtUsd(cushion.x2MaxNotional)} USD${contracts(cushion.x2Max, toNum(s2))}`}
+                    value={fmtCoins(planAX2)} unit={coinName}
+                    sub={`${fmtUsd(planAX2 * s2Eff)} USD${limitContractsText ?? addContracts(planAX2, s2Eff)}`}
                     tone="primary" />
                   <Hero testId="add-sizing-hedge"
                     label={`对冲 @ S₁ · ${side === 'LONG' ? '空' : '多'}`}
-                    value={fmtCoins(cushion.hedgeCoinsAtS1)} unit={coinName}
-                    sub={`${fmtUsd(cushion.hedgeNotionalAtS1)} USD${contracts(cushion.hedgeCoinsAtS1, toNum(s1))}`} />
+                    value={fmtCoins(planAHedge)} unit={coinName}
+                    sub={`${fmtUsd(planAHedge * toNum(s1))} USD${contracts(planAHedge, toNum(s1))}`} />
                 </div>
                 <Chips items={[
                   ['浮盈垫 Y₁', `${fmtUsd(cushion.cushion)} USD ÷ 险 ${fmtPx(cushion.riskDistance)}`],
@@ -528,12 +948,12 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
             </div>
 
             <div className="flex flex-wrap items-end gap-x-2 gap-y-1.5">
-              <div className="w-[116px]"><Field label={`G 落袋净额 ${gUnit}`} value={g} onChange={setG} testId="add-sizing-g" /></div>
+              <div className="w-[116px]"><Field label={`G 落袋净额 ${gUnit}`} value={g} onChange={editG} testId="add-sizing-g" /></div>
               {hasBankedSignal && Number.isFinite(bankedSuggest) && (
                 <button
                   type="button"
                   data-testid="add-sizing-fill-banked"
-                  onClick={() => setG(tidyG(bankedSuggest))}
+                  onClick={() => editG(tidyG(bankedSuggest))}
                   title={bankedMaybeSpent
                     ? `落袋后已有 ${banked.addsSinceBanked} 笔加仓：仍持有的浮亏已通过当前 X₁ / S̄ 重算，已实现亏损也已从建议 G 扣除。`
                     : '止盈1 利润 − 本轮已实现亏损（含强平）'}
@@ -576,6 +996,11 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                 </span>
               )}
             </div>
+            {gChangedFrom != null && (
+              <div data-testid="add-sizing-g-refreshed" className="text-[10px] text-amber-600 dark:text-amber-400">
+                G 已按本场落袋重填为 {g}（上次计划里是 {isCoin ? fmtCoins(gChangedFrom, 4) : fmtUsd(gChangedFrom)}），上限随之重算
+              </div>
+            )}
             {/* 按操作时间排除的止盈单独占一行：放进上面那排控件里会把定线 / 定仓挤到下一行。
                 排除的既有「操作时间早于当前持仓开仓」的，也有根本没有操作时间的（6 月以前的老记录）。 */}
             {banked.excludedByOperationTime > 0 && (
@@ -611,7 +1036,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
                     label="Plan B 加仓上限"
                     value={fmtCoins(limitCoins)}
                     unit={coinName}
-                    sub={`旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(planB.bankedAddCoins)}${contracts(limitCoins, toNum(s2))}`}
+                    sub={`旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(planB.bankedAddCoins)}${limitContractsText ?? addContracts(limitCoins, s2Eff)}`}
                     tone="primary"
                   />
                   <Hero
@@ -737,7 +1162,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
  * 价格阶梯：三个价格齐了就画，**不看有没有解**。
  * 方向反了的那一段标红——「S₁ 还在成本线亏损侧」于是一眼可见，而不是只剩一句灰字。
  */
-function PriceLadder({ side, sBar, s1, s2 }: { side: AddSide; sBar: number; s1: number; s2: number }) {
+function PriceLadder({ side, sBar, s1, s2, s2Label = 'S₂' }: { side: AddSide; sBar: number; s1: number; s2: number; s2Label?: string }) {
   const ok = [sBar, s1, s2].every(v => Number.isFinite(v) && v > 0);
   const lo = ok ? Math.min(sBar, s1, s2) : 0;
   const hi = ok ? Math.max(sBar, s1, s2) : 0;
@@ -762,7 +1187,7 @@ function PriceLadder({ side, sBar, s1, s2 }: { side: AddSide; sBar: number; s1: 
         <div className="absolute inset-x-0 top-[10px] h-[3px] rounded-full bg-muted" />
         <div className={`absolute top-[10px] h-[3px] rounded-full ${cushionOk ? 'bg-trading-green/55' : 'bg-trading-red/55'}`} style={seg(pB, p1)} />
         <div className={`absolute top-[10px] h-[3px] rounded-full ${riskOk ? 'bg-primary/55' : 'bg-trading-red/55'}`} style={seg(p1, p2)} />
-        {([['S̄', pB, false], ['S₁', p1, true], ['S₂', p2, false]] as const).map(([label, p, accent]) => (
+        {([['S̄', pB, false], ['S₁', p1, true], [s2Label, p2, false]] as const).map(([label, p, accent]) => (
           <div key={label} className="absolute top-0 -translate-x-1/2 text-center" style={{ left: `${p}%` }}>
             <div className={`mx-auto h-[7px] w-[2px] rounded-full ${accent ? 'bg-foreground' : 'bg-muted-foreground/50'}`} />
             <div className={`mt-[7px] text-[9px] leading-none ${accent ? 'text-foreground' : 'text-muted-foreground'}`}>{label}</div>

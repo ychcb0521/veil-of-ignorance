@@ -314,6 +314,28 @@ export function endReplayTimeline(
   };
 }
 
+/**
+ * later 是不是 earlier 只隔着「翻转方向」分出来的时间线（含同一条）：从 later 沿 parentId 往上走，
+ * 只穿过 cause 为 'direction' 的节点，走得到 earlier 就是。
+ * 翻转方向不换场——仓位、挂单、计算器的计划都原样带过去；开始 / 跳转 / 兜底分叉（钟被拨回）才是新的一场。
+ * 节点找不到（修剪掉、别的设备的章）按不是处理。
+ */
+export function isWithinDirectionFlips(
+  registry: ReplayTimelineRegistry,
+  earlierId: string,
+  laterId: string,
+): boolean {
+  const seen = new Set<string>();
+  for (let id: string | null = laterId; id && !seen.has(id);) {
+    if (id === earlierId) return true;
+    seen.add(id);
+    const node: ReplayTimelineNode | undefined = registry.nodes[id];
+    if (!node || node.cause !== 'direction') return false;
+    id = node.parentId;
+  }
+  return false;
+}
+
 /** 记下一次盖章的时钟；时钟没动就返回同一个对象（调用方据此跳过持久化）。 */
 export function recordReplayTimelineStamp(
   registry: ReplayTimelineRegistry,

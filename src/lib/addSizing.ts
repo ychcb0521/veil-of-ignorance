@@ -23,8 +23,23 @@
  *
  * 读持仓默认值的工具（legOpeningCoins / weightedEntryByCoins / coinsToContracts）
  * 与本场落袋检测（detectBankedMirrorProfit）也放在这里，供计算器预填。
+ *
+ * 按预计成交价定量（sizeAddAtExpectedFill）
+ *   COMMONUSDT 那一场的学费：用户严格按计算器的上限下单，Legs 校验却判超限 1.57% / 3.70%。
+ *   两边规则、G、S₁ 全部一致，只差一个 S₂——计算器读的是下单前的盘面价，
+ *   引擎市价成交却按 calcSlippage 走 0.01% + 名义/50亿 的滑点（0.14% / 0.29%），
+ *   而 Legs 校验读的是成交价。上限对成交价的弹性有十几倍：币数上限 = 垫子 ÷ (S₂ − S₁) 的弹性是 S₂/(S₂ − S₁)；
+ *   张数 / 名义上限（= 币数 × S₂）的弹性是 S₁/|S₂ − S₁|（多头比币数少 1，空头多 1）——币本位按张下单、校验的超限幅度跟的就是这个数。
+ *   零点几的滑点于是放大成百分之几的超限。所以定量必须按**预计成交价 S₂′**，
+ *   而 S₂′ 又取决于名义、名义取决于量——上限是一个隐式方程的根，用二分解（见下方），不是几步迭代的近似。
+ *
+ * 超出归因（attributeAddExcess）
+ *   判定一律按成交价；计划（计算器当时的快照）只用来解释红叉从哪来：
+ *   是成交比计划预计的更差（滑点）、计算后价格已经变了（漂移）、还是量本身就超了计划。
+ *   Legs 校验与成交后复判共用这一段。
  */
-import type { Position, SettlementMode, TradeRecord } from '@/types/trading';
+import { calcSlippage, type Position, type SettlementMode, type TradeRecord } from '@/types/trading';
+import { coinContractsExact } from '@/lib/coinMargined';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 
 export type AddSide = 'LONG' | 'SHORT';
@@ -297,6 +312,468 @@ export function computePlanBCoverageAtS1(input: PlanBCoverageInput): PlanBCovera
   };
 }
 
+// ===================== 按预计成交价定量 =====================
+
+/**
+ * 加仓单的下单方式（tradingSettlement.applySettlementSlippage 的两种成交口径）：
+ *   · market —— 市价单，在引擎基准价上按 Taker 滑点成交；
+ *   · limit —— 限价 / 只做 Maker，按挂单价原价成交；
+ *   · conditional —— 条件委托，触发后在**触发价**上按 Taker 滑点成交（Index.createTriggeredConditionalPosition 与后台撮合都传 isMaker = false），
+ *     所以它与市价同一个模型，只是参考价换成触发价。突破加仓就是这一档——按限价定的量挂成条件单，滑点照样被放大十几倍。
+ */
+export type AddOrderKind = 'market' | 'limit' | 'conditional';
+
+/** 这种下单方式成交时吃不吃滑点：市价与条件委托是 Taker，限价是 Maker。 */
+export function isTakerOrderKind(kind: AddOrderKind | null | undefined): boolean {
+  return kind === 'market' || kind === 'conditional';
+}
+
+/** 引擎 calcSlippage 的 K 线波动参数：(high − low) ÷ close > 2% 时滑点率翻倍。 */
+export interface SlippageVolatility { high: number; low: number; close: number }
+
+export interface ExpectedFillSizingInput {
+  side: AddSide;
+  settlement: SettlementMode;
+  /**
+   * Y₁ + G：与 computePlanBCoverageAtS1().available 同一个数、同一单位（U 本位 USD、币本位结算币）。
+   * ≤ 0 时上限为 0，仍给出只含固定滑点的预计成交价。
+   */
+  coverage: number;
+  s1: number;
+  /**
+   * 参考价 S₂。市价单是引擎成交的**基准价**——Index 的 latestChartPriceRef（原始收盘价），
+   * 不是平滑 / 节流后的 displayCurrentPrice；限价单就是挂单价本身；条件委托是触发价（引擎在它上面加滑点）。
+   */
+  s2Ref: number;
+  orderKind: AddOrderKind;
+  /** 币本位一张面值（USD）；U 本位不传，张数为 null。 */
+  contractFaceUsd?: number | null;
+  /**
+   * 成交那一刻的 K 线区间（最高 / 最低 / 收盘；calcSlippage 不限定周期）。calcSlippage 有一档「区间 > 收盘价 2% 时滑点率翻倍」，
+   * 但本模拟器没有任何成交路径把 K 线区间传给它（applySettlementSlippage 只给 price / notional / side），
+   * 所以这一档今天从不生效。默认不传 = 不翻倍，与引擎的实际行为一致；
+   * 留着这个参数只为将来引擎真的接上区间时，定量能跟着同一个函数走。
+   */
+  klineVolatility?: SlippageVolatility | null;
+}
+
+export interface ExpectedFillSizing {
+  orderKind: AddOrderKind;
+  s2Ref: number;
+  /** 预计成交价 S₂′：市价 / 条件委托 = calcSlippage(S₂, 上限名义)，限价 = S₂。 */
+  s2Fill: number;
+  /** (S₂′ − S₂) ÷ S₂ × 100，带符号：多头为正、空头为负；限价为 0。 */
+  slippagePct: number;
+  /** 按 S₂′ 算的 Plan B 上限（币）；coverage ≤ 0 时为 0。 */
+  addCoinsMax: number;
+  /** 上限折成整张：向下取整、不足一张为 0——与下单面板 coinContractsExact 同规则，绝不进一；U 本位为 null。 */
+  contracts: number | null;
+  /** addCoinsMax × S₂′（USD）。 */
+  notionalAtFill: number;
+  /**
+   * 成交价再不利 0.1%（S₂″ = S₂′ × (1 ± 0.001)，多头向上、空头向下），同一块垫子给出的币数上限少多少币：
+   * X − X · 险 ÷ 险″，**精确重算**。不用一阶式 X · 0.001 · S₂′ ÷ 险：止损贴近（险距 0.1% 上下）时弹性上百，
+   * 一阶量是真实减少量的好几倍，甚至比整个上限还大。险″ > 险，所以它恒在 [0, X) 里。
+   */
+  sensitivityCoinsPer0_1Pct: number;
+  /**
+   * 同一个 0.1%，张数上限少多少张（四舍五入，只作提示）；U 本位为 null。
+   * 张数 = X · 价 ÷ 面值，价格本身也在分子上：(名义 − X″ · S₂″) ÷ 面值，同样精确重算。
+   * 不能拿上一行的币数按 S₂′ 折张——张数的弹性与币数差 1（多头少 1、空头多 1），那会多算 S₂′/S₁ − 1（≈ 10%）。
+   */
+  sensitivityContractsPer0_1Pct: number | null;
+  /** 币数上限对成交价的弹性 S₂′ ÷ |S₂′ − S₁|：成交价不利 1%，币数上限少约这么多个百分点（U 本位的超限幅度跟它）。 */
+  coinElasticity: number;
+  /** 张数 / 名义上限对成交价的弹性 S₁ ÷ |S₂′ − S₁|（多头 = 币数弹性 − 1，空头 = 币数弹性 + 1；币本位按张下单，超限幅度跟它）。 */
+  contractElasticity: number;
+  /** 二分步数；限价为 0。 */
+  iterations: number;
+  /** 括号收到相邻浮点数（或相对 1e-15）即为 true。二分的步数有上限但用不完，恒为 true；留着给调用方断言。 */
+  converged: boolean;
+}
+
+/**
+ * 二分步数上限：从 double 的最大值一路减半到最小正数（≈ 2,100 步）再收到相邻浮点数也用不完；
+ * 常见量级（括号 X₀ 与根同阶）只要 50–60 步，垫子大到滑点主导时再多 log₂(X₀/X*) 步。
+ */
+const FILL_BISECTION_MAX_ITERATIONS = 2_200;
+/** 括号的相对宽度收到这个数就停：远小于一张（10 USD）或一个数量精度在任何实际名义上的占比。 */
+const FILL_BISECTION_RELATIVE_TOLERANCE = 1e-15;
+
+/**
+ * 某个名义下的预计成交价：市价 / 条件委托走引擎的 calcSlippage（同一函数，模型不可能与引擎分叉），限价原价。
+ * 上限还算不出来（S₁ 没填）时计算器用它按零名义显示 S₂′，只含固定的 0.01%。
+ */
+export function expectedFillPrice(
+  s2Ref: number,
+  notionalUsd: number,
+  side: AddSide,
+  orderKind: AddOrderKind,
+  klineVolatility?: SlippageVolatility | null,
+): number {
+  if (!fin(s2Ref) || s2Ref <= 0) return Number.NaN;
+  if (!isTakerOrderKind(orderKind)) return s2Ref;
+  return calcSlippage(s2Ref, fin(notionalUsd) && notionalUsd > 0 ? notionalUsd : 0, side, klineVolatility ?? undefined);
+}
+
+/**
+ * 按**预计成交价**定 Plan B 上限。
+ *
+ * 要解的是：X 币在它**自己的**成交价上跌回 S₁ 的亏损恰好等于垫子——
+ *   L(X) = X · 每币风险(S₂′(X)) = C，C = max(0, Y₁ + G)，S₂′(X) = calcSlippage(S₂, N(X))，
+ *   N 是引擎拿去算滑点率的名义：U 本位 = 数量 × 基准价 = X·S₂；币本位 = 张 × 面值 = X·S₂′（币数随成交价变）。
+ *
+ * 为什么用二分，不用不动点迭代：X ← C ÷ 每币风险(S₂′(X)) 只在「滑点吃掉的险距」小的时候压缩，
+ *   止损贴得近（险距 0.2% 价格）、名义又大时它在根两侧来回跳、10 步收不住，
+ *   计算器于是把一个根本不是上限的数当上限（实测 BTC 险距 0.2%：显示 179 币，真上限 177.19，在自己的成交价上超 1.67%）。
+ *   二分不挑条件，永远收敛：
+ *   · 单调：L 对 X 严格递增。U 本位 X 与险距都随 X 增大；币本位按名义 N 参数化，
+ *     X = N ÷ S₂′(N) 对 N 递增（dX/dN = S₂(1 + a)/S₂′² > 0），亏损 = N·|1 − S₁/S₂′(N)| ÷ S₁ 也递增。
+ *   · 括号：下端 0（亏损 0 ≤ C）；上端取无滑点上限 X₀ = C ÷ 每币风险(S₂)（币本位取它在 S₂ 上的名义 X₀·S₂）——
+ *     市价成交价只会比 S₂ 更差，在 X₀ 上计入滑点，亏损只会 ≥ C，根必在 [0, X₀] 里。
+ *   · 空头：滑点率到 100% 时成交价归零（名义 ≈ 50 亿），再往上引擎给出非正的价。
+ *     判据「成交价 > 0 且亏损 ≤ C」在 [0, 根) 上为真、之后为假（成交价归零之后一律为假），仍是单调的——
+ *     括号因此只落在成交价为正的那一段；U 本位空头的亏损在成交价归零时有上界 ≈ 数量 × S₁，
+ *     垫子比它还大时，上限就停在成交价仍为正的最大名义上。
+ *   · 返回括号的**下端**：下端恒满足「成交价 > 0 且 L ≤ C」，所以返回的上限在它自己的成交价上绝不超；
+ *     S₂′ 取的就是这个下端的成交价，上限、成交价、名义三者自洽。
+ * 只有 S₂ 本身没越过 S₁（没有正的风险距离）才返回 null；市价的滑点再大也不会让险距变小（多头成交价更高、空头更低）。
+ * 向下取整到整张只会让名义更小、滑点更少、每币风险更小——整张后的加仓在**它自己的**成交价上仍在上限之内。
+ * 条件委托（orderKind = 'conditional'）走同一条路，S₂ 是触发价：引擎在触发价上按同一个 calcSlippage 成交。
+ */
+export function sizeAddAtExpectedFill(input: ExpectedFillSizingInput): ExpectedFillSizing | null {
+  const { side, settlement, s1, s2Ref, orderKind } = input;
+  if (!fin(s1) || !fin(s2Ref) || s1 <= 0 || s2Ref <= 0) return null;
+  const d = side === 'SHORT' ? -1 : 1;
+  if (!((s2Ref - s1) * d > 0)) return null;
+  const coin = settlement === 'coin';
+  const coverage = fin(input.coverage) ? Math.max(0, input.coverage) : 0;
+  const face = fin(input.contractFaceUsd) && (input.contractFaceUsd as number) > 0 ? (input.contractFaceUsd as number) : null;
+  const volatility = input.klineVolatility ?? undefined;
+
+  /** 每币跌回 S₁ 的亏损，与 coverage 同单位：与 computePlanBCoverageAtS1 同一条式子（币本位 = 险 ÷ S₁）。 */
+  const lossPerCoin = (fill: number): number => {
+    const risk = (fill - s1) * d;
+    return coin ? risk / s1 : risk;
+  };
+
+  let s2Fill = s2Ref;
+  let x = coverage > 0 ? coverage / lossPerCoin(s2Ref) : 0;
+  /** 引擎口径的名义：币本位就是二分的变量本身；U 本位 = 数量 × 基准价。 */
+  let engineNotional = x * s2Ref;
+  let iterations = 0;
+  let converged = true;
+  if (isTakerOrderKind(orderKind)) {
+    /** 二分变量 q：U 本位是币数，币本位是名义（张 × 面值）。 */
+    const fillAt = (q: number): number => calcSlippage(s2Ref, coin ? q : q * s2Ref, side, volatility);
+    const coinsAt = (q: number, fill: number): number => (coin ? q / fill : q);
+    const fits = (q: number): boolean => {
+      const fill = fillAt(q);
+      if (!(fill > 0)) return false;
+      return coinsAt(q, fill) * lossPerCoin(fill) <= coverage;
+    };
+    let lo = 0;
+    if (coverage > 0) {
+      let hi = coin ? x * s2Ref : x;
+      if (!fin(hi)) hi = Number.MAX_VALUE;
+      if (fits(hi)) {
+        // 只在舍入让 L(X₀) 恰好等于 C 时发生：X₀ 本身就是根
+        lo = hi;
+      } else {
+        converged = false;
+        while (iterations < FILL_BISECTION_MAX_ITERATIONS) {
+          const mid = lo + (hi - lo) / 2;
+          if (!(mid > lo && mid < hi)) { converged = true; break; }
+          iterations += 1;
+          if (fits(mid)) lo = mid;
+          else hi = mid;
+          if (hi - lo <= FILL_BISECTION_RELATIVE_TOLERANCE * hi) { converged = true; break; }
+        }
+      }
+    }
+    s2Fill = fillAt(lo);
+    x = lo > 0 ? coinsAt(lo, s2Fill) : 0;
+    engineNotional = coin ? lo : lo * s2Ref;
+  }
+
+  const risk = (s2Fill - s1) * d;
+  const coinElasticity = risk > 0 ? s2Fill / risk : Number.NaN;
+  const contractElasticity = risk > 0 ? s1 / risk : Number.NaN;
+  /** 币本位的张数直接从引擎名义折（二分变量本身），不绕 X × S₂′ 再乘回来。 */
+  const notionalForContracts = coin ? engineNotional : x * s2Fill;
+  // 敏感度精确重算：成交价再不利 0.1%，同一块垫子（X · 每币风险不变）在 S₂″ 上能买多少——两种结算下都是 X · 险 ÷ 险″
+  const worseFill = s2Fill * (1 + 0.001 * d);
+  const worseRisk = (worseFill - s1) * d;
+  const sized = x > 0 && risk > 0 && worseRisk > 0;
+  const worseCoins = sized ? x * (risk / worseRisk) : x;
+  const sensitivity = sized ? Math.max(0, x - worseCoins) : 0;
+  return {
+    orderKind,
+    s2Ref,
+    s2Fill,
+    slippagePct: (s2Fill / s2Ref - 1) * 100,
+    addCoinsMax: x,
+    contracts: face == null ? null : coinContractsExact(notionalForContracts / face),
+    notionalAtFill: x * s2Fill,
+    sensitivityCoinsPer0_1Pct: sensitivity,
+    sensitivityContractsPer0_1Pct: face == null
+      ? null
+      : (sized ? Math.max(0, Math.round((notionalForContracts - worseCoins * worseFill) / face)) : 0),
+    coinElasticity,
+    contractElasticity,
+    iterations,
+    converged,
+  };
+}
+
+/**
+ * 限价单的挂单价按下单面板的价格精度**向有利侧**取整：多头向下、空头向上。
+ * 限价 / 只做 Maker 按挂单价原价成交，四舍五入把多头的价抬高一格，
+ * 就等于在比定量用的 S₂ 更差的价上成交——上限对价格的弹性有十几倍，整张的上限立刻超限。
+ * 向有利侧取整只会让险距更大一点点、上限更宽一点点，按原价定的量在取整后的价上仍合规。
+ * 加 / 减 1e-6 格吸收浮点噪声（0.007701 × 1e6 = 7700.999…）。
+ */
+export function roundLimitPriceFavorable(price: number, decimals: number, side: AddSide): number {
+  if (!fin(price) || price <= 0) return Number.NaN;
+  if (!fin(decimals) || decimals < 0) return price;
+  const p = Math.min(15, Math.floor(decimals));
+  const scale = 10 ** p;
+  const ticks = side === 'SHORT' ? Math.ceil(price * scale - 1e-6) : Math.floor(price * scale + 1e-6);
+  return Number((ticks / scale).toFixed(p));
+}
+
+// ===================== 超出归因：滑点 / 计算后价格变动 / 量本身 =====================
+
+/** 判超限之后，超出的那一截从哪来。 */
+export type AddExcessCause =
+  /** 按下单时的价、计入计划预计的滑点，量本在上限之内——超出全部来自成交比预计更差。 */
+  | 'slippage'
+  /** 按计划的价在上限之内，但下单时价格已经变了——计划该按新价重算。 */
+  | 'price_drift'
+  /** 量在计算器给的上限之内，按校验读到的 S₁ / G / 旧仓却不在——两边的输入不一致。 */
+  | 'inputs'
+  /** 量本身就超过了计划价上的上限——超出来自仓位，不是滑点。 */
+  | 'oversize';
+
+/** 计划里与归因有关的几个价（AddSizingSnapshot 的子集）。 */
+export interface AddExcessPlan {
+  /** 计算时的参考价 S₂：市价计划 = 现价（引擎基准价），限价计划 = 手填限价，条件委托 = 触发价。 */
+  s2Ref: number;
+  /** 计划定量用的价 S₂′：市价 / 条件委托 = 预计成交价，限价 = 挂单价。 */
+  s2Fill: number;
+  orderKind: AddOrderKind;
+  /** 计划给的上限（币，按 S₂′）；缺省则不区分 inputs 与 oversize。 */
+  addCoinsMax?: number | null;
+  /** 这张单下单那一刻自己的参考价（市价 = 引擎基准价，限价 = 委托价，条件单 = 触发价）；缺省视为与计划的下单价相同。 */
+  s2AtOrder?: number | null;
+}
+
+export interface AddExcessAttribution {
+  cause: AddExcessCause;
+  /** 计划本该下单的参考价：市价 / 条件委托计划 = S₂（引擎在它上面加滑点；条件委托即触发价），限价计划 = 挂单价 S₂′。 */
+  planOrderPrice: number;
+  /** 计划定量用的价 S₂′。 */
+  planPrice: number;
+  /** 这张单实际的下单参考价。 */
+  orderPrice: number;
+  /** 下单参考价 × 计划预计的滑点比例：按计划应有的成交价。 */
+  anchorPrice: number;
+  fillPrice: number;
+  /** 下单参考价相对计划下单价的变动（%）：计算后价格变动。 */
+  priceDriftPct: number;
+  /** 实际成交相对下单参考价（%）：这张单自己的滑点。 */
+  fillSlippagePct: number;
+  /** 实际成交相对应有成交价（%）：比计划预计多出来的滑点。 */
+  unexpectedSlippagePct: number;
+  /**
+   * 实际量比计算时的上限多出的比例（%）。计划带着计算器的上限（addCoinsMax）时按它算——
+   * 「比计算时的上限多 +x%」说的就是计算器给的那个数；缺省才按判定方在计划价上的上限。上限为 0 时为 +∞。
+   */
+  planOvershootPct: number;
+  /** 应有成交价上的上限（币）。 */
+  limitAtAnchor: number;
+  /** 计划价上的上限（币，按判定方自己的 S₁ / G / 旧仓）。 */
+  limitAtPlan: number;
+  /** 实际量折到计划价上的币数（币本位随价变：名义 ÷ 价；U 本位不变）。 */
+  coinsAtPlan: number;
+  /** 实际量是否在计划自己的上限之内（计划价上的币数 ≤ 计算器的上限；计划没带上限时按判定方在计划价上合规）。 */
+  withinPlanLimit: boolean;
+}
+
+/**
+ * 超出归因：**判定方自己**的上限函数 + 计划的价，给出一个原因。只在已判超限之后调用。
+ *
+ * 三个价排成一条链：计划下单价 → 这张单的下单价（中间是计算后的价格变动）→ 成交价（中间是滑点）。
+ * 计划预计的滑点按比例带到下单价上得到「应有成交价」anchor：
+ *   · 在 anchor 上仍合规、且量在计划自己的上限之内 → 按下单时的价、计划的滑点，这个量本来没问题，超出全部来自成交比预计更差；
+ *     量比计划大时不算滑点：下单前价格朝有利方向走了，anchor 上的上限跟着变宽，恰好容得下多下的量，
+ *     可多下的量自己又把滑点推高——超出来自量，按计算器的上限报「量超了计划」；
+ *   · 否则在计划价 S₂′ 上合规 → 计划当时没错，是下单前价格变了；
+ *   · 否则量在计算器给的上限之内 → 计算器的输入与判定方读到的不一致；
+ *   · 否则 → 量本身超过了计划。
+ * 「合规」由调用方的 fitsAt 决定，与它自己的判定同一个容差，所以 fitsAt(成交价) 必为假。
+ * 多头上限随价格上升单调收窄（币本位的名义上限同样），所以 anchor 上合规而成交价上不合规，
+ * 意味着成交价一定比 anchor 更差——「全部来自滑点」时多出来的滑点必为正，不会出现 +0.00% 的空话。
+ */
+export function attributeAddExcess(args: {
+  plan: AddExcessPlan;
+  fillPrice: number;
+  coinsAt: (price: number) => number;
+  limitAt: (price: number) => number;
+  fitsAt: (price: number) => boolean;
+}): AddExcessAttribution | null {
+  const { plan, fillPrice, coinsAt, limitAt, fitsAt } = args;
+  if (![plan.s2Ref, plan.s2Fill, fillPrice].every(v => fin(v) && v > 0)) return null;
+  const planOrderPrice = plan.orderKind === 'limit' ? plan.s2Fill : plan.s2Ref;
+  const orderPrice = fin(plan.s2AtOrder) && (plan.s2AtOrder as number) > 0 ? (plan.s2AtOrder as number) : planOrderPrice;
+  const anchorPrice = orderPrice * (plan.s2Fill / planOrderPrice);
+  const coinsAtPlan = coinsAt(plan.s2Fill);
+  const limitAtPlan = limitAt(plan.s2Fill);
+  const plannedMax = fin(plan.addCoinsMax) && (plan.addCoinsMax as number) > 0 ? (plan.addCoinsMax as number) : null;
+  // 同一单位（计划价上的币数）、同一个相对容差比对计算器的上限；计划没带上限时退回判定方在计划价上的上限
+  const withinPlanLimit = plannedMax != null ? coinsAtPlan <= plannedMax * (1 + 1e-6) : fitsAt(plan.s2Fill);
+  let cause: AddExcessCause;
+  if (fitsAt(anchorPrice)) cause = withinPlanLimit ? 'slippage' : 'oversize';
+  else if (fitsAt(plan.s2Fill)) cause = 'price_drift';
+  else if (plannedMax != null && withinPlanLimit) cause = 'inputs';
+  else cause = 'oversize';
+  const overshootBase = plannedMax ?? limitAtPlan;
+  return {
+    cause,
+    planOrderPrice,
+    planPrice: plan.s2Fill,
+    orderPrice,
+    anchorPrice,
+    fillPrice,
+    priceDriftPct: (orderPrice / planOrderPrice - 1) * 100,
+    fillSlippagePct: (fillPrice / orderPrice - 1) * 100,
+    unexpectedSlippagePct: (fillPrice / anchorPrice - 1) * 100,
+    planOvershootPct: overshootBase > 0 ? (coinsAtPlan / overshootBase - 1) * 100 : Number.POSITIVE_INFINITY,
+    limitAtAnchor: limitAt(anchorPrice),
+    limitAtPlan,
+    coinsAtPlan,
+    withinPlanLimit,
+  };
+}
+
+/** 带符号百分比：+0.14% / −0.14%；绝对值不足 0.005% 时多给两位（+0.0013%），不把真实的偏差写成 +0.00%。 */
+export function formatSignedPct(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return '—';
+  if (!Number.isFinite(value)) return value > 0 ? '+∞' : '−∞';
+  const abs = Math.abs(value);
+  const digits = abs > 0 && abs < 0.005 ? 4 : 2;
+  return `${value < 0 ? '−' : '+'}${abs.toFixed(digits)}%`;
+}
+
+// ===================== 成交之后按实际成交价复判 =====================
+
+export interface PostFillAddSizingInput {
+  side: AddSide;
+  settlement: SettlementMode;
+  sBar: number;
+  s1: number;
+  x1: number;
+  /** 本轮落袋净额 G（带符号；U 本位 USD、币本位结算币）。 */
+  g: number;
+  /** 这张单下单那一刻的参考价（市价 = 引擎成交的基准价）。 */
+  s2Ref: number;
+  /** 实际成交价。 */
+  s2Fill: number;
+  /** 实际加进去的币量（币本位 = 张 × 面值 ÷ 成交价）。 */
+  addCoins: number;
+  /** 币本位一张面值（USD）；U 本位不传。 */
+  contractFaceUsd?: number | null;
+  /**
+   * 这张单带着的计算器计划。有它，超出归因按计划的价走（市价计划已计入预计滑点）；
+   * 没有就当成「按参考价、不计滑点」定的量——那正是没有计算器时手算的样子。
+   * 计划自己的 s2AtOrder 不用：这里的 s2Ref 就是这张单的下单价。
+   */
+  plan?: AddExcessPlan | null;
+}
+
+export interface PostFillAddSizing {
+  /** Plan B 上限 @ 实际成交价（币）——Legs「加仓校验」判的就是这个数。 */
+  limitAtFill: number;
+  /** Plan B 上限 @ 参考价（币，不计滑点）；参考价没有风险距离时为 NaN。 */
+  limitAtRef: number;
+  addCoins: number;
+  /** 实际成交价相对参考价的偏移 (S₂′ − S₂) ÷ S₂ × 100，带符号。 */
+  slippagePct: number;
+  /** addCoins ÷ limitAtFill − 1（%）；未超限为 0；上限为 0 时为 +∞。 */
+  overshootPct: number;
+  /** 超出上限的币量 max(0, addCoins − limitAtFill)。 */
+  excessCoins: number;
+  /** 超出的张数（进一：减掉这么多张就回到上限之内）；U 本位为 null。 */
+  excessContracts: number | null;
+  /** 只因成交价偏离参考价而少掉的额度：limitAtRef ÷ limitAtFill − 1（%）。 */
+  slippageOvershootPct: number;
+  /** 超限时超出从哪来；未超限为 null。 */
+  attribution: AddExcessAttribution | null;
+  /** 超出 Plan B 上限（超出的亏损 > 一分钱 / 百万分之一的浮点容差）。 */
+  overLimit: boolean;
+  /** 张数 / 名义上限随成交价变化的倍数 S₁ ÷ |S₂′ − S₁|。 */
+  amplification: number;
+}
+
+/**
+ * 成交之后按**实际成交价**把 Plan B 再判一遍——与 Legs「加仓校验」同一条式子、同一个判据。
+ *
+ * 计算器按预计成交价定量，但预计终究是预计：基准价在关掉计算器到点下单之间还会跳，
+ * 量也可能没按计划下。所以成交那一刻就要复判，而不是等到战役页才看见红叉。
+ * 这里只算数，不读盘面：S₁（盘口对冲线或计划里的 S₁）、G、X₁ / S̄ 由调用方按成交**之前**的状态给。
+ * 超限判据与 campaignAddSizingCheck 同源：缺口 = 最大亏损 − (Y₁ + G)（带符号，Y₁ + G 为负时照扣），
+ * 缺口 > max(一分钱, 1e-6 × max(|Y₁ + G|, 最大亏损)) 即超限；一律按 USD 记（币本位的垫按 S₁ 折回）。
+ */
+export function evaluatePostFillAddSizing(input: PostFillAddSizingInput): PostFillAddSizing | null {
+  const { side, settlement, sBar, s1, x1, g, s2Ref, s2Fill, addCoins } = input;
+  if (![sBar, s1, x1, s2Ref, s2Fill, addCoins].every(v => fin(v) && v > 0)) return null;
+  const atFill = computePlanBCoverageAtS1({ side, settlement, sBar, s1, s2: s2Fill, x1, g });
+  if (!atFill) return null;
+  const atRef = computePlanBCoverageAtS1({ side, settlement, sBar, s1, s2: s2Ref, x1, g });
+  const d = side === 'SHORT' ? -1 : 1;
+  const coin = settlement === 'coin';
+  const face = fin(input.contractFaceUsd) && (input.contractFaceUsd as number) > 0 ? (input.contractFaceUsd as number) : null;
+
+  const limitAtFill = atFill.addCoinsMax;
+  const limitAtRef = atRef ? atRef.addCoinsMax : Number.NaN;
+  // 可用垫与价格无关；币本位以币计，乘 S₁ 折回 USD，与 Legs 校验同一口径
+  const availableUsd = coin ? atFill.available * s1 : atFill.available;
+  const maxLossUsd = addCoins * atFill.riskDistance;
+  const tolerance = Math.max(0.01, 1e-6 * Math.max(Math.abs(availableUsd), maxLossUsd));
+  const overLimit = maxLossUsd - availableUsd > tolerance;
+  const excessCoins = overLimit ? Math.max(0, addCoins - limitAtFill) : 0;
+
+  /** 这笔量在某个价上：币本位张数不变、币数随价变（名义 ÷ 价）；U 本位币数不变。 */
+  const notionalUsd = addCoins * s2Fill;
+  const coinsAt = (px: number) => (coin ? notionalUsd / px : addCoins);
+  const riskAt = (px: number) => Math.max(0, (px - s1) * d);
+  const limitAt = (px: number) => {
+    const risk = riskAt(px);
+    return risk > 0 ? Math.max(0, availableUsd) / risk : Number.POSITIVE_INFINITY;
+  };
+  const fitsAt = (px: number) => coinsAt(px) * riskAt(px) - availableUsd <= tolerance;
+  const attribution = overLimit
+    ? attributeAddExcess({
+      plan: { ...(input.plan ?? { s2Ref, s2Fill: s2Ref, orderKind: 'limit' as const }), s2AtOrder: s2Ref },
+      fillPrice: s2Fill, coinsAt, limitAt, fitsAt,
+    })
+    : null;
+
+  return {
+    limitAtFill,
+    limitAtRef,
+    addCoins,
+    slippagePct: (s2Fill / s2Ref - 1) * 100,
+    overshootPct: !overLimit ? 0 : limitAtFill > 0 ? (addCoins / limitAtFill - 1) * 100 : Number.POSITIVE_INFINITY,
+    excessCoins,
+    excessContracts: face == null ? null : (overLimit ? Math.ceil((excessCoins * s2Fill) / face - 1e-9) : 0),
+    slippageOvershootPct: fin(limitAtRef) && limitAtFill > 0 ? (limitAtRef / limitAtFill - 1) * 100 : Number.NaN,
+    attribution,
+    overLimit,
+    amplification: s1 / ((s2Fill - s1) * d),
+  };
+}
+
 // ===================== 从盘面读默认值 =====================
 
 export interface OpeningCoinsSource {
@@ -336,10 +813,19 @@ export function weightedEntryByCoins(legs: Array<{ coins: number; entryPrice: nu
   return coins > 0 ? value / coins : 0;
 }
 
-/** 币量 → 整张：四舍五入；只要币量为正至少 1 张；0 给 0。 */
+/** 币量 → 整张：四舍五入；只要币量为正至少 1 张；0 给 0。对冲量用它——要的是贴近，不是授权上限。 */
 export function coinsToContracts(coins: number, price: number, faceUsd: number): number {
   if (!fin(coins) || coins <= 0 || !fin(price) || price <= 0 || !fin(faceUsd) || faceUsd <= 0) return 0;
   return Math.max(1, Math.round((coins * price) / faceUsd));
+}
+
+/**
+ * 币量 → 整张：**向下取整**，不足一张为 0，与下单面板把输入折成张数的 coinContractsExact 同规则。
+ * 加仓上限用它：上限是授权额度，进一那半张是规则没批的量；少那半张只会让成交滑点更小、更安全。
+ */
+export function coinsToContractsFloor(coins: number, price: number, faceUsd: number): number {
+  if (!fin(coins) || coins <= 0 || !fin(price) || price <= 0 || !fin(faceUsd) || faceUsd <= 0) return 0;
+  return coinContractsExact((coins * price) / faceUsd);
 }
 
 export interface HeldPositionSummary {
@@ -639,7 +1125,8 @@ export function evaluatePostAddCostLine(args: {
  * 前两条在代数上恒等（成本线式展开即 X₂·险 − Y₁ − G），吃的又是同一批手填数，
  * 所以它们守的是算术本身——公式、单位折算、方向符号哪里改坏了，两个数才会分开；
  * 逐笔式另有来源（持仓腿），守的是 X₁ / S̄。S₁ 由计算器里「盘口对冲线偏差」那一块单独核对；
- * S₂ 与 G 没有第二来源，错了单位、错了符号两条路照样一致——那不是自检能抓的，仍靠人核对。
+ * S₂ 与 G 没有第二来源，错了单位、错了符号两条路照样一致——那不是自检能抓的，仍靠人核对
+ * （S₂′ 是从 S₂ 按引擎滑点模型推出来的，同样不算第二来源；它守的是「按成交价定量」，不是「S₂ 填对了」）。
  * 任一路对不上，verdict 是 mismatch，**既不给通过也不给非法**，只把两个数都摆出来。
  * 币本位下三条路全部按 S₁ 折成结算币，与 computePlanBCoverageAtS1 同一口径。
  */

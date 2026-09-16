@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import type { TradeJournal } from '@/types/journal';
-import type { CampaignReverseHedgeOrder } from '@/types/trading';
+import { calcSlippage, type AddSizingSnapshot, type CampaignReverseHedgeOrder, type TradeRecord } from '@/types/trading';
 
 /**
  * 【用户要求】Legs 增加「加仓校验」列：合规用几乎隐形的对号，
@@ -194,5 +194,133 @@ describe('两套算法对不上时的「加仓校验」格', () => {
     expect(mark.getAttribute('aria-label')).toContain('两种算法结果不一致');
     expect(mark.getAttribute('aria-label')).toContain('垫子式缺口');
     expect(mark.getAttribute('aria-label')).toContain('成本线式缺口');
+  });
+});
+
+/**
+ * 成交记录带着加仓计算器当时的计划：点开红叉的计算框并排写出「计算时 / 实际成交」，
+ * 再说超出从哪来——真是滑点才点名滑点。判定本身仍按成交价。
+ * COMMONUSDT 加仓 1：主力 10,346,400 @0.006974，镜像落袋 55,994,538.5 COMMON，S₁ 0.007069，
+ * 计算时现价 0.00770146、成交 0.0077123（+0.14%）、实际 653,602 张。
+ *   · 那一场的计划按现价、不计滑点（限价档，上限 848,689,579 币）→ 超出全部来自滑点；
+ *   · 市价档计划已含 +0.14%（上限 834,590,798 币），同一笔就是量超了计划。
+ */
+describe('计算框里的计算器快照', () => {
+  const T0 = Date.parse('2026-09-01T10:00:00+08:00');
+  const MIN = 60_000;
+  const T_ADD1 = T0 + 61 * MIN;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const FILL = 0.0077123;
+  const REF = FILL / (1 + 0.0001 + 6_536_020 / 5e9);
+  const common = {
+    at: T_ADD1, plan: 'B', side: 'LONG', settlement: 'coin', s1: 0.007069, s2Ref: REF, s2AtOrder: REF,
+    x1: 1_483_567_536.56, sBar: 0.006974, g: 55_994_538.5, gUnit: 'COMMON',
+  } as const;
+  const limitPlan: AddSizingSnapshot = { ...common, s2Fill: REF, slippagePct: 0, addCoinsMax: 848_689_579.33, contracts: 653_615, orderKind: 'limit' };
+  const marketPlan: AddSizingSnapshot = { ...common, s2Fill: 0.0077121467, slippagePct: 0.1388, addCoinsMax: 834_590_798, contracts: 643_648, orderKind: 'market' };
+  const commonLegs = (addNotional: number, fill = FILL) => [
+    legFor({ id: 'main', symbol: 'COMMONUSDT', leg_sequence: 1, pre_simulated_time: iso(T0), pre_entry_price: 0.006974, pre_position_size: 10_346_400 }),
+    legFor({
+      id: 'mirror', symbol: 'COMMONUSDT', leg_sequence: 2, leg_role: 'mirror_tp', pre_simulated_time: iso(T0), pre_entry_price: 0.006974,
+      pre_position_size: 15_519_600, post_simulated_close_time: iso(T0 + 12 * MIN), post_realized_pnl: 55_994_538.5 * 0.007069,
+    }),
+    legFor({
+      id: 'add1', symbol: 'COMMONUSDT', leg_sequence: 3, leg_role: 'main_add_1', trade_record_id: 'rec-add1',
+      pre_simulated_time: iso(T_ADD1), pre_entry_price: fill, pre_position_size: addNotional,
+    }),
+  ];
+  const recordFor = (addNotional: number, snap: AddSizingSnapshot | undefined, fill = FILL): TradeRecord => ({
+    id: 'rec-add1', symbol: 'COMMONUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice: fill, exitPrice: 0.00742559,
+    quantity: addNotional / 10, contracts: addNotional / 10, leverage: 5, pnl: -246_249, fee: 0, slippage: 0,
+    openTime: T_ADD1, closeTime: T_ADD1 + 47 * MIN, settlementMode: 'coin', contractSizeUsd: 10,
+    ...(snap ? { addSizingSnapshot: snap } : {}),
+  });
+  const commonOrders: CampaignReverseHedgeOrder[] = [{
+    id: 'stop', side: 'SHORT', price: 0.007069, status: 'cancelled', createdAt: T_ADD1 - MIN, triggeredAt: null, cancelledAt: T_ADD1 + 24 * MIN,
+  }];
+  const renderCommon = (addNotional: number, snap: AddSizingSnapshot | undefined, fill = FILL) => render(
+    <MemoryRouter>
+      <CampaignLegsList legs={commonLegs(addNotional, fill)} tradeRecords={[recordFor(addNotional, snap, fill)]} reverseHedgeOrders={commonOrders} initialExpectedMaxLoss={1_000} />
+    </MemoryRouter>,
+  );
+
+  it('【回归】COMMONUSDT 加仓 1（按现价、不计滑点定的量）：红叉照打；计算框写出计算时 / 实际成交两行，并点名超出全部来自成交滑点 +0.14%', () => {
+    renderCommon(6_536_020, limitPlan);
+    const mark = screen.getByTestId('add-sizing-check-fail-add1');
+    // 限价计划的 s2Ref 是手填的限价，不叫「现价」（三审）
+    expect(mark.getAttribute('aria-label')).toContain('计算时 限价 0.00770146');
+    expect(mark.getAttribute('aria-label')).not.toContain('现价');
+    expect(mark.getAttribute('aria-label')).toContain('超出部分全部来自成交滑点 +0.14%');
+    fireEvent.click(mark);
+    const dialog = screen.getByTestId('add-sizing-detail-dialog');
+    const line = screen.getByTestId('add-sizing-snapshot-line');
+    expect(line.textContent).toContain('加仓计算器当时的计划（限价 @S₂）');
+    expect(line.textContent).toContain('计算时 限价 0.00770146，挂单价 0.00770146（限价），上限 848,689,579.33 币；');
+    expect(line.textContent).not.toContain('现价');
+    expect(line.textContent).toMatch(/实际成交 0\.00771230（\+0\.14%），上限 834,391,89\d(\.\d+)? 币。/);
+    expect(screen.getByTestId('add-sizing-slippage-line').textContent).toBe('超出部分全部来自成交滑点 +0.14%（计划按限价、不计滑点，这张却是吃单成交）。');
+    expect(screen.queryByTestId('add-sizing-cause-line')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-order-line')).toBeNull();
+    // 判定本身没变：上限仍是成交价上的那个数
+    expect(screen.getByTestId('add-sizing-correct-coins').textContent).toMatch(/^834,391,89\d(\.\d+)? 币$/);
+    expect(dialog.textContent).toContain('⑤ 正确币量上限');
+  });
+
+  it('【回归 · 复审】市价计划（已含滑点）却下了 653,602 张：计算框说量超了计划 +1.55%，不点名滑点', () => {
+    renderCommon(6_536_020, marketPlan);
+    const mark = screen.getByTestId('add-sizing-check-fail-add1');
+    expect(mark.getAttribute('aria-label')).not.toContain('全部来自成交滑点');
+    expect(mark.getAttribute('aria-label')).toContain('实际加仓比计算时的上限多 +1.55%');
+    fireEvent.click(mark);
+    const line = screen.getByTestId('add-sizing-snapshot-line');
+    expect(line.textContent).toContain('加仓计算器当时的计划（市价 · 含滑点）');
+    expect(line.textContent).toContain('计算时 现价 0.00770146，预计成交 0.00771215（+0.14%），上限 834,590,798 币；');
+    expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
+    expect(screen.getByTestId('add-sizing-cause-line').textContent).toBe('实际加仓比计算时的上限多 +1.55%——超出来自仓位本身，不是滑点。');
+  });
+
+  it('下单时价格已经变了：多出一行「下单时 参考价」，原因写计算后价格变动', () => {
+    // 按计划的整张（643,648）下，引擎在已涨 0.2% 的基准价上成交
+    renderCommon(6_436_480, { ...marketPlan, s2AtOrder: REF * 1.002 }, calcSlippage(REF * 1.002, 6_436_480, 'LONG'));
+    fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
+    expect(screen.getByTestId('add-sizing-order-line').textContent).toBe('下单时 参考价 0.00771687（计算后价格变动 +0.20%）；');
+    expect(screen.getByTestId('add-sizing-cause-line').textContent).toMatch(/^超出来自计算后的价格变动 \+0\.20%：/);
+    expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
+  });
+
+  it('【回归 · 三审】条件委托计划（突破加仓）的触发价挂高了 0.2%：抬头写「条件委托 @S₂ · 触发后市价」，计算时写触发价，原因写触发价偏离', () => {
+    const TRIG = 0.0077015;
+    const conditionalPlan: AddSizingSnapshot = {
+      ...common, s2Ref: TRIG, s2AtOrder: TRIG * 1.002, s2Fill: 0.0077121837, slippagePct: 0.1387,
+      addCoinsMax: 834_542_712.37, contracts: 643_614, orderKind: 'conditional',
+    };
+    renderCommon(6_436_140, conditionalPlan, calcSlippage(TRIG * 1.002, 6_436_140, 'LONG'));
+    fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
+    const line = screen.getByTestId('add-sizing-snapshot-line');
+    expect(line.textContent).toContain('加仓计算器当时的计划（条件委托 @S₂ · 触发后市价，含滑点）');
+    expect(line.textContent).toContain('计算时 触发价 0.00770150，预计成交 0.00771218（+0.14%），上限 834,542,712.37 币；');
+    expect(line.textContent).not.toContain('现价');
+    expect(screen.getByTestId('add-sizing-order-line').textContent).toBe('下单时 参考价 0.00771690（触发价偏离计划触发价 +0.20%）；');
+    expect(screen.getByTestId('add-sizing-cause-line').textContent).toMatch(/^超出来自触发价偏离计划触发价 \+0\.20%：.*改了触发价就按新触发价重算。$/);
+    expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
+  });
+
+  it('实际量连参考价的上限都超了：两行照写，不说「全部来自滑点」', () => {
+    renderCommon(6_536_020 * 1.05, limitPlan);
+    fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
+    expect(screen.getByTestId('add-sizing-snapshot-line').textContent).toContain('计算时 限价 0.00770146');
+    expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
+    expect(screen.getByTestId('add-sizing-cause-line').textContent).toContain('超出来自仓位本身，不是滑点');
+  });
+
+  it('没有快照的记录：计算框与之前一样，不多说一个字', () => {
+    renderCommon(6_536_020, undefined);
+    const mark = screen.getByTestId('add-sizing-check-fail-add1');
+    expect(mark.getAttribute('aria-label')).not.toContain('计算时');
+    fireEvent.click(mark);
+    expect(screen.getByTestId('add-sizing-detail-dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('add-sizing-snapshot-line')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
+    expect(screen.queryByTestId('add-sizing-cause-line')).toBeNull();
   });
 });

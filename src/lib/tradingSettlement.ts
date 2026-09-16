@@ -5,6 +5,7 @@ import {
   MAINTENANCE_MARGIN_RATE,
   MAKER_FEE,
   TAKER_FEE,
+  type AddSizingSnapshot,
   type MarginMode,
   type OrderSide,
   type Position,
@@ -39,6 +40,8 @@ export type SettlementOrderLike = SettlementInstrument & {
   quantity: number;
   leverage: number;
   marginMode: MarginMode;
+  /** 下单时加仓计算器的计划；成交时原样落到仓位（这一笔）上，平仓时再落到记录上。 */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 };
 
 export function isCoinSettled(item?: { settlementMode?: SettlementMode | null } | null): boolean {
@@ -207,6 +210,8 @@ export function executeSettlementFill(
     openFeeRate: feeRate,
     ...(Number.isFinite(openedRealAt) && (openedRealAt as number) > 0 ? { openedRealAt } : {}),
     ...(openTimelineId ? { openTimelineId } : {}),
+    // 加仓计划只在有的时候才写：没有计划的成交产出的仓位与改动前逐字节相同。
+    ...(normalized.addSizingSnapshot ? { addSizingSnapshot: normalized.addSizingSnapshot } : {}),
   };
 
   return { fee: feeUsd, feeCoin, margin: marginUsd, marginCoin, slippage: slippageUsd, position };
@@ -364,6 +369,17 @@ function fillOpenedTimelineOverride(pos: Position, fill: PositionFill): Partial<
   return pos.openTimelineId ? { openedTimelineId: undefined } : {};
 }
 
+/**
+ * 按笔拆条时这一片带哪个加仓计划：**这一笔自己的**。只有仓位自己那笔（f.id === pos.id）
+ * 可以借用仓位级的字段——仓位级的就是 fills[0] 的。base 已按仓位写过一次，
+ * 别的笔没有计划就必须显式抹掉，否则主力的计划会顶到加仓那一片上（或反过来）。
+ */
+function fillAddSizingOverride(pos: Position, fill: PositionFill): Partial<TradeRecord> {
+  const own = fill.addSizingSnapshot ?? (fill.id === pos.id ? pos.addSizingSnapshot : null);
+  if (own) return { addSizingSnapshot: own };
+  return pos.addSizingSnapshot ? { addSizingSnapshot: undefined } : {};
+}
+
 /** 按比例带走一部分金额；未知（旧数据）就仍是未知。 */
 function feePart(value: number | undefined, share: number): number | undefined {
   return value == null || !Number.isFinite(value) ? undefined : value * share;
@@ -444,6 +460,8 @@ export function buildCloseRecords(input: {
     // 时间线章只在有的时候才写：没盖章的仓位 / 平仓产出的记录与改动前逐字节相同。
     ...(pos.openTimelineId ? { openedTimelineId: pos.openTimelineId } : {}),
     ...(closedTimelineId ? { closedTimelineId } : {}),
+    // 加仓计划同理：单笔 / 旧数据走仓位级的；多笔成交在下面按每笔各自的覆盖。
+    ...(pos.addSizingSnapshot ? { addSizingSnapshot: pos.addSizingSnapshot } : {}),
     ...over,
   } as TradeRecord);
 
@@ -549,6 +567,7 @@ export function buildCloseRecords(input: {
       openFeeRate: f.openFeeRate,
       liquidationFeeUsd: feePart(totals.liquidationFeeUsd, share),
       ...fillOpenedTimelineOverride(pos, f),
+      ...fillAddSizingOverride(pos, f),
     });
     if (i !== absorber) {
       acc.quantity += rec.quantity; acc.pnl += rec.pnl;
@@ -668,6 +687,8 @@ function fillsOf(p: Position, symbol: string): PositionFill[] {
     openFeeCoin: p.openFeeCoin,
     openIsMaker: p.openIsMaker,
     openFeeRate: p.openFeeRate,
+    // 加仓计划跟着这一笔走：合并进别的仓位后仍知道「这一刀是按哪个计划下的」。
+    ...(p.addSizingSnapshot ? { addSizingSnapshot: p.addSizingSnapshot } : {}),
   }];
 }
 

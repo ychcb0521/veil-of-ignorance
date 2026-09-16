@@ -38,6 +38,57 @@ export const DEFAULT_SETTLEMENT_MODE: SettlementMode = "coin";
 export type OrderStatus = "NEW" | "PENDING" | "FILLED" | "CANCELED" | "TRIGGERED" | "ACTIVE";
 export type TriggerOperator = ">=" | "<=";
 
+/**
+ * 加仓计算器在下单那一刻给出的计划，随委托 → 成交 → 平仓记录一路带着。
+ *
+ * COMMONUSDT 那一场的学费：用户严格按计算器的上限下单，Legs「加仓校验」却判超限 1.57% / 3.70%，
+ * 而**没有任何地方记下计算器当时显示了什么**——事后只能从 PNG 反推。
+ * 从此计算器有可用计划时，下的单就把计划的输入与输出钉在单子上：
+ * 校验读到它才能说清「计算时现价 / 预计成交 / 上限」与「实际成交 / 上限」各是多少，
+ * 超出的那一截是不是全部来自成交滑点。
+ *
+ * 纯数据、可 JSON 序列化：PendingOrder / Position.fills / TradeRecord 都是整块 JSON 持久化并云同步的，
+ * 加一个可选字段不需要任何表结构变更；老数据没有这个字段（undefined）。
+ */
+export interface AddSizingSnapshot {
+  /** 计划最后一次仍然现行的真实时刻（Date.now()）：发布、或计算器关闭时续上；保鲜期从它算起。 */
+  at: number;
+  /** A = G 为 0（Plan B 与 Plan A 同值）；B = G ≠ 0。 */
+  plan: "A" | "B";
+  side: OrderSide;
+  /** 计划时的结算口径——G 的单位随它（U 本位 USD、币本位结算币）。 */
+  settlement: SettlementMode;
+  /** S₁ 止损 / 对冲线。 */
+  s1: number;
+  /** 计算时的参考价 S₂：市价 = 引擎市价成交的基准价；限价 = 手填的挂单价；条件委托 = 触发价（已按价格精度取整）。 */
+  s2Ref: number;
+  /**
+   * 计划定量用的价 S₂′：市价 = calcSlippage(S₂, 上限名义)；限价 = 挂单价（S₂ 按价格精度向有利侧取整）；
+   * 条件委托 = calcSlippage(触发价, 上限名义)——触发后按市价成交。
+   */
+  s2Fill: number;
+  /** 市价计划的预计滑点 (S₂′ − S₂) ÷ S₂ × 100，带符号；限价为 0。 */
+  slippagePct: number;
+  /**
+   * 钉到单子上那一刻，这张单**自己**的下单参考价：市价 / 最优价 = 引擎成交的基准价，
+   * 限价 / 只做 Maker = 委托价，条件单 = 触发价。计划发布时没有（null / 缺省），由下单入口补上。
+   * 计划与下单之间价格可能已经变了——Legs 校验靠它把「计算后价格变动」与「成交滑点」分开。
+   */
+  s2AtOrder?: number | null;
+  /** X₁ 既有币量、S̄ 综合成本，都是计划时手填 / 预填的那个数。 */
+  x1: number;
+  sBar: number;
+  /** 本轮落袋净额 G（带符号）与它的单位（USD / 结算币名）。 */
+  g: number;
+  gUnit: string;
+  /** Plan B 上限（币），按 S₂′ 算。 */
+  addCoinsMax: number;
+  /** 上限折成整张（向下取整）；U 本位为 null。 */
+  contracts: number | null;
+  /** 计划按哪种方式成交：市价含滑点、限价 @S₂、条件委托 @S₂（触发后市价，含滑点）。 */
+  orderKind: "market" | "limit" | "conditional";
+}
+
 export interface PendingOrder {
   id: string;
   side: OrderSide;
@@ -71,6 +122,8 @@ export interface PendingOrder {
   createdTimelineId?: string | null;
   /** Trading mode captured at placement, so later fills keep the original incentive weight. */
   tradingMode?: "decision" | "direct";
+  /** 下单时加仓计算器的计划（见 AddSizingSnapshot）；没有计划的单子没有这个字段。 */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 
   callbackRate?: number;
   trailingExecType?: "MARKET" | "LIMIT";
@@ -192,6 +245,8 @@ export interface FilledOrderSnapshot {
   createdTimelineId?: string | null;
   filledTimelineId?: string | null;
   positionId?: string;
+  /** 挂单时带着的加仓计划，成交后原样带到快照上。 */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
 /**
@@ -276,6 +331,11 @@ export interface Position {
   openFeeCoin?: number;
   openIsMaker?: boolean;
   openFeeRate?: number;
+  /**
+   * 这笔成交（合并仓位里是 fills[0] 那一笔）下单时的加仓计划。
+   * 合并进别的仓位后各笔各留各的，见 PositionFill.addSizingSnapshot。
+   */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
 export interface PositionFill {
@@ -302,6 +362,8 @@ export interface PositionFill {
   openIsMaker?: boolean;
   /** 开仓时适用的费率（小数）。费率表日后再变，历史记录仍能解释。 */
   openFeeRate?: number;
+  /** 这笔成交自己下单时的加仓计划；主力那笔通常没有，加仓那笔才有。 */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
 export interface TradeRecord {
@@ -375,6 +437,11 @@ export interface TradeRecord {
   liquidationFeeUsd?: number;
   /** User-written reason recorded after the close, used for post-trade review and playback. */
   exit_reason_text?: string;
+  /**
+   * 这一片开仓那一笔成交下单时的加仓计划（按笔拆条时取那一笔自己的）。
+   * Legs「加仓校验」靠它说清「计算时上限 / 实际成交上限」以及超出是否全部来自滑点。老记录没有。
+   */
+  addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
 export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4% — strict MM rate (MMR) per tier default
@@ -424,7 +491,7 @@ export const FUNDING_HOURS = [0, 8, 16];
 
 /**
  * Volatility-adjusted slippage for market/taker orders.
- * Base slippage = 0.05% + notional-scaled component.
+ * Base slippage = 0.01% + notional / 5e9 (notional-scaled component).
  * If kline volatility (High-Low)/Close > 2%, slippage doubles (adverse market).
  */
 export function calcSlippage(

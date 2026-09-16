@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useCallback } from "react";
 import { useTradingContext } from "@/contexts/TradingContext";
-import type { PendingOrder } from "@/types/trading";
+import type { PendingOrder, Position } from "@/types/trading";
 import type { ExecutionTradeSnapshot } from "@/lib/executionAssets";
 import { getConditionalTriggerDecisionFromRange } from "@/lib/conditionalOrders";
 import {
@@ -48,6 +48,7 @@ export function useBackgroundPrices() {
     executeReduceOnlyTrigger,
     applyAttachedTpSl,
     applyMergeSideEffects,
+    judgePlannedAddFill,
   } = useTradingContext();
 
   const lastPollRef = useRef<number>(0);
@@ -168,19 +169,30 @@ export function useBackgroundPrices() {
             createdTimelineId: order.createdTimelineId,
             filledTimelineId,
             positionId: position.id,
+            // 挂单时带着的加仓计划原样带到成交快照上，与盘面撮合（Index.tsx）一致；没有的与改动前逐字节相同。
+            ...(order.addSizingSnapshot ? { addSizingSnapshot: order.addSizingSnapshot } : {}),
           }));
           // 合并结果要带出来：合并后必须改指减仓单，否则挂在被吞并那笔上的止损
           // 会指向一个不存在的仓位 id，永不触发且无声。后台成交这一路尤其要紧——
           // 它本来就是「用户没在看的那个标的」。
           const mergeOut: { current: PositionMergeResult | null } = { current: null };
+          const heldBeforeOut: { current: Position[] } = { current: [] };
           setPositionsMap((prev) => {
             // isPositionOpen 而不是 quantity > 1e-8:币本位的存量记在 contracts 上。
             const existing = (prev[symbol] || []).filter(isPositionOpen);
+            heldBeforeOut.current = existing;
             const result = mergeFilledPosition(symbol, existing, position);
             mergeOut.current = result;
             return { ...prev, [symbol]: result.positions };
           });
           if (mergeOut.current) applyMergeSideEffects(symbol, mergeOut.current);
+          /**
+           * 吃单成交（条件委托触发后按市价）带着计算器计划时，按实际成交价复判 Plan B——与盘面的条件单触发（Index）、
+           * 市价单（TradingContext）同一个入口，参考价取触发价。挂单价原价成交的限价单没有滑点，不在这里判。
+           */
+          if (!isMaker && judgePlannedAddFill) {
+            judgePlannedAddFill(symbol, heldBeforeOut.current, position, fillPrice, order.addSizingSnapshot);
+          }
           // 执行力资产只奖励做多开仓；做空都是辅助对冲单，不计分。
           if (order.side === 'LONG') {
             const trade: ExecutionTradeSnapshot = {
@@ -240,7 +252,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
+    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {

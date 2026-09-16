@@ -23,6 +23,7 @@ import {
 } from '@/lib/legPositionShare';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
+  addSizingSnapshotLines,
   describeAddSizingVerdict,
   evaluateCampaignAddSizing,
   formatAddSizingCoinQuantity,
@@ -204,6 +205,7 @@ function AddSizingDetailDialog({
   const cushionPriceTerms = leg.direction === 'short'
     ? `${fmtPrice(averageEntry)} − ${fmtPrice(verdict.s1)}`
     : `${fmtPrice(verdict.s1)} − ${fmtPrice(averageEntry)}`;
+  const snapshotLines = addSizingSnapshotLines(verdict);
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
@@ -228,6 +230,23 @@ function AddSizingDetailDialog({
             超出 {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
           </div>
         </div>
+
+        {/* 成交记录带着计算器当时的计划：把「计算时」「下单时」「实际成交」并排摆出来。
+            判定仍按成交价；这里只解释红叉从哪来——真是滑点才点名滑点，价格变了、量超了各说各的。 */}
+        {snapshotLines && (
+          <div data-testid="add-sizing-snapshot-line" className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
+            <div className="text-muted-foreground">加仓计算器当时的计划{verdict.snapshot?.orderKind === 'limit' ? '（限价 @S₂）' : verdict.snapshot?.orderKind === 'conditional' ? '（条件委托 @S₂ · 触发后市价，含滑点）' : '（市价 · 含滑点）'}</div>
+            <div className="font-mono tabular-nums">{snapshotLines.calc}；</div>
+            {snapshotLines.order && <div data-testid="add-sizing-order-line" className="font-mono tabular-nums">{snapshotLines.order}；</div>}
+            <div className="font-mono tabular-nums">{snapshotLines.actual}。</div>
+            {snapshotLines.slippage && (
+              <div data-testid="add-sizing-slippage-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.slippage}。</div>
+            )}
+            {snapshotLines.cause && (
+              <div data-testid="add-sizing-cause-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.cause}。</div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-2 text-xs">
           <div className="font-medium text-foreground">计算过程</div>

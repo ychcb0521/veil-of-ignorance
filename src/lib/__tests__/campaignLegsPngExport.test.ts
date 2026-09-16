@@ -587,6 +587,98 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     const add = rows.find(row => row.legId === 'add1')!;
     expect(add.cells[ADD_SIZING_COL]).toEqual([expect.objectContaining({ text: '—', color: '#C4CAD3' })]);
   });
+
+  /**
+   * 成交记录带着加仓计算器当时的计划：红叉之下再写「计算时 / 实际成交」两行，再用一句红字说超出从哪来——
+   * 真是滑点才点名滑点（attributeAddExcess）。COMMONUSDT 加仓 1：实际 653,602 张 @0.0077123。
+   *   · 那一场的计划：按现价 0.00770146、不计滑点（限价档），上限 848,689,579 币 / 653,615 张 → 超出全部来自滑点；
+   *   · 若计划是市价档（已含 +0.14%，上限 834,590,798 币 / 643,648 张），同一笔就是量超了计划。
+   */
+  describe('成交记录带着计算器的快照', () => {
+    const T0 = Date.parse('2026-09-01T10:00:00+08:00');
+    const MIN = 60_000;
+    const T_ADD1 = T0 + 61 * MIN;
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const FILL = 0.0077123;
+    const REF = FILL / (1 + 0.0001 + 6_536_020 / 5e9);
+    const common = {
+      at: T_ADD1, plan: 'B', side: 'LONG', settlement: 'coin', s1: 0.007069, s2Ref: REF, s2AtOrder: REF,
+      x1: 1_483_567_536.56, sBar: 0.006974, g: 55_994_538.5, gUnit: 'COMMON',
+    } as const;
+    const limitPlan = { ...common, s2Fill: REF, slippagePct: 0, addCoinsMax: 848_689_579.33, contracts: 653_615, orderKind: 'limit' } as const;
+    const marketPlan = { ...common, s2Fill: 0.0077121467, slippagePct: 0.1388, addCoinsMax: 834_590_798, contracts: 643_648, orderKind: 'market' } as const;
+    type Plan = typeof limitPlan | typeof marketPlan;
+    const commonLegs = (addNotional: number) => [
+      {
+        id: 'main', leg_sequence: 1, leg_role: 'main_open', order_kind: 'main', direction: 'long', symbol: 'COMMONUSDT',
+        pre_simulated_time: iso(T0), pre_entry_price: 0.006974, pre_position_size: 10_346_400,
+      },
+      {
+        id: 'mirror', leg_sequence: 2, leg_role: 'mirror_tp', order_kind: 'tp', direction: 'long', symbol: 'COMMONUSDT',
+        pre_simulated_time: iso(T0), pre_entry_price: 0.006974, pre_position_size: 15_519_600,
+        post_simulated_close_time: iso(T0 + 12 * MIN), post_realized_pnl: 55_994_538.5 * 0.007069,
+      },
+      {
+        id: 'add1', leg_sequence: 3, leg_role: 'main_add_1', order_kind: 'main', direction: 'long', symbol: 'COMMONUSDT',
+        trade_record_id: 'rec-add1', pre_simulated_time: iso(T_ADD1), pre_entry_price: FILL, pre_position_size: addNotional,
+      },
+    ] as unknown as TradeJournal[];
+    const recordFor = (addNotional: number, plan: Plan | null): TradeRecord => ({
+      id: 'rec-add1', symbol: 'COMMONUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice: FILL, exitPrice: 0.00742559,
+      quantity: addNotional / 10, contracts: addNotional / 10, leverage: 5, pnl: -246_249, fee: 0, slippage: 0,
+      openTime: T_ADD1, closeTime: T_ADD1 + 47 * MIN, settlementMode: 'coin', contractSizeUsd: 10,
+      ...(plan ? { addSizingSnapshot: plan } : {}),
+    } as TradeRecord);
+    const stop = {
+      id: 'stop', side: 'SHORT', price: 0.007069, status: 'cancelled', createdAt: T_ADD1 - MIN, triggeredAt: null, cancelledAt: T_ADD1 + 24 * MIN,
+    } as CampaignBoardExportInput['reverseHedgeOrders'][number];
+    const rowFor = (addNotional: number, plan: Plan | null) => buildCampaignLegsExportRows({
+      ...input(), legs: commonLegs(addNotional), tradeRecords: [recordFor(addNotional, plan)], reverseHedgeOrders: [stop],
+    }).find(row => row.legId === 'add1')!;
+
+    it('【回归】COMMONUSDT 加仓 1（按现价、不计滑点定的量）：红叉 + 上限之下写出计算时 / 实际成交两行，再点名超出全部来自成交滑点 +0.14%', () => {
+      const add = rowFor(6_536_020, limitPlan);
+      const cell = add.cells[ADD_SIZING_COL];
+      expect(cell).toHaveLength(6);
+      const [cross, coins, notional, calc, actual, slip] = cell;
+      expect(cross.text).toBe('✗');
+      expect(coins.text).toMatch(/^上限 834,391,89\d(\.\d+)? 币$/);
+      expect(notional.text).toMatch(/^≈ [\d,.]+ U$/);
+      // 限价计划的 s2Ref 是手填的限价，不叫「现价」；市价计划仍叫现价（下一条）
+      expect(calc.text).toBe('计算时 限价 0.00770146，挂单价 0.00770146（限价），上限 848,689,579.33 币');
+      expect(calc.color).toBe('#848E9C');
+      expect(calc.size).toBe(9);
+      expect(actual.text).toMatch(/^实际成交 0\.00771230（\+0\.14%），上限 834,391,89\d(\.\d+)? 币$/);
+      expect(actual.size).toBe(9);
+      expect(slip.text).toBe('超出部分全部来自成交滑点 +0.14%（计划按限价、不计滑点，这张却是吃单成交）');
+      expect(slip.color).toBe('#F6465D');
+      expect(slip.bold).toBe(true);
+      // 长句会折行，行高跟着撑开；格子数不变
+      expect(add.wrapped[ADD_SIZING_COL].length).toBeGreaterThanOrEqual(6);
+      expect(add.height).toBeGreaterThan(rowFor(6_536_020, null).height);
+      expect(add.cells).toHaveLength(13);
+    });
+
+    it('【回归 · 复审】市价计划（已含滑点）却下了 653,602 张：红字说量超了计划 +1.55%，不说滑点', () => {
+      const cell = rowFor(6_536_020, marketPlan).cells[ADD_SIZING_COL];
+      expect(cell).toHaveLength(6);
+      expect(cell[3].text).toBe('计算时 现价 0.00770146，预计成交 0.00771215（+0.14%），上限 834,590,798 币');
+      expect(cell[5].text).toBe('实际加仓比计算时的上限多 +1.55%——超出来自仓位本身，不是滑点');
+      expect(cell[5].color).toBe('#F6465D');
+      expect(cell.some(line => line.text.includes('全部来自成交滑点'))).toBe(false);
+    });
+
+    it('实际量连参考价上限都超了：两行照写，红字说量超了，没有「全部来自滑点」；没有快照的行仍是三行', () => {
+      const over = rowFor(6_536_020 * 1.05, limitPlan).cells[ADD_SIZING_COL];
+      expect(over).toHaveLength(6);
+      expect(over[3].text).toContain('计算时 限价 0.00770146');
+      expect(over[5].text).toMatch(/^实际加仓比计算时的上限多 \+\d\.\d\d%——超出来自仓位本身，不是滑点$/);
+      expect(over.some(line => line.text.includes('全部来自成交滑点'))).toBe(false);
+      const plain = rowFor(6_536_020, null).cells[ADD_SIZING_COL];
+      expect(plain).toHaveLength(3);
+      expect(plain.map(line => line.text).join(' ')).not.toContain('计算时');
+    });
+  });
 });
 
 describe('【用户要求】主力阶段子行在导出图里也标明「对冲结束切段」', () => {

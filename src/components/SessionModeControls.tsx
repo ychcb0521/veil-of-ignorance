@@ -30,8 +30,18 @@ interface Props {
   onSymbolChange?: (symbol: string) => void;
   /** 当前盘面标的——加仓计算器据此读持仓与结算方式 */
   activeSymbol?: string;
-  /** 实时现价（Index 的 displayCurrentPrice），供加仓计算器预填 S₂ */
+  /** 实时现价（Index 的 displayCurrentPrice）；没有 activeFillBasePrice 时供加仓计算器预填 S₂ */
   activePrice?: number;
+  /**
+   * 引擎市价成交的基准价（Index 的 latestChartPriceRef.current || priceMap[symbol] || currentPrice，
+   * 与下单按钮传给 placeOrder 的 latestPrice 同一个式子）。加仓计算器的 S₂ 从它种下并跟着它走——
+   * displayCurrentPrice 是平滑后的显示值，不是引擎撮合用的那个价。
+   */
+  activeFillBasePrice?: number;
+  /** 下单面板的价格精度（Index 的 chartPricePrecision）：加仓计算器的限价 / 条件单档按它向有利侧取整挂单价 / 触发价。 */
+  activePricePrecision?: number;
+  /** 下单面板的数量精度（Index 的 quantityPrecision）：U 本位「按上限下单」按钮上的币数按它向下取整，与面板预填同一个数。 */
+  activeQuantityPrecision?: number;
 }
 
 type GuardedCoin = {
@@ -48,6 +58,9 @@ export function SessionModeControls({
   onSymbolChange,
   activeSymbol,
   activePrice,
+  activeFillBasePrice,
+  activePricePrecision,
+  activeQuantityPrecision,
 }: Props) {
   const ctx = useTradingContext();
   const [addSizingOpen, setAddSizingOpen] = useState(false);
@@ -176,7 +189,15 @@ export function SessionModeControls({
         <Calculator className="w-3 h-3" /> 加仓
       </button>
       {addSizingOpen && activeSymbol && (
-        <AddSizingCalculator open symbol={activeSymbol} currentPrice={activePrice} onClose={() => setAddSizingOpen(false)} />
+        <AddSizingCalculator
+          open
+          symbol={activeSymbol}
+          currentPrice={activePrice}
+          fillBasePrice={activeFillBasePrice}
+          pricePrecision={activePricePrecision}
+          quantityPrecision={activeQuantityPrecision}
+          onClose={() => setAddSizingOpen(false)}
+        />
       )}
 
       {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
