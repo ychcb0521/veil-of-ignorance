@@ -1954,19 +1954,34 @@ async function healCampaignSummarySnapshots(
     .single();
   if (error) {
     if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error)) {
-      const local = {
-        ...campaign,
-        ...patch,
-        updated_at: new Date().toISOString(),
-      };
-      upsertLocalCampaign(local);
-      return local;
+      /**
+       * 云端没有这一行（本地战役 / 这张表不存在）：补丁只打在**此刻**的镜像行上，不把开头读到的整行写回去。
+       * 这是一次写在读路径上的自愈，列表页的后台自愈还会与页面的写并行（页面闸到点就放行）：
+       * 写回整行会把这期间落下的删除墓碑、改名一并盖掉——那是一次静默的「复活已删战役」。
+       * 镜像行已经没了（永久删除）或已带 deleted_at 就什么都不写：已删的战役不必收敛，
+       * 恢复之后下一次读取照常把它收敛过来。补丁的推导与这里改不改一个字都没关系。
+       */
+      const mirror = findLocalCampaign(campaign.user_id, campaign.id);
+      if (mirror && !mirror.deleted_at) {
+        upsertLocalCampaign({ ...mirror, ...patch, updated_at: new Date().toISOString() });
+      }
+      return { ...campaign, ...patch };
     }
     console.warn('[journalApi] 回填战役汇总平仓时间失败', error);
     return { ...campaign, ...patch };
   }
   const updated = toCampaign(data);
-  upsertLocalCampaign(updated);
+  /**
+   * 只更新本地已有的镜像行（同 updateCampaign 的 writeLocalMirror），不插整行：
+   * getCampaignWithLegs 不过滤已删除的行，插进去的副本可能带着 deleted_at；
+   * 这场之后在别处软删再恢复时，mergeCampaigns 让本地带 deleted_at 的副本胜出，恢复的战役就被藏起来了。
+   * 已带墓碑的镜像行同样一个字都不写，立场与上面「找不到」的兜底一致：部署的库还没有 deleted_at 列时，
+   * 软删只存在于这条墓碑里（见 deleteCampaign 与 mergeCampaigns），而服务端返回的行不带 deleted_at——
+   * 原样写回去就是把自愈进行中落地的那次删除悄悄撤销（列表页的后台自愈与页面的写并行，页面闸到点就放行）。
+   * 已删的战役不必收敛，恢复之后下一次读取照常把它收敛过来。
+   */
+  const mirror = findLocalCampaign(updated.user_id, updated.id);
+  if (mirror && !mirror.deleted_at) upsertLocalCampaign(updated);
   return updated;
 }
 

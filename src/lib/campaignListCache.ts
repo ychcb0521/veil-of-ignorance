@@ -21,10 +21,15 @@ import {
 import {
   campaignStatusFromRealizedPnl,
   computeCampaignRealizedPnl,
+  materiallyDifferentPnl,
   type CampaignRealizedPnl,
 } from '@/lib/campaignRealizedPnl';
 import { resolveCampaignOpportunityQuality } from '@/lib/campaignMetrics';
-import { fetchLegExitPriceCorrections, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import {
+  fetchLegExitPriceCorrectionsResult,
+  type LegExitPriceCorrections,
+  type LegExitPriceCorrectionsResult,
+} from '@/lib/campaignLegExecution';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CancelledOrderSnapshot, FilledOrderSnapshot, PendingOrder, TradeRecord } from '@/types/trading';
 
@@ -164,8 +169,14 @@ type CachedRow = {
   crossRecords: TradeRecord[];
   localVersion: number;
   details: CampaignDetails;
-  /** null = 还没取到（或上次取失败），下次重算这一场时再取。 */
+  /** null = 还没取到（或上次取抛错）。拉到一部分（correctionsComplete 为 false）时照样放在这里，供显示。 */
   corrections: LegExitPriceCorrections | null;
+  /**
+   * 每条挂成交的腿都查到了记录、拿到了 K 线结论（见 fetchLegExitPriceCorrectionsResult）。
+   * false 的校正不可信：按退避在之后的远端核对里重拉（失败的分钟不进 K 线缓存，见 correctionRetries），
+   * 也不拿它判定落库结果偏不偏离。
+   */
+  correctionsComplete: boolean;
   row: CampaignCardData;
   profile?: CampaignLocalProfile;
 };
@@ -451,6 +462,40 @@ function crossSymbolRecords(
   return Array.from(found.keys()).sort((a, b) => a - b).map(position => found.get(position)!);
 }
 
+/**
+ * 已结束的战役，落库结果（status / final_realized_pnl）与列表手里校正后的结果不一致：
+ * 元监控等直接读落库值的统计会算错，值得在后台跑一遍详情页的自愈。
+ * 只看已经拿到平仓价校正、已结算、落库与现算都是结束状态的场次；纯内存判断，不碰网络。
+ */
+function storedOutcomeDiverges(entry: CachedRow): boolean {
+  const { row, source } = entry;
+  const stored = source.campaign;
+  // 已软删的行不自愈：远端核对读回带 deleted_at 的行后，排队与排到时都跳过
+  if (stored.deleted_at) return false;
+  // 校正拉不齐（K 线限流 / 断网、本地查不到成交）时的「没有校正」不可信：既可能掩盖偏离，也可能把已收敛的场次看成偏离
+  if (!entry.correctionsComplete || !row.settlement.settled) return false;
+  // 已结算的「放弃」照样算：详情自愈会按校正后的盈亏把它改写成对应的结束状态（结束对话框也只给未结算的战役留「放弃」）
+  if (!stored.closed_at || stored.status === 'active' || stored.status === 'planned') return false;
+  if (row.campaign.status === 'active' || row.campaign.status === 'planned') return false;
+  // 自愈只有在每条腿都挂着成交 id、且本地查得到成交记录时才拉得齐校正、才可能写；
+  // 否则（换了浏览器、清过成交、纯复盘快照）排进去也是一次注定不写的完整详情读取，每个会话重来一遍。
+  if (row.settlement.basis !== 'records' || !row.legs.every(leg => leg.trade_record_id)) return false;
+  return row.campaign.status !== stored.status
+    || materiallyDifferentPnl(stored.final_realized_pnl ?? null, row.settlement.total ?? null);
+}
+
+/**
+ * 平仓价校正只取决于标的、每条腿的 id 与挂的成交 id、以及成交记录（见 fetchLegExitPriceCorrectionsResult）。
+ * 腿上的复盘快照（post_*）不参与：详情页 / 后台自愈回填快照后，下一次核对照旧沿用校正，
+ * 不会先按未校正的数画一遍（状态反号）、等校正回来再翻回去。
+ */
+function sameCorrectionInputs(a: CampaignDetails, b: CampaignDetails): boolean {
+  return a.campaign.symbol === b.campaign.symbol
+    && a.legs.length === b.legs.length
+    && a.legs.every((leg, index) => leg.id === b.legs[index].id && leg.trade_record_id === b.legs[index].trade_record_id)
+    && deepEqual(a.tradeRecords, b.tradeRecords);
+}
+
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 /** 让出主线程但不排进定时器队列：嵌套 setTimeout 会被钳到 4 ms，几十片下来白等半秒。 */
@@ -478,6 +523,111 @@ const withTimeout = <T>(promise: Promise<T>, ms: number) => new Promise<T>((reso
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** 后台自愈相邻两场之间至少歇多久（上一场结束到下一场开始；读取完成后的第一场同样先歇一次）。 */
+export const CAMPAIGN_LIST_HEAL_GAP_MS = 250;
+
+/**
+ * 页面闸最多等后台自愈多久（见 waitForCampaignListHeal）。supabase 请求没有超时，睡醒后的死连接会让一场自愈永远不结束：
+ * 那只让后台队列停一个看门狗（CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS），页面到点照常往下走。
+ */
+export const CAMPAIGN_LIST_HEAL_PAGE_WAIT_MS = 2_000;
+
+/**
+ * 没拉齐（或抛错）的平仓价校正多久之后才重拉：从这个间隔起，每再没拉齐一次翻倍，封顶 CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS。
+ * 只在远端核对里重拉，按战役 id 计时，拉齐时清掉（见 createCampaignListCache 里的 correctionRetries）。
+ */
+export const CAMPAIGN_LIST_CORRECTIONS_RETRY_MS = 60_000;
+export const CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS = 600_000;
+
+/**
+ * 后台队列最多等**别的缓存**那一场自愈多久。supabase 请求没有超时：睡醒后的死连接会让一场自愈永远不落定，
+ * 而它占着全模块唯一的单飞位——上一个用户留下的那一场会把这个标签页之后的每一个队列（登出换用户后新建的也在内）
+ * 永久锁死，那个用户的统计再也收敛不了。到点之后队列不再等它，但它随时可能写：它挪进 healAbandoned，
+ * 不设上限的 whenCampaignListHealIdle 照旧等它落定。
+ * 必须 ≥ CAMPAIGN_LIST_HEAL_PAGE_WAIT_MS：页面闸只看当前那一场，挪走的那一场早已过了页面闸的上限。
+ */
+export const CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS = 30_000;
+
+type HealTurn = { campaignId: string; startedAt: number; done: Promise<void> };
+
+/**
+ * 正在跑的那一场后台自愈。全模块至多一场：拆除的缓存、上一个用户留下的也算，别的缓存排到时先等它落定。
+ * done 只在自愈本身结束（成功或出错）时落定，从不失败；不设超时——落定之前它随时可能写。
+ */
+let healInFlight: HealTurn | null = null;
+
+/**
+ * 过了看门狗、后台队列已经不再等的那些自愈（见 CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS）。
+ * 它们随时可能写，所以不设上限的让出闸照旧等它们落定；落定时自己退出这个集合。
+ */
+const healAbandoned = new Set<HealTurn>();
+
+/** 还可能写的自愈：当前这一场 + 已放弃等待但没落定的。不带 id 就是全部，带 id 只看这一场。 */
+const blockingHealTurns = (campaignId?: string): HealTurn[] => {
+  const turns = healInFlight ? [...healAbandoned, healInFlight] : [...healAbandoned];
+  return campaignId === undefined ? turns : turns.filter(turn => turn.campaignId === campaignId);
+};
+
+/**
+ * 队列等别的缓存那一场自愈让出，最多等 watchdogMs：到点仍没落定就把它挪出单飞位（让出闸照旧等它），
+ * 队列接着往下排。挪走之后它自己落定时不会再动 healInFlight——那时占着位子的已经不是它了（见 runHealTurn）。
+ */
+const waitForOtherHeal = (turn: HealTurn, watchdogMs: number) => new Promise<void>(resolve => {
+  const timer = setTimeout(() => {
+    if (healInFlight === turn) {
+      healInFlight = null;
+      healAbandoned.add(turn);
+      void turn.done.then(() => healAbandoned.delete(turn));
+    }
+    resolve();
+  }, watchdogMs);
+  void turn.done.then(() => {
+    clearTimeout(timer);
+    resolve();
+  });
+});
+
+/**
+ * 等后台自愈让出（不设上限：还可能写的那些落定之前不报让出）。自愈写的是它开头读到的战役与腿推出的补丁——
+ * 晚于用户的写入落地，就会把刚解除的腿算回去、把刚改的汇总盖回去。
+ * 不带 id：还有可能写的自愈才等，没有就立即放行；带 id：可能写的正是这一场才等。页面用 waitForCampaignListHeal。
+ */
+export function whenCampaignListHealIdle(campaignId?: string): Promise<void> {
+  const turns = blockingHealTurns(campaignId);
+  if (turns.length === 0) return Promise.resolve();
+  if (turns.length === 1) return turns[0].done;
+  return Promise.all(turns.map(turn => turn.done)).then(() => undefined);
+}
+
+/**
+ * 页面的闸：与 whenCampaignListHealIdle 相同，但最多等 maxWaitMs——挂死的自愈至多卡住后台队列一个看门狗，从不卡页面。
+ *   · 列表页的删除 / 恢复 / 永久删除 / 点星 / 一键结束：beginMutation（不再排新的一场）之后、调写接口之前等；
+ *   · 详情页打开时传 campaignId：正好是后台在自愈的那一场才等（读到的就是收敛后的行），别的场次立即放行；
+ *   · 归类页解除归属：刚离开列表页时可能还有一场在跑。
+ * 到点放行后那一场若再写，竞态与两个标签页同时操作同一场相同（它只写汇总字段，见 queueDivergedCampaigns 上的说明）。
+ * 上限从那一场**开始**算起：supabase 请求没有超时，挂死的那一场会一直占着 healInFlight，
+ * 若每次都从现在起再等一个上限，这个标签页之后的每一次写入（乃至登出换用户之后）都要白赔一次。
+ */
+export function waitForCampaignListHeal(campaignId?: string, maxWaitMs = CAMPAIGN_LIST_HEAL_PAGE_WAIT_MS): Promise<void> {
+  // 只看当前这一场：被队列放弃等待的那些已经跑满了一个看门狗（≥ 本上限），按下面的算法本来就到点、立即放行。
+  const turn = healInFlight;
+  if (!turn || (campaignId !== undefined && turn.campaignId !== campaignId)) return Promise.resolve();
+  const waitMs = Math.min(maxWaitMs, turn.startedAt + maxWaitMs - Date.now());
+  if (waitMs <= 0) return Promise.resolve();
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, waitMs);
+    void turn.done.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/** clearCampaignListCaches 每调用一次加一：之前建的缓存算已拆除，后台自愈不再排下一场。 */
+let cacheGeneration = 0;
+/** 最近一次取缓存的用户（getCampaignListCache）；换了用户 / 登出，别的用户的后台自愈不再排下一场。null = 还没人取过。 */
+let activeUserId: string | null = null;
+
 export interface CampaignListCacheOptions {
   /** 连续计算多久让出一次主线程。 */
   sliceMs?: number;
@@ -485,6 +635,14 @@ export interface CampaignListCacheOptions {
   publishMs?: number;
   /** 远端读取多久没回应算失败。 */
   remoteTimeoutMs?: number;
+  /** 后台自愈相邻两场的间隔，见 CAMPAIGN_LIST_HEAL_GAP_MS。 */
+  healGapMs?: number;
+  /** 后台队列最多等别的缓存那一场自愈多久，见 CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS。 */
+  healWatchdogMs?: number;
+  /** 没拉齐的平仓价校正第一次重拉前至少等多久，见 CAMPAIGN_LIST_CORRECTIONS_RETRY_MS。 */
+  correctionsRetryMs?: number;
+  /** 重拉间隔翻倍的上限，见 CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS。 */
+  correctionsRetryMaxMs?: number;
 }
 
 /**
@@ -499,11 +657,21 @@ export interface CampaignListCacheOptions {
  *   · 乐观编辑（点星 / 删除 / 恢复）在写入结束前不会被正在收尾的读取盖掉——首载中途的进度提交也不会；
  *     写入结束后以远端为准核对一次。晚到的平仓价校正按缓存条目落地，正在收尾的读取提交时按条目取行，不会盖回去。
  *   · 更新失败保留最后可用结果并显式提示，不把失败当成零战役；远端读不回来时仍用最新本地数据核对一遍。
+ *   · 列表本身不写库（读取走 heal: false）。已结束的战役落库结果与校正后结果不一致时，只把它排进后台队列，
+ *     逐场、一次一场地调用详情页打开时的同一个自愈（getCampaignFullData 默认 heal），见 queueDivergedCampaigns；
+ *     只在列表页开着时排下一场，同一时刻全模块至多一场；页面写入前用 waitForCampaignListHeal 等在跑的那一场落地（有上限）。
+ *   · 没拉齐的平仓价校正只在远端核对里、按每场的退避间隔重拉（见 correctionRetries），本地核对从不重拉；
+ *     同一场同时至多一次拉取（correctionsInFlight），落地时按当时的校正输入归到当前条目上。
  */
 export function createCampaignListCache(userId: string, options: CampaignListCacheOptions = {}) {
   const sliceMs = options.sliceMs ?? 40;
   const publishMs = options.publishMs ?? 200;
   const remoteTimeoutMs = options.remoteTimeoutMs ?? CAMPAIGN_LIST_REMOTE_TIMEOUT_MS;
+  const healGapMs = options.healGapMs ?? CAMPAIGN_LIST_HEAL_GAP_MS;
+  const healWatchdogMs = options.healWatchdogMs ?? CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS;
+  const correctionsRetryMs = options.correctionsRetryMs ?? CAMPAIGN_LIST_CORRECTIONS_RETRY_MS;
+  const correctionsRetryMaxMs = options.correctionsRetryMaxMs ?? CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS;
+  const generation = cacheGeneration;
   let snapshot: CampaignListSnapshot = {
     rows: [], complete: false, refreshing: false, loaded: 0, total: 0, failedCount: 0, error: null,
   };
@@ -511,6 +679,37 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
   const cachedRows = new Map<string, CachedRow>();
   const localGroups = new Map<string, SymbolLocalState>();
   const optimistic = new Map<string, OptimisticEntry>();
+  /**
+   * 没拉齐（或抛错）的平仓价校正的重拉退避，按战役 id 记：条目重建（改标题、本地核对重算）不重置它，拉齐时删掉。
+   * 有记录的场次只在远端核对里、且过了 notBefore 才重拉；跨标签页 storage 事件、交易状态变化驱动的本地核对一律不重拉——
+   * 否则 K 线限流 / 断网时，每次核对都会把失败的那几分钟再打一遍。间隔从 correctionsRetryMs 起，每再没拉齐一次翻倍，封顶 correctionsRetryMaxMs。
+   * 没有记录（从没拉过、或上次拉齐）的照旧随读取拉；校正输入变了（换了挂的成交、没有旧条目）是新的问题，也立即拉，只是计时接着算。
+   */
+  const correctionRetries = new Map<string, { intervalMs: number; notBefore: number }>();
+  const correctionRetryAllowed = (id: string, remote: boolean) => {
+    const retry = correctionRetries.get(id);
+    return !retry || (remote && Date.now() >= retry.notBefore);
+  };
+  /**
+   * 正在拉的平仓价校正，按**战役 id** 记（不是按缓存条目），值是发起时的那份 details。
+   * 条目重建（本地重算）后校正输入没变的不再为同一个问题发第二次，落地时的退避也只记一次——
+   * 否则一次失败会被每个重建过的条目各记一遍，间隔一步跳到封顶。
+   * 校正输入变了（换了挂的成交）是另一个问题：另发起一次并接手这个槽位，先前那次的结果作废。
+   */
+  const correctionsInFlight = new Map<string, CampaignDetails>();
+  const correctionsFetching = (entry: CachedRow) => {
+    const pending = correctionsInFlight.get(entry.details.campaign.id);
+    return Boolean(pending) && sameCorrectionInputs(pending!, entry.details);
+  };
+  const recordCorrectionOutcome = (id: string, complete: boolean) => {
+    if (complete) {
+      correctionRetries.delete(id);
+      return;
+    }
+    const previous = correctionRetries.get(id);
+    const intervalMs = Math.min(previous ? previous.intervalMs * 2 : correctionsRetryMs, correctionsRetryMaxMs);
+    correctionRetries.set(id, { intervalMs, notBefore: Date.now() + intervalMs });
+  };
   const localReader = createUserLocalSnapshotReader(userId);
   let localInputs: CampaignListLocalInputs | null = null;
   let remoteRows: CampaignSourceRows | null = null;
@@ -590,6 +789,132 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
     return { rows: result, overridden };
   };
 
+  /**
+   * 后台自愈队列。落库的 status / final_realized_pnl 以前只在打开详情页时收敛，元监控等读落库值的地方
+   * 会把一场校正后反号却从没点开过的战役算错；这里替用户「逐场点开」一次：
+   *   · 只检测、不推补丁：排到时调用 getCampaignFullData(id, { local })（默认 heal），与详情页打开时是同一条路——
+   *     战役、腿在那一刻现读，本地成交由自愈专用读取器在那一刻现读 localStorage，写不写、写什么全由详情自愈决定；
+   *   · 只凭拉齐了的校正判定偏离（correctionsComplete）：拉不齐的按退避重拉（correctionRetries），拉齐后再判；
+   *   · 一次一场，相邻两场之间歇 healGapMs；每场每个缓存生命周期至多真正调用一次（调用了才算，出错也算，静默）；
+   *   · 单飞：全模块同一时刻至多一场在跑，别的缓存留下的那一场没落定就先等它，但至多等一个看门狗
+   *     （CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS：那一场永远不落定时，登出换用户后的队列也要能往下走）；
+   *     不设单场超时——落定之前它随时可能写，whenCampaignListHealIdle 不能提前报让出。
+   *     挂死的请求至多让后台队列停一个看门狗，页面闸 waitForCampaignListHeal 到点照常放行；
+   *   · 排到时写入没收尾、列表页不在（没有订阅者：详情 / 归类 / 交易页可能正在改战役）、这一场有乐观编辑、
+   *     已不在列表里或已经不再偏离：让路、不算尝试过，下一次读取完成时重判（回到列表页挂载时就会读一次）；
+   *   · 判定「写入没收尾」与登记 healInFlight 在同一个同步段里：列表页的写入 beginMutation 之后等 waitForCampaignListHeal，
+   *     要么先于这一场开始（这一场让路），要么排在这一场落地之后（至多等页面闸的上限）；
+   *   · 已软删（缓存行带 deleted_at）或已不在列表里的场次不排、排到也跳过。自愈进行中在别处软删 / 恢复无害：
+   *     远端补丁只改汇总字段（状态、平仓时间、已实现盈亏等，不碰 deleted_at），回写成功时只更新本地已有的镜像行、
+   *     不插整行，于是不会留下一条带 deleted_at、压住远端恢复的本地副本；云端没有这一行时的兜底同样只把补丁
+   *     打在此刻的镜像行上、已带 deleted_at 的一个字都不写（见 healCampaignSummarySnapshots），
+   *     所以页面闸到点放行之后它也复活不了刚删掉的本地战役；
+   *   · 从不触发读取，也不重建 / 重新提交行（行上本来就是校正后的数）；落库行的 updated_at 变了，
+   *     下一次正常的远端核对按增量读回它，行逐字段比较后不闪；
+   *   · 缓存被拆除（clearCampaignListCaches）或换了用户：不再排下一场。
+   */
+  const healAttempted = new Set<string>();
+  const healQueue = new Set<string>();
+  /**
+   * 自愈专用的本地快照读取器：与详情页的 readUserLocalSnapshot 同键、同兜底，每场排到时现读 localStorage；
+   * 只是原文没变的键不再 JSON.parse，同一份快照上的索引也跟着复用——几 MB 的成交记录不必每场重解析一遍。
+   * 不与列表读取共用读取器：那边带着页面内存里的覆盖值，这里只认落了盘的数据，与打开详情页时一致。
+   */
+  const healLocalReader = createUserLocalSnapshotReader(userId);
+  let healTimer: ReturnType<typeof setTimeout> | null = null;
+  let healing = false;
+  const healAlive = () => Boolean(userId) && generation === cacheGeneration
+    && (activeUserId === null || activeUserId === userId);
+  const scheduleHeal = () => {
+    if (healing || healTimer !== null || healQueue.size === 0) return;
+    healTimer = setTimeout(() => { void runHealTurn(); }, healGapMs);
+  };
+  async function runHealTurn() {
+    healTimer = null;
+    if (!healAlive()) {
+      healQueue.clear();
+      return;
+    }
+    // 单飞：别的缓存（已拆除的、上一个用户的）那一场还没落定，等它落定、再歇一个间隔重判；
+    // 它永远不落定时最多等一个看门狗，之后把它挪进 healAbandoned（让出闸照旧等它）再往下走
+    const other = healInFlight;
+    if (other) {
+      healing = true;
+      await waitForOtherHeal(other, healWatchdogMs);
+      healing = false;
+      scheduleHeal();
+      return;
+    }
+    for (const id of healQueue) {
+      healQueue.delete(id);
+      const entry = cachedRows.get(id);
+      if (mutations > 0 || listeners.size === 0 || optimistic.has(id) || !entry
+        || healAttempted.has(id) || !storedOutcomeDiverges(entry)) continue;
+      healAttempted.add(id);
+      healing = true;
+      // 静默：出错不重试（本缓存生命周期内），留给详情页或下一次会话。不与定时器赛跑：落定之前不排下一场
+      const done = getCampaignFullData(id, { local: healLocalReader.read() }).then(() => undefined, () => undefined);
+      const turn = { campaignId: id, startedAt: Date.now(), done };
+      healInFlight = turn;
+      await done;
+      if (healInFlight === turn) healInFlight = null;
+      healing = false;
+      break;
+    }
+    scheduleHeal();
+  }
+  /** 读取完成 / 晚到的校正落地时调用：只做 O(行数) 的内存判断与入队。 */
+  const queueDivergedCampaigns = () => {
+    if (!healAlive()) return;
+    for (const [id, entry] of cachedRows) {
+      if (!healAttempted.has(id) && storedOutcomeDiverges(entry)) healQueue.add(id);
+    }
+    scheduleHeal();
+  };
+
+  /**
+   * 晚到的校正落到条目上；提交快照与重判偏离攒到同一个微任务里。
+   * 每一场各自落地是为了不被同批挂死的那一场拖住（见下面发起拉取的地方），不是为了把一次提交拆成上百次：
+   * 同一轮里一起落定的几十上百场仍然只提交一次、只扫一遍偏离，订阅者不会被通知上百遍。
+   */
+  const correctionRows = new Map<string, CampaignCardData>();
+  let correctionsLanded = false;
+  let correctionFlushScheduled = false;
+  const flushCorrections = () => {
+    correctionFlushScheduled = false;
+    if (correctionRows.size > 0) {
+      const changed = new Map(correctionRows);
+      correctionRows.clear();
+      publish({ rows: snapshot.rows.map(row => changed.get(row.campaign.id) ?? row) });
+    }
+    if (correctionsLanded) {
+      correctionsLanded = false;
+      queueDivergedCampaigns();
+    }
+  };
+  const applyCorrections = (details: CampaignDetails, result: LegExitPriceCorrectionsResult | null) => {
+    correctionsLanded = true;
+    if (!correctionFlushScheduled) {
+      correctionFlushScheduled = true;
+      queueMicrotask(flushCorrections);
+    }
+    if (!result) return;
+    const { corrections, complete } = result;
+    // 拉取期间条目可能被重建（本地重算）：校正输入没变就落在当前条目上。
+    // 丢掉它的代价是这一场既不会重拉（退避挡着）也不会再判一次偏离，要等下一次读取才恢复。
+    const entry = cachedRows.get(details.campaign.id);
+    if (!entry || !sameCorrectionInputs(details, entry.details)) return;
+    const previous = entry.corrections;
+    entry.corrections = corrections;
+    entry.correctionsComplete = complete;
+    // 行是按上一份校正（没有就是空表）画的：校正没变（重拉到同样的一部分、或本来就无需校正）就不重画
+    if (deepEqual(previous ?? {}, corrections)) return;
+    const row = buildCampaignCardData(entry.details, corrections);
+    if (deepEqual(entry.row, row)) return;
+    entry.row = row;
+    correctionRows.set(details.campaign.id, row);
+  };
+
   async function load(kind: CampaignListRefreshKind) {
     const firstLoad = !snapshot.complete;
     const startRevision = revision;
@@ -663,22 +988,28 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
         if (cached && reusable) {
           nextCache.set(campaign.id, cached);
           nextEntries.push(cached);
+          // 上次没拉齐（或抛错）：输入没变也要重拉，否则一次 429 会让这一场整个会话停在未校正的数上；
+          // 只是按退避来——远端核对、过了间隔（correctionRetries）
+          if (!cached.correctionsComplete && !correctionsFetching(cached)
+            && correctionRetryAllowed(campaign.id, remote)) correctionsNeeded.push(cached);
         } else {
           try {
             const details = await getCampaignFullData(campaign.id, { source, local, heal: false });
-            // 腿与成交都没变：平仓价校正是它们的确定函数，沿用——不再取一次，也不会先跳回未校正的数再跳回来。
-            const corrections = cached?.corrections
-              && deepEqual(cached.details.legs, details.legs)
-              && deepEqual(cached.details.tradeRecords, details.tradeRecords)
-              ? cached.corrections
-              : null;
+            // 平仓价校正输入没变：它是这些输入的确定函数，沿用——不会先跳回未校正的数再跳回来；
+            // 只有拉齐了的才算定论，没拉齐的先照旧显示、再按退避重拉。输入变了（或没有旧条目）是新的问题，立即拉。
+            const sameInputs = Boolean(cached) && sameCorrectionInputs(cached!.details, details);
+            const corrections = sameInputs ? cached!.corrections : null;
+            const correctionsComplete = sameInputs && cached!.correctionsComplete;
             let row = buildCampaignCardData(details, corrections ?? {});
             // 逐字段相同就沿用原对象：卡片与散点图不为一次无差别的重算重绘。
             if (cached && deepEqual(cached.row, row)) row = cached.row;
-            const entry: CachedRow = { source, crossRecords, localVersion, details, corrections, row };
+            const entry: CachedRow = { source, crossRecords, localVersion, details, corrections, correctionsComplete, row };
             nextCache.set(campaign.id, entry);
             nextEntries.push(entry);
-            if (!corrections) correctionsNeeded.push(entry);
+            if (!correctionsComplete && !correctionsFetching(entry)
+              && (!sameInputs || correctionRetryAllowed(campaign.id, remote))) {
+              correctionsNeeded.push(entry);
+            }
           } catch {
             failedCount += 1;
             // 更新失败的场次保留旧值，但不更新签名，下次重试仍会真正读取。
@@ -705,29 +1036,33 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
         complete: true, loaded: sources.length,
         total: sources.length, failedCount, error: remoteError,
       });
+      queueDivergedCampaigns();
 
-      // 不阻塞基础快照/下次刷新；过期校正由缓存条目身份拦截，不能覆盖新编辑或复活已删战役。
-      void Promise.all(correctionsNeeded.map(async entry => {
-        try {
-          const { details } = entry;
-          return { entry, corrections: await fetchLegExitPriceCorrections(details.campaign.symbol, details.legs, details.tradeRecords) };
-        } catch {
-          return null;
-        }
-      })).then(results => {
-        const changed = new Map<string, CampaignCardData>();
-        for (const result of results) {
-          if (!result) continue;
-          const { entry, corrections } = result;
-          const id = entry.details.campaign.id;
-          if (cachedRows.get(id) !== entry) continue;
-          entry.corrections = corrections;
-          if (Object.keys(corrections).length === 0) continue;
-          entry.row = buildCampaignCardData(entry.details, corrections);
-          changed.set(id, entry.row);
-        }
-        if (changed.size > 0) publish({ rows: snapshot.rows.map(row => changed.get(row.campaign.id) ?? row) });
-      });
+      // 不阻塞基础快照/下次刷新；过期校正由校正输入拦截，不能覆盖新编辑或复活已删战役。
+      // 每一场各自落地：一个永不落定的 K 线请求只耽误它自己。它们曾经挂在同一个 Promise.all 上，
+      // 于是同批的场次拿到的校正被一起丢掉、在飞槽位也一起不还，整个会话再也发不出第二次。
+      for (const entry of correctionsNeeded) {
+        const { details } = entry;
+        const id = details.campaign.id;
+        correctionsInFlight.set(id, details);
+        void (async () => {
+          let result: LegExitPriceCorrectionsResult | null = null;
+          try {
+            result = await fetchLegExitPriceCorrectionsResult(details.campaign.symbol, details.legs, details.tradeRecords);
+          } catch {
+            // 抛错与没拉齐同等对待：条目保持 correctionsComplete === false，按退避重拉
+            result = null;
+          } finally {
+            // 校正输入变了、已由另一次拉取接手这个槽位：这一次作废，退避与落地都由接手的那次负责
+            if (correctionsInFlight.get(id) === details) {
+              correctionsInFlight.delete(id);
+              // 退避按 id 记，一次拉取记一次：请求确实发出去了
+              recordCorrectionOutcome(id, Boolean(result?.complete));
+              applyCorrections(details, result);
+            }
+          }
+        })();
+      }
     } catch (error) {
       publish({ error: errorMessage(error) });
     } finally {
@@ -807,6 +1142,7 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
 const userCaches = new Map<string, ReturnType<typeof createCampaignListCache>>();
 
 export function getCampaignListCache(userId: string) {
+  activeUserId = userId;
   let cache = userCaches.get(userId);
   if (!cache) {
     cache = createCampaignListCache(userId);
@@ -818,4 +1154,6 @@ export function getCampaignListCache(userId: string) {
 /** 测试及会话管理可主动释放；普通路由往返不能清除此缓存。 */
 export function clearCampaignListCaches() {
   userCaches.clear();
+  cacheGeneration += 1;
+  activeUserId = null;
 }

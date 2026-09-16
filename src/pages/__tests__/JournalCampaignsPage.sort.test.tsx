@@ -17,6 +17,8 @@ vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   return {
     ...actual,
     fetchLegExitPriceCorrections: vi.fn(async () => ({})),
+    // 列表读的是带完整性标记的版本：无校正、已拉齐
+    fetchLegExitPriceCorrectionsResult: vi.fn(async () => ({ corrections: {}, complete: true })),
   };
 });
 

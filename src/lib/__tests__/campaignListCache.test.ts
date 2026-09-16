@@ -23,7 +23,14 @@ vi.mock('@/lib/journalApi', () => ({
   createUserLocalSnapshotReader: () => ({ read: data.read }),
   getCampaignFullData: vi.fn(async (id: string, options: DetailsOptions) => data.details(id, options)),
 }));
-vi.mock('@/lib/campaignLegExecution', () => ({ fetchLegExitPriceCorrections: vi.fn(async () => ({})) }));
+vi.mock('@/lib/campaignLegExecution', () => {
+  const fetchLegExitPriceCorrections = vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown>> => ({}));
+  return {
+    fetchLegExitPriceCorrections,
+    // 列表读的是带完整性标记的版本：沿用上面的替身，结果按拉齐了处理
+    fetchLegExitPriceCorrectionsResult: vi.fn(async (...args: unknown[]) => ({ corrections: await fetchLegExitPriceCorrections(...args), complete: true })),
+  };
+});
 vi.mock('@/lib/campaignRealizedPnl', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/campaignRealizedPnl')>(),
   computeCampaignRealizedPnl: (_campaign: unknown, _legs: unknown, _records: unknown, corrections: Record<string, { exitPrice: number }>) => ({

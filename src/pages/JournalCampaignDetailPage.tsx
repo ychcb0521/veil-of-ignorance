@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
+import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -650,6 +651,9 @@ export default function JournalCampaignDetailPage() {
     (async () => {
       setLoading(true);
       try {
+        // 列表页的后台自愈正好在跑这一场：等它落地再读（最多等 2 s），之后在本页的编辑不会被它晚到的写入盖回去
+        await waitForCampaignListHeal(id);
+        if (cancelled) return;
         const [full, savedCounterfactuals] = await Promise.all([
           getCampaignFullData(id),
           listCounterfactuals(id),

@@ -29,7 +29,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
-import { buildCampaignCardData, type CampaignCardData } from '@/lib/campaignListCache';
+import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -1434,6 +1434,8 @@ export default function JournalCampaignsPage() {
     setWeight(nextWeight);
 
     try {
+      // 等后台正在跑的那一场自愈落地再写（见 waitForCampaignListHeal，最多等 2 s）；乐观更新已经画上了
+      await waitForCampaignListHeal();
       await updateCampaignImportance(campaign.id, nextWeight);
       toast.success(nextWeight > 0 ? `重要性已设为 ${nextWeight}` : '已清除重要性评分');
     } catch (error) {
@@ -1812,6 +1814,7 @@ export default function JournalCampaignsPage() {
     const warnings: string[] = [];
     const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
     try {
+      await waitForCampaignListHeal();
       for (const item of bulkCloseTargets) {
         // 主操作：结束战役。只有它失败，这一场才算失败。
         let saved: TradeCampaign;
@@ -1917,6 +1920,8 @@ export default function JournalCampaignsPage() {
       return prev.filter(row => row.campaign.id !== campaign.id);
     });
     try {
+      // 先等后台正在跑的那一场自愈落地再删（最多等 2 s）
+      await waitForCampaignListHeal();
       await deleteCampaign(campaign.id);
       setDeletedCampaigns(current => [
         { ...campaign, deleted_at: new Date().toISOString() },
@@ -1971,6 +1976,7 @@ export default function JournalCampaignsPage() {
     const finishMutation = beginMutation();
     setDeletedBusyId(campaign.id);
     try {
+      await waitForCampaignListHeal();
       await restoreCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       const details = await getCampaignFullData(campaign.id);
@@ -1998,6 +2004,7 @@ export default function JournalCampaignsPage() {
     if (!confirmed) return;
     setDeletedBusyId(campaign.id);
     try {
+      await waitForCampaignListHeal();
       await permanentlyDeleteCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       toast.success('战役已永久删除');

@@ -16,6 +16,7 @@ import {
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import { getCampaignFullData } from '@/lib/journalApi';
+import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import {
   CORRECTED_TOTAL,
@@ -38,6 +39,9 @@ vi.mock('@/lib/campaignLegExecution', async importOriginal => {
     )),
   };
 });
+
+// 列表页的后台自愈让出闸：默认立即放行，个别用例手动放行
+vi.mock('@/lib/campaignListCache', () => ({ waitForCampaignListHeal: vi.fn(async () => undefined) }));
 
 vi.mock('@/lib/journalApi', async () => {
   const fixture = await import('@/test/fixtures/correctedLossCampaign');
@@ -231,5 +235,20 @@ describe('战役详情页 · 状态与已实现盈亏同源', () => {
     expect(chip).toHaveTextContent('进行中');
     expect(chip.className).toContain('text-[#F0B90B]');
     expect(await screen.findByRole('button', { name: '结束战役' })).toBeInTheDocument();
+  });
+});
+
+describe('战役详情页 · 等列表后台自愈让出', () => {
+  it('打开的正是后台正在自愈的那一场：等它落地再读，读到的是收敛后的行', async () => {
+    let release!: () => void;
+    vi.mocked(waitForCampaignListHeal).mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
+    renderDetail('tut-1');
+    await waitFor(() => expect(waitForCampaignListHeal).toHaveBeenCalledWith('tut-1'));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(vi.mocked(getCampaignFullData).mock.calls.some(([id, options]) => id === 'tut-1' && options === undefined)).toBe(false);
+    release();
+    const chip = await screen.findByTestId('campaign-status-chip');
+    await waitFor(() => expect(chip).toHaveTextContent('亏损结束'));
+    expect(vi.mocked(getCampaignFullData).mock.calls.some(([id, options]) => id === 'tut-1' && options === undefined)).toBe(true);
   });
 });

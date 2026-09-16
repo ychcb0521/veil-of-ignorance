@@ -24,10 +24,15 @@ const { mockUser } = vi.hoisted(() => ({
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
   const fixture = await import('@/test/fixtures/correctedLossCampaign');
+  const fetchLegExitPriceCorrections = vi.fn(async (symbol: string) => (
+    symbol === 'TUTUSDT' ? fixture.correctedLossCorrections() : {}
+  ));
   return {
     ...actual,
-    fetchLegExitPriceCorrections: vi.fn(async (symbol: string) => (
-      symbol === 'TUTUSDT' ? fixture.correctedLossCorrections() : {}
+    fetchLegExitPriceCorrections,
+    // 列表读的是带完整性标记的版本：沿用上面的替身，结果按拉齐了处理
+    fetchLegExitPriceCorrectionsResult: vi.fn(async (symbol: string) => (
+      { corrections: await fetchLegExitPriceCorrections(symbol), complete: true }
     )),
   };
 });

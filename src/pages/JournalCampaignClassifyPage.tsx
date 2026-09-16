@@ -14,6 +14,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { classifiableOperationTime } from '@/lib/classifiableOperationTime';
 import { getSettlementAsset } from '@/lib/coinMargined';
 import { detachJournalFromCampaign, listAllCampaigns, listUnclassifiedItems, suggestLegRoles } from '@/lib/journalApi';
+import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
@@ -840,6 +841,8 @@ export default function JournalCampaignClassifyPage() {
                   if (!allSelectedClassified || selectedJournals.length !== selectedItems.length) return;
                   if (!window.confirm(`确认解除这 ${selectedJournals.length} 条 journal 的战役归属吗？`)) return;
                   try {
+                    // 刚离开列表页时可能还有一场后台自愈在跑：等它落地再解除（最多等 2 s），免得它按旧腿写回汇总
+                    await waitForCampaignListHeal();
                     for (const journal of selectedJournals) {
                       await detachJournalFromCampaign(journal.id);
                     }

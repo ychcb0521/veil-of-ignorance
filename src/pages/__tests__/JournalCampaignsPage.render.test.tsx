@@ -10,8 +10,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearCampaignListCaches } from '@/lib/campaignListCache';
-import { fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
+import { clearCampaignListCaches, waitForCampaignListHeal } from '@/lib/campaignListCache';
+import { deleteCampaign, fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
@@ -83,6 +83,8 @@ vi.mock('@/components/journal/CampaignOddsScatterPlot', async importOriginal => 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => ({
   ...await importOriginal<typeof import('@/lib/campaignLegExecution')>(),
   fetchLegExitPriceCorrections: vi.fn(async () => ({})),
+  // 列表读的是带完整性标记的版本：无校正、已拉齐
+  fetchLegExitPriceCorrectionsResult: vi.fn(async () => ({ corrections: {}, complete: true })),
 }));
 
 const campaigns: TradeCampaign[] = [
@@ -105,6 +107,12 @@ const tradeHistory: TradeRecord[] = [
   makeRecord('newest-record', '2026-01-10T00:00:00.000Z', 10, 50),
   makeRecord('best-pnl-record', '2026-03-02T00:00:00.000Z', 1_000, 1_000),
 ];
+
+// 后台自愈的让出闸：默认沿用真实实现，个别用例把它换成手动放行
+vi.mock('@/lib/campaignListCache', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignListCache')>();
+  return { ...actual, waitForCampaignListHeal: vi.fn(actual.waitForCampaignListHeal) };
+});
 
 vi.mock('@/lib/journalApi', () => ({
   appendCampaignEvent: vi.fn(async () => undefined),
@@ -267,5 +275,23 @@ describe('JournalCampaignsPage rendering boundaries', () => {
     expect(counters.card).toBe(before.card + 1);
     expect(counters.scatter).toBe(before.scatter + 1);
     expect(screen.getAllByTestId('campaign-card')).toHaveLength(3);
+  });
+});
+
+describe('JournalCampaignsPage · writes wait for the background heal', () => {
+  it('delete removes the card at once but calls the API only after an in-flight heal has landed', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+    let release!: () => void;
+    vi.mocked(waitForCampaignListHeal).mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getAllByTitle('删除战役')[0]);
+    // 乐观更新照旧即时
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(deleteCampaign).not.toHaveBeenCalled();
+    await act(async () => { release(); });
+    await waitFor(() => expect(deleteCampaign).toHaveBeenCalledTimes(1));
+    confirm.mockRestore();
   });
 });

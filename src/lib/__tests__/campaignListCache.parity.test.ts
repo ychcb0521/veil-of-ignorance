@@ -59,9 +59,8 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 
 // 平仓价校正是确定性的：已结束战役的主力腿按记录平仓价的 0.5% 偏移给一条校正。
-vi.mock('@/lib/campaignLegExecution', async importOriginal => ({
-  ...await importOriginal<typeof import('@/lib/campaignLegExecution')>(),
-  fetchLegExitPriceCorrections: vi.fn(async (_symbol: string, legs: TradeJournal[], records: TradeRecord[]) => {
+vi.mock('@/lib/campaignLegExecution', async importOriginal => {
+  const fetchLegExitPriceCorrections = vi.fn(async (_symbol: string, legs: TradeJournal[], records: TradeRecord[]) => {
     const main = legs.find(leg => leg.leg_role === 'main_open' && leg.post_exit_price_snapshot != null);
     const record = main ? records.find(item => item.id === main.trade_record_id) : null;
     if (!main || !record) return {};
@@ -69,8 +68,16 @@ vi.mock('@/lib/campaignLegExecution', async importOriginal => ({
       exitPrice: record.exitPrice * 1.005, originalExitPrice: record.exitPrice,
       candleLow: record.exitPrice * 0.99, candleHigh: record.exitPrice * 1.01,
     } };
-  }),
-}));
+  });
+  return {
+    ...await importOriginal<typeof import('@/lib/campaignLegExecution')>(),
+    fetchLegExitPriceCorrections,
+    // 列表读的是带完整性标记的版本：沿用上面的替身，结果按拉齐了处理
+    fetchLegExitPriceCorrectionsResult: vi.fn(async (symbol: string, legs: TradeJournal[], records: TradeRecord[]) => (
+      { corrections: await fetchLegExitPriceCorrections(symbol, legs, records), complete: true }
+    )),
+  };
+});
 
 // 只为数每场重算了几次；其余照旧走真实实现（Supabase 已 mock 成内存表）。
 vi.mock('@/lib/journalApi', async importOriginal => {
