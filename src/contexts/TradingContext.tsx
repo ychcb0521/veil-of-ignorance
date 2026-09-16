@@ -26,6 +26,7 @@ import {
   type WalletId,
 } from '@/lib/walletTransfer';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -535,7 +536,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const leverageMapRef = useRef(leverageMap);
   leverageMapRef.current = leverageMap;
   const [marginModeMap, setMarginModeMap] = usePersistedState<Record<string, MarginMode>>('symbol_margin_mode', {});
-  const [settlementModeMap, setSettlementModeMap] = usePersistedState<Record<string, SettlementMode>>('symbol_settlement_mode', {});
+  /**
+   * 结算方式**只活在本次会话里**，刻意不走 usePersistedState。
+   * 用户的要求：面板默认币本位；开仓前可以切到 U 本位，但页面一刷新、重新打开，
+   * 一律回到币本位——无论本地或云端之前存过什么。仓位 / 挂单 / 成交各自带着自己的
+   * settlementMode（那是另一张合约，RUNEUSD 与 RUNEUSDT），不受面板回落影响。
+   */
+  const [settlementModeMap, setSettlementModeMap] = useState<Record<string, SettlementMode>>({});
+  // 旧版本把这张表落过盘：进来先把残留的本地条目（含影子时间戳）清掉，
+  // 免得存量回填把它再推上云；同步层已把该键列入排除表，云端旧行水化时也会被跳过。
+  useEffect(() => {
+    try {
+      const staleKey = `${getUserPrefix()}symbol_settlement_mode`;
+      localStorage.removeItem(staleKey);
+      localStorage.removeItem(`${staleKey}__syncts`);
+    } catch {
+      /* 存储不可用时无事可清 */
+    }
+  }, []);
 
   // === Multi-Timeline Mode ===
   const [timeMode, setTimeMode] = usePersistedState<TimeMode>('time_mode', 'synced');

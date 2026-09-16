@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useTradingContext } from '@/contexts/TradingContext';
+import type { SettlementMode } from '@/types/trading';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
 import {
   PRE_MAIN_LOOKBACK_MS,
@@ -97,11 +98,8 @@ function planBMissingNote(side: AddSide, sBar: number, s1: number, s2: number, x
 export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }: Props) {
   const ctx = useTradingContext();
   const positions = ctx.positionsMap[symbol];
-  const settlement = ctx.getSymbolSettlementMode(symbol);
-  const isCoin = settlement === 'coin';
   const face = getCoinMarginedContractSizeUsd(symbol);
   const coinName = getSettlementAsset(symbol);
-  const gUnit = isCoin ? coinName : 'USD';
 
   const held = useMemo(() => pickHeldSide(symbol, positions, face), [symbol, positions, face]);
 
@@ -117,6 +115,22 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0 }:
   const [helpOpen, setHelpOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(false);
   const bankedAutoSeededRef = useRef(false);
+
+  /**
+   * 结算口径跟**被加仓的那条仓位**走，不跟下单面板。
+   * 面板每次打开都回到币本位，而 U 本位仓位重开后仍是 U 本位（RUNEUSDT 与 RUNEUSD 是两张合约）——
+   * 读面板会把这条仓位的垫子、G 与每币风险都按币本位除以 S₁，X₂ 算的是另一张合约。
+   * 先看当前选中方向的腿；缺该字段的老仓位按 U 本位解读（与引擎折币 legOpeningCoins、历史记录同一口径）；
+   * 这一侧没有腿（空仓预演）才退回面板当前的结算方式。
+   * 同一侧混着两张合约时取第一条腿——X₁ 本来就把各腿币量加在一起，这里不另起炉灶。
+   */
+  const { getSymbolSettlementMode } = ctx;
+  const settlement = useMemo<SettlementMode>(() => {
+    const leg = (positions ?? []).find(p => p && p.side === side);
+    return leg ? (leg.settlementMode ?? 'usdt') : getSymbolSettlementMode(symbol);
+  }, [positions, side, getSymbolSettlementMode, symbol]);
+  const isCoin = settlement === 'coin';
+  const gUnit = isCoin ? coinName : 'USD';
 
   const seedRef = useRef({ held, currentPrice });
   seedRef.current = { held, currentPrice };

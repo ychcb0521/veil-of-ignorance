@@ -818,7 +818,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 <li><strong>对冲要扛起它保护的全部仓位：X_h = X₁ + X₂</strong>，挂在 S₁；锁死时 S₁ 恰是加仓后质心，于是 X_h·S₁ = N₁ + N₂——等币量就是等张数。只护头仓、尚未加仓时，等币量（X₁ 币 @ S₁，冻住 USD 盈亏）与等张数（名义 = N₁，冻住币盈亏）相差一个浮盈垫；本系统记账在 USD 上，与之自洽的是等币量。</li>
               </ul>
               <P>
-                <strong>顶栏「加仓」按钮就是这套公式的计算器</strong>（在「倒叙播放」左侧）。X₁ / S̄ 按当前仍持有各腿的开仓价折算后读入、S₂ 读现价，三者都可手改并一键复位；S₁ 必须手填——那是你的判断。界面把来源拆成两块，但不是让你二选一：<strong>Plan A · 旧仓浮盈垫</strong>显示 Y₁ 与其折算量 X₂ᴬ——G = 0 时它就是上限；G ≠ 0（正负都算）时它降为一行中性芯片，只解释旧仓贡献，Y₁ 为负也只显示负数、不再报红。真正下单看<strong>Plan B · 浮盈垫 + 落袋净额</strong>的「加仓上限」<span className="font-mono">max(0, Y₁ + G) ÷ 每币风险</span>（U 本位每币风险 = |S₂ − S₁|；币本位 Y₁、G 以币计，每币风险 = |S₂ − S₁| ÷ S₁）。这个上限<strong>只由规则决定</strong>，系统把 Y₁、G 的正数加进来、负数扣出去，绝不能绕过它单独照 X<sub>G</sub> 下单——X<sub>G</sub> 一格标着「仅拆解」、不给张数。K<sub>B</sub> / 定仓是 G &gt; 0 时可选的旋钮，留空即取 S₁（此时 <span className="font-mono">X<sub>G</sub> = G ÷ |S₂ − S₁|</span>，币本位 <span className="font-mono">G × S₁ ÷ |S₂ − S₁|</span>，跌回 S₁ 恰好花掉 G）；拧了旋钮，推出来的量另起一格叫<strong>「计划加仓」</strong>，上限那一格纹丝不动，R0 复核拿计划加仓与上限比对。把 K<sub>B</sub> 拖到 S₁ 的更保守一侧，计划加仓小于上限、在 S₁ 还剩一部分垫子；定仓填得比上限大，R0 直接报红。对冲必须扛起全部实际仓位：<span className="font-mono">对冲 @ S₁ = X₁ + 实际加仓量</span>（不拧旋钮时就是 X₁ + 上限），无论 K<sub>B</sub> 放在哪都照常显示。
+                <strong>顶栏「加仓」按钮就是这套公式的计算器</strong>（在「倒叙播放」左侧）。X₁ / S̄ 按当前仍持有各腿的开仓价折算后读入、S₂ 读现价，三者都可手改并一键复位；S₁ 必须手填——那是你的判断。币本位 / U 本位的口径跟<strong>被加仓的那条仓位</strong>走，不跟下单面板——面板每次打开都回到币本位，而 U 本位仓位重开后仍按 U 本位折算 G 与每币风险。界面把来源拆成两块，但不是让你二选一：<strong>Plan A · 旧仓浮盈垫</strong>显示 Y₁ 与其折算量 X₂ᴬ——G = 0 时它就是上限；G ≠ 0（正负都算）时它降为一行中性芯片，只解释旧仓贡献，Y₁ 为负也只显示负数、不再报红。真正下单看<strong>Plan B · 浮盈垫 + 落袋净额</strong>的「加仓上限」<span className="font-mono">max(0, Y₁ + G) ÷ 每币风险</span>（U 本位每币风险 = |S₂ − S₁|；币本位 Y₁、G 以币计，每币风险 = |S₂ − S₁| ÷ S₁）。这个上限<strong>只由规则决定</strong>，系统把 Y₁、G 的正数加进来、负数扣出去，绝不能绕过它单独照 X<sub>G</sub> 下单——X<sub>G</sub> 一格标着「仅拆解」、不给张数。K<sub>B</sub> / 定仓是 G &gt; 0 时可选的旋钮，留空即取 S₁（此时 <span className="font-mono">X<sub>G</sub> = G ÷ |S₂ − S₁|</span>，币本位 <span className="font-mono">G × S₁ ÷ |S₂ − S₁|</span>，跌回 S₁ 恰好花掉 G）；拧了旋钮，推出来的量另起一格叫<strong>「计划加仓」</strong>，上限那一格纹丝不动，R0 复核拿计划加仓与上限比对。把 K<sub>B</sub> 拖到 S₁ 的更保守一侧，计划加仓小于上限、在 S₁ 还剩一部分垫子；定仓填得比上限大，R0 直接报红。对冲必须扛起全部实际仓位：<span className="font-mono">对冲 @ S₁ = X₁ + 实际加仓量</span>（不拧旋钮时就是 X₁ + 上限），无论 K<sub>B</sub> 放在哪都照常显示。
               </P>
               <RedHighlight>
                 <strong>S₁ 必须就是盘口上那张对冲单的触发价——整套「锁死」全押在这一个数上。</strong>
@@ -1976,7 +1976,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                   </tr>
                   <tr>
                     <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
-                    <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，一旦为某个标的选过，此后就记住你的选择。</td>
+                    <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，但切到 U本位<strong>只对当前会话有效</strong>——页面每次刷新或重新打开，面板一律回到币本位，不记住上次的选择；已开的 U本位仓位不受影响，它本来就是另一张合约（如 RUNEUSDT 与 RUNEUSD）。</td>
                     <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>
                   </tr>
                   <tr>

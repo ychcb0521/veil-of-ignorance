@@ -25,6 +25,8 @@ const tradeHistory: TradeRecord[] = [
 const book = vi.hoisted(() => ({ orders: {} as Record<string, unknown[]> }));
 /** 盘面覆写：默认 null 即沿用上面那套老持仓（没有真实开仓时刻）；只有重放那组测试会塞。 */
 const scene = vi.hoisted(() => ({ positions: null as unknown[] | null, tradeHistory: null as unknown[] | null }));
+/** 下单面板当前的结算方式：默认币本位；只有「口径跟仓位不跟面板」那组测试会拨它。 */
+const panel = vi.hoisted(() => ({ mode: 'coin' as 'coin' | 'usdt' }));
 
 vi.mock('@/contexts/TradingContext', async () => {
   const actual = await vi.importActual<typeof import('@/contexts/TradingContext')>('@/contexts/TradingContext');
@@ -38,7 +40,7 @@ vi.mock('@/contexts/TradingContext', async () => {
       // 刻意放一个陈旧价：priceMap 是持久化的行情缓存，计算器不该再读它
       priceMap: { RAVEUSDT: 0.6273595 },
       tradeHistory: scene.tradeHistory ?? tradeHistory,
-      getSymbolSettlementMode: () => 'coin',
+      getSymbolSettlementMode: () => panel.mode,
     }),
   };
 });
@@ -691,5 +693,61 @@ describe('R0 复核 · 两套算法对账', () => {
     expect(screen.getByTestId('add-sizing-r0-pass')).toHaveTextContent('两种算法一致');
     expect(screen.getByTestId('add-sizing-r0-routes')).toHaveTextContent('成本线式 缺口 0 RAVE');
     expect(screen.getByTestId('add-sizing-r0')).toHaveTextContent('落在 S₁ 安全侧');
+  });
+});
+
+describe('结算口径跟被加仓的仓位走，不跟下单面板', () => {
+  afterEach(() => { scene.positions = null; scene.tradeHistory = null; panel.mode = 'coin'; });
+
+  /** U 本位多头一腿：20 币 @100（X₁ = 20，S̄ = 100）；本场止盈1 落袋 +150 USD。 */
+  const usdtPositions: Position[] = [
+    { id: 'u1', side: 'LONG', entryPrice: 100, quantity: 20, leverage: 5, marginMode: 'isolated', settlementMode: 'usdt', margin: 400, openTime: 1_000 },
+  ];
+  const usdtHistory: TradeRecord[] = [{ ...tradeHistory[0], settlementMode: 'usdt', pnlCoin: undefined } as TradeRecord];
+
+  it('【回归】刷新后面板回到币本位，持有的却是 U 本位仓位：G 以 USD 计、X₂ᴮ 按 U 本位算、不给张数', () => {
+    // 面板每次打开都回到币本位；仓位自己带的 settlementMode 才是它所在的合约
+    scene.positions = usdtPositions;
+    scene.tradeHistory = usdtHistory;
+    panel.mode = 'coin';
+    renderCalc();
+    expect(num('add-sizing-x1')).toBe(20);
+    expect(screen.getByText('G 落袋净额 USD')).toBeInTheDocument();
+    type('add-sizing-s1', '130');
+    // 垫 20 × 30 = 600 USD，险 10 → X₂ = 60；U 本位不附带张数
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('60');
+    expect(screen.getByTestId('add-sizing-x2')).not.toHaveTextContent('张');
+    // 本场落袋按 USD 建议：150，不是折成币的 1.2
+    const fill = screen.getByTestId('add-sizing-fill-banked');
+    expect(fill).toHaveTextContent('150');
+    fireEvent.click(fill);
+    expect(num('add-sizing-g')).toBe(150);
+    // K_B = S₁：U 本位 X₂ᴮ = G ÷ (S₂ − K_B) = 150 ÷ 10 = 15；误按币本位会是 G·K_B ÷ 险 = 1,950
+    expect(screen.getByTestId('add-sizing-x2b-out')).toHaveTextContent('15');
+    expect(screen.getByTestId('add-sizing-x2b-out')).not.toHaveTextContent('1,950');
+  });
+
+  it('会话内把面板切到 U 本位，持有的仍是币本位仓位：口径照旧是币', () => {
+    panel.mode = 'usdt';
+    renderCalc();
+    expect(screen.getByText('G 落袋净额 RAVE')).toBeInTheDocument();
+    type('add-sizing-s1', '130');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('张');
+  });
+
+  it('缺 settlementMode 的老仓位按 U 本位解读——与引擎折币和历史记录同一口径', () => {
+    scene.positions = [{ ...usdtPositions[0], settlementMode: undefined }];
+    renderCalc();
+    expect(screen.getByText('G 落袋净额 USD')).toBeInTheDocument();
+  });
+
+  it('空仓预演没有仓位可依，才退回面板当前的结算方式', () => {
+    scene.positions = [];
+    const { unmount } = renderCalc();
+    expect(screen.getByText('G 落袋净额 RAVE')).toBeInTheDocument();
+    unmount();
+    panel.mode = 'usdt';
+    renderCalc();
+    expect(screen.getByText('G 落袋净额 USD')).toBeInTheDocument();
   });
 });

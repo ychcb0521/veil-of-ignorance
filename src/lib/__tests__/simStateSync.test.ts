@@ -63,6 +63,13 @@ describe('queueSimStatePush', () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
+  it('下单面板的结算方式 symbol_settlement_mode 不推送——它只活在当前会话，每次打开都回到币本位', async () => {
+    queueSimStatePush(UID, 'symbol_settlement_mode', { RUNEUSD: 'usdt' });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`sim_${UID}_symbol_settlement_mode__syncts`)).toBeNull();
+  });
+
   it('推送失败会自动重试一次——瞬时抖动不该让这笔永远上不了云', async () => {
     let calls = 0;
     mocks.upsert.mockImplementation(async () => {
@@ -180,6 +187,28 @@ describe('hydrateSimState', () => {
       data: [{ key: 'trade_history', value: [], updated_at: '2026-08-17T00:00:00Z' }],
       error: null,
     }));
+    await hydrateSimState(UID);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+
+  it('云端残留的 symbol_settlement_mode 行不水化——别的设备不能把 U 本位再塞回来', async () => {
+    mocks.eq.mockImplementation(async () => ({
+      data: [
+        { key: 'symbol_settlement_mode', value: { RUNEUSD: 'usdt' }, updated_at: '2026-08-17T00:00:00Z' },
+        { key: 'balance', value: 88_000, updated_at: '2026-08-17T00:00:00Z' },
+      ],
+      error: null,
+    }));
+    const result = await hydrateSimState(UID);
+    expect(result.applied).toBe(1);
+    expect(localStorage.getItem(`sim_${UID}_symbol_settlement_mode`)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(`sim_${UID}_balance`)!)).toBe(88_000);
+  });
+
+  it('本地残留的 symbol_settlement_mode 不做存量回填', async () => {
+    localStorage.setItem(`sim_${UID}_symbol_settlement_mode`, JSON.stringify({ RUNEUSD: 'usdt' }));
+    mocks.eq.mockImplementation(async () => ({ data: [], error: null }));
     await hydrateSimState(UID);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(mocks.upsert).not.toHaveBeenCalled();

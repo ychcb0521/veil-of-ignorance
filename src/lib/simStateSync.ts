@@ -18,8 +18,13 @@
 import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 
-/** 行情缓存等可重建数据：没有同步价值，白耗带宽。 */
-const EXCLUDED_KEYS = new Set(['price_map']);
+/**
+ * 不同步的键：
+ *   price_map                行情缓存，可重建，没有同步价值，白耗带宽；
+ *   symbol_settlement_mode   下单面板的结算方式只活在当前会话——每次打开都回到币本位，
+ *                            旧版本落过盘的本地 / 云端条目一律不推、不水化、不回填。
+ */
+const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode']);
 
 /**
  * 水化时**按内容合并**、不按「谁更新谁覆盖」的键。
