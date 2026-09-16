@@ -459,6 +459,13 @@ export interface CampaignCounterfactualParams {
   };
   /** Editable leg copy used by campaign-level manual What-if analysis. */
   manual_legs?: CampaignCounterfactualManualLeg[];
+  /**
+   * 运行时喂给引擎的那段 K 线（周期 / 起止 / 根数 / 运行时刻）。
+   * 结果依赖这段数据，落库后才解释得了「同一组腿为什么两次结果不同」；老行没有。
+   */
+  run_context?: CampaignCounterfactualRunContext;
+  /** 运行时相对编辑器基线（buildManualLegs）改了什么；老行没有。 */
+  change_summary?: CampaignCounterfactualChangeSummary;
 }
 
 export interface CampaignCounterfactualManualLeg {
@@ -472,6 +479,36 @@ export interface CampaignCounterfactualManualLeg {
   size_usdt: number;
   leverage: number;
   enabled: boolean;
+}
+
+export interface CampaignCounterfactualRunContext {
+  /** 主图当时的 K 线周期，例如 '1m' / '1h'。 */
+  interval: string;
+  /** 数组首根 K 线开盘时刻（ISO）。 */
+  from: string;
+  /** 数组末根 K 线开盘时刻（ISO）。 */
+  to: string;
+  kline_count: number;
+  /** 点下「一键运行」的时刻（ISO）。 */
+  ran_at: string;
+}
+
+export type CampaignCounterfactualLegChangeKind = 'edited' | 'added' | 'removed' | 'disabled';
+
+export interface CampaignCounterfactualLegChange {
+  id: string;
+  role: string;
+  kind: CampaignCounterfactualLegChangeKind;
+  /** 被改动的 manual leg 字段名（edited 才有）。 */
+  changedFields: string[];
+}
+
+export interface CampaignCounterfactualChangeSummary {
+  /** ≤ 20 字的一句话，默认分支名的来源，例如「改2腿·增1腿」。 */
+  short: string;
+  /** 逐腿的完整说明行，面板里逐行展示。 */
+  lines: string[];
+  legs: CampaignCounterfactualLegChange[];
 }
 
 export interface CampaignCounterfactualEvent {
@@ -504,11 +541,20 @@ export interface CampaignCounterfactualResult {
   final_r_multiple: number;
   peak_unrealized_pnl: number;
   peak_drawdown: number;
+  /** 已实现 ÷ 峰值权益 × 100——**不是**战役页的盈亏比 b（那是 已实现 ÷ L）。 */
   profit_capture_ratio: number;
   events: CampaignCounterfactualEvent[];
   legs_summary: CampaignCounterfactualLegSummary[];
   state_segments: CampaignCounterfactualStateSegment[];
   sop_score: number;
+  /**
+   * 以下四项是引擎在运行时从合成战役锚出来的风险量（与战役页同一口径），随结果一起落库（jsonb）。
+   * 老行没有这些字段，读取方须退回 deriveCounterfactualRiskAnchors(params) 重算。
+   */
+  initial_expected_max_loss?: number;
+  initial_main_exposure_notional?: number;
+  expected_max_drawdown_pct?: number;
+  main_leverage?: number | null;
 }
 
 export interface CampaignCounterfactual {

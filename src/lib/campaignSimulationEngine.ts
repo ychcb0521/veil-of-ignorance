@@ -1,6 +1,9 @@
 import type { KlineData } from '@/hooks/useBinanceData';
 import {
+  computeCampaignPnlPathExtremes,
+  computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
+  computeInitialMainExposureNotional,
   computeSopDeviation,
   type Deduction,
   type SopDeviationResult,
@@ -9,6 +12,7 @@ import {
   resolveLegExecution,
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
+import { resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import {
   INITIAL_HEDGE_SIZE_PCT,
@@ -30,7 +34,15 @@ import type { TradeRecord } from '@/types/trading';
 const EPSILON = 0.000001;
 const DEFAULT_ACCOUNT_SIZE = 10_000;
 
-type SupportedTemplate = 'main_dual_hedge_mirror_tp' | 'main_only';
+export type SupportedTemplate = 'main_dual_hedge_mirror_tp' | 'main_only';
+
+/**
+ * 战役模板 → 推演模板：只有 main_only 走「无保护线」路径，其余（含 custom）一律按双向对冲 + 镜像止盈。
+ * 运行时选引擎、事后为老行重算风险锚都用这一条，否则 main_only 的老 SOP 行会被默认模板凭空造出一条止损线。
+ */
+export function counterfactualTemplateFor(campaign: Pick<TradeCampaign, 'strategy_template'>): SupportedTemplate {
+  return campaign.strategy_template === 'main_only' ? 'main_only' : 'main_dual_hedge_mirror_tp';
+}
 type Direction = CampaignCounterfactualParams['entry']['direction'];
 type ExitRule = CampaignCounterfactualParams['exit_rule'];
 type StateName = 'state_0_setup' | 'state_1_lockin' | 'state_2_rolling' | 'state_3_exit';
@@ -55,6 +67,8 @@ interface SimulationLeg {
   fillPrice: number | null;
   realizedPnlUsdt: number;
   cycle: number;
+  /** 手动腿自带的杠杆；SOP 推演腿不设，合成腿退回 entry.leverage。 */
+  leverage?: number;
 }
 
 interface ActivePosition {
@@ -600,7 +614,7 @@ function buildSyntheticCampaignAndLegs(
     leg_sequence: index + 1,
     symbol: syntheticCampaign.symbol,
     direction: params.entry.direction,
-    leverage: params.entry.leverage,
+    leverage: leg.leverage ?? params.entry.leverage,
     position_mode: 'isolated',
     order_kind: leg.kind === 'main' ? 'main' : 'hedge',
     pre_simulated_time: leg.placedAt,
@@ -637,6 +651,44 @@ function buildSyntheticCampaignAndLegs(
   }));
 
   return { campaign: syntheticCampaign, legs: syntheticLegs };
+}
+
+/**
+ * 反事实分支的四个风险锚，与战役页「盈亏概览」逐项同口径：
+ * L（最大预期亏损）、主力开仓名义仓位、预期回撤 d、主力杠杆。
+ * 全部从合成战役 + 合成腿上用战役页同一批函数算出，不另写公式。
+ */
+export interface CounterfactualRiskAnchors {
+  initialExpectedMaxLoss: number;
+  initialMainExposureNotional: number;
+  expectedMaxDrawdownPct: number;
+  mainLeverage: number | null;
+}
+
+const ZERO_RISK_ANCHORS: CounterfactualRiskAnchors = {
+  initialExpectedMaxLoss: 0,
+  initialMainExposureNotional: 0,
+  expectedMaxDrawdownPct: 0,
+  mainLeverage: null,
+};
+
+function riskAnchorsFromSynthetic(synthetic: { campaign: TradeCampaign; legs: TradeJournal[] }): CounterfactualRiskAnchors {
+  return {
+    initialExpectedMaxLoss: computeInitialExpectedMaxLoss(synthetic.campaign, synthetic.legs, []),
+    initialMainExposureNotional: computeInitialMainExposureNotional(synthetic.campaign, synthetic.legs, []),
+    expectedMaxDrawdownPct: computeInitialExpectedMaxDrawdownPct(synthetic.campaign, synthetic.legs, [], []),
+    mainLeverage: resolveCampaignMainLeverage(synthetic.campaign, synthetic.legs, []),
+  };
+}
+
+/** 把锚写成结果上的落库字段（4 位小数，与结果里其他金额同精度）。 */
+function riskAnchorResultFields(anchors: CounterfactualRiskAnchors) {
+  return {
+    initial_expected_max_loss: round(anchors.initialExpectedMaxLoss),
+    initial_main_exposure_notional: round(anchors.initialMainExposureNotional),
+    expected_max_drawdown_pct: round(anchors.expectedMaxDrawdownPct),
+    main_leverage: anchors.mainLeverage,
+  };
 }
 
 function buildResultFromState(state: SimulationState): CampaignCounterfactualResult {
@@ -682,11 +734,13 @@ function buildResultFromState(state: SimulationState): CampaignCounterfactualRes
    * leg_role、pre_position_size、pre_entry_price，正好够锚出「M + 镜像」的敞口
    * 与最远那条保护线。直接复用它，口径就不可能再分叉。
    */
-  const plannedMaxLoss = computeInitialExpectedMaxLoss(synthetic.campaign, synthetic.legs, []);
+  const anchors = riskAnchorsFromSynthetic(synthetic);
+  const plannedMaxLoss = anchors.initialExpectedMaxLoss;
   return {
     ...baseResult,
     final_r_multiple: plannedMaxLoss > EPSILON ? round(state.realizedPnl / plannedMaxLoss) : 0,
     sop_score: sop.score ?? 0,
+    ...riskAnchorResultFields(anchors),
   };
 }
 
@@ -924,9 +978,7 @@ export function simulateManualLegScenario(
   params: CampaignCounterfactualParams,
   klines: KlineData[],
 ): CampaignCounterfactualResult {
-  const manualLegs = (params.manual_legs ?? [])
-    .filter(validManualLeg)
-    .sort((a, b) => new Date(a.open_time).getTime() - new Date(b.open_time).getTime());
+  const manualLegs = sortedValidManualLegs(params);
 
   if (manualLegs.length === 0) {
     return {
@@ -964,31 +1016,34 @@ export function simulateManualLegScenario(
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   const finalPnl = manualLegs.reduce((sum, leg) => sum + manualLegPnl(leg), 0);
-  let peakEquity = 0;
-  let troughEquity = 0;
-
-  if (klines.length > 0) {
-    for (const kline of klines) {
-      const equity = manualLegs.reduce((sum, leg) => {
-        const openMs = new Date(leg.open_time).getTime();
-        const closeMs = new Date(leg.close_time).getTime();
-        if (kline.time < openMs) return sum;
-        if (kline.time >= closeMs) return sum + manualLegPnl(leg);
-        return sum + pnlForClose(
-          leg.direction,
-          leg.entry_price,
-          kline.close,
-          leg.size_usdt,
-          leg.leverage || 1,
-        );
-      }, 0);
-      peakEquity = Math.max(peakEquity, equity);
-      troughEquity = Math.min(troughEquity, equity);
-    }
-  } else {
-    peakEquity = Math.max(0, finalPnl);
-    troughEquity = Math.min(0, finalPnl);
-  }
+  /**
+   * 峰值浮盈 / 最大回撤直接用战役页 computeDecisionAccuracy 的那一份权益路径算法
+   * （computeCampaignPnlPathExtremes）：一根 K 线里逐个还原持仓状态——K 线起点、每条腿开仓、
+   * 每条腿平仓前一刻与平仓时刻、K 线终点——各自用这根的最高价 / 最低价重估，已平的腿计已实现。
+   * 不再自写近似：「这根里碰过的腿一律同时持有、同在极值价上估」在多腿同一根换状态时
+   * 会与战役页对不上，原样重跑的副本就印出与真实盈亏概览不同的峰值。
+   *
+   * 粒度告诫：一根 K 线内高低点与开平仓的先后顺序不可知，这是「该周期粒度下」的上下界；
+   * 运行时的周期与根数记在 params.run_context 里，读的人才知道该拿它跟什么比。
+   */
+  const pathLegs = manualLegs.map(leg => ({
+    side: leg.direction === 'short' ? 'SHORT' as const : 'LONG' as const,
+    quantity: leg.size_usdt / leg.entry_price,
+    entryPrice: leg.entry_price,
+    startMs: new Date(leg.open_time).getTime(),
+    endMs: new Date(leg.close_time).getTime(),
+    realizedPnl: manualLegPnl(leg),
+  }));
+  const extremes = computeCampaignPnlPathExtremes(
+    pathLegs,
+    klines,
+    Math.min(...pathLegs.map(leg => leg.startMs)),
+    Math.max(...pathLegs.map(leg => leg.endMs)),
+  );
+  // 最终已实现盈亏本身就是权益路径上的一点（最后一腿平在末根 K 线之后时扫描看不到它）：
+  // 战役页同样先扫 K 线再与已实现取最大，峰值不能低于最终盈亏。没有 K 线时它就是唯一的点。
+  const peakEquity = Math.max(extremes.maxProfit, finalPnl);
+  const troughEquity = Math.min(extremes.maxDrawdown, finalPnl);
 
   const firstTime = manualLegs[0].open_time;
   const lastTime = manualLegs.reduce((latest, leg) => (
@@ -1005,35 +1060,13 @@ export function simulateManualLegScenario(
    * 锚不出保护线时返回 0（下方 > EPSILON 判断会让 R 显示 0），
    * 绝不拿一个凭空的 2% 顶上——那是在给一个不存在的止损定价。
    */
-  const syntheticSimLegs: SimulationLeg[] = manualLegs.map((leg, index) => ({
-    id: leg.id || `manual-leg-${index + 1}`,
-    role: leg.leg_role as LegRole,
-    kind: leg.leg_role === 'main_open' ? 'main' : leg.leg_role === 'mirror_tp' ? 'mirror_tp' : 'hedge',
-    placedAt: leg.open_time,
-    triggerPrice: leg.entry_price,
-    sizeUsdt: leg.size_usdt,
-    status: 'filled',
-    triggeredAt: leg.close_time,
-    fillPrice: leg.entry_price,
-    realizedPnlUsdt: manualLegPnl(leg),
-    cycle: 1,
-  }));
-  const manualBase = {
+  const manualSynthetic = buildManualSynthetic(params, manualLegs, events, {
     final_realized_pnl: round(finalPnl),
-    final_r_multiple: 0,
     peak_unrealized_pnl: round(Math.max(0, peakEquity)),
     peak_drawdown: round(Math.abs(Math.min(0, troughEquity))),
-    profit_capture_ratio: 0,
-    events,
-    legs_summary: [],
-    state_segments: [],
-  } as Omit<CampaignCounterfactualResult, 'sop_score'>;
-  const manualSynthetic = buildSyntheticCampaignAndLegs(
-    params, 'main_dual_hedge_mirror_tp', manualBase, events, syntheticSimLegs,
-  );
-  const plannedMaxLoss = computeInitialExpectedMaxLoss(
-    manualSynthetic.campaign, manualSynthetic.legs, [],
-  );
+  });
+  const anchors = riskAnchorsFromSynthetic(manualSynthetic);
+  const plannedMaxLoss = anchors.initialExpectedMaxLoss;
 
   return {
     final_realized_pnl: round(finalPnl),
@@ -1059,7 +1092,99 @@ export function simulateManualLegScenario(
       end_time: lastTime,
     }],
     sop_score: 0,
+    ...riskAnchorResultFields(anchors),
   };
+}
+
+/** 与 journalApi 选引擎的判断同一条：只要有一条手动腿启用，就是手动 Legs 分支。 */
+export function isManualLegScenario(params: CampaignCounterfactualParams): boolean {
+  return params.manual_legs?.some(leg => leg.enabled) ?? false;
+}
+
+function sortedValidManualLegs(params: CampaignCounterfactualParams): CampaignCounterfactualManualLeg[] {
+  return (params.manual_legs ?? [])
+    .filter(validManualLeg)
+    .sort((a, b) => new Date(a.open_time).getTime() - new Date(b.open_time).getTime());
+}
+
+/**
+ * 把手动腿映射成合成腿再造合成战役——simulateManualLegScenario 与 deriveCounterfactualRiskAnchors 共用，
+ * 保证「运行时落库的锚」与「老行事后重算的锚」出自同一份映射。
+ */
+function buildManualSynthetic(
+  params: CampaignCounterfactualParams,
+  manualLegs: CampaignCounterfactualManualLeg[],
+  events: CampaignCounterfactualEvent[],
+  base: Pick<CampaignCounterfactualResult, 'final_realized_pnl' | 'peak_unrealized_pnl' | 'peak_drawdown'>,
+): { campaign: TradeCampaign; legs: TradeJournal[] } {
+  const syntheticSimLegs: SimulationLeg[] = manualLegs.map((leg, index) => ({
+    id: leg.id || `manual-leg-${index + 1}`,
+    role: leg.leg_role as LegRole,
+    kind: leg.leg_role === 'main_open' ? 'main' : leg.leg_role === 'mirror_tp' ? 'mirror_tp' : 'hedge',
+    placedAt: leg.open_time,
+    triggerPrice: leg.entry_price,
+    sizeUsdt: leg.size_usdt,
+    status: 'filled',
+    triggeredAt: leg.close_time,
+    fillPrice: leg.entry_price,
+    realizedPnlUsdt: manualLegPnl(leg),
+    cycle: 1,
+    leverage: Number.isFinite(leg.leverage) && leg.leverage > 0 ? leg.leverage : undefined,
+  }));
+  const manualBase = {
+    ...base,
+    final_r_multiple: 0,
+    profit_capture_ratio: 0,
+    events,
+    legs_summary: [],
+    state_segments: [],
+  } as Omit<CampaignCounterfactualResult, 'sop_score'>;
+  return buildSyntheticCampaignAndLegs(params, 'main_dual_hedge_mirror_tp', manualBase, events, syntheticSimLegs);
+}
+
+/**
+ * 只凭 params 重建风险锚（L / 主力开仓名义仓位 / 预期回撤 d / 主力杠杆），不需要 K 线。
+ *
+ * 用途：老的 campaign_counterfactuals 行没有把这四项随结果落库，读它们时按 params 重算一遍；
+ * 新行直接读 result 上的同名字段，两者出自同一份 riskAnchorsFromSynthetic。
+ *
+ * 手动 Legs 分支：走 buildManualSynthetic，与运行时完全一致；没有一条有效腿时全 0。
+ * SOP 分支：只重建入场那一刻的建仓腿（主力 + 初始对冲 A/B + 镜像止盈），挂单价由
+ * entry.price 与偏移决定，本来就不依赖 K 线。有重入周期的分支，运行时的合成腿还多几条
+ * 同名 mirror_tp，锚可能有微小差异——那种行只在没有落库字段时才会走到这里。
+ */
+export function deriveCounterfactualRiskAnchors(
+  params: CampaignCounterfactualParams,
+  template: SupportedTemplate = 'main_dual_hedge_mirror_tp',
+): CounterfactualRiskAnchors {
+  if (isManualLegScenario(params)) {
+    const manualLegs = sortedValidManualLegs(params);
+    if (manualLegs.length === 0) return { ...ZERO_RISK_ANCHORS };
+    const synthetic = buildManualSynthetic(params, manualLegs, [], {
+      final_realized_pnl: 0,
+      peak_unrealized_pnl: 0,
+      peak_drawdown: 0,
+    });
+    return riskAnchorsFromSynthetic(synthetic);
+  }
+
+  const entryMs = new Date(params.entry.time).getTime();
+  if (!Number.isFinite(entryMs)) return { ...ZERO_RISK_ANCHORS };
+  const state = initialState(params, template);
+  placeMainPosition(state, entryMs, params.entry.price, params.entry.size_usdt, 'main_open');
+  registerSetupLegs(state, entryMs, params.entry.price, params.entry.size_usdt, state.cycle);
+  const base = {
+    final_realized_pnl: 0,
+    final_r_multiple: 0,
+    peak_unrealized_pnl: 0,
+    peak_drawdown: 0,
+    profit_capture_ratio: 0,
+    events: state.events,
+    legs_summary: [],
+    state_segments: [],
+  } as Omit<CampaignCounterfactualResult, 'sop_score'>;
+  const synthetic = buildSyntheticCampaignAndLegs(params, template, base, state.events, state.legs);
+  return riskAnchorsFromSynthetic(synthetic);
 }
 
 function inferActualParams(

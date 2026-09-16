@@ -5,6 +5,7 @@ import {
   fetchLegExitPriceCorrections,
   fetchLegExitPriceCorrectionsResult,
   resolveLegExecution,
+  sameLegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -245,5 +246,27 @@ describe('campaign leg execution price resolution', () => {
     expect(resolved.closeTime).toBe(record.closeTime);
     expect(resolved.entryPrice).toBe(0.165244);
     expect(resolved.exitPrice).toBe(0.1895);
+  });
+});
+
+describe('sameLegExitPriceCorrections', () => {
+  const correction = { exitPrice: 0.1895, originalExitPrice: 0.19867, candleLow: 0.186, candleHigh: 0.191 };
+
+  it('内容相同即算没变（两份空的、逐字相同的都算）', () => {
+    expect(sameLegExitPriceCorrections({}, {})).toBe(true);
+    expect(sameLegExitPriceCorrections({ 'leg-1': correction }, { 'leg-1': { ...correction } })).toBe(true);
+  });
+
+  it('键集合或任一价格不同就算变了', () => {
+    expect(sameLegExitPriceCorrections({}, { 'leg-1': correction })).toBe(false);
+    expect(sameLegExitPriceCorrections({ 'leg-1': correction }, { 'leg-2': correction })).toBe(false);
+    expect(sameLegExitPriceCorrections(
+      { 'leg-1': correction },
+      { 'leg-1': { ...correction, exitPrice: 0.19 } },
+    )).toBe(false);
+    expect(sameLegExitPriceCorrections(
+      { 'leg-1': correction },
+      { 'leg-1': { ...correction, candleHigh: 0.2 } },
+    )).toBe(false);
   });
 });

@@ -22,6 +22,31 @@ export interface LegExitPriceCorrection {
 export type LegExitPriceCorrections = Record<string, LegExitPriceCorrection>;
 
 /**
+ * 两份校正内容是否一样。调用方据此**保留旧对象的引用**：
+ * 校正是纯函数产物，重算一遍多半逐字相同，但每次都换一个新对象，
+ * 就会顺着 prop 把「Legs 副本」编辑器的重置 effect 一路踢一遍——
+ * 用户刚载入或手改到一半的腿会被静默冲掉。内容没变就不该有「变过」的痕迹。
+ */
+export function sameLegExitPriceCorrections(
+  a: LegExitPriceCorrections,
+  b: LegExitPriceCorrections,
+): boolean {
+  if (a === b) return true;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every(key => {
+    const left = a[key];
+    const right = b[key];
+    if (!left || !right) return false;
+    return left.exitPrice === right.exitPrice
+      && left.originalExitPrice === right.originalExitPrice
+      && left.candleLow === right.candleLow
+      && left.candleHigh === right.candleHigh;
+  });
+}
+
+/**
  * 平仓价校正的拉取结果，带**完整性**标记。
  *
  * 校正本身是一份纯函数的产物（腿 + 成交记录 + 不可变的历史 1 分钟 K 线），

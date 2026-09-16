@@ -10,10 +10,13 @@ import {
   buildDeviationFixParams,
   buildPureSopParams,
   computeDeviationCosts,
+  counterfactualTemplateFor,
+  isManualLegScenario,
   simulateCampaign,
   simulateManualLegScenario,
   type ManualLegDeviationCost,
 } from '@/lib/campaignSimulationEngine';
+import { buildCounterfactualRunContext, inferKlineInterval } from '@/lib/counterfactualOverview';
 import {
   buildCampaignDeviationRuleDrafts,
   normalizeDeviationRuleText,
@@ -4929,10 +4932,6 @@ export async function deleteCounterfactual(id: string): Promise<void> {
   removeLocalCounterfactual(userId, id);
 }
 
-function counterfactualTemplateFor(campaign: Pick<TradeCampaign, 'strategy_template'>): 'main_dual_hedge_mirror_tp' | 'main_only' {
-  return campaign.strategy_template === 'main_only' ? 'main_only' : 'main_dual_hedge_mirror_tp';
-}
-
 export async function runAndPersistPureSop(
   campaignId: string,
   klines: KlineData[],
@@ -4954,22 +4953,53 @@ export async function runAndPersistPureSop(
   });
 }
 
+export interface CustomCounterfactualRun {
+  /** 入参加上 run_context（周期 / 起止 / 根数 / 运行时刻）后的最终 params，保存时原样落库。 */
+  params: CampaignCounterfactualParams;
+  result: CampaignCounterfactualResult;
+}
+
+/**
+ * 只运行、不落库：页面拿到结果先摆成「反事实盈亏概览 · 未保存」，用户点保存才 createCounterfactual。
+ * 以前是运行即插入，「保存并刷新」什么都不存——用户以为的草稿其实早就在库里了。
+ *
+ * interval 是主图当时的周期；拿不到就从 K 线步长反推，写进 params.run_context，
+ * 让「同一组腿两次结果不同」事后解释得了（引擎走完整个数组、按末根收盘结算）。
+ * 手动 Legs 分支不需要战役模板，跳过 getCampaignFullData 那一趟。
+ */
+export async function runCustomCounterfactual(
+  campaignId: string,
+  params: CampaignCounterfactualParams,
+  klines: KlineData[],
+  interval?: string,
+): Promise<CustomCounterfactualRun> {
+  const runContext = buildCounterfactualRunContext(klines, interval ?? inferKlineInterval(klines) ?? 'unknown');
+  const runParams: CampaignCounterfactualParams = runContext ? { ...params, run_context: runContext } : { ...params };
+  let result: CampaignCounterfactualResult;
+  if (isManualLegScenario(runParams)) {
+    result = simulateManualLegScenario(runParams, klines);
+  } else {
+    const { campaign } = await getCampaignFullData(campaignId);
+    result = simulateCampaign(runParams, klines, counterfactualTemplateFor(campaign));
+  }
+  return { params: runParams, result };
+}
+
+/** 运行后立刻落库的旧入口：只是 runCustomCounterfactual + createCounterfactual，页面已不再用它。 */
 export async function runAndPersistCustomCounterfactual(
   campaignId: string,
   label: string,
   params: CampaignCounterfactualParams,
   klines: KlineData[],
+  interval?: string,
 ): Promise<CampaignCounterfactual> {
-  const { campaign } = await getCampaignFullData(campaignId);
-  const result = (params.manual_legs?.some(leg => leg.enabled) ?? false)
-    ? simulateManualLegScenario(params, klines)
-    : simulateCampaign(params, klines, counterfactualTemplateFor(campaign));
+  const run = await runCustomCounterfactual(campaignId, params, klines, interval);
   return createCounterfactual({
     campaign_id: campaignId,
     label,
     branch_kind: 'custom_what_if',
-    params,
-    result,
+    params: run.params,
+    result: run.result,
   });
 }
 

@@ -1709,6 +1709,42 @@ function computeCampaignPnlExtremes(
   return { maxProfit, maxDrawdown };
 }
 
+/** 权益路径上的一条线性腿：开平时刻 + 名义数量，平仓后计 realizedPnl。 */
+export interface CampaignPnlPathLeg {
+  side: 'LONG' | 'SHORT';
+  quantity: number;
+  entryPrice: number;
+  startMs: number;
+  endMs: number;
+  realizedPnl: number;
+}
+
+/**
+ * 战役页「峰值浮盈 / 最大回撤」那一份权益路径极值算法的对外入口，只接 U 本位线性腿。
+ *
+ * 反事实手动 Legs 引擎直接复用它：一根 K 线里逐个还原持仓状态（K 线起点、每条腿开仓、
+ * 每条腿平仓前一刻与平仓时刻、K 线终点），各自用最高价 / 最低价重估。
+ * 另写一份近似（例如「这根 K 线里碰过的腿一律当作同时持有」），多腿在同一根里换状态时
+ * 就会与战役页对不上——而「原样重跑的副本」与真实盈亏概览读数一致，正是两块面板并排的意义。
+ */
+export function computeCampaignPnlPathExtremes(
+  pathLegs: CampaignPnlPathLeg[],
+  klines: KlineData[],
+  startMs: number,
+  endMs: number,
+): { maxProfit: number; maxDrawdown: number } {
+  const activeLegs = pathLegs.map<CampaignActiveLeg>((leg, index) => ({
+    ...leg,
+    id: `path-leg-${index}`,
+    journalId: `path-leg-${index}`,
+    role: null,
+    settlementMode: 'usdt',
+    contractSizeUsd: null,
+    contracts: null,
+  }));
+  return computeCampaignPnlExtremes(activeLegs, klines, startMs, endMs);
+}
+
 function buildActiveLegs(
   campaign: TradeCampaign,
   legs: TradeJournal[],

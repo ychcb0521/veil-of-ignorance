@@ -54,6 +54,18 @@ export function resolveCampaignOpportunityQuality(
 ): number | null {
   const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
     && Number.isFinite(campaign.final_realized_pnl);
+  return resolveResolvedOpportunityQuality(resolved, profitCaptureRatio, initialExpectedMaxDrawdownPct);
+}
+
+/**
+ * 机会质量只对**已了结**的战役计算。把「已了结」判定拆成入参，
+ * 没有 TradeCampaign 行的反事实分支（每条手动腿都有平仓时刻即视为已了结）也走同一条门槛与同一个公式。
+ */
+export function resolveResolvedOpportunityQuality(
+  resolved: boolean,
+  profitCaptureRatio: number | null,
+  initialExpectedMaxDrawdownPct: number,
+): number | null {
   if (
     !resolved
     || profitCaptureRatio == null

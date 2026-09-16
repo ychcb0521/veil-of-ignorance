@@ -9,10 +9,15 @@ import type {
 } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
+import { computeDecisionAccuracy } from '@/lib/campaignAnalysis';
+
 import {
+  buildActualSimulationParams,
   buildManualLegs,
   buildPureSopParams,
   computeManualLegDeviationCosts,
+  deriveCounterfactualRiskAnchors,
+  isManualLegScenario,
   manualLegPnl,
   simulateCampaign,
   simulateManualLegScenario,
@@ -464,5 +469,417 @@ describe('computeManualLegDeviationCosts', () => {
       makeLeg('hedge', 'hedge_initial_a', 'short', 100, 105, 500),
     ];
     expect(computeManualLegDeviationCosts(legs, legs.map(leg => ({ ...leg })))).toEqual([]);
+  });
+});
+
+describe('manual peak semantics (high / low / close, never below realized)', () => {
+  const manualLeg = (overrides: Partial<CampaignCounterfactualManualLeg>): CampaignCounterfactualManualLeg => ({
+    id: 'main',
+    leg_role: 'main_open',
+    direction: 'long',
+    open_time: new Date(t0).toISOString(),
+    close_time: new Date(t0 + 3 * MIN).toISOString(),
+    entry_price: 100,
+    exit_price: 108,
+    size_usdt: 1000,
+    leverage: 1,
+    enabled: true,
+    ...overrides,
+  });
+
+  it('峰值取每根 K 线最高价 / 最低价 / 收盘价重估后的最大值，而不只看收盘价', () => {
+    const result = simulateManualLegScenario(
+      baseParams({ manual_legs: [manualLeg({})] }),
+      [
+        k(0, 100, 101, 99, 100),
+        k(1, 100, 115, 100, 104), // 收盘 +40，但盘中最高 +150
+        k(2, 104, 105, 100, 101),
+        k(3, 101, 109, 100, 108),
+      ],
+    );
+    expect(result.final_realized_pnl).toBeCloseTo(80, 4);
+    expect(result.peak_unrealized_pnl).toBeCloseTo(150, 4);
+    // 谷值同样看最低价：第 2 根最低 100 → 0，第 0 根最低 99 → −10
+    expect(result.peak_drawdown).toBeCloseTo(10, 4);
+  });
+
+  it('空头腿的峰值来自最低价', () => {
+    const result = simulateManualLegScenario(
+      baseParams({ manual_legs: [manualLeg({ direction: 'short', exit_price: 98 })] }),
+      [
+        k(0, 100, 101, 99, 100),
+        k(1, 100, 102, 90, 99), // 最低 90 → 空头 +100
+        k(2, 99, 100, 97, 98),
+      ],
+    );
+    expect(result.final_realized_pnl).toBeCloseTo(20, 4);
+    expect(result.peak_unrealized_pnl).toBeCloseTo(100, 4);
+  });
+
+  it('峰值不低于最终已实现盈亏：最后一腿平在末根 K 线之后时，扫描看不到它', () => {
+    const result = simulateManualLegScenario(
+      baseParams({ manual_legs: [manualLeg({ exit_price: 120, close_time: new Date(t0 + 30 * MIN).toISOString() })] }),
+      [
+        k(0, 100, 101, 99, 100),
+        k(1, 100, 103, 99, 102),
+      ],
+    );
+    expect(result.final_realized_pnl).toBeCloseTo(200, 4);
+    expect(result.peak_unrealized_pnl).toBeCloseTo(200, 4);
+  });
+
+  it('没有 K 线时峰值就是最终盈亏（盈利）或 0（亏损）', () => {
+    const win = simulateManualLegScenario(baseParams({ manual_legs: [manualLeg({})] }), []);
+    expect(win.peak_unrealized_pnl).toBeCloseTo(80, 4);
+    const loss = simulateManualLegScenario(baseParams({ manual_legs: [manualLeg({ exit_price: 95 })] }), []);
+    expect(loss.peak_unrealized_pnl).toBe(0);
+    expect(loss.peak_drawdown).toBeCloseTo(50, 4);
+  });
+});
+
+describe('counterfactual risk anchors', () => {
+  const at = (minutes: number) => new Date(t0 + minutes * MIN).toISOString();
+  const manualLegs: CampaignCounterfactualManualLeg[] = [
+    { id: 'main', leg_role: 'main_open', direction: 'long', open_time: at(0), close_time: at(30), entry_price: 100, exit_price: 106, size_usdt: 1000, leverage: 5, enabled: true },
+    { id: 'mirror', leg_role: 'mirror_tp', direction: 'long', open_time: at(0), close_time: at(30), entry_price: 100, exit_price: 104, size_usdt: 500, leverage: 5, enabled: true },
+    { id: 'ha', leg_role: 'hedge_initial_a', direction: 'short', open_time: at(1), close_time: at(2), entry_price: 98, exit_price: 98, size_usdt: 500, leverage: 5, enabled: true },
+    { id: 'hb', leg_role: 'hedge_initial_b', direction: 'short', open_time: at(1), close_time: at(2), entry_price: 96, exit_price: 96, size_usdt: 500, leverage: 5, enabled: true },
+  ];
+
+  it('手动分支：结果上落库 L / 名义 / d / 杠杆，且与 deriveCounterfactualRiskAnchors(params) 完全一致', () => {
+    const params = baseParams({ manual_legs: manualLegs });
+    const result = simulateManualLegScenario(params, [k(0, 100, 101, 99, 100)]);
+    // 敞口 = M 1000 + 镜像 500；d = max(2%, 4%) = 4% → L = 60
+    expect(result.initial_expected_max_loss).toBeCloseTo(60, 4);
+    expect(result.initial_main_exposure_notional).toBeCloseTo(1500, 4);
+    expect(result.expected_max_drawdown_pct).toBeCloseTo(4, 4);
+    // 主力杠杆来自手动腿自己（5x），不是 entry.leverage（1x）
+    expect(result.main_leverage).toBe(5);
+    expect(result.final_r_multiple).toBeCloseTo(80 / 60, 4);
+
+    const derived = deriveCounterfactualRiskAnchors(params);
+    expect(derived.initialExpectedMaxLoss).toBeCloseTo(result.initial_expected_max_loss!, 4);
+    expect(derived.initialMainExposureNotional).toBeCloseTo(result.initial_main_exposure_notional!, 4);
+    expect(derived.expectedMaxDrawdownPct).toBeCloseTo(result.expected_max_drawdown_pct!, 4);
+    expect(derived.mainLeverage).toBe(result.main_leverage);
+    expect(isManualLegScenario(params)).toBe(true);
+  });
+
+  it('手动分支没有初始对冲 A/B 时 L = 0（不凭空补一条止损线），杠杆仍读得到', () => {
+    const params = baseParams({ manual_legs: [manualLegs[0]] });
+    const result = simulateManualLegScenario(params, []);
+    expect(result.initial_expected_max_loss).toBe(0);
+    expect(result.expected_max_drawdown_pct).toBe(0);
+    expect(result.initial_main_exposure_notional).toBeCloseTo(1000, 4);
+    expect(result.main_leverage).toBe(5);
+    expect(deriveCounterfactualRiskAnchors(params)).toEqual({
+      initialExpectedMaxLoss: 0,
+      initialMainExposureNotional: 1000,
+      expectedMaxDrawdownPct: 0,
+      mainLeverage: 5,
+    });
+  });
+
+  it('手动分支所有腿都停用时四个锚全 0', () => {
+    const params = baseParams({ manual_legs: manualLegs.map(leg => ({ ...leg, enabled: false })) });
+    expect(isManualLegScenario(params)).toBe(false);
+  });
+
+  it('SOP 分支：simulateCampaign 也落库四个锚，与只凭 params 重建的锚一致', () => {
+    const params = baseParams();
+    const result = simulateCampaign(
+      params,
+      [
+        k(0, 100, 100, 100, 100),
+        k(1, 100, 103, 99, 102),
+        k(2, 102, 105, 101, 104),
+      ],
+      'main_dual_hedge_mirror_tp',
+    );
+    // 敞口 = 主力 1000 + 镜像 500；d = max(2%, 4%) = 4% → L = 60
+    expect(result.initial_expected_max_loss).toBeCloseTo(60, 4);
+    expect(result.initial_main_exposure_notional).toBeCloseTo(1500, 4);
+    expect(result.expected_max_drawdown_pct).toBeCloseTo(4, 4);
+    expect(result.main_leverage).toBe(1);
+    expect(result.final_r_multiple).toBeCloseTo(30 / 60, 4);
+
+    const derived = deriveCounterfactualRiskAnchors(params);
+    expect(derived.initialExpectedMaxLoss).toBeCloseTo(60, 4);
+    expect(derived.initialMainExposureNotional).toBeCloseTo(1500, 4);
+    expect(derived.expectedMaxDrawdownPct).toBeCloseTo(4, 4);
+    expect(derived.mainLeverage).toBe(1);
+  });
+
+  it('main_only 模板没有对冲腿：L = 0，锚只剩主力名义与杠杆', () => {
+    const params = baseParams();
+    const result = simulateCampaign(params, [k(0, 100, 100, 100, 100), k(1, 100, 103, 99, 102)], 'main_only');
+    expect(result.initial_expected_max_loss).toBe(0);
+    expect(result.expected_max_drawdown_pct).toBe(0);
+    expect(result.initial_main_exposure_notional).toBeCloseTo(1000, 4);
+    expect(deriveCounterfactualRiskAnchors(params, 'main_only')).toEqual({
+      initialExpectedMaxLoss: 0,
+      initialMainExposureNotional: 1000,
+      expectedMaxDrawdownPct: 0,
+      mainLeverage: 1,
+    });
+  });
+});
+
+/**
+ * 「原样重跑一遍 Legs 副本」和战役页自己的盈亏概览，峰值浮盈必须是同一个数——
+ * 两块面板并排摆在一起，读数对不上就等于把用户的判断建在一个错觉上。
+ *
+ * 最容易分叉的正是「主力开在某根 K 线中间」这一格：战役页的 computeCampaignPnlExtremes
+ * 把开仓时刻当成这根 K 线内的一个状态点、照样用这根的最高价重估；
+ * 手动 Legs 引擎却曾经整根跳过，于是重跑出来的峰值系统性偏低。
+ */
+describe('manual peak parity with the campaign page', () => {
+  const HOUR = 60 * MIN;
+  const openedAt = new Date(t0).toISOString();
+  const closedAt = new Date(t0 + 3 * HOUR).toISOString();
+
+  const campaign = {
+    id: 'parity-campaign',
+    user_id: 'user-1',
+    campaign_code: 'C-PARITY',
+    symbol: 'TESTUSDT',
+    direction: 'main_long',
+    status: 'closed_profit',
+    strategy_template: 'custom',
+    title: 'parity',
+    opened_at: openedAt,
+    closed_at: closedAt,
+    initial_main_size_usdt: 1_000,
+    initial_leverage: 1,
+    final_realized_pnl: 100,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    importance_weight: 0,
+    notes: null,
+    actual_evolution: [],
+    deviation_notes: {},
+    created_at: openedAt,
+    updated_at: closedAt,
+  } as TradeCampaign;
+
+  // 主力开在第 0 根（00:00~01:00）的正中间 00:30；这根的最高价 120 → 浮盈 200
+  const mainRecord = {
+    id: 'parity-main-record',
+    symbol: 'TESTUSDT',
+    side: 'LONG',
+    type: 'MARKET',
+    action: 'CLOSE',
+    entryPrice: 100,
+    exitPrice: 110,
+    quantity: 10,
+    leverage: 1,
+    pnl: 100,
+    fee: 0,
+    slippage: 0,
+    openTime: t0 + 30 * MIN,
+    closeTime: t0 + 3 * HOUR,
+  } satisfies TradeRecord;
+
+  const mainLeg = {
+    id: 'parity-main',
+    trade_record_id: 'parity-main-record',
+    leg_sequence: 1,
+    source: 'live',
+    leg_role: 'main_open',
+    direction: 'long',
+    pre_simulated_time: openedAt,
+    pre_entry_price: 100,
+    pre_position_size: 1_000,
+    leverage: 1,
+    post_simulated_close_time: closedAt,
+  } as TradeJournal;
+
+  // 开仓那根之后再没到过 120：跳过整根就只剩第 1 根的 111（浮盈 110）
+  const klines: KlineData[] = [
+    { time: t0, open: 100, high: 120, low: 99, close: 101, volume: 0 },
+    { time: t0 + HOUR, open: 101, high: 111, low: 100, close: 105, volume: 0 },
+    { time: t0 + 2 * HOUR, open: 105, high: 108, low: 103, close: 107, volume: 0 },
+    { time: t0 + 3 * HOUR, open: 107, high: 110, low: 106, close: 110, volume: 0 },
+  ];
+
+  it('主力开在 K 线中间时，未改动的一次重跑与战役页的峰值浮盈一致', () => {
+    const params = buildActualSimulationParams(campaign, [mainLeg], [mainRecord]);
+    expect(params).not.toBeNull();
+    const manualLegs = buildManualLegs(params!, [mainLeg], klines, [mainRecord]);
+    const rerun = simulateManualLegScenario({ ...params!, manual_legs: manualLegs }, klines);
+
+    const campaignPeak = computeDecisionAccuracy(campaign, [mainLeg], [mainRecord], klines).campaign_max_profit_real;
+    expect(campaignPeak).toBeCloseTo(200, 6);
+    expect(rerun.peak_unrealized_pnl).toBeCloseTo(campaignPeak, 2);
+  });
+});
+
+/**
+ * 多腿在同一根 K 线里换状态时的峰值对齐。
+ *
+ * 战役页 computeCampaignPnlExtremes 在一根 K 线里逐个还原持仓状态
+ * （K 线起点、每条腿开仓、每条腿平仓前一刻与平仓时刻、K 线终点），各自用最高 / 最低价重估；
+ * 手动 Legs 引擎若把「这根 K 线里碰过的腿」一律当作同时持有、同在极值价上估，
+ * 对冲在高点之后才成交、同一根里先平后开、整点换手这几种形状都会与战役页对不上。
+ */
+describe('manual peak parity with the campaign page: multi-leg transitions inside a bar', () => {
+  const HOUR = 60 * MIN;
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  interface LegSpec {
+    id: string;
+    role: TradeJournal['leg_role'];
+    side: 'LONG' | 'SHORT';
+    entry: number;
+    exit: number;
+    /** U 本位是币数；币本位是张数（每张 10 USD）。 */
+    qty: number;
+    openMs: number;
+    closeMs: number;
+    coin?: boolean;
+  }
+
+  const notionalOf = (spec: LegSpec) => (spec.coin ? spec.qty * 10 : spec.qty * spec.entry);
+  const pnlOf = (spec: LegSpec) => (spec.side === 'LONG' ? 1 : -1) * (spec.exit - spec.entry) * notionalOf(spec) / spec.entry;
+
+  function runBoth(direction: 'main_long' | 'main_short', specs: LegSpec[], klines: KlineData[]) {
+    const openedAt = Math.min(...specs.map(spec => spec.openMs));
+    const closedAt = Math.max(...specs.map(spec => spec.closeMs));
+    const totalPnl = specs.reduce((sum, spec) => sum + pnlOf(spec), 0);
+    const campaign = {
+      id: 'multi-parity',
+      user_id: 'user-1',
+      campaign_code: 'C-MULTI',
+      symbol: 'TESTUSDT',
+      direction,
+      status: totalPnl >= 0 ? 'closed_profit' : 'closed_loss',
+      strategy_template: 'custom',
+      title: 'multi parity',
+      opened_at: iso(openedAt),
+      closed_at: iso(closedAt),
+      initial_main_size_usdt: notionalOf(specs[0]),
+      initial_leverage: 1,
+      final_realized_pnl: totalPnl,
+      final_r_multiple: null,
+      peak_unrealized_pnl: null,
+      peak_drawdown: null,
+      importance_weight: 0,
+      notes: null,
+      actual_evolution: [],
+      deviation_notes: {},
+      created_at: iso(openedAt),
+      updated_at: iso(closedAt),
+    } as TradeCampaign;
+    const records = specs.map(spec => ({
+      id: `${spec.id}-record`,
+      symbol: 'TESTUSDT',
+      side: spec.side,
+      type: 'MARKET',
+      action: 'CLOSE',
+      entryPrice: spec.entry,
+      exitPrice: spec.exit,
+      quantity: spec.qty,
+      leverage: 1,
+      pnl: pnlOf(spec),
+      fee: 0,
+      slippage: 0,
+      openTime: spec.openMs,
+      closeTime: spec.closeMs,
+      ...(spec.coin ? { settlementMode: 'coin' as const, contracts: spec.qty, contractSizeUsd: 10 } : {}),
+    }) satisfies TradeRecord);
+    const legs = specs.map((spec, index) => ({
+      id: spec.id,
+      trade_record_id: `${spec.id}-record`,
+      leg_sequence: index + 1,
+      source: 'live',
+      leg_role: spec.role,
+      direction: spec.side === 'LONG' ? 'long' : 'short',
+      pre_simulated_time: iso(spec.openMs),
+      pre_entry_price: spec.entry,
+      pre_position_size: notionalOf(spec),
+      leverage: 1,
+      post_simulated_close_time: iso(spec.closeMs),
+    }) as TradeJournal);
+
+    const params = buildActualSimulationParams(campaign, legs, records);
+    expect(params).not.toBeNull();
+    const manualLegs = buildManualLegs(params!, legs, klines, records);
+    expect(manualLegs).toHaveLength(specs.length);
+    const rerun = simulateManualLegScenario({ ...params!, manual_legs: manualLegs }, klines);
+    const page = computeDecisionAccuracy(campaign, legs, records, klines);
+    return { rerun, page };
+  }
+
+  const bar = (hours: number, open: number, high: number, low: number, close: number): KlineData => ({
+    time: t0 + hours * HOUR,
+    open,
+    high,
+    low,
+    close,
+    volume: 0,
+  });
+
+  it('对冲在高点之后才于 K 线中间成交：峰值是高点时只有主力的那一刻（300），不是两腿同在高点（210）', () => {
+    const { rerun, page } = runBoth('main_long', [
+      { id: 'main', role: 'main_open', side: 'LONG', entry: 100, exit: 110, qty: 10, openMs: t0, closeMs: t0 + 3 * HOUR },
+      { id: 'hedge', role: 'hedge_initial_a', side: 'SHORT', entry: 112, exit: 110, qty: 5, openMs: t0 + 100 * MIN, closeMs: t0 + 3 * HOUR },
+    ], [
+      bar(0, 100, 105, 99, 104),
+      bar(1, 104, 130, 100, 112),
+      bar(2, 112, 115, 105, 110),
+      bar(3, 110, 111, 109, 110),
+    ]);
+    expect(page.campaign_max_profit_real).toBeCloseTo(300, 6);
+    expect(rerun.final_realized_pnl).toBeCloseTo(110, 6);
+    expect(rerun.peak_unrealized_pnl).toBeCloseTo(page.campaign_max_profit_real, 2);
+    expect(rerun.peak_drawdown).toBeCloseTo(page.campaign_max_drawdown_real, 2);
+  });
+
+  it('主力持有期间一根 K 线内开平完的对冲：峰值仍是 K 线起点只有主力的那一刻', () => {
+    const { rerun, page } = runBoth('main_long', [
+      { id: 'main', role: 'main_open', side: 'LONG', entry: 100, exit: 110, qty: 10, openMs: t0, closeMs: t0 + 3 * HOUR },
+      { id: 'hedge', role: 'hedge_initial_a', side: 'SHORT', entry: 115, exit: 116, qty: 5, openMs: t0 + 70 * MIN, closeMs: t0 + 110 * MIN },
+    ], [
+      bar(0, 100, 105, 99, 104),
+      bar(1, 104, 130, 100, 112),
+      bar(2, 112, 115, 105, 110),
+      bar(3, 110, 111, 109, 110),
+    ]);
+    expect(page.campaign_max_profit_real).toBeCloseTo(300, 6);
+    expect(rerun.peak_unrealized_pnl).toBeCloseTo(page.campaign_max_profit_real, 2);
+    expect(rerun.peak_drawdown).toBeCloseTo(page.campaign_max_drawdown_real, 2);
+  });
+
+  it('同一根 K 线里主力先平、再入场：不把已平的主力和新入场同时放在高点上叠加', () => {
+    const { rerun, page } = runBoth('main_long', [
+      { id: 'main', role: 'main_open', side: 'LONG', entry: 100, exit: 120, qty: 10, openMs: t0, closeMs: t0 + 70 * MIN },
+      { id: 'reentry', role: 'reentry_main', side: 'LONG', entry: 127, exit: 112, qty: 10, openMs: t0 + 100 * MIN, closeMs: t0 + 3 * HOUR },
+    ], [
+      bar(0, 100, 105, 99, 104),
+      bar(1, 104, 130, 100, 112),
+      bar(2, 112, 115, 105, 110),
+      bar(3, 110, 113, 109, 112),
+    ]);
+    // 高点 130 时要么主力持有（+300），要么主力已平（+200）再加入场腿（+30）
+    expect(page.campaign_max_profit_real).toBeCloseTo(300, 6);
+    expect(rerun.peak_unrealized_pnl).toBeCloseTo(page.campaign_max_profit_real, 2);
+    expect(rerun.peak_drawdown).toBeCloseTo(page.campaign_max_drawdown_real, 2);
+  });
+
+  it('币本位空头主力 + 多头对冲，对冲整点开、整点平：平仓那一刻按平仓前那根 K 线的价格重估主力', () => {
+    const { rerun, page } = runBoth('main_short', [
+      { id: 'main', role: 'main_open', side: 'SHORT', entry: 100, exit: 95, qty: 100, openMs: t0, closeMs: t0 + 3 * HOUR, coin: true },
+      { id: 'hedge', role: 'hedge_initial_a', side: 'LONG', entry: 98, exit: 96, qty: 50, openMs: t0 + HOUR, closeMs: t0 + 2 * HOUR, coin: true },
+    ], [
+      bar(0, 100, 101, 98, 99),
+      bar(1, 99, 99, 80, 96),
+      bar(2, 96, 97, 90, 95),
+      bar(3, 95, 96, 94, 95),
+    ]);
+    // 01:00 这根的最低 80：对冲平掉（已实现 −10.20）之后主力空单浮盈 +200 → 189.80
+    expect(page.campaign_max_profit_real).toBeCloseTo(200 - 500 * 2 / 98, 6);
+    expect(rerun.peak_unrealized_pnl).toBeCloseTo(page.campaign_max_profit_real, 2);
+    expect(rerun.peak_drawdown).toBeCloseTo(page.campaign_max_drawdown_real, 2);
   });
 });

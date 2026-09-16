@@ -1,0 +1,372 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
+import type { AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
+import { formatCampaignPayoffRatio } from '@/lib/campaignAnalysis';
+import { buildCampaignPnlOverviewItems, buildCampaignPnlOverviewNote } from '@/lib/campaignPnlOverview';
+import { deriveCounterfactualRiskAnchors, simulateCampaign, simulateManualLegScenario } from '@/lib/campaignSimulationEngine';
+import {
+  buildCounterfactualOverviewMetrics,
+  buildCounterfactualOverviewNoteInput,
+  buildCounterfactualRunContext,
+  computeCounterfactualPayoffRatio,
+  resolveCounterfactualRiskAnchors,
+  type CounterfactualOverviewShared,
+} from '@/lib/counterfactualOverview';
+import type {
+  CampaignCounterfactualManualLeg,
+  CampaignCounterfactualParams,
+  CampaignCounterfactualResult,
+} from '@/types/journal';
+
+const MIN = 60_000;
+const t0 = new Date('2026-01-01T00:00:00Z').getTime();
+const iso = (offsetMinutes: number) => new Date(t0 + offsetMinutes * MIN).toISOString();
+
+function leg(overrides: Partial<CampaignCounterfactualManualLeg> & Pick<CampaignCounterfactualManualLeg, 'id' | 'leg_role'>): CampaignCounterfactualManualLeg {
+  return {
+    direction: 'long',
+    open_time: iso(0),
+    close_time: iso(30),
+    entry_price: 100,
+    exit_price: 100,
+    size_usdt: 1000,
+    leverage: 3,
+    enabled: true,
+    ...overrides,
+  };
+}
+
+/** 主力 1000 @100 平 106，镜像 500 @100 平 104；对冲 A/B 挂 98 / 96 → d = 4%，敞口 1500，L = 60。 */
+const FULL_LEGS: CampaignCounterfactualManualLeg[] = [
+  leg({ id: 'main', leg_role: 'main_open', exit_price: 106 }),
+  leg({ id: 'mirror', leg_role: 'mirror_tp', size_usdt: 500, exit_price: 104 }),
+  leg({ id: 'ha', leg_role: 'hedge_initial_a', direction: 'short', entry_price: 98, exit_price: 98, size_usdt: 500, open_time: iso(1), close_time: iso(2) }),
+  leg({ id: 'hb', leg_role: 'hedge_initial_b', direction: 'short', entry_price: 96, exit_price: 96, size_usdt: 500, open_time: iso(1), close_time: iso(2) }),
+];
+
+function params(manualLegs: CampaignCounterfactualManualLeg[], extra: Partial<CampaignCounterfactualParams> = {}): CampaignCounterfactualParams {
+  return {
+    entry: { time: iso(0), price: 100, size_usdt: 1000, direction: 'long', leverage: 3 },
+    hedge_a: { offset_pct: -2, size_pct: 50 },
+    hedge_b: { offset_pct: -4, size_pct: 50 },
+    mirror_tp: { offset_pct: 2, size_pct: 50 },
+    rolling: { enabled: false, trigger_rise_pct: 10, min_interval_minutes: 60, new_hedge_offset_pct: -2, rolling_hedge_size_pct: 100 },
+    exit_rule: 'manual_only',
+    manual_legs: manualLegs,
+    ...extra,
+  };
+}
+
+const summary: AsymmetricRiskMetricsSummary = {
+  sampleCount: 2,
+  winCount: 1,
+  lossCount: 1,
+  excludedPayoffCount: 0,
+  dsi: 1,
+  usi: 2,
+  upsideStandardDeviation: null,
+  downsideStandardDeviation: null,
+  upsidePotential: null,
+  downsidePotential: null,
+  upr: null,
+  omega: null,
+  sortino: null,
+  sortinoIdentityRhs: null,
+  winSquaredSum: 4,
+  lossSquaredSum: 1,
+};
+
+const shared: CounterfactualOverviewShared = {
+  strategyTemplate: 'main_dual_hedge_mirror_tp',
+  expectedWinRate: 0.5,
+  payoffRatioSampleCount: 2,
+  performanceLoading: false,
+  performanceError: false,
+  asymmetricRiskSummary: summary,
+  currentAccountEquity: 10_000,
+  isOwner: true,
+};
+
+const NO_KLINES: never[] = [];
+
+function itemsByKey(metrics: ReturnType<typeof buildCounterfactualOverviewMetrics>) {
+  const items = buildCampaignPnlOverviewItems(metrics);
+  return { items, byKey: Object.fromEntries(items.map(item => [item.key, item])) };
+}
+
+describe('buildCounterfactualOverviewMetrics', () => {
+  it('新行：L / 名义 / d / 杠杆读落库字段，盈亏比 = 已实现 ÷ L，绝不是 result.profit_capture_ratio', () => {
+    const branchParams = params(FULL_LEGS);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    expect(result.initial_expected_max_loss).toBeCloseTo(60, 4);
+    expect(result.initial_main_exposure_notional).toBeCloseTo(1500, 4);
+    expect(result.expected_max_drawdown_pct).toBeCloseTo(4, 4);
+    expect(result.main_leverage).toBe(3);
+
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
+    const { items, byKey } = itemsByKey(metrics);
+    expect(items).toHaveLength(12);
+
+    // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
+    expect(result.final_realized_pnl).toBeCloseTo(80, 4);
+    expect(metrics.payoffRatio).toBeCloseTo((80 / 60) * 100, 6);
+    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 60) * 100));
+    // 峰值权益 = 80 → profit_capture_ratio = 100，与 b 完全不同，盈亏比列不能印它
+    expect(result.profit_capture_ratio).toBe(100);
+    expect(byKey.payoffRatio.value).not.toContain('100.0%');
+    expect(byKey.realizedPnl.value).toBe('80.00 USDT');
+    expect(byKey.mainLeverage.value).toBe('3x');
+    expect(byKey.initialMainExposureNotional.value).toBe('1500.00 USDT');
+    expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
+    expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
+    // 已了结（每条腿都有平仓时刻）→ Q = max(1.3333, 1) ÷ 4 = 0.33
+    expect(byKey.opportunityQuality.value).toBe('0.33');
+    // E = 0.5 × 1.3333 − 0.5 = +0.17R；G = 1 + 1.3333 × 0.1 = 1.13
+    expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
+    expect(byKey.geometricExpectancy.value).toBe('1.13');
+    // 盈利 → USI 组，b² / n = 1.7778 / 1，组内占比 1.7778 / 4
+    expect(byKey.asymmetricRiskContribution.value).toBe('USI · b²/n = 1.7778（组内 44.4%）');
+    expect(byKey.todayAccountEquity.value).toBe('10000.00 USDT');
+    // 没有主力开仓资产快照 → 退到今日总资产，脚注跟着说明
+    expect(metrics.initialRisk).toEqual({ drawdownFraction: 60 / 10_000, source: 'current_account_fallback' });
+    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)))
+      .toBe('期望口径：2 场有效战役，实时胜率 50.00%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
+  });
+
+  it('老行（结果上没有锚字段）按 params 重算，得到与新行完全一样的四个锚', () => {
+    const branchParams = params(FULL_LEGS);
+    const fresh = simulateManualLegScenario(branchParams, NO_KLINES);
+    const legacy: CampaignCounterfactualResult = {
+      final_realized_pnl: fresh.final_realized_pnl,
+      final_r_multiple: fresh.final_r_multiple,
+      peak_unrealized_pnl: fresh.peak_unrealized_pnl,
+      peak_drawdown: fresh.peak_drawdown,
+      profit_capture_ratio: fresh.profit_capture_ratio,
+      events: fresh.events,
+      legs_summary: fresh.legs_summary,
+      state_segments: fresh.state_segments,
+      sop_score: 0,
+    };
+    expect(resolveCounterfactualRiskAnchors({ params: branchParams, result: legacy }, 'main_dual_hedge_mirror_tp'))
+      .toEqual(deriveCounterfactualRiskAnchors(branchParams));
+
+    const legacyMetrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: legacy }, shared);
+    const freshMetrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: fresh }, shared);
+    const strip = ({ helpOverrides: _h, extraNotes: _e, ...rest }: typeof freshMetrics) => rest;
+    expect(strip(legacyMetrics)).toEqual(strip(freshMetrics));
+    expect(itemsByKey(legacyMetrics).byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
+  });
+
+  it('落库的锚优先于按 params 重算：四个字段都在就一律读落库值，盈亏比也按落库的 L 算', () => {
+    const branchParams = params(FULL_LEGS);
+    const fresh = simulateManualLegScenario(branchParams, NO_KLINES);
+    // params 会推出 60 / 1500 / 4% / 3x；故意落库一组完全不同的值，哪边赢一眼可见
+    const stored: CampaignCounterfactualResult = {
+      ...fresh,
+      initial_expected_max_loss: 123,
+      initial_main_exposure_notional: 999,
+      expected_max_drawdown_pct: 7,
+      main_leverage: 9,
+    };
+    expect(resolveCounterfactualRiskAnchors({ params: branchParams, result: stored }, 'main_dual_hedge_mirror_tp')).toEqual({
+      initialExpectedMaxLoss: 123,
+      initialMainExposureNotional: 999,
+      expectedMaxDrawdownPct: 7,
+      mainLeverage: 9,
+    });
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: stored }, shared);
+    const { byKey } = itemsByKey(metrics);
+    expect(byKey.initialExpectedMaxLoss.value).toBe('123.00 USDT');
+    expect(byKey.initialMainExposureNotional.value).toBe('999.00 USDT');
+    expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
+    expect(byKey.mainLeverage.value).toBe('9x');
+    expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);
+    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 123) * 100));
+  });
+
+  it('缺 main_leverage 键的行按老行处理：整组退回 params 重算，不混用半套落库值', () => {
+    const branchParams = params(FULL_LEGS);
+    const fresh = simulateManualLegScenario(branchParams, NO_KLINES);
+    const { main_leverage: _omitted, ...withoutLeverage } = {
+      ...fresh,
+      initial_expected_max_loss: 123,
+      initial_main_exposure_notional: 999,
+      expected_max_drawdown_pct: 7,
+    };
+    expect('main_leverage' in withoutLeverage).toBe(false);
+    expect(resolveCounterfactualRiskAnchors({ params: branchParams, result: withoutLeverage }, 'main_dual_hedge_mirror_tp')).toEqual({
+      initialExpectedMaxLoss: 60,
+      initialMainExposureNotional: 1500,
+      expectedMaxDrawdownPct: 4,
+      mainLeverage: 3,
+    });
+    const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result: withoutLeverage }, shared));
+    expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
+    expect(byKey.mainLeverage.value).toBe('3x');
+  });
+
+  it('main_only 战役的老 SOP 行按 main_only 模板重算：没有保护线 → L = 0，L 派生项印「—」而不是被默认模板造出止损线', () => {
+    // 无手动腿 → SOP 路径；主力 1000 @100，三根 K 线走到 106，manual_only 不平仓、末根收盘强制结算 → +60
+    const sopParams = params([]);
+    const klines = [0, 1, 2].map(offset => ({
+      time: t0 + offset * MIN,
+      open: 100 + offset * 3,
+      high: 100 + offset * 3,
+      low: 100 + offset * 3,
+      close: 100 + offset * 3,
+      volume: 1,
+    }));
+    const fresh = simulateCampaign(sopParams, klines, 'main_only');
+    expect(fresh.final_realized_pnl).toBeCloseTo(60, 4);
+    expect(fresh.initial_expected_max_loss).toBe(0);
+    expect(fresh.final_r_multiple).toBe(0);
+    // 陷阱本身：同一份 params 按默认双向对冲模板重算，会凭空得到 L > 0
+    expect(deriveCounterfactualRiskAnchors(sopParams, 'main_dual_hedge_mirror_tp').initialExpectedMaxLoss).toBeGreaterThan(0);
+
+    const {
+      initial_expected_max_loss: _l,
+      initial_main_exposure_notional: _n,
+      expected_max_drawdown_pct: _d,
+      main_leverage: _lev,
+      ...legacy
+    } = fresh;
+    const mainOnlyShared: CounterfactualOverviewShared = { ...shared, strategyTemplate: 'main_only' };
+    expect(resolveCounterfactualRiskAnchors({ params: sopParams, result: legacy }, 'main_only')).toEqual({
+      initialExpectedMaxLoss: 0,
+      initialMainExposureNotional: 1000,
+      expectedMaxDrawdownPct: 0,
+      mainLeverage: 3,
+    });
+    const legacyMetrics = buildCounterfactualOverviewMetrics({ params: sopParams, result: legacy }, mainOnlyShared);
+    const freshMetrics = buildCounterfactualOverviewMetrics({ params: sopParams, result: fresh }, mainOnlyShared);
+    const strip = ({ helpOverrides: _h, extraNotes: _e, ...rest }: typeof freshMetrics) => rest;
+    expect(strip(legacyMetrics)).toEqual(strip(freshMetrics));
+    const { byKey } = itemsByKey(legacyMetrics);
+    expect(byKey.realizedPnl.value).toBe('60.00 USDT');
+    for (const key of ['initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'payoffRatio', 'opportunityQuality', 'arithmeticExpectancy', 'geometricExpectancy']) {
+      expect(byKey[key].value, key).toBe('—');
+    }
+    expect(legacyMetrics.extraNotes?.payoffRatio).toContainEqual({ warning: '本分支没有初始对冲 A/B，读不到止损线，本项不计算。' });
+  });
+
+  it('L = 0（手动腿里没有初始对冲 A/B）：七个 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
+    const mainOnly = params([leg({ id: 'main', leg_role: 'main_open', exit_price: 106 })]);
+    const result = simulateManualLegScenario(mainOnly, NO_KLINES);
+    expect(result.initial_expected_max_loss).toBe(0);
+    // 老逻辑会把 L = 0 时的 R 记成 0，这个 0 绝不能流到盈亏比列上
+    expect(result.final_r_multiple).toBe(0);
+
+    const metrics = buildCounterfactualOverviewMetrics({ params: mainOnly, result }, shared);
+    const { byKey } = itemsByKey(metrics);
+    const lDerived = [
+      'initialExpectedMaxLoss',
+      'expectedMaxDrawdownPct',
+      'payoffRatio',
+      'asymmetricRiskContribution',
+      'opportunityQuality',
+      'arithmeticExpectancy',
+      'geometricExpectancy',
+    ];
+    for (const key of lDerived) {
+      expect(byKey[key].value, key).toBe('—');
+      expect(byKey[key].value, key).not.toContain('0.00');
+    }
+    expect(byKey.realizedPnl.value).toBe('60.00 USDT');
+    expect(metrics.payoffRatio).toBeNull();
+    expect(metrics.initialRisk).toBeNull();
+    for (const key of lDerived) {
+      expect(metrics.extraNotes?.[key as keyof typeof metrics.extraNotes]).toContainEqual({
+        warning: '手动 Legs 里没有初始对冲 A/B，读不到止损线，本项不计算。',
+      });
+    }
+
+    render(<CampaignPnlOverviewPanel title="反事实盈亏概览 · 未保存" items={itemsByKey(metrics).items} note="" />);
+    fireEvent.click(screen.getByRole('button', { name: '盈亏比说明' }));
+    expect(screen.getByText('手动 Legs 里没有初始对冲 A/B，读不到止损线，本项不计算。')).toBeInTheDocument();
+  });
+
+  it('峰值浮盈的帮助带上本次运行的 K 线周期与根数；老行没有 run_context 时说明按收盘价估计', () => {
+    const withContext = params(FULL_LEGS, {
+      run_context: { interval: '1h', from: iso(0), to: iso(120), kline_count: 3, ran_at: iso(200) },
+    });
+    const result = simulateManualLegScenario(withContext, NO_KLINES);
+    const metrics = buildCounterfactualOverviewMetrics({ params: withContext, result }, shared);
+    expect(metrics.extraNotes?.peakUnrealizedPnl?.[0]).toContain('1h K 线共 3 根');
+    // 手动引擎与战役页共用权益路径算法：一根 K 线里逐个还原持仓状态，
+    // 不再是「所有仍持有的腿同在一个极值价上估」
+    expect(metrics.extraNotes?.peakUnrealizedPnl?.[0]).toContain('与战役页「盈亏概览」同一算法');
+    expect(metrics.extraNotes?.peakUnrealizedPnl?.[0]).toContain('逐个还原持仓状态');
+    expect(metrics.extraNotes?.peakUnrealizedPnl?.[0]).not.toContain('仍持有的腿');
+
+    const legacyMetrics = buildCounterfactualOverviewMetrics({ params: params(FULL_LEGS), result }, shared);
+    expect(legacyMetrics.extraNotes?.peakUnrealizedPnl?.[0]).toContain('未记录运行时的 K 线周期');
+    expect(legacyMetrics.extraNotes?.peakUnrealizedPnl?.[0]).toContain('收盘价');
+  });
+
+  it('SOP 推演分支的峰值告诫按引擎写：run_context 在也不能说「最高价 / 最低价」', () => {
+    // run_context 是在分流到手动 / SOP 之前挂上去的，SOP 分支同样带着它——
+    // 而 simulateCampaign 只在每根 K 线的收盘价上重估权益。
+    const sopParams = params([], {
+      run_context: { interval: '1h', from: iso(0), to: iso(120), kline_count: 3, ran_at: iso(200) },
+    });
+    const klines = [0, 1, 2].map(offset => ({
+      time: t0 + offset * MIN,
+      open: 100 + offset * 3,
+      high: 100 + offset * 3,
+      low: 100 + offset * 3,
+      close: 100 + offset * 3,
+      volume: 1,
+    }));
+    const sopResult = simulateCampaign(sopParams, klines, 'main_dual_hedge_mirror_tp');
+    const caveat = buildCounterfactualOverviewMetrics({ params: sopParams, result: sopResult }, shared)
+      .extraNotes?.peakUnrealizedPnl?.[0];
+    expect(caveat).toContain('1h K 线共 3 根');
+    expect(caveat).toContain('只在每根 K 线的收盘价上重估权益');
+    expect(caveat).not.toContain('逐个还原持仓状态');
+    expect(caveat).not.toContain('最高价、最低价重估');
+  });
+
+  it('DSI/USI 贡献标成假设值：本场反事实不在账户样本内', () => {
+    const branchParams = params(FULL_LEGS);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
+    render(<CampaignPnlOverviewPanel title="反事实盈亏概览" items={itemsByKey(metrics).items} note="" />);
+    fireEvent.click(screen.getByRole('button', { name: '本场 b 对 DSI/USI 的贡献说明' }));
+    expect(screen.getByText(/假设值：本场反事实不在账户样本内/)).toBeInTheDocument();
+    expect(screen.getByText('本场 b = 1.33，n = 1')).toBeInTheDocument();
+  });
+
+  it('非所有者看不到今日总资产，也不用它当几何期望的资产分母', () => {
+    const branchParams = params(FULL_LEGS);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, { ...shared, isOwner: false });
+    expect(metrics.todayAccountEquity).toBeNull();
+    expect(metrics.initialRisk).toBeNull();
+    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)))
+      .toBe('期望口径：2 场有效战役，实时胜率 50.00%。');
+  });
+});
+
+describe('computeCounterfactualPayoffRatio', () => {
+  it('L ≤ 0 时为 null 而不是 0', () => {
+    expect(computeCounterfactualPayoffRatio(80, 0)).toBeNull();
+    expect(computeCounterfactualPayoffRatio(80, -1)).toBeNull();
+    expect(computeCounterfactualPayoffRatio(80, 40)).toBe(200);
+    expect(computeCounterfactualPayoffRatio(-20, 40)).toBe(-50);
+  });
+});
+
+describe('buildCounterfactualRunContext', () => {
+  it('记录周期、首末 K 线开盘时刻、根数与运行时刻；没有 K 线时为 null', () => {
+    const klines = [0, 60, 120].map(offset => ({ time: t0 + offset * MIN, open: 1, high: 1, low: 1, close: 1, volume: 0 }));
+    expect(buildCounterfactualRunContext(klines, '1h', new Date(t0 + 200 * MIN))).toEqual({
+      interval: '1h',
+      from: iso(0),
+      to: iso(120),
+      kline_count: 3,
+      ran_at: iso(200),
+    });
+    expect(buildCounterfactualRunContext([], '1m')).toBeNull();
+  });
+});

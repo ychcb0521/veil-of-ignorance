@@ -30,6 +30,23 @@ import type {
 } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
+/**
+ * 点「一键运行」那一刻编辑器里的两份腿：
+ *   · baselineLegs 上一次重置（换战役 / 还原 Legs）时 buildManualLegs 的输出，即「原始」；
+ *   · manualLegs   编辑器当前的全部腿（含停用），页面用它区分「停用」与「删除」。
+ * 页面拿这两份与 params.manual_legs（仅启用）算改动摘要，随分支一起落库。
+ */
+export interface CampaignWhatIfRunContext {
+  baselineLegs: CampaignCounterfactualManualLeg[];
+  manualLegs: CampaignCounterfactualManualLeg[];
+}
+
+/** 「载入到 Legs 副本」：nonce 变一次就用 legs 的副本整体替换编辑器里的腿。 */
+export interface CampaignWhatIfLoadLegsRequest {
+  nonce: number;
+  legs: CampaignCounterfactualManualLeg[];
+}
+
 interface Props {
   campaign: TradeCampaign;
   legs: TradeJournal[];
@@ -44,7 +61,14 @@ interface Props {
   klineTimeWindow: CampaignKlineTimeWindow;
   timezone?: string;
   whatIfRunning: boolean;
-  onRunWhatIf: (label: string, params: CampaignCounterfactualParams) => void;
+  onRunWhatIf: (label: string, params: CampaignCounterfactualParams, context: CampaignWhatIfRunContext) => void;
+  /**
+   * 把某条已保存分支的 manual_legs 载回编辑器。只在 nonce 变化时生效，替换整份腿并清掉选中；
+   * 保留原 id（永远不含 ':'，盘面竖线 id 靠它拆分）。下面的重置 effect 原样保留：之后
+   * legs / tradeRecords / 平仓价校正再变一次，载入的腿仍会被基线重置——与手工编辑同一条规则。
+   * 战役行只换对象不换推演参数（例如「保存备注」只写 deviation_notes）不算重置：底稿按内容认身份。
+   */
+  loadLegsRequest?: CampaignWhatIfLoadLegsRequest | null;
   /** 原始交易战役盘面标记：反事实盘面用作只读背景，避免丢失原始上下文。 */
   baseMarkers?: ChartMarker[];
   /** 原始交易战役盘面横向区间线：对冲/TP 等只读背景。 */
@@ -135,6 +159,7 @@ export function CampaignWhatIfEditor({
   timezone,
   whatIfRunning,
   onRunWhatIf,
+  loadLegsRequest = null,
   baseMarkers = [],
   baseTimeBoundPriceLines = [],
   baseVerticalLines = [],
@@ -142,9 +167,22 @@ export function CampaignWhatIfEditor({
 }: Props) {
   const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
   const sopDefaults = useMemo(() => buildPureSopParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
-  const baseDefaults = actualDefaults ?? sopDefaults;
+  /**
+   * 底稿按内容、不按对象身份认「换了底稿」。
+   *
+   * 页面上「保存备注」只改战役行的 deviation_notes，却会 setCampaign 换一个对象；推演参数一个字没变，
+   * 若底稿跟着换身份，下面的重置 effect 就把用户刚「载入到 Legs 副本」的腿或手改到一半的腿静默冲掉。
+   * 参数本来就是要落 jsonb 的纯 JSON，序列化成键再解析回来，键不变则引用不变。
+   */
+  const baseDefaultsKey = JSON.stringify(actualDefaults ?? sopDefaults);
+  const baseDefaults = useMemo(
+    () => JSON.parse(baseDefaultsKey) as CampaignCounterfactualParams | null,
+    [baseDefaultsKey],
+  );
   const [params, setParams] = useState<CampaignCounterfactualParams | null>(baseDefaults);
   const [manualLegs, setManualLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
+  // 最近一次重置产出的基线：改动摘要的「原始」一侧。只在重置 / 还原时写，编辑不动它。
+  const [baselineLegs, setBaselineLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
   const [label, setLabel] = useState('');
   const [selectedManualLegId, setSelectedManualLegId] = useState<string | null>(null);
   const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(1.1);
@@ -171,9 +209,25 @@ export function CampaignWhatIfEditor({
   const klinesReady = klines.length > 0;
   useEffect(() => {
     setParams(baseDefaults);
-    if (baseDefaults) setManualLegs(buildManualLegs(baseDefaults, legs, klinesRef.current, tradeRecords, legExitPriceCorrections));
+    if (baseDefaults) {
+      const baseline = buildManualLegs(baseDefaults, legs, klinesRef.current, tradeRecords, legExitPriceCorrections);
+      setBaselineLegs(baseline);
+      setManualLegs(baseline.map(leg => ({ ...leg })));
+    }
     setSelectedManualLegId(null);
   }, [baseDefaults, legs, klinesReady, tradeRecords, legExitPriceCorrections]);
+
+  // 「载入到 Legs 副本」：legs 走 ref、只认 nonce，避免父组件每次渲染都重新载入。
+  const loadLegsRequestRef = useRef(loadLegsRequest);
+  loadLegsRequestRef.current = loadLegsRequest;
+  const loadLegsNonce = loadLegsRequest?.nonce ?? null;
+  useEffect(() => {
+    if (loadLegsNonce == null) return;
+    const request = loadLegsRequestRef.current;
+    if (!request) return;
+    setManualLegs(request.legs.map(leg => ({ ...leg })));
+    setSelectedManualLegId(null);
+  }, [loadLegsNonce]);
 
   useEffect(() => {
     setChartRangeMultiplier(1.1);
@@ -212,7 +266,9 @@ export function CampaignWhatIfEditor({
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
-    setManualLegs(buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections));
+    const baseline = buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections);
+    setBaselineLegs(baseline);
+    setManualLegs(baseline.map(leg => ({ ...leg })));
     setParams(baseDefaults);
     setSelectedManualLegId(null);
   };
@@ -281,7 +337,7 @@ export function CampaignWhatIfEditor({
     onRunWhatIf(runLabel, {
       ...params,
       manual_legs: activeManualLegs,
-    });
+    }, { baselineLegs, manualLegs });
   };
 
   if (!params) {
@@ -536,7 +592,7 @@ export function CampaignWhatIfEditor({
           </table>
         </div>
 
-        {/* 「方案名 + 运行分析」按用户要求隐藏：保留手动 Legs 编辑器（盘面图 + 可编辑表格）用于查看，不再运行自定义 What-if。runManualScenario/label/onRunWhatIf 暂留备用，不删以保持其余反事实部分不变。 */}
+        {/* 方案名输入按用户要求隐藏：分支名在页面的「反事实盈亏概览 · 未保存」面板里起，默认来自改动摘要；label/setLabel 留着以备恢复。 */}
       </div>
     </div>
   );

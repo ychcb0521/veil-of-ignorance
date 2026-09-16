@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
@@ -7,13 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
-import { CampaignWhatIfEditor } from '@/components/journal/CampaignWhatIfEditor';
+import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
+import {
+  CampaignWhatIfEditor,
+  type CampaignWhatIfLoadLegsRequest,
+  type CampaignWhatIfRunContext,
+} from '@/components/journal/CampaignWhatIfEditor';
 import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
@@ -42,7 +46,6 @@ import {
   computeInitialExpectedMaxLoss,
   computeMirrorTpReductionPct,
   computeProfitCaptureRatio,
-  formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
 } from '@/lib/campaignAnalysis';
@@ -53,12 +56,15 @@ import {
 } from '@/lib/campaignRealizedPnl';
 import {
   computeCampaignExpectancies,
-  formatArithmeticExpectancy,
-  formatCampaignLeverage,
-  formatGeometricExpectancy,
   resolveCampaignMainLeverage,
   resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
+import {
+  buildCampaignPnlOverviewItems,
+  buildCampaignPnlOverviewNote,
+  pnlColor,
+  type CampaignPnlOverviewItem,
+} from '@/lib/campaignPnlOverview';
 import {
   buildCampaignChartContentTimeSpan,
   pickCampaignOverviewInterval,
@@ -68,13 +74,13 @@ import {
 import {
   fetchLegExitPriceCorrections,
   resolveLegExecution,
+  sameLegExitPriceCorrections,
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
 import {
   campaignStatusLabel,
   exportCampaignBoardPng,
-  type CampaignBoardPnlItem,
 } from '@/lib/campaignLegsPngExport';
 import { buildEmotionDiaryExportSummary } from '@/lib/emotionDiary';
 import { getDecisionEmotionDiaryByDate } from '@/lib/emotionDiaryApi';
@@ -86,6 +92,7 @@ import {
 } from '@/lib/campaignSnapshotTxtExport';
 import { campaignOperationTime, buildTradeRecordLookup, journalSimulatedCloseTime } from '@/lib/objectiveOperationTime';
 import {
+  createCounterfactual,
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
   getCampaignFullData,
@@ -96,7 +103,7 @@ import {
   type CampaignDeviationNote,
   listCounterfactuals,
   listVisibleCampaigns,
-  runAndPersistCustomCounterfactual,
+  runCustomCounterfactual,
 } from '@/lib/journalApi';
 import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
 import {
@@ -104,13 +111,25 @@ import {
   summarizeAsymmetricRiskMetrics,
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
-import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import {
   buildActualSimulationParams,
   buildManualLegs,
   computeManualLegDeviationCosts,
+  counterfactualTemplateFor,
+  isManualLegScenario,
   type ManualLegDeviationCost,
 } from '@/lib/campaignSimulationEngine';
+import {
+  COUNTERFACTUAL_NAME_MAX_LENGTH,
+  buildCounterfactualChangeSummary,
+  defaultCounterfactualName,
+  formatCounterfactualStamp,
+} from '@/lib/counterfactualChangeSummary';
+import {
+  buildCounterfactualOverviewMetrics,
+  buildCounterfactualOverviewNoteInput,
+  type CounterfactualOverviewShared,
+} from '@/lib/counterfactualOverview';
 import {
   buildCampaignReverseOrderPriceLines,
   buildForeignReplayOrderPriceLines,
@@ -122,7 +141,10 @@ import {
 } from '@/lib/campaignReverseOrderLines';
 import type {
   CampaignCounterfactual,
+  CampaignCounterfactualChangeSummary,
   CampaignCounterfactualParams,
+  CampaignCounterfactualResult,
+  CampaignCounterfactualRunContext,
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
@@ -149,55 +171,11 @@ type CampaignDetailNavigationState = {
   fromCampaignList?: boolean;
 };
 
-type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
-  help: ReactNode;
-  valueClassName?: string;
-  rightColumn?: boolean;
-};
-
-function pnlColor(value: number | null) {
-  if (value == null) return 'text-muted-foreground';
-  if (value > 0) return 'text-[#0ECB81]';
-  if (value < 0) return 'text-[#F6465D]';
-  return 'text-muted-foreground';
-}
-
-function pnlExportColor(value: number | null): string {
-  if (value == null || value === 0) return '#64748B';
-  return value > 0 ? '#0ECB81' : '#F6465D';
-}
-
-function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <span className="group/metric inline-flex items-center gap-0.5 text-muted-foreground">
-      <span>{label}</span>
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-label={`${label}说明`}
-            className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground opacity-20 transition-opacity hover:opacity-80 focus-visible:opacity-80 focus-visible:outline-none group-hover/metric:opacity-40"
-          >
-            <Info className="h-2.5 w-2.5" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          side="bottom"
-          sideOffset={4}
-          className="w-72 border-border bg-card p-3 text-[11px] leading-relaxed shadow-md"
-        >
-          <div className="font-medium text-foreground">{label}</div>
-          <div className="mt-1.5 space-y-1.5 text-muted-foreground">{children}</div>
-        </PopoverContent>
-      </Popover>
-    </span>
-  );
-}
-
 // 战役详情页统一用浏览器本地时区显示 K 线/模拟时间——与下方 Legs 列表（本地 getHours）
 // 和主图时间轴对齐。早先用 UTC 是因为误以为 Legs 列表是 UTC，实际它一直是本地时区。
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+/** 「没有校正」的唯一那份空对象：每次现造一个 {} 就等于告诉下游「校正变了」。 */
+const EMPTY_LEG_EXIT_PRICE_CORRECTIONS: LegExitPriceCorrections = {};
 
 function fmtMdHm(value: string | null) {
   if (!value) return '进行中';
@@ -261,6 +239,73 @@ function branchKindLabel(kind: CampaignCounterfactual['branch_kind']) {
   if (kind === 'pure_sop') return 'Pure SOP';
   if (kind === 'fix_one_deviation') return '修正分支';
   return 'What-if';
+}
+
+/**
+ * 已保存分支列表隐藏自动生成的「修正分支」（补齐 X），默认选中也只从可见分支里挑：
+ * 否则一条列表里看不见的行会顶着「反事实盈亏概览」面板和「删除」出现，而它正是元监控
+ * 「战役 SOP 经济成本」读的那批行。
+ */
+function isVisibleCounterfactualBranch(branch: CampaignCounterfactual): boolean {
+  return branch.branch_kind !== 'fix_one_deviation';
+}
+
+function firstVisibleCounterfactualId(branches: CampaignCounterfactual[]): string | null {
+  return branches.find(isVisibleCounterfactualBranch)?.id ?? null;
+}
+
+/** 刚运行、还没点「保存」的反事实：只活在页面状态里，离开页面即丢。 */
+type CounterfactualDraft = {
+  params: CampaignCounterfactualParams;
+  result: CampaignCounterfactualResult;
+};
+
+/** 反事实面板与真实「盈亏概览」走同一个构造器；这里只把分支翻译成纯数字对象再交给它。 */
+function buildCounterfactualOverview(
+  branch: { params: CampaignCounterfactualParams; result: CampaignCounterfactualResult },
+  shared: CounterfactualOverviewShared,
+): { items: CampaignPnlOverviewItem[]; note: string } {
+  const metrics = buildCounterfactualOverviewMetrics(branch, shared);
+  return {
+    items: buildCampaignPnlOverviewItems(metrics),
+    note: buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)),
+  };
+}
+
+/** 反事实面板标题下那几行小字：相对实际、逐腿改动、运行时的 K 线上下文。 */
+function CounterfactualOverviewSubtitle({
+  delta,
+  changeSummary,
+  runContext,
+  kindLine,
+}: {
+  delta: number | null;
+  changeSummary?: CampaignCounterfactualChangeSummary;
+  runContext?: CampaignCounterfactualRunContext;
+  kindLine?: string;
+}) {
+  return (
+    <div className="space-y-0.5">
+      <div>
+        相对实际
+        <span className={`ml-1 font-mono ${pnlColor(delta)}`}>
+          {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${delta.toFixed(2)} USDT`}
+        </span>
+        {kindLine && <span className="ml-2">{kindLine}</span>}
+      </div>
+      {changeSummary
+        ? (changeSummary.lines.length > 0
+          ? changeSummary.lines.map((line, index) => <div key={`${index}-${line}`}>{line}</div>)
+          : <div>与原始 Legs 无差异</div>)
+        : <div>早期分支未记录改动摘要</div>}
+      {runContext && (
+        <div>
+          运行于 {formatCounterfactualStamp(runContext.ran_at)} · {runContext.interval} K 线 {runContext.kline_count} 根
+          · {formatCounterfactualStamp(runContext.from)} ~ {formatCounterfactualStamp(runContext.to)}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function counterfactualLabel(role: string) {
@@ -615,7 +660,16 @@ export default function JournalCampaignDetailPage() {
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
-  const [pendingCounterfactualId, setPendingCounterfactualId] = useState<string | null>(null);
+  /** 本页删过的分支 id：删除之前发出的列表查询晚到时，用它把已删的行滤掉。 */
+  const deletedCounterfactualIdsRef = useRef(new Set<string>());
+  // 刚运行、尚未保存的反事实：只在页面状态里，点「保存」才 createCounterfactual。
+  const [counterfactualDraft, setCounterfactualDraft] = useState<CounterfactualDraft | null>(null);
+  const [counterfactualDraftName, setCounterfactualDraftName] = useState('');
+  const [counterfactualDraftSaving, setCounterfactualDraftSaving] = useState(false);
+  const [loadLegsRequest, setLoadLegsRequest] = useState<CampaignWhatIfLoadLegsRequest | null>(null);
+  const loadLegsNonceRef = useRef(0);
+  // 当前页面正在看的战役 id：保存 / 删除分支的 await 之后先对一下它，用户已切到别的战役就不再动列表。
+  const activeCampaignIdRef = useRef(id);
   const [whatIfRunning, setWhatIfRunning] = useState(false);
   // 用户对偏离行三列文字的手改覆盖（按行键 = legId），来自本地持久化；保存后下次打开仍在。
   const [deviationNotes, setDeviationNotes] = useState<Record<string, CampaignDeviationNote>>({});
@@ -643,6 +697,14 @@ export default function JournalCampaignDetailPage() {
     // 换战役必须连绝对预设一起重置：否则从某战役的「1月」视图进另一个 symbol，
     // 开场就带着一个月的拉取窗口。
     setChartRangeSelection({ kind: 'multiplier', multiplier: 3 });
+  }, [id]);
+
+  useEffect(() => {
+    // 换战役时草稿与「载入到 Legs 副本」请求都作废：它们只对当前战役有意义。
+    activeCampaignIdRef.current = id;
+    setCounterfactualDraft(null);
+    setCounterfactualDraftName('');
+    setLoadLegsRequest(null);
   }, [id]);
 
   useEffect(() => {
@@ -689,7 +751,7 @@ export default function JournalCampaignDetailPage() {
           });
         }
         setCounterfactuals(savedCounterfactuals);
-        setSelectedCounterfactualId(prev => prev ?? savedCounterfactuals[0]?.id ?? null);
+        setSelectedCounterfactualId(prev => prev ?? firstVisibleCounterfactualId(savedCounterfactuals));
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : String(error));
@@ -868,7 +930,7 @@ export default function JournalCampaignDetailPage() {
   const overviewInterval = useMemo(() => {
     // 拉取项 = 今天的行为，一个字不动：倍率按钮只是取景，绝不允许连带改周期。
     // 一旦改了，klines 的粒度会跟着变，而 klines 同时喂给 computeDecisionAccuracy /
-    // buildManualLegs / runAndPersistCustomCounterfactual —— 点一下缩放就能写脏已保存的反事实。
+    // buildManualLegs / runCustomCounterfactual —— 点一下缩放就能让一次运行的结果偏掉。
     const fetchedInterval = pickCampaignOverviewInterval({
       startMs: campaignKlineTimeWindow.fromTime,
       endMs: campaignKlineTimeWindow.toTime,
@@ -916,25 +978,35 @@ export default function JournalCampaignDetailPage() {
     chartRangeSelection,
   );
 
+  /**
+   * 平仓价校正：内容没变就**保留原来那个对象**，依赖也只收到真正用到的 symbol。
+   *
+   * 这份 state 会一路传到「Legs 副本」编辑器，编辑器的重置 effect 把它列在依赖里。
+   * 从前这里既把整个 campaign 挂在依赖上（「保存备注」只写 deviation_notes，也会换战役对象、
+   * 把这个 effect 整个重跑），又每次都塞一个新对象（早退的 {} 字面量、或新的 Object.fromEntries）——
+   * 于是点一下「保存备注」，用户刚「载入到 Legs 副本」或手改到一半的腿就被静默冲掉。
+   * 校正是纯函数产物，重算出来逐字相同的概率极高，内容相同就不该留下「变过」的痕迹。
+   */
+  const campaignSymbol = campaign?.symbol;
   useEffect(() => {
-    if (!campaign || legs.length === 0 || tradeRecords.length === 0) {
-      setLegExitPriceCorrections({});
+    if (!campaignSymbol || legs.length === 0 || tradeRecords.length === 0) {
+      setLegExitPriceCorrections(prev => (sameLegExitPriceCorrections(prev, EMPTY_LEG_EXIT_PRICE_CORRECTIONS) ? prev : EMPTY_LEG_EXIT_PRICE_CORRECTIONS));
       return;
     }
 
     let cancelled = false;
-    fetchLegExitPriceCorrections(campaign.symbol, legs, tradeRecords)
+    fetchLegExitPriceCorrections(campaignSymbol, legs, tradeRecords)
       .then(corrections => {
-        if (!cancelled) setLegExitPriceCorrections(corrections);
+        if (!cancelled) setLegExitPriceCorrections(prev => (sameLegExitPriceCorrections(prev, corrections) ? prev : corrections));
       })
       .catch(() => {
-        if (!cancelled) setLegExitPriceCorrections({});
+        if (!cancelled) setLegExitPriceCorrections(prev => (sameLegExitPriceCorrections(prev, EMPTY_LEG_EXIT_PRICE_CORRECTIONS) ? prev : EMPTY_LEG_EXIT_PRICE_CORRECTIONS));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [campaign, legs, tradeRecords]);
+  }, [campaignSymbol, legs, tradeRecords]);
 
   const accuracy = useMemo(
     () => (campaign
@@ -1032,225 +1104,32 @@ export default function JournalCampaignDetailPage() {
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
-    const realizedPnl = pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl;
     const pnlSettlement = settlement;
     // 系统一直算得出这个差额，却从来不显示——分歧被静默吞掉正是「两页两个数」能长期存在的原因。
     const pnlDrift = pnlSettlement && hasMaterialDrift(pnlSettlement) ? pnlSettlement.drift : null;
-    const payoffRatio = campaignMetricValues?.profitCaptureRatio ?? null;
-    const opportunityQuality = campaignMetricValues?.opportunityQuality ?? null;
-    const arithmeticExpectancy = campaignMetricValues?.arithmeticExpectancy ?? null;
-    const geometricExpectancy = campaignMetricValues?.geometricExpectancy ?? null;
-    const expectedDrawdownPct = campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0;
-    const expectedWinRate = campaignPerformance?.expectedWinRate ?? null;
-    const mainLeverage = resolveCampaignMainLeverage(campaign, legs, tradeRecords);
-    const initialMainExposureNotional = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
-    const todayAccountEquity = isOwner && Number.isFinite(currentAccountEquity) && currentAccountEquity > 0
-      ? currentAccountEquity
-      : null;
-
-    return [
-      {
-        key: 'realizedPnl',
-        label: '已实现 P&L',
-        value: realizedPnl == null ? '—' : `${realizedPnl.toFixed(2)} USDT`,
-        color: pnlExportColor(realizedPnl),
-        valueClassName: pnlColor(realizedPnl),
-        help: (
-          <>
-            <p>本场战役所有已平仓 Legs 的实际盈亏合计，包括主仓、加仓、对冲与止盈的已实现结果。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">已实现 P&amp;L = Σ 各已平仓 Leg 盈亏</div>
-            <p>
-              这个数与下方 Legs 表的「合计」行、卡片上的状态标签同源，按构造必然相等；
-              取自{' '}
-              <span className="text-foreground">
-                {pnlSettlement?.basis === 'records' ? '成交记录'
-                  : pnlSettlement?.basis === 'mixed' ? '成交记录 + 复盘快照'
-                  : pnlSettlement?.basis === 'leg_snapshots' ? '复盘快照'
-                  : pnlSettlement?.basis === 'events' ? '战役事件'
-                  : pnlSettlement?.basis === 'campaign_summary' ? '落库缓存'
-                  : '尚未结算'}
-              </span>
-              。一个仓位分几刀平掉时，每一刀都计入；资金费不并入任何腿。
-            </p>
-            {pnlDrift != null && (
-              <p className="text-[#F0B90B]">
-                落库缓存为 {pnlSettlement?.stored?.toFixed(2)} USDT，与现算值相差 {pnlDrift.toFixed(2)} USDT。
-                下次读取本战役时会自动回写收敛；若长期不归零说明写库失败。
-              </p>
-            )}
-          </>
-        ),
-      },
-      {
-        key: 'mainLeverage',
-        label: '杠杆倍数',
-        value: formatCampaignLeverage(mainLeverage),
-        help: (
-          <>
-            <p>本场战役主力头仓开仓时使用的杠杆倍数，不把后续加仓或对冲腿的杠杆混入。</p>
-            <p>历史战役依次从主力 Leg、关联成交记录、战役初始字段和主力开仓事件回填。</p>
-            <p>杠杆影响保证金占用与 ROE；名义仓位已经确定时，不再额外放大绝对盈亏。</p>
-          </>
-        ),
-      },
-      {
-        key: 'initialMainExposureNotional',
-        label: '主力开仓名义仓位',
-        value: initialMainExposureNotional > 0
-          ? `${initialMainExposureNotional.toFixed(2)} USDT`
-          : '—',
-        help: (
-          <>
-            <p>入场时主方向的全部初始敞口：M 加镜像仓位，按镜像 TP 落袋之前的真实全暴露计算。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">主力开仓名义仓位 = 初始 M 名义仓位 + 初始镜像名义仓位</div>
-            <p>后续加仓、重入仓位和反向对冲均不计入；历史战役从成交记录、Leg 快照及事件流去重还原。</p>
-          </>
-        ),
-      },
-      {
-        key: 'peakUnrealizedPnl',
-        label: '峰值浮盈',
-        value: accuracy.campaign_max_profit_real.toFixed(2),
-        help: (
-          <>
-            <p>战役期间某一时点的未实现盈亏，加上截至该时点已经落袋的盈亏之后，所得累计战役权益的最高值。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值浮盈 = maxₜ（未实现盈亏ₜ + 累计已实现盈亏ₜ）</div>
-            <p>已落袋部分包含镜像 TP 的已实现盈亏，因此可以与战役最终盈利直接比较。</p>
-            <p>每根 K 线同时使用最高价和最低价重估当时仍持有的完整多空组合；分批平仓、镜像落袋和对冲拆除均按各自发生时点切换仓位状态。</p>
-            <p>历史战役会从关联成交、Leg 快照和事件快照还原；精度以可用 K 线粒度为限，不将不同腿分别放在不可能同时出现的最优价格上。</p>
-          </>
-        ),
-      },
-      {
-        key: 'initialExpectedMaxLoss',
-        label: '最大预期亏损',
-        value: accuracy.initial_expected_max_loss > 0
-          ? `${accuracy.initial_expected_max_loss.toFixed(2)} USDT`
-          : '—',
-        help: (
-          <>
-            <p>入场时 M 加镜像的真实全暴露，在初始对冲 A/B 风险边界下承担的最大亏损额，是盈亏比的风险分母。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例</div>
-            <p><strong>一场有多笔主力时，按笔各算各的、再求和</strong>：每笔主力用它<strong>自己</strong>的开仓价、
-              自己那笔镜像的敞口、以及开仓 ±5 分钟内挂出的<strong>自己</strong>那批保护单。
-              上面那条等式仍然成立——「预期回撤比例」是按敞口加权的等效值。</p>
-            <p>后续加仓、重入仓位和反向对冲不计入主力开仓名义仓位；开仓 5 分钟之后才挂出的追踪单
-              属于新决策，不会抬高这个数。</p>
-          </>
-        ),
-      },
-      {
-        key: 'expectedMaxDrawdownPct',
-        label: '预期回撤',
-        value: expectedDrawdownPct > 0 ? `${expectedDrawdownPct.toFixed(2)}%` : '—',
-        help: (
-          <>
-            <p>主力开仓价到初始对冲 A/B 中更远一条风险边界的价格距离，占主力开仓价的百分比。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
-              d = max（|主力价 − A 价|，|主力价 − B 价|）÷ 主力价 × 100%
-            </div>
-          </>
-        ),
-      },
-      {
-        key: 'payoffRatio',
-        label: '盈亏比',
-        value: payoffRatio == null ? '—' : formatCampaignPayoffRatio(payoffRatio),
-        color: pnlExportColor(payoffRatio),
-        valueClassName: pnlColor(payoffRatio),
-        help: (
-          <>
-            <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
-            <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
-          </>
-        ),
-      },
-      {
-        key: 'asymmetricRiskContribution',
-        label: '本场 b 对 DSI/USI 的贡献',
-        value: asymmetricRiskContribution == null
-          ? '—'
-          : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} · b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}${
-            asymmetricRiskContribution.meanSquareShare == null
-              ? ''
-              : `（组内 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(1)}%）`
-          }`,
-        help: (
-          <>
-            <p>盈利战役进入 USI 的上行组；亏损或持平战役进入 DSI 的下行组。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
-            <p>括号内的组内占比 = 本场 b² ÷ 对应组 Σb²，用于定位哪些战役拉高了 DSI 或支撑了 USI。</p>
-            {asymmetricRiskContribution != null ? (
-              <p className="font-mono text-foreground">
-                本场 b = {((campaignMetricValues?.profitCaptureRatio ?? 0) / 100).toFixed(2)}，n = {asymmetricRiskContribution.sampleCount}
-              </p>
-            ) : <p>本场缺少有效最大预期亏损，或账户级样本尚未加载，因此不计算。</p>}
-          </>
-        ),
-      },
-      {
-        key: 'opportunityQuality',
-        label: '机会质量',
-        value: formatOpportunityQuality(opportunityQuality),
-        color: pnlExportColor(opportunityQuality),
-        valueClassName: pnlColor(opportunityQuality),
-        help: (
-          <>
-            <p>先将本场实际盈亏比设置下限为 1，再衡量每 1 个预期回撤百分点对应的机会质量。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b* = max（实际盈亏比 b, 1）；Q = b* ÷ 预期回撤百分点 d</div>
-            <p>实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。回撤 2% 时 d 按 2 计，不按 0.02 计。</p>
-          </>
-        ),
-      },
-      {
-        key: 'arithmeticExpectancy',
-        label: '算术期望',
-        value: formatArithmeticExpectancy(arithmeticExpectancy),
-        color: pnlExportColor(arithmeticExpectancy),
-        valueClassName: pnlColor(arithmeticExpectancy),
-        help: (
-          <>
-            <p>按同一账户当前有效战役胜率 P，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P）</div>
-            {expectedWinRate != null && payoffRatio != null ? (
-              <p className="font-mono text-foreground">
-                本场：{(expectedWinRate * 100).toFixed(2)}% × {(payoffRatio / 100).toFixed(2)} − {((1 - expectedWinRate) * 100).toFixed(2)}%
-              </p>
-            ) : <p>缺少有效盈亏比或有效战役胜率时不计算。</p>}
-          </>
-        ),
-      },
-      {
-        key: 'geometricExpectancy',
-        label: '几何期望',
-        value: formatGeometricExpectancy(geometricExpectancy),
-        color: pnlExportColor(geometricExpectancy),
-        valueClassName: pnlColor(geometricExpectancy),
-        help: (
-          <>
-            <p>把胜率 P、本场实际盈亏比 b 和本场资产风险比例 x 放入复利路径，衡量这场战役对长期资本增长的影响。</p>
-            <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">G = (1+b·x)^P · (1−x)^(1−P)；几何期望 = G − 1</div>
-            <p>x = 最大预期亏损 ÷ 主力开仓时账户总资产。历史战役缺快照时，才使用今日当前总资产估算。</p>
-            {campaignMetricValues?.initialRisk ? (
-              <p className="font-mono text-foreground">本场 x = {(campaignMetricValues.initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
-            ) : <p>缺少有效最大预期亏损或账户资产分母时不计算。</p>}
-          </>
-        ),
-      },
-      {
-        key: 'todayAccountEquity',
-        label: '今日账户总资产',
-        value: todayAccountEquity == null ? '—' : `${todayAccountEquity.toFixed(2)} USDT`,
-        rightColumn: true,
-        help: (
-          <>
-            <p>当前交易账户按最新余额、持仓和价格计算的总资产。</p>
-            <p>新战役的几何期望优先使用主力开仓时固化的账户资产；历史战役缺少该快照时，使用这个今日总资产作为估算分母。</p>
-          </>
-        ),
-      },
-    ];
+    // 12 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
+    // 这里只负责把真实战役的各个 memo 收成一个纯数字对象。反事实面板走同一个构造器。
+    return buildCampaignPnlOverviewItems({
+      realizedPnl: pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
+      settlement: pnlSettlement
+        ? { basis: pnlSettlement.basis, stored: pnlSettlement.stored, drift: pnlDrift }
+        : null,
+      mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
+      initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
+      peakUnrealizedPnl: accuracy.campaign_max_profit_real,
+      initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
+      expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
+      payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
+      asymmetricRiskContribution,
+      opportunityQuality: campaignMetricValues?.opportunityQuality ?? null,
+      arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
+      geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
+      initialRisk: campaignMetricValues?.initialRisk ?? null,
+      todayAccountEquity: isOwner && Number.isFinite(currentAccountEquity) && currentAccountEquity > 0
+        ? currentAccountEquity
+        : null,
+      expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
+    });
   }, [
     accuracy,
     asymmetricRiskContribution,
@@ -1264,21 +1143,13 @@ export default function JournalCampaignDetailPage() {
     settlement,
     tradeRecords,
   ]);
-  const campaignPnlOverviewNote = useMemo(() => {
-    const expectationNote = campaignPerformanceLoading
-      ? '正在按同一账户的有效战役口径计算期望…'
-      : campaignPerformanceError
-        ? '暂无可计算期望的有效战役样本。'
-        : campaignPerformance?.expectedWinRate == null
-          ? '暂无可计算胜率的有效战役样本。'
-          : `期望口径：${campaignPerformance.payoffRatioSampleCount} 场有效战役，实时胜率 ${(campaignPerformance.expectedWinRate * 100).toFixed(2)}%。`;
-    const riskNote = campaignMetricValues?.initialRisk?.source === 'current_account_fallback'
-      ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
-      : campaignMetricValues?.initialRisk?.source === 'main_open_snapshot'
-        ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
-        : '';
-    return `${expectationNote}${riskNote}`;
-  }, [
+  const campaignPnlOverviewNote = useMemo(() => buildCampaignPnlOverviewNote({
+    performanceLoading: campaignPerformanceLoading,
+    performanceError: !!campaignPerformanceError,
+    expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
+    payoffRatioSampleCount: campaignPerformance?.payoffRatioSampleCount ?? 0,
+    initialRiskSource: campaignMetricValues?.initialRisk?.source ?? null,
+  }), [
     campaignMetricValues?.initialRisk?.source,
     campaignPerformance,
     campaignPerformanceError,
@@ -1288,9 +1159,34 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
   );
-  const pendingCounterfactual = useMemo(
-    () => counterfactuals.find(branch => branch.id === pendingCounterfactualId) ?? null,
-    [counterfactuals, pendingCounterfactualId],
+  // 反事实面板与真实「盈亏概览」共用的账户级输入：胜率样本、DSI/USI 汇总、今日总资产。
+  const counterfactualOverviewShared = useMemo<CounterfactualOverviewShared>(() => ({
+    // 老行没有落库锚时按这场战役自己的模板重算：main_only 没有保护线，不能被默认模板造出 L。
+    // 首帧 campaign 还没到（下面才 return 加载态），先给默认模板占位，不会有分支用到它。
+    strategyTemplate: campaign ? counterfactualTemplateFor(campaign) : 'main_dual_hedge_mirror_tp',
+    expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
+    payoffRatioSampleCount: campaignPerformance?.payoffRatioSampleCount ?? 0,
+    performanceLoading: campaignPerformanceLoading,
+    performanceError: !!campaignPerformanceError,
+    asymmetricRiskSummary: campaignAsymmetricRisk,
+    currentAccountEquity,
+    isOwner,
+  }), [
+    campaign,
+    campaignAsymmetricRisk,
+    campaignPerformance,
+    campaignPerformanceError,
+    campaignPerformanceLoading,
+    currentAccountEquity,
+    isOwner,
+  ]);
+  const counterfactualDraftOverview = useMemo(
+    () => (counterfactualDraft ? buildCounterfactualOverview(counterfactualDraft, counterfactualOverviewShared) : null),
+    [counterfactualDraft, counterfactualOverviewShared],
+  );
+  const selectedCounterfactualOverview = useMemo(
+    () => (selectedCounterfactual ? buildCounterfactualOverview(selectedCounterfactual, counterfactualOverviewShared) : null),
+    [selectedCounterfactual, counterfactualOverviewShared],
   );
   const counterfactualChart = useMemo(
     () => buildCounterfactualChartArtifacts(selectedCounterfactual),
@@ -1545,7 +1441,7 @@ export default function JournalCampaignDetailPage() {
   const hasManualRunBranch = (selectedCounterfactual?.params?.manual_legs ?? []).length > 0;
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
   const visibleBranches = useMemo(
-    () => counterfactuals.filter(branch => branch.branch_kind !== 'fix_one_deviation'),
+    () => counterfactuals.filter(isVisibleCounterfactualBranch),
     [counterfactuals],
   );
   const retroactiveLegCount = useMemo(
@@ -1596,8 +1492,13 @@ export default function JournalCampaignDetailPage() {
    * 未结算（进行中）→ 落库状态原样。与已实现 P&L 同一份 settlement。
    */
   const displayStatus = (displayCampaign ?? campaign).status;
-  // 反事实的「偏离代价」要和界面上的已实现 P&L 比，不能拿未校正的落库值当基线。
-  const actualPnl = (displayCampaign ?? campaign).final_realized_pnl ?? 0;
+  /**
+   * 反事实的「相对实际」和「占本场盈亏 %」的基线：**界面上印的那个已实现 P&L**。
+   * 盈亏概览读的是叠了平仓价校正的现算值（pnlReconciliation.correctedPnl），
+   * 落库的 final_realized_pnl 只有在已结算的战役上才与它相等——
+   * 进行中的战役拿落库值当基线，会印出一个和上面那格对不上的差额。
+   */
+  const actualPnl = pnlReconciliation?.correctedPnl ?? (displayCampaign ?? campaign).final_realized_pnl ?? 0;
   const totalDeviationCost = deviationLegCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
     ? selectedCounterfactual.result.final_realized_pnl - actualPnl
@@ -1669,13 +1570,21 @@ export default function JournalCampaignDetailPage() {
     );
   };
 
-  const reloadCounterfactuals = async (keepSelectionId?: string | null) => {
-    const next = await listCounterfactuals(campaign.id);
+  const reloadCounterfactuals = async (campaignId: string, keepSelectionId?: string | null) => {
+    const fetched = await listCounterfactuals(campaignId);
+    // 等待期间用户可能已切到别的战役：这份列表属于旧战役，不能盖到新战役头上。
+    if (activeCampaignIdRef.current !== campaignId) return;
+    // 查询发出之后才删掉的分支还在这份结果里：删掉的行不会再回来，按本页删过的 id 滤掉，免得它死而复生、又被选中。
+    const next = fetched.filter(branch => !deletedCounterfactualIdsRef.current.has(branch.id));
     setCounterfactuals(next);
-    setSelectedCounterfactualId(keepSelectionId ?? next[0]?.id ?? null);
+    setSelectedCounterfactualId(keepSelectionId ?? firstVisibleCounterfactualId(next));
   };
 
-  const handleRunWhatIf = async (label: string, params: CampaignCounterfactualParams) => {
+  const handleRunWhatIf = async (
+    label: string,
+    params: CampaignCounterfactualParams,
+    context?: CampaignWhatIfRunContext,
+  ) => {
     if (klinesLoading || klines.length === 0) {
       toast.error('K 线尚未加载完成，暂时无法运行 What-if');
       return;
@@ -1689,11 +1598,24 @@ export default function JournalCampaignDetailPage() {
     }
     try {
       setWhatIfRunning(true);
-      const branch = await runAndPersistCustomCounterfactual(campaign.id, label, params, klines);
-      await reloadCounterfactuals(branch.id);
-      setSelectedCounterfactualId(branch.id);
-      setPendingCounterfactualId(branch.id);
-      toast.success('What-if 结果已生成，请选择保存或删除');
+      const runLegs = params.manual_legs ?? [];
+      // 改动摘要在运行那一刻算：基线与编辑器当前腿都来自编辑器，之后 legs 再变也不影响已落库的摘要。
+      const changeSummary = buildCounterfactualChangeSummary(
+        context?.baselineLegs ?? [],
+        context?.manualLegs ?? runLegs,
+        runLegs,
+      );
+      const ranAt = new Date();
+      // 只运行、不落库：结果先摆成「反事实盈亏概览 · 未保存」，用户点「保存」才写库。
+      const run = await runCustomCounterfactual(
+        campaign.id,
+        { ...params, change_summary: changeSummary },
+        klines,
+        effectiveInterval,
+      );
+      setCounterfactualDraft({ params: run.params, result: run.result });
+      setCounterfactualDraftName(defaultCounterfactualName(changeSummary, run.params.run_context?.ran_at ?? ranAt));
+      toast.success(`${label}已运行，结果尚未保存`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1701,40 +1623,84 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
+  const handleSaveCounterfactualDraft = async () => {
+    // 整个流程只认点「保存」那一刻的那一份草稿：插库期间用户又点了一次「一键运行」，
+    // 页面上的草稿已经换成新的一份，清空时必须认出来——否则刚跑出来、还没看过的结果被静默抹掉。
+    const draft = counterfactualDraft;
+    if (!draft) return;
+    // 整个流程只认点「保存」那一刻的战役：插库期间用户切到别的战役，这行仍属于旧战役，
+    // 不能塞进新战役的列表、更不能把新战役的列表换成旧战役的。
+    const campaignId = campaign.id;
+    const fallbackName = defaultCounterfactualName(
+      draft.params.change_summary,
+      draft.params.run_context?.ran_at ?? new Date(),
+    );
+    const name = (counterfactualDraftName.trim() || fallbackName).slice(0, COUNTERFACTUAL_NAME_MAX_LENGTH);
+    try {
+      setCounterfactualDraftSaving(true);
+      const created = await createCounterfactual({
+        campaign_id: campaignId,
+        label: name,
+        branch_kind: 'custom_what_if',
+        params: draft.params,
+        result: draft.result,
+      });
+      toast.success(`反事实「${name}」已保存`);
+      // 已切走：草稿早在换战役那一刻清掉了，列表也不是这场的，到此为止。
+      if (activeCampaignIdRef.current !== campaignId) return;
+      // 草稿已经被下一次运行换掉了就原样留着（名字同理，它是跟着那份草稿一起改的）。
+      let draftReplaced = false;
+      setCounterfactualDraft(prev => {
+        draftReplaced = prev !== draft;
+        return draftReplaced ? prev : null;
+      });
+      setCounterfactualDraftName(prev => (draftReplaced ? prev : ''));
+      // 先把新行放进列表并选中，再按库里的顺序刷新一遍；两步都指向同一个 id。
+      setCounterfactuals(prev => [created, ...prev.filter(branch => branch.id !== created.id)]);
+      setSelectedCounterfactualId(created.id);
+      await reloadCounterfactuals(campaignId, created.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCounterfactualDraftSaving(false);
+    }
+  };
+
+  const handleDiscardCounterfactualDraft = () => {
+    setCounterfactualDraft(null);
+    setCounterfactualDraftName('');
+    toast.info('已丢弃本次运行结果，未保存');
+  };
+
+  const handleLoadCounterfactualLegs = (branch: CampaignCounterfactual) => {
+    const legsToLoad = branch.params?.manual_legs ?? [];
+    if (legsToLoad.length === 0) {
+      toast.warning('这条分支没有手动 Legs 可载入');
+      return;
+    }
+    loadLegsNonceRef.current += 1;
+    setLoadLegsRequest({ nonce: loadLegsNonceRef.current, legs: legsToLoad.map(leg => ({ ...leg })) });
+    toast.success(`已把「${branch.label}」的 Legs 载入副本，可继续调整后再次运行`);
+  };
+
   const handleDeleteBranch = async (branchId: string) => {
+    const campaignId = campaign.id;
     try {
       await deleteCounterfactual(branchId);
-      const next = counterfactuals.filter(branch => branch.id !== branchId);
-      setCounterfactuals(next);
-      if (pendingCounterfactualId === branchId) {
-        setPendingCounterfactualId(null);
-      }
-      if (selectedCounterfactualId === branchId) {
-        setSelectedCounterfactualId(next[0]?.id ?? null);
-      }
       toast.success('分支已删除');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleDiscardGeneratedCounterfactual = async (branchId: string) => {
-    try {
-      await deleteCounterfactual(branchId);
-      setPendingCounterfactualId(null);
-      await reloadCounterfactuals(selectedCounterfactualId === branchId ? null : selectedCounterfactualId);
-      toast.success('已删除并刷新');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleKeepGeneratedCounterfactual = async (branchId: string) => {
-    try {
-      await reloadCounterfactuals(branchId);
-      setSelectedCounterfactualId(branchId);
-      setPendingCounterfactualId(null);
-      toast.success('已保存并刷新');
+      // 与保存同一条规则：删除期间切走了，就别再拿旧战役的列表改新战役的状态。
+      deletedCounterfactualIdsRef.current.add(branchId);
+      if (activeCampaignIdRef.current !== campaignId) return;
+      // 一律用函数式更新：删除悬着的时候，保存可能已经把新分支加进列表并选中了它，
+      // 拿点「删除」那一刻的旧列表和旧选中去改，会把刚保存的分支一起抹掉。
+      // remaining 在列表的更新函数里算出，选中的更新函数紧随其后执行——
+      // counterfactuals 的 useState 声明在 selectedCounterfactualId 之前，React 按声明顺序处理两者的更新队列。
+      let remaining: CampaignCounterfactual[] = [];
+      setCounterfactuals(prev => {
+        remaining = prev.filter(branch => branch.id !== branchId);
+        return remaining;
+      });
+      setSelectedCounterfactualId(prev => (prev === branchId ? firstVisibleCounterfactualId(remaining) : prev));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -1927,23 +1893,11 @@ export default function JournalCampaignDetailPage() {
             <div className="text-[11px] text-muted-foreground/70 pt-1">未标注的时间均为 K 线（模拟）时间。</div>
           </div>
 
-          <div className="bg-card border border-border rounded p-4 text-[12px]">
-            <div className="font-medium">盈亏概览</div>
-            <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-              {campaignPnlOverviewItems.map(item => (
-                <div
-                  key={item.key}
-                  className={`flex items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : ''}`}
-                >
-                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-                  <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
-              {campaignPnlOverviewNote}
-            </div>
-          </div>
+          <CampaignPnlOverviewPanel
+            title="盈亏概览"
+            items={campaignPnlOverviewItems}
+            note={campaignPnlOverviewNote}
+          />
 
         </section>
 
@@ -2368,7 +2322,7 @@ export default function JournalCampaignDetailPage() {
               反事实战役
             </div>
             <div className="text-[14px] text-foreground">
-              如果当时换一种打法，会发生什么？在下方「Legs 副本」里手动调整各条腿，点「一键运行」用真实行情跑一遍；再把你的调整与原始战役逐腿对比，把原始错误的代价折算成 USDT。
+              如果当时换一种打法，会发生什么？在下方「Legs 副本」里手动调整各条腿，点「一键运行」用真实行情跑一遍，结果按「盈亏概览」同一套 12 项指标摆出来；满意就起个名字保存，之后随时删除或载回 Legs 副本；再把你的调整与原始战役逐腿对比，把原始错误的代价折算成 USDT。
             </div>
           </div>
 
@@ -2389,47 +2343,59 @@ export default function JournalCampaignDetailPage() {
             timezone={LOCAL_TIME_ZONE}
             whatIfRunning={whatIfRunning}
             onRunWhatIf={handleRunWhatIf}
+            loadLegsRequest={loadLegsRequest}
             baseMarkers={chart.markers}
             baseTimeBoundPriceLines={chart.timeBoundPriceLines}
             baseVerticalLines={chart.verticalLines}
             orderInfoPriceLines={showOrderInfo ? orderInfoPriceLines : []}
           />
 
-          {pendingCounterfactual && (
-            <div className="rounded border border-[#F0B90B]/40 bg-[#F0B90B]/10 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-[13px] font-medium text-foreground">刚生成的反事实结果</div>
-                <div className="text-[12px] text-muted-foreground">
-                  {pendingCounterfactual.label} · 分支 P&L
-                  <span className={`ml-2 font-mono ${pnlColor(pendingCounterfactual.result.final_realized_pnl)}`}>
-                    {pendingCounterfactual.result.final_realized_pnl >= 0 ? '+' : ''}{pendingCounterfactual.result.final_realized_pnl.toFixed(2)}
-                  </span>
-                  <span className="mx-2">·</span>
-                  相对实际
-                  <span className={`ml-2 font-mono ${pnlColor(pendingCounterfactual.result.final_realized_pnl - actualPnl)}`}>
-                    {pendingCounterfactual.result.final_realized_pnl - actualPnl >= 0 ? '+' : ''}
-                    {(pendingCounterfactual.result.final_realized_pnl - actualPnl).toFixed(2)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 text-[12px]"
-                  onClick={() => handleDiscardGeneratedCounterfactual(pendingCounterfactual.id)}
-                >
-                  删除并刷新
-                </Button>
-                <Button
-                  type="button"
-                  className="h-9 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
-                  onClick={() => handleKeepGeneratedCounterfactual(pendingCounterfactual.id)}
-                >
-                  保存并刷新
-                </Button>
-              </div>
-            </div>
+          {counterfactualDraft && counterfactualDraftOverview && (
+            <CampaignPnlOverviewPanel
+              testId="counterfactual-draft-panel"
+              title="反事实盈亏概览 · 未保存"
+              items={counterfactualDraftOverview.items}
+              note={counterfactualDraftOverview.note}
+              subtitle={(
+                <CounterfactualOverviewSubtitle
+                  delta={counterfactualDraft.result.final_realized_pnl - actualPnl}
+                  changeSummary={counterfactualDraft.params.change_summary}
+                  runContext={counterfactualDraft.params.run_context}
+                />
+              )}
+              actions={(
+                <>
+                  <ImeSafeInput
+                    data-testid="counterfactual-draft-name"
+                    aria-label="反事实分支名"
+                    value={counterfactualDraftName}
+                    onValueChange={setCounterfactualDraftName}
+                    maxLength={COUNTERFACTUAL_NAME_MAX_LENGTH}
+                    placeholder="分支名（≤ 20 字）"
+                    className="h-8 w-56 text-[12px]"
+                  />
+                  <Button
+                    type="button"
+                    data-testid="counterfactual-save"
+                    className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
+                    disabled={counterfactualDraftSaving}
+                    onClick={handleSaveCounterfactualDraft}
+                  >
+                    {counterfactualDraftSaving ? '保存中…' : '保存'}
+                  </Button>
+                  <Button
+                    type="button"
+                    data-testid="counterfactual-discard"
+                    variant="outline"
+                    className="h-8 text-[12px]"
+                    disabled={counterfactualDraftSaving}
+                    onClick={handleDiscardCounterfactualDraft}
+                  >
+                    丢弃
+                  </Button>
+                </>
+              )}
+            />
           )}
 
           <div className="space-y-2">
@@ -2442,17 +2408,23 @@ export default function JournalCampaignDetailPage() {
               visibleBranches.map(branch => {
                     const delta = branch.result.final_realized_pnl - actualPnl;
                     const active = branch.id === selectedCounterfactualId;
+                    // 手动 Legs 分支的 sop_score 恒为 0，没有信息量，只给 SOP 推演分支看。
+                    const manualRun = isManualLegScenario(branch.params);
+                    const changeShort = branch.params?.change_summary?.short;
                     return (
                       <div
                         key={branch.id}
+                        data-testid={`counterfactual-branch-row-${branch.id}`}
                         className={`bg-card border rounded p-3 flex items-center gap-3 cursor-pointer ${active ? 'border-[#B080FF]/60 ring-1 ring-[#B080FF]/30' : 'border-border'}`}
                         onClick={() => setSelectedCounterfactualId(active ? null : branch.id)}
                       >
                         <span className={`h-2.5 w-2.5 rounded-full ${branchKindDot(branch.branch_kind)}`} />
                         <div className="min-w-0 flex-1">
                           <div className="text-[13px] font-medium truncate">{branch.label}</div>
-                          <div className="text-[11px] text-muted-foreground">
-                            {branchKindLabel(branch.branch_kind)} · {fmtMdHm(branch.created_at)}
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {branchKindLabel(branch.branch_kind)}
+                            {changeShort ? ` · ${changeShort}` : ''}
+                            {` · ${formatCounterfactualStamp(branch.created_at)}`}
                           </div>
                         </div>
                         <div className={`px-2 py-1 rounded text-[11px] font-mono ${pnlColor(branch.result.final_realized_pnl)}`}>
@@ -2461,9 +2433,11 @@ export default function JournalCampaignDetailPage() {
                         <div className={`px-2 py-1 rounded text-[11px] font-mono ${pnlColor(delta)}`}>
                           {delta >= 0 ? '+' : ''}{delta.toFixed(2)}
                         </div>
-                        <div className="px-2 py-1 rounded text-[11px] font-mono bg-muted text-foreground">
-                          SOP {branch.result.sop_score}
-                        </div>
+                        {!manualRun && (
+                          <div className="px-2 py-1 rounded text-[11px] font-mono bg-muted text-foreground">
+                            SOP {branch.result.sop_score}
+                          </div>
+                        )}
                         <button
                           type="button"
                           onClick={(event) => {
@@ -2480,36 +2454,49 @@ export default function JournalCampaignDetailPage() {
             )}
           </div>
 
-          {selectedCounterfactual && (
-            <div className="bg-card border border-border rounded p-4 mt-4 space-y-3">
-              <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-                <div>
-                  <div className="text-[13px] font-medium">所选分支结果</div>
-                  <div className="text-[12px] text-muted-foreground mt-1">
-                    这里展示当前高亮分支的模拟结果，与上方“已保存分支”保持同一口径。
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-right">
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">分支 P&L</div>
-                    <div className={`font-mono text-[20px] ${pnlColor(selectedCounterfactual.result.final_realized_pnl)}`}>
-                      {selectedCounterfactual.result.final_realized_pnl >= 0 ? '+' : ''}
-                      {selectedCounterfactual.result.final_realized_pnl.toFixed(2)}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">相对实际</div>
-                    <div className={`font-mono text-[20px] ${pnlColor(selectedCounterfactualDelta)}`}>
-                      {selectedCounterfactualDelta != null && selectedCounterfactualDelta >= 0 ? '+' : ''}
-                      {selectedCounterfactualDelta?.toFixed(2) ?? '-'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="rounded border border-border bg-background/50 px-3 py-2 text-[12px] text-muted-foreground">
-                SOP {selectedCounterfactual.result.sop_score} · {branchKindLabel(selectedCounterfactual.branch_kind)} · {fmtMdHm(selectedCounterfactual.created_at)}
-              </div>
-            </div>
+          {selectedCounterfactual && selectedCounterfactualOverview && (
+            <CampaignPnlOverviewPanel
+              testId="counterfactual-saved-panel"
+              title={`反事实盈亏概览 · ${selectedCounterfactual.label}`}
+              items={selectedCounterfactualOverview.items}
+              note={selectedCounterfactualOverview.note}
+              subtitle={(
+                <CounterfactualOverviewSubtitle
+                  delta={selectedCounterfactualDelta}
+                  changeSummary={selectedCounterfactual.params?.change_summary}
+                  runContext={selectedCounterfactual.params?.run_context}
+                  kindLine={[
+                    branchKindLabel(selectedCounterfactual.branch_kind),
+                    isManualLegScenario(selectedCounterfactual.params) ? null : `SOP ${selectedCounterfactual.result.sop_score}`,
+                    `保存于 ${formatCounterfactualStamp(selectedCounterfactual.created_at)}`,
+                  ].filter(Boolean).join(' · ')}
+                />
+              )}
+              actions={(
+                <>
+                  {hasManualRunBranch && (
+                    <Button
+                      type="button"
+                      data-testid="counterfactual-load-legs"
+                      variant="outline"
+                      className="h-8 text-[12px]"
+                      onClick={() => handleLoadCounterfactualLegs(selectedCounterfactual)}
+                    >
+                      载入到 Legs 副本
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    data-testid="counterfactual-delete"
+                    variant="outline"
+                    className="h-8 text-[12px] border-[#F6465D]/40 text-[#F6465D] hover:bg-[#F6465D]/10"
+                    onClick={() => handleDeleteBranch(selectedCounterfactual.id)}
+                  >
+                    删除
+                  </Button>
+                </>
+              )}
+            />
           )}
 
           {hasManualRunBranch && (
