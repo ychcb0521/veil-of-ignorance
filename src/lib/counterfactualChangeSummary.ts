@@ -18,14 +18,20 @@ import type {
  *   · removed  基线里有、编辑器里已经删掉的腿；
  *   · disabled 基线里有、编辑器里还在但被停用（没送进引擎）。
  * 停用与删除要分开，就得看编辑器里的全部腿（含停用），只看 params.manual_legs（仅启用）分不出来。
+ * 「挂单中」的保护单被切成「已成交」（或切回）也是一次 edited：字段名 filled，缺省按已成交比。
  */
 
 /** 分支名与改动摘要短句的上限（与 createCounterfactual 的 label.slice(0, 20) 同一条线）。 */
 export const COUNTERFACTUAL_NAME_MAX_LENGTH = 20;
 
-type ComparableField = Exclude<keyof CampaignCounterfactualManualLeg, 'id' | 'enabled'>;
+/** 用户在编辑器里能改的字段；结算方式、面值、实际成交结果是 buildManualLegs 抄来的，不算改动。 */
+type ComparableField = Exclude<
+  keyof CampaignCounterfactualManualLeg,
+  'id' | 'enabled' | 'settlement_mode' | 'contract_size_usd' | 'actual'
+>;
 
 const FIELD_ORDER: ComparableField[] = [
+  'filled',
   'leg_role',
   'direction',
   'open_time',
@@ -37,6 +43,7 @@ const FIELD_ORDER: ComparableField[] = [
 ];
 
 const FIELD_LABELS: Record<ComparableField, string> = {
+  filled: '成交',
   leg_role: '角色',
   direction: '方向',
   open_time: '开仓时间',
@@ -73,7 +80,13 @@ function timeMs(value: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** filled 缺省 = 已成交（老行、成交过的腿都不写这个字段）。 */
+function isFilled(leg: CampaignCounterfactualManualLeg): boolean {
+  return leg.filled !== false;
+}
+
 function fieldEqual(field: ComparableField, a: CampaignCounterfactualManualLeg, b: CampaignCounterfactualManualLeg): boolean {
+  if (field === 'filled') return isFilled(a) === isFilled(b);
   const left = a[field];
   const right = b[field];
   if (field === 'open_time' || field === 'close_time') {
@@ -91,6 +104,7 @@ function fieldEqual(field: ComparableField, a: CampaignCounterfactualManualLeg, 
 
 function formatFieldValue(field: ComparableField, leg: CampaignCounterfactualManualLeg): string {
   switch (field) {
+    case 'filled': return isFilled(leg) ? '已成交' : '未成交';
     case 'leg_role': return roleLabel(leg.leg_role);
     case 'direction': return directionLabel(leg.direction);
     case 'open_time': return formatCounterfactualStamp(leg.open_time);
@@ -104,7 +118,11 @@ function formatFieldValue(field: ComparableField, leg: CampaignCounterfactualMan
 }
 
 function changedFieldsBetween(before: CampaignCounterfactualManualLeg, after: CampaignCounterfactualManualLeg): ComparableField[] {
-  return FIELD_ORDER.filter(field => !fieldEqual(field, before, after));
+  // 两边都是没成交的挂单时，平仓时间只是副本给的兜底（不持有、不计钱），不算改动。
+  const bothUnfilled = !isFilled(before) && !isFilled(after);
+  return FIELD_ORDER
+    .filter(field => !(bothUnfilled && field === 'close_time'))
+    .filter(field => !fieldEqual(field, before, after));
 }
 
 function describeAddedLeg(leg: CampaignCounterfactualManualLeg): string {

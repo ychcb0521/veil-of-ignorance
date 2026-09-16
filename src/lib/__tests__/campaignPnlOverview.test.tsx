@@ -272,3 +272,25 @@ describe('buildCampaignPnlOverviewNote', () => {
       .toBe('期望口径：2 场有效战役，实时胜率 50.00%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
   });
 });
+
+describe('峰值浮盈的说明：分刀还原只在本地有成交记录时成立', () => {
+  const peakHelp = () => {
+    const item = buildCampaignPnlOverviewItems(winnerMetrics()).find(entry => entry.key === 'peakUnrealizedPnl');
+    const { container } = render(<>{item?.help}</>);
+    return container.textContent ?? '';
+  };
+
+  it('「每一刀都计入」带着前提；本地没有成交记录时按 Leg 快照整条还原、峰值可能偏高，这一句写明', () => {
+    const help = peakHelp();
+    expect(help).toContain('本地有成交记录时，一条腿分几刀平掉（M 减仓、并仓后的镜像止盈），每一刀都计入');
+    expect(help).not.toContain('切换仓位状态，一条腿分几刀平掉时每一刀都计入');
+    expect(help).toContain('本地没有成交记录时（换了浏览器、清过历史成交），主力 / 镜像腿按 Leg 快照整条还原');
+    expect(help).toContain('峰值浮盈可能高于实际峰值');
+  });
+
+  it('已结束战役的窗口不早于最后一次平仓；挂着委托 id 的保护单按本地委托记录判定', () => {
+    const help = peakHelp();
+    expect(help).toContain('已结束的战役从开仓扫到结束时间，但不早于最后一次平仓');
+    expect(help).toContain('本地委托记录显示它已撤单或仍挂着时同样按从未成交处理');
+  });
+});

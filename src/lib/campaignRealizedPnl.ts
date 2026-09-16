@@ -26,7 +26,11 @@
  */
 import type { CampaignStatus, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
-import { buildTradeRecordPnlCorrection, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import {
+  buildTradeRecordPnlCorrection,
+  type LegExitPriceCorrection,
+  type LegExitPriceCorrections,
+} from '@/lib/campaignLegExecution';
 
 const EPSILON = 1e-9;
 
@@ -142,6 +146,43 @@ function claimRecordsByLeg(
   return result;
 }
 
+/**
+ * 一条腿认领到的记录里「收盘的那一刀」：最晚的一条，同一时刻取认领顺序里靠前的那条。
+ * 平仓价校正只叠在它上面；战役页的权益路径、反事实副本的分刀也按它认「最后一刀」。
+ */
+export function closingSettlementRecord(claimed: TradeRecord[]): TradeRecord | null {
+  if (claimed.length === 0) return null;
+  return claimed.reduce((latest, r) => (recordRecency(r) > recordRecency(latest) ? r : latest), claimed[0]);
+}
+
+/**
+ * 一条腿的平仓价校正叠在已实现上的差额。
+ *
+ * 校正只改「这条腿收盘的那一刀」，不是每一刀都改：校正描述的是该腿的平仓价被错记，
+ * 对应的是界面显示的那条成交（认领记录里最晚的一条）。逐条叠加会把一次校正乘上刀数。
+ * 结算与战役页的峰值权益路径共用这一处，两边给同一条腿叠的永远是同一个数。
+ */
+export function legExitPriceCorrectionDelta(
+  claimed: TradeRecord[],
+  correction: LegExitPriceCorrection | null | undefined,
+): number {
+  const closing = closingSettlementRecord(claimed);
+  if (!correction || !closing) return 0;
+  const delta = buildTradeRecordPnlCorrection(closing, correction);
+  return delta ? delta.pnlDelta : 0;
+}
+
+/**
+ * 各腿认领到的结算记录（与 computeCampaignRealizedPnl 的 recordsByLeg 同一份认领），
+ * 给只需要认领结果、不需要合计的调用方（战役页的峰值权益路径）用。
+ */
+export function claimCampaignRecordsByLeg(
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): Map<string, TradeRecord[]> {
+  return claimRecordsByLeg(legs, tradeRecords);
+}
+
 /** 事件兜底：只在完全没有腿时启用，按 event.id 去重。 */
 function pnlFromEvents(campaign: Pick<TradeCampaign, 'actual_evolution'>): number | null {
   const seen = new Set<string>();
@@ -174,15 +215,9 @@ export function computeCampaignRealizedPnl(
     if (claimed.length > 0) {
       let sum = 0;
       for (const record of claimed) sum += finite(record.pnl) ?? 0;
-      // 平仓价校正只改「这条腿收盘的那一刀」，不是每一刀都改：
-      // 校正描述的是该腿的平仓价被错记，对应的是界面显示的那条成交（最晚的一条）。
-      // 逐条叠加会把一次校正乘上刀数。
+      // 平仓价校正只叠在这条腿收盘的那一刀上（见 legExitPriceCorrectionDelta）。
       const correction = exitPriceCorrections[leg.id];
-      if (correction) {
-        const closing = claimed.reduce((latest, r) => (recordRecency(r) > recordRecency(latest) ? r : latest), claimed[0]);
-        const delta = buildTradeRecordPnlCorrection(closing, correction);
-        if (delta) sum += delta.pnlDelta;
-      }
+      if (correction) sum += legExitPriceCorrectionDelta(claimed, correction);
       byLeg.set(leg.id, sum);
       total = (total ?? 0) + sum;
       fromRecords += 1;

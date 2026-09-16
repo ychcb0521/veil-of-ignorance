@@ -27,7 +27,8 @@ import type {
  * 把一条反事实分支（params + result）翻译成「盈亏概览」构造器要的纯数字对象。
  *
  * 口径守则（每一条都对应过一次错数）：
- *   · 已实现 P&L 读 result.final_realized_pnl；
+ *   · 已实现 P&L 读 result.final_realized_pnl：带 fees_total 的新行是净额（与战役页同一口径，已扣平仓费），
+ *     没有 fees_total 的老行是毛盈亏，帮助文案必须如实说明；
  *   · L / 名义仓位 / d / 杠杆优先读 result 上落库的四个字段，老行没有就按 params 重算——
  *     重算必须用这场战役自己的推演模板（main_only 没有保护线），否则老 SOP 行会被造出 L；
  *   · 盈亏比 b = L > 0 ? 已实现 ÷ L × 100 : null——**绝不**拿 result.profit_capture_ratio
@@ -95,17 +96,27 @@ export function computeCounterfactualPayoffRatio(realizedPnl: number, initialExp
 }
 
 /**
- * 「已了结」门槛：手动 Legs 分支要求每条启用的腿都有可解析的平仓时刻；
+ * 「已了结」门槛：手动 Legs 分支要求每条启用的腿都有可解析的平仓时刻，
+ * 且没有「实际战役还在进行、这条腿也没平、副本也没给它另定平仓时间」的腿——
+ * 那种腿的平仓时间只是末根 K 线，战役页对进行中的战役同样不算已了结。
+ * 再叠上运行那一刻真实战役自己的判定（params.actual_resolved，与战役页同一条规则）：
+ * 真实战役不算已了结（进行中、或一条腿都结算不了又没有落库值）时，原样重跑也不算——
+ * 除非副本给实际还没平的腿另定了平仓时间，那是用户在模拟「这时候全平了」。老行没有这个字段，只看腿。
  * SOP 推演分支以主仓已全平（或已进入退场态）为准。
  */
 export function isCounterfactualResolved(branch: CounterfactualOverviewBranch): boolean {
   if (isManualLegScenario(branch.params)) {
-    return (branch.params.manual_legs ?? [])
-      .filter(leg => leg.enabled)
-      .every(leg => {
-        const closeMs = new Date(leg.close_time).getTime();
-        return Number.isFinite(closeMs) && closeMs > 0;
-      });
+    const enabled = (branch.params.manual_legs ?? []).filter(leg => leg.enabled);
+    let closedAnOpenLeg = false;
+    const legsClosed = enabled.every(leg => {
+      const closeMs = new Date(leg.close_time).getTime();
+      if (!Number.isFinite(closeMs) || closeMs <= 0) return false;
+      if (leg.filled === false || leg.actual?.still_open !== true) return true;
+      const stillOpen = closeMs === new Date(leg.actual.close_time).getTime();
+      if (!stillOpen) closedAnOpenLeg = true;
+      return !stillOpen;
+    });
+    return legsClosed && (branch.params.actual_resolved !== false || closedAnOpenLeg);
   }
   return branch.result.events.some(event => event.event_type === 'main_fully_closed')
     || branch.result.state_segments.some(segment => segment.state === 'state_3_exit');
@@ -142,6 +153,84 @@ function peakCaveat(manual: boolean, runContext: CampaignCounterfactualRunContex
   return '本分支未记录运行时的 K 线周期；早期分支的峰值只按每根 K 线收盘价估计，可能低于按最高价 / 最低价重估的读数。';
 }
 
+/** 这一行的已实现是不是净额：新行落库了 fees_total（哪怕是 0），老行没有这个字段、是毛盈亏。 */
+export function isCounterfactualResultNetOfFees(result: CampaignCounterfactualResult): boolean {
+  return finiteOrNull(result.fees_total) != null;
+}
+
+/**
+ * 手动 Legs 分支「已实现 P&L」的口径说明，按这一行实际落库的口径写。
+ *
+ * 新行与战役页同一口径：战役页的已实现是 Σ record.pnl，record.pnl = 毛盈亏 − 平仓费，
+ * 开仓费在开仓时从钱包扣走、不在其中——所以这里也只扣平仓费，开仓费单列、不扣。
+ * 若连开仓费一起扣，没改过一格的副本就会比实际少一截，被读成「原始错误的代价」。
+ * 只剩复盘快照的腿，手续费已含在快照里、金额未知：不写成「0.00」，单独说明。
+ */
+function manualRealizedPnlHelp(result: CampaignCounterfactualResult): CampaignPnlOverviewHelpParagraph[] {
+  if (!isCounterfactualResultNetOfFees(result)) {
+    return [
+      '本条反事实分支里全部手动 Legs 按调整后的开仓价 / 平仓价算出的盈亏合计（名义仓位 × 价格变动比例，不乘杠杆）。',
+      { formula: '已实现 P&L = Σ 各手动 Leg 毛盈亏' },
+      {
+        warning: '本分支保存于手续费口径统一之前：这是未扣任何手续费的毛盈亏，而实际战役的已实现 P&L 已扣平仓手续费，'
+          + '所以「相对实际」里多出了这部分手续费，不全是方案的得失；若有从未成交的保护单，当时也按成交计入了；'
+          + '分几刀平掉的腿当时按整条腿平在最后一刀计算。'
+          + '把它载回 Legs 副本重新运行一次，即可得到与实际同一口径的读数。',
+      },
+      '停用或删除的腿不计入；资金费不并入任何腿。',
+    ];
+  }
+  const closeFees = finiteOrNull(result.fees_total) ?? 0;
+  const openFees = finiteOrNull(result.open_fees_total);
+  const unknownFeeLegs = finiteOrNull(result.fee_unknown_leg_count) ?? 0;
+  const fromCampaignTotal = result.legs_summary.some(leg => leg.pnl_basis === 'campaign_total');
+  const feeLine = openFees == null
+    ? `本分支已扣平仓手续费 ${closeFees.toFixed(2)} USDT。开仓手续费在开仓时从钱包扣除，实际战役的已实现 P&L 同样不含它，这里也不扣。`
+    : `本分支已扣平仓手续费 ${closeFees.toFixed(2)} USDT；开仓手续费 ${openFees.toFixed(2)} USDT 在开仓时从钱包扣除，`
+      + '实际战役的已实现 P&L 同样不含它，这里也不扣。';
+  return [
+    '本条反事实分支里全部手动 Legs 的已实现盈亏合计，与实际战役的已实现 P&L 同一口径（净额，已扣平仓手续费），可以直接相减得到「相对实际」。',
+    '没改过的腿直接取实际结算值：成交记录的盈亏之和（逐刀，已扣平仓手续费，叠与战役页同一份平仓价校正），只剩复盘快照的腿取快照，'
+      + '实际结算没有计入的腿（既无成交记录也无复盘快照，如尚未平仓）记 0。'
+      + '改过的腿从实际结算值出发，只加上这次改动本身值的钱：按改后的开平价、仓位重算这一刀的毛盈亏（名义仓位 × 价格变动比例，不乘杠杆）'
+      + '与平仓手续费（费率用这一刀成交记录自己的，老记录按当时实收的费率），减去按原开平价算的同一个数；'
+      + '平仓价、平仓时间改的是最后那一刻平掉的全部（同一时刻一起平掉的刀一起平移），分几刀平掉的腿更早平掉的刀维持实际成交。'
+      + '新增的腿、切成「已成交」的挂单，以及改过的未平仓腿，按调整后的价格算毛盈亏，再按模拟器的 Taker 费率扣平仓手续费'
+      + '（U 本位 = 数量 × 平仓价 × 费率；币本位 = 张数 × 面值 × 费率）。',
+    ...(fromCampaignTotal
+      ? ['本场一条腿都结算不了（本地既无成交记录也无复盘快照），上方的已实现取自事件流或落库缓存：'
+        + '这个总额先按各腿的开平价估一份（毛盈亏 − 模拟器 Taker 平仓费），余差记在主力上，各份之和恰为那个总额；'
+        + '停用一条腿减去它自己那一份，改一格仍只挪这一格值的钱。']
+      : []),
+    '所以原样重跑时已实现 P&L 逐分复现上方「盈亏概览」，「相对实际」只反映你的改动。',
+    { formula: '已实现 P&L = Σ 各手动 Leg（实际已实现 + 改动差额）；新增的腿 = 毛盈亏 − 平仓手续费' },
+    unknownFeeLegs > 0
+      ? `${feeLine}另有 ${unknownFeeLegs} 条腿只剩复盘快照或摊自战役级已实现，手续费已含在盈亏里、金额未知，不在上面的数里；`
+        + '改过这些腿的开平价或仓位时，平仓手续费随之变化的部分按模拟器 Taker 费率扣进它们的盈亏，同样不在上面的数里。'
+      : feeLine,
+    '标着「挂单中」（未成交）的腿、停用或删除的腿不计入；资金费不并入任何腿。',
+  ];
+}
+
+/** 手动 Legs 分支峰值的持仓口径：与已实现同一份净额；挂单中的腿不持有。老行按当时的口径如实说明。 */
+function manualPeakBasis(result: CampaignCounterfactualResult): string {
+  return isCounterfactualResultNetOfFees(result)
+    ? '已平的每一刀按与「已实现 P&L」同一份净额计入（没改过的腿即战役页校正后的实际结算值），'
+      + '本地有成交记录时，分几刀平掉的腿按各刀自己的平仓时刻切换持仓（本地没有成交记录时，主力 / 镜像与战役页一样按 Leg 快照整条持有，峰值可能高于实际）；'
+      + '标着「挂单中」的腿不计入持仓；本地没有成交记录、事件流里也没有触发时刻或历史快照的腿，与战役页一样不持有（已实现照计）；'
+      + '历史归类的战役在本地没有成交记录时，主力 / 镜像按 Leg 快照持有，其余只在事件快照里的腿按事件里的成交价、数量与开仓时刻持有，'
+      + '平仓时刻与已实现取腿上的（归类之后补上或改过的也算，腿上没有才取事件里的），与战役页同一段；'
+      + '归类时还挂着的保护单（事件快照里既没有成交 id 也没有已实现）从未成交，与战役页一样标「挂单中」、不持有；'
+      + '腿上存的是委托 id、本地委托记录显示它已撤单或仍挂着的同样算，本地查不到这张委托时无法判定，与战役页一样按成交处理；'
+      + '已结束的战役里平仓时间只是兜底的腿，收在战役页扫描窗口的终点（结束时间，但不早于最后一次平仓）；'
+      + '摊自战役级已实现的腿与战役页一样平仓后不计那份总额（只计改动的差额），峰值至少取到最终已实现。'
+      + '例外：进行中的战役，上方「盈亏概览」只扫到最晚一条成交记录为止（本地一条成交记录都没有时只到开仓那一刻），'
+      + '在那之后的持仓（还没平的腿、只剩复盘快照或事件快照且在那之后才平的腿）上方看不到，副本照常持有'
+      + '（还没平的腿持有到最后一根 K 线），两边峰值可能不同。'
+    : '本分支保存于手续费口径统一之前：已平的腿按毛盈亏计入，从未成交的保护单（如有）也按持有计算，'
+      + '分几刀平掉的腿按整条腿持有到最后一刀，峰值可能与上方「盈亏概览」不同。';
+}
+
 export function buildCounterfactualOverviewMetrics(
   branch: CounterfactualOverviewBranch,
   shared: CounterfactualOverviewShared,
@@ -172,11 +261,7 @@ export function buildCounterfactualOverviewMetrics(
 
   const helpOverrides: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
     realizedPnl: manual
-      ? [
-        '本条反事实分支里全部手动 Legs 按你调整后的开仓价 / 平仓价算出的盈亏合计，与实际战役的已实现 P&L 同一口径（名义仓位 × 价格变动比例，不乘杠杆），可以直接相减得到「相对实际」。',
-        { formula: '已实现 P&L = Σ 各手动 Leg 盈亏' },
-        '停用或删除的腿不计入；资金费不并入任何腿。',
-      ]
+      ? manualRealizedPnlHelp(branch.result)
       : [
         '按标准 SOP 在真实行情上推演出的全部平仓盈亏合计（主仓、镜像止盈、对冲），与实际战役的已实现 P&L 同一口径。',
         { formula: '已实现 P&L = Σ 各推演 Leg 盈亏' },
@@ -193,10 +278,24 @@ export function buildCounterfactualOverviewMetrics(
   const extraNotes: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
     initialMainExposureNotional: [
       manual
-        ? '反事实分支从手动 Legs 里角色为主力开仓与镜像止盈的腿的名义仓位还原；合成腿一律按入场方向计，改了方向的腿也算在内。'
+        ? '反事实分支从手动 Legs 里角色为主力开仓与镜像止盈的腿的名义仓位还原：有成交记录的腿取上方分给它的那份开仓名义'
+          + '（同一笔开仓成交只计一次、滑点后的成交价 × 数量，并进主力仓位却没有腿的加仓不算），「仓位」一格改过则按比例缩放；'
+          + '没有成交记录的腿与新增的腿按「仓位」一格。方向与战役相反、上方不计的原始腿，这里同样不计；其余改了方向的腿仍算在内。'
         : '反事实分支从推演参数的入场名义仓位与镜像止盈仓位还原。',
     ],
-    peakUnrealizedPnl: [peakCaveat(manual, branch.params.run_context)],
+    ...(manual ? {
+      initialExpectedMaxLoss: [
+        isCounterfactualResultNetOfFees(branch.result)
+          ? '止损线与上方同一份：初始对冲按委托价（不是滑点后的成交价），同一角色几张时按挂出时刻取第一张，'
+            + '也读这场战役的反向保护委托（历史归类的战役只认委托快照）与事件流里带价的初始对冲事件；'
+            + '几笔主力时，每张保护单归哪一笔主力与上方相同（有成交记录的腿按成交时刻、没有的按挂出时刻，主力按各自的持仓窗口）；'
+            + '开仓价改过的腿按改后的价。'
+          : { warning: '本分支保存于口径统一之前：止损线只按手动 Legs 的开仓价锚定（成交过的对冲按滑点后的成交价），不含反向委托，可能与上方不同。' },
+      ],
+    } : {}),
+    peakUnrealizedPnl: manual
+      ? [peakCaveat(manual, branch.params.run_context), manualPeakBasis(branch.result)]
+      : [peakCaveat(manual, branch.params.run_context)],
     asymmetricRiskContribution: [
       { warning: '假设值：本场反事实不在账户样本内，n 与 Σb² 取自真实已了结战役，占比只是「如果它是真的」的示意。' },
     ],

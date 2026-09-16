@@ -14,7 +14,12 @@ import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { resolveLegExecution } from '@/lib/campaignLegExecution';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
-import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import {
+  claimCampaignRecordsByLeg,
+  closingSettlementRecord,
+  computeCampaignRealizedPnl,
+  legExitPriceCorrectionDelta,
+} from '@/lib/campaignRealizedPnl';
 import type { CampaignReverseHedgeOrder, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import {
@@ -785,6 +790,62 @@ export function computeInitialMainExposureNotional(
   ) ?? 0;
 }
 
+/** 一条腿在「主力开仓名义仓位」里的份额（反事实「Legs 副本」据此还原合成腿）。 */
+export interface InitialExposureLegShare {
+  /** 这条腿分到的开仓名义（USD）。 */
+  notionalUsd: number;
+  /** 所在的「同一笔开仓成交」组。 */
+  groupKey: string;
+  /** 组里有几条腿；不止一条时合成战役要把它们并回一组。 */
+  groupSize: number;
+}
+
+export interface InitialExposureLegAttribution {
+  /** 有平仓分片可查的初始敞口腿 → 份额。没有分片的腿按 pre_position_size 计，不在这里。 */
+  shares: Map<string, InitialExposureLegShare>;
+  /** 角色是主力 / 镜像、却因方向与战役相反而不计入开仓名义仓位的腿。 */
+  excludedLegIds: Set<string>;
+}
+
+/**
+ * 「主力开仓名义仓位」按腿拆开：与 resolveInitialMainExposureNotional 第 ① 步同一份并组
+ * （groupLegsByOpeningFill：能触达同一批平仓分片的腿是同一笔开仓，名义取分片并集、只计一次），
+ * 组的名义再按各腿自己的开仓名义（openingNotionalUsd）摊开——各腿份额之和恰为组的名义。
+ *
+ * 只给反事实副本用：它的合成战役没有真实成交记录，靠这份份额造出同形的记录，
+ * 主力认领到的分刀里若有并进来、却没有腿的加仓，战役页不把它算进开仓名义，副本也不算。
+ */
+export function resolveInitialExposureLegAttribution(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+): InitialExposureLegAttribution {
+  const settlement = settlementRecordsOf(tradeRecords);
+  const shares = new Map<string, InitialExposureLegShare>();
+  const excludedLegIds = new Set<string>();
+  const initialExposureLegs: TradeJournal[] = [];
+  for (const leg of legs) {
+    if (isInitialMainExposurePosition(campaign, leg.leg_role, leg.direction)) initialExposureLegs.push(leg);
+    else if (leg.leg_role != null && INITIAL_MAIN_EXPOSURE_ROLES.includes(leg.leg_role)) excludedLegIds.add(leg.id);
+  }
+  groupLegsByOpeningFill(initialExposureLegs, settlement).forEach((group, index) => {
+    if (group.notional == null) return;
+    const weights = group.legs.map(leg => openingNotionalUsd(leg.trade_record_id, settlement) ?? 0);
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    group.legs.forEach((leg, legIndex) => {
+      const notional = group.notional as number;
+      shares.set(leg.id, {
+        notionalUsd: group.legs.length === 1
+          ? notional
+          : totalWeight > EPSILON ? notional * weights[legIndex] / totalWeight : notional / group.legs.length,
+        groupKey: `exposure-group-${index + 1}`,
+        groupSize: group.legs.length,
+      });
+    });
+  });
+  return { shares, excludedLegIds };
+}
+
 /**
  * Percentage of the full initial main-side exposure closed by one mirror TP.
  *
@@ -1537,6 +1598,10 @@ export function buildCampaignEventStream(
   return events.sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp));
 }
 
+/**
+ * 战役行记下的结束时刻：已结束的战役是 closed_at；进行中的是最晚一条成交记录（一条都没有时就是开仓那一刻）。
+ * 权益路径与决策精度的扫描窗口不直接用它，见 buildActiveLegs——已结束的战役，窗口不早于路径上最晚的那次平仓。
+ */
 function campaignEndMs(campaign: TradeCampaign, tradeRecords: TradeRecord[]) {
   const latestRecord = tradeRecords.reduce((max, record) => Math.max(max, record.closeTime, record.openTime), 0);
   return campaign.closed_at ? toMs(campaign.closed_at) : Math.max(latestRecord, toMs(campaign.opened_at));
@@ -1549,6 +1614,8 @@ export function deriveCampaignStates(
 ): StateSegment[] {
   const events = buildCampaignEventStream(campaign, legs, tradeRecords);
   const startMs = toMs(campaign.opened_at);
+  // 状态分段画的是战役行记下的生命周期：已结束的战役，事件流里恒有一条按 closed_at 补出的 campaign_closed，
+  // 分段终点取它，endMs 只在进行中的战役里用到——这里不需要（也不该）换成权益路径的扫描窗口。
   const endMs = campaignEndMs(campaign, tradeRecords);
 
   const pushSegment = (
@@ -1615,7 +1682,25 @@ interface CampaignActiveLeg {
   settlementMode: SettlementMode;
   contractSizeUsd: number | null;
   contracts: number | null;
+  /**
+   * 没有成交记录的腿，这一段是怎么还原的：snapshot = 主力 / 镜像的复盘快照，trigger = 带触发事件的对冲，
+   * event = 历史快照事件（开仓价与数量取事件，不取腿上的委托快照；平仓时刻与已实现先取腿上的）。成交记录的段不写。
+   */
+  rebuiltFrom?: 'snapshot' | 'trigger' | 'event';
+  /** 平仓时刻缺省到了战役结束（扫描窗口的终点，见 buildActiveLegs），不是这条腿自己的事实。 */
+  endIsCampaignEnd?: boolean;
 }
+
+/**
+ * 本地委托快照给出的事实（getCampaignFullData 的 unfilledOrderIds）：
+ * 腿 / 归类事件上挂着、却能证明**从未成交**的委托 id（撤掉了，或至今仍挂着）。
+ * 权益路径与「Legs 副本」把这种 id 当作没有成交 id；本地查不到的 id 不下结论，照旧当作成交过。
+ */
+export interface CampaignLocalOrderFacts {
+  unfilledOrderIds?: ReadonlySet<string>;
+}
+
+const NO_UNFILLED_ORDER_IDS: ReadonlySet<string> = new Set<string>();
 
 function activeLegUnrealizedPnl(leg: CampaignActiveLeg, price: number): number {
   if (!(price > 0) || !(leg.entryPrice > 0)) return 0;
@@ -1745,32 +1830,141 @@ export function computeCampaignPnlPathExtremes(
   return computeCampaignPnlExtremes(activeLegs, klines, startMs, endMs);
 }
 
+function recordActiveLeg(
+  leg: TradeJournal,
+  record: TradeRecord,
+  endMs: number,
+  realizedPnl: number | null,
+): CampaignActiveLeg {
+  return {
+    id: record.id,
+    journalId: leg.id,
+    role: leg.leg_role,
+    side: record.side,
+    quantity: record.quantity,
+    entryPrice: record.entryPrice,
+    startMs: record.openTime,
+    endMs: record.closeTime || endMs,
+    realizedPnl,
+    settlementMode: record.settlementMode ?? 'usdt',
+    contractSizeUsd: Number.isFinite(record.contractSizeUsd) ? Number(record.contractSizeUsd) : null,
+    contracts: Number.isFinite(record.contracts) ? Number(record.contracts) : null,
+    ...(record.closeTime ? {} : { endIsCampaignEnd: true }),
+  };
+}
+
+/**
+ * 有成交记录的腿在权益路径上的样子：它认领到的**每一刀**各一段（与已实现 P&L 认领的是同一批记录），
+ * 各带自己的数量、开平时刻与 record.pnl；平仓价校正差额只叠在收盘那一刀上
+ * （legExitPriceCorrectionDelta / closingSettlementRecord，与结算同一条规则）。
+ *
+ * 此前这里只放 buildTradeRecordLookup 折叠出来的**一条**记录，而已实现 P&L 把全部分刀加在一起：
+ *   · 主力 + 镜像并成一个仓位、镜像止盈按比例减仓 60% 时，每条腿都有两刀，路径却只持有最后一刀的量
+ *     （4 个 + 6 个 的仓位在 01:00 那根高点上只算了 1.6 + 2.4 个），峰值 119.96，真值约 300；
+ *   · M 减仓 50%（同一条主力腿两刀）同理，峰值只剩一半。
+ * 只认领到一条记录（且就是查到的那一条）、不带校正的腿，读数与此前逐字节相同。
+ *
+ * 平仓价校正差额同样只有真带着校正时才叠：一刀被错记在 160 平掉（那一分钟只有 99–105）的镜像止盈，
+ * 已实现按 104 算，峰值浮盈也必须按 104 算，否则峰值 600 配已实现 120。
+ */
+function recordActiveLegs(
+  leg: TradeJournal,
+  lookupRecord: TradeRecord,
+  claimed: TradeRecord[],
+  endMs: number,
+  exitPriceCorrections: LegExitPriceCorrections,
+): CampaignActiveLeg[] {
+  const correction = exitPriceCorrections[leg.id];
+  const pnlOf = (record: TradeRecord, delta: number) => {
+    if (!Number.isFinite(record.pnl)) return null;
+    return correction ? Number(record.pnl) + delta : Number(record.pnl);
+  };
+  if (claimed.length === 0) {
+    // 结算没认领它（例如不是结算记录）：维持原样，按查到的那一条放上路径。
+    return [recordActiveLeg(leg, lookupRecord, endMs, pnlOf(lookupRecord, 0))];
+  }
+  const closing = closingSettlementRecord(claimed);
+  const delta = correction ? legExitPriceCorrectionDelta(claimed, correction) : 0;
+  return claimed.map(record => recordActiveLeg(leg, record, endMs, pnlOf(record, record === closing ? delta : 0)));
+}
+
+/** 战役页的权益路径：路径上的每一段，以及扫描窗口的终点（开始恒为 opened_at）。 */
+interface CampaignEquityPath {
+  activeLegs: CampaignActiveLeg[];
+  endMs: number;
+}
+
+/**
+ * 已结束的战役，扫描窗口的终点 = max(closed_at, 路径上最晚的那次平仓)——本地成交记录的平仓时刻、
+ * 没有成交记录的腿按自己的平仓快照 / 撤单事件 / 历史快照事件放下的时刻，都算；缺省到战役结束的段不算。
+ * 平仓时刻缺省的段随之持有到这个终点。
+ *
+ * 为什么不直接用 closed_at：结束战役对话框曾把模拟时钟按 UTC 墙钟预填、再按本地时间解析，
+ * 东八区里存下的 closed_at 比模拟时钟早 8 小时；已经存下的这类战役，窗口在最后一次平仓之前就截断，
+ * 峰值浮盈 / 最大回撤只扫到半程（市价滑点那一场：99.24，真值 299.90），而「Legs 副本」从最早开仓扫到最晚平仓，
+ * 原样重跑两边对不上。closed_at 晚于最后一次平仓的战役不受影响（终点仍是 closed_at）。
+ * 进行中的战役维持原样（扫到最晚一条成交记录为止），那是说明里写明的例外。
+ */
 function buildActiveLegs(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
-): CampaignActiveLeg[] {
-  const endMs = campaignEndMs(campaign, tradeRecords);
-  const syntheticEvents = buildCampaignEventStream(campaign, legs, tradeRecords);
+  exitPriceCorrections: LegExitPriceCorrections = {},
+  unfilledOrderIds: ReadonlySet<string> = NO_UNFILLED_ORDER_IDS,
+): CampaignEquityPath {
+  const recordedEndMs = campaignEndMs(campaign, tradeRecords);
+  const activeLegs = buildActiveLegsUntil(campaign, legs, tradeRecords, exitPriceCorrections, unfilledOrderIds, recordedEndMs);
+  if (!campaign.closed_at) return { activeLegs, endMs: recordedEndMs };
+  let latestClose = Number.NEGATIVE_INFINITY;
+  for (const leg of activeLegs) {
+    if (!leg.endIsCampaignEnd && Number.isFinite(leg.endMs)) latestClose = Math.max(latestClose, leg.endMs);
+  }
+  for (const record of tradeRecords) {
+    if (record.action !== 'FUNDING' && Number.isFinite(record.closeTime) && record.closeTime > 0) {
+      latestClose = Math.max(latestClose, record.closeTime);
+    }
+  }
+  if (!(latestClose > recordedEndMs)) return { activeLegs, endMs: recordedEndMs };
+  return {
+    activeLegs: activeLegs.map(leg => (leg.endIsCampaignEnd ? { ...leg, endMs: latestClose } : leg)),
+    endMs: latestClose,
+  };
+}
 
-  const candidates = legs.flatMap(leg => {
+function buildActiveLegsUntil(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  exitPriceCorrections: LegExitPriceCorrections,
+  unfilledOrderIds: ReadonlySet<string>,
+  endMs: number,
+): CampaignActiveLeg[] {
+  const syntheticEvents = buildCampaignEventStream(campaign, legs, tradeRecords);
+  // 与已实现 P&L 同一份认领：一条记录最多属于一条腿。
+  const claimedByLeg = claimCampaignRecordsByLeg(legs, tradeRecords);
+  const claimOwner = new Map<string, string>();
+  for (const [legId, records] of claimedByLeg) {
+    for (const record of records) claimOwner.set(record.id, legId);
+  }
+
+  /**
+   * 老数据两条腿指向同一条记录、记录归另一条腿认领时，这条腿仍放一个同 id 的占位：
+   * 路径上那条记录的**位置**沿用它第一次出现的地方（与改动之前逐字节相同，求和顺序不变），
+   * 取值由认领它的那条腿给（带着那条腿的平仓价校正）；腿本身也照旧算作「路径上有它」。
+   */
+  const placeholders = new Set<object>();
+  const candidates = legs.flatMap<CampaignActiveLeg>(leg => {
     const record = findTradeRecord(leg, tradeRecords);
 
     if (record) {
-      return [{
-        id: record.id,
-        journalId: leg.id,
-        role: leg.leg_role,
-        side: record.side,
-        quantity: record.quantity,
-        entryPrice: record.entryPrice,
-        startMs: record.openTime,
-        endMs: record.closeTime || endMs,
-        realizedPnl: Number.isFinite(record.pnl) ? Number(record.pnl) : null,
-        settlementMode: record.settlementMode ?? 'usdt',
-        contractSizeUsd: Number.isFinite(record.contractSizeUsd) ? Number(record.contractSizeUsd) : null,
-        contracts: Number.isFinite(record.contracts) ? Number(record.contracts) : null,
-      }];
+      const claimed = claimedByLeg.get(leg.id) ?? [];
+      const owner = claimOwner.get(record.id);
+      if (claimed.length === 0 && owner != null && owner !== leg.id) {
+        const placeholder = recordActiveLeg(leg, record, endMs, Number.isFinite(record.pnl) ? Number(record.pnl) : null);
+        placeholders.add(placeholder);
+        return [placeholder];
+      }
+      return recordActiveLegs(leg, record, claimed, endMs, exitPriceCorrections);
     }
 
     if (
@@ -1797,6 +1991,8 @@ function buildActiveLegs(
         settlementMode,
         contractSizeUsd: Number.isFinite(leg.pre_contract_size_usd) ? Number(leg.pre_contract_size_usd) : null,
         contracts,
+        rebuiltFrom: 'snapshot',
+        endIsCampaignEnd: !Number.isFinite(closeMs) || !leg.post_simulated_close_time,
       }];
     }
 
@@ -1833,15 +2029,35 @@ function buildActiveLegs(
         settlementMode,
         contractSizeUsd: Number.isFinite(leg.pre_contract_size_usd) ? Number(leg.pre_contract_size_usd) : null,
         contracts,
+        rebuiltFrom: 'trigger',
+        endIsCampaignEnd: !Number.isFinite(closeMs) || (!leg.post_simulated_close_time && !cancelEvent),
       }];
     }
 
     return [];
   });
 
-  const byIdentity = new Map(candidates.map(leg => [leg.id, leg]));
+  const byIdentity = new Map<string, (typeof candidates)[number]>();
+  for (const candidate of candidates) {
+    // 占位只占位置：同 id 已有认领者给的值时不覆盖；认领者在后面出现时覆盖占位的值（Map 保留原位置）。
+    if (placeholders.has(candidate) && byIdentity.has(candidate.id)) continue;
+    byIdentity.set(candidate.id, candidate);
+  }
   const representedJournalIds = new Set(candidates.map(leg => leg.journalId));
   const representedRecordIds = new Set(candidates.map(leg => leg.id));
+  /**
+   * 已经在路径上的腿，它挂着的成交 id 也算「已表示」：历史归类的战役在本地没有成交记录时，
+   * 页面按事件合成的主力 / 镜像腿（id 为 record-<成交 id>）已经以复盘快照上了路径，
+   * 描述同一笔的 historical_leg_attached 事件（journal_id 为空、只带成交 id）不能再放一遍——
+   * 否则同一个仓位被持有两次，峰值浮盈翻倍。
+   */
+  const legById = new Map(legs.map(leg => [leg.id, leg]));
+  const unrepresentedLegByRecordId = new Map<string, TradeJournal>();
+  for (const leg of legs) {
+    if (!leg.trade_record_id) continue;
+    if (representedJournalIds.has(leg.id)) representedRecordIds.add(leg.trade_record_id);
+    else if (!unrepresentedLegByRecordId.has(leg.trade_record_id)) unrepresentedLegByRecordId.set(leg.trade_record_id, leg);
+  }
 
   // Some historical campaigns retain complete leg snapshots only inside
   // actual_evolution. Reconstruct those positions so old campaigns use the
@@ -1850,10 +2066,29 @@ function buildActiveLegs(
     if (event.event_type !== 'historical_leg_attached' || event.leg_role == null) continue;
     if (event.journal_id && representedJournalIds.has(event.journal_id)) continue;
     if (event.trade_record_id && representedRecordIds.has(event.trade_record_id)) continue;
+    // 归类那一刻还没成交的保护单（从日志腿归类时列表里的「未触发取消」）：事件只抄了委托价、委托名义与挂出时刻，
+    // 既没有成交 id 也没有已实现——它从未成交，不能从挂出时刻持有到结束（与没有事件的挂单同一条判据）。
+    // 通过「记录决策」挂出的保护单，事件里的「成交 id」其实是委托 id：本地委托快照证明它从未成交时，同样当作没有成交 id。
+    const filledId = Boolean(event.trade_record_id) && !unfilledOrderIds.has(event.trade_record_id as string);
+    if (!filledId && !Number.isFinite(event.realized_pnl)) continue;
     const entryPrice = firstPositiveNumber(event.entry_price, event.price);
     const notional = firstPositiveNumber(event.size_usdt);
     const start = event.open_time ? toMs(event.open_time) : toMs(event.timestamp);
-    const close = event.close_time ? toMs(event.close_time) : endMs;
+    // 这一段归哪条腿：journal_id 指向的那条，否则挂着同一个成交 id 的那条（按事件合成的腿 id 是 record-<成交 id>）。
+    const ownerLeg = (event.journal_id ? legById.get(event.journal_id) : undefined)
+      ?? (event.trade_record_id ? unrepresentedLegByRecordId.get(event.trade_record_id) : undefined);
+    /**
+     * 平仓时刻与已实现先取那条腿上的：事件是归类**那一刻**的快照（归类时还没平的腿，事件没有平仓时间、已实现为空或 0；
+     * 之后在仓位面板改过成交记录，事件也不跟着改），腿上的平仓快照之后还会补、会改。
+     * 「已实现 P&L」读的正是腿上的（computeCampaignRealizedPnl），路径与它同一份；腿上没有时才退到事件。
+     */
+    const legCloseMs = ownerLeg?.post_simulated_close_time ? toMs(ownerLeg.post_simulated_close_time) : Number.NaN;
+    const legRealized = ownerLeg != null && Number.isFinite(ownerLeg.post_realized_pnl)
+      ? Number(ownerLeg.post_realized_pnl)
+      : null;
+    const close = Number.isFinite(legCloseMs)
+      ? legCloseMs
+      : event.close_time ? toMs(event.close_time) : endMs;
     if (entryPrice == null || notional == null || !Number.isFinite(start)) continue;
     const identity = event.trade_record_id ?? event.journal_id ?? event.id;
     const fallbackSide = HEDGE_ROLES.includes(event.leg_role) || event.leg_role === 'reentry_hedge'
@@ -1861,7 +2096,7 @@ function buildActiveLegs(
       : (campaign.direction === 'main_long' ? 'LONG' : 'SHORT');
     byIdentity.set(identity, {
       id: identity,
-      journalId: event.journal_id ?? event.id,
+      journalId: ownerLeg?.id ?? event.journal_id ?? event.id,
       role: event.leg_role,
       side: event.direction === 'short'
         ? 'SHORT'
@@ -1872,14 +2107,121 @@ function buildActiveLegs(
       entryPrice,
       startMs: start,
       endMs: Number.isFinite(close) ? close : endMs,
-      realizedPnl: Number.isFinite(event.realized_pnl) ? Number(event.realized_pnl) : null,
+      realizedPnl: legRealized ?? (Number.isFinite(event.realized_pnl) ? Number(event.realized_pnl) : null),
       settlementMode: 'usdt',
       contractSizeUsd: null,
       contracts: null,
+      rebuiltFrom: 'event',
+      endIsCampaignEnd: (!Number.isFinite(legCloseMs) && !event.close_time) || !Number.isFinite(close),
     });
   }
 
   return Array.from(byIdentity.values());
+}
+
+/** 战役页权益路径（峰值浮盈）对每条腿的处置，反事实「Legs 副本」照着它还原。 */
+export interface CampaignEquityPathLegFacts {
+  /** 权益路径持有过的腿 → 它最早一段的开始时刻（没有成交记录的对冲是 hedge_triggered 的时刻，不是挂单时刻）。 */
+  heldStartMsByLeg: Map<string, number>;
+  /**
+   * 没有成交记录、却在权益路径上的腿 → 路径上它那一段的另外两件事实：
+   *   · endMs：这一段自己的平仓时刻（快照平仓时间、撤单事件；事件还原的段先取腿上的平仓时间，再取事件里的）；缺省到战役结束的为 null；
+   *   · eventFill：这一段从历史快照事件还原时，事件里的成交价与数量（腿上写的是委托价 / 委托名义，二者可以不同）。
+   */
+  heldWithoutRecordByLeg: Map<string, {
+    endMs: number | null;
+    eventFill: { entryPrice: number; quantity: number } | null;
+  }>;
+  /**
+   * 从未成交的腿（Legs 表里的「挂单中」）：权益路径不持有它、没有成交 id、结算也没给它记过一分钱。
+   * 不限角色——初始对冲 A/B、滚动对冲、回场对冲、独立单都一样。
+   */
+  unfilledLegIds: Set<string>;
+  /**
+   * 成交过、权益路径却不持有的腿：挂着成交 id 或复盘快照里有已实现，但本地查不到成交记录、
+   * 事件流里也没有触发时刻或历史快照事件（例如换了浏览器的实时对冲）——不知道它何时成交，峰值不持有它，已实现照计。
+   */
+  offPathLegIds: Set<string>;
+  /**
+   * 战役页扫描窗口的终点（见 buildActiveLegs）：已结束的战役是 max(closed_at, 路径上最晚的那次平仓)，
+   * 进行中的是最晚一条成交记录。路径上平仓时刻缺省的段持有到这里，副本里平仓时间只是兜底的腿也收在这里。
+   */
+  analysisEndMs: number;
+}
+
+/**
+ * 判据就是上面 buildActiveLegs 决定「这条腿在战役页权益路径上持有过没有」的那一条，不另写：
+ *   · 权益路径上有它（成交记录、主力 / 镜像的快照、带 hedge_triggered 事件的对冲、历史快照事件——
+ *     事件按 journal_id、否则按同一个成交 id 认腿，按事件合成的腿 id 是 record-<成交 id>；
+ *     归类时还没成交、既没有成交 id 也没有已实现的事件不算）→ 持有；
+ *   · 否则，挂着成交 id、或复盘快照里有已实现 → 成交过，只是路径不持有（offPath）；
+ *     挂着成交 id 却查不到本地记录的腿成交过，Legs 表里写的是「已成交 · 成交记录未载入」，不能判成挂单；
+ *     例外：那个 id 是本地委托快照证明从未成交的委托 id（localOrders.unfilledOrderIds）——与没有 id 一样；
+ *   · 否则 → 从未成交（unfilled）。
+ */
+export function resolveCampaignEquityPathLegFacts(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  localOrders: CampaignLocalOrderFacts = {},
+): CampaignEquityPathLegFacts {
+  const unfilledOrderIds = localOrders.unfilledOrderIds ?? NO_UNFILLED_ORDER_IDS;
+  const heldStartMsByLeg = new Map<string, number>();
+  const heldWithoutRecordByLeg: CampaignEquityPathLegFacts['heldWithoutRecordByLeg'] = new Map();
+  const path = buildActiveLegs(campaign, legs, tradeRecords, {}, unfilledOrderIds);
+  for (const active of path.activeLegs) {
+    const current = heldStartMsByLeg.get(active.journalId);
+    if (current == null || active.startMs < current) heldStartMsByLeg.set(active.journalId, active.startMs);
+    if (active.rebuiltFrom) {
+      heldWithoutRecordByLeg.set(active.journalId, {
+        endMs: active.endIsCampaignEnd ? null : active.endMs,
+        eventFill: active.rebuiltFrom === 'event'
+          ? { entryPrice: active.entryPrice, quantity: active.quantity }
+          : null,
+      });
+    }
+  }
+  const unfilledLegIds = new Set<string>();
+  const offPathLegIds = new Set<string>();
+  for (const leg of legs) {
+    if (heldStartMsByLeg.has(leg.id)) continue;
+    const filledId = Boolean(leg.trade_record_id) && !unfilledOrderIds.has(leg.trade_record_id as string);
+    if (filledId || Number.isFinite(leg.post_realized_pnl)) offPathLegIds.add(leg.id);
+    else unfilledLegIds.add(leg.id);
+  }
+  return { heldStartMsByLeg, heldWithoutRecordByLeg, unfilledLegIds, offPathLegIds, analysisEndMs: path.endMs };
+}
+
+/**
+ * 这场战役里**从未成交**的腿（判据见 resolveCampaignEquityPathLegFacts）。
+ * 反事实「Legs 副本」据此把这类腿标成「挂单中」：不进持仓与已实现，但仍是定义 L 的那条止损线。
+ */
+export function resolveUnfilledLegIds(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  localOrders: CampaignLocalOrderFacts = {},
+): Set<string> {
+  return resolveCampaignEquityPathLegFacts(campaign, legs, tradeRecords, localOrders).unfilledLegIds;
+}
+
+/**
+ * 战役页锚 L / 预期回撤时这笔主力用的开仓价：老数据先把合并出来的开仓价解回主力自己的，
+ * 否则取成交价，再退到委托价——与 resolveInitialRiskAnchor / resolveMainRiskAnchors 同一条链。
+ * 反事实副本的合成主力按它锚，才与上方盈亏概览同一个 L。
+ */
+export function resolveMainRiskAnchorEntryPrice(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  mainLeg: TradeJournal,
+): number | null {
+  const mainRecord = findTradeRecord(mainLeg, tradeRecords);
+  return firstPositiveNumber(
+    unblendedMainEntryPrice(campaign, mainLeg, mainRecord, legs, tradeRecords),
+    mainRecord?.entryPrice,
+    mainLeg.pre_entry_price,
+  );
 }
 
 function verdictByThresholds(value: number, thresholds: number[], labels: string[]) {
@@ -1896,9 +2238,19 @@ export function computeDecisionAccuracy(
   klines: KlineData[],
   reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
   exitPriceCorrections: LegExitPriceCorrections = {},
+  localOrders: CampaignLocalOrderFacts = {},
 ): DecisionAccuracyResult {
   const isLongCampaign = campaign.direction === 'main_long';
-  const endMs = campaignEndMs(campaign, tradeRecords);
+  // 峰值路径与下面的已实现同一份平仓价校正：两者并排印在盈亏概览里，口径必须一致。
+  const path = buildActiveLegs(
+    campaign,
+    legs,
+    tradeRecords,
+    exitPriceCorrections,
+    localOrders.unfilledOrderIds ?? NO_UNFILLED_ORDER_IDS,
+  );
+  // 对冲精度、镜像止盈与峰值 / 回撤扫同一个窗口：已结束的战役不早于路径上最晚的那次平仓（见 buildActiveLegs）。
+  const endMs = path.endMs;
   const hedge_precision: HedgePrecision[] = [];
 
   for (const leg of legs) {
@@ -2000,9 +2352,8 @@ export function computeDecisionAccuracy(
     }
   }
 
-  const activeLegs = buildActiveLegs(campaign, legs, tradeRecords);
   const startMs = toMs(campaign.opened_at);
-  const extremes = computeCampaignPnlExtremes(activeLegs, klines, startMs, endMs);
+  const extremes = computeCampaignPnlExtremes(path.activeLegs, klines, startMs, endMs);
   let { maxProfit, maxDrawdown } = extremes;
   const finalRealizedPnl = computeCampaignPnlReconciliation(
     campaign,

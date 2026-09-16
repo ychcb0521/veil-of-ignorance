@@ -47,14 +47,21 @@ export function formatCampaignLeverage(value: number | null): string {
   return `${rounded}x`;
 }
 
+/**
+ * 机会质量的「已了结」门槛：状态是已结束、且已实现有数。调用方传的是**套过结算的**战役行
+ * （reconcileCampaignWithSettlement），与列表页、详情页同一口径；反事实分支运行时也按它记下真实战役的判定。
+ */
+export function isCampaignResolved(campaign: Pick<TradeCampaign, 'status' | 'final_realized_pnl'>): boolean {
+  return ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
+    && Number.isFinite(campaign.final_realized_pnl);
+}
+
 export function resolveCampaignOpportunityQuality(
   campaign: TradeCampaign,
   profitCaptureRatio: number | null,
   initialExpectedMaxDrawdownPct: number,
 ): number | null {
-  const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
-    && Number.isFinite(campaign.final_realized_pnl);
-  return resolveResolvedOpportunityQuality(resolved, profitCaptureRatio, initialExpectedMaxDrawdownPct);
+  return resolveResolvedOpportunityQuality(isCampaignResolved(campaign), profitCaptureRatio, initialExpectedMaxDrawdownPct);
 }
 
 /**

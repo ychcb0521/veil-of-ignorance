@@ -69,6 +69,13 @@ const klines: KlineData[] = [0, 1, 2, 3].map(index => ({
   volume: 1,
 }));
 
+/**
+ * 两条腿都是手工拼的（没有实际成交结果），引擎按模拟器 Taker 费率扣平仓费：
+ * 主力毛盈亏 +100，平仓费 10 × 110 × 0.05% = 0.55；对冲开平同价、毛盈亏 0，平仓费 (1000 ÷ 90) × 90 × 0.05% = 0.50。
+ */
+const EXPECTED_CLOSE_FEES = 0.55 + 0.5;
+const EXPECTED_NET_PNL = 100 - EXPECTED_CLOSE_FEES;
+
 const params: CampaignCounterfactualParams = {
   entry: { time: new Date(entryMs).toISOString(), price: 100, size_usdt: 1_000, direction: 'long', leverage: 5 },
   hedge_a: { offset_pct: 0.05, size_pct: 0.5 },
@@ -114,7 +121,8 @@ describe('runCustomCounterfactual', () => {
   it('只运行不落库：结果带四个风险锚，params 带 run_context，insert 没被调用', async () => {
     const run = await runCustomCounterfactual('campaign-1', params, klines, '1m');
 
-    expect(run.result.final_realized_pnl).toBeCloseTo(100, 4);
+    expect(run.result.final_realized_pnl).toBeCloseTo(EXPECTED_NET_PNL, 4);
+    expect(run.result.fees_total).toBeCloseTo(EXPECTED_CLOSE_FEES, 4);
     expect(run.result.initial_expected_max_loss).toBeGreaterThan(0);
     expect(run.result.initial_main_exposure_notional).toBe(1_000);
     expect(run.result.main_leverage).toBe(5);
@@ -142,7 +150,7 @@ describe('runCustomCounterfactual', () => {
 
     const empty = await runCustomCounterfactual('campaign-1', params, []);
     expect(empty.params.run_context).toBeUndefined();
-    expect(empty.result.final_realized_pnl).toBeCloseTo(100, 4);
+    expect(empty.result.final_realized_pnl).toBeCloseTo(EXPECTED_NET_PNL, 4);
   });
 
   it('runAndPersistCustomCounterfactual 仍是「运行 + 落库」：insert 一次，存的 params 带 run_context', async () => {

@@ -23,8 +23,13 @@ const MIN = 60_000;
 const t0 = new Date('2026-01-01T00:00:00Z').getTime();
 const iso = (offsetMinutes: number) => new Date(t0 + offsetMinutes * MIN).toISOString();
 
+/**
+ * 默认的腿模拟「从成交记录原样抄来、记录里没有手续费」的副本：带 actual、各项与 actual 一致，
+ * 引擎直接取实际结算值（= 毛盈亏），下面这些关于锚与派生项的数字因此仍是整数。
+ * 按模拟器费率扣平仓费的路径（改过 / 新增的腿）见文件末尾的专门用例。
+ */
 function leg(overrides: Partial<CampaignCounterfactualManualLeg> & Pick<CampaignCounterfactualManualLeg, 'id' | 'leg_role'>): CampaignCounterfactualManualLeg {
-  return {
+  const base: CampaignCounterfactualManualLeg = {
     direction: 'long',
     open_time: iso(0),
     close_time: iso(30),
@@ -34,6 +39,23 @@ function leg(overrides: Partial<CampaignCounterfactualManualLeg> & Pick<Campaign
     leverage: 3,
     enabled: true,
     ...overrides,
+  };
+  if ('actual' in overrides) return base;
+  const sign = base.direction === 'long' ? 1 : -1;
+  return {
+    ...base,
+    actual: {
+      source: 'records',
+      direction: base.direction,
+      open_time: base.open_time,
+      close_time: base.close_time,
+      entry_price: base.entry_price,
+      exit_price: base.exit_price,
+      size_usdt: base.size_usdt,
+      realized_pnl_usdt: sign * (base.exit_price - base.entry_price) / base.entry_price * base.size_usdt,
+      close_fee_usdt: 0,
+      open_fee_usdt: 0,
+    },
   };
 }
 
@@ -345,6 +367,106 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(metrics.initialRisk).toBeNull();
     expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)))
       .toBe('期望口径：2 场有效战役，实时胜率 50.00%。');
+  });
+});
+
+describe('已实现 P&L 的手续费口径', () => {
+  const helpText = (paragraphs: unknown[] | undefined) => (paragraphs ?? [])
+    .map(paragraph => (typeof paragraph === 'string' ? paragraph : JSON.stringify(paragraph)))
+    .join('\n');
+
+  it('改过的腿从实际结算值出发、只加改动的钱（平仓费按这一刀自己的费率）；帮助写明净额口径与扣掉的金额，开仓费单列不扣', () => {
+    // 实际：主力 1000 @100 平 106，记录净额 60 − 平仓费 10 × 106 × 0.05% = 59.47，开仓费 0.50
+    const feeMain = leg({
+      id: 'main',
+      leg_role: 'main_open',
+      exit_price: 106,
+      actual: {
+        source: 'records', direction: 'long', open_time: iso(0), close_time: iso(30), entry_price: 100, exit_price: 106,
+        size_usdt: 1000, realized_pnl_usdt: 59.47, close_fee_usdt: 0.53, open_fee_usdt: 0.5,
+        cuts: [{
+          open_time: iso(0), close_time: iso(30), entry_price: 100, exit_price: 106, size_usdt: 1000,
+          realized_pnl_usdt: 59.47, close_fee_usdt: 0.53, close_fee_rate: 0.0005, open_fee_usdt: 0.5, open_fee_rate: 0.0005,
+        }],
+      },
+    });
+    // 平仓价 106 → 110：毛盈亏 +40，平仓费 0.53 → 10 × 110 × 0.05% = 0.55 → 净额 59.47 + 40 − 0.02 = 99.45
+    const edited = FULL_LEGS.map(item => (item.id === 'main' ? { ...feeMain, exit_price: 110 } : item));
+    const branchParams = params(edited);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    // 镜像 +20 仍取实际结算值；两张对冲按记录也是 0
+    expect(result.final_realized_pnl).toBeCloseTo(100 - 0.55 + 20, 4);
+    expect(result.fees_total).toBeCloseTo(0.55, 4);
+    expect(result.open_fees_total).toBeCloseTo(0.5, 4);
+    expect(result).not.toHaveProperty('fee_unknown_leg_count');
+    const main = result.legs_summary.find(item => item.leg_role === 'main_open');
+    expect(main).toMatchObject({ pnl_basis: 'adjusted', status: 'filled' });
+    expect(main?.close_fee_usdt).toBeCloseTo(0.55, 4);
+
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
+    const text = helpText(metrics.helpOverrides?.realizedPnl);
+    expect(text).toContain('净额，已扣平仓手续费');
+    expect(text).toContain('本分支已扣平仓手续费 0.55 USDT；开仓手续费 0.50 USDT');
+    expect(text).toContain('原样重跑时已实现 P&L 逐分复现上方「盈亏概览」');
+    expect(text).toContain('只加上这次改动本身值的钱');
+    expect(text).toContain('分几刀平掉的腿更早平掉的刀维持实际成交');
+    expect(text).not.toContain('毛盈亏，而实际');
+    expect(text).not.toContain('金额未知');
+    expect(helpText(metrics.extraNotes?.peakUnrealizedPnl)).toContain('同一份净额');
+    expect(helpText(metrics.extraNotes?.peakUnrealizedPnl)).toContain('进行中的战役');
+    expect(helpText(metrics.extraNotes?.initialExpectedMaxLoss)).toContain('初始对冲按委托价');
+  });
+
+  it('只剩复盘快照的腿：手续费已含在快照里、金额未知，不印成「0.00」，单独说明', () => {
+    const snapshotMain = leg({
+      id: 'main',
+      leg_role: 'main_open',
+      exit_price: 106,
+      actual: {
+        source: 'leg_snapshot', direction: 'long', open_time: iso(0), close_time: iso(30), entry_price: 100, exit_price: 106,
+        size_usdt: 1000, realized_pnl_usdt: 59.4, close_fee_usdt: null, open_fee_usdt: null,
+      },
+    });
+    const branchParams = params(FULL_LEGS.map(item => (item.id === 'main' ? snapshotMain : item)));
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    expect(result.final_realized_pnl).toBeCloseTo(59.4 + 20, 6);
+    expect(result.fees_total).toBe(0);
+    expect(result.fee_unknown_leg_count).toBe(1);
+    const text = helpText(buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared).helpOverrides?.realizedPnl);
+    expect(text).toContain('另有 1 条腿只剩复盘快照或摊自战役级已实现，手续费已含在盈亏里、金额未知');
+  });
+
+  it('没有 fees_total 的老行：如实标明是毛盈亏，「相对实际」里含手续费', () => {
+    const branchParams = params(FULL_LEGS);
+    const { fees_total: _fees, open_fees_total: _openFees, ...legacy } = simulateManualLegScenario(branchParams, NO_KLINES);
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: legacy }, shared);
+    const text = helpText(metrics.helpOverrides?.realizedPnl);
+    expect(text).toContain('未扣任何手续费的毛盈亏');
+    expect(text).toContain('「相对实际」里多出了这部分手续费');
+    expect(text).not.toContain('净额，已扣平仓手续费');
+    expect(helpText(metrics.extraNotes?.peakUnrealizedPnl)).toContain('按毛盈亏计入');
+    // 数值照读，不因口径不同而改写
+    expect(metrics.realizedPnl).toBeCloseTo(80, 4);
+  });
+
+  it('挂单中的保护单：不进已实现与峰值，但 L 与预期回撤照旧由它定义', () => {
+    const pending = FULL_LEGS.map(item => (
+      item.leg_role.startsWith('hedge_')
+        ? { ...item, filled: false, actual: undefined, open_time: iso(0), close_time: iso(30) }
+        : item
+    ));
+    const branchParams = params(pending);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    expect(result.final_realized_pnl).toBeCloseTo(80, 4);
+    expect(result.fees_total).toBe(0);
+    expect(result.initial_expected_max_loss).toBeCloseTo(60, 4);
+    expect(result.expected_max_drawdown_pct).toBeCloseTo(4, 4);
+    expect(result.legs_summary.filter(item => item.pnl_basis === 'unfilled')).toHaveLength(2);
+    expect(result.legs_summary.filter(item => item.status === 'never_triggered')).toHaveLength(2);
+    expect(result.events.every(event => !String(event.leg_role).startsWith('hedge_'))).toBe(true);
+    const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared));
+    expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
+    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 60) * 100));
   });
 });
 

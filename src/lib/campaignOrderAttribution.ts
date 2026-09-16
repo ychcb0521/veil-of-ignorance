@@ -38,3 +38,43 @@ export function isCampaignPositionClosingOrder(order: CampaignOrderSnapshotLike)
 export function isCampaignOpeningShortOrder(order: CampaignOrderSnapshotLike): boolean {
   return order.side === 'SHORT' && !isCampaignPositionClosingOrder(order);
 }
+
+/** 至今仍挂着、或已撤掉的委托状态：这张委托没有成交过。 */
+const NEVER_FILLED_ORDER_STATUSES = new Set<PendingOrder['status']>(['NEW', 'PENDING', 'ACTIVE', 'CANCELED']);
+
+/**
+ * 腿 / 归类事件上挂着的 id 里，本地委托快照能证明**从未成交**的那些委托 id。
+ *
+ * 通过「记录决策」挂出的保护单，腿上的 trade_record_id 存的是**委托** id（handlePlaceOrder 对挂单返回的是委托 id，
+ * 成交后开出的仓位是另一个新 id），从日志腿归类时事件也照抄这个 id。于是「挂着成交 id」不等于「成交过」：
+ *   · 本地有这张委托的成交快照（filled_orders）、挂单表里它已触发 / 已成交，或 id 就是本场选中的成交记录 / 仓位 / 成交 id
+ *     → 成交过（或可能成交过），不在结果里；
+ *   · 本地有它的撤单快照（cancelled_orders），或它仍在挂单表里（orders_map，挂着 / 已撤）→ 从未成交，在结果里；
+ *   · 本地都查不到（换了浏览器、老快照被条数上限淘汰）→ 不下结论，不在结果里（照旧当作成交过）。
+ * 战役页的权益路径与「Legs 副本」读同一份结果，两边对「挂单中」的判断不会分叉。
+ */
+export function resolveNeverFilledOrderIds(input: {
+  referencedIds: Iterable<string | null | undefined>;
+  filledOrders: ReadonlyArray<Pick<FilledOrderSnapshot, 'id'>>;
+  cancelledOrders: ReadonlyArray<Pick<CancelledOrderSnapshot, 'id'>>;
+  pendingOrders: ReadonlyArray<Pick<PendingOrder, 'id' | 'status'>>;
+  /** 本场选中的成交记录上的 id（记录 id、仓位 id、成交 id）：它们本身就证明成交过。 */
+  filledRecordIds?: Iterable<string | null | undefined>;
+}): string[] {
+  const filled = new Set<string>();
+  for (const order of input.filledOrders) if (order.id) filled.add(order.id);
+  for (const id of input.filledRecordIds ?? []) if (id) filled.add(id);
+  const neverFilled = new Set<string>();
+  for (const order of input.cancelledOrders) if (order.id) neverFilled.add(order.id);
+  for (const order of input.pendingOrders) {
+    if (!order.id) continue;
+    // 已触发 / 已成交的挂单表条目不下「未成交」的结论
+    if (NEVER_FILLED_ORDER_STATUSES.has(order.status)) neverFilled.add(order.id);
+    else filled.add(order.id);
+  }
+  const out = new Set<string>();
+  for (const id of input.referencedIds) {
+    if (id && neverFilled.has(id) && !filled.has(id)) out.add(id);
+  }
+  return Array.from(out).sort();
+}

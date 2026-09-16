@@ -2757,3 +2757,72 @@ describe('【用户要求】委托空单与本场操作时间对齐：TUTUSDT 20
     });
   });
 });
+
+describe('getCampaignFullData：腿上挂着的委托 id，本地委托快照证明从未成交的那些', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    campaign = {
+      id: 'campaign-1',
+      user_id: 'user-1',
+      campaign_code: 'C-1',
+      importance_weight: 0,
+      deviation_notes: {},
+      symbol: 'ASTERUSDT',
+      direction: 'main_long',
+      status: 'closed_profit',
+      strategy_template: 'custom',
+      title: 'ASTERUSDT 2025-09-20 多战役',
+      opened_at: '2025-09-20T10:00:00.000Z',
+      closed_at: '2025-09-20T10:30:00.000Z',
+      initial_main_size_usdt: null,
+      initial_leverage: null,
+      final_realized_pnl: null,
+      final_r_multiple: null,
+      peak_unrealized_pnl: null,
+      peak_drawdown: null,
+      notes: null,
+      actual_evolution: [{
+        id: 'ev-attach-b',
+        timestamp: '2025-09-20T10:01:00.000Z',
+        event_type: 'historical_leg_attached',
+        leg_role: 'hedge_initial_b',
+        journal_id: null,
+        trade_record_id: 'ord-cancelled-event-only',
+        pending_order_id: null,
+        price: 1.1,
+        size_usdt: 110,
+        notes: null,
+        recorded_at: '2025-09-20T10:01:00.000Z',
+      }],
+      created_at: '2025-09-20T10:00:00.000Z',
+      updated_at: '2025-09-20T10:30:00.000Z',
+    };
+    journals = [
+      makeLeg({ id: 'hedge-cancelled', leg_role: 'hedge_initial_a', trade_record_id: 'ord-cancelled', order_kind: 'hedge' }),
+      makeLeg({ id: 'hedge-live', leg_role: 'hedge_initial_b', trade_record_id: 'ord-live', order_kind: 'hedge' }),
+      makeLeg({ id: 'hedge-filled', leg_role: 'hedge_rolling', trade_record_id: 'ord-filled', order_kind: 'hedge' }),
+      makeLeg({ id: 'hedge-unknown', leg_role: 'hedge_rolling', trade_record_id: 'ord-unknown', order_kind: 'hedge' }),
+    ];
+  });
+
+  it('撤掉的、仍挂着的委托 id 列出来；成交过的、本地查不到的不下结论', async () => {
+    const base = { symbol: 'ASTERUSDT', side: 'SHORT' as const, type: 'CONDITIONAL' as const, price: 1.1, quantity: 100, leverage: 5 };
+    const cancelled: CancelledOrderSnapshot[] = [
+      { ...base, id: 'ord-cancelled', createdAt: t('2025-09-20T10:01:00.000Z'), cancelledAt: t('2025-09-20T10:20:00.000Z') },
+      { ...base, id: 'ord-cancelled-event-only', createdAt: t('2025-09-20T10:01:00.000Z'), cancelledAt: t('2025-09-20T10:20:00.000Z') },
+    ];
+    const filled: FilledOrderSnapshot[] = [
+      { ...base, id: 'ord-filled', triggerPrice: 1.1, createdAt: t('2025-09-20T10:01:00.000Z'), filledAt: t('2025-09-20T10:05:00.000Z'), positionId: 'pos-filled' },
+    ];
+    const live: PendingOrder = {
+      id: 'ord-live', side: 'SHORT', type: 'CONDITIONAL', price: 1.05, stopPrice: 1.05, quantity: 100, leverage: 5,
+      marginMode: 'isolated', status: 'PENDING', createdAt: t('2025-09-20T10:02:00.000Z'),
+    };
+    localStorage.setItem('sim_user-1_cancelled_orders', JSON.stringify(cancelled));
+    localStorage.setItem('sim_user-1_filled_orders', JSON.stringify(filled));
+    localStorage.setItem('sim_user-1_orders_map', JSON.stringify({ ASTERUSDT: [live] }));
+
+    const result = await getCampaignFullData('campaign-1', { heal: false });
+    expect(result.unfilledOrderIds).toEqual(['ord-cancelled', 'ord-cancelled-event-only', 'ord-live']);
+  });
+});

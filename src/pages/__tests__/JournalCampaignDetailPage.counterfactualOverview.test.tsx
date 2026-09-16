@@ -132,6 +132,8 @@ const {
       size_usdt: 1_000,
       leverage: 1,
       enabled: true,
+      // 页面上这张对冲没有成交记录、没有快照、没有触发事件：buildManualLegs 会把它标成挂单
+      filled: false,
     },
   ];
   const params: CampaignCounterfactualParams = {
@@ -141,7 +143,7 @@ const {
     mirror_tp: { offset_pct: 2, size_pct: 50 },
     rolling: { enabled: false, trigger_rise_pct: 0, min_interval_minutes: 5, new_hedge_offset_pct: 2, rolling_hedge_size_pct: 50 },
     exit_rule: 'manual_only',
-    // 只改主力平仓价：100 → 110，分支已实现 = 1000 × 10% = 100
+    // 只改主力平仓价：100 → 110，分支已实现 = 1000 × 10% − 平仓费 10 × 110 × 0.05% = 99.45（挂单中的对冲不计）
     manual_legs: [{ ...baseline[0], exit_price: 110 }, baseline[1]],
   };
   const saved: CampaignCounterfactual[] = [];
@@ -423,9 +425,9 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
 
     expect(within(panel).getByText('反事实盈亏概览 · 未保存')).toBeInTheDocument();
     expect(helpButtonLabels(panel)).toEqual(OVERVIEW_LABELS);
-    // 分支已实现 100，实际 200 → 相对实际 −100
-    expect(metricValue(panel, '已实现 P&L')).toBe('100.00 USDT');
-    expect(within(panel).getByText('-100.00 USDT')).toBeInTheDocument();
+    // 分支已实现 99.45（净额），实际 200 → 相对实际 −100.55
+    expect(metricValue(panel, '已实现 P&L')).toBe('99.45 USDT');
+    expect(within(panel).getByText('-100.55 USDT')).toBeInTheDocument();
     expect(within(panel).getByText('改 主力开仓：平仓价 100 → 110')).toBeInTheDocument();
     expect(within(panel).getByText(/1m K 线 1 根/)).toBeInTheDocument();
     // 有初始对冲 A → 有止损线，L 派生项不是「—」

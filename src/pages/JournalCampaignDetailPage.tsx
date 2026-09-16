@@ -48,6 +48,7 @@ import {
   computeProfitCaptureRatio,
   resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
+  type CampaignLocalOrderFacts,
 } from '@/lib/campaignAnalysis';
 import {
   computeCampaignRealizedPnl,
@@ -113,10 +114,12 @@ import {
 } from '@/lib/asymmetricRiskMetrics';
 import {
   buildActualSimulationParams,
+  buildCounterfactualRiskContext,
   buildManualLegs,
   computeManualLegDeviationCosts,
   counterfactualTemplateFor,
   isManualLegScenario,
+  resolveCounterfactualActualResolved,
   type ManualLegDeviationCost,
 } from '@/lib/campaignSimulationEngine';
 import {
@@ -176,6 +179,12 @@ type CampaignDetailNavigationState = {
 const LOCAL_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 /** 「没有校正」的唯一那份空对象：每次现造一个 {} 就等于告诉下游「校正变了」。 */
 const EMPTY_LEG_EXIT_PRICE_CORRECTIONS: LegExitPriceCorrections = {};
+const NO_UNFILLED_ORDER_IDS: ReadonlySet<string> = new Set<string>();
+
+function sameOrderIdSet(current: ReadonlySet<string>, ids: string[]): boolean {
+  const next = new Set(ids);
+  return next.size === current.size && [...next].every(id => current.has(id));
+}
 
 function fmtMdHm(value: string | null) {
   if (!value) return '进行中';
@@ -270,6 +279,15 @@ function buildCounterfactualOverview(
     items: buildCampaignPnlOverviewItems(metrics),
     note: buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)),
   };
+}
+
+/**
+ * 「相对实际」按两位小数印：分支结果落库时按 4 位小数取整，而上方的已实现是未取整的现算值，
+ * 原样重跑时两者只差几个亿分位——不归零就会印出染红的「-0.00」，被读成一笔亏损。
+ */
+function counterfactualDelta(branchRealizedPnl: number, actualPnl: number): number {
+  const delta = branchRealizedPnl - actualPnl;
+  return Math.abs(delta) < 0.005 ? 0 : delta;
 }
 
 /** 反事实面板标题下那几行小字：相对实际、逐腿改动、运行时的 K 线上下文。 */
@@ -651,6 +669,15 @@ export default function JournalCampaignDetailPage() {
   const [reverseHedgeOrders, setReverseHedgeOrders] = useState<CampaignReverseHedgeOrder[]>([]);
   // 别的回放留下、本场期间仍挂着的委托：只标注显示，不进 reverseHedgeOrders / pendingOrders。
   const [foreignLiveOrders, setForeignLiveOrders] = useState<CampaignReverseHedgeOrder[]>([]);
+  /**
+   * 腿上挂着、本地委托快照证明从未成交的委托 id：盈亏概览的权益路径与「Legs 副本」读同一份。
+   * 内容没变就保留原来那个对象——它一路传到副本编辑器，换身份会冲掉编辑到一半的腿（与平仓价校正同一条规则）。
+   */
+  const [unfilledOrderIds, setUnfilledOrderIds] = useState<ReadonlySet<string>>(NO_UNFILLED_ORDER_IDS);
+  const localOrderFacts = useMemo<CampaignLocalOrderFacts>(() => ({ unfilledOrderIds }), [unfilledOrderIds]);
+  const adoptUnfilledOrderIds = useCallback((ids: string[] | undefined) => {
+    setUnfilledOrderIds(prev => (sameOrderIdSet(prev, ids ?? []) ? prev : new Set(ids ?? [])));
+  }, []);
   const [interval, setInterval] = useState<Interval>('1m');
   const [intervalTouched, setIntervalTouched] = useState(false);
   const [chartRangeSelection, setChartRangeSelection] = useState<CampaignChartRangeSelection>(
@@ -737,6 +764,7 @@ export default function JournalCampaignDetailPage() {
         setPendingOrders(full.pendingOrders);
         setReverseHedgeOrders(full.reverseHedgeOrders);
         setForeignLiveOrders(full.foreignLiveOrders ?? []);
+        adoptUnfilledOrderIds(full.unfilledOrderIds);
         // 回放时间线的影子比对（Phase 1）：精确判定与启发式不一致时只记一条日志，界面照旧按启发式显示
         const diagnostics = full.timelineDiagnostics;
         if (diagnostics && diagnostics.disagreements.length > 0) {
@@ -762,7 +790,7 @@ export default function JournalCampaignDetailPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, viewerUserId, nav, location.search]);
+  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
 
@@ -1017,9 +1045,10 @@ export default function JournalCampaignDetailPage() {
         klines,
         reverseHedgeOrders,
         legExitPriceCorrections,
+        localOrderFacts,
       )
       : null),
-    [campaign, legs, tradeRecords, klines, reverseHedgeOrders, legExitPriceCorrections],
+    [campaign, legs, tradeRecords, klines, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts],
   );
   const pnlReconciliation = useMemo(
     () => (campaign
@@ -1434,9 +1463,17 @@ export default function JournalCampaignDetailPage() {
     if (adjustedLegs.length === 0) return [];
     const actualParams = buildActualSimulationParams(campaign, legs, tradeRecords);
     if (!actualParams) return [];
-    const originalLegs = buildManualLegs(actualParams, legs, klines, tradeRecords, legExitPriceCorrections);
-    return computeManualLegDeviationCosts(originalLegs, adjustedLegs);
-  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines, legExitPriceCorrections]);
+    const originalLegs = buildManualLegs(
+      actualParams, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders: localOrderFacts },
+    );
+    // 老行的兜底平仓时间按那次运行的 K 线末根与改动摘要认：换了周期、窗口长了都不能读成「改过」。
+    return computeManualLegDeviationCosts(
+      originalLegs,
+      adjustedLegs,
+      selectedCounterfactual.params?.run_context?.to ?? null,
+      selectedCounterfactual.params?.change_summary ?? null,
+    );
+  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines, legExitPriceCorrections, localOrderFacts]);
   // 门槛：选中分支是「手动运行」分支（带 manual_legs）才展示偏离明细。
   const hasManualRunBranch = (selectedCounterfactual?.params?.manual_legs ?? []).length > 0;
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
@@ -1501,7 +1538,7 @@ export default function JournalCampaignDetailPage() {
   const actualPnl = pnlReconciliation?.correctedPnl ?? (displayCampaign ?? campaign).final_realized_pnl ?? 0;
   const totalDeviationCost = deviationLegCosts.reduce((sum, item) => sum + item.cost_usdt, 0);
   const selectedCounterfactualDelta = selectedCounterfactual
-    ? selectedCounterfactual.result.final_realized_pnl - actualPnl
+    ? counterfactualDelta(selectedCounterfactual.result.final_realized_pnl, actualPnl)
     : null;
 
   const refreshCampaign = async () => {
@@ -1513,6 +1550,7 @@ export default function JournalCampaignDetailPage() {
     setPendingOrders(full.pendingOrders);
     setReverseHedgeOrders(full.reverseHedgeOrders);
     setForeignLiveOrders(full.foreignLiveOrders ?? []);
+    adoptUnfilledOrderIds(full.unfilledOrderIds);
   };
 
   // 管理区色块：本场的委托与「他场」委托共用同一套点选 / 隐藏，他场的整体压灰并带「他场」标签。
@@ -1607,9 +1645,18 @@ export default function JournalCampaignDetailPage() {
       );
       const ranAt = new Date();
       // 只运行、不落库：结果先摆成「反事实盈亏概览 · 未保存」，用户点「保存」才写库。
+      // 风险锚上下文：战役页算 L / 预期回撤时读的反向委托、历史归类标记与初始对冲事件，副本按同一份锚。
+      const riskContext = buildCounterfactualRiskContext(campaign, reverseHedgeOrders);
+      // 真实战役此刻算不算「已了结」（机会质量的门槛），与上方盈亏概览同一条规则。
+      const actualResolved = resolveCounterfactualActualResolved(campaign, legs, tradeRecords, legExitPriceCorrections);
       const run = await runCustomCounterfactual(
         campaign.id,
-        { ...params, change_summary: changeSummary },
+        {
+          ...params,
+          change_summary: changeSummary,
+          ...(riskContext ? { risk_context: riskContext } : {}),
+          actual_resolved: actualResolved,
+        },
         klines,
         effectiveInterval,
       );
@@ -1679,7 +1726,12 @@ export default function JournalCampaignDetailPage() {
       return;
     }
     loadLegsNonceRef.current += 1;
-    setLoadLegsRequest({ nonce: loadLegsNonceRef.current, legs: legsToLoad.map(leg => ({ ...leg })) });
+    setLoadLegsRequest({
+      nonce: loadLegsNonceRef.current,
+      legs: legsToLoad.map(leg => ({ ...leg })),
+      savedWindowEnd: branch.params?.run_context?.to ?? null,
+      savedChangeSummary: branch.params?.change_summary ?? null,
+    });
     toast.success(`已把「${branch.label}」的 Legs 载入副本，可继续调整后再次运行`);
   };
 
@@ -2331,6 +2383,7 @@ export default function JournalCampaignDetailPage() {
             legs={legs}
             tradeRecords={tradeRecords}
             legExitPriceCorrections={legExitPriceCorrections}
+            localOrders={localOrderFacts}
             klines={klines}
             klinesLoading={klinesLoading}
             interval={effectiveInterval}
@@ -2358,7 +2411,7 @@ export default function JournalCampaignDetailPage() {
               note={counterfactualDraftOverview.note}
               subtitle={(
                 <CounterfactualOverviewSubtitle
-                  delta={counterfactualDraft.result.final_realized_pnl - actualPnl}
+                  delta={counterfactualDelta(counterfactualDraft.result.final_realized_pnl, actualPnl)}
                   changeSummary={counterfactualDraft.params.change_summary}
                   runContext={counterfactualDraft.params.run_context}
                 />
@@ -2406,7 +2459,7 @@ export default function JournalCampaignDetailPage() {
               </div>
             ) : (
               visibleBranches.map(branch => {
-                    const delta = branch.result.final_realized_pnl - actualPnl;
+                    const delta = counterfactualDelta(branch.result.final_realized_pnl, actualPnl);
                     const active = branch.id === selectedCounterfactualId;
                     // 手动 Legs 分支的 sop_score 恒为 0，没有信息量，只给 SOP 推演分支看。
                     const manualRun = isManualLegScenario(branch.params);

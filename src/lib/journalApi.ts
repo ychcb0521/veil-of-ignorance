@@ -101,6 +101,7 @@ import {
   CAMPAIGN_LEGACY_ORDER_RECORD_MATCH_MS,
   CAMPAIGN_ORDER_WINDOW_LOOKBACK_MS,
   isCampaignOpeningShortOrder,
+  resolveNeverFilledOrderIds,
 } from '@/lib/campaignOrderAttribution';
 import {
   bestOrderRealStamp,
@@ -3081,6 +3082,11 @@ export async function getCampaignFullData(
   /** 别的回放留下、在本场期间仍挂着的委托空单（foreignReplay: true），只供标注显示。 */
   foreignLiveOrders: CampaignReverseHedgeOrder[];
   /**
+   * 腿 / 归类事件上挂着、本地委托快照证明从未成交（撤掉了或仍挂着）的委托 id（见 resolveNeverFilledOrderIds）。
+   * 详情页把它交给权益路径与「Legs 副本」，两边都把这种 id 当作没有成交 id。老的替身可以不给（缺省为空）。
+   */
+  unfilledOrderIds?: string[];
+  /**
    * 自愈路径拉到的平仓价校正（只有 heal !== false 时才有）。
    * 详情页首屏直接用它，页眉状态与已实现 P&L 从第一帧起就是同一份校正后的数；
    * 列表页（heal: false）保持自己的后台拉取，这里为 undefined。
@@ -3726,6 +3732,20 @@ export async function getCampaignFullData(
       },
     });
   }
+  /**
+   * 通过「记录决策」挂出的保护单，腿上存的是委托 id：本地委托快照证明它从未成交时，详情页的权益路径与副本都不持有它。
+   * 只看 id 本身（腿与事件直接引用了这张委托），不过回放时间线。
+   */
+  const unfilledOrderIds = resolveNeverFilledOrderIds({
+    referencedIds: [
+      ...legs.map(leg => leg.trade_record_id),
+      ...(campaign.actual_evolution ?? []).map(event => event.trade_record_id),
+    ],
+    filledOrders: symbolIndex.filled,
+    cancelledOrders: symbolIndex.cancelled,
+    pendingOrders: symbolIndex.orders,
+    filledRecordIds: tradeRecords.flatMap(record => [record.id, record.positionId, record.fillId]),
+  });
   const ownReverseOrderIds = new Set(reverseHedgeOrders.map(order => order.id));
   const foreignLiveOrders = Array.from(foreignCandidates.values())
     .filter(({ order, live, endRealAt, display }) => {
@@ -3763,6 +3783,7 @@ export async function getCampaignFullData(
     pendingOrders,
     reverseHedgeOrders,
     foreignLiveOrders,
+    unfilledOrderIds,
     legExitPriceCorrections,
     timelineDiagnostics: timelineScope
       ? {

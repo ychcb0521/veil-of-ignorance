@@ -466,6 +466,13 @@ export interface CampaignCounterfactualParams {
   run_context?: CampaignCounterfactualRunContext;
   /** 运行时相对编辑器基线（buildManualLegs）改了什么；老行没有。 */
   change_summary?: CampaignCounterfactualChangeSummary;
+  /** 手动 Legs 分支：战役页锚 L 时读的反向委托、历史归类标记与初始对冲事件；老行没有。 */
+  risk_context?: CampaignCounterfactualRiskContext;
+  /**
+   * 手动 Legs 分支：运行那一刻，真实战役按页面的规则算不算「已了结」（派生状态为已结束、且已实现有数）。
+   * false 时这条分支同样不算已了结（机会质量不计算），除非副本给实际还没平的腿另定了平仓时间。老行没有。
+   */
+  actual_resolved?: boolean;
 }
 
 export interface CampaignCounterfactualManualLeg {
@@ -479,6 +486,128 @@ export interface CampaignCounterfactualManualLeg {
   size_usdt: number;
   leverage: number;
   enabled: boolean;
+  /**
+   * 这条腿成交了没有。false = 挂单从未成交（Legs 表里的「挂单中」）：不进持仓与已实现，
+   * 但仍留在合成战役里当止损线（它定义 L 与预期回撤）。缺省 = 已成交（老行没有这个字段）。
+   */
+  filled?: boolean;
+  /** 结算方式：币本位的手续费按 张数 × 面值 × 费率 折美元。缺省 = U 本位（老行没有）。 */
+  settlement_mode?: 'usdt' | 'coin';
+  /** 币本位每张面值（USD）。 */
+  contract_size_usd?: number;
+  /**
+   * 这条腿在实际战役里的成交结果（buildManualLegs 从成交记录 / 复盘快照抄来）。
+   * 引擎从这里的实际结算值出发，只加上用户改动本身值的钱（见 resolveManualLegEconomics）；
+   * 新增的腿没有它，按模拟器费率整笔算。老行没有，读 / 载入时按当前原始基线补上。
+   */
+  actual?: CampaignCounterfactualManualLegActual;
+}
+
+/** 一条腿在实际战役里的一刀（一条结算记录）。 */
+export interface CampaignCounterfactualManualLegCut {
+  open_time: string;
+  close_time: string;
+  /** 这一刀的开仓价（滑点后的成交价）。 */
+  entry_price: number;
+  /** 这一刀的平仓价；收盘那一刀是腿上显示的那一份（已叠平仓价校正）。 */
+  exit_price: number;
+  /** 这一刀的开仓名义（USD）：U 本位 数量 × 开仓价；币本位 张数 × 面值。权益路径与主力开仓名义仓位都按它。 */
+  size_usdt: number;
+  /** 这一刀的已实现：record.pnl（已扣平仓费），收盘那一刀叠平仓价校正。 */
+  realized_pnl_usdt: number;
+  close_fee_usdt: number;
+  /** 这一刀的平仓费率：记录里存的；老记录按 费 ÷ 平仓名义 倒推。改平仓价时按它重算平仓费。 */
+  close_fee_rate: number;
+  open_fee_usdt: number | null;
+  open_fee_rate: number;
+}
+
+export interface CampaignCounterfactualManualLegActual {
+  /**
+   * records = 成交记录（叠平仓价校正）；leg_snapshot = 本地没有成交记录，取复盘快照；
+   * unsettled = 既无成交记录也无复盘快照（如尚未平仓）：战役页的已实现不计这条腿，原样重跑也记 0；
+   * campaign_total = 一条腿都结算不了（换了浏览器、云端水化没跑完），战役页的已实现取自事件流或落库值：
+   * 这个总额按各腿开平价的估算摊到腿上（余差记在主力上）；权益路径上与战役页一样不计它（战役页持有这些腿时平仓后记 0），
+   * 只计改动本身的差额。
+   */
+  source: 'records' | 'leg_snapshot' | 'unsettled' | 'campaign_total';
+  direction: 'long' | 'short';
+  open_time: string;
+  close_time: string;
+  entry_price: number;
+  exit_price: number;
+  /** 腿上显示的仓位（Legs 表的委托名义 pre_position_size）；各刀的实际开仓名义见 cuts。 */
+  size_usdt: number;
+  /** 与战役页已实现 P&L 同一口径的这条腿盈亏：成交记录 pnl 之和（已扣平仓费、叠校正），或复盘快照；unsettled 为 0。 */
+  realized_pnl_usdt: number;
+  /** 已含在 realized_pnl_usdt 里的平仓手续费（USD）；快照腿、未结算的腿为 null。 */
+  close_fee_usdt: number | null;
+  /** 开仓手续费（USD）：开仓时从钱包扣除，不在 realized_pnl_usdt 里；快照腿、未结算的腿为 null。 */
+  open_fee_usdt: number | null;
+  /**
+   * 成交记录腿认领到的每一刀，收盘那一刀排最后。分几刀平掉的腿（M 减仓、并仓后的镜像止盈）靠它逐刀还原。
+   * 本地没有成交记录、从历史快照事件还原的腿，事件里的成交价或名义与委托快照不同时也有一刀（开仓价、名义取事件）。
+   */
+  cuts?: CampaignCounterfactualManualLegCut[];
+  /** close_time 不是事实，而是副本给的兜底（结算没有计入的腿）：判断「改没改」时不比它。 */
+  close_time_fallback?: boolean;
+  /** 战役页锚 L / 预期回撤时这条腿用的价（初始对冲的委托价、解混合后的主力开仓价），与开仓价不同时才有。 */
+  anchor_price?: number;
+  /** 战役页权益路径不持有这条腿（成交过，但成交时刻未知）：开仓时间没改时副本也不持有，已实现照计。 */
+  off_path?: boolean;
+  /**
+   * 实际战役还在进行、这条腿也还没平：副本的平仓时间只是末根 K 线。平仓时间没改时，
+   * 这条分支与战役页一样不算「已了结」（机会质量不计算）。
+   */
+  still_open?: boolean;
+  /**
+   * 以下几项只给合成战役（风险锚）用，让 L / 预期回撤 / 主力开仓名义仓位读到与战役页相同的输入。
+   * placed_time：腿的挂出时刻（pre_simulated_time），与开仓时间不同时才有——战役页按它给同角色的保护单排先后、
+   * 给没有成交记录的腿定持仓窗口的起点；有成交记录的腿，窗口与归属按成交时刻（open_time）。
+   */
+  placed_time?: string;
+  /** 本地有这条腿的成交记录：战役页的持仓窗口与归属按记录的开平时刻，合成战役为它造一条同形的记录。 */
+  has_record?: boolean;
+  /**
+   * 这条腿在「主力开仓名义仓位」里分到的名义（USD）：战役页按同一笔开仓成交并组（groupLegsByOpeningFill），
+   * 组的名义按各腿自己的开仓名义摊开。认领到的分刀里若有并进来、却没有腿的加仓，它不在这里。
+   */
+  exposure_usdt?: number;
+  /** 与别的腿同属一笔开仓成交时的组标识：合成战役把同组的腿并回一组，名义只计一次。 */
+  exposure_group?: string;
+  /** 战役页不把这条主力 / 镜像腿计入开仓名义仓位（方向与战役相反）。 */
+  exposure_excluded?: boolean;
+  /** 原始腿的 order_kind：战役页的主力归属把 order_kind = main 的腿也当主力看。 */
+  order_kind?: 'main' | 'hedge';
+}
+
+/**
+ * 手动 Legs 分支的风险锚上下文：战役页算 L / 预期回撤时除了腿还读的那几样。
+ * 「一键运行」时由页面附上；老行没有，按只有腿的口径算。
+ */
+export interface CampaignCounterfactualRiskContext {
+  /** 历史归类的战役：风险边界只认委托快照。 */
+  historical: boolean;
+  /** 事件流里标成初始对冲 A/B 的委托。 */
+  initial_orders: Array<{ id: string; role: 'hedge_initial_a' | 'hedge_initial_b' }>;
+  /** 这场战役的反向保护委托（委托价、成交价、挂出时刻）。 */
+  reverse_orders: Array<{
+    id: string;
+    side: 'LONG' | 'SHORT';
+    price: number;
+    fill_price: number | null;
+    created_at: number;
+  }>;
+  /**
+   * 事件流里带价的初始对冲 A/B 事件：某个角色一条腿都锚不出价时，战役页退到它（第三级兜底）。
+   * 只抄时间、角色与两个价（取哪个由战役页的函数决定），不抄腿的开平仓事件——那些会被多主力的归属误认成别人的保护线。
+   */
+  hedge_events?: Array<{
+    timestamp: string;
+    role: 'hedge_initial_a' | 'hedge_initial_b';
+    price: number | null;
+    entry_price?: number;
+  }>;
 }
 
 export interface CampaignCounterfactualRunContext {
@@ -527,6 +656,19 @@ export interface CampaignCounterfactualLegSummary {
   status: 'filled' | 'cancelled' | 'never_triggered';
   triggered_at: string | null;
   realized_pnl_usdt: number;
+  /**
+   * 手动 Legs 分支：已从 realized_pnl_usdt 扣掉、且金额完整已知的平仓手续费（USD），口径同 fees_total；
+   * 只剩复盘快照 / 摊自战役级已实现的腿记 0（费用含在盈亏里）。老行与 SOP 推演行没有。
+   */
+  close_fee_usdt?: number;
+  /** 手动 Legs 分支：开仓手续费（USD），与实际战役一样不在已实现里扣。 */
+  open_fee_usdt?: number;
+  /**
+   * 手动 Legs 分支：这条腿盈亏的来历——实际成交记录、复盘快照、实际未结算（记 0）、
+   * 摊自战役级的已实现（事件流 / 落库值，campaign_total）、
+   * 实际结算值加上改动的差额（adjusted）、按模拟器费率整笔算（model）、未成交。
+   */
+  pnl_basis?: 'records' | 'leg_snapshot' | 'unsettled' | 'campaign_total' | 'adjusted' | 'model' | 'unfilled';
 }
 
 export interface CampaignCounterfactualStateSegment {
@@ -555,6 +697,22 @@ export interface CampaignCounterfactualResult {
   initial_main_exposure_notional?: number;
   expected_max_drawdown_pct?: number;
   main_leverage?: number | null;
+  /**
+   * 手动 Legs 分支：已从 final_realized_pnl 扣掉、且金额完整已知的平仓手续费合计（USD），
+   * 与成交记录 pnl（毛盈亏 − 平仓费）同一口径——成交记录腿的逐刀平仓费（改过的腿按改后的开平价重算），
+   * 以及按模拟器 Taker 费率整笔算的腿（新增的腿、切成「已成交」的挂单、改过的未平仓腿）的平仓费。
+   * 只剩复盘快照 / 摊自战役级已实现的腿**不在其中**：它们的平仓费含在盈亏里、金额未知；改过这些腿时，
+   * 平仓费随之变化的那部分（按 Taker 费率）也只计入它们的盈亏、不计入这里（这类腿的条数见 fee_unknown_leg_count）。
+   * 没有这个字段的老行，final_realized_pnl 是**毛**盈亏。
+   */
+  fees_total?: number;
+  /** 手动 Legs 分支：各腿开仓手续费合计（USD）。开仓时从钱包扣除，实际战役的已实现也不含它，这里只作说明。 */
+  open_fees_total?: number;
+  /**
+   * 手动 Legs 分支：只剩复盘快照、或摊自战役级已实现的腿有几条——它们的手续费已含在盈亏里、金额未知，
+   * 改动带来的平仓费变化也只在盈亏里，都不在上面两项里。
+   */
+  fee_unknown_leg_count?: number;
 }
 
 export interface CampaignCounterfactual {

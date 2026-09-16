@@ -3,7 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactualManualLeg, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
-import { CampaignWhatIfEditor, type CampaignWhatIfRunContext } from '../CampaignWhatIfEditor';
+import {
+  CampaignWhatIfEditor,
+  type CampaignWhatIfLoadLegsRequest,
+  type CampaignWhatIfRunContext,
+} from '../CampaignWhatIfEditor';
 
 /**
  * 编辑器要向页面交代两件事：
@@ -14,7 +18,9 @@ vi.mock('@/components/journal/ReplayKlineChart', () => ({
   ReplayKlineChart: () => <div data-testid="counterfactual-chart" />,
 }));
 
-const { baselineLegs } = vi.hoisted(() => ({
+const { baselineLegs, baselineState } = vi.hoisted(() => ({
+  // 个别用例换一份基线（带实际成交结果与「挂单中」）；缺省用下面这份。
+  baselineState: { override: null as CampaignCounterfactualManualLeg[] | null },
   baselineLegs: [
     {
       id: 'main',
@@ -43,7 +49,9 @@ const { baselineLegs } = vi.hoisted(() => ({
   ] as CampaignCounterfactualManualLeg[],
 }));
 
-vi.mock('@/lib/campaignSimulationEngine', () => ({
+vi.mock('@/lib/campaignSimulationEngine', async importOriginal => ({
+  // 载入时按基线补齐老行的 adoptBaselineLegFacts 用真的
+  ...(await importOriginal<typeof import('@/lib/campaignSimulationEngine')>()),
   buildActualSimulationParams: () => ({
     entry: {
       time: '2026-01-02T00:30:00.000Z',
@@ -65,7 +73,7 @@ vi.mock('@/lib/campaignSimulationEngine', () => ({
     exit_rule: 'manual_only',
   }),
   buildPureSopParams: () => null,
-  buildManualLegs: () => baselineLegs.map(leg => ({ ...leg })),
+  buildManualLegs: () => (baselineState.override ?? baselineLegs).map(leg => ({ ...leg })),
 }));
 
 const campaign: TradeCampaign = {
@@ -113,7 +121,7 @@ const noCorrections = {};
 
 function renderEditor(
   onRunWhatIf: ReturnType<typeof vi.fn>,
-  loadLegsRequest: { nonce: number; legs: CampaignCounterfactualManualLeg[] } | null = null,
+  loadLegsRequest: CampaignWhatIfLoadLegsRequest | null = null,
   campaignRow: TradeCampaign = campaign,
 ) {
   return (
@@ -137,6 +145,7 @@ function renderEditor(
 describe('CampaignWhatIfEditor run context and load-legs request', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    baselineState.override = null;
   });
 
   it('一键运行递出基线腿与编辑器全部腿；停用的腿留在 manualLegs、不进 params.manual_legs', async () => {
@@ -234,5 +243,127 @@ describe('CampaignWhatIfEditor run context and load-legs request', () => {
     const [, params, context] = onRunWhatIf.mock.calls[0] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }, CampaignWhatIfRunContext];
     expect(params.manual_legs.map(leg => [leg.id, leg.exit_price])).toEqual([['main', 125]]);
     expect(context.baselineLegs).toEqual(baselineLegs);
+  });
+
+  it('载入口径统一之前保存的分支：没改过的挂单按基线补回「挂单中」，实际成交结果照补；改过价的挂单按成交处理，但开关照画、能切回去', async () => {
+    const actualMain: CampaignCounterfactualManualLeg['actual'] = {
+      source: 'records',
+      direction: 'long',
+      open_time: baselineLegs[0].open_time,
+      close_time: baselineLegs[0].close_time,
+      entry_price: 100,
+      exit_price: 110,
+      size_usdt: 1_000,
+      realized_pnl_usdt: 99.45,
+      close_fee_usdt: 0.55,
+      open_fee_usdt: 0.5,
+    };
+    baselineState.override = [
+      { ...baselineLegs[0], actual: actualMain },
+      { ...baselineLegs[1], filled: false },
+    ];
+    const onRunWhatIf = vi.fn();
+    // 老行：两条腿都没有 actual / filled，内容与基线一致；挂单的平仓时间是保存那一刻 K 线窗口的末根（与现在不同）
+    const legacy = baselineLegs.map(leg => (leg.id === 'hedge-a' ? { ...leg, close_time: '2026-01-02T02:45:00.000Z' } : { ...leg }));
+    const view = render(renderEditor(onRunWhatIf));
+    await waitFor(() => expect(screen.getByTestId('counterfactual-leg-filled-toggle-hedge-a')).toBeInTheDocument());
+
+    view.rerender(renderEditor(onRunWhatIf, { nonce: 1, legs: legacy }));
+    await waitFor(() => expect(screen.getByTestId('counterfactual-leg-filled-toggle-hedge-a')).toHaveAttribute('aria-pressed', 'false'));
+    expect(screen.getByText('挂单中')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    const [, params, context] = onRunWhatIf.mock.calls[0] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }, CampaignWhatIfRunContext];
+    expect(params.manual_legs[0].actual).toEqual(actualMain);
+    expect(params.manual_legs[1].filled).toBe(false);
+    // 挂单的平仓时间只是兜底：换回基线的，不算改动
+    expect(params.manual_legs[1].close_time).toBe(baselineLegs[1].close_time);
+    // 补回来的只是事实：与基线比没有任何改动
+    expect(context.manualLegs.map(leg => leg.filled)).toEqual([undefined, false]);
+
+    // 老行里改过价的挂单：老引擎当它成交，用户当时就在模拟成交——写成 filled: true，开关照画（「已成交」按下）
+    const editedLegacy = [legacy[0], { ...legacy[1], entry_price: 97 }];
+    view.rerender(renderEditor(onRunWhatIf, { nonce: 2, legs: editedLegacy }));
+    await waitFor(() => expect(screen.getByDisplayValue('97')).toBeInTheDocument());
+    const toggle = screen.getByTestId('counterfactual-leg-filled-toggle-hedge-a');
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('挂单中')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    const [, editedParams] = onRunWhatIf.mock.calls[1] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }];
+    expect(editedParams.manual_legs[1].filled).toBe(true);
+    expect(editedParams.manual_legs[0].actual).toEqual(actualMain);
+
+    // 价改回原值、再点开关切回「未成交」：这条腿回到挂单
+    fireEvent.change(screen.getByDisplayValue('97'), { target: { value: '90' } });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('挂单中')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    const [, revertedParams] = onRunWhatIf.mock.calls[2] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }];
+    expect(revertedParams.manual_legs[1]).toMatchObject({ filled: false, entry_price: 90 });
+  });
+
+  it('载入时带上那次运行的改动摘要：没改过平仓时间的未平仓腿按基线当前的兜底值收；没有摘要的老行认不出，原样保留', async () => {
+    // 进行中的战役、主力还没平：基线的平仓时间是现在 K 线窗口的末根（02:00），比老行保存时的末根（01:30）晚
+    const actualOpenMain: CampaignCounterfactualManualLeg['actual'] = {
+      source: 'unsettled',
+      direction: 'long',
+      open_time: baselineLegs[0].open_time,
+      close_time: baselineLegs[0].close_time,
+      entry_price: 100,
+      exit_price: 100,
+      size_usdt: 1_000,
+      realized_pnl_usdt: 0,
+      close_fee_usdt: null,
+      open_fee_usdt: null,
+      close_time_fallback: true,
+      still_open: true,
+    };
+    baselineState.override = [
+      { ...baselineLegs[0], exit_price: 100, actual: actualOpenMain },
+      { ...baselineLegs[1], filled: false },
+    ];
+    const onRunWhatIf = vi.fn();
+    const legacy = [
+      { ...baselineLegs[0], exit_price: 100, close_time: '2026-01-02T01:30:00.000Z' },
+      { ...baselineLegs[1], close_time: '2026-01-02T01:30:00.000Z' },
+    ];
+    const view = render(renderEditor(onRunWhatIf));
+    await waitFor(() => expect(screen.getByTestId('counterfactual-leg-filled-toggle-hedge-a')).toBeInTheDocument());
+
+    // 没有摘要、运行时末根（01:45）也对不上：认不出，保存的 01:30 原样保留
+    view.rerender(renderEditor(onRunWhatIf, { nonce: 1, legs: legacy, savedWindowEnd: '2026-01-02T01:45:00.000Z' }));
+    await waitFor(() => expect(screen.getByTestId('counterfactual-leg-filled-toggle-hedge-a')).toHaveAttribute('aria-pressed', 'false'));
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    const [, withoutSummary] = onRunWhatIf.mock.calls[0] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }];
+    expect(withoutSummary.manual_legs[0].close_time).toBe('2026-01-02T01:30:00.000Z');
+
+    // 带着「未改动」的摘要：换成基线当前的 02:00，与基线比没有改动
+    view.rerender(renderEditor(onRunWhatIf, {
+      nonce: 2,
+      legs: legacy,
+      savedWindowEnd: '2026-01-02T01:45:00.000Z',
+      savedChangeSummary: { short: '未改动', lines: [], legs: [] },
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    await waitFor(() => expect(onRunWhatIf).toHaveBeenCalledTimes(2));
+    const [, withSummary, context] = onRunWhatIf.mock.calls[1] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }, CampaignWhatIfRunContext];
+    expect(withSummary.manual_legs[0].close_time).toBe(baselineLegs[0].close_time);
+    expect(withSummary.manual_legs[0].actual).toEqual(actualOpenMain);
+    expect(context.manualLegs.map(leg => leg.close_time)).toEqual(context.baselineLegs.map(leg => leg.close_time));
+  });
+
+  it('币本位战役里「增添」的腿抄原始 Legs 的结算方式与面值，按币本位收费', async () => {
+    baselineState.override = [
+      { ...baselineLegs[0], settlement_mode: 'coin', contract_size_usd: 100 },
+      { ...baselineLegs[1] },
+    ];
+    const onRunWhatIf = vi.fn();
+    render(renderEditor(onRunWhatIf));
+    await waitFor(() => expect(screen.getAllByDisplayValue('110')).toHaveLength(1));
+    fireEvent.click(screen.getByRole('button', { name: '增添' }));
+    fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
+    const [, params] = onRunWhatIf.mock.calls[0] as [string, { manual_legs: CampaignCounterfactualManualLeg[] }];
+    const added = params.manual_legs.find(leg => leg.id.startsWith('manual-'));
+    expect(added).toMatchObject({ settlement_mode: 'coin', contract_size_usd: 100 });
   });
 });

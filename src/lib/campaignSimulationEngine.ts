@@ -5,31 +5,52 @@ import {
   computeInitialExpectedMaxLoss,
   computeInitialMainExposureNotional,
   computeSopDeviation,
+  resolveCampaignEquityPathLegFacts,
+  resolveInitialExposureLegAttribution,
+  resolveMainRiskAnchorEntryPrice,
+  type CampaignLocalOrderFacts,
+  type CampaignPnlPathLeg,
   type Deduction,
   type SopDeviationResult,
 } from '@/lib/campaignAnalysis';
 import {
   resolveLegExecution,
+  type LegExitPriceCorrection,
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
-import { resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
+import { isCampaignResolved, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import {
+  closingSettlementRecord,
+  computeCampaignRealizedPnl,
+  legExitPriceCorrectionDelta,
+  reconcileCampaignWithSettlement,
+} from '@/lib/campaignRealizedPnl';
+import { getCoinContractSizeUsd, getCoinContracts, roundCoinContracts } from '@/lib/coinMargined';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
+import { tradeRecordFees } from '@/lib/tradeFees';
+import { getPositionNotionalUsd, getSettlementFeeParts } from '@/lib/tradingSettlement';
 import {
   INITIAL_HEDGE_SIZE_PCT,
   MIRROR_TP_REDUCTION_PCT,
 } from '@/lib/strategyTemplates';
-import type {
-  CampaignCounterfactualEvent,
-  CampaignCounterfactualLegSummary,
-  CampaignCounterfactualManualLeg,
-  CampaignCounterfactualParams,
-  CampaignCounterfactualResult,
-  CampaignCounterfactualStateSegment,
-  DeviationCost,
-  TradeCampaign,
-  TradeJournal,
+import {
+  isHistoricalCampaign,
+  type CampaignCounterfactualChangeSummary,
+  type CampaignCounterfactualEvent,
+  type CampaignCounterfactualLegSummary,
+  type CampaignCounterfactualManualLeg,
+  type CampaignCounterfactualManualLegActual,
+  type CampaignCounterfactualManualLegCut,
+  type CampaignCounterfactualParams,
+  type CampaignCounterfactualResult,
+  type CampaignCounterfactualRiskContext,
+  type CampaignCounterfactualStateSegment,
+  type DeviationCost,
+  type TradeCampaign,
+  type TradeJournal,
 } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import { TAKER_FEE, type CampaignReverseHedgeOrder, type TradeRecord } from '@/types/trading';
 
 const EPSILON = 0.000001;
 const DEFAULT_ACCOUNT_SIZE = 10_000;
@@ -672,21 +693,173 @@ const ZERO_RISK_ANCHORS: CounterfactualRiskAnchors = {
   mainLeverage: null,
 };
 
-function riskAnchorsFromSynthetic(synthetic: { campaign: TradeCampaign; legs: TradeJournal[] }): CounterfactualRiskAnchors {
+interface RiskAnchorSynthetic {
+  campaign: TradeCampaign;
+  legs: TradeJournal[];
+  /** 手动 Legs 分支为有成交记录的腿造的同形记录（持仓窗口、归属时刻、开仓名义）；SOP 推演没有。 */
+  records?: TradeRecord[];
+}
+
+function riskAnchorsFromSynthetic(
+  synthetic: RiskAnchorSynthetic,
+  reverseHedgeOrders: CampaignReverseHedgeOrder[] = [],
+): CounterfactualRiskAnchors {
+  const records = synthetic.records ?? [];
   return {
-    initialExpectedMaxLoss: computeInitialExpectedMaxLoss(synthetic.campaign, synthetic.legs, []),
-    initialMainExposureNotional: computeInitialMainExposureNotional(synthetic.campaign, synthetic.legs, []),
-    expectedMaxDrawdownPct: computeInitialExpectedMaxDrawdownPct(synthetic.campaign, synthetic.legs, [], []),
-    mainLeverage: resolveCampaignMainLeverage(synthetic.campaign, synthetic.legs, []),
+    initialExpectedMaxLoss: computeInitialExpectedMaxLoss(synthetic.campaign, synthetic.legs, records, reverseHedgeOrders),
+    initialMainExposureNotional: computeInitialMainExposureNotional(synthetic.campaign, synthetic.legs, records),
+    expectedMaxDrawdownPct: computeInitialExpectedMaxDrawdownPct(synthetic.campaign, synthetic.legs, records, reverseHedgeOrders),
+    mainLeverage: resolveCampaignMainLeverage(synthetic.campaign, synthetic.legs, records),
   };
 }
 
-/** 把锚写成结果上的落库字段（4 位小数，与结果里其他金额同精度）。 */
+function positivePrice(value: number | null | undefined): number | null {
+  return Number.isFinite(value) && Number(value) > 0 ? Number(value) : null;
+}
+
+/**
+ * 手动 Legs 分支的风险锚上下文：战役页算 L / 预期回撤时除了腿，还读这场战役的反向保护委托
+ * （历史归类的战役只认委托快照），以及事件流里带价的初始对冲事件（某个角色一条腿都锚不出价时的兜底）。
+ * 两样都没有时不影响 L，返回 undefined（不落库）。页面在「一键运行」时附到 params 上，老行没有。
+ */
+export function buildCounterfactualRiskContext(
+  campaign: Pick<TradeCampaign, 'actual_evolution'>,
+  reverseHedgeOrders: CampaignReverseHedgeOrder[],
+): CampaignCounterfactualRiskContext | undefined {
+  const reverseOrders = reverseHedgeOrders
+    .filter(order => Number.isFinite(order.price) && order.price > 0 && Number.isFinite(order.createdAt))
+    .map(order => ({
+      id: order.id,
+      side: order.side,
+      price: order.price,
+      fill_price: Number.isFinite(order.fillPrice) ? Number(order.fillPrice) : null,
+      created_at: order.createdAt,
+    }));
+  const events = campaign.actual_evolution ?? [];
+  // 两个价都原样抄下（取哪一个、门槛多少由战役页的函数自己决定），只滤掉两个都不是正数的。
+  const hedgeEvents = events.flatMap(event => {
+    const price = positivePrice(event.price);
+    const entryPrice = positivePrice(event.entry_price);
+    return event.leg_role != null && INITIAL_HEDGE_LEG_ROLES.has(event.leg_role)
+      && (price != null || entryPrice != null)
+      && Number.isFinite(new Date(event.timestamp).getTime())
+      ? [{
+        timestamp: event.timestamp,
+        role: event.leg_role as 'hedge_initial_a' | 'hedge_initial_b',
+        price,
+        ...(entryPrice != null ? { entry_price: entryPrice } : {}),
+      }]
+      : [];
+  });
+  if (reverseOrders.length === 0 && hedgeEvents.length === 0) return undefined;
+  const initialOrders = reverseOrders.length === 0 ? [] : events.flatMap(event => (
+    event.pending_order_id && (event.leg_role === 'hedge_initial_a' || event.leg_role === 'hedge_initial_b')
+      ? [{ id: event.pending_order_id, role: event.leg_role }]
+      : []
+  ));
+  return {
+    historical: reverseOrders.length > 0 && isHistoricalCampaign(campaign),
+    initial_orders: initialOrders,
+    reverse_orders: reverseOrders,
+    ...(hedgeEvents.length > 0 ? { hedge_events: hedgeEvents } : {}),
+  };
+}
+
+/**
+ * 真实战役此刻按页面的规则算不算「已了结」：结算套回战役行（reconcileCampaignWithSettlement）之后，
+ * 状态是已结束、且已实现有数——与详情页、列表页的机会质量门槛同一条。
+ * 页面在「一键运行」时记到 params.actual_resolved 上。
+ */
+export function resolveCounterfactualActualResolved(
+  campaign: TradeCampaign,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  exitPriceCorrections: LegExitPriceCorrections = {},
+): boolean {
+  const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords, exitPriceCorrections);
+  return isCampaignResolved(reconcileCampaignWithSettlement(campaign, legs, settlement));
+}
+
+function riskContextReverseOrders(context: CampaignCounterfactualRiskContext | undefined): CampaignReverseHedgeOrder[] {
+  return (context?.reverse_orders ?? []).map(order => ({
+    id: order.id,
+    side: order.side,
+    price: order.price,
+    fillPrice: order.fill_price,
+    createdAt: order.created_at,
+    cancelledAt: null,
+    status: 'cancelled',
+  }));
+}
+
+/** 把风险锚上下文还原进合成战役的事件流：历史归类标记、标成初始对冲 A/B 的委托 id、带价的初始对冲事件。 */
+function withRiskContextEvents<T extends RiskAnchorSynthetic>(
+  synthetic: T,
+  context: CampaignCounterfactualRiskContext | undefined,
+): T {
+  if (!context) return synthetic;
+  const stamp = synthetic.campaign.opened_at;
+  const extra: TradeCampaign['actual_evolution'] = [
+    ...(context.historical ? [{
+      id: 'synthetic-risk-historical',
+      timestamp: stamp,
+      event_type: 'historical_classification_created' as const,
+      leg_role: null,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: null,
+      size_usdt: null,
+      notes: null,
+      recorded_at: stamp,
+    }] : []),
+    ...context.initial_orders.map((order, index) => ({
+      id: `synthetic-risk-order-${index + 1}`,
+      timestamp: stamp,
+      event_type: 'hedge_placed' as const,
+      leg_role: order.role,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: order.id,
+      price: null,
+      size_usdt: null,
+      notes: null,
+      recorded_at: stamp,
+    })),
+    ...(context.hedge_events ?? []).map((item, index) => ({
+      id: `synthetic-risk-hedge-event-${index + 1}`,
+      timestamp: item.timestamp,
+      event_type: 'hedge_placed' as const,
+      leg_role: item.role,
+      journal_id: null,
+      trade_record_id: null,
+      pending_order_id: null,
+      price: item.price,
+      ...(item.entry_price != null ? { entry_price: item.entry_price } : {}),
+      size_usdt: null,
+      notes: null,
+      recorded_at: item.timestamp,
+    })),
+  ];
+  if (extra.length === 0) return synthetic;
+  return {
+    ...synthetic,
+    campaign: { ...synthetic.campaign, actual_evolution: [...synthetic.campaign.actual_evolution, ...extra] },
+  };
+}
+
+/**
+ * 结果里 L、名义、d 与手动分支已实现的落库精度。盈亏比 = 已实现 ÷ L：L 只有几美元时，
+ * 按 4 位小数取整就足以让重跑的盈亏比与战役页差出 0.01 个百分点以上。
+ */
+const RESULT_AMOUNT_DIGITS = 8;
+
+/** 把锚写成结果上的落库字段。 */
 function riskAnchorResultFields(anchors: CounterfactualRiskAnchors) {
   return {
-    initial_expected_max_loss: round(anchors.initialExpectedMaxLoss),
-    initial_main_exposure_notional: round(anchors.initialMainExposureNotional),
-    expected_max_drawdown_pct: round(anchors.expectedMaxDrawdownPct),
+    initial_expected_max_loss: round(anchors.initialExpectedMaxLoss, RESULT_AMOUNT_DIGITS),
+    initial_main_exposure_notional: round(anchors.initialMainExposureNotional, RESULT_AMOUNT_DIGITS),
+    expected_max_drawdown_pct: round(anchors.expectedMaxDrawdownPct, RESULT_AMOUNT_DIGITS),
     main_leverage: anchors.mainLeverage,
   };
 }
@@ -870,14 +1043,346 @@ function validManualLeg(leg: CampaignCounterfactualManualLeg): boolean {
     && new Date(leg.close_time).getTime() >= new Date(leg.open_time).getTime();
 }
 
+/** 手动腿按调整后开平价算出的**毛**盈亏（名义仓位 × 价格变动比例，不乘杠杆、不扣费）。 */
 export function manualLegPnl(leg: CampaignCounterfactualManualLeg): number {
   return pnlForClose(
     leg.direction,
     leg.entry_price,
     leg.exit_price,
     leg.size_usdt,
-    leg.leverage || 1,
+    leg.leverage,
   );
+}
+
+/** 一条手动腿计入分支的钱，以及它在权益路径与风险锚上的样子。 */
+export interface ManualLegEconomics {
+  /** 计入已实现与权益路径（平仓之后）的净盈亏；未成交的腿为 0。 */
+  netPnl: number;
+  grossPnl: number;
+  /**
+   * 已从 netPnl 扣掉、且金额完整已知的平仓手续费（USD）。只剩快照 / 摊自战役级已实现的腿记 0：
+   * 它们的平仓费含在实际盈亏里、金额未知，改动带来的平仓费变化（按 Taker 费率）只进 netPnl——
+   * 把这一截差额单列进来，合计就成了「一部分腿的全额 + 另一部分腿的差额」，还可能是负数。
+   */
+  closeFeeUsdt: number;
+  /** 开仓手续费（USD）：与实际战役一样不从已实现里扣，只作说明。 */
+  openFeeUsdt: number;
+  /** 手续费已含在盈亏里、但金额未知（只剩复盘快照的腿）：不计入上面两项。 */
+  feesUnknown: boolean;
+  basis: NonNullable<CampaignCounterfactualLegSummary['pnl_basis']>;
+  /** 权益路径上的分段：每一刀一段。未成交的腿、成交时刻未知且没改开仓时间的腿为空。 */
+  pathSegments: CampaignPnlPathLeg[];
+  /**
+   * 合成战役里这条腿的开仓名义（USD）：战役页分给它的那份开仓名义（actual.exposure_usdt，「仓位」一格改过则按比例缩放），
+   * 没有这份份额的腿（没有成交分片、新增的腿）取「仓位」一格——与战役页退到 pre_position_size 同一口径。
+   */
+  exposureUsdt: number;
+  /** 合成战役里这条腿的风险锚价（pre_entry_price）。 */
+  anchorPrice: number;
+}
+
+const MANUAL_LEG_PRICE_EPSILON = 1e-9;
+
+function samePrice(a: number, b: number): boolean {
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= MANUAL_LEG_PRICE_EPSILON;
+}
+
+function sameInstant(a: string, b: string): boolean {
+  const left = new Date(a).getTime();
+  const right = new Date(b).getTime();
+  return Number.isFinite(left) && Number.isFinite(right) && left === right;
+}
+
+/**
+ * 方向、开平时间、开平价、仓位都与实际成交一致。平仓时间只是副本给的兜底（结算没有计入的腿）时不比它：
+ * 老行保存那一刻的 K 线窗口与现在不同，兜底值就不同，那不是改动。
+ * 只用来标注这条腿的盈亏来历、以及老行补事实时判断「改没改」；钱数走 resolveManualLegEconomics。
+ */
+export function manualLegMatchesActual(
+  leg: CampaignCounterfactualManualLeg,
+): leg is CampaignCounterfactualManualLeg & { actual: CampaignCounterfactualManualLegActual } {
+  const actual = leg.actual;
+  if (!actual || !Number.isFinite(actual.realized_pnl_usdt)) return false;
+  return leg.direction === actual.direction
+    && sameInstant(leg.open_time, actual.open_time)
+    && (actual.close_time_fallback === true || sameInstant(leg.close_time, actual.close_time))
+    && samePrice(leg.entry_price, actual.entry_price)
+    && samePrice(leg.exit_price, actual.exit_price)
+    && samePrice(leg.size_usdt, actual.size_usdt);
+}
+
+/**
+ * 模拟器自己的收费口径（getSettlementFeeParts，Taker）：U 本位 = 数量 × 成交价 × 费率，
+ * 数量 = 名义 ÷ 开仓价；币本位 = 张数 × 面值 × 费率（按币收、按成交价折美元后价格约掉）。
+ * 新增的腿、切成「已成交」的挂单没有实际记录可对，按调整后的价格整笔计费。
+ */
+export function manualLegFeeUsdt(leg: CampaignCounterfactualManualLeg, price: number): number {
+  if (!(price > 0) || !(leg.entry_price > 0) || !(leg.size_usdt > 0)) return 0;
+  const side = leg.direction === 'short' ? 'SHORT' as const : 'LONG' as const;
+  const leverage = leg.leverage > 0 ? leg.leverage : 1;
+  if (leg.settlement_mode === 'coin') {
+    const contractSizeUsd = getCoinContractSizeUsd('', { contractSizeUsd: leg.contract_size_usd });
+    const contracts = getCoinContracts({ contracts: leg.size_usdt / contractSizeUsd });
+    return getSettlementFeeParts('', {
+      side,
+      quantity: contracts,
+      contracts,
+      contractSizeUsd,
+      leverage,
+      marginMode: 'isolated',
+      settlementMode: 'coin',
+    }, price, false).feeUsd;
+  }
+  return getSettlementFeeParts('', {
+    side,
+    quantity: leg.size_usdt / leg.entry_price,
+    leverage,
+    marginMode: 'isolated',
+    settlementMode: 'usdt',
+  }, price, false).feeUsd;
+}
+
+/** 给定费率的一笔手续费：U 本位 数量 × 价 × 费率；币本位 张数 × 面值 × 费率（与价格无关）。 */
+function feeAtRate(sizeUsdt: number, entryPrice: number, price: number, rate: number, coinFaceUsd: number | null): number {
+  if (!(price > 0) || !(entryPrice > 0) || !(sizeUsdt > 0) || !(rate > 0)) return 0;
+  if (coinFaceUsd != null && coinFaceUsd > 0) return roundCoinContracts(sizeUsdt / coinFaceUsd) * coinFaceUsd * rate;
+  return (sizeUsdt / entryPrice) * price * rate;
+}
+
+function coinFaceOf(leg: CampaignCounterfactualManualLeg): number | null {
+  return leg.settlement_mode === 'coin'
+    ? getCoinContractSizeUsd('', { contractSizeUsd: leg.contract_size_usd })
+    : null;
+}
+
+function timeMsOr(value: string | null | undefined, fallback: number): number {
+  const ms = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isFinite(ms) ? ms : fallback;
+}
+
+/**
+ * 一条腿的各刀里「收盘那一组」的下标：与收盘那一刀同一时刻平掉的全部刀（并进同一个仓位、一起平掉的加仓也在其中）。
+ * 平仓价、平仓时间两格改的是这一组；更早平掉的刀维持实际成交。
+ */
+export function closingCutIndexes(cuts: CampaignCounterfactualManualLegCut[]): Set<number> {
+  const last = cuts.length - 1;
+  if (last < 0) return new Set();
+  const closeMs = new Date(cuts[last].close_time).getTime();
+  const indexes = new Set<number>([last]);
+  cuts.forEach((cut, index) => {
+    if (index !== last && new Date(cut.close_time).getTime() === closeMs) indexes.add(index);
+  });
+  return indexes;
+}
+
+/** 收盘那一组之前平掉的刀（编辑器在平仓价下方列出「另有 N 刀先平」）。 */
+export function earlierClosedCuts(actual: CampaignCounterfactualManualLegActual | undefined): CampaignCounterfactualManualLegCut[] {
+  const cuts = actual?.cuts ?? [];
+  const closing = closingCutIndexes(cuts);
+  return cuts.filter((_cut, index) => !closing.has(index));
+}
+
+/**
+ * 实际成交的各刀；没有分刀的整条腿算一刀。平仓费率：只剩复盘快照的腿不知道当时收了多少，按模拟器现行 Taker；
+ * 记着平仓费的按 费 ÷ 平仓名义 倒推（与 tradeRecordFees 对老记录的读法一致），记着 0 的按 0。
+ */
+function actualCutsOf(
+  actual: CampaignCounterfactualManualLegActual,
+  coinFaceUsd: number | null,
+): CampaignCounterfactualManualLegCut[] {
+  if (actual.cuts && actual.cuts.length > 0) return actual.cuts;
+  const closeNotional = coinFaceUsd != null
+    ? actual.size_usdt
+    : actual.entry_price > 0 ? (actual.size_usdt / actual.entry_price) * actual.exit_price : 0;
+  const closeFeeRate = actual.close_fee_usdt == null
+    ? TAKER_FEE
+    : actual.close_fee_usdt > 0 && closeNotional > 0 ? actual.close_fee_usdt / closeNotional : 0;
+  return [{
+    open_time: actual.open_time,
+    close_time: actual.close_time,
+    entry_price: actual.entry_price,
+    exit_price: actual.exit_price,
+    size_usdt: actual.size_usdt,
+    realized_pnl_usdt: actual.realized_pnl_usdt,
+    close_fee_usdt: actual.close_fee_usdt ?? 0,
+    close_fee_rate: closeFeeRate,
+    open_fee_usdt: actual.open_fee_usdt,
+    open_fee_rate: TAKER_FEE,
+  }];
+}
+
+function pathSide(direction: CampaignCounterfactualManualLeg['direction']): CampaignPnlPathLeg['side'] {
+  return direction === 'short' ? 'SHORT' : 'LONG';
+}
+
+/** 按调整后的开平价整笔算：毛盈亏 − 模拟器 Taker 平仓费。新增的腿、切成「已成交」的挂单、改过的未结算腿走这里。 */
+function modelLegEconomics(
+  leg: CampaignCounterfactualManualLeg,
+  anchorPrice: number,
+): ManualLegEconomics {
+  const openMs = timeMsOr(leg.open_time, 0);
+  const closeMs = Math.max(timeMsOr(leg.close_time, openMs), openMs);
+  const grossPnl = manualLegPnl(leg);
+  const closeFeeUsdt = manualLegFeeUsdt(leg, leg.exit_price);
+  const netPnl = grossPnl - closeFeeUsdt;
+  return {
+    netPnl,
+    grossPnl,
+    closeFeeUsdt,
+    openFeeUsdt: manualLegFeeUsdt(leg, leg.entry_price),
+    feesUnknown: false,
+    basis: 'model',
+    pathSegments: [{
+      side: pathSide(leg.direction),
+      quantity: leg.size_usdt / leg.entry_price,
+      entryPrice: leg.entry_price,
+      startMs: openMs,
+      endMs: closeMs,
+      realizedPnl: netPnl,
+    }],
+    exposureUsdt: leg.size_usdt,
+    anchorPrice,
+  };
+}
+
+/**
+ * 一条手动腿的钱怎么算——引擎、偏离代价、结果摘要共用这一处：
+ *   · 未成交（filled === false）：不持有，一分钱不计；
+ *   · 没有实际成交可对（新增的腿、切成「已成交」的挂单）：毛盈亏按开平价算，再按模拟器 Taker 费率扣平仓费；
+ *   · 实际结算没有计入的腿（既无成交记录也无复盘快照，如尚未平仓）：没改记 0，改了才按上一条整笔算；
+ *   · 有实际成交（成交记录 / 复盘快照 / 摊自战役级已实现）：从实际结算值出发，**只加上改动本身值多少钱**——
+ *       每一刀 = 实际已实现 + [模型(改后这一刀) − 模型(实际这一刀)]，模型 = 毛盈亏 − 平仓费（按这一刀自己的费率）。
+ *     没改的格子两边输入逐位相同，差额恰为 0，原样重跑逐分复现战役页；改了一格，挪动的恰是这一格值的钱。
+ *     以前「一改就整条腿换成模型重算」：分几刀平掉的腿被抹成全仓平在最后一刀、老记录 0.04% 的费被换成 0.05%、
+ *     滑点被抹掉——平仓价改 0.01，相对实际跳 −29.89，全是改动之外的差额。
+ *   改动怎么落到各刀上：方向、开仓价（按比例）、开仓时间（平移）、仓位（按比例）作用于每一刀；
+ *   平仓价、平仓时间只作用于收盘那一组（编辑器里那一格显示的就是它；与它同一时刻平掉的刀——比如并进同一个仓位、
+ *   没有腿的加仓——一起平移），更早平掉的刀维持实际成交。
+ * 开仓费一律只作说明：战役页的已实现 P&L 是 Σ record.pnl，开仓费在开仓时从钱包扣走、不在其中，
+ * 这里若扣掉它，未改动的副本就会凭空比实际少一截，被读成「原始错误的代价」。
+ */
+export function resolveManualLegEconomics(leg: CampaignCounterfactualManualLeg): ManualLegEconomics {
+  const actual = leg.actual;
+  // 风险锚价（初始对冲的委托价、老数据解混合后的主力开仓价）只在开仓价没改时代替开仓价。
+  const anchorPrice = actual?.anchor_price != null && samePrice(leg.entry_price, actual.entry_price)
+    ? actual.anchor_price
+    : leg.entry_price;
+  if (leg.filled === false) {
+    return {
+      netPnl: 0,
+      grossPnl: 0,
+      closeFeeUsdt: 0,
+      openFeeUsdt: 0,
+      feesUnknown: false,
+      basis: 'unfilled',
+      pathSegments: [],
+      exposureUsdt: leg.size_usdt,
+      anchorPrice,
+    };
+  }
+  if (!actual || !Number.isFinite(actual.realized_pnl_usdt)) return modelLegEconomics(leg, anchorPrice);
+
+  const openMs = timeMsOr(leg.open_time, 0);
+  const closeMs = Math.max(timeMsOr(leg.close_time, openMs), openMs);
+  // 成交时刻未知、权益路径不持有的腿：开仓时间没改就照样不持有（已实现照计）。
+  const offPath = actual.off_path === true && sameInstant(leg.open_time, actual.open_time);
+
+  const sizeRatio = actual.size_usdt > 0 ? leg.size_usdt / actual.size_usdt : 1;
+  const exposureUsdt = actual.exposure_usdt != null ? actual.exposure_usdt * sizeRatio : leg.size_usdt;
+
+  if (actual.source === 'unsettled') {
+    if (!manualLegMatchesActual(leg)) return { ...modelLegEconomics(leg, anchorPrice), exposureUsdt };
+    // 没改过：持仓按实际成交（从历史快照事件还原的腿带着事件里的那一刀），否则按这一格。
+    const held = actual.cuts?.[actual.cuts.length - 1];
+    const heldEntry = held ? held.entry_price : leg.entry_price;
+    const heldSize = held ? held.size_usdt : leg.size_usdt;
+    return {
+      netPnl: 0,
+      grossPnl: 0,
+      closeFeeUsdt: 0,
+      openFeeUsdt: 0,
+      feesUnknown: false,
+      basis: 'unsettled',
+      pathSegments: offPath ? [] : [{
+        side: pathSide(leg.direction),
+        quantity: heldSize / heldEntry,
+        entryPrice: heldEntry,
+        startMs: openMs,
+        endMs: closeMs,
+        realizedPnl: 0,
+      }],
+      exposureUsdt,
+      anchorPrice,
+    };
+  }
+
+  const coinFace = coinFaceOf(leg);
+  const cuts = actualCutsOf(actual, coinFace);
+  const closingIndexes = closingCutIndexes(cuts);
+  const actualOpenMs = timeMsOr(actual.open_time, openMs);
+  const shiftMs = openMs - actualOpenMs;
+  const priceRatio = actual.entry_price > 0 ? leg.entry_price / actual.entry_price : 1;
+  // 平仓价一格改了多少：收盘那一组的每一刀都平移这么多（收盘那一刀的实际平仓价就是这一格显示的值）。
+  const exitShift = leg.exit_price - actual.exit_price;
+  /**
+   * 摊自战役级已实现的腿：战役页的权益路径持有它们时平仓后记 0（没有成交记录、也没有快照），
+   * 副本的路径同样只计改动本身的差额，那个总额只进最终已实现。
+   */
+  const pathExcludesActual = actual.source === 'campaign_total';
+  const modelNet = (
+    direction: CampaignCounterfactualManualLeg['direction'],
+    entry: number,
+    exit: number,
+    size: number,
+    rate: number,
+  ) => pnlForClose(direction, entry, exit, size, 1) - feeAtRate(size, entry, exit, rate, coinFace);
+
+  let netPnl = 0;
+  let closeFeeUsdt = 0;
+  let openFeeUsdt = 0;
+  const pathSegments: CampaignPnlPathLeg[] = [];
+  cuts.forEach((cut, index) => {
+    const closing = closingIndexes.has(index);
+    const entry = cut.entry_price * priceRatio;
+    const size = cut.size_usdt * sizeRatio;
+    // 收盘那一刀直接取这一格的值（免得 a + (b − a) 的浮点尾差）；同一时刻平掉的其余刀按同一差额平移。
+    const exit = index === cuts.length - 1 ? leg.exit_price : closing ? cut.exit_price + exitShift : cut.exit_price;
+    const cutOpenMs = timeMsOr(cut.open_time, actualOpenMs) + shiftMs;
+    const cutCloseMs = Math.max(closing ? closeMs : timeMsOr(cut.close_time, closeMs), cutOpenMs);
+    const editedNet = modelNet(leg.direction, entry, exit, size, cut.close_fee_rate);
+    const actualNet = modelNet(actual.direction, cut.entry_price, cut.exit_price, cut.size_usdt, cut.close_fee_rate);
+    const editWorth = editedNet - actualNet;
+    const realized = cut.realized_pnl_usdt + editWorth;
+    closeFeeUsdt += cut.close_fee_usdt
+      + feeAtRate(size, entry, exit, cut.close_fee_rate, coinFace)
+      - feeAtRate(cut.size_usdt, cut.entry_price, cut.exit_price, cut.close_fee_rate, coinFace);
+    openFeeUsdt += (cut.open_fee_usdt ?? 0)
+      + feeAtRate(size, entry, entry, cut.open_fee_rate, coinFace)
+      - feeAtRate(cut.size_usdt, cut.entry_price, cut.entry_price, cut.open_fee_rate, coinFace);
+    netPnl += realized;
+    pathSegments.push({
+      side: pathSide(leg.direction),
+      quantity: entry > 0 ? size / entry : 0,
+      entryPrice: entry,
+      startMs: cutOpenMs,
+      endMs: cutCloseMs,
+      realizedPnl: pathExcludesActual ? editWorth : realized,
+    });
+  });
+  // 只剩复盘快照的腿、摊自战役级已实现的腿：盈亏里已含手续费，但金额不知道——不计入手续费合计，只标出来；
+  // 改动带来的平仓费变化已在上面的 editWorth 里扣进 netPnl，同样不单列（见 ManualLegEconomics.closeFeeUsdt）。
+  const feesUnknown = actual.source === 'leg_snapshot' || actual.source === 'campaign_total';
+  return {
+    netPnl,
+    grossPnl: feesUnknown ? netPnl : netPnl + closeFeeUsdt,
+    closeFeeUsdt: feesUnknown ? 0 : closeFeeUsdt,
+    openFeeUsdt: feesUnknown ? 0 : openFeeUsdt,
+    feesUnknown,
+    basis: manualLegMatchesActual(leg) ? actual.source : 'adjusted',
+    pathSegments: offPath ? [] : pathSegments,
+    exposureUsdt,
+    anchorPrice,
+  };
 }
 
 function manualTimeMs(value: string): number | null {
@@ -890,10 +1395,235 @@ export function defaultCloseTime(params: CampaignCounterfactualParams, klines: K
   return last ? new Date(last.time).toISOString() : params.entry.time;
 }
 
+export interface BuildManualLegsOptions {
+  /**
+   * 这场战役本身：「挂单从未成交」「对冲何时触发」要看它的事件流才判得准，风险锚要看它的历史归类与解混合，
+   * 结算兜底要看它的落库值。页面与编辑器都必须传。不给时按主力开仓参数造一个最小战役，事件流里的证据看不到。
+   */
+  campaign?: TradeCampaign | null;
+  /** 本地委托快照给出的事实（从未成交的委托 id）：与战役页权益路径读同一份，见 CampaignLocalOrderFacts。 */
+  localOrders?: CampaignLocalOrderFacts;
+}
+
+/** 没有战役行时的最小替身：只够 buildActiveLegs 定方向与时间窗。 */
+function stubCampaignFromParams(params: CampaignCounterfactualParams): TradeCampaign {
+  return {
+    id: 'manual-legs-stub',
+    user_id: '',
+    campaign_code: '',
+    symbol: '',
+    direction: params.entry.direction === 'short' ? 'main_short' : 'main_long',
+    status: 'active',
+    strategy_template: 'custom',
+    title: '',
+    opened_at: params.entry.time,
+    closed_at: null,
+    initial_main_size_usdt: params.entry.size_usdt,
+    initial_leverage: params.entry.leverage,
+    final_realized_pnl: null,
+    final_r_multiple: null,
+    peak_unrealized_pnl: null,
+    peak_drawdown: null,
+    importance_weight: 0,
+    notes: null,
+    actual_evolution: [],
+    deviation_notes: {},
+    deleted_at: null,
+    created_at: params.entry.time,
+    updated_at: params.entry.time,
+  } as TradeCampaign;
+}
+
+const INITIAL_HEDGE_LEG_ROLES = new Set<string>(['hedge_initial_a', 'hedge_initial_b']);
+
+/**
+ * 一条腿认领到的每一刀（与已实现 P&L 同一份认领），收盘那一刀排最后。
+ * 收盘那一刀的平仓时间 / 平仓价取腿上显示的那一份（已叠平仓价校正），已实现叠同一个校正差额——
+ * 这样没改过的腿，引擎按刀重放出来的钱与战役页结算逐分相同。
+ */
+function buildRecordCuts(
+  claimed: TradeRecord[],
+  correction: LegExitPriceCorrection | undefined,
+  displayed: { open_time: string; close_time: string; exit_price: number },
+): CampaignCounterfactualManualLegCut[] {
+  const closing = closingSettlementRecord(claimed) as TradeRecord;
+  const recency = (record: TradeRecord) => record.closeTime || record.openTime || 0;
+  const earlier = claimed.filter(record => record !== closing).sort((a, b) => recency(a) - recency(b));
+  const delta = correction ? legExitPriceCorrectionDelta(claimed, correction) : 0;
+  return [...earlier, closing].map(record => {
+    const isClosing = record === closing;
+    const fees = tradeRecordFees(record);
+    const pnl = Number.isFinite(record.pnl) ? Number(record.pnl) : 0;
+    return {
+      open_time: record.openTime > 0 ? new Date(record.openTime).toISOString() : displayed.open_time,
+      close_time: isClosing || !(record.closeTime > 0)
+        ? displayed.close_time
+        : new Date(record.closeTime).toISOString(),
+      entry_price: record.entryPrice,
+      exit_price: isClosing ? displayed.exit_price : record.exitPrice,
+      size_usdt: getPositionNotionalUsd(record.symbol, record, record.entryPrice),
+      realized_pnl_usdt: isClosing && correction ? pnl + delta : pnl,
+      close_fee_usdt: fees.close.usd,
+      // 费率没存的老记录按 费 ÷ 平仓名义 倒推（tradeRecordFees）；倒推不出（强平）才退到现行 Taker，免费的记录按 0。
+      close_fee_rate: fees.close.rate ?? (fees.close.usd > 0 ? TAKER_FEE : 0),
+      open_fee_usdt: fees.open?.usd ?? null,
+      open_fee_rate: fees.open?.rate ?? TAKER_FEE,
+    };
+  });
+}
+
+/**
+ * 实际成交结果：腿认领到的成交记录（分刀、叠校正）、复盘快照，或「结算没有计入」。
+ *
+ * 结算给这条腿记的是 null（既无成交记录也无复盘快照，典型是尚未平仓的腿）时，战役页的已实现不含它；
+ * 原样重跑也必须记 0——否则按开平价重算（开平同价时只剩一笔平仓费）会凭空印出一截「相对实际」。
+ */
+type ManualLegRiskFacts = Pick<
+  CampaignCounterfactualManualLegActual,
+  'placed_time' | 'has_record' | 'exposure_usdt' | 'exposure_group' | 'exposure_excluded' | 'order_kind'
+>;
+
+function buildManualLegActual(input: {
+  claimed: TradeRecord[];
+  realizedPnl: number | null;
+  /** 一条腿都结算不了、战役页取事件流 / 落库值时，这条腿摊到的那一份（见 buildManualLegs）。 */
+  campaignTotalShare: number | null;
+  correction: LegExitPriceCorrection | undefined;
+  economics: Pick<CampaignCounterfactualManualLegActual, 'direction' | 'open_time' | 'close_time' | 'entry_price' | 'exit_price' | 'size_usdt'>;
+  closeTimeFallback: boolean;
+  campaignClosed: boolean;
+  anchorPrice: number | null;
+  offPath: boolean;
+  riskFacts: ManualLegRiskFacts;
+  /** 从历史快照事件还原、成交价或数量与腿上的委托快照不同的腿：事件里的成交（见 eventFillCut）。 */
+  eventFill: { entryPrice: number; quantity: number } | null;
+}): CampaignCounterfactualManualLegActual {
+  const { claimed, realizedPnl, economics } = input;
+  const facts = {
+    ...economics,
+    ...(input.closeTimeFallback ? { close_time_fallback: true } : {}),
+    ...(input.anchorPrice != null ? { anchor_price: input.anchorPrice } : {}),
+    ...(input.offPath ? { off_path: true } : {}),
+    ...input.riskFacts,
+  };
+  const eventCuts = (realized: number) => (input.eventFill ? { cuts: [eventFillCut(economics, input.eventFill, realized)] } : {});
+  if (input.campaignTotalShare != null) {
+    return {
+      source: 'campaign_total',
+      ...facts,
+      realized_pnl_usdt: input.campaignTotalShare,
+      close_fee_usdt: null,
+      open_fee_usdt: null,
+      ...eventCuts(input.campaignTotalShare),
+    };
+  }
+  if (realizedPnl == null || !Number.isFinite(realizedPnl)) {
+    return {
+      source: 'unsettled',
+      ...facts,
+      ...(input.closeTimeFallback && !input.campaignClosed ? { still_open: true } : {}),
+      realized_pnl_usdt: 0,
+      close_fee_usdt: null,
+      open_fee_usdt: null,
+      ...eventCuts(0),
+    };
+  }
+  if (claimed.length === 0) {
+    return {
+      source: 'leg_snapshot',
+      ...facts,
+      realized_pnl_usdt: realizedPnl,
+      close_fee_usdt: null,
+      open_fee_usdt: null,
+      ...eventCuts(realizedPnl),
+    };
+  }
+  const cuts = buildRecordCuts(claimed, input.correction, economics);
+  // 与 Legs 表「手续费」列同一份 tradeRecordFees：一条腿分几刀平掉时逐刀相加。
+  let closeFee = 0;
+  let openFee: number | null = 0;
+  for (const cut of cuts) {
+    closeFee += cut.close_fee_usdt;
+    openFee = openFee == null || cut.open_fee_usdt == null ? null : openFee + cut.open_fee_usdt;
+  }
+  return {
+    source: 'records',
+    ...facts,
+    realized_pnl_usdt: realizedPnl,
+    close_fee_usdt: closeFee,
+    open_fee_usdt: openFee,
+    cuts,
+  };
+}
+
+/**
+ * 从历史快照事件还原的腿（本地没有成交记录）：战役页的权益路径按事件里的成交价与数量持有它，
+ * 腿上显示的却是委托价 / 委托名义（从已有日志腿归类时，事件抄的是当时成交记录的成交价）。
+ * 副本给它一刀同形的「实际成交」：开仓价、开仓名义取事件，钱数仍是这条腿的结算值；
+ * 手续费金额未知，费率按模拟器 Taker（与只剩快照的腿同一口径）。
+ */
+function eventFillCut(
+  economics: Pick<CampaignCounterfactualManualLegActual, 'open_time' | 'close_time' | 'exit_price'>,
+  fill: { entryPrice: number; quantity: number },
+  realized: number,
+): CampaignCounterfactualManualLegCut {
+  return {
+    open_time: economics.open_time,
+    close_time: economics.close_time,
+    entry_price: fill.entryPrice,
+    exit_price: economics.exit_price,
+    size_usdt: fill.entryPrice * fill.quantity,
+    realized_pnl_usdt: realized,
+    close_fee_usdt: 0,
+    close_fee_rate: TAKER_FEE,
+    open_fee_usdt: null,
+    open_fee_rate: TAKER_FEE,
+  };
+}
+
+/**
+ * 战役页锚 L / 预期回撤时这条腿用的价，与副本里显示的开仓价不同时才返回：
+ *   · 主力：老数据先把合并出来的开仓价解回主力自己的（resolveMainRiskAnchorEntryPrice）；
+ *   · 初始对冲 A/B：委托价（pre_entry_price），不是滑点后的成交价——「委托快照是唯一有效的 ex-ante 边界」。
+ */
+function riskAnchorPriceFor(
+  campaign: TradeCampaign | null,
+  leg: TradeJournal,
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  entryPrice: number,
+): number | null {
+  let anchor: number | null = null;
+  if (leg.leg_role === 'main_open' && campaign) {
+    anchor = resolveMainRiskAnchorEntryPrice(campaign, legs, tradeRecords, leg);
+  } else if (leg.leg_role != null && INITIAL_HEDGE_LEG_ROLES.has(leg.leg_role)) {
+    anchor = Number.isFinite(leg.pre_entry_price) && Number(leg.pre_entry_price) > 0 ? Number(leg.pre_entry_price) : null;
+  }
+  return anchor != null && !samePrice(anchor, entryPrice) ? anchor : null;
+}
+
 /**
  * 把战役已归类的 legs 转成「手动反事实」可编辑的腿副本（编辑器初始值 + 偏离代价的原始基线共用）。
  * 开平时间与价格复用原始 Legs 列表的统一成交解析；历史异常平仓价先应用 K 线校正，
- * 缺少成交记录时再退回腿上的快照，仍缺失才使用开仓价/末根 K 线。
+ * 缺少成交记录时再退回腿上的快照；仍缺平仓时间的腿（挂单、未平仓）在战役结束时刻收，
+ * 进行中的战役才退到末根 K 线——前者不随 K 线窗口变，换周期不会把没动过的腿读成「改过」。
+ * 「仓位」一格仍是 Legs 表显示的委托名义（pre_position_size）。
+ *
+ * 每条腿还带上它的实际成交结果（actual），全部取自战役页用的同一批函数：
+ *   · 盈亏：结算的 byLeg（叠同一份校正）；成交记录腿按认领到的每一刀拆开（cuts），
+ *     每刀带自己的开仓名义（滑点后的成交价 × 数量）、平仓费与费率——引擎按刀重放，
+ *     峰值路径与主力开仓名义仓位因此与战役页一致；
+ *   · 手续费：Legs 表同一份 tradeRecordFees；
+ *   · 持有与否：战役页权益路径（resolveCampaignEquityPathLegFacts）——从未成交的腿标 filled: false、不带 actual；
+ *     成交时刻未知、路径不持有的腿标 off_path；没有成交记录、却在路径上的腿按路径上那一段开平仓
+ *     （对冲按触发时刻开、触发后又撤单的按撤单时刻平；事件快照按事件里的开仓时刻开、按腿上的平仓时刻平，腿上没有才取事件的），
+ *     从历史快照事件还原、成交价或数量与委托快照不同的腿，带一刀取自事件的实际成交（eventFillCut）；
+ *   · 风险锚：初始对冲的委托价、老数据解混合后的主力开仓价（anchor_price）；合成战役要读的原始事实——
+ *     挂出时刻（placed_time）、有没有本地成交记录（has_record）、战役页分给它的开仓名义份额与并组
+ *     （exposure_usdt / exposure_group，resolveInitialExposureLegAttribution）、不计入开仓名义的反向腿、order_kind。
+ * 结算没有计入的腿（byLeg 为 null）记成 unsettled，原样重跑同样记 0。
+ * 一条腿都结算不了、战役页读事件流或落库值时，那个总额摊到成交过的腿上（campaign_total，见 campaignTotalSharesFor）。
+ * 成交过的腿不写 filled。
  */
 export function buildManualLegs(
   params: CampaignCounterfactualParams,
@@ -901,9 +1631,33 @@ export function buildManualLegs(
   klines: KlineData[],
   tradeRecords: TradeRecord[],
   exitPriceCorrections: LegExitPriceCorrections = {},
+  options: BuildManualLegsOptions = {},
 ): CampaignCounterfactualManualLeg[] {
-  const fallbackClose = defaultCloseTime(params, klines);
+  const campaign = options.campaign ?? null;
+  const closedAtMs = campaign?.closed_at ? manualTimeMs(campaign.closed_at) : null;
   const recordMap = buildTradeRecordLookup(tradeRecords);
+  const settlement = computeCampaignRealizedPnl(
+    campaign ?? { final_realized_pnl: null, actual_evolution: [] },
+    legs,
+    tradeRecords,
+    exitPriceCorrections,
+  );
+  const pathFacts = resolveCampaignEquityPathLegFacts(
+    campaign ?? stubCampaignFromParams(params),
+    legs,
+    tradeRecords,
+    options.localOrders,
+  );
+  /**
+   * 平仓时间只是兜底的腿：已结束的战役收在战役页扫描窗口的终点（不早于路径上最晚的那次平仓，
+   * closed_at 被存早了的老战役也一样，见 buildActiveLegs），战役页的路径把平仓时刻缺省的段持有到同一刻；
+   * 进行中的战役收在末根 K 线。
+   */
+  const fallbackClose = closedAtMs != null && Number.isFinite(pathFacts.analysisEndMs)
+    ? new Date(Math.max(closedAtMs, pathFacts.analysisEndMs)).toISOString()
+    : closedAtMs != null
+      ? new Date(closedAtMs).toISOString()
+      : defaultCloseTime(params, klines);
   const ordered = [...legs].sort((a, b) => {
     const seqA = a.leg_sequence ?? 9999;
     const seqB = b.leg_sequence ?? 9999;
@@ -911,35 +1665,269 @@ export function buildManualLegs(
     return new Date(a.pre_simulated_time).getTime() - new Date(b.pre_simulated_time).getTime();
   });
 
-  return ordered
+  const exposure = campaign
+    ? resolveInitialExposureLegAttribution(campaign, legs, tradeRecords)
+    : { shares: new Map(), excludedLegIds: new Set<string>() };
+
+  const drafts = ordered
     .map((leg, index) => {
       const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-      const execution = resolveLegExecution(leg, record, exitPriceCorrections);
-      const openTime = execution.openTime != null
-        ? new Date(execution.openTime).toISOString()
-        : leg.pre_simulated_time || params.entry.time;
-      const closeTime = execution.closeTime != null
-        ? new Date(execution.closeTime).toISOString()
-        : fallbackClose;
+      /**
+       * 开平时间与价格取这条腿**自己认领到的**收盘那一刀：Legs 表按 id 查到的那条记录被另一条腿认领时
+       * （例如实时主力的最后一刀，后来又作为回填的加仓腿归进同一场），战役页的路径只持有这条腿认领到的各刀，
+       * 副本若照抄查到的那条的平仓时间，收盘那一刀会被持有到别人的平仓时刻。认领到的就是查到的那条时与此前逐字节相同。
+       */
+      const claimed = settlement.recordsByLeg.get(leg.id) ?? [];
+      const ownClosing = record && claimed.length > 0 && !claimed.includes(record) ? closingSettlementRecord(claimed) : null;
+      const execution = resolveLegExecution(leg, ownClosing ?? record, exitPriceCorrections);
+      // 没有成交记录、却在权益路径上的腿（带触发事件的对冲、快照、历史快照事件）按路径上那一段开仓；
+      // 那一段有自己的平仓时刻（快照平仓时间、撤单事件、事件里的平仓时间）时也按它平。
+      const heldStartMs = record ? null : pathFacts.heldStartMsByLeg.get(leg.id) ?? null;
+      const heldPath = record ? null : pathFacts.heldWithoutRecordByLeg.get(leg.id) ?? null;
+      const openTime = heldStartMs != null
+        ? new Date(heldStartMs).toISOString()
+        : execution.openTime != null
+          ? new Date(execution.openTime).toISOString()
+          : leg.pre_simulated_time || params.entry.time;
+      const heldEndMs = heldPath?.endMs ?? null;
+      const closeTimeFallback = heldEndMs == null && execution.closeTime == null;
+      const closeTime = heldEndMs != null
+        ? new Date(heldEndMs).toISOString()
+        : execution.closeTime != null
+          ? new Date(execution.closeTime).toISOString()
+          : fallbackClose;
       const closeMs = manualTimeMs(closeTime) ?? manualTimeMs(fallbackClose) ?? manualTimeMs(openTime) ?? Date.now();
       const openMs = manualTimeMs(openTime) ?? closeMs;
       const normalizedClose = closeMs >= openMs ? closeTime : new Date(openMs).toISOString();
       const entryPrice = execution.entryPrice ?? params.entry.price;
       const exitPrice = execution.exitPrice ?? entryPrice;
-      return {
+      const direction: CampaignCounterfactualManualLeg['direction'] = leg.direction === 'short' ? 'short' : 'long';
+      const sizeUsdt = leg.pre_position_size ?? params.entry.size_usdt;
+      const coin = (record?.settlementMode ?? leg.pre_settlement_mode) === 'coin';
+      const unfilled = pathFacts.unfilledLegIds.has(leg.id);
+      const manualLeg: CampaignCounterfactualManualLeg = {
         id: leg.id || `leg-${index}`,
         leg_role: leg.leg_role ?? 'standalone',
-        direction: leg.direction === 'short' ? 'short' : 'long',
+        direction,
         open_time: openTime,
         close_time: normalizedClose,
         entry_price: entryPrice,
         exit_price: exitPrice,
-        size_usdt: leg.pre_position_size ?? params.entry.size_usdt,
+        size_usdt: sizeUsdt,
         leverage: leg.leverage ?? params.entry.leverage ?? 1,
         enabled: true,
-      } satisfies CampaignCounterfactualManualLeg;
+      };
+      if (unfilled) manualLeg.filled = false;
+      if (coin) {
+        manualLeg.settlement_mode = 'coin';
+        manualLeg.contract_size_usd = getCoinContractSizeUsd(leg.symbol, {
+          contractSizeUsd: record?.contractSizeUsd ?? leg.pre_contract_size_usd ?? undefined,
+        });
+      }
+      // 合成战役（风险锚）要读的原始事实：挂出时刻、有没有成交记录、开仓名义的份额与并组、order_kind。
+      const placedMs = manualTimeMs(leg.pre_simulated_time);
+      const share = exposure.shares.get(leg.id);
+      const riskFacts: ManualLegRiskFacts = {
+        ...(placedMs != null && placedMs !== openMs ? { placed_time: new Date(placedMs).toISOString() } : {}),
+        ...(record ? { has_record: true } : {}),
+        ...(share ? { exposure_usdt: share.notionalUsd } : {}),
+        ...(share && share.groupSize > 1 ? { exposure_group: share.groupKey } : {}),
+        ...(exposure.excludedLegIds.has(leg.id) ? { exposure_excluded: true } : {}),
+        ...(leg.order_kind === 'main' || leg.order_kind === 'hedge' ? { order_kind: leg.order_kind } : {}),
+      };
+      // 从历史快照事件还原的腿，事件里的成交价 / 数量与腿上的委托快照不同时，副本的持仓按事件（与战役页同一段）。
+      const eventFill = heldPath?.eventFill
+        && !(samePrice(heldPath.eventFill.entryPrice, entryPrice)
+          && samePrice(heldPath.eventFill.entryPrice * heldPath.eventFill.quantity, sizeUsdt))
+        ? heldPath.eventFill
+        : null;
+      return { leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill };
     })
-    .filter(leg => leg.entry_price > 0 && leg.size_usdt > 0);
+    .filter(draft => draft.manualLeg.entry_price > 0 && draft.manualLeg.size_usdt > 0);
+
+  const campaignTotalShares = campaignTotalSharesFor(settlement, drafts);
+
+  return drafts.map(({ leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill }) => {
+    if (unfilled) return manualLeg;
+    manualLeg.actual = buildManualLegActual({
+      claimed: settlement.recordsByLeg.get(leg.id) ?? [],
+      realizedPnl: settlement.byLeg.get(leg.id) ?? null,
+      campaignTotalShare: campaignTotalShares?.get(leg.id) ?? null,
+      correction: exitPriceCorrections[leg.id],
+      economics: {
+        direction: manualLeg.direction,
+        open_time: manualLeg.open_time,
+        close_time: manualLeg.close_time,
+        entry_price: manualLeg.entry_price,
+        exit_price: manualLeg.exit_price,
+        size_usdt: manualLeg.size_usdt,
+      },
+      closeTimeFallback,
+      campaignClosed: closedAtMs != null,
+      anchorPrice: riskAnchorPriceFor(campaign, leg, legs, tradeRecords, manualLeg.entry_price),
+      offPath: pathFacts.offPathLegIds.has(leg.id),
+      riskFacts,
+      eventFill,
+    });
+    return manualLeg;
+  });
+}
+
+/**
+ * 一条腿都结算不了（本地既无成交记录也无复盘快照）、战役页的已实现取自事件流或落库值时，
+ * 把这个总额摊到成交过的腿上：每条腿先按自己的开平价估一份（毛盈亏 − 模拟器 Taker 平仓费），
+ * 余差（估不到的手续费、滑点、资金费……）记在主力上（名义最大的那笔；没有主力就记在第一条腿上）。
+ * 原样重跑时各份之和恰为那个总额；改一格挪动的仍是这一格值的钱；停用一条腿减去它自己那一份。
+ * 其它结算口径返回 null（各腿按自己的结算值）。
+ */
+function campaignTotalSharesFor(
+  settlement: ReturnType<typeof computeCampaignRealizedPnl>,
+  drafts: Array<{ leg: TradeJournal; manualLeg: CampaignCounterfactualManualLeg; unfilled: boolean }>,
+): Map<string, number> | null {
+  if (settlement.basis !== 'events' && settlement.basis !== 'campaign_summary') return null;
+  const total = settlement.total;
+  if (total == null || !Number.isFinite(total)) return null;
+  const filled = drafts.filter(draft => !draft.unfilled);
+  if (filled.length === 0) return null;
+  const shares = new Map<string, number>();
+  let estimated = 0;
+  for (const { leg, manualLeg } of filled) {
+    const estimate = pnlForClose(manualLeg.direction, manualLeg.entry_price, manualLeg.exit_price, manualLeg.size_usdt, 1)
+      - feeAtRate(manualLeg.size_usdt, manualLeg.entry_price, manualLeg.exit_price, TAKER_FEE, coinFaceOf(manualLeg));
+    shares.set(leg.id, estimate);
+    estimated += estimate;
+  }
+  const carrier = pickPrimaryMainLeg(filled.map(draft => draft.leg)) ?? filled[0].leg;
+  shares.set(carrier.id, (shares.get(carrier.id) ?? 0) + (total - estimated));
+  return shares;
+}
+
+/**
+ * 与 manualLegMatchesActual 同一组字段：方向、开平时间、开平价、仓位——决定这条腿钱数与持仓的全部输入。
+ * ignoreCloseTime：平仓时间只是兜底（挂单、未平仓）时不比。
+ */
+function sameManualLegEconomicFields(
+  a: CampaignCounterfactualManualLeg,
+  b: CampaignCounterfactualManualLeg,
+  ignoreCloseTime = false,
+): boolean {
+  return a.direction === b.direction
+    && sameInstant(a.open_time, b.open_time)
+    && (ignoreCloseTime || sameInstant(a.close_time, b.close_time))
+    && samePrice(a.entry_price, b.entry_price)
+    && samePrice(a.exit_price, b.exit_price)
+    && samePrice(a.size_usdt, b.size_usdt);
+}
+
+/**
+ * 本次口径统一之前保存的分支，腿上没有 actual / filled / 结算方式。读它（偏离代价）或把它载回编辑器时，
+ * 按当前原始基线里同 id 的那条腿补上，补的都是「这条腿本身的事实」：
+ *   · actual、settlement_mode、contract_size_usd 照补——引擎从实际结算值出发，只加上改动值的钱；
+ *   · 开仓时间：老引擎给没有成交记录的腿存的是挂出时刻（pre_simulated_time），基线按战役页权益路径的开始时刻
+ *     （对冲的触发时刻）开仓；老行存的恰是挂出时刻就换成基线的值，否则没动过的对冲会被读成「改了开仓时间」、
+ *     还被当作从挂出那一刻起就持有；
+ *   · 挂单（基线 filled: false）：除平仓时间外逐项一致就补 filled: false，平仓时间也换成基线的兜底值
+ *     （挂单的平仓时间不是事实，老行存的是保存那一刻 K 线窗口的末根，换了窗口就不同）；
+ *     不一致就写明 filled: true——老引擎把挂单一律当作成交，老行里改过价的挂单是用户当时就在模拟它成交，
+ *     写出来编辑器才画「未成交 / 已成交」开关，用户随时能切回去；
+ *   · 平仓时间只是兜底的腿（基线 close_time_fallback）：老行存的是当时 K 线窗口的末根，满足任一条就认作兜底、
+ *     换成基线的兜底值——等于那次运行的 K 线末根（savedWindowEnd）；或者不早于基线的兜底值（已结束的战役按结束时刻收，
+ *     老窗口的末根只会在它之后）、且其余各格与基线一致。都不满足就原样保留，免得抹掉用户当时改过的平仓时间。
+ *   · 那次运行的改动摘要（savedChangeSummary，9962e7e7 起的行都有）说这条腿的平仓时间没改：保存下来的平仓时间就是
+ *     当时基线给的值，一律换成基线当前的值——进行中的战役里还没平的腿，老窗口的末根早于现在的末根，上一条认不出来；
+ *     基线的平仓时间换了来历（例如触发后又撤单的老对冲，现在按撤单时刻平）也一样。
+ * 带着 actual 或 filled 的腿是本次改动之后保存的，事实原样保留；只有平仓时间仍是它自己记下的兜底值、
+ * 而基线的兜底值已经变了（进行中的战役，K 线窗口又往后长了）时，换成基线当前的兜底值。
+ * 切成「已成交」的挂单（基线 filled: false、行里 filled: true，没有 actual）没有兜底标记，靠改动摘要认：
+ * 平仓时间没改就换成基线当前的兜底值，模拟的成交照样持有到现在的末根。
+ * 基线里没有这条腿（新增的腿）原样返回。
+ */
+export function adoptBaselineLegFacts(
+  saved: CampaignCounterfactualManualLeg,
+  baseline: CampaignCounterfactualManualLeg | undefined,
+  savedWindowEnd: string | null = null,
+  savedChangeSummary: CampaignCounterfactualChangeSummary | null = null,
+): CampaignCounterfactualManualLeg {
+  if (!baseline || baseline.id !== saved.id) return saved;
+  const closeKept = closeKeptAtRun(savedChangeSummary, saved.id);
+  if (saved.actual !== undefined || saved.filled !== undefined) {
+    const current = adoptCurrentFallbackClose(saved, baseline);
+    const simulatedFill = current.actual === undefined && current.filled === true && baseline.filled === false;
+    return simulatedFill && closeKept && !sameInstant(current.close_time, baseline.close_time)
+      ? { ...current, close_time: baseline.close_time }
+      : current;
+  }
+  const adopted: CampaignCounterfactualManualLeg = { ...saved };
+  if (baseline.actual !== undefined) adopted.actual = baseline.actual;
+  if (saved.settlement_mode === undefined && baseline.settlement_mode !== undefined) {
+    adopted.settlement_mode = baseline.settlement_mode;
+  }
+  if (saved.contract_size_usd === undefined && baseline.contract_size_usd !== undefined) {
+    adopted.contract_size_usd = baseline.contract_size_usd;
+  }
+  const placedTime = baseline.actual?.placed_time;
+  if (placedTime != null && baseline.actual?.has_record !== true && sameInstant(saved.open_time, placedTime)) {
+    adopted.open_time = baseline.open_time;
+  }
+  if (baseline.filled === false) {
+    if (sameManualLegEconomicFields(adopted, baseline, true)) {
+      adopted.filled = false;
+      adopted.close_time = baseline.close_time;
+    } else {
+      adopted.filled = true;
+      if (closeKept) adopted.close_time = baseline.close_time;
+    }
+  } else if (closeKept) {
+    adopted.close_time = baseline.close_time;
+  } else if (baseline.actual?.close_time_fallback === true) {
+    const savedCloseMs = new Date(adopted.close_time).getTime();
+    const baselineCloseMs = new Date(baseline.close_time).getTime();
+    const windowEnd = savedWindowEnd != null && sameInstant(adopted.close_time, savedWindowEnd);
+    const laterDefault = Number.isFinite(savedCloseMs) && Number.isFinite(baselineCloseMs)
+      && savedCloseMs >= baselineCloseMs
+      && sameManualLegEconomicFields(adopted, baseline, true);
+    if (windowEnd || laterDefault) adopted.close_time = baseline.close_time;
+  }
+  return adopted;
+}
+
+/**
+ * 那次运行的改动摘要里，这条腿的平仓时间没有改：摘要里没有这条腿，或它是「改」且改动字段里没有 close_time。
+ * 没有摘要（9962e7e7 之前的行）、或这条腿在摘要里是新增 / 删除 / 停用时，不下结论。
+ */
+function closeKeptAtRun(summary: CampaignCounterfactualChangeSummary | null, legId: string): boolean {
+  if (!summary || !Array.isArray(summary.legs)) return false;
+  const change = summary.legs.find(item => item.id === legId);
+  if (!change) return true;
+  return change.kind === 'edited' && !(change.changedFields ?? []).includes('close_time');
+}
+
+/** 新行里平仓时间仍是它自己记下的兜底值、而基线的兜底值变了：换成基线当前的兜底值（见 adoptBaselineLegFacts）。 */
+function adoptCurrentFallbackClose(
+  saved: CampaignCounterfactualManualLeg,
+  baseline: CampaignCounterfactualManualLeg,
+): CampaignCounterfactualManualLeg {
+  const savedActual = saved.actual;
+  const baselineActual = baseline.actual;
+  if (
+    saved.filled === false
+    || savedActual?.close_time_fallback !== true
+    || baselineActual?.close_time_fallback !== true
+    || !sameInstant(saved.close_time, savedActual.close_time)
+    || sameInstant(saved.close_time, baseline.close_time)
+  ) {
+    return saved;
+  }
+  const { still_open: _stillOpen, ...rest } = savedActual;
+  return {
+    ...saved,
+    close_time: baseline.close_time,
+    actual: {
+      ...rest,
+      close_time: baselineActual.close_time,
+      ...(baselineActual.still_open ? { still_open: true } : {}),
+    },
+  };
 }
 
 export interface ManualLegDeviationCost {
@@ -952,19 +1940,31 @@ export interface ManualLegDeviationCost {
  * 偏离代价（手动调整 vs 原始）逐腿拆分：
  * 每条腿代价 = 调整后腿盈亏 − 原始腿盈亏（按 leg id 匹配）；新增腿 = 调整后盈亏；删除/停用腿 = −原始盈亏。
  * 合计 = 手动调整总盈亏 − 原始总盈亏 = 原始错误的代价。仅返回 |代价| > EPSILON 的腿。
+ * savedWindowEnd：这条分支运行时 K 线窗口的末根（params.run_context.to）；savedChangeSummary：那次运行的改动摘要
+ * （params.change_summary）——两者都给认兜底平仓时间用（见 adoptBaselineLegFacts）。
  */
 export function computeManualLegDeviationCosts(
   originalLegs: CampaignCounterfactualManualLeg[],
   adjustedLegs: CampaignCounterfactualManualLeg[],
+  savedWindowEnd: string | null = null,
+  savedChangeSummary: CampaignCounterfactualChangeSummary | null = null,
 ): ManualLegDeviationCost[] {
+  // 与引擎同一份净额：未改动的腿两边都取实际结算值，差额恰为 0；未成交的腿两边都记 0。
   const legPnl = (leg: CampaignCounterfactualManualLeg | undefined) =>
-    leg && leg.enabled && validManualLeg(leg) ? manualLegPnl(leg) : 0;
+    leg && leg.enabled && validManualLeg(leg) ? resolveManualLegEconomics(leg).netPnl : 0;
   const origById = new Map(originalLegs.map(leg => [leg.id, leg]));
   const adjById = new Map(adjustedLegs.map(leg => [leg.id, leg]));
   const out: ManualLegDeviationCost[] = [];
-  for (const adj of adjustedLegs) {
-    const cost = legPnl(adj) - legPnl(origById.get(adj.id));
-    if (Math.abs(cost) > EPSILON) out.push({ legId: adj.id, leg_role: adj.leg_role, cost_usdt: round(cost, 2) });
+  for (const saved of adjustedLegs) {
+    const orig = origById.get(saved.id);
+    /**
+     * 老行（本次改动之前保存的分支）的腿没有 actual / filled：按原始基线补上（adoptBaselineLegFacts），
+     * 没改的腿两边都取实际结算值，代价仍恰为 0；否则老行里每一条没动过的腿都会按
+     * 「模拟费率 vs 实际费率」的零头印出一行假代价，换一次 K 线周期还会多出挂单的假代价。
+     */
+    const adj = adoptBaselineLegFacts(saved, orig, savedWindowEnd, savedChangeSummary);
+    const cost = legPnl(adj) - legPnl(orig);
+    if (Math.abs(cost) > EPSILON) out.push({ legId: saved.id, leg_role: saved.leg_role, cost_usdt: round(cost, 2) });
   }
   for (const orig of originalLegs) {
     if (adjById.has(orig.id)) continue;
@@ -991,10 +1991,22 @@ export function simulateManualLegScenario(
       legs_summary: [],
       state_segments: [],
       sop_score: 0,
+      fees_total: 0,
+      open_fees_total: 0,
     };
   }
 
-  const events = manualLegs
+  /**
+   * 未成交的腿（filled === false，Legs 表里的「挂单中」）不进持仓、不进已实现——
+   * 战役页的权益路径同样不持有它；把挂单当成持有，一根 K 线冲高时它会凭空吃掉一截浮盈。
+   * 但它**留在**下面的合成战役里：初始对冲 A/B 的挂单价正是定义 L 与预期回撤的那条止损线，
+   * 拿掉它 L 就变成 0、七项派生指标全部变「—」。
+   */
+  const economicsByLeg = new Map(manualLegs.map(leg => [leg, resolveManualLegEconomics(leg)] as const));
+  const economicsOf = (leg: CampaignCounterfactualManualLeg) => economicsByLeg.get(leg) as ManualLegEconomics;
+  const heldLegs = manualLegs.filter(leg => leg.filled !== false);
+
+  const events = heldLegs
     .flatMap<CampaignCounterfactualEvent>(leg => ([
       {
         timestamp: leg.open_time,
@@ -1015,40 +2027,43 @@ export function simulateManualLegScenario(
     ]))
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  const finalPnl = manualLegs.reduce((sum, leg) => sum + manualLegPnl(leg), 0);
+  // 净额：与战役页已实现 P&L（Σ record.pnl，已扣平仓费、叠平仓价校正）同一口径。
+  const finalPnl = heldLegs.reduce((sum, leg) => sum + economicsOf(leg).netPnl, 0);
+  const feesTotal = heldLegs.reduce((sum, leg) => sum + economicsOf(leg).closeFeeUsdt, 0);
+  const openFeesTotal = heldLegs.reduce((sum, leg) => sum + economicsOf(leg).openFeeUsdt, 0);
+  const feeUnknownLegCount = heldLegs.filter(leg => economicsOf(leg).feesUnknown).length;
   /**
    * 峰值浮盈 / 最大回撤直接用战役页 computeDecisionAccuracy 的那一份权益路径算法
    * （computeCampaignPnlPathExtremes）：一根 K 线里逐个还原持仓状态——K 线起点、每条腿开仓、
    * 每条腿平仓前一刻与平仓时刻、K 线终点——各自用这根的最高价 / 最低价重估，已平的腿计已实现。
    * 不再自写近似：「这根里碰过的腿一律同时持有、同在极值价上估」在多腿同一根换状态时
    * 会与战役页对不上，原样重跑的副本就印出与真实盈亏概览不同的峰值。
+   * 已平的每一刀计的是与上面同一份净额——战役页的路径读的也是（校正后的）record.pnl。
    *
    * 粒度告诫：一根 K 线内高低点与开平仓的先后顺序不可知，这是「该周期粒度下」的上下界；
    * 运行时的周期与根数记在 params.run_context 里，读的人才知道该拿它跟什么比。
    */
-  const pathLegs = manualLegs.map(leg => ({
-    side: leg.direction === 'short' ? 'SHORT' as const : 'LONG' as const,
-    quantity: leg.size_usdt / leg.entry_price,
-    entryPrice: leg.entry_price,
-    startMs: new Date(leg.open_time).getTime(),
-    endMs: new Date(leg.close_time).getTime(),
-    realizedPnl: manualLegPnl(leg),
-  }));
-  const extremes = computeCampaignPnlPathExtremes(
-    pathLegs,
-    klines,
-    Math.min(...pathLegs.map(leg => leg.startMs)),
-    Math.max(...pathLegs.map(leg => leg.endMs)),
-  );
+  // 每条腿按它实际成交的每一刀各放一段（分几刀平掉的腿、并仓后按比例减仓的镜像都在这里还原）；
+  // 成交时刻未知、战役页也不持有的腿不放。
+  const pathLegs = heldLegs.flatMap(leg => economicsOf(leg).pathSegments);
+  const extremes = pathLegs.length > 0
+    ? computeCampaignPnlPathExtremes(
+      pathLegs,
+      klines,
+      Math.min(...pathLegs.map(leg => leg.startMs)),
+      Math.max(...pathLegs.map(leg => leg.endMs)),
+    )
+    : { maxProfit: 0, maxDrawdown: 0 };
   // 最终已实现盈亏本身就是权益路径上的一点（最后一腿平在末根 K 线之后时扫描看不到它）：
   // 战役页同样先扫 K 线再与已实现取最大，峰值不能低于最终盈亏。没有 K 线时它就是唯一的点。
   const peakEquity = Math.max(extremes.maxProfit, finalPnl);
   const troughEquity = Math.min(extremes.maxDrawdown, finalPnl);
 
-  const firstTime = manualLegs[0].open_time;
-  const lastTime = manualLegs.reduce((latest, leg) => (
+  const timelineLegs = heldLegs.length > 0 ? heldLegs : manualLegs;
+  const firstTime = timelineLegs[0].open_time;
+  const lastTime = timelineLegs.reduce((latest, leg) => (
     new Date(leg.close_time).getTime() > new Date(latest).getTime() ? leg.close_time : latest
-  ), manualLegs[0].close_time);
+  ), timelineLegs[0].close_time);
   /**
    * 手动 Legs 分支原来把保护线**写死成 2%**，既不看这场战役实际挂在哪，
    * 敞口也只有主力一条腿。止损越宽被高估得越离谱：实盘那笔 13.38% 的主力，
@@ -1060,16 +2075,17 @@ export function simulateManualLegScenario(
    * 锚不出保护线时返回 0（下方 > EPSILON 判断会让 R 显示 0），
    * 绝不拿一个凭空的 2% 顶上——那是在给一个不存在的止损定价。
    */
-  const manualSynthetic = buildManualSynthetic(params, manualLegs, events, {
-    final_realized_pnl: round(finalPnl),
+  const manualSynthetic = buildManualSynthetic(params, validManualLegsInOrder(params, manualLegs), {
+    final_realized_pnl: round(finalPnl, RESULT_AMOUNT_DIGITS),
     peak_unrealized_pnl: round(Math.max(0, peakEquity)),
     peak_drawdown: round(Math.abs(Math.min(0, troughEquity))),
-  });
-  const anchors = riskAnchorsFromSynthetic(manualSynthetic);
+  }, economicsOf);
+  const anchors = riskAnchorsFromSynthetic(manualSynthetic, riskContextReverseOrders(params.risk_context));
   const plannedMaxLoss = anchors.initialExpectedMaxLoss;
 
   return {
-    final_realized_pnl: round(finalPnl),
+    // 已实现与 L 都按 8 位小数落库：盈亏比 = 已实现 ÷ L，L 只有几美元时 4 位小数的取整就够把它挪出 0.01 个百分点。
+    final_realized_pnl: round(finalPnl, RESULT_AMOUNT_DIGITS),
     final_r_multiple: plannedMaxLoss > EPSILON ? round(finalPnl / plannedMaxLoss) : 0,
     peak_unrealized_pnl: round(Math.max(0, peakEquity)),
     peak_drawdown: round(Math.abs(Math.min(0, troughEquity))),
@@ -1077,14 +2093,21 @@ export function simulateManualLegScenario(
       ? round(clamp((finalPnl / peakEquity) * 100, -999, 999))
       : 0,
     events,
-    legs_summary: manualLegs.map<CampaignCounterfactualLegSummary>(leg => ({
-      leg_role: leg.leg_role,
-      placed_at: leg.open_time,
-      trigger_price: round(leg.entry_price),
-      status: 'filled',
-      triggered_at: leg.close_time,
-      realized_pnl_usdt: round(manualLegPnl(leg)),
-    })),
+    legs_summary: manualLegs.map<CampaignCounterfactualLegSummary>(leg => {
+      const economics = economicsOf(leg);
+      const held = leg.filled !== false;
+      return {
+        leg_role: leg.leg_role,
+        placed_at: leg.open_time,
+        trigger_price: round(leg.entry_price),
+        status: held ? 'filled' : 'never_triggered',
+        triggered_at: held ? leg.close_time : null,
+        realized_pnl_usdt: round(economics.netPnl),
+        close_fee_usdt: round(economics.closeFeeUsdt),
+        open_fee_usdt: round(economics.openFeeUsdt),
+        pnl_basis: economics.basis,
+      };
+    }),
     state_segments: [{
       state: 'manual_legs',
       state_label: '手动 Legs 方案',
@@ -1093,12 +2116,27 @@ export function simulateManualLegScenario(
     }],
     sop_score: 0,
     ...riskAnchorResultFields(anchors),
+    fees_total: round(feesTotal),
+    open_fees_total: round(openFeesTotal),
+    ...(feeUnknownLegCount > 0 ? { fee_unknown_leg_count: feeUnknownLegCount } : {}),
   };
 }
 
 /** 与 journalApi 选引擎的判断同一条：只要有一条手动腿启用，就是手动 Legs 分支。 */
 export function isManualLegScenario(params: CampaignCounterfactualParams): boolean {
   return params.manual_legs?.some(leg => leg.enabled) ?? false;
+}
+
+/**
+ * 同一批有效腿，按副本里的顺序（原始 Legs 的 leg_sequence，新增的腿排在后面）——合成战役按这个顺序排腿，
+ * 与战役页读 legs 的顺序一致（主力归属按 leg_sequence 裁决并列）。sorted 是按开仓时间排过的同一批对象。
+ */
+function validManualLegsInOrder(
+  params: CampaignCounterfactualParams,
+  sorted: CampaignCounterfactualManualLeg[],
+): CampaignCounterfactualManualLeg[] {
+  const valid = new Set(sorted);
+  return (params.manual_legs ?? []).filter(leg => valid.has(leg));
 }
 
 function sortedValidManualLegs(params: CampaignCounterfactualParams): CampaignCounterfactualManualLeg[] {
@@ -1108,38 +2146,105 @@ function sortedValidManualLegs(params: CampaignCounterfactualParams): CampaignCo
 }
 
 /**
- * 把手动腿映射成合成腿再造合成战役——simulateManualLegScenario 与 deriveCounterfactualRiskAnchors 共用，
- * 保证「运行时落库的锚」与「老行事后重算的锚」出自同一份映射。
+ * 把手动腿映射成合成腿（再为有成交记录的腿造同形的记录）、造合成战役——simulateManualLegScenario 与
+ * deriveCounterfactualRiskAnchors 共用，保证「运行时落库的锚」与「老行事后重算的锚」出自同一份映射。
+ *
+ * 目标是让 resolveMainRiskAnchors / computeInitialMainExposureNotional 读到与战役页**同形**的输入：
+ *   · 腿的顺序按副本里的顺序（即原始 Legs 的 leg_sequence），挂出时刻取原始腿的 pre_simulated_time
+ *     （同角色的两张保护单按它排先后）；
+ *   · 有成交记录的腿配一条合成记录：开平时刻即副本的开平时间（战役页的持仓窗口、归属时刻都按记录），
+ *     开仓价是风险锚价，名义是战役页分给它的那份开仓名义，同一笔开仓成交的几条腿共用一个 fillId、并回一组；
+ *   · 没有成交记录的腿按 pre_simulated_time 开窗，平仓时间是兜底（挂单、未平仓）时窗口朝右开口，与战役页一样；
+ *   · 事件流只放风险锚上下文里的那几样（历史归类、初始对冲委托、带价的初始对冲事件），
+ *     不放腿的开平仓事件——多主力时它们会被按时间归属、误当成别的主力的保护线。
+ * 未成交的保护单也映射进来：它的挂单价是止损线，L 与预期回撤靠它锚出来；只是不带成交记录。
  */
 function buildManualSynthetic(
   params: CampaignCounterfactualParams,
   manualLegs: CampaignCounterfactualManualLeg[],
-  events: CampaignCounterfactualEvent[],
   base: Pick<CampaignCounterfactualResult, 'final_realized_pnl' | 'peak_unrealized_pnl' | 'peak_drawdown'>,
-): { campaign: TradeCampaign; legs: TradeJournal[] } {
-  const syntheticSimLegs: SimulationLeg[] = manualLegs.map((leg, index) => ({
-    id: leg.id || `manual-leg-${index + 1}`,
-    role: leg.leg_role as LegRole,
-    kind: leg.leg_role === 'main_open' ? 'main' : leg.leg_role === 'mirror_tp' ? 'mirror_tp' : 'hedge',
-    placedAt: leg.open_time,
-    triggerPrice: leg.entry_price,
-    sizeUsdt: leg.size_usdt,
-    status: 'filled',
-    triggeredAt: leg.close_time,
-    fillPrice: leg.entry_price,
-    realizedPnlUsdt: manualLegPnl(leg),
-    cycle: 1,
-    leverage: Number.isFinite(leg.leverage) && leg.leverage > 0 ? leg.leverage : undefined,
-  }));
+  economicsOf: (leg: CampaignCounterfactualManualLeg) => ManualLegEconomics = resolveManualLegEconomics,
+): RiskAnchorSynthetic {
+  const entryDirection = params.entry.direction;
+  const syntheticSimLegs: SimulationLeg[] = manualLegs.map((leg, index) => {
+    const held = leg.filled !== false;
+    const economics = economicsOf(leg);
+    return {
+      id: leg.id || `manual-leg-${index + 1}`,
+      role: leg.leg_role as LegRole,
+      kind: leg.leg_role === 'main_open' ? 'main' : leg.leg_role === 'mirror_tp' ? 'mirror_tp' : 'hedge',
+      placedAt: leg.open_time,
+      triggerPrice: economics.anchorPrice,
+      sizeUsdt: economics.exposureUsdt,
+      status: held ? 'filled' : 'never_triggered',
+      triggeredAt: held ? leg.close_time : null,
+      fillPrice: held ? leg.entry_price : null,
+      realizedPnlUsdt: economics.netPnl,
+      cycle: 1,
+      leverage: Number.isFinite(leg.leverage) && leg.leverage > 0 ? leg.leverage : undefined,
+    };
+  });
   const manualBase = {
     ...base,
     final_r_multiple: 0,
     profit_capture_ratio: 0,
-    events,
+    events: [],
     legs_summary: [],
     state_segments: [],
   } as Omit<CampaignCounterfactualResult, 'sop_score'>;
-  return buildSyntheticCampaignAndLegs(params, 'main_dual_hedge_mirror_tp', manualBase, events, syntheticSimLegs);
+  const skeleton = buildSyntheticCampaignAndLegs(params, 'main_dual_hedge_mirror_tp', manualBase, [], syntheticSimLegs);
+
+  const records: TradeRecord[] = [];
+  const legs = skeleton.legs.map((syntheticLeg, index) => {
+    const leg = manualLegs[index];
+    const actual = leg.actual;
+    const held = leg.filled !== false;
+    const economics = economicsOf(leg);
+    const openMs = timeMsOr(leg.open_time, 0);
+    const closeMs = timeMsOr(leg.close_time, openMs);
+    // 开仓时间改了多少，挂出时刻就跟着平移多少。
+    const shiftMs = actual ? openMs - timeMsOr(actual.open_time, openMs) : 0;
+    const placedMs = actual?.placed_time != null ? timeMsOr(actual.placed_time, openMs) + shiftMs : openMs;
+    const hasRecord = held && actual?.has_record === true;
+    const closeIsFallback = !held
+      || (actual?.close_time_fallback === true && sameInstant(leg.close_time, actual.close_time));
+    const direction = actual?.exposure_excluded ? oppositeDirection(entryDirection) : entryDirection;
+    const recordId = hasRecord ? `synthetic-record-${index + 1}` : null;
+    if (recordId) {
+      records.push({
+        id: recordId,
+        // fillId 有值：战役页不再尝试把它当成合并出来的老记录去解混合（开仓价已经是风险锚价）。
+        fillId: actual?.exposure_group ?? recordId,
+        symbol: syntheticLeg.symbol,
+        side: leg.direction === 'short' ? 'SHORT' : 'LONG',
+        type: 'MARKET',
+        action: 'CLOSE',
+        entryPrice: economics.anchorPrice,
+        exitPrice: leg.exit_price,
+        quantity: economics.anchorPrice > 0 ? economics.exposureUsdt / economics.anchorPrice : 0,
+        leverage: syntheticLeg.leverage,
+        pnl: economics.netPnl,
+        fee: 0,
+        slippage: 0,
+        openTime: openMs,
+        closeTime: closeMs,
+        settlementMode: 'usdt',
+      });
+    }
+    return {
+      ...syntheticLeg,
+      direction,
+      order_kind: actual?.order_kind ?? syntheticLeg.order_kind,
+      trade_record_id: recordId,
+      pre_simulated_time: new Date(placedMs).toISOString(),
+      pre_real_time: new Date(placedMs).toISOString(),
+      // 有记录的腿，持仓窗口按记录；没有记录的腿按这一格（战役页 pre_position_size 的位置）计开仓名义。
+      pre_position_size: hasRecord ? leg.size_usdt : economics.exposureUsdt,
+      post_simulated_close_time: closeIsFallback ? null : new Date(closeMs).toISOString(),
+      created_at: new Date(placedMs).toISOString(),
+    } as TradeJournal;
+  });
+  return withRiskContextEvents({ campaign: skeleton.campaign, legs, records }, params.risk_context);
 }
 
 /**
@@ -1160,12 +2265,12 @@ export function deriveCounterfactualRiskAnchors(
   if (isManualLegScenario(params)) {
     const manualLegs = sortedValidManualLegs(params);
     if (manualLegs.length === 0) return { ...ZERO_RISK_ANCHORS };
-    const synthetic = buildManualSynthetic(params, manualLegs, [], {
+    const synthetic = buildManualSynthetic(params, validManualLegsInOrder(params, manualLegs), {
       final_realized_pnl: 0,
       peak_unrealized_pnl: 0,
       peak_drawdown: 0,
     });
-    return riskAnchorsFromSynthetic(synthetic);
+    return riskAnchorsFromSynthetic(synthetic, riskContextReverseOrders(params.risk_context));
   }
 
   const entryMs = new Date(params.entry.time).getTime();
@@ -1456,3 +2561,4 @@ export function computeDeviationCosts(
 export function buildActualSimulationParams(campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[] = []) {
   return inferActualParams(campaign, legs, tradeRecords);
 }
+

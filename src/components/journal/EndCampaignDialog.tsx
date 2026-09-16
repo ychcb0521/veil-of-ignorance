@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { closeCampaign, appendCampaignEvent } from '@/lib/journalApi';
 import { computeSopDeviation, type DecisionAccuracyResult } from '@/lib/campaignAnalysis';
 import { campaignStatusFromRealizedPnl, type CampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import { fromLocalDateTimeInputValue, toLocalDateTimeInputValue } from '@/lib/localDateTimeInput';
 import type { CampaignStatus, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
@@ -61,7 +62,20 @@ export function EndCampaignDialog({
   currentSimulatedTime,
   onClosed,
 }: Props) {
-  const [closedAt, setClosedAt] = useState(() => new Date(currentSimulatedTime).toISOString().slice(0, 16));
+  /**
+   * 结束时间：输入框里是本地墙钟（datetime-local 按本地时间解析）。
+   * 曾经按 UTC 墙钟预填（toISOString().slice(0, 16)）、再按本地时间解析，东八区里存下的 closed_at 比模拟时钟早 8 小时，
+   * 战役页的扫描窗口因此在最后一次平仓之前截断。现在：没动过这一格就写**确切的**模拟时钟
+   * （不截到分钟——否则 closed_at 会比刚刚那次平仓早几秒）；动过才按输入框里的本地时间写。
+   * 预填跟着当前的模拟时钟走，不停在页面首次渲染的那一刻（对话框一直挂在页面上）；每次打开都清掉上次的改动。
+   */
+  const prefilledClosedAt = toLocalDateTimeInputValue(currentSimulatedTime);
+  const [editedClosedAt, setEditedClosedAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) setEditedClosedAt(null);
+  }, [open]);
+  const closedAtEdited = editedClosedAt != null && editedClosedAt !== prefilledClosedAt;
+  const closedAt = closedAtEdited ? editedClosedAt : prefilledClosedAt;
   /**
    * 状态不是选出来的，是算出来的（与批量结束同一条原则）：
    * 已结算的战役预选推出的状态，其余三个都不可点——「放弃」也不例外：
@@ -123,7 +137,7 @@ export function EndCampaignDialog({
 
           <div>
             <div className="text-[11px] text-muted-foreground mb-1">结束时间</div>
-            <Input type="datetime-local" value={closedAt} onChange={(e: ChangeEvent<HTMLInputElement>) => setClosedAt(e.target.value)} className="text-[12px]" />
+            <Input type="datetime-local" value={closedAt} onChange={(e: ChangeEvent<HTMLInputElement>) => setEditedClosedAt(e.target.value)} className="text-[12px]" />
           </div>
 
           <div>
@@ -160,7 +174,10 @@ export function EndCampaignDialog({
             onClick={async () => {
               try {
                 setSubmitting(true);
-                const closedAtIso = new Date(closedAt).toISOString();
+                const simulatedIso = new Date(Number.isFinite(currentSimulatedTime) ? currentSimulatedTime : Date.now()).toISOString();
+                const closedAtIso = closedAtEdited
+                  ? fromLocalDateTimeInputValue(closedAt, simulatedIso)
+                  : simulatedIso;
                 const finalR = totalPlannedMaxLoss > 0 ? finalRealized / totalPlannedMaxLoss : null;
                 await closeCampaign(campaign.id, {
                   status,

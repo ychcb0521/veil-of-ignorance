@@ -107,6 +107,62 @@ describe('buildCounterfactualChangeSummary', () => {
   });
 });
 
+describe('buildCounterfactualChangeSummary：挂单中的保护单', () => {
+  const pending = leg({
+    id: 'hedge-a', leg_role: 'hedge_initial_a', direction: 'short', entry_price: 95, exit_price: 95, filled: false,
+  });
+
+  it('切成「已成交」算一次改动：字段名 filled，逐腿行写「成交 未成交 → 已成交」', () => {
+    const baseline = [leg(), pending];
+    const run = [baseline[0], { ...pending, filled: true }];
+    const summary = buildCounterfactualChangeSummary(baseline, run, run);
+    expect(summary.short).toBe('初始对冲 A 成交');
+    expect(summary.legs).toEqual([{ id: 'hedge-a', role: 'hedge_initial_a', kind: 'edited', changedFields: ['filled'] }]);
+    expect(summary.lines).toEqual(['改 初始对冲 A：成交 未成交 → 已成交']);
+  });
+
+  it('缺省按已成交比：成交过的腿没有 filled 字段，与 filled: true 视为相同；实际成交结果等抄来的字段不算改动', () => {
+    const baseline = [leg()];
+    const run = [{
+      ...baseline[0],
+      filled: true,
+      settlement_mode: 'coin' as const,
+      contract_size_usd: 100,
+      actual: {
+        source: 'records' as const,
+        direction: 'long' as const,
+        open_time: baseline[0].open_time,
+        close_time: baseline[0].close_time,
+        entry_price: 100,
+        exit_price: 110,
+        size_usdt: 1_000,
+        realized_pnl_usdt: 99.45,
+        close_fee_usdt: 0.55,
+        open_fee_usdt: 0.5,
+      },
+    }];
+    expect(buildCounterfactualChangeSummary(baseline, run, run)).toEqual({ short: '未改动', lines: [], legs: [] });
+    // 仍挂着、没切：也不是改动
+    expect(buildCounterfactualChangeSummary([pending], [pending], [{ ...pending }]).legs).toEqual([]);
+  });
+
+  it('两边都还挂着时平仓时间只是兜底，不算改动；切成已成交之后再改平仓时间才算', () => {
+    const moved = { ...pending, close_time: new Date(Date.parse(pending.close_time) + 45 * 60_000).toISOString() };
+    expect(buildCounterfactualChangeSummary([pending], [moved], [moved]).legs).toEqual([]);
+    const filledMoved = { ...moved, filled: true };
+    expect(buildCounterfactualChangeSummary([pending], [filledMoved], [filledMoved]).legs[0].changedFields)
+      .toEqual(['filled', 'close_time']);
+  });
+
+  it('切成已成交之后又改了平仓价：两个字段一起列出', () => {
+    const run = [{ ...pending, filled: true, exit_price: 97 }];
+    const summary = buildCounterfactualChangeSummary([pending], run, run);
+    expect(summary.legs[0].changedFields).toEqual(['filled', 'exit_price']);
+    expect(summary.short).toBe('初始对冲 A 成交·平仓价');
+    expect(summary.lines).toEqual(['改 初始对冲 A：成交 未成交 → 已成交；平仓价 95 → 97']);
+  });
+});
+
 describe('defaultCounterfactualName / formatCounterfactualStamp', () => {
   it('默认名 = 短句 + 空格 + MM-DD HH:mm（本地时区），整体截到 20 字', () => {
     const ranAt = new Date(2026, 8, 16, 14, 30);

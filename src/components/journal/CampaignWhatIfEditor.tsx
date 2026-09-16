@@ -18,10 +18,21 @@ import {
   SELECTED_LEG_VERTICAL_LINE_WIDTH,
   legRoleMarkerLabel,
 } from '@/lib/campaignLegMarkers';
+import { resolveUnfilledLegIds, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import type { LegExitPriceCorrections } from '@/lib/campaignLegExecution';
-import { buildActualSimulationParams, buildPureSopParams, buildManualLegs } from '@/lib/campaignSimulationEngine';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import {
+  adoptBaselineLegFacts,
+  buildActualSimulationParams,
+  buildPureSopParams,
+  buildManualLegs,
+  earlierClosedCuts,
+} from '@/lib/campaignSimulationEngine';
+import { formatCounterfactualStamp } from '@/lib/counterfactualChangeSummary';
+import { fromLocalDateTimeInputValue, toLocalDateTimeInputValue } from '@/lib/localDateTimeInput';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type {
+  CampaignCounterfactualChangeSummary,
   CampaignCounterfactualManualLeg,
   CampaignCounterfactualParams,
   LegRole,
@@ -45,6 +56,10 @@ export interface CampaignWhatIfRunContext {
 export interface CampaignWhatIfLoadLegsRequest {
   nonce: number;
   legs: CampaignCounterfactualManualLeg[];
+  /** 那条分支运行时的 K 线末根（params.run_context.to）：老行里未结算腿的兜底平仓时间按它认。 */
+  savedWindowEnd?: string | null;
+  /** 那条分支运行时的改动摘要（params.change_summary）：没改过平仓时间的腿，平仓时间换成基线当前的值。 */
+  savedChangeSummary?: CampaignCounterfactualChangeSummary | null;
 }
 
 interface Props {
@@ -52,6 +67,8 @@ interface Props {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   legExitPriceCorrections: LegExitPriceCorrections;
+  /** 本地委托快照给出的事实（从未成交的委托 id）：与上方盈亏概览的权益路径读同一份，副本据此标「挂单中」。 */
+  localOrders?: CampaignLocalOrderFacts;
   klines: KlineData[];
   klinesLoading: boolean;
   interval: string;
@@ -96,6 +113,8 @@ const ROLE_OPTIONS: LegRole[] = [
   'standalone',
 ];
 
+const NO_LOCAL_ORDER_FACTS: CampaignLocalOrderFacts = {};
+
 const COUNTERFACTUAL_VIEW_MULTIPLIERS: readonly CampaignViewMultiplier[] = [
   1.1,
   ...CAMPAIGN_VIEW_MULTIPLIERS,
@@ -111,26 +130,14 @@ function roleLabel(role: string) {
   return LEG_ROLE_LABELS[role as LegRole] ?? role;
 }
 
-function toLocalInputValue(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (value: number) => `${value}`.padStart(2, '0');
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function fromLocalInputValue(value: string, fallback: string) {
-  if (!value) return fallback;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
-}
-
 function validTimeMs(value: string) {
   const time = new Date(value).getTime();
   return Number.isFinite(time) ? time : null;
+}
+
+/** 收盘那一组之前平掉的各刀（实际成交里先平掉的部分）；与收盘那一刀同一时刻平掉的刀不算「先平」。 */
+function earlierCuts(leg: CampaignCounterfactualManualLeg) {
+  return earlierClosedCuts(leg.actual);
 }
 
 function nearestKline(klines: KlineData[], time: number): KlineData | null {
@@ -150,6 +157,7 @@ export function CampaignWhatIfEditor({
   legs,
   tradeRecords,
   legExitPriceCorrections,
+  localOrders = NO_LOCAL_ORDER_FACTS,
   klines,
   klinesLoading,
   interval,
@@ -207,25 +215,65 @@ export function CampaignWhatIfEditor({
   const klinesRef = useRef(klines);
   klinesRef.current = klines;
   const klinesReady = klines.length > 0;
+  /**
+   * 「挂单中」（从未成交的保护单）要看战役的事件流才判得准，所以基线要拿到战役行；
+   * 但战役行换对象（「保存备注」只写 deviation_notes）不该冲掉编辑到一半的腿——
+   * 战役走 ref，重置只认判定结果的内容：哪几条腿算挂单、战役何时结束、
+   * 一条腿都结算不了时页面读的那个战役级已实现，这几样真的变了才重建基线。
+   */
+  const campaignRef = useRef(campaign);
+  campaignRef.current = campaign;
+  // 本地委托事实同样走 ref：父组件每次给的对象可能是新的，内容（从未成交的委托 id）变了才重建基线。
+  const localOrdersRef = useRef(localOrders);
+  localOrdersRef.current = localOrders;
+  const unfilledOrderIdsKey = [...(localOrders.unfilledOrderIds ?? [])].sort().join('|');
+  const baselineCampaignKey = useMemo(() => {
+    const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections);
+    const campaignTotal = settlement.basis === 'events' || settlement.basis === 'campaign_summary'
+      ? String(settlement.total)
+      : '';
+    return [
+      [...resolveUnfilledLegIds(campaign, legs, tradeRecords, localOrdersRef.current)].sort().join('|'),
+      campaign.closed_at ?? '',
+      campaignTotal,
+      unfilledOrderIdsKey,
+    ].join('#');
+  }, [campaign, legs, tradeRecords, legExitPriceCorrections, unfilledOrderIdsKey]);
   useEffect(() => {
     setParams(baseDefaults);
     if (baseDefaults) {
-      const baseline = buildManualLegs(baseDefaults, legs, klinesRef.current, tradeRecords, legExitPriceCorrections);
+      const baseline = buildManualLegs(
+        baseDefaults,
+        legs,
+        klinesRef.current,
+        tradeRecords,
+        legExitPriceCorrections,
+        { campaign: campaignRef.current, localOrders: localOrdersRef.current },
+      );
       setBaselineLegs(baseline);
       setManualLegs(baseline.map(leg => ({ ...leg })));
     }
     setSelectedManualLegId(null);
-  }, [baseDefaults, legs, klinesReady, tradeRecords, legExitPriceCorrections]);
+  }, [baseDefaults, legs, klinesReady, tradeRecords, legExitPriceCorrections, baselineCampaignKey]);
 
   // 「载入到 Legs 副本」：legs 走 ref、只认 nonce，避免父组件每次渲染都重新载入。
   const loadLegsRequestRef = useRef(loadLegsRequest);
   loadLegsRequestRef.current = loadLegsRequest;
+  const baselineLegsRef = useRef(baselineLegs);
+  baselineLegsRef.current = baselineLegs;
   const loadLegsNonce = loadLegsRequest?.nonce ?? null;
   useEffect(() => {
     if (loadLegsNonce == null) return;
     const request = loadLegsRequestRef.current;
     if (!request) return;
-    setManualLegs(request.legs.map(leg => ({ ...leg })));
+    // 口径统一之前保存的分支没有实际成交结果与成交状态：按当前基线补上，重跑才与上方盈亏概览同一口径。
+    const baselineById = new Map(baselineLegsRef.current.map(leg => [leg.id, leg]));
+    setManualLegs(request.legs.map(leg => adoptBaselineLegFacts(
+      { ...leg },
+      baselineById.get(leg.id),
+      request.savedWindowEnd ?? null,
+      request.savedChangeSummary ?? null,
+    )));
     setSelectedManualLegId(null);
   }, [loadLegsNonce]);
 
@@ -246,6 +294,8 @@ export function CampaignWhatIfEditor({
     const lastTime = defaultCloseTime(params, klines);
     const lastPrice = klines[klines.length - 1]?.close ?? params.entry.price;
     const id = `manual-${Date.now()}`;
+    // 币本位战役里新增的腿同样按币本位收费（张数 × 面值 × 费率）：结算方式与面值抄原始 Legs 里的币本位腿。
+    const coinTemplate = baselineLegs.find(leg => leg.settlement_mode === 'coin') ?? null;
     setManualLegs(prev => [
       ...prev,
       {
@@ -259,6 +309,9 @@ export function CampaignWhatIfEditor({
         size_usdt: round(params.entry.size_usdt * 0.5, 2),
         leverage: params.entry.leverage,
         enabled: true,
+        ...(coinTemplate
+          ? { settlement_mode: 'coin' as const, contract_size_usd: coinTemplate.contract_size_usd }
+          : {}),
       },
     ]);
     setSelectedManualLegId(id);
@@ -266,7 +319,7 @@ export function CampaignWhatIfEditor({
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
-    const baseline = buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections);
+    const baseline = buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders });
     setBaselineLegs(baseline);
     setManualLegs(baseline.map(leg => ({ ...leg })));
     setParams(baseDefaults);
@@ -503,6 +556,35 @@ export function CampaignWhatIfEditor({
                           <option key={role} value={role}>{roleLabel(role)}</option>
                         ))}
                       </select>
+                      {/* 只有原本从未成交的腿（挂单）才带 filled 字段：它不进持仓与已实现，但仍是定义 L 的止损线。
+                          切到「已成交」即模拟它成交，盈亏按你填的开平价与模拟器费率算。
+                          老行里改过价的挂单载入时写成 filled: true（老引擎当它成交），同样画开关，随时能切回去。 */}
+                      {leg.filled !== undefined && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {leg.filled === false && (
+                            <span className="rounded border border-[#F0B90B]/40 px-1 text-[10px] leading-4 text-[#F0B90B]">
+                              挂单中
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            data-testid={`counterfactual-leg-filled-toggle-${leg.id}`}
+                            aria-pressed={leg.filled !== false}
+                            title={leg.filled === false
+                              ? '这张挂单实际从未成交：不计入持仓与已实现，只作止损线。点一下模拟它成交。'
+                              : '正在模拟这张挂单成交：按开平价与模拟器费率计盈亏。点一下恢复为未成交。'}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedManualLegId(leg.id);
+                              updateManualLeg(leg.id, { filled: leg.filled === false });
+                            }}
+                            className="inline-flex h-4 items-center overflow-hidden rounded border border-border text-[10px] leading-4"
+                          >
+                            <span className={`px-1 ${leg.filled === false ? 'bg-foreground/85 text-background' : 'text-muted-foreground'}`}>未成交</span>
+                            <span className={`px-1 ${leg.filled !== false ? 'bg-foreground/85 text-background' : 'text-muted-foreground'}`}>已成交</span>
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <select
@@ -518,16 +600,16 @@ export function CampaignWhatIfEditor({
                       <Input
                         type="datetime-local"
                         className="h-8 text-[11px]"
-                        value={toLocalInputValue(leg.open_time)}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { open_time: fromLocalInputValue(e.target.value, leg.open_time) })}
+                        value={toLocalDateTimeInputValue(leg.open_time)}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { open_time: fromLocalDateTimeInputValue(e.target.value, leg.open_time) })}
                       />
                     </td>
                     <td className="px-3 py-2">
                       <Input
                         type="datetime-local"
                         className="h-8 text-[11px]"
-                        value={toLocalInputValue(leg.close_time)}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalInputValue(e.target.value, leg.close_time) })}
+                        value={toLocalDateTimeInputValue(leg.close_time)}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalDateTimeInputValue(e.target.value, leg.close_time) })}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -545,6 +627,20 @@ export function CampaignWhatIfEditor({
                         value={leg.exit_price}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { exit_price: Number(e.target.value) })}
                       />
+                      {/* 分几刀平掉的腿：更早平掉的刀维持实际成交、按各自时刻平仓，这里列出来；
+                          平仓价 / 平仓时间两格改的是最后那一刻平掉的全部（含同一时刻一起平掉的刀）。 */}
+                      {earlierCuts(leg).length > 0 && (
+                        <div
+                          data-testid={`counterfactual-leg-cuts-${leg.id}`}
+                          className="mt-1 text-[10px] leading-4 text-muted-foreground"
+                          title="这条腿实际分几刀平掉：更早平掉的刀按实际成交还原，平仓价与平仓时间两格只改最后那一刻平掉的部分。"
+                        >
+                          另有 {earlierCuts(leg).length} 刀先平：
+                          {earlierCuts(leg)
+                            .map(cut => `${formatCounterfactualStamp(cut.close_time)} @ ${cut.exit_price}`)
+                            .join('；')}
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <Input

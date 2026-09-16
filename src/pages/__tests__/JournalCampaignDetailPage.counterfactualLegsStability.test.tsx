@@ -473,7 +473,8 @@ describe('JournalCampaignDetailPage：保存期间再次一键运行', () => {
     renderPage();
     await waitForEditor('105');
 
-    // 第一次运行：主力平仓价改到 111 → 分支已实现 110
+    // 第一次运行：主力平仓价改到 111 → 分支已实现 = 实际 50 + 改动值的钱 10 × (111 − 105) = 110
+    // （改过的腿从实际结算值出发，平仓费按这条记录自己的费率——夹具里这条记录没收平仓费，所以是 0；对冲从未成交，不计）
     fireEvent.change(screen.getByDisplayValue('105'), { target: { value: '111' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
@@ -481,7 +482,7 @@ describe('JournalCampaignDetailPage：保存期间再次一键运行', () => {
     const firstDraft = await screen.findByTestId('counterfactual-draft-panel');
     expect(metricValue(firstDraft, '已实现 P&L')).toBe('110.00 USDT');
 
-    // 点保存（插库悬着），保存期间再改再跑一次 → 分支已实现 220
+    // 点保存（插库悬着），保存期间再改再跑一次 → 分支已实现 = 50 + 10 × (122 − 105) = 220
     await act(async () => {
       fireEvent.click(screen.getByTestId('counterfactual-save'));
     });
@@ -503,6 +504,7 @@ describe('JournalCampaignDetailPage：保存期间再次一键运行', () => {
 
     // 落库的是第一份（110），页面上留着的是第二份（220），名字也没被清空
     expect(createCounterfactualMock.mock.calls[0][0].result.final_realized_pnl).toBeCloseTo(110, 6);
+    expect(createCounterfactualMock.mock.calls[0][0].result.fees_total).toBe(0);
     const survivingDraft = screen.getByTestId('counterfactual-draft-panel');
     expect(metricValue(survivingDraft, '已实现 P&L')).toBe('220.00 USDT');
     expect((screen.getByTestId('counterfactual-draft-name') as HTMLInputElement).value).not.toBe('');
