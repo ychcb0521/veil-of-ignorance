@@ -14,6 +14,7 @@ import {
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 const campaign = {
   id: 'campaign-1',
@@ -696,7 +697,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
     expect(texts).toContain('+127.02%');
   });
 
-  it('与页面同一个 helper：多单涨绿、空单跌红、未平仓「—」、按校正后的平仓价算', () => {
+  it('与页面同一个 helper、同一个方向：多单涨绿、空单跌绿、空单涨红、未平仓「—」、按校正后的平仓价算', () => {
     const rows = buildCampaignLegsExportRows({
       ...input(),
       legs: [
@@ -704,6 +705,8 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
         leg({ id: 'short', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'short', pre_entry_price: 10, post_exit_price_snapshot: 9.659, post_simulated_close_time: T('09:00') }),
         leg({ id: 'open', leg_sequence: 3, leg_role: 'main_add_1', pre_entry_price: 2.8717 }),
         leg({ id: 'corrected', leg_sequence: 4, leg_role: 'reentry_main', pre_entry_price: 0.1, post_exit_price_snapshot: 0.5, post_simulated_close_time: T('09:00') }),
+        // ORDIUSDT 的滚动对冲：空单，价格涨了 3.27%、这条腿亏了——不能印成绿色正数
+        leg({ id: 'ordi-hedge', leg_sequence: 5, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short', pre_entry_price: 6.3132, post_exit_price_snapshot: 6.5194, post_simulated_close_time: T('09:00') }),
       ],
       reverseHedgeOrders: [],
       legExitPriceCorrections: {
@@ -713,7 +716,8 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
     const cell = (id: string) => rows.find(row => row.legId === id)!.cells[PRICE_CHANGE_COL];
 
     expect(cell('long')).toEqual([{ text: '+127.02%', color: '#0ECB81' }]);
-    expect(cell('short')).toEqual([{ text: '-3.41%', color: '#F6465D' }]);
+    expect(cell('short')).toEqual([{ text: '+3.41%', color: '#0ECB81' }]);
+    expect(cell('ordi-hedge')).toEqual([{ text: '-3.27%', color: '#F6465D' }]);
     expect(cell('open')).toEqual([{ text: '—', color: '#848E9C' }]);
     expect(cell('corrected')[0].text).toBe('+100.00%');
     // 左边一格就是平仓价：同一对价
@@ -721,6 +725,26 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
     expect(rows.find(row => row.legId === 'long')!.cells[PRICE_CHANGE_COL - 1][0].text).toBe('6.5194');
     // 放得下，不折行
     expect(rows.find(row => row.legId === 'long')!.wrapped[PRICE_CHANGE_COL]).toHaveLength(1);
+  });
+
+  it('一个仓位分几刀平掉：平仓价只取最后一刀、盈亏是各刀合计——与页面一样，两格符号可能不同', () => {
+    const slice = (id: string, exitPrice: number, pnl: number, closeTime: string): TradeRecord => ({
+      id, symbol: 'BTCUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', positionId: 'pos-1', fillId: 'pos-1',
+      entryPrice: 100, exitPrice, quantity: 10, leverage: 10, pnl, fee: 0, slippage: 0,
+      openTime: Date.parse(T('01:00')), closeTime: Date.parse(closeTime),
+    });
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [leg({ id: 'sliced', trade_record_id: 'pos-1', pre_entry_price: 100 })],
+      tradeRecords: [slice('c1', 110, 100, T('05:00')), slice('c2', 108, 80, T('06:00')), slice('c3', 98, -20, T('07:00'))],
+      reverseHedgeOrders: [],
+    });
+    const row = rows.find(r => r.legId === 'sliced')!;
+    expect(row.cells[PRICE_CHANGE_COL - 1][0].text).toBe('98.0000');
+    expect(row.cells[PRICE_CHANGE_COL]).toEqual([{ text: '-2.00%', color: '#F6465D' }]);
+    // 「贡献 / 盈亏」：三刀合计 +160，绿
+    expect(row.cells[3][0].color).toBe('#0ECB81');
+    expect(row.cells[3][1].text).toBe('+160.00');
   });
 
   it('阶段子行各算各的，合计行留空；每一行格子数都与表头列数一致', () => {
@@ -746,10 +770,39 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
       [{ text: '+30.35%', color: '#0ECB81' }],
     ]);
     expect(rows.find(row => row.legId === 'main')!.cells[PRICE_CHANGE_COL][0].text).toBe('+101.26%');
+    // 对冲腿是空单：0.05 → 0.052 按方向计是 -4.00%
+    expect(rows.find(row => row.legId === 'hedge-roll')!.cells[PRICE_CHANGE_COL]).toEqual([{ text: '-4.00%', color: '#F6465D' }]);
     const total = rows.at(-1)!;
     expect(total.kind).toBe('total');
     expect(total.cells[PRICE_CHANGE_COL]).toEqual([{ text: '' }]);
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([12]));
+  });
+
+  it('主力是空单时，阶段子行按主力方向翻号：同一组起止价，正负与多单相反', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        leg({
+          id: 'main', direction: 'short', pre_entry_price: 0.0336792, pre_position_size: 94300, source: 'retroactive_from_record',
+          post_exit_price_snapshot: 0.0677819, post_simulated_close_time: T('09:00'), post_realized_pnl: -95439.77,
+        }),
+        leg({
+          id: 'hedge-roll', leg_sequence: 2, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'long',
+          source: 'retroactive_from_record', pre_simulated_time: T('03:00'), pre_entry_price: 0.05, pre_position_size: 50000,
+          post_exit_price_snapshot: 0.052, post_simulated_close_time: T('05:00'), post_realized_pnl: 2000,
+        }),
+      ],
+      reverseHedgeOrders: [],
+      initialExpectedMaxLoss: 20000,
+    });
+    const phases = rows.filter(row => row.kind === 'phase');
+    expect(phases.map(row => row.cells[PRICE_CHANGE_COL])).toEqual([
+      [{ text: '-54.40%', color: '#F6465D' }],
+      [{ text: '-30.35%', color: '#F6465D' }],
+    ]);
+    expect(rows.find(row => row.legId === 'main')!.cells[PRICE_CHANGE_COL]).toEqual([{ text: '-101.26%', color: '#F6465D' }]);
+    // 对冲腿这回是多单：0.05 → 0.052 是 +4.00%
+    expect(rows.find(row => row.legId === 'hedge-roll')!.cells[PRICE_CHANGE_COL]).toEqual([{ text: '+4.00%', color: '#0ECB81' }]);
   });
 
   it('千倍以上的涨跌幅也一行放下：百分数不被拆成「+199900.00」与「%」两截', () => {

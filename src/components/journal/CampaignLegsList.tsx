@@ -133,11 +133,17 @@ const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_116px_1
  */
 const LEGS_MIN_WIDTH = 'min-w-[1608px]';
 
-/** 「涨跌幅」列表头的说明：它是标的价格的变化，不是这条腿的盈亏。 */
-const PRICE_CHANGE_COLUMN_HINT = '涨跌幅 =（平仓价 − 开仓价）÷ 开仓价：开仓价到平仓价之间标的本身的价格变化，不按方向翻转，不是这条腿的盈亏。'
-  + '多单为正才赚，空单为负才是赚；盈亏看「贡献 / 盈亏」列。阶段子行按该阶段自己的起止价计算。';
+/**
+ * 「涨跌幅」列表头的说明：按这条腿的方向计，正数即在价格上占优。
+ * 「与盈亏同号」只对所示的这一对开平价成立：一个仓位分几刀平掉时，平仓价只显示最后一刀（buildTradeRecordLookup
+ * 把仓位折到最晚那条记录），盈亏却是各刀合计，两格可以一红一绿——所以要明说，不许诺无条件同号。
+ */
+const PRICE_CHANGE_COLUMN_HINT = '按这条腿的方向计——多单 =（平仓价 − 开仓价）÷ 开仓价，空单 =（开仓价 − 平仓价）÷ 开仓价；'
+  + '正数即这条腿在价格上占优，按所示的这一对开平价看与「贡献 / 盈亏」同号'
+  + '（不计手续费；一个仓位分几刀平掉时平仓价取最后一刀、盈亏是各刀合计，符号可能不同）；'
+  + '阶段子行按主力方向、各自起止价计算。';
 
-/** 涨跌幅的字色：绿涨红跌；取整为 0 与缺值都是中性淡色。alpha 用于阶段子行的 /90。 */
+/** 涨跌幅的字色：正绿负红（按方向计，正即占优）；取整为 0 与缺值都是中性淡色。alpha 用于阶段子行的 /90。 */
 function priceChangeTone(pct: number | null, muted = false): string {
   const direction = legPriceChangeDirection(pct);
   if (direction === 'up') return muted ? 'text-[#0ECB81]/90' : 'text-[#0ECB81]';
@@ -404,8 +410,10 @@ export function CampaignLegsList({
                 ? leg.pre_position_size / entryPriceValue
                 : null;
               const exitPriceValue = execution.exitPrice;
-              // 与左边两格同一对价（含 K 线平仓价校正）：三个数永远对得上
-              const priceChangePct = computeLegPriceChangePct(entryPriceValue, exitPriceValue);
+              // 与左边两格同一对价（含 K 线平仓价校正）、按这条腿的方向计：三个数永远对得上。
+              // 阶段子行沿用这个方向。
+              const priceChangeSide = leg.direction === 'short' ? 'short' : 'long';
+              const priceChangePct = computeLegPriceChangePct(entryPriceValue, exitPriceValue, priceChangeSide);
               /**
                * 强平记录的价格不在平仓时刻那根 K 线里，说明引擎用了一个不属于那一刻的价去判强平
                * （旧版会拿比仓位还早的价）。这不是普通的价格误差：按 K 线改价只会把一次误判的强平
@@ -516,7 +524,8 @@ export function CampaignLegsList({
                       <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
                     )}
                   </div>
-                  {/* 涨跌幅：标的从开仓价走到平仓价的百分比，不按方向翻转——空单为负才是赚。
+                  {/* 涨跌幅：开仓价走到平仓价的百分比，按这条腿的方向计——空单价格跌了才是正数，
+                      按所示这一对开平价看与盈亏同号（分几刀平掉时盈亏是各刀合计，可能不同号）。
                       与开平价同字号，不抢 Δb 的主角位。 */}
                   <div
                     data-testid={`leg-price-change-${leg.id}`}
@@ -760,8 +769,8 @@ export function CampaignLegsList({
                           <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
                           {(() => {
-                            // 阶段自己的起止价各算各的：切段处的边界价就是对冲平仓那一刻的市价
-                            const phasePriceChangePct = computeLegPriceChangePct(phase.startPrice, phase.endPrice);
+                            // 阶段自己的起止价各算各的、方向沿用主力：切段处的边界价就是对冲平仓那一刻的市价
+                            const phasePriceChangePct = computeLegPriceChangePct(phase.startPrice, phase.endPrice, priceChangeSide);
                             return (
                               <div
                                 data-testid={`leg-phase-price-change-${leg.id}-${phase.index}`}
