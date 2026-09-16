@@ -231,21 +231,21 @@ describe('Legs 列表的「涨跌幅」列', () => {
     it('合计行这一格留空；表头、腿行、阶段子行、合计行格子数一致', () => {
       renderList(phaseLegs);
       const titles = headerTitles();
-      expect(titles).toHaveLength(13);
+      expect(titles).toHaveLength(14);
       const column = titles.indexOf('涨跌幅');
       const total = screen.getByTestId('legs-total-row');
-      expect(total.children).toHaveLength(13);
+      expect(total.children).toHaveLength(14);
       expect(total.children[column].textContent).toBe('');
       expect(total.children[column].children).toHaveLength(0);
       for (const id of ['main', 'hedge-roll']) {
         const row = screen.getByTestId(`leg-price-change-${id}`).parentElement!;
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-price-change-${id}`));
       }
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
       expect(phaseRows.length).toBeGreaterThanOrEqual(2);
       phaseRows.forEach((row, index) => {
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-phase-price-change-main-${index + 1}`));
       });
     });

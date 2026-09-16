@@ -28,8 +28,8 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(13);
-    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '加仓校验', '手续费', '委托', '操作']) {
+    expect(columnCount).toBe(14);
+    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '占比', '加仓校验', '手续费', '委托', '操作']) {
       expect(s).toContain(`>${title}</div>`);
     }
   });
@@ -42,6 +42,8 @@ describe('Legs 表栅格', () => {
     expect(at('Δb')).toBeLessThan(at('开仓价'));       // 结论在前，"怎么来的"在后
     expect(at('平仓价')).toBeLessThan(at('涨跌幅'));    // 涨跌幅紧贴在开平价右边——它就是这两个数算出来的
     expect(at('涨跌幅')).toBeLessThan(at('币量 / 仓位'));
+    expect(at('币量 / 仓位')).toBeLessThan(at('占比'));       // 占比紧贴在币量 / 仓位右边——它就是这一格算出来的
+    expect(at('占比')).toBeLessThan(at('加仓校验'));
     expect(at('币量 / 仓位')).toBeLessThan(at('加仓校验'));   // 加仓校验紧跟币量——X 就是它要读的数
     expect(at('加仓校验')).toBeLessThan(at('手续费'));
     expect(at('手续费')).toBeLessThan(at('委托'));
@@ -75,19 +77,31 @@ describe('Legs 表栅格', () => {
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
     const tracks = grid.split('_');
-    expect(tracks).toHaveLength(13);
+    expect(tracks).toHaveLength(14);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
-    expect(tracks[11]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
+    expect(tracks[12]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
     expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
   it('【用户要求】手续费列放得下「开 82,328 · 平 104,091 ASTER」这类最长的拆分行', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
-    const feeTrack = Number.parseInt(grid.split('_')[10], 10);
+    const feeTrack = Number.parseInt(grid.split('_')[11], 10);
     expect(feeTrack).toBeGreaterThanOrEqual(148);
     // 单元格必须带 min-w-0：网格项默认 min-width:auto，长子行会顶破定宽轨道、压到左边一列上
     const cell = /data-testid=\{`leg-fees-\$\{leg\.id\}`\}[\s\S]{0,400}?className="([^"]+)"/.exec(src())?.[1] ?? '';
     expect(cell).toContain('min-w-0');
+  });
+
+  it('【用户要求】「占比」紧跟「币量 / 仓位」、约 76px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
+    const s = src();
+    const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
+    expect(tracks[8]).toBe('116px');   // 币量 / 仓位
+    expect(tracks[9]).toBe('76px');    // 占比：放得下「100.0%」
+    // minmax(216px,1fr) 按下限计
+    const trackSum = tracks.reduce((sum, track) => sum + Number.parseInt(track.replace(/^minmax\(/, ''), 10), 0);
+    const minWidth = Number(/const LEGS_MIN_WIDTH = 'min-w-\[(\d+)px\]'/.exec(s)?.[1]);
+    expect(minWidth).toBe(trackSum + 10 * (tracks.length - 1) + 24);
+    expect(minWidth).toBe(1694);
   });
 
   it('操作列只留两个图标按钮（标到盘面 / 解除），中文标签进 title 而不是渲染成文字', () => {

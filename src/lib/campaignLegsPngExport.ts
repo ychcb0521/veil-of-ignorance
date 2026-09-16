@@ -22,6 +22,13 @@ import {
   legPriceChangeDirection,
 } from '@/lib/legPriceChange';
 import {
+  computeLegPositionShares,
+  formatLegCoinQuantity,
+  formatLegNotional,
+  formatLegPositionSharePct,
+  formatLegPositionShareTotal,
+} from '@/lib/legPositionShare';
+import {
   evaluateCampaignAddSizing,
   formatAddSizingCoinQuantity,
   formatAddSizingNotional,
@@ -111,8 +118,11 @@ const COLUMNS = [
   { title: '平仓价', width: 118 },
   // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
   { title: '涨跌幅', width: 120 },
-  // 150：十亿级币量带两位小数（1,171,163,720.54）要一行放下——拆成两截的数字比挤一点更难读
-  { title: '币量 / 仓位', width: 150 },
+  // 160：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
+  // （百亿级 11,981,041,835.39，17 个字符）也得一行放下——拆成两截的数字比挤一点更难读
+  { title: '币量 / 仓位', width: 160 },
+  // 96：留 76px 文字宽，「100.0%」及合计行一行放下
+  { title: '占比', width: 96 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
@@ -228,18 +238,21 @@ function campaignLegCounts(legs: TradeJournal[]) {
   return { main, hedge, tp, other: Math.max(0, legs.length - main - hedge - tp) };
 }
 
-/** closed 是常态：状态不占一列，导出图同样只在未平仓时才写它（与页面同源）。 */
+/**
+ * closed 是常态：状态不占一列，导出图同样只在未平仓时才写它（与页面同源）。
+ * pending 即「挂单中」——对冲 / 镜像腿还没有成交或平仓记录，「占比」列不把它算进分母（与页面同源）。
+ */
 function statusForLeg(
   leg: TradeJournal,
   record: TradeRecord | null,
-): { label: string; color: string; closed: boolean } {
+): { label: string; color: string; closed: boolean; pending: boolean } {
   if (record || leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
-    return { label: '已平仓', color: '#0ECB81', closed: true };
+    return { label: '已平仓', color: '#0ECB81', closed: true, pending: false };
   }
   if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
-    return { label: '挂单中', color: '#D89B00', closed: false };
+    return { label: '挂单中', color: '#D89B00', closed: false, pending: true };
   }
-  return { label: '进行中', color: '#848E9C', closed: false };
+  return { label: '进行中', color: '#848E9C', closed: false, pending: false };
 }
 
 /**
@@ -412,6 +425,22 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     reverseHedgeOrders: input.reverseHedgeOrders,
   });
 
+  // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
+  // 格子里的数就是分母里加的那个数；状态为「挂单中」的腿不进分母。
+  const positionShares = computeLegPositionShares(input.legs.map(leg => {
+    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
+    const coinQty = leg.pre_position_size != null && entryPrice != null && entryPrice > 0
+      ? leg.pre_position_size / entryPrice
+      : null;
+    return {
+      legId: leg.id,
+      coinQty,
+      notional: leg.pre_position_size ?? null,
+      counted: !statusForLeg(leg, record).pending,
+    };
+  }));
+
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
@@ -426,6 +455,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     const operationLabel = fmtClock(journalOperationTime(leg, record));
     const entryPriceValue = execution.entryPrice;
     const exitPriceValue = execution.exitPrice;
+    const position = positionShares.byLeg.get(leg.id);
     const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
       ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
       : null;
@@ -516,16 +546,15 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       // 涨跌幅：开仓价 → 平仓价的价格变化，按这条腿的方向计，与左边两格同一对价
       priceChangeCell(entryPriceValue, exitPriceValue, leg.direction === 'short' ? 'short' : 'long', '#5F6B7A'),
       // 与页面同源：币量在上、名义在下——加仓公式里的 X 是币量，名义只是它乘开仓价的结果
-      (() => {
-        const notionalText = leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—';
-        const coinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
-          ? leg.pre_position_size / entryPriceValue
-          : null;
-        return [
-          { text: coinQty == null ? '—' : coinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }) },
-          { text: notionalText, color: '#848E9C' },
-        ];
-      })(),
+      [
+        { text: formatLegCoinQuantity(position?.coinQty) },
+        { text: formatLegNotional(position?.notional), color: '#848E9C' },
+      ],
+      // 占比：与左边一格同构同色——上行币量占比、下行名义仓位占比；中性色，挂单中的腿两行都是「—」
+      [
+        { text: formatLegPositionSharePct(position?.coinSharePct) },
+        { text: formatLegPositionSharePct(position?.notionalSharePct), color: '#848E9C' },
+      ],
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -613,6 +642,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -651,11 +681,20 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       bold: true,
       size: 16,
     }],
-    // 开仓价 / 平仓价 / 涨跌幅 / 币量 / 加仓校验：涨跌幅跨腿没有意义，与页面一样留空
+    // 开仓价 / 平仓价 / 涨跌幅：涨跌幅跨腿没有意义，与页面一样留空
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
-    [{ text: '' }],
+    // 币量 / 仓位：「占比」的两个分母（挂单中的腿不计入）；占比：分母为正即 100.0%。与页面同源，淡色
+    [
+      { text: formatLegCoinQuantity(positionShares.totalCoins), color: '#5F6B7A' },
+      { text: formatLegNotional(positionShares.totalNotional), color: '#848E9C' },
+    ],
+    [
+      { text: formatLegPositionShareTotal(positionShares.totalCoins), color: '#5F6B7A' },
+      { text: formatLegPositionShareTotal(positionShares.totalNotional), color: '#848E9C' },
+    ],
+    // 加仓校验
     [{ text: '' }],
     feeTotals == null
       ? [{ text: '—', color: '#A3ABB8' }]

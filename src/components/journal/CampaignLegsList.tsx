@@ -14,6 +14,13 @@ import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import { computeLegPriceChangePct, formatLegPriceChangePct, legPriceChangeDirection } from '@/lib/legPriceChange';
+import {
+  computeLegPositionShares,
+  formatLegCoinQuantity,
+  formatLegNotional,
+  formatLegPositionSharePct,
+  formatLegPositionShareTotal,
+} from '@/lib/legPositionShare';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
   describeAddSizingVerdict,
@@ -41,16 +48,19 @@ interface Props {
   initialExpectedMaxLoss?: number | null;
 }
 
-/** closed 是常态：状态不再占一列，只有**不是**已平仓时才在角色旁标一枚小标签。 */
+/**
+ * closed 是常态：状态不再占一列，只有**不是**已平仓时才在角色旁标一枚小标签。
+ * pending 即「挂单中」——还没成交、不是仓位，「占比」列据此把它排除在分母之外。
+ */
 function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
-  if (record) return { label: '已平仓', className: 'text-[#0ECB81]', closed: true };
+  if (record) return { label: '已平仓', className: 'text-[#0ECB81]', closed: true, pending: false };
   if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
-    return { label: '已平仓', className: 'text-[#0ECB81]', closed: true };
+    return { label: '已平仓', className: 'text-[#0ECB81]', closed: true, pending: false };
   }
   if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
-    return { label: '挂单中', className: 'text-[#F0B90B]', closed: false };
+    return { label: '挂单中', className: 'text-[#F0B90B]', closed: false, pending: true };
   }
-  return { label: '进行中', className: 'text-muted-foreground', closed: false };
+  return { label: '进行中', className: 'text-muted-foreground', closed: false, pending: false };
 }
 
 function fmtClock(value: number | string | null | undefined): string {
@@ -93,7 +103,7 @@ function fmtPrice(value: number | null | undefined): string {
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
  * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
- * 扫视最先停留的那一段；开平价、涨跌幅、币量、手续费这些"怎么来的"排在后面；委托与操作收在右端。
+ * 扫视最先停留的那一段；开平价、涨跌幅、币量、占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
  * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时才在角色旁标一枚小标签。
 
  *
@@ -125,13 +135,13 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_116px_116px_148px_minmax(216px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_116px_76px_116px_148px_minmax(216px,1fr)_64px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
  * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1608px]';
+const LEGS_MIN_WIDTH = 'min-w-[1694px]';
 
 /**
  * 「涨跌幅」列表头的说明：按这条腿的方向计，正数即在价格上占优。
@@ -150,6 +160,10 @@ function priceChangeTone(pct: number | null, muted = false): string {
   if (direction === 'down') return muted ? 'text-[#F6465D]/90' : 'text-[#F6465D]';
   return muted ? '' : 'text-muted-foreground';
 }
+
+/** 「占比」列表头的说明：两个分母各算各的，挂单中的腿不进合计。 */
+const POSITION_SHARE_COLUMN_HINT = '上行：本腿币量占本场各腿币量合计的百分比；下行：本腿名义仓位占本场各腿名义仓位合计的百分比。'
+  + '状态为「挂单中」的对冲 / 镜像腿（还没有成交或平仓记录）不计入合计，显示「—」。合计行给出两个分母。';
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
 const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
@@ -363,6 +377,23 @@ export function CampaignLegsList({
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
+  // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
+  // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定沿用角色旁那枚状态标签的规则，两处永远一致。与导出 PNG 同一个 helper。
+  const positionShares = useMemo(() => computeLegPositionShares(legs.map(leg => {
+    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const entryPriceValue = resolveLegExecution(leg, record, legExitPriceCorrections).entryPrice;
+    // 币量 = 名义 ÷ 开仓价。名义为 0 或价格缺失时不猜，显示空。
+    const legCoinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
+      ? leg.pre_position_size / entryPriceValue
+      : null;
+    return {
+      legId: leg.id,
+      coinQty: legCoinQty,
+      notional: leg.pre_position_size ?? null,
+      counted: !statusForLeg(leg, record).pending,
+    };
+  })), [legs, recordMap, legExitPriceCorrections]);
+
   // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
     () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
@@ -390,6 +421,7 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
+            <div className="text-right" title={POSITION_SHARE_COLUMN_HINT}>占比</div>
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
@@ -405,10 +437,9 @@ export function CampaignLegsList({
               const closeLabel = fmtClock(execution.closeTime);
               const operationLabel = fmtClock(journalOperationTime(leg, record));
               const entryPriceValue = execution.entryPrice;
-              // 币量 = 名义 ÷ 开仓价。名义为 0 或价格缺失时不猜，显示空。
-              const legCoinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
-                ? leg.pre_position_size / entryPriceValue
-                : null;
+              // 币量与占比取自同一份（positionShares）：格子里的数就是分母里加的那个数
+              const position = positionShares.byLeg.get(leg.id) ?? null;
+              const legCoinQty = position?.coinQty ?? null;
               const exitPriceValue = execution.exitPrice;
               // 与左边两格同一对价（含 K 线平仓价校正）、按这条腿的方向计：三个数永远对得上。
               // 阶段子行沿用这个方向。
@@ -541,9 +572,20 @@ export function CampaignLegsList({
                       ? `币量 = 名义 ÷ 开仓价 = ${leg.pre_position_size?.toFixed(2)} ÷ ${fmtPrice(entryPriceValue)}`
                       : '缺开仓价时不猜币量'}
                   >
-                    <div>{legCoinQty != null ? legCoinQty.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '—'}</div>
+                    <div>{formatLegCoinQuantity(legCoinQty)}</div>
                     <div className="text-[10px] text-muted-foreground">
-                      {leg.pre_position_size != null ? leg.pre_position_size.toFixed(2) : '—'}
+                      {formatLegNotional(position?.notional)}
+                    </div>
+                  </div>
+                  {/* 占比：与左边一格同构、同色——上行币量占比，下行名义仓位占比。
+                      中性色，不上红绿：这是仓位分布，不是盈亏。挂单中的腿不进分母，两行都是「—」。 */}
+                  <div
+                    data-testid={`leg-position-share-${leg.id}`}
+                    className="text-right tabular-nums leading-snug"
+                  >
+                    <div>{formatLegPositionSharePct(position?.coinSharePct)}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {formatLegPositionSharePct(position?.notionalSharePct)}
                     </div>
                   </div>
                   {(() => {
@@ -785,6 +827,7 @@ export function CampaignLegsList({
                           <div />
                           <div />
                           <div />
+                          <div />
                         </div>
                       );
                     })}
@@ -814,9 +857,26 @@ export function CampaignLegsList({
                   {formatDeltaB(totalDeltaB)}
                 </span>
               </div>
-              {/* 开仓价 / 平仓价 / 涨跌幅 / 币量 / 加仓校验。
-                  涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
-              <div /><div /><div /><div /><div />
+              {/* 开仓价 / 平仓价 / 涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
+              <div /><div /><div />
+              {/* 币量 / 仓位：写出「占比」的两个分母（Σ币量 / Σ名义仓位，挂单中的腿不计入）；
+                  占比：分母为正即 100.0%。加仓校验留空。 */}
+              <div
+                data-testid="legs-total-position"
+                title="占比的两个分母：上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）"
+                className="text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
+              >
+                <div>{formatLegCoinQuantity(positionShares.totalCoins)}</div>
+                <div className="text-[10px] text-muted-foreground">{formatLegNotional(positionShares.totalNotional)}</div>
+              </div>
+              <div
+                data-testid="legs-total-position-share"
+                className="text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
+              >
+                <div>{formatLegPositionShareTotal(positionShares.totalCoins)}</div>
+                <div className="text-[10px] text-muted-foreground">{formatLegPositionShareTotal(positionShares.totalNotional)}</div>
+              </div>
+              <div />
               <div
                 data-testid="legs-total-fees"
                 title={feeTotals?.totalCoin != null
