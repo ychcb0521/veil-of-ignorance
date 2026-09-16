@@ -1,22 +1,20 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Play, Pause, Square, Clock, BookmarkX,
-  Database, ChevronDown, Upload, Download, Plus, Trash2, X, ArrowRightCircle, CheckCircle2,
-  AlertCircle, Loader2,
+  Database, ChevronDown, Upload, Download, Plus, Trash2,
+  Loader2,
 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
-  normalizeSignalQuality,
   setSignalQuality,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
-import { SignalQualityStars } from '@/components/SignalQualityStars';
+import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
   preflightSignalJumpIssues,
-  signalJumpIssueLabel,
   type SignalJumpResult,
 } from '@/lib/signalJumpDiagnostics';
 import type { TimeMachineStatus } from '@/hooks/useTimeSimulator';
@@ -24,10 +22,7 @@ import type { TimeMode } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { listAllCampaigns } from '@/lib/journalApi';
-import {
-  buildCampaignDayIndex, buildTradedDayIndex,
-  hasCampaignOnSignalDay, hasTradeOnSignalDay,
-} from '@/lib/signalCampaignIndex';
+import { buildCampaignDayIndex, buildTradedDayIndex } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 import { SIMULATION_SPEED_OPTIONS } from '@/lib/simulationSpeeds';
 
@@ -121,8 +116,17 @@ export function TimeControl({
     total: number;
   } | null>(null);
   const completedSignalAuditKeyRef = useRef<string | null>(null);
-  const signalsForAuditRef = useRef(signals);
-  signalsForAuditRef.current = signals;
+  /**
+   * 行上的三个回调（跳转 / 删除 / 打分）必须**身份恒定**：
+   * TimeControl 每跳一格模拟时间就重渲染一次（时钟、倍速、状态都挂在它身上），
+   * 回调一换身份，memo 化的信号列表立刻失效，回放期间每跳一格都要重渲染整张表。
+   * 所以凡是会变的东西一律走 ref，useCallback 的依赖保持为空。
+   */
+  const signalsRef = useRef(signals);
+  signalsRef.current = signals;
+  const jumpingSignalIdRef = useRef<string | null>(null);
+  const jumpPropsRef = useRef({ onJumpToSignal, onSymbolChange });
+  jumpPropsRef.current = { onJumpToSignal, onSymbolChange };
 
   useEffect(() => { saveSignals(signals); }, [signals]);
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
@@ -140,7 +144,7 @@ export function TimeControl({
   }, [signalJumpInterval, signalJumpIntervalMs, signals]);
 
   useEffect(() => {
-    const auditSignals = signalsForAuditRef.current;
+    const auditSignals = signalsRef.current;
     if (auditSignals.length === 0) {
       setSignalAuditProgress(null);
       return;
@@ -221,6 +225,12 @@ export function TimeControl({
     const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
     return q ? byMonth.filter(s => s.symbol.includes(q)) : byMonth;
   }, [signals, query, monthFilter, sortKey, sortDir]);
+  /**
+   * 「这一批行是按什么口径排出来的」的指纹，交给列表决定何时把滚动条拨回顶部。
+   * 刻意不看 sortedFiltered 的身份：打分和删除也会换掉那个数组，
+   * 但那两种情况下把人弹回顶部只会让他丢失刚才看到哪儿了。
+   */
+  const listResetKey = `${sortKey}|${sortDir}|${monthFilter}|${query.trim().toUpperCase()}`;
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
   // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
   // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
@@ -270,14 +280,19 @@ export function TimeControl({
     e.target.value = '';
   };
 
-  const handleDeleteSignal = (id: string) => setSignals(prev => prev.filter(s => s.id !== id));
+  const handleDeleteSignal = useCallback(
+    (id: string) => setSignals(prev => prev.filter(s => s.id !== id)),
+    [],
+  );
   /**
    * 打分。写回 signals 之后由既有的 `useEffect(() => saveSignals(signals))` 落盘，
    * 并顺着 saveSignals 推到云端——所以「最新评分覆盖旧的」是自动成立的，
    * 不需要另开一条保存路径。
    */
-  const handleRateSignal = (id: string, next: number) =>
-    setSignals(prev => setSignalQuality(prev, id, next));
+  const handleRateSignal = useCallback(
+    (id: string, next: number) => setSignals(prev => setSignalQuality(prev, id, next)),
+    [],
+  );
   const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
 
   // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。
@@ -297,17 +312,22 @@ export function TimeControl({
     toast.success(`已导出 ${signals.length} 条信号`);
   };
 
-  const handleJumpSignal = async (sig: TradeSignal) => {
-    if (!onJumpToSignal) {
-      onSymbolChange?.(sig.symbol);
+  // 只吃一个 id：整条信号由 ref 里的最新 signals 取，回调才能恒定。
+  const handleJumpSignal = useCallback(async (id: string) => {
+    const sig = signalsRef.current.find(item => item.id === id);
+    if (!sig) return;
+    const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
+    if (!jumpTo) {
+      changeSymbol?.(sig.symbol);
       // 选定标的即进入下一阶段，信号库没有继续停留的必要——与跳转成功后一致收起
       setSignalLibOpen(false);
       return;
     }
-    if (jumpingSignalId) return;
+    if (jumpingSignalIdRef.current) return;
+    jumpingSignalIdRef.current = sig.id;
     setJumpingSignalId(sig.id);
     try {
-      const result = await onJumpToSignal(sig.symbol, sig.timeMs);
+      const result = await jumpTo(sig.symbol, sig.timeMs);
       if (result.ok) {
         if (sig.jumpIssue) {
           setSignals(prev => prev.map(item =>
@@ -321,9 +341,10 @@ export function TimeControl({
           item.id === sig.id ? { ...item, jumpIssue: result.fatalIssue } : item));
       }
     } finally {
+      jumpingSignalIdRef.current = null;
       setJumpingSignalId(null);
     }
-  };
+  }, []);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -587,96 +608,18 @@ export function TimeControl({
                       于是兜底区把所有余量吃掉、评分被顶到最右边去了。 */}
                   <span aria-hidden />
                 </div>
-                <div className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain">
-                {sortedFiltered.map(sig => {
-                  const hasDayCampaign = hasCampaignOnSignalDay(campaignDayIndex, sig);
-                  const tradedOnSignalDay = hasTradeOnSignalDay(tradedDayIndex, sig);
-                  return (
-                  <div key={sig.id} className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60">
-                    <button
-                      onClick={() => handleJumpSignal(sig)}
-                      disabled={jumpingSignalId != null}
-                      className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
-                      title={sig.jumpIssue?.reason ?? `跳转到 ${sig.symbol} @ ${sig.timeLabel}`}
-                    >
-                      {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
-                      {/* 勾号占一条固定的 12px 列，没勾时留空位而不是让标的左移——
-                          条件渲染会让带勾与不带勾的行首字母错开，勾号本身也没有固定的一列可扫。 */}
-                      <span
-                        className="grid min-w-0 grid-cols-[12px_minmax(0,1fr)] items-center gap-1 font-mono text-[11px] font-medium leading-4 text-foreground"
-                        title={tradedOnSignalDay ? `${sig.timeLabel.slice(0, 10)} 当日交易过 ${sig.symbol}` : undefined}
-                      >
-                        {tradedOnSignalDay
-                          ? <CheckCircle2 className="h-3 w-3 text-[#0ecb81]" aria-label="信号当日已交易" />
-                          : <span aria-hidden />}
-                        <span className="truncate">{sig.symbol}</span>
-                      </span>
-                      {/* 时间：定宽等宽字体，纵向严格成列 */}
-                      <span className="flex items-center gap-1">
-                        <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{sig.timeLabel}</span>
-                        {hasDayCampaign && (
-                          // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
-                          // 扫视时不抢注意力，需要时 hover 才给出说明。
-                          <span
-                            data-testid="signal-day-campaign"
-                            title="当日该标的已有交易战役"
-                            aria-label="当日已有战役"
-                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0ecb81]/50"
-                          />
-                        )}
-                      </span>
-                      {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
-                      <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
-                        {sig.fallbackZone ? `兜底 ${sig.fallbackZone}` : ''}
-                      </span>
-                    </button>
-                    {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
-                        整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
-                    <span className="flex w-[74px] shrink-0 items-center justify-start">
-                      <SignalQualityStars
-                        signalId={sig.id}
-                        value={normalizeSignalQuality(sig.quality)}
-                        onChange={(next) => handleRateSignal(sig.id, next)}
-                      />
-                    </span>
-                    {/* 余量放在评分之后，评分才会紧贴兜底区 */}
-                    <span className="min-w-0 flex-1" aria-hidden />
-                    {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
-                        它说的就是「这个箭头点不动」，挨着它才读得出因果；
-                        夹在兜底区与评分之间只会把两列的对齐撑开。
-                        用深灰而非红色：它只在少数行出现，红色会在扫视时抢走注意力，
-                        而这不是一个需要立刻处置的错误，只是「这条跳不过去」。 */}
-                    {sig.jumpIssue && (
-                      <span
-                        data-testid="signal-jump-issue"
-                        className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
-                        title={`不可跳转 · ${signalJumpIssueLabel(sig.jumpIssue.code)}｜${sig.jumpIssue.reason}`}
-                        aria-label={`不可跳转：${signalJumpIssueLabel(sig.jumpIssue.code)}`}
-                      >
-                        <AlertCircle className="h-3.5 w-3.5" />
-                      </span>
-                    )}
-                    <button
-                      onClick={() => handleJumpSignal(sig)}
-                      disabled={jumpingSignalId != null}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center text-primary transition-colors hover:text-primary/70 disabled:cursor-wait disabled:opacity-60"
-                      title={sig.jumpIssue?.reason ?? '跳转盘面'}
-                    >
-                      {jumpingSignalId === sig.id
-                        ? <Loader2 className="h-4 w-4 animate-spin" />
-                        : <ArrowRightCircle className="h-4 w-4" />}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSignal(sig.id)}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                      title="删除该信号"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  );
-                })}
-                </div>
+                {/* 列表整块 memo 化 + 窗口化：它既不该跟着时钟重渲染，
+                    也不该为了 791 条信号一次铺出两万多个节点。 */}
+                <SignalLibraryList
+                  rows={sortedFiltered}
+                  tradedDayIndex={tradedDayIndex}
+                  campaignDayIndex={campaignDayIndex}
+                  jumpingSignalId={jumpingSignalId}
+                  resetKey={listResetKey}
+                  onJump={handleJumpSignal}
+                  onDelete={handleDeleteSignal}
+                  onRate={handleRateSignal}
+                />
               </div>
             )}
           </div>

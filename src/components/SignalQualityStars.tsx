@@ -1,3 +1,4 @@
+import { memo, useCallback, useRef, type MouseEvent } from 'react';
 import { Star } from 'lucide-react';
 import { SIGNAL_QUALITY_MAX } from '@/lib/signalLibrary';
 
@@ -17,9 +18,24 @@ interface Props {
  *
  * 必须是跳转按钮的**兄弟节点**，不能嵌在里面：整行本身就是一个 <button>，
  * 按钮套按钮既是非法 HTML，点星星也会顺带把盘面跳走。
+ *
+ * 整组 memo 化，且五颗星共用同一个恒定的点击处理器（星数从 data-star 上读）。
+ * 信号库里每行一组星，791 行就是 3955 个按钮——每颗星每次渲染各造一个闭包，
+ * 等于让「隔壁行变了」也要把这一行的五个闭包全部重建一遍。
  */
-export function SignalQualityStars({ value, onChange, signalId }: Props) {
+function SignalQualityStarsImpl({ value, onChange, signalId }: Props) {
   const current = value ?? 0;
+  // onChange 可能每次渲染都是新的闭包；用 ref 兜住，处理器本身就能恒定。
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const handleClick = useCallback((event: MouseEvent<HTMLButtonElement>) => {
+    // 整行是跳转按钮，不拦住就会一边评分一边把盘面跳走
+    event.stopPropagation();
+    const star = Number(event.currentTarget.dataset.star);
+    if (Number.isFinite(star) && star > 0) onChangeRef.current(star);
+  }, []);
+
   return (
     <span
       data-testid={`signal-quality-${signalId}`}
@@ -38,12 +54,9 @@ export function SignalQualityStars({ value, onChange, signalId }: Props) {
             aria-checked={star === current}
             aria-label={`${star} 星`}
             data-testid={`signal-quality-${signalId}-${star}`}
+            data-star={star}
             title={star === current ? '再点一次取消评分' : `评 ${star} 星`}
-            onClick={(e) => {
-              // 整行是跳转按钮，不拦住就会一边评分一边把盘面跳走
-              e.stopPropagation();
-              onChange(star);
-            }}
+            onClick={handleClick}
             className="p-0 leading-none transition-transform hover:scale-110 active:scale-95"
           >
             <Star
@@ -57,3 +70,5 @@ export function SignalQualityStars({ value, onChange, signalId }: Props) {
     </span>
   );
 }
+
+export const SignalQualityStars = memo(SignalQualityStarsImpl);
