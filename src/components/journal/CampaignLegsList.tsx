@@ -16,10 +16,17 @@ import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLe
 import { computeLegPriceChangePct, formatLegPriceChangePct, legPriceChangeDirection } from '@/lib/legPriceChange';
 import {
   computeLegPositionShares,
+  describeLegPositionShare,
+  describeLegPositionDenominators,
+  describeLegPositionSideTotal,
   formatLegCoinQuantity,
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
+  legPositionShareTagSide,
+  legPositionSideFromDirection,
+  LEG_POSITION_SIDE_LABELS,
+  type LegPositionSide,
 } from '@/lib/legPositionShare';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
@@ -136,13 +143,14 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_116px_76px_116px_148px_minmax(216px,1fr)_64px]';
+// 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
+const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_136px_76px_116px_148px_minmax(216px,1fr)_64px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
  * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1694px]';
+const LEGS_MIN_WIDTH = 'min-w-[1714px]';
 
 /**
  * 「涨跌幅」列表头的说明：按这条腿的方向计，正数即在价格上占优。
@@ -162,9 +170,75 @@ function priceChangeTone(pct: number | null, muted = false): string {
   return muted ? '' : 'text-muted-foreground';
 }
 
-/** 「占比」列表头的说明：两个分母各算各的，挂单中的腿不进合计。 */
-const POSITION_SHARE_COLUMN_HINT = '上行：本腿币量占本场各腿币量合计的百分比；下行：本腿名义仓位占本场各腿名义仓位合计的百分比。'
-  + '状态为「挂单中」的对冲 / 镜像腿（还没有成交或平仓记录）不计入合计，显示「—」。合计行给出两个分母。';
+/**
+ * 表体（腿行 + 合计行）的滚动区高度上限。原来是 380px；多、空两组分母让合计行多出一组两行字
+ * （11px、10px 字各一行 × leading-snug，加组间 4px，约 33px，实测 46.88px → 79.75px），上限跟着加高至少同样的量——
+ * 改动前不用滚动就能看全的战役，现在照样看全（用户截图那种「主多 + 空单滚动对冲」的形状原本就在这条线附近，
+ * 不加高时空单那组分母会被截掉）。腿行高度不受影响。
+ */
+const LEGS_BODY_MAX_HEIGHT = 'max-h-[420px]';
+
+/**
+ * 表体滚动区的底部滚动留白。合计行贴在滚动区底边（sticky），键盘把焦点移到某条腿的按钮（标到盘面 / 解除 / 加仓校验的红叉）时，
+ * 浏览器只保证按钮落在滚动区之内——恰好落在底边，就被合计行盖住。留出不少于合计行高度的一截（两组分母时 79.75px），
+ * 聚焦时按钮停在合计行之上。80px = scroll-pb-20。
+ */
+const LEGS_BODY_SCROLL_PADDING = 'scroll-pb-20';
+
+/** 「占比」列表头的说明：多单与空单分开算，挂单中的腿不进合计。 */
+const POSITION_SHARE_COLUMN_HINT = '多单与空单分开算：多单各腿占多单合计的百分比，空单各腿占空单合计的百分比（对冲通常是空单）；'
+  + '上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。合计行分别给出多、空两个分母。';
+
+/**
+ * 标签的配色写成完整类名：Tailwind 只认源码里整段出现的类名，拼接出来的不会生成规则。
+ * 透明度 /[0.08] 同 deltaTone 的写法：任意色 + 非标准档必须用方括号。
+ */
+const POSITION_SIDE_TAG_TONE: Record<LegPositionSide, string> = {
+  long: 'border-[#0ECB81]/40 bg-[#0ECB81]/[0.08] text-[#0ECB81]',
+  short: 'border-[#F6465D]/40 bg-[#F6465D]/[0.08] text-[#F6465D]',
+};
+
+/**
+ * 「多 / 空」小标签：币安仓位方向色的描边胶囊，只挂在上行。
+ * 字号 9px、行高 11px，加上下边框 13px，比上行 11px 字的行高（15px）矮——行高一格不变。
+ */
+function PositionSideTag({ side }: { side: LegPositionSide }) {
+  return (
+    <span
+      data-testid="position-side-tag"
+      data-side={side}
+      className={`inline-flex shrink-0 items-center rounded-sm border px-[3px] font-sans text-[9px] font-medium leading-[11px] ${POSITION_SIDE_TAG_TONE[side]}`}
+    >
+      {LEG_POSITION_SIDE_LABELS[side]}
+    </span>
+  );
+}
+
+/**
+ * 「币量 / 仓位」与「占比」两格共用的两行排版：上行（可带方向标签）+ 下行淡色小字。
+ * 合计行两格都用它，行高逐行一致，「多 100.0%」才会与「多」那一组分母落在同一条水平线上。
+ */
+function PositionLines({
+  side,
+  top,
+  bottom,
+  testId,
+}: {
+  side: LegPositionSide | null;
+  top: string;
+  bottom: string;
+  testId?: string;
+}) {
+  return (
+    <div data-testid={testId} data-side={side ?? undefined}>
+      <div className="flex items-center justify-end gap-1">
+        {side && <PositionSideTag side={side} />}
+        <span>{top}</span>
+      </div>
+      <div className="text-[10px] text-muted-foreground">{bottom}</div>
+    </div>
+  );
+}
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
 const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
@@ -397,6 +471,7 @@ export function CampaignLegsList({
   );
 
   // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
+  // 多单、空单分开算：分组取这条腿的持仓方向，与「涨跌幅」列同一个来源（不看角色）。
   // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定沿用角色旁那枚状态标签的规则，两处永远一致。与导出 PNG 同一个 helper。
   const positionShares = useMemo(() => computeLegPositionShares(legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -407,6 +482,7 @@ export function CampaignLegsList({
       : null;
     return {
       legId: leg.id,
+      side: legPositionSideFromDirection(leg.direction),
       coinQty: legCoinQty,
       notional: leg.pre_position_size ?? null,
       counted: !statusForLeg(leg, record).pending,
@@ -446,7 +522,7 @@ export function CampaignLegsList({
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
-          <div className="max-h-[380px] overflow-y-auto">
+          <div className={`${LEGS_BODY_MAX_HEIGHT} ${LEGS_BODY_SCROLL_PADDING} overflow-y-auto`}>
             {legs.map(leg => {
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
               const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
@@ -596,16 +672,19 @@ export function CampaignLegsList({
                       {formatLegNotional(position?.notional)}
                     </div>
                   </div>
-                  {/* 占比：与左边一格同构、同色——上行币量占比，下行名义仓位占比。
-                      中性色，不上红绿：这是仓位分布，不是盈亏。挂单中的腿不进分母，两行都是「—」。 */}
+                  {/* 占比：与左边一格同构——上行币量占比，下行名义仓位占比，都是同方向（多单 / 空单）合计里的份额。
+                      百分数本身中性色，不上红绿：这是仓位分布，不是盈亏；方向只由上行前的「多 / 空」标签交代。
+                      挂单中的腿不进分母，两行都是「—」、不挂标签。 */}
                   <div
                     data-testid={`leg-position-share-${leg.id}`}
+                    title={describeLegPositionShare(position)}
                     className="text-right tabular-nums leading-snug"
                   >
-                    <div>{formatLegPositionSharePct(position?.coinSharePct)}</div>
-                    <div className="text-[10px] text-muted-foreground">
-                      {formatLegPositionSharePct(position?.notionalSharePct)}
-                    </div>
+                    <PositionLines
+                      side={legPositionShareTagSide(position)}
+                      top={formatLegPositionSharePct(position?.coinSharePct)}
+                      bottom={formatLegPositionSharePct(position?.notionalSharePct)}
+                    />
                   </div>
                   {(() => {
                     /**
@@ -857,10 +936,12 @@ export function CampaignLegsList({
             })}
             {/* 合计行：按构造恒等于盈亏概览的「已实现 P&L」。
                 历史上两处各算各的、谁也不显示合计，用户只能手加三个数才发现对不上；
-                把这一行画出来，界面本身就是一道持续生效的断言。 */}
+                把这一行画出来，界面本身就是一道持续生效的断言。
+                贴在滚动区底边（sticky）：腿多到表体要滚动时，多、空两组分母也始终看得见；
+                背景不透明、叠在腿行之上，腿行从它下面滚过。滚到底时它回到自己的位置，不压住最后一条腿。 */}
             <div
               data-testid="legs-total-row"
-              className={`grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`sticky bottom-0 z-[1] bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
               <div />
               <div className="text-muted-foreground">合计</div>
@@ -878,22 +959,45 @@ export function CampaignLegsList({
               </div>
               {/* 开仓价 / 平仓价 / 涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
               <div /><div /><div />
-              {/* 币量 / 仓位：写出「占比」的两个分母（Σ币量 / Σ名义仓位，挂单中的腿不计入）；
-                  占比：分母为正即 100.0%。加仓校验留空。 */}
+              {/* 币量 / 仓位：多单、空单各写一组「占比」的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
+                  每组以同样的「多 / 空」标签开头；没有计入腿的方向不列。
+                  占比：与左格逐组对齐，写「多 100.0%」/「空 100.0%」。两个方向都没有时照旧两行「—」。加仓校验留空。
+                  合计行可以因此变高，腿行不变。 */}
               <div
                 data-testid="legs-total-position"
-                title="占比的两个分母：上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）"
-                className="text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
+                title={describeLegPositionDenominators(positionShares.sides)}
+                className="space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
               >
-                <div>{formatLegCoinQuantity(positionShares.totalCoins)}</div>
-                <div className="text-[10px] text-muted-foreground">{formatLegNotional(positionShares.totalNotional)}</div>
+                {positionShares.sides.length === 0 ? (
+                  <PositionLines side={null} top="—" bottom="—" />
+                ) : positionShares.sides.map(totals => (
+                  <PositionLines
+                    key={totals.side}
+                    testId={`legs-total-position-${totals.side}`}
+                    side={totals.side}
+                    top={formatLegCoinQuantity(totals.totalCoins)}
+                    bottom={formatLegNotional(totals.totalNotional)}
+                  />
+                ))}
               </div>
               <div
                 data-testid="legs-total-position-share"
-                className="text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
+                title={positionShares.sides.length === 0
+                  ? undefined
+                  : positionShares.sides.map(describeLegPositionSideTotal).join('；')}
+                className="space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
               >
-                <div>{formatLegPositionShareTotal(positionShares.totalCoins)}</div>
-                <div className="text-[10px] text-muted-foreground">{formatLegPositionShareTotal(positionShares.totalNotional)}</div>
+                {positionShares.sides.length === 0 ? (
+                  <PositionLines side={null} top="—" bottom="—" />
+                ) : positionShares.sides.map(totals => (
+                  <PositionLines
+                    key={totals.side}
+                    testId={`legs-total-position-share-${totals.side}`}
+                    side={totals.side}
+                    top={formatLegPositionShareTotal(totals.totalCoins)}
+                    bottom={formatLegPositionShareTotal(totals.totalNotional)}
+                  />
+                ))}
               </div>
               <div />
               <div

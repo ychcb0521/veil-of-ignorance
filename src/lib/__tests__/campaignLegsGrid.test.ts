@@ -95,13 +95,14 @@ describe('Legs 表栅格', () => {
   it('【用户要求】「占比」紧跟「币量 / 仓位」、约 76px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
     const s = src();
     const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
-    expect(tracks[8]).toBe('116px');   // 币量 / 仓位
-    expect(tracks[9]).toBe('76px');    // 占比：放得下「100.0%」
+    // 币量 / 仓位：合计行的 Σ币量前多了一枚「多 / 空」标签（约 18px），百亿级 17 个字符（11px 等宽约 112px）加上标签要一行放下
+    expect(tracks[8]).toBe('136px');
+    expect(tracks[9]).toBe('76px');    // 占比：放得下「多 100.0%」
     // minmax(216px,1fr) 按下限计
     const trackSum = tracks.reduce((sum, track) => sum + Number.parseInt(track.replace(/^minmax\(/, ''), 10), 0);
     const minWidth = Number(/const LEGS_MIN_WIDTH = 'min-w-\[(\d+)px\]'/.exec(s)?.[1]);
     expect(minWidth).toBe(trackSum + 10 * (tracks.length - 1) + 24);
-    expect(minWidth).toBe(1694);
+    expect(minWidth).toBe(1714);
   });
 
   it('操作列只留两个图标按钮（标到盘面 / 解除），中文标签进 title 而不是渲染成文字', () => {

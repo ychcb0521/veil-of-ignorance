@@ -27,6 +27,11 @@ import {
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
+  legPositionShareTagSide,
+  legPositionSideFromDirection,
+  LEG_POSITION_SIDE_COLORS,
+  LEG_POSITION_SIDE_LABELS,
+  type LegPositionSide,
 } from '@/lib/legPositionShare';
 import {
   addSizingSnapshotLines,
@@ -80,6 +85,17 @@ export type CampaignLegsExportCellLine = {
    * 超过 16 的（加仓校验的红叉）行高跟着撑开，见 exportLineHeight。
    */
   size?: number;
+  /**
+   * 行首的方向标签（「多」绿 /「空」红，与页面同色），与正文分开着色：正文（百分数、合计数）仍是中性色。
+   * hidden 为 true 时只占位不画——同一组的下一行借它把数字与上一行的数字对齐。
+   */
+  tag?: CampaignLegsExportCellTag;
+};
+
+export type CampaignLegsExportCellTag = {
+  text: string;
+  color: string;
+  hidden?: boolean;
 };
 
 export type CampaignLegsExportRow = {
@@ -119,10 +135,10 @@ const COLUMNS = [
   { title: '平仓价', width: 118 },
   // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
   { title: '涨跌幅', width: 120 },
-  // 160：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
-  // （百亿级 11,981,041,835.39，17 个字符）也得一行放下——拆成两截的数字比挤一点更难读
-  { title: '币量 / 仓位', width: 160 },
-  // 96：留 76px 文字宽，「100.0%」及合计行一行放下
+  // 184：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
+  // （百亿级 11,981,041,835.39，17 个字符），前面再挂一枚「多 / 空」标签也得一行放下——拆成两截的数字比挤一点更难读
+  { title: '币量 / 仓位', width: 184 },
+  // 96：留 76px 文字宽，「多 100.0%」（标签 + 百分数）及合计行一行放下
   { title: '占比', width: 96 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
@@ -275,6 +291,23 @@ function priceChangeCell(
   }];
 }
 
+/**
+ * 「币量 / 仓位」「占比」的一组两行：上行（有方向时前挂彩色「多 / 空」标签）+ 下行淡色。
+ * 下行挂一枚隐藏标签占位，两行的数字左端对齐。topColor 缺省为正文前景色（腿行），合计行传淡色。
+ */
+function positionShareLines(
+  side: LegPositionSide | null,
+  top: string,
+  bottom: string,
+  topColor: string | undefined,
+): CampaignLegsExportCellLine[] {
+  const tag = side ? { text: LEG_POSITION_SIDE_LABELS[side], color: LEG_POSITION_SIDE_COLORS[side] } : null;
+  return [
+    { text: top, ...(topColor ? { color: topColor } : {}), ...(tag ? { tag } : {}) },
+    { text: bottom, color: '#848E9C', ...(tag ? { tag: { ...tag, hidden: true } } : {}) },
+  ];
+}
+
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
   if (order.status === 'pending') return '挂单中';
   if (order.status === 'triggered') return '已触发';
@@ -301,6 +334,14 @@ function measureContext(): CanvasRenderingContext2D | null {
   return sharedMeasureContext;
 }
 
+/** 方向标签与正文之间的空隙（px）。 */
+const TAG_GAP = 6;
+
+/** 标签用同字号加粗画。 */
+function tagFontLine(line: CampaignLegsExportCellLine): CampaignLegsExportCellLine {
+  return { ...line, bold: true };
+}
+
 /** 与绘制同字体量宽；拿不到画布（测试环境）时按等宽字估：CJK 1em、其余 0.62em。 */
 function cellTextWidth(text: string, line: CampaignLegsExportCellLine): number {
   const ctx = measureContext();
@@ -314,6 +355,11 @@ function cellTextWidth(text: string, line: CampaignLegsExportCellLine): number {
   return width;
 }
 
+/** 正文前被标签占掉的宽度：标签（隐藏的也占位）+ 空隙；没有标签为 0。绘制与折行共用。 */
+function tagOffset(line: CampaignLegsExportCellLine): number {
+  return line.tag ? cellTextWidth(line.tag.text, tagFontLine(line)) + TAG_GAP : 0;
+}
+
 /**
  * 把一条放不下的格内文字折成几行，颜色字号原样保留；放得下就原样返回。
  *
@@ -323,8 +369,11 @@ function cellTextWidth(text: string, line: CampaignLegsExportCellLine): number {
  */
 export function wrapCampaignLegsExportLine(
   line: CampaignLegsExportCellLine,
-  maxWidth: number,
+  fullWidth: number,
 ): CampaignLegsExportCellLine[] {
+  // 带标签的行：正文只剩标签右边那一截宽；折出来的后续行挂隐藏标签，与首行的正文左端对齐
+  const indent = tagOffset(line);
+  const maxWidth = fullWidth - indent;
   if (!line.text || cellTextWidth(line.text, line) <= maxWidth) return [line];
   const pieces: string[] = [];
   let current = '';
@@ -361,7 +410,10 @@ export function wrapCampaignLegsExportLine(
     current = chunk;
   }
   flush();
-  return pieces.length > 0 ? pieces.map(text => ({ ...line, text })) : [line];
+  if (pieces.length === 0) return [line];
+  return pieces.map((text, index) => (
+    line.tag && index > 0 ? { ...line, text, tag: { ...line.tag, hidden: true } } : { ...line, text }
+  ));
 }
 
 /**
@@ -427,7 +479,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   });
 
   // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
-  // 格子里的数就是分母里加的那个数；状态为「挂单中」的腿不进分母。
+  // 格子里的数就是分母里加的那个数；多单、空单按持仓方向（与涨跌幅同源）分开算；状态为「挂单中」的腿不进分母。
   const positionShares = computeLegPositionShares(input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
@@ -436,6 +488,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       : null;
     return {
       legId: leg.id,
+      side: legPositionSideFromDirection(leg.direction),
       coinQty,
       notional: leg.pre_position_size ?? null,
       counted: !statusForLeg(leg, record).pending,
@@ -551,11 +604,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: formatLegCoinQuantity(position?.coinQty) },
         { text: formatLegNotional(position?.notional), color: '#848E9C' },
       ],
-      // 占比：与左边一格同构同色——上行币量占比、下行名义仓位占比；中性色，挂单中的腿两行都是「—」
-      [
-        { text: formatLegPositionSharePct(position?.coinSharePct) },
-        { text: formatLegPositionSharePct(position?.notionalSharePct), color: '#848E9C' },
-      ],
+      // 占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是同方向（多单 / 空单）合计里的份额；
+      // 百分数中性色，方向由上行前的「多 / 空」彩色标签交代（与页面同源）；挂单中的腿两行都是「—」、不挂标签
+      positionShareLines(
+        legPositionShareTagSide(position),
+        formatLegPositionSharePct(position?.coinSharePct),
+        formatLegPositionSharePct(position?.notionalSharePct),
+        undefined,
+      ),
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -697,15 +753,24 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
-    // 币量 / 仓位：「占比」的两个分母（挂单中的腿不计入）；占比：分母为正即 100.0%。与页面同源，淡色
-    [
-      { text: formatLegCoinQuantity(positionShares.totalCoins), color: '#5F6B7A' },
-      { text: formatLegNotional(positionShares.totalNotional), color: '#848E9C' },
-    ],
-    [
-      { text: formatLegPositionShareTotal(positionShares.totalCoins), color: '#5F6B7A' },
-      { text: formatLegPositionShareTotal(positionShares.totalNotional), color: '#848E9C' },
-    ],
+    // 币量 / 仓位：多单、空单各一组「占比」的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
+    // 占比：与左格逐组对齐，「多 100.0%」/「空 100.0%」；没有计入腿的方向不列，两个方向都没有时照旧两行「—」。与页面同源，淡色
+    positionShares.sides.length === 0
+      ? positionShareLines(null, '—', '—', '#5F6B7A')
+      : positionShares.sides.flatMap(totals => positionShareLines(
+        totals.side,
+        formatLegCoinQuantity(totals.totalCoins),
+        formatLegNotional(totals.totalNotional),
+        '#5F6B7A',
+      )),
+    positionShares.sides.length === 0
+      ? positionShareLines(null, '—', '—', '#5F6B7A')
+      : positionShares.sides.flatMap(totals => positionShareLines(
+        totals.side,
+        formatLegPositionShareTotal(totals.totalCoins),
+        formatLegPositionShareTotal(totals.totalNotional),
+        '#5F6B7A',
+      )),
     // 加仓校验
     [{ text: '' }],
     feeTotals == null
@@ -821,9 +886,16 @@ function drawLines(
   lines.forEach(line => {
     // 大字号行先把自己的基线往下推出多出来的那截，才不会压到上一行；之后按常规行距往下走
     offset += exportLineHeight(line) - LINE_H;
+    // 方向标签单独着色；隐藏标签只占位。正文右移的距离与折行时量的是同一个 tagOffset
+    if (line.tag && !line.tag.hidden) {
+      ctx.font = cellFont(tagFontLine(line));
+      ctx.fillStyle = line.tag.color;
+      ctx.fillText(line.tag.text, x, y + offset);
+    }
+    const textX = x + tagOffset(line);
     ctx.font = cellFont(line);
     ctx.fillStyle = line.color ?? '#202630';
-    ctx.fillText(line.text, x, y + offset);
+    ctx.fillText(line.text, textX, y + offset);
     offset += LINE_H;
   });
 }

@@ -914,6 +914,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
 });
 
 describe('【用户要求】导出图也带「占比」列（币量 / 仓位右侧）', () => {
+  // 【用户要求 · 续】多单、空单分开算、各自 100%，上行前挂「多 / 空」彩色标签；合计行分别给出两个分母——与页面同源
   afterEach(() => { vi.restoreAllMocks(); });
 
   /** 「币量 / 仓位」与「占比」在 COLUMNS 里的下标。 */
@@ -976,14 +977,21 @@ describe('【用户要求】导出图也带「占比」列（币量 / 仓位右�
     expect(texts(cell('add1'))).toEqual(['12.8%', '13.0%']);
     expect(texts(cell('add2'))).toEqual(['8.1%', '8.4%']);
     expect(texts(cell('add3'))).toEqual(['44.2%', '45.1%']);
-    // 中性色：上行与币量同色（缺省前景），下行与名义仓位同样淡
-    expect(cell('main')).toEqual([{ text: '34.9%' }, { text: '33.6%', color: '#848E9C' }]);
+    // 中性色：上行数字与币量同色（缺省前景），下行与名义仓位同样淡；方向只由上行的彩色标签交代，下行挂隐藏标签对齐
+    expect(cell('main')).toEqual([
+      { text: '34.9%', tag: { text: '多', color: '#0ECB81' } },
+      { text: '33.6%', color: '#848E9C', tag: { text: '多', color: '#0ECB81', hidden: true } },
+    ]);
     expect(cell('main')[1].color).toBe(rows.find(row => row.legId === 'main')!.cells[COINS_COL][1].color);
 
     const total = rows.at(-1)!;
     expect(total.kind).toBe('total');
+    // 全是多单：合计行只列多单一组
     expect(texts(total.cells[COINS_COL])).toEqual(['79,042,835.4', '8981040.00']);
     expect(texts(total.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+    expect(total.cells[COINS_COL].map(line => line.tag)).toEqual([
+      { text: '多', color: '#0ECB81' }, { text: '多', color: '#0ECB81', hidden: true },
+    ]);
     for (const line of [...total.cells[COINS_COL], ...total.cells[SHARE_COL]]) {
       expect(['#5F6B7A', '#848E9C']).toContain(line.color);
     }
@@ -1009,20 +1017,25 @@ describe('【用户要求】导出图也带「占比」列（币量 / 仓位右�
     const cell = (id: string) => texts(rows.find(row => row.legId === id)!.cells[SHARE_COL]);
     expect(texts(rows.find(row => row.legId === 'pending-hedge')!.cells[COINS_COL])).toEqual(['50,000,000', '5000000.00']);
     expect(cell('pending-hedge')).toEqual(['—', '—']);
+    // 挂单中的腿不挂标签（与页面同源）
+    expect(rows.find(row => row.legId === 'pending-hedge')!.cells[SHARE_COL].every(line => line.tag == null)).toBe(true);
     expect(texts(rows.find(row => row.legId === 'no-price')!.cells[COINS_COL])).toEqual(['—', '1018960.00']);
     // 名义分母变成 8,981,040 + 1,018,960 = 10,000,000；币量分母不变
     expect(cell('no-price')).toEqual(['—', '10.2%']);
     expect(cell('main')).toEqual(['34.9%', '30.2%']);
     expect(cell('add3')).toEqual(['44.2%', '40.5%']);
     const total = rows.at(-1)!;
+    // 空单那一方向只有挂单中的对冲：不列空单那组
     expect(texts(total.cells[COINS_COL])).toEqual(['79,042,835.4', '10000000.00']);
     expect(texts(total.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+    expect(total.cells[SHARE_COL].map(line => line.tag?.text)).toEqual(['多', '多']);
   });
 
-  it('一条都不计入：合计行两格都是「—」', () => {
+  it('一条都不计入：合计行两格都是「—」，不挂标签', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: [pendingHedge], reverseHedgeOrders: [] });
     expect(texts(rows.at(-1)!.cells[COINS_COL])).toEqual(['—', '—']);
     expect(texts(rows.at(-1)!.cells[SHARE_COL])).toEqual(['—', '—']);
+    expect([...rows.at(-1)!.cells[COINS_COL], ...rows.at(-1)!.cells[SHARE_COL]].every(line => line.tag == null)).toBe(true);
   });
 
   // 合计行的 Σ币量比任何一条腿都可能多一位：十亿级的腿加起来到了百亿级（17 个字符），也不能被逐字拆成两截
@@ -1042,13 +1055,32 @@ describe('【用户要求】导出图也带「占比」列（币量 / 仓位右�
     const total = rows.at(-1)!;
     expect(texts(total.cells[COINS_COL])).toEqual(['11,981,041,835.39', '119808.00']);
     expect(texts(total.wrapped[COINS_COL])).toEqual(['11,981,041,835.39', '119808.00']);
+    // 前面挂着「多」标签也一行放下
+    expect(total.wrapped[COINS_COL][0].tag).toEqual({ text: '多', color: '#0ECB81' });
     for (const row of rows.filter(r => r.kind === 'leg')) expect(row.wrapped[COINS_COL]).toHaveLength(2);
     // 合计行不因此被撑高：仍是上下各 12 的留白夹两行 17 高的字（被拆开时会多出一行，变成 75）
     expect(total.height).toBe(12 * 2 + 17 * 2);
   };
+  /** 同样的百亿级，再加一组百亿级的空单：两组各两行，一个字都不折，合计行正好四行高。 */
+  const billionBothSides = () => [
+    ...billionLegs(),
+    leg({
+      id: 'hedge', leg_sequence: 5, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+      pre_simulated_time: T('05:00'), pre_entry_price: 30_000 / 11_981_041_835.39, pre_position_size: 30_000,
+      post_exit_price_snapshot: 30_000 / 11_981_041_835.39, post_simulated_close_time: T('06:00'),
+    }),
+  ];
+  const expectBillionBothSidesOnOneLine = (rows: ReturnType<typeof buildCampaignLegsExportRows>) => {
+    const total = rows.at(-1)!;
+    expect(texts(total.cells[COINS_COL])).toEqual(['11,981,041,835.39', '119808.00', '11,981,041,835.39', '30000.00']);
+    expect(total.wrapped[COINS_COL]).toEqual(total.cells[COINS_COL]);
+    expect(total.wrapped[SHARE_COL]).toEqual(total.cells[SHARE_COL]);
+    expect(total.height).toBe(12 * 2 + 17 * 4);
+  };
 
   it('百亿级 Σ币量（两位小数，17 个字符）在合计行一行放下：按无画布时的 0.62em 估算', () => {
     expectBillionTotalOnOneLine(buildCampaignLegsExportRows({ ...input(), legs: billionLegs(), reverseHedgeOrders: [] }));
+    expectBillionBothSidesOnOneLine(buildCampaignLegsExportRows({ ...input(), legs: billionBothSides(), reverseHedgeOrders: [] }));
   });
 
   it('百亿级 Σ币量在合计行一行放下：按真实等宽字体（SF Mono / Menlo 约 0.6em）量宽', async () => {
@@ -1066,6 +1098,7 @@ describe('【用户要求】导出图也带「占比」列（币量 / 仓位右�
     vi.resetModules();
     const fresh = await import('@/lib/campaignLegsPngExport');
     expectBillionTotalOnOneLine(fresh.buildCampaignLegsExportRows({ ...input(), legs: billionLegs(), reverseHedgeOrders: [] }));
+    expectBillionBothSidesOnOneLine(fresh.buildCampaignLegsExportRows({ ...input(), legs: billionBothSides(), reverseHedgeOrders: [] }));
   });
 
   it('阶段子行这一格留空；每一行格子数都与表头列数一致，列宽约 96', () => {
@@ -1091,17 +1124,181 @@ describe('【用户要求】导出图也带「占比」列（币量 / 仓位右�
       expect(row.cells[SHARE_COL]).toEqual([{ text: '' }]);
       expect(row.cells[COINS_COL]).toEqual([{ text: '' }]);
     }
-    expect(texts(rows.find(row => row.legId === 'main')!.cells[SHARE_COL])).toEqual(['73.7%', '65.3%']);
-    expect(texts(rows.find(row => row.legId === 'hedge-roll')!.cells[SHARE_COL])).toEqual(['26.3%', '34.7%']);
-    expect(texts(rows.at(-1)!.cells[COINS_COL])).toEqual(['3,799,947.74', '144300.00']);
-    expect(texts(rows.at(-1)!.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+    // 多单主力与空单对冲各在自己那组里 100%（一个分母时曾是 73.7% / 26.3%）
+    expect(texts(rows.find(row => row.legId === 'main')!.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+    expect(texts(rows.find(row => row.legId === 'hedge-roll')!.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+    expect(rows.find(row => row.legId === 'hedge-roll')!.cells[SHARE_COL][0].tag).toEqual({ text: '空', color: '#F6465D' });
+    expect(texts(rows.at(-1)!.cells[COINS_COL])).toEqual(['2,799,947.74', '94300.00', '1,000,000', '50000.00']);
+    expect(texts(rows.at(-1)!.cells[SHARE_COL])).toEqual(['100.0%', '100.0%', '100.0%', '100.0%']);
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([13]));
 
-    // 画布宽度 = 各列宽之和 + 左右边距：加了「占比」96，「币量 / 仓位」由 150 放宽到 160（放得下 17 位的合计币量），合计多 106
+    // 画布宽度 = 各列宽之和 + 左右边距：加了「占比」96，「币量 / 仓位」由 150 放宽到 184
+    // （放得下 17 位的合计币量，前面再挂一枚「多 / 空」标签），合计多 130
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(new Proxy({}, {
       get: (_target, key) => (key === 'measureText' ? () => ({ width: 0 }) : () => undefined),
     }) as never);
     const canvas = buildCampaignLegsListCanvas({ ...input(), legs: [] }, { includeHeader: false, scale: 1 });
-    expect(canvas.width).toBe(52 + 152 + 300 + 150 + 104 + 118 + 118 + 120 + 160 + 96 + 170 + 132 + 444 + 40 * 2);
+    expect(canvas.width).toBe(52 + 152 + 300 + 150 + 104 + 118 + 118 + 120 + 184 + 96 + 170 + 132 + 444 + 40 * 2);
+  });
+
+  describe('【用户要求 · 续】多单与空单分开算，导出图同样用彩色标签区分', () => {
+    const closed = { post_simulated_close_time: T('09:00') };
+    /** 用户截图的形状（KAITOUSDT，主多）：主力多单、镜像止盈多单、滚动对冲空单、加仓多单，全部已平仓。 */
+    const userShape = () => [
+      leg({ id: 'main', pre_entry_price: 1, pre_position_size: 3_000, post_exit_price_snapshot: 1.2, ...closed }),
+      leg({
+        id: 'mirror', leg_sequence: 2, leg_role: 'mirror_tp', order_kind: 'main',
+        pre_entry_price: 1, pre_position_size: 3_000, post_exit_price_snapshot: 1.1, post_simulated_close_time: T('04:00'),
+      }),
+      leg({
+        id: 'hedge', leg_sequence: 3, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+        pre_simulated_time: T('03:00'), pre_entry_price: 1.1, pre_position_size: 2_000,
+        post_exit_price_snapshot: 1.05, post_simulated_close_time: T('05:00'),
+      }),
+      leg({
+        id: 'add', leg_sequence: 4, leg_role: 'main_add_1', pre_simulated_time: T('06:00'),
+        pre_entry_price: 1.2, pre_position_size: 1_500, post_exit_price_snapshot: 1.3, ...closed,
+      }),
+    ];
+    const rowsOf = (legs: TradeJournal[]) => buildCampaignLegsExportRows({ ...input(), legs, reverseHedgeOrders: [] });
+    const shareOf = (rows: ReturnType<typeof rowsOf>, id: string) => rows.find(row => row.legId === id)!.cells[SHARE_COL];
+
+    it('用户截图的形状：三条多单在多单里加起来 100.0%，唯一的空单对冲独占空单的 100.0%；合计行先多后空两组', () => {
+      const rows = rowsOf(userShape());
+      expect(['main', 'mirror', 'add'].map(id => texts(shareOf(rows, id)))).toEqual([
+        ['41.4%', '40.0%'], ['41.4%', '40.0%'], ['17.2%', '20.0%'],
+      ]);
+      for (const index of [0, 1]) {
+        expect(['main', 'mirror', 'add']
+          .map(id => Number.parseFloat(shareOf(rows, id)[index].text))
+          .reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 6);
+      }
+      expect(texts(shareOf(rows, 'hedge'))).toEqual(['100.0%', '100.0%']);
+      expect(['main', 'mirror', 'hedge', 'add'].map(id => shareOf(rows, id)[0].tag?.text)).toEqual(['多', '多', '空', '多']);
+
+      const total = rows.at(-1)!;
+      expect(texts(total.cells[COINS_COL])).toEqual(['7,250', '7500.00', '1,818.18', '2000.00']);
+      expect(texts(total.cells[SHARE_COL])).toEqual(['100.0%', '100.0%', '100.0%', '100.0%']);
+    });
+
+    it('主空战役里的多单对冲：分组跟方向走——对冲进多单那组；两条空单平分空单那组', () => {
+      const rows = rowsOf([
+        leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
+        leg({
+          id: 'hedge-long', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
+          pre_simulated_time: T('02:00'), pre_entry_price: 2, pre_position_size: 2_000,
+          post_exit_price_snapshot: 2.1, post_simulated_close_time: T('03:00'),
+        }),
+        leg({
+          id: 'add-short', leg_sequence: 3, leg_role: 'main_add_1', direction: 'short', pre_simulated_time: T('04:00'),
+          pre_entry_price: 2, pre_position_size: 3_000, post_exit_price_snapshot: 1.5, ...closed,
+        }),
+      ]);
+      expect(texts(shareOf(rows, 'main-short'))).toEqual(['62.5%', '62.5%']);
+      expect(texts(shareOf(rows, 'add-short'))).toEqual(['37.5%', '37.5%']);
+      expect(texts(shareOf(rows, 'hedge-long'))).toEqual(['100.0%', '100.0%']);
+      expect(shareOf(rows, 'hedge-long')[0].tag).toEqual({ text: '多', color: '#0ECB81' });
+      expect(shareOf(rows, 'main-short')[0].tag).toEqual({ text: '空', color: '#F6465D' });
+      const total = rows.at(-1)!;
+      expect(texts(total.cells[COINS_COL])).toEqual(['1,000', '2000.00', '4,000', '8000.00']);
+      expect(total.cells[COINS_COL].map(line => line.tag?.hidden ? `(${line.tag.text})` : line.tag?.text))
+        .toEqual(['多', '(多)', '空', '(空)']);
+    });
+
+    it('主空战役里唯一的多单对冲还挂单中：多单那组不列，合计行只剩空单一组', () => {
+      const rows = rowsOf([
+        leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
+        leg({
+          id: 'pending-long-hedge', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
+          pre_simulated_time: T('02:00'), pre_entry_price: 2.2, pre_position_size: 2_000,
+        }),
+      ]);
+      expect(shareOf(rows, 'pending-long-hedge')).toEqual([{ text: '—' }, { text: '—', color: '#848E9C' }]);
+      expect(texts(shareOf(rows, 'main-short'))).toEqual(['100.0%', '100.0%']);
+      const total = rows.at(-1)!;
+      expect(texts(total.cells[COINS_COL])).toEqual(['2,500', '5000.00']);
+      expect(total.cells[COINS_COL][0].tag).toEqual({ text: '空', color: '#F6465D' });
+      expect(texts(total.cells[SHARE_COL])).toEqual(['100.0%', '100.0%']);
+      expect(total.height).toBe(12 * 2 + 17 * 2);
+    });
+
+    it('合计行：两格逐组对齐——行数相同、每行标签相同；四行时合计行按现有排版撑到四行高，腿行不变', () => {
+      const rows = rowsOf(userShape());
+      const total = rows.at(-1)!;
+      const coins = total.cells[COINS_COL];
+      const share = total.cells[SHARE_COL];
+      expect(coins).toHaveLength(4);
+      expect(share).toHaveLength(4);
+      expect(coins.map(line => line.tag)).toEqual(share.map(line => line.tag));
+      expect(coins.map(line => line.color)).toEqual(['#5F6B7A', '#848E9C', '#5F6B7A', '#848E9C']);
+      expect(share.map(line => line.color)).toEqual(['#5F6B7A', '#848E9C', '#5F6B7A', '#848E9C']);
+      // 不折行：绘制行就是逻辑行
+      expect(total.wrapped[COINS_COL]).toEqual(coins);
+      expect(total.wrapped[SHARE_COL]).toEqual(share);
+      expect(total.height).toBe(12 * 2 + 17 * 4);
+      // 腿行：占比格仍是两行、不折行；行高由三行的时间格定（开 / 平 / 操作），标签不把它撑高
+      for (const row of rows.filter(r => r.kind === 'leg')) {
+        expect(row.wrapped[SHARE_COL]).toEqual(row.cells[SHARE_COL]);
+        expect(row.wrapped[SHARE_COL]).toHaveLength(2);
+        expect(row.wrapped[2]).toHaveLength(3);
+        expect(row.height).toBe(12 * 2 + 17 * 3);
+      }
+      expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([13]));
+    });
+
+    it('画出来：标签用多绿 / 空红单独着色，百分数与合计数是中性色；隐藏标签不画，但下行数字与上行数字左端对齐', () => {
+      const drawn: { text: string; color: unknown; x: number; font: unknown }[] = [];
+      const state: Record<string | symbol, unknown> = {};
+      const ctx = new Proxy(state, {
+        get(target, key) {
+          if (key === 'fillText') return (text: string, x: number) => { drawn.push({ text: String(text), color: target.fillStyle, x, font: target.font }); };
+          if (key === 'measureText') return (text: string) => ({ width: String(text).length * 8 });
+          if (key in target) return target[key];
+          return () => undefined;
+        },
+        set(target, key, value) { target[key] = value; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+
+      buildCampaignLegsListCanvas({ ...input(), legs: userShape() }, { includeHeader: false, scale: 1 });
+
+      const tags = drawn.filter(item => item.text === '多' || item.text === '空');
+      // 腿行各一枚（4），合计行两格各两枚（4）；隐藏标签一枚都不画
+      expect(tags.map(item => item.text)).toEqual(['多', '多', '空', '多', '多', '空', '多', '空']);
+      for (const tag of tags) {
+        expect(tag.color).toBe(tag.text === '多' ? '#0ECB81' : '#F6465D');
+        expect(String(tag.font)).toMatch(/^700 /);
+      }
+      // 百分数不上红绿
+      const pctItems = drawn.filter(item => /^\d+\.\d%$/.test(item.text));
+      expect(pctItems.length).toBeGreaterThan(0);
+      for (const item of pctItems) expect(['#0ECB81', '#F6465D']).not.toContain(item.color);
+      // 同一组两行的数字起点相同（下行靠隐藏标签占位），且都在标签右边
+      const hedgeTop = drawn.findIndex(item => item.text === '空');
+      const [topValue, bottomValue] = [drawn[hedgeTop + 1], drawn[hedgeTop + 2]];
+      expect(topValue.text).toBe('100.0%');
+      expect(bottomValue.text).toBe('100.0%');
+      expect(bottomValue.x).toBe(topValue.x);
+      expect(topValue.x).toBeGreaterThan(drawn[hedgeTop].x);
+    });
+
+    it('带标签的行放不下时：正文按标签右边剩下的宽度折，续行挂隐藏标签对齐，一个字不丢', () => {
+      const tag = { text: '空', color: '#F6465D' };
+      // 无画布时按 0.62em 估：「1,818.18」≈ 64、「2000.00」≈ 56，整行 ≈ 129；标签「空」13 + 空隙 6
+      const pieces = wrapCampaignLegsExportLine({ text: '1,818.18 2000.00', tag }, 100);
+      expect(pieces.map(piece => piece.text)).toEqual(['1,818.18', '2000.00']);
+      expect(pieces[0].tag).toEqual(tag);
+      for (const piece of pieces.slice(1)) expect(piece.tag).toEqual({ ...tag, hidden: true });
+      // 不带标签时 130 放得下整行；带上标签就只剩 111，得折
+      expect(wrapCampaignLegsExportLine({ text: '1,818.18 2000.00' }, 130)).toHaveLength(1);
+      expect(wrapCampaignLegsExportLine({ text: '1,818.18 2000.00', tag }, 130)).toHaveLength(2);
+      // 没有标签时能放下的宽度，挂上标签后要扣掉标签的宽
+      const plain = { text: '11,981,041,835.39' };
+      const width = 17 * 13 * 0.62;
+      expect(wrapCampaignLegsExportLine(plain, Math.ceil(width))).toEqual([plain]);
+      expect(wrapCampaignLegsExportLine({ ...plain, tag }, Math.ceil(width)).length).toBeGreaterThan(1);
+      // 放得下就原样返回
+      expect(wrapCampaignLegsExportLine({ text: '100.0%', tag }, 76)).toEqual([{ text: '100.0%', tag }]);
+    });
   });
 });
