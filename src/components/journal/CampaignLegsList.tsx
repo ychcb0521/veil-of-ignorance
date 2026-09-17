@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { UIEvent } from 'react';
-import { Crosshair, EyeOff, Unlink } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Crosshair, EyeOff, Unlink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
@@ -19,16 +19,28 @@ import {
   computeLegPositionShares,
   describeLegPositionShare,
   describeLegPositionDenominators,
+  describeLegPositionShareSort,
   describeLegPositionSideTotal,
   formatLegCoinQuantity,
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
-  legPositionShareTagSide,
   legPositionSideFromDirection,
+  legPositionSideName,
+  nextLegPositionShareSort,
+  sortByLegPositionShare,
+  LEG_POSITION_SIDES,
   LEG_POSITION_SIDE_LABELS,
+  type LegPositionShareSort,
   type LegPositionSide,
 } from '@/lib/legPositionShare';
+import {
+  LEG_RETROACTIVE_HINT,
+  LEG_ROW_STATUS_HINTS,
+  LEG_UNCLASSIFIED_HINT,
+  legRowStatus,
+  type LegRowStatus,
+} from '@/lib/legRowStatus';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
   addSizingSnapshotLines,
@@ -58,18 +70,16 @@ interface Props {
 }
 
 /**
- * closed 是常态：状态不再占一列，只有**不是**已平仓时才在角色旁标一枚小标签。
- * pending 即「挂单中」——还没成交、不是仓位，「占比」列据此把它排除在分母之外。
+ * 角色标签的悬停说明：没有角色的先说明「—」是什么；没有平仓时说状态（挂单中 / 进行中）；历史回填的腿再补一句来源。
+ * 状态与「多单占比」「空单占比」的排除读的是同一个 legRowStatus，两处永远一致。
  */
-function statusForLeg(leg: TradeJournal, record: TradeRecord | null) {
-  if (record) return { label: '已平仓', className: 'text-[#0ECB81]', closed: true, pending: false };
-  if (leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
-    return { label: '已平仓', className: 'text-[#0ECB81]', closed: true, pending: false };
-  }
-  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
-    return { label: '挂单中', className: 'text-[#F0B90B]', closed: false, pending: true };
-  }
-  return { label: '进行中', className: 'text-muted-foreground', closed: false, pending: false };
+function roleChipTitle(status: LegRowStatus, retroactive: boolean, unclassified: boolean): string | undefined {
+  const lines = [
+    ...(unclassified ? [LEG_UNCLASSIFIED_HINT] : []),
+    ...(status === 'closed' ? [] : [LEG_ROW_STATUS_HINTS[status]]),
+    ...(retroactive ? [LEG_RETROACTIVE_HINT] : []),
+  ];
+  return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
 function fmtClock(value: number | string | null | undefined): string {
@@ -112,8 +122,10 @@ function fmtPrice(value: number | null | undefined): string {
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
  * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
- * 扫视最先停留的那一段；开平价、涨跌幅、币量、占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
- * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时才在角色旁标一枚小标签。
+ * 扫视最先停留的那一段；开平价、涨跌幅、币量、多单 / 空单占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
+ * 第一列只有「角色」：不再印腿的序号，也不再挂「回填」标签（来源写在角色标签的悬停说明里）。
+ * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时把角色标签本身画成另一种样子
+ * （挂单中：虚线空心；进行中：标签里一枚小圆点）。
 
  *
  * 这里曾经把表头和行各写一份，加列时只改了表头，行少一列，
@@ -144,32 +156,67 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
   + '币本位：名义 = 张数 × 面值 ÷ 成交价，收的是币——折成美元后价格被约掉，所以开平两笔的美元数必然相同，币数才不同（价越高付的币越少），本列因此按币显示。'
   + '盈亏列已扣平仓费；开仓费在开仓当时从钱包扣除。旧记录未存开仓费，按当时 0.04% Taker 估算并标明。';
 
+// 角色 132px：最长的「重新入场主力 2」标签带「进行中」小圆点（实测 95.4px）+ 最小间距 4 + 阶段开关 28 + 开关离右缘 4 = 131.4px，一行放下
 // 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
-const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_136px_76px_116px_148px_minmax(216px,1fr)_64px]';
+// 多单占比 / 空单占比各 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
+// 再宽，右对齐的百分数就离左边的币量太远，读不成一组
+const LEGS_GRID = 'grid-cols-[132px_180px_116px_84px_88px_88px_84px_136px_72px_72px_116px_148px_minmax(216px,1fr)_64px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
  * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1714px]';
+const LEGS_MIN_WIDTH = 'min-w-[1750px]';
 
 /**
- * 冻结列：「#」与「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
- * 两格用负外边距把行的左内边距（px-3 = 12px）和两列之间的间距（gap-x-2.5 = 10px）一并盖住，
- * 拼成从 0 到 186px 的一整块实心底，滚过去的内容不会从缝里透出来。
- * 「角色」格往左多伸 2px、压在「#」格右缘上（-ml-3 = 间距 10px + 重叠 2px，pl-3 把内容推回原位），
- * 所以钉在 46px = 12 + 36（# 列宽）− 2 处：改 # 列宽或行内边距要连同这里一起改。
- * 不重叠而是恰好首尾相接时，浏览器缩放到非整数倍（90%、110%…）会在 48px 那条接缝上抗锯齿，
- * 底下滚过去的字从这条 1px 的缝里透出一串虚线（合计行的多 / 空标签最明显）。
+ * 冻结列：「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
+ * 它是每行的第一格：用负外边距把行的左内边距（px-3 = 12px）盖住、pl-3 再把内容推回原位，
+ * 从 0 到 12px + 角色列宽是一整块实心底，钉在 left-0，滚过去的内容不会从左边透出来。
+ * 只有这一格冻结，没有两格之间的接缝，非整数缩放（90%、110%…）下也不会抗锯齿出一条透字的缝。
+ * 主力的阶段开关就在这一格的第一行（角色标签右边），冻结着，滚到右边也点得到。
  * self-stretch：与整行同高，盖住右边更高的格子（时间列有三四行）；再按所在行的上下内边距用负外边距伸出去（FROZEN_PAD），
- * 上下相邻两行的冻结格首尾相接，右缘的阴影才是一整条，而不是一格一段。
- * 右缘的分隔线与阴影只在滚出去之后出现（容器上的 data-scrolled），没滚时表格看起来和原来一样。
- * 阴影画在伪元素上的一条横向渐变里：box-shadow 在每格上下两端会收窄，连起来是一串缺口。
+ * 上下相邻两行的冻结格首尾相接，右缘的分隔线与阴影才是一整条，而不是一格一段。
+ * 行底还有 1px 的分隔线边框（ROW_RULE），不属于冻结格的盒子，每道行分隔线处都会断开一个像素，所以：
+ * - 分隔线上下各多伸 2px（-inset-y-0.5）：它是不透明的，与相邻格的分隔线重叠处看不出来；
+ *   只伸 1px 不够——非整数缩放（90%）下，行挪过位（排序、展开阶段）之后 Chrome 取整绘制钉住的格子，伪元素的端点会再偏一个设备像素；
+ *   伸出表格上下两端的部分被滚动容器裁掉，表头与合计行（z-20）盖住伸进去的那一截；
+ * - 阴影是半透明的，重叠处会深一档，只在下面有行分隔线时往下伸 1px（FROZEN_SHADOW_BOTTOM）。
+ * 分隔线与阴影只在滚出去之后出现（容器上的 data-scrolled），没滚时表格看起来和原来一样。
+ * 两样都画在伪元素上，不占格子的盒子：
+ * - 分隔线（before）不用 border-r——边框下面要么铺着底色、盖掉高亮行蓝框的那 1px，
+ *   要么改成 bg-clip-padding，Chrome 在 2 倍屏、非整数行高下又会把行底的分隔线吃掉一段；
+ * - 阴影（after）是一条横向渐变：box-shadow 在每格上下两端会收窄，连起来是一串缺口。
+ * 行高常是小数（11px 字 × 1.25 这类），Chrome 给钉住的格子取整绘制时底色会往下多铺半个到一个像素，
+ * 正好压在这一行底边的分隔线上（展开 / 收起阶段、重新排序让行挪位之后最明显）——分隔线因此画在冻结格之上，见 ROW_RULE。
  */
-const FROZEN_SEQ_CELL = 'sticky left-0 z-10 -ml-3 self-stretch pl-3 transition-colors';
-const FROZEN_ROLE_CELL = 'sticky left-[46px] z-10 -ml-3 self-stretch border-r border-transparent pl-3 transition-colors '
-  + "after:pointer-events-none after:absolute after:inset-y-0 after:-right-2 after:w-2 after:bg-gradient-to-r after:from-black/10 after:to-transparent after:opacity-0 after:content-[''] "
-  + 'group-data-[scrolled=true]/legs:border-border group-data-[scrolled=true]/legs:after:opacity-100';
+const FROZEN_ROLE_CELL = 'sticky left-0 z-10 -ml-3 self-stretch pl-3 transition-colors '
+  + "before:pointer-events-none before:absolute before:-inset-y-0.5 before:right-0 before:w-px before:bg-border before:opacity-0 before:content-[''] "
+  + "after:pointer-events-none after:absolute after:top-0 after:-right-2 after:w-2 after:bg-gradient-to-r after:from-black/10 after:to-transparent after:opacity-0 after:content-[''] "
+  + 'group-data-[scrolled=true]/legs:before:opacity-100 group-data-[scrolled=true]/legs:after:opacity-100';
+
+/**
+ * 冻结格右缘阴影的下端：
+ * - flush：表头、合计行、阶段块里除最后一行外的阶段子行——下面没有行分隔线，紧接着的下一格自己会接上；
+ * - overRule：腿行、阶段块的最后一行——下面是 1px 的行分隔线（ROW_RULE），往下多伸 1px 盖过去，
+ *   分隔线叠在上面（z-[11]），交叉处两条线都完整。阶段子行之间不能也伸：阴影是半透明的，重叠的那一像素会深一档。
+ */
+/**
+ * 合计行的冻结格：分隔线只往上伸，不往下伸。合计行是 legs-scroll 里最后渲染的东西，
+ * 伸出它下沿的那 2px 不会被裁掉，而是算进可滚动的溢出——每张表都会因此能被竖向滚动 2px、滚轮不再带动页面。
+ * 所以 legs-scroll 里任何东西都不许伸到合计行下沿之外。Tailwind 把 bottom 排在 inset-y 之后，这一条盖过 -inset-y-0.5 的下半截。
+ */
+const FROZEN_TOTAL_DIVIDER = 'before:bottom-0';
+
+const FROZEN_SHADOW_BOTTOM = {
+  flush: 'after:bottom-0',
+  overRule: 'after:-bottom-px',
+} as const;
+
+/**
+ * 腿行与阶段块底边的分隔线：边框本身透明（行高不变），线画在伪元素上、叠在冻结格（z-10）之上、表头与合计行（z-20）之下，
+ * 冻结格取整绘制时多铺出来的那一点底色盖不住它，横穿冻结列的分隔线始终完整。
+ */
+const ROW_RULE = "relative border-b border-transparent after:pointer-events-none after:absolute after:inset-x-0 after:-bottom-px after:z-[11] after:h-px after:bg-border/40 after:content-['']";
 
 /** 冻结格上下伸出的量 = 所在行的 py：表头与合计行 py-2、数据行 py-2.5、阶段子行 py-1。 */
 const FROZEN_PAD = {
@@ -189,12 +236,33 @@ const PHASE_FILL = 'bg-card bg-[linear-gradient(hsl(var(--muted)/0.2),hsl(var(--
 const ROW_FILL = 'bg-card group-hover/row:bg-accent';
 const HIGHLIGHTED_ROW_FILL = 'bg-card bg-[linear-gradient(rgba(0,47,167,0.05),rgba(0,47,167,0.05))] group-hover/row:bg-accent group-hover/row:bg-none';
 /**
- * 高亮行整行有一圈 ring-1 ring-inset；冻结格盖在它上面，这里把上下两道（# 格再加左边一道）接着画出来，框才是完整的。
+ * 高亮行整行有一圈 ring-1 ring-inset；冻结格盖在它的左端上，这里把左、上、下三道接着画出来，框才是完整的。
  * 颜色取行上 ring 实际渲染出的值：ring-[#002FA7]/12 是任意色 + 非标准透明度档，Tailwind 不生成颜色规则，
  * 落回默认 ring 色 rgba(59,130,246,0.5)。
  */
-const HIGHLIGHTED_SEQ_RING = 'shadow-[inset_1px_0_0_rgba(59,130,246,0.5),inset_0_1px_0_rgba(59,130,246,0.5),inset_0_-1px_0_rgba(59,130,246,0.5)]';
-const HIGHLIGHTED_ROLE_RING = 'shadow-[inset_0_1px_0_rgba(59,130,246,0.5),inset_0_-1px_0_rgba(59,130,246,0.5)]';
+const HIGHLIGHTED_ROLE_RING = 'shadow-[inset_1px_0_0_rgba(59,130,246,0.5),inset_0_1px_0_rgba(59,130,246,0.5),inset_0_-1px_0_rgba(59,130,246,0.5)]';
+
+/**
+ * 角色格第一行的高度 = 时间列第一行（11px 字 × leading-tight）：标签在这一行里竖直居中，
+ * 与「开 2026-…」那一行的中线对齐；标签比这一行高出的部分上下对称地伸进行的内边距里。
+ * gap-1 只是标签与阶段开关之间的最小间距（最长的标签时才用得上），平常开关贴着右侧，离标签更远。
+ */
+const ROLE_LINE = 'flex h-[13.75px] items-center gap-1';
+
+/** 角色标签在表里的统一尺寸：行高 14px，加上下 2px 内边距共 18px；字体与表头一致用无衬线。 */
+const ROLE_CHIP_SIZE = 'shrink-0 whitespace-nowrap font-sans leading-[14px]';
+
+/**
+ * 主力阶段开关：定宽 28px（两位数的阶段数也放得下）、靠右（ml-auto），不同行的开关左缘在同一条竖线上；
+ * 高 18px 与角色标签同高，内容居中：悬停底色与焦点环和旁边的标签一样高，两位数时左右也各留出约 3px；
+ * 箭头的 viewBox 左侧自带 4px 空白，用 -ml-1 抵掉，箭头与数字看起来才是居中的一组。
+ * 离冻结格右缘留 4px（mr-1）：滚出去之后右缘出现分隔线，悬停底色与 1px 焦点环都不会贴上去、被它盖住。
+ * 箭头朝右 = 折叠，转 90° 朝下 = 展开；后面的数字是阶段数，淡色小字，悬停变深。
+ * -scroll-ml-[144px]（= 冻结宽度，见 LEGS_SCROLL_PADDING）：开关钉在冻结列里、永远看得见，
+ * 键盘把焦点移过来时不必为了避开左侧的滚动留白把表格横向滚回最左边。
+ */
+const PHASE_TOGGLE = 'ml-auto mr-1 inline-flex h-[18px] w-[28px] shrink-0 -scroll-ml-[144px] items-center justify-center gap-px rounded-sm font-sans text-[10px] leading-none tabular-nums '
+  + 'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 /** 横向滚出去时给容器打标，冻结列据此画出右缘分隔线；直接写 DOM 属性，滚动时不触发整表重渲染。 */
 function markLegsScrolled(event: UIEvent<HTMLDivElement>) {
@@ -236,13 +304,24 @@ const LEGS_SCROLL_MAX_HEIGHT = 'max-h-[452px]';
  * 浏览器只保证它落在滚动区之内——恰好落在边上，就会被钉住的那一块盖住：
  * - 底：合计行贴在底边（两组分母时 79.75px）→ 80px = scroll-pb-20；
  * - 顶：表头贴在顶边（约 32px）→ scroll-pt-8；
- * - 左：「#」+「角色」冻结在左缘（0–186px）→ scroll-pl-[186px]。
+ * - 左：「角色」冻结在左缘（0 到 12px 行内边距 + 132px 角色列 = 144px）→ scroll-pl-[144px]。
+ * 钉住的那几块里自己的按钮（列头的排序按钮、冻结格里的阶段开关）用负的 scroll-margin 抵掉这截留白，
+ * 否则焦点一落到它们身上，浏览器就会为了「让它离开留白」去滚动表格，而它们本来就一直看得见。
  */
-const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[186px]';
+const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[144px]';
 
-/** 「占比」列表头的说明：多单与空单分开算，挂单中的腿不进合计。 */
-const POSITION_SHARE_COLUMN_HINT = '多单与空单分开算：多单各腿占多单合计的百分比，空单各腿占空单合计的百分比（对冲通常是空单）；'
-  + '上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。合计行分别给出多、空两个分母。';
+/**
+ * 「多单占比」「空单占比」列头的说明：本方向各腿占本方向合计的百分比，挂单中的腿不进合计，点列头排序。
+ * 按钮的 title 在这句后面另起一行接上排序状态（describeLegPositionShareSort）。
+ */
+function positionShareColumnHint(side: LegPositionSide): string {
+  const name = legPositionSideName(side);
+  const other = legPositionSideName(side === 'long' ? 'short' : 'long');
+  return `这条${name}占全部计入的${name}的百分比${side === 'short' ? '（对冲通常是空单）' : ''}：上行币量、下行名义仓位；`
+    + '状态为「挂单中」的对冲 / 镜像腿不计入。'
+    + `${other}的行这一列留空；合计行写${name}各腿合计的 100.0%（${name}没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里${name}那组分母对齐。`
+    + '点击列头按本列排序：降序 → 升序 → 默认顺序。';
+}
 
 /**
  * 标签的配色写成完整类名：Tailwind 只认源码里整段出现的类名，拼接出来的不会生成规则。
@@ -254,7 +333,7 @@ const POSITION_SIDE_TAG_TONE: Record<LegPositionSide, string> = {
 };
 
 /**
- * 「多 / 空」小标签：币安仓位方向色的描边胶囊，只挂在上行。
+ * 「多 / 空」小标签：币安仓位方向色的描边胶囊。挂在两列占比的列头，以及合计行「币量 / 仓位」格每组分母的上行。
  * 字号 9px、行高 11px，加上下边框 13px，比上行 11px 字的行高（15px）矮——行高一格不变。
  */
 function PositionSideTag({ side }: { side: LegPositionSide }) {
@@ -270,16 +349,19 @@ function PositionSideTag({ side }: { side: LegPositionSide }) {
 }
 
 /**
- * 「币量 / 仓位」与「占比」两格共用的两行排版：上行（可带方向标签）+ 下行淡色小字。
- * 合计行两格都用它，行高逐行一致，「多 100.0%」才会与「多」那一组分母落在同一条水平线上。
+ * 合计行「币量 / 仓位」与两列占比共用的一组两行：上行（分母格带方向标签）+ 下行淡色小字。
+ * 三格都用它，行高逐组一致，「100.0%」才会与同方向那组分母落在同一条水平线上
+ * （标签 13px 高，矮于上行 11px 字的行高，带不带标签这一行都一样高）。
  */
 function PositionLines({
   side,
+  withTag,
   top,
   bottom,
   testId,
 }: {
   side: LegPositionSide | null;
+  withTag: boolean;
   top: string;
   bottom: string;
   testId?: string;
@@ -287,11 +369,68 @@ function PositionLines({
   return (
     <div data-testid={testId} data-side={side ?? undefined}>
       <div className="flex items-center justify-end gap-1">
-        {side && <PositionSideTag side={side} />}
+        {side && withTag && <PositionSideTag side={side} />}
         <span>{top}</span>
       </div>
       <div className="text-[10px] text-muted-foreground">{bottom}</div>
     </div>
+  );
+}
+
+/**
+ * 隐形的一组：「空单占比」合计格在多单那组的位置垫上它，「空 100.0%」才与分母格里的空单那组同一行。
+ * 与 PositionLines 同一套两行排版（不间断空格撑出行高），看不见、读屏跳过。
+ */
+function PositionLinesSpacer() {
+  return (
+    <div aria-hidden="true" className="invisible">
+      <div className="flex items-center justify-end gap-1"><span>{'\u00a0'}</span></div>
+      <div className="text-[10px] text-muted-foreground">{'\u00a0'}</div>
+    </div>
+  );
+}
+
+/**
+ * 合计行「币量 / 仓位」与两列占比三格共用的样式。self-start：三格都贴着合计行的顶边排，
+ * 只有一组的格子不会在行里居中，各组才逐组落在同一条水平线上。
+ */
+const TOTAL_POSITION_CELL = 'self-start space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55';
+
+/**
+ * 「多单占比」/「空单占比」列头：原生按钮（键盘可用），点击在 降序 → 升序 → 默认顺序 之间循环。
+ * 看得见的是「多 / 空」标签 +「占比」+ 排序图标；读屏名是完整的「按多单占比排序：当前…，点击…」。
+ * 表头不是真正的表格语义（没有 role="columnheader"），所以不用 aria-sort，状态写在读屏名里。
+ * 悬停说明（title）= 列说明 + 排序状态；读屏的描述只给列说明（aria-description 优先于 title），状态不念两遍。
+ * -scroll-mt-8：按钮在钉住的表头里、永远看得见，键盘焦点移过来时不必为了避开顶部的滚动留白把表体往上滚。
+ */
+function PositionShareSortHeader({
+  side,
+  sort,
+  onSort,
+}: {
+  side: LegPositionSide;
+  sort: LegPositionShareSort | null;
+  onSort: (side: LegPositionSide) => void;
+}) {
+  const label = describeLegPositionShareSort(side, sort);
+  const direction = sort?.side === side ? sort.direction : null;
+  const Icon = direction === 'desc' ? ArrowDown : direction === 'asc' ? ArrowUp : ArrowUpDown;
+  return (
+    <button
+      type="button"
+      data-testid={`legs-share-sort-${side}`}
+      onClick={() => onSort(side)}
+      aria-label={label}
+      aria-description={positionShareColumnHint(side)}
+      title={`${positionShareColumnHint(side)}\n${label}`}
+      className={`flex w-full min-w-0 -scroll-mt-8 items-center justify-end gap-1 whitespace-nowrap rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+        direction ? 'text-foreground' : ''
+      }`}
+    >
+      <PositionSideTag side={side} />
+      <span>占比</span>
+      <Icon aria-hidden="true" className={`h-3 w-3 shrink-0 ${direction ? '' : 'text-muted-foreground/50'}`} />
+    </button>
   );
 }
 
@@ -321,7 +460,8 @@ function AddSizingDetailDialog({
     : null;
   const excessNotional = excessCoins != null && verdict.s2 != null ? excessCoins * verdict.s2 : null;
   const d = leg.direction === 'short' ? -1 : 1;
-  const addOrdinal = leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? leg.leg_sequence ?? '';
+  // 加仓校验只给 main_add_N 的腿打标，标题就用角色里的编号（表里不再印腿的序号，这里也不拿它兜底）
+  const addOrdinal = leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? '';
   const averageEntry = verdict.x1Coins != null && verdict.x1Coins > 0
     && verdict.s1 != null && verdict.cushion != null
     ? verdict.s1 - verdict.cushion / (verdict.x1Coins * d)
@@ -438,6 +578,28 @@ export function CampaignLegsList({
   initialExpectedMaxLoss = null,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
+  // 两列占比的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）
+  const [shareSort, setShareSort] = useState<LegPositionShareSort | null>(null);
+  const legsScrollRef = useRef<HTMLDivElement>(null);
+  const toggleShareSort = useCallback((side: LegPositionSide) => {
+    // 换了排序就回到表体顶端，排在最前的行直接看得见；横向位置不动。
+    // 在重排之前归零：滚动位置为 0 时浏览器不做滚动锚定，不会为了盯住原来顶上那一行又把表体滚下去。
+    const scroller = legsScrollRef.current;
+    if (scroller) scroller.scrollTop = 0;
+    setShareSort(current => nextLegPositionShareSort(current, side));
+  }, []);
+  // 主力阶段子行默认折叠：展开的是哪几条主力，按腿 id 记，不持久化
+  const [expandedPhaseLegIds, setExpandedPhaseLegIds] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePhases = useCallback((legId: string) => {
+    setExpandedPhaseLegIds(current => {
+      const next = new Set(current);
+      if (next.has(legId)) next.delete(legId);
+      else next.add(legId);
+      return next;
+    });
+  }, []);
+  // 阶段容器的 id 前缀：同一页上有两张 Legs 表时 aria-controls 也不会撞
+  const phasesIdPrefix = useId();
   // 与导出 PNG 同一个函数：两处的淡注一字不差
   const foreignLiveOrdersNote = useMemo(() => formatForeignReplayOrdersNote(foreignLiveOrders), [foreignLiveOrders]);
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
@@ -525,9 +687,9 @@ export function CampaignLegsList({
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
-  // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
+  // 「币量 / 仓位」与两列占比：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
   // 多单、空单分开算：分组取这条腿的持仓方向，与「涨跌幅」列同一个来源（不看角色）。
-  // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定沿用角色旁那枚状态标签的规则，两处永远一致。与导出 PNG 同一个 helper。
+  // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定与角色标签的空心样式同一个 legRowStatus，两处永远一致。与导出 PNG 同一个 helper。
   const positionShares = useMemo(() => computeLegPositionShares(legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPriceValue = resolveLegExecution(leg, record, legExitPriceCorrections).entryPrice;
@@ -540,9 +702,18 @@ export function CampaignLegsList({
       side: legPositionSideFromDirection(leg.direction),
       coinQty: legCoinQty,
       notional: leg.pre_position_size ?? null,
-      counted: !statusForLeg(leg, record).pending,
+      counted: legRowStatus(leg, record) !== 'pending',
     };
   })), [legs, recordMap, legExitPriceCorrections]);
+
+  // 行的先后：点了哪一列占比就按哪一列排（没有值的行沉底、并列保持原序），否则就是传进来的先后。
+  // 只重排行，不重算任何数：阶段子行、高亮、加仓校验、委托归属都按腿 id 取，跟着各自的腿走；合计行不在这里，始终在最后。
+  const orderedLegs = useMemo(
+    () => sortByLegPositionShare(legs, leg => positionShares.byLeg.get(leg.id), shareSort),
+    [legs, positionShares, shareSort],
+  );
+  // 合计行两列占比的每一组：与「币量 / 仓位」格里的分母逐组对应；本方向那组之前的别的方向垫一组隐形占位，之后的不画。
+  const listedSides = useMemo(() => positionShares.sides.map(totals => totals.side), [positionShares]);
 
   // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
@@ -564,6 +735,7 @@ export function CampaignLegsList({
           表头因此改为 sticky top、合计行 sticky bottom，都在这一个容器里钉住。 */}
       <div
         data-testid="legs-scroll"
+        ref={legsScrollRef}
         onScroll={markLegsScrolled}
         className={`group/legs ${LEGS_SCROLL_MAX_HEIGHT} ${LEGS_SCROLL_PADDING} overflow-auto`}
       >
@@ -572,8 +744,7 @@ export function CampaignLegsList({
             data-testid="legs-header-row"
             className={`sticky top-0 z-20 grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
           >
-            <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.header} ${HEADER_FILL}`}>#</div>
-            <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${HEADER_FILL}`}>角色</div>
+            <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${FROZEN_SHADOW_BOTTOM.flush} ${HEADER_FILL}`}>角色</div>
             <div>时间</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
@@ -581,17 +752,18 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
-            <div className="text-right" title={POSITION_SHARE_COLUMN_HINT}>占比</div>
+            <PositionShareSortHeader side="long" sort={shareSort} onSort={toggleShareSort} />
+            <PositionShareSortHeader side="short" sort={shareSort} onSort={toggleShareSort} />
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
           <div>
-            {legs.map(leg => {
+            {orderedLegs.map(leg => {
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
               const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
-              const status = statusForLeg(leg, record);
+              const status = legRowStatus(leg, record);
               const highlighted = highlightedSet.has(leg.id);
               const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
               const closeLabel = fmtClock(execution.closeTime);
@@ -622,37 +794,53 @@ export function CampaignLegsList({
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
               const phases = mainPhasesMap.get(leg.id) ?? null;
+              const phasesExpanded = phases != null && expandedPhaseLegIds.has(leg.id);
+              const phasesId = `${phasesIdPrefix}-phases-${leg.id}`;
               return (
                 <div key={leg.id}>
                 <div
-                  className={`group/row grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
+                  className={`group/row grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 ${ROW_RULE} hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
-                  <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.row} ${highlighted ? `${HIGHLIGHTED_ROW_FILL} ${HIGHLIGHTED_SEQ_RING}` : ROW_FILL}`}>{leg.leg_sequence ?? '—'}</div>
-                  {/* 角色名长短不一（主力开仓 / 加仓1 / ReH），标签靠左排就会参差；
-                      推到列的右缘，各行的「回填」便落在同一条竖线上。
-                      外层是冻结格（拉满行高），内层照旧只占一行高，标签仍与行首对齐。 */}
-                  <div data-testid={`leg-frozen-role-${leg.id}`} className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.row} ${highlighted ? `${HIGHLIGHTED_ROW_FILL} ${HIGHLIGHTED_ROLE_RING}` : ROW_FILL}`}>
-                  <div className="flex items-center justify-between gap-1.5">
-                    {leg.leg_role
-                      ? <LegRoleChip role={leg.leg_role} ordinal={mainLegOrdinals.get(leg.id) ?? null} />
-                      : '—'}
-                    {/* 「回填」排在最右：它几乎每行都有，放在右缘各行才落在同一条竖线上；
-                        「挂单中 / 进行中」是少数行才出现的例外，插在它左边。 */}
-                    <div className="flex shrink-0 items-center gap-1">
-                      {!status.closed && (
-                        <span className={`inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] ${status.className}`}>
-                          {status.label}
-                        </span>
-                      )}
-                      {leg.source === 'retroactive_from_record' && (
-                        <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          回填
-                        </span>
+                  {/* 冻结的角色格：一行、一枚标签。没有平仓时标签本身换样子（挂单中空心、进行中带圆点），
+                      来源（历史回填）只在悬停说明里；主力的阶段开关靠右，各行的开关落在同一条竖线上。
+                      没有角色的腿也是一枚标签（中性灰、写「—」），进行中的圆点照样画得出来。
+                      外层是冻结格（拉满行高），内层只占时间列第一行那么高，标签与「开 …」那一行居中对齐。 */}
+                  <div
+                    data-testid={`leg-frozen-role-${leg.id}`}
+                    className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.row} ${FROZEN_SHADOW_BOTTOM.overRule} ${highlighted ? `${HIGHLIGHTED_ROW_FILL} ${HIGHLIGHTED_ROLE_RING}` : ROW_FILL}`}
+                  >
+                    <div className={ROLE_LINE}>
+                      <LegRoleChip
+                        role={leg.leg_role ?? null}
+                        ordinal={mainLegOrdinals.get(leg.id) ?? null}
+                        status={status === 'closed' ? null : status}
+                        title={roleChipTitle(status, leg.source === 'retroactive_from_record', !leg.leg_role)}
+                        className={ROLE_CHIP_SIZE}
+                      />
+                      {/* 主力阶段子行默认折叠：开关是角色标签右边的小箭头 + 阶段数，冻结着，滚到右边也点得到。
+                          title 给鼠标看，与读屏名同一句；aria-description="" 让读屏不再把 title 当描述重复念一遍。 */}
+                      {phases && (
+                        <button
+                          type="button"
+                          data-testid={`leg-phases-toggle-${leg.id}`}
+                          onClick={() => togglePhases(leg.id)}
+                          aria-expanded={phasesExpanded}
+                          aria-controls={phasesId}
+                          aria-label={`${phasesExpanded ? '收起' : '展开'} ${phases.length} 个阶段`}
+                          aria-description=""
+                          title={`${phasesExpanded ? '收起' : '展开'} ${phases.length} 个阶段`}
+                          className={PHASE_TOGGLE}
+                        >
+                          <ChevronRight
+                            aria-hidden="true"
+                            className={`-ml-1 h-3 w-3 shrink-0 transition-transform duration-150 ${phasesExpanded ? 'rotate-90' : ''}`}
+                          />
+                          <span aria-hidden="true">{phases.length}</span>
+                        </button>
                       )}
                     </div>
-                  </div>
                   </div>
                   {/* 标签定宽（按最长的「操作」定），三行时间戳才会起于同一条竖线：
                       一个字的「开」与两个字的「操作」若各自占位，日期就会落在两个位置上。
@@ -740,20 +928,25 @@ export function CampaignLegsList({
                       {formatLegNotional(position?.notional)}
                     </div>
                   </div>
-                  {/* 占比：与左边一格同构——上行币量占比，下行名义仓位占比，都是同方向（多单 / 空单）合计里的份额。
-                      百分数本身中性色，不上红绿：这是仓位分布，不是盈亏；方向只由上行前的「多 / 空」标签交代。
-                      挂单中的腿不进分母，两行都是「—」、不挂标签。 */}
-                  <div
-                    data-testid={`leg-position-share-${leg.id}`}
-                    title={describeLegPositionShare(position)}
-                    className="text-right tabular-nums leading-snug"
-                  >
-                    <PositionLines
-                      side={legPositionShareTagSide(position)}
-                      top={formatLegPositionSharePct(position?.coinSharePct)}
-                      bottom={formatLegPositionSharePct(position?.notionalSharePct)}
-                    />
-                  </div>
+                  {/* 多单占比 / 空单占比：与左边一格同构——上行币量占比，下行名义仓位占比，都是本方向合计里的份额。
+                      两行数只出现在这条腿自己方向的那一列，另一列整格留空（连「—」都不写），方向一眼可辨；列头已写明方向，行里不再挂标签。
+                      百分数本身中性色，不上红绿：这是仓位分布，不是盈亏。挂单中的腿不进分母，两行都是「—」。 */}
+                  {LEG_POSITION_SIDES.map(side => (
+                    position?.side === side ? (
+                      <div
+                        key={side}
+                        data-testid={`leg-position-share-${leg.id}`}
+                        data-side={side}
+                        title={describeLegPositionShare(position)}
+                        className="text-right tabular-nums leading-snug"
+                      >
+                        <div>{formatLegPositionSharePct(position.coinSharePct)}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {formatLegPositionSharePct(position.notionalSharePct)}
+                        </div>
+                      </div>
+                    ) : <div key={side} />
+                  ))}
                   {(() => {
                     /**
                      * 合规是常态，对号几乎隐形；过大则直接写出 Plan B 的币量上限与 U 名义仓位。
@@ -940,10 +1133,10 @@ export function CampaignLegsList({
                 </div>
 
                 {/* 主力阶段拆解：每一次滚动对冲的结束 = 主力一个阶段的完成。
-                    子行缩进浅色呈现，Σ阶段盈亏 === 主力整腿盈亏（分摊守恒）。 */}
-                {phases && (
-                  <div data-testid={`leg-phases-${leg.id}`} className="border-b border-border/40 bg-muted/20">
-                    {phases.map(phase => {
+                    子行缩进浅色呈现，Σ阶段盈亏 === 主力整腿盈亏（分摊守恒）。默认折叠，折叠时整块不渲染。 */}
+                {phases && phasesExpanded && (
+                  <div id={phasesId} data-testid={`leg-phases-${leg.id}`} className={`${ROW_RULE} bg-muted/20`}>
+                    {phases.map((phase, phaseIndex) => {
                       const phaseDelta = legDeltaB(phase.pnl, initialExpectedMaxLoss);
                       const phaseContribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
                       const positive = phase.pnl > 0;
@@ -952,9 +1145,13 @@ export function CampaignLegsList({
                           key={phase.index}
                           className={`grid ${LEGS_GRID} gap-x-2.5 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground`}
                         >
-                          <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.phase} ${PHASE_FILL}`} />
-                          <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.phase} ${PHASE_FILL} flex items-center`}>
-                            <div className="pl-3 font-sans text-[9px]">
+                          {/* 「阶段 N」与主力标签里的文字对齐（标签左内边距 px-2），各列的阶段数也与腿行的同列对齐 */}
+                          <div
+                            className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.phase} ${
+                              phaseIndex === phases.length - 1 ? FROZEN_SHADOW_BOTTOM.overRule : FROZEN_SHADOW_BOTTOM.flush
+                            } ${PHASE_FILL} flex items-center`}
+                          >
+                            <div className="whitespace-nowrap pl-2 font-sans text-[9px]">
                               阶段 {phase.index}
                               {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
                             </div>
@@ -996,6 +1193,7 @@ export function CampaignLegsList({
                           <div />
                           <div />
                           <div />
+                          <div />
                         </div>
                       );
                     })}
@@ -1014,8 +1212,7 @@ export function CampaignLegsList({
               data-testid="legs-total-row"
               className={`sticky bottom-0 z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
-              <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.total} bg-card`} />
-              <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} flex items-center bg-card text-muted-foreground`}>合计</div>
+              <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} ${FROZEN_SHADOW_BOTTOM.flush} ${FROZEN_TOTAL_DIVIDER} flex items-center bg-card text-muted-foreground`}>合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
               <div className={`text-right text-[12px] font-medium tabular-nums ${totalPnl == null ? 'text-foreground/50' : totalPnl > 0 ? 'text-[#0ECB81]/90' : totalPnl < 0 ? 'text-[#F6465D]/90' : ''}`}>
                 {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}
@@ -1030,46 +1227,54 @@ export function CampaignLegsList({
               </div>
               {/* 开仓价 / 平仓价 / 涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
               <div /><div /><div />
-              {/* 币量 / 仓位：多单、空单各写一组「占比」的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
+              {/* 币量 / 仓位：多单、空单各写一组占比的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
                   每组以同样的「多 / 空」标签开头；没有计入腿的方向不列。
-                  占比：与左格逐组对齐，写「多 100.0%」/「空 100.0%」。两个方向都没有时照旧两行「—」。加仓校验留空。
-                  合计行可以因此变高，腿行不变。 */}
+                  多单占比 / 空单占比：各写本方向那组的「100.0%」，与左格里同方向那组落在同一行——
+                  两个方向都列出时，「空单占比」格先垫一组隐形占位；本方向没有计入腿时整格留空。
+                  两个方向都没有时三格照旧两行「—」。加仓校验留空。合计行可以因此变高，腿行不变。 */}
               <div
                 data-testid="legs-total-position"
                 title={describeLegPositionDenominators(positionShares.sides)}
-                className="space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
+                className={TOTAL_POSITION_CELL}
               >
                 {positionShares.sides.length === 0 ? (
-                  <PositionLines side={null} top="—" bottom="—" />
+                  <PositionLines side={null} withTag={false} top="—" bottom="—" />
                 ) : positionShares.sides.map(totals => (
                   <PositionLines
                     key={totals.side}
                     testId={`legs-total-position-${totals.side}`}
                     side={totals.side}
+                    withTag
                     top={formatLegCoinQuantity(totals.totalCoins)}
                     bottom={formatLegNotional(totals.totalNotional)}
                   />
                 ))}
               </div>
-              <div
-                data-testid="legs-total-position-share"
-                title={positionShares.sides.length === 0
-                  ? undefined
-                  : positionShares.sides.map(describeLegPositionSideTotal).join('；')}
-                className="space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55"
-              >
-                {positionShares.sides.length === 0 ? (
-                  <PositionLines side={null} top="—" bottom="—" />
-                ) : positionShares.sides.map(totals => (
-                  <PositionLines
-                    key={totals.side}
-                    testId={`legs-total-position-share-${totals.side}`}
-                    side={totals.side}
-                    top={formatLegPositionShareTotal(totals.totalCoins)}
-                    bottom={formatLegPositionShareTotal(totals.totalNotional)}
-                  />
-                ))}
-              </div>
+              {LEG_POSITION_SIDES.map(side => {
+                const at = listedSides.indexOf(side);
+                return (
+                  <div
+                    key={side}
+                    data-testid={`legs-total-position-share-${side}`}
+                    title={at < 0 ? undefined : describeLegPositionSideTotal(positionShares.bySide[side])}
+                    className={TOTAL_POSITION_CELL}
+                  >
+                    {listedSides.length === 0 ? (
+                      <PositionLines side={null} withTag={false} top="—" bottom="—" />
+                    ) : at < 0 ? null : (
+                      <>
+                        {listedSides.slice(0, at).map(before => <PositionLinesSpacer key={before} />)}
+                        <PositionLines
+                          side={side}
+                          withTag={false}
+                          top={formatLegPositionShareTotal(positionShares.bySide[side].totalCoins)}
+                          bottom={formatLegPositionShareTotal(positionShares.bySide[side].totalNotional)}
+                        />
+                      </>
+                    )}
+                  </div>
+                );
+              })}
               <div />
               <div
                 data-testid="legs-total-fees"

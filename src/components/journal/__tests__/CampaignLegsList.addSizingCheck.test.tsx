@@ -58,13 +58,14 @@ const renderList = (addNotional: number, reverseHedgeOrders = orders) => render(
 );
 
 describe('Legs 列表的「加仓校验」列', () => {
-  it('表头紧跟在「币量 / 仓位」及其「占比」之后', () => {
+  it('表头紧跟在「币量 / 仓位」及其「多单占比」「空单占比」两列之后', () => {
     renderList(22_057_330);
     const header = screen.getByText('加仓校验');
     const coins = screen.getByText('币量 / 仓位');
     const fees = screen.getByText('手续费');
-    expect(coins.nextElementSibling).toBe(screen.getByText('占比'));
-    expect(coins.nextElementSibling!.nextElementSibling).toBe(header);
+    expect(coins.nextElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
+    expect(coins.nextElementSibling!.nextElementSibling).toBe(screen.getByRole('button', { name: /^按空单占比排序/ }));
+    expect(coins.nextElementSibling!.nextElementSibling!.nextElementSibling).toBe(header);
     expect(header.nextElementSibling).toBe(fees);
     expect(header.getAttribute('title')).toContain('X₂(S₂ − S₁)');
   });
@@ -174,6 +175,8 @@ describe('Legs 列表的「加仓校验」列', () => {
       </MemoryRouter>,
     );
     const headerCells = screen.getByText('加仓校验').parentElement!.children.length;
+    // 阶段子行默认折叠：先展开
+    fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
     const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
     expect(phaseRows.length).toBeGreaterThanOrEqual(2);
     for (const row of phaseRows) expect(row.children.length).toBe(headerCells);

@@ -8,9 +8,22 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { LEG_POSITION_SHARE_COLUMN_TITLES } from '@/lib/legPositionShare';
 
 const src = () =>
   readFileSync(join(process.cwd(), 'src/components/journal/CampaignLegsList.tsx'), 'utf8');
+
+/**
+ * 「多单占比」「空单占比」两列的列头是可点击排序的按钮（同一个组件各用一次），列名在读屏名里，
+ * 源码里找的是这两处调用；列名本身来自 LEG_POSITION_SHARE_COLUMN_TITLES（页面与 PNG 共用）。
+ */
+const SHARE_HEADERS = {
+  多单占比: '<PositionShareSortHeader side="long"',
+  空单占比: '<PositionShareSortHeader side="short"',
+} as const;
+const headerAt = (s: string, title: string) => (
+  title in SHARE_HEADERS ? s.indexOf(SHARE_HEADERS[title as keyof typeof SHARE_HEADERS]) : s.indexOf(`>${title}</div>`)
+);
 
 describe('Legs 表栅格', () => {
   it('列定义只有一份常量，表头与数据行都引用它', () => {
@@ -29,30 +42,44 @@ describe('Legs 表栅格', () => {
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
     expect(columnCount).toBe(14);
-    for (const title of ['#', '角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '占比', '加仓校验', '手续费', '委托', '操作']) {
-      expect(s).toContain(`>${title}</div>`);
-    }
+    const titles = ['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '空单占比', '加仓校验', '手续费', '委托', '操作'];
+    expect(titles).toHaveLength(columnCount);
+    for (const title of titles) expect(headerAt(s, title)).toBeGreaterThan(-1);
+    // 两列占比：各只出现一次，列名与 PNG 表头同一份
+    expect(LEG_POSITION_SHARE_COLUMN_TITLES).toEqual({ long: '多单占比', short: '空单占比' });
+    for (const call of Object.values(SHARE_HEADERS)) expect(s.split(call)).toHaveLength(2);
+    expect(s).not.toContain('>占比</div>');
+    // 【用户要求】第一列只有「角色」：不再有「#」列
+    expect(s).not.toContain('>#</div>');
+    expect(s).not.toContain('leg.leg_sequence ??');
   });
 
   it('贡献 / 盈亏与 Δb 紧跟时间——扫视最先停留的那一段留给要读的结论', () => {
     const s = src();
-    const at = (title: string) => s.indexOf(`>${title}</div>`);
+    const at = (title: string) => headerAt(s, title);
     expect(at('时间')).toBeLessThan(at('贡献 / 盈亏'));
     expect(at('贡献 / 盈亏')).toBeLessThan(at('Δb'));
     expect(at('Δb')).toBeLessThan(at('开仓价'));       // 结论在前，"怎么来的"在后
     expect(at('平仓价')).toBeLessThan(at('涨跌幅'));    // 涨跌幅紧贴在开平价右边——它就是这两个数算出来的
     expect(at('涨跌幅')).toBeLessThan(at('币量 / 仓位'));
-    expect(at('币量 / 仓位')).toBeLessThan(at('占比'));       // 占比紧贴在币量 / 仓位右边——它就是这一格算出来的
-    expect(at('占比')).toBeLessThan(at('加仓校验'));
+    expect(at('币量 / 仓位')).toBeLessThan(at('多单占比'));   // 两列占比紧贴在币量 / 仓位右边——它们就是这一格算出来的
+    expect(at('多单占比')).toBeLessThan(at('空单占比'));       // 先多后空，与合计行里分母的先后一致
+    expect(at('空单占比')).toBeLessThan(at('加仓校验'));
     expect(at('币量 / 仓位')).toBeLessThan(at('加仓校验'));   // 加仓校验紧跟币量——X 就是它要读的数
     expect(at('加仓校验')).toBeLessThan(at('手续费'));
     expect(at('手续费')).toBeLessThan(at('委托'));
     expect(s).not.toContain('>状态</div>');             // 状态并进角色格，不单独占一列
   });
 
-  it('回填标签靠右对齐、时间标签定宽——角色名与标签长短不一时才不会参差', () => {
+  it('【用户要求】角色格只有一行：不再挂「回填」，阶段开关定宽靠右、离冻结格右缘留 4px；时间标签定宽——长短不一时才不会参差', () => {
     const s = src();
-    expect(s).toContain('flex items-center justify-between gap-1.5');   // 角色格：标签推到右缘
+    // 角色格第一行与时间列第一行同高（11px × leading-tight），标签在里面竖直居中；gap-1 是标签与开关之间的最小间距
+    expect(s).toContain("const ROLE_LINE = 'flex h-[13.75px] items-center gap-1';");
+    // 阶段开关：定宽、ml-auto 靠右，各行的开关左缘在同一条竖线上；mr-1 离右缘 4px，滚出去之后出现的分隔线不压住悬停底色与焦点环
+    expect(s).toMatch(/const PHASE_TOGGLE = 'ml-auto mr-1 inline-flex h-\[18px\] w-\[28px\] shrink-0 /);
+    // 与角色标签同高（18px）、内容居中：悬停底色与焦点环不比旁边的标签矮，两位数阶段也不贴边
+    expect(s).toMatch(/const PHASE_TOGGLE = '[^']*\bjustify-center\b/);
+    expect(s).not.toMatch(/>\s*回填\s*</);                              // 回填标签去掉了（来源只在悬停说明里）
     expect(s).toContain("const TIME_LABEL = 'inline-block w-[30px]");   // 时间格：三行时间戳同起点
     expect((s.match(/\{TIME_LABEL\}/g) ?? []).length).toBe(3);          // 开 / 平 / 操作 共用它
   });
@@ -80,7 +107,7 @@ describe('Legs 表栅格', () => {
     expect(tracks).toHaveLength(14);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
     expect(tracks[12]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
-    expect(tracks[2]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
+    expect(tracks[1]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
   it('【用户要求】手续费列放得下「开 82,328 · 平 104,091 ASTER」这类最长的拆分行', () => {
@@ -92,31 +119,53 @@ describe('Legs 表栅格', () => {
     expect(cell).toContain('min-w-0');
   });
 
-  it('【用户要求】「占比」紧跟「币量 / 仓位」、约 76px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
+  it('【用户要求】「多单占比」「空单占比」两列紧跟「币量 / 仓位」、各 72px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
     const s = src();
     const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
+    // 角色：最长的「重新入场主力 2」标签带进行中圆点（95.4px）+ 最小间距 4 + 阶段开关 28 + 离右缘 4，一行放下（浏览器里量过）
+    expect(tracks[0]).toBe('132px');
+    const toggleWidth = Number(/const PHASE_TOGGLE = '[^']*\bw-\[(\d+)px\]/.exec(s)?.[1]);
+    expect(toggleWidth).toBe(28);
+    expect(Math.ceil(95.4 + 4 + toggleWidth + 4)).toBeLessThanOrEqual(Number.parseInt(tracks[0], 10));
     // 币量 / 仓位：合计行的 Σ币量前多了一枚「多 / 空」标签（约 18px），百亿级 17 个字符（11px 等宽约 112px）加上标签要一行放下
-    expect(tracks[8]).toBe('136px');
-    expect(tracks[9]).toBe('76px');    // 占比：放得下「多 100.0%」
+    expect(tracks[7]).toBe('136px');
+    // 多单占比 / 空单占比：列头「标签 + 占比 + 排序图标」（57px）与「100.0%」（40px）都一行放下（浏览器里量过）
+    expect(tracks[8]).toBe('72px');
+    expect(tracks[9]).toBe('72px');
+    expect(tracks[10]).toBe('116px');  // 加仓校验不变
     // minmax(216px,1fr) 按下限计
     const trackSum = tracks.reduce((sum, track) => sum + Number.parseInt(track.replace(/^minmax\(/, ''), 10), 0);
     const minWidth = Number(/const LEGS_MIN_WIDTH = 'min-w-\[(\d+)px\]'/.exec(s)?.[1]);
     expect(minWidth).toBe(trackSum + 10 * (tracks.length - 1) + 24);
-    expect(minWidth).toBe(1714);
+    expect(minWidth).toBe(1750);
   });
 
-  it('【用户要求】冻结「#」与「角色」：「角色」的钉点 = 行左内边距 + # 列宽，四种行都用同一对常量', () => {
+  it('【用户要求】只冻结「角色」一列：钉在 left-0，负外边距盖住行的左内边距；四种行都用同一个常量', () => {
     const s = src();
     const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
-    const roleLeft = Number(/const FROZEN_ROLE_CELL = 'sticky left-\[(\d+)px\]/.exec(s)?.[1]);
-    // 各行都是 px-3（12px）；「角色」再往左压住「#」2px。钉点错了，「角色」会在滚动时跳一下，或与 # 之间漏出一道缝
-    expect(roleLeft).toBe(12 + Number.parseInt(tracks[0], 10) - 2);
-    expect(s).toContain("const FROZEN_SEQ_CELL = 'sticky left-0 z-10 -ml-3 ");
-    // 负外边距 = gap-x-2.5 的 10px + 重叠 2px；内边距同量，内容仍从原位起
-    expect(s).toContain("const FROZEN_ROLE_CELL = 'sticky left-[46px] z-10 -ml-3 self-stretch border-r border-transparent pl-3 ");
+    // 各行都是 px-3（12px）：-ml-3 把冻结格伸到 0，pl-3 把内容推回原位——一整块实心底，没有两格之间的接缝
+    expect(s).toContain("const FROZEN_ROLE_CELL = 'sticky left-0 z-10 -ml-3 self-stretch pl-3 ");
+    expect(s).not.toContain('FROZEN_SEQ_CELL');
+    expect(s).not.toMatch(/sticky left-\[\d+px\]/);
+    // 右缘分隔线与阴影画在伪元素上，滚出去之后才出现
+    expect(s).toContain('group-data-[scrolled=true]/legs:before:opacity-100 group-data-[scrolled=true]/legs:after:opacity-100');
     // 表头、数据行、主力阶段子行、合计行各用一次
-    expect((s.match(/\$\{FROZEN_SEQ_CELL\}/g) ?? []).length).toBe(4);
     expect((s.match(/\$\{FROZEN_ROLE_CELL\}/g) ?? []).length).toBe(4);
+    // 键盘滚动留白 = 冻结宽度 = 行左内边距 + 角色列宽
+    const frozenWidth = 12 + Number.parseInt(tracks[0], 10);
+    expect(s).toContain(`const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[${frozenWidth}px]';`);
+    // 冻结格里的阶段开关用同样大小的负滚动外边距抵掉左侧留白（改角色列宽时两处一起改）
+    expect(s).toMatch(new RegExp(`const PHASE_TOGGLE = '[^']*-scroll-ml-\\[${frozenWidth}px\\]`));
+    // 右缘分隔线（不透明）上下各多伸 2px，盖住行分隔线那一像素与取整绘制的偏差；
+    // 阴影（半透明）上端贴顶，下端按行型定（腿行与阶段块最后一行伸过 1px 的行分隔线），四种行各选一次
+    expect(s).toContain("before:absolute before:-inset-y-0.5 before:right-0");
+    expect(s).toContain("after:absolute after:top-0 after:-right-2");
+    expect(s).not.toMatch(/after:inset-y-0|after:-inset-y/);
+    expect(s).toContain("overRule: 'after:-bottom-px'");
+    expect((s.match(/FROZEN_SHADOW_BOTTOM\.(flush|overRule)/g) ?? []).length).toBe(5);
+    // 行底分隔线画在冻结格之上（z-[11]），腿行与阶段块都用它
+    expect(s).toMatch(/const ROW_RULE = "relative border-b border-transparent [^"]*after:z-\[11\]/);
+    expect((s.match(/\$\{ROW_RULE\}/g) ?? []).length).toBe(2);
     // 行区不能再套竖向滚动：否则冻结列钉在一个从不横滚的容器上
     expect(s).not.toContain('max-h-[380px] overflow-y-auto');
   });

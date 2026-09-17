@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
@@ -189,8 +189,12 @@ describe('Legs 列表的「涨跌幅」列', () => {
       }),
     ];
 
+    /** 阶段子行默认折叠：点主力角色格里的「N 个阶段」展开。 */
+    const expandPhases = () => fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
+
     it('阶段子行按各自起止价各算各的，淡色行里仍按 /90 绿涨红跌', () => {
       renderList(phaseLegs);
+      expandPhases();
       expect(screen.getByTestId('leg-price-change-main').textContent).toBe('+101.26%');
       const first = screen.getByTestId('leg-phase-price-change-main-1');
       const tail = screen.getByTestId('leg-phase-price-change-main-2');
@@ -213,6 +217,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
         legFor({ ...phaseLegs[0], direction: 'short', post_realized_pnl: -95_439.77 }),
         legFor({ ...phaseLegs[1], direction: 'long', post_realized_pnl: 2_000 }),
       ]);
+      expandPhases();
       const main = screen.getByTestId('leg-price-change-main');
       expect(main.textContent).toBe('-101.26%');
       expect(main.className).toContain('text-[#F6465D]');
@@ -230,6 +235,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
 
     it('合计行这一格留空；表头、腿行、阶段子行、合计行格子数一致', () => {
       renderList(phaseLegs);
+      expandPhases();
       const titles = headerTitles();
       expect(titles).toHaveLength(14);
       const column = titles.indexOf('涨跌幅');

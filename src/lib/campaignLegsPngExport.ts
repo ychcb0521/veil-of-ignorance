@@ -5,6 +5,8 @@ import {
   journalOperationTime,
 } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
+import { legRowStatus } from '@/lib/legRowStatus';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
@@ -27,10 +29,13 @@ import {
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
-  legPositionShareTagSide,
   legPositionSideFromDirection,
+  LEG_POSITION_SHARE_COLUMN_TITLES,
+  LEG_POSITION_SIDES,
   LEG_POSITION_SIDE_COLORS,
   LEG_POSITION_SIDE_LABELS,
+  type LegPositionShareEntry,
+  type LegPositionShares,
   type LegPositionSide,
 } from '@/lib/legPositionShare';
 import {
@@ -86,10 +91,24 @@ export type CampaignLegsExportCellLine = {
    */
   size?: number;
   /**
-   * 行首的方向标签（「多」绿 /「空」红，与页面同色），与正文分开着色：正文（百分数、合计数）仍是中性色。
-   * hidden 为 true 时只占位不画——同一组的下一行借它把数字与上一行的数字对齐。
+   * 行首的方向标签（「多」绿 /「空」红，与页面同色），与正文分开着色：正文（合计数）仍是中性色。
+   * 只挂在合计行「币量 / 仓位」格每组分母的上行。hidden 为 true 时只占位不画——同一组的下一行借它把数字与上一行的数字对齐。
    */
   tag?: CampaignLegsExportCellTag;
+  /**
+   * 把这一行画成角色标签（与页面同样的样子）：同色淡底圆角；hollow 为挂单中的虚线空心标签，
+   * dot 为进行中标签文字后面的实心小圆点。正文（角色名）用 color 着色，按标签的内边距右移。
+   */
+  chip?: CampaignLegsExportChip;
+  /** 正文左缩进（px）：阶段子行的「阶段 N」与主力角色标签里的字对齐（= 标签左内边距），与页面的缩进一致。 */
+  indent?: number;
+};
+
+export type CampaignLegsExportChip = {
+  /** 标签主色：底色取它的 10%，虚线描边与小圆点直接用它。 */
+  color: string;
+  hollow?: boolean;
+  dot?: boolean;
 };
 
 export type CampaignLegsExportCellTag = {
@@ -125,7 +144,8 @@ type LegsCanvasOptions = {
 };
 
 const COLUMNS = [
-  { title: '#', width: 52 },
+  // 与页面一样，第一列只有「角色」：不印腿的序号，也不挂「回填」；没平仓的腿把角色标签画成空心（挂单中）或带小圆点（进行中）。
+  // 152：最长的「重新入场主力 2」标签带上小圆点也一行放下
   { title: '角色', width: 152 },
   // 300：主力阶段子行的「2026-08-07 19:41 → 2026-08-08 13:00」要一行放下，别把时刻和日期拆开
   { title: '时间', width: 300 },
@@ -138,8 +158,10 @@ const COLUMNS = [
   // 184：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
   // （百亿级 11,981,041,835.39，17 个字符），前面再挂一枚「多 / 空」标签也得一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 184 },
-  // 96：留 76px 文字宽，「多 100.0%」（标签 + 百分数）及合计行一行放下
-  { title: '占比', width: 96 },
+  // 各 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」（12px 粗体 48px）都一行放下。
+  // 与页面同样分成两列：一条腿的数只在自己方向的那一列，另一列留空
+  { title: LEG_POSITION_SHARE_COLUMN_TITLES.long, width: 88 },
+  { title: LEG_POSITION_SHARE_COLUMN_TITLES.short, width: 88 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
@@ -256,23 +278,6 @@ function campaignLegCounts(legs: TradeJournal[]) {
 }
 
 /**
- * closed 是常态：状态不占一列，导出图同样只在未平仓时才写它（与页面同源）。
- * pending 即「挂单中」——对冲 / 镜像腿还没有成交或平仓记录，「占比」列不把它算进分母（与页面同源）。
- */
-function statusForLeg(
-  leg: TradeJournal,
-  record: TradeRecord | null,
-): { label: string; color: string; closed: boolean; pending: boolean } {
-  if (record || leg.post_simulated_close_time || leg.post_real_close_time || leg.post_outcome) {
-    return { label: '已平仓', color: '#0ECB81', closed: true, pending: false };
-  }
-  if (leg.leg_role === 'mirror_tp' || leg.leg_role?.startsWith('hedge_')) {
-    return { label: '挂单中', color: '#D89B00', closed: false, pending: true };
-  }
-  return { label: '进行中', color: '#848E9C', closed: false, pending: false };
-}
-
-/**
  * 涨跌幅格：与页面同一个 helper、同一对价（含平仓价校正）、同一个方向。正绿负红；取整为 0 用中性色，缺值淡灰。
  * 按这条腿的方向计——空单价格跌了才是正数，按所示这一对开平价看与「贡献 / 盈亏」同号
  * （分几刀平掉时平仓价取最后一刀、盈亏是各刀合计，可能不同号）；阶段子行沿用主力的方向。
@@ -292,20 +297,61 @@ function priceChangeCell(
 }
 
 /**
- * 「币量 / 仓位」「占比」的一组两行：上行（有方向时前挂彩色「多 / 空」标签）+ 下行淡色。
+ * 「币量 / 仓位」与两列占比的一组两行：上行（tagSide 给出时前挂彩色「多 / 空」标签）+ 下行淡色。
  * 下行挂一枚隐藏标签占位，两行的数字左端对齐。topColor 缺省为正文前景色（腿行），合计行传淡色。
  */
 function positionShareLines(
-  side: LegPositionSide | null,
+  tagSide: LegPositionSide | null,
   top: string,
   bottom: string,
   topColor: string | undefined,
 ): CampaignLegsExportCellLine[] {
-  const tag = side ? { text: LEG_POSITION_SIDE_LABELS[side], color: LEG_POSITION_SIDE_COLORS[side] } : null;
+  const tag = tagSide ? { text: LEG_POSITION_SIDE_LABELS[tagSide], color: LEG_POSITION_SIDE_COLORS[tagSide] } : null;
   return [
     { text: top, ...(topColor ? { color: topColor } : {}), ...(tag ? { tag } : {}) },
     { text: bottom, color: '#848E9C', ...(tag ? { tag: { ...tag, hidden: true } } : {}) },
   ];
+}
+
+const EMPTY_CELL: CampaignLegsExportCellLine[] = [{ text: '' }];
+
+/**
+ * 腿行的「多单占比」「空单占比」两格（与页面同源）：上行币量占比、下行名义仓位占比，只写在这条腿自己方向的那一列，
+ * 另一列一格空白；行里不挂标签（列头已写明方向）。挂单中的腿两行「—」。
+ */
+function legShareCells(position: LegPositionShareEntry | undefined): CampaignLegsExportCellLine[][] {
+  return LEG_POSITION_SIDES.map(side => (
+    position?.side === side
+      ? positionShareLines(
+        null,
+        formatLegPositionSharePct(position.coinSharePct),
+        formatLegPositionSharePct(position.notionalSharePct),
+        undefined,
+      )
+      : EMPTY_CELL
+  ));
+}
+
+/**
+ * 合计行的「多单占比」「空单占比」两格（与页面同源）：各写本方向那组的「100.0%」，逐行与「币量 / 仓位」格里
+ * 同方向那组分母对齐——本方向那组之前的每一组先垫两行空白；本方向没有计入腿时一格空白；两个方向都没有时两行「—」。
+ */
+function totalShareCells(shares: LegPositionShares): CampaignLegsExportCellLine[][] {
+  const listed = shares.sides.map(totals => totals.side);
+  return LEG_POSITION_SIDES.map(side => {
+    if (listed.length === 0) return positionShareLines(null, '—', '—', '#5F6B7A');
+    const at = listed.indexOf(side);
+    if (at < 0) return EMPTY_CELL;
+    return [
+      ...listed.slice(0, at).flatMap((): CampaignLegsExportCellLine[] => [{ text: '' }, { text: '' }]),
+      ...positionShareLines(
+        null,
+        formatLegPositionShareTotal(shares.bySide[side].totalCoins),
+        formatLegPositionShareTotal(shares.bySide[side].totalNotional),
+        '#5F6B7A',
+      ),
+    ];
+  });
 }
 
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
@@ -355,9 +401,55 @@ function cellTextWidth(text: string, line: CampaignLegsExportCellLine): number {
   return width;
 }
 
-/** 正文前被标签占掉的宽度：标签（隐藏的也占位）+ 空隙；没有标签为 0。绘制与折行共用。 */
+/** 正文前被标签占掉的宽度：方向标签（隐藏的也占位）+ 空隙，或角色标签的左内边距；都没有为 0。绘制与折行共用。 */
 function tagOffset(line: CampaignLegsExportCellLine): number {
-  return line.tag ? cellTextWidth(line.tag.text, tagFontLine(line)) + TAG_GAP : 0;
+  if (line.chip) return CHIP_PAD_X;
+  return line.tag ? cellTextWidth(line.tag.text, tagFontLine(line)) + TAG_GAP : line.indent ?? 0;
+}
+
+/** 角色标签：字号、左右内边距、高度、圆角，以及「进行中」小圆点的直径与它前面的空隙。 */
+const ROLE_CHIP_FONT_SIZE = 12;
+const CHIP_PAD_X = 8;
+const CHIP_H = 20;
+const CHIP_RADIUS = 4;
+const CHIP_DOT = 6;
+const CHIP_DOT_GAP = 5;
+
+/** 角色标签整体占的宽度：左右内边距 + 字 +（小圆点）。 */
+function chipWidth(line: CampaignLegsExportCellLine): number {
+  const dot = line.chip?.dot ? CHIP_DOT_GAP + CHIP_DOT : 0;
+  return CHIP_PAD_X * 2 + cellTextWidth(line.text, line) + dot;
+}
+
+/** 十六进制色加透明度（'#0ECB81' + 0.1 → '#0ECB811A'）。 */
+function withAlpha(hex: string, alpha: number): string {
+  return `${hex}${Math.round(alpha * 255).toString(16).padStart(2, '0').toUpperCase()}`;
+}
+
+/**
+ * 画角色标签的底：实心淡底，或挂单中的虚线空心框；进行中再在字后面点一个实心小圆点。
+ * 标签竖直方向以这一行字的中线为准（基线上方约 4.5px），与同一行「开 …」的时间对齐。
+ */
+function drawChip(ctx: CanvasRenderingContext2D, line: CampaignLegsExportCellLine, x: number, baseline: number) {
+  const chip = line.chip;
+  if (!chip) return;
+  const width = chipWidth(line);
+  const centerY = baseline - 4.5;
+  const top = centerY - CHIP_H / 2;
+  if (chip.hollow) {
+    ctx.save();
+    ctx.setLineDash([3, 2]);
+    strokeRoundedRect(ctx, x + 0.5, top + 0.5, width - 1, CHIP_H - 1, CHIP_RADIUS, withAlpha(chip.color, 0.75), 1);
+    ctx.restore();
+  } else {
+    fillRoundedRect(ctx, x, top, width, CHIP_H, CHIP_RADIUS, withAlpha(chip.color, 0.1));
+  }
+  if (chip.dot) {
+    ctx.beginPath();
+    ctx.arc(x + CHIP_PAD_X + cellTextWidth(line.text, line) + CHIP_DOT_GAP + CHIP_DOT / 2, centerY, CHIP_DOT / 2, 0, Math.PI * 2);
+    ctx.fillStyle = chip.color;
+    ctx.fill();
+  }
 }
 
 /**
@@ -371,6 +463,8 @@ export function wrapCampaignLegsExportLine(
   line: CampaignLegsExportCellLine,
   fullWidth: number,
 ): CampaignLegsExportCellLine[] {
+  // 角色标签整体画在一行里，不折（最长的「重新入场主力 2」加小圆点也放得下）
+  if (line.chip) return [line];
   // 带标签的行：正文只剩标签右边那一截宽；折出来的后续行挂隐藏标签，与首行的正文左端对齐
   const indent = tagOffset(line);
   const maxWidth = fullWidth - indent;
@@ -478,7 +572,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     reverseHedgeOrders: input.reverseHedgeOrders,
   });
 
-  // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
+  // 「币量 / 仓位」与两列占比：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
   // 格子里的数就是分母里加的那个数；多单、空单按持仓方向（与涨跌幅同源）分开算；状态为「挂单中」的腿不进分母。
   const positionShares = computeLegPositionShares(input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -491,14 +585,15 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       side: legPositionSideFromDirection(leg.direction),
       coinQty,
       notional: leg.pre_position_size ?? null,
-      counted: !statusForLeg(leg, record).pending,
+      // 状态规则与页面同一个 legRowStatus：挂单中的腿不进分母，也画成空心标签
+      counted: legRowStatus(leg, record) !== 'pending',
     };
   }));
 
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
-    const status = statusForLeg(leg, record);
+    const status = legRowStatus(leg, record);
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
     const roleOrdinal = mainLegOrdinals.get(leg.id) ?? null;
     const roleLabel = leg.leg_role
@@ -548,12 +643,19 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         : []),
     ];
     const cells: CampaignLegsExportCellLine[][] = [
-      [{ text: String(leg.leg_sequence ?? '—') }],
-      [
-        { text: roleLabel, bold: true },
-        ...(leg.source === 'retroactive_from_record' ? [{ text: '回填', color: '#848E9C' }] : []),
-        ...(status.closed ? [] : [{ text: status.label, color: status.color }]),
-      ],
+      // 角色标签：与页面同一套颜色与状态样式（挂单中空心虚线、进行中带小圆点），不再另写状态字、也不写「回填」；
+      // 没有角色的腿同样是一枚标签（中性灰、写「—」），进行中的圆点照画
+      [{
+        text: roleLabel,
+        bold: true,
+        size: ROLE_CHIP_FONT_SIZE,
+        color: legRoleExportTextColor(leg.leg_role ?? null),
+        chip: {
+          color: leg.leg_role ? LEG_ROLE_TONE_COLORS[leg.leg_role] : LEG_ROLE_NEUTRAL_COLOR,
+          ...(status === 'pending' ? { hollow: true } : {}),
+          ...(status === 'open' ? { dot: true } : {}),
+        },
+      }],
       [
         { text: `开 ${openLabel}` },
         { text: `平 ${closeLabel}` },
@@ -604,14 +706,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: formatLegCoinQuantity(position?.coinQty) },
         { text: formatLegNotional(position?.notional), color: '#848E9C' },
       ],
-      // 占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是同方向（多单 / 空单）合计里的份额；
-      // 百分数中性色，方向由上行前的「多 / 空」彩色标签交代（与页面同源）；挂单中的腿两行都是「—」、不挂标签
-      positionShareLines(
-        legPositionShareTagSide(position),
-        formatLegPositionSharePct(position?.coinSharePct),
-        formatLegPositionSharePct(position?.notionalSharePct),
-        undefined,
-      ),
+      // 多单占比 / 空单占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是本方向合计里的份额；
+      // 只写在自己方向的那一列，另一列空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
+      // 导出图不跟页面的点击排序走：腿按传入的先后画
+      ...legShareCells(position),
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -663,7 +761,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     ];
     const mainRow: CampaignLegsExportRow = { legId: leg.id, kind: 'leg', cells, ...layoutExportRow(cells, 58) };
 
-    // 主力行后追加阶段子行（≥2 段才有意义）
+    // 主力行后追加阶段子行（≥2 段才有意义）。页面上阶段子行默认折叠，导出图不跟着折叠，始终全部列出
     if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') return [mainRow];
     const pnlForPhases = legPnlMap.get(leg.id)?.pnl ?? null;
     if (pnlForPhases == null || entryPriceValue == null || exitPriceValue == null) return [mainRow];
@@ -681,8 +779,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
       const phaseCells: CampaignLegsExportCellLine[][] = [
-          [{ text: '' }],
-          [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C' }],
+          [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C', indent: CHIP_PAD_X }],
           [
             { text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' },
             // 与页面同源：由对冲结束切出来的阶段要标明，否则读不出这一段为什么在这里断开
@@ -711,6 +808,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -734,7 +832,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     value == null || value === 0 ? '#5F6B7A' : value > 0 ? '#0ECB81' : '#F6465D'
   );
   const totalCells: CampaignLegsExportCellLine[][] = [
-    [{ text: '' }],
     // 合计是整张表的结论，用正文最深的颜色、加粗、比腿的角色名大一号——导出图常被缩小看，淡灰小字会直接消失
     [{ text: '合计', bold: true, color: '#111827', size: 14 }],
     [{ text: settlementBasisLabel(settlement.basis), color: '#475569', size: 11 }],
@@ -753,8 +850,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
-    // 币量 / 仓位：多单、空单各一组「占比」的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
-    // 占比：与左格逐组对齐，「多 100.0%」/「空 100.0%」；没有计入腿的方向不列，两个方向都没有时照旧两行「—」。与页面同源，淡色
+    // 币量 / 仓位：多单、空单各一组占比的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
+    // 多单占比 / 空单占比：各写本方向的「100.0%」，逐行与左格同方向那组对齐；没有计入腿的方向不列，
+    // 两个方向都没有时三格照旧两行「—」。与页面同源，淡色
     positionShares.sides.length === 0
       ? positionShareLines(null, '—', '—', '#5F6B7A')
       : positionShares.sides.flatMap(totals => positionShareLines(
@@ -763,14 +861,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         formatLegNotional(totals.totalNotional),
         '#5F6B7A',
       )),
-    positionShares.sides.length === 0
-      ? positionShareLines(null, '—', '—', '#5F6B7A')
-      : positionShares.sides.flatMap(totals => positionShareLines(
-        totals.side,
-        formatLegPositionShareTotal(totals.totalCoins),
-        formatLegPositionShareTotal(totals.totalNotional),
-        '#5F6B7A',
-      )),
+    ...totalShareCells(positionShares),
     // 加仓校验
     [{ text: '' }],
     feeTotals == null
@@ -886,6 +977,8 @@ function drawLines(
   lines.forEach(line => {
     // 大字号行先把自己的基线往下推出多出来的那截，才不会压到上一行；之后按常规行距往下走
     offset += exportLineHeight(line) - LINE_H;
+    // 角色标签先画底，字再压在上面。导出图是白底，与页面浅色主题一样：空心标签的字不再淡一档（品牌色在白底上本来就浅）
+    if (line.chip) drawChip(ctx, line, x, y + offset);
     // 方向标签单独着色；隐藏标签只占位。正文右移的距离与折行时量的是同一个 tagOffset
     if (line.tag && !line.tag.hidden) {
       ctx.font = cellFont(tagFontLine(line));

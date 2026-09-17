@@ -1,7 +1,8 @@
 /**
- * Legs 表「占比」列：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
+ * Legs 表「多单占比」「空单占比」两列：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
  *
  * 多单与空单分开算：多单各腿占多单合计，空单各腿占空单合计（对冲通常是空单）。
+ * 两个方向各占一列，一条腿的两行数只出现在它自己那个方向的列里，另一列留空；点列头按该列排序。
  * 分组按这条腿**实际的持仓方向**（与「涨跌幅」列同一个方向来源），不按角色——
  * 主空战役里的对冲是多单，它就进多单那一组。
  *
@@ -25,6 +26,9 @@ export const LEG_POSITION_SIDES: readonly LegPositionSide[] = ['long', 'short'];
 
 /** 方向标签的字：「多」/「空」。 */
 export const LEG_POSITION_SIDE_LABELS: Record<LegPositionSide, string> = { long: '多', short: '空' };
+
+/** 两列占比的列名：「多单占比」/「空单占比」。页面（读屏名、表头说明）与 PNG 表头共用。 */
+export const LEG_POSITION_SHARE_COLUMN_TITLES: Record<LegPositionSide, string> = { long: '多单占比', short: '空单占比' };
 
 /** 方向标签的颜色：与币安仓位方向同色（多绿空红）。只给标签用，百分数本身保持中性色。 */
 export const LEG_POSITION_SIDE_COLORS: Record<LegPositionSide, string> = { long: '#0ECB81', short: '#F6465D' };
@@ -134,7 +138,8 @@ export function computeLegPositionShares(inputs: readonly LegPositionShareInput[
 }
 
 /**
- * 这一行要不要挂「多 / 空」标签：两行占比至少有一行是数时才挂；两行都是「—」（挂单中、缺值）不挂。
+ * 这一行在它那个方向里有没有可显示的占比：两行至少有一行是数时返回方向；两行都是「—」（挂单中、缺值）返回 null。
+ * tooltip 据此决定说「多单合计里的占比」还是说明为什么不计入。
  */
 export function legPositionShareTagSide(entry: LegPositionShareEntry | null | undefined): LegPositionSide | null {
   if (!entry) return null;
@@ -182,6 +187,90 @@ export function describeLegPositionDenominators(sides: readonly LegPositionSideT
   if (sides.length === 0) return undefined;
   const groups = sides.map(totals => `${legPositionSideName(totals.side)}一组`).join('、');
   return `占比的分母：${groups}，上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）`;
+}
+
+/** 点列头排序：降序（大的在上）/ 升序。 */
+export type LegPositionShareSortDirection = 'desc' | 'asc';
+
+/** 当前按哪一列、哪个方向排；null 即默认顺序（腿传进来时的先后）。一次只有一列在排。 */
+export interface LegPositionShareSort {
+  side: LegPositionSide;
+  direction: LegPositionShareSortDirection;
+}
+
+/**
+ * 这条腿在「多单占比」/「空单占比」某一列里的排序键：上行币量占比，没有时取下行名义仓位占比。
+ * 别的方向的腿、挂单中的腿、两行都是「—」的腿在这一列里没有值，返回 null。
+ */
+export function legPositionShareSortValue(
+  entry: LegPositionShareEntry | null | undefined,
+  side: LegPositionSide,
+): number | null {
+  if (!entry || entry.side !== side) return null;
+  return entry.coinSharePct ?? entry.notionalSharePct ?? null;
+}
+
+/**
+ * 排序时比较的键：占比（百分数）按 1e-9 个百分点取整后的整数。
+ * 币量 = 名义 ÷ 开仓价，同样 1,000 币开在不同价位，算出来会是 1000、999.9999999999999、1000.0000000000001，
+ * 页面上都印成一样的数；按原值比，这些读者眼里并列的行就会随尾差乱跳。
+ * 尾差在 1e-13 个百分点量级，1e-9 的粒度远大于它、又远小于任何显示得出来的差别；
+ * 取整后比较整数，比「差值小于某个阈值算相等」更可靠——后者不满足传递性，排序结果会不稳定。
+ */
+function shareSortKey(value: number): number {
+  return Math.round(value * 1e9);
+}
+
+/**
+ * 按某一列的占比给行排序，返回新数组、不动入参。
+ * 有值的行按值排，并列（取整后相等，见 shareSortKey）保持原来的先后（稳定）；这一列没有值的行不论升降序都沉到最下面，彼此仍按原来的先后。
+ * sort 为 null 时原样返回原来的先后。
+ */
+export function sortByLegPositionShare<T>(
+  items: readonly T[],
+  entryOf: (item: T) => LegPositionShareEntry | null | undefined,
+  sort: LegPositionShareSort | null,
+): T[] {
+  if (!sort) return [...items];
+  const valued: { item: T; index: number; key: number }[] = [];
+  const rest: T[] = [];
+  items.forEach((item, index) => {
+    const value = legPositionShareSortValue(entryOf(item), sort.side);
+    if (value == null) rest.push(item);
+    else valued.push({ item, index, key: shareSortKey(value) });
+  });
+  const sign = sort.direction === 'desc' ? -1 : 1;
+  valued.sort((a, b) => (a.key === b.key ? a.index - b.index : sign * (a.key - b.key)));
+  return [...valued.map(entry => entry.item), ...rest];
+}
+
+/** 点一下某一列之后的排序：降序 → 升序 → 默认顺序；当前排的是另一列时，从这一列的降序开始。 */
+export function nextLegPositionShareSort(
+  current: LegPositionShareSort | null,
+  side: LegPositionSide,
+): LegPositionShareSort | null {
+  if (!current || current.side !== side) return { side, direction: 'desc' };
+  return current.direction === 'desc' ? { side, direction: 'asc' } : null;
+}
+
+const SORT_DIRECTION_LABELS: Record<LegPositionShareSortDirection, string> = { desc: '降序', asc: '升序' };
+
+/**
+ * 列头按钮的读屏名 / 悬停说明：当前是什么状态、再点一下会怎样。
+ * 「按多单占比排序：当前降序，点击改为升序」。
+ */
+export function describeLegPositionShareSort(side: LegPositionSide, current: LegPositionShareSort | null): string {
+  const title = LEG_POSITION_SHARE_COLUMN_TITLES[side];
+  const next = nextLegPositionShareSort(current, side);
+  let state: string;
+  if (!current) state = '默认顺序';
+  else if (current.side === side) state = SORT_DIRECTION_LABELS[current.direction];
+  else state = `按${LEG_POSITION_SHARE_COLUMN_TITLES[current.side]}排序`;
+  let action: string;
+  if (!next) action = '恢复默认顺序';
+  else if (current && current.side !== side) action = `改为按${title}${SORT_DIRECTION_LABELS[next.direction]}`;
+  else action = `改为${SORT_DIRECTION_LABELS[next.direction]}`;
+  return `按${title}排序：当前${state}，点击${action}`;
 }
 
 /** 「34.9%」；取整为 0 的印「0.0%」；缺值「—」。各行分别取一位小数。 */

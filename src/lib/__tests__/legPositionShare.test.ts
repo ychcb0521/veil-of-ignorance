@@ -8,11 +8,17 @@ import {
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
+  legPositionShareSortValue,
   legPositionShareTagSide,
   legPositionSideFromDirection,
+  describeLegPositionShareSort,
+  nextLegPositionShareSort,
+  sortByLegPositionShare,
+  LEG_POSITION_SHARE_COLUMN_TITLES,
   LEG_POSITION_SIDE_COLORS,
   LEG_POSITION_SIDE_LABELS,
   type LegPositionShareInput,
+  type LegPositionShareSort,
   type LegPositionSide,
 } from '@/lib/legPositionShare';
 
@@ -332,5 +338,134 @@ describe('占比 · 多单与空单分开算', () => {
     // 没有计入腿的方向不进 sides，合计行不会为它写 tooltip；直接问 bySide 时也不说 100%
     expect(noNotional.sides.map(totals => totals.side)).toEqual(['long']);
     expect(describeLegPositionSideTotal(noNotional.bySide.short)).toBe('空单没有计入的腿');
+  });
+});
+
+/**
+ * 【用户要求】「仓位占比分成两列呈现，多和空分成两列。并且还要做成能够点击之后排序的」：
+ * 多单占比、空单占比各占一列，点表头按这一列排序——降序 → 升序 → 默认顺序。
+ */
+describe('占比 · 两列与点击排序', () => {
+  const INPUTS = [
+    leg('main', 3_000, 3_000),
+    short('hedge-a', 300, 300),
+    leg('add-small', 500, 1_000),
+    short('hedge-pending', 9_000, 9_000, false),
+    leg('add-big', 5_000, 5_000),
+    short('hedge-b', 900, 900),
+    leg('no-values', null, null),
+    // 缺开仓价：没有币量占比，按名义仓位占比排
+    leg('no-price', null, 2_000),
+  ];
+  const shares = computeLegPositionShares(INPUTS);
+  const ids = INPUTS.map(input => input.legId);
+  const sortIds = (sort: LegPositionShareSort | null) => sortByLegPositionShare(ids, id => shares.byLeg.get(id), sort);
+
+  it('两列的标题：「多单占比」「空单占比」，先多后空', () => {
+    expect(LEG_POSITION_SHARE_COLUMN_TITLES).toEqual({ long: '多单占比', short: '空单占比' });
+  });
+
+  it('排序键：本方向的腿取上行币量占比，没有币量占比时取下行名义仓位占比；别的方向、挂单中、两行都没有的腿没有键', () => {
+    const value = (id: string, side: LegPositionSide) => legPositionShareSortValue(shares.byLeg.get(id), side);
+    // 多单币量合计 3,000 + 500 + 5,000 = 8,500
+    expect(value('main', 'long')).toBeCloseTo((3_000 / 8_500) * 100, 9);
+    expect(value('add-big', 'long')).toBeCloseTo((5_000 / 8_500) * 100, 9);
+    // 名义合计 3,000 + 1,000 + 5,000 + 2,000 = 11,000
+    expect(value('no-price', 'long')).toBeCloseTo((2_000 / 11_000) * 100, 9);
+    expect(value('main', 'short')).toBeNull();
+    expect(value('hedge-a', 'long')).toBeNull();
+    expect(value('hedge-a', 'short')).toBeCloseTo(25, 9);
+    expect(value('hedge-pending', 'short')).toBeNull();
+    expect(value('no-values', 'long')).toBeNull();
+    expect(legPositionShareSortValue(undefined, 'long')).toBeNull();
+    // 占比取整为 0 也是有值的键，不当成缺值
+    const tiny = computeLegPositionShares([leg('big', 1e9, 1e9), leg('tiny', 1, 1)]);
+    expect(formatLegPositionSharePct(tiny.byLeg.get('tiny')!.coinSharePct)).toBe('0.0%');
+    expect(legPositionShareSortValue(tiny.byLeg.get('tiny'), 'long')).toBeGreaterThan(0);
+  });
+
+  it('多单占比降序：大的在上；没有值的行（空单、挂单中、两行都是「—」）按原来的先后留在最下面', () => {
+    // 58.8%（币量）、35.3%（币量）、18.2%（名义，缺开仓价）、5.9%（币量）
+    expect(sortIds({ side: 'long', direction: 'desc' })).toEqual([
+      'add-big', 'main', 'no-price', 'add-small',
+      'hedge-a', 'hedge-pending', 'hedge-b', 'no-values',
+    ]);
+  });
+
+  it('多单占比升序：小的在上；没有值的行仍在最下面、仍按原来的先后', () => {
+    expect(sortIds({ side: 'long', direction: 'asc' })).toEqual([
+      'add-small', 'no-price', 'main', 'add-big',
+      'hedge-a', 'hedge-pending', 'hedge-b', 'no-values',
+    ]);
+  });
+
+  it('空单占比：只有已计入的空单有值，挂单中的空单与所有多单沉底', () => {
+    expect(sortIds({ side: 'short', direction: 'desc' })).toEqual([
+      'hedge-b', 'hedge-a',
+      'main', 'add-small', 'hedge-pending', 'add-big', 'no-values', 'no-price',
+    ]);
+    expect(sortIds({ side: 'short', direction: 'asc' })).toEqual([
+      'hedge-a', 'hedge-b',
+      'main', 'add-small', 'hedge-pending', 'add-big', 'no-values', 'no-price',
+    ]);
+  });
+
+  it('默认顺序：原样返回传入的先后（新数组，不改动入参）', () => {
+    const sorted = sortIds(null);
+    expect(sorted).toEqual(ids);
+    expect(sorted).not.toBe(ids);
+    const before = [...ids];
+    sortIds({ side: 'long', direction: 'desc' });
+    expect(ids).toEqual(before);
+  });
+
+  it('并列时保持原来的先后（稳定排序），升降序都一样', () => {
+    const tie = computeLegPositionShares([leg('first', 3_000, 3_000), leg('small', 1_000, 1_000), leg('second', 3_000, 3_000)]);
+    const tieIds = ['first', 'small', 'second'];
+    expect(sortByLegPositionShare(tieIds, id => tie.byLeg.get(id), { side: 'long', direction: 'desc' }))
+      .toEqual(['first', 'second', 'small']);
+    expect(sortByLegPositionShare(tieIds, id => tie.byLeg.get(id), { side: 'long', direction: 'asc' }))
+      .toEqual(['small', 'first', 'second']);
+  });
+
+  it('等额不同价的腿算并列：币量 = 名义 ÷ 开仓价带出的浮点尾差不打乱原来的先后', () => {
+    // 三笔各 1,000 币的滚动对冲，开在 1.3 / 1.1 / 0.7：算出来是 1000、999.9999999999999、1000.0000000000001，
+    // 页面上都印 1,000 与 33.3%——读者眼里是并列，排序也必须当并列
+    const coins = [['h1', 1_300, 1.3], ['h2', 1_100, 1.1], ['h3', 700, 0.7]] as const;
+    const noisy = computeLegPositionShares([
+      ...coins.map(([id, notional, price]) => short(id, notional / price, notional)),
+      leg('main', 3_000, 3_000),
+    ]);
+    // 前提：原值确实不相等（尾差真实存在），显示却一样
+    const pcts = coins.map(([id]) => noisy.byLeg.get(id)!.coinSharePct!);
+    expect(new Set(pcts).size).toBeGreaterThan(1);
+    expect(new Set(pcts.map(formatLegPositionSharePct))).toEqual(new Set(['33.3%']));
+    const noisyIds = ['h1', 'h2', 'h3', 'main'];
+    for (const direction of ['desc', 'asc'] as const) {
+      expect(sortByLegPositionShare(noisyIds, id => noisy.byLeg.get(id), { side: 'short', direction }))
+        .toEqual(['h1', 'h2', 'h3', 'main']);
+    }
+    // 真正不同的数仍按大小排（哪怕只差一点点）
+    const close = computeLegPositionShares([short('a', 1_000, 1_000), short('b', 1_001, 1_001), short('c', 999, 999)]);
+    expect(sortByLegPositionShare(['a', 'b', 'c'], id => close.byLeg.get(id), { side: 'short', direction: 'desc' }))
+      .toEqual(['b', 'a', 'c']);
+    expect(sortByLegPositionShare(['a', 'b', 'c'], id => close.byLeg.get(id), { side: 'short', direction: 'asc' }))
+      .toEqual(['c', 'a', 'b']);
+  });
+
+  it('点击循环：降序 → 升序 → 默认顺序；点另一列从降序开始', () => {
+    expect(nextLegPositionShareSort(null, 'long')).toEqual({ side: 'long', direction: 'desc' });
+    expect(nextLegPositionShareSort({ side: 'long', direction: 'desc' }, 'long')).toEqual({ side: 'long', direction: 'asc' });
+    expect(nextLegPositionShareSort({ side: 'long', direction: 'asc' }, 'long')).toBeNull();
+    expect(nextLegPositionShareSort({ side: 'long', direction: 'asc' }, 'short')).toEqual({ side: 'short', direction: 'desc' });
+    expect(nextLegPositionShareSort({ side: 'short', direction: 'desc' }, 'long')).toEqual({ side: 'long', direction: 'desc' });
+  });
+
+  it('表头按钮的说明：写明当前状态与下一次点击做什么', () => {
+    expect(describeLegPositionShareSort('long', null)).toBe('按多单占比排序：当前默认顺序，点击改为降序');
+    expect(describeLegPositionShareSort('long', { side: 'long', direction: 'desc' })).toBe('按多单占比排序：当前降序，点击改为升序');
+    expect(describeLegPositionShareSort('long', { side: 'long', direction: 'asc' })).toBe('按多单占比排序：当前升序，点击恢复默认顺序');
+    expect(describeLegPositionShareSort('short', { side: 'long', direction: 'asc' })).toBe('按空单占比排序：当前按多单占比排序，点击改为按空单占比降序');
+    expect(describeLegPositionShareSort('short', { side: 'short', direction: 'desc' })).toBe('按空单占比排序：当前降序，点击改为升序');
   });
 });
