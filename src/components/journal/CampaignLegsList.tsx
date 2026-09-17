@@ -400,7 +400,8 @@ const TOTAL_POSITION_CELL = 'self-start space-y-1 text-right font-mono font-norm
  * 「多单占比」/「空单占比」列头：原生按钮（键盘可用），点击在 降序 → 升序 → 默认顺序 之间循环。
  * 看得见的是「多 / 空」标签 +「占比」+ 排序图标；读屏名是完整的「按多单占比排序：当前…，点击…」。
  * 表头不是真正的表格语义（没有 role="columnheader"），所以不用 aria-sort，状态写在读屏名里。
- * 悬停说明（title）= 列说明 + 排序状态；读屏的描述只给列说明（aria-description 优先于 title），状态不念两遍。
+ * 不挂悬停说明（title）：用户明确不要列头上弹出的那块黑底长说明，列头的意思由标签、图标与指南交代。
+ * 列说明只给读屏（aria-description，不显示），排序状态在读屏名里，不念两遍。
  * -scroll-mt-8：按钮在钉住的表头里、永远看得见，键盘焦点移过来时不必为了避开顶部的滚动留白把表体往上滚。
  */
 function PositionShareSortHeader({
@@ -422,7 +423,6 @@ function PositionShareSortHeader({
       onClick={() => onSort(side)}
       aria-label={label}
       aria-description={positionShareColumnHint(side)}
-      title={`${positionShareColumnHint(side)}\n${label}`}
       className={`flex w-full min-w-0 -scroll-mt-8 items-center justify-end gap-1 whitespace-nowrap rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
         direction ? 'text-foreground' : ''
       }`}

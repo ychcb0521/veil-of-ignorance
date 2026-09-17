@@ -85,12 +85,12 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
       expect(button.tagName).toBe('BUTTON');
       expect(button.getAttribute('type')).toBe('button');
       expect(button.getAttribute('aria-label')).toBe(`按${title}排序：当前默认顺序，点击改为降序`);
-      expect(button.getAttribute('title')).toContain(`\n按${title}排序：当前默认顺序，点击改为降序`);
-      // 读屏的描述只给列说明（优先于 title），排序状态只在读屏名里念一遍
+      // 【用户要求】列头不弹黑底悬停说明：没有 title
+      expect(button.hasAttribute('title')).toBe(false);
+      // 读屏的描述只给列说明，排序状态只在读屏名里念一遍
       const description = button.getAttribute('aria-description')!;
       expect(description).toContain('点击列头按本列排序');
       expect(description).not.toContain('当前');
-      expect(button.getAttribute('title')).toBe(`${description}\n${button.getAttribute('aria-label')}`);
       expect(iconOf(button)).toContain('lucide-arrow-up-down');
       expect(iconOf(button)).toContain('text-muted-foreground/50');
       expect(button.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');

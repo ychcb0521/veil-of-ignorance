@@ -104,19 +104,22 @@ describe('Legs 列表的「多单占比」「空单占比」两列', () => {
     }
   });
 
-  it('列头的 tooltip：这条多（空）单占全部计入多（空）单的百分比，上行币量、下行名义仓位，挂单中不计入，点击按本列排序', () => {
+  it('列头的读屏说明：这条多（空）单占全部计入多（空）单的百分比，上行币量、下行名义仓位，挂单中不计入，点击按本列排序；不弹悬停黑框', () => {
     renderList(screenshotLegs());
-    const longTitle = headerCells()[colOf(LONG)].getAttribute('title')!;
-    const shortTitle = headerCells()[colOf(SHORT)].getAttribute('title')!;
+    // 【用户要求】「这个黑块的部分不需要，多余了」：列头没有 title
+    expect(headerCells()[colOf(LONG)].hasAttribute('title')).toBe(false);
+    expect(headerCells()[colOf(SHORT)].hasAttribute('title')).toBe(false);
+    const longTitle = headerCells()[colOf(LONG)].getAttribute('aria-description')!;
+    const shortTitle = headerCells()[colOf(SHORT)].getAttribute('aria-description')!;
     expect(longTitle).toBe(
       '这条多单占全部计入的多单的百分比：上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
       + '空单的行这一列留空；合计行写多单各腿合计的 100.0%（多单没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里多单那组分母对齐。'
-      + '点击列头按本列排序：降序 → 升序 → 默认顺序。\n按多单占比排序：当前默认顺序，点击改为降序',
+      + '点击列头按本列排序：降序 → 升序 → 默认顺序。',
     );
     expect(shortTitle).toBe(
       '这条空单占全部计入的空单的百分比（对冲通常是空单）：上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
       + '多单的行这一列留空；合计行写空单各腿合计的 100.0%（空单没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里空单那组分母对齐。'
-      + '点击列头按本列排序：降序 → 升序 → 默认顺序。\n按空单占比排序：当前默认顺序，点击改为降序',
+      + '点击列头按本列排序：降序 → 升序 → 默认顺序。',
     );
   });
 
