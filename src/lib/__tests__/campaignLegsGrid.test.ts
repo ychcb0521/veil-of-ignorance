@@ -105,6 +105,22 @@ describe('Legs 表栅格', () => {
     expect(minWidth).toBe(1714);
   });
 
+  it('【用户要求】冻结「#」与「角色」：「角色」的钉点 = 行左内边距 + # 列宽，四种行都用同一对常量', () => {
+    const s = src();
+    const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
+    const roleLeft = Number(/const FROZEN_ROLE_CELL = 'sticky left-\[(\d+)px\]/.exec(s)?.[1]);
+    // 各行都是 px-3（12px）；「角色」再往左压住「#」2px。钉点错了，「角色」会在滚动时跳一下，或与 # 之间漏出一道缝
+    expect(roleLeft).toBe(12 + Number.parseInt(tracks[0], 10) - 2);
+    expect(s).toContain("const FROZEN_SEQ_CELL = 'sticky left-0 z-10 -ml-3 ");
+    // 负外边距 = gap-x-2.5 的 10px + 重叠 2px；内边距同量，内容仍从原位起
+    expect(s).toContain("const FROZEN_ROLE_CELL = 'sticky left-[46px] z-10 -ml-3 self-stretch border-r border-transparent pl-3 ");
+    // 表头、数据行、主力阶段子行、合计行各用一次
+    expect((s.match(/\$\{FROZEN_SEQ_CELL\}/g) ?? []).length).toBe(4);
+    expect((s.match(/\$\{FROZEN_ROLE_CELL\}/g) ?? []).length).toBe(4);
+    // 行区不能再套竖向滚动：否则冻结列钉在一个从不横滚的容器上
+    expect(s).not.toContain('max-h-[380px] overflow-y-auto');
+  });
+
   it('操作列只留两个图标按钮（标到盘面 / 解除），中文标签进 title 而不是渲染成文字', () => {
     const s = src();
     expect(s).toContain("aria-label=\"解除\"");

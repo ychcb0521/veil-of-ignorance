@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { UIEvent } from 'react';
 import { Crosshair, EyeOff, Unlink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -153,6 +154,56 @@ const LEGS_GRID = 'grid-cols-[36px_128px_180px_116px_84px_88px_88px_84px_136px_7
 const LEGS_MIN_WIDTH = 'min-w-[1714px]';
 
 /**
+ * 冻结列：「#」与「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
+ * 两格用负外边距把行的左内边距（px-3 = 12px）和两列之间的间距（gap-x-2.5 = 10px）一并盖住，
+ * 拼成从 0 到 186px 的一整块实心底，滚过去的内容不会从缝里透出来。
+ * 「角色」格往左多伸 2px、压在「#」格右缘上（-ml-3 = 间距 10px + 重叠 2px，pl-3 把内容推回原位），
+ * 所以钉在 46px = 12 + 36（# 列宽）− 2 处：改 # 列宽或行内边距要连同这里一起改。
+ * 不重叠而是恰好首尾相接时，浏览器缩放到非整数倍（90%、110%…）会在 48px 那条接缝上抗锯齿，
+ * 底下滚过去的字从这条 1px 的缝里透出一串虚线（合计行的多 / 空标签最明显）。
+ * self-stretch：与整行同高，盖住右边更高的格子（时间列有三四行）；再按所在行的上下内边距用负外边距伸出去（FROZEN_PAD），
+ * 上下相邻两行的冻结格首尾相接，右缘的阴影才是一整条，而不是一格一段。
+ * 右缘的分隔线与阴影只在滚出去之后出现（容器上的 data-scrolled），没滚时表格看起来和原来一样。
+ * 阴影画在伪元素上的一条横向渐变里：box-shadow 在每格上下两端会收窄，连起来是一串缺口。
+ */
+const FROZEN_SEQ_CELL = 'sticky left-0 z-10 -ml-3 self-stretch pl-3 transition-colors';
+const FROZEN_ROLE_CELL = 'sticky left-[46px] z-10 -ml-3 self-stretch border-r border-transparent pl-3 transition-colors '
+  + "after:pointer-events-none after:absolute after:inset-y-0 after:-right-2 after:w-2 after:bg-gradient-to-r after:from-black/10 after:to-transparent after:opacity-0 after:content-[''] "
+  + 'group-data-[scrolled=true]/legs:border-border group-data-[scrolled=true]/legs:after:opacity-100';
+
+/** 冻结格上下伸出的量 = 所在行的 py：表头与合计行 py-2、数据行 py-2.5、阶段子行 py-1。 */
+const FROZEN_PAD = {
+  header: '-my-2 py-2',
+  row: '-my-2.5 py-2.5',
+  phase: '-my-1 py-1',
+  total: '-my-2 py-2',
+} as const;
+
+/**
+ * 冻结格的底色必须不透明，否则底下滚过去的数字会透出来。
+ * 行自己的底色是半透明的（bg-muted/40、/20、高亮行的蓝），这里用 bg-card 打底、再叠一层同色的渐变，
+ * 冻结格与它所在的行看起来是同一种颜色。
+ */
+const HEADER_FILL = 'bg-card bg-[linear-gradient(hsl(var(--muted)/0.4),hsl(var(--muted)/0.4))]';
+const PHASE_FILL = 'bg-card bg-[linear-gradient(hsl(var(--muted)/0.2),hsl(var(--muted)/0.2))]';
+const ROW_FILL = 'bg-card group-hover/row:bg-accent';
+const HIGHLIGHTED_ROW_FILL = 'bg-card bg-[linear-gradient(rgba(0,47,167,0.05),rgba(0,47,167,0.05))] group-hover/row:bg-accent group-hover/row:bg-none';
+/**
+ * 高亮行整行有一圈 ring-1 ring-inset；冻结格盖在它上面，这里把上下两道（# 格再加左边一道）接着画出来，框才是完整的。
+ * 颜色取行上 ring 实际渲染出的值：ring-[#002FA7]/12 是任意色 + 非标准透明度档，Tailwind 不生成颜色规则，
+ * 落回默认 ring 色 rgba(59,130,246,0.5)。
+ */
+const HIGHLIGHTED_SEQ_RING = 'shadow-[inset_1px_0_0_rgba(59,130,246,0.5),inset_0_1px_0_rgba(59,130,246,0.5),inset_0_-1px_0_rgba(59,130,246,0.5)]';
+const HIGHLIGHTED_ROLE_RING = 'shadow-[inset_0_1px_0_rgba(59,130,246,0.5),inset_0_-1px_0_rgba(59,130,246,0.5)]';
+
+/** 横向滚出去时给容器打标，冻结列据此画出右缘分隔线；直接写 DOM 属性，滚动时不触发整表重渲染。 */
+function markLegsScrolled(event: UIEvent<HTMLDivElement>) {
+  const el = event.currentTarget;
+  const scrolled = el.scrollLeft > 0 ? 'true' : 'false';
+  if (el.dataset.scrolled !== scrolled) el.dataset.scrolled = scrolled;
+}
+
+/**
  * 「涨跌幅」列表头的说明：按这条腿的方向计，正数即在价格上占优。
  * 「与盈亏同号」只对所示的这一对开平价成立：一个仓位分几刀平掉时，平仓价只显示最后一刀（buildTradeRecordLookup
  * 把仓位折到最晚那条记录），盈亏却是各刀合计，两格可以一红一绿——所以要明说，不许诺无条件同号。
@@ -171,19 +222,23 @@ function priceChangeTone(pct: number | null, muted = false): string {
 }
 
 /**
- * 表体（腿行 + 合计行）的滚动区高度上限。原来是 380px；多、空两组分母让合计行多出一组两行字
- * （11px、10px 字各一行 × leading-snug，加组间 4px，约 33px，实测 46.88px → 79.75px），上限跟着加高至少同样的量——
+ * 表格滚动区（表头 + 腿行 + 合计行，横竖共用一个容器，见冻结列）的高度上限。
+ * 表体原来是 380px；多、空两组分母让合计行多出一组两行字
+ * （11px、10px 字各一行 × leading-snug，加组间 4px，约 33px，实测 46.88px → 79.75px），表体上限跟着加到 420px——
  * 改动前不用滚动就能看全的战役，现在照样看全（用户截图那种「主多 + 空单滚动对冲」的形状原本就在这条线附近，
  * 不加高时空单那组分母会被截掉）。腿行高度不受影响。
+ * 表头并进同一个滚动容器后，上限再加上表头的高度（约 32px）：420 + 32 = 452px，表体可见的高度与之前相同。
  */
-const LEGS_BODY_MAX_HEIGHT = 'max-h-[420px]';
+const LEGS_SCROLL_MAX_HEIGHT = 'max-h-[452px]';
 
 /**
- * 表体滚动区的底部滚动留白。合计行贴在滚动区底边（sticky），键盘把焦点移到某条腿的按钮（标到盘面 / 解除 / 加仓校验的红叉）时，
- * 浏览器只保证按钮落在滚动区之内——恰好落在底边，就被合计行盖住。留出不少于合计行高度的一截（两组分母时 79.75px），
- * 聚焦时按钮停在合计行之上。80px = scroll-pb-20。
+ * 滚动区四周被钉住的东西各留一截滚动留白。键盘把焦点移到某个按钮（标到盘面 / 解除 / 加仓校验的红叉）时，
+ * 浏览器只保证它落在滚动区之内——恰好落在边上，就会被钉住的那一块盖住：
+ * - 底：合计行贴在底边（两组分母时 79.75px）→ 80px = scroll-pb-20；
+ * - 顶：表头贴在顶边（约 32px）→ scroll-pt-8；
+ * - 左：「#」+「角色」冻结在左缘（0–186px）→ scroll-pl-[186px]。
  */
-const LEGS_BODY_SCROLL_PADDING = 'scroll-pb-20';
+const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[186px]';
 
 /** 「占比」列表头的说明：多单与空单分开算，挂单中的腿不进合计。 */
 const POSITION_SHARE_COLUMN_HINT = '多单与空单分开算：多单各腿占多单合计的百分比，空单各腿占空单合计的百分比（对冲通常是空单）；'
@@ -504,11 +559,21 @@ export function CampaignLegsList({
   return (
     <>
     <div className="bg-card border border-border rounded overflow-hidden">
-      <div className="overflow-x-auto">
+      {/* 横竖共用一个滚动容器：overflow-y 一旦不是 visible，overflow-x 也会被算成 auto，
+          行若另套一层竖向滚动，冻结列就会钉在那一层（它从不横向滚动）上而失效。
+          表头因此改为 sticky top、合计行 sticky bottom，都在这一个容器里钉住。 */}
+      <div
+        data-testid="legs-scroll"
+        onScroll={markLegsScrolled}
+        className={`group/legs ${LEGS_SCROLL_MAX_HEIGHT} ${LEGS_SCROLL_PADDING} overflow-auto`}
+      >
         <div className={LEGS_MIN_WIDTH}>
-          <div className={`grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground bg-muted/40 py-2 px-3`}>
-            <div>#</div>
-            <div>角色</div>
+          <div
+            data-testid="legs-header-row"
+            className={`sticky top-0 z-20 grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
+          >
+            <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.header} ${HEADER_FILL}`}>#</div>
+            <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${HEADER_FILL}`}>角色</div>
             <div>时间</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
@@ -522,7 +587,7 @@ export function CampaignLegsList({
             <div>委托</div>
             <div className="text-right">操作</div>
           </div>
-          <div className={`${LEGS_BODY_MAX_HEIGHT} ${LEGS_BODY_SCROLL_PADDING} overflow-y-auto`}>
+          <div>
             {legs.map(leg => {
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
               const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
@@ -560,13 +625,15 @@ export function CampaignLegsList({
               return (
                 <div key={leg.id}>
                 <div
-                  className={`grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
+                  className={`group/row grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 border-b border-border/40 hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
-                  <div>{leg.leg_sequence ?? '—'}</div>
+                  <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.row} ${highlighted ? `${HIGHLIGHTED_ROW_FILL} ${HIGHLIGHTED_SEQ_RING}` : ROW_FILL}`}>{leg.leg_sequence ?? '—'}</div>
                   {/* 角色名长短不一（主力开仓 / 加仓1 / ReH），标签靠左排就会参差；
-                      推到列的右缘，各行的「回填」便落在同一条竖线上。 */}
+                      推到列的右缘，各行的「回填」便落在同一条竖线上。
+                      外层是冻结格（拉满行高），内层照旧只占一行高，标签仍与行首对齐。 */}
+                  <div data-testid={`leg-frozen-role-${leg.id}`} className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.row} ${highlighted ? `${HIGHLIGHTED_ROW_FILL} ${HIGHLIGHTED_ROLE_RING}` : ROW_FILL}`}>
                   <div className="flex items-center justify-between gap-1.5">
                     {leg.leg_role
                       ? <LegRoleChip role={leg.leg_role} ordinal={mainLegOrdinals.get(leg.id) ?? null} />
@@ -585,6 +652,7 @@ export function CampaignLegsList({
                         </span>
                       )}
                     </div>
+                  </div>
                   </div>
                   {/* 标签定宽（按最长的「操作」定），三行时间戳才会起于同一条竖线：
                       一个字的「开」与两个字的「操作」若各自占位，日期就会落在两个位置上。
@@ -884,10 +952,12 @@ export function CampaignLegsList({
                           key={phase.index}
                           className={`grid ${LEGS_GRID} gap-x-2.5 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground`}
                         >
-                          <div />
-                          <div className="pl-3 font-sans text-[9px]">
-                            阶段 {phase.index}
-                            {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
+                          <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.phase} ${PHASE_FILL}`} />
+                          <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.phase} ${PHASE_FILL} flex items-center`}>
+                            <div className="pl-3 font-sans text-[9px]">
+                              阶段 {phase.index}
+                              {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
+                            </div>
                           </div>
                           <div className="tabular-nums" title={`${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`}>
                             {fmtCardTime(phase.startTime)} → {fmtCardTime(phase.endTime, phase.startTime)}
@@ -938,13 +1008,14 @@ export function CampaignLegsList({
                 历史上两处各算各的、谁也不显示合计，用户只能手加三个数才发现对不上；
                 把这一行画出来，界面本身就是一道持续生效的断言。
                 贴在滚动区底边（sticky）：腿多到表体要滚动时，多、空两组分母也始终看得见；
-                背景不透明、叠在腿行之上，腿行从它下面滚过。滚到底时它回到自己的位置，不压住最后一条腿。 */}
+                背景不透明、叠在腿行之上，腿行从它下面滚过。滚到底时它回到自己的位置，不压住最后一条腿。
+                层级与表头同为 z-20：高于腿行里的冻结格（z-10），冻结格从它下面经过时不会盖到合计上。 */}
             <div
               data-testid="legs-total-row"
-              className={`sticky bottom-0 z-[1] bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`sticky bottom-0 z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
-              <div />
-              <div className="text-muted-foreground">合计</div>
+              <div className={`${FROZEN_SEQ_CELL} ${FROZEN_PAD.total} bg-card`} />
+              <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} flex items-center bg-card text-muted-foreground`}>合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
               <div className={`text-right text-[12px] font-medium tabular-nums ${totalPnl == null ? 'text-foreground/50' : totalPnl > 0 ? 'text-[#0ECB81]/90' : totalPnl < 0 ? 'text-[#F6465D]/90' : ''}`}>
                 {totalPnl == null ? '—' : `${totalPnl > 0 ? '+' : ''}${totalPnl.toFixed(2)}`}

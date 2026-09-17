@@ -547,8 +547,10 @@ describe('Legs 列表的「占比」列', () => {
      * 改动前内容 373px、滚动区上限 380px，一眼看全；多、空两组分母让合计行从 46.88px 长到 79.75px，
      * 内容变成 406px，空单那组分母被滚动区截掉，得在表里再滚一下才看得见——而它正是这次要给用户看的数。
      * jsdom 不排版，这里钉住两件事：上限跟着合计行一起加高，合计行贴在滚动区底边。
+     * 冻结「#」「角色」两列之后，表头、腿行、合计行共用一个横竖都滚的容器（legs-scroll），上限里因此还含着表头约 32px。
      */
-    const scrollArea = () => screen.getByTestId('legs-total-row').parentElement!;
+    const scrollArea = () => screen.getByTestId('legs-scroll');
+    const HEADER_PX = 32;
     const maxHeightPx = (el: Element) => {
       const match = el.className.match(/(?:^|\s)max-h-\[(\d+)px\](?:\s|$)/);
       return match ? Number(match[1]) : null;
@@ -570,11 +572,15 @@ describe('Legs 列表的「占比」列', () => {
       ]);
       expect(blocks('legs-total-position')).toHaveLength(2);
       const area = scrollArea();
-      expect(area.className).toContain('overflow-y-auto');
-      expect(area.lastElementChild).toBe(screen.getByTestId('legs-total-row'));
+      expect(area.className).toContain('overflow-auto');
+      // 合计行在滚动区里、且是其中最后渲染的一格（它后面没有任何元素）
+      const total = screen.getByTestId('legs-total-row');
+      expect(area.contains(total)).toBe(true);
+      const all = Array.from(area.querySelectorAll('*'));
+      expect(all.slice(all.indexOf(total) + 1).every(el => total.contains(el))).toBe(true);
       const cap = maxHeightPx(area);
       expect(cap).not.toBeNull();
-      expect(cap!).toBeGreaterThanOrEqual(Math.ceil(380 + EXTRA_BLOCK_PX));
+      expect(cap!).toBeGreaterThanOrEqual(Math.ceil(380 + EXTRA_BLOCK_PX + HEADER_PX));
     });
 
     it('腿再多、表体要滚动时，合计行贴在滚动区底边（sticky），背景不透明、压在腿行之上，分母始终看得见', () => {
@@ -584,7 +590,9 @@ describe('Legs 列表的「占比」列', () => {
       expect(classes).toEqual(expect.arrayContaining(['sticky', 'bottom-0', 'bg-card']));
       expect(classes.some(name => /^z-/.test(name))).toBe(true);
       // 贴底的是合计行本身，不是某个包着它的外层；腿行不跟着贴
-      expect(scrollArea().className).toContain('overflow-y-auto');
+      expect(scrollArea().className).toContain('overflow-auto');
+      // 层级不低于表头：腿行里的冻结格（z-10）从它下面经过
+      expect(classes).toContain('z-20');
       for (const row of SCREENSHOT) {
         const legRow = screen.getByTestId(`leg-position-share-${row.id}`).parentElement!;
         expect(legRow.className.split(/\s+/)).not.toContain('sticky');
