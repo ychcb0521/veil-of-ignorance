@@ -607,3 +607,123 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(listCounterfactualsMock.mock.calls.filter(call => call[0] === 'winner')).toHaveLength(1);
   }, 15_000);
 });
+
+/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、12 项每一行的 class（不含数值与染色）。 */
+function overviewSkeleton(panel: HTMLElement) {
+  const [title, grid, note] = Array.from(panel.children) as HTMLElement[];
+  return {
+    card: panel.className,
+    childCount: panel.children.length,
+    title: title?.className,
+    grid: grid?.className,
+    note: note?.className,
+    rows: Array.from(grid?.children ?? []).map(row => row.className),
+  };
+}
+
+/** 从 Tailwind class 里读出像素：p-6 → 24，gap-4 → 16，border → 1（本页只用这几种写法）。 */
+function spacingPx(className: string, prefix: 'p' | 'gap') {
+  const match = className.split(/\s+/).find(token => new RegExp(`^${prefix}-\\d+$`).test(token));
+  return match ? Number(match.slice(prefix.length + 1)) * 4 : 0;
+}
+
+describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据 | 盈亏概览」同一套分栏', () => {
+  it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 12 项', async () => {
+    renderPage();
+    const row = await runFromEditor();
+    const changes = screen.getByTestId('counterfactual-draft-changes');
+    const overview = screen.getByTestId('counterfactual-draft-overview');
+
+    // 行里恰好两栏：左变化卡，右面板（面板外只包一层不拉高的壳）
+    expect(row.children).toHaveLength(2);
+    expect(row.firstElementChild).toBe(changes);
+    expect(row.lastElementChild?.firstElementChild).toBe(overview);
+    expect(row.lastElementChild?.className).toContain('md:self-start');
+
+    // 左栏：标题 + 按钮在同一行，其下是相对实际、改动、运行信息
+    expect(within(changes).getByText('相对原始的变化情况')).toBeInTheDocument();
+    expect(within(changes).getByText('-100.55 USDT')).toHaveClass('text-[#F6465D]');
+    expect(changes).toHaveTextContent('相对实际-100.55 USDT');
+    expect(within(changes).getByText('改 主力开仓：平仓价 100 → 110')).toBeInTheDocument();
+    expect(within(changes).getByText(/运行于 \d{2}-\d{2} \d{2}:\d{2} · 1m K 线 1 根/)).toBeInTheDocument();
+    const titleRow = within(changes).getByText('相对原始的变化情况').parentElement as HTMLElement;
+    expect(within(titleRow).getByTestId('counterfactual-draft-name')).toBeInTheDocument();
+    expect(within(titleRow).getByTestId('counterfactual-save')).toHaveTextContent('保存');
+    expect(within(titleRow).getByTestId('counterfactual-discard')).toHaveTextContent('丢弃');
+    expect(within(changes).queryAllByRole('button', { name: /说明$/ })).toHaveLength(0);
+
+    // 右栏：只有标题、12 项与脚注；没有相对实际、改动、运行信息和任何操作
+    const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
+    expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 未保存');
+    expect(helpButtonLabels(overview)).toEqual(helpButtonLabels(real));
+    expect(helpButtonLabels(overview)).toEqual(OVERVIEW_LABELS);
+    expect(within(overview).getAllByRole('button')).toHaveLength(OVERVIEW_LABELS.length);
+    expect(within(overview).queryByRole('textbox')).not.toBeInTheDocument();
+    for (const text of ['相对实际', '改 主力开仓', '运行于', '相对原始的变化情况']) {
+      expect(overview).not.toHaveTextContent(text);
+    }
+    await waitFor(() => expect(within(overview).getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument());
+    expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
+    expect(overviewSkeleton(real).childCount).toBe(3);
+  }, 15_000);
+
+  it('已保存分支一行：左栏带分支类型 / 保存时刻与 载入到 Legs 副本·删除，右面板同骨架；老行照样写「早期分支未记录改动摘要」', async () => {
+    savedRows.push(oldShapeRow());
+    renderPage();
+    const row = await screen.findByTestId('counterfactual-saved-panel');
+    const changes = screen.getByTestId('counterfactual-saved-changes');
+    const overview = screen.getByTestId('counterfactual-saved-overview');
+
+    expect(row.children).toHaveLength(2);
+    expect(row.firstElementChild).toBe(changes);
+    expect(row.lastElementChild?.firstElementChild).toBe(overview);
+
+    expect(within(changes).getByText('相对原始的变化情况')).toBeInTheDocument();
+    expect(within(changes).getByText('+0.00 USDT')).toBeInTheDocument();
+    expect(within(changes).getByText(/^What-if · 保存于 \d{2}-\d{2} \d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(within(changes).getByText('早期分支未记录改动摘要')).toBeInTheDocument();
+    // 老行没有 run_context：不印运行信息
+    expect(changes).not.toHaveTextContent('运行于');
+    const titleRow = within(changes).getByText('相对原始的变化情况').parentElement as HTMLElement;
+    expect(within(titleRow).getByTestId('counterfactual-load-legs')).toHaveTextContent('载入到 Legs 副本');
+    expect(within(titleRow).getByTestId('counterfactual-delete')).toHaveTextContent('删除');
+
+    const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
+    expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 手动调整');
+    expect(helpButtonLabels(overview)).toEqual(helpButtonLabels(real));
+    expect(within(overview).getAllByRole('button')).toHaveLength(OVERVIEW_LABELS.length);
+    for (const text of ['相对实际', 'What-if', '早期分支', '载入到 Legs 副本', '删除']) {
+      expect(overview).not.toHaveTextContent(text);
+    }
+    expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
+  }, 15_000);
+
+  it('同宽：反事实行挂在「反事实战役」卡片正下方，右栏宽 = 50% + (卡片两侧内缩 − 上方 gap) / 2，与上方右栏逐像素相同', async () => {
+    renderPage();
+    const row = await runFromEditor();
+    const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
+    const originalGrid = real.parentElement as HTMLElement;
+    const cfSection = row.parentElement as HTMLElement;
+    const main = originalGrid.parentElement as HTMLElement;
+
+    // 上方：main 的直接子 section，md 起两等分
+    expect(main.tagName).toBe('MAIN');
+    expect(originalGrid.tagName).toBe('SECTION');
+    expect(originalGrid.className.split(/\s+/)).toEqual(expect.arrayContaining(['grid', 'grid-cols-1', 'md:grid-cols-2']));
+    // 反事实行：直接挂在同一个 main 下的「反事实战役」卡片里，中间没有别的内缩层
+    expect(cfSection.tagName).toBe('SECTION');
+    expect(cfSection.parentElement).toBe(main);
+    expect(cfSection).toHaveTextContent('反事实战役');
+    const cfClasses = cfSection.className.split(/\s+/);
+    expect(cfClasses).toContain('border');
+    expect(cfClasses.filter(token => /^(px|pl|pr|border-[xlr0-9])/.test(token))).toEqual([]);
+
+    const inset = 2 * (spacingPx(cfSection.className, 'p') + 1);
+    const outerGap = spacingPx(originalGrid.className, 'gap');
+    expect(inset).toBe(50);
+    expect(outerGap).toBe(16);
+    const template = row.className.split(/\s+/).find(token => token.startsWith('md:grid-cols-['));
+    expect(template).toBe(`md:grid-cols-[minmax(0,1fr)_calc(50%_+_${(inset - outerGap) / 2}px)]`);
+    expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['grid', 'grid-cols-1']));
+  }, 15_000);
+});

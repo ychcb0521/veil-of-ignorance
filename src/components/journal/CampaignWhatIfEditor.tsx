@@ -688,7 +688,7 @@ export function CampaignWhatIfEditor({
           </table>
         </div>
 
-        {/* 方案名输入按用户要求隐藏：分支名在页面的「反事实盈亏概览 · 未保存」面板里起，默认来自改动摘要；label/setLabel 留着以备恢复。 */}
+        {/* 方案名输入按用户要求隐藏：分支名在页面反事实结果行左栏的「相对原始的变化情况」卡片里起（CounterfactualOverviewRow），默认来自改动摘要；label/setLabel 留着以备恢复。 */}
       </div>
     </div>
   );

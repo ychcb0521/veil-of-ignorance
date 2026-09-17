@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import {
@@ -175,7 +175,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 });
 
 describe('CampaignPnlOverviewPanel', () => {
-  it('渲染 12 个「{label}说明」按钮（同顺序）与原版帮助文案；没有 subtitle / actions 时 DOM 与原内联版本一致', () => {
+  it('渲染 12 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
     const { container } = render(
       <CampaignPnlOverviewPanel title="盈亏概览" items={items} note="期望口径：2 场有效战役，实时胜率 50.00%。" />,
@@ -187,9 +187,12 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2.sm\\:grid-cols-2')).not.toBeNull();
     expect(container.querySelector('.sm\\:col-start-2')).toHaveTextContent('今日账户总资产');
     expect(screen.getByText('期望口径：2 场有效战役，实时胜率 50.00%。')).toBeInTheDocument();
-    // 标题直接是卡片的第一个子节点（没有 actions 时不套 flex 行）
+    // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 12 项网格与脚注，没有别的行
     expect(container.firstElementChild?.firstElementChild).toHaveTextContent('盈亏概览');
-    expect(container.firstElementChild?.firstElementChild?.className).toBe('font-medium');
+    // 标题单行截断、悬停看全名：反事实分支名最长 20 字，并排的窄栏里折行会让面板比上方「盈亏概览」高一行
+    expect(container.firstElementChild?.firstElementChild?.className).toBe('truncate font-medium');
+    expect(container.firstElementChild?.firstElementChild?.getAttribute('title')).toBe('盈亏概览');
+    expect(container.firstElementChild?.children).toHaveLength(3);
 
     fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
     expect(screen.getByText(/b\* = max（实际盈亏比 b, 1）；Q = b\* ÷ 预期回撤百分点 d/)).toBeInTheDocument();
@@ -215,7 +218,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('成交记录')).toBeInTheDocument();
   });
 
-  it('helpOverrides 整段替换、extraNotes 追加在标准文案之后；subtitle / actions / testId 各就各位', () => {
+  it('helpOverrides 整段替换、extraNotes 追加在标准文案之后；testId 落在卡片上，卡片里只有 12 个说明按钮', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       helpOverrides: { realizedPnl: ['替换后的说明', { formula: 'P&L = Σ 手动腿' }] },
       extraNotes: { peakUnrealizedPnl: [{ warning: '按 1h K 线估计' }] },
@@ -225,14 +228,15 @@ describe('CampaignPnlOverviewPanel', () => {
         title="反事实盈亏概览 · 未保存"
         items={items}
         note="脚注"
-        subtitle={<span>相对实际 +12.00 USDT</span>}
-        actions={<button type="button">保存</button>}
-        testId="counterfactual-draft-panel"
+        testId="counterfactual-draft-overview"
       />,
     );
-    expect(screen.getByTestId('counterfactual-draft-panel')).toBeInTheDocument();
-    expect(screen.getByText('相对实际 +12.00 USDT')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+    const panel = screen.getByTestId('counterfactual-draft-overview');
+    expect(panel.firstElementChild).toHaveTextContent('反事实盈亏概览 · 未保存');
+    // 「相对实际」与 保存 / 丢弃 挪到了左边的「相对原始的变化情况」：面板里只剩 12 个说明按钮
+    expect(within(panel).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+      .toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
+    expect(panel).not.toHaveTextContent('相对实际');
 
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('替换后的说明')).toBeInTheDocument();

@@ -36,31 +36,19 @@ export interface CampaignPnlOverviewPanelProps {
   title: string;
   items: CampaignPnlOverviewItem[];
   note: ReactNode;
-  /** 标题下方一行小字：反事实面板用来放「相对实际 ±… USDT」与改动摘要。 */
-  subtitle?: ReactNode;
-  /** 标题右侧的操作按钮：反事实面板的 保存 / 丢弃 / 删除 / 载入到 Legs 副本。 */
-  actions?: ReactNode;
   testId?: string;
 }
 
 /**
- * 「盈亏概览」卡片本体。真实战役与反事实分支共用：同一份 items 顺序、同一套 ⓘ 弹层、同一条脚注。
- * 没有 subtitle / actions 时的 DOM 与原先详情页内联的那份完全一致。
+ * 「盈亏概览」卡片本体。真实战役与反事实分支共用：同一份 items 顺序、同一套 ⓘ 弹层、同一条脚注，
+ * DOM 与原先详情页内联的那份完全一致。反事实的「相对实际」、逐腿改动与操作按钮不进这张卡，
+ * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
-export function CampaignPnlOverviewPanel({ title, items, note, subtitle, actions, testId }: CampaignPnlOverviewPanelProps) {
+export function CampaignPnlOverviewPanel({ title, items, note, testId }: CampaignPnlOverviewPanelProps) {
   return (
     <div className="bg-card border border-border rounded p-4 text-[12px]" data-testid={testId}>
-      {actions ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="font-medium">{title}</div>
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
-        </div>
-      ) : (
-        <div className="font-medium">{title}</div>
-      )}
-      {subtitle != null && subtitle !== false && (
-        <div className="mt-1 text-[11px] text-muted-foreground">{subtitle}</div>
-      )}
+      {/* 标题只占一行：反事实分支名最长 20 字，窄屏两栏并排时折行会让这张卡比上方「盈亏概览」高出一行；截断后悬停看全名。 */}
+      <div className="truncate font-medium" title={title}>{title}</div>
       <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
         {items.map(item => (
           <div
