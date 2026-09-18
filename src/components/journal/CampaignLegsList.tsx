@@ -288,25 +288,14 @@ function priceChangeTone(pct: number | null, muted = false): string {
 }
 
 /**
- * 表格滚动区（表头 + 腿行 + 合计行，横竖共用一个容器，见冻结列）的高度上限。
- * 表体原来是 380px；合计行「币量 / 仓位」格的多、空两组 Σ 让合计行多出一组两行字
- * （11px、10px 字各一行 × leading-snug，加组间 4px，约 33px，实测 46.88px → 79.75px），表体上限跟着加到 420px——
- * 改动前不用滚动就能看全的战役，现在照样看全（用户截图那种「主多 + 空单滚动对冲」的形状原本就在这条线附近，
- * 不加高时空单那组 Σ 会被截掉）。腿行高度不受影响。
- * 表头并进同一个滚动容器后，上限再加上表头的高度（约 32px）：420 + 32 = 452px，表体可见的高度与之前相同。
- */
-const LEGS_SCROLL_MAX_HEIGHT = 'max-h-[452px]';
-
-/**
  * 滚动区四周被钉住的东西各留一截滚动留白。键盘把焦点移到某个按钮（标到盘面 / 解除 / 加仓校验的红叉）时，
  * 浏览器只保证它落在滚动区之内——恰好落在边上，就会被钉住的那一块盖住：
- * - 底：合计行贴在底边（多、空两组 Σ 时 79.75px）→ 80px = scroll-pb-20；
  * - 顶：表头贴在顶边（约 32px）→ scroll-pt-8；
  * - 左：「角色」冻结在左缘（0 到 12px 行内边距 + 132px 角色列 = 144px）→ scroll-pl-[144px]。
  * 钉住的那几块里自己的按钮（列头的排序按钮、冻结格里的阶段开关）用负的 scroll-margin 抵掉这截留白，
  * 否则焦点一落到它们身上，浏览器就会为了「让它离开留白」去滚动表格，而它们本来就一直看得见。
  */
-const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[144px]';
+const LEGS_SCROLL_PADDING = 'scroll-pt-8 scroll-pl-[144px]';
 
 /**
  * 「多单占比」列头的说明：多单各腿占多单合计的百分比；空单的行留空、也不进分母；挂单中的腿不进合计；点列头排序。
@@ -709,14 +698,13 @@ export function CampaignLegsList({
   return (
     <>
     <div className="bg-card border border-border rounded overflow-hidden">
-      {/* 横竖共用一个滚动容器：overflow-y 一旦不是 visible，overflow-x 也会被算成 auto，
-          行若另套一层竖向滚动，冻结列就会钉在那一层（它从不横向滚动）上而失效。
-          表头因此改为 sticky top、合计行 sticky bottom，都在这一个容器里钉住。 */}
+      {/* 不限制高度：全部腿行随页面纵向展开，合计留在最后。
+          共用横向滚动容器，保留角色列横向冻结。 */}
       <div
         data-testid="legs-scroll"
         ref={legsScrollRef}
         onScroll={markLegsScrolled}
-        className={`group/legs ${LEGS_SCROLL_MAX_HEIGHT} ${LEGS_SCROLL_PADDING} overflow-auto`}
+        className={`group/legs ${LEGS_SCROLL_PADDING} overflow-x-auto`}
       >
         <div className={LEGS_MIN_WIDTH}>
           <div
@@ -1179,12 +1167,11 @@ export function CampaignLegsList({
             {/* 合计行：按构造恒等于盈亏概览的「已实现 P&L」。
                 历史上两处各算各的、谁也不显示合计，用户只能手加三个数才发现对不上；
                 把这一行画出来，界面本身就是一道持续生效的断言。
-                贴在滚动区底边（sticky）：腿多到表体要滚动时，多、空两组 Σ 也始终看得见；
-                背景不透明、叠在腿行之上，腿行从它下面滚过。滚到底时它回到自己的位置，不压住最后一条腿。
-                层级与表头同为 z-20：高于腿行里的冻结格（z-10），冻结格从它下面经过时不会盖到合计上。 */}
+                合计随表格自然排列，不再贴底遮挡腿行。
+                保留不透明底色与层级，覆盖相邻冻结列的分隔线延伸。 */}
             <div
               data-testid="legs-total-row"
-              className={`sticky bottom-0 z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`relative z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
               <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} ${FROZEN_SHADOW_BOTTOM.flush} ${FROZEN_TOTAL_DIVIDER} flex items-center bg-card text-muted-foreground`}>合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>

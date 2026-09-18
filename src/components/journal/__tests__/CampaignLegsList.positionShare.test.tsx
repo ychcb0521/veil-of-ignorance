@@ -736,74 +736,30 @@ describe('Legs 列表的「多单占比」列', () => {
     });
   });
 
-  describe('【评审 · 第 1 轮】合计行变高后不被表体滚动区截掉', () => {
-    /**
-     * 用户截图的形状（主多被滚动对冲切成两段阶段子行、对冲带类型说明行）在无头 Chrome 里量过：
-     * 改动前内容 373px、滚动区上限 380px，一眼看全；多、空两组分母让合计行从 46.88px 长到 79.75px，
-     * 内容变成 406px，空单那组分母被滚动区截掉，得在表里再滚一下才看得见——而它正是这次要给用户看的数。
-     * jsdom 不排版，这里钉住两件事：上限跟着合计行一起加高，合计行贴在滚动区底边。
-     * 冻结「#」「角色」两列之后，表头、腿行、合计行共用一个横竖都滚的容器（legs-scroll），上限里因此还含着表头约 32px。
-     */
-    const scrollArea = () => screen.getByTestId('legs-scroll');
-    const HEADER_PX = 32;
-    const maxHeightPx = (el: Element) => {
-      const match = el.className.match(/(?:^|\s)max-h-\[(\d+)px\](?:\s|$)/);
-      return match ? Number(match[1]) : null;
-    };
-    // 多出的一组 = 上行 11px 字 × leading-snug 1.375 + 下行 10px 字 × 1.375 + 组间 space-y-1 的 4px
-    const EXTRA_BLOCK_PX = 11 * 1.375 + 10 * 1.375 + 4;
-
-    it('合计行是表体滚动区的最后一格；滚动区上限在原来的 380px 之上至少加出多出来的那一组，原来不用滚动的战役现在照样不用滚', () => {
-      renderList([
-        legFor({
-          id: 'main', pre_entry_price: 1, pre_position_size: 3_000,
-          post_exit_price_snapshot: 1.2, post_simulated_close_time: at('09:00'),
-        }),
-        legFor({
-          id: 'hedge', leg_sequence: 2, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
-          pre_simulated_time: at('03:00'), pre_entry_price: 1.1, pre_position_size: 2_000,
-          post_exit_price_snapshot: 1.05, post_simulated_close_time: at('05:00'),
-        }),
-      ]);
+  describe('Legs 纵向完整展开，合计不冻结', () => {
+    it('全部腿行与两组分母自然排列，合计始终位于最后', () => {
+      renderList([...screenshotLegs(), legFor({
+        id: 'short-hedge', leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+        pre_entry_price: 1.1, pre_position_size: 2_000,
+        post_exit_price_snapshot: 1.05, post_simulated_close_time: at('05:00'),
+      })]);
+      const area = screen.getByTestId('legs-scroll');
+      expect(area.className).toContain('overflow-x-auto');
+      expect(area.className).not.toMatch(/(?:^|\s)(?:max-h-|h-)/);
       expect(blocks('legs-total-position')).toHaveLength(2);
-      const area = scrollArea();
-      expect(area.className).toContain('overflow-auto');
-      // 合计行在滚动区里、且是其中最后渲染的一格（它后面没有任何元素）
       const total = screen.getByTestId('legs-total-row');
       expect(area.contains(total)).toBe(true);
       const all = Array.from(area.querySelectorAll('*'));
       expect(all.slice(all.indexOf(total) + 1).every(el => total.contains(el))).toBe(true);
-      const cap = maxHeightPx(area);
-      expect(cap).not.toBeNull();
-      expect(cap!).toBeGreaterThanOrEqual(Math.ceil(380 + EXTRA_BLOCK_PX + HEADER_PX));
-    });
-
-    it('腿再多、表体要滚动时，合计行贴在滚动区底边（sticky），背景不透明、压在腿行之上，分母始终看得见', () => {
-      renderList(screenshotLegs());
-      const total = screen.getByTestId('legs-total-row');
-      const classes = total.className.split(/\s+/);
-      expect(classes).toEqual(expect.arrayContaining(['sticky', 'bottom-0', 'bg-card']));
-      expect(classes.some(name => /^z-/.test(name))).toBe(true);
-      // 贴底的是合计行本身，不是某个包着它的外层；腿行不跟着贴
-      expect(scrollArea().className).toContain('overflow-auto');
-      // 层级不低于表头：腿行里的冻结格（z-10）从它下面经过
-      expect(classes).toContain('z-20');
-      for (const row of SCREENSHOT) {
-        const legRow = screen.getByTestId(`leg-position-share-${row.id}`).parentElement!;
-        expect(legRow.className.split(/\s+/)).not.toContain('sticky');
-      }
-      // 格子数不变
       expect(total.children).toHaveLength(headerCells().length);
     });
 
-    it('【评审 · 第 2 轮】滚动区留出不少于合计行高度的底部滚动留白：键盘聚焦腿行按钮时不会停在合计行下面', () => {
+    it('合计不再贴底，容器也不再为冻结合计预留滚动空白', () => {
       renderList(screenshotLegs());
-      const classes = scrollArea().className.split(/\s+/);
-      // scroll-pb-20 = 80px ≥ 两组分母时合计行的 79.75px
-      const padding = classes.map(name => /^scroll-pb-(\d+)$/.exec(name)).find(Boolean);
-      expect(padding).toBeTruthy();
-      expect(Number(padding![1]) * 4).toBeGreaterThanOrEqual(80);
-      expect(screen.getByTestId('legs-total-row').className).toContain('sticky');
+      const total = screen.getByTestId('legs-total-row');
+      expect(total.className.split(/\s+/)).not.toContain('sticky');
+      expect(total.className.split(/\s+/)).not.toContain('bottom-0');
+      expect(screen.getByTestId('legs-scroll').className).not.toMatch(/scroll-pb-/);
     });
   });
 });

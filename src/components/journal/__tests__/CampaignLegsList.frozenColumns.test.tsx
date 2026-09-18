@@ -83,14 +83,15 @@ function renderList(highlightedLegIds?: string[], { hedgeFirst = false }: { hedg
 const isSticky = (element: Element | null | undefined) => element?.className.split(/\s+/).includes('sticky') ?? false;
 
 describe('【用户要求】Legs 表冻结「角色」一列', () => {
-  it('横竖只有一个滚动容器，行区里不再套一层竖向滚动；左边的滚动留白 = 冻结宽度', () => {
+  it('表格纵向展开、只保留横向滚动；左边的滚动留白 = 冻结宽度', () => {
     renderList();
     const scroller = screen.getByTestId('legs-scroll');
-    expect(scroller.className).toContain('overflow-auto');
-    expect(scroller.className).toMatch(/max-h-\[\d+px\]/);
-    // 四周钉住的表头 / 合计行 / 冻结列各留滚动留白，键盘聚焦的按钮不会停在它们下面；
+    expect(scroller.className).toContain('overflow-x-auto');
+    expect(scroller.className).not.toMatch(/max-h-/);
+    // 保留表头 / 冻结列的键盘焦点留白，取消合计行的底部留白；
     // 冻结宽度 = 行左内边距 12px + 角色列 132px
-    expect(scroller.className.split(/\s+/)).toEqual(expect.arrayContaining(['scroll-pb-20', 'scroll-pt-8', 'scroll-pl-[144px]']));
+    expect(scroller.className.split(/\s+/)).toEqual(expect.arrayContaining(['scroll-pt-8', 'scroll-pl-[144px]']));
+    expect(scroller.className).not.toContain('scroll-pb-');
     // 钉住的块里自己的按钮用负的滚动外边距抵掉这截留白：键盘聚焦它们时表格不跟着乱滚
     expect(screen.getByTestId('leg-phases-toggle-leg-main').className.split(/\s+/)).toContain('-scroll-ml-[144px]');
     // 按 test id 取（角色 / 名字的查询在 shareSort 与 positionShare 里测），省掉整棵可访问树的计算——高负载下它会超时
