@@ -816,7 +816,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
       const phaseCells: CampaignLegsExportCellLine[][] = [
-          [{ text: phase.label, color: '#848E9C', indent: CHIP_PAD_X }],
+          [{
+            text: phase.label,
+            color: phase.activeHedgeOrdinals.length > 0 ? '#9B6DE3' : '#0AA66A',
+            indent: CHIP_PAD_X,
+          }],
           [
             { text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' },
           ],

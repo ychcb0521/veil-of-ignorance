@@ -66,6 +66,42 @@ describe('splitMainLegPhases', () => {
     expect(phases.reduce((s, p) => s + p.pnl, 0)).toBeCloseTo(base.pnl, 8);
   });
 
+  it('平仓先后导致的不足一分钟尾段并入上一阶段，不伪造新的纯多头阶段', () => {
+    const closeTime = T(14, 9);
+    const phases = splitMainLegPhases({
+      ...base,
+      closeTime,
+      hedges: [{
+        legId: 'h1',
+        ordinal: 1,
+        openTime: T(11, 0),
+        openPrice: 0.0085,
+        closeTime: closeTime - 20_000,
+        closePrice: 0.009,
+      }],
+    });
+
+    expect(phases.map(phase => phase.label)).toEqual(['纯多头阶段', '对冲1阶段']);
+    expect(phases[1].endTime).toBe(closeTime);
+    expect(phases[1].endPrice).toBe(base.exitPrice);
+    expect(phases.reduce((sum, phase) => sum + phase.pnl, 0)).toBeCloseTo(base.pnl, 8);
+  });
+
+  it('一分钟及以上的独立阶段仍然保留', () => {
+    const phases = splitMainLegPhases({
+      ...base,
+      hedges: [{
+        legId: 'h1',
+        ordinal: 1,
+        openTime: T(11, 0),
+        openPrice: 0.0085,
+        closeTime: base.closeTime! - 60_000,
+        closePrice: 0.009,
+      }],
+    });
+    expect(phases.map(phase => phase.label)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
+  });
+
   it('空头方向：价格下行的阶段为正贡献', () => {
     const phases = splitMainLegPhases({
       pnl: 1000,

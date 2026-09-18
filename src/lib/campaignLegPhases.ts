@@ -65,6 +65,11 @@ export function visibleLegPhases(phases: MainLegPhase[]): MainLegPhase[] {
 }
 
 const EPS = 1e-12;
+/**
+ * 小于一分钟的暴露切换通常只是多空腿在同一次平仓操作里的成交先后，
+ * 分钟级表格既无法把它读成独立决策，也不应把它误画成一个真实持仓阶段。
+ */
+export const MIN_VISIBLE_PHASE_DURATION_MS = 60_000;
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
@@ -153,7 +158,49 @@ export function splitMainLegPhases(input: MainPhaseInput): MainLegPhase[] {
         : `对冲${points[i].active.join('+')}阶段`,
     });
   }
-  return phases;
+  const compacted: MainLegPhase[] = [];
+  for (const phase of phases) {
+    const duration = phase.startTime == null || phase.endTime == null
+      ? null
+      : phase.endTime - phase.startTime;
+    const isTransient = duration != null && duration >= 0 && duration < MIN_VISIBLE_PHASE_DURATION_MS;
+    if (isTransient && compacted.length > 0) {
+      const previous = compacted[compacted.length - 1];
+      previous.endTime = phase.endTime;
+      previous.endPrice = phase.endPrice;
+      previous.pnl += phase.pnl;
+      previous.boundaryLegId = phase.boundaryLegId;
+      continue;
+    }
+    compacted.push({ ...phase, activeHedgeOrdinals: [...phase.activeHedgeOrdinals] });
+  }
+
+  // 极短段若正好出现在开头，只能并入后一段；同时把被极短切换隔开的相同暴露重新接成一段。
+  if (compacted.length > 1) {
+    const first = compacted[0];
+    const duration = first.startTime == null || first.endTime == null ? null : first.endTime - first.startTime;
+    if (duration != null && duration >= 0 && duration < MIN_VISIBLE_PHASE_DURATION_MS) {
+      const next = compacted[1];
+      next.startTime = first.startTime;
+      next.startPrice = first.startPrice;
+      next.pnl += first.pnl;
+      compacted.shift();
+    }
+  }
+
+  const merged: MainLegPhase[] = [];
+  for (const phase of compacted) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.label === phase.label) {
+      previous.endTime = phase.endTime;
+      previous.endPrice = phase.endPrice;
+      previous.pnl += phase.pnl;
+      previous.boundaryLegId = phase.boundaryLegId;
+    } else {
+      merged.push(phase);
+    }
+  }
+  return merged.map((phase, phaseIndex) => ({ ...phase, index: phaseIndex + 1 }));
 }
 
 /**
