@@ -717,7 +717,7 @@ describe('【用户要求】主力及其他多单的阶段子行进入导出图�
     const phases = rows.filter(row => row.kind === 'phase');
     expect(phases).toHaveLength(3);
     expect(phases.map(row => row.cells[ROLE_COL][0].text)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
-    expect(phases.map(row => row.cells[ROLE_COL][0].color)).toEqual(['#0AA66A', '#9B6DE3', '#0AA66A']);
+    expect(phases.map(row => row.cells[ROLE_COL][0].color)).toEqual(['#848E9C', '#6F9BD8', '#848E9C']);
     const cut = phases[1];
     expect(rows.some(row => row.cells[ROLE_COL][0]?.text.includes('收尾'))).toBe(false);
     // 阶段子行的行高跟着多出来的这一行撑开

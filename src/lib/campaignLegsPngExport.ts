@@ -818,7 +818,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       const phaseCells: CampaignLegsExportCellLine[][] = [
           [{
             text: phase.label,
-            color: phase.activeHedgeOrdinals.length > 0 ? '#9B6DE3' : '#0AA66A',
+            color: phase.activeHedgeOrdinals.length > 0 ? '#6F9BD8' : '#848E9C',
             indent: CHIP_PAD_X,
           }],
           [

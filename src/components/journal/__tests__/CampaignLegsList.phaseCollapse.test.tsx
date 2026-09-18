@@ -121,12 +121,12 @@ describe('【用户要求】主力与其他多单的阶段子行默认折叠，�
     expect(phases.previousElementSibling).toBe(screen.getByTestId('leg-frozen-role-main').parentElement);
     expect(Array.from(phases.children).map(row => row.children[0].textContent)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
     const [pure, hedged] = Array.from(phases.children) as HTMLElement[];
-    expect(pure.className).toContain('bg-[#0ECB81]/[0.07]');
+    expect(pure.className).toContain('bg-card');
     expect(pure.firstElementChild?.textContent).toContain('纯多头阶段');
-    expect(pure.firstElementChild?.innerHTML).toContain('text-[#0AA66A]');
-    expect(hedged.className).toContain('bg-[#B080FF]/[0.09]');
+    expect(pure.firstElementChild?.innerHTML).toContain('text-muted-foreground');
+    expect(hedged.className).toContain('bg-blue-500/[0.055]');
     expect(hedged.firstElementChild?.textContent).toContain('对冲1阶段');
-    expect(hedged.firstElementChild?.innerHTML).toContain('text-[#9B6DE3]');
+    expect(hedged.firstElementChild?.innerHTML).toContain('text-blue-500/75');
     expect(phases.textContent).not.toContain('收尾');
 
     fireEvent.click(toggle);

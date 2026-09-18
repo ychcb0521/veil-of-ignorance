@@ -238,8 +238,8 @@ const FROZEN_PAD = {
  * 冻结格与它所在的行看起来是同一种颜色。
  */
 const HEADER_FILL = 'bg-card bg-[linear-gradient(hsl(var(--muted)/0.4),hsl(var(--muted)/0.4))]';
-const PURE_PHASE_FILL = 'bg-card bg-[linear-gradient(rgba(14,203,129,0.07),rgba(14,203,129,0.07))]';
-const HEDGED_PHASE_FILL = 'bg-card bg-[linear-gradient(rgba(176,128,255,0.09),rgba(176,128,255,0.09))]';
+const PURE_PHASE_FILL = 'bg-card';
+const HEDGED_PHASE_FILL = 'bg-card bg-[linear-gradient(rgba(59,130,246,0.055),rgba(59,130,246,0.055))]';
 const ROW_FILL = 'bg-card group-hover/row:bg-accent';
 const HIGHLIGHTED_ROW_FILL = 'bg-card bg-[linear-gradient(rgba(0,47,167,0.05),rgba(0,47,167,0.05))] group-hover/row:bg-accent group-hover/row:bg-none';
 /**
@@ -1159,7 +1159,7 @@ export function CampaignLegsList({
                         <div
                           key={phase.index}
                           className={`grid ${LEGS_GRID} gap-x-2.5 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground ${
-                            hedgedPhase ? 'bg-[#B080FF]/[0.09]' : 'bg-[#0ECB81]/[0.07]'
+                            hedgedPhase ? 'bg-blue-500/[0.055]' : 'bg-card'
                           }`}
                         >
                           {/* 「阶段 N」与主力标签里的文字对齐（标签左内边距 px-2），各列的阶段数也与腿行的同列对齐 */}
@@ -1168,10 +1168,8 @@ export function CampaignLegsList({
                               phaseIndex === phases.length - 1 ? FROZEN_SHADOW_BOTTOM.overRule : FROZEN_SHADOW_BOTTOM.flush
                             } ${hedgedPhase ? HEDGED_PHASE_FILL : PURE_PHASE_FILL} flex items-center`}
                           >
-                            <div className={`ml-2 whitespace-nowrap rounded-sm border px-1.5 py-0.5 font-sans text-[9px] font-medium ${
-                              hedgedPhase
-                                ? 'border-[#B080FF]/35 bg-[#B080FF]/10 text-[#9B6DE3]'
-                                : 'border-[#0ECB81]/35 bg-[#0ECB81]/10 text-[#0AA66A]'
+                            <div className={`whitespace-nowrap pl-2 font-sans text-[9px] ${
+                              hedgedPhase ? 'font-medium text-blue-500/75' : 'text-muted-foreground'
                             }`}>
                               {phase.label}
                             </div>
