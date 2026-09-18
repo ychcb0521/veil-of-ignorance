@@ -284,7 +284,7 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(clause).toContain('<strong>点击列头排序</strong>');
     expect(clause).toContain('降序 → 升序 → 默认顺序');
     expect(clause).toContain('这一列没有数的行（空单、挂单中的腿、没有仓位数据的腿）不论升降序都留在最下面');
-    expect(clause).toContain('主力的阶段子行跟着主力走');
+    expect(clause).toContain('阶段子行跟着所属腿走');
     expect(clause).toContain('合计行始终在最后');
     expect(clause).toContain('PNG 导出不跟着排序');
     // 合计行：两组 Σ 各是什么，多单那组与「多单占比」的 100.0% 同一行
@@ -318,13 +318,15 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(guide).not.toContain('空单占比');
   });
 
-  it('指南写明主力阶段子行默认折叠，点主力角色标签右边的开关展开', () => {
+  it('指南写明多单阶段子行默认折叠，点所属角色标签右边的开关展开', () => {
     const guide = readFileSync(join(process.cwd(), 'src/pages/GuidePage.tsx'), 'utf8');
-    const start = guide.indexOf('<li><strong>「Δb」列与主力阶段拆解。</strong>');
+    const start = guide.indexOf('<li><strong>「Δb」列与持仓阶段拆解。</strong>');
     expect(start).toBeGreaterThan(-1);
     const bullet = guide.slice(start, guide.indexOf('</li>', start));
     expect(bullet).toContain('<strong>默认折叠</strong>');
-    expect(bullet).toContain('主力的角色标签右边有一个小开关');
+    expect(bullet).toContain('对应角色标签右边有一个小开关');
+    expect(bullet).toContain('其他多单（包括加仓）');
+    expect(bullet).toContain('「收尾」阶段一律不呈现');
     expect(bullet).toContain('「展开 5 个阶段」');
     expect(bullet).not.toContain('角色标签下面');
     expect(bullet).not.toContain('「N 个阶段」');
@@ -420,7 +422,7 @@ describe('Legs 列表的「多单占比」列', () => {
       expectNoShareCell('hedge-roll');
 
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
-      expect(phaseRows.length).toBeGreaterThanOrEqual(2);
+      expect(phaseRows.length).toBeGreaterThanOrEqual(1);
       for (const row of phaseRows) {
         for (const col of [longCol, coinsCol]) {
           expect(row.children[col].textContent).toBe('');

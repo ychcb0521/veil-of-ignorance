@@ -145,7 +145,7 @@ describe('【用户要求】点击「多单占比」列头排序', () => {
     renderList();
     fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
     const phases = screen.getByTestId('leg-phases-main');
-    expect(phases.children).toHaveLength(3);
+    expect(phases.children).toHaveLength(2);
     fireEvent.click(sortButton());
     // 主力排到第二：阶段子行紧贴在主力行下面，下一条腿（加仓1）在阶段子行之后
     expect(renderedOrder().indexOf('main')).toBe(1);

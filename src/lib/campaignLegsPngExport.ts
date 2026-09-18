@@ -17,7 +17,7 @@ import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
-import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases } from '@/lib/campaignLegPhases';
+import { formatDeltaB, legDeltaB, legSupportsPhases, roundedDeltaB, splitMainLegPhases, visibleLegPhases } from '@/lib/campaignLegPhases';
 import {
   computeLegPriceChangePct,
   formatLegPriceChangePct,
@@ -750,11 +750,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     ];
     const mainRow: CampaignLegsExportRow = { legId: leg.id, kind: 'leg', cells, ...layoutExportRow(cells, 58) };
 
-    // 主力行后追加阶段子行（≥2 段才有意义）。页面上阶段子行默认折叠，导出图不跟着折叠，始终全部列出
-    if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') return [mainRow];
+    // 主力与其他多单后追加阶段子行。导出图不跟页面折叠；收尾段统一不呈现。
+    if (!legSupportsPhases(leg)) return [mainRow];
     const pnlForPhases = legPnlMap.get(leg.id)?.pnl ?? null;
     if (pnlForPhases == null || entryPriceValue == null || exitPriceValue == null) return [mainRow];
-    const phases = splitMainLegPhases({
+    const phases = visibleLegPhases(splitMainLegPhases({
       pnl: pnlForPhases,
       entryPrice: entryPriceValue,
       exitPrice: exitPriceValue,
@@ -762,13 +762,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       closeTime: execution.closeTime ?? null,
       side: leg.direction === 'short' ? 'short' : 'long',
       hedges: hedgeBoundaries,
-    });
-    if (phases.length < 2) return [mainRow];
+    }));
+    if (phases.length === 0) return [mainRow];
     const phaseRows = phases.map(phase => {
       const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
       const phaseCells: CampaignLegsExportCellLine[][] = [
-          [{ text: `阶段 ${phase.index}${phase.boundaryLegId == null ? ' · 收尾' : ''}`, color: '#848E9C', indent: CHIP_PAD_X }],
+          [{ text: `阶段 ${phase.index}`, color: '#848E9C', indent: CHIP_PAD_X }],
           [
             { text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' },
             // 与页面同源：由对冲结束切出来的阶段要标明，否则读不出这一段为什么在这里断开

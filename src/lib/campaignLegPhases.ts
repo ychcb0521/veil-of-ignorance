@@ -46,6 +46,18 @@ export interface MainLegPhase {
   boundaryLegId: string | null;
 }
 
+/** 主力（多 / 空）以及其他多单都显示阶段；空单对冲等辅助腿不显示。 */
+export function legSupportsPhases(leg: { leg_role?: string | null; direction?: string | null }): boolean {
+  return leg.leg_role === 'main_open'
+    || leg.leg_role === 'reentry_main'
+    || leg.direction === 'long';
+}
+
+/** “收尾”只是腿自身平仓前的余段，不作为一个决策阶段呈现。 */
+export function visibleLegPhases(phases: MainLegPhase[]): MainLegPhase[] {
+  return phases.filter(phase => phase.boundaryLegId != null);
+}
+
 const EPS = 1e-12;
 
 function isFiniteNumber(v: unknown): v is number {

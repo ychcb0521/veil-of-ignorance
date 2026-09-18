@@ -1,7 +1,7 @@
 /**
  * 【用户要求】「我希望主力单下面的那个阶段可以做成折叠模式。」
  *
- * 主力行下方的「阶段 N」子行默认折叠：主力的角色格第一行、角色标签右边有一个小开关（箭头 + 阶段数），
+ * 主力与其他多单下方的「阶段 N」子行默认折叠：角色格第一行、角色标签右边有一个小开关（箭头 + 阶段数），
  * 点开才渲染阶段子行，再点收起。展开状态按腿 id 各记各的，不持久化；折叠时阶段容器不渲染。
  * 【用户要求 · 续】第一列只要「角色」、简洁：开关与标签同在一行，不另占第二行。
  */
@@ -21,7 +21,7 @@ const legFor = (over: Partial<TradeJournal> & { id: string }): TradeJournal => (
   ...over,
 } as TradeJournal);
 
-/** 两段主力（主力开仓、重新入场主力），各被一次滚动对冲切成两段；另有一笔加仓（不是主力，没有阶段）。 */
+/** 两段主力与一笔加仓，各有一次滚动对冲结束；收尾段都不呈现。 */
 const legs = () => [
   legFor({
     id: 'main', pre_entry_price: 1, pre_position_size: 3_000,
@@ -33,7 +33,7 @@ const legs = () => [
     post_exit_price_snapshot: 1.05, post_simulated_close_time: at('03:00'), post_realized_pnl: 90,
   }),
   legFor({
-    id: 'add1', leg_sequence: 3, leg_role: 'main_add_1', pre_simulated_time: at('03:30'),
+    id: 'add1', leg_sequence: 3, leg_role: 'main_add_1', pre_simulated_time: at('02:30'),
     pre_entry_price: 1.1, pre_position_size: 1_100,
     post_exit_price_snapshot: 1.2, post_simulated_close_time: at('05:00'), post_realized_pnl: 100,
   }),
@@ -57,23 +57,22 @@ const renderList = () => render(
 
 const toggleOf = (id: string) => screen.getByTestId(`leg-phases-toggle-${id}`);
 
-describe('【用户要求】主力阶段子行默认折叠', () => {
-  it('默认折叠：阶段子行不渲染；主力的角色格里有阶段开关（看得见的只有箭头与阶段数），aria-expanded=false', () => {
+describe('【用户要求】主力与其他多单的阶段子行默认折叠，收尾不呈现', () => {
+  it('默认折叠：主力和加仓都有阶段开关；空单对冲没有', () => {
     renderList();
     expect(screen.queryByTestId('leg-phases-main')).toBeNull();
     expect(screen.queryByTestId('leg-phases-reentry')).toBeNull();
     expect(screen.queryByText(/^阶段 \d/)).toBeNull();
-    for (const id of ['main', 'reentry']) {
+    for (const id of ['main', 'add1', 'reentry']) {
       const toggle = toggleOf(id);
       expect(toggle.tagName).toBe('BUTTON');
       expect(toggle.getAttribute('type')).toBe('button');
-      expect(toggle.textContent).toBe('2');
-      // 读屏名与悬停说明写全：「展开 2 个阶段」
-      expect(toggle.getAttribute('aria-label')).toBe('展开 2 个阶段');
-      expect(toggle.getAttribute('title')).toBe('展开 2 个阶段');
+      expect(toggle.textContent).toBe('1');
+      expect(toggle.getAttribute('aria-label')).toBe('展开 1 个阶段');
+      expect(toggle.getAttribute('title')).toBe('展开 1 个阶段');
       // title 与读屏名同一句：空的 aria-description 盖掉「title 兜底当描述」，读屏不重复念
       expect(toggle.getAttribute('aria-description')).toBe('');
-      expect(screen.getAllByRole('button', { name: '展开 2 个阶段', expanded: false })).toContain(toggle);
+      expect(screen.getAllByRole('button', { name: '展开 1 个阶段', expanded: false })).toContain(toggle);
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
       expect(toggle.getAttribute('aria-controls')).toBeTruthy();
       // 折叠时的图标朝右
@@ -83,8 +82,8 @@ describe('【用户要求】主力阶段子行默认折叠', () => {
     }
     // 两个按钮控制的是两个不同的容器
     expect(toggleOf('main').getAttribute('aria-controls')).not.toBe(toggleOf('reentry').getAttribute('aria-controls'));
-    // 不是主力、或没被切开的腿没有这个按钮
-    for (const id of ['hedge-1', 'add1', 'hedge-2']) {
+    // 空单对冲没有这个按钮
+    for (const id of ['hedge-1', 'hedge-2']) {
       expect(screen.queryByTestId(`leg-phases-toggle-${id}`)).toBeNull();
     }
   });
@@ -106,11 +105,7 @@ describe('【用户要求】主力阶段子行默认折叠', () => {
     expect(toggle.className).toContain('text-muted-foreground');
     expect(toggle.className).toContain('hover:text-foreground');
     expect(toggle.lastElementChild!.getAttribute('aria-hidden')).toBe('true');
-    // 没有阶段的腿，角色格里只有标签
-    const add = screen.getByTestId('leg-frozen-role-add1');
-    expect(add.children).toHaveLength(1);
-    expect(add.firstElementChild!.children).toHaveLength(1);
-    expect(add.querySelector('button')).toBeNull();
+    expect(toggleOf('add1').className).toBe(toggle.className);
   });
 
   it('点开：阶段子行出现在主力行正下方，容器 id 与 aria-controls 对上；再点收起', () => {
@@ -118,17 +113,18 @@ describe('【用户要求】主力阶段子行默认折叠', () => {
     const toggle = toggleOf('main');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.getAttribute('aria-label')).toBe('收起 2 个阶段');
-    expect(toggle.getAttribute('title')).toBe('收起 2 个阶段');
+    expect(toggle.getAttribute('aria-label')).toBe('收起 1 个阶段');
+    expect(toggle.getAttribute('title')).toBe('收起 1 个阶段');
     expect(toggle.querySelector('svg')!.getAttribute('class')).toContain('rotate-90');
     const phases = screen.getByTestId('leg-phases-main');
     expect(phases.id).toBe(toggle.getAttribute('aria-controls'));
     expect(phases.previousElementSibling).toBe(screen.getByTestId('leg-frozen-role-main').parentElement);
-    expect(Array.from(phases.children).map(row => row.children[0].textContent)).toEqual(['阶段 1', '阶段 2 · 收尾']);
+    expect(Array.from(phases.children).map(row => row.children[0].textContent)).toEqual(['阶段 1']);
+    expect(phases.textContent).not.toContain('收尾');
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-label')).toBe('展开 2 个阶段');
+    expect(toggle.getAttribute('aria-label')).toBe('展开 1 个阶段');
     expect(screen.queryByTestId('leg-phases-main')).toBeNull();
     expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeNull();
   });

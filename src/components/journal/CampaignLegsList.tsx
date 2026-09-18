@@ -13,7 +13,7 @@ import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
-import { formatDeltaB, legDeltaB, roundedDeltaB, splitMainLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
+import { formatDeltaB, legDeltaB, legSupportsPhases, roundedDeltaB, splitMainLegPhases, visibleLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
 import { computeLegPriceChangePct, formatLegPriceChangePct, legPriceChangeDirection } from '@/lib/legPriceChange';
 import {
   computeLegPositionShares,
@@ -277,7 +277,7 @@ function markLegsScrolled(event: UIEvent<HTMLDivElement>) {
 const PRICE_CHANGE_COLUMN_HINT = '按这条腿的方向计——多单 =（平仓价 − 开仓价）÷ 开仓价，空单 =（开仓价 − 平仓价）÷ 开仓价；'
   + '正数即这条腿在价格上占优，按所示的这一对开平价看与「贡献 / 盈亏」同号'
   + '（不计手续费；一个仓位分几刀平掉时平仓价取最后一刀、盈亏是各刀合计，符号可能不同）；'
-  + '阶段子行按主力方向、各自起止价计算。';
+  + '阶段子行按所属腿方向、各自起止价计算。';
 
 /** 涨跌幅的字色：正绿负红（按方向计，正即占优）；取整为 0 与缺值都是中性淡色。alpha 用于阶段子行的 /90。 */
 function priceChangeTone(pct: number | null, muted = false): string {
@@ -555,7 +555,7 @@ export function CampaignLegsList({
     if (scroller) scroller.scrollTop = 0;
     setShareSort(current => nextLegPositionShareSort(current, 'long'));
   }, []);
-  // 主力阶段子行默认折叠：展开的是哪几条主力，按腿 id 记，不持久化
+  // 阶段子行默认折叠：展开的是哪几条腿，按腿 id 记，不持久化
   const [expandedPhaseLegIds, setExpandedPhaseLegIds] = useState<ReadonlySet<string>>(() => new Set());
   const togglePhases = useCallback((legId: string) => {
     setExpandedPhaseLegIds(current => {
@@ -587,9 +587,9 @@ export function CampaignLegsList({
     () => computeLegPnlContributions(legs, leg => settlement.byLeg.get(leg.id) ?? null),
     [legs, settlement],
   );
-  // 主力腿的阶段拆解：每一次滚动对冲的结束把主力切成一段。
+  // 主力与其他多单的阶段拆解：每一次滚动对冲的结束切出一个可见阶段。
   // 边界价取对冲的平仓价（resolveLegExecution 同源，含平仓价校正）。
-  const mainPhasesMap = useMemo(() => {
+  const legPhasesMap = useMemo(() => {
     const hedgeBoundaries = legs
       .filter(l => l.order_kind === 'hedge' || (l.leg_role ?? '').startsWith('hedge_') || l.leg_role === 'reentry_hedge')
       .map(l => {
@@ -599,12 +599,12 @@ export function CampaignLegsList({
       });
     const map = new Map<string, MainLegPhase[]>();
     for (const leg of legs) {
-      if (leg.leg_role !== 'main_open' && leg.leg_role !== 'reentry_main') continue;
+      if (!legSupportsPhases(leg)) continue;
       const rec = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
       const exec = resolveLegExecution(leg, rec, legExitPriceCorrections);
       const pnl = settlement.byLeg.get(leg.id) ?? null;
       if (pnl == null || exec.entryPrice == null || exec.exitPrice == null) continue;
-      const phases = splitMainLegPhases({
+      const phases = visibleLegPhases(splitMainLegPhases({
         pnl,
         entryPrice: exec.entryPrice,
         exitPrice: exec.exitPrice,
@@ -612,9 +612,9 @@ export function CampaignLegsList({
         closeTime: exec.closeTime ?? null,
         side: leg.direction === 'short' ? 'short' : 'long',
         hedges: hedgeBoundaries,
-      });
-      // 只有真被切开（≥2 段）才展示子行；单段就是整腿自身，无需重复
-      if (phases.length >= 2) map.set(leg.id, phases);
+      }));
+      // 收尾段统一不展示；至少有一个由对冲结束界定的阶段才给展开入口。
+      if (phases.length > 0) map.set(leg.id, phases);
     }
     return map;
   }, [legs, recordMap, legExitPriceCorrections, settlement.byLeg]);
@@ -759,7 +759,7 @@ export function CampaignLegsList({
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
                 : null;
-              const phases = mainPhasesMap.get(leg.id) ?? null;
+              const phases = legPhasesMap.get(leg.id) ?? null;
               const phasesExpanded = phases != null && expandedPhaseLegIds.has(leg.id);
               const phasesId = `${phasesIdPrefix}-phases-${leg.id}`;
               return (
@@ -1095,8 +1095,7 @@ export function CampaignLegsList({
                   </div>
                 </div>
 
-                {/* 主力阶段拆解：每一次滚动对冲的结束 = 主力一个阶段的完成。
-                    子行缩进浅色呈现，Σ阶段盈亏 === 主力整腿盈亏（分摊守恒）。默认折叠，折叠时整块不渲染。 */}
+                {/* 主力与其他多单的阶段拆解：只呈现由滚动对冲结束界定的阶段，收尾段省略。 */}
                 {phases && phasesExpanded && (
                   <div id={phasesId} data-testid={`leg-phases-${leg.id}`} className={`${ROW_RULE} bg-muted/20`}>
                     {phases.map((phase, phaseIndex) => {
@@ -1116,7 +1115,6 @@ export function CampaignLegsList({
                           >
                             <div className="whitespace-nowrap pl-2 font-sans text-[9px]">
                               阶段 {phase.index}
-                              {phase.boundaryLegId == null && <span className="text-muted-foreground/60"> · 收尾</span>}
                             </div>
                           </div>
                           <div className="tabular-nums" title={`${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`}>

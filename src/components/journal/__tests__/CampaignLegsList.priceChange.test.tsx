@@ -197,15 +197,11 @@ describe('Legs 列表的「涨跌幅」列', () => {
       expandPhases();
       expect(screen.getByTestId('leg-price-change-main').textContent).toBe('+101.26%');
       const first = screen.getByTestId('leg-phase-price-change-main-1');
-      const tail = screen.getByTestId('leg-phase-price-change-main-2');
       // 0.0336792 → 0.052
       expect(first.previousElementSibling!.textContent).toBe('0.0520000');
       expect(first.textContent).toBe('+54.40%');
       expect(first.className).toContain('text-[#0ECB81]/90');
-      // 0.052 → 0.0677819
-      expect(tail.previousElementSibling!.previousElementSibling!.textContent).toBe('0.0520000');
-      expect(tail.textContent).toBe('+30.35%');
-      expect(tail.className).toContain('text-[#0ECB81]/90');
+      expect(screen.queryByTestId('leg-phase-price-change-main-2')).toBeNull();
       // 对冲腿自己是空单：价格从 0.05 涨到 0.052，按方向计是 -4.00%，红
       const hedge = screen.getByTestId('leg-price-change-hedge-roll');
       expect(hedge.textContent).toBe('-4.00%');
@@ -222,13 +218,10 @@ describe('Legs 列表的「涨跌幅」列', () => {
       expect(main.textContent).toBe('-101.26%');
       expect(main.className).toContain('text-[#F6465D]');
       const first = screen.getByTestId('leg-phase-price-change-main-1');
-      const tail = screen.getByTestId('leg-phase-price-change-main-2');
       // 0.0336792 → 0.052，空单
       expect(first.textContent).toBe('-54.40%');
       expect(first.className).toContain('text-[#F6465D]/90');
-      // 0.052 → 0.0677819，空单
-      expect(tail.textContent).toBe('-30.35%');
-      expect(tail.className).toContain('text-[#F6465D]/90');
+      expect(screen.queryByTestId('leg-phase-price-change-main-2')).toBeNull();
       // 对冲腿这回是多单：0.05 → 0.052 是 +4.00%
       expect(screen.getByTestId('leg-price-change-hedge-roll').textContent).toBe('+4.00%');
     });
@@ -249,7 +242,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
         expect(row.children[column]).toBe(screen.getByTestId(`leg-price-change-${id}`));
       }
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
-      expect(phaseRows.length).toBeGreaterThanOrEqual(2);
+      expect(phaseRows).toHaveLength(1);
       phaseRows.forEach((row, index) => {
         expect(row.children).toHaveLength(13);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-phase-price-change-main-${index + 1}`));

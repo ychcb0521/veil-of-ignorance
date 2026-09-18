@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { legDeltaB, splitMainLegPhases, type MainPhaseInput } from '@/lib/campaignLegPhases';
+import { legDeltaB, legSupportsPhases, splitMainLegPhases, visibleLegPhases, type MainPhaseInput } from '@/lib/campaignLegPhases';
 
 const T = (h: number, m: number) => Date.parse(`2026-04-02T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`);
 
@@ -97,6 +97,24 @@ describe('splitMainLegPhases', () => {
   it('价格非法时返回空数组，不臆造', () => {
     expect(splitMainLegPhases({ ...base, entryPrice: 0 })).toEqual([]);
     expect(splitMainLegPhases({ ...base, exitPrice: Number.NaN })).toEqual([]);
+  });
+});
+
+describe('阶段呈现规则', () => {
+  it('主力多空与其他多单可分阶段，空单对冲不呈现', () => {
+    expect(legSupportsPhases({ leg_role: 'main_open', direction: 'short' })).toBe(true);
+    expect(legSupportsPhases({ leg_role: 'main_add_1', direction: 'long' })).toBe(true);
+    expect(legSupportsPhases({ leg_role: 'hedge_rolling', direction: 'long' })).toBe(true);
+    expect(legSupportsPhases({ leg_role: 'hedge_rolling', direction: 'short' })).toBe(false);
+  });
+
+  it('所有角色都过滤收尾，只保留由对冲结束界定的阶段', () => {
+    const phases = splitMainLegPhases({
+      ...base,
+      hedges: [{ legId: 'h1', closeTime: T(13, 21), closePrice: 0.00935777 }],
+    });
+    expect(visibleLegPhases(phases).map(phase => phase.boundaryLegId)).toEqual(['h1']);
+    expect(visibleLegPhases(phases).map(phase => phase.index)).toEqual([1]);
   });
 });
 
