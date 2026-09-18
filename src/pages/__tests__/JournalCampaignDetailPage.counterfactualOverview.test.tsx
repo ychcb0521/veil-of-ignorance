@@ -483,6 +483,23 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(screen.queryByTestId('counterfactual-draft-panel')).not.toBeInTheDocument();
   }, 15_000);
 
+  it('保存一次后离开页面，重新进入同一战役会自动恢复分支与概览', async () => {
+    const firstVisit = renderPage();
+    await runFromEditor();
+    fireEvent.change(screen.getByTestId('counterfactual-draft-name'), { target: { value: '持久方案' } });
+    fireEvent.click(screen.getByTestId('counterfactual-save'));
+
+    await screen.findByTestId('counterfactual-branch-row-cf-new');
+    firstVisit.unmount();
+
+    renderPage();
+    const restoredRow = await screen.findByTestId('counterfactual-branch-row-cf-new');
+    expect(within(restoredRow).getByText('持久方案')).toBeInTheDocument();
+    const restoredPanel = await screen.findByTestId('counterfactual-saved-panel');
+    expect(within(restoredPanel).getByText('反事实盈亏概览 · 持久方案')).toBeInTheDocument();
+    expect(listCounterfactualsMock.mock.calls.filter(call => call[0] === 'winner').length).toBeGreaterThanOrEqual(2);
+  }, 15_000);
+
   it('丢弃 → 不插库，草稿面板消失', async () => {
     renderPage();
     await runFromEditor();

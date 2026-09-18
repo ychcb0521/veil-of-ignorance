@@ -742,7 +742,11 @@ export default function JournalCampaignDetailPage() {
           });
         }
         setCounterfactuals(savedCounterfactuals);
-        setSelectedCounterfactualId(prev => prev ?? firstVisibleCounterfactualId(savedCounterfactuals));
+        setSelectedCounterfactualId(prev => (
+          prev && savedCounterfactuals.some(branch => branch.id === prev && isVisibleCounterfactualBranch(branch))
+            ? prev
+            : firstVisibleCounterfactualId(savedCounterfactuals)
+        ));
       } catch (error) {
         if (!cancelled) {
           toast.error(error instanceof Error ? error.message : String(error));

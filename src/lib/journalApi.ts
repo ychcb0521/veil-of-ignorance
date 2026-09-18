@@ -308,7 +308,6 @@ const CAMPAIGN_DEVIATION_NOTES_STORAGE_KEY = 'campaign_deviation_notes';
 const TRADING_RULE_SOURCE_CAMPAIGNS_STORAGE_KEY = 'trading_rule_source_campaigns';
 const TRADING_RULE_SOURCE_RULE_ID_PREFIX = 'rule_id:';
 const ACCOUNT_FOLLOWS_STORAGE_KEY = 'account_follows';
-const MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS = 50;
 
 function getInitialCognitiveAssetsDoc(): CognitiveAssetsDoc {
   return deepClone(INITIAL_COGNITIVE_ASSETS);
@@ -1175,7 +1174,7 @@ function writeAllLocalCounterfactuals(userId: string, branches: CampaignCounterf
   writeUserScopedStorage(
     userId,
     CAMPAIGN_COUNTERFACTUALS_STORAGE_KEY,
-    sortCounterfactuals(branches).slice(0, MAX_LOCAL_CAMPAIGN_COUNTERFACTUALS),
+    sortCounterfactuals(branches),
   );
 }
 
@@ -4814,7 +4813,11 @@ export async function createCounterfactual(
       created_at: new Date().toISOString(),
     }));
   }
-  return wrap('创建反事实战役分支', error, toCampaignCounterfactual(data));
+  // 远端是跨设备的权威数据，本地镜像则保证页面重载、短暂离线或
+  // schema cache 短暂不可用时，用户刚保存的分支仍然与原战役绑定。
+  return upsertLocalCounterfactual(
+    wrap('创建反事实战役分支', error, toCampaignCounterfactual(data)),
+  );
 }
 
 export async function listCounterfactuals(campaignId: string): Promise<CampaignCounterfactual[]> {

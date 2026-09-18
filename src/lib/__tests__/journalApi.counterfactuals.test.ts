@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => {
 
   return {
     getUser: vi.fn(),
+    remote: {
+      available: false,
+      inserted: null as Record<string, unknown> | null,
+      listed: [] as Record<string, unknown>[],
+    },
     from: vi.fn((table: string) => {
       if (table === 'profiles') {
         return {
@@ -25,12 +30,16 @@ const mocks = vi.hoisted(() => {
         return {
           insert: vi.fn(() => ({
             select: vi.fn(() => ({
-              single: vi.fn(async () => ({ data: null, error: missingCounterfactualsTable })),
+              single: vi.fn(async () => mocks.remote.available
+                ? { data: mocks.remote.inserted, error: null }
+                : { data: null, error: missingCounterfactualsTable }),
             })),
           })),
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              order: vi.fn(async () => ({ data: null, error: missingCounterfactualsTable })),
+              order: vi.fn(async () => mocks.remote.available
+                ? { data: mocks.remote.listed, error: null }
+                : { data: null, error: missingCounterfactualsTable }),
             })),
           })),
           delete: vi.fn(() => ({
@@ -95,6 +104,9 @@ const result: CampaignCounterfactualResult = {
 describe('journalApi campaign counterfactual local fallback', () => {
   beforeEach(() => {
     localStorage.clear();
+    mocks.remote.available = false;
+    mocks.remote.inserted = null;
+    mocks.remote.listed = [];
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
   });
 
@@ -118,6 +130,37 @@ describe('journalApi campaign counterfactual local fallback', () => {
 
     await deleteCounterfactual(branch.id);
 
+    expect(await listCounterfactuals('campaign-1')).toEqual([]);
+  });
+
+  it('远端保存成功后仍留下按战役绑定的本地镜像，重新进入可直接恢复', async () => {
+    mocks.remote.available = true;
+    mocks.remote.inserted = {
+      id: 'remote-branch-1',
+      user_id: 'user-1',
+      campaign_id: 'campaign-1',
+      label: '长期保留方案',
+      branch_kind: 'custom_what_if',
+      source_deduction_id: null,
+      params,
+      result,
+      created_at: '2026-09-18T03:30:00.000Z',
+    };
+
+    const branch = await createCounterfactual({
+      campaign_id: 'campaign-1',
+      label: '长期保留方案',
+      branch_kind: 'custom_what_if',
+      params,
+      result,
+    });
+
+    // 模拟下次进入页面时远端暂时没返回该行：战役本地镜像仍能恢复。
+    mocks.remote.listed = [];
+    expect((await listCounterfactuals('campaign-1')).map(row => row.id)).toEqual([branch.id]);
+    expect(await listCounterfactuals('campaign-2')).toEqual([]);
+
+    await deleteCounterfactual(branch.id);
     expect(await listCounterfactuals('campaign-1')).toEqual([]);
   });
 });
