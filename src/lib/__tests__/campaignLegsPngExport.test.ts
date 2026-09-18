@@ -6,6 +6,7 @@ import {
   campaignEmotionDiaryPanelHeight,
   drawEmotionDiaryPanel,
   buildCampaignLegsExportRows,
+  campaignLegsShareSide,
   campaignLegsExportCanvasHeight,
   wrapCampaignLegsExportLine,
   formatCampaignChartInterval,
@@ -949,7 +950,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
   });
 });
 
-describe('【用户要求】导出图也带「多单占比」一列（币量 / 仓位右侧）', () => {
+describe('【用户要求】导出图也带「占比」一列（币量 / 仓位右侧，按战役主方向取一侧；这一组是主多战役）', () => {
   // 【用户要求 · 续】多单、空单分开算；合计行分别给出多、空两组 Σ——与页面同源
   // 【用户要求 · 三续】「空单仓位的占比也不需要，没必要存在」：只剩「多单占比」一列，空单的行一格空白、不进它的分母；
   // 导出图不跟页面的排序与折叠走
@@ -1291,7 +1292,7 @@ describe('【用户要求】导出图也带「多单占比」一列（币量 / �
       expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
     });
 
-    it('主空战役里的多单对冲：分组跟方向走——对冲进「多单占比」列；两条空单一格空白、只进空单那组 Σ', () => {
+    it('战役方向说了算：主多战役（campaign.direction = main_long）里即使主力是空单，这一列仍看多单——多单对冲有数，空单一格空白、只进空单那组 Σ', () => {
       const rows = rowsOf([
         leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
         leg({
@@ -1314,7 +1315,7 @@ describe('【用户要求】导出图也带「多单占比」一列（币量 / �
       expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
     });
 
-    it('主空战役里唯一的多单对冲还挂单中：多单那组不列，「多单占比」合计一格空白；Σ 格只剩空单那组', () => {
+    it('主多战役里唯一的多单（对冲）还挂单中：多单那组不列，占比合计一格空白；Σ 格只剩空单那组', () => {
       const rows = rowsOf([
         leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
         leg({
@@ -1331,7 +1332,7 @@ describe('【用户要求】导出图也带「多单占比」一列（币量 / �
       expect(total.height).toBe(12 * 2 + 17 * 2);
     });
 
-    it('合计行：两格逐行对齐——「多单占比」的两行与 Σ 格的第 0、1 行（多单那组）同一行；Σ 四行时合计行撑到四行高，腿行不变', () => {
+    it('合计行：两格逐行对齐——占比的两行与 Σ 格的第 0、1 行（多单那组）同一行；Σ 四行时合计行撑到四行高，腿行不变', () => {
       const rows = rowsOf(userShape());
       const total = rows.at(-1)!;
       const coins = total.cells[COINS_COL];
@@ -1423,6 +1424,114 @@ describe('【用户要求】导出图也带「多单占比」一列（币量 / �
       expect(wrapCampaignLegsExportLine({ ...plain, tag }, Math.ceil(width)).length).toBeGreaterThan(1);
       // 放得下就原样返回
       expect(wrapCampaignLegsExportLine({ text: '100.0%', tag }, 76)).toEqual([{ text: '100.0%', tag }]);
+    });
+  });
+
+  /**
+   * 【用户要求 · 四续】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」。
+   * 与页面同一个 helper（resolveLegPositionShareSide）：战役方向说了算，导出图的表头列名、腿行与合计行都跟着那一侧。
+   */
+  describe('【用户要求 · 四续】主空战役：这一列改看空单', () => {
+    const closed = { post_simulated_close_time: T('09:00') };
+    const mainShortInput = () => ({
+      ...input(),
+      campaign: { ...campaign, direction: 'main_short' } as TradeCampaign,
+      reverseHedgeOrders: [],
+      // 主力空单 5,000 U（2,500 币）、多单对冲 2,000 U（1,000 币）、加仓空单 3,000 U（1,500 币）
+      legs: [
+        leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
+        leg({
+          id: 'hedge-long', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
+          pre_simulated_time: T('02:00'), pre_entry_price: 2, pre_position_size: 2_000,
+          post_exit_price_snapshot: 2.1, post_simulated_close_time: T('03:00'),
+        }),
+        leg({
+          id: 'add-short', leg_sequence: 3, leg_role: 'main_add_1', direction: 'short', pre_simulated_time: T('04:00'),
+          pre_entry_price: 2, pre_position_size: 3_000, post_exit_price_snapshot: 1.5, ...closed,
+        }),
+      ],
+    });
+
+    it('与页面同一批数：两条空单在占比列加起来 100.0%，多单对冲一格空白；合计行先垫两行空白，「100.0%」与空单那组 Σ 同一行', () => {
+      const rows = buildCampaignLegsExportRows(mainShortInput());
+      expect(campaignLegsShareSide(mainShortInput())).toBe('short');
+      expect(texts(rowOf(rows, 'main-short').cells[LONG_COL])).toEqual(['62.5%', '62.5%']);
+      expect(texts(rowOf(rows, 'add-short').cells[LONG_COL])).toEqual(['37.5%', '37.5%']);
+      expect(rowOf(rows, 'hedge-long').cells[LONG_COL]).toEqual(EMPTY);
+      // 腿行的颜色与主多时一样：上行随币量（缺省前景），下行淡色；行里不挂标签
+      expect(rowOf(rows, 'main-short').cells[LONG_COL]).toEqual([
+        { text: '62.5%' },
+        { text: '62.5%', color: '#848E9C' },
+      ]);
+      for (const row of rows) {
+        expect(row.cells).toHaveLength(EXPORT_COLUMN_COUNT);
+        expect(row.cells[LONG_COL].every(line => line.tag == null)).toBe(true);
+      }
+
+      const total = rows.at(-1)!;
+      // Σ 照旧先多后空（分组跟腿的方向走）：多单那组是对冲一共开了多大
+      expect(texts(total.cells[COINS_COL])).toEqual(['1,000', '2000.00', '4,000', '8000.00']);
+      expect(total.cells[COINS_COL].map(line => line.tag?.text)).toEqual(['多', '多', '空', '空']);
+      // 占比格：空单那组是第二组，先垫两行空白，第 2、3 行才是「100.0%」——与 Σ 格逐行对齐
+      expect(texts(total.cells[LONG_COL])).toEqual(['', '', '100.0%', '100.0%']);
+      expect(total.cells[LONG_COL].slice(2).map(line => line.color)).toEqual(['#5F6B7A', '#848E9C']);
+      expect(total.cells[LONG_COL].every(line => line.tag == null)).toBe(true);
+      expect(total.wrapped[LONG_COL]).toEqual(total.cells[LONG_COL]);
+      expect(total.height).toBe(12 * 2 + 17 * 4);
+    });
+
+    it('只有空单（没开对冲）时不垫空白：空单那组就是第一组', () => {
+      const base = mainShortInput();
+      const rows = buildCampaignLegsExportRows({ ...base, legs: base.legs.filter(item => item.id !== 'hedge-long') });
+      const total = rows.at(-1)!;
+      expect(texts(total.cells[COINS_COL])).toEqual(['4,000', '8000.00']);
+      expect(total.cells[COINS_COL][0].tag).toEqual({ text: '空', color: '#F6465D' });
+      expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
+      expect(total.height).toBe(12 * 2 + 17 * 2);
+    });
+
+    it('表头画的是「空单占比」（不是「多单占比」），位置不变；「100.0%」与空单那组 Σ 画在同一条基线上', () => {
+      const drawn: { text: string; x: number; y: number }[] = [];
+      const state: Record<string | symbol, unknown> = {};
+      const ctx = new Proxy(state, {
+        get(target, key) {
+          if (key === 'fillText') return (text: string, x: number, y: number) => { drawn.push({ text: String(text), x, y }); };
+          if (key === 'measureText') return (text: string) => ({ width: String(text).length * 8 });
+          if (key in target) return target[key];
+          return () => undefined;
+        },
+        set(target, key, value) { target[key] = value; return true; },
+      }) as unknown as CanvasRenderingContext2D;
+      vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+
+      buildCampaignLegsListCanvas(mainShortInput(), { includeHeader: false, scale: 1 });
+
+      const at = drawn.findIndex(item => item.text === '空单占比');
+      expect(at).toBeGreaterThan(0);
+      expect(drawn.slice(at - 1, at + 2).map(item => item.text)).toEqual(['币量 / 仓位', '空单占比', '加仓校验']);
+      expect(drawn.some(item => item.text === '多单占比')).toBe(false);
+      const header = (title: string) => drawn.find(item => item.text === title)!;
+      expect(header('加仓校验').x - header('空单占比').x).toBe(88);
+      // 合计行：「空」标签那一行的 y 与占比格第一个「100.0%」相同（垫的两行空白把它顶到了第二组）
+      const totalFrom = drawn.findIndex(item => item.text === '合计');
+      const tags = drawn.slice(totalFrom).filter(item => item.text === '多' || item.text === '空');
+      expect(tags.map(item => item.text)).toEqual(['多', '空']);
+      const pcts = drawn.slice(totalFrom).filter(item => item.text === '100.0%');
+      expect(pcts).toHaveLength(2);
+      expect(pcts[0].y).toBe(tags[1].y);
+      expect(pcts[1].y).toBe(pcts[0].y + 17);
+      expect(pcts[0].x - tags[1].x).toBe(184);
+      // 腿行的百分数也画出来了（62.5% / 37.5%）
+      expect(drawn.slice(0, totalFrom).filter(item => item.text === '62.5%').length).toBeGreaterThan(0);
+    });
+
+    it('战役方向缺失（旧数据）时从主力腿回推：这一批腿照样看空单', () => {
+      const base = mainShortInput();
+      const legacy = { ...base, campaign: { ...base.campaign, direction: undefined } as unknown as TradeCampaign };
+      expect(campaignLegsShareSide(legacy)).toBe('short');
+      const rows = buildCampaignLegsExportRows(legacy);
+      expect(texts(rowOf(rows, 'main-short').cells[LONG_COL])).toEqual(['62.5%', '62.5%']);
+      expect(rowOf(rows, 'hedge-long').cells[LONG_COL]).toEqual(EMPTY);
     });
   });
 });

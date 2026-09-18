@@ -10,7 +10,7 @@ import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttrib
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
-import type { CampaignEvent, TradeJournal } from '@/types/journal';
+import type { CampaignEvent, TradeCampaign, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
 import { formatDeltaB, legDeltaB, legSupportsPhases, roundedDeltaB, splitMainLegPhases, visibleLegPhases, type MainLegPhase } from '@/lib/campaignLegPhases';
@@ -26,7 +26,9 @@ import {
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
   legPositionSideFromDirection,
+  legPositionSideName,
   nextLegPositionShareSort,
+  resolveLegPositionShareSide,
   sortByLegPositionShare,
   LEG_POSITION_SIDE_LABELS,
   type LegPositionShareSort,
@@ -65,11 +67,17 @@ interface Props {
   onDetach?: (leg: TradeJournal) => void;
   /** 战役的初始最大预期亏损 L（USDT）；Δb 列 = 各腿盈亏 ÷ L。缺失时 Δb 显示「—」。 */
   initialExpectedMaxLoss?: number | null;
+  /**
+   * 战役主方向（campaign.direction）。「占比」这一列按它取一侧：主多看多单、主空看空单
+   * （【用户要求】「主空战役里，这一列改成按战役主方向算」）。
+   * 缺失时从主力腿回推（resolveLegPositionShareSide，与导出 PNG 同一个 helper，两处不可能取到不同的一侧）。
+   */
+  campaignDirection?: TradeCampaign['direction'] | null;
 }
 
 /**
  * 角色标签的悬停说明：没有角色的先说明「—」是什么；没有平仓时说状态（挂单中 / 进行中）；历史回填的腿再补一句来源。
- * 状态与「多单占比」、合计行 Σ 的排除读的是同一个 legRowStatus，几处永远一致。
+ * 状态与「占比」列、合计行 Σ 的排除读的是同一个 legRowStatus，几处永远一致。
  */
 function roleChipTitle(status: LegRowStatus, retroactive: boolean, unclassified: boolean): string | undefined {
   const lines = [
@@ -120,7 +128,7 @@ function fmtPrice(value: number | null | undefined): string {
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
  * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
- * 扫视最先停留的那一段；开平价、涨跌幅、币量、多单占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
+ * 扫视最先停留的那一段；开平价、涨跌幅、币量、占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
  * 第一列只有「角色」：不再印腿的序号，也不再挂「回填」标签（来源写在角色标签的悬停说明里）。
  * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时把角色标签本身画成另一种样子
  * （挂单中：虚线空心；进行中：标签里一枚小圆点）。
@@ -156,8 +164,8 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 
 // 角色 132px：最长的「重新入场主力 2」标签带「进行中」小圆点（实测 95.4px）+ 最小间距 4 + 阶段开关 28 + 开关离右缘 4 = 131.4px，一行放下
 // 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
-// 多单占比 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
-// 再宽，右对齐的百分数就离左边的币量太远，读不成一组。占比只给多单这一列：空单不单独算占比
+// 占比 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
+// 再宽，右对齐的百分数就离左边的币量太远，读不成一组。占比只有这一列：按战役主方向取一侧（主多看多单、主空看空单）
 const LEGS_GRID = 'grid-cols-[132px_180px_116px_84px_88px_88px_84px_136px_72px_116px_148px_minmax(216px,1fr)_64px]';
 
 /**
@@ -298,12 +306,18 @@ function priceChangeTone(pct: number | null, muted = false): string {
 const LEGS_SCROLL_PADDING = 'scroll-pt-8 scroll-pl-[144px]';
 
 /**
- * 「多单占比」列头的说明：多单各腿占多单合计的百分比；空单的行留空、也不进分母；挂单中的腿不进合计；点列头排序。
+ * 「占比」列头的说明：本列按战役主方向取一侧（主多看多单、主空看空单），这一侧各腿占这一侧合计的百分比；
+ * 另一侧的行留空、也不进分母；挂单中的腿不进合计；点列头排序。
  * 只给读屏（aria-description）；排序状态在按钮的读屏名里（describeLegPositionShareSort）。
  */
-const LONG_SHARE_COLUMN_HINT = '这条多单占全部计入的多单的百分比：上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
-  + '空单的行这一列留空，空单也不进分母；合计行写多单各腿合计的 100.0%（多单没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里多单那组 Σ 对齐。'
-  + '点击列头按本列排序：降序 → 升序 → 默认顺序。';
+function positionShareColumnHint(side: LegPositionSide): string {
+  const name = legPositionSideName(side);
+  const other = legPositionSideName(side === 'long' ? 'short' : 'long');
+  return `本列按战役主方向取一侧（主多看多单、主空看空单），本场看${name}：这条${name}占全部计入的${name}的百分比，`
+    + '上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
+    + `${other}的行这一列留空，${other}也不进分母；合计行写${name}各腿合计的 100.0%（${name}没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里${name}那组 Σ 对齐。`
+    + '点击列头按本列排序：降序 → 升序 → 默认顺序。';
+}
 
 /**
  * 标签的配色写成完整类名：Tailwind 只认源码里整段出现的类名，拼接出来的不会生成规则。
@@ -315,7 +329,7 @@ const POSITION_SIDE_TAG_TONE: Record<LegPositionSide, string> = {
 };
 
 /**
- * 「多 / 空」小标签：币安仓位方向色的描边胶囊。挂在「多单占比」的列头，以及合计行「币量 / 仓位」格每组 Σ 的上行。
+ * 「多 / 空」小标签：币安仓位方向色的描边胶囊。挂在「占比」列头（战役主方向那一侧），以及合计行「币量 / 仓位」格每组 Σ 的上行。
  * 字号 9px、行高 11px，加上下边框 13px，比上行 11px 字的行高（15px）矮——行高一格不变。
  */
 function PositionSideTag({ side }: { side: LegPositionSide }) {
@@ -331,8 +345,8 @@ function PositionSideTag({ side }: { side: LegPositionSide }) {
 }
 
 /**
- * 合计行「币量 / 仓位」与「多单占比」共用的一组两行：上行（Σ 格带方向标签）+ 下行淡色小字。
- * 两格都用它，行高逐组一致，「100.0%」才会与多单那组 Σ 落在同一条水平线上
+ * 合计行「币量 / 仓位」与「占比」共用的一组两行：上行（Σ 格带方向标签）+ 下行淡色小字。
+ * 两格都用它，行高逐组一致，「100.0%」才会与同方向那组 Σ 落在同一条水平线上
  * （标签 13px 高，矮于上行 11px 字的行高，带不带标签这一行都一样高）。
  */
 function PositionLines({
@@ -360,41 +374,58 @@ function PositionLines({
 }
 
 /**
- * 合计行「币量 / 仓位」与「多单占比」两格共用的样式。self-start：两格都贴着合计行的顶边排，
- * 「多单占比」只有一组，不会在行里居中，才与左格的第一组（多单那组，先多后空）落在同一条水平线上。
+ * 隐形的一组：Σ 格里排在本列那一侧之前的每一组，在「占比」合计格里都垫上它——
+ * 主空战役看空单，而 Σ 格固定先多后空，「空 100.0%」要靠垫一组才与 Σ 格里空单那组落在同一行。
+ * 与 PositionLines 同一套两行排版（不间断空格撑出行高），看不见、读屏跳过。
+ */
+function PositionLinesSpacer() {
+  return (
+    <div aria-hidden="true" className="invisible">
+      <div className="flex items-center justify-end gap-1"><span>{'\u00a0'}</span></div>
+      <div className="text-[10px] text-muted-foreground">{'\u00a0'}</div>
+    </div>
+  );
+}
+
+/**
+ * 合计行「币量 / 仓位」与「占比」两格共用的样式。self-start：两格都贴着合计行的顶边排，
+ * 只有一组的「占比」格不会在行里居中，才与左格里同方向那一组落在同一条水平线上。
  */
 const TOTAL_POSITION_CELL = 'self-start space-y-1 text-right font-mono font-normal tabular-nums leading-snug text-foreground/55';
 
 /**
- * 「多单占比」列头：原生按钮（键盘可用），点击在 降序 → 升序 → 默认顺序 之间循环。
- * 看得见的是「多」标签 +「占比」+ 排序图标；读屏名是完整的「按多单占比排序：当前…，点击…」。
+ * 「占比」列头：原生按钮（键盘可用），点击在 降序 → 升序 → 默认顺序 之间循环。
+ * 看得见的是战役主方向那一侧的「多 / 空」标签 +「占比」+ 排序图标；读屏名是完整的「按…占比排序：当前…，点击…」（列名取那一侧）。
  * 表头不是真正的表格语义（没有 role="columnheader"），所以不用 aria-sort，状态写在读屏名里。
  * 不挂悬停说明（title）：用户明确不要列头上弹出的那块黑底长说明，列头的意思由标签、图标与指南交代。
  * 列说明只给读屏（aria-description，不显示），排序状态在读屏名里，不念两遍。
  * -scroll-mt-8：按钮在钉住的表头里、永远看得见，键盘焦点移过来时不必为了避开顶部的滚动留白把表体往上滚。
  */
 function PositionShareSortHeader({
+  side,
   sort,
   onSort,
 }: {
+  /** 本列看哪一侧：战役主方向（主多 long、主空 short）。 */
+  side: LegPositionSide;
   sort: LegPositionShareSort | null;
   onSort: () => void;
 }) {
-  const label = describeLegPositionShareSort('long', sort);
-  const direction = sort?.side === 'long' ? sort.direction : null;
+  const label = describeLegPositionShareSort(side, sort);
+  const direction = sort?.side === side ? sort.direction : null;
   const Icon = direction === 'desc' ? ArrowDown : direction === 'asc' ? ArrowUp : ArrowUpDown;
   return (
     <button
       type="button"
-      data-testid="legs-share-sort-long"
+      data-testid={`legs-share-sort-${side}`}
       onClick={onSort}
       aria-label={label}
-      aria-description={LONG_SHARE_COLUMN_HINT}
+      aria-description={positionShareColumnHint(side)}
       className={`flex w-full min-w-0 -scroll-mt-8 items-center justify-end gap-1 whitespace-nowrap rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
         direction ? 'text-foreground' : ''
       }`}
     >
-      <PositionSideTag side="long" />
+      <PositionSideTag side={side} />
       <span>占比</span>
       <Icon aria-hidden="true" className={`h-3 w-3 shrink-0 ${direction ? '' : 'text-muted-foreground/50'}`} />
     </button>
@@ -543,18 +574,12 @@ export function CampaignLegsList({
   onHideReverseHedgeOrder,
   onDetach,
   initialExpectedMaxLoss = null,
+  campaignDirection = null,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
-  // 「多单占比」的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是多单
+  // 「占比」列的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是本列那一侧
   const [shareSort, setShareSort] = useState<LegPositionShareSort | null>(null);
   const legsScrollRef = useRef<HTMLDivElement>(null);
-  const toggleShareSort = useCallback(() => {
-    // 换了排序就回到表体顶端，排在最前的行直接看得见；横向位置不动。
-    // 在重排之前归零：滚动位置为 0 时浏览器不做滚动锚定，不会为了盯住原来顶上那一行又把表体滚下去。
-    const scroller = legsScrollRef.current;
-    if (scroller) scroller.scrollTop = 0;
-    setShareSort(current => nextLegPositionShareSort(current, 'long'));
-  }, []);
   // 阶段子行默认折叠：展开的是哪几条腿，按腿 id 记，不持久化
   const [expandedPhaseLegIds, setExpandedPhaseLegIds] = useState<ReadonlySet<string>>(() => new Set());
   const togglePhases = useCallback((legId: string) => {
@@ -654,11 +679,10 @@ export function CampaignLegsList({
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
-  // 「币量 / 仓位」与「多单占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
+  // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
   // 多单、空单分开算：分组取这条腿的持仓方向，与「涨跌幅」列同一个来源（不看角色）。
-  // 「多单占比」的分母只有多单；空单不单独算占比，它的 Σ 只写进合计行「币量 / 仓位」格。
   // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定与角色标签的空心样式同一个 legRowStatus，两处永远一致。与导出 PNG 同一个 helper。
-  const positionShares = useMemo(() => computeLegPositionShares(legs.map(leg => {
+  const shareInputs = useMemo(() => legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPriceValue = resolveLegExecution(leg, record, legExitPriceCorrections).entryPrice;
     // 币量 = 名义 ÷ 开仓价。名义为 0 或价格缺失时不猜，显示空。
@@ -668,20 +692,40 @@ export function CampaignLegsList({
     return {
       legId: leg.id,
       side: legPositionSideFromDirection(leg.direction),
+      role: leg.leg_role,
       coinQty: legCoinQty,
       notional: leg.pre_position_size ?? null,
       counted: legRowStatus(leg, record) !== 'pending',
     };
-  })), [legs, recordMap, legExitPriceCorrections]);
+  }), [legs, recordMap, legExitPriceCorrections]);
+  const positionShares = useMemo(() => computeLegPositionShares(shareInputs), [shareInputs]);
+  // 「占比」这一列看哪一侧：战役主方向（主多看多单、主空看空单），缺方向时从主力腿回推。
+  // 另一侧（对冲）的行留空、也不进分母，它的 Σ 只写进合计行「币量 / 仓位」格。与导出 PNG 同一个 helper、同一份输入。
+  const shareSide = useMemo(
+    () => resolveLegPositionShareSide(campaignDirection, shareInputs),
+    [campaignDirection, shareInputs],
+  );
+  /**
+   * 排序状态里记着是按哪一侧排的。战役主方向变了（换一场战役、方向修正）时，旧那一侧的排序作废：
+   * 否则列头图标回到中性态、行序却还停在上一侧的结果上，两处对不上。这里按当前侧过滤，不另设 effect。
+   */
+  const activeShareSort = shareSort && shareSort.side === shareSide ? shareSort : null;
+  const toggleShareSort = useCallback(() => {
+    // 换了排序就回到表体顶端，排在最前的行直接看得见；横向位置不动。
+    // 在重排之前归零：滚动位置为 0 时浏览器不做滚动锚定，不会为了盯住原来顶上那一行又把表体滚下去。
+    const scroller = legsScrollRef.current;
+    if (scroller) scroller.scrollTop = 0;
+    setShareSort(current => nextLegPositionShareSort(current && current.side === shareSide ? current : null, shareSide));
+  }, [shareSide]);
 
-  // 行的先后：点了「多单占比」列头就按它排（空单与没有值的行沉底、并列保持原序），否则就是传进来的先后。
+  // 行的先后：点了「占比」列头就按它排（另一侧与没有值的行沉底、并列保持原序），否则就是传进来的先后。
   // 只重排行，不重算任何数：阶段子行、高亮、加仓校验、委托归属都按腿 id 取，跟着各自的腿走；合计行不在这里，始终在最后。
   const orderedLegs = useMemo(
-    () => sortByLegPositionShare(legs, leg => positionShares.byLeg.get(leg.id), shareSort),
-    [legs, positionShares, shareSort],
+    () => sortByLegPositionShare(legs, leg => positionShares.byLeg.get(leg.id), activeShareSort),
+    [legs, positionShares, activeShareSort],
   );
-  // 合计行「多单占比」只在列出了多单那组 Σ 时写 100.0%；多单那组永远排在第一组（先多后空），不用垫占位就与它同一行。
-  const longTotalsListed = positionShares.sides.some(totals => totals.side === 'long');
+  // 合计行「占比」只在列出了本列那一侧的 Σ 时写 100.0%；Σ 固定先多后空，排在它之前的每一组都要垫一组隐形占位才同行。
+  const shareTotalsAt = positionShares.sides.findIndex(totals => totals.side === shareSide);
 
   // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
@@ -719,7 +763,7 @@ export function CampaignLegsList({
             <div className="text-right">平仓价</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
-            <PositionShareSortHeader sort={shareSort} onSort={toggleShareSort} />
+            <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
@@ -894,13 +938,13 @@ export function CampaignLegsList({
                       {formatLegNotional(position?.notional)}
                     </div>
                   </div>
-                  {/* 多单占比：与左边一格同构——上行币量占比，下行名义仓位占比，都是多单合计里的份额。
-                      只有多单的行有数；空单（对冲通常是空单）的行整格留空（连「—」都不写），空单也不进分母。列头已写明方向，行里不挂标签。
+                  {/* 占比：与左边一格同构——上行币量占比，下行名义仓位占比，都是本列那一侧（战役主方向）合计里的份额。
+                      只有这一侧的行有数；另一侧（对冲：主多战役里是空单，主空战役里是多单）的行整格留空（连「—」都不写），也不进分母。列头已写明方向，行里不挂标签。
                       百分数本身中性色，不上红绿：这是仓位分布，不是盈亏。挂单中的腿不进分母，两行都是「—」。 */}
-                  {position?.side === 'long' ? (
+                  {position?.side === shareSide ? (
                     <div
                       data-testid={`leg-position-share-${leg.id}`}
-                      data-side="long"
+                      data-side={shareSide}
                       title={describeLegPositionShare(position)}
                       className="text-right tabular-nums leading-snug"
                     >
@@ -1188,12 +1232,13 @@ export function CampaignLegsList({
               <div /><div /><div />
               {/* 币量 / 仓位：多单、空单各写一组 Σ（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
                   每组以同样的「多 / 空」标签开头；没有计入腿的方向不列。
-                  多单那组是「多单占比」的分母；空单那组只是空单各腿的合计（对冲一共开了多大），不作任何占比的分母。
-                  多单占比：写多单那组的「100.0%」，与左格里多单那组落在同一行；多单没有计入腿时整格留空。
+                  本列那一侧（战役主方向）那组是「占比」的分母；另一侧那组只是它各腿的合计（对冲一共开了多大），不作任何占比的分母。
+                  占比：写本列那一侧的「100.0%」，与左格里同方向那组落在同一行——Σ 固定先多后空，
+                  排在它之前的每一组先垫一组隐形占位（主空战役看空单，就要垫多单那一组）；这一侧没有计入腿时整格留空。
                   两个方向都没有时两格照旧两行「—」。加仓校验留空。合计行可以因此变高，腿行不变。 */}
               <div
                 data-testid="legs-total-position"
-                title={describeLegPositionDenominators(positionShares.sides)}
+                title={describeLegPositionDenominators(positionShares.sides, shareSide)}
                 className={TOTAL_POSITION_CELL}
               >
                 {positionShares.sides.length === 0 ? (
@@ -1210,20 +1255,23 @@ export function CampaignLegsList({
                 ))}
               </div>
               <div
-                data-testid="legs-total-position-share-long"
-                title={longTotalsListed ? describeLegPositionSideTotal(positionShares.bySide.long) : undefined}
+                data-testid={`legs-total-position-share-${shareSide}`}
+                title={shareTotalsAt < 0 ? undefined : describeLegPositionSideTotal(positionShares.bySide[shareSide])}
                 className={TOTAL_POSITION_CELL}
               >
                 {positionShares.sides.length === 0 ? (
                   <PositionLines side={null} withTag={false} top="—" bottom="—" />
-                ) : longTotalsListed ? (
-                  <PositionLines
-                    side="long"
-                    withTag={false}
-                    top={formatLegPositionShareTotal(positionShares.bySide.long.totalCoins)}
-                    bottom={formatLegPositionShareTotal(positionShares.bySide.long.totalNotional)}
-                  />
-                ) : null}
+                ) : shareTotalsAt < 0 ? null : (
+                  <>
+                    {positionShares.sides.slice(0, shareTotalsAt).map(before => <PositionLinesSpacer key={before.side} />)}
+                    <PositionLines
+                      side={shareSide}
+                      withTag={false}
+                      top={formatLegPositionShareTotal(positionShares.bySide[shareSide].totalCoins)}
+                      bottom={formatLegPositionShareTotal(positionShares.bySide[shareSide].totalNotional)}
+                    />
+                  </>
+                )}
               </div>
               <div />
               <div

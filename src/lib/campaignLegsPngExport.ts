@@ -30,10 +30,12 @@ import {
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
   legPositionSideFromDirection,
+  resolveLegPositionShareSide,
   LEG_POSITION_SHARE_COLUMN_TITLES,
   LEG_POSITION_SIDE_COLORS,
   LEG_POSITION_SIDE_LABELS,
   type LegPositionShareEntry,
+  type LegPositionShareInput,
   type LegPositionShares,
   type LegPositionSide,
 } from '@/lib/legPositionShare';
@@ -157,14 +159,20 @@ const COLUMNS = [
   // 184：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
   // （百亿级 11,981,041,835.39，17 个字符），前面再挂一枚「多 / 空」标签也得一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 184 },
-  // 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」（12px 粗体 48px）都一行放下。
-  // 与页面一样只有这一列占比：只有多单的行有数，空单的行留空（空单不单独算占比）
+  // 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」/「空单占比」（12px 粗体 48px）都一行放下。
+  // 与页面一样只有这一列占比，且按战役主方向取一侧：主多看多单、主空看空单（表头的列名由 drawLegsTable 按那一侧写，见 SHARE_COLUMN_INDEX）
   { title: LEG_POSITION_SHARE_COLUMN_TITLES.long, width: 88 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
   { title: '委托', width: 444 },
 ] as const;
+
+/**
+ * 占比列在 COLUMNS 里的位置：宽度与别的列一样固定，只有**表头的列名**跟着战役主方向变
+ * （主多「多单占比」、主空「空单占比」，两个都是四个汉字，宽度不变）。
+ */
+const SHARE_COLUMN_INDEX = COLUMNS.findIndex(column => column.title === LEG_POSITION_SHARE_COLUMN_TITLES.long);
 
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
 const MARGIN_X = 40;
@@ -295,7 +303,7 @@ function priceChangeCell(
 }
 
 /**
- * 「币量 / 仓位」与「多单占比」的一组两行：上行（tagSide 给出时前挂彩色「多 / 空」标签）+ 下行淡色。
+ * 「币量 / 仓位」与「占比」的一组两行：上行（tagSide 给出时前挂彩色「多 / 空」标签）+ 下行淡色。
  * 下行挂一枚隐藏标签占位，两行的数字左端对齐。topColor 缺省为正文前景色（腿行），合计行传淡色。
  */
 function positionShareLines(
@@ -314,11 +322,11 @@ function positionShareLines(
 const EMPTY_CELL: CampaignLegsExportCellLine[] = [{ text: '' }];
 
 /**
- * 腿行的「多单占比」格（与页面同源）：上行币量占比、下行名义仓位占比，只有多单的行有数；
- * 空单的行一格空白（空单不单独算占比）；行里不挂标签（列头已写明方向）。挂单中的腿两行「—」。
+ * 腿行的「占比」格（与页面同源）：上行币量占比、下行名义仓位占比，只有本列那一侧（战役主方向）的行有数；
+ * 另一侧的行一格空白（它不算占比，也不进分母）；行里不挂标签（列头已写明方向）。挂单中的腿两行「—」。
  */
-function legShareCell(position: LegPositionShareEntry | undefined): CampaignLegsExportCellLine[] {
-  if (position?.side !== 'long') return EMPTY_CELL;
+function legShareCell(position: LegPositionShareEntry | undefined, side: LegPositionSide): CampaignLegsExportCellLine[] {
+  if (position?.side !== side) return EMPTY_CELL;
   return positionShareLines(
     null,
     formatLegPositionSharePct(position.coinSharePct),
@@ -328,18 +336,23 @@ function legShareCell(position: LegPositionShareEntry | undefined): CampaignLegs
 }
 
 /**
- * 合计行的「多单占比」格（与页面同源）：写多单那组的「100.0%」，与「币量 / 仓位」格里多单那组 Σ 同一行——
- * 多单那组永远排在第一组（先多后空），不用垫空白；多单没有计入腿时一格空白；两个方向都没有时两行「—」。
+ * 合计行的「占比」格（与页面同源）：写本列那一侧那组的「100.0%」，与「币量 / 仓位」格里同方向那组 Σ 同一行——
+ * Σ 固定先多后空，排在它之前的每一组先垫两行空白（主空战役看空单，就要垫多单那一组）；
+ * 这一侧没有计入腿时一格空白；两个方向都没有时两行「—」。
  */
-function totalShareCell(shares: LegPositionShares): CampaignLegsExportCellLine[] {
+function totalShareCell(shares: LegPositionShares, side: LegPositionSide): CampaignLegsExportCellLine[] {
   if (shares.sides.length === 0) return positionShareLines(null, '—', '—', '#5F6B7A');
-  if (!shares.sides.some(totals => totals.side === 'long')) return EMPTY_CELL;
-  return positionShareLines(
-    null,
-    formatLegPositionShareTotal(shares.bySide.long.totalCoins),
-    formatLegPositionShareTotal(shares.bySide.long.totalNotional),
-    '#5F6B7A',
-  );
+  const at = shares.sides.findIndex(totals => totals.side === side);
+  if (at < 0) return EMPTY_CELL;
+  return [
+    ...shares.sides.slice(0, at).flatMap((): CampaignLegsExportCellLine[] => [{ text: '' }, { text: '' }]),
+    ...positionShareLines(
+      null,
+      formatLegPositionShareTotal(shares.bySide[side].totalCoins),
+      formatLegPositionShareTotal(shares.bySide[side].totalNotional),
+      '#5F6B7A',
+    ),
+  ];
 }
 
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
@@ -518,6 +531,46 @@ function layoutExportRow(
   return { wrapped, height: Math.max(minHeight, ROW_PAD_Y * 2 + tallest) };
 }
 
+/**
+ * 「币量 / 仓位」与「占比」的逐腿输入：币量 = 名义 ÷ 开仓价，逐腿只算一次，格子里的数就是分母里加的那个数；
+ * 多单、空单按持仓方向（与涨跌幅同源）分开算；状态为「挂单中」的腿不进任何合计（与页面同一个 legRowStatus）。
+ * 占比列看哪一侧也读这一份（缺战役方向时要回推主方向），行与表头因此不可能各看一侧。
+ */
+function buildShareInputs(
+  input: Pick<ExportInput, 'legs' | 'legExitPriceCorrections'>,
+  recordMap: Map<string, TradeRecord>,
+): LegPositionShareInput[] {
+  return input.legs.map(leg => {
+    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
+    const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
+    const coinQty = leg.pre_position_size != null && entryPrice != null && entryPrice > 0
+      ? leg.pre_position_size / entryPrice
+      : null;
+    return {
+      legId: leg.id,
+      side: legPositionSideFromDirection(leg.direction),
+      role: leg.leg_role,
+      coinQty,
+      notional: leg.pre_position_size ?? null,
+      // 状态规则与页面同一个 legRowStatus：挂单中的腿不进分母，也画成空心标签
+      counted: legRowStatus(leg, record) !== 'pending',
+    };
+  });
+}
+
+/**
+ * 「占比」这一列看哪一侧：与页面同一个 helper——战役主方向（主多看多单、主空看空单），
+ * 缺方向时从主力腿回推。腿行、合计行与表头列名都读它。
+ */
+export function campaignLegsShareSide(
+  input: Pick<ExportInput, 'campaign' | 'legs' | 'tradeRecords' | 'legExitPriceCorrections'>,
+): LegPositionSide {
+  return resolveLegPositionShareSide(
+    input.campaign.direction,
+    buildShareInputs(input, buildTradeRecordLookup(input.tradeRecords)),
+  );
+}
+
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const mainLegOrdinals = buildMainLegOrdinals(input.legs);
@@ -560,24 +613,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     reverseHedgeOrders: input.reverseHedgeOrders,
   });
 
-  // 「币量 / 仓位」与「多单占比」：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
-  // 格子里的数就是分母里加的那个数；多单、空单按持仓方向（与涨跌幅同源）分开算，「多单占比」的分母只有多单，
-  // 空单的 Σ 只写进合计行；状态为「挂单中」的腿不进任何合计。
-  const positionShares = computeLegPositionShares(input.legs.map(leg => {
-    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-    const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
-    const coinQty = leg.pre_position_size != null && entryPrice != null && entryPrice > 0
-      ? leg.pre_position_size / entryPrice
-      : null;
-    return {
-      legId: leg.id,
-      side: legPositionSideFromDirection(leg.direction),
-      coinQty,
-      notional: leg.pre_position_size ?? null,
-      // 状态规则与页面同一个 legRowStatus：挂单中的腿不进分母，也画成空心标签
-      counted: legRowStatus(leg, record) !== 'pending',
-    };
-  }));
+  // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入（buildShareInputs）。
+  // 「占比」的分母只有战役主方向那一侧（主多看多单、主空看空单），另一侧的 Σ 只写进合计行。
+  const shareInputs = buildShareInputs(input, recordMap);
+  const positionShares = computeLegPositionShares(shareInputs);
+  const shareSide = resolveLegPositionShareSide(input.campaign.direction, shareInputs);
 
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
@@ -695,10 +735,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: formatLegCoinQuantity(position?.coinQty) },
         { text: formatLegNotional(position?.notional), color: '#848E9C' },
       ],
-      // 多单占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是多单合计里的份额；
-      // 空单的行空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
+      // 占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是战役主方向那一侧合计里的份额；
+      // 另一侧（对冲）的行空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
       // 导出图不跟页面的点击排序走：腿按传入的先后画
-      legShareCell(position),
+      legShareCell(position, shareSide),
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -839,8 +879,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     [{ text: '' }],
     // 币量 / 仓位：多单、空单各一组 Σ（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
-    // 多单那组是「多单占比」的分母，空单那组只是空单各腿的合计。没有计入腿的方向不列。
-    // 多单占比：写多单的「100.0%」，与左格多单那组同一行；两个方向都没有时两格照旧两行「—」。与页面同源，淡色
+    // 战役主方向那一侧那组是「占比」的分母，另一侧那组只是它各腿的合计。没有计入腿的方向不列。
+    // 占比：写那一侧的「100.0%」，与左格同方向那组同一行（Σ 固定先多后空，排在它之前的组先垫两行空白）；
+    // 两个方向都没有时两格照旧两行「—」。与页面同源，淡色
     positionShares.sides.length === 0
       ? positionShareLines(null, '—', '—', '#5F6B7A')
       : positionShares.sides.flatMap(totals => positionShareLines(
@@ -849,7 +890,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         formatLegNotional(totals.totalNotional),
         '#5F6B7A',
       )),
-    totalShareCell(positionShares),
+    totalShareCell(positionShares, shareSide),
     // 加仓校验
     [{ text: '' }],
     feeTotals == null
@@ -981,15 +1022,22 @@ function drawLines(
   });
 }
 
-function drawLegsTable(ctx: CanvasRenderingContext2D, rows: CampaignLegsExportRow[], startY: number) {
+/** shareSide：占比列的表头写哪一个列名——战役主方向那一侧（主多「多单占比」、主空「空单占比」），与格子里的数同一侧。 */
+function drawLegsTable(
+  ctx: CanvasRenderingContext2D,
+  rows: CampaignLegsExportRow[],
+  startY: number,
+  shareSide: LegPositionSide,
+) {
   let y = startY;
   let x = MARGIN_X;
   ctx.fillStyle = '#EEF2F7';
   ctx.fillRect(MARGIN_X, y, TABLE_WIDTH, TABLE_HEADER_H);
   ctx.font = '700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
   ctx.fillStyle = '#64748B';
-  COLUMNS.forEach(column => {
-    ctx.fillText(column.title, x + 10, y + 24, column.width - 20);
+  COLUMNS.forEach((column, index) => {
+    const title = index === SHARE_COLUMN_INDEX ? LEG_POSITION_SHARE_COLUMN_TITLES[shareSide] : column.title;
+    ctx.fillText(title, x + 10, y + 24, column.width - 20);
     x += column.width;
   });
 
@@ -1055,7 +1103,7 @@ export function buildCampaignLegsListCanvas(input: ExportInput, options: LegsCan
     ctx.fillText(`编号 ${displayCode} · 共 ${input.legs.length} legs`, MARGIN_X, 76, TABLE_WIDTH - 260);
   }
 
-  drawLegsTable(ctx, rows, headerHeight);
+  drawLegsTable(ctx, rows, headerHeight, campaignLegsShareSide(input));
 
   if (includeHeader) {
     ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';

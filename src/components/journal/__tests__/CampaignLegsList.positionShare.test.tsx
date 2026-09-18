@@ -16,9 +16,13 @@ import type { TradeJournal } from '@/types/journal';
  * 【用户要求 · 再续】「仓位占比分成两列呈现，多和空分成两列。并且还要做成能够点击之后排序的」：
  * 占比列头挂「多 / 空」彩色标签，点击排序（见 CampaignLegsList.shareSort.test.tsx）。
  *
- * 【用户要求 · 三续】「空单仓位的占比也不需要，没必要存在」：只留「多单占比」一列。
- * 空单的行这一列留空，空单也不进多单的分母；合计行「币量 / 仓位」格照旧写出多、空两组 Σ——
- * 多单那组是「多单占比」的分母，空单那组只是空单各腿的合计（对冲一共开了多大）。
+ * 【用户要求 · 三续】「空单仓位的占比也不需要，没必要存在」：只留一列占比。
+ * 另一侧的行这一列留空，也不进分母；合计行「币量 / 仓位」格照旧写出多、空两组 Σ——
+ * 本列那一侧那组是分母，另一侧那组只是它各腿的合计（对冲一共开了多大）。
+ *
+ * 【用户要求 · 四续】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」：
+ * 这一列看哪一侧由战役主方向定——主多看多单（列头绿「多」），主空看空单（列头红「空」）；
+ * 战役方向缺失时从主力腿回推，所以下面不传 campaignDirection 的主多形状照旧看多单。
  */
 const legFor = (over: Partial<TradeJournal> & { id: string }): TradeJournal => ({
   user_id: 'u', trade_record_id: null, campaign_id: 'c', leg_role: 'main_open', leg_sequence: 1,
@@ -28,9 +32,12 @@ const legFor = (over: Partial<TradeJournal> & { id: string }): TradeJournal => (
   ...over,
 } as TradeJournal);
 
-const renderList = (legs: TradeJournal[]) => render(
+const renderList = (
+  legs: TradeJournal[],
+  props: Partial<Parameters<typeof CampaignLegsList>[0]> = {},
+) => render(
   <MemoryRouter>
-    <CampaignLegsList legs={legs} tradeRecords={[]} initialExpectedMaxLoss={20_000} />
+    <CampaignLegsList legs={legs} tradeRecords={[]} initialExpectedMaxLoss={20_000} {...props} />
   </MemoryRouter>,
 );
 
@@ -61,13 +68,34 @@ const pendingHedge = legFor({
   pre_simulated_time: at('05:00'), pre_entry_price: 0.1, pre_position_size: 5_000_000,
 });
 
+/**
+ * 主空战役的腿：主力空单 5,000 U（2,500 币）、多单对冲 2,000 U（1,000 币）、加仓空单 3,000 U（1,500 币）。
+ * 空单合计 4,000 币 / 8,000 U → 主力 62.5% / 62.5%，加仓 37.5% / 37.5%。
+ */
+const mainShortLegs = () => [
+  legFor({
+    id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000,
+    post_exit_price_snapshot: 1.5, post_simulated_close_time: at('09:00'),
+  }),
+  legFor({
+    id: 'hedge-long', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
+    pre_simulated_time: at('02:00'), pre_entry_price: 2, pre_position_size: 2_000,
+    post_exit_price_snapshot: 2.1, post_simulated_close_time: at('03:00'),
+  }),
+  legFor({
+    id: 'add-short', leg_sequence: 3, leg_role: 'main_add_1', direction: 'short',
+    pre_simulated_time: at('04:00'), pre_entry_price: 2, pre_position_size: 3_000,
+    post_exit_price_snapshot: 1.5, post_simulated_close_time: at('09:00'),
+  }),
+];
+
 const headerCells = () => Array.from(screen.getByTestId('legs-header-row').children);
 /** 表头一格的列名：「多单占比」是按钮，列名在读屏名里（「按多单占比排序：…」）；其余列就是格里的字。 */
 const columnTitle = (el: Element) => /^按(.+?)排序：/.exec(el.getAttribute('aria-label') ?? '')?.[1] ?? el.textContent;
 const titlesOf = () => headerCells().map(columnTitle);
 const colOf = (title: string) => titlesOf().indexOf(title);
 const LONG = '多单占比';
-/** 已经去掉的那一列：表头里不许再出现。 */
+/** 主空战役里这一列的列名（【用户要求 · 四续】）：主多战役的表头里不许出现它。 */
 const SHORT = '空单占比';
 /** 一条腿所在的那一行（冻结的角色格的父元素）。 */
 const rowOf = (id: string) => screen.getByTestId(`leg-frozen-role-${id}`).parentElement!;
@@ -85,9 +113,9 @@ const blocks = (testId: string) => Array.from(screen.getByTestId(testId).childre
 const lines = (testId: string) => blocks(testId).flat();
 const tagsIn = (el: Element) => Array.from(el.querySelectorAll('[data-testid="position-side-tag"]'));
 const coinCell = (id: string) => rowOf(id).children[colOf('币量 / 仓位')];
-/** 这条腿没有占比格：「多单占比」那一格整格留空（连「—」都不写），也没有 leg-position-share-<id>。 */
-const expectNoShareCell = (id: string) => {
-  const cell = shareCellOf(id, LONG);
+/** 这条腿没有占比格：占比那一格整格留空（连「—」都不写），也没有 leg-position-share-<id>。 */
+const expectNoShareCell = (id: string, title: string = LONG) => {
+  const cell = shareCellOf(id, title);
   expect(cell.textContent).toBe('');
   expect(cell.children).toHaveLength(0);
   expect(cell.getAttribute('title')).toBeNull();
@@ -128,7 +156,8 @@ describe('Legs 列表的「多单占比」列', () => {
     // 【用户要求】「这个黑块的部分不需要，多余了」：列头没有 title
     expect(headerCells()[colOf(LONG)].hasAttribute('title')).toBe(false);
     expect(headerCells()[colOf(LONG)].getAttribute('aria-description')).toBe(
-      '这条多单占全部计入的多单的百分比：上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
+      '本列按战役主方向取一侧（主多看多单、主空看空单），本场看多单：这条多单占全部计入的多单的百分比，'
+      + '上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
       + '空单的行这一列留空，空单也不进分母；合计行写多单各腿合计的 100.0%（多单没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里多单那组 Σ 对齐。'
       + '点击列头按本列排序：降序 → 升序 → 默认顺序。',
     );
@@ -263,38 +292,44 @@ describe('Legs 列表的「多单占比」列', () => {
     }
   });
 
-  it('指南的 Legs 列表条目写明「多单占比」一列：只算多单、空单留空也不进分母、列头标签、点击排序、合计行的两组 Σ、挂单中的排除', () => {
+  it('指南的 Legs 列表条目写明「占比」一列按战役主方向取一侧：主多看多单、主空看空单，另一侧留空也不进分母、列头标签、点击排序、合计行的两组 Σ、挂单中的排除', () => {
     const guide = readFileSync(join(process.cwd(), 'src/pages/GuidePage.tsx'), 'utf8');
     const bullet = guide.slice(guide.indexOf('<li><strong>Legs 列表每条腿都标明'));
-    const clause = bullet.slice(bullet.indexOf('「币量 / 仓位」右侧是<strong>「多单占比」</strong>一列'), bullet.indexOf('「委托」列按真实业务归属呈现'));
+    const clause = bullet.slice(bullet.indexOf('「币量 / 仓位」右侧是<strong>「占比」</strong>一列'), bullet.indexOf('「委托」列按真实业务归属呈现'));
     expect(clause.length).toBeGreaterThan(0);
-    // 【用户要求 · 三续】「空单仓位的占比也不需要」：只有「多单占比」一列，空单的行留空、也不进它的分母
-    expect(clause).toContain('<strong>只算多单</strong>');
-    expect(clause).toContain('<strong>空单的行这一列留空</strong>，空单也不进它的分母');
-    expect(clause).toContain('空单不单独算占比');
-    expect(clause).not.toContain('空单占比');
+    // 【用户要求 · 四续】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」
+    expect(clause).toContain('<strong>按战役主方向取一侧</strong>');
+    expect(clause).toContain('<strong>主多战役看多单</strong>');
+    expect(clause).toContain('<strong>主空战役看空单</strong>');
+    // 【用户要求 · 三续】「空单仓位的占比也不需要」：只有一列，另一侧（对冲）的行留空、也不进它的分母
+    expect(clause).toContain('<strong>另一侧（对冲那一侧）的行这一列留空</strong>，也不进它的分母');
+    expect(clause).toContain('对冲不单独算占比');
+    expect(clause).not.toContain('只算多单');
     expect(clause).not.toContain('两列');
     expect(clause).not.toContain('各自 100%');
     // 【用户要求 · 续】分组跟方向走：对冲通常是空单，主空战役里的对冲是多单
     expect(clause).toContain('对冲通常是空单');
     expect(clause).toContain('跟方向走、不跟角色走');
-    // 列头挂标签
-    expect(clause).toContain('列头挂一枚<strong>「多」（绿）标签</strong>');
+    // 列头挂的标签跟着那一侧：主多绿「多」、主空红「空」
+    expect(clause).toContain('列头挂一枚绿色「多」标签');
+    expect(clause).toContain('列头挂一枚红色「空」标签');
     // 【用户要求】点击列头排序
     expect(clause).toContain('<strong>点击列头排序</strong>');
     expect(clause).toContain('降序 → 升序 → 默认顺序');
-    expect(clause).toContain('这一列没有数的行（空单、挂单中的腿、没有仓位数据的腿）不论升降序都留在最下面');
+    expect(clause).toContain('这一列没有数的行（另一侧的腿、挂单中的腿、没有仓位数据的腿）不论升降序都留在最下面');
     expect(clause).toContain('阶段子行跟着所属腿走');
     expect(clause).toContain('合计行始终在最后');
     expect(clause).toContain('PNG 导出不跟着排序');
     // 合计行：两组 Σ 各是什么，多单那组与「多单占比」的 100.0% 同一行
     expect(clause).toContain('合计行的「币量 / 仓位」格按方向各写一组 Σ');
-    expect(clause).toContain('<strong>「多」那组是「多单占比」的分母</strong>');
-    expect(clause).toContain('<strong>「空」那组是空单各腿的合计</strong>');
+    expect(clause).toContain('<strong>战役主方向那一侧的那组是本列的分母</strong>');
+    expect(clause).toContain('<strong>另一侧那组是对冲各腿的合计</strong>');
+    // 主空战役里本列那一侧是第二组：合计格先垫一组空白才与它对齐
+    expect(clause).toContain('主空战役看空单时先垫一组空白才对齐');
     expect(clause).toContain('不作任何占比的分母');
     expect(clause).toContain('与这组落在同一行');
     expect(clause).toContain('没有计入腿的方向不列');
-    expect(clause).toContain('PNG 导出同样只有「多单占比」一列');
+    expect(clause).toContain('PNG 导出同样只有这一列占比、同样按战役主方向取一侧（表头写「多单占比」或「空单占比」）');
     expect(clause).not.toContain('本场各腿币量合计');
     expect(clause).toContain('币量合计');
     expect(clause).toContain('名义仓位合计');
@@ -314,8 +349,8 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(clause).toContain('未舍入');
     // 旧的单列写法不再出现
     expect(clause).not.toContain('每格上行的数字前挂一枚');
-    // 整篇指南都不再提「空单占比」
-    expect(guide).not.toContain('空单占比');
+    // 指南里提到「多单占比」「空单占比」只是在说两种主方向下这一列的列名，不是两列
+    expect(guide.split('<strong>「占比」</strong>一列')).toHaveLength(2);
   });
 
   it('指南写明多单阶段子行默认折叠，点所属角色标签右边的开关展开', () => {
@@ -356,16 +391,17 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(mirrorBullet).not.toContain('状态显示「挂单中」');
   });
 
-  it('指南的「加仓校验」条目说它紧跟「币量 / 仓位」与「多单占比」之后，与页面表头顺序一致', () => {
+  it('指南的「加仓校验」条目说它紧跟「币量 / 仓位」与占比列之后，与页面表头顺序一致', () => {
     const guide = readFileSync(join(process.cwd(), 'src/pages/GuidePage.tsx'), 'utf8');
     const start = guide.indexOf('<li><strong>「加仓校验」列</strong>');
     expect(start).toBeGreaterThan(-1);
     const bullet = guide.slice(start, guide.indexOf('</li>', start));
     expect(bullet).not.toContain('（紧跟「币量 / 仓位」）');
-    expect(bullet).not.toContain('（紧跟「币量 / 仓位」与「占比」之后）');
+    expect(bullet).not.toContain('（紧跟「币量 / 仓位」与「多单占比」之后）');
     expect(bullet).not.toContain('「空单占比」');
-    expect(bullet).toContain('（紧跟「币量 / 仓位」与「多单占比」之后）');
-    // 与页面表头顺序一致：币量 / 仓位 → 多单占比 → 加仓校验
+    // 列名跟着战役主方向变，指南里因此按列称呼它
+    expect(bullet).toContain('（紧跟「币量 / 仓位」与占比列之后）');
+    // 与页面表头顺序一致：币量 / 仓位 → 占比 → 加仓校验
     renderList(screenshotLegs());
     const titles = titlesOf();
     expect(titles.indexOf(LONG)).toBe(titles.indexOf('币量 / 仓位') + 1);
@@ -525,31 +561,19 @@ describe('Legs 列表的「多单占比」列', () => {
       expect(screen.getAllByTestId(/^leg-position-share-/).map(cell => cell.getAttribute('data-side'))).toEqual(['long', 'long', 'long']);
     });
 
-    it('主空战役里的多单对冲：分组跟方向走、不跟角色走——对冲进「多单占比」列，空单主力与加仓那一格留空、只进空单那组 Σ', () => {
-      renderList([
-        legFor({
-          id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000,
-          post_exit_price_snapshot: 1.5, post_simulated_close_time: at('09:00'),
-        }),
-        legFor({
-          id: 'hedge-long', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
-          pre_simulated_time: at('02:00'), pre_entry_price: 2, pre_position_size: 2_000,
-          post_exit_price_snapshot: 2.1, post_simulated_close_time: at('03:00'),
-        }),
-        legFor({
-          id: 'add-short', leg_sequence: 3, leg_role: 'main_add_1', direction: 'short',
-          pre_simulated_time: at('04:00'), pre_entry_price: 2, pre_position_size: 3_000,
-          post_exit_price_snapshot: 1.5, post_simulated_close_time: at('09:00'),
-        }),
-      ]);
-      expect(cellLines(shareCellOf('hedge-long', LONG))).toEqual(['100.0%', '100.0%']);
-      expectNoShareCell('main-short');
-      expectNoShareCell('add-short');
+    it('【用户要求 · 四续】主空战役的腿形（主力与加仓是空单、对冲是多单）：不传战役方向时从主力腿回推，这一列改看空单——对冲那一格留空', () => {
+      renderList(mainShortLegs());
+      // 分组仍跟方向走、不跟角色走：多单对冲进多单那一组（Σ 里能看到），只是这一列不再看它
+      expect(cellLines(shareCellOf('main-short', SHORT))).toEqual(['62.5%', '62.5%']);
+      expect(cellLines(shareCellOf('add-short', SHORT))).toEqual(['37.5%', '37.5%']);
+      expectNoShareCell('hedge-long', SHORT);
       expect(blocks('legs-total-position')).toEqual([
         ['多 1,000', '2000.00'],
         ['空 4,000', '8000.00'],
       ]);
-      expect(blocks('legs-total-position-share-long')).toEqual([['100.0%', '100.0%']]);
+      expect(screen.queryByTestId('legs-total-position-share-long')).toBeNull();
+      // 空单那组是第二组：合计格先垫一组隐形占位，「100.0%」才与它同一行
+      expect(blocks('legs-total-position-share-short')).toEqual(['(占位)', ['100.0%', '100.0%']]);
     });
 
     it('两条空单对冲：各自那一格留空，合计行的空单 Σ 是两条相加（对冲一共开了多大）；多单主力照旧 100.0%', () => {
@@ -576,20 +600,20 @@ describe('Legs 列表的「多单占比」列', () => {
       expect(blocks('legs-total-position-share-long')).toEqual([['100.0%', '100.0%']]);
     });
 
-    it('主空战役里唯一的多单对冲还挂单中：多单那组不列，「多单占比」合计格留空；「币量 / 仓位」只剩空单那组', () => {
+    it('主多战役里唯一计入的多单（镜像止盈）还挂单中：多单那组不列，「多单占比」合计格留空；「币量 / 仓位」只剩空单那组', () => {
       renderList([
         legFor({
-          id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000,
-          post_exit_price_snapshot: 1.5, post_simulated_close_time: at('09:00'),
+          id: 'pending-mirror', leg_role: 'mirror_tp', pre_entry_price: 2.2, pre_position_size: 2_000,
         }),
         legFor({
-          id: 'pending-long-hedge', leg_sequence: 2, leg_role: 'hedge_initial_a', order_kind: 'hedge', direction: 'long',
-          pre_simulated_time: at('02:00'), pre_entry_price: 2.2, pre_position_size: 2_000,
+          id: 'hedge', leg_sequence: 2, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+          pre_simulated_time: at('02:00'), pre_entry_price: 2, pre_position_size: 5_000,
+          post_exit_price_snapshot: 1.9, post_simulated_close_time: at('03:00'),
         }),
-      ]);
+      ], { campaignDirection: 'main_long' });
       expect(screen.getByText('挂单中')).toBeTruthy();
-      expect(cellLines(shareCellOf('pending-long-hedge', LONG))).toEqual(['—', '—']);
-      expectNoShareCell('main-short');
+      expect(cellLines(shareCellOf('pending-mirror', LONG))).toEqual(['—', '—']);
+      expectNoShareCell('hedge');
       expect(blocks('legs-total-position')).toEqual([['空 2,500', '5000.00']]);
       expect(screen.getByTestId('legs-total-position').getAttribute('title'))
         .toBe('空单一组是空单各腿的合计（只看总量，不算占比）；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
@@ -735,6 +759,161 @@ describe('Legs 列表的「多单占比」列', () => {
         .toBe('多单各腿的名义仓位合计为 100%（币量缺开仓价，没有分母）');
       expect(cellLines(shareCellOf('main-no-price', LONG))).toEqual(['—', '100.0%']);
       expectNoShareCell('hedge');
+    });
+  });
+
+  describe('【用户要求 · 四续】主空战役：这一列按战役主方向改看空单', () => {
+    /** 主空战役：战役方向直接给出（页面从 campaign.direction 传进来）。 */
+    const renderMainShort = (extra: TradeJournal[] = []) => renderList(
+      [...mainShortLegs(), ...extra],
+      { campaignDirection: 'main_short' },
+    );
+
+    it('列头改成红「空」标签 +「占比」，读屏名与列说明都按空单写；列位不变（币量 / 仓位 → 占比 → 加仓校验）', () => {
+      renderMainShort();
+      const col = colOf(SHORT);
+      expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', SHORT, '加仓校验', '手续费', '委托', '操作']);
+      expect(titlesOf()).not.toContain(LONG);
+      const header = headerCells()[col];
+      expect(header).toBe(screen.getByTestId('legs-share-sort-short'));
+      expect(screen.queryByTestId('legs-share-sort-long')).toBeNull();
+      expect(header.tagName).toBe('BUTTON');
+      expect(header.textContent).toBe('空占比');
+      const tags = tagsIn(header);
+      expect(tags).toHaveLength(1);
+      expect(tags[0].getAttribute('data-side')).toBe('short');
+      expect(tags[0].className).toContain('text-[#F6465D]');
+      expect(tags[0].className).toContain('border-[#F6465D]/40');
+      expect(tags[0].className).not.toContain('#0ECB81');
+      expect(screen.getByRole('button', { name: /^按空单占比排序/ })).toBe(header);
+      expect(header.hasAttribute('title')).toBe(false);
+      expect(header.getAttribute('aria-description')).toBe(
+        '本列按战役主方向取一侧（主多看多单、主空看空单），本场看空单：这条空单占全部计入的空单的百分比，'
+        + '上行币量、下行名义仓位；状态为「挂单中」的对冲 / 镜像腿不计入。'
+        + '多单的行这一列留空，多单也不进分母；合计行写空单各腿合计的 100.0%（空单没有计入的腿时不写；某一行没有分母时那一行写「—」），与「币量 / 仓位」里空单那组 Σ 对齐。'
+        + '点击列头按本列排序：降序 → 升序 → 默认顺序。',
+      );
+    });
+
+    it('主力与加仓（空单）有数、加起来 100.0%；多单对冲整格留空，也不进空单的分母；每行仍是 13 格', () => {
+      renderMainShort();
+      expect(cellLines(coinCell('main-short'))).toEqual(['2,500', '5000.00']);
+      expect(cellLines(shareCellOf('main-short', SHORT))).toEqual(['62.5%', '62.5%']);
+      expect(cellLines(shareCellOf('add-short', SHORT))).toEqual(['37.5%', '37.5%']);
+      for (const index of [0, 1] as const) {
+        expect(['main-short', 'add-short']
+          .map(id => Number.parseFloat(cellLines(shareCellOf(id, SHORT))[index]!))
+          .reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 6);
+      }
+      expectNoShareCell('hedge-long', SHORT);
+      expect(screen.getAllByTestId(/^leg-position-share-/).map(cell => cell.getAttribute('data-side')))
+        .toEqual(['short', 'short']);
+      expect(screen.getByTestId('leg-position-share-main-short').getAttribute('title'))
+        .toBe('空单合计里的占比：币量 62.5%，名义仓位 62.5%');
+      // 腿行里一枚方向标签都没有（列头已写明方向）
+      for (const id of ['main-short', 'hedge-long', 'add-short']) {
+        expect(tagsIn(rowOf(id))).toHaveLength(0);
+        expect(rowOf(id).children).toHaveLength(13);
+      }
+    });
+
+    it('合计行：Σ 照旧先多后空，占比格先垫一组隐形占位，「100.0%」与空单那组 Σ 落在同一行；tooltip 说空单那组才是本列的分母', () => {
+      renderMainShort();
+      const coins = screen.getByTestId('legs-total-position');
+      const share = screen.getByTestId('legs-total-position-share-short');
+      expect(screen.queryByTestId('legs-total-position-share-long')).toBeNull();
+      expect(blocks('legs-total-position')).toEqual([['多 1,000', '2000.00'], ['空 4,000', '8000.00']]);
+      expect(blocks('legs-total-position-share-short')).toEqual(['(占位)', ['100.0%', '100.0%']]);
+      expect(coins.getAttribute('title'))
+        .toBe('多单一组是多单各腿的合计（只看总量，不算占比），空单一组是「空单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+      expect(share.getAttribute('title')).toBe('空单各腿合计为 100%');
+      // 两格同一套排版：占位组与真实组各两行，逐行类名与左格同方向那组相同
+      expect(share.className).toBe(coins.className);
+      expect(coins.children).toHaveLength(2);
+      expect(share.children).toHaveLength(2);
+      const [spacer, shortBlock] = Array.from(share.children);
+      expect(spacer.getAttribute('aria-hidden')).toBe('true');
+      expect(spacer.className).toContain('invisible');
+      expect(spacer.children).toHaveLength(2);
+      expect(shortBlock.getAttribute('data-side')).toBe('short');
+      const coinShort = coins.children[1];
+      expect(coinShort.children[0].className).toBe(shortBlock.children[0].className);
+      expect(coinShort.children[1].className).toBe(shortBlock.children[1].className);
+      // 占位组与真实组的两行排版一致（行高一样，才真的对齐）
+      expect(spacer.children[1].className).toBe(shortBlock.children[1].className);
+      // 占比合计格不挂标签；合计行的标签只有 Σ 格里那两枚
+      expect(tagsIn(share)).toHaveLength(0);
+      expect(tagsIn(screen.getByTestId('legs-total-row')).map(tag => tag.textContent)).toEqual(['多', '空']);
+      expect(screen.getByTestId('legs-total-row').children).toHaveLength(13);
+    });
+
+    it('只有空单（没开对冲）时占比格不垫占位：空单那组就是第一组', () => {
+      renderList(mainShortLegs().filter(leg => leg.id !== 'hedge-long'), { campaignDirection: 'main_short' });
+      expect(blocks('legs-total-position')).toEqual([['空 4,000', '8000.00']]);
+      expect(blocks('legs-total-position-share-short')).toEqual([['100.0%', '100.0%']]);
+      expect(screen.getByTestId('legs-total-position').getAttribute('title'))
+        .toBe('空单一组是「空单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+      expect(screen.getByTestId('legs-total-row').querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
+    });
+
+    it('挂单中的空单对冲：两行「—」、带说明，不进空单的分母；挂单中的多单对冲照旧整格留空', () => {
+      renderMainShort([
+        legFor({
+          id: 'pending-short-hedge', leg_sequence: 4, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+          pre_simulated_time: at('05:00'), pre_entry_price: 1.6, pre_position_size: 800,
+        }),
+        legFor({
+          id: 'pending-long-hedge', leg_sequence: 5, leg_role: 'hedge_initial_b', order_kind: 'hedge', direction: 'long',
+          pre_simulated_time: at('06:00'), pre_entry_price: 1.6, pre_position_size: 800,
+        }),
+      ]);
+      const pending = shareCellOf('pending-short-hedge', SHORT);
+      expect(cellLines(pending)).toEqual(['—', '—']);
+      expect(pending.getAttribute('title')).toBe('状态为「挂单中」（还没有成交或平仓记录），不计入多单 / 空单合计');
+      expectNoShareCell('pending-long-hedge', SHORT);
+      // 分母不变：两条计入的空单照旧 62.5% / 37.5%
+      expect(cellLines(shareCellOf('main-short', SHORT))).toEqual(['62.5%', '62.5%']);
+      expect(cellLines(shareCellOf('add-short', SHORT))).toEqual(['37.5%', '37.5%']);
+      expect(blocks('legs-total-position-share-short')).toEqual(['(占位)', ['100.0%', '100.0%']]);
+    });
+
+    it('点列头排序按空单占比走：降序 → 升序 → 默认顺序；多单对冲不论升降序都沉底', () => {
+      renderMainShort();
+      const button = screen.getByTestId('legs-share-sort-short');
+      const order = () => screen.getAllByTestId(/^leg-frozen-role-/)
+        .map(el => el.getAttribute('data-testid')!.replace('leg-frozen-role-', ''));
+      expect(order()).toEqual(['main-short', 'hedge-long', 'add-short']);
+      expect(button.getAttribute('aria-label')).toBe('按空单占比排序：当前默认顺序，点击改为降序');
+
+      fireEvent.click(button);
+      expect(order()).toEqual(['main-short', 'add-short', 'hedge-long']);
+      expect(button.getAttribute('aria-label')).toBe('按空单占比排序：当前降序，点击改为升序');
+
+      fireEvent.click(button);
+      expect(order()).toEqual(['add-short', 'main-short', 'hedge-long']);
+      expect(button.getAttribute('aria-label')).toBe('按空单占比排序：当前升序，点击恢复默认顺序');
+
+      fireEvent.click(button);
+      expect(order()).toEqual(['main-short', 'hedge-long', 'add-short']);
+      expect(button.getAttribute('aria-label')).toBe('按空单占比排序：当前默认顺序，点击改为降序');
+    });
+
+    it('战役详情页把 campaign.direction 传给这张表：页面上的这一列因此跟着战役主方向走', () => {
+      const page = readFileSync(join(process.cwd(), 'src/pages/JournalCampaignDetailPage.tsx'), 'utf8');
+      const at = page.indexOf('<CampaignLegsList');
+      expect(at).toBeGreaterThan(-1);
+      expect(page.slice(at, page.indexOf('/>', at))).toContain('campaignDirection={campaign.direction}');
+    });
+
+    it('战役方向说了算：同一批腿在 main_long 的战役里仍看多单（对冲那一格才有数）', () => {
+      renderList(mainShortLegs(), { campaignDirection: 'main_long' });
+      expect(titlesOf()).toContain(LONG);
+      expect(titlesOf()).not.toContain(SHORT);
+      expect(cellLines(shareCellOf('hedge-long', LONG))).toEqual(['100.0%', '100.0%']);
+      expectNoShareCell('main-short');
+      expectNoShareCell('add-short');
+      expect(blocks('legs-total-position-share-long')).toEqual([['100.0%', '100.0%']]);
+      expect(screen.queryByTestId('legs-total-position-share-short')).toBeNull();
     });
   });
 

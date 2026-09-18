@@ -1,10 +1,12 @@
 /**
- * Legs 表「多单占比」列与合计行的多、空两组 Σ：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
+ * Legs 表「占比」列与合计行的多、空两组 Σ：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
  *
- * 多单与空单分开算：多单各腿占多单合计，空单各腿占空单合计（对冲通常是空单）；空单从不进多单的分母。
- * 页面与 PNG 只有「多单占比」一列（空单的行留空，点列头排序）——【用户要求】空单不单独算占比、不占一列；
- * 空单那一组合计照算，写在合计行「币量 / 仓位」格里（对冲一共开了多大）。
- * 这里的计算、排序与说明仍按方向对称地写（side 参数），调用方只取多单。
+ * 多单与空单分开算：多单各腿占多单合计，空单各腿占空单合计；另一方向从不进这一方向的分母。
+ * 页面与 PNG 只有**一列**占比（点列头排序）——【用户要求】不给两列；这一列
+ * **按战役主方向取一侧**：主多战役看多单、主空战役看空单（【用户要求】「主空战役里，这一列改成按战役主方向算」），
+ * 主力那一侧才是要读的仓位分布；另一侧（对冲）的行留空，也不进分母。
+ * 另一侧那一组合计照算，写在合计行「币量 / 仓位」格里（对冲一共开了多大）。
+ * 这里的计算、排序与说明按方向对称地写（side 参数），调用方传 resolveLegPositionShareSide 取到的那一侧。
  * 分组按这条腿**实际的持仓方向**（与「涨跌幅」列同一个方向来源），不按角色——
  * 主空战役里的对冲是多单，它就进多单那一组。
  *
@@ -29,7 +31,7 @@ export const LEG_POSITION_SIDES: readonly LegPositionSide[] = ['long', 'short'];
 /** 方向标签的字：「多」/「空」。 */
 export const LEG_POSITION_SIDE_LABELS: Record<LegPositionSide, string> = { long: '多', short: '空' };
 
-/** 按方向的占比列名：页面（读屏名）与 PNG 表头只用得到「多单占比」；空单的列名只留给按方向对称的排序说明。 */
+/** 按方向的占比列名：页面（读屏名）与 PNG 表头取战役主方向那一侧——主多是「多单占比」，主空是「空单占比」。 */
 export const LEG_POSITION_SHARE_COLUMN_TITLES: Record<LegPositionSide, string> = { long: '多单占比', short: '空单占比' };
 
 /** 方向标签的颜色：与币安仓位方向同色（多绿空红）。只给标签用，百分数本身保持中性色。 */
@@ -42,10 +44,45 @@ export function legPositionSideFromDirection(direction: string | null | undefine
   return direction === 'short' ? 'short' : 'long';
 }
 
+/** 主力腿的角色：主力、重新入场主力、各次加仓——它们的方向就是战役的主方向。 */
+function isMainLegRole(role: string | null | undefined): boolean {
+  return role === 'main_open' || role === 'reentry_main' || (typeof role === 'string' && role.startsWith('main_add_'));
+}
+
+/**
+ * 「占比」这一列看哪一方向的腿：**按战役主方向**取一侧——主多看多单、主空看空单
+ * （【用户要求】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」）。
+ * 主力那一侧才是要读的仓位分布；另一侧是对冲，行留空、也不进分母。
+ *
+ * 页面与 PNG 共用这一份，两处不可能取到不同的一侧。战役方向读不到（undefined / null / 别的值）时按这个顺序兜底：
+ * 1. 主力腿（主力 / 重新入场主力 / 加仓）的持仓方向——它们的方向就是主方向；列在最前的那一条说话（同一场的主力方向一致，数据自相矛盾时取先来的）；
+ * 2. 还没有主力腿时，按计入的名义仓位总额取大的那一侧（挂单中的腿不算）；
+ * 3. 两侧都没有可加的名义时取多单——与本列原来只算多单的行为一致。
+ */
+export function resolveLegPositionShareSide(
+  campaignDirection: string | null | undefined,
+  inputs: readonly LegPositionShareInput[],
+): LegPositionSide {
+  if (campaignDirection === 'main_short') return 'short';
+  if (campaignDirection === 'main_long') return 'long';
+  const mainLeg = inputs.find(input => isMainLegRole(input.role));
+  if (mainLeg) return mainLeg.side;
+  let long = 0;
+  let short = 0;
+  for (const input of inputs) {
+    if (!input.counted || !contributes(input.notional)) continue;
+    if (input.side === 'short') short += input.notional;
+    else long += input.notional;
+  }
+  return short > long ? 'short' : 'long';
+}
+
 export interface LegPositionShareInput {
   legId: string;
   /** 这条腿实际的持仓方向（用 legPositionSideFromDirection 从 leg.direction 取）。 */
   side: LegPositionSide;
+  /** 这条腿的角色（leg_role）。只在战役方向缺失时用来回推主方向（resolveLegPositionShareSide），不参与任何分组。 */
+  role?: string | null;
   /** 「币量 / 仓位」格上行显示所依据的币量（未舍入）；缺开仓价时为 null。 */
   coinQty: number | null;
   /** 下行显示所依据的名义仓位（USD，未舍入）。 */
@@ -154,7 +191,7 @@ export function legPositionSideName(side: LegPositionSide): string {
 }
 
 /**
- * 腿行「占比」格的 tooltip：「多单合计里的占比：币量 34.9%，名义仓位 33.6%」。
+ * 腿行「占比」格的 tooltip：「多单合计里的占比：币量 34.9%，名义仓位 33.6%」（主空战役里是「空单合计里的占比」）。
  * 不挂标签的行：挂单中的说明为什么不计入；其余（缺值）不给 tooltip。
  */
 export function describeLegPositionShare(entry: LegPositionShareEntry | null | undefined): string | undefined {
@@ -181,34 +218,43 @@ export function describeLegPositionSideTotal(totals: LegPositionSideTotals): str
   return `${name}没有计入的腿`;
 }
 
-/** 合计行「币量 / 仓位」格里每组 Σ 是什么：多单那组是「多单占比」的分母；空单不单独算占比，那组只是合计。 */
-const SIDE_TOTAL_ROLES: Record<LegPositionSide, string> = {
-  long: '「多单占比」的分母',
-  short: '空单各腿的合计（只看总量，不算占比）',
-};
+/**
+ * 合计行「币量 / 仓位」格里某一组 Σ 是什么：占比列那一侧（战役主方向）的是本列的分母，另一侧不算占比、那组只是合计。
+ */
+function sideTotalRole(side: LegPositionSide, columnSide: LegPositionSide): string {
+  return side === columnSide
+    ? `「${LEG_POSITION_SHARE_COLUMN_TITLES[side]}」的分母`
+    : `${legPositionSideName(side)}各腿的合计（只看总量，不算占比）`;
+}
 
 /**
  * 合计行「币量 / 仓位」格的 tooltip：只说实际列出的那几组（「多单一组…，空单一组…」或只有一组），逐组说明是什么；
  * 一组都没有（两行「—」）时不给——不能告诉用户有一组其实没列出来的合计。
+ * columnSide 是占比列当前看的那一侧（战役主方向）：这一侧的那组才是本列的分母。
  */
-export function describeLegPositionDenominators(sides: readonly LegPositionSideTotals[]): string | undefined {
+export function describeLegPositionDenominators(
+  sides: readonly LegPositionSideTotals[],
+  columnSide: LegPositionSide,
+): string | undefined {
   if (sides.length === 0) return undefined;
-  const groups = sides.map(totals => `${legPositionSideName(totals.side)}一组是${SIDE_TOTAL_ROLES[totals.side]}`).join('，');
+  const groups = sides
+    .map(totals => `${legPositionSideName(totals.side)}一组是${sideTotalRole(totals.side, columnSide)}`)
+    .join('，');
   return `${groups}；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）`;
 }
 
 /** 点列头排序：降序（大的在上）/ 升序。 */
 export type LegPositionShareSortDirection = 'desc' | 'asc';
 
-/** 当前按哪个方向的占比、升还是降排；null 即默认顺序（腿传进来时的先后）。页面只有「多单占比」一列可排，side 恒为 long。 */
+/** 当前按哪个方向的占比、升还是降排；null 即默认顺序（腿传进来时的先后）。页面只有一列可排，side 恒为战役主方向那一侧。 */
 export interface LegPositionShareSort {
   side: LegPositionSide;
   direction: LegPositionShareSortDirection;
 }
 
 /**
- * 这条腿按某个方向的占比排序时的键（页面只按多单）：上行币量占比，没有时取下行名义仓位占比。
- * 别的方向的腿（多单占比里的空单）、挂单中的腿、两行都是「—」的腿没有值，返回 null。
+ * 这条腿按某个方向的占比排序时的键（页面按战役主方向那一侧）：上行币量占比，没有时取下行名义仓位占比。
+ * 别的方向的腿（主多战役里的空单、主空战役里的多单）、挂单中的腿、两行都是「—」的腿没有值，返回 null。
  */
 export function legPositionShareSortValue(
   entry: LegPositionShareEntry | null | undefined,
@@ -230,7 +276,7 @@ function shareSortKey(value: number): number {
 }
 
 /**
- * 按某个方向的占比给行排序（页面：「多单占比」列头），返回新数组、不动入参。
+ * 按某个方向的占比给行排序（页面：占比列的列头），返回新数组、不动入参。
  * 有值的行按值排，并列（取整后相等，见 shareSortKey）保持原来的先后（稳定）；没有值的行不论升降序都沉到最下面，彼此仍按原来的先后。
  * sort 为 null 时原样返回原来的先后。
  */
@@ -288,7 +334,7 @@ export function formatLegPositionSharePct(pct: number | null | undefined): strin
   return `${(rounded === 0 ? 0 : rounded).toFixed(1)}%`;
 }
 
-/** 合计行「多单占比」格：分母为正时是 100.0%，否则「—」。上下两行各调一次。 */
+/** 合计行「占比」格：分母为正时是 100.0%，否则「—」。上下两行各调一次。 */
 export function formatLegPositionShareTotal(total: number | null | undefined): string {
   return contributes(total) ? formatLegPositionSharePct(100) : '—';
 }

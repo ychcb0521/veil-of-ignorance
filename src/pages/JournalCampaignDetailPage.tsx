@@ -2310,6 +2310,8 @@ export default function JournalCampaignDetailPage() {
           </div>
           <CampaignLegsList
             initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
+            /* 「占比」列按战役主方向取一侧：主多看多单、主空看空单（导出 PNG 从同一个战役对象取，两处一致） */
+            campaignDirection={campaign.direction}
             legs={legs}
             tradeRecords={tradeRecords}
             campaignEvents={campaign.actual_evolution}

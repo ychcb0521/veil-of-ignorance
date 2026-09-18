@@ -14,9 +14,10 @@ const src = () =>
   readFileSync(join(process.cwd(), 'src/components/journal/CampaignLegsList.tsx'), 'utf8');
 
 /**
- * 「多单占比」的列头是可点击排序的按钮，列名在读屏名里，源码里找的是这一处调用；
- * 列名本身来自 LEG_POSITION_SHARE_COLUMN_TITLES.long（页面与 PNG 共用）。
- * 【用户要求】「空单仓位的占比也不需要，没必要存在」：没有「空单占比」列。
+ * 「占比」的列头是可点击排序的按钮，列名在读屏名里，源码里找的是这一处调用；
+ * 列名本身来自 LEG_POSITION_SHARE_COLUMN_TITLES（页面与 PNG 共用）——按战役主方向取一侧，主多是「多单占比」。
+ * 【用户要求】「空单仓位的占比也不需要，没必要存在」：只有一列占比。
+ * 【用户要求 · 四续】「主空战役里，这一列改成按战役主方向算」：那一列的方向由 campaignDirection 定，源码里没有写死的 'long'。
  */
 const LONG_SHARE_HEADER = '<PositionShareSortHeader ';
 const headerAt = (s: string, title: string) => (
@@ -43,19 +44,36 @@ describe('Legs 表栅格', () => {
     const titles = ['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托', '操作'];
     expect(titles).toHaveLength(columnCount);
     for (const title of titles) expect(headerAt(s, title)).toBeGreaterThan(-1);
-    // 只有「多单占比」一列：列头只调用一次、只按多单排，列名与 PNG 表头同一份
+    // 只有一列占比：列头只调用一次，列名与 PNG 表头同一份
     expect(LEG_POSITION_SHARE_COLUMN_TITLES.long).toBe('多单占比');
+    expect(LEG_POSITION_SHARE_COLUMN_TITLES.short).toBe('空单占比');
     expect(s.split(LONG_SHARE_HEADER)).toHaveLength(2);
-    expect(s).toContain('describeLegPositionShareSort(\'long\', sort)');
-    expect(s).toContain('nextLegPositionShareSort(current, \'long\')');
+    // 【用户要求 · 四续】排序、列头、合计格都按 shareSide（战役主方向那一侧）走，没有写死的 'long'
+    expect(s).toContain('describeLegPositionShareSort(side, sort)');
+    // 排序状态只认当前这一侧：换一场战役 / 方向变了，旧那一侧的排序作废，列头与行序不会脱钩
+    expect(s).toContain('nextLegPositionShareSort(current && current.side === shareSide ? current : null, shareSide)');
+    expect(s).toContain('const activeShareSort = shareSort && shareSort.side === shareSide ? shareSort : null;');
+    expect(s).toContain('sortByLegPositionShare(legs, leg => positionShares.byLeg.get(leg.id), activeShareSort)');
+    expect(s).toContain('<PositionShareSortHeader side={shareSide} sort={activeShareSort}');
+    expect(s).toContain('resolveLegPositionShareSide(campaignDirection, shareInputs)');
+    expect(s).toContain('campaignDirection?: TradeCampaign[\'direction\'] | null;');
+    expect(s).toContain('<PositionShareSortHeader side={shareSide}');
+    expect(s).toContain('data-testid={`legs-share-sort-${side}`}');
+    expect(s).toContain('data-testid={`legs-total-position-share-${shareSide}`}');
+    expect(s).not.toContain('\'long\', sort');
+    expect(s).not.toContain('current, \'long\'');
     expect(s).not.toContain('>占比</div>');
-    // 【用户要求】「空单占比」一列不再存在：没有列头、没有按方向逐列生成的格子、没有为它垫的占位
+    // 只有一列：没有按方向逐列生成的格子，列名也不写死在组件里
     expect(s).not.toContain('空单占比');
+    expect(s).not.toContain('多单占比');
     expect(s).not.toContain('side="short"');
-    expect(s).not.toMatch(/legs-share-sort-(short|\$\{)/);
+    expect(s).not.toContain('side="long"');
+    expect(s).not.toMatch(/legs-share-sort-(short|long)/);
     expect(s).not.toContain('LEG_POSITION_SIDES');
-    expect(s).not.toContain('PositionLinesSpacer');
-    expect(s).not.toContain('legs-total-position-share-${');
+    // 合计行「占比」格与 Σ 格逐组对齐：本列那一侧之前的每一组垫一组隐形占位（主空战役要垫多单那一组）
+    expect(s).toContain('function PositionLinesSpacer()');
+    expect((s.match(/<PositionLinesSpacer /g) ?? []).length).toBe(1);
+    expect(s).toContain('positionShares.sides.slice(0, shareTotalsAt)');
     // 【用户要求】第一列只有「角色」：不再有「#」列
     expect(s).not.toContain('>#</div>');
     expect(s).not.toContain('leg.leg_sequence ??');
@@ -161,7 +179,8 @@ describe('Legs 表栅格', () => {
     expect((s.match(/\$\{FROZEN_ROLE_CELL\}/g) ?? []).length).toBe(4);
     // 键盘滚动留白 = 冻结宽度 = 行左内边距 + 角色列宽
     const frozenWidth = 12 + Number.parseInt(tracks[0], 10);
-    expect(s).toContain(`const LEGS_SCROLL_PADDING = 'scroll-pb-20 scroll-pt-8 scroll-pl-[${frozenWidth}px]';`);
+    // 表体不再竖向滚动（整张表展开、合计行不吸底），只剩横向滚动：底部不用留白，顶部与左侧仍要
+    expect(s).toContain(`const LEGS_SCROLL_PADDING = 'scroll-pt-8 scroll-pl-[${frozenWidth}px]';`);
     // 冻结格里的阶段开关用同样大小的负滚动外边距抵掉左侧留白（改角色列宽时两处一起改）
     expect(s).toMatch(new RegExp(`const PHASE_TOGGLE = '[^']*-scroll-ml-\\[${frozenWidth}px\\]`));
     // 右缘分隔线（不透明）上下各多伸 2px，盖住行分隔线那一像素与取整绘制的偏差；

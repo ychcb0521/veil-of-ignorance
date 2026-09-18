@@ -11,6 +11,7 @@ import {
   legPositionShareSortValue,
   legPositionShareTagSide,
   legPositionSideFromDirection,
+  resolveLegPositionShareSide,
   describeLegPositionShareSort,
   nextLegPositionShareSort,
   sortByLegPositionShare,
@@ -27,6 +28,9 @@ import {
  * 上行币量占比、下行名义仓位占比，两个分母各算各的；状态为「挂单中」的腿不进分母。
  *
  * 【用户要求 · 续】对冲的要单独算——多单与空单分开，各自 100%，按腿实际的持仓方向分组。
+ *
+ * 【用户要求 · 四续】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」：
+ * 页面与 PNG 只有一列占比，看哪一侧由 resolveLegPositionShareSide 定（见文件末尾那一组）。
  */
 const leg = (
   legId: string,
@@ -309,15 +313,22 @@ describe('占比 · 多单与空单分开算', () => {
     expect(describeLegPositionShare(undefined)).toBeUndefined();
   });
 
-  it('合计行「币量 / 仓位」格的 tooltip 只列出实际有的那几组，逐组说明：多单那组是「多单占比」的分母，空单那组只是合计；一组都没有时不给', () => {
-    // 【用户要求】「空单仓位的占比也不需要」：空单那组不再叫「分母」
-    expect(describeLegPositionDenominators(computeLegPositionShares(USER_SHAPE).sides))
+  it('合计行「币量 / 仓位」格的 tooltip 只列出实际有的那几组，逐组说明：本列那一侧那组是分母，另一侧那组只是合计；一组都没有时不给', () => {
+    // 【用户要求】「空单仓位的占比也不需要」：不作分母的那一组不再叫「分母」
+    // 【用户要求 · 四续】哪一组是分母跟战役主方向走：主多是多单那组，主空是空单那组
+    expect(describeLegPositionDenominators(computeLegPositionShares(USER_SHAPE).sides, 'long'))
       .toBe('多单一组是「多单占比」的分母，空单一组是空单各腿的合计（只看总量，不算占比）；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
-    expect(describeLegPositionDenominators(computeLegPositionShares([leg('main', 10, 1_000)]).sides))
+    expect(describeLegPositionDenominators(computeLegPositionShares(USER_SHAPE).sides, 'short'))
+      .toBe('多单一组是多单各腿的合计（只看总量，不算占比），空单一组是「空单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+    expect(describeLegPositionDenominators(computeLegPositionShares([leg('main', 10, 1_000)]).sides, 'long'))
       .toBe('多单一组是「多单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
-    expect(describeLegPositionDenominators(computeLegPositionShares([short('only-short', 2, 300)]).sides))
+    expect(describeLegPositionDenominators(computeLegPositionShares([short('only-short', 2, 300)]).sides, 'long'))
       .toBe('空单一组是空单各腿的合计（只看总量，不算占比）；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
-    expect(describeLegPositionDenominators(computeLegPositionShares([short('pending', 1, 1, false)]).sides)).toBeUndefined();
+    // 主空战役里唯一列出的那一组就是本列的分母
+    expect(describeLegPositionDenominators(computeLegPositionShares([short('only-short', 2, 300)]).sides, 'short'))
+      .toBe('空单一组是「空单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+    expect(describeLegPositionDenominators(computeLegPositionShares([short('pending', 1, 1, false)]).sides, 'long')).toBeUndefined();
+    expect(describeLegPositionDenominators(computeLegPositionShares([short('pending', 1, 1, false)]).sides, 'short')).toBeUndefined();
   });
 
   it('合计行「占比」格的 tooltip：一个方向一句，只说有分母的那一行（上行「—」时不说「各腿合计为 100%」）', () => {
@@ -469,5 +480,86 @@ describe('占比 · 按方向排序', () => {
     expect(describeLegPositionShareSort('long', { side: 'long', direction: 'asc' })).toBe('按多单占比排序：当前升序，点击恢复默认顺序');
     expect(describeLegPositionShareSort('short', { side: 'long', direction: 'asc' })).toBe('按空单占比排序：当前按多单占比排序，点击改为按空单占比降序');
     expect(describeLegPositionShareSort('short', { side: 'short', direction: 'desc' })).toBe('按空单占比排序：当前降序，点击改为升序');
+  });
+});
+
+/**
+ * 【用户要求】「主空战役里，这一列改成按战役主方向算（主多看多单、主空看空单）」。
+ * 页面与 PNG 共用 resolveLegPositionShareSide：战役方向说了算，读不到时从主力腿回推，
+ * 两处不可能一个看多单、一个看空单。
+ */
+describe('占比 · 这一列看哪一侧（战役主方向）', () => {
+  const withRole = (input: LegPositionShareInput, role: string | null): LegPositionShareInput => ({ ...input, role });
+  /** 主空战役的形状：主力空单 + 加仓空单 + 多单对冲。 */
+  const MAIN_SHORT = [
+    withRole(short('main-short', 2_500, 5_000), 'main_open'),
+    withRole(leg('hedge-long', 1_000, 2_000), 'hedge_initial_a'),
+    withRole(short('add-short', 1_500, 3_000), 'main_add_1'),
+  ];
+  /** 主多战役的形状：主力多单 + 加仓多单 + 空单对冲。 */
+  const MAIN_LONG = [
+    withRole(leg('main', 3_000, 3_000), 'main_open'),
+    withRole(short('hedge', 1_818.18, 2_000), 'hedge_rolling'),
+    withRole(leg('add', 1_250, 1_500), 'main_add_1'),
+  ];
+
+  it('战役方向说了算：main_long → 多单，main_short → 空单（哪怕腿的形状相反）', () => {
+    expect(resolveLegPositionShareSide('main_long', MAIN_LONG)).toBe('long');
+    expect(resolveLegPositionShareSide('main_short', MAIN_SHORT)).toBe('short');
+    // 数据自相矛盾时以战役方向为准：主空战役里就是看空单，哪怕这几条腿全是多单
+    expect(resolveLegPositionShareSide('main_short', MAIN_LONG)).toBe('short');
+    expect(resolveLegPositionShareSide('main_long', MAIN_SHORT)).toBe('long');
+  });
+
+  it('战役方向缺失或不认识时从主力腿回推：主力 / 重新入场主力 / 加仓的方向就是主方向', () => {
+    for (const direction of [null, undefined, '', 'unknown']) {
+      expect(resolveLegPositionShareSide(direction, MAIN_SHORT)).toBe('short');
+      expect(resolveLegPositionShareSide(direction, MAIN_LONG)).toBe('long');
+    }
+    // 只有加仓腿时也认得出来
+    expect(resolveLegPositionShareSide(null, [withRole(short('add', 1, 1), 'main_add_3')])).toBe('short');
+    // 重新入场主力同样算主力腿
+    expect(resolveLegPositionShareSide(null, [withRole(short('re', 1, 1), 'reentry_main')])).toBe('short');
+    // 列在最前的那一条主力说话（同一场的主力方向本应一致）
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('main', 1, 1), 'main_open'),
+      withRole(leg('add', 9, 9), 'main_add_1'),
+    ])).toBe('short');
+    // 主力腿挂单中也照样定方向（它是不是仓位与「主方向是什么」无关）
+    expect(resolveLegPositionShareSide(null, [withRole(short('pending-main', 1, 1, false), 'main_open')])).toBe('short');
+  });
+
+  it('连主力腿都没有时按计入的名义仓位取大的那一侧；都没有可加的名义时取多单', () => {
+    // 只有对冲与镜像腿：空单名义更大
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('hedge', 1_000, 5_000), 'hedge_rolling'),
+      withRole(leg('tp', 100, 1_000), 'mirror_tp'),
+    ])).toBe('short');
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('hedge', 1_000, 500), 'hedge_rolling'),
+      withRole(leg('tp', 100, 1_000), 'mirror_tp'),
+    ])).toBe('long');
+    // 挂单中的腿不算：空单虽然名义更大，但它不是仓位
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('pending-hedge', 1_000, 5_000, false), 'hedge_rolling'),
+      withRole(leg('tp', 100, 1_000), 'mirror_tp'),
+    ])).toBe('long');
+    // 并列、没有名义、一条腿都没有：一律回到多单（本列原来就只算多单）
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('a', 1, 1_000), 'hedge_rolling'),
+      withRole(leg('b', 1, 1_000), 'mirror_tp'),
+    ])).toBe('long');
+    // 唯一的腿是空单，但它没有名义可加：没有可比的总额，仍回到多单
+    expect(resolveLegPositionShareSide(null, [withRole(short('a', null, null), 'hedge_rolling')])).toBe('long');
+    expect(resolveLegPositionShareSide(null, [])).toBe('long');
+  });
+
+  it('角色不认识（standalone、没有角色）时不当主力腿：退回按名义取大的一侧', () => {
+    expect(resolveLegPositionShareSide(null, [
+      withRole(short('solo', 1_000, 9_000), 'standalone'),
+      withRole(leg('none', 10, 100), null),
+    ])).toBe('short');
+    // role 缺省（旧调用方不传）也不会被当成主力腿
+    expect(resolveLegPositionShareSide(null, [short('s', 1, 9_000), leg('l', 1, 100)])).toBe('short');
   });
 });
