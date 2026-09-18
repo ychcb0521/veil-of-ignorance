@@ -133,7 +133,7 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     }
     // 两条腿都是回填来的、都有序号：冻结格里一个数字、一个「回填」都没有
     expect(within(screen.getByTestId('leg-frozen-role-leg-hedge')).queryByText('回填')).toBeNull();
-    expect(screen.getByTestId('leg-frozen-role-leg-hedge').textContent).toBe('滚动对冲');
+    expect(screen.getByTestId('leg-frozen-role-leg-hedge').textContent).toBe('滚动对冲 1');
     expect(screen.getByTestId('leg-frozen-role-leg-main').textContent).toMatch(/^主力开仓\d+$/);
     expect(screen.queryByText('回填')).toBeNull();
     // 腿行的第一格就是冻结格：序号不在任何一格里
@@ -160,7 +160,7 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
       expect(cells[0].className).toContain('left-0');
       // 阶段子行是 py-1：冻结格伸出同样的量，与上下相邻的冻结格首尾相接
       expect(cells[0].className.split(/\s+/)).toEqual(expect.arrayContaining(['-my-1', 'py-1']));
-      expect(cells[0].textContent).toMatch(/^阶段 \d/);
+      expect(cells[0].textContent).toMatch(/^(纯多头|纯空头|对冲\d+(?:\+\d+)*)阶段$/);
       for (const cell of cells.slice(1)) expect(isSticky(cell)).toBe(false);
     }
   });

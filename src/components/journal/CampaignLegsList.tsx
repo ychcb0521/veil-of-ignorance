@@ -8,7 +8,7 @@ import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
-import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeCampaign, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
@@ -595,6 +595,7 @@ export function CampaignLegsList({
   // 与导出 PNG 同一个函数：两处的淡注一字不差
   const foreignLiveOrdersNote = useMemo(() => formatForeignReplayOrdersNote(foreignLiveOrders), [foreignLiveOrders]);
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
+  const hedgeLegOrdinals = useMemo(() => buildHedgeLegOrdinals(legs), [legs]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
   // 盈亏取值走全局唯一真源，Legs 表不再自己算一套——
@@ -612,15 +613,21 @@ export function CampaignLegsList({
     () => computeLegPnlContributions(legs, leg => settlement.byLeg.get(leg.id) ?? null),
     [legs, settlement],
   );
-  // 主力与其他多单的阶段拆解：每一次滚动对冲的结束切出一个可见阶段。
-  // 边界价取对冲的平仓价（resolveLegExecution 同源，含平仓价校正）。
+  // 主力与其他多单按对冲存续状态分段：对冲开、平仓都会切换阶段。
   const legPhasesMap = useMemo(() => {
     const hedgeBoundaries = legs
       .filter(l => l.order_kind === 'hedge' || (l.leg_role ?? '').startsWith('hedge_') || l.leg_role === 'reentry_hedge')
       .map(l => {
         const rec = l.trade_record_id ? recordMap.get(l.trade_record_id) ?? null : null;
         const exec = resolveLegExecution(l, rec, legExitPriceCorrections);
-        return { legId: l.id, closeTime: exec.closeTime ?? null, closePrice: exec.exitPrice ?? null };
+        return {
+          legId: l.id,
+          ordinal: hedgeLegOrdinals.get(l.id) ?? 0,
+          openTime: exec.openTime ?? null,
+          openPrice: exec.entryPrice ?? null,
+          closeTime: exec.closeTime ?? null,
+          closePrice: exec.exitPrice ?? null,
+        };
       });
     const map = new Map<string, MainLegPhase[]>();
     for (const leg of legs) {
@@ -642,7 +649,7 @@ export function CampaignLegsList({
       if (phases.length > 0) map.set(leg.id, phases);
     }
     return map;
-  }, [legs, recordMap, legExitPriceCorrections, settlement.byLeg]);
+  }, [legs, recordMap, hedgeLegOrdinals, legExitPriceCorrections, settlement.byLeg]);
 
   const totalPnl = useMemo(() => (settlement.total ?? null), [settlement]);
   const totalDeltaB = useMemo(
@@ -824,7 +831,7 @@ export function CampaignLegsList({
                     <div className={ROLE_LINE}>
                       <LegRoleChip
                         role={leg.leg_role ?? null}
-                        ordinal={mainLegOrdinals.get(leg.id) ?? null}
+                        ordinal={hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null}
                         status={status === 'closed' ? null : status}
                         title={roleChipTitle(status, leg.source === 'retroactive_from_record', !leg.leg_role)}
                         className={ROLE_CHIP_SIZE}
@@ -1139,7 +1146,7 @@ export function CampaignLegsList({
                   </div>
                 </div>
 
-                {/* 主力与其他多单的阶段拆解：只呈现由滚动对冲结束界定的阶段，收尾段省略。 */}
+                {/* 主力与其他多单按对冲是否存续拆成纯多头 / 对冲 N 阶段。 */}
                 {phases && phasesExpanded && (
                   <div id={phasesId} data-testid={`leg-phases-${leg.id}`} className={`${ROW_RULE} bg-muted/20`}>
                     {phases.map((phase, phaseIndex) => {
@@ -1158,14 +1165,11 @@ export function CampaignLegsList({
                             } ${PHASE_FILL} flex items-center`}
                           >
                             <div className="whitespace-nowrap pl-2 font-sans text-[9px]">
-                              阶段 {phase.index}
+                              {phase.label}
                             </div>
                           </div>
                           <div className="tabular-nums" title={`${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`}>
                             {fmtCardTime(phase.startTime)} → {fmtCardTime(phase.endTime, phase.startTime)}
-                            {phase.boundaryLegId != null && (
-                              <span className="ml-1 font-sans text-[9px] text-[#6D28D9]/80">对冲结束切段</span>
-                            )}
                           </div>
                           <div className="text-right leading-tight">
                             <div className={`tabular-nums ${phase.pnl === 0 ? '' : positive ? 'text-[#0ECB81]/90' : 'text-[#F6465D]/90'}`}>

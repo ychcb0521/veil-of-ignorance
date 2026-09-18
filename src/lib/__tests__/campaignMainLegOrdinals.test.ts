@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TradeJournal } from '@/types/journal';
-import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 
 const leg = (id: string, role: TradeJournal['leg_role'], at: string, seq?: number): TradeJournal =>
   ({ id, leg_role: role, pre_simulated_time: at, leg_sequence: seq } as TradeJournal);
@@ -60,5 +60,18 @@ describe('主力编号', () => {
     ]);
     expect(m.get('good')).toBe(1);
     expect(m.get('bad')).toBe(2);
+  });
+});
+
+describe('对冲编号', () => {
+  it('滚动 / 回场对冲从 1 起按开仓时间编号，初始 A/B 保留固有名称', () => {
+    const m = buildHedgeLegOrdinals([
+      leg('initial-a', 'hedge_initial_a', '2026-04-29T18:00:00Z'),
+      leg('rolling-2', 'hedge_rolling', '2026-04-29T21:00:00Z'),
+      leg('rolling-1', 'hedge_rolling', '2026-04-29T20:00:00Z'),
+      leg('reentry', 'reentry_hedge', '2026-04-29T22:00:00Z'),
+    ]);
+    expect([...m.entries()]).toEqual([['rolling-1', 1], ['rolling-2', 2], ['reentry', 3]]);
+    expect(m.has('initial-a')).toBe(false);
   });
 });

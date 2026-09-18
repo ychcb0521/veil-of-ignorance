@@ -63,16 +63,16 @@ describe('【用户要求】主力与其他多单的阶段子行默认折叠，�
     expect(screen.queryByTestId('leg-phases-main')).toBeNull();
     expect(screen.queryByTestId('leg-phases-reentry')).toBeNull();
     expect(screen.queryByText(/^阶段 \d/)).toBeNull();
-    for (const id of ['main', 'add1', 'reentry']) {
+    for (const [id, count] of [['main', 3], ['add1', 2], ['reentry', 3]] as const) {
       const toggle = toggleOf(id);
       expect(toggle.tagName).toBe('BUTTON');
       expect(toggle.getAttribute('type')).toBe('button');
-      expect(toggle.textContent).toBe('1');
-      expect(toggle.getAttribute('aria-label')).toBe('展开 1 个阶段');
-      expect(toggle.getAttribute('title')).toBe('展开 1 个阶段');
+      expect(toggle.textContent).toBe(String(count));
+      expect(toggle.getAttribute('aria-label')).toBe(`展开 ${count} 个阶段`);
+      expect(toggle.getAttribute('title')).toBe(`展开 ${count} 个阶段`);
       // title 与读屏名同一句：空的 aria-description 盖掉「title 兜底当描述」，读屏不重复念
       expect(toggle.getAttribute('aria-description')).toBe('');
-      expect(screen.getAllByRole('button', { name: '展开 1 个阶段', expanded: false })).toContain(toggle);
+      expect(screen.getAllByRole('button', { name: `展开 ${count} 个阶段`, expanded: false })).toContain(toggle);
       expect(toggle.getAttribute('aria-expanded')).toBe('false');
       expect(toggle.getAttribute('aria-controls')).toBeTruthy();
       // 折叠时的图标朝右
@@ -113,18 +113,18 @@ describe('【用户要求】主力与其他多单的阶段子行默认折叠，�
     const toggle = toggleOf('main');
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(toggle.getAttribute('aria-label')).toBe('收起 1 个阶段');
-    expect(toggle.getAttribute('title')).toBe('收起 1 个阶段');
+    expect(toggle.getAttribute('aria-label')).toBe('收起 3 个阶段');
+    expect(toggle.getAttribute('title')).toBe('收起 3 个阶段');
     expect(toggle.querySelector('svg')!.getAttribute('class')).toContain('rotate-90');
     const phases = screen.getByTestId('leg-phases-main');
     expect(phases.id).toBe(toggle.getAttribute('aria-controls'));
     expect(phases.previousElementSibling).toBe(screen.getByTestId('leg-frozen-role-main').parentElement);
-    expect(Array.from(phases.children).map(row => row.children[0].textContent)).toEqual(['阶段 1']);
+    expect(Array.from(phases.children).map(row => row.children[0].textContent)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
     expect(phases.textContent).not.toContain('收尾');
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-label')).toBe('展开 1 个阶段');
+    expect(toggle.getAttribute('aria-label')).toBe('展开 3 个阶段');
     expect(screen.queryByTestId('leg-phases-main')).toBeNull();
     expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBeNull();
   });

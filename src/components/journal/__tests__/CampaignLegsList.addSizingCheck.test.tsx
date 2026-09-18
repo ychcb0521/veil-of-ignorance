@@ -178,7 +178,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     // 阶段子行默认折叠：先展开
     fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
     const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
-    expect(phaseRows).toHaveLength(1);
+    expect(phaseRows).toHaveLength(3);
     for (const row of phaseRows) expect(row.children.length).toBe(headerCells);
   });
 });

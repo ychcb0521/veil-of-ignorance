@@ -361,11 +361,12 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(bullet).toContain('<strong>默认折叠</strong>');
     expect(bullet).toContain('对应角色标签右边有一个小开关');
     expect(bullet).toContain('其他多单（包括加仓）');
-    expect(bullet).toContain('「收尾」阶段一律不呈现');
+    expect(bullet).toContain('不再把最后一段叫作「收尾」');
+    expect(bullet).toContain('「纯多头阶段」「对冲1阶段」「对冲2阶段」');
     expect(bullet).toContain('「展开 5 个阶段」');
     expect(bullet).not.toContain('角色标签下面');
     expect(bullet).not.toContain('「N 个阶段」');
-    expect(bullet).toContain('只有一段时不显示子行，角色标签旁也没有阶段开关');
+    expect(bullet).toContain('完全没有对冲参与时不重复显示整腿，也没有阶段开关');
     expect(bullet).toContain('刷新后回到折叠');
     expect(bullet).toContain('PNG 导出不跟着折叠');
   });

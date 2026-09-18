@@ -23,24 +23,24 @@ describe('splitMainLegPhases', () => {
     expect(phases[0].boundaryLegId).toBeNull();
   });
 
-  it('HEMIUSDT 实盘复现：对冲1 结束把主力切成「+40017 / −8249」', () => {
+  it('一笔对冲按开仓和平仓切成「纯多头 → 对冲1 → 纯多头」', () => {
     const phases = splitMainLegPhases({
       ...base,
-      hedges: [{ legId: 'h1', closeTime: T(13, 21), closePrice: 0.00935777 }],
+      hedges: [{ legId: 'h1', ordinal: 1, openTime: T(11, 0), openPrice: 0.0085, closeTime: T(13, 21), closePrice: 0.00935777 }],
     });
-    expect(phases).toHaveLength(2);
-    expect(phases[0].pnl).toBeCloseTo(40017.35, 1);
-    expect(phases[1].pnl).toBeCloseTo(-8249.37, 1);
-    expect(phases[0].boundaryLegId).toBe('h1');
-    expect(phases[1].boundaryLegId).toBeNull();
+    expect(phases).toHaveLength(3);
+    expect(phases.map(phase => phase.label)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
+    expect(phases.map(phase => [phase.startTime, phase.endTime])).toEqual([
+      [base.openTime, T(11, 0)], [T(11, 0), T(13, 21)], [T(13, 21), base.closeTime],
+    ]);
     // 守恒：各阶段之和严格等于整腿盈亏
-    expect(phases[0].pnl + phases[1].pnl).toBeCloseTo(base.pnl, 8);
+    expect(phases.reduce((sum, phase) => sum + phase.pnl, 0)).toBeCloseTo(base.pnl, 8);
   });
 
   it('贴着主力平仓结束的对冲不切段——切出来是零长度尾段', () => {
     const phases = splitMainLegPhases({
       ...base,
-      hedges: [{ legId: 'h2', closeTime: base.closeTime!, closePrice: 0.00903213 }],
+      hedges: [{ legId: 'h2', ordinal: 1, openTime: base.closeTime!, openPrice: 0.00903213, closeTime: T(15, 0), closePrice: 0.0091 }],
     });
     expect(phases).toHaveLength(1);
   });
@@ -48,22 +48,21 @@ describe('splitMainLegPhases', () => {
   it('主力开仓前结束的对冲不参与', () => {
     const phases = splitMainLegPhases({
       ...base,
-      hedges: [{ legId: 'old', closeTime: T(8, 0), closePrice: 0.007 }],
+      hedges: [{ legId: 'old', ordinal: 1, openTime: T(7, 0), openPrice: 0.006, closeTime: T(8, 0), closePrice: 0.007 }],
     });
     expect(phases).toHaveLength(1);
   });
 
-  it('多个边界按时间排序，同一时刻只切一次', () => {
+  it('连续对冲按状态切段，同一时刻平旧开新不产生零长度段', () => {
     const phases = splitMainLegPhases({
       ...base,
       hedges: [
-        { legId: 'b', closeTime: T(12, 0), closePrice: 0.0088 },
-        { legId: 'a', closeTime: T(11, 0), closePrice: 0.0085 },
-        { legId: 'a2', closeTime: T(11, 0), closePrice: 0.0085 },
+        { legId: 'a', ordinal: 1, openTime: T(10, 0), openPrice: 0.008, closeTime: T(11, 0), closePrice: 0.0085 },
+        { legId: 'b', ordinal: 2, openTime: T(11, 0), openPrice: 0.0085, closeTime: T(12, 0), closePrice: 0.0088 },
       ],
     });
-    expect(phases).toHaveLength(3);
-    expect(phases.map(p => p.boundaryLegId)).toEqual(['a', 'b', null]);
+    expect(phases).toHaveLength(4);
+    expect(phases.map(p => p.label)).toEqual(['纯多头阶段', '对冲1阶段', '对冲2阶段', '纯多头阶段']);
     expect(phases.reduce((s, p) => s + p.pnl, 0)).toBeCloseTo(base.pnl, 8);
   });
 
@@ -73,11 +72,10 @@ describe('splitMainLegPhases', () => {
       entryPrice: 100, exitPrice: 90,
       openTime: T(9, 0), closeTime: T(12, 0),
       side: 'short',
-      hedges: [{ legId: 'h', closeTime: T(10, 0), closePrice: 94 }],
+      hedges: [{ legId: 'h', ordinal: 1, openTime: T(9, 30), openPrice: 97, closeTime: T(10, 0), closePrice: 94 }],
     });
-    // 100→94 跌 6（正权重 6），94→90 跌 4（正权重 4），共 10
-    expect(phases[0].pnl).toBeCloseTo(600, 8);
-    expect(phases[1].pnl).toBeCloseTo(400, 8);
+    expect(phases.map(p => p.pnl)).toEqual([300, 300, 400]);
+    expect(phases.map(p => p.label)).toEqual(['纯空头阶段', '对冲1阶段', '纯空头阶段']);
   });
 
   it('开平同价（总价差为 0）时盈亏全数记在最后一段，不产生 NaN', () => {
@@ -86,11 +84,12 @@ describe('splitMainLegPhases', () => {
       entryPrice: 100, exitPrice: 100,
       openTime: T(9, 0), closeTime: T(12, 0),
       side: 'long',
-      hedges: [{ legId: 'h', closeTime: T(10, 0), closePrice: 105 }],
+      hedges: [{ legId: 'h', ordinal: 1, openTime: T(9, 30), openPrice: 102, closeTime: T(10, 0), closePrice: 105 }],
     });
-    expect(phases).toHaveLength(2);
+    expect(phases).toHaveLength(3);
     expect(phases[0].pnl).toBe(0);
-    expect(phases[1].pnl).toBe(-50);
+    expect(phases[1].pnl).toBe(0);
+    expect(phases[2].pnl).toBe(-50);
     expect(phases.every(p => Number.isFinite(p.pnl))).toBe(true);
   });
 
@@ -108,13 +107,13 @@ describe('阶段呈现规则', () => {
     expect(legSupportsPhases({ leg_role: 'hedge_rolling', direction: 'short' })).toBe(false);
   });
 
-  it('所有角色都过滤收尾，只保留由对冲结束界定的阶段', () => {
+  it('有对冲时保留前后纯多头区间；无对冲时不重复展示整腿', () => {
     const phases = splitMainLegPhases({
       ...base,
-      hedges: [{ legId: 'h1', closeTime: T(13, 21), closePrice: 0.00935777 }],
+      hedges: [{ legId: 'h1', ordinal: 1, openTime: T(11, 0), openPrice: 0.0085, closeTime: T(13, 21), closePrice: 0.00935777 }],
     });
-    expect(visibleLegPhases(phases).map(phase => phase.boundaryLegId)).toEqual(['h1']);
-    expect(visibleLegPhases(phases).map(phase => phase.index)).toEqual([1]);
+    expect(visibleLegPhases(phases).map(phase => phase.label)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
+    expect(visibleLegPhases(splitMainLegPhases(base))).toEqual([]);
   });
 });
 

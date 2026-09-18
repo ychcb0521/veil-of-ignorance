@@ -13,7 +13,7 @@ import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campa
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
-import { buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
@@ -574,6 +574,7 @@ export function campaignLegsShareSide(
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
   const mainLegOrdinals = buildMainLegOrdinals(input.legs);
+  const hedgeLegOrdinals = buildHedgeLegOrdinals(input.legs);
   // 与页面调同一个函数：导出图的归类必须和界面一致，否则 PNG 会成为第五套口径。
   const reverseOrderLegMap = buildDisplayReverseOrderLegMap(
     input.legs,
@@ -595,13 +596,20 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     leg => settlement.byLeg.get(leg.id) ?? null,
   );
 
-  // 主力阶段拆解（与页面同源）：滚动对冲的结束把主力切成阶段
+  // 阶段拆解（与页面同源）：按对冲的完整存续窗口切换暴露状态
   const hedgeBoundaries = input.legs
     .filter(l => l.order_kind === 'hedge' || (l.leg_role ?? '').startsWith('hedge_') || l.leg_role === 'reentry_hedge')
     .map(l => {
       const rec = l.trade_record_id ? recordMap.get(l.trade_record_id) ?? null : null;
       const exec = resolveLegExecution(l, rec, input.legExitPriceCorrections);
-      return { legId: l.id, closeTime: exec.closeTime ?? null, closePrice: exec.exitPrice ?? null };
+      return {
+        legId: l.id,
+        ordinal: hedgeLegOrdinals.get(l.id) ?? 0,
+        openTime: exec.openTime ?? null,
+        openPrice: exec.entryPrice ?? null,
+        closeTime: exec.closeTime ?? null,
+        closePrice: exec.exitPrice ?? null,
+      };
     });
   const contributionDenominator = [...legPnlMap.values()]
     .reduce((sum, entry) => sum + (entry.pnl == null ? 0 : Math.abs(entry.pnl)), 0);
@@ -624,7 +632,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
     const status = legRowStatus(leg, record);
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
-    const roleOrdinal = mainLegOrdinals.get(leg.id) ?? null;
+    const roleOrdinal = hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null;
     const roleLabel = leg.leg_role
       ? `${LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role}${roleOrdinal ? ` ${roleOrdinal}` : ''}`
       : '—';
@@ -808,11 +816,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       const delta = legDeltaB(phase.pnl, input.initialExpectedMaxLoss ?? null);
       const contribution = contributionDenominator > 0 ? phase.pnl / contributionDenominator : null;
       const phaseCells: CampaignLegsExportCellLine[][] = [
-          [{ text: `阶段 ${phase.index}`, color: '#848E9C', indent: CHIP_PAD_X }],
+          [{ text: phase.label, color: '#848E9C', indent: CHIP_PAD_X }],
           [
             { text: `${fmtClock(phase.startTime)} → ${fmtClock(phase.endTime)}`, color: '#848E9C' },
-            // 与页面同源：由对冲结束切出来的阶段要标明，否则读不出这一段为什么在这里断开
-            ...(phase.boundaryLegId != null ? [{ text: '对冲结束切段', color: '#6D28D9', size: 10 }] : []),
           ],
           [
             {

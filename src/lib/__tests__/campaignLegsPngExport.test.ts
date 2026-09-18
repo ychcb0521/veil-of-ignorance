@@ -712,12 +712,12 @@ describe('【用户要求】主力及其他多单的阶段子行进入导出图�
     },
   ] as unknown as TradeJournal[];
 
-  it('只保留由对冲切出来的阶段并带标签；合计行照常在最后', () => {
+  it('按对冲存续状态显示纯多头 / 对冲阶段；合计行照常在最后', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: phaseLegs, initialExpectedMaxLoss: 20000 });
     const phases = rows.filter(row => row.kind === 'phase');
-    expect(phases).toHaveLength(1);
-    const cut = phases.find(row => row.cells[ROLE_COL][0].text === '阶段 1')!;
-    expect(cut.cells[TIME_COL].map(line => line.text)).toContain('对冲结束切段');
+    expect(phases).toHaveLength(3);
+    expect(phases.map(row => row.cells[ROLE_COL][0].text)).toEqual(['纯多头阶段', '对冲1阶段', '纯多头阶段']);
+    const cut = phases[1];
     expect(rows.some(row => row.cells[ROLE_COL][0]?.text.includes('收尾'))).toBe(false);
     // 阶段子行的行高跟着多出来的这一行撑开
     expect(cut.height).toBeGreaterThanOrEqual(cut.wrapped[TIME_COL].length * 17);
@@ -727,7 +727,7 @@ describe('【用户要求】主力及其他多单的阶段子行进入导出图�
     expect(total.cells[PNL_COL][0].text).toBe('+93439.77');
   });
 
-  it('「阶段 N」与主力角色标签里的字左对齐：缩进 = 标签左内边距 8px（与页面一致）', () => {
+  it('阶段名称与主力角色标签里的字左对齐：缩进 = 标签左内边距 8px（与页面一致）', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: phaseLegs, initialExpectedMaxLoss: 20000 });
     const main = rows.find(row => row.kind === 'leg' && row.legId === 'main')!;
     expect(main.cells[ROLE_COL][0].chip).toBeTruthy();
@@ -755,7 +755,7 @@ describe('【用户要求】主力及其他多单的阶段子行进入导出图�
   it('阶段子行与表头同列数，「加仓校验」那一格留空——少一格就会让手续费 / 委托整体左移', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: phaseLegs, initialExpectedMaxLoss: 20000 });
     const phases = rows.filter(row => row.kind === 'phase');
-    expect(phases).toHaveLength(1);
+    expect(phases).toHaveLength(3);
     for (const row of phases) {
       expect(row.cells).toHaveLength(EXPORT_COLUMN_COUNT);
       expect(row.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
@@ -895,9 +895,11 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
       reverseHedgeOrders: [],
       initialExpectedMaxLoss: 20000,
     });
-    const phases = rows.filter(row => row.kind === 'phase');
+    const phases = rows.filter(row => row.kind === 'phase' && row.legId.startsWith('main-phase-'));
     expect(phases.map(row => row.cells[PRICE_CHANGE_COL])).toEqual([
-      [{ text: '+54.40%', color: '#0ECB81' }],
+      [{ text: '+48.46%', color: '#0ECB81' }],
+      [{ text: '+4.00%', color: '#0ECB81' }],
+      [{ text: '+30.35%', color: '#0ECB81' }],
     ]);
     expect(rows.find(row => row.legId === 'main')!.cells[PRICE_CHANGE_COL][0].text).toBe('+101.26%');
     // 对冲腿是空单：0.05 → 0.052 按方向计是 -4.00%
@@ -925,9 +927,11 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
       reverseHedgeOrders: [],
       initialExpectedMaxLoss: 20000,
     });
-    const phases = rows.filter(row => row.kind === 'phase');
+    const phases = rows.filter(row => row.kind === 'phase' && row.legId.startsWith('main-phase-'));
     expect(phases.map(row => row.cells[PRICE_CHANGE_COL])).toEqual([
-      [{ text: '-54.40%', color: '#F6465D' }],
+      [{ text: '-48.46%', color: '#F6465D' }],
+      [{ text: '-4.00%', color: '#F6465D' }],
+      [{ text: '-30.35%', color: '#F6465D' }],
     ]);
     expect(rows.find(row => row.legId === 'main')!.cells[PRICE_CHANGE_COL]).toEqual([{ text: '-101.26%', color: '#F6465D' }]);
     // 对冲腿这回是多单：0.05 → 0.052 是 +4.00%
@@ -1194,7 +1198,7 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       initialExpectedMaxLoss: 20000,
     });
     const phases = rows.filter(row => row.kind === 'phase');
-    expect(phases).toHaveLength(1);
+    expect(phases).toHaveLength(3);
     for (const row of phases) {
       expect(row.cells[LONG_COL]).toEqual(EMPTY);
       expect(row.cells[COINS_COL]).toEqual(EMPTY);
@@ -1249,6 +1253,8 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       'leg:hedge-roll',
       'leg:main',
       'phase:main-phase-1',
+      'phase:main-phase-2',
+      'phase:main-phase-3',
       'total:legs-total',
     ]);
   });

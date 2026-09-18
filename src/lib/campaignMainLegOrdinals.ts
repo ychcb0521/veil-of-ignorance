@@ -40,3 +40,19 @@ export function buildMainLegOrdinals(legs: TradeJournal[]): Map<string, number> 
   }
   return out;
 }
+
+/** 滚动 / 回场对冲按开仓先后编号；初始对冲 A/B 已有固有名称，不重复叠加数字。 */
+export function buildHedgeLegOrdinals(legs: TradeJournal[]): Map<string, number> {
+  const hedges = legs.filter(leg => (
+    leg.leg_role === 'hedge_rolling'
+    || leg.leg_role === 'reentry_hedge'
+    || (leg.order_kind === 'hedge' && leg.leg_role !== 'hedge_initial_a' && leg.leg_role !== 'hedge_initial_b')
+  ));
+  const ordered = [...hedges].sort((a, b) => {
+    const ta = toMs(a.pre_simulated_time);
+    const tb = toMs(b.pre_simulated_time);
+    if (ta !== tb) return ta - tb;
+    return (a.leg_sequence ?? Number.MAX_SAFE_INTEGER) - (b.leg_sequence ?? Number.MAX_SAFE_INTEGER);
+  });
+  return new Map(ordered.map((leg, index) => [leg.id, index + 1]));
+}

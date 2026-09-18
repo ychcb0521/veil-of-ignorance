@@ -1,8 +1,8 @@
 /**
  * 主力腿的阶段拆解，与每条腿 / 每个阶段对盈亏比 b 的增减（Δb）。
  *
- * 交易语义：主力不是铁板一块——每一次滚动对冲的结束，意味着主力一个阶段的
- * 完成（主力随即进入下一阶段）。把主力按对冲结束时刻切开，才能看清
+ * 交易语义：持仓不是铁板一块——每笔对冲的开仓与平仓都会改变净暴露状态。
+ * 按这些时刻切成「纯多头 / 对冲 N」阶段，才能看清
  * 「哪一段决策在挣钱、哪一段在回吐」，而不是只看主力整腿的合计。
  *
  * 阶段边界价取对冲的平仓价：对冲平仓发生在同一标的同一时刻，其成交价就是
@@ -25,9 +25,12 @@ export interface MainPhaseInput {
   openTime: number | null;
   closeTime: number | null;
   side: 'long' | 'short';
-  /** 与主力同场的滚动对冲：只取「平仓时刻落在主力持仓期内」的作阶段边界。 */
+  /** 同场对冲的完整存续窗口；开仓与平仓都是阶段边界。 */
   hedges: Array<{
     legId: string;
+    ordinal?: number;
+    openTime?: number | null;
+    openPrice?: number | null;
     closeTime: number | null;
     closePrice: number | null;
   }>;
@@ -42,8 +45,11 @@ export interface MainLegPhase {
   endPrice: number;
   /** 分摊后的阶段盈亏；所有阶段之和 === 主力整腿盈亏。 */
   pnl: number;
-  /** 结束该阶段的对冲腿 id；最后一段（主力自身平仓收尾）为 null。 */
+  /** 兼容旧调用：结束该段的对冲腿 id。 */
   boundaryLegId: string | null;
+  /** 本区间内正在生效的对冲编号；空数组即纯多头阶段。 */
+  activeHedgeOrdinals: number[];
+  label: string;
 }
 
 /** 主力（多 / 空）以及其他多单都显示阶段；空单对冲等辅助腿不显示。 */
@@ -53,9 +59,9 @@ export function legSupportsPhases(leg: { leg_role?: string | null; direction?: s
     || leg.direction === 'long';
 }
 
-/** “收尾”只是腿自身平仓前的余段，不作为一个决策阶段呈现。 */
+/** 没有任何对冲参与时不重复展示整腿；只要存在对冲，前后纯多头区间也完整呈现。 */
 export function visibleLegPhases(phases: MainLegPhase[]): MainLegPhase[] {
-  return phases.filter(phase => phase.boundaryLegId != null);
+  return phases.some(phase => phase.activeHedgeOrdinals.length > 0) ? phases : [];
 }
 
 const EPS = 1e-12;
@@ -65,7 +71,7 @@ function isFiniteNumber(v: unknown): v is number {
 }
 
 /**
- * 把主力腿按滚动对冲的结束时刻切成阶段。
+ * 把持仓按对冲开仓 / 平仓时刻切成暴露状态阶段。
  * 无有效边界时返回单一阶段（即整腿本身）。
  */
 export function splitMainLegPhases(input: MainPhaseInput): MainLegPhase[] {
@@ -74,38 +80,55 @@ export function splitMainLegPhases(input: MainPhaseInput): MainLegPhase[] {
     return [];
   }
 
-  // 有效边界：平仓时刻严格落在主力持仓期内（贴着主力平仓的不切——切出来是零长度尾段）
-  const boundaries = hedges
-    .filter((h): h is { legId: string; closeTime: number; closePrice: number } => (
-      isFiniteNumber(h.closeTime)
-      && isFiniteNumber(h.closePrice)
-      && h.closePrice > 0
-      && (openTime == null || h.closeTime > openTime)
-      && (closeTime == null || h.closeTime < closeTime)
-    ))
-    .sort((a, b) => a.closeTime - b.closeTime)
-    // 同一时刻多条对冲同时结束只切一次（价格相同，多切出的是零长度段）
-    .filter((h, i, arr) => i === 0 || h.closeTime !== arr[i - 1].closeTime);
+  const validHedges = hedges.filter(h => (
+    isFiniteNumber(h.openTime) && isFiniteNumber(h.openPrice) && h.openPrice > 0
+    && isFiniteNumber(h.closeTime) && isFiniteNumber(h.closePrice) && h.closePrice > 0
+    && h.closeTime > h.openTime
+    && (openTime == null || h.closeTime > openTime)
+    && (closeTime == null || h.openTime < closeTime)
+  ));
+  const active = new Set<number>(validHedges
+    .filter(h => openTime != null && h.openTime <= openTime && h.closeTime > openTime)
+    .map(h => h.ordinal ?? 0));
+  const events = validHedges.flatMap(h => [
+    { time: h.openTime as number, price: h.openPrice as number, kind: 'open' as const, ordinal: h.ordinal ?? 0, legId: h.legId },
+    { time: h.closeTime as number, price: h.closePrice as number, kind: 'close' as const, ordinal: h.ordinal ?? 0, legId: h.legId },
+  ]).filter(event => (
+    (openTime == null || event.time > openTime) && (closeTime == null || event.time < closeTime)
+  )).sort((a, b) => a.time - b.time || (a.kind === 'close' ? -1 : 1));
 
-  // 组装阶段端点：开仓 →（各边界）→ 平仓
-  const points: Array<{ time: number | null; price: number; boundaryLegId: string | null }> = [
-    { time: openTime, price: entryPrice, boundaryLegId: null },
-    ...boundaries.map(b => ({ time: b.closeTime as number | null, price: b.closePrice, boundaryLegId: b.legId })),
-    { time: closeTime, price: exitPrice, boundaryLegId: null },
-  ];
+  const points: Array<{ time: number | null; price: number; active: number[]; boundaryLegId: string | null }> = [];
+  let cursorTime = openTime;
+  let cursorPrice = entryPrice;
+  let index = 0;
+  while (index < events.length) {
+    const time = events[index].time;
+    const sameTime = events.slice(index).filter(event => event.time === time);
+    const price = sameTime[0].price;
+    points.push({ time: cursorTime, price: cursorPrice, active: [...active].sort((a, b) => a - b), boundaryLegId: sameTime[0].legId });
+    for (const event of sameTime) {
+      if (event.kind === 'close') active.delete(event.ordinal);
+      else active.add(event.ordinal);
+    }
+    cursorTime = time;
+    cursorPrice = price;
+    index += sameTime.length;
+  }
+  points.push({ time: cursorTime, price: cursorPrice, active: [...active].sort((a, b) => a - b), boundaryLegId: null });
+  const endpoints = [...points.map(point => ({ time: point.time, price: point.price })), { time: closeTime, price: exitPrice }];
 
   // 各阶段的原始价差权重（带方向）；Σ权重 = dir × (exit − entry)，telescoping
   const dir = input.side === 'short' ? -1 : 1;
   const rawWeights: number[] = [];
-  for (let i = 0; i < points.length - 1; i += 1) {
-    rawWeights.push(dir * (points[i + 1].price - points[i].price));
+  for (let i = 0; i < points.length; i += 1) {
+    rawWeights.push(dir * (endpoints[i + 1].price - endpoints[i].price));
   }
   const totalWeight = rawWeights.reduce((sum, w) => sum + w, 0);
 
   const phases: MainLegPhase[] = [];
   let allocated = 0;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const isLast = i === points.length - 2;
+  for (let i = 0; i < points.length; i += 1) {
+    const isLast = i === points.length - 1;
     // 总价差为 0（开平同价）时无法按比例分摊：盈亏全数记在最后一段
     let phasePnl: number;
     if (Math.abs(totalWeight) < EPS) {
@@ -119,11 +142,15 @@ export function splitMainLegPhases(input: MainPhaseInput): MainLegPhase[] {
     phases.push({
       index: i + 1,
       startTime: points[i].time,
-      endTime: points[i + 1].time,
+      endTime: endpoints[i + 1].time,
       startPrice: points[i].price,
-      endPrice: points[i + 1].price,
+      endPrice: endpoints[i + 1].price,
       pnl: phasePnl,
-      boundaryLegId: points[i + 1].boundaryLegId,
+      boundaryLegId: points[i].boundaryLegId,
+      activeHedgeOrdinals: points[i].active,
+      label: points[i].active.length === 0
+        ? input.side === 'short' ? '纯空头阶段' : '纯多头阶段'
+        : `对冲${points[i].active.join('+')}阶段`,
     });
   }
   return phases;
