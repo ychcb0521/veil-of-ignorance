@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactualManualLeg, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -143,6 +143,18 @@ function renderEditor(
 }
 
 describe('CampaignWhatIfEditor run context and load-legs request', () => {
+  it('反事实 Legs 与原始 Legs 同样先完整纵向展开，再显示辅助盘面', async () => {
+    render(renderEditor(vi.fn()));
+    const table = await screen.findByTestId('counterfactual-legs-table');
+    const chart = screen.getByTestId('counterfactual-chart-section');
+
+    expect(table.className).toContain('order-3');
+    expect(chart.className).toContain('order-4');
+    expect(table.className).not.toContain('max-h-');
+    expect(table.className).not.toContain('overflow-y-auto');
+    expect(within(table).getAllByRole('row')).toHaveLength(baselineLegs.length + 1);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     baselineState.override = null;

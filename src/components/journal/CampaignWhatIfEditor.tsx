@@ -425,8 +425,8 @@ export function CampaignWhatIfEditor({
         </Button>
       </div>
 
-      <div className="bg-card border border-border rounded p-4 space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+      <div className="bg-card border border-border rounded p-4 flex flex-col gap-4">
+        <div className="order-1 flex flex-col gap-3 lg:flex-row lg:items-start">
           <div className="space-y-1 min-w-0">
             <div className="text-[14px] font-medium">Legs 副本 · 手动反事实</div>
             <div className="text-[11px] text-muted-foreground">
@@ -446,7 +446,7 @@ export function CampaignWhatIfEditor({
           </div>
         </div>
 
-        <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-2">
+        <div className="order-2 min-h-9 px-2 py-1 flex flex-wrap items-center gap-2">
           {onIntervalChange && intervalOptions.length > 0 && (
             <div className="flex items-center gap-1">
               {intervalOptions.map(item => (
@@ -486,7 +486,7 @@ export function CampaignWhatIfEditor({
           <div className="flex-1" />
         </div>
 
-        <div className="h-[480px] border border-border rounded overflow-hidden">
+        <div data-testid="counterfactual-chart-section" className="order-4 h-[480px] border border-border rounded overflow-hidden">
           {klinesLoading ? (
             <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
           ) : klines.length === 0 ? (
@@ -516,9 +516,12 @@ export function CampaignWhatIfEditor({
           )}
         </div>
 
-        <div className="max-h-[320px] overflow-x-auto overflow-y-auto rounded border border-border">
+        <div
+          data-testid="counterfactual-legs-table"
+          className="order-3 overflow-x-auto rounded border border-border"
+        >
           <table className="w-full min-w-[980px] text-[11px]">
-            <thead className="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/70">
+            <thead className="bg-muted/80 text-muted-foreground">
               <tr>
                 <th className="text-left px-3 py-2 w-10">#</th>
                 <th className="text-left px-3 py-2">角色</th>
