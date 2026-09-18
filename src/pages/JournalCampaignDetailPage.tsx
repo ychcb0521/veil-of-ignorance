@@ -14,6 +14,7 @@ import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
+import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
 import {
   CampaignWhatIfEditor,
   type CampaignWhatIfLoadLegsRequest,
@@ -2373,50 +2374,41 @@ export default function JournalCampaignDetailPage() {
           />
 
           {counterfactualDraft && counterfactualDraftOverview && (
-            <CounterfactualOverviewRow
-              testIdPrefix="counterfactual-draft"
-              title="反事实盈亏概览 · 未保存"
-              items={counterfactualDraftOverview.items}
-              note={counterfactualDraftOverview.note}
-              delta={counterfactualDelta(counterfactualDraft.result.final_realized_pnl, actualPnl)}
-              changeSummary={counterfactualDraft.params.change_summary}
-              runContext={counterfactualDraft.params.run_context}
-              actions={(
-                <>
-                  <ImeSafeInput
-                    data-testid="counterfactual-draft-name"
-                    aria-label="反事实分支名"
-                    value={counterfactualDraftName}
-                    onValueChange={setCounterfactualDraftName}
-                    maxLength={COUNTERFACTUAL_NAME_MAX_LENGTH}
-                    placeholder="分支名（≤ 20 字）"
-                    className="h-8 w-56 max-w-full text-[12px]"
-                  />
-                  {/* 左栏窄时分支名单独一行，保存 / 丢弃 成对折到下一行，不拆开 */}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      data-testid="counterfactual-save"
-                      className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]"
-                      disabled={counterfactualDraftSaving}
-                      onClick={handleSaveCounterfactualDraft}
-                    >
-                      {counterfactualDraftSaving ? '保存中…' : '保存'}
-                    </Button>
-                    <Button
-                      type="button"
-                      data-testid="counterfactual-discard"
-                      variant="outline"
-                      className="h-8 text-[12px]"
-                      disabled={counterfactualDraftSaving}
-                      onClick={handleDiscardCounterfactualDraft}
-                    >
-                      丢弃
-                    </Button>
-                  </div>
-                </>
+            <>
+              <CounterfactualOverviewRow
+                testIdPrefix="counterfactual-draft"
+                title="反事实盈亏概览 · 未保存"
+                items={counterfactualDraftOverview.items}
+                note={counterfactualDraftOverview.note}
+                delta={counterfactualDelta(counterfactualDraft.result.final_realized_pnl, actualPnl)}
+                changeSummary={counterfactualDraft.params.change_summary}
+                runContext={counterfactualDraft.params.run_context}
+                actions={(
+                  <>
+                    <ImeSafeInput
+                      data-testid="counterfactual-draft-name"
+                      aria-label="反事实分支名"
+                      value={counterfactualDraftName}
+                      onValueChange={setCounterfactualDraftName}
+                      maxLength={COUNTERFACTUAL_NAME_MAX_LENGTH}
+                      placeholder="分支名（≤ 20 字）"
+                      className="h-8 w-56 max-w-full text-[12px]"
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button type="button" data-testid="counterfactual-save" className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]" disabled={counterfactualDraftSaving} onClick={handleSaveCounterfactualDraft}>
+                        {counterfactualDraftSaving ? '保存中…' : '保存'}
+                      </Button>
+                      <Button type="button" data-testid="counterfactual-discard" variant="outline" className="h-8 text-[12px]" disabled={counterfactualDraftSaving} onClick={handleDiscardCounterfactualDraft}>
+                        丢弃
+                      </Button>
+                    </div>
+                  </>
+                )}
+              />
+              {(counterfactualDraft.params.manual_legs ?? []).length > 0 && (
+                <CounterfactualLegsTable legs={counterfactualDraft.params.manual_legs ?? []} result={counterfactualDraft.result} />
               )}
-            />
+            </>
           )}
 
           <div className="space-y-2">
@@ -2476,6 +2468,7 @@ export default function JournalCampaignDetailPage() {
           </div>
 
           {selectedCounterfactual && selectedCounterfactualOverview && (
+            <>
             <CounterfactualOverviewRow
               testIdPrefix="counterfactual-saved"
               title={`反事实盈亏概览 · ${selectedCounterfactual.label}`}
@@ -2514,6 +2507,14 @@ export default function JournalCampaignDetailPage() {
                 </>
               )}
             />
+              {(selectedCounterfactual.params.manual_legs ?? []).length > 0 && (
+                <CounterfactualLegsTable
+                  legs={selectedCounterfactual.params.manual_legs ?? []}
+                  result={selectedCounterfactual.result}
+                  title={`反事实 Legs · ${selectedCounterfactual.label}`}
+                />
+              )}
+            </>
           )}
 
           {hasManualRunBranch && (

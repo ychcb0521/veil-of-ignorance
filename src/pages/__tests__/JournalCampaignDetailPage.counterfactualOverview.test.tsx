@@ -445,6 +445,10 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(runCustomCounterfactualMock.mock.calls[0][3]).toBe('1m');
     expect(createCounterfactualMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId('counterfactual-saved-panel')).not.toBeInTheDocument();
+    const resultLegs = screen.getByTestId('counterfactual-result-legs');
+    expect(within(resultLegs).getByText('反事实 Legs')).toBeInTheDocument();
+    expect(within(resultLegs).getByText('主力开仓')).toBeInTheDocument();
+    expect(within(resultLegs).getByText('合计')).toBeInTheDocument();
   }, 15_000);
 
   it('保存 → createCounterfactual 一次（名字 + change_summary + run_context），列表出现该行，面板切成已保存', async () => {
@@ -479,6 +483,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
 
     const savedPanel = await screen.findByTestId('counterfactual-saved-panel');
     expect(within(savedPanel).getByText('反事实盈亏概览 · 我的方案')).toBeInTheDocument();
+    expect(within(screen.getByTestId('counterfactual-result-legs')).getByText('反事实 Legs · 我的方案')).toBeInTheDocument();
     expect(helpButtonLabels(savedPanel)).toEqual(OVERVIEW_LABELS);
     expect(screen.queryByTestId('counterfactual-draft-panel')).not.toBeInTheDocument();
   }, 15_000);
