@@ -1,8 +1,10 @@
 /**
- * Legs 表「多单占比」「空单占比」两列：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
+ * Legs 表「多单占比」列与合计行的多、空两组 Σ：每条腿的币量 / 名义仓位各占**同方向**各腿合计的百分比。
  *
- * 多单与空单分开算：多单各腿占多单合计，空单各腿占空单合计（对冲通常是空单）。
- * 两个方向各占一列，一条腿的两行数只出现在它自己那个方向的列里，另一列留空；点列头按该列排序。
+ * 多单与空单分开算：多单各腿占多单合计，空单各腿占空单合计（对冲通常是空单）；空单从不进多单的分母。
+ * 页面与 PNG 只有「多单占比」一列（空单的行留空，点列头排序）——【用户要求】空单不单独算占比、不占一列；
+ * 空单那一组合计照算，写在合计行「币量 / 仓位」格里（对冲一共开了多大）。
+ * 这里的计算、排序与说明仍按方向对称地写（side 参数），调用方只取多单。
  * 分组按这条腿**实际的持仓方向**（与「涨跌幅」列同一个方向来源），不按角色——
  * 主空战役里的对冲是多单，它就进多单那一组。
  *
@@ -27,7 +29,7 @@ export const LEG_POSITION_SIDES: readonly LegPositionSide[] = ['long', 'short'];
 /** 方向标签的字：「多」/「空」。 */
 export const LEG_POSITION_SIDE_LABELS: Record<LegPositionSide, string> = { long: '多', short: '空' };
 
-/** 两列占比的列名：「多单占比」/「空单占比」。页面（读屏名、表头说明）与 PNG 表头共用。 */
+/** 按方向的占比列名：页面（读屏名）与 PNG 表头只用得到「多单占比」；空单的列名只留给按方向对称的排序说明。 */
 export const LEG_POSITION_SHARE_COLUMN_TITLES: Record<LegPositionSide, string> = { long: '多单占比', short: '空单占比' };
 
 /** 方向标签的颜色：与币安仓位方向同色（多绿空红）。只给标签用，百分数本身保持中性色。 */
@@ -179,28 +181,34 @@ export function describeLegPositionSideTotal(totals: LegPositionSideTotals): str
   return `${name}没有计入的腿`;
 }
 
+/** 合计行「币量 / 仓位」格里每组 Σ 是什么：多单那组是「多单占比」的分母；空单不单独算占比，那组只是合计。 */
+const SIDE_TOTAL_ROLES: Record<LegPositionSide, string> = {
+  long: '「多单占比」的分母',
+  short: '空单各腿的合计（只看总量，不算占比）',
+};
+
 /**
- * 合计行「币量 / 仓位」格的 tooltip：只说实际列出的那几组分母（「多单一组、空单一组」或只有一组）；
- * 一组都没有（两行「—」）时不给——不能告诉用户有一组其实没列出来的分母。
+ * 合计行「币量 / 仓位」格的 tooltip：只说实际列出的那几组（「多单一组…，空单一组…」或只有一组），逐组说明是什么；
+ * 一组都没有（两行「—」）时不给——不能告诉用户有一组其实没列出来的合计。
  */
 export function describeLegPositionDenominators(sides: readonly LegPositionSideTotals[]): string | undefined {
   if (sides.length === 0) return undefined;
-  const groups = sides.map(totals => `${legPositionSideName(totals.side)}一组`).join('、');
-  return `占比的分母：${groups}，上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）`;
+  const groups = sides.map(totals => `${legPositionSideName(totals.side)}一组是${SIDE_TOTAL_ROLES[totals.side]}`).join('，');
+  return `${groups}；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）`;
 }
 
 /** 点列头排序：降序（大的在上）/ 升序。 */
 export type LegPositionShareSortDirection = 'desc' | 'asc';
 
-/** 当前按哪一列、哪个方向排；null 即默认顺序（腿传进来时的先后）。一次只有一列在排。 */
+/** 当前按哪个方向的占比、升还是降排；null 即默认顺序（腿传进来时的先后）。页面只有「多单占比」一列可排，side 恒为 long。 */
 export interface LegPositionShareSort {
   side: LegPositionSide;
   direction: LegPositionShareSortDirection;
 }
 
 /**
- * 这条腿在「多单占比」/「空单占比」某一列里的排序键：上行币量占比，没有时取下行名义仓位占比。
- * 别的方向的腿、挂单中的腿、两行都是「—」的腿在这一列里没有值，返回 null。
+ * 这条腿按某个方向的占比排序时的键（页面只按多单）：上行币量占比，没有时取下行名义仓位占比。
+ * 别的方向的腿（多单占比里的空单）、挂单中的腿、两行都是「—」的腿没有值，返回 null。
  */
 export function legPositionShareSortValue(
   entry: LegPositionShareEntry | null | undefined,
@@ -222,8 +230,8 @@ function shareSortKey(value: number): number {
 }
 
 /**
- * 按某一列的占比给行排序，返回新数组、不动入参。
- * 有值的行按值排，并列（取整后相等，见 shareSortKey）保持原来的先后（稳定）；这一列没有值的行不论升降序都沉到最下面，彼此仍按原来的先后。
+ * 按某个方向的占比给行排序（页面：「多单占比」列头），返回新数组、不动入参。
+ * 有值的行按值排，并列（取整后相等，见 shareSortKey）保持原来的先后（稳定）；没有值的行不论升降序都沉到最下面，彼此仍按原来的先后。
  * sort 为 null 时原样返回原来的先后。
  */
 export function sortByLegPositionShare<T>(
@@ -244,7 +252,7 @@ export function sortByLegPositionShare<T>(
   return [...valued.map(entry => entry.item), ...rest];
 }
 
-/** 点一下某一列之后的排序：降序 → 升序 → 默认顺序；当前排的是另一列时，从这一列的降序开始。 */
+/** 点一下列头之后的排序：降序 → 升序 → 默认顺序；当前按另一个方向排时，从这个方向的降序开始。 */
 export function nextLegPositionShareSort(
   current: LegPositionShareSort | null,
   side: LegPositionSide,
@@ -256,7 +264,7 @@ export function nextLegPositionShareSort(
 const SORT_DIRECTION_LABELS: Record<LegPositionShareSortDirection, string> = { desc: '降序', asc: '升序' };
 
 /**
- * 列头按钮的读屏名 / 悬停说明：当前是什么状态、再点一下会怎样。
+ * 列头按钮的读屏名：当前是什么状态、再点一下会怎样。
  * 「按多单占比排序：当前降序，点击改为升序」。
  */
 export function describeLegPositionShareSort(side: LegPositionSide, current: LegPositionShareSort | null): string {
@@ -280,7 +288,7 @@ export function formatLegPositionSharePct(pct: number | null | undefined): strin
   return `${(rounded === 0 ? 0 : rounded).toFixed(1)}%`;
 }
 
-/** 合计行「占比」格：分母为正时是 100.0%，否则「—」。多、空两组各调一次。 */
+/** 合计行「多单占比」格：分母为正时是 100.0%，否则「—」。上下两行各调一次。 */
 export function formatLegPositionShareTotal(total: number | null | undefined): string {
   return contributes(total) ? formatLegPositionSharePct(100) : '—';
 }

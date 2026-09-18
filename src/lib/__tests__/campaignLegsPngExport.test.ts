@@ -97,13 +97,13 @@ const DELTA_B_COL = 3;
 const ENTRY_COL = 4;
 const EXIT_COL = 5;
 /** 「委托」列。 */
-const ORDER_COL = 12;
+const ORDER_COL = 11;
 /** 「手续费」列。 */
-const FEE_COL = 11;
-/** 「加仓校验」列（紧跟「币量 / 仓位」与「多单占比」「空单占比」）。 */
-const ADD_SIZING_COL = 10;
+const FEE_COL = 10;
+/** 「加仓校验」列（紧跟「币量 / 仓位」与「多单占比」；没有「空单占比」列）。 */
+const ADD_SIZING_COL = 9;
 /** 导出图的列数（没有页面上的「操作」列）。 */
-const EXPORT_COLUMN_COUNT = 13;
+const EXPORT_COLUMN_COUNT = 12;
 /** 「涨跌幅」列（紧跟「平仓价」）。 */
 const PRICE_CHANGE_COL = 6;
 
@@ -581,8 +581,8 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     expect(rows.at(-1)!.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
     const widths = new Set(rows.map(row => row.cells.length));
     expect(widths).toEqual(new Set([EXPORT_COLUMN_COUNT]));
-    // 列序：币量（及其两列占比）之后、手续费之前
-    expect(add.cells[ADD_SIZING_COL - 3][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
+    // 列序：币量（及其多单占比）之后、手续费之前
+    expect(add.cells[ADD_SIZING_COL - 2][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
   });
 
   it('仓位合规：只是一枚淡灰小 ✓，不是红色', () => {
@@ -808,7 +808,8 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
     const at = texts.indexOf('涨跌幅');
     expect(at).toBeGreaterThan(0);
     expect(texts.slice(at - 2, at + 2)).toEqual(['开仓价', '平仓价', '涨跌幅', '币量 / 仓位']);
-    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '空单占比', '加仓校验', '手续费', '委托']);
+    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托']);
+    expect(texts).not.toContain('空单占比');
     expect(texts).toContain('+127.02%');
   });
 
@@ -936,15 +937,15 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
   });
 });
 
-describe('【用户要求】导出图也带「多单占比」「空单占比」两列（币量 / 仓位右侧）', () => {
-  // 【用户要求 · 续】多单、空单分开算、各自 100%；合计行分别给出两个分母——与页面同源
-  // 【用户要求 · 再续】分成两列：一条腿的数只在自己方向的那一列，另一列留空；导出图不跟页面的排序与折叠走
+describe('【用户要求】导出图也带「多单占比」一列（币量 / 仓位右侧）', () => {
+  // 【用户要求 · 续】多单、空单分开算；合计行分别给出多、空两组 Σ——与页面同源
+  // 【用户要求 · 三续】「空单仓位的占比也不需要，没必要存在」：只剩「多单占比」一列，空单的行一格空白、不进它的分母；
+  // 导出图不跟页面的排序与折叠走
   afterEach(() => { vi.restoreAllMocks(); });
 
-  /** 「币量 / 仓位」「多单占比」「空单占比」在 COLUMNS 里的下标。 */
+  /** 「币量 / 仓位」「多单占比」在 COLUMNS 里的下标；「多单占比」右边紧跟「加仓校验」。 */
   const COINS_COL = 7;
   const LONG_COL = 8;
-  const SHORT_COL = 9;
   const EMPTY = [{ text: '' }];
 
   const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
@@ -983,7 +984,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     },
   });
 
-  it('表头真的把「多单占比」「空单占比」画在币量 / 仓位之后、加仓校验之前；腿行与合计行画出格式化后的值', () => {
+  it('表头真的把「多单占比」画在币量 / 仓位之后、加仓校验之前，没有「空单占比」；腿行与合计行画出格式化后的值', () => {
     const drawn: string[] = [];
     const ctx = new Proxy({} as Record<string | symbol, unknown>, {
       get(target, key) {
@@ -1000,12 +1001,14 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
 
     const at = drawn.indexOf('多单占比');
     expect(at).toBeGreaterThan(0);
-    expect(drawn.slice(at - 1, at + 3)).toEqual(['币量 / 仓位', '多单占比', '空单占比', '加仓校验']);
+    expect(drawn.slice(at - 1, at + 2)).toEqual(['币量 / 仓位', '多单占比', '加仓校验']);
+    expect(LONG_COL + 1).toBe(ADD_SIZING_COL);
+    expect(drawn).not.toContain('空单占比');
     expect(drawn).not.toContain('占比');
     expect(drawn).toEqual(expect.arrayContaining(['34.9%', '33.6%', '44.2%', '45.1%', '79,042,835.4', '8981040.00', '100.0%']));
   });
 
-  it('与页面同一个 helper：截图里的四条腿印出同样的占比，只在「多单占比」列；合计行写分母与本方向的 100.0%', () => {
+  it('与页面同一个 helper：截图里的四条腿印出同样的占比；合计行写 Σ 与多单的 100.0%', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: screenshotLegs(), reverseHedgeOrders: [] });
     const cell = (id: string) => rowOf(rows, id).cells[LONG_COL];
 
@@ -1021,18 +1024,18 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
       { text: '33.6%', color: '#848E9C' },
     ]);
     expect(cell('main').map(line => line.color)).toEqual(rowOf(rows, 'main').cells[COINS_COL].map(line => line.color));
-    // 另一列整格留空，连「—」都不写
-    for (const row of SCREENSHOT) expect(rowOf(rows, row.id).cells[SHORT_COL]).toEqual(EMPTY);
+    // 每一行都是 12 格：右边紧挨着的是加仓校验，不是另一列占比
+    for (const row of rows) expect(row.cells).toHaveLength(EXPORT_COLUMN_COUNT);
 
     const total = rows.at(-1)!;
     expect(total.kind).toBe('total');
-    // 全是多单：分母格只列多单一组；「多单占比」写 100.0%，「空单占比」合计格留空
+    // 全是多单：Σ 格只列多单一组；「多单占比」写 100.0%；右边的加仓校验留空
     expect(texts(total.cells[COINS_COL])).toEqual(['79,042,835.4', '8981040.00']);
     expect(total.cells[LONG_COL]).toEqual([
       { text: '100.0%', color: '#5F6B7A' },
       { text: '100.0%', color: '#848E9C' },
     ]);
-    expect(total.cells[SHORT_COL]).toEqual(EMPTY);
+    expect(total.cells[LONG_COL + 1]).toEqual(EMPTY);
     expect(total.cells[COINS_COL].map(line => line.tag)).toEqual([
       { text: '多', color: '#0ECB81' }, { text: '多', color: '#0ECB81', hidden: true },
     ]);
@@ -1045,7 +1048,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     for (const row of rows.filter(r => r.kind === 'leg')) expect(row.wrapped[LONG_COL]).toHaveLength(2);
   });
 
-  it('状态为「挂单中」的空单在「空单占比」列两行「—」、不进分母；缺开仓价的腿上行「—」、名义仍进下行分母', () => {
+  it('状态为「挂单中」的空单在「多单占比」列一格空白、不进 Σ；缺开仓价的腿上行「—」、名义仍进下行分母', () => {
     const rows = buildCampaignLegsExportRows({
       ...input(),
       legs: [
@@ -1060,7 +1063,6 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     });
     const cell = (id: string) => texts(rowOf(rows, id).cells[LONG_COL]);
     expect(texts(rowOf(rows, 'pending-hedge').cells[COINS_COL])).toEqual(['50,000,000', '5000000.00']);
-    expect(rowOf(rows, 'pending-hedge').cells[SHORT_COL]).toEqual([{ text: '—' }, { text: '—', color: '#848E9C' }]);
     expect(rowOf(rows, 'pending-hedge').cells[LONG_COL]).toEqual(EMPTY);
     expect(texts(rowOf(rows, 'no-price').cells[COINS_COL])).toEqual(['—', '1018960.00']);
     // 名义分母变成 8,981,040 + 1,018,960 = 10,000,000；币量分母不变
@@ -1071,17 +1073,34 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     // 空单那一方向只有挂单中的对冲：不列空单那组
     expect(texts(total.cells[COINS_COL])).toEqual(['79,042,835.4', '10000000.00']);
     expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
-    expect(total.cells[SHORT_COL]).toEqual(EMPTY);
-    // 行里与两列占比的合计格都不挂标签
-    for (const row of rows) {
-      for (const col of [LONG_COL, SHORT_COL]) expect(row.cells[col].every(line => line.tag == null)).toBe(true);
-    }
+    // 行里与「多单占比」的合计格都不挂标签
+    for (const row of rows) expect(row.cells[LONG_COL].every(line => line.tag == null)).toBe(true);
   });
 
-  it('一条都不计入：合计行三格都是「—」，不挂标签', () => {
+  it('状态为「挂单中」的多单（镜像止盈还没触发）在「多单占比」列两行「—」、不进分母', () => {
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        ...screenshotLegs(),
+        leg({
+          id: 'pending-mirror', leg_sequence: 10, leg_role: 'mirror_tp', pre_simulated_time: T('05:30'),
+          pre_entry_price: 0.1, pre_position_size: 5_000_000,
+        }),
+      ],
+      reverseHedgeOrders: [],
+    });
+    expect(rowOf(rows, 'pending-mirror').cells[LONG_COL]).toEqual([{ text: '—' }, { text: '—', color: '#848E9C' }]);
+    expect(texts(rowOf(rows, 'main').cells[LONG_COL])).toEqual(['34.9%', '33.6%']);
+    expect(texts(rows.at(-1)!.cells[COINS_COL])).toEqual(['79,042,835.4', '8981040.00']);
+    expect(texts(rows.at(-1)!.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
+  });
+
+  it('一条都不计入：合计行两格都是「—」，不挂标签', () => {
     const rows = buildCampaignLegsExportRows({ ...input(), legs: [pendingHedge], reverseHedgeOrders: [] });
+    expect(rowOf(rows, 'pending-hedge').cells[LONG_COL]).toEqual(EMPTY);
     const total = rows.at(-1)!;
-    for (const col of [COINS_COL, LONG_COL, SHORT_COL]) {
+    expect(total.cells[LONG_COL + 1]).toEqual(EMPTY);
+    for (const col of [COINS_COL, LONG_COL]) {
       expect(texts(total.cells[col])).toEqual(['—', '—']);
       expect(total.cells[col].every(line => line.tag == null)).toBe(true);
     }
@@ -1110,7 +1129,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     // 合计行不因此被撑高：仍是上下各 12 的留白夹两行 17 高的字（被拆开时会多出一行，变成 75）
     expect(total.height).toBe(12 * 2 + 17 * 2);
   };
-  /** 同样的百亿级，再加一组百亿级的空单：两组各两行，一个字都不折，合计行正好四行高。 */
+  /** 同样的百亿级，再加一组百亿级的空单：Σ 格两组各两行，一个字都不折，合计行正好四行高；「多单占比」仍只有两行。 */
   const billionBothSides = () => [
     ...billionLegs(),
     leg({
@@ -1123,8 +1142,8 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     const total = rows.at(-1)!;
     expect(texts(total.cells[COINS_COL])).toEqual(['11,981,041,835.39', '119808.00', '11,981,041,835.39', '30000.00']);
     expect(total.wrapped[COINS_COL]).toEqual(total.cells[COINS_COL]);
+    expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
     expect(total.wrapped[LONG_COL]).toEqual(total.cells[LONG_COL]);
-    expect(total.wrapped[SHORT_COL]).toEqual(total.cells[SHORT_COL]);
     expect(total.height).toBe(12 * 2 + 17 * 4);
   };
 
@@ -1154,7 +1173,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     }),
   ];
 
-  it('阶段子行两列都留空；每一行格子数都与表头列数一致，两列各 88', () => {
+  it('阶段子行这一列留空；每一行格子数都与表头列数一致，「多单占比」88、没有「空单占比」那 88', () => {
     const rows = buildCampaignLegsExportRows({
       ...input(),
       legs: phaseLegs(),
@@ -1165,42 +1184,48 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     expect(phases.length).toBeGreaterThanOrEqual(2);
     for (const row of phases) {
       expect(row.cells[LONG_COL]).toEqual(EMPTY);
-      expect(row.cells[SHORT_COL]).toEqual(EMPTY);
       expect(row.cells[COINS_COL]).toEqual(EMPTY);
     }
-    // 多单主力与空单对冲各在自己那列 100%（一个分母时曾是 73.7% / 26.3%）
+    // 多单主力独占多单的 100%；空单对冲一格空白，不进多单的分母（一个分母时曾是 73.7% / 26.3%）
     expect(texts(rowOf(rows, 'main').cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
-    expect(rowOf(rows, 'main').cells[SHORT_COL]).toEqual(EMPTY);
-    expect(texts(rowOf(rows, 'hedge-roll').cells[SHORT_COL])).toEqual(['100.0%', '100.0%']);
     expect(rowOf(rows, 'hedge-roll').cells[LONG_COL]).toEqual(EMPTY);
+    // 空单那组 Σ 照旧列出
     expect(texts(rows.at(-1)!.cells[COINS_COL])).toEqual(['2,799,947.74', '94300.00', '1,000,000', '50000.00']);
-    // 合计行：多单那列只有第一组；空单那列先垫两行空白，「100.0%」与分母格里空单那组同一行
+    // 合计行：「多单占比」只有多单那一组，与 Σ 格的第一组同一行，不垫空白
     expect(texts(rows.at(-1)!.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
-    expect(texts(rows.at(-1)!.cells[SHORT_COL])).toEqual(['', '', '100.0%', '100.0%']);
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
 
-    // 画布宽度 = 各列宽之和 + 左右边距：原来一列「占比」96，拆成「多单占比」「空单占比」各 88；「币量 / 仓位」仍是 184；
-    // 第一列「#」（52）已去掉，「角色」152 打头
+    // 画布宽度 = 各列宽之和 + 左右边距：原来一列「占比」96，拆成「多单占比」「空单占比」各 88，再去掉「空单占比」；
+    // 「币量 / 仓位」仍是 184；第一列「#」（52）已去掉，「角色」152 打头
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(new Proxy({}, {
       get: (_target, key) => (key === 'measureText' ? () => ({ width: 0 }) : () => undefined),
     }) as never);
     const canvas = buildCampaignLegsListCanvas({ ...input(), legs: [] }, { includeHeader: false, scale: 1 });
-    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 120 + 184 + 88 + 88 + 170 + 132 + 444 + 40 * 2);
+    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 120 + 184 + 88 + 170 + 132 + 444 + 40 * 2);
   });
 
-  it('按真实等宽字体量宽：「100.0%」与「—」在 88 宽的两列里都不折行；列头「多单占比」（12px 粗体 4 个汉字）放得进去、不被压扁', async () => {
+  it('按真实等宽字体量宽：「100.0%」与「—」在 88 宽的「多单占比」里都不折行；列头「多单占比」（12px 粗体 4 个汉字）放得进去、不被压扁', async () => {
     const measure = monospaceMeasure();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(measure as never);
     vi.resetModules();
     const fresh = await import('@/lib/campaignLegsPngExport');
-    const rows = fresh.buildCampaignLegsExportRows({ ...input(), legs: [...phaseLegs(), pendingHedge], reverseHedgeOrders: [] });
+    const rows = fresh.buildCampaignLegsExportRows({
+      ...input(),
+      legs: [
+        ...phaseLegs(),
+        pendingHedge,
+        // 挂单中的多单：两行「—」
+        leg({ id: 'pending-mirror', leg_sequence: 10, leg_role: 'mirror_tp', pre_entry_price: 0.05, pre_position_size: 1_000 }),
+      ],
+      reverseHedgeOrders: [],
+    });
+    expect(texts(rowOf(rows, 'pending-mirror').cells[LONG_COL])).toEqual(['—', '—']);
     for (const row of rows.filter(r => r.kind !== 'note')) {
       expect(row.wrapped[LONG_COL]).toEqual(row.cells[LONG_COL]);
-      expect(row.wrapped[SHORT_COL]).toEqual(row.cells[SHORT_COL]);
     }
     // 列头画在格内左右各留 10 的宽度里（fillText 的 maxWidth）：量出来的宽不能超过它，否则画布会把字横向压扁
     measure.font = '700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-    for (const title of ['多单占比', '空单占比']) expect(measure.measureText(title).width).toBeLessThanOrEqual(88 - 20);
+    expect(measure.measureText('多单占比').width).toBeLessThanOrEqual(88 - 20);
   });
 
   it('导出图不跟页面的排序与折叠走：腿按传入的先后画，主力的阶段子行全部列出', () => {
@@ -1216,7 +1241,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     ]);
   });
 
-  describe('【用户要求 · 续】多单与空单分开算，导出图同样分成两列', () => {
+  describe('【用户要求 · 续】多单与空单分开算：空单不进多单的分母，只在合计行给出 Σ', () => {
     const closed = { post_simulated_close_time: T('09:00') };
     /** 用户截图的形状（KAITOUSDT，主多）：主力多单、镜像止盈多单、滚动对冲空单、加仓多单，全部已平仓。 */
     const userShape = () => [
@@ -1238,7 +1263,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
     const rowsOf = (legs: TradeJournal[]) => buildCampaignLegsExportRows({ ...input(), legs, reverseHedgeOrders: [] });
     const shareOf = (rows: ReturnType<typeof rowsOf>, id: string, col: number) => rowOf(rows, id).cells[col];
 
-    it('用户截图的形状：三条多单在「多单占比」列加起来 100.0%，唯一的空单对冲在「空单占比」列独占 100.0%', () => {
+    it('用户截图的形状：三条多单在「多单占比」列加起来 100.0%，空单对冲一格空白；合计行照旧列出空单那组 Σ', () => {
       const rows = rowsOf(userShape());
       expect(['main', 'mirror', 'add'].map(id => texts(shareOf(rows, id, LONG_COL)))).toEqual([
         ['41.4%', '40.0%'], ['41.4%', '40.0%'], ['17.2%', '20.0%'],
@@ -1248,17 +1273,14 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
           .map(id => Number.parseFloat(shareOf(rows, id, LONG_COL)[index].text))
           .reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 6);
       }
-      for (const id of ['main', 'mirror', 'add']) expect(shareOf(rows, id, SHORT_COL)).toEqual(EMPTY);
-      expect(texts(shareOf(rows, 'hedge', SHORT_COL))).toEqual(['100.0%', '100.0%']);
       expect(shareOf(rows, 'hedge', LONG_COL)).toEqual(EMPTY);
 
       const total = rows.at(-1)!;
       expect(texts(total.cells[COINS_COL])).toEqual(['7,250', '7500.00', '1,818.18', '2000.00']);
       expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
-      expect(texts(total.cells[SHORT_COL])).toEqual(['', '', '100.0%', '100.0%']);
     });
 
-    it('主空战役里的多单对冲：分组跟方向走——对冲进「多单占比」列；两条空单平分「空单占比」列', () => {
+    it('主空战役里的多单对冲：分组跟方向走——对冲进「多单占比」列；两条空单一格空白、只进空单那组 Σ', () => {
       const rows = rowsOf([
         leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
         leg({
@@ -1271,18 +1293,17 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
           pre_entry_price: 2, pre_position_size: 3_000, post_exit_price_snapshot: 1.5, ...closed,
         }),
       ]);
-      expect(texts(shareOf(rows, 'main-short', SHORT_COL))).toEqual(['62.5%', '62.5%']);
-      expect(texts(shareOf(rows, 'add-short', SHORT_COL))).toEqual(['37.5%', '37.5%']);
       expect(texts(shareOf(rows, 'hedge-long', LONG_COL))).toEqual(['100.0%', '100.0%']);
-      expect(shareOf(rows, 'hedge-long', SHORT_COL)).toEqual(EMPTY);
       expect(shareOf(rows, 'main-short', LONG_COL)).toEqual(EMPTY);
+      expect(shareOf(rows, 'add-short', LONG_COL)).toEqual(EMPTY);
       const total = rows.at(-1)!;
       expect(texts(total.cells[COINS_COL])).toEqual(['1,000', '2000.00', '4,000', '8000.00']);
       expect(total.cells[COINS_COL].map(line => line.tag?.hidden ? `(${line.tag.text})` : line.tag?.text))
         .toEqual(['多', '(多)', '空', '(空)']);
+      expect(texts(total.cells[LONG_COL])).toEqual(['100.0%', '100.0%']);
     });
 
-    it('主空战役里唯一的多单对冲还挂单中：多单那组不列，「空单占比」合计与分母格的第一组同一行、不垫空白', () => {
+    it('主空战役里唯一的多单对冲还挂单中：多单那组不列，「多单占比」合计一格空白；Σ 格只剩空单那组', () => {
       const rows = rowsOf([
         leg({ id: 'main-short', direction: 'short', pre_entry_price: 2, pre_position_size: 5_000, post_exit_price_snapshot: 1.5, ...closed }),
         leg({
@@ -1291,53 +1312,48 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
         }),
       ]);
       expect(shareOf(rows, 'pending-long-hedge', LONG_COL)).toEqual([{ text: '—' }, { text: '—', color: '#848E9C' }]);
-      expect(shareOf(rows, 'pending-long-hedge', SHORT_COL)).toEqual(EMPTY);
-      expect(texts(shareOf(rows, 'main-short', SHORT_COL))).toEqual(['100.0%', '100.0%']);
+      expect(shareOf(rows, 'main-short', LONG_COL)).toEqual(EMPTY);
       const total = rows.at(-1)!;
       expect(texts(total.cells[COINS_COL])).toEqual(['2,500', '5000.00']);
       expect(total.cells[COINS_COL][0].tag).toEqual({ text: '空', color: '#F6465D' });
       expect(total.cells[LONG_COL]).toEqual(EMPTY);
-      expect(texts(total.cells[SHORT_COL])).toEqual(['100.0%', '100.0%']);
       expect(total.height).toBe(12 * 2 + 17 * 2);
     });
 
-    it('合计行：三格逐行对齐——占比两列的每一行，与分母格同一行号的那组同方向；四行时合计行撑到四行高，腿行不变', () => {
+    it('合计行：两格逐行对齐——「多单占比」的两行与 Σ 格的第 0、1 行（多单那组）同一行；Σ 四行时合计行撑到四行高，腿行不变', () => {
       const rows = rowsOf(userShape());
       const total = rows.at(-1)!;
       const coins = total.cells[COINS_COL];
       const long = total.cells[LONG_COL];
-      const short = total.cells[SHORT_COL];
       expect(coins).toHaveLength(4);
       expect(long).toHaveLength(2);
-      expect(short).toHaveLength(4);
-      // 分母格第 0、1 行是多单那组 → 多单占比的两行；第 2、3 行是空单那组 → 空单占比的第 2、3 行，前两行是空白占位
+      // Σ 格第 0、1 行是多单那组 → 多单占比的两行；第 2、3 行是空单那组，右边没有对应的占比
       expect(coins.map(line => line.tag?.text)).toEqual(['多', '多', '空', '空']);
       expect(long.map(line => line.text)).toEqual(['100.0%', '100.0%']);
-      expect(short.slice(0, 2)).toEqual([{ text: '' }, { text: '' }]);
-      expect(short.slice(2).map(line => line.text)).toEqual(['100.0%', '100.0%']);
       expect(coins.map(line => line.color)).toEqual(['#5F6B7A', '#848E9C', '#5F6B7A', '#848E9C']);
       expect(long.map(line => line.color)).toEqual(['#5F6B7A', '#848E9C']);
-      expect(short.slice(2).map(line => line.color)).toEqual(['#5F6B7A', '#848E9C']);
-      // 占比两列不挂标签
-      expect([...long, ...short].every(line => line.tag == null)).toBe(true);
-      // 不折行：绘制行就是逻辑行（空白占位行也各占一行高）
+      // 「多单占比」不挂标签，也没有为别的列垫的空白行
+      expect(long.every(line => line.tag == null)).toBe(true);
+      expect(long.every(line => line.text !== '')).toBe(true);
+      // 不折行：绘制行就是逻辑行
       expect(total.wrapped[COINS_COL]).toEqual(coins);
       expect(total.wrapped[LONG_COL]).toEqual(long);
-      expect(total.wrapped[SHORT_COL]).toEqual(short);
       expect(total.height).toBe(12 * 2 + 17 * 4);
-      // 腿行：占比格仍是两行（另一列一格空白）、不折行；行高由三行的时间格定（开 / 平 / 操作）
+      // 腿行：多单的占比格仍是两行、不折行，空单一格空白；行高由三行的时间格定（开 / 平 / 操作）
       for (const row of rows.filter(r => r.kind === 'leg')) {
-        const own = row.cells[LONG_COL].length === 2 ? LONG_COL : SHORT_COL;
-        expect(row.wrapped[own]).toEqual(row.cells[own]);
-        expect(row.wrapped[own]).toHaveLength(2);
-        expect(row.cells[own === LONG_COL ? SHORT_COL : LONG_COL]).toEqual(EMPTY);
+        if (row.legId === 'hedge') {
+          expect(row.cells[LONG_COL]).toEqual(EMPTY);
+        } else {
+          expect(row.wrapped[LONG_COL]).toEqual(row.cells[LONG_COL]);
+          expect(row.wrapped[LONG_COL]).toHaveLength(2);
+        }
         expect(row.wrapped[TIME_COL]).toHaveLength(3);
         expect(row.height).toBe(12 * 2 + 17 * 3);
       }
       expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
     });
 
-    it('画出来：标签只画在「币量 / 仓位」合计格里（多绿 / 空红），百分数中性色；两列占比的「100.0%」与各自那组分母画在同一条基线上', () => {
+    it('画出来：标签只画在「币量 / 仓位」合计格里（多绿 / 空红），百分数中性色；「多单占比」的「100.0%」与多单那组 Σ 画在同一条基线上', () => {
       const drawn: { text: string; color: unknown; x: number; y: number; font: unknown }[] = [];
       const state: Record<string | symbol, unknown> = {};
       const ctx = new Proxy(state, {
@@ -1354,7 +1370,7 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
       buildCampaignLegsListCanvas({ ...input(), legs: userShape() }, { includeHeader: false, scale: 1 });
 
       const tags = drawn.filter(item => item.text === '多' || item.text === '空');
-      // 只有合计行分母格的两枚；隐藏标签不画，腿行与占比两列不画标签
+      // 只有合计行 Σ 格的两枚；隐藏标签不画，腿行与「多单占比」不画标签
       expect(tags.map(item => item.text)).toEqual(['多', '空']);
       for (const tag of tags) {
         expect(tag.color).toBe(tag.text === '多' ? '#0ECB81' : '#F6465D');
@@ -1364,17 +1380,19 @@ describe('【用户要求】导出图也带「多单占比」「空单占比」�
       const pctItems = drawn.filter(item => /^\d+\.\d%$/.test(item.text));
       expect(pctItems.length).toBeGreaterThan(0);
       for (const item of pctItems) expect(['#0ECB81', '#F6465D']).not.toContain(item.color);
-      // 合计行：「多」「空」标签那一行的 y 与两列占比各自的第一个「100.0%」相同
+      // 合计行：「多」标签那一行的 y 与「多单占比」的第一个「100.0%」相同；空单那组右边不画占比
       const totalPcts = drawn.slice(drawn.findIndex(item => item.text === '合计')).filter(item => item.text === '100.0%');
-      expect(totalPcts).toHaveLength(4);
-      const [longTop, longBottom, shortTop, shortBottom] = totalPcts;
+      expect(totalPcts).toHaveLength(2);
+      const [longTop, longBottom] = totalPcts;
       const [longTag, shortTag] = tags;
       expect(longTop.y).toBe(longTag.y);
-      expect(shortTop.y).toBe(shortTag.y);
       expect(longBottom.y).toBe(longTop.y + 17);
-      expect(shortBottom.y).toBe(shortTop.y + 17);
-      // 两列各在自己的格子里左起：空单那列在多单那列右边 88
-      expect(shortTop.x - longTop.x).toBe(88);
+      expect(shortTag.y).toBe(longTag.y + 17 * 2);
+      // 「多单占比」紧挨在 Σ 格右边（左起差一个 184 宽的「币量 / 仓位」）；它右边 88 处就是「加仓校验」的列头
+      expect(longTop.x - longTag.x).toBe(184);
+      const header = (title: string) => drawn.find(item => item.text === title)!;
+      expect(header('加仓校验').x - header('多单占比').x).toBe(88);
+      expect(drawn.some(item => item.text === '空单占比')).toBe(false);
     });
 
     it('带标签的行放不下时：正文按标签右边剩下的宽度折，续行挂隐藏标签对齐，一个字不丢', () => {
@@ -1455,8 +1473,10 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
       expect(row.wrapped[ROLE_COL]).toEqual(row.cells[ROLE_COL]);
       expect(row.height).toBe(12 * 2 + 17 * 3);
     }
-    // 挂单中的腿照旧不进占比的分母（与页面同一条状态规则）
-    expect(rows.find(r => r.legId === 'pending')!.cells[PRICE_CHANGE_COL + 3].map(line => line.text)).toEqual(['—', '—']);
+    // 挂单中的腿照旧不进合计（与页面同一条状态规则）：它是这场唯一的空单，Σ 格就只列多单那组；空单也没有占比格
+    const coinsCol = PRICE_CHANGE_COL + 1;
+    expect(rows.find(r => r.legId === 'pending')!.cells[coinsCol + 1]).toEqual([{ text: '' }]);
+    expect(rows.at(-1)!.cells[coinsCol].map(line => (line.tag?.hidden ? `(${line.tag.text})` : line.tag?.text))).toEqual(['多', '(多)']);
   });
 
   it('画出来：实心标签是 10% 的淡底，挂单中用虚线描边、字不淡（白底），进行中在字后面点一个圆点；标签与「开 …」同一条基线', () => {

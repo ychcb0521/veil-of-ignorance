@@ -7,7 +7,7 @@
  * - 表头 sticky top，冻结格 sticky left-0，且带不透明底色；
  * - 冻结格出现在表头、数据行、主力阶段子行、合计行四处，每一处都是第一格，也只有这一格。
  * 实际滚动效果在浏览器里核验过。
- * 阶段子行默认折叠（点主力角色标签右边的阶段开关展开），展开后同样冻结；两列占比的列头按钮不冻结。
+ * 阶段子行默认折叠（点主力角色标签右边的阶段开关展开），展开后同样冻结；「多单占比」的列头按钮不冻结。
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -63,7 +63,7 @@ function leg(id: string, sequence: number, role: string, direction: 'long' | 'sh
   } as TradeJournal;
 }
 
-function renderList(highlightedLegIds?: string[]) {
+function renderList(highlightedLegIds?: string[], { hedgeFirst = false }: { hedgeFirst?: boolean } = {}) {
   const t0 = Date.parse('2026-08-01T00:00:00.000Z');
   const hour = 3_600_000;
   const main = record('rec-main', t0, t0 + 10 * hour, 0.1, 0.12, 'LONG');
@@ -72,6 +72,7 @@ function renderList(highlightedLegIds?: string[]) {
     leg('leg-main', 1, 'main_open', 'long', main),
     leg('leg-hedge', 2, 'hedge_rolling', 'short', hedge),
   ];
+  if (hedgeFirst) legs.reverse();
   return render(
     <MemoryRouter>
       <CampaignLegsList legs={legs} tradeRecords={[main, hedge]} highlightedLegIds={highlightedLegIds} />
@@ -93,9 +94,8 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     // 钉住的块里自己的按钮用负的滚动外边距抵掉这截留白：键盘聚焦它们时表格不跟着乱滚
     expect(screen.getByTestId('leg-phases-toggle-leg-main').className.split(/\s+/)).toContain('-scroll-ml-[144px]');
     // 按 test id 取（角色 / 名字的查询在 shareSort 与 positionShare 里测），省掉整棵可访问树的计算——高负载下它会超时
-    for (const side of ['long', 'short']) {
-      expect(screen.getByTestId(`legs-share-sort-${side}`).className.split(/\s+/)).toContain('-scroll-mt-8');
-    }
+    expect(screen.getByTestId('legs-share-sort-long').className.split(/\s+/)).toContain('-scroll-mt-8');
+    expect(screen.queryByTestId('legs-share-sort-short')).toBeNull();
     // 容器里任何一层都不能再是滚动容器（每行「委托」格自己的小滚动区除外：它不包住冻结格）
     const nestedScrollers = Array.from(scroller.querySelectorAll('[class*="overflow-y-auto"], [class*="overflow-auto"], [class*="overflow-x-auto"]'))
       .filter(element => element.querySelector('[class*="sticky"]'));
@@ -149,7 +149,7 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     const phaseRows = Array.from(screen.getByTestId('leg-phases-leg-main').children);
     expect(phaseRows.length).toBeGreaterThanOrEqual(2);
     const count = screen.getByTestId('legs-header-row').children.length;
-    expect(count).toBe(14);
+    expect(count).toBe(13);
     for (const row of phaseRows) {
       const cells = Array.from(row.children);
       expect(cells).toHaveLength(count);
@@ -164,16 +164,20 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     }
   });
 
-  it('两列占比的列头是普通（不冻结）的格子，排序后第一格仍是每行的冻结格', () => {
-    renderList();
+  it('「多单占比」的列头是普通（不冻结）的格子，排序后第一格仍是每行的冻结格', () => {
+    // 空单对冲排在前面：按多单占比排序会把主力挪到第一行
+    renderList(undefined, { hedgeFirst: true });
     const header = screen.getByTestId('legs-header-row');
-    for (const button of Array.from(header.querySelectorAll('button'))) {
+    const buttons = Array.from(header.querySelectorAll('button'));
+    expect(buttons).toHaveLength(1);
+    for (const button of buttons) {
       expect(isSticky(button)).toBe(false);
       expect(Array.from(header.children).indexOf(button)).toBeGreaterThan(0);
     }
-    fireEvent.click(screen.getByRole('button', { name: /^按空单占比排序/ }));
+    expect(screen.getAllByTestId(/^leg-frozen-role-/)[0]).toBe(screen.getByTestId('leg-frozen-role-leg-hedge'));
+    fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
     const firstRole = screen.getAllByTestId(/^leg-frozen-role-/)[0];
-    expect(firstRole).toBe(screen.getByTestId('leg-frozen-role-leg-hedge'));
+    expect(firstRole).toBe(screen.getByTestId('leg-frozen-role-leg-main'));
     const cells = Array.from(firstRole.parentElement!.children);
     expect(cells[0]).toBe(firstRole);
     expect(cells.filter(isSticky)).toEqual([firstRole]);

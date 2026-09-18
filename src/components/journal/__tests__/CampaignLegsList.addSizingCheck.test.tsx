@@ -58,14 +58,14 @@ const renderList = (addNotional: number, reverseHedgeOrders = orders) => render(
 );
 
 describe('Legs 列表的「加仓校验」列', () => {
-  it('表头紧跟在「币量 / 仓位」及其「多单占比」「空单占比」两列之后', () => {
+  it('表头紧跟在「币量 / 仓位」及其「多单占比」之后（没有「空单占比」列）', () => {
     renderList(22_057_330);
     const header = screen.getByText('加仓校验');
     const coins = screen.getByText('币量 / 仓位');
     const fees = screen.getByText('手续费');
     expect(coins.nextElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
-    expect(coins.nextElementSibling!.nextElementSibling).toBe(screen.getByRole('button', { name: /^按空单占比排序/ }));
-    expect(coins.nextElementSibling!.nextElementSibling!.nextElementSibling).toBe(header);
+    expect(coins.nextElementSibling!.nextElementSibling).toBe(header);
+    expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
     expect(header.nextElementSibling).toBe(fees);
     expect(header.getAttribute('title')).toContain('X₂(S₂ − S₁)');
   });
@@ -132,7 +132,7 @@ describe('Legs 列表的「加仓校验」列', () => {
   it('每一行的格子数与表头一致：加列没有让合计行错位', () => {
     renderList(22_057_330);
     const headerCells = screen.getByText('加仓校验').parentElement!.children.length;
-    expect(headerCells).toBe(14);
+    expect(headerCells).toBe(13);
     expect(screen.getByTestId('legs-total-row').children.length).toBe(headerCells);
     const addRow = screen.getByTestId('add-sizing-check-fail-add1').parentElement!;
     expect(addRow.children.length).toBe(headerCells);

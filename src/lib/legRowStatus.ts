@@ -6,7 +6,7 @@ import type { TradeRecord } from '@/types/trading';
  *
  * - closed 是常态，不另外标；
  * - pending 即「挂单中」——对冲 / 镜像腿还没有成交或平仓记录，不是仓位，
- *   「多单占比」「空单占比」两列据此把它排除在分母之外；
+ *   「多单占比」的分母与合计行的多、空两组 Σ 据此把它排除在外；
  * - open 即「进行中」——主力、加仓、回场腿等还没有平仓。
  *
  * 两种例外不再写成文字标签，而是画在角色标签上：挂单中是虚线空心的标签，进行中是标签里一枚实心小圆点
@@ -31,7 +31,7 @@ export const LEG_ROW_STATUS_LABELS: Record<LegRowOpenStatus, string> = { pending
 
 /** 角色标签上的悬停说明。 */
 export const LEG_ROW_STATUS_HINTS: Record<LegRowOpenStatus, string> = {
-  pending: '挂单中：还没有成交或平仓记录，不计入占比合计',
+  pending: '挂单中：还没有成交或平仓记录，不计入多单 / 空单合计',
   open: '进行中：还没有平仓',
 };
 

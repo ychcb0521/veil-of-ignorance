@@ -30,7 +30,7 @@ describe('legRowStatus', () => {
   it('状态名与悬停说明', () => {
     expect(LEG_ROW_STATUS_LABELS).toEqual({ pending: '挂单中', open: '进行中' });
     expect(LEG_ROW_STATUS_HINTS).toEqual({
-      pending: '挂单中：还没有成交或平仓记录，不计入占比合计',
+      pending: '挂单中：还没有成交或平仓记录，不计入多单 / 空单合计',
       open: '进行中：还没有平仓',
     });
   });

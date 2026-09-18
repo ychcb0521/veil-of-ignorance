@@ -309,13 +309,14 @@ describe('占比 · 多单与空单分开算', () => {
     expect(describeLegPositionShare(undefined)).toBeUndefined();
   });
 
-  it('合计行「币量 / 仓位」格的 tooltip 只列出实际有的那几组分母；一组都没有时不给', () => {
+  it('合计行「币量 / 仓位」格的 tooltip 只列出实际有的那几组，逐组说明：多单那组是「多单占比」的分母，空单那组只是合计；一组都没有时不给', () => {
+    // 【用户要求】「空单仓位的占比也不需要」：空单那组不再叫「分母」
     expect(describeLegPositionDenominators(computeLegPositionShares(USER_SHAPE).sides))
-      .toBe('占比的分母：多单一组、空单一组，上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+      .toBe('多单一组是「多单占比」的分母，空单一组是空单各腿的合计（只看总量，不算占比）；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
     expect(describeLegPositionDenominators(computeLegPositionShares([leg('main', 10, 1_000)]).sides))
-      .toBe('占比的分母：多单一组，上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+      .toBe('多单一组是「多单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
     expect(describeLegPositionDenominators(computeLegPositionShares([short('only-short', 2, 300)]).sides))
-      .toBe('占比的分母：空单一组，上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
+      .toBe('空单一组是空单各腿的合计（只看总量，不算占比）；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
     expect(describeLegPositionDenominators(computeLegPositionShares([short('pending', 1, 1, false)]).sides)).toBeUndefined();
   });
 
@@ -342,10 +343,11 @@ describe('占比 · 多单与空单分开算', () => {
 });
 
 /**
- * 【用户要求】「仓位占比分成两列呈现，多和空分成两列。并且还要做成能够点击之后排序的」：
- * 多单占比、空单占比各占一列，点表头按这一列排序——降序 → 升序 → 默认顺序。
+ * 【用户要求】「仓位占比分成两列呈现，多和空分成两列。并且还要做成能够点击之后排序的」：点表头排序——降序 → 升序 → 默认顺序。
+ * 【用户要求 · 续】「空单仓位的占比也不需要」：页面与 PNG 只剩「多单占比」一列（只按 long 排）；
+ * helper 仍按方向对称（side 参数），这里把两个方向都钉住，保证多单那一侧不受空单影响。
  */
-describe('占比 · 两列与点击排序', () => {
+describe('占比 · 按方向排序', () => {
   const INPUTS = [
     leg('main', 3_000, 3_000),
     short('hedge-a', 300, 300),
@@ -361,7 +363,7 @@ describe('占比 · 两列与点击排序', () => {
   const ids = INPUTS.map(input => input.legId);
   const sortIds = (sort: LegPositionShareSort | null) => sortByLegPositionShare(ids, id => shares.byLeg.get(id), sort);
 
-  it('两列的标题：「多单占比」「空单占比」，先多后空', () => {
+  it('按方向的列名：页面与 PNG 只用多单的「多单占比」', () => {
     expect(LEG_POSITION_SHARE_COLUMN_TITLES).toEqual({ long: '多单占比', short: '空单占比' });
   });
 
@@ -399,7 +401,7 @@ describe('占比 · 两列与点击排序', () => {
     ]);
   });
 
-  it('空单占比：只有已计入的空单有值，挂单中的空单与所有多单沉底', () => {
+  it('按空单方向排（helper 对称，页面不用）：只有已计入的空单有值，挂单中的空单与所有多单沉底', () => {
     expect(sortIds({ side: 'short', direction: 'desc' })).toEqual([
       'hedge-b', 'hedge-a',
       'main', 'add-small', 'hedge-pending', 'add-big', 'no-values', 'no-price',

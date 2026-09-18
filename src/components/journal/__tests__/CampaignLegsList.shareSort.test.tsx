@@ -1,8 +1,9 @@
 /**
  * 【用户要求】「仓位占比分成两列呈现，多和空分成两列。并且还要做成能够点击之后排序的」
+ * 【用户要求 · 续】「空单仓位的占比也不需要，没必要存在」：只剩「多单占比」一列可排。
  *
- * 「多单占比」「空单占比」两个列头是原生按钮：点一下降序、再点升序、第三下回到默认顺序（腿传进来时的先后）。
- * 一次只有一列在排；这一列没有数的行（另一方向的腿、挂单中的腿、两行都是「—」的腿）不论升降序都沉到最下面，彼此仍按原来的先后。
+ * 「多单占比」列头是原生按钮：点一下降序、再点升序、第三下回到默认顺序（腿传进来时的先后）。
+ * 这一列没有数的行（空单、挂单中的腿、两行都是「—」的腿）不论升降序都沉到最下面，彼此仍按原来的先后。
  * 主力的阶段子行跟着主力走，合计行始终在最后；高亮、加仓校验等按腿 id 取的东西不受排序影响。
  */
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -24,7 +25,7 @@ const legFor = (over: Partial<TradeJournal> & { id: string }): TradeJournal => (
 /**
  * 主多战役：主力被两次对冲结束切成三段；两笔加仓；一条挂单中的对冲；一条没有仓位数据的加仓。
  * 多单币量：主力 3,000、加仓1 1,250、加仓2 4,000（合计 8,250 → 36.4% / 15.2% / 48.5%）；
- * 空单币量：对冲 A 1,818.18、对冲 B 400（合计 2,218.18 → 82.0% / 18.0%）。
+ * 空单（对冲 A 1,818.18、对冲 B 400）没有占比，只进合计行的空单 Σ。
  */
 const campaignLegs = () => [
   legFor({
@@ -69,39 +70,40 @@ const renderList = (props: Partial<Parameters<typeof CampaignLegsList>[0]> = {})
   </MemoryRouter>,
 );
 
-const sortButton = (title: '多单占比' | '空单占比') => screen.getByRole('button', { name: new RegExp(`^按${title}排序：`) });
+const sortButton = () => screen.getByRole('button', { name: /^按多单占比排序：/ });
 /** 表里各腿的先后：按角色冻结格在 DOM 里的顺序读。 */
 const renderedOrder = () => screen.getAllByTestId(/^leg-frozen-role-/)
   .map(el => el.getAttribute('data-testid')!.replace('leg-frozen-role-', ''));
 const rowOf = (id: string) => screen.getByTestId(`leg-frozen-role-${id}`).parentElement!;
 const iconOf = (button: HTMLElement) => button.querySelector('svg')!.getAttribute('class') ?? '';
 
-describe('【用户要求】点击「多单占比」「空单占比」列头排序', () => {
-  it('默认顺序就是传进来的先后；两个列头都是原生按钮，图标是淡色的上下箭头', () => {
+describe('【用户要求】点击「多单占比」列头排序', () => {
+  it('默认顺序就是传进来的先后；列头是原生按钮，图标是淡色的上下箭头；没有「空单占比」的排序按钮', () => {
     renderList();
     expect(renderedOrder()).toEqual(DEFAULT_ORDER);
-    for (const title of ['多单占比', '空单占比'] as const) {
-      const button = sortButton(title);
-      expect(button.tagName).toBe('BUTTON');
-      expect(button.getAttribute('type')).toBe('button');
-      expect(button.getAttribute('aria-label')).toBe(`按${title}排序：当前默认顺序，点击改为降序`);
-      // 【用户要求】列头不弹黑底悬停说明：没有 title
-      expect(button.hasAttribute('title')).toBe(false);
-      // 读屏的描述只给列说明，排序状态只在读屏名里念一遍
-      const description = button.getAttribute('aria-description')!;
-      expect(description).toContain('点击列头按本列排序');
-      expect(description).not.toContain('当前');
-      expect(iconOf(button)).toContain('lucide-arrow-up-down');
-      expect(iconOf(button)).toContain('text-muted-foreground/50');
-      expect(button.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
-      // 不是 columnheader，不用 aria-sort
-      expect(button.hasAttribute('aria-sort')).toBe(false);
-    }
+    expect(screen.getAllByRole('button', { name: /^按.+排序：/ })).toEqual([sortButton()]);
+    expect(screen.queryByTestId('legs-share-sort-short')).toBeNull();
+    const button = sortButton();
+    expect(button).toBe(screen.getByTestId('legs-share-sort-long'));
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.getAttribute('aria-label')).toBe('按多单占比排序：当前默认顺序，点击改为降序');
+    // 【用户要求】列头不弹黑底悬停说明：没有 title
+    expect(button.hasAttribute('title')).toBe(false);
+    // 读屏的描述只给列说明，排序状态只在读屏名里念一遍
+    const description = button.getAttribute('aria-description')!;
+    expect(description).toContain('点击列头按本列排序');
+    expect(description).not.toContain('当前');
+    expect(iconOf(button)).toContain('lucide-arrow-up-down');
+    expect(iconOf(button)).toContain('text-muted-foreground/50');
+    expect(button.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
+    // 不是 columnheader，不用 aria-sort
+    expect(button.hasAttribute('aria-sort')).toBe(false);
   });
 
   it('点「多单占比」：降序 → 升序 → 默认顺序；没有多单占比的行（空单、挂单中、没有仓位数据的腿）始终按原先后沉底', () => {
     renderList();
-    const button = sortButton('多单占比');
+    const button = sortButton();
 
     fireEvent.click(button);
     expect(renderedOrder()).toEqual(['add2', 'main', 'add1', 'hedge-a', 'hedge-b', 'pending', 'add3']);
@@ -121,30 +123,22 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
     expect(iconOf(button)).toContain('lucide-arrow-up-down');
   });
 
-  it('点「空单占比」：只有已计入的两条空单按值排，挂单中的空单与所有多单沉底', () => {
+  it('【用户要求】空单不能单独排序：两条已计入的空单与挂单中的空单在升降序里都按原先后沉底，读屏名里从不出现空单', () => {
     renderList();
-    fireEvent.click(sortButton('空单占比'));
-    expect(renderedOrder()).toEqual(['hedge-a', 'hedge-b', 'main', 'add1', 'pending', 'add2', 'add3']);
-    fireEvent.click(sortButton('空单占比'));
-    expect(renderedOrder()).toEqual(['hedge-b', 'hedge-a', 'main', 'add1', 'pending', 'add2', 'add3']);
-  });
-
-  it('一次只有一列在排：多单升序时点「空单占比」，直接换成空单降序；另一个列头回到未排序的样子', () => {
-    renderList();
-    const long = sortButton('多单占比');
-    const short = sortButton('空单占比');
-    fireEvent.click(long);
-    fireEvent.click(long);
-    expect(short.getAttribute('aria-label')).toBe('按空单占比排序：当前按多单占比排序，点击改为按空单占比降序');
-    fireEvent.click(short);
-    expect(renderedOrder()).toEqual(['hedge-a', 'hedge-b', 'main', 'add1', 'pending', 'add2', 'add3']);
-    expect(short.getAttribute('aria-label')).toBe('按空单占比排序：当前降序，点击改为升序');
-    expect(iconOf(short)).toContain('lucide-arrow-down');
-    expect(long.getAttribute('aria-label')).toBe('按多单占比排序：当前按空单占比排序，点击改为按多单占比降序');
-    expect(iconOf(long)).toContain('lucide-arrow-up-down');
-    // 再点多单占比：从降序开始
-    fireEvent.click(long);
-    expect(renderedOrder()).toEqual(['add2', 'main', 'add1', 'hedge-a', 'hedge-b', 'pending', 'add3']);
+    const button = sortButton();
+    const labels: string[] = [button.getAttribute('aria-label')!];
+    for (let i = 0; i < 4; i += 1) {
+      fireEvent.click(button);
+      labels.push(button.getAttribute('aria-label')!);
+      const order = renderedOrder();
+      if (i % 3 === 2) {
+        expect(order).toEqual(DEFAULT_ORDER);
+      } else {
+        // 空单（含挂单中的）之间不按空单合计里的份额重排（对冲 A 82.0% / 对冲 B 18.0% 时，升序也不会把 B 提到 A 前面）
+        expect(order.slice(3)).toEqual(['hedge-a', 'hedge-b', 'pending', 'add3']);
+      }
+    }
+    for (const label of labels) expect(label).not.toContain('空单');
   });
 
   it('主力的阶段子行跟着主力走；合计行始终是滚动区里的最后一行', () => {
@@ -152,7 +146,7 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
     fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
     const phases = screen.getByTestId('leg-phases-main');
     expect(phases.children).toHaveLength(3);
-    fireEvent.click(sortButton('多单占比'));
+    fireEvent.click(sortButton());
     // 主力排到第二：阶段子行紧贴在主力行下面，下一条腿（加仓1）在阶段子行之后
     expect(renderedOrder().indexOf('main')).toBe(1);
     expect(screen.getByTestId('leg-phases-main').previousElementSibling).toBe(rowOf('main'));
@@ -163,8 +157,9 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
     expect(screen.getByTestId('leg-phases-toggle-main').getAttribute('aria-expanded')).toBe('true');
     const scroller = screen.getByTestId('legs-scroll');
     const total = screen.getByTestId('legs-total-row');
+    // 升序 → 默认顺序 → 降序：每一种顺序下合计行都是最后一行
     for (const clicks of [1, 1, 1]) {
-      for (let i = 0; i < clicks; i += 1) fireEvent.click(sortButton('空单占比'));
+      for (let i = 0; i < clicks; i += 1) fireEvent.click(sortButton());
       const all = Array.from(scroller.querySelectorAll('*'));
       expect(all.slice(all.indexOf(total) + 1).every(el => total.contains(el))).toBe(true);
       expect(total.previousElementSibling).toBe(rowOf(renderedOrder().at(-1)!).parentElement);
@@ -174,8 +169,8 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
   it('高亮、加仓校验、操作按钮都跟着自己的腿走（按 id 取，不按行号取）', () => {
     const onToggleHighlight = vi.fn();
     renderList({ highlightedLegIds: ['add1'], onToggleHighlight });
-    fireEvent.click(sortButton('多单占比'));
-    fireEvent.click(sortButton('多单占比'));
+    fireEvent.click(sortButton());
+    fireEvent.click(sortButton());
     expect(renderedOrder()[0]).toBe('add1');
     const highlighted = (id: string) => screen.getByTestId(`leg-frozen-role-${id}`).className.includes('rgba(0,47,167,0.05)');
     expect(highlighted('add1')).toBe(true);
@@ -196,42 +191,46 @@ describe('【用户要求】点击「多单占比」「空单占比」列头排�
   it('换了排序就回到表体顶端（横向位置不动），排在最前的行直接看得见', () => {
     renderList();
     const scroller = screen.getByTestId('legs-scroll');
-    for (const title of ['空单占比', '空单占比', '空单占比', '多单占比'] as const) {
+    // 降序 → 升序 → 默认顺序 → 降序：回到默认顺序那一下也归零
+    for (let i = 0; i < 4; i += 1) {
       scroller.scrollTop = 300;
       scroller.scrollLeft = 120;
-      fireEvent.click(sortButton(title));
+      fireEvent.click(sortButton());
       expect(scroller.scrollTop).toBe(0);
       expect(scroller.scrollLeft).toBe(120);
     }
   });
 
-  it('等额不同价的对冲算并列：币量的浮点尾差不打乱原来的先后', () => {
+  it('等额不同价的多单算并列：币量的浮点尾差不打乱原来的先后', () => {
     // 1,300 ÷ 1.3、1,100 ÷ 1.1、700 ÷ 0.7：原值是 1000、999.9999999999999、1000.0000000000001，页面都印 1,000 / 33.3%
-    const hedge = (id: string, sequence: number, notional: number, price: number) => legFor({
-      id, leg_sequence: sequence, leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short',
+    const add = (id: string, sequence: number, notional: number, price: number) => legFor({
+      id, leg_sequence: sequence, leg_role: `main_add_${sequence - 1}` as TradeJournal['leg_role'],
       pre_simulated_time: at(`0${sequence}:00`), pre_entry_price: price, pre_position_size: notional,
-      post_exit_price_snapshot: price * 0.98, post_simulated_close_time: at(`0${sequence}:30`),
+      post_exit_price_snapshot: price * 1.02, post_simulated_close_time: at('09:00'),
     });
     renderList({
       legs: [
-        legFor({ id: 'main', pre_entry_price: 1, pre_position_size: 3_000, post_exit_price_snapshot: 1.2, post_simulated_close_time: at('09:00') }),
-        hedge('h1', 2, 1_300, 1.3),
-        hedge('h2', 3, 1_100, 1.1),
-        hedge('h3', 4, 700, 0.7),
+        legFor({
+          id: 'hedge', leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short', pre_entry_price: 1,
+          pre_position_size: 3_000, post_exit_price_snapshot: 0.98, post_simulated_close_time: at('01:30'),
+        }),
+        add('a1', 2, 1_300, 1.3),
+        add('a2', 3, 1_100, 1.1),
+        add('a3', 4, 700, 0.7),
       ],
     });
-    for (const id of ['h1', 'h2', 'h3']) {
+    for (const id of ['a1', 'a2', 'a3']) {
       expect(screen.getByTestId(`leg-position-share-${id}`).firstElementChild!.textContent).toBe('33.3%');
     }
-    fireEvent.click(sortButton('空单占比'));
-    expect(renderedOrder()).toEqual(['h1', 'h2', 'h3', 'main']);
-    fireEvent.click(sortButton('空单占比'));
-    expect(renderedOrder()).toEqual(['h1', 'h2', 'h3', 'main']);
+    fireEvent.click(sortButton());
+    expect(renderedOrder()).toEqual(['a1', 'a2', 'a3', 'hedge']);
+    fireEvent.click(sortButton());
+    expect(renderedOrder()).toEqual(['a1', 'a2', 'a3', 'hedge']);
   });
 
   it('腿换了（同一个组件收到新的 legs）时，排序照当前那一列重排', () => {
     const { rerender } = renderList();
-    fireEvent.click(sortButton('多单占比'));
+    fireEvent.click(sortButton());
     const legs = campaignLegs().map(leg => (leg.id === 'add1' ? { ...leg, pre_position_size: 50_000 } : leg));
     rerender(
       <MemoryRouter>

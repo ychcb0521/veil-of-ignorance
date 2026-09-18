@@ -14,15 +14,13 @@ const src = () =>
   readFileSync(join(process.cwd(), 'src/components/journal/CampaignLegsList.tsx'), 'utf8');
 
 /**
- * 「多单占比」「空单占比」两列的列头是可点击排序的按钮（同一个组件各用一次），列名在读屏名里，
- * 源码里找的是这两处调用；列名本身来自 LEG_POSITION_SHARE_COLUMN_TITLES（页面与 PNG 共用）。
+ * 「多单占比」的列头是可点击排序的按钮，列名在读屏名里，源码里找的是这一处调用；
+ * 列名本身来自 LEG_POSITION_SHARE_COLUMN_TITLES.long（页面与 PNG 共用）。
+ * 【用户要求】「空单仓位的占比也不需要，没必要存在」：没有「空单占比」列。
  */
-const SHARE_HEADERS = {
-  多单占比: '<PositionShareSortHeader side="long"',
-  空单占比: '<PositionShareSortHeader side="short"',
-} as const;
+const LONG_SHARE_HEADER = '<PositionShareSortHeader ';
 const headerAt = (s: string, title: string) => (
-  title in SHARE_HEADERS ? s.indexOf(SHARE_HEADERS[title as keyof typeof SHARE_HEADERS]) : s.indexOf(`>${title}</div>`)
+  title === '多单占比' ? s.indexOf(LONG_SHARE_HEADER) : s.indexOf(`>${title}</div>`)
 );
 
 describe('Legs 表栅格', () => {
@@ -41,14 +39,23 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(14);
-    const titles = ['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '空单占比', '加仓校验', '手续费', '委托', '操作'];
+    expect(columnCount).toBe(13);
+    const titles = ['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托', '操作'];
     expect(titles).toHaveLength(columnCount);
     for (const title of titles) expect(headerAt(s, title)).toBeGreaterThan(-1);
-    // 两列占比：各只出现一次，列名与 PNG 表头同一份
-    expect(LEG_POSITION_SHARE_COLUMN_TITLES).toEqual({ long: '多单占比', short: '空单占比' });
-    for (const call of Object.values(SHARE_HEADERS)) expect(s.split(call)).toHaveLength(2);
+    // 只有「多单占比」一列：列头只调用一次、只按多单排，列名与 PNG 表头同一份
+    expect(LEG_POSITION_SHARE_COLUMN_TITLES.long).toBe('多单占比');
+    expect(s.split(LONG_SHARE_HEADER)).toHaveLength(2);
+    expect(s).toContain('describeLegPositionShareSort(\'long\', sort)');
+    expect(s).toContain('nextLegPositionShareSort(current, \'long\')');
     expect(s).not.toContain('>占比</div>');
+    // 【用户要求】「空单占比」一列不再存在：没有列头、没有按方向逐列生成的格子、没有为它垫的占位
+    expect(s).not.toContain('空单占比');
+    expect(s).not.toContain('side="short"');
+    expect(s).not.toMatch(/legs-share-sort-(short|\$\{)/);
+    expect(s).not.toContain('LEG_POSITION_SIDES');
+    expect(s).not.toContain('PositionLinesSpacer');
+    expect(s).not.toContain('legs-total-position-share-${');
     // 【用户要求】第一列只有「角色」：不再有「#」列
     expect(s).not.toContain('>#</div>');
     expect(s).not.toContain('leg.leg_sequence ??');
@@ -62,9 +69,8 @@ describe('Legs 表栅格', () => {
     expect(at('Δb')).toBeLessThan(at('开仓价'));       // 结论在前，"怎么来的"在后
     expect(at('平仓价')).toBeLessThan(at('涨跌幅'));    // 涨跌幅紧贴在开平价右边——它就是这两个数算出来的
     expect(at('涨跌幅')).toBeLessThan(at('币量 / 仓位'));
-    expect(at('币量 / 仓位')).toBeLessThan(at('多单占比'));   // 两列占比紧贴在币量 / 仓位右边——它们就是这一格算出来的
-    expect(at('多单占比')).toBeLessThan(at('空单占比'));       // 先多后空，与合计行里分母的先后一致
-    expect(at('空单占比')).toBeLessThan(at('加仓校验'));
+    expect(at('币量 / 仓位')).toBeLessThan(at('多单占比'));   // 多单占比紧贴在币量 / 仓位右边——它就是这一格算出来的
+    expect(at('多单占比')).toBeLessThan(at('加仓校验'));
     expect(at('币量 / 仓位')).toBeLessThan(at('加仓校验'));   // 加仓校验紧跟币量——X 就是它要读的数
     expect(at('加仓校验')).toBeLessThan(at('手续费'));
     expect(at('手续费')).toBeLessThan(at('委托'));
@@ -104,22 +110,22 @@ describe('Legs 表栅格', () => {
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
     const tracks = grid.split('_');
-    expect(tracks).toHaveLength(14);
+    expect(tracks).toHaveLength(13);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
-    expect(tracks[12]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
+    expect(tracks[11]).toMatch(/^minmax\(2\d\dpx,1fr\)$/);   // 委托：唯一越宽越有用的列
     expect(tracks[1]).toBe('180px');                        // 时间：放得下「开 2025-09-19 22:42」
   });
 
   it('【用户要求】手续费列放得下「开 82,328 · 平 104,091 ASTER」这类最长的拆分行', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
-    const feeTrack = Number.parseInt(grid.split('_')[11], 10);
+    const feeTrack = Number.parseInt(grid.split('_')[10], 10);
     expect(feeTrack).toBeGreaterThanOrEqual(148);
     // 单元格必须带 min-w-0：网格项默认 min-width:auto，长子行会顶破定宽轨道、压到左边一列上
     const cell = /data-testid=\{`leg-fees-\$\{leg\.id\}`\}[\s\S]{0,400}?className="([^"]+)"/.exec(src())?.[1] ?? '';
     expect(cell).toContain('min-w-0');
   });
 
-  it('【用户要求】「多单占比」「空单占比」两列紧跟「币量 / 仓位」、各 72px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
+  it('【用户要求】只有「多单占比」一列，紧跟「币量 / 仓位」、72px；最小宽度 = Σ轨道 + 每道 10px 列间距 + 左右 24px', () => {
     const s = src();
     const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
     // 角色：最长的「重新入场主力 2」标签带进行中圆点（95.4px）+ 最小间距 4 + 阶段开关 28 + 离右缘 4，一行放下（浏览器里量过）
@@ -129,15 +135,17 @@ describe('Legs 表栅格', () => {
     expect(Math.ceil(95.4 + 4 + toggleWidth + 4)).toBeLessThanOrEqual(Number.parseInt(tracks[0], 10));
     // 币量 / 仓位：合计行的 Σ币量前多了一枚「多 / 空」标签（约 18px），百亿级 17 个字符（11px 等宽约 112px）加上标签要一行放下
     expect(tracks[7]).toBe('136px');
-    // 多单占比 / 空单占比：列头「标签 + 占比 + 排序图标」（57px）与「100.0%」（40px）都一行放下（浏览器里量过）
+    // 多单占比：列头「标签 + 占比 + 排序图标」（57px）与「100.0%」（40px）都一行放下（浏览器里量过）
     expect(tracks[8]).toBe('72px');
-    expect(tracks[9]).toBe('72px');
-    expect(tracks[10]).toBe('116px');  // 加仓校验不变
+    // 「空单占比」那一道 72px 连同它的 10px 列间距一起去掉：加仓校验紧跟在后面，宽度不变
+    expect(tracks[9]).toBe('116px');
+    expect(tracks.filter(track => track === '72px')).toHaveLength(1);
     // minmax(216px,1fr) 按下限计
     const trackSum = tracks.reduce((sum, track) => sum + Number.parseInt(track.replace(/^minmax\(/, ''), 10), 0);
     const minWidth = Number(/const LEGS_MIN_WIDTH = 'min-w-\[(\d+)px\]'/.exec(s)?.[1]);
     expect(minWidth).toBe(trackSum + 10 * (tracks.length - 1) + 24);
-    expect(minWidth).toBe(1750);
+    expect(minWidth).toBe(1668);
+    expect(1750 - minWidth).toBe(72 + 10);
   });
 
   it('【用户要求】只冻结「角色」一列：钉在 left-0，负外边距盖住行的左内边距；四种行都用同一个常量', () => {

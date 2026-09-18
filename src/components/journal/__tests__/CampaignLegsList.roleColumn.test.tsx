@@ -4,7 +4,7 @@
  * - 第一列只剩一枚角色标签：不印腿的序号，不挂灰色「回填」（历史回填只写进标签的悬停说明）；
  * - 「挂单中 / 进行中」不再是两枚文字标签，而是角色标签本身的样子：挂单中 = 同色虚线空心，进行中 = 标签里一枚实心小圆点，
  *   两种都有悬停说明，读屏仍念得出状态；
- * - 状态与「多单占比」「空单占比」排除挂单中的腿读的是同一条规则（legRowStatus）。
+ * - 状态与「多单占比」、合计行 Σ 排除挂单中的腿读的是同一条规则（legRowStatus）。
  */
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -99,12 +99,14 @@ describe('【用户要求】Legs 表第一列只有「角色」', () => {
       'px-[7px]', 'py-px',
     ]));
     expect(chip.className).not.toContain('bg-[#2B80FF]/10');
-    expect(chip.getAttribute('title')).toBe('挂单中：还没有成交或平仓记录，不计入占比合计');
+    expect(chip.getAttribute('title')).toBe('挂单中：还没有成交或平仓记录，不计入多单 / 空单合计');
     const sr = within(chip).getByText('挂单中');
     expect(sr.className).toBe('sr-only');
     expect(chip.querySelector('[data-status-dot]')).toBeNull();
-    // 同一条规则：挂单中的腿不进占比的分母
-    expect(Array.from(screen.getByTestId('leg-position-share-pending').children).map(line => line.textContent)).toEqual(['—', '—']);
+    // 同一条规则：挂单中的腿不进合计——它是这场唯一的空单，合计行就不列空单那组 Σ；空单也没有占比格
+    expect(screen.queryByTestId('legs-total-position-short')).toBeNull();
+    expect(screen.getByTestId('legs-total-position-long')).toBeTruthy();
+    expect(screen.queryByTestId('leg-position-share-pending')).toBeNull();
   });
 
   it('进行中：实心标签里、文字后面一枚同色小圆点；悬停说明与读屏都写明「进行中」，回填的再补一句来源', () => {

@@ -31,7 +31,6 @@ import {
   formatLegPositionShareTotal,
   legPositionSideFromDirection,
   LEG_POSITION_SHARE_COLUMN_TITLES,
-  LEG_POSITION_SIDES,
   LEG_POSITION_SIDE_COLORS,
   LEG_POSITION_SIDE_LABELS,
   type LegPositionShareEntry,
@@ -92,7 +91,7 @@ export type CampaignLegsExportCellLine = {
   size?: number;
   /**
    * 行首的方向标签（「多」绿 /「空」红，与页面同色），与正文分开着色：正文（合计数）仍是中性色。
-   * 只挂在合计行「币量 / 仓位」格每组分母的上行。hidden 为 true 时只占位不画——同一组的下一行借它把数字与上一行的数字对齐。
+   * 只挂在合计行「币量 / 仓位」格每组 Σ 的上行。hidden 为 true 时只占位不画——同一组的下一行借它把数字与上一行的数字对齐。
    */
   tag?: CampaignLegsExportCellTag;
   /**
@@ -158,10 +157,9 @@ const COLUMNS = [
   // 184：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
   // （百亿级 11,981,041,835.39，17 个字符），前面再挂一枚「多 / 空」标签也得一行放下——拆成两截的数字比挤一点更难读
   { title: '币量 / 仓位', width: 184 },
-  // 各 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」（12px 粗体 48px）都一行放下。
-  // 与页面同样分成两列：一条腿的数只在自己方向的那一列，另一列留空
+  // 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」（12px 粗体 48px）都一行放下。
+  // 与页面一样只有这一列占比：只有多单的行有数，空单的行留空（空单不单独算占比）
   { title: LEG_POSITION_SHARE_COLUMN_TITLES.long, width: 88 },
-  { title: LEG_POSITION_SHARE_COLUMN_TITLES.short, width: 88 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
@@ -297,7 +295,7 @@ function priceChangeCell(
 }
 
 /**
- * 「币量 / 仓位」与两列占比的一组两行：上行（tagSide 给出时前挂彩色「多 / 空」标签）+ 下行淡色。
+ * 「币量 / 仓位」与「多单占比」的一组两行：上行（tagSide 给出时前挂彩色「多 / 空」标签）+ 下行淡色。
  * 下行挂一枚隐藏标签占位，两行的数字左端对齐。topColor 缺省为正文前景色（腿行），合计行传淡色。
  */
 function positionShareLines(
@@ -316,42 +314,32 @@ function positionShareLines(
 const EMPTY_CELL: CampaignLegsExportCellLine[] = [{ text: '' }];
 
 /**
- * 腿行的「多单占比」「空单占比」两格（与页面同源）：上行币量占比、下行名义仓位占比，只写在这条腿自己方向的那一列，
- * 另一列一格空白；行里不挂标签（列头已写明方向）。挂单中的腿两行「—」。
+ * 腿行的「多单占比」格（与页面同源）：上行币量占比、下行名义仓位占比，只有多单的行有数；
+ * 空单的行一格空白（空单不单独算占比）；行里不挂标签（列头已写明方向）。挂单中的腿两行「—」。
  */
-function legShareCells(position: LegPositionShareEntry | undefined): CampaignLegsExportCellLine[][] {
-  return LEG_POSITION_SIDES.map(side => (
-    position?.side === side
-      ? positionShareLines(
-        null,
-        formatLegPositionSharePct(position.coinSharePct),
-        formatLegPositionSharePct(position.notionalSharePct),
-        undefined,
-      )
-      : EMPTY_CELL
-  ));
+function legShareCell(position: LegPositionShareEntry | undefined): CampaignLegsExportCellLine[] {
+  if (position?.side !== 'long') return EMPTY_CELL;
+  return positionShareLines(
+    null,
+    formatLegPositionSharePct(position.coinSharePct),
+    formatLegPositionSharePct(position.notionalSharePct),
+    undefined,
+  );
 }
 
 /**
- * 合计行的「多单占比」「空单占比」两格（与页面同源）：各写本方向那组的「100.0%」，逐行与「币量 / 仓位」格里
- * 同方向那组分母对齐——本方向那组之前的每一组先垫两行空白；本方向没有计入腿时一格空白；两个方向都没有时两行「—」。
+ * 合计行的「多单占比」格（与页面同源）：写多单那组的「100.0%」，与「币量 / 仓位」格里多单那组 Σ 同一行——
+ * 多单那组永远排在第一组（先多后空），不用垫空白；多单没有计入腿时一格空白；两个方向都没有时两行「—」。
  */
-function totalShareCells(shares: LegPositionShares): CampaignLegsExportCellLine[][] {
-  const listed = shares.sides.map(totals => totals.side);
-  return LEG_POSITION_SIDES.map(side => {
-    if (listed.length === 0) return positionShareLines(null, '—', '—', '#5F6B7A');
-    const at = listed.indexOf(side);
-    if (at < 0) return EMPTY_CELL;
-    return [
-      ...listed.slice(0, at).flatMap((): CampaignLegsExportCellLine[] => [{ text: '' }, { text: '' }]),
-      ...positionShareLines(
-        null,
-        formatLegPositionShareTotal(shares.bySide[side].totalCoins),
-        formatLegPositionShareTotal(shares.bySide[side].totalNotional),
-        '#5F6B7A',
-      ),
-    ];
-  });
+function totalShareCell(shares: LegPositionShares): CampaignLegsExportCellLine[] {
+  if (shares.sides.length === 0) return positionShareLines(null, '—', '—', '#5F6B7A');
+  if (!shares.sides.some(totals => totals.side === 'long')) return EMPTY_CELL;
+  return positionShareLines(
+    null,
+    formatLegPositionShareTotal(shares.bySide.long.totalCoins),
+    formatLegPositionShareTotal(shares.bySide.long.totalNotional),
+    '#5F6B7A',
+  );
 }
 
 function statusForReverseOrder(order: CampaignReverseHedgeOrder): string {
@@ -572,8 +560,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     reverseHedgeOrders: input.reverseHedgeOrders,
   });
 
-  // 「币量 / 仓位」与两列占比：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
-  // 格子里的数就是分母里加的那个数；多单、空单按持仓方向（与涨跌幅同源）分开算；状态为「挂单中」的腿不进分母。
+  // 「币量 / 仓位」与「多单占比」：与页面同一个 helper、同一组输入——币量逐腿只算这一次，
+  // 格子里的数就是分母里加的那个数；多单、空单按持仓方向（与涨跌幅同源）分开算，「多单占比」的分母只有多单，
+  // 空单的 Σ 只写进合计行；状态为「挂单中」的腿不进任何合计。
   const positionShares = computeLegPositionShares(input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
@@ -706,10 +695,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         { text: formatLegCoinQuantity(position?.coinQty) },
         { text: formatLegNotional(position?.notional), color: '#848E9C' },
       ],
-      // 多单占比 / 空单占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是本方向合计里的份额；
-      // 只写在自己方向的那一列，另一列空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
+      // 多单占比：与左边一格同构同色——上行币量占比、下行名义仓位占比，都是多单合计里的份额；
+      // 空单的行空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
       // 导出图不跟页面的点击排序走：腿按传入的先后画
-      ...legShareCells(position),
+      legShareCell(position),
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -808,7 +797,6 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
-          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -850,9 +838,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
-    // 币量 / 仓位：多单、空单各一组占比的分母（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
-    // 多单占比 / 空单占比：各写本方向的「100.0%」，逐行与左格同方向那组对齐；没有计入腿的方向不列，
-    // 两个方向都没有时三格照旧两行「—」。与页面同源，淡色
+    // 币量 / 仓位：多单、空单各一组 Σ（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），每组以标签开头；
+    // 多单那组是「多单占比」的分母，空单那组只是空单各腿的合计。没有计入腿的方向不列。
+    // 多单占比：写多单的「100.0%」，与左格多单那组同一行；两个方向都没有时两格照旧两行「—」。与页面同源，淡色
     positionShares.sides.length === 0
       ? positionShareLines(null, '—', '—', '#5F6B7A')
       : positionShares.sides.flatMap(totals => positionShareLines(
@@ -861,7 +849,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         formatLegNotional(totals.totalNotional),
         '#5F6B7A',
       )),
-    ...totalShareCells(positionShares),
+    totalShareCell(positionShares),
     // 加仓校验
     [{ text: '' }],
     feeTotals == null

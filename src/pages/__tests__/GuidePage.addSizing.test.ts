@@ -105,7 +105,7 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
   });
 
   it('Legs「加仓校验」那一条：按成交价判、并排写出计算器的快照、点名滑点；老记录不猜 pre_entry_price', () => {
-    const at = guide.indexOf('「加仓校验」列</strong>（紧跟「币量 / 仓位」与「多单占比」「空单占比」之后）');
+    const at = guide.indexOf('「加仓校验」列</strong>（紧跟「币量 / 仓位」与「多单占比」之后）');
     expect(at).toBeGreaterThan(-1);
     const bullet = guide.slice(at, guide.indexOf('</li>', at));
     expect(bullet).toContain('S₂ 一律按成交价判');
