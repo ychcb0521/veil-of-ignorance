@@ -41,6 +41,44 @@ describe('镜像止盈要认得出来——裸 record 没有 exit_method', () =>
     expect(roleOf(suggestOrphanRecordRoles([MAIN, MIRROR], 'long'), 'mirror')?.confidence).toBe('high');
   });
 
+  it('【ORDI 回归】同一个 fillId 拆成 60% 先平、40% 后平：先平仍是镜像，不能两条都继承主力', () => {
+    const open = Date.parse('2026-04-16T23:46:53+08:00');
+    const out = suggestOrphanRecordRoles([
+      {
+        id: 'ordi-main', fillId: 'same-fill', direction: 'long', openTimeMs: open,
+        closeTimeMs: Date.parse('2026-04-17T01:46:13+08:00'),
+        entryPrice: 7.8308, size: 206_680,
+      },
+      {
+        id: 'ordi-mirror', fillId: 'same-fill', direction: 'long', openTimeMs: open,
+        closeTimeMs: Date.parse('2026-04-16T23:58:01+08:00'),
+        entryPrice: 7.8308, size: 310_020,
+      },
+      {
+        id: 'ordi-hedge', fillId: 'hedge-fill', direction: 'short',
+        openTimeMs: Date.parse('2026-04-17T00:43:06+08:00'),
+        closeTimeMs: Date.parse('2026-04-17T01:36:39+08:00'),
+        entryPrice: 8.1208, size: 134_810,
+      },
+    ], 'long');
+
+    expect(roleOf(out, 'ordi-main')?.suggestedRole).toBe('main_open');
+    expect(roleOf(out, 'ordi-mirror')?.suggestedRole).toBe('mirror_tp');
+    expect(roleOf(out, 'ordi-mirror')?.confidence).toBe('high');
+    expect(roleOf(out, 'ordi-hedge')?.suggestedRole).toBe('hedge_rolling');
+  });
+
+  it('共享 fillId 的普通 50/50 分批平仓仍合并角色，不冒充镜像止盈', () => {
+    const ordinaryCuts = [
+      rec({ id: 'cut-1', fillId: 'ordinary-fill', closeTimeMs: t('12:00:00'), size: 500 }),
+      rec({ id: 'cut-2', fillId: 'ordinary-fill', closeTimeMs: t('15:00:00'), size: 500 }),
+    ];
+    const out = suggestOrphanRecordRoles(ordinaryCuts, 'long');
+    expect(roleOf(out, 'cut-1')?.suggestedRole).toBe('main_open');
+    expect(roleOf(out, 'cut-2')?.suggestedRole).toBe('main_open');
+    expect(out.some(item => item.suggestedRole === 'mirror_tp')).toBe(false);
+  });
+
   it('比例对不上仍判镜像，但降一档并提示确认', () => {
     const odd = { ...MIRROR, size: 100_000 };
     const s = roleOf(suggestOrphanRecordRoles([MAIN, odd], 'long'), 'mirror');

@@ -211,9 +211,55 @@ export function suggestOrphanRecordRoles(
   records: OrphanRecordRoleInput[],
   mainDirection: 'long' | 'short',
 ): OrphanRecordRoleSuggestion[] {
-  const groups = new Map<string, OrphanRecordRoleInput[]>();
+  const OPEN_TOLERANCE_MS = 120_000;   // 同一批委托挂出的时间窗
+  const PRICE_TOLERANCE = 0.01;        // 同价（留出滑点）
+  const MIRROR_SHARE = 0.6;            // 策略写死的镜像占比
+
+  const samePrice = (a: number | null | undefined, b: number | null | undefined): boolean => {
+    if (!(typeof a === 'number' && Number.isFinite(a) && a > 0)) return false;
+    if (!(typeof b === 'number' && Number.isFinite(b) && b > 0)) return false;
+    return Math.abs(a - b) <= Math.max(a, b) * PRICE_TOLERANCE;
+  };
+
+  const rawFillGroups = new Map<string, OrphanRecordRoleInput[]>();
   for (const r of records) {
     const key = r.fillId ?? r.id;
+    const list = rawFillGroups.get(key);
+    if (list) list.push(r); else rawFillGroups.set(key, [r]);
+  }
+
+  /**
+   * 老仓位历史会把一次开仓后 60% 先止盈、40% 最后平仓的两段都写成同一个 fillId。
+   * 它们不是应当合并显示的重复分片，而正是镜像腿 + 主力腿。只在形态完整对上时拆开，
+   * 普通的多刀减仓仍按 fillId 合并，避免把任意第一刀误认成镜像止盈。
+   */
+  const isMirrorMainSplit = (list: OrphanRecordRoleInput[]): boolean => {
+    if (list.length !== 2) return false;
+    const [a, b] = list;
+    if (a.direction !== mainDirection || b.direction !== mainDirection) return false;
+    if (Math.abs(a.openTimeMs - b.openTimeMs) > OPEN_TOLERANCE_MS) return false;
+    if (!samePrice(a.entryPrice, b.entryPrice)) return false;
+    const aClose = a.closeTimeMs ?? Number.POSITIVE_INFINITY;
+    const bClose = b.closeTimeMs ?? Number.POSITIVE_INFINITY;
+    if (aClose === bClose) return false;
+    const earlier = aClose < bClose ? a : b;
+    const earlySize = Number(earlier.size);
+    const totalSize = Number(a.size) + Number(b.size);
+    return Number.isFinite(earlySize) && earlySize > 0
+      && Number.isFinite(totalSize) && totalSize > 0
+      && Math.abs(earlySize / totalSize - MIRROR_SHARE) <= 0.05;
+  };
+
+  const splitFillKeys = new Set(
+    [...rawFillGroups.entries()]
+      .filter(([, list]) => isMirrorMainSplit(list))
+      .map(([key]) => key),
+  );
+  const groups = new Map<string, OrphanRecordRoleInput[]>();
+  for (const r of records) {
+    // 60/40 镜像拆分用记录自己的 id 分组，交给下面的结构判据分别定角色。
+    const fillKey = r.fillId ?? r.id;
+    const key = splitFillKeys.has(fillKey) ? r.id : fillKey;
     const list = groups.get(key);
     if (list) list.push(r); else groups.set(key, [r]);
   }
@@ -263,16 +309,6 @@ export function suggestOrphanRecordRoles(
    * 一笔 12:19 平（822,920）、一笔 15:08 平（548,620）——822920/1371540 = 60.0%，
    * 正是策略写死的 60% 镜像 / 40% 主力。加仓不会长成这个形状。
    */
-  const OPEN_TOLERANCE_MS = 120_000;   // 同一批委托挂出的时间窗
-  const PRICE_TOLERANCE = 0.01;        // 同价（留出滑点）
-  const MIRROR_SHARE = 0.6;            // 策略写死的镜像占比
-
-  const samePrice = (a: number | null | undefined, b: number | null | undefined): boolean => {
-    if (!(typeof a === 'number' && Number.isFinite(a) && a > 0)) return false;
-    if (!(typeof b === 'number' && Number.isFinite(b) && b > 0)) return false;
-    return Math.abs(a - b) <= Math.max(a, b) * PRICE_TOLERANCE;
-  };
-
   /**
    * 找出「这一笔是谁的镜像」：同向、同刻、同价，而对方**活得更久**。
    * 用「存在这样的兄弟」而不是「等于那个 mainId」，多笔主力各带镜像时也成立。
