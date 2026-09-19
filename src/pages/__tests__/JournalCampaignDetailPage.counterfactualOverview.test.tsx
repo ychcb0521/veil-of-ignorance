@@ -284,7 +284,14 @@ vi.mock('@/lib/emotionDiaryApi', () => ({
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
   ReplayKlineChart: () => <div data-testid="campaign-chart" />,
 }));
-vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
+vi.mock('@/components/journal/CampaignLegsList', () => ({
+  CampaignLegsList: ({ legs = [] }: { legs?: Array<{ leg_role?: string | null }> }) => (
+    <div>
+      {legs.map((leg, index) => <span key={index}>{leg.leg_role === 'main_open' ? '主力开仓' : leg.leg_role}</span>)}
+      <span>合计</span>
+    </div>
+  ),
+}));
 vi.mock('@/components/journal/EndCampaignDialog', () => ({ EndCampaignDialog: () => null }));
 
 // 编辑器桩：一个按钮触发 onRunWhatIf，并把基线腿 / 编辑器全部腿一起递出去；记下最新 props 以便看 loadLegsRequest。

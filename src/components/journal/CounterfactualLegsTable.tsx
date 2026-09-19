@@ -1,123 +1,136 @@
-import { Layers3 } from 'lucide-react';
-import { formatCounterfactualStamp } from '@/lib/counterfactualChangeSummary';
-import { formatDeltaB, legDeltaB } from '@/lib/campaignLegPhases';
-import { computeLegPriceChangePct, formatLegPriceChangePct } from '@/lib/legPriceChange';
-import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
-import type { CampaignCounterfactualManualLeg, CampaignCounterfactualResult, LegRole } from '@/types/journal';
+import { Layers } from 'lucide-react';
+import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
+import type {
+  CampaignCounterfactualManualLeg,
+  CampaignCounterfactualResult,
+  LegRole,
+  TradeCampaign,
+  TradeJournal,
+} from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 interface Props {
+  campaign: TradeCampaign;
   legs: CampaignCounterfactualManualLeg[];
   result: CampaignCounterfactualResult;
   title?: string;
 }
 
-const moneyTone = (value: number) => value > 0
-  ? 'text-[#0ECB81]'
-  : value < 0 ? 'text-[#F6465D]' : 'text-muted-foreground';
+/**
+ * 反事实结果直接使用原始战役的 CampaignLegsList。这里只把模拟结果适配成它的输入，
+ * 不复制表格：列序、列宽、冻结列、阶段、占比、手续费及合计行会始终与原始 Legs 一致。
+ */
+function adaptCounterfactualLegs(
+  campaign: TradeCampaign,
+  legs: CampaignCounterfactualManualLeg[],
+  result: CampaignCounterfactualResult,
+): { journals: TradeJournal[]; records: TradeRecord[] } {
+  const records: TradeRecord[] = [];
+  const journals = legs.map((leg, index) => {
+    const summary = result.legs_summary[index]
+      ?? result.legs_summary.find(item => item.leg_role === leg.leg_role);
+    const filled = leg.enabled && leg.filled !== false && summary?.status !== 'never_triggered';
+    const recordId = filled ? `counterfactual-record-${leg.id}` : null;
+    const openTime = new Date(leg.open_time).getTime();
+    const closeTime = new Date(leg.close_time).getTime();
+    const coinSettled = leg.settlement_mode === 'coin';
+    const contractSizeUsd = leg.contract_size_usd ?? 10;
+    const quantity = coinSettled
+      ? leg.size_usdt / contractSizeUsd
+      : leg.entry_price > 0 ? leg.size_usdt / leg.entry_price : 0;
 
-const fmt = (value: number, digits = 2) => Number.isFinite(value)
-  ? value.toLocaleString('en-US', { maximumFractionDigits: digits })
-  : '—';
+    if (recordId) {
+      records.push({
+        id: recordId,
+        positionId: `counterfactual-position-${leg.id}`,
+        symbol: campaign.symbol,
+        side: leg.direction === 'short' ? 'SHORT' : 'LONG',
+        type: 'MARKET',
+        action: 'CLOSE',
+        entryPrice: leg.entry_price,
+        exitPrice: leg.exit_price,
+        quantity,
+        leverage: leg.leverage,
+        settlementMode: coinSettled ? 'coin' : 'usdt',
+        contractSizeUsd: coinSettled ? contractSizeUsd : undefined,
+        contracts: coinSettled ? quantity : undefined,
+        notionalUsd: leg.size_usdt,
+        pnl: summary?.realized_pnl_usdt ?? 0,
+        fee: summary?.close_fee_usdt ?? 0,
+        openFeeUsd: summary?.open_fee_usdt,
+        slippage: 0,
+        openTime: Number.isFinite(openTime) ? openTime : 0,
+        closeTime: Number.isFinite(closeTime) ? closeTime : 0,
+      });
+    }
 
-export function CounterfactualLegsTable({ legs, result, title = '反事实 Legs' }: Props) {
-  const initialLoss = result.initial_expected_max_loss ?? null;
-  const totalAbsPnl = result.legs_summary.reduce((sum, leg) => sum + Math.abs(leg.realized_pnl_usdt), 0);
+    // 交易情绪、评价等字段不属于反事实结果；CampaignLegsList 所需的交易字段均在这里提供。
+    return {
+      id: leg.id,
+      user_id: campaign.user_id,
+      trade_record_id: recordId,
+      campaign_id: campaign.id,
+      leg_role: leg.leg_role as LegRole,
+      leg_sequence: index + 1,
+      source: 'live',
+      symbol: campaign.symbol,
+      direction: leg.direction,
+      leverage: leg.leverage,
+      position_mode: null,
+      order_kind: leg.leg_role.startsWith('hedge_') || leg.leg_role === 'reentry_hedge' ? 'hedge' : 'main',
+      pre_simulated_time: leg.open_time,
+      pre_real_time: leg.open_time,
+      pre_entry_price: leg.entry_price,
+      pre_planned_stop_loss: null,
+      pre_planned_take_profit: null,
+      pre_entry_reason: null,
+      pre_mental_state: 3,
+      pre_mental_trigger: null,
+      pre_risk_awareness: null,
+      pre_risk_management: null,
+      pre_checklist_items: null,
+      pre_checklist_passed: null,
+      pre_position_size: leg.size_usdt,
+      pre_settlement_mode: coinSettled ? 'coin' : 'usdt',
+      pre_contract_size_usd: coinSettled ? contractSizeUsd : null,
+      pre_contracts: coinSettled ? quantity : null,
+      pre_max_loss_usdt: null,
+      post_outcome: filled ? ((summary?.realized_pnl_usdt ?? 0) >= 0 ? 'win' : 'loss') : null,
+      post_realized_pnl: filled ? summary?.realized_pnl_usdt ?? 0 : null,
+      post_r_multiple: null,
+      post_exit_price_snapshot: filled ? leg.exit_price : null,
+      post_reflection: null,
+      post_correct_action: null,
+      post_reviewed_at: filled ? leg.close_time : null,
+      post_simulated_close_time: filled ? leg.close_time : null,
+      post_real_close_time: null,
+      reason_was_rewritten: false,
+      created_at: leg.open_time,
+      updated_at: leg.close_time,
+    } as TradeJournal;
+  });
+
+  return { journals, records };
+}
+
+export function CounterfactualLegsTable({ campaign, legs, result, title = '反事实 Legs' }: Props) {
+  const { journals, records } = adaptCounterfactualLegs(campaign, legs, result);
 
   return (
-    <section data-testid="counterfactual-result-legs" className="mt-3 rounded border border-border bg-card overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+    <section data-testid="counterfactual-result-legs" className="mt-3 space-y-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-[13px] font-medium">
-          <Layers3 className="h-4 w-4 text-muted-foreground" />
+          <Layers className="h-4 w-4 text-muted-foreground" />
           {title}
         </div>
-        <div className="text-[11px] text-muted-foreground">{legs.length} 条</div>
+        <div className="text-[11px] text-muted-foreground">{journals.length} 条</div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1180px] text-[11px]">
-          <thead className="bg-muted/40 text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left">角色</th>
-              <th className="px-3 py-2 text-left">时间</th>
-              <th className="px-3 py-2 text-right">贡献 / 盈亏</th>
-              <th className="px-3 py-2 text-right">Δb</th>
-              <th className="px-3 py-2 text-right">开仓价</th>
-              <th className="px-3 py-2 text-right">平仓价</th>
-              <th className="px-3 py-2 text-right">涨跌幅</th>
-              <th className="px-3 py-2 text-right">币量 / 仓位</th>
-              <th className="px-3 py-2 text-right">手续费</th>
-              <th className="px-3 py-2 text-right">状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            {legs.map((leg, index) => {
-              const summary = result.legs_summary[index]
-                ?? result.legs_summary.find(item => item.leg_role === leg.leg_role);
-              const pnl = summary?.realized_pnl_usdt ?? 0;
-              const contribution = totalAbsPnl > 0 ? pnl / totalAbsPnl : null;
-              const delta = legDeltaB(pnl, initialLoss);
-              const change = computeLegPriceChangePct(
-                leg.entry_price,
-                leg.exit_price,
-                leg.direction === 'short' ? 'short' : 'long',
-              );
-              const coinQuantity = leg.entry_price > 0 ? leg.size_usdt / leg.entry_price : null;
-              const fees = (summary?.open_fee_usdt ?? 0) + (summary?.close_fee_usdt ?? 0);
-              const pending = leg.filled === false || summary?.status === 'never_triggered';
-              return (
-                <tr key={leg.id} className="border-t border-border/60">
-                  <td className="px-3 py-2.5">
-                    <span className={`rounded px-2 py-0.5 ${leg.direction === 'long' ? 'bg-[#0ECB81]/10 text-[#0AA66A]' : 'bg-blue-500/10 text-blue-500/80'}`}>
-                      {LEG_ROLE_LABELS[leg.leg_role as LegRole] ?? leg.leg_role}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 font-mono leading-5 text-foreground">
-                    <div><span className="text-muted-foreground">开</span> {formatCounterfactualStamp(leg.open_time)}</div>
-                    <div><span className="text-muted-foreground">平</span> {formatCounterfactualStamp(leg.close_time)}</div>
-                  </td>
-                  <td className={`px-3 py-2.5 text-right font-mono ${moneyTone(pnl)}`}>
-                    <div>{contribution == null ? '—' : `${contribution > 0 ? '+' : ''}${(contribution * 100).toFixed(1)}%`}</div>
-                    <div className="text-[10px] opacity-75">{pnl > 0 ? '+' : ''}{fmt(pnl)}</div>
-                  </td>
-                  <td className={`px-3 py-2.5 text-right font-mono ${moneyTone(delta ?? 0)}`}>{formatDeltaB(delta)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{fmt(leg.entry_price, 8)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono">{fmt(leg.exit_price, 8)}</td>
-                  <td className={`px-3 py-2.5 text-right font-mono ${moneyTone(change ?? 0)}`}>{formatLegPriceChangePct(change)}</td>
-                  <td className="px-3 py-2.5 text-right font-mono leading-5">
-                    <div>{coinQuantity == null ? '—' : fmt(coinQuantity, 8)}</div>
-                    <div className="text-[10px] text-muted-foreground">{fmt(leg.size_usdt)} USD</div>
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">{fmt(fees)}</td>
-                  <td className="px-3 py-2.5 text-right">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${pending ? 'bg-[#F0B90B]/10 text-[#B8860B]' : 'bg-muted text-muted-foreground'}`}>
-                      {pending ? '挂单中' : '已成交'}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-            {legs.length === 0 && (
-              <tr><td colSpan={10} className="px-3 py-6 text-center text-muted-foreground">该反事实分支没有 Legs 数据</td></tr>
-            )}
-          </tbody>
-          {legs.length > 0 && (
-            <tfoot className="border-t-2 border-border bg-muted/20 font-mono">
-              <tr>
-                <td className="px-3 py-2 font-sans font-medium">合计</td>
-                <td />
-                <td className={`px-3 py-2 text-right ${moneyTone(result.final_realized_pnl)}`}>
-                  {result.final_realized_pnl > 0 ? '+' : ''}{fmt(result.final_realized_pnl)}
-                </td>
-                <td className={`px-3 py-2 text-right ${moneyTone(result.final_r_multiple)}`}>
-                  {result.final_r_multiple > 0 ? '+' : ''}{result.final_r_multiple.toFixed(2)}
-                </td>
-                <td colSpan={4} />
-                <td className="px-3 py-2 text-right text-muted-foreground">{fmt((result.open_fees_total ?? 0) + (result.fees_total ?? 0))}</td>
-                <td />
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
+      <CampaignLegsList
+        legs={journals}
+        tradeRecords={records}
+        initialExpectedMaxLoss={result.initial_expected_max_loss ?? null}
+        campaignDirection={campaign.direction}
+      />
     </section>
   );
 }
