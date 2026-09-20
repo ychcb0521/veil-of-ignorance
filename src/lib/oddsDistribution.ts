@@ -1,6 +1,11 @@
 import type { CampaignMetricPoint } from '@/lib/campaignMetricSeries';
 import type { ScatterStackScale } from '@/components/charts/stackLayout';
 import { gaussianKde, silvermanBandwidth } from '@/lib/kernelDensity';
+import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
+
+/** 固定 10% 风险下注的本金归零界限；不是用户真实账户的强平判定。 */
+export const CAPITAL_RUIN_THRESHOLD = -1 / FIXED_DRAWDOWN_FRACTION;
+export const isFixedBetRuin = (payoffRatio: number) => Number.isFinite(payoffRatio) && payoffRatio <= CAPITAL_RUIN_THRESHOLD;
 
 export type OddsDistributionDomain = {
   min: number;
@@ -45,12 +50,25 @@ function quantile(sorted: number[], q: number) {
 
 /**
  * 分布图的横轴窗口：low = min(−2, ⌊p2⌋)，high = max(2, min(10, ⌈p98⌉))，再吸附到 ≤ 6 格的整数步距。
- * 与 robustRDomain 的差别只在上限封顶——右尾 +38R 会把 p98 推到 +15R 以上，
+ * 存在 b ≤ −10 时改用 −12R 左界，确保归零线可见，极端亏损贴边但不丢样本。
+ * 正向上限封顶——右尾 +38R 会把 p98 推到 +15R 以上，
  * 那时主群只剩几十像素宽，止损墙与盈亏平衡线之间读不出任何结构。
  * −1 永远在窗口内（low ≤ −2），所以止损墙永远画得出来。
  */
 export function oddsDistributionDomain(values: number[]): OddsDistributionDomain {
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.some(isFixedBetRuin)) {
+    // 把归零界限留在视野内，且左侧保留 2R 给越界三角；极端亏损不挤压正常主群。
+    // 裁的是显示窗口，不裁样本：原始 b、统计、提示框和极端点均保留。
+    const min = CAPITAL_RUIN_THRESHOLD - 2;
+    const high = Math.max(2, Math.min(DOMAIN_CAP, Math.ceil(quantile(sorted, 0.98))));
+    const step = Math.max(1, Math.ceil((high - min) / 6));
+    const max = Math.min(DOMAIN_CAP, Math.ceil(high / step) * step);
+    const ticks: number[] = [];
+    for (let value = min; value <= max; value += step) ticks.push(value);
+    if (ticks[ticks.length - 1] !== max) ticks.push(max);
+    return { min, max, ticks };
+  }
   const low = Math.min(-2, Math.floor(quantile(sorted, 0.02)));
   const high = Math.max(2, Math.min(DOMAIN_CAP, Math.ceil(quantile(sorted, 0.98))));
   const step = Math.max(1, Math.ceil((high - low) / 6));

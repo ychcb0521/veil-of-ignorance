@@ -776,7 +776,7 @@ export function CampaignLegsList({
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
-            <div className="text-right" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动立即执行与预设委托/止盈止损触发分开记录；无可靠依据显示未记录，不按回填来源推断。">操作方式</div>
+            <div className="text-center" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动操作以琥珀色提示关注，委托/止盈止损触发及强平显示自动。主力开仓按业务约定记为手动，其他无可靠依据的记录显示未记录。">操作方式</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
             <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
@@ -934,13 +934,19 @@ export function CampaignLegsList({
                       <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
                     )}
                   </div>
+                  <div data-testid={`leg-execution-method-${leg.id}`} className="flex flex-col items-center text-[10px] leading-snug text-muted-foreground">
+                    {([['开', executionMethods.open], ['平', executionMethods.close]] as const).map(([action, method]) => (
+                      <div key={action} title={method.reason} data-method={method.kind} className="grid grid-cols-[3em_3em] gap-x-0.5 text-right whitespace-nowrap">
+                        <span className={method.kind === 'manual'
+                          ? 'font-medium text-amber-700/90 dark:text-amber-400/90'
+                          : method.kind === 'order' ? 'text-muted-foreground/80' : 'text-muted-foreground/45'}>{method.label}</span>
+                        <span className="text-left text-muted-foreground/45">（{action}）</span>
+                      </div>
+                    ))}
+                  </div>
                   {/* 涨跌幅：开仓价走到平仓价的百分比，按这条腿的方向计——空单价格跌了才是正数，
                       按所示这一对开平价看与盈亏同号（分几刀平掉时盈亏是各刀合计，可能不同号）。
                       与开平价同字号，不抢 Δb 的主角位。 */}
-                  <div data-testid={`leg-execution-method-${leg.id}`} className="text-right text-[10px] leading-snug text-muted-foreground">
-                    <div title={executionMethods.open.reason} data-method={executionMethods.open.kind}>开 {executionMethods.open.label}</div>
-                    <div title={executionMethods.close.reason} data-method={executionMethods.close.kind}>平 {executionMethods.close.label}</div>
-                  </div>
                   <div
                     data-testid={`leg-price-change-${leg.id}`}
                     className={`text-right tabular-nums ${priceChangeTone(priceChangePct)}`}

@@ -523,6 +523,8 @@ export interface CampaignCounterfactualManualLegCut {
 }
 
 export interface CampaignCounterfactualManualLegActual {
+  /** 原始角色快照：区分未改动主力与被改成主力的模拟腿；展示业务规则不冒充执行来源。 */
+  leg_role?: LegRole | null;
   /** 实际交易已证实的开/平方式快照；不是反事实编辑操作，缺失时保持未知。 */
   entry_method?: 'manual' | 'order' | 'unknown';
   exit_method?: 'manual' | 'order' | 'unknown';

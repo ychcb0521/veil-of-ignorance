@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveLegExecutionMethods } from '../legExecutionMethod';
+import { resolveLegExecutionMethodEvidence, resolveLegExecutionMethods } from '../legExecutionMethod';
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -27,9 +27,9 @@ describe('execution method evidence', () => {
   });
   it('separately resolves entry and exit from explicit fill evidence', () => {
     expect(resolveLegExecutionMethods(leg(), record({ entry_method: 'manual', exit_method: 'sl' })))
-      .toMatchObject({ open: { label: '手动' }, close: { label: '非手动', reason: '止损委托触发平仓。' } });
+      .toMatchObject({ open: { label: '手动' }, close: { label: '自动', reason: '止损委托触发平仓。' } });
     expect(resolveLegExecutionMethods(leg(), record({ entry_method: 'order', exit_method: 'manual' })))
-      .toMatchObject({ open: { label: '非手动' }, close: { label: '手动' } });
+      .toMatchObject({ open: { label: '自动' }, close: { label: '手动' } });
   });
   it.each(['tp1', 'tp2', 'tp3', 'liquidation'] as const)('recognizes non-manual exit %s', method => {
     expect(resolveLegExecutionMethods(leg(), record({ exit_method: method })).close.kind).toBe('order');
@@ -40,7 +40,7 @@ describe('execution method evidence', () => {
   it('can recover an old triggered short from the full order history', () => {
     expect(resolveLegExecutionMethods(leg(), record(), [triggered]).open.kind).toBe('order');
     expect(resolveLegExecutionMethods(leg(), record(), [{ ...triggered, status: 'cancelled' }]).open.kind).toBe('unknown');
-    expect(resolveLegExecutionMethods(leg({ direction: 'long', order_kind: 'main', leg_role: 'main_open' }), record({ side: 'LONG' }), [triggered]).open.kind).toBe('unknown');
+    expect(resolveLegExecutionMethods(leg({ direction: 'long', order_kind: 'main', leg_role: 'main_add_1' }), record({ side: 'LONG' }), [triggered]).open.kind).toBe('unknown');
   });
   it('explicit manual evidence wins over a similar same-time triggered order', () => {
     expect(resolveLegExecutionMethods(leg(), record({ entry_method: 'manual' }), [triggered]).open.kind).toBe('manual');
@@ -64,5 +64,18 @@ describe('execution method evidence', () => {
   it('recognizes different partial closes of the same explicitly linked fill', () => {
     const linked = record({ id: 'earlier-cut', fillId: 'fill' });
     expect(resolveLegExecutionMethods(leg(), record({ fillId: 'fill' }), [{ ...triggered, tradeRecordId: linked.id }], [linked]).open.kind).toBe('order');
+  });
+
+  it.each(['main_open', 'reentry_main'] as const)('主力 %s 按明确业务规则显示手动，但不伪造实际证据', role => {
+    const main = leg({ leg_role: role, order_kind: 'main', direction: 'long' });
+    expect(resolveLegExecutionMethods(main, null).open).toMatchObject({ kind: 'manual', label: '手动' });
+    expect(resolveLegExecutionMethods(main, null).open.reason).toContain('业务约定');
+    expect(resolveLegExecutionMethodEvidence(main, null).open.kind).toBe('unknown');
+    expect(resolveLegExecutionMethods(main, record({ entry_method: 'order' })).open.kind).toBe('manual');
+    expect(resolveLegExecutionMethodEvidence(main, record({ entry_method: 'order' })).open.kind).toBe('order');
+  });
+
+  it.each(['main_add_1', 'mirror_tp', 'standalone'] as const)('业务约定不扩大到 %s；无依据仍显示未记录', role => {
+    expect(resolveLegExecutionMethods(leg({ leg_role: role, order_kind: 'main' }), null).open.kind).toBe('unknown');
   });
 });

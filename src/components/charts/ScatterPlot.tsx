@@ -18,7 +18,7 @@ import {
   type ClampDirection,
   type ScatterMarkShape,
 } from '@/lib/chartTokens';
-import { columnStackLayout, stackLayout, type ScatterStackScale } from './stackLayout';
+import { columnStackLayout, minimumBoundaryPlotWidth, stackLayout, type ScatterStackScale, type StackLayoutBoundary } from './stackLayout';
 import { useChartSize } from './useChartSize';
 
 export type { ScatterStackScale } from './stackLayout';
@@ -39,6 +39,8 @@ export type ScatterPoint = {
   valueText: string;
   label: string;
   metaText?: string;
+  /** 风险提示同时用于描边与文字，不改变原始数值、系列颜色或越界三角。 */
+  warning?: string;
   ariaLabel: string;
   testId?: string;
   dataAttrs?: Record<string, string | number | undefined>;
@@ -84,7 +86,7 @@ export type ScatterCountAxis = {
 
 export type ScatterXAxis =
   | { mode: 'ordinal'; count: number; labelAt: (index: number) => string | null }
-  | { mode: 'linear'; min: number; max: number; labels?: { at: number; text: string }[]; integerBoundaries?: boolean }
+  | { mode: 'linear'; min: number; max: number; labels?: { at: number; text: string }[]; integerBoundaries?: boolean; boundaries?: readonly StackLayoutBoundary[] }
   | { mode: 'category'; categories: { value: number; label: string; sublabel?: string }[] };
 
 export type ScatterReferenceLine = {
@@ -140,7 +142,7 @@ type PlacedPoint = ScatterPoint & {
   series: ScatterSeries;
 };
 
-type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number };
+type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number; warning?: string };
 
 type StackInfo = {
   pitchY: number;
@@ -307,6 +309,7 @@ export function ScatterPlot({
   directionHint,
 }: ScatterPlotProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const { ref: trackRef, size } = useChartSize<HTMLDivElement>();
   const buttonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
@@ -384,8 +387,9 @@ export function ScatterPlot({
     }
 
     if (stackMode && xAxis.mode === 'linear') {
-      // 场数轴：横轴铺满、永不滚动；点位按档吸附、从底线往上堆，纵轴就是计数。
-      const contentWidth = trackWidth;
+      // 硬边界两侧不能混档；窄屏仅在必要时扩展轨道，保持点距与真实线性比例。
+      const contentWidth = Math.max(trackWidth,
+        minimumBoundaryPlotWidth(xAxis.min, xAxis.max, xAxis.boundaries) + numericLeft + PLOT_INSET.right);
       const result = stackLayout(points.map(point => ({ id: point.id, x: point.x })), {
         xMin: xAxis.min,
         xMax: xAxis.max,
@@ -395,6 +399,7 @@ export function ScatterPlot({
         plotHeight,
         isolatedLeft: hasIsolatedBucket ? { ids: isolatedLeftBucket!.pointIds, cx: isolatedCx } : undefined,
         integerBoundaries: xAxis.integerBoundaries,
+        boundaries: xAxis.boundaries,
       });
       const byId = new Map(points.map(point => [point.id, point]));
       const placed = result.placed.flatMap(item => {
@@ -412,7 +417,7 @@ export function ScatterPlot({
       return {
         contentWidth,
         pitch: result.binPx,
-        fitMode: 'fit' as const,
+        fitMode: contentWidth > trackWidth ? ('scroll' as const) : ('fit' as const),
         placed,
         stack: {
           pitchY: result.pitchY,
@@ -422,7 +427,10 @@ export function ScatterPlot({
           binPx: result.binPx,
           tallest: result.tallest,
           requiredPlotHeight: result.requiredPlotHeight,
-          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n }) => ({ bin, cx, cy, yPct, count: n })),
+          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids }) => ({
+            bin, cx, cy, yPct, count: n,
+            warning: ids.map(id => byId.get(id)?.warning).find(Boolean),
+          })),
         } as StackInfo,
       };
     }
@@ -560,12 +568,13 @@ export function ScatterPlot({
   const stackOverflowCount = stack ? stack.overflow.reduce((sum, glyph) => sum + glyph.count, 0) : 0;
   const clipPathId = `${testId}-plot-clip`;
 
-  // 时序图挂载时滚到最右端，先看到最新的战役；左侧渐隐提示还有更早的点位。
+  // 时序从最新战役看起；分布从左侧风险区看起，不能默认滚走 −10R 线。
   useEffect(() => {
     const node = trackRef.current;
-    if (!node || layout.fitMode !== 'scroll') return;
-    node.scrollLeft = node.scrollWidth;
-  }, [layout.contentWidth, layout.fitMode, trackRef]);
+    if (!node) return;
+    node.scrollLeft = !stackMode && layout.fitMode === 'scroll' ? node.scrollWidth : 0;
+    setScrollOffset(node.scrollLeft);
+  }, [layout.contentWidth, layout.fitMode, stackMode, trackRef]);
 
   const setActive = useCallback(
     (id: string | null) => {
@@ -679,6 +688,7 @@ export function ScatterPlot({
           >
             <div
               ref={trackRef}
+              onScroll={event => setScrollOffset(event.currentTarget.scrollLeft)}
               className={`absolute inset-y-0 left-0 ${fitMode === 'scroll' ? 'overflow-x-auto overscroll-x-contain' : 'overflow-hidden'} [scrollbar-width:thin]`}
               // 没有 n= 计数栏的图不留这 32px：否则右边界会空出一条与其它图不一致的死白。
               style={{ right: bandCounts ? BAND_RAIL_W : 0 }}
@@ -824,6 +834,10 @@ export function ScatterPlot({
                           emphasized={point.id === activeId}
                         />
                       )}
+                      {point.warning && (
+                        <circle data-testid={`chart-warning-ring-${point.id}`} cx={point.cx} cy={point.cy} r={6}
+                          style={{ fill: 'none', stroke: CHART_THRESHOLD_VAR, strokeWidth: 1 }} />
+                      )}
                     </g>
                   ))}
                   {stack?.overflow.map(glyph => (
@@ -834,7 +848,7 @@ export function ScatterPlot({
                       data-overflow-count={glyph.count}
                       d={clampedChevronPath(glyph.cx, glyph.cy, 'up')}
                       paintOrder="stroke"
-                      style={{ fill: 'var(--chart-ink-muted)', stroke: CHART_SURFACE_VAR, strokeWidth: MARK_RING_W }}
+                      style={{ fill: glyph.warning ? seriesTokenVar('loss') : 'var(--chart-ink-muted)', stroke: glyph.warning ? CHART_THRESHOLD_VAR : CHART_SURFACE_VAR, strokeWidth: MARK_RING_W }}
                     />
                   ))}
                   {stack ? placeXReferenceLabels(
@@ -870,9 +884,9 @@ export function ScatterPlot({
                       type="button"
                       data-testid="chart-stack-overflow-hit"
                       data-overflow-count={glyph.count}
-                      aria-label={`该档另有 ${glyph.count} 场超出图高，未逐点绘制`}
+                      aria-label={`该档另有 ${glyph.count} 场超出图高，未逐点绘制${glyph.warning ? `；${glyph.warning}` : ''}`}
                       tabIndex={-1}
-                      title={`另有 ${glyph.count} 场超出图高`}
+                      title={`另有 ${glyph.count} 场超出图高${glyph.warning ? `；${glyph.warning}` : ''}`}
                       className="absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-help rounded-full bg-transparent outline-none"
                       style={{ left: `${glyph.cx}px`, top: `${glyph.yPct}%`, width: `${hitWidth}px`, height: `${hitHeight}px` }}
                     />
@@ -932,16 +946,19 @@ export function ScatterPlot({
                     style={stack ? {
                       // 右侧放不下 15rem 时改用 right 锚到点位左侧：用 left + translate 翻转会让
                       // 绝对定位盒子只剩锚点右侧那点可用宽度，文字被挤成两行。
-                      ...(activePoint.cx + 12 + 240 <= contentWidth
+                      ...(fitMode === 'scroll' ? {
+                        left: `${Math.max(scrollOffset + 8, Math.min(activePoint.cx + 12, scrollOffset + trackWidth - 248))}px`,
+                        maxWidth: `${Math.min(240, Math.max(1, trackWidth - 16))}px`,
+                      } : activePoint.cx + 12 + 240 <= contentWidth
                         ? { left: `${activePoint.cx + 12}px` }
                         : activePoint.cx - 12 - 240 >= 0
                           ? { right: `${contentWidth - (activePoint.cx - 12)}px` }
                           : { left: '8px', maxWidth: `${Math.max(1, contentWidth - 16)}px` }),
                       // 上下各留半个提示框：底行点位（分布图里最多的那些）的提示框不能被盒子裁掉下缘。
-                      top: `${Math.min(boxHeight - STACK_TOOLTIP_HALF, Math.max(PLOT_INSET.top + STACK_TOOLTIP_HALF, activePoint.cy))}px`,
+                      top: `${Math.min(boxHeight - (activePoint.warning ? 80 : STACK_TOOLTIP_HALF), Math.max(PLOT_INSET.top + (activePoint.warning ? 80 : STACK_TOOLTIP_HALF), activePoint.cy))}px`,
                     } : {
                       left: `${Math.min(contentWidth - 90, Math.max(90, activePoint.cx))}px`,
-                      top: `${Math.max(38, activePoint.cy - 10)}px`,
+                      top: `${Math.max(activePoint.warning ? 120 : 38, activePoint.cy - 10)}px`,
                     }}
                   >
                     <div className="flex items-center gap-1.5">
@@ -956,6 +973,7 @@ export function ScatterPlot({
                     {activePoint.metaText ? (
                       <div className="text-[9px] text-[color:var(--chart-ink-muted)]">{activePoint.metaText}</div>
                     ) : null}
+                    {activePoint.warning && <div className="mt-1 text-[10px] text-[color:var(--chart-threshold)]">{activePoint.warning}</div>}
                     {onSelect ? (
                       <div className="text-[9px] text-[color:var(--chart-ink-muted)]">点击进入战役</div>
                     ) : null}

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
-import type { CampaignCounterfactualManualLeg, CampaignCounterfactualResult, TradeCampaign } from '@/types/journal';
+import type { CampaignCounterfactualManualLeg, CampaignCounterfactualResult, TradeCampaign, TradeJournal } from '@/types/journal';
 
 const open = '2026-09-20T00:00:00Z';
 const close = '2026-09-20T01:00:00Z';
@@ -18,10 +18,10 @@ const base: CampaignCounterfactualManualLeg = {
 const result = {
   final_realized_pnl: 9, legs_summary: [{ leg_role: 'hedge_rolling', status: 'filled', realized_pnl_usdt: 9 }],
 } as CampaignCounterfactualResult;
-function renderLeg(leg: CampaignCounterfactualManualLeg = base) {
+function renderLeg(leg: CampaignCounterfactualManualLeg = base, originalLegs?: TradeJournal[]) {
   render(<MemoryRouter><CounterfactualLegsTable
     campaign={{ id: 'campaign', user_id: 'u', symbol: 'ETHUSDT', direction: 'main_long' } as TradeCampaign}
-    legs={[leg]} result={result}
+    legs={[leg]} result={result} originalLegs={originalLegs}
   /></MemoryRouter>);
   return screen.getByTestId('leg-execution-method-leg');
 }
@@ -33,8 +33,8 @@ describe('反事实 Legs 与实际交易的操作方式区分', () => {
   it('原样分支显示保存的实际开平方式，使用和原始 Legs 同一列', () => {
     const cell = renderLeg(JSON.parse(JSON.stringify(base)));
     expect(methods(cell)).toEqual(['manual', 'order']);
-    expect(cell).toHaveTextContent('开 手动');
-    expect(cell).toHaveTextContent('平 非手动');
+    expect(cell).toHaveTextContent('手动（开）');
+    expect(cell).toHaveTextContent('自动（平）');
     expect(cell.previousElementSibling).toHaveTextContent('99.0000');
     expect(cell.nextElementSibling).toHaveAttribute('data-testid', 'leg-price-change-leg');
   });
@@ -67,5 +67,43 @@ describe('反事实 Legs 与实际交易的操作方式区分', () => {
 
   it('未平仓腿的模拟兜底时间不是实际平仓方式证据', () => {
     expect(methods(renderLeg({ ...base, actual: { ...base.actual!, close_time_fallback: true, still_open: true } }))).toEqual(['manual', 'unknown']);
+  });
+
+  it.each(['main_open', 'reentry_main'] as const)('未改动的实际 %s 沿用主力手动约定，来源缺失不影响业务标记', role => {
+    const main = { ...base, leg_role: role, actual: { ...base.actual!, leg_role: role, entry_method: undefined } };
+    const cell = renderLeg(main);
+    expect(methods(cell)).toEqual(['manual', 'order']);
+    expect(cell.firstElementChild?.getAttribute('title')).toContain('业务约定');
+  });
+
+  it('新增模拟主力不会因角色而冒充真实手动交易', () => {
+    expect(methods(renderLeg({ ...base, leg_role: 'main_open', actual: undefined }))).toEqual(['unknown', 'unknown']);
+  });
+
+  it('把实际对冲改成模拟主力，不沿用真实开仓方式或主力手动规则', () => {
+    expect(methods(renderLeg({ ...base, leg_role: 'main_open', actual: { ...base.actual!, leg_role: 'hedge_rolling' } }))).toEqual(['unknown', 'order']);
+  });
+
+  it('修改主力开仓参数后，不再套用实际主力手动规则', () => {
+    expect(methods(renderLeg({ ...base, leg_role: 'main_open', entry_price: 101,
+      actual: { ...base.actual!, leg_role: 'main_open', entry_method: undefined } }))).toEqual(['unknown', 'order']);
+  });
+
+  it('旧分支没有角色快照时，同 id 的原始主力可补充业务角色，不修改实际证据', () => {
+    const legacy = { ...base, leg_role: 'main_open', actual: { ...base.actual!, entry_method: undefined } };
+    const cell = renderLeg(legacy, [{ id: base.id, leg_role: 'main_open' } as TradeJournal]);
+    expect(methods(cell)).toEqual(['manual', 'order']);
+    expect(legacy.actual.entry_method).toBeUndefined();
+  });
+
+  it('同 id 原始腿是对冲：旧分支改成主力后仍未知，不套主力约定', () => {
+    expect(methods(renderLeg({ ...base, leg_role: 'main_open' }, [{ id: base.id, leg_role: 'hedge_rolling' } as TradeJournal])))
+      .toEqual(['unknown', 'order']);
+  });
+
+  it('原始主力 id 不匹配，不为旧分支或新增模拟主力补造方式', () => {
+    expect(methods(renderLeg({ ...base, leg_role: 'main_open', actual: { ...base.actual!, entry_method: undefined } },
+      [{ id: 'another-leg', leg_role: 'main_open' } as TradeJournal])))
+      .toEqual(['unknown', 'order']);
   });
 });

@@ -799,7 +799,7 @@ describe('【用户决定】他场委托在导出图里只是表下一行淡注'
   });
 });
 
-describe('【用户要求】导出图也带开平操作方式，历史未知不冒充非手动', () => {
+describe('【用户要求】导出图也带开平操作方式，历史未知不冒充自动', () => {
   const at = (hhmm: string) => Date.parse(`2026-08-07T${hhmm}:00.000Z`);
   const record = (id: string, methods: Partial<TradeRecord>): TradeRecord => ({
     id, positionId: id, fillId: id, symbol: 'BTCUSDT', side: 'SHORT', type: 'MARKET', action: 'CLOSE',
@@ -807,7 +807,7 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     openTime: at('01:00'), closeTime: at('09:00'), ...methods,
   });
 
-  it('隐藏委托仍可证明非手动开仓，但不会重新出现在委托列；旧调用方保持回退', () => {
+  it('隐藏委托仍可证明自动开仓，但不会重新出现在委托列；旧调用方保持回退', () => {
     const closed = record('hidden-order-record', { exit_method: 'manual' });
     const leg = {
       id: 'hidden-order-leg', trade_record_id: closed.id, leg_sequence: 1, leg_role: 'hedge_rolling',
@@ -823,7 +823,7 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
       ...base, reverseHedgeOrders: [], executionMethodOrders: [hiddenOrder],
     })[0];
     const visible = buildCampaignLegsExportRows({ ...base, reverseHedgeOrders: [hiddenOrder] })[0];
-    expect(hidden.cells[EXECUTION_METHOD_COL].map(line => line.text)).toEqual(['开 非手动', '平 手动']);
+    expect(hidden.cells[EXECUTION_METHOD_COL].map(line => line.text)).toEqual(['自动（开）', '手动（平）']);
     expect(hidden.cells[EXECUTION_METHOD_COL]).toEqual(visible.cells[EXECUTION_METHOD_COL]);
     expect(hidden.cells[ORDER_COL].map(line => line.text)).toEqual(['—']);
     expect(visible.cells[ORDER_COL].some(line => line.text.includes('已触发'))).toBe(true);
@@ -847,9 +847,12 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
       reverseHedgeOrders: [],
     });
     const methodsOf = (id: string) => rows.find(row => row.legId === id)!.cells[EXECUTION_METHOD_COL];
-    expect(methodsOf('manual-open').map(line => line.text)).toEqual(['开 手动', '平 非手动']);
-    expect(methodsOf('manual-close').map(line => line.text)).toEqual(['开 非手动', '平 手动']);
-    expect(methodsOf('legacy').map(line => line.text)).toEqual(['开 未记录', '平 未记录']);
+    expect(methodsOf('manual-open').map(line => line.text)).toEqual(['手动（开）', '自动（平）']);
+    expect(methodsOf('manual-close').map(line => line.text)).toEqual(['自动（开）', '手动（平）']);
+    expect(methodsOf('legacy').map(line => line.text)).toEqual(['未记录（开）', '未记录（平）']);
+    expect(methodsOf('manual-open')[0]).toMatchObject({ color: '#A66B12', bold: true, operation: { action: '开', label: '手动' } });
+    expect(methodsOf('manual-open')[1]).toMatchObject({ color: '#848E9C', bold: false });
+    expect(methodsOf('legacy')[0]).toMatchObject({ color: '#B4BBC5' });
     for (const row of rows.filter(row => row.kind === 'leg')) {
       expect(row.cells[EXIT_COL][0].text).toBe('90.0000');
       expect(row.cells[PRICE_CHANGE_COL][0].text).toBe('+10.00%');
@@ -857,6 +860,46 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     }
     expect(rows.at(-1)!.cells[EXECUTION_METHOD_COL]).toEqual([{ text: '' }]);
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
+  });
+
+  it('主力开仓导出为手动，不把主力规则泛化到加仓', () => {
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: [
+      { id: 'main', leg_role: 'main_open' } as TradeJournal,
+      { id: 'reentry', leg_role: 'reentry_main' } as TradeJournal,
+      { id: 'add', leg_role: 'main_add_1' } as TradeJournal,
+    ] });
+    expect(rows.filter(row => row.kind === 'leg').map(row => row.cells[EXECUTION_METHOD_COL][0].text))
+      .toEqual(['手动（开）', '手动（开）', '未记录（开）']);
+  });
+
+  it('实际画布中状态右端和浅色括号上下对齐，手动单独着色且行距不变', () => {
+    const draws: { text: string; x: number; y: number; color: unknown }[] = [];
+    const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+      get(target, key) {
+        if (key === 'fillText') return (text: string, x: number, y: number) => { draws.push({ text, x, y, color: target.fillStyle }); };
+        if (key === 'measureText') return (text: string) => ({ width: text.length * 8 });
+        if (key in target) return target[key];
+        return () => undefined;
+      },
+      set(target, key, value) { target[key] = value; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    const spy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+    try {
+      buildCampaignLegsListCanvas({ ...input(), legs: [{ id: 'main', leg_role: 'main_open' } as TradeJournal] }, { includeHeader: false, scale: 1 });
+      const manual = draws.find(draw => draw.text === '手动')!;
+      const unknown = draws.find(draw => draw.text === '未记录')!;
+      const open = draws.find(draw => draw.text === '（开）')!;
+      const close = draws.find(draw => draw.text === '（平）')!;
+      expect(manual.color).toBe('#A66B12');
+      expect(unknown.color).toBe('#B4BBC5');
+      expect(open.color).toBe('#B4BBC5');
+      expect(close.color).toBe('#B4BBC5');
+      expect(manual.x + '手动'.length * 8).toBe(unknown.x + '未记录'.length * 8);
+      expect(open.x).toBe(close.x);
+      expect(close.y - open.y).toBe(17);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

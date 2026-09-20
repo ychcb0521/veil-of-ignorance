@@ -29,7 +29,7 @@ import {
 import { getCoinContractSizeUsd, getCoinContracts, roundCoinContracts } from '@/lib/coinMargined';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { tradeRecordFees } from '@/lib/tradeFees';
-import { resolveLegExecutionMethods } from '@/lib/legExecutionMethod';
+import { resolveLegExecutionMethodEvidence } from '@/lib/legExecutionMethod';
 import { getPositionNotionalUsd, getSettlementFeeParts } from '@/lib/tradingSettlement';
 import {
   INITIAL_HEDGE_SIZE_PCT,
@@ -1483,7 +1483,7 @@ function buildRecordCuts(
  */
 type ManualLegRiskFacts = Pick<
   CampaignCounterfactualManualLegActual,
-  'placed_time' | 'has_record' | 'exposure_usdt' | 'exposure_group' | 'exposure_excluded' | 'order_kind'
+  'placed_time' | 'has_record' | 'exposure_usdt' | 'exposure_group' | 'exposure_excluded' | 'order_kind' | 'leg_role'
 >;
 
 function buildManualLegActual(input: {
@@ -1685,7 +1685,7 @@ export function buildManualLegs(
       const claimed = settlement.recordsByLeg.get(leg.id) ?? [];
       const ownClosing = record && claimed.length > 0 && !claimed.includes(record) ? closingSettlementRecord(claimed) : null;
       const execution = resolveLegExecution(leg, ownClosing ?? record, exitPriceCorrections);
-      const executionMethods = resolveLegExecutionMethods(leg, ownClosing ?? record, options.reverseHedgeOrders, tradeRecords);
+      const executionMethods = resolveLegExecutionMethodEvidence(leg, ownClosing ?? record, options.reverseHedgeOrders, tradeRecords);
       // 没有成交记录、却在权益路径上的腿（带触发事件的对冲、快照、历史快照事件）按路径上那一段开仓；
       // 那一段有自己的平仓时刻（快照平仓时间、撤单事件、事件里的平仓时间）时也按它平。
       const heldStartMs = record ? null : pathFacts.heldStartMsByLeg.get(leg.id) ?? null;
@@ -1734,6 +1734,7 @@ export function buildManualLegs(
       const placedMs = manualTimeMs(leg.pre_simulated_time);
       const share = exposure.shares.get(leg.id);
       const riskFacts: ManualLegRiskFacts = {
+        leg_role: leg.leg_role,
         ...(placedMs != null && placedMs !== openMs ? { placed_time: new Date(placedMs).toISOString() } : {}),
         ...(record ? { has_record: true } : {}),
         ...(share ? { exposure_usdt: share.notionalUsd } : {}),

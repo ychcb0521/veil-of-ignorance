@@ -11,6 +11,12 @@ import { MARK_FOOTPRINT, MIN_PITCH, type ClampDirection } from '@/lib/chartToken
  */
 export type StackLayoutPoint = { id: string; x: number };
 
+export type StackLayoutBoundary = {
+  value: number;
+  /** Which interval owns points exactly on the boundary. */
+  inclusiveSide: 'left' | 'right';
+};
+
 export type StackLayoutOptions = {
   xMin: number;
   xMax: number;
@@ -24,7 +30,35 @@ export type StackLayoutOptions = {
   isolatedLeft?: { ids: readonly string[]; cx: number };
   /** R axes keep integer boundaries; transformed axes need only the zero boundary. */
   integerBoundaries?: boolean;
+  /** Hard semantic boundaries; zero remains a boundary when this mode is enabled. */
+  boundaries?: readonly StackLayoutBoundary[];
 };
+
+function interiorBoundaries(xMin: number, xMax: number, boundaries: readonly StackLayoutBoundary[]) {
+  const byValue = new Map<number, StackLayoutBoundary>();
+  for (const boundary of [{ value: 0, inclusiveSide: 'right' as const }, ...boundaries]) {
+    if (Number.isFinite(boundary.value) && boundary.value > xMin && boundary.value < xMax) {
+      byValue.set(boundary.value, boundary);
+    }
+  }
+  return [...byValue.values()].sort((a, b) => a.value - b.value);
+}
+
+/**
+ * Minimum usable track width for hard-boundary mode (excludes plot insets).
+ * Callers must allow horizontal scrolling when the viewport is narrower: shrinking a
+ * one-R interval below a marker cannot preserve both truthful positions and legibility.
+ */
+export function minimumBoundaryPlotWidth(
+  xMin: number,
+  xMax: number,
+  boundaries: readonly StackLayoutBoundary[] = [],
+): number {
+  if (boundaries.length === 0 || !(xMax > xMin)) return MIN_PITCH;
+  const edges = [xMin, ...interiorBoundaries(xMin, xMax, boundaries).map(item => item.value), xMax];
+  const narrowest = Math.min(...edges.slice(1).map((edge, index) => edge - edges[index]));
+  return Math.ceil((xMax - xMin) / narrowest * MIN_PITCH);
+}
 
 export type StackPlacedPoint = {
   id: string;
@@ -50,9 +84,9 @@ export type StackOverflow = {
 export type StackLayoutResult = {
   placed: StackPlacedPoint[];
   overflow: StackOverflow[];
-  /** 档宽（px），≥ MIN_PITCH，恰好铺满可用宽度。 */
+  /** 标准档宽（px）；硬边界模式各区实际等分宽度略有差异。 */
   binPx: number;
-  /** 档宽（数值单位），密度曲线换算「每档期望场数」时用它。 */
+  /** 标准档宽（数值单位），密度曲线按此近似换算「每档期望场数」。 */
   binWidth: number;
   binCount: number;
   /** 纵向步距：默认 14px；最高一档装不下时退到 12px（环贴环，2px 表面环仍是分隔）。 */
@@ -106,13 +140,39 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const zeroPx = xPx(0);
   const firstBin = Math.floor((left - zeroPx) / binPx + 1e-9);
   const lastBin = Math.ceil((right - zeroPx) / binPx - 1e-9) - 1;
-  const numericBinCount = Math.max(1, lastBin - firstBin + 1);
+  const hardBoundaries = options.boundaries?.length
+    ? interiorBoundaries(xMin, xMax, options.boundaries)
+    : null;
+  // Each semantic interval gets its own equal-width bins. The shared nominal width
+  // remains the KDE's standard-bin unit; each interval's actual width may differ slightly.
+  // minimumBoundaryPlotWidth lets the caller keep every interval >= MIN_PITCH wide.
+  let hardBinCount = 0;
+  const hardEdges = hardBoundaries ? [xMin, ...hardBoundaries.map(item => item.value), xMax] : [];
+  const hardSections = hardEdges.slice(0, -1).map((lower, index) => {
+    const upper = hardEdges[index + 1];
+    const sectionLeft = xPx(lower);
+    const sectionWidth = xPx(upper) - sectionLeft;
+    const count = Math.max(1, Math.floor(sectionWidth / binPx + 1e-9));
+    const section = { lower, upper, firstBin: hardBinCount, count, left: sectionLeft, binPx: sectionWidth / count };
+    hardBinCount += count;
+    return section;
+  });
+  const numericBinCount = hardBoundaries ? hardBinCount : Math.max(1, lastBin - firstBin + 1);
   const binCount = numericBinCount + (isolatedIds.size > 0 ? 1 : 0);
 
   // 先分档：越出显示区间的点落到最边上的一档，并记下方向，之后画成三角。
   const entries = points.map(point => {
     if (isolatedIds.has(point.id)) return { id: point.id, x: point.x, bin: numericBinCount, clamped: null };
     const clamped: ClampDirection | null = point.x < xMin ? 'left' : point.x > xMax ? 'right' : null;
+    if (hardBoundaries) {
+      const sectionIndex = hardBoundaries.findIndex(boundary => (
+        point.x < boundary.value || (point.x === boundary.value && boundary.inclusiveSide === 'left')
+      ));
+      const section = hardSections[sectionIndex < 0 ? hardSections.length - 1 : sectionIndex];
+      const fraction = (point.x - section.lower) / (section.upper - section.lower);
+      const within = Math.min(section.count - 1, Math.max(0, Math.floor(fraction * section.count)));
+      return { id: point.id, x: point.x, bin: section.firstBin + within, clamped };
+    }
     const px = clamped === 'left' ? left : clamped === 'right' ? right : xPx(point.x);
     const bin = Math.min(numericBinCount - 1, Math.max(0, Math.floor((px - zeroPx) / binPx) - firstBin));
     return { id: point.id, x: point.x, bin, clamped };
@@ -140,9 +200,14 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const baseline = top + plotHeight;
   const cyAt = (rank: number) => baseline - (rank + 0.5) * pitchY;
   const pctAt = (cy: number) => ((cy - top) / plotHeight) * 100;
-  const cxAt = (bin: number) => bin === numericBinCount && isolatedLeft
-    ? isolatedLeft.cx
-    : zeroPx + (firstBin + bin + 0.5) * binPx;
+  const cxAt = (bin: number) => {
+    if (bin === numericBinCount && isolatedLeft) return isolatedLeft.cx;
+    if (hardBoundaries) {
+      const section = hardSections.find(item => bin < item.firstBin + item.count)!;
+      return section.left + (bin - section.firstBin + 0.5) * section.binPx;
+    }
+    return zeroPx + (firstBin + bin + 0.5) * binPx;
+  };
 
   const placed: StackPlacedPoint[] = [];
   const overflowByBin = new Map<number, StackOverflow>();
@@ -163,6 +228,13 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
     }
     const cy = cyAt(rank);
     placed.push({ id: entry.id, cx, cy, yPct: pctAt(cy), bin: entry.bin, rank, clamped: entry.clamped });
+  }
+
+  if (hardBoundaries) {
+    // Keep the overflow picker in the same value/id order as the visible stack.
+    for (const overflow of overflowByBin.values()) {
+      overflow.ids.sort((a, b) => (rankById.get(a) ?? 0) - (rankById.get(b) ?? 0));
+    }
   }
 
   return {

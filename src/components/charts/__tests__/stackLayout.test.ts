@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MARK_FOOTPRINT, MIN_PITCH } from '@/lib/chartTokens';
-import { columnStackLayout, stackLayout } from '../stackLayout';
+import { columnStackLayout, minimumBoundaryPlotWidth, stackLayout, type StackLayoutBoundary } from '../stackLayout';
 
 const OPTS = { xMin: -2, xMax: 10, left: 12, right: 840, top: 12, plotHeight: 492 };
 
@@ -172,6 +172,110 @@ describe('【用户要求】档边界锚在 0 上', () => {
     const result = stackLayout(pts([-1, -1, 0.5, 3, 3]), OPTS);
     expect(result.binCount * result.binPx).toBeCloseTo(OPTS.right - OPTS.left, 6);
     expect(result.binPx).toBeGreaterThanOrEqual(MIN_PITCH);
+  });
+});
+
+describe('stackLayout 硬风险边界', () => {
+  const boundaries: StackLayoutBoundary[] = [
+    { value: -10, inclusiveSide: 'left' },
+    { value: -1, inclusiveSide: 'right' },
+  ];
+  const riskDomain = { xMin: -12, xMax: 10 };
+
+  function riskOptions(viewportWidth: number) {
+    const width = Math.max(viewportWidth, minimumBoundaryPlotWidth(-12, 10, boundaries));
+    return { ...OPTS, ...riskDomain, right: OPTS.left + width, boundaries };
+  }
+
+  function pxAt(value: number, options: ReturnType<typeof riskOptions>) {
+    return options.left + (value - options.xMin) / (options.xMax - options.xMin) * (options.right - options.left);
+  }
+
+  it('窄屏以最小轨道宽度保留每个语义区间的14px点距，而不改变线性比例', () => {
+    expect(minimumBoundaryPlotWidth(-12, 10, boundaries)).toBe(22 * MIN_PITCH);
+    expect(minimumBoundaryPlotWidth(-12, 10)).toBe(MIN_PITCH);
+    expect(minimumBoundaryPlotWidth(1, 1, boundaries)).toBe(MIN_PITCH);
+    // Sorting, duplicate thresholds and out-of-domain thresholds must not create zero-width intervals.
+    expect(minimumBoundaryPlotWidth(-12, 10, [...boundaries, boundaries[0], { value: -99, inclusiveSide: 'left' }]))
+      .toBe(22 * MIN_PITCH);
+  });
+
+  it.each([828, 400, 240, 180])('可用视口 %ipx 时 −10 左侧含等号，−1 和0右侧含等号，所有边界不混档', viewportWidth => {
+    const options = riskOptions(viewportWidth);
+    const values = [-10.01, -10, -9.99, -1.01, -1, -0.99, -0.01, 0, 0.01];
+    const result = stackLayout(pts(values), options);
+    const placed = new Map(result.placed.map(item => [item.id, item]));
+    const x = (index: number) => placed.get(`p${index}`)!.cx;
+    expect(x(0)).toBeLessThan(pxAt(-10, options));
+    expect(x(1)).toBeLessThan(pxAt(-10, options));
+    expect(x(2)).toBeGreaterThan(pxAt(-10, options));
+    expect(placed.get('p1')!.bin).not.toBe(placed.get('p2')!.bin);
+    expect(x(3)).toBeLessThan(pxAt(-1, options));
+    expect(x(4)).toBeGreaterThan(pxAt(-1, options));
+    expect(x(5)).toBeGreaterThan(pxAt(-1, options));
+    expect(x(6)).toBeLessThan(pxAt(0, options));
+    expect(x(7)).toBeGreaterThan(pxAt(0, options));
+    expect(x(8)).toBeGreaterThan(pxAt(0, options));
+    const centers = [...new Set(result.placed.map(item => item.cx))].sort((a, b) => a - b);
+    for (let index = 1; index < centers.length; index += 1) {
+      expect(centers[index] - centers[index - 1]).toBeGreaterThanOrEqual(MIN_PITCH - 1e-9);
+    }
+    expect(result.binCounts.reduce((sum, count) => sum + count, 0)).toBe(values.length);
+    // The count of a bin is still its actual number of dots, with no collision-avoidance empty rows.
+    for (let bin = 0; bin < result.binCount; bin += 1) {
+      expect(result.placed.filter(item => item.bin === bin).map(item => item.rank).sort((a, b) => a - b))
+        .toEqual(Array.from({ length: result.binCounts[bin] }, (_, index) => index));
+    }
+  });
+
+  it('离群值只贴外缘；真实边界归属、原值排序及总数不变', () => {
+    const options = riskOptions(240);
+    const result = stackLayout(pts([-85.51, -12, -10, -9.99, 50]), options);
+    const byId = new Map(result.placed.map(item => [item.id, item]));
+    expect(byId.get('p0')!.clamped).toBe('left');
+    expect(byId.get('p0')!.bin).toBe(0);
+    expect(byId.get('p0')!.cx).toBeLessThan(pxAt(-10, options));
+    expect(byId.get('p1')!.clamped).toBeNull();
+    expect(byId.get('p2')!.cx).toBeLessThan(pxAt(-10, options));
+    expect(byId.get('p3')!.cx).toBeGreaterThan(pxAt(-10, options));
+    expect(byId.get('p4')!.clamped).toBe('right');
+    expect(byId.get('p4')!.bin).toBe(result.binCount - 1);
+    expect(result.placed).toHaveLength(5);
+  });
+
+  it('归零阈值全同值、overflow与独立左栏同时存在时各自计数准确且顺序确定', () => {
+    const options = {
+      ...riskOptions(240),
+      plotHeight: 96,
+      isolatedLeft: { ids: ['isolated'], cx: -30 },
+    };
+    const points = [...pts(Array(20).fill(-10)), { id: 'isolated', x: 0 }];
+    const result = stackLayout(points, options);
+    expect(result.placed.length + result.overflow.reduce((sum, item) => sum + item.count, 0)).toBe(21);
+    expect(result.binCounts.reduce((sum, count) => sum + count, 0)).toBe(21);
+    expect(result.binCounts[result.binCounts.length - 1]).toBe(1);
+    expect(result.placed.find(item => item.id === 'isolated')!.cx).toBe(-30);
+    expect(result.overflow).toHaveLength(1);
+    expect(result.overflow[0].cx).toBeLessThan(pxAt(-10, options));
+    expect(result.overflow[0].count).toBe(13);
+    const reversed = stackLayout([...points].reverse(), options);
+    expect([...reversed.placed].sort((a, b) => a.id.localeCompare(b.id)))
+      .toEqual([...result.placed].sort((a, b) => a.id.localeCompare(b.id)));
+    expect(reversed.overflow).toEqual(result.overflow);
+  });
+
+  it('非整数硬边界同样生效，且未启用新选项的旧布局输出逐项不变', () => {
+    const custom: StackLayoutBoundary[] = [{ value: 0.25, inclusiveSide: 'left' }];
+    const width = minimumBoundaryPlotWidth(-0.5, 2.5, custom);
+    const result = stackLayout(pts([0.249, 0.25, 0.251]), {
+      ...OPTS, xMin: -0.5, xMax: 2.5, right: OPTS.left + width, boundaries: custom,
+    });
+    const boundaryPx = OPTS.left + 0.75 / 3 * width;
+    expect(result.placed[0].cx).toBeLessThan(boundaryPx);
+    expect(result.placed[1].cx).toBeLessThan(boundaryPx);
+    expect(result.placed[2].cx).toBeGreaterThan(boundaryPx);
+    const points = pts([-1.61, -1, 0, 0.5, 3, 3, 50]);
+    expect(stackLayout(points, { ...OPTS, boundaries: [] })).toEqual(stackLayout(points, OPTS));
   });
 });
 

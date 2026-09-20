@@ -363,6 +363,97 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     );
   }
 
+  function mockNarrowTrack() {
+    const previousObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as typeof ResizeObserver;
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(240);
+    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(288);
+    // jsdom 的真实 scrollWidth 是 0；必须给非零值才能查出错误的默认右端滚动。
+    const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(1000);
+    return () => {
+      width.mockRestore();
+      height.mockRestore();
+      scrollWidth.mockRestore();
+      globalThis.ResizeObserver = previousObserver;
+    };
+  }
+
+  const narrowRiskAxis = {
+    mode: 'linear' as const, min: -12, max: 10,
+    boundaries: [{ value: -10, inclusiveSide: 'left' as const }, { value: -1, inclusiveSide: 'right' as const }],
+  };
+
+  it('硬边界窄屏可横向滚动但默认停在左侧风险区，时序仍从最新一端看起', () => {
+    const restore = mockNarrowTrack();
+    try {
+      const { unmount } = renderStack([-11, -10, -9.99, 0, 9], { xAxis: narrowRiskAxis });
+      const scroll = screen.getByTestId('scroll');
+      expect(scroll).toHaveAttribute('data-fit-mode', 'scroll');
+      const track = scroll.firstElementChild as HTMLElement;
+      expect(track).toHaveClass('overflow-x-auto');
+      expect(Number(track.querySelector('svg')!.getAttribute('width'))).toBeGreaterThan(track.clientWidth);
+      expect(track.scrollLeft).toBe(0);
+      expect(parseFloat(screen.getByTestId('st-0').style.left)).toBeLessThan(track.clientWidth);
+      unmount();
+
+      renderOrdinal(192);
+      const ordinalTrack = screen.getByTestId('scroll').firstElementChild as HTMLElement;
+      expect(screen.getByTestId('scroll')).toHaveAttribute('data-fit-mode', 'scroll');
+      expect(ordinalTrack.scrollLeft).toBe(ordinalTrack.scrollWidth);
+      expect(ordinalTrack.scrollLeft).toBeGreaterThan(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('硬边界窄屏的提示框始终夹在当前可见宽度内，滚动后跟随视口', () => {
+    const restore = mockNarrowTrack();
+    try {
+      renderStack([-11, 0, 9], { xAxis: narrowRiskAxis });
+      const track = screen.getByTestId('scroll').firstElementChild as HTMLElement;
+      fireEvent.focus(screen.getByTestId('st-2'));
+      const expectInsideViewport = () => {
+        const tooltip = screen.getByTestId('chart-tooltip');
+        const left = parseFloat(tooltip.style.left);
+        const maxWidth = parseFloat(tooltip.style.maxWidth);
+        expect(left).toBeGreaterThanOrEqual(track.scrollLeft + 8);
+        expect(left + maxWidth).toBeLessThanOrEqual(track.scrollLeft + track.clientWidth - 8);
+        expect(tooltip).toHaveTextContent('9R');
+        return left;
+      };
+      const initialLeft = expectInsideViewport();
+      track.scrollLeft = 80;
+      fireEvent.scroll(track);
+      expect(expectInsideViewport()).toBe(initialLeft + 80);
+    } finally {
+      restore();
+    }
+  });
+
+  it('超出图高的归零样本合并三角保留红色黄边和风险文字，普通档仍中性色', () => {
+    const warning = '按 10% 下注，本金归零；非实际账户强平判定。';
+    const values = [...Array.from({ length: 100 }, () => -11), ...Array.from({ length: 100 }, () => 0.5)];
+    renderStack(values, {
+      xAxis: narrowRiskAxis,
+      points: makeStackPoints(values).map(point => ({ ...point, warning: point.x <= -10 ? warning : undefined })),
+    });
+    const glyphs = screen.getAllByTestId('chart-stack-overflow');
+    const hits = screen.getAllByTestId('chart-stack-overflow-hit');
+    expect(glyphs).toHaveLength(2);
+    expect(glyphs[0]).toHaveStyle({ fill: 'var(--chart-loss)', stroke: 'var(--chart-threshold)' });
+    expect(hits[0]).toHaveAccessibleName(new RegExp(warning));
+    expect(hits[0]).toHaveAttribute('title', expect.stringContaining(warning));
+    expect(glyphs[1]).toHaveStyle({ fill: 'var(--chart-ink-muted)', stroke: 'var(--chart-surface)' });
+    expect(hits[1]).not.toHaveAccessibleName(/本金归零/);
+    const merged = glyphs.reduce((sum, glyph) => sum + Number(glyph.getAttribute('data-overflow-count')), 0);
+    const visible = screen.getByTestId('plot').querySelectorAll('button[data-campaign-id]').length;
+    expect(visible + merged).toBe(values.length);
+  });
+
   it('同一 x 的 5 个点从底线向上堆：5 个 mark、5 个 button、top% 严格递减、不滚动', () => {
     renderStack([0.5, 0.5, 0.5, 0.5, 0.5]);
     const plot = screen.getByTestId('plot');

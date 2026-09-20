@@ -2479,7 +2479,7 @@ export default function JournalCampaignDetailPage() {
                 )}
               />
               {(counterfactualDraft.params.manual_legs ?? []).length > 0 && (
-                <CounterfactualLegsTable campaign={campaign} legs={counterfactualDraft.params.manual_legs ?? []} result={counterfactualDraft.result} />
+                <CounterfactualLegsTable campaign={campaign} legs={counterfactualDraft.params.manual_legs ?? []} originalLegs={legs} result={counterfactualDraft.result} />
               )}
             </>
           )}
@@ -2584,6 +2584,7 @@ export default function JournalCampaignDetailPage() {
                 <CounterfactualLegsTable
                   campaign={campaign}
                   legs={selectedCounterfactual.params.manual_legs ?? []}
+                  originalLegs={legs}
                   result={selectedCounterfactual.result}
                   title={`反事实 Legs · ${selectedCounterfactual.label}`}
                 />

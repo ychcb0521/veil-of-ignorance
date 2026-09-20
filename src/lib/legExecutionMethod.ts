@@ -3,7 +3,7 @@ import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export type LegExecutionMethod = {
   kind: 'manual' | 'order' | 'unknown';
-  label: '手动' | '非手动' | '未记录';
+  label: '手动' | '自动' | '未记录';
   reason: string;
 };
 export type LegExecutionMethods = { open: LegExecutionMethod; close: LegExecutionMethod };
@@ -12,10 +12,28 @@ const unknown = (action: string): LegExecutionMethod => ({
   kind: 'unknown', label: '未记录', reason: `没有足够的${action}方式记录；历史回填、角色和市价成交不代表手动操作。`,
 });
 const manual = (reason: string): LegExecutionMethod => ({ kind: 'manual', label: '手动', reason });
-const order = (reason: string): LegExecutionMethod => ({ kind: 'order', label: '非手动', reason });
+const order = (reason: string): LegExecutionMethod => ({ kind: 'order', label: '自动', reason });
+
+/** 展示业务规则，不是成交来源证据：用户明确约定主力开单均为手动，不扩大到加仓或镜像腿。 */
+export function mainOpeningExecutionMethod(role: string | null | undefined): LegExecutionMethod | null {
+  return role === 'main_open' || role === 'reentry_main'
+    ? manual('按本系统的业务约定，主力开仓为手动；这不是从历史成交来源推断。')
+    : null;
+}
+
+/** 原始 Legs / 导出使用业务显示规则；持久化实际证据时使用下方 evidence 函数。 */
+export function resolveLegExecutionMethods(
+  leg: TradeJournal,
+  record: TradeRecord | null,
+  reverseOrders: CampaignReverseHedgeOrder[] = [],
+  tradeRecords: TradeRecord[] = [],
+): LegExecutionMethods {
+  const evidence = resolveLegExecutionMethodEvidence(leg, record, reverseOrders, tradeRecords);
+  return { ...evidence, open: mainOpeningExecutionMethod(leg.leg_role) ?? evidence.open };
+}
 
 /** Evidence only: a MARKET close record says nothing about how its position was opened. */
-export function resolveLegExecutionMethods(
+export function resolveLegExecutionMethodEvidence(
   leg: TradeJournal,
   record: TradeRecord | null,
   reverseOrders: CampaignReverseHedgeOrder[] = [],

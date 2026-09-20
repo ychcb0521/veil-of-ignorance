@@ -19,7 +19,7 @@ const record = {
 describe('反事实 actual 保存真实操作方式证据', () => {
   it('按实际记录保存开平方式，JSON 重载后仍在', () => {
     const [built] = buildManualLegs(params, [leg], [], [{ ...record, entry_method: 'manual', exit_method: 'tp1' }]);
-    expect(JSON.parse(JSON.stringify(built.actual))).toMatchObject({ entry_method: 'manual', exit_method: 'order' });
+    expect(JSON.parse(JSON.stringify(built.actual))).toMatchObject({ leg_role: 'hedge_rolling', entry_method: 'manual', exit_method: 'order' });
   });
 
   it('开平证据各自独立，未知侧不添加字段；MARKET 和角色不作为来源', () => {
@@ -48,5 +48,11 @@ describe('反事实 actual 保存真实操作方式证据', () => {
       reverseHedgeOrders: [{ ...reverseOrder, status: 'pending', triggeredAt: null }],
     });
     expect(pending.actual).not.toHaveProperty('entry_method');
+  });
+
+  it('主力业务标记不写成实际来源证据；保存原始角色供未改动反事实复用', () => {
+    const [built] = buildManualLegs(params, [{ ...leg, leg_role: 'main_open', order_kind: 'main', direction: 'long' }], [], [{ ...record, side: 'LONG' }]);
+    expect(built.actual?.leg_role).toBe('main_open');
+    expect(built.actual).not.toHaveProperty('entry_method');
   });
 });

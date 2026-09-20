@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { CampaignMetricPoint } from '@/lib/campaignMetricSeries';
 import type { ScatterStackScale } from '@/components/charts/stackLayout';
 import {
+  CAPITAL_RUIN_THRESHOLD,
   DOMAIN_CAP,
   TAIL_THRESHOLD,
   buildOddsDistributionModel,
   kdeCountPath,
+  isFixedBetRuin,
   metricDistributionDomain,
   oddsDistributionDomain,
 } from '@/lib/oddsDistribution';
+import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
 
 function lcg(seed: number) {
   let state = seed >>> 0;
@@ -82,9 +85,59 @@ describe('oddsDistributionDomain', () => {
   it('全部落在 −1..+1 时给最小窗口 −2..+2', () => {
     expect(oddsDistributionDomain([-0.9, -0.2, 0.1, 0.8])).toEqual({ min: -2, max: 2, ticks: [-2, -1, 0, 1, 2] });
   });
+
+  it('即便归零点不足 2%，仍将 −10R 界限纳入视野，并裁边极端负尾', () => {
+    const bulk = Array.from({ length: 100 }, (_, i) => 0.1 + i * 0.05);
+    const domain = oddsDistributionDomain([-85.51, ...bulk]);
+    expect(domain.min).toBe(-12);
+    expect(domain.min).toBeLessThan(CAPITAL_RUIN_THRESHOLD);
+    expect(domain.max).toBeGreaterThan(0);
+    expect(domain.max).toBeLessThanOrEqual(DOMAIN_CAP);
+    expect(domain.ticks[0]).toBe(domain.min);
+    expect(domain.ticks[domain.ticks.length - 1]).toBe(domain.max);
+    expect(domain.ticks.every((value, index) => index === 0 || value > domain.ticks[index - 1])).toBe(true);
+    expect(domain.ticks.length).toBeLessThanOrEqual(8);
+  });
+
+  it('恰好 −10R 也打开归零区，只有 −9.99R 时不启用固定 −12R 左界', () => {
+    const bulk = Array.from({ length: 100 }, () => 0.5);
+    expect(oddsDistributionDomain([-10, ...bulk]).min).toBe(-12);
+    expect(oddsDistributionDomain([-9.99, ...bulk])).toEqual({ min: -2, max: 2, ticks: [-2, -1, 0, 1, 2] });
+  });
+});
+
+describe('固定 10% 下注归零判定', () => {
+  it('阈值从固定下注比例推导，含等号但不吞掉临界值上方样本', () => {
+    expect(FIXED_DRAWDOWN_FRACTION).toBe(0.1);
+    expect(CAPITAL_RUIN_THRESHOLD).toBe(-1 / FIXED_DRAWDOWN_FRACTION);
+    expect(isFixedBetRuin(-10.01)).toBe(true);
+    expect(isFixedBetRuin(-10)).toBe(true);
+    expect(isFixedBetRuin(-9.99)).toBe(false);
+    expect(isFixedBetRuin(-10 + 1e-10)).toBe(false);
+    expect(isFixedBetRuin(0)).toBe(false);
+  });
+
+  it('非有限值不能充当归零样本', () => {
+    for (const value of [NaN, Infinity, -Infinity]) expect(isFixedBetRuin(value)).toBe(false);
+  });
 });
 
 describe('buildOddsDistributionModel', () => {
+  it('归零样本的裁边仅改变显示窗口，不改原始值、均值、样本量与胜率', () => {
+    const values = [-85.51, ...Array.from({ length: 100 }, (_, i) => 0.1 + i * 0.05)];
+    const model = buildOddsDistributionModel(toPoints(values));
+    expect(model.domain.min).toBe(-12);
+    expect(model.summary.min).toBe(-85.51);
+    expect(model.summary.n).toBe(101);
+    expect(model.summary.winCount).toBe(100);
+    expect(model.summary.winRate).toBeCloseTo(100 / 101, 9);
+    expect(model.summary.median).toBeCloseTo(2.55, 9);
+    expect(model.summary.mean).toBeCloseTo(values.reduce((sum, value) => sum + value, 0) / values.length, 9);
+    expect(model.values).toEqual(values);
+    expect(model.sortedPoints[0]).toMatchObject({ campaignId: 'c0', value: -85.51 });
+    expect(model.sortedPoints).toHaveLength(101);
+  });
+
   it('胜率 = b>0 占比，右尾 = b>+5R 场数，范围 / 中位数 / 均值按原始值', () => {
     const values = [-1.5, -0.5, 0, 0.5, 1, 6, 38];
     const model = buildOddsDistributionModel(toPoints(values));

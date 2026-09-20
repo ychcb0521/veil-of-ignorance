@@ -8,7 +8,7 @@ import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
 import { legRowStatus } from '@/lib/legRowStatus';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
-import { resolveLegExecutionMethods } from '@/lib/legExecutionMethod';
+import { resolveLegExecutionMethods, type LegExecutionMethod } from '@/lib/legExecutionMethod';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
@@ -106,6 +106,8 @@ export type CampaignLegsExportCellLine = {
   chip?: CampaignLegsExportChip;
   /** 正文左缩进（px）：阶段子行的「阶段 N」与主力角色标签里的字对齐（= 标签左内边距），与页面的缩进一致。 */
   indent?: number;
+  /** 状态与（开）/（平）分开绘制，固定两列位置；不因「未记录」多一个字而错位。 */
+  operation?: { action: '开' | '平'; label: string };
 };
 
 export type CampaignLegsExportChip = {
@@ -157,7 +159,7 @@ const COLUMNS = [
   { title: 'Δb', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
-  // 开 / 平各一行，历史记录没有可靠来源时明确写「未记录」，不从角色或是否回填推断。
+  // 开 / 平各一行；主力开仓遵循业务约定，其余历史记录没有可靠来源时明确写「未记录」。
   { title: '操作方式', width: 102 },
   // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
   { title: '涨跌幅', width: 120 },
@@ -178,6 +180,7 @@ const COLUMNS = [
  * （主多「多单占比」、主空「空单占比」，两个都是四个汉字，宽度不变）。
  */
 const SHARE_COLUMN_INDEX = COLUMNS.findIndex(column => column.title === LEG_POSITION_SHARE_COLUMN_TITLES.long);
+const EXECUTION_METHOD_COLUMN_INDEX = COLUMNS.findIndex(column => column.title === '操作方式');
 
 const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
 const MARGIN_X = 40;
@@ -325,6 +328,16 @@ function positionShareLines(
 }
 
 const EMPTY_CELL: CampaignLegsExportCellLine[] = [{ text: '' }];
+
+function executionMethodCellLine(action: '开' | '平', method: LegExecutionMethod): CampaignLegsExportCellLine {
+  return {
+    text: `${method.label}（${action}）`,
+    color: method.kind === 'manual' ? '#A66B12' : method.kind === 'order' ? '#848E9C' : '#B4BBC5',
+    bold: method.kind === 'manual',
+    size: 11,
+    operation: { action, label: method.label },
+  };
+}
 
 /**
  * 腿行的「占比」格（与页面同源）：上行币量占比、下行名义仓位占比，只有本列那一侧（战役主方向）的行有数；
@@ -744,8 +757,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       [{ text: fmtPrice(entryPriceValue) }],
       exitPriceLines,
       [
-        { text: `开 ${executionMethods.open.label}`, color: '#848E9C', size: 11 },
-        { text: `平 ${executionMethods.close.label}`, color: '#848E9C', size: 11 },
+        executionMethodCellLine('开', executionMethods.open),
+        executionMethodCellLine('平', executionMethods.close),
       ],
       // 涨跌幅：开仓价 → 平仓价的价格变化，按这条腿的方向计，与前面的开平价格同一对价
       priceChangeCell(entryPriceValue, exitPriceValue, leg.direction === 'short' ? 'short' : 'long', '#5F6B7A'),
@@ -1029,6 +1042,18 @@ function drawLines(
   lines.forEach(line => {
     // 大字号行先把自己的基线往下推出多出来的那截，才不会压到上一行；之后按常规行距往下走
     offset += exportLineHeight(line) - LINE_H;
+    if (line.operation) {
+      // 操作列宽 102、左右各 10 内边距，中间固定 68px（状态 33 + 间隔 2 + 括号动作 33）。
+      const statusRight = x + 7 + 33;
+      ctx.font = cellFont(line);
+      ctx.fillStyle = line.color ?? '#848E9C';
+      ctx.fillText(line.operation.label, statusRight - ctx.measureText(line.operation.label).width, y + offset);
+      ctx.font = cellFont({ ...line, bold: false });
+      ctx.fillStyle = '#B4BBC5';
+      ctx.fillText(`（${line.operation.action}）`, statusRight + 2, y + offset);
+      offset += LINE_H;
+      return;
+    }
     // 角色标签先画底，字再压在上面。导出图是白底，与页面浅色主题一样：空心标签的字不再淡一档（品牌色在白底上本来就浅）
     if (line.chip) drawChip(ctx, line, x, y + offset);
     // 方向标签单独着色；隐藏标签只占位。正文右移的距离与折行时量的是同一个 tagOffset
@@ -1060,7 +1085,8 @@ function drawLegsTable(
   ctx.fillStyle = '#64748B';
   COLUMNS.forEach((column, index) => {
     const title = index === SHARE_COLUMN_INDEX ? LEG_POSITION_SHARE_COLUMN_TITLES[shareSide] : column.title;
-    ctx.fillText(title, x + 10, y + 24, column.width - 20);
+    const titleX = index === EXECUTION_METHOD_COLUMN_INDEX ? x + (column.width - ctx.measureText(title).width) / 2 : x + 10;
+    ctx.fillText(title, titleX, y + 24, column.width - 20);
     x += column.width;
   });
 

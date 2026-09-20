@@ -26,9 +26,16 @@ describe('Legs 开平操作方式', () => {
     const column = titles.indexOf('操作方式');
     expect(titles.slice(column - 1, column + 2)).toEqual(['平仓价', '操作方式', '涨跌幅']);
     const cell = screen.getByTestId('leg-execution-method-main');
-    expect([...cell.children].map(line => line.textContent)).toEqual(['开 手动', '平 非手动']);
+    expect([...cell.children].map(line => line.textContent)).toEqual(['手动（开）', '自动（平）']);
     expect(cell.className).toContain('text-muted-foreground');
-    expect(screen.getByTestId('leg-execution-method-hedge')).toHaveTextContent('开 非手动平 手动');
+    expect(screen.getByTestId('leg-execution-method-hedge')).toHaveTextContent('自动（开）手动（平）');
+    for (const line of cell.children) {
+      expect(line.className).toContain('grid-cols-[3em_3em]');
+      expect(line.children.length).toBe(2);
+    }
+    expect(cell.children[0].children[0].className).toContain('text-amber-700/90');
+    expect(cell.children[1].children[0].className).not.toContain('amber');
+    expect(cell.children[0].children[1].className).toContain('text-muted-foreground/45');
     expect(screen.getByTestId('leg-frozen-role-hedge')).toHaveTextContent('滚动对冲 1');
     fireEvent.click(screen.getByTestId('leg-phases-toggle-main'));
     const phases = screen.getByTestId('leg-phases-main');
@@ -39,8 +46,14 @@ describe('Legs 开平操作方式', () => {
     }
     expect(hedge.leg_role).toBe('standalone');
   });
-  it('does not classify a synthetic or retroactive MARKET record as manual', () => {
+  it('主力按业务约定显示手动开仓；平仓未知依旧未记录', () => {
     render(<CampaignLegsList legs={[main]} tradeRecords={records.slice(0, 1).map(record => ({ ...record, entry_method: undefined, exit_method: undefined }))} />);
-    expect(screen.getByTestId('leg-execution-method-main')).toHaveTextContent('开 未记录平 未记录');
+    expect(screen.getByTestId('leg-execution-method-main')).toHaveTextContent('手动（开）未记录（平）');
+  });
+  it('加仓不套用主力手动规则，无证据的 MARKET 记录仍未记录', () => {
+    render(<CampaignLegsList legs={[{ ...main, leg_role: 'main_add_1' }]} tradeRecords={records.slice(0, 1).map(record => ({ ...record, entry_method: undefined, exit_method: undefined }))} />);
+    const cell = screen.getByTestId('leg-execution-method-main');
+    expect(cell).toHaveTextContent('未记录（开）未记录（平）');
+    expect(cell.children[0].children[0].className).toContain('text-muted-foreground/45');
   });
 });
