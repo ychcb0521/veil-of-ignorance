@@ -37,6 +37,11 @@ const RUIN_BOUNDARIES = [
   { value: CAPITAL_RUIN_THRESHOLD, inclusiveSide: 'left' as const },
   { value: -1, inclusiveSide: 'right' as const },
 ];
+// The geometric chart stores G−1 and positions positive factors at ln(G).
+const GEOMETRIC_REFERENCE_FACTOR = 0.9;
+// Use the stored edge's representation so an exact −0.1 is not rounded across the boundary.
+const GEOMETRIC_REFERENCE_X = Math.log1p(-0.1);
+const GEOMETRIC_BOUNDARIES = [{ value: GEOMETRIC_REFERENCE_X, inclusiveSide: 'right' as const }];
 
 /**
  * 时序：横轴按操作时间排战役；
@@ -595,6 +600,7 @@ export function CampaignMetricScatterPlot({
     ...geometricDist.domain,
     labels: geometricDist.labels,
     integerBoundaries: false,
+    boundaries: GEOMETRIC_BOUNDARIES,
   } : dist ? {
     mode: 'linear',
     min: dist.domain.min,
@@ -623,9 +629,19 @@ export function CampaignMetricScatterPlot({
       kind: 'zero',
       // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00。
       label: `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
+      labelSide: geometricDistribution ? 'right' : undefined,
       testId: `campaign-metric-break-even-${metricKey}`,
       dataAttrs: { 'data-reference-value': 0 },
     };
+    if (geometricDistribution) return [
+      {
+        axis: 'x', value: GEOMETRIC_REFERENCE_X, kind: 'threshold',
+        label: '0.90 参考线', labelSide: 'left',
+        testId: `campaign-metric-geometric-reference-${metricKey}`,
+        dataAttrs: { 'data-reference-value': GEOMETRIC_REFERENCE_FACTOR },
+      },
+      breakEven,
+    ];
     if (!oddsFamily) return [breakEven];
     return [
       ...(showRuinBoundary ? [{
@@ -644,7 +660,7 @@ export function CampaignMetricScatterPlot({
       },
       breakEven,
     ];
-  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary]);
+  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution]);
 
   const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
     <path
@@ -760,7 +776,7 @@ export function CampaignMetricScatterPlot({
           ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10R；出现 b ≤ −10 时，左端固定为 −12R，保证归零界限可见且不被极端亏损挤压。超出窗口的点贴边画三角，保留原值、黄色风险描边及统计；−1R 止损线仍保留。</dd>
           ) : geometricDist ? (
-            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
+            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。0.90 处另画黄色参考线，与 1.00 盈亏平衡线区分；0.90 不是本金归零。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
           ) : dist ? (
             <dd>横轴就是{axisLabel ?? metricLabel}本身，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把盈亏分界圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
@@ -796,7 +812,7 @@ export function CampaignMetricScatterPlot({
                 ? showRuinBoundary
                   ? '：在 −10R、−1R、0 分区内分别等宽分档，点不跨越边界；恰好 −10R 归入左侧风险区。密度曲线按标准档宽近似换算，边界附近档宽可能略有不同。窄屏必要时可左右滑动；精确 b 看提示框。'
                   : '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
-                : geometricDist ? '：按对数等宽分档，1.00 为档边界，亏损点不会跨到盈利侧；精确倍数看提示框，原始指标计算不变。'
+                : geometricDist ? '：按对数空间分档，0.90 和 1.00 为档边界，点位不会跨过参考线或盈亏分界；精确倍数看提示框，原始指标计算不变。'
                 : '；精确数值看提示框。'}
               纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。
             </dd>

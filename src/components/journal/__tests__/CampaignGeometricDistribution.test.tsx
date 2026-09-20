@@ -3,12 +3,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { CampaignMetricScatterPlot } from '../CampaignOddsScatterPlot';
 import { CHART_THRESHOLD_VAR } from '@/lib/chartTokens';
 
-function renderChart(factors: number[], metricKey = 'geometricExpectancyDistribution') {
+function renderChart(factors: number[], metricKey = 'geometricExpectancyDistribution', storedEdges?: number[]) {
   const onSelect = vi.fn();
   render(<CampaignMetricScatterPlot
     points={factors.map((factor, index) => ({
       campaignId: `c${index}`, title: `战役 ${index}`, symbol: 'TESTUSDT',
-      value: factor - 1, sequence: index + 1, operationTime: 1_700_000_000_000 + index,
+      value: storedEdges?.[index] ?? factor - 1, sequence: index + 1, operationTime: 1_700_000_000_000 + index,
       payoffRatio: (factor - 1) * 10,
     }))}
     metricKey={metricKey} metricLabel="几何期望分布" seriesLabel="几何期望分布"
@@ -92,5 +92,35 @@ describe('campaign geometric distribution', () => {
     expect(screen.getByTestId('campaign-metric-scatter-plot')).not.toHaveAttribute('data-x-scale');
     expect(screen.queryByTestId('chart-isolated-bucket-label')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-metric-loss-wall-oddsDistribution')).toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-metric-geometric-reference-oddsDistribution')).not.toBeInTheDocument();
+  });
+
+  it.each([[0, 0.5, 0.8999, 0.9, 0.9001, 1, 2, 50], [0, 0, 0], [1.1, 2, 5]])(
+    'always shows the 0.90 yellow reference separately from break-even and ruin (%j)',
+    (...factors) => {
+      renderChart(factors);
+      const reference = screen.getByTestId('campaign-metric-geometric-reference-geometricExpectancyDistribution');
+      expect(reference).toHaveAttribute('data-reference-value', '0.9');
+      expect(reference).toHaveAttribute('data-reference-axis', 'x');
+      expect(reference).toHaveStyle({ stroke: CHART_THRESHOLD_VAR });
+      expect(screen.getByTestId('campaign-metric-geometric-reference-geometricExpectancyDistribution-label')).toHaveTextContent('0.90 参考线');
+      const breakEven = screen.getByTestId('campaign-metric-break-even-geometricExpectancyDistribution');
+      const x = Number(reference.getAttribute('x1'));
+      expect(x).toBeLessThan(Number(breakEven.getAttribute('x1')));
+      const zeroDivider = screen.queryByTestId('chart-isolated-bucket-divider');
+      if (zeroDivider) expect(x).toBeGreaterThan(Number(zeroDivider.getAttribute('x1')));
+    },
+  );
+
+  it('keeps points on the correct side of 0.90 after stacking, including the stored −0.1 edge', () => {
+    const factors = [0.5, 0.8999, 0.9, 0.9, 0.9001, 1, 2];
+    renderChart(factors, 'geometricExpectancyDistribution', [-0.5, -0.1001, -0.1, 0.9 - 1, -0.0999, 0, 1]);
+    const referenceX = Number(screen.getByTestId('campaign-metric-geometric-reference-geometricExpectancyDistribution').getAttribute('x1'));
+    const breakEvenX = Number(screen.getByTestId('campaign-metric-break-even-geometricExpectancyDistribution').getAttribute('x1'));
+    const x = (index: number) => parseFloat(screen.getByTestId(`campaign-metric-point-geometricExpectancyDistribution-c${index}`).style.left);
+    expect([0, 1].every(index => x(index) < referenceX)).toBe(true);
+    expect([2, 3, 4].every(index => x(index) > referenceX && x(index) < breakEvenX)).toBe(true);
+    fireEvent.focus(screen.getByTestId('campaign-metric-point-geometricExpectancyDistribution-c2'));
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.90');
   });
 });
