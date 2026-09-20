@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { CampaignMetricScatterPlot } from '../CampaignOddsScatterPlot';
+import { CHART_THRESHOLD_VAR } from '@/lib/chartTokens';
 
 function renderChart(factors: number[], metricKey = 'geometricExpectancyDistribution') {
   const onSelect = vi.fn();
@@ -35,6 +36,12 @@ describe('campaign geometric distribution', () => {
     expect([1, 2, 3, 4].every(index => x(index) < breakEvenX)).toBe(true);
     expect([6, 7, 8].every(index => x(index) > breakEvenX)).toBe(true);
     expect(screen.getByTestId('chart-isolated-bucket-label')).toHaveTextContent('0本金归零');
+    const zeroDivider = screen.getByTestId('chart-isolated-bucket-divider');
+    expect(zeroDivider).toHaveAttribute('data-divider-kind', 'threshold');
+    expect(zeroDivider).toHaveStyle({ stroke: CHART_THRESHOLD_VAR });
+    expect(screen.getByTestId('chart-isolated-bucket-divider-label')).toHaveTextContent('归零界限');
+    expect(x(0)).toBeLessThan(Number(zeroDivider.getAttribute('x1')));
+    expect(x(1)).toBeGreaterThan(Number(zeroDivider.getAttribute('x1')));
     const summary = screen.getByTestId('campaign-metric-summary-geometricExpectancyDistribution');
     expect(summary).toHaveTextContent('范围 0.00 – 50.00');
     expect(summary).toHaveTextContent('中位数 0.80');
@@ -51,6 +58,7 @@ describe('campaign geometric distribution', () => {
     expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution').getAttribute('d')).not.toMatch(/NaN|Infinity/);
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
     expect(screen.getByTestId('campaign-metric-guide-geometricExpectancyDistribution')).toHaveTextContent('ln(Gᵢ) 对数刻度');
+    expect(screen.getByTestId('campaign-metric-guide-geometricExpectancyDistribution')).toHaveTextContent('黄色分隔线');
   });
 
   it('shows all-zero results without a misleading continuous density', () => {
@@ -60,12 +68,23 @@ describe('campaign geometric distribution', () => {
     const points = screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]');
     expect(points).toHaveLength(3);
     expect(new Set([...points].map(point => point.style.left)).size).toBe(1);
+    expect(screen.getByTestId('chart-isolated-bucket-divider-label')).toHaveTextContent('归零界限');
   });
 
   it('has no zero rail when no factor is zero', () => {
     renderChart([0.5, 1, 2]);
     expect(screen.queryByTestId('chart-isolated-bucket-label')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chart-isolated-bucket-divider')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-metric-summary-geometricExpectancyDistribution')).toHaveTextContent('范围 0.50 – 2.00');
+  });
+
+  it('does not mistake an edge of −0.9 (G=0.1) for the capital-zero boundary', () => {
+    renderChart([0.1, 0.5, 1, 2]);
+    expect(screen.queryByTestId('chart-isolated-bucket-divider-label')).not.toBeInTheDocument();
+    const point = screen.getByTestId('campaign-metric-point-geometricExpectancyDistribution-c0');
+    expect(point).toHaveAttribute('data-metric-value', '-0.9');
+    fireEvent.focus(point);
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.10 · b -9.00R');
   });
 
   it('does not transform other distribution metrics', () => {

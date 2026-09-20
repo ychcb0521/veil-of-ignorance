@@ -118,7 +118,13 @@ export type ScatterPlotProps = {
   /** 只在场数轴下调用：画在参考线之后、点位之前，并被裁进绘图区。 */
   overlay?: (scale: ScatterStackScale) => ReactNode;
   /** A separate count column for values excluded from the continuous axis (e.g. log(0)). */
-  isolatedLeftBucket?: { pointIds: string[]; label: string };
+  isolatedLeftBucket?: {
+    pointIds: string[];
+    label: string;
+    /** The divider is categorical, not a finite coordinate on the continuous axis. */
+    dividerKind?: 'neutral' | 'threshold';
+    dividerLabel?: string;
+  };
   bandCounts?: ScatterBandCounts;
   onSelect?: (id: string) => void;
   onActiveChange?: (id: string | null) => void;
@@ -711,10 +717,11 @@ export function ScatterPlot({
                   {hasIsolatedBucket && (
                     <line
                       data-testid="chart-isolated-bucket-divider"
+                      data-divider-kind={isolatedLeftBucket?.dividerKind ?? 'neutral'}
                       x1={numericLeft - 16} x2={numericLeft - 16}
                       y1={PLOT_INSET.top} y2={PLOT_INSET.top + plotHeight}
                       strokeDasharray="3 4"
-                      style={{ stroke: CHART_AXIS_VAR, strokeWidth: 1 }}
+                      style={{ stroke: isolatedLeftBucket?.dividerKind === 'threshold' ? CHART_THRESHOLD_VAR : CHART_AXIS_VAR, strokeWidth: 1 }}
                     />
                   )}
                   {renderAxis.ticks.map(tick => {
@@ -875,6 +882,19 @@ export function ScatterPlot({
                       </text>
                     );
                   }) : null}
+                  {hasIsolatedBucket && isolatedLeftBucket?.dividerLabel && (
+                    <text
+                      data-testid="chart-isolated-bucket-divider-label"
+                      x={isolatedCx}
+                      y={PLOT_INSET.top + 9}
+                      textAnchor="middle"
+                      paintOrder="stroke"
+                      className="font-mono"
+                      style={{ fontSize: 9, fontWeight: 500, fill: 'var(--chart-ink-muted)', stroke: CHART_SURFACE_VAR, strokeWidth: 3 }}
+                    >
+                      {isolatedLeftBucket.dividerLabel}
+                    </text>
+                  )}
                 </svg>
 
                 <div className="absolute left-0" style={{ top: PLOT_INSET.top, bottom: PLOT_INSET.bottom, width: contentWidth }}>

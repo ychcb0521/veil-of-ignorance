@@ -8,7 +8,8 @@ import type {
   TradeJournal,
 } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
-import { mainOpeningExecutionMethod, type LegExecutionMethod, type LegExecutionMethods } from '@/lib/legExecutionMethod';
+import { mainOpeningExecutionMethod, manualExecutionFallback, mirrorOpeningExecutionMethod, mirrorClosingExecutionMethod, type LegExecutionMethod, type LegExecutionMethods } from '@/lib/legExecutionMethod';
+import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
 
 interface Props {
   campaign: TradeCampaign;
@@ -16,28 +17,32 @@ interface Props {
   result: CampaignCounterfactualResult;
   /** 旧分支缺少原始角色快照时，按同 id 的真实战役腿核对；不会用于新增模拟腿。 */
   originalLegs?: readonly TradeJournal[];
+  originalTradeRecords?: TradeRecord[];
   title?: string;
 }
 
-function counterfactualExecutionMethods(leg: CampaignCounterfactualManualLeg, filled: boolean, originalLeg?: TradeJournal): LegExecutionMethods {
+function counterfactualExecutionMethods(leg: CampaignCounterfactualManualLeg, filled: boolean, originalLeg?: TradeJournal, mirrorReductionPct?: number | null): LegExecutionMethods {
   const actual = leg.actual;
   const sameTime = (left: string, right: string) => Number.isFinite(Date.parse(left)) && Date.parse(left) === Date.parse(right);
   const samePrice = (left: number, right: number) => Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-9;
   const originalRole = actual?.leg_role ?? (originalLeg?.id === leg.id ? originalLeg.leg_role : null);
   const roleUnchanged = actual != null && (originalRole == null || leg.leg_role === originalRole);
-  const openUnchanged = actual != null && roleUnchanged && leg.direction === actual.direction
+  const mirror = leg.leg_role === 'mirror_tp';
+  const mirrorSizeUnchanged = !mirror || (actual != null && samePrice(leg.size_usdt, actual.size_usdt));
+  const openUnchanged = actual != null && roleUnchanged && mirrorSizeUnchanged && leg.direction === actual.direction
     && sameTime(leg.open_time, actual.open_time) && samePrice(leg.entry_price, actual.entry_price);
-  const closeUnchanged = actual != null && !actual.close_time_fallback && !actual.still_open
+  const closeUnchanged = actual != null && roleUnchanged && leg.direction === actual.direction
+    && mirrorSizeUnchanged && !actual.close_time_fallback && !actual.still_open
     && sameTime(leg.close_time, actual.close_time) && samePrice(leg.exit_price, actual.exit_price);
   const method = (kind: 'manual' | 'order' | 'unknown' | undefined, unchanged: boolean, action: string): LegExecutionMethod => {
     if (!filled || !unchanged || (kind !== 'manual' && kind !== 'order')) {
-      return {
+      return manualExecutionFallback({
         kind: 'unknown', label: '未记录',
         reason: !filled ? '本条反事实未成交，没有实际操作方式。'
           : action === '平仓' && (actual?.close_time_fallback || actual?.still_open) ? '没有已确认的实际平仓；模拟平仓时间不代表实际操作方式。'
           : actual && !unchanged ? `反事实${action}参数已改变，不沿用实际交易的操作方式；修改模拟参数不代表手动交易。`
             : `保存分支没有可信的实际${action}方式记录；修改模拟参数不代表手动交易。`,
-      };
+      }, filled && unchanged && actual?.source === 'records');
     }
     return {
       kind, label: kind === 'manual' ? '手动' : '自动',
@@ -48,7 +53,13 @@ function counterfactualExecutionMethods(leg: CampaignCounterfactualManualLeg, fi
   // 新增腿 / 改角色、方向、价格、时间后的模拟开仓不能冒充一次真实手动交易。
   const mainRule = filled && openUnchanged && originalRole === leg.leg_role
     ? mainOpeningExecutionMethod(originalRole) : null;
-  return { open: mainRule ?? method(actual?.entry_method, openUnchanged, '开仓'), close: method(actual?.exit_method, closeUnchanged, '平仓') };
+  const mirrorRoleConfirmed = mirror && originalRole === 'mirror_tp';
+  return {
+    open: filled && openUnchanged && mirrorRoleConfirmed ? mirrorOpeningExecutionMethod()
+      : mainRule ?? method(actual?.entry_method, openUnchanged, '开仓'),
+    close: (filled && closeUnchanged && roleUnchanged && mirrorRoleConfirmed ? mirrorClosingExecutionMethod(mirrorReductionPct) : null)
+      ?? method(actual?.exit_method, closeUnchanged, '平仓'),
+  };
 }
 
 /**
@@ -60,6 +71,7 @@ function adaptCounterfactualLegs(
   legs: CampaignCounterfactualManualLeg[],
   result: CampaignCounterfactualResult,
   originalLegs: readonly TradeJournal[],
+  originalTradeRecords: TradeRecord[],
 ): { journals: TradeJournal[]; records: TradeRecord[]; executionMethods: Map<string, LegExecutionMethods> } {
   const records: TradeRecord[] = [];
   const executionMethods = new Map<string, LegExecutionMethods>();
@@ -68,7 +80,12 @@ function adaptCounterfactualLegs(
     const summary = result.legs_summary[index]
       ?? result.legs_summary.find(item => item.leg_role === leg.leg_role);
     const filled = leg.enabled && leg.filled !== false && summary?.status !== 'never_triggered';
-    executionMethods.set(leg.id, counterfactualExecutionMethods(leg, filled, originalById.get(leg.id)));
+    const original = originalById.get(leg.id);
+    const originalOrderKind = leg.actual && original?.leg_role === leg.leg_role ? original.order_kind
+      : leg.actual?.leg_role === leg.leg_role ? leg.actual.order_kind : undefined;
+    const mirrorRatio = original?.leg_role === 'mirror_tp'
+      ? resolveMirrorCloseRatio(campaign, original, [...originalLegs], originalTradeRecords)?.reductionPct : null;
+    executionMethods.set(leg.id, counterfactualExecutionMethods(leg, filled, original, mirrorRatio));
     const recordId = filled ? `counterfactual-record-${leg.id}` : null;
     const openTime = new Date(leg.open_time).getTime();
     const closeTime = new Date(leg.close_time).getTime();
@@ -116,7 +133,7 @@ function adaptCounterfactualLegs(
       direction: leg.direction,
       leverage: leg.leverage,
       position_mode: null,
-      order_kind: leg.leg_role.startsWith('hedge_') || leg.leg_role === 'reentry_hedge' ? 'hedge' : 'main',
+      order_kind: leg.leg_role.startsWith('hedge_') || leg.leg_role === 'reentry_hedge' ? 'hedge' : originalOrderKind ?? 'main',
       pre_simulated_time: leg.open_time,
       pre_real_time: leg.open_time,
       pre_entry_price: leg.entry_price,
@@ -152,8 +169,8 @@ function adaptCounterfactualLegs(
   return { journals, records, executionMethods };
 }
 
-export function CounterfactualLegsTable({ campaign, legs, result, originalLegs = [], title = '反事实 Legs' }: Props) {
-  const { journals, records, executionMethods } = adaptCounterfactualLegs(campaign, legs, result, originalLegs);
+export function CounterfactualLegsTable({ campaign, legs, result, originalLegs = [], originalTradeRecords = [], title = '反事实 Legs' }: Props) {
+  const { journals, records, executionMethods } = adaptCounterfactualLegs(campaign, legs, result, originalLegs, originalTradeRecords);
 
   return (
     <section data-testid="counterfactual-result-legs" className="mt-3 space-y-3">

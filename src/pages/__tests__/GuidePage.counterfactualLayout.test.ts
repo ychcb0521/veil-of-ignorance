@@ -25,7 +25,9 @@ describe('指南：反事实盈亏概览的分栏', () => {
 
   it('已保存分支的按钮写在左栏；卡片标题与页面同一个字', () => {
     expect(guide).not.toContain('面板上可以「删除」');
-    expect(guide).toContain('左栏「相对原始的变化情况」另写分支类型（推演分支带 SOP 分数）与保存时刻，可以在那里「删除」');
+    const savedBranchClause = guide.match(/<li>已保存分支逐行列出[\s\S]*?<\/li>/)?.[0] ?? '';
+    expect(savedBranchClause).toContain('左栏「相对原始的变化情况」另写分支类型（推演分支带 SOP 分数）与保存时刻');
+    expect(savedBranchClause).toContain('可以在那里「删除」，也可以「载入到 Legs 副本」');
     expect(row).toContain("COUNTERFACTUAL_CHANGES_TITLE = '相对原始的变化情况'");
     // 全篇只用这一种叫法
     expect(guide).not.toMatch(/相对原始的变化(?!情况)/);

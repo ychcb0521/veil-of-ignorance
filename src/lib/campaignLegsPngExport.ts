@@ -8,7 +8,8 @@ import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
 import { legRowStatus } from '@/lib/legRowStatus';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
-import { resolveLegExecutionMethods, type LegExecutionMethod } from '@/lib/legExecutionMethod';
+import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethod } from '@/lib/legExecutionMethod';
+import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
@@ -159,7 +160,7 @@ const COLUMNS = [
   { title: 'Δb', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
-  // 开 / 平各一行；主力开仓遵循业务约定，其余历史记录没有可靠来源时明确写「未记录」。
+  // 开 / 平各一行；业务显示约定与页面一致，仅手动对冲开仓突出，未成交且无来源时仍写「未记录」。
   { title: '操作方式', width: 102 },
   // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
   { title: '涨跌幅', width: 120 },
@@ -329,11 +330,16 @@ function positionShareLines(
 
 const EMPTY_CELL: CampaignLegsExportCellLine[] = [{ text: '' }];
 
-function executionMethodCellLine(action: '开' | '平', method: LegExecutionMethod): CampaignLegsExportCellLine {
+function executionMethodCellLine(
+  leg: Pick<TradeJournal, 'order_kind' | 'leg_role'>,
+  action: '开' | '平',
+  method: LegExecutionMethod,
+): CampaignLegsExportCellLine {
+  const highlight = shouldHighlightLegExecution(leg, action === '开' ? 'open' : 'close', method);
   return {
     text: `${method.label}（${action}）`,
-    color: method.kind === 'manual' ? '#A66B12' : method.kind === 'order' ? '#848E9C' : '#B4BBC5',
-    bold: method.kind === 'manual',
+    color: highlight ? '#A66B12' : method.kind === 'unknown' ? '#B4BBC5' : '#848E9C',
+    bold: highlight,
     size: 11,
     operation: { action, label: method.label },
   };
@@ -648,7 +654,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
-    const executionMethods = resolveLegExecutionMethods(leg, record, input.executionMethodOrders ?? input.reverseHedgeOrders, input.tradeRecords);
+    const mirrorRatio = leg.leg_role === 'mirror_tp'
+      ? resolveMirrorCloseRatio(input.campaign, leg, input.legs, input.tradeRecords)?.reductionPct : null;
+    const executionMethods = resolveLegExecutionMethods(leg, record, input.executionMethodOrders ?? input.reverseHedgeOrders, input.tradeRecords, mirrorRatio);
     const status = legRowStatus(leg, record);
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
     const roleOrdinal = hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null;
@@ -757,8 +765,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       [{ text: fmtPrice(entryPriceValue) }],
       exitPriceLines,
       [
-        executionMethodCellLine('开', executionMethods.open),
-        executionMethodCellLine('平', executionMethods.close),
+        executionMethodCellLine(leg, '开', executionMethods.open),
+        executionMethodCellLine(leg, '平', executionMethods.close),
       ],
       // 涨跌幅：开仓价 → 平仓价的价格变化，按这条腿的方向计，与前面的开平价格同一对价
       priceChangeCell(entryPriceValue, exitPriceValue, leg.direction === 'short' ? 'short' : 'long', '#5F6B7A'),

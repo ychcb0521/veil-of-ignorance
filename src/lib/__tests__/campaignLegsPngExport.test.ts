@@ -799,7 +799,7 @@ describe('【用户决定】他场委托在导出图里只是表下一行淡注'
   });
 });
 
-describe('【用户要求】导出图也带开平操作方式，历史未知不冒充自动', () => {
+describe('【用户要求】导出图也带开平操作方式，历史实际成交按业务约定兜底手动', () => {
   const at = (hhmm: string) => Date.parse(`2026-08-07T${hhmm}:00.000Z`);
   const record = (id: string, methods: Partial<TradeRecord>): TradeRecord => ({
     id, positionId: id, fillId: id, symbol: 'BTCUSDT', side: 'SHORT', type: 'MARKET', action: 'CLOSE',
@@ -849,10 +849,13 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     const methodsOf = (id: string) => rows.find(row => row.legId === id)!.cells[EXECUTION_METHOD_COL];
     expect(methodsOf('manual-open').map(line => line.text)).toEqual(['手动（开）', '自动（平）']);
     expect(methodsOf('manual-close').map(line => line.text)).toEqual(['自动（开）', '手动（平）']);
-    expect(methodsOf('legacy').map(line => line.text)).toEqual(['未记录（开）', '未记录（平）']);
+    expect(methodsOf('legacy').map(line => line.text)).toEqual(['手动（开）', '手动（平）']);
     expect(methodsOf('manual-open')[0]).toMatchObject({ color: '#A66B12', bold: true, operation: { action: '开', label: '手动' } });
     expect(methodsOf('manual-open')[1]).toMatchObject({ color: '#848E9C', bold: false });
-    expect(methodsOf('legacy')[0]).toMatchObject({ color: '#B4BBC5' });
+    expect(methodsOf('manual-close')[0]).toMatchObject({ color: '#848E9C', bold: false });
+    expect(methodsOf('manual-close')[1]).toMatchObject({ color: '#848E9C', bold: false });
+    expect(methodsOf('legacy')[0]).toMatchObject({ color: '#A66B12', bold: true });
+    expect(methodsOf('legacy')[1]).toMatchObject({ color: '#848E9C', bold: false });
     for (const row of rows.filter(row => row.kind === 'leg')) {
       expect(row.cells[EXIT_COL][0].text).toBe('90.0000');
       expect(row.cells[PRICE_CHANGE_COL][0].text).toBe('+10.00%');
@@ -860,6 +863,16 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     }
     expect(rows.at(-1)!.cells[EXECUTION_METHOD_COL]).toEqual([{ text: '' }]);
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
+  });
+
+  it('没有实际成交记录的未知对冲开平仍标未记录，不突出', () => {
+    const row = buildCampaignLegsExportRows({
+      ...input(), legs: [{ id: 'unrecorded-hedge', leg_role: 'hedge_rolling', order_kind: 'hedge' } as TradeJournal],
+    })[0];
+    expect(row.cells[EXECUTION_METHOD_COL].map(line => line.text)).toEqual(['未记录（开）', '未记录（平）']);
+    for (const method of row.cells[EXECUTION_METHOD_COL]) {
+      expect(method).toMatchObject({ color: '#B4BBC5', bold: false });
+    }
   });
 
   it('主力开仓导出为手动，不把主力规则泛化到加仓', () => {
@@ -870,9 +883,68 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     ] });
     expect(rows.filter(row => row.kind === 'leg').map(row => row.cells[EXECUTION_METHOD_COL][0].text))
       .toEqual(['手动（开）', '手动（开）', '未记录（开）']);
+    for (const id of ['main', 'reentry']) {
+      expect(rows.find(row => row.legId === id)!.cells[EXECUTION_METHOD_COL][0])
+        .toMatchObject({ color: '#848E9C', bold: false });
+    }
   });
 
-  it('实际画布中状态右端和浅色括号上下对齐，手动单独着色且行距不变', () => {
+  it('仅手动对冲开仓突出，主力和加仓的手动开平保留中性色', () => {
+    const roles = ['main_open', 'main_add_1', 'hedge_rolling', 'reentry_hedge', 'standalone', null] as const;
+    const records = roles.map((_, index) => record(`manual-${index}`, { entry_method: 'manual', exit_method: 'manual' }));
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: roles.map((role, index) => ({
+        id: records[index].id, trade_record_id: records[index].id, leg_sequence: index + 1,
+        leg_role: role, order_kind: index < 2 ? 'main' : 'hedge',
+        direction: index < 2 ? 'long' : 'short', source: 'retroactive_from_record',
+        pre_simulated_time: new Date(records[index].openTime).toISOString(),
+        post_simulated_close_time: new Date(records[index].closeTime).toISOString(),
+      }) as TradeJournal),
+      tradeRecords: records,
+      reverseHedgeOrders: [],
+    });
+    for (const [index, item] of records.entries()) {
+      const methods = rows.find(row => row.legId === item.id)!.cells[EXECUTION_METHOD_COL];
+      expect(methods.map(line => line.text)).toEqual(['手动（开）', '手动（平）']);
+      expect(methods[0]).toMatchObject({ color: index < 2 ? '#848E9C' : '#A66B12', bold: index >= 2 });
+      expect(methods[1]).toMatchObject({ color: '#848E9C', bold: false });
+    }
+  });
+
+  it.each([
+    [600, '自动（平）'],
+    [599.9, '手动（平）'],
+  ] as const)('镜像实际成交 400/%s 的完整导出按严格 60%% 规则显示开平方式，不强调', (mirrorQuantity, expectedClose) => {
+    const records = [
+      record('main-ratio', {
+        fillId: 'same-opening', positionId: 'same-position', side: 'LONG', quantity: 400,
+        entry_method: 'manual', exit_method: 'manual',
+      }),
+      record('mirror-ratio', {
+        fillId: 'same-opening', positionId: 'same-position', side: 'LONG', quantity: mirrorQuantity,
+        closeTime: at('02:00'), entry_method: 'manual', exit_method: 'manual',
+      }),
+    ];
+    const ratioLegs = records.map((item, index) => ({
+      id: item.id, trade_record_id: item.id, leg_sequence: index + 1,
+      leg_role: index === 0 ? 'main_open' : 'mirror_tp', order_kind: index === 0 ? 'main' : 'tp',
+      symbol: item.symbol, direction: 'long', source: 'retroactive_from_record',
+      pre_simulated_time: new Date(item.openTime).toISOString(),
+      post_simulated_close_time: new Date(item.closeTime).toISOString(),
+      pre_entry_price: item.entryPrice, pre_position_size: item.entryPrice * item.quantity,
+      post_exit_price_snapshot: item.exitPrice,
+    }) as TradeJournal);
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: ratioLegs, tradeRecords: records, reverseHedgeOrders: [] });
+    const methods = rows.find(row => row.legId === 'mirror-ratio' && row.kind === 'leg')!.cells[EXECUTION_METHOD_COL];
+    expect(methods.map(line => line.text)).toEqual(['自动（开）', expectedClose]);
+    for (const method of methods) expect(method).toMatchObject({ color: '#848E9C', bold: false });
+    expect(records[1]).toMatchObject({ entry_method: 'manual', exit_method: 'manual' });
+    expect(rows.find(row => row.legId === 'main-ratio' && row.kind === 'leg')!.cells[EXECUTION_METHOD_COL][0].text)
+      .toBe('手动（开）');
+  });
+
+  it('实际画布中状态右端和浅色括号上下对齐，仅手动对冲开仓着色且行距不变', () => {
     const draws: { text: string; x: number; y: number; color: unknown }[] = [];
     const ctx = new Proxy({} as Record<string | symbol, unknown>, {
       get(target, key) {
@@ -885,7 +957,9 @@ describe('【用户要求】导出图也带开平操作方式，历史未知不�
     }) as unknown as CanvasRenderingContext2D;
     const spy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
     try {
-      buildCampaignLegsListCanvas({ ...input(), legs: [{ id: 'main', leg_role: 'main_open' } as TradeJournal] }, { includeHeader: false, scale: 1 });
+      buildCampaignLegsListCanvas({ ...input(), legs: [{
+        id: 'manual-hedge', leg_role: 'hedge_rolling', order_kind: 'hedge', hedge_order_method: 'market_chase',
+      } as TradeJournal] }, { includeHeader: false, scale: 1 });
       const manual = draws.find(draw => draw.text === '手动')!;
       const unknown = draws.find(draw => draw.text === '未记录')!;
       const open = draws.find(draw => draw.text === '（开）')!;

@@ -458,7 +458,12 @@ export function CampaignMetricScatterPlot({
     [chartPoints, geometricDistribution],
   );
   const isolatedLeftBucket = useMemo(
-    () => geometricDist?.zeroIds.length ? { pointIds: geometricDist.zeroIds, label: '本金归零' } : undefined,
+    () => geometricDist?.zeroIds.length ? {
+      pointIds: geometricDist.zeroIds,
+      label: '本金归零',
+      dividerKind: 'threshold' as const,
+      dividerLabel: '归零界限',
+    } : undefined,
     [geometricDist],
   );
   /**
@@ -755,7 +760,7 @@ export function CampaignMetricScatterPlot({
           ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10R；出现 b ≤ −10 时，左端固定为 −12R，保证归零界限可见且不被极端亏损挤压。超出窗口的点贴边画三角，保留原值、黄色风险描边及统计；−1R 止损线仍保留。</dd>
           ) : geometricDist ? (
-            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
+            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
           ) : dist ? (
             <dd>横轴就是{axisLabel ?? metricLabel}本身，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把盈亏分界圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (

@@ -5,7 +5,8 @@ import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
-import { resolveLegExecutionMethods, type LegExecutionMethods } from '@/lib/legExecutionMethod';
+import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethods } from '@/lib/legExecutionMethod';
+import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
@@ -55,6 +56,7 @@ import {
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 interface Props {
+  campaign?: TradeCampaign;
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   campaignEvents?: CampaignEvent[];
@@ -569,6 +571,7 @@ function AddSizingDetailDialog({
 }
 
 export function CampaignLegsList({
+  campaign,
   legs,
   tradeRecords,
   campaignEvents = [],
@@ -603,6 +606,9 @@ export function CampaignLegsList({
   // 与导出 PNG 同一个函数：两处的淡注一字不差
   const foreignLiveOrdersNote = useMemo(() => formatForeignReplayOrdersNote(foreignLiveOrders), [foreignLiveOrders]);
   const recordMap = useMemo(() => buildTradeRecordLookup(tradeRecords), [tradeRecords]);
+  const mirrorCloseRatios = useMemo(() => new Map(legs.filter(leg => leg.leg_role === 'mirror_tp')
+    .map(leg => [leg.id, campaign ? resolveMirrorCloseRatio(campaign, leg, legs, tradeRecords)?.reductionPct ?? null : null])),
+  [campaign, legs, tradeRecords]);
   const hedgeLegOrdinals = useMemo(() => buildHedgeLegOrdinals(legs), [legs]);
   const highlightedSet = useMemo(() => new Set(highlightedLegIds), [highlightedLegIds]);
   // 每条腿的已实现盈亏与对全场的贡献率。必须整体算——贡献率的分母依赖全部腿。
@@ -816,7 +822,7 @@ export function CampaignLegsList({
                 : undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const executionMethods = executionMethodsByLeg?.get(leg.id)
-                ?? resolveLegExecutionMethods(leg, record, executionMethodOrders ?? reverseHedgeOrders, tradeRecords);
+                ?? resolveLegExecutionMethods(leg, record, executionMethodOrders ?? reverseHedgeOrders, tradeRecords, mirrorCloseRatios.get(leg.id));
               const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, campaignEvents);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
@@ -937,9 +943,9 @@ export function CampaignLegsList({
                   <div data-testid={`leg-execution-method-${leg.id}`} className="flex flex-col items-center text-[10px] leading-snug text-muted-foreground">
                     {([['开', executionMethods.open], ['平', executionMethods.close]] as const).map(([action, method]) => (
                       <div key={action} title={method.reason} data-method={method.kind} className="grid grid-cols-[3em_3em] gap-x-0.5 text-right whitespace-nowrap">
-                        <span className={method.kind === 'manual'
+                        <span className={shouldHighlightLegExecution(leg, action === '开' ? 'open' : 'close', method)
                           ? 'font-medium text-amber-700/90 dark:text-amber-400/90'
-                          : method.kind === 'order' ? 'text-muted-foreground/80' : 'text-muted-foreground/45'}>{method.label}</span>
+                          : method.kind !== 'unknown' ? 'text-muted-foreground/80' : 'text-muted-foreground/45'}>{method.label}</span>
                         <span className="text-left text-muted-foreground/45">（{action}）</span>
                       </div>
                     ))}

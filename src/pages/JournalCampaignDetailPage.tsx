@@ -2385,6 +2385,7 @@ export default function JournalCampaignDetailPage() {
             </div>
           </div>
           <CampaignLegsList
+            campaign={campaign}
             initialExpectedMaxLoss={legsInitialExpectedMaxLoss}
             /* 「占比」列按战役主方向取一侧：主多看多单、主空看空单（导出 PNG 从同一个战役对象取，两处一致） */
             campaignDirection={campaign.direction}
@@ -2479,7 +2480,7 @@ export default function JournalCampaignDetailPage() {
                 )}
               />
               {(counterfactualDraft.params.manual_legs ?? []).length > 0 && (
-                <CounterfactualLegsTable campaign={campaign} legs={counterfactualDraft.params.manual_legs ?? []} originalLegs={legs} result={counterfactualDraft.result} />
+                <CounterfactualLegsTable campaign={campaign} legs={counterfactualDraft.params.manual_legs ?? []} originalLegs={legs} originalTradeRecords={tradeRecords} result={counterfactualDraft.result} />
               )}
             </>
           )}
@@ -2585,6 +2586,7 @@ export default function JournalCampaignDetailPage() {
                   campaign={campaign}
                   legs={selectedCounterfactual.params.manual_legs ?? []}
                   originalLegs={legs}
+                  originalTradeRecords={tradeRecords}
                   result={selectedCounterfactual.result}
                   title={`反事实 Legs · ${selectedCounterfactual.label}`}
                 />
