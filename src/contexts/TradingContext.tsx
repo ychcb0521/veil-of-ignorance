@@ -1890,7 +1890,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // BEST PRICE (taker)
     if (normalizedOrder.priceSelection === 'BEST') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId);
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId, 'manual');
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {
@@ -1934,7 +1934,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
 
     // MARKET (taker with slippage)
     if (normalizedOrder.type === 'MARKET') {
-      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId);
+      const { fee, margin, slippage, position } = executeSettlementFill(symbol, effectiveCurrentPrice, normalizedOrder, false, now, Date.now(), timelineId, 'manual');
       const requiredMargin = margin + fee;
       if (requiredMargin > available) {
         toast.error('可用余额不足', {

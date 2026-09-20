@@ -523,6 +523,9 @@ export interface CampaignCounterfactualManualLegCut {
 }
 
 export interface CampaignCounterfactualManualLegActual {
+  /** 实际交易已证实的开/平方式快照；不是反事实编辑操作，缺失时保持未知。 */
+  entry_method?: 'manual' | 'order' | 'unknown';
+  exit_method?: 'manual' | 'order' | 'unknown';
   /**
    * records = 成交记录（叠平仓价校正）；leg_snapshot = 本地没有成交记录，取复盘快照；
    * unsettled = 既无成交记录也无复盘快照（如尚未平仓）：战役页的已实现不计这条腿，原样重跑也记 0；

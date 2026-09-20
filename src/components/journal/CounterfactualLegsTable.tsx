@@ -8,12 +8,39 @@ import type {
   TradeJournal,
 } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
+import type { LegExecutionMethod, LegExecutionMethods } from '@/lib/legExecutionMethod';
 
 interface Props {
   campaign: TradeCampaign;
   legs: CampaignCounterfactualManualLeg[];
   result: CampaignCounterfactualResult;
   title?: string;
+}
+
+function counterfactualExecutionMethods(leg: CampaignCounterfactualManualLeg, filled: boolean): LegExecutionMethods {
+  const actual = leg.actual;
+  const sameTime = (left: string, right: string) => Number.isFinite(Date.parse(left)) && Date.parse(left) === Date.parse(right);
+  const samePrice = (left: number, right: number) => Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-9;
+  const openUnchanged = actual != null && leg.direction === actual.direction
+    && sameTime(leg.open_time, actual.open_time) && samePrice(leg.entry_price, actual.entry_price);
+  const closeUnchanged = actual != null && !actual.close_time_fallback && !actual.still_open
+    && sameTime(leg.close_time, actual.close_time) && samePrice(leg.exit_price, actual.exit_price);
+  const method = (kind: 'manual' | 'order' | 'unknown' | undefined, unchanged: boolean, action: string): LegExecutionMethod => {
+    if (!filled || !unchanged || (kind !== 'manual' && kind !== 'order')) {
+      return {
+        kind: 'unknown', label: '未记录',
+        reason: !filled ? '本条反事实未成交，没有实际操作方式。'
+          : action === '平仓' && (actual?.close_time_fallback || actual?.still_open) ? '没有已确认的实际平仓；模拟平仓时间不代表实际操作方式。'
+          : actual && !unchanged ? `反事实${action}参数已改变，不沿用实际交易的操作方式；修改模拟参数不代表手动交易。`
+            : `保存分支没有可信的实际${action}方式记录；修改模拟参数不代表手动交易。`,
+      };
+    }
+    return {
+      kind, label: kind === 'manual' ? '手动' : '非手动',
+      reason: `${action}参数未改动，沿用分支保存的实际交易方式。`,
+    };
+  };
+  return { open: method(actual?.entry_method, openUnchanged, '开仓'), close: method(actual?.exit_method, closeUnchanged, '平仓') };
 }
 
 /**
@@ -24,12 +51,14 @@ function adaptCounterfactualLegs(
   campaign: TradeCampaign,
   legs: CampaignCounterfactualManualLeg[],
   result: CampaignCounterfactualResult,
-): { journals: TradeJournal[]; records: TradeRecord[] } {
+): { journals: TradeJournal[]; records: TradeRecord[]; executionMethods: Map<string, LegExecutionMethods> } {
   const records: TradeRecord[] = [];
+  const executionMethods = new Map<string, LegExecutionMethods>();
   const journals = legs.map((leg, index) => {
     const summary = result.legs_summary[index]
       ?? result.legs_summary.find(item => item.leg_role === leg.leg_role);
     const filled = leg.enabled && leg.filled !== false && summary?.status !== 'never_triggered';
+    executionMethods.set(leg.id, counterfactualExecutionMethods(leg, filled));
     const recordId = filled ? `counterfactual-record-${leg.id}` : null;
     const openTime = new Date(leg.open_time).getTime();
     const closeTime = new Date(leg.close_time).getTime();
@@ -110,11 +139,11 @@ function adaptCounterfactualLegs(
     } as TradeJournal;
   });
 
-  return { journals, records };
+  return { journals, records, executionMethods };
 }
 
 export function CounterfactualLegsTable({ campaign, legs, result, title = '反事实 Legs' }: Props) {
-  const { journals, records } = adaptCounterfactualLegs(campaign, legs, result);
+  const { journals, records, executionMethods } = adaptCounterfactualLegs(campaign, legs, result);
 
   return (
     <section data-testid="counterfactual-result-legs" className="mt-3 space-y-3">
@@ -128,6 +157,7 @@ export function CounterfactualLegsTable({ campaign, legs, result, title = '反�
       <CampaignLegsList
         legs={journals}
         tradeRecords={records}
+        executionMethodsByLeg={executionMethods}
         initialExpectedMaxLoss={result.initial_expected_max_loss ?? null}
         campaignDirection={campaign.direction}
       />

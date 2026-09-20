@@ -1,9 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
-import { getCampaignFullData } from '@/lib/journalApi';
+import { getCampaignFullData, saveCampaignDeviationNotes } from '@/lib/journalApi';
+import { readCampaignReviewSummary, withCampaignReviewSummary } from '@/lib/campaignReviewSummary';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
@@ -50,6 +51,8 @@ beforeEach(() => {
   exportCampaignPostReviewsTxtMock.mockClear();
   listCounterfactualsMock.mockReset();
   listCounterfactualsMock.mockResolvedValue([]);
+  vi.mocked(saveCampaignDeviationNotes).mockReset();
+  vi.mocked(saveCampaignDeviationNotes).mockResolvedValue(undefined);
   vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => detailsById[id]);
   replayVisibleRanges.length = 0;
   replayAnnotationSnapshots.length = 0;
@@ -213,6 +216,7 @@ vi.mock('@/lib/journalApi', () => ({
   // 列表页共用一份本地快照，避免 147 场各解析一遍（实测 2~6 秒主线程阻塞）。
   readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
   getCampaignFullData: vi.fn(async (id: string) => detailsById[id]),
+  saveCampaignDeviationNotes: vi.fn(async () => undefined),
   listAllCampaigns: vi.fn(async () => campaigns),
   listVisibleCampaigns: vi.fn(async () => campaigns),
   listCounterfactuals: listCounterfactualsMock,
@@ -609,6 +613,113 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(chipFor('95')).toHaveAttribute('data-selected', 'false');
     await waitFor(() => expect(lineFor('order-b')?.selected).toBe(false));
   }, 30_000);
+
+  it('手动对冲与委托列在同一系列：没有委托也能管理、点选、高亮、隐藏和恢复', async () => {
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      legs: [detailsById[id].legs[0], {
+        ...detailsById[id].legs[1],
+        id: 'manual-hedge-leg',
+        leg_role: 'hedge_rolling',
+        hedge_order_method: 'market_chase',
+      }],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    const lineFor = () => replayChartLatest.lines.find(line => line.orderIds?.includes('manual-hedge:manual-hedge-leg'));
+    const manager = await screen.findByRole('button', { name: '管理' });
+    await waitFor(() => expect(lineFor()?.selectId).toBeTruthy());
+    fireEvent.click(manager);
+    const chip = screen.getByTestId('manual-hedge-chip');
+    expect(chip).toHaveTextContent('手动对冲 1');
+    expect(chip).toHaveTextContent('@ 90');
+    expect(chip).toHaveTextContent('平 ');
+    expect(screen.queryAllByTestId('reverse-order-chip')).toHaveLength(0);
+    fireEvent.click(chip);
+    await waitFor(() => expect(lineFor()?.selected).toBe(true));
+    act(() => replayChartLatest.onSelectTimeBoundPriceLine?.(lineFor()!.selectId!));
+    expect(chip).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(within(chip).getByRole('button', { name: '从盘面隐藏这条手动对冲' }));
+    expect(screen.queryByTestId('manual-hedge-chip')).toBeNull();
+    await waitFor(() => expect(lineFor()).toBeUndefined());
+    expect(JSON.parse(window.localStorage.getItem('campaign:winner:hidden-reverse-hedge-orders')!))
+      .toEqual(['manual-hedge:manual-hedge-leg']);
+    fireEvent.click(screen.getByRole('button', { name: '恢复 1' }));
+    expect(screen.getByTestId('manual-hedge-chip')).toBeInTheDocument();
+    await waitFor(() => expect(lineFor()).toBeDefined());
+  });
+
+  it('总结按战役保存并在刷新后回显，保留原备注与逐腿备注，不写进其他战役', async () => {
+    const originalNotes = { leg1: { reason: '逐腿备注', fix: '原规则' } };
+    const persisted = new Map([['winner', withCampaignReviewSummary(originalNotes, '原总结')], ['loser', withCampaignReviewSummary({}, '另一场')]]);
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      campaign: { ...detailsById[id].campaign, notes: '原战役备注', deviation_notes: persisted.get(id)! },
+    }));
+    vi.mocked(saveCampaignDeviationNotes).mockImplementation(async (id, notes) => { persisted.set(id, notes); });
+    const page = () => <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+      <Link to="/journal/campaigns/loser">另一战役</Link>
+      <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+    </MemoryRouter>;
+    const first = render(page());
+    const field = await screen.findByRole('textbox', { name: '复盘总结' });
+    expect(field).toHaveValue('原总结');
+    fireEvent.change(field, { target: { value: '本场自己的结论' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存总结' }));
+    await waitFor(() => expect(within(screen.getByTestId('campaign-review-summary')).getByRole('status')).toHaveTextContent('已保存到本战役'));
+    expect(persisted.get('winner')!.leg1).toEqual(originalNotes.leg1);
+    expect(readCampaignReviewSummary(persisted.get('winner'))).toBe('本场自己的结论');
+    first.unmount();
+    render(page());
+    expect(await screen.findByRole('textbox', { name: '复盘总结' })).toHaveValue('本场自己的结论');
+    fireEvent.click(screen.getByRole('link', { name: '另一战役' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '复盘总结' })).toHaveValue('另一场'));
+    expect(saveCampaignDeviationNotes).toHaveBeenCalledTimes(1);
+    expect(saveCampaignDeviationNotes).toHaveBeenCalledWith('winner', expect.objectContaining(originalNotes));
+  });
+
+  it('切换战役时，上一场总结的慢保存不会改写新战役的总结', async () => {
+    let finish!: () => void;
+    vi.mocked(saveCampaignDeviationNotes).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id], campaign: { ...detailsById[id].campaign, deviation_notes: withCampaignReviewSummary({}, `${id} 总结`) },
+    }));
+    render(<MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+      <Link to="/journal/campaigns/loser">另一战役</Link>
+      <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+    </MemoryRouter>);
+    fireEvent.change(await screen.findByRole('textbox', { name: '复盘总结' }), { target: { value: 'winner 慢保存' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存总结' }));
+    fireEvent.click(screen.getByRole('link', { name: '另一战役' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '复盘总结' })).toHaveValue('loser 总结'));
+    await act(async () => finish());
+    expect(screen.getByRole('textbox', { name: '复盘总结' })).toHaveValue('loser 总结');
+  });
+
+  it('被委托触发的对冲不重复生成手动色块，隐藏委托后也不会冒充手动对冲', async () => {
+    vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => ({
+      ...detailsById[id],
+      reverseHedgeOrders: [{
+        id: 'triggered-order', side: 'SHORT', price: 90, fillPrice: 90,
+        createdAt: Date.parse('2026-01-01T00:00:00.000Z'),
+        triggeredAt: Date.parse('2026-01-01T00:01:00.000Z'),
+        cancelledAt: Date.parse('2026-01-01T01:00:00.000Z'), status: 'triggered', tradeRecordId: null,
+      }],
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+    expect(screen.queryAllByTestId('manual-hedge-chip')).toHaveLength(0);
+    fireEvent.click(within(screen.getByTestId('reverse-order-chip')).getByRole('button', { name: '从盘面隐藏这条委托空单' }));
+    expect(screen.queryAllByTestId('manual-hedge-chip')).toHaveLength(0);
+    await waitFor(() => expect(replayChartLatest.lines.some(line => line.title === '手动空')).toBe(false));
+  });
 
   it('【用户决定】他场委托：盘面灰色淡虚线、管理区排在本场之后单独压灰一组且可隐藏；Legs 与最大预期亏损都不算它', async () => {
     const at = (iso: string) => Date.parse(iso);

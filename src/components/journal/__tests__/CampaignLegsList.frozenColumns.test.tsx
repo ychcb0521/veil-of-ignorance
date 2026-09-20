@@ -150,7 +150,7 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     const phaseRows = Array.from(screen.getByTestId('leg-phases-leg-main').children);
     expect(phaseRows.length).toBeGreaterThanOrEqual(1);
     const count = screen.getByTestId('legs-header-row').children.length;
-    expect(count).toBe(13);
+    expect(count).toBe(14);
     for (const row of phaseRows) {
       const cells = Array.from(row.children);
       expect(cells).toHaveLength(count);

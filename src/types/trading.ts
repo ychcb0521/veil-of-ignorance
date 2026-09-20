@@ -284,6 +284,8 @@ interface TriggerRange {
 
 export interface Position {
   id: string;
+  /** 开仓成交来源；合并后仓位级字段属于第一笔，各笔各存 fills。旧数据缺失时保持未知。 */
+  entry_method?: "manual" | "order";
   side: OrderSide;
   entryPrice: number;
   quantity: number;
@@ -340,6 +342,8 @@ export interface Position {
 
 export interface PositionFill {
   id: string;
+  /** 此笔是手动立即开仓还是由委托撮合；不能从 Maker/Taker 或成交记录 MARKET 推断。 */
+  entry_method?: "manual" | "order";
   openTime: number;
   /** 这笔成交自己的真实开仓时刻；合并进仓位后各笔各留各的。 */
   openedRealAt?: number;
@@ -414,6 +418,8 @@ export interface TradeRecord {
    */
   openedTimelineId?: string | null;
   closedTimelineId?: string | null;
+  /** 这笔成交的开仓方式，来自开仓时的明确记录；旧历史缺失时不推断。 */
+  entry_method?: "manual" | "order";
   /** How the position was closed. Manual for user-initiated; sl/tp1-3 for triggered TP/SL; liquidation for forced close. */
   exit_method?: "manual" | "sl" | "tp1" | "tp2" | "tp3" | "liquidation";
   /**

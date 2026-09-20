@@ -37,11 +37,11 @@ const renderList = (
 const headerTitles = () => Array.from(screen.getByText('涨跌幅').parentElement!.children).map(el => el.textContent);
 
 describe('Legs 列表的「涨跌幅」列', () => {
-  it('表头紧跟在平仓价之后、币量 / 仓位之前，右对齐，tooltip 说明按方向计、与盈亏同号', () => {
+  it('表头紧跟在操作方式之后、币量 / 仓位之前，右对齐，tooltip 说明按方向计、与盈亏同号', () => {
     renderList([legFor({ id: 'long', pre_entry_price: 2.8717, post_exit_price_snapshot: 6.5194 })]);
     const titles = headerTitles();
     const at = titles.indexOf('涨跌幅');
-    expect(titles.slice(at - 2, at + 2)).toEqual(['开仓价', '平仓价', '涨跌幅', '币量 / 仓位']);
+    expect(titles.slice(at - 3, at + 2)).toEqual(['开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位']);
     const header = screen.getByText('涨跌幅');
     expect(header.className).toContain('text-right');
     expect(header.getAttribute('title')).toContain('开仓价');
@@ -64,7 +64,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
     expect(cell.className).not.toContain('text-[14px]');
     expect(cell.className).not.toContain('font-semibold');
     // 紧挨在平仓价那一格右边
-    const exitCell = cell.previousElementSibling!;
+    const exitCell = cell.previousElementSibling!.previousElementSibling!;
     expect(exitCell.textContent).toBe('6.5194');
     expect(exitCell.previousElementSibling!.textContent).toBe('2.8717');
   });
@@ -108,8 +108,8 @@ describe('Legs 列表的「涨跌幅」列', () => {
     expect(cell.className).toContain('text-[#F6465D]');
     expect(cell.className).not.toContain('#0ECB81');
     // 与左边两格同一对价
-    expect(cell.previousElementSibling!.textContent).toBe('6.5194');
-    expect(cell.previousElementSibling!.previousElementSibling!.textContent).toBe('6.3132');
+    expect(cell.previousElementSibling!.previousElementSibling!.textContent).toBe('6.5194');
+    expect(cell.previousElementSibling!.previousElementSibling!.previousElementSibling!.textContent).toBe('6.3132');
     // 「贡献 / 盈亏」是红的负数：两格同号，不再一红一绿
     const pnl = screen.getByTestId('leg-pnl-hedge');
     expect(pnl.textContent).toContain('-2100.00');
@@ -139,7 +139,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
       { corrected: { exitPrice: 0.2, originalExitPrice: 0.5, candleLow: 0.18, candleHigh: 0.22 } },
     );
     const cell = screen.getByTestId('leg-price-change-corrected');
-    expect(cell.previousElementSibling!.textContent).toBe('0.200000');
+    expect(cell.previousElementSibling!.previousElementSibling!.textContent).toBe('0.200000');
     expect(cell.textContent).toBe('+100.00%');   // 不是按原记录 0.5 算出的 +400.00%
   });
 
@@ -161,7 +161,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
     );
     const cell = screen.getByTestId('leg-price-change-sliced');
     // 显示的平仓价是最后一刀 98，涨跌幅按它算是负数、红色
-    expect(cell.previousElementSibling!.textContent).toBe('98.0000');
+    expect(cell.previousElementSibling!.previousElementSibling!.textContent).toBe('98.0000');
     expect(cell.textContent).toBe('-2.00%');
     expect(cell.className).toContain('text-[#F6465D]');
     // 盈亏是三刀合计 +160，绿色——一红一绿是事实，不是 bug；说明文字不能再许诺同号
@@ -198,7 +198,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
       expect(screen.getByTestId('leg-price-change-main').textContent).toBe('+101.26%');
       const first = screen.getByTestId('leg-phase-price-change-main-1');
       // 纯多头：0.0336792 → 对冲开仓价 0.05
-      expect(first.previousElementSibling!.textContent).toBe('0.0500000');
+      expect(first.previousElementSibling!.previousElementSibling!.textContent).toBe('0.0500000');
       expect(first.textContent).toBe('+48.46%');
       expect(first.className).toContain('text-[#0ECB81]/90');
       expect(screen.getByTestId('leg-phase-price-change-main-2').textContent).toBe('+4.00%');
@@ -232,21 +232,21 @@ describe('Legs 列表的「涨跌幅」列', () => {
       renderList(phaseLegs);
       expandPhases();
       const titles = headerTitles();
-      expect(titles).toHaveLength(13);
+      expect(titles).toHaveLength(14);
       const column = titles.indexOf('涨跌幅');
       const total = screen.getByTestId('legs-total-row');
-      expect(total.children).toHaveLength(13);
+      expect(total.children).toHaveLength(14);
       expect(total.children[column].textContent).toBe('');
       expect(total.children[column].children).toHaveLength(0);
       for (const id of ['main', 'hedge-roll']) {
         const row = screen.getByTestId(`leg-price-change-${id}`).parentElement!;
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-price-change-${id}`));
       }
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
       expect(phaseRows).toHaveLength(3);
       phaseRows.forEach((row, index) => {
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-phase-price-change-main-${index + 1}`));
       });
     });

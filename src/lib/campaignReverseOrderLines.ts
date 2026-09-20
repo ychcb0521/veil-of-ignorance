@@ -208,9 +208,12 @@ export function formatForeignReplayOrdersHeading(orders: CampaignReverseHedgeOrd
 }
 
 /** 对冲空单腿：对冲类角色、方向为空。 */
-export function isHedgeShortLeg(leg: { leg_role?: string | null; direction?: string | null }): boolean {
+export function isHedgeShortLeg(leg: { leg_role?: string | null; direction?: string | null; order_kind?: string | null }): boolean {
   const role = leg.leg_role ?? '';
-  return leg.direction === 'short' && (role.startsWith('hedge_') || role === 'reentry_hedge');
+  return leg.direction === 'short' && (
+    role.startsWith('hedge_') || role === 'reentry_hedge'
+    || (leg.order_kind === 'hedge' && (!role || role === 'standalone'))
+  );
 }
 
 /** 画一条手动对冲空单所需的最少信息：已成交的开平时刻与开仓价。 */
@@ -220,6 +223,8 @@ export interface HedgeShortLegExecution {
   openTime: number | null;
   closeTime: number | null;
   entryPrice: number | null;
+  /** 实际成交保存的开仓来源；老数据没有，沿用委托匹配的展示口径。 */
+  entryMethod?: TradeRecord['entry_method'];
 }
 
 interface TriggeredOrderMatch {
@@ -240,6 +245,43 @@ function isOpenedByTriggeredOrder(leg: HedgeShortLegExecution, triggered: Trigge
   return false;
 }
 
+/** 用全部本场委托判断开仓来源；隐藏偏好不改变成交事实。 */
+export function isHedgeOpenedByTriggeredOrder(
+  leg: HedgeShortLegExecution,
+  orders: CampaignReverseHedgeOrder[],
+  tradeRecords: TradeRecord[],
+): boolean {
+  return isOpenedByTriggeredOrder(leg, orders
+    .filter(order => isDisplayableReverseHedgeOrder(order) && order.status === 'triggered')
+    .map(order => ({ order, recordId: findReverseOrderTradeRecord(order, tradeRecords)?.id ?? null })));
+}
+
+/** 盘面线与管理区共同使用的身份，不与真实委托 id 混淆，也不写回交易数据。 */
+export function manualHedgeSelectionId(legId: string): string {
+  return `manual-hedge:${legId}`;
+}
+
+/**
+ * 已实际开出的对冲中，排除能匹配触发委托的腿。沿用历史盘面「手动空」口径，
+ * 只用于展示；缺少委托记录本身不能作为审计开仓方式的证据。
+ */
+export function selectManualHedgeShortLegs(
+  legs: HedgeShortLegExecution[],
+  orders: CampaignReverseHedgeOrder[],
+  tradeRecords: TradeRecord[],
+): HedgeShortLegExecution[] {
+  const triggered: TriggeredOrderMatch[] = orders
+    .filter(order => isDisplayableReverseHedgeOrder(order) && order.status === 'triggered')
+    .map(order => ({ order, recordId: findReverseOrderTradeRecord(order, tradeRecords)?.id ?? null }));
+  return legs.filter(leg => (
+    leg.openTime != null && Number.isFinite(leg.openTime) && leg.openTime > 0
+    && leg.entryPrice != null && Number.isFinite(leg.entryPrice) && leg.entryPrice > 0
+    && (leg.closeTime == null || (Number.isFinite(leg.closeTime) && leg.closeTime > leg.openTime))
+    && leg.entryMethod !== 'order'
+    && (leg.entryMethod === 'manual' || !isOpenedByTriggeredOrder(leg, triggered))
+  ));
+}
+
 /**
  * 手动开的对冲空单：与被触发的委托空单同一个目的（给主仓做反向保护），只是由人按下、
  * 而不是价格走到委托价自动触发。所以画法照「触发空」——黄色实线，从开仓到平仓；
@@ -254,17 +296,13 @@ export function buildManualHedgeShortPriceLines(
   tradeRecords: TradeRecord[],
   fallbackEnd: number,
 ): TimeBoundPriceLine[] {
-  const triggered: TriggeredOrderMatch[] = orders
-    .filter(order => isDisplayableReverseHedgeOrder(order) && order.status === 'triggered')
-    .map(order => ({ order, recordId: findReverseOrderTradeRecord(order, tradeRecords)?.id ?? null }));
   const lines: TimeBoundPriceLine[] = [];
-  for (const leg of legs) {
+  for (const leg of selectManualHedgeShortLegs(legs, orders, tradeRecords)) {
     const { openTime, closeTime, entryPrice } = leg;
     if (openTime == null || !Number.isFinite(openTime)) continue;
     if (entryPrice == null || !Number.isFinite(entryPrice) || entryPrice <= 0) continue;
     // 平仓时刻早于开仓是坏数据：不画，也不拿战役结束去补一条错的线。
     if (closeTime != null && !(closeTime > openTime)) continue;
-    if (isOpenedByTriggeredOrder(leg, triggered)) continue;
     lines.push({
       price: entryPrice,
       color: '#F0B90B',
@@ -273,6 +311,7 @@ export function buildManualHedgeShortPriceLines(
       dashed: false,
       endMarker: null,
       title: '手动空',
+      orderIds: [manualHedgeSelectionId(leg.legId)],
     });
   }
   return dedupeReverseOrderLines(lines);

@@ -360,6 +360,7 @@ describe('JournalCampaignDetailPage：口径统一之前保存的分支', () => 
     renderPage();
     await screen.findByTestId('counterfactual-saved-panel', {}, { timeout: WAIT });
     await screen.findByText('偏离代价明细（手动调整 vs 原始）', {}, { timeout: WAIT });
+    fireEvent.click(screen.getByRole('button', { name: /偏离代价明细/ }));
     expect(screen.getByText('本次手动调整与原始战役无差异（合计 0）')).toBeInTheDocument();
 
     // 换一个周期：K 线窗口的末根变了，没动过的挂单仍不算改动
@@ -408,6 +409,7 @@ describe('JournalCampaignDetailPage：口径统一之前保存的分支', () => 
     renderPage();
     await screen.findByTestId('counterfactual-saved-panel', {}, { timeout: WAIT });
     await screen.findByText('偏离代价明细（手动调整 vs 原始）', {}, { timeout: WAIT });
+    fireEvent.click(screen.getByRole('button', { name: /偏离代价明细/ }));
     await waitFor(() => expect(screen.getByText('本次手动调整与原始战役无差异（合计 0）')).toBeInTheDocument(), { timeout: WAIT });
     await screen.findByRole('button', { name: '一键运行' }, { timeout: WAIT });
 

@@ -39,7 +39,7 @@ import type {
   TradeCampaign,
   TradeJournal,
 } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 /**
  * 点「一键运行」那一刻编辑器里的两份腿：
@@ -69,6 +69,8 @@ interface Props {
   legExitPriceCorrections: LegExitPriceCorrections;
   /** 本地委托快照给出的事实（从未成交的委托 id）：与上方盈亏概览的权益路径读同一份，副本据此标「挂单中」。 */
   localOrders?: CampaignLocalOrderFacts;
+  /** 完整委托历史（不受盘面隐藏影响），只用于保存可靠开仓方式。 */
+  reverseHedgeOrders?: CampaignReverseHedgeOrder[];
   klines: KlineData[];
   klinesLoading: boolean;
   interval: string;
@@ -114,6 +116,7 @@ const ROLE_OPTIONS: LegRole[] = [
 ];
 
 const NO_LOCAL_ORDER_FACTS: CampaignLocalOrderFacts = {};
+const NO_REVERSE_ORDERS: CampaignReverseHedgeOrder[] = [];
 
 const COUNTERFACTUAL_VIEW_MULTIPLIERS: readonly CampaignViewMultiplier[] = [
   1.1,
@@ -158,6 +161,7 @@ export function CampaignWhatIfEditor({
   tradeRecords,
   legExitPriceCorrections,
   localOrders = NO_LOCAL_ORDER_FACTS,
+  reverseHedgeOrders = NO_REVERSE_ORDERS,
   klines,
   klinesLoading,
   interval,
@@ -226,6 +230,8 @@ export function CampaignWhatIfEditor({
   // 本地委托事实同样走 ref：父组件每次给的对象可能是新的，内容（从未成交的委托 id）变了才重建基线。
   const localOrdersRef = useRef(localOrders);
   localOrdersRef.current = localOrders;
+  const reverseHedgeOrdersRef = useRef(reverseHedgeOrders);
+  reverseHedgeOrdersRef.current = reverseHedgeOrders;
   const unfilledOrderIdsKey = [...(localOrders.unfilledOrderIds ?? [])].sort().join('|');
   const baselineCampaignKey = useMemo(() => {
     const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections);
@@ -248,7 +254,7 @@ export function CampaignWhatIfEditor({
         klinesRef.current,
         tradeRecords,
         legExitPriceCorrections,
-        { campaign: campaignRef.current, localOrders: localOrdersRef.current },
+        { campaign: campaignRef.current, localOrders: localOrdersRef.current, reverseHedgeOrders: reverseHedgeOrdersRef.current },
       );
       setBaselineLegs(baseline);
       setManualLegs(baseline.map(leg => ({ ...leg })));
@@ -319,7 +325,7 @@ export function CampaignWhatIfEditor({
 
   const resetManualLegs = () => {
     if (!baseDefaults) return;
-    const baseline = buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders });
+    const baseline = buildManualLegs(baseDefaults, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders, reverseHedgeOrders });
     setBaselineLegs(baseline);
     setManualLegs(baseline.map(leg => ({ ...leg })));
     setParams(baseDefaults);

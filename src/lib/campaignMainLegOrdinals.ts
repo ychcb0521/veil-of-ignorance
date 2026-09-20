@@ -12,6 +12,14 @@ import type { TradeJournal } from '@/types/journal';
  */
 const PRIMARY_ROLES = ['main_open', 'reentry_main'] as const;
 
+/** 手动新增的对冲可能还没有战役角色；只在展示时归入滚动对冲，不改原始归类。 */
+export function resolveLegDisplayRole(leg: Pick<TradeJournal, 'order_kind' | 'leg_role'>): TradeJournal['leg_role'] {
+  if (leg.order_kind === 'hedge' && (leg.leg_role == null || leg.leg_role === 'standalone')) {
+    return 'hedge_rolling';
+  }
+  return leg.leg_role;
+}
+
 function toMs(value: string | null | undefined): number {
   if (!value) return Number.MAX_SAFE_INTEGER;
   const ms = new Date(value).getTime();

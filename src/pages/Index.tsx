@@ -514,7 +514,7 @@ const Index = () => {
       if (!liveOrder) return false;
 
       const filledTimelineId = stampClock(symbol);
-      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId);
+      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId, 'order');
 
       // 付不起就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
       // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
@@ -1363,6 +1363,7 @@ const Index = () => {
               // 现在这一位是真实开仓时刻，供战役按真实时间归属委托单。
               Date.now(),
               filledTimelineId,
+              'order',
             );
             const actualFillPrice = position.entryPrice;
             // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
@@ -1520,6 +1521,7 @@ const Index = () => {
                   getEffectiveTime(symbol),
                   Date.now(),
                   stampClock(symbol),
+                  'order',
                 );
                 // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
                 // 后面每一片只会更贵(仓位在涨、可用在降)。

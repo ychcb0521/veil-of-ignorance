@@ -8,12 +8,13 @@ import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
 import { legRowStatus } from '@/lib/legRowStatus';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { resolveLegExecutionMethods } from '@/lib/legExecutionMethod';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
 import { formatCampaignLeverage, resolveCampaignMainLeverage } from '@/lib/campaignMetrics';
 import { formatCampaignDisplayCode } from '@/lib/campaignCode';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
-import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals, resolveLegDisplayRole } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import { computeLegPnlContributions } from '@/lib/campaignLegPnl';
 import { computeCampaignRealizedPnl, settlementBasisLabel } from '@/lib/campaignRealizedPnl';
@@ -58,6 +59,8 @@ type ExportInput = {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
   reverseHedgeOrders: CampaignReverseHedgeOrder[];
+  /** 操作方式证据含隐藏委托；不改变「委托」列本身的显示范围。 */
+  executionMethodOrders?: CampaignReverseHedgeOrder[];
   /** 别的回放留下、本场期间仍挂着的委托：不进任何腿的行，表尾合计之后画一行淡注（与页面同源）。 */
   foreignLiveOrders?: CampaignReverseHedgeOrder[];
   legExitPriceCorrections?: LegExitPriceCorrections;
@@ -154,6 +157,8 @@ const COLUMNS = [
   { title: 'Δb', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
+  // 开 / 平各一行，历史记录没有可靠来源时明确写「未记录」，不从角色或是否回填推断。
+  { title: '操作方式', width: 102 },
   // 120：留 100px 文字宽，「+199900.00%」「+1234567.89%」这种千倍以上的涨跌幅也一行放下——拆成两截的百分数最难读
   { title: '涨跌幅', width: 120 },
   // 184：十亿级币量带两位小数（1,171,163,720.54）要一行放下，合计行的 Σ币量还可能多一位
@@ -630,11 +635,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   const legRows = input.legs.flatMap((leg): CampaignLegsExportRow[] => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const execution = resolveLegExecution(leg, record, input.legExitPriceCorrections);
+    const executionMethods = resolveLegExecutionMethods(leg, record, input.executionMethodOrders ?? input.reverseHedgeOrders, input.tradeRecords);
     const status = legRowStatus(leg, record);
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
     const roleOrdinal = hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null;
-    const roleLabel = leg.leg_role
-      ? `${LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role}${roleOrdinal ? ` ${roleOrdinal}` : ''}`
+    const displayRole = resolveLegDisplayRole(leg);
+    const roleLabel = displayRole
+      ? `${LEG_ROLE_LABELS[displayRole] ?? displayRole}${roleOrdinal ? ` ${roleOrdinal}` : ''}`
       : '—';
     const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
     const closeLabel = fmtClock(execution.closeTime);
@@ -686,9 +693,9 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         text: roleLabel,
         bold: true,
         size: ROLE_CHIP_FONT_SIZE,
-        color: legRoleExportTextColor(leg.leg_role ?? null),
+        color: legRoleExportTextColor(displayRole ?? null),
         chip: {
-          color: leg.leg_role ? LEG_ROLE_TONE_COLORS[leg.leg_role] : LEG_ROLE_NEUTRAL_COLOR,
+          color: displayRole ? LEG_ROLE_TONE_COLORS[displayRole] : LEG_ROLE_NEUTRAL_COLOR,
           ...(status === 'pending' ? { hollow: true } : {}),
           ...(status === 'open' ? { dot: true } : {}),
         },
@@ -736,7 +743,11 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       })(),
       [{ text: fmtPrice(entryPriceValue) }],
       exitPriceLines,
-      // 涨跌幅：开仓价 → 平仓价的价格变化，按这条腿的方向计，与左边两格同一对价
+      [
+        { text: `开 ${executionMethods.open.label}`, color: '#848E9C', size: 11 },
+        { text: `平 ${executionMethods.close.label}`, color: '#848E9C', size: 11 },
+      ],
+      // 涨跌幅：开仓价 → 平仓价的价格变化，按这条腿的方向计，与前面的开平价格同一对价
       priceChangeCell(entryPriceValue, exitPriceValue, leg.direction === 'short' ? 'short' : 'long', '#5F6B7A'),
       // 与页面同源：币量在上、名义在下——加仓公式里的 X 是币量，名义只是它乘开仓价的结果
       [
@@ -840,6 +851,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           }],
           [{ text: fmtPrice(phase.startPrice), color: '#848E9C' }],
           [{ text: fmtPrice(phase.endPrice), color: '#848E9C' }],
+          EMPTY_CELL,
           // 阶段自己的起止价各算各的、方向沿用主力（与页面同源）
           priceChangeCell(phase.startPrice, phase.endPrice, leg.direction === 'short' ? 'short' : 'long', '#848E9C'),
           [{ text: '' }],
@@ -884,7 +896,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       bold: true,
       size: 16,
     }],
-    // 开仓价 / 平仓价 / 涨跌幅：涨跌幅跨腿没有意义，与页面一样留空
+    // 开仓价 / 平仓价 / 操作方式 / 涨跌幅：合计没有单独的操作方式，涨跌幅跨腿没有意义，与页面一样留空
+    [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],
     [{ text: '' }],

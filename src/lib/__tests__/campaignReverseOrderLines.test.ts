@@ -7,6 +7,9 @@ import {
   formatForeignReplayOrdersHeading,
   formatForeignReplayOrdersNote,
   isHedgeShortLeg,
+  isHedgeOpenedByTriggeredOrder,
+  manualHedgeSelectionId,
+  selectManualHedgeShortLegs,
   type HedgeShortLegExecution,
 } from '../campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -366,6 +369,7 @@ describe('buildManualHedgeShortPriceLines', () => {
     expect(buildManualHedgeShortPriceLines([manualHedge()], cancelledOrders, [], fallbackEnd)).toEqual([{
       price: 0.703118, color: '#F0B90B', startTime: imx('16:17'), endTime: imx('17:17'),
       dashed: false, endMarker: null, title: '手动空',
+      orderIds: [manualHedgeSelectionId('hr1')],
     }]);
   });
 
@@ -388,6 +392,8 @@ describe('buildManualHedgeShortPriceLines', () => {
       createdAt: imx('16:00'), triggeredAt: imx('16:17'),
     });
     expect(buildManualHedgeShortPriceLines([manualHedge()], [order], [], fallbackEnd)).toEqual([]);
+    expect(selectManualHedgeShortLegs([manualHedge()], [order], [])).toEqual([]);
+    expect(isHedgeOpenedByTriggeredOrder(manualHedge(), [order], [])).toBe(true);
   });
 
   it('按成交时刻 ±60 秒与价位认出触发单开出的腿（逐笔拆条后记录 id 对不上时）', () => {
@@ -411,6 +417,30 @@ describe('buildManualHedgeShortPriceLines', () => {
       manualHedge({ openTime: null }),
       manualHedge({ closeTime: imx('16:00') }),
     ], [], [], fallbackEnd)).toEqual([]);
+  });
+
+  it('管理区与盘面同源排重；完全重叠的手动对冲线仍带着每条腿自己的选择身份', () => {
+    const a = manualHedge({ legId: 'one' });
+    const b = manualHedge({ legId: 'two', recordId: 'second' });
+    expect(selectManualHedgeShortLegs([a, b], cancelledOrders, [])).toEqual([a, b]);
+    expect(buildManualHedgeShortPriceLines([a, b], cancelledOrders, [], fallbackEnd)[0].orderIds)
+      .toEqual(['manual-hedge:one', 'manual-hedge:two']);
+  });
+
+  it('真实开仓来源优先：缺了委托快照的自动单不冒充手动；同价同时的手动单不被误排除', () => {
+    expect(selectManualHedgeShortLegs([manualHedge({ entryMethod: 'order' })], [], [])).toEqual([]);
+    const explicitManual = manualHedge({ entryMethod: 'manual' });
+    const coincident = makeShortOrder({
+      status: 'triggered', createdAt: imx('16:00'), triggeredAt: imx('16:17'), price: 0.703118,
+    });
+    expect(selectManualHedgeShortLegs([explicitManual], [coincident], [])).toEqual([explicitManual]);
+  });
+
+  it('订单明确标为对冲时，即使没分角色也进入系列；不能仅因反向就把独立单算对冲', () => {
+    expect(isHedgeShortLeg({ direction: 'short', order_kind: 'hedge', leg_role: null })).toBe(true);
+    expect(isHedgeShortLeg({ direction: 'short', order_kind: 'hedge', leg_role: 'standalone' })).toBe(true);
+    expect(isHedgeShortLeg({ direction: 'short', order_kind: 'main', leg_role: 'standalone' })).toBe(false);
+    expect(isHedgeShortLeg({ direction: 'short', order_kind: 'hedge', leg_role: 'mirror_tp' })).toBe(false);
   });
 });
 

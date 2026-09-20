@@ -395,6 +395,11 @@ describe('JournalCampaignDetailPage：保存备注不冲掉 Legs 副本', () => 
     await waitFor(() => expect(screen.getByDisplayValue('120')).toBeInTheDocument());
     expect(screen.queryByDisplayValue('105')).not.toBeInTheDocument();
 
+    const detailsToggle = screen.getByRole('button', { name: /偏离代价明细/ });
+    expect(detailsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: '保存备注' })).toBeNull();
+    fireEvent.click(detailsToggle);
+
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '保存备注' }));
     });
@@ -412,6 +417,7 @@ describe('JournalCampaignDetailPage：保存备注不冲掉 Legs 副本', () => 
     await waitForEditor('105');
 
     fireEvent.change(screen.getByDisplayValue('105'), { target: { value: '118' } });
+    fireEvent.click(screen.getByRole('button', { name: /偏离代价明细/ }));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: '保存备注' }));
     });

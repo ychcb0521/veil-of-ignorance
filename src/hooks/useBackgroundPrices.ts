@@ -133,7 +133,7 @@ export function useBackgroundPrices() {
           // 后台标的用它**自己**的钟取章：隔离模式下它和盘面标的不在同一条时间线上。
           const filledTimelineId = stampClock(symbol);
           const { fee, margin, position } = executeSettlementFill(
-            symbol, fillPrice, order, isMaker, simulatedTime, Date.now(), filledTimelineId,
+            symbol, fillPrice, order, isMaker, simulatedTime, Date.now(), filledTimelineId, 'order',
           );
           const actualFillPrice = position.entryPrice;
 

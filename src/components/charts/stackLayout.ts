@@ -20,6 +20,10 @@ export type StackLayoutOptions = {
   /** 绘图区顶边（px）与高度（px）。 */
   top: number;
   plotHeight: number;
+  /** Exceptional values (e.g. G=0 on a log chart) form a separate, non-numeric column. */
+  isolatedLeft?: { ids: readonly string[]; cx: number };
+  /** R axes keep integer boundaries; transformed axes need only the zero boundary. */
+  integerBoundaries?: boolean;
 };
 
 export type StackPlacedPoint = {
@@ -78,13 +82,15 @@ export type ScatterStackScale = {
 };
 
 export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOptions): StackLayoutResult {
-  const { xMin, xMax, left, right, top, plotHeight } = options;
+  const { xMin, xMax, left, right, top, plotHeight, isolatedLeft } = options;
+  const isolatedIds = new Set(isolatedLeft?.ids);
   const usable = Math.max(1, right - left);
   const span = xMax - xMin || 1;
   // 档边界必须落在整数 R 上：止损墙（−1）与盈亏平衡（0）都是档边界，−1.05R 的亏损才不会
   // 因为吸附到档中心而画到墙右边。整数窗口下每 1R 切 k 档（k = 每 R 像素 ÷ 步距取整）；
   // 窄到 1R 都放不下一个步距、或窗口不是整数时，退回「按像素等分」。
-  const perUnit = Number.isInteger(xMin) && Number.isInteger(span) ? Math.floor(usable / span / MIN_PITCH) : 0;
+  const perUnit = options.integerBoundaries !== false && Number.isInteger(xMin) && Number.isInteger(span)
+    ? Math.floor(usable / span / MIN_PITCH) : 0;
   const nominalBinCount = perUnit >= 1 ? span * perUnit : Math.max(1, Math.floor(usable / MIN_PITCH));
   const binPx = usable / nominalBinCount;
   const binWidth = (binPx / usable) * span;
@@ -100,13 +106,15 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const zeroPx = xPx(0);
   const firstBin = Math.floor((left - zeroPx) / binPx + 1e-9);
   const lastBin = Math.ceil((right - zeroPx) / binPx - 1e-9) - 1;
-  const binCount = Math.max(1, lastBin - firstBin + 1);
+  const numericBinCount = Math.max(1, lastBin - firstBin + 1);
+  const binCount = numericBinCount + (isolatedIds.size > 0 ? 1 : 0);
 
   // 先分档：越出显示区间的点落到最边上的一档，并记下方向，之后画成三角。
   const entries = points.map(point => {
+    if (isolatedIds.has(point.id)) return { id: point.id, x: point.x, bin: numericBinCount, clamped: null };
     const clamped: ClampDirection | null = point.x < xMin ? 'left' : point.x > xMax ? 'right' : null;
     const px = clamped === 'left' ? left : clamped === 'right' ? right : xPx(point.x);
-    const bin = Math.min(binCount - 1, Math.max(0, Math.floor((px - zeroPx) / binPx) - firstBin));
+    const bin = Math.min(numericBinCount - 1, Math.max(0, Math.floor((px - zeroPx) / binPx) - firstBin));
     return { id: point.id, x: point.x, bin, clamped };
   });
 
@@ -132,7 +140,9 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const baseline = top + plotHeight;
   const cyAt = (rank: number) => baseline - (rank + 0.5) * pitchY;
   const pctAt = (cy: number) => ((cy - top) / plotHeight) * 100;
-  const cxAt = (bin: number) => zeroPx + (firstBin + bin + 0.5) * binPx;
+  const cxAt = (bin: number) => bin === numericBinCount && isolatedLeft
+    ? isolatedLeft.cx
+    : zeroPx + (firstBin + bin + 0.5) * binPx;
 
   const placed: StackPlacedPoint[] = [];
   const overflowByBin = new Map<number, StackOverflow>();

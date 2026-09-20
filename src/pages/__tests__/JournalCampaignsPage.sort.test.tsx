@@ -852,7 +852,8 @@ describe('JournalCampaignsPage sorting', () => {
     // 不能照抄盈亏比那套（单位 R、+10R 封顶、−1R 止损墙——这里一样都不成立）
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
     const guide = await screen.findByTestId('campaign-metric-guide-geometricExpectancyDistribution');
-    expect(guide.textContent).toContain('横轴就是几何期望本身');
+    expect(guide.textContent).toContain('横轴按 ln(Gᵢ) 对数刻度排布');
+    expect(guide.textContent).toContain('0.5 → 1 → 2 等距');
     expect(guide.textContent).not.toContain('单位 R');
     expect(guide.textContent).not.toContain('封顶在 +10R');       // 盈亏比才有的封顶
     expect(guide.textContent).not.toContain('落在墙外');           // 这里根本不画止损墙

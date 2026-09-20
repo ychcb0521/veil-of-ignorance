@@ -84,7 +84,7 @@ export type ScatterCountAxis = {
 
 export type ScatterXAxis =
   | { mode: 'ordinal'; count: number; labelAt: (index: number) => string | null }
-  | { mode: 'linear'; min: number; max: number; labels?: { at: number; text: string }[] }
+  | { mode: 'linear'; min: number; max: number; labels?: { at: number; text: string }[]; integerBoundaries?: boolean }
   | { mode: 'category'; categories: { value: number; label: string; sublabel?: string }[] };
 
 export type ScatterReferenceLine = {
@@ -115,6 +115,8 @@ export type ScatterPlotProps = {
   referenceLines?: ScatterReferenceLine[];
   /** 只在场数轴下调用：画在参考线之后、点位之前，并被裁进绘图区。 */
   overlay?: (scale: ScatterStackScale) => ReactNode;
+  /** A separate count column for values excluded from the continuous axis (e.g. log(0)). */
+  isolatedLeftBucket?: { pointIds: string[]; label: string };
   bandCounts?: ScatterBandCounts;
   onSelect?: (id: string) => void;
   onActiveChange?: (id: string | null) => void;
@@ -289,6 +291,7 @@ export function ScatterPlot({
   xAxis,
   referenceLines = [],
   overlay,
+  isolatedLeftBucket,
   bandCounts,
   onSelect,
   onActiveChange,
@@ -316,6 +319,9 @@ export function ScatterPlot({
   // 场数轴的 min/max 要等布局算出行距才知道，所以数值轴在这里单独收窄；
   // 现有调用方 valueYAxis === yAxis，一切照旧。
   const stackMode = yAxis.mode === 'count';
+  const hasIsolatedBucket = stackMode && xAxis.mode === 'linear' && Boolean(isolatedLeftBucket?.pointIds.length);
+  const numericLeft = PLOT_INSET.left + (hasIsolatedBucket ? 72 : 0);
+  const isolatedCx = PLOT_INSET.left + 24;
   const valueYAxis: ScatterYAxis | null = yAxis.mode === 'count' ? null : yAxis;
   const valueMin = valueYAxis?.min ?? 0;
   const valueMax = valueYAxis?.max ?? 1;
@@ -383,10 +389,12 @@ export function ScatterPlot({
       const result = stackLayout(points.map(point => ({ id: point.id, x: point.x })), {
         xMin: xAxis.min,
         xMax: xAxis.max,
-        left: PLOT_INSET.left,
+        left: numericLeft,
         right: contentWidth - PLOT_INSET.right,
         top: PLOT_INSET.top,
         plotHeight,
+        isolatedLeft: hasIsolatedBucket ? { ids: isolatedLeftBucket!.pointIds, cx: isolatedCx } : undefined,
+        integerBoundaries: xAxis.integerBoundaries,
       });
       const byId = new Map(points.map(point => [point.id, point]));
       const placed = result.placed.flatMap(item => {
@@ -510,7 +518,7 @@ export function ScatterPlot({
       placed,
       stack: null as StackInfo | null,
     };
-  }, [innerWidth, plotHeight, points, series, seriesById, stackMode, trackWidth, xAxis, valueMax, valueMin, valueFraction]);
+  }, [innerWidth, plotHeight, points, series, seriesById, stackMode, trackWidth, xAxis, valueMax, valueMin, valueFraction, numericLeft, hasIsolatedBucket, isolatedLeftBucket, isolatedCx]);
 
   const { contentWidth, pitch, fitMode, placed, stack } = layout;
   const activePoint = placed.find(point => point.id === activeId) ?? null;
@@ -597,7 +605,7 @@ export function ScatterPlot({
     );
   }
 
-  const lineLeft = PLOT_INSET.left;
+  const lineLeft = numericLeft;
   const lineRight = contentWidth - PLOT_INSET.right;
   const gutterStyle: CSSProperties = { top: PLOT_INSET.top, bottom: PLOT_INSET.bottom };
   // 命中区宽度不超过列距，否则相邻按钮会盖住彼此圆心，点错战役。
@@ -690,6 +698,15 @@ export function ScatterPlot({
                       </clipPath>
                     </defs>
                   ) : null}
+                  {hasIsolatedBucket && (
+                    <line
+                      data-testid="chart-isolated-bucket-divider"
+                      x1={numericLeft - 16} x2={numericLeft - 16}
+                      y1={PLOT_INSET.top} y2={PLOT_INSET.top + plotHeight}
+                      strokeDasharray="3 4"
+                      style={{ stroke: CHART_AXIS_VAR, strokeWidth: 1 }}
+                    />
+                  )}
                   {renderAxis.ticks.map(tick => {
                     const y = Math.round(PLOT_INSET.top + yFraction(tick.value) * plotHeight) + 0.5;
                     return (
@@ -758,7 +775,7 @@ export function ScatterPlot({
                         binPx: stack.binPx,
                         pitchY: stack.pitchY,
                         rowsFit: stack.rowsFit,
-                        n: points.length,
+                        n: points.length - (hasIsolatedBucket ? isolatedLeftBucket!.pointIds.length : 0),
                         plot: { left: lineLeft, right: lineRight, top: PLOT_INSET.top, bottom: PLOT_INSET.top + plotHeight },
                         clipPathId,
                       })}
@@ -915,9 +932,11 @@ export function ScatterPlot({
                     style={stack ? {
                       // 右侧放不下 15rem 时改用 right 锚到点位左侧：用 left + translate 翻转会让
                       // 绝对定位盒子只剩锚点右侧那点可用宽度，文字被挤成两行。
-                      ...(activePoint.cx + 12 + 240 > contentWidth
-                        ? { right: `${contentWidth - (activePoint.cx - 12)}px` }
-                        : { left: `${activePoint.cx + 12}px` }),
+                      ...(activePoint.cx + 12 + 240 <= contentWidth
+                        ? { left: `${activePoint.cx + 12}px` }
+                        : activePoint.cx - 12 - 240 >= 0
+                          ? { right: `${contentWidth - (activePoint.cx - 12)}px` }
+                          : { left: '8px', maxWidth: `${Math.max(1, contentWidth - 16)}px` }),
                       // 上下各留半个提示框：底行点位（分布图里最多的那些）的提示框不能被盒子裁掉下缘。
                       top: `${Math.min(boxHeight - STACK_TOOLTIP_HALF, Math.max(PLOT_INSET.top + STACK_TOOLTIP_HALF, activePoint.cy))}px`,
                     } : {
@@ -948,6 +967,13 @@ export function ScatterPlot({
                   style={{ height: PLOT_INSET.bottom, width: contentWidth }}
                   aria-hidden="true"
                 >
+                  {hasIsolatedBucket && (
+                    <span data-testid="chart-isolated-bucket-label"
+                      className="absolute flex -translate-x-1/2 flex-col pt-1 leading-tight"
+                      style={{ left: isolatedCx, top: 0 }}>
+                      <span>0</span><span>{isolatedLeftBucket!.label}</span>
+                    </span>
+                  )}
                   {xAxis.mode === 'ordinal'
                     ? Array.from({ length: xAxis.count }, (_, index) => {
                       const label = xAxis.labelAt(index);
@@ -995,7 +1021,7 @@ export function ScatterPlot({
                     : null}
                   {xAxis.mode === 'linear'
                     ? xAxis.labels?.map(label => {
-                      const usable = contentWidth - PLOT_INSET.left - PLOT_INSET.right;
+                      const usable = lineRight - lineLeft;
                       const span = xAxis.max - xAxis.min || 1;
                       const fraction = (label.at - xAxis.min) / span;
                       // 首尾刻度落在绘图盒边界上，居中就会被裁掉半个字；两端改成贴边对齐。
@@ -1006,7 +1032,7 @@ export function ScatterPlot({
                         <span
                           key={`xn-${label.at}-${label.text}`}
                           className={`absolute whitespace-nowrap pt-1 ${align}`}
-                          style={{ left: `${PLOT_INSET.left + fraction * usable}px`, top: 0 }}
+                          style={{ left: `${lineLeft + fraction * usable}px`, top: 0 }}
                         >
                           {label.text}
                         </span>

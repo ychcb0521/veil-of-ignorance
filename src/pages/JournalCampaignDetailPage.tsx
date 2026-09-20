@@ -12,6 +12,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
+import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
+import { readCampaignReviewSummary, withCampaignReviewSummary } from '@/lib/campaignReviewSummary';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
@@ -81,6 +83,7 @@ import {
   type LegExitPriceCorrections,
 } from '@/lib/campaignLegExecution';
 import { buildSelectedLegVerticalLines, legRoleMarkerLabel } from '@/lib/campaignLegMarkers';
+import { buildHedgeLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import {
   campaignStatusLabel,
   exportCampaignBoardPng,
@@ -142,6 +145,8 @@ import {
   formatForeignReplayOrdersHeading,
   isDisplayableReverseHedgeOrder,
   isHedgeShortLeg,
+  manualHedgeSelectionId,
+  selectManualHedgeShortLegs,
   type HedgeShortLegExecution,
 } from '@/lib/campaignReverseOrderLines';
 import type {
@@ -665,6 +670,9 @@ export default function JournalCampaignDetailPage() {
   // 用户对偏离行三列文字的手改覆盖（按行键 = legId），来自本地持久化；保存后下次打开仍在。
   const [deviationNotes, setDeviationNotes] = useState<Record<string, CampaignDeviationNote>>({});
   const [deviationNotesSaving, setDeviationNotesSaving] = useState(false);
+  const [deviationDetailsOpen, setDeviationDetailsOpen] = useState(false);
+  const deviationNotesCampaignRef = useRef<string | null>(null);
+  const deviationNotesSaveRequestRef = useRef(0);
   const [detachTarget, setDetachTarget] = useState<TradeJournal | null>(null);
   const [detaching, setDetaching] = useState(false);
   const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
@@ -696,6 +704,9 @@ export default function JournalCampaignDetailPage() {
     setCounterfactualDraft(null);
     setCounterfactualDraftName('');
     setLoadLegsRequest(null);
+    setDeviationDetailsOpen(false);
+    setDeviationNotesSaving(false);
+    deviationNotesSaveRequestRef.current += 1;
   }, [id]);
 
   useEffect(() => {
@@ -1315,13 +1326,8 @@ export default function JournalCampaignDetailPage() {
     () => (campaign ? computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, reverseHedgeOrders) : null),
     [campaign, legs, tradeRecords, reverseHedgeOrders],
   );
-  const hiddenReverseOrderCount = useMemo(
-    () => [...displayableReverseHedgeOrders, ...displayableForeignLiveOrders]
-      .filter(order => hiddenReverseOrderSet.has(order.id)).length,
-    [displayableReverseHedgeOrders, displayableForeignLiveOrders, hiddenReverseOrderSet],
-  );
   // 手动开的对冲空单：与被触发的委托空单同一个目的，同在这一层、同样黄色（见 buildManualHedgeShortPriceLines）。
-  const manualHedgeShortLegs = useMemo<HedgeShortLegExecution[]>(() => {
+  const hedgeShortExecutions = useMemo<HedgeShortLegExecution[]>(() => {
     const lookup = buildTradeRecordLookup(tradeRecords);
     const result: HedgeShortLegExecution[] = [];
     for (const leg of legs) {
@@ -1336,10 +1342,40 @@ export default function JournalCampaignDetailPage() {
         openTime: resolved.openTime,
         closeTime: resolved.closeTime,
         entryPrice: resolved.entryPrice,
+        entryMethod: resolved.record?.entry_method
+          ?? (leg.hedge_order_method === 'market_chase' ? 'manual' : leg.hedge_order_method === 'limit_preset' ? 'order' : undefined),
       });
     }
     return result;
   }, [legs, tradeRecords, legExitPriceCorrections]);
+  const manualHedgeShortLegs = useMemo(
+    () => selectManualHedgeShortLegs(hedgeShortExecutions, displayableReverseHedgeOrders, tradeRecords),
+    [hedgeShortExecutions, displayableReverseHedgeOrders, tradeRecords],
+  );
+  const visibleManualHedgeShortLegs = useMemo(
+    () => manualHedgeShortLegs.filter(leg => !hiddenReverseOrderSet.has(manualHedgeSelectionId(leg.legId))),
+    [manualHedgeShortLegs, hiddenReverseOrderSet],
+  );
+  const reverseOrderManagerItems = useMemo(() => [
+    ...visibleReverseHedgeOrders.map(order => ({ order, manualLeg: undefined as HedgeShortLegExecution | undefined })),
+    ...visibleManualHedgeShortLegs.map(leg => ({
+      // 只适配管理色块，绝不进入委托、结算或风险数据。
+      order: {
+        id: manualHedgeSelectionId(leg.legId), side: 'SHORT' as const, tradeRecordId: leg.recordId,
+        price: leg.entryPrice!, createdAt: leg.openTime!, triggeredAt: leg.openTime,
+        cancelledAt: leg.closeTime, status: 'triggered' as const,
+      },
+      manualLeg: leg,
+    })),
+  ].sort((a, b) => a.order.createdAt - b.order.createdAt || a.order.id.localeCompare(b.order.id)),
+  [visibleReverseHedgeOrders, visibleManualHedgeShortLegs]);
+  const hedgeLegOrdinals = useMemo(() => buildHedgeLegOrdinals(legs), [legs]);
+  const hiddenReverseOrderCount = useMemo(
+    () => [...displayableReverseHedgeOrders, ...displayableForeignLiveOrders]
+      .filter(order => hiddenReverseOrderSet.has(order.id)).length
+      + manualHedgeShortLegs.filter(leg => hiddenReverseOrderSet.has(manualHedgeSelectionId(leg.legId))).length,
+    [displayableReverseHedgeOrders, displayableForeignLiveOrders, manualHedgeShortLegs, hiddenReverseOrderSet],
+  );
   const hasReverseOrders = displayableReverseHedgeOrders.length > 0;
   const hasManualHedgeShorts = manualHedgeShortLegs.length > 0;
   const hasForeignLiveOrders = displayableForeignLiveOrders.length > 0;
@@ -1362,17 +1398,20 @@ export default function JournalCampaignDetailPage() {
     return [
       ...buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd),
       // 「是不是触发单开出的腿」按全部可显示的委托判，隐藏某张委托不会让它的腿冒充手动单。
-      ...buildManualHedgeShortPriceLines(manualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
+      ...buildManualHedgeShortPriceLines(visibleManualHedgeShortLegs, displayableReverseHedgeOrders, tradeRecords, fallbackEnd),
       // 他场委托：灰色淡虚线，跟着同一个眼睛开关，但不是黄色层的一部分
       ...buildForeignReplayOrderPriceLines(visibleForeignLiveOrders, fallbackEnd),
     ];
-  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, manualHedgeShortLegs, tradeRecords, klines]);
+  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, tradeRecords, klines]);
   // 隐藏的委托、关掉的委托层都不再算选中——免得管理区里看不见的单子还挂着高亮。
   const activeSelectedReverseOrderSet = useMemo(() => {
     if (!showOrderInfo) return new Set<string>();
-    const visibleIds = new Set([...visibleReverseHedgeOrders, ...visibleForeignLiveOrders].map(order => order.id));
+    const visibleIds = new Set([
+      ...[...visibleReverseHedgeOrders, ...visibleForeignLiveOrders].map(order => order.id),
+      ...visibleManualHedgeShortLegs.map(leg => manualHedgeSelectionId(leg.legId)),
+    ]);
     return new Set(selectedReverseOrderIds.filter(id => visibleIds.has(id)));
-  }, [showOrderInfo, visibleReverseHedgeOrders, visibleForeignLiveOrders, selectedReverseOrderIds]);
+  }, [showOrderInfo, visibleReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, selectedReverseOrderIds]);
   const orderLineIdsBySelectId = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const line of orderInfoPriceLines) {
@@ -1432,7 +1471,7 @@ export default function JournalCampaignDetailPage() {
     const actualParams = buildActualSimulationParams(campaign, legs, tradeRecords);
     if (!actualParams) return [];
     const originalLegs = buildManualLegs(
-      actualParams, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders: localOrderFacts },
+      actualParams, legs, klines, tradeRecords, legExitPriceCorrections, { campaign, localOrders: localOrderFacts, reverseHedgeOrders },
     );
     // 老行的兜底平仓时间按那次运行的 K 线末根与改动摘要认：换了周期、窗口长了都不能读成「改过」。
     return computeManualLegDeviationCosts(
@@ -1441,7 +1480,7 @@ export default function JournalCampaignDetailPage() {
       selectedCounterfactual.params?.run_context?.to ?? null,
       selectedCounterfactual.params?.change_summary ?? null,
     );
-  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines, legExitPriceCorrections, localOrderFacts]);
+  }, [campaign, selectedCounterfactual, legs, tradeRecords, klines, legExitPriceCorrections, localOrderFacts, reverseHedgeOrders]);
   // 门槛：选中分支是「手动运行」分支（带 manual_legs）才展示偏离明细。
   const hasManualRunBranch = (selectedCounterfactual?.params?.manual_legs ?? []).length > 0;
   // 已保存分支列表里隐藏自动生成的「修正分支」(补齐 X)，只保留 Pure SOP 与自定义 What-if。
@@ -1456,9 +1495,10 @@ export default function JournalCampaignDetailPage() {
 
   // 载入该战役已保存的偏离备注（存在战役行上，互关者一并读到）。
   useEffect(() => {
-    if (!campaign) return;
+    if (!campaign || campaign.id !== id || deviationNotesCampaignRef.current === campaign.id) return;
+    deviationNotesCampaignRef.current = campaign.id;
     setDeviationNotes(campaign.deviation_notes ?? {});
-  }, [campaign]);
+  }, [campaign, id]);
 
   if (loading || !campaign || !accuracy) {
     return (
@@ -1522,15 +1562,18 @@ export default function JournalCampaignDetailPage() {
   };
 
   // 管理区色块：本场的委托与「他场」委托共用同一套点选 / 隐藏，他场的整体压灰并带「他场」标签。
-  const renderReverseOrderChip = (order: CampaignReverseHedgeOrder, foreign = false) => {
+  const renderReverseOrderChip = (order: CampaignReverseHedgeOrder, foreign = false, manualLeg?: HedgeShortLegExecution) => {
     const selected = activeSelectedReverseOrderSet.has(order.id);
+    const ordinal = manualLeg ? hedgeLegOrdinals.get(manualLeg.legId) : null;
+    const hideLabel = manualLeg ? '从盘面隐藏这条手动对冲' : foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单';
     return (
       <div
         key={order.id}
         role="button"
         tabIndex={0}
         aria-pressed={selected}
-        data-testid={foreign ? 'foreign-replay-order-chip' : 'reverse-order-chip'}
+        data-testid={manualLeg ? 'manual-hedge-chip' : foreign ? 'foreign-replay-order-chip' : 'reverse-order-chip'}
+        data-leg-id={manualLeg?.legId}
         data-selected={selected ? 'true' : 'false'}
         onClick={() => toggleReverseOrderSelection(order.id)}
         onKeyDown={event => {
@@ -1557,17 +1600,20 @@ export default function JournalCampaignDetailPage() {
           }`}
         />
         {foreign && <span className="rounded-sm bg-muted/40 px-1 text-[9px] text-muted-foreground/70">他场</span>}
-        <span className={foreign ? '' : selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>{reverseOrderStatusText(order)}</span>
+        <span className={foreign ? '' : selected ? 'font-medium text-[#F0B90B]' : 'text-[#F0B90B]/80'}>
+          {manualLeg ? `手动对冲${ordinal ? ` ${ordinal}` : ''}` : reverseOrderStatusText(order)}
+        </span>
         <span>{fmtReverseOrderChipTime(order.createdAt)}</span>
         <span>@ {fmtReverseOrderChipPrice(order.price)}</span>
+        {manualLeg && <span className="text-muted-foreground/65">{manualLeg.closeTime == null ? '进行中' : `平 ${fmtReverseOrderChipTime(manualLeg.closeTime)}`}</span>}
         <button
           type="button"
           onClick={event => {
             event.stopPropagation();
             hideReverseHedgeOrder(order.id);
           }}
-          title={foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单'}
-          aria-label={foreign ? '从盘面隐藏这条他场委托' : '从盘面隐藏这条委托空单'}
+          title={hideLabel}
+          aria-label={hideLabel}
           className="ml-0.5 inline-flex items-center text-muted-foreground/30 opacity-0 transition-opacity hover:text-[#F6465D] group-hover:opacity-100"
         >
           <EyeOff className="w-3 h-3" />
@@ -1727,12 +1773,16 @@ export default function JournalCampaignDetailPage() {
   };
 
   const handleSaveDeviationNotes = async () => {
-    if (!user || !campaign) return;
+    if (!user || !campaign || deviationNotesSaving) return;
+    const campaignId = campaign.id;
+    const request = ++deviationNotesSaveRequestRef.current;
+    const notes = deviationNotes;
     try {
       setDeviationNotesSaving(true);
-      await saveCampaignDeviationNotes(campaign.id, deviationNotes);
-      const syncResult = await syncCampaignDeviationRulesToChecklist(user.id, deviationNotes, deviationLegCosts, campaign.id);
-      setCampaign(prev => (prev ? { ...prev, deviation_notes: deviationNotes } : prev));
+      await saveCampaignDeviationNotes(campaignId, notes);
+      const syncResult = await syncCampaignDeviationRulesToChecklist(user.id, notes, deviationLegCosts, campaignId);
+      if (activeCampaignIdRef.current !== campaignId || request !== deviationNotesSaveRequestRef.current) return;
+      setCampaign(prev => (prev?.id === campaignId ? { ...prev, deviation_notes: notes } : prev));
       if (syncResult.created > 0) {
         toast.success(`偏离备注已保存，并同步 ${syncResult.created} 条规则`);
       } else if (syncResult.drafts > 0) {
@@ -1741,9 +1791,29 @@ export default function JournalCampaignDetailPage() {
         toast.success('偏离备注已保存');
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      if (activeCampaignIdRef.current === campaignId && request === deviationNotesSaveRequestRef.current) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setDeviationNotesSaving(false);
+      if (request === deviationNotesSaveRequestRef.current) setDeviationNotesSaving(false);
+    }
+  };
+
+  const handleSaveReviewSummary = async (summary: string) => {
+    if (!isOwner || !user) throw new Error('只能保存自己的战役总结');
+    if (deviationNotesSaving) throw new Error('正在保存备注，请稍后重试');
+    const campaignId = campaign.id;
+    const request = ++deviationNotesSaveRequestRef.current;
+    const notes = withCampaignReviewSummary(deviationNotes, summary);
+    setDeviationNotesSaving(true);
+    try {
+      await saveCampaignDeviationNotes(campaignId, notes);
+      if (activeCampaignIdRef.current !== campaignId || request !== deviationNotesSaveRequestRef.current) return;
+      // 请求期间继续编辑的逐腿备注留在草稿里，不用旧快照覆盖它们。
+      setDeviationNotes(current => withCampaignReviewSummary(current, summary));
+      setCampaign(current => current?.id === campaignId ? { ...current, deviation_notes: notes } : current);
+    } finally {
+      if (request === deviationNotesSaveRequestRef.current) setDeviationNotesSaving(false);
     }
   };
 
@@ -1760,6 +1830,7 @@ export default function JournalCampaignDetailPage() {
         legs,
         tradeRecords,
         reverseHedgeOrders: visibleReverseHedgeOrders,
+        executionMethodOrders: reverseHedgeOrders,
         foreignLiveOrders: visibleForeignLiveOrders,
         legExitPriceCorrections,
         chartElement: campaignChartExportRef.current,
@@ -2169,7 +2240,7 @@ export default function JournalCampaignDetailPage() {
                       {showOrderInfo ? '' : '·已隐藏'}）
                     </span>
                   )}
-                  {(hasReverseOrders || hasForeignLiveOrders) && (
+                  {(hasYellowOrderLayer || hasForeignLiveOrders) && (
                     <button
                       type="button"
                       onClick={() => setShowReverseOrderManager(v => !v)}
@@ -2188,9 +2259,9 @@ export default function JournalCampaignDetailPage() {
                     </button>
                   )}
                 </div>
-                {showReverseOrderManager && showOrderInfo && visibleReverseHedgeOrders.length > 0 && (
+                {showReverseOrderManager && showOrderInfo && (visibleReverseHedgeOrders.length > 0 || visibleManualHedgeShortLegs.length > 0) && (
                   <div className="flex flex-wrap gap-1.5 pl-5">
-                    {visibleReverseHedgeOrders.map(order => renderReverseOrderChip(order))}
+                    {reverseOrderManagerItems.map(({ order, manualLeg }) => renderReverseOrderChip(order, false, manualLeg))}
                   </div>
                 )}
                 {/* 他场委托单独一组、整体压灰，排在本场的色块之后：一眼看出不是这场挂的。标题只数各自状态，与色块的 已撤 / 已触发 对得上 */}
@@ -2322,6 +2393,7 @@ export default function JournalCampaignDetailPage() {
             campaignEvents={campaign.actual_evolution}
             legExitPriceCorrections={legExitPriceCorrections}
             reverseHedgeOrders={visibleReverseHedgeOrders}
+            executionMethodOrders={reverseHedgeOrders}
             foreignLiveOrders={visibleForeignLiveOrders}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
@@ -2354,6 +2426,7 @@ export default function JournalCampaignDetailPage() {
             tradeRecords={tradeRecords}
             legExitPriceCorrections={legExitPriceCorrections}
             localOrders={localOrderFacts}
+            reverseHedgeOrders={reverseHedgeOrders}
             klines={klines}
             klinesLoading={klinesLoading}
             interval={effectiveInterval}
@@ -2518,21 +2591,31 @@ export default function JournalCampaignDetailPage() {
             </>
           )}
 
+          <CampaignReviewSummary
+            key={campaign.id}
+            value={readCampaignReviewSummary(campaign.deviation_notes)}
+            canEdit={isOwner}
+            disabled={deviationNotesSaving}
+            onSave={handleSaveReviewSummary}
+          />
+
           {hasManualRunBranch && (
                 <div className="bg-card border border-border rounded p-4 mt-4 space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <div className="text-[13px] font-medium">
+                      <button type="button" aria-expanded={deviationDetailsOpen} aria-controls="campaign-deviation-details" onClick={() => setDeviationDetailsOpen(open => !open)} className="inline-flex items-center gap-2 text-[13px] font-medium">
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${deviationDetailsOpen ? '' : '-rotate-90'}`} />
                         偏离代价明细（手动调整 vs 原始）
-                      </div>
-                      <div className="text-[12px] text-muted-foreground mt-2">
+                        <span className="text-[10px] font-normal text-muted-foreground">{deviationDetailsOpen ? '收起' : '展开'}</span>
+                      </button>
+                      {deviationDetailsOpen && <div className="text-[12px] text-muted-foreground mt-2">
                         把你手动调整后的 Legs 与原始战役逐腿对比，每条代价 = 调整后盈亏 − 原始盈亏。
                         合计 {totalDeviationCost >= 0 ? '+' : ''}{totalDeviationCost.toFixed(2)} USDT = 原始错误的总代价。
                         保存后会把已填写的「修正后」汇总进复盘中心的规则。
-                      </div>
+                      </div>}
                     </div>
                     <div className="flex items-center gap-3">
-                      {isOwner && (
+                      {isOwner && deviationDetailsOpen && (
                         <Button
                           variant="outline"
                           className="h-8 text-[11px]"
@@ -2545,6 +2628,7 @@ export default function JournalCampaignDetailPage() {
                     </div>
                   </div>
 
+                  {deviationDetailsOpen && <div id="campaign-deviation-details" className="space-y-4">
                   <div className="overflow-x-auto">
                     <table className="w-full text-[11px]">
                       <thead className="bg-background text-muted-foreground">
@@ -2639,6 +2723,7 @@ export default function JournalCampaignDetailPage() {
                     这张表是这套系统对你最锋利的一刀。每一条都是真金白银。
                     如果总代价 &lt; 10 USDT，本场偏离基本无害；如果 &gt; 100 USDT 或 &gt; 1% 账户，立即把对应违规升级为 checklist 强制规则。
                   </div>
+                  </div>}
                 </div>
           )}
         </section>

@@ -7,6 +7,11 @@ import {
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { mirrorTpOutcome } from '@/lib/mirrorTpSummary';
 import {
+  buildGeometricDistributionModel,
+  formatGeometricDistributionValue,
+  geometricLogPosition,
+} from '@/lib/geometricDistribution';
+import {
   ScatterPlot,
   type ScatterCountAxis,
   type ScatterPoint,
@@ -72,7 +77,7 @@ type CampaignMetricScatterPlotProps = {
   excludedMissingOperationTimeCount?: number;
   colorMode?: CampaignMetricColorMode;
   legacyOddsTestIds?: boolean;
-  /** 缺省 'time'。'distribution' 只对盈亏比这类以 R 计的带符号指标有意义。 */
+  /** 缺省 'time'。几何期望分布使用对数横轴，其余连续指标使用线性横轴。 */
   view?: CampaignMetricChartView;
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
@@ -370,7 +375,7 @@ export function CampaignMetricScatterPlot({
   axisLabel,
   seriesLabel,
   guide,
-  formatValue,
+  formatValue: suppliedFormatValue,
   missingValueLabel,
   excludedMissingValueCount = 0,
   excludedMissingOperationTimeCount = 0,
@@ -383,6 +388,8 @@ export function CampaignMetricScatterPlot({
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const distribution = view === 'distribution';
+  const geometricDistribution = distribution && metricKey === 'geometricExpectancyDistribution';
+  const formatValue = geometricDistribution ? formatGeometricDistributionValue : suppliedFormatValue;
   // 柱状与分布都按横轴堆叠、纵轴读场数；区别只在横轴是离散档位还是连续数值。
   const bars = view === 'bars';
   const stacked = distribution || bars;
@@ -433,6 +440,14 @@ export function CampaignMetricScatterPlot({
       ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : { domain: metricDistributionDomain })
       : null),
     [chartPoints, distribution, oddsFamily],
+  );
+  const geometricDist = useMemo(
+    () => geometricDistribution ? buildGeometricDistributionModel(chartPoints) : null,
+    [chartPoints, geometricDistribution],
+  );
+  const isolatedLeftBucket = useMemo(
+    () => geometricDist?.zeroIds.length ? { pointIds: geometricDist.zeroIds, label: '本金归零' } : undefined,
+    [geometricDist],
   );
   /**
    * 柱状视图的档位表。档位取自该指标的离散刻度（镜像止盈就是 未实现/亏损/持平/盈利 四档），
@@ -524,7 +539,8 @@ export function CampaignMetricScatterPlot({
         : '';
       return {
         id: point.campaignId,
-        x: stacked ? point.value : index,
+        // G=0 lives in its own column; 0 here is only a finite placeholder, never log(0).
+        x: geometricDistribution ? geometricLogPosition(point.value) ?? 0 : stacked ? point.value : index,
         y: stacked ? 0 : point.value,
         seriesId: `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
         valueText: `${formatValue(point.value)}${payoffSuffix}`,
@@ -544,7 +560,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [colorMode, formatValue, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length, showPayoffRatio, stacked],
+    [colorMode, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, orderedPoints, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -554,7 +570,12 @@ export function CampaignMetricScatterPlot({
     unit: '场',
   }), [metricKey]);
 
-  const distributionXAxis = useMemo<ScatterXAxis | null>(() => (dist ? {
+  const distributionXAxis = useMemo<ScatterXAxis | null>(() => (geometricDist ? {
+    mode: 'linear',
+    ...geometricDist.domain,
+    labels: geometricDist.labels,
+    integerBoundaries: false,
+  } : dist ? {
     mode: 'linear',
     min: dist.domain.min,
     max: dist.domain.max,
@@ -562,7 +583,7 @@ export function CampaignMetricScatterPlot({
     labels: dist.domain.ticks
       .map(value => ({ at: value, text: oddsFamily ? formatIntegerOddsTick(value) : formatValue(value) }))
       .filter((label, index, list) => index === 0 || label.text !== list[index - 1].text),
-  } : null), [dist, oddsFamily, formatValue]);
+  } : null), [dist, geometricDist, oddsFamily, formatValue]);
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
     mode: 'category',
@@ -601,11 +622,16 @@ export function CampaignMetricScatterPlot({
   const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
     <path
       data-testid={`campaign-metric-density-curve-${metricKey}`}
-      d={kdeCountPath(dist.values, dist.domain, scale, dist.bandwidth)}
+      d={kdeCountPath(
+        geometricDist?.values ?? dist.values,
+        geometricDist?.domain ?? dist.domain,
+        scale,
+        geometricDist?.bandwidth ?? dist.bandwidth,
+      )}
       fill="none"
       style={{ stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round' }}
     />
-  ) : undefined), [dist, metricKey]);
+  ) : undefined), [dist, geometricDist, metricKey]);
 
   const yAxis = useMemo<ScatterYAxis>(() => ({
     min: domain.min,
@@ -697,6 +723,8 @@ export function CampaignMetricScatterPlot({
             <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
           ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口并封顶在 +10R；超出右缘的极端盈利贴边画成三角并在脚注计数，−1R 左侧的亏损照常落在墙外。</dd>
+          ) : geometricDist ? (
+            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
           ) : dist ? (
             <dd>横轴就是{axisLabel ?? metricLabel}本身，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把盈亏分界圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
@@ -729,6 +757,7 @@ export function CampaignMetricScatterPlot({
               {guide.point} 横向位置吸附到所在档的中心（每档至少 14px 宽）
               {oddsFamily
                 ? '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
+                : geometricDist ? '：按对数等宽分档，1.00 为档边界，亏损点不会跨到盈利侧；精确倍数看提示框，原始指标计算不变。'
                 : '；精确数值看提示框。'}
               纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。
             </dd>
@@ -763,6 +792,7 @@ export function CampaignMetricScatterPlot({
       }}
       referenceLines={dist ? distributionReferenceLines : bars ? [] : referenceLines}
       overlay={densityOverlay}
+      isolatedLeftBucket={isolatedLeftBucket}
       bandCounts={stacked ? undefined : {
         testId: bandCountTestId,
         items: bands.map(band => ({
@@ -779,7 +809,7 @@ export function CampaignMetricScatterPlot({
       emptyMessage={`暂无同时具备客观操作时间与${missingValueLabel}的战役。`}
       testId={plotTestId}
       scrollAreaTestId={scrollTestId}
-      rootDataAttrs={{ 'data-metric-key': metricKey }}
+      rootDataAttrs={{ 'data-metric-key': metricKey, 'data-x-scale': geometricDistribution ? 'log' : undefined }}
       header={header}
       guidePanel={guidePanel}
       legendExtra={dist ? (
@@ -810,8 +840,10 @@ export function CampaignMetricScatterPlot({
             <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" className="shrink-0">
               <path d="M 1 9 C 3 9 4 3 6 3 C 8 3 9 9 11 9" fill="none" style={{ stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinecap: 'round' }} />
             </svg>
-            <span>平滑密度（每档期望场数）</span>
+            <span>{geometricDist ? '对数分档密度（每档期望场数）' : '平滑密度（每档期望场数）'}</span>
           </span>
+          {geometricDist && <span>对数刻度 · 0.5 → 1 → 2 等距</span>}
+          {geometricDist && geometricDist.zeroIds.length > 0 && <span>本金归零 {geometricDist.zeroIds.length} 场</span>}
         </div>
       ) : barColumns ? (
         <div
@@ -837,7 +869,7 @@ export function CampaignMetricScatterPlot({
         </div>
       )}
       directionHint={dist
-        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : axisLabel ?? metricLabel} · 纵轴 场数 · 不按时间排列`
+        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : axisLabel ?? metricLabel}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
         : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}

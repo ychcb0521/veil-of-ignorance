@@ -5,10 +5,11 @@ import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
+import { resolveLegExecutionMethods, type LegExecutionMethods } from '@/lib/legExecutionMethod';
 import { buildTradeRecordLookup, journalOperationTime } from '@/lib/objectiveOperationTime';
 import { buildDisplayReverseOrderLegMap } from '@/lib/campaignReverseOrderAttribution';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
-import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals, resolveLegDisplayRole } from '@/lib/campaignMainLegOrdinals';
 import { resolveMirrorTpOrderTiming } from '@/lib/campaignMirrorTpOrderTiming';
 import type { CampaignEvent, TradeCampaign, TradeJournal } from '@/types/journal';
 import { computeLegPnlContributions, sumLegPnl } from '@/lib/campaignLegPnl';
@@ -59,6 +60,8 @@ interface Props {
   campaignEvents?: CampaignEvent[];
   legExitPriceCorrections?: LegExitPriceCorrections;
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
+  /** Full order history for execution provenance; hiding a chart line must not change it. */
+  executionMethodOrders?: CampaignReverseHedgeOrder[];
   /** 别的回放留下、本场期间仍挂着的委托：不放进任何腿的行，只在表下方写一行淡注。 */
   foreignLiveOrders?: CampaignReverseHedgeOrder[];
   highlightedLegIds?: string[];
@@ -73,6 +76,8 @@ interface Props {
    * 缺失时从主力腿回推（resolveLegPositionShareSide，与导出 PNG 同一个 helper，两处不可能取到不同的一侧）。
    */
   campaignDirection?: TradeCampaign['direction'] | null;
+  /** Saved counterfactuals may carry source evidence; editing a scenario is not a manual trade. */
+  executionMethodsByLeg?: ReadonlyMap<string, LegExecutionMethods>;
 }
 
 /**
@@ -166,13 +171,13 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 // 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
 // 占比 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
 // 再宽，右对齐的百分数就离左边的币量太远，读不成一组。占比只有这一列：按战役主方向取一侧（主多看多单、主空看空单）
-const LEGS_GRID = 'grid-cols-[132px_180px_116px_84px_88px_88px_84px_136px_72px_116px_148px_minmax(216px,1fr)_64px]';
+const LEGS_GRID = 'grid-cols-[132px_180px_116px_84px_88px_88px_76px_84px_136px_72px_116px_148px_minmax(216px,1fr)_64px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
  * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1668px]';
+const LEGS_MIN_WIDTH = 'min-w-[1754px]';
 
 /**
  * 冻结列：「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
@@ -569,6 +574,7 @@ export function CampaignLegsList({
   campaignEvents = [],
   legExitPriceCorrections = {},
   reverseHedgeOrders = [],
+  executionMethodOrders,
   foreignLiveOrders = [],
   highlightedLegIds = [],
   onToggleHighlight,
@@ -576,6 +582,7 @@ export function CampaignLegsList({
   onDetach,
   initialExpectedMaxLoss = null,
   campaignDirection = null,
+  executionMethodsByLeg,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
   // 「占比」列的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是本列那一侧
@@ -769,6 +776,7 @@ export function CampaignLegsList({
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
             <div className="text-right">开仓价</div>
             <div className="text-right">平仓价</div>
+            <div className="text-right" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动立即执行与预设委托/止盈止损触发分开记录；无可靠依据显示未记录，不按回填来源推断。">操作方式</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
             <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
@@ -807,6 +815,8 @@ export function CampaignLegsList({
                   : `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
                 : undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
+              const executionMethods = executionMethodsByLeg?.get(leg.id)
+                ?? resolveLegExecutionMethods(leg, record, executionMethodOrders ?? reverseHedgeOrders, tradeRecords);
               const mirrorTpTiming = resolveMirrorTpOrderTiming(leg, record, campaignEvents);
               const hedgeSummary = leg.order_kind === 'hedge' && leg.hedge_type
                 ? `${HEDGE_TYPE_LABELS[leg.hedge_type]}${leg.hedge_necessity_pct != null ? ` · ${leg.hedge_necessity_pct.toFixed(0)}%` : ''}`
@@ -831,10 +841,10 @@ export function CampaignLegsList({
                   >
                     <div className={ROLE_LINE}>
                       <LegRoleChip
-                        role={leg.leg_role ?? null}
+                        role={resolveLegDisplayRole(leg)}
                         ordinal={hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null}
                         status={status === 'closed' ? null : status}
-                        title={roleChipTitle(status, leg.source === 'retroactive_from_record', !leg.leg_role)}
+                        title={roleChipTitle(status, leg.source === 'retroactive_from_record', !resolveLegDisplayRole(leg))}
                         className={ROLE_CHIP_SIZE}
                       />
                       {/* 主力阶段子行默认折叠：开关是角色标签右边的小箭头 + 阶段数，冻结着，滚到右边也点得到。
@@ -927,6 +937,10 @@ export function CampaignLegsList({
                   {/* 涨跌幅：开仓价走到平仓价的百分比，按这条腿的方向计——空单价格跌了才是正数，
                       按所示这一对开平价看与盈亏同号（分几刀平掉时盈亏是各刀合计，可能不同号）。
                       与开平价同字号，不抢 Δb 的主角位。 */}
+                  <div data-testid={`leg-execution-method-${leg.id}`} className="text-right text-[10px] leading-snug text-muted-foreground">
+                    <div title={executionMethods.open.reason} data-method={executionMethods.open.kind}>开 {executionMethods.open.label}</div>
+                    <div title={executionMethods.close.reason} data-method={executionMethods.close.kind}>平 {executionMethods.close.label}</div>
+                  </div>
                   <div
                     data-testid={`leg-price-change-${leg.id}`}
                     className={`text-right tabular-nums ${priceChangeTone(priceChangePct)}`}
@@ -1190,6 +1204,7 @@ export function CampaignLegsList({
                           </div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
                           <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
+                          <div />
                           {(() => {
                             // 阶段自己的起止价各算各的、方向沿用主力：切段处的边界价就是对冲平仓那一刻的市价
                             const phasePriceChangePct = computeLegPriceChangePct(phase.startPrice, phase.endPrice, priceChangeSide);
@@ -1238,8 +1253,8 @@ export function CampaignLegsList({
                   {formatDeltaB(totalDeltaB)}
                 </span>
               </div>
-              {/* 开仓价 / 平仓价 / 涨跌幅留空：各腿开平价不同，跨腿拼一个「整场涨跌幅」没有意义。 */}
-              <div /><div /><div />
+              {/* 开平价、操作方式、涨跌幅不跨腿合计。 */}
+              <div /><div /><div /><div />
               {/* 币量 / 仓位：多单、空单各写一组 Σ（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
                   每组以同样的「多 / 空」标签开头；没有计入腿的方向不列。
                   本列那一侧（战役主方向）那组是「占比」的分母；另一侧那组只是它各腿的合计（对冲一共开了多大），不作任何占比的分母。

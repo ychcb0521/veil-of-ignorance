@@ -15,7 +15,7 @@ import {
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 const campaign = {
   id: 'campaign-1',
@@ -97,16 +97,18 @@ const PNL_COL = 2;
 const DELTA_B_COL = 3;
 const ENTRY_COL = 4;
 const EXIT_COL = 5;
+/** 开仓和平仓分别记录，不与前后数值列混在一起。 */
+const EXECUTION_METHOD_COL = 6;
 /** 「委托」列。 */
-const ORDER_COL = 11;
+const ORDER_COL = 12;
 /** 「手续费」列。 */
-const FEE_COL = 10;
+const FEE_COL = 11;
 /** 「加仓校验」列（紧跟「币量 / 仓位」与「多单占比」；没有「空单占比」列）。 */
-const ADD_SIZING_COL = 9;
+const ADD_SIZING_COL = 10;
 /** 导出图的列数（没有页面上的「操作」列）。 */
-const EXPORT_COLUMN_COUNT = 12;
-/** 「涨跌幅」列（紧跟「平仓价」）。 */
-const PRICE_CHANGE_COL = 6;
+const EXPORT_COLUMN_COUNT = 13;
+/** 「涨跌幅」列（操作方式右侧）。 */
+const PRICE_CHANGE_COL = 7;
 
 describe('campaign PNG overview', () => {
   it('完整包含战役原数据和盈亏概览字段', () => {
@@ -760,6 +762,7 @@ describe('【用户要求】主力及其他多单的阶段子行进入导出图�
     for (const row of phases) {
       expect(row.cells).toHaveLength(EXPORT_COLUMN_COUNT);
       expect(row.cells[ADD_SIZING_COL].map(line => line.text)).toEqual(['']);
+      expect(row.cells[EXECUTION_METHOD_COL].map(line => line.text)).toEqual(['']);
     }
     expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
   });
@@ -796,7 +799,68 @@ describe('【用户决定】他场委托在导出图里只是表下一行淡注'
   });
 });
 
-describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧）', () => {
+describe('【用户要求】导出图也带开平操作方式，历史未知不冒充非手动', () => {
+  const at = (hhmm: string) => Date.parse(`2026-08-07T${hhmm}:00.000Z`);
+  const record = (id: string, methods: Partial<TradeRecord>): TradeRecord => ({
+    id, positionId: id, fillId: id, symbol: 'BTCUSDT', side: 'SHORT', type: 'MARKET', action: 'CLOSE',
+    entryPrice: 100, exitPrice: 90, quantity: 10, leverage: 10, pnl: 100, fee: 0, slippage: 0,
+    openTime: at('01:00'), closeTime: at('09:00'), ...methods,
+  });
+
+  it('隐藏委托仍可证明非手动开仓，但不会重新出现在委托列；旧调用方保持回退', () => {
+    const closed = record('hidden-order-record', { exit_method: 'manual' });
+    const leg = {
+      id: 'hidden-order-leg', trade_record_id: closed.id, leg_sequence: 1, leg_role: 'hedge_rolling',
+      order_kind: 'hedge', direction: 'short', source: 'retroactive_from_record',
+      pre_simulated_time: new Date(closed.openTime).toISOString(),
+    } as TradeJournal;
+    const hiddenOrder: CampaignReverseHedgeOrder = {
+      id: 'hidden-order', tradeRecordId: closed.id, side: 'SHORT', price: 100,
+      createdAt: at('00:30'), triggeredAt: at('01:00'), cancelledAt: at('09:00'), status: 'triggered',
+    };
+    const base = { ...input(), legs: [leg], tradeRecords: [closed] };
+    const hidden = buildCampaignLegsExportRows({
+      ...base, reverseHedgeOrders: [], executionMethodOrders: [hiddenOrder],
+    })[0];
+    const visible = buildCampaignLegsExportRows({ ...base, reverseHedgeOrders: [hiddenOrder] })[0];
+    expect(hidden.cells[EXECUTION_METHOD_COL].map(line => line.text)).toEqual(['开 非手动', '平 手动']);
+    expect(hidden.cells[EXECUTION_METHOD_COL]).toEqual(visible.cells[EXECUTION_METHOD_COL]);
+    expect(hidden.cells[ORDER_COL].map(line => line.text)).toEqual(['—']);
+    expect(visible.cells[ORDER_COL].some(line => line.text.includes('已触发'))).toBe(true);
+  });
+
+  it('同一列分别显示开仓和平仓方式，并在平仓价之后、涨跌幅之前', () => {
+    const records = [
+      record('manual-open', { entry_method: 'manual', exit_method: 'tp1' }),
+      record('manual-close', { entry_method: 'order', exit_method: 'manual' }),
+      record('legacy', {}),
+    ];
+    const rows = buildCampaignLegsExportRows({
+      ...input(),
+      legs: records.map((item, i) => ({
+        id: item.id, trade_record_id: item.id, leg_sequence: i + 1, leg_role: 'hedge_rolling',
+        order_kind: 'hedge', direction: 'short', source: 'retroactive_from_record',
+        pre_simulated_time: new Date(item.openTime).toISOString(),
+        post_simulated_close_time: new Date(item.closeTime).toISOString(),
+      }) as TradeJournal),
+      tradeRecords: records,
+      reverseHedgeOrders: [],
+    });
+    const methodsOf = (id: string) => rows.find(row => row.legId === id)!.cells[EXECUTION_METHOD_COL];
+    expect(methodsOf('manual-open').map(line => line.text)).toEqual(['开 手动', '平 非手动']);
+    expect(methodsOf('manual-close').map(line => line.text)).toEqual(['开 非手动', '平 手动']);
+    expect(methodsOf('legacy').map(line => line.text)).toEqual(['开 未记录', '平 未记录']);
+    for (const row of rows.filter(row => row.kind === 'leg')) {
+      expect(row.cells[EXIT_COL][0].text).toBe('90.0000');
+      expect(row.cells[PRICE_CHANGE_COL][0].text).toBe('+10.00%');
+      expect(row.wrapped[EXECUTION_METHOD_COL]).toEqual(row.cells[EXECUTION_METHOD_COL]);
+    }
+    expect(rows.at(-1)!.cells[EXECUTION_METHOD_COL]).toEqual([{ text: '' }]);
+    expect(new Set(rows.map(row => row.cells.length))).toEqual(new Set([EXPORT_COLUMN_COUNT]));
+  });
+});
+
+describe('【用户要求】导出图也带「涨跌幅」列（操作方式右侧）', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
@@ -823,8 +887,8 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
 
     const at = texts.indexOf('涨跌幅');
     expect(at).toBeGreaterThan(0);
-    expect(texts.slice(at - 2, at + 2)).toEqual(['开仓价', '平仓价', '涨跌幅', '币量 / 仓位']);
-    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托']);
+    expect(texts.slice(at - 3, at + 2)).toEqual(['开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位']);
+    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托']);
     expect(texts).not.toContain('空单占比');
     expect(texts).toContain('+127.02%');
   });
@@ -852,9 +916,9 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
     expect(cell('ordi-hedge')).toEqual([{ text: '-3.27%', color: '#F6465D' }]);
     expect(cell('open')).toEqual([{ text: '—', color: '#848E9C' }]);
     expect(cell('corrected')[0].text).toBe('+100.00%');
-    // 左边一格就是平仓价：同一对价
-    expect(rows.find(row => row.legId === 'corrected')!.cells[PRICE_CHANGE_COL - 1][0].text).toBe('0.200000');
-    expect(rows.find(row => row.legId === 'long')!.cells[PRICE_CHANGE_COL - 1][0].text).toBe('6.5194');
+    // 与平仓价格同一对价，中间的操作方式列不改变价格口径
+    expect(rows.find(row => row.legId === 'corrected')!.cells[EXIT_COL][0].text).toBe('0.200000');
+    expect(rows.find(row => row.legId === 'long')!.cells[EXIT_COL][0].text).toBe('6.5194');
     // 放得下，不折行
     expect(rows.find(row => row.legId === 'long')!.wrapped[PRICE_CHANGE_COL]).toHaveLength(1);
   });
@@ -872,7 +936,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（平仓价右侧�
       reverseHedgeOrders: [],
     });
     const row = rows.find(r => r.legId === 'sliced')!;
-    expect(row.cells[PRICE_CHANGE_COL - 1][0].text).toBe('98.0000');
+    expect(row.cells[EXIT_COL][0].text).toBe('98.0000');
     expect(row.cells[PRICE_CHANGE_COL]).toEqual([{ text: '-2.00%', color: '#F6465D' }]);
     // 「贡献 / 盈亏」：三刀合计 +160，绿
     expect(row.cells[PNL_COL][0].color).toBe('#0ECB81');
@@ -962,8 +1026,8 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
   afterEach(() => { vi.restoreAllMocks(); });
 
   /** 「币量 / 仓位」「多单占比」在 COLUMNS 里的下标；「多单占比」右边紧跟「加仓校验」。 */
-  const COINS_COL = 7;
-  const LONG_COL = 8;
+  const COINS_COL = 8;
+  const LONG_COL = 9;
   const EMPTY = [{ text: '' }];
 
   const T = (hhmm: string) => `2026-08-07T${hhmm}:00.000Z`;
@@ -1219,7 +1283,7 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       get: (_target, key) => (key === 'measureText' ? () => ({ width: 0 }) : () => undefined),
     }) as never);
     const canvas = buildCampaignLegsListCanvas({ ...input(), legs: [] }, { includeHeader: false, scale: 1 });
-    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 120 + 184 + 88 + 170 + 132 + 444 + 40 * 2);
+    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 102 + 120 + 184 + 88 + 170 + 132 + 444 + 40 * 2);
   });
 
   it('按真实等宽字体量宽：「100.0%」与「—」在 88 宽的「多单占比」里都不折行；列头「多单占比」（12px 粗体 4 个汉字）放得进去、不被压扁', async () => {
@@ -1567,6 +1631,23 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
   ];
   const rowsOf = () => buildCampaignLegsExportRows({ ...input(), legs: shapeLegs(), reverseHedgeOrders: [] });
   const roleOf = (rows: ReturnType<typeof rowsOf>, id: string) => rows.find(row => row.legId === id)!.cells[ROLE_COL];
+
+  it('没有角色和独立单角色的手动对冲同列编号与蓝色标签，原始归类不改变', () => {
+    const manualHedges = [
+      leg({ id: 'manual-late', leg_role: 'standalone', order_kind: 'hedge', direction: 'short', pre_simulated_time: T('04:00') }),
+      leg({ id: 'manual-early', leg_role: null, order_kind: 'hedge', direction: 'short', pre_simulated_time: T('02:00') }),
+      leg({ id: 'rolling', leg_role: 'hedge_rolling', order_kind: 'hedge', direction: 'short', pre_simulated_time: T('03:00') }),
+    ];
+    const rows = buildCampaignLegsExportRows({ ...input(), legs: manualHedges, reverseHedgeOrders: [] });
+    expect(roleOf(rows, 'manual-early')[0].text).toBe('滚动对冲 1');
+    expect(roleOf(rows, 'rolling')[0].text).toBe('滚动对冲 2');
+    expect(roleOf(rows, 'manual-late')[0].text).toBe('滚动对冲 3');
+    for (const row of rows.filter(item => item.kind === 'leg')) {
+      expect(row.cells[ROLE_COL][0].color).toBe('#5BA3FF');
+      expect(row.cells[ROLE_COL][0].chip?.color).toBe('#5BA3FF');
+    }
+    expect(manualHedges.map(item => item.leg_role)).toEqual(['standalone', null, 'hedge_rolling']);
+  });
 
   it('每条腿的角色格只有一行角色名：没有序号、没有「回填」、也没有「挂单中 / 进行中」字样', () => {
     const rows = rowsOf();

@@ -180,6 +180,8 @@ export function executeSettlementFill(
   openedRealAt?: number,
   /** 成交那一刻所在的回放时间线（TradingContext.stampClock）。缺省不写这个字段。 */
   openTimelineId?: string | null,
+  /** 由实际执行路径明确传入；MARKET 也可能是条件委托触发后的成交，不能据此猜测。 */
+  entryMethod?: Position["entry_method"],
 ) {
   const normalized = normalizeSettlementOrder(symbol, order);
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, normalized, isMaker);
@@ -210,6 +212,7 @@ export function executeSettlementFill(
     openFeeRate: feeRate,
     ...(Number.isFinite(openedRealAt) && (openedRealAt as number) > 0 ? { openedRealAt } : {}),
     ...(openTimelineId ? { openTimelineId } : {}),
+    ...(entryMethod ? { entry_method: entryMethod } : {}),
     // 加仓计划只在有的时候才写：没有计划的成交产出的仓位与改动前逐字节相同。
     ...(normalized.addSizingSnapshot ? { addSizingSnapshot: normalized.addSizingSnapshot } : {}),
   };
@@ -380,6 +383,13 @@ function fillAddSizingOverride(pos: Position, fill: PositionFill): Partial<Trade
   return pos.addSizingSnapshot ? { addSizingSnapshot: undefined } : {};
 }
 
+/** 只有第一笔可以借仓位级来源；合并进来的未知旧成交不可继承别人的手动/委托标签。 */
+function fillEntryMethodOverride(pos: Position, fill: PositionFill): Partial<TradeRecord> {
+  const own = fill.entry_method ?? (fill.id === pos.id ? pos.entry_method : undefined);
+  if (own) return { entry_method: own };
+  return pos.entry_method ? { entry_method: undefined } : {};
+}
+
 /** 按比例带走一部分金额；未知（旧数据）就仍是未知。 */
 function feePart(value: number | undefined, share: number): number | undefined {
   return value == null || !Number.isFinite(value) ? undefined : value * share;
@@ -459,6 +469,7 @@ export function buildCloseRecords(input: {
     liquidationFeeUsd: totals.liquidationFeeUsd,
     // 时间线章只在有的时候才写：没盖章的仓位 / 平仓产出的记录与改动前逐字节相同。
     ...(pos.openTimelineId ? { openedTimelineId: pos.openTimelineId } : {}),
+    ...(pos.entry_method ? { entry_method: pos.entry_method } : {}),
     ...(closedTimelineId ? { closedTimelineId } : {}),
     // 加仓计划同理：单笔 / 旧数据走仓位级的；多笔成交在下面按每笔各自的覆盖。
     ...(pos.addSizingSnapshot ? { addSizingSnapshot: pos.addSizingSnapshot } : {}),
@@ -470,7 +481,9 @@ export function buildCloseRecords(input: {
   // 单笔成交、旧数据(没有 fills)、或 units 全坏:退回今天的单条记录,逐字节不变。
   // 这条兜底很要紧——分母为 0 时按占比分会得到 NaN 并产出**零条**记录,
   // 而余额照样入账,等于把一次平仓静默删掉。
-  if (fills.length < 2 || !(totalUnits > 0)) return [base({})];
+  if (fills.length < 2 || !(totalUnits > 0)) {
+    return [base(fills.length === 1 ? fillEntryMethodOverride(pos, fills[0]) : {})];
+  }
 
   /**
    * 币本位的张数是整数,按占比分不可能整除。用最大余额法(Hamilton):
@@ -568,6 +581,7 @@ export function buildCloseRecords(input: {
       liquidationFeeUsd: feePart(totals.liquidationFeeUsd, share),
       ...fillOpenedTimelineOverride(pos, f),
       ...fillAddSizingOverride(pos, f),
+      ...fillEntryMethodOverride(pos, f),
     });
     if (i !== absorber) {
       acc.quantity += rec.quantity; acc.pnl += rec.pnl;
@@ -683,6 +697,7 @@ function fillsOf(p: Position, symbol: string): PositionFill[] {
     openedRealAt: p.openedRealAt,
     // 每笔成交各留各的时间线：合并只改风控口径，不抹掉「这一笔是在哪次回放里成交的」。
     ...(p.openTimelineId ? { timelineId: p.openTimelineId } : {}),
+    ...(p.entry_method ? { entry_method: p.entry_method } : {}),
     openFeeUsd: p.openFeeUsd,
     openFeeCoin: p.openFeeCoin,
     openIsMaker: p.openIsMaker,

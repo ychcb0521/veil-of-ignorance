@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TradeJournal } from '@/types/journal';
-import { buildHedgeLegOrdinals, buildMainLegOrdinals } from '@/lib/campaignMainLegOrdinals';
+import { buildHedgeLegOrdinals, buildMainLegOrdinals, resolveLegDisplayRole } from '@/lib/campaignMainLegOrdinals';
 
 const leg = (id: string, role: TradeJournal['leg_role'], at: string, seq?: number): TradeJournal =>
   ({ id, leg_role: role, pre_simulated_time: at, leg_sequence: seq } as TradeJournal);
@@ -64,6 +64,24 @@ describe('主力编号', () => {
 });
 
 describe('对冲编号', () => {
+  it('手动新增的未归类/独立对冲进入同一序列，标签回退不会修改归类', () => {
+    const entries = [
+      { ...leg('standalone', 'standalone', '2026-04-29T22:00:00Z'), order_kind: 'hedge' as const },
+      { ...leg('unclassified', null, '2026-04-29T20:00:00Z'), order_kind: 'hedge' as const },
+      leg('rolling', 'hedge_rolling', '2026-04-29T21:00:00Z'),
+    ];
+    expect([...buildHedgeLegOrdinals(entries)]).toEqual([['unclassified', 1], ['rolling', 2], ['standalone', 3]]);
+    expect(entries.map(resolveLegDisplayRole)).toEqual(['hedge_rolling', 'hedge_rolling', 'hedge_rolling']);
+    expect(entries.map(item => item.leg_role)).toEqual(['standalone', null, 'hedge_rolling']);
+  });
+
+  it('明确角色与非对冲独立单保持原样，不通过多空方向猜测角色', () => {
+    expect(resolveLegDisplayRole({ order_kind: 'main', leg_role: 'standalone' })).toBe('standalone');
+    expect(resolveLegDisplayRole({ order_kind: 'main', leg_role: null })).toBeNull();
+    expect(resolveLegDisplayRole({ order_kind: 'hedge', leg_role: 'hedge_initial_a' })).toBe('hedge_initial_a');
+    expect(resolveLegDisplayRole({ order_kind: 'hedge', leg_role: 'reentry_hedge' })).toBe('reentry_hedge');
+  });
+
   it('滚动 / 回场对冲从 1 起按开仓时间编号，初始 A/B 保留固有名称', () => {
     const m = buildHedgeLegOrdinals([
       leg('initial-a', 'hedge_initial_a', '2026-04-29T18:00:00Z'),

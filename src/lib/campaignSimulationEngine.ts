@@ -29,6 +29,7 @@ import {
 import { getCoinContractSizeUsd, getCoinContracts, roundCoinContracts } from '@/lib/coinMargined';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { tradeRecordFees } from '@/lib/tradeFees';
+import { resolveLegExecutionMethods } from '@/lib/legExecutionMethod';
 import { getPositionNotionalUsd, getSettlementFeeParts } from '@/lib/tradingSettlement';
 import {
   INITIAL_HEDGE_SIZE_PCT,
@@ -1403,6 +1404,8 @@ export interface BuildManualLegsOptions {
   campaign?: TradeCampaign | null;
   /** 本地委托快照给出的事实（从未成交的委托 id）：与战役页权益路径读同一份，见 CampaignLocalOrderFacts。 */
   localOrders?: CampaignLocalOrderFacts;
+  /** 实际触发委托证据：只用于保存开仓方式快照，不参与反事实成交或盈亏推断。 */
+  reverseHedgeOrders?: CampaignReverseHedgeOrder[];
 }
 
 /** 没有战役行时的最小替身：只够 buildActiveLegs 定方向与时间窗。 */
@@ -1495,6 +1498,7 @@ function buildManualLegActual(input: {
   anchorPrice: number | null;
   offPath: boolean;
   riskFacts: ManualLegRiskFacts;
+  executionFacts: Pick<CampaignCounterfactualManualLegActual, 'entry_method' | 'exit_method'>;
   /** 从历史快照事件还原、成交价或数量与腿上的委托快照不同的腿：事件里的成交（见 eventFillCut）。 */
   eventFill: { entryPrice: number; quantity: number } | null;
 }): CampaignCounterfactualManualLegActual {
@@ -1505,6 +1509,7 @@ function buildManualLegActual(input: {
     ...(input.anchorPrice != null ? { anchor_price: input.anchorPrice } : {}),
     ...(input.offPath ? { off_path: true } : {}),
     ...input.riskFacts,
+    ...input.executionFacts,
   };
   const eventCuts = (realized: number) => (input.eventFill ? { cuts: [eventFillCut(economics, input.eventFill, realized)] } : {});
   if (input.campaignTotalShare != null) {
@@ -1680,6 +1685,7 @@ export function buildManualLegs(
       const claimed = settlement.recordsByLeg.get(leg.id) ?? [];
       const ownClosing = record && claimed.length > 0 && !claimed.includes(record) ? closingSettlementRecord(claimed) : null;
       const execution = resolveLegExecution(leg, ownClosing ?? record, exitPriceCorrections);
+      const executionMethods = resolveLegExecutionMethods(leg, ownClosing ?? record, options.reverseHedgeOrders, tradeRecords);
       // 没有成交记录、却在权益路径上的腿（带触发事件的对冲、快照、历史快照事件）按路径上那一段开仓；
       // 那一段有自己的平仓时刻（快照平仓时间、撤单事件、事件里的平仓时间）时也按它平。
       const heldStartMs = record ? null : pathFacts.heldStartMsByLeg.get(leg.id) ?? null;
@@ -1741,13 +1747,17 @@ export function buildManualLegs(
           && samePrice(heldPath.eventFill.entryPrice * heldPath.eventFill.quantity, sizeUsdt))
         ? heldPath.eventFill
         : null;
-      return { leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill };
+      const executionFacts = {
+        ...(executionMethods.open.kind !== 'unknown' ? { entry_method: executionMethods.open.kind } : {}),
+        ...(!closeTimeFallback && executionMethods.close.kind !== 'unknown' ? { exit_method: executionMethods.close.kind } : {}),
+      };
+      return { leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill, executionFacts };
     })
     .filter(draft => draft.manualLeg.entry_price > 0 && draft.manualLeg.size_usdt > 0);
 
   const campaignTotalShares = campaignTotalSharesFor(settlement, drafts);
 
-  return drafts.map(({ leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill }) => {
+  return drafts.map(({ leg, manualLeg, unfilled, closeTimeFallback, riskFacts, eventFill, executionFacts }) => {
     if (unfilled) return manualLeg;
     manualLeg.actual = buildManualLegActual({
       claimed: settlement.recordsByLeg.get(leg.id) ?? [],
@@ -1767,6 +1777,7 @@ export function buildManualLegs(
       anchorPrice: riskAnchorPriceFor(campaign, leg, legs, tradeRecords, manualLeg.entry_price),
       offPath: pathFacts.offPathLegIds.has(leg.id),
       riskFacts,
+      executionFacts,
       eventFill,
     });
     return manualLeg;
@@ -2561,4 +2572,3 @@ export function computeDeviationCosts(
 export function buildActualSimulationParams(campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[] = []) {
   return inferActualParams(campaign, legs, tradeRecords);
 }
-
