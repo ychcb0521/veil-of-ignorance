@@ -24,6 +24,7 @@ import {
   materiallyDifferentPnl,
   type CampaignRealizedPnl,
 } from '@/lib/campaignRealizedPnl';
+import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { resolveCampaignOpportunityQuality } from '@/lib/campaignMetrics';
 import {
   fetchLegExitPriceCorrectionsResult,
@@ -43,6 +44,8 @@ export type CampaignCardData = {
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
   opportunityQuality: number | null;
+  /** 主力那条腿的涨跌幅（%，按方向计，与 Legs 表同一个数）；主力未平仓时为 null。「涨幅」排序与卡片读数用它。 */
+  mainPriceChangePct: number | null;
 };
 
 type CampaignDetails = Awaited<ReturnType<typeof getCampaignFullData>>;
@@ -74,6 +77,7 @@ export function buildCampaignCardData(
     initialExpectedMaxDrawdownPct,
     profitCaptureRatio,
     opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, profitCaptureRatio, initialExpectedMaxDrawdownPct),
+    mainPriceChangePct: campaignMainLegPriceChangePct(legs, tradeRecords, corrections),
   };
 }
 

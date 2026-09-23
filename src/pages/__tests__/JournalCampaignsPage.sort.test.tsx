@@ -383,6 +383,76 @@ describe('JournalCampaignsPage sorting', () => {
       .toEqual(['3x', '10x', '20x']);
   }, 15_000);
 
+  it('【用户要求】涨幅 / 涨幅效率 / 加仓效率三档排序：读数亮在卡片上、按它排、算不出的战役不进入这一档', async () => {
+    // 四场主力的平仓价拉开：+30% / +5% / −10% / +20%
+    const exits: Record<string, number> = {
+      'high-importance-record': 130, 'newest-record': 105, 'best-pnl-record': 90, 'late-close-record': 120,
+    };
+    const originals = tradeHistory.map(record => record.exitPrice);
+    tradeHistory.forEach(record => { record.exitPrice = exits[record.id] ?? record.exitPrice; });
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      // 默认排序不亮这三枚读数，卡片不多占位
+      expect(screen.queryByTestId('campaign-main-price-change')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
+      await waitFor(() => expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']));
+      expect(screen.getAllByTestId('campaign-main-price-change').map(node => node.textContent))
+        .toEqual(['涨幅 +30.00%', '涨幅 +20.00%', '涨幅 +5.00%', '涨幅 -10.00%']);
+      fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
+      await waitFor(() => expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']));
+
+      const cardNumber = (card: HTMLElement, testId: string) => {
+        const text = card.querySelector(`[data-testid="${testId}"]`)?.textContent ?? '';
+        const match = /[-+]?\d+(?:\.\d+)?/.exec(text.replace(/,/g, ''));
+        return match ? Number(match[0]) : Number.NaN;
+      };
+      const pctOf: Record<string, number> = { 'High Importance': 30, 'Late Close': 20, 'Newest Operation': 5, 'Best PnL': -10 };
+
+      // 涨幅效率 = 主力涨幅 ÷ 预期回撤；预期回撤为「—」的战役（没有对冲边界）不进入这一档
+      fireEvent.click(screen.getByTestId('campaign-sort-mainPriceEfficiency'));
+      await waitFor(() => expect(screen.getAllByTestId('campaign-main-price-efficiency').length).toBeGreaterThan(0));
+      const effCards = screen.getAllByTestId('campaign-card');
+      const effValues = effCards.map(card => cardNumber(card, 'campaign-main-price-efficiency'));
+      expect(effValues.every(Number.isFinite)).toBe(true);
+      expect([...effValues].sort((a, b) => b - a)).toEqual(effValues);
+      for (const card of effCards) {
+        const title = cardOrder()[effCards.indexOf(card)];
+        const drawdown = cardNumber(card, 'campaign-expected-drawdown-pct');
+        expect(drawdown).toBeGreaterThan(0);
+        expect(cardNumber(card, 'campaign-main-price-efficiency')).toBeCloseTo(pctOf[title] / drawdown, 1);
+      }
+      expect(effCards.length).toBeLessThan(4);
+      expect(screen.getAllByTestId('campaign-main-price-efficiency')[0].getAttribute('title')).toContain('÷ 预期回撤');
+
+      // 加仓效率 = 盈亏比 ÷ 涨幅效率
+      fireEvent.click(screen.getByTestId('campaign-sort-addEfficiency'));
+      await waitFor(() => expect(screen.getAllByTestId('campaign-add-efficiency').length).toBeGreaterThan(0));
+      const addCards = screen.getAllByTestId('campaign-card');
+      const addValues = addCards.map(card => cardNumber(card, 'campaign-add-efficiency'));
+      expect([...addValues].sort((a, b) => b - a)).toEqual(addValues);
+      for (const card of addCards) {
+        const title = cardOrder()[addCards.indexOf(card)];
+        const efficiency = pctOf[title] / cardNumber(card, 'campaign-expected-drawdown-pct');
+        // 卡片上盈亏比写作「300.00%（3.00）」：括号里才是 b
+        const payoffText = card.querySelector('[data-testid="campaign-payoff-ratio"]')?.textContent ?? '';
+        const payoff = Number(/（([-+]?\d+(?:\.\d+)?)）/.exec(payoffText)?.[1]);
+        expect(cardNumber(card, 'campaign-add-efficiency')).toBeCloseTo(payoff / efficiency, 1);
+      }
+      // 只有主力、不加仓的战役：盈亏比就是它的涨幅效率，加仓效率恰为 1
+      const pureMain = addCards.find(card => card.textContent?.includes('High Importance'))!;
+      expect(pureMain.querySelector('[data-testid="campaign-add-efficiency"]')?.textContent).toBe('加仓效率 +1.00');
+      expect(screen.getAllByTestId('campaign-add-efficiency')[0].getAttribute('title')).toContain('盈亏比');
+    } finally {
+      tradeHistory.forEach((record, index) => { record.exitPrice = originals[index]; });
+    }
+  }, 20_000);
+
   it('【用户要求】战役封面显示杠杆倍数；没有记录杠杆的战役不显示这枚标签', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
@@ -1075,6 +1145,9 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-dsiContribution',
       'campaign-sort-usiContribution',
       'campaign-sort-leverage',
+      'campaign-sort-mainPriceChange',
+      'campaign-sort-mainPriceEfficiency',
+      'campaign-sort-addEfficiency',
       'campaign-sort-alpha',
     ]);
     expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([

@@ -30,6 +30,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
+import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -126,6 +127,9 @@ type CampaignSortMode =
   | 'dsiContribution'
   | 'usiContribution'
   | 'leverage'
+  | 'mainPriceChange'
+  | 'mainPriceEfficiency'
+  | 'addEfficiency'
   | 'alpha';
 type CampaignSortDirection = 'asc' | 'desc';
 
@@ -202,6 +206,9 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'dsiContribution', label: 'DSI 贡献' },
   { value: 'usiContribution', label: 'USI 贡献' },
   { value: 'leverage', label: '杠杆倍数' },
+  { value: 'mainPriceChange', label: '涨幅' },
+  { value: 'mainPriceEfficiency', label: '涨幅效率' },
+  { value: 'addEfficiency', label: '加仓效率' },
   { value: 'alpha', label: '字母' },
 ];
 
@@ -221,6 +228,15 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   dsiContribution: { noun: '可计算 DSI 贡献', hint: 'DSI 贡献只统计亏损战役，其余不会进入当前排序' },
   usiContribution: { noun: '可计算 USI 贡献', hint: 'USI 贡献只统计盈利战役，其余不会进入当前排序' },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
+  mainPriceChange: { noun: '主力已平仓', hint: '涨幅取主力那条腿的涨跌幅，主力还没平仓的战役不会进入当前排序' },
+  mainPriceEfficiency: {
+    noun: '可计算涨幅效率',
+    hint: '涨幅效率 = 主力涨幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
+  },
+  addEfficiency: {
+    noun: '可计算加仓效率',
+    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率；算不出盈亏比或涨幅效率、或涨幅效率为 0 的战役不会进入当前排序',
+  },
 };
 
 const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
@@ -787,6 +803,52 @@ function campaignLeverage(campaign: TradeCampaign, legs: TradeJournal[]): number
   return max;
 }
 
+/**
+ * 涨幅效率 = 主力涨幅 ÷ 预期回撤（两者都是价格层面的百分数，结果是倍数）：
+ * 主力涨了 12%、入场到对冲边界 4%，效率 +3.00——价格走出了 3 个「预期回撤」。
+ * 任一缺失、或预期回撤不为正时不算（与「预期回撤」排序同一道门槛）。
+ */
+function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
+  const pct = row.mainPriceChangePct;
+  const drawdown = row.initialExpectedMaxDrawdownPct;
+  if (pct == null || !Number.isFinite(pct) || !Number.isFinite(drawdown) || !(drawdown > 0)) return null;
+  const value = pct / drawdown;
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 加仓效率 = 盈亏比 b ÷ 涨幅效率。
+ * 只拿主力、不加仓时，b 大致就是主力的涨幅效率（L 按入场到对冲边界的距离定），比值约为 1；
+ * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
+ * 任一缺失或涨幅效率为 0（除不了）时不算。
+ */
+function rowAddEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
+  const payoff = rowPayoffRatio(row);
+  const efficiency = rowMainPriceEfficiency(row);
+  if (payoff == null || !Number.isFinite(payoff) || efficiency == null || efficiency === 0) return null;
+  const value = payoff / efficiency;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 「+3.00」「-0.75」；取整为 0 统一成「0.00」。 */
+function formatMainPriceEfficiency(value: number): string {
+  const rounded = Number(value.toFixed(2));
+  return rounded === 0 ? '0.00' : `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}`;
+}
+
+/** 卡片上主力涨幅的字色：与 Legs 表「涨跌幅」列同一套判定（按显示到两位小数后的值，正绿负红，0 中性）。 */
+const MAIN_PRICE_CHANGE_TONE: Record<LegPriceChangeDirection, string> = {
+  up: 'text-[#0ECB81]',
+  down: 'text-[#F6465D]',
+  flat: 'text-muted-foreground/80',
+};
+
+/** 按显示到两位小数后的值定正负色，读数为 0.00 时不上色。 */
+function signedTone(value: number): LegPriceChangeDirection {
+  const rounded = Number(value.toFixed(2));
+  return rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'flat';
+}
+
 /** 10 → 「10x」；7.5 → 「7.5x」。 */
 function formatLeverage(value: number): string {
   return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}x`;
@@ -819,6 +881,15 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     }
     if (sort.mode === 'leverage') {
       return campaignLeverage(row.campaign, row.legs) > 0;
+    }
+    if (sort.mode === 'mainPriceChange') {
+      return row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct);
+    }
+    if (sort.mode === 'mainPriceEfficiency') {
+      return rowMainPriceEfficiency(row) != null;
+    }
+    if (sort.mode === 'addEfficiency') {
+      return rowAddEfficiency(row) != null;
     }
     return true;
   });
@@ -937,6 +1008,39 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         || timeDesc
         || alphaAsc;
     }
+    if (sort.mode === 'mainPriceChange') {
+      return compareFiniteMetric(
+        a.mainPriceChangePct ?? Number.NaN,
+        b.mainPriceChangePct ?? Number.NaN,
+        sort.direction,
+      )
+        || comparePnl(a.campaign, b.campaign, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'mainPriceEfficiency') {
+      return compareFiniteMetric(
+        rowMainPriceEfficiency(a) ?? Number.NaN,
+        rowMainPriceEfficiency(b) ?? Number.NaN,
+        sort.direction,
+      )
+        || compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
+    if (sort.mode === 'addEfficiency') {
+      return compareFiniteMetric(
+        rowAddEfficiency(a) ?? Number.NaN,
+        rowAddEfficiency(b) ?? Number.NaN,
+        sort.direction,
+      )
+        || compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, sort.direction)
+        || importanceDesc
+        || timeDesc
+        || alphaAsc;
+    }
     if (sort.mode === 'alpha') {
       return compareAlpha(a.campaign, b.campaign, sort.direction)
         || timeDesc
@@ -975,6 +1079,12 @@ type CampaignCardProps = {
   onToggleDetails: (event: MouseEvent<HTMLButtonElement>, campaignId: string) => void;
   onImportanceChange: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign, weight: number) => void;
   onDelete: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
+  /** 按「涨幅」排序时在杠杆旁边亮出主力涨跌幅，排序的依据看得见；其余排序不占位。 */
+  showMainPriceChange?: boolean;
+  /** 按「涨幅效率」排序时亮出效率（悬停给出代入值）。 */
+  showMainPriceEfficiency?: boolean;
+  /** 按「加仓效率」排序时亮出加仓效率（悬停给出代入值）。 */
+  showAddEfficiency?: boolean;
 };
 
 /**
@@ -991,6 +1101,9 @@ const CampaignCard = memo(function CampaignCard({
   onToggleDetails,
   onImportanceChange,
   onDelete,
+  showMainPriceChange = false,
+  showMainPriceEfficiency = false,
+  showAddEfficiency = false,
 }: CampaignCardProps) {
   const {
     campaign,
@@ -1005,6 +1118,8 @@ const CampaignCard = memo(function CampaignCard({
     geometricExpectancy,
   } = row;
   const cardLeverage = campaignLeverage(campaign, legs);
+  const mainPriceEfficiency = showMainPriceEfficiency || showAddEfficiency ? rowMainPriceEfficiency(row) : null;
+  const addEfficiency = showAddEfficiency ? rowAddEfficiency(row) : null;
   const importance = importanceValue(campaign);
   const operationTime = campaignOperationTime(legs, tradeRecords);
   const campaignDisplayCode = formatCampaignDisplayCode(
@@ -1073,6 +1188,39 @@ const CampaignCard = memo(function CampaignCard({
                 className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
               >
                 {formatLeverage(cardLeverage)}
+              </span>
+            )}
+            {showMainPriceChange && row.mainPriceChangePct != null && (
+              <span
+                data-testid="campaign-main-price-change"
+                title="涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数"
+                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
+                  MAIN_PRICE_CHANGE_TONE[legPriceChangeDirection(row.mainPriceChangePct) ?? 'flat']
+                }`}
+              >
+                涨幅 {formatLegPriceChangePct(row.mainPriceChangePct)}
+              </span>
+            )}
+            {showAddEfficiency && addEfficiency != null && mainPriceEfficiency != null && (
+              <span
+                data-testid="campaign-add-efficiency"
+                title={`加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；只拿主力不加仓时约为 1，大于 1 说明加仓把行情放大成了更多的 R`}
+                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
+                  MAIN_PRICE_CHANGE_TONE[signedTone(addEfficiency)]
+                }`}
+              >
+                加仓效率 {formatMainPriceEfficiency(addEfficiency)}
+              </span>
+            )}
+            {showMainPriceEfficiency && mainPriceEfficiency != null && (
+              <span
+                data-testid="campaign-main-price-efficiency"
+                title={`涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(row.mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
+                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
+                  MAIN_PRICE_CHANGE_TONE[signedTone(mainPriceEfficiency)]
+                }`}
+              >
+                涨幅效率 {formatMainPriceEfficiency(mainPriceEfficiency)}
               </span>
             )}
             <span
@@ -3221,6 +3369,9 @@ export default function JournalCampaignsPage() {
               onToggleDetails={handleCampaignDetailsToggle}
               onImportanceChange={handleImportanceChange}
               onDelete={handleDeleteCampaign}
+              showMainPriceChange={sortState.mode === 'mainPriceChange'}
+              showMainPriceEfficiency={sortState.mode === 'mainPriceEfficiency'}
+              showAddEfficiency={sortState.mode === 'addEfficiency'}
             />
           ))
         )}
