@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -148,7 +148,10 @@ type CampaignMetricChartKey =
   | 'mirrorTp'
   | 'mirrorTpBars'
   | 'dsiContribution'
-  | 'usiContribution';
+  | 'usiContribution'
+  | 'mainPriceChange'
+  | 'mainPriceEfficiency'
+  | 'addEfficiency';
 
 type CampaignMetricChartConfig = {
   key: CampaignMetricChartKey;
@@ -188,24 +191,99 @@ type CampaignFormulaPopover =
   | 'geometricEdge'
   | 'asymmetricRisk'
   | 'dsiContributionSort'
-  | 'usiContributionSort';
+  | 'usiContributionSort'
+  | 'mainPriceChangeSort'
+  | 'mainPriceEfficiencySort'
+  | 'addEfficiencySort';
 
+/**
+ * 【用户要求】涨幅、涨幅效率、盈亏比、加仓效率、几何期望五项排在一起，紧跟「操作时间」右侧。
+ * 这五项同时是排序行与战役封面的「对齐列」（见 CAMPAIGN_COLUMNS_GRID）。
+ * 【用户要求】「重要性」放到后面：排在杠杆倍数之后、字母之前，行首只留「操作时间」。
+ */
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
-  { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
-  { value: 'expectedDrawdownPct', label: '预期回撤' },
+  { value: 'mainPriceChange', label: '涨幅' },
+  { value: 'mainPriceEfficiency', label: '涨幅效率' },
   { value: 'captureRate', label: '盈亏比' },
-  { value: 'arithmeticExpectancy', label: '算术期望' },
+  { value: 'addEfficiency', label: '加仓效率' },
   { value: 'geometricExpectancy', label: '几何期望' },
+  { value: 'expectedDrawdownPct', label: '预期回撤' },
+  { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'dsiContribution', label: 'DSI 贡献' },
   { value: 'usiContribution', label: 'USI 贡献' },
   { value: 'leverage', label: '杠杆倍数' },
-  { value: 'mainPriceChange', label: '涨幅' },
-  { value: 'mainPriceEfficiency', label: '涨幅效率' },
-  { value: 'addEfficiency', label: '加仓效率' },
+  { value: 'importance', label: '重要性' },
   { value: 'alpha', label: '字母' },
 ];
+
+/**
+ * 【用户要求】排序行与战役封面共用一套列（CAMPAIGN_COLUMNS_GRID）。排序行按列分组，每组占一列，
+ * 组内第一个按钮的左缘就是那条列线；卡片指标行每列一格，与这里逐列对应：
+ *   第 1 列   排序方式 / 操作时间                          ↔ 预期回撤
+ *   第 2–6 列 涨幅 / 涨幅效率 / 盈亏比 / 加仓效率 / 几何期望 ↔ 同名五格（用户要求排在一起的五项）
+ *             几何期望那一列里，短分隔线后再跟一个「预期回撤」——它的卡片格在第 1 列
+ *   第 7 列   算术期望                                    ↔ 算术期望
+ *   第 8 列   镜像止盈，之后 DSI 贡献 / USI 贡献 / 杠杆倍数 / 重要性 / 字母 ↔ 镜像止盈
+ * 【用户要求】「重要性」放在后面（杠杆倍数之后、字母之前），首列只剩「操作时间」，整张表随之左移。
+ * 有同名卡片格的按钮都压在那一格的列线上；其余按钮离任何一条列线都不近，不会读成「差一点没对齐」。
+ * 按列摊平就是 SORT_OPTIONS 的次序（测试守着）。
+ */
+const CAMPAIGN_SORT_COLUMNS: readonly (readonly CampaignSortMode[])[] = [
+  ['time'],
+  ['mainPriceChange'],
+  ['mainPriceEfficiency'],
+  ['captureRate'],
+  ['addEfficiency'],
+  ['geometricExpectancy', 'expectedDrawdownPct'],
+  ['arithmeticExpectancy'],
+  ['mirrorTp', 'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha'],
+];
+
+/** 几何期望列里跟着的「预期回撤」前面画一条短分隔线：它的卡片格在第 1 列，不属于对齐的五项。 */
+const SORT_DIVIDER_BEFORE: CampaignSortMode = 'expectedDrawdownPct';
+
+/** 用户要求排在一起、与封面逐列对齐的五档（第 2–6 列的列头），次序即列序。 */
+const CAMPAIGN_ALIGNED_SORT_MODES: readonly CampaignSortMode[] = CAMPAIGN_SORT_COLUMNS.slice(1, 6).map(column => column[0]);
+
+/**
+ * 【用户要求】排序行与战役封面共用的列模板。与 Legs 表共用 LEGS_GRID 同一个做法：两行只读这一个模板，谁也不单独调偏移。
+ * 同一张模板要画出同一组竖线，两行的网格还得从同一个 x 起步、宽度相同：
+ *   · 卡片外框有 1px 边框；排序行补一条等宽的透明边框（CAMPAIGN_COLUMNS_FRAME）；
+ *   · 两行左右内边距都是 CAMPAIGN_COLUMNS_INSET；
+ *   · 列间距归零（xl:gap-x-0），列与列之间只由模板决定；
+ *   · 排序按钮的 1px 边框 + 6px 内边距，与卡片格的 1px 分隔线 + CAMPAIGN_COLUMN_TEXT_INSET 同宽，
+ *     按钮文字与格内标签也落在同一条竖线上。
+ * 列宽 = 浏览器实测的最长内容 + 至少 8px 留白（卡片：10px 标签 + 11px 等宽数字，含 1px 分隔线与 6px 内边距）：
+ *   首列     排序行「排序方式 / 操作时间 ↓」142px，卡片的预期回撤只要 ≈87px；取两者较大的 142px 再留 12px，
+ *            与第 2 列的「涨幅」隔开一段，读得出首列与对齐五列是两组
+ *   涨幅     「+437.21%」≈94px            涨幅效率「+130.41」≈107px
+ *   盈亏比   「49628.76%（496.29）」≈172px  加仓效率「+23.00」≈101px，留出三位整数「+123.45」≈108px
+ *   几何期望 卡片「50.63」＋「仓位击穿」≈142px；排序行「几何期望 | 预期回撤」157px，之后与「算术期望」隔 2px（同末列按钮间距）
+ *   算术期望 「+247.65R」≈114px
+ *   末列 1fr 排序行「镜像止盈 … 重要性 字母」358.5px（按钮间距 2px；杠杆 / 字母选中时多一个箭头 372.5px）；
+ *            卡片「已实现·进行中」≈136px
+ * 八列合计 1323.5px：窗口 ≥ 1414px（含 1440 / 1920 / 2560）时排序行一行放下（默认按操作时间排序时 ≥ 1400px 即可）。
+ * 1280px 时网格只有 1190px，七个有同名卡片格的按钮都压在列线上就不可能再挤进一行——
+ * 这时末列那一串在末列里换到第二行（第一行镜像止盈 / DSI 贡献 / USI 贡献，第二行杠杆倍数 / 重要性 / 字母），
+ * 仍从第 8 列的竖线起步，所有列线照旧对齐。
+ * 窄于 xl（1280px）两行都退回自然换行，不做对齐。
+ */
+const CAMPAIGN_COLUMNS_GRID = 'xl:grid xl:grid-cols-[154px_102px_116px_182px_116px_159px_122px_minmax(0,1fr)] xl:gap-x-0';
+/** 卡片格文字相对列线的缩进：1px 分隔线之后再空 6px，与排序按钮的 1px 边框 + px-1.5 同宽。 */
+const CAMPAIGN_COLUMN_TEXT_INSET = 'xl:pl-1.5';
+/** 两行网格外的 1px 框：卡片用自己的边框，排序行用这条透明边框补齐。 */
+const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';
+/** 两行网格的左右内边距。 */
+const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';
+
+/**
+ * 公式 / 统计浮层与视口边缘至少留 12px：靠左的按钮（如排序行的「涨幅」、概览的「有效战役」）用 align="end" 打开时，
+ * 浮层被推回视口内也不会贴着屏幕左缘；很窄的屏幕上宽度同样让出两侧这 12px（POPOVER_VIEWPORT_MAX_W）。
+ */
+const POPOVER_COLLISION_PADDING = 12;
+const POPOVER_VIEWPORT_MAX_W = 'max-w-[calc(100vw_-_24px)]';
 
 /**
  * 会**过滤掉**缺少该指标的战役的排序档：空列表时要说清是「没有战役」还是「有战役但都算不出这个指标」。
@@ -510,6 +588,64 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'upside',
     formatValue: value => `${value.toFixed(1)}%`,
   },
+  // 【用户要求】涨幅、涨幅效率、加仓效率与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
+  {
+    key: 'mainPriceChange',
+    label: '涨幅',
+    chartLabel: '涨幅图',
+    seriesLabel: '涨幅时序',
+    guide: {
+      yAxis: '每场战役主力那条腿的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。与详情页 Legs 表「涨跌幅」列是同一个数。',
+      point: '点越高，主力吃到的价格行情越大；低于 0% 表示价格朝主力的反方向走。每个点代表一场主力已平仓的战役。',
+      colors: [
+        { token: 'profit', label: '绿色：涨幅 > 0，价格朝主力方向走。' },
+        { token: 'loss', label: '红色：涨幅 < 0，价格朝主力反方向走。' },
+        { token: 'neutral', label: '灰色：涨幅 = 0，开平价相同。' },
+      ],
+      referenceLines: ['灰色零线：价格不涨不跌的分界。'],
+    },
+    missingValueLabel: '主力涨幅',
+    colorMode: 'signed',
+    formatValue: value => formatLegPriceChangePct(value),
+  },
+  {
+    key: 'mainPriceEfficiency',
+    label: '涨幅效率',
+    chartLabel: '涨幅效率图',
+    seriesLabel: '涨幅效率时序',
+    guide: {
+      yAxis: '涨幅效率 = 主力涨幅 ÷ 预期回撤，单位为倍：价格走出了几个「预期回撤」。+3.00 表示主力吃到的行情是入场到对冲边界距离的 3 倍。',
+      point: '点越高，同样的风险距离换来的价格行情越大；低于 0 表示价格朝主力反方向走。每个点代表一场主力已平仓、且算得出预期回撤的战役。',
+      colors: [
+        { token: 'profit', label: '绿色：涨幅效率 > 0，价格朝主力方向走。' },
+        { token: 'loss', label: '红色：涨幅效率 < 0，价格朝主力反方向走。' },
+        { token: 'neutral', label: '灰色：涨幅效率 = 0。' },
+      ],
+      referenceLines: ['灰色零线：正、负涨幅效率的分界。'],
+    },
+    missingValueLabel: '涨幅效率',
+    colorMode: 'signed',
+    formatValue: value => formatEfficiency(value),
+  },
+  {
+    key: 'addEfficiency',
+    label: '加仓效率',
+    chartLabel: '加仓效率图',
+    seriesLabel: '加仓效率时序',
+    guide: {
+      yAxis: '加仓效率 = 盈亏比 b ÷ 涨幅效率，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
+      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）的战役，没有加仓的战役不进图。',
+      colors: [
+        { token: 'profit', label: '绿色：加仓效率 > 0，盈亏比与涨幅效率同号。' },
+        { token: 'loss', label: '红色：加仓效率 < 0，盈亏比与涨幅效率一正一负。' },
+        { token: 'neutral', label: '灰色：加仓效率 = 0。' },
+      ],
+      referenceLines: ['灰色零线：正、负加仓效率的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
+    },
+    missingValueLabel: '加仓效率',
+    colorMode: 'signed',
+    formatValue: value => formatEfficiency(value),
+  },
 ] as const;
 
 const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
@@ -521,6 +657,9 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   mirrorTp: 'mirrorTpSort',
   dsiContribution: 'dsiContributionSort',
   usiContribution: 'usiContributionSort',
+  mainPriceChange: 'mainPriceChangeSort',
+  mainPriceEfficiency: 'mainPriceEfficiencySort',
+  addEfficiency: 'addEfficiencySort',
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
@@ -532,6 +671,9 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   mirrorTp: 'mirrorTp',
   dsiContribution: 'dsiContribution',
   usiContribution: 'usiContribution',
+  mainPriceChange: 'mainPriceChange',
+  mainPriceEfficiency: 'mainPriceEfficiency',
+  addEfficiency: 'addEfficiency',
 };
 
 /**
@@ -602,10 +744,24 @@ const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
   sensitivity: 'base',
 });
 
+/**
+ * 带方向的数字用的正 / 负色。深色主题沿用币安绿 / 红；浅色主题换成与散点图 --chart-profit / --chart-loss
+ * 同一对更深的绿 / 红——#0ECB81 压在浅底上对比度只有 2:1 左右，数字发虚。
+ */
+const TONE_UP = 'text-[#00875A] dark:text-[#0ECB81]';
+const TONE_DOWN = 'text-[#DE350B] dark:text-[#F6465D]';
+
+/** 按正负取色；缺值与 0 用给定的中性色。 */
+function signTone(value: number | null | undefined, neutral: string): string {
+  if (value == null || !Number.isFinite(value) || value === 0) return neutral;
+  return value > 0 ? TONE_UP : TONE_DOWN;
+}
+
+/** 状态胶囊：浅色主题字色加深一档（同 TONE_UP / TONE_DOWN），底色仍是同色系的淡底。 */
 const STATUS_STYLES: Record<string, string> = {
-  active: 'bg-[#F0B90B]/15 text-[#F0B90B]',
-  closed_profit: 'bg-[#0ECB81]/15 text-[#0ECB81]',
-  closed_loss: 'bg-[#F6465D]/15 text-[#F6465D]',
+  active: 'bg-[#F0B90B]/15 text-[#8F6B00] dark:text-[#F0B90B]',
+  closed_profit: `bg-[#0ECB81]/15 ${TONE_UP}`,
+  closed_loss: `bg-[#F6465D]/15 ${TONE_DOWN}`,
   closed_breakeven: 'bg-muted text-muted-foreground',
   planned: 'bg-muted text-muted-foreground',
   abandoned: 'bg-[#848E9C]/15 text-[#848E9C]',
@@ -621,8 +777,8 @@ const STATUS_ACCENT_STYLES: Record<string, string> = {
 };
 
 const DIRECTION_STYLES: Record<string, string> = {
-  main_long: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_short: 'bg-[#F6465D]/10 text-[#F6465D]',
+  main_long: `bg-[#0ECB81]/10 ${TONE_UP}`,
+  main_short: `bg-[#F6465D]/10 ${TONE_DOWN}`,
 };
 
 const LEG_ABBR: Record<LegRole, string> = {
@@ -642,20 +798,24 @@ const LEG_ABBR: Record<LegRole, string> = {
   standalone: 'S',
 };
 
+/** Legs 小标签：浅色主题字色加深一档（绿 / 红同 TONE_UP / TONE_DOWN），深色主题不变。 */
+const LEG_CHIP_UP = `bg-[#0ECB81]/10 ${TONE_UP}`;
+const LEG_CHIP_DOWN = `bg-[#F6465D]/10 ${TONE_DOWN}`;
+const LEG_CHIP_ROLL = 'bg-[#B080FF]/10 text-[#7A4FD6] dark:text-[#B080FF]';
 const LEG_CHIP_CLASS: Record<LegRole, string> = {
-  main_open: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_1: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_2: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_3: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_4: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_5: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  main_add_6: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  hedge_initial_a: 'bg-[#F6465D]/10 text-[#F6465D]',
-  hedge_initial_b: 'bg-[#F6465D]/10 text-[#F6465D]',
-  hedge_rolling: 'bg-[#B080FF]/10 text-[#B080FF]',
-  mirror_tp: 'bg-[#F0B90B]/10 text-[#F0B90B]',
-  reentry_main: 'bg-[#0ECB81]/10 text-[#0ECB81]',
-  reentry_hedge: 'bg-[#B080FF]/10 text-[#B080FF]',
+  main_open: LEG_CHIP_UP,
+  main_add_1: LEG_CHIP_UP,
+  main_add_2: LEG_CHIP_UP,
+  main_add_3: LEG_CHIP_UP,
+  main_add_4: LEG_CHIP_UP,
+  main_add_5: LEG_CHIP_UP,
+  main_add_6: LEG_CHIP_UP,
+  hedge_initial_a: LEG_CHIP_DOWN,
+  hedge_initial_b: LEG_CHIP_DOWN,
+  hedge_rolling: LEG_CHIP_ROLL,
+  mirror_tp: 'bg-[#F0B90B]/10 text-[#8F6B00] dark:text-[#F0B90B]',
+  reentry_main: LEG_CHIP_UP,
+  reentry_hedge: LEG_CHIP_ROLL,
   standalone: 'bg-muted text-muted-foreground',
 };
 
@@ -795,8 +955,8 @@ const formatMainPriceEfficiency = formatEfficiency;
 
 /** 卡片上主力涨幅的字色：与 Legs 表「涨跌幅」列同一套判定（按显示到两位小数后的值，正绿负红，0 中性）。 */
 const MAIN_PRICE_CHANGE_TONE: Record<LegPriceChangeDirection, string> = {
-  up: 'text-[#0ECB81]',
-  down: 'text-[#F6465D]',
+  up: TONE_UP,
+  down: TONE_DOWN,
   flat: 'text-muted-foreground/80',
 };
 
@@ -1008,6 +1168,42 @@ function durationLabel(openedAt: string, closedAt: string | null) {
 /** 几何期望统一按这个固定下注比例读，卡片与汇总区共用。 */
 const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
 
+/**
+ * 封面指标格。宽屏（xl）按列排时：左侧 1px 分隔线 + 6px 内边距（CAMPAIGN_COLUMN_TEXT_INSET），
+ * 与排序按钮的 1px 边框 + px-1.5 同宽——格子左缘与按钮左缘、格内标签与按钮文字都落在同一条竖线上，分隔线就是列线。
+ * 窄屏自然换行时不画分隔线（换到行首的格子会顶着一条孤线），只留间距。
+ */
+const CARD_METRIC_CELL = `inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap border-border/60 pr-4 xl:border-l xl:pr-2 ${CAMPAIGN_COLUMN_TEXT_INSET}`;
+/** 首列（预期回撤）贴着行首、不画分隔线，与排序行的「排序方式」同一起点。 */
+const CARD_METRIC_LEAD_CELL = 'inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap pr-4 xl:pr-2';
+/** 展开详情里的一项：不按列排、不画分隔线，项与项之间只靠 gap-x-6 分开。 */
+const CARD_DETAIL_ITEM = 'inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap';
+/**
+ * 统计概览的一项：标签淡、数值实（11px 等宽），点击展开公式；浮层打开时保持按下态。
+ * border 预留 1px：悬停 / 打开时出现的描边不会把后面的项挤动。
+ */
+const STAT_TRIGGER = 'inline-flex h-7 shrink-0 select-none items-center gap-1.5 whitespace-nowrap rounded border px-2 transition-[color,background-color,border-color] duration-150 hover:border-border/70 hover:bg-background/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 data-[state=open]:border-border data-[state=open]:bg-background';
+const STAT_LABEL = 'text-muted-foreground';
+/** 数值的字形；颜色另给（中性用 text-foreground/90，带方向的走 statSignTone），免得两条颜色类互相覆盖。 */
+const STAT_VALUE = 'font-mono text-[11px] font-medium tabular-nums';
+
+/** 带方向的汇总数（期望值、几何期望）：正绿负红，与封面同一套颜色；缺值与 0 不上色。 */
+function statSignTone(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || Number(value.toFixed(4)) === 0) return 'text-foreground/90';
+  return value > 0 ? TONE_UP : TONE_DOWN;
+}
+
+/** 封面标题旁的标签（方向 / 标的 / 杠杆 / 编号）统一高度与字号。 */
+const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
+const CARD_METRIC_LABEL = 'shrink-0 text-[10px] leading-4 text-muted-foreground/80';
+/**
+ * 数值：11px 等宽。宽屏按列排时列宽是定的，极端读数（如盈亏比 −123456.78%（−1234.57））装不下就在本格内
+ * 以省略号收住，不压到下一列的分隔线上；完整读数在悬停提示里。行高给足 16px，裁切时不削掉括号的上下沿。
+ */
+const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';
+/** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
+const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums';
+
 type CampaignCardProps = {
   row: CampaignDisplayData;
   expanded: boolean;
@@ -1069,25 +1265,22 @@ const CampaignCard = memo(function CampaignCard({
       ? '盈利结束'
       : campaign.status === 'closed_loss'
         ? '亏损结束'
-        : campaign.status === 'abandoned'
-          ? '已放弃'
-          : campaign.status;
+        : campaign.status === 'closed_breakeven'
+          // 与批量结束对话框同一个叫法（BULK_CLOSE_STATUS_LABELS）
+          ? '打平结束'
+          : campaign.status === 'abandoned'
+            ? '已放弃'
+            : campaign.status === 'planned'
+              ? '计划中'
+              : campaign.status;
   const realizedPnl = campaign.final_realized_pnl;
-  const realizedPnlTone = realizedPnl == null || realizedPnl === 0
-    ? 'text-foreground/80'
-    : realizedPnl > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-  const payoffRatioTone = profitCaptureRatio == null || profitCaptureRatio === 0
-    ? 'text-foreground/85'
-    : profitCaptureRatio > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
-  const arithmeticTone = arithmeticExpectancy == null || arithmeticExpectancy === 0
-    ? 'text-foreground/80'
-    : arithmeticExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  const realizedPnlTone = signTone(realizedPnl, 'text-foreground/80');
+  const payoffRatioTone = signTone(profitCaptureRatio, 'text-foreground/85');
+  const arithmeticTone = signTone(arithmeticExpectancy, 'text-foreground/80');
   // 下注比例吃掉全部账户权益：几何期望必然是 −100%/笔（G = 0）。
   // 这是仓位大小的结论，不是本场盈亏，所以会和正的算术期望同时出现。
   const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
-  const geometricTone = geometricExpectancy == null || geometricExpectancy === 0
-    ? 'text-foreground/80'
-    : geometricExpectancy > 0 ? 'text-[#0ECB81]' : 'text-[#F6465D]';
+  const geometricTone = signTone(geometricExpectancy, 'text-foreground/80');
   const detailsExpanded = expanded;
   return (
     <div
@@ -1101,13 +1294,15 @@ const CampaignCard = memo(function CampaignCard({
       />
       <div className="flex flex-col gap-2 px-4 py-2.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <span className={`inline-flex h-2 w-2 shrink-0 rounded-full ${STATUS_STYLES[campaign.status] || 'bg-muted'}`} />
-          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-            <h2 className="text-[13px] font-semibold text-foreground/90">{campaign.title}</h2>
-            <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
+          {/* 状态圆点用实色（与左侧色条同一套），淡底色的圆点在浅色主题里几乎看不见 */}
+          <span aria-hidden="true" className={`inline-flex h-1.5 w-1.5 shrink-0 rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
+          {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
+            <h2 className="mr-0.5 text-[13px] font-semibold leading-5 text-foreground">{campaign.title}</h2>
+            <span className={`${CARD_CHIP} text-[10px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">{campaign.symbol}</span>
+            <span className={`${CARD_CHIP} bg-muted text-[10px] font-medium text-muted-foreground`}>{campaign.symbol}</span>
             {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
             {cardLeverage > 0 && (
               <span
@@ -1115,23 +1310,23 @@ const CampaignCard = memo(function CampaignCard({
                 title={Number(campaign.initial_leverage) > 0
                   ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
                   : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
-                className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
+                className={`${CARD_CHIP} border border-border/70 font-mono text-[10px] tabular-nums text-muted-foreground`}
               >
                 {formatLeverage(cardLeverage)}
               </span>
             )}
             <span
-              className="inline-flex rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground/65"
+              className={`${CARD_CHIP} border border-border/60 font-mono text-[9px] text-muted-foreground/70`}
               title={`战役编号 ${campaignDisplayCode}`}
             >
               {campaignDisplayCode}
             </span>
             <span
               data-testid="campaign-operation-time"
-              className="inline-flex items-center gap-1 border-l border-border/70 pl-2 text-[9px] text-muted-foreground/60"
+              className="-ml-px inline-flex h-[18px] items-center gap-1 border-l border-border/70 pl-2 text-[10px] leading-none text-muted-foreground/75"
             >
               操作时间：
-              <span className="whitespace-nowrap font-mono text-[9px] tabular-nums text-foreground/70">
+              <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/75">
                 {fmtOperationTime(operationTime)}
               </span>
             </span>
@@ -1150,7 +1345,7 @@ const CampaignCard = memo(function CampaignCard({
           </button>
           {isOwnCampaign && (
             <div className="flex h-7 items-center gap-0.5 rounded border border-border/80 bg-background/50 px-1.5">
-              <span className="mr-0.5 text-[8px] text-muted-foreground">重要性</span>
+              <span className="mr-0.5 text-[9px] text-muted-foreground/80">重要性</span>
               {[1, 2, 3, 4, 5].map(score => (
                 <button
                   key={score}
@@ -1184,29 +1379,34 @@ const CampaignCard = memo(function CampaignCard({
               <Trash2 className="h-3.5 w-3.5" />
             </button>
           )}
-          <div className={`inline-flex h-7 items-center rounded px-2.5 text-[9px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
+          <div className={`inline-flex h-7 items-center rounded px-2.5 text-[10px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
             {statusLabel}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-y-1 border-t border-border/65 bg-muted/[0.08] px-4 py-1.5 sm:px-5">
-        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0" data-testid="campaign-expected-drawdown-pct">
-          <span className="text-[10px] text-muted-foreground/70">预期回撤：</span>
-          <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">
+      {/* 【用户要求】与排序行共用 CAMPAIGN_COLUMNS_GRID，每列一格：涨幅、涨幅效率、盈亏比、加仓效率、几何期望五格
+          与排序行同名按钮左缘对齐；首列预期回撤（涨幅效率的分母），之后的算术期望、镜像止盈也压在同名按钮的竖线上。 */}
+      <div
+        data-testid="campaign-card-metrics"
+        className={`flex flex-wrap items-center gap-y-0.5 border-t border-border/60 bg-muted/[0.12] py-1 dark:bg-muted/[0.16] ${CAMPAIGN_COLUMNS_INSET} ${CAMPAIGN_COLUMNS_GRID}`}
+      >
+        <div className={CARD_METRIC_LEAD_CELL} data-testid="campaign-expected-drawdown-pct">
+          <span className={CARD_METRIC_LABEL}>预期回撤：</span>
+          <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
             {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
           </span>
         </div>
-        {/* 涨幅 → 涨幅效率 紧跟预期回撤：效率就是这两个数相除，三格挨着读得出来。 */}
+        {/* 涨幅 → 涨幅效率：效率就是「涨幅 ÷ 预期回撤」，与首列的预期回撤同一行读得出来。 */}
         <div
           data-testid="campaign-main-price-change"
           title={mainPriceChangePct == null
             ? '涨幅：主力还没平仓（没有平仓价），与 Legs 表一样显示「—」'
             : '涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数'}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+          className={CARD_METRIC_CELL}
         >
-          <span className="text-[10px] text-muted-foreground/70">涨幅：</span>
-          <span data-testid="campaign-main-price-change-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
+          <span className={CARD_METRIC_LABEL}>涨幅：</span>
+          <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
             {formatLegPriceChangePct(mainPriceChangePct)}
           </span>
         </div>
@@ -1215,18 +1415,19 @@ const CampaignCard = memo(function CampaignCard({
           title={mainPriceEfficiency == null
             ? '涨幅效率 = 主力涨幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
             : `涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+          className={CARD_METRIC_CELL}
         >
-          <span className="text-[10px] text-muted-foreground/70">涨幅效率：</span>
-          <span data-testid="campaign-main-price-efficiency-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
+          <span className={CARD_METRIC_LABEL}>涨幅效率：</span>
+          <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
             {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
           </span>
         </div>
-        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3" data-testid="campaign-payoff-ratio">
-          <span className="text-[10px] text-muted-foreground/70">盈亏比：</span>
+        <div className={CARD_METRIC_CELL} data-testid="campaign-payoff-ratio">
+          <span className={CARD_METRIC_LABEL}>盈亏比：</span>
           <span
             data-testid="campaign-payoff-ratio-value"
-            className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${payoffRatioTone}`}
+            title={profitCaptureRatio == null ? undefined : `盈亏比 ${formatCampaignPayoffRatio(profitCaptureRatio, 2)}`}
+            className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}
           >
             {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
           </span>
@@ -1239,20 +1440,12 @@ const CampaignCard = memo(function CampaignCard({
               ? '加仓效率 = 盈亏比 ÷ 涨幅效率：算不出盈亏比或涨幅效率、或涨幅效率为 0 时不算'
               : '加仓效率：这场战役没有加仓，不计算')
               : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+          className={CARD_METRIC_CELL}
         >
-          <span className="text-[10px] text-muted-foreground/70">加仓效率：</span>
-          <span data-testid="campaign-add-efficiency-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
+          <span className={CARD_METRIC_LABEL}>加仓效率：</span>
+          <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
             {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
           </span>
-        </div>
-        <div
-          data-testid="campaign-arithmetic-expectancy"
-          title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
-        >
-          <span className="text-[10px] text-muted-foreground/70">算术期望：</span>
-          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
         </div>
         <div
           data-testid="campaign-geometric-expectancy"
@@ -1265,49 +1458,58 @@ const CampaignCard = memo(function CampaignCard({
                   + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
                   + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
                 : '')}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+          className={CARD_METRIC_CELL}
         >
-          <span className="text-[10px] text-muted-foreground/70">几何期望：</span>
-          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
+          <span className={CARD_METRIC_LABEL}>几何期望：</span>
+          <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
           {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
               但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
           {ruinousSizing && (
-            <span className="rounded-sm bg-[#F6465D]/15 px-1 text-[9px] leading-4 text-[#F6465D]">
+            <span className={`inline-flex h-4 shrink-0 items-center rounded-sm bg-[#F6465D]/15 px-1 text-[9px] font-medium leading-none ${TONE_DOWN}`}>
               仓位击穿
             </span>
           )}
         </div>
-        <div className="inline-flex h-7 shrink-0 items-center gap-1.5 px-3" data-testid="campaign-mirror-tp-status">
-          <span className="text-[10px] text-muted-foreground/70">镜像止盈：</span>
-          <span className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? 'text-[#0ECB81]' : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? 'text-[#F6465D]' : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+        <div
+          data-testid="campaign-arithmetic-expectancy"
+          title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
+          className={CARD_METRIC_CELL}
+        >
+          <span className={CARD_METRIC_LABEL}>算术期望：</span>
+          <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
+        </div>
+        <div className={CARD_METRIC_CELL} data-testid="campaign-mirror-tp-status">
+          <span className={CARD_METRIC_LABEL}>镜像止盈：</span>
+          <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
         </div>
       </div>
 
       {detailsExpanded && (
+        // 展开的详情只是一串「名称：值」，不按列排：画分隔线会与上方指标行的列线错开，所以只用间距分组。
         <dl
           data-testid="campaign-card-details"
-          className="flex flex-wrap items-center gap-y-1 border-t border-border/60 bg-background/35 px-4 py-1.5 sm:px-5"
+          className={`flex flex-wrap items-center gap-x-6 gap-y-0.5 border-t border-border/50 bg-background/40 py-1 ${CAMPAIGN_COLUMNS_INSET}`}
         >
-          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3 first:pl-0">
-            <dt className="text-[10px] text-muted-foreground/70">战役时间：</dt>
-            <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
+          <div className={CARD_DETAIL_ITEM}>
+            <dt className={CARD_METRIC_LABEL}>战役时间：</dt>
+            <dd className={`${CARD_DETAIL_VALUE} text-foreground/80`}>
               {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
             </dd>
           </div>
-          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
-            <dt className="text-[10px] text-muted-foreground/70">结构与时长：</dt>
-            <dd className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/80">
+          <div className={CARD_DETAIL_ITEM}>
+            <dt className={CARD_METRIC_LABEL}>结构与时长：</dt>
+            <dd className={`${CARD_DETAIL_VALUE} text-foreground/80`}>
               {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
             </dd>
           </div>
-          <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3">
-            <dt className="text-[10px] text-muted-foreground/70">已实现 P&amp;L：</dt>
-            <dd className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${realizedPnlTone}`}>
+          <div className={CARD_DETAIL_ITEM}>
+            <dt className={CARD_METRIC_LABEL}>已实现 P&amp;L：</dt>
+            <dd className={`${CARD_DETAIL_VALUE} ${realizedPnlTone}`}>
               {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
             </dd>
           </div>
-          <div className="flex min-h-7 min-w-0 items-center gap-1.5 px-3">
-            <dt className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70">
+          <div className="flex min-h-7 min-w-0 items-center gap-1.5">
+            <dt className={`inline-flex items-center gap-1 ${CARD_METRIC_LABEL}`}>
               <Layers className="h-3 w-3" />
               Legs：
             </dt>
@@ -1690,6 +1892,12 @@ export default function JournalCampaignsPage() {
       mirrorTpBars: mirrorTp,
       dsiContribution: buildSeries(row => row.dsiContributionPct),
       usiContribution: buildSeries(row => row.usiContributionPct),
+      // 与卡片、排序同一组函数：算不出的战役（主力未平仓、没有预期回撤、没有加仓）不进图
+      mainPriceChange: buildSeries(row => (
+        row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
+      )),
+      mainPriceEfficiency: buildSeries(row => rowMainPriceEfficiency(row)),
+      addEfficiency: buildSeries(row => rowAddEfficiency(row)),
     };
   }, [metricRows]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
@@ -2080,10 +2288,44 @@ export default function JournalCampaignsPage() {
     }
   };
 
+  /**
+   * 排序按钮按 CAMPAIGN_SORT_COLUMNS 分进共用列：每组一个外壳占一列，组内第一个按钮的左缘就是列线。
+   * 按钮以 option.value 作 key，这里按 key 取，次序仍是 SORT_OPTIONS 的次序。
+   * 窄于 xl 时外壳都是 display: contents，按钮照常在一行里换行。
+   */
+  const renderSortColumns = (buttons: ReactElement[]) => {
+    const byMode = new Map(buttons.map(button => [button.key as CampaignSortMode, button]));
+    const lastColumn = CAMPAIGN_SORT_COLUMNS.length - 1;
+    return CAMPAIGN_SORT_COLUMNS.map((modes, column) => (
+      <div
+        key={modes[0]}
+        data-testid={column === 0 ? 'campaign-sort-lead' : `campaign-sort-column-${column + 1}`}
+        // 末列那一串放不下时在本列内换到第二行，仍从这条列线起步；列内按钮间距 2px，与上方统计概览同一节奏
+        className={`contents xl:flex xl:min-w-0 xl:items-center ${column === lastColumn ? 'xl:flex-wrap xl:gap-x-0.5 xl:gap-y-1' : 'xl:gap-1'}`}
+      >
+        {column === 0 && (
+          <span className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 pr-1.5 font-medium text-foreground/70">
+            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 opacity-80" />
+            排序方式
+          </span>
+        )}
+        {modes.map(mode => (
+          <Fragment key={mode}>
+            {mode === SORT_DIVIDER_BEFORE && (
+              <span aria-hidden="true" className="hidden xl:mx-1.5 xl:block xl:h-4 xl:w-px xl:shrink-0 xl:bg-border" />
+            )}
+            {byMode.get(mode)}
+          </Fragment>
+        ))}
+      </div>
+    ));
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* 页眉恰好 57px（h-14 + 1px 下边框）：下方统计 / 排序的吸顶 top-[57px] 与它严丝合缝，吸住时不会被压掉一截。 */}
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="px-6 py-3 max-w-[1600px] mx-auto flex items-center gap-3">
+        <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-6">
           <BackButton to="/" />
           <div>
             <h1 className="text-[14px] font-medium">交易战役</h1>
@@ -2284,21 +2526,21 @@ export default function JournalCampaignsPage() {
             </button>
           </div>
         )}
-        <section className="mb-5 overflow-visible border-y border-border/80 bg-card/40">
+        {/* 散点图收起时，吸顶区自己的下边框就是这一段的收口，不再叠一条 section 下边框。 */}
+        <section className={`mb-5 overflow-visible border-t border-border/80 bg-card/40 ${metricChartOpen ? 'border-b' : ''}`}>
           <div className="flex w-full flex-col">
             <div
               data-testid="campaign-sticky-controls"
-              className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/70 bg-background/95 shadow-sm backdrop-blur-sm"
+              className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
             >
+            {/* 【用户要求】排序行与战役封面共用 CAMPAIGN_COLUMNS_GRID：涨幅、涨幅效率、盈亏比、加仓效率、几何期望
+                五个按钮就是封面上同名五格的表头，宽屏下左缘在同一条竖线上；算术期望、镜像止盈同样压在同名格的竖线上。
+                窄屏各列外壳退成 contents，按钮照常换行。 */}
             <div
               data-testid="campaign-sort-controls"
-              className="order-2 flex min-h-11 flex-wrap items-center gap-1 border-t border-border/70 bg-background/55 px-3 py-2 text-[10px] text-muted-foreground sm:px-4"
+              className={`order-2 flex min-h-11 flex-wrap items-center gap-1 border-t border-border/60 py-2 text-[10px] text-muted-foreground xl:items-start ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET} ${CAMPAIGN_COLUMNS_GRID}`}
             >
-              <span className="mr-1 inline-flex h-7 select-none items-center gap-1.5 pr-2 font-medium text-foreground/65">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                排序方式
-              </span>
-              {SORT_OPTIONS.map(option => {
+              {renderSortColumns(SORT_OPTIONS.map(option => {
                 const active = sortState.mode === option.value;
                 const direction = active ? sortState.direction : 'desc';
                 const formula = SORT_FORMULA_BY_MODE[option.value] ?? null;
@@ -2336,25 +2578,32 @@ export default function JournalCampaignsPage() {
                     onContextMenu={(event) => {
                       if (formula) openFormulaPopover(event, formula);
                     }}
-                    className={`inline-flex h-7 items-center gap-1 rounded border px-2 transition-colors ${
+                    // 1px 边框 + px-1.5：与封面指标格的 1px 分隔线 + CAMPAIGN_COLUMN_TEXT_INSET 同宽，按钮文字与格内标签也落在同一条竖线上
+                    className={`inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded border px-1.5 transition-[color,background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
                       active
-                        ? 'border-border bg-card text-foreground shadow-sm'
-                        : 'border-transparent text-muted-foreground/60 hover:border-border/70 hover:bg-card/70 hover:text-foreground/80'
+                        ? 'border-border bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:border-foreground/15 dark:bg-accent'
+                        : 'border-transparent text-muted-foreground/75 hover:border-border/60 hover:bg-foreground/[0.04] hover:text-foreground/85'
                     }`}
                   >
                     <span>{option.label}</span>
-                    {formula && (
-                      <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
-                    )}
-                    {active && (
-                      direction === 'desc'
-                        ? <ArrowDown className="h-3 w-3 opacity-45" />
-                        : <ArrowUp className="h-3 w-3 opacity-45" />
+                    {/* 图标位宽度固定：有公式的档平时显示 Σ，选中后同一个位置换成方向箭头。
+                        没有公式的档（操作时间 / 杠杆倍数 / 字母）平时在窄屏也留一个空位：窄屏排序行会换行，
+                        选中时多出一个箭头就会把整行重排，双击落到隔壁按钮上；宽屏（xl）列宽已按选中时的宽度留足，不占这个空位。 */}
+                    {(formula || active) ? (
+                      <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0 justify-center">
+                        {!active
+                          ? <Sigma className="h-2.5 w-2.5 opacity-30" />
+                          : direction === 'desc'
+                            ? <ArrowDown className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />
+                            : <ArrowUp className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />}
+                      </span>
+                    ) : (
+                      <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0 xl:hidden" />
                     )}
                   </button>
                 );
                 if (!formula) {
-                  return <span key={option.value}>{sortButton}</span>;
+                  return <Fragment key={option.value}>{sortButton}</Fragment>;
                 }
                 return (
                 <Popover
@@ -2363,7 +2612,7 @@ export default function JournalCampaignsPage() {
                   onOpenChange={open => handleFormulaPopoverChange(formula, open)}
                 >
                   <PopoverAnchor asChild>{sortButton}</PopoverAnchor>
-                  <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
+                  <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                     {formula === 'captureRate' ? (
                       <>
                         <div className="font-medium text-foreground">单场盈亏比计算公式</div>
@@ -2461,6 +2710,65 @@ export default function JournalCampaignsPage() {
                           <div>当前盈利样本 n={asymmetricRisk.winCount}，USI={formatAsymmetricMetric(asymmetricRisk.usi, 3)}。</div>
                         </div>
                       </>
+                    ) : formula === 'mainPriceChangeSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">主力涨幅计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          涨幅ᵢ = s ×（平仓价 − 开仓价）÷ 开仓价 × 100%
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            s = +1（主多）/ −1（主空）；开平价取主力那条腿
+                          </div>
+                          <div>主力 = 名义最大的 main_open（没有才取 reentry_main），与详情页 Legs 表「涨跌幅」列同一条腿、同一对开平价（含 1 分钟 K 线平仓价校正）。</div>
+                          <div>按主力方向计：空单价格跌了为正，与盈亏同号。</div>
+                          <div>
+                            例：主多 100 → 112，涨幅 = (112 − 100) ÷ 100 = <span className="text-foreground">+12.00%</span>；
+                            主空 50 → 47，涨幅 = −1 × (47 − 50) ÷ 50 = <span className="text-foreground">+6.00%</span>。
+                          </div>
+                          <div>主力还没平仓（没有平仓价）的战役显示「—」，不参与排序与散点图。</div>
+                        </div>
+                      </>
+                    ) : formula === 'mainPriceEfficiencySort' ? (
+                      <>
+                        <div className="font-medium text-foreground">涨幅效率计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          ηᵢ = 涨幅ᵢ ÷ 预期回撤ᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>预期回撤：</div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%
+                          </div>
+                          <div>涨幅与预期回撤都是价格层面的百分数，相除得到倍数：价格走出了几个「预期回撤」。</div>
+                          <div>
+                            例：主力涨了 12%、入场到对冲边界 4%，ηᵢ = 12 ÷ 4 = <span className="text-foreground">+3.00</span>；
+                            价格朝反方向走 −2%，ηᵢ = −2 ÷ 4 = <span className="text-foreground">−0.50</span>。
+                          </div>
+                          <div>主力未平仓，或缺少主力开仓价 / 初始对冲 A/B 价格（算不出预期回撤）的战役不参与排序与散点图。</div>
+                        </div>
+                      </>
+                    ) : formula === 'addEfficiencySort' ? (
+                      <>
+                        <div className="font-medium text-foreground">加仓效率计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          加仓效率ᵢ = bᵢ ÷ ηᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          {/* 两个式子各自不断行，只在「；」之后换行：不会把「涨幅ᵢ」拆成「涨幅」和另起一行的「ᵢ」 */}
+                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
+                            <span className="whitespace-nowrap">bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；</span>
+                            <wbr />
+                            <span className="whitespace-nowrap">ηᵢ = 涨幅ᵢ ÷ 预期回撤ᵢ</span>
+                          </div>
+                          <div>只拿主力、不加仓时，bᵢ 大致就是主力的涨幅效率，比值约为 1。</div>
+                          <div>大于 1：加仓把同一段行情放大成了更多的 R；小于 1：加仓、对冲或止盈吃掉了行情。</div>
+                          <div>
+                            例：bᵢ = +6.00、ηᵢ = +3.00，加仓效率 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
+                          </div>
+                          <div>只算做过加仓的战役（有一条成交过的加仓腿）；没有加仓、算不出盈亏比或涨幅效率、或涨幅效率为 0 的战役不参与排序与散点图。</div>
+                        </div>
+                      </>
                     ) : formula === 'importanceSort' ? (
                       <>
                         <div className="font-medium text-foreground">重要性排序口径</div>
@@ -2514,15 +2822,15 @@ export default function JournalCampaignsPage() {
                     ) : null}
                   </PopoverContent>
                 </Popover>
-                );
-              })}
+              );
+              }))}
             </div>
             <div
               data-testid="campaign-metrics-strip"
-              className="order-1 flex flex-wrap items-center gap-x-1 gap-y-1 bg-[#F0B90B]/[0.045] px-3 py-2.5 text-[10px] text-muted-foreground sm:px-4"
+              className={`order-1 flex flex-wrap items-center gap-x-0.5 gap-y-1 bg-[#F0B90B]/[0.04] py-2 text-[10px] text-muted-foreground dark:bg-[#F0B90B]/[0.035] ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
             >
-              <span className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 border-r border-[#F0B90B]/20 pr-3 font-medium text-[#9B7600]">
-                <Activity className="h-3.5 w-3.5" />
+              <span className="mr-1.5 inline-flex h-7 shrink-0 select-none items-center gap-1.5 border-r border-[#F0B90B]/25 pr-3 font-medium text-[#8F6B00] dark:text-[#E8B21C]">
+                <Activity aria-hidden="true" className="h-3.5 w-3.5" />
                 统计概览
               </span>
             {/**
@@ -2542,17 +2850,21 @@ export default function JournalCampaignsPage() {
                   aria-label={`操作时间段 ${describeOperationRange(operationRange)}，当前 ${scopedRows.length} 场，点击选择时间段`}
                   title="按客观操作时间筛选：统计、卡片与散点图一起收窄"
                   onClick={event => toggleFormulaPopover(event, 'operationRange')}
-                  className={`inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border px-2 transition-colors hover:bg-background/70 hover:text-foreground ${
+                  className={`${STAT_TRIGGER} ${
                     isAllRange(operationRange)
-                      ? 'border-transparent text-foreground/65 hover:border-[#F0B90B]/15'
-                      : 'border-[#F0B90B]/40 bg-[#F0B90B]/10 text-[#9B7600]'
+                      ? 'border-border/70 bg-background/60'
+                      : 'border-[#F0B90B]/45 bg-[#F0B90B]/10 text-[#8F6B00] dark:text-[#E8B21C]'
                   }`}
                 >
                   <CalendarRange aria-hidden="true" className="h-3 w-3 opacity-60" />
-                  操作时间（{describeOperationRange(operationRange)}）
+                  <span className={isAllRange(operationRange) ? STAT_LABEL : ''}>操作时间</span>{' '}
+                  <span className={`text-[11px] font-medium tabular-nums ${isAllRange(operationRange) ? 'text-foreground/90' : ''}`}>
+                    {describeOperationRange(operationRange)}
+                  </span>
+                  <ChevronDown aria-hidden="true" className="h-3 w-3 opacity-45" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="start" className="w-72 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-72 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">按操作时间段筛选</div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   {CAMPAIGN_RANGE_PRESETS.map(([key, label]) => (
@@ -2622,6 +2934,7 @@ export default function JournalCampaignsPage() {
                 ) : null}
               </PopoverContent>
             </Popover>
+            <span aria-hidden="true" className="mx-1.5 h-4 w-px shrink-0 bg-border" />
             <Popover
               open={formulaPopover === 'validCampaigns'}
               onOpenChange={open => handleFormulaPopoverChange('validCampaigns', open)}
@@ -2633,12 +2946,13 @@ export default function JournalCampaignsPage() {
                   aria-label={`有效战役 ${validCampaignCount} 场，其中盈利 ${performance.winCount} 场，亏损 ${performance.lossCount} 场${breakevenCampaignCount > 0 ? `，盈亏平衡 ${breakevenCampaignCount} 场` : ''}，点击查看最大预期亏损计算说明`}
                   title="点击查看有效战役与最大预期亏损说明"
                   onClick={event => toggleFormulaPopover(event, 'validCampaigns')}
-                  className="inline-flex h-7 shrink-0 select-none items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                 >
-                  有效战役（{validCampaignCount}）
+                  <span className={STAT_LABEL}>有效战役</span>{' '}
+                  <span className={`${STAT_VALUE} text-foreground/90`}>{validCampaignCount}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-96 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">有效战役与最大预期亏损</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono leading-relaxed text-foreground">
                   Lᵢ = 主力开仓名义仓位 × max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价
@@ -2651,8 +2965,8 @@ export default function JournalCampaignsPage() {
                   <div>无有效 Lᵢ 的战役不参与盈亏比、胜率、平均盈亏比、算术期望与几何期望统计。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">
-                  <div><span className="text-muted-foreground">盈利</span><strong className="ml-1 text-[#0ECB81]">{performance.winCount}</strong></div>
-                  <div><span className="text-muted-foreground">亏损</span><strong className="ml-1 text-[#F6465D]">{performance.lossCount}</strong></div>
+                  <div><span className="text-muted-foreground">盈利</span><strong className={`ml-1 ${TONE_UP}`}>{performance.winCount}</strong></div>
+                  <div><span className="text-muted-foreground">亏损</span><strong className={`ml-1 ${TONE_DOWN}`}>{performance.lossCount}</strong></div>
                   <div><span className="text-muted-foreground">盈亏平衡</span><strong className="ml-1 text-foreground">{breakevenCampaignCount}</strong></div>
                 </div>
               </PopoverContent>
@@ -2668,12 +2982,13 @@ export default function JournalCampaignsPage() {
                   aria-label={`镜像止盈达成率 ${mirrorTpRateLabel}，实现 ${mirrorTp.achieved} 场（盈利 ${mirrorTp.achievedWin} 场、亏损 ${mirrorTp.achievedLoss} 场），未实现 ${mirrorTp.notAchieved} 场（${mirrorTpNotAchievedRateLabel}），点击查看说明`}
                   title="点击查看镜像止盈达成说明"
                   onClick={event => toggleFormulaPopover(event, 'mirrorTp')}
-                  className="inline-flex h-7 shrink-0 select-none items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                 >
-                  镜像止盈（{mirrorTpRateLabel}）
+                  <span className={STAT_LABEL}>镜像止盈</span>{' '}
+                  <span className={`${STAT_VALUE} text-foreground/90`}>{mirrorTpRateLabel}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-96 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-96 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">镜像止盈达成统计</div>
                 <div className="mt-2 space-y-1 text-muted-foreground">
                   <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前列表全部 {mirrorTp.total} 场战役。</div>
@@ -2685,14 +3000,14 @@ export default function JournalCampaignsPage() {
                   <div><span className="text-muted-foreground">未实现</span><strong className="ml-1 text-foreground">{mirrorTp.notAchieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpNotAchievedRateLabel}）</span></div>
                 </div>
                 <div className="mt-1 grid grid-cols-3 gap-1 text-center">
-                  <div><span className="text-muted-foreground">已实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.achievedWin}</strong></div>
-                  <div><span className="text-muted-foreground">已实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.achievedLoss}</strong></div>
+                  <div><span className="text-muted-foreground">已实现·盈利</span><strong className={`ml-1 ${TONE_UP}`}>{mirrorTp.achievedWin}</strong></div>
+                  <div><span className="text-muted-foreground">已实现·亏损</span><strong className={`ml-1 ${TONE_DOWN}`}>{mirrorTp.achievedLoss}</strong></div>
                   <div><span className="text-muted-foreground">达成盈利率</span><strong className="ml-1 text-foreground">{mirrorTpWinRateLabel}</strong></div>
                 </div>
                 {/* 未达成那一侧也拆开：「没触发但照样赚了」与「没触发且亏了」是两件事，散点图按这六档分柱。 */}
                 <div className="mt-1 grid grid-cols-3 gap-1 text-center" data-testid="campaign-mirror-tp-missed">
-                  <div><span className="text-muted-foreground">未实现·盈利</span><strong className="ml-1 text-[#0ECB81]">{mirrorTp.notAchievedWin}</strong></div>
-                  <div><span className="text-muted-foreground">未实现·亏损</span><strong className="ml-1 text-[#F6465D]">{mirrorTp.notAchievedLoss}</strong></div>
+                  <div><span className="text-muted-foreground">未实现·盈利</span><strong className={`ml-1 ${TONE_UP}`}>{mirrorTp.notAchievedWin}</strong></div>
+                  <div><span className="text-muted-foreground">未实现·亏损</span><strong className={`ml-1 ${TONE_DOWN}`}>{mirrorTp.notAchievedLoss}</strong></div>
                   <div><span className="text-muted-foreground">未实现·持平/进行中</span><strong className="ml-1 text-foreground">{mirrorTp.notAchievedNeutral}</strong></div>
                 </div>
                 {mirrorTp.achievedNeutral > 0 ? (
@@ -2711,13 +3026,13 @@ export default function JournalCampaignsPage() {
                   aria-label={`盈利战役 ${performance.winCount} 场，亏损战役 ${performance.lossCount} 场，胜率 ${winRateLabel}`}
                   title="点击查看胜率计算公式"
                   onClick={event => toggleFormulaPopover(event, 'winRate')}
-                  className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                 >
-                  胜率（{winRateLabel}）
-                  <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
+                  <span className={STAT_LABEL}>胜率</span>{' '}
+                  <span className={`${STAT_VALUE} text-foreground/90`}>{winRateLabel}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-72 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">胜率计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                   P(赢) = 盈利战役数 ÷（盈利战役数 + 亏损战役数）
@@ -2747,13 +3062,13 @@ export default function JournalCampaignsPage() {
                   aria-label={`平均盈亏比 ${winPayoffRatioLabel}，盈利战役 ${performance.winCount} 场；亏损战役平均 ${lossPayoffRatioLabel}，${performance.lossCount} 场`}
                   title="点击查看平均盈亏比计算公式"
                   onClick={event => toggleFormulaPopover(event, 'averagePayoffRatio')}
-                  className="inline-flex h-7 shrink-0 select-none items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                 >
-                  平均盈亏比（{winPayoffRatioLabel}）
-                  <Sigma aria-hidden="true" className="h-2.5 w-2.5 opacity-35" />
+                  <span className={STAT_LABEL}>平均盈亏比</span>{' '}
+                  <span className={`${STAT_VALUE} text-foreground/90`}>{winPayoffRatioLabel}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-72 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">平均盈亏比计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                   b̄赢 = Σ 盈利战役 bᵢ ÷ 盈利战役数
@@ -2766,7 +3081,7 @@ export default function JournalCampaignsPage() {
                       <span className="text-foreground">盈利战役（{performance.winCount} 场）</span>
                       <span
                         data-testid="campaign-win-payoff-ratio"
-                        className="font-mono text-[12px] font-semibold tabular-nums text-[#0ECB81]"
+                        className={`font-mono text-[12px] font-semibold tabular-nums ${TONE_UP}`}
                       >
                         {formatGroupPayoffRatio(performance.winPayoffRatio)}
                       </span>
@@ -2775,7 +3090,7 @@ export default function JournalCampaignsPage() {
                       <span>亏损战役（{performance.lossCount} 场）</span>
                       <span
                         data-testid="campaign-loss-payoff-ratio"
-                        className="font-mono tabular-nums text-[#F6465D]"
+                        className={`font-mono tabular-nums ${TONE_DOWN}`}
                       >
                         {formatGroupPayoffRatio(performance.lossPayoffRatio)}
                       </span>
@@ -2815,14 +3130,15 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-expected-value"
-                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                   aria-label={`期望值 ${expectedRLabel}，点击查看计算公式`}
                   onClick={event => toggleFormulaPopover(event, 'expectedValue')}
                 >
-                  期望值（{expectedRLabel}）
+                  <span className={STAT_LABEL}>期望值</span>{' '}
+                  <span className={`${STAT_VALUE} ${statSignTone(performance.expectedR)}`}>{expectedRLabel}</span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-72 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">期望值计算公式</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                   E = Σ bᵢ ÷ N
@@ -2860,14 +3176,18 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-geometric-edge"
-                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                   aria-label={`几何期望 ${geometricEdgeLabel} 每笔，点击查看计算公式`}
                   onClick={event => toggleFormulaPopover(event, 'geometricEdge')}
                 >
-                  几何期望（{geometricEdgeLabel}/笔）
+                  <span className={STAT_LABEL}>几何期望</span>{' '}
+                  <span className={`${STAT_VALUE} ${statSignTone(geometric?.geometricEdge ?? null)}`}>
+                    {geometricEdgeLabel}
+                    <span className="ml-px font-sans text-[10px] font-normal text-muted-foreground">/笔</span>
+                  </span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 {/**
                   * 这个浮层里其实是**两个概念**，过去挤在同一个标题下，读者很容易把
                   * 「推演出来的复利速度」当成「账户真实走过的路径」。现在分成两块，
@@ -2941,15 +3261,22 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-asymmetric-risk"
-                  className="inline-flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
+                  className={`${STAT_TRIGGER} border-transparent`}
                   aria-label={`不对称风险，UPR ${formatAsymmetricMetric(asymmetricRisk.upr)}，Omega ${formatAsymmetricMetric(asymmetricRisk.omega)}，点击查看六项指标`}
                   title="点击查看不对称风险指标"
                   onClick={event => toggleFormulaPopover(event, 'asymmetricRisk')}
                 >
-                  不对称风险 · UPR {formatAsymmetricMetric(asymmetricRisk.upr)} · Ω {formatAsymmetricMetric(asymmetricRisk.omega)}
+                  <span className={STAT_LABEL}>不对称风险</span>{' '}
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-[10px] text-muted-foreground">UPR</span>{' '}
+                    <span className={`${STAT_VALUE} text-foreground/90`}>{formatAsymmetricMetric(asymmetricRisk.upr)}</span>{' '}
+                    <span aria-hidden="true" className="text-muted-foreground/50">·</span>{' '}
+                    <span className="text-[10px] text-muted-foreground">Ω</span>{' '}
+                    <span className={`${STAT_VALUE} text-foreground/90`}>{formatAsymmetricMetric(asymmetricRisk.omega)}</span>
+                  </span>
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[min(92vw,38rem)] border-border bg-card p-0 text-[11px]">
+              <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-[min(92vw,38rem)] border-border bg-card p-0 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="relative flex items-center justify-between border-b border-border/70 px-4 py-3">
                   <div>
                     <div className="font-medium text-foreground">不对称风险</div>
