@@ -451,6 +451,32 @@ function SignalLibraryListImpl({
     measure();
   }, [resetKey, measure]);
 
+  /**
+   * 【复核遗留】同一口径下行变了（导入新信号、删掉一条、打分改变了筛选结果）：把首个可见行钉在原位。
+   * 窗口化之后，排到可见区上方的新行会把整段内容往下推；窗口却仍按旧的滚动位置取行，
+   * 屏幕上就换成了另一批行（导入 14 条以上排在上方时尤其明显）。改造前是全量渲染，浏览器的滚动锚定会盯住原来那几行。
+   * 这里自己做锚定：取旧行里首个可见的那一行，按它在新行里挪了几位把 scrollTop 补回去（行内的零头原样保留），
+   * 然后再量一次窗口；都在绘制之前完成，不闪。停在顶部（scrollTop 为 0）时不锚——新信号就该出现在最上面；
+   * 那一行被删掉了也不锚。浏览器自带的滚动锚定关掉（overflow-anchor: none），两套锚定不互相拉扯。
+   */
+  const lastRowsRef = useRef<{ key: string; rows: Props['rows'] }>({ key: resetKey, rows });
+  useLayoutEffect(() => {
+    const previous = lastRowsRef.current;
+    lastRowsRef.current = { key: resetKey, rows };
+    if (previous.key !== resetKey || previous.rows === rows) return;
+    const el = scrollerRef.current;
+    if (!el || !(el.scrollTop > 0) || previous.rows.length === 0) return;
+    const metrics = viewRef.current;
+    const top = el.scrollTop;
+    const oldIndex = computeSignalRowWindow(top, metrics.viewport, previous.rows.length, 0, metrics).start;
+    const anchorId = previous.rows[oldIndex]?.id;
+    if (anchorId == null) return;
+    const newIndex = rows.findIndex(row => row.id === anchorId);
+    if (newIndex < 0 || newIndex === oldIndex) return;
+    el.scrollTop = Math.max(0, signalRowOffset(newIndex, metrics) + (top - signalRowOffset(oldIndex, metrics)));
+    measure();
+  }, [rows, resetKey, measure]);
+
   // 行数变了（删掉一条、打分改变了筛选结果）要重算，否则窗口可能越界。
   useLayoutEffect(() => { measure(); }, [rows.length, measure]);
 
@@ -520,7 +546,7 @@ function SignalLibraryListImpl({
     <div
       ref={scrollerRef}
       data-testid="signal-library-scroller"
-      className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain"
+      className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       onBlur={handleBlur}
     >
       {/* 首行始终是第一个子节点：前面不放垫片，它才不会被 divide-y 平白加上一条上边线

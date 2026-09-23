@@ -340,6 +340,66 @@ describe('信号库列表的窗口化', () => {
     expect(renderedSymbols()).toEqual(before);
   });
 
+  describe('【复核遗留】同一口径下行变了：首个可见行钉在原位', () => {
+    // 5000px 处第一整行是第 200 行，行内零头 = 5000 − (200×25 − 1) = 1px
+    const FIRST = 200;
+    const within = 5000 - signalRowOffset(FIRST);
+    const newSignals = (n: number) => SIGNALS.slice(0, n).map((s, i) => ({ ...s, id: `imported-${i}` }));
+
+    it('导入 20 条排在可见区上方的新信号：仍停在原来那一行，行内零头不变', async () => {
+      const { rerenderWith, props } = renderList();
+      const el = scroller();
+      stubLayout(el);
+      await scrollTo(el, 5000);
+      const imported = [...newSignals(20), ...SIGNALS];
+      rerenderWith({ ...props, rows: imported });
+      expect(el.scrollTop).toBe(signalRowOffset(FIRST + 20) + within);
+      // 窗口按补回的滚动位置取：原来第 200 行（现在第 220 行）仍是首个可见行
+      const start = FIRST + 20 - SIGNAL_ROW_OVERSCAN;
+      // indicesOf 只认原 791 行以内的附加下标：导入后的末行（第 810 行）另外补上
+      expect(renderedIds()).toEqual([
+        ...idsAt(imported, indicesOf(start, start + VISIBLE_ROWS + SIGNAL_ROW_OVERSCAN * 2, 0)),
+        imported[imported.length - 1].id,
+      ]);
+      expectLayoutConsistent(imported);
+    });
+
+    it('删掉上方一行：滚动位置跟着上移一行', async () => {
+      const { rerenderWith, props } = renderList();
+      const el = scroller();
+      stubLayout(el);
+      await scrollTo(el, 5000);
+      const firstId = SIGNALS[FIRST].id;
+      rerenderWith({ ...props, rows: SIGNALS.filter((_, i) => i !== 10) });
+      expect(el.scrollTop).toBe(signalRowOffset(FIRST - 1) + within);
+      expect(renderedIds()).toContain(firstId);
+    });
+
+    it('停在顶部时不锚：新导入的信号就出现在最上面', () => {
+      const { rerenderWith, props } = renderList();
+      const el = scroller();
+      stubLayout(el);
+      const imported = [...newSignals(5), ...SIGNALS];
+      rerenderWith({ ...props, rows: imported });
+      expect(el.scrollTop).toBe(0);
+      expect(renderedIds()[0]).toBe('imported-0');
+    });
+
+    it('钉住的那一行被删掉了：不锚，滚动位置不动', async () => {
+      const { rerenderWith, props } = renderList();
+      const el = scroller();
+      stubLayout(el);
+      await scrollTo(el, 5000);
+      rerenderWith({ ...props, rows: SIGNALS.filter((_, i) => i !== FIRST) });
+      expect(el.scrollTop).toBe(5000);
+    });
+
+    it('浏览器自带的滚动锚定关掉，只留这一套', () => {
+      renderList();
+      expect(scroller().className).toContain('[overflow-anchor:none]');
+    });
+  });
+
   it('量不到容器高度时退回 224px 的名义窗口，而不是什么都不渲染', () => {
     // 这一条就是 jsdom 的处境（clientHeight 恒为 0），也是真浏览器首帧的处境
     renderList();
