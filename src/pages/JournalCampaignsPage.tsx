@@ -1079,12 +1079,6 @@ type CampaignCardProps = {
   onToggleDetails: (event: MouseEvent<HTMLButtonElement>, campaignId: string) => void;
   onImportanceChange: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign, weight: number) => void;
   onDelete: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
-  /** 按「涨幅」排序时在杠杆旁边亮出主力涨跌幅，排序的依据看得见；其余排序不占位。 */
-  showMainPriceChange?: boolean;
-  /** 按「涨幅效率」排序时亮出效率（悬停给出代入值）。 */
-  showMainPriceEfficiency?: boolean;
-  /** 按「加仓效率」排序时亮出加仓效率（悬停给出代入值）。 */
-  showAddEfficiency?: boolean;
 };
 
 /**
@@ -1101,9 +1095,6 @@ const CampaignCard = memo(function CampaignCard({
   onToggleDetails,
   onImportanceChange,
   onDelete,
-  showMainPriceChange = false,
-  showMainPriceEfficiency = false,
-  showAddEfficiency = false,
 }: CampaignCardProps) {
   const {
     campaign,
@@ -1118,8 +1109,9 @@ const CampaignCard = memo(function CampaignCard({
     geometricExpectancy,
   } = row;
   const cardLeverage = campaignLeverage(campaign, legs);
-  const mainPriceEfficiency = showMainPriceEfficiency || showAddEfficiency ? rowMainPriceEfficiency(row) : null;
-  const addEfficiency = showAddEfficiency ? rowAddEfficiency(row) : null;
+  const mainPriceChangePct = row.mainPriceChangePct;
+  const mainPriceEfficiency = rowMainPriceEfficiency(row);
+  const addEfficiency = rowAddEfficiency(row);
   const importance = importanceValue(campaign);
   const operationTime = campaignOperationTime(legs, tradeRecords);
   const campaignDisplayCode = formatCampaignDisplayCode(
@@ -1188,39 +1180,6 @@ const CampaignCard = memo(function CampaignCard({
                 className="inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground/80"
               >
                 {formatLeverage(cardLeverage)}
-              </span>
-            )}
-            {showMainPriceChange && row.mainPriceChangePct != null && (
-              <span
-                data-testid="campaign-main-price-change"
-                title="涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数"
-                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
-                  MAIN_PRICE_CHANGE_TONE[legPriceChangeDirection(row.mainPriceChangePct) ?? 'flat']
-                }`}
-              >
-                涨幅 {formatLegPriceChangePct(row.mainPriceChangePct)}
-              </span>
-            )}
-            {showAddEfficiency && addEfficiency != null && mainPriceEfficiency != null && (
-              <span
-                data-testid="campaign-add-efficiency"
-                title={`加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；只拿主力不加仓时约为 1，大于 1 说明加仓把行情放大成了更多的 R`}
-                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
-                  MAIN_PRICE_CHANGE_TONE[signedTone(addEfficiency)]
-                }`}
-              >
-                加仓效率 {formatMainPriceEfficiency(addEfficiency)}
-              </span>
-            )}
-            {showMainPriceEfficiency && mainPriceEfficiency != null && (
-              <span
-                data-testid="campaign-main-price-efficiency"
-                title={`涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(row.mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
-                className={`inline-flex items-center rounded border border-border/70 bg-background/45 px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${
-                  MAIN_PRICE_CHANGE_TONE[signedTone(mainPriceEfficiency)]
-                }`}
-              >
-                涨幅效率 {formatMainPriceEfficiency(mainPriceEfficiency)}
               </span>
             )}
             <span
@@ -1300,6 +1259,31 @@ const CampaignCard = memo(function CampaignCard({
             {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
           </span>
         </div>
+        {/* 涨幅 → 涨幅效率 紧跟预期回撤：效率就是这两个数相除，三格挨着读得出来。 */}
+        <div
+          data-testid="campaign-main-price-change"
+          title={mainPriceChangePct == null
+            ? '涨幅：主力还没平仓（没有平仓价），与 Legs 表一样显示「—」'
+            : '涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数'}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">涨幅：</span>
+          <span data-testid="campaign-main-price-change-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
+            {formatLegPriceChangePct(mainPriceChangePct)}
+          </span>
+        </div>
+        <div
+          data-testid="campaign-main-price-efficiency"
+          title={mainPriceEfficiency == null
+            ? '涨幅效率 = 主力涨幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
+            : `涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">涨幅效率：</span>
+          <span data-testid="campaign-main-price-efficiency-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
+            {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
+          </span>
+        </div>
         <div
           data-testid="campaign-opportunity-quality-value"
           title={opportunityQuality == null
@@ -1317,6 +1301,19 @@ const CampaignCard = memo(function CampaignCard({
             className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${payoffRatioTone}`}
           >
             {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+          </span>
+        </div>
+        {/* 加仓效率紧跟盈亏比：它就是盈亏比 ÷ 涨幅效率。 */}
+        <div
+          data-testid="campaign-add-efficiency"
+          title={addEfficiency == null || mainPriceEfficiency == null
+            ? '加仓效率 = 盈亏比 ÷ 涨幅效率：算不出盈亏比或涨幅效率、或涨幅效率为 0 时不算'
+            : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；只拿主力不加仓时约为 1，大于 1 说明加仓把行情放大成了更多的 R`}
+          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
+        >
+          <span className="text-[10px] text-muted-foreground/70">加仓效率：</span>
+          <span data-testid="campaign-add-efficiency-value" className={`whitespace-nowrap font-mono text-[10px] font-medium tabular-nums ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
+            {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
           </span>
         </div>
         <div
@@ -3369,9 +3366,6 @@ export default function JournalCampaignsPage() {
               onToggleDetails={handleCampaignDetailsToggle}
               onImportanceChange={handleImportanceChange}
               onDelete={handleDeleteCampaign}
-              showMainPriceChange={sortState.mode === 'mainPriceChange'}
-              showMainPriceEfficiency={sortState.mode === 'mainPriceEfficiency'}
-              showAddEfficiency={sortState.mode === 'addEfficiency'}
             />
           ))
         )}

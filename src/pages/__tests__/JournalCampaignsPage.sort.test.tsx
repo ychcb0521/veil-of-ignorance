@@ -397,13 +397,22 @@ describe('JournalCampaignsPage sorting', () => {
         </MemoryRouter>,
       );
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-      // 默认排序不亮这三枚读数，卡片不多占位
-      expect(screen.queryByTestId('campaign-main-price-change')).not.toBeInTheDocument();
+      // 【用户要求】封面常驻显示涨幅、涨幅效率、加仓效率：默认排序下每张卡片都有这三格，算不出的写「—」
+      expect(screen.getAllByTestId('campaign-main-price-change')).toHaveLength(4);
+      expect(screen.getAllByTestId('campaign-main-price-efficiency')).toHaveLength(4);
+      expect(screen.getAllByTestId('campaign-add-efficiency')).toHaveLength(4);
+      const newest = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('Newest Operation'))!;
+      expect(newest.querySelector('[data-testid="campaign-main-price-change-value"]')?.textContent).toBe('+5.00%');
+      // 这场没有对冲边界、算不出预期回撤：效率两格是「—」
+      expect(newest.querySelector('[data-testid="campaign-main-price-efficiency-value"]')?.textContent).toBe('—');
+      expect(newest.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('—');
+      // 杠杆旁不再另挂一枚重复的涨幅标签
+      expect(newest.querySelectorAll('[data-testid="campaign-main-price-change"]')).toHaveLength(1);
 
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
       await waitFor(() => expect(cardOrder()).toEqual(['High Importance', 'Late Close', 'Newest Operation', 'Best PnL']));
-      expect(screen.getAllByTestId('campaign-main-price-change').map(node => node.textContent))
-        .toEqual(['涨幅 +30.00%', '涨幅 +20.00%', '涨幅 +5.00%', '涨幅 -10.00%']);
+      expect(screen.getAllByTestId('campaign-main-price-change-value').map(node => node.textContent))
+        .toEqual(['+30.00%', '+20.00%', '+5.00%', '-10.00%']);
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
       await waitFor(() => expect(cardOrder()).toEqual(['Best PnL', 'Newest Operation', 'Late Close', 'High Importance']));
 
@@ -416,7 +425,7 @@ describe('JournalCampaignsPage sorting', () => {
 
       // 涨幅效率 = 主力涨幅 ÷ 预期回撤；预期回撤为「—」的战役（没有对冲边界）不进入这一档
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceEfficiency'));
-      await waitFor(() => expect(screen.getAllByTestId('campaign-main-price-efficiency').length).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeLessThan(4));
       const effCards = screen.getAllByTestId('campaign-card');
       const effValues = effCards.map(card => cardNumber(card, 'campaign-main-price-efficiency'));
       expect(effValues.every(Number.isFinite)).toBe(true);
@@ -432,7 +441,7 @@ describe('JournalCampaignsPage sorting', () => {
 
       // 加仓效率 = 盈亏比 ÷ 涨幅效率
       fireEvent.click(screen.getByTestId('campaign-sort-addEfficiency'));
-      await waitFor(() => expect(screen.getAllByTestId('campaign-add-efficiency').length).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('data-sort-direction', 'desc'));
       const addCards = screen.getAllByTestId('campaign-card');
       const addValues = addCards.map(card => cardNumber(card, 'campaign-add-efficiency'));
       expect([...addValues].sort((a, b) => b - a)).toEqual(addValues);
@@ -446,7 +455,7 @@ describe('JournalCampaignsPage sorting', () => {
       }
       // 只有主力、不加仓的战役：盈亏比就是它的涨幅效率，加仓效率恰为 1
       const pureMain = addCards.find(card => card.textContent?.includes('High Importance'))!;
-      expect(pureMain.querySelector('[data-testid="campaign-add-efficiency"]')?.textContent).toBe('加仓效率 +1.00');
+      expect(pureMain.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('+1.00');
       expect(screen.getAllByTestId('campaign-add-efficiency')[0].getAttribute('title')).toContain('盈亏比');
     } finally {
       tradeHistory.forEach((record, index) => { record.exitPrice = originals[index]; });
@@ -1162,8 +1171,11 @@ describe('JournalCampaignsPage sorting', () => {
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
       'campaign-expected-drawdown-pct',
+      'campaign-main-price-change',
+      'campaign-main-price-efficiency',
       'campaign-opportunity-quality-value',
       'campaign-payoff-ratio',
+      'campaign-add-efficiency',
       'campaign-arithmetic-expectancy',
       'campaign-geometric-expectancy',
       'campaign-mirror-tp-status',
