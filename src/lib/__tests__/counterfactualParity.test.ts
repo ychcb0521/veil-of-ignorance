@@ -7,7 +7,8 @@
  * 逐项比到 1 分钱以内。
  *
  * 比对的项：已实现 P&L、峰值浮盈、最大预期亏损、预期回撤、杠杆、主力开仓名义仓位、盈亏比，
- * 以及由 b 推出的机会质量、算术期望、几何期望、DSI/USI 贡献（b²/n），再加「相对实际」= 0.00。
+ * 以及由 b 推出的机会质量、算术期望、几何期望、DSI/USI 贡献（b²/n），主力涨幅与由它推出的涨幅效率、加仓效率，
+ * 再加「相对实际」= 0.00。
  * 今日账户总资产两边读同一个数（当前账户），不在这里比。
  *
  * 按构造**不可能**相同、因此不比的项（写死在 EXCLUDED_BY_CONSTRUCTION 里，改动时必须说明理由）：
@@ -28,6 +29,8 @@
  * 第二组断言守「相对实际只反映改动」：从原样副本出发改一格，相对实际挪动的量必须恰好是这一格值多少钱，
  * 不能因为「改过了」就整条腿换一套算法，把滑点、分刀、老费率的差额一起算进去。
  */
+import { campaignMainLegPriceChangePct, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import { describe, expect, it } from 'vitest';
 import { computeAsymmetricRiskContribution, type AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
 import {
@@ -129,7 +132,20 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
   dsiUsiTerm: number | null;
+  mainPriceChangePct: number | null;
+  mainPriceEfficiency: number | null;
+  addEfficiency: number | null;
 };
+
+/** 涨幅效率与加仓效率：两边都从各自的涨幅、预期回撤、盈亏比走同一对函数（页面构造器里就是这么算的）。 */
+function efficiencyNumbers(mainPriceChangePct: number | null, expectedMaxDrawdownPct: number, payoffRatio: number | null) {
+  const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedMaxDrawdownPct);
+  return {
+    mainPriceChangePct,
+    mainPriceEfficiency,
+    addEfficiency: computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency),
+  };
+}
 
 const ALL_FIXTURES = [...PARITY_FIXTURES, ...SIMULATOR_PARITY_FIXTURES];
 
@@ -161,6 +177,8 @@ function realPanel(fx: ParityFixture) {
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,
     dsiUsiTerm: contribution?.meanSquareTerm ?? null,
+    // 与页面同一个函数、同一份平仓价校正
+    ...efficiencyNumbers(campaignMainLegPriceChangePct(legs, tradeRecords, corrections), expectedMaxDrawdownPct, payoffRatio),
   };
   return { numbers, actualPnl: pnlReconciliation.correctedPnl, settlement, accuracy };
 }
@@ -200,6 +218,10 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     asymmetricRiskSummary: ASYMMETRIC,
     currentAccountEquity: 10_000,
     isOwner: true,
+    actualMain: {
+      legId: pickPrimaryMainLeg(fx.legs)?.id ?? null,
+      pct: campaignMainLegPriceChangePct(fx.legs, fx.tradeRecords, fx.corrections),
+    },
   };
   const metrics = buildCounterfactualOverviewMetrics({ params, result }, shared);
   const numbers: PanelNumbers = {
@@ -214,6 +236,7 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     arithmeticExpectancy: metrics.arithmeticExpectancy,
     geometricExpectancy: metrics.geometricExpectancy,
     dsiUsiTerm: metrics.asymmetricRiskContribution?.meanSquareTerm ?? null,
+    ...efficiencyNumbers(metrics.mainPriceChangePct, metrics.expectedMaxDrawdownPct, metrics.payoffRatio),
   };
   return { numbers, result, manualLegs, metrics };
 }
@@ -534,7 +557,8 @@ describe('反事实黄金对账：原样重跑 ≡ 真实盈亏概览', () => {
     const compared: Array<keyof PanelNumbers> = Object.keys(realPanel(parityFixture('fees-everywhere')).numbers) as Array<keyof PanelNumbers>;
     // dsiUsiTerm 是 asymmetricRiskContribution 里的那个数
     const covered = new Set<string>([
-      ...compared.filter(key => key !== 'dsiUsiTerm'),
+      // dsiUsiTerm 与两项效率是由适配器字段推出来的，不是适配器自己的字段
+      ...compared.filter(key => key !== 'dsiUsiTerm' && key !== 'mainPriceEfficiency' && key !== 'addEfficiency'),
       'asymmetricRiskContribution',
       ...EXCLUDED_BY_CONSTRUCTION,
       ...SHARED_INPUTS_AND_TEXT,

@@ -12,6 +12,7 @@ import {
 /**
  * 黄金样本：与详情页内联版本（提取前）在 metrics 页面测试那场「winner」战役上的输出逐字对照。
  * 已实现 200、L 100 → b = 200%；d 10 → Q = 2 ÷ 10 = 0.20；P = 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
+ * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓效率 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 const GOLDEN_LABELS = [
   '已实现 P&L',
@@ -20,7 +21,10 @@ const GOLDEN_LABELS = [
   '峰值浮盈',
   '最大预期亏损',
   '预期回撤',
+  '涨幅',
+  '涨幅效率',
   '盈亏比',
+  '加仓效率',
   '本场 b 对 DSI/USI 的贡献',
   '机会质量',
   '算术期望',
@@ -35,7 +39,10 @@ const GOLDEN_KEYS = [
   'peakUnrealizedPnl',
   'initialExpectedMaxLoss',
   'expectedMaxDrawdownPct',
+  'mainPriceChange',
+  'mainPriceEfficiency',
   'payoffRatio',
+  'addEfficiency',
   'asymmetricRiskContribution',
   'opportunityQuality',
   'arithmeticExpectancy',
@@ -53,6 +60,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
     initialExpectedMaxLoss: 100,
     expectedMaxDrawdownPct: 10,
     payoffRatio: 200,
+    mainPriceChangePct: 20,
     asymmetricRiskContribution: { group: 'win', sampleCount: 1, meanSquareTerm: 4, meanSquareShare: 1 },
     opportunityQuality: 0.2,
     arithmeticExpectancy: 0.5,
@@ -65,7 +73,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
-  it('输出与提取前的详情页完全一致的 12 项：键、标签、值、着色、右列', () => {
+  it('输出 15 项（原 12 项 + 涨幅 / 涨幅效率 / 加仓效率）：键、标签、值、着色、右列', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
@@ -77,7 +85,10 @@ describe('buildCampaignPnlOverviewItems', () => {
       '250.50',
       '100.00 USDT',
       '10.00%',
+      '+20.00%',
+      '+2.00',
       '200.0%（2.00）',
+      '+1.00',
       'USI · b²/n = 4.0000（组内 100.0%）',
       '0.20',
       '+0.50R',
@@ -91,6 +102,9 @@ describe('buildCampaignPnlOverviewItems', () => {
       undefined,
       undefined,
       undefined,
+      '#0ECB81',
+      '#0ECB81',
+      '#0ECB81',
       '#0ECB81',
       undefined,
       '#0ECB81',
@@ -106,6 +120,9 @@ describe('buildCampaignPnlOverviewItems', () => {
       undefined,
       undefined,
       'text-[#0ECB81]',
+      'text-[#0ECB81]',
+      'text-[#0ECB81]',
+      'text-[#0ECB81]',
       undefined,
       'text-[#0ECB81]',
       'text-[#0ECB81]',
@@ -113,7 +130,8 @@ describe('buildCampaignPnlOverviewItems', () => {
       undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
-      false, false, false, false, false, false, false, false, false, false, false, true,
+      // 涨幅效率压在「预期回撤」正下方、加仓效率在「盈亏比」右边；今日总资产仍钉在右列
+      false, false, false, false, false, false, false, true, false, true, false, false, false, false, true,
     ]);
   });
 
@@ -132,6 +150,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       arithmeticExpectancy: null,
       geometricExpectancy: null,
       initialRisk: null,
+      mainPriceChangePct: null,
       todayAccountEquity: null,
       expectedWinRate: null,
     }));
@@ -175,7 +194,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 });
 
 describe('CampaignPnlOverviewPanel', () => {
-  it('渲染 12 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
+  it('渲染 15 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
     const { container } = render(
       <CampaignPnlOverviewPanel title="盈亏概览" items={items} note="期望口径：2 场有效战役，实时胜率 50.00%。" />,
@@ -185,9 +204,10 @@ describe('CampaignPnlOverviewPanel', () => {
     const buttons = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'));
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2.sm\\:grid-cols-2')).not.toBeNull();
-    expect(container.querySelector('.sm\\:col-start-2')).toHaveTextContent('今日账户总资产');
+    expect([...container.querySelectorAll('.sm\\:col-start-2')].map(node => node.firstElementChild?.textContent))
+      .toEqual(['涨幅效率', '加仓效率', '今日账户总资产']);
     expect(screen.getByText('期望口径：2 场有效战役，实时胜率 50.00%。')).toBeInTheDocument();
-    // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 12 项网格与脚注，没有别的行
+    // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 15 项网格与脚注，没有别的行
     expect(container.firstElementChild?.firstElementChild).toHaveTextContent('盈亏概览');
     // 标题单行截断、悬停看全名：反事实分支名最长 20 字，并排的窄栏里折行会让面板比上方「盈亏概览」高一行
     expect(container.firstElementChild?.firstElementChild?.className).toBe('truncate font-medium');
@@ -204,6 +224,10 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('本场 b = 2.00，n = 1')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '涨幅效率说明' }));
+    expect(screen.getByText('本场 = +20.00% ÷ 10.00% = +2.00')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '加仓效率说明' }));
+    expect(screen.getByText('本场 = 2.00 ÷ +2.00 = +1.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '最大预期亏损说明' }));
     expect(screen.getByText('最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例')).toBeInTheDocument();
   });
@@ -218,7 +242,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('成交记录')).toBeInTheDocument();
   });
 
-  it('helpOverrides 整段替换、extraNotes 追加在标准文案之后；testId 落在卡片上，卡片里只有 12 个说明按钮', () => {
+  it('helpOverrides 整段替换、extraNotes 追加在标准文案之后；testId 落在卡片上，卡片里只有 15 个说明按钮', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       helpOverrides: { realizedPnl: ['替换后的说明', { formula: 'P&L = Σ 手动腿' }] },
       extraNotes: { peakUnrealizedPnl: [{ warning: '按 1h K 线估计' }] },
@@ -233,7 +257,7 @@ describe('CampaignPnlOverviewPanel', () => {
     );
     const panel = screen.getByTestId('counterfactual-draft-overview');
     expect(panel.firstElementChild).toHaveTextContent('反事实盈亏概览 · 未保存');
-    // 「相对实际」与 保存 / 丢弃 挪到了左边的「相对原始的变化情况」：面板里只剩 12 个说明按钮
+    // 「相对实际」与 保存 / 丢弃 挪到了左边的「相对原始的变化情况」：面板里只剩 15 个说明按钮
     expect(within(panel).getAllByRole('button').map(button => button.getAttribute('aria-label')))
       .toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     expect(panel).not.toHaveTextContent('相对实际');

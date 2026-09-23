@@ -4,6 +4,8 @@ import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, 
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
+import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
+import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1138,6 +1140,12 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues.profitCaptureRatio / 100,
     campaignAsymmetricRisk,
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
+  // 主力涨幅：与 Legs 表主力那一行「涨跌幅」同一对开平价（同一份平仓价校正），与战役列表卡片同一个函数。
+  // 真实「盈亏概览」与反事实面板共用这一个数（反事实没改主力开平价时沿用它）。
+  const actualMainPriceChange = useMemo(() => ({
+    legId: pickPrimaryMainLeg(legs)?.id ?? null,
+    pct: campaignMainLegPriceChangePct(legs, tradeRecords, legExitPriceCorrections),
+  }), [legs, tradeRecords, legExitPriceCorrections]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
@@ -1156,6 +1164,7 @@ export default function JournalCampaignDetailPage() {
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
       payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
+      mainPriceChangePct: actualMainPriceChange.pct,
       asymmetricRiskContribution,
       opportunityQuality: campaignMetricValues?.opportunityQuality ?? null,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
@@ -1174,6 +1183,7 @@ export default function JournalCampaignDetailPage() {
     campaignPerformance?.expectedWinRate,
     currentAccountEquity,
     isOwner,
+    actualMainPriceChange,
     legs,
     pnlReconciliation,
     settlement,
@@ -1207,6 +1217,8 @@ export default function JournalCampaignDetailPage() {
     asymmetricRiskSummary: campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
+    // 反事实里的「涨幅」先认真实战役选中的那条主力（副本里 id 不变），没改开平价就沿用上方的数。
+    actualMain: actualMainPriceChange,
   }), [
     campaign,
     campaignAsymmetricRisk,
@@ -1215,6 +1227,7 @@ export default function JournalCampaignDetailPage() {
     campaignPerformanceLoading,
     currentAccountEquity,
     isOwner,
+    actualMainPriceChange,
   ]);
   const counterfactualDraftOverview = useMemo(
     () => (counterfactualDraft ? buildCounterfactualOverview(counterfactualDraft, counterfactualOverviewShared) : null),

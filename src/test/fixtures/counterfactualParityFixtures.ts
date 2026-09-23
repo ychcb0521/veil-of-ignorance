@@ -77,7 +77,10 @@ export type ParityMetric =
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
-  | 'dsiUsiTerm';
+  | 'dsiUsiTerm'
+  | 'mainPriceChangePct'
+  | 'mainPriceEfficiency'
+  | 'addEfficiency';
 
 interface FilledLegSpec {
   id: string;

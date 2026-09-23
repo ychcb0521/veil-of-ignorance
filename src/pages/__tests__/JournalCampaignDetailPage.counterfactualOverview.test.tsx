@@ -1,7 +1,7 @@
 /**
  * 反事实战役的「运行 → 未保存草稿 → 保存 / 丢弃 → 已保存分支面板」全流程。
  *
- * 用户要求：一键运行之后显示的结果要与「盈亏概览」同一套模式（同 12 项、同脚注），并且能保存。
+ * 用户要求：一键运行之后显示的结果要与「盈亏概览」同一套模式（同 15 项、同脚注），并且能保存。
  * 这里把编辑器换成一个能触发 onRunWhatIf 并递出基线腿的桩，journalApi 的运行走真引擎，
  * 只把 create / list / delete 换成记账的桩：什么时候插库、插了什么，一目了然。
  */
@@ -327,7 +327,10 @@ const OVERVIEW_LABELS = [
   '峰值浮盈',
   '最大预期亏损',
   '预期回撤',
+  '涨幅',
+  '涨幅效率',
   '盈亏比',
+  '加仓效率',
   '本场 b 对 DSI/USI 的贡献',
   '机会质量',
   '算术期望',
@@ -427,7 +430,7 @@ beforeEach(() => {
 });
 
 describe('JournalCampaignDetailPage counterfactual overview flow', () => {
-  it('一键运行 → 「反事实盈亏概览 · 未保存」：同 12 项说明按钮、相对实际、默认分支名；保存前没有插库', async () => {
+  it('一键运行 → 「反事实盈亏概览 · 未保存」：同 15 项说明按钮、相对实际、默认分支名；保存前没有插库', async () => {
     renderPage();
     const panel = await runFromEditor();
 
@@ -690,7 +693,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
   }, 15_000);
 });
 
-/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、12 项每一行的 class（不含数值与染色）。 */
+/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、15 项每一行的 class（不含数值与染色）。 */
 function overviewSkeleton(panel: HTMLElement) {
   const [title, grid, note] = Array.from(panel.children) as HTMLElement[];
   return {
@@ -710,7 +713,7 @@ function spacingPx(className: string, prefix: 'p' | 'gap') {
 }
 
 describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据 | 盈亏概览」同一套分栏', () => {
-  it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 12 项', async () => {
+  it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 15 项', async () => {
     renderPage();
     const row = await runFromEditor();
     const changes = screen.getByTestId('counterfactual-draft-changes');
@@ -734,7 +737,7 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     expect(within(titleRow).getByTestId('counterfactual-discard')).toHaveTextContent('丢弃');
     expect(within(changes).queryAllByRole('button', { name: /说明$/ })).toHaveLength(0);
 
-    // 右栏：只有标题、12 项与脚注；没有相对实际、改动、运行信息和任何操作
+    // 右栏：只有标题、15 项与脚注；没有相对实际、改动、运行信息和任何操作
     const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
     expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 未保存');
     expect(helpButtonLabels(overview)).toEqual(helpButtonLabels(real));

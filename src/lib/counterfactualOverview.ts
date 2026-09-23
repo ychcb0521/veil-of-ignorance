@@ -4,6 +4,7 @@ import {
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
+import { counterfactualMainLegPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { computeCampaignExpectancies, resolveResolvedOpportunityQuality } from '@/lib/campaignMetrics';
 import type {
   CampaignPnlOverviewHelpParagraph,
@@ -46,6 +47,12 @@ export interface CounterfactualOverviewShared {
   asymmetricRiskSummary: AsymmetricRiskMetricsSummary | null;
   currentAccountEquity: number;
   isOwner: boolean;
+  /**
+   * 真实战役的主力（pickPrimaryMainLeg 选中的腿 id）与它在上方「盈亏概览」里的涨幅：
+   * 反事实的「涨幅」先认这条腿，开平价与方向没改过就沿用这个数，原样重跑因此逐位相同。
+   * 缺省时按「仓位」一格取最大的主力、按副本的开平价算。
+   */
+  actualMain?: ActualMainPriceChange | null;
 }
 
 export interface CounterfactualOverviewBranch {
@@ -241,6 +248,10 @@ export function buildCounterfactualOverviewMetrics(
   const initialExpectedMaxLoss = anchors.initialExpectedMaxLoss > EPSILON ? anchors.initialExpectedMaxLoss : 0;
   const hasStopLine = initialExpectedMaxLoss > 0;
   const payoffRatio = realizedPnl == null ? null : computeCounterfactualPayoffRatio(realizedPnl, initialExpectedMaxLoss);
+  // 手动 Legs 分支：副本里主力那条腿的开平价（改过就按改后的）；SOP 推演没有逐腿开平价，不算。
+  const mainPriceChangePct = manual
+    ? counterfactualMainLegPriceChangePct(branch.params.manual_legs, shared.actualMain)
+    : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   const resolved = isCounterfactualResolved(branch) && realizedPnl != null;
   const opportunityQuality = resolveResolvedOpportunityQuality(resolved, payoffRatio, expectedMaxDrawdownPct);
@@ -299,6 +310,13 @@ export function buildCounterfactualOverviewMetrics(
     asymmetricRiskContribution: [
       { warning: '假设值：本场反事实不在账户样本内，n 与 Σb² 取自真实已了结战役，占比只是「如果它是真的」的示意。' },
     ],
+    mainPriceChange: [
+      manual
+        ? '反事实分支先认真实战役选中的那条主力：它的方向、开仓价、平仓价都没改过时沿用上方「盈亏概览」的涨幅（原样重跑逐位相同），'
+          + '改过就按 Legs 副本里改后的开平价算。它被停用或改掉角色时，在参与运行的主力里按「仓位」一格取最大；'
+          + '那条腿实际还没平仓、平仓价也没改过时不算（引擎只是按数据末端强行结算）。'
+        : 'SOP 推演没有逐腿的开平价，本项与两项效率不计算。',
+    ],
   };
   if (!hasStopLine) {
     const reason = manual
@@ -318,6 +336,7 @@ export function buildCounterfactualOverviewMetrics(
     initialExpectedMaxLoss,
     expectedMaxDrawdownPct,
     payoffRatio,
+    mainPriceChangePct,
     asymmetricRiskContribution,
     opportunityQuality,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,

@@ -31,6 +31,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
+import { computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -803,38 +804,17 @@ function campaignLeverage(campaign: TradeCampaign, legs: TradeJournal[]): number
   return max;
 }
 
-/**
- * 涨幅效率 = 主力涨幅 ÷ 预期回撤（两者都是价格层面的百分数，结果是倍数）：
- * 主力涨了 12%、入场到对冲边界 4%，效率 +3.00——价格走出了 3 个「预期回撤」。
- * 任一缺失、或预期回撤不为正时不算（与「预期回撤」排序同一道门槛）。
- */
+/** 涨幅效率 = 主力涨幅 ÷ 预期回撤（公式与说明见 computeMainPriceEfficiency，盈亏概览同一个函数）。 */
 function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
-  const pct = row.mainPriceChangePct;
-  const drawdown = row.initialExpectedMaxDrawdownPct;
-  if (pct == null || !Number.isFinite(pct) || !Number.isFinite(drawdown) || !(drawdown > 0)) return null;
-  const value = pct / drawdown;
-  return Number.isFinite(value) ? value : null;
+  return computeMainPriceEfficiency(row.mainPriceChangePct, row.initialExpectedMaxDrawdownPct);
 }
 
-/**
- * 加仓效率 = 盈亏比 b ÷ 涨幅效率。
- * 只拿主力、不加仓时，b 大致就是主力的涨幅效率（L 按入场到对冲边界的距离定），比值约为 1；
- * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
- * 任一缺失或涨幅效率为 0（除不了）时不算。
- */
+/** 加仓效率 = 盈亏比 ÷ 涨幅效率（见 computeAddEfficiency）。 */
 function rowAddEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
-  const payoff = rowPayoffRatio(row);
-  const efficiency = rowMainPriceEfficiency(row);
-  if (payoff == null || !Number.isFinite(payoff) || efficiency == null || efficiency === 0) return null;
-  const value = payoff / efficiency;
-  return Number.isFinite(value) ? value : null;
+  return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
 }
 
-/** 「+3.00」「-0.75」；取整为 0 统一成「0.00」。 */
-function formatMainPriceEfficiency(value: number): string {
-  const rounded = Number(value.toFixed(2));
-  return rounded === 0 ? '0.00' : `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}`;
-}
+const formatMainPriceEfficiency = formatEfficiency;
 
 /** 卡片上主力涨幅的字色：与 Legs 表「涨跌幅」列同一套判定（按显示到两位小数后的值，正绿负红，0 中性）。 */
 const MAIN_PRICE_CHANGE_TONE: Record<LegPriceChangeDirection, string> = {

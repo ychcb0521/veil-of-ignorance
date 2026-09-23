@@ -2,7 +2,7 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import { computeLegPriceChangePct } from '@/lib/legPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
-import type { TradeJournal } from '@/types/journal';
+import type { CampaignCounterfactualManualLeg, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
 /**
@@ -22,4 +22,110 @@ export function campaignMainLegPriceChangePct(
   const record = main.trade_record_id ? buildTradeRecordLookup(tradeRecords).get(main.trade_record_id) ?? null : null;
   const execution = resolveLegExecution(main, record, corrections);
   return computeLegPriceChangePct(execution.entryPrice, execution.exitPrice, main.direction === 'short' ? 'short' : 'long');
+}
+
+/**
+ * 涨幅效率 = 主力涨幅 ÷ 预期回撤（两者都是价格层面的百分数，结果是倍数）：
+ * 主力涨了 12%、入场到对冲边界 4%，效率 +3.00——价格走出了 3 个「预期回撤」。
+ * 任一缺失、或预期回撤不为正时不算。战役卡片、列表排序与盈亏概览（含反事实）都读这一个函数。
+ */
+export function computeMainPriceEfficiency(
+  mainPriceChangePct: number | null | undefined,
+  expectedMaxDrawdownPct: number | null | undefined,
+): number | null {
+  if (mainPriceChangePct == null || !Number.isFinite(mainPriceChangePct)) return null;
+  if (expectedMaxDrawdownPct == null || !Number.isFinite(expectedMaxDrawdownPct) || !(expectedMaxDrawdownPct > 0)) return null;
+  const value = mainPriceChangePct / expectedMaxDrawdownPct;
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 加仓效率 = 盈亏比 b ÷ 涨幅效率。
+ * 只拿主力、不加仓时，b 大致就是主力的涨幅效率（最大预期亏损按入场到对冲边界的距离定），比值约为 1；
+ * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
+ * payoffRatio 是 b 本身（倍数，不是百分数）；任一缺失或涨幅效率为 0（除不了）时不算。
+ */
+export function computeAddEfficiency(
+  payoffRatio: number | null | undefined,
+  mainPriceEfficiency: number | null | undefined,
+): number | null {
+  if (payoffRatio == null || !Number.isFinite(payoffRatio)) return null;
+  if (mainPriceEfficiency == null || !Number.isFinite(mainPriceEfficiency) || mainPriceEfficiency === 0) return null;
+  const value = payoffRatio / mainPriceEfficiency;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 两项效率的读数：「+3.00」「-0.75」；取整为 0 统一成「0.00」；缺值「—」。 */
+export function formatEfficiency(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const rounded = Number(value.toFixed(2));
+  return rounded === 0 ? '0.00' : `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}`;
+}
+
+type ManualMainLeg = Pick<CampaignCounterfactualManualLeg,
+  'id' | 'leg_role' | 'direction' | 'open_time' | 'close_time' | 'entry_price' | 'exit_price' | 'size_usdt' | 'enabled' | 'filled' | 'actual'>;
+
+const PRIMARY_MANUAL_ROLES = ['main_open', 'reentry_main'] as const;
+
+/** 真实战役那一侧的主力：选中的腿 id 与它在真实「盈亏概览」里的涨幅（campaignMainLegPriceChangePct）。 */
+export interface ActualMainPriceChange {
+  legId: string | null;
+  pct: number | null;
+}
+
+function samePrice(left: number, right: number): boolean {
+  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-9;
+}
+
+/**
+ * 反事实（手动 Legs 分支）里主力那条腿的涨幅。
+ *
+ * 主力优先认真实战役选中的那一条（副本里腿 id 不变）。它的方向、开仓价、平仓价都没改过时，
+ * **直接沿用真实「盈亏概览」的那个数**——副本的开平价是按分刀、认领、事件快照还原出来的，
+ * 与 Legs 表那一行未必是同一对（主力最后一刀被加仓腿认领、换了浏览器只剩快照、一条腿都结算不了……），
+ * 原样重跑必须逐位相同，这一点只能靠「没改就不重算」保证，不能靠两套还原碰巧一致。
+ * 改过了才按副本里的开平价算（与 Legs 表同一个公式、按方向计）。
+ * 真实选中的那条被停用、删掉或改掉角色时，在参与运行的主力里按「仓位」一格取最大（并列取最早开仓），
+ * 与 pickPrimaryMainLeg 同一条规则；这条腿实际还没平仓、平仓价也没改过时不算（引擎只是按数据末端强行结算）。
+ */
+export function counterfactualMainLegPriceChangePct(
+  manualLegs: readonly ManualMainLeg[] | null | undefined,
+  actualMain?: ActualMainPriceChange | null,
+): number | null {
+  const live = (manualLegs ?? []).filter(leg => leg.enabled && leg.filled !== false);
+  const isMainRole = (leg: ManualMainLeg) => (PRIMARY_MANUAL_ROLES as readonly string[]).includes(leg.leg_role);
+  const pctOf = (leg: ManualMainLeg) =>
+    computeLegPriceChangePct(leg.entry_price, leg.exit_price, leg.direction === 'short' ? 'short' : 'long');
+
+  const preferred = actualMain?.legId ? live.find(leg => leg.id === actualMain.legId) : undefined;
+  if (preferred && isMainRole(preferred)) {
+    const actual = preferred.actual;
+    const pricesUnchanged = actual != null
+      && preferred.direction === actual.direction
+      && samePrice(preferred.entry_price, actual.entry_price)
+      && samePrice(preferred.exit_price, actual.exit_price);
+    return pricesUnchanged ? actualMain?.pct ?? null : pctOf(preferred);
+  }
+
+  let main: ManualMainLeg | null = null;
+  for (const role of PRIMARY_MANUAL_ROLES) {
+    const candidates = live.filter(leg => leg.leg_role === role);
+    if (candidates.length === 0) continue;
+    main = [...candidates].sort((a, b) => {
+      const sa = Number.isFinite(a.size_usdt) && a.size_usdt > 0 ? a.size_usdt : null;
+      const sb = Number.isFinite(b.size_usdt) && b.size_usdt > 0 ? b.size_usdt : null;
+      if (sa != null && sb != null && sa !== sb) return sb - sa;
+      if (sa != null && sb == null) return -1;
+      if (sa == null && sb != null) return 1;
+      return Date.parse(a.open_time) - Date.parse(b.open_time);
+    })[0] ?? null;
+    break;
+  }
+  if (!main) return null;
+  const actual = main.actual;
+  if (actual && (actual.still_open || actual.close_time_fallback || actual.source === 'unsettled')
+    && samePrice(main.exit_price, actual.exit_price)) {
+    return null;
+  }
+  return pctOf(main);
 }

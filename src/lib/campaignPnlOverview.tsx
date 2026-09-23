@@ -8,6 +8,8 @@ import {
   formatGeometricExpectancy,
 } from '@/lib/campaignMetrics';
 import type { RealizedPnlBasis } from '@/lib/campaignRealizedPnl';
+import { computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 
 /**
@@ -27,7 +29,10 @@ export type CampaignPnlOverviewItemKey =
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'expectedMaxDrawdownPct'
+  | 'mainPriceChange'
+  | 'mainPriceEfficiency'
   | 'payoffRatio'
+  | 'addEfficiency'
   | 'asymmetricRiskContribution'
   | 'opportunityQuality'
   | 'arithmeticExpectancy'
@@ -68,6 +73,11 @@ export interface CampaignPnlOverviewMetrics {
   expectedMaxDrawdownPct: number;
   /** b × 100（与 accuracy.profit_capture_ratio 同口径）；没有风险分母时 null。 */
   payoffRatio: number | null;
+  /**
+   * 主力那条腿的涨跌幅（%，按主力方向计），与 Legs 表「涨跌幅」列、战役卡片同一个数；主力未平仓时 null。
+   * 涨幅效率与加仓效率由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
+   */
+  mainPriceChangePct: number | null;
   asymmetricRiskContribution: AsymmetricRiskContribution | null;
   opportunityQuality: number | null;
   arithmeticExpectancy: number | null;
@@ -131,6 +141,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     initialExpectedMaxLoss,
     expectedMaxDrawdownPct: expectedDrawdownPct,
     payoffRatio,
+    mainPriceChangePct,
     asymmetricRiskContribution,
     opportunityQuality,
     arithmeticExpectancy,
@@ -139,6 +150,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     todayAccountEquity,
     expectedWinRate,
   } = metrics;
+  const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
+  const addEfficiency = computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency);
   const pnlDrift = pnlSettlement?.drift ?? null;
 
   const items: CampaignPnlOverviewItem[] = [
@@ -247,6 +260,39 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
+      key: 'mainPriceChange',
+      label: '涨幅',
+      value: formatLegPriceChangePct(mainPriceChangePct),
+      color: pnlExportColor(mainPriceChangePct),
+      valueClassName: pnlColor(mainPriceChangePct),
+      help: (
+        <>
+          <p>主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计：主多价格涨了为正，主空价格跌了为正。与 Legs 表「涨跌幅」列、战役列表卡片是同一个数（同一对开平价，含 1 分钟 K 线平仓价校正）。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%</div>
+          <p>主力有几笔时取名义最大的那笔；主力还没平仓时显示「—」。</p>
+        </>
+      ),
+    },
+    {
+      key: 'mainPriceEfficiency',
+      label: '涨幅效率',
+      value: formatEfficiency(mainPriceEfficiency),
+      color: pnlExportColor(mainPriceEfficiency),
+      valueClassName: pnlColor(mainPriceEfficiency),
+      rightColumn: true,
+      help: (
+        <>
+          <p>价格走出了几个「预期回撤」：主力涨了 12%、入场到对冲边界 4%，效率就是 +3.00。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅效率 = 主力涨幅 ÷ 预期回撤</div>
+          {mainPriceEfficiency != null ? (
+            <p className="font-mono text-foreground">
+              本场 = {formatLegPriceChangePct(mainPriceChangePct)} ÷ {expectedDrawdownPct.toFixed(2)}% = {formatEfficiency(mainPriceEfficiency)}
+            </p>
+          ) : <p>主力未平仓或算不出预期回撤时不计算。</p>}
+        </>
+      ),
+    },
+    {
       key: 'payoffRatio',
       label: '盈亏比',
       value: payoffRatio == null ? '—' : formatCampaignPayoffRatio(payoffRatio),
@@ -257,6 +303,25 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
           <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
+        </>
+      ),
+    },
+    {
+      key: 'addEfficiency',
+      label: '加仓效率',
+      value: formatEfficiency(addEfficiency),
+      color: pnlExportColor(addEfficiency),
+      valueClassName: pnlColor(addEfficiency),
+      rightColumn: true,
+      help: (
+        <>
+          <p>加仓把同一段行情放大了多少：只拿主力、不加仓时，盈亏比大致就是主力的涨幅效率（最大预期亏损按入场到对冲边界的距离定），比值约为 1；大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效率 = 盈亏比 b ÷ 涨幅效率</div>
+          {addEfficiency != null ? (
+            <p className="font-mono text-foreground">
+              本场 = {((payoffRatio ?? 0) / 100).toFixed(2)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
+            </p>
+          ) : <p>算不出盈亏比或涨幅效率、或涨幅效率为 0 时不计算。</p>}
         </>
       ),
     },
