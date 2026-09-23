@@ -8,6 +8,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from '@/lib/notificationCenter';
 import type {
   CampaignCounterfactual,
   CampaignCounterfactualManualLeg,
@@ -549,8 +550,17 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     const panel = await screen.findByTestId('counterfactual-saved-panel');
     expect(within(panel).getByText('反事实盈亏概览 · 手动调整')).toBeInTheDocument();
 
+    // 先弹二次确认：取消什么都不删
+    fireEvent.click(screen.getByTestId('counterfactual-delete'));
+    expect(await screen.findByTestId('counterfactual-delete-confirm')).toHaveTextContent('删除后无法恢复');
+    fireEvent.click(screen.getByTestId('counterfactual-delete-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('counterfactual-delete-confirm')).not.toBeInTheDocument());
+    expect(deleteCounterfactualMock).not.toHaveBeenCalled();
+
+    // 行尾的垃圾桶同样先确认
+    fireEvent.click(screen.getByTestId('counterfactual-branch-delete-old-1'));
     await act(async () => {
-      fireEvent.click(screen.getByTestId('counterfactual-delete'));
+      fireEvent.click(await screen.findByTestId('counterfactual-delete-confirm-button'));
     });
 
     await waitFor(() => expect(deleteCounterfactualMock).toHaveBeenCalledWith('old-1'));
@@ -558,6 +568,49 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(deleteCounterfactualMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('counterfactual-saved-panel')).not.toBeInTheDocument();
     expect(screen.queryByTestId('counterfactual-delete')).not.toBeInTheDocument();
+  }, 15_000);
+
+  it('分支读取失败不再踢回战役列表：战役照常打开，「已保存分支」行内报错，点「重试」成功后列出分支', async () => {
+    savedRows.push(oldShapeRow());
+    listCounterfactualsMock.mockImplementationOnce(async () => { throw new Error('加载反事实战役分支失败：timeout'); });
+    renderPage();
+    const alert = await screen.findByTestId('counterfactual-branches-load-error');
+    expect(alert).toHaveTextContent('已保存分支读取失败');
+    // 原始报错放在悬停说明里，正文只给中文概述
+    expect(alert.querySelector('[title]')?.getAttribute('title')).toContain('timeout');
+    // 页面没有被导航走：编辑器仍在
+    expect(screen.getByRole('button', { name: 'stub-run' })).toBeInTheDocument();
+    expect(screen.queryByText(/还没有反事实分支/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counterfactual-branches-retry'));
+    });
+    await waitFor(() => expect(screen.queryByTestId('counterfactual-branches-load-error')).not.toBeInTheDocument());
+    expect(await screen.findByTestId('counterfactual-branch-row-old-1')).toBeInTheDocument();
+  }, 15_000);
+
+  it('读取失败后照样能保存：保存后的刷新再失败也不弹相反的错误，新分支留在列表里、横幅说明列表可能不全', async () => {
+    const toastErrorMock = vi.spyOn(toast, 'error');
+    const toastSuccessMock = vi.spyOn(toast, 'success');
+    listCounterfactualsMock.mockImplementationOnce(async () => { throw new Error('boom-1'); });
+    renderPage();
+    await screen.findByTestId('counterfactual-branches-load-error');
+    await runFromEditor();
+    listCounterfactualsMock.mockImplementationOnce(async () => { throw new Error('boom-2'); });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('counterfactual-save'));
+    });
+    await waitFor(() => expect(createCounterfactualMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId('counterfactual-branch-row-cf-new')).toBeInTheDocument();
+    const alert = screen.getByTestId('counterfactual-branches-load-error');
+    expect(alert).toHaveTextContent('列表可能不全');
+    expect(alert.querySelector('[title]')?.getAttribute('title')).toContain('boom-2');
+    // 监视的确实是页面用的那个 toast：首屏读取失败没有弹错误（横幅代替），保存的成功提示弹了
+    expect(toastErrorMock).not.toHaveBeenCalledWith(expect.stringContaining('boom-2'));
+    expect(toastErrorMock).not.toHaveBeenCalledWith(expect.stringContaining('boom-1'));
+    expect(toastSuccessMock).toHaveBeenCalledWith(expect.stringContaining('已保存'));
+    toastSuccessMock.mockRestore();
+    toastErrorMock.mockRestore();
   }, 15_000);
 
   it('列表里隐藏的修正分支不会被默认选中：只有它时没有面板与「删除」，有可见分支时选可见的那条', async () => {

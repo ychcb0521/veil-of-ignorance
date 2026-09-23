@@ -4,6 +4,16 @@ import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, 
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
@@ -655,6 +665,14 @@ export default function JournalCampaignDetailPage() {
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
   const [counterfactuals, setCounterfactuals] = useState<CampaignCounterfactual[]>([]);
+  /** 分支列表读取失败的原因：只影响「已保存分支」这一块，页面其余部分照常可用，可在行内重试。 */
+  const [counterfactualsLoadError, setCounterfactualsLoadError] = useState<string | null>(null);
+  const [counterfactualsRetrying, setCounterfactualsRetrying] = useState(false);
+  /** 等待二次确认的删除：分支删了就找不回来（数据库里是硬删除），先问一句。 */
+  const [pendingDeleteBranch, setPendingDeleteBranch] = useState<CampaignCounterfactual | null>(null);
+  /** 确认框淡出的那 200ms 里仍显示刚才那条分支的名字，不闪成「「」」。 */
+  const pendingDeleteLabelRef = useRef('');
+  if (pendingDeleteBranch) pendingDeleteLabelRef.current = pendingDeleteBranch.label;
   const [selectedCounterfactualId, setSelectedCounterfactualId] = useState<string | null>(null);
   /** 本页删过的分支 id：删除之前发出的列表查询晚到时，用它把已删的行滤掉。 */
   const deletedCounterfactualIdsRef = useRef(new Set<string>());
@@ -707,6 +725,9 @@ export default function JournalCampaignDetailPage() {
     setDeviationDetailsOpen(false);
     setDeviationNotesSaving(false);
     deviationNotesSaveRequestRef.current += 1;
+    // 删除确认框与「重试中」只属于上一场：换战役后旧确认框不能在新战役上重新弹出（点了会删掉上一场的分支）。
+    setPendingDeleteBranch(null);
+    setCounterfactualsRetrying(false);
   }, [id]);
 
   useEffect(() => {
@@ -718,11 +739,17 @@ export default function JournalCampaignDetailPage() {
         // 列表页的后台自愈正好在跑这一场：等它落地再读（最多等 2 s），之后在本页的编辑不会被它晚到的写入盖回去
         await waitForCampaignListHeal(id);
         if (cancelled) return;
-        const [full, savedCounterfactuals] = await Promise.all([
+        // 分支读取失败不是致命错误：战役本身照常打开，「已保存分支」一块显示原因与「重试」，
+        // 而不是把人踢回战役列表（分支表偶发超时、权限抖动都不该让整场战役打不开）。
+        const [full, branchesResult] = await Promise.all([
           getCampaignFullData(id),
-          listCounterfactuals(id),
+          listCounterfactuals(id).then(
+            branches => ({ branches, error: null as string | null }),
+            (error: unknown) => ({ branches: [] as CampaignCounterfactual[], error: error instanceof Error ? error.message : String(error) }),
+          ),
         ]);
         if (cancelled) return;
+        const savedCounterfactuals = branchesResult.branches;
         const ownCampaign = full.campaign.user_id === viewerUserId;
         const mutual = ownCampaign ? true : await hasMutualFollow(viewerUserId, full.campaign.user_id);
         if (!mutual) {
@@ -753,6 +780,7 @@ export default function JournalCampaignDetailPage() {
             disagreements: diagnostics.disagreements,
           });
         }
+        setCounterfactualsLoadError(branchesResult.error);
         setCounterfactuals(savedCounterfactuals);
         setSelectedCounterfactualId(prev => (
           prev && savedCounterfactuals.some(branch => branch.id === prev && isVisibleCounterfactualBranch(branch))
@@ -1628,8 +1656,24 @@ export default function JournalCampaignDetailPage() {
     if (activeCampaignIdRef.current !== campaignId) return;
     // 查询发出之后才删掉的分支还在这份结果里：删掉的行不会再回来，按本页删过的 id 滤掉，免得它死而复生、又被选中。
     const next = fetched.filter(branch => !deletedCounterfactualIdsRef.current.has(branch.id));
+    setCounterfactualsLoadError(null);
     setCounterfactuals(next);
     setSelectedCounterfactualId(keepSelectionId ?? firstVisibleCounterfactualId(next));
+  };
+
+  const handleRetryCounterfactuals = async () => {
+    if (!campaign || counterfactualsRetrying) return;
+    const campaignId = campaign.id;
+    setCounterfactualsRetrying(true);
+    try {
+      await reloadCounterfactuals(campaignId);
+    } catch (error) {
+      if (activeCampaignIdRef.current === campaignId) {
+        setCounterfactualsLoadError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setCounterfactualsRetrying(false);
+    }
   };
 
   const handleRunWhatIf = async (
@@ -1719,7 +1763,15 @@ export default function JournalCampaignDetailPage() {
       // 先把新行放进列表并选中，再按库里的顺序刷新一遍；两步都指向同一个 id。
       setCounterfactuals(prev => [created, ...prev.filter(branch => branch.id !== created.id)]);
       setSelectedCounterfactualId(created.id);
-      await reloadCounterfactuals(campaignId, created.id);
+      try {
+        await reloadCounterfactuals(campaignId, created.id);
+      } catch (error) {
+        // 保存已经成功，只是刷新列表失败：不再弹一条与「已保存」相反的错误提示，
+        // 新分支照常留在列表里，横幅说明列表可能不全、可重试。
+        if (activeCampaignIdRef.current === campaignId) {
+          setCounterfactualsLoadError(error instanceof Error ? error.message : String(error));
+        }
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2488,7 +2540,31 @@ export default function JournalCampaignDetailPage() {
 
           <div className="space-y-2">
             <div className="text-[13px] font-medium">已保存分支</div>
-            {visibleBranches.length === 0 ? (
+            {counterfactualsLoadError && (
+              <div
+                data-testid="counterfactual-branches-load-error"
+                role="alert"
+                className="flex items-center justify-between gap-3 rounded border border-[#F6465D]/30 bg-[#F6465D]/5 px-4 py-3 text-[12px]"
+              >
+                <span className="min-w-0 text-muted-foreground" title={counterfactualsLoadError}>
+                  <span className="text-[#F6465D]">已保存分支读取失败</span>
+                  <span className="ml-2">
+                    {visibleBranches.length > 0 ? '下面的列表可能不全，' : ''}战役本身不受影响，可稍后重试。
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  data-testid="counterfactual-branches-retry"
+                  variant="outline"
+                  className="h-7 shrink-0 text-[12px]"
+                  disabled={counterfactualsRetrying}
+                  onClick={handleRetryCounterfactuals}
+                >
+                  {counterfactualsRetrying ? '重试中…' : '重试'}
+                </Button>
+              </div>
+            )}
+            {counterfactualsLoadError && visibleBranches.length === 0 ? null : visibleBranches.length === 0 ? (
               <div className="rounded border border-border bg-background/40 px-4 py-4 text-[12px] text-muted-foreground">
                 还没有反事实分支。先运行一键方案或新建 What-if 分支。
               </div>
@@ -2526,16 +2602,21 @@ export default function JournalCampaignDetailPage() {
                             SOP {branch.result.sop_score}
                           </div>
                         )}
+                        {isOwner && (
                         <button
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            handleDeleteBranch(branch.id);
+                            setPendingDeleteBranch(branch);
                           }}
+                          data-testid={`counterfactual-branch-delete-${branch.id}`}
+                          aria-label={`删除分支「${branch.label}」`}
+                          title="删除这条分支"
                           className="h-8 w-8 rounded flex items-center justify-center text-muted-foreground hover:text-[#F6465D] hover:bg-[#F6465D]/10"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
+                        )}
                       </div>
                     );
               })
@@ -2570,15 +2651,18 @@ export default function JournalCampaignDetailPage() {
                       载入到 Legs 副本
                     </Button>
                   )}
-                  <Button
-                    type="button"
-                    data-testid="counterfactual-delete"
-                    variant="outline"
-                    className="h-8 text-[12px] border-[#F6465D]/40 text-[#F6465D] hover:bg-[#F6465D]/10"
-                    onClick={() => handleDeleteBranch(selectedCounterfactual.id)}
-                  >
-                    删除
-                  </Button>
+                  {/* 只有战役主人能删：互关好友读得到分支，但数据库不允许他们删，按钮给了也只是假装删掉。 */}
+                  {isOwner && (
+                    <Button
+                      type="button"
+                      data-testid="counterfactual-delete"
+                      variant="outline"
+                      className="h-8 text-[12px] border-[#F6465D]/40 text-[#F6465D] hover:bg-[#F6465D]/10"
+                      onClick={() => setPendingDeleteBranch(selectedCounterfactual)}
+                    >
+                      删除
+                    </Button>
+                  )}
                 </>
               )}
             />
@@ -2746,6 +2830,31 @@ export default function JournalCampaignDetailPage() {
             toast.success('战役已结束');
           }}
         />
+        <AlertDialog open={!!pendingDeleteBranch} onOpenChange={(open) => { if (!open) setPendingDeleteBranch(null); }}>
+          <AlertDialogContent data-testid="counterfactual-delete-confirm" className="max-w-[440px]">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-[14px]">删除这条反事实分支？</AlertDialogTitle>
+              <AlertDialogDescription className="text-[12px] leading-5">
+                「{pendingDeleteLabelRef.current}」会被永久删除，删除后无法恢复。真实的成交记录与战役数据不受影响。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="counterfactual-delete-cancel" className="h-8 text-[12px]">取消</AlertDialogCancel>
+              <AlertDialogAction
+                data-testid="counterfactual-delete-confirm-button"
+                className="h-8 text-[12px] bg-[#F6465D] text-white hover:bg-[#F6465D]/90"
+                onClick={() => {
+                  const target = pendingDeleteBranch;
+                  setPendingDeleteBranch(null);
+                  // 只删当前这场战役的分支：确认框若来自已切走的战役，什么也不做。
+                  if (target && target.campaign_id === activeCampaignIdRef.current) void handleDeleteBranch(target.id);
+                }}
+              >
+                删除
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         <Dialog open={!!detachTarget} onOpenChange={(open) => { if (!open) setDetachTarget(null); }}>
           <DialogContent className="max-w-[520px]">
             <DialogHeader>

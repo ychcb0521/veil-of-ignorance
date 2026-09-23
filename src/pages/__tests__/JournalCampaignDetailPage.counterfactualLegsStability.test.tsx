@@ -557,6 +557,10 @@ describe('JournalCampaignDetailPage：保存与删除交错', () => {
     await act(async () => {
       fireEvent.click(within(screen.getByTestId('counterfactual-saved-panel')).getByTestId('counterfactual-delete'));
     });
+    // 删除先要二次确认
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('counterfactual-delete-confirm-button'));
+    });
 
     // 保存先落地：新分支出现并被选中
     await act(async () => { releaseCreate(); await Promise.resolve(); });
@@ -601,6 +605,10 @@ describe('JournalCampaignDetailPage：保存与删除交错', () => {
     // 刷新还悬着，先把刚保存的分支删掉
     await act(async () => {
       fireEvent.click(within(screen.getByTestId('counterfactual-saved-panel')).getByTestId('counterfactual-delete'));
+    });
+    // 删除先要二次确认
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('counterfactual-delete-confirm-button'));
     });
     await waitFor(() => expect(screen.queryByTestId('counterfactual-branch-row-cf-new')).not.toBeInTheDocument());
 
