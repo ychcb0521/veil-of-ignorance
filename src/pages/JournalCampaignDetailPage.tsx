@@ -38,6 +38,7 @@ import { EndCampaignDialog } from '@/components/journal/EndCampaignDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { intervalToMs } from '@/hooks/useBinanceData';
+import { useViewportFitHeight } from '@/hooks/useViewportFitHeight';
 import {
   CAMPAIGN_ABSOLUTE_RANGE_PRESETS,
   CAMPAIGN_MIN_CONTEXT_MS,
@@ -619,6 +620,12 @@ async function loadAccountCampaignPerformance(
 /** 情绪日记折叠态的本机存储键（跨战役共用一个偏好）。 */
 const EMOTION_DIARY_COLLAPSED_STORAGE_KEY = 'journal:campaign-emotion-diary-collapsed';
 
+/**
+ * K 线盘面的矮屏兜底高度（按实测排版）：主图 172px + VOL / HV 副图各 80px + 两条 1px 分隔线 + 时间轴 24px + 上下边框 2px。
+ * 带着反事实图例一行时，可视区约 550px 仍能整块放下；再矮就不再压缩，改由页面滚动。
+ */
+const CAMPAIGN_CHART_MIN_HEIGHT = 172 + 80 * 2 + 2 + 24 + 2;
+
 export default function JournalCampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -697,6 +704,16 @@ export default function JournalCampaignDetailPage() {
   const [selectedLegMarkerIds, setSelectedLegMarkerIds] = useState<string[]>([]);
   const [legsExporting, setLegsExporting] = useState(false);
   const campaignChartExportRef = useRef<HTMLDivElement | null>(null);
+  const pageHeaderRef = useRef<HTMLElement | null>(null);
+  const campaignChartPanelRef = useRef<HTMLDivElement | null>(null);
+  // 盘面按可视区取最大高度：面板顶边贴在吸顶页眉下方时，工具栏、盘面到下方常驻图例整块露出、无内滚动；
+  // 多出的高度全归主图（VOL / HV 副图固定 80px 不变）。点开的「管理」色块与「标记说明」不计入，往下推。
+  const campaignChartFitHeight = useViewportFitHeight({
+    stickyRef: pageHeaderRef,
+    panelRef: campaignChartPanelRef,
+    targetRef: campaignChartExportRef,
+    minHeight: CAMPAIGN_CHART_MIN_HEIGHT,
+  });
   const [isOwner, setIsOwner] = useState(true);
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignAsymmetricRisk, setCampaignAsymmetricRisk] = useState<AsymmetricRiskMetricsSummary | null>(null);
@@ -1938,7 +1955,7 @@ export default function JournalCampaignDetailPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
+      <header ref={pageHeaderRef} className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
         <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -2122,7 +2139,7 @@ export default function JournalCampaignDetailPage() {
         )}
 
         <section className="space-y-3">
-          <div className="bg-card border border-border rounded p-2">
+          <div ref={campaignChartPanelRef} className="bg-card border border-border rounded p-2">
             <div className="h-9 px-2 flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1">
                 {INTERVALS.map(item => (
@@ -2214,7 +2231,12 @@ export default function JournalCampaignDetailPage() {
               )}
               <div className="flex-1" />
             </div>
-            <div ref={campaignChartExportRef} className="h-[480px] border border-border rounded overflow-hidden">
+            <div
+              ref={campaignChartExportRef}
+              data-testid="campaign-chart-frame"
+              className="border border-border rounded overflow-hidden"
+              style={{ height: campaignChartFitHeight ?? 480 }}
+            >
               {klinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : klinesError ? (
@@ -2293,13 +2315,13 @@ export default function JournalCampaignDetailPage() {
                   )}
                 </div>
                 {showReverseOrderManager && showOrderInfo && (visibleReverseHedgeOrders.length > 0 || visibleManualHedgeShortLegs.length > 0) && (
-                  <div className="flex flex-wrap gap-1.5 pl-5">
+                  <div data-viewport-fit-exclude className="flex flex-wrap gap-1.5 pl-5">
                     {reverseOrderManagerItems.map(({ order, manualLeg }) => renderReverseOrderChip(order, false, manualLeg))}
                   </div>
                 )}
                 {/* 他场委托单独一组、整体压灰，排在本场的色块之后：一眼看出不是这场挂的。标题只数各自状态，与色块的 已撤 / 已触发 对得上 */}
                 {showReverseOrderManager && showOrderInfo && visibleForeignLiveOrders.length > 0 && (
-                  <div data-testid="foreign-replay-order-group" className="flex flex-wrap items-center gap-1.5 pl-5">
+                  <div data-testid="foreign-replay-order-group" data-viewport-fit-exclude className="flex flex-wrap items-center gap-1.5 pl-5">
                     <span className="text-[10px] text-muted-foreground/50">
                       {formatForeignReplayOrdersHeading(visibleForeignLiveOrders)}
                     </span>
@@ -2337,7 +2359,7 @@ export default function JournalCampaignDetailPage() {
                   </button>
                 </div>
                 {showCfLegend && (
-                  <div className="rounded border border-border/60 bg-muted/30 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
+                  <div data-viewport-fit-exclude className="rounded border border-border/60 bg-muted/30 px-2.5 py-2 text-[10px] leading-relaxed text-muted-foreground">
                     <div className="text-foreground/80 mb-1">
                       CF = 反事实「补齐」分支（紫色虚拟轨迹，按标准 SOP 推演，不是真实成交）
                     </div>
