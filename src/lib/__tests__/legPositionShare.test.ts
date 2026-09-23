@@ -307,7 +307,7 @@ describe('占比 · 多单与空单分开算', () => {
     const shares = computeLegPositionShares([...USER_SHAPE, short('pending', 1, 1, false), leg('empty', null, null)]);
     expect(describeLegPositionShare(shares.byLeg.get('hedge'))).toBe('空单合计里的占比：币量 100.0%，名义仓位 100.0%');
     expect(describeLegPositionShare(shares.byLeg.get('main'))).toBe('多单合计里的占比：币量 41.4%，名义仓位 40.0%');
-    expect(describeLegPositionShare(shares.byLeg.get('pending'))).toBe('状态为「挂单中」（还没有成交或平仓记录），不计入多单 / 空单合计');
+    expect(describeLegPositionShare(shares.byLeg.get('pending'))).toBe('状态为「挂单中」（还没有成交），不计入多单 / 空单合计');
     expect(describeLegPositionShare(shares.byLeg.get('empty'))).toBeUndefined();
     expect(legPositionShareTagSide(shares.byLeg.get('empty'))).toBeNull();
     expect(describeLegPositionShare(undefined)).toBeUndefined();

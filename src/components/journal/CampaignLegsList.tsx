@@ -42,6 +42,7 @@ import {
   LEG_UNCLASSIFIED_HINT,
   legRowStatus,
   type LegRowStatus,
+  type LegFillEvidence,
 } from '@/lib/legRowStatus';
 import { isBankruptcySettlement, liquidationPnlFloorUsd } from '@/lib/liquidationRecord';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
@@ -81,6 +82,11 @@ interface Props {
   campaignDirection?: TradeCampaign['direction'] | null;
   /** Saved counterfactuals may carry source evidence; editing a scenario is not a manual trade. */
   executionMethodsByLeg?: ReadonlyMap<string, LegExecutionMethods>;
+  /**
+   * 本地委托快照证明从未成交的 id（getCampaignFullData 的 unfilledOrderIds）：
+   * 对冲 / 镜像腿「挂单中 / 进行中」按成交判定时的负证据（legRowStatus 的 LegFillEvidence）。
+   */
+  unfilledOrderIds?: ReadonlySet<string>;
 }
 
 /**
@@ -587,6 +593,7 @@ export function CampaignLegsList({
   initialExpectedMaxLoss = null,
   campaignDirection = null,
   executionMethodsByLeg,
+  unfilledOrderIds,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
   // 「占比」列的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是本列那一侧
@@ -701,9 +708,16 @@ export function CampaignLegsList({
     [legs, reverseHedgeOrders, recordMap, legExitPriceCorrections],
   );
 
+  // 「挂单中」按成交判定的凭据：完整委托列表（隐藏一条盘面线不能改变状态）、事件流、本地「从未成交」的 id。与导出 PNG 同一份。
+  const fillEvidence = useMemo<LegFillEvidence>(() => ({
+    unfilledOrderIds,
+    orders: executionMethodOrders ?? reverseHedgeOrders,
+    events: campaignEvents,
+  }), [unfilledOrderIds, executionMethodOrders, reverseHedgeOrders, campaignEvents]);
+
   // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
   // 多单、空单分开算：分组取这条腿的持仓方向，与「涨跌幅」列同一个来源（不看角色）。
-  // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）不进分母——判定与角色标签的空心样式同一个 legRowStatus，两处永远一致。与导出 PNG 同一个 helper。
+  // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交）不进分母；已成交未平的是真实持仓，照常计入——判定与角色标签的空心样式同一个 legRowStatus，两处永远一致。与导出 PNG 同一个 helper。
   const shareInputs = useMemo(() => legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPriceValue = resolveLegExecution(leg, record, legExitPriceCorrections).entryPrice;
@@ -717,9 +731,9 @@ export function CampaignLegsList({
       role: leg.leg_role,
       coinQty: legCoinQty,
       notional: leg.pre_position_size ?? null,
-      counted: legRowStatus(leg, record) !== 'pending',
+      counted: legRowStatus(leg, record, fillEvidence) !== 'pending',
     };
-  }), [legs, recordMap, legExitPriceCorrections]);
+  }), [legs, recordMap, legExitPriceCorrections, fillEvidence]);
   const positionShares = useMemo(() => computeLegPositionShares(shareInputs), [shareInputs]);
   // 「占比」这一列看哪一侧：战役主方向（主多看多单、主空看空单），缺方向时从主力腿回推。
   // 另一侧（对冲）的行留空、也不进分母，它的 Σ 只写进合计行「币量 / 仓位」格。与导出 PNG 同一个 helper、同一份输入。
@@ -796,7 +810,7 @@ export function CampaignLegsList({
             {orderedLegs.map(leg => {
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
               const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
-              const status = legRowStatus(leg, record);
+              const status = legRowStatus(leg, record, fillEvidence);
               const highlighted = highlightedSet.has(leg.id);
               const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
               const closeLabel = fmtClock(execution.closeTime);

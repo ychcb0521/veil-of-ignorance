@@ -253,7 +253,7 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(pendingCell).toBe(screen.getByTestId('leg-position-share-pending-mirror'));
     expect(cellLines(pendingCell)).toEqual(['—', '—']);
     expect(tagsIn(pendingCell)).toHaveLength(0);
-    expect(pendingCell.getAttribute('title')).toBe('状态为「挂单中」（还没有成交或平仓记录），不计入多单 / 空单合计');
+    expect(pendingCell.getAttribute('title')).toBe('状态为「挂单中」（还没有成交），不计入多单 / 空单合计');
     // 分母里没有它：其余四条腿的占比与 Σ 都不变
     expect(cellLines(shareCellOf('main', LONG))).toEqual(['34.9%', '33.6%']);
     expect(blocks('legs-total-position')).toEqual([['多 79,042,835.4', '8981040.00']]);
@@ -333,7 +333,7 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(clause).not.toContain('本场各腿币量合计');
     expect(clause).toContain('币量合计');
     expect(clause).toContain('名义仓位合计');
-    expect(clause).toContain('状态为「挂单中」的对冲 / 镜像腿（还没有成交或平仓记录）不计入合计');
+    expect(clause).toContain('状态为「挂单中」的对冲 / 镜像腿（还没有成交）不计入合计');
     expect(clause).not.toContain('未成交');
     expect(clause).toContain('合计行');
     expect(clause).toContain('100.0%');
@@ -870,7 +870,7 @@ describe('Legs 列表的「多单占比」列', () => {
       ]);
       const pending = shareCellOf('pending-short-hedge', SHORT);
       expect(cellLines(pending)).toEqual(['—', '—']);
-      expect(pending.getAttribute('title')).toBe('状态为「挂单中」（还没有成交或平仓记录），不计入多单 / 空单合计');
+      expect(pending.getAttribute('title')).toBe('状态为「挂单中」（还没有成交），不计入多单 / 空单合计');
       expectNoShareCell('pending-long-hedge', SHORT);
       // 分母不变：两条计入的空单照旧 62.5% / 37.5%
       expect(cellLines(shareCellOf('main-short', SHORT))).toEqual(['62.5%', '62.5%']);

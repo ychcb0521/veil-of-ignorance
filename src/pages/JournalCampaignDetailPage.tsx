@@ -1898,6 +1898,7 @@ export default function JournalCampaignDetailPage() {
         executionMethodOrders: reverseHedgeOrders,
         foreignLiveOrders: visibleForeignLiveOrders,
         legExitPriceCorrections,
+        unfilledOrderIds,
         chartElement: campaignChartExportRef.current,
         chartInterval: effectiveInterval,
         pnlOverview: {
@@ -2462,6 +2463,7 @@ export default function JournalCampaignDetailPage() {
             reverseHedgeOrders={visibleReverseHedgeOrders}
             executionMethodOrders={reverseHedgeOrders}
             foreignLiveOrders={visibleForeignLiveOrders}
+            unfilledOrderIds={unfilledOrderIds}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
               setFocusTime(null);

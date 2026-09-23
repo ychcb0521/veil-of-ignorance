@@ -1738,7 +1738,7 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
       id: 'mirror', leg_sequence: 2, leg_role: 'mirror_tp', pre_entry_price: 1, pre_position_size: 1_000,
       post_exit_price_snapshot: 1.1, post_simulated_close_time: T('04:00'),
     }),
-    // 挂单中：对冲还没有成交或平仓记录
+    // 挂单中：对冲还没有成交
     leg({ id: 'pending', leg_sequence: 3, leg_role: 'hedge_initial_b', order_kind: 'hedge', direction: 'short', pre_entry_price: 0.9, pre_position_size: 500 }),
     // 进行中：加仓还没平
     leg({ id: 'open', leg_sequence: 4, leg_role: 'main_add_2', pre_simulated_time: T('05:00'), pre_entry_price: 1.1, pre_position_size: 800, source: 'live' }),

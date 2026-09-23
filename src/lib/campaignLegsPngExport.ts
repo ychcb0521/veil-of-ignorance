@@ -6,7 +6,7 @@ import {
 } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
-import { legRowStatus } from '@/lib/legRowStatus';
+import { legRowStatus, type LegFillEvidence } from '@/lib/legRowStatus';
 import { isLiquidationRecord } from '@/lib/liquidationRecord';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethod } from '@/lib/legExecutionMethod';
@@ -66,7 +66,20 @@ type ExportInput = {
   /** 别的回放留下、本场期间仍挂着的委托：不进任何腿的行，表尾合计之后画一行淡注（与页面同源）。 */
   foreignLiveOrders?: CampaignReverseHedgeOrder[];
   legExitPriceCorrections?: LegExitPriceCorrections;
+  /** 本地委托快照证明从未成交的 id：「挂单中」按成交判定的负证据，与页面同一份（legRowStatus）。 */
+  unfilledOrderIds?: ReadonlySet<string>;
 };
+
+/** 「挂单中」按成交判定的凭据：与页面 CampaignLegsList 同一份（完整委托列表、事件流、本地从未成交的 id）。 */
+function exportFillEvidence(
+  input: Pick<ExportInput, 'campaign' | 'reverseHedgeOrders' | 'executionMethodOrders' | 'unfilledOrderIds'>,
+): LegFillEvidence {
+  return {
+    unfilledOrderIds: input.unfilledOrderIds,
+    orders: input.executionMethodOrders ?? input.reverseHedgeOrders,
+    events: input.campaign.actual_evolution,
+  };
+}
 
 export type CampaignBoardExportInput = ExportInput & {
   chartElement: HTMLElement | null;
@@ -588,9 +601,10 @@ function layoutExportRow(
  * 占比列看哪一侧也读这一份（缺战役方向时要回推主方向），行与表头因此不可能各看一侧。
  */
 function buildShareInputs(
-  input: Pick<ExportInput, 'legs' | 'legExitPriceCorrections'>,
+  input: Pick<ExportInput, 'campaign' | 'legs' | 'legExitPriceCorrections' | 'reverseHedgeOrders' | 'executionMethodOrders' | 'unfilledOrderIds'>,
   recordMap: Map<string, TradeRecord>,
 ): LegPositionShareInput[] {
+  const evidence = exportFillEvidence(input);
   return input.legs.map(leg => {
     const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
     const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
@@ -604,7 +618,7 @@ function buildShareInputs(
       coinQty,
       notional: leg.pre_position_size ?? null,
       // 状态规则与页面同一个 legRowStatus：挂单中的腿不进分母，也画成空心标签
-      counted: legRowStatus(leg, record) !== 'pending',
+      counted: legRowStatus(leg, record, evidence) !== 'pending',
     };
   });
 }
@@ -614,7 +628,7 @@ function buildShareInputs(
  * 缺方向时从主力腿回推。腿行、合计行与表头列名都读它。
  */
 export function campaignLegsShareSide(
-  input: Pick<ExportInput, 'campaign' | 'legs' | 'tradeRecords' | 'legExitPriceCorrections'>,
+  input: Pick<ExportInput, 'campaign' | 'legs' | 'tradeRecords' | 'legExitPriceCorrections' | 'reverseHedgeOrders' | 'executionMethodOrders' | 'unfilledOrderIds'>,
 ): LegPositionSide {
   return resolveLegPositionShareSide(
     input.campaign.direction,
@@ -624,6 +638,7 @@ export function campaignLegsShareSide(
 
 export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExportRow[] {
   const recordMap = buildTradeRecordLookup(input.tradeRecords);
+  const fillEvidence = exportFillEvidence(input);
   const mainLegOrdinals = buildMainLegOrdinals(input.legs);
   const hedgeLegOrdinals = buildHedgeLegOrdinals(input.legs);
   // 与页面调同一个函数：导出图的归类必须和界面一致，否则 PNG 会成为第五套口径。
@@ -684,7 +699,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     const mirrorRatio = leg.leg_role === 'mirror_tp'
       ? resolveMirrorCloseRatio(input.campaign, leg, input.legs, input.tradeRecords)?.reductionPct : null;
     const executionMethods = resolveLegExecutionMethods(leg, record, input.executionMethodOrders ?? input.reverseHedgeOrders, input.tradeRecords, mirrorRatio);
-    const status = legRowStatus(leg, record);
+    const status = legRowStatus(leg, record, fillEvidence);
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
     const roleOrdinal = hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null;
     const displayRole = resolveLegDisplayRole(leg);

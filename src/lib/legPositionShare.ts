@@ -15,7 +15,7 @@
  *
  * 页面与 PNG 导出共用这一份。调用方必须传入「币量 / 仓位」格**显示所依据的同一组数**
  * （币量 = 名义 ÷ 开仓价，逐腿只算一次，格子与分母读的是同一份），
- * 以及这条腿是不是真的成了仓位——状态为「挂单中」的腿（对冲 / 镜像腿还没有成交或平仓记录）由调用方按 Legs 表的状态规则判定，
+ * 以及这条腿是不是真的成了仓位——状态为「挂单中」的腿（对冲 / 镜像腿还没有成交）由调用方按 Legs 表的状态规则判定，
  * 不进任何分母，两行都显示「—」。
  *
  * 分母按未舍入的原值相加，各行与合计行各自取两位小数：把各行印出来的数手工相加，
@@ -87,7 +87,7 @@ export interface LegPositionShareInput {
   coinQty: number | null;
   /** 下行显示所依据的名义仓位（USD，未舍入）。 */
   notional: number | null;
-  /** 这条腿是否计入合计：状态为「挂单中」（还没有成交或平仓记录）的为 false。 */
+  /** 这条腿是否计入合计：状态为「挂单中」（还没有成交）的为 false。 */
   counted: boolean;
 }
 
@@ -198,7 +198,7 @@ export function describeLegPositionShare(entry: LegPositionShareEntry | null | u
   if (!entry) return undefined;
   const side = legPositionShareTagSide(entry);
   if (side == null) {
-    return entry.counted ? undefined : '状态为「挂单中」（还没有成交或平仓记录），不计入多单 / 空单合计';
+    return entry.counted ? undefined : '状态为「挂单中」（还没有成交），不计入多单 / 空单合计';
   }
   return `${legPositionSideName(side)}合计里的占比：币量 ${formatLegPositionSharePct(entry.coinSharePct)}，`
     + `名义仓位 ${formatLegPositionSharePct(entry.notionalSharePct)}`;

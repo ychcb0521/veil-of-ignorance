@@ -99,7 +99,7 @@ describe('【用户要求】Legs 表第一列只有「角色」', () => {
       'px-[7px]', 'py-px',
     ]));
     expect(chip.className).not.toContain('bg-[#2B80FF]/10');
-    expect(chip.getAttribute('title')).toBe('挂单中：还没有成交或平仓记录，不计入多单 / 空单合计');
+    expect(chip.getAttribute('title')).toBe('挂单中：还没有成交（委托仍挂着、已撤单，或这条腿没有任何成交凭据），不计入多单 / 空单合计');
     const sr = within(chip).getByText('挂单中');
     expect(sr.className).toBe('sr-only');
     expect(chip.querySelector('[data-status-dot]')).toBeNull();
