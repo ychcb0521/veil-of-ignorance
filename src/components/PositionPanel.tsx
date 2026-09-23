@@ -37,6 +37,7 @@ import { isTieredRiskPosition, positionMaintenanceMarginUsd, sharedRiskStamp } f
 import { allocateMarginUsd } from '@/lib/marginAllocation';
 import type { LeverageChangePlan } from '@/lib/leverageRestatement';
 import { doomedAtTrigger, limitSettlementOf, triggerCheckLead } from '@/lib/positionLimit';
+import { cardCloseLotSize, pendingLotSizeBadge, pendingLotSizeRisk } from '@/lib/marketLotSize';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -763,6 +764,17 @@ export function PositionPanel({
       .map((p, index) => ({ p, index }))
       .filter(({ p }) => positionIds.includes(p.id) && isPositionOpen(p))
       .sort((a, b) => b.index - a.index);
+    /**
+     * 币安单笔市价上限（-4005）：市价平仓也是一笔市价单。弹窗已经把按钮置灰并给出「按上限平」，
+     * 这里按确认那一刻还活着的几笔再判一次——不替用户拆单，也不悄悄只平一部分。
+     */
+    const lot = cardCloseLotSize(symbol, live.map(({ p }) => p), percentage, priceMap[symbol] || 0);
+    if (lot.refusal) {
+      toast.error(`市价平仓：${lot.refusal.title}`, {
+        description: `${lot.refusal.source}。请分几次市价平仓（每次不超过上限），或在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限）。`,
+      });
+      return;
+    }
     for (const { index } of live) onClosePosition(symbol, index, percentage);
   };
 
@@ -1360,6 +1372,11 @@ export function PositionPanel({
                      * 按此刻的持仓与挂单它到时会被拒：标出来，别等到止损换对冲的那一刻才发现对冲单被撤了。
                      */
                     const triggerDoom = doomedAtTrigger(symbol, order, positionsMap[symbol] ?? [], ordersMap[symbol] ?? [], priceMap[symbol] || 0);
+                    /**
+                     * 按市价成交、触发 / 执行时要再判单笔市价上限的挂单（本次更新之后下的条件单、跟踪委托、TWAP、
+                     * 按成数的止盈止损），按此刻能知道的价会被拒：标出来，别等触发那一刻保护单或对冲单才没了。
+                     */
+                    const lotRisk = pendingLotSizeRisk(symbol, order, priceMap[symbol] || 0);
                     return (
                       <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
                         <td className="px-3 py-2">
@@ -1389,6 +1406,18 @@ export function PositionPanel({
                                 className="text-[9px] px-1 py-0 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/40 whitespace-nowrap"
                               >
                                 {triggerDoom.kind === 'limit' ? '成交时将超限' : '触发时将超限'}
+                              </span>
+                            )}
+                            {lotRisk && (
+                              <span
+                                data-testid="order-lot-size-risk"
+                                title={order.reduceOnly
+                                  ? `${lotRisk.title}（${lotRisk.source}）。到时这张单会被撤销，仓位就没有它的保护：`
+                                    + '改成 100%（平掉整个仓位的止盈止损不受此限），或把成数调小。'
+                                  : `${lotRisk.title}。${lotRisk.detail}`}
+                                className="text-[9px] px-1 py-0 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/40 whitespace-nowrap"
+                              >
+                                {pendingLotSizeBadge(order)}
                               </span>
                             )}
                             {/* 减仓单按触发价折币，主读数会比按标记价折的持仓卡小一截
@@ -1911,6 +1940,7 @@ export function PositionPanel({
             markPrice={priceMap[tpslModal.symbol] || 0}
             liqPrice={tpslModal.liqPrice}
             legCount={live.length}
+            lotSizeCheck={(fraction, triggerPrice) => cardCloseLotSize(tpslModal.symbol, live, fraction, triggerPrice, 'tpsl')}
             onClose={() => setTpslModal(null)}
             onConfirm={(tp, sl, pct) => {
               // 卡上每一笔各挂一张：同一个触发价、同一个成数（成数按各笔自己的数量算），
@@ -1940,6 +1970,7 @@ export function PositionPanel({
             currentPrice={priceMap[closeModal.symbol] || 0}
             pricePrecision={getPrecision(closeModal.symbol)}
             legCount={live.length}
+            lotSizeCheck={(fraction) => cardCloseLotSize(closeModal.symbol, live, fraction, priceMap[closeModal.symbol] || 0)}
             onConfirm={(pct) => handleCloseConfirm(closeModal.symbol, closeModal.positionIds, pct)}
           />
         );

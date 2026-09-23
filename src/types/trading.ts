@@ -120,6 +120,12 @@ export interface PendingOrder {
    * 成交后仍开旧的 0.4% 仓位（更新前的仓位），免得一成交就在开仓价上被强平。
    */
   riskModel?: 'binance-tiers-v1' | 'legacy-hedge-v1';
+  /**
+   * 币安单笔数量上限（MARKET_LOT_SIZE / LOT_SIZE，见 lib/marketLotSize）上线之后经引擎下的委托盖这个戳：
+   * 按市价成交的（条件委托、跟踪委托、TWAP 的每一片、按成数的止盈止损）在触发 / 执行那一刻再判一次单笔上限。
+   * 上线之前挂出的委托没有它，触发时不再判——它们是按旧规则放行的。
+   */
+  lotSizeRule?: 'binance-lot-size-v1';
   status: OrderStatus;
   createdAt: number;
   /**

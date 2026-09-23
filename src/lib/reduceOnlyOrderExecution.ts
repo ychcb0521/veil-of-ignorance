@@ -14,7 +14,9 @@ export type ReduceOnlyTriggerFailureReason =
   | 'linked_position_missing'
   | 'position_side_mismatch'
   | 'invalid_close_quantity'
-  | 'settlement_failed';
+  | 'settlement_failed'
+  /** 触发时超过币安单笔市价上限（见 lib/marketLotSize）：这张单已撤销并留痕，不再重试。 */
+  | 'lot_size_rejected';
 
 export interface ReduceOnlyTriggerFailure {
   ok: false;

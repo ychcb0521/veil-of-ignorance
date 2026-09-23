@@ -96,11 +96,19 @@ describe('引擎下单：绕过面板也过不去', () => {
     unmount();
   });
 
-  it('【用户案例】同一单 @2x：成交，新仓位带分层风险模型的戳', () => {
+  it('【用户案例】同样的规模 @2x：分几笔市价单开出（每笔不超过单笔市价上限），并成一个仓位、带分层风险模型的戳', () => {
     const { result, unmount } = mount();
-    let placed: { id: string } | null = null;
-    act(() => { placed = result.current.handlePlaceOrder(SYMBOL, coinMarket(163_578, { leverage: 2 })); });
-    expect(placed).not.toBeNull();
+    /**
+     * 单笔市价上限（lib/marketLotSize）上线之后，163,578 张不能一笔市价下出去：
+     * 币安无 KAITO 币本位合约，借 KAITOUSDT 的 200,000 KAITO，在 1.0905 上折 21,810 张。
+     * 分层（@2x 最高 7,500,000）照样放得下这个规模——分 8 笔下，每一笔都过分层与单笔上限。
+     */
+    const pieces = [...Array(7).fill(21_810), 163_578 - 7 * 21_810];
+    for (const contracts of pieces) {
+      let placed: { id: string } | null = null;
+      act(() => { placed = result.current.handlePlaceOrder(SYMBOL, coinMarket(contracts, { leverage: 2 })); });
+      expect(placed).not.toBeNull();
+    }
     const [pos] = openPositions(result.current);
     expect(pos.contracts).toBe(163_578);
     expect(pos.leverage).toBe(2);
@@ -1402,7 +1410,7 @@ describe('【复核 r5】豁免单带显式标记：不当底、占额度，挂�
     stoppedUnmount(view);
   });
 
-  it('【复现】豁免对冲不并进分层仓位：旧多 240,000 + 分层空 9,000（20x、现价 1.1），市价空 230,000 靠豁免开出，单独成仓、按旧模型，消息中心说明', () => {
+  it('【复现】豁免对冲不并进分层仓位：旧多 240,000 + 分层空 9,000（20x、现价 1.1），市价空 200,000（KAITOUSDT 单笔市价上限）靠豁免开出，单独成仓、按旧模型，消息中心说明', () => {
     const view = seedAndMount({
       positions: [
         storedUsdtPosition('legacy-long', 'LONG', 240_000, 1.0, 20),
@@ -1413,11 +1421,11 @@ describe('【复核 r5】豁免单带显式标记：不当底、占额度，挂�
     });
     const warn = vi.spyOn(toast, 'warning');
     let placed: { id: string } | null = null;
-    act(() => { placed = view.result.current.handlePlaceOrder(SYMBOL, usdtOrder(230_000, { side: 'SHORT', leverage: 20, latestPrice: 1.1 })); });
+    act(() => { placed = view.result.current.handlePlaceOrder(SYMBOL, usdtOrder(200_000, { side: 'SHORT', leverage: 20, latestPrice: 1.1 })); });
     expect(placed).not.toBeNull();
     const shorts = openPositions(view.result.current).filter(p => p.side === 'SHORT');
     expect(shorts.map(p => [p.riskModel, Math.round(p.quantity)]).sort())
-      .toEqual([['binance-tiers-v1', 9_000], ['legacy-hedge-v1', 230_000]]);
+      .toEqual([['binance-tiers-v1', 9_000], ['legacy-hedge-v1', 200_000]]);
     const notice = warn.mock.calls.find(c => String(c[0]) === '未与现有仓位合并');
     expect(String((notice?.[1] as { description?: string })?.description)).toContain('靠对冲更新前仓位的豁免开的');
     stoppedUnmount(view);

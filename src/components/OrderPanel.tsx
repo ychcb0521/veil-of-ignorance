@@ -32,6 +32,7 @@ import {
 } from '@/lib/coinMargined';
 import { orderPriceKindLabel, panelReferencePrice } from '@/lib/orderReferencePrice';
 import {
+  LIVE_PRICE_TIER_HEADROOM,
   checkPlacementPositionLimit,
   clampLeverageAcrossSettlements,
   isTriggerRecheckedOrder,
@@ -52,6 +53,7 @@ import { isLegacyHedgeRisk, isTieredRiskPosition, legacyHedgeRiskStamp, position
 import { formatTierAmount } from '@/lib/leverageTiers';
 import { noticeLeverageClamp } from '@/lib/leverageClampNotice';
 import { LeverageTierTable } from '@/components/LeverageTierTable';
+import { lotSizeCapLabel, placementLotSize } from '@/lib/marketLotSize';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -606,7 +608,61 @@ export function OrderPanel({
   // belowMinContract 此前是死代码：roundCoinContracts 只会返回 0 或 ≥1，
   // 永远落不进 (0,1)，所以「不足一张」从来没被拦住过，而是被放大成一张下出去。
   // 换成 coinContractsExact 之后这条守卫才真正活了。
-  const baseOrderDisabled = disabled || !!coolingOff || belowMinContract;
+  /**
+   * 币安单笔数量上限（-4005 Quantity greater than max quantity，见 lib/marketLotSize）：与引擎下单同一个判定。
+   * 按市价成交的类型（市价、条件委托、跟踪委托、TWAP 的每一片）不得超过 MARKET_LOT_SIZE，
+   * 限价类（限价、只做 Maker、分段的每张子单）不得超过 LOT_SIZE。与方向无关，开多开空一起置灰。
+   */
+  const lotSize = placementLotSize(symbol, {
+    ...limitDraft,
+    priceSelection,
+    // 与下单时发给引擎的回调幅度同一个口径（小数；空着按 1%）
+    callbackRate: parseFloat(callbackRate) / 100 || 0.01,
+    twapDuration: parseFloat(twapDuration) || 60,
+    twapInterval: parseFloat(twapInterval) || 5,
+  }, currentPrice);
+  const lotRefusal = lotSize.refusal;
+  /**
+   * 市价类的常驻小字：「单笔市价上限 200,000 KAITO」。TWAP 注明按每一片算；合成币本位的上限随价变，
+   * TWAP 每一片按执行那一刻的价折张、跟踪委托按回调后的成交价折张，都写明按哪个价。
+   */
+  const lotCapHint = lotSize.main.kind === 'market'
+    ? (() => {
+      const label = lotSizeCapLabel(lotSize.main);
+      if (!label) return null;
+      const floating = lotSize.main.resolved?.source === 'usdm-proxy';
+      if (orderType === 'TWAP' && !executesNow) {
+        return `${label} · TWAP 按每一片算（共 ${lotSize.pieces} 片）${floating ? '，价格下跌时每片上限随之变小' : ''}`;
+      }
+      if (orderType === 'TRAILING_STOP' && !executesNow && floating && lotSize.main.price != null) {
+        return `${label} · 按${parseFloat(stopPrice) > 0 ? '激活价' : '现价'}下方一个回调幅度（${formatPrice(lotSize.main.price)}）算`;
+      }
+      return label;
+    })()
+    : null;
+  /**
+   * 仓位比例按钮 / 「可开」的单笔上限这一支（引擎单位 × 笔数：TWAP 片数、分段张数）。
+   * 上限与这一单的量有一边跟着现价走时，在上限前留 0.2% 余量（LIVE_PRICE_TIER_HEADROOM）——
+   * 面板用的是平滑后的显示价，引擎按最新价折算，恰好卡线的数量跌一个 tick 就又超了、按钮随之置灰：
+   *   · 合成币本位：张数上限 = 币数上限 × 价 ÷ 面值，随价变化；按现价成交的（市价、TWAP、没有激活价的跟踪委托）留，
+   *     整张向下取整。张数是锁定的，量本身不漂。
+   *   · U 本位按 USDT 下单（订单金额 / 初始保证金，面板的默认单位）：上限以币计、与价无关，但框里的 USDT
+   *     按折算价 ÷ 成币——折算价是现价（市价、TWAP、跟踪委托：它们都按现价折币）时，币数跟着现价漂，同样留；
+   *     条件委托按触发价、限价按委托价折，价钉住了，不留。币数不取整（100% 填进框里时再按精度向下取整）。
+   *   · 币数档（U 本位）与张数档（币本位）的量是锁定的，真币本位的上限与价无关：都不留。
+   */
+  const lotCapUnits = (() => {
+    const max = lotSize.main.maxUnits;
+    if (max == null || !Number.isFinite(max)) return Infinity;
+    const proxyFloats = lotSize.main.resolved?.source === 'usdm-proxy'
+      && (executesNow || orderType === 'TWAP' || (orderType === 'TRAILING_STOP' && !(parseFloat(stopPrice) > 0)));
+    const usdtFoldFloats = !isCoinMargined && currencyUnit === 'USDT' && priceRef.kind === 'market';
+    const perPiece = proxyFloats
+      ? Math.floor(max * (1 - LIVE_PRICE_TIER_HEADROOM))
+      : usdtFoldFloats ? max * (1 - LIVE_PRICE_TIER_HEADROOM) : max;
+    return perPiece * lotSize.pieces;
+  })();
+  const baseOrderDisabled = disabled || !!coolingOff || belowMinContract || lotRefusal != null;
   const orderDisabledFor = (side: OrderSide) => baseOrderDisabled || sideBlocked[side];
 
   /**
@@ -636,11 +692,12 @@ export function OrderPanel({
   const maxNotionalFor = (side: OrderSide) => {
     const tierUsd = placementSizingRemainingUsd(limitChecks[side], currentPrice, sizingLiveFor(side));
     const marginUsd = Math.max(0, available) * leverage;
-    if (isCoinMargined) return Math.min(marginUsd, tierUsd);
+    // 单笔数量上限（币本位张数 × 面值；U 本位币数）：100% 不会填出一张被 -4005 拒掉的单
+    if (isCoinMargined) return Math.min(marginUsd, tierUsd, lotCapUnits * contractSizeUsd);
     const unit = placementUnits[side].unitUsd;
     const marginUnit = marginUnitUsd(side);
     if (!(unit > 0) || !(marginUnit > 0)) return Math.min(marginUsd, tierUsd);
-    return Math.min(marginUsd / marginUnit, tierUsd / unit) * unit;
+    return Math.min(marginUsd / marginUnit, tierUsd / unit, lotCapUnits) * unit;
   };
   const maxNotionalBySide = { LONG: maxNotionalFor('LONG'), SHORT: maxNotionalFor('SHORT') };
   /**
@@ -1612,6 +1669,24 @@ export function OrderPanel({
             {coinInputUnit === 'COIN_MARGIN' && (
               <>{'，占用保证金 '}{formatCoinAmount(marginCoin, baseCoin)}</>
             )}
+          </div>
+        )}
+
+        {/* 币安单笔数量上限：按市价成交的类型常驻一行小字；数量超过上限时换成红色警告，下单按钮置灰 */}
+        {lotRefusal ? (
+          <div
+            data-testid="lot-size-warning"
+            className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30"
+          >
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>
+              {lotSize.refusalLead}{lotRefusal.title}
+              <span className="block mt-0.5 text-[9px] text-trading-red/70">{lotRefusal.detail}</span>
+            </span>
+          </div>
+        ) : lotCapHint && (
+          <div data-testid="lot-size-hint" className="mt-1 text-[10px] leading-4 text-muted-foreground/80">
+            {lotCapHint}
           </div>
         )}
 

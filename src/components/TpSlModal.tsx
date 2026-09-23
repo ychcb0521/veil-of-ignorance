@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { Position, SettlementMode } from '@/types/trading';
 import { Slider } from '@/components/ui/slider';
-import { X } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
 import { formatPrice } from '@/lib/formatters';
 import { getSettlementAsset } from '@/lib/coinMargined';
+import { CARD_TPSL_PERCENT_STEP, type CardCloseLotSize } from '@/lib/marketLotSize';
 
 interface Props {
   pos: Position;
@@ -19,6 +20,11 @@ interface Props {
    * 强平价是最先被强平的那一笔，落到单子上却是逐笔，这件事必须说出来。
    */
   legCount?: number;
+  /**
+   * 按成数（0–1）与触发价判这张止盈 / 止损触发后那笔市价单会不会超过币安单笔市价上限
+   * （lib/marketLotSize.cardCloseLotSize，'tpsl'）。100% 平掉整个仓位的不受限。不传就不判。
+   */
+  lotSizeCheck?: (fraction: number, triggerPrice: number) => CardCloseLotSize;
 }
 
 export function TpSlModal({
@@ -30,6 +36,7 @@ export function TpSlModal({
   onConfirm,
   settlementMode = 'usdt',
   legCount = 1,
+  lotSizeCheck,
 }: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
@@ -37,10 +44,30 @@ export function TpSlModal({
   const baseCoin = getSettlementAsset(symbol);
   const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
+  /**
+   * 按成数（不足 100%）挂的止盈止损带明确数量，触发后是一笔市价单：超过币安单笔市价上限就挂不出去。
+   * 按各自的触发价判（合成币本位的张数上限随价变化）；100% 平掉整个仓位的不受限（相当于 closePosition）。
+   */
+  const lotRefusal = (() => {
+    if (!lotSizeCheck || pct >= 100) return null;
+    for (const [label, raw] of [['止盈', tpPrice], ['止损', slPrice]] as const) {
+      const px = parseFloat(raw);
+      if (!(px > 0)) continue;
+      const verdict = lotSizeCheck(pct / 100, px);
+      if (verdict.refusal) {
+        // 滑条最小一格（10%）在这个触发价上也放不下：没有「调小」这条路，只剩 100%
+        const smallestFits = lotSizeCheck(CARD_TPSL_PERCENT_STEP / 100, px).refusal == null;
+        return { label, check: verdict.refusal, smallestFits };
+      }
+    }
+    return null;
+  })();
+
   const handleConfirm = () => {
     const tp = tpPrice ? parseFloat(tpPrice) : null;
     const sl = slPrice ? parseFloat(slPrice) : null;
     if (tp === null && sl === null) return;
+    if (lotRefusal) return;
     onConfirm(tp, sl, pct);
   };
 
@@ -112,21 +139,40 @@ export function TpSlModal({
             </div>
             <Slider
               value={[pct]}
-              min={10}
+              min={CARD_TPSL_PERCENT_STEP}
               max={100}
-              step={10}
+              step={CARD_TPSL_PERCENT_STEP}
               onValueChange={([v]) => setPct(v)}
             />
             <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-              <span>10%</span>
+              <span>{CARD_TPSL_PERCENT_STEP}%</span>
               <span>100%</span>
             </div>
           </div>
 
+          {lotRefusal && (
+            <div
+              data-testid="tpsl-lot-size-warning"
+              className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30"
+            >
+              <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+              <span className="space-y-0.5">
+                <span className="block">{lotRefusal.label}（{pct}% 仓位）：{lotRefusal.check.title}</span>
+                <span className="block text-[9px] opacity-80">
+                  {lotRefusal.smallestFits
+                    ? `${lotRefusal.check.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
+                      + '或选 100%（平掉整个仓位的不受此限）。'
+                    : `${lotRefusal.check.source}。按成数挂的止盈止损触发后是一笔市价单，`
+                      + `连最小的一格（${CARD_TPSL_PERCENT_STEP}%）都超过上限：只能选 100%（平掉整个仓位的不受此限）。`}
+                </span>
+              </span>
+            </div>
+          )}
+
           {/* Confirm */}
           <button
             onClick={handleConfirm}
-            disabled={!tpPrice && !slPrice}
+            disabled={(!tpPrice && !slPrice) || lotRefusal != null}
             className="w-full py-2.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             确认

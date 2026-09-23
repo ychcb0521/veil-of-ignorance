@@ -9,6 +9,8 @@ import { getPriceDecimals } from '@/lib/formatters';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
 import { addTierHeadroom } from '@/lib/addTierHeadroom';
 import { formatTierAmount } from '@/lib/leverageTiers';
+import { lotSizeCapLabel, checkLotSize } from '@/lib/marketLotSize';
+import { LIVE_PRICE_TIER_HEADROOM } from '@/lib/positionLimit';
 import {
   PRE_MAIN_LOOKBACK_MS,
   evaluateS1Deviation,
@@ -729,18 +731,87 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
     ? Math.max(0, Math.min(12, Math.floor(quantityPrecision)))
     : 2;
   /**
+   * 币安单笔数量上限（lib/marketLotSize）：「按上限下单」预填的是**一笔**单子。市价 / 条件单（触发后市价）按
+   * MARKET_LOT_SIZE、限价按 LOT_SIZE，在这一单自己的价上判（合成币本位的张数上限随价变化）。
+   * 可下单量比单笔上限大时只预填一笔上限，并说清剩下的还要再下几笔——计划（上限、对冲）本身不因此缩小，
+   * 仓位可以比单笔上限大，分几笔下就是了。
+   */
+  const lotAddPrice = orderKind === 'market' ? s2Ref : limitPx;
+  const offeredUnits = isCoin ? (offeredContracts ?? 0) : offeredCoins;
+  const lotAdd = checkLotSize({
+    symbol, settlement, kind: orderKind === 'limit' ? 'limit' : 'market',
+    units: offeredUnits,
+    price: lotAddPrice,
+  });
+  /**
+   * 一笔最多预填多少（引擎单位）。合成币本位的市价单按现价折张、随价变：与下单面板的 100% 一样在上限前留 0.2%，
+   * 否则预填的整张在引擎按下一个 tick 的价折张时会差一张被拒。限价与条件单的价钉在委托价 / 触发价上，不留。
+   */
+  const lotAddCapUnits = lotAdd.maxUnits == null
+    ? null
+    : orderKind === 'market' && lotAdd.resolved?.source === 'usdm-proxy'
+      ? Math.floor(lotAdd.maxUnits * (1 - LIVE_PRICE_TIER_HEADROOM))
+      : lotAdd.maxUnits;
+  /** 与判定同一个容差：按金额折出来的浮点尾巴（200,000.00000001）不算超。 */
+  const lotBinds = lotAddCapUnits != null && offeredUnits > lotAddCapUnits * (1 + 1e-9) + 1e-9;
+  /** 一笔最多能下的币数（币本位按整张 × 面值 ÷ 这一单的价折回币）。 */
+  const lotAddMaxCoins = lotAddCapUnits == null
+    ? Infinity
+    : isCoin ? (lotAddPrice > 0 ? (lotAddCapUnits * face) / lotAddPrice : Infinity) : lotAddCapUnits;
+  const prefillContracts = offeredContracts != null && lotAddCapUnits != null && isCoin
+    ? Math.min(offeredContracts, lotAddCapUnits)
+    : offeredContracts;
+  const prefillCoins = Math.min(offeredCoins, lotAddMaxCoins);
+  /**
    * U 本位落进下单面板的币数：按面板数量精度**向下取整**（与按钮上的字、与面板预填同一个数）。
    * 分层余量是二分出来的，收敛只到判定用的相对容差（豁免的底 30,000 × 1e-9 = 3e-5 币）：
    * 拿没取整的余量判「能不能下单」，余量实际为 0 时按钮照样出现、写着「按上限下单 · 0 KAITO」，
    * 点下去预填的是 0.00003 币（面板取整后是空数量）。取整之后再判，这一档的按钮直接不出现。
    */
   const offeredCoinsPlaceable = (() => {
-    if (!Number.isFinite(offeredCoins) || offeredCoins <= 0) return 0;
+    if (!Number.isFinite(prefillCoins) || prefillCoins <= 0) return 0;
     const scale = 10 ** placeDecimals;
-    return Math.floor(offeredCoins * scale + 1e-7) / scale;
+    return Math.floor(prefillCoins * scale + 1e-7) / scale;
   })();
+  /** 预填一笔之后剩下的量（引擎单位）还要再下几笔：每笔不超过同一个上限。 */
+  const lotRestUnits = isCoin ? (offeredContracts ?? 0) - (prefillContracts ?? 0) : offeredCoins - prefillCoins;
+  const lotRestPieces = lotBinds && lotAddCapUnits != null && lotAddCapUnits > 0
+    ? Math.max(1, Math.ceil(lotRestUnits / lotAddCapUnits - 1e-9))
+    : 0;
+  const lotAddText = lotBinds && lotAddCapUnits != null
+    ? `${lotSizeCapLabel(lotAdd)}：「按上限下单」预填一笔 `
+      + `${isCoin ? `${(prefillContracts ?? 0).toLocaleString('en-US')} 张` : `${fmtCoinsFloor(prefillCoins, placeDecimals)} ${coinName}`}`
+      + `${lotAddCapUnits !== lotAdd.maxUnits ? '（按现价折张，留 0.2% 余量）' : ''}，`
+      + `剩下的 ${isCoin ? `${lotRestUnits.toLocaleString('en-US')} 张` : `${fmtCoins(lotRestUnits, 4)} ${coinName}`}`
+      // 「张」后面直接接中文；「KAITO」这种拉丁字母单位后面空一格
+      + `${isCoin ? '' : ' '}${lotRestPieces > 1 ? `再分 ${lotRestPieces} 笔下` : '另下一笔'}`
+      /**
+       * 出路按下单方式写：市价单可以改用限价单；条件单（突破加仓挂在现价上方买入）不行——
+       * 同价的买入限价单在现价上方是一张立刻能成交的单，当场就按现价成交了，剩下的几笔同样挂成条件单。
+       */
+      + (orderKind === 'market' ? '（或改用限价单）' : orderKind === 'conditional' ? '（每笔都挂成条件单）' : '')
+    : null;
+  /**
+   * S₁ 上的对冲是一张条件单，触发后是一笔市价单：合计对冲超过单笔市价上限，一张单就挂不下，要拆成几张。
+   * Plan A（G = 0）读 planAHedge，Plan B 读 hedgeCoinsAtS1；张数按 S₁ 四舍五入（与上面的对冲张数同一个折法）。
+   */
+  const s1Px = toNum(s1);
+  const hedgeForLot = bankedOn
+    ? (planB && planBHasRoom ? hedgeCoinsAtS1 : Number.NaN)
+    : (cushion.ok ? planAHedge : Number.NaN);
+  const lotHedge = Number.isFinite(hedgeForLot) && hedgeForLot > 0 && s1Px > 0
+    ? checkLotSize({
+      symbol, settlement, kind: 'market',
+      units: isCoin ? coinsToContracts(hedgeForLot, s1Px, face) : hedgeForLot,
+      price: s1Px,
+    })
+    : null;
+  const lotHedgeText = lotHedge && !lotHedge.ok && lotHedge.maxUnits != null && lotHedge.maxUnits > 0
+    ? `S₁ ${fmtPx(s1Px)} 上的合计对冲 ${isCoin ? `${lotHedge.units.toLocaleString('en-US')} 张` : `${fmtCoins(lotHedge.units)} ${coinName}`}`
+      + ` 超过${lotSizeCapLabel(lotHedge)}：条件单触发后是一笔市价单，要拆成 ${Math.ceil(lotHedge.units / lotHedge.maxUnits)} 张条件单挂在 S₁`
+    : null;
   /** 可下单量至少一整张（币本位）/ 取整后大于 0（U 本位）才给按钮：分层把余量卡到 0 时，预填一张空单没有意义。 */
-  const placeable = planSnapshot != null && (isCoin ? (offeredContracts ?? 0) >= 1 : offeredCoinsPlaceable > 0);
+  const placeable = planSnapshot != null && (isCoin ? (prefillContracts ?? 0) >= 1 : offeredCoinsPlaceable > 0);
   /**
    * 「按上限下单」：可下单量（min(Plan B 上限, 分层余量)，币本位整张、U 本位币数）连同下单方式交给下单面板预填，然后关掉弹窗。
    * 钉在单子上的计划仍是 Plan B 的（上限 addCoinsMax、整张 contracts 都不改）。
@@ -748,8 +819,8 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
   const placeAtLimit = () => {
     if (!planSnapshot || !placeable) return;
     requestAddSizingPrefill(symbol, planSnapshot, {
-      contracts: isCoin ? offeredContracts : planSnapshot.contracts,
-      coins: offeredCoins,
+      contracts: isCoin ? prefillContracts : planSnapshot.contracts,
+      coins: prefillCoins,
       orderType: orderKind === 'market' ? 'MARKET' : orderKind === 'limit' ? 'LIMIT' : 'CONDITIONAL',
       // 限价挂在定量用的那个价上（已按面板精度向有利侧取整），计划、委托、校验三处是同一个数；条件单的触发价同理
       limitPrice: orderKind === 'limit' ? planSnapshot.s2Fill : null,
@@ -762,9 +833,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
   /** 按钮上的量就是落进面板的量：币本位整张；U 本位按面板数量精度向下取整（没给精度按两位）。 */
   const placeAtLimitQty = planSnapshot == null
     ? ''
-    : isCoin && offeredContracts != null
-      ? `${offeredContracts.toLocaleString('en-US')} 张`
-      : `${fmtCoinsFloor(offeredCoins, placeDecimals)} ${coinName}`;
+    : isCoin && prefillContracts != null
+      ? `${prefillContracts.toLocaleString('en-US')} 张`
+      : `${fmtCoinsFloor(prefillCoins, placeDecimals)} ${coinName}`;
   const orderKindTitle = orderKind === 'market' ? '市价单' : orderKind === 'limit' ? `限价单 @ ${fmtPx(s2Eff)}` : `条件委托 · 触发价 ${fmtPx(limitPx)}（触发后市价）`;
 
   return (
@@ -904,6 +975,16 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
               className={`text-[10px] ${tierBinds ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
             >
               {tierRoomText}
+            </div>
+          )}
+          {lotAddText && (
+            <div data-testid="add-sizing-lot-size" className="text-[10px] text-amber-600 dark:text-amber-400">
+              {lotAddText}
+            </div>
+          )}
+          {lotHedgeText && (
+            <div data-testid="add-sizing-hedge-lot-size" className="text-[10px] text-amber-600 dark:text-amber-400">
+              {lotHedgeText}
             </div>
           )}
           {autoLimit && orderKind === 'limit' && (

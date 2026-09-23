@@ -75,6 +75,7 @@ import {
   type PositionMergeResult,
 } from "@/lib/tradingSettlement";
 import { recheckedAtFill, twapSliceTrigger } from "@/lib/positionLimit";
+import { twapSlicePlan } from "@/lib/marketLotSize";
 import {
   Dialog,
   DialogContent,
@@ -1521,9 +1522,10 @@ const Index = () => {
               const totalQty = order.twapTotalQty || order.quantity;
               const intervalMs = order.twapInterval || 300000;
               const endTime = order.twapEndTime || order.createdAt + 3600000;
-              const totalSlices = Math.max(1, Math.floor((endTime - order.createdAt) / intervalMs));
-              const rawSliceQty = totalQty / totalSlices;
-              const sliceQty = isCoinSettled(order) ? Math.max(1, Math.round(rawSliceQty)) : rawSliceQty;
+              // 切片式子与下单时的单笔上限判定共用（lib/marketLotSize.twapSlicePlan）：下单时判的那一片就是这里执行的这一片
+              const { sliceQty } = twapSlicePlan({
+                totalQty, durationMs: endTime - order.createdAt, intervalMs, coin: isCoinSettled(order),
+              });
               const filledSoFar = order.twapFilledQty || 0;
 
               if (filledSoFar + sliceQty <= totalQty + (isCoinSettled(order) ? 0 : 0.0001) && now < endTime) {

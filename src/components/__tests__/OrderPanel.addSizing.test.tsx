@@ -62,6 +62,15 @@ vi.mock('@/contexts/TradingContext', () => ({
  * 预填机制与分层是两件事：默认换一张宽松分层（1 档、125x、上限 1 万亿），
  * 「按分层余量预填」那一组显式切回真实分层。
  */
+/**
+ * 单笔数量上限的注入口（lib/marketLotSize）：这里的预填用例刻意用远超真实规模的名义把滑点放大
+ * （API3 3,000 万名义、COMMON 价位上的几百万张），按币安真实的单笔上限，一笔市价单根本下不出这么大——
+ * 按钮全是灰的。预填机制与单笔上限是两件事：本文件把快照换成空表（查不到的合约不设上限），
+ * 单笔上限另有专门的用例（OrderPanel.lotSize / AddSizingCalculator.lotSize）。
+ */
+vi.mock('@/data/binanceSymbolFilters.json', () => ({
+  default: { fetchedAt: '2026-09-23T00:00:00.000Z', sources: {}, columns: [], usdm: {}, coinm: {} },
+}));
 const tierSeam = vi.hoisted(() => ({ wide: true }));
 vi.mock('@/lib/leverageTiers', async () => {
   const actual = await vi.importActual<typeof import('@/lib/leverageTiers')>('@/lib/leverageTiers');

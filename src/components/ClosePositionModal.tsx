@@ -14,6 +14,8 @@ import {
   getPositionUnits,
   isCoinSettled,
 } from '@/lib/tradingSettlement';
+import { formatClosePercent, type CardCloseLotSize } from '@/lib/marketLotSize';
+import { AlertTriangle } from 'lucide-react';
 
 interface Props {
   open: boolean;
@@ -30,6 +32,12 @@ interface Props {
   legCount?: number;
   /** 确认平仓：只回成数（0–1）。按 id 重新解析各笔、下发给引擎都在调用方那一侧。 */
   onConfirm: (percentage: number) => void;
+  /**
+   * 按成数（0–1）判这次市价平仓会不会超过币安单笔市价上限（lib/marketLotSize.cardCloseLotSize）。
+   * 超过时按钮置灰并说明，给一个「按上限平」把数量改到上限——不替用户拆单，也不悄悄只平一部分。
+   * 不传就不判（快照里查不到的合约也不设上限）。
+   */
+  lotSizeCheck?: (fraction: number) => CardCloseLotSize;
 }
 
 const QUICK_PERCENTAGES = [25, 50, 75, 100];
@@ -41,7 +49,7 @@ function roundQty(v: number) {
   return Math.round(v * f) / f;
 }
 
-export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm }: Props) {
+export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm, lotSizeCheck }: Props) {
   const baseCoin = getSettlementAsset(symbol);
   const isCoinMargined = isCoinSettled(position);
   const totalUnits = getPositionUnits(position);
@@ -157,7 +165,35 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
     if (!v) onClose();
   };
 
-  const submitDisabled = closeAmount < minQty;
+  /**
+   * 币安单笔市价上限：这次要平的量超过它就不放行，并给出「按上限平」的数量（向下取整，不超上限；
+   * 合成币本位按现价折张、在上限前留 0.2% 余量，见 cardCloseLotSize 的 maxFraction）。
+   */
+  const lotSize = lotSizeCheck && ratio > 0 ? lotSizeCheck(ratio) : null;
+  const lotRefusal = lotSize?.refusal ?? null;
+  const lotMaxAmount = (() => {
+    if (!lotSize || !lotRefusal) return 0;
+    /**
+     * 币本位：直接向下取整，不加容差。二分出来的成数 lo 满足「按 lo 平放得下」，而平掉的张数随成数单调不减、
+     * ⌊lo × 总张数⌋ ÷ 总张数 ≤ lo，所以这个张数一定放得下。加一丝容差再取整会越过边界：卡上两笔各 1,500 张、
+     * 一笔最多 1,000 张时，lo × 3,000 = 1,000.99…，进成 1,001 张，摊到两笔各 500.5 张、各自四舍五入成 501，
+     * 合计 1,002 张——按了「按上限平」还是超。
+     */
+    if (isCoinMargined) return Math.floor(lotSize.maxFraction * totalUnits);
+    // U 本位没有逐笔取整，边界就是上限本身：二分的成数比它低一丝（乘回去是 199,999.99999999），取整前吸掉这一丝浮点尾巴
+    return Math.floor(lotSize.maxFraction * totalUnits * 10 ** QTY_PRECISION + 1e-3) / 10 ** QTY_PRECISION;
+  })();
+  const applyLotMax = () => {
+    setCloseAmount(lotMaxAmount);
+    setAmountInput(lotMaxAmount.toString());
+  };
+  /** 与警告标题同一种写法（千分位、不补零）：「按上限平 21,766 张」「按上限平 200,000 KAITO」。 */
+  const lotMaxLabel = isCoinMargined
+    ? `${Math.round(lotMaxAmount).toLocaleString('en-US')} 张`
+    : `${lotMaxAmount.toLocaleString('en-US', { maximumFractionDigits: QTY_PRECISION })} ${baseCoin}`;
+  const lotFillable = lotMaxAmount >= minQty;
+
+  const submitDisabled = closeAmount < minQty || lotRefusal != null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -300,6 +336,35 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
           </div>
         </div>
 
+        {lotRefusal && (
+          <div
+            data-testid="close-lot-size-warning"
+            className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[11px] bg-trading-red/10 text-trading-red border border-trading-red/30"
+          >
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+            <span className="space-y-0.5">
+              <span className="block">{lotRefusal.title}</span>
+              <span className="block text-[10px] opacity-80">
+                {lotFillable
+                  ? `${lotRefusal.source}。市价平仓也是一笔市价单：请分几次平（每次不超过上限），`
+                    + '或在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限）。'
+                  : `${lotRefusal.source}。连最小的一笔（${isCoinMargined ? '1 张' : `${MIN_QTY} ${baseCoin}`}）都超过上限，市价平仓平不了：`
+                    + '请在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限），或用「一键平仓」。'}
+              </span>
+              {lotFillable && (
+                <button
+                  type="button"
+                  data-testid="close-lot-size-fill-max"
+                  onClick={applyLotMax}
+                  className="mt-0.5 underline hover:no-underline"
+                >
+                  按上限平 {lotMaxLabel}
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1">
             取消
@@ -313,7 +378,8 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
                 : 'bg-trading-green hover:bg-trading-green/90 text-white'
             }`}
           >
-            确认平仓 ({sliderPct}%)
+            {/* 成数照引擎真正平掉的写：不到 1% 的不四舍五入成 1% / 0%（见 formatClosePercent） */}
+            确认平仓 ({formatClosePercent(ratio)})
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -125,7 +125,7 @@ import {
   type ReplayTimelineScope,
 } from '@/lib/replayTimeline';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
-import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLevels } from '@/lib/tpSlOrders';
+import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, tpSlCloseUnits, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { planLeverageChange, type LeverageChangePlan } from '@/lib/leverageRestatement';
@@ -148,6 +148,16 @@ import {
 } from '@/lib/positionLimit';
 import type { PositionMergeResult } from '@/lib/tradingSettlement';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
+import {
+  CARD_TPSL_PERCENT_STEP,
+  ORDER_LOT_SIZE_STAMP,
+  checkLotSize,
+  formatClosePercent,
+  isWholePositionCloseOrder,
+  lotSizeRefusalAtExecution,
+  placementLotSize,
+  type LotSizeCheck,
+} from '@/lib/marketLotSize';
 import {
   createDefaultExecutionAssetState,
   recordExecutionTrade as applyExecutionTradeReward,
@@ -1661,12 +1671,26 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     let refusal: { title: string; description: string } | null = null;
     const triggerPx = Number(trigger?.price);
     /**
+     * 币安单笔市价上限（MARKET_LOT_SIZE，-4005）：条件 / 跟踪委托触发、TWAP 执行一片时，这一笔是一张新的市价单。
+     * 下单时已经按触发价（TWAP 按每一片）判过一道；合成币本位的张数上限随价变化，所以在成交这一刻按这一刻的价再判。
+     * 只判本次更新之后下的（带 lotSizeRule 戳，见 lib/marketLotSize）；过不去与付不起同样处理：撤单留痕、不缩量。
+     */
+    if (!order.reduceOnly && triggerPx > 0) {
+      const lot = lotSizeRefusalAtExecution(symbol, order, triggerPx, getPositionUnits(trigger?.fill ?? order));
+      if (lot) {
+        refusal = {
+          title: `${order.type === 'TWAP' ? 'TWAP 执行这一片时' : '触发时'}超过单笔市价上限，委托已撤销`,
+          description: `${symbol}：${lot.title}。${lot.detail}`,
+        };
+      }
+    }
+    /**
      * 只判带来源的委托（本次更新之后经引擎下的：分层戳或对冲豁免标记）。更新前挂出的条件单、
      * 跟踪委托、TWAP 是按旧规则放行的——与它们成交后开旧模型仓位是同一条规则
      * （positionRiskStampForFill）。否则升级会在触发那一刻悄悄撤掉用户早就挂好的对冲单
      * （旧默认 35x 在 599 个最高杠杆低于 35x 的合约上更是一触发就撤）。
      */
-    if (!order.reduceOnly && triggerPx > 0 && hasRiskProvenance(order)) {
+    if (!refusal && !order.reduceOnly && triggerPx > 0 && hasRiskProvenance(order)) {
       const filling = trigger?.fill ?? order;
       const limit = checkOrderPositionLimit({
         symbol,
@@ -1782,7 +1806,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const now = getEffectiveTime(symbol);
     const newOrders = buildTpSlOrders({
       symbol, position, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
-    });
+    }).map(o => ({ ...o, ...ORDER_LOT_SIZE_STAMP }));
     if (dropped.length > 0) {
       toast.error('随单止盈/止损未能挂出', {
         description: `${dropped.map(d => d.message).join('；')}（成交价 ${formatPrice(position.entryPrice, symbol)}）`,
@@ -2149,6 +2173,19 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
        */
       if (placementUsesLegacyHedge(limit)) Object.assign(normalizedOrder, ORDER_LEGACY_HEDGE_STAMP);
     }
+    /**
+     * 币安单笔数量上限（-4005 Quantity greater than max quantity，见 lib/marketLotSize）：
+     * 一笔市价单（条件 / 跟踪委托触发后、TWAP 的每一片同样是市价单）不得超过 MARKET_LOT_SIZE，
+     * 一笔限价单（分段订单的每张子单）不得超过 LOT_SIZE；随单止盈止损成数不足 100% 时那一截也按市价单判。
+     * 面板已经把按钮置灰，这里是引擎自己的闸门。快照里查不到的合约不设上限。
+     */
+    {
+      const lot = placementLotSize(symbol, normalizedOrder, effectiveCurrentPrice);
+      if (lot.refusal) {
+        toast.error(`${lot.refusalLead}${lot.refusal.title}`, { description: lot.refusal.detail ?? undefined });
+        return null;
+      }
+    }
     const stampedAs = (normalizedOrder as { riskModel?: string }).riskModel;
     const exemptOrder = stampedAs === LEGACY_HEDGE_RISK_MODEL;
     const orderRiskStamp = exemptOrder
@@ -2314,6 +2351,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined,
         status: 'NEW' as const, createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
         ...orderRiskStamp,
+        ...ORDER_LOT_SIZE_STAMP,
         parentScaledId: parentId,
         tradingMode: tradingModeRef.current,
       }));
@@ -2359,6 +2397,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         peakPrice: undefined, troughPrice: undefined,
         status: 'PENDING', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
         ...orderRiskStamp,
+        ...ORDER_LOT_SIZE_STAMP,
         tradingMode: tradingModeRef.current,
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), trailingOrder] }));
@@ -2396,6 +2435,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         contracts: normalizedOrder.contracts,
         status: 'ACTIVE', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
         ...orderRiskStamp,
+        ...ORDER_LOT_SIZE_STAMP,
         tradingMode: tradingModeRef.current,
         twapTotalQty: normalizedOrder.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
@@ -2460,6 +2500,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now, createdRealAt: Date.now(),
       createdTimelineId: timelineId,
       ...orderRiskStamp,
+      ...ORDER_LOT_SIZE_STAMP,
       tradingMode: tradingModeRef.current,
       callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
       trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
@@ -2483,7 +2524,12 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const totalUnits = getPositionUnits(pos);
     if (!pos || totalUnits <= 0) return;
 
-    const pct = Math.min(1, Math.max(0.01, percentage));
+    /**
+     * 按给的成数平，没有 1% 的下限（此前 Math.max(0.01, …)：弹窗里填不到 1% 的量也按 1% 平）。
+     * 仓位是币安单笔市价上限的 100 多倍时，「按上限平」给的成数不到 1%，必须真的只平那么多（lib/marketLotSize）。
+     * 只有持仓卡的「平仓」弹窗会传不足 100% 的成数；非正数 / 非数字照旧按 1% 兜底。
+     */
+    const pct = percentage > 0 ? Math.min(1, percentage) : 0.01;
     let closeQty = totalUnits * pct;
     if (isCoinSettled(pos)) closeQty = Math.max(1, Math.round(closeQty));
     const rawPrice = priceMapRef.current[symbol] || 0;
@@ -2591,7 +2637,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       },
     })]);
 
-    const pctLabel = pct < 1 ? ` (${Math.round(pct * 100)}%)` : '';
+    // 成数照真正平掉的写：没有 1% 的下限之后，四舍五入会把 0.8% 写成 1%、0.3% 写成 0%
+    const pctLabel = pct < 1 ? ` (${formatClosePercent(pct)})` : '';
     const netPnl = pnlUsd - feeUsd;
     toast.success(`市价平仓成功，已结算盈亏：${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT`, {
       description: `${symbol} ${formatSettlementQuantity({ ...pos, quantity: closeQty, contracts: isCoinSettled(pos) ? closeQty : undefined }, symbol)}${pctLabel} @ ${formatPrice(fillPrice, symbol)}`,
@@ -2606,10 +2653,37 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const invalid = validateTpSlLevels(pos.side, levels, priceMapRef.current[symbol] || 0);
     if (invalid) { toast.error(invalid.message); return; }
 
+    /**
+     * 按成数（不足 100%）挂的止盈止损带明确数量，触发后是一笔市价单：超过币安单笔市价上限就不挂（-4005），
+     * 按各自的触发价判（合成币本位的张数上限随价变化）。100% 平掉整个仓位的不受限（相当于 closePosition）。
+     */
+    if (pct < 100) {
+      const units = tpSlCloseUnits(pos, pct);
+      for (const [label, px] of [['止盈', tp], ['止损', sl]] as const) {
+        if (!(Number(px) > 0)) continue;
+        const lot = checkLotSize({ symbol, settlement: pos.settlementMode, kind: 'market', units, price: Number(px) });
+        if (!lot.ok) {
+          // 持仓卡弹窗的最小一格（10%）在这个触发价上也放不下：没有「调小」这条路，只剩 100%
+          const smallestFits = checkLotSize({
+            symbol, settlement: pos.settlementMode, kind: 'market',
+            units: tpSlCloseUnits(pos, CARD_TPSL_PERCENT_STEP), price: Number(px),
+          }).ok;
+          toast.error(`${label}（${Math.min(100, Math.max(1, pct))}% 仓位）：${lot.title}`, {
+            description: smallestFits
+              ? `${lot.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
+                + '或选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。'
+              : `${lot.source}。按成数挂的止盈止损触发后是一笔市价单，连最小的一格（${CARD_TPSL_PERCENT_STEP}%）都超过上限：`
+                + '只能选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。',
+          });
+          return;
+        }
+      }
+    }
+
     const now = getEffectiveTime(symbol);
     const newOrders = buildTpSlOrders({
       symbol, position: pos, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
-    });
+    }).map(o => ({ ...o, ...ORDER_LOT_SIZE_STAMP }));
     if (newOrders.length === 0) { toast.error('平仓数量无效'); return; }
 
     setOrdersMap(prev => ({
@@ -2639,6 +2713,60 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       orders: ordersMapRef.current,
       closedTimelineId,
     });
+    /**
+     * 币安单笔市价上限（-4005）：按成数（不足 100%）挂的止盈止损触发后是一笔带数量的市价单。下单时已经按触发价判过；
+     * 这一刻按这一刻的量（不超过仓位）与价再判一次——合成币本位的张数上限随价变化，快照更新后上限也可能变。
+     * 过不去**绝不悄悄丢掉保护**：撤单留痕，并在消息中心说清这张保护单没了、仓位此刻没有它的保护。
+     * 平掉整个仓位的（100%，相当于币安 closePosition）与更新前挂出的不判（见 lib/marketLotSize）。
+     */
+    const liveReduce = (ordersMapRef.current[targetSymbol] || []).find(candidate => candidate.id === order.id);
+    const linkedId = liveReduce?.linkedPositionId || order.linkedPositionId;
+    const linked = liveReduce
+      ? (positionsMapRef.current[targetSymbol] || []).find(p => p.id === linkedId && isPositionOpen(p))
+      : undefined;
+    const lotRefusal: LotSizeCheck | null = liveReduce && linked && !isWholePositionCloseOrder(liveReduce)
+      ? lotSizeRefusalAtExecution(
+        targetSymbol, liveReduce, triggerPrice, Math.min(getPositionUnits(linked), getPositionUnits(liveReduce)),
+      )
+      : null;
+    if (liveReduce && lotRefusal) {
+      const cancelledTimelineId = stampClock(targetSymbol);
+      setCancelledOrders(prev => upsertOrderSnapshot(prev, {
+        id: liveReduce.id,
+        symbol: targetSymbol,
+        side: liveReduce.side,
+        type: liveReduce.type,
+        reduceOnly: true,
+        reduceKind: liveReduce.reduceKind ?? null,
+        linkedPositionId: liveReduce.linkedPositionId ?? null,
+        price: orderReferencePrice(liveReduce, priceMapRef.current[targetSymbol] || 0).price,
+        quantity: liveReduce.quantity,
+        contracts: liveReduce.contracts,
+        leverage: liveReduce.leverage,
+        settlementMode: liveReduce.settlementMode,
+        settlementAsset: liveReduce.settlementAsset,
+        contractSizeUsd: liveReduce.contractSizeUsd,
+        createdAt: liveReduce.createdAt,
+        createdRealAt: liveReduce.createdRealAt,
+        cancelledAt: closeTime,
+        cancelledRealAt: Date.now(),
+        createdTimelineId: liveReduce.createdTimelineId,
+        cancelledTimelineId,
+      }));
+      setOrdersMap(prev => ({
+        ...prev,
+        [targetSymbol]: (prev[targetSymbol] || []).filter(candidate => candidate.id !== liveReduce.id),
+      }));
+      reduceOnlyDeferredReasonRef.current.delete(order.id);
+      const kind = liveReduce.reduceKind === 'TP' ? '止盈' : liveReduce.reduceKind === 'SL' ? '止损' : '减仓单';
+      toast.error(`${kind}触发时超过单笔市价上限，委托已撤销`, {
+        description: `${targetSymbol}：${lotRefusal.title}（${lotRefusal.source}）。`
+          + `这个仓位此刻没有这张${kind}的保护：请在持仓卡上分几次市价平仓（每次不超过上限），`
+          + `或重新设置不超过上限的${kind}；平掉整个仓位（100%）的止盈止损不受单笔上限约束。`,
+      });
+      return { ok: false, reason: 'lot_size_rejected' };
+    }
+
     /**
      * 先用不落盘的 getTimelineId 试算，真的要平仓了才 stampClock：
      * 触发失败（仓位暂时找不到等）每帧都会重试，每帧盖章会让登记表每帧落一次盘、推一次云。
@@ -2683,7 +2811,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       description: `${execution.netPnl >= 0 ? '+' : ''}${execution.netPnl.toFixed(2)} USDT`,
     });
     return execution;
-  }, [getEffectiveTime, getTimelineId, stampClock, setBalance, setFilledOrders, setOrdersMap, setPositionsMap, setTradeHistory]);
+  }, [getEffectiveTime, getTimelineId, stampClock, setBalance, setCancelledOrders, setFilledOrders, setOrdersMap, setPositionsMap, setTradeHistory]);
 
   // ===== Cancel Order =====
   const handleCancelOrder = useCallback((symbol: string, orderId: string) => {

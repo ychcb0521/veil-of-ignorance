@@ -495,11 +495,20 @@ describe('按现价估值的单：100% 在分层上限前留 0.2% 余量', () =>
   });
 
   it('真币本位（BTCUSD，以 BTC 计、随价变）：留余量', () => {
+    // 15x 的分层上限 150 BTC（90,000 张）比 BTCUSD 的单笔市价上限 60,000 张还宽，那里卡住的是单笔上限（见下一条）；
+    // 50x 最高 25 BTC = 1,500,000 USD，分层先卡：留 0.2% → 1,497,000 USD = 14,970 张 = 24.95 BTC
+    state.leverage = 50;
     renderPanel('BTCUSD', 60_000);
     fireEvent.click(screen.getByRole('button', { name: '市价' }));
-    // 15x 最高 150 BTC = 9,000,000 USD；留 0.2% → 8,982,000 USD = 89,820 张 = 149.7 BTC
-    expect(maxOpenTexts()).toEqual(['149.700000 BTC', '149.700000 BTC']);
-    expect(maxOpenSubs()).toEqual(['89,820 张 · 8,982,000.00 USD', '89,820 张 · 8,982,000.00 USD']);
+    expect(maxOpenTexts()).toEqual(['24.950000 BTC', '24.950000 BTC']);
+    expect(maxOpenSubs()).toEqual(['14,970 张 · 1,497,000.00 USD', '14,970 张 · 1,497,000.00 USD']);
+  });
+
+  it('真币本位（BTCUSD）15x：分层 150 BTC 放得下，100% 按单笔市价上限 60,000 张封顶（不留余量，上限以张计、与价无关）', () => {
+    renderPanel('BTCUSD', 60_000);
+    fireEvent.click(screen.getByRole('button', { name: '市价' }));
+    expect(maxOpenSubs()).toEqual(['60,000 张 · 6,000,000.00 USD', '60,000 张 · 6,000,000.00 USD']);
+    expect(screen.getByTestId('lot-size-hint')).toHaveTextContent('单笔市价上限 60,000 张');
   });
 });
 
@@ -1045,7 +1054,7 @@ describe('【复核 r5】来源：豁免说明写清挂着的单还要再判；�
     expect(screen.getByTestId('merge-model-note')).toHaveTextContent('整仓强平价 0.954000 → 0.945206（推远 0.92%）。');
   });
 
-  it('【复现】豁免对冲不并进分层仓位：KAITOUSDT 5x 旧多 240,000 + 分层空 9,000、现价 1.1——市价空 230,000 靠豁免放行，说明单独成仓、不改按分层', async () => {
+  it('【复现】豁免对冲不并进分层仓位：KAITOUSDT 5x 旧多 240,000 + 分层空 9,000、现价 1.1——市价空 200,000（单笔市价上限）靠豁免放行，说明单独成仓、不改按分层', async () => {
     state.settlement = 'usdt';
     state.leverage = 5;
     state.positionsMap = {
@@ -1057,7 +1066,7 @@ describe('【复核 r5】来源：豁免说明写清挂着的单还要再判；�
     renderPanel('KAITOUSDT', 1.1);
     fireEvent.click(screen.getByRole('button', { name: '市价' }));
     await pickUnit('BASE');
-    fireEvent.change(qtyInput(), { target: { value: '230000' } });
+    fireEvent.change(qtyInput(), { target: { value: '200000' } });
     expect(shortButton().disabled).toBe(false);
     expect(screen.getByTestId('legacy-hedge-note')).toHaveTextContent('开空：这一单是对冲更新前的仓位');
     const note = screen.getByTestId('merge-model-note');

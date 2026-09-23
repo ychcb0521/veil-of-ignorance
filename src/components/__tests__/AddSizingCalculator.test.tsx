@@ -22,6 +22,15 @@ const tradeHistory: TradeRecord[] = [
   { id: 'old', symbol: 'RAVEUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', entryPrice: 90, exitPrice: 95, quantity: 1, leverage: 5, pnl: 999, pnlCoin: 9, fee: 0, slippage: 0, openTime: 100, closeTime: 500, exit_method: 'tp1', settlementMode: 'coin' } as TradeRecord,
 ];
 
+/**
+ * 单笔数量上限的注入口（lib/marketLotSize）：这里的预填用例刻意用远超真实规模的名义把滑点放大
+ * （RAVEUSDT 当壳、价却是 COMMON 的 0.0077，几十万到几百万张），按币安真实的单笔上限，一笔市价单根本下不出这么大——
+ * 按钮全是灰的。预填机制与单笔上限是两件事：本文件把快照换成空表（查不到的合约不设上限），
+ * 单笔上限另有专门的用例（OrderPanel.lotSize / AddSizingCalculator.lotSize）。
+ */
+vi.mock('@/data/binanceSymbolFilters.json', () => ({
+  default: { fetchedAt: '2026-09-23T00:00:00.000Z', sources: {}, columns: [], usdm: {}, coinm: {} },
+}));
 /** 盘口挂单：模块级可变量，默认空——这样现有 13 条测试里 bookLine 恒为 null，
  *  「S₁ 留给人」那条契约原样成立；只有显式塞单子的测试才看得到盘口线。 */
 const book = vi.hoisted(() => ({ orders: {} as Record<string, unknown[]> }));
