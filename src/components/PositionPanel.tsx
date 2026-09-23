@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import type { Position, PendingOrder, TradeRecord } from '@/types/trading';
+import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
@@ -33,8 +33,10 @@ import {
 import { orderPriceKindLabel, orderReferencePrice } from '@/lib/orderReferencePrice';
 import { restingOrderSize, withRemainingUnits } from '@/lib/restingOrderSize';
 import { firstLiquidationPrice, initialMarginUsd } from '@/lib/positionGroupRisk';
+import { isTieredRiskPosition, positionMaintenanceMarginUsd, sharedRiskStamp } from '@/lib/positionRiskModel';
 import { allocateMarginUsd } from '@/lib/marginAllocation';
-import { symbolExposureNotionalUsd, type LeverageChangePlan } from '@/lib/leverageRestatement';
+import type { LeverageChangePlan } from '@/lib/leverageRestatement';
+import { doomedAtTrigger, limitSettlementOf, triggerCheckLead } from '@/lib/positionLimit';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -64,7 +66,7 @@ interface Props {
   onCancelOrder: (symbol: string, orderId: string) => void;
   onAdjustMargin?: (symbol: string, allocations: { positionId: string; deltaUsd: number }[]) => void;
   /** 调整标的杠杆：持仓、挂单、余额一起重述，返回执行计划或拒绝原因。 */
-  onApplySymbolLeverage?: (symbol: string, nextLeverage: number) => LeverageChangePlan;
+  onApplySymbolLeverage?: (symbol: string, nextLeverage: number, settlementMode?: SettlementMode) => LeverageChangePlan;
   availableBalance?: number;
   balance?: number;
   initialCapital?: number;
@@ -183,6 +185,58 @@ function buildCorrectedTradeRecord(record: TradeRecord, form: TradeRecordRepairF
   };
 }
 
+/**
+ * 把一张卡上的几笔合成一个**显示用**仓位：合计数量、按币量加权的开仓价、合计保证金、最高杠杆，
+ * 保证金模式与结算方式取第一笔（分组键只有 symbol_side）。卡片的合成强平价、止盈止损与平仓弹窗都用它，
+ * 平仓弹窗每次渲染都按还活着的腿重算——弹窗开着时被强平的那一笔，可用数量与预计盈亏也要跟着消失。
+ *
+ * 加权开仓价按**币量**加权，不是按张数（币本位的 units 是张数，按张数取算术平均是错的；
+ * 见 mergedPositions 里的注释，这里是同一个式子）。
+ */
+function syntheticCardPosition(symbol: string, legs: readonly Position[]): Position {
+  const first = legs[0];
+  const isCoinGroup = isCoinSettled(first);
+  let totalCoinsAtEntry = 0;
+  let weightedEntryPrice = 0;
+  let totalUnits = 0;
+  let totalMargin = 0;
+  let totalIsolatedMargin: number | null = null;
+  let totalMarginCoin = 0;
+  let leverage = first.leverage;
+  for (const pos of legs) {
+    const coinsAtEntry = pos.entryPrice > 0
+      ? Math.abs(getPositionNotionalUsd(symbol, pos, pos.entryPrice)) / pos.entryPrice
+      : 0;
+    weightedEntryPrice = (weightedEntryPrice * totalCoinsAtEntry + pos.entryPrice * coinsAtEntry)
+      / (totalCoinsAtEntry + coinsAtEntry || 1);
+    totalCoinsAtEntry += coinsAtEntry;
+    totalUnits += getPositionUnits(pos);
+    totalMargin += pos.margin;
+    if (pos.marginMode === 'isolated' && pos.isolatedMargin != null) {
+      totalIsolatedMargin = (totalIsolatedMargin ?? 0) + pos.isolatedMargin;
+    }
+    totalMarginCoin += pos.marginCoin ?? 0;
+    if (pos.leverage > leverage) leverage = pos.leverage;
+  }
+  return {
+    id: `merged_${symbol}_${first.side}`,
+    side: first.side,
+    entryPrice: weightedEntryPrice,
+    quantity: totalUnits,
+    leverage,
+    marginMode: first.marginMode,
+    margin: totalMargin,
+    isolatedMargin: totalIsolatedMargin ?? undefined,
+    settlementMode: first.settlementMode,
+    settlementAsset: first.settlementAsset,
+    contractSizeUsd: first.contractSizeUsd,
+    contracts: isCoinGroup ? totalUnits : undefined,
+    marginCoin: isCoinGroup ? totalMarginCoin : undefined,
+    // 全部成员都是分层模型才按分层算这个合成价，混着旧仓位就按旧模型。
+    ...sharedRiskStamp(legs),
+  };
+}
+
 export function PositionPanel({
   positionsMap, ordersMap, tradeHistory, priceMap, activeSymbol,
   onClosePosition, onCancelOrder, onAdjustMargin, onApplySymbolLeverage, availableBalance = 0, balance = 0, initialCapital = 1_000_000,
@@ -192,9 +246,28 @@ export function PositionPanel({
   const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance } = useTradingContext();
   // 调杠杆是**按标的**的操作（持仓、挂单一起重述）。刻意不带 pos——
   // 带着单笔仓位会诱导出逐腿写入，而逐腿写入正是混杠杆状态的制造方式。
-  const [leverageModal, setLeverageModal] = useState<{ symbol: string } | null>(null);
-  const [tpslModal, setTpslModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
-  const [closeModal, setCloseModal] = useState<{ symbol: string; index: number; pos: Position } | null>(null);
+  /** settlement：点的那张卡的结算方式（卡片按标的 + 方向分组，同一个币的 U 本位与币本位是两张卡）。 */
+  const [leverageModal, setLeverageModal] = useState<{ symbol: string; settlement?: SettlementMode } | null>(null);
+  /**
+   * 止盈/止损按钮开的是**整张卡**：卡上有几笔就给几笔各挂一张（同价、同成数）。
+   *
+   * 此前这里只记 children[0]，「100%」盖住的也只有那一笔。分组键只有 symbol_side，
+   * 混杠杆 / 混保证金模式的组本来就可能有两笔；分层上线之后，**加仓不再并进更新前的仓位**，
+   * 于是「加仓 → 回持仓面板设止损」这条主线流程天天产出两笔的卡：
+   * 先死的恰恰是新加的那一笔（强平价离现价更近），而它拿不到任何止损，界面上也看不出来。
+   * 所以记 id（不记下标、不记快照）：模态框开着的这段时间里仓位可能被平掉 / 被强平，
+   * 确认时按 id 重新解析一次，只对还活着的那几笔下单。
+   */
+  const [tpslModal, setTpslModal] = useState<{ symbol: string; positionIds: string[]; display: Position; liqPrice: number } | null>(null);
+  /**
+   * 平仓弹窗按**整张卡**开：positionIds 是卡上每一笔的 id（确认时按 id 重新解析，期间被平掉 / 被强平的自动消失）。
+   * 弹窗里显示的仓位**不存快照**：每次渲染按还活着的腿重新合成（syntheticCardPosition），
+   * 弹窗开着时有一笔被强平，可用数量、预计盈亏与那句「N 笔」的说明都跟着变——
+   * 否则用户确认的是「50%」于一个已经不存在的数。
+   * 此前这里存的是单个 index，卡上多于一笔时按钮直接变成「全部平仓」、一键市价平掉两笔——
+   * 一张吃过加仓的卡因此再也不能按成数减仓（见 handleCloseGroup 的注释）。
+   */
+  const [closeModal, setCloseModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   /**
    * 按**仓位 id**记，不按数组下标。下标是活靶子:仓位被移除时一律用 id 过滤,
    * 而强平与平仓由行情时钟触发——模态框开着的这段时间里,下标随时可能整体前移。
@@ -672,12 +745,25 @@ export function PositionPanel({
   const regularColumns = POSITION_COLUMNS.filter(c => !c.hiddenByDefault);
   const hiddenSectionColumns = POSITION_COLUMNS.filter(c => c.hiddenByDefault);
 
-  const handleOpenCloseModal = (symbol: string, index: number, pos: Position) => {
-    setCloseModal({ symbol, index, pos });
+  const handleOpenCloseModal = (symbol: string, positionIds: string[]) => {
+    setCloseModal({ symbol, positionIds });
   };
 
-  const handleCloseConfirm = (symbol: string, index: number, percentage: number) => {
-    onClosePosition(symbol, index, percentage);
+  /**
+   * 成数摊到卡上每一笔（与「止盈/止损」按整张卡生效同一个摊法）：各笔按**自己的数量**平掉同一个成数，
+   * 所以 50% 平的是整张卡的一半、100% 盖住整张卡。
+   *
+   * 两件事必须这样做：
+   *   · **确认那一刻按 id 重新解析下标**——弹窗开着的时候可能有一笔被强平 / 被止盈平掉，
+   *     打开时记下的 index 会指到别人身上；
+   *   · **按下标从大到小**下发——成数为 1 时那一笔会整个从数组里移除，下标随之前移。
+   */
+  const handleCloseConfirm = (symbol: string, positionIds: string[], percentage: number) => {
+    const live = (positionsMap[symbol] ?? [])
+      .map((p, index) => ({ p, index }))
+      .filter(({ p }) => positionIds.includes(p.id) && isPositionOpen(p))
+      .sort((a, b) => b.index - a.index);
+    for (const { index } of live) onClosePosition(symbol, index, percentage);
   };
 
   const handleCloseAll = () => {
@@ -933,11 +1019,14 @@ export function PositionPanel({
                     // Aggregate PnL / notional / 初始保证金 across all children.
                     let totalPnl = 0;
                     let notional = 0;
+                    let maintenance = 0;
                     let initialMargin = 0;
                     for (const c of mg.children) {
                       const mark = price || c.position.entryPrice;
                       totalPnl += calcUnrealizedPnl(c.position, mark);
                       notional += getPositionNotionalUsd(mg.symbol, c.position, mark);
+                      // 维持保证金逐笔按各自的风险模型算（分层 / 旧 0.4%），再加总。
+                      maintenance += positionMaintenanceMarginUsd(mg.symbol, c.position, mark);
                       // 初始保证金 = 名义@开仓 / 杠杆（固定、不含追加保证金），U本位/币本位统一同一口径。
                       initialMargin += getPositionNotionalUsd(mg.symbol, c.position, c.position.entryPrice) / c.position.leverage;
                     }
@@ -946,7 +1035,26 @@ export function PositionPanel({
                     const isProfit = totalPnl >= 0;
                     // 保证金比率（与币安一致）：维持保证金 / 保证金余额；余额含追加保证金，币本位按现价估值。
                     const markValuedMargin = isCoinGroup && totalMarginCoin > 0 && price > 0 ? totalMarginCoin * price : effectiveMargin;
-                    const marginRatio = settlementMarginRatioPct(notional, markValuedMargin, totalPnl);
+                    const pooledMarginRatio = settlementMarginRatioPct(notional, markValuedMargin, totalPnl, maintenance);
+                    /**
+                     * 一笔逐仓仓位自己的保证金比率（各按各的风险模型算维持保证金）。
+                     * 逐仓的保证金**不在腿之间共用**，所以把两条腿的保证金、盈亏、维持保证金各自加总再相除，
+                     * 等于让健康那一腿的浮盈去垫正在死的那一腿——卡上会在一条腿已经 100% 的价位上写出一个好看的数。
+                     */
+                    const legMarginRatio = (leg: Position) => {
+                      const mark = price || leg.entryPrice;
+                      const legNotional = getPositionNotionalUsd(mg.symbol, leg, mark);
+                      const legMargin = leg.isolatedMargin ?? leg.margin;
+                      const legMarkValued = isCoinSettled(leg) && leg.marginCoin != null && leg.marginCoin > 0 && mark > 0
+                        ? leg.marginCoin * mark
+                        : legMargin;
+                      return settlementMarginRatioPct(
+                        legNotional,
+                        legMarkValued,
+                        calcUnrealizedPnl(leg, mark),
+                        positionMaintenanceMarginUsd(mg.symbol, leg, mark),
+                      );
+                    };
                     // 币本位（反向合约）的合约面值固定在 USD 上，持币数量随价格浮动：
                     // 币量 = 名义 USD ÷ 价格。只显示张数的话，「我到底拿着多少币」得自己心算。
                     // 按标记价折算，与同一张卡上显示的标记价、保证金比率同口径。
@@ -965,21 +1073,7 @@ export function PositionPanel({
 
                 // Compute aggregate liquidation price from the first child (approximation for merged)
                 // For merged positions use weighted entry to compute approximate liq
-                const syntheticPos: Position = {
-                  id: `merged_${mg.symbol}_${mg.side}`,
-                  side: mg.side,
-                  entryPrice: mg.weightedEntryPrice,
-                  quantity: totalUnits,
-                  leverage: mg.leverage,
-                  marginMode: mg.marginMode,
-                  margin: mg.totalMargin,
-                  isolatedMargin: mg.totalIsolatedMargin ?? undefined,
-                  settlementMode: firstChild?.settlementMode,
-                  settlementAsset: firstChild?.settlementAsset,
-                  contractSizeUsd: firstChild?.contractSizeUsd,
-                  contracts: isCoinGroup ? totalUnits : undefined,
-                  marginCoin: isCoinGroup ? totalMarginCoin : undefined,
-                };
+                const syntheticPos: Position = syntheticCardPosition(mg.symbol, mg.children.map(c => c.position));
                 /**
                  * 逐仓爆仓是**逐仓位**判的，所以合并卡上该写的是"先死的那一笔"在哪个价，
                  * 而不是把总量/总保证金/加权均价拼成的虚构单仓位算出来的那个数。
@@ -1003,20 +1097,50 @@ export function PositionPanel({
                 const hasIsolated = isolatedChildren.length > 0;
                 const mixedWithCross = hasIsolated && isolatedChildren.length < mg.children.length;
                 const groupFirstLiq = isolatedChildren.length > 0
-                  ? firstLiquidationPrice(isolatedChildren, mg.side)
+                  ? firstLiquidationPrice(isolatedChildren, mg.side, mg.symbol)
                   : null;
                 const liq = mg.marginMode === 'isolated' && groupFirstLiq != null
                   ? groupFirstLiq
-                  : calcLiquidationPrice(syntheticPos);
+                  : calcLiquidationPrice(syntheticPos, mg.symbol);
+                /**
+                 * 保证金比率与上面那个强平价**同一个口径**：逐仓的多笔卡上写「最高」的那一笔，
+                 * 也就是离强平最近的那一笔；全仓照旧写合计（那本来就是一个共用的保证金池，合成才是对的）。
+                 *
+                 * 此前这张卡把各腿的保证金、盈亏、维持保证金各自加总再相除，于是同一张卡上
+                 * 「强平价格（最先）」写着已经到价的那一笔，「保证金比率」却因为另一腿的浮盈还显示 1.48%
+                 * ——两个格子讲相反的故事。逐仓保证金不共用，最高的那个才是这张卡的真实处境。
+                 */
+                const worstLegRatio = mg.marginMode === 'isolated' && groupFirstLiq != null && mg.children.length > 1
+                  ? Math.max(...isolatedChildren.map(legMarginRatio))
+                  : null;
+                const marginRatio = worstLegRatio ?? pooledMarginRatio;
+                /**
+                 * 混口径的合成价（既有按币安分层的腿、也有按旧 0.4% 的腿）**偏乐观**，悬停里要说出来。
+                 *
+                 * 合成仓位混着旧仓位时不盖分层戳（sharedRiskStamp），于是整组按旧的 0.4% 算一个合成强平价；
+                 * 而真正的判定是逐笔各按自己的模型加总。实测（KAITOUSDT 全仓）：旧 30,000 + 分层 10,000 @20x
+                 * 卡上 0.954000、逐笔加总解出来 0.955827（乐观 0.19%）；旧 30,000 + 分层 60,000 @10x 差到 1.27%。
+                 * 方向与本文件开头那次事故一样——把余量显示得比实际多，所以宁可在悬停里明说，
+                 * 也不让人拿这个数当准数用（同一张卡的「保证金比率」已经是逐笔按各自模型加总的）。
+                 * 本轮之前混口径的组只来自豁免×分层；分层上线后「加仓不并进更新前的仓位」让它成了常见画面。
+                 */
+                const crossMixedRiskModels = !(mg.marginMode === 'isolated' && groupFirstLiq != null)
+                  && mg.children.length > 1
+                  && mg.children.some(c => isTieredRiskPosition(c.position))
+                  && !mg.children.every(c => isTieredRiskPosition(c.position));
 
+                /**
+                 * 「平仓」**对整张卡开同一个弹窗**，卡上有几笔都一样。
+                 *
+                 * 此前 children.length > 1 时按钮变成「全部平仓」，一点就市价平掉卡上每一笔、无弹窗无确认——
+                 * 于是一张吃过加仓（或杠杆 / 保证金模式不同）的卡**再也不能按成数减仓**，
+                 * 而这个系统的止盈本来就是机械的镜像减半。合并口径不同的两笔现在会并成一笔（规则二），
+                 * 但规则三那一格（豁免成交旁边站着分层仓位）仍会出现两笔的卡，所以这条路必须留着。
+                 * 成数怎么摊见 handleCloseConfirm。
+                 */
                 const handleCloseGroup = (e: React.MouseEvent) => {
                   e.stopPropagation();
-                  if (mg.children.length === 1) {
-                    handleOpenCloseModal(mg.symbol, mg.children[0].index, mg.children[0].position);
-                  } else if (onCloseAllPositions) {
-                    onCloseAllPositions(mg.children.map(c => ({ symbol: mg.symbol, index: c.index })));
-                    toast.success(`已市价平仓 ${mg.children.length} 个 ${baseCoin} ${mg.side === 'LONG' ? '多' : '空'}仓`);
-                  }
+                  handleOpenCloseModal(mg.symbol, mg.children.map(c => c.position.id));
                 };
 
                 return (
@@ -1104,7 +1228,16 @@ export function PositionPanel({
                           )}
                         </div>
                       </div>
-                      <DetailCell label="保证金比率" value={`${marginRatio.toFixed(2)}%`} />
+                      <DetailCell
+                        label={worstLegRatio != null ? '保证金比率（最高）' : '保证金比率'}
+                        value={`${marginRatio.toFixed(2)}%`}
+                        title={worstLegRatio != null
+                          ? '逐仓的保证金不在各笔之间共用，爆仓也是逐仓位判的：这里写的是这组里比率最高'
+                            + '（离强平最近）的那一笔，与左边的「强平价格（最先）」是同一笔，不是各笔的平均。'
+                            + `整组合计是 ${pooledMarginRatio.toFixed(2)}%——那个数会拿健康那一笔的浮盈去垫正在死的那一笔。`
+                            + (mixedWithCross ? '（卡上的全仓腿不计入：全仓是另一个共用的保证金池。）' : '')
+                          : undefined}
+                      />
                       <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
                       <DetailCell
@@ -1113,7 +1246,11 @@ export function PositionPanel({
                         value={isFinite(liq) ? formatPrice(liq, mg.symbol) : '--'}
                         title={mg.children.length > 1 && mg.marginMode === 'isolated'
                           ? '逐仓爆仓是逐仓位判的：这里写的是这组里最先被强平的那一笔的价格，不是各笔的平均。'
-                          : undefined}
+                          : crossMixedRiskModels
+                            ? '这组里既有按币安分层计维持保证金的仓位，也有按旧 0.4% 的：这个合成价把整组按旧模型算，'
+                              + '比逐笔各按自己模型加总的真实强平价偏乐观（余量显示得比实际多）。真正的判定按逐笔的模型加总，'
+                              + '同卡的「保证金比率」按全仓那一个共用的保证金池算，维持保证金已经是逐笔按各自模型加总的。'
+                            : undefined}
                         valueClassName="text-trading-red"
                       />
                     </div>
@@ -1127,8 +1264,12 @@ export function PositionPanel({
                       const tps = groupOrders.filter(o => o.reduceKind === 'TP');
                       const sls = groupOrders.filter(o => o.reduceKind === 'SL');
                       if (tps.length === 0 && sls.length === 0) return null;
+                      /**
+                       * 同一个价只写一次：卡上按一次「止盈/止损」会给每一笔各挂一张（同价），
+                       * 两笔的卡就会出现「0.9500 / 0.9500」这种重复读数——去重之后这一条仍是「这张卡上有哪些线」。
+                       */
                       const fmtList = (arr: typeof groupOrders) =>
-                        arr.map(o => formatPrice(o.stopPrice, mg.symbol)).join(' / ');
+                        [...new Set(arr.map(o => formatPrice(o.stopPrice, mg.symbol)))].join(' / ');
                       return (
                         <div className="flex items-center gap-3 px-3 pb-2 text-[10px] font-mono tabular-nums">
                           {tps.length > 0 && (
@@ -1151,16 +1292,21 @@ export function PositionPanel({
                     <div className="flex border-t border-border/50">
                       <ActionBtn label="杠杆" onClick={(e) => {
                         e.stopPropagation();
-                        setLeverageModal({ symbol: mg.symbol });
+                        setLeverageModal({ symbol: mg.symbol, settlement: limitSettlementOf(mg.children[0]?.position) });
                       }} />
                       <ActionBtn label="止盈/止损" onClick={(e) => {
                         e.stopPropagation();
-                        // Apply TP/SL to the first child position
-                        const first = mg.children[0];
-                        setTpslModal({ symbol: mg.symbol, index: first.index, pos: first.position });
+                        // 整张卡：卡上每一笔各挂一张（同价、同成数），不再只盖 children[0]。
+                        // 弹窗里的开仓价 / 强平价与卡片同一个口径（加权开仓价、逐仓写"最先"的那一笔）。
+                        setTpslModal({
+                          symbol: mg.symbol,
+                          positionIds: mg.children.map(c => c.position.id),
+                          display: mg.children.length === 1 ? mg.children[0].position : syntheticPos,
+                          liqPrice: liq,
+                        });
                       }} />
                       <ActionBtn
-                        label={mg.children.length > 1 ? '全部平仓' : '平仓'}
+                        label="平仓"
                         danger
                         onClick={handleCloseGroup}
                       />
@@ -1207,6 +1353,13 @@ export function PositionPanel({
                       ? coinNotionalAmount(orderNotional, orderMark)
                       : null;
                     const unitWord = isCoinSettled(order) ? '张' : '';
+                    /**
+                     * 本次更新之后下的触发类开仓单，触发那一刻按当时的敞口再判分层上限（币安在触发时才真正下单）；
+                     * 靠对冲豁免挂出的单（含限价单）触发 / 成交那一刻再判豁免是否仍成立。
+                     * 价格直接走到它的价、或先到另一侧某张挂单的价再折回来（doomedAtTrigger），路上成交 / 触发的挂单到时已是持仓。
+                     * 按此刻的持仓与挂单它到时会被拒：标出来，别等到止损换对冲的那一刻才发现对冲单被撤了。
+                     */
+                    const triggerDoom = doomedAtTrigger(symbol, order, positionsMap[symbol] ?? [], ordersMap[symbol] ?? [], priceMap[symbol] || 0);
                     return (
                       <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
                         <td className="px-3 py-2">
@@ -1227,6 +1380,15 @@ export function PositionPanel({
                             {order.reduceOnly && (
                               <span className="text-[9px] px-1 py-0 rounded bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-[#848e9c] border border-gray-200 dark:border-[#2b3139] whitespace-nowrap">
                                 只减仓
+                              </span>
+                            )}
+                            {triggerDoom && (
+                              <span
+                                data-testid="order-trigger-limit-risk"
+                                title={`${triggerCheckLead(triggerDoom)}：${triggerDoom.message ?? ''}`}
+                                className="text-[9px] px-1 py-0 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/40 whitespace-nowrap"
+                              >
+                                {triggerDoom.kind === 'limit' ? '成交时将超限' : '触发时将超限'}
                               </span>
                             )}
                             {/* 减仓单按触发价折币，主读数会比按标记价折的持仓卡小一截
@@ -1696,14 +1858,20 @@ export function PositionPanel({
         const legs = (positionsMap[sym] ?? []).filter(isPositionOpen);
         const orders = ordersMap[sym] ?? [];
         const mark = priceMap[sym] || 0;
+        /**
+         * 对话框按**点的那张卡**的结算方式取分层；确认时把**同一个**结算方式交给引擎，
+         * 否则引擎按下单面板当前的结算方式（刷新后是币本位）夹值，与对话框给出两个答案。
+         * 不能取 legs[0]：同一个币上 U 本位多、币本位空各一张卡时，点哪张都会拿到第一笔的结算方式。
+         */
+        const dialogSettlement: SettlementMode = leverageModal.settlement
+          ?? limitSettlementOf(legs[0] ?? orders.find(o => !o.reduceOnly));
         return (
           <LeverageModal
             symbol={sym}
             currentLeverage={legs.length > 0
               ? Math.max(...legs.map(p => Math.max(1, p.leverage || 1)))
               : (legs[0]?.leverage ?? 1)}
-            settlementMode={legs[0]?.settlementMode}
-            notional={symbolExposureNotionalUsd(sym, legs, orders, mark)}
+            settlementMode={dialogSettlement}
             positions={legs}
             orders={orders}
             markPrice={mark}
@@ -1715,14 +1883,14 @@ export function PositionPanel({
              * 现在走 applySymbolLeverage 原子重述，并按返回的计划如实报告。
              */
             onConfirm={(newLev) => {
-              const plan = onApplySymbolLeverage(sym, newLev);
+              const plan = onApplySymbolLeverage(sym, newLev, dialogSettlement);
               if (!plan.ok) {
                 toast.error(plan.refusal?.message ?? '杠杆未调整');
                 return;
               }
               toast.success(`杠杆已调整为 ${plan.to}x`, {
                 description: plan.totalReleaseUsd > 1e-9
-                  ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} USDT`
+                  ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} ${dialogSettlement === 'coin' ? 'USD' : 'USDT'}`
                   : undefined,
               });
               setLeverageModal(null);
@@ -1730,34 +1898,52 @@ export function PositionPanel({
           />
         );
       })()}
-      {tpslModal && (
-        <TpSlModal
-          pos={tpslModal.pos}
-          symbol={tpslModal.symbol}
-          settlementMode={tpslModal.pos.settlementMode}
-          markPrice={priceMap[tpslModal.symbol] || 0}
-          liqPrice={calcLiquidationPrice(tpslModal.pos)}
-          onClose={() => setTpslModal(null)}
-          onConfirm={(tp, sl, pct) => {
-            if (onPlaceTpSl) {
-              onPlaceTpSl(tpslModal.symbol, tpslModal.pos, tp, sl, pct);
-            }
-            setTpslModal(null);
-          }}
-        />
-      )}
-      {closeModal && (
-        <ClosePositionModal
-          open={!!closeModal}
-          onClose={() => setCloseModal(null)}
-          symbol={closeModal.symbol}
-          position={closeModal.pos}
-          posIndex={closeModal.index}
-          currentPrice={priceMap[closeModal.symbol] || 0}
-          pricePrecision={getPrecision(closeModal.symbol)}
-          onConfirm={handleCloseConfirm}
-        />
-      )}
+      {(() => {
+        if (!tpslModal) return null;
+        // 每次渲染按 id 重新解析：期间被平掉 / 被强平的腿自动消失，不会误伤别人（与调整保证金同一条规矩）。
+        const live = (positionsMap[tpslModal.symbol] ?? []).filter(p => tpslModal.positionIds.includes(p.id));
+        if (live.length === 0) return null;
+        return (
+          <TpSlModal
+            pos={tpslModal.display}
+            symbol={tpslModal.symbol}
+            settlementMode={tpslModal.display.settlementMode}
+            markPrice={priceMap[tpslModal.symbol] || 0}
+            liqPrice={tpslModal.liqPrice}
+            legCount={live.length}
+            onClose={() => setTpslModal(null)}
+            onConfirm={(tp, sl, pct) => {
+              // 卡上每一笔各挂一张：同一个触发价、同一个成数（成数按各笔自己的数量算），
+              // 「100%」因此盖住整张卡，而不是只盖第一笔。
+              if (onPlaceTpSl) {
+                for (const pos of live) onPlaceTpSl(tpslModal.symbol, pos, tp, sl, pct);
+              }
+              setTpslModal(null);
+            }}
+          />
+        );
+      })()}
+      {(() => {
+        if (!closeModal) return null;
+        // 每次渲染按 id 重新解析：期间被平掉 / 被强平的腿自动消失（与止盈止损、调整保证金同一条规矩）。
+        const live = (positionsMap[closeModal.symbol] ?? [])
+          .filter(p => closeModal.positionIds.includes(p.id) && isPositionOpen(p));
+        if (live.length === 0) return null;
+        // 显示用的仓位按**此刻**还活着的腿合成：可用数量、开仓价、预计盈亏都是这几笔的，不是打开时的快照。
+        const display = live.length === 1 ? live[0] : syntheticCardPosition(closeModal.symbol, live);
+        return (
+          <ClosePositionModal
+            open
+            onClose={() => setCloseModal(null)}
+            symbol={closeModal.symbol}
+            position={display}
+            currentPrice={priceMap[closeModal.symbol] || 0}
+            pricePrecision={getPrecision(closeModal.symbol)}
+            legCount={live.length}
+            onConfirm={(pct) => handleCloseConfirm(closeModal.symbol, closeModal.positionIds, pct)}
+          />
+        );
+      })()}
       {(() => {
         if (!adjustMarginModal || !onAdjustMargin) return null;
         const { symbol, positionIds } = adjustMarginModal;

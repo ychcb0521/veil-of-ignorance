@@ -7,6 +7,8 @@ import type { AddSizingSnapshot, Position, SettlementMode, TradeRecord } from '@
 import { getFreshAddSizingPlan, publishAddSizingPlan, requestAddSizingPrefill, touchAddSizingPlan } from '@/lib/addSizingPlan';
 import { getPriceDecimals } from '@/lib/formatters';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
+import { addTierHeadroom } from '@/lib/addTierHeadroom';
+import { formatTierAmount } from '@/lib/leverageTiers';
 import {
   PRE_MAIN_LOOKBACK_MS,
   evaluateS1Deviation,
@@ -63,6 +65,11 @@ import {
  * 下单面板里已经预填好的那张单还指望着这份计划，打开看一眼不能把它清掉。
  * 但计划只记得它算出来那一刻：X₁ / S̄ 按计划那一侧的持仓重读，G 按本场落袋重读（变了就换成新的并说明），
  * 计划早于当前持仓的开仓（上一场回放、平掉又重开）就整个不认。
+ *
+ * **可下单量还要过币安分层**（addTierHeadroom）：按这个合约当前的杠杆，这一侧还能再开多少（持仓多空相加 + 当前委托），
+ * 而且计划自己的对冲（S₁ 上的合计对冲 X₁ + X₂）也要放得下——它与加仓共用同一个上限。
+ * 大字、张数、合计对冲、「按上限下单」都取 min(Plan B 上限, 分层余量)，一行字说清卡住的是哪一个、给对冲留了多少；
+ * 计划快照记的仍是 Plan B 上限——成交后复判与 Legs 校验只判 Plan B。
  *
  * **算出来的计划会发布出去（addSizingPlan）**：之后同标的同方向的开仓单会把它钉在单子上，
  * 成交、平仓一路带到成交记录，Legs「加仓校验」据此说清计算时与成交时各是多少。
@@ -529,9 +536,81 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
    * 大字、张数、R0、快照、「按上限下单」全部读这一个数，不再各算各的。
    */
   const limitCoins = fillPlan ? fillPlan.addCoinsMax : (planB?.addCoinsMax ?? 0);
-  /** 上限的整张：币本位直接取 fillPlan 按引擎名义向下取整的张数，与快照、按钮同一个数。 */
-  const limitContractsText = isCoin && fillPlan?.contracts != null
-    ? ` · ${fillPlan.contracts.toLocaleString('en-US')} 张`
+
+  /**
+   * 计划的对冲占同一个分层上限：S₁ 上那张反向条件单要盖住 X₁ + X₂。
+   * 已经挂在 S₁ 这条线上的对冲（盘口候选里与 S₁ 是同一条线的）和已成交的反向持仓算已有，只补差额。
+   */
+  const tierHedge = useMemo(() => {
+    const price = toNum(s1);
+    const mainCoins = toNum(x1);
+    if (!(price > 0) || !Number.isFinite(mainCoins) || mainCoins < 0) return null;
+    const resting = hedgeRead.candidates.filter(c => sameLine(c.price, price)).reduce((sum, c) => sum + c.coins, 0);
+    return { price, mainCoins, existingCoins: resting + hedgeRead.filledHedgeCoins };
+  }, [s1, x1, hedgeRead]);
+  /**
+   * 币安分层给这一侧留的余量（按当前杠杆；持仓多空相加 + 非只减仓挂单），单看这一单时与下单面板「可开」同一个判定；
+   * 再给计划的对冲留出位置（加仓与要补挂的对冲都得放得下，两张单谁先成交 / 触发都放得下，也不让已挂的触发单注定被拒）。
+   * 估值价：市价 = 引擎成交基准价，限价 = 挂单价，条件单 = 触发价；币本位的整张按 S₂′ 折回币。
+   * 算不出（还没有价）时为 null，只受 Plan B 约束。
+   */
+  const tierRoom = useMemo(() => addTierHeadroom({
+    symbol, settlement, side,
+    storedLeverage: ctx.leverageMap?.[symbol],
+    positions,
+    orders: ctx.ordersMap?.[symbol],
+    markPrice: seedPrice,
+    orderKind,
+    orderPrice: limitPx,
+    fillPrice: s2Eff,
+    contractFaceUsd: isCoin ? face : null,
+    hedge: tierHedge,
+  }), [symbol, settlement, side, ctx.leverageMap, positions, ctx.ordersMap, seedPrice, orderKind, limitPx, s2Eff, isCoin, face, tierHedge]);
+  const tierCoins = tierRoom ? tierRoom.coins : Infinity;
+  /** 分层比 Plan B 更紧：可下单量按分层来。 */
+  const tierBinds = tierRoom != null && tierCoins < limitCoins * (1 - 1e-12);
+  /** 可下单量 = min(Plan B 上限, 分层余量)：大字、张数、合计对冲、「按上限下单」都读它。 */
+  const offeredCoins = Math.min(limitCoins, tierCoins);
+  const offeredContracts = isCoin && fillPlan?.contracts != null
+    ? (tierRoom?.contracts != null ? Math.min(fillPlan.contracts, tierRoom.contracts) : fillPlan.contracts)
+    : null;
+  /** 可下单量的整张：币本位取 fillPlan 按引擎名义向下取整的张数（再按分层封顶），与按钮同一个数。 */
+  const limitContractsText = offeredContracts != null
+    ? ` · ${offeredContracts.toLocaleString('en-US')} 张`
+    : null;
+  /**
+   * 那一行说明：分层还剩多少、卡住的是哪一个；给对冲留了位置就说留了多少，对冲本身挂不下就直说。
+   */
+  const tierHedgeRoom = tierRoom?.hedge ?? null;
+  /** 对冲在分层里的处境：blocked（对冲本身挂不下）/ binds（给对冲留位后可下单量变小）/ fits / none。 */
+  const tierHedgeState = !tierHedgeRoom
+    ? 'none'
+    : tierHedgeRoom.blocked
+      ? 'blocked'
+      // 分层本身已经没有余量（卡在加仓这一侧）时不谈对冲
+      : !(Number(tierRoom?.coins) > 0) || !(tierHedgeRoom.coins > 0)
+        ? 'none'
+        : tierHedgeRoom.binds ? 'binds' : 'fits';
+  const tierHedgeText = (() => {
+    if (!tierHedgeRoom || !tierRoom) return '';
+    const px = fmtPx(tierHedgeRoom.price);
+    if (tierHedgeState === 'blocked') {
+      const lots = tierHedgeRoom.contracts != null ? ` / ${tierHedgeRoom.contracts.toLocaleString('en-US')} 张` : '';
+      return `——S₁ ${px} 上还要补挂的对冲 ${fmtCoins(tierHedgeRoom.coins, 4)} ${coinName}${lots} 已经放不下`
+        + `（对冲这一侧最多还能挂 ${fmtCoins(tierHedgeRoom.roomCoins, 4)} ${coinName}），先减仓或撤单，再谈加仓`;
+    }
+    if (tierHedgeState === 'binds') {
+      return `（已给 S₁ ${px} 上的合计对冲留出位置，加仓与对冲谁先成交都放得下；不算对冲，单看加仓还能开 ${fmtCoins(tierRoom.alone.coins, 4)} ${coinName}）`;
+    }
+    if (tierHedgeState === 'fits') return `（S₁ ${px} 上的合计对冲也放得下）`;
+    return '';
+  })();
+  const tierRoomText = tierRoom && fillPlan && limitCoins > 0
+    ? `分层上限：当前 ${tierRoom.leverage}x 最多再开 ${fmtCoins(tierRoom.coins, 4)} ${coinName}`
+      + `${tierRoom.contracts != null ? `（${tierRoom.contracts.toLocaleString('en-US')} 张）` : ''}`
+      + tierHedgeText
+      + ` · 持仓和当前委托 ${formatTierAmount(tierRoom.limit.exposureBefore, tierRoom.limit.unit)} / 最高 ${formatTierAmount(tierRoom.limit.cap, tierRoom.limit.unit)}`
+      + (tierBinds ? `——比 Plan B 上限 ${fmtCoins(limitCoins)} ${coinName} 小，可下单量按分层` : '——Plan B 上限更小，按 Plan B')
     : null;
   /**
    * 旋钮是否在用：只有 G > 0 才有 B 腿可拧；K_B 留空（= S₁）或定仓没填时，计划加仓就是上限本身。
@@ -544,13 +623,14 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
   const plannedAddCoins = !planB
     ? 0
     : knobActive
-      ? (bankedRes.ok ? Math.max(0, planB.cushionAddCoins + bankedRes.x2) : Number.NaN)
-      : limitCoins;
+      // 旋钮推出的量同样过不了分层之外的部分：超出分层余量的那一截下不出去
+      ? (bankedRes.ok ? Math.min(Math.max(0, planB.cushionAddCoins + bankedRes.x2), tierCoins) : Number.NaN)
+      : offeredCoins;
   const planBHasRoom = planB != null && planB.available > 0 && limitCoins > 0;
-  const hedgeCoinsAtS1 = toNum(x1) + (Number.isFinite(plannedAddCoins) ? plannedAddCoins : limitCoins);
-  /** Plan A 大字（G = 0）：有 fillPlan 就是同一个上限；没有才退回 Plan A 自己的代数。 */
-  const planAX2 = fillPlan ? limitCoins : cushion.x2Max;
-  const planAHedge = fillPlan ? toNum(x1) + limitCoins : cushion.hedgeCoinsAtS1;
+  const hedgeCoinsAtS1 = toNum(x1) + (Number.isFinite(plannedAddCoins) ? plannedAddCoins : offeredCoins);
+  /** Plan A 大字（G = 0）：有 fillPlan 就是同一个可下单量；没有才退回 Plan A 自己的代数（同样按分层封顶）。 */
+  const planAX2 = fillPlan ? offeredCoins : Math.min(cushion.x2Max, tierCoins);
+  const planAHedge = fillPlan || planAX2 < cushion.x2Max ? toNum(x1) + planAX2 : cushion.hedgeCoinsAtS1;
 
   const bankedProblem = bankedOn && !planB
     ? planBMissingNote(side, toNum(sBar), toNum(s1), s2Eff, toNum(x1))
@@ -644,12 +724,32 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
     if (!open) return undefined;
     return () => touchAddSizingPlan(symbol);
   }, [open, symbol]);
-  /** 「按上限下单」：整张的上限（U 本位是币数）连同下单方式交给下单面板预填，然后关掉弹窗。 */
+  /** 下单面板的数量精度（没给按两位）：按钮上的量、落进面板的量、能不能下单都按它取整。 */
+  const placeDecimals = quantityPrecision != null && Number.isFinite(quantityPrecision) && quantityPrecision >= 0
+    ? Math.max(0, Math.min(12, Math.floor(quantityPrecision)))
+    : 2;
+  /**
+   * U 本位落进下单面板的币数：按面板数量精度**向下取整**（与按钮上的字、与面板预填同一个数）。
+   * 分层余量是二分出来的，收敛只到判定用的相对容差（豁免的底 30,000 × 1e-9 = 3e-5 币）：
+   * 拿没取整的余量判「能不能下单」，余量实际为 0 时按钮照样出现、写着「按上限下单 · 0 KAITO」，
+   * 点下去预填的是 0.00003 币（面板取整后是空数量）。取整之后再判，这一档的按钮直接不出现。
+   */
+  const offeredCoinsPlaceable = (() => {
+    if (!Number.isFinite(offeredCoins) || offeredCoins <= 0) return 0;
+    const scale = 10 ** placeDecimals;
+    return Math.floor(offeredCoins * scale + 1e-7) / scale;
+  })();
+  /** 可下单量至少一整张（币本位）/ 取整后大于 0（U 本位）才给按钮：分层把余量卡到 0 时，预填一张空单没有意义。 */
+  const placeable = planSnapshot != null && (isCoin ? (offeredContracts ?? 0) >= 1 : offeredCoinsPlaceable > 0);
+  /**
+   * 「按上限下单」：可下单量（min(Plan B 上限, 分层余量)，币本位整张、U 本位币数）连同下单方式交给下单面板预填，然后关掉弹窗。
+   * 钉在单子上的计划仍是 Plan B 的（上限 addCoinsMax、整张 contracts 都不改）。
+   */
   const placeAtLimit = () => {
-    if (!planSnapshot) return;
+    if (!planSnapshot || !placeable) return;
     requestAddSizingPrefill(symbol, planSnapshot, {
-      contracts: planSnapshot.contracts,
-      coins: limitCoins,
+      contracts: isCoin ? offeredContracts : planSnapshot.contracts,
+      coins: offeredCoins,
       orderType: orderKind === 'market' ? 'MARKET' : orderKind === 'limit' ? 'LIMIT' : 'CONDITIONAL',
       // 限价挂在定量用的那个价上（已按面板精度向有利侧取整），计划、委托、校验三处是同一个数；条件单的触发价同理
       limitPrice: orderKind === 'limit' ? planSnapshot.s2Fill : null,
@@ -662,9 +762,9 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
   /** 按钮上的量就是落进面板的量：币本位整张；U 本位按面板数量精度向下取整（没给精度按两位）。 */
   const placeAtLimitQty = planSnapshot == null
     ? ''
-    : isCoin && planSnapshot.contracts != null
-      ? `${planSnapshot.contracts.toLocaleString('en-US')} 张`
-      : `${fmtCoinsFloor(limitCoins, quantityPrecision != null && Number.isFinite(quantityPrecision) && quantityPrecision >= 0 ? quantityPrecision : 2)} ${coinName}`;
+    : isCoin && offeredContracts != null
+      ? `${offeredContracts.toLocaleString('en-US')} 张`
+      : `${fmtCoinsFloor(offeredCoins, placeDecimals)} ${coinName}`;
   const orderKindTitle = orderKind === 'market' ? '市价单' : orderKind === 'limit' ? `限价单 @ ${fmtPx(s2Eff)}` : `条件委托 · 触发价 ${fmtPx(limitPx)}（触发后市价）`;
 
   return (
@@ -784,18 +884,28 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
                   : `(${fmtSlipPct(slippagePct)})`}</span>
             </div>
             {/* 把整张的上限直接交给下单面板：不再手抄币数、再让面板按另一个价折一次张。 */}
-            {planSnapshot && (
+            {placeable && (
               <button
                 type="button"
                 data-testid="add-sizing-place-at-limit"
                 onClick={placeAtLimit}
-                title={`按 Plan B 上限预填下单面板：${orderKindTitle} · ${side === 'LONG' ? '开多' : '开空'}`}
+                title={`按${tierBinds ? '分层余量（比 Plan B 上限小）' : ' Plan B 上限'}预填下单面板：${orderKindTitle} · ${side === 'LONG' ? '开多' : '开空'}`}
                 className="ml-auto h-6 rounded border border-primary/40 bg-primary/10 px-2 font-medium text-primary transition-colors hover:bg-primary/20"
               >
                 按上限下单 · {placeAtLimitQty}
               </button>
             )}
           </div>
+          {tierRoomText && (
+            <div
+              data-testid="add-sizing-tier-cap"
+              data-binds={tierBinds ? 'tier' : 'plan-b'}
+              data-hedge={tierHedgeState}
+              className={`text-[10px] ${tierBinds ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+            >
+              {tierRoomText}
+            </div>
+          )}
           {autoLimit && orderKind === 'limit' && (
             <div data-testid="add-sizing-s2-limit-note" className="text-[10px] text-amber-600 dark:text-amber-400">
               手填 S₂ 只能按限价或条件单成交，已切到限价 @S₂；点复位回到市价
@@ -897,8 +1007,8 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
             {!bankedOn && cushion.ok && (
               <>
                 <div className="grid grid-cols-2 gap-2">
-                  {/* G = 0 时 Plan A 就是 Plan B：大字与对冲读同一个 limitCoins（fillPlan 的上限），与按钮、快照一致 */}
-                  <Hero testId="add-sizing-x2" label="加仓上限 X₂"
+                  {/* G = 0 时 Plan A 就是 Plan B：大字与对冲读同一个可下单量（fillPlan 的上限，再按分层封顶），与按钮一致 */}
+                  <Hero testId="add-sizing-x2" label={tierBinds ? '加仓上限 X₂ · 分层封顶' : '加仓上限 X₂'}
                     value={fmtCoins(planAX2)} unit={coinName}
                     sub={`${fmtUsd(planAX2 * s2Eff)} USD${limitContractsText ?? addContracts(planAX2, s2Eff)}`}
                     tone="primary" />
@@ -1033,10 +1143,10 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
                 <div className="grid grid-cols-2 gap-2">
                   <Hero
                     testId="add-sizing-total-add"
-                    label="Plan B 加仓上限"
-                    value={fmtCoins(limitCoins)}
+                    label={tierBinds ? 'Plan B 加仓上限 · 分层封顶' : 'Plan B 加仓上限'}
+                    value={fmtCoins(offeredCoins)}
                     unit={coinName}
-                    sub={`旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(planB.bankedAddCoins)}${limitContractsText ?? addContracts(limitCoins, s2Eff)}`}
+                    sub={`${tierBinds ? `Plan B ${fmtCoins(limitCoins)} · ` : ''}旧仓垫 ${fmtCoins(planB.cushionAddCoins)} + 落袋垫 ${fmtCoins(planB.bankedAddCoins)}${limitContractsText ?? addContracts(offeredCoins, s2Eff)}`}
                     tone="primary"
                   />
                   <Hero
@@ -1058,7 +1168,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
                     unit={coinName}
                     sub={plannedAddCoins > limitCoins * (1 + 1e-9)
                       ? `超出上限 ${fmtCoins(plannedAddCoins - limitCoins)} ${coinName}——见 R0`
-                      : `上限的 ${fmtPct(plannedAddCoins / limitCoins)}`}
+                      : `上限的 ${fmtPct(plannedAddCoins / limitCoins)}${tierBinds && plannedAddCoins >= tierCoins * (1 - 1e-9) ? ' · 已按分层封顶' : ''}`}
                     tone={plannedAddCoins > limitCoins * (1 + 1e-9) ? 'danger' : undefined}
                   />
                 )}

@@ -4,8 +4,8 @@ import { calcLiquidationPrice } from '@/types/trading';
 import { evaluateIsolatedLiquidation } from '@/lib/liquidationGuards';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { getSettlementMarginParts } from '@/lib/tradingSettlement';
+import { maxPositionAtLeverage, resolveSymbolTiers } from '@/lib/leverageTiers';
 import {
-  maxNotionalForLeverage,
   maxSafeLeverageForPosition,
   planLeverageChange,
   symbolExposureNotionalUsd,
@@ -135,16 +135,33 @@ describe('守卫', () => {
     expect(r.floorLeverage).toBe(1);
   });
 
-  it('【G3】档位按该标的**总**敞口算，不是单笔', () => {
-    // 30 万名义 → 20x 上限
-    const big = lumia({ quantity: 300_000 / E, margin: 60_000, isolatedMargin: 60_000 });
+  it('【G3】档位按该标的**总**敞口算，不是单笔——用的是 LUMIAUSDT 自己的币安分层', () => {
+    // LUMIAUSDT 分层：0–1 万 10x、1–6 万 5x、6–7 万 4x、7–25 万 3x、25–250 万 2x……
+    // 30 万名义落在 25–250 万那一档 → 最高 2x
+    // 2x 开的仓：降回 2x 是走得通的，照币安的话说「请调低杠杆倍数至 2x 以下」
+    const big = lumia({ quantity: 300_000 / E, leverage: 2, margin: 150_000, isolatedMargin: 150_000 });
     const exposure = symbolExposureNotionalUsd('LUMIAUSDT', [big], [], E);
     expect(exposure).toBeCloseTo(300_000, 0);
 
-    const r = plan([big], 50);
+    const r = plan([big], 50, E, [], 2);
+    expect(r.to).toBe(10);                     // 滑块之外的 50x 也被夹到合约最高 10x
     expect(r.ok).toBe(false);
     expect(r.refusal?.code).toBe('tier-cap');
-    expect(r.tierMaxLeverage).toBe(20);
+    expect(r.refusal?.message).toContain('请调低杠杆倍数至 2x 以下');
+    expect(r.tierMaxLeverage).toBe(2);
+    expect(r.tierCap).toBe(10_000);            // 10x 最高可持有头寸
+    expect(r.tierUnit).toBe('USDT');
+  });
+
+  it('【复核】同样 30 万、但仓位是 5x 开的：逐仓不能降到 2x——不再叫人「调低杠杆倍数至 2x」，而是说只能减仓', () => {
+    const big = lumia({ quantity: 300_000 / E, margin: 60_000, isolatedMargin: 60_000 });
+    const r = plan([big], 50);
+    expect(r.ok).toBe(false);
+    expect(r.refusal?.code).toBe('exposure-over-cap');
+    expect(r.refusal?.message).not.toContain('请调低杠杆倍数至 2x');
+    expect(r.refusal?.message).toContain('调整杠杆解决不了');
+    expect(r.refusal?.message).toContain('5x 最高 60,000 USDT');
+    expect(r.refusal?.message).toContain('逐仓有持仓时不能降杠杆（当前最低 5x）');
   });
 
   it('【G3】挂单也计入总敞口——小仓位配大挂单不该放行高杠杆', () => {
@@ -181,25 +198,121 @@ describe('全仓与多腿', () => {
   });
 
   it('【回归】混杠杆的旧仓位被一次拉齐——这正是让它们此后能合并的前提', () => {
+    // LUMIAUSDT 最高 10x（币安分层），所以两腿取 5x 与 8x、拉齐到 10x
     const a = lumia({ id: 'a', leverage: 5 });
-    const b = lumia({ id: 'b', leverage: 10, margin: N / 10, isolatedMargin: N / 10 });
+    const b = lumia({ id: 'b', leverage: 8, margin: N / 8, isolatedMargin: N / 8 });
     const r = planLeverageChange({
       symbol: 'LUMIAUSDT', positions: [a, b], orders: [], markPrice: E,
-      currentLeverage: 10, nextLeverage: 10,
+      currentLeverage: 8, nextLeverage: 8,
     });
-    // 10x 与当前一致 → no-change；换成 12x 看两腿都被拉齐
+    // 8x 与当前一致 → no-change；换成 10x 看两腿都被拉齐
     const r2 = planLeverageChange({
       symbol: 'LUMIAUSDT', positions: [a, b], orders: [], markPrice: E,
-      currentLeverage: 10, nextLeverage: 12,
+      currentLeverage: 8, nextLeverage: 10,
     });
-    expect(r).toBeDefined();
+    expect(r.refusal?.code).toBe('no-change');
     expect(r2.ok).toBe(true);
-    expect(r2.legs.map(l => l.next.leverage)).toEqual([12, 12]);
-    expect(r2.floorLeverage).toBe(10);
+    expect(r2.legs.map(l => l.next.leverage)).toEqual([10, 10]);
+    expect(r2.floorLeverage).toBe(8);
   });
 
-  it('档位反读：给定杠杆最多能开多少名义', () => {
-    expect(maxNotionalForLeverage(125)).toBe(50_000);
-    expect(maxNotionalForLeverage(20)).toBe(1_000_000);
+  it('档位反读：给定杠杆最多能持有多少——按合约分层，不再是一张通用表', () => {
+    const lumiaTiers = resolveSymbolTiers('LUMIAUSDT', 'usdt').tiers;
+    expect(maxPositionAtLeverage(lumiaTiers, 10)).toBe(10_000);
+    expect(maxPositionAtLeverage(lumiaTiers, 5)).toBe(60_000);
+    expect(maxPositionAtLeverage(lumiaTiers, 11)).toBe(0);
+    const r = planLeverageChange({
+      symbol: 'LUMIAUSDT', positions: [], orders: [], markPrice: E,
+      currentLeverage: 3, nextLeverage: 5, settlementMode: 'usdt',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.symbolMaxLeverage).toBe(10);
+    expect(r.tierCap).toBe(60_000);
+    expect(r.tierMaxNotionalUsd).toBe(60_000);
+  });
+});
+
+describe('旧版本留下的超上限挂单', () => {
+  const kaitoOrder = (leverage: number): PendingOrder => ({
+    id: `old-${leverage}`, side: 'LONG', type: 'LIMIT', price: 0.9, stopPrice: 0, quantity: 100, leverage,
+    marginMode: 'isolated', settlementMode: 'usdt', settlementAsset: 'USDT', status: 'NEW', createdAt: 1,
+  } as PendingOrder);
+  const kaitoPlan = (orders: PendingOrder[], from: number, to: number) => planLeverageChange({
+    symbol: 'KAITOUSDT', positions: [], orders, markPrice: 1, currentLeverage: from, nextLeverage: to, settlementMode: 'usdt',
+  });
+
+  it('保存的 125x 读成 75x、挂单还是 125x：在 75x 上确认不是「杠杆未变」，挂单被拉回 75x', () => {
+    const r = kaitoPlan([kaitoOrder(125)], 75, 75);
+    expect(r).toMatchObject({ ok: true, refusal: null, to: 75, restatedOrderIds: ['old-125'] });
+  });
+
+  it('挂单杠杆没超过合约上限时，杠杆没变仍是 no-change', () => {
+    expect(kaitoPlan([kaitoOrder(50)], 75, 75).refusal?.code).toBe('no-change');
+    expect(kaitoPlan([], 75, 75).refusal?.code).toBe('no-change');
+  });
+
+  it('只减仓的旧单不算（它不开仓，杠杆只是元数据）', () => {
+    const reduce = { ...kaitoOrder(125), reduceOnly: true } as PendingOrder;
+    expect(kaitoPlan([reduce], 75, 75).refusal?.code).toBe('no-change');
+  });
+});
+
+describe('【复核】现有仓位已超过它自己杠杆的上限：对话框说清出路', () => {
+  /** 更新前按 35x 开的 20,000 KAITO：旧通用表允许，新分层 35x 最多 10,000。没有分层戳。 */
+  const legacyKaito = {
+    id: 'k1', side: 'LONG', quantity: 20_000, entryPrice: 1, leverage: 35, marginMode: 'isolated',
+    settlementMode: 'usdt', settlementAsset: 'USDT', margin: 20_000 / 35, isolatedMargin: 20_000 / 35, openTime: 1_000,
+  } as Position;
+  const kaito = (to: number, from = 35) => planLeverageChange({
+    symbol: 'KAITOUSDT', positions: [legacyKaito], orders: [], markPrice: 1,
+    currentLeverage: from, nextLeverage: to, settlementMode: 'usdt',
+  });
+  const stuck = '只能先减仓或撤单，把总量降到 10,000 USDT 以下再开新单';
+
+  it('降到 25x：仍是「只能提高杠杆」，但补一句提高也没用、只能减仓', () => {
+    const r = kaito(25);
+    expect(r.refusal?.code).toBe('below-floor');
+    expect(r.refusal?.message).toContain('逐仓有持仓时只能提高杠杆，当前最低 35x');
+    expect(r.refusal?.message).toContain('调整杠杆解决不了');
+    expect(r.refusal?.message).toContain(stuck);
+  });
+
+  it('提到 40x：不再叫人「调低杠杆倍数至 25x」（逐仓降不下去），而是只能减仓', () => {
+    const r = kaito(40);
+    expect(r.refusal?.code).toBe('exposure-over-cap');
+    expect(r.refusal?.message).not.toContain('请调低杠杆倍数至 25x');
+    expect(r.refusal?.message).toContain('（含更新前按旧规则开的仓位）');
+    expect(r.refusal?.message).toContain(stuck);
+  });
+
+  it('停在当前的 35x：不是「杠杆未变」，而是把这个死局摆出来（确认键置灰）', () => {
+    const r = kaito(35);
+    expect(r.ok).toBe(false);
+    expect(r.refusal?.code).toBe('exposure-over-cap');
+    expect(r.refusal?.message).toContain(stuck);
+  });
+
+  it('仓位还在上限之内时，这几条都照旧', () => {
+    const small = { ...legacyKaito, quantity: 5_000, margin: 5_000 / 35, isolatedMargin: 5_000 / 35 } as Position;
+    const r = (to: number) => planLeverageChange({
+      symbol: 'KAITOUSDT', positions: [small], orders: [], markPrice: 1,
+      currentLeverage: 35, nextLeverage: to, settlementMode: 'usdt',
+    });
+    expect(r(35).refusal?.code).toBe('no-change');
+    expect(r(25).refusal?.message).toBe('逐仓有持仓时只能提高杠杆，当前最低 35x');
+    expect(r(40).ok).toBe(true);
+  });
+
+  it('LUMIAUSDT（最高 10x）上更新前按 35x 开的小仓位：说清平仓前杠杆调不了、新单最高 10x', () => {
+    const legacyLumia = lumia({ leverage: 35, margin: N / 35, isolatedMargin: N / 35 });
+    const r = planLeverageChange({
+      symbol: 'LUMIAUSDT', positions: [legacyLumia], orders: [], markPrice: E,
+      currentLeverage: 35, nextLeverage: 10, settlementMode: 'usdt',
+    });
+    expect(r.refusal?.code).toBe('below-floor');
+    expect(r.refusal?.message).toBe(
+      '逐仓有持仓时不能降杠杆：现有仓位按 35x 开（高于该合约现在的最高杠杆 10x，是更新前按旧规则开的），'
+      + '平仓前无法调整杠杆；新单最高只能用 10x',
+    );
   });
 });

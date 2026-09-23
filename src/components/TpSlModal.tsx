@@ -13,6 +13,12 @@ interface Props {
   onClose: () => void;
   onConfirm: (tp: number | null, sl: number | null, pct: number) => void;
   settlementMode?: SettlementMode;
+  /**
+   * 这一次覆盖几笔仓位（持仓卡上的「N 笔合并」）。大于 1 时在弹窗里写明：
+   * 每一笔各挂一张、同价同成数，「100%」盖住的是整张卡——用户看的开仓价是加权价、
+   * 强平价是最先被强平的那一笔，落到单子上却是逐笔，这件事必须说出来。
+   */
+  legCount?: number;
 }
 
 export function TpSlModal({
@@ -23,6 +29,7 @@ export function TpSlModal({
   onClose,
   onConfirm,
   settlementMode = 'usdt',
+  legCount = 1,
 }: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
@@ -65,6 +72,13 @@ export function TpSlModal({
               {pos.side === 'LONG' ? '多' : '空'} {pos.leverage}x
             </span>
           </div>
+
+          {legCount > 1 && (
+            <div className="text-[10px] text-muted-foreground text-center" data-testid="tpsl-leg-note">
+              这张卡上的 {legCount} 笔仓位<strong className="text-foreground">各挂一张</strong>（同一个触发价，成数按各笔自己的数量算）：
+              开仓价写的是加权价、强平价写的是最先被强平的那一笔。
+            </div>
+          )}
 
           {/* TP input */}
           <div className="space-y-1.5">

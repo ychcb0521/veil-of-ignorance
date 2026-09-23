@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl } from '@/types/trading';
 import {
@@ -19,11 +19,17 @@ interface Props {
   open: boolean;
   onClose: () => void;
   symbol: string;
+  /**
+   * 要平的那张卡。卡上多于一笔时传的是**合成仓位**（合计数量、加权开仓价、合计保证金与盈亏），
+   * 弹窗只管挑一个成数，成数怎么摊到各笔由调用方决定（PositionPanel 与「止盈/止损」同一个摊法）。
+   */
   position: Position;
-  posIndex: number;
   currentPrice: number;
   pricePrecision: number;
-  onConfirm: (symbol: string, index: number, percentage: number) => void;
+  /** 这张卡上有几笔仓位；> 1 时提示成数会摊到每一笔。 */
+  legCount?: number;
+  /** 确认平仓：只回成数（0–1）。按 id 重新解析各笔、下发给引擎都在调用方那一侧。 */
+  onConfirm: (percentage: number) => void;
 }
 
 const QUICK_PERCENTAGES = [25, 50, 75, 100];
@@ -35,7 +41,7 @@ function roundQty(v: number) {
   return Math.round(v * f) / f;
 }
 
-export function ClosePositionModal({ open, onClose, symbol, position, posIndex, currentPrice, pricePrecision, onConfirm }: Props) {
+export function ClosePositionModal({ open, onClose, symbol, position, currentPrice, pricePrecision, legCount = 1, onConfirm }: Props) {
   const baseCoin = getSettlementAsset(symbol);
   const isCoinMargined = isCoinSettled(position);
   const totalUnits = getPositionUnits(position);
@@ -56,13 +62,27 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
   // Raw input string so users can freely type (e.g. "0.", "0.00")
   const [amountInput, setAmountInput] = useState<string>(() => normalizeAmount(totalUnits).toString());
 
-  // Reset when modal opens for a different position
+  /**
+   * 打开时按全部可用数量起步；弹窗**开着的时候**可用数量变了（卡上有一笔被强平 / 被止盈平掉，
+   * 调用方按还活着的腿重算了合成仓位）就按用户已经挑好的成数换算到新的可用数量——
+   * 挑的是「50%」，那就仍是剩下那些的 50%，而不是悄悄跳回 100%，也不是停在一个已经不存在的数上。
+   */
+  const sessionRef = useRef<{ open: boolean; units: number; amount: number }>({ open: false, units: 0, amount: 0 });
+  sessionRef.current.amount = closeAmount;
   useEffect(() => {
-    if (open) {
-      const initial = normalizeAmount(totalUnits);
-      setCloseAmount(initial);
-      setAmountInput(initial.toString());
+    const prev = sessionRef.current;
+    if (!open) {
+      sessionRef.current = { open: false, units: 0, amount: prev.amount };
+      return;
     }
+    const keepRatio = prev.open && prev.units > 0 && prev.units !== totalUnits;
+    const next = keepRatio
+      ? normalizeAmount(totalUnits * Math.min(1, Math.max(0, prev.amount / prev.units)))
+      : normalizeAmount(totalUnits);
+    sessionRef.current = { open: true, units: totalUnits, amount: next };
+    setCloseAmount(next);
+    setAmountInput(next.toString());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, totalUnits, position.id, isCoinMargined]);
 
   const totalPnl = useMemo(() => calcUnrealizedPnl(position, currentPrice), [position, currentPrice]);
@@ -129,7 +149,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
     const finalAmount = clampAmount(isNaN(parsed) ? closeAmount : parsed);
     if (finalAmount < minQty || totalUnits <= 0) return;
     const finalRatio = Math.min(1, finalAmount / totalUnits);
-    onConfirm(symbol, posIndex, finalRatio);
+    onConfirm(finalRatio);
     onClose();
   };
 
@@ -176,6 +196,14 @@ export function ClosePositionModal({ open, onClose, symbol, position, posIndex, 
             </div>
           </div>
         </div>
+
+        {legCount > 1 && (
+          <div className="text-[10px] text-muted-foreground" data-testid="close-leg-note">
+            这张卡上有 {legCount} 笔仓位（杠杆 / 保证金模式 / 结算方式 / 维持保证金口径任一不同，没有合并）：
+            <strong className="text-foreground">成数摊到每一笔</strong>，各按自己的数量平——
+            上面的数量与开仓价是这一组的合计与加权价，所以「100%」盖住的是整张卡。
+          </div>
+        )}
 
         {/* Amount input + Slider */}
         <div className="space-y-3 pt-1">

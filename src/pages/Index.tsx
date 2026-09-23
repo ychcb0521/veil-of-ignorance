@@ -74,6 +74,7 @@ import {
   mergeFilledPosition,
   type PositionMergeResult,
 } from "@/lib/tradingSettlement";
+import { recheckedAtFill, twapSliceTrigger } from "@/lib/positionLimit";
 import {
   Dialog,
   DialogContent,
@@ -516,9 +517,10 @@ const Index = () => {
       const filledTimelineId = stampClock(symbol);
       const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId, 'order');
 
-      // 付不起就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
+      // 付不起、或触发这一刻超过杠杆分层上限，就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
       // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
-      if (!settleFillDebit(symbol, order, margin, fee, openTime)) {
+      // 带上刚造出的仓位：闸门按这一刻的判定给它定来源（只靠对冲旧仓位的豁免 → 豁免标记、旧模型；否则分层）。
+      if (!settleFillDebit(symbol, order, margin, fee, openTime, { price: entryPrice, position })) {
         const pruned = {
           ...ordersMapRef.current,
           [symbol]: (ordersMapRef.current[symbol] || []).filter((candidate) => candidate.id !== order.id),
@@ -1368,7 +1370,15 @@ const Index = () => {
             const actualFillPrice = position.entryPrice;
             // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
             // 所以 updater 被 React 重跑时不会重复扣款或重复撤单。
-            if (!settleFillDebit(activeSymbol, matchedOrder, margin, fee, simulatedTime)) {
+            // 触发类（条件 / 跟踪 / 旧止盈止损开仓单）在触发这一刻再判一次杠杆分层上限，
+            // 只靠对冲豁免挂出的限价单在成交这一刻再判豁免是否仍成立（recheckedAtFill）；
+            // 同一批已成交的单还在列表里，按 filledIds 排除，免得与刚记进持仓的那笔重复计算。
+            if (!settleFillDebit(
+              activeSymbol, matchedOrder, margin, fee, simulatedTime,
+              isConditionalType || recheckedAtFill(matchedOrder)
+                ? { price: fillPrice, settledOrderIds: filledIds, position }
+                : undefined,
+            )) {
               continue;
             }
             setFilledOrders(prev => upsertOrderSnapshot(prev, {
@@ -1486,6 +1496,14 @@ const Index = () => {
       setOrdersMap((prev) => {
         let changed = false;
         const symOrders = prev[symbol] || [];
+        /**
+         * 这一轮里排在前面、已经处理过的 TWAP：切过一片的新版本、以及被停掉 / 走完的 id。
+         * 持仓的写入是同步的，挂单列表却要等这个 updater 返回才写回——后面的 TWAP 做分层判定时
+         * 要拿这两份替换 / 排除，否则前面刚成交的那一片会按持仓与挂单各算一遍（见 twapSliceTrigger）。
+         * 放在 updater 里：React 重跑 updater 时从空开始。
+         */
+        const slicedThisPass: PendingOrder[] = [];
+        const removedThisPass: string[] = [];
         const updated = symOrders
           .map((order) => {
             if (order.type !== "TWAP") return order;
@@ -1496,6 +1514,7 @@ const Index = () => {
               order.twapFilledQty >= order.twapTotalQty
             ) {
               changed = true;
+              removedThisPass.push(order.id);
               return null;
             }
             if (order.twapNextExecTime && now >= order.twapNextExecTime) {
@@ -1525,8 +1544,13 @@ const Index = () => {
                 );
                 // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
                 // 后面每一片只会更贵(仓位在涨、可用在降)。
-                if (!settleFillDebit(symbol, order, margin, fee, getEffectiveTime(symbol))) {
+                // 每一片都是一笔新市价单：按「持仓 + 其余委托 + 这一片」再判杠杆分层上限，过不去同样停掉。
+                if (!settleFillDebit(
+                  symbol, order, margin, fee, getEffectiveTime(symbol),
+                  { ...twapSliceTrigger(order, sliceOrder, price, { updated: slicedThisPass, removedIds: removedThisPass }), position },
+                )) {
                   changed = true;
+                  removedThisPass.push(order.id);
                   return null;
                 }
                 {
@@ -1544,13 +1568,16 @@ const Index = () => {
                   if (mergeOut.current) twapMerges.push({ symbol, merged: mergeOut.current });
                 }
                 changed = true;
-                return {
+                const next: PendingOrder = {
                   ...order,
                   twapFilledQty: filledSoFar + sliceQty,
                   twapNextExecTime: order.twapNextExecTime! + intervalMs,
                 };
+                slicedThisPass.push(next);
+                return next;
               } else {
                 changed = true;
+                removedThisPass.push(order.id);
                 return null;
               }
             }

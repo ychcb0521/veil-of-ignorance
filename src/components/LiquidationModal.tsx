@@ -10,7 +10,7 @@ interface Props {
 export function LiquidationModal({ open, onClose, details }: Props) {
   if (!open) return null;
   // 逐仓与全仓的强平是两回事：只接管一笔 vs 接管全部全仓，破产价结算 vs 市价 + 0.5% 强平费。
-  const copy = liquidationNoticeCopy(details?.scope, details?.liquidatedPositions);
+  const copy = liquidationNoticeCopy(details?.scope, details?.liquidatedPositions, details?.maintenance);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">

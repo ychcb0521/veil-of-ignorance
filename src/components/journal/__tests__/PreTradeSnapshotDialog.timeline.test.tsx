@@ -4,6 +4,8 @@ import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
+import { toast } from '@/lib/notificationCenter';
+import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import type { SnapshotPayload } from '@/components/journal/PreTradeSnapshotForm';
 
 /**
@@ -40,7 +42,7 @@ vi.mock('@/contexts/TradingContext', () => {
   return { useTradingContext: () => ctx };
 });
 vi.mock('@/lib/journalApi', () => api);
-vi.mock('@/lib/notificationCenter', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('@/lib/notificationCenter', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
 // 表单本身不是这里的题目：两个按钮分别走「提交快照」与「太难不做」。
 vi.mock('@/components/journal/PreTradeSnapshotForm', () => ({
@@ -128,5 +130,51 @@ describe('开仓快照弹窗 · 回放时间线随快照落盘', () => {
     fireEvent.click(screen.getByText('提交快照'));
     await waitFor(() => expect(api.createJournalPreSnapshot).toHaveBeenCalledTimes(2));
     expect(api.createJournalPreSnapshot.mock.calls[1][0]).toMatchObject({ pre_timeline_id: null });
+  });
+});
+
+describe('【复核】决策记录模式：引擎拒单时不报「已提交订单」', () => {
+  const orderParams = { side: 'LONG', type: 'MARKET', quantity: 1 } as unknown as PlaceOrderParams;
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    api.updateJournalTradeRef.mockClear();
+  });
+
+  it('引擎返回 null（被拒，例如超过杠杆分层上限）：不报成功、不关联订单，说清快照已存但没有下单', async () => {
+    const onPlaceOrder = vi.fn(() => null);
+    const { props } = renderDialog({ orderParams, onPlaceOrder });
+    fireEvent.click(screen.getByText('提交快照'));
+    await waitFor(() => expect(onPlaceOrder).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalledWith('已记录开仓快照并提交订单');
+    expect(vi.mocked(toast.error).mock.calls.at(-1)?.[0]).toBe('订单被拒，没有下单；开仓快照已保存，但没有关联订单');
+    expect(api.updateJournalTradeRef).not.toHaveBeenCalled();
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('下单抛错：同样不报成功', async () => {
+    const onPlaceOrder = vi.fn(() => { throw new Error('boom'); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderDialog({ orderParams, onPlaceOrder });
+    fireEvent.click(screen.getByText('提交快照'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalledWith('已记录开仓快照并提交订单');
+  });
+
+  it('下出去了：报成功并关联成交 id', async () => {
+    const onPlaceOrder = vi.fn(() => ({ id: 'fill-1' }));
+    renderDialog({ orderParams, onPlaceOrder });
+    fireEvent.click(screen.getByText('提交快照'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('已记录开仓快照并提交订单'));
+    expect(api.updateJournalTradeRef).toHaveBeenCalledWith('j-1', 'fill-1');
+  });
+
+  it('下出去了但没有可关联的成交 id（分段 / 跟踪 / TWAP 返回空 id）：报成功、不关联', async () => {
+    const onPlaceOrder = vi.fn(() => ({ id: '' }));
+    renderDialog({ orderParams, onPlaceOrder });
+    fireEvent.click(screen.getByText('提交快照'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('已记录开仓快照并提交订单'));
+    expect(api.updateJournalTradeRef).not.toHaveBeenCalled();
   });
 });

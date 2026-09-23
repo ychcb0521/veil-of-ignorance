@@ -1,4 +1,5 @@
 import type { OrderSide } from '@/types/trading';
+import { isListedBaseAsset, listedCoinContractSizeUsd } from '@/lib/leverageTierData';
 
 export type CoinLikeInstrument = {
   settlementMode?: 'usdt' | 'coin' | null;
@@ -8,14 +9,25 @@ export type CoinLikeInstrument = {
   quantity?: number | null;
 };
 
+/** 可能的计价后缀。真正用到的只有 USDT 与 USD，USDC / BUSD 是历史上的交易对留的。 */
+const QUOTE_ASSETS = ['USDT', 'USDC', 'BUSD', 'USD'] as const;
+
+/**
+ * 交易对的基础币。计价后缀**只去掉一个**：此前 USDT、USDC、BUSD、USD 依次各去一遍，
+ * USDCUSDT → USDC → '' → 兜底成 BTC（FDUSDUSDT 则变成 FD），币本位于是借错了合约的分层与面值。
+ *
+ * 一个后缀也可能有两种切法：'BNBUSD' 既以 BUSD 结尾又以 USD 结尾（ARBUSD、TRBUSD……凡是基础币以 B 结尾的都是），
+ * 只按最长的后缀切会得到 'BN'，于是查不到 BNBUSD_PERP，币本位 BNB 悄悄借了通用 U 本位表（50x）而不是它自己的 20x。
+ * 所以**留得多的先试**（后缀短的先试），取快照里真有这个合约的那一个：BNBUSD → BNB（快照有 BNBUSDT / BNBUSD，没有 BNUSDT）。
+ * 都查不到就退回原来的切法（后缀长的优先），BUSD 计价的老交易对（BTCBUSD → BTC）因此不变。
+ */
 export function getSettlementAsset(symbol: string): string {
-  const normalized = (symbol || 'BTCUSDT').toUpperCase().replace(/[-_/]/g, '');
-  const stripped = normalized
-    .replace(/PERP$/, '')
-    .replace(/USDT$/, '')
-    .replace(/USDC$/, '')
-    .replace(/BUSD$/, '')
-    .replace(/USD$/, '');
+  const normalized = (symbol || 'BTCUSDT').toUpperCase().replace(/[-_/]/g, '').replace(/PERP$/, '');
+  const bases = QUOTE_ASSETS
+    .filter(quote => normalized.endsWith(quote))
+    .map(quote => normalized.slice(0, -quote.length))
+    .sort((a, b) => b.length - a.length);
+  const stripped = bases.find(base => base && isListedBaseAsset(base)) ?? bases[bases.length - 1] ?? normalized;
   return stripped || 'BTC';
 }
 
@@ -23,8 +35,15 @@ export function getCoinMarginedSymbol(symbol: string): string {
   return `${getSettlementAsset(symbol)}USD_PERP`;
 }
 
+/** 币安没有上线的币本位合约（模拟器合成的，例如 KAITOUSD）按主流山寨币的面值：10 USD/张。 */
+export const SYNTHETIC_COIN_CONTRACT_SIZE_USD = 10;
+
+/**
+ * 币本位合约面值（USD/张）。币安已上线的按 dapi exchangeInfo 的 contractSize
+ * （快照：BTCUSD 100，其余 19 个永续 10）；没上线的合成合约取 10。
+ */
 export function getCoinMarginedContractSizeUsd(symbol: string): number {
-  return getSettlementAsset(symbol) === 'BTC' ? 100 : 10;
+  return listedCoinContractSizeUsd(getSettlementAsset(symbol)) ?? SYNTHETIC_COIN_CONTRACT_SIZE_USD;
 }
 
 export function getCoinContractSizeUsd(symbol: string, item?: CoinLikeInstrument | null): number {

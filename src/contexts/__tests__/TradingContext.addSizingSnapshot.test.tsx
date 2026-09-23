@@ -15,7 +15,8 @@ import { __resetNotificationCenterForTests, getNotificationSnapshot } from '@/li
 import { computePlanBCoverageAtS1, sizeAddAtExpectedFill } from '@/lib/addSizing';
 import { addSizingSnapshotLines, evaluateCampaignAddSizing } from '@/lib/campaignAddSizingCheck';
 import { calcSlippage, type AddSizingSnapshot, type TradeRecord } from '@/types/trading';
-import { executeSettlementFill, isPositionOpen } from '@/lib/tradingSettlement';
+import { executeSettlementFill, isPositionOpen, mergeFilledPosition } from '@/lib/tradingSettlement';
+import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
 import type { TradeJournal } from '@/types/journal';
 
 /**
@@ -724,5 +725,118 @@ describe('【回归 · 三审】条件单触发后的复判入口；清除标的
     act(() => { result.current.handleClearSymbolData('ETHUSDT'); });
     expect(getAddSizingPlan('ETHUSDT')).toBeNull();
     expect(getAddSizingPlan('BTCUSDT')).not.toBeNull();
+  });
+});
+
+/**
+ * 【合并复核】加仓计划（146cef12）与币安分层（本分支）在同一条路径上相遇：
+ *   · 条件单触发时被分层上限拒掉，与保证金不足被撤是同一个出口（settleFillDebit → restoreCancelledAddPlan），计划照样放回；
+ *   · 委托上同时带着计划与分层戳，成交、合并、部分平仓、记录各走各的，谁也没把谁挤掉。
+ * KAITOUSDT U 本位 15x：最高 50,000 USDT。
+ */
+describe('【合并复核】加仓计划 × 币安分层', () => {
+  const kaito = (over: Partial<PlaceOrderParams> = {}): PlaceOrderParams => marketLong({
+    leverage: 15, latestPrice: 1, quantity: 20_000, inputAmount: 20_000, ...over,
+  });
+  const kaitoPlan = (over: Partial<Omit<AddSizingSnapshot, 'at'>> = {}) => plan({
+    s1: 0.9, s2Ref: 1.2, s2Fill: 1.2012, slippagePct: 0.1, x1: 20_000, sBar: 1, addCoinsMax: 20_000, orderKind: 'conditional',
+    ...over,
+  });
+  const setup = () => {
+    const view = mount();
+    const { result } = view;
+    act(() => { result.current.setPriceMap({ KAITOUSDT: 1 }); result.current.sim.startSimulation(SIM0); });
+    act(() => { result.current.handlePlaceOrder('KAITOUSDT', kaito()); });          // 主仓多 20,000
+    expect(result.current.positionsMap.KAITOUSDT[0]).toMatchObject({ riskModel: 'binance-tiers-v1', quantity: 20_000 });
+    return view;
+  };
+
+  it.each([
+    ['触发时超过分层上限', 'tier'],
+    ['成交时保证金不足', 'margin'],
+  ] as const)('条件加仓单%s被撤：计划原样放回（去掉 s2AtOrder、保鲜期不续）', (_label, cause) => {
+    const { result } = setup();
+    publishAddSizingPlan('KAITOUSDT', kaitoPlan());
+    const original = getAddSizingPlan('KAITOUSDT')!.snapshot;
+    // 下单时两道都过：20,000 + 24,000 = 44,000；触发价上 24,000 + 24,000 = 48,000
+    act(() => { result.current.handlePlaceOrder('KAITOUSDT', kaito({ type: 'CONDITIONAL', stopPrice: 1.2 })); });
+    const stop = result.current.ordersMap.KAITOUSDT.find(o => o.type === 'CONDITIONAL')!;
+    expect(stop).toMatchObject({ riskModel: 'binance-tiers-v1', addSizingSnapshot: { ...original, s2AtOrder: 1.2 } });
+    expect(getAddSizingPlan('KAITOUSDT')).toBeNull();
+    // 之后又开了空 5,000（方向不同，不带计划）：到 1.2 时 24,000 + 6,000 + 24,000 = 54,000
+    act(() => { result.current.handlePlaceOrder('KAITOUSDT', kaito({ side: 'SHORT', quantity: 5_000, inputAmount: 5_000 })); });
+    expect(getAddSizingPlan('KAITOUSDT')).toBeNull();
+
+    vi.setSystemTime(T0 + 60_000);
+    let ok = true;
+    act(() => {
+      ok = cause === 'tier'
+        ? result.current.settleFillDebit('KAITOUSDT', stop, 1_600, 12, SIM0 + 60_000, { price: 1.2 })
+        : result.current.settleFillDebit('KAITOUSDT', stop, 1e12, 1, SIM0 + 60_000);
+    });
+    expect(ok).toBe(false);
+    const errors = getNotificationSnapshot().entries.filter(e => e.level === 'error').map(e => e.title);
+    expect(errors).toContain(cause === 'tier' ? '触发时超过杠杆分层上限，委托已撤销' : '保证金不足，委托已撤销');
+    const restored = getAddSizingPlan('KAITOUSDT')!;
+    expect(restored.snapshot).toEqual(original);
+    expect('s2AtOrder' in restored.snapshot).toBe(false);
+    expect(restored.snapshot.at).toBe(T0);
+    expect(restored.prefill).toBeNull();
+    const cancelled = JSON.parse(localStorage.getItem('sim_anon_cancelled_orders') ?? '[]') as Array<{ id: string }>;
+    expect(cancelled.map(c => c.id)).toContain(stop.id);
+  });
+
+  it('委托 → 成交 → 合并 → 部分平仓 → 记录：计划与分层戳都在各自该在的地方', () => {
+    const { result } = setup();
+    // 市价加仓（带计划）：并进主仓，仓位仍按分层，这一笔带计划
+    publishAddSizingPlan('KAITOUSDT', kaitoPlan({ orderKind: 'market', s2Ref: 1, s2Fill: 1.0001, addCoinsMax: 3_000 }));
+    act(() => { result.current.handlePlaceOrder('KAITOUSDT', kaito({ quantity: 2_000, inputAmount: 2_000 })); });
+    let main = result.current.positionsMap.KAITOUSDT.find(p => p.side === 'LONG')!;
+    expect(main.riskModel).toBe('binance-tiers-v1');
+    expect(main.fills).toHaveLength(2);
+    expect(main.fills![1].addSizingSnapshot).toMatchObject({ orderKind: 'market', s2AtOrder: 1 });
+
+    // 限价加仓（带计划）：委托上两样都带
+    publishAddSizingPlan('KAITOUSDT', kaitoPlan({ orderKind: 'limit', s2Ref: 1.05, s2Fill: 1.05, slippagePct: 0, addCoinsMax: 3_000 }));
+    const limitPlan = getAddSizingPlan('KAITOUSDT')!.snapshot;
+    act(() => {
+      result.current.handlePlaceOrder('KAITOUSDT', kaito({ type: 'LIMIT', price: 1.05, priceSelection: 'LIMIT', quantity: 3_000, inputAmount: 3_000 }));
+    });
+    const limit = result.current.ordersMap.KAITOUSDT.find(o => o.type === 'LIMIT')!;
+    expect(limit).toMatchObject({ riskModel: 'binance-tiers-v1', addSizingSnapshot: { ...limitPlan, s2AtOrder: 1.05 } });
+
+    // 成交（与 Index 的挂单成交同一路径）：新的一笔带戳、带计划；并进主仓后仓位的戳不变
+    const heldBefore = result.current.positionsMap.KAITOUSDT.filter(isPositionOpen);
+    const { fee, margin, position } = executeSettlementFill('KAITOUSDT', 1.05, limit, true, SIM0 + 60_000, Date.now());
+    expect(position).toMatchObject({ riskModel: 'binance-tiers-v1', riskSymbol: 'KAITOUSDT' });
+    expect(position.addSizingSnapshot).toMatchObject({ orderKind: 'limit', s2AtOrder: 1.05 });
+    let settled = false;
+    act(() => { settled = result.current.settleFillDebit('KAITOUSDT', limit, margin, fee, SIM0 + 60_000); });
+    expect(settled).toBe(true);
+    const merged = mergeFilledPosition('KAITOUSDT', heldBefore, position);
+    act(() => {
+      result.current.setOrdersMap(prev => ({ ...prev, KAITOUSDT: (prev.KAITOUSDT ?? []).filter(o => o.id !== limit.id) }));
+      result.current.setPositionsMap(prev => ({ ...prev, KAITOUSDT: merged.positions }));
+    });
+    main = result.current.positionsMap.KAITOUSDT.find(p => p.side === 'LONG')!;
+    expect(main.riskModel).toBe('binance-tiers-v1');
+    expect(main.quantity).toBe(25_000);
+    expect(main.fills!.map(f => f.addSizingSnapshot?.orderKind ?? null)).toEqual([null, 'market', 'limit']);
+
+    // 部分平仓一半：剩下的仓位仍带戳、每一笔的计划原样留着；记录里只有带计划的那两笔带着它
+    const index = result.current.positionsMap.KAITOUSDT.findIndex(p => p.side === 'LONG');
+    act(() => { result.current.handleClosePosition('KAITOUSDT', index, 0.5); });
+    const rest = result.current.positionsMap.KAITOUSDT.find(p => p.side === 'LONG')!;
+    expect(rest.riskModel).toBe('binance-tiers-v1');
+    expect(rest.quantity).toBeCloseTo(12_500, 6);
+    expect(rest.fills!.map(f => f.addSizingSnapshot?.orderKind ?? null)).toEqual([null, 'market', 'limit']);
+    // 分层维持保证金照旧：12,500 落在 10,000–25,000 那一档 → 12,500 × 2% − 75 = 175（旧 0.4% 是 50）
+    expect(positionMaintenanceMarginUsd('KAITOUSDT', rest, 1)).toBeCloseTo(175, 6);
+    const records = result.current.tradeHistory.filter(r => r.symbol === 'KAITOUSDT' && r.action === 'CLOSE');
+    expect(records).toHaveLength(3);
+    const byFill = (i: number) => records.find(r => r.fillId === main.fills![i].id)!;
+    expect(byFill(0).addSizingSnapshot).toBeUndefined();
+    expect(byFill(1).addSizingSnapshot).toMatchObject({ orderKind: 'market' });
+    expect(byFill(2).addSizingSnapshot).toMatchObject({ orderKind: 'limit', s2AtOrder: 1.05 });
   });
 });

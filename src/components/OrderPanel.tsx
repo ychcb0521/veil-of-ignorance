@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import type { OrderSide, OrderType } from '@/types/trading';
-import { ORDER_TYPE_INFO, getMaxLeverageForNotional, getLeverageTierInfo, MAINTENANCE_MARGIN_RATE, calcSlippage, calcUnrealizedPnl } from '@/types/trading';
+import type { OrderSide, OrderType, Position } from '@/types/trading';
+import { ORDER_TYPE_INFO, calcLiquidationPrice, calcSlippage, calcUnrealizedPnl } from '@/types/trading';
+import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
 import { consumeAddSizingPrefill, peekAddSizingSnapshotForOrder, useAddSizingPrefill } from '@/lib/addSizingPlan';
 import { roundLimitPriceFavorable } from '@/lib/addSizing';
 import { ChevronDown, Check, AlertTriangle, Crosshair, ArrowLeftRight, Calculator, Gauge, Info, MoreHorizontal } from 'lucide-react';
@@ -16,9 +17,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { PlaceOrderParams } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
-import { formatUSDT } from '@/lib/formatters';
+import { formatAmount, formatPrice, formatUSDT } from '@/lib/formatters';
 import { LeverageModal } from '@/components/LeverageModal';
-import { symbolExposureNotionalUsd } from '@/lib/leverageRestatement';
 import { toast } from '@/lib/notificationCenter';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
 import {
@@ -32,8 +32,26 @@ import {
 } from '@/lib/coinMargined';
 import { orderPriceKindLabel, panelReferencePrice } from '@/lib/orderReferencePrice';
 import {
-  getPositionNotionalUsd,
-} from '@/lib/tradingSettlement';
+  checkPlacementPositionLimit,
+  clampLeverageAcrossSettlements,
+  isTriggerRecheckedOrder,
+  limitSettlementOf,
+  newlyDoomedTriggerOrders,
+  orderWaypointPrice,
+  placementAftermath,
+  placementCheckPrice,
+  placementFloatsWithMark,
+  placementOrderValuation,
+  placementSizingRemainingUsd,
+  placementUnitPriceUsd,
+  placementUsesLegacyHedge,
+  triggerRiskMessage,
+} from '@/lib/positionLimit';
+import { isPositionOpen, mergeFilledPosition } from '@/lib/tradingSettlement';
+import { isLegacyHedgeRisk, isTieredRiskPosition, legacyHedgeRiskStamp, positionRiskStamp } from '@/lib/positionRiskModel';
+import { formatTierAmount } from '@/lib/leverageTiers';
+import { noticeLeverageClamp } from '@/lib/leverageClampNotice';
+import { LeverageTierTable } from '@/components/LeverageTierTable';
 
 // Re-export for convenience
 export type { PlaceOrderParams };
@@ -116,7 +134,7 @@ export function OrderPanel({
     for (const p of ps) {
       const mark = ctx.priceMap[posSymbol] ?? p.entryPrice;
       totalMargin += p.margin;
-      totalMaintenance += getPositionNotionalUsd(posSymbol, p, mark) * MAINTENANCE_MARGIN_RATE;
+      totalMaintenance += positionMaintenanceMarginUsd(posSymbol, p, mark);
       totalPnl += calcUnrealizedPnl(p, mark);
     }
   }
@@ -214,9 +232,24 @@ export function OrderPanel({
     if (ctx.leverageMap[symbol] != null) return;
     if ((ctx.positionsMap[symbol]?.length ?? 0) > 0) return;
     if ((ctx.ordersMap[symbol]?.length ?? 0) > 0) return;
-    ctx.setSymbolLeverage(symbol, clampPrefLeverage(tradingPrefs.defaultLeverage));
+    /**
+     * 偏好的 1–50x 再夹到这个币的最高杠杆：KAITO 以外还有不少只到 10x、20x 的合约。
+     * 杠杆按标的只存一份，而同一个币的 U 本位与币本位上限可能不同（BNB 75x / 20x）：
+     * 存「两张合约里较高的上限」与偏好的较小者，读的时候再按各自的结算方式夹——
+     * 面板每次刷新都在币本位，按它夹会把 U 本位那张合约也永久压到币本位的上限。
+     */
+    ctx.setSymbolLeverage(symbol, clampLeverageAcrossSettlements(symbol, clampPrefLeverage(tradingPrefs.defaultLeverage)), 'any');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, tradingPrefs.useDefaultLeverage, tradingPrefs.defaultLeverage]);
+
+  /**
+   * 保存的杠杆超过这个合约的最高杠杆（例如旧版本允许的 125x 放在只到 75x 的 KAITO 上）时，
+   * 读出来的已经是夹过的值（TradingContext.getSymbolLeverage）。这里只负责说一声，每个值只说一次。
+   */
+  const storedLeverage = ctx.leverageMap?.[symbol];
+  useEffect(() => {
+    noticeLeverageClamp({ symbol, settlement: settlementMode, stored: storedLeverage, applied: leverage });
+  }, [symbol, settlementMode, storedLeverage, leverage]);
 
   // 换标的或切结算方式时，数量单位回到该模式的原生单位并清空输入——
   // 否则「5,000,000」这种数字会带着上一个模式的语义留在框里，极易误读。
@@ -335,16 +368,308 @@ export function OrderPanel({
     ? coinNotionalUsd(effectiveQty, contractSizeUsd) / effectivePrice
     : 0;
 
-  const maxAllowedLeverage = getMaxLeverageForNotional(notionalValue);
-  const leverageExceeded = leverage > maxAllowedLeverage && notionalValue > 0;
-  const tierInfo = getLeverageTierInfo(notionalValue);
+  /**
+   * 币安分层上限（-2027）：判的是**下单之后**这个合约的总敞口——持仓（多空绝对值相加）
+   * + 当前委托 + 这一单，不是这一单自己。杠杆对话框与引擎下单读的是同一个判定。
+   * 面板的「平仓」档并不平仓（见 belowMinContract 的注释），所以这里没有只减仓豁免。
+   */
+  const symbolOrders = ctx.ordersMap?.[symbol] ?? [];
+  /**
+   * 这一单按引擎的口径估值（placementOrderValuation，与 handlePlaceOrder 同一个函数）：USD 名义与估值价。
+   * 分段订单按各子单的委托价、跟踪委托按激活价，其余按折算价；真币本位按估值价把名义折成币——
+   * 一张低于现价的买入限价单按委托价折，成交后的仓位才不会超出上限。
+   * 已经穿价的限价单（买价 ≥ 现价、卖价 ≤ 现价）下一根就成交，按现价估值——所以估值按方向各算一份。
+   */
+  const limitDraft = {
+    type: orderType,
+    quantity: effectiveQty,
+    price: priceSelection === 'LIMIT' ? (parseFloat(price) || 0) : 0,
+    stopPrice: parseFloat(stopPrice) || 0,
+    settlementMode,
+    contracts: isCoinMargined ? effectiveQty : undefined,
+    contractSizeUsd: isCoinMargined ? contractSizeUsd : undefined,
+    scaledCount: parseInt(scaledCount) || 5,
+    scaledStartPrice: parseFloat(scaledStartPrice) || 0,
+    scaledEndPrice: parseFloat(scaledEndPrice) || 0,
+  };
+  const draftFor = (side: OrderSide) => ({ ...limitDraft, side });
+  /** 立即成交（市价 / 最优价）的单按现价估值，也不再判第二道。 */
+  const executesNow = orderType === 'MARKET' || priceSelection === 'BEST';
+  const valuationFor = (side: OrderSide) => placementOrderValuation(symbol, draftFor(side), effectivePrice, currentPrice);
+  /** 数量还没填时也要知道估值价（「可开」按它折回 USD）：按一个单位的量估。 */
+  const valuationPriceFor = (side: OrderSide) => (effectiveQty > 0
+    ? valuationFor(side).price
+    : placementOrderValuation(
+      symbol,
+      { ...draftFor(side), quantity: 1, contracts: isCoinMargined ? 1 : undefined },
+      effectivePrice,
+      currentPrice,
+    ).price);
+  /**
+   * 两个方向各判一道：对冲更新前仓位的反向单不受上限约束（见 positionLimit 文件头），
+   * 所以开多 / 开空可能一个能下、一个不能；同一个限价对一个方向已经穿价、对另一个方向还挂着，估值与第二道也不同。
+   * 第二道与引擎下单同一个判定（checkPlacementPositionLimit）：条件委托 / 跟踪委托按触发价（激活价），
+   * 不会立即成交的限价单按成交那一刻的委托价（分段订单取离现价最远的子单）。
+   */
+  /** 第二道的价：限价类只对还挂得住的方向有（穿价的方向下一根就按现价成交，没有第二道）。 */
+  const secondGates = {
+    LONG: placementCheckPrice(draftFor('LONG'), currentPrice, executesNow),
+    SHORT: placementCheckPrice(draftFor('SHORT'), currentPrice, executesNow),
+  };
+  const limitCheckFor = (side: OrderSide) => {
+    const gate = secondGates[side];
+    return checkPlacementPositionLimit({
+      symbol,
+      settlement: settlementMode,
+      leverage,
+      positions,
+      orders: symbolOrders,
+      markPrice: currentPrice,
+      orderNotionalUsd: effectiveQty > 0 ? valuationFor(side).usd : 0,
+      orderPrice: valuationPriceFor(side),
+      side,
+      triggerPrice: gate.price,
+      triggerKind: gate.kind,
+    });
+  };
+  const limitChecks = { LONG: limitCheckFor('LONG'), SHORT: limitCheckFor('SHORT') };
+  /** 分层单位、当前杠杆的上限、浮层：两个方向相同，取开多那一道。 */
+  const limitCheck = limitChecks.LONG;
+  /** U 本位每个币在引擎眼里的单价（分段 = 阶梯均价，跟踪 = 激活价，已经穿价的限价 = 现价），仓位比例按钮按它换数量。 */
+  const placementUnits = {
+    LONG: placementUnitPriceUsd(symbol, draftFor('LONG'), effectivePrice, priceRef.kind === 'market', currentPrice),
+    SHORT: placementUnitPriceUsd(symbol, draftFor('SHORT'), effectivePrice, priceRef.kind === 'market', currentPrice),
+  };
+  const sideBlocked = {
+    LONG: notionalValue > 0 && !limitChecks.LONG.ok,
+    SHORT: notionalValue > 0 && !limitChecks.SHORT.ok,
+  };
+  const leverageExceeded = sideBlocked.LONG || sideBlocked.SHORT;
+  /** 按钮上的字（「平仓」档的开多按钮写的是「平空」）。 */
+  const sideButtonLabel = (side: OrderSide) => (actionMode === 'OPEN'
+    ? (side === 'LONG' ? '开多' : '开空')
+    : (side === 'LONG' ? '平空' : '平多'));
+  /**
+   * 限价单只对这个方向穿价（买价高于现价、卖价低于现价；另一个方向挂得住）：下一根就成交，等于市价单，按现价估值——
+   * 拒绝理由前说一句，免得挂单方向照常、另一个方向却标红时看不懂。委托价就是现价时两个方向一样，不说。
+   */
+  const limitPriced = !executesNow && (orderType === 'LIMIT' || orderType === 'POST_ONLY');
+  const crossedLead = (side: OrderSide) => (
+    limitPriced && placementUnits[side].atMarket && !placementUnits[side === 'LONG' ? 'SHORT' : 'LONG'].atMarket
+      ? `${side === 'LONG' ? '买' : '卖'}价已穿过现价、下一根就成交，按现价估值：`
+      : ''
+  );
+  /** 两个方向的话一样就只说一遍；不一样（有旧仓位、或限价对一个方向已经穿价时）分别说是哪个按钮。 */
+  const limitWarningText = (() => {
+    const longText = sideBlocked.LONG ? `${crossedLead('LONG')}${limitChecks.LONG.message ?? ''}` : null;
+    const shortText = sideBlocked.SHORT ? `${crossedLead('SHORT')}${limitChecks.SHORT.message ?? ''}` : null;
+    if (longText && shortText && longText === shortText) return longText;
+    return [
+      longText && `${sideButtonLabel('LONG')}：${longText}`,
+      shortText && `${sideButtonLabel('SHORT')}：${shortText}`,
+    ].filter(Boolean).join(' ');
+  })();
+  const tierUnit = limitCheck.unit;
+  /** 分层是借来的（合成币本位）或兜底的，要在数字旁边说清楚。 */
+  const tierNote = limitCheck.note;
+  /**
+   * 挂着的、触发 / 成交时会被再判的开仓单（本次更新之后下的触发类单、靠对冲豁免挂出的限价单）到时按那一刻的敞口再判：
+   * 这张单下出去之后，哪张会注定被撤——价格直接走到那张单的价，或先到另一侧某张挂单的价再折回来
+   * （restingTriggerScenarios；这一单若是路上会成交的限价单 / 会触发的条件单，到时已是持仓）。
+   * 这一单自己是触发类单时，「另一侧的挂单先成交、再折回来触发它」的走法也一并说。
+   * 币安不拦这一单，面板也不拦，只在点按钮之前摆出来；引擎下单成功后再往消息中心记一条。
+   */
+  const hasRecheckedOrders = symbolOrders.some(o => isTriggerRecheckedOrder(o) || orderWaypointPrice(o) > 0);
+  const triggerRiskFor = (side: OrderSide) => (hasRecheckedOrders && effectiveQty > 0 && !sideBlocked[side]
+    ? triggerRiskMessage(newlyDoomedTriggerOrders({
+      symbol,
+      positions,
+      orders: symbolOrders,
+      added: placementAftermath(
+        { ...limitDraft, side, leverage },
+        { markPrice: currentPrice, immediate: executesNow, legacy: placementUsesLegacyHedge(limitChecks[side]) },
+      ),
+      markPrice: currentPrice,
+    }), '这张单下出去后')
+    : null);
+  const triggerRiskWarning = (() => {
+    const longRisk = triggerRiskFor('LONG');
+    const shortRisk = triggerRiskFor('SHORT');
+    if (!longRisk && !shortRisk) return null;
+    if (longRisk && shortRisk && longRisk.title === shortRisk.title) return [longRisk];
+    return [
+      longRisk && { ...longRisk, title: `${sideButtonLabel('LONG')}：${longRisk.title}` },
+      shortRisk && { ...shortRisk, title: `${sideButtonLabel('SHORT')}：${shortRisk.title}` },
+    ].filter((r): r is { title: string; description: string } => r != null);
+  })();
+  /**
+   * 只靠「对冲更新前的仓位」那条豁免放行的方向：引擎给这一单盖豁免标记、按旧模型开，在按钮前说一声，
+   * 免得看着一张远超分层的单下得出去，以为分层维持保证金也照常适用；也说清挂着的单到时还要再判一次。
+   */
+  const legacyHedgeNote = (() => {
+    if (!(effectiveQty > 0)) return null;
+    const sides = (['LONG', 'SHORT'] as const).filter(side => !sideBlocked[side] && placementUsesLegacyHedge(limitChecks[side]));
+    if (sides.length === 0) return null;
+    return `${sides.map(sideButtonLabel).join('、')}：这一单是对冲更新前的仓位，不受分层上限约束；`
+      + '开出的仓位与它对冲的旧仓位一样按旧模型计维持保证金（0.4%），但它不算更新前的仓位，不能再给别的单当豁免额度。'
+      + (executesNow ? '' : '挂着的这张单触发 / 成交那一刻还会再判一次：旧仓位已减少或平掉时按普通分层判，放不下就撤单。');
+  })();
+  /**
+   * 这一单（成交后）与同方向仓位怎么合并，按钮前说清楚（positionRiskModel.mergeRiskBlocked）。
+   * 第 7 轮定的规则把这件事变成**有方向**的两种画面，两种都要说：
+   *
+   *   · **会合并**（这一单按分层、同方向仓位按旧的 0.4%——更新前的仓位或靠对冲豁免开的）：
+   *     并进去之后**整个仓位仍按旧的 0.4%**，不换模型、不重新定价，旧仓位的维持保证金口径一个数都不变；
+   *     两笔的保证金与均价汇到一起，强平价因此被推远一点（把前后两个数都写出来）。
+   *     加进去的这一截也**不会**把对冲豁免的额度做大（豁免的底冻在加仓之前，规则四），旧仓位是豁免的底时一并说。
+   *   · **不合并**（这一单按旧的 0.4%——只靠对冲豁免放行——而同方向仓位按币安分层）：合并会让分层仓位把
+   *     这一截也按档位定价、跨进更高的档，把它自己当场强平，所以两笔各成一个仓位、各算各的强平价。
+   *     这时旧仓位的强平价一个数都不动，卡上会有两笔；追加保证金要说清「+」的真实行为
+   *     （AdjustMarginModal 按名义等比摊到卡上每一笔，没有单腿的追加入口）。
+   */
+  const mergeModelNote = (() => {
+    if (!(effectiveQty > 0) || !(currentPrice > 0)) return null;
+    const lines: string[] = [];
+    const open = positions.filter(isPositionOpen);
+    const after = executesNow ? '' : '成交后';
+    /** 这一单成交后的样子（带保证金，用来算合并后的强平价）。与引擎的建仓口径同：名义 ÷ 杠杆。 */
+    const draftFill = (side: OrderSide, exempt: boolean) => {
+      const notionalUsd = isCoinMargined ? coinNotionalUsd(effectiveQty, contractSizeUsd) : effectiveQty * currentPrice;
+      const marginUsd = leverage > 0 ? notionalUsd / leverage : 0;
+      return {
+        id: 'merge-note-fill',
+        side,
+        entryPrice: currentPrice,
+        quantity: effectiveQty,
+        contracts: isCoinMargined ? effectiveQty : undefined,
+        leverage,
+        marginMode,
+        margin: marginUsd,
+        isolatedMargin: marginMode === 'isolated' ? marginUsd : undefined,
+        marginCoin: isCoinMargined && currentPrice > 0 ? marginUsd / currentPrice : undefined,
+        settlementMode,
+        contractSizeUsd: isCoinMargined ? contractSizeUsd : undefined,
+        openTime: 0,
+        ...(exempt ? legacyHedgeRiskStamp(symbol) : positionRiskStamp(symbol)),
+      } as Position;
+    };
+    for (const side of ['LONG', 'SHORT'] as const) {
+      if (sideBlocked[side]) continue;
+      const exempt = placementUsesLegacyHedge(limitChecks[side]);
+      const fill = draftFill(side, exempt);
+      const merged = mergeFilledPosition(symbol, open, fill);
+
+      if (merged.blockedBy === 'riskModel') {
+        // 只有靠对冲豁免放行的单会走到这里（面板下的单一定带戳；分层的一笔现在照并）。
+        const held = open.find(p => p.side === side) ?? null;
+        const heldLiq = held && held.marginMode === 'isolated' ? calcLiquidationPrice(held, symbol) : Number.NaN;
+        const liqGap = Number.isFinite(heldLiq) && heldLiq > 0 ? Math.abs(currentPrice - heldLiq) / currentPrice : Number.NaN;
+        /**
+         * 旧仓位（逐仓）贴着强平价时把「这一笔推不远它」说在按钮前。
+         * 「+」是**卡级**的：卡上多于一笔时按名义等比摊到每一笔，旧仓位只拿到其中一部分——照实说，
+         * 别让面板与 AdjustMarginModal 里那句「按名义等比摊到每一笔」互相打架。
+         */
+        const rescue = Number.isFinite(liqGap) && liqGap <= 0.05
+          ? `现有仓位的强平价 ${formatPrice(heldLiq, symbol)} 离现价只剩 ${(liqGap * 100).toFixed(2)}%，`
+            + '这一单不会把它推远（并不进去）：要给它续命，用持仓卡上的「+」追加保证金——'
+            + '卡上有两笔时这笔钱按名义等比摊到每一笔，旧仓位只拿到其中一部分，要按这个比例多存一些。'
+          : '';
+        lines.push(`${sideButtonLabel(side)}：这一单靠对冲豁免按旧的 0.4% 开，${after}不会并进按币安分层计的同方向仓位`
+          + '（并进去会把这一截也按档位定价、把那个分层仓位推进更高的档），单独成一个仓位、各算各的强平价；'
+          + '现有仓位的维持保证金与强平价不变。卡上的「平仓」照常可以按成数部分平仓（成数摊到卡上每一笔）。'
+          + rescue);
+        continue;
+      }
+
+      // 会合并，而且是「分层的一笔并进按旧 0.4% 的仓位」那一格：整仓仍按旧模型，把代价与好处都写出来。
+      if (!merged.absorbedFillId || exempt) continue;
+      const target = open.find(p => p.id === merged.survivor.id) ?? null;
+      if (!target || isTieredRiskPosition(target)) continue;
+      const beforeLiq = calcLiquidationPrice(target, symbol);
+      const afterLiq = calcLiquidationPrice(merged.survivor, symbol);
+      /** 强平价前后对比。多单的强平价变低 = 推远，空单相反；变动不到 0.01% 就别拿百分比唬人。 */
+      const moved = (() => {
+        if (!(beforeLiq > 0) || !(afterLiq > 0) || !Number.isFinite(beforeLiq) || !Number.isFinite(afterLiq)) return '';
+        const pair = `整仓强平价 ${formatPrice(beforeLiq, symbol)} → ${formatPrice(afterLiq, symbol)}`;
+        const movePct = (Math.abs(afterLiq - beforeLiq) / currentPrice) * 100;
+        if (!(movePct >= 0.01)) return `${pair}（几乎不动）。`;
+        const safer = side === 'LONG' ? afterLiq < beforeLiq : afterLiq > beforeLiq;
+        return `${pair}（${safer ? '推远' : '拉近'} ${movePct.toFixed(2)}%）。`;
+      })();
+      lines.push(`${sideButtonLabel(side)}：这一单${after}会并进${isLegacyHedgeRisk(target) ? '靠对冲豁免开的' : '更新前开的'}同方向仓位——`
+        + '合并后整个仓位（含这一笔）仍按旧的统一 0.4% 计维持保证金，不换模型、不重新定价，也不会多出一条只靠自己那点保证金硬扛的新腿。'
+        + moved
+        + (isLegacyHedgeRisk(target) ? '' : '加进去的这一截不会把「对冲更新前仓位」的豁免额度做大：豁免的底冻在这一笔之前。'));
+    }
+    return lines.length > 0 ? lines.join(' ') : null;
+  })();
   // belowMinContract 此前是死代码：roundCoinContracts 只会返回 0 或 ≥1，
   // 永远落不进 (0,1)，所以「不足一张」从来没被拦住过，而是被放大成一张下出去。
   // 换成 coinContractsExact 之后这条守卫才真正活了。
-  const orderDisabled = disabled || leverageExceeded || !!coolingOff || belowMinContract;
+  const baseOrderDisabled = disabled || !!coolingOff || belowMinContract;
+  const orderDisabledFor = (side: OrderSide) => baseOrderDisabled || sideBlocked[side];
 
-  // Max buy/sell capacity in USDT (notional)
-  const maxNotional = Math.max(0, available) * leverage;
+  /**
+   * 可开（名义，USD / USDT）= min(可用 × 杠杆, 分层上限 − 现有敞口)，两个方向各算一个
+   * （对冲更新前仓位的那一侧可以更大，见 remainingOpenUsd；同一个限价对一个方向已经穿价，估值也不同）。
+   * 仓位比例按钮的 100% 见 percentMax（限价只对一个方向穿价时取挂得住的那一列，否则取较大的那一列，向下取整），
+   * 拖到头也不会拖出一张在它要下的那个方向上过不了分层的单。
+   * 估值随标记价浮动时（按现价成交的单、已有按标记价估值的持仓），分层这一支留 0.2% 余量：
+   * 面板用的是平滑后的显示价，引擎用最新价（见 sizingRemainingOpenUsd）。
+   * 条件委托 / 跟踪委托还要按触发价那一道的余量封顶（placementSizingRemainingUsd）。
+   */
+  const hasOpenLimitPositions = positions.some(p => isPositionOpen(p) && limitSettlementOf(p) === settlementMode);
+  const sizingLiveFor = (side: OrderSide) => ({
+    orderAtMarket: placementFloatsWithMark({
+      draft: draftFor(side), atMarket: placementUnits[side].atMarket, markPrice: currentPrice, orders: symbolOrders,
+    }),
+    hasOpenPositions: hasOpenLimitPositions,
+  });
+  /** 引擎的保证金预检按委托价估（限价单即使已经穿价也按委托价扣），其余按引擎单价。 */
+  const marginUnitUsd = (side: OrderSide) => (orderType === 'LIMIT' || orderType === 'POST_ONLY'
+    ? effectivePrice
+    : placementUnits[side].unitUsd);
+  /**
+   * 这一方向的可开名义（按分层判定里这一单的估值口径）。U 本位按币数取两条约束的较小者再乘回单价——
+   * 保证金按委托价、分层按引擎单价（已经穿价的限价单是现价），两者的币数不能直接拿名义比。
+   */
+  const maxNotionalFor = (side: OrderSide) => {
+    const tierUsd = placementSizingRemainingUsd(limitChecks[side], currentPrice, sizingLiveFor(side));
+    const marginUsd = Math.max(0, available) * leverage;
+    if (isCoinMargined) return Math.min(marginUsd, tierUsd);
+    const unit = placementUnits[side].unitUsd;
+    const marginUnit = marginUnitUsd(side);
+    if (!(unit > 0) || !(marginUnit > 0)) return Math.min(marginUsd, tierUsd);
+    return Math.min(marginUsd / marginUnit, tierUsd / unit) * unit;
+  };
+  const maxNotionalBySide = { LONG: maxNotionalFor('LONG'), SHORT: maxNotionalFor('SHORT') };
+  /**
+   * 仓位比例按钮的 100% 取哪一列「可开」。两列不同有两个来源：
+   *   · 同一个限价只对一个方向穿价（买价高于现价、卖价低于现价；分段订单是全部子单都穿价）：穿价的那个方向等于市价单
+   *     （按现价估值、留余量），限价单挂得住的是另一个方向——100% 取挂得住的那一列（U 本位低于现价的买单、
+   *     真币本位高于现价的卖单，取穿价那一列会少开一截）；那一列是 0 时才取另一列。拿这个量去点穿价的方向，
+   *     超出的话按钮标红并说明「已穿过现价、按现价估值」，不会下出一张成交后超限的单；
+   *   · 更新前仓位的对冲豁免让一侧更大：取较大的那一列——往超限的旧仓位那一侧本来就开不了，100% 给的是整份对冲；
+   *     拿这个量点另一侧的按钮会标红并说明。
+   */
+  const bothSides: OrderSide[] = ['LONG', 'SHORT'];
+  /** 限价类（限价、只做 Maker、分段）在这个方向上有没有挂得住的价（有「成交那一刻」那一道）。 */
+  const restsOnBook = (side: OrderSide) => secondGates[side].kind === 'limit' && secondGates[side].price > 0;
+  const restingSide: OrderSide | null = restsOnBook('LONG') === restsOnBook('SHORT')
+    ? null
+    : restsOnBook('LONG') ? 'LONG' : 'SHORT';
+  const percentMax = (value: (side: OrderSide) => number) => {
+    const usable = (v: number) => Number.isFinite(v) && v > 0;
+    if (restingSide && usable(value(restingSide))) return value(restingSide);
+    const open = bothSides.map(value).filter(usable);
+    return open.length > 0 ? Math.max(...open) : 0;
+  };
+  const maxNotional = percentMax(side => maxNotionalBySide[side]);
+  /** U 本位：这一方向最多能开的币数（按引擎单价把可开名义换成币）。 */
+  const maxBaseCoinsFor = (side: OrderSide) => (placementUnits[side].unitUsd > 0
+    ? maxNotionalBySide[side] / placementUnits[side].unitUsd
+    : 0);
+  const maxBaseCoins = percentMax(maxBaseCoinsFor);
   /**
    * 这三行描述的是**账户**，不是这一单，所以只能按实时价折——
    * totalMaintenance 甚至聚合了别的标的的仓位（见上方循环）。
@@ -400,7 +725,6 @@ export function OrderPanel({
     // 「买 10 个 API3」完全合理——而币本位永远拿不到「10 个币的仓位」，
     // 那个数字自始至终只是个折算金额。这次事故的入口就在这个标签上。
     : (isCoinMargined ? (usdtInputMode === 'ORDER_VALUE' ? `${baseCoin} 金额` : `${baseCoin} 保证金`) : 'USDT');
-  const maxNotionalUnit = isCoinMargined ? 'USD' : 'USDT';
   const marginDisplay = isCoinMargined
     ? `${formatCoinAmount(marginCoin, baseCoin)} ≈ ${formatUSDT(margin)} USD`
     : `${formatUSDT(margin)} USDT`;
@@ -503,13 +827,28 @@ export function OrderPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qtyFocused, foldBasisChanged, snappedInput]);
 
+  /**
+   * 仓位比例一律**向下**取整：toFixed 是四舍五入，100% 会被进位推过分层上限，
+   * 面板随即把自己刚填的单标红（45,871.559 → 45,871.6 = 50,000.04 USDT）。
+   */
+  const floorToDecimals = (value: number, decimals: number) => {
+    const f = 10 ** decimals;
+    return Math.max(0, Math.floor(value * f + 1e-9) / f);
+  };
+  /** 分段订单的张数取到笔数的整数倍：引擎按 round(张数 ÷ 笔数) 拆子单，不整除时会多出几张。 */
+  const scaledSafeContracts = (contracts: number) => {
+    const n = parseInt(scaledCount) || 5;
+    return orderType === 'SCALED' && n >= 2 ? Math.floor(contracts / n) * n : contracts;
+  };
+  /** U 本位的金额 / 保证金档：面板按折算价把币数换成金额（引擎按 placementUnits 的单价估值，分段 / 跟踪 / 穿价限价会不同）。 */
+  const coinsToInputUsdt = (coins: number) => (effectivePrice > 0 ? coins * effectivePrice : 0);
   const applyPercent = (p: number) => {
     setPercent(p);
     if (currencyUnit === 'USDT') {
       if (isCoinMargined) {
         // 先定张数、再折显示值。顺序反过来（先折币串再转回张）会在 toFixed
         // 的最后一位上掉一张——0.532 张的世界里六位小数不是免费的。
-        const c = Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd));
+        const c = scaledSafeContracts(Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd)));
         setLockedContracts(c);
         const exact = c > 0 && effectivePrice > 0
           ? coinNotionalUsd(c, contractSizeUsd)
@@ -518,18 +857,51 @@ export function OrderPanel({
         lockFoldRef.current = { raw: exact, price: effectivePrice };
         setQuantity(exact > 0 ? exact.toFixed(6) : '0');
       } else {
-        const target = usdtInputMode === 'ORDER_VALUE' ? maxNotional : Math.max(0, available);
-        setQuantity((target * (p / 100)).toFixed(2));
+        // 初始保证金档的 100% = 可开金额 ÷ 杠杆：分层没卡住时就是可用余额本身。
+        const value = coinsToInputUsdt(maxBaseCoins);
+        const target = usdtInputMode === 'ORDER_VALUE' ? value : value / Math.max(1, leverage);
+        setQuantity(floorToDecimals(target * (p / 100), 2).toFixed(2));
       }
     } else {
       if (isCoinMargined) {
-        const targetContracts = Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd));
+        const targetContracts = scaledSafeContracts(Math.max(0, Math.floor((maxNotional * (p / 100)) / contractSizeUsd)));
         setQuantity(String(targetContracts));
       } else {
-        const maxBase = effectivePrice > 0 ? maxNotional / effectivePrice : 0;
-        setQuantity((maxBase * (p / 100)).toFixed(quantityPrecision));
+        setQuantity(floorToDecimals(maxBaseCoins * (p / 100), quantityPrecision).toFixed(quantityPrecision));
       }
     }
+  };
+
+  /**
+   * 「可开」按输入框当前那一档的单位报（与 100% 按钮填进去的数同一个折法，只往下取整）：
+   *   币本位：张 / 币金额（整张 × 面值 ÷ 折算价）/ 币保证金（再 ÷ 杠杆），小字附张数与 USD 名义；
+   *   U 本位：币数（按引擎单价、数量精度）/ USDT 金额 / USDT 保证金，币数档小字附 USDT 名义。
+   */
+  const maxOpenLabel = (side: OrderSide): { main: string; sub: string | null } => {
+    const usd = maxNotionalBySide[side];
+    const notional = Number.isFinite(usd) ? Math.max(0, usd) : NaN;
+    if (!Number.isFinite(notional)) return { main: '--', sub: null };
+    if (isCoinMargined) {
+      const c = scaledSafeContracts(Math.floor(notional / contractSizeUsd + 1e-9));
+      const usdText = `${formatUSDT(c * contractSizeUsd)} USD`;
+      if (coinInputUnit === 'CONTRACTS') return { main: `${c.toLocaleString('en-US')} 张`, sub: usdText };
+      const coins = effectivePrice > 0 ? (c * contractSizeUsd) / effectivePrice : NaN;
+      if (!Number.isFinite(coins)) return { main: `${c.toLocaleString('en-US')} 张`, sub: usdText };
+      const coinText = coinInputUnit === 'COIN_MARGIN'
+        ? `${formatAmount(floorToDecimals(coins / Math.max(1, leverage), 6), 6)} ${baseCoin} 保证金`
+        : `${formatAmount(floorToDecimals(coins, 6), 6)} ${baseCoin}`;
+      return { main: coinText, sub: `${c.toLocaleString('en-US')} 张 · ${usdText}` };
+    }
+    const unit = placementUnits[side].unitUsd;
+    if (!(unit > 0)) return { main: `${formatUSDT(notional)} USDT`, sub: null };
+    const coins = notional / unit;
+    if (currencyUnit === 'BASE') {
+      return { main: `${formatAmount(floorToDecimals(coins, quantityPrecision), quantityPrecision)} ${baseCoin}`, sub: `${formatUSDT(notional)} USDT` };
+    }
+    if (usdtInputMode === 'INITIAL_MARGIN') {
+      return { main: `${formatUSDT(floorToDecimals(coinsToInputUsdt(coins) / Math.max(1, leverage), 2))} USDT 保证金`, sub: null };
+    }
+    return { main: `${formatUSDT(floorToDecimals(coinsToInputUsdt(coins), 2))} USDT`, sub: null };
   };
 
   const selectCoinInputUnit = (unit: CoinInputUnit) => {
@@ -694,9 +1066,9 @@ export function OrderPanel({
 
   const buildOrderParams = (rawSide: OrderSide): PlaceOrderParams | null => {
     // 绝不向上兜底：把「不足一张」放大成一张正是本次要修的东西。
-    // 不足一张时 belowMinContract 已经让 orderDisabled 为真，走不到这里。
+    // 不足一张时 belowMinContract 已经让 orderDisabledFor 为真，走不到这里。
     const finalQty = isCoinMargined ? coinContractsExact(effectiveQty) : effectiveQty;
-    if (orderDisabled || finalQty <= 0) return null;
+    if (orderDisabledFor(rawSide) || finalQty <= 0) return null;
     /**
      * 勾选止盈止损**不再改写订单类型**。
      *
@@ -1355,11 +1727,51 @@ export function OrderPanel({
           </div>
         )}
 
-        {/* Tier exceeded warning */}
+        {/* 分层上限：持仓 + 当前委托 + 这一单 超过当前杠杆的最高可持有头寸 */}
         {leverageExceeded && (
-          <div className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30">
+          <div
+            data-testid="position-limit-warning"
+            className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30"
+          >
             <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-            <span>名义价值超出当前 {leverage}x 杠杆上限（最高 {maxAllowedLeverage}x）</span>
+            <span>
+              {limitWarningText}
+              {tierNote && (
+                <span data-testid="position-limit-note" className="block mt-0.5 text-[9px] text-trading-red/70">{tierNote}</span>
+              )}
+            </span>
+          </div>
+        )}
+
+        {/* 只靠对冲旧仓位的豁免放行：按旧模型开 */}
+        {legacyHedgeNote && (
+          <div data-testid="legacy-hedge-note" className="px-2 py-1 rounded text-[10px] bg-muted/40 text-muted-foreground border border-border">
+            {legacyHedgeNote}
+          </div>
+        )}
+
+        {/* 维持保证金口径不同：这一单不与同方向仓位合并，各算各的强平价 */}
+        {mergeModelNote && (
+          <div data-testid="merge-model-note" className="px-2 py-1 rounded text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+            {mergeModelNote}
+          </div>
+        )}
+
+        {/* 已挂的触发类开仓单：这张单下出去后，它们触发时会被分层上限拒掉（只提醒，不拦——币安也不拦） */}
+        {triggerRiskWarning && (
+          <div
+            data-testid="trigger-risk-warning"
+            className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+          >
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+            <span className="space-y-0.5">
+              {triggerRiskWarning.map(r => (
+                <span key={r.title} className="block">
+                  <span className="block">{r.title}</span>
+                  <span className="block text-[9px] opacity-80">{r.description}</span>
+                </span>
+              ))}
+            </span>
           </div>
         )}
 
@@ -1367,14 +1779,14 @@ export function OrderPanel({
         <div className="grid grid-cols-2 gap-2 pt-1 w-full min-w-0">
           <button
             onClick={() => handleOrder('LONG')}
-            disabled={orderDisabled}
+            disabled={orderDisabledFor('LONG')}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-green hover:bg-trading-green/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
             {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开多' : '平空')}
           </button>
           <button
             onClick={() => handleOrder('SHORT')}
-            disabled={orderDisabled}
+            disabled={orderDisabledFor('SHORT')}
             className="w-full min-w-0 h-10 px-1 rounded-md bg-trading-red hover:bg-trading-red/90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-white text-[13px] font-semibold transition-all truncate"
           >
             {coolingOff ? '🧊 冷静中' : (actionMode === 'OPEN' ? '开空' : '平多')}
@@ -1383,14 +1795,18 @@ export function OrderPanel({
 
         {/* Pre-trade calculation: left aligned for LONG, right aligned for SHORT */}
         <div className="grid grid-cols-2 gap-2 text-[10px] font-mono tabular-nums">
-          <div className="text-left space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{marginDisplay}</span></div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> {maxNotionalUnit}</div>
-          </div>
-          <div className="text-right space-y-0.5">
-            <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{marginDisplay}</span></div>
-            <div className="text-muted-foreground/80">可开 <span className="text-foreground/90">{formatUSDT(maxNotional)}</span> {maxNotionalUnit}</div>
-          </div>
+          {(['LONG', 'SHORT'] as const).map(side => {
+            const open = maxOpenLabel(side);
+            return (
+              <div key={side} className={`${side === 'LONG' ? 'text-left' : 'text-right'} space-y-0.5`}>
+                <div className="text-muted-foreground/80">保证金 <span className="text-foreground/90">{marginDisplay}</span></div>
+                <div data-testid={`max-open-${side}`} className="text-muted-foreground/80">
+                  可开 <span data-testid={`max-open-${side}-main`} className="text-foreground/90">{open.main}</span>
+                  {open.sub && <span data-testid={`max-open-${side}-sub`} className="block text-[9px] text-muted-foreground/60">{open.sub}</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* TWAP 新手引导（仅 TWAP 类型显示，币安同位） */}
@@ -1405,12 +1821,35 @@ export function OrderPanel({
             TWAP 新手引导
           </button>
         )}
-        {/* Fee tier link */}
-        <button className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
-          <Info className="w-3 h-3" />
-          手续费等级
-          <span className="text-muted-foreground/80 ml-0.5">· {tierInfo.tierLabel}</span>
-        </button>
+        {/* 杠杆分层：此前这里标着「手续费等级」，显示的却是杠杆档位——名实不符，改回它真正的内容 */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              data-testid="leverage-tier-link"
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Info className="w-3 h-3" />
+              杠杆分层
+              <span className="text-muted-foreground/80 ml-0.5">
+                · {leverage}x 最高 {formatTierAmount(limitCheck.cap, tierUnit)}
+              </span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            side="top"
+            collisionPadding={12}
+            data-testid="leverage-tier-popover"
+            className="w-[380px] max-w-[calc(100vw-24px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto overscroll-contain border-border bg-card p-3"
+          >
+            <LeverageTierTable
+              resolved={limitCheck.tiers}
+              leverage={leverage}
+              exposure={Number.isFinite(limitCheck.exposureAfter) ? limitCheck.exposureAfter : null}
+            />
+          </PopoverContent>
+        </Popover>
 
         {/* ===== ACCOUNT RISK PANEL ===== */}
         <div className="border-t border-border pt-3 mt-2 space-y-2">
@@ -1425,7 +1864,7 @@ export function OrderPanel({
             <span className="text-muted-foreground/80">保证金比率</span>
             <div className="flex items-center gap-1.5">
               <Gauge className={`w-3.5 h-3.5 ${ratioColor}`} />
-              <span className={`font-mono tabular-nums ${ratioColor}`}>{marginRatio.toFixed(2)}%</span>
+              <span data-testid="account-margin-ratio" className={`font-mono tabular-nums ${ratioColor}`}>{marginRatio.toFixed(2)}%</span>
             </div>
           </div>
           {/* mini gauge bar */}
@@ -1435,7 +1874,7 @@ export function OrderPanel({
 
           <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">维持保证金</span>
-            <span className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{maintenanceDisplay}</span>
+            <span data-testid="account-maintenance" className="font-mono tabular-nums text-foreground truncate text-right min-w-0">{maintenanceDisplay}</span>
           </div>
           <div className="flex items-center justify-between gap-2 text-[11px] w-full min-w-0">
             <span className="text-muted-foreground/80 shrink-0">保证金余额</span>
@@ -1464,18 +1903,18 @@ export function OrderPanel({
           symbol={symbol}
           currentLeverage={leverage}
           settlementMode={settlementMode}
-          notional={symbolExposureNotionalUsd(symbol, positions, ctx.ordersMap[symbol] ?? [], currentPrice)}
           positions={positions}
-          orders={ctx.ordersMap[symbol] ?? []}
+          orders={symbolOrders}
           markPrice={currentPrice}
           availableBalance={Math.max(0, available)}
           onClose={() => setLeverageModalOpen(false)}
           onConfirm={(next) => {
-            const plan = ctx.applySymbolLeverage(symbol, next);
+            // 与对话框同一种结算方式（面板当前的），引擎按它夹值、判定、写回。
+            const plan = ctx.applySymbolLeverage(symbol, next, settlementMode);
             if (!plan.ok) { toast.error(plan.refusal?.message ?? '杠杆未调整'); return; }
             toast.success(`杠杆已调整为 ${plan.to}x`, {
               description: plan.totalReleaseUsd > 1e-9
-                ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} USDT`
+                ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} ${quoteUnitLabel}`
                 : undefined,
             });
             setLeverageModalOpen(false);
@@ -1515,7 +1954,8 @@ export function OrderPanel({
           if (result && typeof result === 'object' && 'id' in result) {
             return result as { id: string };
           }
-          return null;
+          // null = 引擎拒单；不回报结果的回调（void）照旧当作下出去了、只是没有可关联的 id。
+          return result === undefined ? { id: '' } : null;
         }}
       />
     </div>

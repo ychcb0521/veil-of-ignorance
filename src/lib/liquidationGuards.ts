@@ -10,11 +10,11 @@
  *   误强平 → 仓位没了、历史里多出一条假爆仓单，且不可撤销。
  */
 import {
-  MAINTENANCE_MARGIN_RATE,
   calcUnrealizedPnl,
   type PendingOrder,
   type Position,
 } from '@/types/trading';
+import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
 import { resolveConditionalTriggerPrice } from '@/lib/conditionalOrders';
 import {
   getPositionNotionalUsd,
@@ -177,15 +177,16 @@ export function evaluateIsolatedLiquidation(input: {
    * 所以空头会在显示的强平价之前约 10% 就被打掉，而那时保证金还剩一成多。
    * x < E 时反过来 → 多头**越过**显示的强平价仍活着，此时币本位权益其实已经为负。
    *
-   * 换成按现价折算之后，判据 x·marginCoin + pnlUsd ≤ N·mmr 解出来的边界，
+   * 换成按现价折算之后，判据 x·marginCoin + pnlUsd ≤ 维持保证金 解出来的边界，
    * 与 calcLiquidationPrice 的币本位公式逐字一致（下有测试逐条比对）。
-   * 维持保证金那一项不用动：币本位名义 N = 张数 × 面值，本来就与价格无关。
+   * 维持保证金按仓位的风险模型取（positionRiskModel）：旧仓位 N × 0.4%，
+   * 分层仓位按币安档位（真币本位的档位以币计，维持保证金随价格变）。
    */
   const marginUsd = isCoinSettledPosition(position)
     ? coinMarginUsdAtMark(position, price)
     : position.isolatedMargin;
   const equityUsd = marginUsd + pnlUsd;
-  const maintenanceUsd = notionalUsd * MAINTENANCE_MARGIN_RATE;
+  const maintenanceUsd = positionMaintenanceMarginUsd(symbol, position, price);
   if (!Number.isFinite(equityUsd) || !Number.isFinite(maintenanceUsd)) {
     return { liquidate: false, reason: 'bad_numbers' };
   }
@@ -361,7 +362,7 @@ function isolatedEquityAt(symbol: string, position: Position, price: number): {
     notionalUsd,
     pnlUsd,
     equityUsd: marginUsd + pnlUsd,
-    maintenanceUsd: notionalUsd * MAINTENANCE_MARGIN_RATE,
+    maintenanceUsd: positionMaintenanceMarginUsd(symbol, position, price),
   };
 }
 
@@ -454,7 +455,7 @@ export function evaluateIsolatedLiquidationOnCandle(input: {
   }
   if (!(at.equityUsd <= at.maintenanceUsd)) return { liquidate: false, reason: 'solvent' };
 
-  const liq = calcLiquidationPrice(position);
+  const liq = calcLiquidationPrice(position, symbol);
   const exitPrice = Number.isFinite(liq) && liq > 0 ? Math.min(hi, Math.max(lo, liq)) : triggerPrice;
   return { liquidate: true, triggerPrice, exitPrice, equityUsd: at.equityUsd, maintenanceUsd: at.maintenanceUsd };
 }

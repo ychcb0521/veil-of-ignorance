@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Position } from '@/types/trading';
 import { calcLiquidationPrice, calcUnrealizedPnl } from '@/types/trading';
 import { mergeFilledPosition } from '@/lib/tradingSettlement';
+import { legacyHedgeRiskStamp, positionRiskStamp } from '@/lib/positionRiskModel';
 
 const FACE = 10;
 /** 币本位仓位。coins = 张 × 面值 ÷ 开仓价。 */
@@ -172,5 +173,53 @@ describe('合并不抹掉每笔成交所在的回放时间线', () => {
   it('没盖章的旧仓位合并后，fills 里不凭空多出 timelineId 字段', () => {
     const { survivor } = mergeFilledPosition('BTCUSDT', [linear('old', 10, 100)], linear('new', 5, 110));
     expect(survivor.fills!.every(f => !('timelineId' in f))).toBe(true);
+  });
+});
+
+/**
+ * 【复核 r8】没有合并时报的原因要是**最接近合并**的那一笔的，不是数组里排最前的那一笔的。
+ *
+ * 第 8 轮复核实测：盘上 [空 更新前, 多 分层 5x, 多 更新前 全仓, 多 分层 10x 逐仓（本该并进去的那笔）]，
+ * 一笔 10x 逐仓的豁免成交挡住它的是规则三（口径），但 sameSide 取到的是 5x 那笔，
+ * 于是「未与现有仓位合并」的提示说成「杠杆与现有同向仓位不同」，下单面板里规则三那句也不出现。
+ * 引擎的结果（不并、不重新定价）本来就对，只是原因报错了。
+ */
+describe('【复核 r8】没有合并时报最接近那一笔的原因', () => {
+  const SYM = 'KAITOUSDT';
+  const TIERED = positionRiskStamp(SYM);
+  const EXEMPT = legacyHedgeRiskStamp(SYM);
+  const usdt = (id: string, over: Partial<Position>): Position => linear(id, 1_000, 1, over);
+
+  it('挡住的是规则三时报 riskModel，与同向仓位在数组里的顺序无关', () => {
+    const board = [
+      usdt('short-pre', { side: 'SHORT' }),
+      usdt('long-tiered-5x', { leverage: 5, ...TIERED }),
+      usdt('long-pre-cross', { marginMode: 'cross', isolatedMargin: undefined }),
+      usdt('long-tiered-10x', { leverage: 10, ...TIERED }),
+    ];
+    const fill = usdt('exempt-fill', { leverage: 10, ...EXEMPT });
+    const r = mergeFilledPosition(SYM, board, fill);
+    expect(r.absorbedFillId).toBeNull();
+    expect(r.blockedBy).toBe('riskModel');
+    expect(r.positions).toHaveLength(5);
+    // 只有目标那笔在盘上时也是 riskModel；倒过来排也一样
+    expect(mergeFilledPosition(SYM, [board[3]], fill).blockedBy).toBe('riskModel');
+    expect(mergeFilledPosition(SYM, [...board].reverse(), fill).blockedBy).toBe('riskModel');
+    // 四种结算 / 保证金口味都一样
+    const coinBoard = board.map(p => ({ ...p, settlementMode: 'coin', settlementAsset: 'KAITO', contractSizeUsd: FACE, contracts: p.quantity } as Position));
+    const coinFill = { ...fill, settlementMode: 'coin', settlementAsset: 'KAITO', contractSizeUsd: FACE, contracts: fill.quantity } as Position;
+    expect(mergeFilledPosition(SYM, coinBoard, coinFill).blockedBy).toBe('riskModel');
+  });
+
+  it('没有口径只差的同向仓位时，按 杠杆 > 结算方式 > 保证金模式 报最深的那一个', () => {
+    const fill = usdt('exempt-fill', { leverage: 10, ...EXEMPT });
+    expect(mergeFilledPosition(SYM, [usdt('a', { leverage: 5, ...TIERED })], fill).blockedBy).toBe('leverage');
+    expect(mergeFilledPosition(SYM, [
+      usdt('cross', { marginMode: 'cross', isolatedMargin: undefined, leverage: 10 }),
+      usdt('lev', { leverage: 5 }),
+    ], fill).blockedBy).toBe('leverage');
+    expect(mergeFilledPosition(SYM, [usdt('cross', { marginMode: 'cross', isolatedMargin: undefined })], fill).blockedBy).toBe('marginMode');
+    // 没有同向仓位：不是「没合并」，是新开
+    expect(mergeFilledPosition(SYM, [usdt('short', { side: 'SHORT' })], fill).blockedBy).toBeNull();
   });
 });

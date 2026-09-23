@@ -75,7 +75,18 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     expect(block).toContain('消息会直接点明该改用「市价」或「条件单 @S₂」档定量');
     expect(block).not.toContain('与计算器的数只差整张取整');
     expect(block).toContain('下的是 653,602 张、1,380,961 张，比计算器按现价给出的 653,615 / 1,380,978 张还略少');
-    expect(block).toContain('<strong>撤掉带计划的限价 / 条件单</strong>（包括成交时保证金不足被撤），计划仍在保鲜期、又没有更新的计划、这个标的也仍持有同方向仓位时会放回去');
+    // 合并复核：触发时被分层上限拒掉的计划单与保证金不足被撤走同一个放回口子
+    expect(block).toContain('<strong>撤掉带计划的限价 / 条件单</strong>（包括成交时保证金不足、触发时超过杠杆分层上限被撤），计划仍在保鲜期、又没有更新的计划、这个标的也仍持有同方向仓位时会放回去');
+    // 合并复核：可下单量 = min(Plan B 上限, 分层余量)，快照与复判只管 Plan B
+    expect(block).toContain('<strong>可下单量还要过币安分层</strong>');
+    expect(block).toContain('都取 Plan B 上限与分层余量的<strong>较小者</strong>');
+    expect(block).toContain('「分层上限：当前 Lx 最多再开 X」');
+    // 修复验证第一轮：计划自己的对冲也占这个上限
+    expect(block).toContain('<strong>计划自己的对冲也占这个上限</strong>');
+    expect(block).toContain('加仓、以及加仓之后还要补挂的对冲（X₁ + X₂ 减去已挂在 S₁ 这条线上的、已成交的反向对冲）都放得下，也不让已挂的触发单注定被拒');
+    expect(block).toContain('单看加仓还能开 39,900，加满之后连 X₁ 的对冲都挂不上；留出对冲的位置是 16,263');
+    expect(block).toContain('S₁ 上的对冲本身已经放不下时直说，可下单量为 0，并给出对冲这一侧还能挂多少');
+    expect(block).toContain('钉在单子上的快照仍记 Plan B 上限，成交后复判与战役页的加仓校验照旧只判 Plan B');
     expect(block).toContain('停止回放先平仓再撤单，计划不会漏到下一场');
     // 三审：撤单放回只认这一场、这条仓位
     expect(block).toContain('但计划必须属于<strong>这一场、这条仓位</strong>：跳到信号时刻把旧挂单带进新的一场后再撤（计划早于分场、或挂单与撤单不在同一场回放里），或平掉又重开之后再撤上一轮的计划单（同方向的仓位晚于计划开出），都不放回');

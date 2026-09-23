@@ -28,7 +28,7 @@ const book = vi.hoisted(() => ({ orders: {} as Record<string, unknown[]> }));
 /** 盘面覆写：默认 null 即沿用上面那套老持仓（没有真实开仓时刻）；只有重放那组测试会塞。 */
 const scene = vi.hoisted(() => ({ positions: null as unknown[] | null, tradeHistory: null as unknown[] | null }));
 /** 下单面板当前的结算方式：默认币本位；只有「口径跟仓位不跟面板」那组测试会拨它。 */
-const panel = vi.hoisted(() => ({ mode: 'coin' as 'coin' | 'usdt' }));
+const panel = vi.hoisted(() => ({ mode: 'coin' as 'coin' | 'usdt', leverageMap: {} as Record<string, number> }));
 
 vi.mock('@/contexts/TradingContext', async () => {
   const actual = await vi.importActual<typeof import('@/contexts/TradingContext')>('@/contexts/TradingContext');
@@ -43,16 +43,21 @@ vi.mock('@/contexts/TradingContext', async () => {
       priceMap: { RAVEUSDT: 0.6273595 },
       tradeHistory: scene.tradeHistory ?? tradeHistory,
       getSymbolSettlementMode: () => panel.mode,
+      leverageMap: panel.leverageMap,
     }),
   };
 });
 
 /** R0 自检注入口：垫子式与成本线式在数学上恒等，走正门造不出分歧；要测「对不上就不说通过」只能从外面把结论改坏。 */
 const r0Seam = vi.hoisted(() => ({ costLineMismatch: false }));
+/** 按预计成交价定量的注入口：打开时 sizeAddAtExpectedFill 返回 null（没有 fillPlan，Plan A 退回自己的代数）。 */
+const fillSeam = vi.hoisted(() => ({ none: false }));
 vi.mock('@/lib/addSizing', async () => {
   const actual = await vi.importActual<typeof import('@/lib/addSizing')>('@/lib/addSizing');
   return {
     ...actual,
+    sizeAddAtExpectedFill: (input: Parameters<typeof actual.sizeAddAtExpectedFill>[0]) =>
+      (fillSeam.none ? null : actual.sizeAddAtExpectedFill(input)),
     crossCheckPostAddR0: (input: Parameters<typeof actual.crossCheckPostAddR0>[0]) => {
       const check = actual.crossCheckPostAddR0(input);
       if (!check || !r0Seam.costLineMismatch) return check;
@@ -67,10 +72,24 @@ vi.mock('@/lib/addSizing', async () => {
 });
 
 /**
+ * 分层余量注入口：上面这几十条钉的是 Plan A / Plan B 的代数，盘面（RAVEUSDT、BTC 1,000 万名义……）远超各自的币安分层，
+ * 按真实分层一算可下单量全被卡成 0。默认关掉（addTierHeadroom 返回 null = 不另设限，与算不出分层时一致）；
+ * 「分层上限封顶可下单量」那一组显式打开，走真实分层。
+ */
+const tierSeam = vi.hoisted(() => ({ real: false }));
+vi.mock('@/lib/addTierHeadroom', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/addTierHeadroom')>('@/lib/addTierHeadroom');
+  return {
+    ...actual,
+    addTierHeadroom: (input: Parameters<typeof actual.addTierHeadroom>[0]) => (tierSeam.real ? actual.addTierHeadroom(input) : null),
+  };
+});
+
+/**
  * 计划仓库是模块级的，而计算器打开时会从仍在保鲜期的计划种回 S₁ / G：
  * 上一条测试发布的计划不清掉，下一条一打开就带着它的 S₁。每条测试从空仓库开始。
  */
-beforeEach(() => { __resetAddSizingPlanForTests(); });
+beforeEach(() => { __resetAddSizingPlanForTests(); tierSeam.real = false; });
 
 const num = (testId: string) => Number((screen.getByTestId(testId) as HTMLInputElement).value);
 const type = (testId: string, v: string) => fireEvent.change(screen.getByTestId(testId), { target: { value: v } });
@@ -1788,5 +1807,216 @@ describe('【回归 · 三审】顶栏把面板的精度交给计算器', () => 
     // 价格精度 2 位：手填 3,500.004 与基准价差不到一格，仍是市价
     type('add-sizing-s2', '3500.004');
     expect(screen.getByTestId('add-sizing-order-kind-market')).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+/**
+ * 可下单量还要过币安分层：按这个合约当前的杠杆，这一侧还能再开多少（持仓多空相加 + 非只减仓挂单），
+ * 而且计划自己的对冲（S₁ 上合计 X₁ + X₂ 的反向条件单）也占同一个上限——加仓与要补挂的对冲都得放得下。
+ * 大字、张数、合计对冲、「按上限下单」取 min(Plan B 上限, 分层余量)，一行字说清卡住的是哪一个、给对冲留了位置；
+ * 计划快照仍记 Plan B 上限（成交后复判与 Legs 校验只判 Plan B）。
+ *
+ * 盘面沿用上面的 RAVE 币本位两腿（200 张 = 2,000 USD，X₁ = 18.3333 币）。币安没有 RAVE 币本位合约，借 U 本位 RAVEUSDT 的分层：
+ * 20x 最高 5,000 USD，5x 最高 50,000 USD，最高 20x；合成币本位按 USD 面值计，不留 0.2% 余量。
+ * S₁ = 130 上的对冲按 130 折张、向上取整：X₁ 就要 ⌈238.33⌉ 张。
+ */
+describe('【分层】可下单量 = min(Plan B 上限, 币安分层余量)，分层余量给计划的对冲留出位置', () => {
+  beforeEach(() => { tierSeam.real = true; });
+  afterEach(() => {
+    tierSeam.real = false;
+    fillSeam.none = false;
+    panel.leverageMap = {};
+    book.orders = {};
+    scene.positions = null;
+    __resetAddSizingPlanForTests();
+  });
+
+  it('20x：单看加仓还剩 300 张，但 S₁ 上的对冲也要放下 → 31 张（2,000 + 310 + 268 张对冲 2,680 ≤ 5,000）；计划仍记 Plan B 的 38.33 / 536 张', () => {
+    panel.leverageMap = { RAVEUSDT: 20 };
+    renderCalc();                                        // 限价 @140
+    type('add-sizing-s1', '130');
+    const coins = (31 * 10) / 140;                       // 2.2143
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('2.21');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('31 张');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('分层封顶');
+    expect(screen.getByTestId('add-sizing-hedge')).toHaveTextContent('20.55');   // 18.3333 + 2.2143
+    const line = screen.getByTestId('add-sizing-tier-cap');
+    expect(line.dataset.binds).toBe('tier');
+    expect(line.dataset.hedge).toBe('binds');
+    expect(line).toHaveTextContent('分层上限：当前 20x 最多再开 2.2143 RAVE（31 张）');
+    expect(line).toHaveTextContent('（已给 S₁ 130.0000 上的合计对冲留出位置，加仓与对冲谁先成交都放得下；不算对冲，单看加仓还能开 21.4286 RAVE）');
+    expect(line).toHaveTextContent('持仓和当前委托 2,000 USD / 最高 5,000 USD');
+    expect(line).toHaveTextContent('比 Plan B 上限 38.33 RAVE 小，可下单量按分层');
+    // R0 按实际要下的量复核：比上限小，跌到 S₁ 还剩垫子
+    expect(screen.getByTestId('add-sizing-r0-pass')).toBeInTheDocument();
+
+    const snap = getAddSizingPlan('RAVEUSDT')!.snapshot;
+    expect(snap.addCoinsMax).toBeCloseTo(38.333, 2);
+    expect(snap.contracts).toBe(536);
+    const button = screen.getByTestId('add-sizing-place-at-limit');
+    expect(button.textContent).toBe('按上限下单 · 31 张');
+    fireEvent.click(button);
+    const entry = getAddSizingPlan('RAVEUSDT')!;
+    expect(entry.prefill).toMatchObject({ orderType: 'LIMIT', limitPrice: 140, contracts: 31 });
+    expect(entry.prefill!.coins).toBeCloseTo(coins, 9);
+    expect(entry.snapshot.contracts).toBe(536);
+    expect(entry.snapshot.addCoinsMax).toBeCloseTo(38.333, 2);
+  });
+
+  it('5x：给对冲留位后分层还能开 2,365 张，Plan B 的 536 张更小——数照旧，一行字说按 Plan B', () => {
+    panel.leverageMap = { RAVEUSDT: 5 };
+    renderCalc();
+    type('add-sizing-s1', '130');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('38.33');
+    expect(screen.getByTestId('add-sizing-x2')).not.toHaveTextContent('分层封顶');
+    const line = screen.getByTestId('add-sizing-tier-cap');
+    expect(line.dataset.binds).toBe('plan-b');
+    // 2,000 + 23,650 + 2,435 张对冲 24,350 = 50,000
+    expect(line).toHaveTextContent('当前 5x 最多再开 168.9286 RAVE（2,365 张）');
+    expect(line).toHaveTextContent('单看加仓还能开 342.8571 RAVE');
+    expect(line).toHaveTextContent('Plan B 上限更小，按 Plan B');
+    expect(screen.getByTestId('add-sizing-place-at-limit').textContent).toBe('按上限下单 · 536 张');
+  });
+
+  describe('双向持仓相加、非只减仓挂单计入、只减仓单不计：2,000 + 空仓 500 + 空头条件单 @125 1,000 = 3,500', () => {
+    const setup = () => {
+      panel.leverageMap = { RAVEUSDT: 20 };
+      scene.positions = [
+        ...positions,
+        { id: 's1', side: 'SHORT', entryPrice: 150, quantity: 3.33, leverage: 20, marginMode: 'isolated', settlementMode: 'coin', settlementAsset: 'RAVE', contractSizeUsd: 10, contracts: 50, margin: 25, openTime: 2_500 },
+      ];
+      book.orders = {
+        RAVEUSDT: [
+          { id: 'hedge', side: 'SHORT', type: 'CONDITIONAL', price: 0, stopPrice: 125, quantity: 100, contracts: 100, contractSizeUsd: 10, settlementMode: 'coin', leverage: 20, marginMode: 'isolated', status: 'PENDING', createdAt: 5_000 },
+          { id: 'tp', side: 'SHORT', type: 'CONDITIONAL', price: 0, stopPrice: 160, quantity: 200, contracts: 200, contractSizeUsd: 10, settlementMode: 'coin', leverage: 20, marginMode: 'isolated', status: 'PENDING', createdAt: 5_000, reduceOnly: true },
+        ],
+      };
+      renderCalc();
+      fireEvent.click(screen.getByTestId('add-sizing-side-toggle'));
+      fireEvent.click(screen.getByTestId('add-sizing-side-LONG'));
+    };
+
+    it('S₁ = 130（盘口的对冲挂在 125，不是这条线）：已成交的空仓 3.33 币算已有，还要补挂 15 币 = 195 张 → 放不下，可下单量 0，不给按钮', () => {
+      setup();
+      type('add-sizing-s1', '130');
+      const line = screen.getByTestId('add-sizing-tier-cap');
+      expect(line.dataset.hedge).toBe('blocked');
+      expect(line).toHaveTextContent('持仓和当前委托 3,500 USD / 最高 5,000 USD');
+      expect(line).toHaveTextContent('最多再开 0 RAVE（0 张）');
+      // 对冲这一侧：5,000 − 3,500 = 1,500 USD = 150 张 → 150 × 10 ÷ 130
+      expect(line).toHaveTextContent('S₁ 130.0000 上还要补挂的对冲 15 RAVE / 195 张 已经放不下（对冲这一侧最多还能挂 11.5385 RAVE），先减仓或撤单，再谈加仓');
+      expect(screen.queryByTestId('add-sizing-place-at-limit')).toBeNull();
+      expect(getAddSizingPlan('RAVEUSDT')!.snapshot.contracts).toBeGreaterThan(0);
+    });
+
+    it('S₁ = 125（就是盘口那张对冲的线）：已挂 8 币 + 已成交 3.33 币都算已有 → 33 张（3,500 + 330 + 117 张 1,170 = 5,000）', () => {
+      setup();
+      type('add-sizing-s1', '125');
+      const line = screen.getByTestId('add-sizing-tier-cap');
+      expect(line.dataset.hedge).toBe('binds');
+      expect(line).toHaveTextContent('最多再开 2.3571 RAVE（33 张）');
+      expect(line).toHaveTextContent('单看加仓还能开 10.7143 RAVE');
+      expect(screen.getByTestId('add-sizing-place-at-limit').textContent).toBe('按上限下单 · 33 张');
+    });
+  });
+
+  it('U 本位市价：按引擎成交基准价估值、已有持仓时留 0.2% 余量；给 S₁ 上的对冲留位 → 84.81 币（14,000 + 140X + 130(100 + X) ≤ 49,900）', () => {
+    scene.positions = [
+      { id: 'u1', side: 'LONG', entryPrice: 100, quantity: 100, leverage: 5, marginMode: 'isolated', settlementMode: 'usdt', margin: 2_000, openTime: 1_000 },
+    ];
+    panel.leverageMap = { RAVEUSDT: 5 };
+    renderCalc(140, { market: true, fillBasePrice: 140 });
+    type('add-sizing-s1', '130');
+    const line = screen.getByTestId('add-sizing-tier-cap');
+    expect(line.dataset.binds).toBe('tier');
+    expect(line).toHaveTextContent('最多再开 84.8148 RAVE');
+    // 单看加仓：(50,000 − 14,000 − 100) ÷ 140
+    expect(line).toHaveTextContent('单看加仓还能开 256.4286 RAVE');
+    expect(line).toHaveTextContent('持仓和当前委托 14,000 USDT / 最高 50,000 USDT');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('84.81');
+    expect(screen.getByTestId('add-sizing-place-at-limit').textContent).toBe('按上限下单 · 84.81 RAVE');
+    fireEvent.click(screen.getByTestId('add-sizing-place-at-limit'));
+    const entry = getAddSizingPlan('RAVEUSDT')!;
+    expect(entry.prefill!.coins).toBeCloseTo(22_900 / 270, 6);
+    // 计划仍是 Plan B：Y₁ = 100 × 30 = 3,000 USD ÷ 险（含滑点）≈ 299 币
+    expect(entry.snapshot.addCoinsMax).toBeGreaterThan(290);
+  });
+
+  it('分层已经没有余量（20x 最高 5,000，持仓 14,000）：可下单量为 0，不给按钮、不谈对冲；计划照样发布', () => {
+    scene.positions = [
+      { id: 'u1', side: 'LONG', entryPrice: 100, quantity: 100, leverage: 5, marginMode: 'isolated', settlementMode: 'usdt', margin: 2_000, openTime: 1_000 },
+    ];
+    panel.leverageMap = { RAVEUSDT: 20 };
+    renderCalc(140, { market: true, fillBasePrice: 140 });
+    type('add-sizing-s1', '130');
+    const line = screen.getByTestId('add-sizing-tier-cap');
+    expect(line).toHaveTextContent('当前 20x 最多再开 0 RAVE');
+    expect(line.dataset.hedge).toBe('none');
+    expect(line).not.toHaveTextContent('对冲');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent(/^加仓上限 X₂ · 分层封顶0/);
+    expect(screen.queryByTestId('add-sizing-place-at-limit')).toBeNull();
+    expect(getAddSizingPlan('RAVEUSDT')!.snapshot.addCoinsMax).toBeGreaterThan(290);
+  });
+
+  /**
+   * 【复核 r7】分层余量被**计划的对冲**卡到 0 时，二分只收敛到判定用的相对容差
+   * （豁免的底 3,000 币 × 1e-9 = 3e-6 币），于是「按上限下单 · 0 RAVE」的按钮照旧渲染，
+   * 点下去预填 0.000003 币——面板取整之后是一张空数量的单，按钮是纯噪声。
+   * 现在 U 本位也按下单面板的数量精度取整之后再判能不能下单（与币本位「≥ 1 张」同一条判据）。
+   *
+   * 盘面就是发布日最常见的那一张：更新前的 U 本位多仓 3,000 @0.8、现价 1、20x
+   * （20x 上限 5,000 放得下加仓，但 S₁ 上的合计对冲 X₁ + X₂ 一过豁免的底 3,000 就放不下）。
+   */
+  it('对冲把分层余量卡到 0（只剩二分的容差）：不给按钮，不会预填一张 0 币的单；计划照样发布', () => {
+    scene.positions = [
+      { id: 'u1', side: 'LONG', entryPrice: 0.8, quantity: 3_000, leverage: 20, marginMode: 'isolated', settlementMode: 'usdt', margin: 120, isolatedMargin: 120, openTime: 1_000 },
+    ];
+    panel.leverageMap = { RAVEUSDT: 20 };
+    renderCalc(1, { market: true, fillBasePrice: 1 });
+    type('add-sizing-s1', '0.9');
+    expect(screen.getByTestId('add-sizing-tier-cap')).toHaveTextContent('最多再开 0 RAVE');
+    expect(screen.getByTestId('add-sizing-x2')).toHaveTextContent('分层封顶');
+    expect(screen.queryByTestId('add-sizing-place-at-limit')).toBeNull();
+    // 计划本身照旧发布（Plan B 的上限不受分层影响）
+    expect(getAddSizingPlan('RAVEUSDT')!.snapshot.addCoinsMax).toBeGreaterThan(0);
+  });
+
+  it('保存的 125x（RAVE 最高 20x）按 20x 算：不会因为超过最高杠杆算出 0、藏掉按钮', () => {
+    panel.leverageMap = { RAVEUSDT: 125 };
+    renderCalc();
+    type('add-sizing-s1', '130');
+    const line = screen.getByTestId('add-sizing-tier-cap');
+    expect(line).toHaveTextContent('分层上限：当前 20x 最多再开 2.2143 RAVE（31 张）');
+    expect(screen.getByTestId('add-sizing-place-at-limit').textContent).toBe('按上限下单 · 31 张');
+  });
+
+  it('旋钮推出的计划加仓同样按分层封顶（定仓 X₂ᴮ = 7.2 → 38.33 + 7.2 = 45.53，封到 2.21）', () => {
+    panel.leverageMap = { RAVEUSDT: 20 };
+    renderCalc();
+    type('add-sizing-s1', '130');
+    type('add-sizing-g', '1.2');
+    fireEvent.click(screen.getByTestId('add-sizing-knob-size'));
+    type('add-sizing-x2b', '7.2');
+    const planned = screen.getByTestId('add-sizing-planned-add');
+    expect(planned).toHaveTextContent('2.21');
+    expect(planned).not.toHaveTextContent('45.53');
+    expect(planned).toHaveTextContent('已按分层封顶');
+    // 对冲扛起的是实际要下的量：18.33 + 2.21
+    expect(screen.getByTestId('add-sizing-total-hedge-hero')).toHaveTextContent('20.55');
+  });
+
+  it('没有按成交价定量的结果（fillPlan 为空）时，Plan A 的大字与对冲同样按分层封顶', () => {
+    fillSeam.none = true;
+    panel.leverageMap = { RAVEUSDT: 20 };
+    renderCalc();
+    type('add-sizing-s1', '130');
+    const x2 = screen.getByTestId('add-sizing-x2');
+    expect(x2).toHaveTextContent('分层封顶');
+    expect(x2).toHaveTextContent('2.21');
+    expect(x2).not.toHaveTextContent('38.33');
+    expect(x2).toHaveTextContent('31 张');
+    expect(screen.getByTestId('add-sizing-hedge')).toHaveTextContent('20.55');
+    // 没有计划：不发布、不给按钮
+    expect(screen.queryByTestId('add-sizing-place-at-limit')).toBeNull();
   });
 });

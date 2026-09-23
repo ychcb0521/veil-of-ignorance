@@ -1,4 +1,9 @@
 // Shared trading types for the matching engine
+import {
+  LEGACY_MAINTENANCE_MARGIN_RATE,
+  isTieredRiskPosition,
+  tieredLiquidationPrice,
+} from "@/lib/positionRiskModel";
 
 export type OrderSide = "LONG" | "SHORT";
 export type OrderType =
@@ -106,6 +111,15 @@ export interface PendingOrder {
   contractSizeUsd?: number;
   /** COIN-M order quantity in contracts/张. Mirrors quantity for coin-settled orders. */
   contracts?: number;
+  /**
+   * 风险模型来源（lib/positionRiskModel）。币安分层上线之后由引擎下单时盖上：
+   * 'binance-tiers-v1' = 正常过了分层判定，成交开出分层仓位；
+   * 'legacy-hedge-v1' = 只靠「对冲更新前的仓位」那条豁免放行，成交开出旧 0.4% 模型的豁免仓位，
+   * 触发 / 成交那一刻再判一次豁免是否仍成立。
+   * 上线之前挂出的委托没有这个字段：它们是按旧规则（通用表、滑块到 125x）放行的，
+   * 成交后仍开旧的 0.4% 仓位（更新前的仓位），免得一成交就在开仓价上被强平。
+   */
+  riskModel?: 'binance-tiers-v1' | 'legacy-hedge-v1';
   status: OrderStatus;
   createdAt: number;
   /**
@@ -338,6 +352,24 @@ export interface Position {
    * 合并进别的仓位后各笔各留各的，见 PositionFill.addSizingSnapshot。
    */
   addSizingSnapshot?: AddSizingSnapshot | null;
+  /**
+   * 风险模型来源（lib/positionRiskModel）。'binance-tiers-v1' = 维持保证金与强平价按币安分层算；
+   * 'legacy-hedge-v1' = 只靠对冲豁免开出的仓位，按旧的 0.4% 算，但**不是**更新前的仓位（不能再当豁免的底）。
+   * 仓位沿用开出它的委托的来源；上线前挂出、上线后才成交的委托开出的仓位没有这个字段（更新前的仓位）。
+   * **仓位开出来之后不换模型**：合并时存活仓位一律沿用被加仓的那个仓位的来源（survivorRiskStamp），
+   * 所以分层的一笔可以并进按旧 0.4% 的仓位（整仓仍 0.4%，不重新定价），反过来不并（mergeRiskBlocked）。
+   * 没有来源的仓位一直按旧的 0.4% 统一费率，直到平掉——升级不改任何现有仓位的强平价。
+   */
+  riskModel?: 'binance-tiers-v1' | 'legacy-hedge-v1';
+  /** 盖戳时的标的（positionsMap 的键）。仓位对象本身不带标的，按它查分层。 */
+  riskSymbol?: string;
+  /**
+   * 冻结的「对冲豁免的底」，以该仓位的计量单位数计（币本位张数 / U 本位币数，与 getPositionUnits 同口径）。
+   * 只有更新前的仓位才有意义；没有这个字段时整仓都是底（升级前就在的仓位）。
+   * 分层 / 豁免成交并进来只加仓位的大小、**不加这个底**；部分平仓按比例缩。
+   * 读它请走 positionRiskModel.hedgeExemptBaseUnits，别直接读这个字段。
+   */
+  hedgeBaseUnits?: number;
 }
 
 export interface PositionFill {
@@ -450,37 +482,19 @@ export interface TradeRecord {
   addSizingSnapshot?: AddSizingSnapshot | null;
 }
 
-export const MAINTENANCE_MARGIN_RATE = 0.004; // 0.4% — strict MM rate (MMR) per tier default
+/**
+ * 旧模型的统一维持保证金率 0.4%。只适用于不带分层戳的仓位（币安分层上线前开的、靠对冲豁免开的 'legacy-hedge-v1'）；
+ * 读维持保证金一律走 lib/positionRiskModel 的 positionMaintenanceMarginUsd，它按仓位选模型。
+ */
+export const MAINTENANCE_MARGIN_RATE = LEGACY_MAINTENANCE_MARGIN_RATE;
 export const LIQUIDATION_FEE_RATE = 0.005; // 0.5%
 export const FUNDING_RATE = 0.0001; // 0.01% per 8h settlement
 
-// Tiered leverage limits (based on notional value in USDT)
-export const LEVERAGE_TIERS = [
-  { maxNotional: 50_000, maxLeverage: 125 },
-  { maxNotional: 250_000, maxLeverage: 50 },
-  { maxNotional: 1_000_000, maxLeverage: 20 },
-  { maxNotional: Infinity, maxLeverage: 10 },
-];
-
-/** Get max allowed leverage for a given notional value */
-export function getMaxLeverageForNotional(notional: number): number {
-  for (const tier of LEVERAGE_TIERS) {
-    if (notional <= tier.maxNotional) return tier.maxLeverage;
-  }
-  return 10;
-}
-
-/** Get leverage tier info string */
-export function getLeverageTierInfo(notional: number): { maxLeverage: number; tierLabel: string } {
-  for (const tier of LEVERAGE_TIERS) {
-    if (notional <= tier.maxNotional) {
-      const label =
-        tier.maxNotional === Infinity ? `> 1,000,000 USDT` : `0 - ${tier.maxNotional.toLocaleString()} USDT`;
-      return { maxLeverage: tier.maxLeverage, tierLabel: label };
-    }
-  }
-  return { maxLeverage: 10, tierLabel: "> 1,000,000 USDT" };
-}
+/*
+ * 杠杆分层不在这里：币安按合约分层（U 本位以 USDT 计、币本位以币计），
+ * 数据与查询见 lib/leverageTiers，下单 / 改杠杆的上限判定见 lib/positionLimit。
+ * 这里原先那张「所有合约一张表」的通用分层（≤50k 125x … 其余 10x）已删除。
+ */
 
 /** Lock the trigger operator at placement time using the then-current close price. */
 export function getTriggerOperator(triggerPrice: number, currentPrice: number): TriggerOperator {
@@ -573,9 +587,13 @@ export function calcROE(pos: Position, currentPrice: number): number {
  * No zero-clamp: returns the true mathematical value, including negatives, so
  * over-collateralized positions truthfully show their "buffer below zero".
  * Only NaN / non-finite results are guarded (returns NaN to signal invalid input).
+ *
+ * 带 riskModel = 'binance-tiers-v1' 戳的仓位改走币安分层公式（lib/positionRiskModel），
+ * 标的取 symbol 参数，缺省用戳里记下的 riskSymbol。下面的 0.4% 公式只给不带分层戳的仓位（更新前的、对冲豁免的）。
  */
-export function calcLiquidationPrice(pos: Position): number {
+export function calcLiquidationPrice(pos: Position, symbol?: string): number {
   if (!pos.quantity || pos.quantity <= 0 || !isFinite(pos.entryPrice)) return NaN;
+  if (isTieredRiskPosition(pos)) return tieredLiquidationPrice(pos, symbol);
 
   const mmr = MAINTENANCE_MARGIN_RATE;
   if (pos.settlementMode === "coin") {

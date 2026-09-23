@@ -24,6 +24,7 @@ import { isCoinTimelineClockActive } from "@/lib/replayTimeline";
 import { formatPrice } from "@/lib/formatters";
 import { toast } from '@/lib/notificationCenter';
 import { fetchCanonicalTimePriceAt, type CanonicalTimePrice } from "@/lib/canonicalTimePrice";
+import { recheckedAtFill } from "@/lib/positionLimit";
 
 type KlinePrice = CanonicalTimePrice;
 
@@ -139,7 +140,13 @@ export function useBackgroundPrices() {
 
           // 付不起就当场撤单留痕。id 已经进了 filledIds（上一行 push），
           // 所以这一单无论如何都会离开 ordersMap，不会变成一张永远挂着却成不了的单。
-          if (!settleFillDebit(symbol, order, margin, fee, simulatedTime)) {
+          // 触发类开仓单（条件单等）在触发这一刻再判一次杠杆分层上限，只靠对冲豁免挂出的限价单在成交这一刻再判
+          // 豁免是否仍成立（recheckedAtFill）；同一轮里已成交、还没从挂单列表移走的单按 filledIds 排除（它们已经记进持仓了）。
+          if (!settleFillDebit(
+            symbol, order, margin, fee, simulatedTime,
+            // 带上刚造出的仓位：闸门按这一刻的判定给它定来源（只靠豁免 → 豁免标记、旧模型；否则分层）
+            recheckedAtFill(order) ? { price: fillPrice, settledOrderIds: filledIds, position } : undefined,
+          )) {
             continue;
           }
 

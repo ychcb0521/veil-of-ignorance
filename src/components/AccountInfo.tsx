@@ -1,8 +1,8 @@
 import { Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
-import { calcUnrealizedPnl, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
+import { calcUnrealizedPnl } from '@/types/trading';
 import type { PositionsMap, PriceMap, TimeMode } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
+import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
 
 interface Props {
   balance: number;
@@ -29,7 +29,8 @@ export function AccountInfo({ balance, positionsMap, priceMap, timeMode = 'synce
       const mark = price || pos.entryPrice;
       totalPnl += calcUnrealizedPnl(pos, mark);
       totalMargin += pos.margin;
-      totalMaintenanceMargin += getPositionNotionalUsd(symbol, pos, mark) * MAINTENANCE_MARGIN_RATE;
+      // 维持保证金按仓位的风险模型取：分层上线后开的仓位按币安档位，老仓位仍是 0.4%。
+      totalMaintenanceMargin += positionMaintenanceMarginUsd(symbol, pos, mark);
     }
   }
 

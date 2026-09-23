@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderPanel } from '@/components/OrderPanel';
 import { ADD_SIZING_PLAN_TTL_MS, __resetAddSizingPlanForTests, getAddSizingPlan, requestAddSizingPrefill } from '@/lib/addSizingPlan';
 import { calcSlippage, type AddSizingSnapshot } from '@/types/trading';
+import { addTierHeadroom } from '@/lib/addTierHeadroom';
+import { formatPrice } from '@/lib/formatters';
 
 /**
  * 下单面板与加仓计算器的两处接口：
@@ -12,6 +14,10 @@ import { calcSlippage, type AddSizingSnapshot } from '@/types/trading';
  */
 class RO { observe() {} unobserve() {} disconnect() {} }
 (globalThis as unknown as { ResizeObserver: typeof RO }).ResizeObserver ??= RO;
+
+// 每个用例都整面板渲染；首个用例还要付首次渲染的冷启动（分层数据、判定模块）。
+// 机器负载高时首个用例会越过默认的 5 秒，这里放宽到 20 秒（只影响本文件，与 OrderPanel.positionLimit 相同）。
+vi.setConfig({ testTimeout: 20_000 });
 
 vi.mock('@/hooks/usePersistedState', () => ({
   usePersistedState: <T,>(_k: string, d: T) => useState(d),
@@ -30,15 +36,18 @@ const panel = vi.hoisted(() => ({
   mode: 'coin' as 'coin' | 'usdt',
   tradingMode: 'direct' as 'direct' | 'decision',
   switches: [] as Array<[string, string]>,
+  positionsMap: {} as Record<string, unknown[]>,
+  leverage: 6,
 }));
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     get tradingMode() { return panel.tradingMode; },
     balance: 200_000_000,
-    positionsMap: {}, ordersMap: {}, priceMap: {}, leverageMap: {},
+    get positionsMap() { return panel.positionsMap; },
+    ordersMap: {}, priceMap: {}, leverageMap: {},
     getSymbolSettlementMode: () => panel.mode,
     setSymbolSettlementMode: (symbol: string, mode: string) => { panel.switches.push([symbol, mode]); },
-    getSymbolLeverage: () => 6,
+    getSymbolLeverage: () => panel.leverage,
     setSymbolLeverage: vi.fn(),
     getSymbolMarginMode: () => 'isolated',
     setSymbolMarginMode: vi.fn(),
@@ -46,6 +55,27 @@ vi.mock('@/contexts/TradingContext', () => ({
     getTimelineId: () => null,
   }),
 }));
+
+/**
+ * 分层注入口：下面的预填用例刻意用 3,000 万名义（API3）、640 万名义（COMMON）把滑点放大，
+ * 这些规模远超两个币的币安分层（API3 最高 1,250 万、COMMON 最高 65 万），按真实分层按钮全是灰的。
+ * 预填机制与分层是两件事：默认换一张宽松分层（1 档、125x、上限 1 万亿），
+ * 「按分层余量预填」那一组显式切回真实分层。
+ */
+const tierSeam = vi.hoisted(() => ({ wide: true }));
+vi.mock('@/lib/leverageTiers', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/leverageTiers')>('@/lib/leverageTiers');
+  const wideTiers = Object.freeze([Object.freeze({
+    bracket: 1, floor: 0, cap: 1e12, maxLeverage: 125, maintenanceMarginRate: 0.004, maintenanceAmount: 0,
+  })]);
+  return {
+    ...actual,
+    resolveSymbolTiers: (...args: Parameters<typeof actual.resolveSymbolTiers>) => {
+      const real = actual.resolveSymbolTiers(...args);
+      return tierSeam.wide ? { ...real, tiers: wideTiers, maxLeverage: 125, topCap: 1e12 } : real;
+    },
+  };
+});
 
 const PX = 0.419209;
 
@@ -68,7 +98,10 @@ const snapshot = (over: Partial<Omit<AddSizingSnapshot, 'at'>> = {}): Omit<AddSi
   ...over,
 });
 
-beforeEach(() => { panel.mode = 'coin'; panel.tradingMode = 'direct'; panel.switches = []; __resetAddSizingPlanForTests(); });
+beforeEach(() => {
+  panel.mode = 'coin'; panel.tradingMode = 'direct'; panel.switches = []; panel.positionsMap = {}; panel.leverage = 6;
+  tierSeam.wide = true; __resetAddSizingPlanForTests();
+});
 afterEach(() => { __resetAddSizingPlanForTests(); vi.restoreAllMocks(); });
 
 describe('市价单的预计成交价', () => {
@@ -326,5 +359,88 @@ describe('【回归 · 二审】计划随「开多 / 开空」一起取走', () 
     expect(screen.getByTestId('pre-trade-submit')).toBeInTheDocument();
     expect(onPlaceOrder).not.toHaveBeenCalled();
     expect(getAddSizingPlan('API3USD')!.snapshot).toBe(plan);
+  });
+});
+
+/**
+ * 加仓计算器的可下单量 = min(Plan B 上限, 分层余量)，分层余量与面板「可开」是同一个判定（addTierHeadroom）。
+ * 按它预填进来的单，面板不标红、下得出去；多一张就过不了。真币本位的限价单按挂单价折币。
+ */
+describe('【分层】按分层余量预填的单：面板放行，多一张就拦', () => {
+  beforeEach(() => { tierSeam.wide = false; });
+
+  it('KAITOUSD 6x（借 KAITOUSDT 分层，6x 最高 125,000 USD）：市价预填 12,500 张不标红、下出去的就是它；12,501 张标红', () => {
+    const room = addTierHeadroom({
+      symbol: 'KAITOUSD', settlement: 'coin', side: 'LONG', storedLeverage: 6, positions: [], orders: [],
+      markPrice: 1, orderKind: 'market', orderPrice: 1, fillPrice: 1.0001, contractFaceUsd: 10,
+    })!;
+    expect(room.contracts).toBe(12_500);
+    const onPlaceOrder = renderPanel(vi.fn(), 'KAITOUSD', { price: 1 });
+    act(() => {
+      requestAddSizingPrefill('KAITOUSD', snapshot({ gUnit: 'KAITO', contracts: 20_000, addCoinsMax: 199_980 }),
+        { contracts: room.contracts, coins: room.coins, orderType: 'MARKET', limitPrice: null, side: 'LONG', settlement: 'coin' });
+    });
+    expect(qtyInput().value).toBe('12500');
+    expect(screen.queryByTestId('position-limit-warning')).toBeNull();
+    fireEvent.click(screen.getByText('开多'));
+    expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ type: 'MARKET', contracts: 12_500, leverage: 6 });
+    // 钉上去的仍是 Plan B 的计划（上限与整张不因分层改动）
+    expect(onPlaceOrder.mock.calls[0][0].addSizingSnapshot).toMatchObject({ contracts: 20_000, addCoinsMax: 199_980 });
+    fireEvent.change(qtyInput(), { target: { value: '12501' } });
+    expect(screen.getByTestId('position-limit-warning')).toHaveTextContent('6x 最高 125,000 USD');
+  });
+
+  it('BTCUSD 6x（最高 400 BTC）、限价 90,000（现价 100,000）：按挂单价折币 → 36,000,000 USD = 360,000 张；成交后正好 400 BTC', () => {
+    const room = addTierHeadroom({
+      symbol: 'BTCUSD', settlement: 'coin', side: 'LONG', storedLeverage: 6, positions: [], orders: [],
+      markPrice: 100_000, orderKind: 'limit', orderPrice: 90_000, fillPrice: 90_000, contractFaceUsd: 100,
+    })!;
+    expect(room.contracts).toBe(360_000);
+    expect(room.coins).toBeCloseTo(400, 9);
+    const onPlaceOrder = renderPanel(vi.fn(), 'BTCUSD', { price: 100_000 });
+    act(() => {
+      requestAddSizingPrefill('BTCUSD', snapshot({ gUnit: 'BTC', orderKind: 'limit', s2Ref: 90_000, s2Fill: 90_000, slippagePct: 0, contracts: 400_000, addCoinsMax: 444.44 }),
+        { contracts: room.contracts, coins: room.coins, orderType: 'LIMIT', limitPrice: 90_000, side: 'LONG', settlement: 'coin' });
+    });
+    expect(qtyInput().value).toBe('360000');
+    expect(screen.queryByTestId('position-limit-warning')).toBeNull();
+    fireEvent.click(screen.getByText('开多'));
+    expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ type: 'LIMIT', price: 90_000, contracts: 360_000 });
+    // 360,000 × 100 ÷ 90,000 = 400 BTC：成交后恰好在 6x 的上限上
+    expect((360_000 * 100) / 90_000).toBeCloseTo(400, 9);
+    fireEvent.change(qtyInput(), { target: { value: '360001' } });
+    expect(screen.getByTestId('position-limit-warning')).toHaveTextContent('6x 最高 400 BTC');
+  });
+});
+
+describe('【复核 v1】突破加仓（条件单）：计算器单看这一单的余量按触发价那一道算，与面板「可开」同一个数', () => {
+  beforeEach(() => { tierSeam.wide = false; });
+
+  it('KAITOUSDT 15x、多 20,000 @0.9（现价 1.0）、触发价 1.2：可开 21,666.66 币（触发时 24,000 + 26,000）；预填不标红，多 1 个币就按触发价标红', () => {
+    panel.mode = 'usdt';
+    panel.leverage = 15;
+    const held = {
+      id: 'l1', side: 'LONG', quantity: 20_000, entryPrice: 0.9, leverage: 15, marginMode: 'isolated',
+      settlementMode: 'usdt', settlementAsset: 'USDT', margin: 1_200, openTime: 1, riskModel: 'binance-tiers-v1', riskSymbol: 'KAITOUSDT',
+    };
+    panel.positionsMap = { KAITOUSDT: [held] };
+    const room = addTierHeadroom({
+      symbol: 'KAITOUSDT', settlement: 'usdt', side: 'LONG', storedLeverage: 15, positions: [held as never], orders: [],
+      markPrice: 1, orderKind: 'conditional', orderPrice: 1.2, fillPrice: 1.2001, contractFaceUsd: null,
+    })!;
+    // 现价那一道 (50,000 − 20,000 − 100) ÷ 1.2 = 24,916.67 更宽；触发价那一道 26,000 ÷ 1.2 更紧
+    expect(room.coins).toBeCloseTo(26_000 / 1.2, 6);
+    const onPlaceOrder = renderPanel(vi.fn(), 'KAITOUSDT', { price: 1, quantityPrecision: 2 });
+    act(() => {
+      requestAddSizingPrefill('KAITOUSDT', snapshot({ settlement: 'usdt', gUnit: 'USD', contracts: null, orderKind: 'conditional', s2Ref: 1.2, s2Fill: 1.2001 }),
+        { contracts: null, coins: room.coins, orderType: 'CONDITIONAL', limitPrice: null, triggerPrice: 1.2, side: 'LONG', settlement: 'usdt' });
+    });
+    expect(qtyInput().value).toBe('21666.66');
+    expect(screen.getByTestId('max-open-LONG-main')).toHaveTextContent('21,666.66 KAITO');
+    expect(screen.queryByTestId('position-limit-warning')).toBeNull();
+    fireEvent.click(screen.getByText('开多'));
+    expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ type: 'CONDITIONAL', stopPrice: 1.2, quantity: 21_666.66 });
+    fireEvent.change(qtyInput(), { target: { value: '21667.66' } });
+    expect(screen.getByTestId('position-limit-warning')).toHaveTextContent(`按触发价 ${formatPrice(1.2)} 估值：`);
   });
 });

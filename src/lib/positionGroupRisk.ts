@@ -17,9 +17,12 @@ import { getSettlementMarginParts } from '@/lib/tradingSettlement';
  * 那是"扛得住一根 10% 的针"和"扛不住"的区别。
  */
 
-/** 一笔仓位的强平价；算不出来时返回 null（不返回 NaN，免得被当成数参与比较）。 */
-export function positionLiquidationPrice(position: Position): number | null {
-  const liq = calcLiquidationPrice(position);
+/**
+ * 一笔仓位的强平价；算不出来时返回 null（不返回 NaN，免得被当成数参与比较）。
+ * symbol 给分层模型的仓位查档位用，缺省取仓位戳里的标的。
+ */
+export function positionLiquidationPrice(position: Position, symbol?: string): number | null {
+  const liq = calcLiquidationPrice(position, symbol);
   return Number.isFinite(liq) && liq > 0 ? liq : null;
 }
 
@@ -29,10 +32,10 @@ export function positionLiquidationPrice(position: Position): number | null {
  * 多单价格往下走，所以最先撞线的是强平价**最高**的那一笔；空单反之。
  * 全都算不出来时返回 null，由调用方显示 '--'，绝不编一个数。
  */
-export function firstLiquidationPrice(positions: Position[], side: OrderSide): number | null {
+export function firstLiquidationPrice(positions: Position[], side: OrderSide, symbol?: string): number | null {
   let out: number | null = null;
   for (const p of positions) {
-    const liq = positionLiquidationPrice(p);
+    const liq = positionLiquidationPrice(p, symbol);
     if (liq == null) continue;
     if (out == null) out = liq;
     else out = side === 'LONG' ? Math.max(out, liq) : Math.min(out, liq);

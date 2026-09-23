@@ -9,22 +9,39 @@
 import { LIQUIDATION_FEE_RATE, MAINTENANCE_MARGIN_RATE } from '@/types/trading';
 
 export type LiquidationScope = 'isolated' | 'cross' | 'mixed';
+/**
+ * 被强平的仓位按哪套维持保证金算的（lib/positionRiskModel）：
+ * legacy = 旧的统一 0.4%（更新前的仓位、靠对冲豁免开的仓位）；tiered = 币安分层；mixed = 两种都有。缺省按 legacy（老调用方）。
+ */
+export type LiquidationMaintenanceModel = 'legacy' | 'tiered' | 'mixed';
 
 export interface LiquidationDetails {
   lostAmount: number;
   liquidatedPositions: number;
   /** 缺省按全仓口径（老调用方）。 */
   scope?: LiquidationScope;
+  maintenance?: LiquidationMaintenanceModel;
+}
+
+function mergeMaintenance(
+  a: LiquidationMaintenanceModel | undefined,
+  b: LiquidationMaintenanceModel | undefined,
+): LiquidationMaintenanceModel | undefined {
+  if (a == null) return b;
+  if (b == null) return a;
+  return a === b ? a : 'mixed';
 }
 
 /** 弹窗还开着时又发生强平：并入同一个弹窗，数字累加，而不是把前一笔覆盖掉。 */
 export function mergeLiquidationDetails(a: LiquidationDetails, b: LiquidationDetails): LiquidationDetails {
   const sa = a.scope ?? 'cross';
   const sb = b.scope ?? 'cross';
+  const maintenance = mergeMaintenance(a.maintenance, b.maintenance);
   return {
     lostAmount: a.lostAmount + b.lostAmount,
     liquidatedPositions: a.liquidatedPositions + b.liquidatedPositions,
     scope: sa === sb ? sa : 'mixed',
+    ...(maintenance ? { maintenance } : {}),
   };
 }
 
@@ -38,8 +55,19 @@ export interface LiquidationNoticeCopy {
 
 const pct = (rate: number) => `${+(rate * 100).toFixed(2)}%`;
 
-export function liquidationNoticeCopy(scope: LiquidationScope = 'cross', count = 1): LiquidationNoticeCopy {
-  const mmr = `维持保证金率 ${pct(MAINTENANCE_MARGIN_RATE)}`;
+function maintenanceText(model: LiquidationMaintenanceModel = 'legacy'): string {
+  const legacy = `维持保证金率 ${pct(MAINTENANCE_MARGIN_RATE)}`;
+  if (model === 'tiered') return '维持保证金按币安分层（名义 × 档位费率 − 速算扣除额）';
+  if (model === 'mixed') return `维持保证金：分层仓位按币安分层，更新前的仓位与靠对冲豁免开的仓位按${legacy}`;
+  return legacy;
+}
+
+export function liquidationNoticeCopy(
+  scope: LiquidationScope = 'cross',
+  count = 1,
+  maintenance?: LiquidationMaintenanceModel,
+): LiquidationNoticeCopy {
+  const mmr = maintenanceText(maintenance);
   const crossFee = `${pct(LIQUIDATION_FEE_RATE)} 强平清算费`;
   if (scope === 'isolated') {
     const many = count > 1;

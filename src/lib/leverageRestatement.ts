@@ -1,12 +1,15 @@
-import type { PendingOrder, Position } from '@/types/trading';
-import {
-  calcLiquidationPrice,
-  calcUnrealizedPnl,
-  getMaxLeverageForNotional,
-  LEVERAGE_TIERS,
-  MAINTENANCE_MARGIN_RATE,
-} from '@/types/trading';
+import type { PendingOrder, Position, SettlementMode } from '@/types/trading';
+import { calcLiquidationPrice, calcUnrealizedPnl } from '@/types/trading';
 import { getPositionNotionalUsd, isCoinSettled, isPositionOpen } from '@/lib/tradingSettlement';
+import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
+import { clampLeverageToTiers, resolveSymbolTiers, usdNotionalFromTierAmount } from '@/lib/leverageTiers';
+import {
+  checkLeverageChange,
+  leverageFloorOf,
+  limitSettlementOf,
+  symbolExposureUsd,
+  type LimitSettlement,
+} from '@/lib/positionLimit';
 
 /**
  * 改一个标的的杠杆——**同时**重述该标的下所有持仓与挂单。
@@ -24,7 +27,13 @@ export type LeverageRefusalCode =
   | 'no-change'
   | 'no-price'
   | 'below-floor'
+  /** 敞口超过目标杠杆的上限，降到现有敞口放得下的杠杆就行。 */
   | 'tier-cap'
+  /**
+   * 现有敞口在用户还能选的最低杠杆上也放不下（逐仓持仓把下限卡住了，或超过最高一档）：
+   * 调杠杆解决不了，只能减仓 / 撤单。停在当前杠杆时也报它，不报「杠杆未变」。
+   */
+  | 'exposure-over-cap'
   | 'would-liquidate';
 
 export interface LeverageLegPlan {
@@ -49,9 +58,20 @@ export interface LeverageChangePlan {
   to: number;
   /** 滑块下限：有持仓时只能升不能降。 */
   floorLeverage: number;
-  /** 滑块上限：按该标的**总**名义（持仓 + 非减仓挂单）查档位。 */
+  /**
+   * 该标的**总**敞口（持仓 + 非减仓挂单）所在档位允许的最高杠杆（币安分层，按合约）；
+   * 超过最高一档上限为 0。滑块上限是合约的最高杠杆 symbolMaxLeverage，不是它。
+   */
   tierMaxLeverage: number;
-  /** 「当前杠杆倍数最高可开 N USDT」——档位的反读。 */
+  /** 这个合约（当前结算方式）的最高杠杆，即滑块上限。 */
+  symbolMaxLeverage: number;
+  /** 「当前杠杆倍数最高可持有头寸」——目标杠杆下的档位上限，单位见 tierUnit。 */
+  tierCap: number;
+  /** 档位单位：'USDT'、币名（真币本位）或 'USD'（合成币本位）。 */
+  tierUnit: string;
+  /** 当前敞口（档位单位），与 tierCap 可直接比较。 */
+  tierExposure: number;
+  /** tierCap 折成 USD 名义（真币本位按标记价折；无价时为 NaN）。 */
   tierMaxNotionalUsd: number;
   /** 立刻触发强平的杠杆下界；≥ 它即拒绝。无持仓时为 Infinity。 */
   maxSafeLeverage: number;
@@ -62,50 +82,37 @@ export interface LeverageChangePlan {
   restatedOrderIds: string[];
 }
 
-const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
-const clampLev = (v: number) => Math.max(1, Math.min(125, Math.round(v)));
-
-/** 档位反读：给定杠杆，最多能开多少名义。 */
-export function maxNotionalForLeverage(leverage: number): number {
-  let best = 0;
-  for (const tier of LEVERAGE_TIERS) {
-    if (tier.maxLeverage >= leverage) best = Math.max(best, tier.maxNotional);
-  }
-  return best;
-}
-
-/** 该标的的总敞口：持仓按标记价 + 非减仓挂单按其委托价。档位要看总量，不是单笔。 */
+/**
+ * 该标的的总敞口（USD）：持仓按标记价 + 非减仓挂单按其委托价（TWAP 只算没成交的部分）。
+ * 档位要看总量，不是单笔。实现在 positionLimit（分层判定的唯一入口），这里保留旧名给界面用。
+ */
 export function symbolExposureNotionalUsd(
   symbol: string,
   positions: Position[],
   orders: PendingOrder[],
   markPrice: number,
 ): number {
-  let total = 0;
-  for (const p of positions) {
-    if (!isPositionOpen(p)) continue;
-    const px = markPrice > 0 ? markPrice : p.entryPrice;
-    total += Math.abs(getPositionNotionalUsd(symbol, p, px));
-  }
-  for (const o of orders) {
-    if (o.reduceOnly) continue;
-    const px = o.price > 0 ? o.price : (o.stopPrice > 0 ? o.stopPrice : markPrice);
-    if (!(px > 0)) continue;
-    total += Math.abs(getPositionNotionalUsd(symbol, o as unknown as Position, px));
-  }
-  return total;
+  return symbolExposureUsd(symbol, positions, orders, markPrice);
+}
+
+/** 没说结算方式时按手上的仓位 / 挂单推：有币本位的就算币本位，否则 U 本位。 */
+function inferSettlement(positions: Position[], orders: PendingOrder[]): LimitSettlement {
+  const items = [...positions, ...orders.filter(o => !o.reduceOnly)];
+  return items.some(i => limitSettlementOf(i) === 'coin') ? 'coin' : 'usdt';
 }
 
 /**
  * 提到多高会**当场**被强平。
  *
- * 引擎判的是「逐仓保证金 + 未实现盈亏 ≤ 按**标记价**算的名义 × 维持保证金率」
+ * 引擎判的是「逐仓保证金 + 未实现盈亏 ≤ 标记价下的维持保证金 MM_mark」
  * （liquidationGuards）。把保证金拆成「地板 + 手动追加的盈余 S」：
  *
- *     N_entry/L + S + pnl ≤ N_mark·mmr
- *     ⟺ L ≥ N_entry / (N_mark·mmr − pnl − S)
+ *     N_entry/L + S + pnl ≤ MM_mark
+ *     ⟺ L ≥ N_entry / (MM_mark − pnl − S)
  *
- * 注意分母用的是**标记价**下的名义，而卡片上的强平价用的是开仓价下的名义——
+ * MM_mark 按仓位的风险模型取（positionMaintenanceMarginUsd）：旧仓位 = N_mark × 0.4%，
+ * 分层仓位 = 按币安档位算，与杠杆无关，所以提杠杆不改变它。
+ * 注意旧模型下卡片上的强平价用的是开仓价下的名义——
  * 两者不是一个数，不能拿卡片上的强平价来反推这个界。
  */
 export function maxSafeLeverageForPosition(
@@ -116,12 +123,11 @@ export function maxSafeLeverageForPosition(
   if (position.marginMode !== 'isolated') return Infinity;
   if (!isPositionOpen(position) || !(markPrice > 0)) return Infinity;
   const nEntry = Math.abs(getPositionNotionalUsd(symbol, position, position.entryPrice));
-  const nMark = Math.abs(getPositionNotionalUsd(symbol, position, markPrice));
   if (!(nEntry > 0)) return Infinity;
   const floor = nEntry / Math.max(1, position.leverage);
   const surplus = Math.max(0, Number(position.isolatedMargin ?? position.margin) - floor);
   const pnl = calcUnrealizedPnl(position, markPrice);
-  const denom = nMark * MAINTENANCE_MARGIN_RATE - pnl - surplus;
+  const denom = positionMaintenanceMarginUsd(symbol, position, markPrice) - pnl - surplus;
   return denom > 0 ? nEntry / denom : Infinity;
 }
 
@@ -153,8 +159,8 @@ function restateLeg(symbol: string, p: Position, to: number): LeverageLegPlan {
       : p.marginCoin,
   };
 
-  const liqBefore = calcLiquidationPrice(p);
-  const liqAfter = calcLiquidationPrice(next);
+  const liqBefore = calcLiquidationPrice(p, symbol);
+  const liqAfter = calcLiquidationPrice(next, symbol);
   return {
     positionId: p.id,
     side: p.side,
@@ -183,11 +189,18 @@ export function planLeverageChange(args: {
   markPrice: number;
   currentLeverage: number;
   nextLeverage: number;
+  /** 下单面板当前的结算方式（决定用哪张分层）；缺省按手上的仓位 / 挂单推断。 */
+  settlementMode?: SettlementMode;
 }): LeverageChangePlan {
   const { symbol, markPrice, currentLeverage } = args;
-  const to = clampLev(args.nextLeverage);
   const open = (args.positions ?? []).filter(isPositionOpen);
   const orders = args.orders ?? [];
+  const settlement: LimitSettlement = args.settlementMode
+    ? (args.settlementMode === 'coin' ? 'coin' : 'usdt')
+    : inferSettlement(open, orders);
+  const tiers = resolveSymbolTiers(symbol, settlement);
+  // 滑块与输入框之外的调用也不许越过合约的最高杠杆（BTCUSDT 150x、KAITOUSDT 75x……）。
+  const to = clampLeverageToTiers(tiers, args.nextLeverage);
 
   /**
    * 下限 = 现有持仓里最高的那个杠杆。**有持仓时只能升不能降**（与币安一致）。
@@ -195,12 +208,13 @@ export function planLeverageChange(args: {
    * 更要命的是扣款可能失败，一旦失败 leverageMap 与 position.leverage 就分叉，
    * 而合并键把杠杆算在内——下一笔成交会另开一张卡，等于拖一下滑块拆了仓位。
    */
-  const floorLeverage = open.length > 0
-    ? Math.max(1, ...open.map(p => Math.max(1, Number(p.leverage) || 1)))
-    : 1;
+  const floorLeverage = leverageFloorOf(open);
 
-  const exposure = symbolExposureNotionalUsd(symbol, open, orders, markPrice);
-  const tierMaxLeverage = exposure > 0 ? getMaxLeverageForNotional(exposure) : 125;
+  /**
+   * 分层上限与下单面板、引擎下单走同一个判定（positionLimit）：
+   * 敞口在目标杠杆的「最高可持有头寸」之内才放行。
+   */
+  const limit = checkLeverageChange({ symbol, settlement, leverage: to, positions: open, orders, markPrice });
   const maxSafeLeverage = open.length > 0
     ? Math.min(...open.map(p => maxSafeLeverageForPosition(symbol, p, markPrice)))
     : Infinity;
@@ -210,26 +224,60 @@ export function planLeverageChange(args: {
     from: currentLeverage,
     to,
     floorLeverage,
-    tierMaxLeverage,
-    tierMaxNotionalUsd: maxNotionalForLeverage(to),
+    tierMaxLeverage: limit.maxLeverageForResult,
+    symbolMaxLeverage: tiers.maxLeverage,
+    tierCap: limit.cap,
+    tierUnit: limit.unit,
+    tierExposure: limit.exposureAfter,
+    tierMaxNotionalUsd: usdNotionalFromTierAmount(limit.tiers, limit.cap, markPrice),
     maxSafeLeverage,
     legs: [],
     totalReleaseUsd: 0,
     restatedOrderIds: [],
   };
 
-  if (to === currentLeverage) return refuse('no-change', '杠杆未变', base);
+  /**
+   * 「杠杆没变」有一个例外：旧版本的滑块到 125x，保存值读出来已按合约夹到上限（KAITOUSDT 75x），
+   * 可挂单上还写着 125x。此时在上限上确认，正是要把这些挂单拉回合约允许的杠杆，不能当成没变。
+   */
+  const overMaxOrders = orders.some(o => !o.reduceOnly
+    && Number(o.leverage) > resolveSymbolTiers(symbol, limitSettlementOf(o)).maxLeverage);
+
+  /**
+   * 死局：现有敞口在用户还能选的最低杠杆（下限，且不超过合约最高杠杆）上也放不下。
+   * 更新前按旧规则开的大仓位、或行情把持仓的价值推过了线，都会落进来——
+   * 这时降杠杆被「只能升不能降」挡住、升杠杆上限只会更低，唯一的出路是减仓 / 撤单。
+   * 对话框不能再说「请调低杠杆倍数至 Nx 以下」（N 低于下限，根本选不到）。
+   */
+  const lowestSelectable = Math.min(floorLeverage, tiers.maxLeverage);
+  const atLowest = markPrice > 0 && lowestSelectable !== to
+    ? checkLeverageChange({ symbol, settlement, leverage: lowestSelectable, positions: open, orders, markPrice })
+    : limit;
+  const stuck = markPrice > 0 && !atLowest.ok && atLowest.reason !== 'leverage-above-max'
+    ? atLowest.message
+    : null;
+
+  if (to === currentLeverage && !overMaxOrders) {
+    return stuck ? refuse('exposure-over-cap', stuck, base) : refuse('no-change', '杠杆未变', base);
+  }
   // 有持仓却拿不到价，就不要在一个自己都不敢担保的价上重述风险。
   if (open.length > 0 && !(markPrice > 0)) {
     return refuse('no-price', '暂时取不到标记价，无法调整杠杆', base);
   }
   if (open.length > 0 && to < floorLeverage) {
-    return refuse('below-floor', `逐仓有持仓时只能提高杠杆，当前最低 ${floorLeverage}x`, base);
+    // 更新前按旧规则开的仓位，杠杆可能高过合约现在的最高杠杆（LUMIAUSDT 35x / 最高 10x）：
+    // 滑块上哪个值都选不了，照实说。
+    const floorText = floorLeverage > tiers.maxLeverage
+      ? `逐仓有持仓时不能降杠杆：现有仓位按 ${floorLeverage}x 开（高于该合约现在的最高杠杆 ${tiers.maxLeverage}x，`
+        + `是更新前按旧规则开的），平仓前无法调整杠杆；新单最高只能用 ${tiers.maxLeverage}x`
+      : `逐仓有持仓时只能提高杠杆，当前最低 ${floorLeverage}x`;
+    return refuse('below-floor', stuck ? `${floorText}。${stuck}` : floorText, base);
   }
-  if (to > tierMaxLeverage) {
+  if (!limit.ok) {
+    // limit 的文案已按「降得下去 / 降不下去」选好出路（leverageChangeRefusalMessage）。
     return refuse(
-      'tier-cap',
-      `本标的总敞口 ${Math.round(exposure).toLocaleString('en-US')} USDT，最高 ${tierMaxLeverage}x`,
+      stuck && limit.reason !== 'leverage-above-max' ? 'exposure-over-cap' : 'tier-cap',
+      limit.message ?? `请调低杠杆倍数至 ${limit.maxLeverageForResult}x 以下`,
       base,
     );
   }

@@ -267,15 +267,28 @@ export function PreTradeSnapshotDialog({
       });
 
       if (mode === 'trade' && orderParams && onPlaceOrder) {
+        /**
+         * 只有引擎真的下出去了才报成功。null 表示被拒（超过杠杆分层上限、余额不足……，
+         * 原因引擎已经另发了一条提示）；分段 / 跟踪 / TWAP 下出去时返回空 id，照样算下出去了。
+         * 快照此时已经存好，不删也不留着弹窗重交（重交会再建一条快照），关窗并说清没有下单。
+         */
+        let placed = false;
         try {
           const result = await onPlaceOrder(orderParams);
+          placed = result != null;
           if (result?.id) {
             await updateJournalTradeRef(journal.id, result.id);
           }
         } catch (orderErr) {
           console.error('[Snapshot] 下单失败', orderErr);
         }
-        toast.success('已记录开仓快照并提交订单');
+        if (placed) {
+          toast.success('已记录开仓快照并提交订单');
+        } else {
+          toast.error('订单被拒，没有下单；开仓快照已保存，但没有关联订单', {
+            description: '拒绝原因见同一时刻的另一条提示（历史消息里可查）。调整后重新下单即可。',
+          });
+        }
       } else {
         // 未下单但全程观察 = 当天有练习：清「未交易 −1000」（Option A）。下单成交会经 recordExecutionTrade 自行打标。
         trading.recordObservationLogged();

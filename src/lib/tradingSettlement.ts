@@ -24,6 +24,7 @@ import {
   getSettlementAsset,
   roundCoinContracts,
 } from "@/lib/coinMargined";
+import { mergeRiskBlocked, mergedHedgeBaseUnits, positionRiskStampForFill, survivorRiskStamp } from "@/lib/positionRiskModel";
 
 export const POSITION_DUST_EPSILON = 1e-6;
 
@@ -36,6 +37,8 @@ type SettlementInstrument = {
 };
 
 export type SettlementOrderLike = SettlementInstrument & {
+  /** 委托上的风险模型来源：分层戳的委托成交开分层仓位，对冲豁免标记的开豁免仓位（旧模型），没有的开更新前的仓位（见 positionRiskModel）。 */
+  riskModel?: string | null;
   side: OrderSide;
   quantity: number;
   leverage: number;
@@ -102,7 +105,8 @@ export function settlementRoePct(pnlUsd: number, initialMarginUsd: number): numb
 
 /**
  * 结算口径下的保证金比率% = 维持保证金 / 保证金余额（与币安一致：亏损越大越逼近 100% = 爆仓）。
- * 维持保证金 = 标记价名义价值 × 维持保证金率（notionalUsdAtMark 对 U本位/币本位都是 USD 名义）。
+ * 维持保证金优先取调用方按仓位算好的 maintenanceUsd（positionMaintenanceMarginUsd，分层 / 旧模型各按各的）；
+ * 不传时按旧模型 = 标记价名义价值 × 0.4%（notionalUsdAtMark 对 U本位/币本位都是 USD 名义）。
  * 保证金余额 = 按标记价估值的保证金 + 未实现盈亏(USD)；币本位的保证金需先按现价折算（与 ROE 同口径）。
  * 余额 ≤ 0 视为已触及强平，返回 100。
  */
@@ -110,9 +114,10 @@ export function settlementMarginRatioPct(
   notionalUsdAtMark: number,
   marginUsdValuedAtMark: number,
   pnlUsd: number,
+  maintenanceUsd: number = notionalUsdAtMark * MAINTENANCE_MARGIN_RATE,
 ): number {
   const marginBalance = marginUsdValuedAtMark + pnlUsd;
-  return marginBalance > 0 ? (notionalUsdAtMark * MAINTENANCE_MARGIN_RATE / marginBalance) * 100 : 100;
+  return marginBalance > 0 ? (maintenanceUsd / marginBalance) * 100 : 100;
 }
 
 export function getSettlementMarginParts(symbol: string, order: SettlementOrderLike, price: number) {
@@ -215,6 +220,9 @@ export function executeSettlementFill(
     ...(entryMethod ? { entry_method: entryMethod } : {}),
     // 加仓计划只在有的时候才写：没有计划的成交产出的仓位与改动前逐字节相同。
     ...(normalized.addSizingSnapshot ? { addSizingSnapshot: normalized.addSizingSnapshot } : {}),
+    // 仓位沿用委托的来源：分层戳 → 分层模型；对冲豁免 → 旧模型的豁免仓位；升级前挂出的委托没有来源，开更新前的仓位。
+    // 合并进已有仓位时存活的沿用那个仓位的来源（见 positionRiskModel.survivorRiskStamp）：仓位不中途换模型。
+    ...positionRiskStampForFill(symbol, order),
   };
 
   return { fee: feeUsd, feeCoin, margin: marginUsd, marginCoin, slippage: slippageUsd, position };
@@ -633,6 +641,14 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
     openFeeCoin: feePart(f.openFeeCoin, pct),
   }));
   const openFees = { openFeeUsd: feePart(pos.openFeeUsd, pct), openFeeCoin: feePart(pos.openFeeCoin, pct) };
+  /**
+   * 冻结的「对冲豁免的底」按同一个比例缩（规则四：底只会变小）。
+   * 不缩的话，减仓之后底还是原来那么大，反向就能按一个早已不存在的旧仓位开出超限的裸仓位。
+   * 没有这个字段的仓位（升级前就在的）**不要凭空补一个**——它整仓都是底，补了反而多出一次取整误差。
+   */
+  const baseUnits = pos.hedgeBaseUnits == null
+    ? {}
+    : { hedgeBaseUnits: Math.max(0, Math.min(remainingUnits, pos.hedgeBaseUnits * pct)) };
   if (isCoinSettled(pos)) {
     return {
       ...pos,
@@ -643,6 +659,7 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
       isolatedMargin: pos.isolatedMargin == null ? undefined : pos.isolatedMargin * pct,
       fills,
       ...openFees,
+      ...baseUnits,
     };
   }
   return {
@@ -652,6 +669,7 @@ export function scaleSettlementPosition(pos: Position, remainingUnits: number): 
     margin: pos.margin * pct,
     isolatedMargin: pos.isolatedMargin == null ? undefined : pos.isolatedMargin * pct,
     ...openFees,
+    ...baseUnits,
   };
 }
 
@@ -682,7 +700,7 @@ export interface PositionMergeResult {
   /** 被吞并的那笔成交的 id；为 null 表示没有合并（新开了一个仓位）。 */
   absorbedFillId: string | null;
   /** 没有合并的原因，用来向用户解释「N 笔合并」这个徽标。 */
-  blockedBy: 'leverage' | 'marginMode' | 'settlement' | null;
+  blockedBy: 'leverage' | 'marginMode' | 'settlement' | 'riskModel' | null;
 }
 
 function fillsOf(p: Position, symbol: string): PositionFill[] {
@@ -729,7 +747,42 @@ function mergeBlocker(a: Position, b: Position): PositionMergeResult['blockedBy'
    * 按最大算只有 200，用户会以为有 100 可以撤出来，撤完等于事后把 5x 那腿加到了 10x。
    */
   if (Number(a.leverage) !== Number(b.leverage)) return 'leverage';
+  /**
+   * 维持保证金口径（positionRiskModel.mergeRiskBlocked，那里有完整矩阵）。**有方向**：
+   * 现有仓位 a 是分层的、这一笔 b 按旧 0.4%（更新前 / 豁免）才不合并——存活的分层仓位会把没过分层的
+   * 那一截也按档位定价、推进更高的档，把 a 自己当场强平。反过来（分层的 b 并进按 0.4% 的 a）照并：
+   * 存活的是 a，整仓仍按 0.4%，一个数都不重新定价，加仓也照旧被 a 的权益扛着。
+   * 无论哪个方向，现有仓位的强平模型都不因为一笔加仓改变（规则一）。
+   */
+  if (mergeRiskBlocked(a, b)) return 'riskModel';
   return null;
+}
+
+/**
+ * 没有合并时报哪一个原因：报**最接近合并**的那一笔同向仓位的原因，不是数组里排最前的那一笔。
+ *
+ * mergeBlocker 按 保证金模式 → 结算方式 → 杠杆 → 维持保证金口径 的顺序判，后面的键只有前面全对上才会比到；
+ * 所以 'riskModel' 意味着其余三样都一样（这一笔本来就该并进那笔仓位，只差口径），
+ * 'leverage' 意味着保证金模式与结算方式一样。报最深的那一个，「未与现有仓位合并」的提示与下单面板的说明
+ * 才会说到点子上：盘上先有一笔 5x 的分层多仓、再有一笔 10x 的分层多仓时，一笔 10x 的豁免成交
+ * 挡住它的是规则三（口径），不是「杠杆与现有同向仓位不同」。引擎的结果本身与报什么原因无关。
+ */
+const MERGE_BLOCKER_DEPTH: Record<NonNullable<PositionMergeResult['blockedBy']>, number> = {
+  marginMode: 0,
+  settlement: 1,
+  leverage: 2,
+  riskModel: 3,
+};
+
+function closestMergeBlocker(open: Position[], fill: Position): PositionMergeResult['blockedBy'] {
+  let best: PositionMergeResult['blockedBy'] = null;
+  for (const p of open) {
+    if (p.side !== fill.side) continue;
+    const reason = mergeBlocker(p, fill);
+    if (reason == null) continue;
+    if (best == null || MERGE_BLOCKER_DEPTH[reason] > MERGE_BLOCKER_DEPTH[best]) best = reason;
+  }
+  return best;
 }
 
 export function mergeFilledPosition(
@@ -741,12 +794,11 @@ export function mergeFilledPosition(
   const target = open.find(p => p.side === fill.side && mergeBlocker(p, fill) == null) ?? null;
 
   if (!target) {
-    const sameSide = open.find(p => p.side === fill.side) ?? null;
     return {
       positions: [...open, { ...fill, fills: fillsOf(fill, symbol) }],
       survivor: fill,
       absorbedFillId: null,
-      blockedBy: sameSide ? mergeBlocker(sameSide, fill) : null,
+      blockedBy: closestMergeBlocker(open, fill),
     };
   }
 
@@ -771,9 +823,15 @@ export function mergeFilledPosition(
     : target.entryPrice;
 
   const openTimes = fills.map(f => f.openTime).filter(t => t > 0);
+  const mergedBase = mergedHedgeBaseUnits(target, getPositionUnits(target), fill, getPositionUnits(fill));
   const survivor: Position = {
     ...target,
     // id 保留**最早**那一笔：挂在它上面的减仓单、日志的 trade_record_id 都指着它。
+    // 【规则一】风险模型来源一律沿用 target 的（survivorRiskStamp）：仓位开出来之后不换强平模型。
+    // 所以存活仓位的维持保证金口径与合并前一模一样，分层的一笔并进来也不会给它重新定价。
+    ...survivorRiskStamp(target),
+    // 【规则四】豁免的底单独冻结：只有「更新前的成交」才把底做大，分层 / 豁免成交并进来只加仓位大小。
+    ...(mergedBase == null ? {} : { hedgeBaseUnits: mergedBase }),
     id: target.id,
     entryPrice,
     quantity: Number(target.quantity) + Number(fill.quantity),

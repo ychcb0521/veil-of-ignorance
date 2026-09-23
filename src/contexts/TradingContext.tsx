@@ -47,6 +47,17 @@ import {
 } from '@/lib/liquidationGuards';
 import { mergeLiquidationDetails, type LiquidationDetails } from '@/lib/liquidationNotice';
 import { calcLiquidationPrice } from '@/types/trading';
+import {
+  LEGACY_HEDGE_RISK_MODEL,
+  ORDER_LEGACY_HEDGE_STAMP,
+  ORDER_RISK_STAMP,
+  TIERED_RISK_MODEL,
+  hasRiskProvenance,
+  legacyHedgeRiskStamp,
+  positionMaintenanceMarginUsd,
+  positionRiskStamp,
+  summarizeRiskModels,
+} from '@/lib/positionRiskModel';
 import { toast } from '@/lib/notificationCenter';
 import type {
   AddSizingSnapshot,
@@ -65,7 +76,7 @@ import {
   calcUnrealizedPnl,
   DEFAULT_MARGIN_MODE,
   DEFAULT_SETTLEMENT_MODE,
-  MAINTENANCE_MARGIN_RATE, LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
+  LIQUIDATION_FEE_RATE, FUNDING_RATE, FUNDING_HOURS, getTriggerOperator,
 } from '@/types/trading';
 import { resolveConditionalTriggerPrice, shouldRejectImmediateConditionalPlacement } from '@/lib/conditionalOrders';
 import {
@@ -118,6 +129,23 @@ import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, validateTpSlLeve
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
 import { evaluateFillAffordability, fillCostUsd } from '@/lib/fillAffordability';
 import { planLeverageChange, type LeverageChangePlan } from '@/lib/leverageRestatement';
+import {
+  DEFAULT_SYMBOL_LEVERAGE,
+  checkOrderPositionLimit,
+  checkPlacementPositionLimit,
+  clampLeverageAcrossSettlements,
+  clampSymbolLeverage,
+  effectiveSymbolLeverage,
+  limitSettlementOf,
+  isTriggeredOpenOrder,
+  newlyDoomedTriggerOrders,
+  placementAftermath,
+  placementCheckPrice,
+  placementOrderValuation,
+  placementUsesLegacyHedge,
+  positionLimitDetail,
+  triggerRiskMessage,
+} from '@/lib/positionLimit';
 import type { PositionMergeResult } from '@/lib/tradingSettlement';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
@@ -214,7 +242,16 @@ interface TradingState {
   marginModeMap: Record<string, MarginMode>;
   settlementModeMap: Record<string, SettlementMode>;
   getSymbolLeverage: (symbol: string) => number;
-  setSymbolLeverage: (symbol: string, value: number | ((prev: number) => number)) => void;
+  /**
+   * 写入标的的杠杆（夹到合约上限）。settlementMode 指定按哪一种结算方式的分层夹值，
+   * 缺省按下单面板当前的结算方式；'any' 夹到两种结算方式里较高的上限（偏好里的默认杠杆：
+   * 杠杆按标的只存一份，读的时候再按各自的结算方式夹）。
+   */
+  setSymbolLeverage: (
+    symbol: string,
+    value: number | ((prev: number) => number),
+    settlementMode?: SettlementMode | 'any',
+  ) => void;
   getSymbolMarginMode: (symbol: string) => MarginMode;
   setSymbolMarginMode: (symbol: string, mode: MarginMode) => void;
   getSymbolSettlementMode: (symbol: string) => SettlementMode;
@@ -224,13 +261,28 @@ interface TradingState {
   handleClosePosition: (symbol: string, index: number, percentage?: number, method?: 'manual' | 'sl' | 'tp1' | 'tp2' | 'tp3' | 'liquidation') => void;
   handleCancelOrder: (symbol: string, orderId: string) => void;
   handlePlaceTpSl: (symbol: string, pos: Position, tp: number | null, sl: number | null, pct: number) => void;
-  /** 调整标的杠杆：持仓、挂单、余额一起重述；被拒绝时返回原因，不做任何写入。 */
-  applySymbolLeverage: (symbol: string, nextLeverage: number) => LeverageChangePlan;
+  /**
+   * 调整标的杠杆：持仓、挂单、余额一起重述；被拒绝时返回原因，不做任何写入。
+   * settlementMode 是**打开对话框的那一方**用的结算方式（持仓卡传仓位的，下单面板传面板的），
+   * 夹值、判定、写回都按它——对话框与引擎因此读同一张分层。缺省按下单面板当前的结算方式。
+   */
+  applySymbolLeverage: (symbol: string, nextLeverage: number, settlementMode?: SettlementMode) => LeverageChangePlan;
   /**
    * 成交时扣款；付不起就撤单留痕并返回 false。
    * 必须严格排在减仓分支**之后**——止盈止损是**退还**保证金的，绝不能被这道闸门拦住。
+   * 传 trigger 表示这一笔要按这一刻的敞口再判一次币安分层上限（触发后才下单的开仓单：条件 / 跟踪委托、
+   * TWAP 的一片；以及只靠对冲豁免挂出的限价单成交时），超限同样撤单留痕并返回 false。
+   * 只判本次更新之后下的委托（带分层戳或对冲豁免标记）；更新前挂出的委托是按旧规则放行的，触发时不再判。
+   * 判过的这一笔，开出的仓位按判定结果定来源（trigger.position）：正常放行 → 分层，只靠豁免 → 豁免标记。
    */
-  settleFillDebit: (symbol: string, order: PendingOrder, marginUsd: number, feeUsd: number, cancelledAt: number) => boolean;
+  settleFillDebit: (
+    symbol: string,
+    order: PendingOrder,
+    marginUsd: number,
+    feeUsd: number,
+    cancelledAt: number,
+    trigger?: SettleFillTrigger,
+  ) => boolean;
   /** 挂单成交时兑现它随身带着的止盈止损（勾选框下达的那一对）。 */
   applyAttachedTpSl: (symbol: string, position: Position, order: PendingOrder) => void;
   /**
@@ -326,6 +378,33 @@ interface TradingState {
   getEffectiveAvailable: (symbol: string) => number;
 }
 
+/** 触发后才下单的开仓单在成交闸门上的附加信息（见 settleFillDebit）。 */
+export interface SettleFillTrigger {
+  /** 触发 / 成交价：分层判定按这一刻的价给持仓估值、把这一单折成档位单位。 */
+  price: number;
+  /**
+   * 同一批里已经成交、但还没从挂单列表移走的单（含这一单自己）——它们的仓位已经记进持仓，
+   * 再按挂单算一遍就重复了。
+   */
+  settledOrderIds?: readonly string[];
+  /**
+   * 这一次真正成交的那一部分（TWAP 的一片）；缺省是整张委托。分层判定按它估值，
+   * 撤单留痕仍记整张委托。
+   */
+  fill?: PendingOrder;
+  /**
+   * 同一批里已经改过、挂单列表还没写回的委托（同一轮里先切过一片的别的 TWAP）：按这里的版本算，
+   * 否则它刚成交的那一片会按持仓与挂单各算一遍（见 positionLimit.twapSliceTrigger）。
+   */
+  orderOverrides?: readonly PendingOrder[];
+  /**
+   * 这一笔成交开出的仓位（调用方刚用 executeSettlementFill 造出、还没并进持仓）。闸门按这一刻的判定就地改它的来源：
+   * 只靠「对冲更新前的仓位」那条豁免放行 → 'legacy-hedge-v1'（旧模型：豁免单的名义可能远超分层允许的大小，
+   * 套分层维持保证金会一成交就爆）；正常过了分层 → 分层戳（挂出时靠豁免、成交时已经放得下的单也一样）。
+   */
+  position?: Position;
+}
+
 export interface PlaceOrderParams {
   side: OrderSide;
   type: OrderType;
@@ -381,6 +460,13 @@ export function useTradingContext() {
 }
 
 // ===== Helpers =====
+
+/**
+ * handlePlaceOrder 的「下出去了，但没有可回填到决策记录的 id」（分段订单 / 跟踪委托 / TWAP）。
+ * 此前这三种成功时返回 null，与「被拒、什么都没下」分不开，决策记录弹窗于是对被拒的单也报
+ * 「已提交订单」。null 现在只表示被拒；id 为空串，`result?.id` 判真的回填逻辑照旧跳过（行为不变）。
+ */
+const placedWithoutTradeRef = (): { id: string } => ({ id: '' });
 
 /**
  * Calculate available balance — always from the single global pool.
@@ -1048,20 +1134,37 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return Array.from(syms);
   }, [positionsMap, ordersMap]);
 
+  /**
+   * 读出来的杠杆一律夹到这个合约（当前结算方式）的最高杠杆：旧版本的滑块到 125x，
+   * 而币安按合约分层（KAITOUSDT 75x、不少合约只到 10x）。保存值不改写，
+   * 下单面板会就此提示一次（leverageClampNotice）。默认 35x 同样要夹。
+   */
   const getSymbolLeverage = useCallback((symbol: string) => {
-    return leverageMap[symbol] ?? 35;
-  }, [leverageMap]);
+    const settlement = settlementModeMap[symbol] ?? DEFAULT_SETTLEMENT_MODE;
+    return effectiveSymbolLeverage(leverageMap[symbol], symbol, settlement);
+  }, [leverageMap, settlementModeMap]);
 
-  const setSymbolLeverage = useCallback((symbol: string, value: number | ((prev: number) => number)) => {
+  const setSymbolLeverage = useCallback((
+    symbol: string,
+    value: number | ((prev: number) => number),
+    settlementMode?: SettlementMode | 'any',
+  ) => {
+    const anySettlement = settlementMode === 'any';
+    const settlement = (anySettlement ? undefined : settlementMode) ?? settlementModeMap[symbol] ?? DEFAULT_SETTLEMENT_MODE;
+    const clampWrite = (v: number) => (anySettlement
+      ? clampLeverageAcrossSettlements(symbol, Math.floor(v))
+      : clampSymbolLeverage(symbol, settlement, Math.floor(v)));
     setLeverageMap(prev => {
-      const current = prev[symbol] ?? 35;
+      const current = anySettlement
+        ? clampLeverageAcrossSettlements(symbol, prev[symbol] ?? DEFAULT_SYMBOL_LEVERAGE)
+        : effectiveSymbolLeverage(prev[symbol], symbol, settlement);
       const nextValue = typeof value === 'function' ? value(current) : value;
       return {
         ...prev,
-        [symbol]: Math.floor(Math.max(1, Math.min(125, nextValue))),
+        [symbol]: clampWrite(nextValue),
       };
     });
-  }, [setLeverageMap]);
+  }, [setLeverageMap, settlementModeMap]);
 
   const getSymbolMarginMode = useCallback((symbol: string): MarginMode => {
     return marginModeMap[symbol] ?? DEFAULT_MARGIN_MODE;
@@ -1242,7 +1345,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
       return changed ? next : prev;
     });
-    openLiquidationModal({ lostAmount: lost, liquidatedPositions: items.length, scope: 'isolated' });
+    openLiquidationModal({
+      lostAmount: lost, liquidatedPositions: items.length, scope: 'isolated',
+      maintenance: summarizeRiskModels(items.map(i => i.position)),
+    });
   }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal, stampClock]);
 
   /** 逐根判定：每个标的上一次判定看到的最后时刻，与每副仓位构成的风险下限（见 updateRiskFloors）。 */
@@ -1331,7 +1437,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (!decision.liquidate) continue;
         // 两次采样之间价格已越过强平价：按强平价记账（仓位本应在那里被接管），
         // 不按采样到的那个更远的价；亏损由结算函数封顶在保证金。
-        const liq = calcLiquidationPrice(pos);
+        const liq = calcLiquidationPrice(pos, sym);
         const exitPrice = Number.isFinite(liq) && liq > 0 ? liq : price;
         // 时间取这个价的时刻：判据已保证它按播放方向不早于仓位形成。
         isolatedItems.push({ symbol: sym, position: pos, exitPrice, closeTime: Number(priceAsOf) });
@@ -1340,10 +1446,11 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     settleIsolatedLiquidations(isolatedItems);
 
     // --- CROSS liquidation: aggregate all cross positions globally ---
-    // MMR = ∑(notional * MAINTENANCE_MARGIN_RATE) where notional = qty * currentPrice
+    // 维持保证金 = Σ 各全仓仓位按自己的风险模型算的维持保证金（positionMaintenanceMarginUsd，现价口径）
     let crossUnrealizedPnl = 0;
     let crossMaintenanceMargin = 0;
     let crossPositionCount = 0;
+    const crossRiskPositions: Position[] = [];
     // 已被扣出钱包的全仓保证金——它是权益的一部分，判据里漏掉它就等于把风险算大一倍。
     let crossMargin = 0;
     /**
@@ -1363,7 +1470,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (pos.marginMode !== 'cross') continue;
         if (!priceObservedAfter(priceAsOf, riskStartOf(pos), direction)) crossPriceUsable = false;
         crossUnrealizedPnl += calcUnrealizedPnl(pos, price);
-        crossMaintenanceMargin += getPositionNotionalUsd(sym, pos, price) * MAINTENANCE_MARGIN_RATE;
+        crossMaintenanceMargin += positionMaintenanceMarginUsd(sym, pos, price);
+        crossRiskPositions.push(pos);
         // 币本位持有的是币，保证金的美元价值随价格走；用开仓时冻结的 pos.margin
         // 会让同一笔仓位在逐仓与全仓下按两套模型判生死（逐仓那一支已按现价折算）。
         crossMargin += positionMarginUsdAtMark(pos, price);
@@ -1500,7 +1608,10 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         setBalance(prev => prev + crossMargin + crossSettlement);
         setTradeHistory(prev => [...prev, ...liqRecords]);
 
-        openLiquidationModal({ lostAmount: totalLoss, liquidatedPositions: crossPositionCount, scope: 'cross' });
+        openLiquidationModal({
+          lostAmount: totalLoss, liquidatedPositions: crossPositionCount, scope: 'cross',
+          maintenance: summarizeRiskModels(crossRiskPositions),
+        });
         toast.error('🚨 全仓爆仓！所有全仓仓位已被强制平仓', { duration: 10000 });
 
         setTimeout(() => { liquidationCheckRef.current = false; }, 2000);
@@ -1538,7 +1649,55 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     marginUsd: number,
     feeUsd: number,
     cancelledAt: number,
+    trigger?: SettleFillTrigger,
   ): boolean => {
+    /**
+     * 条件 / 跟踪委托：币安在触发这一刻才真正下单，分层上限（-2027）按这一刻的敞口判——
+     * 挂单之后行情走了、别的仓位开了，下单时过得去的单子触发时可能已经过不去。
+     * 过不去就与付不起同样处理：撤单留痕、不缩量。挂在盘口的分层限价单成交时不再判（与币安一致）。
+     * 只靠对冲豁免挂出的单（条件单、跟踪委托、限价单都算）在这一刻再判豁免是否仍成立：
+     * 旧仓位先平掉 / 减掉、或额度已被别的对冲占掉时，按普通的分层判——放得下就开分层仓位，放不下就撤。
+     */
+    let refusal: { title: string; description: string } | null = null;
+    const triggerPx = Number(trigger?.price);
+    /**
+     * 只判带来源的委托（本次更新之后经引擎下的：分层戳或对冲豁免标记）。更新前挂出的条件单、
+     * 跟踪委托、TWAP 是按旧规则放行的——与它们成交后开旧模型仓位是同一条规则
+     * （positionRiskStampForFill）。否则升级会在触发那一刻悄悄撤掉用户早就挂好的对冲单
+     * （旧默认 35x 在 599 个最高杠杆低于 35x 的合约上更是一触发就撤）。
+     */
+    if (!order.reduceOnly && triggerPx > 0 && hasRiskProvenance(order)) {
+      const filling = trigger?.fill ?? order;
+      const limit = checkOrderPositionLimit({
+        symbol,
+        settlement: limitSettlementOf(order),
+        leverage: Number(order.leverage),
+        positions: positionsMapRef.current[symbol] || [],
+        orders: ordersMapRef.current[symbol] || [],
+        excludeOrderIds: [order.id, ...(trigger?.settledOrderIds ?? [])],
+        orderOverrides: trigger?.orderOverrides,
+        markPrice: triggerPx,
+        orderNotionalUsd: getPositionNotionalUsd(symbol, filling, triggerPx),
+        orderPrice: triggerPx,
+        side: order.side,
+      });
+      const exempt = order.riskModel === LEGACY_HEDGE_RISK_MODEL;
+      if (!limit.ok) {
+        // 触发类与 TWAP 是「触发时」；挂在盘口的豁免限价单是「成交时」
+        const when = isTriggeredOpenOrder(order) || order.type === 'TWAP' ? '触发时' : '成交时';
+        refusal = {
+          title: `${when}超过杠杆分层上限，委托已撤销`,
+          description: `${symbol}：${exempt ? '这张单是靠对冲更新前仓位的豁免挂出的，这一刻豁免已不成立（旧仓位已减少或平掉，或额度已被别的对冲占掉），按普通分层判：' : ''}`
+            + `${limit.message} ${positionLimitDetail(limit)}`,
+        };
+      } else if (trigger?.position) {
+        // 这一笔的来源按这一刻的判定定：只靠豁免 → 豁免标记（旧模型）；正常放行 → 分层
+        Object.assign(
+          trigger.position,
+          limit.reason === 'legacy-hedge' ? legacyHedgeRiskStamp(symbol) : positionRiskStamp(symbol),
+        );
+      }
+    }
     /**
      * 用**钱包里的自由现金**判定,不是 calcAvailable。
      *
@@ -1552,14 +1711,20 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
      * 一个仓位铺得比较开的全仓用户,会看着自己付得起的挂单在触发时被撤掉。
      * (下单侧那道偏严的检查照旧——它可重试,而且宁严勿松。)
      */
-    const verdict = evaluateFillAffordability({
-      availableUsd: balanceRef.current,
-      marginUsd,
-      feeUsd,
-    });
-    if (verdict.ok) {
-      setBalance(prev => prev - marginUsd - feeUsd);
-      return true;
+    if (!refusal) {
+      const verdict = evaluateFillAffordability({
+        availableUsd: balanceRef.current,
+        marginUsd,
+        feeUsd,
+      });
+      if (verdict.ok) {
+        setBalance(prev => prev - marginUsd - feeUsd);
+        return true;
+      }
+      refusal = {
+        title: '保证金不足，委托已撤销',
+        description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
+      };
     }
 
     // 章在回调外面取：setCancelledOrders 是 React 的 updater，可能被重跑。
@@ -1586,11 +1751,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       createdTimelineId: order.createdTimelineId,
       cancelledTimelineId,
     }));
-    // 成交时被撤的是按计算器计划挂的加仓单：计划同样放回去（与手动撤单同一规则）
+    // 成交时被撤（保证金不足或超出币安分层上限）的若是按计算器计划挂的加仓单：计划同样放回去（与手动撤单同一规则）
     restoreCancelledAddPlan(symbol, order, positionsMapRef.current[symbol], cancelledTimelineId, timelineRegistryRef.current);
-    toast.error('保证金不足，委托已撤销', {
-      description: `${symbol} 需要 ${verdict.requiredUsd.toFixed(2)} USDT，可用 ${verdict.availableUsd.toFixed(2)} USDT`,
-    });
+    toast.error(refusal.title, { description: refusal.description });
     return false;
   }, [setBalance, setCancelledOrders, stampClock]);
 
@@ -1645,12 +1808,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
    */
   const applyMergeSideEffects = useCallback((symbol: string, merged: PositionMergeResult) => {
     if (merged.blockedBy) {
+      /**
+       * 不合并 = 这一笔身上**没有任何减仓单**：挂在现有仓位上的止盈止损只认那一笔的 id
+       * （planReduceOnlyTrigger 按 linkedPositionId 找仓位），盖不住新开的这一笔——而不合并的这几种情形里，
+       * 先被强平的往往正是新的这一笔（它的强平价离现价更近）。持仓卡上按一次「止盈/止损」会给卡上每一笔各挂一张，
+       * 但那要用户自己去点，所以在这里说一句。
+       */
+      const uncovered = ' 现有仓位上的止盈止损不覆盖这一笔：在持仓卡上按一次「止盈/止损」会给卡上每一笔各挂一张。';
       toast.warning('未与现有仓位合并', {
-        description: merged.blockedBy === 'leverage'
+        description: (merged.blockedBy === 'leverage'
           ? '杠杆与现有同向仓位不同，两笔各自独立计算强平价。'
           : merged.blockedBy === 'marginMode'
             ? '保证金模式与现有同向仓位不同，两笔各自独立计算强平价。'
-            : '结算方式与现有同向仓位不同，两笔各自独立计算强平价。',
+            : merged.blockedBy === 'riskModel'
+              // 只挡一个方向（mergeRiskBlocked）：这一笔按旧的 0.4%，而现有同向仓位按币安分层——
+              // 合并会让分层仓位把这一截也按档位定价、跨进更高的档，把它自己当场强平。
+              // 反过来（分层加仓并进按 0.4% 的旧仓位）是合并的，走不到这里。
+              ? '这一笔按旧的 0.4% 计维持保证金（更新前挂出的委托，或靠对冲更新前仓位的豁免开的），'
+                + '现有同向仓位按币安分层计：并进去会把这一截也按档位定价、把现有仓位推进更高的档位，'
+                + '所以两笔各自独立计算强平价；现有仓位的维持保证金与强平价不变。'
+                + '这张卡上的「平仓」照常可以按成数部分平仓（成数摊到卡上每一笔）。'
+              : '结算方式与现有同向仓位不同，两笔各自独立计算强平价。') + uncovered,
       });
       return;
     }
@@ -1706,20 +1884,42 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
    *
    * 方向是单向的：leverageMap → 持仓 + 挂单。持仓永不反向写回 leverageMap。
    */
-  const applySymbolLeverage = useCallback((symbol: string, nextLeverage: number): LeverageChangePlan => {
+  const applySymbolLeverage = useCallback((
+    symbol: string,
+    nextLeverage: number,
+    requestedSettlement?: SettlementMode,
+  ): LeverageChangePlan => {
     const positions = (positionsMapRef.current[symbol] || []).filter(isPositionOpen);
     const orders = ordersMapRef.current[symbol] || [];
+    /**
+     * 持仓卡上的对话框按**仓位的**结算方式预览（U 本位仓位用 U 本位分层），而下单面板每次刷新
+     * 都回到币本位；两边上限不同的币（BNB 75x / 20x、SOL 100x / 50x、BTC 150x / 125x）上，
+     * 按面板的结算方式夹值会把对话框放行的杠杆悄悄压低或拒掉。所以用调用方传来的那一种。
+     */
+    const settlementMode = requestedSettlement ?? getSymbolSettlementMode(symbol);
     const plan = planLeverageChange({
       symbol,
       positions,
       orders,
       markPrice: priceMapRef.current[symbol] || 0,
-      currentLeverage: leverageMapRef.current[symbol] ?? 35,
+      // 与 getSymbolLeverage 同一口径（夹到合约上限），但读 ref，不读可能落后一拍的 state。
+      currentLeverage: effectiveSymbolLeverage(leverageMapRef.current[symbol], symbol, settlementMode === 'coin' ? 'coin' : 'usdt'),
       nextLeverage,
+      settlementMode,
     });
     if (!plan.ok) return plan;
 
-    setSymbolLeverage(symbol, plan.to);
+    /**
+     * 已挂的触发类开仓单会被一并重述到新杠杆，触发时按新杠杆的上限判（币安一样：改杠杆不拦，触发时才拒）。
+     * 这一步让哪张单到时注定被撤，就在消息中心说一声（对话框在确认前已经摆出来了）。
+     */
+    const triggerRisk = triggerRiskMessage(
+      newlyDoomedTriggerOrders({ symbol, positions, orders, leverage: plan.to, markPrice: priceMapRef.current[symbol] || 0 }),
+      `杠杆调到 ${plan.to}x 后`,
+    );
+
+    // 写回也按同一种结算方式夹：否则保存值被夹到另一张合约的上限，而仓位已经重述到这一张的值。
+    setSymbolLeverage(symbol, plan.to, settlementMode);
 
     if (plan.legs.length > 0) {
       const byId = new Map(plan.legs.map(l => [l.positionId, l.next] as const));
@@ -1740,8 +1940,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         [symbol]: (prev[symbol] || []).map(o => (ids.has(o.id) ? { ...o, leverage: plan.to } : o)),
       }));
     }
+    if (triggerRisk) toast.warning(`${symbol}：${triggerRisk.title}`, { description: triggerRisk.description });
     return plan;
-  }, [setSymbolLeverage, setPositionsMap, setBalance, setOrdersMap]);
+  }, [getSymbolSettlementMode, setSymbolLeverage, setPositionsMap, setBalance, setOrdersMap]);
 
   // ===== Place Order (with strict accounting enforcement — single global pool) =====
   const handlePlaceOrder = useCallback((symbol: string, order: PlaceOrderParams): { id: string } | null => {
@@ -1805,6 +2006,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ...order,
       settlementMode: orderSettlement,
       ...(addSizingSnapshot ? { addSizingSnapshot } : {}),
+      // 本次经引擎下的委托一律盖分层戳：成交后开分层仓位（立即成交的市价单就在下面用它）。
+      ...ORDER_RISK_STAMP,
     });
 
     /**
@@ -1888,6 +2091,90 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    /**
+     * 立即成交的：市价单与最优价（下面两条分支），其余都先挂出去。
+     * 估值价：立即成交的按引擎成交的基准价，其余按 orderReferencePrice（限价 = 委托价，条件单 = 触发价）；
+     * 真币本位按它把这一单折成币——一张低于现价的买入限价单按委托价折，成交后的仓位才不会超出上限。
+     */
+    const executesNow = normalizedOrder.priceSelection === 'BEST' || normalizedOrder.type === 'MARKET';
+    const limitMarkPrice = symbolPrice > 0 ? symbolPrice : effectiveCurrentPrice;
+    // 已经穿价的限价单（买价 ≥ 现价、卖价 ≤ 现价）下一根就成交，按现价估值（placementOrderValuation 按方向判）；
+    // 立即成交的本来就按引擎成交的基准价估值
+    const valuation = placementOrderValuation(
+      symbol,
+      normalizedOrder,
+      executesNow
+        ? effectiveCurrentPrice
+        : orderReferencePrice(normalizedOrder as unknown as PendingOrder, effectiveCurrentPrice).price,
+      executesNow ? undefined : limitMarkPrice,
+    );
+    /** 第二道：触发类按触发价 / 激活价，不会立即成交的限价单（含分段子单）按成交那一刻的委托价。 */
+    const secondGate = placementCheckPrice(normalizedOrder, limitMarkPrice, executesNow);
+    const currentPositions = positionsMapRef.current[symbol] || [];
+    const currentOrders = ordersMapRef.current[symbol] || [];
+    /**
+     * 币安分层上限（-2027 Exceeded the maximum allowable position at current leverage）：
+     * 持仓（多空绝对值相加）+ 当前委托 + 这一单，不得超过当前杠杆的最高可持有头寸。
+     * 面板已经把按钮置灰，这里是引擎自己的闸门——绕过面板（快照弹窗、脚本、旧界面）也过不去。
+     * 与面板读的是同一个判定、同一句话。面板下的单都是开仓单（PlaceOrderParams 没有只减仓），
+     * 平仓走 handleClosePosition / 止盈止损，本来就不经过这里。
+     * 条件单 / 跟踪委托再按触发价（激活价）判一道：触发时注定被撤的单，下单时就不放行；
+     * 不会立即成交的限价单再按委托价判一道：成交那一刻就超限、把账户卡死的单，下单时就不放行。
+     * 反向对冲更新前的仓位不受上限约束（见 positionLimit 文件头），所以要带上方向。
+     */
+    {
+      const limit = checkPlacementPositionLimit({
+        symbol,
+        settlement: limitSettlementOf(normalizedOrder),
+        leverage: Number(normalizedOrder.leverage),
+        positions: currentPositions,
+        orders: currentOrders,
+        markPrice: limitMarkPrice,
+        orderNotionalUsd: valuation.usd,
+        orderPrice: valuation.price,
+        side: normalizedOrder.side,
+        triggerPrice: secondGate.price,
+        triggerKind: secondGate.kind,
+      });
+      if (!limit.ok) {
+        toast.error(limit.message ?? '超过当前杠杆倍数最高可持有头寸', {
+          description: positionLimitDetail(limit),
+        });
+        return null;
+      }
+      /**
+       * 只靠「对冲更新前的仓位」那条豁免放行的单盖豁免标记 'legacy-hedge-v1'（立即成交的仓位、挂出的委托都一样）：
+       * 按旧模型开；它不是更新前的仓位，不能再给别的单当豁免的底；挂着的时候触发 / 成交那一刻再判豁免是否仍成立
+       * （见 positionLimit 文件头）。normalizedOrder 是 normalizeSettlementOrder 刚造的新对象，就地改不影响任何别的引用。
+       */
+      if (placementUsesLegacyHedge(limit)) Object.assign(normalizedOrder, ORDER_LEGACY_HEDGE_STAMP);
+    }
+    const stampedAs = (normalizedOrder as { riskModel?: string }).riskModel;
+    const exemptOrder = stampedAs === LEGACY_HEDGE_RISK_MODEL;
+    const orderRiskStamp = exemptOrder
+      ? ORDER_LEGACY_HEDGE_STAMP
+      : stampedAs === TIERED_RISK_MODEL ? ORDER_RISK_STAMP : {};
+    /**
+     * 已挂的触发类开仓单（带分层戳）在触发那一刻按当时的敞口再判——这一单会不会让其中哪张到时注定被撤。
+     * 币安不拦这一单，这里也不拦；单子真的下出去了才在消息中心说一声（面板在点按钮之前已经摆出来了）。
+     */
+    const triggerRisk = triggerRiskMessage(
+      newlyDoomedTriggerOrders({
+        symbol,
+        positions: currentPositions,
+        orders: currentOrders,
+        added: placementAftermath(
+          { ...normalizedOrder, leverage: Number(normalizedOrder.leverage) },
+          { markPrice: limitMarkPrice, immediate: executesNow, legacy: exemptOrder },
+        ),
+        markPrice: limitMarkPrice,
+      }),
+      '这张单下出去后',
+    );
+    const announceTriggerRisk = () => {
+      if (triggerRisk) toast.warning(`${symbol}：${triggerRisk.title}`, { description: triggerRisk.description });
+    };
+
     // Note: We no longer record OPEN trades to tradeHistory.
     // Only CLOSE/LIQUIDATION/FUNDING produce realized PnL entries.
 
@@ -1932,6 +2219,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       } else {
         applyAttachedTpSl(symbol, merged.survivor, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
       }
+      announceTriggerRisk();
       return { id: position.id };
     }
 
@@ -1976,6 +2264,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       } else {
         applyAttachedTpSl(symbol, merged.survivor, { ...normalizedOrder, ...attachedTpSl } as unknown as PendingOrder);
       }
+      announceTriggerRisk();
       return { id: position.id };
     }
 
@@ -2024,12 +2313,14 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: isCoinSettled(normalizedOrder) ? qtyPerStep : undefined,
         status: 'NEW' as const, createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
+        ...orderRiskStamp,
         parentScaledId: parentId,
         tradingMode: tradingModeRef.current,
       }));
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), ...newOrders] }));
       toast.info(`分段订单已挂出: ${count} 笔限价单`);
-      return null;
+      announceTriggerRisk();
+      return placedWithoutTradeRef();
     }
 
     // TWAP
@@ -2067,13 +2358,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         trailingActivated: activation <= 0,
         peakPrice: undefined, troughPrice: undefined,
         status: 'PENDING', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
+        ...orderRiskStamp,
         tradingMode: tradingModeRef.current,
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), trailingOrder] }));
       toast.info(activation > 0
         ? `跟踪委托已挂出 · 激活价 ${activation} · 回调 ${(cb * 100).toFixed(1)}%`
         : `跟踪委托已挂出 · 回调 ${(cb * 100).toFixed(1)}%`);
-      return null;
+      announceTriggerRisk();
+      return placedWithoutTradeRef();
     }
 
     if (normalizedOrder.type === 'TWAP') {
@@ -2102,6 +2395,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         contractSizeUsd: normalizedOrder.contractSizeUsd,
         contracts: normalizedOrder.contracts,
         status: 'ACTIVE', createdAt: now, createdRealAt: Date.now(), createdTimelineId: timelineId,
+        ...orderRiskStamp,
         tradingMode: tradingModeRef.current,
         twapTotalQty: normalizedOrder.quantity, twapFilledQty: 0,
         twapInterval: intervalMs, twapNextExecTime: now,
@@ -2109,7 +2403,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       };
       setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), twapOrder] }));
       toast.info(`TWAP 委托已启动`);
-      return null;
+      announceTriggerRisk();
+      return placedWithoutTradeRef();
     }
 
     // All other pending types — strict margin pre-check
@@ -2164,6 +2459,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       contracts: normalizedOrder.contracts,
       status: normalizedOrder.type === 'CONDITIONAL' ? 'PENDING' : 'NEW', createdAt: now, createdRealAt: Date.now(),
       createdTimelineId: timelineId,
+      ...orderRiskStamp,
       tradingMode: tradingModeRef.current,
       callbackRate: normalizedOrder.callbackRate, trailingExecType: normalizedOrder.trailingExecType,
       trailingLimitPrice: normalizedOrder.trailingLimitPrice, trailingActivated: false,
@@ -2176,6 +2472,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     setOrdersMap(prev => ({ ...prev, [symbol]: [...(prev[symbol] || []), newOrder] }));
     commitAddSizingPlan();
     toast.info('委托已挂出');
+    announceTriggerRisk();
     return { id: newOrder.id };
   }, [getEffectiveTime, getSymbolSettlementMode, judgePlannedAddFill, recordExecutionTrade, stampClock]);
 
