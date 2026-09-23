@@ -74,7 +74,6 @@ export type ParityMetric =
   | 'mainLeverage'
   | 'initialMainExposureNotional'
   | 'payoffRatio'
-  | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'dsiUsiTerm'

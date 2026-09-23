@@ -31,7 +31,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -91,7 +91,6 @@ import {
   summarizeMirrorTp,
   type MirrorTpOutcome,
 } from '@/lib/mirrorTpSummary';
-import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import {
@@ -121,7 +120,6 @@ type CampaignSortMode =
   | 'time'
   | 'captureRate'
   | 'expectedDrawdownPct'
-  | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'mirrorTp'
@@ -143,7 +141,6 @@ type CampaignMetricChartKey =
   | 'odds'
   | 'oddsDistribution'
   | 'expectedDrawdownPct'
-  | 'opportunityQuality'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'geometricExpectancyDistribution'
@@ -190,16 +187,13 @@ type CampaignFormulaPopover =
   | 'expectedValue'
   | 'geometricEdge'
   | 'asymmetricRisk'
-  | 'opportunityQualitySort'
   | 'dsiContributionSort'
-  | 'usiContributionSort'
-  | 'opportunityQuality';
+  | 'usiContributionSort';
 
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'importance', label: '重要性' },
   { value: 'time', label: '操作时间' },
   { value: 'expectedDrawdownPct', label: '预期回撤' },
-  { value: 'opportunityQuality', label: '机会质量' },
   { value: 'captureRate', label: '盈亏比' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'geometricExpectancy', label: '几何期望' },
@@ -220,7 +214,6 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: string }>> = {
   captureRate: { noun: '可计算盈亏比', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
   expectedDrawdownPct: { noun: '可计算预期回撤', hint: '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
-  opportunityQuality: { noun: '可计算机会质量', hint: '缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
   arithmeticExpectancy: { noun: '可计算算术期望', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
   geometricExpectancy: {
     noun: '可计算几何期望',
@@ -236,7 +229,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   },
   addEfficiency: {
     noun: '可计算加仓效率',
-    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率；算不出盈亏比或涨幅效率、或涨幅效率为 0 的战役不会进入当前排序',
+    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率，只算做过加仓的战役；没有加仓、算不出盈亏比或涨幅效率的战役不会进入当前排序',
   },
 };
 
@@ -351,22 +344,6 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
     formatValue: value => `${(Math.abs(value) < 0.005 ? 0 : value).toFixed(2)}%`,
-  },
-  {
-    key: 'opportunityQuality',
-    label: '机会质量',
-    chartLabel: '质量图',
-    seriesLabel: '机会质量时序',
-    guide: {
-      yAxis: '机会质量 Q。Q = max(实际盈亏比 b, 1) ÷ 预期回撤百分点；预期回撤 2% 在公式中按 2 计算。',
-      point: '点越高，表示在实际盈亏表现与初始回撤空间共同衡量下，机会质量越高；点越低则相反。',
-      colors: [
-        { token: 'info', label: '蓝色：统一表示机会质量；颜色不表达盈亏方向。' },
-      ],
-    },
-    missingValueLabel: '机会质量',
-    colorMode: 'quality',
-    formatValue: value => value.toFixed(2),
   },
   {
     key: 'arithmeticExpectancy',
@@ -539,7 +516,6 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   importance: 'importanceSort',
   captureRate: 'captureRate',
   expectedDrawdownPct: 'expectedDrawdownPct',
-  opportunityQuality: 'opportunityQualitySort',
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTpSort',
@@ -551,7 +527,6 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   importance: 'importance',
   captureRate: 'odds',
   expectedDrawdownPct: 'expectedDrawdownPct',
-  opportunityQuality: 'opportunityQuality',
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTp',
@@ -810,7 +785,9 @@ function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct'
 }
 
 /** 加仓效率 = 盈亏比 ÷ 涨幅效率（见 computeAddEfficiency）。 */
-function rowAddEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
+function rowAddEfficiency(row: Pick<CampaignCardData, 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
+  // 【用户要求】没有加仓的战役不算加仓效率（campaignHasMainAdd，与盈亏概览同一个判断）
+  if (!campaignHasMainAdd(row.legs)) return null;
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
 }
 
@@ -842,9 +819,6 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
     if (sort.mode === 'expectedDrawdownPct') {
       return Number.isFinite(row.initialExpectedMaxDrawdownPct)
         && row.initialExpectedMaxDrawdownPct > 0;
-    }
-    if (sort.mode === 'opportunityQuality') {
-      return row.opportunityQuality != null && Number.isFinite(row.opportunityQuality);
     }
     if (sort.mode === 'arithmeticExpectancy') {
       return row.arithmeticExpectancy != null && Number.isFinite(row.arithmeticExpectancy);
@@ -902,21 +876,6 @@ function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState):
         b.initialExpectedMaxDrawdownPct,
         sort.direction,
       )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'opportunityQuality') {
-      return compareFiniteMetric(
-        a.opportunityQuality ?? Number.NaN,
-        b.opportunityQuality ?? Number.NaN,
-        sort.direction,
-      )
-        || compareFiniteMetric(
-          a.profitCaptureRatio ?? Number.NaN,
-          b.profitCaptureRatio ?? Number.NaN,
-          sort.direction,
-        )
         || importanceDesc
         || timeDesc
         || alphaAsc;
@@ -1082,7 +1041,6 @@ const CampaignCard = memo(function CampaignCard({
     tradeRecords,
     profitCaptureRatio,
     initialExpectedMaxDrawdownPct,
-    opportunityQuality,
     initialRiskFraction,
     riskAccountEquity,
     arithmeticExpectancy,
@@ -1264,16 +1222,6 @@ const CampaignCard = memo(function CampaignCard({
             {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
           </span>
         </div>
-        <div
-          data-testid="campaign-opportunity-quality-value"
-          title={opportunityQuality == null
-            ? '需要已结束战役的实际盈亏比、主力开仓价和至少一个初始对冲 A/B 价格'
-            : `Q = 实际盈亏比 ${(profitCaptureRatio! / 100).toFixed(2)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%`}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
-        >
-          <span className="text-[10px] text-muted-foreground/70">机会质量：</span>
-          <span className="whitespace-nowrap font-mono text-[10px] font-medium tabular-nums text-foreground/85">{formatOpportunityQuality(opportunityQuality)}</span>
-        </div>
         <div className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3" data-testid="campaign-payoff-ratio">
           <span className="text-[10px] text-muted-foreground/70">盈亏比：</span>
           <span
@@ -1287,8 +1235,10 @@ const CampaignCard = memo(function CampaignCard({
         <div
           data-testid="campaign-add-efficiency"
           title={addEfficiency == null || mainPriceEfficiency == null
-            ? '加仓效率 = 盈亏比 ÷ 涨幅效率：算不出盈亏比或涨幅效率、或涨幅效率为 0 时不算'
-            : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；只拿主力不加仓时约为 1，大于 1 说明加仓把行情放大成了更多的 R`}
+            ? (campaignHasMainAdd(legs)
+              ? '加仓效率 = 盈亏比 ÷ 涨幅效率：算不出盈亏比或涨幅效率、或涨幅效率为 0 时不算'
+              : '加仓效率：这场战役没有加仓，不计算')
+              : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
           className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
         >
           <span className="text-[10px] text-muted-foreground/70">加仓效率：</span>
@@ -1298,7 +1248,7 @@ const CampaignCard = memo(function CampaignCard({
         </div>
         <div
           data-testid="campaign-arithmetic-expectancy"
-          title="Eᵢ = 当前有效战役胜率 × 该战役盈亏比 − 亏损概率"
+          title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
           className="inline-flex h-7 shrink-0 items-center gap-1.5 border-r border-border/60 px-3"
         >
           <span className="text-[10px] text-muted-foreground/70">算术期望：</span>
@@ -1622,16 +1572,6 @@ export default function JournalCampaignsPage() {
   const mirrorTpRateLabel = mirrorTp.achievedRatePct == null ? '—' : `${mirrorTp.achievedRatePct.toFixed(0)}%`;
   const mirrorTpNotAchievedRateLabel = mirrorTp.notAchievedRatePct == null ? '—' : `${mirrorTp.notAchievedRatePct.toFixed(0)}%`;
   const mirrorTpWinRateLabel = mirrorTp.achievedWinRatePct == null ? '—' : `${mirrorTp.achievedWinRatePct.toFixed(0)}%`;
-  const opportunityQualityStats = useMemo(() => {
-    const samples = scopedRows.filter(row => (
-      row.opportunityQuality != null && Number.isFinite(row.opportunityQuality)
-    ));
-    const sum = samples.reduce((total, row) => total + (row.opportunityQuality ?? 0), 0);
-    return {
-      average: samples.length > 0 ? sum / samples.length : null,
-      sampleCount: samples.length,
-    };
-  }, [scopedRows]);
   /**
    * 期望与不对称风险贡献都依赖全表统计（胜率、DSI/USI 汇总），一场变了整表都要重算——
    * 但重算出的四个数与上次相同的行沿用上一个对象（整表都没变就沿用同一个数组）：
@@ -1646,7 +1586,8 @@ export default function JournalCampaignsPage() {
     const rows = scopedRows.map(row => {
       const next: CampaignMetricData = {
         ...row,
-        ...computeCampaignExpectancies(row.profitCaptureRatio, performance.expectedWinRate),
+        // 单场算术期望的胜率统一取 50%（与详情页同一个函数），不随账户实时胜率变动
+        ...computeCampaignExpectancies(row.profitCaptureRatio),
         ...computeAsymmetricRiskContributionRates({
           campaign: row.campaign,
           payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
@@ -1666,7 +1607,7 @@ export default function JournalCampaignsPage() {
     const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
-  }, [scopedRows, performance.expectedWinRate, asymmetricRisk]);
+  }, [scopedRows, asymmetricRisk]);
   /**
    * 账户权益随行情每个 tick 变，但只有没记开仓权益快照的场次才拿它兜底。
    * 解析出的三个数与上次相同就沿用上一个行对象（整表都没变就沿用同一个数组）：
@@ -1739,7 +1680,6 @@ export default function JournalCampaignsPage() {
           ? row.initialExpectedMaxDrawdownPct
           : null
       )),
-      opportunityQuality: buildSeries(row => row.opportunityQuality),
       arithmeticExpectancy: buildSeries(row => row.arithmeticExpectancy),
       geometricExpectancy: geometric,
       // 分布图与时序图是同一份序列的两种读法，只建一次、共用同一个对象。
@@ -1828,7 +1768,6 @@ export default function JournalCampaignsPage() {
   const realizedGrowthLabel = realizedGrowth.count === 0
     ? '—'
     : formatGrowthFactor(realizedGrowth.factor);
-  const opportunityQualityLabel = formatOpportunityQuality(opportunityQualityStats.average);
 
   const updateListParams = (
     nextSort: CampaignSortState,
@@ -2453,23 +2392,6 @@ export default function JournalCampaignsPage() {
                           <div>缺少主力开仓价或所有初始对冲价格的战役不参与排序。</div>
                         </div>
                       </>
-                    ) : formula === 'opportunityQualitySort' ? (
-                      <>
-                        <div className="font-medium text-foreground">单场机会质量计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          bᵢ* = max（bᵢ, 1），Qᵢ = bᵢ* ÷ 预期回撤百分点 dᵢ
-                        </div>
-                        <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ。</div>
-                          <div>实际盈亏比 bᵢ 小于 1（包括等于 0 或为负数）时统一按 1 计算；不取绝对值。</div>
-                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
-                          </div>
-                          <div>2% 回撤按 2 计算，不按 0.02 计算。</div>
-                          <div>历史战役沿用最大预期亏损的价格解析规则：原始委托快照优先，缺失时才回退到角色记录。</div>
-                          <div>缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不参与排序。</div>
-                        </div>
-                      </>
                     ) : formula === 'arithmeticExpectancy' ? (
                       <>
                         <div className="font-medium text-foreground">单场算术期望计算公式</div>
@@ -2477,9 +2399,9 @@ export default function JournalCampaignsPage() {
                           Eᵢ = P(赢) × bᵢ −（1 − P(赢)）
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>P(赢) 使用当前有效战役实时胜率：{winRateLabel}。</div>
+                          <div>P(赢) 统一取 50%，不随账户实时胜率变动。</div>
                           <div>bᵢ 使用该战役带正负号的实际盈亏比。</div>
-                          <div>算术期望按 R 展示，并随有效战役样本实时更新。</div>
+                          <div>算术期望按 R 展示；同一场战役的读数只由它自己的 bᵢ 决定。</div>
                           <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
                         </div>
                       </>
@@ -3009,41 +2931,6 @@ export default function JournalCampaignsPage() {
                 ) : (
                   <div className="mt-2 text-muted-foreground">需要可计算的胜率，以及至少一场盈利战役的平均盈亏比，才能得到几何期望。</div>
                 )}
-              </PopoverContent>
-            </Popover>
-            <Popover
-              open={formulaPopover === 'opportunityQuality'}
-              onOpenChange={open => handleFormulaPopoverChange('opportunityQuality', open)}
-            >
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  data-testid="campaign-opportunity-quality"
-                  className="inline-flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded border border-transparent px-2 text-foreground/65 transition-colors hover:border-[#F0B90B]/15 hover:bg-background/70 hover:text-foreground"
-                  aria-label={`机会质量 ${opportunityQualityLabel}，${opportunityQualityStats.sampleCount} 场有效战役，点击查看计算公式`}
-                  title="点击查看机会质量计算公式"
-                  onClick={event => toggleFormulaPopover(event, 'opportunityQuality')}
-                >
-                  机会质量（{opportunityQualityLabel}）
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-80 border-border bg-card p-3 text-[11px]">
-                <div className="font-medium text-foreground">机会质量计算公式</div>
-                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                  bᵢ* = max（bᵢ, 1），Qᵢ = bᵢ* ÷ dᵢ，Q̄ = ΣQᵢ ÷ N
-                </div>
-                <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>bᵢ = 该战役实际盈亏比 = 已实现盈亏 ÷ 初始最大预期亏损；dᵢ = 预期回撤百分点。</div>
-                  <div>实际盈亏比 bᵢ 小于 1（包括等于 0 或为负数）时统一按 1 计算；不取绝对值。</div>
-                  <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                    dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100
-                  </div>
-                  <div>2% 回撤按 2 计算，不按 0.02 计算。例：实际盈亏比 0.5、回撤 2%，b* = 1，Q = 0.50。</div>
-                  <div>缺少实际盈亏比、主力开仓价或初始对冲 A/B 价格的战役不纳入平均。</div>
-                  <div className="border-t border-border/60 pt-1.5">
-                    当前 N = {opportunityQualityStats.sampleCount} 场。
-                  </div>
-                </div>
               </PopoverContent>
             </Popover>
             <Popover

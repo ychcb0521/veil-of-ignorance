@@ -101,10 +101,6 @@ const summary: AsymmetricRiskMetricsSummary = {
 
 const shared: CounterfactualOverviewShared = {
   strategyTemplate: 'main_dual_hedge_mirror_tp',
-  expectedWinRate: 0.5,
-  payoffRatioSampleCount: 2,
-  performanceLoading: false,
-  performanceError: false,
   asymmetricRiskSummary: summary,
   currentAccountEquity: 10_000,
   isOwner: true,
@@ -128,7 +124,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
 
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
     const { items, byKey } = itemsByKey(metrics);
-    expect(items).toHaveLength(15);
+    expect(items).toHaveLength(13);
 
     // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
     expect(result.final_realized_pnl).toBeCloseTo(80, 4);
@@ -142,18 +138,17 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.initialMainExposureNotional.value).toBe('1500.00 USDT');
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
-    // 已了结（每条腿都有平仓时刻）→ Q = max(1.3333, 1) ÷ 4 = 0.33
-    expect(byKey.opportunityQuality.value).toBe('0.33');
     // E = 0.5 × 1.3333 − 0.5 = +0.17R；G = 1 + 1.3333 × 0.1 = 1.13
     expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
     expect(byKey.geometricExpectancy.value).toBe('1.13');
     // 盈利 → USI 组，b² / n = 1.7778 / 1，组内占比 1.7778 / 4
     expect(byKey.asymmetricRiskContribution.value).toBe('USI · b²/n = 1.7778（组内 44.4%）');
-    expect(byKey.todayAccountEquity.value).toBe('10000.00 USDT');
+    // 【用户要求】「今日账户总资产」不单列，只作几何期望的估算分母（见脚注）
+    expect(byKey.todayAccountEquity).toBeUndefined();
     // 没有主力开仓资产快照 → 退到今日总资产，脚注跟着说明
     expect(metrics.initialRisk).toEqual({ drawdownFraction: 60 / 10_000, source: 'current_account_fallback' });
-    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)))
-      .toBe('期望口径：2 场有效战役，实时胜率 50.00%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
+    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)))
+      .toBe('期望口径：算术期望的胜率统一取 50%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
   });
 
   it('老行（结果上没有锚字段）按 params 重算，得到与新行完全一样的四个锚', () => {
@@ -266,13 +261,13 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(strip(legacyMetrics)).toEqual(strip(freshMetrics));
     const { byKey } = itemsByKey(legacyMetrics);
     expect(byKey.realizedPnl.value).toBe('60.00 USDT');
-    for (const key of ['initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'payoffRatio', 'opportunityQuality', 'arithmeticExpectancy', 'geometricExpectancy']) {
+    for (const key of ['initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'mainPriceEfficiency', 'payoffRatio', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy']) {
       expect(byKey[key].value, key).toBe('—');
     }
     expect(legacyMetrics.extraNotes?.payoffRatio).toContainEqual({ warning: '本分支没有初始对冲 A/B，读不到止损线，本项不计算。' });
   });
 
-  it('L = 0（手动腿里没有初始对冲 A/B）：七个 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
+  it('L = 0（手动腿里没有初始对冲 A/B）：八个 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
     const mainOnly = params([leg({ id: 'main', leg_role: 'main_open', exit_price: 106 })]);
     const result = simulateManualLegScenario(mainOnly, NO_KLINES);
     expect(result.initial_expected_max_loss).toBe(0);
@@ -284,9 +279,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const lDerived = [
       'initialExpectedMaxLoss',
       'expectedMaxDrawdownPct',
+      'mainPriceEfficiency',
       'payoffRatio',
+      'addEfficiency',
       'asymmetricRiskContribution',
-      'opportunityQuality',
       'arithmeticExpectancy',
       'geometricExpectancy',
     ];
@@ -359,14 +355,13 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(screen.getByText('本场 b = 1.33，n = 1')).toBeInTheDocument();
   });
 
-  it('非所有者看不到今日总资产，也不用它当几何期望的资产分母', () => {
+  it('非所有者不用今日总资产当几何期望的资产分母', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, { ...shared, isOwner: false });
-    expect(metrics.todayAccountEquity).toBeNull();
     expect(metrics.initialRisk).toBeNull();
-    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)))
-      .toBe('期望口径：2 场有效战役，实时胜率 50.00%。');
+    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)))
+      .toBe('期望口径：算术期望的胜率统一取 50%。');
   });
 });
 

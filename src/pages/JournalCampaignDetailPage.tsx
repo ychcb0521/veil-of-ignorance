@@ -4,7 +4,7 @@ import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, 
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import {
   AlertDialog,
@@ -74,7 +74,6 @@ import {
 import {
   computeCampaignExpectancies,
   resolveCampaignMainLeverage,
-  resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import {
   buildCampaignPnlOverviewItems,
@@ -294,7 +293,7 @@ function buildCounterfactualOverview(
   const metrics = buildCounterfactualOverviewMetrics(branch, shared);
   return {
     items: buildCampaignPnlOverviewItems(metrics),
-    note: buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics, shared)),
+    note: buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)),
   };
 }
 
@@ -1100,26 +1099,17 @@ export default function JournalCampaignDetailPage() {
       tradeRecords,
       reverseHedgeOrders,
     );
-    // 机会质量的「已结束」门槛读派生状态，与列表页传 reconciledCampaign 同一口径。
-    const opportunityQuality = resolveCampaignOpportunityQuality(
-      displayCampaign,
-      profitCaptureRatio,
-      initialExpectedMaxDrawdownPct,
-    );
     const initialRisk = resolveCampaignInitialRiskFraction(
       accuracy.initial_expected_max_loss,
       legs,
       isOwner ? currentAccountEquity : null,
     );
-    const expectancies = computeCampaignExpectancies(
-      profitCaptureRatio,
-      campaignPerformance?.expectedWinRate ?? null,
-    );
+    // 单场算术期望的胜率统一取 50%（ARITHMETIC_EXPECTANCY_WIN_RATE），不等账户样本加载。
+    const expectancies = computeCampaignExpectancies(profitCaptureRatio);
 
     return {
       profitCaptureRatio,
       initialExpectedMaxDrawdownPct,
-      opportunityQuality,
       initialRisk,
       ...expectancies,
     };
@@ -1127,7 +1117,6 @@ export default function JournalCampaignDetailPage() {
     accuracy,
     campaign,
     displayCampaign,
-    campaignPerformance?.expectedWinRate,
     currentAccountEquity,
     isOwner,
     legs,
@@ -1165,24 +1154,17 @@ export default function JournalCampaignDetailPage() {
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
       payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
       mainPriceChangePct: actualMainPriceChange.pct,
+      hasMainAdd: campaignHasMainAdd(legs),
       asymmetricRiskContribution,
-      opportunityQuality: campaignMetricValues?.opportunityQuality ?? null,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
-      todayAccountEquity: isOwner && Number.isFinite(currentAccountEquity) && currentAccountEquity > 0
-        ? currentAccountEquity
-        : null,
-      expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
     });
   }, [
     accuracy,
     asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
-    campaignPerformance?.expectedWinRate,
-    currentAccountEquity,
-    isOwner,
     actualMainPriceChange,
     legs,
     pnlReconciliation,
@@ -1190,17 +1172,8 @@ export default function JournalCampaignDetailPage() {
     tradeRecords,
   ]);
   const campaignPnlOverviewNote = useMemo(() => buildCampaignPnlOverviewNote({
-    performanceLoading: campaignPerformanceLoading,
-    performanceError: !!campaignPerformanceError,
-    expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
-    payoffRatioSampleCount: campaignPerformance?.payoffRatioSampleCount ?? 0,
     initialRiskSource: campaignMetricValues?.initialRisk?.source ?? null,
-  }), [
-    campaignMetricValues?.initialRisk?.source,
-    campaignPerformance,
-    campaignPerformanceError,
-    campaignPerformanceLoading,
-  ]);
+  }), [campaignMetricValues?.initialRisk?.source]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
@@ -1210,10 +1183,6 @@ export default function JournalCampaignDetailPage() {
     // 老行没有落库锚时按这场战役自己的模板重算：main_only 没有保护线，不能被默认模板造出 L。
     // 首帧 campaign 还没到（下面才 return 加载态），先给默认模板占位，不会有分支用到它。
     strategyTemplate: campaign ? counterfactualTemplateFor(campaign) : 'main_dual_hedge_mirror_tp',
-    expectedWinRate: campaignPerformance?.expectedWinRate ?? null,
-    payoffRatioSampleCount: campaignPerformance?.payoffRatioSampleCount ?? 0,
-    performanceLoading: campaignPerformanceLoading,
-    performanceError: !!campaignPerformanceError,
     asymmetricRiskSummary: campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
@@ -1222,9 +1191,6 @@ export default function JournalCampaignDetailPage() {
   }), [
     campaign,
     campaignAsymmetricRisk,
-    campaignPerformance,
-    campaignPerformanceError,
-    campaignPerformanceLoading,
     currentAccountEquity,
     isOwner,
     actualMainPriceChange,

@@ -3,6 +3,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import {
+  ARITHMETIC_EXPECTANCY_WIN_RATE,
   formatArithmeticExpectancy,
   formatCampaignLeverage,
   formatGeometricExpectancy,
@@ -10,7 +11,6 @@ import {
 import type { RealizedPnlBasis } from '@/lib/campaignRealizedPnl';
 import { computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { formatLegPriceChangePct } from '@/lib/legPriceChange';
-import { formatOpportunityQuality } from '@/lib/opportunityQuality';
 
 /**
  * 盈亏概览的**唯一**一份指标清单构造器。
@@ -34,10 +34,8 @@ export type CampaignPnlOverviewItemKey =
   | 'payoffRatio'
   | 'addEfficiency'
   | 'asymmetricRiskContribution'
-  | 'opportunityQuality'
   | 'arithmeticExpectancy'
-  | 'geometricExpectancy'
-  | 'todayAccountEquity';
+  | 'geometricExpectancy';
 
 export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
   key: CampaignPnlOverviewItemKey;
@@ -78,13 +76,12 @@ export interface CampaignPnlOverviewMetrics {
    * 涨幅效率与加仓效率由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
    */
   mainPriceChangePct: number | null;
+  /** 战役（或反事实副本）里有没有成交过的加仓腿；没有加仓时「加仓效率」不算（campaignHasMainAdd）。 */
+  hasMainAdd: boolean;
   asymmetricRiskContribution: AsymmetricRiskContribution | null;
-  opportunityQuality: number | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
   initialRisk: { drawdownFraction: number; source: CampaignInitialRiskSource } | null;
-  todayAccountEquity: number | null;
-  expectedWinRate: number | null;
   /** 整段替换某一项的帮助文案（含义与真实战役不同时用）。 */
   helpOverrides?: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>>;
   /** 在标准帮助文案末尾追加的说明（口径相同、只差一个前提时用）。 */
@@ -142,16 +139,16 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     expectedMaxDrawdownPct: expectedDrawdownPct,
     payoffRatio,
     mainPriceChangePct,
+    hasMainAdd,
     asymmetricRiskContribution,
-    opportunityQuality,
     arithmeticExpectancy,
     geometricExpectancy,
     initialRisk,
-    todayAccountEquity,
-    expectedWinRate,
   } = metrics;
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
-  const addEfficiency = computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency);
+  const addEfficiency = hasMainAdd
+    ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency)
+    : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
 
   const items: CampaignPnlOverviewItem[] = [
@@ -315,13 +312,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       rightColumn: true,
       help: (
         <>
-          <p>加仓把同一段行情放大了多少：只拿主力、不加仓时，盈亏比大致就是主力的涨幅效率（最大预期亏损按入场到对冲边界的距离定），比值约为 1；大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。</p>
+          <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨幅效率、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只对做过加仓的战役计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效率 = 盈亏比 b ÷ 涨幅效率</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
               本场 = {((payoffRatio ?? 0) / 100).toFixed(2)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
             </p>
-          ) : <p>算不出盈亏比或涨幅效率、或涨幅效率为 0 时不计算。</p>}
+          ) : <p>{hasMainAdd ? '算不出盈亏比或涨幅效率、或涨幅效率为 0 时不计算。' : '本场没有加仓，不计算加仓效率。'}</p>}
         </>
       ),
     },
@@ -349,20 +346,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
-      key: 'opportunityQuality',
-      label: '机会质量',
-      value: formatOpportunityQuality(opportunityQuality),
-      color: pnlExportColor(opportunityQuality),
-      valueClassName: pnlColor(opportunityQuality),
-      help: (
-        <>
-          <p>先将本场实际盈亏比设置下限为 1，再衡量每 1 个预期回撤百分点对应的机会质量。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b* = max（实际盈亏比 b, 1）；Q = b* ÷ 预期回撤百分点 d</div>
-          <p>实际盈亏比小于 1（包括等于 0 或为负数）时统一按 1 计算，不取绝对值。回撤 2% 时 d 按 2 计，不按 0.02 计。</p>
-        </>
-      ),
-    },
-    {
       key: 'arithmeticExpectancy',
       label: '算术期望',
       value: formatArithmeticExpectancy(arithmeticExpectancy),
@@ -370,13 +353,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(arithmeticExpectancy),
       help: (
         <>
-          <p>按同一账户当前有效战役胜率 P，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P）</div>
-          {expectedWinRate != null && payoffRatio != null ? (
+          <p>胜率 P 统一取 50%，与本场带正负号的实际盈亏比 b，计算每承担 1R 风险的加法期望。P 不随账户实时胜率变动，同一场战役的读数只由它自己的 b 决定。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P），P = 50%</div>
+          {payoffRatio != null ? (
             <p className="font-mono text-foreground">
-              本场：{(expectedWinRate * 100).toFixed(2)}% × {(payoffRatio / 100).toFixed(2)} − {((1 - expectedWinRate) * 100).toFixed(2)}%
+              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {(payoffRatio / 100).toFixed(2)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
             </p>
-          ) : <p>缺少有效盈亏比或有效战役胜率时不计算。</p>}
+          ) : <p>缺少有效盈亏比时不计算。</p>}
         </>
       ),
     },
@@ -397,18 +380,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         </>
       ),
     },
-    {
-      key: 'todayAccountEquity',
-      label: '今日账户总资产',
-      value: todayAccountEquity == null ? '—' : `${todayAccountEquity.toFixed(2)} USDT`,
-      rightColumn: true,
-      help: (
-        <>
-          <p>当前交易账户按最新余额、持仓和价格计算的总资产。</p>
-          <p>新战役的几何期望优先使用主力开仓时固化的账户资产；历史战役缺少该快照时，使用这个今日总资产作为估算分母。</p>
-        </>
-      ),
-    },
   ];
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;
@@ -416,22 +387,12 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
 }
 
 export interface CampaignPnlOverviewNoteInput {
-  performanceLoading: boolean;
-  performanceError: boolean;
-  expectedWinRate: number | null;
-  payoffRatioSampleCount: number;
   initialRiskSource: CampaignInitialRiskSource | null;
 }
 
 /** 面板底部那句「期望口径」脚注；PNG 导出与反事实面板共用。 */
 export function buildCampaignPnlOverviewNote(input: CampaignPnlOverviewNoteInput): string {
-  const expectationNote = input.performanceLoading
-    ? '正在按同一账户的有效战役口径计算期望…'
-    : input.performanceError
-      ? '暂无可计算期望的有效战役样本。'
-      : input.expectedWinRate == null
-        ? '暂无可计算胜率的有效战役样本。'
-        : `期望口径：${input.payoffRatioSampleCount} 场有效战役，实时胜率 ${(input.expectedWinRate * 100).toFixed(2)}%。`;
+  const expectationNote = `期望口径：算术期望的胜率统一取 ${(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(0)}%。`;
   const riskNote = input.initialRiskSource === 'current_account_fallback'
     ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
     : input.initialRiskSource === 'main_open_snapshot'

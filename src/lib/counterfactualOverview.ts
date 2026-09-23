@@ -4,8 +4,8 @@ import {
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
-import { counterfactualMainLegPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
-import { computeCampaignExpectancies, resolveResolvedOpportunityQuality } from '@/lib/campaignMetrics';
+import { counterfactualHasMainAdd, counterfactualMainLegPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
 import type {
   CampaignPnlOverviewHelpParagraph,
   CampaignPnlOverviewItemKey,
@@ -34,16 +34,12 @@ import type {
  *     重算必须用这场战役自己的推演模板（main_only 没有保护线），否则老 SOP 行会被造出 L；
  *   · 盈亏比 b = L > 0 ? 已实现 ÷ L × 100 : null——**绝不**拿 result.profit_capture_ratio
  *     （那是 已实现 ÷ 峰值），也不拿 final_r_multiple（L = 0 时它是 0，会印成 0.00 而不是「—」）；
- *   · 机会质量 / 算术与几何期望 / DSI-USI 贡献全部由这个 b 推出，用的是战役页同一批函数。
+ *   · 算术与几何期望 / 加仓效率 / DSI-USI 贡献全部由这个 b 推出，用的是战役页同一批函数。
  */
 
 export interface CounterfactualOverviewShared {
   /** 这场战役的推演模板（counterfactualTemplateFor）：老行没有落库锚时按它重算，与运行时选的引擎一致。 */
   strategyTemplate: SupportedTemplate;
-  expectedWinRate: number | null;
-  payoffRatioSampleCount: number;
-  performanceLoading: boolean;
-  performanceError: boolean;
   asymmetricRiskSummary: AsymmetricRiskMetricsSummary | null;
   currentAccountEquity: number;
   isOwner: boolean;
@@ -132,9 +128,10 @@ export function isCounterfactualResolved(branch: CounterfactualOverviewBranch): 
 const L_DERIVED_KEYS: CampaignPnlOverviewItemKey[] = [
   'initialExpectedMaxLoss',
   'expectedMaxDrawdownPct',
+  'mainPriceEfficiency',
   'payoffRatio',
+  'addEfficiency',
   'asymmetricRiskContribution',
-  'opportunityQuality',
   'arithmeticExpectancy',
   'geometricExpectancy',
 ];
@@ -253,9 +250,7 @@ export function buildCounterfactualOverviewMetrics(
     ? counterfactualMainLegPriceChangePct(branch.params.manual_legs, shared.actualMain)
     : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
-  const resolved = isCounterfactualResolved(branch) && realizedPnl != null;
-  const opportunityQuality = resolveResolvedOpportunityQuality(resolved, payoffRatio, expectedMaxDrawdownPct);
-  const expectancies = computeCampaignExpectancies(payoffRatio, shared.expectedWinRate);
+  const expectancies = computeCampaignExpectancies(payoffRatio);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
     payoffRatio == null ? null : payoffRatio / 100,
     shared.asymmetricRiskSummary,
@@ -266,9 +261,6 @@ export function buildCounterfactualOverviewMetrics(
     [],
     shared.isOwner ? shared.currentAccountEquity : null,
   );
-  const todayAccountEquity = shared.isOwner && Number.isFinite(shared.currentAccountEquity) && shared.currentAccountEquity > 0
-    ? shared.currentAccountEquity
-    : null;
 
   const helpOverrides: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
     realizedPnl: manual
@@ -337,13 +329,11 @@ export function buildCounterfactualOverviewMetrics(
     expectedMaxDrawdownPct,
     payoffRatio,
     mainPriceChangePct,
+    hasMainAdd: manual && counterfactualHasMainAdd(branch.params.manual_legs),
     asymmetricRiskContribution,
-    opportunityQuality,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,
     initialRisk: initialRisk ? { drawdownFraction: initialRisk.drawdownFraction, source: initialRisk.source } : null,
-    todayAccountEquity,
-    expectedWinRate: shared.expectedWinRate,
     helpOverrides,
     extraNotes,
   };
@@ -352,13 +342,8 @@ export function buildCounterfactualOverviewMetrics(
 /** 反事实面板的脚注输入：期望口径那句与真实面板完全一致，资产分母那句跟着 initialRisk 走。 */
 export function buildCounterfactualOverviewNoteInput(
   metrics: Pick<CampaignPnlOverviewMetrics, 'initialRisk'>,
-  shared: CounterfactualOverviewShared,
 ): CampaignPnlOverviewNoteInput {
   return {
-    performanceLoading: shared.performanceLoading,
-    performanceError: shared.performanceError,
-    expectedWinRate: shared.expectedWinRate,
-    payoffRatioSampleCount: shared.payoffRatioSampleCount,
     initialRiskSource: metrics.initialRisk?.source ?? null,
   };
 }

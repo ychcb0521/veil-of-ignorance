@@ -161,12 +161,13 @@ const OVERVIEW_LABELS = [
   '峰值浮盈',
   '最大预期亏损',
   '预期回撤',
+  '涨幅',
+  '涨幅效率',
   '盈亏比',
+  '加仓效率',
   '本场 b 对 DSI/USI 的贡献',
-  '机会质量',
   '算术期望',
   '几何期望',
-  '今日账户总资产',
 ];
 
 function metricValue(panel: HTMLElement, label: string) {
@@ -301,11 +302,10 @@ describe('JournalCampaignDetailPage：不改一格的 Legs 副本逐项复现盈
     expect(metricValue(draft, '最大预期亏损')).toBe(metricValue(screen.getByText('盈亏概览').parentElement as HTMLElement, '最大预期亏损'));
   }, PAGE_TEST_TIMEOUT_MS);
 
-  it('进行中的战役：原样重跑与上方一样不算「已了结」，机会质量留空', async () => {
+  it('进行中的战役：原样重跑与上方逐项相同，运行时记下「未了结」', async () => {
     state.fixtureId = 'sim-active-all-closed';
     renderPage();
     const { campaignPanel, draft } = await runCopy(await mainExitShown('sim-active-all-closed'));
-    expect(metricValue(campaignPanel, '机会质量')).toBe('—');
     expect(panelValues(draft)).toEqual(panelValues(campaignPanel));
     expect(runCustomCounterfactualMock.mock.calls[0][1]).toMatchObject({ actual_resolved: false });
   }, PAGE_TEST_TIMEOUT_MS);
@@ -423,8 +423,6 @@ describe('JournalCampaignDetailPage：口径统一之前保存的分支', () => 
     expect(sent.manual_legs?.find(leg => leg.id === 'main')?.close_time).toBe('2026-01-01T04:00:00.000Z');
     expect(within(draft).getByText('与原始 Legs 无差异')).toBeInTheDocument();
     expect(within(draft).getByText('+0.00 USDT')).toBeInTheDocument();
-    // 与上方一样不算「已了结」
-    expect(metricValue(draft, '机会质量')).toBe('—');
   }, PAGE_TEST_TIMEOUT_MS);
 
   it('主力与镜像并仓：副本在平仓价下方列出先平的那一刀', async () => {

@@ -7,7 +7,7 @@
  * 逐项比到 1 分钱以内。
  *
  * 比对的项：已实现 P&L、峰值浮盈、最大预期亏损、预期回撤、杠杆、主力开仓名义仓位、盈亏比，
- * 以及由 b 推出的机会质量、算术期望、几何期望、DSI/USI 贡献（b²/n），主力涨幅与由它推出的涨幅效率、加仓效率，
+ * 以及由 b 推出的算术期望、几何期望、DSI/USI 贡献（b²/n），主力涨幅与由它推出的涨幅效率、加仓效率，
  * 再加「相对实际」= 0.00。
  * 今日账户总资产两边读同一个数（当前账户），不在这里比。
  *
@@ -15,9 +15,6 @@
  *   · settlement（取数来源 / 落库缓存差额）——那是战役行自己的对账信息，反事实分支没有落库缓存；
  *   · initialRisk（帮助里的「本场 x」与脚注的资产分母来源）——真实战役优先用主力开仓时固化的账户资产快照，
  *     反事实分支没有「开仓那一刻的账户」，只能退到今日总资产。几何期望只由 b 决定，不受它影响，照样比。
- * 机会质量的「已了结」门槛：真实战役读派生状态；反事实读「每条腿都有平仓时刻、没有副本也没另定平仓时间的未平腿」，
- * 再叠上运行时记下的真实判定（params.actual_resolved，与页面同一条规则）——进行中、或一条腿都结算不了又没有落库值的战役，
- * 原样重跑同样留空。机会质量照样逐项比对。
  *
  * 夹具分三批：手写的八场（形状齐全、数字好算）；用模拟器自己的下单 / 合并 / 分刀平仓函数实跑出来的
  * 那一批（市价滑点、主力与镜像并仓、镜像止盈按比例减仓、历史归类的委托快照、本地没有成交记录、
@@ -29,7 +26,7 @@
  * 第二组断言守「相对实际只反映改动」：从原样副本出发改一格，相对实际挪动的量必须恰好是这一格值多少钱，
  * 不能因为「改过了」就整条腿换一套算法，把滑点、分刀、老费率的差额一起算进去。
  */
-import { campaignMainLegPriceChangePct, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, campaignMainLegPriceChangePct, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import { describe, expect, it } from 'vitest';
 import { computeAsymmetricRiskContribution, type AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
@@ -45,12 +42,10 @@ import { resolveNeverFilledOrderIds } from '@/lib/campaignOrderAttribution';
 import {
   computeCampaignExpectancies,
   resolveCampaignMainLeverage,
-  resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import {
   claimCampaignRecordsByLeg,
   computeCampaignRealizedPnl,
-  reconcileCampaignWithSettlement,
 } from '@/lib/campaignRealizedPnl';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import {
@@ -92,7 +87,6 @@ import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaig
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeJournal } from '@/types/journal';
 
-const WIN_RATE = 0.5;
 const ASYMMETRIC: AsymmetricRiskMetricsSummary = {
   sampleCount: 10,
   winCount: 5,
@@ -118,7 +112,7 @@ const EXCLUDED_BY_CONSTRUCTION = ['settlement', 'initialRisk'] as const;
  * 不是本场的读数、两边按构造读同一个输入的项：今日账户总资产、有效胜率（整页测试里逐字比过），
  * 以及帮助文案的覆盖 / 追加（文字，不是数）。
  */
-const SHARED_INPUTS_AND_TEXT = ['todayAccountEquity', 'expectedWinRate', 'helpOverrides', 'extraNotes'] as const;
+const SHARED_INPUTS_AND_TEXT = ['helpOverrides', 'extraNotes'] as const;
 
 type PanelNumbers = Record<ParityMetric, number | null> & {
   realizedPnl: number | null;
@@ -128,7 +122,6 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
   mainLeverage: number | null;
   initialMainExposureNotional: number;
   payoffRatio: number | null;
-  opportunityQuality: number | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
   dsiUsiTerm: number | null;
@@ -137,13 +130,16 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
   addEfficiency: number | null;
 };
 
-/** 涨幅效率与加仓效率：两边都从各自的涨幅、预期回撤、盈亏比走同一对函数（页面构造器里就是这么算的）。 */
-function efficiencyNumbers(mainPriceChangePct: number | null, expectedMaxDrawdownPct: number, payoffRatio: number | null) {
+/**
+ * 涨幅效率与加仓效率：两边都从各自的涨幅、预期回撤、盈亏比走同一对函数（页面构造器里就是这么算的）；
+ * 加仓效率只对做过加仓的战役算（真实侧 campaignHasMainAdd，重跑侧 metrics.hasMainAdd），这个判断也就跟着逐项比对。
+ */
+function efficiencyNumbers(mainPriceChangePct: number | null, expectedMaxDrawdownPct: number, payoffRatio: number | null, hasMainAdd: boolean) {
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedMaxDrawdownPct);
   return {
     mainPriceChangePct,
     mainPriceEfficiency,
-    addEfficiency: computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency),
+    addEfficiency: hasMainAdd ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency) : null,
   };
 }
 
@@ -160,10 +156,9 @@ function realPanel(fx: ParityFixture) {
   const accuracy = computeDecisionAccuracy(campaign, legs, tradeRecords, klines, reverseHedgeOrders, corrections, localOrdersOf(fx));
   const pnlReconciliation = computeCampaignPnlReconciliation(campaign, legs, tradeRecords, corrections);
   const settlement = computeCampaignRealizedPnl(campaign, legs, tradeRecords, corrections);
-  const displayCampaign = reconcileCampaignWithSettlement(campaign, legs, settlement);
   const payoffRatio = accuracy.initial_expected_max_loss > 0 ? accuracy.profit_capture_ratio : null;
   const expectedMaxDrawdownPct = computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, reverseHedgeOrders);
-  const expectancies = computeCampaignExpectancies(payoffRatio, WIN_RATE);
+  const expectancies = computeCampaignExpectancies(payoffRatio);
   const contribution = computeAsymmetricRiskContribution(payoffRatio == null ? null : payoffRatio / 100, ASYMMETRIC);
   const numbers: PanelNumbers = {
     realizedPnl: pnlReconciliation.correctedPnl ?? campaign.final_realized_pnl,
@@ -173,12 +168,11 @@ function realPanel(fx: ParityFixture) {
     mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
     initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
     payoffRatio,
-    opportunityQuality: resolveCampaignOpportunityQuality(displayCampaign, payoffRatio, expectedMaxDrawdownPct),
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,
     dsiUsiTerm: contribution?.meanSquareTerm ?? null,
     // 与页面同一个函数、同一份平仓价校正
-    ...efficiencyNumbers(campaignMainLegPriceChangePct(legs, tradeRecords, corrections), expectedMaxDrawdownPct, payoffRatio),
+    ...efficiencyNumbers(campaignMainLegPriceChangePct(legs, tradeRecords, corrections), expectedMaxDrawdownPct, payoffRatio, campaignHasMainAdd(legs)),
   };
   return { numbers, actualPnl: pnlReconciliation.correctedPnl, settlement, accuracy };
 }
@@ -211,10 +205,6 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
   const { params, result } = runLegs(fx, base, manualLegs);
   const shared: CounterfactualOverviewShared = {
     strategyTemplate: counterfactualTemplateFor(fx.campaign),
-    expectedWinRate: WIN_RATE,
-    payoffRatioSampleCount: 10,
-    performanceLoading: false,
-    performanceError: false,
     asymmetricRiskSummary: ASYMMETRIC,
     currentAccountEquity: 10_000,
     isOwner: true,
@@ -232,11 +222,10 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     mainLeverage: metrics.mainLeverage,
     initialMainExposureNotional: metrics.initialMainExposureNotional,
     payoffRatio: metrics.payoffRatio,
-    opportunityQuality: metrics.opportunityQuality,
     arithmeticExpectancy: metrics.arithmeticExpectancy,
     geometricExpectancy: metrics.geometricExpectancy,
     dsiUsiTerm: metrics.asymmetricRiskContribution?.meanSquareTerm ?? null,
-    ...efficiencyNumbers(metrics.mainPriceChangePct, metrics.expectedMaxDrawdownPct, metrics.payoffRatio),
+    ...efficiencyNumbers(metrics.mainPriceChangePct, metrics.expectedMaxDrawdownPct, metrics.payoffRatio, metrics.hasMainAdd),
   };
   return { numbers, result, manualLegs, metrics };
 }
@@ -559,6 +548,8 @@ describe('反事实黄金对账：原样重跑 ≡ 真实盈亏概览', () => {
     const covered = new Set<string>([
       // dsiUsiTerm 与两项效率是由适配器字段推出来的，不是适配器自己的字段
       ...compared.filter(key => key !== 'dsiUsiTerm' && key !== 'mainPriceEfficiency' && key !== 'addEfficiency'),
+      // hasMainAdd 只决定加仓效率算不算，已随 addEfficiency 逐项比对
+      'hasMainAdd',
       'asymmetricRiskContribution',
       ...EXCLUDED_BY_CONSTRUCTION,
       ...SHARED_INPUTS_AND_TEXT,
@@ -910,18 +901,6 @@ describe('第二轮复核的几处分叉', () => {
     expect(help).toContain('一条腿都结算不了');
   });
 
-  it('机会质量的「已了结」门槛与战役页同一条：进行中 / 没有落库值时原样重跑留空；副本给未平的腿另定平仓时间才算', () => {
-    for (const id of ['sim-no-settlement-null', 'sim-no-settlement-events', 'sim-active-all-closed', 'sim-active-open-main']) {
-      const fx = parityFixture(id);
-      expect(realPanel(fx).numbers.opportunityQuality, id).toBeNull();
-      expect(rerunPanel(fx).numbers.opportunityQuality, id).toBeNull();
-      expect(rerunPanel(fx).result, id).toBeTruthy();
-    }
-    const open = parityFixture('sim-active-open-main');
-    const closedByEdit = rerunPanel(open, legs => legs.map(leg => (leg.id === 'main' ? { ...leg, close_time: '2026-01-01T02:00:00.000Z', exit_price: 112 } : leg)));
-    expect(closedByEdit.numbers.opportunityQuality).not.toBeNull();
-  });
-
   it('同一角色两张初始对冲：按挂出时刻取第一张（98），不按成交时刻', () => {
     const fx = parityFixture('sim-hedge-placed-early');
     const real = realPanel(fx);
@@ -1118,7 +1097,7 @@ describe('第三轮复核的几处分叉', () => {
     expect(after.result.fees_total! - before.result.fees_total!).toBeCloseTo(record.quantity * 10 * TAKER_FEE, 4);
   });
 
-  it('进行中的战役、9962e7e7 的老分支：K 线窗口长了，改动摘要里没改平仓时间的未平仓腿按现在的末根收，不印假改动，机会质量照样留空', () => {
+  it('进行中的战役、9962e7e7 的老分支：K 线窗口长了，改动摘要里没改平仓时间的未平仓腿按现在的末根收，不印假改动', () => {
     const fx = parityFixture('sim-active-open-main');
     const { base } = copyOf(fx);
     // 老编辑器在窗口 K0（末根 03:00）上建基线，运行时窗口多一根（run_context.to = 04:00），摘要是「未改动」
@@ -1142,16 +1121,11 @@ describe('第三轮复核的几处分叉', () => {
     const rerun = runLegs(grown, base, loaded);
     const metrics = buildCounterfactualOverviewMetrics(rerun, {
       strategyTemplate: counterfactualTemplateFor(fx.campaign),
-      expectedWinRate: WIN_RATE,
-      payoffRatioSampleCount: 10,
-      performanceLoading: false,
-      performanceError: false,
       asymmetricRiskSummary: ASYMMETRIC,
       currentAccountEquity: 10_000,
       isOwner: true,
     });
-    expect(realPanel(grown).numbers.opportunityQuality).toBeNull();
-    expect(metrics.opportunityQuality).toBeNull();
+    expect(metrics.realizedPnl).not.toBeNull();
 
     // 用户当时改过平仓时间：摘要里有，原样保留
     const edited = saved.map(leg => (leg.id === 'main' ? { ...leg, close_time: '2026-01-01T02:00:00.000Z', exit_price: 112 } : leg));

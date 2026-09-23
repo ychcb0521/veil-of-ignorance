@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import {
+  ARITHMETIC_EXPECTANCY_WIN_RATE,
   campaignGrowthFactor,
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
@@ -89,36 +90,35 @@ describe('campaign metrics shared by list and detail pages', () => {
   it('【用户要求】Gᵢ = 1 + bᵢ·x，x 固定 0.1，bᵢ 用当场战役的 b', () => {
     // b = +2 → G = 1.20；【用户要求】列里直接显示 Gᵢ 本身，不显示 Gᵢ − 1
     expect(campaignGrowthFactor(2)).toBeCloseTo(1.2, 12);
-    const result = computeCampaignExpectancies(200, 0.5);
+    const result = computeCampaignExpectancies(200);
     expect(result.geometricExpectancy).toBeCloseTo(0.2, 12);   // 内部仍以 0 为分界保存
     expect(formatGeometricExpectancy(result.geometricExpectancy)).toBe('1.20');
-    expect(formatGeometricExpectancy(computeCampaignExpectancies(-100, 0.5).geometricExpectancy)).toBe('0.90');
-    expect(formatGeometricExpectancy(computeCampaignExpectancies(0, 0.5).geometricExpectancy)).toBe('1.00');
-    expect(formatGeometricExpectancy(computeCampaignExpectancies(-1000, 0.5).geometricExpectancy)).toBe('0.00');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(-100).geometricExpectancy)).toBe('0.90');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(0).geometricExpectancy)).toBe('1.00');
+    expect(formatGeometricExpectancy(computeCampaignExpectancies(-1000).geometricExpectancy)).toBe('0.00');
     expect(formatGeometricExpectancy(null)).toBe('—');
-    // 算术期望仍按账户胜率加权，两者是不同的量
+    // 算术期望是另一个量：胜率统一 50%，E = 0.5 × 2 − 0.5
     expect(result.arithmeticExpectancy).toBeCloseTo(0.5, 8);
     expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50R');
   });
 
-  it('【用户要求】不乘胜率：同一个 b 换个胜率，几何期望一模一样', () => {
-    const low = computeCampaignExpectancies(150, 0.2).geometricExpectancy;
-    const high = computeCampaignExpectancies(150, 0.9).geometricExpectancy;
-    expect(low).toBeCloseTo(0.15, 12);
-    expect(high).toBeCloseTo(0.15, 12);
-    // 连胜率都没有时也算得出来（算术期望才需要胜率）
-    expect(computeCampaignExpectancies(150, null).geometricExpectancy).toBeCloseTo(0.15, 12);
-    expect(computeCampaignExpectancies(150, null).arithmeticExpectancy).toBeNull();
+  it('【用户要求】算术期望的胜率统一取 50%：Eᵢ = (bᵢ − 1) ÷ 2，不需要也不受账户胜率影响', () => {
+    expect(ARITHMETIC_EXPECTANCY_WIN_RATE).toBe(0.5);
+    expect(computeCampaignExpectancies(150).arithmeticExpectancy).toBeCloseTo(0.25, 12);
+    expect(computeCampaignExpectancies(300).arithmeticExpectancy).toBeCloseTo(1, 12);
+    expect(computeCampaignExpectancies(-100).arithmeticExpectancy).toBeCloseTo(-1, 12);
+    // 几何期望只由 b 决定
+    expect(computeCampaignExpectancies(150).geometricExpectancy).toBeCloseTo(0.15, 12);
   });
 
   it('【用户要求】不再看该场真实的 Lᵢ ÷ Aᵢ：没有开仓资产快照的老战役同样算得出来', () => {
-    expect(computeCampaignExpectancies(150, 0.6).geometricExpectancy).not.toBeNull();
+    expect(computeCampaignExpectancies(150).geometricExpectancy).not.toBeNull();
     // 缺少 bᵢ 才算不出来
-    expect(computeCampaignExpectancies(null, 0.6).geometricExpectancy).toBeNull();
+    expect(computeCampaignExpectancies(null).geometricExpectancy).toBeNull();
   });
 
   it('allows a losing campaign to produce negative arithmetic and geometric expectancy', () => {
-    const result = computeCampaignExpectancies(-100, 0.5);
+    const result = computeCampaignExpectancies(-100);
 
     expect(result.arithmeticExpectancy).toBeCloseTo(-1, 8);
     // b = −1 → G = 0.9 → −10%
@@ -128,7 +128,7 @@ describe('campaign metrics shared by list and detail pages', () => {
   it('bᵢ ≤ −10 时 1+bᵢ·x ≤ 0，本金被打穿，因子记 0、几何期望记 −100%', () => {
     expect(campaignGrowthFactor(-10)).toBe(0);
     expect(campaignGrowthFactor(-25)).toBe(0);
-    expect(computeCampaignExpectancies(-1000, 0.5).geometricExpectancy).toBeCloseTo(-1, 8);
-    expect(computeCampaignExpectancies(-2500, 0.5).geometricExpectancy).toBeCloseTo(-1, 8);
+    expect(computeCampaignExpectancies(-1000).geometricExpectancy).toBeCloseTo(-1, 8);
+    expect(computeCampaignExpectancies(-2500).geometricExpectancy).toBeCloseTo(-1, 8);
   });
 });

@@ -437,7 +437,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByRole('button', { name: '显示测试反事实' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('shows the same payoff, opportunity-quality and expectancy metrics as the campaign list', async () => {
+  it('shows the same payoff and expectancy metrics as the campaign list', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
         <Routes>
@@ -446,17 +446,20 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('机会质量')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('涨幅效率')).toBeInTheDocument());
+    // 【用户要求】「机会质量」已删掉（涨幅效率更合理）
+    expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
     expect(screen.getByText('200.0%（2.00）')).toBeInTheDocument();
-    expect(screen.getByText('0.20')).toBeInTheDocument();
     expect(screen.getByText('1000.00 USDT')).toBeInTheDocument();
-    expect(screen.getByText('10000.00 USDT')).toBeInTheDocument();
-    // 算术/几何期望与实时胜率依赖异步加载的 campaignPerformance（同账户有效战役），需等它落定。
+    // 【用户要求】「今日账户总资产」不在盈亏概览里显示
+    expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '今日账户总资产说明' })).not.toBeInTheDocument();
+    // 算术期望胜率统一 50%：b = 2 → +0.50R，不等账户样本加载。
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     // 【用户要求】单场几何期望以 Gᵢ 呈现；这场 b = 2.00 → G = 1 + 2×0.1 = 1.20
     expect(screen.getByText('1.20')).toBeInTheDocument();
     expect(screen.getByText('USI · b²/n = 4.0000（组内 100.0%）')).toBeInTheDocument();
-    expect(screen.getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument();
+    expect(screen.getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
     expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
 
@@ -469,17 +472,12 @@ describe('JournalCampaignDetailPage metrics', () => {
       '预期回撤',
       '盈亏比',
       '本场 b 对 DSI/USI 的贡献',
-      '机会质量',
       '算术期望',
       '几何期望',
-      '今日账户总资产',
     ]) {
       expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
     }
     expect(screen.queryByRole('button', { name: '最大回撤说明' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '机会质量说明' }));
-    expect(await screen.findByText(/b\* = max（实际盈亏比 b, 1）；Q = b\* ÷ 预期回撤百分点 d/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
@@ -498,12 +496,10 @@ describe('JournalCampaignDetailPage metrics', () => {
       '盈亏比',
       '加仓效率',
       '本场 b 对 DSI/USI 的贡献',
-      '机会质量',
       '算术期望',
       '几何期望',
-      '今日账户总资产',
     ]);
-    expect(exportInput.pnlOverview.note).toContain('2 场有效战役，实时胜率 50.00%');
+    expect(exportInput.pnlOverview.note).toContain('算术期望的胜率统一取 50%');
     expect(exportInput.pnlOverview.note).not.toContain('逐腿 P&L 对账');
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
@@ -871,8 +867,9 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('+2.00R')).toBeInTheDocument());
-    expect(screen.getByText(/1 场有效战役，实时胜率 100.00%/)).toBeInTheDocument();
+    // 【用户要求】胜率统一 50%：b = 2 → E = 0.5 × 2 − 0.5，不受别的战役加载成败影响
+    await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
+    expect(screen.getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument();
     expect(screen.queryByText(/期望口径加载失败/)).not.toBeInTheDocument();
   });
 

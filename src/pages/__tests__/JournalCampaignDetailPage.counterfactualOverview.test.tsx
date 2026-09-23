@@ -1,7 +1,7 @@
 /**
  * 反事实战役的「运行 → 未保存草稿 → 保存 / 丢弃 → 已保存分支面板」全流程。
  *
- * 用户要求：一键运行之后显示的结果要与「盈亏概览」同一套模式（同 15 项、同脚注），并且能保存。
+ * 用户要求：一键运行之后显示的结果要与「盈亏概览」同一套模式（同 14 项、同脚注），并且能保存。
  * 这里把编辑器换成一个能触发 onRunWhatIf 并递出基线腿的桩，journalApi 的运行走真引擎，
  * 只把 create / list / delete 换成记账的桩：什么时候插库、插了什么，一目了然。
  */
@@ -332,10 +332,8 @@ const OVERVIEW_LABELS = [
   '盈亏比',
   '加仓效率',
   '本场 b 对 DSI/USI 的贡献',
-  '机会质量',
   '算术期望',
   '几何期望',
-  '今日账户总资产',
 ];
 
 function helpButtonLabels(panel: HTMLElement) {
@@ -430,7 +428,7 @@ beforeEach(() => {
 });
 
 describe('JournalCampaignDetailPage counterfactual overview flow', () => {
-  it('一键运行 → 「反事实盈亏概览 · 未保存」：同 15 项说明按钮、相对实际、默认分支名；保存前没有插库', async () => {
+  it('一键运行 → 「反事实盈亏概览 · 未保存」：同 14 项说明按钮、相对实际、默认分支名；保存前没有插库', async () => {
     renderPage();
     const panel = await runFromEditor();
 
@@ -444,9 +442,10 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     // 有初始对冲 A → 有止损线，L 派生项不是「—」
     expect(metricValue(panel, '最大预期亏损')).not.toBe('—');
     expect(metricValue(panel, '盈亏比')).not.toBe('—');
-    expect(metricValue(panel, '今日账户总资产')).toBe('10000.00 USDT');
+    // 【用户要求】「今日账户总资产」不单列
+    expect(within(panel).queryByText('今日账户总资产')).not.toBeInTheDocument();
     // 期望口径脚注与真实面板同一句
-    await waitFor(() => expect(within(panel).getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument());
+    await waitFor(() => expect(within(panel).getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument());
 
     const nameInput = screen.getByTestId('counterfactual-draft-name') as HTMLInputElement;
     expect(nameInput.value).toMatch(/^主力开仓 平仓价 \d{2}-\d{2} \d{2}:\d{2}$/);
@@ -535,7 +534,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(within(panel).getByText('反事实盈亏概览 · 手动调整')).toBeInTheDocument();
     expect(helpButtonLabels(panel)).toEqual(OVERVIEW_LABELS);
     expect(metricValue(panel, '已实现 P&L')).toBe('200.00 USDT');
-    for (const label of ['最大预期亏损', '预期回撤', '盈亏比', '机会质量', '算术期望', '几何期望']) {
+    for (const label of ['最大预期亏损', '预期回撤', '涨幅效率', '盈亏比', '加仓效率', '算术期望', '几何期望']) {
       expect(metricValue(panel, label)).toBe('—');
     }
     expect(within(panel).getByText('早期分支未记录改动摘要')).toBeInTheDocument();
@@ -693,7 +692,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
   }, 15_000);
 });
 
-/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、15 项每一行的 class（不含数值与染色）。 */
+/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、14 项每一行的 class（不含数值与染色）。 */
 function overviewSkeleton(panel: HTMLElement) {
   const [title, grid, note] = Array.from(panel.children) as HTMLElement[];
   return {
@@ -713,7 +712,7 @@ function spacingPx(className: string, prefix: 'p' | 'gap') {
 }
 
 describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据 | 盈亏概览」同一套分栏', () => {
-  it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 15 项', async () => {
+  it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 14 项', async () => {
     renderPage();
     const row = await runFromEditor();
     const changes = screen.getByTestId('counterfactual-draft-changes');
@@ -737,7 +736,7 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     expect(within(titleRow).getByTestId('counterfactual-discard')).toHaveTextContent('丢弃');
     expect(within(changes).queryAllByRole('button', { name: /说明$/ })).toHaveLength(0);
 
-    // 右栏：只有标题、15 项与脚注；没有相对实际、改动、运行信息和任何操作
+    // 右栏：只有标题、14 项与脚注；没有相对实际、改动、运行信息和任何操作
     const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
     expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 未保存');
     expect(helpButtonLabels(overview)).toEqual(helpButtonLabels(real));
@@ -747,7 +746,7 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     for (const text of ['相对实际', '改 主力开仓', '运行于', '相对原始的变化情况']) {
       expect(overview).not.toHaveTextContent(text);
     }
-    await waitFor(() => expect(within(overview).getByText(/2 场有效战役，实时胜率 50.00%/)).toBeInTheDocument());
+    await waitFor(() => expect(within(overview).getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument());
     expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
     expect(overviewSkeleton(real).childCount).toBe(3);
   }, 15_000);

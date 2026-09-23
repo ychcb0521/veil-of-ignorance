@@ -3,9 +3,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  campaignHasMainAdd,
   campaignMainLegPriceChangePct,
   computeAddEfficiency,
   computeMainPriceEfficiency,
+  counterfactualHasMainAdd,
   counterfactualMainLegPriceChangePct,
   formatEfficiency,
 } from '@/lib/campaignMainPriceChange';
@@ -128,5 +130,29 @@ describe('反事实里的主力涨幅', () => {
   it('没有主力：null', () => {
     expect(counterfactualMainLegPriceChangePct([manual({ leg_role: 'hedge_initial_a' })], null)).toBeNull();
     expect(counterfactualMainLegPriceChangePct([], null)).toBeNull();
+  });
+});
+
+describe('【用户要求】加仓效率只算做过加仓的战役', () => {
+  const journal = (over: Partial<TradeJournal>) => ({ leg_role: 'main_open', trade_record_id: null, ...over } as TradeJournal);
+
+  it('有成交过的加仓腿（带成交 id 或已有结算结果）才算做过加仓', () => {
+    expect(campaignHasMainAdd([journal({}), journal({ leg_role: 'main_add_1', trade_record_id: 'r-add' })])).toBe(true);
+    expect(campaignHasMainAdd([journal({ leg_role: 'main_add_2', post_realized_pnl: 12 })])).toBe(true);
+    expect(campaignHasMainAdd([journal({ leg_role: 'main_add_1', post_real_close_time: '2026-01-02T00:00:00.000Z' })])).toBe(true);
+  });
+
+  it('只有主力 / 对冲 / 镜像，或加仓腿连成交 id 都没有：不算', () => {
+    expect(campaignHasMainAdd([journal({}), journal({ leg_role: 'hedge_initial_a', trade_record_id: 'h' }), journal({ leg_role: 'mirror_tp', trade_record_id: 'm' })])).toBe(false);
+    expect(campaignHasMainAdd([journal({ leg_role: 'main_add_1' })])).toBe(false);
+    expect(campaignHasMainAdd([])).toBe(false);
+  });
+
+  it('反事实：参与运行、成交了的加仓腿才算', () => {
+    const add = { leg_role: 'main_add_1', enabled: true } as CampaignCounterfactualManualLeg;
+    expect(counterfactualHasMainAdd([add])).toBe(true);
+    expect(counterfactualHasMainAdd([{ ...add, enabled: false }])).toBe(false);
+    expect(counterfactualHasMainAdd([{ ...add, filled: false }])).toBe(false);
+    expect(counterfactualHasMainAdd([{ ...add, leg_role: 'main_open' }])).toBe(false);
   });
 });

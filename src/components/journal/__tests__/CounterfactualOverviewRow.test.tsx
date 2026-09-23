@@ -9,7 +9,7 @@ import type { CampaignPnlOverviewItem } from '@/lib/campaignPnlOverview';
 
 const items: CampaignPnlOverviewItem[] = [
   { key: 'realizedPnl', label: '已实现 P&L', value: '12.00 USDT', help: '说明 A', valueClassName: 'text-[#0ECB81]' },
-  { key: 'todayAccountEquity', label: '今日账户总资产', value: '100.00 USDT', help: '说明 B', rightColumn: true },
+  { key: 'geometricExpectancy', label: '几何期望', value: '1.20', help: '说明 B', rightColumn: true },
 ];
 
 const LONG_LINE = `改 滚动对冲：开仓价 ${'1.75470000000000000000'.repeat(6)} → 1.7828`;
@@ -57,8 +57,8 @@ describe('CounterfactualOverviewRow', () => {
     expect(overview.children).toHaveLength(3);
     expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 我的方案');
     expect(within(overview).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-      .toEqual(['已实现 P&L说明', '今日账户总资产说明']);
-    expect(overview.querySelector('.sm\\:col-start-2')).toHaveTextContent('今日账户总资产');
+      .toEqual(['已实现 P&L说明', '几何期望说明']);
+    expect(overview.querySelector('.sm\\:col-start-2')).toHaveTextContent('几何期望');
   });
 
   it('草稿没有类型行；delta 为 null 印「—」，负数染红；没改动 / 老行各有一句，没有运行信息就不印', () => {

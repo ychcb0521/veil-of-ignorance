@@ -129,3 +129,31 @@ export function counterfactualMainLegPriceChangePct(
   }
   return pctOf(main);
 }
+
+function isMainAddRole(role: string | null | undefined): boolean {
+  return !!role && role.startsWith('main_add');
+}
+
+/**
+ * 【用户要求】「加仓效率」只对做过加仓的战役计算：没有加仓，这个比值只是「主力盈亏比 ÷ 主力涨幅效率」，
+ * 恒在 1 附近，排进来只会把真正加过仓的战役冲散。
+ * 「做过加仓」= 有一条加仓腿（main_add_N）真的成交过：带成交 id（实时 / 回填都有），或腿上已有结算结果。
+ * 只挂了单、腿上连成交 id 都没有的加仓不算。
+ */
+export function campaignHasMainAdd(
+  legs: readonly Pick<TradeJournal, 'leg_role' | 'trade_record_id' | 'post_realized_pnl' | 'post_real_close_time' | 'post_simulated_close_time'>[],
+): boolean {
+  return legs.some(leg => isMainAddRole(leg.leg_role) && (
+    !!leg.trade_record_id
+    || (leg.post_realized_pnl != null && Number.isFinite(Number(leg.post_realized_pnl)))
+    || !!leg.post_real_close_time
+    || !!leg.post_simulated_close_time
+  ));
+}
+
+/** 反事实（手动 Legs）里有没有参与运行、且成交了的加仓腿：与 campaignHasMainAdd 同一个口径。 */
+export function counterfactualHasMainAdd(
+  manualLegs: readonly Pick<CampaignCounterfactualManualLeg, 'leg_role' | 'enabled' | 'filled'>[] | null | undefined,
+): boolean {
+  return (manualLegs ?? []).some(leg => leg.enabled && leg.filled !== false && isMainAddRole(leg.leg_role));
+}

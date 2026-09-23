@@ -111,19 +111,24 @@ export function campaignGrowthFactor(payoffRatio: number): number {
  * 后期大账户算出来几乎没下注，两个数没法横向比。固定 x 之后只剩 bᵢ 在动。
  * 附带好处：不再需要开仓时的账户资产快照，老战役也算得出来。
  */
+/**
+ * 【用户要求】单场算术期望的胜率统一取 50%（「排序方式那里的算术期望值哪里的胜率统一都用 50%」）：
+ * 不再随账户有效战役的实时胜率变动——同一场战役的 Eᵢ 只由它自己的 bᵢ 决定，排序与卡片不会因为别的战役结束而重排。
+ * 战役封面、列表排序、详情页盈亏概览与反事实概览都读这一个常数。账户级的期望值与汇总几何期望仍按实时胜率，不在此列。
+ */
+export const ARITHMETIC_EXPECTANCY_WIN_RATE = 0.5;
+
 export function computeCampaignExpectancies(
   profitCaptureRatio: number | null,
-  winRate: number | null,
 ): CampaignExpectancies {
   if (profitCaptureRatio == null || !Number.isFinite(profitCaptureRatio)) {
     return { arithmeticExpectancy: null, geometricExpectancy: null };
   }
 
   const payoffRatio = profitCaptureRatio / 100;
-  // 算术期望要按账户胜率加权，没有胜率就给不出；几何那一项只由 bᵢ 决定，照常算。
-  const arithmeticExpectancy = winRate != null && Number.isFinite(winRate)
-    ? winRate * payoffRatio - (1 - winRate)
-    : null;
+  // Eᵢ = P × bᵢ −（1 − P），P 固定 50%；几何那一项只由 bᵢ 决定。
+  const p = ARITHMETIC_EXPECTANCY_WIN_RATE;
+  const arithmeticExpectancy = p * payoffRatio - (1 - p);
 
   return {
     arithmeticExpectancy,

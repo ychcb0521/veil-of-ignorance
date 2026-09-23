@@ -390,6 +390,13 @@ describe('JournalCampaignsPage sorting', () => {
     };
     const originals = tradeHistory.map(record => record.exitPrice);
     tradeHistory.forEach(record => { record.exitPrice = exits[record.id] ?? record.exitPrice; });
+    // 【用户要求】加仓效率只算做过加仓的战役：给 High Importance 补一条已结算的加仓腿（盈亏 0，不改 b）
+    const hiLegs = legsByCampaign['high-importance'];
+    legsByCampaign['high-importance'] = [...hiLegs, makeLeg({
+      id: 'high-importance-add', campaign_id: 'high-importance', leg_role: 'main_add_1',
+      post_real_close_time: '2025-12-01T00:00:00.000Z',
+    } as Partial<TradeJournal>)];
+    legsByCampaign['high-importance'][1].post_realized_pnl = 0;
     try {
       render(
         <MemoryRouter initialEntries={['/journal/campaigns']}>
@@ -406,6 +413,11 @@ describe('JournalCampaignsPage sorting', () => {
       // 这场没有对冲边界、算不出预期回撤：效率两格是「—」
       expect(newest.querySelector('[data-testid="campaign-main-price-efficiency-value"]')?.textContent).toBe('—');
       expect(newest.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('—');
+      // 没有加仓的战役：涨幅效率照算，加仓效率不算
+      const bestPnl = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('Best PnL'))!;
+      expect(bestPnl.querySelector('[data-testid="campaign-main-price-efficiency-value"]')?.textContent).not.toBe('—');
+      expect(bestPnl.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('—');
+      expect(bestPnl.querySelector('[data-testid="campaign-add-efficiency"]')?.getAttribute('title')).toContain('没有加仓');
       // 杠杆旁不再另挂一枚重复的涨幅标签
       expect(newest.querySelectorAll('[data-testid="campaign-main-price-change"]')).toHaveLength(1);
 
@@ -453,12 +465,14 @@ describe('JournalCampaignsPage sorting', () => {
         const payoff = Number(/（([-+]?\d+(?:\.\d+)?)）/.exec(payoffText)?.[1]);
         expect(cardNumber(card, 'campaign-add-efficiency')).toBeCloseTo(payoff / efficiency, 1);
       }
-      // 只有主力、不加仓的战役：盈亏比就是它的涨幅效率，加仓效率恰为 1
-      const pureMain = addCards.find(card => card.textContent?.includes('High Importance'))!;
-      expect(pureMain.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('+1.00');
+      // 只有做过加仓的战役进这一档：夹具里只有 High Importance（加仓腿盈亏 0，b 仍等于它的涨幅效率 → 恰为 1）
+      expect(cardOrder().slice(0, addCards.length)).toEqual(['High Importance']);
+      const withAdd = addCards.find(card => card.textContent?.includes('High Importance'))!;
+      expect(withAdd.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('+1.00');
       expect(screen.getAllByTestId('campaign-add-efficiency')[0].getAttribute('title')).toContain('盈亏比');
     } finally {
       tradeHistory.forEach((record, index) => { record.exitPrice = originals[index]; });
+      legsByCampaign['high-importance'] = hiLegs;
     }
   }, 20_000);
 
@@ -1146,7 +1160,6 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-importance',
       'campaign-sort-time',
       'campaign-sort-expectedDrawdownPct',
-      'campaign-sort-opportunityQuality',
       'campaign-sort-captureRate',
       'campaign-sort-arithmeticExpectancy',
       'campaign-sort-geometricExpectancy',
@@ -1173,7 +1186,6 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-expected-drawdown-pct',
       'campaign-main-price-change',
       'campaign-main-price-efficiency',
-      'campaign-opportunity-quality-value',
       'campaign-payoff-ratio',
       'campaign-add-efficiency',
       'campaign-arithmetic-expectancy',
@@ -1207,16 +1219,13 @@ describe('JournalCampaignsPage sorting', () => {
       '预期回撤：50.00%',
       '预期回撤：—',
     ]);
-    expect(screen.getAllByTestId('campaign-opportunity-quality-value').map(node => node.textContent)).toEqual([
-      '机会质量：0.30',
-      '机会质量：0.50', // max（0.50, 1） ÷ 2% = 0.50
-      '机会质量：0.02', // max（−0.80, 1） ÷ 50% = 0.02
-      '机会质量：—',
-    ]);
+    // 【用户要求】「机会质量」删掉（涨幅效率更合理）：卡片上不再有这一格
+    expect(screen.queryByTestId('campaign-opportunity-quality-value')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(node => node.textContent)).toEqual([
-      '算术期望：+1.67R',
-      '算术期望：+0.00R',
-      '算术期望：-0.87R',
+      // 【用户要求】胜率统一 50%：E = 0.5 × b − 0.5
+      '算术期望：+1.00R',   // b = +3.00
+      '算术期望：-0.25R',   // b = +0.50
+      '算术期望：-0.90R',   // b = −0.80
       '算术期望：—',
     ]);
     // 【用户要求】单场几何期望以 Gᵢ = 1 + bᵢ×0.1 呈现；1.00 是本金不增不减的分界
@@ -1238,7 +1247,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sticky-controls')).toContainElement(sortControls);
     expect(sortControls).not.toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
-    expect(metricsStrip).toContainElement(screen.getByTestId('campaign-opportunity-quality'));
+    expect(screen.queryByTestId('campaign-opportunity-quality')).not.toBeInTheDocument();
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-asymmetric-risk'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-geometric-edge'));
     expect(screen.getByTestId('campaign-valid-count')).toHaveTextContent('有效战役（3）');
@@ -1300,18 +1309,6 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
     expect(screen.getByText('= +0.90R')).toBeInTheDocument();
     expect(screen.getByText('P(赢) 仅统计设置了最大预期亏损的有效战役')).toBeInTheDocument();
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveTextContent('机会质量（0.27）');
-    expect(screen.getByTestId('campaign-opportunity-quality')).toHaveAttribute(
-      'aria-label',
-      '机会质量 0.27，3 场有效战役，点击查看计算公式',
-    );
-    fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
-    expect(screen.getByText('机会质量计算公式')).toBeInTheDocument();
-    expect(screen.getByText('bᵢ* = max（bᵢ, 1），Qᵢ = bᵢ* ÷ dᵢ，Q̄ = ΣQᵢ ÷ N')).toBeInTheDocument();
-    expect(screen.getByText('实际盈亏比 bᵢ 小于 1（包括等于 0 或为负数）时统一按 1 计算；不取绝对值。')).toBeInTheDocument();
-    expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
-    expect(screen.getByText('当前 N = 3 场。')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-opportunity-quality'));
     // 【用户要求】复合战役增长率撤掉：几何期望的 W = G^n 已经表达了同一件事
     expect(screen.queryByTestId('campaign-compound-growth-rate')).not.toBeInTheDocument();
     expect(screen.queryByText('复合战役增长率计算公式')).not.toBeInTheDocument();
@@ -1434,20 +1431,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-expectedDrawdownPct')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close']);
 
-    fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
-    expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('data-sort-direction', 'desc');
-    expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-label', '机会质量，从大到小排序');
-    expect(screen.queryByText('单场机会质量计算公式')).not.toBeInTheDocument();
-    expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close']);
-
-    fireEvent.click(screen.getByTestId('campaign-sort-opportunityQuality'));
-    expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('data-sort-direction', 'asc');
-    expect(screen.getByTestId('campaign-sort-opportunityQuality')).toHaveAttribute('aria-label', '机会质量，从小到大排序');
-    expect(cardOrder()).toEqual(['Late Close', 'High Importance', 'Best PnL']);
-
     fireEvent.click(screen.getByTestId('campaign-win-rate'));
-    expect(screen.queryByText('单场机会质量计算公式')).not.toBeInTheDocument();
     expect(screen.getByText('胜率计算公式')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
