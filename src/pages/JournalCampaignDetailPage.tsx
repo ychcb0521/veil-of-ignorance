@@ -1873,6 +1873,7 @@ export default function JournalCampaignDetailPage() {
         displayCampaign ?? campaign,
         openingSnapshotLegs,
         campaignAccountName,
+        tradeRecords,
       );
       toast.success('开仓快照已保存为 TXT', { description: fileName });
     } catch (error) {

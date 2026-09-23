@@ -27,6 +27,7 @@ import {
   reconcileCampaignWithSettlement,
 } from '@/lib/campaignRealizedPnl';
 import { getCoinContractSizeUsd, getCoinContracts, roundCoinContracts } from '@/lib/coinMargined';
+import { isLiquidationRecord, liquidationPnlFloorUsd } from '@/lib/liquidationRecord';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { tradeRecordFees } from '@/lib/tradeFees';
 import { resolveLegExecutionMethodEvidence } from '@/lib/legExecutionMethod';
@@ -1353,7 +1354,19 @@ export function resolveManualLegEconomics(leg: CampaignCounterfactualManualLeg):
     const editedNet = modelNet(leg.direction, entry, exit, size, cut.close_fee_rate);
     const actualNet = modelNet(actual.direction, cut.entry_price, cut.exit_price, cut.size_usdt, cut.close_fee_rate);
     const editWorth = editedNet - actualNet;
-    const realized = cut.realized_pnl_usdt + editWorth;
+    /**
+     * 逐仓强平的那一刀：盈亏在封顶处截断（「仓位」一格改过时按同一比例缩放，杠杆不变、保证金同比例变）。
+     * 交易所在破产价上把仓位收走了，再往下的价格不属于这条腿——不截断就会算出
+     * 一条保证金 1000 的腿亏掉 3078.96。封顶带符号（多笔成交并成的仓位拆账后，加仓那一片可能是正的），
+     * 各刀相加恰好是 −整仓保证金；没改过时 editWorth 恒为 0、封顶就是实际结算值，截断不动它。
+     */
+    // 方向被改过的老分支（编辑器现已锁死爆仓腿的方向）：封顶是按原方向的保证金算的，套到反向仓位上会错截，不封。
+    const pnlFloor = cut.pnl_floor_usdt != null && Number.isFinite(cut.pnl_floor_usdt) && leg.direction === actual.direction
+      ? cut.pnl_floor_usdt * Math.abs(sizeRatio)
+      : null;
+    const realized = pnlFloor != null
+      ? Math.max(cut.realized_pnl_usdt + editWorth, pnlFloor)
+      : cut.realized_pnl_usdt + editWorth;
     closeFeeUsdt += cut.close_fee_usdt
       + feeAtRate(size, entry, exit, cut.close_fee_rate, coinFace)
       - feeAtRate(cut.size_usdt, cut.entry_price, cut.exit_price, cut.close_fee_rate, coinFace);
@@ -1368,6 +1381,7 @@ export function resolveManualLegEconomics(leg: CampaignCounterfactualManualLeg):
       startMs: cutOpenMs,
       endMs: cutCloseMs,
       realizedPnl: pathExcludesActual ? editWorth : realized,
+      ...(pnlFloor != null ? { pnlFloorUsd: pnlFloor } : {}),
     });
   });
   // 只剩复盘快照的腿、摊自战役级已实现的腿：盈亏里已含手续费，但金额不知道——不计入手续费合计，只标出来；
@@ -1457,6 +1471,7 @@ function buildRecordCuts(
     const isClosing = record === closing;
     const fees = tradeRecordFees(record);
     const pnl = Number.isFinite(record.pnl) ? Number(record.pnl) : 0;
+    const floor = liquidationPnlFloorUsd(record);
     return {
       open_time: record.openTime > 0 ? new Date(record.openTime).toISOString() : displayed.open_time,
       close_time: isClosing || !(record.closeTime > 0)
@@ -1471,6 +1486,8 @@ function buildRecordCuts(
       close_fee_rate: fees.close.rate ?? (fees.close.usd > 0 ? TAKER_FEE : 0),
       open_fee_usdt: fees.open?.usd ?? null,
       open_fee_rate: fees.open?.rate ?? TAKER_FEE,
+      // 逐仓强平的刀：盈亏封顶（各刀相加 = −整仓保证金）。其余的刀不写这个字段，与此前逐字节相同。
+      ...(floor != null ? { pnl_floor_usdt: floor } : {}),
     };
   });
 }
@@ -1544,6 +1561,8 @@ function buildManualLegActual(input: {
     };
   }
   const cuts = buildRecordCuts(claimed, input.correction, economics);
+  // 这条腿被交易所强平过：平仓价 / 平仓时间不是决策，编辑器据此锁格，盈亏按各刀的封顶截断。
+  const liquidated = claimed.some(record => isLiquidationRecord(record));
   // 与 Legs 表「手续费」列同一份 tradeRecordFees：一条腿分几刀平掉时逐刀相加。
   let closeFee = 0;
   let openFee: number | null = 0;
@@ -1554,6 +1573,7 @@ function buildManualLegActual(input: {
   return {
     source: 'records',
     ...facts,
+    ...(liquidated ? { liquidated: true as const } : {}),
     realized_pnl_usdt: realizedPnl,
     close_fee_usdt: closeFee,
     open_fee_usdt: openFee,
@@ -1863,7 +1883,7 @@ export function adoptBaselineLegFacts(
   if (!baseline || baseline.id !== saved.id) return saved;
   const closeKept = closeKeptAtRun(savedChangeSummary, saved.id);
   if (saved.actual !== undefined || saved.filled !== undefined) {
-    const current = adoptCurrentFallbackClose(saved, baseline);
+    const current = adoptLiquidationFacts(adoptCurrentFallbackClose(saved, baseline), baseline);
     const simulatedFill = current.actual === undefined && current.filled === true && baseline.filled === false;
     return simulatedFill && closeKept && !sameInstant(current.close_time, baseline.close_time)
       ? { ...current, close_time: baseline.close_time }
@@ -1912,6 +1932,49 @@ function closeKeptAtRun(summary: CampaignCounterfactualChangeSummary | null, leg
   const change = summary.legs.find(item => item.id === legId);
   if (!change) return true;
   return change.kind === 'edited' && !(change.changedFields ?? []).includes('close_time');
+}
+
+/**
+ * 「这条腿被交易所强平过」这件事一律按当前基线补——它不是用户当时的改动，是成交记录上的事实。
+ *
+ * 带着 actual 的分支（本次改动之前保存的那一批也算）事实原样保留，唯独强平这两项要补：
+ * 老分支里既没有 liquidated（编辑器不画红色「爆仓」标记、平仓价 / 平仓时间两格不锁），
+ * 也没有各刀的 pnl_floor_usdt（盈亏不封顶）——用户当年把强平价从 0.9540 拖到 0.8500 存下的那一条，
+ * 载回来仍读 −3078.96，而且还能接着往下拖。补完之后那两格锁死、盈亏在封顶处截断，
+ * 存下的那个平仓价仍留在（已锁的）格子里，看得见当年改过什么。
+ *
+ * 只在基线说这条腿是强平时动手；各刀对不上（老分支存的刀数与现在不同）时只补标记不补封顶，
+ * 免得把封顶写到另一刀上。其余字段一概不碰。
+ */
+function adoptLiquidationFacts(
+  saved: CampaignCounterfactualManualLeg,
+  baseline: CampaignCounterfactualManualLeg,
+): CampaignCounterfactualManualLeg {
+  const baselineActual = baseline.actual;
+  const savedActual = saved.actual;
+  if (!baselineActual || !savedActual || baselineActual.liquidated !== true) return saved;
+  const baselineCuts = baselineActual.cuts;
+  const savedCuts = savedActual.cuts;
+  const alignedCuts = baselineCuts != null && savedCuts != null && baselineCuts.length === savedCuts.length
+    ? savedCuts.map((cut, index) => {
+      const floor = baselineCuts[index].pnl_floor_usdt;
+      if (floor === cut.pnl_floor_usdt) return cut;
+      const next = { ...cut };
+      if (floor == null) delete next.pnl_floor_usdt;
+      else next.pnl_floor_usdt = floor;
+      return next;
+    })
+    : null;
+  const sameCuts = alignedCuts == null || alignedCuts.every((cut, index) => cut === savedCuts?.[index]);
+  if (savedActual.liquidated === true && sameCuts) return saved;
+  return {
+    ...saved,
+    actual: {
+      ...savedActual,
+      liquidated: true,
+      ...(alignedCuts != null ? { cuts: alignedCuts } : {}),
+    },
+  };
 }
 
 /** 新行里平仓时间仍是它自己记下的兜底值、而基线的兜底值变了：换成基线当前的兜底值（见 adoptBaselineLegFacts）。 */

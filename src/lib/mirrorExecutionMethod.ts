@@ -1,5 +1,6 @@
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
+import { isLiquidationRecord } from '@/lib/liquidationRecord';
 
 export interface MirrorCloseRatio {
   reductionPct: number;
@@ -64,7 +65,10 @@ export function resolveMirrorCloseRatio(
   if (mirrorLeg.direction && mirrorLeg.direction !== direction) return null;
   const side = direction === 'long' ? 'LONG' : 'SHORT';
   const symbol = campaign.symbol || mirrorLeg.symbol;
+  // 强平记录不是镜像止盈的减仓（交易所收走的那一份不算「实际平仓比例」）：并成一个仓位后被爆掉的镜像，
+  // 不会因此被算成 100% 的「手动」；镜像先减仓 60% 再被爆掉，比例仍按那 60% 读。
   const records = tradeRecords.filter(record => record.action !== 'FUNDING' && record.action !== 'OPEN'
+    && !isLiquidationRecord(record)
     && record.side === side && (!symbol || record.symbol === symbol));
   const initialLegs = legs.filter(leg => (leg.leg_role === 'main_open' || leg.leg_role === 'mirror_tp')
     && (!leg.direction || leg.direction === direction) && (!symbol || !leg.symbol || leg.symbol === symbol));

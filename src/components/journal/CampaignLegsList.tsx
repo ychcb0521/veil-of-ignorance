@@ -43,6 +43,7 @@ import {
   legRowStatus,
   type LegRowStatus,
 } from '@/lib/legRowStatus';
+import { isBankruptcySettlement, liquidationPnlFloorUsd } from '@/lib/liquidationRecord';
 import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeFees';
 import {
   addSizingSnapshotLines,
@@ -812,14 +813,31 @@ export function CampaignLegsList({
               /**
                * 强平记录的价格不在平仓时刻那根 K 线里，说明引擎用了一个不属于那一刻的价去判强平
                * （旧版会拿比仓位还早的价）。这不是普通的价格误差：按 K 线改价只会把一次误判的强平
-               * 改写成一笔看似合理的亏损，所以要明说。
+               * 改写成一笔看似合理的亏损，所以只报异常、不改这条腿的盈亏（见 buildTradeRecordPnlCorrection），
+               * 价格三格也仍显示记录里的强平价（resolveLegExecution），与盈亏同一对价。
                */
-              const liquidationAnomaly = Boolean(execution.exitCorrection) && execution.record?.action === 'LIQUIDATION';
+              const liquidated = status === 'liquidated';
+              const liquidationAnomaly = Boolean(execution.exitCorrection) && liquidated;
+              /**
+               * 爆仓腿的「开仓价 / 平仓价 / 涨跌幅」三格解释不了它的盈亏：逐仓按破产价结算，
+               * 整笔仓位亏掉的恰好是它的隔离保证金（价差算出来的是另一个数）。这句话写在平仓价格子上。
+               */
+              const liquidationFloor = liquidated ? liquidationPnlFloorUsd(execution.record) : null;
+              const liquidationSettlementTitle = !liquidated
+                ? undefined
+                : isBankruptcySettlement(execution.record)
+                  ? `爆仓 · 按破产价结算：${
+                    liquidationFloor != null && liquidationFloor < 0
+                      ? `这一笔亏掉的 ${Math.abs(liquidationFloor).toFixed(2)} USDT 由交易所在破产价上定死`
+                      : '这一笔的盈亏由交易所在破产价上定死'
+                  }——整笔仓位亏掉的恰好是它的隔离保证金（多笔成交并成的仓位按各刀分摊），与开仓价 / 平仓价的价差无关（差额是平仓费与强平清算费，见手续费列；跳空穿仓时强平费为 0，差额由保险基金承担）。`
+                  : '爆仓 · 全仓强平（或标记上线前的老强平记录）：亏损 = 强平价上的浮亏 + 平仓费 + 强平清算费，没有保证金封顶，与本格价差不是同一个数。';
               const exitCorrectionTitle = execution.exitCorrection
                 ? liquidationAnomaly
-                  ? `强平异常：记录的强平价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 不在平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)} 内，属于引擎误判的强平。本页按 K 线时价显示，这条腿的盈亏不代表真实结果。`
+                  ? `强平异常：记录的强平价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 不在平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)} 内，属于引擎误判的强平。本格仍显示记录里的强平价：这条腿的盈亏按交易所的强平结算，不按 K 线价重算，两者只能同用一对价。`
                   : `原 TradeRecord 平仓价 ${fmtPrice(execution.exitCorrection.originalExitPrice)} 超出该平仓时刻 1m K 线范围 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}，本页按 K 线时价显示。`
                 : undefined;
+              const exitPriceTitle = [liquidationSettlementTitle, exitCorrectionTitle].filter(Boolean).join('\n') || undefined;
               const reverseOrdersForLeg = reverseHedgeOrders.filter(order => reverseOrderLegMap.get(order.id) === leg.id);
               const executionMethods = executionMethodsByLeg?.get(leg.id)
                 ?? resolveLegExecutionMethods(leg, record, executionMethodOrders ?? reverseHedgeOrders, tradeRecords, mirrorCloseRatios.get(leg.id));
@@ -934,7 +952,7 @@ export function CampaignLegsList({
                     );
                   })()}
                   <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
-                  <div className="text-right tabular-nums" title={exitCorrectionTitle}>
+                  <div data-testid={`leg-exit-price-${leg.id}`} className="text-right tabular-nums" title={exitPriceTitle}>
                     {fmtPrice(exitPriceValue)}
                     {liquidationAnomaly && (
                       <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>

@@ -378,6 +378,9 @@ export function CampaignWhatIfEditor({
       });
     }
     if (endpoint === 'close') {
+      // 强平腿的平仓端点由交易所决定：图上拖动也不改它（与编辑器里锁死那两格同一条规则）。
+      const target = manualLegs.find(leg => leg.id === legId);
+      if (target?.actual?.liquidated === true) return;
       updateManualLeg(legId, {
         close_time: iso,
         exit_price: kline ? round(kline.close, 8) : undefined,
@@ -543,6 +546,13 @@ export function CampaignWhatIfEditor({
             <tbody>
               {manualLegs.map((leg, index) => {
                 const isSelected = selectedManualLegId === leg.id;
+                /**
+                 * 被交易所强平掉的腿：平仓价 / 平仓时间不是决策，是交易所在强平价上的动作。
+                 * 「如果当时晚一点平」在现实里不存在（仓位已经被收走），所以这两格锁死；
+                 * 逐仓强平的盈亏另按各刀在破产价上结算掉的那笔钱截断（resolveManualLegEconomics），全仓强平不封顶。
+                 */
+                const liquidated = leg.actual?.liquidated === true;
+                const liquidatedHint = '这条腿是被交易所强平的：方向、平仓价与平仓时间由强平决定，改不动。其余格子照常可改；逐仓强平的亏损按保证金封顶，全仓强平没有封顶。';
                 return (
                   <tr
                     key={leg.id}
@@ -568,6 +578,17 @@ export function CampaignWhatIfEditor({
                       {/* 只有原本从未成交的腿（挂单）才带 filled 字段：它不进持仓与已实现，但仍是定义 L 的止损线。
                           切到「已成交」即模拟它成交，盈亏按你填的开平价与模拟器费率算。
                           老行里改过价的挂单载入时写成 filled: true（老引擎当它成交），同样画开关，随时能切回去。 */}
+                      {liquidated && (
+                        <div className="mt-1">
+                          <span
+                            data-testid={`counterfactual-leg-liquidated-${leg.id}`}
+                            title={liquidatedHint}
+                            className="rounded border border-[#F6465D]/40 bg-[#F6465D]/10 px-1 text-[10px] leading-4 text-[#F6465D]"
+                          >
+                            爆仓
+                          </span>
+                        </div>
+                      )}
                       {leg.filled !== undefined && (
                         <div className="mt-1 flex items-center gap-1.5">
                           {leg.filled === false && (
@@ -596,9 +617,14 @@ export function CampaignWhatIfEditor({
                       )}
                     </td>
                     <td className="px-3 py-2">
+                      {/* 爆仓腿的方向也锁死：多单翻成空单后这笔强平在现实里已不存在，
+                          锁着的平仓价 / 时间与按原方向保证金算的封顶都会套错方向。 */}
                       <select
+                        data-testid={`counterfactual-leg-direction-${leg.id}`}
                         className="h-8 w-full rounded border border-border bg-background px-2"
                         value={leg.direction}
+                        disabled={liquidated}
+                        title={liquidated ? liquidatedHint : undefined}
                         onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { direction: e.target.value as 'long' | 'short' })}
                       >
                         <option value="long">多</option>
@@ -616,7 +642,10 @@ export function CampaignWhatIfEditor({
                     <td className="px-3 py-2">
                       <Input
                         type="datetime-local"
+                        data-testid={`counterfactual-leg-close-time-${leg.id}`}
                         className="h-8 text-[11px]"
+                        disabled={liquidated}
+                        title={liquidated ? liquidatedHint : undefined}
                         value={toLocalDateTimeInputValue(leg.close_time)}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalDateTimeInputValue(e.target.value, leg.close_time) })}
                       />
@@ -632,7 +661,10 @@ export function CampaignWhatIfEditor({
                     <td className="px-3 py-2">
                       <Input
                         type="number"
+                        data-testid={`counterfactual-leg-exit-price-${leg.id}`}
                         className="h-8 text-[11px]"
+                        disabled={liquidated}
+                        title={liquidated ? liquidatedHint : undefined}
                         value={leg.exit_price}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { exit_price: Number(e.target.value) })}
                       />

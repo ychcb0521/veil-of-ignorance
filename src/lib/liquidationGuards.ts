@@ -520,6 +520,9 @@ export function updateRiskFloors(
  *   净盈亏 = −隔离保证金
  *   平仓手续费按平仓价照收
  *   强平费 = 保证金扣掉亏损与平仓费之后剩下的部分，亏穿时为 0
+ *
+ * 币本位再写一个 pnlCoin = −整笔币保证金（钱包少掉的就是这些币）。缺了它，
+ * 加仓计算器按「盈亏 ÷ 平仓价」折币、Legs 的加仓校验只认 pnlCoin，同一笔爆仓在两处折出两个 G。
  */
 export function isolatedLiquidationSettlement(input: {
   symbol: string;
@@ -534,8 +537,13 @@ export function isolatedLiquidationSettlement(input: {
   const leftover = grossPnl - closeFee - netPnl;
   const liqFee = Number.isFinite(leftover) ? Math.max(0, leftover) : 0;
   const feeCoin = closeFeeCoin != null && exitPrice > 0 ? closeFeeCoin + liqFee / exitPrice : closeFeeCoin;
+  // 币本位：亏掉的币就是这笔仓位的币保证金（老仓位没有 marginCoin 时按开仓价折一次）。
+  const marginCoin = isCoinSettledPosition(position)
+    ? Math.max(0, Number(position.marginCoin ?? (position.entryPrice > 0 ? marginUsd / position.entryPrice : 0)) || 0)
+    : null;
   return {
     netPnl,
+    ...(marginCoin != null ? { pnlCoin: -marginCoin } : {}),
     feeUsd: closeFee + liqFee,
     feeCoin,
     slippageUsd: 0,

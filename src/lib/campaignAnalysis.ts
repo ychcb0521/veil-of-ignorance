@@ -11,6 +11,7 @@ import {
   type TradeRecordPnlCorrection,
 } from '@/lib/campaignLegExecution';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
+import { liquidationPnlFloorUsd } from '@/lib/liquidationRecord';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { resolveLegExecution } from '@/lib/campaignLegExecution';
 import { isHistoricalCampaign, type CampaignEvent, type LegRole, type TradeCampaign, type TradeJournal } from '@/types/journal';
@@ -1689,6 +1690,13 @@ interface CampaignActiveLeg {
   rebuiltFrom?: 'snapshot' | 'trigger' | 'event';
   /** 平仓时刻缺省到了战役结束（扫描窗口的终点，见 buildActiveLegs），不是这条腿自己的事实。 */
   endIsCampaignEnd?: boolean;
+  /**
+   * 这一段的盈亏最低能到哪（USD，带符号）：逐仓破产价结算的爆仓腿才有（见 liquidationPnlFloorUsd）。
+   * 交易所在破产价上把仓位收走、亏掉的恰好是隔离保证金，破产价之下的价格从来不属于它；
+   * 不封顶就会把强平那根 K 线的影线全算成这条腿的浮亏。全仓强平不封顶（没有保证金兜底）。
+   * 只在强平所在的那根 K 线内生效（见 legPnlFloorActiveIn）：之前的 K 线按真实浮亏算。
+   */
+  pnlFloorUsd?: number | null;
 }
 
 /**
@@ -1702,7 +1710,46 @@ export interface CampaignLocalOrderFacts {
 
 const NO_UNFILLED_ORDER_IDS: ReadonlySet<string> = new Set<string>();
 
-function activeLegUnrealizedPnl(leg: CampaignActiveLeg, price: number): number {
+/**
+ * 这一段在某个价上的浮动盈亏，**爆仓腿按它的封顶截断**。
+ *
+ * 强平是交易所在强平价上把仓位收走：逐仓按破产价结算，账户在这笔仓位上亏掉的恰好是隔离保证金，
+ * 破产价之下的价格与这条腿无关。不截断的话，20 倍、保证金 1000 的多单在强平那根 K 线的影线
+ * （0.8000）上会被算成浮亏 4000，而钱包只少了 1000——这个数是战役页「最大回撤」、
+ * campaign.peak_drawdown 与 SOP 扣分的来源。
+ *
+ * 封顶带符号，逐片截断：多笔成交并成的仓位拆账后，加仓那一片在破产价上可能仍是正的，
+ * 各片在破产价之下都读回自己的结算值，相加恰好是 −整仓保证金（见 liquidationPnlFloorUsd）。
+ * floorActive 由调用方按「强平是否发生在当前这根 K 线」给出（见 legPnlFloorActiveIn）。
+ */
+function activeLegUnrealizedPnl(leg: CampaignActiveLeg, price: number, floorActive: boolean): number {
+  const raw = activeLegMarkToMarketPnl(leg, price);
+  const floor = leg.pnlFloorUsd;
+  return floorActive && floor != null && Number.isFinite(floor) ? Math.max(raw, floor) : raw;
+}
+
+/** 权益路径正在扫的那根 K 线：[startMs, endMs)，与 computeCampaignPnlExtremes 的 barEndMs 同一口径。 */
+interface CampaignPnlBar {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * 封顶只在**强平所在的那根 K 线**内生效。
+ *
+ * 封顶值是强平那一刻、按仓位**最终结构**（杠杆、保证金、并进来的各刀）结算出来的数；
+ * 在此之前仓位可能长得不一样——20 倍、保证金 1000 时先跌出 −800 的浮亏（没爆），之后提到 40 倍、
+ * 保证金变 500 再被强平：封顶 −500 对更早那根 K 线不成立，套上去会把 −800 读成 −500，最大回撤少报。
+ * 金字塔加仓同理：主力在加仓之前的回撤会被截在按加仓后整仓破产价算出的更浅的封顶上，
+ * 拆账后主力那一片的封顶甚至可能是正数（+44），把加仓前真实的 −5 抬成 +44。
+ * 所以只有 leg.endMs（强平时刻）落在当前这根 K 线里时才截断；之前的每根 K 线按真实浮亏算。
+ */
+function legPnlFloorActiveIn(leg: CampaignActiveLeg, bar: CampaignPnlBar | undefined): boolean {
+  if (!bar) return false;
+  return leg.endMs > bar.startMs && leg.endMs <= bar.endMs;
+}
+
+function activeLegMarkToMarketPnl(leg: CampaignActiveLeg, price: number): number {
   if (!(price > 0) || !(leg.entryPrice > 0)) return 0;
   if (leg.settlementMode === 'coin') {
     const contracts = Math.max(0, Math.round(leg.contracts ?? leg.quantity));
@@ -1722,13 +1769,14 @@ function campaignPnlAt(
   activeLegs: CampaignActiveLeg[],
   timestamp: number,
   price: number,
+  bar?: CampaignPnlBar,
 ): number {
   return activeLegs.reduce((total, leg) => {
     if (timestamp >= leg.endMs) {
       return total + (leg.realizedPnl ?? 0);
     }
     if (timestamp < leg.startMs) return total;
-    return total + activeLegUnrealizedPnl(leg, price);
+    return total + activeLegUnrealizedPnl(leg, price, legPnlFloorActiveIn(leg, bar));
   }, 0);
 }
 
@@ -1784,7 +1832,7 @@ function computeCampaignPnlExtremes(
     for (const timestamp of stateTimes) {
       if (timestamp < startMs || timestamp > endMs) continue;
       for (const price of prices) {
-        const total = campaignPnlAt(activeLegs, timestamp, price);
+        const total = campaignPnlAt(activeLegs, timestamp, price, { startMs: kline.time, endMs: barEndMs });
         maxProfit = Math.max(maxProfit, total);
         maxDrawdown = Math.min(maxDrawdown, total);
       }
@@ -1802,6 +1850,11 @@ export interface CampaignPnlPathLeg {
   startMs: number;
   endMs: number;
   realizedPnl: number;
+  /**
+   * 这一段的盈亏最低能到哪（USD，带符号）：逐仓爆仓腿才有。战役页从成交记录读（liquidationPnlFloorUsd），
+   * 反事实副本从这条腿的「实际成交」事实读——两边同一条封顶，原样重跑才对得上。
+   */
+  pnlFloorUsd?: number | null;
 }
 
 /**
@@ -1849,6 +1902,9 @@ function recordActiveLeg(
     settlementMode: record.settlementMode ?? 'usdt',
     contractSizeUsd: Number.isFinite(record.contractSizeUsd) ? Number(record.contractSizeUsd) : null,
     contracts: Number.isFinite(record.contracts) ? Number(record.contracts) : null,
+    // 逐仓爆仓的那一片按它自己结算掉的那笔钱封顶（各片相加 = −整仓保证金）；
+    // 全仓强平与普通平仓为 null，与此前逐字节相同。
+    pnlFloorUsd: liquidationPnlFloorUsd(record),
     ...(record.closeTime ? {} : { endIsCampaignEnd: true }),
   };
 }

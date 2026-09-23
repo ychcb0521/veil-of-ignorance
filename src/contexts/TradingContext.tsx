@@ -1432,6 +1432,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
               closedTimelineId: stampClock(sym),
               totals: {
                 netPnl: pnl - closeFee - liqFee,
+                // 币本位：钱包少掉的币 = 净结算 ÷ 强平价（全仓没有保证金封顶，净额就是全部）。
+                // 不写这一项，加仓计算器按「盈亏 ÷ 平仓价」折币、Legs 加仓校验只认 pnlCoin，同一笔爆仓折出两个 G。
+                ...(isCoinSettled(pos) && price > 0 ? { pnlCoin: (pnl - closeFee - liqFee) / price } : {}),
                 feeUsd: closeFee + liqFee,
                 feeCoin,
                 slippageUsd: 0,

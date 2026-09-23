@@ -84,9 +84,10 @@ interface Props {
    */
   ordinal?: number | null;
   /**
-   * Legs 表里没有平仓的腿（见 legRowStatus）：
-   * 「挂单中」画成同色虚线的空心标签，「进行中」在标签文字后面加一枚实心小圆点。
-   * 两种都另带一段只给读屏的状态名；不传即常规的实心标签。
+   * Legs 表里的例外状态（见 legRowStatus）：
+   * 「挂单中」画成同色虚线的空心标签，「进行中」在标签文字后面加一枚实心小圆点，
+   * 「爆仓」在标签文字后面加一枚红色的「爆仓」小字（与时间线、仓位面板的强平标记同色）。
+   * 挂单中 / 进行中另带一段只给读屏的状态名（爆仓两个字本来就看得见、读得出）；不传即常规的实心标签。
    */
   status?: LegRowOpenStatus | null;
   /** 悬停说明（状态、历史回填等）。 */
@@ -117,7 +118,11 @@ export function LegRoleChip({ role, short = false, className, ordinal, status = 
       {status === 'open' && (
         <span aria-hidden="true" data-status-dot className={`ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} />
       )}
-      {status && <span className="sr-only">{LEG_ROW_STATUS_LABELS[status]}</span>}
+      {/* 爆仓：角色仍用自己的颜色，红只给「爆仓」两个字——这一行的例外是它，不是这条腿的角色 */}
+      {status === 'liquidated' && (
+        <span data-status-flag className="ml-1 shrink-0 rounded-[2px] bg-[#F6465D]/15 px-1 font-medium text-[#F6465D]">爆仓</span>
+      )}
+      {status && status !== 'liquidated' && <span className="sr-only">{LEG_ROW_STATUS_LABELS[status]}</span>}
     </span>
   );
 }

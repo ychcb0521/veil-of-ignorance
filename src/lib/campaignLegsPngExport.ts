@@ -7,6 +7,7 @@ import {
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } from '@/lib/legRoleTone';
 import { legRowStatus } from '@/lib/legRowStatus';
+import { isLiquidationRecord } from '@/lib/liquidationRecord';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethod } from '@/lib/legExecutionMethod';
 import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
@@ -102,7 +103,8 @@ export type CampaignLegsExportCellLine = {
   tag?: CampaignLegsExportCellTag;
   /**
    * 把这一行画成角色标签（与页面同样的样子）：同色淡底圆角；hollow 为挂单中的虚线空心标签，
-   * dot 为进行中标签文字后面的实心小圆点。正文（角色名）用 color 着色，按标签的内边距右移。
+   * dot 为进行中标签文字后面的实心小圆点，flag 为爆仓时标签文字后面那两个红字。
+   * 正文（角色名）用 color 着色，按标签的内边距右移。
    */
   chip?: CampaignLegsExportChip;
   /** 正文左缩进（px）：阶段子行的「阶段 N」与主力角色标签里的字对齐（= 标签左内边距），与页面的缩进一致。 */
@@ -116,6 +118,8 @@ export type CampaignLegsExportChip = {
   color: string;
   hollow?: boolean;
   dot?: boolean;
+  /** 爆仓：标签文字后面一枚红色小字（与页面同一枚），文本恒为「爆仓」。 */
+  flag?: string;
 };
 
 export type CampaignLegsExportCellTag = {
@@ -439,11 +443,23 @@ const CHIP_H = 20;
 const CHIP_RADIUS = 4;
 const CHIP_DOT = 6;
 const CHIP_DOT_GAP = 5;
+/** 爆仓那两个红字：字号、它前面的空隙、以及红底方框左右各留的一点内边距。 */
+const CHIP_FLAG_FONT_SIZE = 10;
+const CHIP_FLAG_GAP = 5;
+const CHIP_FLAG_PAD_X = 3;
+const CHIP_FLAG_COLOR = '#F6465D';
 
-/** 角色标签整体占的宽度：左右内边距 + 字 +（小圆点）。 */
+/** 爆仓小字整体占的宽度（含红底方框的内边距）；没有时为 0。 */
+function chipFlagWidth(line: CampaignLegsExportCellLine): number {
+  const flag = line.chip?.flag;
+  if (!flag) return 0;
+  return CHIP_FLAG_GAP + CHIP_FLAG_PAD_X * 2 + cellTextWidth(flag, { text: flag, size: CHIP_FLAG_FONT_SIZE, bold: true });
+}
+
+/** 角色标签整体占的宽度：左右内边距 + 字 +（小圆点 / 爆仓小字）。 */
 function chipWidth(line: CampaignLegsExportCellLine): number {
   const dot = line.chip?.dot ? CHIP_DOT_GAP + CHIP_DOT : 0;
-  return CHIP_PAD_X * 2 + cellTextWidth(line.text, line) + dot;
+  return CHIP_PAD_X * 2 + cellTextWidth(line.text, line) + dot + chipFlagWidth(line);
 }
 
 /** 十六进制色加透明度（'#0ECB81' + 0.1 → '#0ECB811A'）。 */
@@ -474,6 +490,17 @@ function drawChip(ctx: CanvasRenderingContext2D, line: CampaignLegsExportCellLin
     ctx.arc(x + CHIP_PAD_X + cellTextWidth(line.text, line) + CHIP_DOT_GAP + CHIP_DOT / 2, centerY, CHIP_DOT / 2, 0, Math.PI * 2);
     ctx.fillStyle = chip.color;
     ctx.fill();
+  }
+  // 爆仓：角色名后面一枚红字（自带淡红底），与页面上的同一枚
+  if (chip.flag) {
+    const flagLine = { text: chip.flag, size: CHIP_FLAG_FONT_SIZE, bold: true };
+    const flagTextWidth = cellTextWidth(chip.flag, flagLine);
+    const flagX = x + CHIP_PAD_X + cellTextWidth(line.text, line) + CHIP_FLAG_GAP;
+    const flagH = CHIP_FLAG_FONT_SIZE + 4;
+    fillRoundedRect(ctx, flagX, centerY - flagH / 2, flagTextWidth + CHIP_FLAG_PAD_X * 2, flagH, 2, withAlpha(CHIP_FLAG_COLOR, 0.15));
+    ctx.font = cellFont(flagLine);
+    ctx.fillStyle = CHIP_FLAG_COLOR;
+    ctx.fillText(chip.flag, flagX + CHIP_FLAG_PAD_X, baseline);
   }
 }
 
@@ -696,19 +723,22 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ? [{ text: '—', color: '#848E9C' }]
       : [...mirrorTpLines, ...reverseOrderLines];
 
+    /**
+     * 强平记录不换显示价：格子里就是记录上的强平价（与这一行的盈亏同一对价），
+     * 所以不再印「原 …」那一行（它与上面那个数一模一样），只留 K 线区间与「强平异常」的警示。
+     */
+    const liquidationAnomaly = Boolean(execution.exitCorrection) && isLiquidationRecord(execution.record);
     const exitPriceLines: CampaignLegsExportCellLine[] = [
       { text: fmtPrice(exitPriceValue), bold: Boolean(execution.exitCorrection) },
       ...(execution.exitCorrection ? [
-        { text: `原 ${fmtPrice(execution.exitCorrection.originalExitPrice)}`, color: '#848E9C' },
+        ...(liquidationAnomaly ? [] : [{ text: `原 ${fmtPrice(execution.exitCorrection.originalExitPrice)}`, color: '#848E9C' }]),
         { text: `K线 ${fmtPrice(execution.exitCorrection.candleLow)}-${fmtPrice(execution.exitCorrection.candleHigh)}`, color: '#848E9C' },
       ] : []),
-      // 强平记录的价不在那一刻的 K 线里 = 引擎误判的强平，改价后的盈亏不代表真实结果。
-      ...(execution.exitCorrection && execution.record?.action === 'LIQUIDATION'
-        ? [{ text: '强平异常', color: '#F6465D' }]
-        : []),
+      // 强平记录的价不在那一刻的 K 线里 = 引擎误判的强平；只报异常，盈亏与显示价都不按这个价改。
+      ...(liquidationAnomaly ? [{ text: '强平异常', color: '#F6465D' }] : []),
     ];
     const cells: CampaignLegsExportCellLine[][] = [
-      // 角色标签：与页面同一套颜色与状态样式（挂单中空心虚线、进行中带小圆点），不再另写状态字、也不写「回填」；
+      // 角色标签：与页面同一套颜色与状态样式（挂单中空心虚线、进行中带小圆点、爆仓带红字），不再另写状态字、也不写「回填」；
       // 没有角色的腿同样是一枚标签（中性灰、写「—」），进行中的圆点照画
       [{
         text: roleLabel,
@@ -719,6 +749,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           color: displayRole ? LEG_ROLE_TONE_COLORS[displayRole] : LEG_ROLE_NEUTRAL_COLOR,
           ...(status === 'pending' ? { hollow: true } : {}),
           ...(status === 'open' ? { dot: true } : {}),
+          ...(status === 'liquidated' ? { flag: '爆仓' } : {}),
         },
       }],
       [

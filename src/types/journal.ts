@@ -520,6 +520,14 @@ export interface CampaignCounterfactualManualLegCut {
   close_fee_rate: number;
   open_fee_usdt: number | null;
   open_fee_rate: number;
+  /**
+   * 这一刀的盈亏最低能到哪（USD，带符号）：只有**逐仓破产价结算**的强平那一刀才有，
+   * 取它自己结算掉的那笔钱（多笔成交并成的仓位拆账后各刀相加 = −整仓隔离保证金）。
+   * 交易所在破产价上把仓位收走，再往下的价格不属于它——改了开仓价 / 仓位后重算的盈亏在这里截断，
+   * 权益路径上那一段也带着它（与战役页同一条封顶）。「仓位」一格改过时按同一比例缩放（杠杆不变）。
+   * 全仓强平没有保证金兜底，不写这个字段。
+   */
+  pnl_floor_usdt?: number;
 }
 
 export interface CampaignCounterfactualManualLegActual {
@@ -560,6 +568,11 @@ export interface CampaignCounterfactualManualLegActual {
   anchor_price?: number;
   /** 战役页权益路径不持有这条腿（成交过，但成交时刻未知）：开仓时间没改时副本也不持有，已实现照计。 */
   off_path?: boolean;
+  /**
+   * 这条腿是被交易所强制平掉的（成交记录的 action / exit_method 说了算）。
+   * 平仓价与平仓时间不是决策、是交易所的动作：编辑器锁死这两格，逐仓强平的盈亏按各刀的 pnl_floor_usdt 封顶。
+   */
+  liquidated?: true;
   /**
    * 实际战役还在进行、这条腿也还没平：副本的平仓时间只是末根 K 线。平仓时间没改时，
    * 这条分支与战役页一样不算「已了结」（机会质量不计算）。

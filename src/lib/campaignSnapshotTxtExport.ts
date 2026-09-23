@@ -15,6 +15,8 @@ import {
   MARKET_REGIME_LABELS,
   STOP_QUALITY_LABELS,
 } from '@/lib/snapshotStructure';
+import { legRowStatus } from '@/lib/legRowStatus';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
@@ -24,6 +26,7 @@ import {
   type TradeCampaign,
   type TradeJournal,
 } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
 
 type QuestionAnswer = {
   question: string;
@@ -361,11 +364,14 @@ export function buildCampaignOpeningSnapshotsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   accountName?: string | null,
+  /** 成交记录：只用来判这条腿是不是被交易所强平的（与 Legs 表同一条 legRowStatus）。不传即不标。 */
+  tradeRecords: TradeRecord[] = [],
 ): string {
   const snapshots = openingSnapshotCampaignLegs(legs);
   if (snapshots.length === 0) {
     throw new Error('当前战役没有可导出的开仓快照');
   }
+  const recordLookup = buildTradeRecordLookup(tradeRecords);
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
@@ -376,9 +382,11 @@ export function buildCampaignOpeningSnapshotsTxt(
 
   const sections = snapshots.map((leg, index) => {
     const role = leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role : '未归类仓位';
+    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
+    const liquidated = legRowStatus(leg, record) === 'liquidated' ? ' · 爆仓' : '';
     const metadata = [
       `===== 开仓快照 ${index + 1} / ${snapshots.length} =====`,
-      `仓位：${role} · ${leg.symbol} · ${directionLabel(leg.direction)}`,
+      `仓位：${role} · ${leg.symbol} · ${directionLabel(leg.direction)}${liquidated}`,
       `快照时间：${formatBeijingTime(leg.pre_real_time || leg.created_at)}`,
     ].join('\n');
     const body = buildLegQuestionAnswers(leg).map(renderQuestionAnswer).join('\n\n');
@@ -410,8 +418,9 @@ export function exportCampaignOpeningSnapshotsTxt(
   campaign: TradeCampaign,
   legs: TradeJournal[],
   accountName?: string | null,
+  tradeRecords: TradeRecord[] = [],
 ): string {
-  const content = buildCampaignOpeningSnapshotsTxt(campaign, legs, accountName);
+  const content = buildCampaignOpeningSnapshotsTxt(campaign, legs, accountName, tradeRecords);
   const fileName = campaignOpeningSnapshotsTxtFileName(campaign, accountName);
   const blob = new Blob(['\uFEFF', content], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);

@@ -1,6 +1,7 @@
 import type { TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 import { resolveLegDisplayRole } from '@/lib/campaignMainLegOrdinals';
+import { isLiquidationRecord } from '@/lib/liquidationRecord';
 import { MIRROR_RATIO_EPSILON_PCT } from '@/lib/mirrorExecutionMethod';
 
 export type LegExecutionMethod = {
@@ -67,7 +68,12 @@ export function resolveLegExecutionMethods(
   return {
     open: leg.leg_role === 'mirror_tp' ? mirrorOpeningExecutionMethod()
       : mainOpeningExecutionMethod(leg.leg_role) ?? manualExecutionFallback(evidence.open, hasOpening),
-    close: (leg.leg_role === 'mirror_tp' && hasClosing ? mirrorClosingExecutionMethod(mirrorReductionPct) : null)
+    // 镜像腿被强平（主力 + 镜像并成一个仓位后一起爆掉）：那不是镜像止盈的减仓，
+    // 不套「60% = 自动 / 否则手动」的显示规则，直接用证据里的「强制平仓」——否则同一行角色标签是红色「爆仓」、
+    // 执行方式却写成「按镜像止盈规则……显示为手动」，自相矛盾。
+    close: (leg.leg_role === 'mirror_tp' && hasClosing && !isLiquidationRecord(record)
+      ? mirrorClosingExecutionMethod(mirrorReductionPct)
+      : null)
       ?? manualExecutionFallback(evidence.close, hasClosing),
   };
 }

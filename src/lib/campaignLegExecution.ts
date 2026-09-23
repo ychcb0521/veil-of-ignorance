@@ -6,6 +6,7 @@ import {
   buildTradeRecordLookup,
   journalSimulatedCloseTime,
 } from '@/lib/objectiveOperationTime';
+import { isBankruptcySettlement, isLiquidationRecord } from '@/lib/liquidationRecord';
 import { getPositionNotionalUsd } from '@/lib/tradingSettlement';
 import type { TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -211,7 +212,7 @@ export async function fetchLegExitPriceCorrectionsResult(
      * 1 分钟校验看的是收线之后那一分钟（大周期下离影线可达一小时），会把正确的强平判成异常；
      * 更糟的是按平仓价重算毛盈亏会拆掉「亏损＝保证金」的封顶。老的强平记录照常校正。
      */
-    if (record.liquidationSettlement === 'bankruptcy') continue;
+    if (isBankruptcySettlement(record)) continue;
     const linkedLegs = legsByRecordId.get(record.id) ?? [];
     linkedLegs.push(leg);
     legsByRecordId.set(record.id, linkedLegs);
@@ -262,7 +263,14 @@ export function resolveLegExecution(
   const closeTime = record?.closeTime ?? journalSimulatedCloseTime(leg);
   const entryPrice = record?.entryPrice ?? leg.pre_entry_price ?? null;
   const rawExitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
-  const exitPrice = exitCorrection?.exitPrice ?? rawExitPrice;
+  /**
+   * 强平记录不做平仓价替换：它的盈亏按交易所的强平结算（buildTradeRecordPnlCorrection 不重算），
+   * 显示价若换成 K 线价，这一行的「开仓价 / 平仓价 / 涨跌幅」与「盈亏」就来自两对价——
+   * 全仓 BTC 多单会显示「平仓价 97200 / 涨跌幅 −2.80% / 盈亏 −4253（占名义 −8.51%）」；
+   * 副本里的 cut.exit_price 也会落在一个交易所从未成交过的价上，改「仓位」一格就按它定价。
+   * exitCorrection 照常返回：那一格仍标「强平异常」，K 线区间写在悬停说明里（警示，不改数）。
+   */
+  const exitPrice = isLiquidationRecord(record) ? rawExitPrice : (exitCorrection?.exitPrice ?? rawExitPrice);
 
   return {
     record,
@@ -314,8 +322,15 @@ export function buildTradeRecordPnlCorrection(
   exitCorrection: LegExitPriceCorrection,
 ): TradeRecordPnlCorrection | null {
   if (!Number.isFinite(record.pnl)) return null;
-  // 破产价结算的净盈亏与平仓价无关（恒为 −保证金），按价差重算只会拆掉封顶。
-  if (record.liquidationSettlement === 'bankruptcy') return null;
+  /**
+   * 强平一律不按平仓价重算——交易所在强平价上把仓位收走，那一笔钱已经落定：
+   *   · 逐仓（破产价结算）：净盈亏恒为 −隔离保证金，按价差重算只会拆掉封顶；
+   *   · 全仓：净盈亏 = 标记盈亏 − 平仓费 − 强平费，它**没有** bankruptcy 标记，
+   *     以前就从这个洞里漏下去：BTC 全仓多单实际亏 4253，按收线后那一分钟的 K 线被改成 −1653，
+   *     还一路流进合计、Δb、b、R、战役状态与自愈回写的 final_realized_pnl。
+   * 价确实不在那一刻的 K 线里时，仍按「强平异常」报出来（警示，不改数）。
+   */
+  if (isLiquidationRecord(record)) return null;
   const originalGrossPnl = tradeRecordGrossPnlAtExit(record, exitCorrection.originalExitPrice);
   const correctedGrossPnl = tradeRecordGrossPnlAtExit(record, exitCorrection.exitPrice);
   const pnlDelta = correctedGrossPnl - originalGrossPnl;

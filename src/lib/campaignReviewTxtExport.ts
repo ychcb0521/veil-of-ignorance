@@ -14,6 +14,8 @@ import {
   CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION,
   parseCloseReviewReflectionText,
 } from '@/lib/reflectionFacts';
+import { legRowStatus } from '@/lib/legRowStatus';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import {
   MISSED_HIGH_ODDS_LABELS,
@@ -406,6 +408,8 @@ export function buildCampaignPostReviewsTxt(
     throw new Error('当前战役没有可导出的平仓评价');
   }
   const campaignTotalRealizedPnl = computeCampaignRealizedPnl(campaign, legs, tradeRecords).total;
+  // 爆仓与 Legs 表同一条判据（legRowStatus）：这条腿是交易所强制平掉的，复盘正文里必须写出来。
+  const recordLookup = buildTradeRecordLookup(tradeRecords);
 
   const header = [
     `交易战役：${campaign.title || campaignKlineTitleName(campaign)}`,
@@ -416,9 +420,11 @@ export function buildCampaignPostReviewsTxt(
 
   const sections = reviewed.map((leg, index) => {
     const role = leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] ?? leg.leg_role : '未归类仓位';
+    const record = leg.trade_record_id ? recordLookup.get(leg.trade_record_id) ?? null : null;
+    const liquidated = legRowStatus(leg, record) === 'liquidated' ? ' · 爆仓' : '';
     const metadata = [
       `===== 平仓评价 ${index + 1} / ${reviewed.length} =====`,
-      `仓位：${role} · ${leg.symbol} · ${directionLabel(leg.direction)}`,
+      `仓位：${role} · ${leg.symbol} · ${directionLabel(leg.direction)}${liquidated}`,
       `评价时间：${leg.post_reviewed_at
         ? formatBeijingTime(leg.post_reviewed_at)
         : '历史评价（原记录未保存评价时间）'}`,

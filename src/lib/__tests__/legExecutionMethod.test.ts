@@ -45,6 +45,17 @@ describe('execution method evidence', () => {
   it.each(['tp1', 'tp2', 'tp3', 'liquidation'] as const)('recognizes non-manual exit %s', method => {
     expect(resolveLegExecutionMethodEvidence(leg(), record({ exit_method: method })).close.kind).toBe('order');
   });
+  it('被强平的镜像腿：执行方式是「强制平仓」，不套镜像止盈的 60% 显示规则（否则与红色「爆仓」标签自相矛盾）', () => {
+    const mirror = leg({ direction: 'long', order_kind: 'main', leg_role: 'mirror_tp' });
+    const liquidated = record({ side: 'LONG', action: 'LIQUIDATION', exit_method: 'liquidation', liquidationSettlement: 'bankruptcy', pnl: -100 });
+    // 比例不是 60% 时以前会显示成琥珀色「手动」；是 60% 时会写成「按镜像止盈规则……显示为自动」
+    for (const pct of [100, 60, null]) {
+      const close = resolveLegExecutionMethods(mirror, liquidated, [], [], pct).close;
+      expect(close).toMatchObject({ kind: 'order', reason: '强制平仓，不是手动平仓。' });
+    }
+    // 正常镜像止盈照旧走显示规则
+    expect(resolveLegExecutionMethods(mirror, record({ side: 'LONG' }), [], [], 100).close.label).toBe('手动');
+  });
   it('recognizes legacy liquidation without exit_method', () => {
     expect(resolveLegExecutionMethodEvidence(leg(), record({ action: 'LIQUIDATION' })).close.kind).toBe('order');
   });
