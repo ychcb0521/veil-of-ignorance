@@ -614,7 +614,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-mainPriceChange-view-time',
     seriesLabel: '涨幅时序',
     guide: {
-      yAxis: '每场战役主力的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。主力有几笔时取涨幅最大的那笔，就是详情页 Legs 表主力那几行「涨跌幅」列里最大的数。',
+      yAxis: '每场战役主力的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。主力有几笔时取涨幅最大的那笔；每一笔的数就是详情页 Legs 表「涨跌幅」列。',
       point: '点越高，主力吃到的价格行情越大；低于 0% 表示价格朝主力的反方向走。每个点代表一场主力已平仓的战役。',
       colors: [
         { token: 'profit', label: '绿色：涨幅 > 0，价格朝主力方向走。' },
