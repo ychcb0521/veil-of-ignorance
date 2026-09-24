@@ -60,7 +60,10 @@ vi.mock('@/hooks/useReplayKlines', () => ({
 vi.mock('@/lib/emotionDiaryApi', () => ({ getDecisionEmotionDiaryByDate: vi.fn(async () => null) }));
 vi.mock('@/components/journal/ReplayKlineChart', () => ({ ReplayKlineChart: () => <div data-testid="campaign-chart" /> }));
 vi.mock('@/components/journal/CampaignLegsList', () => ({ CampaignLegsList: () => null }));
-vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({ CampaignWhatIfEditor: () => null }));
+// 反事实编辑器只留一个探针：读它收到的盘面高度
+vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({
+  CampaignWhatIfEditor: ({ chartHeight }: { chartHeight?: number }) => <div data-testid="counterfactual-editor-probe" data-chart-height={chartHeight} />,
+}));
 vi.mock('@/components/journal/EndCampaignDialog', () => ({ EndCampaignDialog: () => null }));
 
 // 真机实测的排版：页眉 67px，面板贴在页眉下 8px，工具栏占 45px，盘面下方委托图例 + 内边距 36px；
@@ -178,12 +181,18 @@ describe('战役详情页 · K 线盘面按可视区撑满', { timeout: 30_000 }
     expect(frame.style.height).toBe(`${900 - HEADER - 16 - ABOVE - BELOW}px`);
     expect(frame.className).not.toContain('h-[480px]');
 
+    // 【用户要求】反事实盘面与原始盘面同高，随窗口一起变
+    const cfHeight = () => `${screen.getByTestId('counterfactual-editor-probe').getAttribute('data-chart-height')}px`;
+    expect(cfHeight()).toBe(frame.style.height);
+
     resizeViewport(1440);
     expect(frame.style.height).toBe(`${1440 - HEADER - 16 - ABOVE - BELOW}px`);
+    expect(cfHeight()).toBe(frame.style.height);
 
     // 矮屏守住最小高度
     resizeViewport(480);
     expect(frame.style.height).toBe(`${MIN_HEIGHT}px`);
+    expect(cfHeight()).toBe(frame.style.height);
   });
 
   it('已保存的反事实自动选中、多一行图例：1280×600 仍整块放下（盘面 411px，底边留 8px）', async () => {

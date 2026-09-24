@@ -2509,6 +2509,8 @@ export default function JournalCampaignDetailPage() {
             baseTimeBoundPriceLines={chart.timeBoundPriceLines}
             baseVerticalLines={chart.verticalLines}
             orderInfoPriceLines={showOrderInfo ? orderInfoPriceLines : []}
+            // 【用户要求】反事实盘面与原始盘面同高：原始盘面按可视区实测的那个高度，两块一起随窗口变
+            chartHeight={campaignChartFitHeight ?? 480}
           />
 
           {counterfactualDraft && counterfactualDraftOverview && (

@@ -96,6 +96,11 @@ interface Props {
   baseVerticalLines?: VerticalLine[];
   /** 「委托空单（黄色）」挂单层：与原始战役盘面同一套数据，由父组件按开关传入；空数组即不显示。 */
   orderInfoPriceLines?: TimeBoundPriceLine[];
+  /**
+   * 【用户要求】「反事实的盘面的高度要与交易战役的原始盘面保持一致」：父组件把原始盘面按可视区实测出的高度传进来，
+   * 两块盘面同高、随窗口一起变；缺省 480px（与原始盘面实测前的兜底一致）。
+   */
+  chartHeight?: number;
 }
 
 const ROLE_OPTIONS: LegRole[] = [
@@ -176,6 +181,7 @@ export function CampaignWhatIfEditor({
   baseTimeBoundPriceLines = [],
   baseVerticalLines = [],
   orderInfoPriceLines = [],
+  chartHeight,
 }: Props) {
   const actualDefaults = useMemo(() => buildActualSimulationParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
   const sopDefaults = useMemo(() => buildPureSopParams(campaign, legs, tradeRecords), [campaign, legs, tradeRecords]);
@@ -495,7 +501,11 @@ export function CampaignWhatIfEditor({
           <div className="flex-1" />
         </div>
 
-        <div data-testid="counterfactual-chart-section" className="order-4 h-[480px] border border-border rounded overflow-hidden">
+        <div
+          data-testid="counterfactual-chart-section"
+          className="order-4 border border-border rounded overflow-hidden"
+          style={{ height: chartHeight ?? 480 }}
+        >
           {klinesLoading ? (
             <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
           ) : klines.length === 0 ? (

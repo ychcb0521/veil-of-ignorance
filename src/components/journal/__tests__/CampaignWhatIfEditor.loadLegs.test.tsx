@@ -1,3 +1,4 @@
+import { cloneElement } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
@@ -150,9 +151,18 @@ describe('CampaignWhatIfEditor run context and load-legs request', () => {
 
     expect(table.className).toContain('order-3');
     expect(chart.className).toContain('order-4');
+    // 没传高度时兜底 480px（与原始盘面实测前一致），不再写死在类名里
+    expect(chart.className).not.toContain('h-[480px]');
+    expect(chart.style.height).toBe('480px');
     expect(table.className).not.toContain('max-h-');
     expect(table.className).not.toContain('overflow-y-auto');
     expect(within(table).getAllByRole('row')).toHaveLength(baselineLegs.length + 1);
+  });
+
+  it('【用户要求】反事实盘面与原始盘面同高：父组件传进来的实测高度直接用在盘面上', async () => {
+    render(cloneElement(renderEditor(vi.fn()), { chartHeight: 733 }));
+    await screen.findByTestId('counterfactual-legs-table');
+    expect(screen.getByTestId('counterfactual-chart-section').style.height).toBe('733px');
   });
 
   beforeEach(() => {

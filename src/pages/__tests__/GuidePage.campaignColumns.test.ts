@@ -82,4 +82,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('右栏是结果与仓位——前三是<strong>已实现 P&amp;L、主力开仓名义仓位、最大预期亏损</strong>，第四是<strong>多方总名义仓位</strong>');
     expect(guide).toContain('同一份 14 项指标（左栏：预期回撤');
   });
+  it('【用户要求】反事实盘面与原始盘面同高', () => {
+    expect(guide).toContain('<strong>反事实盘面与原始盘面同高</strong>');
+  });
 });
