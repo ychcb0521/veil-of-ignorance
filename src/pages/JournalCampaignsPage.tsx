@@ -235,18 +235,14 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution']);
 
 /**
- * 战役封面指标行：【用户要求】「指标排布要美观，不整齐」——八项指标排成**等宽**的统计格，上面一行淡色的指标名，下面一行等宽数字。
- * 格宽只由卡片宽度决定、与读数无关：每张卡片同宽，上下各张卡的同名格就落在同一条竖线上。
- *   · 宽屏（xl，≥ 1280px）一行八格；平板（≥ 672px）一行四格、两行；手机一行两格、四行。
- * 断点按浏览器实测（Chrome，卡片数值 11px 等宽）：最长的真实读数是盈亏比「49628.76%（496.29）」≈ 121.3px，
- * 格子左右各 12px 内边距（CARD_METRIC_CELL），要放下它每格须 ≥ 145.3px。指标行宽 = 视口 − 48（main 左右内边距）
- * − 2（卡片边框）− 16（CARD_METRIC_STRIP_INSET），所以八格要视口 ≥ 1229px、四格要 ≥ 648px。
- * 两档都在「每格 ≈ 151.5px、数值区还余 6px」处起用：八格取 xl（1280px 时每格 151.75px），四格取 672px（每格 151.5px）。
- * 更极端的读数（如「-123456.78%（-1234.57）」≈ 148px）在本格内以省略号收住，不压到隔壁一格；完整读数在悬停提示里。
+ * 战役封面指标行：【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布。美观是第一位的」——
+ * 八项按排序行的次序从左往右紧凑排开（上一行淡色指标名、下一行等宽数字），每项的宽度按它自己最长的真实读数定
+ * （CARD_METRIC_WIDTH），不再把整行均分；右侧留白。每张卡片读同一套宽度，上下各张卡的同名项仍落在同一条竖线上。
+ * 手机（< 640px）放不下一行，退回两列网格；≥ 640px 起按宽度依次排开，放不下时整行换行（各卡在同一处换行）。
  */
-const CAMPAIGN_COLUMNS_GRID = 'grid grid-cols-2 min-[672px]:grid-cols-4 xl:grid-cols-8';
-/** 指标格外框的左右内边距：再加上格子自己的 12px，首格文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
-const CARD_METRIC_STRIP_INSET = 'px-1 sm:px-2';
+const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';
+/** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
+const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
 const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';
 /** 排序行、统计概览与卡片展开详情的左右内边距（封面指标行的首格文字也落在这条线上，见 CARD_METRIC_STRIP_INSET）。 */
@@ -1302,14 +1298,35 @@ function durationLabel(openedAt: string, closedAt: string | null) {
 const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
 
 /**
- * 封面指标格：上标签、下数值，左右各 12px 内边距，每格同高。
- * 格与格之间的细分隔线画在格子自己的左缘外（before，上下各缩 8px）与上缘外（after，左右各缩 12px，只在换成多行时出现）：
- * 每行第一格的左线、第一行的上线落在指标行（overflow-hidden）之外被裁掉，所以不论一行几格，线只出现在格与格之间，
- * 不必按每行格数去数第几格。
+ * 封面指标项：上标签、下数值，左右各 10px 内边距、圆角。每一项都预留同样的内边距，
+ * 高亮（当前排序项）只换底色与描边，切换排序时文字一个像素都不动。
  */
-const CARD_METRIC_CELL = 'relative flex min-w-0 flex-col gap-0.5 px-3 py-1.5 before:absolute before:inset-y-2 before:-left-px before:w-px before:bg-border/70 after:absolute after:inset-x-3 after:-top-px after:h-px after:bg-border/60';
+const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 transition-[background-color,box-shadow] duration-150';
+/**
+ * 每项的宽度（≥ 640px）：浏览器实测最长的真实读数（11px 等宽）+ 左右内边距，取整到 4px。
+ *   镜像止盈「已实现·进行中」≈ 73px；预期回撤「13.86%」、加仓效率 / 涨幅效率「+130.41」≈ 46px（指标名 40px）；
+ *   涨幅「+437.21%」、算术期望「+383.20R」≈ 53px；盈亏比「76740.80%（767.41）」≈ 121px；
+ *   几何期望「50.63」+「仓位击穿」徽标 ≈ 83px。更极端的读数在本项内以省略号收住，完整读数在悬停提示里。
+ */
+const CARD_METRIC_WIDTH = {
+  mirrorTp: 'sm:w-[96px]',
+  expectedDrawdownPct: 'sm:w-[72px]',
+  mainPriceChange: 'sm:w-[80px]',
+  mainPriceEfficiency: 'sm:w-[72px]',
+  captureRate: 'sm:w-[148px]',
+  addEfficiency: 'sm:w-[72px]',
+  geometricExpectancy: 'sm:w-[108px]',
+  arithmeticExpectancy: 'sm:w-[80px]',
+} as const satisfies Partial<Record<CampaignSortMode, string>>;
+type CardMetricMode = keyof typeof CARD_METRIC_WIDTH;
+/**
+ * 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：淡琥珀底 + 细描边，
+ * 指标名换成琥珀色（浅色主题用深一档的琥珀，白底上才看得清）。封面上的其它对应模块（操作时间、杠杆、重要性、标题）同一套颜色。
+ */
+const SORT_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.08] ring-1 ring-inset ring-[#F0B90B]/40 dark:bg-[#F0B90B]/[0.10]';
+const SORT_HIGHLIGHT_TEXT = 'text-[#B7860B] dark:text-[#F0B90B]';
 /** 指标名：10px 淡色，一格一行，放不下时省略。 */
-const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px] text-muted-foreground/80';
+const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px]';
 /** 数值一行：数值可收缩（省略号），「仓位击穿」徽标跟在数值后面、不收缩。 */
 const CARD_METRIC_VALUE_ROW = 'flex h-4 min-w-0 items-center gap-1.5';
 /** 展开详情里的名称（「名称：值」写在一行里）。 */
@@ -1343,6 +1360,8 @@ const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tab
 
 type CampaignCardProps = {
   row: CampaignDisplayData;
+  /** 当前排序项：封面上对应的模块高亮（DSI / USI 贡献不在封面上，没有可亮的）。 */
+  sortHighlight: CampaignSortMode;
   expanded: boolean;
   busy: boolean;
   isOwnCampaign: boolean;
@@ -1359,6 +1378,7 @@ type CampaignCardProps = {
  */
 const CampaignCard = memo(function CampaignCard({
   row,
+  sortHighlight,
   expanded,
   busy,
   isOwnCampaign,
@@ -1419,6 +1439,11 @@ const CampaignCard = memo(function CampaignCard({
   const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
   const geometricTone = signTone(geometricExpectancy, 'text-foreground/80');
   const detailsExpanded = expanded;
+  const lit = (mode: CampaignSortMode) => sortHighlight === mode;
+  /** 指标项的类名：宽度 + 当前排序项高亮。 */
+  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH[mode]} ${lit(mode) ? SORT_HIGHLIGHT_BOX : ''}`;
+  const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${lit(mode) ? `${SORT_HIGHLIGHT_TEXT} font-medium` : 'text-muted-foreground/80'}`;
+  const litAttr = (mode: CampaignSortMode) => (lit(mode) ? 'true' : undefined);
   return (
     <div
       data-testid="campaign-card"
@@ -1435,7 +1460,13 @@ const CampaignCard = memo(function CampaignCard({
           <span aria-hidden="true" className={`inline-flex h-1.5 w-1.5 shrink-0 rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
           {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
-            <h2 className="mr-0.5 text-[13px] font-semibold leading-5 text-foreground">{campaign.title}</h2>
+            {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
+            <h2
+              data-sort-highlight={litAttr('alpha')}
+              className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${lit('alpha') ? 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]' : ''}`}
+            >
+              {campaign.title}
+            </h2>
             <span className={`${CARD_CHIP} text-[10px] font-medium ${DIRECTION_STYLES[campaign.direction] || 'bg-muted text-muted-foreground'}`}>
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>
@@ -1447,7 +1478,8 @@ const CampaignCard = memo(function CampaignCard({
                 title={Number(campaign.initial_leverage) > 0
                   ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
                   : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
-                className={`${CARD_CHIP} border border-border/70 font-mono text-[10px] tabular-nums text-muted-foreground`}
+                data-sort-highlight={litAttr('leverage')}
+                className={`${CARD_CHIP} border font-mono text-[10px] tabular-nums ${lit('leverage') ? `border-[#F0B90B]/55 bg-[#F0B90B]/10 ${SORT_HIGHLIGHT_TEXT}` : 'border-border/70 text-muted-foreground'}`}
               >
                 {formatLeverage(cardLeverage)}
               </span>
@@ -1458,13 +1490,19 @@ const CampaignCard = memo(function CampaignCard({
             >
               {campaignDisplayCode}
             </span>
+            {/* 分隔线之后的内容带 6px 内边距与圆角：按「操作时间」排序时只换底色，文字位置不变。 */}
             <span
               data-testid="campaign-operation-time"
-              className="-ml-px inline-flex h-[18px] items-center gap-1 border-l border-border/70 pl-2 text-[10px] leading-none text-muted-foreground/75"
+              className="-ml-px inline-flex h-[18px] items-center border-l border-border/70 pl-0.5 text-[10px] leading-none"
             >
-              操作时间：
-              <span className="whitespace-nowrap font-mono text-[10px] tabular-nums text-foreground/75">
-                {fmtOperationTime(operationTime)}
+              <span
+                data-sort-highlight={litAttr('time')}
+                className={`inline-flex h-[18px] items-center gap-1 rounded-[3px] px-1.5 ${lit('time') ? `${SORT_HIGHLIGHT_BOX} ${SORT_HIGHLIGHT_TEXT}` : 'text-muted-foreground/75'}`}
+              >
+                操作时间：
+                <span className={`whitespace-nowrap font-mono text-[10px] tabular-nums ${lit('time') ? 'text-foreground/90' : 'text-foreground/75'}`}>
+                  {fmtOperationTime(operationTime)}
+                </span>
               </span>
             </span>
           </div>
@@ -1481,8 +1519,11 @@ const CampaignCard = memo(function CampaignCard({
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
           </button>
           {isOwnCampaign && (
-            <div className="flex h-7 items-center gap-0.5 rounded border border-border/80 bg-background/50 px-1.5">
-              <span className="mr-0.5 text-[9px] text-muted-foreground/80">重要性</span>
+            <div
+              data-sort-highlight={litAttr('importance')}
+              className={`flex h-7 items-center gap-0.5 rounded border px-1.5 transition-colors ${lit('importance') ? 'border-[#F0B90B]/55 bg-[#F0B90B]/[0.08]' : 'border-border/80 bg-background/50'}`}
+            >
+              <span className={`mr-0.5 text-[9px] ${lit('importance') ? `${SORT_HIGHLIGHT_TEXT} font-medium` : 'text-muted-foreground/80'}`}>重要性</span>
               {[1, 2, 3, 4, 5].map(score => (
                 <button
                   key={score}
@@ -1501,7 +1542,10 @@ const CampaignCard = memo(function CampaignCard({
             </div>
           )}
           {!isOwnCampaign && importance > 0 && (
-            <span className="rounded border border-border bg-background/60 px-2 py-1 text-[10px] text-muted-foreground">
+            <span
+              data-sort-highlight={litAttr('importance')}
+              className={`rounded border px-2 py-1 text-[10px] ${lit('importance') ? `border-[#F0B90B]/55 bg-[#F0B90B]/[0.08] ${SORT_HIGHLIGHT_TEXT}` : 'border-border bg-background/60 text-muted-foreground'}`}
+            >
               重要性 {importance}/5
             </span>
           )}
@@ -1522,21 +1566,21 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 封面指标行：八格等宽（CAMPAIGN_COLUMNS_GRID），上标签、下数值；【用户要求】顺序与排序行一致：镜像止盈、预期回撤、
-          涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望。上下各张卡的同名格落在同一条竖线上。 */}
+      {/* 封面指标行：左对齐、按读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH），上标签、下数值；【用户要求】顺序与排序行一致：
+          镜像止盈、预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望。当前排序项高亮。 */}
       <div className={`border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
-          className={`${CAMPAIGN_COLUMNS_GRID} overflow-hidden`}
+          className={CARD_METRIC_STRIP}
         >
-          <div className={CARD_METRIC_CELL} data-testid="campaign-mirror-tp-status">
-            <dt className={CARD_METRIC_NAME}>镜像止盈</dt>
+          <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
+            <dt className={metricName('mirrorTp')}>镜像止盈</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
             </dd>
           </div>
-          <div className={CARD_METRIC_CELL} data-testid="campaign-expected-drawdown-pct">
-            <dt className={CARD_METRIC_NAME}>预期回撤</dt>
+          <div className={metricCell('expectedDrawdownPct')} data-testid="campaign-expected-drawdown-pct" data-sort-highlight={litAttr('expectedDrawdownPct')}>
+            <dt className={metricName('expectedDrawdownPct')}>预期回撤</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
                 {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
@@ -1549,9 +1593,10 @@ const CampaignCard = memo(function CampaignCard({
             title={mainPriceChangePct == null
               ? '涨幅：主力还没平仓（没有平仓价），与 Legs 表一样显示「—」'
               : '涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数'}
-            className={CARD_METRIC_CELL}
+            className={metricCell('mainPriceChange')}
+            data-sort-highlight={litAttr('mainPriceChange')}
           >
-            <dt className={CARD_METRIC_NAME}>涨幅</dt>
+            <dt className={metricName('mainPriceChange')}>涨幅</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
                 {formatLegPriceChangePct(mainPriceChangePct)}
@@ -1563,17 +1608,18 @@ const CampaignCard = memo(function CampaignCard({
             title={mainPriceEfficiency == null
               ? '涨幅效率 = 主力涨幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
               : `涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
-            className={CARD_METRIC_CELL}
+            className={metricCell('mainPriceEfficiency')}
+            data-sort-highlight={litAttr('mainPriceEfficiency')}
           >
-            <dt className={CARD_METRIC_NAME}>涨幅效率</dt>
+            <dt className={metricName('mainPriceEfficiency')}>涨幅效率</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
                 {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
               </span>
             </dd>
           </div>
-          <div className={CARD_METRIC_CELL} data-testid="campaign-payoff-ratio">
-            <dt className={CARD_METRIC_NAME}>盈亏比</dt>
+          <div className={metricCell('captureRate')} data-testid="campaign-payoff-ratio" data-sort-highlight={litAttr('captureRate')}>
+            <dt className={metricName('captureRate')}>盈亏比</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span
                 data-testid="campaign-payoff-ratio-value"
@@ -1592,9 +1638,10 @@ const CampaignCard = memo(function CampaignCard({
                 ? '加仓效率 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
                 : '加仓效率：这场战役没有加仓，不计算')
                 : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
-            className={CARD_METRIC_CELL}
+            className={metricCell('addEfficiency')}
+            data-sort-highlight={litAttr('addEfficiency')}
           >
-            <dt className={CARD_METRIC_NAME}>加仓效率</dt>
+            <dt className={metricName('addEfficiency')}>加仓效率</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
                 {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
@@ -1612,9 +1659,10 @@ const CampaignCard = memo(function CampaignCard({
                     + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
                     + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
                   : '')}
-            className={CARD_METRIC_CELL}
+            className={metricCell('geometricExpectancy')}
+            data-sort-highlight={litAttr('geometricExpectancy')}
           >
-            <dt className={CARD_METRIC_NAME}>几何期望</dt>
+            <dt className={metricName('geometricExpectancy')}>几何期望</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
               {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
@@ -1629,9 +1677,10 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-arithmetic-expectancy"
             title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
-            className={CARD_METRIC_CELL}
+            className={metricCell('arithmeticExpectancy')}
+            data-sort-highlight={litAttr('arithmeticExpectancy')}
           >
-            <dt className={CARD_METRIC_NAME}>算术期望</dt>
+            <dt className={metricName('arithmeticExpectancy')}>算术期望</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
             </dd>
@@ -3698,6 +3747,7 @@ export default function JournalCampaignsPage() {
             <CampaignCard
               key={row.campaign.id}
               row={row}
+              sortHighlight={sortState.mode}
               expanded={expandedCampaignIds.has(row.campaign.id)}
               busy={busyCampaignId === row.campaign.id}
               isOwnCampaign={row.campaign.user_id === userId}

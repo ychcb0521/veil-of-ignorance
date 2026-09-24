@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * 指南里「战役列表」几段话要与页面对得上：排序行的新次序与左对齐、封面的等宽统计格与断点、
+ * 指南里「战役列表」几段话要与页面对得上：排序行的新次序与左对齐、封面指标左对齐与排序高亮、
  * 涨幅 / 涨幅效率 / 加仓效率的公式浮层与散点图。
  */
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
@@ -31,20 +31,23 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     }
   });
 
-  it('写明排序行左对齐、封面等宽统计格与三档断点，以及新增三项的公式浮层', () => {
+  it('写明排序行左对齐、封面指标左对齐与排序高亮，以及新增三项的公式浮层', () => {
     // 【用户要求】「排序方式这里不美观。这里还是用左对齐吧」
     expect(guide).toContain('排序行<strong>左对齐</strong>、按钮依次排开、间距均匀');
     expect(guide).not.toContain('与上方排序行的同名按钮共用同一套列');
-    // 【用户要求】「交易战役封面的指标排布要美观，现在太零散了，不整齐」：等宽统计格，顺序与排序行一致
-    expect(guide).toContain('<strong>等宽的统计格</strong>');
+    // 【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布」：左对齐、按读数定宽，顺序与排序行一致
+    expect(guide).toContain('第二层<strong>左对齐、紧凑排开</strong>');
+    expect(guide).not.toContain('<strong>等宽的统计格</strong>');
     expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、单场几何期望、单场算术期望');
-    expect(guide).toContain('<strong>每一格在所有卡片上都落在同一条竖线上</strong>');
-    expect(guide).toContain('≥ 1280px 时八格排成一行，≥ 672px（平板）时每行四格、排两行，手机上每行两格');
+    expect(guide).toContain('<strong>同名的项在上下各张卡片上落在同一条竖线上</strong>');
+    // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」
+    expect(guide).toContain('<strong>当前排序项在封面上高亮</strong>');
+    expect(guide).toContain('DSI / USI 贡献不在封面上，没有可亮的');
     // 旧的按读数定宽、窄屏自然换行的说法不再出现
     expect(guide).not.toContain('列宽按真实最长的读数定');
     expect(guide).not.toContain('卡片按原顺序自然换行');
-    // 断点与页面常量一致
-    expect(page).toContain("const CAMPAIGN_COLUMNS_GRID = 'grid grid-cols-2 min-[672px]:grid-cols-4 xl:grid-cols-8';");
+    // 与页面常量一致：手机两列、≥ 640px 左对齐排开
+    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';");
     expect(guide).toContain('重要性放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是重要性');
     expect(guide).toContain('涨幅、涨幅效率、加仓效率与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');

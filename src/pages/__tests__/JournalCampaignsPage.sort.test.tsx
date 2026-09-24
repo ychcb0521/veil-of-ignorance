@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCampaignListCaches } from '@/lib/campaignListCache';
@@ -481,7 +481,7 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 20_000);
 
-  it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行是八格等宽的统计格、顺序与排序行一致', async () => {
+  it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行左对齐、按读数定宽、顺序与排序行一致，当前排序项高亮', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <JournalCampaignsPage />
@@ -511,13 +511,13 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
-    // 【用户要求】「指标排布要美观，不整齐」：封面指标行是等宽统计格（手机两格、平板四格、宽屏八格一行），
-    // 每张卡同一套类名——格宽只由卡片宽度决定，上下各张卡的同名格在同一条竖线上
+    // 【用户要求】「封面上的指标做成左对齐，要美观，不需要均匀分布」：手机两列网格，≥ 640px 左对齐依次排开、每项按读数定宽，
+    // 每张卡同一套类名——上下各张卡的同名项在同一条竖线上
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'min-[672px]:grid-cols-4', 'xl:grid-cols-8', 'overflow-hidden');
-    expect([...metricRows[0].classList].some(cls => cls.includes('grid-cols-['))).toBe(false);
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-wrap');
+    expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后涨幅…几何期望、算术期望（操作时间留在标题行）
     const cardCells = [...metricRows[0].children].map(node => node.getAttribute('data-testid'));
@@ -540,9 +540,40 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
       expect(cell.children[1].tagName).toBe('DD');
-      expect(cell.className).toBe(cells[0].className);
-      expect(cell).toHaveClass('flex-col', 'px-3');
+      expect(cell).toHaveClass('flex-col', 'px-2.5', 'shrink-0');
+      expect([...cell.classList].some(cls => /^sm:w-\[\d+px\]$/.test(cls))).toBe(true);
     }
+    // 各张卡的同名项宽度类相同
+    for (const row of metricRows) {
+      expect([...row.children].map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))))
+        .toEqual(cells.map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))));
+    }
+
+    // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：默认按操作时间排——每张卡的操作时间亮，指标项都不亮
+    const lit = (card: HTMLElement) => [...card.querySelectorAll('[data-sort-highlight="true"]')];
+    const cards = screen.getAllByTestId('campaign-card');
+    for (const card of cards) {
+      expect(lit(card)).toHaveLength(1);
+      expect(within(card).getByTestId('campaign-operation-time')).toContainElement(lit(card)[0] as HTMLElement);
+    }
+    // 切到盈亏比：每张卡只有盈亏比那一项亮，指标名换成琥珀色；高亮不改内边距
+    fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-payoff-ratio')[0]).toHaveAttribute('data-sort-highlight', 'true'));
+    for (const card of screen.getAllByTestId('campaign-card')) {
+      expect(lit(card).map(node => node.getAttribute('data-testid'))).toEqual(['campaign-payoff-ratio']);
+    }
+    const payoffCell = screen.getAllByTestId('campaign-payoff-ratio')[0];
+    expect(payoffCell).toHaveClass('ring-1', 'px-2.5', 'py-1.5');
+    expect(payoffCell.querySelector('dt')).toHaveClass('text-[#B7860B]');
+    expect(screen.getAllByTestId('campaign-expected-drawdown-pct')[0]).not.toHaveClass('ring-1');
+    // 切到字母：比的是标题，标题亮（琥珀下划线）；DSI 贡献不在封面上，没有可亮的
+    fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
+    await waitFor(() => expect(lit(screen.getAllByTestId('campaign-card')[0]).map(node => node.tagName)).toEqual(['H2']));
+    expect(lit(screen.getAllByTestId('campaign-card')[0])[0]).toHaveClass('underline');
+    fireEvent.click(screen.getByTestId('campaign-sort-dsiContribution'));
+    await waitFor(() => {
+      for (const card of screen.getAllByTestId('campaign-card')) expect(lit(card)).toHaveLength(0);
+    });
 
     // 图标位宽度固定：有公式的档平时是 Σ，选中那一档换成方向箭头；没有公式的档平时也留同宽空位，切换排序整行不重排
     expect(screen.getByTestId('campaign-sort-mainPriceChange-icon')).toHaveClass('w-3');
