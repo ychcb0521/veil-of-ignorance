@@ -36,3 +36,20 @@ describe('AccountInfo：风险率里的维持保证金按仓位的风险模型�
     expect(riskRate()).toContain('17.9%');
   });
 });
+
+/**
+ * 【复核】顶栏「可用余额」与下单面板、引擎同一个数（lib/availableBalance）：余额 − Σ全仓保证金。
+ * 逐仓保证金开仓时已经从余额扣掉，不再减一次。
+ */
+describe('AccountInfo：可用余额与引擎同一个口径', () => {
+  const available = () => screen.getByText(/可用余额/).parentElement?.textContent ?? '';
+
+  it('钱包 10,000、逐仓仓位保证金 6,000：可用 10,000（不是 4,000）；另有 1,000 全仓保证金时 9,000', () => {
+    const { unmount } = render(<AccountInfo balance={10_000} priceMap={{ KAITOUSDT: 1 }} positionsMap={{ KAITOUSDT: [position()] }} />);
+    expect(available()).toContain('10,000.00');
+    unmount();
+    render(<AccountInfo balance={10_000} priceMap={{ KAITOUSDT: 1 }}
+      positionsMap={{ KAITOUSDT: [position(), position({ id: 'c', marginMode: 'cross', margin: 1_000, isolatedMargin: undefined })] }} />);
+    expect(available()).toContain('9,000.00');
+  });
+});

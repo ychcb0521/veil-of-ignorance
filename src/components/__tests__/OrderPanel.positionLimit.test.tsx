@@ -43,6 +43,8 @@ vi.mock('@/components/journal/PreTradeSnapshotDialog', () => ({
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     tradingMode: 'direct',
+    // 这个文件测的全是币安分层规则：显式选「币安标准」持仓限制模式（默认是无限制）
+    positionLimitMode: 'binance',
     balance: 2_000_000,
     positionsMap: state.positionsMap,
     ordersMap: state.ordersMap,

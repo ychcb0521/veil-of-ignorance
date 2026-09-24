@@ -35,21 +35,36 @@ import {
   LIVE_PRICE_TIER_HEADROOM,
   checkPlacementPositionLimit,
   clampLeverageAcrossSettlements,
+  hedgeBaseNoun,
   isTriggerRecheckedOrder,
   limitSettlementOf,
+  mergeHedgeBaseKinds,
   newlyDoomedTriggerOrders,
   orderWaypointPrice,
   placementAftermath,
   placementCheckPrice,
   placementFloatsWithMark,
+  placementHedgeBaseKinds,
   placementOrderValuation,
   placementSizingRemainingUsd,
   placementUnitPriceUsd,
   placementUsesLegacyHedge,
   triggerRiskMessage,
 } from '@/lib/positionLimit';
-import { isPositionOpen, mergeFilledPosition } from '@/lib/tradingSettlement';
-import { isLegacyHedgeRisk, isTieredRiskPosition, legacyHedgeRiskStamp, positionRiskStamp } from '@/lib/positionRiskModel';
+import { executeSettlementFill, isPositionOpen, mergeFilledPosition } from '@/lib/tradingSettlement';
+import {
+  ORDER_LEGACY_HEDGE_STAMP,
+  ORDER_RISK_STAMP,
+  isLegacyHedgeRisk,
+  isTieredRiskPosition,
+  isUnlimitedRisk,
+  legacyHedgeRiskStamp,
+  positionRiskStamp,
+  unlimitedRiskStamp,
+} from '@/lib/positionRiskModel';
+import { UNLIMITED_MAX_LEVERAGE, isUnlimitedLimitMode } from '@/lib/positionLimitMode';
+import { calcAvailableBalance } from '@/lib/availableBalance';
+import { openingLiquidation } from '@/lib/openingLiquidation';
 import { formatTierAmount } from '@/lib/leverageTiers';
 import { noticeLeverageClamp } from '@/lib/leverageClampNotice';
 import { LeverageTierTable } from '@/components/LeverageTierTable';
@@ -129,19 +144,22 @@ export function OrderPanel({
   const quoteUnitLabel = isCoinMargined ? 'USD' : 'USDT';
   const positions = ctx.positionsMap[symbol] || [];
 
-  let totalMargin = 0;
   let totalMaintenance = 0;
   let totalPnl = 0;
   for (const [posSymbol, ps] of Object.entries(ctx.positionsMap) as [string, typeof positions][]) {
     for (const p of ps) {
       const mark = ctx.priceMap[posSymbol] ?? p.entryPrice;
-      totalMargin += p.margin;
       totalMaintenance += positionMaintenanceMarginUsd(posSymbol, p, mark);
       totalPnl += calcUnrealizedPnl(p, mark);
     }
   }
   const equity = ctx.balance + totalPnl;
-  const available = ctx.balance - totalMargin;
+  /**
+   * 可用：与引擎下单预检、改杠杆同一个数（lib/availableBalance：余额 − Σ全仓保证金）。
+   * 逐仓保证金开仓时已经从余额扣掉，不再减一次——此前这里减的是全部保证金，
+   * 「可开」、100% 与杠杆对话框都比引擎少算一份逐仓保证金（无限制模式下降杠杆会被这里错拒）。
+   */
+  const available = calcAvailableBalance(ctx.balance, ctx.positionsMap ?? {});
   const marginRatio = equity > 0 ? (totalMaintenance / equity) * 100 : 0;
   const ratioColor = marginRatio > 80 ? 'text-trading-red' : marginRatio > 50 ? 'text-yellow-400' : 'text-trading-green';
   const ratioBg = marginRatio > 80 ? 'bg-red-400' : marginRatio > 50 ? 'bg-yellow-400' : 'bg-emerald-400';
@@ -151,6 +169,12 @@ export function OrderPanel({
   const [orderType, setOrderType] = useState<OrderType>('LIMIT');
   const marginMode = ctx.getSymbolMarginMode(symbol);
   const leverage = ctx.getSymbolLeverage(symbol);
+  /**
+   * 持仓限制模式（顶栏「直接交易」右边）。无限制：不判分层上限与单笔上限，不显示杠杆分层、上限小字与各种「将超限」预警；
+   * 币安标准：下面所有判定照旧。读不到（旧的测试替身）按币安标准——与纯函数库的缺省同一个取向。
+   */
+  const limitMode = ctx.positionLimitMode;
+  const unlimitedLimits = isUnlimitedLimitMode(limitMode);
   const setLeverage = (v: number | ((prev: number) => number)) => ctx.setSymbolLeverage(symbol, v);
 
   // ===== Existing selectors / payload state =====
@@ -240,7 +264,11 @@ export function OrderPanel({
      * 存「两张合约里较高的上限」与偏好的较小者，读的时候再按各自的结算方式夹——
      * 面板每次刷新都在币本位，按它夹会把 U 本位那张合约也永久压到币本位的上限。
      */
-    ctx.setSymbolLeverage(symbol, clampLeverageAcrossSettlements(symbol, clampPrefLeverage(tradingPrefs.defaultLeverage)), 'any');
+    ctx.setSymbolLeverage(
+      symbol,
+      clampLeverageAcrossSettlements(symbol, clampPrefLeverage(tradingPrefs.defaultLeverage), limitMode),
+      'any',
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, tradingPrefs.useDefaultLeverage, tradingPrefs.defaultLeverage]);
 
@@ -432,6 +460,7 @@ export function OrderPanel({
       side,
       triggerPrice: gate.price,
       triggerKind: gate.kind,
+      mode: limitMode,
     });
   };
   const limitChecks = { LONG: limitCheckFor('LONG'), SHORT: limitCheckFor('SHORT') };
@@ -481,7 +510,9 @@ export function OrderPanel({
    * 这一单自己是触发类单时，「另一侧的挂单先成交、再折回来触发它」的走法也一并说。
    * 币安不拦这一单，面板也不拦，只在点按钮之前摆出来；引擎下单成功后再往消息中心记一条。
    */
-  const hasRecheckedOrders = symbolOrders.some(o => isTriggerRecheckedOrder(o) || orderWaypointPrice(o) > 0);
+  // 无限制模式下触发 / 成交那一刻不再判，没有什么会「注定被拒」
+  const hasRecheckedOrders = !unlimitedLimits
+    && symbolOrders.some(o => isTriggerRecheckedOrder(o) || orderWaypointPrice(o) > 0);
   const triggerRiskFor = (side: OrderSide) => (hasRecheckedOrders && effectiveQty > 0 && !sideBlocked[side]
     ? triggerRiskMessage(newlyDoomedTriggerOrders({
       symbol,
@@ -492,6 +523,7 @@ export function OrderPanel({
         { markPrice: currentPrice, immediate: executesNow, legacy: placementUsesLegacyHedge(limitChecks[side]) },
       ),
       markPrice: currentPrice,
+      mode: limitMode,
     }), '这张单下出去后')
     : null);
   const triggerRiskWarning = (() => {
@@ -512,8 +544,10 @@ export function OrderPanel({
     if (!(effectiveQty > 0)) return null;
     const sides = (['LONG', 'SHORT'] as const).filter(side => !sideBlocked[side] && placementUsesLegacyHedge(limitChecks[side]));
     if (sides.length === 0) return null;
-    return `${sides.map(sideButtonLabel).join('、')}：这一单是对冲更新前的仓位，不受分层上限约束；`
-      + '开出的仓位与它对冲的旧仓位一样按旧模型计维持保证金（0.4%），但它不算更新前的仓位，不能再给别的单当豁免额度。'
+    // 底叫什么与上面红框同一个取法（positionLimit.hedgeBaseNoun）：只有更新前的仓位时与改动前逐字相同
+    const noun = hedgeBaseNoun(mergeHedgeBaseKinds(...sides.map(side => placementHedgeBaseKinds(limitChecks[side]))));
+    return `${sides.map(sideButtonLabel).join('、')}：这一单是对冲${noun}，不受分层上限约束；`
+      + `开出的仓位与它对冲的旧仓位一样按旧模型计维持保证金（0.4%），但它不算${noun}，不能再给别的单当豁免额度。`
       + (executesNow ? '' : '挂着的这张单触发 / 成交那一刻还会再判一次：旧仓位已减少或平掉时按普通分层判，放不下就撤单。');
   })();
   /**
@@ -528,13 +562,18 @@ export function OrderPanel({
    *     这一截也按档位定价、跨进更高的档，把它自己当场强平，所以两笔各成一个仓位、各算各的强平价。
    *     这时旧仓位的强平价一个数都不动，卡上会有两笔；追加保证金要说清「+」的真实行为
    *     （AdjustMarginModal 按名义等比摊到卡上每一笔，没有单腿的追加入口）。
+   *   · 无限制模式下**并进币安标准下开的分层仓位**：整仓仍按分层（不换模型），名义变大可能进更高的档——
+   *     这个模式不显示分层，所以把强平价的前后两个数写出来；一开出来就越过强平价的另有红框（openingLiquidationWarning）。
    */
   const mergeModelNote = (() => {
     if (!(effectiveQty > 0) || !(currentPrice > 0)) return null;
     const lines: string[] = [];
     const open = positions.filter(isPositionOpen);
     const after = executesNow ? '' : '成交后';
-    /** 这一单成交后的样子（带保证金，用来算合并后的强平价）。与引擎的建仓口径同：名义 ÷ 杠杆。 */
+    /**
+     * 这一单成交后的样子（带保证金，用来算合并后的强平价）。与引擎的建仓口径同：名义 ÷ 杠杆。
+     * 来源与引擎同一个取法：无限制模式下成交 → 'unlimited-v1'（按 0.4%）；否则分层，或只靠对冲豁免时豁免标记。
+     */
     const draftFill = (side: OrderSide, exempt: boolean) => {
       const notionalUsd = isCoinMargined ? coinNotionalUsd(effectiveQty, contractSizeUsd) : effectiveQty * currentPrice;
       const marginUsd = leverage > 0 ? notionalUsd / leverage : 0;
@@ -552,7 +591,9 @@ export function OrderPanel({
         settlementMode,
         contractSizeUsd: isCoinMargined ? contractSizeUsd : undefined,
         openTime: 0,
-        ...(exempt ? legacyHedgeRiskStamp(symbol) : positionRiskStamp(symbol)),
+        ...(unlimitedLimits
+          ? unlimitedRiskStamp(symbol)
+          : exempt ? legacyHedgeRiskStamp(symbol) : positionRiskStamp(symbol)),
       } as Position;
     };
     for (const side of ['LONG', 'SHORT'] as const) {
@@ -562,7 +603,7 @@ export function OrderPanel({
       const merged = mergeFilledPosition(symbol, open, fill);
 
       if (merged.blockedBy === 'riskModel') {
-        // 只有靠对冲豁免放行的单会走到这里（面板下的单一定带戳；分层的一笔现在照并）。
+        // 只有靠对冲豁免放行的单会走到这里（面板下的单一定带戳；分层的一笔与无限制模式下的一笔现在照并）。
         const held = open.find(p => p.side === side) ?? null;
         const heldLiq = held && held.marginMode === 'isolated' ? calcLiquidationPrice(held, symbol) : Number.NaN;
         const liqGap = Number.isFinite(heldLiq) && heldLiq > 0 ? Math.abs(currentPrice - heldLiq) / currentPrice : Number.NaN;
@@ -583,10 +624,16 @@ export function OrderPanel({
         continue;
       }
 
-      // 会合并，而且是「分层的一笔并进按旧 0.4% 的仓位」那一格：整仓仍按旧模型，把代价与好处都写出来。
       if (!merged.absorbedFillId || exempt) continue;
       const target = open.find(p => p.id === merged.survivor.id) ?? null;
-      if (!target || isTieredRiskPosition(target)) continue;
+      if (!target) continue;
+      /**
+       * 无限制模式：并进按 0.4% 的仓位时两边本来同一个口径，没有换口径可说；
+       * 并进币安标准下开的分层仓位时（mergeRiskBlocked 里「无限制」那一格）整仓仍按分层——
+       * 这个模式不显示分层，所以在这里把「整仓按分层、名义变大可能进更高的档」与强平价的前后两个数说清楚。
+       * 币安标准：会合并、而且是「分层的一笔并进按旧 0.4% 的仓位」那一格——整仓仍按旧模型，把代价与好处都写出来。
+       */
+      if (unlimitedLimits ? !isTieredRiskPosition(target) : isTieredRiskPosition(target)) continue;
       const beforeLiq = calcLiquidationPrice(target, symbol);
       const afterLiq = calcLiquidationPrice(merged.survivor, symbol);
       /** 强平价前后对比。多单的强平价变低 = 推远，空单相反；变动不到 0.01% 就别拿百分比唬人。 */
@@ -598,10 +645,58 @@ export function OrderPanel({
         const safer = side === 'LONG' ? afterLiq < beforeLiq : afterLiq > beforeLiq;
         return `${pair}（${safer ? '推远' : '拉近'} ${movePct.toFixed(2)}%）。`;
       })();
-      lines.push(`${sideButtonLabel(side)}：这一单${after}会并进${isLegacyHedgeRisk(target) ? '靠对冲豁免开的' : '更新前开的'}同方向仓位——`
+      if (unlimitedLimits) {
+        lines.push(`${sideButtonLabel(side)}：这一单${after}会并进币安标准下开的同方向仓位——那个仓位按币安分层计维持保证金，`
+          + '合并后整个仓位（含这一笔）仍按分层计、不换模型，加仓照旧被它的权益扛着；总名义变大可能跨进更高的档'
+          + '（超过最高一档按最高一档的费率），维持保证金随之变高。'
+          + moved);
+        continue;
+      }
+      // 被加仓的是无限制模式下开的仓位（币安标准下往它上面加仓）：同样按 0.4%，同样是豁免的底
+      const head = isUnlimitedRisk(target)
+        ? `${sideButtonLabel(side)}：这一单${after}会并进无限制模式下开的同方向仓位——`
+        : `${sideButtonLabel(side)}：这一单${after}会并进${isLegacyHedgeRisk(target) ? '靠对冲豁免开的' : '更新前开的'}同方向仓位——`;
+      lines.push(head
         + '合并后整个仓位（含这一笔）仍按旧的统一 0.4% 计维持保证金，不换模型、不重新定价，也不会多出一条只靠自己那点保证金硬扛的新腿。'
         + moved
-        + (isLegacyHedgeRisk(target) ? '' : '加进去的这一截不会把「对冲更新前仓位」的豁免额度做大：豁免的底冻在这一笔之前。'));
+        + (isLegacyHedgeRisk(target)
+          ? ''
+          : `加进去的这一截不会把「对冲${isUnlimitedRisk(target) ? '无限制模式下开的' : '更新前'}仓位」的豁免额度做大：豁免的底冻在这一笔之前。`));
+    }
+    return lines.length > 0 ? lines.join(' ') : null;
+  })();
+  /**
+   * 这一单一成交就够得着强平（lib/openingLiquidation）：滑点把成交价推过了它自己的强平价
+   * （150x、名义上千万的市价单），或并进分层仓位后整仓跨进更高的档。按市价成交、吃滑点的才判：
+   * 立即成交的市价 / 最优价单按现价，条件单按触发价（触发那一刻标记价就在那儿）。
+   * 只提醒，不拦——无限制模式不设任何上限，规模是使用者自己选的；币安标准的分层上限本来就把规模挡在前面。
+   */
+  const openingLiquidationWarning = (() => {
+    if (!(effectiveQty > 0) || !(currentPrice > 0)) return null;
+    const lines: string[] = [];
+    for (const side of ['LONG', 'SHORT'] as const) {
+      if (sideBlocked[side]) continue;
+      const gate = secondGates[side];
+      const px = executesNow
+        ? currentPrice
+        : orderType === 'CONDITIONAL' && gate.kind === 'trigger' ? gate.price : 0;
+      if (!(px > 0)) continue;
+      // 只是预估（造出来的仓位不落进任何地方、不扣钱、不盖时间线章）：与引擎同一个建仓口径——滑点、保证金、来源戳（无限制模式下一律 'unlimited-v1'）
+      const { position: fill } = executeSettlementFill(symbol, px, {
+        ...draftFor(side),
+        leverage,
+        marginMode,
+        ...(placementUsesLegacyHedge(limitChecks[side]) ? ORDER_LEGACY_HEDGE_STAMP : ORDER_RISK_STAMP),
+      }, false, 0, undefined, null, 'manual', limitMode);
+      const hit = openingLiquidation(symbol, positions, fill, px);
+      if (!hit) continue;
+      const at = executesNow ? '现价' : `触发价 ${formatPrice(px, symbol)}`;
+      const liq = Number.isFinite(hit.liquidationPrice) && hit.liquidationPrice > 0
+        ? `强平价 ${formatPrice(hit.liquidationPrice, symbol)}，`
+        : '';
+      lines.push(`${sideButtonLabel(side)}：按滑点估算这一单成交价约 ${formatPrice(hit.fillPrice, symbol)}，`
+        + `${hit.merged ? '并进现有仓位后整个仓位的' : '开出的仓位'}${liq}${at}已在强平价外面——一成交就会被强平，`
+        + `${hit.merged ? '连同现有仓位的' : ''}保证金全部亏掉。请降低杠杆或减少数量。`);
     }
     return lines.length > 0 ? lines.join(' ') : null;
   })();
@@ -620,7 +715,7 @@ export function OrderPanel({
     callbackRate: parseFloat(callbackRate) / 100 || 0.01,
     twapDuration: parseFloat(twapDuration) || 60,
     twapInterval: parseFloat(twapInterval) || 5,
-  }, currentPrice);
+  }, currentPrice, limitMode);
   const lotRefusal = lotSize.refusal;
   /**
    * 市价类的常驻小字：「单笔市价上限 200,000 KAITO」。TWAP 注明按每一片算；合成币本位的上限随价变，
@@ -1825,10 +1920,21 @@ export function OrderPanel({
           </div>
         )}
 
-        {/* 维持保证金口径不同：这一单不与同方向仓位合并，各算各的强平价 */}
+        {/* 维持保证金口径：不合并时各算各的强平价；合并时整仓沿用被加仓那个仓位的口径（前后强平价） */}
         {mergeModelNote && (
           <div data-testid="merge-model-note" className="px-2 py-1 rounded text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
             {mergeModelNote}
+          </div>
+        )}
+
+        {/* 一成交就够得着强平（滑点推过强平价，或并进分层仓位后整仓进了更高的档）：只提醒，不拦 */}
+        {openingLiquidationWarning && (
+          <div
+            data-testid="opening-liquidation-warning"
+            className="flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] bg-trading-red/10 text-trading-red border border-trading-red/30"
+          >
+            <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>{openingLiquidationWarning}</span>
           </div>
         )}
 
@@ -1896,7 +2002,17 @@ export function OrderPanel({
             TWAP 新手引导
           </button>
         )}
-        {/* 杠杆分层：此前这里标着「手续费等级」，显示的却是杠杆档位——名实不符，改回它真正的内容 */}
+        {/* 杠杆分层：此前这里标着「手续费等级」，显示的却是杠杆档位——名实不符，改回它真正的内容。
+            无限制模式没有分层：换成一行平静的说明，免得这里空一块。 */}
+        {unlimitedLimits ? (
+          <div
+            data-testid="position-limit-mode-note"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground"
+          >
+            <Info className="w-3 h-3 shrink-0" />
+            <span>无限制模式 · 杠杆 1–{UNLIMITED_MAX_LEVERAGE}x，不设持仓与单笔上限</span>
+          </div>
+        ) : (
         <Popover>
           <PopoverTrigger asChild>
             <button
@@ -1925,6 +2041,7 @@ export function OrderPanel({
             />
           </PopoverContent>
         </Popover>
+        )}
 
         {/* ===== ACCOUNT RISK PANEL ===== */}
         <div className="border-t border-border pt-3 mt-2 space-y-2">
@@ -1982,6 +2099,7 @@ export function OrderPanel({
           orders={symbolOrders}
           markPrice={currentPrice}
           availableBalance={Math.max(0, available)}
+          limitMode={limitMode}
           onClose={() => setLeverageModalOpen(false)}
           onConfirm={(next) => {
             // 与对话框同一种结算方式（面板当前的），引擎按它夹值、判定、写回。
@@ -1990,7 +2108,10 @@ export function OrderPanel({
             toast.success(`杠杆已调整为 ${plan.to}x`, {
               description: plan.totalReleaseUsd > 1e-9
                 ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} ${quoteUnitLabel}`
-                : undefined,
+                : plan.totalReleaseUsd < -1e-9
+                  // 无限制模式下有持仓时降杠杆：从可用余额追加保证金
+                  ? `追加保证金 ${formatUSDT(-plan.totalReleaseUsd)} ${quoteUnitLabel}（从可用余额扣）`
+                  : undefined,
             });
             setLeverageModalOpen(false);
           }}

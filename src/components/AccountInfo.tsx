@@ -3,6 +3,7 @@ import { calcUnrealizedPnl } from '@/types/trading';
 import type { PositionsMap, PriceMap, TimeMode } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { positionMaintenanceMarginUsd } from '@/lib/positionRiskModel';
+import { calcAvailableBalance } from '@/lib/availableBalance';
 
 interface Props {
   balance: number;
@@ -35,7 +36,11 @@ export function AccountInfo({ balance, positionsMap, priceMap, timeMode = 'synce
   }
 
   const equity = balance + totalPnl;
-  const available = balance - totalMargin;
+  /**
+   * 可用余额：与下单面板、引擎下单预检、改杠杆同一个数（lib/availableBalance：余额 − Σ全仓保证金）。
+   * 逐仓保证金开仓时已经从余额扣掉，不再减一次——此前这里与下单面板都减了全部保证金，比引擎放行的少一截。
+   */
+  const available = calcAvailableBalance(balance, positionsMap);
   const totalReturn = equity - initialCapital;
   const totalReturnPct = (totalReturn / initialCapital) * 100;
 

@@ -556,6 +556,8 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
    * 估值价：市价 = 引擎成交基准价，限价 = 挂单价，条件单 = 触发价；币本位的整张按 S₂′ 折回币。
    * 算不出（还没有价）时为 null，只受 Plan B 约束。
    */
+  // 持仓限制模式为「无限制」时没有分层上限（addTierHeadroom 返回 null）、也没有单笔上限：只受 Plan B 约束
+  const limitMode = ctx.positionLimitMode;
   const tierRoom = useMemo(() => addTierHeadroom({
     symbol, settlement, side,
     storedLeverage: ctx.leverageMap?.[symbol],
@@ -567,7 +569,8 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
     fillPrice: s2Eff,
     contractFaceUsd: isCoin ? face : null,
     hedge: tierHedge,
-  }), [symbol, settlement, side, ctx.leverageMap, positions, ctx.ordersMap, seedPrice, orderKind, limitPx, s2Eff, isCoin, face, tierHedge]);
+    mode: limitMode,
+  }), [symbol, settlement, side, ctx.leverageMap, positions, ctx.ordersMap, seedPrice, orderKind, limitPx, s2Eff, isCoin, face, tierHedge, limitMode]);
   const tierCoins = tierRoom ? tierRoom.coins : Infinity;
   /** 分层比 Plan B 更紧：可下单量按分层来。 */
   const tierBinds = tierRoom != null && tierCoins < limitCoins * (1 - 1e-12);
@@ -742,6 +745,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
     symbol, settlement, kind: orderKind === 'limit' ? 'limit' : 'market',
     units: offeredUnits,
     price: lotAddPrice,
+    mode: limitMode,
   });
   /**
    * 一笔最多预填多少（引擎单位）。合成币本位的市价单按现价折张、随价变：与下单面板的 100% 一样在上限前留 0.2%，
@@ -804,6 +808,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
       symbol, settlement, kind: 'market',
       units: isCoin ? coinsToContracts(hedgeForLot, s1Px, face) : hedgeForLot,
       price: s1Px,
+      mode: limitMode,
     })
     : null;
   const lotHedgeText = lotHedge && !lotHedge.ok && lotHedge.maxUnits != null && lotHedge.maxUnits > 0

@@ -58,6 +58,12 @@
  *   直接从 M 走到 P；或者先到 M 另一侧某张开仓挂单的价 w（它先成交 / 触发）、再折回 P。
  *   突破加仓在上、止损对冲在下，两张单谁先到都有可能——两种先后都要放得下。同一侧的单子先后由价格决定，直接走就包含了。
  *
+ * 持仓限制模式（lib/positionLimitMode）：上面写的全部是「币安标准」模式的规则。使用者选「无限制」（默认）时，
+ * 每个入口都带着 mode = 'unlimited' 进来：任何币种 1–150x、不设上限（checkPositionLimit 直接放行，理由 'unlimited'），
+ * 触发 / 成交那一刻不再判、也不预警（recheckPrice 为 null）。缺省 mode 按币安标准，库与已有测试的口径不变。
+ * 切到币安标准之后，无限制模式下开的仓位（'unlimited-v1'）与更新前的仓位一样是对冲豁免的底（isHedgeBaseRisk），
+ * 文案按底的来源说「更新前的仓位」还是「无限制模式下开的仓位」（hedgeBaseNoun）。
+ *
  * 这个模块是纯函数，不碰 React、不弹提示。
  */
 import type { OrderSide, PendingOrder, Position, SettlementMode } from '@/types/trading';
@@ -69,10 +75,19 @@ import {
   LEGACY_HEDGE_RISK_MODEL,
   TIERED_RISK_MODEL,
   hasRiskProvenance,
+  hedgeBaseKindOf,
   hedgeExemptBaseUnits,
+  isHedgeBaseRisk,
   isLegacyHedgeRisk,
   isPreUpdateRisk,
+  type HedgeBaseKind,
 } from '@/lib/positionRiskModel';
+import {
+  UNLIMITED_MAX_LEVERAGE,
+  isUnlimitedLimitMode,
+  symbolMaxLeverageFor,
+  type PositionLimitMode,
+} from '@/lib/positionLimitMode';
 import {
   clampLeverageToTiers,
   exceedsTopCap,
@@ -91,29 +106,36 @@ export function limitSettlementOf(item?: { settlementMode?: SettlementMode | nul
   return isCoinSettled(item) ? 'coin' : 'usdt';
 }
 
-/** 杠杆夹到这个合约（这种结算方式）允许的 [1, 最高杠杆]。 */
-export function clampSymbolLeverage(symbol: string, settlement: LimitSettlement, leverage: number): number {
-  return clampLeverageToTiers(resolveSymbolTiers(symbol, settlement), leverage);
+/** 杠杆夹到这个合约（这种结算方式）允许的 [1, 最高杠杆]；无限制模式下一律 [1, 150]。mode 缺省按币安标准。 */
+export function clampSymbolLeverage(
+  symbol: string,
+  settlement: LimitSettlement,
+  leverage: number,
+  mode?: PositionLimitMode | null,
+): number {
+  return clampLeverageToTiers({ maxLeverage: symbolMaxLeverageFor(symbol, settlement, mode) }, leverage);
 }
 
 /** 没设置过杠杆的标的的起手杠杆（读出来时再夹到合约的最高杠杆）。 */
 export const DEFAULT_SYMBOL_LEVERAGE = 35;
 
 /**
- * 按标的存的那一个杠杆，在某种结算方式下实际生效的值：没存过取 35x，再夹到这张合约的最高杠杆。
- * TradingContext.getSymbolLeverage 与加仓计算器（按被加仓仓位的结算方式）读的都是它。
+ * 按标的存的那一个杠杆，在某种结算方式下实际生效的值：没存过取 35x，再夹到这张合约的最高杠杆
+ * （无限制模式下夹到 150x）。TradingContext.getSymbolLeverage 与加仓计算器（按被加仓仓位的结算方式）读的都是它。
  */
 export function effectiveSymbolLeverage(
   stored: number | null | undefined,
   symbol: string,
   settlement: LimitSettlement,
+  mode?: PositionLimitMode | null,
 ): number {
   const raw = stored == null ? NaN : Number(stored);
-  return clampSymbolLeverage(symbol, settlement, Number.isFinite(raw) ? raw : DEFAULT_SYMBOL_LEVERAGE);
+  return clampSymbolLeverage(symbol, settlement, Number.isFinite(raw) ? raw : DEFAULT_SYMBOL_LEVERAGE, mode);
 }
 
-/** 同一个币的 U 本位与币本位里较高的那个最高杠杆（两张合约的上限可能不同：BNB 75x / 20x）。 */
-export function maxLeverageAcrossSettlements(symbol: string): number {
+/** 同一个币的 U 本位与币本位里较高的那个最高杠杆（两张合约的上限可能不同：BNB 75x / 20x）；无限制模式下 150x。 */
+export function maxLeverageAcrossSettlements(symbol: string, mode?: PositionLimitMode | null): number {
+  if (isUnlimitedLimitMode(mode)) return UNLIMITED_MAX_LEVERAGE;
   return Math.max(resolveSymbolTiers(symbol, 'usdt').maxLeverage, resolveSymbolTiers(symbol, 'coin').maxLeverage);
 }
 
@@ -121,8 +143,55 @@ export function maxLeverageAcrossSettlements(symbol: string): number {
  * 杠杆按标的只存一份：不看结算方式的写入（偏好里的默认杠杆）夹到两张合约里较高的那个上限，
  * 读的时候再按各自的结算方式夹（effectiveSymbolLeverage）——两张合约各得 min(偏好, 自己的上限)。
  */
-export function clampLeverageAcrossSettlements(symbol: string, leverage: number): number {
-  return clampLeverageToTiers({ maxLeverage: maxLeverageAcrossSettlements(symbol) }, leverage);
+export function clampLeverageAcrossSettlements(symbol: string, leverage: number, mode?: PositionLimitMode | null): number {
+  return clampLeverageToTiers({ maxLeverage: maxLeverageAcrossSettlements(symbol, mode) }, leverage);
+}
+
+/**
+ * 从币安标准切到无限制（含从没选过、按默认进了无限制的老用户第一次打开）时，哪些标的的杠杆要**钉住**、钉在几倍。
+ *
+ * 为什么要钉：币安标准下读出来的杠杆是夹过的（没存过的默认 35x 夹到 LUMIAUSDT 的 10x、旧滑块存下的 125x 夹到
+ * KAITOUSDT 的 75x），仓位就是按夹过的值开的；无限制模式下夹到 150x，同一个保存值一下子读成 35x / 125x。
+ * 保存值不动的话，这些标的的下一笔加仓按新杠杆成交、与现有仓位杠杆不同（合并键含杠杆）就另开一张卡，
+ * 自己那点保证金扛着、强平价贴得更近，下单面板与持仓卡上的杠杆也对不上——而切换本身不该改变任何现有仓位怎么被加仓。
+ *
+ * 规则（只看有持仓或有开仓挂单的标的；什么都没有的标的读成多少都不会分叉，不钉）：
+ *   · 切换前后读出来的杠杆一样 → 不钉（币安的夹值没在起作用）；
+ *   · 否则钉在「现有仓位共同的杠杆」（没有持仓时看开仓挂单）：仓位都按 10x 开 → 钉 10x；
+ *     更新前按 35x 开的旧仓位（币安标准下被夹成 10x、加仓本来就另开）→ 无限制下读成 35x 正好对上，不用钉；
+ *   · 仓位 / 挂单杠杆不一（本来就分叉）→ 钉在切换前读出来的值：切换不改变任何东西。
+ * 钉 = 把按标的存的杠杆写成这个值（写之前与写之后在无限制模式下读出来都 ≤ 150x）。反方向（切到币安标准）不钉：
+ * 超过合约上限的保存值照样按上限生效并提示一次，切回无限制又按原值生效（leverageClampNotice）。
+ */
+export function leveragePinsForUnlimited(args: {
+  leverageMap: Readonly<Record<string, number | null | undefined>>;
+  positionsMap: Readonly<Record<string, readonly Position[] | undefined>>;
+  ordersMap: Readonly<Record<string, readonly PendingOrder[] | undefined>>;
+  /** 这个标的下单面板此刻的结算方式（TradingContext.getSymbolLeverage 按它夹）。 */
+  settlementOf: (symbol: string) => LimitSettlement;
+}): Record<string, number> {
+  const pins: Record<string, number> = {};
+  const symbols = new Set([...Object.keys(args.positionsMap), ...Object.keys(args.ordersMap)]);
+  const common = (levs: number[]): number | null => {
+    const set = new Set(levs);
+    if (set.size !== 1) return null;
+    const [only] = [...set];
+    return Number.isInteger(only) && only >= 1 && only <= UNLIMITED_MAX_LEVERAGE ? only : null;
+  };
+  for (const symbol of symbols) {
+    const held = (args.positionsMap[symbol] ?? []).filter(p => p && isPositionOpen(p));
+    const opening = (args.ordersMap[symbol] ?? []).filter(o => o && !o.reduceOnly);
+    if (held.length === 0 && opening.length === 0) continue;
+    const settlement = args.settlementOf(symbol);
+    const stored = args.leverageMap[symbol];
+    const before = effectiveSymbolLeverage(stored, symbol, settlement, 'binance');
+    const after = effectiveSymbolLeverage(stored, symbol, settlement, 'unlimited');
+    if (before === after) continue;
+    const levs = (held.length > 0 ? held : opening).map(x => Math.max(1, Number(x.leverage) || 1));
+    const target = common(levs) ?? before;
+    if (target !== after) pins[symbol] = target;
+  }
+  return pins;
 }
 
 /**
@@ -341,6 +410,8 @@ interface ExposureItem {
    * 底却必须冻在合并之前（规则四，hedgeExemptBaseUnits）——所以这里记的是「多少」，不是「是不是」。
    */
   legacyUsdAtMark: number;
+  /** 这一笔是底时，底是哪一种（更新前的 / 无限制模式开的）；不是底为 null。只用于文案。 */
+  legacyKind: HedgeBaseKind | null;
   /** 按标记价估的 USD 名义与价（对冲豁免比大小用）；标记价取不到时同 usd / price。 */
   usdAtMark: number;
   priceAtMark: number;
@@ -371,6 +442,7 @@ function exposureItems(
       usd,
       price,
       legacyUsdAtMark: units > 0 ? (usd * baseUnits) / units : 0,
+      legacyKind: baseUnits > 0 ? hedgeBaseKindOf(p) : null,
       usdAtMark: usd,
       priceAtMark: price,
     });
@@ -389,6 +461,7 @@ function exposureItems(
         price: markPrice,
         // 更新前挂出的旧委托：成交后开出（或并进）更新前的仓位，整笔都是底。
         legacyUsdAtMark: isPreUpdateRisk(o) ? usd : 0,
+        legacyKind: isPreUpdateRisk(o) ? 'pre-update' : null,
         usdAtMark: usd,
         priceAtMark: markPrice,
       });
@@ -402,6 +475,7 @@ function exposureItems(
       usd: Math.abs(getPositionNotionalUsd(symbol, part as unknown as Position, price)),
       price,
       legacyUsdAtMark: 0,
+      legacyKind: null,
       usdAtMark: Math.abs(getPositionNotionalUsd(symbol, part as unknown as Position, priceAtMark)),
       priceAtMark,
     });
@@ -437,7 +511,9 @@ export type PositionLimitReason =
   /** 下单之前的敞口自己就已超过上限：这一单再小也过不去。 */
   | 'exposure-over-cap'
   /** 按上限本该拒绝，但这一单是在对冲更新前按旧规则开的仓位，反向总量不超过它们的名义：放行（见文件头）。 */
-  | 'legacy-hedge';
+  | 'legacy-hedge'
+  /** 持仓限制模式是「无限制」：不设上限，放行（杠杆超出 1–150x 时仍拒绝，理由 leverage-above-max）。 */
+  | 'unlimited';
 
 export interface PositionLimitInput {
   symbol: string;
@@ -452,8 +528,12 @@ export interface PositionLimitInput {
    * 杠杆下限：逐仓有持仓时不能降到它以下（leverageFloorOf）。只用来选拒绝理由里的出路；缺省 1。
    */
   leverageFloor?: number;
-  /** 敞口里有没有更新前按旧规则开的仓位（只用于拒绝理由里的说明）。 */
+  /** 敞口里有没有更新前按旧规则开的仓位（或无限制模式下开的仓位；只用于拒绝理由里的说明）。 */
   legacyExposure?: boolean;
+  /** 敞口里对冲豁免的底都是哪几种（文案据此说「更新前的仓位」还是「无限制模式下开的仓位」）；缺省按更新前。 */
+  legacyKinds?: readonly HedgeBaseKind[];
+  /** 持仓限制模式（lib/positionLimitMode）；缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
   /** 这一单的方向；改杠杆时没有。 */
   side?: OrderSide | null;
   /** 这一单的估值价（真币本位按它折币）；只记录下来给「可开」折回 USD 用。 */
@@ -512,6 +592,10 @@ export interface PositionLimitResult {
   /** 合成合约 / 兜底分层的说明；直接对得上币安合约时为 null。 */
   note: string | null;
   tiers: ResolvedSymbolTiers;
+  /** 判的时候用的持仓限制模式；缺省（旧调用口径）为币安标准。 */
+  mode?: PositionLimitMode;
+  /** 见 PositionLimitInput.legacyKinds。 */
+  legacyKinds?: readonly HedgeBaseKind[];
 }
 
 const fmt = (amount: number, unit: string) => formatTierAmount(amount, unit);
@@ -520,7 +604,41 @@ type MessageFields = Pick<PositionLimitResult,
   'reason' | 'leverage' | 'cap' | 'unit' | 'maxLeverage' | 'maxLeverageForResult' | 'topCap'>
   & Partial<Pick<PositionLimitResult,
     'exposureBefore' | 'exposureAfter' | 'maxLeverageForExposure' | 'leverageFloor' | 'legacyExposure'
-    | 'legacyHedgeBase' | 'legacyHedgeRoom' | 'reverseHedgeRoom' | 'legacyHedgeOrder'>>;
+    | 'legacyHedgeBase' | 'legacyHedgeRoom' | 'reverseHedgeRoom' | 'legacyHedgeOrder' | 'mode' | 'legacyKinds'>>;
+
+/**
+ * 对冲豁免的底怎么称呼：只有更新前的仓位（或没说）→「更新前的仓位」（与改动前逐字相同）；
+ * 只有无限制模式下开的 →「无限制模式下开的仓位」；两种都有 →「更新前或无限制模式下开的仓位」。
+ */
+export function hedgeBaseNoun(kinds?: readonly HedgeBaseKind[] | null): string {
+  const pre = !kinds || kinds.length === 0 || kinds.includes('pre-update');
+  const unlimited = !!kinds && kinds.includes('unlimited');
+  if (pre && unlimited) return '更新前或无限制模式下开的仓位';
+  return unlimited ? '无限制模式下开的仓位' : '更新前的仓位';
+}
+
+/** 同上，用在「靠对冲更新前仓位的豁免……」这种紧凑说法里（更新前时不带「的」，与改动前逐字相同）。 */
+export function hedgeBaseShortNoun(kinds?: readonly HedgeBaseKind[] | null): string {
+  const noun = hedgeBaseNoun(kinds);
+  return noun === '更新前的仓位' ? '更新前仓位' : noun;
+}
+
+/** 几组「底的来源」合成一组（去重、保持先后）；文案按合起来的那一组说。 */
+export function mergeHedgeBaseKinds(...groups: (readonly HedgeBaseKind[] | null | undefined)[]): HedgeBaseKind[] {
+  const out: HedgeBaseKind[] = [];
+  for (const group of groups) {
+    for (const kind of group ?? []) if (!out.includes(kind)) out.push(kind);
+  }
+  return out;
+}
+
+/** 「（含更新前按旧规则开的仓位）」那半句，按底的来源换说法。 */
+function legacyExposureNote(kinds?: readonly HedgeBaseKind[] | null): string {
+  const pre = !kinds || kinds.length === 0 || kinds.includes('pre-update');
+  const unlimited = !!kinds && kinds.includes('unlimited');
+  if (pre && unlimited) return '（含更新前按旧规则或无限制模式下开的仓位）';
+  return unlimited ? '（含无限制模式下开的仓位）' : '（含更新前按旧规则开的仓位）';
+}
 
 /** 对冲豁免的容差：同一批数算出来的「恰好等于旧仓位名义」不能因浮点噪声被拒。 */
 const hedgeFits = (order: number, room: number) => order <= room + Math.abs(room) * 1e-9;
@@ -537,11 +655,15 @@ function legacyHedgeNote(r: MessageFields): string {
   const base = Number(r.legacyHedgeBase);
   const room = Number(r.legacyHedgeRoom);
   const reverse = Number(r.reverseHedgeRoom);
+  // 底只有更新前的仓位时与改动前逐字相同；有无限制模式下开的仓位时换成对应的称呼（hedgeBaseNoun）
+  const noun = hedgeBaseNoun(r.legacyKinds);
   if (base > 0 && room > 0 && !hedgeFits(order, room)) {
-    return `这一单是反向对冲更新前的仓位，不受此限的额度最多 ${fmt(room, r.unit)}（按标记价计，连同这一侧已有的持仓与委托不超过旧仓位的 ${fmt(base, r.unit)}）。`;
+    return `这一单是反向对冲${noun}，不受此限的额度最多 ${fmt(room, r.unit)}（按标记价计，连同这一侧已有的持仓与委托不超过旧仓位的 ${fmt(base, r.unit)}）。`;
   }
   if (reverse > 0) {
-    return `反向开仓对冲更新前的仓位不受此限，最多 ${fmt(reverse, r.unit)}。`;
+    return noun === '更新前的仓位'
+      ? `反向开仓对冲更新前的仓位不受此限，最多 ${fmt(reverse, r.unit)}。`
+      : `反向开仓对冲${noun}不受此限，最多 ${fmt(reverse, r.unit)}。`;
   }
   return '';
 }
@@ -561,8 +683,9 @@ function exposureOverCapText(a: {
   maxLeverageForExposure: number;
   leverageFloor: number;
   legacy: boolean;
+  legacyKinds?: readonly HedgeBaseKind[];
 }): string {
-  const head = `现有持仓和当前委托价值 ${fmt(a.exposure, a.unit)}${a.legacy ? '（含更新前按旧规则开的仓位）' : ' '}已超过`;
+  const head = `现有持仓和当前委托价值 ${fmt(a.exposure, a.unit)}${a.legacy ? legacyExposureNote(a.legacyKinds) : ' '}已超过`;
   if (!(a.maxLeverageForExposure >= 1)) {
     return `${head}该合约最大可持有头寸 ${fmt(a.topCap, a.unit)}（任何杠杆都不可开）：`
       + `请先减仓或撤单，把总量降到 ${fmt(a.cap, a.unit)} 以下再开新单。`;
@@ -579,6 +702,9 @@ function exposureOverCapText(a: {
 export function positionLimitMessage(r: MessageFields): string | null {
   switch (r.reason) {
     case 'leverage-above-max':
+      if (isUnlimitedLimitMode(r.mode)) {
+        return `${r.leverage}x 超出无限制模式的杠杆范围 1–${r.maxLeverage}x，请调整杠杆倍数`;
+      }
       return `${r.leverage}x 超过该合约最高杠杆 ${r.maxLeverage}x，请调低杠杆倍数至 ${r.maxLeverage}x 以下`;
     case 'exceeds-top-cap':
       return `超过该合约最大可持有头寸 ${fmt(r.topCap, r.unit)}（任何杠杆都不可开）${legacyHedgeNote(r)}`;
@@ -595,6 +721,7 @@ export function positionLimitMessage(r: MessageFields): string | null {
         maxLeverageForExposure: Number(r.maxLeverageForExposure),
         leverageFloor: Number(r.leverageFloor ?? 1),
         legacy: !!r.legacyExposure,
+        legacyKinds: r.legacyKinds,
       }) + legacyHedgeNote(r);
     default:
       return null;
@@ -624,14 +751,58 @@ export function leverageChangeRefusalMessage(r: PositionLimitResult): string | n
       maxLeverageForExposure: r.maxLeverageForExposure,
       leverageFloor: floor,
       legacy: r.legacyExposure,
+      legacyKinds: r.legacyKinds,
     })}`;
   }
   return positionLimitMessage(r);
 }
 
 /**
+ * 无限制模式的判定：不设上限（cap / remaining / topCap 都是 Infinity，「可开」只受余额约束），
+ * 杠杆只要在 1–150x 之内就放行（理由 'unlimited'）；只减仓照旧是 'reduce-only'。
+ * 敞口照实记下（exposureBefore / After），只是不拿它比任何上限。
+ */
+function unlimitedPositionLimit(input: PositionLimitInput): PositionLimitResult {
+  const tiers = resolveSymbolTiers(input.symbol, input.settlement);
+  const leverage = Number(input.leverage);
+  const before = Math.max(0, Number(input.exposureBefore));
+  const order = Math.max(0, Math.abs(Number(input.orderNotional)));
+  const base = {
+    leverage,
+    cap: Infinity,
+    unit: tiers.unit,
+    maxLeverageForResult: UNLIMITED_MAX_LEVERAGE,
+    maxLeverageForExposure: UNLIMITED_MAX_LEVERAGE,
+    leverageFloor: 1,
+    legacyExposure: false,
+    exposureBefore: before,
+    exposureAfter: before + order,
+    remaining: Infinity,
+    maxLeverage: UNLIMITED_MAX_LEVERAGE,
+    topCap: Infinity,
+    side: input.side ?? null,
+    orderPrice: Number(input.orderPrice) > 0 ? Number(input.orderPrice) : NaN,
+    legacyHedgeBase: NaN,
+    legacyHedgeRoom: NaN,
+    reverseHedgeRoom: NaN,
+    legacyHedgeOrder: NaN,
+    legacyHedgeMarkPrice: NaN,
+    note: null,
+    tiers,
+    mode: 'unlimited' as const,
+  };
+  if (input.reduceOnly) return { ...base, ok: true, reason: 'reduce-only', message: null };
+  if (!(leverage >= 1) || leverage > UNLIMITED_MAX_LEVERAGE) {
+    const failed = { ...base, ok: false, reason: 'leverage-above-max' as const };
+    return { ...failed, message: positionLimitMessage(failed) };
+  }
+  return { ...base, ok: true, reason: 'unlimited', message: null };
+}
+
+/**
  * 唯一的判定（输入都已是档位单位）。
  *
+ *   无限制模式        → 见 unlimitedPositionLimit（不设上限）；以下都是币安标准
  *   只减仓            → 放行（见文件头：与币安刻意不同）
  *   敞口算不出（无价）→ 放行；引擎在没有价格时本来就拒绝下单
  *   杠杆 > 合约最高   → 拒绝
@@ -641,6 +812,7 @@ export function leverageChangeRefusalMessage(r: PositionLimitResult): string | n
  *   后三种拒绝里，这一单若是反向对冲更新前的仓位、且没超过豁免额度 → 放行（legacy-hedge，见文件头）
  */
 export function checkPositionLimit(input: PositionLimitInput): PositionLimitResult {
+  if (isUnlimitedLimitMode(input.mode)) return unlimitedPositionLimit(input);
   const tiers = resolveSymbolTiers(input.symbol, input.settlement);
   const leverage = Number(input.leverage);
   const before = Math.max(0, Number(input.exposureBefore));
@@ -672,6 +844,7 @@ export function checkPositionLimit(input: PositionLimitInput): PositionLimitResu
     legacyHedgeMarkPrice: hedge && Number(hedge.markPrice) > 0 ? Number(hedge.markPrice) : NaN,
     note: tiers.note,
     tiers,
+    ...(input.legacyKinds && input.legacyKinds.length > 0 ? { legacyKinds: input.legacyKinds } : {}),
   };
   const pass = (reason: PositionLimitReason): PositionLimitResult => ({ ...base, ok: true, reason, message: null });
   const fail = (reason: PositionLimitReason): PositionLimitResult => {
@@ -706,6 +879,8 @@ export interface ExposureContext {
   pathFrom?: number;
   /** 到 markPrice 之前先到过的价（见 ExposureOptions.pathVia）。 */
   pathVia?: readonly number[];
+  /** 持仓限制模式（lib/positionLimitMode）；缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
 }
 
 /**
@@ -731,6 +906,8 @@ interface ExposureBreakdown {
    * 对冲豁免的底（更新前按旧规则开的持仓里冻结的那一截；豁免仓位不算，分层加仓并进来的那一截也不算）。
    */
   legacyBySide: Record<OrderSide, number>;
+  /** 底都是哪几种（文案用）。 */
+  legacyKinds: HedgeBaseKind[];
 }
 
 /**
@@ -739,7 +916,9 @@ interface ExposureBreakdown {
  */
 function exposureBreakdown(ctx: ExposureContext): ExposureBreakdown {
   const tiers = resolveSymbolTiers(ctx.symbol, ctx.settlement);
-  const out: ExposureBreakdown = { total: 0, markBySide: { LONG: 0, SHORT: 0 }, legacyBySide: { LONG: 0, SHORT: 0 } };
+  const out: ExposureBreakdown = {
+    total: 0, markBySide: { LONG: 0, SHORT: 0 }, legacyBySide: { LONG: 0, SHORT: 0 }, legacyKinds: [],
+  };
   const items = exposureItems(ctx.symbol, ctx.positions, ctx.orders, ctx.markPrice, {
     settlement: ctx.settlement,
     excludeOrderIds: ctx.excludeOrderIds,
@@ -754,6 +933,7 @@ function exposureBreakdown(ctx: ExposureContext): ExposureBreakdown {
     // 底按这一笔自己那部分折：整笔是底时与 atMark 相等，分层加仓并进来之后只有冻结的那一截。
     if (item.legacyUsdAtMark > 0) {
       out.legacyBySide[item.side] += tierAmountFromUsdNotional(tiers, item.legacyUsdAtMark, item.priceAtMark);
+      if (item.legacyKind && !out.legacyKinds.includes(item.legacyKind)) out.legacyKinds.push(item.legacyKind);
     }
   }
   return out;
@@ -788,6 +968,13 @@ export function checkOrderPositionLimit(ctx: ExposureContext & {
    */
   const hedgeMark = ctx.markPrice > 0 ? ctx.markPrice : orderPrice;
   const orderUsdAtMark = ctx.settlement === 'usdt' && orderPrice > 0 ? (orderUsd * hedgeMark) / orderPrice : orderUsd;
+  const legacyPositions = (ctx.positions ?? []).filter(p => p && isPositionOpen(p)
+    && limitSettlementOf(p) === ctx.settlement && isHedgeBaseRisk(p));
+  const legacyKinds = [...ex.legacyKinds];
+  for (const p of legacyPositions) {
+    const kind = hedgeBaseKindOf(p);
+    if (kind && !legacyKinds.includes(kind)) legacyKinds.push(kind);
+  }
   return checkPositionLimit({
     symbol: ctx.symbol,
     settlement: ctx.settlement,
@@ -796,8 +983,9 @@ export function checkOrderPositionLimit(ctx: ExposureContext & {
     orderNotional: orderUsd === 0 ? 0 : tierAmountFromUsdNotional(tiers, orderUsd, orderPrice),
     reduceOnly: ctx.reduceOnly,
     leverageFloor: leverageFloorOf(ctx.positions),
-    legacyExposure: (ctx.positions ?? []).some(p => p && isPositionOpen(p)
-      && limitSettlementOf(p) === ctx.settlement && isPreUpdateRisk(p)),
+    legacyExposure: legacyPositions.length > 0,
+    legacyKinds,
+    mode: ctx.mode,
     side,
     orderPrice: Number(ctx.orderPrice) > 0 ? Number(ctx.orderPrice) : undefined,
     legacyHedge: side
@@ -856,7 +1044,8 @@ export function checkPlacementPositionLimit(ctx: ExposureContext & {
   const px = Number(ctx.triggerPrice);
   const kind: PlacementCheckKind = ctx.triggerKind ?? 'trigger';
   let atTrigger: PlacementLimitResult['atTrigger'] = null;
-  if (!ctx.reduceOnly && px > 0) {
+  // 无限制模式不设上限，触发 / 成交那一刻也不再判：没有第二道
+  if (!ctx.reduceOnly && px > 0 && !isUnlimitedLimitMode(ctx.mode)) {
     /**
      * 这一单在 P 上的 USD 名义：U 本位的币数不变、名义随价走（名义 ÷ 估值价 × P）；币本位的名义是张数 × 面值，与价无关。
      * 条件单 / 限价单的估值价本来就是 P，分段订单的估值价是子单均价。没给估值价时视为名义已按 P 估好（旧调用口径）。
@@ -899,6 +1088,14 @@ function placementCheckLead(kind: PlacementCheckKind, price: number): string {
  */
 export function placementUsesLegacyHedge(r: Pick<PlacementLimitResult, 'ok' | 'atMark' | 'atTrigger'>): boolean {
   return r.ok && (r.atMark.reason === 'legacy-hedge' || r.atTrigger?.reason === 'legacy-hedge');
+}
+
+/**
+ * 这一单靠对冲豁免放行时，底是哪几种（现价那一道与第二道合起来）：下单面板的说明、引擎记在委托上的
+ * hedgeBaseKinds 都按它说「更新前的仓位」还是「无限制模式下开的仓位」，免得同一个面板上两种说法。
+ */
+export function placementHedgeBaseKinds(r: Pick<PlacementLimitResult, 'atMark' | 'atTrigger'>): HedgeBaseKind[] {
+  return mergeHedgeBaseKinds(r.atMark.legacyKinds, r.atTrigger?.legacyKinds);
 }
 
 /**
@@ -1197,8 +1394,11 @@ export function placementOrderNotionalUsd(
   return placementOrderValuation(symbol, order, referencePrice, markPrice).usd;
 }
 
-/** 被拒提示的补充说明：敞口的加法摆出来，并写明分层来源。 */
+/** 被拒提示的补充说明：敞口的加法摆出来，并写明分层来源。无限制模式只会因杠杆超出 1–150x 被拒，说模式本身。 */
 export function positionLimitDetail(r: PositionLimitResult): string {
+  if (isUnlimitedLimitMode(r.mode)) {
+    return `无限制模式：任何币种杠杆 1–${UNLIMITED_MAX_LEVERAGE}x，不设持仓上限`;
+  }
   const source = r.tiers.binanceSymbol
     ? `币安 ${r.tiers.binanceSymbol} 分层`
     : '兜底分层';
@@ -1208,27 +1408,40 @@ export function positionLimitDetail(r: PositionLimitResult): string {
 
 // ─────────────────────── 已挂触发类开仓单的预警 ───────────────────────
 
+/** 无限制模式下挂出的委托（PendingOrder.limitModeAtPlacement）。 */
+export function placedUnderUnlimited(order: Pick<PendingOrder, 'limitModeAtPlacement'> | null | undefined): boolean {
+  return order?.limitModeAtPlacement === 'unlimited';
+}
+
 /**
  * 一张挂单在触发 / 成交那一刻会被 settleFillDebit 再判分层上限、而且事先知道按哪个价判——按那个价预判（见 recheckedAtFill）：
  *   本次更新之后下的（带分层戳或对冲豁免标记）触发类开仓单 → 触发价（跟踪委托为激活价），kind 'trigger'；
- *   只靠对冲豁免挂出的限价单 / 只做 Maker 单 → 委托价（成交那一刻再判豁免是否仍成立），kind 'limit'。
- * 其余返回 null：更新前挂出的（没有任何 riskModel）触发时不再判；普通分层限价单成交时不再判；
- * 没有激活价的跟踪委托不知道会在哪个价触发，不预判。
+ *   只靠对冲豁免挂出的限价单 / 只做 Maker 单 → 委托价（成交那一刻再判豁免是否仍成立），kind 'limit'；
+ *   无限制模式下挂出、此刻按币安标准判的限价单 / 只做 Maker 单 → 委托价（下单时没过分层，成交那一刻判），kind 'limit'。
+ * 其余返回 null：更新前挂出的（没有任何 riskModel）触发时不再判；币安标准下挂出的普通分层限价单成交时不再判；
+ * 没有激活价的跟踪委托不知道会在哪个价触发，不预判；**此刻是无限制模式时一律 null**（不再判，也不预警）。
  */
-export function recheckPrice(order: PendingOrder | null | undefined): { price: number; kind: PlacementCheckKind } | null {
+export function recheckPrice(
+  order: PendingOrder | null | undefined,
+  mode?: PositionLimitMode | null,
+): { price: number; kind: PlacementCheckKind } | null {
+  if (isUnlimitedLimitMode(mode)) return null;
   if (!order || order.reduceOnly || !hasRiskProvenance(order)) return null;
   if (isTriggeredOpenOrder(order)) {
     const price = triggeredCheckPrice(order);
     return price > 0 ? { price, kind: 'trigger' } : null;
   }
-  if (isLegacyHedgeRisk(order) && isRestingLimitOrder(order)) {
+  if ((isLegacyHedgeRisk(order) || placedUnderUnlimited(order)) && isRestingLimitOrder(order)) {
     const price = Number(order.price);
     return Number.isFinite(price) && price > 0 ? { price, kind: 'limit' } : null;
   }
   return null;
 }
 
-/** 这张挂单触发 / 成交时会被再判、而且事先知道判在哪个价（recheckPrice 不为 null）：委托列表标记、预警、计算器都看它。 */
+/**
+ * 这张挂单触发 / 成交时会被再判、而且事先知道判在哪个价（recheckPrice 不为 null）：委托列表标记、预警、计算器都看它。
+ * 按币安标准判（只收一个参数，好直接交给 .map / .some）；无限制模式下调用方自己跳过（那时什么都不再判）。
+ */
 export function isTriggerRecheckedOrder(order: PendingOrder | null | undefined): boolean {
   return recheckPrice(order) != null;
 }
@@ -1236,12 +1449,16 @@ export function isTriggerRecheckedOrder(order: PendingOrder | null | undefined):
 /**
  * 成交 / 触发那一刻要不要交给 settleFillDebit 再判（调用方据此决定传不传 trigger）：
  *   触发类开仓单（条件单、跟踪委托、旧止盈止损开仓单）——带来源的才真判，更新前挂出的由闸门自己跳过；
- *   只靠对冲豁免挂出的限价单——成交那一刻豁免可能已经不成立（旧仓位先平掉了）。
- * 普通的分层限价单成交时不再判（与币安一致）。
+ *   只靠对冲豁免挂出的限价单——成交那一刻豁免可能已经不成立（旧仓位先平掉了）；
+ *   无限制模式下挂出的限价单 / 只做 Maker 单（含分段子单）——下单时没过分层，此刻若是币安标准就在成交这一刻判。
+ * 币安标准下挂出的普通分层限价单成交时不再判（与币安一致）。与此刻的模式无关：
+ * 无限制模式下闸门（settleFillDebit）自己什么都不判，传进去也只是让它给仓位定来源。
  */
 export function recheckedAtFill(order: PendingOrder | null | undefined): boolean {
   if (!order || order.reduceOnly) return false;
-  return isTriggeredOpenOrder(order) || order.riskModel === LEGACY_HEDGE_RISK_MODEL;
+  return isTriggeredOpenOrder(order)
+    || order.riskModel === LEGACY_HEDGE_RISK_MODEL
+    || (placedUnderUnlimited(order) && isRestingLimitOrder(order));
 }
 
 /** 触发 / 成交那一刻的预判结果：判在哪个价、哪一种价，以及价格是不是先到过另一侧的 via 再折回来。 */
@@ -1256,6 +1473,8 @@ export interface TriggerCheckState {
   markPrice?: number;
   /** 这条走法先到过的另一侧的价（见文件头「几种走法」）；缺省直接走过去。 */
   via?: number | null;
+  /** 持仓限制模式；无限制时不预判（返回 null）。缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
 }
 
 /**
@@ -1269,7 +1488,7 @@ export function restingTriggerCheck(
   order: PendingOrder,
   state: TriggerCheckState,
 ): TriggerCheckResult | null {
-  const gate = recheckPrice(order);
+  const gate = recheckPrice(order, state.mode);
   if (!gate) return null;
   const { price, kind } = gate;
   const via = Number(state.via) > 0 ? Number(state.via) : null;
@@ -1287,6 +1506,7 @@ export function restingTriggerCheck(
       orderNotionalUsd: getPositionNotionalUsd(symbol, order, price),
       orderPrice: price,
       side: order.side,
+      mode: state.mode,
     }),
     price,
     kind,
@@ -1303,8 +1523,9 @@ export function triggerWaypoints(
   order: PendingOrder,
   orders: readonly PendingOrder[] | null | undefined,
   markPrice: number | undefined,
+  mode?: PositionLimitMode | null,
 ): number[] {
-  const gate = recheckPrice(order);
+  const gate = recheckPrice(order, mode);
   const mark = Number(markPrice);
   if (!gate || !(mark > 0)) return [];
   const direction = Math.sign(gate.price - mark);
@@ -1326,7 +1547,7 @@ export function restingTriggerScenarios(
   symbol: string,
   order: PendingOrder,
   state: Omit<TriggerCheckState, 'via'>,
-  waypoints: readonly number[] = triggerWaypoints(order, state.orders, state.markPrice),
+  waypoints: readonly number[] = triggerWaypoints(order, state.orders, state.markPrice, state.mode),
 ): TriggerCheckResult[] {
   const out: TriggerCheckResult[] = [];
   for (const via of [null, ...waypoints]) {
@@ -1347,8 +1568,11 @@ export function doomedAtTrigger(
   positions: readonly Position[] | null | undefined,
   orders: readonly PendingOrder[] | null | undefined,
   markPrice?: number,
+  /** 此刻的持仓限制模式；无限制时从不标（触发 / 成交时不再判）。缺省按币安标准。 */
+  mode?: PositionLimitMode | null,
 ): TriggerCheckResult | null {
-  return restingTriggerScenarios(symbol, order, { positions, orders, markPrice }).find(r => !r.ok) ?? null;
+  if (isUnlimitedLimitMode(mode)) return null;
+  return restingTriggerScenarios(symbol, order, { positions, orders, markPrice, mode }).find(r => !r.ok) ?? null;
 }
 
 /** 「触发价 0.9 上」「委托价 1.1 成交时」（价格先到 1.2 再回来时）——委托列表标记的悬停说明用。 */
@@ -1457,7 +1681,10 @@ export function newlyDoomedTriggerOrders(args: {
   /** 此刻的现价（价格从这里走到各张单的判定价）。 */
   markPrice?: number;
   checkAdded?: boolean;
+  /** 此刻的持仓限制模式；无限制时触发 / 成交那一刻不再判，没有什么会「注定被拒」。缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
 }): TriggerRisk[] {
+  if (isUnlimitedLimitMode(args.mode)) return [];
   const positions = args.positions ?? [];
   const orders = args.orders ?? [];
   const addedOrders = args.added?.orders ?? [];

@@ -64,8 +64,18 @@ const errorTitles = (spy: ReturnType<typeof vi.spyOn>) => spy.mock.calls.map(cal
 const openPositions = (ctx: ReturnType<typeof useTradingContext>) =>
   (ctx.positionsMap[SYMBOL] ?? []).filter(p => (p.contracts ?? p.quantity) > 0);
 
-beforeEach(() => {
+
+/**
+ * 这些用例写的全是「币安标准」持仓限制模式的规则（分层上限、单笔上限、分层维持保证金）；
+ * 持仓限制模式默认是无限制（lib/positionLimitMode），所以每次清空存储之后显式选回币安标准。
+ */
+function resetStorageBinance() {
   localStorage.clear();
+  localStorage.setItem(KEY('position_limit_mode'), JSON.stringify('binance'));
+}
+
+beforeEach(() => {
+  resetStorageBinance();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(T0);
 });
@@ -972,7 +982,7 @@ describe('【复核 r3】杠杆的保存：偏好的默认杠杆按两张合约�
 describe('【复核 r3】逐仓强平的弹窗：维持保证金按被强平仓位的模型说明', () => {
   function liquidate(over: Record<string, unknown>) {
     const pos = storedUsdtPosition('iso-1', 'LONG', 60_000, 1.0, 10, over);
-    localStorage.clear();
+    resetStorageBinance();
     localStorage.setItem(KEY('positions_map'), JSON.stringify({ [SYMBOL]: [pos] }));
     const view = mount(1.0);
     for (const [start, low] of [[SIM0, 1], [SIM0 + 60_000, 0.85]] as const) {
@@ -1013,7 +1023,7 @@ describe('【复核 r3】同一轮里两张 TWAP：引擎按前一张的新版�
     const aAfter = { ...a, twapFilledQty: 1_000 };
     const slice = { ...b, quantity: 1_000 } as PendingOrder;
     const run = (trigger: ReturnType<typeof twapSliceTrigger>) => {
-      localStorage.clear();
+      resetStorageBinance();
       const view = seedAndMount({
         positions: [storedUsdtPosition('twap-pos', 'LONG', 25_000, 1.0, 15, TIERED)],
         orders: [a, b], leverage: 15, price: 1.0,
@@ -1141,7 +1151,7 @@ describe('【复核 v1】只靠旧仓位对冲豁免放行的单：按旧模型�
     expect(smallFill.position.riskModel).toBe('binance-tiers-v1');
     stoppedUnmount(view);
 
-    localStorage.clear();
+    resetStorageBinance();
     const big = seedAndMount({
       positions: [storedUsdtPosition('legacy-long', 'LONG', 200_000, 1.0, 20)], orders: [hedge], leverage: 20, price: 0.9,
     });
@@ -1624,7 +1634,7 @@ describe('【复核 r5】计算器给的量：挂上加仓与补挂的对冲，�
     const btc = 'BTCUSDT';
     const run = (units: number | null, sequence: 'add-first' | 'hedge-first') => {
       __resetNotificationCenterForTests();
-      localStorage.clear();
+      resetStorageBinance();
       const view = mount(100_000, btc);
       const { result } = view;
       act(() => result.current.setSymbolLeverage(btc, 125, 'coin'));
@@ -1675,7 +1685,7 @@ describe('【复核 r5】计算器给的量：挂上加仓与补挂的对冲，�
   it('【复现】U 本位空仓跌破加仓：KAITOUSDT 5x、空 100,000、卖出条件单 @0.8、S₁ 1.05——计算器给 19,047.62，两种先后都成交；旧口径的 21,621.62 挂对冲时就预警、先跌破之后对冲被撤', () => {
     const run = (units: number | null, sequence: 'add-first' | 'hedge-first') => {
       __resetNotificationCenterForTests();
-      localStorage.clear();
+      resetStorageBinance();
       const view = mount(1.0);
       const { result } = view;
       act(() => result.current.setSymbolSettlementMode(SYMBOL, 'usdt'));

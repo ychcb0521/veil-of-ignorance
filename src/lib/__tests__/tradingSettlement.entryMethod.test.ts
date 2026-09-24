@@ -78,6 +78,10 @@ describe('开仓方式跟随每笔成交持久保存', () => {
     const source = readFileSync(path as string, 'utf8');
     const calls = [...source.matchAll(/executeSettlementFill\([\s\S]*?\);/g)];
     expect(calls).toHaveLength(count as number);
-    for (const [call] of calls) expect(call).toMatch(new RegExp(`'${method}'[,]?\\s*\\);$`));
+    // 开仓方式后面**必须**跟成交那一刻的持仓限制模式（决定仓位的维持保证金模型，lib/positionLimitMode）：
+    // 漏传就按币安标准盖分层戳，无限制模式下开的大仓位会按分层维持保证金一开出来就被强平
+    for (const [call] of calls) {
+      expect(call).toMatch(new RegExp(`'${method}',\\s*(limitMode|getPositionLimitMode\\?\\.\\(\\))[,]?\\s*\\);$`));
+    }
   });
 });

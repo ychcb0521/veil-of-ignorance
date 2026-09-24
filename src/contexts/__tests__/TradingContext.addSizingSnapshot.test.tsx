@@ -44,8 +44,18 @@ const plan = (over: Partial<Omit<AddSizingSnapshot, 'at'>> = {}): Omit<AddSizing
 
 const warnings = () => getNotificationSnapshot().entries.filter(e => e.level === 'warning');
 
-beforeEach(() => {
+
+/**
+ * 这些用例写的全是「币安标准」持仓限制模式的规则（分层上限、单笔上限、分层维持保证金）；
+ * 持仓限制模式默认是无限制（lib/positionLimitMode），所以每次清空存储之后显式选回币安标准。
+ */
+function resetStorageBinance() {
   localStorage.clear();
+  localStorage.setItem('sim_anon_position_limit_mode', JSON.stringify('binance'));
+}
+
+beforeEach(() => {
+  resetStorageBinance();
   __resetAddSizingPlanForTests();
   __resetNotificationCenterForTests();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });

@@ -82,8 +82,18 @@ const openPositions = (view: View, symbol = SYMBOL) =>
   (view.result.current.positionsMap[symbol] ?? []).filter(p => (p.contracts ?? p.quantity) > 0);
 const cancelledIds = () => (JSON.parse(localStorage.getItem(KEY('cancelled_orders')) ?? '[]') as { id: string }[]).map(c => c.id);
 
-beforeEach(() => {
+
+/**
+ * 这些用例写的全是「币安标准」持仓限制模式的规则（分层上限、单笔上限、分层维持保证金）；
+ * 持仓限制模式默认是无限制（lib/positionLimitMode），所以每次清空存储之后显式选回币安标准。
+ */
+function resetStorageBinance() {
   localStorage.clear();
+  localStorage.setItem(KEY('position_limit_mode'), JSON.stringify('binance'));
+}
+
+beforeEach(() => {
+  resetStorageBinance();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(T0);
 });

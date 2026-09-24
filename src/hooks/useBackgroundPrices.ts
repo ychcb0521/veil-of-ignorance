@@ -40,6 +40,7 @@ export function useBackgroundPrices() {
     setPositionsMap,
     setFilledOrders,
     settleFillDebit,
+    getPositionLimitMode,
     tradingMode,
     timeMode,
     coinTimelines,
@@ -133,8 +134,9 @@ export function useBackgroundPrices() {
           const isMaker = order.type === 'LIMIT' || order.type === 'POST_ONLY' || order.type === 'LIMIT_TP_SL';
           // 后台标的用它**自己**的钟取章：隔离模式下它和盘面标的不在同一条时间线上。
           const filledTimelineId = stampClock(symbol);
+          // 仓位的维持保证金模型按成交这一刻的持仓限制模式定（无限制 → 'unlimited-v1'，按 0.4%）
           const { fee, margin, position } = executeSettlementFill(
-            symbol, fillPrice, order, isMaker, simulatedTime, Date.now(), filledTimelineId, 'order',
+            symbol, fillPrice, order, isMaker, simulatedTime, Date.now(), filledTimelineId, 'order', getPositionLimitMode?.(),
           );
           const actualFillPrice = position.entryPrice;
 
@@ -259,7 +261,7 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, executeReduceOnlyTrigger, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
+    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, getPositionLimitMode, executeReduceOnlyTrigger, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {

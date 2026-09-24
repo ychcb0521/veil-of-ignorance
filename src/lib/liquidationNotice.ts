@@ -58,7 +58,7 @@ const pct = (rate: number) => `${+(rate * 100).toFixed(2)}%`;
 function maintenanceText(model: LiquidationMaintenanceModel = 'legacy'): string {
   const legacy = `维持保证金率 ${pct(MAINTENANCE_MARGIN_RATE)}`;
   if (model === 'tiered') return '维持保证金按币安分层（名义 × 档位费率 − 速算扣除额）';
-  if (model === 'mixed') return `维持保证金：分层仓位按币安分层，更新前的仓位与靠对冲豁免开的仓位按${legacy}`;
+  if (model === 'mixed') return `维持保证金：分层仓位按币安分层，更新前的仓位、靠对冲豁免开的仓位与无限制模式下开的仓位按${legacy}`;
   return legacy;
 }
 

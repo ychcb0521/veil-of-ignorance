@@ -1,8 +1,9 @@
 /**
  * 会话模式控制条 —— 从 TimeControl 抽出、移到主 Header（复盘中心左侧）。
- * 包含两组开关：
+ * 包含三组开关：
  *   ① 交易模式：决策记录 ↔ 直接交易（全局会话开关，直接显示）；
- *   ② 时间模式：同步 ↔ 隔离（折叠进一个极小、近乎隐形的符号，点开才切换）。
+ *   ② 持仓限制模式：无限制 ↔ 币安标准（紧挨在「直接交易」右边，默认无限制，见 lib/positionLimitMode）；
+ *   ③ 时间模式：同步 ↔ 隔离（折叠进一个极小、近乎隐形的符号，点开才切换）。
  * 时间模式的切换守卫（持仓阻断 / 运行中币种确认弹窗）一并迁来，逻辑与原 TimeControl 一致。
  */
 
@@ -20,6 +21,15 @@ import {
 } from '@/components/ui/dialog';
 import type { TimeMode, CoinTimelinesMap } from '@/contexts/TradingContext';
 import { useTradingContext } from '@/contexts/TradingContext';
+import {
+  POSITION_LIMIT_MODE_HINT,
+  POSITION_LIMIT_MODE_LABEL,
+  POSITION_LIMIT_MODE_SWITCH_LINE,
+  normalizePositionLimitMode,
+  type PositionLimitMode,
+} from '@/lib/positionLimitMode';
+import { binanceSwitchRiskText, ordersRefusedUnderBinance } from '@/lib/positionLimitModeSwitch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface Props {
   timeMode?: TimeMode;
@@ -163,6 +173,34 @@ export function SessionModeControls({
     );
   };
 
+  // ===== 持仓限制模式：无限制 / 币安标准 =====
+  // 旧的测试替身里可能没有这两个字段：读不到按默认的无限制显示，点了也不报错。
+  const positionLimitMode = normalizePositionLimitMode(ctx.positionLimitMode);
+  const handlePositionLimitModeClick = (next: PositionLimitMode) => {
+    if (next === positionLimitMode || !ctx.setPositionLimitMode) return;
+    /**
+     * 切到币安标准：无限制下挂出的委托到触发 / 成交时按币安判，按此刻的持仓与价格就过不去的先数出来说——
+     * 尤其是按成数挂的止盈止损（触发时超单笔上限被撤，仓位就没了保护）。有这样的单时提示升为警告。
+     */
+    const risk = next === 'binance'
+      ? binanceSwitchRiskText(ordersRefusedUnderBinance(ctx.ordersMap, ctx.positionsMap, ctx.priceMap))
+      : null;
+    ctx.setPositionLimitMode(next);
+    const title = next === 'unlimited' ? '已切换到无限制模式' : '已切换到币安标准模式';
+    const description = `${POSITION_LIMIT_MODE_SWITCH_LINE[next]}。`
+      + '现有仓位保持原来的维持保证金口径；新模式作用于之后的下单、挂单触发 / 成交与杠杆调整。'
+      + (risk ? ` ${risk}` : '');
+    if (risk) toast.warning(title, { description });
+    else toast.message(title, { description });
+  };
+  // 与决策记录 / 直接交易同一套尺寸与选中样式；选中色另取一种（像倒叙播放的紫色一样），免得和紧挨着的「直接交易」金色连成一片
+  const limitSegmentCls = (active: boolean) =>
+    `flex items-center whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+      active
+        ? 'bg-sky-500/15 text-sky-600 dark:text-sky-400'
+        : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+    }`;
+
   const timeModeBtnCls = (active: boolean, disabled: boolean) =>
     `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
       active
@@ -242,6 +280,46 @@ export function SessionModeControls({
       >
         <Zap className="w-3 h-3" /> 直接交易
       </button>
+
+      {/* 持仓限制模式：紧挨「直接交易」右边，用细分隔线与交易模式分开。
+          不用 title（浏览器的悬停提示跟着鼠标走，会盖住右上角的模拟时钟）：说明写在 aria-label 里，
+          悬停时在按钮**正下方**弹一个定位好的说明（Radix Tooltip，贴着按钮、不跟鼠标），切换时记入「历史消息」。 */}
+      {/* 说明不可点，关掉「悬停在说明上保持打开」：否则从一段移到紧挨着的另一段时，鼠标落在前一段说明的保持区里，另一段的说明打不开 */}
+      <TooltipProvider delayDuration={300} disableHoverableContent>
+        <div
+          role="group"
+          aria-label="持仓限制模式"
+          data-testid="position-limit-mode"
+          className="flex items-center gap-0.5 border-l border-border/60 pl-1.5 ml-0.5"
+        >
+          {(['unlimited', 'binance'] as const).map(mode => (
+            <Tooltip key={mode}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => handlePositionLimitModeClick(mode)}
+                  data-testid={`position-limit-mode-${mode}`}
+                  aria-pressed={positionLimitMode === mode}
+                  aria-label={POSITION_LIMIT_MODE_HINT[mode]}
+                  className={limitSegmentCls(positionLimitMode === mode)}
+                >
+                  {POSITION_LIMIT_MODE_LABEL[mode]}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                align="end"
+                collisionPadding={8}
+                data-testid={`position-limit-mode-tip-${mode}`}
+                className="max-w-[260px] text-[11px] leading-5"
+              >
+                {POSITION_LIMIT_MODE_HINT[mode]}
+                {mode === 'unlimited' ? '（默认）' : ''}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
+      </TooltipProvider>
 
       {/* 时间模式：折叠进一个极小、近乎隐形的符号；点开才露出 同步 / 隔离 */}
       {onSetTimeMode && (

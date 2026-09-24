@@ -46,6 +46,9 @@ vi.mock('@/contexts/TradingContext', async () => {
     useTradingContext: () => ({
       tradingMode: 'direct',
       setTradingMode: vi.fn(),
+      // 可下单量按币安分层封顶：币安标准持仓限制模式（默认是无限制）
+      positionLimitMode: 'binance',
+      setPositionLimitMode: vi.fn(),
       positionsMap: { RAVEUSDT: scene.positions ?? positions },
       ordersMap: book.orders,
       // 刻意放一个陈旧价：priceMap 是持久化的行情缓存，计算器不该再读它

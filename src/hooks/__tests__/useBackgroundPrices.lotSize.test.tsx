@@ -55,8 +55,18 @@ async function poll() {
   await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
 }
 
-beforeEach(() => {
+
+/**
+ * 这些用例写的全是「币安标准」持仓限制模式的规则（分层上限、单笔上限、分层维持保证金）；
+ * 持仓限制模式默认是无限制（lib/positionLimitMode），所以每次清空存储之后显式选回币安标准。
+ */
+function resetStorageBinance() {
   localStorage.clear();
+  localStorage.setItem(KEY('position_limit_mode'), JSON.stringify('binance'));
+}
+
+beforeEach(() => {
+  resetStorageBinance();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   vi.setSystemTime(T0);
   // 这一根 K 线穿过 1.0：两张单都在 1.0 上触发，合成币本位在 1.0 上一笔最多 20,000 张
@@ -110,6 +120,34 @@ describe('后台标的：触发时超过单笔市价上限', () => {
     await poll();
     expect(error.mock.calls.map(c => String(c[0]))).not.toContain('止损触发时超过单笔市价上限，委托已撤销');
     expect((view.result.current.positionsMap[SYMBOL] ?? []).filter(p => (p.contracts ?? 0) > 0)).toHaveLength(0);
+    act(() => view.result.current.sim.stopSimulation());
+    view.unmount();
+  });
+});
+
+/**
+ * 后台成交按**成交那一刻**的持仓限制模式定仓位的维持保证金模型（useBackgroundPrices 把 getPositionLimitMode() 传给
+ * executeSettlementFill）：无限制模式下开出的仓位盖 'unlimited-v1'、按 0.4%；漏传就按币安标准盖分层戳——
+ * 23,000 张 20x 在分层下一开出来就被强平。同一张单在币安标准下触发时超单笔上限被撤（见上面第一条）。
+ */
+describe('后台标的：无限制模式下触发成交', () => {
+  it('开仓条件单（23,000 张 @1.0，超过币安单笔上限）：照常成交，开出的仓位按 0.4%（unlimited-v1）', async () => {
+    localStorage.setItem(KEY('position_limit_mode'), JSON.stringify('unlimited'));
+    const view = mountWith([], [{ ...coinOrder, id: 'bg-cond-u', side: 'LONG', type: 'CONDITIONAL', stopPrice: 1.0, quantity: 23_000, contracts: 23_000, riskModel: 'binance-tiers-v1', limitModeAtPlacement: 'unlimited' }]);
+    const error = vi.spyOn(toast, 'error');
+    await poll();
+    expect(error.mock.calls.map(c => String(c[0]))).not.toContain('触发时超过单笔市价上限，委托已撤销');
+    const opened = (view.result.current.positionsMap[SYMBOL] ?? []).filter(p => (p.contracts ?? 0) > 0);
+    expect(opened.map(p => [p.contracts, p.riskModel])).toEqual([[23_000, 'unlimited-v1']]);
+    act(() => view.result.current.sim.stopSimulation());
+    view.unmount();
+  });
+
+  it('币安标准下同一类单（放得下的 10,000 张）：开出的仓位沿用委托的分层戳', async () => {
+    const view = mountWith([], [{ ...coinOrder, id: 'bg-cond-b', side: 'LONG', type: 'CONDITIONAL', stopPrice: 1.0, quantity: 10_000, contracts: 10_000, riskModel: 'binance-tiers-v1' }]);
+    await poll();
+    const opened = (view.result.current.positionsMap[SYMBOL] ?? []).filter(p => (p.contracts ?? 0) > 0);
+    expect(opened.map(p => [p.contracts, p.riskModel])).toEqual([[10_000, 'binance-tiers-v1']]);
     act(() => view.result.current.sim.stopSimulation());
     view.unmount();
   });

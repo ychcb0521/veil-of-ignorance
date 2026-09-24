@@ -30,6 +30,8 @@
  *            对冲按 S₁ 折张（向上取整：对冲只能多盖不能少盖）。
  *
  * 只管「可下单量」：计划快照（addCoinsMax）仍是 Plan B 的上限，成交后复判与 Legs 校验照旧只判 Plan B。
+ *
+ * 持仓限制模式为「无限制」（lib/positionLimitMode）时没有分层上限：直接返回 null，只受 Plan B 约束。
  */
 import type { OrderSide, OrderType, PendingOrder, Position, SettlementMode } from '@/types/trading';
 import {
@@ -49,6 +51,7 @@ import {
   type PlacementLimitResult,
 } from '@/lib/positionLimit';
 import { isPositionOpen } from '@/lib/tradingSettlement';
+import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 
 /** 计划里的对冲：S₁ 上一张反向条件单，合计盖住 X₁ + X₂。 */
 export interface AddTierHedge {
@@ -79,6 +82,8 @@ export interface AddTierHeadroomInput {
   contractFaceUsd: number | null;
   /** 计划的对冲；不给（还没有 S₁）就只看加仓这一单。 */
   hedge?: AddTierHedge | null;
+  /** 持仓限制模式：无限制时没有分层上限（返回 null）。缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
 }
 
 export interface AddTierHedgeRoom {
@@ -126,8 +131,9 @@ const ORDER_TYPE: Record<AddTierHeadroomInput['orderKind'], OrderType> = {
   conditional: 'CONDITIONAL',
 };
 
-/** 算不出（没有价、没有估值价）时返回 null：只受 Plan B 约束，不另设限。 */
+/** 算不出（没有价、没有估值价）或无限制模式时返回 null：只受 Plan B 约束，不另设限。 */
 export function addTierHeadroom(input: AddTierHeadroomInput): AddTierHeadroom | null {
+  if (isUnlimitedLimitMode(input.mode)) return null;
   const { symbol, side, orderKind, contractFaceUsd } = input;
   const markPrice = Number(input.markPrice);
   if (!(markPrice > 0)) return null;

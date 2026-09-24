@@ -29,6 +29,8 @@ vi.mock('@/components/journal/PreTradeSnapshotDialog', () => ({
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     tradingMode: 'direct',
+    // 单笔上限只在「币安标准」持仓限制模式下生效（默认是无限制）
+    positionLimitMode: 'binance',
     balance: 2_000_000,
     positionsMap: {},
     ordersMap: {},

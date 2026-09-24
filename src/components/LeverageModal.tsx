@@ -5,6 +5,7 @@ import { formatTierAmount, maxPositionAtLeverage, resolveSymbolTiers } from '@/l
 import { newlyDoomedTriggerOrders, triggerRiskMessage } from '@/lib/positionLimit';
 import { formatPrice, formatUSDT } from '@/lib/formatters';
 import { getSettlementAsset } from '@/lib/coinMargined';
+import { UNLIMITED_MAX_LEVERAGE, isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 import { Slider } from '@/components/ui/slider';
 import { Minus, Plus, X } from 'lucide-react';
 
@@ -24,12 +25,17 @@ interface Props {
   orders?: PendingOrder[];
   markPrice?: number;
   availableBalance?: number;
+  /**
+   * 持仓限制模式（下单面板、持仓卡从 TradingContext 取来传进来）。缺省按币安标准——对话框只靠 props 渲染，
+   * 不读 context。无限制：滑块 1–150x，有持仓也能降（追加的保证金从可用余额扣），不显示分层上限。
+   */
+  limitMode?: PositionLimitMode | null;
 }
 
 /**
  * 杠杆对话框的上限与「当前杠杆倍数最高可持有头寸」都来自币安按合约的分层
  * （leverageTiers）；是否放行读 planLeverageChange 的判定，它与下单面板、引擎下单
- * 共用 positionLimit，三处不可能给出两个答案。
+ * 共用 positionLimit，三处不可能给出两个答案。无限制模式下上限是 150x、没有分层上限（lib/positionLimitMode）。
  */
 export function LeverageModal({
   symbol,
@@ -41,10 +47,12 @@ export function LeverageModal({
   orders = [],
   markPrice = 0,
   availableBalance = 0,
+  limitMode,
 }: Props) {
+  const unlimited = isUnlimitedLimitMode(limitMode);
   const tiers = resolveSymbolTiers(symbol, settlementMode);
-  /** 滑块上限 = 这个合约第 1 档的最高杠杆（KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x）。 */
-  const maxLev = tiers.maxLeverage;
+  /** 滑块上限 = 这个合约第 1 档的最高杠杆（KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x）；无限制模式一律 150x。 */
+  const maxLev = unlimited ? UNLIMITED_MAX_LEVERAGE : tiers.maxLeverage;
   const initialLeverage = Math.max(1, Math.min(maxLev, Math.round(currentLeverage) || 1));
   const [leverage, setLeverage] = useState(initialLeverage);
   const [inputValue, setInputValue] = useState(String(initialLeverage));
@@ -65,22 +73,24 @@ export function LeverageModal({
   /**
    * 旧版本允许到 125x：一笔 125x 的旧仓位放在只到 75x 的合约上时，下限会高过上限。
    * 滑块只能停在上限，确认被 below-floor 拒绝——逐仓有持仓不能降杠杆，与币安一致。
+   * 无限制模式没有这个下限：有持仓也能降，追加的保证金从可用余额扣（补不上由 planLeverageChange 拒绝）。
    */
-  const sliderMin = Math.min(minLev, maxLev);
+  const sliderMin = unlimited ? 1 : Math.min(minLev, maxLev);
 
   const plan = useMemo(() => planLeverageChange({
     symbol, positions: held, orders, markPrice,
     currentLeverage, nextLeverage: leverage, settlementMode,
-  }), [symbol, held, orders, markPrice, currentLeverage, leverage, settlementMode]);
+    limitMode, availableBalance,
+  }), [symbol, held, orders, markPrice, currentLeverage, leverage, settlementMode, limitMode, availableBalance]);
   /** 滑块当前值下最多能持有的头寸（档位单位）。 */
   const capAtLeverage = maxPositionAtLeverage(tiers.tiers, leverage);
   /**
    * 已挂的触发类开仓单会被一并重述到新杠杆、触发时按新杠杆的上限判——币安改杠杆时不拦，触发时才拒。
    * 这里不拦确认，只在确认之前说清楚：调到这个杠杆后，哪张单到时会被撤销。
    */
-  const triggerRisk = useMemo(() => (plan.ok
+  const triggerRisk = useMemo(() => (plan.ok && !unlimited
     ? triggerRiskMessage(newlyDoomedTriggerOrders({ symbol, positions: held, orders, leverage: plan.to, markPrice }), `杠杆调到 ${plan.to}x 后`)
-    : null), [plan, symbol, held, orders, markPrice]);
+    : null), [plan, unlimited, symbol, held, orders, markPrice]);
   const exposure = plan.tierExposure;
 
   // Keep input in sync with slider/buttons
@@ -171,7 +181,16 @@ export function LeverageModal({
             <span data-testid="leverage-max-label">{maxLev}x</span>
           </div>
 
-          {/* 币安同位文案：滑块停在哪，就报那个杠杆下最多能持有多少（按合约分层、按合约的单位） */}
+          {/* 币安同位文案：滑块停在哪，就报那个杠杆下最多能持有多少（按合约分层、按合约的单位）。
+              无限制模式没有分层上限：换成一行说明。 */}
+          {unlimited ? (
+            <div
+              data-testid="leverage-unlimited-note"
+              className="rounded-lg bg-secondary/50 px-3 py-2 text-[11px] text-muted-foreground"
+            >
+              无限制模式：任何币种 1–{UNLIMITED_MAX_LEVERAGE}x，不设持仓上限
+            </div>
+          ) : (
           <div className="rounded-lg bg-secondary/50 px-3 py-2 text-[11px] text-muted-foreground space-y-1">
             <div data-testid="leverage-max-position" className="flex justify-between gap-2">
               <span>当前杠杆倍数最高可持有头寸：</span>
@@ -192,6 +211,7 @@ export function LeverageModal({
               <div data-testid="leverage-tier-note" className="text-[9px] leading-4 text-amber-500/90">{tiers.note}</div>
             )}
           </div>
+          )}
 
           {/* 确认前必须看得见后果:保证金、强平价、释放额,以及被拒的原因 */}
           {held.length > 0 && (
@@ -222,8 +242,25 @@ export function LeverageModal({
                   </span>
                 </div>
               )}
+              {/* 无限制模式下降杠杆：追加保证金，从可用余额扣。补不上时不投影一个负的「可用」，照实写可用多少、不足 */}
+              {plan.totalReleaseUsd < -1e-9 && (
+                <div data-testid="leverage-margin-topup" className="flex items-center justify-between gap-2 border-t border-border/60 pt-1">
+                  <span className="text-muted-foreground">追加保证金</span>
+                  {plan.refusal?.code === 'insufficient-balance' ? (
+                    <span className="text-trading-red">
+                      −{formatUSDT(-plan.totalReleaseUsd)} {quoteUnitLabel} · 可用只有 {formatUSDT(Math.max(0, availableBalance))} {quoteUnitLabel}（不足）
+                    </span>
+                  ) : (
+                    <span className={plan.ok ? 'text-foreground' : 'text-trading-red'}>
+                      −{formatUSDT(-plan.totalReleaseUsd)} → 可用 {formatUSDT(Math.max(0, availableBalance + plan.totalReleaseUsd))} {quoteUnitLabel}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="text-[9px] leading-4 text-muted-foreground/80 pt-0.5">
-                逐仓有持仓时只能提高杠杆（当前下限 {minLev}x）
+                {unlimited
+                  ? '无限制模式：有持仓时也能降杠杆，降杠杆要从可用余额追加保证金'
+                  : `逐仓有持仓时只能提高杠杆（当前下限 ${minLev}x）`}
                 <br />ROE% 的分母是「名义 ÷ 杠杆」，提杠杆后同一笔盈亏的 ROE 会同比放大。
               </div>
             </div>

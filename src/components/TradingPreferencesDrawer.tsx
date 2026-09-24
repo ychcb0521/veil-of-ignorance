@@ -446,7 +446,7 @@ export function TradingPreferencesDrawer({ open, onClose, prefs, onChange, onOpe
               <ul className="space-y-1 text-[11px] leading-relaxed text-muted-foreground">
                 <li>· 需访问该币对交易页面后，修改才会生效</li>
                 <li>· 若您有未平仓位或挂单，此设置将不适用</li>
-                <li>· 若您的默认杠杆超过该币对允许的最高杠杆（币安按合约分层），则按该币对的最高杠杆生效</li>
+                <li>· 若您的默认杠杆超过该币对允许的最高杠杆（币安标准持仓限制模式下按合约分层；无限制模式下最高 150x），则按该币对的最高杠杆生效</li>
                 <li>· 本系统训练阶段强制逐仓：选择全仓时下单仍会被硬阻断</li>
               </ul>
 

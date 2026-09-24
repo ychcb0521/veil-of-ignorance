@@ -126,6 +126,18 @@ export interface PendingOrder {
    * 上线之前挂出的委托没有它，触发时不再判——它们是按旧规则放行的。
    */
   lotSizeRule?: 'binance-lot-size-v1';
+  /**
+   * 挂出时的持仓限制模式是「无限制」（lib/positionLimitMode）才写这一个字段；币安标准下挂出的委托不写，与改动前逐字节相同。
+   * 挂在盘口的限价单 / 只做 Maker 单 / 分段子单在币安标准下成交时本来不再判（下单时判过了），
+   * 无限制模式下挂出的却从没过分层——切到币安标准之后，它们在成交那一刻按那一刻的模式再判一次（positionLimit.recheckedAtFill）。
+   */
+  limitModeAtPlacement?: 'unlimited';
+  /**
+   * 只靠对冲豁免挂出的委托（riskModel 'legacy-hedge-v1'）对冲的底里有无限制模式下开的仓位时才写：底都是哪几种。
+   * 只用于文案——触发 / 成交那一刻豁免已不成立、底已平掉时，撤单提示仍能说对「对冲的是哪一种旧仓位」。
+   * 只对冲更新前的仓位的不写，与改动前逐字节相同。
+   */
+  hedgeBaseKinds?: ('pre-update' | 'unlimited')[];
   status: OrderStatus;
   createdAt: number;
   /**
@@ -365,8 +377,10 @@ export interface Position {
    * **仓位开出来之后不换模型**：合并时存活仓位一律沿用被加仓的那个仓位的来源（survivorRiskStamp），
    * 所以分层的一笔可以并进按旧 0.4% 的仓位（整仓仍 0.4%，不重新定价），反过来不并（mergeRiskBlocked）。
    * 没有来源的仓位一直按旧的 0.4% 统一费率，直到平掉——升级不改任何现有仓位的强平价。
+   * 'unlimited-v1' = 持仓限制模式为「无限制」时首笔成交开出的仓位，按旧的 0.4% 算；切到币安标准之后与更新前的仓位
+   * 同等对待（仍按 0.4%，是对冲豁免的底）。只有仓位带它，委托从不带。
    */
-  riskModel?: 'binance-tiers-v1' | 'legacy-hedge-v1';
+  riskModel?: 'binance-tiers-v1' | 'legacy-hedge-v1' | 'unlimited-v1';
   /** 盖戳时的标的（positionsMap 的键）。仓位对象本身不带标的，按它查分层。 */
   riskSymbol?: string;
   /**
@@ -595,7 +609,7 @@ export function calcROE(pos: Position, currentPrice: number): number {
  * Only NaN / non-finite results are guarded (returns NaN to signal invalid input).
  *
  * 带 riskModel = 'binance-tiers-v1' 戳的仓位改走币安分层公式（lib/positionRiskModel），
- * 标的取 symbol 参数，缺省用戳里记下的 riskSymbol。下面的 0.4% 公式只给不带分层戳的仓位（更新前的、对冲豁免的）。
+ * 标的取 symbol 参数，缺省用戳里记下的 riskSymbol。下面的 0.4% 公式只给不带分层戳的仓位（更新前的、对冲豁免的、无限制模式开的）。
  */
 export function calcLiquidationPrice(pos: Position, symbol?: string): number {
   if (!pos.quantity || pos.quantity <= 0 || !isFinite(pos.entryPrice)) return NaN;

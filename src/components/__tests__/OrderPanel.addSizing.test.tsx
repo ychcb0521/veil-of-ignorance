@@ -42,6 +42,8 @@ const panel = vi.hoisted(() => ({
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     get tradingMode() { return panel.tradingMode; },
+    // 「按分层余量预填」按币安标准持仓限制模式判（默认是无限制）
+    positionLimitMode: 'binance',
     balance: 200_000_000,
     get positionsMap() { return panel.positionsMap; },
     ordersMap: {}, priceMap: {}, leverageMap: {},

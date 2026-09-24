@@ -6,7 +6,7 @@
  *   分层模型（binance-tiers-v1）：维持保证金 = 名义 × 档位费率 − 速算扣除额，
  *     档位按合约取自币安快照（leverageTiers），强平价用币安的逐仓公式并在跨档时换档重算。
  *
- * 来源（riskModel 一个字段，三种取值，**显式**记下，不靠「没有戳」去猜）：
+ * 来源（riskModel 一个字段，四种取值，**显式**记下，不靠「没有戳」去猜）：
  *   · 'binance-tiers-v1'（分层）：本次更新之后经引擎下的开仓委托（handlePlaceOrder，含分段子单、
  *     跟踪委托、TWAP、条件单）都带它；这样的委托成交开出的仓位按分层模型。
  *   · 'legacy-hedge-v1'（对冲豁免）：本次更新之后下的、**只靠**「对冲更新前的仓位」那条豁免才放行的委托
@@ -16,6 +16,10 @@
  *   · 没有 riskModel（更新前）：升级之前开的仓位、升级之前挂出的委托，以及这些旧委托之后成交开出的仓位
  *     （它们是按旧规则放行的：旧通用表、滑块到 125x、默认 35x，套上分层会一成交就在开仓价上被强平）。
  *     只有它们是豁免的底（isPreUpdatePosition）。
+ *   · 'unlimited-v1'（无限制模式开的）：持仓限制模式为「无限制」（lib/positionLimitMode）时首笔成交开出的仓位。
+ *     那一刻不设持仓上限、杠杆到 150x，名义可能远超分层允许的大小，所以按旧的 0.4% 模型算；
+ *     切到「币安标准」之后与更新前的仓位同等对待：仍按 0.4%，并且是对冲豁免的底（isHedgeBaseRisk）。
+ *     **只盖在仓位上**，委托从不带它——无限制模式下挂出的委托照样带分层戳，切到币安标准之后触发 / 成交那一刻照样再判。
  *
  * 切换规则（不追溯）——**仓位开出来之后就不换强平模型**：
  *   · 委托成交时（executeSettlementFill）仓位沿用委托的来源（positionRiskStampForFill）；
@@ -30,6 +34,7 @@
  *   · 【规则三】反过来**不并**：按旧 0.4% 的一笔（更新前的旧委托成交、对冲豁免成交）不并进分层仓位。
  *     存活的会是分层仓位，它要把并进来的那一截名义也按档位定价、推进更高的档，
  *     足以把现有的分层仓位当场强平（算例在 mergeRiskBlocked 的注释里）——那正是规则一禁止的事。
+ *     唯一的例外是无限制模式下的成交（'unlimited-v1'）：它并进分层仓位、整仓仍按分层（见 mergeRiskBlocked）。
  *   · 【规则四】**豁免的底不因合并变大**：更新前的仓位记着一个冻结的「底」（hedgeBaseUnits），
  *     分层加仓并进来只加仓位的大小、不加这个底；部分平仓按比例缩，平光就没了（hedgeExemptBaseUnits）。
  *     对冲额度、触发 / 成交那一刻的再判、面板的「可开」读的都是这个冻结的底，不是仓位当前的大小。
@@ -40,6 +45,7 @@
  * 名义也在这里就地算，不借 tradingSettlement，免得形成运行期循环依赖。
  */
 import type { Position } from '@/types/trading';
+import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 import { getCoinContracts, getCoinContractSizeUsd } from '@/lib/coinMargined';
 import {
   binanceIsolatedLiquidationPriceCoinm,
@@ -58,7 +64,9 @@ export const LEGACY_MAINTENANCE_MARGIN_RATE = 0.004;
 export const TIERED_RISK_MODEL = 'binance-tiers-v1' as const;
 /** 只靠「对冲更新前的仓位」那条豁免放行的委托与它们开出的仓位：旧 0.4% 模型，但不是更新前的仓位。 */
 export const LEGACY_HEDGE_RISK_MODEL = 'legacy-hedge-v1' as const;
-export type PositionRiskModelId = typeof TIERED_RISK_MODEL | typeof LEGACY_HEDGE_RISK_MODEL;
+/** 无限制模式下首笔成交开出的仓位：旧 0.4% 模型；切到币安标准之后与更新前的仓位一样是对冲豁免的底。只盖在仓位上。 */
+export const UNLIMITED_RISK_MODEL = 'unlimited-v1' as const;
+export type PositionRiskModelId = typeof TIERED_RISK_MODEL | typeof LEGACY_HEDGE_RISK_MODEL | typeof UNLIMITED_RISK_MODEL;
 
 type RiskStamped = Pick<Position, 'riskModel' | 'riskSymbol'>;
 type RiskPositionLike = Pick<
@@ -77,6 +85,11 @@ export function legacyHedgeRiskStamp(symbol: string): Required<RiskStamped> {
   return { riskModel: LEGACY_HEDGE_RISK_MODEL, riskSymbol: String(symbol || '').toUpperCase() };
 }
 
+/** 无限制模式开出的仓位的标记（旧模型；标的照样记下）。 */
+export function unlimitedRiskStamp(symbol: string): Required<RiskStamped> {
+  return { riskModel: UNLIMITED_RISK_MODEL, riskSymbol: String(symbol || '').toUpperCase() };
+}
+
 /** 引擎下单时盖在委托上的戳。 */
 export const ORDER_RISK_STAMP: Readonly<{ riskModel: typeof TIERED_RISK_MODEL }> = Object.freeze({ riskModel: TIERED_RISK_MODEL });
 /** 只靠对冲豁免放行的委托盖的标记。 */
@@ -84,8 +97,13 @@ export const ORDER_LEGACY_HEDGE_STAMP: Readonly<{ riskModel: typeof LEGACY_HEDGE
 
 type RiskModelLike = { riskModel?: string | null } | null | undefined;
 
-/** 一笔成交开出的仓位该带的戳：沿用委托的来源（分层 / 对冲豁免）；委托没有来源（升级前挂出的）就不带，按旧模型。 */
-export function positionRiskStampForFill(symbol: string, order: RiskModelLike): RiskStamped {
+/**
+ * 一笔成交开出的仓位该带的戳：沿用委托的来源（分层 / 对冲豁免）；委托没有来源（升级前挂出的）就不带，按旧模型。
+ * 成交那一刻的持仓限制模式是「无限制」时一律盖 'unlimited-v1'（按 0.4%），与委托的来源无关——
+ * 那一刻没有过分层，套上分层维持保证金会一开出来就爆。mode 缺省按币安标准。
+ */
+export function positionRiskStampForFill(symbol: string, order: RiskModelLike, mode?: PositionLimitMode | null): RiskStamped {
+  if (isUnlimitedLimitMode(mode)) return unlimitedRiskStamp(symbol);
   if (order?.riskModel === TIERED_RISK_MODEL) return positionRiskStamp(symbol);
   if (order?.riskModel === LEGACY_HEDGE_RISK_MODEL) return legacyHedgeRiskStamp(symbol);
   return {};
@@ -101,11 +119,33 @@ export function isLegacyHedgeRisk(item?: RiskModelLike): boolean {
 }
 
 /**
- * 更新前的仓位（或更新前挂出的委托）：**没有任何** riskModel。只有它们是对冲豁免的底。
- * 豁免仓位、分层仓位、以及将来任何带了来源的仓位都不算。
+ * 更新前的仓位（或更新前挂出的委托）：**没有任何** riskModel。
+ * 豁免仓位、分层仓位、无限制模式开的仓位都不算（后者另有 isUnlimitedRisk）。
  */
 export function isPreUpdateRisk(item?: RiskModelLike): boolean {
   return !!item && (item.riskModel == null || item.riskModel === '');
+}
+
+/** 无限制模式下开出的仓位。 */
+export function isUnlimitedRisk(item?: RiskModelLike): boolean {
+  return item?.riskModel === UNLIMITED_RISK_MODEL;
+}
+
+/**
+ * 对冲豁免的底：更新前的仓位，以及无限制模式下开的仓位（切到币安标准之后与更新前的仓位同等对待——
+ * 它们开出来时没有过分层，可能远超现在的上限，升级 / 切换不能让它们连对冲都挂不出去）。
+ * 只看仓位；委托这边仍只有更新前挂出的旧委托算（委托从不带 'unlimited-v1'）。
+ */
+export function isHedgeBaseRisk(item?: RiskModelLike): boolean {
+  return isPreUpdateRisk(item) || isUnlimitedRisk(item);
+}
+
+/** 对冲豁免的底是哪一种（文案按它说「更新前的仓位」还是「无限制模式下开的仓位」）；不是底为 null。 */
+export type HedgeBaseKind = 'pre-update' | 'unlimited';
+export function hedgeBaseKindOf(item?: RiskModelLike): HedgeBaseKind | null {
+  if (isPreUpdateRisk(item)) return 'pre-update';
+  if (isUnlimitedRisk(item)) return 'unlimited';
+  return null;
 }
 
 /** 带着显式来源（分层或对冲豁免）的委托：本次更新之后经引擎下的，触发 / 成交那一刻要再判。 */
@@ -131,7 +171,7 @@ export function survivorRiskStamp(target: RiskStamped): RiskStamped {
 /**
  * 【规则四】这个仓位有多少「量」算作对冲豁免的底（hedgeExemptBaseUnits）。
  *
- * 只有更新前的仓位是底（豁免仓位、分层仓位一律 0，见 isPreUpdateRisk）。规则二放开了
+ * 只有更新前的仓位与无限制模式开的仓位是底（豁免仓位、分层仓位一律 0，见 isHedgeBaseRisk）。规则二放开了
  * 「分层加仓并进更新前的仓位」，若照旧拿仓位**当前**的大小当底，一笔分层加仓就把豁免额度顶大一截，
  * 反向再开一笔同样大的超限裸仓位——这正是第 5 轮 F5 那个循环（旧仓位既没减、底却变大）。
  * 所以底单独记在 hedgeBaseUnits 上：
@@ -145,7 +185,7 @@ export function hedgeExemptBaseUnits(
   position: Pick<Position, 'riskModel' | 'hedgeBaseUnits'> | null | undefined,
   currentUnits: number,
 ): number {
-  if (!position || !isPreUpdateRisk(position)) return 0;
+  if (!position || !isHedgeBaseRisk(position)) return 0;
   const units = Number.isFinite(currentUnits) ? Math.max(0, currentUnits) : 0;
   const frozen = Number(position.hedgeBaseUnits);
   if (!Number.isFinite(frozen)) return units;
@@ -153,8 +193,8 @@ export function hedgeExemptBaseUnits(
 }
 
 /**
- * 合并之后存活仓位该记多少底（规则四）：target 原来的底 + 只有这一笔本身是**更新前**的成交时才加它的量。
- * target 不是更新前的仓位（豁免 / 分层）时不写这个字段——它本来就不是底。
+ * 合并之后存活仓位该记多少底（规则四）：target 原来的底 + 只有这一笔本身是**更新前**的成交
+ * （或无限制模式下的成交）时才加它的量。target 不是底（豁免 / 分层）时不写这个字段——它本来就不是底。
  */
 export function mergedHedgeBaseUnits(
   target: Pick<Position, 'riskModel' | 'hedgeBaseUnits'>,
@@ -162,9 +202,9 @@ export function mergedHedgeBaseUnits(
   fill: Pick<Position, 'riskModel'>,
   fillUnits: number,
 ): number | undefined {
-  if (!isPreUpdateRisk(target)) return undefined;
+  if (!isHedgeBaseRisk(target)) return undefined;
   const base = hedgeExemptBaseUnits(target, targetUnits);
-  return isPreUpdateRisk(fill) ? base + Math.max(0, Number(fillUnits) || 0) : base;
+  return isHedgeBaseRisk(fill) ? base + Math.max(0, Number(fillUnits) || 0) : base;
 }
 
 /**
@@ -200,14 +240,26 @@ export function mergedHedgeBaseUnits(
  *   分层   × 豁免   → **不并**（规则三）
  * 任一边不存在（null）时谈不上合并，返回 false。
  *
+ * 无限制模式下的成交（'unlimited-v1'）另有一格——**加仓并进现有仓位的模型**（规则一不变）：
+ *   分层 × 无限制 → **并**，仍是分层。无限制模式下往币安标准下开的分层仓位上加仓，照样并进去、被那个仓位的
+ *     权益扛着（不另开一条只靠自己那点保证金的新腿——那正是 COAIUSDT 事故的形状，而默认模式是无限制，
+ *     每一个在币安标准下开过仓的人都会碰上）。整仓照旧按分层计：总名义变大可能跨进更高的档，
+ *     超过最高一档就按最高一档的费率与速算额（tierFor 的兜底），维持保证金与强平价始终有定义。
+ *     这是使用者在无限制模式下自己选的规模，下单面板在按钮前把合并前后的强平价摆出来，
+ *     合并后一开出来就越过强平价时标红（lib/openingLiquidation）。
+ *   无限制 × 任何 → 并，仍是无限制（整仓 0.4%）。
+ *   更新前 / 豁免 × 无限制 → 并，仍是原来的来源（同是 0.4%）；无限制的那一截与更新前的一样算进底（规则四）。
+ *
  * 注意 a、b 的**顺序有意义**：a 是现有仓位（target），b 是这一笔成交。调用方
  * （tradingSettlement.mergeBlocker）两处都是这个顺序。
  */
 export function mergeRiskBlocked(a: RiskModelLike, b: RiskModelLike): boolean {
   if (!a || !b) return false;
   const tiered = (x: RiskModelLike) => x?.riskModel === TIERED_RISK_MODEL;
-  // 只挡一个方向：现有仓位是分层的、并进来的这一笔按旧 0.4% —— 合并会把那一截也按档位定价，
+  // 只挡一个方向：现有仓位是分层的、并进来的这一笔按旧 0.4%（更新前的旧委托、对冲豁免）—— 合并会把那一截也按档位定价，
   // 把现有的分层仓位推进更高的档、当场强平。反过来（分层并进旧仓位）整仓仍按 0.4%，不重新定价，照并。
+  // 无限制模式下的成交并进分层仓位照并（见上面「无限制」那一格）：整仓仍按分层，是使用者在无限制模式下自己选的规模。
+  if (isUnlimitedRisk(b)) return false;
   return tiered(a) && !tiered(b);
 }
 

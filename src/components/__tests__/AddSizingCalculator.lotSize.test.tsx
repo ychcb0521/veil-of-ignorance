@@ -28,6 +28,8 @@ vi.mock('@/contexts/TradingContext', async () => {
     ...actual,
     useTradingContext: () => ({
       tradingMode: 'direct',
+      // 单笔上限只在「币安标准」持仓限制模式下生效（默认是无限制）
+      positionLimitMode: 'binance',
       setTradingMode: vi.fn(),
       positionsMap: { KAITOUSDT: book.settlement === 'coin' ? coinPositions : usdtPositions },
       ordersMap: {},

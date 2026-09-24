@@ -38,6 +38,7 @@ import { allocateMarginUsd } from '@/lib/marginAllocation';
 import type { LeverageChangePlan } from '@/lib/leverageRestatement';
 import { doomedAtTrigger, limitSettlementOf, triggerCheckLead } from '@/lib/positionLimit';
 import { cardCloseLotSize, pendingLotSizeBadge, pendingLotSizeRisk } from '@/lib/marketLotSize';
+import { isUnlimitedLimitMode } from '@/lib/positionLimitMode';
 import {
   formatSettlementQuantity,
   getPositionNotionalUsd,
@@ -244,7 +245,14 @@ export function PositionPanel({
   onClearSymbolData,
   activeTab, onTabChange, onCloseAllPositions, pricePrecision, onPlaceTpSl,
 }: Props) {
-  const { setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance } = useTradingContext();
+  const {
+    setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance, positionLimitMode,
+  } = useTradingContext();
+  /**
+   * 持仓限制模式（顶栏「直接交易」右边）：无限制时不标「触发时将超限」「触发时将超单笔上限」、市价平仓与按成数的
+   * 止盈止损不受单笔上限约束、杠杆对话框 1–150x。读不到（旧的测试替身）按币安标准。
+   */
+  const limitMode = positionLimitMode;
   // 调杠杆是**按标的**的操作（持仓、挂单一起重述）。刻意不带 pos——
   // 带着单笔仓位会诱导出逐腿写入，而逐腿写入正是混杠杆状态的制造方式。
   /** settlement：点的那张卡的结算方式（卡片按标的 + 方向分组，同一个币的 U 本位与币本位是两张卡）。 */
@@ -768,7 +776,7 @@ export function PositionPanel({
      * 币安单笔市价上限（-4005）：市价平仓也是一笔市价单。弹窗已经把按钮置灰并给出「按上限平」，
      * 这里按确认那一刻还活着的几笔再判一次——不替用户拆单，也不悄悄只平一部分。
      */
-    const lot = cardCloseLotSize(symbol, live.map(({ p }) => p), percentage, priceMap[symbol] || 0);
+    const lot = cardCloseLotSize(symbol, live.map(({ p }) => p), percentage, priceMap[symbol] || 0, 'market-close', limitMode);
     if (lot.refusal) {
       toast.error(`市价平仓：${lot.refusal.title}`, {
         description: `${lot.refusal.source}。请分几次市价平仓（每次不超过上限），或在持仓卡上设 100% 的止盈止损（平掉整个仓位的不受此限）。`,
@@ -1259,7 +1267,7 @@ export function PositionPanel({
                         title={mg.children.length > 1 && mg.marginMode === 'isolated'
                           ? '逐仓爆仓是逐仓位判的：这里写的是这组里最先被强平的那一笔的价格，不是各笔的平均。'
                           : crossMixedRiskModels
-                            ? '这组里既有按币安分层计维持保证金的仓位，也有按旧 0.4% 的：这个合成价把整组按旧模型算，'
+                            ? '这组里既有按币安分层计维持保证金的仓位，也有按旧 0.4% 的（更新前、对冲豁免或无限制模式下开的）：这个合成价把整组按旧模型算，'
                               + '比逐笔各按自己模型加总的真实强平价偏乐观（余量显示得比实际多）。真正的判定按逐笔的模型加总，'
                               + '同卡的「保证金比率」按全仓那一个共用的保证金池算，维持保证金已经是逐笔按各自模型加总的。'
                             : undefined}
@@ -1371,12 +1379,14 @@ export function PositionPanel({
                      * 价格直接走到它的价、或先到另一侧某张挂单的价再折回来（doomedAtTrigger），路上成交 / 触发的挂单到时已是持仓。
                      * 按此刻的持仓与挂单它到时会被拒：标出来，别等到止损换对冲的那一刻才发现对冲单被撤了。
                      */
-                    const triggerDoom = doomedAtTrigger(symbol, order, positionsMap[symbol] ?? [], ordersMap[symbol] ?? [], priceMap[symbol] || 0);
+                    const triggerDoom = doomedAtTrigger(
+                      symbol, order, positionsMap[symbol] ?? [], ordersMap[symbol] ?? [], priceMap[symbol] || 0, limitMode,
+                    );
                     /**
                      * 按市价成交、触发 / 执行时要再判单笔市价上限的挂单（本次更新之后下的条件单、跟踪委托、TWAP、
                      * 按成数的止盈止损），按此刻能知道的价会被拒：标出来，别等触发那一刻保护单或对冲单才没了。
                      */
-                    const lotRisk = pendingLotSizeRisk(symbol, order, priceMap[symbol] || 0);
+                    const lotRisk = pendingLotSizeRisk(symbol, order, priceMap[symbol] || 0, limitMode);
                     return (
                       <tr key={order.id} className="border-b border-gray-100 dark:border-[#2b3139]/50 hover:bg-gray-50 dark:hover:bg-white/5">
                         <td className="px-3 py-2">
@@ -1905,6 +1915,7 @@ export function PositionPanel({
             orders={orders}
             markPrice={mark}
             availableBalance={availableBalance}
+            limitMode={limitMode}
             onClose={() => setLeverageModal(null)}
             /**
              * 此前这里只写 leverageMap，然后无条件弹「杠杆已调整为 Nx」——
@@ -1920,7 +1931,10 @@ export function PositionPanel({
               toast.success(`杠杆已调整为 ${plan.to}x`, {
                 description: plan.totalReleaseUsd > 1e-9
                   ? `释放保证金 ${formatUSDT(plan.totalReleaseUsd)} ${dialogSettlement === 'coin' ? 'USD' : 'USDT'}`
-                  : undefined,
+                  : plan.totalReleaseUsd < -1e-9
+                    // 无限制模式下有持仓时降杠杆：从可用余额追加保证金
+                    ? `追加保证金 ${formatUSDT(-plan.totalReleaseUsd)} ${dialogSettlement === 'coin' ? 'USD' : 'USDT'}（从可用余额扣）`
+                    : undefined,
               });
               setLeverageModal(null);
             }}
@@ -1940,7 +1954,10 @@ export function PositionPanel({
             markPrice={priceMap[tpslModal.symbol] || 0}
             liqPrice={tpslModal.liqPrice}
             legCount={live.length}
-            lotSizeCheck={(fraction, triggerPrice) => cardCloseLotSize(tpslModal.symbol, live, fraction, triggerPrice, 'tpsl')}
+            // 无限制模式不设单笔上限：不传就不判
+            lotSizeCheck={isUnlimitedLimitMode(limitMode)
+              ? undefined
+              : (fraction, triggerPrice) => cardCloseLotSize(tpslModal.symbol, live, fraction, triggerPrice, 'tpsl')}
             onClose={() => setTpslModal(null)}
             onConfirm={(tp, sl, pct) => {
               // 卡上每一笔各挂一张：同一个触发价、同一个成数（成数按各笔自己的数量算），
@@ -1970,7 +1987,9 @@ export function PositionPanel({
             currentPrice={priceMap[closeModal.symbol] || 0}
             pricePrecision={getPrecision(closeModal.symbol)}
             legCount={live.length}
-            lotSizeCheck={(fraction) => cardCloseLotSize(closeModal.symbol, live, fraction, priceMap[closeModal.symbol] || 0)}
+            lotSizeCheck={isUnlimitedLimitMode(limitMode)
+              ? undefined
+              : (fraction) => cardCloseLotSize(closeModal.symbol, live, fraction, priceMap[closeModal.symbol] || 0)}
             onConfirm={(pct) => handleCloseConfirm(closeModal.symbol, closeModal.positionIds, pct)}
           />
         );

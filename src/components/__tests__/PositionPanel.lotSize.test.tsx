@@ -7,6 +7,8 @@ vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user-1
 vi.mock('@/contexts/TradingContext', () => ({
   useTradingContext: () => ({
     setSymbolLeverage: vi.fn(), tradingMode: 'direct',
+    // 单笔上限只在「币安标准」持仓限制模式下生效（默认是无限制）
+    positionLimitMode: 'binance',
     setTradeHistory: vi.fn(), setBalance: vi.fn(),
   }),
 }));

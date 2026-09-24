@@ -25,6 +25,7 @@ import {
   roundCoinContracts,
 } from "@/lib/coinMargined";
 import { mergeRiskBlocked, mergedHedgeBaseUnits, positionRiskStampForFill, survivorRiskStamp } from "@/lib/positionRiskModel";
+import type { PositionLimitMode } from "@/lib/positionLimitMode";
 
 export const POSITION_DUST_EPSILON = 1e-6;
 
@@ -187,6 +188,11 @@ export function executeSettlementFill(
   openTimelineId?: string | null,
   /** 由实际执行路径明确传入；MARKET 也可能是条件委托触发后的成交，不能据此猜测。 */
   entryMethod?: Position["entry_method"],
+  /**
+   * 成交那一刻的持仓限制模式（lib/positionLimitMode）：「无限制」时开出的仓位盖 'unlimited-v1'（按 0.4%）。
+   * 缺省按币安标准（仓位沿用委托的来源），纯函数的旧调用与测试口径不变。
+   */
+  limitMode?: PositionLimitMode | null,
 ) {
   const normalized = normalizeSettlementOrder(symbol, order);
   const { fillPrice, slippageUsd } = applySettlementSlippage(symbol, rawPrice, normalized, isMaker);
@@ -222,7 +228,8 @@ export function executeSettlementFill(
     ...(normalized.addSizingSnapshot ? { addSizingSnapshot: normalized.addSizingSnapshot } : {}),
     // 仓位沿用委托的来源：分层戳 → 分层模型；对冲豁免 → 旧模型的豁免仓位；升级前挂出的委托没有来源，开更新前的仓位。
     // 合并进已有仓位时存活的沿用那个仓位的来源（见 positionRiskModel.survivorRiskStamp）：仓位不中途换模型。
-    ...positionRiskStampForFill(symbol, order),
+    // 无限制模式下的成交一律按 0.4%（'unlimited-v1'）。
+    ...positionRiskStampForFill(symbol, order, limitMode),
   };
 
   return { fee: feeUsd, feeCoin, margin: marginUsd, marginCoin, slippage: slippageUsd, position };

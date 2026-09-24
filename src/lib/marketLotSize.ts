@@ -36,6 +36,10 @@
  * 触发时再判：挂单在本次更新之后下的（带 lotSizeRule 戳）才在触发 / 执行那一刻再判一次；
  * 更新前挂出的委托是按旧规则放行的，触发时不再判——与杠杆分层对旧委托的处理同一条规则，
  * 升级不会在触发那一刻悄悄撤掉早就挂好的对冲单或止损。
+ *
+ * 持仓限制模式（lib/positionLimitMode）：上面全是「币安标准」的规则。「无限制」模式（默认）下每个入口都带着
+ * mode = 'unlimited' 进来，一律放行、没有上限（checkLotSize 的 maxUnits 为 null，与「快照里查不到」同一个口径）。
+ * 委托照样盖 lotSizeRule 戳：切到币安标准之后，触发 / 执行那一刻按那一刻的模式再判。缺省 mode 按币安标准。
  */
 import raw from '@/data/binanceSymbolFilters.json';
 import type { OrderType, PendingOrder, Position, SettlementMode } from '@/types/trading';
@@ -45,6 +49,7 @@ import { tpSlCloseUnits } from '@/lib/tpSlOrders';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import { formatPrice } from '@/lib/formatters';
 import { LIVE_PRICE_TIER_HEADROOM } from '@/lib/positionLimit';
+import { isUnlimitedLimitMode, type PositionLimitMode } from '@/lib/positionLimitMode';
 
 // ─────────────────────── 快照 ───────────────────────
 
@@ -347,7 +352,15 @@ export function checkLotSize(args: {
   orderType?: OrderType | string | null;
   /** 在哪一步判的（默认下单时）：挂着的单与触发时已撤的单，出路要说先撤单 / 重新挂。 */
   stage?: LotSizeStage;
+  /** 持仓限制模式：无限制时不设单笔上限（maxUnits 为 null）。缺省按币安标准。 */
+  mode?: PositionLimitMode | null;
 }): LotSizeCheck {
+  if (isUnlimitedLimitMode(args.mode)) {
+    return {
+      ok: true, kind: args.kind, units: Number(args.units), maxUnits: null, resolved: null, price: null,
+      title: null, source: null, detail: null,
+    };
+  }
   const settlement: LotSizeSettlement = args.settlement === 'coin' ? 'coin' : 'usdt';
   const resolved = resolveLotSize(args.symbol, settlement);
   const units = Number(args.units);
@@ -514,7 +527,13 @@ export interface PlacementLotSize {
  *   随单止盈止损成数不足 100% 时：各按自己的触发价、按市价上限判那一截。
  * 合成币本位的上限随价变化，所以「按哪个价」要紧；其余合约的上限与价无关。
  */
-export function placementLotSize(symbol: string, draft: LotSizeDraft, marketPrice: number): PlacementLotSize {
+export function placementLotSize(
+  symbol: string,
+  draft: LotSizeDraft,
+  marketPrice: number,
+  /** 持仓限制模式：无限制时一律放行、没有上限。缺省按币安标准。 */
+  mode?: PositionLimitMode | null,
+): PlacementLotSize {
   const coin = isCoinSettled(draft);
   const settlement = coin ? 'coin' : 'usdt';
   const units = coin ? positive(draft.contracts ?? draft.quantity) : positive(draft.quantity);
@@ -525,7 +544,7 @@ export function placementLotSize(symbol: string, draft: LotSizeDraft, marketPric
   const kind: LotSizeKind = draft.type === 'TRAILING_STOP' ? 'market' : lotSizeKindOfOrder(draft);
   const market = positive(marketPrice);
   const check = (k: LotSizeKind, u: number, price: number, noun?: LotSizeNoun, orderType?: string) => checkLotSize({
-    symbol, settlement, kind: k, units: u, price, noun, orderType,
+    symbol, settlement, kind: k, units: u, price, noun, orderType, mode,
   });
 
   let main: LotSizeCheck;
@@ -613,7 +632,10 @@ export function lotSizeRefusalAtExecution(
   units: number = getPositionUnits(order),
   /** 触发 / 执行那一刻（默认，被拒即撤单）；委托列表的标记传 'pending'（出路说先撤单再重挂）。 */
   stage: LotSizeStage = 'triggered',
+  /** 此刻的持仓限制模式：无限制时不判（返回 null）。缺省按币安标准。 */
+  mode?: PositionLimitMode | null,
 ): LotSizeCheck | null {
+  if (isUnlimitedLimitMode(mode)) return null;
   if (!isLotSizeStamped(order) || isWholePositionCloseOrder(order)) return null;
   if (lotSizeKindOfOrder(order) !== 'market') return null;
   const check = checkLotSize({
@@ -636,7 +658,14 @@ export function lotSizeRefusalAtExecution(
  *   TWAP：每一片按现价。
  * 只标触发时真的会再判的单（lotSizeRefusalAtExecution 的同一组条件）。
  */
-export function pendingLotSizeRisk(symbol: string, order: PendingOrder, markPrice: number): LotSizeCheck | null {
+export function pendingLotSizeRisk(
+  symbol: string,
+  order: PendingOrder,
+  markPrice: number,
+  /** 此刻的持仓限制模式：无限制时从不标。缺省按币安标准。 */
+  mode?: PositionLimitMode | null,
+): LotSizeCheck | null {
+  if (isUnlimitedLimitMode(mode)) return null;
   if (!isLotSizeStamped(order) || isWholePositionCloseOrder(order)) return null;
   if (lotSizeKindOfOrder(order) !== 'market') return null;
   const mark = positive(markPrice);
@@ -650,7 +679,7 @@ export function pendingLotSizeRisk(symbol: string, order: PendingOrder, markPric
     const ref = orderReferencePrice(order, mark);
     price = ref.price || mark;
   }
-  return lotSizeRefusalAtExecution(symbol, order, price, units, 'pending');
+  return lotSizeRefusalAtExecution(symbol, order, price, units, 'pending', mode);
 }
 
 /** 委托列表那枚标记上的字。 */
@@ -739,7 +768,10 @@ export function cardCloseLotSize(
   fraction: number,
   price: number,
   mode: CardCloseMode = 'market-close',
+  /** 此刻的持仓限制模式：无限制时不设单笔上限（按任何成数都能平，maxFraction 为 1）。缺省按币安标准。 */
+  limitMode?: PositionLimitMode | null,
 ): CardCloseLotSize {
+  if (isUnlimitedLimitMode(limitMode)) return { ok: true, orders: [], refusal: null, maxFraction: 1 };
   if (mode === 'tpsl' && fraction >= 1) return { ok: true, orders: [], refusal: null, maxFraction: 1 };
   const orders = cardOrders(symbol, legs, fraction, price, mode);
   const refusal = orders.find(o => !o.check.ok)?.check ?? null;

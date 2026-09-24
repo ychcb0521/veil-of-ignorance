@@ -135,6 +135,7 @@ const Index = () => {
     liquidateIsolatedOnCandle,
     applySymbolLeverage,
     settleFillDebit,
+    getPositionLimitMode,
     executeReduceOnlyTrigger,
     handleAdjustMargin,
     handleClearSymbolData,
@@ -516,7 +517,8 @@ const Index = () => {
       if (!liveOrder) return false;
 
       const filledTimelineId = stampClock(symbol);
-      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId, 'order');
+      // 仓位的维持保证金模型按成交这一刻的持仓限制模式定（无限制 → 'unlimited-v1'，按 0.4%）
+      const { fee, margin, position } = executeSettlementFill(symbol, entryPrice, order, false, openTime, Date.now(), filledTimelineId, 'order', getPositionLimitMode?.());
 
       // 付不起、或触发这一刻超过杠杆分层上限，就当场撤单。**返回 true**:调用方把 false 读成「没执行」，
       // 会解掉触发锁并挂上 500ms 重试——那会变成每半秒一次的无限重试加提示。
@@ -605,7 +607,7 @@ const Index = () => {
       toast.success(`条件单已触发：${symbol} ${order.side} ${formatSettlementQuantity(position, symbol)} @ ${formatPrice(entryPrice, symbol)}`);
       return true;
     },
-    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, judgePlannedAddFill, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap, stampClock],
+    [applyAttachedTpSl, applyMergeSideEffects, executeReduceOnlyTrigger, getPositionLimitMode, judgePlannedAddFill, settleFillDebit, setFilledOrders, setOrdersMap, setPositionsMap, stampClock],
   );
 
   const runConditionalMatchingForSymbol = useCallback(
@@ -1356,6 +1358,7 @@ const Index = () => {
             filledIds.push(matchedOrder.id);
             const simulatedTime = getEffectiveTime(activeSymbol);
             const filledTimelineId = stampClock(activeSymbol);
+            // 最后一个参数是成交这一刻的持仓限制模式：挂在盘口的限价单成交时只有这里能定仓位的维持保证金模型
             const { fee, margin, position } = executeSettlementFill(
               activeSymbol,
               fillPrice,
@@ -1367,6 +1370,7 @@ const Index = () => {
               Date.now(),
               filledTimelineId,
               'order',
+              getPositionLimitMode?.(),
             );
             const actualFillPrice = position.entryPrice;
             // 付不起 → 不 push 回 remaining（等于撤单）。id 在上面已经进了 filledIds，
@@ -1478,7 +1482,7 @@ const Index = () => {
         applyAttachedTpSl(activeSymbol, merged?.survivor ?? position, order);
       }
     }
-  }, [visibleData, iMs, timeDirection, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects, stampClock]);
+  }, [visibleData, iMs, timeDirection, activeSymbol, recordExecutionTrade, tradingMode, getEffectiveTime, setFilledOrders, applyAttachedTpSl, applyMergeSideEffects, stampClock, getPositionLimitMode]);
 
   // ===== TWAP ENGINE =====
   useEffect(() => {
@@ -1543,6 +1547,7 @@ const Index = () => {
                   Date.now(),
                   stampClock(symbol),
                   'order',
+                  getPositionLimitMode?.(),
                 );
                 // 付不起就**停掉整张 TWAP**,而不是跳过一片继续跑:
                 // 后面每一片只会更贵(仓位在涨、可用在降)。
@@ -1592,7 +1597,7 @@ const Index = () => {
     }
 
     for (const { symbol, merged } of twapMerges) applyMergeSideEffects(symbol, merged);
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock, getPositionLimitMode]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {
@@ -2203,17 +2208,21 @@ const Index = () => {
           activePricePrecision={chartPricePrecision}
           activeQuantityPrecision={quantityPrecision}
         />
-        <div className="flex items-center gap-3 shrink-0">
-          {loading && <span className="text-[10px] text-primary animate-pulse font-mono">加载历史数据...</span>}
-          <JournalNavMenu
-            onOpenAssets={() => setAssetsOpen(true)}
-          />
-          <span className="text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate max-w-[120px]">
+        {/* 顶栏放不下时（中间一排多了持仓限制模式开关），先让邮箱让位，复盘中心与登出不被挤出屏幕。
+            邮箱在 1280px 以下整个藏起来（1,120–1,260px 之间它只剩几个像素的残影），1280px 起完整显示、需要时再截短 */}
+        <div className="flex items-center gap-3 min-w-0">
+          {loading && <span className="text-[10px] text-primary animate-pulse font-mono whitespace-nowrap shrink-0">加载历史数据...</span>}
+          <div className="shrink-0">
+            <JournalNavMenu
+              onOpenAssets={() => setAssetsOpen(true)}
+            />
+          </div>
+          <span className="hidden min-[1280px]:block text-[10px] text-gray-500 dark:text-[#848e9c] font-mono truncate min-w-0 max-w-[120px]">
             {user?.email}
           </span>
           <button
             onClick={signOut}
-            className="text-[10px] text-gray-600 dark:text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
+            className="shrink-0 whitespace-nowrap text-[10px] text-gray-600 dark:text-[#B7BDC6] hover:text-destructive font-medium transition-colors"
           >
             登出
           </button>
