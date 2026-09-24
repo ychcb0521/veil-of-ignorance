@@ -270,7 +270,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   dsiContribution: { noun: '可计算 DSI 贡献', hint: 'DSI 贡献只统计亏损战役，其余不会进入当前排序' },
   usiContribution: { noun: '可计算 USI 贡献', hint: 'USI 贡献只统计盈利战役，其余不会进入当前排序' },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
-  mainPriceChange: { noun: '主力已平仓', hint: '涨幅取主力的涨跌幅（多笔主力取涨幅最大的那笔），主力都还没平仓的战役不会进入当前排序' },
+  mainPriceChange: { noun: '主力已平仓', hint: '涨幅按战役算（开仓价取主力最有利的一笔，主力平仓时有滚动对冲在手就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
   mainPriceEfficiency: {
     noun: '可计算涨幅效率',
     hint: '涨幅效率 = 主力涨幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
@@ -614,7 +614,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-mainPriceChange-view-time',
     seriesLabel: '涨幅时序',
     guide: {
-      yAxis: '每场战役主力的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。主力有几笔时取涨幅最大的那笔；每一笔的数就是详情页 Legs 表「涨跌幅」列。',
+      yAxis: '每场战役的涨幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。开仓价取主力最有利的一笔；主力平仓时有滚动对冲在手就按对冲的开仓价，否则按主力的平仓价（开平价与详情页 Legs 表「涨跌幅」列同源）。',
       point: '点越高，主力吃到的价格行情越大；低于 0% 表示价格朝主力的反方向走。每个点代表一场主力已平仓的战役。',
       colors: [
         { token: 'profit', label: '绿色：涨幅 > 0，价格朝主力方向走。' },
@@ -638,7 +638,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '涨幅分布',
     guide: {
       yAxis: '落在该涨幅附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨幅出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: '每个点仍是一场主力已平仓的战役，横向位置就是主力的涨跌幅（%，按主力方向计，空单价格跌了为正；多笔主力取涨幅最大的那笔，与 Legs 表「涨跌幅」列同一个数），不考虑时间先后；同一档内的点按涨幅从小到大自下而上排。',
+      point: '每个点仍是一场主力已平仓的战役，横向位置就是这场战役的涨幅（%，按主力方向计，空单价格跌了为正；开仓价取主力最有利的一笔，主力平仓时有滚动对冲在手就按对冲开仓价；开平价与 Legs 表「涨跌幅」列同源），不考虑时间先后；同一档内的点按涨幅从小到大自下而上排。',
       colors: [
         { token: 'profit', label: '绿色：涨幅 > 0，价格朝主力方向走。' },
         { token: 'loss', label: '红色：涨幅 < 0，价格朝主力反方向走。' },
@@ -1591,8 +1591,8 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-main-price-change"
             title={mainPriceChangePct == null
-              ? '涨幅：主力都还没平仓（没有平仓价），与 Legs 表一样显示「—」'
-              : '涨幅：主力从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正）；主力有几笔时取涨幅最大的那笔，与详情页 Legs 表「涨跌幅」列同一个数'}
+              ? '涨幅：主力都还没平仓（没有平仓价），显示「—」'
+              : '涨幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有滚动对冲在手就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「涨幅」的说明'}
             className={metricCell('mainPriceChange')}
             data-sort-highlight={litAttr('mainPriceChange')}
           >
@@ -2912,9 +2912,9 @@ export default function JournalCampaignsPage() {
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            s = +1（主多）/ −1（主空）；主力有几笔时取涨幅ᵢ最大的那笔
+                            s = +1（主多）/ −1（主空）；开仓价 = 主力最有利的一笔；平仓价 = 主力平仓时有滚动对冲在手则取对冲开仓价，否则取主力平仓价
                           </div>
-                          <div>主力 = 所有 main_open（没有才取 reentry_main），每笔与详情页 Legs 表那一行「涨跌幅」同一对开平价（含 1 分钟 K 线平仓价校正）；取其中涨幅最大的那笔，还没平仓的不参与。</div>
+                          <div>开仓价取主力（main_open，没有才取 reentry_main）各笔里最有利的那个：主多最低、主空最高。平仓价看主力平仓那一刻有没有滚动对冲在手（仍持有、或与主力同一次操作里平掉，相差不超过一分钟）：有就取最早开的那张滚动对冲的开仓价——对冲一挂上，主力后面的行情就被锁住了；没有就取主力自己的平仓价（最后平的那几笔里最有利的）。初始对冲 A/B 不算。开平价与详情页 Legs 表同源（含 1 分钟 K 线平仓价校正）。</div>
                           <div>按主力方向计：空单价格跌了为正，与盈亏同号。</div>
                           <div>
                             例：主多 100 → 112，涨幅 = (112 − 100) ÷ 100 = <span className="text-foreground">+12.00%</span>；

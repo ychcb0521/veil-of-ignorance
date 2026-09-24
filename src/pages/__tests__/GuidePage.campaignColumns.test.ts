@@ -73,8 +73,10 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toContain(`${source}: '${source}Distribution'`);
     }
   });
-  it('【用户要求】涨幅：主力有几笔时取涨幅最大的那笔（不按名义大小挑）', () => {
-    expect(guide).toContain('<strong>主力有几笔时取涨幅最大的那笔</strong>（不按名义大小挑）');
+  it('【用户要求】涨幅：开仓价取主力最有利的一笔；主力平仓时有滚动对冲在手就按对冲开仓价', () => {
+    expect(guide).toContain('<strong>开仓价取主力各笔里最有利的那个</strong>（主多最低、主空最高）');
+    expect(guide).toContain('<strong>平仓价看主力平仓那一刻有没有滚动对冲在手</strong>');
+    expect(guide).not.toContain('主力有几笔时取涨幅最大的那笔');
     expect(page).not.toContain('主力 = 名义最大的 main_open');
   });
   it('【用户要求】盈亏概览：左右对调（递进链在左）；右栏前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位', () => {

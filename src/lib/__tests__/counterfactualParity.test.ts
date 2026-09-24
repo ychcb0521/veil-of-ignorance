@@ -26,7 +26,7 @@
  * 第二组断言守「相对实际只反映改动」：从原样副本出发改一格，相对实际挪动的量必须恰好是这一格值多少钱，
  * 不能因为「改过了」就整条腿换一套算法，把滑点、分刀、老费率的差额一起算进去。
  */
-import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignMainLegPriceChanges, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignPriceChangeLegInputs, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { describe, expect, it } from 'vitest';
 import { computeAsymmetricRiskContribution, type AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
 import {
@@ -112,7 +112,10 @@ const EXCLUDED_BY_CONSTRUCTION = ['settlement', 'initialRisk'] as const;
  * 不是本场的读数、两边按构造读同一个输入的项：今日账户总资产、有效胜率（整页测试里逐字比过），
  * 以及帮助文案的覆盖 / 追加（文字，不是数）。
  */
-const SHARED_INPUTS_AND_TEXT = ['helpOverrides', 'extraNotes'] as const;
+const SHARED_INPUTS_AND_TEXT = ['helpOverrides', 'extraNotes',
+  // 涨幅的依据只进 ⓘ 说明，读数已随 mainPriceChangePct 逐项比对
+  'mainPriceChangeBasis',
+] as const;
 
 type PanelNumbers = Record<ParityMetric, number | null> & {
   realizedPnl: number | null;
@@ -187,7 +190,7 @@ function realPanel(fx: ParityFixture) {
     geometricExpectancy: expectancies.geometricExpectancy,
     dsiUsiTerm: contribution?.meanSquareTerm ?? null,
     // 与页面同一个函数、同一份平仓价校正
-    ...efficiencyNumbers(campaignMainLegPriceChangePct(legs, tradeRecords, corrections), expectedMaxDrawdownPct, payoffRatio, campaignHasMainAdd(legs)),
+    ...efficiencyNumbers(campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, localOrdersOf(fx)), expectedMaxDrawdownPct, payoffRatio, campaignHasMainAdd(legs)),
   };
   return { numbers, actualPnl: pnlReconciliation.correctedPnl, settlement, accuracy };
 }
@@ -224,8 +227,8 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     currentAccountEquity: 10_000,
     isOwner: true,
     actualMain: {
-      byLegId: Object.fromEntries(campaignMainLegPriceChanges(fx.legs, fx.tradeRecords, fx.corrections)),
-      pct: campaignMainLegPriceChangePct(fx.legs, fx.tradeRecords, fx.corrections),
+      byLegId: Object.fromEntries(campaignPriceChangeLegInputs(fx.campaign, fx.legs, fx.tradeRecords, fx.corrections, localOrdersOf(fx)).map(input => [input.id, input])),
+      pct: campaignMainLegPriceChangePct(fx.campaign, fx.legs, fx.tradeRecords, fx.corrections, localOrdersOf(fx)),
     },
     mainSide: realMainSide(fx).side,
   };

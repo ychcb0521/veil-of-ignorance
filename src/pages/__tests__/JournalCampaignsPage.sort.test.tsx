@@ -617,8 +617,9 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByText(/s = \+1（主多）\/ −1（主空）/)).toBeInTheDocument();
       expect(screen.getByText(/主多 100 → 112/)).toBeInTheDocument();
       expect(screen.getByText(/主力都还没平仓（没有平仓价）的战役显示「—」，不参与排序与散点图/)).toBeInTheDocument();
-      // 【用户要求】多笔主力取涨幅最大的那笔
-      expect(screen.getByText(/取其中涨幅最大的那笔，还没平仓的不参与/)).toBeInTheDocument();
+      // 【用户要求】开仓价取主力最有利的一笔；主力平仓时有滚动对冲在手就按对冲开仓价
+      expect(screen.getByText(/开仓价取主力（main_open，没有才取 reentry_main）各笔里最有利的那个/)).toBeInTheDocument();
+      expect(screen.getByText(/取最早开的那张滚动对冲的开仓价/)).toBeInTheDocument();
       expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
       const priceToggle = screen.getByTestId('campaign-mainPriceChange-chart-toggle');
       expect(priceToggle).toHaveAttribute('aria-expanded', 'false');

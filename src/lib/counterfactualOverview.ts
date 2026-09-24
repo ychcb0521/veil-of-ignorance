@@ -4,7 +4,7 @@ import {
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
-import { counterfactualHasMainAdd, counterfactualMainLegPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { counterfactualHasMainAdd, counterfactualPriceChange, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
 import { legPositionSideFromDirection, type LegPositionSide } from '@/lib/legPositionShare';
 import type {
@@ -44,9 +44,9 @@ export interface CounterfactualOverviewShared {
   currentAccountEquity: number;
   isOwner: boolean;
   /**
-   * 真实战役每条主力的涨幅（按腿 id）与上方「盈亏概览」里取最大之后的那个数：
-   * 反事实的「涨幅」逐腿对账——开平价与方向没改过的主力沿用真实一侧这条腿的数，再取最大，原样重跑因此逐位相同。
-   * 缺省时每条主力都按副本的开平价算。
+   * 真实战役算涨幅用到的各腿（主力与滚动对冲的开平价与时间，按腿 id）与上方「盈亏概览」的读数：
+   * 反事实的「涨幅」逐腿对账——没改过的腿沿用真实一侧这条腿的那一份，再按同一条规则算，原样重跑因此逐位相同。
+   * 缺省时每条腿都按副本的开平价与时间算。
    */
   actualMain?: ActualMainPriceChange | null;
   /** 真实战役的主方向（主多是多单）：反事实的「多方总名义仓位」数这一侧。缺省按多单。 */
@@ -268,10 +268,9 @@ export function buildCounterfactualOverviewMetrics(
   const initialExpectedMaxLoss = anchors.initialExpectedMaxLoss > EPSILON ? anchors.initialExpectedMaxLoss : 0;
   const hasStopLine = initialExpectedMaxLoss > 0;
   const payoffRatio = realizedPnl == null ? null : computeCounterfactualPayoffRatio(realizedPnl, initialExpectedMaxLoss);
-  // 手动 Legs 分支：副本里各笔主力的开平价（改过就按改后的），取涨幅最大的那笔；SOP 推演没有逐腿开平价，不算。
-  const mainPriceChangePct = manual
-    ? counterfactualMainLegPriceChangePct(branch.params.manual_legs, shared.actualMain)
-    : null;
+  // 手动 Legs 分支：副本里的主力与滚动对冲（改过就按改后的）按与上方同一条规则算；SOP 推演没有逐腿开平价，不算。
+  const priceChange = manual ? counterfactualPriceChange(branch.params.manual_legs, shared.actualMain) : null;
+  const mainPriceChangePct = priceChange?.pct ?? null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   const expectancies = computeCampaignExpectancies(payoffRatio);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
@@ -299,6 +298,18 @@ export function buildCounterfactualOverviewMetrics(
         : '本分支主力开仓时使用的杠杆倍数，来自推演参数里的入场杠杆。',
       '杠杆影响保证金占用与 ROE；名义仓位已经确定时，不再额外放大绝对盈亏。',
     ],
+    ...(manual ? {
+      // 反事实的涨幅按副本算，不能沿用真实面板那段「与战役列表卡片是同一个数」的说法
+      mainPriceChange: [
+        '本分支的涨幅：从开仓价到平仓价的涨跌幅，按主力方向计（主多价格涨了为正，主空价格跌了为正）。',
+        { formula: '涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%' },
+        '开仓价取副本里参与运行的主力各笔里最有利的那个（主多最低、主空最高）；平仓价看主力平仓那一刻有没有滚动对冲在手'
+          + '（仍持有、或与主力同一次操作里平掉，相差不超过一分钟）：有就取最早开的那张滚动对冲的开仓价，没有就取主力自己的平仓价。初始对冲 A/B 不算。',
+        priceChange?.entryPrice != null && priceChange.exitPrice != null
+          ? { formula: `本场：${priceChange.entryPrice} → ${priceChange.exitPrice}${priceChange.exitSource === 'rolling_hedge' ? '（平仓价取滚动对冲的开仓价）' : '（平仓价取主力的平仓价）'}` }
+          : '主力都还没平仓时显示「—」。',
+      ],
+    } : {}),
   };
 
   const extraNotes: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
@@ -327,9 +338,9 @@ export function buildCounterfactualOverviewMetrics(
     ],
     mainPriceChange: [
       manual
-        ? '反事实分支与上方同一条规则：参与运行的主力里取涨幅最大的那笔。逐腿对账——方向、开仓价、平仓价都没改过的主力'
-          + '沿用上方这条腿的涨幅（原样重跑逐位相同），改过的按 Legs 副本里改后的开平价算；停用的腿不参与；'
-          + '实际还没平仓、平仓价也没改过的腿不算（引擎只是按数据末端强行结算）。'
+        ? '反事实分支与上方同一条规则：开仓价取副本里参与运行的主力最有利的一笔，主力平仓时若有滚动对冲在手就按对冲开仓价。'
+          + '逐腿对账——方向、开平价、开平时间都没改过的腿沿用上方这条腿的数（原样重跑逐位相同），改过的按 Legs 副本里改后的算；'
+          + '停用、标着「挂单中」的腿不参与；实际还没平仓、平仓价也没改过的腿视为未平仓（引擎只是按数据末端强行结算）。'
         : 'SOP 推演没有逐腿的开平价，本项与两项效率不计算。',
     ],
     mainSideNotional: [
@@ -361,6 +372,7 @@ export function buildCounterfactualOverviewMetrics(
     expectedMaxDrawdownPct,
     payoffRatio,
     mainPriceChangePct,
+    mainPriceChangeBasis: priceChange ? { entryPrice: priceChange.entryPrice, exitPrice: priceChange.exitPrice, exitSource: priceChange.exitSource } : null,
     hasMainAdd: manual && counterfactualHasMainAdd(branch.params.manual_legs),
     asymmetricRiskContribution,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,

@@ -4,7 +4,7 @@ import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, 
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignMainLegPriceChanges } from '@/lib/campaignMainPriceChange';
+import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
@@ -1143,12 +1143,19 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues.profitCaptureRatio / 100,
     campaignAsymmetricRisk,
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
-  // 主力涨幅：每条主力与 Legs 表那一行「涨跌幅」同一对开平价（同一份平仓价校正），【用户要求】多笔取涨幅最大的那笔，
-  // 与战役列表卡片同一个函数。真实「盈亏概览」与反事实面板共用这份逐腿的数（反事实没改的主力沿用它）。
-  const actualMainPriceChange = useMemo(() => {
-    const byLegId = Object.fromEntries(campaignMainLegPriceChanges(legs, tradeRecords, legExitPriceCorrections));
-    return { byLegId, pct: campaignMainLegPriceChangePct(legs, tradeRecords, legExitPriceCorrections) };
-  }, [legs, tradeRecords, legExitPriceCorrections]);
+  // 战役涨幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有滚动对冲在手就按对冲开仓价）：与战役列表卡片同一个函数。
+  // 真实「盈亏概览」与反事实面板共用这份逐腿的开平价与时间（反事实没改的腿沿用它）。
+  // 挂单判定与触发时刻读权益路径同一份事实（localOrderFacts），与反事实副本 buildManualLegs 同源。
+  const actualPriceChange = useMemo(
+    () => (campaign ? campaignPriceChange(campaign, legs, tradeRecords, legExitPriceCorrections, localOrderFacts) : EMPTY_CAMPAIGN_PRICE_CHANGE),
+    [campaign, legs, tradeRecords, legExitPriceCorrections, localOrderFacts],
+  );
+  const actualMainPriceChange = useMemo<ActualMainPriceChange>(() => ({
+    byLegId: campaign
+      ? Object.fromEntries(campaignPriceChangeLegInputs(campaign, legs, tradeRecords, legExitPriceCorrections, localOrderFacts).map(input => [input.id, input]))
+      : {},
+    pct: actualPriceChange.pct,
+  }), [campaign, legs, tradeRecords, legExitPriceCorrections, localOrderFacts, actualPriceChange.pct]);
   // 【用户要求】「多方总名义仓位」：与 Legs 表合计行同一份输入（同一个 buildLegPositionShareInputs、同一份挂单判定凭据）。
   const mainSideNotional = useMemo(() => (campaign ? campaignMainSideNotional(
     campaign.direction,
@@ -1177,7 +1184,8 @@ export default function JournalCampaignDetailPage() {
       mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
       payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
-      mainPriceChangePct: actualMainPriceChange.pct,
+      mainPriceChangePct: actualPriceChange.pct,
+      mainPriceChangeBasis: { entryPrice: actualPriceChange.entryPrice, exitPrice: actualPriceChange.exitPrice, exitSource: actualPriceChange.exitSource },
       hasMainAdd: campaignHasMainAdd(legs),
       asymmetricRiskContribution,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
@@ -1189,7 +1197,7 @@ export default function JournalCampaignDetailPage() {
     asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
-    actualMainPriceChange,
+    actualPriceChange,
     legs,
     mainSideNotional,
     pnlReconciliation,
@@ -1208,7 +1216,7 @@ export default function JournalCampaignDetailPage() {
     asymmetricRiskSummary: campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
-    // 反事实里的「涨幅」逐腿对账（副本里 id 不变）：没改开平价的主力沿用上方这条腿的数，再取最大。
+    // 反事实里的「涨幅」逐腿逐字段对账（副本里 id 不变）：没改过的主力与滚动对冲沿用上方这条腿的开平价与时间，再按同一条规则算。
     actualMain: actualMainPriceChange,
     // 反事实的「多方总名义仓位」数哪一侧：与上方同一个主方向
     mainSide: mainSideNotional?.side ?? 'long',
