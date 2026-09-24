@@ -197,20 +197,21 @@ type CampaignFormulaPopover =
   | 'addEfficiencySort';
 
 /**
- * 【用户要求】涨幅、涨幅效率、盈亏比、加仓效率、几何期望五项排在一起，紧跟「操作时间」右侧。
- * 封面指标行按列排（见 CAMPAIGN_COLUMNS_GRID）；排序行左对齐依次排开。
- * 【用户要求】「重要性」放到后面：排在杠杆倍数之后、字母之前，行首只留「操作时间」。
+ * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望 ┆
+ * DSI 贡献、USI 贡献、杠杆倍数、重要性、字母（默认仍按操作时间排序）。
+ * 【用户要求】封面指标格的先后与这里一致：镜像止盈之后就是中间那一组七项（见 CampaignCard 的指标格）。
+ * 排序行左对齐依次排开。
  */
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'time', label: '操作时间' },
+  { value: 'mirrorTp', label: '镜像止盈' },
+  { value: 'expectedDrawdownPct', label: '预期回撤' },
   { value: 'mainPriceChange', label: '涨幅' },
   { value: 'mainPriceEfficiency', label: '涨幅效率' },
   { value: 'captureRate', label: '盈亏比' },
   { value: 'addEfficiency', label: '加仓效率' },
   { value: 'geometricExpectancy', label: '几何期望' },
-  { value: 'expectedDrawdownPct', label: '预期回撤' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
-  { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'dsiContribution', label: 'DSI 贡献' },
   { value: 'usiContribution', label: 'USI 贡献' },
   { value: 'leverage', label: '杠杆倍数' },
@@ -220,29 +221,27 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
- * 两条短分隔线把它分成三组，读得出用户要求排在一起的那五项：
- *   操作时间 ┆ 涨幅 · 涨幅效率 · 盈亏比 · 加仓效率 · 几何期望 ┆ 预期回撤 · 算术期望 · 镜像止盈 · DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
- * 封面的指标行仍按列排（CAMPAIGN_COLUMNS_GRID）。
+ * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨幅 · 涨幅效率 · 盈亏比 · 加仓效率 · 几何期望 · 算术期望 ┆ DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
  */
-const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mainPriceChange', 'expectedDrawdownPct']);
+const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution']);
 
 /**
- * 战役封面指标行的列模板（宽屏 xl 起按列排，窄屏自然换行）。每张封面读同一张模板，上下各张卡的同名格落在同一条竖线上。
- * 【用户要求】排序行原先也读这张模板、按钮压在封面同名格的列线上；用户看过后觉得排序行空隙不均、不美观，改回左对齐，
- * 只有封面指标行还按列排。
- * 列序：预期回撤 | 涨幅 | 涨幅效率 | 盈亏比 | 加仓效率 | 几何期望 | 算术期望 | 镜像止盈。
- * 列宽 = 浏览器实测的最长内容 + 至少 8px 留白（10px 标签 + 11px 等宽数字，含 1px 分隔线与 6px 内边距）：
- *   预期回撤 ≈87px（首列 154px，与第 2 列隔开）；涨幅「+437.21%」≈94px；涨幅效率「+130.41」≈107px；
- *   盈亏比「49628.76%（496.29）」≈172px；加仓效率「+123.45」≈108px；几何期望「50.63」＋「仓位击穿」≈142px；
- *   算术期望「+247.65R」≈114px；镜像止盈「已实现·进行中」≈136px（末列 1fr）。
- * 超出列宽的极端值在本列内以省略号收住，不压到隔壁一列。
+ * 战役封面指标行：【用户要求】「指标排布要美观，不整齐」——八项指标排成**等宽**的统计格，上面一行淡色的指标名，下面一行等宽数字。
+ * 格宽只由卡片宽度决定、与读数无关：每张卡片同宽，上下各张卡的同名格就落在同一条竖线上。
+ *   · 宽屏（xl，≥ 1280px）一行八格；平板（≥ 672px）一行四格、两行；手机一行两格、四行。
+ * 断点按浏览器实测（Chrome，卡片数值 11px 等宽）：最长的真实读数是盈亏比「49628.76%（496.29）」≈ 121.3px，
+ * 格子左右各 12px 内边距（CARD_METRIC_CELL），要放下它每格须 ≥ 145.3px。指标行宽 = 视口 − 48（main 左右内边距）
+ * − 2（卡片边框）− 16（CARD_METRIC_STRIP_INSET），所以八格要视口 ≥ 1229px、四格要 ≥ 648px。
+ * 两档都在「每格 ≈ 151.5px、数值区还余 6px」处起用：八格取 xl（1280px 时每格 151.75px），四格取 672px（每格 151.5px）。
+ * 更极端的读数（如「-123456.78%（-1234.57）」≈ 148px）在本格内以省略号收住，不压到隔壁一格；完整读数在悬停提示里。
  */
-const CAMPAIGN_COLUMNS_GRID = 'xl:grid xl:grid-cols-[154px_102px_116px_182px_116px_159px_122px_minmax(0,1fr)] xl:gap-x-0';
-/** 卡片格文字相对列线的缩进：1px 分隔线之后再空 6px。 */
-const CAMPAIGN_COLUMN_TEXT_INSET = 'xl:pl-1.5';
+const CAMPAIGN_COLUMNS_GRID = 'grid grid-cols-2 min-[672px]:grid-cols-4 xl:grid-cols-8';
+/** 指标格外框的左右内边距：再加上格子自己的 12px，首格文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
+const CARD_METRIC_STRIP_INSET = 'px-1 sm:px-2';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
 const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';
-/** 排序行与封面指标行的左右内边距。 */
+/** 排序行、统计概览与卡片展开详情的左右内边距（封面指标行的首格文字也落在这条线上，见 CARD_METRIC_STRIP_INSET）。 */
 const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';
 
 /**
@@ -1136,13 +1135,18 @@ function durationLabel(openedAt: string, closedAt: string | null) {
 const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
 
 /**
- * 封面指标格。宽屏（xl）按列排时：左侧 1px 分隔线 + 6px 内边距（CAMPAIGN_COLUMN_TEXT_INSET），
- * 与排序按钮的 1px 边框 + px-1.5 同宽——格子左缘与按钮左缘、格内标签与按钮文字都落在同一条竖线上，分隔线就是列线。
- * 窄屏自然换行时不画分隔线（换到行首的格子会顶着一条孤线），只留间距。
+ * 封面指标格：上标签、下数值，左右各 12px 内边距，每格同高。
+ * 格与格之间的细分隔线画在格子自己的左缘外（before，上下各缩 8px）与上缘外（after，左右各缩 12px，只在换成多行时出现）：
+ * 每行第一格的左线、第一行的上线落在指标行（overflow-hidden）之外被裁掉，所以不论一行几格，线只出现在格与格之间，
+ * 不必按每行格数去数第几格。
  */
-const CARD_METRIC_CELL = `inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap border-border/60 pr-4 xl:border-l xl:pr-2 ${CAMPAIGN_COLUMN_TEXT_INSET}`;
-/** 首列（预期回撤）贴着行首、不画分隔线，与排序行的「排序方式」同一起点。 */
-const CARD_METRIC_LEAD_CELL = 'inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap pr-4 xl:pr-2';
+const CARD_METRIC_CELL = 'relative flex min-w-0 flex-col gap-0.5 px-3 py-1.5 before:absolute before:inset-y-2 before:-left-px before:w-px before:bg-border/70 after:absolute after:inset-x-3 after:-top-px after:h-px after:bg-border/60';
+/** 指标名：10px 淡色，一格一行，放不下时省略。 */
+const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px] text-muted-foreground/80';
+/** 数值一行：数值可收缩（省略号），「仓位击穿」徽标跟在数值后面、不收缩。 */
+const CARD_METRIC_VALUE_ROW = 'flex h-4 min-w-0 items-center gap-1.5';
+/** 展开详情里的名称（「名称：值」写在一行里）。 */
+const CARD_DETAIL_LABEL = 'shrink-0 text-[10px] leading-4 text-muted-foreground/80';
 /** 展开详情里的一项：不按列排、不画分隔线，项与项之间只靠 gap-x-6 分开。 */
 const CARD_DETAIL_ITEM = 'inline-flex h-7 min-w-0 shrink-0 items-center gap-1 whitespace-nowrap';
 /**
@@ -1162,10 +1166,9 @@ function statSignTone(value: number | null | undefined): string {
 
 /** 封面标题旁的标签（方向 / 标的 / 杠杆 / 编号）统一高度与字号。 */
 const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
-const CARD_METRIC_LABEL = 'shrink-0 text-[10px] leading-4 text-muted-foreground/80';
 /**
- * 数值：11px 等宽。宽屏按列排时列宽是定的，极端读数（如盈亏比 −123456.78%（−1234.57））装不下就在本格内
- * 以省略号收住，不压到下一列的分隔线上；完整读数在悬停提示里。行高给足 16px，裁切时不削掉括号的上下沿。
+ * 数值：11px 等宽。格宽是定的，极端读数（如盈亏比 −123456.78%（−1234.57））装不下就在本格内
+ * 以省略号收住，不压到隔壁一格的分隔线上；完整读数在悬停提示里。行高给足 16px，裁切时不削掉括号的上下沿。
  */
 const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';
 /** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
@@ -1352,103 +1355,121 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 封面指标行按 CAMPAIGN_COLUMNS_GRID 每列一格（【用户要求】顺序：预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望，
-          之后算术期望、镜像止盈），上下各张卡的同名格落在同一条竖线上。 */}
-      <div
-        data-testid="campaign-card-metrics"
-        className={`flex flex-wrap items-center gap-y-0.5 border-t border-border/60 bg-muted/[0.12] py-1 dark:bg-muted/[0.16] ${CAMPAIGN_COLUMNS_INSET} ${CAMPAIGN_COLUMNS_GRID}`}
-      >
-        <div className={CARD_METRIC_LEAD_CELL} data-testid="campaign-expected-drawdown-pct">
-          <span className={CARD_METRIC_LABEL}>预期回撤：</span>
-          <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
-            {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
-          </span>
-        </div>
-        {/* 涨幅 → 涨幅效率：效率就是「涨幅 ÷ 预期回撤」，与首列的预期回撤同一行读得出来。 */}
-        <div
-          data-testid="campaign-main-price-change"
-          title={mainPriceChangePct == null
-            ? '涨幅：主力还没平仓（没有平仓价），与 Legs 表一样显示「—」'
-            : '涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数'}
-          className={CARD_METRIC_CELL}
+      {/* 封面指标行：八格等宽（CAMPAIGN_COLUMNS_GRID），上标签、下数值；【用户要求】顺序与排序行一致：镜像止盈、预期回撤、
+          涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望。上下各张卡的同名格落在同一条竖线上。 */}
+      <div className={`border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
+        <dl
+          data-testid="campaign-card-metrics"
+          className={`${CAMPAIGN_COLUMNS_GRID} overflow-hidden`}
         >
-          <span className={CARD_METRIC_LABEL}>涨幅：</span>
-          <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
-            {formatLegPriceChangePct(mainPriceChangePct)}
-          </span>
-        </div>
-        <div
-          data-testid="campaign-main-price-efficiency"
-          title={mainPriceEfficiency == null
-            ? '涨幅效率 = 主力涨幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
-            : `涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
-          className={CARD_METRIC_CELL}
-        >
-          <span className={CARD_METRIC_LABEL}>涨幅效率：</span>
-          <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
-            {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
-          </span>
-        </div>
-        <div className={CARD_METRIC_CELL} data-testid="campaign-payoff-ratio">
-          <span className={CARD_METRIC_LABEL}>盈亏比：</span>
-          <span
-            data-testid="campaign-payoff-ratio-value"
-            title={profitCaptureRatio == null ? undefined : `盈亏比 ${formatCampaignPayoffRatio(profitCaptureRatio, 2)}`}
-            className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}
+          <div className={CARD_METRIC_CELL} data-testid="campaign-mirror-tp-status">
+            <dt className={CARD_METRIC_NAME}>镜像止盈</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+            </dd>
+          </div>
+          <div className={CARD_METRIC_CELL} data-testid="campaign-expected-drawdown-pct">
+            <dt className={CARD_METRIC_NAME}>预期回撤</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
+                {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
+              </span>
+            </dd>
+          </div>
+          {/* 涨幅 → 涨幅效率：效率就是「涨幅 ÷ 预期回撤」，紧跟预期回撤读得出来。 */}
+          <div
+            data-testid="campaign-main-price-change"
+            title={mainPriceChangePct == null
+              ? '涨幅：主力还没平仓（没有平仓价），与 Legs 表一样显示「—」'
+              : '涨幅：主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计（空单价格跌了为正），与详情页 Legs 表「涨跌幅」列同一个数'}
+            className={CARD_METRIC_CELL}
           >
-            {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
-          </span>
-        </div>
-        {/* 加仓效率紧跟盈亏比：它就是盈亏比 ÷ 涨幅效率。 */}
-        <div
-          data-testid="campaign-add-efficiency"
-          title={addEfficiency == null || mainPriceEfficiency == null
-            ? (campaignHasMainAdd(legs)
-              ? '加仓效率 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
-              : '加仓效率：这场战役没有加仓，不计算')
-              : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
-          className={CARD_METRIC_CELL}
-        >
-          <span className={CARD_METRIC_LABEL}>加仓效率：</span>
-          <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
-            {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
-          </span>
-        </div>
-        <div
-          data-testid="campaign-geometric-expectancy"
-          data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-          title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
-            + (initialRiskFraction == null
-              ? ''
-              : ruinousSizing
-                ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
-                  + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
-                  + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
-                : '')}
-          className={CARD_METRIC_CELL}
-        >
-          <span className={CARD_METRIC_LABEL}>几何期望：</span>
-          <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
-          {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
-              但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
-          {ruinousSizing && (
-            <span className={`inline-flex h-4 shrink-0 items-center rounded-sm bg-[#F6465D]/15 px-1 text-[9px] font-medium leading-none ${TONE_DOWN}`}>
-              仓位击穿
-            </span>
-          )}
-        </div>
-        <div
-          data-testid="campaign-arithmetic-expectancy"
-          title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
-          className={CARD_METRIC_CELL}
-        >
-          <span className={CARD_METRIC_LABEL}>算术期望：</span>
-          <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
-        </div>
-        <div className={CARD_METRIC_CELL} data-testid="campaign-mirror-tp-status">
-          <span className={CARD_METRIC_LABEL}>镜像止盈：</span>
-          <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
-        </div>
+            <dt className={CARD_METRIC_NAME}>涨幅</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
+                {formatLegPriceChangePct(mainPriceChangePct)}
+              </span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-main-price-efficiency"
+            title={mainPriceEfficiency == null
+              ? '涨幅效率 = 主力涨幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
+              : `涨幅效率 = 主力涨幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
+            className={CARD_METRIC_CELL}
+          >
+            <dt className={CARD_METRIC_NAME}>涨幅效率</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
+                {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
+              </span>
+            </dd>
+          </div>
+          <div className={CARD_METRIC_CELL} data-testid="campaign-payoff-ratio">
+            <dt className={CARD_METRIC_NAME}>盈亏比</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span
+                data-testid="campaign-payoff-ratio-value"
+                title={profitCaptureRatio == null ? undefined : `盈亏比 ${formatCampaignPayoffRatio(profitCaptureRatio, 2)}`}
+                className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}
+              >
+                {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+              </span>
+            </dd>
+          </div>
+          {/* 加仓效率紧跟盈亏比：它就是盈亏比 ÷ 涨幅效率。 */}
+          <div
+            data-testid="campaign-add-efficiency"
+            title={addEfficiency == null || mainPriceEfficiency == null
+              ? (campaignHasMainAdd(legs)
+                ? '加仓效率 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
+                : '加仓效率：这场战役没有加仓，不计算')
+                : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
+            className={CARD_METRIC_CELL}
+          >
+            <dt className={CARD_METRIC_NAME}>加仓效率</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
+                {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
+              </span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-geometric-expectancy"
+            data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
+            title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
+              + (initialRiskFraction == null
+                ? ''
+                : ruinousSizing
+                  ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
+                    + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
+                    + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
+                  : '')}
+            className={CARD_METRIC_CELL}
+          >
+            <dt className={CARD_METRIC_NAME}>几何期望</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
+              {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
+                  但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
+              {ruinousSizing && (
+                <span className={`inline-flex h-4 shrink-0 items-center rounded-sm bg-[#F6465D]/15 px-1 text-[9px] font-medium leading-none ${TONE_DOWN}`}>
+                  仓位击穿
+                </span>
+              )}
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-arithmetic-expectancy"
+            title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
+            className={CARD_METRIC_CELL}
+          >
+            <dt className={CARD_METRIC_NAME}>算术期望</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
+            </dd>
+          </div>
+        </dl>
       </div>
 
       {detailsExpanded && (
@@ -1458,25 +1479,25 @@ const CampaignCard = memo(function CampaignCard({
           className={`flex flex-wrap items-center gap-x-6 gap-y-0.5 border-t border-border/50 bg-background/40 py-1 ${CAMPAIGN_COLUMNS_INSET}`}
         >
           <div className={CARD_DETAIL_ITEM}>
-            <dt className={CARD_METRIC_LABEL}>战役时间：</dt>
+            <dt className={CARD_DETAIL_LABEL}>战役时间：</dt>
             <dd className={`${CARD_DETAIL_VALUE} text-foreground/80`}>
               {fmtTime(campaign.opened_at)} → {fmtTime(campaign.closed_at)}
             </dd>
           </div>
           <div className={CARD_DETAIL_ITEM}>
-            <dt className={CARD_METRIC_LABEL}>结构与时长：</dt>
+            <dt className={CARD_DETAIL_LABEL}>结构与时长：</dt>
             <dd className={`${CARD_DETAIL_VALUE} text-foreground/80`}>
               {legs.length} legs · {durationLabel(campaign.opened_at, campaign.closed_at)}
             </dd>
           </div>
           <div className={CARD_DETAIL_ITEM}>
-            <dt className={CARD_METRIC_LABEL}>已实现 P&amp;L：</dt>
+            <dt className={CARD_DETAIL_LABEL}>已实现 P&amp;L：</dt>
             <dd className={`${CARD_DETAIL_VALUE} ${realizedPnlTone}`}>
               {realizedPnl == null ? '—' : realizedPnl.toFixed(2)}
             </dd>
           </div>
           <div className="flex min-h-7 min-w-0 items-center gap-1.5">
-            <dt className={`inline-flex items-center gap-1 ${CARD_METRIC_LABEL}`}>
+            <dt className={`inline-flex items-center gap-1 ${CARD_DETAIL_LABEL}`}>
               <Layers className="h-3 w-3" />
               Legs：
             </dt>
@@ -2484,7 +2505,7 @@ export default function JournalCampaignsPage() {
               data-testid="campaign-sticky-controls"
               className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
             >
-            {/* 【用户要求】排序行左对齐：按钮依次排开、间距均匀，两条短分隔线分出「操作时间 ┆ 用户要求排在一起的五项 ┆ 其余」三组。
+            {/* 【用户要求】排序行左对齐：按钮依次排开、间距均匀，两条短分隔线分出「操作时间 · 镜像止盈 ┆ 与封面指标同序的七项 ┆ 其余」三组。
                 左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
             <div
               data-testid="campaign-sort-controls"

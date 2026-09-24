@@ -306,6 +306,11 @@ function cardOrder(): string[] {
   });
 }
 
+/** 封面指标格读作「名称：数值」：上一行 dt 是指标名、下一行 dd 是数值（格子里不写冒号）。 */
+function metricReading(cell: Element): string {
+  return `${cell.querySelector('dt')?.textContent ?? ''}：${cell.querySelector('dd')?.textContent ?? ''}`;
+}
+
 function LocationProbe() {
   const location = useLocation();
   const state = location.state as { fromCampaignList?: boolean } | null;
@@ -476,7 +481,7 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 20_000);
 
-  it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行仍按列排', async () => {
+  it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行是八格等宽的统计格、顺序与排序行一致', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <JournalCampaignsPage />
@@ -494,26 +499,30 @@ describe('JournalCampaignsPage sorting', () => {
     const children = [...sortRow.children];
     expect(children[0]).toHaveTextContent('排序方式');
     const sequence = children.slice(1).map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母
     expect(sequence).toEqual([
-      'time',
-      'divider-mainPriceChange',
-      'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'geometricExpectancy',
+      'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
-      'expectedDrawdownPct', 'arithmeticExpectancy', 'mirrorTp', 'dsiContribution', 'usiContribution',
-      'leverage', 'importance', 'alpha',
+      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency',
+      'geometricExpectancy', 'arithmeticExpectancy',
+      'divider-dsiContribution',
+      'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha',
     ]);
-    expect(screen.getByTestId('campaign-sort-divider-mainPriceChange')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
-    // 封面指标行仍按列排：同一个列模板，上下各张卡同名格在同一条竖线上
+    // 【用户要求】「指标排布要美观，不整齐」：封面指标行是等宽统计格（手机两格、平板四格、宽屏八格一行），
+    // 每张卡同一套类名——格宽只由卡片宽度决定，上下各张卡的同名格在同一条竖线上
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
-    const gridToken = (node: Element) => [...node.classList].find(cls => cls.startsWith('xl:grid-cols-['));
-    const token = gridToken(metricRows[0]);
-    expect(token).toBeTruthy();
-    for (const row of metricRows) expect(gridToken(row)).toBe(token);
+    expect(metricRows[0].tagName).toBe('DL');
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'min-[672px]:grid-cols-4', 'xl:grid-cols-8', 'overflow-hidden');
+    expect([...metricRows[0].classList].some(cls => cls.includes('grid-cols-['))).toBe(false);
+    for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
+    // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后涨幅…几何期望、算术期望（操作时间留在标题行）
     const cardCells = [...metricRows[0].children].map(node => node.getAttribute('data-testid'));
     expect(cardCells).toEqual([
+      'campaign-mirror-tp-status',
       'campaign-expected-drawdown-pct',
       'campaign-main-price-change',
       'campaign-main-price-efficiency',
@@ -521,8 +530,19 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-add-efficiency',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',
-      'campaign-mirror-tp-status',
     ]);
+    // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
+    const cells = [...metricRows[0].children];
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
+      '镜像止盈', '预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望',
+    ]);
+    for (const cell of cells) {
+      expect(cell.children).toHaveLength(2);
+      expect(cell.children[0].tagName).toBe('DT');
+      expect(cell.children[1].tagName).toBe('DD');
+      expect(cell.className).toBe(cells[0].className);
+      expect(cell).toHaveClass('flex-col', 'px-3');
+    }
 
     // 图标位宽度固定：有公式的档平时是 Σ，选中那一档换成方向箭头；没有公式的档平时也留同宽空位，切换排序整行不重排
     expect(screen.getByTestId('campaign-sort-mainPriceChange-icon')).toHaveClass('w-3');
@@ -1365,16 +1385,16 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getByTestId('campaign-sort-controls').querySelectorAll('button[data-testid^="campaign-sort-"]')]
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
-      // 【用户要求】涨幅、涨幅效率、盈亏比、加仓效率、几何期望排在一起，紧跟操作时间右侧；重要性放在后面（字母之前）
+      // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母；重要性放在后面（字母之前）
       'campaign-sort-time',
+      'campaign-sort-mirrorTp',
+      'campaign-sort-expectedDrawdownPct',
       'campaign-sort-mainPriceChange',
       'campaign-sort-mainPriceEfficiency',
       'campaign-sort-captureRate',
       'campaign-sort-addEfficiency',
       'campaign-sort-geometricExpectancy',
-      'campaign-sort-expectedDrawdownPct',
       'campaign-sort-arithmeticExpectancy',
-      'campaign-sort-mirrorTp',
       'campaign-sort-dsiContribution',
       'campaign-sort-usiContribution',
       'campaign-sort-leverage',
@@ -1392,7 +1412,8 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getAllByTestId('campaign-expected-drawdown-pct')[0].parentElement!.children]
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
-      // 首列预期回撤；五个对齐格与排序行同序；之后算术期望、镜像止盈
+      // 与排序行同序：镜像止盈、预期回撤，之后涨幅…几何期望、算术期望
+      'campaign-mirror-tp-status',
       'campaign-expected-drawdown-pct',
       'campaign-main-price-change',
       'campaign-main-price-efficiency',
@@ -1400,7 +1421,6 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-add-efficiency',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',
-      'campaign-mirror-tp-status',
     ]);
     fireEvent.click(screen.getAllByRole('button', { name: '展开战役详情' })[0]);
     const expandedDetails = screen.getByTestId('campaign-card-details');
@@ -1412,7 +1432,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(expandedDetails).toHaveTextContent('Legs：');
     fireEvent.click(screen.getByRole('button', { name: '收起战役详情' }));
     expect(screen.queryByTestId('campaign-card-details')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('campaign-payoff-ratio').map(node => node.textContent)).toEqual([
+    expect(screen.getAllByTestId('campaign-payoff-ratio').map(metricReading)).toEqual([
       '盈亏比：300.00%（3.00）',
       '盈亏比：50.00%（0.50）',
       '盈亏比：-80.00%（-0.80）',
@@ -1424,7 +1444,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(payoffRatioValues[1]).toHaveClass('text-[#00875A]', 'dark:text-[#0ECB81]');
     expect(payoffRatioValues[2]).toHaveClass('text-[#DE350B]', 'dark:text-[#F6465D]');
     expect(payoffRatioValues[3]).toHaveClass('text-foreground/85');
-    expect(screen.getAllByTestId('campaign-expected-drawdown-pct').map(node => node.textContent)).toEqual([
+    expect(screen.getAllByTestId('campaign-expected-drawdown-pct').map(metricReading)).toEqual([
       '预期回撤：10.00%',
       '预期回撤：2.00%',
       '预期回撤：50.00%',
@@ -1432,7 +1452,7 @@ describe('JournalCampaignsPage sorting', () => {
     ]);
     // 【用户要求】「机会质量」删掉（涨幅效率更合理）：卡片上不再有这一格
     expect(screen.queryByTestId('campaign-opportunity-quality-value')).not.toBeInTheDocument();
-    expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(node => node.textContent)).toEqual([
+    expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(metricReading)).toEqual([
       // 【用户要求】胜率统一 50%：E = 0.5 × b − 0.5
       '算术期望：+1.00R',   // b = +3.00
       '算术期望：-0.25R',   // b = +0.50
@@ -1440,7 +1460,7 @@ describe('JournalCampaignsPage sorting', () => {
       '算术期望：—',
     ]);
     // 【用户要求】单场几何期望以 Gᵢ = 1 + bᵢ×0.1 呈现；1.00 是本金不增不减的分界
-    expect(screen.getAllByTestId('campaign-geometric-expectancy').map(node => node.textContent)).toEqual([
+    expect(screen.getAllByTestId('campaign-geometric-expectancy').map(metricReading)).toEqual([
       '几何期望：1.30',   // b = +3.00
       '几何期望：1.05',   // b = +0.50
       '几何期望：0.92',   // b = −0.80，亏损场落在 1.00 以下
