@@ -8,13 +8,16 @@ import type { TradeRecord } from '@/types/trading';
 
 /** 参与「涨跌幅」的主力角色：main_open 全部；一条都没有才取 reentry_main（与 pickPrimaryMainLeg 同一套角色分档）。 */
 const PRIMARY_MAIN_ROLES = ['main_open', 'reentry_main'] as const;
-/** 【用户要求】主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），战役的平仓价按滚动对冲的开仓价。 */
-const ROLLING_HEDGE_ROLE = 'hedge_rolling';
 /**
- * 【用户要求】已触发的初始对冲 A/B 与回场对冲，**与主力同一次操作里平掉**（相差不超过 SAME_CLOSE_TOLERANCE_MS）时也锁平仓价；
- * 与滚动对冲不同，主力平了它们还挂着不算——「平仓时间一致」才算。
+ * 【用户要求】主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），战役的平仓价按滚动对冲的开仓价。
+ * 「计算涨跌幅的时候，初始对冲 A 和初始对冲 B 也隶属于滚动对冲」：已触发的 A/B 与 hedge_rolling 同一条判据。
  */
-const SAME_CLOSE_HEDGE_ROLES = ['hedge_initial_a', 'hedge_initial_b', 'reentry_hedge'] as const;
+const ROLLING_HEDGE_ROLES = ['hedge_rolling', 'hedge_initial_a', 'hedge_initial_b'] as const;
+/**
+ * 【用户要求】回场对冲只在**与主力同一次操作里平掉**（相差不超过 SAME_CLOSE_TOLERANCE_MS）时锁平仓价；
+ * 与滚动对冲不同，主力平仓后它仍持有不算——「平仓时间一致」才算。
+ */
+const SAME_CLOSE_HEDGE_ROLES = ['reentry_hedge'] as const;
 
 /**
  * 「对冲的平仓和主力的平仓时间一致」的判据：两者相差不超过一分钟——
@@ -57,9 +60,9 @@ const EXIT_SOURCE_LABELS: Readonly<Record<Exclude<CampaignPriceChangeExitSource,
 /**
  * 平仓价规则的一句话说明：盈亏概览（含反事实）的 ⓘ 与列表页的说明都读这一句，规则改了只改这里。
  */
-export const PRICE_CHANGE_EXIT_RULE_TEXT = '平仓价看主力平仓那一刻有没有对冲把行情锁住：滚动对冲仍持有、或与主力同一次操作里平掉'
-  + '（相差不超过一分钟），以及已触发的初始对冲 A/B、回场对冲与主力同一次操作里平掉，都算锁住——'
-  + '有就取其中最早开的那张对冲的开仓价（对冲一挂上，主力后面的行情就不再属于它）；没有就取主力自己的平仓价（最后平的那几笔里最有利的）。';
+export const PRICE_CHANGE_EXIT_RULE_TEXT = '平仓价看主力平仓那一刻有没有对冲把行情锁住：滚动对冲（含已触发的初始对冲 A/B）'
+  + '仍持有、或与主力同一次操作里平掉（相差不超过一分钟），以及回场对冲与主力同一次操作里平掉，都算锁住——'
+  + '有就取其中最早开的那张对冲的开仓价（对冲一成交，主力后面的行情就不再属于它）；没有就取主力自己的平仓价（最后平的那几笔里最有利的）。';
 
 /** 「本场：开仓价 → 平仓价」的来源注记：「平仓价取滚动对冲的开仓价」「平仓价取主力的平仓价」（不带括号，内联时由调用方加）。 */
 export function describePriceChangeExitSource(source: CampaignPriceChangeExitSource | null | undefined): string {
@@ -105,8 +108,8 @@ function mainLegsOf<T extends { role: string }>(legs: readonly T[]): T[] {
  *   · 主力平仓时刻：主力已平仓各笔里最晚的那个；主力都还没平仓时算不出，显示「—」。
  *   · 平仓价：主力平仓那一刻有对冲把行情锁住，取**其中最早开的那张对冲的开仓价**——对冲一挂上，主力后面的行情就被锁住了，
  *     主力真正吃到的涨跌幅到对冲开仓为止；否则取主力自己的平仓价（最后平的那几笔里最有利的：主多取最高、主空取最低）。
- *     「锁住」：滚动对冲仍在持有、或与主力同一次操作里平掉（相差 ≤ SAME_CLOSE_TOLERANCE_MS）；
- *     已触发的初始对冲 A/B、回场对冲只认与主力同一次操作里平掉（主力平了它们还挂着不算）。
+ *     「锁住」：滚动对冲（含已触发的初始对冲 A/B）仍在持有、或与主力同一次操作里平掉（相差 ≤ SAME_CLOSE_TOLERANCE_MS）；
+ *     回场对冲只认与主力同一次操作里平掉（主力平仓后它仍持有不算）。
  *   · 按主力方向计：空单价格跌了为正，与盈亏同号。
  * 涨跌幅倍数、加仓效用、排序、封面、散点图、盈亏概览、导出图、反事实都从这一个数派生。
  */
@@ -138,15 +141,18 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
   ));
 
   // 主力平仓那一刻把行情锁住的对冲：取最早开的那张。
-  //   · 滚动对冲：还没平（没有平仓价），或平仓时间不早于主力平仓一分钟；
-  //   · 初始对冲 A/B、回场对冲：已平仓，且平仓时间与主力相差不超过一分钟（还挂着的不算）。
+  //   · 滚动对冲（含已触发的初始对冲 A/B）：还没平，或平仓（放下）时刻不早于主力平仓一分钟；
+  //   · 回场对冲：平仓（放下）时刻与主力相差不超过一分钟（主力平仓后它仍持有不算）。
+  // 平仓时刻：成交记录的平仓时间，没有记录的读权益路径放下它的那一刻（撤单、快照平仓时间）；
   // 有平仓价却没记平仓时间的算不出，不当锁住。
   const locks = (leg: PriceChangeLegInput, closeAt: number): boolean => {
     const closedInTime = usable(leg.closeTime) && leg.closeTime > (leg.openTime as number);
-    if (leg.role === ROLLING_HEDGE_ROLE) {
-      return leg.exitPrice == null || (closedInTime && (leg.closeTime as number) >= closeAt - SAME_CLOSE_TOLERANCE_MS);
+    if ((ROLLING_HEDGE_ROLES as readonly string[]).includes(leg.role)) {
+      // 有平仓（放下）时刻就按时刻判；没有平仓时刻时，没平仓价 = 仍在手，有平仓价 = 读不出何时平，不当锁住
+      if (usable(leg.closeTime)) return closedInTime && leg.closeTime >= closeAt - SAME_CLOSE_TOLERANCE_MS;
+      return leg.exitPrice == null;
     }
-    return leg.exitPrice != null && closedInTime && Math.abs((leg.closeTime as number) - closeAt) <= SAME_CLOSE_TOLERANCE_MS;
+    return closedInTime && Math.abs((leg.closeTime as number) - closeAt) <= SAME_CLOSE_TOLERANCE_MS;
   };
   const lockingHedge = mainCloseTime == null ? null : inputs
     .filter(leg => isLockingHedgeRole(leg.role) && leg.side !== side
@@ -169,7 +175,7 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
 }
 
 function isLockingHedgeRole(role: string | null | undefined): boolean {
-  return role === ROLLING_HEDGE_ROLE || (SAME_CLOSE_HEDGE_ROLES as readonly string[]).includes(role ?? '');
+  return [...ROLLING_HEDGE_ROLES, ...SAME_CLOSE_HEDGE_ROLES].includes(role as never);
 }
 
 function isPriceChangeRole(role: string | null | undefined): boolean {
@@ -205,9 +211,18 @@ export function campaignPriceChangeLegInputs(
         side: leg.direction === 'short' ? 'short' : 'long',
         entryPrice: execution.entryPrice,
         exitPrice: execution.exitPrice,
-        // 没有成交记录的腿按权益路径的持有起点（触发时刻）；有记录的按记录
-        openTime: record ? execution.openTime : (facts.heldStartMsByLeg.get(leg.id) ?? execution.openTime),
-        closeTime: execution.exitPrice == null ? null : execution.closeTime,
+        // 没有成交记录的腿按权益路径的持有起点（触发时刻）；有记录的按记录。
+        // 成交过、成交时刻却不知道的锁价对冲（权益路径不持有：换了设备、本地查不到成交记录或委托快照）：
+        // 读不出它何时在手，不参与锁价——挂出时刻不是成交时刻（与峰值浮盈同一份事实）
+        openTime: record
+          ? execution.openTime
+          : (facts.heldStartMsByLeg.get(leg.id)
+            ?? (isLockingHedgeRole(leg.leg_role) && facts.offPathLegIds.has(leg.id) ? null : execution.openTime)),
+        // 没有平仓价的腿：有成交记录的就是还没平；没有记录的读权益路径在哪一刻放下它
+        // （触发后撤单、快照里只记了平仓时间）——撤掉的对冲不再在手
+        closeTime: execution.exitPrice != null
+          ? execution.closeTime
+          : (record ? null : facts.heldWithoutRecordByLeg.get(leg.id)?.endMs ?? null),
       };
     });
 }
@@ -329,14 +344,17 @@ export function counterfactualPriceChange(
 
     if (base && actual) {
       const exitUnchanged = samePrice(leg.exit_price, actual.exit_price);
-      const closeUnchanged = actual.close_time_fallback === true || sameInstant(leg.close_time, actual.close_time);
+      // 与合成战役判 closeIsFallback 同一个严格口径：兜底平仓时间在载入时已与基线同步（adoptCurrentFallbackClose），
+      // 用户真改了它（仍在手的对冲改到主力平仓之前）就要认
+      const closeUnchanged = sameInstant(leg.close_time, actual.close_time);
       let exitPrice = exitUnchanged ? base.exitPrice : leg.exit_price;
       let closeTime = closeUnchanged ? base.closeTime : parseTime(leg.close_time);
-      // 真实一侧没有平仓价、平仓价也没改：仍是未平仓，平仓时间也不能单独存在
-      if (exitUnchanged && base.exitPrice == null) { exitPrice = null; closeTime = null; }
-      // 用户给真实一侧还没平的腿定了平仓价：平仓时间取副本的。平仓价没改就不补——
-      // 只有平仓价快照、没记平仓时间的腿，副本给的是兜底时间（close_time_fallback），补进去会让它变成「最晚平的主力」
-      if (!exitUnchanged && exitPrice != null && closeTime == null) closeTime = parseTime(leg.close_time);
+      // 真实一侧没有平仓价、平仓价也没改：仍没有平仓价；平仓时刻没改就照读真实一侧那一份（权益路径放下它的时刻，
+      // 还在手的是 null），原样重跑逐位相同
+      if (exitUnchanged && base.exitPrice == null) exitPrice = null;
+      // 用户给真实一侧还没平的腿定了平仓价：平仓时间取副本的。只补这一种——真实一侧已有平仓价、只是没记平仓时间的腿
+      // （平仓价快照腿），副本给的是兜底时间，补进去会让主力变成「最晚平的主力」、让对冲从「算不出」变成锁住
+      if (!exitUnchanged && base.exitPrice == null && exitPrice != null && closeTime == null) closeTime = parseTime(leg.close_time);
       inputs.push({
         id: leg.id,
         role: leg.leg_role,

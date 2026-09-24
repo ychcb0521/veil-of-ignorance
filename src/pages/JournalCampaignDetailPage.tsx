@@ -1216,7 +1216,7 @@ export default function JournalCampaignDetailPage() {
     asymmetricRiskSummary: campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
-    // 反事实里的「涨跌幅」逐腿逐字段对账（副本里 id 不变）：没改过的主力与滚动对冲沿用上方这条腿的开平价与时间，再按同一条规则算。
+    // 反事实里的「涨跌幅」逐腿逐字段对账（副本里 id 不变）：没改过的主力与能锁平仓价的对冲沿用上方这条腿的开平价与时间，再按同一条规则算。
     actualMain: actualMainPriceChange,
     // 反事实的「多方总名义仓位」数哪一侧：与上方同一个主方向
     mainSide: mainSideNotional?.side ?? 'long',

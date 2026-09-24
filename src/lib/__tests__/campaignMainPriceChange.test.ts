@@ -1,6 +1,6 @@
 /**
- * 【用户要求】战役的涨跌幅：开仓价按主力开仓最有利的那笔（主多最低）；主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），
- * 平仓价按滚动对冲的开仓价；否则按主力自己的平仓价。涨跌幅倍数、加仓效用、反事实都从它派生。
+ * 【用户要求】战役的涨跌幅：开仓价按主力开仓最有利的那笔（主多最低）；主力平仓时若有对冲锁住行情（滚动对冲含已触发的 A/B 仍持有或同平、回场对冲同平），
+ * 平仓价按最早那张对冲的开仓价；否则按主力自己的平仓价。涨跌幅倍数、加仓效用、反事实都从它派生。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -134,7 +134,7 @@ describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览�
     expect(change(legs, records)).toMatchObject({ exitSource: 'rolling_hedge', exitLegId: 'roll-1', exitPrice: 118 });
   });
 
-  it('【用户要求】已触发的初始对冲 A/B 与主力同一次操作里平掉：也锁平仓价；与滚动对冲一起在手时取最早开的那张', () => {
+  it('【用户要求】初始对冲 A/B 算滚动对冲：与主力同平、或主力平仓后才平都锁平仓价；与滚动对冲一起在手时取最早开的那张', () => {
     const main = closedRecord('r-main', {});
     const legsA = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: 'r-a' })];
     const aTogether = closedRecord('r-a', { side: 'SHORT', entryPrice: 95, exitPrice: 112, openTime: T_OPEN + 60_000, closeTime: T_CLOSE + 20_000 });
@@ -144,8 +144,8 @@ describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览�
     // 容差边上：早平一分钟整仍算同一次操作，再早 1 毫秒就不算
     expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE - SAME_CLOSE_TOLERANCE_MS }])).toMatchObject({ exitSource: 'initial_hedge_a' });
     expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE - SAME_CLOSE_TOLERANCE_MS - 1 }])).toMatchObject({ exitSource: 'main', exitPrice: 112 });
-    // 晚平也一样：相差超过一分钟就不是「平仓时间一致」（滚动对冲晚平仍算在手，初始对冲不算）
-    expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE + SAME_CLOSE_TOLERANCE_MS + 1 }])).toMatchObject({ exitSource: 'main' });
+    // 主力平了它才平（晚一分钟以上）：主力平仓那一刻它仍在手，与滚动对冲一样锁住
+    expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE + 3_600_000 }])).toMatchObject({ exitSource: 'initial_hedge_a', exitPrice: 95 });
 
     // B 比滚动对冲开得早：取 B；滚动对冲比 B 早：取滚动对冲
     const legsMixed = [
@@ -159,13 +159,38 @@ describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览�
     expect(change(legsMixed, [main, { ...b, openTime: T_CLOSE - 1_800_000 }, roll])).toMatchObject({ exitSource: 'rolling_hedge', exitLegId: 'roll', exitPrice: 118 });
   });
 
-  it('【用户要求】初始对冲触发了、主力平掉时它还挂着（没有平仓）：平仓时间不一致，不锁', () => {
+  it('【用户要求】初始对冲触发了、主力平掉时它还没平：与滚动对冲一样算在手，锁平仓价；从未触发（只挂着）不算', () => {
     const legs = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: null, pre_entry_price: 95, pre_simulated_time: new Date(T_OPEN).toISOString() })];
     const triggered = campaignOf([{
       id: 'e-a', event_type: 'hedge_triggered', timestamp: new Date(T_OPEN + 60_000).toISOString(),
       journal_id: 'a', leg_role: 'hedge_initial_a', direction: 'short', price: 95, size_usdt: 10_000,
     } as unknown as CampaignEvent]);
-    expect(change(legs, [closedRecord('r-main', {})], triggered)).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+    expect(change(legs, [closedRecord('r-main', {})], triggered)).toMatchObject({ exitSource: 'initial_hedge_a', exitLegId: 'a', exitPrice: 95 });
+    // 同一张 A 只是挂着、事件流里没有触发（Legs 表「挂单中」）：不是对冲在手
+    expect(change(legs, [closedRecord('r-main', {})])).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+  });
+
+  it('【回归】初始对冲触发后又撤掉、或快照里只记了平仓时间：放下那一刻起就不在手，不锁平仓价', () => {
+    const legs = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: null, pre_entry_price: 95, pre_simulated_time: new Date(T_OPEN).toISOString() })];
+    const triggered = { id: 'e-a', event_type: 'hedge_triggered', timestamp: new Date(T_OPEN + 60_000).toISOString(), journal_id: 'a', leg_role: 'hedge_initial_a', direction: 'short', price: 95, size_usdt: 10_000 };
+    const cancelled = { id: 'e-a-x', event_type: 'hedge_cancelled', timestamp: new Date(T_OPEN + 3_600_000).toISOString(), journal_id: 'a', leg_role: 'hedge_initial_a' };
+    // 触发 1 小时后撤单，主力 4 小时后才平：主力平仓那一刻 A 早已不在手
+    const withCancel = campaignOf([triggered, cancelled] as unknown as CampaignEvent[]);
+    expect(change(legs, [closedRecord('r-main', {})], withCancel)).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+    // 撤单与主力平仓在同一分钟里：主力平仓那一刻它还在，照样锁住
+    const cancelTogether = campaignOf([triggered, { ...cancelled, timestamp: new Date(T_CLOSE + 20_000).toISOString() }] as unknown as CampaignEvent[]);
+    expect(change(legs, [closedRecord('r-main', {})], cancelTogether)).toMatchObject({ exitSource: 'initial_hedge_a', exitPrice: 95 });
+    // 腿上只记了平仓时间、没有平仓价快照：同样按那一刻放下
+    const snapClosed = [legs[0], { ...legs[1], post_simulated_close_time: new Date(T_OPEN + 3_600_000).toISOString() } as TradeJournal];
+    expect(change(snapClosed, [closedRecord('r-main', {})], campaignOf([triggered] as unknown as CampaignEvent[]))).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+  });
+
+  it('【回归】A 挂的是委托 id、本地查不到委托快照（换了设备）：成交时刻读不出，不拿挂出时刻冒充，不锁', () => {
+    const legs = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: 'ord-a', pre_entry_price: 95, pre_simulated_time: new Date(T_OPEN).toISOString() })];
+    expect(change(legs, [closedRecord('r-main', {})])).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+    // 本地委托快照证明它从未成交：同样不锁（原来就对）
+    expect(campaignPriceChange(CAMPAIGN, legs, [closedRecord('r-main', {})], {}, { unfilledOrderIds: new Set(['ord-a']) }))
+      .toMatchObject({ exitSource: 'main', exitPrice: 112 });
   });
 
   it('【用户要求】只剩回场主力的战役：回场对冲与回场主力同一次操作里平掉，平仓价取回场对冲的开仓价', () => {
@@ -178,6 +203,11 @@ describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览�
       closedRecord('r-rh', { side: 'SHORT', entryPrice: 109, exitPrice: 106, openTime: T_CLOSE - 1_800_000, closeTime: T_CLOSE + 5_000 }),
     ];
     expect(change(legs, records)).toMatchObject({ exitSource: 'reentry_hedge', exitLegId: 'rh', exitPrice: 109 });
+    // 回场对冲只认同平：主力平了它晚一分钟以上才平、或一直没平，都不锁（与滚动对冲、初始对冲不同）
+    const rhLate = { ...records[1], closeTime: T_CLOSE + SAME_CLOSE_TOLERANCE_MS + 1 };
+    expect(change(legs, [records[0], rhLate])).toMatchObject({ exitSource: 'main', exitPrice: 106 });
+    const rhOpen = record({ id: 'r-rh', side: 'SHORT', entryPrice: 109, exitPrice: 0, openTime: T_CLOSE - 1_800_000, closeTime: null as never, action: 'OPEN' as never });
+    expect(change(legs, [records[0], rhOpen])).toMatchObject({ exitSource: 'main', exitPrice: 106 });
     expect(describePriceChangeExitSource('reentry_hedge')).toBe('平仓价取回场对冲的开仓价');
     expect(describePriceChangeExitSource('initial_hedge_b')).toBe('平仓价取初始对冲 B 的开仓价');
     expect(describePriceChangeExitSource('main')).toBe('平仓价取主力的平仓价');

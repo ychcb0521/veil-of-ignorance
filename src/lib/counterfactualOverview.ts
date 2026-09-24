@@ -50,7 +50,7 @@ export interface CounterfactualOverviewShared {
   currentAccountEquity: number;
   isOwner: boolean;
   /**
-   * 真实战役算涨跌幅用到的各腿（主力与滚动对冲的开平价与时间，按腿 id）与上方「盈亏概览」的读数：
+   * 真实战役算涨跌幅用到的各腿（主力与能锁平仓价的对冲（滚动对冲含已触发的 A/B、回场对冲）的开平价与时间，按腿 id）与上方「盈亏概览」的读数：
    * 反事实的「涨跌幅」逐腿对账——没改过的腿沿用真实一侧这条腿的那一份，再按同一条规则算，原样重跑因此逐位相同。
    * 缺省时每条腿都按副本的开平价与时间算。
    */
@@ -274,7 +274,7 @@ export function buildCounterfactualOverviewMetrics(
   const initialExpectedMaxLoss = anchors.initialExpectedMaxLoss > EPSILON ? anchors.initialExpectedMaxLoss : 0;
   const hasStopLine = initialExpectedMaxLoss > 0;
   const payoffRatio = realizedPnl == null ? null : computeCounterfactualPayoffRatio(realizedPnl, initialExpectedMaxLoss);
-  // 手动 Legs 分支：副本里的主力与滚动对冲（改过就按改后的）按与上方同一条规则算；SOP 推演没有逐腿开平价，不算。
+  // 手动 Legs 分支：副本里的主力与能锁平仓价的对冲（改过就按改后的）按与上方同一条规则算；SOP 推演没有逐腿开平价，不算。
   const priceChange = manual ? counterfactualPriceChange(branch.params.manual_legs, shared.actualMain) : null;
   const mainPriceChangePct = priceChange?.pct ?? null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;

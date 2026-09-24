@@ -107,6 +107,86 @@ describe('战役涨跌幅：真实一侧 ↔ 反事实副本', () => {
     expect(after.entryPrice).toBeCloseTo((change.entryPrice as number) * 0.99, 9);
   });
 
+  it('5. 【回归】初始对冲触发后又撤单（sim-hedge-cancelled-after-trigger）：撤单那一刻起不在手，真实与原样重跑都按主力平仓价', () => {
+    const fx = parityFixture('sim-hedge-cancelled-after-trigger');
+    const { change, actualMain } = real(fx);
+    expect(change.exitSource).toBe('main');
+    const rerun = counterfactualPriceChange(copy(fx), actualMain);
+    expect(rerun.pct).toBe(change.pct);
+    expect(rerun.exitSource).toBe('main');
+  });
+
+  it('6. 【回归】A 挂的是委托 id、本地查不到（换了设备）：真实侧不锁，原样重跑逐位相同', () => {
+    const base = parityFixture('plain-long');
+    const mainLeg = base.legs.find(leg => leg.leg_role === 'main_open')!;
+    const fx: ParityFixture = {
+      ...base,
+      legs: [...base.legs, rollingLeg(base, { id: 'a-x', leg_role: 'hedge_initial_a', trade_record_id: 'ord-missing', pre_simulated_time: mainLeg.pre_simulated_time })],
+    };
+    const { change, actualMain } = real(fx);
+    expect(change).toMatchObject({ exitSource: 'main', pct: real(base).change.pct });
+    const rerun = counterfactualPriceChange(copy(fx), actualMain);
+    expect(rerun.pct).toBe(change.pct);
+    expect(rerun.exitSource).toBe('main');
+  });
+
+  it('7. 【回归】副本里只改对冲的平仓价，不改变它锁不锁：有平仓价没平仓时间的对冲仍算不出，不当锁住', () => {
+    const base = parityFixture('plain-long');
+    const mainClose = real(base).change.mainCloseTime!;
+    const roll = rollingLeg(base, {
+      pre_entry_price: 98, post_exit_price_snapshot: 97,
+      pre_simulated_time: new Date(mainClose - 7_200_000).toISOString(),
+    });
+    const fx: ParityFixture = {
+      ...base,
+      legs: [...base.legs, roll],
+      campaign: { ...base.campaign, actual_evolution: [...(base.campaign.actual_evolution ?? []), {
+        id: 'e-roll-x', event_type: 'hedge_triggered', timestamp: new Date(mainClose - 3_600_000).toISOString(),
+        journal_id: 'roll-x', leg_role: 'hedge_rolling', direction: 'short', price: 98, size_usdt: 1_000,
+      } as unknown as CampaignEvent] },
+    };
+    const { change, actualMain } = real(fx);
+    expect(change.exitSource).toBe('main');
+    const edited = copy(fx, legs => legs.map(leg => (leg.id === 'roll-x' ? { ...leg, exit_price: 96 } : leg)));
+    expect(counterfactualPriceChange(edited, actualMain)).toMatchObject({ exitSource: 'main', pct: change.pct });
+  });
+
+  it('8. 【回归】仍在手的对冲（平仓时间只是兜底）在副本里改到主力平仓之前：涨跌幅认这次改动，退回主力平仓价', () => {
+    const base = parityFixture('plain-long');
+    const mainClose = real(base).change.mainCloseTime!;
+    const roll = rollingLeg(base, { pre_entry_price: 98, pre_simulated_time: new Date(mainClose - 7_200_000).toISOString() });
+    const fx: ParityFixture = {
+      ...base,
+      legs: [...base.legs, roll],
+      campaign: { ...base.campaign, actual_evolution: [...(base.campaign.actual_evolution ?? []), {
+        id: 'e-roll-x', event_type: 'hedge_triggered', timestamp: new Date(mainClose - 3_600_000).toISOString(),
+        journal_id: 'roll-x', leg_role: 'hedge_rolling', direction: 'short', price: 98, size_usdt: 1_000,
+      } as unknown as CampaignEvent] },
+    };
+    const { change, actualMain } = real(fx);
+    expect(change).toMatchObject({ exitSource: 'rolling_hedge', exitLegId: 'roll-x' });
+    expect(counterfactualPriceChange(copy(fx), actualMain).pct).toBe(change.pct);
+    const earlier = copy(fx, legs => legs.map(leg => (leg.id === 'roll-x' ? { ...leg, close_time: new Date(mainClose - 1_800_000).toISOString() } : leg)));
+    expect(counterfactualPriceChange(earlier, actualMain).exitSource).toBe('main');
+    const later = copy(fx, legs => legs.map(leg => (leg.id === 'roll-x' ? { ...leg, close_time: new Date(mainClose + 1_800_000).toISOString() } : leg)));
+    expect(counterfactualPriceChange(later, actualMain).exitSource).toBe('rolling_hedge');
+  });
+
+  it('9. 【回归】成交时刻未知的初始对冲（本地无成交记录、带平仓价快照）：不拿挂出时刻冒充成交时刻，不参与锁价', () => {
+    const base = parityFixture('plain-long');
+    const mainClose = real(base).change.mainCloseTime!;
+    const a = rollingLeg(base, {
+      id: 'a-x', leg_role: 'hedge_initial_a', trade_record_id: 'pos-missing',
+      pre_entry_price: 98, post_exit_price_snapshot: 97, post_realized_pnl: 1,
+      pre_simulated_time: new Date(mainClose - 7_200_000).toISOString(),
+      post_simulated_close_time: new Date(mainClose + 3_600_000).toISOString(),
+    });
+    const fx: ParityFixture = { ...base, legs: [...base.legs, a] };
+    const { change, actualMain } = real(fx);
+    expect(change).toMatchObject({ exitSource: 'main', pct: real(base).change.pct });
+    expect(counterfactualPriceChange(copy(fx), actualMain)).toMatchObject({ exitSource: 'main', pct: change.pct });
+  });
+
   it('4. 一条腿都结算不了的战役：真实涨跌幅「—」，只改开仓价后仍是「—」', () => {
     for (const id of ['sim-no-settlement-stored', 'sim-no-settlement-events']) {
       const fx = parityFixture(id);

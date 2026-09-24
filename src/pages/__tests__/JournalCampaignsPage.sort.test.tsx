@@ -618,10 +618,11 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByText(/主多 100 → 112/)).toBeInTheDocument();
       expect(screen.getByText(/主力都还没平仓（没有平仓价）的战役显示「—」，不参与排序与散点图/)).toBeInTheDocument();
       // 【用户要求】开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲开仓价——
-      // 滚动对冲仍持有或同平；已触发的初始对冲 A/B、回场对冲只认与主力同一次操作里平掉
+      // 滚动对冲（含已触发的初始对冲 A/B）仍持有或同平；回场对冲只认与主力同一次操作里平掉
       expect(screen.getByText(/开仓价取主力（main_open，没有才取 reentry_main）各笔里最有利的那个/)).toBeInTheDocument();
       expect(screen.getByText(/取其中最早开的那张对冲的开仓价/)).toBeInTheDocument();
-      expect(screen.getByText(/已触发的初始对冲 A\/B、回场对冲与主力同一次操作里平掉，都算锁住/)).toBeInTheDocument();
+      expect(screen.getByText(/滚动对冲（含已触发的初始对冲 A\/B）仍持有、或与主力同一次操作里平掉/)).toBeInTheDocument();
+      expect(screen.getByText(/以及回场对冲与主力同一次操作里平掉，都算锁住/)).toBeInTheDocument();
       expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
       const priceToggle = screen.getByTestId('campaign-mainPriceChange-chart-toggle');
       expect(priceToggle).toHaveAttribute('aria-expanded', 'false');
