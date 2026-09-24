@@ -12,16 +12,16 @@ import {
 /**
  * 黄金样本：与详情页内联版本（提取前）在 metrics 页面测试那场「winner」战役上的输出逐字对照。
  * 已实现 200、L 100 → b = 200%；P 统一 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
- * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓效率 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
+ * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓&止盈效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
-// 【用户要求】左右两列对调：左栏是递进链 预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓效率 → 几何期望 → 算术期望
+// 【用户要求】左右两列对调：左栏是递进链 预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓&止盈效用 → 几何期望 → 算术期望
 // （与战役封面、排序栏同序）；右栏是结果与仓位：最大预期亏损、已实现 P&L、主力开仓名义仓位、多方总名义仓位……
 const GOLDEN_LABELS = [
   '预期回撤',
   '涨幅',
   '涨幅效率',
   '盈亏比',
-  '加仓效率',
+  '加仓&止盈效用',
   '几何期望',
   '算术期望',
   '最大预期亏损',
@@ -138,14 +138,14 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.payoffRatio.color).toBe('#64748B');
   });
 
-  it('【用户要求】没有加仓的战役不算加仓效率：印「—」，说明里写明原因；涨幅与涨幅效率照算', () => {
+  it('【用户要求】没有加仓的战役不算加仓&止盈效用：印「—」，说明里写明原因；涨幅与涨幅效率照算', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ hasMainAdd: false }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     expect(byKey.addEfficiency.value).toBe('—');
     expect(byKey.mainPriceChange.value).toBe('+20.00%');
     expect(byKey.mainPriceEfficiency.value).toBe('+2.00');
     const { container } = render(<>{byKey.addEfficiency.help}</>);
-    expect(container.textContent).toContain('本场没有加仓，不计算加仓效率。');
+    expect(container.textContent).toContain('本场没有加仓，不计算加仓&止盈效用。');
   });
 
   it('亏损战役的已实现、盈亏比、期望走红色', () => {
@@ -191,7 +191,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2')).toHaveClass('[@container(min-width:540px)]:grid-cols-2');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+      .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓&止盈效用', '几何期望', '算术期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['最大预期亏损', '已实现 P&L', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位', '杠杆倍数', 'DSI/USI 贡献']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
@@ -223,7 +223,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '涨幅效率说明' }));
     expect(screen.getByText('本场 = +20.00% ÷ 10.00% = +2.00')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '加仓效率说明' }));
+    fireEvent.click(screen.getByRole('button', { name: '加仓&止盈效用说明' }));
     expect(screen.getByText('本场 = 2.00 ÷ +2.00 = +1.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '最大预期亏损说明' }));
     expect(screen.getByText('最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例')).toBeInTheDocument();

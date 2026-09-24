@@ -1,6 +1,6 @@
 /**
  * 【用户要求】战役的涨幅：开仓价按主力开仓最有利的那笔（主多最低）；主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），
- * 平仓价按滚动对冲的开仓价；否则按主力自己的平仓价。涨幅效率、加仓效率、反事实都从它派生。
+ * 平仓价按滚动对冲的开仓价；否则按主力自己的平仓价。涨幅效率、加仓&止盈效用、反事实都从它派生。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -187,11 +187,11 @@ describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一�
   });
 });
 
-describe('涨幅效率 / 加仓效率', () => {
-  it('涨幅效率 = 主力涨幅 ÷ 预期回撤；加仓效率 = 盈亏比 ÷ 涨幅效率', () => {
+describe('涨幅效率 / 加仓&止盈效用', () => {
+  it('涨幅效率 = 主力涨幅 ÷ 预期回撤；加仓&止盈效用 = 盈亏比 ÷ 涨幅效率', () => {
     expect(computeMainPriceEfficiency(12, 4)).toBeCloseTo(3, 9);
     expect(computeAddEfficiency(6, 3)).toBeCloseTo(2, 9);
-    // 只拿主力不加仓：b 就是涨幅效率，加仓效率恰为 1
+    // 只拿主力不加仓：b 就是涨幅效率，加仓&止盈效用恰为 1
     expect(computeAddEfficiency(3, computeMainPriceEfficiency(12, 4))).toBeCloseTo(1, 9);
   });
 
@@ -283,7 +283,7 @@ describe('反事实里的涨幅', () => {
   });
 });
 
-describe('【用户要求】加仓效率只算做过加仓的战役', () => {
+describe('【用户要求】加仓&止盈效用只算做过加仓的战役', () => {
   const journal = (over: Partial<TradeJournal>) => ({ leg_role: 'main_open', trade_record_id: null, ...over } as TradeJournal);
 
   it('有成交过的加仓腿（带成交 id 或已有结算结果）才算做过加仓', () => {
@@ -307,7 +307,7 @@ describe('【用户要求】加仓效率只算做过加仓的战役', () => {
   });
 });
 
-describe('【用户要求】加仓效率门槛：涨幅效率为正才算', () => {
+describe('【用户要求】加仓&止盈效用门槛：涨幅效率为正才算', () => {
   it('涨幅效率为负：不算（亏损战役负负得正不再排到最前）', () => {
     expect(computeAddEfficiency(-0.68, -0.05)).toBeNull();
     expect(computeAddEfficiency(2, -1)).toBeNull();

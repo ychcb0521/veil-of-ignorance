@@ -175,7 +175,7 @@ type CampaignMetricChartConfig = {
   missingValueLabel: string;
   colorMode: CampaignMetricColorMode;
   formatValue: (value: number) => string;
-  /** 通用分布图（涨幅、涨幅效率、加仓效率、算术期望）的读法：单位、0 线、正值占比、额外参照线。 */
+  /** 通用分布图（涨幅、涨幅效率、加仓&止盈效用、算术期望）的读法：单位、0 线、正值占比、额外参照线。 */
   distribution?: CampaignMetricDistributionSpec;
 };
 
@@ -205,7 +205,7 @@ type CampaignFormulaPopover =
   | 'addEfficiencySort';
 
 /**
- * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望 ┆
+ * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨幅、涨幅效率、盈亏比、加仓&止盈效用、几何期望、算术期望 ┆
  * DSI 贡献、USI 贡献、杠杆倍数、重要性、字母（默认仍按操作时间排序）。
  * 【用户要求】封面指标格的先后与这里一致：镜像止盈之后就是中间那一组七项（见 CampaignCard 的指标格）。
  * 排序行左对齐依次排开。
@@ -217,7 +217,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'mainPriceChange', label: '涨幅' },
   { value: 'mainPriceEfficiency', label: '涨幅效率' },
   { value: 'captureRate', label: '盈亏比' },
-  { value: 'addEfficiency', label: '加仓效率' },
+  { value: 'addEfficiency', label: '加仓&止盈效用' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'dsiContribution', label: 'DSI 贡献' },
@@ -230,7 +230,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
- *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨幅 · 涨幅效率 · 盈亏比 · 加仓效率 · 几何期望 · 算术期望 ┆ DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨幅 · 涨幅效率 · 盈亏比 · 加仓&止盈效用 · 几何期望 · 算术期望 ┆ DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution']);
 
@@ -276,8 +276,8 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
     hint: '涨幅效率 = 主力涨幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
   },
   addEfficiency: {
-    noun: '可计算加仓效率',
-    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率，只算做过加仓、且涨幅效率为正的战役；其余战役不会进入当前排序',
+    noun: '可计算加仓&止盈效用',
+    hint: '加仓&止盈效用 = 盈亏比 ÷ 涨幅效率，只算做过加仓、且涨幅效率为正的战役；其余战役不会进入当前排序',
   },
 };
 
@@ -321,7 +321,7 @@ function formatMirrorTpMetric(value: number): string {
 }
 
 /**
- * 【用户要求】涨幅、涨幅效率、加仓效率、算术期望也配「分布」看法并默认打开（同盈亏比）。
+ * 【用户要求】涨幅、涨幅效率、加仓&止盈效用、算术期望也配「分布」看法并默认打开（同盈亏比）。
  * 四张分布图共用的两句参考线说明：密度曲线与越界三角的读法四张图一字不差，写一份免得各自漂移。
  */
 const METRIC_DISTRIBUTION_DENSITY_NOTE = '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与点列共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。';
@@ -605,7 +605,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'upside',
     formatValue: value => `${value.toFixed(1)}%`,
   },
-  // 【用户要求】涨幅、涨幅效率、加仓效率与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
+  // 【用户要求】涨幅、涨幅效率、加仓&止盈效用与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
   {
     key: 'mainPriceChange',
     label: '涨幅',
@@ -716,22 +716,22 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   },
   {
     key: 'addEfficiency',
-    label: '加仓效率',
-    chartLabel: '加仓效率图',
+    label: '加仓&止盈效用',
+    chartLabel: '加仓&止盈效用图',
     viewLabel: '时序',
     viewTestId: 'campaign-addEfficiency-view-time',
-    seriesLabel: '加仓效率时序',
+    seriesLabel: '加仓&止盈效用时序',
     guide: {
-      yAxis: '加仓效率 = 盈亏比 b ÷ 涨幅效率，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
+      yAxis: '加仓&止盈效用 = 盈亏比 b ÷ 涨幅效率，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
       point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）且涨幅效率为正的战役，其余不进图。',
       colors: [
-        { token: 'profit', label: '绿色：加仓效率 > 0，本场盈亏比为正。' },
-        { token: 'loss', label: '红色：加仓效率 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
-        { token: 'neutral', label: '灰色：加仓效率 = 0。' },
+        { token: 'profit', label: '绿色：加仓&止盈效用 > 0，本场盈亏比为正。' },
+        { token: 'loss', label: '红色：加仓&止盈效用 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
+        { token: 'neutral', label: '灰色：加仓&止盈效用 = 0。' },
       ],
-      referenceLines: ['灰色零线：正、负加仓效率的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
+      referenceLines: ['灰色零线：正、负加仓&止盈效用的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
     },
-    missingValueLabel: '加仓效率',
+    missingValueLabel: '加仓&止盈效用',
     colorMode: 'signed',
     formatValue: value => formatEfficiency(value),
   },
@@ -739,27 +739,27 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'addEfficiencyDistribution',
     sourceKey: 'addEfficiency',
     view: 'distribution',
-    label: '加仓效率分布',
+    label: '加仓&止盈效用分布',
     chartLabel: '分布图',
     viewLabel: '分布',
     viewTestId: 'campaign-addEfficiency-view-distribution',
-    seriesLabel: '加仓效率分布',
+    seriesLabel: '加仓&止盈效用分布',
     guide: {
-      yAxis: '落在该加仓效率附近的战役数量：点从底线向上堆叠，堆得越高，这一档加仓效率出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: '每个点仍是一场做过加仓、且涨幅效率为正的战役，横向位置就是它的加仓效率（倍，= 盈亏比 b ÷ 涨幅效率），不考虑时间先后；同一档内的点按加仓效率从小到大自下而上排。没有加仓、或涨幅效率不为正的战役不进图。',
+      yAxis: '落在该加仓&止盈效用附近的战役数量：点从底线向上堆叠，堆得越高，这一档加仓&止盈效用出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场做过加仓、且涨幅效率为正的战役，横向位置就是它的加仓&止盈效用（倍，= 盈亏比 b ÷ 涨幅效率），不考虑时间先后；同一档内的点按加仓&止盈效用从小到大自下而上排。没有加仓、或涨幅效率不为正的战役不进图。',
       colors: [
-        { token: 'profit', label: '绿色：加仓效率 > 0，本场盈亏比为正。' },
-        { token: 'loss', label: '红色：加仓效率 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
-        { token: 'neutral', label: '灰色：加仓效率 = 0。' },
+        { token: 'profit', label: '绿色：加仓&止盈效用 > 0，本场盈亏比为正。' },
+        { token: 'loss', label: '红色：加仓&止盈效用 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
+        { token: 'neutral', label: '灰色：加仓&止盈效用 = 0。' },
       ],
       referenceLines: [
-        '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓效率约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓效率 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
-        '灰色 0.00 竖线：盈亏平衡。进图的战役涨幅效率都为正，加仓效率与盈亏比同号：线左是主力涨了、本场却亏了；摘要条的「盈利」是加仓效率 > 0 的场数占比。',
+        '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓&止盈效用约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓&止盈效用 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
+        '灰色 0.00 竖线：盈亏平衡。进图的战役涨幅效率都为正，加仓&止盈效用与盈亏比同号：线左是主力涨了、本场却亏了；摘要条的「盈利」是加仓&止盈效用 > 0 的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
     },
-    missingValueLabel: '加仓效率',
+    missingValueLabel: '加仓&止盈效用',
     colorMode: 'signed',
     formatValue: value => formatEfficiency(value),
     distribution: {
@@ -816,7 +816,7 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   mirrorTp: 'mirrorTpBars',
   // 几何期望也一样：要判断的是这套打法的资本增长偏不偏、右尾够不够长——那是形状问题。
   geometricExpectancy: 'geometricExpectancyDistribution',
-  // 【用户要求】涨幅、涨幅效率、加仓效率、算术期望同盈亏比：默认看分布，「时序 | 分布」随时切回。
+  // 【用户要求】涨幅、涨幅效率、加仓&止盈效用、算术期望同盈亏比：默认看分布，「时序 | 分布」随时切回。
   mainPriceChange: 'mainPriceChangeDistribution',
   mainPriceEfficiency: 'mainPriceEfficiencyDistribution',
   addEfficiency: 'addEfficiencyDistribution',
@@ -1073,9 +1073,9 @@ function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct'
   return computeMainPriceEfficiency(row.mainPriceChangePct, row.initialExpectedMaxDrawdownPct);
 }
 
-/** 加仓效率 = 盈亏比 ÷ 涨幅效率（见 computeAddEfficiency）。 */
+/** 加仓&止盈效用 = 盈亏比 ÷ 涨幅效率（见 computeAddEfficiency）。 */
 function rowAddEfficiency(row: Pick<CampaignCardData, 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
-  // 【用户要求】没有加仓的战役不算加仓效率（campaignHasMainAdd，与盈亏概览同一个判断）
+  // 【用户要求】没有加仓的战役不算加仓&止盈效用（campaignHasMainAdd，与盈亏概览同一个判断）
   if (!campaignHasMainAdd(row.legs)) return null;
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
 }
@@ -1304,7 +1304,8 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
 const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 transition-[background-color,box-shadow] duration-150';
 /**
  * 每项的宽度（≥ 640px）：浏览器实测最长的真实读数（11px 等宽）+ 左右内边距，取整到 4px。
- *   镜像止盈「已实现·进行中」≈ 73px；预期回撤「13.86%」、加仓效率 / 涨幅效率「+130.41」≈ 46px（指标名 40px）；
+ *   镜像止盈「已实现·进行中」≈ 73px；预期回撤「13.86%」、涨幅效率「+130.41」≈ 46px（指标名 40px）；
+ *   加仓&止盈效用读数同样 ≈ 46px，但指标名最长（「加仓&止盈效用」≈ 67px），这一格按名字定宽；
  *   涨幅「+437.21%」、算术期望「+383.20R」≈ 53px；盈亏比「76740.80%（767.41）」≈ 121px；
  *   几何期望「50.63」+「仓位击穿」徽标 ≈ 83px。更极端的读数在本项内以省略号收住，完整读数在悬停提示里。
  */
@@ -1314,7 +1315,7 @@ const CARD_METRIC_WIDTH = {
   mainPriceChange: 'sm:w-[80px]',
   mainPriceEfficiency: 'sm:w-[72px]',
   captureRate: 'sm:w-[148px]',
-  addEfficiency: 'sm:w-[72px]',
+  addEfficiency: 'sm:w-[88px]',
   geometricExpectancy: 'sm:w-[108px]',
   arithmeticExpectancy: 'sm:w-[80px]',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
@@ -1567,7 +1568,7 @@ const CampaignCard = memo(function CampaignCard({
       </div>
 
       {/* 封面指标行：左对齐、按读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH），上标签、下数值；【用户要求】顺序与排序行一致：
-          镜像止盈、预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望。当前排序项高亮。 */}
+          镜像止盈、预期回撤、涨幅、涨幅效率、盈亏比、加仓&止盈效用、几何期望、算术期望。当前排序项高亮。 */}
       <div className={`border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
@@ -1630,18 +1631,18 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
-          {/* 加仓效率紧跟盈亏比：它就是盈亏比 ÷ 涨幅效率。 */}
+          {/* 加仓&止盈效用紧跟盈亏比：它就是盈亏比 ÷ 涨幅效率。 */}
           <div
             data-testid="campaign-add-efficiency"
             title={addEfficiency == null || mainPriceEfficiency == null
               ? (campaignHasMainAdd(legs)
-                ? '加仓效率 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
-                : '加仓效率：这场战役没有加仓，不计算')
-                : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
+                ? '加仓&止盈效用 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
+                : '加仓&止盈效用：这场战役没有加仓，不计算')
+                : `加仓&止盈效用 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
-            <dt className={metricName('addEfficiency')}>加仓效率</dt>
+            <dt className={metricName('addEfficiency')}>加仓&止盈效用</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
                 {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
@@ -2944,9 +2945,9 @@ export default function JournalCampaignsPage() {
                       </>
                     ) : formula === 'addEfficiencySort' ? (
                       <>
-                        <div className="font-medium text-foreground">加仓效率计算公式</div>
+                        <div className="font-medium text-foreground">加仓&止盈效用计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          加仓效率ᵢ = bᵢ ÷ ηᵢ
+                          加仓&止盈效用ᵢ = bᵢ ÷ ηᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {/* 两个式子各自不断行，只在「；」之后换行：不会把「涨幅ᵢ」拆成「涨幅」和另起一行的「ᵢ」 */}
@@ -2958,7 +2959,7 @@ export default function JournalCampaignsPage() {
                           <div>只拿主力、不加仓时，bᵢ 大致就是主力的涨幅效率，比值约为 1。</div>
                           <div>大于 1：加仓把同一段行情放大成了更多的 R；小于 1：加仓、对冲或止盈吃掉了行情。</div>
                           <div>
-                            例：bᵢ = +6.00、ηᵢ = +3.00，加仓效率 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
+                            例：bᵢ = +6.00、ηᵢ = +3.00，加仓&止盈效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
                           </div>
                           <div>只算做过加仓（有一条成交过的加仓腿）<span className="text-foreground">且涨幅效率为正</span>的战役：涨幅效率为负时亏损战役负负得正、接近 0 时分母过小，读数都会失真；其余战役不参与排序与散点图，封面显示「—」。</div>
                         </div>

@@ -7,7 +7,7 @@ import {
 import { CHART_THRESHOLD_VAR } from '@/lib/chartTokens';
 
 /**
- * 【用户要求】涨幅、涨幅效率、加仓效率、算术期望的分布图：与盈亏比同一套分布机制（堆叠、密度、摘要），
+ * 【用户要求】涨幅、涨幅效率、加仓&止盈效用、算术期望的分布图：与盈亏比同一套分布机制（堆叠、密度、摘要），
  * 读法（单位、0 线、正值占比、额外参照线）由 distributionSpec 给。
  */
 const SIGNED_COLORS = [
@@ -68,15 +68,15 @@ function renderChart(
 }
 
 describe('通用连续指标的分布图', () => {
-  // 加仓效率的真实形状：主群 0.3~2.5，几场亏损（负值）、一场恰为 0、一场恰为 1、一个 +18 的离群值
+  // 加仓&止盈效用的真实形状：主群 0.3~2.5，几场亏损（负值）、一场恰为 0、一场恰为 1、一个 +18 的离群值
   const addValues = [
     -2.4, -1.1, -0.35, 0, 0.18, 0.32, 0.41, 0.55, 0.62, 0.7, 0.78, 0.84, 0.9, 0.96, 1,
     1.04, 1.1, 1.18, 1.25, 1.33, 1.42, 1.5, 1.61, 1.75, 1.9, 2.05, 2.3, 2.6, 3.1, 3.8,
     0.66, 0.88, 1.12, 1.27, 1.48, 0.52, 0.73, 1.05, 1.36, 18,
   ];
 
-  it('加仓效率：1.00 参照线（琥珀虚线）与 0 线并存，两条线都是档边界，点位不跨线', () => {
-    const onSelect = renderChart(addValues, 'addEfficiencyDistribution', ADD_SPEC, '加仓效率', formatEfficiency, { excluded: 7 });
+  it('加仓&止盈效用：1.00 参照线（琥珀虚线）与 0 线并存，两条线都是档边界，点位不跨线', () => {
+    const onSelect = renderChart(addValues, 'addEfficiencyDistribution', ADD_SPEC, '加仓&止盈效用', formatEfficiency, { excluded: 7 });
     const root = screen.getByTestId('campaign-metric-scatter-plot');
     expect(root.querySelectorAll('button[data-campaign-id]').length).toBe(addValues.length);
 
@@ -142,19 +142,19 @@ describe('通用连续指标的分布图', () => {
     expect(screen.getByTestId('campaign-metric-density-curve-addEfficiencyDistribution').getAttribute('d')).not.toMatch(/NaN|Infinity/);
 
     // 图下：方向提示带单位；缺值脚注与其它图同一格式
-    expect(screen.getByText(/横轴 加仓效率（倍） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
-    expect(screen.getByText(/未绘制：无加仓效率 7 场/)).toBeInTheDocument();
+    expect(screen.getByText(/横轴 加仓&止盈效用（倍） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
+    expect(screen.getByText(/未绘制：无加仓&止盈效用 7 场/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiencyDistribution'));
     const guide = screen.getByTestId('campaign-metric-guide-addEfficiencyDistribution');
-    expect(guide).toHaveTextContent('横轴就是加仓效率本身（单位 倍）');
+    expect(guide).toHaveTextContent('横轴就是加仓&止盈效用本身（单位 倍）');
     expect(guide).toHaveTextContent('把盈亏分界 0 与参照值 1.00 圈在窗口内');
     expect(guide).toHaveTextContent('1.00 也是档边界，点位不会吸附到参考线或盈亏分界的另一侧；恰好落在线上的归右侧');
     expect(guide).not.toHaveTextContent('归零线');
   });
 
   it('全部小于 1 时也把 1.00 参照线留在视野里，线右那一侧看得出「一场都没放大」', () => {
-    renderChart([0.2, 0.35, 0.5, 0.62, 0.7, 0.81], 'addEfficiencyDistribution', ADD_SPEC, '加仓效率', formatEfficiency);
+    renderChart([0.2, 0.35, 0.5, 0.62, 0.7, 0.81], 'addEfficiencyDistribution', ADD_SPEC, '加仓&止盈效用', formatEfficiency);
     const reference = screen.getByTestId('campaign-metric-reference-addEfficiencyDistribution-1');
     const buttons = [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLElement>('button[data-campaign-id]')];
     const oneX = Number(reference.getAttribute('x1'));

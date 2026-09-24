@@ -72,7 +72,7 @@ function mainLegsOf<T extends { role: string }>(legs: readonly T[]): T[] {
  *     取**最早开的那张滚动对冲的开仓价**——对冲一挂上，主力后面的行情就被锁住了，主力真正吃到的涨幅到对冲开仓为止；
  *     否则取主力自己的平仓价（最后平的那几笔里最有利的：主多取最高、主空取最低）。
  *   · 按主力方向计：空单价格跌了为正，与盈亏同号。
- * 涨幅效率、加仓效率、排序、封面、散点图、盈亏概览、导出图、反事实都从这一个数派生。
+ * 涨幅效率、加仓&止盈效用、排序、封面、散点图、盈亏概览、导出图、反事实都从这一个数派生。
  */
 export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[]): CampaignPriceChange {
   const mains = mainLegsOf(inputs);
@@ -202,7 +202,7 @@ export function computeMainPriceEfficiency(
 }
 
 /**
- * 加仓效率 = 盈亏比 b ÷ 涨幅效率。
+ * 加仓&止盈效用 = 盈亏比 b ÷ 涨幅效率。
  * 只拿主力、不加仓时，b 大致就是主力的涨幅效率（最大预期亏损按入场到对冲边界的距离定），比值约为 1；
  * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
  * payoffRatio 是 b 本身（倍数，不是百分数）。
@@ -330,7 +330,7 @@ function isMainAddRole(role: string | null | undefined): boolean {
 }
 
 /**
- * 【用户要求】「加仓效率」只对做过加仓的战役计算：没有加仓，这个比值只是「主力盈亏比 ÷ 主力涨幅效率」，
+ * 【用户要求】「加仓&止盈效用」只对做过加仓的战役计算：没有加仓，这个比值只是「主力盈亏比 ÷ 主力涨幅效率」，
  * 恒在 1 附近，排进来只会把真正加过仓的战役冲散。
  * 「做过加仓」= 有一条加仓腿（main_add_N）真的成交过：带成交 id（实时 / 回填都有），或腿上已有结算结果。
  * 只挂了单、腿上连成交 id 都没有的加仓不算。
