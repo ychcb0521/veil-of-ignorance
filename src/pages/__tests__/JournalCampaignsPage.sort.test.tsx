@@ -476,7 +476,7 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 20_000);
 
-  it('【用户要求】排序行与战役封面共用一套列：五个排序按钮与卡片上同名五格同序、读同一个列模板', async () => {
+  it('【用户要求】排序行左对齐依次排开（两条分隔线分出三组）；封面指标行仍按列排', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <JournalCampaignsPage />
@@ -484,62 +484,34 @@ describe('JournalCampaignsPage sorting', () => {
     );
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
 
-    const gridToken = (node: Element) => [...node.classList].find(cls => cls.startsWith('xl:grid-cols-['));
     const sortRow = screen.getByTestId('campaign-sort-controls');
-    const token = gridToken(sortRow);
-    expect(token).toBeTruthy();
+    // 「排序方式这里不美观。这里还是用左对齐吧」：不再读封面的列模板，按钮依次排开、间距均匀
+    expect([...sortRow.classList].some(cls => cls.startsWith('xl:grid'))).toBe(false);
+    expect(sortRow).toHaveClass('flex', 'flex-wrap', 'gap-x-1');
+    // 行首与封面左缘对齐：同一套内边距 + 一条透明 1px 边框抵掉卡片外框
+    expect(sortRow).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
+    // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳
+    const children = [...sortRow.children];
+    expect(children[0]).toHaveTextContent('排序方式');
+    const sequence = children.slice(1).map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    expect(sequence).toEqual([
+      'time',
+      'divider-mainPriceChange',
+      'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'geometricExpectancy',
+      'divider-expectedDrawdownPct',
+      'expectedDrawdownPct', 'arithmeticExpectancy', 'mirrorTp', 'dsiContribution', 'usiContribution',
+      'leverage', 'importance', 'alpha',
+    ]);
+    expect(screen.getByTestId('campaign-sort-divider-mainPriceChange')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
+
+    // 封面指标行仍按列排：同一个列模板，上下各张卡同名格在同一条竖线上
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
-    for (const row of metricRows) {
-      // 同一个列模板、同一套内边距、列间距归零
-      expect(gridToken(row)).toBe(token);
-      for (const cls of ['xl:grid', 'xl:gap-x-0', 'px-4', 'sm:px-5']) {
-        expect(row).toHaveClass(cls);
-        expect(sortRow).toHaveClass(cls);
-      }
-    }
-    // 卡片外框 1px；排序行补一条透明的 1px 边框，两行网格从同一个 x 起步
-    expect(sortRow).toHaveClass('border-x', 'border-transparent');
-    expect(screen.getAllByTestId('campaign-card')[0]).toHaveClass('border');
-
-    // 排序行按列分组：八个外壳各占一列，组内第一个按钮压在列线上；按列摊平就是排序行的次序
-    const sortColumns = [
-      ['time'],
-      ['mainPriceChange'],
-      ['mainPriceEfficiency'],
-      ['captureRate'],
-      ['addEfficiency'],
-      ['geometricExpectancy', 'expectedDrawdownPct'],
-      ['arithmeticExpectancy'],
-      // 【用户要求】重要性放在后面：杠杆倍数之后、字母之前
-      ['mirrorTp', 'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha'],
-    ];
-    const sortCells = [...sortRow.children];
-    expect(sortCells).toHaveLength(8);
-    expect(sortCells[0]).toBe(screen.getByTestId('campaign-sort-lead'));
-    sortCells.forEach((cell, column) => {
-      if (column > 0) expect(cell).toHaveAttribute('data-testid', `campaign-sort-column-${column + 1}`);
-      const buttons = [...cell.querySelectorAll('button[data-testid^="campaign-sort-"]')]
-        .map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
-      expect(buttons).toEqual(sortColumns[column]);
-      // 窄屏外壳是 display: contents，按钮照常在一行里换行；宽屏才按列排
-      expect(cell).toHaveClass('contents', 'xl:flex');
-    });
-    // 末列那一串在 1280–1413px 放不下时在本列内换行，仍从第 8 列的竖线起步；列内按钮间距 2px，其余列照常 4px
-    expect(sortCells[7]).toHaveClass('xl:flex-wrap', 'xl:gap-x-0.5', 'xl:gap-y-1');
-    expect(sortCells[7]).not.toHaveClass('xl:gap-1');
-    for (const cell of sortCells.slice(0, 7)) expect(cell).toHaveClass('xl:gap-1');
-    // 首列：排序方式 + 操作时间（重要性已挪到末列）
-    expect(screen.getByTestId('campaign-sort-lead')).toHaveTextContent('排序方式');
-    expect(screen.getByTestId('campaign-sort-lead')).toContainElement(screen.getByTestId('campaign-sort-time'));
-    expect(screen.getByTestId('campaign-sort-lead')).not.toContainElement(screen.getByTestId('campaign-sort-importance'));
-    expect(sortCells[7]).toContainElement(screen.getByTestId('campaign-sort-importance'));
-    // 几何期望列里的预期回撤前面有一条短分隔线：它的卡片格在第 1 列，不属于对齐的五项
-    const divider = screen.getByTestId('campaign-sort-expectedDrawdownPct').previousElementSibling;
-    expect(divider).toHaveAttribute('aria-hidden', 'true');
-    expect(divider).toHaveClass('xl:w-px');
-
-    // 卡片每列一格，与排序行逐列对应：首列预期回撤，第 2–8 列与排序行各列的第一个按钮同名
+    const gridToken = (node: Element) => [...node.classList].find(cls => cls.startsWith('xl:grid-cols-['));
+    const token = gridToken(metricRows[0]);
+    expect(token).toBeTruthy();
+    for (const row of metricRows) expect(gridToken(row)).toBe(token);
     const cardCells = [...metricRows[0].children].map(node => node.getAttribute('data-testid'));
     expect(cardCells).toEqual([
       'campaign-expected-drawdown-pct',
@@ -551,24 +523,13 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-arithmetic-expectancy',
       'campaign-mirror-tp-status',
     ]);
-    // 宽屏下格子的 1px 分隔线 + pl-1.5 与按钮的 1px 边框 + px-1.5 同宽：左缘对齐，格内标签与按钮文字也对齐
-    for (const id of cardCells.slice(1)) {
-      expect(metricRows[0].querySelector(`[data-testid="${id}"]`)).toHaveClass('xl:border-l', 'xl:pl-1.5');
-    }
-    expect(metricRows[0].querySelector('[data-testid="campaign-expected-drawdown-pct"]')).not.toHaveClass('xl:border-l');
-    for (const mode of sortColumns.flat()) {
-      expect(screen.getByTestId(`campaign-sort-${mode}`)).toHaveClass('border', 'px-1.5');
-    }
-    // 图标位宽度固定：有公式的档平时是 Σ，选中那一档在同一个位置换成方向箭头（排序默认按操作时间）
+
+    // 图标位宽度固定：有公式的档平时是 Σ，选中那一档换成方向箭头；没有公式的档平时也留同宽空位，切换排序整行不重排
     expect(screen.getByTestId('campaign-sort-mainPriceChange-icon')).toHaveClass('w-3');
     expect(screen.getByTestId('campaign-sort-time-icon')).toHaveClass('w-3');
-    // 没有公式的档平时也留同宽空位（只在窄屏占位，xl 按选中时的宽度留足列宽）：窄屏切换排序不会让整行重排
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toHaveClass('w-3');
-    expect(screen.getByTestId('campaign-sort-leverage-icon')).toHaveClass('xl:hidden');
+    expect(screen.getByTestId('campaign-sort-leverage-icon')).not.toHaveClass('xl:hidden');
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toBeEmptyDOMElement();
-    expect(screen.getByTestId('campaign-sort-alpha-icon')).toHaveClass('xl:hidden');
-    expect(sortRow).toHaveClass('flex', 'flex-wrap');
-    expect(metricRows[0]).toHaveClass('flex', 'flex-wrap');
   }, 15_000);
 
   it('【用户要求】涨幅 / 涨幅效率 / 加仓效率：双击或右键看公式与例子，浮层里「查看散点图」打开与已有指标一致的散点图', async () => {
@@ -650,7 +611,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect([...addPopover.querySelectorAll('span.whitespace-nowrap')].map(node => node.textContent))
         .toEqual(['bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；', 'ηᵢ = 涨幅ᵢ ÷ 预期回撤ᵢ']);
       expect(screen.getByText(/加仓效率 = 6 ÷ 3 =/)).toBeInTheDocument();
-      expect(screen.getByText(/只算做过加仓的战役/)).toBeInTheDocument();
+      expect(screen.getByText(/只算做过加仓（有一条成交过的加仓腿）/)).toBeInTheDocument();
       const addToggle = screen.getByTestId('campaign-addEfficiency-chart-toggle');
       expect(addToggle).toHaveAccessibleName('查看加仓效率散点图，共 1 场');
       fireEvent.click(addToggle);
@@ -659,7 +620,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(Number(screen.getByTestId('campaign-metric-point-addEfficiency-high-importance').dataset.metricValue)).toBeCloseTo(1, 6);
       expect(screen.getByText(/无加仓效率 3 场/)).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiency'));
-      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('没有加仓的战役不进图');
+      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('且涨幅效率为正的战役，其余不进图');
 
       // 散点图开着时点排序按钮：排序照改，图跟着切到这一项
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));

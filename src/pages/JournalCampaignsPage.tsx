@@ -198,7 +198,7 @@ type CampaignFormulaPopover =
 
 /**
  * 【用户要求】涨幅、涨幅效率、盈亏比、加仓效率、几何期望五项排在一起，紧跟「操作时间」右侧。
- * 这五项同时是排序行与战役封面的「对齐列」（见 CAMPAIGN_COLUMNS_GRID）。
+ * 封面指标行按列排（见 CAMPAIGN_COLUMNS_GRID）；排序行左对齐依次排开。
  * 【用户要求】「重要性」放到后面：排在杠杆倍数之后、字母之前，行首只留「操作时间」。
  */
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
@@ -219,63 +219,30 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 ];
 
 /**
- * 【用户要求】排序行与战役封面共用一套列（CAMPAIGN_COLUMNS_GRID）。排序行按列分组，每组占一列，
- * 组内第一个按钮的左缘就是那条列线；卡片指标行每列一格，与这里逐列对应：
- *   第 1 列   排序方式 / 操作时间                          ↔ 预期回撤
- *   第 2–6 列 涨幅 / 涨幅效率 / 盈亏比 / 加仓效率 / 几何期望 ↔ 同名五格（用户要求排在一起的五项）
- *             几何期望那一列里，短分隔线后再跟一个「预期回撤」——它的卡片格在第 1 列
- *   第 7 列   算术期望                                    ↔ 算术期望
- *   第 8 列   镜像止盈，之后 DSI 贡献 / USI 贡献 / 杠杆倍数 / 重要性 / 字母 ↔ 镜像止盈
- * 【用户要求】「重要性」放在后面（杠杆倍数之后、字母之前），首列只剩「操作时间」，整张表随之左移。
- * 有同名卡片格的按钮都压在那一格的列线上；其余按钮离任何一条列线都不近，不会读成「差一点没对齐」。
- * 按列摊平就是 SORT_OPTIONS 的次序（测试守着）。
+ * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
+ * 两条短分隔线把它分成三组，读得出用户要求排在一起的那五项：
+ *   操作时间 ┆ 涨幅 · 涨幅效率 · 盈亏比 · 加仓效率 · 几何期望 ┆ 预期回撤 · 算术期望 · 镜像止盈 · DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
+ * 封面的指标行仍按列排（CAMPAIGN_COLUMNS_GRID）。
  */
-const CAMPAIGN_SORT_COLUMNS: readonly (readonly CampaignSortMode[])[] = [
-  ['time'],
-  ['mainPriceChange'],
-  ['mainPriceEfficiency'],
-  ['captureRate'],
-  ['addEfficiency'],
-  ['geometricExpectancy', 'expectedDrawdownPct'],
-  ['arithmeticExpectancy'],
-  ['mirrorTp', 'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha'],
-];
-
-/** 几何期望列里跟着的「预期回撤」前面画一条短分隔线：它的卡片格在第 1 列，不属于对齐的五项。 */
-const SORT_DIVIDER_BEFORE: CampaignSortMode = 'expectedDrawdownPct';
-
-/** 用户要求排在一起、与封面逐列对齐的五档（第 2–6 列的列头），次序即列序。 */
-const CAMPAIGN_ALIGNED_SORT_MODES: readonly CampaignSortMode[] = CAMPAIGN_SORT_COLUMNS.slice(1, 6).map(column => column[0]);
+const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mainPriceChange', 'expectedDrawdownPct']);
 
 /**
- * 【用户要求】排序行与战役封面共用的列模板。与 Legs 表共用 LEGS_GRID 同一个做法：两行只读这一个模板，谁也不单独调偏移。
- * 同一张模板要画出同一组竖线，两行的网格还得从同一个 x 起步、宽度相同：
- *   · 卡片外框有 1px 边框；排序行补一条等宽的透明边框（CAMPAIGN_COLUMNS_FRAME）；
- *   · 两行左右内边距都是 CAMPAIGN_COLUMNS_INSET；
- *   · 列间距归零（xl:gap-x-0），列与列之间只由模板决定；
- *   · 排序按钮的 1px 边框 + 6px 内边距，与卡片格的 1px 分隔线 + CAMPAIGN_COLUMN_TEXT_INSET 同宽，
- *     按钮文字与格内标签也落在同一条竖线上。
- * 列宽 = 浏览器实测的最长内容 + 至少 8px 留白（卡片：10px 标签 + 11px 等宽数字，含 1px 分隔线与 6px 内边距）：
- *   首列     排序行「排序方式 / 操作时间 ↓」142px，卡片的预期回撤只要 ≈87px；取两者较大的 142px 再留 12px，
- *            与第 2 列的「涨幅」隔开一段，读得出首列与对齐五列是两组
- *   涨幅     「+437.21%」≈94px            涨幅效率「+130.41」≈107px
- *   盈亏比   「49628.76%（496.29）」≈172px  加仓效率「+23.00」≈101px，留出三位整数「+123.45」≈108px
- *   几何期望 卡片「50.63」＋「仓位击穿」≈142px；排序行「几何期望 | 预期回撤」157px，之后与「算术期望」隔 2px（同末列按钮间距）
- *   算术期望 「+247.65R」≈114px
- *   末列 1fr 排序行「镜像止盈 … 重要性 字母」358.5px（按钮间距 2px；杠杆 / 字母选中时多一个箭头 372.5px）；
- *            卡片「已实现·进行中」≈136px
- * 八列合计 1323.5px：窗口 ≥ 1414px（含 1440 / 1920 / 2560）时排序行一行放下（默认按操作时间排序时 ≥ 1400px 即可）。
- * 1280px 时网格只有 1190px，七个有同名卡片格的按钮都压在列线上就不可能再挤进一行——
- * 这时末列那一串在末列里换到第二行（第一行镜像止盈 / DSI 贡献 / USI 贡献，第二行杠杆倍数 / 重要性 / 字母），
- * 仍从第 8 列的竖线起步，所有列线照旧对齐。
- * 窄于 xl（1280px）两行都退回自然换行，不做对齐。
+ * 战役封面指标行的列模板（宽屏 xl 起按列排，窄屏自然换行）。每张封面读同一张模板，上下各张卡的同名格落在同一条竖线上。
+ * 【用户要求】排序行原先也读这张模板、按钮压在封面同名格的列线上；用户看过后觉得排序行空隙不均、不美观，改回左对齐，
+ * 只有封面指标行还按列排。
+ * 列序：预期回撤 | 涨幅 | 涨幅效率 | 盈亏比 | 加仓效率 | 几何期望 | 算术期望 | 镜像止盈。
+ * 列宽 = 浏览器实测的最长内容 + 至少 8px 留白（10px 标签 + 11px 等宽数字，含 1px 分隔线与 6px 内边距）：
+ *   预期回撤 ≈87px（首列 154px，与第 2 列隔开）；涨幅「+437.21%」≈94px；涨幅效率「+130.41」≈107px；
+ *   盈亏比「49628.76%（496.29）」≈172px；加仓效率「+123.45」≈108px；几何期望「50.63」＋「仓位击穿」≈142px；
+ *   算术期望「+247.65R」≈114px；镜像止盈「已实现·进行中」≈136px（末列 1fr）。
+ * 超出列宽的极端值在本列内以省略号收住，不压到隔壁一列。
  */
 const CAMPAIGN_COLUMNS_GRID = 'xl:grid xl:grid-cols-[154px_102px_116px_182px_116px_159px_122px_minmax(0,1fr)] xl:gap-x-0';
-/** 卡片格文字相对列线的缩进：1px 分隔线之后再空 6px，与排序按钮的 1px 边框 + px-1.5 同宽。 */
+/** 卡片格文字相对列线的缩进：1px 分隔线之后再空 6px。 */
 const CAMPAIGN_COLUMN_TEXT_INSET = 'xl:pl-1.5';
-/** 两行网格外的 1px 框：卡片用自己的边框，排序行用这条透明边框补齐。 */
+/** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
 const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';
-/** 两行网格的左右内边距。 */
+/** 排序行与封面指标行的左右内边距。 */
 const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';
 
 /**
@@ -307,7 +274,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   },
   addEfficiency: {
     noun: '可计算加仓效率',
-    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率，只算做过加仓的战役；没有加仓、算不出盈亏比或涨幅效率的战役不会进入当前排序',
+    hint: '加仓效率 = 盈亏比 ÷ 涨幅效率，只算做过加仓、且涨幅效率为正的战役；其余战役不会进入当前排序',
   },
 };
 
@@ -634,10 +601,10 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '加仓效率时序',
     guide: {
       yAxis: '加仓效率 = 盈亏比 b ÷ 涨幅效率，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
-      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）的战役，没有加仓的战役不进图。',
+      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）且涨幅效率为正的战役，其余不进图。',
       colors: [
-        { token: 'profit', label: '绿色：加仓效率 > 0，盈亏比与涨幅效率同号。' },
-        { token: 'loss', label: '红色：加仓效率 < 0，盈亏比与涨幅效率一正一负。' },
+        { token: 'profit', label: '绿色：加仓效率 > 0，本场盈亏比为正。' },
+        { token: 'loss', label: '红色：加仓效率 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
         { token: 'neutral', label: '灰色：加仓效率 = 0。' },
       ],
       referenceLines: ['灰色零线：正、负加仓效率的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
@@ -1385,8 +1352,8 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 【用户要求】与排序行共用 CAMPAIGN_COLUMNS_GRID，每列一格：涨幅、涨幅效率、盈亏比、加仓效率、几何期望五格
-          与排序行同名按钮左缘对齐；首列预期回撤（涨幅效率的分母），之后的算术期望、镜像止盈也压在同名按钮的竖线上。 */}
+      {/* 封面指标行按 CAMPAIGN_COLUMNS_GRID 每列一格（【用户要求】顺序：预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望，
+          之后算术期望、镜像止盈），上下各张卡的同名格落在同一条竖线上。 */}
       <div
         data-testid="campaign-card-metrics"
         className={`flex flex-wrap items-center gap-y-0.5 border-t border-border/60 bg-muted/[0.12] py-1 dark:bg-muted/[0.16] ${CAMPAIGN_COLUMNS_INSET} ${CAMPAIGN_COLUMNS_GRID}`}
@@ -1437,7 +1404,7 @@ const CampaignCard = memo(function CampaignCard({
           data-testid="campaign-add-efficiency"
           title={addEfficiency == null || mainPriceEfficiency == null
             ? (campaignHasMainAdd(legs)
-              ? '加仓效率 = 盈亏比 ÷ 涨幅效率：算不出盈亏比或涨幅效率、或涨幅效率为 0 时不算'
+              ? '加仓效率 = 盈亏比 ÷ 涨幅效率：只在涨幅效率为正时计算，这场涨幅效率不为正或算不出（或算不出盈亏比）'
               : '加仓效率：这场战役没有加仓，不计算')
               : `加仓效率 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨幅效率 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
           className={CARD_METRIC_CELL}
@@ -2289,37 +2256,21 @@ export default function JournalCampaignsPage() {
   };
 
   /**
-   * 排序按钮按 CAMPAIGN_SORT_COLUMNS 分进共用列：每组一个外壳占一列，组内第一个按钮的左缘就是列线。
-   * 按钮以 option.value 作 key，这里按 key 取，次序仍是 SORT_OPTIONS 的次序。
-   * 窄于 xl 时外壳都是 display: contents，按钮照常在一行里换行。
+   * 排序行：「排序方式」标签之后按 SORT_OPTIONS 的次序左对齐依次排开，两条短分隔线分出三组（见 SORT_DIVIDERS_BEFORE）。
+   * 按钮以 option.value 作 key，这里按 key 取。
    */
-  const renderSortColumns = (buttons: ReactElement[]) => {
-    const byMode = new Map(buttons.map(button => [button.key as CampaignSortMode, button]));
-    const lastColumn = CAMPAIGN_SORT_COLUMNS.length - 1;
-    return CAMPAIGN_SORT_COLUMNS.map((modes, column) => (
-      <div
-        key={modes[0]}
-        data-testid={column === 0 ? 'campaign-sort-lead' : `campaign-sort-column-${column + 1}`}
-        // 末列那一串放不下时在本列内换到第二行，仍从这条列线起步；列内按钮间距 2px，与上方统计概览同一节奏
-        className={`contents xl:flex xl:min-w-0 xl:items-center ${column === lastColumn ? 'xl:flex-wrap xl:gap-x-0.5 xl:gap-y-1' : 'xl:gap-1'}`}
-      >
-        {column === 0 && (
-          <span className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 pr-1.5 font-medium text-foreground/70">
-            <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 opacity-80" />
-            排序方式
-          </span>
-        )}
-        {modes.map(mode => (
-          <Fragment key={mode}>
-            {mode === SORT_DIVIDER_BEFORE && (
-              <span aria-hidden="true" className="hidden xl:mx-1.5 xl:block xl:h-4 xl:w-px xl:shrink-0 xl:bg-border" />
-            )}
-            {byMode.get(mode)}
-          </Fragment>
-        ))}
-      </div>
-    ));
-  };
+  const renderSortRow = (buttons: ReactElement[]) => [
+    <span key="__label" className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 pr-1 font-medium text-foreground/70">
+      <SlidersHorizontal aria-hidden="true" className="h-3.5 w-3.5 opacity-80" />
+      排序方式
+    </span>,
+    ...buttons.flatMap(button => {
+      const mode = button.key as CampaignSortMode;
+      return SORT_DIVIDERS_BEFORE.has(mode)
+        ? [<span key={`__divider-${mode}`} aria-hidden="true" data-testid={`campaign-sort-divider-${mode}`} className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:block" />, button]
+        : [button];
+    }),
+  ];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -2533,14 +2484,13 @@ export default function JournalCampaignsPage() {
               data-testid="campaign-sticky-controls"
               className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
             >
-            {/* 【用户要求】排序行与战役封面共用 CAMPAIGN_COLUMNS_GRID：涨幅、涨幅效率、盈亏比、加仓效率、几何期望
-                五个按钮就是封面上同名五格的表头，宽屏下左缘在同一条竖线上；算术期望、镜像止盈同样压在同名格的竖线上。
-                窄屏各列外壳退成 contents，按钮照常换行。 */}
+            {/* 【用户要求】排序行左对齐：按钮依次排开、间距均匀，两条短分隔线分出「操作时间 ┆ 用户要求排在一起的五项 ┆ 其余」三组。
+                左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
             <div
               data-testid="campaign-sort-controls"
-              className={`order-2 flex min-h-11 flex-wrap items-center gap-1 border-t border-border/60 py-2 text-[10px] text-muted-foreground xl:items-start ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET} ${CAMPAIGN_COLUMNS_GRID}`}
+              className={`order-2 flex min-h-11 flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/60 py-2 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
             >
-              {renderSortColumns(SORT_OPTIONS.map(option => {
+              {renderSortRow(SORT_OPTIONS.map(option => {
                 const active = sortState.mode === option.value;
                 const direction = active ? sortState.direction : 'desc';
                 const formula = SORT_FORMULA_BY_MODE[option.value] ?? null;
@@ -2578,7 +2528,6 @@ export default function JournalCampaignsPage() {
                     onContextMenu={(event) => {
                       if (formula) openFormulaPopover(event, formula);
                     }}
-                    // 1px 边框 + px-1.5：与封面指标格的 1px 分隔线 + CAMPAIGN_COLUMN_TEXT_INSET 同宽，按钮文字与格内标签也落在同一条竖线上
                     className={`inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded border px-1.5 transition-[color,background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
                       active
                         ? 'border-border bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:border-foreground/15 dark:bg-accent'
@@ -2586,9 +2535,8 @@ export default function JournalCampaignsPage() {
                     }`}
                   >
                     <span>{option.label}</span>
-                    {/* 图标位宽度固定：有公式的档平时显示 Σ，选中后同一个位置换成方向箭头。
-                        没有公式的档（操作时间 / 杠杆倍数 / 字母）平时在窄屏也留一个空位：窄屏排序行会换行，
-                        选中时多出一个箭头就会把整行重排，双击落到隔壁按钮上；宽屏（xl）列宽已按选中时的宽度留足，不占这个空位。 */}
+                    {/* 图标位宽度固定：有公式的档平时显示 Σ，选中后同一个位置换成方向箭头；
+                        没有公式的档（操作时间 / 杠杆倍数 / 字母）平时也留一个同宽的空位——切换排序时按钮宽度不变，整行不会重排、双击不会落到隔壁。 */}
                     {(formula || active) ? (
                       <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0 justify-center">
                         {!active
@@ -2598,7 +2546,7 @@ export default function JournalCampaignsPage() {
                             : <ArrowUp className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />}
                       </span>
                     ) : (
-                      <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0 xl:hidden" />
+                      <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0" />
                     )}
                   </button>
                 );
@@ -2766,7 +2714,7 @@ export default function JournalCampaignsPage() {
                           <div>
                             例：bᵢ = +6.00、ηᵢ = +3.00，加仓效率 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
                           </div>
-                          <div>只算做过加仓的战役（有一条成交过的加仓腿）；没有加仓、算不出盈亏比或涨幅效率、或涨幅效率为 0 的战役不参与排序与散点图。</div>
+                          <div>只算做过加仓（有一条成交过的加仓腿）<span className="text-foreground">且涨幅效率为正</span>的战役：涨幅效率为负时亏损战役负负得正、接近 0 时分母过小，读数都会失真；其余战役不参与排序与散点图，封面显示「—」。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

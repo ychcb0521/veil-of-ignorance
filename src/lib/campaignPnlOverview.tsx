@@ -312,13 +312,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       rightColumn: true,
       help: (
         <>
-          <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨幅效率、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只对做过加仓的战役计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量。</p>
+          <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨幅效率、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只在做过加仓、且涨幅效率为正时计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量；涨幅效率不为正时，亏损战役负负得正、主力几乎没动时分母过小，读数都会失真。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效率 = 盈亏比 b ÷ 涨幅效率</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
               本场 = {((payoffRatio ?? 0) / 100).toFixed(2)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
             </p>
-          ) : <p>{hasMainAdd ? '算不出盈亏比或涨幅效率、或涨幅效率为 0 时不计算。' : '本场没有加仓，不计算加仓效率。'}</p>}
+          ) : <p>{hasMainAdd ? '只在涨幅效率为正时计算：本场涨幅效率不为正或算不出，或算不出盈亏比。' : '本场没有加仓，不计算加仓效率。'}</p>}
         </>
       ),
     },

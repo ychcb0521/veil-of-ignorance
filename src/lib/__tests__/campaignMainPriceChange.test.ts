@@ -156,3 +156,18 @@ describe('【用户要求】加仓效率只算做过加仓的战役', () => {
     expect(counterfactualHasMainAdd([{ ...add, leg_role: 'main_open' }])).toBe(false);
   });
 });
+
+describe('【用户要求】加仓效率门槛：涨幅效率为正才算', () => {
+  it('涨幅效率为负：不算（亏损战役负负得正不再排到最前）', () => {
+    expect(computeAddEfficiency(-0.68, -0.05)).toBeNull();
+    expect(computeAddEfficiency(2, -1)).toBeNull();
+  });
+  it('涨幅效率显示为 0.00（接近 0）：不算，分母过小不再把比值放大成十几倍', () => {
+    expect(computeAddEfficiency(0.59, 0.004)).toBeNull();
+    expect(computeAddEfficiency(0.59, 0)).toBeNull();
+  });
+  it('涨幅效率为正：照算，盈亏比为负时读数为负', () => {
+    expect(computeAddEfficiency(0.59, 0.04)).toBeCloseTo(14.75, 9);
+    expect(computeAddEfficiency(-1, 2)).toBeCloseTo(-0.5, 9);
+  });
+});
