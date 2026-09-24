@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * 指南里「战役列表」几段话要与页面对得上：排序行的新次序与左对齐、封面指标左对齐与排序高亮、
- * 涨幅 / 涨幅效率 / 加仓&止盈效用的公式浮层与散点图。
+ * 涨幅 / 涨幅效率 / 加仓效用的公式浮层与散点图。
  */
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
 
@@ -17,7 +17,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     const labels = [...block.matchAll(/label: '([^']+)'/g)].map(match => match[1]);
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母（重要性在杠杆倍数之后、字母之前）
     expect(labels).toEqual([
-      '操作时间', '镜像止盈', '预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓&止盈效用', '几何期望',
+      '操作时间', '镜像止盈', '预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效用', '几何期望',
       '算术期望', 'DSI 贡献', 'USI 贡献', '杠杆倍数', '重要性', '字母',
     ]);
     const at = guide.indexOf('排序行依次是');
@@ -38,7 +38,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布」：左对齐、按读数定宽，顺序与排序行一致
     expect(guide).toContain('第二层<strong>左对齐、紧凑排开</strong>');
     expect(guide).not.toContain('<strong>等宽的统计格</strong>');
-    expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨幅、涨幅效率、盈亏比、加仓&止盈效用、单场几何期望、单场算术期望');
+    expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨幅、涨幅效率、盈亏比、加仓效用、单场几何期望、单场算术期望');
     expect(guide).toContain('<strong>同名的项在上下各张卡片上落在同一条竖线上</strong>');
     // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」
     expect(guide).toContain('<strong>当前排序项在封面上高亮</strong>');
@@ -50,13 +50,13 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';");
     expect(guide).toContain('重要性放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是重要性');
-    expect(guide).toContain('涨幅、涨幅效率、加仓&止盈效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');
+    expect(guide).toContain('涨幅、涨幅效率、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');
   });
 
-  it('散点图清单与颜色说明包含涨幅、涨幅效率、加仓&止盈效用', () => {
-    expect(guide).toContain('盈亏比、预期回撤、涨幅、涨幅效率、加仓&止盈效用、算术期望、几何期望、重要性、镜像止盈、DSI 贡献、USI 贡献都各自配有一张散点图');
-    expect(guide).toContain('本身带盈亏方向的指标（盈亏比、涨幅、涨幅效率、加仓&止盈效用、算术期望、几何期望）按数值正负着色');
-    expect(guide).toContain('没有加仓、或涨幅效率不为正的战役不进加仓&止盈效用图');
+  it('散点图清单与颜色说明包含涨幅、涨幅效率、加仓效用', () => {
+    expect(guide).toContain('盈亏比、预期回撤、涨幅、涨幅效率、加仓效用、算术期望、几何期望、重要性、镜像止盈、DSI 贡献、USI 贡献都各自配有一张散点图');
+    expect(guide).toContain('本身带盈亏方向的指标（盈亏比、涨幅、涨幅效率、加仓效用、算术期望、几何期望）按数值正负着色');
+    expect(guide).toContain('没有加仓、或涨幅效率不为正的战役不进加仓效用图');
     // 页面上确实给三项注册了散点图
     for (const key of ['mainPriceChange', 'mainPriceEfficiency', 'addEfficiency']) {
       expect(page).toContain(`key: '${key}',`);
@@ -64,9 +64,9 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toMatch(new RegExp(`${key}: '${key}',`));
     }
   });
-  it('【用户要求】涨幅、涨幅效率、加仓&止盈效用、算术期望默认看分布，可切回时序；加仓&止盈效用另有 1.00 参照线', () => {
-    expect(guide).toContain('<strong>盈亏比、涨幅、涨幅效率、加仓&止盈效用、算术期望与几何期望默认展开的是分布图、镜像止盈默认展开的是柱状图</strong>');
-    expect(guide).toContain('<strong>涨幅、涨幅效率、加仓&止盈效用、算术期望默认看分布</strong>');
+  it('【用户要求】涨幅、涨幅效率、加仓效用、算术期望默认看分布，可切回时序；加仓效用另有 1.00 参照线', () => {
+    expect(guide).toContain('<strong>盈亏比、涨幅、涨幅效率、加仓效用、算术期望与几何期望默认展开的是分布图、镜像止盈默认展开的是柱状图</strong>');
+    expect(guide).toContain('<strong>涨幅、涨幅效率、加仓效用、算术期望默认看分布</strong>');
     expect(guide).toContain('<strong>琥珀色 1.00 虚线</strong>「加仓没有额外放大」');
     expect(guide).toContain('用面板右上角的「时序 | 分布」切回时序');
     for (const source of ['mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy']) {
@@ -80,7 +80,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(page).not.toContain('主力 = 名义最大的 main_open');
   });
   it('【用户要求】盈亏概览：左右对调（递进链在左）；右栏前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位', () => {
-    expect(guide).toContain('左栏是<strong>层层递进的一列</strong>——预期回撤、涨幅、涨幅效率、盈亏比、加仓&止盈效用、几何期望、算术期望');
+    expect(guide).toContain('左栏是<strong>层层递进的一列</strong>——预期回撤、涨幅、涨幅效率、盈亏比、加仓效用、几何期望、算术期望');
     // 【用户要求】「最大预期亏损放在那一列的第一个」
     expect(guide).toContain('右栏是结果与仓位——第一个是<strong>最大预期亏损</strong>，与左栏第一个的预期回撤同一行');
     // 【用户要求】「峰值浮盈放在已实现 P&L 的紧贴的后面」

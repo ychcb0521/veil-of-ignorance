@@ -34,7 +34,7 @@ import type {
  *     重算必须用这场战役自己的推演模板（main_only 没有保护线），否则老 SOP 行会被造出 L；
  *   · 盈亏比 b = L > 0 ? 已实现 ÷ L × 100 : null——**绝不**拿 result.profit_capture_ratio
  *     （那是 已实现 ÷ 峰值），也不拿 final_r_multiple（L = 0 时它是 0，会印成 0.00 而不是「—」）；
- *   · 算术与几何期望 / 加仓&止盈效用 / DSI-USI 贡献全部由这个 b 推出，用的是战役页同一批函数。
+ *   · 算术与几何期望 / 加仓效用 / DSI-USI 贡献全部由这个 b 推出，用的是战役页同一批函数。
  */
 
 export interface CounterfactualOverviewShared {

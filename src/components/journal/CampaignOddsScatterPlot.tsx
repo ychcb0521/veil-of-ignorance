@@ -79,7 +79,7 @@ export type CampaignMetricScatterGuide = {
 };
 
 /**
- * 通用连续指标（涨幅、涨幅效率、加仓&止盈效用、算术期望）的分布图读法。
+ * 通用连续指标（涨幅、涨幅效率、加仓效用、算术期望）的分布图读法。
  *
  * 盈亏比与几何期望各有一套专属画法（−1R 止损墙 / 对数横轴），不读这里；
  * 其余指标共用线性横轴、稳健窗口、密度曲线与摘要条，只有「0 叫什么」「正值占比叫什么」
@@ -95,7 +95,7 @@ export type CampaignMetricDistributionSpec = {
   /** 摘要条里正值占比那一项的名字：「顺向」「盈利」「正期望」。 */
   positiveShareLabel: string;
   /**
-   * 0 以外的参照值（加仓&止盈效用的 1.00「加仓没有额外放大」）：画成琥珀色虚线，
+   * 0 以外的参照值（加仓效用的 1.00「加仓没有额外放大」）：画成琥珀色虚线，
    * 同时是档边界（点位不会吸附到线的另一侧），窗口也一定把它圈进来。
    */
   references?: readonly {
@@ -454,7 +454,7 @@ export function CampaignMetricScatterPlot({
   /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
   const oddsFamily = metricKey.startsWith('odds');
   /**
-   * 通用连续指标的分布（涨幅、涨幅效率、加仓&止盈效用、算术期望）：线性横轴、稳健窗口，
+   * 通用连续指标的分布（涨幅、涨幅效率、加仓效用、算术期望）：线性横轴、稳健窗口，
    * 0 线叫什么、正值占比叫什么、另有哪些参照值由 distributionSpec 给。
    */
   const genericSpec = distribution && !oddsFamily && !geometricDistribution ? distributionSpec : undefined;

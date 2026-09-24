@@ -493,7 +493,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '涨幅',
       '涨幅效率',
       '盈亏比',
-      '加仓&止盈效用',
+      '加仓效用',
       '几何期望',
       '算术期望',
       '最大预期亏损',

@@ -272,7 +272,7 @@ describe('【评审发现】通用窗口的两个退化情形', () => {
   });
 });
 
-describe('【用户要求】加仓&止盈效用的 1.00 参照：通用窗口的额外锚点', () => {
+describe('【用户要求】加仓效用的 1.00 参照：通用窗口的额外锚点', () => {
   it('不传锚点时与原来逐位相同', () => {
     const values = [-0.36, 0.1, 0.5, 1.2, 4.65];
     expect(metricDistributionDomain(values, [])).toEqual(metricDistributionDomain(values));

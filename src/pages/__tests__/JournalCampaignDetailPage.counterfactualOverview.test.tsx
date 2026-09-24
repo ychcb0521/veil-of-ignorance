@@ -326,7 +326,7 @@ const OVERVIEW_LABELS = [
   '涨幅',
   '涨幅效率',
   '盈亏比',
-  '加仓&止盈效用',
+  '加仓效用',
   '几何期望',
   '算术期望',
   '最大预期亏损',
@@ -536,7 +536,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(within(panel).getByText('反事实盈亏概览 · 手动调整')).toBeInTheDocument();
     expect(helpButtonLabels(panel)).toEqual(OVERVIEW_LABELS);
     expect(metricValue(panel, '已实现 P&L')).toBe('200.00 USDT');
-    for (const label of ['最大预期亏损', '预期回撤', '涨幅效率', '盈亏比', '加仓&止盈效用', '算术期望', '几何期望']) {
+    for (const label of ['最大预期亏损', '预期回撤', '涨幅效率', '盈亏比', '加仓效用', '算术期望', '几何期望']) {
       expect(metricValue(panel, label)).toBe('—');
     }
     expect(within(panel).getByText('早期分支未记录改动摘要')).toBeInTheDocument();
