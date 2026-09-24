@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
-import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
+import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
@@ -154,6 +154,23 @@ function withHelpCustomisation(
   );
 }
 
+/**
+ * 盈亏概览里的盈亏比读数：「58.8% (0.59)」。数值列右对齐，全角「）」自带右侧空白会让这一行的右端比上下行缩进半个字，
+ * 所以这里用半角括号；其余地方（封面、准确度面板）左对齐，仍用 formatCampaignPayoffRatio 的全角写法。
+ */
+export function formatOverviewPayoffRatio(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  return `${value.toFixed(1)}% (${(value / 100).toFixed(2)})`;
+}
+
+/** 组内占比的读数：一位小数；大于 0 但不到 0.1% 写「<0.1%」，免得读成 0；缺值不写。 */
+function formatContributionShare(share: number | null | undefined): string {
+  if (share == null || !Number.isFinite(share)) return '';
+  const pct = share * 100;
+  if (pct > 0 && pct < 0.05) return '<0.1%';
+  return `${pct.toFixed(1)}%`;
+}
+
 export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetrics): CampaignPnlOverviewItem[] {
   const {
     realizedPnl,
@@ -239,7 +256,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     {
       key: 'peakUnrealizedPnl',
       label: '峰值浮盈',
-      value: peakUnrealizedPnl.toFixed(2),
+      // 【用户要求】「峰值浮盈带上单位」：与已实现 P&L、名义仓位同样写 USDT，右端对齐
+      value: `${peakUnrealizedPnl.toFixed(2)} USDT`,
       help: (
         <>
           <p>战役期间某一时点的未实现盈亏，加上截至该时点已经落袋的盈亏之后，所得累计战役权益的最高值。</p>
@@ -317,7 +335,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     {
       key: 'payoffRatio',
       label: '盈亏比',
-      value: payoffRatio == null ? '—' : formatCampaignPayoffRatio(payoffRatio),
+      value: payoffRatio == null ? '—' : formatOverviewPayoffRatio(payoffRatio),
       color: pnlExportColor(payoffRatio),
       valueClassName: pnlColor(payoffRatio),
       help: (
@@ -348,22 +366,23 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     },
     {
       key: 'asymmetricRiskContribution',
-      label: '本场 b 对 DSI/USI 的贡献',
+      // 【用户要求】「简化一下，细节信息放在说明部分」：行内只写进了哪一组、占组内多少，均方项与样本数放进 ⓘ
+      label: 'DSI/USI 贡献',
       value: asymmetricRiskContribution == null
         ? '—'
-        : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} · b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}${
-          asymmetricRiskContribution.meanSquareShare == null
-            ? ''
-            : `（组内 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(1)}%）`
-        }`,
+        : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} ${formatContributionShare(asymmetricRiskContribution.meanSquareShare)}`.trim(),
       help: (
         <>
-          <p>盈利战役进入 USI 的上行组；亏损或持平战役进入 DSI 的下行组。</p>
+          <p>本场盈亏比 b 对账户不对称风险指标的贡献：盈利战役进入 USI 的上行组，亏损或持平战役进入 DSI 的下行组。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div>
+          <p>读数就是这个占比（与战役列表「DSI 贡献 / USI 贡献」排序同一个数），用于定位哪些战役拉高了 DSI 或支撑了 USI；不到 0.1% 写「&lt;0.1%」。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
-          <p>括号内的组内占比 = 本场 b² ÷ 对应组 Σb²，用于定位哪些战役拉高了 DSI 或支撑了 USI。</p>
           {asymmetricRiskContribution != null ? (
             <p className="font-mono text-foreground">
-              本场 b = {((payoffRatio ?? 0) / 100).toFixed(2)}，n = {asymmetricRiskContribution.sampleCount}
+              {`本场：${asymmetricRiskContribution.group === 'win' ? 'USI 上行组' : 'DSI 下行组'}，b = ${((payoffRatio ?? 0) / 100).toFixed(2)}，n = ${asymmetricRiskContribution.sampleCount}，b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}`}
+              {asymmetricRiskContribution.meanSquareShare == null
+                ? ''
+                : `，组内占比 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(2)}%`}
             </p>
           ) : <p>本场缺少有效最大预期亏损，或账户级样本尚未加载，因此不计算。</p>}
         </>
@@ -399,7 +418,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">G = (1+b·x)^P · (1−x)^(1−P)；几何期望 = G − 1</div>
           <p>x = 最大预期亏损 ÷ 主力开仓时账户总资产。历史战役缺快照时，才使用今日当前总资产估算。</p>
           {initialRisk ? (
-            <p className="font-mono text-foreground">本场 x = {(initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
+            <>
+              <p className="font-mono text-foreground">本场 x = {(initialRisk.drawdownFraction * 100).toFixed(2)}%</p>
+              <p>
+                本场的资产分母：{initialRisk.source === 'main_open_snapshot'
+                  ? '主力开仓那一刻的账户总资产快照。'
+                  : '这场没有开仓时的资产快照，用今日当前总账户资产估算。'}
+              </p>
+            </>
           ) : <p>缺少有效最大预期亏损或账户资产分母时不计算。</p>}
         </>
       ),
@@ -415,19 +441,4 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;
   return items.map(item => ({ ...item, help: withHelpCustomisation(item.key, item.help, metrics) }));
-}
-
-export interface CampaignPnlOverviewNoteInput {
-  initialRiskSource: CampaignInitialRiskSource | null;
-}
-
-/** 面板底部那句「期望口径」脚注；PNG 导出与反事实面板共用。 */
-export function buildCampaignPnlOverviewNote(input: CampaignPnlOverviewNoteInput): string {
-  const expectationNote = `期望口径：算术期望的胜率统一取 ${(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(0)}%。`;
-  const riskNote = input.initialRiskSource === 'current_account_fallback'
-    ? ' 本场几何期望的资产分母使用今日当前总账户资产估算。'
-    : input.initialRiskSource === 'main_open_snapshot'
-      ? ' 本场几何期望的资产分母使用主力开仓实时总资产快照。'
-      : '';
-  return `${expectationNote}${riskNote}`;
 }

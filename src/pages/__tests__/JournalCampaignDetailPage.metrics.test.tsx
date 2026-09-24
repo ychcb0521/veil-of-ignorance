@@ -449,7 +449,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('涨幅效率')).toBeInTheDocument());
     // 【用户要求】「机会质量」已删掉（涨幅效率更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
-    expect(screen.getByText('200.0%（2.00）')).toBeInTheDocument();
+    expect(screen.getByText('200.0% (2.00)')).toBeInTheDocument();
     expect(screen.getByText('1000.00 USDT')).toBeInTheDocument();
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
@@ -458,8 +458,9 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
     // 【用户要求】单场几何期望以 Gᵢ 呈现；这场 b = 2.00 → G = 1 + 2×0.1 = 1.20
     expect(screen.getByText('1.20')).toBeInTheDocument();
-    expect(screen.getByText('USI · b²/n = 4.0000（组内 100.0%）')).toBeInTheDocument();
-    expect(screen.getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument();
+    // 【用户要求】DSI/USI 贡献简化：只写组与组内占比；底部「期望口径」脚注删掉
+    expect(screen.getByText('USI 100.0%')).toBeInTheDocument();
+    expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
     expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
 
@@ -471,7 +472,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '最大预期亏损',
       '预期回撤',
       '盈亏比',
-      '本场 b 对 DSI/USI 的贡献',
+      'DSI/USI 贡献',
       '算术期望',
       '几何期望',
     ]) {
@@ -491,7 +492,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '杠杆倍数',
       '主力开仓名义仓位',
       '最大预期亏损',
-      '本场 b 对 DSI/USI 的贡献',
+      'DSI/USI 贡献',
       '预期回撤',
       '涨幅',
       '涨幅效率',
@@ -500,8 +501,10 @@ describe('JournalCampaignDetailPage metrics', () => {
       '几何期望',
       '算术期望',
     ]);
-    expect(exportInput.pnlOverview.note).toContain('算术期望的胜率统一取 50%');
-    expect(exportInput.pnlOverview.note).not.toContain('逐腿 P&L 对账');
+    // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
+    expect(exportInput.pnlOverview.note).toBeUndefined();
+    expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
+      .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);
@@ -870,7 +873,6 @@ describe('JournalCampaignDetailPage metrics', () => {
 
     // 【用户要求】胜率统一 50%：b = 2 → E = 0.5 × 2 − 0.5，不受别的战役加载成败影响
     await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
-    expect(screen.getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument();
     expect(screen.queryByText(/期望口径加载失败/)).not.toBeInTheDocument();
   });
 

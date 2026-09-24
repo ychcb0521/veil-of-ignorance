@@ -77,7 +77,6 @@ import {
 } from '@/lib/campaignMetrics';
 import {
   buildCampaignPnlOverviewItems,
-  buildCampaignPnlOverviewNote,
   pnlColor,
   type CampaignPnlOverviewItem,
 } from '@/lib/campaignPnlOverview';
@@ -146,7 +145,6 @@ import {
 } from '@/lib/counterfactualChangeSummary';
 import {
   buildCounterfactualOverviewMetrics,
-  buildCounterfactualOverviewNoteInput,
   type CounterfactualOverviewShared,
 } from '@/lib/counterfactualOverview';
 import {
@@ -289,11 +287,10 @@ type CounterfactualDraft = {
 function buildCounterfactualOverview(
   branch: { params: CampaignCounterfactualParams; result: CampaignCounterfactualResult },
   shared: CounterfactualOverviewShared,
-): { items: CampaignPnlOverviewItem[]; note: string } {
+): { items: CampaignPnlOverviewItem[] } {
   const metrics = buildCounterfactualOverviewMetrics(branch, shared);
   return {
     items: buildCampaignPnlOverviewItems(metrics),
-    note: buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)),
   };
 }
 
@@ -1187,9 +1184,6 @@ export default function JournalCampaignDetailPage() {
     settlement,
     tradeRecords,
   ]);
-  const campaignPnlOverviewNote = useMemo(() => buildCampaignPnlOverviewNote({
-    initialRiskSource: campaignMetricValues?.initialRisk?.source ?? null,
-  }), [campaignMetricValues?.initialRisk?.source]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
@@ -1884,13 +1878,14 @@ export default function JournalCampaignDetailPage() {
         chartElement: campaignChartExportRef.current,
         chartInterval: effectiveInterval,
         pnlOverview: {
-          items: campaignPnlOverviewItems.map(({ key, label, value, color }) => ({
+          // rightColumn 要带上：导出图与页面一样按两栏从上往下排（递进链在右栏）
+          items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn }) => ({
             key,
             label,
             value,
             color,
+            rightColumn,
           })),
-          note: campaignPnlOverviewNote,
         },
         emotionDiary: campaignEmotionDiarySummary,
         emotionDiaryCollapsed,
@@ -2036,7 +2031,6 @@ export default function JournalCampaignDetailPage() {
           <CampaignPnlOverviewPanel
             title="盈亏概览"
             items={campaignPnlOverviewItems}
-            note={campaignPnlOverviewNote}
           />
 
         </section>
@@ -2508,7 +2502,6 @@ export default function JournalCampaignDetailPage() {
                 testIdPrefix="counterfactual-draft"
                 title="反事实盈亏概览 · 未保存"
                 items={counterfactualDraftOverview.items}
-                note={counterfactualDraftOverview.note}
                 delta={counterfactualDelta(counterfactualDraft.result.final_realized_pnl, actualPnl)}
                 changeSummary={counterfactualDraft.params.change_summary}
                 runContext={counterfactualDraft.params.run_context}
@@ -2631,7 +2624,6 @@ export default function JournalCampaignDetailPage() {
               testIdPrefix="counterfactual-saved"
               title={`反事实盈亏概览 · ${selectedCounterfactual.label}`}
               items={selectedCounterfactualOverview.items}
-              note={selectedCounterfactualOverview.note}
               delta={selectedCounterfactualDelta}
               changeSummary={selectedCounterfactual.params?.change_summary}
               runContext={selectedCounterfactual.params?.run_context}

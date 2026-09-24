@@ -6,8 +6,8 @@ import type { CampaignPnlOverviewItem } from '@/lib/campaignPnlOverview';
 /** 指标名 + ⓘ 弹层。aria-label 固定为「{label}说明」，页面测试靠它定位每一项。 */
 export function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <span className="group/metric inline-flex items-center gap-0.5 text-muted-foreground">
-      <span>{label}</span>
+    <span className="group/metric inline-flex min-w-0 items-center gap-0.5 text-muted-foreground">
+      <span className="truncate" title={label}>{label}</span>
       <Popover>
         <PopoverTrigger asChild>
           <button
@@ -41,16 +41,15 @@ const SM_ROW_START = [
 export interface CampaignPnlOverviewPanelProps {
   title: string;
   items: CampaignPnlOverviewItem[];
-  note: ReactNode;
   testId?: string;
 }
 
 /**
- * 「盈亏概览」卡片本体。真实战役与反事实分支共用：同一份 items 顺序、同一套 ⓘ 弹层、同一条脚注，
- * DOM 与原先详情页内联的那份完全一致。反事实的「相对实际」、逐腿改动与操作按钮不进这张卡，
+ * 「盈亏概览」卡片本体。真实战役与反事实分支共用：同一份 items 顺序、同一套 ⓘ 弹层。
+ * 【用户要求】底部那行「期望口径」脚注删掉：胜率取 50% 写在算术期望的 ⓘ 里，资产分母用的是哪种写在几何期望的 ⓘ 里。反事实的「相对实际」、逐腿改动与操作按钮不进这张卡，
  * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
-export function CampaignPnlOverviewPanel({ title, items, note, testId }: CampaignPnlOverviewPanelProps) {
+export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOverviewPanelProps) {
   const leftRows = new Map(items.filter(item => !item.rightColumn).map((item, row) => [item.key, row]));
   const rightRows = new Map(items.filter(item => item.rightColumn).map((item, row) => [item.key, row]));
   return (
@@ -66,16 +65,14 @@ export function CampaignPnlOverviewPanel({ title, items, note, testId }: Campaig
             <div
               key={item.key}
               data-column={item.rightColumn ? 'right' : 'left'}
-              className={`flex items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : 'sm:col-start-1'} ${SM_ROW_START[row] ?? ''}`}
+              className={`flex min-w-0 items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : 'sm:col-start-1'} ${SM_ROW_START[row] ?? ''}`}
             >
               <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-              <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
+              {/* 【用户要求】「要对齐」：每项一行，数值不折行、右端对齐；名称过长时截断（悬停看全名），不把这一行撑高。 */}
+              <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
             </div>
           );
         })}
-      </div>
-      <div className="mt-3 border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
-        {note}
       </div>
     </div>
   );

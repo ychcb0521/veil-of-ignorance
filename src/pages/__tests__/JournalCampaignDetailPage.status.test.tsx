@@ -195,7 +195,8 @@ describe('战役详情页 · 状态与已实现盈亏同源', () => {
   it('本场 b < 0 进入 DSI 下行组，账户级样本只读、不触发回写', async () => {
     renderDetail('tut-1');
 
-    await waitFor(() => expect(screen.getByText(/^DSI · b²\/n = /)).toBeInTheDocument());
+    // 【用户要求】DSI/USI 贡献简化：只写组与组内占比
+    await waitFor(() => expect(screen.getByText(/^DSI (<0\.1|\d+\.\d)%$/)).toBeInTheDocument());
     // 页面自身的加载走自愈路径（默认 heal），账户级样本一律 heal: false
     const calls = vi.mocked(getCampaignFullData).mock.calls;
     expect(calls.some(([id, options]) => id === 'tut-1' && options === undefined)).toBe(true);

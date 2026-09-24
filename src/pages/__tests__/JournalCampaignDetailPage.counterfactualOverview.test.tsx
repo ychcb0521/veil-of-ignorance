@@ -327,7 +327,7 @@ const OVERVIEW_LABELS = [
   '杠杆倍数',
   '主力开仓名义仓位',
   '最大预期亏损',
-  '本场 b 对 DSI/USI 的贡献',
+  'DSI/USI 贡献',
   '预期回撤',
   '涨幅',
   '涨幅效率',
@@ -445,8 +445,8 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(metricValue(panel, '盈亏比')).not.toBe('—');
     // 【用户要求】「今日账户总资产」不单列
     expect(within(panel).queryByText('今日账户总资产')).not.toBeInTheDocument();
-    // 期望口径脚注与真实面板同一句
-    await waitFor(() => expect(within(panel).getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument());
+    // 【用户要求】底部「期望口径」那行脚注删掉（真实面板与反事实面板一样）
+    expect(within(panel).queryByText(/期望口径/)).not.toBeInTheDocument();
 
     const nameInput = screen.getByTestId('counterfactual-draft-name') as HTMLInputElement;
     expect(nameInput.value).toMatch(/^主力开仓 平仓价 \d{2}-\d{2} \d{2}:\d{2}$/);
@@ -693,15 +693,14 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
   }, 15_000);
 });
 
-/** 一张盈亏概览卡的骨架：卡片 class、三段子节点的 class、14 项每一行的 class（不含数值与染色）。 */
+/** 一张盈亏概览卡的骨架：卡片 class、两段子节点（标题、指标网格）的 class、每一行的 class（不含数值与染色）。 */
 function overviewSkeleton(panel: HTMLElement) {
-  const [title, grid, note] = Array.from(panel.children) as HTMLElement[];
+  const [title, grid] = Array.from(panel.children) as HTMLElement[];
   return {
     card: panel.className,
     childCount: panel.children.length,
     title: title?.className,
     grid: grid?.className,
-    note: note?.className,
     rows: Array.from(grid?.children ?? []).map(row => row.className),
   };
 }
@@ -747,9 +746,10 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     for (const text of ['相对实际', '改 主力开仓', '运行于', '相对原始的变化情况']) {
       expect(overview).not.toHaveTextContent(text);
     }
-    await waitFor(() => expect(within(overview).getByText(/算术期望的胜率统一取 50%/)).toBeInTheDocument());
+    expect(within(overview).queryByText(/期望口径/)).not.toBeInTheDocument();
     expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
-    expect(overviewSkeleton(real).childCount).toBe(3);
+    // 【用户要求】脚注删掉：只剩标题与指标网格
+    expect(overviewSkeleton(real).childCount).toBe(2);
   }, 15_000);
 
   it('已保存分支一行：左栏带分支类型 / 保存时刻与 载入到 Legs 副本·删除，右面板同骨架；老行照样写「早期分支未记录改动摘要」', async () => {

@@ -165,7 +165,7 @@ const OVERVIEW_LABELS = [
   '涨幅效率',
   '盈亏比',
   '加仓效率',
-  '本场 b 对 DSI/USI 的贡献',
+  'DSI/USI 贡献',
   '算术期望',
   '几何期望',
 ];
@@ -265,7 +265,8 @@ describe('JournalCampaignDetailPage：不改一格的 Legs 副本逐项复现盈
 
     const real = panelValues(campaignPanel);
     if (realized) expect(real['已实现 P&L']).toBe(realized);
-    expect(real['峰值浮盈']).toBe(peak);
+    // 【用户要求】峰值浮盈带单位 USDT
+    expect(real['峰值浮盈']).toBe(`${peak} USDT`);
     // 真实面板有止损线：这些夹具都挂着初始对冲 A，L 派生项有数
     expect(real['最大预期亏损']).not.toBe('—');
     expect(panelValues(draft)).toEqual(real);
@@ -294,7 +295,7 @@ describe('JournalCampaignDetailPage：不改一格的 Legs 副本逐项复现盈
     await waitFor(() => expect(runCustomCounterfactualMock).toHaveBeenCalledTimes(2), { timeout: WAIT });
     const draft = screen.getByTestId('counterfactual-draft-panel');
     // 空单 95 × 5 按持有算：01:00 那根高点 130 上 300 − 175 = 125；开平价相同，只多一笔平仓费 5 × 95 × 0.05%
-    await waitFor(() => expect(metricValue(draft, '峰值浮盈')).toBe('125.00'), { timeout: WAIT });
+    await waitFor(() => expect(metricValue(draft, '峰值浮盈')).toBe('125.00 USDT'), { timeout: WAIT });
     expect(metricValue(draft, '已实现 P&L')).toBe('99.76 USDT');
     expect(within(draft).getByText('-0.24 USDT')).toBeInTheDocument();
     expect(within(draft).getByText('改 初始对冲 A：成交 未成交 → 已成交')).toBeInTheDocument();
@@ -377,7 +378,7 @@ describe('JournalCampaignDetailPage：口径统一之前保存的分支', () => 
     const draft = await screen.findByTestId('counterfactual-draft-panel', {}, { timeout: WAIT });
     const campaignPanel = screen.getByText('盈亏概览').parentElement as HTMLElement;
     expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
-    expect(metricValue(draft, '峰值浮盈')).toBe('300.00');
+    expect(metricValue(draft, '峰值浮盈')).toBe('300.00 USDT');
     expect(metricValue(draft, '已实现 P&L')).toBe('100.00 USDT');
     expect(within(draft).getByText('+0.00 USDT')).toBeInTheDocument();
     expect(within(draft).getByText('与原始 Legs 无差异')).toBeInTheDocument();

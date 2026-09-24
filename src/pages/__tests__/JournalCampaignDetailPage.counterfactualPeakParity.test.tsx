@@ -272,7 +272,7 @@ describe('JournalCampaignDetailPage：未改动的 Legs 副本与真实盈亏概
 
     expect(metricValue(campaignPanel, '已实现 P&L')).toBe('110.00 USDT');
     expect(metricValue(draft, '已实现 P&L')).toBe('110.00 USDT');
-    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00');
+    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00 USDT');
     expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
     expect(createCounterfactualMock).not.toHaveBeenCalled();
   }, 20_000);
@@ -282,7 +282,7 @@ describe('JournalCampaignDetailPage：未改动的 Legs 副本与真实盈亏概
     const { campaignPanel, draft } = await runUnchangedCopy('116');
 
     expect(metricValue(draft, '已实现 P&L')).toBe(metricValue(campaignPanel, '已实现 P&L'));
-    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00');
+    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00 USDT');
     expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
   }, 20_000);
 });

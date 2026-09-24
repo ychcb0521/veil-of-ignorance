@@ -10,7 +10,6 @@ import type {
   CampaignPnlOverviewHelpParagraph,
   CampaignPnlOverviewItemKey,
   CampaignPnlOverviewMetrics,
-  CampaignPnlOverviewNoteInput,
 } from '@/lib/campaignPnlOverview';
 import {
   deriveCounterfactualRiskAnchors,
@@ -336,15 +335,6 @@ export function buildCounterfactualOverviewMetrics(
     initialRisk: initialRisk ? { drawdownFraction: initialRisk.drawdownFraction, source: initialRisk.source } : null,
     helpOverrides,
     extraNotes,
-  };
-}
-
-/** 反事实面板的脚注输入：期望口径那句与真实面板完全一致，资产分母那句跟着 initialRisk 走。 */
-export function buildCounterfactualOverviewNoteInput(
-  metrics: Pick<CampaignPnlOverviewMetrics, 'initialRisk'>,
-): CampaignPnlOverviewNoteInput {
-  return {
-    initialRiskSource: metrics.initialRisk?.source ?? null,
   };
 }
 

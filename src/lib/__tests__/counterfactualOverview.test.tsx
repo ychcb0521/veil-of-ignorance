@@ -2,12 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import type { AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
-import { formatCampaignPayoffRatio } from '@/lib/campaignAnalysis';
-import { buildCampaignPnlOverviewItems, buildCampaignPnlOverviewNote } from '@/lib/campaignPnlOverview';
+import { buildCampaignPnlOverviewItems, formatOverviewPayoffRatio } from '@/lib/campaignPnlOverview';
 import { deriveCounterfactualRiskAnchors, simulateCampaign, simulateManualLegScenario } from '@/lib/campaignSimulationEngine';
 import {
   buildCounterfactualOverviewMetrics,
-  buildCounterfactualOverviewNoteInput,
   buildCounterfactualRunContext,
   computeCounterfactualPayoffRatio,
   resolveCounterfactualRiskAnchors,
@@ -129,7 +127,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
     expect(result.final_realized_pnl).toBeCloseTo(80, 4);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 60) * 100, 6);
-    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 60) * 100));
+    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
     // 峰值权益 = 80 → profit_capture_ratio = 100，与 b 完全不同，盈亏比列不能印它
     expect(result.profit_capture_ratio).toBe(100);
     expect(byKey.payoffRatio.value).not.toContain('100.0%');
@@ -142,13 +140,13 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
     expect(byKey.geometricExpectancy.value).toBe('1.13');
     // 盈利 → USI 组，b² / n = 1.7778 / 1，组内占比 1.7778 / 4
-    expect(byKey.asymmetricRiskContribution.value).toBe('USI · b²/n = 1.7778（组内 44.4%）');
+    expect(byKey.asymmetricRiskContribution.value).toBe('USI 44.4%');
     // 【用户要求】「今日账户总资产」不单列，只作几何期望的估算分母（见脚注）
     expect(byKey.todayAccountEquity).toBeUndefined();
-    // 没有主力开仓资产快照 → 退到今日总资产，脚注跟着说明
+    // 没有主力开仓资产快照 → 退到今日总资产，几何期望的说明跟着写明
     expect(metrics.initialRisk).toEqual({ drawdownFraction: 60 / 10_000, source: 'current_account_fallback' });
-    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)))
-      .toBe('期望口径：算术期望的胜率统一取 50%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
+    expect(render(<>{byKey.geometricExpectancy.help}</>).container.textContent)
+      .toContain('本场的资产分母：这场没有开仓时的资产快照，用今日当前总账户资产估算。');
   });
 
   it('老行（结果上没有锚字段）按 params 重算，得到与新行完全一样的四个锚', () => {
@@ -199,7 +197,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
     expect(byKey.mainLeverage.value).toBe('9x');
     expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);
-    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 123) * 100));
+    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 123) * 100));
   });
 
   it('缺 main_leverage 键的行按老行处理：整组退回 params 重算，不混用半套落库值', () => {
@@ -299,7 +297,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
       });
     }
 
-    render(<CampaignPnlOverviewPanel title="反事实盈亏概览 · 未保存" items={itemsByKey(metrics).items} note="" />);
+    render(<CampaignPnlOverviewPanel title="反事实盈亏概览 · 未保存" items={itemsByKey(metrics).items} />);
     fireEvent.click(screen.getByRole('button', { name: '盈亏比说明' }));
     expect(screen.getByText('手动 Legs 里没有初始对冲 A/B，读不到止损线，本项不计算。')).toBeInTheDocument();
   });
@@ -349,10 +347,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
-    render(<CampaignPnlOverviewPanel title="反事实盈亏概览" items={itemsByKey(metrics).items} note="" />);
-    fireEvent.click(screen.getByRole('button', { name: '本场 b 对 DSI/USI 的贡献说明' }));
+    render(<CampaignPnlOverviewPanel title="反事实盈亏概览" items={itemsByKey(metrics).items} />);
+    fireEvent.click(screen.getByRole('button', { name: 'DSI/USI 贡献说明' }));
     expect(screen.getByText(/假设值：本场反事实不在账户样本内/)).toBeInTheDocument();
-    expect(screen.getByText('本场 b = 1.33，n = 1')).toBeInTheDocument();
+    expect(screen.getByText(/b = 1\.33，n = 1，/)).toBeInTheDocument();
   });
 
   it('非所有者不用今日总资产当几何期望的资产分母', () => {
@@ -360,8 +358,8 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, { ...shared, isOwner: false });
     expect(metrics.initialRisk).toBeNull();
-    expect(buildCampaignPnlOverviewNote(buildCounterfactualOverviewNoteInput(metrics)))
-      .toBe('期望口径：算术期望的胜率统一取 50%。');
+    const geometric = buildCampaignPnlOverviewItems(metrics).find(item => item.key === 'geometricExpectancy');
+    expect(render(<>{geometric?.help}</>).container.textContent).not.toContain('本场的资产分母');
   });
 });
 
@@ -461,7 +459,7 @@ describe('已实现 P&L 的手续费口径', () => {
     expect(result.events.every(event => !String(event.leg_role).startsWith('hedge_'))).toBe(true);
     const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared));
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
-    expect(byKey.payoffRatio.value).toBe(formatCampaignPayoffRatio((80 / 60) * 100));
+    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
   });
 });
 

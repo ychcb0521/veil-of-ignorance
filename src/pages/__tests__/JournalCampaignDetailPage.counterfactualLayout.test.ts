@@ -47,10 +47,10 @@ describe('反事实盈亏概览与上方盈亏概览同宽（源码守卫）', (
     expect(row).toContain('className={COUNTERFACTUAL_OVERVIEW_ROW_GRID_CLASS}');
   });
 
-  it('右栏不被左栏拉高，面板只拿标题 / 12 项 / 脚注', () => {
+  it('右栏不被左栏拉高，面板只拿标题与指标（【用户要求】脚注删掉）', () => {
     expect(row).toContain('<div className="min-w-0 md:self-start">');
     const panelAt = row.indexOf('<CampaignPnlOverviewPanel');
     const panelProps = row.slice(panelAt, row.indexOf('/>', panelAt));
-    expect(panelProps.match(/\b(\w+)=/g)).toEqual(['testId=', 'title=', 'items=', 'note=']);
+    expect(panelProps.match(/\b(\w+)=/g)).toEqual(['testId=', 'title=', 'items=']);
   });
 });

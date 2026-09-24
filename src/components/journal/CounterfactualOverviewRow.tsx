@@ -24,7 +24,6 @@ export interface CounterfactualOverviewRowProps {
   /** 右栏面板标题：「反事实盈亏概览 · 未保存」或「反事实盈亏概览 · {分支名}」。 */
   title: string;
   items: CampaignPnlOverviewItem[];
-  note: ReactNode;
   /** 分支已实现 − 上方「已实现 P&L」；null 印「—」。 */
   delta: number | null;
   changeSummary?: CampaignCounterfactualChangeSummary;
@@ -44,7 +43,6 @@ export function CounterfactualOverviewRow({
   testIdPrefix,
   title,
   items,
-  note,
   delta,
   changeSummary,
   runContext,
@@ -88,7 +86,6 @@ export function CounterfactualOverviewRow({
           testId={`${testIdPrefix}-overview`}
           title={title}
           items={items}
-          note={note}
         />
       </div>
     </div>

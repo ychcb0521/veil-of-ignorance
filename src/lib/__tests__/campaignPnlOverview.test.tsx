@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import {
   buildCampaignPnlOverviewItems,
-  buildCampaignPnlOverviewNote,
   pnlColor,
   pnlExportColor,
   type CampaignPnlOverviewMetrics,
@@ -22,7 +22,7 @@ const GOLDEN_LABELS = [
   '杠杆倍数',
   '主力开仓名义仓位',
   '最大预期亏损',
-  '本场 b 对 DSI/USI 的贡献',
+  'DSI/USI 贡献',
   '预期回撤',
   '涨幅',
   '涨幅效率',
@@ -76,15 +76,15 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
     expect(items.map(item => item.value)).toEqual([
       '200.00 USDT',
-      '250.50',
+      '250.50 USDT',
       '1x',
       '1000.00 USDT',
       '100.00 USDT',
-      'USI · b²/n = 4.0000（组内 100.0%）',
+      'USI 100.0%',
       '10.00%',
       '+20.00%',
       '+2.00',
-      '200.0%（2.00）',
+      '200.0% (2.00)',
       '+1.00',
       '1.20',
       '+0.50R',
@@ -146,8 +146,8 @@ describe('buildCampaignPnlOverviewItems', () => {
     for (const key of GOLDEN_KEYS.filter(item => item !== 'peakUnrealizedPnl')) {
       expect(byKey[key].value, key).toBe('—');
     }
-    // 峰值浮盈是纯数字列（原版就没有 USDT 后缀），0 就印 0.00
-    expect(byKey.peakUnrealizedPnl.value).toBe('0.00');
+    // 【用户要求】峰值浮盈带单位；0 就印 0.00 USDT
+    expect(byKey.peakUnrealizedPnl.value).toBe('0.00 USDT');
     expect(byKey.realizedPnl.color).toBe('#64748B');
     expect(byKey.realizedPnl.valueClassName).toBe('text-muted-foreground');
     expect(byKey.payoffRatio.color).toBe('#64748B');
@@ -173,7 +173,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     expect(byKey.realizedPnl.value).toBe('-50.00 USDT');
     expect(byKey.realizedPnl.color).toBe('#F6465D');
-    expect(byKey.payoffRatio.value).toBe('-50.0%（-0.50）');
+    expect(byKey.payoffRatio.value).toBe('-50.0% (-0.50)');
     expect(byKey.payoffRatio.valueClassName).toBe('text-[#F6465D]');
     expect(byKey.arithmeticExpectancy.value).toBe('-0.75R');
     expect(byKey.geometricExpectancy.value).toBe('0.95');
@@ -195,7 +195,7 @@ describe('CampaignPnlOverviewPanel', () => {
   it('渲染 13 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
     const { container } = render(
-      <CampaignPnlOverviewPanel title="盈亏概览" items={items} note="期望口径：2 场有效战役，实时胜率 50.00%。" />,
+      <CampaignPnlOverviewPanel title="盈亏概览" items={items} />,
     );
 
     expect(screen.getByText('盈亏概览')).toBeInTheDocument();
@@ -206,27 +206,28 @@ describe('CampaignPnlOverviewPanel', () => {
     expect([...container.querySelectorAll('.sm\\:col-start-2')].map(node => node.firstElementChild?.textContent))
       .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
     expect([...container.querySelectorAll('.sm\\:col-start-1')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', '本场 b 对 DSI/USI 的贡献']);
+      .toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', 'DSI/USI 贡献']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/sm:row-start-(\d+)/)?.[1];
     expect(rowOf('已实现 P&L')).toBe('1');
     expect(rowOf('预期回撤')).toBe('1');
-    expect(rowOf('本场 b 对 DSI/USI 的贡献')).toBe('6');
+    expect(rowOf('DSI/USI 贡献')).toBe('6');
     expect(rowOf('算术期望')).toBe('7');
-    expect(screen.getByText('期望口径：2 场有效战役，实时胜率 50.00%。')).toBeInTheDocument();
+    // 【用户要求】底部「期望口径」那行脚注删掉
+    expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
     // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 13 项网格与脚注，没有别的行
     expect(container.firstElementChild?.firstElementChild).toHaveTextContent('盈亏概览');
     // 标题单行截断、悬停看全名：反事实分支名最长 20 字，并排的窄栏里折行会让面板比上方「盈亏概览」高一行
     expect(container.firstElementChild?.firstElementChild?.className).toBe('truncate font-medium');
     expect(container.firstElementChild?.firstElementChild?.getAttribute('title')).toBe('盈亏概览');
-    expect(container.firstElementChild?.children).toHaveLength(3);
+    expect(container.firstElementChild?.children).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: '算术期望说明' }));
     expect(screen.getByText('本场：50.00% × 2.00 − 50.00%')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '几何期望说明' }));
     expect(screen.getByText('本场 x = 1.00%')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '本场 b 对 DSI/USI 的贡献说明' }));
-    expect(screen.getByText('本场 b = 2.00，n = 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'DSI/USI 贡献说明' }));
+    expect(screen.getByText(/b = 2\.00，n = 1，b²\/n = 4\.0000，组内占比 100\.00%/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '涨幅效率说明' }));
@@ -241,7 +242,7 @@ describe('CampaignPnlOverviewPanel', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       settlement: { basis: 'records', stored: 180, drift: -20 },
     }));
-    render(<CampaignPnlOverviewPanel title="盈亏概览" items={items} note="" />);
+    render(<CampaignPnlOverviewPanel title="盈亏概览" items={items} />);
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText(/落库缓存为 180\.00 USDT，与现算值相差 -20\.00 USDT/)).toBeInTheDocument();
     expect(screen.getByText('成交记录')).toBeInTheDocument();
@@ -256,7 +257,7 @@ describe('CampaignPnlOverviewPanel', () => {
       <CampaignPnlOverviewPanel
         title="反事实盈亏概览 · 未保存"
         items={items}
-        note="脚注"
+       
         testId="counterfactual-draft-overview"
       />,
     );
@@ -278,18 +279,30 @@ describe('CampaignPnlOverviewPanel', () => {
   });
 });
 
-describe('buildCampaignPnlOverviewNote', () => {
-  const base = { initialRiskSource: null } as const;
+describe('【用户要求】盈亏概览简化：DSI/USI 贡献只写组与占比，细节进说明；脚注删掉、资产分母写进几何期望的说明', () => {
+  const byKey = (overrides: Partial<CampaignPnlOverviewMetrics> = {}) =>
+    Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics(overrides)).map(item => [item.key, item]));
+  const helpText = (help: ReactNode) => render(<>{help}</>).container.textContent ?? '';
 
-  it('【用户要求】期望口径：算术期望的胜率统一取 50%，不再等账户样本、不写实时胜率', () => {
-    expect(buildCampaignPnlOverviewNote(base)).toBe('期望口径：算术期望的胜率统一取 50%。');
+  it('DSI/USI 贡献：读数「USI 12.3%」，不到 0.1% 写「<0.1%」；均方项、b、n 在说明里', () => {
+    expect(byKey({ asymmetricRiskContribution: { group: 'win', sampleCount: 7, meanSquareTerm: 0.0498, meanSquareShare: 0.1234 } })
+      .asymmetricRiskContribution.value).toBe('USI 12.3%');
+    const tiny = byKey({ asymmetricRiskContribution: { group: 'loss', sampleCount: 30, meanSquareTerm: 0.0018, meanSquareShare: 0.0002 } }).asymmetricRiskContribution;
+    expect(tiny.value).toBe('DSI <0.1%');
+    const text = helpText(tiny.help);
+    expect(text).toContain('组内占比 = 本场 b² ÷ 对应组 Σb²');
+    expect(text).toContain('本场：DSI 下行组，b = 2.00，n = 30，b²/n = 0.0018，组内占比 0.02%');
+    expect(byKey({ asymmetricRiskContribution: null }).asymmetricRiskContribution.value).toBe('—');
   });
 
-  it('资产分母来源的补充句跟着 initialRiskSource 走', () => {
-    expect(buildCampaignPnlOverviewNote({ initialRiskSource: 'main_open_snapshot' }))
-      .toBe('期望口径：算术期望的胜率统一取 50%。 本场几何期望的资产分母使用主力开仓实时总资产快照。');
-    expect(buildCampaignPnlOverviewNote({ initialRiskSource: 'current_account_fallback' }))
-      .toBe('期望口径：算术期望的胜率统一取 50%。 本场几何期望的资产分母使用今日当前总账户资产估算。');
+  it('峰值浮盈带单位 USDT', () => {
+    expect(byKey().peakUnrealizedPnl.value).toBe('250.50 USDT');
+  });
+
+  it('几何期望的说明写明本场资产分母用的是哪一种（原来在脚注里）', () => {
+    expect(helpText(byKey().geometricExpectancy.help)).toContain('本场的资产分母：主力开仓那一刻的账户总资产快照。');
+    expect(helpText(byKey({ initialRisk: { drawdownFraction: 0.01, source: 'current_account_fallback' } }).geometricExpectancy.help))
+      .toContain('本场的资产分母：这场没有开仓时的资产快照，用今日当前总账户资产估算。');
   });
 });
 

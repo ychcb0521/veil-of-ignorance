@@ -1875,7 +1875,7 @@ describe('【用户要求】导出图的盈亏概览与页面同样两栏：递�
     const { cells, rows } = overviewItemCells(items);
     expect(rows).toBe(7);
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
-    expect(column(0)).toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', '本场 b 对 DSI/USI 的贡献']);
+    expect(column(0)).toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', 'DSI/USI 贡献']);
     expect(column(1)).toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);

@@ -21,7 +21,6 @@ describe('CounterfactualOverviewRow', () => {
         testIdPrefix="counterfactual-saved"
         title="反事实盈亏概览 · 我的方案"
         items={items}
-        note="脚注"
         delta={8153}
         kindLine="What-if · 保存于 09-17 13:55"
         changeSummary={{ short: '滚动对冲 开仓价', lines: ['改 主力开仓：平仓价 100 → 110', LONG_LINE], legs: [] }}
@@ -54,7 +53,8 @@ describe('CounterfactualOverviewRow', () => {
 
     // 右栏：与原面板同一张卡，没有任何额外行
     expect(overview.className).toBe('bg-card border border-border rounded p-4 text-[12px]');
-    expect(overview.children).toHaveLength(3);
+    // 标题 + 指标网格（【用户要求】脚注删掉）
+    expect(overview.children).toHaveLength(2);
     expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 我的方案');
     expect(within(overview).getAllByRole('button').map(button => button.getAttribute('aria-label')))
       .toEqual(['已实现 P&L说明', '几何期望说明']);
@@ -67,7 +67,6 @@ describe('CounterfactualOverviewRow', () => {
         testIdPrefix="counterfactual-draft"
         title="反事实盈亏概览 · 未保存"
         items={items}
-        note=""
         delta={null}
         changeSummary={{ short: '', lines: [], legs: [] }}
         actions={null}
@@ -85,7 +84,6 @@ describe('CounterfactualOverviewRow', () => {
         testIdPrefix="counterfactual-draft"
         title="反事实盈亏概览 · 未保存"
         items={items}
-        note=""
         delta={-0.24}
         actions={null}
       />,
