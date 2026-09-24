@@ -7,7 +7,7 @@ import {
 import { CHART_THRESHOLD_VAR } from '@/lib/chartTokens';
 
 /**
- * 【用户要求】涨幅、涨幅效率、加仓效用、算术期望的分布图：与盈亏比同一套分布机制（堆叠、密度、摘要），
+ * 【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望的分布图：与盈亏比同一套分布机制（堆叠、密度、摘要），
  * 读法（单位、0 线、正值占比、额外参照线）由 distributionSpec 给。
  */
 const SIGNED_COLORS = [
@@ -166,13 +166,13 @@ describe('通用连续指标的分布图', () => {
     expect(screen.getByTestId('campaign-metric-reference-share-addEfficiencyDistribution-1')).toHaveTextContent('放大（> 1） 0% (0/6)');
   });
 
-  it('涨幅：0% 线叫「不涨不跌」，刻度去掉小数尾零，摘要报「顺向」', () => {
+  it('涨跌幅：0% 线叫「不涨不跌」，刻度去掉小数尾零，摘要报「顺向」', () => {
     const pctValues = [
       -18.4, -9.2, -6.5, -3.1, -1.4, 0, 0.8, 2.2, 3.9, 5.1, 6.6, 7.4, 8.8, 10.5, 12.1, 14.8,
       16.2, 19.5, 22.4, 25.9, 31.2, 38.7, 44.1, 52.6, 61.3, 4.4, 9.7, 11.9, -2.6, 13.3, 17.7, 26.4,
       3.3, 6.1, 8.2, 20.8, -4.8, 1.9, 15.5, 437.2,
     ];
-    renderChart(pctValues, 'mainPriceChangeDistribution', PRICE_SPEC, '涨幅', formatPct);
+    renderChart(pctValues, 'mainPriceChangeDistribution', PRICE_SPEC, '涨跌幅', formatPct);
     expect(screen.getByTestId('campaign-metric-break-even-mainPriceChangeDistribution-label')).toHaveTextContent('0% 不涨不跌');
     expect(screen.queryByTestId(/campaign-metric-reference-mainPriceChangeDistribution/)).toBeNull();
     const root = screen.getByTestId('campaign-metric-scatter-plot');
@@ -184,8 +184,8 @@ describe('通用连续指标的分布图', () => {
     expect(screen.getByTestId('campaign-metric-win-rate-mainPriceChangeDistribution'))
       .toHaveTextContent(`顺向 ${Math.round((positives / pctValues.length) * 100)}% (${positives}/${pctValues.length})`);
     expect(screen.getByTestId('campaign-metric-summary-mainPriceChangeDistribution')).toHaveTextContent('范围 -18.40% – +437.20%');
-    expect(screen.getByText(/横轴 涨幅（%） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
-    // 0 恰好是档边界：0% 那一场（灰）落在 0 线右侧，负涨幅全在左侧
+    expect(screen.getByText(/横轴 涨跌幅（%） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
+    // 0 恰好是档边界：0% 那一场（灰）落在 0 线右侧，负涨跌幅全在左侧
     const zeroX = Number(screen.getByTestId('campaign-metric-break-even-mainPriceChangeDistribution').getAttribute('x1'));
     for (const button of root.querySelectorAll<HTMLElement>('button[data-campaign-id]')) {
       const value = Number(button.dataset.metricValue);

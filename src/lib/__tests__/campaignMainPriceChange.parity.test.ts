@@ -1,11 +1,11 @@
 /**
- * 战役涨幅的真实一侧 ↔ 反事实副本对账（用真实夹具，走编辑器同一条路：buildManualLegs → JSON 往返 → counterfactualPriceChange）。
+ * 战役涨跌幅的真实一侧 ↔ 反事实副本对账（用真实夹具，走编辑器同一条路：buildManualLegs → JSON 往返 → counterfactualPriceChange）。
  *
  * 【复核发现】四个会让「原样重跑逐位相同」「改一格只挪这一格」失守的场景，固化成回归用例：
  *   1. 挂着从未成交的滚动对冲（Legs 表「挂单中」）不是对冲在手；
  *   2. 没有成交记录、靠 hedge_triggered 事件持有的对冲按触发时刻算（触发在主力平仓之后的不在手）；
  *   3. 主力最后一刀被加仓腿认领：只改开仓价，平仓价与主力平仓时刻不能跟着换；
- *   4. 一条腿都结算不了的战役：真实涨幅「—」，只改开仓价也不能印出幻影涨幅。
+ *   4. 一条腿都结算不了的战役：真实涨跌幅「—」，只改开仓价也不能印出幻影涨跌幅。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -53,7 +53,7 @@ function rollingLeg(fx: ParityFixture, over: Partial<TradeJournal>): TradeJourna
   } as TradeJournal;
 }
 
-describe('战役涨幅：真实一侧 ↔ 反事实副本', () => {
+describe('战役涨跌幅：真实一侧 ↔ 反事实副本', () => {
   it('1. 挂着从未成交的滚动对冲不是对冲在手：真实与原样重跑都按主力平仓价', () => {
     const base = parityFixture('plain-long');
     const fx: ParityFixture = {
@@ -107,7 +107,7 @@ describe('战役涨幅：真实一侧 ↔ 反事实副本', () => {
     expect(after.entryPrice).toBeCloseTo((change.entryPrice as number) * 0.99, 9);
   });
 
-  it('4. 一条腿都结算不了的战役：真实涨幅「—」，只改开仓价后仍是「—」', () => {
+  it('4. 一条腿都结算不了的战役：真实涨跌幅「—」，只改开仓价后仍是「—」', () => {
     for (const id of ['sim-no-settlement-stored', 'sim-no-settlement-events']) {
       const fx = parityFixture(id);
       const { change, actualMain } = real(fx);

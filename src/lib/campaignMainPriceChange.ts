@@ -6,7 +6,7 @@ import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { CampaignCounterfactualManualLeg, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
-/** 参与「涨幅」的主力角色：main_open 全部；一条都没有才取 reentry_main（与 pickPrimaryMainLeg 同一套角色分档）。 */
+/** 参与「涨跌幅」的主力角色：main_open 全部；一条都没有才取 reentry_main（与 pickPrimaryMainLeg 同一套角色分档）。 */
 const PRIMARY_MAIN_ROLES = ['main_open', 'reentry_main'] as const;
 /** 【用户要求】主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），战役的平仓价按滚动对冲的开仓价。 */
 const ROLLING_HEDGE_ROLE = 'hedge_rolling';
@@ -24,7 +24,7 @@ export const SAME_CLOSE_TOLERANCE_MS = MIN_VISIBLE_PHASE_DURATION_MS;
 
 export type PriceChangeSide = 'long' | 'short';
 
-/** 算战役涨幅要用到的一条腿：主力与能锁平仓价的对冲各一份，页面与反事实都喂这个形状。 */
+/** 算战役涨跌幅要用到的一条腿：主力与能锁平仓价的对冲各一份，页面与反事实都喂这个形状。 */
 export interface PriceChangeLegInput {
   id: string;
   role: string;
@@ -69,7 +69,7 @@ export function describePriceChangeExitSource(source: CampaignPriceChangeExitSou
   return `平仓价取${label}${/[A-Za-z0-9]$/.test(label) ? ' ' : ''}的开仓价`;
 }
 
-/** 战役涨幅与它的依据：读数之外，还记下开仓价取自哪一笔主力、平仓价取自主力还是哪张对冲。 */
+/** 战役涨跌幅与它的依据：读数之外，还记下开仓价取自哪一笔主力、平仓价取自主力还是哪张对冲。 */
 export interface CampaignPriceChange {
   pct: number | null;
   side: PriceChangeSide | null;
@@ -100,15 +100,15 @@ function mainLegsOf<T extends { role: string }>(legs: readonly T[]): T[] {
 }
 
 /**
- * 战役的涨幅（【用户要求】的口径，不再粗糙地取主力各笔里涨幅最大的那笔）：
+ * 战役的涨跌幅（【用户要求】的口径，不再粗糙地取主力各笔里涨跌幅最大的那笔）：
  *   · 开仓价：主力（main_open）各笔里最有利的那个——主多取最低、主空取最高（并列取最早开的）。
  *   · 主力平仓时刻：主力已平仓各笔里最晚的那个；主力都还没平仓时算不出，显示「—」。
  *   · 平仓价：主力平仓那一刻有对冲把行情锁住，取**其中最早开的那张对冲的开仓价**——对冲一挂上，主力后面的行情就被锁住了，
- *     主力真正吃到的涨幅到对冲开仓为止；否则取主力自己的平仓价（最后平的那几笔里最有利的：主多取最高、主空取最低）。
+ *     主力真正吃到的涨跌幅到对冲开仓为止；否则取主力自己的平仓价（最后平的那几笔里最有利的：主多取最高、主空取最低）。
  *     「锁住」：滚动对冲仍在持有、或与主力同一次操作里平掉（相差 ≤ SAME_CLOSE_TOLERANCE_MS）；
  *     已触发的初始对冲 A/B、回场对冲只认与主力同一次操作里平掉（主力平了它们还挂着不算）。
  *   · 按主力方向计：空单价格跌了为正，与盈亏同号。
- * 涨幅效率、加仓效用、排序、封面、散点图、盈亏概览、导出图、反事实都从这一个数派生。
+ * 涨跌幅倍数、加仓效用、排序、封面、散点图、盈亏概览、导出图、反事实都从这一个数派生。
  */
 export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[]): CampaignPriceChange {
   const mains = mainLegsOf(inputs);
@@ -212,7 +212,7 @@ export function campaignPriceChangeLegInputs(
     });
 }
 
-/** 真实战役的涨幅及其依据（见 computeCampaignPriceChange）。 */
+/** 真实战役的涨跌幅及其依据（见 computeCampaignPriceChange）。 */
 export function campaignPriceChange(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -223,7 +223,7 @@ export function campaignPriceChange(
   return computeCampaignPriceChange(campaignPriceChangeLegInputs(campaign, legs, tradeRecords, corrections, localOrders));
 }
 
-/** 战役列表「涨幅」排序与卡片读数、盈亏概览的「涨幅」：campaignPriceChange 的读数。 */
+/** 战役列表「涨跌幅」排序与卡片读数、盈亏概览的「涨跌幅」：campaignPriceChange 的读数。 */
 export function campaignMainLegPriceChangePct(
   campaign: TradeCampaign,
   legs: TradeJournal[],
@@ -235,8 +235,8 @@ export function campaignMainLegPriceChangePct(
 }
 
 /**
- * 涨幅效率 = 主力涨幅 ÷ 预期回撤（两者都是价格层面的百分数，结果是倍数）：
- * 主力涨了 12%、入场到对冲边界 4%，效率 +3.00——价格走出了 3 个「预期回撤」。
+ * 涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤（两者都是价格层面的百分数，结果是倍数）：
+ * 主力涨了 12%、入场到对冲边界 4%，倍数 +3.00——价格走出了 3 个「预期回撤」。
  * 任一缺失、或预期回撤不为正时不算。战役卡片、列表排序与盈亏概览（含反事实）都读这一个函数。
  */
 export function computeMainPriceEfficiency(
@@ -250,13 +250,13 @@ export function computeMainPriceEfficiency(
 }
 
 /**
- * 加仓效用 = 盈亏比 b ÷ 涨幅效率。
- * 只拿主力、不加仓时，b 大致就是主力的涨幅效率（最大预期亏损按入场到对冲边界的距离定），比值约为 1；
+ * 加仓效用 = 盈亏比 b ÷ 涨跌幅倍数。
+ * 只拿主力、不加仓时，b 大致就是主力的涨跌幅倍数（最大预期亏损按入场到对冲边界的距离定），比值约为 1；
  * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
  * payoffRatio 是 b 本身（倍数，不是百分数）。
  *
- * 【用户要求】门槛：只在涨幅效率**为正**时算（按显示到两位小数的值判，显示 0.00 的不算）。
- * 涨幅效率为负时，亏损战役负负得正会排到最前；接近 0 时分母太小，主力几乎没动也会被放大成十几倍——两种读数都没有意义。
+ * 【用户要求】门槛：只在涨跌幅倍数**为正**时算（按显示到两位小数的值判，显示 0.00 的不算）。
+ * 涨跌幅倍数为负时，亏损战役负负得正会排到最前；接近 0 时分母太小，主力几乎没动也会被放大成十几倍——两种读数都没有意义。
  * 「只算做过加仓的战役」由调用方用 campaignHasMainAdd 另判。
  */
 export function computeAddEfficiency(
@@ -270,7 +270,7 @@ export function computeAddEfficiency(
   return Number.isFinite(value) ? value : null;
 }
 
-/** 两项效率的读数：「+3.00」「-0.75」；取整为 0 统一成「0.00」；缺值「—」。 */
+/** 涨跌幅倍数与加仓效用的读数：「+3.00」「-0.75」；取整为 0 统一成「0.00」；缺值「—」。 */
 export function formatEfficiency(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   const rounded = Number(value.toFixed(2));
@@ -281,7 +281,7 @@ type ManualPriceChangeLeg = Pick<CampaignCounterfactualManualLeg,
   'id' | 'leg_role' | 'direction' | 'open_time' | 'close_time' | 'entry_price' | 'exit_price' | 'enabled' | 'filled' | 'actual'>;
 
 /**
- * 真实战役那一侧算涨幅用到的各腿（campaignPriceChangeLegInputs，按腿 id）与取出来的读数（campaignPriceChange().pct）。
+ * 真实战役那一侧算涨跌幅用到的各腿（campaignPriceChangeLegInputs，按腿 id）与取出来的读数（campaignPriceChange().pct）。
  * 反事实逐腿对账：没改过的腿直接沿用这里的那一份，原样重跑因此逐位相同。
  */
 export interface ActualMainPriceChange {
@@ -305,7 +305,7 @@ function parseTime(value: string): number | null {
 }
 
 /**
- * 反事实（手动 Legs 分支）的涨幅：与真实一侧同一条规则（computeCampaignPriceChange），喂的是副本里参与运行的主力与能锁平仓价的对冲。
+ * 反事实（手动 Legs 分支）的涨跌幅：与真实一侧同一条规则（computeCampaignPriceChange），喂的是副本里参与运行的主力与能锁平仓价的对冲。
  *
  * 逐腿、**逐字段**对账（副本里腿 id 不变）：以真实一侧这条腿的那一份为底，只把相对 actual 真正改过的字段
  * （方向、开仓价、平仓价、开仓时间、平仓时间各自比对）换成副本的值——副本的开平价是按分刀、认领、事件快照还原出来的，
@@ -365,7 +365,7 @@ export function counterfactualPriceChange(
   return computeCampaignPriceChange(inputs);
 }
 
-/** 反事实的涨幅读数（counterfactualPriceChange().pct）。 */
+/** 反事实的涨跌幅读数（counterfactualPriceChange().pct）。 */
 export function counterfactualMainLegPriceChangePct(
   manualLegs: readonly ManualPriceChangeLeg[] | null | undefined,
   actualMain?: ActualMainPriceChange | null,
@@ -378,7 +378,7 @@ function isMainAddRole(role: string | null | undefined): boolean {
 }
 
 /**
- * 【用户要求】「加仓效用」只对做过加仓的战役计算：没有加仓，这个比值只是「主力盈亏比 ÷ 主力涨幅效率」，
+ * 【用户要求】「加仓效用」只对做过加仓的战役计算：没有加仓，这个比值只是「主力盈亏比 ÷ 主力涨跌幅倍数」，
  * 恒在 1 附近，排进来只会把真正加过仓的战役冲散。
  * 「做过加仓」= 有一条加仓腿（main_add_N）真的成交过：带成交 id（实时 / 回填都有），或腿上已有结算结果。
  * 只挂了单、腿上连成交 id 都没有的加仓不算。

@@ -7,7 +7,7 @@
  * 逐项比到 1 分钱以内。
  *
  * 比对的项：已实现 P&L、峰值浮盈、最大预期亏损、预期回撤、杠杆、主力开仓名义仓位、盈亏比，
- * 以及由 b 推出的算术期望、几何期望、DSI/USI 贡献（b²/n），主力涨幅与由它推出的涨幅效率、加仓效用，
+ * 以及由 b 推出的算术期望、几何期望、DSI/USI 贡献（b²/n），主力涨跌幅与由它推出的涨跌幅倍数、加仓效用，
  * 再加「相对实际」= 0.00。
  * 今日账户总资产两边读同一个数（当前账户），不在这里比。
  *
@@ -113,7 +113,7 @@ const EXCLUDED_BY_CONSTRUCTION = ['settlement', 'initialRisk'] as const;
  * 以及帮助文案的覆盖 / 追加（文字，不是数）。
  */
 const SHARED_INPUTS_AND_TEXT = ['helpOverrides', 'extraNotes',
-  // 涨幅的依据只进 ⓘ 说明，读数已随 mainPriceChangePct 逐项比对
+  // 涨跌幅的依据只进 ⓘ 说明，读数已随 mainPriceChangePct 逐项比对
   'mainPriceChangeBasis',
 ] as const;
 
@@ -135,7 +135,7 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
 };
 
 /**
- * 涨幅效率与加仓效用：两边都从各自的涨幅、预期回撤、盈亏比走同一对函数（页面构造器里就是这么算的）；
+ * 涨跌幅倍数与加仓效用：两边都从各自的涨跌幅、预期回撤、盈亏比走同一对函数（页面构造器里就是这么算的）；
  * 加仓效用只对做过加仓的战役算（真实侧 campaignHasMainAdd，重跑侧 metrics.hasMainAdd），这个判断也就跟着逐项比对。
  */
 function efficiencyNumbers(mainPriceChangePct: number | null, expectedMaxDrawdownPct: number, payoffRatio: number | null, hasMainAdd: boolean) {
@@ -566,7 +566,7 @@ describe('反事实黄金对账：原样重跑 ≡ 真实盈亏概览', () => {
     const compared: Array<keyof PanelNumbers> = Object.keys(realPanel(parityFixture('fees-everywhere')).numbers) as Array<keyof PanelNumbers>;
     // dsiUsiTerm 是 asymmetricRiskContribution 里的那个数
     const covered = new Set<string>([
-      // dsiUsiTerm 与两项效率是由适配器字段推出来的，不是适配器自己的字段
+      // dsiUsiTerm 与涨跌幅倍数、加仓效用是由适配器字段推出来的，不是适配器自己的字段
       ...compared.filter(key => key !== 'dsiUsiTerm' && key !== 'mainPriceEfficiency' && key !== 'addEfficiency'),
       // hasMainAdd 只决定加仓效用算不算，已随 addEfficiency 逐项比对
       'hasMainAdd',

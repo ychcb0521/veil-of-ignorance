@@ -79,7 +79,7 @@ export type CampaignMetricScatterGuide = {
 };
 
 /**
- * 通用连续指标（涨幅、涨幅效率、加仓效用、算术期望）的分布图读法。
+ * 通用连续指标（涨跌幅、涨跌幅倍数、加仓效用、算术期望）的分布图读法。
  *
  * 盈亏比与几何期望各有一套专属画法（−1R 止损墙 / 对数横轴），不读这里；
  * 其余指标共用线性横轴、稳健窗口、密度曲线与摘要条，只有「0 叫什么」「正值占比叫什么」
@@ -454,7 +454,7 @@ export function CampaignMetricScatterPlot({
   /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
   const oddsFamily = metricKey.startsWith('odds');
   /**
-   * 通用连续指标的分布（涨幅、涨幅效率、加仓效用、算术期望）：线性横轴、稳健窗口，
+   * 通用连续指标的分布（涨跌幅、涨跌幅倍数、加仓效用、算术期望）：线性横轴、稳健窗口，
    * 0 线叫什么、正值占比叫什么、另有哪些参照值由 distributionSpec 给。
    */
   const genericSpec = distribution && !oddsFamily && !geometricDistribution ? distributionSpec : undefined;
@@ -695,7 +695,7 @@ export function CampaignMetricScatterPlot({
       value: 0,
       kind: 'zero',
       // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00；
-      // 涨幅一族的 0 是「不涨不跌」，由 distributionSpec 给全文。
+      // 涨跌幅一族的 0 是「不涨不跌」，由 distributionSpec 给全文。
       label: genericSpec?.zeroLabel ?? `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
       labelSide: geometricDistribution ? 'right' : undefined,
       testId: `campaign-metric-break-even-${metricKey}`,

@@ -1,6 +1,6 @@
 /**
- * 【用户要求】战役的涨幅：开仓价按主力开仓最有利的那笔（主多最低）；主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），
- * 平仓价按滚动对冲的开仓价；否则按主力自己的平仓价。涨幅效率、加仓效用、反事实都从它派生。
+ * 【用户要求】战役的涨跌幅：开仓价按主力开仓最有利的那笔（主多最低）；主力平仓时若有滚动对冲在手（仍持有、或与主力同一次操作里平掉），
+ * 平仓价按滚动对冲的开仓价；否则按主力自己的平仓价。涨跌幅倍数、加仓效用、反事实都从它派生。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -47,7 +47,7 @@ const CAMPAIGN = campaignOf();
 const pct = (legs: TradeJournal[], records: TradeRecord[], corrections = {}) => campaignMainLegPriceChangePct(CAMPAIGN, legs, records, corrections);
 const change = (legs: TradeJournal[], records: TradeRecord[], campaign = CAMPAIGN) => campaignPriceChange(campaign, legs, records);
 
-describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一个数）', () => {
+describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览同一个数）', () => {
   it('只有一笔主力、没有滚动对冲：（平仓价 − 开仓价）÷ 开仓价', () => {
     expect(pct([leg({})], [record({})])).toBeCloseTo(12, 9);
     const detail = change([leg({})], [record({})]);
@@ -238,15 +238,15 @@ describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一�
   });
 });
 
-describe('涨幅效率 / 加仓效用', () => {
-  it('涨幅效率 = 主力涨幅 ÷ 预期回撤；加仓效用 = 盈亏比 ÷ 涨幅效率', () => {
+describe('涨跌幅倍数 / 加仓效用', () => {
+  it('涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；加仓效用 = 盈亏比 ÷ 涨跌幅倍数', () => {
     expect(computeMainPriceEfficiency(12, 4)).toBeCloseTo(3, 9);
     expect(computeAddEfficiency(6, 3)).toBeCloseTo(2, 9);
-    // 只拿主力不加仓：b 就是涨幅效率，加仓效用恰为 1
+    // 只拿主力不加仓：b 就是涨跌幅倍数，加仓效用恰为 1
     expect(computeAddEfficiency(3, computeMainPriceEfficiency(12, 4))).toBeCloseTo(1, 9);
   });
 
-  it('算不出就是 null：主力未平仓、预期回撤不为正、涨幅效率为 0', () => {
+  it('算不出就是 null：主力未平仓、预期回撤不为正、涨跌幅倍数为 0', () => {
     expect(computeMainPriceEfficiency(null, 4)).toBeNull();
     expect(computeMainPriceEfficiency(12, 0)).toBeNull();
     expect(computeAddEfficiency(null, 3)).toBeNull();
@@ -262,7 +262,7 @@ describe('涨幅效率 / 加仓效用', () => {
   });
 });
 
-describe('反事实里的涨幅', () => {
+describe('反事实里的涨跌幅', () => {
   const manual = (over: Partial<CampaignCounterfactualManualLeg>): CampaignCounterfactualManualLeg => ({
     id: 'main', leg_role: 'main_open', direction: 'long',
     open_time: openIso, close_time: closeIso,
@@ -379,16 +379,16 @@ describe('【用户要求】加仓效用只算做过加仓的战役', () => {
   });
 });
 
-describe('【用户要求】加仓效用门槛：涨幅效率为正才算', () => {
-  it('涨幅效率为负：不算（亏损战役负负得正不再排到最前）', () => {
+describe('【用户要求】加仓效用门槛：涨跌幅倍数为正才算', () => {
+  it('涨跌幅倍数为负：不算（亏损战役负负得正不再排到最前）', () => {
     expect(computeAddEfficiency(-0.68, -0.05)).toBeNull();
     expect(computeAddEfficiency(2, -1)).toBeNull();
   });
-  it('涨幅效率显示为 0.00（接近 0）：不算，分母过小不再把比值放大成十几倍', () => {
+  it('涨跌幅倍数显示为 0.00（接近 0）：不算，分母过小不再把比值放大成十几倍', () => {
     expect(computeAddEfficiency(0.59, 0.004)).toBeNull();
     expect(computeAddEfficiency(0.59, 0)).toBeNull();
   });
-  it('涨幅效率为正：照算，盈亏比为负时读数为负', () => {
+  it('涨跌幅倍数为正：照算，盈亏比为负时读数为负', () => {
     expect(computeAddEfficiency(0.59, 0.04)).toBeCloseTo(14.75, 9);
     expect(computeAddEfficiency(-1, 2)).toBeCloseTo(-0.5, 9);
   });

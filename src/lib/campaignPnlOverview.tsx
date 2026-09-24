@@ -55,7 +55,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏：【用户要求】「预期回撤、涨幅、涨幅效率、盈亏比、加仓效用、几何期望、算术期望，这几个变量要放在同一列，
+ * 左栏：【用户要求】「预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望，这几个变量要放在同一列，
  * 因为这些指标是层层递进的」——与战役封面、列表排序栏同序，上一项是下一项的分母或来源。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
@@ -116,12 +116,12 @@ export interface CampaignPnlOverviewMetrics {
   /** b × 100（与 accuracy.profit_capture_ratio 同口径）；没有风险分母时 null。 */
   payoffRatio: number | null;
   /**
-   * 战役的涨幅（%，按主力方向计；见 computeCampaignPriceChange：开仓价取主力最有利的一笔，主力平仓时若有对冲锁住行情，
+   * 战役的涨跌幅（%，按主力方向计；见 computeCampaignPriceChange：开仓价取主力最有利的一笔，主力平仓时若有对冲锁住行情，
    * 平仓价取最早那张对冲的开仓价），与战役卡片同一个数；主力都未平仓时 null。
-   * 涨幅效率与加仓效用由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
+   * 涨跌幅倍数与加仓效用由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
    */
   mainPriceChangePct: number | null;
-  /** 涨幅的依据（只进 ⓘ 说明）：开仓价、平仓价、平仓价取自主力还是哪张对冲；SOP 推演没有逐腿数据时可缺省。 */
+  /** 涨跌幅的依据（只进 ⓘ 说明）：开仓价、平仓价、平仓价取自主力还是哪张对冲；SOP 推演没有逐腿数据时可缺省。 */
   mainPriceChangeBasis?: { entryPrice: number | null; exitPrice: number | null; exitSource: CampaignPriceChangeExitSource | null } | null;
   /** 战役（或反事实副本）里有没有成交过的加仓腿；没有加仓时「加仓效用」不算（campaignHasMainAdd）。 */
   hasMainAdd: boolean;
@@ -350,14 +350,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     },
     {
       key: 'mainPriceChange',
-      label: '涨幅',
+      label: '涨跌幅',
       value: formatLegPriceChangePct(mainPriceChangePct),
       color: pnlExportColor(mainPriceChangePct),
       valueClassName: pnlColor(mainPriceChangePct),
       help: (
         <>
           <p>战役从开仓价到平仓价的涨跌幅，按主力方向计：主多价格涨了为正，主空价格跌了为正。与战役列表卡片是同一个数（开平价含 1 分钟 K 线平仓价校正）。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%</div>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨跌幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%</div>
           <p><strong>开仓价</strong>取主力各笔里最有利的那个：主多最低、主空最高。<strong>平仓价</strong>{PRICE_CHANGE_EXIT_RULE_TEXT.slice('平仓价'.length)}</p>
           {mainPriceChangeBasis?.entryPrice != null && mainPriceChangeBasis.exitPrice != null ? (
             <p className="font-mono text-foreground">
@@ -371,14 +371,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     },
     {
       key: 'mainPriceEfficiency',
-      label: '涨幅效率',
+      label: '涨跌幅倍数',
       value: formatEfficiency(mainPriceEfficiency),
       color: pnlExportColor(mainPriceEfficiency),
       valueClassName: pnlColor(mainPriceEfficiency),
       help: (
         <>
-          <p>价格走出了几个「预期回撤」：主力涨了 12%、入场到对冲边界 4%，效率就是 +3.00。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅效率 = 主力涨幅 ÷ 预期回撤</div>
+          <p>价格走出了几个「预期回撤」：主力涨了 12%、入场到对冲边界 4%，倍数就是 +3.00。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤</div>
           {mainPriceEfficiency != null ? (
             <p className="font-mono text-foreground">
               本场 = {formatLegPriceChangePct(mainPriceChangePct)} ÷ {expectedDrawdownPct.toFixed(2)}% = {formatEfficiency(mainPriceEfficiency)}
@@ -409,13 +409,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(addEfficiency),
       help: (
         <>
-          <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨幅效率、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只在做过加仓、且涨幅效率为正时计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量；涨幅效率不为正时，亏损战役负负得正、主力几乎没动时分母过小，读数都会失真。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 盈亏比 b ÷ 涨幅效率</div>
+          <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨跌幅倍数、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只在做过加仓、且涨跌幅倍数为正时计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量；涨跌幅倍数不为正时，亏损战役负负得正、主力几乎没动时分母过小，读数都会失真。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 盈亏比 b ÷ 涨跌幅倍数</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
               本场 = {((payoffRatio ?? 0) / 100).toFixed(2)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
             </p>
-          ) : <p>{hasMainAdd ? '只在涨幅效率为正时计算：本场涨幅效率不为正或算不出，或算不出盈亏比。' : '本场没有加仓，不计算加仓效用。'}</p>}
+          ) : <p>{hasMainAdd ? '只在涨跌幅倍数为正时计算：本场涨跌幅倍数不为正或算不出，或算不出盈亏比。' : '本场没有加仓，不计算加仓效用。'}</p>}
         </>
       ),
     },

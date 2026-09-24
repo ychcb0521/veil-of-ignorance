@@ -446,8 +446,8 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('涨幅效率')).toBeInTheDocument());
-    // 【用户要求】「机会质量」已删掉（涨幅效率更合理）
+    await waitFor(() => expect(screen.getByText('涨跌幅倍数')).toBeInTheDocument());
+    // 【用户要求】「机会质量」已删掉（涨跌幅倍数更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
     expect(screen.getByText('200.0% (2.00)')).toBeInTheDocument();
     // 主力开仓名义仓位；这场只有一笔主力多单，多方总名义仓位也是 1000
@@ -490,8 +490,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '预期回撤',
-      '涨幅',
-      '涨幅效率',
+      '涨跌幅',
+      '涨跌幅倍数',
       '盈亏比',
       '加仓效用',
       '几何期望',

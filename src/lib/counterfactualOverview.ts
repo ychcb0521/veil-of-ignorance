@@ -50,8 +50,8 @@ export interface CounterfactualOverviewShared {
   currentAccountEquity: number;
   isOwner: boolean;
   /**
-   * 真实战役算涨幅用到的各腿（主力与滚动对冲的开平价与时间，按腿 id）与上方「盈亏概览」的读数：
-   * 反事实的「涨幅」逐腿对账——没改过的腿沿用真实一侧这条腿的那一份，再按同一条规则算，原样重跑因此逐位相同。
+   * 真实战役算涨跌幅用到的各腿（主力与滚动对冲的开平价与时间，按腿 id）与上方「盈亏概览」的读数：
+   * 反事实的「涨跌幅」逐腿对账——没改过的腿沿用真实一侧这条腿的那一份，再按同一条规则算，原样重跑因此逐位相同。
    * 缺省时每条腿都按副本的开平价与时间算。
    */
   actualMain?: ActualMainPriceChange | null;
@@ -305,10 +305,10 @@ export function buildCounterfactualOverviewMetrics(
       '杠杆影响保证金占用与 ROE；名义仓位已经确定时，不再额外放大绝对盈亏。',
     ],
     ...(manual ? {
-      // 反事实的涨幅按副本算，不能沿用真实面板那段「与战役列表卡片是同一个数」的说法
+      // 反事实的涨跌幅按副本算，不能沿用真实面板那段「与战役列表卡片是同一个数」的说法
       mainPriceChange: [
-        '本分支的涨幅：从开仓价到平仓价的涨跌幅，按主力方向计（主多价格涨了为正，主空价格跌了为正）。',
-        { formula: '涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%' },
+        '本分支的涨跌幅：按副本的开仓价与平仓价算，按主力方向计（主多价格涨了为正，主空价格跌了为正）。',
+        { formula: '涨跌幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%' },
         `开仓价取副本里参与运行的主力各笔里最有利的那个（主多最低、主空最高）。${PRICE_CHANGE_EXIT_RULE_TEXT}`,
         priceChange?.entryPrice != null && priceChange.exitPrice != null
           ? { formula: `本场：${priceChange.entryPrice} → ${priceChange.exitPrice}（${describePriceChangeExitSource(priceChange.exitSource)}）` }
@@ -346,7 +346,7 @@ export function buildCounterfactualOverviewMetrics(
         ? '反事实分支与上方同一条规则：开仓价取副本里参与运行的主力最有利的一笔，主力平仓时若有对冲锁住行情就按对冲开仓价。'
           + '逐腿对账——方向、开平价、开平时间都没改过的腿沿用上方这条腿的数（原样重跑逐位相同），改过的按 Legs 副本里改后的算；'
           + '停用、标着「挂单中」的腿不参与；实际还没平仓、平仓价也没改过的腿视为未平仓（引擎只是按数据末端强行结算）。'
-        : 'SOP 推演没有逐腿的开平价，本项与两项效率不计算。',
+        : 'SOP 推演没有逐腿的开平价，本项与涨跌幅倍数、加仓效用不计算。',
     ],
     mainSideNotional: [
       manual
