@@ -9,7 +9,14 @@ import {
   formatGeometricExpectancy,
 } from '@/lib/campaignMetrics';
 import type { RealizedPnlBasis } from '@/lib/campaignRealizedPnl';
-import { computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import {
+  PRICE_CHANGE_EXIT_RULE_TEXT,
+  computeAddEfficiency,
+  computeMainPriceEfficiency,
+  describePriceChangeExitSource,
+  formatEfficiency,
+  type CampaignPriceChangeExitSource,
+} from '@/lib/campaignMainPriceChange';
 import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 
 /**
@@ -109,13 +116,13 @@ export interface CampaignPnlOverviewMetrics {
   /** b × 100（与 accuracy.profit_capture_ratio 同口径）；没有风险分母时 null。 */
   payoffRatio: number | null;
   /**
-   * 战役的涨幅（%，按主力方向计；见 computeCampaignPriceChange：开仓价取主力最有利的一笔，主力平仓时若有滚动对冲在手，
-   * 平仓价取滚动对冲的开仓价），与战役卡片同一个数；主力都未平仓时 null。
+   * 战役的涨幅（%，按主力方向计；见 computeCampaignPriceChange：开仓价取主力最有利的一笔，主力平仓时若有对冲锁住行情，
+   * 平仓价取最早那张对冲的开仓价），与战役卡片同一个数；主力都未平仓时 null。
    * 涨幅效率与加仓效用由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
    */
   mainPriceChangePct: number | null;
-  /** 涨幅的依据（只进 ⓘ 说明）：开仓价、平仓价、平仓价取自主力还是滚动对冲；SOP 推演没有逐腿数据时可缺省。 */
-  mainPriceChangeBasis?: { entryPrice: number | null; exitPrice: number | null; exitSource: 'main' | 'rolling_hedge' | null } | null;
+  /** 涨幅的依据（只进 ⓘ 说明）：开仓价、平仓价、平仓价取自主力还是哪张对冲；SOP 推演没有逐腿数据时可缺省。 */
+  mainPriceChangeBasis?: { entryPrice: number | null; exitPrice: number | null; exitSource: CampaignPriceChangeExitSource | null } | null;
   /** 战役（或反事实副本）里有没有成交过的加仓腿；没有加仓时「加仓效用」不算（campaignHasMainAdd）。 */
   hasMainAdd: boolean;
   asymmetricRiskContribution: AsymmetricRiskContribution | null;
@@ -351,11 +358,12 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <>
           <p>战役从开仓价到平仓价的涨跌幅，按主力方向计：主多价格涨了为正，主空价格跌了为正。与战役列表卡片是同一个数（开平价含 1 分钟 K 线平仓价校正）。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%</div>
-          <p><strong>开仓价</strong>取主力各笔里最有利的那个：主多最低、主空最高。<strong>平仓价</strong>看主力平仓那一刻有没有滚动对冲在手：有（仍持有、或与主力同一次操作里平掉，相差不超过一分钟）就取<strong>最早开的那张滚动对冲的开仓价</strong>——对冲一挂上，主力后面的行情就被锁住了；没有就取主力自己的平仓价（最后平的那几笔里最有利的）。初始对冲 A/B 不算。</p>
+          <p><strong>开仓价</strong>取主力各笔里最有利的那个：主多最低、主空最高。<strong>平仓价</strong>{PRICE_CHANGE_EXIT_RULE_TEXT.slice('平仓价'.length)}</p>
           {mainPriceChangeBasis?.entryPrice != null && mainPriceChangeBasis.exitPrice != null ? (
             <p className="font-mono text-foreground">
               本场：{mainPriceChangeBasis.entryPrice} → {mainPriceChangeBasis.exitPrice}
-              {mainPriceChangeBasis.exitSource === 'rolling_hedge' ? '（平仓价取滚动对冲的开仓价）' : '（平仓价取主力的平仓价）'}
+              {/* 来源注记单独一行、不加括号：「初始对冲 B」这类长名字接在价格后面会在名字中间折行，行首全角括号又像缩进 */}
+              <span className="block text-muted-foreground">{describePriceChangeExitSource(mainPriceChangeBasis.exitSource)}</span>
             </p>
           ) : <p>主力都还没平仓时显示「—」。</p>}
         </>

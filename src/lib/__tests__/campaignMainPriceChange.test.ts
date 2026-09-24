@@ -13,6 +13,7 @@ import {
   counterfactualHasMainAdd,
   counterfactualMainLegPriceChangePct,
   counterfactualPriceChange,
+  describePriceChangeExitSource,
   formatEfficiency,
   SAME_CLOSE_TOLERANCE_MS,
 } from '@/lib/campaignMainPriceChange';
@@ -115,7 +116,7 @@ describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一�
     expect(change(legsOpen, [main], late)).toMatchObject({ exitSource: 'main', exitPrice: 112 });
   });
 
-  it('几张滚动对冲都在手：取最早开的那张的开仓价；主力平仓之后才开的不算；初始对冲 A/B 不算', () => {
+  it('几张滚动对冲都在手：取最早开的那张的开仓价；主力平仓之后才开的不算；早于主力平掉的初始对冲 A 不算', () => {
     const legs = [
       leg({}),
       leg({ id: 'roll-2', leg_role: 'hedge_rolling', direction: 'short', trade_record_id: 'r-2' }),
@@ -128,9 +129,58 @@ describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一�
       closedRecord('r-2', { side: 'SHORT', entryPrice: 125, exitPrice: 112, openTime: T_CLOSE - 1_800_000 }),
       closedRecord('r-1', { side: 'SHORT', entryPrice: 118, exitPrice: 112, openTime: T_CLOSE - 3_600_000 }),
       closedRecord('r-late', { side: 'SHORT', entryPrice: 130, exitPrice: 112, openTime: T_CLOSE + 60_000, closeTime: T_CLOSE + 3_600_000 }),
-      closedRecord('r-a', { side: 'SHORT', entryPrice: 90, exitPrice: 112, openTime: T_OPEN }),
+      closedRecord('r-a', { side: 'SHORT', entryPrice: 90, exitPrice: 112, openTime: T_OPEN, closeTime: T_CLOSE - 3_600_000 }),
     ];
     expect(change(legs, records)).toMatchObject({ exitSource: 'rolling_hedge', exitLegId: 'roll-1', exitPrice: 118 });
+  });
+
+  it('【用户要求】已触发的初始对冲 A/B 与主力同一次操作里平掉：也锁平仓价；与滚动对冲一起在手时取最早开的那张', () => {
+    const main = closedRecord('r-main', {});
+    const legsA = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: 'r-a' })];
+    const aTogether = closedRecord('r-a', { side: 'SHORT', entryPrice: 95, exitPrice: 112, openTime: T_OPEN + 60_000, closeTime: T_CLOSE + 20_000 });
+    const detail = change(legsA, [main, aTogether]);
+    expect(detail).toMatchObject({ exitSource: 'initial_hedge_a', exitLegId: 'a', exitPrice: 95 });
+    expect(detail.pct).toBeCloseTo(-5, 9);
+    // 容差边上：早平一分钟整仍算同一次操作，再早 1 毫秒就不算
+    expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE - SAME_CLOSE_TOLERANCE_MS }])).toMatchObject({ exitSource: 'initial_hedge_a' });
+    expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE - SAME_CLOSE_TOLERANCE_MS - 1 }])).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+    // 晚平也一样：相差超过一分钟就不是「平仓时间一致」（滚动对冲晚平仍算在手，初始对冲不算）
+    expect(change(legsA, [main, { ...aTogether, closeTime: T_CLOSE + SAME_CLOSE_TOLERANCE_MS + 1 }])).toMatchObject({ exitSource: 'main' });
+
+    // B 比滚动对冲开得早：取 B；滚动对冲比 B 早：取滚动对冲
+    const legsMixed = [
+      leg({}),
+      leg({ id: 'b', leg_role: 'hedge_initial_b', direction: 'short', trade_record_id: 'r-b' }),
+      leg({ id: 'roll', leg_role: 'hedge_rolling', direction: 'short', trade_record_id: 'r-roll' }),
+    ];
+    const b = closedRecord('r-b', { side: 'SHORT', entryPrice: 97, exitPrice: 112, openTime: T_OPEN + 120_000, closeTime: T_CLOSE });
+    const roll = closedRecord('r-roll', { side: 'SHORT', entryPrice: 118, exitPrice: 112, openTime: T_CLOSE - 3_600_000, closeTime: T_CLOSE });
+    expect(change(legsMixed, [main, b, roll])).toMatchObject({ exitSource: 'initial_hedge_b', exitLegId: 'b', exitPrice: 97 });
+    expect(change(legsMixed, [main, { ...b, openTime: T_CLOSE - 1_800_000 }, roll])).toMatchObject({ exitSource: 'rolling_hedge', exitLegId: 'roll', exitPrice: 118 });
+  });
+
+  it('【用户要求】初始对冲触发了、主力平掉时它还挂着（没有平仓）：平仓时间不一致，不锁', () => {
+    const legs = [leg({}), leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: null, pre_entry_price: 95, pre_simulated_time: new Date(T_OPEN).toISOString() })];
+    const triggered = campaignOf([{
+      id: 'e-a', event_type: 'hedge_triggered', timestamp: new Date(T_OPEN + 60_000).toISOString(),
+      journal_id: 'a', leg_role: 'hedge_initial_a', direction: 'short', price: 95, size_usdt: 10_000,
+    } as unknown as CampaignEvent]);
+    expect(change(legs, [closedRecord('r-main', {})], triggered)).toMatchObject({ exitSource: 'main', exitPrice: 112 });
+  });
+
+  it('【用户要求】只剩回场主力的战役：回场对冲与回场主力同一次操作里平掉，平仓价取回场对冲的开仓价', () => {
+    const legs = [
+      leg({ id: 're', leg_role: 'reentry_main', trade_record_id: 'r-re' }),
+      leg({ id: 'rh', leg_role: 'reentry_hedge', direction: 'short', trade_record_id: 'r-rh' }),
+    ];
+    const records = [
+      closedRecord('r-re', { entryPrice: 100, exitPrice: 106 }),
+      closedRecord('r-rh', { side: 'SHORT', entryPrice: 109, exitPrice: 106, openTime: T_CLOSE - 1_800_000, closeTime: T_CLOSE + 5_000 }),
+    ];
+    expect(change(legs, records)).toMatchObject({ exitSource: 'reentry_hedge', exitLegId: 'rh', exitPrice: 109 });
+    expect(describePriceChangeExitSource('reentry_hedge')).toBe('平仓价取回场对冲的开仓价');
+    expect(describePriceChangeExitSource('initial_hedge_b')).toBe('平仓价取初始对冲 B 的开仓价');
+    expect(describePriceChangeExitSource('main')).toBe('平仓价取主力的平仓价');
   });
 
   it('几笔主力：开仓价取最有利的一笔（主多最低、主空最高），平仓时刻取最晚平的那笔', () => {
@@ -171,18 +221,19 @@ describe('战役涨幅（列表「涨幅」排序、封面、盈亏概览同一�
     expect(change(legs, [closedRecord('r-main', {})])).toMatchObject({ exitSource: 'main', exitPrice: 112 });
   });
 
-  it('逐腿输入只含主力与滚动对冲；挂着没成交的腿不进来；还没平仓的腿平仓价与平仓时间为 null', () => {
+  it('逐腿输入只含主力与能锁平仓价的对冲；挂着没成交的腿不进来；还没平仓的腿平仓价与平仓时间为 null', () => {
     const legs = [
       leg({}),
       leg({ id: 'roll', leg_role: 'hedge_rolling', direction: 'short', trade_record_id: 'r-roll' }),
+      leg({ id: 'a', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: 'r-a' }),
       leg({ id: 'pending', leg_role: 'hedge_rolling', direction: 'short', trade_record_id: null }),
       leg({ id: 'add', leg_role: 'main_add_1' }),
       leg({ id: 'tp', leg_role: 'mirror_tp' }),
     ];
     // 滚动对冲成交了但还没平：记录里没有平仓
     const openRoll = record({ id: 'r-roll', side: 'SHORT', entryPrice: 120, exitPrice: 0, closeTime: null as never, action: 'OPEN' as never });
-    const inputs = campaignPriceChangeLegInputs(CAMPAIGN, legs, [record({}), openRoll]);
-    expect(inputs.map(input => input.id)).toEqual(['main', 'roll']);
+    const inputs = campaignPriceChangeLegInputs(CAMPAIGN, legs, [record({}), openRoll, record({ id: 'r-a', side: 'SHORT', entryPrice: 95 })]);
+    expect(inputs.map(input => input.id)).toEqual(['main', 'roll', 'a']);
     expect(inputs[1]).toMatchObject({ role: 'hedge_rolling', side: 'short', entryPrice: 120 });
   });
 });
@@ -250,6 +301,27 @@ describe('反事实里的涨幅', () => {
     expect(counterfactualPriceChange([manual({}), earlier], actual)).toMatchObject({ exitSource: 'main', exitPrice: 112.4 });
     // 标着「挂单中」的对冲从未成交，不参与
     expect(counterfactualPriceChange([manual({}), rolling({ filled: false })], actual)).toMatchObject({ exitSource: 'main' });
+  });
+
+  it('【用户要求】副本里的初始对冲与主力同时平：同样锁平仓价；把它的平仓时间改早、或停用，退回主力自己的', () => {
+    const hedgeA = (over: Partial<CampaignCounterfactualManualLeg> = {}) => manual({
+      id: 'a', leg_role: 'hedge_initial_a', direction: 'short',
+      open_time: new Date(T_OPEN + 60_000).toISOString(), entry_price: 95, exit_price: 112,
+      actual: { ...manual({}).actual!, direction: 'short', open_time: new Date(T_OPEN + 60_000).toISOString(), entry_price: 95, exit_price: 112 },
+      ...over,
+    });
+    const withA = {
+      byLegId: {
+        main: actual.byLegId.main,
+        a: { id: 'a', role: 'hedge_initial_a', side: 'short' as const, entryPrice: 95.2, exitPrice: 112.1, openTime: T_OPEN + 60_000, closeTime: T_CLOSE + 10_000 },
+      },
+      pct: ((95.2 - 99.5) / 99.5) * 100,
+    };
+    expect(counterfactualMainLegPriceChangePct([manual({}), hedgeA()], withA)).toBe(withA.pct);
+    expect(counterfactualPriceChange([manual({}), hedgeA()], withA)).toMatchObject({ exitSource: 'initial_hedge_a', exitPrice: 95.2 });
+    expect(counterfactualPriceChange([manual({}), hedgeA({ enabled: false })], withA)).toMatchObject({ exitSource: 'main', exitPrice: 112.4 });
+    const earlier = hedgeA({ close_time: new Date(T_CLOSE - 3_600_000).toISOString() });
+    expect(counterfactualPriceChange([manual({}), earlier], withA)).toMatchObject({ exitSource: 'main', exitPrice: 112.4 });
   });
 
   it('改了主力的开仓价 / 平仓价：逐字段对账——只换改过的那一格，其余沿用真实一侧', () => {

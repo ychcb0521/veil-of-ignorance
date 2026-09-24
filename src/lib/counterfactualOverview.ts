@@ -4,7 +4,13 @@ import {
   type AsymmetricRiskMetricsSummary,
 } from '@/lib/asymmetricRiskMetrics';
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
-import { counterfactualHasMainAdd, counterfactualPriceChange, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import {
+  PRICE_CHANGE_EXIT_RULE_TEXT,
+  counterfactualHasMainAdd,
+  counterfactualPriceChange,
+  describePriceChangeExitSource,
+  type ActualMainPriceChange,
+} from '@/lib/campaignMainPriceChange';
 import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
 import { legPositionSideFromDirection, type LegPositionSide } from '@/lib/legPositionShare';
 import type {
@@ -303,10 +309,9 @@ export function buildCounterfactualOverviewMetrics(
       mainPriceChange: [
         '本分支的涨幅：从开仓价到平仓价的涨跌幅，按主力方向计（主多价格涨了为正，主空价格跌了为正）。',
         { formula: '涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%' },
-        '开仓价取副本里参与运行的主力各笔里最有利的那个（主多最低、主空最高）；平仓价看主力平仓那一刻有没有滚动对冲在手'
-          + '（仍持有、或与主力同一次操作里平掉，相差不超过一分钟）：有就取最早开的那张滚动对冲的开仓价，没有就取主力自己的平仓价。初始对冲 A/B 不算。',
+        `开仓价取副本里参与运行的主力各笔里最有利的那个（主多最低、主空最高）。${PRICE_CHANGE_EXIT_RULE_TEXT}`,
         priceChange?.entryPrice != null && priceChange.exitPrice != null
-          ? { formula: `本场：${priceChange.entryPrice} → ${priceChange.exitPrice}${priceChange.exitSource === 'rolling_hedge' ? '（平仓价取滚动对冲的开仓价）' : '（平仓价取主力的平仓价）'}` }
+          ? { formula: `本场：${priceChange.entryPrice} → ${priceChange.exitPrice}（${describePriceChangeExitSource(priceChange.exitSource)}）` }
           : '主力都还没平仓时显示「—」。',
       ],
     } : {}),
@@ -338,7 +343,7 @@ export function buildCounterfactualOverviewMetrics(
     ],
     mainPriceChange: [
       manual
-        ? '反事实分支与上方同一条规则：开仓价取副本里参与运行的主力最有利的一笔，主力平仓时若有滚动对冲在手就按对冲开仓价。'
+        ? '反事实分支与上方同一条规则：开仓价取副本里参与运行的主力最有利的一笔，主力平仓时若有对冲锁住行情就按对冲开仓价。'
           + '逐腿对账——方向、开平价、开平时间都没改过的腿沿用上方这条腿的数（原样重跑逐位相同），改过的按 Legs 副本里改后的算；'
           + '停用、标着「挂单中」的腿不参与；实际还没平仓、平仓价也没改过的腿视为未平仓（引擎只是按数据末端强行结算）。'
         : 'SOP 推演没有逐腿的开平价，本项与两项效率不计算。',

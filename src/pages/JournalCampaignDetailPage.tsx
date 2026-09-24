@@ -1143,7 +1143,7 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues.profitCaptureRatio / 100,
     campaignAsymmetricRisk,
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
-  // 战役涨幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有滚动对冲在手就按对冲开仓价）：与战役列表卡片同一个函数。
+  // 战役涨幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）：与战役列表卡片同一个函数。
   // 真实「盈亏概览」与反事实面板共用这份逐腿的开平价与时间（反事实没改的腿沿用它）。
   // 挂单判定与触发时刻读权益路径同一份事实（localOrderFacts），与反事实副本 buildManualLegs 同源。
   const actualPriceChange = useMemo(

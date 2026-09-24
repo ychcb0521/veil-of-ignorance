@@ -44,7 +44,7 @@ export type CampaignCardData = {
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
   opportunityQuality: number | null;
-  /** 战役的涨幅（%，按主力方向计：开仓价取主力最有利的一笔，主力平仓时有滚动对冲在手就按对冲开仓价）；主力都未平仓时为 null。「涨幅」排序与卡片读数用它。 */
+  /** 战役的涨幅（%，按主力方向计：开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）；主力都未平仓时为 null。「涨幅」排序与卡片读数用它。 */
   mainPriceChangePct: number | null;
 };
 
