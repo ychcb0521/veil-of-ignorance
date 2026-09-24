@@ -320,20 +320,21 @@ vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({
   },
 }));
 
+// 【用户要求】先左栏（结果与仓位）、再右栏（预期回撤 → … → 算术期望，与封面同序的递进链）
 const OVERVIEW_LABELS = [
   '已实现 P&L',
+  '峰值浮盈',
   '杠杆倍数',
   '主力开仓名义仓位',
-  '峰值浮盈',
   '最大预期亏损',
+  '本场 b 对 DSI/USI 的贡献',
   '预期回撤',
   '涨幅',
   '涨幅效率',
   '盈亏比',
   '加仓效率',
-  '本场 b 对 DSI/USI 的贡献',
-  '算术期望',
   '几何期望',
+  '算术期望',
 ];
 
 function helpButtonLabels(panel: HTMLElement) {

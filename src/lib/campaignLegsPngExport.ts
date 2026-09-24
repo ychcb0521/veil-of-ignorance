@@ -98,6 +98,8 @@ export type CampaignBoardPnlItem = {
   label: string;
   value: string;
   color?: string;
+  /** 排在右栏（盈亏概览的递进链）；导出图与页面一样按栏从上往下排。 */
+  rightColumn?: boolean;
 };
 
 export type CampaignLegsExportCellLine = {
@@ -1313,7 +1315,30 @@ type OverviewItem = {
   label: string;
   value: string;
   color?: string;
+  rightColumn?: boolean;
 };
+
+/**
+ * 摘要面板里每一项的格位（两栏）。有项标了 rightColumn 时按栏从上往下排：未标的进左栏、标了的进右栏，
+ * 与页面上的盈亏概览一致；都没标（战役元数据）时仍按行从左到右排。
+ */
+export function overviewItemCells(items: OverviewItem[]): { cells: { item: OverviewItem; column: number; row: number }[]; rows: number } {
+  if (!items.some(item => item.rightColumn)) {
+    return {
+      cells: items.map((item, index) => ({ item, column: index % 2, row: Math.floor(index / 2) })),
+      rows: Math.ceil(items.length / 2),
+    };
+  }
+  const left = items.filter(item => !item.rightColumn);
+  const right = items.filter(item => item.rightColumn);
+  return {
+    cells: [
+      ...left.map((item, row) => ({ item, column: 0, row })),
+      ...right.map((item, row) => ({ item, column: 1, row })),
+    ],
+    rows: Math.max(left.length, right.length),
+  };
+}
 
 export type CampaignBoardOverview = {
   metadataItems: OverviewItem[];
@@ -1383,9 +1408,8 @@ function drawOverviewPanel(
 
   const columns = 2;
   const columnWidth = (width - 32) / columns;
-  items.forEach((item, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
+  const { cells, rows: itemRows } = overviewItemCells(items);
+  cells.forEach(({ item, column, row }) => {
     const itemX = x + 16 + column * columnWidth;
     const itemY = y + 52 + row * 32;
     ctx.font = '500 11px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -1397,7 +1421,6 @@ function drawOverviewPanel(
   });
 
   if (note) {
-    const itemRows = Math.ceil(items.length / columns);
     const noteTop = y + 52 + itemRows * 32 + 2;
     ctx.strokeStyle = '#E5E7EB';
     ctx.beginPath();
@@ -1433,7 +1456,7 @@ function wrapCanvasText(
 }
 
 function overviewPanelHeight(items: OverviewItem[], note: string | undefined, width: number): number {
-  const itemRows = Math.ceil(items.length / 2);
+  const itemRows = overviewItemCells(items).rows;
   const itemsBottom = 52 + itemRows * 32;
   if (!note) return Math.max(BOARD_OVERVIEW_MIN_H, itemsBottom + 12);
 

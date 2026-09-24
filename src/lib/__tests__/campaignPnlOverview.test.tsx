@@ -14,36 +14,38 @@ import {
  * 已实现 200、L 100 → b = 200%；P 统一 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
  * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓效率 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
+// 【用户要求】先左栏（结果与仓位）、再右栏：预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓效率 → 几何期望 → 算术期望，
+// 与战役封面、排序栏同序，放在同一列（层层递进）。
 const GOLDEN_LABELS = [
   '已实现 P&L',
+  '峰值浮盈',
   '杠杆倍数',
   '主力开仓名义仓位',
-  '峰值浮盈',
   '最大预期亏损',
+  '本场 b 对 DSI/USI 的贡献',
   '预期回撤',
   '涨幅',
   '涨幅效率',
   '盈亏比',
   '加仓效率',
-  '本场 b 对 DSI/USI 的贡献',
-  '算术期望',
   '几何期望',
+  '算术期望',
 ];
 
 const GOLDEN_KEYS = [
   'realizedPnl',
+  'peakUnrealizedPnl',
   'mainLeverage',
   'initialMainExposureNotional',
-  'peakUnrealizedPnl',
   'initialExpectedMaxLoss',
+  'asymmetricRiskContribution',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
   'payoffRatio',
   'addEfficiency',
-  'asymmetricRiskContribution',
-  'arithmeticExpectancy',
   'geometricExpectancy',
+  'arithmeticExpectancy',
 ];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
@@ -74,18 +76,18 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
     expect(items.map(item => item.value)).toEqual([
       '200.00 USDT',
+      '250.50',
       '1x',
       '1000.00 USDT',
-      '250.50',
       '100.00 USDT',
+      'USI · b²/n = 4.0000（组内 100.0%）',
       '10.00%',
       '+20.00%',
       '+2.00',
       '200.0%（2.00）',
       '+1.00',
-      'USI · b²/n = 4.0000（组内 100.0%）',
-      '+0.50R',
       '1.20',
+      '+0.50R',
     ]);
     expect(items.map(item => item.color)).toEqual([
       '#0ECB81',
@@ -94,11 +96,11 @@ describe('buildCampaignPnlOverviewItems', () => {
       undefined,
       undefined,
       undefined,
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
       undefined,
+      '#0ECB81',
+      '#0ECB81',
+      '#0ECB81',
+      '#0ECB81',
       '#0ECB81',
       '#0ECB81',
     ]);
@@ -109,17 +111,18 @@ describe('buildCampaignPnlOverviewItems', () => {
       undefined,
       undefined,
       undefined,
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
       undefined,
+      'text-[#0ECB81]',
+      'text-[#0ECB81]',
+      'text-[#0ECB81]',
+      'text-[#0ECB81]',
       'text-[#0ECB81]',
       'text-[#0ECB81]',
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
-      // 涨幅效率压在「预期回撤」正下方、加仓效率在「盈亏比」右边；13 项排 7 行
-      false, false, false, false, false, false, false, true, false, true, false, false, false,
+      // 左栏 6 项（结果与仓位），右栏 7 项（递进链）；两栏排 7 行
+      false, false, false, false, false, false,
+      true, true, true, true, true, true, true,
     ]);
   });
 
@@ -199,8 +202,17 @@ describe('CampaignPnlOverviewPanel', () => {
     const buttons = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'));
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2.sm\\:grid-cols-2')).not.toBeNull();
+    // 【用户要求】递进链七项同在右栏、从上往下排；左栏六项。每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('.sm\\:col-start-2')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['涨幅效率', '加仓效率']);
+      .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+    expect([...container.querySelectorAll('.sm\\:col-start-1')].map(node => node.firstElementChild?.textContent))
+      .toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', '本场 b 对 DSI/USI 的贡献']);
+    const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
+      .find(node => node.firstElementChild?.textContent === label)?.className.match(/sm:row-start-(\d+)/)?.[1];
+    expect(rowOf('已实现 P&L')).toBe('1');
+    expect(rowOf('预期回撤')).toBe('1');
+    expect(rowOf('本场 b 对 DSI/USI 的贡献')).toBe('6');
+    expect(rowOf('算术期望')).toBe('7');
     expect(screen.getByText('期望口径：2 场有效战役，实时胜率 50.00%。')).toBeInTheDocument();
     // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 13 项网格与脚注，没有别的行
     expect(container.firstElementChild?.firstElementChild).toHaveTextContent('盈亏概览');

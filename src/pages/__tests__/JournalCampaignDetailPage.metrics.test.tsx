@@ -484,20 +484,21 @@ describe('JournalCampaignDetailPage metrics', () => {
     const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
     expect(exportInput.accountName).toBe('主账户');
     expect(exportInput.chartInterval).toBe('1m');
+    // 导出图与页面同一份两栏次序：先左栏、再右栏的递进链
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '已实现 P&L',
+      '峰值浮盈',
       '杠杆倍数',
       '主力开仓名义仓位',
-      '峰值浮盈',
       '最大预期亏损',
+      '本场 b 对 DSI/USI 的贡献',
       '预期回撤',
       '涨幅',
       '涨幅效率',
       '盈亏比',
       '加仓效率',
-      '本场 b 对 DSI/USI 的贡献',
-      '算术期望',
       '几何期望',
+      '算术期望',
     ]);
     expect(exportInput.pnlOverview.note).toContain('算术期望的胜率统一取 50%');
     expect(exportInput.pnlOverview.note).not.toContain('逐腿 P&L 对账');

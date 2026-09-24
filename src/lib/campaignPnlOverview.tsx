@@ -41,8 +41,34 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
   key: CampaignPnlOverviewItemKey;
   help: ReactNode;
   valueClassName?: string;
-  rightColumn?: boolean;
 };
+
+/**
+ * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
+ * 左栏：结果与仓位。
+ */
+export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'realizedPnl',
+  'peakUnrealizedPnl',
+  'mainLeverage',
+  'initialMainExposureNotional',
+  'initialExpectedMaxLoss',
+  'asymmetricRiskContribution',
+];
+
+/**
+ * 右栏：【用户要求】「预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望，这几个变量要放在同一列，
+ * 因为这些指标是层层递进的」——与战役封面、列表排序栏同序，上一项是下一项的分母或来源。
+ */
+export const PNL_OVERVIEW_CHAIN_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'expectedMaxDrawdownPct',
+  'mainPriceChange',
+  'mainPriceEfficiency',
+  'payoffRatio',
+  'addEfficiency',
+  'geometricExpectancy',
+  'arithmeticExpectancy',
+];
 
 /**
  * 帮助文案的可序列化段落：纯字符串是普通段落，formula 是等宽公式框，warning 是黄色警示。
@@ -151,7 +177,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
 
-  const items: CampaignPnlOverviewItem[] = [
+  const built: CampaignPnlOverviewItem[] = [
     {
       key: 'realizedPnl',
       label: '已实现 P&L',
@@ -276,7 +302,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       value: formatEfficiency(mainPriceEfficiency),
       color: pnlExportColor(mainPriceEfficiency),
       valueClassName: pnlColor(mainPriceEfficiency),
-      rightColumn: true,
       help: (
         <>
           <p>价格走出了几个「预期回撤」：主力涨了 12%、入场到对冲边界 4%，效率就是 +3.00。</p>
@@ -309,7 +334,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       value: formatEfficiency(addEfficiency),
       color: pnlExportColor(addEfficiency),
       valueClassName: pnlColor(addEfficiency),
-      rightColumn: true,
       help: (
         <>
           <p>加仓把同一段行情放大了多少：以「只拿主力、不加仓时盈亏比大致等于涨幅效率、比值约为 1」为基准，大于 1 说明加仓把行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。<strong>只在做过加仓、且涨幅效率为正时计算</strong>——没有加仓，这个比值恒在 1 附近，没有信息量；涨幅效率不为正时，亏损战役负负得正、主力几乎没动时分母过小，读数都会失真。</p>
@@ -380,6 +404,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         </>
       ),
     },
+  ];
+
+  // 按两栏次序重排：先左栏、再右栏（递进链，标 rightColumn），窄屏单栏时也是这个先后。
+  const byKey = new Map(built.map(item => [item.key, item]));
+  const items: CampaignPnlOverviewItem[] = [
+    ...PNL_OVERVIEW_LEFT_COLUMN.map(key => byKey.get(key)!),
+    ...PNL_OVERVIEW_CHAIN_COLUMN.map(key => ({ ...byKey.get(key)!, rightColumn: true })),
   ];
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;

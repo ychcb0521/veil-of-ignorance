@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildCampaignPnlOverviewItems, type CampaignPnlOverviewMetrics } from '@/lib/campaignPnlOverview';
 import {
   EMOTION_DIARY_COLLAPSED_H,
   buildCampaignLegsListCanvas,
@@ -12,6 +13,7 @@ import {
   formatCampaignChartInterval,
   campaignKlineTitleName,
   campaignStatusLabel,
+  overviewItemCells,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -1866,3 +1868,37 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
     expect(drawn.slice(0, 2)).toEqual(['角色', '时间']);
   });
 });
+
+describe('【用户要求】导出图的盈亏概览与页面同样两栏：递进链排在同一列', () => {
+  it('标了 rightColumn 的按栏从上往下排：左栏六项、右栏七项，同一行齐平；战役元数据仍按行排', () => {
+    const items = buildCampaignPnlOverviewItems(pnlMetricsForColumns());
+    const { cells, rows } = overviewItemCells(items);
+    expect(rows).toBe(7);
+    const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
+    expect(column(0)).toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', '本场 b 对 DSI/USI 的贡献']);
+    expect(column(1)).toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+
+    const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);
+    expect(metadata.cells.map(cell => [cell.item.label, cell.column, cell.row])).toEqual([['A', 0, 0], ['B', 1, 0], ['C', 0, 1]]);
+    expect(metadata.rows).toBe(2);
+  });
+});
+
+function pnlMetricsForColumns(): CampaignPnlOverviewMetrics {
+  return {
+    realizedPnl: 200,
+    settlement: null,
+    mainLeverage: 1,
+    initialMainExposureNotional: 1000,
+    peakUnrealizedPnl: 250.5,
+    initialExpectedMaxLoss: 100,
+    expectedMaxDrawdownPct: 10,
+    payoffRatio: 200,
+    mainPriceChangePct: 20,
+    hasMainAdd: true,
+    asymmetricRiskContribution: null,
+    arithmeticExpectancy: 0.5,
+    geometricExpectancy: 0.2,
+    initialRisk: null,
+  };
+}

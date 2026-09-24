@@ -32,6 +32,12 @@ export function PnlMetricLabel({ label, children }: { label: string; children: R
   );
 }
 
+/** 两栏时每项所在的行（Tailwind 需要完整类名，所以逐个写出）。 */
+const SM_ROW_START = [
+  'sm:row-start-1', 'sm:row-start-2', 'sm:row-start-3', 'sm:row-start-4', 'sm:row-start-5',
+  'sm:row-start-6', 'sm:row-start-7', 'sm:row-start-8', 'sm:row-start-9', 'sm:row-start-10',
+];
+
 export interface CampaignPnlOverviewPanelProps {
   title: string;
   items: CampaignPnlOverviewItem[];
@@ -45,20 +51,28 @@ export interface CampaignPnlOverviewPanelProps {
  * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
 export function CampaignPnlOverviewPanel({ title, items, note, testId }: CampaignPnlOverviewPanelProps) {
+  const leftRows = new Map(items.filter(item => !item.rightColumn).map((item, row) => [item.key, row]));
+  const rightRows = new Map(items.filter(item => item.rightColumn).map((item, row) => [item.key, row]));
   return (
     <div className="bg-card border border-border rounded p-4 text-[12px]" data-testid={testId}>
       {/* 标题只占一行：反事实分支名最长 20 字，窄屏两栏并排时折行会让这张卡比上方「盈亏概览」高出一行；截断后悬停看全名。 */}
       <div className="truncate font-medium" title={title}>{title}</div>
+      {/* 两栏各自从上往下排（次序见 PNL_OVERVIEW_LEFT_COLUMN / PNL_OVERVIEW_CHAIN_COLUMN）：每项按它在本栏的序号落到同一行，
+          左右两栏共用行高，同一行的两项始终齐平；窄屏单栏时按 DOM 顺序，先左栏、再右栏。 */}
       <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-        {items.map(item => (
-          <div
-            key={item.key}
-            className={`flex items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : ''}`}
-          >
-            <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-            <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
-          </div>
-        ))}
+        {items.map(item => {
+          const row = (item.rightColumn ? rightRows : leftRows).get(item.key) ?? 0;
+          return (
+            <div
+              key={item.key}
+              data-column={item.rightColumn ? 'right' : 'left'}
+              className={`flex items-baseline justify-between gap-3 ${item.rightColumn ? 'sm:col-start-2' : 'sm:col-start-1'} ${SM_ROW_START[row] ?? ''}`}
+            >
+              <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+              <span className={`font-mono ${item.valueClassName ?? ''}`}>{item.value}</span>
+            </div>
+          );
+        })}
       </div>
       <div className="mt-3 border-t border-border/70 pt-2 text-[10px] text-muted-foreground">
         {note}
