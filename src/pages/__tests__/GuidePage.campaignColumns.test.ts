@@ -61,4 +61,13 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toMatch(new RegExp(`${key}: '${key}',`));
     }
   });
+  it('【用户要求】涨幅、涨幅效率、加仓效率、算术期望默认看分布，可切回时序；加仓效率另有 1.00 参照线', () => {
+    expect(guide).toContain('<strong>盈亏比、涨幅、涨幅效率、加仓效率、算术期望与几何期望默认展开的是分布图、镜像止盈默认展开的是柱状图</strong>');
+    expect(guide).toContain('<strong>涨幅、涨幅效率、加仓效率、算术期望默认看分布</strong>');
+    expect(guide).toContain('<strong>琥珀色 1.00 虚线</strong>「加仓没有额外放大」');
+    expect(guide).toContain('用面板右上角的「时序 | 分布」切回时序');
+    for (const source of ['mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy']) {
+      expect(page).toContain(`${source}: '${source}Distribution'`);
+    }
+  });
 });

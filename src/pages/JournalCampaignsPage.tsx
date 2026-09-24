@@ -22,6 +22,7 @@ import {
   CampaignMetricScatterPlot,
   type CampaignMetricChartView,
   type CampaignMetricColorMode,
+  type CampaignMetricDistributionSpec,
   type CampaignMetricScatterGuide,
 } from '@/components/journal/CampaignOddsScatterPlot';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -57,6 +58,7 @@ import {
   type BulkClosePlanItem,
 } from '@/lib/campaignBulkClose';
 import {
+  ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectancies,
   formatArithmeticExpectancy,
   formatGeometricExpectancy,
@@ -150,8 +152,12 @@ type CampaignMetricChartKey =
   | 'dsiContribution'
   | 'usiContribution'
   | 'mainPriceChange'
+  | 'mainPriceChangeDistribution'
   | 'mainPriceEfficiency'
-  | 'addEfficiency';
+  | 'mainPriceEfficiencyDistribution'
+  | 'addEfficiency'
+  | 'addEfficiencyDistribution'
+  | 'arithmeticExpectancyDistribution';
 
 type CampaignMetricChartConfig = {
   key: CampaignMetricChartKey;
@@ -169,6 +175,8 @@ type CampaignMetricChartConfig = {
   missingValueLabel: string;
   colorMode: CampaignMetricColorMode;
   formatValue: (value: number) => string;
+  /** 通用分布图（涨幅、涨幅效率、加仓效率、算术期望）的读法：单位、0 线、正值占比、额外参照线。 */
+  distribution?: CampaignMetricDistributionSpec;
 };
 
 type CampaignListNavigationState = {
@@ -316,6 +324,17 @@ function formatMirrorTpMetric(value: number): string {
   return MIRROR_TP_RANK_LABELS[Math.min(MIRROR_TP_RANK_LABELS.length - 1, Math.max(0, rounded))];
 }
 
+/**
+ * 【用户要求】涨幅、涨幅效率、加仓效率、算术期望也配「分布」看法并默认打开（同盈亏比）。
+ * 四张分布图共用的两句参考线说明：密度曲线与越界三角的读法四张图一字不差，写一份免得各自漂移。
+ */
+const METRIC_DISTRIBUTION_DENSITY_NOTE = '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与点列共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。';
+const METRIC_DISTRIBUTION_CLAMP_NOTE = '显示区间取 p2–p98 的稳健窗口，超出的极端值贴边画成三角并在图下计数；提示框、摘要统计与点击跳转仍用原值。';
+/** 单场算术期望的胜率是常数（见 ARITHMETIC_EXPECTANCY_WIN_RATE）：说明里的式子与「0R ↔ b」的换算都从它推，不手写数字。 */
+const ARITHMETIC_WIN_RATE_PCT = Math.round(ARITHMETIC_EXPECTANCY_WIN_RATE * 100);
+/** Eᵢ = 0 ⇔ bᵢ = (1 − P) ÷ P；P = 50% 时是 +1R。 */
+const ARITHMETIC_BREAK_EVEN_PAYOFF = `+${Number(((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) / ARITHMETIC_EXPECTANCY_WIN_RATE).toFixed(2))}R`;
+
 const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'odds',
@@ -393,6 +412,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'arithmeticExpectancy',
     label: '算术期望',
     chartLabel: '算术图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-arithmeticExpectancy-view-time',
     seriesLabel: '算术期望时序',
     guide: {
       yAxis: '该场战役在当前有效样本胜率下的算术期望，单位为 R。E = P(赢) × b − (1 − P(赢))。',
@@ -407,6 +428,40 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     missingValueLabel: '算术期望',
     colorMode: 'signed',
     formatValue: formatArithmeticExpectancy,
+  },
+  {
+    key: 'arithmeticExpectancyDistribution',
+    sourceKey: 'arithmeticExpectancy',
+    view: 'distribution',
+    label: '算术期望分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-arithmeticExpectancy-view-distribution',
+    seriesLabel: '算术期望分布',
+    guide: {
+      yAxis: '落在该算术期望附近的战役数量：点从底线向上堆叠，堆得越高，这一档 Eᵢ 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: `每个点仍是一场战役，横向位置就是它的单场算术期望 Eᵢ = ${ARITHMETIC_WIN_RATE_PCT}% × bᵢ − ${100 - ARITHMETIC_WIN_RATE_PCT}%（单位 R，胜率统一取 ${ARITHMETIC_WIN_RATE_PCT}%），不考虑时间先后；同一档内的点按 Eᵢ 从小到大自下而上排。`
+        + `胜率固定之后 Eᵢ 只是 bᵢ 的线性变换，分布形状与盈亏比分布一致、只是刻度不同：Eᵢ = 0R 对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}，Eᵢ = −1R 仍对应 bᵢ = −1R。`,
+      colors: [
+        { token: 'profit', label: '绿色：算术期望 > 0。' },
+        { token: 'loss', label: '红色：算术期望 < 0。' },
+        { token: 'neutral', label: '灰色：算术期望 = 0。' },
+      ],
+      referenceLines: [
+        `灰色 0R 竖线：盈亏平衡，正、负算术期望的分界（对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}）；摘要条的「正期望」是 Eᵢ > 0 的场数占比。`,
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '算术期望',
+    colorMode: 'signed',
+    formatValue: formatArithmeticExpectancy,
+    distribution: {
+      unit: 'R',
+      zeroLabel: '0R 盈亏平衡',
+      zeroMeaning: '盈亏分界',
+      positiveShareLabel: '正期望',
+    },
   },
   {
     key: 'geometricExpectancy',
@@ -559,6 +614,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'mainPriceChange',
     label: '涨幅',
     chartLabel: '涨幅图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-mainPriceChange-view-time',
     seriesLabel: '涨幅时序',
     guide: {
       yAxis: '每场战役主力那条腿的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。与详情页 Legs 表「涨跌幅」列是同一个数。',
@@ -575,9 +632,44 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     formatValue: value => formatLegPriceChangePct(value),
   },
   {
+    key: 'mainPriceChangeDistribution',
+    sourceKey: 'mainPriceChange',
+    view: 'distribution',
+    label: '涨幅分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-mainPriceChange-view-distribution',
+    seriesLabel: '涨幅分布',
+    guide: {
+      yAxis: '落在该涨幅附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨幅出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场主力已平仓的战役，横向位置就是主力那条腿的涨跌幅（%，按主力方向计，空单价格跌了为正，与 Legs 表「涨跌幅」列同一个数），不考虑时间先后；同一档内的点按涨幅从小到大自下而上排。',
+      colors: [
+        { token: 'profit', label: '绿色：涨幅 > 0，价格朝主力方向走。' },
+        { token: 'loss', label: '红色：涨幅 < 0，价格朝主力反方向走。' },
+        { token: 'neutral', label: '灰色：涨幅 = 0，开平价相同。' },
+      ],
+      referenceLines: [
+        '灰色 0% 竖线：价格不涨不跌的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨幅 > 0 的场数占比。',
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '主力涨幅',
+    colorMode: 'signed',
+    formatValue: value => formatLegPriceChangePct(value),
+    distribution: {
+      unit: '%',
+      zeroLabel: '0% 不涨不跌',
+      zeroMeaning: '涨跌分界',
+      positiveShareLabel: '顺向',
+    },
+  },
+  {
     key: 'mainPriceEfficiency',
     label: '涨幅效率',
     chartLabel: '涨幅效率图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-mainPriceEfficiency-view-time',
     seriesLabel: '涨幅效率时序',
     guide: {
       yAxis: '涨幅效率 = 主力涨幅 ÷ 预期回撤，单位为倍：价格走出了几个「预期回撤」。+3.00 表示主力吃到的行情是入场到对冲边界距离的 3 倍。',
@@ -594,9 +686,44 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     formatValue: value => formatEfficiency(value),
   },
   {
+    key: 'mainPriceEfficiencyDistribution',
+    sourceKey: 'mainPriceEfficiency',
+    view: 'distribution',
+    label: '涨幅效率分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-mainPriceEfficiency-view-distribution',
+    seriesLabel: '涨幅效率分布',
+    guide: {
+      yAxis: '落在该涨幅效率附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨幅效率出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场战役，横向位置就是它的涨幅效率（倍，= 主力涨幅 ÷ 预期回撤：价格走出了几个「预期回撤」），不考虑时间先后；同一档内的点按涨幅效率从小到大自下而上排。只画主力已平仓、且算得出预期回撤的战役。',
+      colors: [
+        { token: 'profit', label: '绿色：涨幅效率 > 0，价格朝主力方向走。' },
+        { token: 'loss', label: '红色：涨幅效率 < 0，价格朝主力反方向走。' },
+        { token: 'neutral', label: '灰色：涨幅效率 = 0。' },
+      ],
+      referenceLines: [
+        '灰色 0.00 竖线：正、负涨幅效率的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨幅效率 > 0 的场数占比。',
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '涨幅效率',
+    colorMode: 'signed',
+    formatValue: value => formatEfficiency(value),
+    distribution: {
+      unit: '倍',
+      zeroLabel: '0.00 不涨不跌',
+      zeroMeaning: '涨跌分界',
+      positiveShareLabel: '顺向',
+    },
+  },
+  {
     key: 'addEfficiency',
     label: '加仓效率',
     chartLabel: '加仓效率图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-addEfficiency-view-time',
     seriesLabel: '加仓效率时序',
     guide: {
       yAxis: '加仓效率 = 盈亏比 b ÷ 涨幅效率，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
@@ -611,6 +738,41 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     missingValueLabel: '加仓效率',
     colorMode: 'signed',
     formatValue: value => formatEfficiency(value),
+  },
+  {
+    key: 'addEfficiencyDistribution',
+    sourceKey: 'addEfficiency',
+    view: 'distribution',
+    label: '加仓效率分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-addEfficiency-view-distribution',
+    seriesLabel: '加仓效率分布',
+    guide: {
+      yAxis: '落在该加仓效率附近的战役数量：点从底线向上堆叠，堆得越高，这一档加仓效率出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场做过加仓、且涨幅效率为正的战役，横向位置就是它的加仓效率（倍，= 盈亏比 b ÷ 涨幅效率），不考虑时间先后；同一档内的点按加仓效率从小到大自下而上排。没有加仓、或涨幅效率不为正的战役不进图。',
+      colors: [
+        { token: 'profit', label: '绿色：加仓效率 > 0，本场盈亏比为正。' },
+        { token: 'loss', label: '红色：加仓效率 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
+        { token: 'neutral', label: '灰色：加仓效率 = 0。' },
+      ],
+      referenceLines: [
+        '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓效率约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓效率 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
+        '灰色 0.00 竖线：盈亏平衡。进图的战役涨幅效率都为正，加仓效率与盈亏比同号：线左是主力涨了、本场却亏了；摘要条的「盈利」是加仓效率 > 0 的场数占比。',
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '加仓效率',
+    colorMode: 'signed',
+    formatValue: value => formatEfficiency(value),
+    distribution: {
+      unit: '倍',
+      zeroLabel: '0.00 盈亏平衡',
+      zeroMeaning: '盈亏分界',
+      positiveShareLabel: '盈利',
+      references: [{ value: 1, label: '1.00 加仓没有额外放大', shareLabel: '放大（> 1）' }],
+    },
   },
 ] as const;
 
@@ -658,6 +820,11 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   mirrorTp: 'mirrorTpBars',
   // 几何期望也一样：要判断的是这套打法的资本增长偏不偏、右尾够不够长——那是形状问题。
   geometricExpectancy: 'geometricExpectancyDistribution',
+  // 【用户要求】涨幅、涨幅效率、加仓效率、算术期望同盈亏比：默认看分布，「时序 | 分布」随时切回。
+  mainPriceChange: 'mainPriceChangeDistribution',
+  mainPriceEfficiency: 'mainPriceEfficiencyDistribution',
+  addEfficiency: 'addEfficiencyDistribution',
+  arithmeticExpectancy: 'arithmeticExpectancyDistribution',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1862,6 +2029,13 @@ export default function JournalCampaignsPage() {
     ));
     const mirrorTp = buildSeries(row => rowMirrorTpRank(row));
     const geometric = buildSeries(row => row.geometricExpectancy);
+    const arithmetic = buildSeries(row => row.arithmeticExpectancy);
+    // 与卡片、排序同一组函数：算不出的战役（主力未平仓、没有预期回撤、没有加仓）不进图
+    const mainPriceChange = buildSeries(row => (
+      row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
+    ));
+    const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
+    const addEfficiency = buildSeries(row => rowAddEfficiency(row));
     return {
       odds,
       oddsDistribution: odds,
@@ -1870,7 +2044,8 @@ export default function JournalCampaignsPage() {
           ? row.initialExpectedMaxDrawdownPct
           : null
       )),
-      arithmeticExpectancy: buildSeries(row => row.arithmeticExpectancy),
+      arithmeticExpectancy: arithmetic,
+      arithmeticExpectancyDistribution: arithmetic,
       geometricExpectancy: geometric,
       // 分布图与时序图是同一份序列的两种读法，只建一次、共用同一个对象。
       geometricExpectancyDistribution: geometric,
@@ -1880,12 +2055,13 @@ export default function JournalCampaignsPage() {
       mirrorTpBars: mirrorTp,
       dsiContribution: buildSeries(row => row.dsiContributionPct),
       usiContribution: buildSeries(row => row.usiContributionPct),
-      // 与卡片、排序同一组函数：算不出的战役（主力未平仓、没有预期回撤、没有加仓）不进图
-      mainPriceChange: buildSeries(row => (
-        row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
-      )),
-      mainPriceEfficiency: buildSeries(row => rowMainPriceEfficiency(row)),
-      addEfficiency: buildSeries(row => rowAddEfficiency(row)),
+      // 涨幅三项与算术期望同理：分布图与时序图共用同一份序列。
+      mainPriceChange,
+      mainPriceChangeDistribution: mainPriceChange,
+      mainPriceEfficiency,
+      mainPriceEfficiencyDistribution: mainPriceEfficiency,
+      addEfficiency,
+      addEfficiencyDistribution: addEfficiency,
     };
   }, [metricRows]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
@@ -3450,6 +3626,7 @@ export default function JournalCampaignsPage() {
                     colorMode={selectedMetricConfig.colorMode}
                     legacyOddsTestIds={selectedMetricConfig.key === 'odds'}
                     view={selectedMetricConfig.view ?? 'time'}
+                    distributionSpec={selectedMetricConfig.distribution}
                     onBack={handleChartBack}
                     onSelectCampaign={handleCampaignOpen}
                   />

@@ -42,6 +42,7 @@ const GEOMETRIC_REFERENCE_FACTOR = 0.9;
 // Use the stored edge's representation so an exact −0.1 is not rounded across the boundary.
 const GEOMETRIC_REFERENCE_X = Math.log1p(-0.1);
 const GEOMETRIC_BOUNDARIES = [{ value: GEOMETRIC_REFERENCE_X, inclusiveSide: 'right' as const }];
+const NO_DISTRIBUTION_REFERENCES: NonNullable<CampaignMetricDistributionSpec['references']> = [];
 
 /**
  * 时序：横轴按操作时间排战役；
@@ -77,6 +78,35 @@ export type CampaignMetricScatterGuide = {
   referenceLines?: readonly string[];
 };
 
+/**
+ * 通用连续指标（涨幅、涨幅效率、加仓效率、算术期望）的分布图读法。
+ *
+ * 盈亏比与几何期望各有一套专属画法（−1R 止损墙 / 对数横轴），不读这里；
+ * 其余指标共用线性横轴、稳健窗口、密度曲线与摘要条，只有「0 叫什么」「正值占比叫什么」
+ * 「还有没有别的参照值」各不相同——写错一个字，图旁边就多了一句与指标不符的话。
+ */
+export type CampaignMetricDistributionSpec = {
+  /** 横轴单位，缀在方向提示里：「%」「倍」「R」。 */
+  unit: string;
+  /** 0 竖线的标签全文：「0% 不涨不跌」「0R 盈亏平衡」。 */
+  zeroLabel: string;
+  /** 0 在这项指标上是什么分界，写进说明面板的横轴一行：「涨跌分界」「盈亏分界」。 */
+  zeroMeaning: string;
+  /** 摘要条里正值占比那一项的名字：「顺向」「盈利」「正期望」。 */
+  positiveShareLabel: string;
+  /**
+   * 0 以外的参照值（加仓效率的 1.00「加仓没有额外放大」）：画成琥珀色虚线，
+   * 同时是档边界（点位不会吸附到线的另一侧），窗口也一定把它圈进来。
+   */
+  references?: readonly {
+    value: number;
+    /** 竖线标签全文，如「1.00 加仓没有额外放大」。 */
+    label: string;
+    /** 摘要条里「> 该值」的占比名字，如「放大（> 1）」。 */
+    shareLabel: string;
+  }[];
+};
+
 type CampaignMetricScatterPlotProps = {
   points: CampaignMetricPoint[];
   metricKey: string;
@@ -93,6 +123,8 @@ type CampaignMetricScatterPlotProps = {
   legacyOddsTestIds?: boolean;
   /** 缺省 'time'。几何期望分布使用对数横轴，其余连续指标使用线性横轴。 */
   view?: CampaignMetricChartView;
+  /** 通用分布图（盈亏比、几何期望以外）的读法；时序视图忽略。 */
+  distributionSpec?: CampaignMetricDistributionSpec;
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
 };
@@ -120,6 +152,17 @@ type CampaignMetricBand = {
 function formatIntegerOddsTick(value: number) {
   const normalized = Object.is(value, -0) ? 0 : value;
   return `${normalized > 0 ? '+' : ''}${normalized}R`;
+}
+
+/**
+ * 通用分布横轴的刻度去掉小数尾零：「+20.00%」→「+20%」、「+2.50」→「+2.5」、「+0.00R」→「0R」。
+ * 刻度只标位置，两位小数在这里全是噪声，还会让窄屏上的相邻刻度挤在一起；
+ * 与盈亏比分布的「+2R」同一种紧凑读法。精确值仍在提示框与摘要条里。
+ */
+function compactDistributionTick(text: string) {
+  return text
+    .replace(/(\d)\.(\d*?)0+(?!\d)/, (_, digit: string, fraction: string) => (fraction ? `${digit}.${fraction}` : digit))
+    .replace(/^\+(?=0(?![.\d]))/, '');
 }
 
 function valuePosition(value: number, min: number, max: number) {
@@ -396,6 +439,7 @@ export function CampaignMetricScatterPlot({
   colorMode = 'signed',
   legacyOddsTestIds = false,
   view = 'time',
+  distributionSpec,
   onBack,
   onSelectCampaign,
 }: CampaignMetricScatterPlotProps) {
@@ -409,6 +453,27 @@ export function CampaignMetricScatterPlot({
   const stacked = distribution || bars;
   /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
   const oddsFamily = metricKey.startsWith('odds');
+  /**
+   * 通用连续指标的分布（涨幅、涨幅效率、加仓效率、算术期望）：线性横轴、稳健窗口，
+   * 0 线叫什么、正值占比叫什么、另有哪些参照值由 distributionSpec 给。
+   */
+  const genericSpec = distribution && !oddsFamily && !geometricDistribution ? distributionSpec : undefined;
+  const genericReferences = genericSpec?.references ?? NO_DISTRIBUTION_REFERENCES;
+  // 参照值同时是档边界：恰好落在线上的归右侧，与 0 线同一个约定。
+  const genericBoundaries = useMemo(
+    () => (genericReferences.length
+      ? genericReferences.map(reference => ({ value: reference.value, inclusiveSide: 'right' as const }))
+      : undefined),
+    [genericReferences],
+  );
+  /** 说明面板里念参照值：「1.00」，不带正号。 */
+  const referenceValueText = (value: number) => formatValue(value).replace(/^\+/, '');
+  /** 横轴说明里「窗口一定圈进来的值」：通用分布写出 0 的名字与各参照值，其余沿用「盈亏分界」。 */
+  const windowAnchorText = genericSpec
+    ? `${genericSpec.zeroMeaning} 0${genericReferences.length
+      ? ` 与参照值 ${genericReferences.map(reference => referenceValueText(reference.value)).join('、')}`
+      : ''} `
+    : '盈亏分界';
   /**
    * 提示框一律补上这一场的 b。
    *
@@ -454,9 +519,11 @@ export function CampaignMetricScatterPlot({
   // 分布视图的窗口、摘要、带宽都由同一份纯函数派生，和时序视图互不影响。
   const dist = useMemo(
     () => (distribution
-      ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : { domain: metricDistributionDomain })
+      ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : {
+        domain: values => metricDistributionDomain(values, genericReferences.map(reference => reference.value)),
+      })
       : null),
-    [chartPoints, distribution, oddsFamily],
+    [chartPoints, distribution, genericReferences, oddsFamily],
   );
   const geometricDist = useMemo(
     () => geometricDistribution ? buildGeometricDistributionModel(chartPoints) : null,
@@ -607,10 +674,10 @@ export function CampaignMetricScatterPlot({
     max: dist.domain.max,
     // 步距细于格式化精度时会连着印出两个「1.00」；重复的直接丢掉，留第一个。
     labels: dist.domain.ticks
-      .map(value => ({ at: value, text: oddsFamily ? formatIntegerOddsTick(value) : formatValue(value) }))
+      .map(value => ({ at: value, text: oddsFamily ? formatIntegerOddsTick(value) : compactDistributionTick(formatValue(value)) }))
       .filter((label, index, list) => index === 0 || label.text !== list[index - 1].text),
-    boundaries: showRuinBoundary ? RUIN_BOUNDARIES : undefined,
-  } : null), [dist, geometricDist, oddsFamily, formatValue, showRuinBoundary]);
+    boundaries: showRuinBoundary ? RUIN_BOUNDARIES : genericBoundaries,
+  } : null), [dist, geometricDist, oddsFamily, formatValue, showRuinBoundary, genericBoundaries]);
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
     mode: 'category',
@@ -627,8 +694,9 @@ export function CampaignMetricScatterPlot({
       axis: 'x',
       value: 0,
       kind: 'zero',
-      // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00。
-      label: `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
+      // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00；
+      // 涨幅一族的 0 是「不涨不跌」，由 distributionSpec 给全文。
+      label: genericSpec?.zeroLabel ?? `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
       labelSide: geometricDistribution ? 'right' : undefined,
       testId: `campaign-metric-break-even-${metricKey}`,
       dataAttrs: { 'data-reference-value': 0 },
@@ -642,7 +710,18 @@ export function CampaignMetricScatterPlot({
       },
       breakEven,
     ];
-    if (!oddsFamily) return [breakEven];
+    if (!oddsFamily) return [
+      // 参照线先排：标签排位按先来后到，参照线在正侧、0 线标签在负侧，互不相撞。
+      ...genericReferences.map(reference => ({
+        axis: 'x' as const,
+        value: reference.value,
+        kind: 'threshold' as const,
+        label: reference.label,
+        testId: `campaign-metric-reference-${metricKey}-${reference.value}`,
+        dataAttrs: { 'data-reference-value': reference.value },
+      })),
+      breakEven,
+    ];
     return [
       ...(showRuinBoundary ? [{
         axis: 'x' as const, value: CAPITAL_RUIN_THRESHOLD, kind: 'threshold' as const,
@@ -660,7 +739,7 @@ export function CampaignMetricScatterPlot({
       },
       breakEven,
     ];
-  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution]);
+  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution, genericSpec, genericReferences]);
 
   const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
     <path
@@ -778,7 +857,7 @@ export function CampaignMetricScatterPlot({
           ) : geometricDist ? (
             <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。0.90 处另画黄色参考线，与 1.00 盈亏平衡线区分；0.90 不是本金归零。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
           ) : dist ? (
-            <dd>横轴就是{axisLabel ?? metricLabel}本身，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把盈亏分界圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
+            <dd>横轴就是{axisLabel ?? metricLabel}本身{genericSpec ? `（单位 ${genericSpec.unit}）` : ''}，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把{windowAnchorText}圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
             <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。</dd>
           )}
@@ -813,7 +892,9 @@ export function CampaignMetricScatterPlot({
                   ? '：在 −10R、−1R、0 分区内分别等宽分档，点不跨越边界；恰好 −10R 归入左侧风险区。密度曲线按标准档宽近似换算，边界附近档宽可能略有不同。窄屏必要时可左右滑动；精确 b 看提示框。'
                   : '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
                 : geometricDist ? '：按对数空间分档，0.90 和 1.00 为档边界，点位不会跨过参考线或盈亏分界；精确倍数看提示框，原始指标计算不变。'
-                : '；精确数值看提示框。'}
+                : genericReferences.length
+                  ? `：档网格锚在 0 上，${genericReferences.map(reference => referenceValueText(reference.value)).join('、')} 也是档边界，点位不会吸附到参考线或${genericSpec?.zeroMeaning ?? '盈亏分界'}的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
+                  : `：档网格锚在 0 上，${genericSpec?.zeroMeaning ?? '盈亏分界'}两侧的点不会混进同一档；精确数值看提示框。`}
               纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。
             </dd>
           ) : (
@@ -880,8 +961,19 @@ export function CampaignMetricScatterPlot({
           <span>均值 {formatValue(dist.summary.mean)}</span>
           <span className="text-[color:var(--chart-axis)]">|</span>
           <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
-            胜率 {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
+            {genericSpec?.positiveShareLabel ?? '胜率'} {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
           </span>
+          {genericReferences.map(reference => {
+            const above = dist.values.filter(value => value > reference.value).length;
+            return (
+              <Fragment key={`reference-share-${reference.value}`}>
+                <span className="text-[color:var(--chart-axis)]">|</span>
+                <span data-testid={`campaign-metric-reference-share-${metricKey}-${reference.value}`}>
+                  {reference.shareLabel} {dist.summary.n ? Math.round((above / dist.summary.n) * 100) : 0}% ({above}/{dist.summary.n})
+                </span>
+              </Fragment>
+            );
+          })}
           {/* 右尾按 +5R 计数，只有盈亏比读得出意思；别的指标连同分隔线一起省掉。 */}
           {oddsFamily ? (
             <>
@@ -927,7 +1019,7 @@ export function CampaignMetricScatterPlot({
         </div>
       )}
       directionHint={dist
-        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : axisLabel ?? metricLabel}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
+        ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : `${axisLabel ?? metricLabel}${genericSpec ? `（${genericSpec.unit}）` : ''}`}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
         : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}

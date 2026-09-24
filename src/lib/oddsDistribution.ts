@@ -97,10 +97,34 @@ function niceStep(raw: number): number {
  * 别的指标没有这两条，硬套过去只会在左边留出一大片空白（比如几何期望永远 ≥ −1）。
  * 这里只做两件事：用 p2 / p98 抗离群，以及无论如何把 0 圈进窗口——0 是盈亏分界，
  * 它一旦被挤出视野，读者就失去了唯一的参照点。
+ *
+ * anchors：除 0 之外还必须留在视野里的参照值（加仓效率的 1.00「加仓没有额外放大」）。
+ * 参照线画在窗口外等于没画，所以和 0 一样，窗口只许把它们圈进来、不许裁掉；
+ * 而且不许让它们压在窗口边上——那样线外一侧永远是空的，读不出「有没有战役越过这条线」。
  */
-export function metricDistributionDomain(values: number[]): OddsDistributionDomain {
+export function metricDistributionDomain(values: number[], anchors: readonly number[] = []): OddsDistributionDomain {
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
-  if (sorted.length === 0) return { min: -1, max: 1, ticks: [-1, 0, 1] };
+  const extraAnchors = anchors.filter(anchor => Number.isFinite(anchor) && anchor !== 0);
+  const pinned = [0, ...extraAnchors];
+  /** 按步距铺刻度；额外锚点压在边缘上时向外多让一格。 */
+  const finish = (rawMin: number, rawMax: number, step: number): OddsDistributionDomain => {
+    let min = rawMin;
+    let max = rawMax;
+    for (const anchor of extraAnchors) {
+      if (anchor >= max - step * 1e-9) max += step;
+      if (anchor <= min + step * 1e-9) min -= step;
+    }
+    const ticks: number[] = [];
+    for (let value = min; value <= max + step * 1e-9; value += step) {
+      ticks.push(Number(value.toFixed(6)));
+    }
+    return { min: Number(min.toFixed(6)), max: Number(max.toFixed(6)), ticks };
+  };
+  if (sorted.length === 0) {
+    // 没有样本时按整数格铺开：缺省正好还原成 [−1, 0, 1]。
+    const step = Math.max(1, niceStep((Math.max(1, ...pinned) - Math.min(-1, ...pinned)) / 6));
+    return finish(Math.floor(Math.min(-1, ...pinned) / step) * step, Math.ceil(Math.max(1, ...pinned) / step) * step, step);
+  }
 
   const smallest = sorted[0];
   const largest = sorted[sorted.length - 1];
@@ -116,8 +140,8 @@ export function metricDistributionDomain(values: number[]): OddsDistributionDoma
   const iqr = q3 - q1;
   const lowRaw = p2 > smallest || iqr <= 0 ? p2 : Math.max(p2, q1 - 3 * iqr);
   const highRaw = p98 < largest || iqr <= 0 ? p98 : Math.min(p98, q3 + 3 * iqr);
-  const low = Math.min(0, lowRaw);
-  const high = Math.max(0, highRaw);
+  const low = Math.min(lowRaw, ...pinned);
+  const high = Math.max(highRaw, ...pinned);
   // 按 6 格切而不是 5：span 略大于 5 时，/5 会把步距从 1 顶成 2，窗口白白多出一倍空白。
   const step = niceStep((high - low || 1) / 6);
   let min = Math.floor(low / step) * step;
@@ -127,11 +151,7 @@ export function metricDistributionDomain(values: number[]): OddsDistributionDoma
     min -= step;
     max += step;
   }
-  const ticks: number[] = [];
-  for (let value = min; value <= max + step * 1e-9; value += step) {
-    ticks.push(Number(value.toFixed(6)));
-  }
-  return { min: Number(min.toFixed(6)), max: Number(max.toFixed(6)), ticks };
+  return finish(min, max, step);
 }
 
 function median(sorted: number[]) {

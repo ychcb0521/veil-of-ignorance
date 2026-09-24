@@ -271,3 +271,31 @@ describe('【评审发现】通用窗口的两个退化情形', () => {
     expect(domain.max).toBeGreaterThanOrEqual(0.3);
   });
 });
+
+describe('【用户要求】加仓效率的 1.00 参照：通用窗口的额外锚点', () => {
+  it('不传锚点时与原来逐位相同', () => {
+    const values = [-0.36, 0.1, 0.5, 1.2, 4.65];
+    expect(metricDistributionDomain(values, [])).toEqual(metricDistributionDomain(values));
+    expect(metricDistributionDomain(values, [0])).toEqual(metricDistributionDomain(values));
+  });
+
+  it('全部小于 1 时仍把 1 圈进窗口，而且不压在右边缘上——线外那一侧也看得见', () => {
+    const domain = metricDistributionDomain([0.12, 0.3, 0.45, 0.6, 0.72], [1]);
+    expect(domain.min).toBeLessThanOrEqual(0);
+    expect(domain.max).toBeGreaterThan(1);
+    expect(domain.ticks).toContain(1);
+  });
+
+  it('全部大于 1 时 0 与 1 都在窗口内；锚点只扩窗口，不改刻度的步距规则', () => {
+    const domain = metricDistributionDomain([1.4, 1.8, 2.2, 3.1, 4.5], [1]);
+    expect(domain.min).toBeLessThanOrEqual(0);
+    expect(domain.max).toBeGreaterThanOrEqual(4.5);
+    const steps = domain.ticks.slice(1).map((tick, index) => Number((tick - domain.ticks[index]).toFixed(6)));
+    expect(new Set(steps).size).toBe(1);
+  });
+
+  it('空样本带锚点也给得出窗口，缺省仍是 [−1, 0, 1]', () => {
+    expect(metricDistributionDomain([], [1]).max).toBeGreaterThan(1);
+    expect(metricDistributionDomain([]).ticks).toEqual([-1, 0, 1]);
+  });
+});
