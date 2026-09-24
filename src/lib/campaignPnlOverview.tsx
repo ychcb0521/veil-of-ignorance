@@ -63,14 +63,15 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
 
 /**
  * 右栏：结果与仓位。【用户要求】「已实现 P&L、主力开仓名义仓位、最大预期亏损放在一起，放在前三，第四再增加一个多方的总名义仓位」，
- * 之后是峰值浮盈、杠杆倍数、DSI/USI 贡献。
+ * 又要求「最大预期亏损放在那一列的第一个」——与左栏第一个的预期回撤同一行（最大预期亏损 = 主力开仓名义仓位 × 预期回撤）；
+ * 「峰值浮盈放在已实现 P&L 的紧贴的后面」；之后是两项名义仓位、杠杆倍数、DSI/USI 贡献。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
-  'realizedPnl',
-  'initialMainExposureNotional',
   'initialExpectedMaxLoss',
-  'mainSideNotional',
+  'realizedPnl',
   'peakUnrealizedPnl',
+  'initialMainExposureNotional',
+  'mainSideNotional',
   'mainLeverage',
   'asymmetricRiskContribution',
 ];

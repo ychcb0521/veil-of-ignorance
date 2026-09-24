@@ -15,7 +15,7 @@ import {
  * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓效率 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 【用户要求】左右两列对调：左栏是递进链 预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓效率 → 几何期望 → 算术期望
-// （与战役封面、排序栏同序）；右栏是结果与仓位，前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位。
+// （与战役封面、排序栏同序）；右栏是结果与仓位：最大预期亏损、已实现 P&L、主力开仓名义仓位、多方总名义仓位……
 const GOLDEN_LABELS = [
   '预期回撤',
   '涨幅',
@@ -24,11 +24,11 @@ const GOLDEN_LABELS = [
   '加仓效率',
   '几何期望',
   '算术期望',
-  '已实现 P&L',
-  '主力开仓名义仓位',
   '最大预期亏损',
-  '多方总名义仓位',
+  '已实现 P&L',
   '峰值浮盈',
+  '主力开仓名义仓位',
+  '多方总名义仓位',
   '杠杆倍数',
   'DSI/USI 贡献',
 ];
@@ -41,11 +41,11 @@ const GOLDEN_KEYS = [
   'addEfficiency',
   'geometricExpectancy',
   'arithmeticExpectancy',
-  'realizedPnl',
-  'initialMainExposureNotional',
   'initialExpectedMaxLoss',
-  'mainSideNotional',
+  'realizedPnl',
   'peakUnrealizedPnl',
+  'initialMainExposureNotional',
+  'mainSideNotional',
   'mainLeverage',
   'asymmetricRiskContribution',
 ];
@@ -85,23 +85,23 @@ describe('buildCampaignPnlOverviewItems', () => {
       '+1.00',
       '1.20',
       '+0.50R',
-      '200.00 USDT',
-      '1000.00 USDT',
       '100.00 USDT',
-      '1500.00 USDT',
+      '200.00 USDT',
       '250.50 USDT',
+      '1000.00 USDT',
+      '1500.00 USDT',
       '1x',
       'USI 100.0%',
     ]);
     const G = '#0ECB81';
     expect(items.map(item => item.color)).toEqual([
       undefined, G, G, G, G, G, G,
-      G, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, G, undefined, undefined, undefined, undefined, undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
       undefined, T, T, T, T, T, T,
-      T, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, T, undefined, undefined, undefined, undefined, undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -193,12 +193,15 @@ describe('CampaignPnlOverviewPanel', () => {
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['已实现 P&L', '主力开仓名义仓位', '最大预期亏损', '多方总名义仓位', '峰值浮盈', '杠杆倍数', 'DSI/USI 贡献']);
+      .toEqual(['最大预期亏损', '已实现 P&L', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位', '杠杆倍数', 'DSI/USI 贡献']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('预期回撤')).toBe('1');
-    expect(rowOf('已实现 P&L')).toBe('1');
-    expect(rowOf('多方总名义仓位')).toBe('4');
+    // 【用户要求】最大预期亏损在右栏第一个，与预期回撤同一行
+    expect(rowOf('最大预期亏损')).toBe('1');
+    expect(rowOf('已实现 P&L')).toBe('2');
+    expect(rowOf('峰值浮盈')).toBe('3');
+    expect(rowOf('多方总名义仓位')).toBe('5');
     expect(rowOf('DSI/USI 贡献')).toBe('7');
     expect(rowOf('算术期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉

@@ -496,18 +496,18 @@ describe('JournalCampaignDetailPage metrics', () => {
       '加仓效率',
       '几何期望',
       '算术期望',
-      '已实现 P&L',
-      '主力开仓名义仓位',
       '最大预期亏损',
-      '多方总名义仓位',
+      '已实现 P&L',
       '峰值浮盈',
+      '主力开仓名义仓位',
+      '多方总名义仓位',
       '杠杆倍数',
       'DSI/USI 贡献',
     ]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['已实现 P&L', '主力开仓名义仓位', '最大预期亏损', '多方总名义仓位', '峰值浮盈', '杠杆倍数', 'DSI/USI 贡献']);
+      .toEqual(['最大预期亏损', '已实现 P&L', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位', '杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);
