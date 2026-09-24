@@ -117,12 +117,13 @@ describe('Legs 表栅格', () => {
   });
 
   it('仓位列同时给出名义与币量——币量 = 名义 ÷ 开仓价，就是加仓公式里的 X', () => {
-    const src_ = src();
+    // 逐腿输入由共享函数 buildLegPositionShareInputs 算（Legs 表、导出 PNG、盈亏概览「多方总名义仓位」共用）
+    expect(src()).toContain('buildLegPositionShareInputs(legs, recordMap, legExitPriceCorrections, fillEvidence)');
+    const shared = readFileSync(join(process.cwd(), 'src/lib/legPositionShareInputs.ts'), 'utf8');
     // 反向合约面值锁在 USD 上，光看名义看不出这条腿拿着多少币
-    expect(src_).toContain('leg.pre_position_size / entryPriceValue');
+    expect(shared).toContain('leg.pre_position_size / entryPrice');
     // 价格缺失或为 0 时不猜一个币量出来
-    expect(src_).toContain('entryPriceValue > 0');
-    expect(src_).toContain('legCoinQty');
+    expect(shared).toContain('entryPrice > 0');
   });
 
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {

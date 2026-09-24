@@ -1870,13 +1870,13 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
 });
 
 describe('【用户要求】导出图的盈亏概览与页面同样两栏：递进链排在同一列', () => {
-  it('标了 rightColumn 的按栏从上往下排：左栏六项、右栏七项，同一行齐平；战役元数据仍按行排', () => {
+  it('标了 rightColumn 的按栏从上往下排：左栏递进链七项、右栏结果与仓位七项，同一行齐平；战役元数据仍按行排', () => {
     const items = buildCampaignPnlOverviewItems(pnlMetricsForColumns());
     const { cells, rows } = overviewItemCells(items);
     expect(rows).toBe(7);
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
-    expect(column(0)).toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', 'DSI/USI 贡献']);
-    expect(column(1)).toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+    expect(column(0)).toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+    expect(column(1)).toEqual(['已实现 P&L', '主力开仓名义仓位', '最大预期亏损', '多方总名义仓位', '峰值浮盈', '杠杆倍数', 'DSI/USI 贡献']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);
     expect(metadata.cells.map(cell => [cell.item.label, cell.column, cell.row])).toEqual([['A', 0, 0], ['B', 1, 0], ['C', 0, 1]]);
@@ -1892,6 +1892,7 @@ function pnlMetricsForColumns(): CampaignPnlOverviewMetrics {
     initialMainExposureNotional: 1000,
     peakUnrealizedPnl: 250.5,
     initialExpectedMaxLoss: 100,
+    mainSideNotional: { side: 'long', total: 1500 },
     expectedMaxDrawdownPct: 10,
     payoffRatio: 200,
     mainPriceChangePct: 20,

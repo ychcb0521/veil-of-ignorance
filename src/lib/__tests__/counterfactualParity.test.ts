@@ -84,6 +84,7 @@ import {
 import type { KlineData } from '@/hooks/useBinanceData';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
+import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import type { TradeJournal } from '@/types/journal';
 
 const ASYMMETRIC: AsymmetricRiskMetricsSummary = {
@@ -120,6 +121,7 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
   expectedMaxDrawdownPct: number;
   mainLeverage: number | null;
   initialMainExposureNotional: number;
+  mainSideNotional: number | null;
   payoffRatio: number | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
@@ -149,6 +151,18 @@ function localOrdersOf(fx: ParityFixture) {
   return fx.unfilledOrderIds ? { unfilledOrderIds: new Set(fx.unfilledOrderIds) } : {};
 }
 
+/** 页面「多方总名义仓位」memo 原样算：Legs 表同一份输入、同一份挂单判定凭据。 */
+function realMainSide(fx: ParityFixture) {
+  return campaignMainSideNotional(
+    fx.campaign.direction,
+    buildLegPositionShareInputs(fx.legs, buildTradeRecordLookup(fx.tradeRecords), fx.corrections, {
+      unfilledOrderIds: new Set(fx.unfilledOrderIds ?? []),
+      orders: fx.reverseHedgeOrders,
+      events: fx.campaign.actual_evolution,
+    }),
+  );
+}
+
 /** 按 JournalCampaignDetailPage 的 accuracy / pnlReconciliation / campaignMetricValues / 盈亏概览 memo 原样算。 */
 function realPanel(fx: ParityFixture) {
   const { campaign, legs, tradeRecords, klines, reverseHedgeOrders, corrections } = fx;
@@ -166,6 +180,8 @@ function realPanel(fx: ParityFixture) {
     expectedMaxDrawdownPct,
     mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
     initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
+    // 【用户要求】多方总名义仓位：与页面、Legs 表合计行同一份输入
+    mainSideNotional: realMainSide(fx).total,
     payoffRatio,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,
@@ -211,6 +227,7 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
       byLegId: Object.fromEntries(campaignMainLegPriceChanges(fx.legs, fx.tradeRecords, fx.corrections)),
       pct: campaignMainLegPriceChangePct(fx.legs, fx.tradeRecords, fx.corrections),
     },
+    mainSide: realMainSide(fx).side,
   };
   const metrics = buildCounterfactualOverviewMetrics({ params, result }, shared);
   const numbers: PanelNumbers = {
@@ -224,6 +241,7 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     arithmeticExpectancy: metrics.arithmeticExpectancy,
     geometricExpectancy: metrics.geometricExpectancy,
     dsiUsiTerm: metrics.asymmetricRiskContribution?.meanSquareTerm ?? null,
+    mainSideNotional: metrics.mainSideNotional?.total ?? null,
     ...efficiencyNumbers(metrics.mainPriceChangePct, metrics.expectedMaxDrawdownPct, metrics.payoffRatio, metrics.hasMainAdd),
   };
   return { numbers, result, manualLegs, metrics };

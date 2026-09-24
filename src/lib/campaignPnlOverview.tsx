@@ -28,6 +28,7 @@ export type CampaignPnlOverviewItemKey =
   | 'initialMainExposureNotional'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
+  | 'mainSideNotional'
   | 'expectedMaxDrawdownPct'
   | 'mainPriceChange'
   | 'mainPriceEfficiency'
@@ -45,22 +46,12 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 
 /**
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
- * 左栏：结果与仓位。
- */
-export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
-  'realizedPnl',
-  'peakUnrealizedPnl',
-  'mainLeverage',
-  'initialMainExposureNotional',
-  'initialExpectedMaxLoss',
-  'asymmetricRiskContribution',
-];
-
-/**
- * 右栏：【用户要求】「预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望，这几个变量要放在同一列，
+ * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
+ *
+ * 左栏：【用户要求】「预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望，这几个变量要放在同一列，
  * 因为这些指标是层层递进的」——与战役封面、列表排序栏同序，上一项是下一项的分母或来源。
  */
-export const PNL_OVERVIEW_CHAIN_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -68,6 +59,20 @@ export const PNL_OVERVIEW_CHAIN_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'addEfficiency',
   'geometricExpectancy',
   'arithmeticExpectancy',
+];
+
+/**
+ * 右栏：结果与仓位。【用户要求】「已实现 P&L、主力开仓名义仓位、最大预期亏损放在一起，放在前三，第四再增加一个多方的总名义仓位」，
+ * 之后是峰值浮盈、杠杆倍数、DSI/USI 贡献。
+ */
+export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'realizedPnl',
+  'initialMainExposureNotional',
+  'initialExpectedMaxLoss',
+  'mainSideNotional',
+  'peakUnrealizedPnl',
+  'mainLeverage',
+  'asymmetricRiskContribution',
 ];
 
 /**
@@ -94,6 +99,11 @@ export interface CampaignPnlOverviewMetrics {
   initialMainExposureNotional: number;
   peakUnrealizedPnl: number;
   initialExpectedMaxLoss: number;
+  /**
+   * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
+   * 与 Legs 表合计行这一侧的 Σ名义仓位同一个数（campaignMainSideNotional）。读不到（SOP 推演没有逐腿）时为 null。
+   */
+  mainSideNotional: { side: 'long' | 'short'; total: number | null } | null;
   expectedMaxDrawdownPct: number;
   /** b × 100（与 accuracy.profit_capture_ratio 同口径）；没有风险分母时 null。 */
   payoffRatio: number | null;
@@ -179,6 +189,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     initialMainExposureNotional,
     peakUnrealizedPnl,
     initialExpectedMaxLoss,
+    mainSideNotional,
     expectedMaxDrawdownPct: expectedDrawdownPct,
     payoffRatio,
     mainPriceChangePct,
@@ -284,6 +295,31 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
             上面那条等式仍然成立——「预期回撤比例」是按敞口加权的等效值。</p>
           <p>后续加仓、重入仓位和反向对冲不计入主力开仓名义仓位；开仓 5 分钟之后才挂出的追踪单
             属于新决策，不会抬高这个数。</p>
+        </>
+      ),
+    },
+    {
+      key: 'mainSideNotional',
+      // 【用户要求】「多方的总名义仓位包括所有多方的仓位，包括主力、镜像、加仓的多单」；主空战役同理是空方
+      label: `${mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位`,
+      value: mainSideNotional?.total != null && mainSideNotional.total > 0
+        ? `${mainSideNotional.total.toFixed(2)} USDT`
+        : '—',
+      help: (
+        <>
+          <p>
+            本场战役{mainSideNotional?.side === 'short' ? '空方（主力方向）' : '多方（主力方向）'}所有腿的名义仓位合计：
+            主力、镜像、加仓、重新入场的主力都算，每条腿取 Legs 表「仓位」列那个数（开仓时的委托名义）。
+          </p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
+            {mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位 = Σ 同方向各腿的名义仓位
+          </div>
+          <p>
+            与 Legs 表合计行「币量 / 仓位」格里{mainSideNotional?.side === 'short' ? '空单' : '多单'}那一组的 Σ 名义仓位同一个数
+            （也是「{mainSideNotional?.side === 'short' ? '空单' : '多单'}占比」列的分母）。还挂着没成交的腿不算；已成交未平的是真实持仓，照常计入。
+            反向的对冲腿不在这一侧，不计入。
+          </p>
+          <p>它是整场累计投入的名义，不是某一刻同时持有的最大仓位：先平掉再开的腿会各算一次。</p>
         </>
       ),
     },
@@ -432,11 +468,11 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     },
   ];
 
-  // 按两栏次序重排：先左栏、再右栏（递进链，标 rightColumn），窄屏单栏时也是这个先后。
+  // 按两栏次序重排：先左栏（递进链）、再右栏（结果与仓位，标 rightColumn），窄屏单栏时也是这个先后。
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [
     ...PNL_OVERVIEW_LEFT_COLUMN.map(key => byKey.get(key)!),
-    ...PNL_OVERVIEW_CHAIN_COLUMN.map(key => ({ ...byKey.get(key)!, rightColumn: true })),
+    ...PNL_OVERVIEW_RIGHT_COLUMN.map(key => ({ ...byKey.get(key)!, rightColumn: true })),
   ];
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;

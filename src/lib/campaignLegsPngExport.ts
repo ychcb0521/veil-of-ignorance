@@ -9,6 +9,7 @@ import { LEG_ROLE_NEUTRAL_COLOR, LEG_ROLE_TONE_COLORS, legRoleExportTextColor } 
 import { legRowStatus, type LegFillEvidence } from '@/lib/legRowStatus';
 import { isLiquidationRecord } from '@/lib/liquidationRecord';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { buildLegPositionShareInputs } from '@/lib/legPositionShareInputs';
 import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethod } from '@/lib/legExecutionMethod';
 import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
@@ -32,7 +33,6 @@ import {
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
-  legPositionSideFromDirection,
   resolveLegPositionShareSide,
   LEG_POSITION_SHARE_COLUMN_TITLES,
   LEG_POSITION_SIDE_COLORS,
@@ -606,23 +606,8 @@ function buildShareInputs(
   input: Pick<ExportInput, 'campaign' | 'legs' | 'legExitPriceCorrections' | 'reverseHedgeOrders' | 'executionMethodOrders' | 'unfilledOrderIds'>,
   recordMap: Map<string, TradeRecord>,
 ): LegPositionShareInput[] {
-  const evidence = exportFillEvidence(input);
-  return input.legs.map(leg => {
-    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-    const entryPrice = resolveLegExecution(leg, record, input.legExitPriceCorrections).entryPrice;
-    const coinQty = leg.pre_position_size != null && entryPrice != null && entryPrice > 0
-      ? leg.pre_position_size / entryPrice
-      : null;
-    return {
-      legId: leg.id,
-      side: legPositionSideFromDirection(leg.direction),
-      role: leg.leg_role,
-      coinQty,
-      notional: leg.pre_position_size ?? null,
-      // 状态规则与页面同一个 legRowStatus：挂单中的腿不进分母，也画成空心标签
-      counted: legRowStatus(leg, record, evidence) !== 'pending',
-    };
-  });
+  // 与页面 Legs 表同一个函数：挂单中的腿不进分母，也画成空心标签
+  return buildLegPositionShareInputs(input.legs, recordMap, input.legExitPriceCorrections, exportFillEvidence(input));
 }
 
 /**

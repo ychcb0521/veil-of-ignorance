@@ -154,12 +154,14 @@ const PAGE_TEST_TIMEOUT_MS = 60_000;
 /** 单次等待的上限：页面要先拉完详情、校正与 K 线，编辑器才按带校正的基线建好。 */
 const WAIT = 15_000;
 
+// 逐项比对的清单（不管先后）；【用户要求】新增多方总名义仓位，原样重跑也要逐位相同
 const OVERVIEW_LABELS = [
   '已实现 P&L',
   '杠杆倍数',
   '主力开仓名义仓位',
   '峰值浮盈',
   '最大预期亏损',
+  '多方总名义仓位',
   '预期回撤',
   '涨幅',
   '涨幅效率',
@@ -171,7 +173,10 @@ const OVERVIEW_LABELS = [
 ];
 
 function metricValue(panel: HTMLElement, label: string) {
-  const row = within(panel).getByRole('button', { name: `${label}说明` }).closest('div.flex');
+  // 主空战役里「多方总名义仓位」叫「空方总名义仓位」
+  const button = within(panel).queryByRole('button', { name: `${label}说明` })
+    ?? (label === '多方总名义仓位' ? within(panel).getByRole('button', { name: '空方总名义仓位说明' }) : within(panel).getByRole('button', { name: `${label}说明` }));
+  const row = button.closest('div.flex');
   return row?.querySelector('span.font-mono')?.textContent ?? null;
 }
 

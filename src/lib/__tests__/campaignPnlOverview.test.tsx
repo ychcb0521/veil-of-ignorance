@@ -14,15 +14,9 @@ import {
  * 已实现 200、L 100 → b = 200%；P 统一 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
  * 【用户要求】主力涨幅 +20% → 涨幅效率 = 20 ÷ 10 = +2.00；加仓效率 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
-// 【用户要求】先左栏（结果与仓位）、再右栏：预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓效率 → 几何期望 → 算术期望，
-// 与战役封面、排序栏同序，放在同一列（层层递进）。
+// 【用户要求】左右两列对调：左栏是递进链 预期回撤 → 涨幅 → 涨幅效率 → 盈亏比 → 加仓效率 → 几何期望 → 算术期望
+// （与战役封面、排序栏同序）；右栏是结果与仓位，前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位。
 const GOLDEN_LABELS = [
-  '已实现 P&L',
-  '峰值浮盈',
-  '杠杆倍数',
-  '主力开仓名义仓位',
-  '最大预期亏损',
-  'DSI/USI 贡献',
   '预期回撤',
   '涨幅',
   '涨幅效率',
@@ -30,15 +24,16 @@ const GOLDEN_LABELS = [
   '加仓效率',
   '几何期望',
   '算术期望',
+  '已实现 P&L',
+  '主力开仓名义仓位',
+  '最大预期亏损',
+  '多方总名义仓位',
+  '峰值浮盈',
+  '杠杆倍数',
+  'DSI/USI 贡献',
 ];
 
 const GOLDEN_KEYS = [
-  'realizedPnl',
-  'peakUnrealizedPnl',
-  'mainLeverage',
-  'initialMainExposureNotional',
-  'initialExpectedMaxLoss',
-  'asymmetricRiskContribution',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -46,6 +41,13 @@ const GOLDEN_KEYS = [
   'addEfficiency',
   'geometricExpectancy',
   'arithmeticExpectancy',
+  'realizedPnl',
+  'initialMainExposureNotional',
+  'initialExpectedMaxLoss',
+  'mainSideNotional',
+  'peakUnrealizedPnl',
+  'mainLeverage',
+  'asymmetricRiskContribution',
 ];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
@@ -56,6 +58,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
     initialMainExposureNotional: 1000,
     peakUnrealizedPnl: 250.5,
     initialExpectedMaxLoss: 100,
+    mainSideNotional: { side: 'long', total: 1500 },
     expectedMaxDrawdownPct: 10,
     payoffRatio: 200,
     mainPriceChangePct: 20,
@@ -69,18 +72,12 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
-  it('输出 13 项（原 12 项 + 涨幅 / 涨幅效率 / 加仓效率 − 今日账户总资产 − 机会质量）：键、标签、值、着色、右列', () => {
+  it('输出 14 项（新增多方总名义仓位）：键、标签、值、着色、分栏', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
     expect(items.map(item => item.value)).toEqual([
-      '200.00 USDT',
-      '250.50 USDT',
-      '1x',
-      '1000.00 USDT',
-      '100.00 USDT',
-      'USI 100.0%',
       '10.00%',
       '+20.00%',
       '+2.00',
@@ -88,40 +85,27 @@ describe('buildCampaignPnlOverviewItems', () => {
       '+1.00',
       '1.20',
       '+0.50R',
+      '200.00 USDT',
+      '1000.00 USDT',
+      '100.00 USDT',
+      '1500.00 USDT',
+      '250.50 USDT',
+      '1x',
+      'USI 100.0%',
     ]);
+    const G = '#0ECB81';
     expect(items.map(item => item.color)).toEqual([
-      '#0ECB81',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
-      '#0ECB81',
+      undefined, G, G, G, G, G, G,
+      G, undefined, undefined, undefined, undefined, undefined, undefined,
     ]);
+    const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
-      'text-[#0ECB81]',
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
-      'text-[#0ECB81]',
+      undefined, T, T, T, T, T, T,
+      T, undefined, undefined, undefined, undefined, undefined, undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
-      // 左栏 6 项（结果与仓位），右栏 7 项（递进链）；两栏排 7 行
-      false, false, false, false, false, false,
+      // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
+      false, false, false, false, false, false, false,
       true, true, true, true, true, true, true,
     ]);
   });
@@ -141,6 +125,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       geometricExpectancy: null,
       initialRisk: null,
       mainPriceChangePct: null,
+      mainSideNotional: null,
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     for (const key of GOLDEN_KEYS.filter(item => item !== 'peakUnrealizedPnl')) {
@@ -192,7 +177,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 });
 
 describe('CampaignPnlOverviewPanel', () => {
-  it('渲染 13 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
+  it('渲染 14 个「{label}说明」按钮（同顺序）与原版帮助文案；DOM 与原内联版本一致', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
     const { container } = render(
       <CampaignPnlOverviewPanel title="盈亏概览" items={items} />,
@@ -201,17 +186,20 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('盈亏概览')).toBeInTheDocument();
     const buttons = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'));
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
-    expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2.sm\\:grid-cols-2')).not.toBeNull();
-    // 【用户要求】递进链七项同在右栏、从上往下排；左栏六项。每项按本栏序号落行，左右同一行齐平
-    expect([...container.querySelectorAll('.sm\\:col-start-2')].map(node => node.firstElementChild?.textContent))
+    // 两栏还是一栏看面板自己的宽度（容器查询）：面板内容宽 ≥ 540px 才并排
+    expect(container.firstElementChild).toHaveClass('[container-type:inline-size]');
+    expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2')).toHaveClass('[@container(min-width:540px)]:grid-cols-2');
+    // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
+    expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
-    expect([...container.querySelectorAll('.sm\\:col-start-1')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['已实现 P&L', '峰值浮盈', '杠杆倍数', '主力开仓名义仓位', '最大预期亏损', 'DSI/USI 贡献']);
+    expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
+      .toEqual(['已实现 P&L', '主力开仓名义仓位', '最大预期亏损', '多方总名义仓位', '峰值浮盈', '杠杆倍数', 'DSI/USI 贡献']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
-      .find(node => node.firstElementChild?.textContent === label)?.className.match(/sm:row-start-(\d+)/)?.[1];
-    expect(rowOf('已实现 P&L')).toBe('1');
+      .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('预期回撤')).toBe('1');
-    expect(rowOf('DSI/USI 贡献')).toBe('6');
+    expect(rowOf('已实现 P&L')).toBe('1');
+    expect(rowOf('多方总名义仓位')).toBe('4');
+    expect(rowOf('DSI/USI 贡献')).toBe('7');
     expect(rowOf('算术期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();

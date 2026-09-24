@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Crosshair, EyeOff, Unlin
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { buildLegPositionShareInputs } from '@/lib/legPositionShareInputs';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import { resolveLegExecutionMethods, shouldHighlightLegExecution, type LegExecutionMethods } from '@/lib/legExecutionMethod';
 import { resolveMirrorCloseRatio } from '@/lib/mirrorExecutionMethod';
@@ -27,7 +28,6 @@ import {
   formatLegNotional,
   formatLegPositionSharePct,
   formatLegPositionShareTotal,
-  legPositionSideFromDirection,
   legPositionSideName,
   nextLegPositionShareSort,
   resolveLegPositionShareSide,
@@ -718,22 +718,10 @@ export function CampaignLegsList({
   // 「币量 / 仓位」与「占比」：币量逐腿只算这一次，格子显示的数与占比的分母读的是同一份。
   // 多单、空单分开算：分组取这条腿的持仓方向，与「涨跌幅」列同一个来源（不看角色）。
   // 状态为「挂单中」的腿（对冲 / 镜像腿还没有成交）不进分母；已成交未平的是真实持仓，照常计入——判定与角色标签的空心样式同一个 legRowStatus，两处永远一致。与导出 PNG 同一个 helper。
-  const shareInputs = useMemo(() => legs.map(leg => {
-    const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
-    const entryPriceValue = resolveLegExecution(leg, record, legExitPriceCorrections).entryPrice;
-    // 币量 = 名义 ÷ 开仓价。名义为 0 或价格缺失时不猜，显示空。
-    const legCoinQty = leg.pre_position_size != null && entryPriceValue != null && entryPriceValue > 0
-      ? leg.pre_position_size / entryPriceValue
-      : null;
-    return {
-      legId: leg.id,
-      side: legPositionSideFromDirection(leg.direction),
-      role: leg.leg_role,
-      coinQty: legCoinQty,
-      notional: leg.pre_position_size ?? null,
-      counted: legRowStatus(leg, record, fillEvidence) !== 'pending',
-    };
-  }), [legs, recordMap, legExitPriceCorrections, fillEvidence]);
+  const shareInputs = useMemo(
+    () => buildLegPositionShareInputs(legs, recordMap, legExitPriceCorrections, fillEvidence),
+    [legs, recordMap, legExitPriceCorrections, fillEvidence],
+  );
   const positionShares = useMemo(() => computeLegPositionShares(shareInputs), [shareInputs]);
   // 「占比」这一列看哪一侧：战役主方向（主多看多单、主空看空单），缺方向时从主力腿回推。
   // 另一侧（对冲）的行留空、也不进分母，它的 Σ 只写进合计行「币量 / 仓位」格。与导出 PNG 同一个 helper、同一份输入。

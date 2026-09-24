@@ -73,6 +73,7 @@ export type ParityMetric =
   | 'expectedMaxDrawdownPct'
   | 'mainLeverage'
   | 'initialMainExposureNotional'
+  | 'mainSideNotional'
   | 'payoffRatio'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'

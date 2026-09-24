@@ -450,7 +450,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】「机会质量」已删掉（涨幅效率更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
     expect(screen.getByText('200.0% (2.00)')).toBeInTheDocument();
-    expect(screen.getByText('1000.00 USDT')).toBeInTheDocument();
+    // 主力开仓名义仓位；这场只有一笔主力多单，多方总名义仓位也是 1000
+    expect(screen.getAllByText('1000.00 USDT').length).toBeGreaterThanOrEqual(1);
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '今日账户总资产说明' })).not.toBeInTheDocument();
@@ -470,6 +471,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '主力开仓名义仓位',
       '峰值浮盈',
       '最大预期亏损',
+      '多方总名义仓位',
       '预期回撤',
       '盈亏比',
       'DSI/USI 贡献',
@@ -485,14 +487,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
     expect(exportInput.accountName).toBe('主账户');
     expect(exportInput.chartInterval).toBe('1m');
-    // 导出图与页面同一份两栏次序：先左栏、再右栏的递进链
+    // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
-      '已实现 P&L',
-      '峰值浮盈',
-      '杠杆倍数',
-      '主力开仓名义仓位',
-      '最大预期亏损',
-      'DSI/USI 贡献',
       '预期回撤',
       '涨幅',
       '涨幅效率',
@@ -500,11 +496,18 @@ describe('JournalCampaignDetailPage metrics', () => {
       '加仓效率',
       '几何期望',
       '算术期望',
+      '已实现 P&L',
+      '主力开仓名义仓位',
+      '最大预期亏损',
+      '多方总名义仓位',
+      '峰值浮盈',
+      '杠杆倍数',
+      'DSI/USI 贡献',
     ]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['预期回撤', '涨幅', '涨幅效率', '盈亏比', '加仓效率', '几何期望', '算术期望']);
+      .toEqual(['已实现 P&L', '主力开仓名义仓位', '最大预期亏损', '多方总名义仓位', '峰值浮盈', '杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);

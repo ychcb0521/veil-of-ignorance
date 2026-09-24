@@ -77,4 +77,9 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('<strong>主力有几笔时取涨幅最大的那笔</strong>（不按名义大小挑）');
     expect(page).not.toContain('主力 = 名义最大的 main_open');
   });
+  it('【用户要求】盈亏概览：左右对调（递进链在左）；右栏前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位', () => {
+    expect(guide).toContain('左栏是<strong>层层递进的一列</strong>——预期回撤、涨幅、涨幅效率、盈亏比、加仓效率、几何期望、算术期望');
+    expect(guide).toContain('右栏是结果与仓位——前三是<strong>已实现 P&amp;L、主力开仓名义仓位、最大预期亏损</strong>，第四是<strong>多方总名义仓位</strong>');
+    expect(guide).toContain('同一份 14 项指标（左栏：预期回撤');
+  });
 });

@@ -6,6 +6,7 @@ import {
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
 import { counterfactualHasMainAdd, counterfactualMainLegPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
+import { legPositionSideFromDirection, type LegPositionSide } from '@/lib/legPositionShare';
 import type {
   CampaignPnlOverviewHelpParagraph,
   CampaignPnlOverviewItemKey,
@@ -48,6 +49,29 @@ export interface CounterfactualOverviewShared {
    * 缺省时每条主力都按副本的开平价算。
    */
   actualMain?: ActualMainPriceChange | null;
+  /** 真实战役的主方向（主多是多单）：反事实的「多方总名义仓位」数这一侧。缺省按多单。 */
+  mainSide?: LegPositionSide;
+}
+
+/**
+ * 反事实（手动 Legs 分支）的「多方总名义仓位」：参与运行（启用、且不是「挂单中」）的同方向各腿「仓位」一格之和。
+ * 副本的「仓位」一格就是 Legs 表那一行的委托名义、挂单中的判定与 Legs 表同源，所以原样重跑与上方逐位相同；
+ * 改过「仓位」、新增或停用的腿按改后的算。
+ */
+export function counterfactualMainSideNotional(
+  manualLegs: CampaignCounterfactualParams['manual_legs'],
+  side: LegPositionSide,
+): number | null {
+  let total = 0;
+  let counted = 0;
+  for (const leg of manualLegs ?? []) {
+    if (!leg.enabled || leg.filled === false) continue;
+    if (legPositionSideFromDirection(leg.direction) !== side) continue;
+    if (!(Number.isFinite(leg.size_usdt) && leg.size_usdt > 0)) continue;
+    total += leg.size_usdt;
+    counted += 1;
+  }
+  return counted > 0 ? total : null;
 }
 
 export interface CounterfactualOverviewBranch {
@@ -303,10 +327,15 @@ export function buildCounterfactualOverviewMetrics(
     ],
     mainPriceChange: [
       manual
-        ? '反事实分支先认真实战役选中的那条主力：它的方向、开仓价、平仓价都没改过时沿用上方「盈亏概览」的涨幅（原样重跑逐位相同），'
-          + '改过就按 Legs 副本里改后的开平价算。它被停用或改掉角色时，在参与运行的主力里按「仓位」一格取最大；'
-          + '那条腿实际还没平仓、平仓价也没改过时不算（引擎只是按数据末端强行结算）。'
+        ? '反事实分支与上方同一条规则：参与运行的主力里取涨幅最大的那笔。逐腿对账——方向、开仓价、平仓价都没改过的主力'
+          + '沿用上方这条腿的涨幅（原样重跑逐位相同），改过的按 Legs 副本里改后的开平价算；停用的腿不参与；'
+          + '实际还没平仓、平仓价也没改过的腿不算（引擎只是按数据末端强行结算）。'
         : 'SOP 推演没有逐腿的开平价，本项与两项效率不计算。',
+    ],
+    mainSideNotional: [
+      manual
+        ? '反事实分支按 Legs 副本里参与运行的同方向各腿「仓位」一格合计：没改过的腿与上方同一个数，改过「仓位」、新增或停用的腿按改后的算；标着「挂单中」的腿不算。'
+        : 'SOP 推演没有逐腿的仓位，本项不计算。',
     ],
   };
   if (!hasStopLine) {
@@ -325,6 +354,10 @@ export function buildCounterfactualOverviewMetrics(
     initialMainExposureNotional: anchors.initialMainExposureNotional > 0 ? anchors.initialMainExposureNotional : 0,
     peakUnrealizedPnl: finiteOrNull(branch.result.peak_unrealized_pnl) ?? 0,
     initialExpectedMaxLoss,
+    mainSideNotional: {
+      side: shared.mainSide ?? 'long',
+      total: manual ? counterfactualMainSideNotional(branch.params.manual_legs, shared.mainSide ?? 'long') : null,
+    },
     expectedMaxDrawdownPct,
     payoffRatio,
     mainPriceChangePct,

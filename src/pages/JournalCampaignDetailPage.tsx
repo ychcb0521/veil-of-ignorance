@@ -5,6 +5,7 @@ import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
 import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignMainLegPriceChanges } from '@/lib/campaignMainPriceChange';
+import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1148,6 +1149,15 @@ export default function JournalCampaignDetailPage() {
     const byLegId = Object.fromEntries(campaignMainLegPriceChanges(legs, tradeRecords, legExitPriceCorrections));
     return { byLegId, pct: campaignMainLegPriceChangePct(legs, tradeRecords, legExitPriceCorrections) };
   }, [legs, tradeRecords, legExitPriceCorrections]);
+  // 【用户要求】「多方总名义仓位」：与 Legs 表合计行同一份输入（同一个 buildLegPositionShareInputs、同一份挂单判定凭据）。
+  const mainSideNotional = useMemo(() => (campaign ? campaignMainSideNotional(
+    campaign.direction,
+    buildLegPositionShareInputs(legs, buildTradeRecordLookup(tradeRecords), legExitPriceCorrections, {
+      unfilledOrderIds,
+      orders: reverseHedgeOrders,
+      events: campaign.actual_evolution,
+    }),
+  ) : null), [campaign, legs, tradeRecords, legExitPriceCorrections, unfilledOrderIds, reverseHedgeOrders]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
@@ -1164,6 +1174,7 @@ export default function JournalCampaignDetailPage() {
       initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: accuracy.campaign_max_profit_real,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
+      mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
       payoffRatio: campaignMetricValues?.profitCaptureRatio ?? null,
       mainPriceChangePct: actualMainPriceChange.pct,
@@ -1180,6 +1191,7 @@ export default function JournalCampaignDetailPage() {
     campaignMetricValues,
     actualMainPriceChange,
     legs,
+    mainSideNotional,
     pnlReconciliation,
     settlement,
     tradeRecords,
@@ -1196,14 +1208,17 @@ export default function JournalCampaignDetailPage() {
     asymmetricRiskSummary: campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
-    // 反事实里的「涨幅」先认真实战役选中的那条主力（副本里 id 不变），没改开平价就沿用上方的数。
+    // 反事实里的「涨幅」逐腿对账（副本里 id 不变）：没改开平价的主力沿用上方这条腿的数，再取最大。
     actualMain: actualMainPriceChange,
+    // 反事实的「多方总名义仓位」数哪一侧：与上方同一个主方向
+    mainSide: mainSideNotional?.side ?? 'long',
   }), [
     campaign,
     campaignAsymmetricRisk,
     currentAccountEquity,
     isOwner,
     actualMainPriceChange,
+    mainSideNotional?.side,
   ]);
   const counterfactualDraftOverview = useMemo(
     () => (counterfactualDraft ? buildCounterfactualOverview(counterfactualDraft, counterfactualOverviewShared) : null),

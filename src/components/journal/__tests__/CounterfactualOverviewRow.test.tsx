@@ -52,13 +52,13 @@ describe('CounterfactualOverviewRow', () => {
     expect(runLine).toHaveTextContent('运行于 09-17 13:55 · 1h K 线 1943 根 · 03-23 03:00 ~ 06-12 01:00');
 
     // 右栏：与原面板同一张卡，没有任何额外行
-    expect(overview.className).toBe('bg-card border border-border rounded p-4 text-[12px]');
+    expect(overview.className).toBe('bg-card border border-border rounded p-4 text-[12px] [container-type:inline-size]');
     // 标题 + 指标网格（【用户要求】脚注删掉）
     expect(overview.children).toHaveLength(2);
     expect(overview.firstElementChild).toHaveTextContent('反事实盈亏概览 · 我的方案');
     expect(within(overview).getAllByRole('button').map(button => button.getAttribute('aria-label')))
       .toEqual(['已实现 P&L说明', '几何期望说明']);
-    expect(overview.querySelector('.sm\\:col-start-2')).toHaveTextContent('几何期望');
+    expect(overview.querySelector('[data-column="right"]')).toHaveTextContent('几何期望');
   });
 
   it('草稿没有类型行；delta 为 null 印「—」，负数染红；没改动 / 老行各有一句，没有运行信息就不印', () => {
