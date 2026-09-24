@@ -44,7 +44,7 @@ export type CampaignCardData = {
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
   opportunityQuality: number | null;
-  /** 主力那条腿的涨跌幅（%，按方向计，与 Legs 表同一个数）；主力未平仓时为 null。「涨幅」排序与卡片读数用它。 */
+  /** 主力的涨跌幅（%，按方向计，与 Legs 表同一个数；多笔主力取涨幅最大的那笔）；主力都未平仓时为 null。「涨幅」排序与卡片读数用它。 */
   mainPriceChangePct: number | null;
 };
 

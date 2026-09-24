@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   campaignHasMainAdd,
   campaignMainLegPriceChangePct,
+  campaignMainLegPriceChanges,
   computeAddEfficiency,
   computeMainPriceEfficiency,
   counterfactualHasMainAdd,
@@ -48,18 +49,47 @@ describe('主力涨幅（战役列表「涨幅」排序）', () => {
     expect(campaignMainLegPriceChangePct([leg({})], [record({ exitPrice: 160 })], corrections)).toBeCloseTo(4, 9);
   });
 
-  it('多笔主力时取名义最大的那一笔（pickPrimaryMainLeg），不看对冲腿', () => {
+  it('【用户要求】多笔主力时取涨幅最大的那一笔（不看名义大小），不看对冲腿、加仓腿', () => {
+    // NEARUSDT 那场：主力开仓 1 +14.43%、主力开仓 2 +4.39%、主力开仓 3（名义最大）+0.79% → 取 +14.43%
     const legs = [
-      leg({ id: 'tiny', trade_record_id: 'r-tiny', pre_position_size: 100 }),
-      leg({ id: 'main' }),
+      leg({ id: 'main-1', trade_record_id: 'r-1', pre_position_size: 85_136 }),
+      leg({ id: 'main-2', trade_record_id: 'r-2', pre_position_size: 74_975 }),
+      leg({ id: 'main-3', trade_record_id: 'r-3', pre_position_size: 240_171 }),
+      leg({ id: 'add', leg_role: 'main_add_1', trade_record_id: 'r-add', pre_position_size: 50_000 }),
       leg({ id: 'hedge', leg_role: 'hedge_initial_a', direction: 'short', trade_record_id: 'r-hedge', pre_position_size: 99_999 }),
     ];
     const records = [
-      record({ id: 'r-tiny', exitPrice: 200 }),
-      record({}),
+      record({ id: 'r-1', exitPrice: 114.43 }),
+      record({ id: 'r-2', exitPrice: 104.39 }),
+      record({ id: 'r-3', exitPrice: 100.79 }),
+      record({ id: 'r-add', exitPrice: 150 }),
       record({ id: 'r-hedge', side: 'SHORT', exitPrice: 80 }),
     ];
-    expect(campaignMainLegPriceChangePct(legs, records)).toBeCloseTo(12, 9);
+    expect(campaignMainLegPriceChangePct(legs, records)).toBeCloseTo(14.43, 9);
+    expect(Object.fromEntries(campaignMainLegPriceChanges(legs, records))).toEqual({
+      'main-1': expect.closeTo(14.43, 9), 'main-2': expect.closeTo(4.39, 9), 'main-3': expect.closeTo(0.79, 9),
+    });
+  });
+
+  it('多笔主力都亏：取亏得最少的那笔（最大值）；还没平仓的主力不参与，全没平仓才是 null', () => {
+    const legs = [
+      leg({ id: 'a', trade_record_id: 'r-a' }),
+      leg({ id: 'b', trade_record_id: 'r-b' }),
+      leg({ id: 'open', trade_record_id: null }),
+    ];
+    const records = [record({ id: 'r-a', exitPrice: 90 }), record({ id: 'r-b', exitPrice: 97 })];
+    expect(campaignMainLegPriceChangePct(legs, records)).toBeCloseTo(-3, 9);
+    expect(campaignMainLegPriceChangePct([leg({ id: 'open', trade_record_id: null })], [])).toBeNull();
+  });
+
+  it('没有 main_open 时才退到 reentry_main（与主力的角色分档一致）', () => {
+    const legs = [
+      leg({ id: 're', leg_role: 'reentry_main', trade_record_id: 'r-re' }),
+    ];
+    expect(campaignMainLegPriceChangePct(legs, [record({ id: 'r-re', exitPrice: 108 })])).toBeCloseTo(8, 9);
+    // 有 main_open 时 reentry_main 不参与
+    const mixed = [leg({ id: 'main' }), ...legs];
+    expect(campaignMainLegPriceChangePct(mixed, [record({}), record({ id: 'r-re', exitPrice: 150 })])).toBeCloseTo(12, 9);
   });
 });
 
@@ -101,24 +131,36 @@ describe('反事实里的主力涨幅', () => {
     ...over,
   } as CampaignCounterfactualManualLeg);
 
-  it('主力开平价没改：沿用真实「盈亏概览」的数（哪怕副本还原的开平价与 Legs 表那一行不是同一对）', () => {
-    expect(counterfactualMainLegPriceChangePct([manual({})], { legId: 'main', pct: 9.98 })).toBe(9.98);
-    expect(counterfactualMainLegPriceChangePct([manual({})], { legId: 'main', pct: null })).toBeNull();
+  it('主力开平价没改：沿用真实一侧这条腿的数（哪怕副本还原的开平价与 Legs 表那一行不是同一对）', () => {
+    expect(counterfactualMainLegPriceChangePct([manual({})], { byLegId: { main: 9.98 }, pct: 9.98 })).toBe(9.98);
+    expect(counterfactualMainLegPriceChangePct([manual({})], { byLegId: { main: null }, pct: null })).toBeNull();
   });
 
   it('改了平仓价：按副本里改后的开平价算（按方向计）', () => {
-    expect(counterfactualMainLegPriceChangePct([manual({ exit_price: 120 })], { legId: 'main', pct: 12 })).toBeCloseTo(20, 9);
+    expect(counterfactualMainLegPriceChangePct([manual({ exit_price: 120 })], { byLegId: { main: 12 }, pct: 12 })).toBeCloseTo(20, 9);
     const short = manual({ direction: 'short', exit_price: 90, actual: { ...manual({}).actual!, direction: 'short', exit_price: 95 } });
-    expect(counterfactualMainLegPriceChangePct([short], { legId: 'main', pct: 5 })).toBeCloseTo(10, 9);
+    expect(counterfactualMainLegPriceChangePct([short], { byLegId: { main: 5 }, pct: 5 })).toBeCloseTo(10, 9);
   });
 
-  it('真实选中的主力被停用：在参与运行的主力里取「仓位」最大的那条；它实际未平仓、平仓价没改时不算', () => {
+  it('【用户要求】多笔主力取涨幅最大：没改的沿用真实值、改过的重算，停用的不参与', () => {
+    const actual = { byLegId: { 'main-1': 14.43, 'main-2': 4.39, 'main-3': 0.79 }, pct: 14.43 };
+    const three = [manual({ id: 'main-1' }), manual({ id: 'main-2' }), manual({ id: 'main-3' })];
+    // 原样重跑：逐腿沿用真实值，取最大 → 与真实「盈亏概览」逐位相同
+    expect(counterfactualMainLegPriceChangePct(three, actual)).toBe(14.43);
+    // 停用涨幅最大的那笔：换成剩下里最大的
+    expect(counterfactualMainLegPriceChangePct([{ ...three[0], enabled: false }, three[1], three[2]], actual)).toBe(4.39);
+    // 改了第三笔的平仓价（+25%）：它按副本重算，成为最大
+    expect(counterfactualMainLegPriceChangePct([three[0], three[1], { ...three[2], exit_price: 125 }], actual)).toBeCloseTo(25, 9);
+  });
+
+  it('真实一侧没有的主力按副本算；实际未平仓、平仓价没改时不算', () => {
     const legs = [
       manual({ enabled: false }),
-      manual({ id: 'small', size_usdt: 100, exit_price: 150 }),
+      manual({ id: 'small', size_usdt: 100, exit_price: 150, actual: { ...manual({}).actual!, exit_price: 150 } }),
       manual({ id: 'big', size_usdt: 5_000, exit_price: 110, actual: { ...manual({}).actual!, exit_price: 110 } }),
     ];
-    expect(counterfactualMainLegPriceChangePct(legs, { legId: 'main', pct: 12 })).toBeCloseTo(10, 9);
+    // 停用了真实的主力，剩下两条真实一侧都没记 → 各按副本算，取最大（+50%，不按仓位挑）
+    expect(counterfactualMainLegPriceChangePct(legs, { byLegId: { main: 12 }, pct: 12 })).toBeCloseTo(50, 9);
     const stillOpen = [
       manual({ id: 'big', exit_price: 105, actual: { ...manual({}).actual!, exit_price: 105, still_open: true } }),
     ];

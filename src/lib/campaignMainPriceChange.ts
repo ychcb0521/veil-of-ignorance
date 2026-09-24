@@ -1,27 +1,63 @@
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
-import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
 import { computeLegPriceChangePct } from '@/lib/legPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { CampaignCounterfactualManualLeg, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 
+/** 参与「涨幅」的主力角色：main_open 全部；一条都没有才取 reentry_main（与 pickPrimaryMainLeg 同一套角色分档）。 */
+const PRIMARY_MAIN_ROLES = ['main_open', 'reentry_main'] as const;
+
+function mainLegsOf<T extends { leg_role: string }>(legs: readonly T[]): T[] {
+  for (const role of PRIMARY_MAIN_ROLES) {
+    const found = legs.filter(leg => leg.leg_role === role);
+    if (found.length > 0) return found;
+  }
+  return [];
+}
+
+/** 一组涨幅里的最大值；全是 null（主力都还没平仓）时为 null。 */
+function maxPriceChange(values: Iterable<number | null>): number | null {
+  let best: number | null = null;
+  for (const value of values) {
+    if (value == null || !Number.isFinite(value)) continue;
+    if (best == null || value > best) best = value;
+  }
+  return best;
+}
+
 /**
- * 战役列表「涨幅」排序与卡片读数：**主力那条腿**在 Legs 表「涨跌幅」列里的那个数。
+ * 每条主力腿在 Legs 表「涨跌幅」列里的那个数（按腿 id）。
  *
- * 与 Legs 表逐字同源：主力按 pickPrimaryMainLeg 选（名义最大的 main_open，没有才退到 reentry_main），
- * 成交记录按 buildTradeRecordLookup 查，开平价取 resolveLegExecution（含 1 分钟 K 线平仓价校正、爆仓不改价），
- * 再按主力的方向算——空单价格跌了是正数。主力还没平仓（没有平仓价）时返回 null，与 Legs 表的「—」一致。
+ * 与 Legs 表逐字同源：成交记录按 buildTradeRecordLookup 查，开平价取 resolveLegExecution
+ * （含 1 分钟 K 线平仓价校正、爆仓不改价），再按这条腿的方向算——空单价格跌了是正数。
+ * 还没平仓（没有平仓价）的腿记 null，与 Legs 表的「—」一致。
+ */
+export function campaignMainLegPriceChanges(
+  legs: TradeJournal[],
+  tradeRecords: TradeRecord[],
+  corrections: LegExitPriceCorrections = {},
+): Map<string, number | null> {
+  const lookup = buildTradeRecordLookup(tradeRecords);
+  const result = new Map<string, number | null>();
+  for (const leg of mainLegsOf(legs)) {
+    const record = leg.trade_record_id ? lookup.get(leg.trade_record_id) ?? null : null;
+    const execution = resolveLegExecution(leg, record, corrections);
+    result.set(leg.id, computeLegPriceChangePct(execution.entryPrice, execution.exitPrice, leg.direction === 'short' ? 'short' : 'long'));
+  }
+  return result;
+}
+
+/**
+ * 战役列表「涨幅」排序与卡片读数、盈亏概览的「涨幅」：
+ * 【用户要求】主力有几笔时，取**涨幅最大**的那一笔（各笔的数就是 Legs 表主力那几行「涨跌幅」列）。
+ * 还没平仓的主力不参与；主力都还没平仓时返回 null（显示「—」）。
  */
 export function campaignMainLegPriceChangePct(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   corrections: LegExitPriceCorrections = {},
 ): number | null {
-  const main = pickPrimaryMainLeg(legs);
-  if (!main) return null;
-  const record = main.trade_record_id ? buildTradeRecordLookup(tradeRecords).get(main.trade_record_id) ?? null : null;
-  const execution = resolveLegExecution(main, record, corrections);
-  return computeLegPriceChangePct(execution.entryPrice, execution.exitPrice, main.direction === 'short' ? 'short' : 'long');
+  return maxPriceChange(campaignMainLegPriceChanges(legs, tradeRecords, corrections).values());
 }
 
 /**
@@ -70,11 +106,12 @@ export function formatEfficiency(value: number | null | undefined): string {
 type ManualMainLeg = Pick<CampaignCounterfactualManualLeg,
   'id' | 'leg_role' | 'direction' | 'open_time' | 'close_time' | 'entry_price' | 'exit_price' | 'size_usdt' | 'enabled' | 'filled' | 'actual'>;
 
-const PRIMARY_MANUAL_ROLES = ['main_open', 'reentry_main'] as const;
-
-/** 真实战役那一侧的主力：选中的腿 id 与它在真实「盈亏概览」里的涨幅（campaignMainLegPriceChangePct）。 */
+/**
+ * 真实战役那一侧的主力涨幅：每条主力腿的涨幅（campaignMainLegPriceChanges，按腿 id）
+ * 与取最大之后真实「盈亏概览」里的那个数（campaignMainLegPriceChangePct）。
+ */
 export interface ActualMainPriceChange {
-  legId: string | null;
+  byLegId: Readonly<Record<string, number | null>>;
   pct: number | null;
 }
 
@@ -83,56 +120,37 @@ function samePrice(left: number, right: number): boolean {
 }
 
 /**
- * 反事实（手动 Legs 分支）里主力那条腿的涨幅。
+ * 反事实（手动 Legs 分支）里的主力涨幅：与真实一侧同一条规则——参与运行的主力里取**涨幅最大**的那一笔。
  *
- * 主力优先认真实战役选中的那一条（副本里腿 id 不变）。它的方向、开仓价、平仓价都没改过时，
- * **直接沿用真实「盈亏概览」的那个数**——副本的开平价是按分刀、认领、事件快照还原出来的，
- * 与 Legs 表那一行未必是同一对（主力最后一刀被加仓腿认领、换了浏览器只剩快照、一条腿都结算不了……），
- * 原样重跑必须逐位相同，这一点只能靠「没改就不重算」保证，不能靠两套还原碰巧一致。
- * 改过了才按副本里的开平价算（与 Legs 表同一个公式、按方向计）。
- * 真实选中的那条被停用、删掉或改掉角色时，在参与运行的主力里按「仓位」一格取最大（并列取最早开仓），
- * 与 pickPrimaryMainLeg 同一条规则；这条腿实际还没平仓、平仓价也没改过时不算（引擎只是按数据末端强行结算）。
+ * 逐腿对账（副本里腿 id 不变）：一条主力的方向、开仓价、平仓价都没改过时，**直接沿用真实一侧这条腿的那个数**——
+ * 副本的开平价是按分刀、认领、事件快照还原出来的，与 Legs 表那一行未必是同一对（主力最后一刀被加仓腿认领、
+ * 换了浏览器只剩快照、一条腿都结算不了……），原样重跑必须逐位相同，这一点只能靠「没改就不重算」保证，
+ * 不能靠两套还原碰巧一致。改过了才按副本里的开平价算（与 Legs 表同一个公式、按方向计）。
+ * 真实一侧没有的主力（新增的腿、改成主力角色的腿）按副本的开平价算；实际还没平仓、平仓价也没改过的腿不算
+ * （引擎只是按数据末端强行结算）。停用的腿不参与。
  */
 export function counterfactualMainLegPriceChangePct(
   manualLegs: readonly ManualMainLeg[] | null | undefined,
   actualMain?: ActualMainPriceChange | null,
 ): number | null {
   const live = (manualLegs ?? []).filter(leg => leg.enabled && leg.filled !== false);
-  const isMainRole = (leg: ManualMainLeg) => (PRIMARY_MANUAL_ROLES as readonly string[]).includes(leg.leg_role);
   const pctOf = (leg: ManualMainLeg) =>
     computeLegPriceChangePct(leg.entry_price, leg.exit_price, leg.direction === 'short' ? 'short' : 'long');
+  const byLegId = actualMain?.byLegId ?? {};
 
-  const preferred = actualMain?.legId ? live.find(leg => leg.id === actualMain.legId) : undefined;
-  if (preferred && isMainRole(preferred)) {
-    const actual = preferred.actual;
+  return maxPriceChange(mainLegsOf(live).map(leg => {
+    const actual = leg.actual;
     const pricesUnchanged = actual != null
-      && preferred.direction === actual.direction
-      && samePrice(preferred.entry_price, actual.entry_price)
-      && samePrice(preferred.exit_price, actual.exit_price);
-    return pricesUnchanged ? actualMain?.pct ?? null : pctOf(preferred);
-  }
-
-  let main: ManualMainLeg | null = null;
-  for (const role of PRIMARY_MANUAL_ROLES) {
-    const candidates = live.filter(leg => leg.leg_role === role);
-    if (candidates.length === 0) continue;
-    main = [...candidates].sort((a, b) => {
-      const sa = Number.isFinite(a.size_usdt) && a.size_usdt > 0 ? a.size_usdt : null;
-      const sb = Number.isFinite(b.size_usdt) && b.size_usdt > 0 ? b.size_usdt : null;
-      if (sa != null && sb != null && sa !== sb) return sb - sa;
-      if (sa != null && sb == null) return -1;
-      if (sa == null && sb != null) return 1;
-      return Date.parse(a.open_time) - Date.parse(b.open_time);
-    })[0] ?? null;
-    break;
-  }
-  if (!main) return null;
-  const actual = main.actual;
-  if (actual && (actual.still_open || actual.close_time_fallback || actual.source === 'unsettled')
-    && samePrice(main.exit_price, actual.exit_price)) {
-    return null;
-  }
-  return pctOf(main);
+      && leg.direction === actual.direction
+      && samePrice(leg.entry_price, actual.entry_price)
+      && samePrice(leg.exit_price, actual.exit_price);
+    if (pricesUnchanged && Object.prototype.hasOwnProperty.call(byLegId, leg.id)) return byLegId[leg.id];
+    if (actual && (actual.still_open || actual.close_time_fallback || actual.source === 'unsettled')
+      && samePrice(leg.exit_price, actual.exit_price)) {
+      return null;
+    }
+    return pctOf(leg);
+  }));
 }
 
 function isMainAddRole(role: string | null | undefined): boolean {

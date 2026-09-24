@@ -98,7 +98,7 @@ export interface CampaignPnlOverviewMetrics {
   /** b × 100（与 accuracy.profit_capture_ratio 同口径）；没有风险分母时 null。 */
   payoffRatio: number | null;
   /**
-   * 主力那条腿的涨跌幅（%，按主力方向计），与 Legs 表「涨跌幅」列、战役卡片同一个数；主力未平仓时 null。
+   * 主力的涨跌幅（%，按主力方向计；多笔主力取涨幅最大的那笔），与 Legs 表「涨跌幅」列、战役卡片同一个数；主力都未平仓时 null。
    * 涨幅效率与加仓效率由它和预期回撤、盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
    */
   mainPriceChangePct: number | null;
@@ -290,9 +290,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(mainPriceChangePct),
       help: (
         <>
-          <p>主力那条腿从开仓价到平仓价的涨跌幅，按主力方向计：主多价格涨了为正，主空价格跌了为正。与 Legs 表「涨跌幅」列、战役列表卡片是同一个数（同一对开平价，含 1 分钟 K 线平仓价校正）。</p>
+          <p>主力从开仓价到平仓价的涨跌幅，按主力方向计：主多价格涨了为正，主空价格跌了为正。与 Legs 表「涨跌幅」列、战役列表卡片是同一个数（同一对开平价，含 1 分钟 K 线平仓价校正）。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅 = ±（平仓价 − 开仓价）÷ 开仓价 × 100%</div>
-          <p>主力有几笔时取名义最大的那笔；主力还没平仓时显示「—」。</p>
+          <p>主力有几笔时取<strong>涨幅最大</strong>的那笔（就是 Legs 表主力那几行「涨跌幅」里最大的数），还没平仓的不参与；主力都还没平仓时显示「—」。</p>
         </>
       ),
     },

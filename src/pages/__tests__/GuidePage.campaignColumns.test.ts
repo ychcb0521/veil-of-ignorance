@@ -73,4 +73,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toContain(`${source}: '${source}Distribution'`);
     }
   });
+  it('【用户要求】涨幅：主力有几笔时取涨幅最大的那笔（不按名义大小挑）', () => {
+    expect(guide).toContain('<strong>主力有几笔时取涨幅最大的那笔</strong>（不按名义大小挑）');
+    expect(page).not.toContain('主力 = 名义最大的 main_open');
+  });
 });

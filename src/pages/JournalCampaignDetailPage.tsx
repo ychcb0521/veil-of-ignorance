@@ -4,8 +4,7 @@ import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, 
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { campaignHasMainAdd, campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
-import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignMainLegPriceChanges } from '@/lib/campaignMainPriceChange';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1146,12 +1145,12 @@ export default function JournalCampaignDetailPage() {
       : campaignMetricValues.profitCaptureRatio / 100,
     campaignAsymmetricRisk,
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
-  // 主力涨幅：与 Legs 表主力那一行「涨跌幅」同一对开平价（同一份平仓价校正），与战役列表卡片同一个函数。
-  // 真实「盈亏概览」与反事实面板共用这一个数（反事实没改主力开平价时沿用它）。
-  const actualMainPriceChange = useMemo(() => ({
-    legId: pickPrimaryMainLeg(legs)?.id ?? null,
-    pct: campaignMainLegPriceChangePct(legs, tradeRecords, legExitPriceCorrections),
-  }), [legs, tradeRecords, legExitPriceCorrections]);
+  // 主力涨幅：每条主力与 Legs 表那一行「涨跌幅」同一对开平价（同一份平仓价校正），【用户要求】多笔取涨幅最大的那笔，
+  // 与战役列表卡片同一个函数。真实「盈亏概览」与反事实面板共用这份逐腿的数（反事实没改的主力沿用它）。
+  const actualMainPriceChange = useMemo(() => {
+    const byLegId = Object.fromEntries(campaignMainLegPriceChanges(legs, tradeRecords, legExitPriceCorrections));
+    return { byLegId, pct: campaignMainLegPriceChangePct(legs, tradeRecords, legExitPriceCorrections) };
+  }, [legs, tradeRecords, legExitPriceCorrections]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;

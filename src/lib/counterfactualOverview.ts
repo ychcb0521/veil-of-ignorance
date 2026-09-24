@@ -44,9 +44,9 @@ export interface CounterfactualOverviewShared {
   currentAccountEquity: number;
   isOwner: boolean;
   /**
-   * 真实战役的主力（pickPrimaryMainLeg 选中的腿 id）与它在上方「盈亏概览」里的涨幅：
-   * 反事实的「涨幅」先认这条腿，开平价与方向没改过就沿用这个数，原样重跑因此逐位相同。
-   * 缺省时按「仓位」一格取最大的主力、按副本的开平价算。
+   * 真实战役每条主力的涨幅（按腿 id）与上方「盈亏概览」里取最大之后的那个数：
+   * 反事实的「涨幅」逐腿对账——开平价与方向没改过的主力沿用真实一侧这条腿的数，再取最大，原样重跑因此逐位相同。
+   * 缺省时每条主力都按副本的开平价算。
    */
   actualMain?: ActualMainPriceChange | null;
 }
@@ -245,7 +245,7 @@ export function buildCounterfactualOverviewMetrics(
   const initialExpectedMaxLoss = anchors.initialExpectedMaxLoss > EPSILON ? anchors.initialExpectedMaxLoss : 0;
   const hasStopLine = initialExpectedMaxLoss > 0;
   const payoffRatio = realizedPnl == null ? null : computeCounterfactualPayoffRatio(realizedPnl, initialExpectedMaxLoss);
-  // 手动 Legs 分支：副本里主力那条腿的开平价（改过就按改后的）；SOP 推演没有逐腿开平价，不算。
+  // 手动 Legs 分支：副本里各笔主力的开平价（改过就按改后的），取涨幅最大的那笔；SOP 推演没有逐腿开平价，不算。
   const mainPriceChangePct = manual
     ? counterfactualMainLegPriceChangePct(branch.params.manual_legs, shared.actualMain)
     : null;

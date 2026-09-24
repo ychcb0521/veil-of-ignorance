@@ -26,8 +26,7 @@
  * 第二组断言守「相对实际只反映改动」：从原样副本出发改一格，相对实际挪动的量必须恰好是这一格值多少钱，
  * 不能因为「改过了」就整条腿换一套算法，把滑点、分刀、老费率的差额一起算进去。
  */
-import { campaignHasMainAdd, campaignMainLegPriceChangePct, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
-import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignMainLegPriceChanges, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { describe, expect, it } from 'vitest';
 import { computeAsymmetricRiskContribution, type AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
 import {
@@ -209,7 +208,7 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     currentAccountEquity: 10_000,
     isOwner: true,
     actualMain: {
-      legId: pickPrimaryMainLeg(fx.legs)?.id ?? null,
+      byLegId: Object.fromEntries(campaignMainLegPriceChanges(fx.legs, fx.tradeRecords, fx.corrections)),
       pct: campaignMainLegPriceChangePct(fx.legs, fx.tradeRecords, fx.corrections),
     },
   };
