@@ -127,6 +127,9 @@ export type ScatterPlotProps = {
   };
   bandCounts?: ScatterBandCounts;
   onSelect?: (id: string) => void;
+  /** 批量下载的选择由战役列表页统一持有（受控）：切换图表或视图，已选的点保持不变；选中的点加一圈蓝色外圈（琥珀色外圈留给破产风险）。 */
+  selectionMode?: boolean;
+  selectedIds?: ReadonlySet<string>;
   onActiveChange?: (id: string | null) => void;
   emptyMessage: string;
   testId: string;
@@ -148,7 +151,7 @@ type PlacedPoint = ScatterPoint & {
   series: ScatterSeries;
 };
 
-type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number; warning?: string };
+type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number; ids: string[]; warning?: string };
 
 type StackInfo = {
   pitchY: number;
@@ -302,6 +305,8 @@ export function ScatterPlot({
   isolatedLeftBucket,
   bandCounts,
   onSelect,
+  selectionMode = false,
+  selectedIds,
   onActiveChange,
   emptyMessage,
   testId,
@@ -316,8 +321,13 @@ export function ScatterPlot({
 }: ScatterPlotProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
+  const [expandedOverflowId, setExpandedOverflowId] = useState<string | null>(null);
   const { ref: trackRef, size } = useChartSize<HTMLDivElement>();
   const buttonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
+  /** 最近一次按下点位的指针类型（touch / mouse / pen）：选择模式下手指点选后要收起提示框。 */
+  const lastPointerTypeRef = useRef('');
+  const overflowPickerRef = useRef<HTMLElement | null>(null);
+  const overflowButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const seriesById = useMemo(() => new Map(series.map(item => [item.id, item])), [series]);
   const boxHeight = size.height;
@@ -387,7 +397,7 @@ export function ScatterPlot({
           binPx: result.columnPx,
           tallest: result.tallest,
           requiredPlotHeight: result.requiredPlotHeight,
-          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n }) => ({ bin, cx, cy, yPct, count: n })),
+          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids }) => ({ bin, cx, cy, yPct, count: n, ids })),
         } as StackInfo,
       };
     }
@@ -434,7 +444,7 @@ export function ScatterPlot({
           tallest: result.tallest,
           requiredPlotHeight: result.requiredPlotHeight,
           overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids }) => ({
-            bin, cx, cy, yPct, count: n,
+            bin, cx, cy, yPct, count: n, ids,
             warning: ids.map(id => byId.get(id)?.warning).find(Boolean),
           })),
         } as StackInfo,
@@ -572,7 +582,24 @@ export function ScatterPlot({
     ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
     : null;
   const stackOverflowCount = stack ? stack.overflow.reduce((sum, glyph) => sum + glyph.count, 0) : 0;
+  const expandedOverflow = stack?.overflow.find(glyph => glyph.ids[0] === expandedOverflowId);
+  const overflowPoints = expandedOverflow
+    ? (() => {
+      const byId = new Map(points.map(point => [point.id, point]));
+      return expandedOverflow.ids.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
+    })()
+    : [];
   const clipPathId = `${testId}-plot-clip`;
+
+  // 展开的列表在图下方：点了顶端的合并三角后把焦点移过去，屏幕外的列表也会被滚进视野。
+  useEffect(() => {
+    if (expandedOverflowId) overflowPickerRef.current?.focus();
+  }, [expandedOverflowId]);
+
+  const closeOverflow = () => {
+    setExpandedOverflowId(null);
+    if (expandedOverflowId) overflowButtonsRef.current.get(expandedOverflowId)?.focus();
+  };
 
   // 时序从最新战役看起；分布从左侧风险区看起，不能默认滚走 −10R 线。
   useEffect(() => {
@@ -646,6 +673,10 @@ export function ScatterPlot({
                 <span>{item.label}</span>
               </li>
             ))}
+            {selectionMode && <li className="inline-flex items-center gap-1.5">
+              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--chart-info)" strokeWidth="1.5" /></svg>
+              <span>外圈：已选择</span>
+            </li>}
           </ul>
         </div>
 
@@ -687,9 +718,11 @@ export function ScatterPlot({
             // data-layout 由元件自己挂，不由调用方传：三张图的绘图盒必须是同一个盒子。
             data-layout="campaign-scatter-landscape"
             onMouseLeave={clearHover}
-            className="relative aspect-[8/5] min-h-[18rem] min-w-0 overflow-hidden rounded-[6px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface)] sm:min-h-0"
+            className="relative aspect-[8/5] min-h-[18rem] w-full min-w-0 overflow-hidden rounded-[6px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface)] sm:min-h-0"
             // 带 aspect-ratio 的网格项一旦被 min-height 撑高，浏览器会反过来按比例推宽度而不是
             // 拉伸到列宽（justify-self: normal 对有比例的盒子按 start 处理）；写死 100% 宽度切断这条回路。
+            // 手机上 min-h-[18rem] 本身就会这样：288px × 8/5 推出约 461px 宽，撑破 270px 的列、整页横向溢出，
+            // 所以 w-full 一直挂着，堆叠档的内联 width 只是同一件事。
             style={stackBoxMinHeight == null ? undefined : { minHeight: stackBoxMinHeight, width: '100%' }}
           >
             <div
@@ -845,6 +878,10 @@ export function ScatterPlot({
                         <circle data-testid={`chart-warning-ring-${point.id}`} cx={point.cx} cy={point.cy} r={6}
                           style={{ fill: 'none', stroke: CHART_THRESHOLD_VAR, strokeWidth: 1 }} />
                       )}
+                      {selectionMode && selectedIds?.has(point.id) && (
+                        <circle data-testid={`chart-selection-ring-${point.id}`} cx={point.cx} cy={point.cy} r={7.5}
+                          style={{ fill: 'none', stroke: seriesTokenVar('info'), strokeWidth: 1.5 }} />
+                      )}
                     </g>
                   ))}
                   {stack?.overflow.map(glyph => (
@@ -902,12 +939,18 @@ export function ScatterPlot({
                     <button
                       key={`overflow-${glyph.bin}`}
                       type="button"
+                      ref={node => {
+                        if (node) overflowButtonsRef.current.set(glyph.ids[0], node);
+                        else overflowButtonsRef.current.delete(glyph.ids[0]);
+                      }}
                       data-testid="chart-stack-overflow-hit"
                       data-overflow-count={glyph.count}
-                      aria-label={`该档另有 ${glyph.count} 场超出图高，未逐点绘制${glyph.warning ? `；${glyph.warning}` : ''}`}
-                      tabIndex={-1}
-                      title={`另有 ${glyph.count} 场超出图高${glyph.warning ? `；${glyph.warning}` : ''}`}
-                      className="absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-help rounded-full bg-transparent outline-none"
+                      aria-label={`该档另有 ${glyph.count} 场超出图高，展开查看${selectionMode ? `；已选择 ${glyph.ids.filter(id => selectedIds?.has(id)).length} 场` : ''}${glyph.warning ? `；${glyph.warning}` : ''}`}
+                      aria-expanded={glyph.ids[0] === expandedOverflowId}
+                      aria-controls={`${testId}-overflow-picker`}
+                      title={`另有 ${glyph.count} 场超出图高，点击展开${glyph.warning ? `；${glyph.warning}` : ''}`}
+                      onClick={() => { setActive(null); setExpandedOverflowId(current => current === glyph.ids[0] ? null : glyph.ids[0]); }}
+                      className="absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
                       style={{ left: `${glyph.cx}px`, top: `${glyph.yPct}%`, width: `${hitWidth}px`, height: `${hitHeight}px` }}
                     />
                   ))}
@@ -924,8 +967,8 @@ export function ScatterPlot({
                       data-series-token={point.series.token}
                       data-marker-shape={point.series.shape}
                       {...applyDataAttrs(point.dataAttrs)}
-                      aria-pressed={point.id === activeId}
-                      aria-label={point.ariaLabel}
+                      aria-pressed={selectionMode ? Boolean(selectedIds?.has(point.id)) : point.id === activeId}
+                      aria-label={selectionMode ? `${point.ariaLabel}，${selectedIds?.has(point.id) ? '已选择，点击取消选择' : '未选择，点击选择'}` : point.ariaLabel}
                       tabIndex={point.id === tabbableId ? 0 : -1}
                       onMouseEnter={() => setActive(point.id)}
                       onFocus={() => setActive(point.id)}
@@ -935,9 +978,17 @@ export function ScatterPlot({
                         if (next && event.currentTarget.parentElement?.contains(next)) return;
                         setActive(null);
                       }}
-                      onClick={() => onSelect?.(point.id)}
+                      onPointerDown={event => { lastPointerTypeRef.current = event.pointerType; }}
+                      onClick={() => {
+                        onSelect?.(point.id);
+                        // 选择模式下点按留在本页：触屏没有「指针移开」，提示框会一直钉在原位、往下翻时还压着别的内容，
+                        // 所以手指点选完就收起。鼠标照旧（移开即消失）；键盘选择走 onKeyDown，读数保留。
+                        if (selectionMode && lastPointerTypeRef.current === 'touch') setActive(null);
+                        lastPointerTypeRef.current = '';
+                      }}
                       onKeyDown={event => {
-                        if (event.key === 'ArrowRight') { event.preventDefault(); focusIndex(index + 1); }
+                        if (selectionMode && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelect?.(point.id); }
+                        else if (event.key === 'ArrowRight') { event.preventDefault(); focusIndex(index + 1); }
                         else if (event.key === 'ArrowLeft') { event.preventDefault(); focusIndex(index - 1); }
                         else if (event.key === 'Home') { event.preventDefault(); focusIndex(0); }
                         else if (event.key === 'End') { event.preventDefault(); focusIndex(placed.length - 1); }
@@ -995,7 +1046,7 @@ export function ScatterPlot({
                     ) : null}
                     {activePoint.warning && <div className="mt-1 text-[10px] text-[color:var(--chart-threshold)]">{activePoint.warning}</div>}
                     {onSelect ? (
-                      <div className="text-[9px] text-[color:var(--chart-ink-muted)]">点击进入战役</div>
+                      <div className="text-[9px] text-[color:var(--chart-ink-muted)]">{selectionMode ? selectedIds?.has(activePoint.id) ? '已选择 · 点击取消选择' : '点击选择此战役' : '点击进入战役'}</div>
                     ) : null}
                   </div>
                 ) : null}
@@ -1122,6 +1173,42 @@ export function ScatterPlot({
             ) : null}
           </div>
         </div>
+
+        {expandedOverflow && <section
+          ref={overflowPickerRef}
+          id={`${testId}-overflow-picker`}
+          data-testid="chart-overflow-picker"
+          aria-label="合并散点中的战役"
+          tabIndex={-1}
+          onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); closeOverflow(); }
+          }}
+          className="mt-2 rounded border border-[color:var(--chart-border)] bg-[color:var(--chart-surface-raised)] p-2"
+        >
+          <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-[color:var(--chart-ink-muted)]">
+            <span>合并的 {overflowPoints.length} 场 · {selectionMode ? '点击选择或取消选择' : '点击进入战役'}</span>
+            <button type="button" onClick={closeOverflow} className="shrink-0 rounded px-2 py-1 hover:text-[color:var(--chart-ink)]">收起</button>
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {overflowPoints.map(point => <button
+              key={point.id}
+              type="button"
+              data-testid={`chart-overflow-point-${point.id}`}
+              {...applyDataAttrs(point.dataAttrs)}
+              aria-label={selectionMode ? `${point.ariaLabel}，${selectedIds?.has(point.id) ? '已选择，点击取消选择' : '未选择，点击选择'}` : point.ariaLabel}
+              aria-pressed={selectionMode ? Boolean(selectedIds?.has(point.id)) : undefined}
+              onClick={() => onSelect?.(point.id)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect?.(point.id); }
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-[10px] hover:bg-[color:var(--chart-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+            >
+              {selectionMode && <span aria-hidden="true" className="w-3 shrink-0 text-[color:var(--chart-info)]">{selectedIds?.has(point.id) ? '✓' : '○'}</span>}
+              <span className="min-w-0 flex-1"><span className="block truncate">{point.label}</span><span className="block truncate text-[color:var(--chart-ink-muted)]">{point.metaText}</span></span>
+              <span className="shrink-0 font-mono" style={{ color: point.warning ? CHART_THRESHOLD_VAR : seriesTokenVar(seriesById.get(point.seriesId)?.token ?? 'neutral') }}>{point.valueText}</span>
+            </button>)}
+          </div>
+        </section>}
 
         <figcaption className="mt-1.5 flex flex-wrap items-center justify-between gap-3 text-[9px] text-[color:var(--chart-ink-muted)]">
           <span>

@@ -157,8 +157,13 @@ function mergeDiaries(
   return [...byDate.values()].sort((a, b) => b.diary_date.localeCompare(a.diary_date));
 }
 
+/**
+ * 读全部情绪日记（云端与本机镜像合并）。默认读完把合并结果写回本机镜像并排队推一次云端同步；
+ * mirror: false 只读不写——批量导出战役图片用它：导出是只读操作，逐场回写会把整份日记反复上传。
+ */
 export async function listDecisionEmotionDiaries(
   userId: string,
+  options: { mirror?: boolean } = {},
 ): Promise<DecisionEmotionDiary[]> {
   const local = readLocal(userId);
   const { data, error } = await supabase
@@ -176,7 +181,7 @@ export async function listDecisionEmotionDiaries(
     ((data ?? []) as EmotionDiaryRow[]).map(toDiary),
     local,
   );
-  writeLocal(userId, merged);
+  if (options.mirror !== false) writeLocal(userId, merged);
   return merged;
 }
 

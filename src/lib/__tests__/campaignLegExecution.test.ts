@@ -146,15 +146,15 @@ describe('campaign leg execution price resolution', () => {
         [closedRecord('rec-a')],
         inRange,
       );
-      expect(result).toEqual({ corrections: {}, complete: true });
+      expect(result).toEqual({ corrections: {}, complete: true, fetchFailed: false });
     });
 
     it('is complete for legs that never carried a trade record (pure review snapshots)', async () => {
       const legs = [{ id: 'leg-snapshot', trade_record_id: null } as TradeJournal];
       expect(await fetchLegExitPriceCorrectionsResult('TESTUSDT', legs, [], inRange))
-        .toEqual({ corrections: {}, complete: true });
+        .toEqual({ corrections: {}, complete: true, fetchFailed: false });
       expect(await fetchLegExitPriceCorrectionsResult('TESTUSDT', legs, [closedRecord('rec-x')], inRange))
-        .toEqual({ corrections: {}, complete: true });
+        .toEqual({ corrections: {}, complete: true, fetchFailed: false });
     });
 
     it('is incomplete when a linked leg has no local record at all (empty trade history)', async () => {
@@ -165,7 +165,8 @@ describe('campaign leg execution price resolution', () => {
         [],
         async () => { requestCount += 1; return inRange(); },
       );
-      expect(result).toEqual({ corrections: {}, complete: false });
+      // 本地查不到记录：不完整，但不是请求失败——重试不会好（只读导出据此照常出图）
+      expect(result).toEqual({ corrections: {}, complete: false, fetchFailed: false });
       expect(requestCount).toBe(0);
     });
 
@@ -180,6 +181,7 @@ describe('campaign leg execution price resolution', () => {
         inRange,
       );
       expect(result.complete).toBe(false);
+      expect(result.fetchFailed).toBe(false);
       expect(result.corrections['leg-a']?.exitPrice).toBe(1.05);
       expect(result.corrections['leg-missing']).toBeUndefined();
     });
@@ -191,7 +193,8 @@ describe('campaign leg execution price resolution', () => {
         [closedRecord('rec-a')],
         async () => { throw new Error('HTTP 429'); },
       );
-      expect(result).toEqual({ corrections: {}, complete: false });
+      // 请求失败：不完整且可重试
+      expect(result).toEqual({ corrections: {}, complete: false, fetchFailed: true });
     });
 
     it('the read-only wrapper still returns whatever corrections were resolved', async () => {

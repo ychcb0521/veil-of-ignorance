@@ -105,6 +105,13 @@ describe('ScatterPlot 布局：尺寸恒定，让位的是排布', () => {
     expect(big).toHaveAttribute('data-layout', 'campaign-scatter-landscape');
   });
 
+  it('绘图盒一律占满列宽：手机上 min-height 不会按 8:5 反推出比列更宽的盒子、撑出整页横向滚动', () => {
+    // jsdom 不排版，只能守住类名：带 aspect-ratio 的网格项被 min-h-[18rem] 撑高时，没有 w-full 就会按比例推宽（288 × 8/5 ≈ 461px）
+    renderOrdinal(20);
+    const box = screen.getByTestId('scroll');
+    expect(box).toHaveClass('w-full', 'min-w-0', 'min-h-[18rem]', 'aspect-[8/5]');
+  });
+
   it('相邻命中区不重叠，点位圆心永远属于自己', () => {
     renderOrdinal(192);
     const buttons = [...screen.getByTestId('plot').querySelectorAll<HTMLElement>('button[data-campaign-id]')];
@@ -202,6 +209,40 @@ describe('ScatterPlot 交互与可达性', () => {
     expect(screen.getByTestId('pt-5')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.keyDown(screen.getByTestId('pt-5'), { key: 'Home' });
     expect(screen.getByTestId('pt-0')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('选择模式下手指点选后收起提示框（触屏没有「指针移开」，不收就一直钉在原位）；鼠标点选照旧保留读数', () => {
+    const onSelect = vi.fn();
+    renderOrdinal(6, { onSelect, selectionMode: true, selectedIds: new Set() });
+    const point = screen.getByTestId('pt-3');
+    // 与浏览器里的点按同序：pointerdown → 兼容鼠标事件（进入、聚焦）→ click
+    const tap = (pointerType: string) => {
+      const down = new MouseEvent('pointerdown', { bubbles: true });
+      Object.defineProperty(down, 'pointerType', { value: pointerType });
+      fireEvent(point, down);
+      fireEvent.mouseEnter(point);
+      fireEvent.focus(point);
+      fireEvent.click(point);
+    };
+    tap('touch');
+    expect(onSelect).toHaveBeenLastCalledWith('p3');
+    expect(screen.queryByTestId('chart-tooltip')).not.toBeInTheDocument();
+    tap('mouse');
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('战役 3');
+  });
+
+  it('非选择模式下手指点按不额外清读数（点按直接进详情页，交给跳转）', () => {
+    const onSelect = vi.fn();
+    renderOrdinal(6, { onSelect });
+    const point = screen.getByTestId('pt-2');
+    const down = new MouseEvent('pointerdown', { bubbles: true });
+    Object.defineProperty(down, 'pointerType', { value: 'touch' });
+    fireEvent(point, down);
+    fireEvent.mouseEnter(point);
+    fireEvent.click(point);
+    expect(onSelect).toHaveBeenCalledWith('p2');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('战役 2');
   });
 
   it('指针离开图区后提示框与十字线消失，键盘焦点还在时不清', () => {

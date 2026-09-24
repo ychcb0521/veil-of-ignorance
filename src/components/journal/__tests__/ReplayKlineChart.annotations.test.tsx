@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   annotations: [] as AnalysisChartAnnotations[],
   visibleRanges: [] as Array<{ start: number | null | undefined; end: number | null | undefined }>,
   datasets: [] as KlineData[][],
+  throwOnRender: false,
 }));
 
 vi.mock('@/components/CandlestickChart', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/components/CandlestickChart', () => ({
     analysisVisibleStartTime?: number | null;
     analysisVisibleEndTime?: number | null;
   }) => {
+    if (mocks.throwOnRender) throw new Error('native chart crashed');
     if (props.analysisAnnotations) mocks.annotations.push(props.analysisAnnotations);
     mocks.datasets.push(props.data);
     mocks.visibleRanges.push({
@@ -43,6 +45,16 @@ describe('ReplayKlineChart annotations', () => {
     mocks.annotations.length = 0;
     mocks.visibleRanges.length = 0;
     mocks.datasets.length = 0;
+    mocks.throwOnRender = false;
+  });
+
+  it('reports native chart rendering errors to an export worker instead of crashing the batch dialog', () => {
+    const onError = vi.fn();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.throwOnRender = true;
+    render(<ReplayKlineChart klines={[candle(1000)]} currentTime={1000} intervalMs={1000} symbol="BTCUSDT" onRenderError={onError} />);
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'native chart crashed' }));
+    consoleError.mockRestore();
   });
 
   it('用户手动标注的 leg 竖线会越过回放时间过滤，普通未来竖线仍隐藏', async () => {

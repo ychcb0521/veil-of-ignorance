@@ -1006,6 +1006,7 @@ describe('CandlestickChart analysis annotations', () => {
 
   it('历史 K 线原生时间轴尚未提交时不提前创建屏幕脱钩标注', async () => {
     let nativeReady = false;
+    const exportReady = vi.fn();
     mocks.chart.getDataList.mockImplementation(() => nativeReady ? mocks.dataList : []);
     render(
       <CandlestickChart
@@ -1013,6 +1014,7 @@ describe('CandlestickChart analysis annotations', () => {
         symbol="HIFIUSDT"
         rawSymbol="HIFIUSDT"
         analysisMode
+        onAnalysisRenderReady={exportReady}
         analysisAnnotations={{
           markers: [{
             time: 2400,
@@ -1029,6 +1031,7 @@ describe('CandlestickChart analysis annotations', () => {
       await new Promise(resolve => setTimeout(resolve, 20));
     });
     expect(mocks.chart.createOverlay.mock.calls.some(([overlay]) => overlay.name === 'simpleAnnotation')).toBe(false);
+    expect(exportReady).not.toHaveBeenCalled();
 
     nativeReady = true;
     const dataReadyCallbacks = mocks.chart.subscribeAction.mock.calls
@@ -1042,6 +1045,7 @@ describe('CandlestickChart analysis annotations', () => {
         .find(overlay => overlay.name === 'simpleAnnotation');
       expect(markerOverlay?.points?.[0]).toEqual({ timestamp: 2000, value: 1.1 });
     });
+    await waitFor(() => expect(exportReady).toHaveBeenCalledTimes(1));
   });
 
   it('预载五十一倍数据时把指定三倍区间铺满，并让持仓段位于默认视口正中', async () => {

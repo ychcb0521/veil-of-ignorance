@@ -127,6 +127,10 @@ type CampaignMetricScatterPlotProps = {
   distributionSpec?: CampaignMetricDistributionSpec;
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
+  /** 批量下载的选择模式：点点位只增减选择、不进战役；选择集由列表页持有，与卡片勾选框共用。 */
+  selectionMode?: boolean;
+  selectedCampaignIds?: ReadonlySet<string>;
+  onToggleCampaign?: (campaignId: string) => void;
 };
 
 type CampaignMetricTick = {
@@ -442,6 +446,9 @@ export function CampaignMetricScatterPlot({
   distributionSpec,
   onBack,
   onSelectCampaign,
+  selectionMode = false,
+  selectedCampaignIds,
+  onToggleCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
@@ -637,7 +644,7 @@ export function CampaignMetricScatterPlot({
         label: `#${point.sequence} ${point.title}`,
         metaText: `操作时间 ${operationTime}`,
         warning: ruin ? `${RUIN_ASSUMPTION}（b ≤ ${CAPITAL_RUIN_THRESHOLD}R）；非实际账户强平判定。` : undefined,
-        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}，进入战役`,
+        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
@@ -652,7 +659,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [colorMode, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, series.length, showPayoffRatio, stacked],
+    [colorMode, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -820,8 +827,8 @@ export function CampaignMetricScatterPlot({
         aria-live="polite"
       >
         {activePoint
-          ? `#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
-          : '悬停或聚焦点位读取数值；点击进入对应战役'}
+          ? `${selectionMode ? selectedCampaignIds?.has(activePoint.campaignId) ? '已选择 · ' : '未选择 · ' : ''}#${activePoint.sequence} ${activePoint.title} · ${formatValue(activePoint.value)} · ${formatBeijingTime(activePoint.operationTime)}`
+          : selectionMode ? '批量选择：点击点位选择或取消，外圈表示已选择' : '悬停或聚焦点位读取数值；点击进入对应战役'}
       </span>
       <span className="shrink-0 font-mono tabular-nums">n={chartPoints.length}</span>
       {onBack ? (
@@ -895,10 +902,10 @@ export function CampaignMetricScatterPlot({
                 : genericReferences.length
                   ? `：档网格锚在 0 上，${genericReferences.map(reference => referenceValueText(reference.value)).join('、')} 也是档边界，点位不会吸附到参考线或${genericSpec?.zeroMeaning ?? '盈亏分界'}的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
                   : `：档网格锚在 0 上，${genericSpec?.zeroMeaning ?? '盈亏分界'}两侧的点不会混进同一档；精确数值看提示框。`}
-              纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数。点击任一点进入对应战役。
+              纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数；点击三角可展开其中的战役。{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}
             </dd>
           ) : (
-            <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；点击任一点进入对应战役。右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
+            <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
           )}
         </div>
         {guide.referenceLines?.length ? (
@@ -941,7 +948,9 @@ export function CampaignMetricScatterPlot({
           label: band.label,
         })),
       }}
-      onSelect={onSelectCampaign}
+      onSelect={selectionMode ? onToggleCampaign : onSelectCampaign}
+      selectionMode={selectionMode}
+      selectedIds={selectedCampaignIds}
       onActiveChange={setActiveCampaignId}
       emptyMessage={`暂无同时具备客观操作时间与${missingValueLabel}的战役。`}
       testId={plotTestId}

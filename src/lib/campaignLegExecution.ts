@@ -62,6 +62,12 @@ export interface LegExitPriceCorrectionsResult {
    * 「校验不了」≠「校验过、无需校正」：本地查不到那条成交记录时同样是 false。
    */
   complete: boolean;
+  /**
+   * 有 K 线请求失败（限流、断网）：这是 complete === false 里**重试能好**的那一种。
+   * 另一种是本地查不到挂着的成交记录（换了浏览器、清过历史成交）——重试也不会好，
+   * 只读界面只能与详情页一样按腿快照显示。只读的批量导出据此区分「报失败可重试」与「照常导出」。
+   */
+  fetchFailed?: boolean;
 }
 
 export interface ResolvedLegExecution {
@@ -194,8 +200,8 @@ export async function fetchLegExitPriceCorrectionsResult(
    * 写回库，与上一次拿齐记录时写的校正值来回翻转（closed_loss 配 +469.96 的那种行）。
    */
   const linkedLegs = legs.filter(leg => leg.trade_record_id);
-  if (linkedLegs.length === 0) return { corrections: {}, complete: true };
-  if (!symbol || tradeRecords.length === 0) return { corrections: {}, complete: false };
+  if (linkedLegs.length === 0) return { corrections: {}, complete: true, fetchFailed: false };
+  if (!symbol || tradeRecords.length === 0) return { corrections: {}, complete: false, fetchFailed: false };
 
   const recordLookup = buildTradeRecordLookup(tradeRecords);
   const legsByRecordId = new Map<string, TradeJournal[]>();
@@ -237,9 +243,11 @@ export async function fetchLegExitPriceCorrectionsResult(
     }),
   );
 
+  const fetchFailed = entries.some(entry => entry.failed);
   return {
     corrections: Object.fromEntries(entries.flatMap(entry => entry.pairs)),
-    complete: !unresolved && !entries.some(entry => entry.failed),
+    complete: !unresolved && !fetchFailed,
+    fetchFailed,
   };
 }
 

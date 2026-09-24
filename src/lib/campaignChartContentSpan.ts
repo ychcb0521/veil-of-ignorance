@@ -102,3 +102,29 @@ export function pickCoarserCampaignInterval(
   const indexB = OVERVIEW_INTERVALS.findIndex(item => item.interval === b);
   return indexA >= indexB ? a : b;
 }
+
+/**
+ * 批量导出盘面（屏幕外 1440px 宽）最多可见的 K 线根数：再多每根不到 1.4px，蜡烛挤成一条色带。
+ * 盘面只画默认 3 倍视窗，所以按这一段数根数。
+ */
+export const BATCH_EXPORT_VISIBLE_CANDLE_LIMIT = 1_000;
+/**
+ * 批量导出一场最多拉取的 K 线根数（约 12 页 × 1500 根）。拉取窗口与详情页一样是 51 倍（同一份 K 线算同一套指标），
+ * 可见根数达到上限时拉取约 17000 根；这条上限只兜住缺少内容边界的旧记录那种异常宽的窗口。
+ */
+export const BATCH_EXPORT_FETCH_CANDLE_LIMIT = 18_000;
+
+/**
+ * 批量导出里用户统一指定的周期：它是下限，而不是被「自动」档的拉取预算（51 倍窗口 6000 根）顶掉。
+ * 旧写法与自动档取粗，3 小时的战役选 1 分钟也只能拿到 5 分钟线，选了等于没选。
+ * 现在只在两种情况放宽：3 倍视窗里按指定周期放不下（BATCH_EXPORT_VISIBLE_CANDLE_LIMIT），
+ * 或整段拉取超出 BATCH_EXPORT_FETCH_CANDLE_LIMIT。放宽后的实际周期写在图里，队列里也会标出。
+ */
+export function pickBatchExportInterval(
+  chosen: CampaignChartInterval,
+  spans: { fetch: CampaignChartContentTimeSpan; visible: CampaignChartContentTimeSpan },
+): CampaignChartInterval {
+  const readable = pickCampaignOverviewInterval(spans.visible, BATCH_EXPORT_VISIBLE_CANDLE_LIMIT);
+  const fetchable = pickCampaignOverviewInterval(spans.fetch, BATCH_EXPORT_FETCH_CANDLE_LIMIT);
+  return pickCoarserCampaignInterval(chosen, pickCoarserCampaignInterval(readable, fetchable));
+}

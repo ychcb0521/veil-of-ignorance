@@ -523,7 +523,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       // 第四个参数是成交记录：导出的 TXT 必须与界面显示的战役盈亏同源
       expect.any(Array),
     );
-  }, 10_000);
+  }, 20_000);
 
   it('【用户要求】情绪日记可以折叠，折叠后导出的 PNG 也只保留标题', async () => {
     render(

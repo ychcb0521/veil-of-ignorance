@@ -82,7 +82,7 @@ function exportFillEvidence(
 }
 
 export type CampaignBoardExportInput = ExportInput & {
-  chartElement: HTMLElement | null;
+  chartElement?: HTMLElement | null;
   chartInterval: string;
   pnlOverview: {
     items: CampaignBoardPnlItem[];
@@ -91,6 +91,25 @@ export type CampaignBoardExportInput = ExportInput & {
   emotionDiary?: EmotionDiaryExportSummary | null;
   /** 页面上情绪日记折叠着时为 true：导出图跟着只画标题栏，不画日记正文与量表。 */
   emotionDiaryCollapsed?: boolean;
+  /** 不传时导出全部模块；单个模块仅在显式 false 时关闭。 */
+  sections?: CampaignBoardExportSections;
+  /** 批量导出共用同一导出时刻，避免每张图的时间随生成进度变化。 */
+  exportedAt?: string;
+  /** 单张默认为当前视图；批量完整战役视图可显式说明，避免误导。 */
+  chartViewLabel?: string;
+  /**
+   * 勾了 K 线盘面、但这段时间交易所没有 K 线（批量导出里的新币 / 已下架合约）：
+   * 不截图、不报错，盘面位置画一块说明，其余模块照常导出。
+   */
+  chartUnavailableNote?: string;
+};
+
+export type CampaignBoardExportSections = {
+  metadata?: boolean;
+  overview?: boolean;
+  emotionDiary?: boolean;
+  chart?: boolean;
+  legs?: boolean;
 };
 
 export type CampaignBoardPnlItem = {
@@ -212,7 +231,11 @@ const FOOTER_H = 24;
 const BOARD_HEADER_H = 92;
 const BOARD_OVERVIEW_MIN_H = 154;
 const BOARD_SECTION_GAP = 18;
-const BOARD_SECTION_LABEL_H = 28;
+/**
+ * 分区标题（「K 线盘面…」「Legs 列表…」）占的高度：标题基线在 +18，下方白框从 -10 起画，
+ * 留到 36 才让白框顶边落在基线下 8px；原来的 28 让白框正好压在基线上，把字的下半截盖掉。
+ */
+const BOARD_SECTION_LABEL_H = 36;
 const BOARD_FOOTER_H = 34;
 const MAX_CANVAS_SIDE_PX = 32_000;
 const MAX_CANVAS_AREA_PX = 180_000_000;
@@ -1272,13 +1295,16 @@ function captureCampaignChartCanvas(chartElement: HTMLElement | null): RenderedC
   return rendered;
 }
 
-async function downloadCanvas(canvas: HTMLCanvasElement, fileName: string): Promise<string> {
-  const blob = await new Promise<Blob>((resolve, reject) => {
+async function canvasPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(nextBlob => {
       if (nextBlob) resolve(nextBlob);
       else reject(new Error('PNG 生成失败'));
     }, 'image/png');
   });
+}
+
+function downloadBlob(blob: Blob, fileName: string): string {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -1288,6 +1314,10 @@ async function downloadCanvas(canvas: HTMLCanvasElement, fileName: string): Prom
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   return fileName;
+}
+
+async function downloadCanvas(canvas: HTMLCanvasElement, fileName: string): Promise<string> {
+  return downloadBlob(await canvasPngBlob(canvas), fileName);
 }
 
 function drawSectionLabel(ctx: CanvasRenderingContext2D, label: string, x: number, y: number) {
@@ -1333,11 +1363,21 @@ export type CampaignBoardOverview = {
   emotionDiaryCollapsed: boolean;
 };
 
+/**
+ * 图里画不画 K 线周期：只有 K 线盘面（含「无 K 线」说明）与盈亏概览（峰值浮盈按这一周期的 K 线路径算）用得到它。
+ * 两块都没勾的图里写「周期 5分钟线」只会让人以为图里有盘面。不传 sections（详情页单张导出）时照旧写。
+ * 批量下载弹窗用同一个判断决定周期单选可不可用、进度区写不写周期。
+ */
+export function boardUsesChartInterval(sections: CampaignBoardExportSections | undefined): boolean {
+  return sections?.chart !== false || sections?.overview !== false;
+}
+
 /** 导出图顶部两块摘要的唯一数据源，避免页面字段演进时漏掉战役原数据或盈亏信息。 */
 export function buildCampaignBoardOverview(input: CampaignBoardExportInput): CampaignBoardOverview {
   const legCounts = campaignLegCounts(input.legs);
   const operationTime = campaignOperationTime(input.legs, input.tradeRecords);
   const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
+  const showChartInterval = boardUsesChartInterval(input.sections);
   const initialMainExposureNotional = computeInitialMainExposureNotional(
     input.campaign,
     input.legs,
@@ -1347,7 +1387,7 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
   return {
     metadataItems: [
       { label: '操作时间', value: operationTime == null ? '—' : fmtClock(operationTime) },
-      { label: 'K 线周期', value: chartIntervalLabel },
+      ...(showChartInterval ? [{ label: 'K 线周期', value: chartIntervalLabel }] : []),
       { label: '方向 / 状态', value: `${input.campaign.direction === 'main_long' ? '主多' : '主空'} / ${campaignStatusLabel(input.campaign.status)}` },
       { label: '战役开始', value: fmtClock(input.campaign.opened_at) },
       { label: '战役结束', value: fmtClock(input.campaign.closed_at) },
@@ -1597,94 +1637,162 @@ export async function exportCampaignLegsListPng(input: ExportInput): Promise<str
   );
 }
 
-export async function exportCampaignBoardPng(input: CampaignBoardExportInput): Promise<string> {
-  const title = campaignKlineTitleName(input.campaign);
-  const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
-  const chart = captureCampaignChartCanvas(input.chartElement);
-  const legs = buildCampaignLegsListCanvas(input, { includeHeader: false, scale: chart.scale });
-  const overview = buildCampaignBoardOverview(input);
-  const width = Math.max(TABLE_WIDTH + MARGIN_X * 2, chart.width + MARGIN_X * 2);
-  const chartDisplayWidth = width - MARGIN_X * 2;
-  const chartDisplayHeight = chart.height * (chartDisplayWidth / chart.width);
-  const contentWidth = width - MARGIN_X * 2;
-  const overviewGap = 16;
-  const overviewWidth = (contentWidth - overviewGap) / 2;
-  const overviewHeight = Math.max(
-    overviewPanelHeight(overview.metadataItems, undefined, overviewWidth),
-    overviewPanelHeight(overview.pnlItems, overview.pnlNote, overviewWidth),
-  );
-  const emotionDiaryHeight = overview.emotionDiary
-    ? campaignEmotionDiaryPanelHeight(overview.emotionDiary, contentWidth, overview.emotionDiaryCollapsed)
-    : 0;
-  const height = BOARD_HEADER_H
-    + overviewHeight
-    + (overview.emotionDiary ? BOARD_SECTION_GAP + emotionDiaryHeight : 0)
-    + BOARD_SECTION_GAP
-    + BOARD_SECTION_LABEL_H
-    + chartDisplayHeight
-    + BOARD_SECTION_GAP
-    + BOARD_SECTION_LABEL_H
-    + legs.height
-    + BOARD_FOOTER_H;
-  const { ctx, rendered } = createRenderedCanvas(width, height, chart.scale);
+const BOARD_CHART_NOTE_H = 72;
 
-  ctx.fillStyle = '#F8FAFC';
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.font = '700 24px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  ctx.fillStyle = '#111827';
-  ctx.fillText(title, MARGIN_X, 42, width - MARGIN_X * 2);
-  ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+function drawChartUnavailableNote(ctx: CanvasRenderingContext2D, note: string, x: number, y: number, width: number) {
+  fillRoundedRect(ctx, x - 10, y - 10, width + 20, BOARD_CHART_NOTE_H, 12, '#FFFFFF');
+  strokeRoundedRect(ctx, x - 10, y - 10, width + 20, BOARD_CHART_NOTE_H, 12, '#E5E7EB', 1);
+  ctx.font = '500 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   ctx.fillStyle = '#64748B';
-  const displayCode = formatCampaignDisplayCode(
-    input.campaign.campaign_code,
-    input.accountName,
-    input.campaign.id,
-  );
-  ctx.fillText(
-    `编号 ${displayCode} · 周期 ${chartIntervalLabel} · 战役原数据 + 盈亏概览${overview.emotionDiary ? ' + 操作日情绪日记' : ''} + K 线盘面（当前视图）+ Legs 列表`,
-    MARGIN_X,
-    68,
-    width - MARGIN_X * 2,
-  );
+  ctx.textAlign = 'center';
+  const lines = wrapCanvasText(ctx, note, width - 40).slice(0, 2);
+  const top = y - 10 + (BOARD_CHART_NOTE_H - lines.length * 18) / 2 + 13;
+  lines.forEach((line, index) => ctx.fillText(line, x + width / 2, top + index * 18, width - 40));
+  ctx.textAlign = 'left';
+}
 
-  let y = BOARD_HEADER_H;
-  drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, undefined, MARGIN_X, y, overviewWidth, overviewHeight);
-  drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, overview.pnlNote, MARGIN_X + overviewWidth + overviewGap, y, overviewWidth, overviewHeight);
-  y += overviewHeight + BOARD_SECTION_GAP;
-
-  if (overview.emotionDiary) {
-    drawEmotionDiaryPanel(
-      ctx,
-      overview.emotionDiary,
-      MARGIN_X,
-      y,
-      contentWidth,
-      emotionDiaryHeight,
-      overview.emotionDiaryCollapsed,
+/** 只生成 PNG，不触发浏览器下载；批量调用可逐张释放画布后打包。 */
+export async function renderCampaignBoardPng(input: CampaignBoardExportInput): Promise<{ blob: Blob; fileName: string }> {
+  const sections = {
+    metadata: input.sections?.metadata !== false,
+    overview: input.sections?.overview !== false,
+    emotionDiary: input.sections?.emotionDiary !== false,
+    chart: input.sections?.chart !== false,
+    legs: input.sections?.legs !== false,
+  };
+  if (!Object.values(sections).some(Boolean)) throw new Error('请至少选择一个导出模块');
+  const temporaryCanvases: HTMLCanvasElement[] = [];
+  try {
+    const title = campaignKlineTitleName(input.campaign);
+    const chartIntervalLabel = formatCampaignChartInterval(input.chartInterval);
+    const chartViewLabel = input.chartViewLabel ?? '当前视图';
+    const chartNote = sections.chart && input.chartUnavailableNote ? input.chartUnavailableNote : null;
+    const chart = sections.chart && !chartNote ? captureCampaignChartCanvas(input.chartElement ?? null) : null;
+    if (chart) temporaryCanvases.push(chart.canvas);
+    const legs = sections.legs ? buildCampaignLegsListCanvas(input, { includeHeader: false, scale: chart?.scale }) : null;
+    if (legs) temporaryCanvases.push(legs.canvas);
+    const overview = buildCampaignBoardOverview(input);
+    const width = Math.max(TABLE_WIDTH + MARGIN_X * 2, (chart?.width ?? 0) + MARGIN_X * 2);
+    const chartDisplayWidth = width - MARGIN_X * 2;
+    const chartDisplayHeight = chart ? chart.height * (chartDisplayWidth / chart.width) : 0;
+    const contentWidth = width - MARGIN_X * 2;
+    const overviewGap = 16;
+    const overviewWidth = sections.metadata && sections.overview ? (contentWidth - overviewGap) / 2 : contentWidth;
+    const overviewHeight = Math.max(
+      sections.metadata ? overviewPanelHeight(overview.metadataItems, undefined, overviewWidth) : 0,
+      sections.overview ? overviewPanelHeight(overview.pnlItems, overview.pnlNote, overviewWidth) : 0,
     );
-    y += emotionDiaryHeight + BOARD_SECTION_GAP;
+    const emotionDiary = sections.emotionDiary ? overview.emotionDiary : null;
+    const emotionDiaryHeight = emotionDiary
+      ? campaignEmotionDiaryPanelHeight(emotionDiary, contentWidth, overview.emotionDiaryCollapsed)
+      : 0;
+    const blockHeights = [
+      overviewHeight,
+      emotionDiaryHeight,
+      chart ? BOARD_SECTION_LABEL_H + chartDisplayHeight : chartNote ? BOARD_SECTION_LABEL_H + BOARD_CHART_NOTE_H - 10 : 0,
+      legs ? BOARD_SECTION_LABEL_H + legs.height : 0,
+    ].filter(value => value > 0);
+    const height = BOARD_HEADER_H + blockHeights.reduce((sum, value) => sum + value, 0)
+      + Math.max(0, blockHeights.length - 1) * BOARD_SECTION_GAP + BOARD_FOOTER_H;
+    const { ctx, rendered } = createRenderedCanvas(width, height, chart?.scale);
+    temporaryCanvases.push(rendered.canvas);
+
+    ctx.fillStyle = '#F8FAFC';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.font = '700 24px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.fillStyle = '#111827';
+    ctx.fillText(title, MARGIN_X, 42, width - MARGIN_X * 2);
+    ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#64748B';
+    const displayCode = formatCampaignDisplayCode(
+      input.campaign.campaign_code,
+      input.accountName,
+      input.campaign.id,
+    );
+    const moduleLabels = [
+      sections.metadata && '战役原数据',
+      sections.overview && '盈亏概览',
+      emotionDiary && '操作日情绪日记',
+      chart && `K 线盘面（${chartViewLabel}）`,
+      chartNote && 'K 线盘面（无 K 线）',
+      legs && 'Legs 列表',
+    ].filter(Boolean);
+    ctx.fillText(
+      `编号 ${displayCode}${boardUsesChartInterval(input.sections) ? ` · 周期 ${chartIntervalLabel}` : ''} · ${moduleLabels.join(' + ')}`,
+      MARGIN_X,
+      68,
+      width - MARGIN_X * 2,
+    );
+
+    let y = BOARD_HEADER_H;
+    if (overviewHeight > 0) {
+      if (sections.metadata) drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, undefined, MARGIN_X, y, overviewWidth, overviewHeight);
+      if (sections.overview) drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, overview.pnlNote,
+        sections.metadata ? MARGIN_X + overviewWidth + overviewGap : MARGIN_X, y, overviewWidth, overviewHeight);
+      y += overviewHeight + BOARD_SECTION_GAP;
+    }
+
+    if (emotionDiary) {
+      drawEmotionDiaryPanel(
+        ctx,
+        emotionDiary,
+        MARGIN_X,
+        y,
+        contentWidth,
+        emotionDiaryHeight,
+        overview.emotionDiaryCollapsed,
+      );
+      y += emotionDiaryHeight + BOARD_SECTION_GAP;
+    }
+
+    if (chart) {
+      drawSectionLabel(ctx, `K 线盘面（${chartIntervalLabel} · ${chartViewLabel}）`, MARGIN_X, y);
+      y += BOARD_SECTION_LABEL_H;
+      fillRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#FFFFFF');
+      strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#E5E7EB', 1);
+      ctx.drawImage(chart.canvas, MARGIN_X, y, chartDisplayWidth, chartDisplayHeight);
+
+      y += chartDisplayHeight + BOARD_SECTION_GAP;
+    } else if (chartNote) {
+      drawSectionLabel(ctx, `K 线盘面（${chartIntervalLabel} · 无 K 线）`, MARGIN_X, y);
+      y += BOARD_SECTION_LABEL_H;
+      drawChartUnavailableNote(ctx, chartNote, MARGIN_X, y, contentWidth);
+      y += BOARD_CHART_NOTE_H - 10 + BOARD_SECTION_GAP;
+    }
+    if (legs) {
+      drawSectionLabel(ctx, `Legs 列表（完整展开 ${input.legs.length}/${input.legs.length} 条）`, MARGIN_X, y);
+      y += BOARD_SECTION_LABEL_H;
+      fillRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#FFFFFF');
+      strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#E5E7EB', 1);
+      // Legs 画布左右自带 MARGIN_X 白边（单独导出 Legs 图时的页边）；拼进整板只裁表格本身，
+      // 表格才正好落在白框里——整块贴上去会让表格右移 MARGIN_X、越出白框并顶到整图右缘。
+      const legsPixelRatio = legs.canvas.width / legs.width;
+      ctx.drawImage(
+        legs.canvas,
+        MARGIN_X * legsPixelRatio, 0, TABLE_WIDTH * legsPixelRatio, legs.canvas.height,
+        MARGIN_X, y, TABLE_WIDTH, legs.height,
+      );
+    }
+
+    ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#94A3B8';
+    ctx.fillText(`导出时间 ${fmtClock(input.exportedAt ?? new Date().toISOString())}`, MARGIN_X, height - 16, width - MARGIN_X * 2);
+
+    return {
+      blob: await canvasPngBlob(rendered.canvas),
+      fileName: `${safeFileName(campaignExportFileBaseName(input.campaign, input.accountName))}.png`,
+    };
+  } finally {
+    // 多战役逐张导出时及时释放像素缓冲；不能清理传入的页面原始 K 线画布。
+    for (const canvas of temporaryCanvases) {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
   }
+}
 
-  drawSectionLabel(ctx, `K 线盘面（${chartIntervalLabel} · 当前视图）`, MARGIN_X, y);
-  y += BOARD_SECTION_LABEL_H;
-  fillRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#FFFFFF');
-  strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, chartDisplayWidth + 20, chartDisplayHeight + 20, 12, '#E5E7EB', 1);
-  ctx.drawImage(chart.canvas, MARGIN_X, y, chartDisplayWidth, chartDisplayHeight);
-
-  y += chartDisplayHeight + BOARD_SECTION_GAP;
-  drawSectionLabel(ctx, `Legs 列表（完整展开 ${input.legs.length}/${input.legs.length} 条）`, MARGIN_X, y);
-  y += BOARD_SECTION_LABEL_H;
-  fillRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#FFFFFF');
-  strokeRoundedRect(ctx, MARGIN_X - 10, y - 10, TABLE_WIDTH + 20, legs.height + 20, 12, '#E5E7EB', 1);
-  ctx.drawImage(legs.canvas, MARGIN_X, y, legs.width, legs.height);
-
-  ctx.font = '500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-  ctx.fillStyle = '#94A3B8';
-  ctx.fillText(`导出时间 ${fmtClock(new Date().toISOString())}`, MARGIN_X, height - 16, width - MARGIN_X * 2);
-
-  return downloadCanvas(
-    rendered.canvas,
-    `${safeFileName(campaignExportFileBaseName(input.campaign, input.accountName))}.png`,
-  );
+export async function exportCampaignBoardPng(input: CampaignBoardExportInput): Promise<string> {
+  const { blob, fileName } = await renderCampaignBoardPng(input);
+  return downloadBlob(blob, fileName);
 }

@@ -494,10 +494,14 @@ describe('JournalCampaignsPage sorting', () => {
     expect(sortRow).toHaveClass('flex', 'flex-wrap', 'gap-x-1');
     // 行首与封面左缘对齐：同一套内边距 + 一条透明 1px 边框抵掉卡片外框
     expect(sortRow).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
-    // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳
+    // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳；
+    // 最末一个是「批量下载」开关——不是排序项，靠 ml-auto 单独贴在这一行最右端
     const children = [...sortRow.children];
     expect(children[0]).toHaveTextContent('排序方式');
-    const sequence = children.slice(1).map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    const batchToggle = children.at(-1)!;
+    expect(batchToggle).toHaveAttribute('data-testid', 'campaign-batch-select-toggle');
+    expect(batchToggle).toHaveClass('ml-auto');
+    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母
     expect(sequence).toEqual([
       'time', 'mirrorTp',

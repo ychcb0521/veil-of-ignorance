@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
@@ -83,12 +83,14 @@ import {
 } from '@/lib/campaignPnlOverview';
 import {
   buildCampaignChartContentTimeSpan,
+  pickBatchExportInterval,
   pickCampaignOverviewInterval,
   pickCoarserCampaignInterval,
   type CampaignChartInterval,
 } from '@/lib/campaignChartContentSpan';
 import {
   fetchLegExitPriceCorrections,
+  fetchLegExitPriceCorrectionsResult,
   resolveLegExecution,
   sameLegExitPriceCorrections,
   type LegExitPriceCorrections,
@@ -98,9 +100,17 @@ import { buildHedgeLegOrdinals } from '@/lib/campaignMainLegOrdinals';
 import {
   campaignStatusLabel,
   exportCampaignBoardPng,
+  renderCampaignBoardPng,
+  type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
+import type {
+  CampaignBatchAccountMetrics,
+  CampaignBatchExportSnapshot,
+  CampaignBatchExportWorkerProps,
+} from '@/lib/campaignBatchExportContext';
+import { ThemeOverride } from '@/contexts/ThemeContext';
 import { buildEmotionDiaryExportSummary } from '@/lib/emotionDiary';
-import { getDecisionEmotionDiaryByDate } from '@/lib/emotionDiaryApi';
+import { getDecisionEmotionDiaryByDate, listDecisionEmotionDiaries } from '@/lib/emotionDiaryApi';
 import { exportCampaignEmotionDiaryTxt } from '@/lib/emotionDiaryTxtExport';
 import { exportCampaignPostReviewsTxt, reviewedCampaignLegs } from '@/lib/campaignReviewTxtExport';
 import {
@@ -113,6 +123,8 @@ import {
   deleteCounterfactual,
   detachCampaignLegFromCampaign,
   getCampaignFullData,
+  getCampaignWithLegs,
+  readUserLocalSnapshot,
   hasMutualFollow,
   listAllCampaigns,
   saveCampaignDeviationNotes,
@@ -560,22 +572,78 @@ function buildCounterfactualChartArtifacts(
   return { markers, timeBoundPriceLines, verticalLines };
 }
 
-type AccountCampaignMetrics = {
-  performance: CampaignPerformanceSummary;
-  asymmetricRisk: AsymmetricRiskMetricsSummary;
-};
+type AccountCampaignMetrics = CampaignBatchAccountMetrics;
 
+/**
+ * 批量导出读一场战役：只读（heal: false），同一批里同一场只读一次（本场与账户级样本共用），
+ * 本机成交快照按账户只读一次；读失败的不进缓存，重试时重新读。
+ */
+async function loadBatchCampaignData(id: string, snapshot: CampaignBatchExportSnapshot) {
+  let pending = snapshot.campaignData.get(id);
+  if (pending) return pending;
+  pending = (async () => {
+    const source = await getCampaignWithLegs(id);
+    const owner = source.campaign.user_id;
+    let local = snapshot.localSnapshots.get(owner);
+    if (!local) {
+      local = readUserLocalSnapshot(owner);
+      snapshot.localSnapshots.set(owner, local);
+    }
+    return getCampaignFullData(id, { heal: false, source, local });
+  })();
+  snapshot.campaignData.set(id, pending);
+  void pending.catch(() => snapshot.campaignData.delete(id));
+  return pending;
+}
+
+/**
+ * 批量导出读操作日情绪日记：一批只按账户读一次整份日记，逐场按日期取；而且只读——不回写本机镜像、不推 user_sim_state。
+ * 详情页照旧走 getDecisionEmotionDiaryByDate（读完顺手合并回写本机镜像）；批量里逐场这样读，
+ * 就是每场一次整份日记的云端上传，与「只读导出」不符。读失败的不进缓存，重试时重新读。
+ */
+function loadBatchEmotionDiary(userId: string, diaryDate: string, snapshot: CampaignBatchExportSnapshot) {
+  let pending = snapshot.emotionDiaries.get(userId);
+  if (!pending) {
+    pending = listDecisionEmotionDiaries(userId, { mirror: false });
+    snapshot.emotionDiaries.set(userId, pending);
+    void pending.catch(() => snapshot.emotionDiaries.delete(userId));
+  }
+  return pending.then(diaries => diaries.find(item => item.diary_date === diaryDate) ?? null);
+}
+
+/**
+ * 导出本场用的平仓价校正。核验时 K 线请求失败（限流、断网）重试就能好：这一场报失败，不把没核验完的盈亏画进图里。
+ * 本机查不到挂着的成交记录（换了浏览器、清过历史成交）重试也不会好：与详情页、详情页单张导出一样按腿快照出图，
+ * 否则这种战役在批量里永远导不出来。
+ */
+async function loadBatchExitCorrections(symbol: string, legs: TradeJournal[], records: TradeRecord[]) {
+  const result = await fetchLegExitPriceCorrectionsResult(symbol, legs, records);
+  if (!result.complete && result.fetchFailed !== false) throw new Error('平仓价核验时 K 线接口出错，请重试；未导出未经核验的盈亏');
+  return result.corrections;
+}
+
+/**
+ * 账户级样本（胜率、DSI/USI 汇总）。平仓价校正与详情页同样宽松——账户里任何一场核验不完整
+ * （换了浏览器、成交记录缺失）都不该让整批每一张图失败。
+ *
+ * 批量导出传 snapshot：整批共用一次读取，每张图同一份样本。读不出的样本先原地重读一次（网络抖动）；
+ * 仍读不出的（那一场自己的数据坏了）按其余场次汇总，并把缺了哪几场交给导出图注明——
+ * 旧写法是整份作废，于是账户里一场没选中的坏数据让整批每一张图都失败，重试也永远失败。
+ * 一场样本都读不出多半是断网，这时整份报失败，可重试。
+ * 详情页（不传 snapshot）维持原样：略过读不出的样本。
+ */
 async function loadAccountCampaignPerformance(
   ownerUserId: string,
   viewerUserId: string,
+  snapshot?: CampaignBatchExportSnapshot,
 ): Promise<AccountCampaignMetrics> {
   const campaigns = ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
-  const settledSamples = await Promise.allSettled(campaigns.map(async item => {
+  const loadSample = async (item: TradeCampaign) => {
     // 账户级样本只是读：这里自己算校正后的口径，不需要（也不该）让每一场都走一遍回写。
     // 此前默认 heal 让打开一个详情页对全部 ~147 场各写一次库，还与本场的回写抢同一行。
-    const details = await getCampaignFullData(item.id, { heal: false });
+    const details = snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false });
     const exitPriceCorrections = await fetchLegExitPriceCorrections(
       details.campaign.symbol,
       details.legs,
@@ -603,7 +671,18 @@ async function loadAccountCampaignPerformance(
       ) / 100
       : null;
     return { campaign: reconciledCampaign, payoffRatio };
-  }));
+  };
+  const settledSamples = await Promise.allSettled(campaigns.map(loadSample));
+  let missing: TradeCampaign[] = [];
+  if (snapshot) {
+    const rejectedIndexes = settledSamples.flatMap((result, index) => (result.status === 'rejected' ? [index] : []));
+    const retried = await Promise.allSettled(rejectedIndexes.map(index => loadSample(campaigns[index])));
+    rejectedIndexes.forEach((index, order) => { settledSamples[index] = retried[order]; });
+    missing = campaigns.filter((_, index) => settledSamples[index].status === 'rejected');
+    if (campaigns.length > 0 && missing.length === campaigns.length) {
+      throw new Error('账户战役样本一场都没读出来（多半是网络中断），请重试');
+    }
+  }
   const samples = settledSamples.flatMap(result => (
     result.status === 'fulfilled' ? [result.value] : []
   ));
@@ -611,7 +690,21 @@ async function loadAccountCampaignPerformance(
   return {
     performance: summarizeCampaignPerformance(samples),
     asymmetricRisk: summarizeAsymmetricRiskMetrics(samples),
+    ...(missing.length ? {
+      missingSampleTitles: missing.map(item => item.title || item.id),
+      missingSampleIds: missing.map(item => item.id),
+      sampleCount: samples.length,
+    } : {}),
   };
+}
+
+/** 账户样本缺场时写进导出图「盈亏概览」下的说明；只影响「不对称风险贡献」（期望按固定 50% 胜率，不读样本）。 */
+function accountSampleNote(metrics: AccountCampaignMetrics | null): string | undefined {
+  const titles = metrics?.missingSampleTitles;
+  if (!titles?.length) return undefined;
+  const shown = titles.slice(0, 2).map(title => `「${title}」`).join('、');
+  const more = titles.length > 2 ? ` 等 ${titles.length} 场` : '';
+  return `账户样本缺 ${titles.length} 场（${shown}${more}读取失败），不对称风险贡献按其余 ${metrics?.sampleCount ?? 0} 场计算。`;
 }
 
 /** 情绪日记折叠态的本机存储键（跨战役共用一个偏好）。 */
@@ -623,8 +716,87 @@ const EMOTION_DIARY_COLLAPSED_STORAGE_KEY = 'journal:campaign-emotion-diary-coll
  */
 const CAMPAIGN_CHART_MIN_HEIGHT = 172 + 80 * 2 + 2 + 24 + 2;
 
-export default function JournalCampaignDetailPage() {
-  const { id } = useParams<{ id: string }>();
+/** 批量导出时屏幕外盘面的固定尺寸：与视口无关，每张图的 K 线盘面一样大。 */
+const BATCH_CHART_SURFACE = { width: 1440, height: 480 } as const;
+
+/**
+ * 批量导出的最后一环：详情页算好的全部数据在这里交给 renderCampaignBoardPng。
+ * 需要 K 线盘面时，先等原生 K 线（蜡烛、视窗、标注）真正画完再截；交易所没有这段 K 线时不截图，改在图里画说明。
+ */
+function CampaignBatchBoardRenderer({
+  input, chartRef, ready, chartRequired, chartOmitted, peakFallback, sampleNote, chartInterval, error, children, onComplete, onError,
+}: {
+  input: CampaignBoardExportInput;
+  chartRef: RefObject<HTMLDivElement>;
+  ready: boolean;
+  chartRequired: boolean;
+  /** 勾了 K 线盘面、但这段时间交易所没有 K 线时的说明；有值时盘面位置改画这段文字。 */
+  chartOmitted: string | null;
+  /** 没画盘面、画了盈亏概览，而交易所没有 K 线：「峰值浮盈」兜底的说明（已拼进 input 的盈亏概览注明，这里只回报给弹窗）。 */
+  peakFallback: string | null;
+  /** 账户样本缺场的说明（图里画了盈亏概览时才有）：单独回报给弹窗，不从盈亏概览的注明里拆——那里还可能拼着兜底说明。 */
+  sampleNote: string | undefined;
+  /** 盘面实际用的周期：回报给弹窗，指定周期被放宽时在队列里标出来。 */
+  chartInterval: CampaignChartInterval;
+  error: string | null;
+  children: (onReady: () => void) => ReactNode;
+  onComplete: CampaignBatchExportWorkerProps['onComplete'];
+  onError: CampaignBatchExportWorkerProps['onError'];
+}) {
+  const [chartReady, setChartReady] = useState(false);
+  const onReady = useCallback(() => setChartReady(true), []);
+  const latestInput = useRef(input);
+  latestInput.current = input;
+  const latestChartInterval = useRef(chartInterval);
+  latestChartInterval.current = chartInterval;
+  const latestNotes = useRef({ peakFallback, sampleNote });
+  latestNotes.current = { peakFallback, sampleNote };
+  useEffect(() => {
+    if (error) { onError(new Error(error)); return; }
+    if (!ready || (chartRequired && !chartReady)) return;
+    let cancelled = false;
+    // 推到微任务里再画：StrictMode 预演 effect 时不会多跑一遍昂贵的画布合成；卸载后迟到的结果一律作废。
+    void Promise.resolve().then(async () => {
+      if (cancelled) return;
+      try {
+        const result = await renderCampaignBoardPng({
+          ...latestInput.current,
+          chartElement: chartRequired ? chartRef.current : null,
+          chartUnavailableNote: chartOmitted ?? undefined,
+        });
+        if (cancelled) return;
+        const notes = latestNotes.current;
+        onComplete({
+          ...result,
+          ...(chartOmitted ? { chartOmitted } : {}),
+          ...(notes.peakFallback ? { peakFallback: notes.peakFallback } : {}),
+          ...(chartRequired ? { chartInterval: latestChartInterval.current } : {}),
+          ...(notes.sampleNote ? { sampleNote: notes.sampleNote } : {}),
+        });
+      } catch (cause) {
+        if (!cancelled) onError(cause instanceof Error ? cause : new Error(String(cause)));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [ready, chartRequired, chartReady, chartOmitted, error, chartRef, onComplete, onError]);
+  // 看板是浅色的：盘面不论应用当前是深是浅都按浅色主题画（图表配色走 ThemeOverride，容器里的 CSS 变量走 light 类），
+  // 否则深色主题的网格线、坐标轴字色画在浅色看板上，网格又黑又粗、标注发灰。
+  return (
+    <div aria-hidden="true" data-testid="campaign-batch-export-surface" className="light bg-background"
+      style={{ position: 'fixed', left: -20000, top: 0, ...BATCH_CHART_SURFACE, pointerEvents: 'none' }}>
+      {chartRequired && (
+        <div ref={chartRef} data-testid="campaign-batch-chart-frame" style={BATCH_CHART_SURFACE}>
+          <ThemeOverride theme="light">{children(onReady)}</ThemeOverride>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
+  const { id: routeId } = useParams<{ id: string }>();
+  const id = batchExport?.campaignId ?? routeId;
+  const batchNeedsKlines = !batchExport || batchExport.options.sections.chart !== false || batchExport.options.sections.overview !== false;
   const nav = useNavigate();
   const location = useLocation();
   const { user, profile } = useAuth();
@@ -705,9 +877,11 @@ export default function JournalCampaignDetailPage() {
   const campaignChartPanelRef = useRef<HTMLDivElement | null>(null);
   // 盘面按可视区取最大高度：面板顶边贴在吸顶页眉下方时，工具栏、盘面到下方常驻图例整块露出、无内滚动；
   // 多出的高度全归主图（VOL / HV 副图固定 80px 不变）。点开的「管理」色块与「标记说明」不计入，往下推。
+  // 批量导出模式下盘面是屏幕外固定 1440×480 的一块：不给面板，hook 就不绑定、不量视口，更不会改它的高度。
+  const detachedChartPanelRef = useRef<HTMLDivElement | null>(null);
   const campaignChartFitHeight = useViewportFitHeight({
     stickyRef: pageHeaderRef,
-    panelRef: campaignChartPanelRef,
+    panelRef: batchExport ? detachedChartPanelRef : campaignChartPanelRef,
     targetRef: campaignChartExportRef,
     minHeight: CAMPAIGN_CHART_MIN_HEIGHT,
   });
@@ -716,14 +890,27 @@ export default function JournalCampaignDetailPage() {
   const [campaignAsymmetricRisk, setCampaignAsymmetricRisk] = useState<AsymmetricRiskMetricsSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
   const [campaignPerformanceError, setCampaignPerformanceError] = useState<string | null>(null);
+  /** 批量导出：账户样本缺场时写进图里「盈亏概览」下的说明（见 accountSampleNote）。 */
+  const [batchSampleNote, setBatchSampleNote] = useState<string | undefined>(undefined);
   const [campaignEmotionDiary, setCampaignEmotionDiary] = useState<DecisionEmotionDiary | null>(null);
   const [campaignEmotionDiaryLoading, setCampaignEmotionDiaryLoading] = useState(false);
+  const [batchMetricsOwnerReady, setBatchMetricsOwnerReady] = useState<string | null>(null);
+  const [batchDiaryReady, setBatchDiaryReady] = useState<string | null>(null);
+  const batchCallbacksRef = useRef(batchExport);
+  batchCallbacksRef.current = batchExport;
+  const batchFailureRef = useRef(false);
+  const reportBatchError = useCallback((error: unknown) => {
+    if (batchFailureRef.current) return;
+    batchFailureRef.current = true;
+    batchCallbacksRef.current?.onError(error instanceof Error ? error : new Error(String(error)));
+  }, []);
   const reviewedLegs = useMemo(() => reviewedCampaignLegs(legs), [legs]);
   const openingSnapshotLegs = useMemo(() => openingSnapshotCampaignLegs(legs), [legs]);
 
   useLayoutEffect(() => {
+    if (batchExport) return;
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-  }, [id]);
+  }, [id, batchExport]);
 
   useEffect(() => {
     // 换战役必须连绝对预设一起重置：否则从某战役的「1月」视图进另一个 symbol，
@@ -746,38 +933,54 @@ export default function JournalCampaignDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!id || !viewerUserId) return;
+    if (!id || !viewerUserId) {
+      if (batchExport) reportBatchError(new Error('请先登录后再导出战役'));
+      return;
+    }
+    if (batchExport && batchExport.userId !== viewerUserId) {
+      reportBatchError(new Error('登录账号已变化，已停止本次导出'));
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
         // 列表页的后台自愈正好在跑这一场：等它落地再读（最多等 2 s），之后在本页的编辑不会被它晚到的写入盖回去
-        await waitForCampaignListHeal(id);
+        if (!batchExport) await waitForCampaignListHeal(id);
         if (cancelled) return;
         // 分支读取失败不是致命错误：战役本身照常打开，「已保存分支」一块显示原因与「重试」，
         // 而不是把人踢回战役列表（分支表偶发超时、权限抖动都不该让整场战役打不开）。
+        // 批量导出不需要反事实分支，直接给空列表。
         const [full, branchesResult] = await Promise.all([
-          getCampaignFullData(id),
-          listCounterfactuals(id).then(
-            branches => ({ branches, error: null as string | null }),
-            (error: unknown) => ({ branches: [] as CampaignCounterfactual[], error: error instanceof Error ? error.message : String(error) }),
-          ),
+          batchExport ? loadBatchCampaignData(id, batchExport.snapshot) : getCampaignFullData(id),
+          batchExport
+            ? Promise.resolve({ branches: [] as CampaignCounterfactual[], error: null as string | null })
+            : listCounterfactuals(id).then(
+              branches => ({ branches, error: null as string | null }),
+              (error: unknown) => ({ branches: [] as CampaignCounterfactual[], error: error instanceof Error ? error.message : String(error) }),
+            ),
         ]);
         if (cancelled) return;
         const savedCounterfactuals = branchesResult.branches;
         const ownCampaign = full.campaign.user_id === viewerUserId;
         const mutual = ownCampaign ? true : await hasMutualFollow(viewerUserId, full.campaign.user_id);
         if (!mutual) {
+          if (batchExport) throw new Error('你已无权查看这场战役，无法导出');
           nav(`/journal/campaigns${location.search}`);
           return;
         }
+        // 只读导出不走自愈读取：在把数据交给页面之前，先显式等到本场平仓价校正拉完（见 loadBatchExitCorrections）。
+        const corrections = batchExport
+          ? await loadBatchExitCorrections(full.campaign.symbol, full.legs, full.tradeRecords)
+          : full.legExitPriceCorrections ?? {};
+        if (cancelled) return;
         setIsOwner(ownCampaign);
         setCampaign(full.campaign);
         setLegs(full.legs);
         setTradeRecords(full.tradeRecords);
         // 自愈路径已经拉过校正：首屏就用它，页眉状态与已实现 P&L 从第一帧起同源，
         // 不再出现「先画盈利、校正到了再翻成亏损」。下面的 effect 随后命中缓存、结果相同。
-        setLegExitPriceCorrections(full.legExitPriceCorrections ?? {});
+        setLegExitPriceCorrections(corrections);
         setPendingOrders(full.pendingOrders);
         setReverseHedgeOrders(full.reverseHedgeOrders);
         setForeignLiveOrders(full.foreignLiveOrders ?? []);
@@ -804,6 +1007,10 @@ export default function JournalCampaignDetailPage() {
         ));
       } catch (error) {
         if (!cancelled) {
+          if (batchExport) {
+            reportBatchError(error);
+            return;
+          }
           toast.error(error instanceof Error ? error.message : String(error));
           nav(`/journal/campaigns${location.search}`);
         }
@@ -812,27 +1019,51 @@ export default function JournalCampaignDetailPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds]);
+  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds, batchExport, reportBatchError]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
 
   useEffect(() => {
     if (!campaignOwnerId || !viewerUserId) return;
+    if (batchExport?.options.sections.overview === false) {
+      setCampaignPerformanceLoading(false);
+      setBatchMetricsOwnerReady(campaignOwnerId);
+      return;
+    }
     let cancelled = false;
     setCampaignPerformance(null);
     setCampaignAsymmetricRisk(null);
     setCampaignPerformanceError(null);
     setCampaignPerformanceLoading(true);
-    loadAccountCampaignPerformance(campaignOwnerId, viewerUserId)
+    const cacheKey = `${viewerUserId}:${campaignOwnerId}`;
+    let shared = batchExport?.snapshot.accountMetrics.get(cacheKey);
+    if (!shared) {
+      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot);
+      batchExport?.snapshot.accountMetrics.set(cacheKey, shared);
+      // 失败的那份不留在缓存里：重试时重新读，而不是反复拿到同一个被拒的 Promise。
+      if (batchExport) void shared.catch(() => batchExport.snapshot.accountMetrics.delete(cacheKey));
+    }
+    // 整批共用一份样本；唯一的例外是这份样本恰好缺了本场自己（先前读不出、这次重试读出来了）：
+    // 照用它，本场的图会写「样本缺本场」、占比的分母也不含自己，与详情页对不上。
+    // 这时只为本场重新读一次样本（不进缓存，其余场次仍共用原来那一份、各自注明缺场）。
+    const request = batchExport
+      ? shared.then(result => (result.missingSampleIds?.includes(batchExport.campaignId)
+        ? loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport.snapshot)
+        : result))
+      : shared;
+    request
       .then(result => {
         if (!cancelled) {
           setCampaignPerformance(result.performance);
           setCampaignAsymmetricRisk(result.asymmetricRisk);
+          if (batchExport) setBatchSampleNote(accountSampleNote(result));
+          setBatchMetricsOwnerReady(campaignOwnerId);
         }
       })
       .catch(error => {
         if (!cancelled) {
           setCampaignPerformanceError(error instanceof Error ? error.message : String(error));
+          if (batchExport) reportBatchError(error);
         }
       })
       .finally(() => {
@@ -842,12 +1073,23 @@ export default function JournalCampaignDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [campaignOwnerId, viewerUserId]);
+  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
-    return campaign.closed_at ?? new Date(getEffectiveTime(campaign.symbol)).toISOString();
-  }, [campaign, getEffectiveTime]);
+    if (campaign.closed_at) return campaign.closed_at;
+    if (batchExport) {
+      // 复盘模式下的「当前时刻」不是墙上时钟：每个标的在一批里只取一次，
+      // 进行中的战役不会因为导出途中回放在走而前后几张图的截止时间不一致。
+      let time = batchExport.snapshot.effectiveTimes.get(campaign.symbol);
+      if (time == null) {
+        time = getEffectiveTime(campaign.symbol);
+        batchExport.snapshot.effectiveTimes.set(campaign.symbol, time);
+      }
+      return new Date(time).toISOString();
+    }
+    return new Date(getEffectiveTime(campaign.symbol)).toISOString();
+  }, [campaign, getEffectiveTime, batchExport]);
   const objectiveOperationTime = useMemo(
     () => campaignOperationTime(legs, tradeRecords),
     [legs, tradeRecords],
@@ -862,14 +1104,17 @@ export default function JournalCampaignDetailPage() {
   );
 
   useEffect(() => {
-    if (!viewerUserId || !isOwner || !campaignOperationDate) {
+    if (!viewerUserId || !isOwner || !campaignOperationDate || batchExport?.options.sections.emotionDiary === false) {
       setCampaignEmotionDiary(null);
       setCampaignEmotionDiaryLoading(false);
+      setBatchDiaryReady(`${id}:${campaignOperationDate}`);
       return;
     }
     let cancelled = false;
     setCampaignEmotionDiaryLoading(true);
-    getDecisionEmotionDiaryByDate(viewerUserId, campaignOperationDate)
+    (batchExport
+      ? loadBatchEmotionDiary(viewerUserId, campaignOperationDate, batchExport.snapshot)
+      : getDecisionEmotionDiaryByDate(viewerUserId, campaignOperationDate))
       .then(diary => {
         if (!cancelled) setCampaignEmotionDiary(diary);
       })
@@ -877,15 +1122,19 @@ export default function JournalCampaignDetailPage() {
         if (!cancelled) {
           setCampaignEmotionDiary(null);
           console.warn('[JournalCampaignDetailPage] 读取操作日情绪日记失败', error);
+          if (batchExport) reportBatchError(new Error('操作日情绪日记读取失败，请重试'));
         }
       })
       .finally(() => {
-        if (!cancelled) setCampaignEmotionDiaryLoading(false);
+        if (!cancelled) {
+          setCampaignEmotionDiaryLoading(false);
+          setBatchDiaryReady(`${id}:${campaignOperationDate}`);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [campaignOperationDate, isOwner, viewerUserId]);
+  }, [campaignOperationDate, isOwner, viewerUserId, batchExport, id, reportBatchError]);
   /**
    * 情绪日记折叠与否。折叠态会一并带进 PNG 导出：用户把它收起来，
    * 多半就是不想让这段私人记录出现在要分享的图里。
@@ -1005,11 +1254,23 @@ export default function JournalCampaignDetailPage() {
   // 于是「点预设」的那一帧窗口已经是 30 天、interval 还停在 1m，
   // useReplayKlines 的 effect 先跑起来就是 43200 根 / 29 个串行请求。
   // 手动挡（intervalTouched）在倍率视图下原样保留；绝对预设下只保证不比可读下限更细。
+  // 批量导出里统一指定的周期是下限：只在 3 倍视窗放不下或拉取过多时放宽（见 pickBatchExportInterval）。
+  const batchInterval = batchExport?.options.interval;
   const effectiveInterval = useMemo<Interval>(() => {
+    if (batchInterval && batchInterval !== 'auto') {
+      return pickBatchExportInterval(batchInterval, {
+        fetch: { startMs: campaignKlineTimeWindow.fromTime, endMs: campaignKlineTimeWindow.toTime },
+        visible: { startMs: campaignKlineVisibleRange.fromTime, endMs: campaignKlineVisibleRange.toTime },
+      });
+    }
     if (!intervalTouched) return overviewInterval;
     if (chartRangeSelection.kind !== 'absolute') return interval;
     return pickCoarserCampaignInterval(interval, overviewInterval);
-  }, [chartRangeSelection, interval, intervalTouched, overviewInterval]);
+  }, [
+    chartRangeSelection, interval, intervalTouched, overviewInterval, batchInterval,
+    campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime,
+    campaignKlineVisibleRange.fromTime, campaignKlineVisibleRange.toTime,
+  ]);
 
   const {
     klines,
@@ -1019,7 +1280,7 @@ export default function JournalCampaignDetailPage() {
     fromTime: campaignKlineFromTime,
     toTime: campaignKlineToTime,
   } = useCampaignKlines(
-    campaign?.symbol ?? '',
+    batchNeedsKlines ? campaign?.symbol ?? '' : '',
     campaign?.opened_at ?? new Date().toISOString(),
     effectiveClosedAt,
     effectiveInterval,
@@ -1039,6 +1300,7 @@ export default function JournalCampaignDetailPage() {
    */
   const campaignSymbol = campaign?.symbol;
   useEffect(() => {
+    if (batchExport) return;
     if (!campaignSymbol || legs.length === 0 || tradeRecords.length === 0) {
       setLegExitPriceCorrections(prev => (sameLegExitPriceCorrections(prev, EMPTY_LEG_EXIT_PRICE_CORRECTIONS) ? prev : EMPTY_LEG_EXIT_PRICE_CORRECTIONS));
       return;
@@ -1056,7 +1318,7 @@ export default function JournalCampaignDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [campaignSymbol, legs, tradeRecords]);
+  }, [campaignSymbol, legs, tradeRecords, batchExport]);
 
   const accuracy = useMemo(
     () => (campaign
@@ -1099,8 +1361,8 @@ export default function JournalCampaignDetailPage() {
     [campaign, legs, settlement],
   );
   const currentAccountEquity = useMemo(
-    () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
-    [balance, positionsMap, priceMap],
+    () => batchExport ? batchExport.snapshot.currentAccountEquity ?? 0 : computeCurrentAccountEquity(balance, positionsMap, priceMap),
+    [balance, positionsMap, priceMap, batchExport],
   );
   const campaignMetricValues = useMemo(() => {
     if (!campaign || !displayCampaign || !accuracy) return null;
@@ -1253,6 +1515,7 @@ export default function JournalCampaignDetailPage() {
     [campaign],
   );
   useEffect(() => {
+    if (batchExport) return;
     if (!hiddenCounterfactualStorageKey) {
       setHiddenCounterfactualIds([]);
       return;
@@ -1264,7 +1527,7 @@ export default function JournalCampaignDetailPage() {
     } catch {
       setHiddenCounterfactualIds([]);
     }
-  }, [hiddenCounterfactualStorageKey]);
+  }, [hiddenCounterfactualStorageKey, batchExport]);
   const persistHiddenCounterfactualIds = useCallback((next: string[]) => {
     if (!hiddenCounterfactualStorageKey) return;
     try {
@@ -1304,6 +1567,7 @@ export default function JournalCampaignDetailPage() {
     [campaign],
   );
   useEffect(() => {
+    if (batchExport) return;
     if (!hiddenReverseOrderStorageKey) {
       setHiddenReverseHedgeOrderIds([]);
       return;
@@ -1315,7 +1579,7 @@ export default function JournalCampaignDetailPage() {
     } catch {
       setHiddenReverseHedgeOrderIds([]);
     }
-  }, [hiddenReverseOrderStorageKey]);
+  }, [hiddenReverseOrderStorageKey, batchExport]);
   const persistHiddenReverseHedgeOrderIds = useCallback((next: string[]) => {
     if (!hiddenReverseOrderStorageKey) return;
     try {
@@ -1541,6 +1805,7 @@ export default function JournalCampaignDetailPage() {
   }, [campaign, id]);
 
   if (loading || !campaign || !accuracy) {
+    if (batchExport) return null;
     return (
       <div className="min-h-screen bg-background p-6 space-y-4">
         <Skeleton className="h-16 w-full bg-card" />
@@ -1881,11 +2146,8 @@ export default function JournalCampaignDetailPage() {
     }
   };
 
-  const handleExportCampaignBoardPng = async () => {
-    if (!campaign || legsExporting) return;
-    try {
-      setLegsExporting(true);
-      const fileName = await exportCampaignBoardPng({
+  /** batchOverviewNote：批量导出写在「盈亏概览」下的注明（K 线兜底说明、账户样本缺场）；详情页单张导出不传。 */
+  const buildBoardExportInput = (batchOverviewNote?: string): CampaignBoardExportInput => ({
         // 标题 slug（profit / loss）、文件名、「方向 / 状态」、「最终 R」全部读派生后的行，
         // 与图中 Legs 合计、盈亏概览同一份校正。
         campaign: displayCampaign ?? campaign,
@@ -1901,7 +2163,7 @@ export default function JournalCampaignDetailPage() {
         chartElement: campaignChartExportRef.current,
         chartInterval: effectiveInterval,
         pnlOverview: {
-          // rightColumn 要带上：导出图与页面一样按两栏从上往下排（递进链在右栏）
+          // rightColumn 要带上：导出图与页面一样按两栏从上往下排（左栏递进链、右栏结果与仓位）
           items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn }) => ({
             key,
             label,
@@ -1909,10 +2171,22 @@ export default function JournalCampaignDetailPage() {
             color,
             rightColumn,
           })),
+          ...(batchOverviewNote ? { note: batchOverviewNote } : {}),
         },
         emotionDiary: campaignEmotionDiarySummary,
-        emotionDiaryCollapsed,
+        emotionDiaryCollapsed: batchExport ? false : emotionDiaryCollapsed,
+        ...(batchExport ? {
+          sections: batchExport.options.sections,
+          exportedAt: batchExport.snapshot.exportedAt,
+          chartViewLabel: '完整战役 · 前后上下文',
+        } : {}),
       });
+
+  const handleExportCampaignBoardPng = async () => {
+    if (!campaign || legsExporting) return;
+    try {
+      setLegsExporting(true);
+      const fileName = await exportCampaignBoardPng(buildBoardExportInput());
       toast.success('交易战役完整图片已保存为 PNG', { description: fileName });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -1969,6 +2243,55 @@ export default function JournalCampaignDetailPage() {
     }
     nav(`/journal/campaigns${location.search}`);
   };
+
+  if (batchExport) {
+    const chartSelected = batchExport.options.sections.chart !== false;
+    const overviewSelected = batchExport.options.sections.overview !== false;
+    // 接口正常、但交易所就是没有这段 K 线（新币上线前、已下架的老合约）：重试也不会有，不算失败。
+    // 盘面位置改画说明；「峰值浮盈」缺了 K 线路径，与详情页一样只能按已实现盈亏兜底，说明里点明。
+    const klinesAbsent = batchNeedsKlines && !klinesLoading && !klinesError && klines.length === 0;
+    // 「峰值浮盈」那半句只在图里画了盈亏概览时才说：没画概览的图里读不到这一项。
+    const chartOmitted = chartSelected && klinesAbsent
+      ? `交易所没有这段时间的 ${campaign.symbol} K 线，盘面从略${overviewSelected ? '；「峰值浮盈」缺少 K 线路径，按已实现盈亏兜底' : ''}。`
+      : null;
+    // 反过来，只画盈亏概览、没画盘面时，没有盘面位置可写：兜底说明写在盈亏概览下面，队列里同样标「无 K 线」。
+    const peakFallback = !chartSelected && overviewSelected && klinesAbsent
+      ? `交易所没有这段时间的 ${campaign.symbol} K 线：「峰值浮盈」缺少 K 线路径，按已实现盈亏兜底。`
+      : null;
+    const sampleNote = overviewSelected ? batchSampleNote : undefined;
+    return <CampaignBatchBoardRenderer
+      // 两句都以「。」收尾，直接相接（全角句号后不再加空格）
+      input={buildBoardExportInput([peakFallback, sampleNote].filter(Boolean).join('') || undefined)}
+      chartRef={campaignChartExportRef}
+      ready={!batchFailureRef.current && (!batchNeedsKlines || !klinesLoading) && !campaignPerformanceLoading && !campaignEmotionDiaryLoading
+        && batchMetricsOwnerReady === campaign.user_id && batchDiaryReady === `${id}:${campaignOperationDate}`}
+      chartRequired={chartSelected && !klinesAbsent}
+      chartOmitted={chartOmitted}
+      peakFallback={peakFallback}
+      sampleNote={sampleNote}
+      chartInterval={effectiveInterval}
+      error={batchNeedsKlines && klinesError ? `K 线加载失败：${klinesError}` : null}
+      onComplete={batchExport.onComplete}
+      onError={reportBatchError}
+    >{onReady => !klinesLoading && klines.length > 0 && !klinesError ? <ReplayKlineChart
+      key={`${campaign.id}:${effectiveInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
+      klines={klines}
+      currentTime={chartCurrentTime}
+      intervalMs={intervalToMs(effectiveInterval)}
+      symbol={campaign.symbol}
+      markers={displayMarkers}
+      timeBoundPriceLines={displayPriceLines}
+      verticalLines={displayVerticalLines}
+      fitAll
+      initialVisibleStartTime={campaignKlineVisibleRange.fromTime}
+      initialVisibleEndTime={campaignKlineVisibleRange.toTime}
+      showLastPriceLine={false}
+      viewportCenterTime={chartViewportCenterTime}
+      timezone={LOCAL_TIME_ZONE}
+      onRenderReady={onReady}
+      onRenderError={reportBatchError}
+    /> : null}</CampaignBatchBoardRenderer>;
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground">

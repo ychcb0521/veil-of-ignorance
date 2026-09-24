@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Component, useMemo, type ReactNode } from 'react';
 import { CandlestickChart, type AnalysisChartAnnotations, type AnalysisDraggablePriceLine, type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import type { KlineData } from '@/hooks/useBinanceData';
 import {
@@ -41,6 +41,16 @@ interface Props {
   onSelectVerticalLine?: (id: string) => void;
   /** 点击可点选的限时价格线（委托线）时，返回它的 selectId。 */
   onSelectTimeBoundPriceLine?: (id: string) => void;
+  /** 原生蜡烛、视窗与标注都已提交并画完时回调（批量导出据此截图）。 */
+  onRenderReady?: () => void;
+  onRenderError?: (error: Error) => void;
+}
+
+class ReplayChartRenderBoundary extends Component<{ children: ReactNode; onError: (error: Error) => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) { this.props.onError(error); }
+  render() { return this.state.failed ? null : this.props.children; }
 }
 
 function inferReplayPricePrecision(
@@ -98,6 +108,8 @@ export function ReplayKlineChart({
   onDragVerticalLine,
   onSelectVerticalLine,
   onSelectTimeBoundPriceLine,
+  onRenderReady,
+  onRenderError,
 }: Props) {
   const normalizedKlines = useMemo(() => normalizeReplayKlines(klines), [klines]);
 
@@ -170,7 +182,7 @@ export function ReplayKlineChart({
     );
   }
 
-  return (
+  const chart = (
     <CandlestickChart
       data={replayData}
       symbol={symbol}
@@ -190,7 +202,9 @@ export function ReplayKlineChart({
       onDragVerticalLine={onDragVerticalLine}
       onSelectVerticalLine={onSelectVerticalLine}
       onSelectTimeBoundPriceLine={onSelectTimeBoundPriceLine}
+      onAnalysisRenderReady={onRenderReady}
       timezone={timezone}
     />
   );
+  return onRenderError ? <ReplayChartRenderBoundary onError={onRenderError}>{chart}</ReplayChartRenderBoundary> : chart;
 }

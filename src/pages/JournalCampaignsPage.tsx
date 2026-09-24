@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement } from 'react';
+import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -8,16 +8,20 @@ import {
   CalendarRange,
   ChartScatter,
   ChevronDown,
+  Download,
   FolderPlus,
   Layers,
+  ListChecks,
   RotateCcw,
   Sigma,
   SlidersHorizontal,
   Star,
   Trash2,
+  X,
 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { BackButton } from '@/components/journal/BackButton';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
   CampaignMetricScatterPlot,
   type CampaignMetricChartView,
@@ -103,7 +107,21 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
+import { orderedCampaignExportTargets, retainCampaignSelection, toggleCampaignSelection, type CampaignExportTarget } from '@/lib/campaignBatchSelection';
 const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
+const LazyCampaignBatchExportDialog = lazy(() => import('@/components/journal/CampaignBatchExportDialog')
+  .then(module => ({ default: module.CampaignBatchExportDialog })));
+
+/**
+ * 批量下载弹窗是按需加载的一块代码：加载失败（断网、发版后旧页面拿不到新分块）只关掉弹窗并提示，
+ * 不能让错误一路冒上去把整张战役列表卸掉成白屏。
+ */
+class BatchExportLoadBoundary extends Component<{ children: ReactNode; onError: (error: Error) => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) { this.props.onError(error); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
 
 /** 列表行加上依赖全表统计的四个数（期望与不对称风险贡献）。 */
 type CampaignMetricData = CampaignCardData & {
@@ -1409,6 +1427,8 @@ function statSignTone(value: number | null | undefined): string {
 
 /** 封面标题旁的标签（方向 / 标的 / 杠杆 / 仓位击穿 / 编号）统一高度与圆角。 */
 const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
+/** 批量下载选择条里的次级按钮：与排序按钮同高同字号，平时只有淡边框。 */
+const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/60 bg-background/60 px-2 text-foreground/80 transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40';
 /**
  * 数值：11px 等宽。格宽按列表里最宽的读数估算（只会偏宽），正常不会截断；省略号只是兜底，
  * 万一装不下也在本格内收住、不压到隔壁一格。行高给足 16px。
@@ -1425,6 +1445,9 @@ type CampaignCardProps = {
   busy: boolean;
   isOwnCampaign: boolean;
   campaignAccountName: string;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelection?: (campaignId: string) => void;
   onOpen: (campaignId: string) => void;
   onToggleDetails: (event: MouseEvent<HTMLButtonElement>, campaignId: string) => void;
   onImportanceChange: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign, weight: number) => void;
@@ -1442,6 +1465,9 @@ const CampaignCard = memo(function CampaignCard({
   busy,
   isOwnCampaign,
   campaignAccountName,
+  selectionMode = false,
+  selected = false,
+  onToggleSelection,
   onOpen,
   onToggleDetails,
   onImportanceChange,
@@ -1507,8 +1533,15 @@ const CampaignCard = memo(function CampaignCard({
   return (
     <div
       data-testid="campaign-card"
-      onClick={() => onOpen(campaign.id)}
-      className="group relative mb-3.5 cursor-pointer overflow-hidden rounded-md border border-border bg-card shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow,background-color] last:mb-0 hover:border-foreground/20 hover:bg-accent/20 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)]"
+      data-selected={selectionMode ? selected : undefined}
+      onClick={() => selectionMode ? onToggleSelection?.(campaign.id) : onOpen(campaign.id)}
+      className={`group relative mb-3.5 cursor-pointer overflow-hidden rounded-md border shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow,background-color] last:mb-0 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)] ${
+        selectionMode && selected
+          // 选中：琥珀描边 + 极淡琥珀底，与选择模式按钮同一种强调色；左侧状态色条照旧，盈亏一眼仍读得出。
+          // 琥珀底叠在卡片底色上（背景图层），不是替掉卡片底色：深色主题里只剩 3.5% 琥珀叠在页面底色上，选中的卡反而比没选中的更暗、像陷下去一块。
+          ? 'border-[#F0B90B]/60 bg-card bg-[linear-gradient(rgba(240,185,11,0.05),rgba(240,185,11,0.05))] ring-1 ring-[#F0B90B]/25 hover:border-[#F0B90B]/80'
+          : 'border-border bg-card hover:border-foreground/20 hover:bg-accent/20'
+      }`}
     >
       <span
         aria-hidden="true"
@@ -1516,8 +1549,21 @@ const CampaignCard = memo(function CampaignCard({
       />
       <div className="flex flex-col gap-2 px-4 py-2.5 sm:px-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          {/* 批量下载的选择模式：标题前一枚勾选框（点整张卡也能切换）；平时不占位。封面指标行在下一行，勾选框不挪动逐列对齐。
+              勾选框与状态圆点都对齐标题那一行（行高 20px 的中线）：手机上标签折成几行时，它们不会跑到中间那行（杠杆 / 编号）旁边。 */}
+          {selectionMode && (
+            <input
+              type="checkbox"
+              checked={selected}
+              aria-label={`选择战役：${campaign.title}`}
+              data-testid="campaign-select-checkbox"
+              className="mt-[3px] h-3.5 w-3.5 shrink-0 cursor-pointer self-start accent-[#F0B90B] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 dark:[color-scheme:dark]"
+              onClick={event => event.stopPropagation()}
+              onChange={() => onToggleSelection?.(campaign.id)}
+            />
+          )}
           {/* 状态圆点用实色（与左侧色条同一套），淡底色的圆点在浅色主题里几乎看不见 */}
-          <span aria-hidden="true" className={`inline-flex h-1.5 w-1.5 shrink-0 rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
+          <span aria-hidden="true" data-testid="campaign-status-dot" className={`mt-[7px] inline-flex h-1.5 w-1.5 shrink-0 self-start rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
           {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
@@ -1582,6 +1628,7 @@ const CampaignCard = memo(function CampaignCard({
         <div className="flex shrink-0 flex-wrap items-center gap-1 self-end lg:self-auto" onClick={(event) => event.stopPropagation()}>
           <button
             type="button"
+            data-testid="campaign-details-toggle"
             aria-expanded={detailsExpanded}
             aria-label={detailsExpanded ? '收起战役详情' : '展开战役详情'}
             title={detailsExpanded ? '收起战役详情' : '展开战役详情'}
@@ -1857,6 +1904,125 @@ export default function JournalCampaignsPage() {
   const [deletedCampaigns, setDeletedCampaigns] = useState<TradeCampaign[]>([]);
   const [deletedBusyId, setDeletedBusyId] = useState<string | null>(null);
   const [expandedCampaignIds, setExpandedCampaignIds] = useState<Set<string>>(() => new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [selectFirstCount, setSelectFirstCount] = useState('10');
+  const [exportTargets, setExportTargets] = useState<CampaignExportTarget[] | null>(null);
+  const toggleExportSelection = useCallback((id: string) => setSelectedCampaignIds(current => toggleCampaignSelection(current, id)), []);
+  useEffect(() => {
+    setSelectionMode(false); setSelectedCampaignIds(new Set()); setExportTargets(null);
+  }, [userId]);
+  const batchToggleRef = useRef<HTMLButtonElement | null>(null);
+  const selectionBarRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  /** 退出选择模式后要聚焦的元素（在列表按退出后的状态重渲染之后取）。 */
+  const exitFocusRef = useRef<(() => HTMLElement | null | undefined) | null>(null);
+  /**
+   * 退出选择模式（Esc、底部浮条上的「退出选择」）。焦点原先在选择条或浮条里时，它们随即卸载，焦点会掉到 <body>：
+   * 改交给「批量下载」开关；焦点原先在卡片勾选框上时，交给同一张卡片的「展开详情」，键盘位置不跳走。
+   * preventScroll：从很下面的浮条退出时，焦点回到页顶的开关不该把页面拽回去。
+   */
+  const exitSelectionMode = useCallback(() => {
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const fromToolbar = Boolean(active && (selectionBarRef.current?.contains(active) || dockRef.current?.contains(active)));
+    const card = !fromToolbar && active?.matches('[data-testid="campaign-select-checkbox"]')
+      ? active.closest('[data-testid="campaign-card"]')
+      : null;
+    exitFocusRef.current = fromToolbar
+      ? () => batchToggleRef.current
+      : card
+        ? () => card.querySelector<HTMLElement>('[data-testid="campaign-details-toggle"]')
+        : null;
+    setSelectionMode(false);
+  }, []);
+  useEffect(() => {
+    if (selectionMode) return;
+    const pick = exitFocusRef.current;
+    exitFocusRef.current = null;
+    const target = pick?.();
+    if (target?.isConnected) target.focus({ preventScroll: true });
+  }, [selectionMode]);
+  // 选择模式下按 Esc 退出（已选保留）；弹窗、浮层或正在打字的输入框自己要用 Esc 时不抢。
+  // 勾选框、单选框不算「打字」：刚勾完一张卡片焦点就停在勾选框上，这时 Esc 也要能退出。
+  useEffect(() => {
+    if (!selectionMode || exportTargets) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable) return;
+      if (target?.closest('input:not([type="checkbox"]):not([type="radio"]), textarea, select, [role="dialog"], [data-radix-popper-content-wrapper]')) return;
+      if (document.querySelector('[data-radix-popper-content-wrapper]')) return;
+      exitSelectionMode();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectionMode, exportTargets, exitSelectionMode]);
+  const barExportButtonRef = useRef<HTMLButtonElement | null>(null);
+  const dockExportButtonRef = useRef<HTMLButtonElement | null>(null);
+  /** 打开批量下载弹窗的是哪一个「下载选中」（选择条上的 / 底部浮条上的）：关弹窗后焦点还给它。 */
+  const exportOpenerRef = useRef<'bar' | 'dock'>('bar');
+  /** 这次关弹窗时整批都已下载、退出了选择模式：焦点交给「批量下载」开关。 */
+  const exportFinishedRef = useRef(false);
+  const handleExportDialogClose = useCallback(({ allDownloaded }: { allDownloaded: boolean }) => {
+    exportFinishedRef.current = allDownloaded;
+    setExportTargets(null);
+    // 整批都已下载：任务完成，退回普通浏览（已选保留，再次进入可以接着用）；还有失败或没下载的就留在选择模式。
+    if (allDownloaded) setSelectionMode(false);
+  }, []);
+  /**
+   * 弹窗卸载后（Radix 的 onCloseAutoFocus，此时列表已按关窗后的状态重渲染）把键盘焦点还回来：
+   * 整批下载完、退出了选择模式 → 「批量下载」开关；否则 → 打开它的那个「下载选中」，浮条收起了就退到选择条上的那个。
+   * preventScroll：从底部浮条打开时页面可能翻在很下面，焦点回到页顶的开关不该把页面拽回去。
+   */
+  const returnFocusAfterExport = useCallback(() => {
+    const order = exportFinishedRef.current
+      ? [batchToggleRef, barExportButtonRef]
+      : exportOpenerRef.current === 'dock'
+        ? [dockExportButtonRef, barExportButtonRef, batchToggleRef]
+        : [barExportButtonRef, dockExportButtonRef, batchToggleRef];
+    order.map(ref => ref.current).find(node => node?.isConnected && !node.disabled)?.focus({ preventScroll: true });
+  }, []);
+  /** 窄屏：选择条不进吸顶区（见 renderBatchSelectionBar）。 */
+  const narrowViewport = useIsMobile();
+  const stickyControlsRef = useRef<HTMLDivElement | null>(null);
+  const [stickyControlsHeight, setStickyControlsHeight] = useState(0);
+  useEffect(() => {
+    const node = stickyControlsRef.current;
+    if (!selectionMode || !narrowViewport || !node) {
+      setStickyControlsHeight(0);
+      return;
+    }
+    const update = () => setStickyControlsHeight(Math.round(node.getBoundingClientRect().height));
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [selectionMode, narrowViewport]);
+  // 宽屏上选择条在吸顶区里，吸顶区只在列表上半段（统计与散点图那一节）吸顶；往下翻卡片时它会滚出视野。
+  // 窄屏上它本来就跟着页面滚。滚出视野后在屏幕底部浮出一条精简的「已选 N 场 · 下载选中」，勾到哪都能直接下载，不必翻回顶部。
+  const [selectionBarInView, setSelectionBarInView] = useState(true);
+  useEffect(() => {
+    const node = selectionBarRef.current;
+    if (!selectionMode || !node || typeof IntersectionObserver === 'undefined') {
+      setSelectionBarInView(true);
+      return;
+    }
+    // 顶部让出吸顶页眉的 57px（窄屏上再让出吸顶的统计与排序区：选择条滚到它底下也算看不见）。
+    // 选择条要几乎整条露着才算「在视野里」：只看是否相交（露 1px 也算）时，窄屏上它滑到吸顶区底下的那一段，
+    // 「下载选中」已被盖掉一截、浮条却还没出来；这里只要被盖住一点，浮条就接手。
+    const top = 57 + (narrowViewport ? stickyControlsHeight : 0);
+    const observer = new IntersectionObserver(
+      ([entry]) => setSelectionBarInView(entry.isIntersecting && entry.intersectionRatio >= 0.99),
+      { rootMargin: `-${top}px 0px 0px 0px`, threshold: [0, 0.99, 1] },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [selectionMode, narrowViewport, stickyControlsHeight]);
+  const handleExportDialogLoadError = useCallback((error: Error) => {
+    setExportTargets(null);
+    toast.error('批量下载没能打开，请刷新页面后重试', { description: error.message });
+  }, []);
   const [bulkCloseOpen, setBulkCloseOpen] = useState(false);
   const [bulkClosing, setBulkClosing] = useState(false);
   const [includeUnsettled, setIncludeUnsettled] = useState(false);
@@ -1926,6 +2092,9 @@ export default function JournalCampaignsPage() {
       operationRange,
     ));
   }, [rows, operationRange]);
+  useEffect(() => {
+    if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
+  }, [scopedRows, campaignRowsComplete]);
   /** 因为没有客观操作时间而被时间段挡在外面的场数——不声不响地少几场是不能接受的。 */
   const undatedExcludedCount = useMemo(() => {
     if (isAllRange(operationRange)) return 0;
@@ -2188,6 +2357,17 @@ export default function JournalCampaignsPage() {
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
   const selectedMetricSeries = metricSeriesByKey[metricChartKey];
+  const selectedExportTargets = useMemo(() => orderedCampaignExportTargets(
+    selectedCampaignIds, sortedRows.map(row => row.campaign), scopedRows.map(row => row.campaign),
+  ), [selectedCampaignIds, sortedRows, scopedRows]);
+  const selectedOutsideList = selectedExportTargets.length - sortedRows.filter(row => selectedCampaignIds.has(row.campaign.id)).length;
+  const openExportDialog = (opener: 'bar' | 'dock') => {
+    exportOpenerRef.current = opener;
+    exportFinishedRef.current = false;
+    setExportTargets(selectedExportTargets);
+  };
+  const selectFirstNumber = Number(selectFirstCount);
+  const selectFirstValid = Number.isInteger(selectFirstNumber) && selectFirstNumber >= 1;
   // 「当前打开的是哪份数据」：分布图打开时，盈亏比的排序行按钮也要读成「收起」。
   const openSourceKey: CampaignMetricChartKey = selectedMetricConfig.sourceKey ?? selectedMetricConfig.key;
   /** 同一指标的几种看法（时序 / 分布 / 柱状）；只有一种时不画切换键。 */
@@ -2589,6 +2769,112 @@ export default function JournalCampaignsPage() {
     }),
   ];
 
+  /**
+   * 批量下载的选择条。宽屏上放在吸顶区里（排序行下方），跟着统计与排序一起吸顶；
+   * 窄屏（< 768px）上排序行本身就折成好几行，再叠一条会让吸顶区占掉小半屏，所以放到吸顶区下面、跟着页面滚走，
+   * 滚出视野后由底部浮条（已选 N 场 · 退出选择 · 下载选中）接手。两处只挂一份。
+   */
+  const renderBatchSelectionBar = (detached: boolean) => (
+    <div
+      ref={selectionBarRef}
+      data-testid="campaign-batch-selection-bar"
+      role="toolbar"
+      aria-label="批量下载：选择战役"
+      data-placement={detached ? 'flow' : 'sticky'}
+      className={`flex min-h-10 flex-wrap items-center gap-x-1 gap-y-1 bg-[#F0B90B]/[0.045] py-1.5 text-[10px] text-muted-foreground dark:bg-[#F0B90B]/[0.035] ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET} ${
+        detached
+          // 跟着页面滚走的一条：上面贴着吸顶区的下边框；散点图收起时这一节没有下边框，由它自己收口
+          ? `order-2 ${metricChartOpen ? '' : 'border-b border-border/80'}`
+          : 'order-3 border-t border-[#F0B90B]/20'
+      }`}
+    >
+      <span className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 pr-1 font-medium text-foreground/70" role="status" aria-live="polite">
+        <ListChecks aria-hidden="true" className="h-3.5 w-3.5 text-[#C98500] dark:text-[#F0B90B]" />
+        已选
+        <span data-testid="campaign-batch-selected-count" className="font-mono text-[11px] tabular-nums text-foreground">{selectedExportTargets.length}</span>
+        场
+      </span>
+      <span aria-hidden="true" className="mx-1 hidden h-4 w-px shrink-0 bg-border sm:block" />
+      <button
+        type="button"
+        className={BATCH_BAR_BUTTON}
+        onClick={() => setSelectedCampaignIds(new Set(sortedRows.map(row => row.campaign.id)))}
+        aria-label={`全选列表（${sortedRows.length}）`}
+        title="选中列表里当前显示的全部战役（替换现有选择）"
+      >
+        全选列表<span className="font-mono tabular-nums text-muted-foreground/60">{sortedRows.length}</span>
+      </button>
+      {metricChartOpen && (
+        <button
+          type="button"
+          className={BATCH_BAR_BUTTON}
+          onClick={() => setSelectedCampaignIds(new Set(selectedMetricSeries.points.map(point => point.campaignId)))}
+          aria-label={`全选当前图（${selectedMetricSeries.points.length}）`}
+          title={`选中「${selectedMetricConfig.label}」图上的全部战役（替换现有选择）`}
+        >
+          全选当前图<span className="font-mono tabular-nums text-muted-foreground/60">{selectedMetricSeries.points.length}</span>
+        </button>
+      )}
+      <form
+        noValidate
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded border border-border/60 bg-background/60 pl-1.5 pr-0.5"
+        onSubmit={event => {
+          event.preventDefault();
+          // 超过列表场数就按全部算（不弹浏览器自带的「值必须小于或等于…」提示）
+          if (selectFirstValid) setSelectedCampaignIds(new Set(sortedRows.slice(0, selectFirstNumber).map(row => row.campaign.id)));
+        }}
+      >
+        <label htmlFor="campaign-batch-first-n">前</label>
+        <input
+          id="campaign-batch-first-n"
+          aria-label="选择前几场"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={Math.max(1, sortedRows.length)}
+          value={selectFirstCount}
+          onChange={event => setSelectFirstCount(event.target.value)}
+          className="h-5 w-10 rounded-sm border border-border/70 bg-background px-1 text-center font-mono text-[10px] tabular-nums text-foreground [appearance:textfield] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <span>场</span>
+        <button
+          type="submit"
+          disabled={!selectFirstValid}
+          className="ml-0.5 inline-flex h-5 items-center rounded-sm px-1.5 text-foreground/80 transition-colors hover:bg-foreground/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+          title="按列表当前的排序选中前 N 场（替换现有选择）"
+        >
+          按当前排序选择
+        </button>
+      </form>
+      <button
+        type="button"
+        disabled={selectedCampaignIds.size === 0}
+        className={`${BATCH_BAR_BUTTON} border-transparent`}
+        onClick={() => setSelectedCampaignIds(new Set())}
+      >
+        清空
+      </button>
+      {selectedOutsideList > 0 && (
+        <span data-testid="campaign-batch-outside-note" className="inline-flex h-7 items-center text-[#8F6B00] dark:text-[#E8B21C]">
+          另有 {selectedOutsideList} 场因当前排序口径未显示，仍保留并排在下载队列末尾
+        </span>
+      )}
+      <span className="ml-auto hidden select-none pr-1.5 text-muted-foreground/55 xl:inline">点卡片或散点增减 · Esc 退出</span>
+      <button
+        type="button"
+        disabled={!selectedExportTargets.length || !campaignRowsComplete}
+        onClick={() => openExportDialog('bar')}
+        data-testid="campaign-batch-export-open"
+        ref={barExportButtonRef}
+        className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[#F0B90B] px-2.5 text-[11px] font-medium text-black transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 max-xl:ml-auto"
+      >
+        <Download aria-hidden="true" className="h-3.5 w-3.5" />
+        下载选中
+        <span className="font-mono tabular-nums">{selectedExportTargets.length}</span>
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* 页眉恰好 57px（h-14 + 1px 下边框）：下方统计 / 排序的吸顶 top-[57px] 与它严丝合缝，吸住时不会被压掉一截。 */}
@@ -2622,7 +2908,8 @@ export default function JournalCampaignsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6">
+      {/* 选择模式下底部留出浮条（bottom-4 + h-10）的高度：翻到列表最末，最后一张卡片的指标行不被浮条压住 */}
+      <main className={`mx-auto max-w-[1600px] px-4 py-5 sm:px-6${selectionMode ? ' pb-20' : ''}`}>
         {activeCount > 0 && (
           <button
             type="button"
@@ -2798,6 +3085,7 @@ export default function JournalCampaignsPage() {
         <section className={`mb-5 overflow-visible border-t border-border/80 bg-card/40 ${metricChartOpen ? 'border-b' : ''}`}>
           <div className="flex w-full flex-col">
             <div
+              ref={stickyControlsRef}
               data-testid="campaign-sticky-controls"
               className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
             >
@@ -3089,7 +3377,28 @@ export default function JournalCampaignsPage() {
                 </Popover>
               );
               }))}
+              {/* 批量下载不是排序项：排序按钮照旧左对齐，它单独靠在这一行最右端；进入选择模式后下方展开选择条。 */}
+              <button
+                ref={batchToggleRef}
+                type="button"
+                aria-pressed={selectionMode}
+                data-testid="campaign-batch-select-toggle"
+                disabled={!campaignRowsComplete}
+                title={campaignRowsComplete
+                  ? selectionMode ? '退出选择模式（Esc）；已选的战役保留' : '勾选卡片或点击散点，把多场战役一次下载成 PNG 压缩包'
+                  : '战役还在加载，全部读完后才能批量下载'}
+                onClick={() => setSelectionMode(current => !current)}
+                className={`ml-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border px-2 transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
+                  selectionMode
+                    ? 'border-[#F0B90B]/45 bg-[#F0B90B]/10 font-medium text-[#8F6B00] dark:text-[#E8B21C]'
+                    : 'border-border/70 text-muted-foreground hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85'
+                }`}
+              >
+                {selectionMode ? <X aria-hidden="true" className="h-3 w-3" /> : <Download aria-hidden="true" className="h-3 w-3" />}
+                {selectionMode ? '退出选择' : '批量下载'}
+              </button>
             </div>
+            {selectionMode && !narrowViewport && renderBatchSelectionBar(false)}
             <div
               data-testid="campaign-metrics-strip"
               className={`order-1 flex flex-wrap items-center gap-x-0.5 gap-y-1 bg-[#F0B90B]/[0.04] py-2 text-[10px] text-muted-foreground dark:bg-[#F0B90B]/[0.035] ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
@@ -3681,12 +3990,15 @@ export default function JournalCampaignsPage() {
             </Popover>
           </div>
           </div>
+          {selectionMode && narrowViewport && renderBatchSelectionBar(true)}
           {metricChartOpen ? (
             <div
               ref={metricChartPanelRef}
               id="campaign-odds-scatter-panel"
               data-testid="campaign-odds-scatter-panel"
-              className="order-3 border-t border-border/70 bg-background/35"
+              // isolate：面板自成层叠上下文。图里提示框（z-20）、合并三角（z-10）只在面板内部比层级，
+              // 往下翻时整块面板都在吸顶的统计与排序区（sticky z-10）底下，提示框不会画到吸顶区上面。
+              className="order-3 isolate border-t border-border/70 bg-background/35"
             >
               <div id="campaign-metric-scatter-view">
                 <div className="h-5 px-4 text-right text-[10px] text-muted-foreground" role="status">
@@ -3749,6 +4061,9 @@ export default function JournalCampaignsPage() {
                     distributionSpec={selectedMetricConfig.distribution}
                     onBack={handleChartBack}
                     onSelectCampaign={handleCampaignOpen}
+                    selectionMode={selectionMode}
+                    selectedCampaignIds={selectedCampaignIds}
+                    onToggleCampaign={toggleExportSelection}
                   />
                 ) : campaignLoadError ? null : (
                   <div
@@ -3825,6 +4140,9 @@ export default function JournalCampaignsPage() {
                 busy={busyCampaignId === row.campaign.id}
                 isOwnCampaign={row.campaign.user_id === userId}
                 campaignAccountName={campaignAccountName}
+                selectionMode={selectionMode}
+                selected={selectedCampaignIds.has(row.campaign.id)}
+                onToggleSelection={toggleExportSelection}
                 onOpen={handleCampaignOpen}
                 onToggleDetails={handleCampaignDetailsToggle}
                 onImportanceChange={handleImportanceChange}
@@ -3834,6 +4152,54 @@ export default function JournalCampaignsPage() {
           </div>
         )}
       </main>
+      {selectionMode && !selectionBarInView && !exportTargets && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
+          <div
+            ref={dockRef}
+            data-testid="campaign-batch-dock"
+            role="toolbar"
+            aria-label="批量下载：已选战役"
+            className="pointer-events-auto inline-flex h-10 items-center gap-1 rounded-md border border-[#F0B90B]/35 bg-background/95 pl-3 pr-1 text-[10px] text-muted-foreground shadow-[0_10px_28px_-6px_rgba(15,23,42,0.28)] backdrop-blur-md"
+          >
+            {/* 不再设 aria-live：选择条仍挂在页面上、它的计数已经播报过，这里重复播报只会念两遍 */}
+            <span className="inline-flex shrink-0 select-none items-center gap-1.5 pr-1 font-medium text-foreground/70">
+              <ListChecks aria-hidden="true" className="h-3.5 w-3.5 text-[#C98500] dark:text-[#F0B90B]" />
+              已选
+              <span className="font-mono text-[11px] tabular-nums text-foreground">{selectedExportTargets.length}</span>
+              场
+            </span>
+            <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" />
+            <button type="button" className={`${BATCH_BAR_BUTTON} border-transparent bg-transparent`} onClick={exitSelectionMode} title="退出选择模式（Esc）；已选的战役保留">
+              <X aria-hidden="true" className="h-3 w-3" />退出选择
+            </button>
+            <button
+              type="button"
+              disabled={!selectedExportTargets.length || !campaignRowsComplete}
+              ref={dockExportButtonRef}
+              onClick={() => openExportDialog('dock')}
+              data-testid="campaign-batch-dock-export"
+              className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[#F0B90B] px-2.5 text-[11px] font-medium text-black transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Download aria-hidden="true" className="h-3.5 w-3.5" />
+              下载选中
+              <span className="font-mono tabular-nums">{selectedExportTargets.length}</span>
+            </button>
+          </div>
+        </div>
+      )}
+      {exportTargets && userId && (
+        <BatchExportLoadBoundary key={userId} onError={handleExportDialogLoadError}>
+          <Suspense fallback={<div role="status" className="fixed bottom-5 right-5 z-50 rounded border border-border bg-card px-3 py-2 text-[11px] text-muted-foreground shadow-md">正在准备批量下载…</div>}>
+            <LazyCampaignBatchExportDialog
+              campaigns={exportTargets}
+              userId={userId}
+              currentAccountEquity={currentAccountEquity}
+              onClose={handleExportDialogClose}
+              onReturnFocus={returnFocusAfterExport}
+            />
+          </Suspense>
+        </BatchExportLoadBoundary>
+      )}
       <Dialog open={deletedOpen} onOpenChange={open => void handleDeletedOpenChange(open)}>
         <DialogContent className="max-h-[78vh] max-w-2xl overflow-hidden border-border bg-background p-0 sm:rounded-md">
           <DialogHeader className="border-b border-border px-5 py-4 pr-12">

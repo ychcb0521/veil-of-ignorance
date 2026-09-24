@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval } from '@/lib/campaignChartContentSpan';
+import {
+  buildCampaignChartContentTimeSpan,
+  pickBatchExportInterval,
+  pickCampaignOverviewInterval,
+  pickCoarserCampaignInterval,
+} from '@/lib/campaignChartContentSpan';
 import {
   CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER,
   CAMPAIGN_MIN_CONTEXT_MS,
@@ -207,6 +212,46 @@ describe('pickCampaignOverviewInterval', () => {
       startMs: t('2026-01-01T00:00:00.000Z'),
       endMs: t('2026-02-10T00:00:00.000Z'),
     })).toBe('1h');
+  });
+});
+
+describe('pickBatchExportInterval', () => {
+  const spansFor = (hours: number) => {
+    const opened = t('2026-01-01T00:00:00.000Z');
+    const closed = opened + hours * 3_600_000;
+    const window = buildCampaignKlineTimeWindow(opened, closed, opened, closed);
+    const visible = buildCampaignKlineVisibleRange(window, 3);
+    return {
+      fetch: { startMs: window.fromTime, endMs: window.toTime },
+      visible: { startMs: visible.fromTime, endMs: visible.toTime },
+    };
+  };
+  const autoFor = (hours: number) => pickCampaignOverviewInterval(spansFor(hours).fetch, 6_000);
+
+  it('批量里指定的周期是下限：3 小时的战役选 1 分钟就用 1 分钟，不被自动档的拉取预算顶成 5 分钟', () => {
+    expect(autoFor(3)).toBe('5m');
+    // 旧写法：与自动档取粗
+    expect(pickCoarserCampaignInterval('1m', autoFor(3))).toBe('5m');
+    expect(pickBatchExportInterval('1m', spansFor(3))).toBe('1m');
+    // 20 小时：3 倍视窗 60 小时 = 720 根 5 分钟线
+    expect(pickBatchExportInterval('5m', spansFor(20))).toBe('5m');
+  });
+
+  it('3 倍视窗里放不下（超过 1000 根）才放宽到可读的周期；指定粗周期原样保留', () => {
+    // 6 小时：3 倍视窗 18 小时 = 1080 根 1 分钟线 → 放宽到 5 分钟
+    expect(pickBatchExportInterval('1m', spansFor(6))).toBe('5m');
+    // 3 天：3 倍视窗 9 天 = 2592 根 5 分钟线 → 放宽到 15 分钟
+    expect(pickBatchExportInterval('5m', spansFor(72))).toBe('15m');
+    expect(pickBatchExportInterval('1h', spansFor(1))).toBe('1h');
+    expect(pickBatchExportInterval('15m', spansFor(3))).toBe('15m');
+  });
+
+  it('拉取窗口异常宽（缺内容边界的旧记录）时按拉取根数兜底', () => {
+    const start = t('2026-01-01T00:00:00.000Z');
+    expect(pickBatchExportInterval('1m', {
+      visible: { startMs: start, endMs: start + 3_600_000 },
+      fetch: { startMs: start, endMs: start + 20 * 86_400_000 },
+    })).toBe('5m');
   });
 });
 

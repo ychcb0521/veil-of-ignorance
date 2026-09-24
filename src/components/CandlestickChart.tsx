@@ -241,6 +241,8 @@ interface Props {
   onPricePicked?: (price: number) => void;
   /** Use the main chart engine in read-only analysis surfaces such as replay/campaign review. */
   analysisMode?: boolean;
+  /** 只读导出用：原生时间轴、视窗与标注都画完（连过两帧）后回调一次，截图才不会截到半成品。 */
+  onAnalysisRenderReady?: () => void;
   /** Non-trading overlays rendered by replay and campaign review pages. */
   analysisAnnotations?: AnalysisChartAnnotations;
   /** Optional analysis anchor used to center short replay/campaign windows instead of snapping to the latest candle. */
@@ -481,6 +483,7 @@ function CandlestickChartComponent({
   pickMode,
   onPricePicked,
   analysisMode = false,
+  onAnalysisRenderReady,
   analysisAnnotations,
   analysisFocusTime = null,
   analysisFitAll = false,
@@ -495,6 +498,8 @@ function CandlestickChartComponent({
   onSelectTimeBoundPriceLine,
   timezone = "Asia/Shanghai",
 }: Props) {
+  const expectsAnalysisRenderRef = useRef(Boolean(analysisMode && onAnalysisRenderReady));
+  expectsAnalysisRenderRef.current = Boolean(analysisMode && onAnalysisRenderReady);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const prevDataLenRef = useRef(0);
@@ -901,7 +906,11 @@ function CandlestickChartComponent({
       },
     });
 
-    if (!chart) return;
+    if (!chart) {
+      // 导出场景直接抛给错误边界，当场记为失败，不必干等超时；普通交互图表仍走原来的静默兜底。
+      if (expectsAnalysisRenderRef.current) throw new Error('K 线绘图引擎初始化失败');
+      return;
+    }
 
     chartRef.current = chart;
 
@@ -1880,6 +1889,25 @@ function CandlestickChartComponent({
     };
   }, [analysisAnnotations, data, pricePrecision, analysisDataReadyRevision, theme, propTimeAxisSignature]);
 
+  useEffect(() => {
+    if (!analysisMode || !onAnalysisRenderReady || !analysisDataReadyRevision || !data.length) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const lifecycle = analysisLifecycleRef.current;
+        const chart = chartRef.current;
+        if (!chart || lifecycle.settledSnapshotKey !== lifecycle.requestedSnapshotKey || lifecycle.needsViewport) return;
+        const nativeData = chart.getDataList();
+        if (hashTimeAxis(nativeData.length, index => nativeData[index].timestamp as number) !== propTimeAxisSignature) return;
+        onAnalysisRenderReady();
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [analysisMode, onAnalysisRenderReady, analysisDataReadyRevision, analysisAnnotations, data, propTimeAxisSignature, theme]);
+
   // Campaign What-if: draggable horizontal price lines and vertical timing lines.
   // Drag a price line up/down or a time line left/right, then report the new value on release.
   useEffect(() => {
@@ -2339,6 +2367,7 @@ function areChartPropsEqual(prev: Props, next: Props) {
     prev.pickMode === next.pickMode &&
     prev.onPricePicked === next.onPricePicked &&
     prev.analysisMode === next.analysisMode &&
+    prev.onAnalysisRenderReady === next.onAnalysisRenderReady &&
     prev.analysisAnnotations === next.analysisAnnotations &&
     prev.analysisFocusTime === next.analysisFocusTime &&
     prev.analysisFitAll === next.analysisFitAll &&
