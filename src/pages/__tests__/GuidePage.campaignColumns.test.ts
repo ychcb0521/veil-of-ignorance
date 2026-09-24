@@ -46,6 +46,26 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 旧的按读数定宽、窄屏自然换行的说法不再出现
     expect(guide).not.toContain('列宽按真实最长的读数定');
     expect(guide).not.toContain('卡片按原顺序自然换行');
+    // 【用户要求】「分布要做的非常均匀，美观，不要有没必要的空隙」：宽度按当前列表里实际出现的读数定，不再按理论最长读数写死
+    expect(guide).toContain('每项的宽度按<strong>当前列表里实际出现的读数</strong>定');
+    expect(guide).not.toContain('每项的宽度按它自己最长的真实读数定');
+    // 宽度按整个时间段算、不随排序变：切换排序（会筛掉算不出这一项的战役）时文字不挪，与「高亮只换底色」同一句话不打架
+    expect(page).toContain('const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);');
+    expect(guide).toContain('换一个时间段，宽度跟着这一段的战役重算；<strong>切换排序不改宽度</strong>');
+    expect(guide).toContain('高亮只换底色，切换排序时文字不会挪动');
+    expect(guide).not.toContain('换一个排序或时间段');
+    expect(guide).toContain('首次加载时战役分批到达，宽度可能随新到的读数放宽，加载完就定下来');
+    // 【用户要求】「盈亏比只保留括号内的数字，把百分比部分删除」
+    expect(guide).toContain('<strong>盈亏比只写倍数 b</strong>（如「34.60」「-0.80」），不再写百分数和括号');
+    expect(guide).toContain('页面只写倍数 bᵢ（两位小数，如 34.60、-0.80），不写百分数');
+    expect(guide).toContain('不到 0.005 的读作 0.00、用中性色，不按原始正负上红绿');
+    expect(guide).not.toContain('页面同时显示百分数和括号内数字');
+    expect(guide).not.toContain('76740.80%（767.41）');
+    // 「仓位击穿」挪到标题行、紧跟杠杆倍数
+    expect(guide).toContain('杠杆倍数（仓位击穿的战役紧跟一枚红色的「仓位击穿」标签）');
+    expect(guide).toContain('卡片标题行紧跟杠杆倍数的「仓位击穿」标签');
+    expect(guide).not.toContain('几何期望连同「仓位击穿」徽标');
+    expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
     // 与页面常量一致：手机两列、≥ 640px 左对齐排开
     expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';");
     expect(guide).toContain('重要性放在后面，排在字母之前');

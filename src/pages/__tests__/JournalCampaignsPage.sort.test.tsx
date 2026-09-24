@@ -465,9 +465,8 @@ describe('JournalCampaignsPage sorting', () => {
       for (const card of addCards) {
         const title = cardOrder()[addCards.indexOf(card)];
         const efficiency = pctOf[title] / cardNumber(card, 'campaign-expected-drawdown-pct');
-        // 卡片上盈亏比写作「300.00%（3.00）」：括号里才是 b
-        const payoffText = card.querySelector('[data-testid="campaign-payoff-ratio"]')?.textContent ?? '';
-        const payoff = Number(/（([-+]?\d+(?:\.\d+)?)）/.exec(payoffText)?.[1]);
+        // 【用户要求】卡片上盈亏比只写倍数 b（「3.00」）
+        const payoff = Number(card.querySelector('[data-testid="campaign-payoff-ratio-value"]')?.textContent);
         expect(cardNumber(card, 'campaign-add-efficiency')).toBeCloseTo(payoff / efficiency, 1);
       }
       // 只有做过加仓的战役进这一档：夹具里只有 High Importance（加仓腿盈亏 0，b 仍等于它的涨跌幅倍数 → 恰为 1）
@@ -541,13 +540,30 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cell.children[0].tagName).toBe('DT');
       expect(cell.children[1].tagName).toBe('DD');
       expect(cell).toHaveClass('flex-col', 'px-2.5', 'shrink-0');
-      expect([...cell.classList].some(cls => /^sm:w-\[\d+px\]$/.test(cls))).toBe(true);
+      // 宽度读列表容器上的 CSS 变量，不再是写死的 px
+      expect([...cell.classList].some(cls => /^sm:w-\[var\(--cm-w-\w+\)\]$/.test(cls))).toBe(true);
     }
     // 各张卡的同名项宽度类相同
     for (const row of metricRows) {
       expect([...row.children].map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))))
         .toEqual(cells.map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))));
     }
+    // 【用户要求】「分布要非常均匀，不要有没必要的空隙」：列宽按当前列表里实际出现的读数定，八个变量挂在列表容器上，
+    // 每个都是偶数 px、至少装得下指标名（10px × 字数）+ 左右内边距 20px；所有卡片都在这个容器里
+    const cardList = screen.getByTestId('campaign-card-list');
+    for (const card of screen.getAllByTestId('campaign-card')) expect(cardList).toContainElement(card);
+    const cellVars = cells.map(cell => /^sm:w-\[var\((--cm-w-\w+)\)\]$/.exec([...cell.classList].find(cls => cls.startsWith('sm:w-')) ?? '')?.[1] ?? '');
+    cellVars.forEach((name, index) => {
+      const px = /^(\d+)px$/.exec(cardList.style.getPropertyValue(name))?.[1];
+      expect(px, name).toBeDefined();
+      expect(Number(px) % 2, name).toBe(0);
+      expect(Number(px), name).toBeGreaterThanOrEqual((cells[index].querySelector('dt')?.textContent?.length ?? 0) * 10 + 20);
+    });
+    // 盈亏比这一列：读数 3.00 / 0.50 / -0.80 / —，最宽的「-0.80」5 个半角按 SF Mono ≈ 34.0px，比指标名 30px 宽 → 56px；
+    // 预期回撤：「50.00%」6 个半角按 SF Mono ≈ 40.8px，比指标名 40px 宽 → 62px（按 Menlo 的 39.8px 算会是 60px，Safari 里被省略号截断）
+    expect(screen.getAllByTestId('campaign-payoff-ratio-value').map(node => node.textContent)).toEqual(['3.00', '0.50', '-0.80', '—']);
+    expect(cardList.style.getPropertyValue('--cm-w-captureRate')).toBe('56px');
+    expect(cardList.style.getPropertyValue('--cm-w-expectedDrawdownPct')).toBe('62px');
 
     // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：默认按操作时间排——每张卡的操作时间亮，指标项都不亮
     const lit = (card: HTMLElement) => [...card.querySelectorAll('[data-sort-highlight="true"]')];
@@ -581,6 +597,85 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toHaveClass('w-3');
     expect(screen.getByTestId('campaign-sort-leverage-icon')).not.toHaveClass('xl:hidden');
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toBeEmptyDOMElement();
+  }, 15_000);
+
+  it('【用户要求】封面列宽按当前时间段里的全部战役定：切换排序（哪怕筛掉了撑宽某一列的战役）列宽不变、文字不挪；换时间段才重算', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    const modes = [
+      'mirrorTp', 'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency',
+      'captureRate', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
+    ];
+    const widths = () => {
+      const list = screen.getByTestId('campaign-card-list');
+      return Object.fromEntries(modes.map(mode => [mode, list.style.getPropertyValue(`--cm-w-${mode}`)]));
+    };
+    const initial = widths();
+    // 盈亏比这一列最宽的读数是 Late Close 的「-0.80」（5 个半角按 SF Mono ≈ 34.0px > 指标名 30px）→ 56px
+    expect(initial.captureRate).toBe('56px');
+    for (const mode of modes) expect(initial[mode], mode).toMatch(/^\d+px$/);
+
+    // USI 贡献只收盈利战役：Late Close（「-0.80」）被筛掉，只剩「3.00」「0.50」——列宽仍是 56px，各格位置不动
+    fireEvent.click(screen.getByTestId('campaign-sort-usiContribution'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeLessThan(4));
+    expect(screen.getAllByTestId('campaign-payoff-ratio-value').map(node => node.textContent)).toEqual(['3.00', '0.50']);
+    expect(widths()).toEqual(initial);
+    // 其它会筛掉战役的排序也一样：DSI 贡献只剩 Late Close 一场，涨跌幅倍数 / 盈亏比 / 两个期望 / 杠杆倍数各剩 3 场
+    for (const [mode, count] of [
+      ['dsiContribution', 1], ['mainPriceEfficiency', 3], ['captureRate', 3],
+      ['geometricExpectancy', 3], ['arithmeticExpectancy', 3], ['leverage', 3],
+    ] as const) {
+      fireEvent.click(screen.getByTestId(`campaign-sort-${mode}`));
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card'), mode).toHaveLength(count));
+      expect(widths(), mode).toEqual(initial);
+    }
+
+    // 换时间段：框到 3 月~4 月，只剩 High Importance（3.00）与 Best PnL（0.50）；「-0.80」不在这一段里，
+    // 盈亏比这一列按指标名 30px + 20px = 50px 重算
+    fireEvent.click(screen.getByTestId('campaign-sort-time'));
+    fireEvent.click(screen.getByTestId('campaign-operation-range'));
+    fireEvent.change(screen.getByLabelText('起始日期'), { target: { value: '2026-03-01' } });
+    fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2026-04-30' } });
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
+    expect(screen.getAllByTestId('campaign-payoff-ratio-value').map(node => node.textContent)).toEqual(['3.00', '0.50']);
+    expect(widths().captureRate).toBe('50px');
+  }, 15_000);
+
+  it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，不再按原始正负上红 / 绿', async () => {
+    // Late Close 只亏 0.05 USDT（L = 25 → b = -0.002），读数「0.00」
+    const lateIndex = campaigns.findIndex(campaign => campaign.id === 'late-close');
+    const recordIndex = tradeHistory.findIndex(record => record.id === 'late-close-record');
+    const lateCampaign = campaigns[lateIndex];
+    const lateRecord = tradeHistory[recordIndex];
+    campaigns[lateIndex] = { ...lateCampaign, final_realized_pnl: -0.05 };
+    tradeHistory[recordIndex] = { ...lateRecord, pnl: -0.05 };
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const card = screen.getAllByTestId('campaign-card').find(node => node.textContent?.includes('Late Close')) as HTMLElement;
+      const value = within(card).getByTestId('campaign-payoff-ratio-value');
+      expect(value).toHaveTextContent(/^0\.00$/);
+      expect(value).toHaveClass('text-foreground/85');
+      expect(value.className).not.toMatch(/#DE350B|#F6465D|#00875A|#0ECB81/);
+      // 读数不为 0 的照旧按正负上色
+      const winner = screen.getAllByTestId('campaign-card').find(node => node.textContent?.includes('High Importance')) as HTMLElement;
+      expect(within(winner).getByTestId('campaign-payoff-ratio-value')).toHaveTextContent(/^3\.00$/);
+      expect(within(winner).getByTestId('campaign-payoff-ratio-value').className).toMatch(/#00875A|#0ECB81/);
+    } finally {
+      campaigns[lateIndex] = lateCampaign;
+      tradeHistory[recordIndex] = lateRecord;
+    }
   }, 15_000);
 
   it('【用户要求】涨跌幅 / 涨跌幅倍数 / 加仓效用：双击或右键看公式与例子，浮层里「查看散点图」默认打开分布图（同盈亏比），「时序」仍在', async () => {
@@ -951,6 +1046,51 @@ describe('JournalCampaignsPage sorting', () => {
     expect(card.querySelector('[data-testid="campaign-leverage"]')?.textContent).toBe('20x');
     expect(card.querySelector('[data-testid="campaign-leverage"]')?.getAttribute('title'))
       .toContain('主力开仓那一刻记录的初始杠杆');
+  }, 15_000);
+
+  it('【用户要求】「仓位击穿」挪到标题行、紧跟杠杆标签：与其它小标签同高同圆角、红色，悬停写明含义；几何期望格只留读数', async () => {
+    // High Importance 开主力那一刻的账户总资产改成 1 USDT：下注比例 = 最大预期亏损 ÷ 1 ≥ 100%
+    const hiLegs = legsByCampaign['high-importance'];
+    legsByCampaign['high-importance'] = [{ ...hiLegs[0], pre_account_equity_usdt: 1 }, ...hiLegs.slice(1)];
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const chips = screen.getAllByTestId('campaign-ruinous-sizing');
+      expect(chips).toHaveLength(1);
+      expect(chips[0].closest('[data-testid="campaign-card"]')).toHaveTextContent('High Importance');
+      for (const chip of chips) {
+        const card = chip.closest('[data-testid="campaign-card"]') as HTMLElement;
+        expect(chip).toHaveTextContent(/^仓位击穿$/);
+        // 标题行里紧跟杠杆标签（「3x」）；不在指标行里
+        const leverage = card.querySelector('[data-testid="campaign-leverage"]');
+        expect(leverage).toHaveTextContent('3x');
+        expect(leverage?.nextElementSibling).toBe(chip);
+        expect(within(card).getByTestId('campaign-card-metrics')).not.toContainElement(chip);
+        expect(chip).toHaveClass('h-[18px]', 'rounded-[3px]', 'text-[#DE350B]', 'dark:text-[#F6465D]');
+        // 分子分母都代入：High Importance 的 L = 100 × |100 − 90| ÷ 100 = 10，开仓那一刻的账户总资产 1
+        expect(chip.getAttribute('title')).toContain('下注比例 = 最大预期亏损 ÷ 账户总资产 = 10.00 ÷ 1.00 = 1000.00% ≥ 100%');
+        expect(chip.getAttribute('title')).toContain('≥ 100%');
+        expect(chip.getAttribute('title')).toContain('这一注押上了全部本金');
+        expect(chip.getAttribute('title')).toContain('不进几何期望公式');
+        // 几何期望格：保留 data-ruinous-sizing 与原来的说明，格子里只剩读数
+        const geometric = within(card).getByTestId('campaign-geometric-expectancy');
+        expect(geometric).toHaveAttribute('data-ruinous-sizing', 'true');
+        expect(geometric.getAttribute('title')).toContain('本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 = 10.00 ÷ 1.00 = 1000.00% ≥ 100%');
+        expect(geometric.querySelector('dd')?.children).toHaveLength(1);
+        expect(geometric.querySelector('dd')).not.toHaveTextContent('仓位击穿');
+      }
+      // 没有击穿的卡片不挂这枚标签，几何期望格也不带 data-ruinous-sizing
+      for (const card of screen.getAllByTestId('campaign-card')) {
+        const ruinous = within(card).queryByTestId('campaign-ruinous-sizing') != null;
+        expect(within(card).getByTestId('campaign-geometric-expectancy').hasAttribute('data-ruinous-sizing')).toBe(ruinous);
+      }
+    } finally {
+      legsByCampaign['high-importance'] = hiLegs;
+    }
   }, 15_000);
 
   it('removes the legacy mutual scope while preserving sort parameters and detail navigation', async () => {
@@ -1665,9 +1805,10 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起战役详情' }));
     expect(screen.queryByTestId('campaign-card-details')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('campaign-payoff-ratio').map(metricReading)).toEqual([
-      '盈亏比：300.00%（3.00）',
-      '盈亏比：50.00%（0.50）',
-      '盈亏比：-80.00%（-0.80）',
+      // 【用户要求】只保留倍数 b，不带百分号、括号与「+」号
+      '盈亏比：3.00',
+      '盈亏比：0.50',
+      '盈亏比：-0.80',
       '盈亏比：—',
     ]);
     const payoffRatioValues = screen.getAllByTestId('campaign-payoff-ratio-value');

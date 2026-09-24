@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -46,11 +46,13 @@ import {
   updateCampaignImportance,
 } from '@/lib/journalApi';
 import {
+  campaignPayoffRatioMultiple,
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
+import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import {
   BULK_CLOSE_STATUS_LABELS,
   CLOSE_TIME_SOURCE_LABELS,
@@ -236,8 +238,12 @@ const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSort
 
 /**
  * 战役封面指标行：【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布。美观是第一位的」——
- * 八项按排序行的次序从左往右紧凑排开（上一行淡色指标名、下一行等宽数字），每项的宽度按它自己最长的真实读数定
- * （CARD_METRIC_WIDTH），不再把整行均分；右侧留白。每张卡片读同一套宽度，上下各张卡的同名项仍落在同一条竖线上。
+ * 八项按排序行的次序从左往右紧凑排开（上一行淡色指标名、下一行等宽数字），不把整行均分；右侧留白。
+ * 【用户要求】「分布要做得非常均匀、美观，不要有没必要的空隙」：每项的宽度按**当前时间段里的全部战役实际出现的读数**定
+ * （指标名与读数取宽者 + 左右内边距，见 cardMetricColumnWidths），以 CSS 变量挂在列表容器上（campaign-card-list），
+ * 不再为列表里没出现的极端读数留空。每张卡片读同一套变量，上下各张卡的同名项仍落在同一条竖线上。
+ * 列宽不看排序：有的排序会筛掉算不出这一项的战役，若按筛完的列表算，撑宽某一列的那场一被筛掉，后面各格就整体左移——
+ * 切换排序时文字不能挪。换时间段才重算。
  * 手机（< 640px）放不下一行，退回两列网格；≥ 640px 起按宽度依次排开，放不下时整行换行（各卡在同一处换行）。
  */
 const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';
@@ -1302,24 +1308,76 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  * 高亮（当前排序项）只换底色与描边，切换排序时文字一个像素都不动。
  */
 const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 transition-[background-color,box-shadow] duration-150';
-/**
- * 每项的宽度（≥ 640px）：浏览器实测最长的真实读数（11px 等宽）+ 左右内边距，取整到 4px。
- *   镜像止盈「已实现·进行中」≈ 73px；预期回撤「13.86%」、加仓效用 / 涨跌幅倍数「+130.41」≈ 46px（指标名 40px；
- *   「涨跌幅倍数」五个字 50px，CJK 字符固定 1em 宽、换字体不变，72px 格的 52px 内宽放得下）；
- *   涨跌幅「+437.21%」、算术期望「+383.20R」≈ 53px；盈亏比「76740.80%（767.41）」≈ 121px；
- *   几何期望「50.63」+「仓位击穿」徽标 ≈ 83px。更极端的读数在本项内以省略号收住，完整读数在悬停提示里。
- */
-const CARD_METRIC_WIDTH = {
-  mirrorTp: 'sm:w-[96px]',
-  expectedDrawdownPct: 'sm:w-[72px]',
-  mainPriceChange: 'sm:w-[80px]',
-  mainPriceEfficiency: 'sm:w-[72px]',
-  captureRate: 'sm:w-[148px]',
-  addEfficiency: 'sm:w-[72px]',
-  geometricExpectancy: 'sm:w-[108px]',
-  arithmeticExpectancy: 'sm:w-[80px]',
+/** 封面八项的指标名（与排序行同序）：卡片上的 dt 与列宽估算读同一份。 */
+const CARD_METRIC_LABEL = {
+  mirrorTp: '镜像止盈',
+  expectedDrawdownPct: '预期回撤',
+  mainPriceChange: '涨跌幅',
+  mainPriceEfficiency: '涨跌幅倍数',
+  captureRate: '盈亏比',
+  addEfficiency: '加仓效用',
+  geometricExpectancy: '几何期望',
+  arithmeticExpectancy: '算术期望',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
-type CardMetricMode = keyof typeof CARD_METRIC_WIDTH;
+type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
+type CardMetricReadings = Record<CardMetricMode, string>;
+const CARD_METRIC_MODES = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
+/**
+ * 每项的宽度（≥ 640px）读列表容器上的 CSS 变量 --cm-w-<项>（cardMetricWidthStyle 按当前时间段里全部战役的读数算出）。
+ * Tailwind 要看到完整类名，所以逐个写出；手机（< 640px）是两列网格，不读这些变量。
+ */
+const CARD_METRIC_WIDTH_CLASS = {
+  mirrorTp: 'sm:w-[var(--cm-w-mirrorTp)]',
+  expectedDrawdownPct: 'sm:w-[var(--cm-w-expectedDrawdownPct)]',
+  mainPriceChange: 'sm:w-[var(--cm-w-mainPriceChange)]',
+  mainPriceEfficiency: 'sm:w-[var(--cm-w-mainPriceEfficiency)]',
+  captureRate: 'sm:w-[var(--cm-w-captureRate)]',
+  addEfficiency: 'sm:w-[var(--cm-w-addEfficiency)]',
+  geometricExpectancy: 'sm:w-[var(--cm-w-geometricExpectancy)]',
+  arithmeticExpectancy: 'sm:w-[var(--cm-w-arithmeticExpectancy)]',
+} as const satisfies Record<CardMetricMode, string>;
+
+/** 每行的封面读数按行对象缓存：行对象不变，读数就不变（行情 tick 不会换掉没变的行）。 */
+const cardMetricReadingsCache = new WeakMap<CampaignDisplayData, CardMetricReadings>();
+/**
+ * 封面八项的读数，与卡片上显示的字符串逐字相同：卡片渲染与列宽估算都读这一份，估出来的宽度就是卡片上的字。
+ */
+function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
+  const cached = cardMetricReadingsCache.get(row);
+  if (cached) return cached;
+  const { profitCaptureRatio, initialExpectedMaxDrawdownPct } = row;
+  const mainPriceEfficiency = rowMainPriceEfficiency(row);
+  const addEfficiency = rowAddEfficiency(row);
+  const readings: CardMetricReadings = {
+    mirrorTp: !campaignAchievedMirrorTp(row.legs, row.tradeRecords)
+      ? '未实现'
+      : MIRROR_TP_STATUS_LABEL[mirrorTpOutcome(
+        profitCaptureRatio == null ? null : profitCaptureRatio / 100,
+        row.campaign.final_realized_pnl ?? null,
+      )],
+    expectedDrawdownPct: initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—',
+    mainPriceChange: formatLegPriceChangePct(row.mainPriceChangePct),
+    mainPriceEfficiency: mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency),
+    // 【用户要求】盈亏比只保留倍数 b，不写百分数
+    captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),
+    addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
+    geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
+    arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
+  };
+  cardMetricReadingsCache.set(row, readings);
+  return readings;
+}
+
+/**
+ * 列表容器上的列宽变量：当前时间段里的全部战役（displayRows，与排序无关）每一项的指标名与读数取宽者 + 左右内边距，
+ * 向上取整到偶数 px（cardMetricColumnWidths）。读数短的列表不再为没出现的极端读数留空，相邻两项之间的空白因此匀称。
+ */
+function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperties {
+  const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));
+  const style: Record<string, string> = {};
+  for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;
+  return style as CSSProperties;
+}
 /**
  * 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：淡琥珀底 + 细描边，
  * 指标名换成琥珀色（浅色主题用深一档的琥珀，白底上才看得清）。封面上的其它对应模块（操作时间、杠杆、重要性、标题）同一套颜色。
@@ -1328,8 +1386,8 @@ const SORT_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.08] ring-1 ring-inset ring-[#F0B90B]
 const SORT_HIGHLIGHT_TEXT = 'text-[#B7860B] dark:text-[#F0B90B]';
 /** 指标名：10px 淡色，一格一行，放不下时省略。 */
 const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px]';
-/** 数值一行：数值可收缩（省略号），「仓位击穿」徽标跟在数值后面、不收缩。 */
-const CARD_METRIC_VALUE_ROW = 'flex h-4 min-w-0 items-center gap-1.5';
+/** 数值一行：只放读数（「仓位击穿」徽标在标题行、杠杆标签之后）。 */
+const CARD_METRIC_VALUE_ROW = 'flex h-4 min-w-0 items-center';
 /** 展开详情里的名称（「名称：值」写在一行里）。 */
 const CARD_DETAIL_LABEL = 'shrink-0 text-[10px] leading-4 text-muted-foreground/80';
 /** 展开详情里的一项：不按列排、不画分隔线，项与项之间只靠 gap-x-6 分开。 */
@@ -1349,11 +1407,11 @@ function statSignTone(value: number | null | undefined): string {
   return value > 0 ? TONE_UP : TONE_DOWN;
 }
 
-/** 封面标题旁的标签（方向 / 标的 / 杠杆 / 编号）统一高度与字号。 */
+/** 封面标题旁的标签（方向 / 标的 / 杠杆 / 仓位击穿 / 编号）统一高度与圆角。 */
 const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';
 /**
- * 数值：11px 等宽。格宽是定的，极端读数（如盈亏比 −123456.78%（−1234.57））装不下就在本格内
- * 以省略号收住，不压到隔壁一格的分隔线上；完整读数在悬停提示里。行高给足 16px，裁切时不削掉括号的上下沿。
+ * 数值：11px 等宽。格宽按列表里最宽的读数估算（只会偏宽），正常不会截断；省略号只是兜底，
+ * 万一装不下也在本格内收住、不压到隔壁一格。行高给足 16px。
  */
 const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';
 /** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
@@ -1411,12 +1469,9 @@ const CampaignCard = memo(function CampaignCard({
     campaignAccountName,
     campaign.id,
   );
-  const mirrorTpStatus = !campaignAchievedMirrorTp(legs, tradeRecords)
-    ? '未实现'
-    : MIRROR_TP_STATUS_LABEL[mirrorTpOutcome(
-      profitCaptureRatio == null ? null : profitCaptureRatio / 100,
-      campaign.final_realized_pnl ?? null,
-    )];
+  /** 封面八项的读数：与列表容器上的列宽估算同一份（cardMetricReadings）。 */
+  const readings = cardMetricReadings(row);
+  const mirrorTpStatus = readings.mirrorTp;
   const statusLabel = campaign.status === 'active'
     ? '进行中'
     : campaign.status === 'closed_profit'
@@ -1433,16 +1488,20 @@ const CampaignCard = memo(function CampaignCard({
               : campaign.status;
   const realizedPnl = campaign.final_realized_pnl;
   const realizedPnlTone = signTone(realizedPnl, 'text-foreground/80');
-  const payoffRatioTone = signTone(profitCaptureRatio, 'text-foreground/85');
+  // 红绿跟着读数上的 b（两位小数）走：只亏一点手续费、读作「0.00」的战役用中性色，不出现红色的 0.00
+  const payoffRatioTone = signTone(campaignPayoffRatioMultiple(profitCaptureRatio), 'text-foreground/85');
   const arithmeticTone = signTone(arithmeticExpectancy, 'text-foreground/80');
-  // 下注比例吃掉全部账户权益：几何期望必然是 −100%/笔（G = 0）。
-  // 这是仓位大小的结论，不是本场盈亏，所以会和正的算术期望同时出现。
+  // 本场真实下注比例（最大预期亏损 ÷ 账户总资产）≥ 100%：这一注押上了全部本金。
+  // 这是仓位大小的结论，不进几何期望公式，也不是本场盈亏，所以会和正的算术期望同时出现。
   const ruinousSizing = initialRiskFraction != null && initialRiskFraction >= 1;
+  /** 下注比例的算式，分子分母都代入：标题行「仓位击穿」与几何期望格的悬停说明共用。 */
+  const riskFractionFormula = `最大预期亏损 ÷ 账户总资产 = ${row.initialExpectedMaxLoss.toFixed(2)} ÷ ${riskAccountEquity?.toFixed(2) ?? '—'}`
+    + ` = ${((initialRiskFraction ?? 0) * 100).toFixed(2)}%`;
   const geometricTone = signTone(geometricExpectancy, 'text-foreground/80');
   const detailsExpanded = expanded;
   const lit = (mode: CampaignSortMode) => sortHighlight === mode;
-  /** 指标项的类名：宽度 + 当前排序项高亮。 */
-  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH[mode]} ${lit(mode) ? SORT_HIGHLIGHT_BOX : ''}`;
+  /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 当前排序项高亮。 */
+  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ${lit(mode) ? SORT_HIGHLIGHT_BOX : ''}`;
   const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${lit(mode) ? `${SORT_HIGHLIGHT_TEXT} font-medium` : 'text-muted-foreground/80'}`;
   const litAttr = (mode: CampaignSortMode) => (lit(mode) ? 'true' : undefined);
   return (
@@ -1483,6 +1542,18 @@ const CampaignCard = memo(function CampaignCard({
                 className={`${CARD_CHIP} border font-mono text-[10px] tabular-nums ${lit('leverage') ? `border-[#F0B90B]/55 bg-[#F0B90B]/10 ${SORT_HIGHLIGHT_TEXT}` : 'border-border/70 text-muted-foreground'}`}
               >
                 {formatLeverage(cardLeverage)}
+              </span>
+            )}
+            {/* 「仓位击穿」紧跟杠杆：它说的是当时的仓位大小（与杠杆同一类信息），不进几何期望公式，
+                放在几何期望格里会被读成那个数的一部分，还要为它把那一格撑宽。 */}
+            {ruinousSizing && (
+              <span
+                data-testid="campaign-ruinous-sizing"
+                title={`仓位击穿：本场下注比例 = ${riskFractionFormula} ≥ 100%，`
+                  + '这一注押上了全部本金。它评判的是当时的仓位大小，不进几何期望公式，也与本场实际盈亏无关。'}
+                className={`${CARD_CHIP} bg-[#F6465D]/15 text-[10px] font-medium ${TONE_DOWN}`}
+              >
+                仓位击穿
               </span>
             )}
             <span
@@ -1567,7 +1638,7 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 封面指标行：左对齐、按读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH），上标签、下数值；【用户要求】顺序与排序行一致：
+      {/* 封面指标行：左对齐、按当前列表的读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH_CLASS），上标签、下数值；【用户要求】顺序与排序行一致：
           镜像止盈、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望。当前排序项高亮。 */}
       <div className={`border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
@@ -1575,16 +1646,16 @@ const CampaignCard = memo(function CampaignCard({
           className={CARD_METRIC_STRIP}
         >
           <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
-            <dt className={metricName('mirrorTp')}>镜像止盈</dt>
+            <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
             </dd>
           </div>
           <div className={metricCell('expectedDrawdownPct')} data-testid="campaign-expected-drawdown-pct" data-sort-highlight={litAttr('expectedDrawdownPct')}>
-            <dt className={metricName('expectedDrawdownPct')}>预期回撤</dt>
+            <dt className={metricName('expectedDrawdownPct')}>{CARD_METRIC_LABEL.expectedDrawdownPct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
-                {initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—'}
+                {readings.expectedDrawdownPct}
               </span>
             </dd>
           </div>
@@ -1597,10 +1668,10 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('mainPriceChange')}
             data-sort-highlight={litAttr('mainPriceChange')}
           >
-            <dt className={metricName('mainPriceChange')}>涨跌幅</dt>
+            <dt className={metricName('mainPriceChange')}>{CARD_METRIC_LABEL.mainPriceChange}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
-                {formatLegPriceChangePct(mainPriceChangePct)}
+                {readings.mainPriceChange}
               </span>
             </dd>
           </div>
@@ -1612,22 +1683,22 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('mainPriceEfficiency')}
             data-sort-highlight={litAttr('mainPriceEfficiency')}
           >
-            <dt className={metricName('mainPriceEfficiency')}>涨跌幅倍数</dt>
+            <dt className={metricName('mainPriceEfficiency')}>{CARD_METRIC_LABEL.mainPriceEfficiency}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
-                {mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency)}
+                {readings.mainPriceEfficiency}
               </span>
             </dd>
           </div>
           <div className={metricCell('captureRate')} data-testid="campaign-payoff-ratio" data-sort-highlight={litAttr('captureRate')}>
-            <dt className={metricName('captureRate')}>盈亏比</dt>
+            <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span
                 data-testid="campaign-payoff-ratio-value"
-                title={profitCaptureRatio == null ? undefined : `盈亏比 ${formatCampaignPayoffRatio(profitCaptureRatio, 2)}`}
+                title={profitCaptureRatio == null ? undefined : `盈亏比 b = 已实现 P&L ÷ 最大预期亏损 = ${readings.captureRate}`}
                 className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}
               >
-                {profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio, 2)}
+                {readings.captureRate}
               </span>
             </dd>
           </div>
@@ -1638,14 +1709,14 @@ const CampaignCard = memo(function CampaignCard({
               ? (campaignHasMainAdd(legs)
                 ? '加仓效用 = 盈亏比 ÷ 涨跌幅倍数：只在涨跌幅倍数为正时计算，这场涨跌幅倍数不为正或算不出（或算不出盈亏比）'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 盈亏比 ${(rowPayoffRatio(row) ?? 0).toFixed(2)} ÷ 涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
+                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ 涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
-            <dt className={metricName('addEfficiency')}>加仓效用</dt>
+            <dt className={metricName('addEfficiency')}>{CARD_METRIC_LABEL.addEfficiency}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(addEfficiency)]}`}>
-                {addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency)}
+                {readings.addEfficiency}
               </span>
             </dd>
           </div>
@@ -1656,23 +1727,16 @@ const CampaignCard = memo(function CampaignCard({
               + (initialRiskFraction == null
                 ? ''
                 : ruinousSizing
-                  ? `。另：本场真实下注比例 = 最大预期亏损 ÷ 账户总资产 ${riskAccountEquity?.toFixed(2) ?? '—'} = ${(initialRiskFraction * 100).toFixed(2)}% ≥ 100%，`
-                    + '这一注押上了全部本金。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
+                  ? `。另：本场真实下注比例 = ${riskFractionFormula} ≥ 100%，`
+                    + '这一注押上了全部本金（标题行的「仓位击穿」）。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
                     + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
                   : '')}
             className={metricCell('geometricExpectancy')}
             data-sort-highlight={litAttr('geometricExpectancy')}
           >
-            <dt className={metricName('geometricExpectancy')}>几何期望</dt>
+            <dt className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{formatGeometricExpectancy(geometricExpectancy)}</span>
-              {/* 这一注押上了全部本金。几何期望改用固定 x 之后它不再影响那个数，
-                  但「当时仓位有多大」本身就是要盯的纪律信号，所以徽标留着。 */}
-              {ruinousSizing && (
-                <span className={`inline-flex h-4 shrink-0 items-center rounded-sm bg-[#F6465D]/15 px-1 text-[9px] font-medium leading-none ${TONE_DOWN}`}>
-                  仓位击穿
-                </span>
-              )}
+              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
             </dd>
           </div>
           <div
@@ -1681,9 +1745,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('arithmeticExpectancy')}
             data-sort-highlight={litAttr('arithmeticExpectancy')}
           >
-            <dt className={metricName('arithmeticExpectancy')}>算术期望</dt>
+            <dt className={metricName('arithmeticExpectancy')}>{CARD_METRIC_LABEL.arithmeticExpectancy}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{formatArithmeticExpectancy(arithmeticExpectancy)}</span>
+              <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{readings.arithmeticExpectancy}</span>
             </dd>
           </div>
         </dl>
@@ -2056,6 +2120,12 @@ export default function JournalCampaignsPage() {
     () => sortCampaignRows(displayRows, sortState),
     [displayRows, sortState],
   );
+  /**
+   * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
+   * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
+   * 首次加载时战役分批到达，新到的一场读数更宽，这一列就跟着放宽；加载完就定下来。
+   */
+  const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);
   const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
     const samples = metricRows.map(row => ({
       row,
@@ -3744,21 +3814,24 @@ export default function JournalCampaignsPage() {
             )}
           </div>
         ) : (
-          sortedRows.map(row => (
-            <CampaignCard
-              key={row.campaign.id}
-              row={row}
-              sortHighlight={sortState.mode}
-              expanded={expandedCampaignIds.has(row.campaign.id)}
-              busy={busyCampaignId === row.campaign.id}
-              isOwnCampaign={row.campaign.user_id === userId}
-              campaignAccountName={campaignAccountName}
-              onOpen={handleCampaignOpen}
-              onToggleDetails={handleCampaignDetailsToggle}
-              onImportanceChange={handleImportanceChange}
-              onDelete={handleDeleteCampaign}
-            />
-          ))
+          // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
+          <div data-testid="campaign-card-list" style={cardMetricWidths}>
+            {sortedRows.map(row => (
+              <CampaignCard
+                key={row.campaign.id}
+                row={row}
+                sortHighlight={sortState.mode}
+                expanded={expandedCampaignIds.has(row.campaign.id)}
+                busy={busyCampaignId === row.campaign.id}
+                isOwnCampaign={row.campaign.user_id === userId}
+                campaignAccountName={campaignAccountName}
+                onOpen={handleCampaignOpen}
+                onToggleDetails={handleCampaignDetailsToggle}
+                onImportanceChange={handleImportanceChange}
+                onDelete={handleDeleteCampaign}
+              />
+            ))}
+          </div>
         )}
       </main>
       <Dialog open={deletedOpen} onOpenChange={open => void handleDeletedOpenChange(open)}>

@@ -2,8 +2,10 @@
  * 战役封面指标行的守卫，与排序行左对齐的守卫。
  *
  * 封面：【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布。美观是第一位的」——八项指标从左往右紧凑排开
- * （上指标名、下数值），每项宽度按它自己的最长真实读数定（CARD_METRIC_WIDTH），不再均分整行；每张卡读同一套宽度，
- * 上下各张卡的同名项落在同一条竖线上。手机退回两列网格。
+ * （上指标名、下数值），不均分整行；上下各张卡的同名项落在同一条竖线上。手机退回两列网格。
+ * 【用户要求】「封面上的指标的分布还不是很均匀，要做的非常均匀，美观，不要有没必要的空隙」——每项宽度不再是按理论最长读数
+ * 写死的静态表，而是按当前列表里实际出现的读数估算（cardMetricColumnWidths），以 CSS 变量挂在列表容器上；
+ * 「仓位击穿」徽标从几何期望格挪到标题行、紧跟杠杆标签。
  * 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：高亮只换底色与描边，不改内边距。
  * 排序行：【用户要求】「排序方式这里不美观。这里还是用左对齐吧」——按钮按 SORT_OPTIONS 依次左对齐排开，
  * 两条短分隔线分出「操作时间 · 镜像止盈 ┆ 预期回撤…算术期望 ┆ 其余」三组；行首与封面左缘对齐（同一套内边距 + 透明 1px 边框）。
@@ -14,27 +16,19 @@ import { describe, expect, it } from 'vitest';
 
 const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
 
-/**
- * 浏览器实测（Chrome，macOS；卡片数值 11px 等宽 font-mono、font-medium）的各项最长真实读数（px），指标名 10px 四个字约 40px：
- * 镜像止盈「已实现·进行中」72.6；预期回撤「100.00%」、涨跌幅倍数 / 加仓效用「+130.41」46.4；涨跌幅「+437.21%」、算术期望「+383.20R」53；
- * 盈亏比「76740.80%（767.41）」121.3；几何期望「50.63」＋ 6px ＋「仓位击穿」徽标 83.1。
- */
-const WIDEST: Record<string, number> = {
-  mirrorTp: 72.6,
-  expectedDrawdownPct: 46.4,
-  mainPriceChange: 53,
-  mainPriceEfficiency: 46.4,
-  captureRate: 121.3,
-  addEfficiency: 46.4,
-  geometricExpectancy: 83.1,
-  arithmeticExpectancy: 53,
-};
-/** 每项左右各 10px 内边距（px-2.5）。 */
-const CELL_PADDING_X = 20;
+const METRIC_MODES = [
+  'mirrorTp', 'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency',
+  'captureRate', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
+];
 
-function metricWidths(s: string): Record<string, number> {
-  const block = /const CARD_METRIC_WIDTH = \{([\s\S]*?)\n\}/.exec(s)?.[1] ?? '';
-  return Object.fromEntries([...block.matchAll(/(\w+): 'sm:w-\[(\d+)px\]'/g)].map(match => [match[1], Number(match[2])]));
+function constBlock(s: string, name: string): string {
+  return new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\}`).exec(s)?.[1] ?? '';
+}
+
+function stripSource(s: string): string {
+  const start = s.indexOf('data-testid="campaign-card-metrics"');
+  const end = s.indexOf('{detailsExpanded && (', start);
+  return s.slice(start, end);
 }
 
 describe('封面指标行左对齐、按读数定宽；排序行左对齐', () => {
@@ -89,20 +83,80 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(order.filter(mode => cells.some(([cellMode]) => cellMode === mode))).toEqual(cells.map(([mode]) => mode));
   });
 
-  it('每项宽度装得下它的最长读数；一行八项的总宽在 1024px 的屏幕上放得下；首项文字与标题行同一起点', () => {
+  it('【用户要求】列宽按当前列表的读数定：静态宽度表删掉，每项读列表容器上的 CSS 变量；首项文字与标题行同一起点', () => {
     const s = src();
-    const widths = metricWidths(s);
-    expect(Object.keys(widths).sort()).toEqual(Object.keys(WIDEST).sort());
-    for (const [mode, width] of Object.entries(widths)) {
-      expect(width - CELL_PADDING_X - WIDEST[mode], mode).toBeGreaterThanOrEqual(3);
+    // 按理论最长读数写死的静态宽度表不再出现
+    expect(s).not.toContain('CARD_METRIC_WIDTH =');
+    expect(s).not.toMatch(/sm:w-\[\d+px\]/);
+    // 八项指标名一份常量（dt 与宽度估算共用），次序与排序行一致
+    const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
+    expect(labels).toEqual([
+      ['mirrorTp', '镜像止盈'], ['expectedDrawdownPct', '预期回撤'], ['mainPriceChange', '涨跌幅'], ['mainPriceEfficiency', '涨跌幅倍数'],
+      ['captureRate', '盈亏比'], ['addEfficiency', '加仓效用'], ['geometricExpectancy', '几何期望'], ['arithmeticExpectancy', '算术期望'],
+    ]);
+    // 每项的宽度类读 --cm-w-<项>（Tailwind 要完整类名，逐个写出）
+    const widthClasses = [...constBlock(s, 'CARD_METRIC_WIDTH_CLASS').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
+    expect(widthClasses).toEqual(METRIC_MODES.map(mode => [mode, `sm:w-[var(--cm-w-${mode})]`]));
+    expect(s).toContain('const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ');
+    // 变量由当前时间段里的全部战役（displayRows）的读数算出，不随排序变——排序会筛掉算不出这一项的战役，
+    // 按筛完的列表算，切换排序时后面各格会整体左右挪；挂在包住全部卡片的列表容器上
+    expect(s).toContain("import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';");
+    expect(s).toContain('const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));');
+    expect(s).toContain('for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;');
+    expect(s).toContain('const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);');
+    expect(s).not.toContain('cardMetricWidthStyle(sortedRows)');
+    expect(s).toMatch(/<div data-testid="campaign-card-list" style=\{cardMetricWidths\}>\s*\{sortedRows\.map\(row => \(\s*<CampaignCard/);
+    // 卡片上显示的字就是估算用的那一份：每格的 dt 读 CARD_METRIC_LABEL，数值读 cardMetricReadings
+    const strip = stripSource(s);
+    expect(s).toContain('const readings = cardMetricReadings(row);');
+    for (const mode of METRIC_MODES) {
+      expect(strip, mode).toContain(`<dt className={metricName('${mode}')}>{CARD_METRIC_LABEL.${mode}}</dt>`);
     }
-    // 1024px：视口 − main 左右 24px ×2 − 卡片边框 2 − 指标行外框 10px ×2；项与项之间 8px（sm:gap-x-2）
-    const total = Object.values(widths).reduce((sum, width) => sum + width, 0) + 7 * 8;
-    expect(total).toBeLessThanOrEqual(1024 - 48 - 2 - 20);
-    // 外框内边距 + 每项 10px = 标题行 px-4 / sm:px-5
+    expect(strip).toContain('{mirrorTpStatus}');
+    expect(s).toContain('const mirrorTpStatus = readings.mirrorTp;');
+    for (const mode of METRIC_MODES.filter(mode => mode !== 'mirrorTp')) {
+      expect(strip, mode).toContain(`{readings.${mode}}`);
+    }
+    // 外框内边距 + 每项 10px = 标题行 px-4 / sm:px-5；每项左右内边距之和 20px 与估算里的 CARD_METRIC_CELL_PADDING_X 一致
     expect(s).toContain("const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';");
     expect(s).toContain("const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';");
     expect(s).toMatch(/const CARD_METRIC_CELL = '[^']*\bpx-2\.5\b[^']*'/);
+    const widthsModule = readFileSync(join(process.cwd(), 'src/lib/campaignCardMetricWidths.ts'), 'utf8');
+    expect(widthsModule).toContain('export const CARD_METRIC_CELL_PADDING_X = 20;');
+    expect(widthsModule).toContain('export const CARD_METRIC_VALUE_FONT_PX = 11;');
+    expect(widthsModule).toContain('export const CARD_METRIC_LABEL_FONT_PX = 10;');
+    // 估算用的字号与封面上的字号一致：数值 11px 等宽、指标名 10px
+    expect(s).toMatch(/const CARD_METRIC_VALUE = '[^']*\bfont-mono text-\[11px\] font-medium\b[^']*'/);
+    expect(s).toMatch(/const CARD_METRIC_NAME = '[^']*\btext-\[10px\][^']*'/);
+  });
+
+  it('【用户要求】盈亏比只写倍数 b；「仓位击穿」在标题行、紧跟杠杆标签，几何期望格里不再有徽标', () => {
+    const s = src();
+    const strip = stripSource(s);
+    expect(s).toContain("captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),");
+    // 红绿按读数上的 b（两位小数取整后）定：读作「0.00」的用中性色
+    expect(s).toContain("const payoffRatioTone = signTone(campaignPayoffRatioMultiple(profitCaptureRatio), 'text-foreground/85');");
+    // 几何期望格里不再渲染徽标（悬停说明里提到标题行的「仓位击穿」可以）
+    expect(strip).not.toMatch(/>\s*仓位击穿\s*</);
+    // 几何期望格保留 data-ruinous-sizing 与原来的说明
+    expect(strip).toContain("data-ruinous-sizing={ruinousSizing ? 'true' : undefined}");
+    // 标题行：杠杆标签 → 仓位击穿 → 战役编号
+    const leverage = s.indexOf('data-testid="campaign-leverage"');
+    const ruin = s.indexOf('data-testid="campaign-ruinous-sizing"');
+    const code = s.indexOf('title={`战役编号 ${campaignDisplayCode}`}');
+    expect(leverage).toBeGreaterThan(-1);
+    expect(ruin).toBeGreaterThan(leverage);
+    expect(code).toBeGreaterThan(ruin);
+    const chip = s.slice(ruin, s.indexOf('</span>', ruin));
+    // 与标题行其它小标签同高同圆角（CARD_CHIP）、红色
+    expect(chip).toContain('className={`${CARD_CHIP} bg-[#F6465D]/15 text-[10px] font-medium ${TONE_DOWN}`}');
+    // 悬停说明的算式分子分母都代入（最大预期亏损 L ÷ 账户总资产），几何期望格的说明读同一份算式
+    expect(chip).toContain('title={`仓位击穿：本场下注比例 = ${riskFractionFormula} ≥ 100%，`');
+    expect(s).toContain('const riskFractionFormula = `最大预期亏损 ÷ 账户总资产 = ${row.initialExpectedMaxLoss.toFixed(2)} ÷ ${riskAccountEquity?.toFixed(2) ?? \'—\'}`');
+    expect(strip).toContain('? `。另：本场真实下注比例 = ${riskFractionFormula} ≥ 100%，`');
+    expect(chip).toContain('这一注押上了全部本金');
+    expect(chip).toContain('不进几何期望公式');
+    expect(s).toContain("const CARD_CHIP = 'inline-flex h-[18px] items-center rounded-[3px] px-1.5 leading-none';");
   });
 
   it('【用户要求】当前排序项高亮：只换底色与描边，不改内边距、不挪文字', () => {

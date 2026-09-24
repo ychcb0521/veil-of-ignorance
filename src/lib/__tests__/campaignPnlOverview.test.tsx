@@ -81,7 +81,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       '10.00%',
       '+20.00%',
       '+2.00',
-      '200.0% (2.00)',
+      '2.00',
       '+1.00',
       '1.20',
       '+0.50R',
@@ -158,10 +158,42 @@ describe('buildCampaignPnlOverviewItems', () => {
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     expect(byKey.realizedPnl.value).toBe('-50.00 USDT');
     expect(byKey.realizedPnl.color).toBe('#F6465D');
-    expect(byKey.payoffRatio.value).toBe('-50.0% (-0.50)');
+    expect(byKey.payoffRatio.value).toBe('-0.50');
     expect(byKey.payoffRatio.valueClassName).toBe('text-[#F6465D]');
     expect(byKey.arithmeticExpectancy.value).toBe('-0.75R');
     expect(byKey.geometricExpectancy.value).toBe('0.95');
+  });
+
+  it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，颜色跟着读者看到的数走（同涨跌幅倍数）', () => {
+    // 已实现 -3、L 1000 → b = -0.003，读数「0.00」：不能是红色的 0.00
+    for (const payoffRatio of [-0.3, 0.3, -0.49]) {
+      const byKey = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ payoffRatio })).map(item => [item.key, item]));
+      expect(byKey.payoffRatio.value, String(payoffRatio)).toBe('0.00');
+      expect(byKey.payoffRatio.valueClassName, String(payoffRatio)).toBe('text-muted-foreground');
+      expect(byKey.payoffRatio.color, String(payoffRatio)).toBe('#64748B');
+    }
+    // 取整后不为 0 的仍按正负上色
+    const loss = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ payoffRatio: -0.6 })).map(item => [item.key, item]));
+    expect(loss.payoffRatio.value).toBe('-0.01');
+    expect(loss.payoffRatio.valueClassName).toBe('text-[#F6465D]');
+    expect(loss.payoffRatio.color).toBe('#F6465D');
+  });
+
+  it('【用户要求】说明（ⓘ）里引用的 b 与盈亏比读数同一个写法：取整为 0 写 0.00，不写 -0.00', () => {
+    // 已实现 -0.3、L 100 → b = -0.003：盈亏比读「0.00」，加仓效用 / DSI 贡献 / 算术期望的说明里也只能是「0.00」
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({
+      payoffRatio: -0.3,
+      asymmetricRiskContribution: { group: 'loss', sampleCount: 1, meanSquareTerm: 0, meanSquareShare: 1 },
+    }));
+    const byKey = Object.fromEntries(items.map(item => [item.key, item]));
+    expect(byKey.payoffRatio.value).toBe('0.00');
+    for (const key of ['addEfficiency', 'asymmetricRiskContribution', 'arithmeticExpectancy']) {
+      const text = render(<>{byKey[key].help}</>).container.textContent ?? '';
+      expect(text, key).not.toContain('-0.00');
+    }
+    expect(render(<>{byKey.addEfficiency.help}</>).container.textContent).toContain('本场 = 0.00 ÷ +2.00');
+    expect(render(<>{byKey.asymmetricRiskContribution.help}</>).container.textContent).toContain('本场：DSI 下行组，b = 0.00，');
+    expect(render(<>{byKey.arithmeticExpectancy.help}</>).container.textContent).toContain('本场：50.00% × 0.00 − 50.00%');
   });
 
   it('pnlColor / pnlExportColor 与原详情页同一张色表', () => {

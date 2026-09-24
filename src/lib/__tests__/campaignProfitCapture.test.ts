@@ -7,6 +7,7 @@ import {
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeProfitCaptureRatio,
+  campaignPayoffRatioMultiple,
   formatCampaignPayoffRatio,
   resolveCampaignInitialRiskFraction,
 } from '@/lib/campaignAnalysis';
@@ -100,9 +101,30 @@ function markAsHistorical(campaign: TradeCampaign) {
 }
 
 describe('campaign profit capture ratio', () => {
-  it('formats the percentage with its numeric multiple', () => {
-    expect(formatCampaignPayoffRatio(150)).toBe('150.0%（1.50）');
-    expect(formatCampaignPayoffRatio(-50)).toBe('-50.0%（-0.50）');
+  it('【用户要求】盈亏比只写倍数 b：两位小数，不带百分号、括号与「+」号', () => {
+    expect(formatCampaignPayoffRatio(150)).toBe('1.50');
+    expect(formatCampaignPayoffRatio(-50)).toBe('-0.50');
+    expect(formatCampaignPayoffRatio(3459.89)).toBe('34.60');
+    expect(formatCampaignPayoffRatio(-80)).toBe('-0.80');
+    expect(formatCampaignPayoffRatio(76740.8)).toBe('767.41');
+    // 取整为 0 写 0.00，不写 -0.00
+    expect(formatCampaignPayoffRatio(-0.2)).toBe('0.00');
+    expect(formatCampaignPayoffRatio(Number.NaN)).toBe('—');
+  });
+
+  it('读数上的倍数 b（两位小数取整后）：定色读它，取整为 0 的是 +0、不是 -0；算不出为 null', () => {
+    expect(campaignPayoffRatioMultiple(3459.89)).toBe(34.6);
+    expect(campaignPayoffRatioMultiple(-80)).toBe(-0.8);
+    expect(Object.is(campaignPayoffRatioMultiple(-0.2), 0)).toBe(true);
+    expect(Object.is(campaignPayoffRatioMultiple(0.3), 0)).toBe(true);
+    expect(campaignPayoffRatioMultiple(-0.6)).toBe(-0.01);
+    expect(campaignPayoffRatioMultiple(null)).toBeNull();
+    expect(campaignPayoffRatioMultiple(undefined)).toBeNull();
+    expect(campaignPayoffRatioMultiple(Number.POSITIVE_INFINITY)).toBeNull();
+    // 读数就是它的两位小数写法
+    for (const pct of [3459.89, -80, -0.2, 76740.8, -0.6]) {
+      expect(formatCampaignPayoffRatio(pct)).toBe(campaignPayoffRatioMultiple(pct)?.toFixed(2));
+    }
   });
 
   it('uses actual main entry/notional and the farther initial hedge A/B boundary', () => {

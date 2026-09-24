@@ -1424,9 +1424,26 @@ export function computeProfitCaptureRatio(
   return (reconciliation.correctedPnl / initialExpectedMaxLoss) * 100;
 }
 
-export function formatCampaignPayoffRatio(value: number, percentDigits = 1): string {
-  if (!Number.isFinite(value)) return '—';
-  return `${value.toFixed(percentDigits)}%（${(value / 100).toFixed(2)}）`;
+/**
+ * 盈亏比读数上的倍数 b：两位小数取整之后的值，取整为 0 时给 +0（不给 -0）；算不出为 null。
+ * 入参是百分数口径的盈亏比（computeProfitCaptureRatio 的结果 = b × 100）。
+ * 读数只剩两位小数的 b 之后，红绿也要跟着读者看到的这个数定：只亏一点手续费的战役（|b| < 0.005）读作「0.00」，
+ * 按原始正负上红 / 绿会出现红色的 0.00——同一行的涨跌幅倍数、加仓效用本来就是「取整为 0 用中性色」。
+ */
+export function campaignPayoffRatioMultiple(ratioPct: number | null | undefined): number | null {
+  if (ratioPct == null || !Number.isFinite(ratioPct)) return null;
+  const multiple = Number((ratioPct / 100).toFixed(2));
+  return multiple === 0 ? 0 : multiple;
+}
+
+/**
+ * 盈亏比读数：【用户要求】「盈亏比只保留括号内的数字，把百分比部分删除」——只写倍数 b = 已实现 P&L ÷ 最大预期亏损，
+ * 两位小数，不带百分号、括号，也不加「+」号（34.60、-0.80、767.41）；取整为 0 写 0.00，不写 -0.00。
+ * 入参仍是百分数口径的盈亏比（computeProfitCaptureRatio 的结果 = b × 100）。封面、盈亏概览（详情页、反事实、导出图）、决策准确度面板共用；
+ * 定色读 campaignPayoffRatioMultiple（与这里同一个取整），字和颜色才对得上。
+ */
+export function formatCampaignPayoffRatio(ratioPct: number): string {
+  return campaignPayoffRatioMultiple(ratioPct)?.toFixed(2) ?? '—';
 }
 
 function eventTradeRecord(

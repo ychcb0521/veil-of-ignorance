@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
-import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
+import { campaignPayoffRatioMultiple, formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
@@ -176,12 +176,11 @@ function withHelpCustomisation(
 }
 
 /**
- * 盈亏概览里的盈亏比读数：「58.8% (0.59)」。数值列右对齐，全角「）」自带右侧空白会让这一行的右端比上下行缩进半个字，
- * 所以这里用半角括号；其余地方（封面、准确度面板）左对齐，仍用 formatCampaignPayoffRatio 的全角写法。
+ * 盈亏概览里的盈亏比读数：【用户要求】只写倍数 b（「0.59」），与封面同一个写法（formatCampaignPayoffRatio）；
+ * 详情页、反事实面板与导出 PNG 都读这一格。红绿按同一个取整后的 b 定（campaignPayoffRatioMultiple）。
  */
 export function formatOverviewPayoffRatio(value: number): string {
-  if (!Number.isFinite(value)) return '—';
-  return `${value.toFixed(1)}% (${(value / 100).toFixed(2)})`;
+  return formatCampaignPayoffRatio(value);
 }
 
 /** 组内占比的读数：一位小数；大于 0 但不到 0.1% 写「<0.1%」，免得读成 0；缺值不写。 */
@@ -391,13 +390,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'payoffRatio',
       label: '盈亏比',
       value: payoffRatio == null ? '—' : formatOverviewPayoffRatio(payoffRatio),
-      color: pnlExportColor(payoffRatio),
-      valueClassName: pnlColor(payoffRatio),
+      // 颜色跟着读数上的 b 走：取整为「0.00」的（只亏一点手续费）用中性色，不出现红色的 0.00
+      color: pnlExportColor(campaignPayoffRatioMultiple(payoffRatio)),
+      valueClassName: pnlColor(campaignPayoffRatioMultiple(payoffRatio)),
       help: (
         <>
-          <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号。</p>
+          <p>本场已实现结果相对于初始风险分母的倍数。盈利为正，亏损保留负号；不到 0.005 R 的（只差一点手续费）读作 0.00，用中性色。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">b = 已实现 P&amp;L ÷ 最大预期亏损</div>
-          <p>百分数后括号内是数字倍数，例如 200%（2.00）表示 2R。</p>
+          <p>读数就是倍数 b，两位小数：2.00 表示赚到 2 个 R，-0.50 表示亏掉半个 R。</p>
         </>
       ),
     },
@@ -413,7 +413,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 盈亏比 b ÷ 涨跌幅倍数</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
-              本场 = {((payoffRatio ?? 0) / 100).toFixed(2)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
+              本场 = {formatCampaignPayoffRatio(payoffRatio ?? 0)} ÷ {formatEfficiency(mainPriceEfficiency)} = {formatEfficiency(addEfficiency)}
             </p>
           ) : <p>{hasMainAdd ? '只在涨跌幅倍数为正时计算：本场涨跌幅倍数不为正或算不出，或算不出盈亏比。' : '本场没有加仓，不计算加仓效用。'}</p>}
         </>
@@ -434,7 +434,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
           {asymmetricRiskContribution != null ? (
             <p className="font-mono text-foreground">
-              {`本场：${asymmetricRiskContribution.group === 'win' ? 'USI 上行组' : 'DSI 下行组'}，b = ${((payoffRatio ?? 0) / 100).toFixed(2)}，n = ${asymmetricRiskContribution.sampleCount}，b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}`}
+              {`本场：${asymmetricRiskContribution.group === 'win' ? 'USI 上行组' : 'DSI 下行组'}，b = ${formatCampaignPayoffRatio(payoffRatio ?? 0)}，n = ${asymmetricRiskContribution.sampleCount}，b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}`}
               {asymmetricRiskContribution.meanSquareShare == null
                 ? ''
                 : `，组内占比 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(2)}%`}
@@ -455,7 +455,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P），P = 50%</div>
           {payoffRatio != null ? (
             <p className="font-mono text-foreground">
-              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {(payoffRatio / 100).toFixed(2)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
+              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {formatCampaignPayoffRatio(payoffRatio)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
             </p>
           ) : <p>缺少有效盈亏比时不计算。</p>}
         </>

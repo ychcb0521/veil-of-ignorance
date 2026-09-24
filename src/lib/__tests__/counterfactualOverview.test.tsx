@@ -130,7 +130,8 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
     // 峰值权益 = 80 → profit_capture_ratio = 100，与 b 完全不同，盈亏比列不能印它
     expect(result.profit_capture_ratio).toBe(100);
-    expect(byKey.payoffRatio.value).not.toContain('100.0%');
+    expect(byKey.payoffRatio.value).toBe('1.33');
+    expect(byKey.payoffRatio.value).not.toBe('1.00');
     expect(byKey.realizedPnl.value).toBe('80.00 USDT');
     expect(byKey.mainLeverage.value).toBe('3x');
     expect(byKey.initialMainExposureNotional.value).toBe('1500.00 USDT');

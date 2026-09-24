@@ -449,7 +449,12 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('涨跌幅倍数')).toBeInTheDocument());
     // 【用户要求】「机会质量」已删掉（涨跌幅倍数更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
-    expect(screen.getByText('200.0% (2.00)')).toBeInTheDocument();
+    // 【用户要求】盈亏比只写倍数 b：「2.00」，不再写「200.0% (2.00)」
+    const payoffRow = screen.getAllByText('盈亏比')
+      .map(node => node.closest('[data-column]'))
+      .find((row): row is HTMLElement => row != null);
+    expect(payoffRow?.lastElementChild?.textContent).toBe('2.00');
+    expect(screen.queryByText('200.0% (2.00)')).not.toBeInTheDocument();
     // 主力开仓名义仓位；这场只有一笔主力多单，多方总名义仓位也是 1000
     expect(screen.getAllByText('1000.00 USDT').length).toBeGreaterThanOrEqual(1);
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示

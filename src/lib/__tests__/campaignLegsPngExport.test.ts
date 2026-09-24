@@ -70,7 +70,7 @@ function input(): CampaignBoardExportInput {
         { key: 'maxDrawdown', label: '最大回撤', value: '-800.00' },
         { key: 'initialExpectedMaxLoss', label: '最大预期亏损', value: '1800.00 USDT' },
         { key: 'expectedMaxDrawdownPct', label: '预期回撤', value: '3.20%' },
-        { key: 'payoffRatio', label: '盈亏比', value: '66.48%（0.66）', color: '#0ECB81' },
+        { key: 'payoffRatio', label: '盈亏比', value: '0.66', color: '#0ECB81' },
         { key: 'opportunityQuality', label: '机会质量', value: '0.21', color: '#0ECB81' },
         { key: 'arithmeticExpectancy', label: '算术期望', value: '+0.18R', color: '#0ECB81' },
         { key: 'geometricExpectancy', label: '几何期望', value: '+0.4%/笔', color: '#0ECB81' },
@@ -132,7 +132,7 @@ describe('campaign PNG overview', () => {
     expect(pnl['最大回撤']).toBe('-800.00');
     expect(pnl['最大预期亏损']).toBe('1800.00 USDT');
     expect(pnl['预期回撤']).toBe('3.20%');
-    expect(pnl['盈亏比']).toBe('66.48%（0.66）');
+    expect(pnl['盈亏比']).toBe('0.66');
     expect(pnl['机会质量']).toBe('0.21');
     expect(pnl['算术期望']).toBe('+0.18R');
     expect(pnl['几何期望']).toBe('+0.4%/笔');
@@ -170,13 +170,13 @@ describe('campaign PNG overview', () => {
   it('亏损战役的盈亏比保留负号', () => {
     const negativeInput = input();
     negativeInput.pnlOverview.items = negativeInput.pnlOverview.items.map(item => (
-      item.key === 'payoffRatio' ? { ...item, value: '-37.25%（-0.37）', color: '#F6465D' } : item
+      item.key === 'payoffRatio' ? { ...item, value: '-0.37', color: '#F6465D' } : item
     ));
 
     const overview = buildCampaignBoardOverview(negativeInput);
     const pnl = Object.fromEntries(overview.pnlItems.map(item => [item.label, item.value]));
 
-    expect(pnl['盈亏比']).toBe('-37.25%（-0.37）');
+    expect(pnl['盈亏比']).toBe('-0.37');
   });
 
   it('新增盈亏指标时自动进入导出摘要', () => {
