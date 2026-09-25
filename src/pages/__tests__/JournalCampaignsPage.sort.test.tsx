@@ -501,7 +501,11 @@ describe('JournalCampaignsPage sorting', () => {
     const batchToggle = children.at(-1)!;
     expect(batchToggle).toHaveAttribute('data-testid', 'campaign-batch-select-toggle');
     expect(batchToggle).toHaveClass('ml-auto');
-    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点
+    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    for (const item of children.slice(1, -1).filter(node => node.hasAttribute('data-sort-item'))) {
+      expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
+    }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母
     expect(sequence).toEqual([
       'time', 'mirrorTp',

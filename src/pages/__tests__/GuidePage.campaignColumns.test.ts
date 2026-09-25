@@ -112,6 +112,28 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('第五是<strong>多方总名义仓位</strong>');
     expect(guide).toContain('同一份 14 项指标（左栏：预期回撤');
   });
+  it('【用户要求】多级排序：单击替换、「+」加层、手机长按、排序链、缺值规则、清除保留第一级', () => {
+    const sortLib = read('lib/campaignListSort.ts');
+    expect(guide).toContain('<strong>多级排序</strong>：<strong>单击</strong>排序项仍是只按这一项排');
+    expect(guide).toContain('点它右上角出现的<strong>「+」</strong>，这一项就追加为下一级');
+    expect(guide).toContain('「+」挂在排序项右上角外沿、只盖住角上一小块，不挡文字与 Σ');
+    expect(guide).toContain('多级时单击链上的某一项＝只按它排、方向不变，双击看说明不改排序链');
+    expect(guide).toContain('手机上没有悬停，<strong>长按排序项</strong>加一级（短按仍是只按它排）');
+    expect(guide).toContain('「① 镜像止盈 ↓ › ② 加仓效用 ↓」');
+    expect(guide).toContain('<strong>「清除」回到单级、保留第一级</strong>');
+    expect(guide).toContain('只有一级时这条链不出现，界面与原来一样');
+    expect(guide).toContain('<strong>进不进列表只由第一级决定</strong>');
+    expect(guide).toContain('<strong>第二级起算不出的战役留在本档、排到本档末尾</strong>（不论这一级是升序还是降序）');
+    expect(guide).toContain('之后每级一个 then=项.方向');
+    // 与实现对得上：清除保留第一级、URL 第一级仍是 sort / direction、之后 then；长按 450ms
+    expect(sortLib).toContain('return chain.length <= 1 ? chain : [chain[0]];');
+    expect(sortLib).toContain("params.append('then', `${level.mode}.${level.direction}`);");
+    expect(page).toContain('const SORT_LONG_PRESS_MS = 450;');
+    expect(page).toContain('{sortChain.length > 1 && renderSortChainBar()}');
+    // 「+」挂在右上角（与级数角标同位），没显形时不接收指针
+    expect(page).toMatch(/const SORT_ADD_BUTTON = 'pointer-events-none absolute -right-1 -top-1 /);
+    expect(page).toContain('加一级：悬停排序项，点右上角的「+」；手机上长按排序项。');
+  });
   it('【用户要求】反事实盘面与原始盘面同高', () => {
     expect(guide).toContain('<strong>反事实盘面与原始盘面同高</strong>');
   });

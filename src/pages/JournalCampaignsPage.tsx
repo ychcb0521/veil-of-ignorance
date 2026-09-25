@@ -1,4 +1,4 @@
-import { Component, Fragment, lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -10,8 +10,11 @@ import {
   ChevronDown,
   Download,
   FolderPlus,
+  Info,
   Layers,
   ListChecks,
+  ListOrdered,
+  Plus,
   RotateCcw,
   Sigma,
   SlidersHorizontal,
@@ -36,7 +39,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, computeAddEfficiency, computeMainPriceEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -95,7 +98,6 @@ import {
 import {
   campaignAchievedMirrorTp,
   mirrorTpOutcome,
-  mirrorTpRank,
   summarizeMirrorTp,
   type MirrorTpOutcome,
 } from '@/lib/mirrorTpSummary';
@@ -108,6 +110,26 @@ import {
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
 import { orderedCampaignExportTargets, retainCampaignSelection, toggleCampaignSelection, type CampaignExportTarget } from '@/lib/campaignBatchSelection';
+import {
+  appendSortLevel,
+  campaignLeverage,
+  clearSortChain,
+  importanceValue,
+  parseCampaignSortChain,
+  removeSortLevel,
+  rowAddEfficiency,
+  rowMainPriceEfficiency,
+  rowMirrorTpRank,
+  rowPayoffRatio,
+  selectSortMode,
+  sortCampaignRows,
+  sortChainKey,
+  toggleSortLevel,
+  writeCampaignSortParams,
+  type CampaignSortChain,
+  type CampaignSortDirection,
+  type CampaignSortMode,
+} from '@/lib/campaignListSort';
 const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
 const LazyCampaignBatchExportDialog = lazy(() => import('@/components/journal/CampaignBatchExportDialog')
   .then(module => ({ default: module.CampaignBatchExportDialog })));
@@ -135,28 +157,6 @@ type CampaignDisplayData = CampaignMetricData & {
   initialRiskFraction: number | null;
   initialRiskSource: CampaignInitialRiskSource | null;
   riskAccountEquity: number | null;
-};
-
-type CampaignSortMode =
-  | 'importance'
-  | 'time'
-  | 'captureRate'
-  | 'expectedDrawdownPct'
-  | 'arithmeticExpectancy'
-  | 'geometricExpectancy'
-  | 'mirrorTp'
-  | 'dsiContribution'
-  | 'usiContribution'
-  | 'leverage'
-  | 'mainPriceChange'
-  | 'mainPriceEfficiency'
-  | 'addEfficiency'
-  | 'alpha';
-type CampaignSortDirection = 'asc' | 'desc';
-
-type CampaignSortState = {
-  mode: CampaignSortMode;
-  direction: CampaignSortDirection;
 };
 
 type CampaignMetricChartKey =
@@ -222,7 +222,8 @@ type CampaignFormulaPopover =
   | 'usiContributionSort'
   | 'mainPriceChangeSort'
   | 'mainPriceEfficiencySort'
-  | 'addEfficiencySort';
+  | 'addEfficiencySort'
+  | 'sortChain';
 
 /**
  * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望 ┆
@@ -253,6 +254,34 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
  *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution']);
+const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
+
+/**
+ * 【用户要求】多级排序（「先让镜像止盈的排序固定下来，然后在此基础上再排序加仓效用」）：
+ * 单击排序项 = 只按这一项排（与原来一样）；排序项右上角的「+」= 把它追加为下一级；排序行下方的排序链逐级切方向、移除、清除。
+ * 只有一级时，排序行、封面与原来逐像素相同：「+」只在悬停 / 键盘聚焦时显形，级数角标与排序链都不出现。
+ */
+/** 第二级及以后在排序行里的样子：淡琥珀描边与底色，比第一级（实底 + 阴影）轻一档。 */
+const SORT_THEN_BUTTON = 'border-[#F0B90B]/35 text-foreground/85 hover:border-[#F0B90B]/55 hover:bg-foreground/[0.03]';
+const SORT_THEN_ARROW = 'text-[#C98500]/75 dark:text-[#F0B90B]/70';
+/**
+ * 「+」：挂在排序按钮右上角（14px 小圆钮，与多级时的级数角标同一个位置——加层后这个角上就换成 ②），不占尺寸，
+ * 不压在按钮本体上：按钮连同 Σ 的单击、双击、右键都与原来一样。
+ * 只在能悬停的设备上出现（悬停这一项、或键盘聚焦到它时显形）；没显形时 pointer-events-none，不会被看不见地点中。
+ * 触屏没有悬停，改用长按排序项加层（见 sortLongPressHandlers）。
+ */
+const SORT_ADD_BUTTON = 'pointer-events-none absolute -right-1 -top-1 hidden h-3.5 w-3.5 items-center justify-center rounded-full bg-background text-[#B7860B] opacity-0 shadow-[0_1px_2px_rgba(15,23,42,0.12)] ring-1 ring-inset ring-[#F0B90B]/60 transition-[opacity,background-color,color] duration-150 hover:bg-[#F0B90B] hover:text-black focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 group-hover/sort:pointer-events-auto group-hover/sort:opacity-100 dark:text-[#F0B90B] dark:hover:text-black [@media(hover:hover)]:inline-flex';
+/** 级数：排序行右上角的角标与排序链里每一级前面的序号共用。 */
+const SORT_LEVEL_BADGE = 'inline-flex h-3 min-w-3 items-center justify-center rounded-full px-[3px] font-mono text-[8px] font-semibold leading-none tabular-nums';
+const SORT_LEVEL_BADGE_FIRST = 'bg-[#F0B90B] text-black';
+const SORT_LEVEL_BADGE_THEN = 'bg-background text-[#8F6B00] ring-1 ring-inset ring-[#F0B90B]/60 dark:text-[#F0B90B]';
+/** 排序链上的一级：第一级实一档，之后各级轻一档（与封面高亮同一个主次）。 */
+const SORT_CHAIN_CHIP_FIRST = 'border-[#F0B90B]/45 bg-[#F0B90B]/[0.08] font-medium text-foreground';
+const SORT_CHAIN_CHIP_THEN = 'border-[#F0B90B]/25 bg-[#F0B90B]/[0.03] text-foreground/85';
+/** 排序链上的小按钮（切方向 / 移除 / 清除 / ⓘ）：手机上 28px 高好点按，≥ 640px 收成 24px。 */
+const SORT_CHAIN_CONTROL = 'inline-flex h-7 items-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/70 sm:h-6';
+/** 触屏长按排序项多久算「加为下一级」。 */
+const SORT_LONG_PRESS_MS = 450;
 
 /**
  * 战役封面指标行：【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布。美观是第一位的」——
@@ -305,7 +334,6 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   },
 };
 
-const DEFAULT_CAMPAIGN_SORT: CampaignSortState = { mode: 'time', direction: 'desc' };
 const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
 
 function formatSignedMetric(value: number, suffix: string, digits = 2): string {
@@ -879,24 +907,6 @@ function parseCampaignRangeParams(search: string): CampaignOperationRange {
   };
 }
 
-function parseCampaignListParams(search: string): CampaignSortState {
-  const params = new URLSearchParams(search);
-  const requestedMode = params.get('sort');
-  const mode = SORT_OPTIONS.some(option => option.value === requestedMode)
-    ? requestedMode as CampaignSortMode
-    : DEFAULT_CAMPAIGN_SORT.mode;
-  const requestedDirection = params.get('direction');
-  const direction = requestedDirection === 'asc' || requestedDirection === 'desc'
-    ? requestedDirection
-    : mode === 'alpha' ? 'asc' : 'desc';
-  return { mode, direction };
-}
-
-const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
-  numeric: true,
-  sensitivity: 'base',
-});
-
 /**
  * 带方向的数字用的正 / 负色。深色主题沿用币安绿 / 红；浅色主题换成与散点图 --chart-profit / --chart-loss
  * 同一对更深的绿 / 红——#0ECB81 压在浅底上对比度只有 2:1 左右，数字发虚。
@@ -998,66 +1008,10 @@ function usiTone(value: number | null): string {
   return 'text-[#F6465D]';
 }
 
-function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
-  const value = Number(campaign.importance_weight);
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(5, Math.round(value)));
-}
-
-function campaignSortTime(row: CampaignCardData): number {
-  return campaignOperationTime(row.legs, row.tradeRecords) ?? 0;
-}
-
-function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): number {
-  const value = Number(campaign.final_realized_pnl);
-  return Number.isFinite(value) ? value : Number.NaN;
-}
-
-function compareNumber(a: number, b: number, direction: CampaignSortDirection): number {
-  return direction === 'asc' ? a - b : b - a;
-}
-
 function sortDirectionLabel(direction: CampaignSortDirection, mode?: CampaignSortMode): string {
   if (mode === 'alpha') return direction === 'asc' ? 'A 到 Z' : 'Z 到 A';
   if (mode === 'mirrorTp') return direction === 'desc' ? '生效在前' : '未实现在前';
   return direction === 'desc' ? '从大到小' : '从小到大';
-}
-
-function compareAlpha(
-  a: Pick<TradeCampaign, 'title' | 'symbol'>,
-  b: Pick<TradeCampaign, 'title' | 'symbol'>,
-  direction: CampaignSortDirection,
-): number {
-  const aValue = (a.title || a.symbol || '').trim();
-  const bValue = (b.title || b.symbol || '').trim();
-  const result = CAMPAIGN_TITLE_COLLATOR.compare(aValue, bValue);
-  return direction === 'asc' ? result : -result;
-}
-
-function compareFiniteMetric(
-  aValue: number,
-  bValue: number,
-  direction: CampaignSortDirection,
-): number {
-  const aFinite = Number.isFinite(aValue);
-  const bFinite = Number.isFinite(bValue);
-  if (!aFinite && !bFinite) return 0;
-  if (!aFinite) return 1;
-  if (!bFinite) return -1;
-  return compareNumber(aValue, bValue, direction);
-}
-
-function comparePnl(
-  a: Pick<TradeCampaign, 'final_realized_pnl'>,
-  b: Pick<TradeCampaign, 'final_realized_pnl'>,
-  direction: CampaignSortDirection,
-): number {
-  return compareFiniteMetric(pnlSortValue(a), pnlSortValue(b), direction);
-}
-
-/** 每场战役的实际盈亏比 b = 已实现盈亏 ÷ 初始最大预期亏损（列表口径 = 利润捕获率 ÷ 100）。 */
-function rowPayoffRatio(row: { profitCaptureRatio: number | null }): number | null {
-  return row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100;
 }
 
 /** 卡片上的镜像止盈状态文案；与统计、排序共用 mirrorTpOutcome，三处不会各判各的。 */
@@ -1067,42 +1021,6 @@ const MIRROR_TP_STATUS_LABEL: Record<MirrorTpOutcome, string> = {
   flat: '已实现·持平',
   open: '已实现·进行中',
 };
-
-/** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
-function rowMirrorTpRank(row: CampaignCardData): number {
-  return mirrorTpRank(
-    campaignAchievedMirrorTp(row.legs, row.tradeRecords),
-    rowPayoffRatio(row),
-    row.campaign.final_realized_pnl ?? null,
-  );
-}
-
-/**
- * 战役的杠杆倍数：以主力开仓那一刻记下的初始杠杆为准。
- * 老战役没记这个字段时退回各腿里最大的那个——持仓期内提过杠杆的，按它真正承担过的风险排。
- */
-function campaignLeverage(campaign: TradeCampaign, legs: TradeJournal[]): number {
-  const initial = Number(campaign.initial_leverage);
-  if (Number.isFinite(initial) && initial > 0) return initial;
-  let max = 0;
-  for (const leg of legs) {
-    const value = Number(leg.leverage);
-    if (Number.isFinite(value) && value > max) max = value;
-  }
-  return max;
-}
-
-/** 涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤（公式与说明见 computeMainPriceEfficiency，盈亏概览同一个函数）。 */
-function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
-  return computeMainPriceEfficiency(row.mainPriceChangePct, row.initialExpectedMaxDrawdownPct);
-}
-
-/** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */
-function rowAddEfficiency(row: Pick<CampaignCardData, 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
-  // 【用户要求】没有加仓的战役不算加仓效用（campaignHasMainAdd，与盈亏概览同一个判断）
-  if (!campaignHasMainAdd(row.legs)) return null;
-  return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
-}
 
 const formatMainPriceEfficiency = formatEfficiency;
 
@@ -1122,188 +1040,6 @@ function signedTone(value: number): LegPriceChangeDirection {
 /** 10 → 「10x」；7.5 → 「7.5x」。 */
 function formatLeverage(value: number): string {
   return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}x`;
-}
-
-function sortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortState): CampaignDisplayData[] {
-  const visibleRows = rows.filter(row => {
-    if (sort.mode === 'captureRate') {
-      return row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio);
-    }
-    if (sort.mode === 'expectedDrawdownPct') {
-      return Number.isFinite(row.initialExpectedMaxDrawdownPct)
-        && row.initialExpectedMaxDrawdownPct > 0;
-    }
-    if (sort.mode === 'arithmeticExpectancy') {
-      return row.arithmeticExpectancy != null && Number.isFinite(row.arithmeticExpectancy);
-    }
-    if (sort.mode === 'geometricExpectancy') {
-      return row.geometricExpectancy != null && Number.isFinite(row.geometricExpectancy);
-    }
-    // 贡献率两档天然只含一侧样本：DSI 只有亏损战役、USI 只有盈利战役。
-    if (sort.mode === 'dsiContribution') {
-      return row.dsiContributionPct != null && Number.isFinite(row.dsiContributionPct);
-    }
-    if (sort.mode === 'usiContribution') {
-      return row.usiContributionPct != null && Number.isFinite(row.usiContributionPct);
-    }
-    if (sort.mode === 'leverage') {
-      return campaignLeverage(row.campaign, row.legs) > 0;
-    }
-    if (sort.mode === 'mainPriceChange') {
-      return row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct);
-    }
-    if (sort.mode === 'mainPriceEfficiency') {
-      return rowMainPriceEfficiency(row) != null;
-    }
-    if (sort.mode === 'addEfficiency') {
-      return rowAddEfficiency(row) != null;
-    }
-    return true;
-  });
-  return [...visibleRows].sort((a, b) => {
-    const importanceDesc = compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), 'desc');
-    const timeDesc = compareNumber(campaignSortTime(a), campaignSortTime(b), 'desc');
-    const pnlDesc = comparePnl(a.campaign, b.campaign, 'desc');
-    const alphaAsc = compareAlpha(a.campaign, b.campaign, 'asc');
-
-    if (sort.mode === 'time') {
-      return compareNumber(campaignSortTime(a), campaignSortTime(b), sort.direction)
-        || importanceDesc
-        || pnlDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'captureRate') {
-      return compareFiniteMetric(
-        a.profitCaptureRatio ?? Number.NaN,
-        b.profitCaptureRatio ?? Number.NaN,
-        sort.direction,
-      )
-        || comparePnl(a.campaign, b.campaign, sort.direction)
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'expectedDrawdownPct') {
-      return compareNumber(
-        a.initialExpectedMaxDrawdownPct,
-        b.initialExpectedMaxDrawdownPct,
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'arithmeticExpectancy') {
-      return compareFiniteMetric(
-        a.arithmeticExpectancy ?? Number.NaN,
-        b.arithmeticExpectancy ?? Number.NaN,
-        sort.direction,
-      )
-        || compareFiniteMetric(
-          a.geometricExpectancy ?? Number.NaN,
-          b.geometricExpectancy ?? Number.NaN,
-          sort.direction,
-        )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'geometricExpectancy') {
-      return compareFiniteMetric(
-        a.geometricExpectancy ?? Number.NaN,
-        b.geometricExpectancy ?? Number.NaN,
-        sort.direction,
-      )
-        || compareFiniteMetric(
-          a.arithmeticExpectancy ?? Number.NaN,
-          b.arithmeticExpectancy ?? Number.NaN,
-          sort.direction,
-        )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'mirrorTp') {
-      return compareNumber(rowMirrorTpRank(a), rowMirrorTpRank(b), sort.direction)
-        || pnlDesc
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'dsiContribution') {
-      return compareFiniteMetric(
-        a.dsiContributionPct ?? Number.NaN,
-        b.dsiContributionPct ?? Number.NaN,
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'usiContribution') {
-      return compareFiniteMetric(
-        a.usiContributionPct ?? Number.NaN,
-        b.usiContributionPct ?? Number.NaN,
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'leverage') {
-      return compareNumber(
-        campaignLeverage(a.campaign, a.legs),
-        campaignLeverage(b.campaign, b.legs),
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'mainPriceChange') {
-      return compareFiniteMetric(
-        a.mainPriceChangePct ?? Number.NaN,
-        b.mainPriceChangePct ?? Number.NaN,
-        sort.direction,
-      )
-        || comparePnl(a.campaign, b.campaign, sort.direction)
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'mainPriceEfficiency') {
-      return compareFiniteMetric(
-        rowMainPriceEfficiency(a) ?? Number.NaN,
-        rowMainPriceEfficiency(b) ?? Number.NaN,
-        sort.direction,
-      )
-        || compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, sort.direction)
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'addEfficiency') {
-      return compareFiniteMetric(
-        rowAddEfficiency(a) ?? Number.NaN,
-        rowAddEfficiency(b) ?? Number.NaN,
-        sort.direction,
-      )
-        || compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, sort.direction)
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'alpha') {
-      return compareAlpha(a.campaign, b.campaign, sort.direction)
-        || timeDesc
-        || importanceDesc
-        || pnlDesc;
-    }
-    return compareNumber(importanceValue(a.campaign), importanceValue(b.campaign), sort.direction)
-      || timeDesc
-      || pnlDesc
-      || alphaAsc;
-  });
 }
 
 function durationLabel(openedAt: string, closedAt: string | null) {
@@ -1402,6 +1138,12 @@ function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperti
  */
 const SORT_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.08] ring-1 ring-inset ring-[#F0B90B]/40 dark:bg-[#F0B90B]/[0.10]';
 const SORT_HIGHLIGHT_TEXT = 'text-[#B7860B] dark:text-[#F0B90B]';
+/**
+ * 多级排序时，第二级及以后对应的模块用更轻一档的同色系：底色与描边都减半、指标名换成淡琥珀、不加粗——
+ * 第一级仍是上面那一套，扫一眼分得出主次；与第一级一样只换底色与描边，文字不挪。
+ */
+const SORT_THEN_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.035] ring-1 ring-inset ring-[#F0B90B]/20 dark:bg-[#F0B90B]/[0.045]';
+const SORT_THEN_HIGHLIGHT_TEXT = 'text-[#B7860B]/80 dark:text-[#F0B90B]/70';
 /** 指标名：10px 淡色，一格一行，放不下时省略。 */
 const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px]';
 /** 数值一行：只放读数（「仓位击穿」徽标在标题行、杠杆标签之后）。 */
@@ -1439,8 +1181,11 @@ const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tab
 
 type CampaignCardProps = {
   row: CampaignDisplayData;
-  /** 当前排序项：封面上对应的模块高亮（DSI / USI 贡献不在封面上，没有可亮的）。 */
-  sortHighlight: CampaignSortMode;
+  /**
+   * 排序链上各级的排序项（第一级在前）：封面上对应的模块高亮——第一级用 SORT_HIGHLIGHT_*，之后各级轻一档（SORT_THEN_*）。
+   * DSI / USI 贡献不在封面上，没有可亮的。页面按排序链 memo 住这个数组，卡片的 memo 才不会白白失效。
+   */
+  sortHighlight: readonly CampaignSortMode[];
   expanded: boolean;
   busy: boolean;
   isOwnCampaign: boolean;
@@ -1525,11 +1270,18 @@ const CampaignCard = memo(function CampaignCard({
     + ` = ${((initialRiskFraction ?? 0) * 100).toFixed(2)}%`;
   const geometricTone = signTone(geometricExpectancy, 'text-foreground/80');
   const detailsExpanded = expanded;
-  const lit = (mode: CampaignSortMode) => sortHighlight === mode;
-  /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 当前排序项高亮。 */
-  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ${lit(mode) ? SORT_HIGHLIGHT_BOX : ''}`;
-  const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${lit(mode) ? `${SORT_HIGHLIGHT_TEXT} font-medium` : 'text-muted-foreground/80'}`;
-  const litAttr = (mode: CampaignSortMode) => (lit(mode) ? 'true' : undefined);
+  /** 这一项在排序链上的第几级（0 = 第一级；-1 = 不在链上）。 */
+  const sortLevel = (mode: CampaignSortMode) => sortHighlight.indexOf(mode);
+  /** 按这一项在排序链上的级别取类名：第一级 / 之后各级 / 不在链上。 */
+  const byLevel = (mode: CampaignSortMode, first: string, then: string, idle: string) => {
+    const level = sortLevel(mode);
+    return level === 0 ? first : level > 0 ? then : idle;
+  };
+  /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 排序链上的高亮。 */
+  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')}`;
+  const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${byLevel(mode, `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`;
+  /** data-sort-highlight：第一级 'true'，之后各级 'then'。 */
+  const litAttr = (mode: CampaignSortMode) => byLevel(mode, 'true', 'then', '') || undefined;
   return (
     <div
       data-testid="campaign-card"
@@ -1569,7 +1321,7 @@ const CampaignCard = memo(function CampaignCard({
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
             <h2
               data-sort-highlight={litAttr('alpha')}
-              className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${lit('alpha') ? 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]' : ''}`}
+              className={`mr-0.5 text-[13px] font-semibold leading-5 text-foreground ${byLevel('alpha', 'underline decoration-[#F0B90B]/70 decoration-2 underline-offset-[5px]', 'underline decoration-[#F0B90B]/35 decoration-2 underline-offset-[5px]', '')}`}
             >
               {campaign.title}
             </h2>
@@ -1585,7 +1337,7 @@ const CampaignCard = memo(function CampaignCard({
                   ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
                   : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
                 data-sort-highlight={litAttr('leverage')}
-                className={`${CARD_CHIP} border font-mono text-[10px] tabular-nums ${lit('leverage') ? `border-[#F0B90B]/55 bg-[#F0B90B]/10 ${SORT_HIGHLIGHT_TEXT}` : 'border-border/70 text-muted-foreground'}`}
+                className={`${CARD_CHIP} border font-mono text-[10px] tabular-nums ${byLevel('leverage', `border-[#F0B90B]/55 bg-[#F0B90B]/10 ${SORT_HIGHLIGHT_TEXT}`, `border-[#F0B90B]/30 bg-[#F0B90B]/[0.05] ${SORT_THEN_HIGHLIGHT_TEXT}`, 'border-border/70 text-muted-foreground')}`}
               >
                 {formatLeverage(cardLeverage)}
               </span>
@@ -1615,10 +1367,10 @@ const CampaignCard = memo(function CampaignCard({
             >
               <span
                 data-sort-highlight={litAttr('time')}
-                className={`inline-flex h-[18px] items-center gap-1 rounded-[3px] px-1.5 ${lit('time') ? `${SORT_HIGHLIGHT_BOX} ${SORT_HIGHLIGHT_TEXT}` : 'text-muted-foreground/75'}`}
+                className={`inline-flex h-[18px] items-center gap-1 rounded-[3px] px-1.5 ${byLevel('time', `${SORT_HIGHLIGHT_BOX} ${SORT_HIGHLIGHT_TEXT}`, `${SORT_THEN_HIGHLIGHT_BOX} ${SORT_THEN_HIGHLIGHT_TEXT}`, 'text-muted-foreground/75')}`}
               >
                 操作时间：
-                <span className={`whitespace-nowrap font-mono text-[10px] tabular-nums ${lit('time') ? 'text-foreground/90' : 'text-foreground/75'}`}>
+                <span className={`whitespace-nowrap font-mono text-[10px] tabular-nums ${byLevel('time', 'text-foreground/90', 'text-foreground/85', 'text-foreground/75')}`}>
                   {fmtOperationTime(operationTime)}
                 </span>
               </span>
@@ -1640,9 +1392,9 @@ const CampaignCard = memo(function CampaignCard({
           {isOwnCampaign && (
             <div
               data-sort-highlight={litAttr('importance')}
-              className={`flex h-7 items-center gap-0.5 rounded border px-1.5 transition-colors ${lit('importance') ? 'border-[#F0B90B]/55 bg-[#F0B90B]/[0.08]' : 'border-border/80 bg-background/50'}`}
+              className={`flex h-7 items-center gap-0.5 rounded border px-1.5 transition-colors ${byLevel('importance', 'border-[#F0B90B]/55 bg-[#F0B90B]/[0.08]', 'border-[#F0B90B]/30 bg-[#F0B90B]/[0.04]', 'border-border/80 bg-background/50')}`}
             >
-              <span className={`mr-0.5 text-[9px] ${lit('importance') ? `${SORT_HIGHLIGHT_TEXT} font-medium` : 'text-muted-foreground/80'}`}>重要性</span>
+              <span className={`mr-0.5 text-[9px] ${byLevel('importance', `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`}>重要性</span>
               {[1, 2, 3, 4, 5].map(score => (
                 <button
                   key={score}
@@ -1663,7 +1415,7 @@ const CampaignCard = memo(function CampaignCard({
           {!isOwnCampaign && importance > 0 && (
             <span
               data-sort-highlight={litAttr('importance')}
-              className={`rounded border px-2 py-1 text-[10px] ${lit('importance') ? `border-[#F0B90B]/55 bg-[#F0B90B]/[0.08] ${SORT_HIGHLIGHT_TEXT}` : 'border-border bg-background/60 text-muted-foreground'}`}
+              className={`rounded border px-2 py-1 text-[10px] ${byLevel('importance', `border-[#F0B90B]/55 bg-[#F0B90B]/[0.08] ${SORT_HIGHLIGHT_TEXT}`, `border-[#F0B90B]/30 bg-[#F0B90B]/[0.04] ${SORT_THEN_HIGHLIGHT_TEXT}`, 'border-border bg-background/60 text-muted-foreground')}`}
             >
               重要性 {importance}/5
             </span>
@@ -1854,7 +1606,7 @@ const CampaignCard = memo(function CampaignCard({
 export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
-  const initialSortState = useMemo(() => parseCampaignListParams(location.search), [location.search]);
+  const initialSortChain = useMemo(() => parseCampaignSortChain(location.search), [location.search]);
   const { user, profile } = useAuth();
   // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
   const userId = user?.id;
@@ -1884,7 +1636,12 @@ export default function JournalCampaignsPage() {
     busyCampaignIdRef.current = id;
     setBusyCampaignIdState(id);
   }, []);
-  const [sortState, setSortState] = useState<CampaignSortState>(initialSortState);
+  /** 排序链（第一级就是原来的 mode / direction）；只有一级时一切与原来的单级排序相同。 */
+  const [sortChain, setSortChain] = useState<CampaignSortChain>(initialSortChain);
+  /** 第一级：决定哪些战役进列表、空列表提示按它说。 */
+  const primarySort = sortChain[0];
+  /** 卡片按引用 memo：链不变，数组引用就不变。 */
+  const sortHighlight = useMemo(() => sortChain.map(level => level.mode), [sortChain]);
   // 默认全选：进页面先看全部战役，要比较某一段日子再自己框。
   const [operationRange, setOperationRange] = useState<CampaignOperationRange>(
     () => parseCampaignRangeParams(location.search),
@@ -2033,12 +1790,8 @@ export default function JournalCampaignsPage() {
   const [bulkWarnings, setBulkWarnings] = useState<string[]>([]);
 
   useEffect(() => {
-    const next = parseCampaignListParams(location.search);
-    setSortState(current => (
-      current.mode === next.mode && current.direction === next.direction
-        ? current
-        : next
-    ));
+    const next = parseCampaignSortChain(location.search);
+    setSortChain(current => (sortChainKey(current) === sortChainKey(next) ? current : next));
     const nextRange = parseCampaignRangeParams(location.search);
     setOperationRange(current => (
       current.from === nextRange.from && current.to === nextRange.to ? current : nextRange
@@ -2286,8 +2039,8 @@ export default function JournalCampaignsPage() {
     return displayRowsRef.current.rows;
   }, [metricRows, currentAccountEquity, userId]);
   const sortedRows = useMemo(
-    () => sortCampaignRows(displayRows, sortState),
-    [displayRows, sortState],
+    () => sortCampaignRows(displayRows, sortChain),
+    [displayRows, sortChain],
   );
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
@@ -2442,13 +2195,13 @@ export default function JournalCampaignsPage() {
     : formatGrowthFactor(realizedGrowth.factor);
 
   const updateListParams = (
-    nextSort: CampaignSortState,
+    nextSort: CampaignSortChain,
     nextChartKey: CampaignMetricChartKey | null | undefined = undefined,
   ) => {
     const params = new URLSearchParams(location.search);
     params.delete('scope');
-    params.set('sort', nextSort.mode);
-    params.set('direction', nextSort.direction);
+    // 第一级写 sort / direction（只有一级时与原来逐字相同），之后各级写 then=项.方向
+    writeCampaignSortParams(params, nextSort);
     if (nextChartKey !== undefined) {
       if (nextChartKey) params.set('chart', nextChartKey);
       else params.delete('chart');
@@ -2480,15 +2233,14 @@ export default function JournalCampaignsPage() {
     updateRangeParams(nextRange);
   };
 
+  /** 单击排序项：只按这一项排（已经只按它排时切换方向；它在多级链里时收成单级、保留方向），见 selectSortMode。 */
   const handleSortChange = (mode: CampaignSortMode) => {
-    const nextSort: CampaignSortState = sortState.mode === mode
-      ? { mode, direction: sortState.direction === 'desc' ? 'asc' : 'desc' }
-      : { mode, direction: mode === 'alpha' ? 'asc' : 'desc' };
+    const nextSort = selectSortMode(sortChain, mode);
     const sortChartKey = SORT_CHART_BY_MODE[mode] ?? null;
     const nextChartKey = metricChartOpen && sortChartKey != null && metricSeriesByKey[sortChartKey].points.length > 0
       ? DEFAULT_CHART_VIEW_BY_SOURCE[sortChartKey] ?? sortChartKey
       : undefined;
-    setSortState(nextSort);
+    setSortChain(nextSort);
     if (nextChartKey) {
       setMetricChartKey(nextChartKey);
       setMetricChartOpen(true);
@@ -2496,6 +2248,150 @@ export default function JournalCampaignsPage() {
     }
     updateListParams(nextSort, nextChartKey);
   };
+
+  /**
+   * 键盘操作「+」、链上的 ×、「清除」之后，被按的那个按钮随即卸载，焦点会掉回 <body>（下一次 Tab 从页面开头走）。
+   * 这里记下接替它的按钮（data-testid），排序链一更新就把焦点交过去；只在键盘触发时（单击的 detail = 0）这样做。
+   */
+  const pendingSortFocusRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const testId = pendingSortFocusRef.current;
+    if (!testId) return;
+    pendingSortFocusRef.current = null;
+    document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus({ preventScroll: true });
+  }, [sortChain]);
+
+  /**
+   * 排序链的其余改动（「+」加层、链上切方向 / 移除 / 清除）：只改排序，不切换散点图——
+   * 散点图仍按被点开的那一项，排序行按钮的单击才会让它跟着换。
+   * focusTestId：键盘触发时，改完把焦点交给这个按钮（见 pendingSortFocusRef）。
+   */
+  const applySortChain = (nextSort: CampaignSortChain, focusTestId: string | null = null) => {
+    if (sortChainKey(nextSort) === sortChainKey(sortChain)) return;
+    pendingSortFocusRef.current = focusTestId;
+    setSortChain(nextSort);
+    updateListParams(nextSort);
+  };
+  /** 「+」加层：焦点留在同一项的排序按钮上（「+」换成级数角标），接着 Tab 仍从这一项往后走。 */
+  const handleSortAppend = (mode: CampaignSortMode, fromKeyboard = false) => applySortChain(
+    appendSortLevel(sortChain, mode),
+    fromKeyboard ? `campaign-sort-${mode}` : null,
+  );
+  const handleSortLevelToggle = (index: number) => applySortChain(toggleSortLevel(sortChain, index));
+  /**
+   * × / 清除之后排序链变短或整条消失，双击（手机双点）的第二下会落到挪过来的下一级 ×、或挪上来的卡片上
+   * （点开详情 / 选择模式里被勾掉）。吞掉紧跟着的那一下连击（detail > 1），600ms 后自动撤掉。
+   */
+  const swallowFollowUpClick = () => {
+    const cleanup = () => {
+      document.removeEventListener('click', swallow, true);
+      window.clearTimeout(timer);
+    };
+    const swallow = (event: globalThis.MouseEvent) => {
+      if (event.detail > 1) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      cleanup();
+    };
+    document.addEventListener('click', swallow, true);
+    const timer = window.setTimeout(cleanup, 600);
+  };
+  /** 移除一级：还剩多级时焦点落到前一级（移除的是第一级时落到新的第一级），只剩一级时落到它在排序行上的按钮。 */
+  const handleSortLevelRemove = (index: number, fromKeyboard = false) => {
+    const nextSort = removeSortLevel(sortChain, index);
+    const focusTestId = !fromKeyboard
+      ? null
+      : nextSort.length > 1
+        ? `sort-chain-toggle-${Math.max(1, index)}`
+        : `campaign-sort-${nextSort[0].mode}`;
+    if (!fromKeyboard) swallowFollowUpClick();
+    applySortChain(nextSort, focusTestId);
+  };
+  /** 清除：排序链消失，焦点落到第一级在排序行上的按钮。 */
+  const handleSortChainClear = (fromKeyboard = false) => {
+    if (!fromKeyboard) swallowFollowUpClick();
+    applySortChain(clearSortChain(sortChain), fromKeyboard ? `campaign-sort-${sortChain[0].mode}` : null);
+  };
+  /**
+   * 多级时双击排序项看说明：第一击已经把链收成了单级，双击时把单击前的链还原——看说明不该改排序，
+   * 而 URL 是 replace 导航、后退也找不回来。单级时行为不变（单击换排序，双击只多弹说明）。
+   */
+  const sortChainBeforeClickRef = useRef<{ mode: CampaignSortMode; chain: CampaignSortChain } | null>(null);
+  /**
+   * 双击「+」：第一击已经加了层、「+」随即卸载，第二击落到下面的排序按钮上——
+   * 那一下的 dblclick 不再顺带打开说明（双击「+」只算加一级）。
+   */
+  const sortJustAppendedRef = useRef<{ mode: CampaignSortMode; at: number } | null>(null);
+  const markSortJustAppended = (mode: CampaignSortMode) => {
+    sortJustAppendedRef.current = { mode, at: Date.now() };
+  };
+  const sortDoubleClickFollowsAppend = (mode: CampaignSortMode) => {
+    const recent = sortJustAppendedRef.current;
+    return recent != null && recent.mode === mode && Date.now() - recent.at < 800;
+  };
+
+  /**
+   * 触屏：长按排序项 = 把它加为下一级（触屏没有悬停，「+」不出现）。
+   * 【为什么不在手机上常驻「+」】十四个排序项各带一个够点按的「+」，窄屏上排序行要多折两行、吸顶区占掉更多屏幕，
+   * 只有一级时也不再与原来一样；长按是手机上「更多操作」的通行手势，排序行保持原样，加层后下方出现的排序链就是反馈，
+   * 链上的切方向 / 移除 / 清除都是 28px 高的按钮。
+   * 450ms 内松手或手指滑动超过 10px 不算；长按后松手的那次单击、安卓顺带弹出的 contextmenu 都吞掉。
+   */
+  const sortLongPressRef = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const sortLongPressFiredRef = useRef(false);
+  const sortAppendRef = useRef(handleSortAppend);
+  sortAppendRef.current = handleSortAppend;
+  const cancelSortLongPress = () => {
+    const pending = sortLongPressRef.current;
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    sortLongPressRef.current = null;
+  };
+  useEffect(() => () => {
+    if (sortLongPressRef.current) window.clearTimeout(sortLongPressRef.current.timer);
+  }, []);
+  const sortLongPressActive = () => sortLongPressRef.current != null || sortLongPressFiredRef.current;
+  /** 长按之后紧跟的那次单击吞掉；键盘触发的单击（detail = 0）不是手指松开，从不吞。 */
+  const consumeSortLongPress = (event: MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0 || !sortLongPressFiredRef.current) return false;
+    sortLongPressFiredRef.current = false;
+    return true;
+  };
+  /** 手指离开（松开或被浏览器取消，如滑动去滚页面）：长按已生效的，稍后自己复位，不误吞之后的键盘操作。 */
+  const releaseSortLongPress = () => {
+    cancelSortLongPress();
+    if (sortLongPressFiredRef.current) window.setTimeout(() => { sortLongPressFiredRef.current = false; }, 400);
+  };
+  const sortLongPressHandlers = (mode: CampaignSortMode, canAppend: boolean) => ({
+    onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      sortLongPressFiredRef.current = false;
+      cancelSortLongPress();
+      if (event.pointerType !== 'touch') return;
+      const timer = window.setTimeout(() => {
+        sortLongPressRef.current = null;
+        sortLongPressFiredRef.current = true;
+        // 已在排序链上的项长按不做任何事（松手也不会改成只按它排）
+        if (!canAppend) return;
+        setFormulaPopover(null);
+        sortAppendRef.current(mode);
+        try {
+          navigator.vibrate?.(8);
+        } catch {
+          // 不支持震动的设备忽略
+        }
+      }, SORT_LONG_PRESS_MS);
+      sortLongPressRef.current = { timer, x: event.clientX, y: event.clientY };
+    },
+    onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => {
+      const pending = sortLongPressRef.current;
+      if (pending && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) > 10) cancelSortLongPress();
+    },
+    // 松手后紧跟着的那次单击由 consumeSortLongPress 吞掉；万一没有单击（或手指滑走、浏览器发的是 pointercancel），稍后自己复位
+    onPointerUp: releaseSortLongPress,
+    onPointerCancel: releaseSortLongPress,
+    onPointerLeave: cancelSortLongPress,
+  });
 
   const handleCampaignOpen = useCallback((campaignId: string) => {
     const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
@@ -2770,6 +2666,112 @@ export default function JournalCampaignsPage() {
   ];
 
   /**
+   * 排序链：多级时出现在排序行下方，「① 镜像止盈 ↓ › ② 加仓效用 ↓ ×  ⓘ 清除」。
+   * 点某一级的名称或箭头切换它的方向，× 移除这一级，「清除」只保留第一级；只有一级时不出现（界面与原来相同）。
+   * 行首与排序行同样是图标 + 四个字的标签，各级从排序行第一个按钮的位置开始排。
+   * 窄屏放不下一行时：标签只留图标、图标后与「清除」前各收 4px（390 宽的手机上两级连同 ⓘ、清除正好一行排下）；
+   * 各级连同前面的「›」、ⓘ 连同「清除」各自成组折行，
+   * 折下去的那行与 ① 对齐（标签右边整块是一个折行区），「›」不会孤零零挂在行尾。
+   */
+  const renderSortChainBar = () => (
+    <div
+      data-testid="sort-chain"
+      role="group"
+      aria-label="多级排序"
+      className={`order-2 flex items-start gap-x-1 border-t border-border/40 py-1.5 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
+    >
+      <span aria-hidden="true" data-testid="sort-chain-label" className="mr-1 inline-flex h-7 shrink-0 select-none items-center gap-1.5 pr-1 font-medium text-foreground/70 max-sm:pr-0 sm:h-6">
+        <ListOrdered className="h-3.5 w-3.5 opacity-80" />
+        <span className="max-sm:hidden">多级排序</span>
+      </span>
+      <div data-testid="sort-chain-levels" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1">
+      {sortChain.map((level, index) => {
+        const label = SORT_LABEL_BY_MODE[level.mode];
+        const first = index === 0;
+        const directionText = sortDirectionLabel(level.direction, level.mode);
+        const arrowTone = first ? 'text-[#C98500] dark:text-[#F0B90B]' : SORT_THEN_ARROW;
+        return (
+          <span key={level.mode} className="inline-flex shrink-0 items-center gap-1">
+            {index > 0 && <span aria-hidden="true" className="select-none px-0.5 text-[12px] leading-none text-muted-foreground/45 max-sm:hidden">›</span>}
+            <span
+              data-testid={`sort-chain-level-${index + 1}`}
+              data-sort-mode={level.mode}
+              data-sort-direction={level.direction}
+              className={`inline-flex shrink-0 items-stretch overflow-hidden rounded border ${first ? SORT_CHAIN_CHIP_FIRST : SORT_CHAIN_CHIP_THEN}`}
+            >
+              <button
+                type="button"
+                data-testid={`sort-chain-toggle-${index + 1}`}
+                aria-label={`第 ${index + 1} 级：${label}，${directionText}；点击切换方向`}
+                title={`第 ${index + 1} 级：按${label}${directionText}；点击切换方向`}
+                onClick={event => { if (event.detail > 1) return; handleSortLevelToggle(index); }}
+                className={`${SORT_CHAIN_CONTROL} gap-1 pl-1 pr-1.5 hover:bg-[#F0B90B]/10`}
+              >
+                <span aria-hidden="true" className={`${SORT_LEVEL_BADGE} ${first ? SORT_LEVEL_BADGE_FIRST : SORT_LEVEL_BADGE_THEN}`}>{index + 1}</span>
+                <span>{label}</span>
+                {level.direction === 'desc'
+                  ? <ArrowDown aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />
+                  : <ArrowUp aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />}
+              </button>
+              <button
+                type="button"
+                data-testid={`sort-chain-remove-${index + 1}`}
+                aria-label={`移除第 ${index + 1} 级「${label}」`}
+                title={first
+                  ? `移除第 1 级「${label}」：第 2 级升为第一级，进不进列表改由它决定`
+                  : `移除第 ${index + 1} 级「${label}」`}
+                onClick={event => { if (event.detail > 1) return; handleSortLevelRemove(index, event.detail === 0); }}
+                className={`${SORT_CHAIN_CONTROL} w-6 justify-center border-l border-[#F0B90B]/20 text-muted-foreground/60 hover:bg-foreground/[0.06] hover:text-foreground sm:w-5`}
+              >
+                <X aria-hidden="true" className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          </span>
+        );
+      })}
+      <span className="inline-flex shrink-0 items-center">
+      <Popover
+        open={formulaPopover === 'sortChain'}
+        onOpenChange={open => handleFormulaPopoverChange('sortChain', open)}
+      >
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            data-testid="sort-chain-info"
+            aria-label="多级排序的规则"
+            title="多级排序的规则"
+            onClick={event => toggleFormulaPopover(event, 'sortChain')}
+            className={`${SORT_CHAIN_CONTROL} ml-0.5 w-6 justify-center rounded text-muted-foreground/50 hover:bg-foreground/[0.04] hover:text-foreground/80`}
+          >
+            <Info aria-hidden="true" className="h-3 w-3" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
+          <div className="font-medium text-foreground">多级排序</div>
+          <div data-testid="sort-chain-rules" className="mt-2 space-y-1 text-muted-foreground">
+            <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
+            <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
+            <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
+            <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
+            <div>加一级：悬停排序项，点右上角的「+」；手机上长按排序项。单击排序项仍是只按这一项排。</div>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <button
+        type="button"
+        data-testid="sort-chain-clear"
+        title="清除后面各级，只保留第一级"
+        onClick={event => { if (event.detail > 1) return; handleSortChainClear(event.detail === 0); }}
+        className={`${SORT_CHAIN_CONTROL} ml-1 rounded px-1.5 text-muted-foreground/70 hover:bg-foreground/[0.04] hover:text-foreground max-sm:ml-0`}
+      >
+        清除
+      </button>
+      </span>
+      </div>
+    </div>
+  );
+
+  /**
    * 批量下载的选择条。宽屏上放在吸顶区里（排序行下方），跟着统计与排序一起吸顶；
    * 窄屏（< 768px）上排序行本身就折成好几行，再叠一条会让吸顶区占掉小半屏，所以放到吸顶区下面、跟着页面滚走，
    * 滚出视野后由底部浮条（已选 N 场 · 退出选择 · 下载选中）接手。两处只挂一份。
@@ -2855,7 +2857,11 @@ export default function JournalCampaignsPage() {
         清空
       </button>
       {selectedOutsideList > 0 && (
-        <span data-testid="campaign-batch-outside-note" className="inline-flex h-7 items-center text-[#8F6B00] dark:text-[#E8B21C]">
+        <span
+          data-testid="campaign-batch-outside-note"
+          title={`进不进列表由排序的第一级「${SORT_LABEL_BY_MODE[primarySort.mode]}」决定：算不出这一项的战役不在列表里`}
+          className="inline-flex h-7 items-center text-[#8F6B00] dark:text-[#E8B21C]"
+        >
           另有 {selectedOutsideList} 场因当前排序口径未显示，仍保留并排在下载队列末尾
         </span>
       )}
@@ -3096,8 +3102,12 @@ export default function JournalCampaignsPage() {
               className={`order-2 flex min-h-11 flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/60 py-2 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
             >
               {renderSortRow(SORT_OPTIONS.map(option => {
-                const active = sortState.mode === option.value;
-                const direction = active ? sortState.direction : 'desc';
+                /** 这一项在排序链上的第几级（0 = 第一级，-1 = 不在链上）。 */
+                const level = sortChain.findIndex(item => item.mode === option.value);
+                const active = level === 0;
+                const inChain = level >= 0;
+                const thenLevel = level > 0;
+                const direction = inChain ? sortChain[level].direction : 'desc';
                 const formula = SORT_FORMULA_BY_MODE[option.value] ?? null;
                 const sortChartKey = SORT_CHART_BY_MODE[option.value] ?? null;
                 const sortChartConfig = sortChartKey == null
@@ -3114,53 +3124,117 @@ export default function JournalCampaignsPage() {
                   : sortChartKey == null
                     ? undefined
                     : `campaign-${sortChartKey}-chart-toggle`;
+                /** 多级时链上的每一级（含第一级）都标出级数；单击它会收成只按这一项排、方向不变（见 selectSortMode）。 */
+                const chainLevel = inChain && sortChain.length > 1;
                 const sortButton = (
                   <button
                     type="button"
                     aria-pressed={active}
-                    aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序`}
-                    title={`按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}${formula ? '；双击或右键查看说明与散点图' : ''}`}
-                    data-sort-direction={active ? direction : undefined}
+                    aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序${chainLevel ? `（第 ${level + 1} 级）` : ''}`}
+                    title={chainLevel
+                      ? `第 ${level + 1} 级：按${option.label}${sortDirectionLabel(direction, option.value)}；单击改为只按这一项排（方向不变）${formula ? '；双击或右键查看说明与散点图' : ''}`
+                      : `按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}${formula ? '；双击或右键查看说明与散点图' : ''}`}
+                    data-sort-direction={inChain ? direction : undefined}
+                    data-sort-level={inChain ? level + 1 : undefined}
                     data-testid={`campaign-sort-${option.value}`}
                     onClick={(event) => {
                       if (event.detail > 1) return;
+                      // 触屏长按刚把它加成了下一级：松手时的这次单击不再当作「只按这一项排」
+                      if (consumeSortLongPress(event)) return;
+                      // 键盘在「+」上连按两下：第一下加层后焦点交给本项排序按钮，第二下不能把刚建好的链收成单级
+                      if (event.detail === 0 && sortDoubleClickFollowsAppend(option.value)) return;
+                      sortChainBeforeClickRef.current = sortChain.length > 1 ? { mode: option.value, chain: sortChain } : null;
                       setFormulaPopover(null);
                       handleSortChange(option.value);
                     }}
                     onDoubleClick={(event) => {
+                      // 双击的是右上角的「+」（第一击已加层）：只算加一级，不顺带打开说明
+                      if (sortDoubleClickFollowsAppend(option.value)) {
+                        event.preventDefault();
+                        return;
+                      }
+                      // 多级时双击看说明：把第一击收掉的排序链还原
+                      const before = sortChainBeforeClickRef.current;
+                      sortChainBeforeClickRef.current = null;
+                      if (before && before.mode === option.value) applySortChain(before.chain);
                       if (formula) openFormulaPopover(event, formula);
                     }}
                     onContextMenu={(event) => {
+                      // 触屏长按（安卓会顺带弹出 contextmenu）是加层，不是看说明
+                      if (sortLongPressActive()) {
+                        event.preventDefault();
+                        return;
+                      }
                       if (formula) openFormulaPopover(event, formula);
                     }}
-                    className={`inline-flex h-7 shrink-0 items-center gap-0.5 whitespace-nowrap rounded border px-1.5 transition-[color,background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
+                    {...sortLongPressHandlers(option.value, !inChain)}
+                    className={`inline-flex h-7 shrink-0 select-none items-center gap-0.5 whitespace-nowrap rounded border px-1.5 transition-[color,background-color,border-color,box-shadow] duration-150 [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
                       active
                         ? 'border-border bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:border-foreground/15 dark:bg-accent'
-                        : 'border-transparent text-muted-foreground/75 hover:border-border/60 hover:bg-foreground/[0.04] hover:text-foreground/85'
+                        : thenLevel
+                          ? SORT_THEN_BUTTON
+                          : 'border-transparent text-muted-foreground/75 hover:border-border/60 hover:bg-foreground/[0.04] hover:text-foreground/85'
                     }`}
                   >
                     <span>{option.label}</span>
                     {/* 图标位宽度固定：有公式的档平时显示 Σ，选中后同一个位置换成方向箭头；
                         没有公式的档（操作时间 / 杠杆倍数 / 字母）平时也留一个同宽的空位——切换排序时按钮宽度不变，整行不会重排、双击不会落到隔壁。 */}
-                    {(formula || active) ? (
+                    {(formula || inChain) ? (
                       <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0 justify-center">
-                        {!active
+                        {!inChain
                           ? <Sigma className="h-2.5 w-2.5 opacity-30" />
                           : direction === 'desc'
-                            ? <ArrowDown className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />
-                            : <ArrowUp className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />}
+                            ? <ArrowDown className={`h-3 w-3 ${active ? 'text-[#C98500] dark:text-[#F0B90B]' : SORT_THEN_ARROW}`} />
+                            : <ArrowUp className={`h-3 w-3 ${active ? 'text-[#C98500] dark:text-[#F0B90B]' : SORT_THEN_ARROW}`} />}
                       </span>
                     ) : (
                       <span aria-hidden="true" data-testid={`campaign-sort-${option.value}-icon`} className="inline-flex w-3 shrink-0" />
                     )}
                   </button>
                 );
+                /**
+                 * 每一项外面包一层（不占尺寸）：右上角挂一个悬停才出现的「+」（加为下一级），多级时同一个角上标出第几级。
+                 * 只有一级时这一层什么也不画，排序行与原来逐像素相同。
+                 */
+                const wrapSortItem = (content: ReactElement) => (
+                  <span key={option.value} data-sort-item={option.value} className="group/sort relative inline-flex shrink-0">
+                    {content}
+                    {!inChain && (
+                      <button
+                        type="button"
+                        data-testid={`sort-chain-add-${option.value}`}
+                        aria-label={`把「${option.label}」加为第 ${sortChain.length + 1} 级排序`}
+                        title={`加为第 ${sortChain.length + 1} 级：前面各级打平时，再按${option.label}排`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (event.detail > 1) return;
+                          setFormulaPopover(null);
+                          markSortJustAppended(option.value);
+                          handleSortAppend(option.value, event.detail === 0);
+                        }}
+                        // 「+」是这一项的一部分：右键同样看说明与散点图（不弹浏览器菜单、不加层）
+                        onContextMenu={formula ? event => openFormulaPopover(event, formula) : undefined}
+                        className={SORT_ADD_BUTTON}
+                      >
+                        <Plus aria-hidden="true" strokeWidth={3} className="h-2.5 w-2.5" />
+                      </button>
+                    )}
+                    {inChain && sortChain.length > 1 && (
+                      <span
+                        aria-hidden="true"
+                        data-testid={`sort-chain-rank-${option.value}`}
+                        className={`pointer-events-none absolute -right-1 -top-1 ${SORT_LEVEL_BADGE} ${active ? SORT_LEVEL_BADGE_FIRST : SORT_LEVEL_BADGE_THEN}`}
+                      >
+                        {level + 1}
+                      </span>
+                    )}
+                  </span>
+                );
                 if (!formula) {
-                  return <Fragment key={option.value}>{sortButton}</Fragment>;
+                  return wrapSortItem(sortButton);
                 }
-                return (
+                return wrapSortItem(
                 <Popover
-                  key={option.value}
                   open={formulaPopover === formula}
                   onOpenChange={open => handleFormulaPopoverChange(formula, open)}
                 >
@@ -3374,7 +3448,7 @@ export default function JournalCampaignsPage() {
                       </div>
                     ) : null}
                   </PopoverContent>
-                </Popover>
+                </Popover>,
               );
               }))}
               {/* 批量下载不是排序项：排序按钮照旧左对齐，它单独靠在这一行最右端；进入选择模式后下方展开选择条。 */}
@@ -3398,6 +3472,7 @@ export default function JournalCampaignsPage() {
                 {selectionMode ? '退出选择' : '批量下载'}
               </button>
             </div>
+            {sortChain.length > 1 && renderSortChainBar()}
             {selectionMode && !narrowViewport && renderBatchSelectionBar(false)}
             <div
               data-testid="campaign-metrics-strip"
@@ -4116,13 +4191,13 @@ export default function JournalCampaignsPage() {
             ) : (
               <>
                 <div className="text-[13px] font-medium">
-                  {SORT_EMPTY_HINTS[sortState.mode] && scopedRows.length > 0
-                    ? `暂无${SORT_EMPTY_HINTS[sortState.mode]!.noun}的战役`
+                  {SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0
+                    ? `暂无${SORT_EMPTY_HINTS[primarySort.mode]!.noun}的战役`
                     : '尚无战役'}
                 </div>
                 <div className="text-[12px] text-muted-foreground">
-                  {SORT_EMPTY_HINTS[sortState.mode] && scopedRows.length > 0
-                    ? SORT_EMPTY_HINTS[sortState.mode]!.hint
+                  {SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0
+                    ? SORT_EMPTY_HINTS[primarySort.mode]!.hint
                     : '你下次开主力单时会自动创建第一个战役'}
                 </div>
               </>
@@ -4135,7 +4210,7 @@ export default function JournalCampaignsPage() {
               <CampaignCard
                 key={row.campaign.id}
                 row={row}
-                sortHighlight={sortState.mode}
+                sortHighlight={sortHighlight}
                 expanded={expandedCampaignIds.has(row.campaign.id)}
                 busy={busyCampaignId === row.campaign.id}
                 isOwnCampaign={row.campaign.user_id === userId}

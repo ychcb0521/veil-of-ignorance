@@ -170,7 +170,14 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     for (const mode of ['time', 'leverage', 'importance', 'alpha']) {
       expect(s, mode).toContain(`data-sort-highlight={litAttr('${mode}')}`);
     }
-    expect(s).toContain('sortHighlight={sortState.mode}');
+    // 【用户要求】多级排序：排序链上每一级对应的模块都亮，第一级用上面那一套，之后各级轻一档的同色系（同样只换底色与描边）
+    expect(s).toContain('sortHighlight={sortHighlight}');
+    expect(s).toContain('const sortHighlight = useMemo(() => sortChain.map(level => level.mode), [sortChain]);');
+    const thenBox = /const SORT_THEN_HIGHLIGHT_BOX = '([^']+)'/.exec(s)?.[1] ?? '';
+    expect(thenBox).toContain('ring-1');
+    expect(thenBox).toMatch(/bg-\[#F0B90B\]/);
+    expect(thenBox).not.toMatch(/(^|\s)(dark:)?(p[xytblr]?|m[xytblr]?|w|h|border)-/);
+    expect(s).toContain("byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')");
   });
 });
 
