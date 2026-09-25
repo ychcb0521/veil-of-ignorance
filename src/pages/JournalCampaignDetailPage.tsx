@@ -103,10 +103,11 @@ import {
   renderCampaignBoardPng,
   type CampaignBoardExportInput,
 } from '@/lib/campaignLegsPngExport';
-import type {
-  CampaignBatchAccountMetrics,
-  CampaignBatchExportSnapshot,
-  CampaignBatchExportWorkerProps,
+import {
+  BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER,
+  type CampaignBatchAccountMetrics,
+  type CampaignBatchExportSnapshot,
+  type CampaignBatchExportWorkerProps,
 } from '@/lib/campaignBatchExportContext';
 import { ThemeOverride } from '@/contexts/ThemeContext';
 import { buildEmotionDiaryExportSummary } from '@/lib/emotionDiary';
@@ -836,8 +837,12 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, []);
   const [interval, setInterval] = useState<Interval>('1m');
   const [intervalTouched, setIntervalTouched] = useState(false);
+  // 批量导出按弹窗里选的倍数取视窗（默认 1.1 倍）；详情页首屏仍是 3 倍
+  const initialViewMultiplier: CampaignViewMultiplier = batchExport
+    ? batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER
+    : 3;
   const [chartRangeSelection, setChartRangeSelection] = useState<CampaignChartRangeSelection>(
-    { kind: 'multiplier', multiplier: 3 },
+    { kind: 'multiplier', multiplier: initialViewMultiplier },
   );
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
@@ -915,8 +920,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   useEffect(() => {
     // 换战役必须连绝对预设一起重置：否则从某战役的「1月」视图进另一个 symbol，
     // 开场就带着一个月的拉取窗口。
-    setChartRangeSelection({ kind: 'multiplier', multiplier: 3 });
-  }, [id]);
+    setChartRangeSelection({ kind: 'multiplier', multiplier: initialViewMultiplier });
+  }, [id, initialViewMultiplier]);
 
   useEffect(() => {
     // 换战役时草稿与「载入到 Legs 副本」请求都作废：它们只对当前战役有意义。
@@ -1254,7 +1259,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   // 于是「点预设」的那一帧窗口已经是 30 天、interval 还停在 1m，
   // useReplayKlines 的 effect 先跑起来就是 43200 根 / 29 个串行请求。
   // 手动挡（intervalTouched）在倍率视图下原样保留；绝对预设下只保证不比可读下限更细。
-  // 批量导出里统一指定的周期是下限：只在 3 倍视窗放不下或拉取过多时放宽（见 pickBatchExportInterval）。
+  // 批量导出里统一指定的周期是下限：只在所选倍数的视窗放不下或拉取过多时放宽（见 pickBatchExportInterval）。
   const batchInterval = batchExport?.options.interval;
   const effectiveInterval = useMemo<Interval>(() => {
     if (batchInterval && batchInterval !== 'auto') {
@@ -2178,7 +2183,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         ...(batchExport ? {
           sections: batchExport.options.sections,
           exportedAt: batchExport.snapshot.exportedAt,
-          chartViewLabel: '完整战役 · 前后上下文',
+          chartViewLabel: `${batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER} 倍视窗`,
         } : {}),
       });
 

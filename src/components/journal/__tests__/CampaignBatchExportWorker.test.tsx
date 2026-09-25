@@ -105,6 +105,14 @@ describe('CampaignBatchExportWorker', () => {
   });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+  it('【用户要求】按弹窗里选的倍数取盘面视窗，看板标题写明倍数', async () => {
+    const props = workerProps({ options: { interval: '15m', viewMultiplier: 5, sections: {} } });
+    mount(props);
+    await finishChart();
+    await waitFor(() => expect(props.onComplete).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(renderCampaignBoardPng).mock.calls[0][0].chartViewLabel).toBe('5 倍视窗');
+  });
+
   it('uses the detail calculations read-only and waits for the native chart before producing a PNG', async () => {
     const props = workerProps();
     mount(props);
@@ -123,6 +131,8 @@ describe('CampaignBatchExportWorker', () => {
     expect(input.legExitPriceCorrections).toEqual(parityFixture('exit-correction').corrections);
     expect(input.chartElement?.getAttribute('style')).toContain('width: 1440px');
     expect(input.chartInterval).toBe('15m');
+    // 【用户要求】没指定倍数时按默认的 1.1 倍视窗画，看板盘面标题写明
+    expect(input.chartViewLabel).toBe('1.1 倍视窗');
     expect(input.exportedAt).toBe(props.snapshot.exportedAt);
     // 与详情页同一个 14 项盈亏概览，按两栏次序（左栏递进链 → 右栏结果与仓位；见 PNL_OVERVIEW_LEFT_COLUMN / RIGHT_COLUMN），
     // 右栏各项带 rightColumn：导出图与页面一样按两栏从上往下排。

@@ -119,7 +119,7 @@ describe('批量下载队列', () => {
     const badge = within(row('b')).getByText('5分钟');
     expect(badge).toHaveAttribute('title', '所选 1分钟 在这场战役的盘面上放不下，已放宽到 5分钟');
     expect(within(row('a')).queryByText('1分钟')).not.toBeInTheDocument();
-    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('周期 1分钟 ｜ 1 场盘面放不下，已放宽周期');
+    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('周期 1分钟 · 1.1x 视窗 ｜ 1 场盘面放不下，已放宽周期');
   });
 
   it('「自动」档按每场各自选周期，不算放宽', () => {
@@ -141,6 +141,30 @@ describe('批量下载队列', () => {
     // 窄屏只在「），」之后换行：后两句各自整句不折行，不会把「不对称」拆成「不 / 对称」
     const unbroken = [...note.querySelectorAll('.whitespace-nowrap')].map(node => node.textContent);
     expect(unbroken).toEqual(['不对称风险贡献按其余 23 场计算。', '图中「盈亏概览」下已注明。']);
+  });
+
+  it('【用户要求】盘面视窗可选 1.1x / 2x / 3x …，默认 1.1 倍；所选倍数交给离屏详情页，进度区写明', () => {
+    render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
+    const group = screen.getByTestId('campaign-batch-view-multiplier');
+    const options = within(group).getAllByRole('radio').map(input => (input as HTMLInputElement).value);
+    expect(options).toEqual(['1.1', '2', '3', '5', '11', '21', '31', '41', '51']);
+    expect(within(group).getByRole('radio', { name: '1.1x' })).toBeChecked();
+    fireEvent.click(within(group).getByRole('radio', { name: '3x' }));
+    start();
+    expect(latestWorker().options.viewMultiplier).toBe(3);
+    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('3x 视窗');
+  });
+
+  it('没画 K 线盘面时视窗单选停用、说明原因，进度区不写视窗；默认倍数照样是 1.1', () => {
+    render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
+    const group = screen.getByTestId('campaign-batch-view-multiplier');
+    expect(group).not.toBeDisabled();
+    fireEvent.click(screen.getByLabelText('K 线盘面'));
+    expect(group).toBeDisabled();
+    expect(group).toHaveTextContent('未画 K 线盘面，不用视窗');
+    start();
+    expect(latestWorker().options.viewMultiplier).toBe(1.1);
+    expect(screen.getByTestId('campaign-batch-progress')).not.toHaveTextContent('视窗');
   });
 
   it('K 线盘面与盈亏概览都不画时，周期单选调暗停用并说明原因，进度区也不写周期', () => {

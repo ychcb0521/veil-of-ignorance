@@ -117,7 +117,7 @@ export const BATCH_EXPORT_FETCH_CANDLE_LIMIT = 18_000;
 /**
  * 批量导出里用户统一指定的周期：它是下限，而不是被「自动」档的拉取预算（51 倍窗口 6000 根）顶掉。
  * 旧写法与自动档取粗，3 小时的战役选 1 分钟也只能拿到 5 分钟线，选了等于没选。
- * 现在只在两种情况放宽：3 倍视窗里按指定周期放不下（BATCH_EXPORT_VISIBLE_CANDLE_LIMIT），
+ * 现在只在两种情况放宽：所选倍数的视窗里按指定周期放不下（BATCH_EXPORT_VISIBLE_CANDLE_LIMIT），
  * 或整段拉取超出 BATCH_EXPORT_FETCH_CANDLE_LIMIT。放宽后的实际周期写在图里，队列里也会标出。
  */
 export function pickBatchExportInterval(

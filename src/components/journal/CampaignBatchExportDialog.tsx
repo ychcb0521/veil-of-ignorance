@@ -3,16 +3,19 @@ import { Check, Download, Loader2, Package, Pause, Play, RotateCcw, TriangleAler
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CampaignBatchExportWorker } from './CampaignBatchExportWorker';
 import {
+  BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER,
   createCampaignBatchExportSnapshot,
+  formatViewMultiplier,
   type CampaignBatchExportResult,
   type CampaignBatchExportSnapshot,
 } from '@/lib/campaignBatchExportContext';
 import { buildCampaignPngZip } from '@/lib/campaignPngZip';
 import { boardUsesChartInterval, type CampaignBoardExportSections } from '@/lib/campaignLegsPngExport';
 import type { CampaignChartInterval } from '@/lib/campaignChartContentSpan';
+import { CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS, type CampaignViewMultiplier } from '@/hooks/useCampaignKlines';
 import { campaignZipFileName, numberedCampaignPngName, type CampaignExportTarget } from '@/lib/campaignBatchSelection';
 
-type Options = { interval: 'auto' | CampaignChartInterval; sections: CampaignBoardExportSections };
+type Options = { interval: 'auto' | CampaignChartInterval; viewMultiplier: CampaignViewMultiplier; sections: CampaignBoardExportSections };
 /**
  * running：正在逐场生成；paused：用户暂停；budget：已生成图片达到内存预算，先下载本包才能继续；
  * idle：本轮队列已走完（可能还有失败项或暂停时没轮到的）。
@@ -99,6 +102,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
   onReturnFocus?: () => void;
 }) {
   const [interval, setIntervalOption] = useState<Options['interval']>('auto');
+  const [viewMultiplier, setViewMultiplier] = useState<CampaignViewMultiplier>(BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER);
   const [sections, setSections] = useState<Required<CampaignBoardExportSections>>({
     metadata: true, overview: true, emotionDiary: true, chart: true, legs: true,
   });
@@ -116,6 +120,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
   const anySection = SECTIONS.some(({ key }) => sections[key]);
   /** K 线盘面与盈亏概览都不画时，周期既不进图、也不拉 K 线：周期单选调暗停用。 */
   const intervalMatters = boardUsesChartInterval(sections);
+  const chartDrawn = sections.chart !== false;
 
   useEffect(() => {
     alive.current = true;
@@ -188,7 +193,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
     setRun({
       generation: ++generation.current, targets, queue: targets.map(item => item.id), index: 0,
       outputs: new Map(), packed: new Map(), failures: new Map(),
-      options: { interval, sections: { ...sections } },
+      options: { interval, viewMultiplier, sections: { ...sections } },
       snapshot: createCampaignBatchExportSnapshot({ exportedAt: new Date().toISOString(), currentAccountEquity }),
       status: 'running', part: 1,
     });
@@ -409,7 +414,45 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] leading-[1.7] text-muted-foreground/75">
-                    盘面取完整战役及前后上下文，不沿用详情页里手动拖动的视窗。指定周期是下限：某场战役的盘面放不下那么多根时自动放宽，队列里标出实际周期。交易所没有 K 线的战役照常导出，图里写明原因。
+                    指定周期是下限：某场战役的盘面放不下那么多根时自动放宽，队列里标出实际周期。交易所没有 K 线的战役照常导出，图里写明原因。
+                  </p>
+                </div>
+              </fieldset>
+
+              {/* 【用户要求】盘面视窗倍数：与详情页 K 线上方那一排倍数按钮同一组，默认 1.1 倍；只有画 K 线盘面时起作用 */}
+              <fieldset disabled={!chartDrawn} data-testid="campaign-batch-view-multiplier">
+                <legend className="mb-2 text-[10px] font-medium text-muted-foreground">
+                  盘面视窗
+                  {!chartDrawn && (
+                    <span className="ml-2 font-normal text-muted-foreground/70">未画 K 线盘面，不用视窗</span>
+                  )}
+                </legend>
+                <div className={chartDrawn ? undefined : 'pointer-events-none select-none opacity-40'}>
+                  <div role="radiogroup" aria-label="批量导出盘面视窗倍数" className="inline-flex overflow-hidden rounded border border-border/80 font-mono text-[11px]">
+                    {CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map(item => (
+                      <label
+                        key={item}
+                        title={`盘面显示 ${item} 倍战役时长（战役居中）`}
+                        className={`cursor-pointer border-l border-border/80 px-2 py-1 transition-colors first:border-l-0 has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-inset has-[:focus-visible]:ring-ring/70 ${
+                          viewMultiplier === item
+                            ? 'bg-[#F0B90B]/[0.12] font-medium text-foreground'
+                            : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground/85'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="campaign-batch-view-multiplier"
+                          value={item}
+                          className="sr-only"
+                          checked={viewMultiplier === item}
+                          onChange={() => setViewMultiplier(item)}
+                        />
+                        {formatViewMultiplier(item)}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[10px] leading-[1.7] text-muted-foreground/75">
+                    盘面显示战役时长的几倍，战役居中；1.1 倍几乎只放战役本身，倍数越大前后行情越多。不沿用详情页里手动拖动的视窗。
                   </p>
                 </div>
               </fieldset>
@@ -459,6 +502,9 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
                     <span className="max-sm:hidden">{' ｜ '}</span><br className="sm:hidden" />
                     <span className="whitespace-nowrap">周期 {intervalLabel(run.options.interval)}</span>
                   </>
+                )}
+                {run.options.sections.chart !== false && (
+                  <>{' · '}<span className="whitespace-nowrap">{formatViewMultiplier(run.options.viewMultiplier)} 视窗</span></>
                 )}
                 {widenedCount > 0 && <>{' ｜ '}<span className="whitespace-nowrap">{widenedCount} 场盘面放不下，已放宽周期</span></>}
                 {omittedCount > 0 && <>{' ｜ '}<span className="whitespace-nowrap">

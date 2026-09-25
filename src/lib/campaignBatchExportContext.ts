@@ -1,3 +1,4 @@
+import type { CampaignViewMultiplier } from '@/hooks/useCampaignKlines';
 import type { CampaignBoardExportSections } from '@/lib/campaignLegsPngExport';
 import type { CampaignChartInterval } from '@/lib/campaignChartContentSpan';
 import type { CampaignPerformanceSummary } from '@/lib/kellySizing';
@@ -61,11 +62,21 @@ export type CampaignBatchExportResult = {
   sampleNote?: string;
 };
 
+/** 【用户要求】批量导出的盘面视窗默认 1.1 倍：完整战役加一圈边距，盘面几乎只放战役本身。 */
+export const BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;
+
+/** 倍数按钮的写法：「1.1x」「2x」，与详情页 K 线上方那一排同一个样子。 */
+export function formatViewMultiplier(multiplier: CampaignViewMultiplier): string {
+  return `${multiplier}x`;
+}
+
 export type CampaignBatchExportWorkerProps = {
   campaignId: string;
   userId: string;
   options: {
     interval: 'auto' | CampaignChartInterval;
+    /** 【用户要求】盘面视窗 = 战役时长的几倍（与详情页 K 线上方的倍数按钮同一组）；缺省按 BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER。 */
+    viewMultiplier?: CampaignViewMultiplier;
     sections: CampaignBoardExportSections;
   };
   snapshot: CampaignBatchExportSnapshot;

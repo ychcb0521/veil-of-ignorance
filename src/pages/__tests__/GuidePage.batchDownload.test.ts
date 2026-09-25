@@ -17,6 +17,14 @@ describe('指南：批量下载图片', () => {
   const detail = read('pages/JournalCampaignDetailPage.tsx');
   const selection = read('lib/campaignBatchSelection.ts');
 
+  it('【用户要求】盘面视窗倍数可选、默认 1.1 倍，与详情页倍数按钮同一组', () => {
+    expect(section).toContain('<strong>盘面视窗</strong>可选 1.1x、2x、3x、5x、11x、21x、31x、41x、51x');
+    expect(section).toContain('<strong>默认 1.1 倍</strong>');
+    expect(section).not.toContain('盘面取完整战役及前后上下文');
+    expect(dialog).toContain('CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map');
+    expect(detail).toContain('batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER');
+  });
+
   it('这一节存在，入口写的是排序行最右端的「批量下载」', () => {
     expect(at).toBeGreaterThan(-1);
     expect(section).toContain('「排序方式」一行最右端');

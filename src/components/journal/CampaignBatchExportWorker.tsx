@@ -32,11 +32,12 @@ export function CampaignBatchExportWorker(props: CampaignBatchExportWorkerProps)
   callbacks.current = props;
   const { campaignId, userId, snapshot } = props;
   const interval = props.options.interval;
+  const viewMultiplier = props.options.viewMultiplier;
   const { metadata, overview, emotionDiary, chart, legs } = props.options.sections;
   // 队列进度刷新不能让这一场重新读数或重建原生 K 线：回调走 ref，传给详情页的对象只随设置变化。
   const stableProps = useMemo<CampaignBatchExportWorkerProps>(() => ({
     campaignId, userId, snapshot,
-    options: { interval, sections: { metadata, overview, emotionDiary, chart, legs } },
+    options: { interval, viewMultiplier, sections: { metadata, overview, emotionDiary, chart, legs } },
     onComplete: result => {
       if (!active.current || finished.current) return;
       finished.current = true;
@@ -47,7 +48,7 @@ export function CampaignBatchExportWorker(props: CampaignBatchExportWorkerProps)
       finished.current = true;
       callbacks.current.onError(error);
     },
-  }), [campaignId, userId, snapshot, interval, metadata, overview, emotionDiary, chart, legs]);
+  }), [campaignId, userId, snapshot, interval, viewMultiplier, metadata, overview, emotionDiary, chart, legs]);
   useEffect(() => {
     active.current = true;
     finished.current = false;
