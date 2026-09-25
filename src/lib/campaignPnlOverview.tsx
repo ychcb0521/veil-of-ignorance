@@ -430,7 +430,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <>
           <p>本场盈亏比 b 对账户不对称风险指标的贡献：盈利战役进入 USI 的上行组，亏损或持平战役进入 DSI 的下行组。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div>
-          <p>读数就是这个占比（与战役列表「DSI 贡献 / USI 贡献」排序同一个数），用于定位哪些战役拉高了 DSI 或支撑了 USI；不到 0.1% 写「&lt;0.1%」。</p>
+          <p>读数就是这个占比，用于定位哪些战役拉高了 DSI 或支撑了 USI；不到 0.1% 写「&lt;0.1%」。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
           {asymmetricRiskContribution != null ? (
             <p className="font-mono text-foreground">

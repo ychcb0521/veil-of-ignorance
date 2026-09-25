@@ -106,10 +106,10 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
     expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-testid^="sort-chain-rank-"]')).toHaveLength(0);
-    // 第一级自己没有「+」；其余十三项各一个，平时透明、只在能悬停的设备上显示（触屏改用长按）
+    // 第一级自己没有「+」；其余十一项各一个，平时透明、只在能悬停的设备上显示（触屏改用长按）
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    expect(adds).toHaveLength(13);
+    expect(adds).toHaveLength(11);
     for (const add of adds) {
       // 「+」挂在右上角（与多级时的级数角标同一个位置），不再叠在 Σ 那一格上；没显形时不接收指针
       expect(add).toHaveClass(
@@ -520,7 +520,7 @@ describe('战役列表：多级排序', () => {
     expect(first.getAttribute('aria-label')).not.toContain('第 1 级');
   }, 15_000);
 
-  it('ⓘ 写明规则：第一级决定进不进列表、缺值排本档末尾、清除保留第一级、手机长按', async () => {
+  it('ⓘ 写明规则：第一级决定进不进列表、缺值排本档末尾、清除保留第一级、手机长按、连续指标分档、本级排了几场', async () => {
     renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-info'));
@@ -529,5 +529,142 @@ describe('战役列表：多级排序', () => {
     expect(rules).toHaveTextContent('第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序）');
     expect(rules).toHaveTextContent('「清除」只保留第一级');
     expect(rules).toHaveTextContent('手机上长按排序项');
+    expect(rules).toHaveTextContent('第一级是连续数值指标（预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何 / 算术期望）且链上不止一级时，先按四分位分成四档');
+    expect(rules).toHaveTextContent('档界按当前列表算、按封面精度取整，就是那一档里最小的读数');
+    expect(rules).toHaveTextContent('镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档');
+    expect(rules).toHaveTextContent('第二级起每一级标出本级排了几场');
+    expect(rules).toHaveTextContent('「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项');
+    // 【复核】档界与各级的作用不只放在悬停提示里：ⓘ 末尾的「当前」段逐级写出来（手机、键盘也读得到）
+    const current = screen.getByTestId('sort-chain-current');
+    expect(current).toHaveTextContent('当前');
+    expect(current).toHaveTextContent('第 2 级「加仓效用」：前面各级并列的 4 组、11 场里，按加仓效用排了 6 场；5 场算不出加仓效用，留在各组末尾');
+    expect(current).not.toHaveTextContent('分档');
+  }, 15_000);
+
+  it('【用户反馈】第二级起每一级标出「本级排了 N 场」：前一级并列的战役里按这一项排了几场，算不出的几场留在组尾（悬停看明细）', async () => {
+    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.asc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
+    // 第一级没有「作用」可标
+    expect(screen.queryByTestId('sort-chain-effect-1')).not.toBeInTheDocument();
+    // 第二级：四档都有并列，11 场里 6 场算得出加仓效用、5 场算不出
+    const second = screen.getByTestId('sort-chain-effect-2');
+    expect(second).toHaveTextContent('6 场');
+    expect(second.getAttribute('title')).toContain('第 2 级「加仓效用」：前面各级并列的 4 组、11 场里，按加仓效用排了 6 场');
+    expect(second.getAttribute('title')).toContain('5 场算不出加仓效用，留在各组末尾');
+    // 第三级：前两级都打平的只有未实现·亏损那一档（两场都算不出加仓效用）
+    const third = screen.getByTestId('sort-chain-effect-3');
+    expect(third).toHaveTextContent('2 场');
+    expect(third.getAttribute('title')).toContain('前面各级并列的 1 组、2 场里，按盈亏比排了 2 场');
+    expect(third.getAttribute('title')).not.toContain('算不出');
+    // 芯片仍在同一个圆角框里：作用标记夹在名称与 × 之间
+    const chip = screen.getByTestId('sort-chain-level-2');
+    expect(chip).toContainElement(second);
+    expect(chip).toContainElement(screen.getByTestId('sort-chain-remove-2'));
+  }, 15_000);
+
+  it('前一级没有并列时第二级标「未起作用」并说明原因；并列的都算不出这一项时也标「未起作用」', async () => {
+    // 字母作第一级：十一场标题各不相同 → 没有并列
+    renderPage('?sort=alpha&direction=asc&then=captureRate.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+    const effect = screen.getByTestId('sort-chain-effect-2');
+    expect(effect).toHaveTextContent('未起作用');
+    expect(effect.getAttribute('title')).toBe('第 2 级「盈亏比」未起作用：前面各级没有并列，每一场的先后都已由前面各级决定');
+    // 换成镜像止盈 › 加仓效用：又有作用了
+    fireEvent.click(screen.getByTestId('sort-chain-remove-1'));
+    await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('sort-chain-add-mirrorTp'));
+    await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
+    // 盈亏比 › 镜像止盈：盈亏比分档后四档都有并列，镜像止盈每场都有；Q4 三场都是已实现·盈利（读数相同、先后未变）不算排了 → 8 场
+    expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('8 场');
+    expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toContain('按镜像止盈排了 8 场；3 场与同组其它场读数相同，先后未变');
+  }, 15_000);
+
+  it('【复核】前面各级并列、但本级读数全相同时标「未起作用」并说明（不再把「进入比较」当成「排了」）', async () => {
+    // 十一场重要性都是 0：镜像止盈四档里每一档的重要性读数全相同 → 顺序与只按镜像止盈逐位相同，芯片不能报「排了 11 场」
+    renderPage('?sort=mirrorTp&direction=desc&then=importance.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+    expect(order()).toEqual(MIRROR_ONLY);
+    const effect = screen.getByTestId('sort-chain-effect-2');
+    expect(effect).toHaveTextContent('未起作用');
+    expect(effect.getAttribute('title')).toBe('第 2 级「重要性」未起作用：前面各级并列的 4 组、11 场里，每一组的重要性读数都相同，先后未变');
+    // 并列的一部分读数全相同、一部分算不出：两种原因都写明
+    fireEvent.click(screen.getByTestId('sort-chain-remove-2'));
+    await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('sort-chain-add-leverage'));
+    await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
+    expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('未起作用');
+    expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toBe('第 2 级「杠杆倍数」未起作用：前面各级并列的 4 组、11 场都算不出杠杆倍数');
+  }, 15_000);
+
+  it('【用户已定】连续指标作第一级、链上不止一级时先按四分位分档：第一级芯片标「分档」，悬停写明档界；封面第一级高亮不变', async () => {
+    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+    // 十一场的盈亏比分四档：Q4 {ETH 2.50, SOL 4.20, BTC 6.00} · Q3 {LINK 1.20, BNB 1.80, TIA 2.10} · Q2 {DOGE −0.60, ARB 0.80} · Q1 {APT, OP, AVAX}
+    // 同档内按镜像止盈（已实现在前），再打平按盈亏比本身从大到小
+    expect(order()).toEqual([
+      'BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓',
+      'BNB 镜像止盈', 'TIA 二次加仓', 'LINK 区间',
+      'DOGE 假突破', 'ARB 回踩',
+      'AVAX 反抽', 'OP 追高', 'APT 抄底',
+    ]);
+    const binned = screen.getByTestId('sort-chain-binned');
+    expect(binned).toHaveTextContent('分档');
+    expect(screen.getByTestId('sort-chain-level-1')).toContainElement(binned);
+    const title = binned.getAttribute('title') ?? '';
+    expect(title).toContain('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）');
+    // 插值档界 2.30 / −0.75 不是任何一场的读数：档界写成那一档里最小的读数（2.50 / −0.60），与封面对得上
+    expect(title).toContain('Q4 ≥ 2.50（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.60（2 场）· Q1 < -0.60（3 场）');
+    expect(title).toContain('同档内按后面各级排；各级都打平再按盈亏比本身从大到小');
+    // 排序行上第一级的提示也写明分档；「+」的提示说清加层后会分档
+    expect(screen.getByTestId('campaign-sort-captureRate').getAttribute('title')).toContain('第 1 级：按盈亏比从大到小，四分位分档');
+    // 封面：第一级仍是原来的高亮，第二级轻一档
+    const first = screen.getAllByTestId('campaign-card')[0];
+    expect(highlights(first)).toEqual(['campaign-mirror-tp-status:then', 'campaign-payoff-ratio:true']);
+    // 只剩一级：不分档、没有「分档」标记，顺序回到纯按盈亏比
+    fireEvent.click(screen.getByTestId('sort-chain-clear'));
+    await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('sort-chain-binned')).not.toBeInTheDocument();
+    expect(order().slice(0, 3)).toEqual(['BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓']);
+    expect(order().slice(-3)).toEqual(['AVAX 反抽', 'OP 追高', 'APT 抄底']);
+    // 单级时「+」的提示说清加层后第一级会分档
+    expect(screen.getByTestId('sort-chain-add-mirrorTp').getAttribute('title')).toBe('加为第 2 级：盈亏比按四分位分成四档后，同档内再按镜像止盈排');
+  }, 15_000);
+
+  it('分档指标作第一级时不分档：芯片上没有「分档」，「+」的提示与原来一样', async () => {
+    renderPage('?sort=mirrorTp&direction=desc&then=captureRate.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+    expect(screen.queryByTestId('sort-chain-binned')).not.toBeInTheDocument();
+    expect(screen.getByTestId('campaign-sort-mirrorTp').getAttribute('title')).not.toContain('分档');
+    expect(screen.getByTestId('sort-chain-add-addEfficiency').getAttribute('title')).toBe('加为第 3 级：前面各级打平时，再按加仓效用排');
+  }, 15_000);
+
+  it('【复核】档界与本级作用不只在悬停提示里：ⓘ 的「当前」段写出档界与各级作用；「分档」「N 场」是可聚焦的按钮，点它打开 ⓘ', async () => {
+    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc&then=addEfficiency.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
+    const binned = screen.getByTestId('sort-chain-binned');
+    const effect2 = screen.getByTestId('sort-chain-effect-2');
+    const effect3 = screen.getByTestId('sort-chain-effect-3');
+    // 可聚焦：按钮、tabIndex 0、aria-label 与悬停提示同一串（键盘与读屏读得到）
+    for (const note of [binned, effect2, effect3]) {
+      expect(note.tagName).toBe('BUTTON');
+      expect(note.tabIndex).toBe(0);
+      expect(note.getAttribute('aria-label')).toBe(note.getAttribute('title'));
+    }
+    expect(screen.queryByTestId('sort-chain-current')).not.toBeInTheDocument();
+    // 点「分档」：打开 ⓘ 弹层，「当前」段第一行是档界（与悬停提示同一串），之后每级一行
+    fireEvent.click(binned);
+    const current = await screen.findByTestId('sort-chain-current');
+    expect(current).toHaveTextContent('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）：Q4 ≥ 2.50（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.60（2 场）· Q1 < -0.60（3 场）');
+    expect(current).toHaveTextContent('第 2 级「镜像止盈」：前面各级并列的 4 组、11 场里，按镜像止盈排了 8 场；3 场与同组其它场读数相同，先后未变');
+    expect(current).toHaveTextContent(effect3.getAttribute('title') ?? '∅');
+    // 一级一行：档界行、第 2 级行、第 3 级行
+    expect(within(current).getAllByTestId(/^sort-chain-current-level-\d$/).map(node => node.getAttribute('data-testid'))).toEqual([
+      'sort-chain-current-level-1', 'sort-chain-current-level-2', 'sort-chain-current-level-3',
+    ]);
+    // 键盘：在「N 场」上按回车同样打开
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sort-chain-current')).not.toBeInTheDocument());
+    keyboardClick(effect2);
+    expect(await screen.findByTestId('sort-chain-current')).toBeInTheDocument();
   }, 15_000);
 });

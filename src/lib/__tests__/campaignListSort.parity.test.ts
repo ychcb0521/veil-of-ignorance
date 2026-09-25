@@ -137,13 +137,6 @@ function legacySortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortS
     if (sort.mode === 'geometricExpectancy') {
       return row.geometricExpectancy != null && Number.isFinite(row.geometricExpectancy);
     }
-    // 贡献率两档天然只含一侧样本：DSI 只有亏损战役、USI 只有盈利战役。
-    if (sort.mode === 'dsiContribution') {
-      return row.dsiContributionPct != null && Number.isFinite(row.dsiContributionPct);
-    }
-    if (sort.mode === 'usiContribution') {
-      return row.usiContributionPct != null && Number.isFinite(row.usiContributionPct);
-    }
     if (sort.mode === 'leverage') {
       return campaignLeverage(row.campaign, row.legs) > 0;
     }
@@ -228,26 +221,6 @@ function legacySortCampaignRows(rows: CampaignDisplayData[], sort: CampaignSortS
         || timeDesc
         || alphaAsc;
     }
-    if (sort.mode === 'dsiContribution') {
-      return compareFiniteMetric(
-        a.dsiContributionPct ?? Number.NaN,
-        b.dsiContributionPct ?? Number.NaN,
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
-    if (sort.mode === 'usiContribution') {
-      return compareFiniteMetric(
-        a.usiContributionPct ?? Number.NaN,
-        b.usiContributionPct ?? Number.NaN,
-        sort.direction,
-      )
-        || importanceDesc
-        || timeDesc
-        || alphaAsc;
-    }
     if (sort.mode === 'leverage') {
       return compareNumber(
         campaignLeverage(a.campaign, a.legs),
@@ -311,17 +284,17 @@ const DIRECTIONS: CampaignSortDirection[] = ['desc', 'asc'];
 
 /** 手写的一批：每一项都有并列、有缺值，镜像止盈六档与有无加仓都覆盖到。 */
 const HANDPICKED: CampaignSortRow[] = [
-  makeSortRow({ id: 'a', title: 'SOL 趋势回踩', pnl: 420, importance: 3, leverage: 10, time: '2026-09-03T08:00:00.000Z', tp: true, add: true, pcr: 420, dd: 2, mpc: 6, arith: 1.6, geo: 1.42, usi: 30 }),
-  makeSortRow({ id: 'b', title: 'ETH 突破加仓', pnl: 250, leverage: 20, time: '2026-09-09T08:00:00.000Z', tp: true, add: true, pcr: 250, dd: 2.5, mpc: 2.5, arith: 0.75, geo: 1.25, usi: 18 }),
-  makeSortRow({ id: 'c', title: 'BNB 镜像止盈', pnl: 180, leverage: 5, time: '2026-09-12T08:00:00.000Z', tp: true, pcr: 180, dd: 2, mpc: 3.6, arith: 0.4, geo: 1.18, usi: 12 }),
-  makeSortRow({ id: 'd', title: 'BTC 周线共振', pnl: 600, importance: 5, leverage: 15, time: '2026-09-05T08:00:00.000Z', tp: true, add: true, pcr: 600, dd: 1.5, mpc: 6, arith: 2.5, geo: 1.6, usi: 40 }),
-  makeSortRow({ id: 'e', title: 'DOGE 假突破', pnl: -60, leverage: 10, time: '2026-09-07T08:00:00.000Z', tp: true, add: true, pcr: -60, dd: 2, mpc: 1, arith: -0.8, geo: 0.94, dsi: 30 }),
-  makeSortRow({ id: 'f', title: 'AVAX 反抽', pnl: -90, time: '2026-09-14T08:00:00.000Z', tp: true, pcr: -90, dd: 3, mpc: -0.4, arith: -0.95, geo: 0.91, dsi: 45 }),
+  makeSortRow({ id: 'a', title: 'SOL 趋势回踩', pnl: 420, importance: 3, leverage: 10, time: '2026-09-03T08:00:00.000Z', tp: true, add: true, pcr: 420, dd: 2, mpc: 6, arith: 1.6, geo: 1.42 }),
+  makeSortRow({ id: 'b', title: 'ETH 突破加仓', pnl: 250, leverage: 20, time: '2026-09-09T08:00:00.000Z', tp: true, add: true, pcr: 250, dd: 2.5, mpc: 2.5, arith: 0.75, geo: 1.25 }),
+  makeSortRow({ id: 'c', title: 'BNB 镜像止盈', pnl: 180, leverage: 5, time: '2026-09-12T08:00:00.000Z', tp: true, pcr: 180, dd: 2, mpc: 3.6, arith: 0.4, geo: 1.18 }),
+  makeSortRow({ id: 'd', title: 'BTC 周线共振', pnl: 600, importance: 5, leverage: 15, time: '2026-09-05T08:00:00.000Z', tp: true, add: true, pcr: 600, dd: 1.5, mpc: 6, arith: 2.5, geo: 1.6 }),
+  makeSortRow({ id: 'e', title: 'DOGE 假突破', pnl: -60, leverage: 10, time: '2026-09-07T08:00:00.000Z', tp: true, add: true, pcr: -60, dd: 2, mpc: 1, arith: -0.8, geo: 0.94 }),
+  makeSortRow({ id: 'f', title: 'AVAX 反抽', pnl: -90, time: '2026-09-14T08:00:00.000Z', tp: true, pcr: -90, dd: 3, mpc: -0.4, arith: -0.95, geo: 0.91 }),
   makeSortRow({ id: 'g', title: 'SUI 打平离场', pnl: 5, time: '2026-09-04T08:00:00.000Z', tp: true, add: true, pcr: 5, dd: 2, mpc: 0.2, arith: -0.47, geo: 1 }),
-  makeSortRow({ id: 'h', title: 'LINK 区间', pnl: 120, leverage: 8, time: '2026-09-11T08:00:00.000Z', add: true, pcr: 120, dd: 3, mpc: 2, arith: 0.1, geo: 1.12, usi: 10 }),
+  makeSortRow({ id: 'h', title: 'LINK 区间', pnl: 120, leverage: 8, time: '2026-09-11T08:00:00.000Z', add: true, pcr: 120, dd: 3, mpc: 2, arith: 0.1, geo: 1.12 }),
   makeSortRow({ id: 'i', title: 'ARB 回踩', pnl: 80, time: '2026-09-02T08:00:00.000Z', pcr: 80, dd: 2.5, mpc: 2, arith: -0.1, geo: 1.08 }),
-  makeSortRow({ id: 'j', title: 'TIA 二次加仓', pnl: 210, leverage: 12, time: '2026-09-08T08:00:00.000Z', add: true, pcr: 210, dd: 1.4, mpc: 2.8, arith: 0.55, geo: 1.21, usi: 20 }),
-  makeSortRow({ id: 'k', title: 'OP 追高', pnl: -100, time: '2026-09-06T08:00:00.000Z', pcr: -100, dd: 2, mpc: -2, arith: -1, geo: 0.9, dsi: 25 }),
+  makeSortRow({ id: 'j', title: 'TIA 二次加仓', pnl: 210, leverage: 12, time: '2026-09-08T08:00:00.000Z', add: true, pcr: 210, dd: 1.4, mpc: 2.8, arith: 0.55, geo: 1.21 }),
+  makeSortRow({ id: 'k', title: 'OP 追高', pnl: -100, time: '2026-09-06T08:00:00.000Z', pcr: -100, dd: 2, mpc: -2, arith: -1, geo: 0.9 }),
   makeSortRow({ id: 'l', title: 'APT 抄底', pnl: -130, importance: 2, time: '2026-09-10T08:00:00.000Z', add: true, pcr: -130, dd: 2.5, mpc: -1.5, arith: -1.15, geo: 0.87 }),
   // 缺值与并列：没有初始最大预期亏损、没有操作时间、没有杠杆、盈亏为空、同名
   makeSortRow({ id: 'm', title: 'SOL 趋势回踩', pnl: null, time: null }),
@@ -330,7 +303,7 @@ const HANDPICKED: CampaignSortRow[] = [
 ];
 
 describe('排序链只有一级时与改动前的单级排序逐位相同', () => {
-  it('十四个排序项 × 两个方向，手写的一批战役', () => {
+  it('十二个排序项 × 两个方向，手写的一批战役', () => {
     for (const mode of CAMPAIGN_SORT_MODES) {
       for (const direction of DIRECTIONS) {
         const legacy = ids(legacySortCampaignRows(HANDPICKED, { mode, direction }));
@@ -340,7 +313,7 @@ describe('排序链只有一级时与改动前的单级排序逐位相同', () =
     }
   });
 
-  it('十四个排序项 × 两个方向，六批各 80 场的随机战役（大量并列与缺值）', () => {
+  it('十二个排序项 × 两个方向，六批各 80 场的随机战役（大量并列与缺值）', () => {
     for (const seed of [1, 7, 42, 2026, 31337, 65535]) {
       const rows = randomSortRows(80, seed);
       for (const mode of CAMPAIGN_SORT_MODES) {

@@ -4,19 +4,30 @@ import { describe, expect, it } from 'vitest';
 import {
   appendSortLevel,
   CAMPAIGN_SORT_MODES,
+  CONTINUOUS_SORT_MODES,
   buildCampaignSortKeys,
   clearSortChain,
   DEFAULT_CAMPAIGN_SORT_CHAIN,
+  describeSortLevelEffects,
   parseCampaignSortChain,
+  quartileOf,
+  quartileThresholds,
   removeSortLevel,
+  resolveSortBinning,
   selectSortMode,
+  sortBinValue,
   sortCampaignRows,
+  sortChainBinsFirstLevel,
   sortChainKey,
   toggleSortLevel,
   writeCampaignSortParams,
   type CampaignSortChain,
   type CampaignSortRow,
 } from '@/lib/campaignListSort';
+import { formatCampaignPayoffRatio } from '@/lib/campaignAnalysis';
+import { formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { formatArithmeticExpectancy, formatGeometricExpectancy } from '@/lib/campaignMetrics';
+import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 import { makeSortRow } from '@/test/fixtures/campaignSortRows';
 
 const ids = (rows: readonly CampaignSortRow[]) => rows.map(row => row.campaign.id);
@@ -75,9 +86,10 @@ describe('排序链：依次比较', () => {
     const single = sortCampaignRows(ROWS, [{ mode: 'mirrorTp', direction: 'desc' }]);
     const chained = sortCampaignRows(ROWS, [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }]);
     expect(chained).toHaveLength(single.length);
-    // 反过来：第一级是加仓效用时，只收算得出的五场
+    // 反过来：第一级是加仓效用时，只收算得出的六场；加仓效用是连续指标、链上有两级 → 按四分位分档：
+    // Q4 {ETH 2.50, LINK 1.80}、Q3 {BTC 1.50}、Q2 {SOL 1.40}、Q1 {TIA 1.05, DOGE −1.20}，Q1 里已实现的 DOGE 排到 TIA 之前
     expect(ids(sortCampaignRows(ROWS, [{ mode: 'addEfficiency', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])))
-      .toEqual(['eth', 'link', 'btc', 'sol', 'tia', 'doge']);
+      .toEqual(['eth', 'link', 'btc', 'sol', 'doge', 'tia']);
   });
 
   it('三级链：前两级都打平时由第三级定先后，方向按第三级自己的', () => {
@@ -139,8 +151,8 @@ describe('排序链：依次比较', () => {
 
 describe('每个排序项的独立比较器', () => {
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, dsi: 10, usi: 10 });
-  const empty = makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null, dsi: null, usi: null });
+  const withValue = makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1 });
+  const empty = makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null });
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {
     for (const [mode, key] of Object.entries(keys)) {
@@ -207,6 +219,16 @@ describe('URL 参数', () => {
     expect(parseCampaignSortChain('?sort=nope&direction=up')).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(parseCampaignSortChain('')).toEqual(DEFAULT_CAMPAIGN_SORT_CHAIN);
   });
+  it('【用户要求】删掉的「DSI 贡献」「USI 贡献」：旧链接整条退回默认（操作时间从新到旧），then 里的直接忽略，不报错', () => {
+    expect(CAMPAIGN_SORT_MODES).not.toContain('dsiContribution');
+    expect(CAMPAIGN_SORT_MODES).not.toContain('usiContribution');
+    expect(parseCampaignSortChain('?sort=dsiContribution&direction=asc')).toEqual(DEFAULT_CAMPAIGN_SORT_CHAIN);
+    expect(parseCampaignSortChain('?sort=usiContribution&direction=desc&then=mirrorTp.asc')).toEqual(DEFAULT_CAMPAIGN_SORT_CHAIN);
+    expect(parseCampaignSortChain('?sort=mirrorTp&direction=desc&then=dsiContribution.desc&then=usiContribution.asc&then=captureRate.asc')).toEqual([
+      { mode: 'mirrorTp', direction: 'desc' },
+      { mode: 'captureRate', direction: 'asc' },
+    ]);
+  });
 
   it('then=项.方向 读成后续各级：缺方向取默认，认不出的、重复的、与第一级相同的都忽略', () => {
     expect(parseCampaignSortChain('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=alpha&then=bogus.desc&then=mirrorTp.asc&then=addEfficiency.desc&then=captureRate.sideways'))
@@ -240,6 +262,226 @@ describe('URL 参数', () => {
     writeCampaignSortParams(params, chain);
     expect(parseCampaignSortChain(`?${params.toString()}`)).toEqual(chain);
     expect(sortChainKey(parseCampaignSortChain(params))).toBe('geometricExpectancy.asc,leverage.desc,alpha.desc');
+  });
+});
+
+describe('【用户已定】连续指标作第一级时按四分位分档', () => {
+  it('四分位档界按 type 7（位置 (n−1)·p，线性插值）；值 ≥ q₃ 为 Q4、≥ q₂ 为 Q3、≥ q₁ 为 Q2，其余 Q1', () => {
+    const thresholds = quartileThresholds([8, 1, 3, 7, 2, 6, 5, 4]);
+    // 插值落在 2.75 / 4.5 / 6.25：归档不变，但档界写成那一档里最小的读数（3 / 5 / 7），显示出来与封面对得上
+    expect(thresholds).toEqual([3, 5, 7]);
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(value => quartileOf(value, thresholds!))).toEqual([1, 1, 2, 2, 3, 3, 4, 4]);
+    // 单个值：三条档界都是它，落在 Q4；没有值：null
+    expect(quartileThresholds([3])).toEqual([3, 3, 3]);
+    expect(quartileOf(3, [3, 3, 3])).toBe(4);
+    expect(quartileThresholds([])).toBeNull();
+    expect(quartileThresholds([Number.NaN, Number.POSITIVE_INFINITY])).toBeNull();
+  });
+
+  it('相等的值必然同档（并列值不会被档界劈开）', () => {
+    const thresholds = quartileThresholds([1, 1, 1, 1, 5, 5, 5, 5])!;
+    expect(new Set([1, 1, 1, 1].map(value => quartileOf(value, thresholds))).size).toBe(1);
+    expect(new Set([5, 5, 5, 5].map(value => quartileOf(value, thresholds))).size).toBe(1);
+    expect(quartileOf(1, thresholds)).toBeLessThan(quartileOf(5, thresholds));
+  });
+
+  it('档界就是那一档里最小的读数：插值落在两个读数之间时取上面那个，归档与插值档界完全相同', () => {
+    const values = [10, 20, 30, 40, 50, 60];
+    // type 7：位置 1.25 / 2.5 / 3.75 → 22.5 / 35 / 47.5；取档内最小读数 → 30 / 40 / 50
+    const thresholds = quartileThresholds(values)!;
+    expect(thresholds).toEqual([30, 40, 50]);
+    const byInterpolated = values.map(value => (value >= 47.5 ? 4 : value >= 35 ? 3 : value >= 22.5 ? 2 : 1));
+    expect(values.map(value => quartileOf(value, thresholds))).toEqual(byInterpolated);
+    // 档界落在某个读数上时就是它
+    expect(quartileThresholds([1, 2, 3, 4, 5])).toEqual([2, 3, 4]);
+  });
+
+  it('【复核】分档按封面精度：显示相同的读数必然同档；档界的显示值 = 档内最小读数的显示值', () => {
+    // 线上复现：档界 −71.9625 显示「-0.72」，−72.48 也显示「-0.72」却落在低一档；231.93 / 231.94 都显示 2.32 却被 231.935 劈开
+    const pcrs = [-72.48, -71.79, -71.9625, -30, 18.75, 19.54, 100, 231.93, 231.94, 232.21, 500, 800];
+    const rows = pcrs.map((pcr, index) => makeSortRow({ id: `p${index}`, pnl: pcr, pcr }));
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
+    const binning = resolveSortBinning(rows, chain)!;
+    const shown = (pcr: number) => formatCampaignPayoffRatio(pcr);
+    const bandOf = (pcr: number) => quartileOf(sortBinValue('captureRate', pcr), binning.thresholds);
+    // 显示相同 → 同档
+    for (const [a, b] of [[-72.48, -71.79], [-72.48, -71.9625], [231.93, 231.94]] as const) {
+      expect(shown(a)).toBe(shown(b));
+      expect(bandOf(a)).toBe(bandOf(b));
+    }
+    // 每一档的档界显示值就是这一档里最小的封面读数；每张封面的读数字面上 ≥ 本档档界、< 上一档档界
+    const [q1, q2, q3] = binning.thresholds;
+    for (const [band, threshold] of [[2, q1], [3, q2], [4, q3]] as const) {
+      const members = pcrs.filter(pcr => bandOf(pcr) === band);
+      expect(members.length).toBeGreaterThan(0);
+      const smallest = Math.min(...members.map(pcr => Number(shown(pcr))));
+      expect(shown(threshold)).toBe(smallest.toFixed(2));
+      for (const pcr of pcrs) {
+        if (bandOf(pcr) >= band) expect(Number(shown(pcr))).toBeGreaterThanOrEqual(Number(shown(threshold)));
+        else expect(Number(shown(pcr))).toBeLessThan(Number(shown(threshold)));
+      }
+    }
+    // 排序本身不受影响：各级都打平后仍按盈亏比原值（−71.79 在 −72.48 之前）
+    const order = ids(sortCampaignRows(rows, chain));
+    expect(order.indexOf('p1')).toBeLessThan(order.indexOf('p0'));
+  });
+
+  it('sortBinValue：七个连续指标都按封面同一精度取整（显示相同 ⇔ 取整后相同）', () => {
+    const sweep = Array.from({ length: 801 }, (_, index) => (index - 400) * 0.0337);
+    // 各项只扫自己的取值域：预期回撤只在 > 0 时进列表，几何期望 = 增长因子 − 1、因子恒为正
+    const signed = (raw: number) => raw;
+    const nonNegative = (raw: number) => Math.abs(raw);
+    const pairs: [Parameters<typeof sortBinValue>[0], (value: number) => string, (raw: number) => number][] = [
+      ['captureRate', formatCampaignPayoffRatio, signed],
+      ['mainPriceChange', formatLegPriceChangePct, signed],
+      ['mainPriceEfficiency', formatEfficiency, signed],
+      ['addEfficiency', formatEfficiency, signed],
+      ['geometricExpectancy', formatGeometricExpectancy, raw => Math.abs(raw) - 0.99],
+      ['arithmeticExpectancy', formatArithmeticExpectancy, signed],
+      ['expectedDrawdownPct', value => `${value.toFixed(2)}%`, nonNegative],
+    ];
+    for (const [mode, format, domain] of pairs) {
+      const byShown = new Map<string, Set<number>>();
+      for (const raw of sweep) {
+        const value = domain(raw);
+        const rounded = sortBinValue(mode, value);
+        expect(format(rounded), `${mode} ${value}`).toBe(format(value));
+        const set = byShown.get(format(value)) ?? new Set<number>();
+        set.add(rounded);
+        byShown.set(format(value), set);
+      }
+      for (const [text, set] of byShown) expect(set.size, `${mode} ${text}`).toBe(1);
+    }
+    // 分档指标没有精度可言：原样返回
+    expect(sortBinValue('mirrorTp', 4.2)).toBe(4.2);
+  });
+
+  /** 九场：盈亏比 1.00 … 8.00（含 7.50），奇数场镜像止盈成交；预期回撤 2、涨跌幅 4 → 涨跌幅倍数 2。 */
+  const BINNED = [
+    makeSortRow({ id: 'r1', pnl: 100, tp: true, pcr: 100, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r2', pnl: 200, pcr: 200, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r3', pnl: 300, tp: true, pcr: 300, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r4', pnl: 400, pcr: 400, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r5', pnl: 500, tp: true, pcr: 500, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r6', pnl: 600, pcr: 600, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r7', pnl: 700, tp: true, pcr: 700, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r8', pnl: 800, add: true, pcr: 800, dd: 2, mpc: 4 }),
+    makeSortRow({ id: 'r9', pnl: 750, tp: true, pcr: 750, dd: 2, mpc: 4 }),
+  ];
+
+  it('链上不止一级且第一级是连续指标时才分档：档界按进入列表的战役算', () => {
+    const binning = resolveSortBinning(BINNED, [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }]);
+    expect(binning).toEqual({ mode: 'captureRate', thresholds: [300, 500, 700], counts: [2, 2, 2, 3], total: 9 });
+    // 只有一级：永远不分档
+    expect(resolveSortBinning(BINNED, [{ mode: 'captureRate', direction: 'desc' }])).toBeNull();
+    expect(sortChainBinsFirstLevel([{ mode: 'captureRate', direction: 'desc' }])).toBe(false);
+    // 分档指标作第一级：不分档
+    for (const mode of ['mirrorTp', 'importance', 'leverage', 'alpha', 'time'] as const) {
+      expect(resolveSortBinning(BINNED, [{ mode, direction: 'desc' }, { mode: 'captureRate', direction: 'desc' }]), mode).toBeNull();
+      expect(CONTINUOUS_SORT_MODES.has(mode)).toBe(false);
+    }
+    // 七个连续指标都分档（DSI / USI 贡献已从排序栏删掉）
+    expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
+      'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'expectedDrawdownPct',
+      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency',
+    ]);
+    // 第一级算不出的战役本来就不进列表，也不参与档界
+    const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
+    expect(resolveSortBinning(withMissing, [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])?.total).toBe(9);
+  });
+
+  it('盈亏比 ↓ › 镜像止盈 ↓：Q4 在前；同档内按镜像止盈，再打平按盈亏比本身', () => {
+    expect(ids(sortCampaignRows(BINNED, [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])))
+      .toEqual(['r9', 'r7', 'r8', 'r5', 'r6', 'r3', 'r4', 'r1', 'r2']);
+    // 只有一级时不分档：与原来一样纯按盈亏比
+    expect(ids(sortCampaignRows(BINNED, [{ mode: 'captureRate', direction: 'desc' }])))
+      .toEqual(['r8', 'r9', 'r7', 'r6', 'r5', 'r4', 'r3', 'r2', 'r1']);
+  });
+
+  it('第一级升序时 Q1 在前；第二级的方向仍是它自己的', () => {
+    expect(ids(sortCampaignRows(BINNED, [{ mode: 'captureRate', direction: 'asc' }, { mode: 'mirrorTp', direction: 'asc' }])))
+      .toEqual(['r2', 'r1', 'r4', 'r3', 'r6', 'r5', 'r8', 'r7', 'r9']);
+    expect(ids(sortCampaignRows(BINNED, [{ mode: 'captureRate', direction: 'asc' }, { mode: 'mirrorTp', direction: 'desc' }])))
+      .toEqual(['r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r9', 'r8']);
+  });
+
+  it('分档后第二级算不出的战役留在本档末尾；第一级进不进列表的口径不变', () => {
+    // Q4 = {r7, r8, r9}：只有 r8 有加仓效用 → r8 在前，其余两场按盈亏比本身从大到小
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }];
+    expect(ids(sortCampaignRows(BINNED, chain)).slice(0, 3)).toEqual(['r8', 'r9', 'r7']);
+    const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
+    expect(ids(sortCampaignRows(withMissing, chain))).not.toContain('none');
+    expect(ids(sortCampaignRows(withMissing, chain))).toHaveLength(9);
+  });
+
+  it('全部并列（同一个值）时只有一档：第二级排整个列表', () => {
+    const rows = [
+      makeSortRow({ id: 'a', pnl: 100, pcr: 100 }),
+      makeSortRow({ id: 'b', pnl: 100, tp: true, pcr: 100 }),
+      makeSortRow({ id: 'c', pnl: 100, pcr: 100, importance: 5 }),
+    ];
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }, { mode: 'importance', direction: 'desc' }];
+    expect(resolveSortBinning(rows, chain)?.counts).toEqual([0, 0, 0, 3]);
+    expect(ids(sortCampaignRows(rows, chain))).toEqual(['b', 'c', 'a']);
+  });
+});
+
+describe('排序链每一级的作用（芯片反馈）', () => {
+  it('第二级起：前面各级并列的组里按读数排了几场、几场算不出；第一级记 null', () => {
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }, { mode: 'captureRate', direction: 'asc' }];
+    const sorted = sortCampaignRows(ROWS, chain);
+    expect(describeSortLevelEffects(sorted, chain)).toEqual([
+      null,
+      // 四档都有并列：已实现·盈利 4 场（BNB 算不出）、已实现·亏损 2（AVAX 算不出）、未实现·盈利 3（ARB 算不出）、未实现·亏损 2（都算不出）
+      { groups: 4, rows: 11, sorted: 6, tied: 0, missing: 5 },
+      // 前两级都打平的只有未实现·亏损那一档（OP、APT 都算不出加仓效用）
+      { groups: 1, rows: 2, sorted: 2, tied: 0, missing: 0 },
+    ]);
+  });
+
+  it('前一级没有并列：groups = 0（本级未起作用）；并列的都算不出：sorted = 0', () => {
+    const alphaChain: CampaignSortChain = [{ mode: 'alpha', direction: 'asc' }, { mode: 'captureRate', direction: 'desc' }];
+    expect(describeSortLevelEffects(sortCampaignRows(ROWS, alphaChain), alphaChain)[1]).toEqual({ groups: 0, rows: 0, sorted: 0, tied: 0, missing: 0 });
+    const rows = [makeSortRow({ id: 'x', importance: 5 }), makeSortRow({ id: 'y', importance: 5 })];
+    const chain: CampaignSortChain = [{ mode: 'importance', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }];
+    expect(describeSortLevelEffects(sortCampaignRows(rows, chain), chain)[1]).toEqual({ groups: 1, rows: 2, sorted: 0, tied: 0, missing: 2 });
+  });
+
+  it('【复核】并列组里本级读数全相同：这一组没有分出先后，不算「排了」（sorted = 0、tied = N → 芯片标「未起作用」）', () => {
+    // 线上复现：镜像止盈 › 杠杆倍数，300 场全是 10x → 顺序与只按镜像止盈逐位相同，芯片却报「排了 300 场」
+    const uniform = [
+      makeSortRow({ id: 'a', pnl: 100, tp: true, pcr: 100, leverage: 10 }),
+      makeSortRow({ id: 'b', pnl: 50, tp: true, pcr: 50, leverage: 10 }),
+      makeSortRow({ id: 'c', pnl: 80, pcr: 80, leverage: 10 }),
+      makeSortRow({ id: 'd', pnl: 20, pcr: 20, leverage: 10 }),
+    ];
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'leverage', direction: 'desc' }];
+    const sorted = sortCampaignRows(uniform, chain);
+    expect(ids(sorted)).toEqual(ids(sortCampaignRows(uniform, [{ mode: 'mirrorTp', direction: 'desc' }])));
+    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 2, rows: 4, sorted: 0, tied: 4, missing: 0 });
+    // 一组全 5 星（tied）、另一组 5 星 / 0 星（sorted）、再一组一场有读数一场算不出（有读数的排到了算不出的前面：算排了）
+    const mixed = [
+      makeSortRow({ id: 'w1', pnl: 100, tp: true, pcr: 100, importance: 5 }),
+      makeSortRow({ id: 'w2', pnl: 50, tp: true, pcr: 50, importance: 5 }),
+      makeSortRow({ id: 'l1', pnl: -100, tp: true, pcr: -100, importance: 5 }),
+      makeSortRow({ id: 'l2', pnl: -50, tp: true, pcr: -50, importance: 0 }),
+    ];
+    const importanceChain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'importance', direction: 'desc' }];
+    expect(describeSortLevelEffects(sortCampaignRows(mixed, importanceChain), importanceChain)[1]).toEqual({ groups: 2, rows: 4, sorted: 2, tied: 2, missing: 0 });
+    const half = [
+      makeSortRow({ id: 'h1', pnl: 100, tp: true, pcr: 100, add: true, dd: 2, mpc: 4 }),
+      makeSortRow({ id: 'h2', pnl: 50, tp: true, pcr: 50 }),
+    ];
+    const addChain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }];
+    expect(describeSortLevelEffects(sortCampaignRows(half, addChain), addChain)[1]).toEqual({ groups: 1, rows: 2, sorted: 1, tied: 0, missing: 1 });
+  });
+
+  it('只有一级：[null]；分档的第一级按档算并列', () => {
+    expect(describeSortLevelEffects(sortCampaignRows(ROWS, [{ mode: 'captureRate', direction: 'desc' }]), [{ mode: 'captureRate', direction: 'desc' }])).toEqual([null]);
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
+    const sorted = sortCampaignRows(ROWS, chain);
+    // 十一场分四档，每档都不止一场 → 全部进入第二级比较；Q4 三场都是已实现·盈利（读数相同，tied），其余三档分出了先后
+    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 4, rows: 11, sorted: 8, tied: 3, missing: 0 });
   });
 });
 

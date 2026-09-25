@@ -44,19 +44,19 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(s).not.toContain('CAMPAIGN_SORT_COLUMNS');
   });
 
-  it('排序行：左对齐 flex 换行，两条分隔线在「预期回撤」与「DSI 贡献」之前；行首与封面左缘对齐', () => {
+  it('排序行：左对齐 flex 换行，两条分隔线在「预期回撤」与「杠杆倍数」之前；行首与封面左缘对齐', () => {
     const s = src();
-    expect(s).toContain("new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution'])");
+    expect(s).toContain("new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage'])");
     expect(s).toMatch(/data-testid="campaign-sort-controls"\s+className=\{`order-2 flex min-h-11 flex-wrap items-center gap-x-1 gap-y-1[^`]*\$\{CAMPAIGN_COLUMNS_FRAME\} \$\{CAMPAIGN_COLUMNS_INSET\}`\}/);
     expect(s).toContain("const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';");
     const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(s)?.[1] ?? '';
     const order = [...block.matchAll(/value: '([A-Za-z]+)'/g)].map(match => match[1]);
-    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母
+    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
     expect(order).toEqual([
       'time', 'mirrorTp',
       'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency',
       'geometricExpectancy', 'arithmeticExpectancy',
-      'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha',
+      'leverage', 'importance', 'alpha',
     ]);
   });
 

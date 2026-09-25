@@ -30,8 +30,6 @@ export type SortRowSpec = {
   mpc?: number | null;
   arith?: number | null;
   geo?: number | null;
-  dsi?: number | null;
-  usi?: number | null;
 };
 
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -121,8 +119,6 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
     mainPriceChangePct: spec.mpc ?? null,
     arithmeticExpectancy: spec.arith ?? null,
     geometricExpectancy: spec.geo ?? null,
-    dsiContributionPct: spec.dsi ?? null,
-    usiContributionPct: spec.usi ?? null,
   };
 }
 
@@ -162,7 +158,5 @@ export function randomSortRows(count: number, seed: number): CampaignSortRow[] {
     mpc: pick([null, -2, 0, 1, 2.5, 2.5, 6]),
     arith: pick([null, -1, 0.25, 0.25, 2.5]),
     geo: pick([null, 0.9, 1.25, 1.25, 1.6]),
-    dsi: pick([null, null, 12.5, 40]),
-    usi: pick([null, null, 8, 30, 30]),
   }));
 }

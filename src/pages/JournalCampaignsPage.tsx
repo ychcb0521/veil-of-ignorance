@@ -72,10 +72,7 @@ import {
   formatArithmeticExpectancy,
   formatGeometricExpectancy,
 } from '@/lib/campaignMetrics';
-import {
-  computeAsymmetricRiskContributionRates,
-  summarizeAsymmetricRiskMetrics,
-} from '@/lib/asymmetricRiskMetrics';
+import { summarizeAsymmetricRiskMetrics } from '@/lib/asymmetricRiskMetrics';
 import { selectValidCampaignPerformanceSamples, summarizeCampaignPerformance } from '@/lib/kellySizing';
 import {
   ALL_CAMPAIGN_OPERATION_RANGE,
@@ -114,9 +111,12 @@ import {
   appendSortLevel,
   campaignLeverage,
   clearSortChain,
+  describeSortLevelEffects,
   importanceValue,
+  isContinuousSortMode,
   parseCampaignSortChain,
   removeSortLevel,
+  resolveSortBinning,
   rowAddEfficiency,
   rowMainPriceEfficiency,
   rowMirrorTpRank,
@@ -126,9 +126,11 @@ import {
   sortChainKey,
   toggleSortLevel,
   writeCampaignSortParams,
+  type CampaignSortBinning,
   type CampaignSortChain,
   type CampaignSortDirection,
   type CampaignSortMode,
+  type SortLevelEffect,
 } from '@/lib/campaignListSort';
 const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
 const LazyCampaignBatchExportDialog = lazy(() => import('@/components/journal/CampaignBatchExportDialog')
@@ -145,12 +147,10 @@ class BatchExportLoadBoundary extends Component<{ children: ReactNode; onError: 
   render() { return this.state.failed ? null : this.props.children; }
 }
 
-/** 列表行加上依赖全表统计的四个数（期望与不对称风险贡献）。 */
+/** 列表行加上依赖全表统计的两个期望。 */
 type CampaignMetricData = CampaignCardData & {
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
-  dsiContributionPct: number | null;
-  usiContributionPct: number | null;
 };
 
 type CampaignDisplayData = CampaignMetricData & {
@@ -169,8 +169,6 @@ type CampaignMetricChartKey =
   | 'importance'
   | 'mirrorTp'
   | 'mirrorTpBars'
-  | 'dsiContribution'
-  | 'usiContribution'
   | 'mainPriceChange'
   | 'mainPriceChangeDistribution'
   | 'mainPriceEfficiency'
@@ -218,8 +216,6 @@ type CampaignFormulaPopover =
   | 'expectedValue'
   | 'geometricEdge'
   | 'asymmetricRisk'
-  | 'dsiContributionSort'
-  | 'usiContributionSort'
   | 'mainPriceChangeSort'
   | 'mainPriceEfficiencySort'
   | 'addEfficiencySort'
@@ -227,7 +223,8 @@ type CampaignFormulaPopover =
 
 /**
  * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望 ┆
- * DSI 贡献、USI 贡献、杠杆倍数、重要性、字母（默认仍按操作时间排序）。
+ * 杠杆倍数、重要性、字母（默认仍按操作时间排序）。
+ * 【用户要求】删掉「DSI 贡献」「USI 贡献」两个排序项（几乎跟盈亏比重复）；详情页盈亏概览的 DSI/USI 贡献与统计概览的「不对称风险」保留。
  * 【用户要求】封面指标格的先后与这里一致：镜像止盈之后就是中间那一组七项（见 CampaignCard 的指标格）。
  * 排序行左对齐依次排开。
  */
@@ -241,8 +238,6 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addEfficiency', label: '加仓效用' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
-  { value: 'dsiContribution', label: 'DSI 贡献' },
-  { value: 'usiContribution', label: 'USI 贡献' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '重要性' },
   { value: 'alpha', label: '字母' },
@@ -251,9 +246,9 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
- *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ DSI 贡献 · USI 贡献 · 杠杆倍数 · 重要性 · 字母
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 重要性 · 字母
  */
-const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'dsiContribution']);
+const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
 
 /**
@@ -280,6 +275,16 @@ const SORT_CHAIN_CHIP_FIRST = 'border-[#F0B90B]/45 bg-[#F0B90B]/[0.08] font-medi
 const SORT_CHAIN_CHIP_THEN = 'border-[#F0B90B]/25 bg-[#F0B90B]/[0.03] text-foreground/85';
 /** 排序链上的小按钮（切方向 / 移除 / 清除 / ⓘ）：手机上 28px 高好点按，≥ 640px 收成 24px。 */
 const SORT_CHAIN_CONTROL = 'inline-flex h-7 items-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/70 sm:h-6';
+/**
+ * 排序链芯片上的附注，夹在名称与 × 之间；细节放悬停提示，点它（手机没有悬停）或回车打开 ⓘ，ⓘ 末尾的「当前」段逐级写出同一串明细：
+ *   · 第一级的「分档」（连续指标作第一级、链上不止一级时按四分位分档，见 resolveSortBinning）；
+ *   · 第二级起的「N 场」（本级在前面各级并列的战役里真分出先后的几场）或「未起作用」（前面各级没有并列 / 并列的读数全相同 / 并列的都算不出）。
+ * 【用户反馈】「多级排序从第二级开始，排序似乎不起作用了」——有了这一格，第二级有没有起作用一眼能看出来。
+ */
+const SORT_CHAIN_NOTE = `${SORT_CHAIN_CONTROL} select-none border-l border-[#F0B90B]/20 px-1 text-[9px] leading-none`;
+const SORT_CHAIN_NOTE_BINNED = 'font-medium text-[#8F6B00] dark:text-[#F0B90B]/85';
+const SORT_CHAIN_NOTE_EFFECT = 'font-mono tabular-nums text-muted-foreground/70';
+const SORT_CHAIN_NOTE_IDLE = 'text-[#B7860B]/75 dark:text-[#F0B90B]/55';
 /** 触屏长按排序项多久算「加为下一级」。 */
 const SORT_LONG_PRESS_MS = 450;
 
@@ -310,7 +315,7 @@ const POPOVER_VIEWPORT_MAX_W = 'max-w-[calc(100vw_-_24px)]';
 
 /**
  * 会**过滤掉**缺少该指标的战役的排序档：空列表时要说清是「没有战役」还是「有战役但都算不出这个指标」。
- * 此前 DSI / USI / 杠杆三档同样在过滤，却只显示「尚无战役」，看上去像战役丢了。
+ * 此前杠杆这一档同样在过滤，却只显示「尚无战役」，看上去像战役丢了。
  */
 const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: string }>> = {
   captureRate: { noun: '可计算盈亏比', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
@@ -320,8 +325,6 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
     noun: '可计算几何期望',
     hint: '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序',
   },
-  dsiContribution: { noun: '可计算 DSI 贡献', hint: 'DSI 贡献只统计亏损战役，其余不会进入当前排序' },
-  usiContribution: { noun: '可计算 USI 贡献', hint: 'USI 贡献只统计盈利战役，其余不会进入当前排序' },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
   mainPriceChange: { noun: '主力已平仓', hint: '涨跌幅按战役算（开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
   mainPriceEfficiency: {
@@ -623,40 +626,6 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'pnlBand',
     formatValue: formatMirrorTpMetric,
   },
-  {
-    key: 'dsiContribution',
-    label: 'DSI 贡献',
-    chartLabel: 'DSI 贡献图',
-    seriesLabel: 'DSI 贡献率时序',
-    guide: {
-      yAxis: '该场亏损战役对下行风险 DSI 的贡献率 = bᵢ² ÷ 所有亏损战役 b² 之和 × 100%。',
-      point: '点越高，这一场对下行风险的拉动越大。平方放大了大亏，少数几场就可能占掉大半 DSI。',
-      colors: [
-        { token: 'loss', label: '红色：亏损战役；只有亏损（b ≤ 0）才对 DSI 有贡献。' },
-      ],
-      referenceLines: ['所有点的贡献率合计为 100%。'],
-    },
-    missingValueLabel: 'DSI 贡献率',
-    colorMode: 'downside',
-    formatValue: value => `${value.toFixed(1)}%`,
-  },
-  {
-    key: 'usiContribution',
-    label: 'USI 贡献',
-    chartLabel: 'USI 贡献图',
-    seriesLabel: 'USI 贡献率时序',
-    guide: {
-      yAxis: '该场盈利战役对上行离散 USI 的贡献率 = bᵢ² ÷ 所有盈利战役 b² 之和 × 100%。',
-      point: '点越高，这一场对盈利离散度的拉动越大。若极少数战役占掉大半，说明盈利高度依赖偶发大赚。',
-      colors: [
-        { token: 'profit', label: '绿色：盈利战役；只有盈利（b > 0）才对 USI 有贡献。' },
-      ],
-      referenceLines: ['所有点的贡献率合计为 100%。'],
-    },
-    missingValueLabel: 'USI 贡献率',
-    colorMode: 'upside',
-    formatValue: value => `${value.toFixed(1)}%`,
-  },
   // 【用户要求】涨跌幅、涨跌幅倍数、加仓效用与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
   {
     key: 'mainPriceChange',
@@ -831,8 +800,6 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTpSort',
-  dsiContribution: 'dsiContributionSort',
-  usiContribution: 'usiContributionSort',
   mainPriceChange: 'mainPriceChangeSort',
   mainPriceEfficiency: 'mainPriceEfficiencySort',
   addEfficiency: 'addEfficiencySort',
@@ -845,8 +812,6 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   arithmeticExpectancy: 'arithmeticExpectancy',
   geometricExpectancy: 'geometricExpectancy',
   mirrorTp: 'mirrorTp',
-  dsiContribution: 'dsiContribution',
-  usiContribution: 'usiContribution',
   mainPriceChange: 'mainPriceChange',
   mainPriceEfficiency: 'mainPriceEfficiency',
   addEfficiency: 'addEfficiency',
@@ -1006,6 +971,57 @@ function usiTone(value: number | null): string {
   if (value >= 1.8) return 'text-[#0ECB81]';
   if (value >= 1.5) return 'text-[#B8860B]';
   return 'text-[#F6465D]';
+}
+
+/** 分档档界的读数：与封面上这一项的读数同一种写法（盈亏比写倍数 b、涨跌幅带正负号与 %……）。 */
+function formatSortBinValue(mode: CampaignSortMode, value: number): string {
+  switch (mode) {
+    case 'captureRate': return formatCampaignPayoffRatio(value);
+    case 'expectedDrawdownPct': return `${value.toFixed(2)}%`;
+    case 'mainPriceChange': return formatLegPriceChangePct(value);
+    case 'mainPriceEfficiency':
+    case 'addEfficiency': return formatEfficiency(value);
+    case 'geometricExpectancy': return formatGeometricExpectancy(value);
+    case 'arithmeticExpectancy': return formatArithmeticExpectancy(value);
+    default: return value.toFixed(2);
+  }
+}
+
+/** 「Q4 ≥ 2.30（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.75（2 场）· Q1 < -0.75（3 场）」 */
+function describeSortBinning(binning: CampaignSortBinning): string {
+  const [q1, q2, q3] = binning.thresholds;
+  const [n1, n2, n3, n4] = binning.counts;
+  const value = (threshold: number) => formatSortBinValue(binning.mode, threshold);
+  // 读数成团时相邻档界会重合、中间档是 0 场：只列有战役的档
+  return [
+    { text: `Q4 ≥ ${value(q3)}`, count: n4 },
+    { text: `Q3 ≥ ${value(q2)}`, count: n3 },
+    { text: `Q2 ≥ ${value(q1)}`, count: n2 },
+    { text: `Q1 < ${value(q1)}`, count: n1 },
+  ].filter((bin) => bin.count > 0).map((bin) => `${bin.text}（${bin.count} 场）`).join('· ');
+}
+
+/** 排序链第一级「分档」的说明（悬停提示与 ⓘ「当前」共用；三行）。 */
+function describeSortBinningTitle(label: string, directionText: string, binning: CampaignSortBinning): string {
+  return `第 1 级「${label}」按四分位分成四档（档界按当前列表 ${binning.total} 场算）：\n${describeSortBinning(binning)}\n同档内按后面各级排；各级都打平再按${label}本身${directionText}`;
+}
+
+/**
+ * 排序链第二级起某一级的作用说明（悬停提示与 ⓘ「当前」共用）。
+ * 「排了 N 场」只数真分出了先后的组；并列的一组读数全相同（tied）一场先后都没改，写明「未起作用」。
+ */
+function describeSortLevelEffect(level: number, label: string, effect: SortLevelEffect): string {
+  const head = `第 ${level} 级「${label}」`;
+  if (effect.groups === 0) return `${head}未起作用：前面各级没有并列，每一场的先后都已由前面各级决定`;
+  const scope = `前面各级并列的 ${effect.groups} 组、${effect.rows} 场`;
+  if (effect.sorted === 0) {
+    if (effect.tied > 0 && effect.missing > 0) return `${head}未起作用：${scope}里，${effect.tied} 场读数与同组其它场相同、${effect.missing} 场算不出${label}，先后未变`;
+    if (effect.tied > 0) return `${head}未起作用：${scope}里，每一组的${label}读数都相同，先后未变`;
+    return `${head}未起作用：${scope}都算不出${label}`;
+  }
+  return `${head}：${scope}里，按${label}排了 ${effect.sorted} 场`
+    + (effect.tied > 0 ? `；${effect.tied} 场与同组其它场读数相同，先后未变` : '')
+    + (effect.missing > 0 ? `；${effect.missing} 场算不出${label}，留在各组末尾` : '');
 }
 
 function sortDirectionLabel(direction: CampaignSortDirection, mode?: CampaignSortMode): string {
@@ -1183,7 +1199,7 @@ type CampaignCardProps = {
   row: CampaignDisplayData;
   /**
    * 排序链上各级的排序项（第一级在前）：封面上对应的模块高亮——第一级用 SORT_HIGHLIGHT_*，之后各级轻一档（SORT_THEN_*）。
-   * DSI / USI 贡献不在封面上，没有可亮的。页面按排序链 memo 住这个数组，卡片的 memo 才不会白白失效。
+   * 页面按排序链 memo 住这个数组，卡片的 memo 才不会白白失效。
    */
   sortHighlight: readonly CampaignSortMode[];
   expanded: boolean;
@@ -1966,8 +1982,8 @@ export default function JournalCampaignsPage() {
   const mirrorTpNotAchievedRateLabel = mirrorTp.notAchievedRatePct == null ? '—' : `${mirrorTp.notAchievedRatePct.toFixed(0)}%`;
   const mirrorTpWinRateLabel = mirrorTp.achievedWinRatePct == null ? '—' : `${mirrorTp.achievedWinRatePct.toFixed(0)}%`;
   /**
-   * 期望与不对称风险贡献都依赖全表统计（胜率、DSI/USI 汇总），一场变了整表都要重算——
-   * 但重算出的四个数与上次相同的行沿用上一个对象（整表都没变就沿用同一个数组）：
+   * 两个期望按每场自己的盈亏比算，但行对象随列表整体重建——
+   * 重算出的两个数与上次相同的行沿用上一个对象（整表都没变就沿用同一个数组）：
    * 卡片与散点图的 memo 按引用判，一场成交变化只重画那一张卡片、一次散点图。
    */
   const metricRowsRef = useRef<{ byRow: Map<CampaignCardData, CampaignMetricData>; rows: CampaignMetricData[] }>({
@@ -1981,17 +1997,11 @@ export default function JournalCampaignsPage() {
         ...row,
         // 单场算术期望的胜率统一取 50%（与详情页同一个函数），不随账户实时胜率变动
         ...computeCampaignExpectancies(row.profitCaptureRatio),
-        ...computeAsymmetricRiskContributionRates({
-          campaign: row.campaign,
-          payoffRatio: row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100,
-        }, asymmetricRisk),
       };
       const before = previous.byRow.get(row);
       const kept = before
         && Object.is(before.arithmeticExpectancy, next.arithmeticExpectancy)
         && Object.is(before.geometricExpectancy, next.geometricExpectancy)
-        && Object.is(before.dsiContributionPct, next.dsiContributionPct)
-        && Object.is(before.usiContributionPct, next.usiContributionPct)
         ? before
         : next;
       byRow.set(row, kept);
@@ -2000,7 +2010,7 @@ export default function JournalCampaignsPage() {
     const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
-  }, [scopedRows, asymmetricRisk]);
+  }, [scopedRows]);
   /**
    * 账户权益随行情每个 tick 变，但只有没记开仓权益快照的场次才拿它兜底。
    * 解析出的三个数与上次相同就沿用上一个行对象（整表都没变就沿用同一个数组）：
@@ -2042,6 +2052,10 @@ export default function JournalCampaignsPage() {
     () => sortCampaignRows(displayRows, sortChain),
     [displayRows, sortChain],
   );
+  /** 第一级的四分位分档（连续指标作第一级、链上不止一级时才有）：排序链芯片上标「分档」，悬停看档界。 */
+  const sortBinning = useMemo(() => resolveSortBinning(sortedRows, sortChain), [sortedRows, sortChain]);
+  /** 第二级起每一级的作用（本级排了几场）：排序链芯片上的反馈。 */
+  const sortLevelEffects = useMemo(() => describeSortLevelEffects(sortedRows, sortChain), [sortedRows, sortChain]);
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
    * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
@@ -2095,8 +2109,6 @@ export default function JournalCampaignsPage() {
       mirrorTp: mirrorTp,
       // 柱状图与时序图读的是同一份镜像止盈序列，只是横轴换成了结果档位。
       mirrorTpBars: mirrorTp,
-      dsiContribution: buildSeries(row => row.dsiContributionPct),
-      usiContribution: buildSeries(row => row.usiContributionPct),
       // 涨跌幅三项与算术期望同理：分布图与时序图共用同一份序列。
       mainPriceChange,
       mainPriceChangeDistribution: mainPriceChange,
@@ -2333,7 +2345,7 @@ export default function JournalCampaignsPage() {
 
   /**
    * 触屏：长按排序项 = 把它加为下一级（触屏没有悬停，「+」不出现）。
-   * 【为什么不在手机上常驻「+」】十四个排序项各带一个够点按的「+」，窄屏上排序行要多折两行、吸顶区占掉更多屏幕，
+   * 【为什么不在手机上常驻「+」】十二个排序项各带一个够点按的「+」，窄屏上排序行要多折两行、吸顶区占掉更多屏幕，
    * 只有一级时也不再与原来一样；长按是手机上「更多操作」的通行手势，排序行保持原样，加层后下方出现的排序链就是反馈，
    * 链上的切方向 / 移除 / 清除都是 28px 高的按钮。
    * 450ms 内松手或手指滑动超过 10px 不算；长按后松手的那次单击、安卓顺带弹出的 contextmenu 都吞掉。
@@ -2690,6 +2702,8 @@ export default function JournalCampaignsPage() {
         const first = index === 0;
         const directionText = sortDirectionLabel(level.direction, level.mode);
         const arrowTone = first ? 'text-[#C98500] dark:text-[#F0B90B]' : SORT_THEN_ARROW;
+        const effect = sortLevelEffects[index];
+        const effective = effect != null && effect.sorted > 0;
         return (
           <span key={level.mode} className="inline-flex shrink-0 items-center gap-1">
             {index > 0 && <span aria-hidden="true" className="select-none px-0.5 text-[12px] leading-none text-muted-foreground/45 max-sm:hidden">›</span>}
@@ -2713,6 +2727,31 @@ export default function JournalCampaignsPage() {
                   ? <ArrowDown aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />
                   : <ArrowUp aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />}
               </button>
+              {/* 附注是可聚焦的按钮：悬停看提示，点它（手机上没有悬停）或回车打开 ⓘ，明细在 ⓘ 的「当前」段里 */}
+              {first && sortBinning && (
+                <button
+                  type="button"
+                  data-testid="sort-chain-binned"
+                  aria-label={describeSortBinningTitle(label, directionText, sortBinning)}
+                  title={describeSortBinningTitle(label, directionText, sortBinning)}
+                  onClick={event => { if (event.detail > 1) return; openFormulaPopover(event, 'sortChain'); }}
+                  className={`${SORT_CHAIN_NOTE} ${SORT_CHAIN_NOTE_BINNED} hover:bg-[#F0B90B]/10`}
+                >
+                  分档
+                </button>
+              )}
+              {!first && effect && (
+                <button
+                  type="button"
+                  data-testid={`sort-chain-effect-${index + 1}`}
+                  aria-label={describeSortLevelEffect(index + 1, label, effect)}
+                  title={describeSortLevelEffect(index + 1, label, effect)}
+                  onClick={event => { if (event.detail > 1) return; openFormulaPopover(event, 'sortChain'); }}
+                  className={`${SORT_CHAIN_NOTE} ${effective ? SORT_CHAIN_NOTE_EFFECT : SORT_CHAIN_NOTE_IDLE} hover:bg-[#F0B90B]/10`}
+                >
+                  {effective ? `${effect.sorted} 场` : '未起作用'}
+                </button>
+              )}
               <button
                 type="button"
                 data-testid={`sort-chain-remove-${index + 1}`}
@@ -2746,15 +2785,40 @@ export default function JournalCampaignsPage() {
             <Info aria-hidden="true" className="h-3 w-3" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
+        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto ${POPOVER_VIEWPORT_MAX_W}`}>
           <div className="font-medium text-foreground">多级排序</div>
           <div data-testid="sort-chain-rules" className="mt-2 space-y-1 text-muted-foreground">
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
+            <div>第一级是连续数值指标（预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何 / 算术期望）且链上不止一级时，先按四分位分成四档（档界按当前列表算、按封面精度取整，就是那一档里最小的读数），同档内按后面各级排；各级都打平再按第一级本身的数值。镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
+            <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」也能打开这里。</div>
             <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
             <div>加一级：悬停排序项，点右上角的「+」；手机上长按排序项。单击排序项仍是只按这一项排。</div>
           </div>
+          {/* 【复核】档界与「本级排了 N 场」的明细不只放在悬停提示里：手机与键盘也要读得到——一级一行 */}
+          {sortChain.length > 1 && (
+            <div data-testid="sort-chain-current" className="mt-2 space-y-1 border-t border-border/50 pt-2 text-muted-foreground">
+              <div className="font-medium text-foreground/80">当前</div>
+              {sortChain.map((level, index) => {
+                const label = SORT_LABEL_BY_MODE[level.mode];
+                const effect = sortLevelEffects[index];
+                const text = index === 0
+                  ? (sortBinning ? describeSortBinningTitle(label, sortDirectionLabel(level.direction, level.mode), sortBinning) : null)
+                  : (effect ? describeSortLevelEffect(index + 1, label, effect) : null);
+                if (!text) return null;
+                return (
+                  <div key={level.mode} data-testid={`sort-chain-current-level-${index + 1}`} className="flex items-start gap-1.5">
+                    <span aria-hidden="true" className={`${SORT_LEVEL_BADGE} mt-[3px] shrink-0 ${index === 0 ? SORT_LEVEL_BADGE_FIRST : SORT_LEVEL_BADGE_THEN}`}>{index + 1}</span>
+                    <span className="min-w-0 flex-1 break-words">
+                      {text.split('\n').map((line, lineIndex) => <div key={lineIndex}>{line}</div>)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </PopoverContent>
       </Popover>
       <button
@@ -3132,7 +3196,7 @@ export default function JournalCampaignsPage() {
                     aria-pressed={active}
                     aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序${chainLevel ? `（第 ${level + 1} 级）` : ''}`}
                     title={chainLevel
-                      ? `第 ${level + 1} 级：按${option.label}${sortDirectionLabel(direction, option.value)}；单击改为只按这一项排（方向不变）${formula ? '；双击或右键查看说明与散点图' : ''}`
+                      ? `第 ${level + 1} 级：按${option.label}${sortDirectionLabel(direction, option.value)}${active && sortBinning ? '，四分位分档' : ''}；单击改为只按这一项排（方向不变）${formula ? '；双击或右键查看说明与散点图' : ''}`
                       : `按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}${formula ? '；双击或右键查看说明与散点图' : ''}`}
                     data-sort-direction={inChain ? direction : undefined}
                     data-sort-level={inChain ? level + 1 : undefined}
@@ -3204,7 +3268,10 @@ export default function JournalCampaignsPage() {
                         type="button"
                         data-testid={`sort-chain-add-${option.value}`}
                         aria-label={`把「${option.label}」加为第 ${sortChain.length + 1} 级排序`}
-                        title={`加为第 ${sortChain.length + 1} 级：前面各级打平时，再按${option.label}排`}
+                        // 单级且第一级是连续指标：加层后第一级会按四分位分档，提示里说清
+                        title={sortChain.length === 1 && isContinuousSortMode(sortChain[0].mode)
+                          ? `加为第 2 级：${SORT_LABEL_BY_MODE[sortChain[0].mode]}按四分位分成四档后，同档内再按${option.label}排`
+                          : `加为第 ${sortChain.length + 1} 级：前面各级打平时，再按${option.label}排`}
                         onClick={(event) => {
                           event.stopPropagation();
                           if (event.detail > 1) return;
@@ -3307,34 +3374,6 @@ export default function JournalCampaignsPage() {
                           </div>
                           <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），代表这一注把本金打穿，Gᵢ 记为 0.00。</div>
                           <div>缺少有效初始最大预期亏损（因而没有 bᵢ）的战役不参与几何期望排序。</div>
-                        </div>
-                      </>
-                    ) : formula === 'dsiContributionSort' ? (
-                      <>
-                        <div className="font-medium text-foreground">单场 DSI 贡献率计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          DSI 贡献率ᵢ = bᵢ² ÷ Σ(亏损战役 b²) × 100%
-                        </div>
-                        <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>DSI = √(Σ 亏损战役 b² ÷ 亏损场数)，衡量下行风险的量级。</div>
-                          <div>因此单场的边际影响就是它的 b² 占亏损组平方和的比例；平方会放大大亏，少数几场往往占掉大半。</div>
-                          <div>只有亏损战役（b ≤ 0，含盈亏持平）对 DSI 有贡献；盈利战役不参与该排序。</div>
-                          <div>全部参与战役的贡献率合计为 100%。未了结或缺少有效 bᵢ 的战役不参与。</div>
-                          <div>当前亏损样本 n={asymmetricRisk.lossCount}，DSI={formatAsymmetricMetric(asymmetricRisk.dsi, 3)}。</div>
-                        </div>
-                      </>
-                    ) : formula === 'usiContributionSort' ? (
-                      <>
-                        <div className="font-medium text-foreground">单场 USI 贡献率计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          USI 贡献率ᵢ = bᵢ² ÷ Σ(盈利战役 b²) × 100%
-                        </div>
-                        <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>USI = √(Σ 盈利战役 b² ÷ 盈利场数) ÷ 盈利均值，衡量盈利的离散程度。</div>
-                          <div>分子的组内均方决定量级，单场的边际影响即它的 b² 占盈利组平方和的比例。</div>
-                          <div>只有盈利战役（b &gt; 0）对 USI 有贡献；亏损战役不参与该排序。</div>
-                          <div>若极少数战役就占掉大半，说明整体盈利高度依赖偶发大赚，需与 U1 联合判读。</div>
-                          <div>当前盈利样本 n={asymmetricRisk.winCount}，USI={formatAsymmetricMetric(asymmetricRisk.usi, 3)}。</div>
                         </div>
                       </>
                     ) : formula === 'mainPriceChangeSort' ? (

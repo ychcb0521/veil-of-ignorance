@@ -506,14 +506,14 @@ describe('JournalCampaignsPage sorting', () => {
     for (const item of children.slice(1, -1).filter(node => node.hasAttribute('data-sort-item'))) {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
-    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母
+    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
     expect(sequence).toEqual([
       'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
       'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency',
       'geometricExpectancy', 'arithmeticExpectancy',
-      'divider-dsiContribution',
-      'dsiContribution', 'usiContribution', 'leverage', 'importance', 'alpha',
+      'divider-leverage',
+      'leverage', 'importance', 'alpha',
     ]);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
@@ -590,14 +590,10 @@ describe('JournalCampaignsPage sorting', () => {
     expect(payoffCell).toHaveClass('ring-1', 'px-2.5', 'py-1.5');
     expect(payoffCell.querySelector('dt')).toHaveClass('text-[#B7860B]');
     expect(screen.getAllByTestId('campaign-expected-drawdown-pct')[0]).not.toHaveClass('ring-1');
-    // 切到字母：比的是标题，标题亮（琥珀下划线）；DSI 贡献不在封面上，没有可亮的
+    // 切到字母：比的是标题，标题亮（琥珀下划线）
     fireEvent.click(screen.getByTestId('campaign-sort-alpha'));
     await waitFor(() => expect(lit(screen.getAllByTestId('campaign-card')[0]).map(node => node.tagName)).toEqual(['H2']));
     expect(lit(screen.getAllByTestId('campaign-card')[0])[0]).toHaveClass('underline');
-    fireEvent.click(screen.getByTestId('campaign-sort-dsiContribution'));
-    await waitFor(() => {
-      for (const card of screen.getAllByTestId('campaign-card')) expect(lit(card)).toHaveLength(0);
-    });
 
     // 图标位宽度固定：有公式的档平时是 Σ，选中那一档换成方向箭头；没有公式的档平时也留同宽空位，切换排序整行不重排
     expect(screen.getByTestId('campaign-sort-mainPriceChange-icon')).toHaveClass('w-3');
@@ -630,14 +626,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(initial.captureRate).toBe('56px');
     for (const mode of modes) expect(initial[mode], mode).toMatch(/^\d+px$/);
 
-    // USI 贡献只收盈利战役：Late Close（「-0.80」）被筛掉，只剩「3.00」「0.50」——列宽仍是 56px，各格位置不动
-    fireEvent.click(screen.getByTestId('campaign-sort-usiContribution'));
-    await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeLessThan(4));
-    expect(screen.getAllByTestId('campaign-payoff-ratio-value').map(node => node.textContent)).toEqual(['3.00', '0.50']);
-    expect(widths()).toEqual(initial);
-    // 其它会筛掉战役的排序也一样：DSI 贡献只剩 Late Close 一场，涨跌幅倍数 / 盈亏比 / 两个期望 / 杠杆倍数各剩 3 场
+    // 会筛掉战役的排序：涨跌幅倍数 / 盈亏比 / 两个期望 / 杠杆倍数各剩 3 场——列宽不变，各格位置不动
     for (const [mode, count] of [
-      ['dsiContribution', 1], ['mainPriceEfficiency', 3], ['captureRate', 3],
+      ['mainPriceEfficiency', 3], ['captureRate', 3],
       ['geometricExpectancy', 3], ['arithmeticExpectancy', 3], ['leverage', 3],
     ] as const) {
       fireEvent.click(screen.getByTestId(`campaign-sort-${mode}`));
@@ -1702,9 +1693,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('chart=');
   }, 15_000);
 
-  it('DSI / USI 贡献率各自只收一侧样本，且组内合计 100%', async () => {
+  it('【用户要求】排序栏删掉「DSI 贡献」「USI 贡献」：旧链接（sort / then / chart 里的）退回默认、不报错；统计概览的不对称风险仍在', async () => {
     render(
-      <MemoryRouter initialEntries={['/journal/campaigns']}>
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=dsiContribution&direction=asc&then=usiContribution.desc&chart=dsiContribution']}>
         <Routes>
           <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
           <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
@@ -1712,27 +1703,14 @@ describe('JournalCampaignsPage sorting', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-
-    // DSI 贡献：只有亏损战役 late-close 参与，独占 100%。
-    fireEvent.contextMenu(screen.getByTestId('campaign-sort-dsiContribution'));
-    fireEvent.click(await screen.findByTestId('campaign-dsiContribution-chart-toggle'));
-    const dsiPlot = screen.getByTestId('campaign-metric-scatter-plot');
-    expect(dsiPlot).toHaveAttribute('data-metric-key', 'dsiContribution');
-    const dsiPoints = Array.from(dsiPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'));
-    expect(dsiPoints.map(node => node.dataset.campaignId)).toEqual(['late-close']);
-    expect(Number(dsiPoints[0].dataset.metricValue)).toBeCloseTo(100, 6);
-
-    // USI 贡献：只有盈利战役参与，彼此合计 100%。
-    fireEvent.contextMenu(screen.getByTestId('campaign-sort-usiContribution'));
-    fireEvent.click(await screen.findByTestId('campaign-usiContribution-chart-toggle'));
-    const usiPlot = screen.getByTestId('campaign-metric-scatter-plot');
-    expect(usiPlot).toHaveAttribute('data-metric-key', 'usiContribution');
-    const usiPoints = Array.from(usiPlot.querySelectorAll<HTMLElement>('button[data-campaign-id]'));
-    expect(usiPoints.length).toBeGreaterThan(1);
-    expect(usiPoints.map(node => node.dataset.campaignId)).not.toContain('late-close');
-    expect(
-      usiPoints.reduce((sum, node) => sum + Number(node.dataset.metricValue), 0),
-    ).toBeCloseTo(100, 6);
+    // 退回默认：操作时间从新到旧，没有排序链、没有散点图
+    expect(cardOrder()).toEqual(['High Importance', 'Best PnL', 'Late Close', 'Newest Operation']);
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('campaign-sort-dsiContribution')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-sort-usiContribution')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-metric-scatter-plot')).not.toBeInTheDocument();
+    expect(screen.queryByText('DSI 贡献')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^不对称风险/ })).toBeInTheDocument();
   }, 15_000);
 
   it('关闭散点图会移除 chart 参数', async () => {
@@ -1765,7 +1743,7 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getByTestId('campaign-sort-controls').querySelectorAll('button[data-testid^="campaign-sort-"]')]
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
-      // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ DSI 贡献 … 字母；重要性放在后面（字母之前）
+      // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母；重要性放在后面（字母之前）
       'campaign-sort-time',
       'campaign-sort-mirrorTp',
       'campaign-sort-expectedDrawdownPct',
@@ -1775,8 +1753,6 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-addEfficiency',
       'campaign-sort-geometricExpectancy',
       'campaign-sort-arithmeticExpectancy',
-      'campaign-sort-dsiContribution',
-      'campaign-sort-usiContribution',
       'campaign-sort-leverage',
       'campaign-sort-importance',
       'campaign-sort-alpha',
