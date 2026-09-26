@@ -393,6 +393,12 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
  * 再把每条档界抬到「≥ 它的最小读数」上：归档一场不变（值 ≥ 档界的集合完全相同），档界却成了那一档里最小的读数，
  * 显示出来与封面对得上（「Q4 ≥ 2.32」= Q4 里最小的一场就是 2.32），不会出现谁也不是的 2.315。
  * 一个值也没有时为 null；只有一个值时三条档界都等于它（全部落在 Q4）。
+ *
+ * 【用户要求】「负值不能与正值在同一档位」（盈亏比 Q2 = −0.30 至 0.42 就不对）：带正负的指标里 0 一定是档界。
+ * 四分位切完后若有一档同时含负值与非负值，把它靠 0 的那条档界挪到 0：
+ *   · 这一档负值多（或持平）→ 上界挪到 0，它只留负值，非负值并入上一档；否则下界挪到 0，负值并入下一档；
+ *   · Q1 没有下界只能挪上界，Q4 没有上界只能挪下界。
+ * 恰好为 0 的读数（持平）归非负那一侧。这条档界显示为 0（几何期望显示 1.00），是「最小读数」规则唯一的例外。
  */
 export function quartileThresholds(values: readonly number[]): readonly [number, number, number] | null {
   const sorted = values.filter(value => Number.isFinite(value)).sort((a, b) => a - b);
@@ -405,7 +411,28 @@ export function quartileThresholds(values: readonly number[]): readonly [number,
   };
   // 插值点夹在 sorted[lower] 与 sorted[upper] 之间，≥ 它的最小读数一定存在
   const snap = (threshold: number) => sorted.find(value => value >= threshold) ?? sorted[sorted.length - 1];
-  return [snap(at(0.25)), snap(at(0.5)), snap(at(0.75))];
+  return splitAtZero(sorted, [snap(at(0.25)), snap(at(0.5)), snap(at(0.75))]);
+}
+
+/** 让 0 成为档界：找出同时含负值与非负值的那一档（至多一档），把它靠 0 的档界挪到 0。sorted 已升序。 */
+function splitAtZero(
+  sorted: readonly number[],
+  thresholds: [number, number, number],
+): readonly [number, number, number] {
+  if (!(sorted[0] < 0 && sorted[sorted.length - 1] >= 0)) return thresholds;
+  const edges = [Number.NEGATIVE_INFINITY, ...thresholds, Number.POSITIVE_INFINITY];
+  for (let bin = 0; bin < 4; bin += 1) {
+    const members = sorted.filter(value => value >= edges[bin] && value < edges[bin + 1]);
+    const negatives = members.filter(value => value < 0).length;
+    const nonNegatives = members.length - negatives;
+    if (negatives === 0 || nonNegatives === 0) continue;
+    const next: [number, number, number] = [...thresholds];
+    // bin 是 0..3；它的下界是 thresholds[bin − 1]，上界是 thresholds[bin]
+    const moveUpper = bin === 0 || (bin < 3 && negatives >= nonNegatives);
+    next[moveUpper ? bin : bin - 1] = 0;
+    return next;
+  }
+  return thresholds;
 }
 
 /** 一个值落在哪一档：≥ q₃ → Q4，≥ q₂ → Q3，≥ q₁ → Q2，否则 Q1。相等的值必然同档。 */

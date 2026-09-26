@@ -89,9 +89,10 @@ describe('排序链：依次比较', () => {
     const chained = sortCampaignRows(ROWS, [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }]);
     expect(chained).toHaveLength(single.length);
     // 反过来：第一级是加仓效用时，只收算得出的六场；加仓效用是连续指标、链上有两级 → 按四分位分档：
-    // Q4 {ETH 2.50, LINK 1.80}、Q3 {BTC 1.50}、Q2 {SOL 1.40}、Q1 {TIA 1.05, DOGE −1.20}，Q1 里已实现的 DOGE 排到 TIA 之前
+    // Q4 {ETH 2.50, LINK 1.80}、Q3 {BTC 1.50}、Q2 {SOL 1.40, TIA 1.05}、Q1 {DOGE −1.20}：
+    // 四分位的 Q1 本是 {TIA, DOGE}，一正一负不能同档，0 成为档界，TIA 并入 Q2；Q2 里已实现的 SOL 排到 TIA 之前
     expect(ids(sortCampaignRows(ROWS, [{ mode: 'addEfficiency', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])))
-      .toEqual(['eth', 'link', 'btc', 'sol', 'doge', 'tia']);
+      .toEqual(['eth', 'link', 'btc', 'sol', 'tia', 'doge']);
   });
 
   it('三级链：前两级都打平时由第三级定先后，方向按第三级自己的', () => {
@@ -317,7 +318,8 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
       const members = pcrs.filter(pcr => bandOf(pcr) === band);
       expect(members.length).toBeGreaterThan(0);
       const smallest = Math.min(...members.map(pcr => Number(shown(pcr))));
-      expect(shown(threshold)).toBe(smallest.toFixed(2));
+      // 正负分界那条档界是 0（例外），其余档界就是档内最小读数
+      if (threshold !== 0) expect(shown(threshold)).toBe(smallest.toFixed(2));
       for (const pcr of pcrs) {
         if (bandOf(pcr) >= band) expect(Number(shown(pcr))).toBeGreaterThanOrEqual(Number(shown(threshold)));
         else expect(Number(shown(pcr))).toBeLessThan(Number(shown(threshold)));
@@ -482,8 +484,9 @@ describe('排序链每一级的作用（芯片反馈）', () => {
     expect(describeSortLevelEffects(sortCampaignRows(ROWS, [{ mode: 'captureRate', direction: 'desc' }]), [{ mode: 'captureRate', direction: 'desc' }])).toEqual([null]);
     const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
     const sorted = sortCampaignRows(ROWS, chain);
-    // 十一场分四档，每档都不止一场 → 全部进入第二级比较；Q4 三场都是已实现·盈利（读数相同，tied），其余三档分出了先后
-    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 4, rows: 11, sorted: 8, tied: 3, missing: 0 });
+    // 十一场分四档：Q4 {BTC, SOL, ETH}、Q3 {TIA, BNB, LINK, ARB}、Q2 {DOGE}（负值不与 ARB 同档）、Q1 {AVAX, OP, APT}；
+    // Q2 只有一场不进比较；Q4 三场都是已实现·盈利（读数相同，tied），Q3、Q1 分出了先后
+    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 3, rows: 10, sorted: 7, tied: 3, missing: 0 });
   });
 });
 
@@ -503,18 +506,18 @@ describe('【用户要求】排序后的分组统计', () => {
     const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
     expect(groups.map(group => group.key)).toEqual([
       { kind: 'quartile', quartile: 4, lower: 250 },
-      { kind: 'quartile', quartile: 3, lower: 120 },
+      { kind: 'quartile', quartile: 3, lower: 0 },
       { kind: 'quartile', quartile: 2, lower: -60 },
       { kind: 'quartile', quartile: 1, lower: null },
     ]);
-    expect(groups.map(group => group.count)).toEqual([3, 3, 2, 3]);
-    expect(groups.map(group => group.wins)).toEqual([3, 3, 1, 0]);
+    expect(groups.map(group => group.count)).toEqual([3, 4, 1, 3]);
+    expect(groups.map(group => group.wins)).toEqual([3, 4, 0, 0]);
     expect(groups[0].meanPayoff).toBeCloseTo((6 + 4.2 + 2.5) / 3);
     // 第二级镜像止盈：本组已实现（生效）几场
     expect(groups.map(group => group.levels[1])).toEqual([
       { kind: 'achieved', hits: 3, count: 3 },
-      { kind: 'achieved', hits: 1, count: 3 },
-      { kind: 'achieved', hits: 1, count: 2 },
+      { kind: 'achieved', hits: 1, count: 4 },
+      { kind: 'achieved', hits: 1, count: 1 },
       { kind: 'achieved', hits: 1, count: 3 },
     ]);
     // 第一级自己：本档读数的平均值（600、420、250）
@@ -547,7 +550,7 @@ describe('【用户要求】第一级每一档里第二级的分布（交叉表�
     expect(crossTab.thresholds).not.toBeNull();
     expect(crossTab.columns.map(column => (column.kind === 'quartile' ? column.quartile : column.kind))).toEqual([4, 3, 2, 1]);
     crossTab.rows.forEach(row => expect(row.counts.reduce((sum, count) => sum + count, 0)).toBe(row.count));
-    expect(crossTab.totals).toEqual([3, 3, 2, 3]);
+    expect(crossTab.totals).toEqual([3, 4, 1, 3]);
     // 行与分组统计同一套（镜像止盈一个档位一行）
     expect(crossTab.rows.map(row => row.key)).toEqual(
       summarizeSortGroups(sortCampaignRows(ROWS, chain), chain).map(group => group.key),
@@ -570,5 +573,35 @@ describe('【用户要求】第一级每一档里第二级的分布（交叉表�
     expect(crossTab.rows[0].counts.reduce((sum, count) => sum + count, 0)).toBe(3);
     const alpha: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'alpha', direction: 'asc' }];
     expect(summarizeSortCrossTab(sortCampaignRows(ROWS, alpha), alpha, 1)).toBeNull();
+  });
+});
+
+describe('【用户要求】分档时负值与正值不同档：0 一定是档界', () => {
+  const signOf = (value: number) => (value < 0 ? 'neg' : 'nonneg');
+  const assertNoMixedBin = (values: number[]) => {
+    const thresholds = quartileThresholds(values)!;
+    for (const quartile of [1, 2, 3, 4]) {
+      const signs = new Set(values.filter(value => quartileOf(value, thresholds) === quartile).map(signOf));
+      expect(signs.size).toBeLessThanOrEqual(1);
+    }
+    return thresholds;
+  };
+
+  it('中间档跨 0：负值多就把上界挪到 0，否则把下界挪到 0', () => {
+    // 原档界 [-0.30, 0.42, 2] 的 Q2 = {-0.30, -0.1, 0.2}：负值多 → 上界挪到 0
+    expect(assertNoMixedBin([-2, -1, -0.5, -0.3, -0.1, 0.2, 0.42, 0.6, 1, 2, 3, 4])).toEqual([-0.3, 0, 2]);
+    // Q2 = {-0.3, 0.1, 0.2}：非负多 → 下界挪到 0，-0.3 并入 Q1
+    expect(assertNoMixedBin([-2, -1, -0.5, -0.3, 0.1, 0.2, 0.42, 0.6, 1, 2, 3, 4])).toEqual([0, 0.42, 2]);
+  });
+
+  it('Q1 / Q4 跨 0 时只能挪有的那条档界；恰好为 0 的读数归非负一侧', () => {
+    expect(assertNoMixedBin([-1, 0, 1, 2, 3, 4, 5, 6])[0]).toBe(0);
+    expect(assertNoMixedBin([-6, -5, -4, -3, -2, -1, 0, 1])[2]).toBe(0);
+    expect(quartileOf(0, quartileThresholds([-1, 0, 1, 2, 3, 4, 5, 6])!)).toBeGreaterThan(1);
+  });
+
+  it('全正或全负时档界不变', () => {
+    expect(quartileThresholds([8, 1, 3, 7, 2, 6, 5, 4])).toEqual([3, 5, 7]);
+    expect(quartileThresholds([-8, -1, -3, -7, -2, -6, -5, -4])).toEqual([-6, -4, -2]);
   });
 });

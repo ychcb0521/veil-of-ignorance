@@ -574,9 +574,10 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-add-mirrorTp'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
-    // 盈亏比 › 镜像止盈：盈亏比分档后四档都有并列，镜像止盈每场都有；Q4 三场都是已实现·盈利（读数相同、先后未变）不算排了 → 8 场
-    expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('8 场');
-    expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toContain('按镜像止盈排了 8 场；3 场与同组其它场读数相同，先后未变');
+    // 盈亏比 › 镜像止盈：盈亏比分档后 Q4、Q3、Q1 有并列（Q2 只有负值 DOGE 一场），镜像止盈每场都有；
+    // Q4 三场都是已实现·盈利（读数相同、先后未变）不算排了 → 7 场
+    expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('7 场');
+    expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toContain('按镜像止盈排了 7 场；3 场与同组其它场读数相同，先后未变');
   }, 15_000);
 
   it('【复核】前面各级并列、但本级读数全相同时标「未起作用」并说明（不再把「进入比较」当成「排了」）', async () => {
@@ -599,12 +600,13 @@ describe('战役列表：多级排序', () => {
   it('【用户已定】连续指标作第一级、链上不止一级时先按四分位分档：第一级芯片标「分档」，悬停写明档界；封面第一级高亮不变', async () => {
     renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
-    // 十一场的盈亏比分四档：Q4 {ETH 2.50, SOL 4.20, BTC 6.00} · Q3 {LINK 1.20, BNB 1.80, TIA 2.10} · Q2 {DOGE −0.60, ARB 0.80} · Q1 {APT, OP, AVAX}
+    // 十一场的盈亏比分四档：Q4 {ETH 2.50, SOL 4.20, BTC 6.00} · Q3 {ARB 0.80, LINK 1.20, BNB 1.80, TIA 2.10} · Q2 {DOGE −0.60} · Q1 {APT, OP, AVAX}
+    // 【用户要求】负值不与正值同档：四分位的 Q2 本是 {DOGE −0.60, ARB 0.80}，0 成为档界，ARB 并入 Q3
     // 同档内按镜像止盈（已实现在前），再打平按盈亏比本身从大到小
     expect(order()).toEqual([
       'BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓',
-      'BNB 镜像止盈', 'TIA 二次加仓', 'LINK 区间',
-      'DOGE 假突破', 'ARB 回踩',
+      'BNB 镜像止盈', 'TIA 二次加仓', 'LINK 区间', 'ARB 回踩',
+      'DOGE 假突破',
       'AVAX 反抽', 'OP 追高', 'APT 抄底',
     ]);
     const binned = screen.getByTestId('sort-chain-binned');
@@ -613,7 +615,7 @@ describe('战役列表：多级排序', () => {
     const title = binned.getAttribute('title') ?? '';
     expect(title).toContain('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）');
     // 插值档界 2.30 / −0.75 不是任何一场的读数：档界写成那一档里最小的读数（2.50 / −0.60），与封面对得上
-    expect(title).toContain('Q4 ≥ 2.50（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.60（2 场）· Q1 < -0.60（3 场）');
+    expect(title).toContain('Q4 ≥ 2.50（3 场）· Q3 ≥ 0.00（4 场）· Q2 ≥ -0.60（1 场）· Q1 < -0.60（3 场）');
     expect(title).toContain('同档内按后面各级排；各级都打平再按盈亏比本身从大到小');
     // 排序行上第一级的提示也写明分档；「+」的提示说清加层后会分档
     expect(screen.getByTestId('campaign-sort-captureRate').getAttribute('title')).toContain('第 1 级：按盈亏比从大到小，四分位分档');
@@ -681,8 +683,8 @@ describe('战役列表：多级排序', () => {
     // 点「分档」：打开 ⓘ 弹层，「当前」段第一行是档界（与悬停提示同一串），之后每级一行
     fireEvent.click(binned);
     const current = await screen.findByTestId('sort-chain-current');
-    expect(current).toHaveTextContent('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）：Q4 ≥ 2.50（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.60（2 场）· Q1 < -0.60（3 场）');
-    expect(current).toHaveTextContent('第 2 级「镜像止盈」：前面各级并列的 4 组、11 场里，按镜像止盈排了 8 场；3 场与同组其它场读数相同，先后未变');
+    expect(current).toHaveTextContent('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）：Q4 ≥ 2.50（3 场）· Q3 ≥ 0.00（4 场）· Q2 ≥ -0.60（1 场）· Q1 < -0.60（3 场）');
+    expect(current).toHaveTextContent('第 2 级「镜像止盈」：前面各级并列的 3 组、10 场里，按镜像止盈排了 7 场；3 场与同组其它场读数相同，先后未变');
     expect(current).toHaveTextContent(effect3.getAttribute('title') ?? '∅');
     // 一级一行：档界行、第 2 级行、第 3 级行
     expect(within(current).getAllByTestId(/^sort-chain-current-level-\d$/).map(node => node.getAttribute('data-testid'))).toEqual([
