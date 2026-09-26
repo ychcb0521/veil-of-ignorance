@@ -211,7 +211,7 @@ export function SessionModeControls({
     }`;
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center gap-1">
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
           只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}
       <button

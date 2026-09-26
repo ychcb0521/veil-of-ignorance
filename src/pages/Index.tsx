@@ -2169,8 +2169,9 @@ const Index = () => {
   // Desktop layout
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-gray-50 dark:bg-[#0b0e11]">
-      <header className="border-b border-gray-200 dark:border-[#2b3139] px-4 py-1.5 flex items-center justify-between shrink-0 bg-white dark:bg-[#1e2329] gap-2 min-h-[36px]">
-        <div className="flex items-center gap-4 min-w-0 shrink-0">
+      {/* 【用户要求】非全屏（窗口变窄）时顶栏不能被截掉：三组放不下一行就折到下一行，而不是溢出窗口右边。 */}
+      <header className="border-b border-gray-200 dark:border-[#2b3139] px-4 py-1.5 flex flex-wrap items-center justify-between shrink-0 bg-white dark:bg-[#1e2329] gap-x-2 gap-y-1 min-h-[36px]">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
           <ThemeToggle />
           <h1 className="text-xs font-bold text-primary tracking-widest uppercase whitespace-nowrap shrink-0">
             ⚡ 无知之幕
@@ -2210,7 +2211,7 @@ const Index = () => {
         />
         {/* 顶栏放不下时（中间一排多了持仓限制模式开关），先让邮箱让位，复盘中心与登出不被挤出屏幕。
             邮箱在 1280px 以下整个藏起来（1,120–1,260px 之间它只剩几个像素的残影），1280px 起完整显示、需要时再截短 */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="ml-auto flex items-center gap-3 min-w-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono whitespace-nowrap shrink-0">加载历史数据...</span>}
           <div className="shrink-0">
             <JournalNavMenu
@@ -2263,7 +2264,8 @@ const Index = () => {
       {/* ===== Resizable Pro Grid (Binance/TradingView-style) =====
           Viewport lock: enforce min width so layout never wraps/squishes;
           allow horizontal scroll on small viewports. */}
-      <div className="h-[calc(100vh-64px)] min-h-0 w-full min-w-[1200px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
+      {/* 高度取顶栏以下剩余的空间：顶栏折成两行时盘面跟着让出高度，底部不被挤出窗口。 */}
+      <div className="flex-1 min-h-0 w-full min-w-[1200px] overflow-x-auto overflow-y-hidden bg-gray-50 dark:bg-[#0b0e11]">
         <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
           {/* Left main area (chart + orderbook + positions) */}
           <ResizablePanel defaultSize={75} minSize={60}>
