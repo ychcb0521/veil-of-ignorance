@@ -65,7 +65,7 @@ export type CampaignBatchExportResult = {
 /** 【用户要求】批量导出的盘面视窗默认 1.1 倍：完整战役加一圈边距，盘面几乎只放战役本身。 */
 export const BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;
 
-/** 倍数按钮的写法：「1.1x」「2x」，与详情页 K 线上方那一排同一个样子。 */
+/** 倍数按钮的写法：「1.1x」「2.1x」，与详情页 K 线上方那一排同一个样子。 */
 export function formatViewMultiplier(multiplier: CampaignViewMultiplier): string {
   return `${multiplier}x`;
 }

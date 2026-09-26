@@ -114,18 +114,18 @@ describe('renderCampaignBoardPng', () => {
     expect(texts.join('\n')).not.toContain('当前视图');
   });
 
-  it('writes the K-line interval only when the board draws the chart or the P&L overview', async () => {
+  it('writes the K-line interval only when the board draws the chart', async () => {
     // 只画原数据与 Legs：标题行与「战役原数据」都不写周期
     await renderCampaignBoardPng({ ...fixture(), chartElement: undefined, sections: { ...disabled, metadata: true, legs: true } });
     const header = texts.find(text => text.startsWith('编号 '))!;
     expect(header).not.toContain('周期');
     expect(texts).not.toContain('K 线周期');
     expect(texts).toContain('战役原数据');
-    // 画了盈亏概览（峰值浮盈按这一周期的 K 线路径算）：照旧写
+    // 【用户已定】计算与显示分开：画了盈亏概览、没画盘面——概览按自动周期的计算用 K 线算，不随盘面周期变，不写
     texts.length = 0;
     await renderCampaignBoardPng({ ...fixture(), chartElement: undefined, sections: { ...disabled, metadata: true, overview: true } });
-    expect(texts.find(text => text.startsWith('编号 '))).toContain('· 周期 15分钟线 ·');
-    expect(texts).toContain('K 线周期');
+    expect(texts.find(text => text.startsWith('编号 '))).not.toContain('周期');
+    expect(texts).not.toContain('K 线周期');
     // 只画 K 线盘面：照旧写
     texts.length = 0;
     await renderCampaignBoardPng({ ...fixture(), sections: { ...disabled, metadata: true, chart: true } });

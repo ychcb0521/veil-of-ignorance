@@ -25,8 +25,10 @@ import {
 } from '@/test/fixtures/correctedLossCampaign';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
 
-const { exportCampaignBoardPngMock } = vi.hoisted(() => ({
+const { exportCampaignBoardPngMock, klineState } = vi.hoisted(() => ({
   exportCampaignBoardPngMock: vi.fn(async (_input: CampaignBoardExportInput) => 'TUTUSDT campaign.png'),
+  /** 计算用 K 线是否还在加载（个别用例压住它） */
+  klineState: { loading: false },
 }));
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
@@ -136,7 +138,7 @@ vi.mock('@/hooks/useCampaignKlines', async importOriginal => {
         close: 0.09,
         volume: 1,
       }],
-      loading: false,
+      loading: klineState.loading,
       error: null,
       reload: vi.fn(),
       fromTime: Date.parse('2025-12-31T07:30:00.000Z'),
@@ -160,6 +162,7 @@ vi.mock('@/lib/campaignLegsPngExport', async importOriginal => {
 });
 
 beforeEach(() => {
+  klineState.loading = false;
   window.localStorage.clear();
   exportCampaignBoardPngMock.mockClear();
   vi.mocked(getCampaignFullData).mockClear();
@@ -235,7 +238,19 @@ describe('战役详情页 · 状态与已实现盈亏同源', () => {
     await waitFor(() => expect(chip).toHaveAttribute('title', 'active'));
     expect(chip).toHaveTextContent('进行中');
     expect(chip.className).toContain('text-[#F0B90B]');
-    expect(await screen.findByRole('button', { name: '结束战役' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '结束战役' })).toBeEnabled();
+  });
+
+  it('K 线还在加载时「结束战役」停用：结束对话框会把峰值浮盈写库，不能写进兜底值', async () => {
+    klineState.loading = true;
+    const active = activeVariant();
+    renderDetail(active.campaign.id);
+
+    const end = await screen.findByRole('button', { name: '结束战役' });
+    expect(end).toBeDisabled();
+    // 停用的按钮收不到悬停：提示挂在外层 span 上，按钮本身不带 title
+    expect(screen.getByTestId('campaign-end-button-wrap')).toHaveAttribute('title', 'K 线加载中：峰值浮盈要按 K 线算，稍候再结束');
+    expect(screen.getByTestId('campaign-end-button-wrap')).toContainElement(end);
   });
 });
 

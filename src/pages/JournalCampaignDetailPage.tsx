@@ -41,11 +41,14 @@ import { intervalToMs } from '@/hooks/useBinanceData';
 import { useViewportFitHeight } from '@/hooks/useViewportFitHeight';
 import {
   CAMPAIGN_ABSOLUTE_RANGE_PRESETS,
+  CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER,
+  CAMPAIGN_DEFAULT_VIEW_MULTIPLIER,
   CAMPAIGN_MIN_CONTEXT_MS,
   CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS,
   buildCampaignChartVisibleRange,
   buildCampaignKlineTimeWindow,
   buildCampaignKlineVisibleRange,
+  normalizeCampaignViewMultiplier,
   useCampaignKlines,
   type CampaignChartRangeSelection,
   type CampaignKlineTimeWindow,
@@ -82,10 +85,12 @@ import {
   type CampaignPnlOverviewItem,
 } from '@/lib/campaignPnlOverview';
 import {
+  CAMPAIGN_DEFAULT_DISPLAY_INTERVAL,
   buildCampaignChartContentTimeSpan,
+  explainCampaignDisplayIntervalWidening,
   pickBatchExportInterval,
-  pickCampaignOverviewInterval,
-  pickCoarserCampaignInterval,
+  pickCampaignComputeInterval,
+  pickCampaignDisplayInterval,
   type CampaignChartInterval,
 } from '@/lib/campaignChartContentSpan';
 import {
@@ -198,6 +203,58 @@ function campaignMultiplierSpanMs(window: CampaignKlineTimeWindow, multiplier: C
 
 const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
 type Interval = CampaignChartInterval;
+const INTERVAL_LABELS: Record<Interval, string> = { '1m': '1 分钟', '5m': '5 分钟', '15m': '15 分钟', '1h': '1 小时' };
+/** 盘面周期按钮的悬停提示：【用户要求】默认 5 分钟线；周期只管盘面，读数不跟着变。 */
+const DISPLAY_INTERVAL_HINT = '默认 5 分钟线，放不下时自动放宽。周期只改盘面显示，峰值浮盈、盈亏概览与反事实照旧按自动周期的 K 线计算';
+
+/**
+ * 周期按钮的悬停提示（原始盘面与反事实盘面各按自己的视窗算）：自动放宽时先说清是哪条下限放宽的——
+ * 视窗放不下 5 分钟线，还是整段拉取超过 6000 根（10 小时到 2 天这类战役常见：视窗放得下，拉取放不下）。
+ */
+function displayIntervalButtonTitle(item: Interval, chart: {
+  /** 这块盘面实际显示的周期 */
+  shown: Interval;
+  /** 手动选过周期没有、选的是哪个（两块盘面共用） */
+  touched: boolean;
+  manual: Interval;
+  /** 这块盘面当前的视窗 */
+  visible: { fromTime: number; toTime: number };
+}): string {
+  let status = '';
+  if (!chart.touched && item === chart.shown) {
+    const reason = explainCampaignDisplayIntervalWidening(chart.shown, { startMs: chart.visible.fromTime, endMs: chart.visible.toTime });
+    if (reason === 'visible') status = `当前视窗放不下 5 分钟线，已自动放宽到 ${INTERVAL_LABELS[chart.shown]}。`;
+    else if (reason === 'fetch') status = `战役较长，整段拉取范围按 5 分钟线超过 6000 根，已自动放宽到 ${INTERVAL_LABELS[chart.shown]}。`;
+  } else if (chart.touched && item === chart.manual && item !== chart.shown) {
+    status = `当前绝对时间预设下已自动放粗到 ${chart.shown}，避免 K 线被压成 1 像素。`;
+  }
+  return `${status}${DISPLAY_INTERVAL_HINT}`;
+}
+
+/** 盘面要在计算用 K 线之外另拉的一份：key = 周期 + 拉取窗口，key 相同就是同一份数据。 */
+type ExtraKlineNeed = { key: string; interval: Interval; selection: CampaignChartRangeSelection | null };
+type ExtraKlineSlots = readonly [ExtraKlineNeed | null, ExtraKlineNeed | null];
+
+/**
+ * 原始盘面与反事实盘面各至多另要一份 K 线，分进两个拉取槽：同一份只占一个槽、两块盘面共用；
+ * 上一轮已经在某个槽里拉着的那份原地不动——否则一块盘面缩放到另一块已在用的周期时，
+ * 数据从一个槽搬到另一个槽，白白重拉一遍，盘面也跟着重载、丢掉拖动位置。
+ */
+function assignExtraKlineSlots(
+  needs: ReadonlyArray<ExtraKlineNeed | null>,
+  previousKeys: readonly [string | null, string | null],
+): ExtraKlineSlots {
+  const slots: [ExtraKlineNeed | null, ExtraKlineNeed | null] = [null, null];
+  const pending: ExtraKlineNeed[] = [];
+  for (const need of needs) {
+    if (!need || slots.some(slot => slot?.key === need.key) || pending.some(item => item.key === need.key)) continue;
+    const kept = previousKeys.indexOf(need.key);
+    if (kept >= 0 && !slots[kept]) slots[kept] = need;
+    else pending.push(need);
+  }
+  for (const need of pending) slots[slots[0] ? 1 : 0] = need;
+  return slots;
+}
 
 type CampaignDetailNavigationState = {
   fromCampaignList?: boolean;
@@ -798,7 +855,10 @@ function CampaignBatchBoardRenderer({
 export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
-  const batchNeedsKlines = !batchExport || batchExport.options.sections.chart !== false || batchExport.options.sections.overview !== false;
+  // 计算用 K 线（峰值浮盈、决策准确度、反事实）：详情页始终要；批量导出只在图里画盈亏概览时要。
+  const computeKlinesNeeded = !batchExport || batchExport.options.sections.overview !== false;
+  // 显示用 K 线（盘面）：详情页始终要；批量导出只在图里画 K 线盘面时要。
+  const displayKlinesNeeded = !batchExport || batchExport.options.sections.chart !== false;
   const nav = useNavigate();
   const location = useLocation();
   const { user, profile } = useAuth();
@@ -836,14 +896,19 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const adoptUnfilledOrderIds = useCallback((ids: string[] | undefined) => {
     setUnfilledOrderIds(prev => (sameOrderIdSet(prev, ids ?? []) ? prev : new Set(ids ?? [])));
   }, []);
-  const [interval, setInterval] = useState<Interval>('1m');
+  // 手动选的盘面周期：没点过周期按钮（intervalTouched = false）时不生效，盘面按默认 5 分钟线自动放宽。
+  const [interval, setInterval] = useState<Interval>(CAMPAIGN_DEFAULT_DISPLAY_INTERVAL);
   const [intervalTouched, setIntervalTouched] = useState(false);
-  // 批量导出按弹窗里选的倍数取视窗（默认 1.1 倍）；详情页首屏仍是 3 倍
+  // 批量导出按弹窗里选的倍数取视窗（默认 1.1 倍）；【用户要求】详情页首屏 2.1 倍。旧档 2 / 3 读成 2.1 / 3.1。
   const initialViewMultiplier: CampaignViewMultiplier = batchExport
-    ? batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER
-    : 3;
+    ? normalizeCampaignViewMultiplier(batchExport.options.viewMultiplier) ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER
+    : CAMPAIGN_DEFAULT_VIEW_MULTIPLIER;
   const [chartRangeSelection, setChartRangeSelection] = useState<CampaignChartRangeSelection>(
     { kind: 'multiplier', multiplier: initialViewMultiplier },
+  );
+  // 反事实盘面自己的倍数（默认 1.1 倍）：详情页要按它选反事实盘面的自动周期，不能拿原始盘面的倍数来选。
+  const [counterfactualViewMultiplier, setCounterfactualViewMultiplier] = useState<CampaignViewMultiplier>(
+    CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER,
   );
   const [endOpen, setEndOpen] = useState(false);
   const [focusTime, setFocusTime] = useState<number | null>(null);
@@ -924,6 +989,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 换战役必须连绝对预设一起重置：否则从某战役的「1月」视图进另一个 symbol，
     // 开场就带着一个月的拉取窗口。
     setChartRangeSelection({ kind: 'multiplier', multiplier: initialViewMultiplier });
+    setCounterfactualViewMultiplier(CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER);
   }, [id, initialViewMultiplier]);
 
   useEffect(() => {
@@ -1234,68 +1300,145 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     () => buildCampaignChartVisibleRange(campaignKlineTimeWindow, chartRangeSelection),
     [campaignKlineTimeWindow, chartRangeSelection],
   );
-  const overviewInterval = useMemo(() => {
-    // 拉取项 = 今天的行为，一个字不动：倍率按钮只是取景，绝不允许连带改周期。
-    // 一旦改了，klines 的粒度会跟着变，而 klines 同时喂给 computeDecisionAccuracy /
-    // buildManualLegs / runCustomCounterfactual —— 点一下缩放就能让一次运行的结果偏掉。
-    const fetchedInterval = pickCampaignOverviewInterval({
-      startMs: campaignKlineTimeWindow.fromTime,
-      endMs: campaignKlineTimeWindow.toTime,
-    }, 6_000);
-    if (chartRangeSelection.kind !== 'absolute') return fetchedInterval;
-    // 只有绝对预设需要按「可见根数」再收紧一次：klinecharts 的 barSpace 下限是 1px，
-    // 可见根数超过画布宽度（约 1700）就会被静默裁掉中心以外的部分，
-    // 用户点了「1月」只会拿到不可读的 1px 柱子和被裁掉一大半的区间。
-    const visibleInterval = pickCampaignOverviewInterval({
-      startMs: campaignKlineVisibleRange.fromTime,
-      endMs: campaignKlineVisibleRange.toTime,
-    }, 1_200);
-    return pickCoarserCampaignInterval(visibleInterval, fetchedInterval);
-  }, [
-    campaignKlineTimeWindow.fromTime,
-    campaignKlineTimeWindow.toTime,
-    campaignKlineVisibleRange.fromTime,
-    campaignKlineVisibleRange.toTime,
-    chartRangeSelection,
-  ]);
-  // 自动挡直接派生，不再走 state 往返。旧写法是在 effect 里 setInterval，
-  // 于是「点预设」的那一帧窗口已经是 30 天、interval 还停在 1m，
-  // useReplayKlines 的 effect 先跑起来就是 43200 根 / 29 个串行请求。
-  // 手动挡（intervalTouched）在倍率视图下原样保留；绝对预设下只保证不比可读下限更细。
-  // 批量导出里统一指定的周期是下限：只在所选倍数的视窗放不下或拉取过多时放宽（见 pickBatchExportInterval）。
+  /**
+   * 【用户已定】计算与显示分开。
+   *
+   * 计算用周期：只看基准窗口（不含绝对预设撑开的部分），与倍率、手动周期、绝对预设全都无关——
+   * 就是改动前「默认打开、没手动改周期」时那个自动周期（51 倍拉取窗口 6000 根预算）。
+   * 峰值浮盈、决策准确度、反事实副本、一键运行都读这一份，切换盘面周期 / 倍数 / 预设一位不变。
+   * 从前 klines 只有一份，盘面周期一改，computeDecisionAccuracy / buildManualLegs /
+   * runCustomCounterfactual 的输入跟着变粒度——点一下周期按钮，峰值浮盈就换了一个数。
+   */
+  const computeInterval = useMemo<Interval>(
+    () => pickCampaignComputeInterval({ startMs: campaignKlineBaseWindow.fromTime, endMs: campaignKlineBaseWindow.toTime }),
+    [campaignKlineBaseWindow.fromTime, campaignKlineBaseWindow.toTime],
+  );
+  // 显示用周期只管盘面。自动挡直接派生，不走 state 往返：旧写法在 effect 里 setInterval，
+  // 「点预设」的那一帧窗口已经是 30 天、周期还停在 1m，先跑起来就是 43200 根 / 29 个串行请求。
+  // 没手动选过：【用户要求】默认 5 分钟线，视窗放不下（可读下限 / 拉取预算）时自动放宽到 15 分钟 / 1 小时。
+  // 手动选过：倍率视图原样照手动；绝对预设下只保证不比可读下限更细（见 pickCampaignDisplayInterval）。
+  // 批量导出里统一指定的周期是下限：只在所选倍数的视窗放不下或拉取过多时放宽（见 pickBatchExportInterval）；
+  // 「自动」与详情页首屏同一套选法。
   const batchInterval = batchExport?.options.interval;
-  const effectiveInterval = useMemo<Interval>(() => {
-    if (batchInterval && batchInterval !== 'auto') {
-      return pickBatchExportInterval(batchInterval, {
-        fetch: { startMs: campaignKlineTimeWindow.fromTime, endMs: campaignKlineTimeWindow.toTime },
-        visible: { startMs: campaignKlineVisibleRange.fromTime, endMs: campaignKlineVisibleRange.toTime },
-      });
-    }
-    if (!intervalTouched) return overviewInterval;
-    if (chartRangeSelection.kind !== 'absolute') return interval;
-    return pickCoarserCampaignInterval(interval, overviewInterval);
+  const displayInterval = useMemo<Interval>(() => {
+    const fetch = { startMs: campaignKlineTimeWindow.fromTime, endMs: campaignKlineTimeWindow.toTime };
+    const visible = { startMs: campaignKlineVisibleRange.fromTime, endMs: campaignKlineVisibleRange.toTime };
+    if (batchInterval && batchInterval !== 'auto') return pickBatchExportInterval(batchInterval, { fetch, visible });
+    return pickCampaignDisplayInterval({
+      manual: intervalTouched ? interval : null,
+      absolute: chartRangeSelection.kind === 'absolute',
+      fetch,
+      visible,
+    });
   }, [
-    chartRangeSelection, interval, intervalTouched, overviewInterval, batchInterval,
+    chartRangeSelection.kind, interval, intervalTouched, batchInterval,
     campaignKlineTimeWindow.fromTime, campaignKlineTimeWindow.toTime,
     campaignKlineVisibleRange.fromTime, campaignKlineVisibleRange.toTime,
   ]);
+  // 反事实盘面的显示周期：同一套规则，但按它自己的视窗（基准窗口 + 它自己的倍数）选——
+  // 原始盘面切到 51x 不该把反事实盘面 1.1x 的 5 分钟线也放宽成 15 分钟。手动选的周期两块盘面共用。
+  const counterfactualVisibleRange = useMemo(
+    () => buildCampaignKlineVisibleRange(campaignKlineBaseWindow, counterfactualViewMultiplier),
+    [campaignKlineBaseWindow, counterfactualViewMultiplier],
+  );
+  const counterfactualDisplayInterval = useMemo<Interval>(() => pickCampaignDisplayInterval({
+    manual: intervalTouched ? interval : null,
+    absolute: false,
+    fetch: { startMs: campaignKlineBaseWindow.fromTime, endMs: campaignKlineBaseWindow.toTime },
+    visible: { startMs: counterfactualVisibleRange.fromTime, endMs: counterfactualVisibleRange.toTime },
+  }), [
+    campaignKlineBaseWindow.fromTime, campaignKlineBaseWindow.toTime,
+    counterfactualVisibleRange.fromTime, counterfactualVisibleRange.toTime,
+    interval, intervalTouched,
+  ]);
+  // 点周期按钮（原始盘面工具栏与反事实盘面共用手动周期）。没手动选过时点的正是这块盘面当前自动选中的那个：
+  // 画面不变，也不算手动选择——否则会悄悄关掉「放不下时自动放宽」，之后切到 51x 就把几千根 5 分钟线挤进一张图。
+  const selectDisplayInterval = useCallback((item: Interval, shown: Interval) => {
+    if (!intervalTouched && item === shown) return;
+    setIntervalTouched(true);
+    setInterval(item);
+  }, [intervalTouched]);
 
+  const klineSymbol = campaign?.symbol ?? '';
+  const klineOpenedAt = campaign?.opened_at ?? new Date().toISOString();
+  // 计算用 K 线：拉取窗口 = 基准窗口（selection 传 null），与改动前默认打开时同一份请求。
+  const computeKlineSet = useCampaignKlines(
+    computeKlinesNeeded ? klineSymbol : '',
+    klineOpenedAt,
+    effectiveClosedAt,
+    computeInterval,
+    campaignKlineSpanStartMs,
+    campaignKlineSpanEndMs,
+    null,
+  );
+  // 盘面周期与计算周期相同、拉取窗口也相同（倍率视图）时只拉一次，直接用计算那一份；
+  // 不同时（换了周期、绝对预设撑开了窗口）才另拉。两块盘面要的另一份相同时也只拉一次。
+  const displaySharesComputeKlines = computeKlinesNeeded
+    && displayInterval === computeInterval
+    && campaignKlineTimeWindow.fromTime === campaignKlineBaseWindow.fromTime
+    && campaignKlineTimeWindow.toTime === campaignKlineBaseWindow.toTime;
+  const mainExtraKlineNeed: ExtraKlineNeed | null = displayKlinesNeeded && !displaySharesComputeKlines
+    ? {
+      key: `${displayInterval}|${campaignKlineTimeWindow.fromTime}|${campaignKlineTimeWindow.toTime}`,
+      interval: displayInterval,
+      selection: chartRangeSelection,
+    }
+    : null;
+  // 反事实盘面只在详情页里画（批量导出没有它），拉取窗口固定是基准窗口。
+  const counterfactualExtraKlineNeed: ExtraKlineNeed | null = !batchExport && counterfactualDisplayInterval !== computeInterval
+    ? {
+      key: `${counterfactualDisplayInterval}|${campaignKlineBaseWindow.fromTime}|${campaignKlineBaseWindow.toTime}`,
+      interval: counterfactualDisplayInterval,
+      selection: null,
+    }
+    : null;
+  const extraKlineSlotKeysRef = useRef<readonly [string | null, string | null]>([null, null]);
+  const extraKlineSlots = assignExtraKlineSlots(
+    [mainExtraKlineNeed, counterfactualExtraKlineNeed],
+    extraKlineSlotKeysRef.current,
+  );
+  const extraKlineSlotKeyA = extraKlineSlots[0]?.key ?? null;
+  const extraKlineSlotKeyB = extraKlineSlots[1]?.key ?? null;
+  useEffect(() => {
+    extraKlineSlotKeysRef.current = [extraKlineSlotKeyA, extraKlineSlotKeyB];
+  }, [extraKlineSlotKeyA, extraKlineSlotKeyB]);
+  const extraKlineSetA = useCampaignKlines(
+    extraKlineSlots[0] ? klineSymbol : '',
+    klineOpenedAt,
+    effectiveClosedAt,
+    extraKlineSlots[0]?.interval ?? computeInterval,
+    campaignKlineSpanStartMs,
+    campaignKlineSpanEndMs,
+    extraKlineSlots[0]?.selection ?? null,
+  );
+  const extraKlineSetB = useCampaignKlines(
+    extraKlineSlots[1] ? klineSymbol : '',
+    klineOpenedAt,
+    effectiveClosedAt,
+    extraKlineSlots[1]?.interval ?? computeInterval,
+    campaignKlineSpanStartMs,
+    campaignKlineSpanEndMs,
+    extraKlineSlots[1]?.selection ?? null,
+  );
+  const extraKlineSetFor = (need: ExtraKlineNeed) => (extraKlineSlotKeyA === need.key ? extraKlineSetA : extraKlineSetB);
+  const displayKlineSet = mainExtraKlineNeed ? extraKlineSetFor(mainExtraKlineNeed) : computeKlineSet;
+  const counterfactualKlineSet = counterfactualExtraKlineNeed ? extraKlineSetFor(counterfactualExtraKlineNeed) : computeKlineSet;
+  // 计算用：以下所有读数（accuracy、偏离代价、反事实副本与运行）只认这一份。
   const {
     klines,
     loading: klinesLoading,
     error: klinesError,
     reload: reloadKlines,
+  } = computeKlineSet;
+  // 显示用：只喂原始盘面、批量离屏盘面与盘面上的委托线右端（反事实盘面另见 counterfactualKlineSet）。
+  const {
+    klines: chartKlines,
+    loading: chartKlinesLoading,
+    error: chartKlinesError,
+    reload: reloadChartKlines,
     fromTime: campaignKlineFromTime,
     toTime: campaignKlineToTime,
-  } = useCampaignKlines(
-    batchNeedsKlines ? campaign?.symbol ?? '' : '',
-    campaign?.opened_at ?? new Date().toISOString(),
-    effectiveClosedAt,
-    effectiveInterval,
-    campaignKlineSpanStartMs,
-    campaignKlineSpanEndMs,
-    chartRangeSelection,
-  );
+  } = displayKlineSet;
 
   /**
    * 平仓价校正：内容没变就**保留原来那个对象**，依赖也只收到真正用到的 symbol。
@@ -1442,7 +1585,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     const pnlDrift = pnlSettlement && hasMaterialDrift(pnlSettlement) ? pnlSettlement.drift : null;
     // 12 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
     // 这里只负责把真实战役的各个 memo 收成一个纯数字对象。反事实面板走同一个构造器。
-    return buildCampaignPnlOverviewItems({
+    const items = buildCampaignPnlOverviewItems({
       realizedPnl: pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
       settlement: pnlSettlement
         ? { basis: pnlSettlement.basis, stored: pnlSettlement.stored, drift: pnlDrift }
@@ -1462,12 +1605,19 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });
+    // 峰值浮盈是这里唯一读 K 线的一项。计算用 K 线还在路上时它只是「至少取到已实现」的兜底值；
+    // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
+    if (!klinesLoading) return items;
+    return items.map(item => (item.key === 'peakUnrealizedPnl'
+      ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
+      : item));
   }, [
     accuracy,
     asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
     actualPriceChange,
+    klinesLoading,
     legs,
     mainSideNotional,
     pnlReconciliation,
@@ -1704,9 +1854,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const orderLayerToggleLabel = `${orderLayerToggleVerb}${orderLayerNames.length > 2 ? orderLayerNames.join('、') : orderLayerNames.join('与')}`;
   const orderInfoPriceLines = useMemo<TimeBoundPriceLine[]>(() => {
     if (!campaign) return [];
+    // 只决定进行中战役的委托线在盘面上画到哪一根：跟盘面上最后一根蜡烛走（显示用 K 线），不进任何读数。
     const fallbackEnd = campaign.closed_at
       ? new Date(campaign.closed_at).getTime()
-      : (klines.length > 0 ? klines[klines.length - 1].time : 0);
+      : (chartKlines.length > 0 ? chartKlines[chartKlines.length - 1].time : 0);
     return [
       ...buildCampaignReverseOrderPriceLines(visibleReverseHedgeOrders, tradeRecords, fallbackEnd),
       // 「是不是触发单开出的腿」按全部可显示的委托判，隐藏某张委托不会让它的腿冒充手动单。
@@ -1714,7 +1865,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       // 他场委托：灰色淡虚线，跟着同一个眼睛开关，但不是黄色层的一部分
       ...buildForeignReplayOrderPriceLines(visibleForeignLiveOrders, fallbackEnd),
     ];
-  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, tradeRecords, klines]);
+  }, [campaign, visibleReverseHedgeOrders, displayableReverseHedgeOrders, visibleForeignLiveOrders, visibleManualHedgeShortLegs, tradeRecords, chartKlines]);
   // 隐藏的委托、关掉的委托层都不再算选中——免得管理区里看不见的单子还挂着高亮。
   const activeSelectedReverseOrderSet = useMemo(() => {
     if (!showOrderInfo) return new Set<string>();
@@ -1970,13 +2121,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       toast.error('K 线尚未加载完成，暂时无法运行 What-if');
       return;
     }
-    // 模拟引擎会走完整个 klines 数组，并用最后一根收盘结算未平仓位。
-    // 绝对预设下这个数组是「1 天 / 1 周 / 1 月」的窗口，同一组参数会因为
-    // 当时恰好选了哪个预设而写出不同的 final_realized_pnl —— 这是会污染库里数据的静默错误。
-    if (chartRangeSelection.kind === 'absolute') {
-      toast.error('当前是绝对时间范围预设，请先切回倍率视图再运行 What-if');
-      return;
-    }
+    // 模拟引擎会走完整个 klines 数组，并用最后一根收盘结算未平仓位。这里的 klines 是计算用那一份：
+    // 拉取窗口固定是基准窗口、周期固定是自动周期，与盘面周期、倍数、绝对预设都无关——
+    // 从前它就是盘面那一份，绝对预设下同一组参数会写出不同的 final_realized_pnl，只好在预设下禁止运行；
+    // 分开之后这条限制不再需要。
     try {
       setWhatIfRunning(true);
       const runLegs = params.manual_legs ?? [];
@@ -2001,7 +2149,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           actual_resolved: actualResolved,
         },
         klines,
-        effectiveInterval,
+        computeInterval,
       );
       setCounterfactualDraft({ params: run.params, result: run.result });
       setCounterfactualDraftName(defaultCounterfactualName(changeSummary, run.params.run_context?.ran_at ?? ranAt));
@@ -2169,7 +2317,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         legExitPriceCorrections,
         unfilledOrderIds,
         chartElement: campaignChartExportRef.current,
-        chartInterval: effectiveInterval,
+        chartInterval: displayInterval,
         pnlOverview: {
           // rightColumn 要带上：导出图与页面一样按两栏从上往下排（左栏递进链、右栏结果与仓位）
           items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn }) => ({
@@ -2186,12 +2334,17 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         ...(batchExport ? {
           sections: batchExport.options.sections,
           exportedAt: batchExport.snapshot.exportedAt,
-          chartViewLabel: `${batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER} 倍视窗`,
+          chartViewLabel: `${initialViewMultiplier} 倍视窗`,
         } : {}),
       });
 
   const handleExportCampaignBoardPng = async () => {
     if (!campaign || legsExporting) return;
+    // 计算用 K 线没到之前，峰值浮盈只是「加载中…」：盘面可能已先画好，但不能把它导进图里
+    if (klinesLoading) {
+      toast.error('K 线尚未加载完成，稍后再导出');
+      return;
+    }
     try {
       setLegsExporting(true);
       const fileName = await exportCampaignBoardPng(buildBoardExportInput());
@@ -2275,35 +2428,39 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     const overviewSelected = batchExport.options.sections.overview !== false;
     // 接口正常、但交易所就是没有这段 K 线（新币上线前、已下架的老合约）：重试也不会有，不算失败。
     // 盘面位置改画说明；「峰值浮盈」缺了 K 线路径，与详情页一样只能按已实现盈亏兜底，说明里点明。
-    const klinesAbsent = batchNeedsKlines && !klinesLoading && !klinesError && klines.length === 0;
-    // 「峰值浮盈」那半句只在图里画了盈亏概览时才说：没画概览的图里读不到这一项。
-    const chartOmitted = chartSelected && klinesAbsent
-      ? `交易所没有这段时间的 ${campaign.symbol} K 线，盘面从略${overviewSelected ? '；「峰值浮盈」缺少 K 线路径，按已实现盈亏兜底' : ''}。`
+    // 盘面读显示用 K 线、盈亏概览读计算用 K 线（与详情页同一份）：两份各判各的「没有」。
+    const chartKlinesAbsent = chartSelected && !chartKlinesLoading && !chartKlinesError && chartKlines.length === 0;
+    const computeKlinesAbsent = overviewSelected && !klinesLoading && !klinesError && klines.length === 0;
+    // 「峰值浮盈」那半句只在图里画了盈亏概览、且计算用 K 线也没有时才说：没画概览的图里读不到这一项。
+    const chartOmitted = chartKlinesAbsent
+      ? `交易所没有这段时间的 ${campaign.symbol} K 线，盘面从略${computeKlinesAbsent ? '；「峰值浮盈」缺少 K 线路径，按已实现盈亏兜底' : ''}。`
       : null;
-    // 反过来，只画盈亏概览、没画盘面时，没有盘面位置可写：兜底说明写在盈亏概览下面，队列里同样标「无 K 线」。
-    const peakFallback = !chartSelected && overviewSelected && klinesAbsent
+    // 反过来，盘面照常画了（或没画盘面）而计算用 K 线没有：没有盘面位置可写，兜底说明写在盈亏概览下面，队列里同样标「无 K 线」。
+    const peakFallback = computeKlinesAbsent && !chartKlinesAbsent
       ? `交易所没有这段时间的 ${campaign.symbol} K 线：「峰值浮盈」缺少 K 线路径，按已实现盈亏兜底。`
       : null;
     const sampleNote = overviewSelected ? batchSampleNote : undefined;
+    const batchKlinesError = (overviewSelected && klinesError) || (chartSelected && chartKlinesError) || null;
     return <CampaignBatchBoardRenderer
       // 两句都以「。」收尾，直接相接（全角句号后不再加空格）
       input={buildBoardExportInput([peakFallback, sampleNote].filter(Boolean).join('') || undefined)}
       chartRef={campaignChartExportRef}
-      ready={!batchFailureRef.current && (!batchNeedsKlines || !klinesLoading) && !campaignPerformanceLoading && !campaignEmotionDiaryLoading
+      ready={!batchFailureRef.current && (!overviewSelected || !klinesLoading) && (!chartSelected || !chartKlinesLoading)
+        && !campaignPerformanceLoading && !campaignEmotionDiaryLoading
         && batchMetricsOwnerReady === campaign.user_id && batchDiaryReady === `${id}:${campaignOperationDate}`}
-      chartRequired={chartSelected && !klinesAbsent}
+      chartRequired={chartSelected && !chartKlinesAbsent}
       chartOmitted={chartOmitted}
       peakFallback={peakFallback}
       sampleNote={sampleNote}
-      chartInterval={effectiveInterval}
-      error={batchNeedsKlines && klinesError ? `K 线加载失败：${klinesError}` : null}
+      chartInterval={displayInterval}
+      error={batchKlinesError ? `K 线加载失败：${batchKlinesError}` : null}
       onComplete={batchExport.onComplete}
       onError={reportBatchError}
-    >{onReady => !klinesLoading && klines.length > 0 && !klinesError ? <ReplayKlineChart
-      key={`${campaign.id}:${effectiveInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
-      klines={klines}
+    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <ReplayKlineChart
+      key={`${campaign.id}:${displayInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
+      klines={chartKlines}
       currentTime={chartCurrentTime}
-      intervalMs={intervalToMs(effectiveInterval)}
+      intervalMs={intervalToMs(displayInterval)}
       symbol={campaign.symbol}
       markers={displayMarkers}
       timeBoundPriceLines={displayPriceLines}
@@ -2358,9 +2515,21 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             </div>
           </div>
           {displayStatus === 'active' && (
-            <Button className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 h-8" onClick={() => setEndOpen(true)}>
-              结束战役
-            </Button>
+            // 结束对话框会把峰值浮盈（accuracy）写库：计算用 K 线没到之前那是兜底值，先停用
+            // 停用的 Button 带 pointer-events-none，悬停落不到它身上：提示挂在外层 span 上才看得见
+            <span
+              data-testid="campaign-end-button-wrap"
+              className="inline-flex"
+              title={klinesLoading ? 'K 线加载中：峰值浮盈要按 K 线算，稍候再结束' : undefined}
+            >
+              <Button
+                className="bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 h-8"
+                disabled={klinesLoading}
+                onClick={() => setEndOpen(true)}
+              >
+                结束战役
+              </Button>
+            </span>
           )}
         </div>
       </header>
@@ -2529,84 +2698,96 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
         <section className="space-y-3">
           <div ref={campaignChartPanelRef} className="bg-card border border-border rounded p-2">
-            <div className="h-9 px-2 flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1">
-                {INTERVALS.map(item => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => {
-                      setIntervalTouched(true);
-                      setInterval(item);
-                    }}
-                    title={effectiveInterval !== item && intervalTouched && interval === item
-                      ? `当前绝对时间预设下已自动放粗到 ${effectiveInterval}，避免 K 线被压成 1 像素`
-                      : undefined}
-                    className={`h-6 px-2 rounded text-[10px] font-mono ${effectiveInterval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-              <div className="h-4 w-px bg-border/70" />
-              <div className="flex items-center gap-0.5" aria-label="K 线显示范围">
-                {CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map(multiplier => (
-                  <button
-                    key={multiplier}
-                    type="button"
-                    title={`显示 ${multiplier} 倍战役时间范围（约 ${formatCampaignSpanLabel(
-                      campaignMultiplierSpanMs(campaignKlineBaseWindow, multiplier),
-                    )}）`}
-                    aria-label={`显示 ${multiplier} 倍战役时间范围`}
-                    aria-pressed={chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier}
-                    onClick={() => {
-                      setFocusTime(null);
-                      setChartRangeSelection({ kind: 'multiplier', multiplier });
-                    }}
-                    className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
-                      chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier
-                        ? 'bg-foreground/85 text-background'
-                        : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
-                    }`}
-                  >
-                    {multiplier}x
-                  </button>
-                ))}
-                <div className="h-4 w-px bg-border/70 mx-1" />
-                {CAMPAIGN_ABSOLUTE_RANGE_PRESETS.map(preset => {
-                  /*
-                   * 绝对档一律可点。
-                   *
-                   * 曾按「比 51 倍还窄就置灰」处理，结果恰好在最该有它们的两头全锁死：
-                   * 67 秒的战役 51 倍已是 25.5 小时，「1天」一进来就是灰的；
-                   * 而超过 14 小时的战役三个档全灰，一排点不动的按钮读起来就是坏了。
-                   * 「正好一天」本身就是一种有意义的取景，不该因为另一个档更宽而禁用；
-                   * 比战役本身还窄的情形另有兜底（effectiveSpan 取 max，战役永远在画面内）。
-                   */
-                  const pressed = chartRangeSelection.kind === 'absolute' && chartRangeSelection.key === preset.key;
+            {/* 窄屏上一排放不下时折行、工具栏跟着长高：倍数档换成 2.1x / 3.1x 之后 390 宽正好多出 2px，不折行就顶出页面、压在盘面底下 */}
+            <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <div className="flex items-center gap-1" role="group" aria-label="盘面 K 线周期">
+                {INTERVALS.map(item => {
+                  // 选中态 = 盘面实际显示的周期（自动放宽、预设放粗之后的那个）
+                  const active = displayInterval === item;
                   return (
                     <button
-                      key={preset.key}
+                      key={item}
                       type="button"
-                      title={`以战役为中心显示 ${preset.label} K 线（不短于战役本身，右沿不超过现在）`}
-                      aria-label={`显示 ${preset.label} K 线范围`}
-                      aria-pressed={pressed}
+                      aria-pressed={active}
+                      onClick={() => selectDisplayInterval(item, displayInterval)}
+                      title={displayIntervalButtonTitle(item, {
+                        shown: displayInterval,
+                        touched: intervalTouched,
+                        manual: interval,
+                        visible: campaignKlineVisibleRange,
+                      })}
+                      className={`h-6 px-2 rounded text-[10px] font-mono ${active ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
+                    >
+                      {item}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="h-4 w-px bg-border/70 max-sm:hidden" />
+              {/* 窄屏两组折成两行时行首都贴左（列间距不会缩进折行后的行首）；仍在同一行时靠 gap-x-2 隔开 */}
+              <div className="flex flex-wrap items-center gap-x-0.5 max-sm:gap-x-2 gap-y-1" aria-label="K 线显示范围">
+                {/* 倍数一组、时间预设一组：窄屏折行时整组换行，不把「1天」与「1周 1月」拆到两行 */}
+                <div className="flex flex-wrap items-center gap-0.5 gap-y-1">
+                  {CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map(multiplier => (
+                    <button
+                      key={multiplier}
+                      type="button"
+                      title={`显示 ${multiplier} 倍战役时间范围（约 ${formatCampaignSpanLabel(
+                        campaignMultiplierSpanMs(campaignKlineBaseWindow, multiplier),
+                      )}）`}
+                      aria-label={`显示 ${multiplier} 倍战役时间范围`}
+                      aria-pressed={chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier}
                       onClick={() => {
                         setFocusTime(null);
-                        // nowMs 在点击这一刻取样并随选择冻结：放进 memo 里裸调 Date.now()
-                        // 会让 fromTime/toTime 每帧都变，等于无限重取 + 图表反复重挂。
-                        setChartRangeSelection({ kind: 'absolute', key: preset.key, nowMs: Date.now() });
+                        setChartRangeSelection({ kind: 'multiplier', multiplier });
                       }}
-                      className={`h-5 min-w-7 rounded px-1 text-[9px] font-mono transition-colors ${
-                        pressed
+                      className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
+                        chartRangeSelection.kind === 'multiplier' && chartRangeSelection.multiplier === multiplier
                           ? 'bg-foreground/85 text-background'
                           : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
                       }`}
                     >
-                      {preset.label}
+                      {multiplier}x
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+                <div className="h-4 w-px bg-border/70 mx-1 max-sm:hidden" />
+                <div className="flex items-center gap-0.5">
+                  {CAMPAIGN_ABSOLUTE_RANGE_PRESETS.map(preset => {
+                    /*
+                     * 绝对档一律可点。
+                     *
+                     * 曾按「比 51 倍还窄就置灰」处理，结果恰好在最该有它们的两头全锁死：
+                     * 67 秒的战役 51 倍已是 25.5 小时，「1天」一进来就是灰的；
+                     * 而超过 14 小时的战役三个档全灰，一排点不动的按钮读起来就是坏了。
+                     * 「正好一天」本身就是一种有意义的取景，不该因为另一个档更宽而禁用；
+                     * 比战役本身还窄的情形另有兜底（effectiveSpan 取 max，战役永远在画面内）。
+                     */
+                    const pressed = chartRangeSelection.kind === 'absolute' && chartRangeSelection.key === preset.key;
+                    return (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        title={`以战役为中心显示 ${preset.label} K 线（不短于战役本身，右沿不超过现在）`}
+                        aria-label={`显示 ${preset.label} K 线范围`}
+                        aria-pressed={pressed}
+                        onClick={() => {
+                          setFocusTime(null);
+                          // nowMs 在点击这一刻取样并随选择冻结：放进 memo 里裸调 Date.now()
+                          // 会让 fromTime/toTime 每帧都变，等于无限重取 + 图表反复重挂。
+                          setChartRangeSelection({ kind: 'absolute', key: preset.key, nowMs: Date.now() });
+                        }}
+                        className={`h-5 min-w-7 rounded px-1 text-[9px] font-mono transition-colors ${
+                          pressed
+                            ? 'bg-foreground/85 text-background'
+                            : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               {campaignKlineBaseWindow.contentStartMs != null
                 && campaignKlineBaseWindow.contentEndMs != null
@@ -2626,22 +2807,22 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               className="border border-border rounded overflow-hidden"
               style={{ height: campaignChartFitHeight ?? 480 }}
             >
-              {klinesLoading ? (
+              {chartKlinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
-              ) : klinesError ? (
+              ) : chartKlinesError ? (
                 <div className="h-full flex flex-col items-center justify-center gap-2 text-[12px] text-[#F6465D]">
-                  <div>K 线加载失败：{klinesError}</div>
+                  <div>K 线加载失败：{chartKlinesError}</div>
                   <div className="text-[11px] text-muted-foreground">可能是网络或交易所接口限制，并非战役数据本身的问题。</div>
-                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={reloadKlines}>重试</Button>
+                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={reloadChartKlines}>重试</Button>
                 </div>
-              ) : klines.length === 0 ? (
+              ) : chartKlines.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">该时间段暂无 K 线数据</div>
               ) : (
                 <ReplayKlineChart
-                  key={`${campaign.id}:${effectiveInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
-                  klines={klines}
+                  key={`${campaign.id}:${displayInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
+                  klines={chartKlines}
                   currentTime={chartCurrentTime}
-                  intervalMs={intervalToMs(effectiveInterval)}
+                  intervalMs={intervalToMs(displayInterval)}
                   symbol={campaign.symbol}
                   markers={displayMarkers}
                   timeBoundPriceLines={displayPriceLines}
@@ -2656,6 +2837,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 />
               )}
             </div>
+            {/* 盘面与计算各拉一份时，计算那份失败盘面上看不出来：单独说一句，读数按已实现盈亏兜底 */}
+            {!displaySharesComputeKlines && klinesError && (
+              <div data-testid="campaign-compute-klines-error" className="mt-2 px-1 flex flex-wrap items-center gap-2 text-[11px] text-[#F6465D]">
+                <span>峰值浮盈等读数所用的 {computeInterval} K 线加载失败：{klinesError}（暂按已实现盈亏兜底）</span>
+                <button type="button" onClick={reloadKlines} className="underline underline-offset-2 hover:text-foreground">重试</button>
+              </div>
+            )}
             {(hasYellowOrderLayer || hasForeignLiveOrders) && (
               <div className="mt-2 px-1 space-y-1.5">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -2814,18 +3002,25 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                   评价 TXT
                 </Button>
               )}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={legsExporting || legs.length === 0}
-                onClick={handleExportCampaignBoardPng}
-                className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
-                title="保存战役原数据、盈亏概览、当前 K 线盘面与完整 Legs 列表为高清 PNG"
+              {/* 提示挂在外层 span：停用的 Button 收不到悬停 */}
+              <span
+                className="inline-flex"
+                title={klinesLoading
+                  ? 'K 线加载中：导出图里的峰值浮盈要按 K 线算，稍候再导出'
+                  : '保存战役原数据、盈亏概览、当前 K 线盘面与完整 Legs 列表为高清 PNG'}
               >
-                <Download className="h-3.5 w-3.5" />
-                {legsExporting ? '生成中' : 'PNG'}
-              </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={legsExporting || legs.length === 0 || klinesLoading}
+                  onClick={handleExportCampaignBoardPng}
+                  className="h-7 gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {legsExporting ? '生成中' : 'PNG'}
+                </Button>
+              </span>
             </div>
           </div>
           <CampaignLegsList
@@ -2873,14 +3068,25 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             legExitPriceCorrections={legExitPriceCorrections}
             localOrders={localOrderFacts}
             reverseHedgeOrders={reverseHedgeOrders}
+            // 副本基线、拖线取价、一键运行读计算用 K 线；反事实盘面按它自己的视窗选周期、画它那一份
+            // （手动周期与原始盘面共用；与计算或原始盘面同一份时不另拉）
             klines={klines}
             klinesLoading={klinesLoading}
-            interval={effectiveInterval}
+            chartKlines={counterfactualKlineSet.klines}
+            chartKlinesLoading={counterfactualKlineSet.loading}
+            chartKlinesError={counterfactualKlineSet.error}
+            onRetryChartKlines={counterfactualKlineSet.reload}
+            interval={counterfactualDisplayInterval}
+            intervalHint={item => displayIntervalButtonTitle(item as Interval, {
+              shown: counterfactualDisplayInterval,
+              touched: intervalTouched,
+              manual: interval,
+              visible: counterfactualVisibleRange,
+            })}
             intervalOptions={INTERVALS}
-            onIntervalChange={(nextInterval) => {
-              setIntervalTouched(true);
-              setInterval(nextInterval as Interval);
-            }}
+            onIntervalChange={(nextInterval) => selectDisplayInterval(nextInterval as Interval, counterfactualDisplayInterval)}
+            viewMultiplier={counterfactualViewMultiplier}
+            onViewMultiplierChange={setCounterfactualViewMultiplier}
             klineTimeWindow={campaignKlineBaseWindow}
             timezone={LOCAL_TIME_ZONE}
             whatIfRunning={whatIfRunning}

@@ -18,11 +18,13 @@ describe('指南：批量下载图片', () => {
   const selection = read('lib/campaignBatchSelection.ts');
 
   it('【用户要求】盘面视窗倍数可选、默认 1.1 倍，与详情页倍数按钮同一组', () => {
-    expect(section).toContain('<strong>盘面视窗</strong>可选 1.1x、2x、3x、5x、11x、21x、31x、41x、51x');
+    expect(section).toContain('<strong>盘面视窗</strong>可选 1.1x、2.1x、3.1x、5x、11x、21x、31x、41x、51x');
     expect(section).toContain('<strong>默认 1.1 倍</strong>');
     expect(section).not.toContain('盘面取完整战役及前后上下文');
+    expect(section).not.toContain('三倍视窗');
     expect(dialog).toContain('CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS.map');
-    expect(detail).toContain('batchExport.options.viewMultiplier ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER');
+    // 旧档 2 / 3 读成 2.1 / 3.1
+    expect(detail).toContain('normalizeCampaignViewMultiplier(batchExport.options.viewMultiplier) ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER');
   });
 
   it('这一节存在，入口写的是排序行最右端的「批量下载」', () => {
@@ -127,9 +129,10 @@ describe('指南：批量下载图片', () => {
     expect(section).toContain('不算失败');
     expect(section).toContain('无 K 线');
     expect(detail).toContain('交易所没有这段时间的');
-    // 只画盈亏概览、没画盘面时，峰值浮盈兜底写在盈亏概览下，队列同样标「无 K 线」
+    // 只画盈亏概览、没画盘面时，峰值浮盈兜底写在盈亏概览下，队列同样标「无 K 线」；
+    // 盘面读显示用 K 线、概览读计算用 K 线，两份各判各的「没有」
     expect(section).toContain('这句写在「盈亏概览」下面');
-    expect(detail).toContain('const peakFallback = !chartSelected && overviewSelected && klinesAbsent');
+    expect(detail).toContain('const peakFallback = computeKlinesAbsent && !chartKlinesAbsent');
     expect(dialog).toContain('峰值浮盈按已实现盈亏兜底');
   });
 
@@ -137,5 +140,22 @@ describe('指南：批量下载图片', () => {
     expect(dialog).toContain('详情页里已保存的反事实分支撑宽的视窗不计入');
     expect(section).toContain('不计入分支');
     expect(detail).not.toContain('该战役时间段暂无 K 线数据，无法保证完整导出');
+  });
+
+  it('【用户已定】周期只管盘面：盈亏概览按与详情页同一份自动周期的 K 线算，没画盘面时周期停用', () => {
+    expect(section).toContain('<strong>周期只管盘面</strong>');
+    expect(section).toContain('读数与详情页逐位一致');
+    // 例外写明：详情页选中的反事实分支越出 Legs 跨度时会撑宽详情页算读数的那份 K 线，批量不读分支
+    expect(section).toContain('详情页选中的反事实分支越出 Legs 的时间跨度时除外');
+    expect(section).toContain('在详情页取消选中该分支后两边一致');
+    expect(section).toContain('没画 K 线盘面时周期不起作用');
+    // 放宽既可能是视窗放不下，也可能是 51 倍拉取超过 6000 根：两种原因都要说到
+    expect(section).toContain('默认 5 分钟线，某场的视窗或拉取量放不下时自动放宽');
+    expect(dialog).toContain("hint: '默认 5 分钟线，视窗或拉取量放不下时自动放宽");
+    expect(section).not.toContain('某场的盘面放不下时自动放宽');
+    expect(read('lib/campaignLegsPngExport.ts')).toContain('return sections?.chart !== false;');
+    expect(dialog).toContain('未画 K 线盘面，不用周期');
+    // 批量里盈亏概览读计算用 K 线，只在画概览时才拉
+    expect(detail).toContain("const computeKlinesNeeded = !batchExport || batchExport.options.sections.overview !== false;");
   });
 });

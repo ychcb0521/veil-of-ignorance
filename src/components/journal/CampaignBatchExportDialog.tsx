@@ -53,7 +53,7 @@ const SECTIONS = [
   { key: 'legs', label: '完整 Legs 列表' },
 ] as const;
 const INTERVALS: Array<{ value: Options['interval']; label: string; hint: string }> = [
-  { value: 'auto', label: '自动', hint: '按每场战役自身的时长各自选周期（与详情页首屏同一套选法；详情页里已保存的反事实分支撑宽的视窗不计入）' },
+  { value: 'auto', label: '自动', hint: '默认 5 分钟线，视窗或拉取量放不下时自动放宽（与详情页首屏同一套选法；详情页里已保存的反事实分支撑宽的视窗不计入）' },
   { value: '1m', label: '1分钟', hint: '统一用 1 分钟线；某场战役的盘面放不下这么多根时自动放宽，队列里标出实际周期' },
   { value: '5m', label: '5分钟', hint: '统一用 5 分钟线；某场战役的盘面放不下这么多根时自动放宽，队列里标出实际周期' },
   { value: '15m', label: '15分钟', hint: '统一用 15 分钟线；某场战役的盘面放不下这么多根时自动放宽，队列里标出实际周期' },
@@ -118,7 +118,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const activeId = run?.status === 'running' ? run.queue[run.index] : undefined;
   const anySection = SECTIONS.some(({ key }) => sections[key]);
-  /** K 线盘面与盈亏概览都不画时，周期既不进图、也不拉 K 线：周期单选调暗停用。 */
+  /** 没画 K 线盘面时周期不进图（盈亏概览按与详情页同一份自动周期的 K 线算，不随这里的周期变）：周期单选调暗停用。 */
   const intervalMatters = boardUsesChartInterval(sections);
   const chartDrawn = sections.chart !== false;
 
@@ -385,7 +385,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
                   K 线周期
                   {!intervalMatters && (
                     <span data-testid="campaign-batch-interval-unused" className="ml-2 font-normal text-muted-foreground/70">
-                      未画 K 线盘面与盈亏概览，不用周期
+                      未画 K 线盘面，不用周期
                     </span>
                   )}
                 </legend>
@@ -414,7 +414,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
                     ))}
                   </div>
                   <p className="mt-2 text-[10px] leading-[1.7] text-muted-foreground/75">
-                    指定周期是下限：某场战役的盘面放不下那么多根时自动放宽，队列里标出实际周期。交易所没有 K 线的战役照常导出，图里写明原因。
+                    只管盘面：指定周期是下限，某场战役的盘面放不下那么多根时自动放宽，队列里标出实际周期；盈亏概览与详情页一样按自动周期的 K 线计算，不随这里变。交易所没有 K 线的战役照常导出，图里写明原因。
                   </p>
                 </div>
               </fieldset>
@@ -496,7 +496,7 @@ export function CampaignBatchExportDialog({ campaigns, userId, currentAccountEqu
                 {SECTIONS.filter(({ key }) => run.options.sections[key] !== false).map(({ key, label }, index) => (
                   <Fragment key={key}>{index ? ' · ' : ''}<span className="whitespace-nowrap">{label}</span></Fragment>
                 ))}
-                {/* 与图里一致：K 线盘面与盈亏概览都没画时，图里不写周期，这里也不写 */}
+                {/* 与图里一致：没画 K 线盘面时，图里不写周期，这里也不写 */}
                 {boardUsesChartInterval(run.options.sections) && (
                   <>
                     <span className="max-sm:hidden">{' ｜ '}</span><br className="sm:hidden" />

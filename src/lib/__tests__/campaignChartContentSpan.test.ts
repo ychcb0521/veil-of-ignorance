@@ -299,10 +299,16 @@ describe('buildCampaignKlineTimeWindow', () => {
       fromTime: t('2026-01-02T00:24:00.000Z'),
       toTime: t('2026-01-02T02:36:00.000Z'),
     });
-    expect(buildCampaignKlineVisibleRange(window, 2)).toEqual({
-      fromTime: t('2026-01-01T23:30:00.000Z'),
-      toTime: t('2026-01-02T03:30:00.000Z'),
+    // 【用户要求】档位改成 2.1 / 3.1：2.1 倍左右各 0.55 倍、3.1 倍左右各 1.05 倍
+    expect(buildCampaignKlineVisibleRange(window, 2.1)).toEqual({
+      fromTime: t('2026-01-01T23:24:00.000Z'),
+      toTime: t('2026-01-02T03:36:00.000Z'),
     });
+    expect(buildCampaignKlineVisibleRange(window, 3.1)).toEqual({
+      fromTime: t('2026-01-01T22:24:00.000Z'),
+      toTime: t('2026-01-02T04:36:00.000Z'),
+    });
+    // 3 倍已不是界面档位，但几何基准不变：恰好是 defaultFrom/To
     expect(buildCampaignKlineVisibleRange(window, 3)).toEqual({
       fromTime: window.defaultFromTime,
       toTime: window.defaultToTime,

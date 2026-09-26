@@ -1364,12 +1364,13 @@ export type CampaignBoardOverview = {
 };
 
 /**
- * 图里画不画 K 线周期：只有 K 线盘面（含「无 K 线」说明）与盈亏概览（峰值浮盈按这一周期的 K 线路径算）用得到它。
- * 两块都没勾的图里写「周期 5分钟线」只会让人以为图里有盘面。不传 sections（详情页单张导出）时照旧写。
+ * 图里画不画 K 线周期：只有 K 线盘面（含「无 K 线」说明）用得到它。
+ * 【用户已定】计算与显示分开：盈亏概览（峰值浮盈）按与详情页同一份自动周期的 K 线算，不随这里的周期变，
+ * 所以没画盘面的图里写「周期 5分钟线」只会让人以为概览是按它算的。不传 sections（详情页单张导出）时照旧写。
  * 批量下载弹窗用同一个判断决定周期单选可不可用、进度区写不写周期。
  */
 export function boardUsesChartInterval(sections: CampaignBoardExportSections | undefined): boolean {
-  return sections?.chart !== false || sections?.overview !== false;
+  return sections?.chart !== false;
 }
 
 /** 导出图顶部两块摘要的唯一数据源，避免页面字段演进时漏掉战役原数据或盈亏信息。 */

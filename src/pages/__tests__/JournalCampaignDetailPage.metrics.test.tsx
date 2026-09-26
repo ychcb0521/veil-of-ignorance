@@ -289,7 +289,7 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
-  it('defaults to 3x and jumps to the selected centered K-line range', async () => {
+  it('【用户要求】defaults to 2.1x and jumps to the selected centered K-line range', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
         <Routes>
@@ -298,14 +298,19 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    const button3x = await screen.findByRole('button', { name: '显示 3 倍战役时间范围' });
-    expect(button3x).toHaveAttribute('aria-pressed', 'true');
-    for (const multiplier of [1.1, 2, 3, 5, 11, 21, 31, 41, 51]) {
+    const button21x = await screen.findByRole('button', { name: '显示 2.1 倍战役时间范围' });
+    expect(button21x).toHaveAttribute('aria-pressed', 'true');
+    expect(button21x).toHaveTextContent('2.1x');
+    for (const multiplier of [1.1, 2.1, 3.1, 5, 11, 21, 31, 41, 51]) {
       expect(screen.getByRole('button', { name: `显示 ${multiplier} 倍战役时间范围` })).toBeInTheDocument();
     }
+    for (const legacy of [2, 3]) {
+      expect(screen.queryByRole('button', { name: `显示 ${legacy} 倍战役时间范围` })).not.toBeInTheDocument();
+    }
+    // 上下文单位 40 分钟：2.1 倍 = 左右各 22 分钟
     await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({
-      start: Date.parse('2025-12-31T23:30:00.000Z'),
-      end: Date.parse('2026-01-01T01:30:00.000Z'),
+      start: Date.parse('2025-12-31T23:48:00.000Z'),
+      end: Date.parse('2026-01-01T01:12:00.000Z'),
     }));
 
     fireEvent.click(screen.getByRole('button', { name: '显示 51 倍战役时间范围' }));
@@ -491,7 +496,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
     const exportInput = exportCampaignBoardPngMock.mock.calls[0][0];
     expect(exportInput.accountName).toBe('主账户');
-    expect(exportInput.chartInterval).toBe('1m');
+    // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
+    expect(exportInput.chartInterval).toBe('5m');
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
       '预期回撤',

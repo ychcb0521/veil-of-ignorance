@@ -143,16 +143,18 @@ describe('批量下载队列', () => {
     expect(unbroken).toEqual(['不对称风险贡献按其余 23 场计算。', '图中「盈亏概览」下已注明。']);
   });
 
-  it('【用户要求】盘面视窗可选 1.1x / 2x / 3x …，默认 1.1 倍；所选倍数交给离屏详情页，进度区写明', () => {
+  it('【用户要求】盘面视窗可选 1.1x / 2.1x / 3.1x …，默认 1.1 倍；所选倍数交给离屏详情页，进度区写明', () => {
     render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
     const group = screen.getByTestId('campaign-batch-view-multiplier');
     const options = within(group).getAllByRole('radio').map(input => (input as HTMLInputElement).value);
-    expect(options).toEqual(['1.1', '2', '3', '5', '11', '21', '31', '41', '51']);
+    expect(options).toEqual(['1.1', '2.1', '3.1', '5', '11', '21', '31', '41', '51']);
     expect(within(group).getByRole('radio', { name: '1.1x' })).toBeChecked();
-    fireEvent.click(within(group).getByRole('radio', { name: '3x' }));
+    expect(within(group).queryByRole('radio', { name: '2x' })).not.toBeInTheDocument();
+    expect(within(group).queryByRole('radio', { name: '3x' })).not.toBeInTheDocument();
+    fireEvent.click(within(group).getByRole('radio', { name: '3.1x' }));
     start();
-    expect(latestWorker().options.viewMultiplier).toBe(3);
-    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('3x 视窗');
+    expect(latestWorker().options.viewMultiplier).toBe(3.1);
+    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('3.1x 视窗');
   });
 
   it('没画 K 线盘面时视窗单选停用、说明原因，进度区不写视窗；默认倍数照样是 1.1', () => {
@@ -167,18 +169,18 @@ describe('批量下载队列', () => {
     expect(screen.getByTestId('campaign-batch-progress')).not.toHaveTextContent('视窗');
   });
 
-  it('K 线盘面与盈亏概览都不画时，周期单选调暗停用并说明原因，进度区也不写周期', () => {
+  it('【用户已定】周期只管盘面：没画 K 线盘面时周期单选调暗停用并说明原因，进度区也不写周期', () => {
     render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
     const group = screen.getByTestId('campaign-batch-interval');
     expect(group).not.toBeDisabled();
     expect(screen.queryByTestId('campaign-batch-interval-unused')).not.toBeInTheDocument();
+    // 盈亏概览（峰值浮盈）按与详情页同一份自动周期的 K 线算，不随这里的周期变：去掉盘面，周期就用不上了
     fireEvent.click(screen.getByLabelText('K 线盘面'));
-    // 只去掉盘面：盈亏概览的峰值浮盈仍按周期的 K 线路径算，周期照常可选
-    expect(group).not.toBeDisabled();
-    fireEvent.click(screen.getByLabelText('盈亏概览'));
     expect(group).toBeDisabled();
     expect(screen.getByRole('radio', { name: '5分钟' })).toBeDisabled();
-    expect(screen.getByTestId('campaign-batch-interval-unused')).toHaveTextContent('未画 K 线盘面与盈亏概览，不用周期');
+    expect(screen.getByTestId('campaign-batch-interval-unused')).toHaveTextContent('未画 K 线盘面，不用周期');
+    fireEvent.click(screen.getByLabelText('盈亏概览'));
+    expect(group).toBeDisabled();
     start();
     const progress = screen.getByTestId('campaign-batch-progress');
     expect(progress).toHaveTextContent('战役原数据 · 操作日情绪日记 · 完整 Legs 列表');
@@ -186,9 +188,14 @@ describe('批量下载队列', () => {
     expect(progress).not.toHaveTextContent('｜');
   });
 
-  it('画了盈亏概览（没画盘面）时进度区照常写周期', () => {
-    render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
+  it('画了盈亏概览、没画盘面时进度区不写周期（概览不随周期变）；画了盘面照常写', () => {
+    const first = render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
     fireEvent.click(screen.getByLabelText('K 线盘面'));
+    start();
+    expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('盈亏概览');
+    expect(screen.getByTestId('campaign-batch-progress')).not.toHaveTextContent('周期');
+    first.unmount();
+    render(<CampaignBatchExportDialog campaigns={campaigns} userId="u" currentAccountEquity={100} onClose={vi.fn()} />);
     fireEvent.click(screen.getByRole('radio', { name: '15分钟' }));
     start();
     expect(screen.getByTestId('campaign-batch-progress')).toHaveTextContent('周期 15分钟');

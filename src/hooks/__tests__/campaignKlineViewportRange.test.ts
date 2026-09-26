@@ -65,7 +65,11 @@ const spanOf = (range: { fromTime: number; toTime: number }) => ({
   endMs: range.toTime,
 });
 
-/** 复刻详情页的自动周期规则：拉取项 6000 根永远生效，可见项 1200 根只在绝对预设下再收紧一次。 */
+/**
+ * 复刻改版前详情页「没手动改周期」时的自动周期：拉取项 6000 根永远生效，可见项 1200 根只在绝对预设下再收紧一次。
+ * 改版后它按 isAbsolute = false 的那一支原样成了「计算用周期」（pickCampaignComputeInterval，只看基准窗口）；
+ * 盘面显示周期另有规则（默认 5 分钟线、按可见根数放宽），见 campaignDisplayInterval.test.ts。
+ */
 function autoInterval(
   window: CampaignKlineTimeWindow,
   visible: { fromTime: number; toTime: number },
@@ -110,18 +114,18 @@ describe('战役 K 线视野：短战役（QUICKUSDT 型，内容跨度 67 秒�
     expect(minutes(fetchedMs)).toBeCloseTo(1530, 6);
     expect(hours(fetchedMs)).toBeCloseTo(25.5, 6);
 
-    // 默认 3 倍窗口 = 90 分钟（改造前 3.35 分钟）。
+    // 3 倍几何基准窗口 = 90 分钟（改造前 3.35 分钟）。
     const defaultMs = window.defaultToTime - window.defaultFromTime;
     expect(minutes(defaultMs)).toBeCloseTo(90, 6);
   });
 
-  it('1.1x…51x 全档位可见跨度 = 倍数 × 30 分钟，默认 3 倍已有 18 根 5m', () => {
+  it('1.1x…51x 全档位可见跨度 = 倍数 × 30 分钟，默认 2.1 倍已有 12.6 根 5m', () => {
     const table = viewportTable(window);
 
     expect(table.map(row => Number(row.visibleMinutes.toFixed(4)))).toEqual([
       33, //    1.1x（改造前 1.2283，不足一根 5m）
-      60, //    2x
-      90, //    3x（默认；改造前 3.35）
+      63, //    2.1x（默认）
+      93, //    3.1x
       150, //   5x
       330, //   11x
       630, //   21x
@@ -135,10 +139,10 @@ describe('战役 K 线视野：短战役（QUICKUSDT 型，内容跨度 67 秒�
       expect(row.visibleMs).toBeCloseTo(row.multiplier * CAMPAIGN_MIN_CONTEXT_MS, 6);
     }
 
-    // 默认 3 倍：18 根 5m，越过“至少 12 根才能读出结构”的门槛。
-    const defaultRow = rowAt(table, 3);
-    expect(defaultRow.candles5m).toBeCloseTo(18, 6);
-    expect(defaultRow.candles1m).toBeCloseTo(90, 6);
+    // 默认 2.1 倍：12.6 根 5m，仍越过“至少 12 根才能读出结构”的门槛。
+    const defaultRow = rowAt(table, 2.1);
+    expect(defaultRow.candles5m).toBeCloseTo(12.6, 6);
+    expect(defaultRow.candles1m).toBeCloseTo(63, 6);
     // 最紧的 1.1 倍也有 6.6 根 5m，不会再退化成“不足一根 K 线”。
     expect(rowAt(table, 1.1).candles5m).toBeCloseTo(6.6, 6);
 
@@ -157,7 +161,7 @@ describe('战役 K 线视野：短战役（QUICKUSDT 型，内容跨度 67 秒�
 
   it('自动周期：被抬高的短战役仍然停在 1m，不会因为修 bug 反而被降级', () => {
     // 51 × 30 分钟 = 1530 根 1m，远没吃满 6000 根拉取预算。
-    expect(autoInterval(window, buildCampaignKlineVisibleRange(window, 3), false)).toBe('1m');
+    expect(autoInterval(window, buildCampaignKlineVisibleRange(window, 2.1), false)).toBe('1m');
     expect(autoInterval(window, buildCampaignKlineVisibleRange(window, 51), false)).toBe('1m');
   });
 
@@ -199,13 +203,13 @@ describe('战役 K 线视野：长战役（XLMUSDT 型，内容跨度 3h35m）�
     expect(days(fetchedMs)).toBeCloseTo(7.6146, 4);
   });
 
-  it('1.1x…51x 全档位可见跨度表：顶格 ≈7.61 天，默认 3 倍 = 10h45m（与改造前逐行相同）', () => {
+  it('1.1x…51x 全档位可见跨度表：顶格 ≈7.61 天，默认 2.1 倍 = 7h31.5m', () => {
     const table = viewportTable(window);
 
     expect(table.map(row => Number(row.visibleMinutes.toFixed(2)))).toEqual([
       236.5, //   1.1x
-      430, //     2x
-      645, //     3x（默认）
+      451.5, //   2.1x（默认）
+      666.5, //   3.1x
       1075, //    5x
       2365, //    11x
       4515, //    21x
@@ -214,25 +218,25 @@ describe('战役 K 线视野：长战役（XLMUSDT 型，内容跨度 3h35m）�
       10965, //   51x（顶格，等于已拉取窗口）
     ]);
 
-    const defaultRow = rowAt(table, 3);
-    expect(defaultRow.visibleMs).toBe(38_700_000);
-    expect(hours(defaultRow.visibleMs)).toBeCloseTo(10.75, 4); // 10h45m
-    expect(defaultRow.candles1m).toBeCloseTo(645, 4);
-    expect(defaultRow.candles5m).toBeCloseTo(129, 4);
+    const defaultRow = rowAt(table, 2.1);
+    expect(defaultRow.visibleMs).toBe(27_090_000);
+    expect(hours(defaultRow.visibleMs)).toBeCloseTo(7.525, 4); // 7h31.5m
+    expect(defaultRow.candles1m).toBeCloseTo(451.5, 4);
+    expect(defaultRow.candles5m).toBeCloseTo(90.3, 4);
 
     const maxRow = rowAt(table, 51);
     expect(days(maxRow.visibleMs)).toBeCloseTo(7.6146, 4);
     expect(maxRow.candles1m).toBeCloseTo(10_965, 4);
     expect(maxRow.candles5m).toBeCloseTo(2_193, 4);
 
-    // 内容跨度 >= 下限时，虚拟取景区间恒等于内容区间，3 倍就是 defaultFrom/To。
+    // 内容跨度 >= 下限时，虚拟取景区间恒等于内容区间，3 倍几何基准就是 defaultFrom/To（3 倍已不是界面档位，几何不变）。
     expect(buildCampaignKlineVisibleRange(window, 3)).toEqual({
       fromTime: window.defaultFromTime,
       toTime: window.defaultToTime,
     });
   });
 
-  it('自动周期：全部九个倍率都给 5m，一个字不动（拉取窗口 = 657_900_000ms）', () => {
+  it('计算用周期：全部九个倍率都给 5m，一个字不动（拉取窗口 = 657_900_000ms）', () => {
     expect(pickCampaignOverviewInterval(spanOf(window), 6_000)).toBe('5m');
     for (const multiplier of CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS) {
       expect(autoInterval(window, buildCampaignKlineVisibleRange(window, multiplier), false)).toBe('5m');
@@ -246,10 +250,11 @@ describe('战役 K 线视野：内容跨度 2 小时的老战役，倍率不得�
   const contentEndMs = t('2026-01-02T02:30:00.000Z');
   const window = buildCampaignKlineTimeWindow(contentStartMs, contentEndMs, contentStartMs, contentEndMs);
 
-  it('九个倍率的自动周期全部是 5m：可见项预算绝不允许泄漏到倍率路径', () => {
+  it('九个倍率的计算用周期全部是 5m：可见项预算绝不允许泄漏到计算路径', () => {
     expect(window.contextMs).toBe(2 * HOUR_MS);
     expect(pickCampaignOverviewInterval(spanOf(window), 6_000)).toBe('5m');
-    // 若把 1200 根的可见项也套到倍率上，51 倍会变成 15m —— 已保存的反事实会因此换一套粒度。
+    // 若把 1200 根的可见项也套到计算用周期上，51 倍会变成 15m —— 已保存的反事实会因此换一套粒度。
+    // （盘面显示周期允许按可见根数放宽，它不进任何计算；见 campaignDisplayInterval.test.ts。）
     expect(pickCampaignOverviewInterval(spanOf(buildCampaignKlineVisibleRange(window, 51)), 1_200)).toBe('15m');
     for (const multiplier of CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS) {
       expect(autoInterval(window, buildCampaignKlineVisibleRange(window, multiplier), false)).toBe('5m');
@@ -399,8 +404,8 @@ describe('战役 K 线视野：退化区间与无区间兜底', () => {
 
       expect(table.map(row => Number(row.visibleMinutes.toFixed(4)))).toEqual([
         33, //    1.1x（改造前 1.5）
-        60, //    2x（改造前 15）
-        90, //    3x（改造前 30）
+        63, //    2.1x（默认）
+        93, //    3.1x
         150, //   5x
         330, //   11x
         630, //   21x
@@ -436,10 +441,10 @@ describe('战役 K 线视野：退化区间与无区间兜底', () => {
       expect(hours(window.toTime - window.fromTime)).toBeCloseTo(10, 6);
     });
 
-    it('倍率从 5x 起就被夹死在 10 小时，但绝对预设在这条路径上照样可用', () => {
+    it('倍率从 3.1x 起就被夹死在 10 小时，但绝对预设在这条路径上照样可用', () => {
       const table = viewportTable(window);
       expect(table.map(row => Number(row.visibleMinutes.toFixed(4)))).toEqual([
-        220, 400, 600, 600, 600, 600, 600, 600, 600,
+        220, 420, 600, 600, 600, 600, 600, 600, 600,
       ]);
 
       const nowMs = t('2026-06-01T00:00:00.000Z');

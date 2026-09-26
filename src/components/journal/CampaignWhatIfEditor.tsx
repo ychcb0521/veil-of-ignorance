@@ -7,6 +7,7 @@ import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/
 import { type AnalysisDraggableVerticalLine } from '@/components/CandlestickChart';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import {
+  CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER,
   CAMPAIGN_VIEW_MULTIPLIERS,
   buildCampaignKlineVisibleRange,
   type CampaignKlineTimeWindow,
@@ -71,11 +72,29 @@ interface Props {
   localOrders?: CampaignLocalOrderFacts;
   /** 完整委托历史（不受盘面隐藏影响），只用于保存可靠开仓方式。 */
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
+  /**
+   * 计算用 K 线：副本基线（buildManualLegs）、拖线取价、增添腿的兜底平仓价、能否「一键运行」都读它。
+   * 与上方盈亏概览同一份，不随盘面周期变。
+   */
   klines: KlineData[];
   klinesLoading: boolean;
+  /** 显示用 K 线：只画反事实盘面（按盘面周期拉）。缺省与 klines 相同。 */
+  chartKlines?: KlineData[];
+  chartKlinesLoading?: boolean;
+  chartKlinesError?: string | null;
+  onRetryChartKlines?: () => void;
+  /** 盘面显示周期（与 chartKlines 对应）；周期按钮的选中态也按它。 */
   interval: string;
+  /** 周期按钮的悬停提示：可逐个按钮给（选中的那个写明为什么自动放宽）。 */
+  intervalHint?: string | ((item: string) => string);
   intervalOptions?: readonly string[];
   onIntervalChange?: (interval: string) => void;
+  /**
+   * 反事实盘面的倍数由详情页接管时传入：详情页要按它（反事实盘面自己的视窗）选这块盘面的自动周期，
+   * 不能拿原始盘面的倍数来选。缺省时编辑器自己管（默认 1.1 倍，换战役回到 1.1 倍）。
+   */
+  viewMultiplier?: CampaignViewMultiplier;
+  onViewMultiplierChange?: (multiplier: CampaignViewMultiplier) => void;
   /** 与原始战役盘面共用的完整时间窗口；反事实盘面默认只显示战役本身的 1 倍范围。 */
   klineTimeWindow: CampaignKlineTimeWindow;
   timezone?: string;
@@ -123,6 +142,7 @@ const ROLE_OPTIONS: LegRole[] = [
 const NO_LOCAL_ORDER_FACTS: CampaignLocalOrderFacts = {};
 const NO_REVERSE_ORDERS: CampaignReverseHedgeOrder[] = [];
 
+/** 与原始盘面同一组档位（1.1 / 2.1 / 3.1 / 5 … 51）；反事实盘面默认 1.1 倍（CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER），不跟随原始盘面的 2.1 倍。 */
 const COUNTERFACTUAL_VIEW_MULTIPLIERS: readonly CampaignViewMultiplier[] = [
   1.1,
   ...CAMPAIGN_VIEW_MULTIPLIERS,
@@ -169,9 +189,16 @@ export function CampaignWhatIfEditor({
   reverseHedgeOrders = NO_REVERSE_ORDERS,
   klines,
   klinesLoading,
+  chartKlines = klines,
+  chartKlinesLoading = klinesLoading,
+  chartKlinesError = null,
+  onRetryChartKlines,
   interval,
+  intervalHint,
   intervalOptions = [],
   onIntervalChange,
+  viewMultiplier,
+  onViewMultiplierChange,
   klineTimeWindow,
   timezone,
   whatIfRunning,
@@ -203,7 +230,14 @@ export function CampaignWhatIfEditor({
   const [baselineLegs, setBaselineLegs] = useState<CampaignCounterfactualManualLeg[]>([]);
   const [label, setLabel] = useState('');
   const [selectedManualLegId, setSelectedManualLegId] = useState<string | null>(null);
-  const [chartRangeMultiplier, setChartRangeMultiplier] = useState<CampaignViewMultiplier>(1.1);
+  const [ownChartRangeMultiplier, setOwnChartRangeMultiplier] = useState<CampaignViewMultiplier>(
+    CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER,
+  );
+  const chartRangeMultiplier = viewMultiplier ?? ownChartRangeMultiplier;
+  const selectChartRangeMultiplier = (multiplier: CampaignViewMultiplier) => {
+    setOwnChartRangeMultiplier(multiplier);
+    onViewMultiplierChange?.(multiplier);
+  };
 
   const chartVisibleRange = useMemo(
     () => buildCampaignKlineVisibleRange(klineTimeWindow, chartRangeMultiplier),
@@ -289,8 +323,9 @@ export function CampaignWhatIfEditor({
     setSelectedManualLegId(null);
   }, [loadLegsNonce]);
 
+  // 换战役回到默认倍数（详情页接管倍数时由详情页自己重置）
   useEffect(() => {
-    setChartRangeMultiplier(1.1);
+    setOwnChartRangeMultiplier(CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER);
   }, [campaign.id]);
 
   const canRun = !klinesLoading && klines.length > 0;
@@ -463,11 +498,13 @@ export function CampaignWhatIfEditor({
 
         <div className="order-2 min-h-9 px-2 py-1 flex flex-wrap items-center gap-2">
           {onIntervalChange && intervalOptions.length > 0 && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1" role="group" aria-label="反事实盘面 K 线周期">
               {intervalOptions.map(item => (
                 <button
                   key={item}
                   type="button"
+                  aria-pressed={interval === item}
+                  title={typeof intervalHint === 'function' ? intervalHint(item) : intervalHint}
                   onClick={() => onIntervalChange(item)}
                   className={`h-6 px-2 rounded text-[10px] font-mono ${interval === item ? 'bg-[#F0B90B] text-black' : 'bg-muted text-foreground'}`}
                 >
@@ -476,10 +513,12 @@ export function CampaignWhatIfEditor({
               ))}
             </div>
           )}
+          {/* 窄屏两组折成两行时这条线会挂在第一行末尾、不再分隔什么：与原始盘面工具栏一样在窄屏隐藏 */}
           {onIntervalChange && intervalOptions.length > 0 && (
-            <div className="h-4 w-px bg-border/70" />
+            <div className="h-4 w-px bg-border/70 max-sm:hidden" />
           )}
-          <div className="flex items-center gap-0.5" aria-label="反事实 K 线显示范围">
+          {/* 九档倍数在 360 宽的屏上放不下一行（反事实卡片比原始盘面窄）：允许折行，桌面宽度下仍是一行 */}
+          <div data-testid="counterfactual-view-multipliers" className="flex flex-wrap items-center gap-0.5 gap-y-1" aria-label="反事实 K 线显示范围">
             {COUNTERFACTUAL_VIEW_MULTIPLIERS.map(multiplier => (
               <button
                 key={multiplier}
@@ -487,7 +526,7 @@ export function CampaignWhatIfEditor({
                 title={`反事实盘面显示 ${multiplier} 倍战役时间范围`}
                 aria-label={`反事实盘面显示 ${multiplier} 倍战役时间范围`}
                 aria-pressed={chartRangeMultiplier === multiplier}
-                onClick={() => setChartRangeMultiplier(multiplier)}
+                onClick={() => selectChartRangeMultiplier(multiplier)}
                 className={`h-5 min-w-6 rounded px-1 text-[9px] font-mono transition-colors ${
                   chartRangeMultiplier === multiplier
                     ? 'bg-foreground/85 text-background'
@@ -506,13 +545,22 @@ export function CampaignWhatIfEditor({
           className="order-4 border border-border rounded overflow-hidden"
           style={{ height: chartHeight ?? 480 }}
         >
-          {klinesLoading ? (
+          {chartKlinesLoading ? (
             <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
-          ) : klines.length === 0 ? (
+          ) : chartKlinesError ? (
+            <div className="h-full flex flex-col items-center justify-center gap-2 text-[12px] text-[#F6465D]">
+              <div>K 线加载失败：{chartKlinesError}</div>
+              {onRetryChartKlines && (
+                <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={onRetryChartKlines}>重试</Button>
+              )}
+            </div>
+          ) : chartKlines.length === 0 ? (
             <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">暂无 K 线数据</div>
           ) : (
             <ReplayKlineChart
-              klines={klines}
+              // 换周期就重挂（与原始盘面一样）：两份 K 线都已到手时切换不经过「加载中」，不重挂会按新周期画旧蜡烛
+              key={interval}
+              klines={chartKlines}
               currentTime={chartCurrentTime}
               intervalMs={intervalToMs(interval)}
               symbol={campaign.symbol}

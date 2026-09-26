@@ -11,7 +11,7 @@ import { useReplayKlines } from '@/hooks/useReplayKlines';
  * QUICKUSDT 那种内容跨度只有 67 秒的战役，默认 3 倍只有 3.35 分钟——
  * 5m 周期下连一根 K 线都不到，51 倍顶格也才 57 分钟，用户投诉
  * “有的战役只能选取这么一小段时间”正是从这里长出来的。
- * 现在把单位下限抬到 30 分钟：3 倍默认 = 90 分钟 ≈ 18 根 5m，够读结构；
+ * 现在把单位下限抬到 30 分钟：默认 2.1 倍 = 63 分钟 ≈ 12 根 5m，够读结构；
  * 1.1 倍 = 33 分钟也不再退化回“不足一根 K 线”；
  * 51 倍 = 25.5 小时 = 1530 根 1m，仍远小于详情页 6000 根的拉取预算，
  * 所以被抬高的短战役不会因为修这个 bug 反而被降级到 5m。
@@ -20,9 +20,35 @@ import { useReplayKlines } from '@/hooks/useReplayKlines';
  */
 export const CAMPAIGN_MIN_CONTEXT_MS = 30 * 60_000;
 export const CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER = 25;
-export const CAMPAIGN_VIEW_MULTIPLIERS = [2, 3, 5, 11, 21, 31, 41, 51] as const;
+/**
+ * 【用户要求】倍数档：1.1 / 2.1 / 3.1 / 5 / 11 / 21 / 31 / 41 / 51。
+ * 详情页工具栏、反事实编辑器、批量下载对话框共用这一组。
+ */
+export const CAMPAIGN_VIEW_MULTIPLIERS = [2.1, 3.1, 5, 11, 21, 31, 41, 51] as const;
 export const CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS = [1.1, ...CAMPAIGN_VIEW_MULTIPLIERS] as const;
 export type CampaignViewMultiplier = 1 | (typeof CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS)[number];
+/** 【用户要求】交易战役原始盘面首屏 2.1 倍（换战役也回到它）。 */
+export const CAMPAIGN_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 2.1;
+/** 反事实盘面首屏 1.1 倍（沿用原来的规则，不跟随原始盘面的 2.1 倍；换战役也回到它）。 */
+export const CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;
+
+/** 改档之前的旧值：2 倍、3 倍分别对应现在的 2.1 倍、3.1 倍。 */
+const LEGACY_VIEW_MULTIPLIERS: ReadonlyMap<number, CampaignViewMultiplier> = new Map([[2, 2.1], [3, 3.1]]);
+
+/**
+ * 从外部读入的倍数（调用方传进来的选项、以后若有持久化或 URL 参数）一律过这里：
+ * 在档内的原样返回，旧档 2 / 3 读成 2.1 / 3.1，其余（缺省、非数字、不在档内）返回 null 交给调用方兜底。
+ */
+export function normalizeCampaignViewMultiplier(value: unknown): CampaignViewMultiplier | null {
+  const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value.trim().replace(/x$/i, '')) : value;
+  if (typeof numeric !== 'number' || !Number.isFinite(numeric)) return null;
+  const legacy = LEGACY_VIEW_MULTIPLIERS.get(numeric);
+  if (legacy != null) return legacy;
+  if (numeric === 1) return 1;
+  return (CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS as readonly number[]).includes(numeric)
+    ? numeric as CampaignViewMultiplier
+    : null;
+}
 
 /**
  * 绝对时间预设：跨度与战役时长完全无关，用来兑现“尽可能长的 K 线”。
@@ -54,7 +80,7 @@ export type CampaignKlineTimeWindow = {
   /** 实际请求并允许浏览的完整 51 倍时间范围。 */
   fromTime: number;
   toTime: number;
-  /** 首次打开时显示的 3 倍时间范围。 */
+  /** 3 倍几何基准窗口（前 1 倍 + 内容 + 后 1 倍）；首屏倍数见 CAMPAIGN_DEFAULT_VIEW_MULTIPLIER。 */
   defaultFromTime: number;
   defaultToTime: number;
   contentStartMs: number | null;
@@ -119,7 +145,8 @@ function campaignVirtualContentInterval(
  */
 export function buildCampaignKlineVisibleRange(
   window: CampaignKlineTimeWindow,
-  multiplier: CampaignViewMultiplier,
+  // 纯几何：任意正倍数都成立（3 倍恰好等于 defaultFrom/To）；界面上能选的档位见 CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS。
+  multiplier: number,
 ): CampaignKlineVisibleRange {
   if (hasCampaignContentRange(window)) {
     // 必须与 buildCampaignKlineBaseWindow 用同一个切分，否则 3 倍可见区不再等于 defaultFrom/To。
@@ -279,8 +306,10 @@ export function useCampaignKlines(
 ) {
   const openedAtMs = useMemo(() => new Date(openedAt).getTime(), [openedAt]);
   const closedAtMs = useMemo(() => new Date(closedAt ?? Date.now()).getTime(), [closedAt]);
-  // 有 Legs/委托/反事实内容区间时，初始可见窗口仍是三段各占 1/3；
+  // 有 Legs/委托/反事实内容区间时，初始可见窗口是 2.1 倍（战役居中）；
   // 数据层预载左右各二十五段上下文，用户可一键切换并查看完整 51 倍范围。
+  // 详情页会调用两次：一次拉计算用 K 线（selection 传 null、周期固定为自动周期），
+  // 一次拉显示用 K 线（按盘面周期）；两边周期与窗口相同时第二次传空 symbol，不发请求、共用第一份。
   // 页面与本 hook 各算一次窗口，必须吃同一份 (spanStart, spanEnd, selection)；
   // 只喂其中一个的症状是「预设无效」或「画面两侧空白」。
   const window = useMemo(
