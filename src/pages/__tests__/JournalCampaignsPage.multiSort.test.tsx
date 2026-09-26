@@ -646,6 +646,11 @@ describe('战役列表：多级排序', () => {
     expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('生效 3/3');
     expect(within(stats).getByTestId('sort-chain-stats-row-4')).toHaveTextContent('Q1 < -0.60');
     expect(within(stats).getByTestId('sort-chain-stats-total')).toHaveTextContent('合计11');
+    // 第一级每一档里第二级的分布：一档一行，行合计 = 这一档的场数
+    const crossTab = within(stats).getByTestId('sort-chain-crosstab-2');
+    expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
+    expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('sort-chain-stats')).not.toBeInTheDocument());
     fireEvent.contextMenu(screen.getByTestId('sort-chain-toggle-2'));

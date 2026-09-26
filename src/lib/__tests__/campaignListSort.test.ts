@@ -19,6 +19,7 @@ import {
   sortCampaignRows,
   sortChainBinsFirstLevel,
   sortChainKey,
+  summarizeSortCrossTab,
   summarizeSortGroups,
   toggleSortLevel,
   writeCampaignSortParams,
@@ -516,11 +517,12 @@ describe('【用户要求】排序后的分组统计', () => {
       { kind: 'achieved', hits: 1, count: 2 },
       { kind: 'achieved', hits: 1, count: 3 },
     ]);
-    // 第一级自己：本档读数的中位数
-    expect(groups[0].levels[0]).toEqual({ kind: 'median', value: 420, count: 3 });
+    // 第一级自己：本档读数的平均值（600、420、250）
+    expect(groups[0].levels[0]).toMatchObject({ kind: 'average', count: 3 });
+    expect((groups[0].levels[0] as { value: number }).value).toBeCloseTo((600 + 420 + 250) / 3);
   });
 
-  it('第一级是镜像止盈时一个档位一组；后面的连续指标报中位数，本组算不出时为 none', () => {
+  it('第一级是镜像止盈时一个档位一组；后面的连续指标报平均值，本组算不出时为 none', () => {
     const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }];
     const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
     expect(groups.every(group => group.key.kind === 'value')).toBe(true);
@@ -535,5 +537,38 @@ describe('【用户要求】排序后的分组统计', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toEqual({ kind: 'all' });
     expect(groups[0].count).toBe(ROWS.length);
+  });
+});
+
+describe('【用户要求】第一级每一档里第二级的分布（交叉表）', () => {
+  it('连续 × 连续：第二级按整张列表统一分四档，列按第二级方向，格子数加起来等于每行场数', () => {
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'captureRate', direction: 'desc' }];
+    const crossTab = summarizeSortCrossTab(sortCampaignRows(ROWS, chain), chain, 1)!;
+    expect(crossTab.thresholds).not.toBeNull();
+    expect(crossTab.columns.map(column => (column.kind === 'quartile' ? column.quartile : column.kind))).toEqual([4, 3, 2, 1]);
+    crossTab.rows.forEach(row => expect(row.counts.reduce((sum, count) => sum + count, 0)).toBe(row.count));
+    expect(crossTab.totals).toEqual([3, 3, 2, 3]);
+    // 行与分组统计同一套（镜像止盈一个档位一行）
+    expect(crossTab.rows.map(row => row.key)).toEqual(
+      summarizeSortGroups(sortCampaignRows(ROWS, chain), chain).map(group => group.key),
+    );
+  });
+
+  it('第二级有算不出的战役时另起一列「算不出」；升序时 Q1 在左', () => {
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'addEfficiency', direction: 'asc' }];
+    const crossTab = summarizeSortCrossTab(sortCampaignRows(ROWS, chain), chain, 1)!;
+    const kinds = crossTab.columns.map(column => (column.kind === 'quartile' ? `q${column.quartile}` : column.kind));
+    expect(kinds[kinds.length - 1]).toBe('missing');
+    expect(kinds[0]).toBe('q1');
+    expect(crossTab.totals.reduce((sum, count) => sum + count, 0)).toBe(ROWS.length);
+  });
+
+  it('第二级是镜像止盈：一个档位一列；字母没法分档返回 null', () => {
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
+    const crossTab = summarizeSortCrossTab(sortCampaignRows(ROWS, chain), chain, 1)!;
+    expect(crossTab.columns.every(column => column.kind === 'value')).toBe(true);
+    expect(crossTab.rows[0].counts.reduce((sum, count) => sum + count, 0)).toBe(3);
+    const alpha: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'alpha', direction: 'asc' }];
+    expect(summarizeSortCrossTab(sortCampaignRows(ROWS, alpha), alpha, 1)).toBeNull();
   });
 });

@@ -124,10 +124,13 @@ import {
   selectSortMode,
   sortCampaignRows,
   sortChainKey,
+  summarizeSortCrossTab,
   summarizeSortGroups,
   toggleSortLevel,
   writeCampaignSortParams,
   type CampaignSortBinning,
+  type SortCrossTab,
+  type SortCrossTabColumn,
   type SortGroupKey,
   type SortGroupLevelStat,
   type CampaignSortChain,
@@ -1072,10 +1075,10 @@ function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, threshold
   return String(key.value);
 }
 
-/** 分组统计表里后面各级的格子：连续指标与杠杆写中位数，镜像止盈写生效场数，重要性写平均星级。 */
+/** 分组统计表里后面各级的格子：连续指标与杠杆写平均值，镜像止盈写生效场数，重要性写平均星级。 */
 function formatSortGroupLevelStat(mode: CampaignSortMode, stat: SortGroupLevelStat): string {
   switch (stat.kind) {
-    case 'median': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x` : formatSortBinValue(mode, stat.value);
+    case 'average': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x` : formatSortBinValue(mode, stat.value);
     case 'achieved': return `生效 ${stat.hits}/${stat.count}`;
     case 'mean': return `${stat.value.toFixed(1)} 星`;
     default: return '—';
@@ -1087,7 +1090,7 @@ function sortGroupLevelStatCaption(mode: CampaignSortMode): string {
   if (mode === 'mirrorTp') return '生效场数';
   if (mode === 'importance') return '平均';
   if (mode === 'alpha' || mode === 'time') return '';
-  return '中位数';
+  return '平均值';
 }
 
 function formatMeanPayoff(value: number | null): string {
@@ -2133,6 +2136,11 @@ export default function JournalCampaignsPage() {
     () => (sortChain.length > 1 ? summarizeSortGroups(sortedRows, sortChain) : []),
     [sortedRows, sortChain],
   );
+  /** 【用户要求】第一级每一档里，后面每一级怎么分布：一级一张交叉表（字母 / 操作时间没法分档，为 null）。 */
+  const sortCrossTabs = useMemo<(SortCrossTab | null)[]>(
+    () => sortChain.slice(1).map((_, index) => summarizeSortCrossTab(sortedRows, sortChain, index + 1)),
+    [sortedRows, sortChain],
+  );
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
    * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
@@ -2834,7 +2842,81 @@ export default function JournalCampaignsPage() {
           </table>
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground/70">
-          组的先后与列表相同。胜率 = b &gt; 0 的场数 ÷ 算得出 b 的场数；中位数只数本组算得出这一项的战役。
+          组的先后与列表相同。胜率 = b &gt; 0 的场数 ÷ 算得出 b 的场数；平均值只数本组算得出这一项的战役。
+        </div>
+        {sortCrossTabs.map((crossTab, offset) => crossTab && renderSortCrossTab(crossTab, offset + 1))}
+      </div>
+    );
+  };
+
+  /**
+   * 交叉表：行是第一级的档（与上面分组统计同一套、同一顺序），列是这一级按整张列表分出的档，格子是场数。
+   * 格子底色按「占本行的比例」深浅：一眼看出每一档里这一级集中在哪一段；百分比写在场数下面。
+   */
+  const renderSortCrossTab = (crossTab: SortCrossTab, levelIndex: number) => {
+    const firstMode = sortChain[0].mode;
+    const label = SORT_LABEL_BY_MODE[crossTab.mode];
+    const columnLabel = (column: SortCrossTabColumn) => (column.kind === 'missing'
+      ? '算不出'
+      : formatSortGroupKey(crossTab.mode, column, crossTab.thresholds));
+    const cell = 'px-1.5 py-1 text-right font-mono tabular-nums whitespace-nowrap';
+    const grandTotal = crossTab.totals.reduce((sum, count) => sum + count, 0);
+    const missingIndex = crossTab.columns.findIndex(column => column.kind === 'missing');
+    const presentTotal = grandTotal - (missingIndex >= 0 ? crossTab.totals[missingIndex] : 0);
+    return (
+      <div key={crossTab.mode} data-testid={`sort-chain-crosstab-${levelIndex + 1}`} className="mt-3">
+        <div className="mb-1 font-medium text-foreground/80">
+          <span className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_FIRST} mr-1`}>1</span>{SORT_LABEL_BY_MODE[firstMode]}
+          <span className="mx-1 text-muted-foreground/60">×</span>
+          <span className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_THEN} mr-1`}>{levelIndex + 1}</span>{label}
+          <span className="ml-1 font-normal text-muted-foreground">的分布（场数）</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[10px] text-muted-foreground">
+            <thead>
+              <tr className="border-b border-border/50 text-foreground/70">
+                <th className="px-1.5 py-1 text-left font-medium">{SORT_LABEL_BY_MODE[firstMode]} ＼ {label}</th>
+                {crossTab.columns.map((column, index) => (
+                  <th key={index} className={`${cell} font-medium`}>{columnLabel(column)}</th>
+                ))}
+                <th className={`${cell} font-medium`}>合计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {crossTab.rows.map((row, rowIndex) => (
+                <tr key={rowIndex} data-testid={`sort-chain-crosstab-${levelIndex + 1}-row-${rowIndex + 1}`} className="border-b border-border/30">
+                  <td className="px-1.5 py-1 text-left whitespace-nowrap text-foreground/80">
+                    {formatSortGroupKey(firstMode, row.key, sortBinning?.thresholds ?? null)}
+                  </td>
+                  {row.counts.map((count, index) => {
+                    const share = row.count > 0 ? count / row.count : 0;
+                    return (
+                      <td
+                        key={index}
+                        className={cell}
+                        style={count > 0 ? { backgroundColor: `rgba(240, 185, 11, ${(0.06 + share * 0.4).toFixed(3)})` } : undefined}
+                      >
+                        <div className={count > 0 ? 'text-foreground/85' : 'text-muted-foreground/40'}>{count}</div>
+                        <div className="text-[9px] text-muted-foreground/70">{count > 0 ? `${Math.round(share * 100)}%` : ''}</div>
+                      </td>
+                    );
+                  })}
+                  <td className={`${cell} text-foreground/80`}>{row.count}</td>
+                </tr>
+              ))}
+              <tr data-testid={`sort-chain-crosstab-${levelIndex + 1}-total`} className="text-foreground/80">
+                <td className="px-1.5 py-1 text-left font-medium">合计</td>
+                {crossTab.totals.map((count, index) => <td key={index} className={cell}>{count}</td>)}
+                <td className={cell}>{grandTotal}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-1 text-[10px] text-muted-foreground/70">
+          {crossTab.thresholds
+            ? `${label}的四档按整张列表里算得出的 ${presentTotal} 场统一分（档界是那一档里最小的读数），各行才能直接比较；`
+            : `${label}按读数分列；`}
+          底色越深，这一格占本行的比例越大；「算不出」是这一项算不出的战役。
         </div>
       </div>
     );

@@ -600,8 +600,8 @@ export type SortGroupKey =
   | { kind: 'all' };
 
 export type SortGroupLevelStat =
-  /** 连续指标与杠杆：本组算得出这一项的中位数。 */
-  | { kind: 'median'; value: number; count: number }
+  /** 【用户要求】连续指标与杠杆：本组算得出这一项的平均值（中位数意义不大）。 */
+  | { kind: 'average'; value: number; count: number }
   /** 镜像止盈：本组已实现（生效）的场数。 */
   | { kind: 'achieved'; hits: number; count: number }
   /** 重要性：本组平均星级。 */
@@ -616,16 +616,9 @@ export type SortGroupSummary = {
   payoffCount: number;
   wins: number;
   meanPayoff: number | null;
-  /** 与排序链逐级对应；第一级也给（分档时是本档读数的中位数）。 */
+  /** 与排序链逐级对应；第一级也给（分档时是本档读数的平均值）。 */
   levels: SortGroupLevelStat[];
 };
-
-function medianOf(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
 
 function levelStat<T extends CampaignSortRow>(
   mode: CampaignSortMode,
@@ -646,17 +639,17 @@ function levelStat<T extends CampaignSortRow>(
     : key.value;
   if (!read) return { kind: 'none' };
   const values = rows.map(read).filter(finite);
-  const median = medianOf(values);
-  return median == null ? { kind: 'none' } : { kind: 'median', value: median, count: values.length };
+  return values.length === 0
+    ? { kind: 'none' }
+    : { kind: 'average', value: values.reduce((sum, value) => sum + value, 0) / values.length, count: values.length };
 }
 
-export function summarizeSortGroups<T extends CampaignSortRow>(
+/** 按第一级把排好的行切成组（口径见 summarizeSortGroups），组的先后同列表。 */
+function groupSortedRows<T extends CampaignSortRow>(
   sortedRows: readonly T[],
-  chain: CampaignSortChain,
-): SortGroupSummary[] {
-  const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
-  if (sortedRows.length === 0) return [];
-  const keys = buildCampaignSortKeys<T>();
+  levels: CampaignSortChain,
+  keys: Record<CampaignSortMode, CampaignSortKey<T>>,
+): { key: SortGroupKey; rows: T[] }[] {
   const first = levels[0];
   const firstKey = keys[first.mode];
   const binning = resolveSortBinning(sortedRows, levels, keys);
@@ -674,10 +667,8 @@ export function summarizeSortGroups<T extends CampaignSortRow>(
       const q = quartile(row);
       return { kind: 'quartile', quartile: q, lower: q === 1 ? null : binning.thresholds[q - 2] };
     };
-  } else if (first.mode === 'mirrorTp' || first.mode === 'importance' || first.mode === 'leverage') {
-    const read = (row: T) => (first.mode === 'mirrorTp'
-      ? rowMirrorTpRank(row)
-      : first.mode === 'importance' ? importanceValue(row.campaign) : campaignLeverage(row.campaign, row.legs));
+  } else if (DISCRETE_GROUP_MODES.has(first.mode)) {
+    const read = discreteReader<T>(first.mode);
     groupOf = row => `v${read(row)}`;
     keyOf = row => ({ kind: 'value', value: read(row) });
   } else {
@@ -697,9 +688,26 @@ export function summarizeSortGroups<T extends CampaignSortRow>(
     }
     bucket.rows.push(row);
   }
+  return order.map(id => buckets.get(id)!);
+}
 
-  return order.map(id => {
-    const { key, rows } = buckets.get(id)!;
+/** 按读数本身分组的排序项（不分档）：镜像止盈六档、重要性星级、杠杆倍数。 */
+const DISCRETE_GROUP_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mirrorTp', 'importance', 'leverage']);
+
+function discreteReader<T extends CampaignSortRow>(mode: CampaignSortMode): (row: T) => number {
+  if (mode === 'mirrorTp') return rowMirrorTpRank;
+  if (mode === 'importance') return row => importanceValue(row.campaign);
+  return row => campaignLeverage(row.campaign, row.legs);
+}
+
+export function summarizeSortGroups<T extends CampaignSortRow>(
+  sortedRows: readonly T[],
+  chain: CampaignSortChain,
+): SortGroupSummary[] {
+  const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
+  if (sortedRows.length === 0) return [];
+  const keys = buildCampaignSortKeys<T>();
+  return groupSortedRows(sortedRows, levels, keys).map(({ key, rows }) => {
     const payoffs = rows.map(rowPayoffRatio).filter(finite);
     return {
       key,
@@ -710,6 +718,94 @@ export function summarizeSortGroups<T extends CampaignSortRow>(
       levels: levels.map(level => levelStat(level.mode, keys[level.mode], rows)),
     };
   });
+}
+
+/**
+ * 【用户要求】「在第一级的每个档位中，第二级是如何分布的，需要进一步分档，以及对应的数量」：
+ * 第一级（行，与 summarizeSortGroups 同一套组）× 后面某一级（列）的交叉表，格子是场数。
+ * 列的分档对整张列表统一算，每一行才读得出「这一档里第二级偏高还是偏低」：
+ *   · 连续指标：按列表里算得出这一项的全部战役算四分位（与第一级分档同一口径：封面精度取整、档界是那一档最小的读数）；
+ *   · 镜像止盈 / 重要性 / 杠杆：一个读数一列；
+ *   · 字母 / 操作时间：没法分档，返回 null。
+ * 列的先后按这一级的方向（从大到小就是 Q4 在左）；算不出这一项的战役另起一列「算不出」，没有就不出这一列。
+ * 整张表一场都没有的列不画（读数成团时四分位档界会重合）。
+ */
+export type SortCrossTabColumn = SortGroupKey | { kind: 'missing' };
+
+export type SortCrossTab = {
+  mode: CampaignSortMode;
+  /** 连续指标的四分位档界 [q₁, q₂, q₃]；按读数分列时为 null。 */
+  thresholds: readonly [number, number, number] | null;
+  columns: SortCrossTabColumn[];
+  rows: { key: SortGroupKey; count: number; counts: number[] }[];
+  totals: number[];
+};
+
+export function summarizeSortCrossTab<T extends CampaignSortRow>(
+  sortedRows: readonly T[],
+  chain: CampaignSortChain,
+  levelIndex: number,
+): SortCrossTab | null {
+  const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
+  const level = levels[levelIndex];
+  if (!level || levelIndex === 0 || sortedRows.length === 0) return null;
+  const keys = buildCampaignSortKeys<T>();
+  const key = keys[level.mode];
+
+  let columnOf: (row: T) => string;
+  let candidates: { id: string; column: SortCrossTabColumn; order: number }[];
+  let thresholds: readonly [number, number, number] | null = null;
+  if (isContinuousSortMode(level.mode) && key.value) {
+    const read = key.value;
+    const binned = (row: T) => {
+      const value = key.missing(row) ? null : read(row);
+      return value == null ? null : sortBinValue(level.mode, value);
+    };
+    thresholds = quartileThresholds(sortedRows.map(binned).filter(finite));
+    if (!thresholds) return null;
+    const bounds = thresholds;
+    columnOf = row => {
+      const value = binned(row);
+      return value == null ? 'missing' : `q${quartileOf(value, bounds)}`;
+    };
+    candidates = ([1, 2, 3, 4] as const).map(quartile => ({
+      id: `q${quartile}`,
+      column: { kind: 'quartile', quartile, lower: quartile === 1 ? null : bounds[quartile - 2] },
+      order: quartile,
+    }));
+  } else if (DISCRETE_GROUP_MODES.has(level.mode)) {
+    const read = discreteReader<T>(level.mode);
+    columnOf = row => (key.missing(row) ? 'missing' : `v${read(row)}`);
+    const values = [...new Set(sortedRows.filter(row => !key.missing(row)).map(read))];
+    candidates = values.map(value => ({ id: `v${value}`, column: { kind: 'value', value }, order: value }));
+  } else {
+    return null;
+  }
+  candidates.sort((a, b) => (level.direction === 'desc' ? b.order - a.order : a.order - b.order));
+  candidates.push({ id: 'missing', column: { kind: 'missing' }, order: Number.POSITIVE_INFINITY });
+
+  const groups = groupSortedRows(sortedRows, levels, keys);
+  const tally = groups.map(({ rows }) => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const id = columnOf(row);
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return counts;
+  });
+  const kept = candidates.filter(candidate => tally.some(counts => (counts.get(candidate.id) ?? 0) > 0));
+  const rows = groups.map(({ key: groupKey, rows: groupRows }, index) => ({
+    key: groupKey,
+    count: groupRows.length,
+    counts: kept.map(candidate => tally[index].get(candidate.id) ?? 0),
+  }));
+  return {
+    mode: level.mode,
+    thresholds,
+    columns: kept.map(candidate => candidate.column),
+    rows,
+    totals: kept.map((_, column) => rows.reduce((sum, row) => sum + row.counts[column], 0)),
+  };
 }
 
 // ─── 排序链的操作 ─────────────────────────────────────────────────────────────
