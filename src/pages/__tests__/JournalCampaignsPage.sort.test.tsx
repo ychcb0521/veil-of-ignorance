@@ -1230,6 +1230,19 @@ describe('JournalCampaignsPage sorting', () => {
     expect(drawdownChartToggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(drawdownChartToggle);
 
+    // 【用户要求】预期回撤同镜像止盈：默认打开柱状，柱子按 100 ÷ D% 等间距分档，每场都落进某一根柱。
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
+      'data-metric-key',
+      'expectedDrawdownPctBars',
+    );
+    expect(screen.getByTestId('campaign-expectedDrawdownPct-view-bars')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-metric-summary-expectedDrawdownPctBars')).toHaveTextContent('合计 3 场');
+    const drawdownBarCounts = [...screen.getByTestId('campaign-metric-scatter-plot')
+      .querySelectorAll('[data-testid^="chart-category-count-"]')]
+      .map(node => Number.parseInt(node.textContent ?? '', 10));
+    expect(drawdownBarCounts.reduce((sum, count) => sum + count, 0)).toBe(3);
+    fireEvent.click(screen.getByTestId('campaign-expectedDrawdownPct-view-time'));
+
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute(
       'data-metric-key',
       'expectedDrawdownPct',

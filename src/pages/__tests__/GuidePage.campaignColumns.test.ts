@@ -87,7 +87,10 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     }
   });
   it('【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布，可切回时序；加仓效用另有 1.00 参照线', () => {
-    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图、镜像止盈默认展开的是柱状图</strong>');
+    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图、镜像止盈与预期回撤默认展开的是柱状图</strong>');
+    // 【用户要求】预期回撤柱状按倒数 100 ÷ D% 等间距分档，默认打开。
+    expect(guide).toContain('<strong>倒数 100 ÷ D%</strong> 等间距分档');
+    expect(page).toContain("expectedDrawdownPct: 'expectedDrawdownPctBars'");
     expect(guide).toContain('<strong>涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布</strong>');
     expect(guide).toContain('<strong>琥珀色 1.00 虚线</strong>「加仓没有额外放大」');
     expect(guide).toContain('用面板右上角的「时序 | 分布」切回时序');

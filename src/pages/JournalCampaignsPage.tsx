@@ -163,6 +163,7 @@ type CampaignMetricChartKey =
   | 'odds'
   | 'oddsDistribution'
   | 'expectedDrawdownPct'
+  | 'expectedDrawdownPctBars'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy'
   | 'geometricExpectancyDistribution'
@@ -444,6 +445,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'expectedDrawdownPct',
     label: '预期回撤',
     chartLabel: '回撤图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-expectedDrawdownPct-view-time',
     seriesLabel: '预期回撤时序',
     guide: {
       yAxis: '以主力开仓价为 0%，向下显示到初始对冲 A/B 中有效风险边界的负回撤，占主力开仓价的百分比。数值越负，预设价格回撤空间越大。',
@@ -454,6 +457,32 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
         { token: 'neutral', label: '灰色：盈亏持平或尚未结束。' },
       ],
       referenceLines: ['0% 顶线：无预期回撤；纵轴向下表示回撤加深。'],
+    },
+    missingValueLabel: '预期回撤',
+    colorMode: 'risk',
+    formatValue: value => `${(Math.abs(value) < 0.005 ? 0 : value).toFixed(2)}%`,
+  },
+  // 【用户要求】预期回撤也配一张镜像止盈那样的柱状散点图；柱子按预期回撤百分比的倒数等间距分档。
+  {
+    key: 'expectedDrawdownPctBars',
+    sourceKey: 'expectedDrawdownPct',
+    view: 'bars',
+    viewLabel: '柱状',
+    viewTestId: 'campaign-expectedDrawdownPct-view-bars',
+    label: '预期回撤分布',
+    chartLabel: '柱状图',
+    seriesLabel: '预期回撤分布',
+    guide: {
+      yAxis: '纵轴是场数：落在同一倒数区间的战役码成一根柱，柱越高这一段止损距离出现得越多。场数多时一行会并排放几个点，'
+        + '左侧刻度已按每行点数折算，照着刻度读柱高即可；每根柱的精确场数写在柱脚下，图例右侧另有一份含合计的汇总。',
+      point: '每个点仍是一场战役；柱内按 |b| 从小到大自底向上码放，越往上这一档的战役盈亏越极端。'
+        + '颜色报的是该战役最终盈亏，所以每根柱都读得出「这么紧 / 这么宽的止损，最后赚没赚到钱」。'
+        + '悬停读预期回撤、它的倒数与 b，点击进入对应战役。',
+      colors: [
+        { token: 'profit', label: '绿色：该战役最终盈利。' },
+        { token: 'loss', label: '红色：该战役最终亏损。' },
+        { token: 'neutral', label: '灰色：盈亏持平或尚未结束。' },
+      ],
     },
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
@@ -831,6 +860,8 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   odds: 'oddsDistribution',
   // 镜像止盈同理：要问的是「四档各多少场」，时序把 200 个点摊成四条横线，什么也读不出来。
   mirrorTp: 'mirrorTpBars',
+  // 【用户要求】预期回撤同镜像止盈：默认看柱状，「时序 | 柱状」随时切回。
+  expectedDrawdownPct: 'expectedDrawdownPctBars',
   // 几何期望也一样：要判断的是这套打法的资本增长偏不偏、右尾够不够长——那是形状问题。
   geometricExpectancy: 'geometricExpectancyDistribution',
   // 【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望同盈亏比：默认看分布，「时序 | 分布」随时切回。
@@ -2084,6 +2115,11 @@ export default function JournalCampaignsPage() {
       row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100
     ));
     const mirrorTp = buildSeries(row => rowMirrorTpRank(row));
+    const expectedDrawdown = buildSeries(row => (
+      Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0
+        ? row.initialExpectedMaxDrawdownPct
+        : null
+    ));
     const geometric = buildSeries(row => row.geometricExpectancy);
     const arithmetic = buildSeries(row => row.arithmeticExpectancy);
     // 与卡片、排序同一组函数：算不出的战役（主力未平仓、没有预期回撤、没有加仓）不进图
@@ -2095,11 +2131,9 @@ export default function JournalCampaignsPage() {
     return {
       odds,
       oddsDistribution: odds,
-      expectedDrawdownPct: buildSeries(row => (
-        Number.isFinite(row.initialExpectedMaxDrawdownPct) && row.initialExpectedMaxDrawdownPct > 0
-          ? row.initialExpectedMaxDrawdownPct
-          : null
-      )),
+      expectedDrawdownPct: expectedDrawdown,
+      // 柱状图与时序图读的是同一份预期回撤序列，只是横轴换成了倒数区间。
+      expectedDrawdownPctBars: expectedDrawdown,
       arithmeticExpectancy: arithmetic,
       arithmeticExpectancyDistribution: arithmetic,
       geometricExpectancy: geometric,

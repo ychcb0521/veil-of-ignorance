@@ -6,6 +6,7 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { mirrorTpOutcome } from '@/lib/mirrorTpSummary';
+import { buildExpectedDrawdownBins, drawdownReciprocal } from '@/lib/expectedDrawdownBins';
 import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
 import {
   buildGeometricDistributionModel,
@@ -458,6 +459,8 @@ export function CampaignMetricScatterPlot({
   // 柱状与分布都按横轴堆叠、纵轴读场数；区别只在横轴是离散档位还是连续数值。
   const bars = view === 'bars';
   const stacked = distribution || bars;
+  /** 【用户要求】预期回撤柱状：档位不是离散刻度，而是按 100 ÷ D% 等间距分出的区间。 */
+  const drawdownBars = bars && metricKey === 'expectedDrawdownPctBars';
   /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
   const oddsFamily = metricKey.startsWith('odds');
   /**
@@ -549,19 +552,38 @@ export function CampaignMetricScatterPlot({
    * 柱状视图的档位表。档位取自该指标的离散刻度（镜像止盈就是 未实现/亏损/持平/盈利 四档），
    * 而不是数据里出现过的值——某一档一场没有时，那根空柱也要留在轴上，
    * 「持平 0 场」本身就是结论。柱状键与它的时序键共用同一套刻度：mirrorTpBars → mirrorTp。
+   * 预期回撤没有离散刻度：柱子是倒数轴上的等宽区间（见 expectedDrawdownBins），点落进哪根柱由 barOf 定。
    */
-  const barColumns = useMemo(() => {
+  const barModel = useMemo(() => {
     if (!bars) return null;
+    if (drawdownBars) {
+      const binning = buildExpectedDrawdownBins(chartPoints.map(point => point.value));
+      const barOf = (point: CampaignMetricPoint) => binning.binOf(point.value) ?? 0;
+      return {
+        barOf,
+        columns: binning.bins.map(bin => ({
+          value: bin.index,
+          label: bin.label,
+          detail: bin.drawdownLabel,
+          count: chartPoints.filter(point => barOf(point) === bin.index).length,
+        })),
+      };
+    }
     const discrete = createDiscreteMetricScale(metricKey.replace(/Bars$/, ''));
     const values = discrete
       ? discrete.ticks.map(tick => tick.value).sort((a, b) => a - b)
       : [...new Set(chartPoints.map(point => point.value))].sort((a, b) => a - b);
-    return values.map(value => ({
-      value,
-      label: formatValue(value),
-      count: chartPoints.filter(point => point.value === value).length,
-    }));
-  }, [bars, chartPoints, formatValue, metricKey]);
+    return {
+      barOf: (point: CampaignMetricPoint) => point.value,
+      columns: values.map(value => ({
+        value,
+        label: formatValue(value),
+        detail: null as string | null,
+        count: chartPoints.filter(point => point.value === value).length,
+      })),
+    };
+  }, [bars, chartPoints, drawdownBars, formatValue, metricKey]);
+  const barColumns = barModel?.columns ?? null;
   const summary = useMemo(() => {
     const values = chartPoints.map(point => point.value);
     if (values.length === 0) {
@@ -610,7 +632,7 @@ export function CampaignMetricScatterPlot({
        * 键盘左右键沿的也是这个顺序。
        */
       ? [...chartPoints].sort((a, b) => (
-        a.value - b.value
+        barModel!.barOf(a) - barModel!.barOf(b)
         || stackMagnitude(a.payoffRatio) - stackMagnitude(b.payoffRatio)
         || a.campaignId.localeCompare(b.campaignId)
       ))
@@ -634,17 +656,20 @@ export function CampaignMetricScatterPlot({
           return ` · b ${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}R`;
         })()
         : '';
+      // 预期回撤柱状的横轴是倒数，提示框把这一场的倒数也报出来，才对得上它站在哪根柱里。
+      const reciprocal = drawdownBars ? drawdownReciprocal(point.value) : null;
+      const reciprocalSuffix = reciprocal == null ? '' : ` · 100÷D ${reciprocal.toFixed(1)}`;
       return {
         id: point.campaignId,
         // G=0 lives in its own column; 0 here is only a finite placeholder, never log(0).
-        x: geometricDistribution ? geometricLogPosition(point.value) ?? 0 : stacked ? point.value : index,
+        x: geometricDistribution ? geometricLogPosition(point.value) ?? 0 : barModel ? barModel.barOf(point) : stacked ? point.value : index,
         y: stacked ? 0 : point.value,
         seriesId: ruin ? 'capital-ruin' : `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
-        valueText: `${formatValue(point.value)}${payoffSuffix}`,
+        valueText: `${formatValue(point.value)}${reciprocalSuffix}${payoffSuffix}`,
         label: `#${point.sequence} ${point.title}`,
         metaText: `操作时间 ${operationTime}`,
         warning: ruin ? `${RUIN_ASSUMPTION}（b ≤ ${CAPITAL_RUIN_THRESHOLD}R）；非实际账户强平判定。` : undefined,
-        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
+        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${reciprocalSuffix}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
@@ -659,7 +684,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [colorMode, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
+    [barModel, colorMode, drawdownBars, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -857,7 +882,9 @@ export function CampaignMetricScatterPlot({
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
           <dt className="font-medium text-[color:var(--chart-ink)]">横轴</dt>
           {/* 四种横轴各有各的读法，一条都不能串：串了就是在图旁边写一句与图相反的话。 */}
-          {bars ? (
+          {drawdownBars ? (
+            <dd>按预期回撤百分比的倒数 100 ÷ D% 等间距分柱（D = 2% → 50），不考虑时间先后：越往右止损越紧，越往左回撤空间越宽。柱脚写的是倒数区间，图例右侧的汇总另附对应的预期回撤区间。样本够多且有极远的离群值时，最右一根并成「≥ 上界」柱。一场都没有的区间也保留空柱。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
+          ) : bars ? (
             <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
           ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10R；出现 b ≤ −10 时，左端固定为 −12R，保证归零界限可见且不被极端亏损挤压。超出窗口的点贴边画三角，保留原值、黄色风险描边及统计；−1R 止损线仍保留。</dd>
@@ -1012,7 +1039,7 @@ export function CampaignMetricScatterPlot({
             <Fragment key={column.value}>
               {index > 0 ? <span className="text-[color:var(--chart-axis)]">|</span> : null}
               <span data-testid={`campaign-metric-bar-count-${metricKey}-${column.value}`}>
-                {column.label} {column.count} 场
+                {column.label}{column.detail ? `（${column.detail}）` : ''} {column.count} 场
               </span>
             </Fragment>
           ))}
@@ -1029,7 +1056,9 @@ export function CampaignMetricScatterPlot({
       )}
       directionHint={dist
         ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : `${axisLabel ?? metricLabel}${genericSpec ? `（${genericSpec.unit}）` : ''}`}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
-        : bars
+        : drawdownBars
+          ? '横轴 100 ÷ 预期回撤%（等间距） · 纵轴 场数 · 不按时间排列'
+          : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}
       footnote={excludedMissingValueCount > 0 || excludedMissingOperationTimeCount > 0 ? (
