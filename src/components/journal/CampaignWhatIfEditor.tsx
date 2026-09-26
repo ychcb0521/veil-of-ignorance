@@ -30,6 +30,13 @@ import {
   earlierClosedCuts,
 } from '@/lib/campaignSimulationEngine';
 import { formatCounterfactualStamp } from '@/lib/counterfactualChangeSummary';
+import { formatLegNotional } from '@/lib/legPositionShare';
+import {
+  coinQuantityInputValue,
+  manualLegCoinQuantity,
+  patchCoinQuantity,
+  patchEntryPriceKeepingQuantity,
+} from '@/lib/manualLegCoinQuantity';
 import { fromLocalDateTimeInputValue, toLocalDateTimeInputValue } from '@/lib/localDateTimeInput';
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
 import type {
@@ -331,8 +338,14 @@ export function CampaignWhatIfEditor({
   const canRun = !klinesLoading && klines.length > 0;
   const chartCurrentTime = chartVisibleRange.toTime;
 
-  const updateManualLeg = (id: string, patch: Partial<CampaignCounterfactualManualLeg>) => {
-    setManualLegs(prev => prev.map(leg => (leg.id === id ? { ...leg, ...patch } : leg)));
+  const updateManualLeg = (
+    id: string,
+    patch: Partial<CampaignCounterfactualManualLeg> | ((leg: CampaignCounterfactualManualLeg) => Partial<CampaignCounterfactualManualLeg>),
+  ) => {
+    // 补丁可以依赖这条腿当前的值（改开仓价时要按旧价缩放名义），所以在 setState 的回调里读最新的腿
+    setManualLegs(prev => prev.map(leg => (
+      leg.id === id ? { ...leg, ...(typeof patch === 'function' ? patch(leg) : patch) } : leg
+    )));
   };
 
   const addHedgeLeg = () => {
@@ -413,19 +426,17 @@ export function CampaignWhatIfEditor({
     const kline = nearestKline(klines, time);
     const iso = new Date(time).toISOString();
     if (endpoint === 'open') {
-      updateManualLeg(legId, {
-        open_time: iso,
-        entry_price: kline ? round(kline.close, 8) : undefined,
-      });
+      // 拖开仓线同时回写开仓价：与输入框一样，币数不变、名义随价变
+      // 附近没有 K 线时只挪时间、价格不动（以前会把开仓价写成 undefined）
+      updateManualLeg(legId, leg => (kline
+        ? { open_time: iso, ...patchEntryPriceKeepingQuantity(leg, round(kline.close, 8)) }
+        : { open_time: iso }));
     }
     if (endpoint === 'close') {
       // 强平腿的平仓端点由交易所决定：图上拖动也不改它（与编辑器里锁死那两格同一条规则）。
       const target = manualLegs.find(leg => leg.id === legId);
       if (target?.actual?.liquidated === true) return;
-      updateManualLeg(legId, {
-        close_time: iso,
-        exit_price: kline ? round(kline.close, 8) : undefined,
-      });
+      updateManualLeg(legId, kline ? { close_time: iso, exit_price: round(kline.close, 8) } : { close_time: iso });
     }
   };
 
@@ -480,7 +491,7 @@ export function CampaignWhatIfEditor({
           <div className="space-y-1 min-w-0">
             <div className="text-[14px] font-medium">Legs 副本 · 手动反事实</div>
             <div className="text-[11px] text-muted-foreground">
-              复制当前 Legs 后再调整。你可以改开/平时间、价格、仓位，也可以删除或增添；拖动盘面竖线会同步回写时间与价格。
+              复制当前 Legs 后再调整。你可以改开/平时间、价格、币量（只改开仓价时币量不变），也可以删除或增添；拖动盘面竖线会同步回写时间与价格。
             </div>
           </div>
           <div className="flex-1" />
@@ -597,7 +608,7 @@ export function CampaignWhatIfEditor({
                 <th className="text-left px-3 py-2">平仓时间</th>
                 <th className="text-left px-3 py-2">开仓价</th>
                 <th className="text-left px-3 py-2">平仓价</th>
-                <th className="text-left px-3 py-2">仓位</th>
+                <th className="text-left px-3 py-2" title="上行：币量（名义 ÷ 开仓价，可编辑）；下行：名义仓位（USD）">币量 / 仓位</th>
                 <th className="text-right px-3 py-2">操作</th>
               </tr>
             </thead>
@@ -712,8 +723,13 @@ export function CampaignWhatIfEditor({
                       <Input
                         type="number"
                         className="h-8 text-[11px]"
+                        data-testid={`counterfactual-leg-entry-price-${leg.id}`}
                         value={leg.entry_price}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { entry_price: Number(e.target.value) })}
+                        // 【用户要求】只改开仓价时币数不变：名义随价变，盈亏 = 币数 × 价差
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          const next = Number(e.target.value);
+                          updateManualLeg(leg.id, current => patchEntryPriceKeepingQuantity(current, next));
+                        }}
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -741,13 +757,25 @@ export function CampaignWhatIfEditor({
                         </div>
                       )}
                     </td>
+                    {/* 【用户要求】币量在上（可编辑）、名义在下，与 Legs 表「币量 / 仓位」同写法同数；存储仍是名义 */}
                     <td className="px-3 py-2">
                       <Input
                         type="number"
+                        data-testid={`counterfactual-leg-quantity-${leg.id}`}
                         className="h-8 text-[11px]"
-                        value={leg.size_usdt}
-                        onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { size_usdt: Number(e.target.value) })}
+                        title="币量 = 名义 ÷ 开仓价；改币量时名义 = 币量 × 开仓价，只改开仓价时币量不变"
+                        value={coinQuantityInputValue(manualLegCoinQuantity(leg))}
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          const next = Number(e.target.value);
+                          updateManualLeg(leg.id, current => patchCoinQuantity(current, next));
+                        }}
                       />
+                      <div
+                        data-testid={`counterfactual-leg-notional-${leg.id}`}
+                        className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground"
+                      >
+                        {formatLegNotional(leg.size_usdt)}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-right">
                       <button

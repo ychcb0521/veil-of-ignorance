@@ -1177,3 +1177,41 @@ describe('adoptBaselineLegFacts：本次改动之前保存的腿', () => {
     expect(adoptBaselineLegFacts(added, hedge)).toBe(added);
   });
 });
+
+describe('【用户要求】反事实编辑器按币量改：只改开仓价时币数不变', () => {
+  it('成交 10 个币、开仓价 100 → 98：每一刀仍是 10 个币，已实现只多出 10 × 2；原样副本逐位复现实际', async () => {
+    const { manualLegCoinQuantity, patchEntryPriceKeepingQuantity } = await import('@/lib/manualLegCoinQuantity');
+    const at = (minutes: number) => new Date(t0 + minutes * MIN).toISOString();
+    const record = {
+      id: 'rec-main', positionId: 'pos-main', symbol: 'BTCUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE',
+      entryPrice: 100, exitPrice: 110, quantity: 10, leverage: 2, pnl: 100 - 0.55, fee: 0.55, slippage: 0,
+      openTime: t0, closeTime: t0 + 3 * MIN, openFeeUsd: 0.5, openFeeRate: TAKER_FEE, closeFeeRate: TAKER_FEE,
+    } as TradeRecord;
+    const legs = [{
+      id: 'main', trade_record_id: 'rec-main', leg_role: 'main_open', leg_sequence: 1, symbol: 'BTCUSDT',
+      direction: 'long', leverage: 2, pre_simulated_time: at(0), pre_entry_price: 100, pre_position_size: 1000,
+    }] as TradeJournal[];
+    const campaign = {
+      id: 'c', direction: 'main_long', opened_at: at(0), closed_at: at(3), actual_evolution: [],
+      final_realized_pnl: 99.45, strategy_template: 'custom',
+    } as unknown as TradeCampaign;
+    const main = buildManualLegs(baseParams(), legs, [], [record], {}, { campaign }).find(leg => leg.id === 'main')!;
+
+    // 编辑器显示的币量 = 名义 ÷ 开仓价 = 与 Legs 表同一个数（10）
+    expect(manualLegCoinQuantity(main)).toBe(10);
+    // 没改：逐位复现实际
+    expect(resolveManualLegEconomics(main).netPnl).toBe(99.45);
+
+    const edited = { ...main, ...patchEntryPriceKeepingQuantity(main, 98) };
+    expect(manualLegCoinQuantity(edited)).toBeCloseTo(10, 12);
+    const economics = resolveManualLegEconomics(edited);
+    // 持仓每一段的币数不变
+    for (const segment of economics.pathSegments) expect(segment.quantity).toBeCloseTo(10, 12);
+    // 平仓那一侧（币数 × 平仓价）不变，平仓费不变：已实现只多出 币数 × 价差
+    expect(economics.netPnl).toBeCloseTo(99.45 + 10 * (100 - 98), 10);
+
+    // 对照：以前「名义不变」时改开仓价，币数会变成 1000 ÷ 98 ≈ 10.204
+    const legacy = resolveManualLegEconomics({ ...main, entry_price: 98 });
+    expect(legacy.pathSegments[0].quantity).toBeCloseTo(1000 / 98, 10);
+  });
+});

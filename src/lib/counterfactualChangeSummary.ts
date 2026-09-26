@@ -1,4 +1,5 @@
 import { LEG_ROLE_LABELS } from '@/lib/strategyTemplates';
+import { formatManualLegCoinQuantity, manualLegCoinQuantity } from '@/lib/manualLegCoinQuantity';
 import type {
   CampaignCounterfactualChangeSummary,
   CampaignCounterfactualLegChange,
@@ -50,7 +51,8 @@ const FIELD_LABELS: Record<ComparableField, string> = {
   close_time: '平仓时间',
   entry_price: '开仓价',
   exit_price: '平仓价',
-  size_usdt: '仓位',
+  // 【用户要求】编辑器里这一格是币量：只改开仓价时名义随价变、币量不变，摘要不该多出一条「仓位」
+  size_usdt: '币量',
   leverage: '杠杆',
 };
 
@@ -87,6 +89,13 @@ function isFilled(leg: CampaignCounterfactualManualLeg): boolean {
 
 function fieldEqual(field: ComparableField, a: CampaignCounterfactualManualLeg, b: CampaignCounterfactualManualLeg): boolean {
   if (field === 'filled') return isFilled(a) === isFilled(b);
+  if (field === 'size_usdt') {
+    // 按币量比（相对误差）：改开仓价时名义按比例缩放，除法的尾数误差不算改动
+    const left = manualLegCoinQuantity(a);
+    const right = manualLegCoinQuantity(b);
+    if (left == null || right == null) return a.size_usdt === b.size_usdt;
+    return Math.abs(left - right) <= NUMBER_EPSILON * Math.max(1, Math.abs(left), Math.abs(right));
+  }
   const left = a[field];
   const right = b[field];
   if (field === 'open_time' || field === 'close_time') {
@@ -111,7 +120,7 @@ function formatFieldValue(field: ComparableField, leg: CampaignCounterfactualMan
     case 'close_time': return formatCounterfactualStamp(leg.close_time);
     case 'entry_price': return String(leg.entry_price);
     case 'exit_price': return String(leg.exit_price);
-    case 'size_usdt': return `${leg.size_usdt} USDT`;
+    case 'size_usdt': return formatManualLegCoinQuantity(manualLegCoinQuantity(leg));
     case 'leverage': return `${leg.leverage}x`;
     default: return String(leg[field]);
   }
@@ -128,7 +137,7 @@ function changedFieldsBetween(before: CampaignCounterfactualManualLeg, after: Ca
 function describeAddedLeg(leg: CampaignCounterfactualManualLeg): string {
   return `增 ${roleLabel(leg.leg_role)}：${directionLabel(leg.direction)} `
     + `${formatCounterfactualStamp(leg.open_time)} → ${formatCounterfactualStamp(leg.close_time)}，`
-    + `${leg.entry_price} → ${leg.exit_price}，${leg.size_usdt} USDT`;
+    + `${leg.entry_price} → ${leg.exit_price}，币量 ${formatManualLegCoinQuantity(manualLegCoinQuantity(leg))}`;
 }
 
 function describeEditedLeg(

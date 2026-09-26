@@ -65,11 +65,11 @@ describe('buildCounterfactualChangeSummary', () => {
       { id: 'hedge-b', role: 'hedge_initial_b', kind: 'removed', changedFields: [] },
       { id: 'manual-1', role: 'hedge_rolling', kind: 'added', changedFields: [] },
     ]);
-    expect(summary.lines[0]).toBe('改 主力开仓：仓位 1000 USDT → 500 USDT');
+    expect(summary.lines[0]).toBe('改 主力开仓：币量 10 → 5');
     expect(summary.lines[1]).toMatch(/^改 加仓1：平仓时间 \d{2}-\d{2} \d{2}:\d{2} → \d{2}-\d{2} \d{2}:\d{2}；平仓价 105 → 120$/);
     expect(summary.lines[2]).toBe('停用 初始对冲 A');
     expect(summary.lines[3]).toBe('删 初始对冲 B');
-    expect(summary.lines[4]).toMatch(/^增 滚动对冲：空 \d{2}-\d{2} \d{2}:\d{2} → \d{2}-\d{2} \d{2}:\d{2}，95 → 92，500 USDT$/);
+    expect(summary.lines[4]).toMatch(/^增 滚动对冲：空 \d{2}-\d{2} \d{2}:\d{2} → \d{2}-\d{2} \d{2}:\d{2}，95 → 92，币量 5.2631579$/);
   });
 
   it('拿不到编辑器全部腿时，基线里缺席的腿按「删除」计', () => {
@@ -178,5 +178,21 @@ describe('defaultCounterfactualName / formatCounterfactualStamp', () => {
     expect(defaultCounterfactualName(null, ranAt)).toBe('手动调整 01-02 09:05');
     expect(defaultCounterfactualName({ short: '' }, ranAt)).toBe('手动调整 01-02 09:05');
     expect(formatCounterfactualStamp('not-a-date')).toBe('—');
+  });
+});
+
+describe('【用户要求】仓位列改成币量', () => {
+  it('只改开仓价（名义随价按比例变、币量不变）：摘要只写开仓价，不多出一条币量', () => {
+    const baseline = [leg()];
+    const run = [leg({ entry_price: 104.37, size_usdt: 1_000 * (104.37 / 100) })];
+    const summary = buildCounterfactualChangeSummary(baseline, run, run);
+    expect(summary.lines).toEqual(['改 主力开仓：开仓价 100 → 104.37']);
+    expect(summary.legs[0].changedFields).toEqual(['entry_price']);
+  });
+
+  it('改币量：写成「币量 旧 → 新」', () => {
+    const baseline = [leg()];
+    const run = [leg({ size_usdt: 1_250 })];
+    expect(buildCounterfactualChangeSummary(baseline, run, run).lines).toEqual(['改 主力开仓：币量 10 → 12.5']);
   });
 });
