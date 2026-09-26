@@ -19,6 +19,7 @@ import {
   sortCampaignRows,
   sortChainBinsFirstLevel,
   sortChainKey,
+  summarizeSortGroups,
   toggleSortLevel,
   writeCampaignSortParams,
   type CampaignSortChain,
@@ -492,5 +493,47 @@ describe('排序项清单只有一份来源', () => {
     const values = [...block.matchAll(/value: '([A-Za-z]+)'/g)].map(match => match[1]);
     expect(values.length).toBeGreaterThan(0);
     expect([...CAMPAIGN_SORT_MODES].sort()).toEqual([...values].sort());
+  });
+});
+
+describe('【用户要求】排序后的分组统计', () => {
+  it('第一级分档时一档一组（顺序同列表）：场数、胜率、平均 b，后面各级报本组概况', () => {
+    const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
+    const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
+    expect(groups.map(group => group.key)).toEqual([
+      { kind: 'quartile', quartile: 4, lower: 250 },
+      { kind: 'quartile', quartile: 3, lower: 120 },
+      { kind: 'quartile', quartile: 2, lower: -60 },
+      { kind: 'quartile', quartile: 1, lower: null },
+    ]);
+    expect(groups.map(group => group.count)).toEqual([3, 3, 2, 3]);
+    expect(groups.map(group => group.wins)).toEqual([3, 3, 1, 0]);
+    expect(groups[0].meanPayoff).toBeCloseTo((6 + 4.2 + 2.5) / 3);
+    // 第二级镜像止盈：本组已实现（生效）几场
+    expect(groups.map(group => group.levels[1])).toEqual([
+      { kind: 'achieved', hits: 3, count: 3 },
+      { kind: 'achieved', hits: 1, count: 3 },
+      { kind: 'achieved', hits: 1, count: 2 },
+      { kind: 'achieved', hits: 1, count: 3 },
+    ]);
+    // 第一级自己：本档读数的中位数
+    expect(groups[0].levels[0]).toEqual({ kind: 'median', value: 420, count: 3 });
+  });
+
+  it('第一级是镜像止盈时一个档位一组；后面的连续指标报中位数，本组算不出时为 none', () => {
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }];
+    const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
+    expect(groups.every(group => group.key.kind === 'value')).toBe(true);
+    expect(groups.reduce((sum, group) => sum + group.count, 0)).toBe(ROWS.length);
+    const unrealizedLoss = groups.find(group => group.key.kind === 'value' && group.key.value === 0);
+    expect(unrealizedLoss?.levels[1]).toEqual({ kind: 'none' });
+  });
+
+  it('第一级是字母 / 操作时间：只给一组「全部」', () => {
+    const chain: CampaignSortChain = [{ mode: 'alpha', direction: 'asc' }, { mode: 'captureRate', direction: 'desc' }];
+    const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toEqual({ kind: 'all' });
+    expect(groups[0].count).toBe(ROWS.length);
   });
 });

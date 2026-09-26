@@ -630,6 +630,28 @@ describe('战役列表：多级排序', () => {
     expect(screen.getByTestId('sort-chain-add-mirrorTp').getAttribute('title')).toBe('加为第 2 级：盈亏比按四分位分成四档后，同档内再按镜像止盈排');
   }, 15_000);
 
+  it('【用户要求】双击或右键排序链上任一级打开分组统计：一档一行，方向不因双击改变', async () => {
+    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+    const before = order();
+    const toggle = screen.getByTestId('sort-chain-toggle-1');
+    expect(toggle.getAttribute('title')).toContain('双击或右键看分组统计');
+    fireEvent.click(toggle, { detail: 1 });
+    fireEvent.click(toggle, { detail: 2 });
+    fireEvent.doubleClick(toggle);
+    const stats = await screen.findByTestId('sort-chain-stats');
+    expect(screen.getByTestId('sort-chain-level-1')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(order()).toEqual(before);
+    expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('生效 3/3');
+    expect(within(stats).getByTestId('sort-chain-stats-row-4')).toHaveTextContent('Q1 < -0.60');
+    expect(within(stats).getByTestId('sort-chain-stats-total')).toHaveTextContent('合计11');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('sort-chain-stats')).not.toBeInTheDocument());
+    fireEvent.contextMenu(screen.getByTestId('sort-chain-toggle-2'));
+    expect(await screen.findByTestId('sort-chain-stats')).toBeInTheDocument();
+  }, 15_000);
+
   it('分档指标作第一级时不分档：芯片上没有「分档」，「+」的提示与原来一样', async () => {
     renderPage('?sort=mirrorTp&direction=desc&then=captureRate.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());

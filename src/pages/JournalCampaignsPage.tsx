@@ -124,9 +124,12 @@ import {
   selectSortMode,
   sortCampaignRows,
   sortChainKey,
+  summarizeSortGroups,
   toggleSortLevel,
   writeCampaignSortParams,
   type CampaignSortBinning,
+  type SortGroupKey,
+  type SortGroupLevelStat,
   type CampaignSortChain,
   type CampaignSortDirection,
   type CampaignSortMode,
@@ -1053,6 +1056,44 @@ function describeSortLevelEffect(level: number, label: string, effect: SortLevel
   return `${head}：${scope}里，按${label}排了 ${effect.sorted} 场`
     + (effect.tied > 0 ? `；${effect.tied} 场与同组其它场读数相同，先后未变` : '')
     + (effect.missing > 0 ? `；${effect.missing} 场算不出${label}，留在各组末尾` : '');
+}
+
+/** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，重要性写星级，杠杆写倍数。 */
+function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, thresholds: readonly number[] | null): string {
+  if (key.kind === 'all') return '全部';
+  if (key.kind === 'quartile') {
+    return key.lower == null
+      ? `Q1 < ${thresholds ? formatSortBinValue(mode, thresholds[0]) : '—'}`
+      : `Q${key.quartile} ≥ ${formatSortBinValue(mode, key.lower)}`;
+  }
+  if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
+  if (mode === 'importance') return `${key.value} 星`;
+  if (mode === 'leverage') return `${key.value}x`;
+  return String(key.value);
+}
+
+/** 分组统计表里后面各级的格子：连续指标与杠杆写中位数，镜像止盈写生效场数，重要性写平均星级。 */
+function formatSortGroupLevelStat(mode: CampaignSortMode, stat: SortGroupLevelStat): string {
+  switch (stat.kind) {
+    case 'median': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x` : formatSortBinValue(mode, stat.value);
+    case 'achieved': return `生效 ${stat.hits}/${stat.count}`;
+    case 'mean': return `${stat.value.toFixed(1)} 星`;
+    default: return '—';
+  }
+}
+
+/** 表头下那一行小字：这一列报的是什么。 */
+function sortGroupLevelStatCaption(mode: CampaignSortMode): string {
+  if (mode === 'mirrorTp') return '生效场数';
+  if (mode === 'importance') return '平均';
+  if (mode === 'alpha' || mode === 'time') return '';
+  return '中位数';
+}
+
+function formatMeanPayoff(value: number | null): string {
+  if (value == null) return '—';
+  const rounded = Number(value.toFixed(2)) + 0;
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}R`;
 }
 
 function sortDirectionLabel(direction: CampaignSortDirection, mode?: CampaignSortMode): string {
@@ -2087,6 +2128,11 @@ export default function JournalCampaignsPage() {
   const sortBinning = useMemo(() => resolveSortBinning(sortedRows, sortChain), [sortedRows, sortChain]);
   /** 第二级起每一级的作用（本级排了几场）：排序链芯片上的反馈。 */
   const sortLevelEffects = useMemo(() => describeSortLevelEffects(sortedRows, sortChain), [sortedRows, sortChain]);
+  /** 【用户要求】多级排序之后的分组统计：排序链芯片双击 / 右键打开，表在 ⓘ 浮层顶部。 */
+  const sortGroupStats = useMemo(
+    () => (sortChain.length > 1 ? summarizeSortGroups(sortedRows, sortChain) : []),
+    [sortedRows, sortChain],
+  );
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
    * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
@@ -2719,6 +2765,81 @@ export default function JournalCampaignsPage() {
    * 各级连同前面的「›」、ⓘ 连同「清除」各自成组折行，
    * 折下去的那行与 ① 对齐（标签右边整块是一个折行区），「›」不会孤零零挂在行尾。
    */
+  /**
+   * 分组统计表：一组一行（分档时一档一行），列是场数、胜率、平均 b，再加后面各级在本组的读数概况。
+   * 第一级不分档时组名本身就是它的读数，第一级那一列不再重复。
+   */
+  const renderSortGroupStats = () => {
+    const firstMode = sortChain[0].mode;
+    const levelColumns = sortChain
+      .map((level, index) => ({ level, index }))
+      .filter(({ level, index }) => (index > 0 || sortBinning != null) && level.mode !== 'alpha' && level.mode !== 'time');
+    const total = sortGroupStats.reduce(
+      (sum, group) => ({
+        count: sum.count + group.count,
+        payoffCount: sum.payoffCount + group.payoffCount,
+        wins: sum.wins + group.wins,
+        payoffSum: sum.payoffSum + (group.meanPayoff ?? 0) * group.payoffCount,
+      }),
+      { count: 0, payoffCount: 0, wins: 0, payoffSum: 0 },
+    );
+    const winRate = (wins: number, count: number) => (count > 0 ? `${Math.round((wins / count) * 100)}%` : '—');
+    const cell = 'px-1.5 py-1 text-right font-mono tabular-nums whitespace-nowrap';
+    return (
+      <div data-testid="sort-chain-stats" className="mt-2 border-b border-border/50 pb-2">
+        <div className="mb-1 font-medium text-foreground/80">排序后的分组统计</div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[10px] text-muted-foreground">
+            <thead>
+              <tr className="border-b border-border/50 text-foreground/70">
+                <th className="px-1.5 py-1 text-left font-medium">
+                  <span className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_FIRST} mr-1`}>1</span>{SORT_LABEL_BY_MODE[firstMode]}
+                </th>
+                <th className={`${cell} font-medium`}>场数</th>
+                <th className={`${cell} font-medium`}>胜率</th>
+                <th className={`${cell} font-medium`}>平均 b</th>
+                {levelColumns.map(({ level, index }) => (
+                  <th key={level.mode} className={`${cell} font-medium`}>
+                    <span className={`${SORT_LEVEL_BADGE} ${index === 0 ? SORT_LEVEL_BADGE_FIRST : SORT_LEVEL_BADGE_THEN} mr-1`}>{index + 1}</span>
+                    {SORT_LABEL_BY_MODE[level.mode]}
+                    <div className="font-normal text-muted-foreground/70">{sortGroupLevelStatCaption(level.mode)}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortGroupStats.map((group, groupIndex) => (
+                <tr key={groupIndex} data-testid={`sort-chain-stats-row-${groupIndex + 1}`} className="border-b border-border/30">
+                  <td className="px-1.5 py-1 text-left whitespace-nowrap text-foreground/80">
+                    {formatSortGroupKey(firstMode, group.key, sortBinning?.thresholds ?? null)}
+                  </td>
+                  <td className={cell}>{group.count}</td>
+                  <td className={cell}>{winRate(group.wins, group.payoffCount)}</td>
+                  <td className={cell}>{formatMeanPayoff(group.meanPayoff)}</td>
+                  {levelColumns.map(({ level, index }) => (
+                    <td key={level.mode} className={cell}>{formatSortGroupLevelStat(level.mode, group.levels[index])}</td>
+                  ))}
+                </tr>
+              ))}
+              {sortGroupStats.length > 1 && (
+                <tr data-testid="sort-chain-stats-total" className="text-foreground/80">
+                  <td className="px-1.5 py-1 text-left font-medium">合计</td>
+                  <td className={cell}>{total.count}</td>
+                  <td className={cell}>{winRate(total.wins, total.payoffCount)}</td>
+                  <td className={cell}>{formatMeanPayoff(total.payoffCount ? total.payoffSum / total.payoffCount : null)}</td>
+                  {levelColumns.map(({ level }) => <td key={level.mode} className={cell} />)}
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-1 text-[10px] text-muted-foreground/70">
+          组的先后与列表相同。胜率 = b &gt; 0 的场数 ÷ 算得出 b 的场数；中位数只数本组算得出这一项的战役。
+        </div>
+      </div>
+    );
+  };
+
   const renderSortChainBar = () => (
     <div
       data-testid="sort-chain"
@@ -2751,8 +2872,11 @@ export default function JournalCampaignsPage() {
                 type="button"
                 data-testid={`sort-chain-toggle-${index + 1}`}
                 aria-label={`第 ${index + 1} 级：${label}，${directionText}；点击切换方向`}
-                title={`第 ${index + 1} 级：按${label}${directionText}；点击切换方向`}
+                title={`第 ${index + 1} 级：按${label}${directionText}；点击切换方向，双击或右键看分组统计`}
                 onClick={event => { if (event.detail > 1) return; handleSortLevelToggle(index); }}
+                // 双击看统计：第一击已切了方向，这里切回去再打开，排序不变
+                onDoubleClick={event => { handleSortLevelToggle(index); openFormulaPopover(event, 'sortChain'); }}
+                onContextMenu={event => openFormulaPopover(event, 'sortChain')}
                 className={`${SORT_CHAIN_CONTROL} gap-1 pl-1 pr-1.5 hover:bg-[#F0B90B]/10`}
               >
                 <span aria-hidden="true" className={`${SORT_LEVEL_BADGE} ${first ? SORT_LEVEL_BADGE_FIRST : SORT_LEVEL_BADGE_THEN}`}>{index + 1}</span>
@@ -2819,15 +2943,16 @@ export default function JournalCampaignsPage() {
             <Info aria-hidden="true" className="h-3 w-3" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto ${POPOVER_VIEWPORT_MAX_W}`}>
+        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`${sortGroupStats.length ? 'w-[30rem]' : 'w-80'} border-border bg-card p-3 text-[11px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto ${POPOVER_VIEWPORT_MAX_W}`}>
           <div className="font-medium text-foreground">多级排序</div>
+          {sortGroupStats.length > 0 && renderSortGroupStats()}
           <div data-testid="sort-chain-rules" className="mt-2 space-y-1 text-muted-foreground">
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
             <div>第一级是连续数值指标（预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何 / 算术期望）且链上不止一级时，先按四分位分成四档（档界按当前列表算、按封面精度取整，就是那一档里最小的读数），同档内按后面各级排；各级都打平再按第一级本身的数值。镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
-            <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」也能打开这里。</div>
+            <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
             <div>加一级：悬停排序项，点右上角的「+」；手机上长按排序项。单击排序项仍是只按这一项排。</div>
           </div>

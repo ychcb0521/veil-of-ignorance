@@ -584,6 +584,134 @@ export function describeSortLevelEffects<T extends CampaignSortRow>(
   return effects;
 }
 
+// ─── 排序后的分组统计（排序链芯片双击 / 右键打开） ─────────────────────────────
+
+/**
+ * 【用户要求】多级排序之后显示统计数据：按第一级把列表切成组，每组报场数、胜率、平均 b，
+ * 以及后面各级在这一组里的读数概况——看得出「第一级的每一档里，第二级大致是什么水平」。
+ *   · 第一级分档时（连续指标）：一档一组（Q4…Q1，按列表顺序）；
+ *   · 第一级是镜像止盈 / 重要性 / 杠杆：一个读数一组；
+ *   · 第一级是字母 / 操作时间：几乎一场一组，分组没有意义，只给一行「全部」。
+ * 组的先后与列表相同（按排好的行第一次出现的顺序）。胜率与统计概览同一口径：b > 0 记赢，只数算得出 b 的战役。
+ */
+export type SortGroupKey =
+  | { kind: 'quartile'; quartile: SortQuartile; lower: number | null }
+  | { kind: 'value'; value: number }
+  | { kind: 'all' };
+
+export type SortGroupLevelStat =
+  /** 连续指标与杠杆：本组算得出这一项的中位数。 */
+  | { kind: 'median'; value: number; count: number }
+  /** 镜像止盈：本组已实现（生效）的场数。 */
+  | { kind: 'achieved'; hits: number; count: number }
+  /** 重要性：本组平均星级。 */
+  | { kind: 'mean'; value: number; count: number }
+  /** 本组一场都算不出，或这一项（字母 / 操作时间）不做统计。 */
+  | { kind: 'none' };
+
+export type SortGroupSummary = {
+  key: SortGroupKey;
+  count: number;
+  /** 算得出 b 的场数（胜率的分母）。 */
+  payoffCount: number;
+  wins: number;
+  meanPayoff: number | null;
+  /** 与排序链逐级对应；第一级也给（分档时是本档读数的中位数）。 */
+  levels: SortGroupLevelStat[];
+};
+
+function medianOf(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function levelStat<T extends CampaignSortRow>(
+  mode: CampaignSortMode,
+  key: CampaignSortKey<T>,
+  rows: readonly T[],
+): SortGroupLevelStat {
+  if (mode === 'mirrorTp') {
+    // 六档 0..5：3 起是已实现（镜像止盈生效）
+    const hits = rows.filter(row => rowMirrorTpRank(row) >= 3).length;
+    return { kind: 'achieved', hits, count: rows.length };
+  }
+  if (mode === 'importance') {
+    const values = rows.map(row => importanceValue(row.campaign));
+    return values.length === 0 ? { kind: 'none' } : { kind: 'mean', value: values.reduce((sum, value) => sum + value, 0) / values.length, count: values.length };
+  }
+  const read: ((row: T) => number | null) | undefined = mode === 'leverage'
+    ? row => { const value = campaignLeverage(row.campaign, row.legs); return value > 0 ? value : null; }
+    : key.value;
+  if (!read) return { kind: 'none' };
+  const values = rows.map(read).filter(finite);
+  const median = medianOf(values);
+  return median == null ? { kind: 'none' } : { kind: 'median', value: median, count: values.length };
+}
+
+export function summarizeSortGroups<T extends CampaignSortRow>(
+  sortedRows: readonly T[],
+  chain: CampaignSortChain,
+): SortGroupSummary[] {
+  const levels = chain.length > 0 ? chain : DEFAULT_CAMPAIGN_SORT_CHAIN;
+  if (sortedRows.length === 0) return [];
+  const keys = buildCampaignSortKeys<T>();
+  const first = levels[0];
+  const firstKey = keys[first.mode];
+  const binning = resolveSortBinning(sortedRows, levels, keys);
+
+  let groupOf: (row: T) => string;
+  let keyOf: (row: T) => SortGroupKey;
+  if (binning && firstKey.value) {
+    const read = firstKey.value;
+    const quartile = (row: T): SortQuartile => {
+      const value = read(row);
+      return quartileOf(value == null ? Number.NaN : sortBinValue(binning.mode, value), binning.thresholds);
+    };
+    groupOf = row => `q${quartile(row)}`;
+    keyOf = row => {
+      const q = quartile(row);
+      return { kind: 'quartile', quartile: q, lower: q === 1 ? null : binning.thresholds[q - 2] };
+    };
+  } else if (first.mode === 'mirrorTp' || first.mode === 'importance' || first.mode === 'leverage') {
+    const read = (row: T) => (first.mode === 'mirrorTp'
+      ? rowMirrorTpRank(row)
+      : first.mode === 'importance' ? importanceValue(row.campaign) : campaignLeverage(row.campaign, row.legs));
+    groupOf = row => `v${read(row)}`;
+    keyOf = row => ({ kind: 'value', value: read(row) });
+  } else {
+    groupOf = () => 'all';
+    keyOf = () => ({ kind: 'all' });
+  }
+
+  const order: string[] = [];
+  const buckets = new Map<string, { key: SortGroupKey; rows: T[] }>();
+  for (const row of sortedRows) {
+    const id = groupOf(row);
+    let bucket = buckets.get(id);
+    if (!bucket) {
+      bucket = { key: keyOf(row), rows: [] };
+      buckets.set(id, bucket);
+      order.push(id);
+    }
+    bucket.rows.push(row);
+  }
+
+  return order.map(id => {
+    const { key, rows } = buckets.get(id)!;
+    const payoffs = rows.map(rowPayoffRatio).filter(finite);
+    return {
+      key,
+      count: rows.length,
+      payoffCount: payoffs.length,
+      wins: payoffs.filter(value => value > 0).length,
+      meanPayoff: payoffs.length ? payoffs.reduce((sum, value) => sum + value, 0) / payoffs.length : null,
+      levels: levels.map(level => levelStat(level.mode, keys[level.mode], rows)),
+    };
+  });
+}
+
 // ─── 排序链的操作 ─────────────────────────────────────────────────────────────
 
 function flipDirection(direction: CampaignSortDirection): CampaignSortDirection {
