@@ -20,6 +20,16 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => mocks.authValue,
 }));
 
+vi.mock('@/contexts/TradingContext', () => ({
+  useTradingContext: () => ({ tradeHistory: [], ordersMap: {}, filledOrders: [], positionsMap: {} }),
+}));
+
+// 战役列表缓存：操作时间按腿上的客观操作时间算（与战役列表同一个函数）
+const listRows = vi.hoisted(() => ({ rows: [] as unknown[] }));
+vi.mock('@/hooks/useCampaignList', () => ({
+  useCampaignList: () => ({ rows: listRows.rows }),
+}));
+
 vi.mock('@/lib/journalApi', () => ({
   bindLocalTradingRuleSourceCampaign: mocks.bindLocalTradingRuleSourceCampaign,
   createPrinciple: vi.fn(),
