@@ -1136,6 +1136,17 @@ function deletedCampaignRows(rows: TradeCampaign[]): TradeCampaign[] {
     ));
 }
 
+/**
+ * 战役列表的作用域：'active' 是正常列表（deleted_at 为空的行），'deleted' 是回收站（deleted_at 非空的行）。
+ * 回收站视图与正常列表共用同一套装配、缓存、排序与统计，只在这里分流数据源。
+ */
+export type CampaignListScope = 'active' | 'deleted';
+
+/** 按作用域取行：'deleted' 走 deletedCampaignRows（按删除时间倒序），其余一律 activeCampaignRows。 */
+function campaignRowsInScope(rows: TradeCampaign[], scope: CampaignListScope = 'active'): TradeCampaign[] {
+  return scope === 'deleted' ? deletedCampaignRows(rows) : activeCampaignRows(rows);
+}
+
 function counterfactualSortTime(branch: Pick<CampaignCounterfactual, 'created_at'>): number {
   return new Date(branch.created_at).getTime() || 0;
 }
@@ -2240,9 +2251,14 @@ export async function listActiveCampaigns(userId: string, symbol?: string): Prom
   return withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns((data ?? []).map(toCampaign), local)));
 }
 
+/**
+ * 全部战役。scope 默认 'active'（正常列表，与原来逐字相同）；'deleted' 只给回收站里的行，
+ * 排序与 listDeletedCampaigns 一致（按删除时间倒序）。
+ */
 export async function listAllCampaigns(
   userId: string,
   filters?: ListCampaignFilters,
+  scope: CampaignListScope = 'active',
 ): Promise<TradeCampaign[]> {
   let q = supabase.from('trade_campaigns' as never).select('*').eq('user_id', userId);
   if (filters?.status && filters.status !== 'all') q = q.eq('status', filters.status);
@@ -2252,10 +2268,10 @@ export async function listAllCampaigns(
   const { data, error } = await q.order('opened_at', { ascending: false });
   const local = applyCampaignFilters(readLocalCampaigns(userId), filters);
   if (error) {
-    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, activeCampaignRows(local));
+    if (isMissingTradeCampaignsTableError(error)) return withCampaignPreferences(userId, campaignRowsInScope(local, scope));
     return wrap('加载战役列表', error, (data ?? []).map(toCampaign));
   }
-  return withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns((data ?? []).map(toCampaign), local)));
+  return withCampaignPreferences(userId, campaignRowsInScope(mergeCampaigns((data ?? []).map(toCampaign), local), scope));
 }
 
 export async function listVisibleCampaigns(
@@ -2432,6 +2448,11 @@ export async function fetchCampaignSourceRows(
 export interface AssembleCampaignsOptions {
   /** 已在内存里的成交记录；不传则读本地存储（与单场路径同源）。 */
   tradeHistory?: TradeRecord[];
+  /**
+   * 装配哪个作用域的行：默认 'active'（正常列表，只要 deleted_at 为空的行）；'deleted' 只要回收站里的行。
+   * fetchCampaignSourceRows 读回来的是两张表的原始行、不分作用域——同一份远端行按不同作用域各装配一次。
+   */
+  scope?: CampaignListScope;
 }
 
 /**
@@ -2443,10 +2464,10 @@ export function assembleCampaignsWithLegs(
   rows: CampaignSourceRows,
   options: AssembleCampaignsOptions = {},
 ): CampaignWithLegs[] {
-  const campaigns = withCampaignPreferences(userId, activeCampaignRows(mergeCampaigns(
+  const campaigns = withCampaignPreferences(userId, campaignRowsInScope(mergeCampaigns(
     rows.campaigns.map(toCampaign),
     readLocalCampaigns(userId),
-  )));
+  ), options.scope));
   const journals = rows.journals as TradeJournal[];
   const legsByCampaign = new Map<string, TradeJournal[]>();
   for (const leg of journals) {
@@ -2474,8 +2495,8 @@ export function assembleCampaignsWithLegs(
   });
 }
 
-export async function getCampaignsWithLegs(userId: string): Promise<CampaignWithLegs[]> {
-  return assembleCampaignsWithLegs(userId, await fetchCampaignSourceRows(userId));
+export async function getCampaignsWithLegs(userId: string, scope: CampaignListScope = 'active'): Promise<CampaignWithLegs[]> {
+  return assembleCampaignsWithLegs(userId, await fetchCampaignSourceRows(userId), { scope });
 }
 
 /** 本地存储的一次性快照。147 场各读一遍会把同一份 JSON 解析 588 次（实测 2~6 秒纯阻塞）。 */

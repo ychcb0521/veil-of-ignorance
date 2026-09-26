@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Star,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
@@ -910,6 +911,15 @@ function parseCampaignRangeParams(search: string): CampaignOperationRange {
 }
 
 /**
+ * 回收站视图的开关也在 URL 里（?bin=1）：与排序、时间段、散点图并存，刷新、分享链接、从详情返回都回到回收站。
+ * 回收站 = 同一个页面、同一套统计 / 排序 / 封面 / 批量下载，只是数据源换成回收站里的战役（useCampaignList 的作用域）。
+ */
+const CAMPAIGN_BIN_PARAM = 'bin';
+function parseCampaignBinParam(search: string): boolean {
+  return new URLSearchParams(search).get(CAMPAIGN_BIN_PARAM) === '1';
+}
+
+/**
  * 带方向的数字用的正 / 负色。深色主题沿用币安绿 / 红；浅色主题换成与散点图 --chart-profit / --chart-loss
  * 同一对更深的绿 / 红——#0ECB81 压在浅底上对比度只有 2:1 左右，数字发虚。
  */
@@ -1288,6 +1298,10 @@ type CampaignCardProps = {
   onToggleDetails: (event: MouseEvent<HTMLButtonElement>, campaignId: string) => void;
   onImportanceChange: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign, weight: number) => void;
   onDelete: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
+  /** 回收站视图：右侧的删除按钮换成「恢复」与「彻底删除」，其余一切与正常列表相同。 */
+  binView?: boolean;
+  onRestore?: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
+  onPermanentDelete?: (event: MouseEvent<HTMLButtonElement>, campaign: TradeCampaign) => void;
 };
 
 /**
@@ -1308,6 +1322,9 @@ const CampaignCard = memo(function CampaignCard({
   onToggleDetails,
   onImportanceChange,
   onDelete,
+  binView = false,
+  onRestore,
+  onPermanentDelete,
 }: CampaignCardProps) {
   const {
     campaign,
@@ -1511,7 +1528,33 @@ const CampaignCard = memo(function CampaignCard({
               重要性 {importance}/5
             </span>
           )}
-          {isOwnCampaign && (
+          {/* 回收站视图：删除换成「恢复」与「彻底删除」（彻底删除要二次确认，与已删除战役弹窗里的一致）；正常列表照旧是删除 */}
+          {isOwnCampaign && binView ? (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                title="恢复：回到正常的战役列表"
+                data-testid="campaign-bin-restore"
+                onClick={(event) => onRestore?.(event, campaign)}
+                className="inline-flex h-7 items-center gap-1 rounded border border-border/80 bg-background/50 px-2 text-[10px] text-foreground/80 transition-colors hover:border-[#F0B90B]/50 hover:bg-[#F0B90B]/10 hover:text-[#8F6B00] disabled:opacity-50 dark:hover:text-[#F0B90B]"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                恢复
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                title="彻底删除：无法恢复"
+                aria-label={`彻底删除 ${campaign.title}`}
+                data-testid="campaign-bin-purge"
+                onClick={(event) => onPermanentDelete?.(event, campaign)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/80 bg-background/50 text-muted-foreground transition-colors hover:border-[#F6465D]/40 hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : isOwnCampaign && (
             <button
               type="button"
               disabled={busy}
@@ -1698,6 +1741,8 @@ export default function JournalCampaignsPage() {
   const nav = useNavigate();
   const location = useLocation();
   const initialSortChain = useMemo(() => parseCampaignSortChain(location.search), [location.search]);
+  /** 回收站视图（?bin=1）：同一个页面、同一套一切，只是列表缓存换成回收站那一份（见 useCampaignList 的作用域）。 */
+  const binView = useMemo(() => parseCampaignBinParam(location.search), [location.search]);
   const { user, profile } = useAuth();
   // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
   const userId = user?.id;
@@ -1717,7 +1762,7 @@ export default function JournalCampaignsPage() {
   const {
     rows, setRows, complete: campaignRowsComplete, refreshing, loaded, total,
     error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
-  } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap });
+  } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap }, binView ? 'deleted' : 'active');
   const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
   const campaignLoadProgress = { loaded, total };
   const [busyCampaignId, setBusyCampaignIdState] = useState<string | null>(null);
@@ -2691,6 +2736,104 @@ export default function JournalCampaignsPage() {
     }
   };
 
+  /**
+   * 进入 / 离开回收站视图：只改 URL 上的 bin 开关，排序、时间段、散点图等参数原样保留（回收站与正常列表共用它们）。
+   * 与排序不同，这里 push 一条 history 记录：浏览器后退就回到进入前的那个视图。
+   */
+  const setBinView = (next: boolean) => {
+    const params = new URLSearchParams(location.search);
+    params.delete('scope');
+    if (next) params.set(CAMPAIGN_BIN_PARAM, '1');
+    else params.delete(CAMPAIGN_BIN_PARAM);
+    const search = params.toString();
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' });
+  };
+  const enterBin = () => {
+    setDeletedOpen(false);
+    setBinView(true);
+  };
+  const leaveBin = () => setBinView(false);
+
+  /**
+   * 乐观地把一行从当前列表拿掉，返回「放回原处」：失败时只把这一行放回去，不整表回滚
+   * （期间别的行可能已经被后台核对更新过）。回收站里的恢复 / 彻底删除共用。
+   */
+  const removeRowOptimistically = useCallback((campaignId: string) => {
+    let removed: { row: CampaignCardData; index: number } | null = null;
+    setRows(prev => {
+      const index = prev.findIndex(row => row.campaign.id === campaignId);
+      if (index < 0) return prev;
+      removed = { row: prev[index], index };
+      return prev.filter(row => row.campaign.id !== campaignId);
+    });
+    return () => {
+      const restore = removed as { row: CampaignCardData; index: number } | null;
+      if (!restore) return;
+      setRows(prev => {
+        if (prev.some(row => row.campaign.id === campaignId)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(restore.index, next.length), 0, restore.row);
+        return next;
+      });
+    };
+  }, [setRows]);
+
+  /**
+   * 回收站卡片上的「恢复」：这一行从回收站消失；正常列表那一份缓存下次进入时按增量读回它（updated_at 变了）。
+   * 与卡片上的其他回调一样按引用 memo，不依赖 rows / 正在忙的那一场。
+   */
+  const handleBinRestoreCampaign = useCallback(async (
+    event: MouseEvent<HTMLButtonElement>,
+    campaign: TradeCampaign,
+  ) => {
+    event.stopPropagation();
+    if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
+    const finishMutation = beginMutation();
+    setBusyCampaignId(campaign.id);
+    const putBack = removeRowOptimistically(campaign.id);
+    try {
+      // 先等后台正在跑的那一场自愈落地再写（最多等 2 s）；乐观更新已经画上了
+      await waitForCampaignListHeal();
+      await restoreCampaign(campaign.id);
+      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      toast.success('战役已恢复，回到正常列表可以看到');
+    } catch (error) {
+      putBack();
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyCampaignId(null);
+      finishMutation();
+    }
+  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId]);
+
+  /** 回收站卡片上的「彻底删除」：二次确认的措辞与已删除战役弹窗里的一致。 */
+  const handleBinPurgeCampaign = useCallback(async (
+    event: MouseEvent<HTMLButtonElement>,
+    campaign: TradeCampaign,
+  ) => {
+    event.stopPropagation();
+    if (!userId || campaign.user_id !== userId || busyCampaignIdRef.current === campaign.id) return;
+    const confirmed = window.confirm(
+      `永久删除战役「${campaign.title}」？\n\n此操作无法恢复；原始交易记录不会被删除。`,
+    );
+    if (!confirmed) return;
+    const finishMutation = beginMutation();
+    setBusyCampaignId(campaign.id);
+    const putBack = removeRowOptimistically(campaign.id);
+    try {
+      await waitForCampaignListHeal();
+      await permanentlyDeleteCampaign(campaign.id);
+      setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
+      toast.success('战役已永久删除');
+    } catch (error) {
+      putBack();
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyCampaignId(null);
+      finishMutation();
+    }
+  }, [userId, beginMutation, removeRowOptimistically, setBusyCampaignId]);
+
   const handleCampaignDetailsToggle = useCallback((
     event: MouseEvent<HTMLButtonElement>,
     campaignId: string,
@@ -2708,20 +2851,25 @@ export default function JournalCampaignsPage() {
     if (!user || deletedBusyId) return;
     const finishMutation = beginMutation();
     setDeletedBusyId(campaign.id);
+    // 回收站视图里这一行就在列表上：恢复后它从回收站消失，不把恢复的行插进当前（回收站的）列表
+    const putBack = binView ? removeRowOptimistically(campaign.id) : null;
     try {
       await waitForCampaignListHeal();
       await restoreCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
-      const details = await getCampaignFullData(campaign.id);
-      const exitPriceCorrections = await fetchLegExitPriceCorrections(
-        details.campaign.symbol,
-        details.legs,
-        details.tradeRecords,
-      );
-      const restoredRow = buildCampaignCardData(details, exitPriceCorrections);
-      setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
+      if (!binView) {
+        const details = await getCampaignFullData(campaign.id);
+        const exitPriceCorrections = await fetchLegExitPriceCorrections(
+          details.campaign.symbol,
+          details.legs,
+          details.tradeRecords,
+        );
+        const restoredRow = buildCampaignCardData(details, exitPriceCorrections);
+        setRows(current => [restoredRow, ...current.filter(item => item.campaign.id !== campaign.id)]);
+      }
       toast.success('战役已恢复');
     } catch (error) {
+      putBack?.();
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeletedBusyId(null);
@@ -2736,15 +2884,20 @@ export default function JournalCampaignsPage() {
     );
     if (!confirmed) return;
     setDeletedBusyId(campaign.id);
+    // 回收站视图里这一行就在列表上：先拿掉，写入结束后以远端为准核对一次
+    const finishMutation = binView ? beginMutation() : null;
+    const putBack = binView ? removeRowOptimistically(campaign.id) : null;
     try {
       await waitForCampaignListHeal();
       await permanentlyDeleteCampaign(campaign.id);
       setDeletedCampaigns(current => current.filter(item => item.id !== campaign.id));
       toast.success('战役已永久删除');
     } catch (error) {
+      putBack?.();
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeletedBusyId(null);
+      finishMutation?.();
     }
   };
 
@@ -3199,25 +3352,58 @@ export default function JournalCampaignsPage() {
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-3 px-6">
           <BackButton to="/" />
           <div>
-            <h1 className="text-[14px] font-medium">交易战役</h1>
-            <p className="text-[11px] text-muted-foreground">复盘的高层单位</p>
+            <h1 className="flex items-center gap-2 text-[14px] font-medium">
+              交易战役
+              {/* 回收站视图的标识：琥珀色小标签，说明放在悬停提示里 */}
+              {binView && (
+                <span
+                  data-testid="campaign-bin-badge"
+                  title="回收站视图：只显示回收站里的战役；统计、时间段、排序、封面与批量下载都与正常列表相同"
+                  className="inline-flex h-[18px] items-center gap-1 rounded border border-[#F0B90B]/50 bg-[#F0B90B]/10 px-1.5 text-[10px] font-medium text-[#8F6B00] dark:text-[#F0B90B]"
+                >
+                  <ArchiveRestore aria-hidden="true" className="h-3 w-3" />
+                  回收站
+                </span>
+              )}
+            </h1>
+            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : '复盘的高层单位'}</p>
           </div>
           <div className="flex-1" />
-          <button
-            type="button"
-            onClick={() => nav('/journal/campaigns/classify')}
-            className="inline-flex h-8 items-center gap-1 rounded border border-border bg-card px-3 text-[12px] hover:bg-accent"
-          >
-            <FolderPlus className="w-3.5 h-3.5" />
-            归类历史交易
-          </button>
+          {/* 回收站视图下没有「归类历史交易」（新战役不会归类进回收站），换成「返回战役」 */}
+          {binView ? (
+            <button
+              type="button"
+              onClick={leaveBin}
+              data-testid="campaign-bin-leave"
+              className="inline-flex h-8 items-center gap-1 rounded border border-border bg-card px-3 text-[12px] hover:bg-accent"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              返回战役
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => nav('/journal/campaigns/classify')}
+              data-testid="campaign-classify-entry"
+              className="inline-flex h-8 items-center gap-1 rounded border border-border bg-card px-3 text-[12px] hover:bg-accent"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+              归类历史交易
+            </button>
+          )}
+          {/* 回收站图标照旧打开「已删除战役」弹窗；回收站视图下点亮（琥珀）表示当前就在回收站 */}
           <button
             type="button"
             onClick={() => void handleDeletedOpenChange(true)}
-            title="已删除战役"
+            title={binView ? '已删除战役（当前在回收站视图）' : '已删除战役'}
             aria-label={`已删除战役，共 ${deletedCampaigns.length} 场`}
+            aria-pressed={binView}
             data-testid="deleted-campaigns-entry"
-            className="inline-flex h-8 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-muted-foreground/45 transition-colors hover:border-border/60 hover:bg-accent hover:text-muted-foreground"
+            className={`inline-flex h-8 items-center gap-1 rounded border px-1.5 text-[10px] transition-colors ${
+              binView
+                ? 'border-[#F0B90B]/50 bg-[#F0B90B]/10 text-[#8F6B00] hover:bg-[#F0B90B]/20 dark:text-[#F0B90B]'
+                : 'border-transparent text-muted-foreground/45 hover:border-border/60 hover:bg-accent hover:text-muted-foreground'
+            }`}
           >
             <ArchiveRestore className="h-3.5 w-3.5" />
             {deletedCampaigns.length > 0 && <span>{deletedCampaigns.length}</span>}
@@ -4474,18 +4660,27 @@ export default function JournalCampaignsPage() {
                   整表共 {rows.length} 场。换一个时间段，或点上方「操作时间」选回全部。
                 </div>
               </>
-            ) : (
+            ) : SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0 ? (
               <>
                 <div className="text-[13px] font-medium">
-                  {SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0
-                    ? `暂无${SORT_EMPTY_HINTS[primarySort.mode]!.noun}的战役`
-                    : '尚无战役'}
+                  {`暂无${SORT_EMPTY_HINTS[primarySort.mode]!.noun}的战役`}
                 </div>
                 <div className="text-[12px] text-muted-foreground">
-                  {SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0
-                    ? SORT_EMPTY_HINTS[primarySort.mode]!.hint
-                    : '你下次开主力单时会自动创建第一个战役'}
+                  {SORT_EMPTY_HINTS[primarySort.mode]!.hint}
                 </div>
+              </>
+            ) : binView ? (
+              // 回收站一场都没有：与「尚无战役」区分开，别让人以为战役丢了
+              <>
+                <div className="text-[13px] font-medium" data-testid="campaign-bin-empty">回收站是空的</div>
+                <div className="text-[12px] text-muted-foreground">
+                  删除的战役会移到这里，可随时恢复或彻底删除；点上方「返回战役」回到正常列表。
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[13px] font-medium">尚无战役</div>
+                <div className="text-[12px] text-muted-foreground">你下次开主力单时会自动创建第一个战役</div>
               </>
             )}
           </div>
@@ -4508,6 +4703,9 @@ export default function JournalCampaignsPage() {
                 onToggleDetails={handleCampaignDetailsToggle}
                 onImportanceChange={handleImportanceChange}
                 onDelete={handleDeleteCampaign}
+                binView={binView}
+                onRestore={handleBinRestoreCampaign}
+                onPermanentDelete={handleBinPurgeCampaign}
               />
             ))}
           </div>
@@ -4571,6 +4769,28 @@ export default function JournalCampaignsPage() {
             <DialogDescription className="text-[11px]">
               删除的战役不会进入列表与统计；恢复后会回到原来的战役记录。
             </DialogDescription>
+            {/* 进入回收站视图：与正常列表同一套排序 / 统计 / 封面 / 批量下载，只是数据源换成回收站里的战役。
+                回收站为空时停用；已经在回收站视图里时也停用（说明放在悬停提示里）。 */}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                disabled={binView || deletedLoading || deletedCampaigns.length === 0}
+                onClick={enterBin}
+                data-testid="campaign-bin-enter"
+                title={binView
+                  ? '当前已经在回收站视图里'
+                  : deletedCampaigns.length === 0
+                    ? '回收站是空的'
+                    : '在列表里查看回收站：同一套排序、统计、封面与批量下载'}
+                className="inline-flex h-7 items-center gap-1 rounded border border-[#F0B90B]/50 bg-[#F0B90B]/10 px-2 text-[11px] font-medium text-[#8F6B00] transition-colors hover:bg-[#F0B90B]/20 disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#F0B90B]"
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" />
+                进入回收站
+              </button>
+              <span className="text-[10px] text-muted-foreground/70">
+                {binView ? '当前就在回收站视图里' : '在列表里查看：排序、统计、批量下载与正常战役相同'}
+              </span>
+            </div>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-y-auto px-5 py-2">
             {deletedLoading ? (

@@ -10,6 +10,7 @@ import JournalCampaignsPage from '../JournalCampaignsPage';
 beforeEach(() => {
   clearCampaignListCaches();
   restoredIds.clear();
+  purgedIds.clear();
 });
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
@@ -22,15 +23,18 @@ vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   };
 });
 
-const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign, restoredIds } = vi.hoisted(() => {
+const { mockUser, mockListDeletedCampaigns, mockRestoreCampaign, mockPermanentlyDeleteCampaign, restoredIds, purgedIds } = vi.hoisted(() => {
   /** 已恢复的战役：恢复之后的远端核对要读得到它，像真的 Supabase 一样。 */
   const restoredIds = new Set<string>();
+  /** 彻底删除的战役：远端再也读不到。 */
+  const purgedIds = new Set<string>();
   return {
     mockUser: { id: 'user-1', email: 'desk@example.com' },
     mockListDeletedCampaigns: vi.fn(async () => []),
     mockRestoreCampaign: vi.fn(async (id: string) => { restoredIds.add(id); }),
-    mockPermanentlyDeleteCampaign: vi.fn(async () => undefined),
+    mockPermanentlyDeleteCampaign: vi.fn(async (id: string) => { purgedIds.add(id); }),
     restoredIds,
+    purgedIds,
   };
 });
 const mockTrading = vi.hoisted(() => ({
@@ -186,11 +190,17 @@ vi.mock('@/lib/journalApi', () => ({
   listAllCampaigns: vi.fn(async () => campaigns),
   // 远端只给原始行，装配是纯本地的一步；这里的装配只是把 fixture 的 legs 接回去。
   fetchCampaignSourceRows: vi.fn(async () => ({
-    campaigns: [...campaigns, ...(restoredIds.has(deletedCampaign.id) ? [{ ...deletedCampaign, deleted_at: null }] : [])],
+    // 回收站里的那场也在原始行里（像真的表一样），作用域在装配时分流
+    campaigns: [
+      ...campaigns,
+      ...(purgedIds.has(deletedCampaign.id) ? [] : [restoredIds.has(deletedCampaign.id) ? { ...deletedCampaign, deleted_at: null } : deletedCampaign]),
+    ],
     journals: [],
   })),
-  assembleCampaignsWithLegs: (_userId: string, rows: { campaigns: TradeCampaign[] }) => (
-    rows.campaigns.map(campaign => ({ campaign, legs: legsByCampaign[campaign.id] ?? [] }))
+  assembleCampaignsWithLegs: (_userId: string, rows: { campaigns: TradeCampaign[] }, options?: { scope?: 'active' | 'deleted' }) => (
+    rows.campaigns
+      .filter(campaign => (options?.scope === 'deleted') === Boolean(campaign.deleted_at))
+      .map(campaign => ({ campaign, legs: legsByCampaign[campaign.id] ?? [] }))
   ),
   listDeletedCampaigns: mockListDeletedCampaigns,
   permanentlyDeleteCampaign: mockPermanentlyDeleteCampaign,
@@ -2103,4 +2113,92 @@ describe('JournalCampaignsPage sorting', () => {
     await waitFor(() => expect(screen.queryByTestId('deleted-campaign-row')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
   });
+});
+
+describe('【用户要求】回收站平行世界', () => {
+  it('已删除战役弹窗顶部「进入回收站」：同一个页面只显示回收站里的战役，写进地址栏；「返回战役」回到正常列表', async () => {
+    mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=desc']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    await waitFor(() => expect(screen.getByTestId('deleted-campaigns-entry')).toHaveTextContent('1'));
+    fireEvent.click(screen.getByTestId('deleted-campaigns-entry'));
+    const enter = await screen.findByTestId('campaign-bin-enter');
+    await waitFor(() => expect(enter).not.toBeDisabled());
+    fireEvent.click(enter);
+
+    // 同一个页面：只剩回收站那一场，排序参数原样保留，顶栏标出回收站、「归类历史交易」换成「返回战役」
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
+    expect(screen.getByText('Deleted Campaign')).toBeInTheDocument();
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('sort=importance');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('bin=1');
+    expect(screen.getByTestId('campaign-bin-badge')).toHaveTextContent('回收站');
+    expect(screen.queryByTestId('campaign-classify-entry')).not.toBeInTheDocument();
+    // 排序栏、统计概览照常在
+    expect(screen.getByTestId('campaign-sort-importance')).toBeInTheDocument();
+    // 卡片上的删除换成恢复 / 彻底删除
+    expect(screen.getByTestId('campaign-bin-restore')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-bin-purge')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('campaign-bin-leave'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('bin=1');
+    expect(screen.queryByTestId('campaign-bin-badge')).not.toBeInTheDocument();
+  }, 15_000);
+
+  it('?bin=1 直接进回收站；卡片上「恢复」后这一场从回收站消失，回到正常列表能看到', async () => {
+    mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('campaign-bin-restore'));
+    await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(screen.queryAllByTestId('campaign-card')).toHaveLength(0));
+    expect(await screen.findByTestId('campaign-bin-empty')).toHaveTextContent('回收站是空的');
+    fireEvent.click(screen.getByTestId('campaign-bin-leave'));
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
+  }, 15_000);
+
+  it('回收站卡片上「彻底删除」要二次确认；取消就什么都不做，确认后从回收站消失', async () => {
+    mockListDeletedCampaigns.mockResolvedValue([deletedCampaign]);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('campaign-bin-purge'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(mockPermanentlyDeleteCampaign).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('campaign-bin-purge'));
+    await waitFor(() => expect(mockPermanentlyDeleteCampaign).toHaveBeenCalledWith('deleted-campaign'));
+    await waitFor(() => expect(screen.queryAllByTestId('campaign-card')).toHaveLength(0));
+    confirm.mockRestore();
+  }, 15_000);
+
+  it('从回收站点进战役详情，URL 带着 bin=1，返回时仍回到回收站', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?bin=1']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
+    fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
+    expect(await screen.findByTestId('location-probe')).toHaveTextContent('/journal/campaigns/deleted-campaign?bin=1');
+  }, 15_000);
 });

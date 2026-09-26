@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { getCampaignListCache, type CampaignListLocalInputs } from '@/lib/campaignListCache';
+import type { CampaignListScope } from '@/lib/journalApi';
 
 /** 窗口焦点 / 可见 / 联网触发的远端核对最多每分钟一次：切个窗口回来不该重读整张表。 */
 export const CAMPAIGN_LIST_FOCUS_REFRESH_MS = 60_000;
@@ -14,9 +15,14 @@ const REMOTE_STORAGE_KEYS = ['trade_campaigns', 'trade_campaign_preferences', 't
  * 稳定用户 id 而非 auth.user 对象：刷新 token 不重启加载。
  * inputs 是交易上下文里已经在内存中的那几份引用：核对直接用它们，不再解析本地存储里的几 MB 成交记录；
  * 它们的引用变了才触发本地核对，实时行情 priceMap 不参与。
+ * scope 选哪一份缓存：默认 'active'（正常列表）；'deleted' 是回收站视图，换作用域就换到另一份缓存（各自记着自己的行）。
  */
-export function useCampaignList(userId: string | undefined, inputs: CampaignListLocalInputs) {
-  const cache = useMemo(() => getCampaignListCache(userId ?? ''), [userId]);
+export function useCampaignList(
+  userId: string | undefined,
+  inputs: CampaignListLocalInputs,
+  scope: CampaignListScope = 'active',
+) {
+  const cache = useMemo(() => getCampaignListCache(userId ?? '', scope), [userId, scope]);
   const snapshot = useSyncExternalStore(cache.subscribe, cache.getSnapshot);
   const { tradeHistory, ordersMap, filledOrders, positionsMap } = inputs;
   const previousInputs = useRef([cache, tradeHistory, ordersMap, filledOrders, positionsMap]);

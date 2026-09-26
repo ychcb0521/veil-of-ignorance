@@ -3,6 +3,7 @@ import {
   createUserLocalSnapshotReader,
   fetchCampaignSourceRows,
   getCampaignFullData,
+  type CampaignListScope,
   type CampaignSourceRows,
   type CampaignWithLegs,
   type UserLocalSnapshot,
@@ -648,6 +649,11 @@ export interface CampaignListCacheOptions {
   correctionsRetryMs?: number;
   /** 重拉间隔翻倍的上限，见 CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS。 */
   correctionsRetryMaxMs?: number;
+  /**
+   * 这份缓存装配哪个作用域的行：默认 'active'（正常列表）；'deleted' 是回收站视图那一份，
+   * 同一套读取、核对、乐观编辑与平仓价校正，只是不排后台自愈（已删的战役不进统计，落库汇总没有收敛的必要）。
+   */
+  scope?: CampaignListScope;
 }
 
 /**
@@ -676,6 +682,7 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
   const healWatchdogMs = options.healWatchdogMs ?? CAMPAIGN_LIST_HEAL_SINGLE_FLIGHT_WAIT_MS;
   const correctionsRetryMs = options.correctionsRetryMs ?? CAMPAIGN_LIST_CORRECTIONS_RETRY_MS;
   const correctionsRetryMaxMs = options.correctionsRetryMaxMs ?? CAMPAIGN_LIST_CORRECTIONS_RETRY_MAX_MS;
+  const scope: CampaignListScope = options.scope ?? 'active';
   const generation = cacheGeneration;
   let snapshot: CampaignListSnapshot = {
     rows: [], complete: false, refreshing: false, loaded: 0, total: 0, failedCount: 0, error: null,
@@ -743,7 +750,7 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
       && assembled.rows.journals === rows.journals && assembled.tradeHistory === local.tradeHistory) {
       return assembled.sources;
     }
-    const sources = assembleCampaignsWithLegs(userId, rows, { tradeHistory: local.tradeHistory });
+    const sources = assembleCampaignsWithLegs(userId, rows, { tradeHistory: local.tradeHistory, scope });
     assembled = { rows, tradeHistory: local.tradeHistory, sources };
     return sources;
   };
@@ -870,7 +877,9 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
   }
   /** 读取完成 / 晚到的校正落地时调用：只做 O(行数) 的内存判断与入队。 */
   const queueDivergedCampaigns = () => {
-    if (!healAlive()) return;
+    // 回收站那一份从不自愈：里面的行本来就带 deleted_at（storedOutcomeDiverges 也会跳过），这里按作用域整体短路，
+    // 不依赖每一行的字段——已删的战役不进统计，落库汇总偏不偏离都没有收敛的必要
+    if (scope === 'deleted' || !healAlive()) return;
     for (const [id, entry] of cachedRows) {
       if (!healAttempted.has(id) && storedOutcomeDiverges(entry)) healQueue.add(id);
     }
@@ -1146,12 +1155,17 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
 
 const userCaches = new Map<string, ReturnType<typeof createCampaignListCache>>();
 
-export function getCampaignListCache(userId: string) {
+/**
+ * 按「用户 + 作用域」各一份：正常列表（默认 'active'）与回收站视图（'deleted'）互不干扰——
+ * 正常列表那一份的读取、核对、后台自愈与原来一字不变；回收站那一份只在进入回收站时才建。
+ */
+export function getCampaignListCache(userId: string, scope: CampaignListScope = 'active') {
   activeUserId = userId;
-  let cache = userCaches.get(userId);
+  const key = `${scope}:${userId}`;
+  let cache = userCaches.get(key);
   if (!cache) {
-    cache = createCampaignListCache(userId);
-    userCaches.set(userId, cache);
+    cache = createCampaignListCache(userId, { scope });
+    userCaches.set(key, cache);
   }
   return cache;
 }

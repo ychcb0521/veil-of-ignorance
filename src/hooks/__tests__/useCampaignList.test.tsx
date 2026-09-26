@@ -94,7 +94,7 @@ describe('useCampaignList triggers', () => {
     const tradeHistory = [{ id: 'r1', symbol: 'BTCUSDT', action: 'CLOSE' } as never];
     rerender({ inputs: { ...baseInputs, tradeHistory } });
     await waitFor(() => expect(assembleCampaignsWithLegs).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(assembleCampaignsWithLegs).mock.calls[1][2]).toEqual({ tradeHistory });
+    expect(vi.mocked(assembleCampaignsWithLegs).mock.calls[1][2]).toEqual({ tradeHistory, scope: 'active' });
     expect(data.read).toHaveBeenLastCalledWith({ ...baseInputs, tradeHistory });
     expect(fetchCampaignSourceRows).toHaveBeenCalledTimes(1);
 

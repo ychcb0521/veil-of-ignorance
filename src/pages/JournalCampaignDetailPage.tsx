@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, Sparkles, Trash2 } from 'lucide-react';
+import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
@@ -133,6 +133,7 @@ import {
   type CampaignDeviationNote,
   listCounterfactuals,
   listVisibleCampaigns,
+  restoreCampaign,
   runCustomCounterfactual,
 } from '@/lib/journalApi';
 import { summarizeCampaignPerformance, type CampaignPerformanceSummary } from '@/lib/kellySizing';
@@ -891,6 +892,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     minHeight: CAMPAIGN_CHART_MIN_HEIGHT,
   });
   const [isOwner, setIsOwner] = useState(true);
+  /** 「这场战役在回收站里」提示上的「恢复」正在写。 */
+  const [restoringFromBin, setRestoringFromBin] = useState(false);
   const [campaignPerformance, setCampaignPerformance] = useState<CampaignPerformanceSummary | null>(null);
   const [campaignAsymmetricRisk, setCampaignAsymmetricRisk] = useState<AsymmetricRiskMetricsSummary | null>(null);
   const [campaignPerformanceLoading, setCampaignPerformanceLoading] = useState(false);
@@ -2249,6 +2252,24 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     nav(`/journal/campaigns${location.search}`);
   };
 
+  /**
+   * 从回收站视图点进来的战役带着 deleted_at：顶部一条提示配「恢复」。恢复只清 deleted_at（与列表页的恢复同一个写接口），
+   * 提示随即消失；列表页两份缓存下次进入时各自按增量读回这一行（正常列表看得到它、回收站里没有它）。
+   */
+  const handleRestoreFromBin = async () => {
+    if (!campaign || !isOwner || restoringFromBin) return;
+    setRestoringFromBin(true);
+    try {
+      await restoreCampaign(campaign.id);
+      setCampaign(current => (current && current.id === campaign.id ? { ...current, deleted_at: null } : current));
+      toast.success('战役已恢复，回到正常列表可以看到');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRestoringFromBin(false);
+    }
+  };
+
   if (batchExport) {
     const chartSelected = batchExport.options.sections.chart !== false;
     const overviewSelected = batchExport.options.sections.overview !== false;
@@ -2345,6 +2366,30 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
+        {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
+        {campaign.deleted_at && (
+          <div
+            data-testid="campaign-bin-notice"
+            className="flex items-center gap-2 rounded border border-[#F0B90B]/30 bg-[#F0B90B]/10 px-3 py-2 text-[11px] text-[#8F6B00] dark:text-[#F0B90B]"
+          >
+            <ArchiveRestore aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              这场战役在回收站里：不进正常列表与统计；恢复后回到原来的战役记录。
+            </span>
+            {isOwner && (
+              <button
+                type="button"
+                disabled={restoringFromBin}
+                onClick={() => void handleRestoreFromBin()}
+                data-testid="campaign-bin-restore"
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-[#F0B90B]/45 px-2 text-[10px] font-medium transition-colors hover:bg-[#F0B90B]/20 disabled:opacity-50"
+              >
+                <RotateCcw aria-hidden="true" className="h-3 w-3" />
+                恢复
+              </button>
+            )}
+          </div>
+        )}
         {canSuggestEnd && (
           <div className="text-[11px] text-[#F0B90B] bg-[#F0B90B]/10 px-3 py-2 rounded border border-[#F0B90B]/30">
             本战役看起来已经结束（主仓全平且无活跃挂单）。建议立即点击右上角[结束战役]录入最终复盘。
