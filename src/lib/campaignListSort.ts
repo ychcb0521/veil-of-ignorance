@@ -394,13 +394,18 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
  * 显示出来与封面对得上（「Q4 ≥ 2.32」= Q4 里最小的一场就是 2.32），不会出现谁也不是的 2.315。
  * 一个值也没有时为 null；只有一个值时三条档界都等于它（全部落在 Q4）。
  *
- * 【用户要求】「负值不能与正值在同一档位」（盈亏比 Q2 = −0.30 至 0.42 就不对）：带正负的指标里 0 一定是档界。
- * 四分位切完后若有一档同时含负值与非负值，把它靠 0 的那条档界挪到 0：
- *   · 这一档负值多（或持平）→ 上界挪到 0，它只留负值，非负值并入上一档；否则下界挪到 0，负值并入下一档；
- *   · Q1 没有下界只能挪上界，Q4 没有上界只能挪下界。
- * 恰好为 0 的读数（持平）归非负那一侧。这条档界显示为 0（几何期望显示 1.00），是「最小读数」规则唯一的例外。
+ * 【用户要求】档界要落在有意义的分界线上（sortBinAnchors）：先是「负值不能与正值在同一档位」，
+ * 后来补充「加仓效用 1、盈亏比 −1、涨跌幅 / 涨跌幅倍数正负、几何期望 0.9 有意义」。
+ * 四分位切完后，按优先顺序逐个处理分界线：若有一档跨过它（档内既有 < 它的读数、也有 ≥ 它的读数），
+ * 把这一档靠它的那条档界挪到它上面：
+ *   · 这一档在它下面的读数多（或持平）→ 挪上界，否则挪下界；那条已被别的分界线占用、或这一档是 Q1 / Q4 没有那条档界时，挪另一条；
+ *   · 两条都用不了（四档装不下这么多分界线）就跳过这一条，优先顺序靠前的先占。
+ * 恰好落在分界线上的读数归上面那一档。挪过的档界显示为分界线本身（0.00、-1.00、1.00、0.90），是「最小读数」规则的例外。
  */
-export function quartileThresholds(values: readonly number[]): readonly [number, number, number] | null {
+export function quartileThresholds(
+  values: readonly number[],
+  anchors: readonly number[] = [],
+): readonly [number, number, number] | null {
   const sorted = values.filter(value => Number.isFinite(value)).sort((a, b) => a - b);
   if (sorted.length === 0) return null;
   const at = (p: number) => {
@@ -411,28 +416,69 @@ export function quartileThresholds(values: readonly number[]): readonly [number,
   };
   // 插值点夹在 sorted[lower] 与 sorted[upper] 之间，≥ 它的最小读数一定存在
   const snap = (threshold: number) => sorted.find(value => value >= threshold) ?? sorted[sorted.length - 1];
-  return splitAtZero(sorted, [snap(at(0.25)), snap(at(0.5)), snap(at(0.75))]);
+  return splitAtAnchors(sorted, [snap(at(0.25)), snap(at(0.5)), snap(at(0.75))], anchors);
 }
 
-/** 让 0 成为档界：找出同时含负值与非负值的那一档（至多一档），把它靠 0 的档界挪到 0。sorted 已升序。 */
-function splitAtZero(
+/** 让分界线成为档界（按优先顺序；已挪到分界线上的档界不再动）。sorted 已升序。 */
+function splitAtAnchors(
   sorted: readonly number[],
-  thresholds: [number, number, number],
+  initial: [number, number, number],
+  anchors: readonly number[],
 ): readonly [number, number, number] {
-  if (!(sorted[0] < 0 && sorted[sorted.length - 1] >= 0)) return thresholds;
-  const edges = [Number.NEGATIVE_INFINITY, ...thresholds, Number.POSITIVE_INFINITY];
-  for (let bin = 0; bin < 4; bin += 1) {
-    const members = sorted.filter(value => value >= edges[bin] && value < edges[bin + 1]);
-    const negatives = members.filter(value => value < 0).length;
-    const nonNegatives = members.length - negatives;
-    if (negatives === 0 || nonNegatives === 0) continue;
-    const next: [number, number, number] = [...thresholds];
-    // bin 是 0..3；它的下界是 thresholds[bin − 1]，上界是 thresholds[bin]
-    const moveUpper = bin === 0 || (bin < 3 && negatives >= nonNegatives);
-    next[moveUpper ? bin : bin - 1] = 0;
-    return next;
+  const thresholds: [number, number, number] = [...initial];
+  const pinned = new Set<number>();
+  for (const anchor of anchors) {
+    // 已经隔开（没有哪一档跨过它），但档界停在它上方的第一个读数上（「Q3 ≥ 0.20」）：
+    // 归档不变，只把档界写成分界线本身（「Q3 ≥ 0.00」），不然 Q2 看上去像跨过了 0
+    const aligned = thresholds.findIndex((threshold, index) => {
+      if (pinned.has(index) || threshold < anchor) return false;
+      const below = sorted.filter(value => value < threshold);
+      return below.length > 0 && below[below.length - 1] < anchor
+        && (index === 0 || thresholds[index - 1] <= anchor);
+    });
+    if (aligned >= 0 && !sorted.some(value => value >= anchor && value < thresholds[aligned])) {
+      thresholds[aligned] = anchor;
+      pinned.add(aligned);
+      continue;
+    }
+    const edges = [Number.NEGATIVE_INFINITY, ...thresholds, Number.POSITIVE_INFINITY];
+    for (let bin = 0; bin < 4; bin += 1) {
+      const members = sorted.filter(value => value >= edges[bin] && value < edges[bin + 1]);
+      const below = members.filter(value => value < anchor).length;
+      const above = members.length - below;
+      if (below === 0 || above === 0) continue;
+      // bin 是 0..3；它的下界是 thresholds[bin − 1]，上界是 thresholds[bin]
+      const upper = bin < 3 && !pinned.has(bin) ? bin : null;
+      const lower = bin > 0 && !pinned.has(bin - 1) ? bin - 1 : null;
+      const preferred = below >= above ? upper ?? lower : lower ?? upper;
+      if (preferred != null) {
+        thresholds[preferred] = anchor;
+        pinned.add(preferred);
+      }
+      break;
+    }
   }
   return thresholds;
+}
+
+/**
+ * 各指标在分档空间（sortBinValue 之后）里有意义的分界线，按优先顺序：
+ *   · 盈亏比（利润捕获率 %）：0 盈亏分界、−100 = −1R 止损线；
+ *   · 加仓效用：1 = 加仓没有额外放大，0 = 正负；
+ *   · 涨跌幅、涨跌幅倍数、算术期望：0 正负；
+ *   · 几何期望（存 G − 1）：−0.1 = 0.90 参考线，0 = 1.00 不增不减；
+ *   · 预期回撤恒为正，没有分界线。
+ */
+export function sortBinAnchors(mode: CampaignSortMode): readonly number[] {
+  switch (mode) {
+    case 'captureRate': return [0, -100];
+    case 'addEfficiency': return [1, 0];
+    case 'geometricExpectancy': return [-0.1, 0];
+    case 'mainPriceChange':
+    case 'mainPriceEfficiency':
+    case 'arithmeticExpectancy': return [0];
+    default: return [];
+  }
 }
 
 /** 一个值落在哪一档：≥ q₃ → Q4，≥ q₂ → Q3，≥ q₁ → Q2，否则 Q1。相等的值必然同档。 */
@@ -463,7 +509,7 @@ export function resolveSortBinning<T extends CampaignSortRow>(
     // 档界与归档都按封面精度取整后的读数算（sortBinValue）
     if (value != null) values.push(sortBinValue(first.mode, value));
   }
-  const thresholds = quartileThresholds(values);
+  const thresholds = quartileThresholds(values, sortBinAnchors(first.mode));
   if (!thresholds) return null;
   const counts: [number, number, number, number] = [0, 0, 0, 0];
   for (const value of values) counts[quartileOf(value, thresholds) - 1] += 1;
@@ -788,7 +834,7 @@ export function summarizeSortCrossTab<T extends CampaignSortRow>(
       const value = key.missing(row) ? null : read(row);
       return value == null ? null : sortBinValue(level.mode, value);
     };
-    thresholds = quartileThresholds(sortedRows.map(binned).filter(finite));
+    thresholds = quartileThresholds(sortedRows.map(binned).filter(finite), sortBinAnchors(level.mode));
     if (!thresholds) return null;
     const bounds = thresholds;
     columnOf = row => {
