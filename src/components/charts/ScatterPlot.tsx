@@ -44,6 +44,8 @@ export type ScatterPoint = {
   ariaLabel: string;
   testId?: string;
   dataAttrs?: Record<string, string | number | undefined>;
+  /** 类目柱状：同一列里换组时另起一行（见 columnStackLayout 的 group）。 */
+  stackGroup?: string;
 };
 
 export type ScatterTick = {
@@ -361,7 +363,7 @@ export function ScatterPlot({
     if (stackMode && xAxis.mode === 'category') {
       // 类目柱状：每个类目一根柱，柱内把点码成方阵，纵轴仍然是场数。
       const contentWidth = trackWidth;
-      const result = columnStackLayout(points.map(point => ({ id: point.id, x: point.x })), {
+      const result = columnStackLayout(points.map(point => ({ id: point.id, x: point.x, group: point.stackGroup })), {
         columns: xAxis.categories.map(category => category.value),
         left: PLOT_INSET.left,
         right: contentWidth - PLOT_INSET.right,

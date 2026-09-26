@@ -9,7 +9,15 @@ import { MARK_FOOTPRINT, MIN_PITCH, type ClampDirection } from '@/lib/chartToken
  * 与密度曲线换算出来的「每档期望场数」是同一个量；点位横向吸附到档中心，相邻档恰好
  * 隔一个步距，永远不会叠画。精确数值留在提示框与 aria-label 里。
  */
-export type StackLayoutPoint = { id: string; x: number };
+export type StackLayoutPoint = {
+  id: string;
+  x: number;
+  /**
+   * 类目柱状专用：同一列里相邻两点的 group 不同时，后一个另起一行——一行里不会混着两组（盈利 / 亏损泾渭分明）。
+   * 缺省 = 不分组，照原样一格接一格码放。
+   */
+  group?: string;
+};
 
 export type StackLayoutBoundary = {
   value: number;
@@ -321,12 +329,28 @@ export function columnStackLayout(points: StackLayoutPoint[], options: ColumnSta
   const columnCounts = buckets.map(bucket => bucket.length);
   const tallest = columnCounts.reduce((max, count) => Math.max(max, count), 0);
 
+  /** 每个点在列内的格位：换组时跳到下一行开头；返回格位与占用的总格数。 */
+  const slotRanks = (bucket: StackLayoutPoint[], perRow: number) => {
+    const ranks: number[] = [];
+    let cursor = 0;
+    bucket.forEach((point, index) => {
+      if (index > 0 && point.group !== bucket[index - 1].group && cursor % perRow !== 0) {
+        cursor += perRow - (cursor % perRow);
+      }
+      ranks.push(cursor);
+      cursor += 1;
+    });
+    return { ranks, cells: cursor };
+  };
+
   // 每行点数只由「一列能并排放几个」和参考高度决定：最高一柱正好占满参考高度。
   // 实测高度不参与，否则撑高盒子会让 perRow 变小、柱变高、又要撑高，一路顶到上限。
   const widest = Math.max(1, Math.floor(columnPx / MIN_PITCH));
   const targetRows = Math.max(1, Math.floor(referenceHeight / MARK_FOOTPRINT));
   const perRow = Math.min(widest, Math.max(1, Math.ceil(tallest / targetRows)));
-  const rowsNeeded = Math.max(1, Math.ceil(tallest / perRow));
+  const slotted = buckets.map(bucket => slotRanks(bucket, perRow));
+  const tallestCells = slotted.reduce((max, item) => Math.max(max, item.cells), 0);
+  const rowsNeeded = Math.max(1, Math.ceil(tallestCells / perRow));
   // 行距和 linear 一路一样：装得下就用 14px，装不下退到 12px（环贴环）。
   const pitchY = rowsNeeded * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
   const rowsFit = Math.max(1, Math.floor(plotHeight / pitchY));
@@ -339,10 +363,11 @@ export function columnStackLayout(points: StackLayoutPoint[], options: ColumnSta
   const overflow: StackOverflow[] = [];
   buckets.forEach((bucket, index) => {
     const center = centerAt(index);
-    const rows = Math.ceil(bucket.length / perRow);
+    const { ranks, cells } = slotted[index];
+    const rows = Math.ceil(cells / perRow);
     bucket.forEach((point, rank) => {
-      const row = Math.floor(rank / perRow);
-      const slot = rank % perRow;
+      const row = Math.floor(ranks[rank] / perRow);
+      const slot = ranks[rank] % perRow;
       // 方阵左右边缘取齐（不逐行居中），柱子才有直边；最顶一行没填满是可以数出来的。
       const cx = center + (slot - (perRow - 1) / 2) * pitchX;
       // 图高仍然装不下时（列窄到 perRow 被夹住），最顶一行让给合成三角。

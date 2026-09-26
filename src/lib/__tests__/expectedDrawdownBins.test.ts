@@ -52,3 +52,15 @@ describe('buildExpectedDrawdownBins', () => {
     expect(buildExpectedDrawdownBins([0, -1]).bins).toEqual([]);
   });
 });
+
+describe('【用户要求】柱脚按实际预期回撤百分比标注', () => {
+  it('倒数 0–5 → ≥20%，5–10 → 20–10%，10–15 → 10–6.67%；溢出柱写 ≤ 下界', () => {
+    const { bins, step } = buildExpectedDrawdownBins([100, 2]); // 倒数 1、50 → 步长 5
+    expect(step).toBe(5);
+    expect(bins[0].drawdownLabel).toBe('≥20%');
+    expect(bins[1].drawdownLabel).toBe('20–10%');
+    expect(bins[2].drawdownLabel).toBe('10–6.67%');
+    const outlier = buildExpectedDrawdownBins([...Array.from({ length: 30 }, (_, index) => 2 + index * 0.2), 0.05]).bins;
+    expect(outlier[outlier.length - 1].drawdownLabel.startsWith('≤')).toBe(true);
+  });
+});

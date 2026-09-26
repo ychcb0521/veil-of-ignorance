@@ -371,3 +371,25 @@ describe('columnStackLayout 类目柱状堆叠', () => {
     expect(rankOf(reversed, 'c0-0')).toBe(5);
   });
 });
+
+describe('【用户要求】柱内分组：换组时另起一行，一行里不混组', () => {
+  it('group 变化时跳到下一行开头；不给 group 时照原样一格接一格', () => {
+    // 一列 5 场、每行 2 个：亏损 3 场（占 2 行，第二行只 1 个）→ 盈利 2 场另起第 3 行
+    const points = [
+      ...Array.from({ length: 3 }, (_, index) => ({ id: `loss-${index}`, x: 0, group: 'loss' })),
+      ...Array.from({ length: 2 }, (_, index) => ({ id: `win-${index}`, x: 0, group: 'win' })),
+      // 撑高另一列让 perRow = 2
+      ...Array.from({ length: 70 }, (_, index) => ({ id: `tall-${index}`, x: 1 })),
+    ];
+    const result = columnStackLayout(points, { ...COLUMN_OPTS, referenceHeight: 36 * 12 });
+    expect(result.perRow).toBe(2);
+    const rowOf = (id: string) => result.placed.find(item => item.id === id)!.cy;
+    const lossRows = new Set(['loss-0', 'loss-1', 'loss-2'].map(rowOf));
+    const winRows = new Set(['win-0', 'win-1'].map(rowOf));
+    expect([...winRows].some(cy => lossRows.has(cy))).toBe(false);
+    // 盈利在亏损上方（cy 更小）
+    expect(Math.max(...winRows)).toBeLessThan(Math.min(...lossRows));
+    const plain = columnStackLayout(points.map(({ id, x }) => ({ id, x })), { ...COLUMN_OPTS, referenceHeight: 36 * 12 });
+    expect(plain.placed.find(item => item.id === 'win-0')!.cy).toBe(plain.placed.find(item => item.id === 'loss-2')!.cy);
+  });
+});

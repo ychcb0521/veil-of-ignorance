@@ -653,6 +653,7 @@ describe('战役列表：多级排序', () => {
     expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('Q4 ≥ 2.50');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
+    expect(within(stats).getByTestId('sort-chain-quartile-note')).toHaveTextContent('Q1 最低的四分之一，Q4 最高的四分之一');
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('sort-chain-stats')).not.toBeInTheDocument());
     fireEvent.contextMenu(screen.getByTestId('sort-chain-toggle-2'));

@@ -18,8 +18,9 @@ export type ExpectedDrawdownBin = {
   lower: number;
   /** 这一档倒数的上界（不含）；最后一根溢出柱为 Infinity。 */
   upper: number;
+  /** 倒数区间，如「25–50」。 */
   label: string;
-  /** 对应的预期回撤区间文案（倒数大 = 回撤小），如「2.00%–4.00%」。 */
+  /** 柱脚标注用的实际预期回撤区间（倒数大 = 回撤小，从左到右递减），如「4–2%」「≥20%」「≤2%」。 */
   drawdownLabel: string;
 };
 
@@ -56,8 +57,9 @@ function formatReciprocal(value: number, step: number): string {
   return tidy(value).toFixed(digits);
 }
 
-function formatDrawdown(reciprocal: number): string {
-  return `${(100 / reciprocal).toFixed(2)}%`;
+/** 倒数界 → 回撤百分数，最多两位小数、去掉尾零：50 → 「2」，15 → 「6.67」。 */
+function drawdownNumber(reciprocal: number): string {
+  return String(Number((100 / reciprocal).toFixed(2)));
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -102,7 +104,7 @@ export function buildExpectedDrawdownBins(drawdownPcts: readonly number[]): Expe
       lower,
       upper,
       label: `${formatReciprocal(lower, step)}–${formatReciprocal(upper, step)}`,
-      drawdownLabel: lower > 0 ? `${formatDrawdown(upper)}–${formatDrawdown(lower)}` : `≥${formatDrawdown(upper)}`,
+      drawdownLabel: lower > 0 ? `${drawdownNumber(lower)}–${drawdownNumber(upper)}%` : `≥${drawdownNumber(upper)}%`,
     };
   });
   if (overflow) {
@@ -111,7 +113,7 @@ export function buildExpectedDrawdownBins(drawdownPcts: readonly number[]): Expe
       lower: end,
       upper: Infinity,
       label: `≥${formatReciprocal(end, step)}`,
-      drawdownLabel: `≤${formatDrawdown(end)}`,
+      drawdownLabel: `≤${drawdownNumber(end)}%`,
     });
   }
 

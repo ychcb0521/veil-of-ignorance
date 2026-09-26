@@ -2845,6 +2845,12 @@ export default function JournalCampaignsPage() {
           组的先后与列表相同。胜率 = b &gt; 0 的场数 ÷ 算得出 b 的场数；平均值只数本组算得出这一项的战役。
         </div>
         {sortCrossTabs.map((crossTab, offset) => crossTab && renderSortCrossTab(crossTab, offset + 1))}
+        {/* 【用户要求】只写 Q 分不清每个 Q 是什么：用一行很小的脚注说明 */}
+        {(sortBinning || sortCrossTabs.some(crossTab => crossTab?.thresholds)) && (
+          <div data-testid="sort-chain-quartile-note" className="mt-2 text-[9px] leading-snug text-muted-foreground/60">
+            注：Q1–Q4 是按该指标数值从低到高切的四分位档——Q1 最低的四分之一，Q4 最高的四分之一。「Q3 ≥ x」= 这一档的读数都不低于 x（x 是档内最小的读数）、且低于上一档的档界；「Q1 &lt; x」= 低于 Q2 的档界。带正负的指标以 0 为界、负值不与正值同档，所以各档场数不一定相等。
+          </div>
+        )}
       </div>
     );
   };
