@@ -215,3 +215,18 @@ describe('【用户要求】每行一个不显眼的小按钮：编辑与删除'
     await waitFor(() => expect(screen.getByTestId('rule-edit')).toBeDisabled());
   });
 });
+
+describe('【用户要求】规则卡片：违规与修正分行，不显示【战役偏离】', () => {
+  it('拆成红色「违规」与绿色「修正」两行，前缀不出现', async () => {
+    mocks.ruleText = '【战役偏离】违规操作：main_open：加仓之后的对冲触发之后硬拆。修正后的规则：加仓之后对冲触发之后就不要动了';
+    render(
+      <MemoryRouter initialEntries={['/journal/rules']}>
+        <Routes><Route path="/journal/rules" element={<JournalRulesPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId('rule-violation')).toHaveTextContent('加仓之后的对冲触发之后硬拆');
+    expect(screen.getByTestId('rule-fix')).toHaveTextContent('加仓之后对冲触发之后就不要动了');
+    expect(screen.queryByText(/战役偏离/)).not.toBeInTheDocument();
+    expect(screen.getByText('主力开仓')).toBeInTheDocument();
+  });
+});

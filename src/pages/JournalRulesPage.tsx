@@ -37,11 +37,15 @@ import {
 } from '@/lib/campaignDeviationRules';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
+import { parseRuleTextParts } from '@/lib/ruleTextParts';
 import { cn } from '@/lib/utils';
 import type { TradeCampaign, TradingRule } from '@/types/journal';
 import { ruleCooldownRemainingMs } from '@/types/journal';
 
 type RuleSortMode = 'operation' | 'created';
+
+/** 与交易战役卡片同一种小标签：18px 高、3px 圆角。 */
+const RULE_CHIP = 'inline-flex h-[18px] shrink-0 items-center rounded-[3px] px-1.5 leading-none whitespace-nowrap';
 type RuleSortDirection = 'asc' | 'desc';
 
 const SORT_OPTIONS: { mode: RuleSortMode; label: string; hint: string }[] = [
@@ -287,12 +291,23 @@ export default function JournalRulesPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* 顶栏与交易战役页同一套：返回、标题 + 一行说明；排序收成右侧一枚很小的分段按钮 */}
       <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-[1080px] items-center gap-3 px-4 py-3 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-[980px] items-center gap-3 px-4 sm:px-6">
           <BackButton />
-          <h1 className="text-[15px] font-semibold text-foreground">规则</h1>
-          <span className="font-mono text-[11px] text-muted-foreground">{rules.length} 条</span>
-          <div className="ml-auto flex items-center gap-1 text-[11px]" role="group" aria-label="排序">
+          <div className="min-w-0">
+            <h1 className="text-[14px] font-medium">规则</h1>
+            <p className="text-[11px] text-muted-foreground">
+              {/* 手机上只留条数，说明折成两行会把顶栏撑高 */}
+              <span className="max-sm:hidden">从交易战役的偏离里沉淀下来的修正 · </span>
+              <span className="font-mono tabular-nums">{rules.length}</span> 条
+            </p>
+          </div>
+          <div
+            className="ml-auto inline-flex shrink-0 items-center rounded-md border border-border/70 bg-muted/40 p-0.5 text-[10.5px]"
+            role="group"
+            aria-label="排序"
+          >
             {SORT_OPTIONS.map(option => {
               const active = option.mode === sortMode;
               return (
@@ -304,16 +319,16 @@ export default function JournalRulesPage() {
                   title={`${option.hint}；再点一次切换方向`}
                   onClick={() => handleSort(option.mode)}
                   className={cn(
-                    'inline-flex h-7 items-center gap-0.5 rounded border px-2 transition-colors',
+                    'inline-flex h-5 items-center gap-0.5 rounded-[4px] px-1.5 transition-colors',
                     active
-                      ? 'border-border bg-card font-medium text-foreground shadow-sm'
-                      : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+                      ? 'bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   {option.label}
                   {active && (sortDirection === 'desc'
-                    ? <ArrowDown aria-label="从新到旧" className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />
-                    : <ArrowUp aria-label="从旧到新" className="h-3 w-3 text-[#C98500] dark:text-[#F0B90B]" />)}
+                    ? <ArrowDown aria-label="从新到旧" className="h-2.5 w-2.5 text-[#C98500] dark:text-[#F0B90B]" />
+                    : <ArrowUp aria-label="从旧到新" className="h-2.5 w-2.5 text-[#C98500] dark:text-[#F0B90B]" />)}
                 </button>
               );
             })}
@@ -321,108 +336,135 @@ export default function JournalRulesPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1080px] px-4 py-4 sm:px-6">
+      <main className="mx-auto max-w-[980px] px-4 py-5 sm:px-6">
         {loading && rules.length === 0 ? (
           <div className="py-16 text-center text-[12px] text-muted-foreground">加载中…</div>
         ) : sortedRows.length === 0 ? (
           <div className="py-16 text-center text-[12px] text-muted-foreground">还没有规则</div>
         ) : (
-          <ol className="divide-y divide-border overflow-hidden rounded-md border border-border bg-card" data-testid="rules-list">
+          <ol data-testid="rules-list" className="space-y-3">
             {sortedRows.map(({ rule, campaignId, campaign, operationMs, createdMs }) => {
               const shownMs = sortMode === 'operation' ? operationMs : createdMs;
+              const parts = parseRuleTextParts(rule.rule_text);
+              const editing = editingId === rule.id;
               return (
                 <li
                   key={rule.id}
                   data-testid="rule-row"
                   data-rule-id={rule.id}
-                  className="group grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-1.5 px-4 py-3 sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:items-start"
+                  className="group relative overflow-hidden rounded-md border border-border bg-card shadow-[0_2px_7px_rgba(15,23,42,0.055)] transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-[0_7px_22px_rgba(15,23,42,0.08)]"
                 >
-                  <div
-                    className="font-mono text-[11px] tabular-nums leading-6 text-muted-foreground"
-                    title={sortMode === 'operation' ? '来源战役的操作时间' : '规则创建时间'}
-                  >
-                    {shownMs != null ? formatBeijingTime(shownMs).slice(0, 16) : '—'}
-                  </div>
-                  {editingId === rule.id ? (
-                    <div className="min-w-0 space-y-1.5" data-testid="rule-editor">
-                      <textarea
-                        value={editText}
-                        onChange={e => setEditText(e.target.value)}
-                        rows={Math.min(8, Math.max(2, Math.ceil(editText.length / 60)))}
-                        autoFocus
-                        aria-label="规则文字"
-                        className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-[13px] leading-6 outline-none focus:border-[#F0B90B]/70 focus:ring-2 focus:ring-[#F0B90B]/15"
-                      />
-                      <div className="flex items-center gap-2 text-[11px]">
+                  <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] bg-[#F0B90B] opacity-60" />
+                  <div className="px-4 py-3 sm:px-5">
+                    {/* 封面一行：日期（只到日）· 来源战役 · 阶段；右端是悬停才显现的铅笔 */}
+                    <div className="flex min-h-[18px] flex-wrap items-center gap-x-1.5 gap-y-1">
+                      <span
+                        className="font-mono text-[11px] tabular-nums text-muted-foreground"
+                        title={sortMode === 'operation' ? '来源战役的操作时间' : '规则创建时间'}
+                      >
+                        {shownMs != null ? formatBeijingTime(shownMs).slice(0, 10) : '—'}
+                      </span>
+                      {campaignId ? (
                         <button
                           type="button"
-                          disabled={savingId === rule.id}
-                          onClick={() => void saveEdit(rule)}
-                          className="h-6 rounded bg-[#F0B90B] px-2 font-medium text-black hover:bg-[#F0B90B]/90 disabled:opacity-50"
+                          aria-label="跳到对应交易战役"
+                          title={campaign ? `打开交易战役：${campaign.title}` : '跳到对应交易战役'}
+                          onClick={() => nav(`/journal/campaigns/${campaignId}`)}
+                          className={cn(RULE_CHIP, 'gap-0.5 bg-muted text-[10px] font-medium text-muted-foreground transition-colors hover:bg-[#F0B90B]/15 hover:text-[#8F6B00] dark:hover:text-[#F0B90B]')}
                         >
-                          保存
+                          {campaign?.symbol ?? '战役'}
+                          <ArrowUpRight aria-hidden="true" className="h-2.5 w-2.5" />
                         </button>
+                      ) : (
+                        <span className={cn(RULE_CHIP, 'text-[10px] text-muted-foreground/60')}>无来源战役</span>
+                      )}
+                      {parts.phase && (
+                        <span title={parts.phase} className={cn(RULE_CHIP, 'max-w-[18rem] overflow-hidden border border-border/70 text-[10px] text-muted-foreground')}>
+                          <span className="truncate">{parts.phase}</span>
+                        </span>
+                      )}
+                      {/* 【用户要求】不显眼的小按钮：平时透明，悬停这张卡或键盘聚焦时才显现 */}
+                      <span
+                        className="ml-auto inline-flex"
+                        title={designBlocked ? '有进行中的交易战役时规则冻结，先结束战役再改' : '编辑或删除这条规则'}
+                      >
                         <button
                           type="button"
-                          onClick={() => setEditingId(null)}
-                          className="h-6 rounded px-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          data-testid="rule-edit"
+                          aria-label="编辑或删除这条规则"
+                          disabled={designBlocked || editing}
+                          onClick={() => startEdit(rule)}
+                          className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-70 disabled:pointer-events-none max-sm:opacity-40"
                         >
-                          取消
+                          <Pencil aria-hidden="true" className="h-3 w-3" />
                         </button>
-                        {/* 删除收在编辑里，平时看不到；冷却期内停用，提示挂在外层 span（停用按钮收不到悬停） */}
-                        {(() => {
-                          const cooldownMs = ruleCooldownRemainingMs(rule);
-                          const cooling = cooldownMs > 0;
-                          return (
-                            <span
-                              className="ml-auto inline-flex"
-                              title={cooling ? `刚激活的规则 ${Math.ceil(cooldownMs / 86_400_000)} 天后才能删除（7 天冷却期）` : undefined}
-                            >
-                              <button
-                                type="button"
-                                data-testid="rule-delete"
-                                disabled={cooling || savingId === rule.id}
-                                onClick={() => void removeRule(rule)}
-                                className="h-6 rounded px-2 text-muted-foreground hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:pointer-events-none disabled:opacity-40"
-                              >
-                                删除
-                              </button>
-                            </span>
-                          );
-                        })()}
-                      </div>
+                      </span>
                     </div>
-                  ) : (
-                    <div className="whitespace-pre-wrap text-[13px] leading-6 text-foreground">{rule.rule_text}</div>
-                  )}
-                  <div className="flex items-center gap-0.5 justify-self-start sm:justify-self-end">
-                  {campaignId ? (
-                    <button
-                      type="button"
-                      aria-label="跳到对应交易战役"
-                      title={campaign ? `${campaign.title}` : '跳到对应交易战役'}
-                      onClick={() => nav(`/journal/campaigns/${campaignId}`)}
-                      className="inline-flex h-6 items-center gap-1 whitespace-nowrap rounded px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#9A6B00] dark:hover:text-[#F0B90B]"
-                    >
-                      {campaign?.symbol ?? '战役'}
-                      <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
-                    </button>
-                  ) : (
-                    <span className="px-1.5 text-[11px] leading-6 text-muted-foreground/50">无来源战役</span>
-                  )}
-                  {/* 【用户要求】不显眼的小按钮：平时几乎透明，悬停这一行或键盘聚焦时才显现 */}
-                  <span className="inline-flex" title={designBlocked ? '有进行中的交易战役时规则冻结，先结束战役再改' : '编辑或删除这条规则'}>
-                    <button
-                      type="button"
-                      data-testid="rule-edit"
-                      aria-label="编辑或删除这条规则"
-                      disabled={designBlocked || editingId === rule.id}
-                      onClick={() => startEdit(rule)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-60 disabled:pointer-events-none max-sm:opacity-40"
-                    >
-                      <Pencil aria-hidden="true" className="h-3 w-3" />
-                    </button>
-                  </span>
+
+                    {editing ? (
+                      <div className="mt-2.5 space-y-1.5" data-testid="rule-editor">
+                        <textarea
+                          value={editText}
+                          onChange={e => setEditText(e.target.value)}
+                          rows={Math.min(8, Math.max(3, Math.ceil(editText.length / 56)))}
+                          autoFocus
+                          aria-label="规则文字"
+                          className="w-full resize-y rounded border border-border bg-background px-2.5 py-2 text-[12.5px] leading-[22px] outline-none focus:border-[#F0B90B]/70 focus:ring-2 focus:ring-[#F0B90B]/15"
+                        />
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <button
+                            type="button"
+                            disabled={savingId === rule.id}
+                            onClick={() => void saveEdit(rule)}
+                            className="h-6 rounded bg-[#F0B90B] px-2.5 font-medium text-black transition-colors hover:bg-[#F0B90B]/90 disabled:opacity-50"
+                          >
+                            保存
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            className="h-6 rounded px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          >
+                            取消
+                          </button>
+                          {/* 删除收在编辑里；冷却期内停用，提示挂在外层 span（停用按钮收不到悬停） */}
+                          {(() => {
+                            const cooldownMs = ruleCooldownRemainingMs(rule);
+                            const cooling = cooldownMs > 0;
+                            return (
+                              <span
+                                className="ml-auto inline-flex"
+                                title={cooling ? `刚激活的规则 ${Math.ceil(cooldownMs / 86_400_000)} 天后才能删除（7 天冷却期）` : undefined}
+                              >
+                                <button
+                                  type="button"
+                                  data-testid="rule-delete"
+                                  disabled={cooling || savingId === rule.id}
+                                  onClick={() => void removeRule(rule)}
+                                  className="h-6 rounded px-2 text-muted-foreground transition-colors hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:pointer-events-none disabled:opacity-40"
+                                >
+                                  删除
+                                </button>
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    ) : (
+                      /* 【用户要求】违规与修正分行、一眼分得开：红色「违规」+ 淡色原因；绿色「修正」+ 实色加粗的规则本身 */
+                      <dl className="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1.5">
+                        {parts.violation && (
+                          <>
+                            <dt className={cn(RULE_CHIP, 'mt-[2px] bg-[#F6465D]/10 text-[10px] font-medium text-[#CF304A] dark:text-[#F6465D]')}>违规</dt>
+                            <dd data-testid="rule-violation" className="text-[12.5px] leading-[22px] text-muted-foreground">{parts.violation}</dd>
+                          </>
+                        )}
+                        <dt className={cn(RULE_CHIP, 'mt-[2px] bg-[#0ECB81]/12 text-[10px] font-medium text-[#07875A] dark:text-[#0ECB81]')}>
+                          {parts.violation ? '修正' : '规则'}
+                        </dt>
+                        <dd data-testid="rule-fix" className="text-[13px] font-medium leading-[22px] text-foreground">{parts.fix}</dd>
+                      </dl>
+                    )}
                   </div>
                 </li>
               );
