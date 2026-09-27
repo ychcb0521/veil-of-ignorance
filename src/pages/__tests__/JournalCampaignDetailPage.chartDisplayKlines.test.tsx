@@ -74,6 +74,7 @@ vi.mock('@/lib/journalApi', async () => {
     createCounterfactual: vi.fn(),
     deleteCounterfactual: vi.fn(async () => undefined),
     saveCampaignDeviationNotes: vi.fn(async () => undefined),
+    syncCampaignReviewRule: vi.fn(async () => 'none'),
     syncCampaignDeviationRulesToChecklist: vi.fn(async () => ({ created: 0, drafts: 0 })),
   };
 });

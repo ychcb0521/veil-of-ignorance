@@ -6125,6 +6125,67 @@ export async function syncCampaignDeviationRulesToChecklist(
   return { drafts: drafts.length, created, skipped };
 }
 
+export type CampaignReviewRuleSyncResult = 'created' | 'updated' | 'unchanged' | 'none';
+
+/** 纯判断（便于测试）：这一对规则文字该新建、原地改哪一条，还是已经有了。文字按规则同一套归一比较。 */
+export function planCampaignReviewRuleSync(
+  existing: readonly Pick<TradingRule, 'id' | 'rule_text'>[],
+  previousText: string | null,
+  nextText: string | null,
+): { action: 'none' } | { action: 'create' } | { action: 'unchanged' | 'update'; ruleId: string } {
+  if (!nextText) return { action: 'none' };
+  const next = normalizeDeviationRuleText(nextText);
+  const byText = new Map(existing.map(rule => [normalizeDeviationRuleText(rule.rule_text), rule]));
+  const same = byText.get(next);
+  if (same) return { action: 'unchanged', ruleId: same.id };
+  const earlier = previousText ? byText.get(normalizeDeviationRuleText(previousText)) : undefined;
+  if (earlier) return { action: 'update', ruleId: earlier.id };
+  return { action: 'create' };
+}
+
+/**
+ * 【用户要求】复盘总结里「违规 / 修正」保存后自动纳入规则：
+ *   · 修正为空：不生成规则（'none'）；
+ *   · 同样文字的规则已经有了：只把它绑到这场战役（'unchanged'）；
+ *   · 上一次保存的那一对生成过规则、而且还在：原地改那一条的文字，不另建一条（'updated'）；
+ *   · 否则新建一条，与战役偏离同步来的规则同一套默认（激活、进开仓 checklist、核心规则）（'created'）。
+ * 清空修正不删已有规则——规则页可以自己删（7 天冷却期照旧）。
+ */
+export async function syncCampaignReviewRule(
+  userId: string,
+  campaignId: string,
+  previousText: string | null,
+  nextText: string | null,
+): Promise<CampaignReviewRuleSyncResult> {
+  if (!nextText) return 'none';
+  const next = normalizeDeviationRuleText(nextText);
+  writeLocalTradingRuleSourceCampaign(userId, next, campaignId);
+  const plan = planCampaignReviewRuleSync(await listRules(userId), previousText, nextText);
+  if (plan.action === 'none') return 'none';
+  if (plan.action === 'unchanged') {
+    bindLocalTradingRuleSourceCampaign(userId, plan.ruleId, campaignId);
+    return 'unchanged';
+  }
+  if (plan.action === 'update') {
+    await updateRule(plan.ruleId, { rule_text: next });
+    bindLocalTradingRuleSourceCampaign(userId, plan.ruleId, campaignId);
+    return 'updated';
+  }
+  const rule = await createRule({
+    user_id: userId,
+    source_pattern_id: null,
+    rule_text: next,
+    is_active: true,
+    added_to_checklist: true,
+    required: false,
+    rule_category: 'core',
+    weight: 70,
+    evolution_level: 3,
+  });
+  bindLocalTradingRuleSourceCampaign(userId, rule.id, campaignId);
+  return 'created';
+}
+
 export async function markRuleAddedToChecklist(ruleId: string): Promise<void> {
   const { data: cur, error: gErr } = await supabase
     .from("trading_rules" as never)

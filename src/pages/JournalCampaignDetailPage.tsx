@@ -25,7 +25,14 @@ import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
-import { readCampaignReviewSummary, withCampaignReviewSummary } from '@/lib/campaignReviewSummary';
+import {
+  campaignReviewRuleText,
+  readCampaignReviewRule,
+  readCampaignReviewSummary,
+  withCampaignReviewRule,
+  withCampaignReviewSummary,
+  type CampaignReviewRule,
+} from '@/lib/campaignReviewSummary';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
@@ -135,6 +142,7 @@ import {
   hasMutualFollow,
   listAllCampaigns,
   saveCampaignDeviationNotes,
+  syncCampaignReviewRule,
   syncCampaignDeviationRulesToChecklist,
   type CampaignDeviationNote,
   listCounterfactuals,
@@ -2317,19 +2325,27 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     }
   };
 
-  const handleSaveReviewSummary = async (summary: string) => {
+  const reviewRuleValue = readCampaignReviewRule(campaign.deviation_notes);
+
+  const handleSaveReviewSummary = async (summary: string, reviewRule: CampaignReviewRule) => {
     if (!isOwner || !user) throw new Error('只能保存自己的战役总结');
     if (deviationNotesSaving) throw new Error('正在保存备注，请稍后重试');
     const campaignId = campaign.id;
     const request = ++deviationNotesSaveRequestRef.current;
-    const notes = withCampaignReviewSummary(deviationNotes, summary);
+    // 上一次保存的那一对生成的规则文字：这次改了就原地改那一条规则，不另建
+    const previousRuleText = campaignReviewRuleText(readCampaignReviewRule(campaign.deviation_notes));
+    const notes = withCampaignReviewRule(withCampaignReviewSummary(deviationNotes, summary), reviewRule);
     setDeviationNotesSaving(true);
     try {
       await saveCampaignDeviationNotes(campaignId, notes);
+      // 【用户要求】「违规 / 修正」填写后自动纳入规则
+      const ruleSync = await syncCampaignReviewRule(user.id, campaignId, previousRuleText, campaignReviewRuleText(reviewRule));
       if (activeCampaignIdRef.current !== campaignId || request !== deviationNotesSaveRequestRef.current) return;
       // 请求期间继续编辑的逐腿备注留在草稿里，不用旧快照覆盖它们。
-      setDeviationNotes(current => withCampaignReviewSummary(current, summary));
+      setDeviationNotes(current => withCampaignReviewRule(withCampaignReviewSummary(current, summary), reviewRule));
       setCampaign(current => current?.id === campaignId ? { ...current, deviation_notes: notes } : current);
+      if (ruleSync === 'created') toast.success('复盘已保存，「违规 / 修正」已纳入规则');
+      else if (ruleSync === 'updated') toast.success('复盘已保存，对应的规则已同步修改');
     } finally {
       if (request === deviationNotesSaveRequestRef.current) setDeviationNotesSaving(false);
     }
@@ -3314,6 +3330,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           <CampaignReviewSummary
             key={campaign.id}
             value={readCampaignReviewSummary(campaign.deviation_notes)}
+            rule={reviewRuleValue}
             canEdit={isOwner}
             disabled={deviationNotesSaving}
             onSave={handleSaveReviewSummary}

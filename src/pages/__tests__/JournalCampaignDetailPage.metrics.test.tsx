@@ -217,6 +217,7 @@ vi.mock('@/lib/journalApi', () => ({
   readUserLocalSnapshot: () => ({ tradeHistory: [], ordersMap: {}, cancelledOrders: [], filledOrders: [] }),
   getCampaignFullData: vi.fn(async (id: string) => detailsById[id]),
   saveCampaignDeviationNotes: vi.fn(async () => undefined),
+  syncCampaignReviewRule: vi.fn(async () => 'none'),
   listAllCampaigns: vi.fn(async () => campaigns),
   listVisibleCampaigns: vi.fn(async () => campaigns),
   listCounterfactuals: listCounterfactualsMock,
