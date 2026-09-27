@@ -3,31 +3,34 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * 指南里「交易战役」的盘面说明是用户照着读的：默认 2.1 倍、5 分钟线、倍数档、
+ * 指南里「交易战役」的盘面说明是用户照着读的：默认 1.1 倍、5 分钟线、倍数档、
  * 以及「周期只管盘面、读数不跟着变」都要与实现对得上，改了实现就得跟着改指南。
  */
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
 
-describe('指南：交易战役原始盘面默认 5 分钟线、2.1 倍', () => {
+describe('指南：交易战役原始盘面默认 5 分钟线、1.1 倍', () => {
   const guide = read('pages/GuidePage.tsx');
   const hook = read('hooks/useCampaignKlines.ts');
   const span = read('lib/campaignChartContentSpan.ts');
   const detail = read('pages/JournalCampaignDetailPage.tsx');
 
-  it('【用户要求】默认 2.1 倍、5 分钟线，倍数档 1.1 / 2.1 / 3.1 / 5 … 51', () => {
-    expect(guide).toContain('<strong>K 线盘面默认 2.1 倍视窗、5 分钟线</strong>');
+  it('【用户要求】默认 1.1 倍、5 分钟线，倍数档 1.1 / 2.1 / 3.1 / 5 … 51', () => {
+    expect(guide).toContain('<strong>K 线盘面默认 1.1 倍视窗、5 分钟线</strong>');
     expect(guide).toContain('<strong>1.1、2.1、3.1、5、11、21、31、41、51 倍</strong>');
     expect(guide).not.toContain('K 线默认按三段式窗口自适应');
     expect(guide).not.toContain('1.1、2、3、5、11');
     expect(hook).toContain('export const CAMPAIGN_VIEW_MULTIPLIERS = [2.1, 3.1, 5, 11, 21, 31, 41, 51] as const;');
-    expect(hook).toContain('export const CAMPAIGN_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 2.1;');
+    expect(hook).toContain('export const CAMPAIGN_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;');
     expect(detail).toContain(': CAMPAIGN_DEFAULT_VIEW_MULTIPLIER;');
   });
 
   it('默认 5 分钟线，放不下时自动放宽：写明可读下限与拉取预算', () => {
     expect(guide).toContain('<strong>周期默认 5 分钟线，放不下时自动放宽</strong>');
     expect(guide).toContain('超过约 1200 根');
-    expect(guide).toContain('51 倍拉取超过 6000 根');
+    // 【用户要求】「每个战役默认 5 分钟线」：不再因为预拉 51 倍超过 6000 根而放粗，只拉视窗附近一段
+    expect(guide).toContain('<strong>不再因此放粗周期</strong>，盘面只预载视窗附近约 6000 根');
+    expect(guide).not.toContain('或 51 倍拉取超过 6000 根时');
+    expect(span).toContain('export function trimCampaignDisplayFetchWindow(');
     expect(span).toContain("export const CAMPAIGN_DEFAULT_DISPLAY_INTERVAL: CampaignChartInterval = '5m';");
     expect(span).toContain('export const CAMPAIGN_VISIBLE_CANDLE_LIMIT = 1_200;');
     expect(span).toContain('export const CAMPAIGN_FETCH_CANDLE_BUDGET = 6_000;');
@@ -52,8 +55,8 @@ describe('指南：交易战役原始盘面默认 5 分钟线、2.1 倍', () => 
     // 共用的条件写全：原始盘面在绝对预设下拉的是撑开后的窗口，同周期也不共用（key 里带窗口）
     expect(guide).toContain('与计算用那一份，或与倍率视图下的原始盘面那一份同周期时直接共用，不另拉（原始盘面在「1天 / 1周 / 1月」预设下拉的是更宽的窗口，不共用）');
     expect(guide).not.toContain('与计算用或原始盘面那份 K 线同周期时直接共用，不另拉');
-    expect(detail).toContain('key: `${displayInterval}|${campaignKlineTimeWindow.fromTime}|${campaignKlineTimeWindow.toTime}`');
-    expect(detail).toContain('key: `${counterfactualDisplayInterval}|${campaignKlineBaseWindow.fromTime}|${campaignKlineBaseWindow.toTime}`');
+    expect(detail).toContain('key: `${displayInterval}|${mainDisplayFetch.fromTime}|${mainDisplayFetch.toTime}`');
+    expect(detail).toContain('key: `${counterfactualDisplayInterval}|${counterfactualDisplayFetch.fromTime}|${counterfactualDisplayFetch.toTime}`');
   });
 
   it('读数不随盘面变，唯一例外写明：选中的反事实分支越出 Legs 跨度会撑宽计算窗口（改版前就是这样）', () => {

@@ -289,7 +289,7 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
-  it('【用户要求】defaults to 2.1x and jumps to the selected centered K-line range', async () => {
+  it('【用户要求】defaults to 1.1x and jumps to the selected centered K-line range', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
         <Routes>
@@ -298,19 +298,19 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    const button21x = await screen.findByRole('button', { name: '显示 2.1 倍战役时间范围' });
-    expect(button21x).toHaveAttribute('aria-pressed', 'true');
-    expect(button21x).toHaveTextContent('2.1x');
+    const button11x = await screen.findByRole('button', { name: '显示 1.1 倍战役时间范围' });
+    expect(button11x).toHaveAttribute('aria-pressed', 'true');
+    expect(button11x).toHaveTextContent('1.1x');
     for (const multiplier of [1.1, 2.1, 3.1, 5, 11, 21, 31, 41, 51]) {
       expect(screen.getByRole('button', { name: `显示 ${multiplier} 倍战役时间范围` })).toBeInTheDocument();
     }
     for (const legacy of [2, 3]) {
       expect(screen.queryByRole('button', { name: `显示 ${legacy} 倍战役时间范围` })).not.toBeInTheDocument();
     }
-    // 上下文单位 40 分钟：2.1 倍 = 左右各 22 分钟
+    // 上下文单位 40 分钟：1.1 倍 = 44 分钟，以 00:30 为中心
     await waitFor(() => expect(replayVisibleRanges.at(-1)).toEqual({
-      start: Date.parse('2025-12-31T23:48:00.000Z'),
-      end: Date.parse('2026-01-01T01:12:00.000Z'),
+      start: Date.parse('2026-01-01T00:08:00.000Z'),
+      end: Date.parse('2026-01-01T00:52:00.000Z'),
     }));
 
     fireEvent.click(screen.getByRole('button', { name: '显示 51 倍战役时间范围' }));

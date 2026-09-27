@@ -11,7 +11,7 @@ import { useReplayKlines } from '@/hooks/useReplayKlines';
  * QUICKUSDT 那种内容跨度只有 67 秒的战役，默认 3 倍只有 3.35 分钟——
  * 5m 周期下连一根 K 线都不到，51 倍顶格也才 57 分钟，用户投诉
  * “有的战役只能选取这么一小段时间”正是从这里长出来的。
- * 现在把单位下限抬到 30 分钟：默认 2.1 倍 = 63 分钟 ≈ 12 根 5m，够读结构；
+ * 现在把单位下限抬到 30 分钟：默认 1.1 倍 = 33 分钟 ≈ 6 根 5m；
  * 1.1 倍 = 33 分钟也不再退化回“不足一根 K 线”；
  * 51 倍 = 25.5 小时 = 1530 根 1m，仍远小于详情页 6000 根的拉取预算，
  * 所以被抬高的短战役不会因为修这个 bug 反而被降级到 5m。
@@ -27,9 +27,9 @@ export const CAMPAIGN_AVAILABLE_CONTEXT_MULTIPLIER = 25;
 export const CAMPAIGN_VIEW_MULTIPLIERS = [2.1, 3.1, 5, 11, 21, 31, 41, 51] as const;
 export const CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS = [1.1, ...CAMPAIGN_VIEW_MULTIPLIERS] as const;
 export type CampaignViewMultiplier = 1 | (typeof CAMPAIGN_ORIGINAL_VIEW_MULTIPLIERS)[number];
-/** 【用户要求】交易战役原始盘面首屏 2.1 倍（换战役也回到它）。 */
-export const CAMPAIGN_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 2.1;
-/** 反事实盘面首屏 1.1 倍（沿用原来的规则，不跟随原始盘面的 2.1 倍；换战役也回到它）。 */
+/** 【用户要求】交易战役原始盘面首屏 1.1 倍（换战役也回到它；2026-09-27 由 2.1 倍改为 1.1 倍）。 */
+export const CAMPAIGN_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;
+/** 反事实盘面首屏 1.1 倍（与原始盘面同为 1.1 倍；换战役也回到它）。 */
 export const CAMPAIGN_COUNTERFACTUAL_DEFAULT_VIEW_MULTIPLIER: CampaignViewMultiplier = 1.1;
 
 /** 改档之前的旧值：2 倍、3 倍分别对应现在的 2.1 倍、3.1 倍。 */
@@ -303,10 +303,12 @@ export function useCampaignKlines(
   spanEndMs: number | null = null,
   // 详情页当前选中的显示范围：绝对预设要把实际拉取窗口一起撑开。
   selection: CampaignChartRangeSelection | null = null,
+  // 只给显示用 K 线：整段放不下时只拉这一段（见 trimCampaignDisplayFetchWindow）；null = 整段。
+  fetchWindow: { fromTime: number; toTime: number } | null = null,
 ) {
   const openedAtMs = useMemo(() => new Date(openedAt).getTime(), [openedAt]);
   const closedAtMs = useMemo(() => new Date(closedAt ?? Date.now()).getTime(), [closedAt]);
-  // 有 Legs/委托/反事实内容区间时，初始可见窗口是 2.1 倍（战役居中）；
+  // 有 Legs/委托/反事实内容区间时，初始可见窗口是 1.1 倍（战役居中）；
   // 数据层预载左右各二十五段上下文，用户可一键切换并查看完整 51 倍范围。
   // 详情页会调用两次：一次拉计算用 K 线（selection 传 null、周期固定为自动周期），
   // 一次拉显示用 K 线（按盘面周期）；两边周期与窗口相同时第二次传空 symbol，不发请求、共用第一份。
@@ -317,10 +319,15 @@ export function useCampaignKlines(
     [closedAtMs, openedAtMs, selection, spanEndMs, spanStartMs],
   );
 
+  const fetchFrom = fetchWindow?.fromTime ?? window.fromTime;
+  const fetchTo = fetchWindow?.toTime ?? window.toTime;
   return {
-    ...useReplayKlines(symbol, window.fromTime, window.toTime, interval),
+    ...useReplayKlines(symbol, fetchFrom, fetchTo, interval),
     openedAtMs,
     closedAtMs,
     ...window,
+    // 实际拉到的那一段（截过时比整段窗口短）
+    fromTime: fetchFrom,
+    toTime: fetchTo,
   };
 }

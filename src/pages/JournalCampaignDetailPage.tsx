@@ -90,6 +90,7 @@ import {
   explainCampaignDisplayIntervalWidening,
   pickBatchExportInterval,
   pickCampaignComputeInterval,
+  trimCampaignDisplayFetchWindow,
   pickCampaignDisplayInterval,
   type CampaignChartInterval,
 } from '@/lib/campaignChartContentSpan';
@@ -232,7 +233,13 @@ function displayIntervalButtonTitle(item: Interval, chart: {
 }
 
 /** 盘面要在计算用 K 线之外另拉的一份：key = 周期 + 拉取窗口，key 相同就是同一份数据。 */
-type ExtraKlineNeed = { key: string; interval: Interval; selection: CampaignChartRangeSelection | null };
+type ExtraKlineNeed = {
+  key: string;
+  interval: Interval;
+  selection: CampaignChartRangeSelection | null;
+  /** 实际拉的那一段：整段放不下时截在视窗附近（见 trimCampaignDisplayFetchWindow）。 */
+  fetch: { fromTime: number; toTime: number };
+};
 type ExtraKlineSlots = readonly [ExtraKlineNeed | null, ExtraKlineNeed | null];
 
 /**
@@ -901,7 +908,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   // 手动选的盘面周期：没点过周期按钮（intervalTouched = false）时不生效，盘面按默认 5 分钟线自动放宽。
   const [interval, setInterval] = useState<Interval>(CAMPAIGN_DEFAULT_DISPLAY_INTERVAL);
   const [intervalTouched, setIntervalTouched] = useState(false);
-  // 批量导出按弹窗里选的倍数取视窗（默认 1.1 倍）；【用户要求】详情页首屏 2.1 倍。旧档 2 / 3 读成 2.1 / 3.1。
+  // 批量导出按弹窗里选的倍数取视窗（默认 1.1 倍）；【用户要求】详情页首屏 1.1 倍。旧档 2 / 3 读成 2.1 / 3.1。
   const initialViewMultiplier: CampaignViewMultiplier = batchExport
     ? normalizeCampaignViewMultiplier(batchExport.options.viewMultiplier) ?? BATCH_EXPORT_DEFAULT_VIEW_MULTIPLIER
     : CAMPAIGN_DEFAULT_VIEW_MULTIPLIER;
@@ -1375,23 +1382,45 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   );
   // 盘面周期与计算周期相同、拉取窗口也相同（倍率视图）时只拉一次，直接用计算那一份；
   // 不同时（换了周期、绝对预设撑开了窗口）才另拉。两块盘面要的另一份相同时也只拉一次。
+  // 【用户要求】自动周期（默认 5 分钟线）放不下整段 51 倍时，显示用 K 线只拉视窗附近的一段，不为预拉而放粗周期。
+  // 手动选的周期、批量下载里指定的周期照旧整段拉（它们本来就按拉取预算选过周期）。
+  const autoDisplayInterval = !intervalTouched && !(batchInterval && batchInterval !== 'auto');
+  const mainDisplayFetch = autoDisplayInterval
+    ? trimCampaignDisplayFetchWindow(
+      { fromTime: campaignKlineTimeWindow.fromTime, toTime: campaignKlineTimeWindow.toTime },
+      { fromTime: campaignKlineVisibleRange.fromTime, toTime: campaignKlineVisibleRange.toTime },
+      displayInterval,
+    )
+    : { fromTime: campaignKlineTimeWindow.fromTime, toTime: campaignKlineTimeWindow.toTime };
   const displaySharesComputeKlines = computeKlinesNeeded
     && displayInterval === computeInterval
-    && campaignKlineTimeWindow.fromTime === campaignKlineBaseWindow.fromTime
-    && campaignKlineTimeWindow.toTime === campaignKlineBaseWindow.toTime;
+    && mainDisplayFetch.fromTime === campaignKlineBaseWindow.fromTime
+    && mainDisplayFetch.toTime === campaignKlineBaseWindow.toTime;
   const mainExtraKlineNeed: ExtraKlineNeed | null = displayKlinesNeeded && !displaySharesComputeKlines
     ? {
-      key: `${displayInterval}|${campaignKlineTimeWindow.fromTime}|${campaignKlineTimeWindow.toTime}`,
+      key: `${displayInterval}|${mainDisplayFetch.fromTime}|${mainDisplayFetch.toTime}`,
       interval: displayInterval,
       selection: chartRangeSelection,
+      fetch: mainDisplayFetch,
     }
     : null;
-  // 反事实盘面只在详情页里画（批量导出没有它），拉取窗口固定是基准窗口。
-  const counterfactualExtraKlineNeed: ExtraKlineNeed | null = !batchExport && counterfactualDisplayInterval !== computeInterval
+  // 反事实盘面只在详情页里画（批量导出没有它），拉取窗口是基准窗口（自动周期放不下时同样截在它自己的视窗附近）。
+  const counterfactualDisplayFetch = !intervalTouched
+    ? trimCampaignDisplayFetchWindow(
+      { fromTime: campaignKlineBaseWindow.fromTime, toTime: campaignKlineBaseWindow.toTime },
+      { fromTime: counterfactualVisibleRange.fromTime, toTime: counterfactualVisibleRange.toTime },
+      counterfactualDisplayInterval,
+    )
+    : { fromTime: campaignKlineBaseWindow.fromTime, toTime: campaignKlineBaseWindow.toTime };
+  const counterfactualSharesCompute = counterfactualDisplayInterval === computeInterval
+    && counterfactualDisplayFetch.fromTime === campaignKlineBaseWindow.fromTime
+    && counterfactualDisplayFetch.toTime === campaignKlineBaseWindow.toTime;
+  const counterfactualExtraKlineNeed: ExtraKlineNeed | null = !batchExport && !counterfactualSharesCompute
     ? {
-      key: `${counterfactualDisplayInterval}|${campaignKlineBaseWindow.fromTime}|${campaignKlineBaseWindow.toTime}`,
+      key: `${counterfactualDisplayInterval}|${counterfactualDisplayFetch.fromTime}|${counterfactualDisplayFetch.toTime}`,
       interval: counterfactualDisplayInterval,
       selection: null,
+      fetch: counterfactualDisplayFetch,
     }
     : null;
   const extraKlineSlotKeysRef = useRef<readonly [string | null, string | null]>([null, null]);
@@ -1412,6 +1441,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     campaignKlineSpanStartMs,
     campaignKlineSpanEndMs,
     extraKlineSlots[0]?.selection ?? null,
+    extraKlineSlots[0]?.fetch ?? null,
   );
   const extraKlineSetB = useCampaignKlines(
     extraKlineSlots[1] ? klineSymbol : '',
@@ -1421,6 +1451,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     campaignKlineSpanStartMs,
     campaignKlineSpanEndMs,
     extraKlineSlots[1]?.selection ?? null,
+    extraKlineSlots[1]?.fetch ?? null,
   );
   const extraKlineSetFor = (need: ExtraKlineNeed) => (extraKlineSlotKeyA === need.key ? extraKlineSetA : extraKlineSetB);
   const displayKlineSet = mainExtraKlineNeed ? extraKlineSetFor(mainExtraKlineNeed) : computeKlineSet;

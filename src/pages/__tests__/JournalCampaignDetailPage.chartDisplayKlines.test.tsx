@@ -219,22 +219,23 @@ afterEach(() => {
   navigateRef = null;
 });
 
-describe('原始盘面默认 5 分钟线、2.1 倍；显示与计算同周期时只拉一次', () => {
+describe('原始盘面默认 5 分钟线、1.1 倍；显示与计算同周期时只拉一次', () => {
   it.each([
     // [战役, 默认显示周期, 计算用周期, 请求次数（按周期）]
     ['tut-1h', '5m', '1m', { '1m': 3, '5m': 1 }],
     ['tut-5h', '5m', '5m', { '5m': 3 }],
-    ['tut-8d', '1h', '1h', { '1h': 7 }],
+    // 【用户要求】默认 5 分钟线：8 天战役 1.1 倍视窗画不清 5 分钟线才放宽到 15 分钟；整段 51 倍放不下 6000 根，只拉视窗附近一段（4 页）
+    ['tut-8d', '15m', '1h', { '1h': 7, '15m': 4 }],
   ] as const)('%s：盘面 %s、计算 %s，请求 %o', async (id, displayInterval, computeInterval, counts) => {
     renderPage(id);
     const probe = await waitMainProbe(displayInterval);
     await waitComputeLoaded();
     expect(legacyDefaultKlines(id).interval).toBe(computeInterval);
 
-    // 2.1 倍按下；新档 2.1x / 3.1x 在，旧的 2x / 3x 不在
-    const pressed = screen.getByRole('button', { name: '显示 2.1 倍战役时间范围' });
+    // 1.1 倍按下；新档 2.1x / 3.1x 在，旧的 2x / 3x 不在
+    const pressed = screen.getByRole('button', { name: '显示 1.1 倍战役时间范围' });
     expect(pressed).toHaveAttribute('aria-pressed', 'true');
-    expect(pressed).toHaveTextContent('2.1x');
+    expect(pressed).toHaveTextContent('1.1x');
     expect(screen.getByRole('button', { name: '显示 3.1 倍战役时间范围' })).toHaveTextContent('3.1x');
     expect(screen.queryByRole('button', { name: '显示 2 倍战役时间范围' })).toBeNull();
     expect(screen.queryByRole('button', { name: '显示 3 倍战役时间范围' })).toBeNull();
@@ -247,7 +248,7 @@ describe('原始盘面默认 5 分钟线、2.1 倍；显示与计算同周期时
     }
     if (displayInterval !== '5m') {
       expect(within(intervalGroup()).getByRole('button', { name: displayInterval }).getAttribute('title'))
-        .toContain(`当前视窗放不下 5 分钟线，已自动放宽到 1 小时`);
+        .toContain(`当前视窗放不下 5 分钟线，已自动放宽到 ${({ '15m': '15 分钟', '1h': '1 小时' } as Record<string, string>)[displayInterval]}`);
     }
 
     // 请求次数：同周期同窗口时只有一份（计算那一份的分页），两边共用同一个数组
@@ -255,7 +256,7 @@ describe('原始盘面默认 5 分钟线、2.1 倍；显示与计算同周期时
     const computeKlines = accuracyCallsWithKlines().at(-1)!.args[3];
     if (displayInterval === computeInterval) expect(probeProps.get(probe)!.klines).toBe(computeKlines);
     else expect(probeProps.get(probe)!.klines).not.toBe(computeKlines);
-    // 反事实盘面画显示用 K 线（它自己的倍数默认 1.1，不跟随原始盘面的 2.1）
+    // 反事实盘面默认也是 1.1 倍：与原始盘面同一个视窗、同一份显示用 K 线
     const editorProbe = within(screen.getByTestId('counterfactual-chart-section')).getByTestId('kline-probe');
     expect(probeProps.get(editorProbe)!.klines).toBe(probeProps.get(probe)!.klines);
     expect(screen.getByRole('button', { name: '反事实盘面显示 1.1 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
@@ -290,14 +291,14 @@ describe('原始盘面默认 5 分钟线、2.1 倍；显示与计算同周期时
     expect(within(intervalGroup()).getByRole('button', { name: '5m' })).toHaveAttribute('aria-pressed', 'true');
   }, PAGE_TEST_TIMEOUT_MS);
 
-  it('换战役时倍数回到 2.1', async () => {
+  it('换战役时倍数回到 1.1', async () => {
     renderPage('tut-1h');
     await waitMainProbe('5m');
     fireEvent.click(screen.getByRole('button', { name: '显示 5 倍战役时间范围' }));
     expect(screen.getByRole('button', { name: '显示 5 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
     await act(async () => { navigateRef!('/journal/campaigns/tut-5h'); });
     await waitFor(() => expect(screen.getByText('TUTUSDT 约 5 小时')).toBeInTheDocument(), { timeout: WAIT });
-    expect(screen.getByRole('button', { name: '显示 2.1 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '显示 1.1 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '显示 5 倍战役时间范围' })).toHaveAttribute('aria-pressed', 'false');
   }, PAGE_TEST_TIMEOUT_MS);
 });
@@ -436,14 +437,15 @@ describe('放宽边界两侧来回切倍数：已拉到手的那份原样接着�
 });
 
 describe('悬停提示说对放宽的原因', () => {
-  it('12 小时战役：2.1 倍视窗放得下 5 分钟线，是整段拉取超过 6000 根才放宽到 15 分钟', async () => {
+  it('【用户要求】12 小时战役：整段 51 倍按 5 分钟线超过 6000 根，但盘面照样是 5 分钟线（只拉视窗附近一段），不提示放宽', async () => {
     renderPage('tut-12h');
-    await waitMainProbe('15m');
-    const title = within(intervalGroup()).getByRole('button', { name: '15m' }).getAttribute('title');
-    expect(title).toContain('整段拉取范围按 5 分钟线超过 6000 根，已自动放宽到 15 分钟');
-    expect(title).not.toContain('当前视窗放不下');
-    // 计算用周期同是 15m：只拉一份
-    expect(countCallsByInterval(synth.calls)).toEqual({ '15m': 2 });
+    await waitMainProbe('5m');
+    await waitComputeLoaded();
+    const title = within(intervalGroup()).getByRole('button', { name: '5m' }).getAttribute('title');
+    expect(title).not.toContain('已自动放宽');
+    // 计算用仍是 15m（读数不变）；显示用 5m 只拉视窗附近那一段
+    expect(legacyDefaultKlines('tut-12h').interval).toBe('15m');
+    expect(countCallsByInterval(synth.calls)).toEqual({ '15m': 2, '5m': 4 });
   }, PAGE_TEST_TIMEOUT_MS);
 });
 

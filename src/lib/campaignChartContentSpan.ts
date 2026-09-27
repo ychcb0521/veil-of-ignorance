@@ -127,8 +127,10 @@ export function pickCampaignComputeInterval(fetch: CampaignChartContentTimeSpan)
 
 /**
  * 盘面显示周期（只管显示，不进任何计算）。
- * 没手动选过：取「5 分钟」「可读下限」「拉取预算」三者里最粗的——长战役 2.1 倍放不下 5 分钟线时
- * 自动放宽到 15 分钟 / 1 小时，不裁、不卡。
+ * 没手动选过：【用户要求】「每个交易战役点进去，盘面默认 5 分钟线」——取「5 分钟」与「可读下限」里较粗的。
+ * 拉取预算不再参与：放不下整段 51 倍时，显示用 K 线只拉视窗附近的一段（trimCampaignDisplayFetchWindow），
+ * 以前 10 小时以上的战役会仅仅因为预拉 51 倍超过 6000 根就被放宽到 15 分钟线。
+ * 只剩视窗里 5 分钟线超过约 1200 根（每根不到 1 像素、画不清）时才放宽——1.1 倍下约 3.8 天以上的战役。
  * 手动选过：沿用原来的规则——倍率视图原样照手动；绝对预设下不比可读下限 / 拉取预算更细。
  */
 export function pickCampaignDisplayInterval(options: {
@@ -147,13 +149,37 @@ export function pickCampaignDisplayInterval(options: {
   if (options.manual) {
     return options.absolute ? pickCoarserCampaignInterval(options.manual, floor) : options.manual;
   }
-  return pickCoarserCampaignInterval(CAMPAIGN_DEFAULT_DISPLAY_INTERVAL, floor);
+  return pickCoarserCampaignInterval(CAMPAIGN_DEFAULT_DISPLAY_INTERVAL, readable);
+}
+
+export type CampaignFetchWindow = { fromTime: number; toTime: number };
+
+/**
+ * 显示用 K 线实际拉哪一段：整段拉取窗口按这个周期放得下 6000 根就整段拉（切倍数不用再等）；
+ * 放不下就以当前视窗中心为准，截一段正好 6000 根的（仍在整段窗口之内、一定盖住视窗）。
+ * 视窗本身按可读下限不超过约 1200 根，所以截出来的这段两侧各还留着好几倍视窗的余地可拖动。
+ */
+export function trimCampaignDisplayFetchWindow(
+  full: CampaignFetchWindow,
+  visible: CampaignFetchWindow,
+  interval: CampaignChartInterval,
+  budget: number = CAMPAIGN_FETCH_CANDLE_BUDGET,
+): CampaignFetchWindow {
+  const intervalMs = OVERVIEW_INTERVALS.find(item => item.interval === interval)?.ms ?? 60_000;
+  const span = budget * intervalMs;
+  if (full.toTime - full.fromTime <= span) return full;
+  const center = (visible.fromTime + visible.toTime) / 2;
+  const toTime = Math.min(full.toTime, Math.max(full.fromTime + span, center + span / 2));
+  const fromTime = Math.max(full.fromTime, toTime - span);
+  // 对齐到周期边界，同一视窗来回切换得到同一段（拉取缓存的键不变）
+  return { fromTime: Math.floor(fromTime / intervalMs) * intervalMs, toTime: Math.ceil(toTime / intervalMs) * intervalMs };
 }
 
 /**
  * 没手动选周期、盘面却比 5 分钟线粗时，是哪条下限放宽的——悬停提示要说对原因：
- * - 'visible'：当前视窗里 5 分钟线超过约 1200 根（例如 8 天的战役开 2.1 倍）；
- * - 'fetch'：视窗放得下，是整段拉取范围按 5 分钟线超过 6000 根（例如 12 小时的战役，51 倍拉取约 7300 根）。
+ * - 'visible'：当前视窗里 5 分钟线超过约 1200 根（例如 8 天的战役开 1.1 倍）；
+ * - 'fetch'：视窗放得下，是整段拉取范围按 5 分钟线超过 6000 根。自动周期已不再因拉取预算放宽（见 pickCampaignDisplayInterval），
+ *   只有手动选过、又开了绝对预设时还可能出现。
  * 盘面就是 5 分钟线（或更细）时返回 null。
  */
 export function explainCampaignDisplayIntervalWidening(
