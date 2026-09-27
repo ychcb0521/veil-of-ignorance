@@ -348,6 +348,30 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByTestId('list-location-probe')).toHaveTextContent(listLocation);
   });
 
+  it('【用户要求】从规则页跳进来的，返回时回到规则页（原排序），不掉到战役列表', async () => {
+    const rulesLocation = '/journal/rules?sort=created&dir=asc';
+    render(
+      <MemoryRouter
+        initialEntries={[
+          rulesLocation,
+          { pathname: '/journal/campaigns/winner', state: { fromRules: true } },
+        ]}
+        initialIndex={1}
+      >
+        <Routes>
+          <Route path="/journal/rules" element={<ListLocationProbe />} />
+          <Route path="/journal/campaigns" element={<div>战役列表</div>} />
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('winner campaign')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '返回规则' }));
+    expect(screen.getByTestId('list-location-probe')).toHaveTextContent(rulesLocation);
+    expect(screen.queryByText('战役列表')).not.toBeInTheDocument();
+  });
+
   it('一键隐藏会同时移除反事实 marker、水平线和竖线', async () => {
     const branch = {
       id: 'counterfactual-1',

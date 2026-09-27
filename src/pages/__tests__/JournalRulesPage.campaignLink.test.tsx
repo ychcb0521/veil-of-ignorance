@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import JournalRulesPage from '../JournalRulesPage';
+import JournalRulesPage, { clearRulesPageCache } from '../JournalRulesPage';
 import type { TradeCampaign, TradingRule } from '@/types/journal';
 
 const mocks = vi.hoisted(() => ({
@@ -96,6 +96,8 @@ vi.mock('@/lib/journalApi', () => ({
   ]),
   updateRule: mocks.updateRule,
 }));
+
+beforeEach(() => clearRulesPageCache());
 
 describe('JournalRulesPage campaign link', () => {
   beforeEach(() => {
@@ -228,5 +230,50 @@ describe('【用户要求】规则卡片：违规与修正分行，不显示【�
     expect(screen.getByTestId('rule-fix')).toHaveTextContent('加仓之后对冲触发之后就不要动了');
     expect(screen.queryByText(/战役偏离/)).not.toBeInTheDocument();
     expect(screen.getByText('主力开仓')).toBeInTheDocument();
+  });
+});
+
+describe('【用户要求】从规则跳到战役再返回：回到规则页，排序与数据原样', () => {
+  function CampaignProbe() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    const state = location.state as { fromRules?: boolean } | null;
+    return (
+      <div>
+        <div data-testid="campaign-probe">{state?.fromRules ? 'from-rules' : 'direct'}</div>
+        <button type="button" onClick={() => navigate(-1)}>返回</button>
+      </div>
+    );
+  }
+  function SearchProbe() {
+    return <div data-testid="rules-search">{useLocation().search}</div>;
+  }
+
+  it('跳转带上「从规则来」；排序写在地址栏；返回后立即显示、不回到加载中', async () => {
+    mocks.ruleText = '【战役偏离】违规操作：main_open：硬拆。修正后的规则：不要动';
+    mocks.sourceIndex = { byText: {}, byRuleId: { 'rule-1': 'campaign-1' } };
+    render(
+      <MemoryRouter initialEntries={['/journal/rules']}>
+        <Routes>
+          <Route path="/journal/rules" element={<><JournalRulesPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:campaignId" element={<CampaignProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('rule-fix');
+    fireEvent.click(screen.getByTestId('rules-sort-created'));
+    await waitFor(() => expect(screen.getByTestId('rules-search')).toHaveTextContent('?sort=created'));
+
+    const link = screen.getByRole('button', { name: '跳到对应交易战役' });
+    await waitFor(() => expect(link).toBeEnabled());
+    fireEvent.click(link);
+    expect(await screen.findByTestId('campaign-probe')).toHaveTextContent('from-rules');
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    // 返回的第一帧就有规则（内存里的那份），排序仍是创建时间
+    expect(screen.getByTestId('rule-fix')).toHaveTextContent('不要动');
+    expect(screen.queryByText('加载中…')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rules-search')).toHaveTextContent('?sort=created');
+    expect(screen.getByTestId('rules-sort-created')).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -13,7 +13,7 @@
  * 或来源战役不在列表里（例如已删除）的规则排在最后，按规则创建时间从新到旧。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, ArrowUpRight, Pencil } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { toast } from '@/lib/notificationCenter';
@@ -47,6 +47,28 @@ type RuleSortMode = 'operation' | 'created';
 /** 与交易战役卡片同一种小标签：18px 高、3px 圆角。 */
 const RULE_CHIP = 'inline-flex h-[18px] shrink-0 items-center rounded-[3px] px-1.5 leading-none whitespace-nowrap';
 type RuleSortDirection = 'asc' | 'desc';
+
+/**
+ * 【用户要求】「从规则跳到战役、返回时要回到规则；操作逻辑的流畅性是第一位的」。
+ * 返回时这一页要原样回来：排序记在地址栏（?sort=created&dir=asc，缺省 = 操作时间从新到旧）；
+ * 读过的规则留在内存里，返回时立即画出来、后台再核对一次，不闪「加载中」；滚动位置按这条 history 记录记住。
+ */
+export type RulesPageNavigationState = { fromRules: true };
+const RULES_SCROLL_KEY_PREFIX = 'journal-rules-scroll:';
+type RulesPageSnapshot = { rules: TradingRule[]; campaigns: TradeCampaign[]; activeCampaignCount: number };
+const rulesPageCache = new Map<string, RulesPageSnapshot>();
+/** 测试之间清掉内存里的规则页数据。 */
+export function clearRulesPageCache() {
+  rulesPageCache.clear();
+}
+
+function parseRulesSort(search: string): { mode: RuleSortMode; direction: RuleSortDirection } {
+  const params = new URLSearchParams(search);
+  return {
+    mode: params.get('sort') === 'created' ? 'created' : 'operation',
+    direction: params.get('dir') === 'asc' ? 'asc' : 'desc',
+  };
+}
 
 const SORT_OPTIONS: { mode: RuleSortMode; label: string; hint: string }[] = [
   { mode: 'operation', label: '操作时间', hint: '按来源战役的操作时间排（与交易战役列表同一个时间）；没有来源战役的排在最后' },
@@ -150,41 +172,44 @@ export function sortRuleRows(rows: readonly RuleRow[], mode: RuleSortMode, direc
 
 export default function JournalRulesPage() {
   const nav = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
+  const userId = user?.id;
+  const cached = userId ? rulesPageCache.get(userId) : undefined;
   const { tradeHistory, ordersMap, filledOrders, positionsMap } = useTradingContext();
   // 与交易战役列表同一份缓存：操作时间在两页是同一个数，已经打开过战役列表时不再重读
   const { rows: campaignRows } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap });
-  const [rules, setRules] = useState<TradingRule[]>([]);
-  const [campaigns, setCampaigns] = useState<TradeCampaign[]>([]);
+  const [rules, setRules] = useState<TradingRule[]>(() => cached?.rules ?? []);
+  const [campaigns, setCampaigns] = useState<TradeCampaign[]>(() => cached?.campaigns ?? []);
   const [localRuleSources, setLocalRuleSources] = useState<{ byText: Record<string, string>; byRuleId: Record<string, string> }>({
     byText: {},
     byRuleId: {},
   });
-  const [loading, setLoading] = useState(true);
-  const [sortMode, setSortMode] = useState<RuleSortMode>('operation');
-  const [sortDirection, setSortDirection] = useState<RuleSortDirection>('desc');
+  const [loading, setLoading] = useState(!cached);
+  const { mode: sortMode, direction: sortDirection } = useMemo(() => parseRulesSort(location.search), [location.search]);
   /** 有进行中的战役时规则冻结（执行者时段不许改规则）。 */
-  const [activeCampaignCount, setActiveCampaignCount] = useState(0);
+  const [activeCampaignCount, setActiveCampaignCount] = useState(() => cached?.activeCampaignCount ?? 0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!userId) return;
     let cancelled = false;
-    setLoading(true);
+    // 内存里已经有这一页的数据（从战役返回）：照常显示、后台核对，不回到「加载中」
+    if (!rulesPageCache.has(userId)) setLoading(true);
     (async () => {
       try {
         const [r, allCampaigns, active] = await Promise.all([
-          listRules(user.id),
-          listAllCampaigns(user.id, { status: 'all' }),
-          listActiveCampaigns(user.id),
+          listRules(userId),
+          listAllCampaigns(userId, { status: 'all' }),
+          listActiveCampaigns(userId),
         ]);
         if (cancelled) return;
         setRules(r.filter(x => x.rule_text !== '[延后]'));
         setCampaigns(allCampaigns);
         setActiveCampaignCount(active.length);
-        setLocalRuleSources(getLocalTradingRuleSourceCampaignIndex(user.id));
+        setLocalRuleSources(getLocalTradingRuleSourceCampaignIndex(userId));
       } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : String(e));
       } finally {
@@ -192,7 +217,45 @@ export default function JournalRulesPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [userId]);
+
+  // 读到的、改过的都记进内存，返回这一页时直接用
+  useEffect(() => {
+    if (!userId || loading) return;
+    rulesPageCache.set(userId, { rules, campaigns, activeCampaignCount });
+  }, [userId, loading, rules, campaigns, activeCampaignCount]);
+
+  // 本地来源索引只在本机，缓存命中时也要先读一次，否则第一帧的战役链接是空的
+  useEffect(() => {
+    if (userId && cached) setLocalRuleSources(getLocalTradingRuleSourceCampaignIndex(userId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  // 从战役返回：滚回点进去之前的位置（按这条 history 记录记的，只用一次）
+  useEffect(() => {
+    if (loading || rules.length === 0) return;
+    const storageKey = `${RULES_SCROLL_KEY_PREFIX}${location.key}`;
+    let saved: number;
+    try {
+      saved = Number(sessionStorage.getItem(storageKey));
+      sessionStorage.removeItem(storageKey);
+    } catch {
+      return;
+    }
+    if (!Number.isFinite(saved) || saved <= 0) return;
+    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: saved }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading, rules.length, location.key]);
+
+  const openCampaign = (campaignId: string) => {
+    try {
+      sessionStorage.setItem(`${RULES_SCROLL_KEY_PREFIX}${location.key}`, String(window.scrollY));
+    } catch {
+      // 存不了也照样跳，只是回来时不回到原位置
+    }
+    const state: RulesPageNavigationState = { fromRules: true };
+    nav(`/journal/campaigns/${campaignId}`, { state });
+  };
 
   const designBlocked = activeCampaignCount > 0;
 
@@ -282,11 +345,13 @@ export default function JournalRulesPage() {
   }), sortMode, sortDirection), [rules, ruleCampaignSources, campaignMap, operationMsByCampaign, sortMode, sortDirection]);
 
   const handleSort = (mode: RuleSortMode) => {
-    if (mode === sortMode) setSortDirection(current => (current === 'desc' ? 'asc' : 'desc'));
-    else {
-      setSortMode(mode);
-      setSortDirection('desc');
-    }
+    const nextDirection: RuleSortDirection = mode === sortMode ? (sortDirection === 'desc' ? 'asc' : 'desc') : 'desc';
+    const params = new URLSearchParams(location.search);
+    if (mode === 'operation') params.delete('sort'); else params.set('sort', mode);
+    if (nextDirection === 'desc') params.delete('dir'); else params.set('dir', nextDirection);
+    const search = params.toString();
+    // 换排序不新增 history 记录：返回键仍是「回到上一页」
+    nav({ pathname: location.pathname, search: search ? `?${search}` : '' }, { replace: true });
   };
 
   return (
@@ -369,7 +434,7 @@ export default function JournalRulesPage() {
                           type="button"
                           aria-label="跳到对应交易战役"
                           title={campaign ? `打开交易战役：${campaign.title}` : '跳到对应交易战役'}
-                          onClick={() => nav(`/journal/campaigns/${campaignId}`)}
+                          onClick={() => openCampaign(campaignId)}
                           className={cn(RULE_CHIP, 'gap-0.5 bg-muted text-[10px] font-medium text-muted-foreground transition-colors hover:bg-[#F0B90B]/15 hover:text-[#8F6B00] dark:hover:text-[#F0B90B]')}
                         >
                           {campaign?.symbol ?? '战役'}
