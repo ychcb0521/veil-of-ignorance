@@ -4,7 +4,9 @@
  * 【用户要求】「布局和内容太复杂了。规则一条一条呈现，每条能链接跳到对应的战役即可，不用冗余的没必要的功能；
  * 要能按时间排序（默认按操作时间排序）。」
  * 所以这一页只做三件事：一条一行列出规则、每条可跳到来源战役、按时间排序。
- * 类型 / 权重 / 演化 / 原则、激活 / Checklist / 必填、编辑 / 删除、原则层与演化地图都不在这里呈现——
+ * 【用户要求】每行再留一个不显眼的小按钮（铅笔，悬停这一行才显现）：原位改文字，里面带删除。
+ * 有进行中的战役时不能改、刚激活 7 天冷却期内不能删——与以前同一套保护。
+ * 类型 / 权重 / 演化 / 原则、激活 / Checklist / 必填、原则层与演化地图都不在这里呈现——
  * 规则上的这些字段原样留在数据里，开仓 checklist、必填提醒照旧按它们工作，这一页不改它们。
  *
  * 「操作时间」= 来源战役的客观操作时间（与交易战役列表同一个函数、同一份缓存行），没有来源战役、
@@ -12,7 +14,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpRight } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpRight, Pencil } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { toast } from '@/lib/notificationCenter';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,9 +22,12 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import {
   bindLocalTradingRuleSourceCampaign,
+  deleteRule,
   getLocalTradingRuleSourceCampaignIndex,
+  listActiveCampaigns,
   listAllCampaigns,
   listRules,
+  updateRule,
 } from '@/lib/journalApi';
 import {
   buildCampaignDeviationRuleTextFromNote,
@@ -34,6 +39,7 @@ import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { cn } from '@/lib/utils';
 import type { TradeCampaign, TradingRule } from '@/types/journal';
+import { ruleCooldownRemainingMs } from '@/types/journal';
 
 type RuleSortMode = 'operation' | 'created';
 type RuleSortDirection = 'asc' | 'desc';
@@ -153,6 +159,11 @@ export default function JournalRulesPage() {
   const [loading, setLoading] = useState(true);
   const [sortMode, setSortMode] = useState<RuleSortMode>('operation');
   const [sortDirection, setSortDirection] = useState<RuleSortDirection>('desc');
+  /** 有进行中的战役时规则冻结（执行者时段不许改规则）。 */
+  const [activeCampaignCount, setActiveCampaignCount] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -160,13 +171,15 @@ export default function JournalRulesPage() {
     setLoading(true);
     (async () => {
       try {
-        const [r, allCampaigns] = await Promise.all([
+        const [r, allCampaigns, active] = await Promise.all([
           listRules(user.id),
           listAllCampaigns(user.id, { status: 'all' }),
+          listActiveCampaigns(user.id),
         ]);
         if (cancelled) return;
         setRules(r.filter(x => x.rule_text !== '[延后]'));
         setCampaigns(allCampaigns);
+        setActiveCampaignCount(active.length);
         setLocalRuleSources(getLocalTradingRuleSourceCampaignIndex(user.id));
       } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : String(e));
@@ -176,6 +189,51 @@ export default function JournalRulesPage() {
     })();
     return () => { cancelled = true; };
   }, [user]);
+
+  const designBlocked = activeCampaignCount > 0;
+
+  const startEdit = (rule: TradingRule) => {
+    setEditingId(rule.id);
+    setEditText(rule.rule_text);
+  };
+
+  const saveEdit = async (rule: TradingRule) => {
+    const text = editText.trim();
+    if (!text) {
+      toast.error('规则文字不能为空');
+      return;
+    }
+    if (text === rule.rule_text) {
+      setEditingId(null);
+      return;
+    }
+    setSavingId(rule.id);
+    try {
+      await updateRule(rule.id, { rule_text: text });
+      // 来源战役按规则 id 绑定（见上面的迁移），改了文字链接不丢
+      setRules(prev => prev.map(item => (item.id === rule.id ? { ...item, rule_text: text } : item)));
+      setEditingId(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeRule = async (rule: TradingRule) => {
+    if (!confirm('删除这条规则？已加入开仓 checklist 的，下次开仓将不再出现。')) return;
+    setSavingId(rule.id);
+    try {
+      await deleteRule(rule.id);
+      setRules(prev => prev.filter(item => item.id !== rule.id));
+      setEditingId(null);
+      toast.message('已删除规则');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const campaignMap = useMemo(() => new Map(campaigns.map(campaign => [campaign.id, campaign])), [campaigns]);
   const ruleCampaignSources = useMemo(
@@ -277,7 +335,7 @@ export default function JournalRulesPage() {
                   key={rule.id}
                   data-testid="rule-row"
                   data-rule-id={rule.id}
-                  className="grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-1.5 px-4 py-3 sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:items-start"
+                  className="group grid grid-cols-[minmax(0,1fr)] gap-x-4 gap-y-1.5 px-4 py-3 sm:grid-cols-[112px_minmax(0,1fr)_auto] sm:items-start"
                 >
                   <div
                     className="font-mono text-[11px] tabular-nums leading-6 text-muted-foreground"
@@ -285,21 +343,87 @@ export default function JournalRulesPage() {
                   >
                     {shownMs != null ? formatBeijingTime(shownMs).slice(0, 16) : '—'}
                   </div>
-                  <div className="whitespace-pre-wrap text-[13px] leading-6 text-foreground">{rule.rule_text}</div>
+                  {editingId === rule.id ? (
+                    <div className="min-w-0 space-y-1.5" data-testid="rule-editor">
+                      <textarea
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        rows={Math.min(8, Math.max(2, Math.ceil(editText.length / 60)))}
+                        autoFocus
+                        aria-label="规则文字"
+                        className="w-full resize-y rounded border border-border bg-background px-2 py-1.5 text-[13px] leading-6 outline-none focus:border-[#F0B90B]/70 focus:ring-2 focus:ring-[#F0B90B]/15"
+                      />
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <button
+                          type="button"
+                          disabled={savingId === rule.id}
+                          onClick={() => void saveEdit(rule)}
+                          className="h-6 rounded bg-[#F0B90B] px-2 font-medium text-black hover:bg-[#F0B90B]/90 disabled:opacity-50"
+                        >
+                          保存
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                          className="h-6 rounded px-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          取消
+                        </button>
+                        {/* 删除收在编辑里，平时看不到；冷却期内停用，提示挂在外层 span（停用按钮收不到悬停） */}
+                        {(() => {
+                          const cooldownMs = ruleCooldownRemainingMs(rule);
+                          const cooling = cooldownMs > 0;
+                          return (
+                            <span
+                              className="ml-auto inline-flex"
+                              title={cooling ? `刚激活的规则 ${Math.ceil(cooldownMs / 86_400_000)} 天后才能删除（7 天冷却期）` : undefined}
+                            >
+                              <button
+                                type="button"
+                                data-testid="rule-delete"
+                                disabled={cooling || savingId === rule.id}
+                                onClick={() => void removeRule(rule)}
+                                className="h-6 rounded px-2 text-muted-foreground hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:pointer-events-none disabled:opacity-40"
+                              >
+                                删除
+                              </button>
+                            </span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap text-[13px] leading-6 text-foreground">{rule.rule_text}</div>
+                  )}
+                  <div className="flex items-center gap-0.5 justify-self-start sm:justify-self-end">
                   {campaignId ? (
                     <button
                       type="button"
                       aria-label="跳到对应交易战役"
                       title={campaign ? `${campaign.title}` : '跳到对应交易战役'}
                       onClick={() => nav(`/journal/campaigns/${campaignId}`)}
-                      className="inline-flex h-6 items-center gap-1 justify-self-start whitespace-nowrap rounded px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#9A6B00] dark:hover:text-[#F0B90B] sm:justify-self-end"
+                      className="inline-flex h-6 items-center gap-1 whitespace-nowrap rounded px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#9A6B00] dark:hover:text-[#F0B90B]"
                     >
                       {campaign?.symbol ?? '战役'}
                       <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
                     </button>
                   ) : (
-                    <span className="justify-self-start text-[11px] leading-6 text-muted-foreground/50 sm:justify-self-end">无来源战役</span>
+                    <span className="px-1.5 text-[11px] leading-6 text-muted-foreground/50">无来源战役</span>
                   )}
+                  {/* 【用户要求】不显眼的小按钮：平时几乎透明，悬停这一行或键盘聚焦时才显现 */}
+                  <span className="inline-flex" title={designBlocked ? '有进行中的交易战役时规则冻结，先结束战役再改' : '编辑或删除这条规则'}>
+                    <button
+                      type="button"
+                      data-testid="rule-edit"
+                      aria-label="编辑或删除这条规则"
+                      disabled={designBlocked || editingId === rule.id}
+                      onClick={() => startEdit(rule)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-60 disabled:pointer-events-none max-sm:opacity-40"
+                    >
+                      <Pencil aria-hidden="true" className="h-3 w-3" />
+                    </button>
+                  </span>
+                  </div>
                 </li>
               );
             })}

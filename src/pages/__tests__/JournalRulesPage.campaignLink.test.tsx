@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   },
   ruleText: '【战役偏离】 违规操作： hedge_initial_a：入场价格低于谢林点、长期横盘、且存在一浅一深的支撑位，此时居然开单！而且还用了浅的支撑位作为止损位。。 修正后的规则： 入场价格低于谢林点且长期横盘时，不能开单! 更不能用浅的支撑位作为止损位。不能妄图所有好结果都与自己有关系！因为凡事皆有代价！',
   updateRule: vi.fn(),
+  deleteRule: vi.fn(),
+  activeCampaigns: [] as unknown[],
+  activatedAt: null as string | null,
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -33,9 +36,9 @@ vi.mock('@/hooks/useCampaignList', () => ({
 vi.mock('@/lib/journalApi', () => ({
   bindLocalTradingRuleSourceCampaign: mocks.bindLocalTradingRuleSourceCampaign,
   createPrinciple: vi.fn(),
-  deleteRule: vi.fn(),
+  deleteRule: mocks.deleteRule,
   getLocalTradingRuleSourceCampaignIndex: vi.fn(() => mocks.sourceIndex),
-  listActiveCampaigns: vi.fn(async () => []),
+  listActiveCampaigns: vi.fn(async () => mocks.activeCampaigns),
   listAllCampaigns: vi.fn(async () => [
     {
       id: 'campaign-1',
@@ -86,7 +89,7 @@ vi.mock('@/lib/journalApi', () => ({
       evolution_level: 3,
       ui_order: 0,
       snooze_until: null,
-      activated_at: null,
+      activated_at: mocks.activatedAt,
       created_at: '2026-06-30T04:00:00.000Z',
       updated_at: '2026-06-30T04:00:00.000Z',
     } satisfies TradingRule,
@@ -149,5 +152,66 @@ describe('JournalRulesPage campaign link', () => {
 
     expect(await screen.findByText('已进入战役详情')).toBeInTheDocument();
     expect(mocks.bindLocalTradingRuleSourceCampaign).not.toHaveBeenCalled();
+  });
+});
+
+describe('【用户要求】每行一个不显眼的小按钮：编辑与删除', () => {
+  const renderPage = () => render(
+    <MemoryRouter initialEntries={['/journal/rules']}>
+      <Routes>
+        <Route path="/journal/rules" element={<JournalRulesPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  beforeEach(() => {
+    mocks.updateRule.mockReset();
+    mocks.deleteRule.mockReset();
+    mocks.activeCampaigns = [];
+    mocks.activatedAt = null;
+    mocks.ruleText = '原来的规则文字';
+  });
+
+  it('点铅笔原位改文字，保存写回；取消不写', async () => {
+    renderPage();
+    const edit = await screen.findByTestId('rule-edit');
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    const box = screen.getByLabelText('规则文字');
+    fireEvent.change(box, { target: { value: '改过的规则文字' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(mocks.updateRule).toHaveBeenCalledWith('rule-1', { rule_text: '改过的规则文字' }));
+    expect(await screen.findByText('改过的规则文字')).toBeInTheDocument();
+    expect(screen.queryByTestId('rule-editor')).not.toBeInTheDocument();
+  });
+
+  it('删除收在编辑里，要确认；确认后这一行消失', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    renderPage();
+    const edit = await screen.findByTestId('rule-edit');
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    fireEvent.click(screen.getByTestId('rule-delete'));
+    expect(mocks.deleteRule).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('rule-delete'));
+    await waitFor(() => expect(mocks.deleteRule).toHaveBeenCalledWith('rule-1'));
+    await waitFor(() => expect(screen.queryAllByTestId('rule-row')).toHaveLength(0));
+    confirm.mockRestore();
+  });
+
+  it('刚激活 7 天冷却期内删除停用', async () => {
+    mocks.activatedAt = new Date(Date.now() - 86_400_000).toISOString();
+    renderPage();
+    const edit = await screen.findByTestId('rule-edit');
+    await waitFor(() => expect(edit).toBeEnabled());
+    fireEvent.click(edit);
+    expect(screen.getByTestId('rule-delete')).toBeDisabled();
+  });
+
+  it('有进行中的战役时规则冻结：铅笔停用', async () => {
+    mocks.activeCampaigns = [{ id: 'active-1' }];
+    renderPage();
+    await screen.findByText('原来的规则文字');
+    await waitFor(() => expect(screen.getByTestId('rule-edit')).toBeDisabled());
   });
 });
