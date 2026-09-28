@@ -132,6 +132,7 @@ import {
   writeCampaignSortParams,
   type CampaignSortBinning,
   type SortCrossTab,
+  type SortQuartile,
   type SortCrossTabColumn,
   type SortGroupKey,
   type SortGroupLevelStat,
@@ -1035,18 +1036,27 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
   }
 }
 
-/** 「Q4 ≥ 2.30（3 场）· Q3 ≥ 1.20（3 场）· Q2 ≥ -0.75（2 场）· Q1 < -0.75（3 场）」 */
+/**
+ * 【用户要求】「分档里把 Q 换成对应的实际数值」：一档写成它的读数区间，不写 Q1–Q4——
+ * 最高一档「≥ x」、最低一档「< x」、中间「a ~ b」（含 a、不含 b）。档界按封面精度写，就是那一档里最小的读数
+ * （落在有意义的分界线上时就是那条线，如 0.00、-1.00）。分区标题、分组统计、交叉表、「分档」提示都用这一个写法。
+ */
+function formatQuartileRange(mode: CampaignSortMode, quartile: SortQuartile, thresholds: readonly number[] | null): string {
+  if (!thresholds) return '—';
+  const value = (index: number) => formatSortBinValue(mode, thresholds[index]);
+  if (quartile === 4) return `≥ ${value(2)}`;
+  if (quartile === 1) return `< ${value(0)}`;
+  return `${value(quartile - 2)} ~ ${value(quartile - 1)}`;
+}
+
+/** 「≥ 2.50（3 场）· 0.00 ~ 2.50（4 场）· -1.00 ~ 0.00（3 场）· < -1.00（1 场）」 */
 function describeSortBinning(binning: CampaignSortBinning): string {
-  const [q1, q2, q3] = binning.thresholds;
-  const [n1, n2, n3, n4] = binning.counts;
-  const value = (threshold: number) => formatSortBinValue(binning.mode, threshold);
   // 读数成团时相邻档界会重合、中间档是 0 场：只列有战役的档
-  return [
-    { text: `Q4 ≥ ${value(q3)}`, count: n4 },
-    { text: `Q3 ≥ ${value(q2)}`, count: n3 },
-    { text: `Q2 ≥ ${value(q1)}`, count: n2 },
-    { text: `Q1 < ${value(q1)}`, count: n1 },
-  ].filter((bin) => bin.count > 0).map((bin) => `${bin.text}（${bin.count} 场）`).join('· ');
+  return ([4, 3, 2, 1] as const)
+    .map(quartile => ({ text: formatQuartileRange(binning.mode, quartile, binning.thresholds), count: binning.counts[quartile - 1] }))
+    .filter(bin => bin.count > 0)
+    .map(bin => `${bin.text}（${bin.count} 场）`)
+    .join('· ');
 }
 
 /** 排序链第一级「分档」的说明（悬停提示与 ⓘ「当前」共用；三行）。 */
@@ -1075,11 +1085,7 @@ function describeSortLevelEffect(level: number, label: string, effect: SortLevel
 /** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，重要性写星级，杠杆写倍数。 */
 function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, thresholds: readonly number[] | null): string {
   if (key.kind === 'all') return '全部';
-  if (key.kind === 'quartile') {
-    return key.lower == null
-      ? `Q1 < ${thresholds ? formatSortBinValue(mode, thresholds[0]) : '—'}`
-      : `Q${key.quartile} ≥ ${formatSortBinValue(mode, key.lower)}`;
-  }
+  if (key.kind === 'quartile') return formatQuartileRange(mode, key.quartile, thresholds);
   if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
   if (mode === 'importance') return `${key.value} 星`;
   if (mode === 'leverage') return `${key.value}x`;
@@ -3048,10 +3054,10 @@ export default function JournalCampaignsPage() {
           组的先后与列表相同。胜率 = b &gt; 0 的场数 ÷ 算得出 b 的场数；平均值只数本组算得出这一项的战役。
         </div>
         {sortCrossTabs.map((crossTab, offset) => crossTab && renderSortCrossTab(crossTab, offset + 1))}
-        {/* 【用户要求】只写 Q 分不清每个 Q 是什么：用一行很小的脚注说明 */}
+        {/* 区间怎么读（含不含端点、档界从哪来）：一行很小的脚注 */}
         {(sortBinning || sortCrossTabs.some(crossTab => crossTab?.thresholds)) && (
           <div data-testid="sort-chain-quartile-note" className="mt-2 text-[9px] leading-snug text-muted-foreground/60">
-            注：Q1–Q4 是按该指标数值从低到高切的四分位档——Q1 最低的四分之一，Q4 最高的四分之一。「Q3 ≥ x」= 这一档的读数都不低于 x（x 是档内最小的读数）、且低于上一档的档界；「Q1 &lt; x」= 低于 Q2 的档界。有意义的分界线一定是档界（盈亏比 0 与 −1R、加仓效用 1 与 0、涨跌幅 / 涨跌幅倍数 / 算术期望 0、几何期望 0.90 与 1.00），不会有一档跨过它们，所以各档场数不一定相等。
+            注：按该指标的数值切成四档（四分位，档界按当前列表算）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。档界就是那一档里最小的读数；有意义的分界线一定是档界（盈亏比 0 与 −1R、加仓效用 1 与 0、涨跌幅 / 涨跌幅倍数 / 算术期望 0、几何期望 0.90 与 1.00），不会有一档跨过它们，所以各档场数不一定相等。
           </div>
         )}
       </div>

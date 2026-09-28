@@ -615,7 +615,7 @@ describe('战役列表：多级排序', () => {
     const title = binned.getAttribute('title') ?? '';
     expect(title).toContain('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）');
     // 插值档界 2.30 / −0.75 不是任何一场的读数：档界写成那一档里最小的读数（2.50 / −0.60），与封面对得上
-    expect(title).toContain('Q4 ≥ 2.50（3 场）· Q3 ≥ 0.00（4 场）· Q2 ≥ -1.00（3 场）· Q1 < -1.00（1 场）');
+    expect(title).toContain('≥ 2.50（3 场）· 0.00 ~ 2.50（4 场）· -1.00 ~ 0.00（3 场）· < -1.00（1 场）');
     expect(title).toContain('同档内按后面各级排；各级都打平再按盈亏比本身从大到小');
     // 排序行上第一级的提示也写明分档；「+」的提示说清加层后会分档
     expect(screen.getByTestId('campaign-sort-captureRate').getAttribute('title')).toContain('第 1 级：按盈亏比从大到小，四分位分档');
@@ -644,16 +644,18 @@ describe('战役列表：多级排序', () => {
     const stats = await screen.findByTestId('sort-chain-stats');
     expect(screen.getByTestId('sort-chain-level-1')).toHaveAttribute('data-sort-direction', 'desc');
     expect(order()).toEqual(before);
-    expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('≥ 2.50');
     expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('生效 3/3');
-    expect(within(stats).getByTestId('sort-chain-stats-row-4')).toHaveTextContent('Q1 < -1.00');
+    expect(within(stats).getByTestId('sort-chain-stats-row-4')).toHaveTextContent('< -1.00');
+    // 【用户要求】分档写实际数值区间，不写 Q1–Q4
+    expect(stats.textContent).not.toMatch(/Q[1-4]/);
     expect(within(stats).getByTestId('sort-chain-stats-total')).toHaveTextContent('合计11');
     // 第一级每一档里第二级的分布：一档一行，行合计 = 这一档的场数
     const crossTab = within(stats).getByTestId('sort-chain-crosstab-2');
     expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
-    expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('≥ 2.50');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
-    expect(within(stats).getByTestId('sort-chain-quartile-note')).toHaveTextContent('Q1 最低的四分之一，Q4 最高的四分之一');
+    expect(within(stats).getByTestId('sort-chain-quartile-note')).toHaveTextContent('「≥ x」含 x；「a ~ b」含 a、不含 b；「< x」不含 x');
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('sort-chain-stats')).not.toBeInTheDocument());
     fireEvent.contextMenu(screen.getByTestId('sort-chain-toggle-2'));
@@ -684,7 +686,7 @@ describe('战役列表：多级排序', () => {
     // 点「分档」：打开 ⓘ 弹层，「当前」段第一行是档界（与悬停提示同一串），之后每级一行
     fireEvent.click(binned);
     const current = await screen.findByTestId('sort-chain-current');
-    expect(current).toHaveTextContent('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）：Q4 ≥ 2.50（3 场）· Q3 ≥ 0.00（4 场）· Q2 ≥ -1.00（3 场）· Q1 < -1.00（1 场）');
+    expect(current).toHaveTextContent('第 1 级「盈亏比」按四分位分成四档（档界按当前列表 11 场算）：≥ 2.50（3 场）· 0.00 ~ 2.50（4 场）· -1.00 ~ 0.00（3 场）· < -1.00（1 场）');
     expect(current).toHaveTextContent('第 2 级「镜像止盈」：前面各级并列的 3 组、10 场里，按镜像止盈排了 7 场；3 场与同组其它场读数相同，先后未变');
     expect(current).toHaveTextContent(effect3.getAttribute('title') ?? '∅');
     // 一级一行：档界行、第 2 级行、第 3 级行
@@ -707,10 +709,12 @@ describe('【用户要求】多级排序后卡片按第一级的档分区', () =
     expect(screen.queryByTestId('campaign-sort-section-5')).toBeNull();
     // 与分组统计同一套组：Q4 {BTC, SOL, ETH} · Q3（≥ 0.00）4 场 · Q2（≥ -1.00）3 场 · Q1 1 场
     expect(sections.map(section => within(section).getAllByTestId('campaign-card').length)).toEqual([3, 4, 3, 1]);
-    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('盈亏比≥ 2.50');
     expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('3 场');
     expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('胜率 100%');
-    expect(within(sections[1]).getByTestId('campaign-sort-section-toggle-2')).toHaveTextContent('Q3 ≥ 0.00');
+    expect(within(sections[1]).getByTestId('campaign-sort-section-toggle-2')).toHaveTextContent('0.00 ~ 2.50');
+    expect(within(sections[2]).getByTestId('campaign-sort-section-toggle-3')).toHaveTextContent('-1.00 ~ 0.00');
+    expect(screen.getByTestId('campaign-sort-section-toggle-4')).toHaveTextContent('< -1.00');
     // 分区只是把原列表切段：卡片总顺序不变
     expect(order()).toEqual([
       'BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓',
