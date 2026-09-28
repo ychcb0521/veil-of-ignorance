@@ -12,7 +12,9 @@ import {
   parseCampaignSortChain,
   quartileOf,
   quartileThresholds,
-  sortBinAnchors,
+  isSignSplitSortMode,
+  signSplitThresholds,
+  sortBinThresholds,
   removeSortLevel,
   resolveSortBinning,
   selectSortMode,
@@ -90,10 +92,10 @@ describe('排序链：依次比较', () => {
     const chained = sortCampaignRows(ROWS, [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }]);
     expect(chained).toHaveLength(single.length);
     // 反过来：第一级是加仓效用时，只收算得出的六场；加仓效用是连续指标、链上有两级 → 按四分位分档：
-    // Q4 {ETH 2.50, LINK 1.80}、Q3 {BTC 1.50}、Q2 {SOL 1.40, TIA 1.05}、Q1 {DOGE −1.20}：
-    // 四分位的 Q1 本是 {TIA, DOGE}，一正一负不能同档，0 成为档界，TIA 并入 Q2；Q2 里已实现的 SOL 排到 TIA 之前
+    // 【用户要求】0 为界、两侧对半：非负 {ETH 2.50, LINK 1.80, BTC 1.50, SOL 1.40, TIA 1.05} 以中位数 1.50 分成 ≥ 1.50 {ETH, BTC, LINK} 与 0 ~ 1.50 {SOL, TIA}；
+    // 负侧只有 DOGE −1.20。档内按镜像止盈（已实现在前）、再按加仓效用本身
     expect(ids(sortCampaignRows(ROWS, [{ mode: 'addEfficiency', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])))
-      .toEqual(['eth', 'link', 'btc', 'sol', 'tia', 'doge']);
+      .toEqual(['eth', 'btc', 'link', 'sol', 'tia', 'doge']);
   });
 
   it('三级链：前两级都打平时由第三级定先后，方向按第三级自己的', () => {
@@ -485,9 +487,9 @@ describe('排序链每一级的作用（芯片反馈）', () => {
     expect(describeSortLevelEffects(sortCampaignRows(ROWS, [{ mode: 'captureRate', direction: 'desc' }]), [{ mode: 'captureRate', direction: 'desc' }])).toEqual([null]);
     const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
     const sorted = sortCampaignRows(ROWS, chain);
-    // 十一场分四档：Q4 {BTC, SOL, ETH}、Q3 {TIA, BNB, LINK, ARB}（0 是档界）、Q2 {DOGE, AVAX, OP}、Q1 {APT}（−1R 是档界）；
-    // Q1 只有一场不进比较；Q4 三场都是已实现·盈利（读数相同，tied），Q3、Q2 分出了先后
-    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 3, rows: 10, sorted: 7, tied: 3, missing: 0 });
+    // 【用户要求】0 为界、两侧对半：≥ 2.10 {BTC, SOL, ETH, TIA}、0 ~ 2.10 {BNB, LINK, ARB}、-0.90 ~ 0 {DOGE, AVAX}、< -0.90 {OP, APT}；
+    // 四组都进比较；后两组镜像止盈读数相同（tied），前两组分出了先后
+    expect(describeSortLevelEffects(sorted, chain)[1]).toEqual({ groups: 4, rows: 11, sorted: 7, tied: 4, missing: 0 });
   });
 });
 
@@ -506,24 +508,24 @@ describe('【用户要求】排序后的分组统计', () => {
     const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
     const groups = summarizeSortGroups(sortCampaignRows(ROWS, chain), chain);
     expect(groups.map(group => group.key)).toEqual([
-      { kind: 'quartile', quartile: 4, lower: 250 },
+      { kind: 'quartile', quartile: 4, lower: 210 },
       { kind: 'quartile', quartile: 3, lower: 0 },
-      { kind: 'quartile', quartile: 2, lower: -100 },
+      { kind: 'quartile', quartile: 2, lower: -90 },
       { kind: 'quartile', quartile: 1, lower: null },
     ]);
-    expect(groups.map(group => group.count)).toEqual([3, 4, 3, 1]);
-    expect(groups.map(group => group.wins)).toEqual([3, 4, 0, 0]);
-    expect(groups[0].meanPayoff).toBeCloseTo((6 + 4.2 + 2.5) / 3);
+    expect(groups.map(group => group.count)).toEqual([4, 3, 2, 2]);
+    expect(groups.map(group => group.wins)).toEqual([4, 3, 0, 0]);
+    expect(groups[0].meanPayoff).toBeCloseTo((6 + 4.2 + 2.5 + 2.1) / 4);
     // 第二级镜像止盈：本组已实现（生效）几场
     expect(groups.map(group => group.levels[1])).toEqual([
-      { kind: 'achieved', hits: 3, count: 3 },
-      { kind: 'achieved', hits: 1, count: 4 },
-      { kind: 'achieved', hits: 2, count: 3 },
-      { kind: 'achieved', hits: 0, count: 1 },
+      { kind: 'achieved', hits: 3, count: 4 },
+      { kind: 'achieved', hits: 1, count: 3 },
+      { kind: 'achieved', hits: 2, count: 2 },
+      { kind: 'achieved', hits: 0, count: 2 },
     ]);
-    // 第一级自己：本档读数的平均值（600、420、250）
-    expect(groups[0].levels[0]).toMatchObject({ kind: 'average', count: 3 });
-    expect((groups[0].levels[0] as { value: number }).value).toBeCloseTo((600 + 420 + 250) / 3);
+    // 第一级自己：本档读数的平均值（600、420、250、210）
+    expect(groups[0].levels[0]).toMatchObject({ kind: 'average', count: 4 });
+    expect((groups[0].levels[0] as { value: number }).value).toBeCloseTo((600 + 420 + 250 + 210) / 4);
   });
 
   it('第一级是镜像止盈时一个档位一组；后面的连续指标报平均值，本组算不出时为 none', () => {
@@ -551,7 +553,7 @@ describe('【用户要求】第一级每一档里第二级的分布（交叉表�
     expect(crossTab.thresholds).not.toBeNull();
     expect(crossTab.columns.map(column => (column.kind === 'quartile' ? column.quartile : column.kind))).toEqual([4, 3, 2, 1]);
     crossTab.rows.forEach(row => expect(row.counts.reduce((sum, count) => sum + count, 0)).toBe(row.count));
-    expect(crossTab.totals).toEqual([3, 4, 3, 1]);
+    expect(crossTab.totals).toEqual([4, 3, 2, 2]);
     // 行与分组统计同一套（镜像止盈一个档位一行）
     expect(crossTab.rows.map(row => row.key)).toEqual(
       summarizeSortGroups(sortCampaignRows(ROWS, chain), chain).map(group => group.key),
@@ -563,7 +565,9 @@ describe('【用户要求】第一级每一档里第二级的分布（交叉表�
     const crossTab = summarizeSortCrossTab(sortCampaignRows(ROWS, chain), chain, 1)!;
     const kinds = crossTab.columns.map(column => (column.kind === 'quartile' ? `q${column.quartile}` : column.kind));
     expect(kinds[kinds.length - 1]).toBe('missing');
-    expect(kinds[0]).toBe('q1');
+    // 升序：档从低到高排（加仓效用负侧只有 DOGE 一场，它自己就是档界，最低一档没有战役、那一列不画）
+    const quartiles = kinds.filter(kind => kind !== 'missing').map(kind => Number(kind.slice(1)));
+    expect(quartiles).toEqual([...quartiles].sort((a, b) => a - b));
     expect(crossTab.totals.reduce((sum, count) => sum + count, 0)).toBe(ROWS.length);
   });
 
@@ -571,7 +575,7 @@ describe('【用户要求】第一级每一档里第二级的分布（交叉表�
     const chain: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }];
     const crossTab = summarizeSortCrossTab(sortCampaignRows(ROWS, chain), chain, 1)!;
     expect(crossTab.columns.every(column => column.kind === 'value')).toBe(true);
-    expect(crossTab.rows[0].counts.reduce((sum, count) => sum + count, 0)).toBe(3);
+    expect(crossTab.rows[0].counts.reduce((sum, count) => sum + count, 0)).toBe(4);
     const alpha: CampaignSortChain = [{ mode: 'captureRate', direction: 'desc' }, { mode: 'alpha', direction: 'asc' }];
     expect(summarizeSortCrossTab(sortCampaignRows(ROWS, alpha), alpha, 1)).toBeNull();
   });
@@ -607,54 +611,39 @@ describe('【用户要求】分档时负值与正值不同档：0 一定是档�
   });
 });
 
-describe('【用户要求】各指标有意义的分界线一定是档界', () => {
-  const noStraddle = (values: number[], thresholds: readonly [number, number, number], anchor: number) => {
-    for (const quartile of [1, 2, 3, 4]) {
-      const sides = new Set(values.filter(value => quartileOf(value, thresholds) === quartile).map(value => value < anchor));
-      expect(sides.size).toBeLessThanOrEqual(1);
+describe('【用户要求】与 0 相关的分档：0 的分界线保留，正负两侧各自按场数对半分', () => {
+  it('哪些指标这样分：盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望；预期回撤照旧整体四分位', () => {
+    for (const mode of ['captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy'] as const) {
+      expect(isSignSplitSortMode(mode)).toBe(true);
     }
-  };
-
-  it('分界线清单：盈亏比 0 与 −1R、加仓效用 1 与 0、涨跌幅 / 涨跌幅倍数 / 算术期望 0、几何期望 0.90 与 1.00、预期回撤没有', () => {
-    expect(sortBinAnchors('captureRate')).toEqual([0, -100]);
-    expect(sortBinAnchors('addEfficiency')).toEqual([1, 0]);
-    expect(sortBinAnchors('mainPriceChange')).toEqual([0]);
-    expect(sortBinAnchors('mainPriceEfficiency')).toEqual([0]);
-    expect(sortBinAnchors('arithmeticExpectancy')).toEqual([0]);
-    expect(sortBinAnchors('geometricExpectancy')).toEqual([-0.1, 0]);
-    expect(sortBinAnchors('expectedDrawdownPct')).toEqual([]);
+    expect(isSignSplitSortMode('expectedDrawdownPct')).toBe(false);
+    expect(sortBinThresholds('expectedDrawdownPct', [8, 1, 3, 7, 2, 6, 5, 4])).toEqual([3, 5, 7]);
   });
 
-  it('盈亏比：−1R 与 0 同时成为档界（利润捕获率 −100 / 0）', () => {
-    const values = [-300, -150, -120, -90, -60, -30, 20, 40, 80, 150, 300, 600];
-    const thresholds = quartileThresholds(values, sortBinAnchors('captureRate'))!;
-    expect(thresholds).toContain(0);
-    expect(thresholds).toContain(-100);
-    noStraddle(values, thresholds, 0);
-    noStraddle(values, thresholds, -100);
+  it('档界 = [负侧中位数, 0, 非负侧中位数]，档界是档内最小的读数；两侧各两档、场数对半', () => {
+    // 负侧 6 场、正侧 6 场（0 归非负一侧）
+    const values = [-300, -150, -120, -90, -60, -30, 0, 40, 80, 150, 300, 600];
+    const thresholds = signSplitThresholds(values)!;
+    expect(thresholds).toEqual([-90, 0, 150]);
+    const counts = [1, 2, 3, 4].map(q => values.filter(value => quartileOf(value, thresholds) === q).length);
+    expect(counts).toEqual([3, 3, 3, 3]);
+    // 负值与非负值永不同档
+    for (const q of [1, 2, 3, 4]) {
+      expect(new Set(values.filter(value => quartileOf(value, thresholds) === q).map(value => value < 0)).size).toBe(1);
+    }
   });
 
-  it('加仓效用：1 是档界（加仓没有额外放大）', () => {
-    const values = [0.3, 0.6, 0.8, 0.9, 1.1, 1.2, 1.5, 2, 3, 4];
-    const thresholds = quartileThresholds(values, sortBinAnchors('addEfficiency'))!;
-    expect(thresholds).toContain(1);
-    noStraddle(values, thresholds, 1);
+  it('两侧场数悬殊时也各对半：3 个负值、9 个正值 → 负侧两档 1 + 2、正侧两档 4 + 5（以前的 −1R 等分界线不再参与）', () => {
+    const values = [-200, -50, -10, 5, 10, 20, 40, 80, 150, 300, 600, 900];
+    const thresholds = signSplitThresholds(values)!;
+    expect(thresholds[1]).toBe(0);
+    expect([1, 2, 3, 4].map(q => values.filter(value => quartileOf(value, thresholds) === q).length)).toEqual([1, 2, 4, 5]);
   });
 
-  it('几何期望：0.90（存 −0.1）与 1.00（存 0）都是档界', () => {
-    const values = [-0.3, -0.2, -0.15, -0.08, -0.05, -0.02, 0.01, 0.05, 0.1, 0.2, 0.4, 0.8];
-    const thresholds = quartileThresholds(values, sortBinAnchors('geometricExpectancy'))!;
-    expect(thresholds).toContain(-0.1);
-    expect(thresholds).toContain(0);
-    noStraddle(values, thresholds, -0.1);
-    noStraddle(values, thresholds, 0);
-  });
-
-  it('四档装不下时优先顺序靠前的先占，档界保持递增', () => {
-    const values = [-0.5, -0.2, 0.1, 0.5, 0.95, 1.05, 1.5];
-    const thresholds = quartileThresholds(values, [1, 0, 0.5, -0.3])!;
-    expect(thresholds[0]).toBeLessThanOrEqual(thresholds[1]);
-    expect(thresholds[1]).toBeLessThanOrEqual(thresholds[2]);
-    expect(thresholds).toContain(1);
+  it('只有一侧有读数时，0 分不出东西：那一侧整体四分位', () => {
+    expect(signSplitThresholds([8, 1, 3, 7, 2, 6, 5, 4])).toEqual([3, 5, 7]);
+    expect(signSplitThresholds([-8, -1, -3, -7, -2, -6, -5, -4])).toEqual([-6, -4, -2]);
+    expect(signSplitThresholds([])).toBeNull();
   });
 });
+

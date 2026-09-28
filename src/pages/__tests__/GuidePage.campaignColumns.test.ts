@@ -142,7 +142,9 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
   it('【用户已定】连续指标作第一级时按四分位分档；排序链每一级标出本级排了几场', () => {
     const sortLib = read('lib/campaignListSort.ts');
     expect(guide).toContain('<strong>第一级是连续数值指标时分档</strong>');
-    expect(guide).toContain('先按四分位把进入列表的战役分成四档（档界按当前列表算，降序时数值最高的一档在前），同档内按后面各级排，各级都打平再按第一级本身的数值');
+    expect(guide).toContain('先把进入列表的战役分成四档（档界按当前列表算，降序时数值最高的一档在前），同档内按后面各级排，各级都打平再按第一级本身的数值');
+    // 【用户要求】与 0 相关的指标：0 的分界线保留、正负两侧各按场数对半
+    expect(guide).toContain('以 0 为界</strong>：负的一侧与正的一侧<strong>各按场数对半分</strong>成两档');
     expect(guide).toContain('排序链上第一级标着<strong>「分档」</strong>，悬停或点它（也可点 ⓘ）看档界');
     expect(guide).toContain('档界按封面精度取整、就是那一档里最小的读数，封面读数相同的战役必在同一档');
     expect(guide).toContain('镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档，只有一级时也不分档（与原来逐位相同）');
@@ -158,7 +160,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(page).toContain('data-testid="sort-chain-binned"');
     expect(page).toContain('data-testid={`sort-chain-effect-${index + 1}`}');
     expect(page).toContain('data-testid="sort-chain-current"');
-    expect(page).toContain('先按四分位分成四档');
+    expect(page).toContain('先把列表分成四档');
+    expect(page).toContain("phrase: '以 0 为界、正负两侧各按场数对半分成四档'");
   });
   it('【用户要求】反事实盘面与原始盘面同高', () => {
     expect(guide).toContain('<strong>反事实盘面与原始盘面同高</strong>');

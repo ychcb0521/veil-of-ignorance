@@ -462,23 +462,45 @@ function splitAtAnchors(
 }
 
 /**
- * 各指标在分档空间（sortBinValue 之后）里有意义的分界线，按优先顺序：
- *   · 盈亏比（利润捕获率 %）：0 盈亏分界、−100 = −1R 止损线；
- *   · 加仓效用：1 = 加仓没有额外放大，0 = 正负；
- *   · 涨跌幅、涨跌幅倍数、算术期望：0 正负；
- *   · 几何期望（存 G − 1）：−0.1 = 0.90 参考线，0 = 1.00 不增不减；
- *   · 预期回撤恒为正，没有分界线。
+ * 【用户要求】「0 的分界线保留，正的那部分均分，负的那部分均分」（2026-09-28）：
+ * 以 0 为正负分界的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望——几何期望存 G − 1，0 = 1.00 不增不减）
+ * 不再按整体四分位切：0 是中间那条档界，负值一侧按场数对半分、非负一侧按场数对半分，档界 = [负侧中位数, 0, 非负侧中位数]。
+ * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
-export function sortBinAnchors(mode: CampaignSortMode): readonly number[] {
-  switch (mode) {
-    case 'captureRate': return [0, -100];
-    case 'addEfficiency': return [1, 0];
-    case 'geometricExpectancy': return [-0.1, 0];
-    case 'mainPriceChange':
-    case 'mainPriceEfficiency':
-    case 'arithmeticExpectancy': return [0];
-    default: return [];
-  }
+const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
+  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy',
+]);
+
+/** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */
+export function isSignSplitSortMode(mode: CampaignSortMode): boolean {
+  return SIGN_SPLIT_SORT_MODES.has(mode);
+}
+
+/** 一侧的中位数档界：位置 (n−1)·0.5 线性插值，再抬到「≥ 它的最小读数」上（与四分位档界同一个取法，档界就是档内最小的读数）。 */
+function sideMedianThreshold(side: readonly number[]): number {
+  const position = (side.length - 1) * 0.5;
+  const lower = Math.floor(position);
+  const upper = Math.min(side.length - 1, lower + 1);
+  const median = side[lower] + (position - lower) * (side[upper] - side[lower]);
+  return side.find(value => value >= median) ?? side[side.length - 1];
+}
+
+/**
+ * 以 0 为界的档界：[负侧中位数, 0, 非负侧中位数]（恰好为 0 的读数归非负一侧）。
+ * 某一侧一场都没有时，0 分不出东西，另一侧照常整体四分位。
+ */
+export function signSplitThresholds(values: readonly number[]): readonly [number, number, number] | null {
+  const sorted = values.filter(value => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const negatives = sorted.filter(value => value < 0);
+  const nonNegatives = sorted.filter(value => value >= 0);
+  if (negatives.length === 0 || nonNegatives.length === 0) return quartileThresholds(sorted);
+  return [sideMedianThreshold(negatives), 0, sideMedianThreshold(nonNegatives)];
+}
+
+/** 分档用的档界：以 0 为界的指标正负两侧各对半分，其余（预期回撤）整体四分位。 */
+export function sortBinThresholds(mode: CampaignSortMode, values: readonly number[]): readonly [number, number, number] | null {
+  return isSignSplitSortMode(mode) ? signSplitThresholds(values) : quartileThresholds(values);
 }
 
 /** 一个值落在哪一档：≥ q₃ → Q4，≥ q₂ → Q3，≥ q₁ → Q2，否则 Q1。相等的值必然同档。 */
@@ -509,7 +531,7 @@ export function resolveSortBinning<T extends CampaignSortRow>(
     // 档界与归档都按封面精度取整后的读数算（sortBinValue）
     if (value != null) values.push(sortBinValue(first.mode, value));
   }
-  const thresholds = quartileThresholds(values, sortBinAnchors(first.mode));
+  const thresholds = sortBinThresholds(first.mode, values);
   if (!thresholds) return null;
   const counts: [number, number, number, number] = [0, 0, 0, 0];
   for (const value of values) counts[quartileOf(value, thresholds) - 1] += 1;
@@ -834,7 +856,7 @@ export function summarizeSortCrossTab<T extends CampaignSortRow>(
       const value = key.missing(row) ? null : read(row);
       return value == null ? null : sortBinValue(level.mode, value);
     };
-    thresholds = quartileThresholds(sortedRows.map(binned).filter(finite), sortBinAnchors(level.mode));
+    thresholds = sortBinThresholds(level.mode, sortedRows.map(binned).filter(finite));
     if (!thresholds) return null;
     const bounds = thresholds;
     columnOf = row => {

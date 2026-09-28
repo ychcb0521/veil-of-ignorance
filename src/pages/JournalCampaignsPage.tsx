@@ -116,6 +116,7 @@ import {
   describeSortLevelEffects,
   importanceValue,
   isContinuousSortMode,
+  isSignSplitSortMode,
   parseCampaignSortChain,
   removeSortLevel,
   resolveSortBinning,
@@ -1039,7 +1040,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
 /**
  * 【用户要求】「分档里把 Q 换成对应的实际数值」：一档写成它的读数区间，不写 Q1–Q4——
  * 最高一档「≥ x」、最低一档「< x」、中间「a ~ b」（含 a、不含 b）。档界按封面精度写，就是那一档里最小的读数
- * （落在有意义的分界线上时就是那条线，如 0.00、-1.00）。分区标题、分组统计、交叉表、「分档」提示都用这一个写法。
+ * （以 0 为界的那条档界就是 0.00）。分区标题、分组统计、交叉表、「分档」提示都用这一个写法。
  */
 function formatQuartileRange(mode: CampaignSortMode, quartile: SortQuartile, thresholds: readonly number[] | null): string {
   if (!thresholds) return '—';
@@ -1059,9 +1060,19 @@ function describeSortBinning(binning: CampaignSortBinning): string {
     .join('· ');
 }
 
+/**
+ * 分档方式的说法：【用户要求】与 0 相关的指标「0 的分界线保留，正负两侧各自均分」，预期回撤照旧四分位。
+ * phrase 用在整句里（「盈亏比以 0 为界、正负两侧各对半分成四档」），short 用在排序项提示的附注里。
+ */
+function sortBinningPhrase(mode: CampaignSortMode): { phrase: string; short: string } {
+  return isSignSplitSortMode(mode)
+    ? { phrase: '以 0 为界、正负两侧各按场数对半分成四档', short: '以 0 为界分档' }
+    : { phrase: '按四分位分成四档', short: '四分位分档' };
+}
+
 /** 排序链第一级「分档」的说明（悬停提示与 ⓘ「当前」共用；三行）。 */
 function describeSortBinningTitle(label: string, directionText: string, binning: CampaignSortBinning): string {
-  return `第 1 级「${label}」按四分位分成四档（档界按当前列表 ${binning.total} 场算）：\n${describeSortBinning(binning)}\n同档内按后面各级排；各级都打平再按${label}本身${directionText}`;
+  return `第 1 级「${label}」${sortBinningPhrase(binning.mode).phrase}（档界按当前列表 ${binning.total} 场算）：\n${describeSortBinning(binning)}\n同档内按后面各级排；各级都打平再按${label}本身${directionText}`;
 }
 
 /**
@@ -3057,7 +3068,7 @@ export default function JournalCampaignsPage() {
         {/* 区间怎么读（含不含端点、档界从哪来）：一行很小的脚注 */}
         {(sortBinning || sortCrossTabs.some(crossTab => crossTab?.thresholds)) && (
           <div data-testid="sort-chain-quartile-note" className="mt-2 text-[9px] leading-snug text-muted-foreground/60">
-            注：按该指标的数值切成四档（四分位，档界按当前列表算）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。档界就是那一档里最小的读数；有意义的分界线一定是档界（盈亏比 0 与 −1R、加仓效用 1 与 0、涨跌幅 / 涨跌幅倍数 / 算术期望 0、几何期望 0.90 与 1.00），不会有一档跨过它们，所以各档场数不一定相等。
+            注：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分，负值永不与正值同档；预期回撤按四分位分。档界按当前列表算，就是那一档里最小的读数（0 除外）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。
           </div>
         )}
       </div>
@@ -3129,7 +3140,7 @@ export default function JournalCampaignsPage() {
         </div>
         <div className="mt-1 text-[10px] text-muted-foreground/70">
           {crossTab.thresholds
-            ? `${label}的四档按整张列表里算得出的 ${presentTotal} 场统一分（档界是那一档里最小的读数；有意义的分界线一定是档界，如盈亏比 0 与 −1R、加仓效用 1），各行才能直接比较；`
+            ? `${label}的四档按整张列表里算得出的 ${presentTotal} 场统一分（档界是那一档里最小的读数；与 0 相关的指标以 0 为界、正负两侧各对半），各行才能直接比较；`
             : `${label}按读数分列；`}
           底色越深，这一格占本行的比例越大；「算不出」是这一项算不出的战役。
         </div>
@@ -3247,7 +3258,7 @@ export default function JournalCampaignsPage() {
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
-            <div>第一级是连续数值指标（预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何 / 算术期望）且链上不止一级时，先按四分位分成四档（档界按当前列表算、按封面精度取整，就是那一档里最小的读数），同档内按后面各级排；有意义的分界线一定是档界（盈亏比 0 与 −1R、加仓效用 1 与 0、涨跌幅 / 涨跌幅倍数 / 算术期望 0、几何期望 0.90 与 1.00）：四分位切出的某一档若跨过分界线，就把它靠分界线的那条档界挪到分界线上（线下读数多就只留线下、否则只留线上），恰好落在线上的归上面一档；四档装不下时按上面的先后优先；各级都打平再按第一级本身的数值。镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
@@ -3685,7 +3696,7 @@ export default function JournalCampaignsPage() {
                     aria-pressed={active}
                     aria-label={`${option.label}，${sortDirectionLabel(direction, option.value)}排序${chainLevel ? `（第 ${level + 1} 级）` : ''}`}
                     title={chainLevel
-                      ? `第 ${level + 1} 级：按${option.label}${sortDirectionLabel(direction, option.value)}${active && sortBinning ? '，四分位分档' : ''}；单击改为只按这一项排（方向不变）${formula ? '；双击或右键查看说明与散点图' : ''}`
+                      ? `第 ${level + 1} 级：按${option.label}${sortDirectionLabel(direction, option.value)}${active && sortBinning ? `，${sortBinningPhrase(option.value).short}` : ''}；单击改为只按这一项排（方向不变）${formula ? '；双击或右键查看说明与散点图' : ''}`
                       : `按${option.label}${sortDirectionLabel(direction, option.value)}排序${active ? '；再次单击切换方向' : ''}${formula ? '；双击或右键查看说明与散点图' : ''}`}
                     data-sort-direction={inChain ? direction : undefined}
                     data-sort-level={inChain ? level + 1 : undefined}
@@ -3757,9 +3768,9 @@ export default function JournalCampaignsPage() {
                         type="button"
                         data-testid={`sort-chain-add-${option.value}`}
                         aria-label={`把「${option.label}」加为第 ${sortChain.length + 1} 级排序`}
-                        // 单级且第一级是连续指标：加层后第一级会按四分位分档，提示里说清
+                        // 单级且第一级是连续指标：加层后第一级会分档，提示里说清怎么分
                         title={sortChain.length === 1 && isContinuousSortMode(sortChain[0].mode)
-                          ? `加为第 2 级：${SORT_LABEL_BY_MODE[sortChain[0].mode]}按四分位分成四档后，同档内再按${option.label}排`
+                          ? `加为第 2 级：${SORT_LABEL_BY_MODE[sortChain[0].mode]}${sortBinningPhrase(sortChain[0].mode).phrase}后，同档内再按${option.label}排`
                           : `加为第 ${sortChain.length + 1} 级：前面各级打平时，再按${option.label}排`}
                         onClick={(event) => {
                           event.stopPropagation();
