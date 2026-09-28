@@ -105,7 +105,11 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(s).toContain('for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;');
     expect(s).toContain('const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);');
     expect(s).not.toContain('cardMetricWidthStyle(sortedRows)');
-    expect(s).toMatch(/<div data-testid="campaign-card-list" style=\{cardMetricWidths\}>\s*\{sortedRows\.map\(row => \(\s*<CampaignCard/);
+    // 列宽变量挂在列表容器上；多级排序分区（【用户要求】分区模块）也在这个容器里，分区内外的卡片读同一个宽度
+    expect(s).toMatch(/<div data-testid="campaign-card-list" style=\{cardMetricWidths\}>\s*\{cardSections \? cardSections\.map\(/);
+    expect(s).toContain('{!collapsed && sectionRows.map(renderCampaignCard)}');
+    expect(s).toContain('}) : sortedRows.map(renderCampaignCard)}');
+    expect(s).toMatch(/const renderCampaignCard = \(row: CampaignDisplayData\) => \(\s*<CampaignCard/);
     // 卡片上显示的字就是估算用的那一份：每格的 dt 读 CARD_METRIC_LABEL，数值读 cardMetricReadings
     const strip = stripSource(s);
     expect(s).toContain('const readings = cardMetricReadings(row);');

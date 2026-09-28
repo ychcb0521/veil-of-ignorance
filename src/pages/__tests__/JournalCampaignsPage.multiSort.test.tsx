@@ -698,3 +698,40 @@ describe('战役列表：多级排序', () => {
     expect(await screen.findByTestId('sort-chain-current')).toBeInTheDocument();
   }, 15_000);
 });
+
+describe('【用户要求】多级排序后卡片按第一级的档分区', () => {
+  it('每一档一个分区：标题写档界、场数、胜率、平均 b；分区里的卡片顺序与原列表一致；可以收起', async () => {
+    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    await waitFor(() => expect(screen.getByTestId('campaign-sort-section-1')).toBeInTheDocument());
+    const sections = [1, 2, 3, 4].map(index => screen.getByTestId(`campaign-sort-section-${index}`));
+    expect(screen.queryByTestId('campaign-sort-section-5')).toBeNull();
+    // 与分组统计同一套组：Q4 {BTC, SOL, ETH} · Q3（≥ 0.00）4 场 · Q2（≥ -1.00）3 场 · Q1 1 场
+    expect(sections.map(section => within(section).getAllByTestId('campaign-card').length)).toEqual([3, 4, 3, 1]);
+    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('Q4 ≥ 2.50');
+    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('3 场');
+    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('胜率 100%');
+    expect(within(sections[1]).getByTestId('campaign-sort-section-toggle-2')).toHaveTextContent('Q3 ≥ 0.00');
+    // 分区只是把原列表切段：卡片总顺序不变
+    expect(order()).toEqual([
+      'BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓',
+      'BNB 镜像止盈', 'TIA 二次加仓', 'LINK 区间', 'ARB 回踩',
+      'DOGE 假突破', 'AVAX 反抽', 'OP 追高',
+      'APT 抄底',
+    ]);
+    // 收起 Q3：它的卡片藏起来，标题还在；再点展开
+    const toggle = screen.getByTestId('campaign-sort-section-toggle-2');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(sections[1]).queryAllByTestId('campaign-card')).toHaveLength(0);
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(7);
+    fireEvent.click(toggle);
+    expect(within(sections[1]).getAllByTestId('campaign-card')).toHaveLength(4);
+  }, 15_000);
+
+  it('只按一项排、或第一级是字母（几乎一场一组）时不分区', async () => {
+    renderPage('?sort=captureRate&direction=desc');
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeGreaterThan(0));
+    expect(screen.queryByTestId('campaign-sort-section-1')).toBeNull();
+  }, 15_000);
+});

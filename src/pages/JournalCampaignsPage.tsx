@@ -8,6 +8,7 @@ import {
   CalendarRange,
   ChartScatter,
   ChevronDown,
+  ChevronRight,
   Download,
   FolderPlus,
   Info,
@@ -2180,6 +2181,55 @@ export default function JournalCampaignsPage() {
   const sortGroupStats = useMemo(
     () => (sortChain.length > 1 ? summarizeSortGroups(sortedRows, sortChain) : []),
     [sortedRows, sortChain],
+  );
+  /**
+   * 【用户要求】「分级分区之后，在众多战役之间开一个分区模块——现在看不出分级和模块化的界限」：
+   * 多级排序时卡片列表按第一级的档切成几段（与分组统计同一套组、同一个顺序；组在排好的列表里本来就是连续的），
+   * 每段前一条分区标题：哪一档、几场、胜率、平均 b；可以单独收起。字母 / 操作时间作第一级时不分组，没有分区。
+   * 各组场数加起来必须正好是列表长度，否则（理论上不会）退回不分区的列表，不冒险切错。
+   */
+  const cardSections = useMemo(() => {
+    if (sortGroupStats.length < 2 || sortGroupStats[0].key.kind === 'all') return null;
+    if (sortGroupStats.reduce((sum, group) => sum + group.count, 0) !== sortedRows.length) return null;
+    let offset = 0;
+    return sortGroupStats.map((group, index) => {
+      const rows = sortedRows.slice(offset, offset + group.count);
+      offset += group.count;
+      return { id: `${index}:${JSON.stringify(group.key)}`, group, rows };
+    });
+  }, [sortGroupStats, sortedRows]);
+  /** 收起的分区：换了排序链就全部展开（组都变了）。 */
+  const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
+  const sortChainKeyForSections = sortChainKey(sortChain);
+  useEffect(() => { setCollapsedSections(new Set()); }, [sortChainKeyForSections]);
+  const toggleSection = useCallback((id: string) => {
+    setCollapsedSections(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+  /** 一张战役卡片：分区里与不分区时同一份属性。 */
+  const renderCampaignCard = (row: CampaignDisplayData) => (
+    <CampaignCard
+      key={row.campaign.id}
+      row={row}
+      sortHighlight={sortHighlight}
+      expanded={expandedCampaignIds.has(row.campaign.id)}
+      busy={busyCampaignId === row.campaign.id}
+      isOwnCampaign={row.campaign.user_id === userId}
+      campaignAccountName={campaignAccountName}
+      selectionMode={selectionMode}
+      selected={selectedCampaignIds.has(row.campaign.id)}
+      onToggleSelection={toggleExportSelection}
+      onOpen={handleCampaignOpen}
+      onToggleDetails={handleCampaignDetailsToggle}
+      onImportanceChange={handleImportanceChange}
+      onDelete={handleDeleteCampaign}
+      binView={binView}
+      onRestore={handleBinRestoreCampaign}
+      onPermanentDelete={handleBinPurgeCampaign}
+    />
   );
   /** 【用户要求】第一级每一档里，后面每一级怎么分布：一级一张交叉表（字母 / 操作时间没法分档，为 null）。 */
   const sortCrossTabs = useMemo<(SortCrossTab | null)[]>(
@@ -4687,27 +4737,40 @@ export default function JournalCampaignsPage() {
         ) : (
           // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
           <div data-testid="campaign-card-list" style={cardMetricWidths}>
-            {sortedRows.map(row => (
-              <CampaignCard
-                key={row.campaign.id}
-                row={row}
-                sortHighlight={sortHighlight}
-                expanded={expandedCampaignIds.has(row.campaign.id)}
-                busy={busyCampaignId === row.campaign.id}
-                isOwnCampaign={row.campaign.user_id === userId}
-                campaignAccountName={campaignAccountName}
-                selectionMode={selectionMode}
-                selected={selectedCampaignIds.has(row.campaign.id)}
-                onToggleSelection={toggleExportSelection}
-                onOpen={handleCampaignOpen}
-                onToggleDetails={handleCampaignDetailsToggle}
-                onImportanceChange={handleImportanceChange}
-                onDelete={handleDeleteCampaign}
-                binView={binView}
-                onRestore={handleBinRestoreCampaign}
-                onPermanentDelete={handleBinPurgeCampaign}
-              />
-            ))}
+            {cardSections ? cardSections.map(({ id, group, rows: sectionRows }, sectionIndex) => {
+              const collapsed = collapsedSections.has(id);
+              const winRate = group.payoffCount > 0 ? `${Math.round((group.wins / group.payoffCount) * 100)}%` : '—';
+              return (
+                <section
+                  key={id}
+                  data-testid={`campaign-sort-section-${sectionIndex + 1}`}
+                  aria-label={`${SORT_LABEL_BY_MODE[sortChain[0].mode]} ${formatSortGroupKey(sortChain[0].mode, group.key, sortBinning?.thresholds ?? null)}`}
+                  className={sectionIndex > 0 ? 'mt-7' : undefined}
+                >
+                  {/* 分区标题：第一级的档名在前（与排序链第 1 级同一枚琥珀角标），场数 · 胜率 · 平均 b 在后，右边一道细线延到行尾 */}
+                  <button
+                    type="button"
+                    data-testid={`campaign-sort-section-toggle-${sectionIndex + 1}`}
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleSection(id)}
+                    title={collapsed ? '展开这一档' : '收起这一档'}
+                    className="group/section mb-2.5 flex w-full items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70"
+                  >
+                    <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-hover/section:text-foreground ${collapsed ? '' : 'rotate-90'}`} />
+                    <span aria-hidden="true" className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_FIRST}`}>1</span>
+                    <span className="text-[12px] text-muted-foreground">{SORT_LABEL_BY_MODE[sortChain[0].mode]}</span>
+                    <span className="text-[13px] font-semibold text-foreground">
+                      {formatSortGroupKey(sortChain[0].mode, group.key, sortBinning?.thresholds ?? null)}
+                    </span>
+                    <span className="ml-1 whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {group.count} 场<span className="mx-1.5 text-border">·</span>胜率 {winRate}<span className="mx-1.5 text-border">·</span>平均 b {formatMeanPayoff(group.meanPayoff)}
+                    </span>
+                    <span aria-hidden="true" className="ml-2 h-px min-w-6 flex-1 bg-border/80" />
+                  </button>
+                  {!collapsed && sectionRows.map(renderCampaignCard)}
+                </section>
+              );
+            }) : sortedRows.map(renderCampaignCard)}
           </div>
         )}
       </main>
