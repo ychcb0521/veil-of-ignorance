@@ -1,5 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, RotateCcw, Trash2, TrendingUp } from 'lucide-react';
+import { Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { QuietInfo } from '@/components/journal/QuietInfo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
@@ -464,19 +465,8 @@ export function CampaignWhatIfEditor({
 
   return (
     <div className="space-y-4">
-      <div className="bg-[#0ECB81]/5 border border-[#0ECB81]/30 rounded p-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="h-10 w-10 rounded-full bg-[#0ECB81]/15 flex items-center justify-center text-[#0ECB81]">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-[14px] font-medium">一键运行（按你手动调整的 Legs）</div>
-            <div className="text-[11px] text-muted-foreground">
-              用这场战役的真实行情，跑你在下方「Legs 副本·手动反事实」里调整后的 Legs。
-            </div>
-          </div>
-        </div>
-        <div className="flex-1" />
+      {/* 【用户要求】绿框与按钮保留，左侧图标与说明去掉：一条压扁的绿框，按钮靠右 */}
+      <div className="bg-[#0ECB81]/5 border border-[#0ECB81]/30 rounded px-3 py-2 flex items-center justify-end">
         <Button
           className="bg-[#0ECB81] text-black hover:bg-[#0ECB81]/90 h-9 text-[12px]"
           disabled={whatIfRunning || !canRun || activeManualLegs.length === 0}
@@ -487,12 +477,13 @@ export function CampaignWhatIfEditor({
       </div>
 
       <div className="bg-card border border-border rounded p-4 flex flex-col gap-4">
-        <div className="order-1 flex flex-col gap-3 lg:flex-row lg:items-start">
-          <div className="space-y-1 min-w-0">
+        <div className="order-1 flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="flex min-w-0 items-center gap-1">
             <div className="text-[14px] font-medium">Legs 副本 · 手动反事实</div>
-            <div className="text-[11px] text-muted-foreground">
-              复制当前 Legs 后再调整。你可以改开/平时间、价格、币量（只改开仓价时币量不变），也可以删除或增添；拖动盘面竖线会同步回写时间与价格。
-            </div>
+            <QuietInfo label="Legs 副本">
+              <div>复制当前 Legs 后再调整。可以改开 / 平时间、价格、币量（只改开仓价时币量不变），也可以删除或增添。</div>
+              <div>拖动盘面竖线会同步回写时间与价格。「还原 Legs」回到原始战役的腿。</div>
+            </QuietInfo>
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-2">

@@ -26,7 +26,7 @@ describe('反事实盈亏概览与上方盈亏概览同宽（源码守卫）', (
     expect(page.slice(originalAt, page.indexOf('</section>', originalAt))).toContain('title="盈亏概览"');
 
     // 反事实战役卡片：整张卡片只有均匀的 p-N 与 1px 边框
-    const cfTitleAt = page.indexOf('              反事实战役\n');
+    const cfTitleAt = page.indexOf('            反事实战役\n');
     expect(cfTitleAt).toBeGreaterThan(-1);
     const cfOpen = page.lastIndexOf('<section className="', cfTitleAt);
     const cfClass = page.slice(cfOpen, page.indexOf('">', cfOpen));

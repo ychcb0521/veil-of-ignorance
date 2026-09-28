@@ -20,7 +20,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
@@ -35,6 +34,7 @@ import {
 } from '@/lib/campaignReviewSummary';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
+import { QuietInfo } from '@/components/journal/QuietInfo';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
 import {
   CampaignWhatIfEditor,
@@ -1992,10 +1992,6 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     () => counterfactuals.filter(isVisibleCounterfactualBranch),
     [counterfactuals],
   );
-  const retroactiveLegCount = useMemo(
-    () => legs.filter(leg => leg.source === 'retroactive_from_record').length,
-    [legs],
-  );
 
   // 载入该战役已保存的偏离备注（存在战役行上，互关者一并读到）。
   useEffect(() => {
@@ -2618,29 +2614,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
-            <div className="text-muted-foreground">
-              操作时间：{objectiveOperationTime == null ? '—' : fmtMdHm(new Date(objectiveOperationTime).toISOString())}
-            </div>
             <div>开始：{fmtMdHm(campaign.opened_at)}</div>
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
             <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
-            {retroactiveLegCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span>本战役 legs 中含 {retroactiveLegCount} 个历史回填项</span>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button type="button" className="text-muted-foreground hover:text-foreground">
-                      <Info className="w-3.5 h-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[260px] text-[11px]">
-                    历史回填的 legs 缺少原始开仓决策信息，SOP 评分会跳过这些 legs。
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            )}
-            <div className="text-[11px] text-muted-foreground/70 pt-1">未标注的时间均为 K 线（模拟）时间。</div>
           </div>
 
           <CampaignPnlOverviewPanel
@@ -3101,14 +3078,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         </section>
 
         <section className="bg-card border border-border rounded p-6 mb-6 space-y-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-[13px] font-medium">
-              <Sparkles className="w-4 h-4 text-[#B080FF]" />
-              反事实战役
-            </div>
-            <div className="text-[14px] text-foreground">
-              如果当时换一种打法，会发生什么？在下方「Legs 副本」里手动调整各条腿，点「一键运行」用真实行情跑一遍，结果按「盈亏概览」同一套 12 项指标摆出来；满意就起个名字保存，之后随时删除或载回 Legs 副本；再把你的调整与原始战役逐腿对比，把原始错误的代价折算成 USDT。
-            </div>
+          <div className="flex items-center gap-2 text-[13px] font-medium">
+            <Sparkles className="w-4 h-4 text-[#B080FF]" />
+            反事实战役
+            <QuietInfo label="反事实战役">
+              <div>如果当时换一种打法，会发生什么？在下方「Legs 副本」里手动调整各条腿，点「一键运行」用真实行情跑一遍，结果按「盈亏概览」同一套指标摆出来。</div>
+              <div>满意就起个名字保存，之后随时删除或载回 Legs 副本；再把你的调整与原始战役逐腿对比，把原始错误的代价折算成 USDT。</div>
+            </QuietInfo>
           </div>
 
           <CampaignWhatIfEditor
