@@ -24,7 +24,7 @@ describe('Legs 开平操作方式', () => {
     const header = screen.getByTestId('legs-header-row');
     const titles = [...header.children].map(cell => cell.textContent);
     const column = titles.indexOf('操作方式');
-    expect(titles.slice(column - 1, column + 2)).toEqual(['平仓价', '操作方式', '涨跌幅']);
+    expect(titles.slice(column - 1, column + 2)).toEqual(['开 / 平价', '操作方式', '涨跌幅']);
     const cell = screen.getByTestId('leg-execution-method-main');
     expect([...cell.children].map(line => line.textContent)).toEqual(['手动（开）', '自动（平）']);
     expect(cell.className).toContain('text-muted-foreground');

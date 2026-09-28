@@ -180,13 +180,18 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 // 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
 // 占比 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
 // 再宽，右对齐的百分数就离左边的币量太远，读不成一组。占比只有这一列：按战役主方向取一侧（主多看多单、主空看空单）
-const LEGS_GRID = 'grid-cols-[132px_180px_116px_84px_88px_88px_76px_84px_136px_72px_116px_148px_minmax(216px,1fr)_64px]';
+// 【用户要求】「Legs 列表需要完整展示」「手续费不是重点，简化」「委托挺重要的」（2026-09-28）：
+// 整张表在 1440 宽的窗口里放得下、不用横向滚动；委托列一格不少、吃掉全部富余。
+// 手续费只留一行合计（开 / 平拆分进悬停提示）148 → 64；开仓价 / 平仓价并成一列两行（与时间列的开 / 平两行对齐）；
+// 其余按实测内容收紧：时间 148（标签 30 + 「2025-09-19 22:42」约 106）、盈亏 100、Δb 64、操作方式 64（两栏各 3em）、
+// 涨跌幅 68、加仓校验 88（「上限 1,234,567 币」约 81）、操作 56（两枚 24px 图标）；列间距 10 → 8px。
+const LEGS_GRID = 'grid-cols-[132px_148px_100px_64px_80px_64px_68px_136px_72px_88px_64px_minmax(184px,1fr)_56px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
- * = Σ轨道 + 列间距 gap-x-2.5 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 10px 间距一起加上。
+ * = Σ轨道 + 列间距 gap-x-2 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 8px 间距一起加上。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1754px]';
+const LEGS_MIN_WIDTH = 'min-w-[1376px]';
 
 /**
  * 冻结列：「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
@@ -777,14 +782,13 @@ export function CampaignLegsList({
         <div className={LEGS_MIN_WIDTH}>
           <div
             data-testid="legs-header-row"
-            className={`sticky top-0 z-20 grid ${LEGS_GRID} gap-x-2.5 text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
+            className={`sticky top-0 z-20 grid ${LEGS_GRID} gap-x-2 text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
           >
             <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${FROZEN_SHADOW_BOTTOM.flush} ${HEADER_FILL}`}>角色</div>
             <div>时间</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
             <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
-            <div className="text-right">开仓价</div>
-            <div className="text-right">平仓价</div>
+            <div className="text-right" title="上行开仓价、下行平仓价，与左边时间列的开 / 平两行对齐">开 / 平价</div>
             <div className="text-center" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动操作以琥珀色提示关注，委托/止盈止损触发及强平显示自动。主力开仓按业务约定记为手动，其他无可靠依据的记录显示未记录。">操作方式</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
@@ -853,7 +857,7 @@ export function CampaignLegsList({
               return (
                 <div key={leg.id}>
                 <div
-                  className={`group/row grid ${LEGS_GRID} gap-x-2.5 items-start text-[11px] font-mono py-2.5 px-3 ${ROW_RULE} hover:bg-accent transition-colors ${
+                  className={`group/row grid ${LEGS_GRID} gap-x-2 items-start text-[11px] font-mono py-2.5 px-3 ${ROW_RULE} hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
@@ -953,12 +957,15 @@ export function CampaignLegsList({
                       </div>
                     );
                   })()}
-                  <div className="text-right tabular-nums">{fmtPrice(entryPriceValue)}</div>
-                  <div data-testid={`leg-exit-price-${leg.id}`} className="text-right tabular-nums" title={exitPriceTitle}>
-                    {fmtPrice(exitPriceValue)}
-                    {liquidationAnomaly && (
-                      <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
-                    )}
+                  {/* 开 / 平价一列两行：与时间列的「开 / 平」两行同字号同行高，逐行对齐 */}
+                  <div className="text-right tabular-nums leading-tight">
+                    <div data-testid={`leg-entry-price-${leg.id}`}>{fmtPrice(entryPriceValue)}</div>
+                    <div data-testid={`leg-exit-price-${leg.id}`} title={exitPriceTitle}>
+                      {fmtPrice(exitPriceValue)}
+                      {liquidationAnomaly && (
+                        <div data-testid="leg-liquidation-anomaly" className="text-[10px] text-[#F6465D]">强平异常</div>
+                      )}
+                    </div>
                   </div>
                   <div data-testid={`leg-execution-method-${leg.id}`} className="flex flex-col items-center text-[10px] leading-snug text-muted-foreground">
                     {([['开', executionMethods.open], ['平', executionMethods.close]] as const).map(([action, method]) => (
@@ -1076,26 +1083,16 @@ export function CampaignLegsList({
                      * 折成美元后价格被约掉（= 张数 × 面值 × 费率），开平两笔的金额必然相同——
                      * 把两个一模一样的金额并排写出来只会让人以为引擎算错了，币数才看得出两笔的差别。
                      */
-                    const coinMode = fees.coinSettled && fees.open?.coin != null && fees.close.coin != null;
+                    // 【用户要求】「手续费不是重点，简化」：一行合计金额（钱包扣的数），开 / 平拆分不再逐行列出；
+                    // 此前的要求「不要那个黑框提示」照旧——单元格不挂 title。估算的开仓费仍标「估」。
                     return (
                       <div
                         data-testid={`leg-fees-${leg.id}`}
-                        // min-w-0 不能少：网格项的 min-width 默认是 auto，等于「不许比内容窄」，
-                        // 于是这条长子行会把 132px 的轨道顶破、压到左边「币量 / 仓位」那一列上。
-                        className="min-w-0 text-right text-[11px] leading-snug tabular-nums text-foreground/55"
+                        // min-w-0：网格项的 min-width 默认 auto，不许比内容窄，窄轨道里要能收住
+                        className="min-w-0 truncate text-right text-[10px] leading-snug tabular-nums text-foreground/45"
                       >
-                        <div>
-                          {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
-                          {fees.estimated && <span className="ml-1 text-[8px] tracking-wide text-foreground/30">估</span>}
-                        </div>
-                        <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-foreground/35">
-                          开 {coinMode
-                            ? formatFeeCoin(fees.open?.coin)
-                            : fees.open ? fees.open.usd.toFixed(2) : '—'}
-                          {' · 平 '}
-                          {coinMode ? formatFeeCoin(fees.close.coin) : fees.close.usd.toFixed(2)}
-                          {coinMode && <span className="ml-1 text-[8px] text-foreground/30">{fees.asset}</span>}
-                        </div>
+                        {fees.totalUsd == null ? '—' : fees.totalUsd.toFixed(2)}
+                        {fees.estimated && <span className="ml-0.5 text-[8px] tracking-wide text-foreground/30">估</span>}
                       </div>
                     );
                   })()}
@@ -1204,7 +1201,7 @@ export function CampaignLegsList({
                       return (
                         <div
                           key={phase.index}
-                          className={`grid ${LEGS_GRID} gap-x-2.5 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground ${
+                          className={`grid ${LEGS_GRID} gap-x-2 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground ${
                             hedgedPhase ? 'bg-blue-500/[0.055]' : 'bg-card'
                           }`}
                         >
@@ -1234,8 +1231,10 @@ export function CampaignLegsList({
                           <div className={`text-right tabular-nums ${phaseDelta == null ? '' : phaseDelta > 0 ? 'text-[#0ECB81]/90' : phaseDelta < 0 ? 'text-[#F6465D]/90' : ''}`}>
                             {phaseDelta == null ? '—' : `${phaseDelta > 0 ? '+' : ''}${phaseDelta.toFixed(2)}`}
                           </div>
-                          <div className="text-right tabular-nums">{fmtPrice(phase.startPrice)}</div>
-                          <div className="text-right tabular-nums">{fmtPrice(phase.endPrice)}</div>
+                          <div className="text-right tabular-nums leading-tight">
+                            <div>{fmtPrice(phase.startPrice)}</div>
+                            <div>{fmtPrice(phase.endPrice)}</div>
+                          </div>
                           <div />
                           {(() => {
                             // 阶段自己的起止价各算各的、方向沿用主力：切段处的边界价就是对冲平仓那一刻的市价
@@ -1270,7 +1269,7 @@ export function CampaignLegsList({
                 保留不透明底色与层级，覆盖相邻冻结列的分隔线延伸。 */}
             <div
               data-testid="legs-total-row"
-              className={`relative z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2.5 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`relative z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
               <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} ${FROZEN_SHADOW_BOTTOM.flush} ${FROZEN_TOTAL_DIVIDER} flex items-center bg-card text-muted-foreground`}>合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
@@ -1285,8 +1284,8 @@ export function CampaignLegsList({
                   {formatDeltaB(totalDeltaB)}
                 </span>
               </div>
-              {/* 开平价、操作方式、涨跌幅不跨腿合计。 */}
-              <div /><div /><div /><div />
+              {/* 开 / 平价、操作方式、涨跌幅不跨腿合计。 */}
+              <div /><div /><div />
               {/* 币量 / 仓位：多单、空单各写一组 Σ（上行 Σ币量、下行 Σ名义仓位，挂单中的腿不计入），
                   每组以同样的「多 / 空」标签开头；没有计入腿的方向不列。
                   本列那一侧（战役主方向）那组是「占比」的分母；另一侧那组只是它各腿的合计（对冲一共开了多大），不作任何占比的分母。
