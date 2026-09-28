@@ -222,7 +222,12 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.firstElementChild).toHaveClass('[container-type:inline-size]');
     // 【用户要求】「命名和对应的数字离得太远」：栏宽按内容定（max-content），不撑满半张卡；两栏之间 64px
     const grid = container.querySelector('[data-column]')!.parentElement!;
-    expect(grid).toHaveClass('grid-cols-[minmax(0,max-content)]', 'gap-x-16', '[@container(min-width:540px)]:grid-cols-[repeat(2,max-content)]');
+    // 【用户要求】「空隙不好看」：左栏贴左、右栏贴右，富余落在中间那一列，正中一道淡竖线（至少 64px）
+    expect(grid).toHaveClass('grid-cols-[minmax(0,max-content)]', '[@container(min-width:540px)]:grid-cols-[max-content_minmax(64px,1fr)_max-content]');
+    const divider = container.querySelector('[data-testid="pnl-overview-column-divider"]') as HTMLElement;
+    expect(divider).toHaveClass('hidden', '[@container(min-width:540px)]:col-start-2', '[@container(min-width:540px)]:block');
+    expect(divider.style.gridRow).toBe('1 / span 7');
+    expect(container.querySelector('[data-column="right"]')).toHaveClass('[@container(min-width:540px)]:col-start-3');
     expect(grid.className).not.toContain('grid-cols-2 ');
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平

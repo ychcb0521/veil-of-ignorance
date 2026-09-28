@@ -39,10 +39,10 @@ export function PnlMetricLabel({ label, children }: { label: string; children: R
  * 两栏各要 ≈ 250px，加 32px 栏距，面板内容宽 ≥ 540px 才并排，否则并成一栏（先左栏、再右栏）。
  * Tailwind 需要完整类名，所以逐个写出。
  */
-const TWO_COLUMN_GRID = '[@container(min-width:540px)]:grid-cols-[repeat(2,max-content)]';
+const TWO_COLUMN_GRID = '[@container(min-width:540px)]:grid-cols-[max-content_minmax(64px,1fr)_max-content]';
 const COL_START = {
   left: '[@container(min-width:540px)]:col-start-1',
-  right: '[@container(min-width:540px)]:col-start-2',
+  right: '[@container(min-width:540px)]:col-start-3',
 } as const;
 /** 并成一栏时，右栏第一项上面一道细线，把递进链与结果和仓位两组分开；两栏并排时去掉。 */
 const SINGLE_COLUMN_GROUP_BREAK = 'mt-1 border-t border-border/50 pt-3 [@container(min-width:540px)]:mt-0 [@container(min-width:540px)]:border-t-0 [@container(min-width:540px)]:pt-0';
@@ -74,9 +74,19 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
       <div className="truncate font-medium" title={title}>{title}</div>
       {/* 两栏各自从上往下排（次序见 PNL_OVERVIEW_LEFT_COLUMN / PNL_OVERVIEW_CHAIN_COLUMN）：每项按它在本栏的序号落到同一行，
           左右两栏共用行高，同一行的两项始终齐平；面板窄时并成一栏，按 DOM 顺序，先左栏、再右栏。 */}
-      {/* 【用户要求】「命名和对应的数字离得太远」：栏宽不再撑满半张卡，只按内容定（最长的名字 + 24px + 最长的读数），
-          读数在栏内右对齐、上下对齐——名字与它的数紧挨着；两栏之间留 64px，一眼分得出是两组。整块靠左（与封面同一取向）。 */}
-      <div className={`mt-3 grid grid-cols-[minmax(0,max-content)] gap-x-16 gap-y-2 ${TWO_COLUMN_GRID}`}>
+      {/* 【用户要求】「命名和对应的数字离得太远」：栏宽只按内容定（最长的名字 + 24px + 最长的读数），读数在栏内右对齐——名字与它的数紧挨着。
+          【用户要求】「空隙不好看」：两栏整块靠左时卡片右侧空出一大片。改为左栏贴左（与标题对齐）、右栏贴右（与卡片右内边距对齐），
+          富余全部落在两栏正中间，正中一道淡竖线（第二列）把这段空白变成两组之间的分隔；两栏之间至少 64px。 */}
+      <div className={`mt-3 grid grid-cols-[minmax(0,max-content)] gap-y-2 ${TWO_COLUMN_GRID}`}>
+        <div
+          aria-hidden="true"
+          data-testid="pnl-overview-column-divider"
+          // 跨满两栏的行数（隐式行上 row-end:-1 不起作用，按行数写）；一栏时 hidden，不占格
+          style={{ gridRow: `1 / span ${Math.max(1, leftRows.size, rightRows.size)}` }}
+          className="hidden [@container(min-width:540px)]:col-start-2 [@container(min-width:540px)]:block"
+        >
+          <div className="mx-auto h-full w-px bg-border/70" />
+        </div>
         {items.map(item => {
           const row = (item.rightColumn ? rightRows : leftRows).get(item.key) ?? 0;
           return (
