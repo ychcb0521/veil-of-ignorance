@@ -6,7 +6,7 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { mirrorTpOutcome } from '@/lib/mirrorTpSummary';
-import { buildExpectedDrawdownBins, drawdownReciprocal } from '@/lib/expectedDrawdownBins';
+import { buildExpectedDrawdownBins } from '@/lib/expectedDrawdownBins';
 import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
 import {
   buildGeometricDistributionModel,
@@ -678,20 +678,17 @@ export function CampaignMetricScatterPlot({
           return ` · b ${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}R`;
         })()
         : '';
-      // 预期回撤柱状的横轴是倒数，提示框把这一场的倒数也报出来，才对得上它站在哪根柱里。
-      const reciprocal = drawdownBars ? drawdownReciprocal(point.value) : null;
-      const reciprocalSuffix = reciprocal == null ? '' : ` · 100÷D ${reciprocal.toFixed(1)}`;
       return {
         id: point.campaignId,
         // G=0 lives in its own column; 0 here is only a finite placeholder, never log(0).
         x: geometricDistribution ? geometricLogPosition(point.value) ?? 0 : barModel ? barModel.barOf(point) : stacked ? point.value : index,
         y: stacked ? 0 : point.value,
         seriesId: ruin ? 'capital-ruin' : `s${Math.min(seriesIndex, Math.max(0, series.length - 1))}`,
-        valueText: `${formatValue(point.value)}${reciprocalSuffix}${payoffSuffix}`,
+        valueText: `${formatValue(point.value)}${payoffSuffix}`,
         label: `#${point.sequence} ${point.title}`,
         metaText: `操作时间 ${operationTime}`,
         warning: ruin ? `${RUIN_ASSUMPTION}（b ≤ ${CAPITAL_RUIN_THRESHOLD}R）；非实际账户强平判定。` : undefined,
-        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${reciprocalSuffix}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
+        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
@@ -1080,7 +1077,8 @@ export function CampaignMetricScatterPlot({
       directionHint={dist
         ? `横轴 ${oddsFamily ? '盈亏比 b（R）' : `${axisLabel ?? metricLabel}${genericSpec ? `（${genericSpec.unit}）` : ''}`}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
         : drawdownBars
-          ? '横轴 预期回撤%（按 100 ÷ 预期回撤 等间距分档） · 纵轴 场数 · 不按时间排列'
+          // 【用户要求】倒数只是分档的梯子，不是重点：横轴说明与提示框里都不再出现 100÷D
+          ? '横轴 预期回撤% · 纵轴 场数 · 不按时间排列'
           : bars
           ? `横轴 ${metricLabel}档位 · 纵轴 场数 · 不按时间排列`
           : '早 → 晚 · 横轴每格一场战役'}
