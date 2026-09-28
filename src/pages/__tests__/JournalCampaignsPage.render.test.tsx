@@ -279,6 +279,18 @@ describe('JournalCampaignsPage rendering boundaries', () => {
 });
 
 describe('JournalCampaignsPage · writes wait for the background heal', () => {
+  it('【用户要求】删除按钮在封面右下角（指标行里、绝对定位在右下），小图标', async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+    const card = screen.getAllByTestId('campaign-card')[0];
+    const button = within(card).getByTestId('campaign-delete');
+    const strip = within(card).getByTestId('campaign-card-metrics').parentElement!;
+    expect(button.parentElement).toBe(strip);
+    expect(strip).toHaveClass('relative');
+    expect(button).toHaveClass('absolute', 'bottom-1.5', 'right-4', 'h-5', 'w-5');
+    expect(button.querySelector('svg')).toHaveClass('h-3', 'w-3');
+  });
+
   it('delete removes the card at once but calls the API only after an in-flight heal has landed', async () => {
     renderPage();
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));

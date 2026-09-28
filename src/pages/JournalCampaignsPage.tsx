@@ -1596,17 +1596,7 @@ const CampaignCard = memo(function CampaignCard({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </>
-          ) : isOwnCampaign && (
-            <button
-              type="button"
-              disabled={busy}
-              title="删除战役"
-              onClick={(event) => onDelete(event, campaign)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded border border-border/80 bg-background/50 text-muted-foreground transition-colors hover:border-[#F6465D]/40 hover:bg-[#F6465D]/10 hover:text-[#F6465D] disabled:opacity-50"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
+          ) : null}
           <div className={`inline-flex h-7 items-center rounded px-2.5 text-[10px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
             {statusLabel}
           </div>
@@ -1615,7 +1605,7 @@ const CampaignCard = memo(function CampaignCard({
 
       {/* 封面指标行：左对齐、按当前列表的读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH_CLASS），上标签、下数值；【用户要求】顺序与排序行一致：
           镜像止盈、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望。当前排序项高亮。 */}
-      <div className={`border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
+      <div className={`relative border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
           className={CARD_METRIC_STRIP}
@@ -1726,6 +1716,20 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
         </dl>
+        {/* 【用户要求】删除按钮放在封面右下角、小一点：无边框的小图标，平时淡、悬停变红；回收站视图里仍是标题行的「恢复 / 彻底删除」 */}
+        {isOwnCampaign && !binView && (
+          <button
+            type="button"
+            disabled={busy}
+            title="删除战役"
+            aria-label={`删除 ${campaign.title}`}
+            data-testid="campaign-delete"
+            onClick={(event) => onDelete(event, campaign)}
+            className="absolute bottom-1.5 right-4 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/45 transition-colors hover:bg-[#F6465D]/10 hover:text-[#F6465D] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#F6465D]/40 disabled:opacity-50"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
       </div>
 
       {detailsExpanded && (
