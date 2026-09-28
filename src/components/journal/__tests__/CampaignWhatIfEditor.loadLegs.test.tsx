@@ -151,6 +151,11 @@ describe('CampaignWhatIfEditor run context and load-legs request', () => {
 
     expect(table.className).toContain('order-3');
     expect(chart.className).toContain('order-4');
+    // 【用户要求】一键运行的绿框紧跟在 Legs 表下方、盘面之上
+    const runBar = screen.getByTestId('counterfactual-run-bar');
+    expect(runBar.className).toContain('order-3');
+    expect(table.nextElementSibling).toBe(runBar);
+    expect(within(runBar).getByRole('button', { name: '一键运行' })).toBeInTheDocument();
     // 没传高度时兜底 480px（与原始盘面实测前一致），不再写死在类名里
     expect(chart.className).not.toContain('h-[480px]');
     expect(chart.style.height).toBe('480px');

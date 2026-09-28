@@ -35,6 +35,7 @@ import {
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { QuietInfo } from '@/components/journal/QuietInfo';
+import { formatBeijingTime } from '@/lib/timeFormat';
 import { CounterfactualLegsTable } from '@/components/journal/CounterfactualLegsTable';
 import {
   CampaignWhatIfEditor,
@@ -2029,10 +2030,6 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const chartCurrentTime = focusTime ?? chartDefaultCurrentTime;
   const chartViewportCenterTime = focusTime ?? chartDefaultViewportCenterTime;
 
-  const mainCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')).length;
-  const hedgeCount = legs.filter((leg: TradeJournal) => leg.leg_role?.startsWith('hedge_')).length;
-  const tpCount = legs.filter((leg: TradeJournal) => leg.leg_role === 'mirror_tp').length;
-  const otherCount = Math.max(0, legs.length - mainCount - hedgeCount - tpCount);
   /**
    * 页眉、结束按钮、导出文件名读的状态：已结算 → 由校正后的结算推出；
    * 未结算（进行中）→ 落库状态原样。与已实现 P&L 同一份 settlement。
@@ -2614,10 +2611,16 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
             <div className="font-medium">战役元数据</div>
+            {/* 【用户要求】操作时间非常重要、要加强显示：放在第一行，客观操作时间（北京时间，与列表卡片同一写法）用加粗等宽的琥珀底读数；下面几行是 K 线时间 */}
+            <div data-testid="campaign-meta-operation-time" className="flex items-center gap-1.5">
+              <span>操作时间：</span>
+              <span className="rounded-[3px] bg-[#F0B90B]/10 px-1.5 py-0.5 font-mono text-[14px] font-semibold leading-none tabular-nums text-[#8F6B00] dark:text-[#F0B90B]">
+                {objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16)}
+              </span>
+            </div>
             <div>开始：{fmtMdHm(campaign.opened_at)}</div>
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
-            <div>legs 数：{legs.length} (主仓 {mainCount} / 对冲 {hedgeCount} / TP {tpCount} / 其他 {otherCount})</div>
           </div>
 
           <CampaignPnlOverviewPanel

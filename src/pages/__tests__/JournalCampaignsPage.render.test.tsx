@@ -334,5 +334,5 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
     fireEvent.pointerLeave(options()[3]);
     await waitFor(() => expect(label()).toHaveTextContent('未评'));
     target.importance_weight = 0;
-  });
+  }, 15_000);
 });

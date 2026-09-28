@@ -465,17 +465,6 @@ export function CampaignWhatIfEditor({
 
   return (
     <div className="space-y-4">
-      {/* 【用户要求】绿框与按钮保留，左侧图标与说明去掉：一条压扁的绿框，按钮靠右 */}
-      <div className="bg-[#0ECB81]/5 border border-[#0ECB81]/30 rounded px-3 py-2 flex items-center justify-end">
-        <Button
-          className="bg-[#0ECB81] text-black hover:bg-[#0ECB81]/90 h-9 text-[12px]"
-          disabled={whatIfRunning || !canRun || activeManualLegs.length === 0}
-          onClick={runManualScenario}
-        >
-          {whatIfRunning ? '运行中…' : '一键运行'}
-        </Button>
-      </div>
-
       <div className="bg-card border border-border rounded p-4 flex flex-col gap-4">
         <div className="order-1 flex flex-col gap-3 lg:flex-row lg:items-center">
           <div className="flex min-w-0 items-center gap-1">
@@ -804,6 +793,20 @@ export function CampaignWhatIfEditor({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* 【用户要求】一键运行的绿框放在反事实 Legs 表正下方（盘面之上）：与表同为 order-3，DOM 在表之后；左侧图标与说明去掉，按钮靠右 */}
+        <div
+          data-testid="counterfactual-run-bar"
+          className="order-3 bg-[#0ECB81]/5 border border-[#0ECB81]/30 rounded px-3 py-2 flex items-center justify-end"
+        >
+          <Button
+            className="bg-[#0ECB81] text-black hover:bg-[#0ECB81]/90 h-9 text-[12px]"
+            disabled={whatIfRunning || !canRun || activeManualLegs.length === 0}
+            onClick={runManualScenario}
+          >
+            {whatIfRunning ? '运行中…' : '一键运行'}
+          </Button>
         </div>
 
         {/* 方案名输入按用户要求隐藏：分支名在页面反事实结果行左栏的「相对原始的变化情况」卡片里起（CounterfactualOverviewRow），默认来自改动摘要；label/setLabel 留着以备恢复。 */}

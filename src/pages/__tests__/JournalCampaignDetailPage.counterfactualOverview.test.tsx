@@ -713,6 +713,18 @@ function spacingPx(className: string, prefix: 'p' | 'gap') {
 }
 
 describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据 | 盈亏概览」同一套分栏', () => {
+  it('【用户要求】战役元数据：第一行是加强显示的客观操作时间（北京时间），没有 legs 数', async () => {
+    renderPage();
+    const operation = await screen.findByTestId('campaign-meta-operation-time');
+    // 与列表卡片同一口径（campaignOperationTime）：这场取到的是 2026-07-19 11:00 UTC = 北京 19:00
+    expect(operation).toHaveTextContent('操作时间：2026-07-19 19:00');
+    expect(operation.lastElementChild).toHaveClass('font-semibold');
+    const card = operation.parentElement!;
+    expect(card.children[1]).toBe(operation);
+    expect(card).toHaveTextContent('开始：');
+    expect(card.textContent).not.toContain('legs 数');
+  });
+
   it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 14 项', async () => {
     renderPage();
     const row = await runFromEditor();
