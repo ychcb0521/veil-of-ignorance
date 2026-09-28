@@ -3020,12 +3020,13 @@ export default function JournalCampaignsPage() {
   /**
    * 分组统计表：一组一行（分档时一档一行），列是场数、胜率、平均 b，再加后面各级在本组的读数概况。
    * 第一级不分档时组名本身就是它的读数，第一级那一列不再重复。
+   * 盈亏比的平均值就是「平均 b」那一列（b 即盈亏比），链上有盈亏比时不再另起一列（【用户要求】不重复）。
    */
   const renderSortGroupStats = () => {
     const firstMode = sortChain[0].mode;
     const levelColumns = sortChain
       .map((level, index) => ({ level, index }))
-      .filter(({ level, index }) => (index > 0 || sortBinning != null) && level.mode !== 'alpha' && level.mode !== 'time');
+      .filter(({ level, index }) => (index > 0 || sortBinning != null) && level.mode !== 'alpha' && level.mode !== 'time' && level.mode !== 'captureRate');
     const total = sortGroupStats.reduce(
       (sum, group) => ({
         count: sum.count + group.count,

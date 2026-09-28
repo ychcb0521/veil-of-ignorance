@@ -652,6 +652,11 @@ describe('战役列表：多级排序', () => {
     // 【用户要求】分档写实际数值区间，不写 Q1–Q4
     expect(stats.textContent).not.toMatch(/Q[1-4]/);
     expect(within(stats).getByTestId('sort-chain-stats-total')).toHaveTextContent('合计11');
+    // 【用户要求】盈亏比的平均值就是「平均 b」：不再另起一列「盈亏比 平均值」
+    const headers = within(stats).getAllByRole('columnheader').map(th => th.textContent ?? '');
+    expect(headers).toContain('平均 b');
+    expect(headers.some(text => /盈亏比平均值/.test(text))).toBe(false);
+    expect(headers.some(text => /镜像止盈生效场数/.test(text))).toBe(true);
     // 第一级每一档里第二级的分布：一档一行，行合计 = 这一档的场数
     const crossTab = within(stats).getByTestId('sort-chain-crosstab-2');
     expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
