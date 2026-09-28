@@ -534,7 +534,7 @@ describe('战役列表：多级排序', () => {
     expect(rules).toHaveTextContent('以 0 为界，负的一侧与正的一侧各按场数对半分');
     expect(rules).toHaveTextContent('预期回撤按四分位分');
     expect(rules).toHaveTextContent('档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）');
-    expect(rules).toHaveTextContent('镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档');
+    expect(rules).toHaveTextContent('镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档');
     expect(rules).toHaveTextContent('第二级起每一级标出本级排了几场');
     expect(rules).toHaveTextContent('「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项');
     // 【复核】档界与各级的作用不只放在悬停提示里：ⓘ 末尾的「当前」段逐级写出来（手机、键盘也读得到）
@@ -583,13 +583,13 @@ describe('战役列表：多级排序', () => {
   }, 15_000);
 
   it('【复核】前面各级并列、但本级读数全相同时标「未起作用」并说明（不再把「进入比较」当成「排了」）', async () => {
-    // 十一场重要性都是 0：镜像止盈四档里每一档的重要性读数全相同 → 顺序与只按镜像止盈逐位相同，芯片不能报「排了 11 场」
+    // 十一场自评都是 0：镜像止盈四档里每一档的自评读数全相同 → 顺序与只按镜像止盈逐位相同，芯片不能报「排了 11 场」
     renderPage('?sort=mirrorTp&direction=desc&then=importance.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     expect(order()).toEqual(MIRROR_ONLY);
     const effect = screen.getByTestId('sort-chain-effect-2');
     expect(effect).toHaveTextContent('未起作用');
-    expect(effect.getAttribute('title')).toBe('第 2 级「重要性」未起作用：前面各级并列的 4 组、11 场里，每一组的重要性读数都相同，先后未变');
+    expect(effect.getAttribute('title')).toBe('第 2 级「自评」未起作用：前面各级并列的 4 组、11 场里，每一组的自评读数都相同，先后未变');
     // 并列的一部分读数全相同、一部分算不出：两种原因都写明
     fireEvent.click(screen.getByTestId('sort-chain-remove-2'));
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());

@@ -19,7 +19,6 @@ import {
   RotateCcw,
   Sigma,
   SlidersHorizontal,
-  Star,
   Trash2,
   Undo2,
   X,
@@ -115,6 +114,8 @@ import {
   clearSortChain,
   describeSortLevelEffects,
   importanceValue,
+  SELF_RATING_LABELS,
+  selfRatingLabel,
   isContinuousSortMode,
   isSignSplitSortMode,
   parseCampaignSortChain,
@@ -234,7 +235,7 @@ type CampaignFormulaPopover =
 
 /**
  * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望 ┆
- * 杠杆倍数、重要性、字母（默认仍按操作时间排序）。
+ * 杠杆倍数、自评、字母（默认仍按操作时间排序）。
  * 【用户要求】删掉「DSI 贡献」「USI 贡献」两个排序项（几乎跟盈亏比重复）；详情页盈亏概览的 DSI/USI 贡献与统计概览的「不对称风险」保留。
  * 【用户要求】封面指标格的先后与这里一致：镜像止盈之后就是中间那一组七项（见 CampaignCard 的指标格）。
  * 排序行左对齐依次排开。
@@ -250,14 +251,14 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'leverage', label: '杠杆倍数' },
-  { value: 'importance', label: '重要性' },
+  { value: 'importance', label: '自评' },
   { value: 'alpha', label: '字母' },
 ];
 
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
- *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 重要性 · 字母
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
@@ -605,19 +606,19 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   },
   {
     key: 'importance',
-    label: '重要性',
-    chartLabel: '重要性图',
-    seriesLabel: '重要性时序',
+    label: '自评',
+    chartLabel: '自评图',
+    seriesLabel: '自评时序',
     guide: {
-      yAxis: '人工设置的战役重要性评分，范围为 0–5 星。纵坐标数值就是对应星级。',
-      point: '点越高，代表该战役被标记得越重要；点位只反映人工重要性，不代表盈亏或风险大小。',
+      yAxis: '战役自评，五点量表：1 非常差、2 很差、3 一般、4 很好、5 非常好；未评为 0。纵坐标数值就是自评分。',
+      point: '点越高，代表这场战役自评越好；点位只反映人工自评，不代表盈亏或风险大小。',
       colors: [
-        { token: 'importance', label: '金色：统一表示重要性评分；颜色不区分盈亏。' },
+        { token: 'importance', label: '金色：统一表示自评；颜色不区分盈亏。' },
       ],
     },
-    missingValueLabel: '重要性评分',
+    missingValueLabel: '自评',
     colorMode: 'importance',
-    formatValue: value => `${Math.round(value)}/5`,
+    formatValue: value => `${Math.round(value)} ${selfRatingLabel(Math.round(value)) ?? '未评'}`,
   },
   {
     key: 'mirrorTp',
@@ -1093,22 +1094,22 @@ function describeSortLevelEffect(level: number, label: string, effect: SortLevel
     + (effect.missing > 0 ? `；${effect.missing} 场算不出${label}，留在各组末尾` : '');
 }
 
-/** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，重要性写星级，杠杆写倍数。 */
+/** 分组统计表的组名：分档写档界（与「分档」提示同一写法），镜像止盈写档位名，自评写分值与量表文字，杠杆写倍数。 */
 function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, thresholds: readonly number[] | null): string {
   if (key.kind === 'all') return '全部';
   if (key.kind === 'quartile') return formatQuartileRange(mode, key.quartile, thresholds);
   if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
-  if (mode === 'importance') return `${key.value} 星`;
+  if (mode === 'importance') return `${key.value} ${selfRatingLabel(Number(key.value)) ?? '未评'}`;
   if (mode === 'leverage') return `${key.value}x`;
   return String(key.value);
 }
 
-/** 分组统计表里后面各级的格子：连续指标与杠杆写平均值，镜像止盈写生效场数，重要性写平均星级。 */
+/** 分组统计表里后面各级的格子：连续指标与杠杆写平均值，镜像止盈写生效场数，自评写平均分。 */
 function formatSortGroupLevelStat(mode: CampaignSortMode, stat: SortGroupLevelStat): string {
   switch (stat.kind) {
     case 'average': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x` : formatSortBinValue(mode, stat.value);
     case 'achieved': return `生效 ${stat.hits}/${stat.count}`;
-    case 'mean': return `${stat.value.toFixed(1)} 星`;
+    case 'mean': return `${stat.value.toFixed(1)} 分`;
     default: return '—';
   }
 }
@@ -1253,7 +1254,7 @@ function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperti
 }
 /**
  * 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：淡琥珀底 + 细描边，
- * 指标名换成琥珀色（浅色主题用深一档的琥珀，白底上才看得清）。封面上的其它对应模块（操作时间、杠杆、重要性、标题）同一套颜色。
+ * 指标名换成琥珀色（浅色主题用深一档的琥珀，白底上才看得清）。封面上的其它对应模块（操作时间、杠杆、自评、标题）同一套颜色。
  */
 const SORT_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.08] ring-1 ring-inset ring-[#F0B90B]/40 dark:bg-[#F0B90B]/[0.10]';
 const SORT_HIGHLIGHT_TEXT = 'text-[#B7860B] dark:text-[#F0B90B]';
@@ -1360,6 +1361,8 @@ const CampaignCard = memo(function CampaignCard({
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
   const importance = importanceValue(campaign);
+  /** 自评量表上悬停 / 聚焦的那一档（预览文字用）；null = 显示已选的那一档。 */
+  const [ratingPreview, setRatingPreview] = useState<number | null>(null);
   const operationTime = campaignOperationTime(legs, tradeRecords);
   const campaignDisplayCode = formatCampaignDisplayCode(
     campaign.campaign_code,
@@ -1517,25 +1520,46 @@ const CampaignCard = memo(function CampaignCard({
           </button>
           {isOwnCampaign && (
             <div
+              role="radiogroup"
+              aria-label="自评"
               data-sort-highlight={litAttr('importance')}
-              className={`flex h-7 items-center gap-0.5 rounded border px-1.5 transition-colors ${byLevel('importance', 'border-[#F0B90B]/55 bg-[#F0B90B]/[0.08]', 'border-[#F0B90B]/30 bg-[#F0B90B]/[0.04]', 'border-border/80 bg-background/50')}`}
+              className={`flex h-7 items-center gap-1 rounded border px-1.5 transition-colors ${byLevel('importance', 'border-[#F0B90B]/55 bg-[#F0B90B]/[0.08]', 'border-[#F0B90B]/30 bg-[#F0B90B]/[0.04]', 'border-border/80 bg-background/50')}`}
             >
-              <span className={`mr-0.5 text-[9px] ${byLevel('importance', `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`}>重要性</span>
-              {[1, 2, 3, 4, 5].map(score => (
-                <button
-                  key={score}
-                  type="button"
-                  disabled={busy}
-                  title={`设为 ${score} 分`}
-                  onClick={(event) => onImportanceChange(event, campaign, score)}
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-[#F0B90B]/10 hover:text-[#F0B90B] disabled:opacity-50"
-                >
-                  <Star
-                    className={`h-3 w-3 ${score <= importance ? 'text-[#F0B90B]' : ''}`}
-                    fill={score <= importance ? 'currentColor' : 'none'}
-                  />
-                </button>
-              ))}
+              <span className={`mr-1 text-[9px] ${byLevel('importance', `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`}>自评</span>
+              {SELF_RATING_LABELS.map((label, index) => {
+                const score = index + 1;
+                const checked = score === importance;
+                return (
+                  <button
+                    key={score}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    aria-label={`${score} ${label}`}
+                    disabled={busy}
+                    data-testid="campaign-self-rating-option"
+                    onClick={(event) => onImportanceChange(event, campaign, score)}
+                    onPointerEnter={() => setRatingPreview(score)}
+                    onPointerLeave={() => setRatingPreview(null)}
+                    onFocus={() => setRatingPreview(score)}
+                    onBlur={() => setRatingPreview(null)}
+                    className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded-full border font-mono text-[9px] leading-none tabular-nums transition-colors disabled:opacity-50 ${checked
+                      ? 'border-[#F0B90B] bg-[#F0B90B] font-semibold text-[#1E2026]'
+                      : 'border-border text-muted-foreground/80 hover:border-[#F0B90B]/70 hover:bg-[#F0B90B]/10 hover:text-[#8F6B00] dark:hover:text-[#F0B90B]'}`}
+                  >
+                    {score}
+                  </button>
+                );
+              })}
+              {/* 量表文字：悬停 / 聚焦时预览那一档，平时写已选的那一档；定宽（三个字）免得换档时右侧按钮挪动 */}
+              <span
+                data-testid="campaign-self-rating-label"
+                className={`ml-1 w-[3.4em] whitespace-nowrap text-[10px] leading-none ${ratingPreview != null
+                  ? 'text-[#8F6B00] dark:text-[#F0B90B]'
+                  : importance > 0 ? 'text-foreground/85' : 'text-muted-foreground/60'}`}
+              >
+                {selfRatingLabel(ratingPreview ?? importance) ?? '未评'}
+              </span>
             </div>
           )}
           {!isOwnCampaign && importance > 0 && (
@@ -1543,7 +1567,7 @@ const CampaignCard = memo(function CampaignCard({
               data-sort-highlight={litAttr('importance')}
               className={`rounded border px-2 py-1 text-[10px] ${byLevel('importance', `border-[#F0B90B]/55 bg-[#F0B90B]/[0.08] ${SORT_HIGHLIGHT_TEXT}`, `border-[#F0B90B]/30 bg-[#F0B90B]/[0.04] ${SORT_THEN_HIGHLIGHT_TEXT}`, 'border-border bg-background/60 text-muted-foreground')}`}
             >
-              重要性 {importance}/5
+              自评 {importance} · {selfRatingLabel(importance)}
             </span>
           )}
           {/* 回收站视图：删除换成「恢复」与「彻底删除」（彻底删除要二次确认，与已删除战役弹窗里的一致）；正常列表照旧是删除 */}
@@ -1784,7 +1808,7 @@ export default function JournalCampaignsPage() {
   const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
   const campaignLoadProgress = { loaded, total };
   const [busyCampaignId, setBusyCampaignIdState] = useState<string | null>(null);
-  // 回调只从 ref 读「正在忙的那一场」：不把它列进依赖，点一次星不会换掉 237 张卡片的回调引用
+  // 回调只从 ref 读「正在忙的那一场」：不把它列进依赖，点一次自评不会换掉 237 张卡片的回调引用
   const busyCampaignIdRef = useRef<string | null>(null);
   const setBusyCampaignId = useCallback((id: string | null) => {
     busyCampaignIdRef.current = id;
@@ -2060,7 +2084,7 @@ export default function JournalCampaignsPage() {
       // 等后台正在跑的那一场自愈落地再写（见 waitForCampaignListHeal，最多等 2 s）；乐观更新已经画上了
       await waitForCampaignListHeal();
       await updateCampaignImportance(campaign.id, nextWeight);
-      toast.success(nextWeight > 0 ? `重要性已设为 ${nextWeight}` : '已清除重要性评分');
+      toast.success(nextWeight > 0 ? `自评已设为 ${nextWeight} ${selfRatingLabel(nextWeight)}` : '已清除自评');
     } catch (error) {
       // 只把这一场的评分退回去，不整表回滚：期间别的行可能已经被后台核对更新过
       setWeight(previousWeight);
@@ -3258,7 +3282,7 @@ export default function JournalCampaignsPage() {
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
-            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
@@ -3937,13 +3961,13 @@ export default function JournalCampaignsPage() {
                       </>
                     ) : formula === 'importanceSort' ? (
                       <>
-                        <div className="font-medium text-foreground">重要性排序口径</div>
+                        <div className="font-medium text-foreground">自评排序口径</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          重要性 = 手动标记星级（0–5）
+                          自评 = 手动选择的五点评分（1 非常差 · 2 很差 · 3 一般 · 4 很好 · 5 非常好）
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>排序直接使用每场战役当前保存的星级。</div>
-                          <div>未标记的战役按 0 星处理；相同星级再按客观操作时间排序。</div>
+                          <div>排序直接使用每场战役当前保存的自评分。</div>
+                          <div>未评的战役按 0 处理；同分再按客观操作时间排序。再点一次已选的那一档即清除自评。</div>
                         </div>
                       </>
                     ) : (

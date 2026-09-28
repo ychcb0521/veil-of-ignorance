@@ -104,6 +104,14 @@ export type CampaignSortRow = CampaignCardData & {
 
 // ─── 单场读数（卡片、散点图与排序共用） ─────────────────────────────────────────
 
+/** 自评（importance_weight）的五点量表：1 非常差 … 5 非常好；0 = 未评。 */
+export const SELF_RATING_LABELS = ['非常差', '很差', '一般', '很好', '非常好'] as const;
+
+/** 自评分值的文字；0 或越界时 null（未评）。 */
+export function selfRatingLabel(score: number): string | null {
+  return SELF_RATING_LABELS[score - 1] ?? null;
+}
+
 export function importanceValue(campaign: Pick<TradeCampaign, 'importance_weight'>): number {
   const value = Number(campaign.importance_weight);
   if (!Number.isFinite(value)) return 0;
@@ -699,7 +707,7 @@ export type SortGroupLevelStat =
   | { kind: 'average'; value: number; count: number }
   /** 镜像止盈：本组已实现（生效）的场数。 */
   | { kind: 'achieved'; hits: number; count: number }
-  /** 重要性：本组平均星级。 */
+  /** 自评：本组平均分。 */
   | { kind: 'mean'; value: number; count: number }
   /** 本组一场都算不出，或这一项（字母 / 操作时间）不做统计。 */
   | { kind: 'none' };
@@ -786,7 +794,7 @@ function groupSortedRows<T extends CampaignSortRow>(
   return order.map(id => buckets.get(id)!);
 }
 
-/** 按读数本身分组的排序项（不分档）：镜像止盈六档、重要性星级、杠杆倍数。 */
+/** 按读数本身分组的排序项（不分档）：镜像止盈六档、自评分、杠杆倍数。 */
 const DISCRETE_GROUP_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mirrorTp', 'importance', 'leverage']);
 
 function discreteReader<T extends CampaignSortRow>(mode: CampaignSortMode): (row: T) => number {

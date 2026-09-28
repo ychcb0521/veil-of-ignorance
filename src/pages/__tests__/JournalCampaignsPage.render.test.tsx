@@ -7,11 +7,11 @@
  *   · 详情返回没有缓存，从 0/237 重来。
  * 这里用三个计数器盯住：页面自己（账户权益每 tick 都要算）、散点图元件、每张卡片。
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCampaignListCaches, waitForCampaignListHeal } from '@/lib/campaignListCache';
-import { deleteCampaign, fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
+import { deleteCampaign, fetchCampaignSourceRows, getCampaignFullData, updateCampaignImportance } from '@/lib/journalApi';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
@@ -293,5 +293,46 @@ describe('JournalCampaignsPage · writes wait for the background heal', () => {
     await act(async () => { release(); });
     await waitFor(() => expect(deleteCampaign).toHaveBeenCalledTimes(1));
     confirm.mockRestore();
+  });
+});
+
+describe('JournalCampaignsPage · 自评（五点评分）', () => {
+  it('五个圆点单选、右侧写量表文字；悬停预览、再点已选的一档清除', async () => {
+    // 写入要真落到假数据源上：页面写完会重读一次数据源，没存下来就会被旧值盖回去（真实环境读回的是库里的新值）
+    const target = campaigns.find(campaign => campaign.id === 'best-pnl')!;
+    vi.mocked(updateCampaignImportance).mockImplementation(async (_id: string, weight: number) => {
+      target.importance_weight = weight;
+      return weight;
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+    // 每次都重新取节点、按战役名找卡片：改了自评列表可能重排（同分按自评排先后），后台核对也可能换掉卡片
+    const card = () => screen.getAllByTestId('campaign-card').find(node => node.textContent?.includes('Best PnL'))!;
+    const group = () => within(card()).getByRole('radiogroup', { name: '自评' });
+    const options = () => within(group()).getAllByRole('radio');
+    const label = () => within(group()).getByTestId('campaign-self-rating-label');
+    expect(options().map(option => option.getAttribute('aria-label')))
+      .toEqual(['1 非常差', '2 很差', '3 一般', '4 很好', '5 非常好']);
+    const initial = label().textContent;
+    expect(initial).toBe('未评');
+
+    fireEvent.pointerEnter(options()[1]);
+    expect(label()).toHaveTextContent('很差');
+    fireEvent.pointerLeave(options()[1]);
+    expect(label().textContent).toBe(initial);
+
+    fireEvent.click(options()[3]);
+    await waitFor(() => expect(updateCampaignImportance).toHaveBeenLastCalledWith(expect.any(String), 4));
+    // 单选：只点亮第 4 颗
+    await waitFor(() => expect(options().map(option => option.getAttribute('aria-checked')))
+      .toEqual(['false', 'false', 'false', 'true', 'false']));
+    fireEvent.pointerLeave(options()[3]);
+    expect(label()).toHaveTextContent('很好');
+
+    fireEvent.click(options()[3]);
+    await waitFor(() => expect(updateCampaignImportance).toHaveBeenLastCalledWith(expect.any(String), 0));
+    fireEvent.pointerLeave(options()[3]);
+    await waitFor(() => expect(label()).toHaveTextContent('未评'));
+    target.importance_weight = 0;
   });
 });

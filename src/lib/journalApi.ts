@@ -2119,7 +2119,7 @@ export async function updateCampaign(
 }
 
 export async function updateCampaignImportance(id: string, importanceWeight: number): Promise<number> {
-  const userId = await getAuthenticatedUserId('更新战役重要性');
+  const userId = await getAuthenticatedUserId('更新战役自评');
   const normalized = normalizeCampaignImportance(importanceWeight);
   upsertLocalCampaignPreference(userId, id, { importance_weight: normalized });
 
@@ -2132,7 +2132,7 @@ export async function updateCampaignImportance(id: string, importanceWeight: num
     if (isMissingTradeCampaignsTableError(error) || isCampaignNotFoundError(error) || isMissingCampaignImportanceColumnError(error)) {
       return normalized;
     }
-    throw new Error(`更新战役重要性失败：${error.message}`);
+    throw new Error(`更新战役自评失败：${error.message}`);
   }
 
   const local = findLocalCampaign(userId, id);

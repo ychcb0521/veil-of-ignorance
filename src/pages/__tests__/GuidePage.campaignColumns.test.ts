@@ -15,10 +15,10 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
   it('排序行的次序与页面 SORT_OPTIONS 一致', () => {
     const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(page)?.[1] ?? '';
     const labels = [...block.matchAll(/label: '([^']+)'/g)].map(match => match[1]);
-    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（重要性在杠杆倍数之后、字母之前；「DSI 贡献」「USI 贡献」已删）
+    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（自评在杠杆倍数之后、字母之前；「DSI 贡献」「USI 贡献」已删）
     expect(labels).toEqual([
       '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望',
-      '算术期望', '杠杆倍数', '重要性', '字母',
+      '算术期望', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
     expect(guide).not.toContain('<SubTitle>DSI 贡献率与 USI 贡献率</SubTitle>');
@@ -70,13 +70,13 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
     // 与页面常量一致：手机两列、≥ 640px 左对齐排开
     expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';");
-    expect(guide).toContain('重要性放在后面，排在字母之前');
-    expect(guide).not.toContain('排序行依次是重要性');
+    expect(guide).toContain('自评放在后面，排在字母之前');
+    expect(guide).not.toContain('排序行依次是自评');
     expect(guide).toContain('涨跌幅、涨跌幅倍数、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');
   });
 
   it('散点图清单与颜色说明包含涨跌幅、涨跌幅倍数、加仓效用', () => {
-    expect(guide).toContain('盈亏比、预期回撤、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望、重要性、镜像止盈都各自配有一张散点图');
+    expect(guide).toContain('盈亏比、预期回撤、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望、自评、镜像止盈都各自配有一张散点图');
     expect(guide).toContain('本身带盈亏方向的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）按数值正负着色');
     expect(guide).toContain('没有加仓、或涨跌幅倍数不为正的战役不进加仓效用图');
     // 页面上确实给三项注册了散点图
@@ -147,10 +147,10 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('以 0 为界</strong>：负的一侧与正的一侧<strong>各按场数对半分</strong>成两档');
     expect(guide).toContain('排序链上第一级标着<strong>「分档」</strong>，悬停或点它（也可点 ⓘ）看档界');
     expect(guide).toContain('档界按封面精度取整、就是那一档里最小的读数，封面读数相同的战役必在同一档');
-    expect(guide).toContain('镜像止盈 / 重要性 / 杠杆倍数 / 字母 / 操作时间不分档，只有一级时也不分档（与原来逐位相同）');
+    expect(guide).toContain('镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档，只有一级时也不分档（与原来逐位相同）');
     expect(guide).toContain('<strong>「本级排了 N 场」</strong>');
     expect(guide).toContain('（悬停或点它看明细）');
-    expect(guide).toContain('<strong>「未起作用」</strong>= 前面各级没有并列、并列的读数全相同（比如某一档里全是 5 星），或并列的都算不出这一项');
+    expect(guide).toContain('<strong>「未起作用」</strong>= 前面各级没有并列、并列的读数全相同（比如某一档里全是 5 分），或并列的都算不出这一项');
     // 与实现对得上：七个连续指标；只有一级永远不分档；分档按封面精度取整；第一级分档后各级都打平再按它本身的数值；读数全相同的组记 tied
     expect(sortLib).toContain("'expectedDrawdownPct',\n  'mainPriceChange',\n  'mainPriceEfficiency',\n  'captureRate',\n  'addEfficiency',\n  'geometricExpectancy',\n  'arithmeticExpectancy',\n]);");
     expect(sortLib).toContain('return chain.length > 1 && isContinuousSortMode(chain[0].mode);');

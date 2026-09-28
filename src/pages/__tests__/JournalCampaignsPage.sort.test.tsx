@@ -1766,7 +1766,7 @@ describe('JournalCampaignsPage sorting', () => {
       [...screen.getByTestId('campaign-sort-controls').querySelectorAll('button[data-testid^="campaign-sort-"]')]
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
-      // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母；重要性放在后面（字母之前）
+      // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母；自评放在后面（字母之前）
       'campaign-sort-time',
       'campaign-sort-mirrorTp',
       'campaign-sort-expectedDrawdownPct',
