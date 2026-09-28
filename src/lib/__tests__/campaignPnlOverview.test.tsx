@@ -220,7 +220,11 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     // 两栏还是一栏看面板自己的宽度（容器查询）：面板内容宽 ≥ 540px 才并排
     expect(container.firstElementChild).toHaveClass('[container-type:inline-size]');
-    expect(container.querySelector('.grid.grid-cols-1.gap-x-8.gap-y-2')).toHaveClass('[@container(min-width:540px)]:grid-cols-2');
+    // 【用户要求】「命名和对应的数字离得太远」：栏宽按内容定（max-content），不撑满半张卡；两栏之间 64px
+    const grid = container.querySelector('[data-column]')!.parentElement!;
+    expect(grid).toHaveClass('grid-cols-[minmax(0,max-content)]', 'gap-x-16', '[@container(min-width:540px)]:grid-cols-[repeat(2,max-content)]');
+    expect(grid.className).not.toContain('grid-cols-2 ');
+    expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望', '算术期望']);

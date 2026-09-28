@@ -39,7 +39,7 @@ export function PnlMetricLabel({ label, children }: { label: string; children: R
  * 两栏各要 ≈ 250px，加 32px 栏距，面板内容宽 ≥ 540px 才并排，否则并成一栏（先左栏、再右栏）。
  * Tailwind 需要完整类名，所以逐个写出。
  */
-const TWO_COLUMN_GRID = '[@container(min-width:540px)]:grid-cols-2';
+const TWO_COLUMN_GRID = '[@container(min-width:540px)]:grid-cols-[repeat(2,max-content)]';
 const COL_START = {
   left: '[@container(min-width:540px)]:col-start-1',
   right: '[@container(min-width:540px)]:col-start-2',
@@ -74,14 +74,16 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
       <div className="truncate font-medium" title={title}>{title}</div>
       {/* 两栏各自从上往下排（次序见 PNL_OVERVIEW_LEFT_COLUMN / PNL_OVERVIEW_CHAIN_COLUMN）：每项按它在本栏的序号落到同一行，
           左右两栏共用行高，同一行的两项始终齐平；面板窄时并成一栏，按 DOM 顺序，先左栏、再右栏。 */}
-      <div className={`mt-3 grid grid-cols-1 gap-x-8 gap-y-2 ${TWO_COLUMN_GRID}`}>
+      {/* 【用户要求】「命名和对应的数字离得太远」：栏宽不再撑满半张卡，只按内容定（最长的名字 + 24px + 最长的读数），
+          读数在栏内右对齐、上下对齐——名字与它的数紧挨着；两栏之间留 64px，一眼分得出是两组。整块靠左（与封面同一取向）。 */}
+      <div className={`mt-3 grid grid-cols-[minmax(0,max-content)] gap-x-16 gap-y-2 ${TWO_COLUMN_GRID}`}>
         {items.map(item => {
           const row = (item.rightColumn ? rightRows : leftRows).get(item.key) ?? 0;
           return (
             <div
               key={item.key}
               data-column={item.rightColumn ? 'right' : 'left'}
-              className={`flex min-w-0 items-baseline justify-between gap-3 ${item.rightColumn ? COL_START.right : COL_START.left} ${ROW_START[row] ?? ''} ${item.rightColumn && row === 0 ? SINGLE_COLUMN_GROUP_BREAK : ''}`}
+              className={`flex min-w-0 items-baseline justify-between gap-6 ${item.rightColumn ? COL_START.right : COL_START.left} ${ROW_START[row] ?? ''} ${item.rightColumn && row === 0 ? SINGLE_COLUMN_GROUP_BREAK : ''}`}
             >
               <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
               {/* 【用户要求】「要对齐」：每项一行，数值不折行、右端对齐；名称过长时截断（悬停看全名），不把这一行撑高。 */}
