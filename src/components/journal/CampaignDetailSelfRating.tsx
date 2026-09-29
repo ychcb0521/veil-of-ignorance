@@ -29,14 +29,23 @@ export function CampaignDetailSelfRating({ campaignId, value, editable, onChange
       setBusy(false);
     }
   }
-  return <div role="group" aria-label="战役自评" aria-busy={busy} className="ml-auto flex shrink-0 items-center gap-1 rounded border border-border/80 px-2 py-1.5">
-    <span className="mr-1 text-xs text-muted-foreground">自评</span>
+  const currentLabel = selfRatingLabel(score);
+  return <div
+    role="radiogroup"
+    aria-label="战役自评"
+    aria-busy={busy}
+    title={currentLabel ? `当前自评：${score} ${currentLabel}` : '尚未自评'}
+    className="ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground/70"
+  >
+    <span className="mr-1 text-[10px] tracking-wide">自评</span>
     {SELF_RATING_LABELS.map((label, index) => <button
-      key={label} type="button" aria-label={`${index + 1} ${label}`} aria-pressed={score === index + 1}
+      key={label} type="button" role="radio" aria-label={`${index + 1} ${label}`} aria-checked={score === index + 1}
       title={`${index + 1} ${label}（再次点击清除）`} disabled={!editable || busy}
       onClick={() => void save(index + 1)}
-      className={`h-6 w-6 rounded-full border text-xs tabular-nums transition-colors disabled:opacity-50 ${score === index + 1 ? 'border-[#F0B90B] bg-[#F0B90B] text-[#1E2026]' : 'border-border text-muted-foreground hover:border-[#F0B90B]'}`}
+      className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[9px] leading-none tabular-nums transition-colors disabled:cursor-default ${score === index + 1
+        ? 'border-[#D9A600]/70 bg-[#F0B90B]/80 font-medium text-[#3B2E00] shadow-[0_0_0_1px_rgba(240,185,11,0.08)]'
+        : 'border-border/70 text-muted-foreground/55 hover:border-[#D9A600]/60 hover:bg-[#F0B90B]/[0.08] hover:text-muted-foreground'}`}
     >{index + 1}</button>)}
-    <span className="ml-1 w-[3.5em] text-xs text-muted-foreground">{busy ? '保存中' : selfRatingLabel(score) ?? '未评'}</span>
+    {busy && <span className="ml-1 text-[9px] text-muted-foreground/60">保存中</span>}
   </div>;
 }
