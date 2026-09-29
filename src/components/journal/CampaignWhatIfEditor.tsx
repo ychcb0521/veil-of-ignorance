@@ -434,9 +434,7 @@ export function CampaignWhatIfEditor({
         : { open_time: iso }));
     }
     if (endpoint === 'close') {
-      // 强平腿的平仓端点由交易所决定：图上拖动也不改它（与编辑器里锁死那两格同一条规则）。
-      const target = manualLegs.find(leg => leg.id === legId);
-      if (target?.actual?.liquidated === true) return;
+      // 副本允许重演爆仓前后的决策；actual 中的真实强平事实保持不变。
       updateManualLeg(legId, kline ? { close_time: iso, exit_price: round(kline.close, 8) } : { close_time: iso });
     }
   };
@@ -601,7 +599,7 @@ export function CampaignWhatIfEditor({
                  * 逐仓强平的盈亏另按各刀在破产价上结算掉的那笔钱截断（resolveManualLegEconomics），全仓强平不封顶。
                  */
                 const liquidated = leg.actual?.liquidated === true;
-                const liquidatedHint = '这条腿是被交易所强平的：方向、平仓价与平仓时间由强平决定，改不动。其余格子照常可改；逐仓强平的亏损按保证金封顶，全仓强平没有封顶。';
+                const liquidatedHint = '原始记录为爆仓；反事实副本可以修改方向、价格和时间以重演决策，不会覆盖实际记录。同方向逐仓亏损仍按保证金封顶；修改方向不沿用原方向封顶。此标记不代表修改后的方案仍会爆仓。';
                 return (
                   <tr
                     key={leg.id}
@@ -666,13 +664,11 @@ export function CampaignWhatIfEditor({
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {/* 爆仓腿的方向也锁死：多单翻成空单后这笔强平在现实里已不存在，
-                          锁着的平仓价 / 时间与按原方向保证金算的封顶都会套错方向。 */}
+                      {/* 反事实允许改变方向；原方向的强平事实保存在 actual 中。 */}
                       <select
                         data-testid={`counterfactual-leg-direction-${leg.id}`}
                         className="h-8 w-full rounded border border-border bg-background px-2"
                         value={leg.direction}
-                        disabled={liquidated}
                         title={liquidated ? liquidatedHint : undefined}
                         onChange={(e: ChangeEvent<HTMLSelectElement>) => updateManualLeg(leg.id, { direction: e.target.value as 'long' | 'short' })}
                       >
@@ -693,7 +689,6 @@ export function CampaignWhatIfEditor({
                         type="datetime-local"
                         data-testid={`counterfactual-leg-close-time-${leg.id}`}
                         className="h-8 text-[11px]"
-                        disabled={liquidated}
                         title={liquidated ? liquidatedHint : undefined}
                         value={toLocalDateTimeInputValue(leg.close_time)}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { close_time: fromLocalDateTimeInputValue(e.target.value, leg.close_time) })}
@@ -717,7 +712,6 @@ export function CampaignWhatIfEditor({
                         type="number"
                         data-testid={`counterfactual-leg-exit-price-${leg.id}`}
                         className="h-8 text-[11px]"
-                        disabled={liquidated}
                         title={liquidated ? liquidatedHint : undefined}
                         value={leg.exit_price}
                         onChange={(e: ChangeEvent<HTMLInputElement>) => updateManualLeg(leg.id, { exit_price: Number(e.target.value) })}

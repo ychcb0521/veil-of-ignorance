@@ -570,7 +570,7 @@ export interface CampaignCounterfactualManualLegActual {
   off_path?: boolean;
   /**
    * 这条腿是被交易所强制平掉的（成交记录的 action / exit_method 说了算）。
-   * 平仓价与平仓时间不是决策、是交易所的动作：编辑器锁死这两格，逐仓强平的盈亏按各刀的 pnl_floor_usdt 封顶。
+   * 这是原始事实标记，不限制反事实副本编辑；同方向逐仓强平的盈亏按各刀的 pnl_floor_usdt 封顶。
    */
   liquidated?: true;
   /**

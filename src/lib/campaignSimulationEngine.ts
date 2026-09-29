@@ -1360,7 +1360,7 @@ export function resolveManualLegEconomics(leg: CampaignCounterfactualManualLeg):
      * 一条保证金 1000 的腿亏掉 3078.96。封顶带符号（多笔成交并成的仓位拆账后，加仓那一片可能是正的），
      * 各刀相加恰好是 −整仓保证金；没改过时 editWorth 恒为 0、封顶就是实际结算值，截断不动它。
      */
-    // 方向被改过的老分支（编辑器现已锁死爆仓腿的方向）：封顶是按原方向的保证金算的，套到反向仓位上会错截，不封。
+    // 副本允许改变方向：封顶按原方向的保证金算，套到反向仓位上会错截，不沿用。
     const pnlFloor = cut.pnl_floor_usdt != null && Number.isFinite(cut.pnl_floor_usdt) && leg.direction === actual.direction
       ? cut.pnl_floor_usdt * Math.abs(sizeRatio)
       : null;

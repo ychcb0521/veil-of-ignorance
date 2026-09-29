@@ -1,11 +1,8 @@
 /**
- * 反事实编辑器里的爆仓腿：平仓价与平仓时间两格锁死。
- *
- * 「如果当时晚一点平」对一条被强平的腿不成立——仓位是交易所在强平价上收走的，
- * 那之后的价格根本不属于它。以前这两格随便拖：0.9540 拖到 0.8500，
- * 一条保证金只有 1000 的腿被算出 −3078.96。
+ * 爆仓是原始结果，不是反事实编辑限制：可以重演方向、平仓价和时间。
+ * 原始事实与逐仓封顶另由引擎回归测试保护。
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import type { CampaignCounterfactualManualLeg, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -13,7 +10,7 @@ import type { TradeRecord } from '@/types/trading';
 import { CampaignWhatIfEditor } from '../CampaignWhatIfEditor';
 
 vi.mock('@/components/journal/ReplayKlineChart', () => ({
-  ReplayKlineChart: () => <div data-testid="counterfactual-chart" />,
+  ReplayKlineChart: ({ onDragVerticalLine }: { onDragVerticalLine: (id: string, time: number) => void }) => <button data-testid="counterfactual-chart" onClick={() => onDragVerticalLine('liq:close', Date.parse('2026-01-02T03:00:00.000Z'))}>拖动平仓</button>,
 }));
 
 const { baselineLegs } = vi.hoisted(() => ({
@@ -147,27 +144,36 @@ const renderEditor = () => render(
   />,
 );
 
-describe('反事实编辑器：爆仓腿改不动平仓那一端', () => {
+describe('反事实编辑器：爆仓腿可编辑，保留原始事实', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('爆仓腿挂红色「爆仓」标记，方向 / 平仓价 / 平仓时间三格禁用并写明原因；其余腿照常可改', async () => {
+  it('爆仓腿保留标记，方向 / 平仓价 / 平仓时间可编辑', async () => {
     renderEditor();
     await waitFor(() => expect(screen.getByTestId('counterfactual-leg-exit-price-liq')).toBeInTheDocument());
 
     expect(screen.getByTestId('counterfactual-leg-liquidated-liq').textContent).toBe('爆仓');
     const exitPrice = screen.getByTestId('counterfactual-leg-exit-price-liq') as HTMLInputElement;
     const closeTime = screen.getByTestId('counterfactual-leg-close-time-liq') as HTMLInputElement;
-    expect(exitPrice.disabled).toBe(true);
-    expect(closeTime.disabled).toBe(true);
-    expect(exitPrice.getAttribute('title')).toContain('被交易所强平');
+    expect(exitPrice.disabled).toBe(false);
+    expect(closeTime.disabled).toBe(false);
+    expect(exitPrice.getAttribute('title')).toContain('原始记录为爆仓');
 
     expect(screen.queryByTestId('counterfactual-leg-liquidated-normal')).toBeNull();
     expect((screen.getByTestId('counterfactual-leg-exit-price-normal') as HTMLInputElement).disabled).toBe(false);
     expect((screen.getByTestId('counterfactual-leg-close-time-normal') as HTMLInputElement).disabled).toBe(false);
-    // 方向也锁死：多单翻成空单后这笔强平在现实里已不存在，锁着的平仓价与按原方向算的封顶都会套错方向
+    // 改的是副本，不抹掉原始爆仓标记。
     const direction = screen.getByTestId('counterfactual-leg-direction-liq') as HTMLSelectElement;
-    expect(direction.disabled).toBe(true);
+    expect(direction.disabled).toBe(false);
     expect(direction.title).toContain('方向');
+    fireEvent.change(exitPrice, { target: { value: '1.1' } });
+    expect(exitPrice.value).toBe('1.1');
+    fireEvent.change(direction, { target: { value: 'short' } });
+    expect(direction.value).toBe('short');
+    fireEvent.change(closeTime, { target: { value: '2026-01-02T09:00' } });
+    expect(closeTime.value).toBe('2026-01-02T09:00');
+    expect(baselineLegs[0].actual?.liquidated).toBe(true);
+    fireEvent.click(screen.getAllByTestId('counterfactual-chart')[0]);
+    expect(closeTime.value).toBe('2026-01-02T11:00');
     expect((screen.getByTestId('counterfactual-leg-direction-normal') as HTMLSelectElement).disabled).toBe(false);
   });
 });

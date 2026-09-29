@@ -9,7 +9,7 @@
  *   · 强平腿在「实际成交」事实里标出来（actual.liquidated），每一刀带自己的盈亏封顶（pnl_floor_usdt）；
  *   · 这条腿的盈亏在封顶处截断（仓位一格改过时按比例缩放，杠杆不变、保证金同比例变）；
  *   · 权益路径上的那一段带同一个封顶，与战役页的极值算法读同一条规则；
- *   · 编辑器锁死它的平仓价 / 平仓时间（改不动的事）。
+ *   · 编辑器允许重演平仓价 / 平仓时间；原始事实与同方向逐仓封顶不变。
  */
 import { describe, expect, it } from 'vitest';
 import type { KlineData } from '@/hooks/useBinanceData';
