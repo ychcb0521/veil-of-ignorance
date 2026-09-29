@@ -475,7 +475,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
       const bar = screen.getByTestId('campaign-batch-selection-bar');
       expect(bar).toHaveAttribute('data-placement', 'flow');
       expect(screen.getByTestId('campaign-sticky-controls')).not.toContainElement(bar);
-      // 紧跟在吸顶区后面，仍在统计与散点图这一节里
+      // 紧跟在吸顶区后面、随页面滚动
       expect(bar.previousElementSibling).toBe(screen.getByTestId('campaign-sticky-controls'));
       expect(bar).toHaveClass('order-2');
       // 选择条上的功能照旧

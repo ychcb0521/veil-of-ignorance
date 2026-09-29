@@ -3727,13 +3727,15 @@ export default function JournalCampaignsPage() {
             </button>
           </div>
         )}
-        {/* 散点图收起时，吸顶区自己的下边框就是这一段的收口，不再叠一条 section 下边框。 */}
-        <section className={`mb-5 overflow-visible border-t border-border/80 bg-card/40 ${metricChartOpen ? 'border-b' : ''}`}>
-          <div className="flex w-full flex-col">
+        {/*
+          【用户要求】翻战役时「排序方式」冻结在顶上：吸顶区只在父容器范围内生效，原来它和散点图一起包在 section 里、卡片列表在外面，
+          一翻过散点图就跟着滚走。现在吸顶区、散点图、卡片列表同在这一个容器里，整张列表翻到底都吸顶。
+        */}
+        <div data-testid="campaign-sticky-scope">
             <div
               ref={stickyControlsRef}
               data-testid="campaign-sticky-controls"
-              className="sticky top-[57px] z-10 order-1 flex w-full flex-col border-b border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
+              className="sticky top-[57px] z-10 flex w-full flex-col border-y border-border/80 bg-background/95 shadow-[0_8px_16px_-14px_rgba(15,23,42,0.45)] backdrop-blur-md"
             >
             {/* 【用户要求】排序行左对齐：按钮依次排开、间距均匀，两条短分隔线分出「操作时间 · 镜像止盈 ┆ 与封面指标同序的七项 ┆ 其余」三组。
                 左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
@@ -4680,7 +4682,11 @@ export default function JournalCampaignsPage() {
             </Popover>
           </div>
           </div>
-          {selectionMode && narrowViewport && renderBatchSelectionBar(true)}
+        {/* 窄屏的批量选择条紧跟吸顶区、随页面滚动（不把吸顶区撑高） */}
+        {selectionMode && narrowViewport && renderBatchSelectionBar(true)}
+        {/* 散点图收起时，吸顶区自己的下边框就是这一段的收口，不再叠一条 section 下边框。 */}
+        <section className={`mb-5 overflow-visible bg-card/40 ${metricChartOpen ? 'border-b border-border/80' : ''}`}>
+          <div className="flex w-full flex-col">
           {metricChartOpen ? (
             <div
               ref={metricChartPanelRef}
@@ -4866,6 +4872,7 @@ export default function JournalCampaignsPage() {
             }) : sortedRows.map(renderCampaignCard)}
           </div>
         )}
+        </div>
       </main>
       {selectionMode && !selectionBarInView && !exportTargets && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">

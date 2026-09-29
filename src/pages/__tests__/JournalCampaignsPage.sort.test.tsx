@@ -1856,6 +1856,10 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sticky-controls')).toHaveClass('top-[57px]');
     expect(screen.getByTestId('campaign-sticky-controls')).toContainElement(metricsStrip);
     expect(screen.getByTestId('campaign-sticky-controls')).toContainElement(sortControls);
+    // 【用户要求】翻战役时排序区冻结：吸顶只在父容器里生效，父容器必须把卡片列表也包进去（原来只包到散点图，一翻就滚走）
+    const stickyParent = screen.getByTestId('campaign-sticky-controls').parentElement!;
+    expect(stickyParent).toBe(screen.getByTestId('campaign-sticky-scope'));
+    expect(stickyParent).toContainElement(screen.getByTestId('campaign-card-list'));
     expect(sortControls).not.toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(metricsStrip).toContainElement(screen.getByTestId('campaign-valid-count'));
     expect(screen.queryByTestId('campaign-opportunity-quality')).not.toBeInTheDocument();
