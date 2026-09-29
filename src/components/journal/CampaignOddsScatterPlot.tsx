@@ -587,7 +587,9 @@ export function CampaignMetricScatterPlot({
     }
     const discrete = createDiscreteMetricScale(metricKey.replace(/Bars$/, ''));
     const values = discrete
-      ? discrete.ticks.map(tick => tick.value).sort((a, b) => a - b)
+      ? discrete.ticks.map(tick => tick.value)
+        .filter(value => metricKey !== 'importanceBars' || value > 0)
+        .sort((a, b) => a - b)
       : [...new Set(chartPoints.map(point => point.value))].sort((a, b) => a - b);
     return {
       barOf: (point: CampaignMetricPoint) => point.value,

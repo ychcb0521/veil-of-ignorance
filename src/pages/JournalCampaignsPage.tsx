@@ -609,8 +609,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     chartLabel: '柱状图',
     seriesLabel: '自评分布',
     guide: {
-      yAxis: '纵轴是场数：相同自评的战役码成一根柱，柱越高，该评分出现得越多。每根柱的精确场数写在柱脚下；0 分表示未评。',
-      point: '横轴按未评、1 非常差、2 很差、3 一般、4 很好、5 非常好分为六档，不按时间排列。每个点仍是一场战役，颜色表示该战役最终盈亏；悬停查看战役与 b，点击进入对应战役。没有战役的评分仍保留空柱。',
+      yAxis: '纵轴是场数：相同自评的战役码成一根柱，柱越高，该评分出现得越多。每根柱的精确场数写在柱脚下；未填写自评的战役不进入柱状图。',
+      point: '横轴按 1 非常差、2 很差、3 一般、4 很好、5 非常好分为五档，不按时间排列。每个点仍是一场战役，颜色表示该战役最终盈亏；悬停查看战役与 b，点击进入对应战役。已评分但没有战役的档位仍保留空柱。',
       colors: PAYOFF_SIGN_COLORS,
     },
     missingValueLabel: '自评',
@@ -2339,6 +2339,10 @@ export default function JournalCampaignsPage() {
     const geometric = buildSeries(row => row.geometricExpectancy);
     const arithmetic = buildSeries(row => row.arithmeticExpectancy);
     const importance = buildSeries(row => importanceValue(row.campaign));
+    const importanceBars = buildSeries(row => {
+      const value = importanceValue(row.campaign);
+      return value > 0 ? value : null;
+    });
     // 与卡片、排序同一组函数：算不出的战役（主力未平仓、没有预期回撤、没有加仓）不进图
     const mainPriceChange = buildSeries(row => (
       row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
@@ -2362,7 +2366,7 @@ export default function JournalCampaignsPage() {
       // 分布图与时序图是同一份序列的两种读法，只建一次、共用同一个对象。
       geometricExpectancyDistribution: geometric,
       importance,
-      importanceBars: importance,
+      importanceBars,
       mirrorTp: mirrorTp,
       // 柱状图与时序图读的是同一份镜像止盈序列，只是横轴换成了结果档位。
       mirrorTpBars: mirrorTp,

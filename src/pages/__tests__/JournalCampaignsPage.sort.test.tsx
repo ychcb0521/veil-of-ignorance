@@ -1621,10 +1621,12 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=importanceBars');
 
     const summary = screen.getByTestId('campaign-metric-summary-importanceBars');
-    for (const label of ['0 未评', '1 非常差', '2 很差', '3 一般', '4 很好', '5 非常好']) {
+    expect(summary).not.toHaveTextContent('0 未评');
+    for (const label of ['1 非常差', '2 很差', '3 一般', '4 很好', '5 非常好']) {
       expect(summary).toHaveTextContent(label);
     }
-    for (const score of [0, 1, 2, 3, 4, 5]) {
+    expect(screen.queryByTestId('campaign-metric-bar-count-importanceBars-0')).not.toBeInTheDocument();
+    for (const score of [1, 2, 3, 4, 5]) {
       expect(screen.getByTestId(`campaign-metric-bar-count-importanceBars-${score}`)).toBeInTheDocument();
     }
 
