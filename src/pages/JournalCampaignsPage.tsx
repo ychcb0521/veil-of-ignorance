@@ -345,7 +345,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   },
   addEfficiency: {
     noun: '可计算加仓效用',
-    hint: '加仓效用 = 盈亏比 ÷ 涨跌幅倍数，只算做过加仓、且涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
+    hint: '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|，只算做过加仓、且涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
   },
 };
 
@@ -743,8 +743,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-addEfficiency-view-time',
     seriesLabel: '加仓效用时序',
     guide: {
-      yAxis: '加仓效用 = 盈亏比 b ÷ 涨跌幅倍数，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
-      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）的战役；涨跌幅倍数为负的也画，读数照 b ÷ η 带符号除（η、b 都为负时为正）。涨跌幅倍数显示为 0.00 的不进图。',
+      yAxis: '加仓效用 = 盈亏比 b ÷ |涨跌幅倍数|，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
+      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）的战役；涨跌幅倍数为负的也画，读数照 b ÷ |η| 计算，正负跟随 b。涨跌幅倍数显示为 0.00 的不进图。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
     },
@@ -763,7 +763,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '加仓效用分布',
     guide: {
       yAxis: '落在该加仓效用附近的战役数量，上下镜像：涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆，堆得越远，这一档出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度（下半边的刻度也是场数）。',
-      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 盈亏比 b ÷ 涨跌幅倍数，带符号除），不考虑时间先后；0 线上方是涨跌幅倍数为正的、下方是为负的（价格朝主力反方向走）；同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图。',
+      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 盈亏比 b ÷ |涨跌幅倍数|，带符号除），不考虑时间先后；0 线上方是涨跌幅倍数为正的、下方是为负的（价格朝主力反方向走）；同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓效用约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓效用 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
@@ -1626,14 +1626,14 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
-          {/* 加仓效用紧跟盈亏比：它就是盈亏比 ÷ 涨跌幅倍数。 */}
+          {/* 加仓效用紧跟盈亏比：它就是盈亏比 ÷ |涨跌幅倍数|。 */}
           <div
             data-testid="campaign-add-efficiency"
             title={addEfficiency == null || mainPriceEfficiency == null
               ? (campaignHasMainAdd(legs)
-                ? '加仓效用 = 盈亏比 ÷ 涨跌幅倍数：这场涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
+                ? '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|：这场涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ 涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)} = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
+                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ |涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
@@ -2320,7 +2320,7 @@ export default function JournalCampaignsPage() {
       row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
     ));
     const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
-    // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ η，带符号直接除）；分布图里它们从 0 线往下镜像堆
+    // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
     const addEfficiency = buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
       ...sample,
       value: rowAddEfficiency(row),
@@ -3953,7 +3953,7 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">加仓效用计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          加仓效用ᵢ = bᵢ ÷ ηᵢ
+                          加仓效用ᵢ = bᵢ ÷ |ηᵢ|
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {/* 两个式子各自不断行，只在「；」之后换行：不会把「涨跌幅ᵢ」拆成「涨跌幅」和另起一行的「ᵢ」 */}
@@ -3967,7 +3967,7 @@ export default function JournalCampaignsPage() {
                           <div>
                             例：bᵢ = +6.00、ηᵢ = +3.00，加仓效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
                           </div>
-                          <div>只算做过加仓（有一条成交过的加仓腿）的战役。<span className="text-foreground">涨跌幅倍数为负的也算，符号照除</span>：例 bᵢ = −3.00、ηᵢ = −2.00，加仓效用 = −3 ÷ −2 = +1.50——价格逆行 2 个预期回撤，亏成了 3R，同样放大了 1.5 倍；分布图里这类战役从 0 线往下堆。颜色按 bᵢ 的正负。涨跌幅倍数显示为 0.00 时分母过小不算；算不出的战役不参与排序与散点图，封面显示「—」。</div>
+                          <div>只算做过加仓（有一条成交过的加仓腿）的战役。<span className="text-foreground">涨跌幅倍数为负的也算，分母取绝对值、正负跟随 b</span>：例 bᵢ = −3.00、ηᵢ = −2.00，加仓效用 = −3 ÷ |−2| = −1.50——价格逆行 2 个预期回撤，亏成了 3R，同样放大了 1.5 倍；分布图里这类战役从 0 线往下堆。颜色按 bᵢ 的正负。涨跌幅倍数显示为 0.00 时分母过小不算；算不出的战役不参与排序与散点图，封面显示「—」。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

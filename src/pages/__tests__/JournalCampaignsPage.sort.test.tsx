@@ -466,7 +466,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(effCards.length).toBeLessThan(4);
       expect(screen.getAllByTestId('campaign-main-price-efficiency')[0].getAttribute('title')).toContain('÷ 预期回撤');
 
-      // 加仓效用 = 盈亏比 ÷ 涨跌幅倍数
+      // 加仓效用 = 盈亏比 ÷ |涨跌幅倍数|
       fireEvent.click(screen.getByTestId('campaign-sort-addEfficiency'));
       await waitFor(() => expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('data-sort-direction', 'desc'));
       const addCards = screen.getAllByTestId('campaign-card');
@@ -817,7 +817,7 @@ describe('JournalCampaignsPage sorting', () => {
       // —— 加仓效用：只画做过加仓的战役 ——
       fireEvent.contextMenu(screen.getByTestId('campaign-sort-addEfficiency'));
       expect(screen.getByText('加仓效用计算公式')).toBeInTheDocument();
-      expect(screen.getByText('加仓效用ᵢ = bᵢ ÷ ηᵢ')).toBeInTheDocument();
+      expect(screen.getByText('加仓效用ᵢ = bᵢ ÷ |ηᵢ|')).toBeInTheDocument();
       // 两个式子各自不断行，只在「；」之后换行：「涨跌幅ᵢ」不会被拆成「涨跌幅」和另起一行的「ᵢ」
       const addPopover = screen.getByText('加仓效用计算公式').closest('[role="dialog"]')!;
       expect([...addPopover.querySelectorAll('span.whitespace-nowrap')].map(node => node.textContent))
@@ -854,7 +854,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'addEfficiency');
       expect(screen.queryByTestId('campaign-metric-reference-addEfficiency-1')).toBeNull();
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiency'));
-      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('涨跌幅倍数为负的也画，读数照 b ÷ η 带符号除');
+      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('涨跌幅倍数为负的也画，读数照 b ÷ |η| 计算，正负跟随 b');
 
       // 散点图开着时点排序按钮：排序照改，图跟着切到这一项——落在它的默认视图（分布）
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));

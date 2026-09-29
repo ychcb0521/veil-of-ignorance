@@ -269,7 +269,7 @@ describe('战役涨跌幅（列表「涨跌幅」排序、封面、盈亏概览�
 });
 
 describe('涨跌幅倍数 / 加仓效用', () => {
-  it('涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；加仓效用 = 盈亏比 ÷ 涨跌幅倍数', () => {
+  it('涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；加仓效用 = 盈亏比 ÷ |涨跌幅倍数|', () => {
     expect(computeMainPriceEfficiency(12, 4)).toBeCloseTo(3, 9);
     expect(computeAddEfficiency(6, 3)).toBeCloseTo(2, 9);
     // 只拿主力不加仓：b 就是涨跌幅倍数，加仓效用恰为 1
@@ -409,11 +409,16 @@ describe('【用户要求】加仓效用只算做过加仓的战役', () => {
   });
 });
 
-describe('【用户要求】加仓效用：涨跌幅倍数为正、为负都算（符号照除），只有显示为 0.00 的不算', () => {
-  it('涨跌幅倍数为负：照算、符号照除——b 与 η 都为负时读数为正', () => {
-    expect(computeAddEfficiency(-3, -2)).toBeCloseTo(1.5, 9);
-    expect(computeAddEfficiency(2, -1)).toBeCloseTo(-2, 9);
-    expect(computeAddEfficiency(-0.68, -0.05)).toBeCloseTo(13.6, 9);
+describe('【用户要求】加仓效用：涨跌幅倍数为正、为负都算（正负跟随 b），只有显示为 0.00 的不算', () => {
+  it.each([[3, 2, 1.5], [3, -2, 1.5], [-3, 2, -1.5], [-3, -2, -1.5], [0, -2, 0]])(
+    'b=%s、涨跌幅倍数=%s 时效用=%s', (b, eta, expected) => {
+      expect(computeAddEfficiency(b, eta)).toBe(expected);
+    },
+  );
+  it('涨跌幅倍数为负：分母取绝对值，效用正负跟随 b', () => {
+    expect(computeAddEfficiency(-3, -2)).toBeCloseTo(-1.5, 9);
+    expect(computeAddEfficiency(2, -1)).toBeCloseTo(2, 9);
+    expect(computeAddEfficiency(-0.68, -0.05)).toBeCloseTo(-13.6, 9);
   });
   it('涨跌幅倍数显示为 0.00（接近 0，含负的 −0.004）：不算，分母过小不再把比值放大成十几倍', () => {
     expect(computeAddEfficiency(0.59, 0.004)).toBeNull();

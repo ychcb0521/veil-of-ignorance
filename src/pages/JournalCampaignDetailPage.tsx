@@ -24,6 +24,7 @@ import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
+import { CampaignDetailSelfRating } from '@/components/journal/CampaignDetailSelfRating';
 import {
   campaignReviewRuleText,
   readCampaignReviewRule,
@@ -2522,7 +2523,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header ref={pageHeaderRef} className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between gap-4">
+        <div className="max-w-[1600px] mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -2557,6 +2558,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               </div>
             </div>
           </div>
+          <CampaignDetailSelfRating key={campaign.id} campaignId={campaign.id}
+            value={campaign.importance_weight} editable={campaign.user_id === viewerUserId}
+            onChange={value => setCampaign(current => current?.id === campaign.id ? { ...current, importance_weight: value } : current)} />
           {displayStatus === 'active' && (
             // 结束对话框会把峰值浮盈（accuracy）写库：计算用 K 线没到之前那是兜底值，先停用
             // 停用的 Button 带 pointer-events-none，悬停落不到它身上：提示挂在外层 span 上才看得见
