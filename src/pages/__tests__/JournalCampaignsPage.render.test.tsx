@@ -347,4 +347,42 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
     await waitFor(() => expect(label()).toHaveTextContent('未评'));
     target.importance_weight = 0;
   }, 15_000);
+
+  it('【用户要求】按自评排序时改分不重排（卡片不跳走），点排序才按新分重排', async () => {
+    const target = campaigns.find(campaign => campaign.id === 'best-pnl')!;
+    vi.mocked(updateCampaignImportance).mockImplementation(async (_id: string, weight: number) => {
+      target.importance_weight = weight;
+      return weight;
+    });
+    const titles = ['High Importance', 'Newest Operation', 'Best PnL'];
+    const order = () => screen.getAllByTestId('campaign-card')
+      .map(card => titles.find(title => card.textContent?.includes(title)));
+    const view = renderPage('/journal/campaigns?sort=importance&direction=desc');
+    // 5 → 1 → 0
+    await waitFor(() => expect(order()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']));
+
+    const best = () => screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('Best PnL'))!;
+    fireEvent.click(within(best()).getByRole('radio', { name: '5 非常好' }));
+    await waitFor(() => expect(updateCampaignImportance).toHaveBeenLastCalledWith('best-pnl', 5));
+    await waitFor(() => expect(within(best()).getByRole('radio', { name: '5 非常好' })).toHaveAttribute('aria-checked', 'true'));
+    // 写完会重读一次数据源：等它落地，顺序仍不变
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(order()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+
+    // 进详情再返回（页面重新挂载、排序链没变）：仍是原来的顺序，回到原处找得到它
+    view.unmount();
+    renderPage('/journal/campaigns?sort=importance&direction=desc');
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(3));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+    expect(order()).toEqual(['High Importance', 'Newest Operation', 'Best PnL']);
+    expect(within(best()).getByRole('radio', { name: '5 非常好' })).toHaveAttribute('aria-checked', 'true');
+
+    // 点排序（切到升序、再切回降序）才按新分排：Best PnL 5 分，不再垫底
+    fireEvent.click(screen.getByTestId('campaign-sort-importance'));
+    await waitFor(() => expect(order()[0]).toBe('Newest Operation'));
+    fireEvent.click(screen.getByTestId('campaign-sort-importance'));
+    await waitFor(() => expect(order()[2]).toBe('Newest Operation'));
+    expect(order().slice(0, 2)).toContain('Best PnL');
+    target.importance_weight = 0;
+  }, 15_000);
 });

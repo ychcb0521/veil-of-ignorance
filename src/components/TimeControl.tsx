@@ -9,7 +9,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
-  setSignalQuality,
+  setSignalQuality, normalizeSignalQuality,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
@@ -219,18 +219,40 @@ export function TimeControl({
     if (monthFilter && !monthOptions.some(m => m.month === monthFilter)) setMonthFilter('');
   }, [monthFilter, monthOptions]);
 
-  const sortedFiltered = useMemo(() => {
-    const q = query.trim().toUpperCase();
-    const base = sortSignalsBy(signals, sortKey, sortDir);
-    const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
-    return q ? byMonth.filter(s => s.symbol.includes(q)) : byMonth;
-  }, [signals, query, monthFilter, sortKey, sortDir]);
+  /**
+   * 【用户要求】打分后不重排：按评分排序时刚打分的那一条一下子跳走、找不着了。
+   * 打分时记下这一条打分前的评分（每条只记第一次，null = 未评），排序按记下的评分算，行里照常显示新评分；
+   * 用户点表头换排序 / 切方向、换月份或搜索（listResetKey 变了）时清空，按新评分重排。
+   */
   /**
    * 「这一批行是按什么口径排出来的」的指纹，交给列表决定何时把滚动条拨回顶部。
    * 刻意不看 sortedFiltered 的身份：打分和删除也会换掉那个数组，
    * 但那两种情况下把人弹回顶部只会让他丢失刚才看到哪儿了。
    */
   const listResetKey = `${sortKey}|${sortDir}|${monthFilter}|${query.trim().toUpperCase()}`;
+  const listResetKeyRef = useRef(listResetKey);
+  listResetKeyRef.current = listResetKey;
+  // 冻结表带着记下时的口径：口径一变即作废（点表头那一帧就按新评分排，不闪旧顺序）
+  const [frozenQuality, setFrozenQuality] = useState<{ key: string; map: ReadonlyMap<string, number | null> }>(
+    () => ({ key: '', map: new Map() }),
+  );
+  // 口径变了就清空：否则切到升序再切回降序，口径又回到记下时那个，旧冻结会「复活」
+  useEffect(() => {
+    if (frozenQuality.key !== listResetKey && frozenQuality.map.size > 0) setFrozenQuality({ key: listResetKey, map: new Map() });
+  }, [frozenQuality, listResetKey]);
+  const activeFrozenQuality = frozenQuality.key === listResetKey && frozenQuality.map.size > 0 ? frozenQuality.map : null;
+  const sortedFiltered = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    const basis = !activeFrozenQuality ? signals : signals.map(sig => (
+      activeFrozenQuality.has(sig.id) ? { ...sig, quality: activeFrozenQuality.get(sig.id) ?? undefined } : sig
+    ));
+    const sortedBasis = sortSignalsBy(basis, sortKey, sortDir);
+    // 同一个顺序换回真实的信号对象（行里显示新评分，行的身份也不变）
+    const real = basis === signals ? null : new Map(signals.map(sig => [sig.id, sig]));
+    const base = real ? sortedBasis.map(sig => real.get(sig.id) ?? sig) : sortedBasis;
+    const byMonth = monthFilter ? base.filter(s => signalMonthKey(s.timeMs) === monthFilter) : base;
+    return q ? byMonth.filter(s => s.symbol.includes(q)) : byMonth;
+  }, [signals, query, monthFilter, sortKey, sortDir, activeFrozenQuality]);
   // 「标的@日期」索引：信号那天，这个标的动过手没有。
   // 这里曾经只按标的判定（做过一次 TRB，所有 TRB 信号全被标成已交易），
   // 而同一个币种会在很多个日期出现——按标的判等于把标记稀释成「这币我碰过」，
@@ -289,10 +311,16 @@ export function TimeControl({
    * 并顺着 saveSignals 推到云端——所以「最新评分覆盖旧的」是自动成立的，
    * 不需要另开一条保存路径。
    */
-  const handleRateSignal = useCallback(
-    (id: string, next: number) => setSignals(prev => setSignalQuality(prev, id, next)),
-    [],
-  );
+  const handleRateSignal = useCallback((id: string, next: number) => {
+    // 记下打分前的评分：列表按它排、不跳位，直到用户点表头（见 frozenQuality）
+    const before = normalizeSignalQuality(signalsRef.current.find(sig => sig.id === id)?.quality) ?? null;
+    setFrozenQuality(prev => {
+      const key = listResetKeyRef.current;
+      const map = prev.key === key ? prev.map : new Map<string, number | null>();
+      return map.has(id) ? prev : { key, map: new Map(map).set(id, before) };
+    });
+    setSignals(prev => setSignalQuality(prev, id, next));
+  }, []);
   const handleClearSignals = () => { setSignals([]); setImportErrors([]); toast.message('信号库已清空'); };
 
   // 导出：把整库序列化成「区块格式」txt（与导入互逆，可原样再导入），触发浏览器下载。

@@ -377,37 +377,42 @@ describe(`信号库（${BULK_SIGNAL_COUNT} 条）`, () => {
       expect(badges).toHaveLength(expected);
     });
 
-    it('按评分排序时用键盘给首行改分：行被挪出窗口，焦点仍在那颗星上，下一行也在', async () => {
+    it('【用户要求】按评分排序时用键盘给首行改分：行不挪位、焦点仍在那颗星上；点表头才按新评分重排', async () => {
       await renderControl();
       await openLibrary();
       const lib = libraryRoot();
       fireEvent.click(within(lib).getByTestId('signal-sort-评分'));   // 评分 高→低
-      const [target] = sortSignalsBy(SIGNALS, 'quality', 'desc');
+      const before = sortSignalsBy(SIGNALS, 'quality', 'desc');
+      const [target] = before;
       expect(target.quality).toBe(5);
+      const idsBefore = renderedIds();
       const star = screen.getByTestId(`signal-quality-${target.id}-1`);
       act(() => { star.focus(); });
       // 键盘空格 / 回车在按钮上派发的就是 click
       fireEvent.click(star);
 
+      // 改分不重排：首行仍是它，窗口里的顺序一字不变，焦点与新评分都在
+      expect(renderedIds()).toEqual(idsBefore);
+      expect(renderedIds()[0]).toBe(target.id);
+      expect(star.isConnected).toBe(true);
+      expect(document.activeElement).toBe(star);
+      expect(star).toHaveAttribute('aria-checked', 'true');
+      const saved = JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY) ?? '[]');
+      expect(saved.find((x: TradeSignal) => x.id === target.id).quality).toBe(1);
+
+      // 点表头（切到低→高再切回高→低）才按新评分排：它被挪出了首屏
+      fireEvent.click(within(lib).getByTestId('signal-sort-评分'));
+      fireEvent.click(within(lib).getByTestId('signal-sort-评分'));
       const after = sortSignalsBy(
         SIGNALS.map(s => (s.id === target.id ? { ...s, quality: 1 } : s)),
         'quality',
         'desc',
       );
-      const moved = after.findIndex(s => s.id === target.id);
-      expect(moved).toBeGreaterThan(TOP_RENDERED);
-      // 同一个节点仍在文档里、仍是焦点（改造前 React 会在重排后把焦点还给它）
-      expect(star.isConnected).toBe(true);
-      expect(document.activeElement).toBe(star);
-      expect(star).toHaveAttribute('aria-checked', 'true');
-      // DOM 顺序与新顺序一致；Tab / Shift+Tab 的落点（上下邻行）都在
-      const ids = renderedIds();
-      const at = ids.indexOf(target.id);
-      expect(ids.slice(at - 1, at + 2)).toEqual(after.slice(moved - 1, moved + 2).map(s => s.id));
-      const order = ids.map(id => after.findIndex(s => s.id === id));
-      expect(order).toEqual([...order].sort((a, b) => a - b));
-      const saved = JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY) ?? '[]');
-      expect(saved.find((x: TradeSignal) => x.id === target.id).quality).toBe(1);
+      expect(after.findIndex(s => s.id === target.id)).toBeGreaterThan(TOP_RENDERED);
+      expect(renderedIds()[0]).toBe(after[0].id);
+      // 窗口里的顺序按新评分（有焦点的那一行仍挂在文档里，位置也按新顺序）
+      const order = renderedIds().map(id => after.findIndex(s => s.id === id));
+      expect(order).toEqual([...order].sort((x, y) => x - y));
     });
   });
 });

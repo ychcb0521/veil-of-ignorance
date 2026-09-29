@@ -1327,6 +1327,13 @@ type CampaignCardProps = {
  * 单张战役卡片。按引用 memo：行情每个 tick 都会让整页重渲染，
  * 行对象与回调没变的卡片一张都不重画（237 张卡片就是每个 tick 上万个节点的对账）。
  */
+/**
+ * 改自评时冻结的「改之前的分」，跨页面往返保留（列表 → 详情 → 返回，列表顺序不变）；排序链变了就作废。
+ * 与列表的内存缓存同一个生命周期：刷新页面即清空。
+ */
+type FrozenImportance = { chainKey: string; map: ReadonlyMap<string, number> };
+let frozenImportanceMemory: FrozenImportance = { chainKey: '', map: new Map() };
+
 const CampaignCard = memo(function CampaignCard({
   row,
   sortHighlight,
@@ -2065,6 +2072,11 @@ export default function JournalCampaignsPage() {
   const bulkCloseTargets = includeUnsettled ? bulkClosePlan : settledPlan;
 
   // 卡片按引用 memo：回调不依赖 rows / 正在忙的那一场（都走函数式更新与 ref），整个会话里引用不换。
+  /** 改自评时冻结的「改之前的分」（排序口径）：见下方 sortBasisRows 的说明。 */
+  // 冻结表带着记下时的排序链：链一变就整张作废（不靠事后清空，点排序那一帧就按新分排，不闪旧顺序）
+  const [frozenImportance, setFrozenImportance] = useState<FrozenImportance>(() => frozenImportanceMemory);
+  const sortChainKeyRef = useRef('');
+  sortChainKeyRef.current = sortChainKey(sortChain);
   const handleImportanceChange = useCallback(async (
     event: MouseEvent<HTMLButtonElement>,
     campaign: TradeCampaign,
@@ -2075,6 +2087,12 @@ export default function JournalCampaignsPage() {
 
     const previousWeight = importanceValue(campaign);
     const nextWeight = previousWeight === weight ? 0 : weight;
+    // 记下改之前的分：列表按它排、不跳位，直到用户点排序（见 frozenImportance）
+    setFrozenImportance(prev => {
+      const chainKey = sortChainKeyRef.current;
+      const map = prev.chainKey === chainKey ? prev.map : new Map<string, number>();
+      return map.has(campaign.id) ? prev : { chainKey, map: new Map(map).set(campaign.id, previousWeight) };
+    });
     const setWeight = (value: number) => setRows(prev => prev.map(row => (
       row.campaign.id === campaign.id
         ? { ...row, campaign: { ...row.campaign, importance_weight: value } }
@@ -2214,18 +2232,48 @@ export default function JournalCampaignsPage() {
     displayRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return displayRowsRef.current.rows;
   }, [metricRows, currentAccountEquity, userId]);
-  const sortedRows = useMemo(
-    () => sortCampaignRows(displayRows, sortChain),
-    [displayRows, sortChain],
+  const sortChainKeyForSections = sortChainKey(sortChain);
+  /**
+   * 【用户要求】改了自评不重排：「重评之后，被重评的那个战役一下子消失找不着了」。
+   * 改自评时记下这一场改之前的分（每场只记第一次），排序、分档、分组统计都按记下的分算，卡片上照常显示新分；
+   * 用户点排序（换排序项、切方向、加 / 减一级，即排序链变了）时清空，按新分重排。
+   */
+  // 跨页面往返保留：从详情页返回重新挂载时排序链没变，冻结照旧生效，列表回到原样
+  useEffect(() => { frozenImportanceMemory = frozenImportance; }, [frozenImportance]);
+  // 链变了就把冻结表清掉：否则切到升序再切回降序，链又回到记下时那条，旧冻结会「复活」
+  useEffect(() => {
+    if (frozenImportance.chainKey !== sortChainKeyForSections && frozenImportance.map.size > 0) {
+      setFrozenImportance({ chainKey: sortChainKeyForSections, map: new Map() });
+    }
+  }, [frozenImportance, sortChainKeyForSections]);
+  /** 当前生效的冻结：只认记下时与当前同一条排序链的（用户点了排序，链变了，冻结即作废）。 */
+  const activeFrozenImportance = frozenImportance.chainKey === sortChainKeyForSections ? frozenImportance.map : null;
+  /** 排序口径的行：被冻结的场换成改之前的自评，其余原样（同一对象）。 */
+  const sortBasisInput = useMemo(() => (!activeFrozenImportance?.size ? displayRows : displayRows.map(row => {
+    const frozen = activeFrozenImportance.get(row.campaign.id);
+    return frozen == null || frozen === importanceValue(row.campaign)
+      ? row
+      : { ...row, campaign: { ...row.campaign, importance_weight: frozen } };
+  })), [displayRows, activeFrozenImportance]);
+  /** 按排序口径排好的行（分档、分组统计、交叉表都读它，组与列表顺序才对得上）。 */
+  const sortBasisRows = useMemo(
+    () => sortCampaignRows(sortBasisInput, sortChain),
+    [sortBasisInput, sortChain],
   );
+  /** 同一个顺序、换回真实的行：卡片、选择、批量下载读它，显示的是新自评。 */
+  const sortedRows = useMemo(() => {
+    if (sortBasisInput === displayRows) return sortBasisRows;
+    const real = new Map(displayRows.map(row => [row.campaign.id, row]));
+    return sortBasisRows.map(row => real.get(row.campaign.id) ?? row);
+  }, [sortBasisRows, sortBasisInput, displayRows]);
   /** 第一级的四分位分档（连续指标作第一级、链上不止一级时才有）：排序链芯片上标「分档」，悬停看档界。 */
-  const sortBinning = useMemo(() => resolveSortBinning(sortedRows, sortChain), [sortedRows, sortChain]);
+  const sortBinning = useMemo(() => resolveSortBinning(sortBasisRows, sortChain), [sortBasisRows, sortChain]);
   /** 第二级起每一级的作用（本级排了几场）：排序链芯片上的反馈。 */
-  const sortLevelEffects = useMemo(() => describeSortLevelEffects(sortedRows, sortChain), [sortedRows, sortChain]);
+  const sortLevelEffects = useMemo(() => describeSortLevelEffects(sortBasisRows, sortChain), [sortBasisRows, sortChain]);
   /** 【用户要求】多级排序之后的分组统计：排序链芯片双击 / 右键打开，表在 ⓘ 浮层顶部。 */
   const sortGroupStats = useMemo(
-    () => (sortChain.length > 1 ? summarizeSortGroups(sortedRows, sortChain) : []),
-    [sortedRows, sortChain],
+    () => (sortChain.length > 1 ? summarizeSortGroups(sortBasisRows, sortChain) : []),
+    [sortBasisRows, sortChain],
   );
   /**
    * 【用户要求】「分级分区之后，在众多战役之间开一个分区模块——现在看不出分级和模块化的界限」：
@@ -2245,7 +2293,6 @@ export default function JournalCampaignsPage() {
   }, [sortGroupStats, sortedRows]);
   /** 收起的分区：换了排序链就全部展开（组都变了）。 */
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
-  const sortChainKeyForSections = sortChainKey(sortChain);
   useEffect(() => { setCollapsedSections(new Set()); }, [sortChainKeyForSections]);
   const toggleSection = useCallback((id: string) => {
     setCollapsedSections(current => {
@@ -2278,8 +2325,8 @@ export default function JournalCampaignsPage() {
   );
   /** 【用户要求】第一级每一档里，后面每一级怎么分布：一级一张交叉表（字母 / 操作时间没法分档，为 null）。 */
   const sortCrossTabs = useMemo<(SortCrossTab | null)[]>(
-    () => sortChain.slice(1).map((_, index) => summarizeSortCrossTab(sortedRows, sortChain, index + 1)),
-    [sortedRows, sortChain],
+    () => sortChain.slice(1).map((_, index) => summarizeSortCrossTab(sortBasisRows, sortChain, index + 1)),
+    [sortBasisRows, sortChain],
   );
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
