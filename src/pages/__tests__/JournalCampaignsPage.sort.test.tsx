@@ -746,9 +746,9 @@ describe('JournalCampaignsPage sorting', () => {
       expect(priceButtons.map(node => node.dataset.campaignId)).toEqual(['best-pnl', 'newest', 'late-close', 'high-importance']);
       const priceLefts = priceButtons.map(node => Number.parseFloat(node.style.left));
       expect([...priceLefts].sort((a, b) => a - b)).toEqual(priceLefts);
-      // 分布里同样正绿负红、绿圆红菱
-      expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-series-token', 'loss');
-      expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-marker-shape', 'diamond');
+      // 【用户要求】颜色按这一场的盈亏比 b 分，不按横轴指标：Best PnL 涨跌幅 −10%、b 却为正 → 绿圆
+      expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-series-token', 'profit');
+      expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-marker-shape', 'circle');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-high-importance')).toHaveAttribute('data-series-token', 'profit');
       // 0 线用本指标的读法：不涨不跌，不是「盈亏平衡」；盈亏比专属的止损墙、右尾不出现
       const priceZero = screen.getByTestId('campaign-metric-break-even-mainPriceChangeDistribution');
@@ -779,15 +779,15 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('chart=mainPriceChangeDistribution');
       expect(screen.getByTestId('campaign-mainPriceChange-view-time')).toHaveAttribute('aria-pressed', 'true');
       expect(plotIds()).toEqual(['best-pnl', 'high-importance', 'late-close', 'newest']);
-      // 带方向：正绿负红，与盈亏比同一套（形状也跟着：绿圆、红菱）
-      expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-series-token', 'loss');
-      expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-marker-shape', 'diamond');
+      // 【用户要求】颜色按这一场的 b 分（形状也跟着：绿圆、红菱）：Best PnL 涨跌幅为负、b 为正 → 绿圆
+      expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-series-token', 'profit');
+      expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-marker-shape', 'circle');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChange-high-importance')).toHaveAttribute('data-series-token', 'profit');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChange-high-importance')).toHaveAttribute('data-marker-shape', 'circle');
       // 说明面板与其他图同一结构：纵轴 / 颜色 / 点位 / 参考线
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-mainPriceChange'));
       const priceGuide = screen.getByTestId('campaign-metric-guide-mainPriceChange');
-      for (const text of ['纵轴', '颜色', '点位', '参考线', 'Legs 表「涨跌幅」列', '绿色：涨跌幅 > 0', '红色：涨跌幅 < 0', '灰色零线']) {
+      for (const text of ['纵轴', '颜色', '点位', '参考线', 'Legs 表「涨跌幅」列', '绿色圆点：这一场盈亏比 b > 0', '红色菱形：这一场盈亏比 b < 0', '灰色零线']) {
         expect(priceGuide).toHaveTextContent(text);
       }
 
@@ -804,7 +804,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(plotIds()).toEqual(['best-pnl', 'high-importance', 'late-close']);
       // 点上的数与卡片同一个函数：High Importance 涨跌幅 +30%、预期回撤 10% → +3.00
       expect(Number(screen.getByTestId('campaign-metric-point-mainPriceEfficiencyDistribution-high-importance').dataset.metricValue)).toBeCloseTo(3, 6);
-      expect(screen.getByTestId('campaign-metric-point-mainPriceEfficiencyDistribution-best-pnl')).toHaveAttribute('data-series-token', 'loss');
+      expect(screen.getByTestId('campaign-metric-point-mainPriceEfficiencyDistribution-best-pnl')).toHaveAttribute('data-series-token', 'profit'); // 按 b 着色：倍数为负、b 为正
       expect(screen.getByTestId('campaign-metric-break-even-mainPriceEfficiencyDistribution-label')).toHaveTextContent('0.00 不涨不跌');
       expect(screen.getByTestId('campaign-metric-win-rate-mainPriceEfficiencyDistribution')).toHaveTextContent('顺向 67% (2/3)');
       // 算不出的场数照样写在图下脚注里
@@ -1309,8 +1309,8 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(drawdownGuideToggle);
     const drawdownGuide = screen.getByTestId('campaign-metric-guide-expectedDrawdownPct');
     expect(drawdownGuide).toHaveTextContent('占主力开仓价的百分比');
-    expect(drawdownGuide).toHaveTextContent('绿色：该战役最终盈利');
-    expect(drawdownGuide).toHaveTextContent('红色：该战役最终亏损');
+    expect(drawdownGuide).toHaveTextContent('绿色圆点：这一场盈亏比 b > 0（盈利）');
+    expect(drawdownGuide).toHaveTextContent('红色菱形：这一场盈亏比 b < 0（亏损）');
     expect(drawdownGuide).toHaveTextContent('0%');
     expect(drawdownGuide).toHaveTextContent('纵轴向下');
 

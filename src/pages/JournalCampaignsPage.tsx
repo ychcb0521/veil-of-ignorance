@@ -398,6 +398,16 @@ const ARITHMETIC_WIN_RATE_PCT = Math.round(ARITHMETIC_EXPECTANCY_WIN_RATE * 100)
 /** Eᵢ = 0 ⇔ bᵢ = (1 − P) ÷ P；P = 50% 时是 +1R。 */
 const ARITHMETIC_BREAK_EVEN_PAYOFF = `+${Number(((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) / ARITHMETIC_EXPECTANCY_WIN_RATE).toFixed(2))}R`;
 
+/**
+ * 【用户要求】散点颜色一律按这一场的盈亏比 b 的正负分（镜像止盈图另按 |b| ≤ 0.1 记持平，与它的柱子分档一致）：
+ * 纵 / 横轴是什么指标都一样，颜色只报「这一场最后是赚是亏」。与 CampaignMetricScatterPlot 的 signed / risk / importance 配色同序。
+ */
+const PAYOFF_SIGN_COLORS: CampaignMetricChartConfig['guide']['colors'] = [
+  { token: 'profit', label: '绿色圆点：这一场盈亏比 b > 0（盈利）。' },
+  { token: 'loss', label: '红色菱形：这一场盈亏比 b < 0（亏损）。' },
+  { token: 'neutral', label: '灰色空心圈：b = 0，或算不出 b（没有初始最大预期亏损、尚未结束）。' },
+];
+
 const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   {
     key: 'odds',
@@ -409,11 +419,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '每场战役的实际盈亏比 b，单位为 R。b = 已实现盈亏 ÷ 初始最大预期亏损；正数表示盈利，负数表示亏损。',
       point: '点越高，实际盈亏比越大；点越低，亏损相对初始风险越深。每个点代表一场具备有效风险分母的战役。',
-      colors: [
-        { token: 'profit', label: '绿色：b > 0，战役盈利。' },
-        { token: 'loss', label: '红色：b < 0，战役亏损。' },
-        { token: 'neutral', label: '灰色：b = 0，盈亏持平。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色零线：盈亏平衡线。',
         '黄色 -1R 虚线：实际亏损等于初始最大预期亏损；低于该线表示亏损超过原定风险边界。',
@@ -435,11 +441,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '落在该盈亏比附近的战役数量：点从底线向上堆叠，堆得越高，这一档 b 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: '每个点仍是一场战役，横向位置就是它的实际盈亏比 b，不考虑时间先后；同一档内的点按 b 从小到大自下而上排。',
-      colors: [
-        { token: 'profit', label: '绿色：b > 0，战役盈利。' },
-        { token: 'loss', label: '红色：b < 0，战役亏损。' },
-        { token: 'neutral', label: '灰色：b = 0，盈亏持平。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '琥珀色 -1R 虚线：止损墙，实际亏损等于初始最大预期亏损；墙左侧的点是止损滑点或超出原定风险的亏损。',
         '存在 b ≤ -10 时，额外显示黄色 -10R 归零线：按固定 10% 下注，1 + 0.1b ≤ 0。含等号的风险点用红色方点与黄色描边区分；这不是实际账户的强平判定。',
@@ -462,11 +464,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '以主力开仓价为 0%，向下显示到初始对冲 A/B 中有效风险边界的负回撤，占主力开仓价的百分比。数值越负，预设价格回撤空间越大。',
       point: '点越靠近顶部 0%，初始风险边界离开仓价越近；点越低，负回撤绝对值越大。',
-      colors: [
-        { token: 'profit', label: '绿色：该战役最终盈利。' },
-        { token: 'loss', label: '红色：该战役最终亏损。' },
-        { token: 'neutral', label: '灰色：盈亏持平或尚未结束。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['0% 顶线：无预期回撤；纵轴向下表示回撤加深。'],
     },
     missingValueLabel: '预期回撤',
@@ -489,11 +487,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       point: '每个点仍是一场战役；柱内按 |b| 从小到大自底向上码放，越往上这一档的战役盈亏越极端。'
         + '颜色报的是该战役最终盈亏，所以每根柱都读得出「这么紧 / 这么宽的止损，最后赚没赚到钱」。'
         + '悬停读预期回撤、它的倒数与 b，点击进入对应战役。',
-      colors: [
-        { token: 'profit', label: '绿色：该战役最终盈利。' },
-        { token: 'loss', label: '红色：该战役最终亏损。' },
-        { token: 'neutral', label: '灰色：盈亏持平或尚未结束。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
     },
     missingValueLabel: '预期回撤',
     colorMode: 'risk',
@@ -509,11 +503,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '该场战役在当前有效样本胜率下的算术期望，单位为 R。E = P(赢) × b − (1 − P(赢))。',
       point: '点越高，代表按当前胜率与本场实际盈亏比计算的期望越高；低于零表示算术期望为负。',
-      colors: [
-        { token: 'profit', label: '绿色：算术期望 > 0。' },
-        { token: 'loss', label: '红色：算术期望 < 0。' },
-        { token: 'neutral', label: '灰色：算术期望 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：正、负算术期望的分界。'],
     },
     missingValueLabel: '算术期望',
@@ -533,11 +523,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       yAxis: '落在该算术期望附近的战役数量：点从底线向上堆叠，堆得越高，这一档 Eᵢ 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: `每个点仍是一场战役，横向位置就是它的单场算术期望 Eᵢ = ${ARITHMETIC_WIN_RATE_PCT}% × bᵢ − ${100 - ARITHMETIC_WIN_RATE_PCT}%（单位 R，胜率统一取 ${ARITHMETIC_WIN_RATE_PCT}%），不考虑时间先后；同一档内的点按 Eᵢ 从小到大自下而上排。`
         + `胜率固定之后 Eᵢ 只是 bᵢ 的线性变换，分布形状与盈亏比分布一致、只是刻度不同：Eᵢ = 0R 对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}，Eᵢ = −1R 仍对应 bᵢ = −1R。`,
-      colors: [
-        { token: 'profit', label: '绿色：算术期望 > 0。' },
-        { token: 'loss', label: '红色：算术期望 < 0。' },
-        { token: 'neutral', label: '灰色：算术期望 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         `灰色 0R 竖线：盈亏平衡，正、负算术期望的分界（对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}）；摘要条的「正期望」是 Eᵢ > 0 的场数占比。`,
         METRIC_DISTRIBUTION_DENSITY_NOTE,
@@ -565,11 +551,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴直接读 Gᵢ——1.00 是本金不增不减。',
       point: '点越高，本场按同一下注比例换算出的资本增长越大；低于 1.00 的是亏损场（bᵢ 为负）。'
         + '固定 x 之后 Gᵢ 是 bᵢ 的线性变换，所以它的形状与盈亏比图一致——差别只在单位。',
-      colors: [
-        { token: 'profit', label: '绿色：Gᵢ > 1.00，本场让本金变大。' },
-        { token: 'loss', label: '红色：Gᵢ < 1.00，本场让本金变小。' },
-        { token: 'neutral', label: '灰色：Gᵢ = 1.00，不增不减。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色的 1.00 线：本金不增不减，线上为增长、线下为损耗。'],
     },
     missingValueLabel: '几何期望',
@@ -590,11 +572,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       point: '每个点仍是一场战役，横向按 Gᵢ 的对数排布，不考虑时间先后。'
         + '相同倍率变化占相同距离，例如 0.5 → 1 → 2 等距，方便比较本金减半与翻倍；'
         + 'Gᵢ = 0 在独立栏显示，不能只凭分布偏斜判断风控是否合格。',
-      colors: [
-        { token: 'profit', label: '绿色：Gᵢ > 1.00，本场让本金变大。' },
-        { token: 'loss', label: '红色：Gᵢ < 1.00，本场让本金变小。' },
-        { token: 'neutral', label: '灰色：Gᵢ = 1.00，不增不减。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色 1.00 竖线：盈亏分界，线右为增长、线左为损耗。',
         '灰色曲线：在 ln(Gᵢ) 空间计算核密度，再换算成「每个对数档的期望场数」，与点列共用场数轴；归零点不纳入曲线。',
@@ -611,10 +589,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '自评时序',
     guide: {
       yAxis: '战役自评，五点量表：1 非常差、2 很差、3 一般、4 很好、5 非常好；未评为 0。纵坐标数值就是自评分。',
-      point: '点越高，代表这场战役自评越好；点位只反映人工自评，不代表盈亏或风险大小。',
-      colors: [
-        { token: 'importance', label: '金色：统一表示自评；颜色不区分盈亏。' },
-      ],
+      point: '点越高，代表这场战役自评越好；点位只反映人工自评，颜色才报这一场的盈亏（按 b 的正负）。',
+      colors: PAYOFF_SIGN_COLORS,
     },
     missingValueLabel: '自评',
     colorMode: 'importance',
@@ -677,11 +653,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '每场战役的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价（开平价与详情页 Legs 表「涨跌幅」列同源）。',
       point: '点越高，主力吃到的价格行情越大；低于 0% 表示价格朝主力的反方向走。每个点代表一场主力已平仓的战役。',
-      colors: [
-        { token: 'profit', label: '绿色：涨跌幅 > 0，价格朝主力方向走。' },
-        { token: 'loss', label: '红色：涨跌幅 < 0，价格朝主力反方向走。' },
-        { token: 'neutral', label: '灰色：涨跌幅 = 0，开平价相同。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：价格不涨不跌的分界。'],
     },
     missingValueLabel: '主力涨跌幅',
@@ -700,11 +672,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '落在该涨跌幅附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨跌幅出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: '每个点仍是一场主力已平仓的战役，横向位置就是这场战役的涨跌幅（%，按主力方向计，空单价格跌了为正；开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价；开平价与 Legs 表「涨跌幅」列同源），不考虑时间先后；同一档内的点按涨跌幅从小到大自下而上排。',
-      colors: [
-        { token: 'profit', label: '绿色：涨跌幅 > 0，价格朝主力方向走。' },
-        { token: 'loss', label: '红色：涨跌幅 < 0，价格朝主力反方向走。' },
-        { token: 'neutral', label: '灰色：涨跌幅 = 0，开平价相同。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色 0% 竖线：价格不涨不跌的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨跌幅 > 0 的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
@@ -731,11 +699,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤，单位为倍：价格走出了几个「预期回撤」。+3.00 表示主力吃到的行情是入场到对冲边界距离的 3 倍。',
       point: '点越高，同样的风险距离换来的价格行情越大；低于 0 表示价格朝主力反方向走。每个点代表一场主力已平仓、且算得出预期回撤的战役。',
-      colors: [
-        { token: 'profit', label: '绿色：涨跌幅倍数 > 0，价格朝主力方向走。' },
-        { token: 'loss', label: '红色：涨跌幅倍数 < 0，价格朝主力反方向走。' },
-        { token: 'neutral', label: '灰色：涨跌幅倍数 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：正、负涨跌幅倍数的分界。'],
     },
     missingValueLabel: '涨跌幅倍数',
@@ -754,11 +718,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '落在该涨跌幅倍数附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨跌幅倍数出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: '每个点仍是一场战役，横向位置就是它的涨跌幅倍数（= 主力涨跌幅 ÷ 预期回撤：价格走出了几个「预期回撤」），不考虑时间先后；同一档内的点按涨跌幅倍数从小到大自下而上排。只画主力已平仓、且算得出预期回撤的战役。',
-      colors: [
-        { token: 'profit', label: '绿色：涨跌幅倍数 > 0，价格朝主力方向走。' },
-        { token: 'loss', label: '红色：涨跌幅倍数 < 0，价格朝主力反方向走。' },
-        { token: 'neutral', label: '灰色：涨跌幅倍数 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色 0.00 竖线：正、负涨跌幅倍数的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨跌幅倍数 > 0 的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
@@ -785,11 +745,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '加仓效用 = 盈亏比 b ÷ 涨跌幅倍数，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
       point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）且涨跌幅倍数为正的战役，其余不进图。',
-      colors: [
-        { token: 'profit', label: '绿色：加仓效用 > 0，本场盈亏比为正。' },
-        { token: 'loss', label: '红色：加仓效用 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
-        { token: 'neutral', label: '灰色：加仓效用 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
     },
     missingValueLabel: '加仓效用',
@@ -808,11 +764,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '落在该加仓效用附近的战役数量：点从底线向上堆叠，堆得越高，这一档加仓效用出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: '每个点仍是一场做过加仓、且涨跌幅倍数为正的战役，横向位置就是它的加仓效用（倍，= 盈亏比 b ÷ 涨跌幅倍数），不考虑时间先后；同一档内的点按加仓效用从小到大自下而上排。没有加仓、或涨跌幅倍数不为正的战役不进图。',
-      colors: [
-        { token: 'profit', label: '绿色：加仓效用 > 0，本场盈亏比为正。' },
-        { token: 'loss', label: '红色：加仓效用 < 0，主力涨了、本场却亏了（盈亏比为负）。' },
-        { token: 'neutral', label: '灰色：加仓效用 = 0。' },
-      ],
+      colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓效用约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓效用 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
         '灰色 0.00 竖线：盈亏平衡。进图的战役涨跌幅倍数都为正，加仓效用与盈亏比同号：线左是主力涨了、本场却亏了；摘要条的「盈利」是加仓效用 > 0 的场数占比。',

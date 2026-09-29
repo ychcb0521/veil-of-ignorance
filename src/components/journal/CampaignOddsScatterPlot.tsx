@@ -413,7 +413,7 @@ function median(values: number[]) {
 function seriesShapeAt(index: number, mode: CampaignMetricColorMode): ScatterMarkShape {
   // risk 模式过去所有点都是圆：绿红在 deutan 下 ΔE 只有 7.9，属于「必须配次编码」的地板band，
   // 少了形状就是硬性不合规，因此和 signed 用同一套形状。
-  if (mode === 'signed' || mode === 'risk' || mode === 'pnlBand') {
+  if (mode === 'signed' || mode === 'risk' || mode === 'importance' || mode === 'pnlBand') {
     return (['circle', 'diamond', 'ring'] as const)[index] ?? 'circle';
   }
   return 'circle';
@@ -421,7 +421,7 @@ function seriesShapeAt(index: number, mode: CampaignMetricColorMode): ScatterMar
 
 /** 点位落到 guide.colors 的哪一档；返回的是下标，颜色与形状都由它派生。 */
 function metricSeriesIndex(
-  value: number,
+  _value: number,
   mode: CampaignMetricColorMode,
   pnl?: number | null,
   payoffRatio?: number | null,
@@ -433,19 +433,15 @@ function metricSeriesIndex(
     if (outcome === 'loss') return 1;
     return 2;
   }
-  if (mode === 'risk') {
-    // 预期回撤的纵轴只表达风险距离，方向由战役已实现盈亏决定。
-    if (pnl != null && Number.isFinite(pnl)) {
-      if (pnl > 0) return 0;
-      if (pnl < 0) return 1;
-    }
-    return 2;
-  }
-  if (mode === 'downside' || mode === 'upside' || mode === 'quality' || mode === 'importance') {
+  if (mode === 'downside' || mode === 'upside' || mode === 'quality') {
     return 0;
   }
-  if (value > 0) return 0;
-  if (value < 0) return 1;
+  // 【用户要求】散点颜色一律按这一场的盈亏比 b 的正负分：绿 b > 0、红 b < 0、灰 b = 0 或算不出。
+  // 纵 / 横轴是什么指标都一样（涨跌幅倍数为正、b 却为负的战役是红点），颜色只报「这一场最后是赚是亏」。
+  if (payoffRatio != null && Number.isFinite(payoffRatio)) {
+    if (payoffRatio > 0) return 0;
+    if (payoffRatio < 0) return 1;
+  }
   return 2;
 }
 

@@ -199,3 +199,26 @@ describe('通用连续指标的分布图', () => {
     expect(guide).toHaveTextContent('档网格锚在 0 上，涨跌分界两侧的点不会混进同一档');
   });
 });
+
+describe('【用户要求】散点颜色按这一场的盈亏比 b 的正负分，不按图上的指标', () => {
+  it('指标为正、b 为负 → 红菱；指标为负、b 为正 → 绿圆；算不出 b → 灰圈', () => {
+    render(<CampaignMetricScatterPlot
+      points={[
+        { campaignId: 'up-loss', title: '涨了却亏', symbol: 'TESTUSDT', value: 0.04, sequence: 1, operationTime: 1_700_000_000_000, pnl: -2, payoffRatio: -0.02 },
+        { campaignId: 'down-win', title: '跌了却赚', symbol: 'TESTUSDT', value: -0.5, sequence: 2, operationTime: 1_700_086_400_000, pnl: 30, payoffRatio: 1.2 },
+        { campaignId: 'no-b', title: '算不出 b', symbol: 'TESTUSDT', value: 2, sequence: 3, operationTime: 1_700_172_800_000, pnl: null, payoffRatio: null },
+      ]}
+      metricKey="mainPriceEfficiency" metricLabel="涨跌幅倍数" seriesLabel="涨跌幅倍数时序"
+      axisLabel="涨跌幅倍数" missingValueLabel="涨跌幅倍数"
+      formatValue={formatEfficiency}
+      guide={{ yAxis: '倍数', point: '每点一场。', colors: SIGNED_COLORS }}
+      onSelectCampaign={vi.fn()}
+    />);
+    const point = (id: string) => screen.getByTestId(`campaign-metric-point-mainPriceEfficiency-${id}`);
+    expect(point('up-loss')).toHaveAttribute('data-series-token', 'loss');
+    expect(point('up-loss')).toHaveAttribute('data-marker-shape', 'diamond');
+    expect(point('down-win')).toHaveAttribute('data-series-token', 'profit');
+    expect(point('down-win')).toHaveAttribute('data-marker-shape', 'circle');
+    expect(point('no-b')).toHaveAttribute('data-series-token', 'neutral');
+  });
+});

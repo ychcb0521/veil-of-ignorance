@@ -77,7 +77,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
 
   it('散点图清单与颜色说明包含涨跌幅、涨跌幅倍数、加仓效用', () => {
     expect(guide).toContain('盈亏比、预期回撤、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望、自评、镜像止盈都各自配有一张散点图');
-    expect(guide).toContain('本身带盈亏方向的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）按数值正负着色');
+    // 【用户要求】颜色一律按这一场的 b 的正负分，不按图上的指标
+    expect(guide).toContain('<strong>颜色一律按这一场的盈亏比 b 的正负分</strong>');
     expect(guide).toContain('没有加仓、或涨跌幅倍数不为正的战役不进加仓效用图');
     // 页面上确实给三项注册了散点图
     for (const key of ['mainPriceChange', 'mainPriceEfficiency', 'addEfficiency']) {
