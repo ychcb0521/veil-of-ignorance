@@ -1601,6 +1601,38 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-mirrorTp-view-time')).toHaveAttribute('aria-pressed', 'false');
   }, 15_000);
 
+  it('【用户要求】自评默认看六档柱状散点图，可切回时序', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns?sort=importance&direction=desc']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          <Route path="/journal/campaigns/:id" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.contextMenu(await screen.findByTestId('campaign-sort-importance'));
+    fireEvent.click(await screen.findByTestId('campaign-importance-chart-toggle'));
+
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'importanceBars'));
+    expect(screen.getByTestId('campaign-importance-view-bars')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('campaign-importance-view-time')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=importanceBars');
+
+    const summary = screen.getByTestId('campaign-metric-summary-importanceBars');
+    for (const label of ['0 未评', '1 非常差', '2 很差', '3 一般', '4 很好', '5 非常好']) {
+      expect(summary).toHaveTextContent(label);
+    }
+    for (const score of [0, 1, 2, 3, 4, 5]) {
+      expect(screen.getByTestId(`campaign-metric-bar-count-importanceBars-${score}`)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId('campaign-importance-view-time'));
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
+      .toHaveAttribute('data-metric-key', 'importance'));
+  }, 15_000);
+
   it('散点图模式下点击排序项会跳到对应指标图，并保留排序切换', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?sort=captureRate&direction=desc&chart=oddsDistribution']}>

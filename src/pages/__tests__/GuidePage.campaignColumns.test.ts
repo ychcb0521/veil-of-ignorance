@@ -81,7 +81,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('<strong>颜色一律按这一场的盈亏比 b 的正负分</strong>');
     expect(guide).toContain('没有加仓、或涨跌幅倍数显示为 0.00 的战役不进加仓效用图');
     // 【用户要求】涨跌幅倍数为负的也算、分布图上下镜像
-    expect(guide).toContain('<strong>涨跌幅倍数为负的也算，符号照除</strong>');
+    expect(guide).toContain('<strong>涨跌幅倍数为负的也算，分母取绝对值、正负跟随 b</strong>');
     expect(guide).toContain('<strong>加仓效用分布图上下镜像</strong>');
     // 页面上确实给三项注册了散点图
     for (const key of ['mainPriceChange', 'mainPriceEfficiency', 'addEfficiency']) {
@@ -91,10 +91,12 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     }
   });
   it('【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布，可切回时序；加仓效用另有 1.00 参照线', () => {
-    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图、镜像止盈与预期回撤默认展开的是柱状图</strong>');
+    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图；镜像止盈、预期回撤与自评默认展开的是柱状图</strong>');
     // 【用户要求】预期回撤柱状按倒数 100 ÷ D% 等间距分档，默认打开。
     expect(guide).toContain('<strong>倒数 100 ÷ D%</strong> 等间距分档');
     expect(page).toContain("expectedDrawdownPct: 'expectedDrawdownPctBars'");
+    expect(page).toContain("importance: 'importanceBars'");
+    expect(guide).toContain('<strong>自评默认看柱状。</strong>');
     expect(guide).toContain('<strong>涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布</strong>');
     expect(guide).toContain('<strong>琥珀色 1.00 虚线</strong>「加仓没有额外放大」');
     expect(guide).toContain('用面板右上角的「时序 | 分布」切回时序');

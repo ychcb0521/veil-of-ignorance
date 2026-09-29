@@ -509,7 +509,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     ...[
       'oddsDistribution', 'expectedDrawdownPct',
       'arithmeticExpectancy', 'arithmeticExpectancyDistribution',
-      'geometricExpectancy', 'geometricExpectancyDistribution',
+      'geometricExpectancy', 'geometricExpectancyDistribution', 'importance', 'importanceBars',
       'mirrorTp', 'mirrorTpBars',
       'mainPriceChange', 'mainPriceChangeDistribution',
       'mainPriceEfficiency', 'mainPriceEfficiencyDistribution',
