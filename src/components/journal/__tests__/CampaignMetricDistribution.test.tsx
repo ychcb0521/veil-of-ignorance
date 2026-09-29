@@ -222,3 +222,35 @@ describe('【用户要求】散点颜色按这一场的盈亏比 b 的正负分�
     expect(point('no-b')).toHaveAttribute('data-series-token', 'neutral');
   });
 });
+
+describe('【用户要求】加仓效用分布：涨跌幅倍数为负的战役从 0 线往下镜像堆', () => {
+  it('stackBelow 的点画在 0 线下方、上下各有一条密度曲线、下半轴刻度写场数', () => {
+    const values = [0.4, 0.8, 1.1, 1.3, 1.6, 2.2, 0.9, 1.2];
+    render(<CampaignMetricScatterPlot
+      points={values.map((value, index) => ({
+        campaignId: `c${index}`, title: `战役 ${index}`, symbol: 'TESTUSDT', value, sequence: index + 1,
+        operationTime: 1_700_000_000_000 + index * 86_400_000,
+        // 后三场涨跌幅倍数为负：b 与 η 都为负，读数为正，从 0 线往下堆
+        pnl: index >= 5 ? -value : value, payoffRatio: index >= 5 ? -value : value, stackBelow: index >= 5,
+      }))}
+      metricKey="addEfficiencyDistribution" metricLabel="加仓效用分布" seriesLabel="加仓效用分布"
+      axisLabel="加仓效用" missingValueLabel="加仓效用" view="distribution" formatValue={formatEfficiency}
+      guide={{ yAxis: '场数', point: '每点一场。', colors: SIGNED_COLORS }}
+      distributionSpec={ADD_SPEC}
+      onSelectCampaign={vi.fn()}
+    />);
+    const top = (id: string) => Number.parseFloat(screen.getByTestId(`campaign-metric-point-addEfficiencyDistribution-${id}`).style.top);
+    const zeroTick = document.querySelector('[data-grid-value="0"]');
+    expect(zeroTick).not.toBeNull();
+    // 往上堆的都在往下堆的上方（top% 越小越靠上）
+    const upTops = ['c0', 'c1', 'c2', 'c3', 'c4'].map(top);
+    const downTops = ['c5', 'c6', 'c7'].map(top);
+    expect(Math.max(...upTops)).toBeLessThan(Math.min(...downTops));
+    // 颜色仍按 b：往下堆的三场 b 为负 → 红菱
+    expect(screen.getByTestId('campaign-metric-point-addEfficiencyDistribution-c6')).toHaveAttribute('data-series-token', 'loss');
+    // 两条密度曲线，下半轴有负的网格值
+    expect(screen.getByTestId('campaign-metric-density-curve-addEfficiencyDistribution')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-metric-density-curve-below-addEfficiencyDistribution')).toBeInTheDocument();
+    expect(document.querySelector('[data-grid-value^="-"]')).not.toBeNull();
+  });
+});

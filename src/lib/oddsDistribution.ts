@@ -207,6 +207,8 @@ export function kdeCountPath(
   domain: { min: number; max: number },
   scale: ScatterStackScale,
   bandwidth = silvermanBandwidth(values),
+  /** -1：画在 0 线下方（镜像堆叠那一侧），场数取负交给 countY。 */
+  direction: 1 | -1 = 1,
 ) {
   const finite = values.filter(Number.isFinite);
   if (finite.length === 0) return '';
@@ -220,7 +222,7 @@ export function kdeCountPath(
   samples.push(end);
 
   return samples.map((x, index) => {
-    const count = density(x) * finite.length * scale.binWidth;
+    const count = direction * density(x) * finite.length * scale.binWidth;
     const px = scale.x(x).toFixed(2);
     const py = scale.countY(count).toFixed(2);
     return `${index === 0 ? 'M' : 'L'} ${px} ${py}`;

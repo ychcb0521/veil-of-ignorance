@@ -842,11 +842,11 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-break-even-addEfficiencyDistribution-label')).toHaveTextContent('0.00 盈亏平衡');
       expect(Number(screen.getByTestId('campaign-metric-break-even-addEfficiencyDistribution').getAttribute('x1')))
         .toBeLessThan(Number(addReference.getAttribute('x1')));
-      expect(screen.getByTestId('campaign-metric-win-rate-addEfficiencyDistribution')).toHaveTextContent('盈利 100% (1/1)');
+      expect(screen.getByTestId('campaign-metric-win-rate-addEfficiencyDistribution')).toHaveTextContent('同号 100% (1/1)');
       expect(screen.getByTestId('campaign-metric-reference-share-addEfficiencyDistribution-1')).toHaveTextContent(/放大（> 1） (0|100)% \([01]\/1\)/);
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiencyDistribution'));
       const addGuide = screen.getByTestId('campaign-metric-guide-addEfficiencyDistribution');
-      for (const text of ['盈亏分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：加仓没有额外放大', '没有加仓、或涨跌幅倍数不为正的战役不进图']) {
+      for (const text of ['盈亏分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：加仓没有额外放大', '没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图', '涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆']) {
         expect(addGuide).toHaveTextContent(text);
       }
       // 时序那张图原样保留：1 仍只是读数参照、不画线
@@ -854,7 +854,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'addEfficiency');
       expect(screen.queryByTestId('campaign-metric-reference-addEfficiency-1')).toBeNull();
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiency'));
-      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('且涨跌幅倍数为正的战役，其余不进图');
+      expect(screen.getByTestId('campaign-metric-guide-addEfficiency')).toHaveTextContent('涨跌幅倍数为负的也画，读数照 b ÷ η 带符号除');
 
       // 散点图开着时点排序按钮：排序照改，图跟着切到这一项——落在它的默认视图（分布）
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));

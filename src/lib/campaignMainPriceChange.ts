@@ -270,8 +270,9 @@ export function computeMainPriceEfficiency(
  * 大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情。
  * payoffRatio 是 b 本身（倍数，不是百分数）。
  *
- * 【用户要求】门槛：只在涨跌幅倍数**为正**时算（按显示到两位小数的值判，显示 0.00 的不算）。
- * 涨跌幅倍数为负时，亏损战役负负得正会排到最前；接近 0 时分母太小，主力几乎没动也会被放大成十几倍——两种读数都没有意义。
+ * 【用户要求】涨跌幅倍数为正、为负都算，符号照除（b ÷ η）：η 为负、b 为负（价格逆行、本场亏损）时读数为正，
+ * 它的大小同样是「这段行情被放大成了几倍的 R」；分布图里 η 为负的点从 0 线往下镜像堆，与 η 为正的分开读。
+ * 只有涨跌幅倍数显示为 0.00（按两位小数判）时不算：分母太小，主力几乎没动也会被放大成十几倍。
  * 「只算做过加仓的战役」由调用方用 campaignHasMainAdd 另判。
  */
 export function computeAddEfficiency(
@@ -280,7 +281,7 @@ export function computeAddEfficiency(
 ): number | null {
   if (payoffRatio == null || !Number.isFinite(payoffRatio)) return null;
   if (mainPriceEfficiency == null || !Number.isFinite(mainPriceEfficiency)) return null;
-  if (!(Number(mainPriceEfficiency.toFixed(2)) > 0)) return null;
+  if (Number(mainPriceEfficiency.toFixed(2)) === 0) return null;
   const value = payoffRatio / mainPriceEfficiency;
   return Number.isFinite(value) ? value : null;
 }

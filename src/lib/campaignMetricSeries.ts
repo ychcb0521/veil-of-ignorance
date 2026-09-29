@@ -15,7 +15,8 @@ export type CampaignMetricSeriesInput = {
    * 与 value 无关：像镜像止盈这种只有四个档位的指标，点上读不出赚亏了多少个 R，
    * 提示框里补一个 b 才能就地判断这一档到底值不值。null = 无有效 L。
    */
-  payoffRatio?: number | null;
+  payoffRatio?: number | null;  /** 分布图里从 0 线往下堆（镜像），见 CampaignMetricPoint.stackBelow。 */
+  stackBelow?: boolean;
 };
 
 export type CampaignMetricPoint = {
@@ -29,6 +30,8 @@ export type CampaignMetricPoint = {
   pnl?: number | null;
   /** 战役实际盈亏比 b；null / undefined = 无有效初始最大预期亏损。 */
   payoffRatio?: number | null;
+  /** 分布图里从 0 线往下堆（镜像）：加仓效用图里涨跌幅倍数为负的战役。 */
+  stackBelow?: boolean;
 };
 
 export type CampaignMetricSeries = {

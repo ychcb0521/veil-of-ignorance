@@ -689,6 +689,8 @@ export function CampaignMetricScatterPlot({
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
         stackGroup: drawdownBars ? String(drawdownStackOrder(point)) : undefined,
+        // 【用户要求】加仓效用分布：涨跌幅倍数为负的战役从 0 线往下镜像堆
+        stackBelow: distribution && !geometricDistribution && point.stackBelow === true ? true : undefined,
         dataAttrs: {
           'data-campaign-id': point.campaignId,
           'data-metric-key': metricKey,
@@ -700,7 +702,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [barModel, colorMode, drawdownBars, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
+    [barModel, colorMode, distribution, drawdownBars, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -789,19 +791,46 @@ export function CampaignMetricScatterPlot({
     ];
   }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution, genericSpec, genericReferences]);
 
-  const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => (
-    <path
-      data-testid={`campaign-metric-density-curve-${metricKey}`}
-      d={kdeCountPath(
-        geometricDist?.values ?? dist.values,
-        geometricDist?.domain ?? dist.domain,
-        scale,
-        geometricDist?.bandwidth ?? dist.bandwidth,
-      )}
-      fill="none"
-      style={{ stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinejoin: 'round', strokeLinecap: 'round' }}
-    />
-  ) : undefined), [dist, geometricDist, metricKey]);
+  /** 镜像堆叠（加仓效用里涨跌幅倍数为负的战役）：往下那一侧的数值，密度曲线另画一条在 0 线下方。 */
+  const mirroredValues = useMemo(() => (
+    dist && !geometricDist ? dist.sortedPoints.filter(point => point.stackBelow === true).map(point => point.value) : []
+  ), [dist, geometricDist]);
+  const densityOverlay = useMemo(() => (dist ? (scale: ScatterStackScale) => {
+    const curveStyle = { stroke: 'var(--chart-ink-secondary)', strokeWidth: 2, strokeLinejoin: 'round' as const, strokeLinecap: 'round' as const };
+    if (mirroredValues.length === 0) {
+      return (
+        <path
+          data-testid={`campaign-metric-density-curve-${metricKey}`}
+          d={kdeCountPath(
+            geometricDist?.values ?? dist.values,
+            geometricDist?.domain ?? dist.domain,
+            scale,
+            geometricDist?.bandwidth ?? dist.bandwidth,
+          )}
+          fill="none"
+          style={curveStyle}
+        />
+      );
+    }
+    // 两侧各自一条：上方是往上堆的那批、下方是镜像的那批，带宽共用整体的（两条曲线同一把尺子）
+    const upperValues = dist.sortedPoints.filter(point => point.stackBelow !== true).map(point => point.value);
+    return (
+      <>
+        <path
+          data-testid={`campaign-metric-density-curve-${metricKey}`}
+          d={kdeCountPath(upperValues, dist.domain, scale, dist.bandwidth)}
+          fill="none"
+          style={curveStyle}
+        />
+        <path
+          data-testid={`campaign-metric-density-curve-below-${metricKey}`}
+          d={kdeCountPath(mirroredValues, dist.domain, scale, dist.bandwidth, -1)}
+          fill="none"
+          style={curveStyle}
+        />
+      </>
+    );
+  } : undefined), [dist, geometricDist, metricKey, mirroredValues]);
 
   const yAxis = useMemo<ScatterYAxis>(() => ({
     min: domain.min,

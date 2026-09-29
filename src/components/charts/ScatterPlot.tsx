@@ -46,6 +46,8 @@ export type ScatterPoint = {
   dataAttrs?: Record<string, string | number | undefined>;
   /** 类目柱状：同一列里换组时另起一行（见 columnStackLayout 的 group）。 */
   stackGroup?: string;
+  /** 分布堆叠：从 0 线往下堆（镜像，见 stackLayout 的 below）。 */
+  stackBelow?: boolean;
 };
 
 export type ScatterTick = {
@@ -153,7 +155,7 @@ type PlacedPoint = ScatterPoint & {
   series: ScatterSeries;
 };
 
-type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number; ids: string[]; warning?: string };
+type StackOverflowGlyph = { bin: number; cx: number; cy: number; yPct: number; count: number; ids: string[]; warning?: string; direction?: 'up' | 'down' };
 
 type StackInfo = {
   pitchY: number;
@@ -165,6 +167,10 @@ type StackInfo = {
   tallest: number;
   requiredPlotHeight: number;
   overflow: StackOverflowGlyph[];
+  /** 0 线的像素 y（往上堆的底线）；不镜像时是绘图区底边。 */
+  baselineY: number;
+  /** 镜像堆叠时 0 线下方的行数；不镜像时 0。 */
+  rowsBelow: number;
 };
 
 /** 场数轴的盒子最高撑到这里（44rem）：再高就让最高一档合成一个三角并在脚注报数。 */
@@ -400,6 +406,8 @@ export function ScatterPlot({
           tallest: result.tallest,
           requiredPlotHeight: result.requiredPlotHeight,
           overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids }) => ({ bin, cx, cy, yPct, count: n, ids })),
+          baselineY: PLOT_INSET.top + plotHeight,
+          rowsBelow: 0,
         } as StackInfo,
       };
     }
@@ -408,7 +416,7 @@ export function ScatterPlot({
       // 硬边界两侧不能混档；窄屏仅在必要时扩展轨道，保持点距与真实线性比例。
       const contentWidth = Math.max(trackWidth,
         minimumBoundaryPlotWidth(xAxis.min, xAxis.max, xAxis.boundaries) + numericLeft + PLOT_INSET.right);
-      const result = stackLayout(points.map(point => ({ id: point.id, x: point.x })), {
+      const result = stackLayout(points.map(point => ({ id: point.id, x: point.x, below: point.stackBelow })), {
         xMin: xAxis.min,
         xMax: xAxis.max,
         left: numericLeft,
@@ -445,10 +453,12 @@ export function ScatterPlot({
           binPx: result.binPx,
           tallest: result.tallest,
           requiredPlotHeight: result.requiredPlotHeight,
-          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids }) => ({
-            bin, cx, cy, yPct, count: n, ids,
+          overflow: result.overflow.map(({ bin, cx, cy, yPct, count: n, ids, direction }) => ({
+            bin, cx, cy, yPct, count: n, ids, direction,
             warning: ids.map(id => byId.get(id)?.warning).find(Boolean),
           })),
+          baselineY: result.baselineY,
+          rowsBelow: result.rowsBelow,
         } as StackInfo,
       };
     }
@@ -555,9 +565,11 @@ export function ScatterPlot({
   const renderAxis = useMemo<ScatterYAxis>(() => {
     if (!stack || yAxis.mode !== 'count') return valueYAxis ?? { min: 0, max: 1, ticks: [] };
     // 一行码 perRow 场时，刻度必须同比放大：不然「20」这条线读出来会少算 perRow 倍。
-    const max = (plotHeight / stack.pitchY) * stack.perRow;
-    const capacity = stack.rowsFit * stack.perRow;
-    const step = countTickStep(capacity);
+    // 镜像堆叠：0 线下方 rowsBelow 行是负半轴，刻度写场数的绝对值（往下数第 c 个点）。
+    const below = (stack.rowsBelow ?? 0) * stack.perRow;
+    const max = (plotHeight / stack.pitchY) * stack.perRow - below;
+    const capacity = stack.rowsFit * stack.perRow - below;
+    const step = countTickStep(stack.rowsFit * stack.perRow);
     const ticks: ScatterTick[] = [];
     for (let value = Math.floor(capacity / step) * step; value >= 0; value -= step) {
       const topmost = value + step > capacity;
@@ -570,7 +582,17 @@ export function ScatterPlot({
         gridDataAttrs: { 'data-grid-value': value },
       });
     }
-    return { min: 0, max, ticks };
+    for (let value = step; value <= below; value += step) {
+      ticks.push({
+        value: -value,
+        label: value + step > below && yAxis.unit ? `${value} ${yAxis.unit}` : String(value),
+        testId: yAxis.tickTestId,
+        dataAttrs: { 'data-tick-value': -value },
+        gridTestId: yAxis.gridTestId,
+        gridDataAttrs: { 'data-grid-value': -value },
+      });
+    }
+    return { min: -below, max, ticks };
   }, [plotHeight, stack, valueYAxis, yAxis]);
   const yFraction = (value: number) => fractionOf(renderAxis, value);
   const xFraction = (value: number) => {
@@ -822,7 +844,8 @@ export function ScatterPlot({
                     <g aria-hidden="true" clipPath={`url(#${clipPathId})`}>
                       {overlay({
                         x: value => lineLeft + xFraction(value) * (lineRight - lineLeft),
-                        countY: count => PLOT_INSET.top + plotHeight - (count / stack.perRow) * stack.pitchY,
+                        // 负的场数画到 0 线下方（镜像堆叠那一侧的密度曲线）
+                        countY: count => stack.baselineY - (count / stack.perRow) * stack.pitchY,
                         binWidth: stack.binWidth,
                         binPx: stack.binPx,
                         pitchY: stack.pitchY,
@@ -889,10 +912,11 @@ export function ScatterPlot({
                   {stack?.overflow.map(glyph => (
                     // 图高放不下的那一截：一档一个朝上的三角，不把 N 个点叠在同一像素上。
                     <path
-                      key={`overflow-${glyph.bin}`}
+                      key={`overflow-${glyph.bin}-${glyph.direction ?? 'up'}`}
                       data-testid="chart-stack-overflow"
                       data-overflow-count={glyph.count}
-                      d={clampedChevronPath(glyph.cx, glyph.cy, 'up')}
+                      data-overflow-direction={glyph.direction ?? 'up'}
+                      d={clampedChevronPath(glyph.cx, glyph.cy, glyph.direction === 'down' ? 'down' : 'up')}
                       paintOrder="stroke"
                       style={{ fill: glyph.warning ? seriesTokenVar('loss') : 'var(--chart-ink-muted)', stroke: glyph.warning ? CHART_THRESHOLD_VAR : CHART_SURFACE_VAR, strokeWidth: MARK_RING_W }}
                     />
@@ -939,7 +963,7 @@ export function ScatterPlot({
                 <div className="absolute left-0" style={{ top: PLOT_INSET.top, bottom: PLOT_INSET.bottom, width: contentWidth }}>
                   {stack?.overflow.map(glyph => (
                     <button
-                      key={`overflow-${glyph.bin}`}
+                      key={`overflow-${glyph.bin}-${glyph.direction ?? 'up'}`}
                       type="button"
                       ref={node => {
                         if (node) overflowButtonsRef.current.set(glyph.ids[0], node);

@@ -49,7 +49,7 @@ const ROWS = [
   makeSortRow({ id: 'tia', title: 'TIA 二次加仓', pnl: 210, time: '2026-09-08T08:00:00.000Z', add: true, pcr: 210, dd: 1.4, mpc: 2.8 }),
   // 未实现·亏损：都算不出加仓效用
   makeSortRow({ id: 'op', title: 'OP 追高', pnl: -100, time: '2026-09-06T08:00:00.000Z', pcr: -100, dd: 2, mpc: -2 }),
-  makeSortRow({ id: 'apt', title: 'APT 抄底', pnl: -130, time: '2026-09-10T08:00:00.000Z', add: true, pcr: -130, dd: 2.5, mpc: -1.5 }),
+  makeSortRow({ id: 'apt', title: 'APT 抄底', pnl: -130, time: '2026-09-10T08:00:00.000Z', add: true, pcr: -130, dd: 2.5, mpc: 0 }),
 ];
 state.list = {
   rows: ROWS, setRows: vi.fn(), complete: true, refreshing: false, loaded: ROWS.length, total: ROWS.length,

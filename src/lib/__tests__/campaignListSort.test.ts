@@ -39,7 +39,7 @@ const ids = (rows: readonly CampaignSortRow[]) => rows.map(row => row.campaign.i
 
 /**
  * 与 harness 同一套战役：镜像止盈三档（已实现·盈利 / 已实现·亏损 / 未实现）各有多场，
- * 同一档里有的有加仓效用、有的没有（没加仓，或涨跌幅倍数不为正）。
+ * 同一档里有的有加仓效用、有的没有（没加仓，或涨跌幅倍数显示为 0.00）。
  * 加仓效用 = 盈亏比 ÷（涨跌幅 ÷ 预期回撤）。
  */
 const ROWS = [
@@ -55,9 +55,9 @@ const ROWS = [
   makeSortRow({ id: 'link', pnl: 120, add: true, pcr: 120, dd: 3, mpc: 2 }),
   makeSortRow({ id: 'arb', pnl: 80, pcr: 80, dd: 2.5, mpc: 2 }),
   makeSortRow({ id: 'tia', pnl: 210, add: true, pcr: 210, dd: 1.4, mpc: 2.8 }),
-  // 未实现·亏损：两场都算不出加仓效用（APT 加过仓但涨跌幅为负）
+  // 未实现·亏损：两场都算不出加仓效用（APT 加过仓但涨跌幅为 0：涨跌幅倍数显示 0.00，分母过小不算）
   makeSortRow({ id: 'op', pnl: -100, pcr: -100, dd: 2, mpc: -2 }),
-  makeSortRow({ id: 'apt', pnl: -130, add: true, pcr: -130, dd: 2.5, mpc: -1.5 }),
+  makeSortRow({ id: 'apt', pnl: -130, add: true, pcr: -130, dd: 2.5, mpc: 0 }),
 ];
 
 describe('排序链：依次比较', () => {

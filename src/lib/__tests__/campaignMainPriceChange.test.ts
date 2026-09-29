@@ -409,13 +409,15 @@ describe('【用户要求】加仓效用只算做过加仓的战役', () => {
   });
 });
 
-describe('【用户要求】加仓效用门槛：涨跌幅倍数为正才算', () => {
-  it('涨跌幅倍数为负：不算（亏损战役负负得正不再排到最前）', () => {
-    expect(computeAddEfficiency(-0.68, -0.05)).toBeNull();
-    expect(computeAddEfficiency(2, -1)).toBeNull();
+describe('【用户要求】加仓效用：涨跌幅倍数为正、为负都算（符号照除），只有显示为 0.00 的不算', () => {
+  it('涨跌幅倍数为负：照算、符号照除——b 与 η 都为负时读数为正', () => {
+    expect(computeAddEfficiency(-3, -2)).toBeCloseTo(1.5, 9);
+    expect(computeAddEfficiency(2, -1)).toBeCloseTo(-2, 9);
+    expect(computeAddEfficiency(-0.68, -0.05)).toBeCloseTo(13.6, 9);
   });
-  it('涨跌幅倍数显示为 0.00（接近 0）：不算，分母过小不再把比值放大成十几倍', () => {
+  it('涨跌幅倍数显示为 0.00（接近 0，含负的 −0.004）：不算，分母过小不再把比值放大成十几倍', () => {
     expect(computeAddEfficiency(0.59, 0.004)).toBeNull();
+    expect(computeAddEfficiency(0.59, -0.004)).toBeNull();
     expect(computeAddEfficiency(0.59, 0)).toBeNull();
   });
   it('涨跌幅倍数为正：照算，盈亏比为负时读数为负', () => {

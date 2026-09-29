@@ -17,6 +17,11 @@ export type StackLayoutPoint = {
    * 缺省 = 不分组，照原样一格接一格码放。
    */
   group?: string;
+  /**
+   * 镜像堆叠：true 的点从 0 线**往下**堆（同一档里与往上堆的点各自计数）。
+   * 有任一点往下堆时，0 线从绘图区底边移到中间，上下两侧按各自最高一档的场数分配行数。
+   */
+  below?: boolean;
 };
 
 export type StackLayoutBoundary = {
@@ -79,7 +84,7 @@ export type StackPlacedPoint = {
   clamped: ClampDirection | null;
 };
 
-/** 图高放不下的那部分：每档合成一个朝上的三角，不逐点叠画。 */
+/** 图高放不下的那部分：每档合成一个三角（往上堆的朝上、往下堆的朝下），不逐点叠画。 */
 export type StackOverflow = {
   bin: number;
   cx: number;
@@ -87,6 +92,8 @@ export type StackOverflow = {
   yPct: number;
   count: number;
   ids: string[];
+  /** 镜像堆叠时往下那一侧的溢出三角朝下；缺省朝上。 */
+  direction?: 'up' | 'down';
 };
 
 export type StackLayoutResult = {
@@ -107,6 +114,10 @@ export type StackLayoutResult = {
   requiredPlotHeight: number;
   /** 每档计数，按档序号索引。 */
   binCounts: number[];
+  /** 0 线（往上堆的底线）的像素 y；不镜像时就是绘图区底边。 */
+  baselineY: number;
+  /** 镜像堆叠时 0 线下方分到的行数；不镜像时 0。 */
+  rowsBelow: number;
 };
 
 export type ScatterStackScale = {
@@ -186,27 +197,49 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
     return { id: point.id, x: point.x, bin, clamped };
   });
 
-  const byBin = new Map<number, typeof entries>();
+  // 往上堆与往下堆（镜像）各自成桶：同一档里两侧分开计数、分开排位。
+  const belowIds = new Set(points.filter(point => point.below).map(point => point.id));
+  const mirrored = belowIds.size > 0;
+  const byBin = new Map<string, typeof entries>();
   for (const entry of entries) {
-    const bucket = byBin.get(entry.bin);
+    const key = `${belowIds.has(entry.id) ? 'd' : 'u'}${entry.bin}`;
+    const bucket = byBin.get(key);
     if (bucket) bucket.push(entry);
-    else byBin.set(entry.bin, [entry]);
+    else byBin.set(key, [entry]);
   }
-  // 档内按数值升序、再按 id 排，重复渲染永远得到同一张图。
+  // 档内按数值升序、再按 id 排，重复渲染永远得到同一张图（往下堆的一侧 rank 0 也是贴着 0 线的那一格）。
   const rankById = new Map<string, number>();
   const binCounts = Array.from({ length: binCount }, () => 0);
-  let tallest = 0;
-  for (const [bin, bucket] of byBin) {
+  const upCounts = Array.from({ length: binCount }, () => 0);
+  const downCounts = Array.from({ length: binCount }, () => 0);
+  let tallestUp = 0;
+  let tallestDown = 0;
+  for (const [key, bucket] of byBin) {
+    const bin = Number(key.slice(1));
     bucket.sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     bucket.forEach((entry, rank) => rankById.set(entry.id, rank));
-    binCounts[bin] = bucket.length;
-    tallest = Math.max(tallest, bucket.length);
+    binCounts[bin] += bucket.length;
+    if (key[0] === 'd') {
+      downCounts[bin] = bucket.length;
+      tallestDown = Math.max(tallestDown, bucket.length);
+    } else {
+      upCounts[bin] = bucket.length;
+      tallestUp = Math.max(tallestUp, bucket.length);
+    }
   }
+  const tallest = Math.max(tallestUp, tallestDown);
+  const stackedRows = tallestUp + tallestDown;
 
-  const pitchY = tallest * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
+  const pitchY = stackedRows * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
   const rowsFit = Math.max(1, Math.floor(plotHeight / pitchY));
-  const baseline = top + plotHeight;
-  const cyAt = (rank: number) => baseline - (rank + 0.5) * pitchY;
+  // 镜像时 0 线下方按两侧最高一档的比例分行（至少一行，也给上方至少留一行）；不镜像时 0 线就是底边。
+  const rowsBelow = !mirrored ? 0 : rowsFit < 2 ? 0 : Math.min(rowsFit - 1, Math.max(1,
+    stackedRows <= rowsFit ? tallestDown + Math.floor((rowsFit - stackedRows) * tallestDown / Math.max(1, stackedRows))
+      : Math.round(rowsFit * tallestDown / stackedRows),
+  ));
+  const rowsAbove = rowsFit - rowsBelow;
+  const baseline = top + plotHeight - rowsBelow * pitchY;
+  const cyAt = (rank: number, below = false) => (below ? baseline + (rank + 0.5) * pitchY : baseline - (rank + 0.5) * pitchY);
   const pctAt = (cy: number) => ((cy - top) / plotHeight) * 100;
   const cxAt = (bin: number) => {
     if (bin === numericBinCount && isolatedLeft) return isolatedLeft.cx;
@@ -218,23 +251,29 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   };
 
   const placed: StackPlacedPoint[] = [];
-  const overflowByBin = new Map<number, StackOverflow>();
+  const overflowByBin = new Map<string, StackOverflow>();
   for (const entry of entries) {
     const rank = rankById.get(entry.id) ?? 0;
     const cx = cxAt(entry.bin);
-    // 这一档装不下时，最顶一格让给合成三角：三角代表「从这格起还有多少场」。
-    if (binCounts[entry.bin] > rowsFit && rank >= rowsFit - 1) {
-      const cy = cyAt(rowsFit - 1);
-      const existing = overflowByBin.get(entry.bin);
+    const below = belowIds.has(entry.id);
+    const sideRows = below ? rowsBelow : rowsAbove;
+    const sideCount = below ? downCounts[entry.bin] : upCounts[entry.bin];
+    // 这一档装不下时，最外一格让给合成三角：三角代表「从这格起还有多少场」。
+    if (sideCount > sideRows && rank >= sideRows - 1) {
+      const cy = cyAt(Math.max(0, sideRows - 1), below);
+      const key = `${below ? 'd' : 'u'}${entry.bin}`;
+      const existing = overflowByBin.get(key);
       if (existing) {
         existing.count += 1;
         existing.ids.push(entry.id);
       } else {
-        overflowByBin.set(entry.bin, { bin: entry.bin, cx, cy, yPct: pctAt(cy), count: 1, ids: [entry.id] });
+        overflowByBin.set(key, {
+          bin: entry.bin, cx, cy, yPct: pctAt(cy), count: 1, ids: [entry.id], ...(below ? { direction: 'down' as const } : {}),
+        });
       }
       continue;
     }
-    const cy = cyAt(rank);
+    const cy = cyAt(rank, below);
     placed.push({ id: entry.id, cx, cy, yPct: pctAt(cy), bin: entry.bin, rank, clamped: entry.clamped });
   }
 
@@ -247,15 +286,17 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
 
   return {
     placed,
-    overflow: [...overflowByBin.values()].sort((a, b) => a.bin - b.bin),
+    overflow: [...overflowByBin.values()].sort((a, b) => a.bin - b.bin || (a.direction === 'down' ? 1 : 0) - (b.direction === 'down' ? 1 : 0)),
     binPx,
     binWidth,
     binCount,
     pitchY,
     rowsFit,
     tallest,
-    requiredPlotHeight: tallest * MARK_FOOTPRINT,
+    requiredPlotHeight: stackedRows * MARK_FOOTPRINT,
     binCounts,
+    baselineY: baseline,
+    rowsBelow,
   };
 }
 
