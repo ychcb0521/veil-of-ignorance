@@ -91,32 +91,46 @@ function P({ children, className = '' }: { children: ReactNode; className?: stri
   return <p className={`guide-copy ${className}`}>{children}</p>;
 }
 
+/**
+ * 【用户要求】目录项是按钮、不是 <a href>：链接悬停时浏览器会在左下角弹出整条网址，没必要。
+ * 点了直接把对应章节滚到视野里（章节自带 scroll-mt，停在顶栏下方），与原来锚点跳转同一个落点。
+ */
+function jumpToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ block: 'start' });
+}
+
 function TocList({ activeId, onJump }: { activeId: string; onJump?: () => void }) {
+  const jump = (id: string) => {
+    jumpToSection(id);
+    onJump?.();
+  };
   return (
     <nav className="guide-toc">
       <div className="guide-toc-label">目录</div>
       {TOC.map(item => (
         <div key={item.id}>
-          <a
-            href={`#${item.id}`}
-            onClick={onJump}
+          <button
+            type="button"
+            onClick={() => jump(item.id)}
+            aria-current={activeId === item.id ? 'location' : undefined}
             className={`guide-toc-link ${
               activeId === item.id ? 'is-active' : ''
             }`}
           >
             {item.label}
-          </a>
+          </button>
           {item.children?.map(c => (
-            <a
+            <button
               key={c.id}
-              href={`#${c.id}`}
-              onClick={onJump}
+              type="button"
+              onClick={() => jump(c.id)}
+              aria-current={activeId === c.id ? 'location' : undefined}
               className={`guide-toc-link guide-toc-link--child ${
                 activeId === c.id ? 'is-active' : ''
               }`}
             >
               {c.label}
-            </a>
+            </button>
           ))}
         </div>
       ))}
@@ -227,21 +241,35 @@ export default function GuidePage() {
     setCharCount((clone.textContent ?? '').replace(/\s+/g, '').length);
   }, []);
 
+  /**
+   * 当前章节 = 顶部已越过顶栏下方那条线（ACTIVE_LINE）的最后一个章节。
+   * 原来取「判定带里最靠上的那个」：父章节（3. 交易页）包着它的小节，二者同时在带里时父章节永远胜出，
+   * 点了 3.4、目录却亮在 3。FLAT_TOC 里小节排在父章节之后，取最后一个越线的就是最细的那一项。
+   * IntersectionObserver 只在章节进出判定带时报一次，用它当「该重算了」的信号，再配一个按帧节流的滚动监听兜住细节。
+   */
   useEffect(() => {
-    const obs = new IntersectionObserver(
-      entries => {
-        const visible = entries.filter(e => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActiveId(visible[0].target.id);
-      },
-      { rootMargin: '-80px 0px -60% 0px', threshold: 0 },
-    );
-    FLAT_TOC.forEach(t => {
-      const el = document.getElementById(t.id);
-      if (el) obs.observe(el);
-    });
+    const ACTIVE_LINE = 120;
+    const sections = FLAT_TOC.map(t => document.getElementById(t.id)).filter((el): el is HTMLElement => el != null);
+    let frame = 0;
+    const recompute = () => {
+      frame = 0;
+      let current = sections[0]?.id;
+      for (const el of sections) {
+        if (el.getBoundingClientRect().top <= ACTIVE_LINE) current = el.id;
+      }
+      if (current) setActiveId(current);
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(recompute); };
+    const obs = new IntersectionObserver(schedule, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
+    sections.forEach(el => obs.observe(el));
     observerRef.current = obs;
-    return () => obs.disconnect();
+    window.addEventListener('scroll', schedule, { passive: true });
+    schedule();
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('scroll', schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   const handleExportGuide = () => {

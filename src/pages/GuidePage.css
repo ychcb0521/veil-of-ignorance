@@ -1184,6 +1184,13 @@
 .guide-toc-link {
   position: relative;
   display: block;
+  /* 目录项是 <button>（不是 <a href>，免得悬停时左下角弹网址）：抹掉按钮的默认外观，排版与原链接一致 */
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
   height: 2rem;
   padding: 0 0.5rem 0 0.7rem;
   border-radius: 0.375rem;
