@@ -73,6 +73,27 @@ function RedHighlight({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * 【用户要求】3.4 里的红框太大、太突兀：红框只留那一句结论（细框），
+ * 实测案例与推导收进下方的「实测与细节」，点开以普通正文显示，内容一字不删。
+ */
+function RuleNote({ headline, children }: { headline: ReactNode; children: ReactNode }) {
+  return (
+    <div className="guide-rule">
+      <div className="guide-callout guide-callout--red guide-rule__headline">
+        <strong>{headline}</strong>
+      </div>
+      <details className="guide-rule__more">
+        <summary className="guide-rule__toggle">
+          实测与细节
+          <ChevronDown aria-hidden="true" className="guide-rule__chevron" />
+        </summary>
+        <div className="guide-rule__body">{children}</div>
+      </details>
+    </div>
+  );
+}
+
 function SectionTitle({ children, accent }: { children: ReactNode; accent?: string }) {
   return (
     <div className="guide-section-title">
@@ -899,8 +920,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               <P>
                 <strong>顶栏「加仓」按钮就是这套公式的计算器</strong>（在「倒叙播放」左侧）。X₁ / S̄ 按当前仍持有各腿的开仓价折算后读入、S₂ 从<strong>引擎市价成交的基准价</strong>读入并在弹窗开着时跟着它走（不是顶栏那个平滑后的显示价；市价档永远跟着它，限价档手改即锁定，复位图标回到市价并重新跟随），三者都可手改并一键复位；S₁ 必须手填——那是你的判断。<strong>所有派生量都按预计成交价 S₂′ 算，不按 S₂</strong>——见下方红框。币本位 / U 本位的口径跟<strong>被加仓的那条仓位</strong>走，不跟下单面板——面板每次打开都回到币本位，而 U 本位仓位重开后仍按 U 本位折算 G 与每币风险。界面把来源拆成两块，但不是让你二选一：<strong>Plan A · 旧仓浮盈垫</strong>显示 Y₁ 与其折算量 X₂ᴬ——G = 0 时它就是上限；G ≠ 0（正负都算）时它降为一行中性芯片，只解释旧仓贡献，Y₁ 为负也只显示负数、不再报红。真正下单看<strong>Plan B · 浮盈垫 + 落袋净额</strong>的「加仓上限」<span className="font-mono">max(0, Y₁ + G) ÷ 每币风险</span>（U 本位每币风险 = |S₂ − S₁|；币本位 Y₁、G 以币计，每币风险 = |S₂ − S₁| ÷ S₁）。这个上限<strong>只由规则决定</strong>，系统把 Y₁、G 的正数加进来、负数扣出去，绝不能绕过它单独照 X<sub>G</sub> 下单——X<sub>G</sub> 一格标着「仅拆解」、不给张数。K<sub>B</sub> / 定仓是 G &gt; 0 时可选的旋钮，留空即取 S₁（此时 <span className="font-mono">X<sub>G</sub> = G ÷ |S₂ − S₁|</span>，币本位 <span className="font-mono">G × S₁ ÷ |S₂ − S₁|</span>，跌回 S₁ 恰好花掉 G）；拧了旋钮，推出来的量另起一格叫<strong>「计划加仓」</strong>，上限那一格纹丝不动，R0 复核拿计划加仓与上限比对。把 K<sub>B</sub> 拖到 S₁ 的更保守一侧，计划加仓小于上限、在 S₁ 还剩一部分垫子；定仓填得比上限大，R0 直接报红。对冲必须扛起全部实际仓位：<span className="font-mono">对冲 @ S₁ = X₁ + 实际加仓量</span>（不拧旋钮时就是 X₁ + 上限），无论 K<sub>B</sub> 放在哪都照常显示。
               </P>
-              <RedHighlight>
-                <strong>S₁ 必须就是盘口上那张对冲单的触发价——整套「锁死」全押在这一个数上。</strong>
+              <RuleNote headline={<>S₁ 必须就是盘口上那张对冲单的触发价——整套「锁死」全押在这一个数上。</>}>
                 实测（SCRTUSDT 2026-04-20，已实现 −7,930.74）：计算器被喂的 S₁ 是 0.114572，
                 而盘口挂着的对冲线是 <span className="font-mono">0.114401</span>，两者差 0.000171（<strong>0.149%</strong>）。
                 公式照算不误，但「锁死」的前提已经不成立：加仓量因此多下 <strong>9.1%</strong>
@@ -921,9 +941,8 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 真正要下的是 <span className="font-mono">Plan B 加仓上限 = max(0, Y₁ + G) ÷ 每币风险</span>、
                 真正要挂的是 <span className="font-mono">合计对冲 = X₁ + 实际加仓量</span>——
                 这两个数现在都以大字呈现，A 段明确标为「来源拆解」。尤其当 Y₁ 为负时，照 X<sub>G</sub> 单独下单会把旧仓亏损漏掉，直接制造本金缺口。
-              </RedHighlight>
-              <RedHighlight>
-                <strong>S₂ 必须是预计成交价，不是下单前看到的现价——上限对 S₂ 的弹性有十几倍。</strong>
+              </RuleNote>
+              <RuleNote headline={<>S₂ 必须是预计成交价，不是下单前看到的现价——上限对 S₂ 的弹性有十几倍。</>}>
                 实测（COMMONUSDT，加仓 1 / 加仓 2）：用户按计算器的上限下单（下的是 653,602 张、1,380,961 张，比计算器按现价给出的 653,615 / 1,380,978 张还略少），
                 Legs「加仓校验」却判超限 <strong>1.57% / 3.70%</strong>。两边规则、G、S₁ 全部一致，只差一个 S₂：
                 计算器读的是下单前的盘面价，而<strong>市价单在本模拟器里按 Taker 滑点成交：0.01% + 名义 ÷ 50 亿</strong>
@@ -993,7 +1012,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
                 <strong>两笔 3,000 万名义的平仓在本模拟器里各吃约 0.6%，一来一回就是 1.2%</strong>。
                 COMMONUSDT 那一场 −565K 里，超限的仓位只解释了约 45K，其余几乎全部来自这些执行成本。
                 锁死锁的是几何，不是钱；钱要另外算。
-              </RedHighlight>
+              </RuleNote>
               <P>
                 定线推仓、定仓推线两个旋钮互为反函数；K<sub>B</sub> 拖到 S₁ 之下即「零风险线更低」，跌到 S₁ 只吃掉 G 的一部分，界面会标出吃掉多少、剩多少。
                 G 留空按 0，此时 Plan B 与 Plan A 同值。系统会检测本场「止盈1」利润，并扣掉本轮（不论在止盈之前还是之后）已经实现的亏损——平仓与强平都算——作为可用净额，净额可以是负数、负数照扣；普通减仓或手动平仓的正利润不会混进来。当前持仓每一笔成交都有真实开仓时刻、且净额不为 0 时，这个净额会在打开计算器时自动带入（缺操作时间的止盈直接不计并在下方注明；落袋后又加过仓也照样带入，按钮转黄提示；净额为负时按钮标红）；旧数据缺真实时间戳、无法排除别次回放时只给建议按钮，必须由你确认后点入。「本场」同时看两只钟：模拟平仓时间不早于当前持仓开仓，且<strong>操作时间（真实平仓时刻）不早于当前仍持有仓位最早一笔成交的真实开仓时刻</strong>——同一段历史重放多遍时，别的重放在同一模拟时刻落袋的止盈不会混进 G，被排除的笔数（含没有操作时间的老记录）在下方以小字注明（持仓里只要有一笔成交没有真实开仓时刻——老仓位，或在老仓位上新加的一刀——起点无从确定，仍只看模拟时间）。落袋之后又加过仓（按成交笔数算，合并进同一仓位的加仓也算）时，按钮转黄：仍持有部分已经进入当前 X₁ / S̄，会在新 S₁ 上重新计入浮盈或浮亏；已经平仓的亏损则已从建议 G 中扣掉。计算器右上角那个几乎看不见的「?」展开公式速览并链回本节。<strong>Plan B 是上限，不是目标</strong>；S₁ 每次变化、仓位每次变化都要重算。输入区下方的价格阶梯把 S̄ / S₁ / S₂ 按比例画在一条轴上；若 S₁ 仍在成本线亏损侧，旧仓垫会显示为负，只有 G 补完缺口后 Plan B 才会给出可下单量。S₁ 还没填时 Plan B 一栏提示「填入 S₁ 后计算」——K<sub>B</sub> 可以留空，缺的是 S₁。

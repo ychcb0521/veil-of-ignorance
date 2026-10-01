@@ -20,10 +20,10 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     expect(guide).toContain('所有派生量都按预计成交价 S₂′ 算，不按 S₂');
   });
 
-  it('红框写明滑点模型、放大倍数、市价 / 限价档、成交后复判、快照与「按上限下单」', () => {
+  it('红框（结论）与「实测与细节」写明滑点模型、放大倍数、市价 / 限价档、成交后复判、快照与「按上限下单」', () => {
     const at = guide.indexOf('S₂ 必须是预计成交价，不是下单前看到的现价');
     expect(at).toBeGreaterThan(-1);
-    const block = guide.slice(at, guide.indexOf('</RedHighlight>', at));
+    const block = guide.slice(at, guide.indexOf('</RuleNote>', at));
     expect(block).toContain('0.01% + 名义 ÷ 50 亿');
     // 翻倍那一档只在函数里：没有成交路径传 K 线区间，指南不能让人为它留余量
     expect(block).toContain('2% 时滑点率翻倍」，但本模拟器没有任何成交路径把 K 线区间传给它，这一档今天从不生效');

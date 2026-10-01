@@ -1629,3 +1629,57 @@
   .guide-note__chevron { grid-row: 1; grid-column: 2; }
   .guide-note__body { padding-left: 0.25rem; }
 }
+
+/* ============================================================
+   3.4 · 红框只装一句结论，实测与推导收进「实测与细节」
+   ============================================================ */
+.guide-rule {
+  display: grid;
+  gap: 0.35rem;
+}
+
+/* 细框：只有一句话，内边距收紧，不再是一整块红底 */
+.guide-rule__headline {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+}
+
+.guide-rule__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+  padding: 0.15rem 0.4rem;
+  margin-left: calc(var(--rhythm) * 0.9 - 0.4rem);
+  border-radius: 0.375rem;
+  font-size: 12px;
+  color: hsl(var(--guide-ink) / 0.65);
+  cursor: pointer;
+  list-style: none;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.guide-rule__toggle::-webkit-details-marker { display: none; }
+
+.guide-rule__toggle:hover {
+  color: hsl(var(--guide-ink));
+  background: hsl(var(--guide-line) / 0.35);
+}
+
+.guide-rule__chevron {
+  width: 0.8rem;
+  height: 0.8rem;
+  transition: transform 160ms ease;
+}
+
+.guide-rule__more[open] .guide-rule__chevron { transform: rotate(180deg); }
+
+/* 展开的细节是普通正文：与红框左侧文字同一条起点，左边一道淡红细线说明它属于上面那条结论 */
+.guide-rule__body {
+  margin: 0.4rem 0 0.2rem calc(var(--rhythm) * 0.9);
+  padding-left: 0.9rem;
+  border-left: 2px solid hsl(var(--guide-red) / 0.25);
+  font-size: var(--fs-body);
+  line-height: var(--lh);
+  color: hsl(var(--guide-ink));
+}
