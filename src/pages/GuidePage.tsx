@@ -187,6 +187,12 @@ function buildGuideExport(items: TocItem[]): string {
   return `${lines.join('\n').trim()}\n`;
 }
 
+/**
+ * 正文与开篇共用的栅格：目录在左栏（目录本身 208px、贴近页面左缘，与正文至少隔 32px），正文最宽 960px、在整页居中；
+ * 两侧 1fr 平分余量，屏幕不够宽时左栏守住 240px、右侧余量先收成 0，正文往右让。
+ */
+const GUIDE_LAYOUT_GRID = 'mx-auto max-w-[1680px] px-4 sm:px-6 grid grid-cols-1 md:grid-cols-[minmax(240px,1fr)_minmax(0,960px)_minmax(0,1fr)]';
+
 export default function GuidePage() {
   const nav = useNavigate();
   const [activeId, setActiveId] = useState<string>('s1');
@@ -194,6 +200,18 @@ export default function GuidePage() {
   const [charCount, setCharCount] = useState<number | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
+  const tocScrollRef = useRef<HTMLDivElement | null>(null);
+  // 当前条目滚进目录视野：只动目录自己的 scrollTop（scrollIntoView 会连带滚动整页）
+  useEffect(() => {
+    const box = tocScrollRef.current;
+    const link = box?.querySelector<HTMLElement>('.guide-toc-link.is-active');
+    if (!box || !link) return;
+    const boxRect = box.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    const margin = 24;
+    if (linkRect.top < boxRect.top + margin) box.scrollTop -= boxRect.top + margin - linkRect.top;
+    else if (linkRect.bottom > boxRect.bottom - margin) box.scrollTop += linkRect.bottom - (boxRect.bottom - margin);
+  }, [activeId]);
 
   /**
    * 全文字数。按「非空白字符」计：中文没有词边界，按词数算不成立；
@@ -302,20 +320,28 @@ export default function GuidePage() {
 
       {/* 使用说明开篇即点题：纪律的终极目的是进攻，不是防守。 */}
       <div className="border-b border-[#F0B90B]/20 bg-gradient-to-b from-[#F0B90B]/10 to-transparent">
-        <div className="max-w-[1280px] mx-auto px-6 py-10 text-center">
-          <p className="text-[12px] tracking-wide text-muted-foreground">封住下限，不是为了少亏，而是为了敢赢——</p>
-          <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
-            纪律的终极目的是进攻，不是防守！
-          </p>
-          <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-            别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
-          </p>
+        {/* 【用户要求】开篇与正文对齐，目录不算正文：与下方同一套栅格，只占正文那一栏，文字在正文栏内居中 */}
+        <div className={GUIDE_LAYOUT_GRID}>
+          <div className="py-10 text-center md:col-start-2">
+            <p className="text-[12px] tracking-wide text-muted-foreground">封住下限，不是为了少亏，而是为了敢赢——</p>
+            <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
+              纪律的终极目的是进攻，不是防守！
+            </p>
+            <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+              别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="max-w-[1280px] mx-auto px-6 py-8 grid grid-cols-1 md:grid-cols-[240px_1fr] gap-8">
-        <aside className="hidden md:block">
-          <div className="sticky top-[72px] bg-card border border-border rounded p-3">
+      <div className={`${GUIDE_LAYOUT_GRID} py-8`}>
+        <aside className="hidden md:block md:w-[208px]">
+          {/* 【用户要求】目录更窄、更靠左，且能单独滚动：限高一屏，超出部分在目录里滚，翻页时当前条目自动滚进视野 */}
+          <div
+            ref={tocScrollRef}
+            data-testid="guide-toc-scroll"
+            className="sticky top-[72px] max-h-[calc(100vh-88px)] overflow-y-auto overscroll-contain bg-card border border-border rounded p-2"
+          >
             <TocList activeId={activeId} />
           </div>
         </aside>
