@@ -191,7 +191,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       const text = render(<>{byKey[key].help}</>).container.textContent ?? '';
       expect(text, key).not.toContain('-0.00');
     }
-    expect(render(<>{byKey.addEfficiency.help}</>).container.textContent).toContain('本场 = 0.00 ÷ +2.00');
+    expect(render(<>{byKey.addEfficiency.help}</>).container.textContent).toContain('本场 = 0.00 ÷ |+2.00|');
     expect(render(<>{byKey.asymmetricRiskContribution.help}</>).container.textContent).toContain('本场：DSI 下行组，b = 0.00，');
     expect(render(<>{byKey.arithmeticExpectancy.help}</>).container.textContent).toContain('本场：50.00% × 0.00 − 50.00%');
   });
@@ -265,7 +265,7 @@ describe('CampaignPnlOverviewPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '涨跌幅倍数说明' }));
     expect(screen.getByText('本场 = +20.00% ÷ 10.00% = +2.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '加仓效用说明' }));
-    expect(screen.getByText('本场 = 2.00 ÷ +2.00 = +1.00')).toBeInTheDocument();
+    expect(screen.getByText('本场 = 2.00 ÷ |+2.00| = +1.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '最大预期亏损说明' }));
     expect(screen.getByText('最大预期亏损 = 主力开仓名义仓位 × 预期回撤比例')).toBeInTheDocument();
   });
