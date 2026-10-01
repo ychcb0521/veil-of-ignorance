@@ -351,22 +351,6 @@ export default function GuidePage() {
         </div>
       </header>
 
-      {/* 使用说明开篇即点题：纪律的终极目的是进攻，不是防守。 */}
-      <div className="border-b border-[#F0B90B]/20 bg-gradient-to-b from-[#F0B90B]/10 to-transparent">
-        {/* 【用户要求】开篇与正文对齐，目录不算正文：与下方同一套栅格，只占正文那一栏，文字在正文栏内居中 */}
-        <div className={GUIDE_LAYOUT_GRID}>
-          <div className="py-10 text-center md:col-start-2">
-            <p className="text-[12px] tracking-wide text-muted-foreground">封住下限，不是为了少亏，而是为了敢赢——</p>
-            <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
-              纪律的终极目的是进攻，不是防守！
-            </p>
-            <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
-              别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
-            </p>
-          </div>
-        </div>
-      </div>
-
       <div className={`${GUIDE_LAYOUT_GRID} py-8`}>
         <aside className="hidden md:block md:w-[208px]">
           {/* 【用户要求】目录更窄、更靠左，且能单独滚动：限高一屏，超出部分在目录里滚，翻页时当前条目自动滚进视野 */}
@@ -380,6 +364,17 @@ export default function GuidePage() {
         </aside>
 
         <main ref={mainRef} className="guide-doc min-w-0">
+          {/* 使用说明开篇即点题：纪律的终极目的是进攻，不是防守。
+              【用户要求】不再单独开一条通栏模块，直接放在正文最上方（正文栏内居中）；data-guide-meta：不计入全文字数 */}
+          <div data-guide-meta className="pb-10 pt-2 text-center">
+            <p className="text-[12px] tracking-wide text-muted-foreground">封住下限，不是为了少亏，而是为了敢赢——</p>
+            <p className="mt-2 text-[26px] md:text-[34px] font-bold leading-tight tracking-tight text-[#F0B90B]">
+              纪律的终极目的是进攻，不是防守！
+            </p>
+            <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+              别把这里的硬约束读成“风控”或“防守”。下限被焊死，正是你<strong className="text-foreground">敢多下、敢把仓位放到该放的位置、敢让每个赢家一路跑得更肥</strong>的前提。
+            </p>
+          </div>
           <section id="s1" className="scroll-mt-20">
             <SectionTitle accent="#F0B90B">1. 系统定位</SectionTitle>
             <div className="guide-stack">
