@@ -1538,3 +1538,94 @@
     transform: none;
   }
 }
+
+/* ============================================================
+   8 · 注意事项：一项一行，点开看完整口径
+   ============================================================ */
+
+/* 【用户要求】原来是三列大表，太繁琐。每项只露「事项 + 一句话结论」，完整口径与原因收在 <details> 里。
+   名字一栏定宽、结论紧挨着（左对齐紧凑），行与行之间一道细线；展开后正文与结论同一条起点。 */
+.guide-notes {
+  /* 名字一栏的宽度：摘要行与展开正文共用一个像素值（用 em 的话两处字号不同、起点会错开） */
+  --note-name: 228px;
+  --note-gap: 1.25rem;
+  margin-top: var(--gap-flow);
+  border-top: 1px solid hsl(var(--guide-line));
+}
+
+.guide-note {
+  border-bottom: 1px solid hsl(var(--guide-line));
+}
+
+.guide-note__summary {
+  display: grid;
+  grid-template-columns: var(--note-name) minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--note-gap);
+  padding: 0.7rem 0.25rem;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 0.375rem;
+  transition: background-color 140ms ease;
+}
+
+.guide-note__summary::-webkit-details-marker { display: none; }
+
+.guide-note__summary:hover { background: hsl(var(--guide-line) / 0.35); }
+
+.guide-note__title {
+  font-size: var(--fs-body);
+  font-weight: var(--w-bold);
+  color: hsl(var(--guide-h3));
+}
+
+.guide-note__gist {
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  color: hsl(var(--guide-ink));
+}
+
+.guide-note__chevron {
+  align-self: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: hsl(var(--guide-ink) / 0.45);
+  transition: transform 160ms ease, color 140ms ease;
+}
+
+.guide-note[open] > .guide-note__summary .guide-note__chevron {
+  transform: rotate(180deg);
+  color: hsl(var(--guide-ink) / 0.8);
+}
+
+/* 展开的正文从结论那一列起排：名字一栏留空，读的时候视线不用回到行首 */
+.guide-note__body {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0 0.25rem 1rem calc(var(--note-name) + var(--note-gap) + 0.25rem);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  color: hsl(var(--guide-ink));
+}
+
+.guide-note__why {
+  color: hsl(var(--guide-ink) / 0.85);
+}
+
+.guide-note__why-label {
+  display: inline-block;
+  margin-right: 0.6rem;
+  padding: 0 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 12px;
+  font-weight: var(--w-bold);
+  color: hsl(var(--guide-ink));
+  background: hsl(var(--guide-line) / 0.6);
+}
+
+@container (max-width: 674.98px) {
+  .guide-note__summary { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0.2rem; }
+  .guide-note__gist { grid-column: 1; }
+  .guide-note__chevron { grid-row: 1; grid-column: 2; }
+  .guide-note__body { padding-left: 0.25rem; }
+}

@@ -10,16 +10,16 @@ const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf
 
 describe('指南：单笔数量上限（市价单）', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('单笔数量上限（市价单）</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('单笔数量上限（市价单）</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('紧跟在「杠杆分层与仓位上限」那一行后面，快照日期与数据文件一致', () => {
     expect(at).toBeGreaterThan(-1);
-    const tiers = guide.indexOf('杠杆分层与仓位上限</td>');
+    const tiers = guide.indexOf('杠杆分层与仓位上限</span>');
     expect(tiers).toBeGreaterThan(-1);
     expect(tiers).toBeLessThan(at);
     // 两行之间没有别的行
-    expect(guide.slice(tiers, at).match(/<tr>/g)?.length).toBe(1);
+    expect(guide.slice(tiers, at).match(/<details /g)?.length).toBe(1);
     expect(SYMBOL_FILTER_SNAPSHOT_DATE).toBe('2026-09-23');
     expect(row).toContain(`快照 <strong>${SYMBOL_FILTER_SNAPSHOT_DATE}</strong>`);
   });

@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowLeft, ChevronDown, Download, List } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ArrowDown, ArrowRight, ChevronDown, Download, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -201,14 +201,15 @@ function buildGuideExport(items: TocItem[]): string {
   return `${lines.join('\n').trim()}\n`;
 }
 
+/** 顶栏、开篇、正文共用的页面宽度：最宽 1680px，左右各留 16 / 24px——顶栏两端与目录左缘、正文右缘对齐。 */
+const GUIDE_PAGE_FRAME = 'mx-auto max-w-[1680px] px-4 sm:px-6';
 /**
- * 正文与开篇共用的栅格：目录在左栏（目录本身 208px、贴近页面左缘，与正文至少隔 32px），正文最宽 960px、在整页居中；
- * 两侧 1fr 平分余量，屏幕不够宽时左栏守住 240px、右侧余量先收成 0，正文往右让。
+ * 正文与开篇共用的栅格：目录在左栏（目录本身 208px、贴近页面左缘，与正文隔 32px），
+ * 【用户要求】正文铺满右边剩下的宽度，右侧不再空一大片。
  */
-const GUIDE_LAYOUT_GRID = 'mx-auto max-w-[1680px] px-4 sm:px-6 grid grid-cols-1 md:grid-cols-[minmax(240px,1fr)_minmax(0,960px)_minmax(0,1fr)]';
+const GUIDE_LAYOUT_GRID = `${GUIDE_PAGE_FRAME} grid grid-cols-1 md:grid-cols-[240px_minmax(0,1fr)]`;
 
 export default function GuidePage() {
-  const nav = useNavigate();
   const [activeId, setActiveId] = useState<string>('s1');
   const [exportOpen, setExportOpen] = useState(false);
   const [charCount, setCharCount] = useState<number | null>(null);
@@ -294,10 +295,9 @@ export default function GuidePage() {
   return (
     <div className="guide-page min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="px-6 py-3 max-w-[1280px] mx-auto flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => nav(-1)}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> 返回
-          </Button>
+        {/* 【用户要求】顶栏与正文同一个页面宽度，「进入交易页」贴正文右缘 */}
+        <div className={`${GUIDE_PAGE_FRAME} flex h-14 items-center gap-3`}>
+
           <div className="md:hidden">
             <Sheet>
               <SheetTrigger asChild>
@@ -312,7 +312,8 @@ export default function GuidePage() {
               </SheetContent>
             </Sheet>
           </div>
-          <h1 className="text-[14px] font-medium">使用说明 · 无知之幕</h1>
+          {/* 【用户要求】「返回」与标题都不需要：顶栏只留右端的导出与「进入交易页」；页面名留给读屏 */}
+          <h1 className="sr-only">使用说明 · 无知之幕</h1>
           <div className="flex-1" />
           <Collapsible open={exportOpen} onOpenChange={setExportOpen}>
             <div className="flex items-center gap-1">
@@ -338,10 +339,12 @@ export default function GuidePage() {
               </CollapsibleContent>
             </div>
           </Collapsible>
-          <Link to="/">
-            <Button className="h-8 bg-[#F0B90B] hover:bg-[#F0B90B]/90 text-black text-[12px]">
-              进入交易页
-            </Button>
+          <Link
+            to="/"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#F0B90B] px-3.5 text-[12px] font-medium text-black shadow-sm transition-colors hover:bg-[#F0B90B]/90"
+          >
+            进入交易页
+            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
       </header>
@@ -2068,88 +2071,162 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
           <section id="s8" className="scroll-mt-20">
             <SectionTitle accent="#F0B90B">8. 注意事项</SectionTitle>
             <P>这里专门记录与币安界面不完全一致的特殊口径。遇到这类差异时，以本系统说明为准；原因通常是为了让训练样本、复盘统计和 U本位 / 币本位之间保持可比较。</P>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">事项</th>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">本系统口径</th>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">为什么这样做</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">交易偏好（右上角 ⋯）</td>
-                    <td className="px-3 py-2 border-t border-border">下单面板右上角的 <strong>⋯</strong> 打开抽屉，页面树与币安一致，分 <strong>交易偏好</strong> / <strong>界面设置</strong> 两个页签。<br />· <strong>默认交易设置 → 默认杠杆和保证金模式</strong>：可开启「应用默认杠杆」并设定 1–50x 与默认保证金模式，点「确认」才生效（草稿式，与币安相同）。默认杠杆超过某个币对的最高杠杆时，在该币对上按它的最高杠杆生效（币安标准持仓限制模式下按合约分层；同一个币的 U 本位与币本位各按各的上限；无限制模式下最高 150x，偏好的 1–50x 照原值生效）。<strong>只对尚未访问过、且当前无持仓无挂单的币对生效</strong>——已建仓的标的不会在背后被改动风险参数。注意即便这里选了全仓，下单时仍会被硬阻断：训练阶段强制逐仓。<br />· <strong>默认交易设置 → 默认触发类型</strong>：最新价格 / 标记价格，改完即同步到下单面板的触发价判定。<br />· <strong>下单确认</strong>：按八种订单类型分别开关二次确认弹窗。决策记录模式本就强制下单前快照，不受此开关影响。<br />· <strong>仓位模式</strong>：本系统默认双向持仓——主仓做多 + 对冲做空必须能并存，切成单向会让对冲腿无处安放。<br />· <strong>界面设置 → 模块显隐</strong>：只列真能藏的两个（订单簿、P_gap 优势边际），与页内的关闭按钮是同一个状态，刷新后保留。图表 / 下单 / 仓位是交易页骨架不可隐藏，「最新成交」「保证金比率」本系统没有对应模块，因此不列。配色全局锁定绿涨红跌，以免历史截图与复盘记录里的红绿含义前后不一致。<br />· <strong>冷静期</strong>在「高级设置」里（原先挂在面板顶部，已收进抽屉）。<br />· <strong>历史消息</strong>在抽屉首页最下方：成交、触发、资金费结算、报错等提示<strong>默认不再弹出</strong>（原先弹在屏幕右上角，会盖住时间机器的倍速条与模拟时钟），一律记在这里，按真实时间倒序，最多保留最近 300 条，点开即视为已读。未读条数显示在 <strong>⋯</strong> 按钮的角标上，有未读报错时为红色。想恢复弹出，到「通知设置」打开「在屏幕上弹出提示」。爆仓仍以独立弹窗告知，不受此开关影响。<br />· 账户模式 / 资产模式 / 价差保护 / 涨跌幅与图表时区等本系统无对应功能的页面照样能打开，里面写清了币安在此做什么、以及本系统为何不适用——不是漏做。</td>
-                    <td className="px-3 py-2 border-t border-border">与币安同构，便于迁移习惯。注意本系统训练阶段<strong>强制逐仓</strong>：即便把默认保证金模式设为全仓，下单仍会被硬阻断。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">订单类型（币安式三槽）</td>
-                    <td className="px-3 py-2 border-t border-border">常驻 <strong>限价 | 市价 | 高级槽</strong> 三个标签；高级槽显示当前选中的高级类型，下拉五项（条件委托 / 跟踪委托 / 只做Maker / TWAP / 分段订单）对当前项打勾。止盈止损不占标签位，用限价 / 市价表单里的勾选组合。<strong>五种高级类型都是真实执行</strong>：条件委托触发价成交；<strong>跟踪委托</strong>按币安语义——卖出方向追踪最高价、从峰值回撤「回调率」即市价成交，买入方向对称追踪最低价，可设激活价（触及后才开始追踪）；<strong>TWAP</strong> 在总时长内按模拟时间均匀分批市价成交（切片间隔自动 ≈ 总时长 ÷ 20，最短 1 分钟）；<strong>分段订单</strong>在起始价与终止价之间均匀铺出指定张数的限价单。</td>
-                    <td className="px-3 py-2 border-t border-border">与币安的下单区同构，训练动作可以直接迁移。跟踪委托同一根 K 线内先按有利端点推进极值、再用不利端点判触发——宁可早触发，不做乐观回测。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">数量单位</td>
-                    <td className="px-3 py-2 border-t border-border">点数量框右侧的单位即弹出<strong>单位偏好</strong>浮层（贴着数量框，与币安同位置），两张卡片：<strong>卡片一</strong>是标的自身的计量单位（U 本位 → 币，币本位 → <strong>张</strong>，1 张 = 固定 USD 面值）；<strong>卡片二</strong>是保证金资产（U 本位 → USDT，币本位 → 该币），内含常驻的<strong>「订单金额 / 初始保证金」</strong>两个子选项。默认落在<strong>卡片二的「订单金额」</strong>——币本位即该币的订单金额、U 本位即 USDT 订单金额，量纲与该模式的保证金资产一致；「张」与「初始保证金」留给需要时手动切换。换标的或切结算方式时自动回到这个默认并清空输入。</td>
-                    <td className="px-3 py-2 border-t border-border">币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">持仓卡的「持仓数量」</td>
-                    <td className="px-3 py-2 border-t border-border">币本位持仓在张数后面补一个<strong>按标记价折算的持币数量</strong>，形如 <strong>13291 张 ≈ 284,702.0065 RAVE</strong>；U 本位不变（它的数量本来就是币量）。悬停给出折算式：名义 USD ÷ 标记价。价格暂时取不到时只显示张数，不编一个币量出来。</td>
-                    <td className="px-3 py-2 border-t border-border">反向合约的面值锁死在 USD 上，<strong>持币数量随价格浮动</strong>——只显示张数的话，「我现在到底拿着多少币」每次都得自己心算。折算口径与同一张卡上的标记价、保证金比率一致。<strong>持仓按标记价、挂单按它自己会成交的价</strong>——两者不同源，这是刻意的：持仓已经在市场里，挂单还没有。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">当前委托的「数量」</td>
-                    <td className="px-3 py-2 border-t border-border">币本位挂单的币数，按<strong>这一单真正会成交的那个价</strong>折算，并在张数那一行写明口径（按<strong>委托价</strong> / <strong>触发价</strong> / <strong>现价</strong>折算）。逐型：限价 / 限价止盈止损 / 只做Maker / 分段子单 → 委托价；<strong>条件委托（含止盈止损单）→ 触发价</strong>；<strong>跟踪委托 / TWAP / 市价止盈止损 → 现价</strong>。减仓单还会写出<strong>成数</strong>（如「100% 仓位」）：它按触发价折，主读数会比按标记价折的持仓卡小一截，不写成数容易被误读成部分平仓。<strong>TWAP 按剩余量显示</strong>，并单列「剩余 X / 总 Y」——切片引擎只累加已成交量、从不递减挂单量，此前一张走完九成的 TWAP 与一张还没开始的长得一模一样。下单面板的「实际下单 N 张 ≈ …」用的是同一个价，所以输入框、提示、委托列表三处永远是同一个数。</td>
-                    <td className="px-3 py-2 border-t border-border">此前一律按<strong>下单那一刻的市价</strong>折算：触发价 0.010344、市价 0.011199 的那张条件单，屏幕上写 892.96 NOM，而它成交时给你的是 966.744006 NOM——差 8.27%，且永不收敛，因为它是拿一个<strong>永不发生的价</strong>算出来的。张数也一样被它定：填 3600 个币会下出 4 张，那 4 张到触发价上是 3866.98 个币，多出的 267 个你从没批准过。<strong>跟踪委托那行输入是「激活价」不是触发价</strong>（成交价 = 极值 ×(1∓回调率)，挂单时不可知），TWAP 的两个价都是 0，所以这两类如实退回<strong>现价并标注</strong>——标签只声称「按此刻的市价，这一单相当于多少币」，不假装那是成交价；拿激活价去折出来的数才会被读成成交价，而它永远不是。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">「止盈/止损」勾选框</td>
-                    <td className="px-3 py-2 border-t border-border">勾上它<strong>不改变订单类型</strong>：市价单仍然当场成交、限价单仍然挂在你写的委托价上、条件单的触发价仍然是你填的那个。两个保护价随单带着，<strong>成交那一刻</strong>才变成挂在这笔仓位上的减仓单（与持仓卡上的「止盈/止损」按钮造出的是同一种东西）。方向校验参照的是<strong>这笔仓位的开仓价</strong>，不是此刻的盘口，并且<strong>在下单时就拦</strong>——那是你还能改的最后一刻；成交时再查一遍作兜底，若某一腿方向不对，<strong>只丢那一腿</strong>并弹出提示，另一腿照挂。<strong>分段订单 / TWAP / 跟踪委托不支持</strong>随单保护单，勾选框在这三类下直接置灰。</td>
-                    <td className="px-3 py-2 border-t border-border">此前勾上它会把类型改写成「限价TP/SL」「市价TP/SL」，并把<strong>止盈价塞进开仓触发价</strong>——触发价那行输入在市价/限价标签下根本不渲染（类型是提交那一刻才合成的），所以一定会兜到止盈价上。后果是：<strong>市价单不再立刻成交，而是挂在止盈价上开仓</strong>；限价单则要等价格先摸到止盈价才肯激活。开仓价与保护价从此分开存，不再共用一个字段。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">保证金不足时的委托</td>
-                    <td className="px-3 py-2 border-t border-border">挂单<strong>不预留</strong>保证金（与真实交易所不同），所以下单时那道「可用余额不足」是一次<strong>检查</strong>、不是一次<strong>冻结</strong>。成交那一刻会再查一次：付不起就<strong>当场撤销并留痕</strong>（进「已撤销」记录，战役页照样看得到这条腿），并弹出提示写明差多少。绝不缩量成交——填进去的数是授权上限，缩量还会把绑在这笔仓位上的减仓单和战役的初始风险锚一起弄脏。</td>
-                    <td className="px-3 py-2 border-t border-border">此前成交点<strong>一次都不查</strong>：余额 100,000 配两条各需 60,120 的条件单，下单时各自都过，同时触发就扣成 <strong>−20,480</strong>。负余额之后没有任何东西把它捞回来——<strong>有全仓仓位</strong>时它会把全仓权益自己拖到 0 以下，下一跳强平所有标的的全仓仓位并清空全部挂单；<strong>只有逐仓仓位</strong>时那一支根本不跑，负余额永久留在账上、还同步进云端，此后每一笔下单都被「可用余额不足」永久拒掉。分段订单与 TWAP 更是连下单时那道检查都绕过了，现在一并补上。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">合并持仓卡的强平价与追加保证金</td>
-                    <td className="px-3 py-2 border-t border-border">同标的同方向的多笔仓位会并成一张卡。卡上的<strong>强平价格（最先）</strong>写的是这组里<strong>最先被强平</strong>的那一笔的价格——多单取各笔中最高的，空单取最低的；逐仓的多笔卡上，<strong>保证金比率（最高）</strong>写的是同一笔（比率最高 = 离强平最近），悬停里给出整组合计那个数，并说明逐仓保证金不在各笔之间共用。全仓照旧写合计——那本来就是一个共用的保证金池。<strong>「+」调整保证金在合并卡上一直可用，合并几笔都一样</strong>：追加按各笔名义等比摊分，减少按各笔<strong>还能减多少</strong>等比摊分，减到各自的开仓保证金为止。整组一次写完，按仓位 id 定位。分组只按标的+方向、<strong>不含保证金模式</strong>，所以全仓腿会并进同一张卡——此时按钮照常可用，<strong>只对其中的逐仓腿生效</strong>，并在弹窗里写明有几笔全仓未计入。整张卡都是全仓时按钮置灰保留并给出原因：全仓共用一个保证金池，单仓位追加在机制上不存在。</td>
-                    <td className="px-3 py-2 border-t border-border">逐仓爆仓是<strong>逐仓位</strong>判的，先死的是最弱的那一笔。此前卡上显示的是把总量、总保证金、加权均价拼成一笔<strong>虚构仓位</strong>算出来的价，既不是最先也不是最后：一张 104,933 张、均价 0.147257、现价 0.154646 的卡显示 0.134361，而真正先爆的一腿在 <strong>0.142494</strong>——卡说还有 13.1% 空间，<strong>实际只有 7.9%</strong>，低估的余量是现价的 5.26%。另外两件一并修掉：币本位的「减少保证金」<strong>从开仓那一刻起就是死的</strong>（可减额恒为 0，地板取错了字段），以及模态框里的「预估强平价」<strong>对币本位恒等于当前值</strong>（它只改了一个强平公式根本不读的字段）。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">同向仓位合并</td>
-                    <td className="px-3 py-2 border-t border-border">同标的、同方向、<strong>同杠杆同保证金模式同结算方式</strong>的成交会并成<strong>一个</strong>仓位（与币安单向持仓一致）：加权开仓价按<strong>币量</strong>加权，张数与保证金相加，保留最早那一笔的 id 与开仓时刻，每笔成交仍留在仓位的 fills 里。强平因此按合并后的整体判。四项有任一不同则<strong>不合并</strong>，并弹出提示说明原因；<strong>维持保证金口径</strong>另有一条<strong>有方向</strong>的规则：按旧 0.4% 的一笔不并进按币安分层的仓位（会把现有的分层仓位推进更高的档、当场强平），反过来分层的加仓照常并进按旧 0.4% 的仓位、整仓仍按 0.4%——仓位开出来之后不换强平模型，见下面的杠杆分层与仓位上限；「无限制」持仓限制模式下的成交碰上按分层计的仓位照样并进去、整仓仍按分层（见 3.1）。多单与空单<strong>永远不合并</strong>——那是主力与对冲。并入现有仓位时，随单勾选的止盈止损<strong>不挂出</strong>并提示，避免悄悄覆盖仓位上已有的止损；挂在被并入那一笔上的减仓单会自动改指到存活仓位，不撤销。<strong>不合并时</strong>（四项任一不同、或按旧 0.4% 的一笔碰上分层仓位）新的那一笔身上没有任何减仓单，提示里会说明；持仓卡上的<strong>「止盈/止损」与「平仓」都按整张卡生效</strong>：止盈止损是卡上有几笔就各挂一张，平仓是弹窗里挑的成数摊到卡上每一笔（各按自己的数量平）——同一个触发价 / 同一个成数，所以「100%」盖住的是整张卡，一张有两笔的卡照样能按成数减仓。两个弹窗里的开仓价都是这张卡的加权开仓价；止盈止损弹窗里的强平价是逐仓里最先被强平的那一笔，平仓弹窗只写加权开仓价与标记价（不写强平价）；卡上多于一笔时弹窗会写明笔数，平仓弹窗的可用数量按此刻还活着的几笔算，弹窗开着时有一笔被强平，可用数量与预计盈亏跟着变、挑好的成数不变。</td>
-                    <td className="px-3 py-2 border-t border-border">此前每一笔成交各建一个仓位，逐仓强平按「<strong>任一腿</strong>净值 ≤ 维持保证金」判——于是加仓会被<strong>自己的</strong>强平价单独打掉，而健康的主力明明还有盈余可以扛住它。实盘 COAIUSDT 2026-06-13：主力开仓 0.538058（强平 0.491100）、加仓 0.604447（强平 <strong>0.551695</strong>），价格触及 0.542220 把<strong>加仓整条打掉</strong>，主力毫发无损；合并后加权开仓价 0.581748、强平价 <strong>0.530977</strong>，0.542220 根本不该触发任何强平。单向持仓的正确判据是「<strong>各腿净值之和</strong> ≤ 维持保证金之和」，健康腿的盈余本来就该拿来扛住加仓。另注：反向合约的强平价是 E·L(1+mmr)/(L+1)，与线性的 E(1−1/L+mmr) 在 10x 上差 0.9%。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">调整杠杆</td>
-                    <td className="px-3 py-2 border-t border-border"><strong>这一行的上限与「只能升不能降」只在「币安标准」持仓限制模式下生效</strong>（顶部 Header「直接交易」右边的开关，见 3.1）；默认的「无限制」模式下滑块一律 1–150x、有持仓也能降杠杆（降杠杆要从可用余额追加保证金）、不判分层上限，只保留三道：立即触发强平则拒绝、取不到标记价则拒绝、降杠杆要追加的保证金可用余额补不上则拒绝（对话框照实写「可用只有 X（不足）」）。<br />持仓卡上的<strong>「杠杆」</strong>按钮与下单面板的杠杆按钮是<strong>同一个对话框</strong>，改动会<strong>同时重述该标的的持仓、挂单与余额</strong>——所以「下单模块改了杠杆，持仓也跟着改」是结构上成立的，不存在只改一边的路径。提杠杆 = 降低保证金地板 = <strong>释放保证金回余额</strong>（释放额 = 名义 ×(1/L₁ − 1/L₂)，按<strong>开仓价</strong>折算）。名义、张数、开仓价一概不动。确认前会显示保证金与<strong>强平价的前后对比</strong>、释放额，以及滑块所在杠杆的「<strong>当前杠杆倍数最高可持有头寸</strong>」（按该合约的单位：U 本位 USDT、币本位的币、合成币本位 USD）。滑块上限是<strong>该合约的最高杠杆</strong>（KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x），不再一律 125x。四道守卫：立即触发强平则拒绝、逐仓有持仓时<strong>只能升不能降</strong>（滑块下限直接卡死）、持仓和当前委托的总价值超过目标杠杆的最高可持有头寸则拒绝（提示「请调低杠杆倍数至 Nx 以下」，与下单面板是同一个判定，见下一行「杠杆分层与仓位上限」）、取不到标记价则拒绝。</td>
-                    <td className="px-3 py-2 border-t border-border">这正是上文「用提杠杆换加仓弹药」的机制：释放出来的保证金就是新增的可用资金。三件事必须在同一次写入里完成，否则任一交错都是缺陷——<strong>只改杠杆不退钱</strong>会让保证金地板下降而钱还在仓位里，凭空多出一笔「可减保证金」，用户能从调整保证金弹窗里提走、每提一档再来一次；<strong>只退钱不改杠杆</strong>则让用户自己追加的保证金变得取不出来；<strong>不改挂单</strong>则下一笔成交按旧杠杆建仓，而合并键把杠杆算在内，拖一下滑块就多出一张卡。另：平仓记录写的是<strong>开仓时</strong>的杠杆快照，否则中途提一次杠杆再平仓，战役的「初始杠杆」会被追溯改写、R 倍数虚高。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">杠杆分层与仓位上限</td>
-                    <td className="px-3 py-2 border-t border-border"><strong>这一行写的全部规则只在「币安标准」持仓限制模式下生效</strong>（顶部 Header「直接交易」右边的开关，见 3.1）。默认的「无限制」模式：任何币种杠杆 1–150x，不设持仓上限，触发 / 成交时不再判、不标「将超限」，新开的仓位按统一 0.4% 计维持保证金；无限制模式下开的仓位切到币安标准之后与下文「更新前的仓位」同等对待（仍按 0.4%，是对冲豁免的底，提示里写「无限制模式下开的仓位」）。<br />杠杆上限<strong>按合约分层</strong>，数据取自币安公开的分层快照（<strong>2026-09-16</strong>）。这份快照<strong>不是历史分层</strong>：回放更早的日期也按它判。规则与币安一致：<br />· <strong>判的是下单之后的总量</strong>：该合约的持仓 + 当前委托（只减仓单不算，TWAP 只算没成交的部分）+ 这一单。双向持仓下<strong>多空按绝对值相加</strong>，共用一个上限。持仓按标记价估值，挂单按各自的委托价（没有委托价的按触发价，跟踪委托按激活价，市价单与 TWAP 按标记价）估值，正要下的这一单也一样；<strong>已经穿价的限价单</strong>（买价 ≥ 现价、卖价 ≤ 现价，下一根 K 线就按委托价成交）按标记价估值——成交之后它就是按标记价估值的持仓；U 本位以 USDT 计（数量 × 价），币本位以币计（张数 × 面值 ÷ 价，如 BTC）——折币同样是持仓按标记价、挂单与这一单按各自的价：一张低于现价的买入限价单成交时就是按委托价折的币，按标记价折会少算，100% 下出去的单成交后就超了。同一个币的 U 本位与币本位是两张合约，各算各的。<br />· <strong>某个杠杆下最多能持有多少</strong>：最后一个「最高杠杆不低于它」的档位的上限。例：KAITOUSDT 15x 最高 50,000 USDT，75x 只有 5,000。<br />· <strong>某个规模最高能用几倍</strong>：它所在档位的最高杠杆。例：1,635,780 落在 1,000,000–7,500,000 那一档，最高 2x。<br />· 超过<strong>最高一档的上限</strong>，任何杠杆都不能开（KAITOUSDT 为 12,500,000）。<br />· 超限时下单按钮置灰，并提示「持仓和当前委托价值超过当前杠杆倍数最高可持有头寸……按这个规模最高可用 Nx」。引擎下单时再判一次，绕过面板也下不出去。条件单与跟踪委托下单时还会按触发价（跟踪委托按激活价）再判一道——持仓按那个价估值，价格走过去的路上会成交的限价单、会触发的条件单也算作那个价上的持仓——触发时注定过不去的单当场就挂不出去，面板同样标红。<strong>没有穿价的限价单</strong>（分段订单取离现价最远的那笔子单）同样再按委托价判一道「成交那一刻」：持仓、路上会先成交的限价单与会先触发的条件单、这一单都按委托价估值——真币本位低于现价的买单、U 本位高于现价的卖单，成交之后总量会比下单时按标记价算的大，100% 下出去的单成交后就超了、账户从此连对冲都开不出去。币安下单时只判一次（持仓按标记价），这是与币安刻意不同的一处（宁可下单时少给一点，也不让成交把人卡住），第二道的提示以「按委托价 X 成交那一刻估值」开头。「可开」与仓位比例按钮取两道里较小的那个。<strong>本次更新之后下的条件单与跟踪委托</strong>在<strong>触发那一刻</strong>再判一次（币安在触发时才真正下单），过不去就撤单留痕；TWAP 的每一片执行时也按「持仓 + 其余委托 + 这一片」再判，过不去就停掉整张 TWAP 并留痕。更新前挂出的委托触发时不再判：它们是按旧规则放行的，与它们成交后仍按旧模型是同一条规则，升级不会在触发那一刻悄悄撤掉早就挂好的对冲单。挂在盘口的限价单成交时不再判（与币安一致）——只靠下文对冲豁免挂出的限价单除外，它成交那一刻要再判豁免是否仍成立。同一轮里两张 TWAP 各切一片时，前一张刚成交的那一片不会被后一张再算一遍。<br />· <strong>已挂触发单的预警</strong>：下单与改杠杆时，已挂的触发单只按触发价（跟踪委托按激活价）算进敞口，不会替它们预演触发那一刻的判定——那一刻的判定在触发时才做（持仓按那时的价、那时的挂单与杠杆）。所以一张新单、一次提杠杆，可能让本次更新之后挂出的条件单或跟踪委托到触发时注定被撤——止损换对冲的那张对冲单恰恰在该触发时没了。下单面板与杠杆对话框会在确认之前说「这张单下出去后（杠杆调到 Nx 后），已挂的做多条件单 X 触发时会因超出当前杠杆最高可持有头寸被拒」，下出去 / 改完之后消息中心再记一条；<strong>只提醒，不拦</strong>。当前委托里，按此刻的持仓与挂单到时就会被拒的单标着「<strong>触发时将超限</strong>」（靠下文对冲豁免挂出的限价单标「<strong>成交时将超限</strong>」，悬停看原因）。预判按「<strong>价格走到触发价</strong>（跟踪委托为激活价，豁免限价单为委托价）那一刻」算：持仓按那个价估值；走过的路上会成交的限价单（买单委托价不低于走过的最低价、卖单不高于走过的最高价，含已经穿价的，也含正要下的这一单）与会触发的条件单到时已是持仓、按那个价估值——一张回调加仓的限价单会让 S₁ 上的对冲单到时放不下，下单前就会说；路上的条件单触发时自己还要再判，这里按「开出来了」算，宁严勿松；其余挂单按各自的价（跟踪委托单边走过去只会激活、不会成交，按激活价算作挂单）。价格也可能<strong>先去现价另一侧、再折回来</strong>：另一侧的开仓挂单（限价单、条件单）先成交，再走到这张单的价——这几种走法都算，任何一种会被拒都标出来；预警只说这一步新弄坏的那几种（这一步之前就放不下的走法不重复说，直接走过去本来就放不下的单整张不再说——它早就标着）：突破加仓在上、止损对冲在下时，「先突破再跌回来」对冲按已成交的加仓判，「先跌到对冲再涨回来」加仓按已成交的对冲判。正要下的这一单若是触发类单，「另一侧的挂单先成交、再折回来触发它」会被拒时也会说（直接走过去就会被拒的，下单时就已经拦下）。行情再变、之后又下了别的单或改了杠杆，触发时的结果还会不同——这是预警，不是保证。决策记录模式下，引擎拒单时开仓快照照存，但不会再提示「已提交订单」，而是明说没有下单。「可开」与仓位比例按钮同样以这个上限封顶（向下取整）；「可开」按输入框当前的单位报（张、币金额、币保证金、币数、USDT 金额或 USDT 保证金），开多、开空各一列——两列可能不同：同一个限价对一个方向已经穿价（按现价估值），或更新前仓位的对冲豁免让一侧更大。仓位比例按钮的 100%：同一个限价只对一个方向穿价时，取<strong>挂得住的那一列</strong>（穿价的那个方向等于市价单；那一列是 0 才取另一列）——U 本位低于现价的买单、真币本位高于现价的卖单按穿价那一列会少开一截；对冲豁免让两列不同时取<strong>较大的那一列</strong>：往超限的旧仓位那一侧本来就开不了，100% 给的是整份对冲，拿这个量去点另一侧的按钮会标红并说明。估值跟着标记价浮动时，会在上限前留 0.2% 余量——面板显示的是平滑后的价，引擎按最新价估值，差一个 tick 就会把恰好卡线的单拒掉。具体是：按现价成交的单（市价、最优价、已经穿价或离现价不到 0.2% 的限价单——面板与引擎可能对「穿没穿价」看法不同）、挂着这样的限价单、这一单或挂单按标记价估值（TWAP、没有激活价的跟踪委托），或已有持仓时留，U 本位与真币本位都一样；除此之外（离现价更远的限价 / 触发价单、没有持仓，挂单也都按各自的价估值）不留——估值不随现价漂；第二道钉在委托价 / 触发价上，也不留；合成币本位（如 KAITOUSD）按 USD 面值计、与价格无关，从不留。分段订单按各子单的委托价、跟踪委托按激活价估值，面板与引擎同一个口径。下单面板底部的「<strong>杠杆分层</strong>」可查看该合约的全部档位（持仓价值区间、最高杠杆、维持保证金率、速算额、单位、快照日期）。<br />· <strong>现有敞口自己就超过上限</strong>时（行情把持仓的价值推过了线，或更新前按旧规则开的大仓位——旧通用表比币安宽），这个杠杆下再小的同向加仓都开不出去；行情把新仓位推过了线时，对冲单也一样（与币安一致；更新前的旧仓位见下文的对冲豁免）。能把杠杆降到放得下的倍数时，提示照币安的话说「请调低杠杆倍数至 Nx 以下」；逐仓有持仓时不能降杠杆，只能先减仓或撤单，把总量降到上限以下——下单提示与杠杆对话框都照实这么说（对话框停在当前杠杆时也会摆出来），不再叫人去调一个调不了的杠杆。仓位杠杆高过合约现在最高杠杆的旧仓位（如 LUMIAUSDT 上按 35x 开的，该合约最高 10x），平仓前杠杆无法调整，新单最高只能用该合约的最高杠杆。<br />· 保存过的杠杆若超过该合约的最高杠杆（旧版本可存到 125x），按最高杠杆生效并提示一次。杠杆按标的只存一份：偏好里的默认杠杆存的是它与两张合约（U 本位、币本位）里较高那个上限的较小者，读的时候再按各自的结算方式夹——面板刷新后停在币本位，也不会把 U 本位那张合约压到币本位的上限（BNB：偏好 50x → U 本位 50x、币本位 20x）。挂单上若还留着超过上限的旧杠杆，在杠杆对话框里按上限确认一次，挂单即被拉回上限。<br />· 同一个币的 U 本位与币本位上限可能不同（如 BNB 75x / 20x、SOL 100x / 50x、BTC 150x / 125x）：下单面板按它当前的结算方式取分层；持仓卡上的「杠杆」按该仓位自己的结算方式取分层，确认时引擎按同一种结算方式判定与保存。<br />· <strong>币安没有的币本位合约</strong>（如 KAITOUSD）借同一个币的 U 本位分层，按 USD 面值（张数 × 面值）比较，界面上注明「币安无 KAITO 币本位合约，按 U 本位 KAITOUSDT 分层折算」。快照里查不到的合约暂按最常见的那张 U 本位分层（113 个合约共用），同样会注明。<br />· <strong>真正的平仓从不被拦</strong>：持仓卡上的平仓、止盈止损等只减仓单不受这道上限约束。币安在挂单把总量顶过上限时也会拒绝平仓，训练器里拦住平仓只会把人困在仓位里——这是刻意的差别。注意下单面板的「平仓」档并不平仓，而是反向开一笔新仓位，所以它照常受上限约束。<br />· <strong>维持保证金也按档位算</strong>：维持保证金 = 持仓价值 × 档位维持保证金率 − 速算扣除额，与所选杠杆无关；强平价用币安的逐仓公式，算出的价位落进别的档位时换档重算。这只适用于<strong>本次更新之后新开</strong>的仓位——准确地说，是更新之后下的委托成交开出的仓位（往它上面的加仓也一样；只靠下一条的对冲豁免下出去的除外）；更新前开的仓位，以及<strong>更新前挂出、更新后才成交</strong>的委托开出的仓位，仍按旧的统一 0.4% 计算，直到平掉（往它上面的分层加仓会并进这个仓位，整仓仍按 0.4%，见下文的合并规则）。那些旧委托是按旧规则放行的（旧通用表、滑块到 125x、默认 35x），套上分层会一成交就在开仓价上被强平。升级本身不会让任何现有仓位或现有委托开出的仓位被强平或改变强平价。<br />· <strong>更新前的仓位超过新上限时，对冲照常开得出去</strong>：更新前按旧规则开的仓位（旧通用表放行的，如 20x 的 200,000 USD KAITO，新规则 20x 只到 50,000）可能已经超过它的新上限。<strong>反向开仓不受上限约束</strong>，只要反方向的总量（已有持仓与挂单 + 这一单）不超过这些旧仓位的大小——比的是仓位大小：旧仓位、这一单与反方向已有的持仓和挂单<strong>一律按标记价</strong>折算（U 本位比币数，真币本位比张数），一张远离现价的限价单不能因为委托价低就比它要对冲的旧仓位大；<strong>往旧仓位那一侧加仓照常受上限约束</strong>，提示里写明「反向开仓对冲更新前的仓位不受此限，最多 X」。<br />· <strong>谁算「更新前的仓位」，按记下来的来源判，不靠猜</strong>：每张委托、每个仓位都带着来源——分层（本次更新之后正常过了分层判定的）、<strong>对冲豁免</strong>（只靠上一条豁免放行的）、更新前（什么都没有：升级前开的仓位、升级前挂出的委托及它们之后成交开出的仓位）。<strong>只有更新前的仓位是豁免的底</strong>，某一侧的额度 = 反方向上更新前仓位<strong>冻结的底</strong>（见下面的规则四：分层加仓并进来不会把它做大）− 这一侧已有的全部持仓与挂单（已经靠豁免开出 / 挂出的对冲占着额度）。<strong>靠这条豁免下出去的单按旧模型开</strong>：与它对冲的旧仓位一样按统一 0.4% 计维持保证金——这样的对冲往往远超当前杠杆在分层里允许的大小，套上分层维持保证金会高过它自己的保证金，价格不动也会一成交就被强平；下单面板在按钮前会说明。但它<strong>不是</strong>更新前的仓位：不能再给别的单当豁免的底——否则旧仓位减掉一半后又能加回去，旧仓位平掉后还能开出新的超限仓位，一轮轮接下去。<strong>挂着的豁免单到触发 / 成交那一刻再判一次</strong>（条件单、跟踪委托、限价单都是）：旧仓位还在、额度没被别的对冲占掉，就按旧模型开；否则按普通的分层判——放得下就开分层仓位，放不下就撤单留痕、计划单照常放回。旧仓位先平掉之后，那张对冲单不会再开出一个远超上限的裸仓位。本次更新之后挂的条件单若到触发那一刻才靠这条豁免放行，那一笔同样按旧模型开，带豁免标记。旧仓位平掉之后还留着的豁免仓位就是一个超过上限的普通仓位：只能减仓，不能再往任何一侧开新单（与行情把仓位推过线同样处理）。下单面板里开多、开空两个按钮因此可能一个能点、一个不能，「可开」两列也不同。触发时再判、已挂触发单的预警也按同一条豁免。这是与币安刻意不同的又一处：升级不该拿走现有仓位的对冲（止损换对冲）；本次更新之后开的仓位没有这条豁免。<br />· <strong>加仓合并：仓位开出来之后不换强平模型</strong>（规则一）——合并之后存活的仓位一律沿用<strong>被加仓的那个仓位</strong>的维持保证金模型与来源，与并进来的这一笔是什么来源无关。没有任何一笔成交能改动一个现有仓位的维持保证金、强平价或是否还活着。由此分成三条：<br />　· <strong>分层的加仓可以并进按旧 0.4% 的仓位</strong>（更新前的仓位、靠对冲豁免开的仓位，规则二）：并进去之后<strong>整个仓位仍按旧的统一 0.4%</strong>，一个数都不重新定价，也不会多出一条只靠自己那点保证金硬扛的新腿——加仓照旧被旧仓位的权益扛着（上面 COAIUSDT 那次事故正是为此）。加仓在<strong>下单</strong>那一刻照样要过分层上限，这一条没变；上限限的是总敞口，所以靠一路加仓把按 0.4% 的仓位堆到上限之上是做不到的。合并会把两笔的保证金与均价汇到一起，顺带把强平价<strong>推远或拉近</strong>——加到<strong>亏损</strong>的旧仓位上推远，加到<strong>浮盈</strong>的旧仓位上拉近（新的一刀在更高的价上开、拉高了均价）；面板在按钮前把前后两个数摆出来。推远的例子：KAITOUSDT 20x 逐仓、更新前的多仓 40,000 @1.0、保证金 2,000，在 0.96 上加满一刀，整仓强平价 <strong>0.954000 → 0.945206</strong>（推远 0.92%）；只加 1 个币则 0.954000 → 0.953999（几乎不动）。拉近的例子、也是这个体系里最常见的画面（往浮盈的头仓上加）：同一个盘面若旧多仓是 40,000 @0.50、保证金 1,000（标记价 0.96 即 +92%），在 0.96 上加 10,000 USDT，旧仓位自己的强平价从 <strong>0.477000 变成 0.567669</strong>（拉近 9.44%）——这是往浮盈头仓上加仓的人该读的那一个数；而那一刀若单独成仓只有 <strong>0.923452</strong>（离标记价 3.81%），一次 4% 的回撤就把加仓单独打掉，并进去之后它被整仓 18,400 的浮盈扛着。<br />　· <strong>反过来不并</strong>（规则三）：按旧 0.4% 的一笔（更新前挂出的旧委托成交、靠对冲豁免开的成交）<strong>不会</strong>并进按币安分层的同方向仓位。存活的会是分层仓位，它要把并进来的那一截名义也按档位定价、跨进更高的档，足以把现有的分层仓位当场强平（KAITOUSDT 5x：分层空 9,000 的维持保证金是 9,000 × 1.5% − 25 = 110，并进一笔 230,000 的豁免对冲后按分层是 239,000 × 10% − 7,700 = <strong>16,200</strong>，而两笔各算各的只要 110 + 920 = 1,030）。这一格两笔各成一个仓位、各算各的强平价，现有仓位的维持保证金与强平价一个数都不动；下单面板在按钮前会说，成交时消息中心也会记一条「未与现有仓位合并」。<br />　· <strong>加进去的名义不会把对冲豁免的额度做大</strong>（规则四）：更新前的仓位单独记着一个<strong>冻结的底</strong>——分层加仓并进来只把仓位做大、底不动；部分平仓按比例缩，平光就没了；只有<strong>更新前挂出、更新后才成交</strong>的旧委托并进来才会把底做大（那些单子是按旧规则放行的，用户没法再挂新的）。对冲额度、触发 / 成交那一刻的再判、面板的「可开」读的都是这个冻结的底，<strong>不是仓位当前的大小</strong>——否则一笔分层加仓就能把额度顶大一截，反向再开出一笔同样大的超限裸仓位，一轮轮接下去。靠豁免开的仓位与分层仓位一概不是底，这一条没变。<br />　· <strong>口径相同的两笔照常合并</strong>（都按分层、都按旧 0.4%），存活的仍是被加仓那个仓位的来源，维持保证金与强平价不变；豁免成交并进更新前的仓位后整个仓位仍按 0.4%，但并进去的那一截不算底。<br />　· 规则三那一格<strong>没有合并</strong>时，新的那一笔身上<strong>没有任何减仓单</strong>：挂在旧仓位上的止盈止损只认那一笔，盖不住新的这一笔；持仓卡上按一次「止盈/止损」会给卡上每一笔各挂一张（同一个触发价、成数按各笔自己的数量算），成交时的提示也会说这句。<strong>「平仓」同样按整张卡生效</strong>：弹窗里挑的成数摊到卡上每一笔、各按自己的数量平，所以一张有两笔的卡照样能按成数减仓，「100%」盖住整张卡——不再是一按就把两笔全部市价平掉。旧仓位贴着强平价、这一笔又并不进去时，要救只能用持仓卡上的「+」追加保证金；<strong>「+」是卡级的</strong>，卡上多于一笔时这笔钱按名义等比摊到每一笔，旧仓位只拿到其中一部分，面板在按钮前会连这一点一起说。<br />· <strong>加仓计算器</strong>给出的可下单量同样过这道上限（见 3.4）。</td>
-                    <td className="px-3 py-2 border-t border-border">此前所有合约共用一张通用表（≤5 万 125x、≤25 万 50x、≤100 万 20x、其余 10x），单位写死 USDT，而且<strong>只看这一单自己</strong>的名义：KAITO 币本位 163,578 张（1,635,780 USD）在 15x 下被提示「最高 10x」，而币安对 KAITOUSDT 这个规模最高只给 <strong>2x</strong>（15x 最多 50,000）——旧表在这里反而过松。它也不看已有持仓与挂单，把一单拆成几单就能绕过去；引擎下单与挂单触发从不检查；「手续费等级」链接显示的其实是这张杠杆表。维持保证金一律 0.4%，没有速算扣除额，大仓位的强平价因此偏乐观。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">单笔数量上限（市价单）</td>
-                    <td className="px-3 py-2 border-t border-border"><strong>只在「币安标准」持仓限制模式下生效</strong>（见 3.1）；默认的「无限制」模式没有单笔市价 / 限价上限，也不标「触发时将超单笔上限」，持仓卡上的市价平仓与按成数的止盈止损不受限。无限制模式下挂出的委托切到币安标准之后，触发 / 执行那一刻照样按下面的规则再判。<br />与币安一致，<strong>一笔市价单</strong>的数量有上限（币安 exchangeInfo 的 MARKET_LOT_SIZE，快照 <strong>2026-09-23</strong>）：BTCUSDT 120 BTC、ETHUSDT 2,000 ETH、KAITOUSDT 200,000 KAITO、TUTUSDT 4,000,000 TUT、ORDIUSDT 20,000 ORDI、ASTERUSDT 400,000 ASTER；币本位按张计，如 BTCUSD 60,000 张。限价单按宽得多的 LOT_SIZE 判（KAITOUSDT 2,000,000、BTCUSDT 1,000）。上限管的是<strong>一笔单子</strong>，不是仓位：仓位可以比它大，分几笔下就是了。<br />· <strong>哪些单按市价上限判</strong>：市价单（开仓、加仓、下单面板的「平仓」档）、条件委托与跟踪委托（触发后按市价成交）、TWAP 的<strong>每一片</strong>、持仓卡上的市价平仓、按成数（不足 100%）挂的止盈止损；分段订单的<strong>每张子单</strong>按限价上限判。超过就下不出去：下单面板把按钮置灰并标红说明，引擎下单时再判一次（币安的 -4005「数量超过最大值」）。提示写明上限与出路，出路按单子的类型说：市价单拆成几笔或改用限价单；条件单、跟踪委托拆成几张同类的单（每张不超过上限）——不建议改用限价单：止损方向的单子（S₁ 下方卖出的对冲、现价上方买入的突破加仓）换成同价的限价单会立刻按现价成交；委托列表里已经挂着的，说的是撤单后拆开重挂。<br />· <strong>下单面板</strong>：市价类订单在数量框下常驻一行「单笔市价上限 200,000 KAITO」（币本位写张数）；仓位比例按钮的 100% 与「可开」按这个上限封顶（TWAP 按每一片乘片数，分段按每张子单乘张数）。U 本位按 USDT 下单（订单金额 / 初始保证金，面板默认的单位）时，框里的 USDT 按现价折成币：上限以币计、与价无关，折出来的币数却跟着现价走，恰好填到「上限 × 现价」的单跌一个 tick 就又超了——市价、TWAP、跟踪委托的 100% 在上限前同样留 0.2% 余量；条件委托按触发价折币，不留。加仓计算器的「按上限下单」只预填一笔上限、说明剩下的还要再分几笔下；S₁ 上的合计对冲超过上限时，提示要拆成几张条件单。<br />· <strong>币安没有的币本位合约</strong>（如 KAITOUSD）借同一个币的 U 本位上限，按这一单成交的价把币数折成整张（向下取整）：KAITO 在 1.0905 上 200,000 KAITO = 21,810 张，价格越低能下的张数越少。所以这类合约的条件单、跟踪委托、TWAP 在触发 / 执行那一刻按那一刻的价再判一次。跟踪委托的成交价是回调线（极值 × (1 ∓ 回调幅度)），下单时按<strong>激活价（没有激活价按现价）下方一个回调幅度</strong>折张。<strong>有激活价</strong>时，卖出方向的峰值从激活价起算、只会更高，成交价不会低于它——挂得出去就不会在触发时被拒；<strong>没有激活价</strong>时挂出即开始追踪，峰值从挂出之后第一段行情算起，可能低于下单时的现价（回放按 K 线的高低点撮合），成交价也就可能低于下单时判的那个价。这种单与买入方向一样在触发那一刻再判一次，过不去就撤单留痕：买入方向从谷底反弹成交，谷底再深时上限更小。委托列表按此刻的回调线提前标出，但同一段行情里刚摸到极值就回撤触发的，来不及提前标。TWAP 每一片按执行那一刻的价折张，<strong>价格下跌时每片上限随之变小</strong>，面板小字会说。下单面板的 100% 与持仓卡的「按上限平」在按现价折的上限前留 0.2% 余量（现价每一帧都在变，恰好卡线的数量跌一个 tick 就又超了）。快照里查不到的合约<strong>不设上限</strong>。<br />· <strong>触发时再判，但不悄悄丢掉保护</strong>：本次更新之后挂的、按市价成交的单在触发 / 执行时再判；过不去就撤单留痕，并在消息中心说清（止盈止损会写明「这个仓位此刻没有这张止损的保护」）。委托列表里到时会被拒的单提前标着「<strong>触发时将超单笔上限</strong>」（TWAP 标「执行时将超单笔上限」，悬停看原因）。更新前挂出的委托触发时不再判。<br />· <strong>不受这个上限约束</strong>：引擎强平；平掉整个仓位（100%）的止盈止损——相当于币安不带数量的「平仓」止盈止损（closePosition）；「一键平仓」与停止回放时的收尾平仓。币安文档对 closePosition 只说触发时平掉整个仓位、不能带数量，没有说它受单笔上限约束，这里按不受约束处理；币安 FAQ 对仓位超过市价单上限时的「一键平仓」说的是可能延迟成交，不是拒单。<br />· <strong>仓位比上限大，怎么平</strong>：持仓卡上的「平仓」一次最多平一个上限，超过时按钮置灰并给出「按上限平」，分几次市价平仓即可；或者设 100% 的止盈止损。按成数挂的止盈止损最小一格是 10%：仓位是上限的 10 倍以上时，连这一格都放不下，弹窗会直说只能选 100%。仓位比上限大 100 倍以上也一样（CYPHUSDT 一笔最多 2,000 CYPH，250,000 的仓位按 0.8% 平）：平仓弹窗填多少就平多少（此前不到 1% 的量一律按 1% 平），确认按钮上写的就是真正平掉的成数（0.8%），不四舍五入成 1% 或 0%。连最小的一笔都超过上限时（合成币本位在极低的价上，1 张就超过借来的币数上限），只能设 100% 的止盈止损或用「一键平仓」。本模拟器没有只减仓的限价平仓单——下单面板的「平仓」档是反向开一笔新仓位，照常受上限约束。</td>
-                    <td className="px-3 py-2 border-t border-border">此前任何规模的市价单都一口成交，币安却会拒单：KAITO 币本位 163,578 张（1,635,780 USD）这样的单子，按 KAITOUSDT 的上限一笔最多 200,000 KAITO（在 1.0905 上约 21,810 张、218,100 USD）。在这里练出来的「一笔市价吃满、一笔市价平光」到真实账户上会被拒——最要命的是止损换对冲那一刻：S₁ 上的对冲条件单超过上限，在币安一张都挂不出去（-4005），要事先拆成几张。数据取自币安公开的 exchangeInfo（不需要登录），用 scripts/update-binance-symbol-filters.mjs 刷新；强平清算费率一并存下，暂不参与计算。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">默认结算方式</td>
-                    <td className="px-3 py-2 border-t border-border">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，但切到 U本位<strong>只对当前会话有效</strong>——页面每次刷新或重新打开，面板一律回到币本位，不记住上次的选择；已开的 U本位仓位不受影响，它本来就是另一张合约（如 RUNEUSDT 与 RUNEUSD）。</td>
-                    <td className="px-3 py-2 border-t border-border">本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 border-t border-border font-medium">ROE 分母</td>
-                    <td className="px-3 py-2 border-t border-border">U本位与币本位合约的 ROE 分母统一固定为开仓时的初始保证金；后续追加保证金不计入 ROE 分母，只影响保证金余额、强平风险和保证金比率。</td>
-                    <td className="px-3 py-2 border-t border-border">追加保证金是延长生存时间的动作，不是降低这笔交易原始收益率的动作。看 ROE 时，读的是这笔交易相对初始风险资本的效率；看爆仓风险时，再看保证金余额和保证金比率。</td>
-                  </tr>
-                </tbody>
-              </table>
+            {/* 【用户要求】原来是一张 14 行、三列的大表，太繁琐：改成每项一行「事项 + 一句话结论」，完整口径与原因点开再看（内容一字未删，导出照样带上） */}
+            <div className="guide-notes">
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">交易偏好（右上角 ⋯）</span>
+                  <span className="guide-note__gist">与币安同构的偏好抽屉；训练阶段强制逐仓，默认设成全仓也下不了单。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">下单面板右上角的 <strong>⋯</strong> 打开抽屉，页面树与币安一致，分 <strong>交易偏好</strong> / <strong>界面设置</strong> 两个页签。<br />· <strong>默认交易设置 → 默认杠杆和保证金模式</strong>：可开启「应用默认杠杆」并设定 1–50x 与默认保证金模式，点「确认」才生效（草稿式，与币安相同）。默认杠杆超过某个币对的最高杠杆时，在该币对上按它的最高杠杆生效（币安标准持仓限制模式下按合约分层；同一个币的 U 本位与币本位各按各的上限；无限制模式下最高 150x，偏好的 1–50x 照原值生效）。<strong>只对尚未访问过、且当前无持仓无挂单的币对生效</strong>——已建仓的标的不会在背后被改动风险参数。注意即便这里选了全仓，下单时仍会被硬阻断：训练阶段强制逐仓。<br />· <strong>默认交易设置 → 默认触发类型</strong>：最新价格 / 标记价格，改完即同步到下单面板的触发价判定。<br />· <strong>下单确认</strong>：按八种订单类型分别开关二次确认弹窗。决策记录模式本就强制下单前快照，不受此开关影响。<br />· <strong>仓位模式</strong>：本系统默认双向持仓——主仓做多 + 对冲做空必须能并存，切成单向会让对冲腿无处安放。<br />· <strong>界面设置 → 模块显隐</strong>：只列真能藏的两个（订单簿、P_gap 优势边际），与页内的关闭按钮是同一个状态，刷新后保留。图表 / 下单 / 仓位是交易页骨架不可隐藏，「最新成交」「保证金比率」本系统没有对应模块，因此不列。配色全局锁定绿涨红跌，以免历史截图与复盘记录里的红绿含义前后不一致。<br />· <strong>冷静期</strong>在「高级设置」里（原先挂在面板顶部，已收进抽屉）。<br />· <strong>历史消息</strong>在抽屉首页最下方：成交、触发、资金费结算、报错等提示<strong>默认不再弹出</strong>（原先弹在屏幕右上角，会盖住时间机器的倍速条与模拟时钟），一律记在这里，按真实时间倒序，最多保留最近 300 条，点开即视为已读。未读条数显示在 <strong>⋯</strong> 按钮的角标上，有未读报错时为红色。想恢复弹出，到「通知设置」打开「在屏幕上弹出提示」。爆仓仍以独立弹窗告知，不受此开关影响。<br />· 账户模式 / 资产模式 / 价差保护 / 涨跌幅与图表时区等本系统无对应功能的页面照样能打开，里面写清了币安在此做什么、以及本系统为何不适用——不是漏做。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>与币安同构，便于迁移习惯。注意本系统训练阶段<strong>强制逐仓</strong>：即便把默认保证金模式设为全仓，下单仍会被硬阻断。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">订单类型（币安式三槽）</span>
+                  <span className="guide-note__gist">限价 | 市价 | 高级槽三个标签，五种高级类型都真实执行；止盈止损用勾选。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">常驻 <strong>限价 | 市价 | 高级槽</strong> 三个标签；高级槽显示当前选中的高级类型，下拉五项（条件委托 / 跟踪委托 / 只做Maker / TWAP / 分段订单）对当前项打勾。止盈止损不占标签位，用限价 / 市价表单里的勾选组合。<strong>五种高级类型都是真实执行</strong>：条件委托触发价成交；<strong>跟踪委托</strong>按币安语义——卖出方向追踪最高价、从峰值回撤「回调率」即市价成交，买入方向对称追踪最低价，可设激活价（触及后才开始追踪）；<strong>TWAP</strong> 在总时长内按模拟时间均匀分批市价成交（切片间隔自动 ≈ 总时长 ÷ 20，最短 1 分钟）；<strong>分段订单</strong>在起始价与终止价之间均匀铺出指定张数的限价单。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>与币安的下单区同构，训练动作可以直接迁移。跟踪委托同一根 K 线内先按有利端点推进极值、再用不利端点判触发——宁可早触发，不做乐观回测。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">数量单位</span>
+                  <span className="guide-note__gist">默认按保证金资产的「订单金额」输入；「◯◯ 保证金」是按保证金投入，不是数量。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">点数量框右侧的单位即弹出<strong>单位偏好</strong>浮层（贴着数量框，与币安同位置），两张卡片：<strong>卡片一</strong>是标的自身的计量单位（U 本位 → 币，币本位 → <strong>张</strong>，1 张 = 固定 USD 面值）；<strong>卡片二</strong>是保证金资产（U 本位 → USDT，币本位 → 该币），内含常驻的<strong>「订单金额 / 初始保证金」</strong>两个子选项。默认落在<strong>卡片二的「订单金额」</strong>——币本位即该币的订单金额、U 本位即 USDT 订单金额，量纲与该模式的保证金资产一致；「张」与「初始保证金」留给需要时手动切换。换标的或切结算方式时自动回到这个默认并清空输入。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>币本位下把数量默认成 USD 会让单位与标的脱节。另需留意：单位下拉里还有「<strong>◯◯ 保证金</strong>」一项，那是<strong>按保证金输入</strong>而非按数量——标签特意带上「保证金」三字，避免与数量混淆（在该模式下输入 500 万，意思是投入 500 万枚币作保证金，按杠杆放大后名义可达数千万）。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">持仓卡的「持仓数量」</span>
+                  <span className="guide-note__gist">币本位在张数后补一个按标记价折算的持币数量。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">币本位持仓在张数后面补一个<strong>按标记价折算的持币数量</strong>，形如 <strong>13291 张 ≈ 284,702.0065 RAVE</strong>；U 本位不变（它的数量本来就是币量）。悬停给出折算式：名义 USD ÷ 标记价。价格暂时取不到时只显示张数，不编一个币量出来。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>反向合约的面值锁死在 USD 上，<strong>持币数量随价格浮动</strong>——只显示张数的话，「我现在到底拿着多少币」每次都得自己心算。折算口径与同一张卡上的标记价、保证金比率一致。<strong>持仓按标记价、挂单按它自己会成交的价</strong>——两者不同源，这是刻意的：持仓已经在市场里，挂单还没有。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">当前委托的「数量」</span>
+                  <span className="guide-note__gist">币本位挂单按它真正会成交的价折算币数（委托价 / 触发价 / 现价）。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">币本位挂单的币数，按<strong>这一单真正会成交的那个价</strong>折算，并在张数那一行写明口径（按<strong>委托价</strong> / <strong>触发价</strong> / <strong>现价</strong>折算）。逐型：限价 / 限价止盈止损 / 只做Maker / 分段子单 → 委托价；<strong>条件委托（含止盈止损单）→ 触发价</strong>；<strong>跟踪委托 / TWAP / 市价止盈止损 → 现价</strong>。减仓单还会写出<strong>成数</strong>（如「100% 仓位」）：它按触发价折，主读数会比按标记价折的持仓卡小一截，不写成数容易被误读成部分平仓。<strong>TWAP 按剩余量显示</strong>，并单列「剩余 X / 总 Y」——切片引擎只累加已成交量、从不递减挂单量，此前一张走完九成的 TWAP 与一张还没开始的长得一模一样。下单面板的「实际下单 N 张 ≈ …」用的是同一个价，所以输入框、提示、委托列表三处永远是同一个数。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前一律按<strong>下单那一刻的市价</strong>折算：触发价 0.010344、市价 0.011199 的那张条件单，屏幕上写 892.96 NOM，而它成交时给你的是 966.744006 NOM——差 8.27%，且永不收敛，因为它是拿一个<strong>永不发生的价</strong>算出来的。张数也一样被它定：填 3600 个币会下出 4 张，那 4 张到触发价上是 3866.98 个币，多出的 267 个你从没批准过。<strong>跟踪委托那行输入是「激活价」不是触发价</strong>（成交价 = 极值 ×(1∓回调率)，挂单时不可知），TWAP 的两个价都是 0，所以这两类如实退回<strong>现价并标注</strong>——标签只声称「按此刻的市价，这一单相当于多少币」，不假装那是成交价；拿激活价去折出来的数才会被读成成交价，而它永远不是。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">「止盈/止损」勾选框</span>
+                  <span className="guide-note__gist">勾上不改订单类型；两个保护价成交后才挂成这笔仓位的减仓单。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">勾上它<strong>不改变订单类型</strong>：市价单仍然当场成交、限价单仍然挂在你写的委托价上、条件单的触发价仍然是你填的那个。两个保护价随单带着，<strong>成交那一刻</strong>才变成挂在这笔仓位上的减仓单（与持仓卡上的「止盈/止损」按钮造出的是同一种东西）。方向校验参照的是<strong>这笔仓位的开仓价</strong>，不是此刻的盘口，并且<strong>在下单时就拦</strong>——那是你还能改的最后一刻；成交时再查一遍作兜底，若某一腿方向不对，<strong>只丢那一腿</strong>并弹出提示，另一腿照挂。<strong>分段订单 / TWAP / 跟踪委托不支持</strong>随单保护单，勾选框在这三类下直接置灰。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前勾上它会把类型改写成「限价TP/SL」「市价TP/SL」，并把<strong>止盈价塞进开仓触发价</strong>——触发价那行输入在市价/限价标签下根本不渲染（类型是提交那一刻才合成的），所以一定会兜到止盈价上。后果是：<strong>市价单不再立刻成交，而是挂在止盈价上开仓</strong>；限价单则要等价格先摸到止盈价才肯激活。开仓价与保护价从此分开存，不再共用一个字段。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">保证金不足时的委托</span>
+                  <span className="guide-note__gist">挂单不冻结保证金；成交时付不起就整单撤销并留痕，绝不缩量。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">挂单<strong>不预留</strong>保证金（与真实交易所不同），所以下单时那道「可用余额不足」是一次<strong>检查</strong>、不是一次<strong>冻结</strong>。成交那一刻会再查一次：付不起就<strong>当场撤销并留痕</strong>（进「已撤销」记录，战役页照样看得到这条腿），并弹出提示写明差多少。绝不缩量成交——填进去的数是授权上限，缩量还会把绑在这笔仓位上的减仓单和战役的初始风险锚一起弄脏。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前成交点<strong>一次都不查</strong>：余额 100,000 配两条各需 60,120 的条件单，下单时各自都过，同时触发就扣成 <strong>−20,480</strong>。负余额之后没有任何东西把它捞回来——<strong>有全仓仓位</strong>时它会把全仓权益自己拖到 0 以下，下一跳强平所有标的的全仓仓位并清空全部挂单；<strong>只有逐仓仓位</strong>时那一支根本不跑，负余额永久留在账上、还同步进云端，此后每一笔下单都被「可用余额不足」永久拒掉。分段订单与 TWAP 更是连下单时那道检查都绕过了，现在一并补上。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">合并持仓卡的强平价与追加保证金</span>
+                  <span className="guide-note__gist">强平价写最先爆的那一笔；「+」追加 / 减少保证金按各笔等比摊分。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">同标的同方向的多笔仓位会并成一张卡。卡上的<strong>强平价格（最先）</strong>写的是这组里<strong>最先被强平</strong>的那一笔的价格——多单取各笔中最高的，空单取最低的；逐仓的多笔卡上，<strong>保证金比率（最高）</strong>写的是同一笔（比率最高 = 离强平最近），悬停里给出整组合计那个数，并说明逐仓保证金不在各笔之间共用。全仓照旧写合计——那本来就是一个共用的保证金池。<strong>「+」调整保证金在合并卡上一直可用，合并几笔都一样</strong>：追加按各笔名义等比摊分，减少按各笔<strong>还能减多少</strong>等比摊分，减到各自的开仓保证金为止。整组一次写完，按仓位 id 定位。分组只按标的+方向、<strong>不含保证金模式</strong>，所以全仓腿会并进同一张卡——此时按钮照常可用，<strong>只对其中的逐仓腿生效</strong>，并在弹窗里写明有几笔全仓未计入。整张卡都是全仓时按钮置灰保留并给出原因：全仓共用一个保证金池，单仓位追加在机制上不存在。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>逐仓爆仓是<strong>逐仓位</strong>判的，先死的是最弱的那一笔。此前卡上显示的是把总量、总保证金、加权均价拼成一笔<strong>虚构仓位</strong>算出来的价，既不是最先也不是最后：一张 104,933 张、均价 0.147257、现价 0.154646 的卡显示 0.134361，而真正先爆的一腿在 <strong>0.142494</strong>——卡说还有 13.1% 空间，<strong>实际只有 7.9%</strong>，低估的余量是现价的 5.26%。另外两件一并修掉：币本位的「减少保证金」<strong>从开仓那一刻起就是死的</strong>（可减额恒为 0，地板取错了字段），以及模态框里的「预估强平价」<strong>对币本位恒等于当前值</strong>（它只改了一个强平公式根本不读的字段）。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">同向仓位合并</span>
+                  <span className="guide-note__gist">同标的、同方向、同杠杆、同模式、同结算才合并，强平按合并后的整体判。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">同标的、同方向、<strong>同杠杆同保证金模式同结算方式</strong>的成交会并成<strong>一个</strong>仓位（与币安单向持仓一致）：加权开仓价按<strong>币量</strong>加权，张数与保证金相加，保留最早那一笔的 id 与开仓时刻，每笔成交仍留在仓位的 fills 里。强平因此按合并后的整体判。四项有任一不同则<strong>不合并</strong>，并弹出提示说明原因；<strong>维持保证金口径</strong>另有一条<strong>有方向</strong>的规则：按旧 0.4% 的一笔不并进按币安分层的仓位（会把现有的分层仓位推进更高的档、当场强平），反过来分层的加仓照常并进按旧 0.4% 的仓位、整仓仍按 0.4%——仓位开出来之后不换强平模型，见下面的杠杆分层与仓位上限；「无限制」持仓限制模式下的成交碰上按分层计的仓位照样并进去、整仓仍按分层（见 3.1）。多单与空单<strong>永远不合并</strong>——那是主力与对冲。并入现有仓位时，随单勾选的止盈止损<strong>不挂出</strong>并提示，避免悄悄覆盖仓位上已有的止损；挂在被并入那一笔上的减仓单会自动改指到存活仓位，不撤销。<strong>不合并时</strong>（四项任一不同、或按旧 0.4% 的一笔碰上分层仓位）新的那一笔身上没有任何减仓单，提示里会说明；持仓卡上的<strong>「止盈/止损」与「平仓」都按整张卡生效</strong>：止盈止损是卡上有几笔就各挂一张，平仓是弹窗里挑的成数摊到卡上每一笔（各按自己的数量平）——同一个触发价 / 同一个成数，所以「100%」盖住的是整张卡，一张有两笔的卡照样能按成数减仓。两个弹窗里的开仓价都是这张卡的加权开仓价；止盈止损弹窗里的强平价是逐仓里最先被强平的那一笔，平仓弹窗只写加权开仓价与标记价（不写强平价）；卡上多于一笔时弹窗会写明笔数，平仓弹窗的可用数量按此刻还活着的几笔算，弹窗开着时有一笔被强平，可用数量与预计盈亏跟着变、挑好的成数不变。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前每一笔成交各建一个仓位，逐仓强平按「<strong>任一腿</strong>净值 ≤ 维持保证金」判——于是加仓会被<strong>自己的</strong>强平价单独打掉，而健康的主力明明还有盈余可以扛住它。实盘 COAIUSDT 2026-06-13：主力开仓 0.538058（强平 0.491100）、加仓 0.604447（强平 <strong>0.551695</strong>），价格触及 0.542220 把<strong>加仓整条打掉</strong>，主力毫发无损；合并后加权开仓价 0.581748、强平价 <strong>0.530977</strong>，0.542220 根本不该触发任何强平。单向持仓的正确判据是「<strong>各腿净值之和</strong> ≤ 维持保证金之和」，健康腿的盈余本来就该拿来扛住加仓。另注：反向合约的强平价是 E·L(1+mmr)/(L+1)，与线性的 E(1−1/L+mmr) 在 10x 上差 0.9%。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">调整杠杆</span>
+                  <span className="guide-note__gist">上限与「只能升不能降」只在币安标准模式生效；无限制模式 1–150x、可降杠杆。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule"><strong>这一行的上限与「只能升不能降」只在「币安标准」持仓限制模式下生效</strong>（顶部 Header「直接交易」右边的开关，见 3.1）；默认的「无限制」模式下滑块一律 1–150x、有持仓也能降杠杆（降杠杆要从可用余额追加保证金）、不判分层上限，只保留三道：立即触发强平则拒绝、取不到标记价则拒绝、降杠杆要追加的保证金可用余额补不上则拒绝（对话框照实写「可用只有 X（不足）」）。<br />持仓卡上的<strong>「杠杆」</strong>按钮与下单面板的杠杆按钮是<strong>同一个对话框</strong>，改动会<strong>同时重述该标的的持仓、挂单与余额</strong>——所以「下单模块改了杠杆，持仓也跟着改」是结构上成立的，不存在只改一边的路径。提杠杆 = 降低保证金地板 = <strong>释放保证金回余额</strong>（释放额 = 名义 ×(1/L₁ − 1/L₂)，按<strong>开仓价</strong>折算）。名义、张数、开仓价一概不动。确认前会显示保证金与<strong>强平价的前后对比</strong>、释放额，以及滑块所在杠杆的「<strong>当前杠杆倍数最高可持有头寸</strong>」（按该合约的单位：U 本位 USDT、币本位的币、合成币本位 USD）。滑块上限是<strong>该合约的最高杠杆</strong>（KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x），不再一律 125x。四道守卫：立即触发强平则拒绝、逐仓有持仓时<strong>只能升不能降</strong>（滑块下限直接卡死）、持仓和当前委托的总价值超过目标杠杆的最高可持有头寸则拒绝（提示「请调低杠杆倍数至 Nx 以下」，与下单面板是同一个判定，见下一行「杠杆分层与仓位上限」）、取不到标记价则拒绝。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>这正是上文「用提杠杆换加仓弹药」的机制：释放出来的保证金就是新增的可用资金。三件事必须在同一次写入里完成，否则任一交错都是缺陷——<strong>只改杠杆不退钱</strong>会让保证金地板下降而钱还在仓位里，凭空多出一笔「可减保证金」，用户能从调整保证金弹窗里提走、每提一档再来一次；<strong>只退钱不改杠杆</strong>则让用户自己追加的保证金变得取不出来；<strong>不改挂单</strong>则下一笔成交按旧杠杆建仓，而合并键把杠杆算在内，拖一下滑块就多出一张卡。另：平仓记录写的是<strong>开仓时</strong>的杠杆快照，否则中途提一次杠杆再平仓，战役的「初始杠杆」会被追溯改写、R 倍数虚高。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">杠杆分层与仓位上限</span>
+                  <span className="guide-note__gist">只在币安标准模式下按合约真实分层；无限制模式 1–150x、不设持仓上限。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule"><strong>这一行写的全部规则只在「币安标准」持仓限制模式下生效</strong>（顶部 Header「直接交易」右边的开关，见 3.1）。默认的「无限制」模式：任何币种杠杆 1–150x，不设持仓上限，触发 / 成交时不再判、不标「将超限」，新开的仓位按统一 0.4% 计维持保证金；无限制模式下开的仓位切到币安标准之后与下文「更新前的仓位」同等对待（仍按 0.4%，是对冲豁免的底，提示里写「无限制模式下开的仓位」）。<br />杠杆上限<strong>按合约分层</strong>，数据取自币安公开的分层快照（<strong>2026-09-16</strong>）。这份快照<strong>不是历史分层</strong>：回放更早的日期也按它判。规则与币安一致：<br />· <strong>判的是下单之后的总量</strong>：该合约的持仓 + 当前委托（只减仓单不算，TWAP 只算没成交的部分）+ 这一单。双向持仓下<strong>多空按绝对值相加</strong>，共用一个上限。持仓按标记价估值，挂单按各自的委托价（没有委托价的按触发价，跟踪委托按激活价，市价单与 TWAP 按标记价）估值，正要下的这一单也一样；<strong>已经穿价的限价单</strong>（买价 ≥ 现价、卖价 ≤ 现价，下一根 K 线就按委托价成交）按标记价估值——成交之后它就是按标记价估值的持仓；U 本位以 USDT 计（数量 × 价），币本位以币计（张数 × 面值 ÷ 价，如 BTC）——折币同样是持仓按标记价、挂单与这一单按各自的价：一张低于现价的买入限价单成交时就是按委托价折的币，按标记价折会少算，100% 下出去的单成交后就超了。同一个币的 U 本位与币本位是两张合约，各算各的。<br />· <strong>某个杠杆下最多能持有多少</strong>：最后一个「最高杠杆不低于它」的档位的上限。例：KAITOUSDT 15x 最高 50,000 USDT，75x 只有 5,000。<br />· <strong>某个规模最高能用几倍</strong>：它所在档位的最高杠杆。例：1,635,780 落在 1,000,000–7,500,000 那一档，最高 2x。<br />· 超过<strong>最高一档的上限</strong>，任何杠杆都不能开（KAITOUSDT 为 12,500,000）。<br />· 超限时下单按钮置灰，并提示「持仓和当前委托价值超过当前杠杆倍数最高可持有头寸……按这个规模最高可用 Nx」。引擎下单时再判一次，绕过面板也下不出去。条件单与跟踪委托下单时还会按触发价（跟踪委托按激活价）再判一道——持仓按那个价估值，价格走过去的路上会成交的限价单、会触发的条件单也算作那个价上的持仓——触发时注定过不去的单当场就挂不出去，面板同样标红。<strong>没有穿价的限价单</strong>（分段订单取离现价最远的那笔子单）同样再按委托价判一道「成交那一刻」：持仓、路上会先成交的限价单与会先触发的条件单、这一单都按委托价估值——真币本位低于现价的买单、U 本位高于现价的卖单，成交之后总量会比下单时按标记价算的大，100% 下出去的单成交后就超了、账户从此连对冲都开不出去。币安下单时只判一次（持仓按标记价），这是与币安刻意不同的一处（宁可下单时少给一点，也不让成交把人卡住），第二道的提示以「按委托价 X 成交那一刻估值」开头。「可开」与仓位比例按钮取两道里较小的那个。<strong>本次更新之后下的条件单与跟踪委托</strong>在<strong>触发那一刻</strong>再判一次（币安在触发时才真正下单），过不去就撤单留痕；TWAP 的每一片执行时也按「持仓 + 其余委托 + 这一片」再判，过不去就停掉整张 TWAP 并留痕。更新前挂出的委托触发时不再判：它们是按旧规则放行的，与它们成交后仍按旧模型是同一条规则，升级不会在触发那一刻悄悄撤掉早就挂好的对冲单。挂在盘口的限价单成交时不再判（与币安一致）——只靠下文对冲豁免挂出的限价单除外，它成交那一刻要再判豁免是否仍成立。同一轮里两张 TWAP 各切一片时，前一张刚成交的那一片不会被后一张再算一遍。<br />· <strong>已挂触发单的预警</strong>：下单与改杠杆时，已挂的触发单只按触发价（跟踪委托按激活价）算进敞口，不会替它们预演触发那一刻的判定——那一刻的判定在触发时才做（持仓按那时的价、那时的挂单与杠杆）。所以一张新单、一次提杠杆，可能让本次更新之后挂出的条件单或跟踪委托到触发时注定被撤——止损换对冲的那张对冲单恰恰在该触发时没了。下单面板与杠杆对话框会在确认之前说「这张单下出去后（杠杆调到 Nx 后），已挂的做多条件单 X 触发时会因超出当前杠杆最高可持有头寸被拒」，下出去 / 改完之后消息中心再记一条；<strong>只提醒，不拦</strong>。当前委托里，按此刻的持仓与挂单到时就会被拒的单标着「<strong>触发时将超限</strong>」（靠下文对冲豁免挂出的限价单标「<strong>成交时将超限</strong>」，悬停看原因）。预判按「<strong>价格走到触发价</strong>（跟踪委托为激活价，豁免限价单为委托价）那一刻」算：持仓按那个价估值；走过的路上会成交的限价单（买单委托价不低于走过的最低价、卖单不高于走过的最高价，含已经穿价的，也含正要下的这一单）与会触发的条件单到时已是持仓、按那个价估值——一张回调加仓的限价单会让 S₁ 上的对冲单到时放不下，下单前就会说；路上的条件单触发时自己还要再判，这里按「开出来了」算，宁严勿松；其余挂单按各自的价（跟踪委托单边走过去只会激活、不会成交，按激活价算作挂单）。价格也可能<strong>先去现价另一侧、再折回来</strong>：另一侧的开仓挂单（限价单、条件单）先成交，再走到这张单的价——这几种走法都算，任何一种会被拒都标出来；预警只说这一步新弄坏的那几种（这一步之前就放不下的走法不重复说，直接走过去本来就放不下的单整张不再说——它早就标着）：突破加仓在上、止损对冲在下时，「先突破再跌回来」对冲按已成交的加仓判，「先跌到对冲再涨回来」加仓按已成交的对冲判。正要下的这一单若是触发类单，「另一侧的挂单先成交、再折回来触发它」会被拒时也会说（直接走过去就会被拒的，下单时就已经拦下）。行情再变、之后又下了别的单或改了杠杆，触发时的结果还会不同——这是预警，不是保证。决策记录模式下，引擎拒单时开仓快照照存，但不会再提示「已提交订单」，而是明说没有下单。「可开」与仓位比例按钮同样以这个上限封顶（向下取整）；「可开」按输入框当前的单位报（张、币金额、币保证金、币数、USDT 金额或 USDT 保证金），开多、开空各一列——两列可能不同：同一个限价对一个方向已经穿价（按现价估值），或更新前仓位的对冲豁免让一侧更大。仓位比例按钮的 100%：同一个限价只对一个方向穿价时，取<strong>挂得住的那一列</strong>（穿价的那个方向等于市价单；那一列是 0 才取另一列）——U 本位低于现价的买单、真币本位高于现价的卖单按穿价那一列会少开一截；对冲豁免让两列不同时取<strong>较大的那一列</strong>：往超限的旧仓位那一侧本来就开不了，100% 给的是整份对冲，拿这个量去点另一侧的按钮会标红并说明。估值跟着标记价浮动时，会在上限前留 0.2% 余量——面板显示的是平滑后的价，引擎按最新价估值，差一个 tick 就会把恰好卡线的单拒掉。具体是：按现价成交的单（市价、最优价、已经穿价或离现价不到 0.2% 的限价单——面板与引擎可能对「穿没穿价」看法不同）、挂着这样的限价单、这一单或挂单按标记价估值（TWAP、没有激活价的跟踪委托），或已有持仓时留，U 本位与真币本位都一样；除此之外（离现价更远的限价 / 触发价单、没有持仓，挂单也都按各自的价估值）不留——估值不随现价漂；第二道钉在委托价 / 触发价上，也不留；合成币本位（如 KAITOUSD）按 USD 面值计、与价格无关，从不留。分段订单按各子单的委托价、跟踪委托按激活价估值，面板与引擎同一个口径。下单面板底部的「<strong>杠杆分层</strong>」可查看该合约的全部档位（持仓价值区间、最高杠杆、维持保证金率、速算额、单位、快照日期）。<br />· <strong>现有敞口自己就超过上限</strong>时（行情把持仓的价值推过了线，或更新前按旧规则开的大仓位——旧通用表比币安宽），这个杠杆下再小的同向加仓都开不出去；行情把新仓位推过了线时，对冲单也一样（与币安一致；更新前的旧仓位见下文的对冲豁免）。能把杠杆降到放得下的倍数时，提示照币安的话说「请调低杠杆倍数至 Nx 以下」；逐仓有持仓时不能降杠杆，只能先减仓或撤单，把总量降到上限以下——下单提示与杠杆对话框都照实这么说（对话框停在当前杠杆时也会摆出来），不再叫人去调一个调不了的杠杆。仓位杠杆高过合约现在最高杠杆的旧仓位（如 LUMIAUSDT 上按 35x 开的，该合约最高 10x），平仓前杠杆无法调整，新单最高只能用该合约的最高杠杆。<br />· 保存过的杠杆若超过该合约的最高杠杆（旧版本可存到 125x），按最高杠杆生效并提示一次。杠杆按标的只存一份：偏好里的默认杠杆存的是它与两张合约（U 本位、币本位）里较高那个上限的较小者，读的时候再按各自的结算方式夹——面板刷新后停在币本位，也不会把 U 本位那张合约压到币本位的上限（BNB：偏好 50x → U 本位 50x、币本位 20x）。挂单上若还留着超过上限的旧杠杆，在杠杆对话框里按上限确认一次，挂单即被拉回上限。<br />· 同一个币的 U 本位与币本位上限可能不同（如 BNB 75x / 20x、SOL 100x / 50x、BTC 150x / 125x）：下单面板按它当前的结算方式取分层；持仓卡上的「杠杆」按该仓位自己的结算方式取分层，确认时引擎按同一种结算方式判定与保存。<br />· <strong>币安没有的币本位合约</strong>（如 KAITOUSD）借同一个币的 U 本位分层，按 USD 面值（张数 × 面值）比较，界面上注明「币安无 KAITO 币本位合约，按 U 本位 KAITOUSDT 分层折算」。快照里查不到的合约暂按最常见的那张 U 本位分层（113 个合约共用），同样会注明。<br />· <strong>真正的平仓从不被拦</strong>：持仓卡上的平仓、止盈止损等只减仓单不受这道上限约束。币安在挂单把总量顶过上限时也会拒绝平仓，训练器里拦住平仓只会把人困在仓位里——这是刻意的差别。注意下单面板的「平仓」档并不平仓，而是反向开一笔新仓位，所以它照常受上限约束。<br />· <strong>维持保证金也按档位算</strong>：维持保证金 = 持仓价值 × 档位维持保证金率 − 速算扣除额，与所选杠杆无关；强平价用币安的逐仓公式，算出的价位落进别的档位时换档重算。这只适用于<strong>本次更新之后新开</strong>的仓位——准确地说，是更新之后下的委托成交开出的仓位（往它上面的加仓也一样；只靠下一条的对冲豁免下出去的除外）；更新前开的仓位，以及<strong>更新前挂出、更新后才成交</strong>的委托开出的仓位，仍按旧的统一 0.4% 计算，直到平掉（往它上面的分层加仓会并进这个仓位，整仓仍按 0.4%，见下文的合并规则）。那些旧委托是按旧规则放行的（旧通用表、滑块到 125x、默认 35x），套上分层会一成交就在开仓价上被强平。升级本身不会让任何现有仓位或现有委托开出的仓位被强平或改变强平价。<br />· <strong>更新前的仓位超过新上限时，对冲照常开得出去</strong>：更新前按旧规则开的仓位（旧通用表放行的，如 20x 的 200,000 USD KAITO，新规则 20x 只到 50,000）可能已经超过它的新上限。<strong>反向开仓不受上限约束</strong>，只要反方向的总量（已有持仓与挂单 + 这一单）不超过这些旧仓位的大小——比的是仓位大小：旧仓位、这一单与反方向已有的持仓和挂单<strong>一律按标记价</strong>折算（U 本位比币数，真币本位比张数），一张远离现价的限价单不能因为委托价低就比它要对冲的旧仓位大；<strong>往旧仓位那一侧加仓照常受上限约束</strong>，提示里写明「反向开仓对冲更新前的仓位不受此限，最多 X」。<br />· <strong>谁算「更新前的仓位」，按记下来的来源判，不靠猜</strong>：每张委托、每个仓位都带着来源——分层（本次更新之后正常过了分层判定的）、<strong>对冲豁免</strong>（只靠上一条豁免放行的）、更新前（什么都没有：升级前开的仓位、升级前挂出的委托及它们之后成交开出的仓位）。<strong>只有更新前的仓位是豁免的底</strong>，某一侧的额度 = 反方向上更新前仓位<strong>冻结的底</strong>（见下面的规则四：分层加仓并进来不会把它做大）− 这一侧已有的全部持仓与挂单（已经靠豁免开出 / 挂出的对冲占着额度）。<strong>靠这条豁免下出去的单按旧模型开</strong>：与它对冲的旧仓位一样按统一 0.4% 计维持保证金——这样的对冲往往远超当前杠杆在分层里允许的大小，套上分层维持保证金会高过它自己的保证金，价格不动也会一成交就被强平；下单面板在按钮前会说明。但它<strong>不是</strong>更新前的仓位：不能再给别的单当豁免的底——否则旧仓位减掉一半后又能加回去，旧仓位平掉后还能开出新的超限仓位，一轮轮接下去。<strong>挂着的豁免单到触发 / 成交那一刻再判一次</strong>（条件单、跟踪委托、限价单都是）：旧仓位还在、额度没被别的对冲占掉，就按旧模型开；否则按普通的分层判——放得下就开分层仓位，放不下就撤单留痕、计划单照常放回。旧仓位先平掉之后，那张对冲单不会再开出一个远超上限的裸仓位。本次更新之后挂的条件单若到触发那一刻才靠这条豁免放行，那一笔同样按旧模型开，带豁免标记。旧仓位平掉之后还留着的豁免仓位就是一个超过上限的普通仓位：只能减仓，不能再往任何一侧开新单（与行情把仓位推过线同样处理）。下单面板里开多、开空两个按钮因此可能一个能点、一个不能，「可开」两列也不同。触发时再判、已挂触发单的预警也按同一条豁免。这是与币安刻意不同的又一处：升级不该拿走现有仓位的对冲（止损换对冲）；本次更新之后开的仓位没有这条豁免。<br />· <strong>加仓合并：仓位开出来之后不换强平模型</strong>（规则一）——合并之后存活的仓位一律沿用<strong>被加仓的那个仓位</strong>的维持保证金模型与来源，与并进来的这一笔是什么来源无关。没有任何一笔成交能改动一个现有仓位的维持保证金、强平价或是否还活着。由此分成三条：<br />　· <strong>分层的加仓可以并进按旧 0.4% 的仓位</strong>（更新前的仓位、靠对冲豁免开的仓位，规则二）：并进去之后<strong>整个仓位仍按旧的统一 0.4%</strong>，一个数都不重新定价，也不会多出一条只靠自己那点保证金硬扛的新腿——加仓照旧被旧仓位的权益扛着（上面 COAIUSDT 那次事故正是为此）。加仓在<strong>下单</strong>那一刻照样要过分层上限，这一条没变；上限限的是总敞口，所以靠一路加仓把按 0.4% 的仓位堆到上限之上是做不到的。合并会把两笔的保证金与均价汇到一起，顺带把强平价<strong>推远或拉近</strong>——加到<strong>亏损</strong>的旧仓位上推远，加到<strong>浮盈</strong>的旧仓位上拉近（新的一刀在更高的价上开、拉高了均价）；面板在按钮前把前后两个数摆出来。推远的例子：KAITOUSDT 20x 逐仓、更新前的多仓 40,000 @1.0、保证金 2,000，在 0.96 上加满一刀，整仓强平价 <strong>0.954000 → 0.945206</strong>（推远 0.92%）；只加 1 个币则 0.954000 → 0.953999（几乎不动）。拉近的例子、也是这个体系里最常见的画面（往浮盈的头仓上加）：同一个盘面若旧多仓是 40,000 @0.50、保证金 1,000（标记价 0.96 即 +92%），在 0.96 上加 10,000 USDT，旧仓位自己的强平价从 <strong>0.477000 变成 0.567669</strong>（拉近 9.44%）——这是往浮盈头仓上加仓的人该读的那一个数；而那一刀若单独成仓只有 <strong>0.923452</strong>（离标记价 3.81%），一次 4% 的回撤就把加仓单独打掉，并进去之后它被整仓 18,400 的浮盈扛着。<br />　· <strong>反过来不并</strong>（规则三）：按旧 0.4% 的一笔（更新前挂出的旧委托成交、靠对冲豁免开的成交）<strong>不会</strong>并进按币安分层的同方向仓位。存活的会是分层仓位，它要把并进来的那一截名义也按档位定价、跨进更高的档，足以把现有的分层仓位当场强平（KAITOUSDT 5x：分层空 9,000 的维持保证金是 9,000 × 1.5% − 25 = 110，并进一笔 230,000 的豁免对冲后按分层是 239,000 × 10% − 7,700 = <strong>16,200</strong>，而两笔各算各的只要 110 + 920 = 1,030）。这一格两笔各成一个仓位、各算各的强平价，现有仓位的维持保证金与强平价一个数都不动；下单面板在按钮前会说，成交时消息中心也会记一条「未与现有仓位合并」。<br />　· <strong>加进去的名义不会把对冲豁免的额度做大</strong>（规则四）：更新前的仓位单独记着一个<strong>冻结的底</strong>——分层加仓并进来只把仓位做大、底不动；部分平仓按比例缩，平光就没了；只有<strong>更新前挂出、更新后才成交</strong>的旧委托并进来才会把底做大（那些单子是按旧规则放行的，用户没法再挂新的）。对冲额度、触发 / 成交那一刻的再判、面板的「可开」读的都是这个冻结的底，<strong>不是仓位当前的大小</strong>——否则一笔分层加仓就能把额度顶大一截，反向再开出一笔同样大的超限裸仓位，一轮轮接下去。靠豁免开的仓位与分层仓位一概不是底，这一条没变。<br />　· <strong>口径相同的两笔照常合并</strong>（都按分层、都按旧 0.4%），存活的仍是被加仓那个仓位的来源，维持保证金与强平价不变；豁免成交并进更新前的仓位后整个仓位仍按 0.4%，但并进去的那一截不算底。<br />　· 规则三那一格<strong>没有合并</strong>时，新的那一笔身上<strong>没有任何减仓单</strong>：挂在旧仓位上的止盈止损只认那一笔，盖不住新的这一笔；持仓卡上按一次「止盈/止损」会给卡上每一笔各挂一张（同一个触发价、成数按各笔自己的数量算），成交时的提示也会说这句。<strong>「平仓」同样按整张卡生效</strong>：弹窗里挑的成数摊到卡上每一笔、各按自己的数量平，所以一张有两笔的卡照样能按成数减仓，「100%」盖住整张卡——不再是一按就把两笔全部市价平掉。旧仓位贴着强平价、这一笔又并不进去时，要救只能用持仓卡上的「+」追加保证金；<strong>「+」是卡级的</strong>，卡上多于一笔时这笔钱按名义等比摊到每一笔，旧仓位只拿到其中一部分，面板在按钮前会连这一点一起说。<br />· <strong>加仓计算器</strong>给出的可下单量同样过这道上限（见 3.4）。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前所有合约共用一张通用表（≤5 万 125x、≤25 万 50x、≤100 万 20x、其余 10x），单位写死 USDT，而且<strong>只看这一单自己</strong>的名义：KAITO 币本位 163,578 张（1,635,780 USD）在 15x 下被提示「最高 10x」，而币安对 KAITOUSDT 这个规模最高只给 <strong>2x</strong>（15x 最多 50,000）——旧表在这里反而过松。它也不看已有持仓与挂单，把一单拆成几单就能绕过去；引擎下单与挂单触发从不检查；「手续费等级」链接显示的其实是这张杠杆表。维持保证金一律 0.4%，没有速算扣除额，大仓位的强平价因此偏乐观。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">单笔数量上限（市价单）</span>
+                  <span className="guide-note__gist">只在币安标准模式下按币安 MARKET_LOT_SIZE 限制单笔市价数量。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule"><strong>只在「币安标准」持仓限制模式下生效</strong>（见 3.1）；默认的「无限制」模式没有单笔市价 / 限价上限，也不标「触发时将超单笔上限」，持仓卡上的市价平仓与按成数的止盈止损不受限。无限制模式下挂出的委托切到币安标准之后，触发 / 执行那一刻照样按下面的规则再判。<br />与币安一致，<strong>一笔市价单</strong>的数量有上限（币安 exchangeInfo 的 MARKET_LOT_SIZE，快照 <strong>2026-09-23</strong>）：BTCUSDT 120 BTC、ETHUSDT 2,000 ETH、KAITOUSDT 200,000 KAITO、TUTUSDT 4,000,000 TUT、ORDIUSDT 20,000 ORDI、ASTERUSDT 400,000 ASTER；币本位按张计，如 BTCUSD 60,000 张。限价单按宽得多的 LOT_SIZE 判（KAITOUSDT 2,000,000、BTCUSDT 1,000）。上限管的是<strong>一笔单子</strong>，不是仓位：仓位可以比它大，分几笔下就是了。<br />· <strong>哪些单按市价上限判</strong>：市价单（开仓、加仓、下单面板的「平仓」档）、条件委托与跟踪委托（触发后按市价成交）、TWAP 的<strong>每一片</strong>、持仓卡上的市价平仓、按成数（不足 100%）挂的止盈止损；分段订单的<strong>每张子单</strong>按限价上限判。超过就下不出去：下单面板把按钮置灰并标红说明，引擎下单时再判一次（币安的 -4005「数量超过最大值」）。提示写明上限与出路，出路按单子的类型说：市价单拆成几笔或改用限价单；条件单、跟踪委托拆成几张同类的单（每张不超过上限）——不建议改用限价单：止损方向的单子（S₁ 下方卖出的对冲、现价上方买入的突破加仓）换成同价的限价单会立刻按现价成交；委托列表里已经挂着的，说的是撤单后拆开重挂。<br />· <strong>下单面板</strong>：市价类订单在数量框下常驻一行「单笔市价上限 200,000 KAITO」（币本位写张数）；仓位比例按钮的 100% 与「可开」按这个上限封顶（TWAP 按每一片乘片数，分段按每张子单乘张数）。U 本位按 USDT 下单（订单金额 / 初始保证金，面板默认的单位）时，框里的 USDT 按现价折成币：上限以币计、与价无关，折出来的币数却跟着现价走，恰好填到「上限 × 现价」的单跌一个 tick 就又超了——市价、TWAP、跟踪委托的 100% 在上限前同样留 0.2% 余量；条件委托按触发价折币，不留。加仓计算器的「按上限下单」只预填一笔上限、说明剩下的还要再分几笔下；S₁ 上的合计对冲超过上限时，提示要拆成几张条件单。<br />· <strong>币安没有的币本位合约</strong>（如 KAITOUSD）借同一个币的 U 本位上限，按这一单成交的价把币数折成整张（向下取整）：KAITO 在 1.0905 上 200,000 KAITO = 21,810 张，价格越低能下的张数越少。所以这类合约的条件单、跟踪委托、TWAP 在触发 / 执行那一刻按那一刻的价再判一次。跟踪委托的成交价是回调线（极值 × (1 ∓ 回调幅度)），下单时按<strong>激活价（没有激活价按现价）下方一个回调幅度</strong>折张。<strong>有激活价</strong>时，卖出方向的峰值从激活价起算、只会更高，成交价不会低于它——挂得出去就不会在触发时被拒；<strong>没有激活价</strong>时挂出即开始追踪，峰值从挂出之后第一段行情算起，可能低于下单时的现价（回放按 K 线的高低点撮合），成交价也就可能低于下单时判的那个价。这种单与买入方向一样在触发那一刻再判一次，过不去就撤单留痕：买入方向从谷底反弹成交，谷底再深时上限更小。委托列表按此刻的回调线提前标出，但同一段行情里刚摸到极值就回撤触发的，来不及提前标。TWAP 每一片按执行那一刻的价折张，<strong>价格下跌时每片上限随之变小</strong>，面板小字会说。下单面板的 100% 与持仓卡的「按上限平」在按现价折的上限前留 0.2% 余量（现价每一帧都在变，恰好卡线的数量跌一个 tick 就又超了）。快照里查不到的合约<strong>不设上限</strong>。<br />· <strong>触发时再判，但不悄悄丢掉保护</strong>：本次更新之后挂的、按市价成交的单在触发 / 执行时再判；过不去就撤单留痕，并在消息中心说清（止盈止损会写明「这个仓位此刻没有这张止损的保护」）。委托列表里到时会被拒的单提前标着「<strong>触发时将超单笔上限</strong>」（TWAP 标「执行时将超单笔上限」，悬停看原因）。更新前挂出的委托触发时不再判。<br />· <strong>不受这个上限约束</strong>：引擎强平；平掉整个仓位（100%）的止盈止损——相当于币安不带数量的「平仓」止盈止损（closePosition）；「一键平仓」与停止回放时的收尾平仓。币安文档对 closePosition 只说触发时平掉整个仓位、不能带数量，没有说它受单笔上限约束，这里按不受约束处理；币安 FAQ 对仓位超过市价单上限时的「一键平仓」说的是可能延迟成交，不是拒单。<br />· <strong>仓位比上限大，怎么平</strong>：持仓卡上的「平仓」一次最多平一个上限，超过时按钮置灰并给出「按上限平」，分几次市价平仓即可；或者设 100% 的止盈止损。按成数挂的止盈止损最小一格是 10%：仓位是上限的 10 倍以上时，连这一格都放不下，弹窗会直说只能选 100%。仓位比上限大 100 倍以上也一样（CYPHUSDT 一笔最多 2,000 CYPH，250,000 的仓位按 0.8% 平）：平仓弹窗填多少就平多少（此前不到 1% 的量一律按 1% 平），确认按钮上写的就是真正平掉的成数（0.8%），不四舍五入成 1% 或 0%。连最小的一笔都超过上限时（合成币本位在极低的价上，1 张就超过借来的币数上限），只能设 100% 的止盈止损或用「一键平仓」。本模拟器没有只减仓的限价平仓单——下单面板的「平仓」档是反向开一笔新仓位，照常受上限约束。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>此前任何规模的市价单都一口成交，币安却会拒单：KAITO 币本位 163,578 张（1,635,780 USD）这样的单子，按 KAITOUSDT 的上限一笔最多 200,000 KAITO（在 1.0905 上约 21,810 张、218,100 USD）。在这里练出来的「一笔市价吃满、一笔市价平光」到真实账户上会被拒——最要命的是止损换对冲那一刻：S₁ 上的对冲条件单超过上限，在币安一张都挂不出去（-4005），要事先拆成几张。数据取自币安公开的 exchangeInfo（不需要登录），用 scripts/update-binance-symbol-filters.mjs 刷新；强平清算费率一并存下，暂不参与计算。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">默认结算方式</span>
+                  <span className="guide-note__gist">新标的默认币本位；切到 U本位只在当前会话有效。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">新标的下单<strong>默认币本位</strong>；下单面板顶部那颗「U本位 / 币本位」标签可随时切换，但切到 U本位<strong>只对当前会话有效</strong>——页面每次刷新或重新打开，面板一律回到币本位，不记住上次的选择；已开的 U本位仓位不受影响，它本来就是另一张合约（如 RUNEUSDT 与 RUNEUSD）。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>本系统的主仓打法以币本位为主。<strong>已有的历史记录不受影响</strong>——缺少该字段的旧单子一律仍按 U 本位解读，否则等于事后改写过去交易的含义，连带污染战役的保证金、R 倍数与统计。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
+                  <span className="guide-note__title">ROE 分母</span>
+                  <span className="guide-note__gist">固定为开仓时的初始保证金，后续追加的保证金不计入。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">U本位与币本位合约的 ROE 分母统一固定为开仓时的初始保证金；后续追加保证金不计入 ROE 分母，只影响保证金余额、强平风险和保证金比率。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>追加保证金是延长生存时间的动作，不是降低这笔交易原始收益率的动作。看 ROE 时，读的是这笔交易相对初始风险资本的效率；看爆仓风险时，再看保证金余额和保证金比率。</div>
+                </div>
+              </details>
             </div>
           </section>
 

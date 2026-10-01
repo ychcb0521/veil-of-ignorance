@@ -10,9 +10,9 @@ import { DEFAULT_POSITION_LIMIT_MODE, UNLIMITED_MAX_LEVERAGE } from '@/lib/posit
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
 
 const rowOf = (guide: string, title: string) => {
-  const at = guide.indexOf(`${title}</td>`);
+  const at = guide.indexOf(`${title}</span>`);
   expect(at).toBeGreaterThan(-1);
-  return guide.slice(at, guide.indexOf('</tr>', at));
+  return guide.slice(at, guide.indexOf('</details>', at));
 };
 
 describe('指南：持仓限制模式', () => {
@@ -41,7 +41,7 @@ describe('指南：持仓限制模式', () => {
   it('第 8 节的三行币安规则开头都写明只在币安标准下生效，并指回 3.1', () => {
     for (const title of ['调整杠杆', '杠杆分层与仓位上限', '单笔数量上限（市价单）']) {
       const row = rowOf(guide, title);
-      const body = row.slice(row.indexOf('<td', 1));
+      const body = row.slice(row.indexOf('guide-note__rule'));
       expect(body.slice(0, 200)).toMatch(/只在「币安标准」持仓限制模式下生效/);
       expect(row).toContain('见 3.1');
     }

@@ -11,8 +11,8 @@ const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf
 
 describe('指南：杠杆分层与仓位上限', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('杠杆分层与仓位上限</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('杠杆分层与仓位上限</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('有这一行，而且快照日期与数据文件一致', () => {
     expect(at).toBeGreaterThan(-1);
@@ -60,8 +60,8 @@ describe('指南：杠杆分层与仓位上限', () => {
   });
 
   it('旧的通用分层描述不再出现在「调整杠杆」里', () => {
-    const adjust = guide.indexOf('调整杠杆</td>');
-    const adjustRow = guide.slice(adjust, guide.indexOf('</tr>', adjust));
+    const adjust = guide.indexOf('调整杠杆</span>');
+    const adjustRow = guide.slice(adjust, guide.indexOf('</details>', adjust));
     expect(adjustRow).not.toContain('按该标的<strong>总</strong>敞口查档位上限');
     expect(adjustRow).toContain('请调低杠杆倍数至 Nx 以下');
     expect(adjustRow).toContain('KAITOUSDT 75x、BTCUSDT 150x、BTCUSD 125x');
@@ -77,8 +77,8 @@ describe('指南：杠杆分层与仓位上限', () => {
 
 describe('指南：复核第三轮', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('杠杆分层与仓位上限</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('杠杆分层与仓位上限</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('折币口径：持仓按标记价，挂单与这一单按各自的价（买入限价单按委托价折）', () => {
     expect(row).toContain('折币同样是持仓按标记价、挂单与这一单按各自的价');
@@ -140,8 +140,8 @@ describe('指南：复核第三轮', () => {
 
 describe('指南：修复验证第一轮', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('杠杆分层与仓位上限</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('杠杆分层与仓位上限</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('对冲豁免按仓位大小比（一律按标记价），靠它下出去的单按旧模型开，紧挨着豁免那一句', () => {
     const exemption = row.indexOf('更新前的仓位超过新上限时，对冲照常开得出去');
@@ -162,8 +162,8 @@ describe('指南：修复验证第一轮', () => {
 
 describe('指南：复核第五轮', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('杠杆分层与仓位上限</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('杠杆分层与仓位上限</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('来源按记下来的判：只有更新前的仓位是豁免的底，豁免单占额度、不当底，挂着的豁免单到时再判', () => {
     const exemption = row.indexOf('更新前的仓位超过新上限时，对冲照常开得出去');
@@ -312,8 +312,8 @@ describe('指南：复核第五轮', () => {
 
 describe('指南：复核第五轮 · 二', () => {
   const guide = read('pages/GuidePage.tsx');
-  const at = guide.indexOf('杠杆分层与仓位上限</td>');
-  const row = guide.slice(at, guide.indexOf('</tr>', at));
+  const at = guide.indexOf('杠杆分层与仓位上限</span>');
+  const row = guide.slice(at, guide.indexOf('</details>', at));
 
   it('几种走法：先去现价另一侧再折回来也算，标记与预警都按它；正要下的触发单自己也说', () => {
     expect(row).toContain('价格也可能<strong>先去现价另一侧、再折回来</strong>');
