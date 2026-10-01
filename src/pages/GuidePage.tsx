@@ -39,17 +39,20 @@ const TOC: TocItem[] = [
   {
     id: 's4',
     label: '4. 复盘中心',
+    // 【用户要求】与交易页「复盘中心」菜单同一层级、同一顺序：资产三项一组，复盘工具四项一组
     children: [
-      { id: 's4-1', label: '4.1 错题集' },
-      { id: 's4-3', label: '4.2 交易战役' },
-      { id: 's4-5', label: '4.3 规则' },
+      { id: 's6', label: '4.1 执行力资产' },
+      { id: 's4-account', label: '4.2 账户资产' },
+      { id: 's5', label: '4.3 认知资产' },
+      { id: 's4-1', label: '4.4 错题集' },
+      { id: 's4-diary', label: '4.5 情绪日记' },
+      { id: 's4-3', label: '4.6 交易战役' },
+      { id: 's4-5', label: '4.7 规则' },
     ],
   },
-  { id: 's5', label: '5. 认知资产' },
-  { id: 's6', label: '6. 执行力资产' },
-  { id: 's7', label: '7. 数据边界与硬约束' },
-  { id: 's8', label: '8. 注意事项' },
-  { id: 's9', label: '9. 判断标准' },
+  { id: 's7', label: '5. 数据边界与硬约束' },
+  { id: 's8', label: '6. 注意事项' },
+  { id: 's9', label: '7. 判断标准' },
 ];
 
 const FLAT_TOC = TOC.flatMap(t => [t, ...(t.children ?? [])]);
@@ -579,12 +582,12 @@ export default function GuidePage() {
                     <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">币安标准</div>
                   </div>
                   <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
-                    完全按币安：各币种的杠杆分层（KAITOUSDT 75x、BTCUSDT 150x、不少合约只到 10x）、「持仓 + 当前委托 + 本单」不得超过当前杠杆的最高可持有头寸、单笔市价 / 限价数量上限（MARKET_LOT_SIZE / LOT_SIZE）、逐仓有持仓只能升杠杆、分层维持保证金。第 8 节「<strong>调整杠杆</strong>」「<strong>杠杆分层与仓位上限</strong>」「<strong>单笔数量上限（市价单）</strong>」三行写的全部规则，以及 3.4 里加仓计算器按分层封顶，<strong>都只在币安标准模式下生效</strong>。想在模拟里就练出真实账户下单会不会被拒，用这一档。
+                    完全按币安：各币种的杠杆分层（KAITOUSDT 75x、BTCUSDT 150x、不少合约只到 10x）、「持仓 + 当前委托 + 本单」不得超过当前杠杆的最高可持有头寸、单笔市价 / 限价数量上限（MARKET_LOT_SIZE / LOT_SIZE）、逐仓有持仓只能升杠杆、分层维持保证金。第 6 节「<strong>调整杠杆</strong>」「<strong>杠杆分层与仓位上限</strong>」「<strong>单笔数量上限（市价单）</strong>」三行写的全部规则，以及 3.4 里加仓计算器按分层封顶，<strong>都只在币安标准模式下生效</strong>。想在模拟里就练出真实账户下单会不会被拒，用这一档。
                   </div>
                 </div>
               </div>
               <Highlight>
-                <strong>切换不改写任何现有仓位与挂单</strong>：现有仓位保持原来的维持保证金口径（仓位开出来之后不换强平模型），新模式作用于之后的下单、挂单触发 / 成交那一刻的判定与杠杆调整——<strong>每一次判定都按那一刻的模式</strong>。所以：无限制模式下挂出的条件单、跟踪委托、TWAP、限价单，切到币安标准之后在触发 / 成交那一刻按币安的规则再判（挂在盘口的限价单也会在成交那一刻判），过不去就撤单留痕，委托列表会提前标「触发时将超限 / 成交时将超限」；保存的杠杆高过合约上限（如在无限制下存了 150x，合约只到 75x）时按合约上限生效并提示一次，保存值不改，切回无限制又按原值生效。无限制模式下开的仓位切到币安标准之后与更新前的仓位同等对待：仍按 0.4%，是反向对冲豁免的底（见第 8 节），杠杆高过合约上限的平仓前无法调整。无限制模式下往币安标准下开的（按分层计的）仓位上加仓，照样<strong>并进去</strong>、被那个仓位的权益扛着——仓位开出来之后不换模型，合并后整仓仍按分层计维持保证金：总名义变大可能跨进更高的档，超过最高一档按最高一档的费率，下单面板在按钮前把合并前后的强平价写出来，合并后一开出来就在强平价外面时标红。切到无限制（包括从没选过、按默认进了无限制的老用户第一次打开）时，<strong>有持仓或开仓挂单的标的杠杆保持切换前仓位用的那一个</strong>：币安标准下被夹到合约上限的杠杆（没设过的默认 35x、旧版本存下的 125x）不会在无限制下一下子读回原值、让下一笔加仓按另一个杠杆另开一张卡；没有仓位的标的按保存值（最高 150x）。手机版顶栏没有这组开关（与决策记录 / 直接交易一样），只能在电脑上切换，手机上沿用上次选的模式（从没选过就是无限制）；无限制模式下下单面板底部写着「无限制模式 · 杠杆 1–150x…」，币安标准模式下那里是「杠杆分层」。
+                <strong>切换不改写任何现有仓位与挂单</strong>：现有仓位保持原来的维持保证金口径（仓位开出来之后不换强平模型），新模式作用于之后的下单、挂单触发 / 成交那一刻的判定与杠杆调整——<strong>每一次判定都按那一刻的模式</strong>。所以：无限制模式下挂出的条件单、跟踪委托、TWAP、限价单，切到币安标准之后在触发 / 成交那一刻按币安的规则再判（挂在盘口的限价单也会在成交那一刻判），过不去就撤单留痕，委托列表会提前标「触发时将超限 / 成交时将超限」；保存的杠杆高过合约上限（如在无限制下存了 150x，合约只到 75x）时按合约上限生效并提示一次，保存值不改，切回无限制又按原值生效。无限制模式下开的仓位切到币安标准之后与更新前的仓位同等对待：仍按 0.4%，是反向对冲豁免的底（见第 6 节），杠杆高过合约上限的平仓前无法调整。无限制模式下往币安标准下开的（按分层计的）仓位上加仓，照样<strong>并进去</strong>、被那个仓位的权益扛着——仓位开出来之后不换模型，合并后整仓仍按分层计维持保证金：总名义变大可能跨进更高的档，超过最高一档按最高一档的费率，下单面板在按钮前把合并前后的强平价写出来，合并后一开出来就在强平价外面时标红。切到无限制（包括从没选过、按默认进了无限制的老用户第一次打开）时，<strong>有持仓或开仓挂单的标的杠杆保持切换前仓位用的那一个</strong>：币安标准下被夹到合约上限的杠杆（没设过的默认 35x、旧版本存下的 125x）不会在无限制下一下子读回原值、让下一笔加仓按另一个杠杆另开一张卡；没有仓位的标的按保存值（最高 150x）。手机版顶栏没有这组开关（与决策记录 / 直接交易一样），只能在电脑上切换，手机上沿用上次选的模式（从没选过就是无限制）；无限制模式下下单面板底部写着「无限制模式 · 杠杆 1–150x…」，币安标准模式下那里是「杠杆分层」。
               </Highlight>
             </section>
 
@@ -1523,10 +1526,69 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
 
           <section id="s4" className="scroll-mt-20">
             <SectionTitle accent="#B080FF">4. 复盘中心</SectionTitle>
-            <P>复盘中心负责把交易样本加工成能力。它的正确使用顺序是：先补评价，再看预测误差与错误类型，再归类战役，再写规则，最后用元监控验证。</P>
+            <P>复盘中心负责把交易样本加工成能力。交易页右上角的「复盘中心」菜单分两组：<strong>资产</strong>（执行力资产、账户资产、认知资产）记的是你积累了什么；<strong>复盘工具</strong>（错题集、情绪日记、交易战役、规则）把样本加工成能力。复盘工具的正确使用顺序是：先补评价，再看预测误差与错误类型，再归类战役，再写规则，最后用元监控验证。</P>
+
+            <section id="s6" className="scroll-mt-20">
+              <SubTitle anchor>4.1 执行力资产</SubTitle>
+              <P>认知资产记的是<strong>你知道什么</strong>，执行力资产记的是<strong>你做了多少</strong>——同一枚硬币的<strong>知</strong>与<strong>行</strong>两面。系统的底层方法是“用试错替代规划”，而试错的样本只能从“做”里长出来：不做，账户数字不会变红，你却永远停在原地。这笔看不见的机会成本，必须被系统看见、被定价、被累积成一份负债。</P>
+              <Highlight>
+                重复次数的加速器：<strong>做，比想更贵重。</strong>没去做带来的损失，必须被系统看见。
+              </Highlight>
+              <P>它和“封住下限”是同一件事的两面：正因为单笔亏损被锁死在受得起的数字里，你才<strong>敢多下、敢把该做的单真的做出来</strong>。执行力资产奖励的是<strong>有结构地敢做</strong>——带着决策快照 / 战役 / 复盘去做；同时把“无结构地乱下”和“因为怕错而不做”的代价，一起摆到台面上。</P>
+
+              <SubTitle>怎么计分</SubTitle>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">事件</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">积分</th>
+                      <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">为什么是这个分</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 规则 / 元监控</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">按“自然日 × 标的”计分；同日同标的建一场或多场都只奖励一次</td></tr>
+                    <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-2000</td><td className="px-3 py-2 border-t border-border"><strong>头号大罪</strong>：一整天没有任何练习动作；无正向镜像、<strong>永久不可逆</strong>——后续再练也不退这笔，按模拟时间的自然日结算</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <P>四个类目里，前三个都是<strong>奖励</strong>：完成评价 +1000、决策记录 +600、建战役 +300。做了给分，<strong>没做不倒扣</strong>——原先与它们成对的三项扣分（未做评价 −1000、直接交易 −600、未建战役 −300）已经取消，历史记录也一并撤销退分。唯一的扣分是第四项「自然日未练习 −2000」：它没有正向镜像、独占一档且最重，因为练习是一切样本的源头，<strong>断更是头号大罪</strong>。</P>
+              <P>为什么只留这一条扣分：其余三项罚的都是「这一次做得不够好」，而那种事后再补就能补回来的缺口，用<strong>拿不到奖励</strong>来表达就够了，再倒扣一次是重复计价。断更不一样——它罚的是「这一天根本没发生」，那是补不回来的。所以这页想拉高的不是总分，而是让每次「做」都落到加分那侧、且<strong>每天至少留一次练习</strong>。</P>
+
+              <SubTitle>什么算、什么不算</SubTitle>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
+                <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
+                <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −2000”——练的是决策周期，不是必须下注。</li>
+                <li><strong>平仓评价：做 +1000，不做不扣。</strong>系统按 journal ID 识别，反复编辑不重复计分。没做的那些不再挂 −1000——待复盘清单本身就是提醒，扣一次分只是把同一件事再说一遍。</li>
+                <li><strong>“未练习”扣分永久不可逆、且最重（−2000）。</strong>某个自然日没有任何练习，就永久记一笔 −2000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
+                <li><strong>直接交易不再扣分。</strong>它只是<strong>拿不到</strong>决策记录那 +600，而不是倒扣 600。直接交易的笔数仍然统计，用来算「决策记录占比」——那是给你看的诊断，不是罚单。</li>
+                <li><strong>四项各自独立计分、互不联动。</strong>战役是「计划层」结构、决策记录是「每单层」结构，两者分别度量，不互相抵扣。</li>
+                <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次；<strong>已取消的三项扣分会从流水里整条删除、总分同步退回</strong>——不是记成 0 分留在明细里，否则你会以为系统还在算那笔账。</li>
+              </ul>
+              <RedHighlight>
+                执行力资产不判<strong>单笔对错</strong>——一笔亏损的决策单照样 +600；但它判你做得<strong>有没有结构</strong>：带着快照 / 战役 / 评价去做加分，无结构地乱下则拿不到分，干脆不练才扣分。对错（质量）交给复盘中心（错题集 / 规则）去判，这里管的是<strong>做得够多 × 做得有结构</strong>。它专治的是那种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
+              </RedHighlight>
+            </section>
+
+            <section id="s4-account" className="scroll-mt-20">
+              <SubTitle anchor>4.2 账户资产</SubTitle>
+              <P>菜单里的「账户资产」打开一个弹窗：顶部是<strong>预估总资产（USD）</strong>与<strong>今日盈亏</strong>，下面是<strong>账户资金分布</strong>（合约 / 现货 / 资金三个钱包各有多少）。点今日盈亏打开<strong>资产报告</strong>看收益走势；右上角的眼睛可以把金额全部隐藏。</P>
+              <P>「划转」在三个钱包之间挪钱：合约钱包只能划走<strong>可用余额</strong>——占用中的保证金与未实现盈亏划不走。「添加资金」「转出」在模拟盘里不可用，不涉及真实出入金。</P>
+            </section>
+
+            <section id="s5" className="scroll-mt-20">
+              <SubTitle anchor>4.3 认知资产</SubTitle>
+              <Highlight>
+                你可以在自己的账号里上传自己总结的交易规则、SOP 或复盘原则，作为个人认知资产保存。
+              </Highlight>
+              <P>这部分不影响交易训练主流程。把它当成你的个人规则库即可，需要时再上传或更新。</P>
+            </section>
 
             <section id="s4-1" className="scroll-mt-20">
-              <SubTitle anchor>4.1 错题集</SubTitle>
+              <SubTitle anchor>4.4 错题集</SubTitle>
               <P>错题集的单位不是<strong>一笔笔交易</strong>，也不是抽象的"错误类型代码"，而是<strong>开仓快照与平仓评价里每一个具体问题的历史答案分布</strong>。它要回答的是：所有历史主力单加起来，<strong>这道题我都填过些什么</strong>，分布在哪几格，命中过几次坑。</P>
               <P>常用的是这 <strong>3 个 tab</strong>：</P>
               <KeyGrid>
@@ -1570,8 +1632,14 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </RedHighlight>
             </section>
 
+            <section id="s4-diary" className="scroll-mt-20">
+              <SubTitle anchor>4.5 情绪日记</SubTitle>
+              <P>把交易日的情绪背景留在决策记录旁边。一天一篇，按<strong>客观操作日期</strong>（北京时间）归档：先写「最近起波澜的事情」——事实、触发点、身体反应、仍在脑内回响的部分；再做四份量表：<strong>POMS-40</strong> 心境状态、<strong>PANAS-20</strong> 正负情感、<strong>PI-7</strong> 个人主动性、<strong>HADS-14</strong> 焦虑抑郁，全部填完才能保存。</P>
+              <P>它按操作日期和战役绑定：战役详情页的「操作日情绪日记」、导出的情绪 TXT、批量下载的战役图读的都是这一篇，复盘时能把「那天的我」和「那天的决策」放在一起看。</P>
+            </section>
+
             <section id="s4-3" className="scroll-mt-20">
-              <SubTitle anchor>4.2 交易战役</SubTitle>
+              <SubTitle anchor>4.6 交易战役</SubTitle>
               <P>战役是比单笔交易更高一层的复盘单位。一次战役由同一标的、同一主方向、明确开始结束、多个 leg 组成。每场战役都会生成一个全局唯一的<strong>战役编号</strong>；编号与生成过程绑定，不会因标题、备注或规则文字被修改而改变。</P>
               <SubTitle>Legs 的认知与风险分工</SubTitle>
               <P>交易战役里的每一个 leg 都不是对价格涨跌的情绪表达，而是在不同证据阶段购买优势、限制误差或回收成本。判断一个动作是否合理，应先问它承担了什么认知与风险职能，而不是只看动作之后价格是否上涨。</P>
@@ -1899,7 +1967,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
 
             <section id="s4-5" className="scroll-mt-20">
-              <SubTitle anchor>4.3 规则</SubTitle>
+              <SubTitle anchor>4.7 规则</SubTitle>
               <P>规则不是独立写出来的口号，而是复盘系统的输出。它来自已发生的交易错误，并被写回下一次开仓前的 checklist。</P>
               <P>规则生成有四条来源：</P>
               <div className="overflow-x-auto">
@@ -1931,61 +1999,8 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
             </section>
           </section>
 
-          <section id="s5" className="scroll-mt-20">
-            <SectionTitle accent="#F0B90B">5. 认知资产</SectionTitle>
-            <Highlight>
-              你可以在自己的账号里上传自己总结的交易规则、SOP 或复盘原则，作为个人认知资产保存。
-            </Highlight>
-            <P>这部分不影响交易训练主流程。把它当成你的个人规则库即可，需要时再上传或更新。</P>
-          </section>
-
-          <section id="s6" className="scroll-mt-20">
-            <SectionTitle accent="#0ECB81">6. 执行力资产</SectionTitle>
-            <P>认知资产记的是<strong>你知道什么</strong>，执行力资产记的是<strong>你做了多少</strong>——同一枚硬币的<strong>知</strong>与<strong>行</strong>两面。系统的底层方法是“用试错替代规划”，而试错的样本只能从“做”里长出来：不做，账户数字不会变红，你却永远停在原地。这笔看不见的机会成本，必须被系统看见、被定价、被累积成一份负债。</P>
-            <Highlight>
-              重复次数的加速器：<strong>做，比想更贵重。</strong>没去做带来的损失，必须被系统看见。
-            </Highlight>
-            <P>它和“封住下限”是同一件事的两面：正因为单笔亏损被锁死在受得起的数字里，你才<strong>敢多下、敢把该做的单真的做出来</strong>。执行力资产奖励的是<strong>有结构地敢做</strong>——带着决策快照 / 战役 / 复盘去做；同时把“无结构地乱下”和“因为怕错而不做”的代价，一起摆到台面上。</P>
-
-            <SubTitle>怎么计分</SubTitle>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px] my-3 border border-border rounded overflow-hidden">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">事件</th>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">积分</th>
-                    <th className="text-left px-3 py-2 font-medium text-foreground text-[10px]">为什么是这个分</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr><td className="px-3 py-2 border-t border-border">完成平仓评价</td><td className="px-3 py-2 border-t border-border font-mono text-[#B080FF]">+1000</td><td className="px-3 py-2 border-t border-border">把一次交易闭合成可复盘的评价样本——错题集的数据全从这里来；同一笔后续编辑不重复计分</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">决策记录模块交易</td><td className="px-3 py-2 border-t border-border font-mono text-[#0ECB81]">+600</td><td className="px-3 py-2 border-t border-border">走决策模块下单，留下完整样本：开仓快照 → 平仓评价 → 错题集 / 规则 / 元监控</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">创建交易战役</td><td className="px-3 py-2 border-t border-border font-mono text-[#5BA3FF]">+300</td><td className="px-3 py-2 border-t border-border">按“自然日 × 标的”计分；同日同标的建一场或多场都只奖励一次</td></tr>
-                  <tr><td className="px-3 py-2 border-t border-border">自然日未练习</td><td className="px-3 py-2 border-t border-border font-mono text-[#F6465D]">-2000</td><td className="px-3 py-2 border-t border-border"><strong>头号大罪</strong>：一整天没有任何练习动作；无正向镜像、<strong>永久不可逆</strong>——后续再练也不退这笔，按模拟时间的自然日结算</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <P>四个类目里，前三个都是<strong>奖励</strong>：完成评价 +1000、决策记录 +600、建战役 +300。做了给分，<strong>没做不倒扣</strong>——原先与它们成对的三项扣分（未做评价 −1000、直接交易 −600、未建战役 −300）已经取消，历史记录也一并撤销退分。唯一的扣分是第四项「自然日未练习 −2000」：它没有正向镜像、独占一档且最重，因为练习是一切样本的源头，<strong>断更是头号大罪</strong>。</P>
-            <P>为什么只留这一条扣分：其余三项罚的都是「这一次做得不够好」，而那种事后再补就能补回来的缺口，用<strong>拿不到奖励</strong>来表达就够了，再倒扣一次是重复计价。断更不一样——它罚的是「这一天根本没发生」，那是补不回来的。所以这页想拉高的不是总分，而是让每次「做」都落到加分那侧、且<strong>每天至少留一次练习</strong>。</P>
-
-            <SubTitle>什么算、什么不算</SubTitle>
-            <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-              <li><strong>只记做多开仓。</strong>做空都是辅助对冲单，属于风险管理动作，不计执行力分。</li>
-              <li><strong>挂单成交才计分。</strong>挂出限价单只是意图，真正成交才算“做”——意图不计分，执行才计分。</li>
-              <li><strong>“当天已练习” = 下单 / 弃单（太难不做）/ 完成复盘，任一即可。</strong>只要当天留下其中任一动作，就清掉当天的“未练习 −2000”——练的是决策周期，不是必须下注。</li>
-              <li><strong>平仓评价：做 +1000，不做不扣。</strong>系统按 journal ID 识别，反复编辑不重复计分。没做的那些不再挂 −1000——待复盘清单本身就是提醒，扣一次分只是把同一件事再说一遍。</li>
-              <li><strong>“未练习”扣分永久不可逆、且最重（−2000）。</strong>某个自然日没有任何练习，就永久记一笔 −2000，后面再怎么练、再盈利都不退这笔——单笔亏损能被后续盈利覆盖，断更不能。按模拟时间的自然日结算。</li>
-              <li><strong>直接交易不再扣分。</strong>它只是<strong>拿不到</strong>决策记录那 +600，而不是倒扣 600。直接交易的笔数仍然统计，用来算「决策记录占比」——那是给你看的诊断，不是罚单。</li>
-              <li><strong>四项各自独立计分、互不联动。</strong>战役是「计划层」结构、决策记录是「每单层」结构，两者分别度量，不互相抵扣。</li>
-              <li><strong>历史按同一把尺重算。</strong>旧数据首次加载会按当前权重重算一次；<strong>已取消的三项扣分会从流水里整条删除、总分同步退回</strong>——不是记成 0 分留在明细里，否则你会以为系统还在算那笔账。</li>
-            </ul>
-            <RedHighlight>
-              执行力资产不判<strong>单笔对错</strong>——一笔亏损的决策单照样 +600；但它判你做得<strong>有没有结构</strong>：带着快照 / 战役 / 评价去做加分，无结构地乱下则拿不到分，干脆不练才扣分。对错（质量）交给复盘中心（错题集 / 规则）去判，这里管的是<strong>做得够多 × 做得有结构</strong>。它专治的是那种更隐蔽的失败——<strong>因为怕错而不做</strong>：在一个下限已被焊死的系统里，不做，往往才是最贵的那个错误。
-            </RedHighlight>
-          </section>
-
           <section id="s7" className="scroll-mt-20">
-            <SectionTitle accent="#F6465D">7. 数据边界与硬约束</SectionTitle>
+            <SectionTitle accent="#F6465D">5. 数据边界与硬约束</SectionTitle>
             <P className="mb-3">这一节的每一条硬约束，本质上都在做同一件事：把<strong>下限</strong>钉死。它们不决定你能赚多少，只确保最坏情况发生时，你依然亏得起、活得下来——上限可以敞开，正是因为下限不会被击穿。<strong>别把它们读成“风控”或“防守”：恰恰相反，下限被焊死，才是你敢多下、敢让每个赢家跑得更肥的前提——纪律的终极目的是进攻，不是防守。</strong></P>
             <div className="guide-stack">
               <P><strong>主力单与对冲单必须分开理解。</strong> 主力单评估方向与机会质量；对冲单评估风险管理。把两者混在一起，会污染 R 倍数、胜率和错误类型统计。</P>
@@ -2003,7 +2018,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
           </section>
 
           <section id="s8" className="scroll-mt-20">
-            <SectionTitle accent="#F0B90B">8. 注意事项</SectionTitle>
+            <SectionTitle accent="#F0B90B">6. 注意事项</SectionTitle>
             <P>这里专门记录与币安界面不完全一致的特殊口径。遇到这类差异时，以本系统说明为准；原因通常是为了让训练样本、复盘统计和 U本位 / 币本位之间保持可比较。</P>
             {/* 【用户要求】原来是一张 14 行、三列的大表，太繁琐：改成每项一行「事项 + 一句话结论」，完整口径与原因点开再看（内容一字未删，导出照样带上） */}
             <div className="guide-notes">
@@ -2165,7 +2180,7 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
           </section>
 
           <section id="s9" className="scroll-mt-20">
-            <SectionTitle accent="#B080FF">9. 判断标准</SectionTitle>
+            <SectionTitle accent="#B080FF">7. 判断标准</SectionTitle>
             <div className="bg-card border-l-4 border-[#F0B90B] rounded-r p-6 my-8">
               <p className="text-[24px] leading-relaxed text-foreground text-center">
                 “系统是否有效，不看你复盘写得多长，而看同一类错误是否越来越少。”
