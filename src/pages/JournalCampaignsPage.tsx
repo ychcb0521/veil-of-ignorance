@@ -2648,7 +2648,7 @@ export default function JournalCampaignsPage() {
     appendSortLevel(sortChain, mode),
     fromKeyboard ? `campaign-sort-${mode}` : null,
   );
-  const handleSortLevelToggle = (index: number) => applySortChain(toggleSortLevel(sortChain, index));
+  const handleSortLevelToggle = (index: number, step: 1 | -1 = 1) => applySortChain(toggleSortLevel(sortChain, index, step));
   /**
    * × / 清除之后排序链变短或整条消失，双击（手机双点）的第二下会落到挪过来的下一级 ×、或挪上来的卡片上
    * （点开详情 / 选择模式里被勾掉）。吞掉紧跟着的那一下连击（detail > 1），600ms 后自动撤掉。
@@ -3323,7 +3323,11 @@ export default function JournalCampaignsPage() {
       {sortChain.map((level, index) => {
         const label = SORT_LABEL_BY_MODE[level.mode];
         const first = index === 0;
-        const directionText = sortDirectionLabel(level.direction, level.mode);
+        const following = !first && level.follow === true;
+        const directionText = following
+          ? `跟随第 ${index} 级（${sortDirectionLabel(level.direction, level.mode)}）`
+          : sortDirectionLabel(level.direction, level.mode);
+        const toggleHint = first ? '点击切换方向' : '点击依次切换：跟随上一级 → 倒序 → 顺序';
         const arrowTone = first ? 'text-[#C98500] dark:text-[#F0B90B]' : SORT_THEN_ARROW;
         const effect = sortLevelEffects[index];
         const effective = effect != null && effect.sorted > 0;
@@ -3339,11 +3343,12 @@ export default function JournalCampaignsPage() {
               <button
                 type="button"
                 data-testid={`sort-chain-toggle-${index + 1}`}
-                aria-label={`第 ${index + 1} 级：${label}，${directionText}；点击切换方向`}
-                title={`第 ${index + 1} 级：按${label}${directionText}；点击切换方向，双击或右键看分组统计`}
+                data-sort-follow={following ? 'true' : undefined}
+                aria-label={`第 ${index + 1} 级：${label}，${directionText}；${toggleHint}`}
+                title={`第 ${index + 1} 级：按${label}${directionText}；${toggleHint}，双击或右键看分组统计`}
                 onClick={event => { if (event.detail > 1) return; handleSortLevelToggle(index); }}
-                // 双击看统计：第一击已切了方向，这里切回去再打开，排序不变
-                onDoubleClick={event => { handleSortLevelToggle(index); openFormulaPopover(event, 'sortChain'); }}
+                // 双击看统计：第一击已切了一步，这里倒退一步再打开，排序不变
+                onDoubleClick={event => { handleSortLevelToggle(index, -1); openFormulaPopover(event, 'sortChain'); }}
                 onContextMenu={event => openFormulaPopover(event, 'sortChain')}
                 className={`${SORT_CHAIN_CONTROL} gap-1 pl-1 pr-1.5 hover:bg-[#F0B90B]/10`}
               >
@@ -3352,6 +3357,7 @@ export default function JournalCampaignsPage() {
                 {level.direction === 'desc'
                   ? <ArrowDown aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />
                   : <ArrowUp aria-hidden="true" className={`h-3 w-3 ${arrowTone}`} />}
+                {following && <span aria-hidden="true" data-testid={`sort-chain-follow-${index + 1}`} className="-ml-0.5 text-[9px] text-muted-foreground/60">同上</span>}
               </button>
               {/* 附注是可聚焦的按钮：悬停看提示，点它（手机上没有悬停）或回车打开 ⓘ，明细在 ⓘ 的「当前」段里 */}
               {first && sortBinning && (
@@ -3421,7 +3427,7 @@ export default function JournalCampaignsPage() {
             <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
-            <div>点某一级的名称或箭头切换它的方向，× 移除这一级；「清除」只保留第一级。</div>
+            <div>点第一级的名称或箭头切换方向；第二级起点击依次切换「跟随上一级 → 倒序 → 顺序」，新加的一级默认跟随上一级（标「同上」），上一级换方向时它随之换。× 移除这一级；「清除」只保留第一级。</div>
             <div>加一级：悬停排序项，点右上角的「+」；手机上长按排序项。单击排序项仍是只按这一项排。</div>
           </div>
           {/* 【复核】档界与「本级排了 N 场」的明细不只放在悬停提示里：手机与键盘也要读得到——一级一行 */}

@@ -42,7 +42,10 @@ export type CampaignSortDirection = 'asc' | 'desc';
 /** 排序链的一级：按哪一项、哪个方向。 */
 export type CampaignSortLevel = {
   mode: CampaignSortMode;
+  /** 本级实际的方向；follow 的级别恒等于上一级的方向（由 normalizeSortChain 维持）。 */
   direction: CampaignSortDirection;
+  /** 第二级起可选「跟随上一级」：上一级切方向时本级随之切。第一级没有上一级，不带这个标记。 */
+  follow?: true;
 };
 
 /** 排序链：至少一级，各级的排序项互不重复；第一级就是原来单级排序的 mode / direction。 */
@@ -941,6 +944,43 @@ function flipDirection(direction: CampaignSortDirection): CampaignSortDirection 
  *   · 这一项已在多级链里：收成只按它排，保留它当前的方向（再单击才切方向）；
  *   · 其它项：换成它，方向取默认。
  */
+/**
+ * 让跟随上一级的级别与上一级同向（逐级传递：第三级跟第二级、第二级跟第一级）；第一级去掉 follow。
+ * 链没变时原样返回同一个数组。
+ */
+export function normalizeSortChain(chain: CampaignSortChain): CampaignSortChain {
+  let previous: CampaignSortDirection | null = null;
+  let changed = false;
+  const next = chain.map((level, index) => {
+    let resolved: CampaignSortLevel = level;
+    if (index === 0 && level.follow) resolved = { mode: level.mode, direction: level.direction };
+    else if (level.follow && previous && level.direction !== previous) resolved = { ...level, direction: previous };
+    if (resolved !== level) changed = true;
+    previous = resolved.direction;
+    return resolved;
+  });
+  return changed ? next : chain;
+}
+
+/** 第二级起的方向选项：跟随上一级 / 倒序（从大到小）/ 顺序（从小到大）。 */
+export type CampaignSortLevelOrder = 'follow' | 'desc' | 'asc';
+
+export function sortLevelOrder(level: CampaignSortLevel): CampaignSortLevelOrder {
+  return level.follow ? 'follow' : level.direction;
+}
+
+/** 把第二级起的某一级设成某个方向选项（第一级只认倒序 / 顺序）。 */
+export function setSortLevelOrder(chain: CampaignSortChain, index: number, order: CampaignSortLevelOrder): CampaignSortChain {
+  if (index < 0 || index >= chain.length || (index === 0 && order === 'follow')) return chain;
+  const next = chain.map((level, at) => {
+    if (at !== index) return level;
+    return order === 'follow'
+      ? { mode: level.mode, direction: level.direction, follow: true as const }
+      : { mode: level.mode, direction: order };
+  });
+  return normalizeSortChain(next);
+}
+
 export function selectSortMode(chain: CampaignSortChain, mode: CampaignSortMode): CampaignSortChain {
   const existing = chain.find(level => level.mode === mode);
   if (existing && chain.length === 1) return [{ mode, direction: flipDirection(existing.direction) }];
@@ -948,22 +988,33 @@ export function selectSortMode(chain: CampaignSortChain, mode: CampaignSortMode)
   return [{ mode, direction: defaultSortDirection(mode) }];
 }
 
-/** 「+」：把这一项追加为下一级（方向取默认）；已在链里的不重复加。 */
+/** 「+」：把这一项追加为下一级，默认跟随上一级的方向；已在链里的不重复加。 */
 export function appendSortLevel(chain: CampaignSortChain, mode: CampaignSortMode): CampaignSortChain {
   if (chain.some(level => level.mode === mode)) return chain;
-  return [...chain, { mode, direction: defaultSortDirection(mode) }];
+  const previous = chain[chain.length - 1];
+  if (!previous) return [{ mode, direction: defaultSortDirection(mode) }];
+  return [...chain, { mode, direction: previous.direction, follow: true }];
 }
 
-/** 排序链上单独切换某一级的方向。 */
-export function toggleSortLevel(chain: CampaignSortChain, index: number): CampaignSortChain {
+/** 第二级起单击依次切换：跟随上一级 → 倒序 → 顺序 → 跟随上一级。 */
+const LEVEL_ORDER_CYCLE: readonly CampaignSortLevelOrder[] = ['follow', 'desc', 'asc'];
+
+/**
+ * 排序链上单独切换某一级：第一级在倒序 / 顺序间切换（跟随它的各级随之切）；
+ * 第二级起在「跟随上一级 → 倒序 → 顺序」三者间轮换，step = -1 倒着走一步（双击时撤回第一击）。
+ */
+export function toggleSortLevel(chain: CampaignSortChain, index: number, step: 1 | -1 = 1): CampaignSortChain {
   if (index < 0 || index >= chain.length) return chain;
-  return chain.map((level, at) => (at === index ? { ...level, direction: flipDirection(level.direction) } : level));
+  if (index === 0) return setSortLevelOrder(chain, 0, flipDirection(chain[0].direction));
+  const at = LEVEL_ORDER_CYCLE.indexOf(sortLevelOrder(chain[index]));
+  const order = LEVEL_ORDER_CYCLE[(at + step + LEVEL_ORDER_CYCLE.length) % LEVEL_ORDER_CYCLE.length];
+  return setSortLevelOrder(chain, index, order);
 }
 
 /** 排序链上单独移除某一级；只剩一级时不再移除（总得按某一项排）。 */
 export function removeSortLevel(chain: CampaignSortChain, index: number): CampaignSortChain {
   if (chain.length <= 1 || index < 0 || index >= chain.length) return chain;
-  return chain.filter((_, at) => at !== index);
+  return normalizeSortChain(chain.filter((_, at) => at !== index));
 }
 
 /** 「清除」：回到单级，保留第一级（连同它的方向）。 */
@@ -973,7 +1024,7 @@ export function clearSortChain(chain: CampaignSortChain): CampaignSortChain {
 
 /** 排序链的签名：比较两条链是否相同。 */
 export function sortChainKey(chain: CampaignSortChain): string {
-  return chain.map(level => `${level.mode}.${level.direction}`).join(',');
+  return chain.map(level => `${level.mode}.${level.direction}${level.follow ? '.follow' : ''}`).join(',');
 }
 
 // ─── URL 参数 ─────────────────────────────────────────────────────────────────
@@ -982,6 +1033,7 @@ export function sortChainKey(chain: CampaignSortChain): string {
  * URL 里的排序链：第一级沿用原来的 sort / direction 两个参数（旧链接照样能读，只有一级时写出来与原来逐字相同），
  * 第二级起每级一个 then 参数，写成「项.方向」，例如
  *   ?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.asc
+ * 跟随上一级的写成「项.follow」（方向由上一级推出）；
  * then 缺方向时取默认方向；认不出的项、与前面重复的项一律忽略。
  */
 export function parseCampaignSortChain(search: string | URLSearchParams): CampaignSortChain {
@@ -998,6 +1050,10 @@ export function parseCampaignSortChain(search: string | URLSearchParams): Campai
   for (const raw of params.getAll('then')) {
     const [thenMode, thenDirection] = raw.split('.');
     if (!isCampaignSortMode(thenMode) || chain.some(level => level.mode === thenMode)) continue;
+    if (thenDirection === 'follow') {
+      chain.push({ mode: thenMode, direction: chain[chain.length - 1].direction, follow: true });
+      continue;
+    }
     chain.push({
       mode: thenMode,
       direction: thenDirection === 'asc' || thenDirection === 'desc' ? thenDirection : defaultSortDirection(thenMode),
@@ -1012,5 +1068,5 @@ export function writeCampaignSortParams(params: URLSearchParams, chain: Campaign
   params.set('sort', first.mode);
   params.set('direction', first.direction);
   params.delete('then');
-  for (const level of rest) params.append('then', `${level.mode}.${level.direction}`);
+  for (const level of rest) params.append('then', `${level.mode}.${level.follow ? 'follow' : level.direction}`);
 }

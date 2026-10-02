@@ -26,6 +26,8 @@ import {
   summarizeSortCrossTab,
   summarizeSortGroups,
   toggleSortLevel,
+  setSortLevelOrder,
+  normalizeSortChain,
   writeCampaignSortParams,
   type CampaignSortChain,
   type CampaignSortRow,
@@ -109,7 +111,7 @@ describe('排序链：依次比较', () => {
     const order = ids(sortCampaignRows(ROWS, chain));
     expect(order.slice(-2)).toEqual(['apt', 'op']);
     // 第三级降序：回到 OP、APT
-    expect(ids(sortCampaignRows(ROWS, toggleSortLevel(chain, 2))).slice(-2)).toEqual(['op', 'apt']);
+    expect(ids(sortCampaignRows(ROWS, setSortLevelOrder(chain, 2, 'desc'))).slice(-2)).toEqual(['op', 'apt']);
     // 前两级已分出先后的地方，第三级不起作用
     expect(order.slice(0, 4)).toEqual(['eth', 'btc', 'sol', 'bnb']);
   });
@@ -199,15 +201,16 @@ describe('排序链的操作', () => {
     expect(selectSortMode(two, 'alpha')).toEqual([{ mode: 'alpha', direction: 'asc' }]);
   });
 
-  it('「+」追加为下一级（默认方向），已在链里的不重复加', () => {
+  it('「+」追加为下一级（默认跟随上一级的方向），已在链里的不重复加', () => {
     expect(appendSortLevel([{ mode: 'mirrorTp', direction: 'desc' }], 'addEfficiency'))
-      .toEqual([{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }]);
-    expect(appendSortLevel(two, 'alpha').at(-1)).toEqual({ mode: 'alpha', direction: 'asc' });
+      .toEqual([{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc', follow: true }]);
+    expect(appendSortLevel(two, 'alpha').at(-1)).toEqual({ mode: 'alpha', direction: 'asc', follow: true });
     expect(appendSortLevel(two, 'mirrorTp')).toBe(two);
   });
 
   it('链上单独切方向、单独移除（至少留一级）、清除（保留第一级）', () => {
-    expect(toggleSortLevel(two, 1)).toEqual([{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc' }]);
+    // 第二级「顺序」→ 下一步回到「跟随上一级」（上一级倒序，本级随之倒序）
+    expect(toggleSortLevel(two, 1)).toEqual([{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'addEfficiency', direction: 'desc', follow: true }]);
     expect(toggleSortLevel(two, 0)[0]).toEqual({ mode: 'mirrorTp', direction: 'asc' });
     expect(removeSortLevel(two, 0)).toEqual([{ mode: 'addEfficiency', direction: 'asc' }]);
     expect(removeSortLevel(two, 1)).toEqual([{ mode: 'mirrorTp', direction: 'desc' }]);
@@ -216,6 +219,40 @@ describe('排序链的操作', () => {
     const three = appendSortLevel(two, 'captureRate');
     expect(clearSortChain(three)).toEqual([{ mode: 'mirrorTp', direction: 'desc' }]);
     expect(clearSortChain(single)).toBe(single);
+  });
+});
+
+describe('【用户要求】第二级起三个方向选项：跟随上一级 / 倒序 / 顺序', () => {
+  const base: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }];
+  it('单击依次切换：跟随 → 倒序 → 顺序 → 跟随；双击的倒退一步撤回', () => {
+    const follow = appendSortLevel(base, 'captureRate');
+    expect(follow[1]).toEqual({ mode: 'captureRate', direction: 'desc', follow: true });
+    const desc = toggleSortLevel(follow, 1);
+    expect(desc[1]).toEqual({ mode: 'captureRate', direction: 'desc' });
+    const asc = toggleSortLevel(desc, 1);
+    expect(asc[1]).toEqual({ mode: 'captureRate', direction: 'asc' });
+    expect(toggleSortLevel(asc, 1)).toEqual(follow);
+    expect(toggleSortLevel(toggleSortLevel(follow, 1), 1, -1)).toEqual(follow);
+  });
+  it('上一级切方向，跟随它的各级随之切（逐级传递）；显式倒序 / 顺序的不动', () => {
+    const chain = appendSortLevel(appendSortLevel(base, 'captureRate'), 'leverage');
+    const flipped = toggleSortLevel(chain, 0);
+    expect(flipped.map(level => level.direction)).toEqual(['asc', 'asc', 'asc']);
+    const fixed = setSortLevelOrder(chain, 1, 'desc');
+    expect(toggleSortLevel(fixed, 0).map(level => level.direction)).toEqual(['asc', 'desc', 'desc']);
+  });
+  it('移除第一级后，原来跟随的第二级升为第一级、去掉跟随，方向保留', () => {
+    const chain = appendSortLevel(base, 'captureRate');
+    expect(removeSortLevel(chain, 0)).toEqual([{ mode: 'captureRate', direction: 'desc' }]);
+    expect(normalizeSortChain(base)).toBe(base);
+  });
+  it('URL 写成「项.follow」，读回来方向按上一级推', () => {
+    const chain = toggleSortLevel(appendSortLevel(base, 'captureRate'), 0);
+    const params = new URLSearchParams();
+    writeCampaignSortParams(params, chain);
+    expect(params.getAll('then')).toEqual(['captureRate.follow']);
+    expect(parseCampaignSortChain(params)).toEqual(chain);
+    expect(sortChainKey(chain)).not.toBe(sortChainKey(setSortLevelOrder(chain, 1, 'asc')));
   });
 });
 

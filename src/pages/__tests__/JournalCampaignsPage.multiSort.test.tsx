@@ -137,7 +137,7 @@ describe('战役列表：多级排序', () => {
     fireEvent.click(screen.getByTestId('sort-chain-add-addEfficiency'));
 
     await waitFor(() => expect(order()).toEqual(MIRROR_THEN_ADD));
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
     // 排序链：① 镜像止盈 ↓ › ② 加仓效用 ↓
     const chain = screen.getByTestId('sort-chain');
     expect(within(chain).getByTestId('sort-chain-level-1')).toHaveAttribute('data-sort-mode', 'mirrorTp');
@@ -181,10 +181,17 @@ describe('战役列表：多级排序', () => {
     expect(order().slice(0, 4)).toEqual(['SOL 趋势回踩', 'BTC 周线共振', 'ETH 突破加仓', 'BNB 镜像止盈']);
     expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('data-sort-direction', 'asc');
 
-    // 第三级：盈亏比升序——只有未实现·亏损那一档（两场都算不出加仓效用）被它重排
+    // 第三级：盈亏比默认跟随第 2 级（升序，标「同上」）——只有未实现·亏损那一档（两场都算不出加仓效用）被它重排
     fireEvent.click(screen.getByTestId('sort-chain-add-captureRate'));
-    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.desc'));
-    expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']);
+    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.follow'));
+    expect(screen.getByTestId('sort-chain-follow-3')).toHaveTextContent('同上');
+    expect(order().slice(-2)).toEqual(['APT 抄底', 'OP 追高']);
+    // 跟随 → 倒序
+    fireEvent.click(screen.getByTestId('sort-chain-toggle-3'));
+    await waitFor(() => expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']));
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.desc');
+    expect(screen.queryByTestId('sort-chain-follow-3')).not.toBeInTheDocument();
+    // 倒序 → 顺序
     fireEvent.click(screen.getByTestId('sort-chain-toggle-3'));
     await waitFor(() => expect(order().slice(-2)).toEqual(['APT 抄底', 'OP 追高']));
     expect(order().slice(0, 4)).toEqual(['SOL 趋势回踩', 'BTC 周线共振', 'ETH 突破加仓', 'BNB 镜像止盈']);
@@ -256,7 +263,7 @@ describe('战役列表：多级排序', () => {
     fireEvent.click(screen.getByTestId('sort-chain-add-addEfficiency'));
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'mirrorTpBars');
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&chart=mirrorTpBars&then=addEfficiency.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&chart=mirrorTpBars&then=addEfficiency.follow');
     fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
     await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'oddsDistribution'));
   }, 15_000);
@@ -295,7 +302,7 @@ describe('战役列表：多级排序', () => {
       fireEvent(button, pointer('pointerup', 'touch'));
       fireEvent.click(button, { detail: 1 });
       expect(screen.getByTestId('sort-chain-level-2')).toHaveAttribute('data-sort-mode', 'addEfficiency');
-      expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
+      expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
 
       // 短按（没到 450ms 就松手）仍是只按这一项排
       const capture = screen.getByTestId('campaign-sort-captureRate');
@@ -404,14 +411,14 @@ describe('战役列表：多级排序', () => {
     const sortButton = screen.getByTestId('campaign-sort-captureRate');
     fireEvent.click(sortButton, { detail: 2 });
     fireEvent.dblClick(sortButton);
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
     expect(screen.queryByText(CAPTURE_FORMULA_TITLE)).not.toBeInTheDocument();
     // 过了双击间隔再双击排序按钮：照常看说明
     await new Promise(resolve => setTimeout(resolve, 850));
     fireEvent.click(sortButton, { detail: 2 });
     fireEvent.dblClick(sortButton);
     expect(await screen.findByText(CAPTURE_FORMULA_TITLE)).toBeInTheDocument();
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
   }, 15_000);
 
   it('多级时双击排序项看说明：第一击收成的单级在双击时还原，排序链不变', async () => {
@@ -433,7 +440,7 @@ describe('战役列表：多级排序', () => {
     keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
     await waitFor(() => expect(screen.getByTestId('campaign-sort-captureRate')).toHaveFocus());
     keyboardClick(screen.getByTestId('campaign-sort-captureRate'));
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
     await new Promise(resolve => setTimeout(resolve, 850));
     keyboardClick(screen.getByTestId('campaign-sort-captureRate'));
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
@@ -467,17 +474,17 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveFocus());
     keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
     await waitFor(() => expect(screen.getByTestId('campaign-sort-captureRate')).toHaveFocus());
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow&then=captureRate.follow');
 
     // ×：还剩多级时落到前一级的名称上
     keyboardClick(screen.getByTestId('sort-chain-remove-3'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-toggle-2')).toHaveFocus());
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
     keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
     // 移除第 1 级：落到新的第 1 级上
     keyboardClick(screen.getByTestId('sort-chain-remove-1'));
-    await waitFor(() => expect(search()).toBe('?sort=addEfficiency&direction=desc&then=captureRate.desc'));
+    await waitFor(() => expect(search()).toBe('?sort=addEfficiency&direction=desc&then=captureRate.follow'));
     expect(screen.getByTestId('sort-chain-toggle-1')).toHaveFocus();
 
     // 清除：排序链消失，落到第一级的排序按钮上
