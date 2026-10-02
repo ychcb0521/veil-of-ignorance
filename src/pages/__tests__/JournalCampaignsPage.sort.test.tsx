@@ -505,15 +505,17 @@ describe('JournalCampaignsPage sorting', () => {
     // 行首与封面左缘对齐：同一套内边距 + 一条透明 1px 边框抵掉卡片外框
     expect(sortRow).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
     // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳；
-    // 最末一个是「批量下载」开关——不是排序项，靠 ml-auto 单独贴在这一行最右端
+    // 最末两个是「导出 Excel」与「批量下载」——不是排序项，「导出 Excel」带 ml-auto，两个一起贴在这一行最右端
     const children = [...sortRow.children];
     expect(children[0]).toHaveTextContent('排序方式');
+    const exportButton = children.at(-2)!;
+    expect(exportButton).toHaveAttribute('data-testid', 'campaign-export-xlsx');
+    expect(exportButton).toHaveClass('ml-auto');
     const batchToggle = children.at(-1)!;
     expect(batchToggle).toHaveAttribute('data-testid', 'campaign-batch-select-toggle');
-    expect(batchToggle).toHaveClass('ml-auto');
     // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点
-    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
-    for (const item of children.slice(1, -1).filter(node => node.hasAttribute('data-sort-item'))) {
+    const sequence = children.slice(1, -2).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    for (const item of children.slice(1, -2).filter(node => node.hasAttribute('data-sort-item'))) {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）

@@ -22,8 +22,11 @@ import {
   Trash2,
   Undo2,
   X,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
+import { buildXlsx } from '@/lib/xlsxWorkbook';
+import { buildCampaignSummarySheets } from '@/lib/campaignSummaryExport';
 import { BackButton } from '@/components/journal/BackButton';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -2374,6 +2377,32 @@ export default function JournalCampaignsPage() {
    * 首次加载时战役分批到达，新到的一场读数更宽，这一列就跟着放宽；加载完就定下来。
    */
   const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);
+  /**
+   * 【用户要求】导出 Excel 汇总表（统计分析、找相关性）：当前时间段（含回收站视图）里的全部战役，
+   * 按当前排序的次序排，被当前排序口径筛掉的战役接在最后（样本不缺）；列见 campaignSummaryColumns。
+   */
+  const handleExportSummaryXlsx = useCallback(() => {
+    try {
+      const listed = new Set(sortedRows.map(row => row.campaign.id));
+      const rowsForExport = [...sortedRows, ...displayRows.filter(row => !listed.has(row.campaign.id))];
+      const blob = buildXlsx(buildCampaignSummarySheets(rowsForExport, {
+        mirrorTpLabel: row => cardMetricReadings(row as CampaignDisplayData).mirrorTp,
+        asymmetricSummary: asymmetricRisk,
+      }));
+      const stamp = formatBeijingTime(Date.now()).replace(/[^\d]/g, '').slice(0, 12);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `交易战役汇总-${stamp}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(`已导出 ${rowsForExport.length} 场战役`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导出失败');
+    }
+  }, [asymmetricRisk, displayRows, sortedRows]);
   const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
     const samples = metricRows.map(row => ({
       row,
@@ -4134,7 +4163,21 @@ export default function JournalCampaignsPage() {
                 </Popover>,
               );
               }))}
-              {/* 批量下载不是排序项：排序按钮照旧左对齐，它单独靠在这一行最右端；进入选择模式后下方展开选择条。 */}
+              {/* 【用户要求】导出 Excel 汇总表：与批量下载一起靠在这一行最右端 */}
+              <button
+                type="button"
+                data-testid="campaign-export-xlsx"
+                disabled={!campaignRowsComplete || displayRows.length === 0}
+                title={campaignRowsComplete
+                  ? `导出 Excel 汇总表：当前时间段里的全部 ${displayRows.length} 场战役，一场一行，排序方式与盈亏概览的全部参数（数值不带单位，便于做相关性分析）`
+                  : '战役还在加载，全部读完后才能导出'}
+                onClick={handleExportSummaryXlsx}
+                className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/70 px-2 text-muted-foreground transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <FileSpreadsheet aria-hidden="true" className="h-3 w-3" />
+                导出 Excel
+              </button>
+              {/* 批量下载不是排序项：排序按钮照旧左对齐，它与「导出 Excel」一起靠在这一行最右端；进入选择模式后下方展开选择条。 */}
               <button
                 ref={batchToggleRef}
                 type="button"
@@ -4145,7 +4188,7 @@ export default function JournalCampaignsPage() {
                   ? selectionMode ? '退出选择模式（Esc）；已选的战役保留' : '勾选卡片或点击散点，把多场战役一次下载成 PNG 压缩包'
                   : '战役还在加载，全部读完后才能批量下载'}
                 onClick={() => setSelectionMode(current => !current)}
-                className={`ml-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border px-2 transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border px-2 transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
                   selectionMode
                     ? 'border-[#F0B90B]/45 bg-[#F0B90B]/10 font-medium text-[#8F6B00] dark:text-[#E8B21C]'
                     : 'border-border/70 text-muted-foreground hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85'
