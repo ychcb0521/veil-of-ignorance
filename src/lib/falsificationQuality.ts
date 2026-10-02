@@ -11,7 +11,7 @@
  * 这个库把快照里的几个字段，收口成一个 ex-ante 的证伪质量评级，
  * 并预报它是否「注定走后门」。纯函数、无副作用，便于测试。
  *
- * 与 structureLoop / structureMaturity 的死法门口径同源：
+ * 与 structureLoop 的死法门口径同源：
  *   富集 ↔ 前门（顺势天命）；贫瘠 ↔ 后门（逆势宿命）。
  */
 import type { LegTone } from '@/lib/structureLoop';

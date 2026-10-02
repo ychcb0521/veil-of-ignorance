@@ -3,7 +3,7 @@
  *
  * 默认页是「汇总」：把开仓快照 / 平仓评价的每个问题做成一行可展开，
  * 展开后看到的是历史全部主力单在这个问题上的答案分布 / 列表 / 数值统计。
- * 旁边并列三个 tab：结构成熟度、盲区（手动登记你没预想到的错）、待复盘。
+ * 旁边并列两个 tab：盲区（手动登记你没预想到的错）、待复盘。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -18,13 +18,13 @@ import { coalesceJournalRecords } from '@/lib/journalReviewIdentity';
 import { buildJournalCampaignIdIndex } from '@/lib/journalCampaignNavigation';
 import { useBlindSpots } from '@/lib/blindSpots';
 import { JournalSummaryView } from '@/components/journal/JournalSummaryView';
-import { StructureMaturityView } from '@/components/journal/StructureMaturityView';
 import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 import type { TradeCampaign } from '@/types/journal';
 import { buildUnreviewedLongMainItems } from '@/lib/unreviewedLongMainTrades';
 
-type View = 'summary' | 'structures' | 'blindspots' | 'unreviewed';
+type View = 'summary' | 'blindspots' | 'unreviewed';
+const VIEWS: readonly View[] = ['summary', 'blindspots', 'unreviewed'];
 
 export default function JournalListPage() {
   const { user } = useAuth();
@@ -37,7 +37,9 @@ export default function JournalListPage() {
 
   const blindSpots = useBlindSpots(user?.id);
 
-  const view = (params.get('view') ?? 'summary') as View;
+  // 认不出的 view（含已删除的「结构成熟度」旧链接 ?view=structures）回到汇总
+  const requestedView = params.get('view');
+  const view: View = VIEWS.includes(requestedView as View) ? (requestedView as View) : 'summary';
 
   /**
    * 重新拉数据。silent=true 时不切 loading（用于背景刷新，避免页面闪屏）。
@@ -140,7 +142,6 @@ export default function JournalListPage() {
           <Tabs value={view} onValueChange={setView}>
             <TabsList className="h-8 bg-card">
               <TabsTrigger value="summary" className="text-[12px] h-7 px-3">汇总</TabsTrigger>
-              <TabsTrigger value="structures" className="text-[12px] h-7 px-3">结构成熟度</TabsTrigger>
               <TabsTrigger value="blindspots" className="text-[12px] h-7 px-3">
                 盲区{blindSpots.items.length > 0 ? ` ${blindSpots.items.length}` : ''}
               </TabsTrigger>
@@ -156,8 +157,6 @@ export default function JournalListPage() {
         {view === 'summary' && (
           <JournalSummaryView journals={navigableTradeJournals} />
         )}
-
-        {view === 'structures' && <StructureMaturityView journals={navigableTradeJournals} />}
 
         {view === 'blindspots' && (
           <BlindSpotModule items={blindSpots.items} onAdd={blindSpots.add} onRemove={blindSpots.remove} />

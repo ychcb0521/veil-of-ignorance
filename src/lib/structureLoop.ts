@@ -11,7 +11,7 @@
  * 这一层不收集新数据，只把已核验的事实「收口」成一句裁决，并在死法走「后门」（不在预案内）时
  * 给出迭代指令 —— 把这次的死法前置成下次的「止」。
  *
- * 这是 structureMaturity（聚合层）在单笔尺度的镜像：同一套死法门口径（前门 / 晚门 / 后门）。
+ * 死法门口径：前门 / 晚门 / 后门。
  * 纯函数、无副作用，便于测试。
  */
 import type { ExitFalsificationStatus, TradeOutcome } from '@/types/journal';
@@ -57,7 +57,7 @@ export interface LoopReadout {
 
 /**
  * 把（结果, 证伪状态）映射到死法门。赢 / 保本 / 未评价证伪状态 → null（不下结论）。
- * 与 structureMaturity 共用同一口径，避免两处各写一遍 switch。
+ * 只在这里写一遍 switch。
  */
 export function classifyDeathDoor(
   outcome: TradeOutcome | null | undefined,
