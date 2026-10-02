@@ -122,6 +122,7 @@ import {
   removeSortLevel,
   resolveSortBinning,
   rowAddEfficiency,
+  rowAddCount,
   rowMainPriceEfficiency,
   rowMirrorTpRank,
   rowPayoffRatio,
@@ -188,6 +189,8 @@ type CampaignMetricChartKey =
   | 'mainPriceEfficiencyDistribution'
   | 'addEfficiency'
   | 'addEfficiencyDistribution'
+  | 'addCount'
+  | 'addCountBars'
   | 'arithmeticExpectancyDistribution';
 
 type CampaignMetricChartConfig = {
@@ -232,6 +235,7 @@ type CampaignFormulaPopover =
   | 'mainPriceChangeSort'
   | 'mainPriceEfficiencySort'
   | 'addEfficiencySort'
+  | 'addCountSort'
   | 'sortChain';
 
 /**
@@ -249,6 +253,8 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'mainPriceEfficiency', label: '涨跌幅倍数' },
   { value: 'captureRate', label: '盈亏比' },
   { value: 'addEfficiency', label: '加仓效用' },
+  // 【用户要求】加仓次数：紧跟加仓效用（排序行、封面同一位置）
+  { value: 'addCount', label: '加仓次数' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'leverage', label: '杠杆倍数' },
@@ -259,7 +265,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
- *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 盈亏比 · 加仓效用 · 加仓次数 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
@@ -804,6 +810,41 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       references: [{ value: 1, label: '1.00 加仓没有额外放大', shareLabel: '放大（> 1）' }],
     },
   },
+  // 【用户要求】加仓次数的散点图：模式与预期回撤一致——默认柱状（一次一根柱），柱内盈亏泾渭分明
+  {
+    key: 'addCount',
+    label: '加仓次数',
+    chartLabel: '加仓次数图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-addCount-view-time',
+    seriesLabel: '加仓次数时序',
+    guide: {
+      yAxis: '每场战役真的成交过的加仓腿有几条（只挂了单、没成交的不算）；没有加仓为 0。纵坐标数值就是次数。',
+      point: '点越高，这场加仓越多；点位只说加了几次，颜色才报这一场的盈亏（按 b 的正负）。',
+      colors: PAYOFF_SIGN_COLORS,
+    },
+    missingValueLabel: '加仓次数',
+    colorMode: 'signed',
+    formatValue: value => `${Math.round(value)} 次`,
+  },
+  {
+    key: 'addCountBars',
+    sourceKey: 'addCount',
+    view: 'bars',
+    viewLabel: '柱状',
+    viewTestId: 'campaign-addCount-view-bars',
+    label: '加仓次数分布',
+    chartLabel: '柱状图',
+    seriesLabel: '加仓次数分布',
+    guide: {
+      yAxis: '纵轴是场数：加仓次数相同的战役码成一根柱，柱越高，这个次数出现得越多。每根柱的精确场数写在柱脚下。',
+      point: '横轴从 0 次（没有加仓）到最多的那一档逐次分柱，不按时间排列；一场都没有的次数也保留空柱。柱内亏损在下、盈利在上，换组另起一行。每个点仍是一场战役，悬停查看战役与 b，点击进入对应战役。',
+      colors: PAYOFF_SIGN_COLORS,
+    },
+    missingValueLabel: '加仓次数',
+    colorMode: 'signed',
+    formatValue: value => `${Math.round(value)} 次`,
+  },
 ] as const;
 
 const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
@@ -816,6 +857,7 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   mainPriceChange: 'mainPriceChangeSort',
   mainPriceEfficiency: 'mainPriceEfficiencySort',
   addEfficiency: 'addEfficiencySort',
+  addCount: 'addCountSort',
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
@@ -828,6 +870,7 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   mainPriceChange: 'mainPriceChange',
   mainPriceEfficiency: 'mainPriceEfficiency',
   addEfficiency: 'addEfficiency',
+  addCount: 'addCount',
 };
 
 /**
@@ -855,6 +898,8 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   mainPriceEfficiency: 'mainPriceEfficiencyDistribution',
   addEfficiency: 'addEfficiencyDistribution',
   arithmeticExpectancy: 'arithmeticExpectancyDistribution',
+  // 【用户要求】加仓次数同预期回撤：默认看柱状，「时序 | 柱状」随时切回
+  addCount: 'addCountBars',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1076,13 +1121,16 @@ function formatSortGroupKey(mode: CampaignSortMode, key: SortGroupKey, threshold
   if (mode === 'mirrorTp') return formatMirrorTpMetric(key.value);
   if (mode === 'importance') return `${key.value} ${selfRatingLabel(Number(key.value)) ?? '未评'}`;
   if (mode === 'leverage') return `${key.value}x`;
+  if (mode === 'addCount') return `${key.value} 次`;
   return String(key.value);
 }
 
 /** 分组统计表里后面各级的格子：连续指标与杠杆写平均值，镜像止盈写生效场数，自评写平均分。 */
 function formatSortGroupLevelStat(mode: CampaignSortMode, stat: SortGroupLevelStat): string {
   switch (stat.kind) {
-    case 'average': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x` : formatSortBinValue(mode, stat.value);
+    case 'average': return mode === 'leverage' ? `${Number(stat.value.toFixed(1))}x`
+      : mode === 'addCount' ? `${stat.value.toFixed(1)} 次`
+      : formatSortBinValue(mode, stat.value);
     case 'achieved': return `生效 ${stat.hits}/${stat.count}`;
     case 'mean': return `${stat.value.toFixed(1)} 分`;
     default: return '—';
@@ -1165,6 +1213,7 @@ const CARD_METRIC_LABEL = {
   mainPriceEfficiency: '涨跌幅倍数',
   captureRate: '盈亏比',
   addEfficiency: '加仓效用',
+  addCount: '加仓次数',
   geometricExpectancy: '几何期望',
   arithmeticExpectancy: '算术期望',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
@@ -1182,6 +1231,7 @@ const CARD_METRIC_WIDTH_CLASS = {
   mainPriceEfficiency: 'sm:w-[var(--cm-w-mainPriceEfficiency)]',
   captureRate: 'sm:w-[var(--cm-w-captureRate)]',
   addEfficiency: 'sm:w-[var(--cm-w-addEfficiency)]',
+  addCount: 'sm:w-[var(--cm-w-addCount)]',
   geometricExpectancy: 'sm:w-[var(--cm-w-geometricExpectancy)]',
   arithmeticExpectancy: 'sm:w-[var(--cm-w-arithmeticExpectancy)]',
 } as const satisfies Record<CardMetricMode, string>;
@@ -1210,6 +1260,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     // 【用户要求】盈亏比只保留倍数 b，不写百分数
     captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
+    addCount: String(rowAddCount(row)),
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
     arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
   };
@@ -1664,6 +1715,20 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(rowPayoffRatio(row) ?? 0)]}`}>
                 {readings.addEfficiency}
+              </span>
+            </dd>
+          </div>
+          {/* 【用户要求】加仓次数：紧跟加仓效用，成交过的加仓腿有几条（0 = 没加仓，淡色） */}
+          <div
+            data-testid="campaign-add-count"
+            title={`加仓次数：这场战役里真的成交过的加仓腿有 ${readings.addCount} 条（只挂了单、没成交的不算）`}
+            className={metricCell('addCount')}
+            data-sort-highlight={litAttr('addCount')}
+          >
+            <dt className={metricName('addCount')}>{CARD_METRIC_LABEL.addCount}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+                {readings.addCount}
               </span>
             </dd>
           </div>
@@ -2348,6 +2413,8 @@ export default function JournalCampaignsPage() {
       row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
     ));
     const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
+    // 加仓次数：每一场都有读数（没加仓 = 0）
+    const addCount = buildSeries(row => rowAddCount(row));
     // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
     const addEfficiency = buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
       ...sample,
@@ -2377,6 +2444,8 @@ export default function JournalCampaignsPage() {
       mainPriceEfficiencyDistribution: mainPriceEfficiency,
       addEfficiency,
       addEfficiencyDistribution: addEfficiency,
+      addCount,
+      addCountBars: addCount,
     };
   }, [metricRows]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
@@ -3997,6 +4066,17 @@ export default function JournalCampaignsPage() {
                             例：bᵢ = +6.00、ηᵢ = +3.00，加仓效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
                           </div>
                           <div>只算做过加仓（有一条成交过的加仓腿）的战役。<span className="text-foreground">涨跌幅倍数为负的也算，分母取绝对值、正负跟随 b</span>：例 bᵢ = −3.00、ηᵢ = −2.00，加仓效用 = −3 ÷ |−2| = −1.50——价格逆行 2 个预期回撤，亏成了 3R，同样放大了 1.5 倍；分布图里这类战役从 0 线往下堆。颜色按 bᵢ 的正负。涨跌幅倍数显示为 0.00 时分母过小不算；算不出的战役不参与排序与散点图，封面显示「—」。</div>
+                        </div>
+                      </>
+                    ) : formula === 'addCountSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">加仓次数排序口径</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          加仓次数 = 这场战役里真的成交过的加仓腿条数
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>与「加仓效用」判断有没有加仓同一个口径：带成交记录、或腿上已有结算结果的加仓腿才算，只挂了单、没成交的不算。</div>
+                          <div>没有加仓的战役记 0，照样进入排序；同次数再按盈亏比、自评、操作时间排。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

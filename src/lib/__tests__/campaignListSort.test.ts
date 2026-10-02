@@ -17,6 +17,7 @@ import {
   sortBinThresholds,
   removeSortLevel,
   resolveSortBinning,
+  rowAddCount,
   selectSortMode,
   sortBinValue,
   sortCampaignRows,
@@ -647,3 +648,35 @@ describe('【用户要求】与 0 相关的分档：0 的分界线保留，正�
   });
 });
 
+
+describe('【用户要求】加仓次数：排序项与封面读数', () => {
+  const rows = [
+    makeSortRow({ id: 'none', pnl: 50, pcr: 50 }),
+    makeSortRow({ id: 'one', pnl: -40, adds: 1, pcr: -40 }),
+    makeSortRow({ id: 'three-win', pnl: 300, adds: 3, pcr: 300 }),
+    makeSortRow({ id: 'three-loss', pnl: -90, adds: 3, pcr: -90 }),
+    // 两条只挂了单、没成交的加仓不算：读数仍是 1
+    makeSortRow({ id: 'pending', pnl: 20, adds: 1, pendingAdds: 2, pcr: 20 }),
+  ];
+
+  it('只数成交过的加仓腿；没加仓是 0 而不是算不出', () => {
+    expect(rows.map(rowAddCount)).toEqual([0, 1, 3, 3, 1]);
+  });
+
+  it('每一场都进列表；降序按次数从多到少，同次数按盈亏比', () => {
+    expect(ids(sortCampaignRows(rows, [{ mode: 'addCount', direction: 'desc' }])))
+      .toEqual(['three-win', 'three-loss', 'pending', 'one', 'none']);
+    expect(ids(sortCampaignRows(rows, [{ mode: 'addCount', direction: 'asc' }]))[0]).toBe('none');
+  });
+
+  it('作第一级时一个次数一组（不分四分位档），组名就是次数', () => {
+    const chain: CampaignSortChain = [{ mode: 'addCount', direction: 'desc' }, { mode: 'captureRate', direction: 'desc' }];
+    expect(resolveSortBinning(rows, chain)).toBeNull();
+    const groups = summarizeSortGroups(sortCampaignRows(rows, chain), chain);
+    expect(groups.map(group => [group.key, group.count])).toEqual([
+      [{ kind: 'value', value: 3 }, 2],
+      [{ kind: 'value', value: 1 }, 2],
+      [{ kind: 'value', value: 0 }, 1],
+    ]);
+  });
+});

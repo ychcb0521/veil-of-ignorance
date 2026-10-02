@@ -17,7 +17,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     const labels = [...block.matchAll(/label: '([^']+)'/g)].map(match => match[1]);
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（自评在杠杆倍数之后、字母之前；「DSI 贡献」「USI 贡献」已删）
     expect(labels).toEqual([
-      '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望',
+      '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '几何期望',
       '算术期望', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
@@ -40,7 +40,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布」：左对齐、按读数定宽，顺序与排序行一致
     expect(guide).toContain('第二层<strong>左对齐、紧凑排开</strong>');
     expect(guide).not.toContain('<strong>等宽的统计格</strong>');
-    expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、单场几何期望、单场算术期望');
+    expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、加仓次数、单场几何期望、单场算术期望');
     expect(guide).toContain('<strong>同名的项在上下各张卡片上落在同一条竖线上</strong>');
     // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」
     expect(guide).toContain('<strong>当前排序项在封面上高亮</strong>');
@@ -76,7 +76,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
   });
 
   it('散点图清单与颜色说明包含涨跌幅、涨跌幅倍数、加仓效用', () => {
-    expect(guide).toContain('盈亏比、预期回撤、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望、自评、镜像止盈都各自配有一张散点图');
+    expect(guide).toContain('盈亏比、预期回撤、涨跌幅、涨跌幅倍数、加仓效用、加仓次数、算术期望、几何期望、自评、镜像止盈都各自配有一张散点图');
     // 【用户要求】颜色一律按这一场的 b 的正负分，不按图上的指标
     expect(guide).toContain('<strong>颜色一律按这一场的盈亏比 b 的正负分</strong>');
     expect(guide).toContain('没有加仓、或涨跌幅倍数显示为 0.00 的战役不进加仓效用图');
@@ -91,7 +91,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     }
   });
   it('【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布，可切回时序；加仓效用另有 1.00 参照线', () => {
-    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图；镜像止盈、预期回撤与自评默认展开的是柱状图</strong>');
+    expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图；镜像止盈、预期回撤、自评与加仓次数默认展开的是柱状图</strong>');
     // 【用户要求】预期回撤柱状按倒数 100 ÷ D% 等间距分档，默认打开。
     expect(guide).toContain('<strong>倒数 100 ÷ D%</strong> 等间距分档');
     expect(page).toContain("expectedDrawdownPct: 'expectedDrawdownPctBars'");

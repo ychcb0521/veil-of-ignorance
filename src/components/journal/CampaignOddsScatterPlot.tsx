@@ -180,15 +180,15 @@ function stackMagnitude(payoffRatio: number | null | undefined): number {
 }
 
 /**
- * 【用户要求】预期回撤柱状：柱子上部放盈利、下部放亏损，泾渭分明。
- * 自底向上：亏损（0）→ 持平或进行中（1）→ 盈利（2）；换组时另起一行（stackGroup），一行里不混色。
- * 与点的颜色同一个判定（risk 配色按已实现盈亏的正负）。
+ * 【用户要求】柱状散点图「盈亏泾渭分明」（预期回撤、自评、加仓次数）：柱子上部放盈利、下部放亏损。
+ * 自底向上：亏损（0）→ 持平或算不出 b（1）→ 盈利（2）；换组时另起一行（stackGroup），一行里不混色。
+ * 与点的颜色同一个判定（metricSeriesIndex：按这一场盈亏比 b 的正负）。
  */
-function drawdownStackOrder(point: { pnl?: number | null }): number {
-  const pnl = point.pnl;
-  if (pnl != null && Number.isFinite(pnl)) {
-    if (pnl < 0) return 0;
-    if (pnl > 0) return 2;
+function drawdownStackOrder(point: { payoffRatio?: number | null }): number {
+  const b = point.payoffRatio;
+  if (b != null && Number.isFinite(b)) {
+    if (b < 0) return 0;
+    if (b > 0) return 2;
   }
   return 1;
 }
@@ -476,6 +476,8 @@ export function CampaignMetricScatterPlot({
   const stacked = distribution || bars;
   /** 【用户要求】预期回撤柱状：档位不是离散刻度，而是按 100 ÷ D% 等间距分出的区间。 */
   const drawdownBars = bars && metricKey === 'expectedDrawdownPctBars';
+  /** 【用户要求】盈亏泾渭分明的柱状图：柱内亏损在下、盈利在上，换组另起一行（预期回撤、自评、加仓次数）。 */
+  const segregatedBars = drawdownBars || (bars && (metricKey === 'importanceBars' || metricKey === 'addCountBars'));
   /** 盈亏比那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
   const oddsFamily = metricKey.startsWith('odds');
   /**
@@ -585,6 +587,19 @@ export function CampaignMetricScatterPlot({
         })),
       };
     }
+    // 加仓次数：0 次到最多那一档逐次一根柱，中间没有战役的次数也留空柱（「3 次 0 场」本身就是结论）
+    if (metricKey === 'addCountBars') {
+      const maxCount = Math.max(0, ...chartPoints.map(point => Math.round(point.value)));
+      return {
+        barOf: (point: CampaignMetricPoint) => Math.round(point.value),
+        columns: Array.from({ length: maxCount + 1 }, (_, value) => ({
+          value,
+          label: formatValue(value),
+          detail: null as string | null,
+          count: chartPoints.filter(point => Math.round(point.value) === value).length,
+        })),
+      };
+    }
     const discrete = createDiscreteMetricScale(metricKey.replace(/Bars$/, ''));
     const values = discrete
       ? discrete.ticks.map(tick => tick.value)
@@ -651,7 +666,7 @@ export function CampaignMetricScatterPlot({
        */
       ? [...chartPoints].sort((a, b) => (
         barModel!.barOf(a) - barModel!.barOf(b)
-        || (drawdownBars
+        || (segregatedBars
           ? drawdownStackOrder(a) - drawdownStackOrder(b) || drawdownStackTiebreak(a) - drawdownStackTiebreak(b)
           : stackMagnitude(a.payoffRatio) - stackMagnitude(b.payoffRatio))
         || a.campaignId.localeCompare(b.campaignId)
@@ -690,7 +705,7 @@ export function CampaignMetricScatterPlot({
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
-        stackGroup: drawdownBars ? String(drawdownStackOrder(point)) : undefined,
+        stackGroup: segregatedBars ? String(drawdownStackOrder(point)) : undefined,
         // 【用户要求】加仓效用分布：涨跌幅倍数为负的战役从 0 线往下镜像堆
         stackBelow: distribution && !geometricDistribution && point.stackBelow === true ? true : undefined,
         dataAttrs: {
@@ -704,7 +719,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [barModel, colorMode, distribution, drawdownBars, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, selectionMode, series.length, showPayoffRatio, stacked],
+    [barModel, colorMode, distribution, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, segregatedBars, selectionMode, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -930,9 +945,9 @@ export function CampaignMetricScatterPlot({
           <dt className="font-medium text-[color:var(--chart-ink)]">横轴</dt>
           {/* 四种横轴各有各的读法，一条都不能串：串了就是在图旁边写一句与图相反的话。 */}
           {drawdownBars ? (
-            <dd>按预期回撤百分比的倒数 100 ÷ D% 等间距分柱（D = 2% → 50），标注写的是对应的实际预期回撤区间，所以百分比刻度左疏右密；不考虑时间先后：越往右止损越紧，越往左回撤空间越宽。样本够多且有极远的离群值时，最右一根并成「≤ 下界」柱。一场都没有的区间也保留空柱。柱内自底向上是亏损 → 持平或进行中 → 盈利，换组时另起一行、一行里不混色；亏损越大越靠底、盈利越大越靠顶。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
+            <dd>按预期回撤百分比的倒数 100 ÷ D% 等间距分柱（D = 2% → 50），标注写的是对应的实际预期回撤区间，所以百分比刻度左疏右密；不考虑时间先后：越往右止损越紧，越往左回撤空间越宽。样本够多且有极远的离群值时，最右一根并成「≤ 下界」柱。一场都没有的区间也保留空柱。柱内自底向上是亏损 → 持平或算不出 b → 盈利（按这一场 b 的正负），换组时另起一行、一行里不混色；亏损越大越靠底、盈利越大越靠顶。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
           ) : bars ? (
-            <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
+            <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。{segregatedBars ? '柱内自底向上是亏损 → 持平或算不出 b → 盈利（按这一场 b 的正负），换组时另起一行、一行里不混色；亏损越大越靠底、盈利越大越靠顶。' : ''}柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
           ) : dist && oddsFamily ? (
             <dd>横轴就是盈亏比 b 本身，单位 R，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10R；出现 b ≤ −10 时，左端固定为 −12R，保证归零界限可见且不被极端亏损挤压。超出窗口的点贴边画三角，保留原值、黄色风险描边及统计；−1R 止损线仍保留。</dd>
           ) : geometricDist ? (

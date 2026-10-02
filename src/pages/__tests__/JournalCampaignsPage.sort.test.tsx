@@ -520,7 +520,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(sequence).toEqual([
       'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
-      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency',
+      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
       'geometricExpectancy', 'arithmeticExpectancy',
       'divider-leverage',
       'leverage', 'importance', 'alpha',
@@ -545,13 +545,14 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-main-price-efficiency',
       'campaign-payoff-ratio',
       'campaign-add-efficiency',
+      'campaign-add-count',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',
     ]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = [...metricRows[0].children];
     expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
-      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望', '算术期望',
+      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '几何期望', '算术期望',
     ]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
@@ -1808,6 +1809,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-mainPriceEfficiency',
       'campaign-sort-captureRate',
       'campaign-sort-addEfficiency',
+      'campaign-sort-addCount',
       'campaign-sort-geometricExpectancy',
       'campaign-sort-arithmeticExpectancy',
       'campaign-sort-leverage',
@@ -1832,6 +1834,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-main-price-efficiency',
       'campaign-payoff-ratio',
       'campaign-add-efficiency',
+      'campaign-add-count',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',
     ]);

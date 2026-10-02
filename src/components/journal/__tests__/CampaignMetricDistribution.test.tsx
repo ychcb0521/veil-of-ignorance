@@ -254,3 +254,41 @@ describe('【用户要求】加仓效用分布：涨跌幅倍数为负的战役�
     expect(document.querySelector('[data-grid-value^="-"]')).not.toBeNull();
   });
 });
+
+describe('【用户要求】柱状散点图盈亏泾渭分明：加仓次数、自评', () => {
+  const renderBars = (metricKey: string, rows: Array<[string, number, number]>) => render(<CampaignMetricScatterPlot
+    points={rows.map(([id, value, b], index) => ({
+      campaignId: id, title: id, symbol: 'TESTUSDT', value, sequence: index + 1,
+      operationTime: 1_700_000_000_000 + index * 86_400_000, pnl: b * 10, payoffRatio: b,
+    }))}
+    metricKey={metricKey} metricLabel={metricKey} seriesLabel={metricKey} axisLabel={metricKey} missingValueLabel={metricKey}
+    view="bars" formatValue={value => `${Math.round(value)} 次`}
+    guide={{ yAxis: '场数', point: '每点一场。', colors: SIGNED_COLORS }}
+    onSelectCampaign={vi.fn()}
+  />);
+  const top = (metricKey: string, id: string) => Number.parseFloat(
+    screen.getByTestId(`campaign-metric-point-${metricKey}-${id}`).style.top,
+  );
+
+  it('加仓次数：0 次到最多那一档逐次一根柱，缺的次数留空柱；柱内亏损都在盈利下方', () => {
+    // 2 次没有战役，柱子照留；1 次那根柱里两亏两赚（输入顺序故意交错）
+    renderBars('addCountBars', [
+      ['z', 0, 0.5], ['w1', 1, 2], ['l1', 1, -0.8], ['w2', 1, 0.3], ['l2', 1, -2.5], ['t', 3, 1.2],
+    ]);
+    const columns = [...document.querySelectorAll('[data-testid^="chart-category-count-"]')]
+      .map(node => node.getAttribute('data-testid')!.replace('chart-category-count-', ''));
+    expect(columns).toEqual(['0', '1', '2', '3']);
+    expect(screen.getByTestId('chart-category-count-2')).toHaveTextContent('0');
+    // top% 越大越靠下：两场亏损都在两场盈利下方
+    expect(Math.min(top('addCountBars', 'l1'), top('addCountBars', 'l2')))
+      .toBeGreaterThan(Math.max(top('addCountBars', 'w1'), top('addCountBars', 'w2')));
+  });
+
+  it('自评柱状同样盈亏分开码放', () => {
+    renderBars('importanceBars', [
+      ['w1', 4, 1.5], ['l1', 4, -0.4], ['w2', 4, 0.2], ['l2', 4, -1.1],
+    ]);
+    expect(Math.min(top('importanceBars', 'l1'), top('importanceBars', 'l2')))
+      .toBeGreaterThan(Math.max(top('importanceBars', 'w1'), top('importanceBars', 'w2')));
+  });
+});

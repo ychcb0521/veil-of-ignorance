@@ -22,6 +22,10 @@ export type SortRowSpec = {
   tp?: boolean;
   /** 有一条成交过的加仓腿。 */
   add?: boolean;
+  /** 成交过的加仓腿条数（加仓次数）；给了就以它为准，覆盖 add。 */
+  adds?: number;
+  /** 只挂了单、没成交的加仓腿条数（不计入加仓次数）。 */
+  pendingAdds?: number;
   /** 利润捕获率（%，= 盈亏比 b × 100）。 */
   pcr?: number | null;
   /** 预期回撤（%）。 */
@@ -86,7 +90,13 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
   const time = spec.time === undefined ? NOW : spec.time;
   const legs: TradeJournal[] = [makeLeg(spec, 'main', 'main_open', null, time)];
   const tradeRecords: TradeRecord[] = [];
-  if (spec.add) legs.push(makeLeg(spec, 'add', 'main_add_1', `${spec.id}-add-record`, null));
+  const filledAdds = spec.adds ?? (spec.add ? 1 : 0);
+  for (let i = 1; i <= filledAdds; i += 1) {
+    legs.push(makeLeg(spec, i === 1 ? 'add' : `add-${i}`, `main_add_${i}` as TradeJournal['leg_role'], `${spec.id}-add-record${i === 1 ? '' : `-${i}`}`, null));
+  }
+  for (let i = 1; i <= (spec.pendingAdds ?? 0); i += 1) {
+    legs.push(makeLeg(spec, `pending-add-${i}`, `main_add_${filledAdds + i}` as TradeJournal['leg_role'], null, null));
+  }
   if (spec.tp) {
     legs.push(makeLeg(spec, 'tp', 'mirror_tp', `${spec.id}-tp-record`, null));
     // 成交记录不带真实时刻：不影响操作时间，只证明镜像止盈成交了

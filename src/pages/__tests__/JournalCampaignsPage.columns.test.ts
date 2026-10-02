@@ -18,7 +18,7 @@ const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPa
 
 const METRIC_MODES = [
   'mirrorTp', 'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency',
-  'captureRate', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
+  'captureRate', 'addEfficiency', 'addCount', 'geometricExpectancy', 'arithmeticExpectancy',
 ];
 
 function constBlock(s: string, name: string): string {
@@ -54,7 +54,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
     expect(order).toEqual([
       'time', 'mirrorTp',
-      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency',
+      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
       'geometricExpectancy', 'arithmeticExpectancy',
       'leverage', 'importance', 'alpha',
     ]);
@@ -74,6 +74,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
       ['mainPriceEfficiency', 'campaign-main-price-efficiency'],
       ['captureRate', 'campaign-payoff-ratio'],
       ['addEfficiency', 'campaign-add-efficiency'],
+      ['addCount', 'campaign-add-count'],
       ['geometricExpectancy', 'campaign-geometric-expectancy'],
       ['arithmeticExpectancy', 'campaign-arithmetic-expectancy'],
     ]);
@@ -92,7 +93,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
     expect(labels).toEqual([
       ['mirrorTp', '镜像止盈'], ['expectedDrawdownPct', '预期回撤'], ['mainPriceChange', '涨跌幅'], ['mainPriceEfficiency', '涨跌幅倍数'],
-      ['captureRate', '盈亏比'], ['addEfficiency', '加仓效用'], ['geometricExpectancy', '几何期望'], ['arithmeticExpectancy', '算术期望'],
+      ['captureRate', '盈亏比'], ['addEfficiency', '加仓效用'], ['addCount', '加仓次数'], ['geometricExpectancy', '几何期望'], ['arithmeticExpectancy', '算术期望'],
     ]);
     // 每项的宽度类读 --cm-w-<项>（Tailwind 要完整类名，逐个写出）
     const widthClasses = [...constBlock(s, 'CARD_METRIC_WIDTH_CLASS').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);

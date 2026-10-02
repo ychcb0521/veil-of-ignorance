@@ -402,15 +402,27 @@ function isMainAddRole(role: string | null | undefined): boolean {
  * 「做过加仓」= 有一条加仓腿（main_add_N）真的成交过：带成交 id（实时 / 回填都有），或腿上已有结算结果。
  * 只挂了单、腿上连成交 id 都没有的加仓不算。
  */
-export function campaignHasMainAdd(
-  legs: readonly Pick<TradeJournal, 'leg_role' | 'trade_record_id' | 'post_realized_pnl' | 'post_real_close_time' | 'post_simulated_close_time'>[],
-): boolean {
-  return legs.some(leg => isMainAddRole(leg.leg_role) && (
+type MainAddLeg = Pick<TradeJournal, 'leg_role' | 'trade_record_id' | 'post_realized_pnl' | 'post_real_close_time' | 'post_simulated_close_time'>;
+
+function isFilledMainAdd(leg: MainAddLeg): boolean {
+  return isMainAddRole(leg.leg_role) && (
     !!leg.trade_record_id
     || (leg.post_realized_pnl != null && Number.isFinite(Number(leg.post_realized_pnl)))
     || !!leg.post_real_close_time
     || !!leg.post_simulated_close_time
-  ));
+  );
+}
+
+export function campaignHasMainAdd(legs: readonly MainAddLeg[]): boolean {
+  return legs.some(isFilledMainAdd);
+}
+
+/**
+ * 【用户要求】加仓次数：这场战役里真的成交过的加仓腿（main_add_N）有几条——与 campaignHasMainAdd 同一个口径，
+ * 只挂了单、没成交的加仓不算。没有加仓就是 0（0 也是一个读数，不是「算不出」）。
+ */
+export function campaignMainAddCount(legs: readonly MainAddLeg[]): number {
+  return legs.filter(isFilledMainAdd).length;
 }
 
 /** 反事实（手动 Legs）里有没有参与运行、且成交了的加仓腿：与 campaignHasMainAdd 同一个口径。 */

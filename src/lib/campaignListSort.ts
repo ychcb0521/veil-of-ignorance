@@ -1,5 +1,5 @@
 import type { CampaignCardData } from '@/lib/campaignListCache';
-import { campaignHasMainAdd, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -35,6 +35,7 @@ export type CampaignSortMode =
   | 'mainPriceChange'
   | 'mainPriceEfficiency'
   | 'addEfficiency'
+  | 'addCount'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -55,6 +56,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'mainPriceEfficiency',
   'captureRate',
   'addEfficiency',
+  'addCount',
   'geometricExpectancy',
   'arithmeticExpectancy',
   'leverage',
@@ -168,6 +170,11 @@ export function rowAddEfficiency(row: Pick<CampaignCardData, 'legs' | 'mainPrice
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
 }
 
+/** 加仓次数（成交过的加仓腿条数，见 campaignMainAddCount）：卡片、散点图与排序共用。 */
+export function rowAddCount(row: Pick<CampaignCardData, 'legs'>): number {
+  return campaignMainAddCount(row.legs);
+}
+
 // ─── 比较的基本件 ─────────────────────────────────────────────────────────────
 
 const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
@@ -257,6 +264,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
   const leverage = memoizeByRow<T, number>(row => campaignLeverage(row.campaign, row.legs));
   const mainPriceEfficiency = memoizeByRow<T, number | null>(rowMainPriceEfficiency);
   const addEfficiency = memoizeByRow<T, number | null>(rowAddEfficiency);
+  const addCount = memoizeByRow<T, number>(rowAddCount);
 
   const importanceDesc = (a: T, b: T) => compareNumber(importance(a), importance(b), 'desc');
   const timeDesc = (a: T, b: T) => compareNumber(sortTime(a), sortTime(b), 'desc');
@@ -340,6 +348,15 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
+    // 每一场都有读数（没加仓 = 0），同次数按盈亏比、再按自评 → 操作时间 → 字母
+    addCount: {
+      include: always,
+      missing: never,
+      compare: (a, b, direction) => compareNumber(addCount(a), addCount(b), direction),
+      tieBreak: (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
+        || importanceTimeAlpha(a, b),
+      value: addCount,
+    },
     alpha: {
       include: always,
       missing: never,
@@ -794,12 +811,13 @@ function groupSortedRows<T extends CampaignSortRow>(
   return order.map(id => buckets.get(id)!);
 }
 
-/** 按读数本身分组的排序项（不分档）：镜像止盈六档、自评分、杠杆倍数。 */
-const DISCRETE_GROUP_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mirrorTp', 'importance', 'leverage']);
+/** 按读数本身分组的排序项（不分档）：镜像止盈六档、自评分、杠杆倍数、加仓次数。 */
+const DISCRETE_GROUP_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['mirrorTp', 'importance', 'leverage', 'addCount']);
 
 function discreteReader<T extends CampaignSortRow>(mode: CampaignSortMode): (row: T) => number {
   if (mode === 'mirrorTp') return rowMirrorTpRank;
   if (mode === 'importance') return row => importanceValue(row.campaign);
+  if (mode === 'addCount') return rowAddCount;
   return row => campaignLeverage(row.campaign, row.legs);
 }
 

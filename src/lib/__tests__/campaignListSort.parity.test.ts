@@ -302,9 +302,12 @@ const HANDPICKED: CampaignSortRow[] = [
   makeSortRow({ id: 'o', title: '', symbol: 'XRPUSDT', pnl: 0, time: null, add: true, pcr: 0, dd: 0, mpc: 0 }),
 ];
 
+/** 改动前就有的排序项：之后新增的（加仓次数）没有老实现可对照，另由 campaignListSort.test 覆盖。 */
+const LEGACY_SORT_MODES = CAMPAIGN_SORT_MODES.filter(mode => mode !== 'addCount');
+
 describe('排序链只有一级时与改动前的单级排序逐位相同', () => {
   it('十二个排序项 × 两个方向，手写的一批战役', () => {
-    for (const mode of CAMPAIGN_SORT_MODES) {
+    for (const mode of LEGACY_SORT_MODES) {
       for (const direction of DIRECTIONS) {
         const legacy = ids(legacySortCampaignRows(HANDPICKED, { mode, direction }));
         const next = ids(sortCampaignRows(HANDPICKED, [{ mode, direction }]));
@@ -316,7 +319,7 @@ describe('排序链只有一级时与改动前的单级排序逐位相同', () =
   it('十二个排序项 × 两个方向，六批各 80 场的随机战役（大量并列与缺值）', () => {
     for (const seed of [1, 7, 42, 2026, 31337, 65535]) {
       const rows = randomSortRows(80, seed);
-      for (const mode of CAMPAIGN_SORT_MODES) {
+      for (const mode of LEGACY_SORT_MODES) {
         for (const direction of DIRECTIONS) {
           const legacy = ids(legacySortCampaignRows(rows, { mode, direction }));
           const next = ids(sortCampaignRows(rows, [{ mode, direction }]));
@@ -329,7 +332,7 @@ describe('排序链只有一级时与改动前的单级排序逐位相同', () =
   it('输入顺序打乱后仍一致（排序稳定性不掩盖差别）', () => {
     const rows = randomSortRows(60, 99);
     const reversed = [...rows].reverse();
-    for (const mode of CAMPAIGN_SORT_MODES) {
+    for (const mode of LEGACY_SORT_MODES) {
       for (const direction of DIRECTIONS) {
         expect(ids(sortCampaignRows(reversed, [{ mode, direction }])), `${mode}.${direction}`)
           .toEqual(ids(legacySortCampaignRows(reversed, { mode, direction })));
