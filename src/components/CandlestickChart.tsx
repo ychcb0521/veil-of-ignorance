@@ -35,6 +35,7 @@ import {
   registerAnalysisBandLabelOverlay,
   type AnalysisBandLabelOverlayData,
 } from "@/lib/analysisBandLabelOverlay";
+import { klineChartLayoutIsStale } from "@/lib/klineChartLayoutHeal";
 import {
   installKlineChartPointerInteraction,
   type InteractionController,
@@ -979,6 +980,18 @@ function CandlestickChartComponent({
     });
     ro.observe(containerRef.current);
 
+    // 【用户反馈】个别战役盘面：鼠标在主图上、十字线却画在下方副图里，缩放失效；盘面尺寸一变就好。
+    // 即 KlineCharts 内部的窗格布局过时了。指针进入 / 按下盘面时核对一次，对不上就让图表重新量（见 klineChartLayoutHeal）。
+    const layoutHost = containerRef.current;
+    const healStaleLayout = () => {
+      if (chartRef.current !== chart) return;
+      if (!klineChartLayoutIsStale(chart)) return;
+      chart.resize();
+      pointerInteractionRef.current?.invalidate();
+    };
+    layoutHost.addEventListener("pointerenter", healStaleLayout);
+    layoutHost.addEventListener("pointerdown", healStaleLayout, true);
+
     // Subscribe to crosshair for price sync — use pixel-to-value conversion, NOT kline data
     const crosshairCb = (data: any) => {
       const priceChangeHandler = onCrosshairPriceChangeRef.current;
@@ -1044,6 +1057,8 @@ function CandlestickChartComponent({
       pointerInteraction.destroy();
       pointerInteractionRef.current = null;
       ro.disconnect();
+      layoutHost.removeEventListener("pointerenter", healStaleLayout);
+      layoutHost.removeEventListener("pointerdown", healStaleLayout, true);
       liveUpdateGenerationRef.current += 1;
       liveUpdateQueueRef.current = [];
       liveUpdateInFlightRef.current = false;
