@@ -2387,12 +2387,13 @@ export default function JournalCampaignsPage() {
     [sortBasisRows, sortChain],
   );
   /**
-   * 分组统计浮层按最宽交叉表的列数自适应：基础 30rem，每个分布列预留约 5.25rem，最多 64rem；
-   * 最终仍受视口宽度约束。镜像止盈 / 自评这类 6 列表不再被固定 30rem 的卡片截断。
+   * 分组统计浮层按最宽交叉表的列数紧凑自适应：百分比格本身很短，每列只需约 3.4rem；
+   * 20rem 留给行名、内边距与合计列，整体最少 30rem、最多 52rem，最终仍受视口宽度约束。
+   * 这样镜像止盈 / 自评的 6 列表能完整显示，又不会为了少量短读数把卡片撑到接近整页宽。
    */
   const sortStatsPopoverWidthRem = useMemo(() => {
     const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
-    return Math.min(64, Math.max(30, 19 + columns * 5.25));
+    return Math.min(52, Math.max(30, 20 + columns * 3.4));
   }, [sortCrossTabs]);
   /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。

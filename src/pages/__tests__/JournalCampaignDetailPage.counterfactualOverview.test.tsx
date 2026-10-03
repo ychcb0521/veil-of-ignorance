@@ -490,6 +490,8 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     const row = await screen.findByTestId('counterfactual-branch-row-cf-new');
     expect(within(row).getByText('我的方案')).toBeInTheDocument();
     expect(within(row).getByText(/What-if · 主力开仓 平仓价 · \d{2}-\d{2} \d{2}:\d{2}/)).toBeInTheDocument();
+    expect(screen.getByTestId('counterfactual-branch-pnl-cf-new')).toHaveTextContent('分支 P&L+99.45');
+    expect(screen.getByTestId('counterfactual-branch-delta-cf-new')).toHaveTextContent('相对实际-100.55');
     // 手动分支不显示 SOP 分数
     expect(within(row).queryByText(/^SOP /)).not.toBeInTheDocument();
 

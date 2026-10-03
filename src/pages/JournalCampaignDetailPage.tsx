@@ -3223,11 +3223,25 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                             {` · ${formatCounterfactualStamp(branch.created_at)}`}
                           </div>
                         </div>
-                        <div className={`px-2 py-1 rounded text-[11px] font-mono ${pnlColor(branch.result.final_realized_pnl)}`}>
-                          {branch.result.final_realized_pnl >= 0 ? '+' : ''}{branch.result.final_realized_pnl.toFixed(2)}
+                        <div
+                          data-testid={`counterfactual-branch-pnl-${branch.id}`}
+                          className="shrink-0 px-2 py-1 text-right"
+                          title="这条反事实分支最终实现的盈亏"
+                        >
+                          <div className="text-[9px] leading-none text-muted-foreground">分支 P&amp;L</div>
+                          <div className={`mt-1 font-mono text-[11px] leading-none ${pnlColor(branch.result.final_realized_pnl)}`}>
+                            {branch.result.final_realized_pnl >= 0 ? '+' : ''}{branch.result.final_realized_pnl.toFixed(2)}
+                          </div>
                         </div>
-                        <div className={`px-2 py-1 rounded text-[11px] font-mono ${pnlColor(delta)}`}>
-                          {delta >= 0 ? '+' : ''}{delta.toFixed(2)}
+                        <div
+                          data-testid={`counterfactual-branch-delta-${branch.id}`}
+                          className="shrink-0 px-2 py-1 text-right"
+                          title="分支 P&L 减去实际战役已实现 P&L"
+                        >
+                          <div className="text-[9px] leading-none text-muted-foreground">相对实际</div>
+                          <div className={`mt-1 font-mono text-[11px] leading-none ${pnlColor(delta)}`}>
+                            {delta >= 0 ? '+' : ''}{delta.toFixed(2)}
+                          </div>
                         </div>
                         {!manualRun && (
                           <div className="px-2 py-1 rounded text-[11px] font-mono bg-muted text-foreground">
