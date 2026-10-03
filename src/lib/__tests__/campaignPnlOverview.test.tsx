@@ -16,13 +16,13 @@ import {
  */
 // 【用户要求】盈亏比与已实现 P&L 分别置顶左右栏；其余递进指标与结果 / 仓位指标依序向下。
 const GOLDEN_LABELS = [
-  '盈亏比',
+  '算术期望',
   '预期回撤',
   '涨跌幅',
   '涨跌幅倍数',
+  '盈亏比',
   '加仓效用',
   '几何期望',
-  '算术期望',
   '已实现 P&L',
   '最大预期亏损',
   '峰值涨幅',
@@ -33,13 +33,13 @@ const GOLDEN_LABELS = [
 ];
 
 const GOLDEN_KEYS = [
-  'payoffRatio',
+  'arithmeticExpectancy',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
+  'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
-  'arithmeticExpectancy',
   'realizedPnl',
   'initialExpectedMaxLoss',
   'peakPriceChange',
@@ -78,13 +78,13 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
     expect(items.map(item => item.value)).toEqual([
-      '2.00',
+      '+0.50R',
       '10.00%',
       '+20.00%',
       '+2.00',
+      '2.00',
       '+1.00',
       '1.20',
-      '+0.50R',
       '200.00 USDT',
       '100.00 USDT',
       '+25.00%',
@@ -232,20 +232,21 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['盈亏比', '预期回撤', '涨跌幅', '涨跌幅倍数', '加仓效用', '几何期望', '算术期望']);
+      .toEqual(['算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
-    expect(rowOf('盈亏比')).toBe('1');
+    expect(rowOf('算术期望')).toBe('1');
     expect(rowOf('预期回撤')).toBe('2');
+    expect(rowOf('盈亏比')).toBe('5');
     expect(rowOf('已实现 P&L')).toBe('1');
     expect(rowOf('最大预期亏损')).toBe('2');
     expect(rowOf('峰值涨幅')).toBe('3');
     expect(rowOf('峰值涨幅倍数')).toBe('4');
     expect(rowOf('峰值浮盈')).toBe('5');
     expect(rowOf('多方总名义仓位')).toBe('7');
-    expect(rowOf('算术期望')).toBe('7');
+    expect(rowOf('几何期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
     // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 13 项网格与脚注，没有别的行

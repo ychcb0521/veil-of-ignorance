@@ -525,13 +525,13 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportInput.chartInterval).toBe('5m');
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
     expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
-      '盈亏比',
+      '算术期望',
       '预期回撤',
       '涨跌幅',
       '涨跌幅倍数',
+      '盈亏比',
       '加仓效用',
       '几何期望',
-      '算术期望',
       '已实现 P&L',
       '最大预期亏损',
       '峰值涨幅',

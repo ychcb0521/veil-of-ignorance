@@ -57,16 +57,16 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏：盈亏比置顶；其后保留预期回撤、涨跌幅、涨跌幅倍数、加仓效用、几何期望、算术期望的递进关系。
+ * 左栏按用户指定的阅读顺序：算术期望、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
-  'payoffRatio',
+  'arithmeticExpectancy',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
+  'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
-  'arithmeticExpectancy',
 ];
 
 /**
