@@ -2658,25 +2658,37 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           </div>
         )}
 
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-card border border-border rounded p-4 space-y-2 text-[12px]">
+        <section className="space-y-4">
+          <div className="bg-card border border-border rounded p-4 text-[12px]">
             <div className="font-medium">战役元数据</div>
-            {/* 【用户要求】操作时间非常重要、要加强显示：放在第一行，客观操作时间（北京时间，与列表卡片同一写法）用加粗等宽的琥珀底读数；下面几行是 K 线时间 */}
-            <div data-testid="campaign-meta-operation-time" className="flex items-center gap-1.5">
-              <span>操作时间：</span>
-              <span className="rounded-[3px] bg-[#F0B90B]/10 px-1.5 py-0.5 font-mono text-[14px] font-semibold leading-none tabular-nums text-[#8F6B00] dark:text-[#F0B90B]">
-                {objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16)}
-              </span>
-            </div>
-            <div>开始：{fmtMdHm(campaign.opened_at)}</div>
-            <div>结束：{fmtMdHm(campaign.closed_at)}</div>
-            <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
-            {campaignMetadataMetrics.map(item => (
-              <div key={item.key} className="flex max-w-sm items-baseline justify-between gap-6">
-                <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-                <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+            {/* 元数据在自己的紧凑信息带里就近对齐；盈亏概览另起第二行，避免半宽卡片把名称和数字横向拉散。 */}
+            <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {/* 【用户要求】操作时间非常重要、要加强显示：客观操作时间（北京时间，与列表卡片同一写法）用加粗等宽的琥珀底读数。 */}
+              <div data-testid="campaign-meta-operation-time" className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+                <span className="text-muted-foreground">操作时间：</span>
+                <span className="rounded-[3px] bg-[#F0B90B]/10 px-1.5 py-0.5 font-mono text-[14px] font-semibold leading-none tabular-nums text-[#8F6B00] dark:text-[#F0B90B]">
+                  {objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16)}
+                </span>
               </div>
-            ))}
+              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+                <span className="text-muted-foreground">开始</span>
+                <span className="font-mono tabular-nums">{fmtMdHm(campaign.opened_at)}</span>
+              </div>
+              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+                <span className="text-muted-foreground">结束</span>
+                <span className="font-mono tabular-nums">{fmtMdHm(campaign.closed_at)}</span>
+              </div>
+              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+                <span className="text-muted-foreground">持续时间</span>
+                <span className="font-mono tabular-nums">{fmtDuration(campaign.opened_at, campaign.closed_at)}</span>
+              </div>
+              {campaignMetadataMetrics.map(item => (
+                <div key={item.key} className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
+                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+                  <span className={`shrink-0 font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <CampaignPnlOverviewPanel

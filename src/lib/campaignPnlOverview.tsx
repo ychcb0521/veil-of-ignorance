@@ -57,26 +57,25 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏：【用户要求】「预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望，这几个变量要放在同一列，
- * 因为这些指标是层层递进的」——与战役封面、列表排序栏同序，上一项是下一项的分母或来源。
+ * 左栏：盈亏比置顶；其后保留预期回撤、涨跌幅、涨跌幅倍数、加仓效用、几何期望、算术期望的递进关系。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'payoffRatio',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
   'arithmeticExpectancy',
 ];
 
 /**
- * 右栏：结果与仓位。最大预期亏损、已实现 P&L 后依次放峰值涨幅、峰值涨幅倍数、峰值浮盈，再放两项名义仓位。
+ * 右栏：结果与仓位。已实现 P&L 置顶，其后是最大预期亏损、峰值涨幅、峰值涨幅倍数、峰值浮盈，再放两项名义仓位。
  * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
-  'initialExpectedMaxLoss',
   'realizedPnl',
+  'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
   'peakUnrealizedPnl',

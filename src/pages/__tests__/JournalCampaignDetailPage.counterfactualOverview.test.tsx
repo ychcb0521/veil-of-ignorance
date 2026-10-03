@@ -320,17 +320,17 @@ vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({
   },
 }));
 
-// 【用户要求】左右对调：先左栏（预期回撤 → … → 算术期望，与封面同序的递进链）、再右栏（结果与仓位，新增多方总名义仓位）
+// 【用户要求】盈亏比与已实现 P&L 分别置顶左右栏；真实与反事实保持同一顺序。
 const OVERVIEW_LABELS = [
+  '盈亏比',
   '预期回撤',
   '涨跌幅',
   '涨跌幅倍数',
-  '盈亏比',
   '加仓效用',
   '几何期望',
   '算术期望',
-  '最大预期亏损',
   '已实现 P&L',
+  '最大预期亏损',
   '峰值涨幅',
   '峰值涨幅倍数',
   '峰值浮盈',
@@ -708,12 +708,6 @@ function overviewSkeleton(panel: HTMLElement) {
   };
 }
 
-/** 从 Tailwind class 里读出像素：p-6 → 24，gap-4 → 16，border → 1（本页只用这几种写法）。 */
-function spacingPx(className: string, prefix: 'p' | 'gap') {
-  const match = className.split(/\s+/).find(token => new RegExp(`^${prefix}-\\d+$`).test(token));
-  return match ? Number(match.slice(prefix.length + 1)) * 4 : 0;
-}
-
 describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据 | 盈亏概览」同一套分栏', () => {
   it('【用户要求】战役元数据：第一行是加强显示的客观操作时间（北京时间），没有 legs 数', async () => {
     renderPage();
@@ -721,9 +715,9 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     // 与列表卡片同一口径（campaignOperationTime）：这场取到的是 2026-07-19 11:00 UTC = 北京 19:00
     expect(operation).toHaveTextContent('操作时间：2026-07-19 19:00');
     expect(operation.lastElementChild).toHaveClass('font-semibold');
-    const card = operation.parentElement!;
-    expect(card.children[1]).toBe(operation);
-    expect(card).toHaveTextContent('开始：');
+    const card = operation.parentElement!.parentElement!;
+    expect(card.firstElementChild).toHaveTextContent('战役元数据');
+    expect(card).toHaveTextContent('开始');
     expect(card.textContent).not.toContain('legs 数');
   });
 
@@ -798,18 +792,20 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
   }, 15_000);
 
-  it('同宽：反事实行挂在「反事实战役」卡片正下方，右栏宽 = 50% + (卡片两侧内缩 − 上方 gap) / 2，与上方右栏逐像素相同', async () => {
+  it('真实元数据与盈亏概览纵向排布；反事实行挂在「反事实战役」卡片内并保持双栏', async () => {
     renderPage();
     const row = await runFromEditor();
     const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
-    const originalGrid = real.parentElement as HTMLElement;
+    const originalStack = real.parentElement as HTMLElement;
     const cfSection = row.parentElement as HTMLElement;
-    const main = originalGrid.parentElement as HTMLElement;
+    const main = originalStack.parentElement as HTMLElement;
 
-    // 上方：main 的直接子 section，md 起两等分
+    // 上方：main 的直接子 section，元数据第一行、盈亏概览第二行
     expect(main.tagName).toBe('MAIN');
-    expect(originalGrid.tagName).toBe('SECTION');
-    expect(originalGrid.className.split(/\s+/)).toEqual(expect.arrayContaining(['grid', 'grid-cols-1', 'md:grid-cols-2']));
+    expect(originalStack.tagName).toBe('SECTION');
+    expect(originalStack.className.split(/\s+/)).toContain('space-y-4');
+    expect(originalStack.className).not.toContain('md:grid-cols-2');
+    expect(real.previousElementSibling).toHaveTextContent('战役元数据');
     // 反事实行：直接挂在同一个 main 下的「反事实战役」卡片里，中间没有别的内缩层
     expect(cfSection.tagName).toBe('SECTION');
     expect(cfSection.parentElement).toBe(main);
@@ -818,12 +814,8 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     expect(cfClasses).toContain('border');
     expect(cfClasses.filter(token => /^(px|pl|pr|border-[xlr0-9])/.test(token))).toEqual([]);
 
-    const inset = 2 * (spacingPx(cfSection.className, 'p') + 1);
-    const outerGap = spacingPx(originalGrid.className, 'gap');
-    expect(inset).toBe(50);
-    expect(outerGap).toBe(16);
     const template = row.className.split(/\s+/).find(token => token.startsWith('md:grid-cols-['));
-    expect(template).toBe(`md:grid-cols-[minmax(0,1fr)_calc(50%_+_${(inset - outerGap) / 2}px)]`);
+    expect(template).toBe('md:grid-cols-[minmax(0,1fr)_calc(50%_+_17px)]');
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['grid', 'grid-cols-1']));
   }, 15_000);
 });

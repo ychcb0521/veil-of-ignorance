@@ -14,18 +14,17 @@ import {
  * 已实现 200、L 100 → b = 200%；P 统一 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
  * 【用户要求】主力涨跌幅 +20% → 涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
-// 【用户要求】左右两列对调：左栏是递进链 预期回撤 → 涨跌幅 → 涨跌幅倍数 → 盈亏比 → 加仓效用 → 几何期望 → 算术期望
-// （与战役封面、排序栏同序）；右栏是结果与仓位：最大预期亏损、已实现 P&L、主力开仓名义仓位、多方总名义仓位……
+// 【用户要求】盈亏比与已实现 P&L 分别置顶左右栏；其余递进指标与结果 / 仓位指标依序向下。
 const GOLDEN_LABELS = [
+  '盈亏比',
   '预期回撤',
   '涨跌幅',
   '涨跌幅倍数',
-  '盈亏比',
   '加仓效用',
   '几何期望',
   '算术期望',
-  '最大预期亏损',
   '已实现 P&L',
+  '最大预期亏损',
   '峰值涨幅',
   '峰值涨幅倍数',
   '峰值浮盈',
@@ -34,15 +33,15 @@ const GOLDEN_LABELS = [
 ];
 
 const GOLDEN_KEYS = [
+  'payoffRatio',
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
   'arithmeticExpectancy',
-  'initialExpectedMaxLoss',
   'realizedPnl',
+  'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
   'peakUnrealizedPnl',
@@ -79,15 +78,15 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
     expect(items.map(item => item.value)).toEqual([
+      '2.00',
       '10.00%',
       '+20.00%',
       '+2.00',
-      '2.00',
       '+1.00',
       '1.20',
       '+0.50R',
-      '100.00 USDT',
       '200.00 USDT',
+      '100.00 USDT',
       '+25.00%',
       '+2.50',
       '250.50 USDT',
@@ -96,13 +95,13 @@ describe('buildCampaignPnlOverviewItems', () => {
     ]);
     const G = '#0ECB81';
     expect(items.map(item => item.color)).toEqual([
-      undefined, G, G, G, G, G, G,
-      undefined, G, G, G, undefined, undefined, undefined,
+      G, undefined, G, G, G, G, G,
+      G, undefined, G, G, undefined, undefined, undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
-      undefined, T, T, T, T, T, T,
-      undefined, T, T, T, undefined, undefined, undefined,
+      T, undefined, T, T, T, T, T,
+      T, undefined, T, T, undefined, undefined, undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -233,15 +232,15 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望', '算术期望']);
+      .toEqual(['盈亏比', '预期回撤', '涨跌幅', '涨跌幅倍数', '加仓效用', '几何期望', '算术期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['最大预期亏损', '已实现 P&L', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
-    expect(rowOf('预期回撤')).toBe('1');
-    // 【用户要求】最大预期亏损在右栏第一个，与预期回撤同一行
-    expect(rowOf('最大预期亏损')).toBe('1');
-    expect(rowOf('已实现 P&L')).toBe('2');
+    expect(rowOf('盈亏比')).toBe('1');
+    expect(rowOf('预期回撤')).toBe('2');
+    expect(rowOf('已实现 P&L')).toBe('1');
+    expect(rowOf('最大预期亏损')).toBe('2');
     expect(rowOf('峰值涨幅')).toBe('3');
     expect(rowOf('峰值涨幅倍数')).toBe('4');
     expect(rowOf('峰值浮盈')).toBe('5');
