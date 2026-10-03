@@ -178,12 +178,95 @@ describe('useCampaignPricePathTasks', () => {
     expect(localStorage.getItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:one`)).not.toBeNull();
     fetchRange.mockClear();
 
-    const remounted = renderHook(() => useCampaignPricePathTasks(tasks.map(item => ({ ...item })), OWNER, true));
+    const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
+    const remounted = renderHook(() => {
+      const frame = useCampaignPricePathTasks(tasks.map(item => ({ ...item })), OWNER, true);
+      frames.push(frame);
+      return frame;
+    });
+    expect(frames[0]).toMatchObject({ processed: 2, loaded: 2, loading: false });
+    expect(frames[0].peaks.get('one')).toBeCloseTo(20);
+    expect(frames[0].drawdowns.get('two')).toBeCloseTo(25);
     await advance();
 
     expect(fetchRange).not.toHaveBeenCalled();
     expect(remounted.result.current).toMatchObject({ processed: 2, loaded: 2, loading: false });
     expect(remounted.result.current.peaks.get('one')).toBeCloseTo(20);
+  });
+
+  it('restores a partial scan on the first render and loads only the remaining campaigns', async () => {
+    const tasks = [task('ready'), task('pending')];
+    const originalPending = deferred<KlineData[]>();
+    fetchRange.mockResolvedValueOnce(candles).mockImplementationOnce(() => originalPending.promise);
+    const first = renderHook(() => useCampaignPricePathTasks(tasks, OWNER, true));
+    await advance(2_000);
+    expect(first.result.current).toMatchObject({ processed: 1, loading: true });
+    first.unmount();
+    fetchRange.mockClear();
+    const resumedPending = deferred<KlineData[]>();
+    fetchRange.mockImplementationOnce(() => resumedPending.promise);
+
+    const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
+    const remounted = renderHook(() => {
+      const frame = useCampaignPricePathTasks(tasks, OWNER, true);
+      frames.push(frame);
+      return frame;
+    });
+
+    expect(frames[0]).toMatchObject({ total: 2, processed: 1, loaded: 1, loading: true });
+    expect(frames[0].peaks.get('ready')).toBeCloseTo(20);
+    expect(frames[0].drawdowns.get('ready')).toBeCloseTo(25);
+    expect(frames[0].peaks.has('pending')).toBe(false);
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    expect(fetchRange.mock.calls[0][0]).toBe('pending');
+    await act(async () => { resumedPending.resolve(candles); });
+    expect(remounted.result.current).toMatchObject({ processed: 2, loaded: 2, loading: false });
+  });
+
+  it.each([
+    { reason: 'another owner', owner: 'other-owner', fingerprint: 'cached:original', historical: true, age: 0 },
+    { reason: 'changed inputs', owner: OWNER, fingerprint: 'cached:entry-200', historical: true, age: 0 },
+    { reason: 'an expired ongoing campaign', owner: OWNER, fingerprint: 'cached:original', historical: false, age: 60_001 },
+    { reason: 'an ongoing campaign without a cache timestamp', owner: OWNER, fingerprint: 'cached:original', historical: false, age: null },
+  ])('does not show cached values for $reason on the first render', async ({ owner, fingerprint, historical, age }) => {
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:cached`, JSON.stringify({
+      fingerprint: 'cached:original', peak: 20, drawdown: 25,
+      ...(age == null ? {} : { savedAt: Date.now() - age }),
+    }));
+    const pending = deferred<KlineData[]>();
+    fetchRange.mockImplementationOnce(() => pending.promise);
+    const tasks = [task('cached', { fingerprint, historical, entryPrice: fingerprint === 'cached:entry-200' ? 200 : 100 })];
+    const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
+    const { result } = renderHook(() => {
+      const frame = useCampaignPricePathTasks(tasks, owner, true);
+      frames.push(frame);
+      return frame;
+    });
+
+    expect(frames[0]).toMatchObject({ processed: 0, loaded: 0, loading: true });
+    expect(frames[0].peaks.has('cached')).toBe(false);
+    expect(frames[0].drawdowns.has('cached')).toBe(false);
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(candles); });
+    expect(result.current).toMatchObject({ processed: 1, loaded: 1, loading: false });
+  });
+
+  it('restores an ongoing campaign cache within its one-minute lifetime on the first render', () => {
+    const tasks = [task('ongoing', { historical: false })];
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:ongoing`, JSON.stringify({
+      fingerprint: tasks[0].fingerprint, peak: 20, drawdown: 25, savedAt: Date.now() - 60_000,
+    }));
+    const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
+    renderHook(() => {
+      const frame = useCampaignPricePathTasks(tasks, OWNER, true);
+      frames.push(frame);
+      return frame;
+    });
+
+    expect(frames[0]).toMatchObject({ processed: 1, loaded: 1, loading: false });
+    expect(frames[0].peaks.get('ongoing')).toBe(20);
+    expect(frames[0].drawdowns.get('ongoing')).toBe(25);
+    expect(fetchRange).not.toHaveBeenCalled();
   });
 
   it('does not reuse another owner\'s persisted or in-memory values', async () => {

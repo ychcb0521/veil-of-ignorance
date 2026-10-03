@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { readChartViewState, saveChartViewState } from '@/lib/chartViewState';
 import {
   BAND_RAIL_W,
   CHART_AXIS_VAR,
@@ -138,6 +139,8 @@ export type ScatterPlotProps = {
   emptyMessage: string;
   testId: string;
   scrollAreaTestId: string;
+  /** Owner + history entry + metric/view: return to this chart without resetting its viewport. */
+  viewStateKey?: string;
   rootDataAttrs?: Record<string, string | number | undefined>;
   scrollAreaDataAttrs?: Record<string, string | number | undefined>;
   header?: ReactNode;
@@ -319,6 +322,7 @@ export function ScatterPlot({
   emptyMessage,
   testId,
   scrollAreaTestId,
+  viewStateKey,
   rootDataAttrs,
   scrollAreaDataAttrs,
   header,
@@ -329,7 +333,10 @@ export function ScatterPlot({
 }: ScatterPlotProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const [expandedOverflowId, setExpandedOverflowId] = useState<string | null>(null);
+  const [restoredView] = useState(() => readChartViewState(viewStateKey));
+  const scrollPositionRef = useRef(restoredView.scrollLeft);
+  const [expandedOverflowId, setExpandedOverflowId] = useState<string | null>(restoredView.expandedOverflowId ?? null);
+  const previousOverflowRef = useRef(expandedOverflowId);
   const { ref: trackRef, size } = useChartSize<HTMLDivElement>();
   const buttonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   /** 最近一次按下点位的指针类型（touch / mouse / pen）：选择模式下手指点选后要收起提示框。 */
@@ -617,21 +624,27 @@ export function ScatterPlot({
 
   // 展开的列表在图下方：点了顶端的合并三角后把焦点移过去，屏幕外的列表也会被滚进视野。
   useEffect(() => {
-    if (expandedOverflowId) overflowPickerRef.current?.focus();
-  }, [expandedOverflowId]);
+    if (expandedOverflowId && expandedOverflowId !== previousOverflowRef.current) overflowPickerRef.current?.focus();
+    previousOverflowRef.current = expandedOverflowId;
+    saveChartViewState(viewStateKey, { expandedOverflowId });
+  }, [expandedOverflowId, viewStateKey]);
 
   const closeOverflow = () => {
     setExpandedOverflowId(null);
     if (expandedOverflowId) overflowButtonsRef.current.get(expandedOverflowId)?.focus();
   };
 
-  // 时序从最新战役看起；分布从左侧风险区看起，不能默认滚走 −10R 线。
-  useEffect(() => {
+  // 首次查看仍按原来的默认位置；返回、补齐数据或尺寸变化不能覆盖用户已经滚到的位置。
+  useLayoutEffect(() => {
     const node = trackRef.current;
     if (!node) return;
-    node.scrollLeft = !stackMode && layout.fitMode === 'scroll' ? node.scrollWidth : 0;
+    node.scrollLeft = scrollPositionRef.current ?? (!stackMode && layout.fitMode === 'scroll' ? node.scrollWidth : 0);
     setScrollOffset(node.scrollLeft);
-  }, [layout.contentWidth, layout.fitMode, stackMode, trackRef]);
+  }, [layout.contentWidth, layout.fitMode, stackMode, trackRef, points.length]);
+  useEffect(() => {
+    // URL replace creates a new history key while leaving the chart mounted.
+    if (scrollPositionRef.current != null) saveChartViewState(viewStateKey, { scrollLeft: scrollPositionRef.current });
+  }, [viewStateKey]);
 
   const setActive = useCallback(
     (id: string | null) => {
@@ -751,7 +764,12 @@ export function ScatterPlot({
           >
             <div
               ref={trackRef}
-              onScroll={event => setScrollOffset(event.currentTarget.scrollLeft)}
+              onScroll={event => {
+                const scrollLeft = event.currentTarget.scrollLeft;
+                scrollPositionRef.current = scrollLeft;
+                setScrollOffset(scrollLeft);
+                saveChartViewState(viewStateKey, { scrollLeft });
+              }}
               className={`absolute inset-y-0 left-0 ${fitMode === 'scroll' ? 'overflow-x-auto overscroll-x-contain' : 'overflow-hidden'} [scrollbar-width:thin]`}
               // 没有 n= 计数栏的图不留这 32px：否则右边界会空出一条与其它图不一致的死白。
               style={{ right: bandCounts ? BAND_RAIL_W : 0 }}

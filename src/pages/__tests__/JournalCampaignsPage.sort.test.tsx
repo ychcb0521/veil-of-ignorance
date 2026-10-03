@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCampaignListCaches } from '@/lib/campaignListCache';
@@ -11,6 +12,7 @@ import * as xlsxWorkbook from '@/lib/xlsxWorkbook';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
 beforeEach(() => {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   clearCampaignListCaches();
   sessionStorage.clear();
   Object.keys(localStorage).filter(key => key.startsWith(CAMPAIGN_PRICE_PATH_CACHE_PREFIX))
@@ -406,6 +408,63 @@ function DetailReturn() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
+  it.each(['unrealizedPriceChangePctDistribution', 'unrealizedPriceChangePct'])(
+    '%s 点位进入详情再返回：保留视图、排序筛选、点位、说明和页面位置，不重算已加载行情', async chartKey => {
+      const restore = preparePricePathFixtures();
+      const pending = deferredPricePathRequests();
+      const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+      const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')!;
+      const search = `?sort=unrealizedPriceChangePct&direction=asc&then=importance.asc&from=2026-01-01&to=2026-12-31&chart=${chartKey}`;
+      const pointSnapshot = () => [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]')]
+        .map(point => [point.dataset.campaignId, point.dataset.metricValue, point.style.left, point.style.top]);
+      try {
+        render(
+          <MemoryRouter initialEntries={[`/journal/campaigns${search}`]}>
+            <SearchProbe />
+            <Routes>
+              <Route path="/journal/campaigns" element={<StrictMode><JournalCampaignsPage /></StrictMode>} />
+              <Route path="/journal/campaigns/:id" element={<DetailReturn />} />
+            </Routes>
+          </MemoryRouter>,
+        );
+        for (let index = 0; index < campaigns.length; index += 1) {
+          await waitFor(() => expect(pending.length).toBeGreaterThan(index), { timeout: 5_000 });
+          await act(async () => { pending[index].resolve(pending[index].bars); });
+        }
+        await waitFor(() => expect(unrealizedPlotIds()).toHaveLength(4));
+        fireEvent.click(screen.getByTestId(`campaign-metric-guide-toggle-${chartKey}`));
+        const before = pointSnapshot();
+        const order = cardOrder();
+        Object.defineProperty(window, 'scrollY', { configurable: true, value: 420 });
+        fireEvent.click(screen.getByTestId('campaign-metric-scatter-plot').querySelector('button[data-campaign-id]')!);
+        let resolve!: (value: Awaited<ReturnType<typeof fetchCampaignSourceRows>>) => void;
+        vi.mocked(fetchCampaignSourceRows).mockReturnValueOnce(new Promise(res => { resolve = res; }));
+        scrollTo.mockClear();
+        fireEvent.click(screen.getByText('返回战役图'));
+
+        expect(pointSnapshot()).toEqual(before);
+        expect(cardOrder()).toEqual(order);
+        expect(screen.getByTestId('location-probe-search')).toHaveTextContent(search);
+        expect(screen.getByTestId(`campaign-metric-guide-toggle-${chartKey}`)).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.queryByTestId('campaign-unrealized-loading')).not.toBeInTheDocument();
+        expect(scrollTo).toHaveBeenCalledWith({ top: 420, behavior: 'auto' });
+        expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(4);
+        // A wheel gesture wins over the queued post-measurement restoration.
+        fireEvent.wheel(window);
+        scrollTo.mockClear();
+        await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+        expect(scrollTo).not.toHaveBeenCalled();
+        await act(async () => { resolve({ campaigns, journals: [] }); });
+        expect(pointSnapshot()).toEqual(before);
+        expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(4);
+      } finally {
+        Object.defineProperty(window, 'scrollY', originalScrollY);
+        scrollTo.mockRestore();
+        restore();
+      }
+    }, 15_000,
+  );
+
   it('详情返回立即复用散点图；后台核对期间不显示加载屏，且不重复计算未变的战役', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns?chart=geometricExpectancyDistribution']}>

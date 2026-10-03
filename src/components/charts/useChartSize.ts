@@ -15,10 +15,16 @@ const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : us
  */
 export function useChartSize<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
+  const subscriptionRef = useRef<{ node: T; observer: ResizeObserver } | null>(null);
   const [size, setSize] = useState<ChartSize>(CHART_FALLBACK_SIZE);
 
+  // 空图没有绘图节点；每次提交检查 ref，节点稍后出现或被替换时才重新订阅。
+  // 保留 object ref 接口，调用方仍可直接读取 ref.current 的滚动位置。
   useIsomorphicLayoutEffect(() => {
     const node = ref.current;
+    if (subscriptionRef.current?.node === node) return;
+    subscriptionRef.current?.observer.disconnect();
+    subscriptionRef.current = null;
     if (!node || typeof ResizeObserver === 'undefined') return;
 
     const apply = (width: number, height: number) => {
@@ -29,12 +35,19 @@ export function useChartSize<T extends HTMLElement>() {
 
     apply(node.clientWidth, node.clientHeight);
     const observer = new ResizeObserver(entries => {
-      const entry = entries[0];
+      // 已断开节点的回调可能排在队列里，不能覆盖新节点的尺寸。
+      if (subscriptionRef.current?.observer !== observer || ref.current !== node) return;
+      const entry = entries.find(entry => entry.target === node);
       if (!entry) return;
       apply(entry.contentRect.width, entry.contentRect.height);
     });
+    subscriptionRef.current = { node, observer };
     observer.observe(node);
-    return () => observer.disconnect();
+  });
+
+  useIsomorphicLayoutEffect(() => () => {
+    subscriptionRef.current?.observer.disconnect();
+    subscriptionRef.current = null;
   }, []);
 
   return { ref, size };

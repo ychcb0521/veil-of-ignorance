@@ -56,7 +56,7 @@ function readCache(owner: string, task: CampaignPricePathTask): Result | null {
     if (!raw) return null;
     const cached = JSON.parse(raw);
     if (cached.fingerprint !== task.fingerprint || !Number.isFinite(cached.peak) || !Number.isFinite(cached.drawdown)) return null;
-    if (!task.historical && Date.now() - cached.savedAt > 60_000) return null;
+    if (!task.historical && (!Number.isFinite(cached.savedAt) || Date.now() - cached.savedAt > 60_000)) return null;
     return { fingerprint: task.fingerprint, peak: cached.peak, drawdown: cached.drawdown };
   } catch { return null; } // Storage permissions/quota must never interrupt the calculation queue.
 }
@@ -70,7 +70,15 @@ function saveCache(owner: string, task: CampaignPricePathTask, result: Result) {
 
 /** Retries temporary failures until completion; a single failed campaign never ends the remaining scan. */
 export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[], owner: string, enabled: boolean) {
-  const [snapshot, setSnapshot] = useState<Snapshot>(() => emptySnapshot(owner));
+  const [snapshot, setSnapshot] = useState<Snapshot>(() => {
+    const results = new Map<string, Result>();
+    for (const task of tasks) {
+      const cached = readCache(owner, task);
+      if (cached) results.set(task.id, cached);
+    }
+    // Returning from a detail view must show persisted points before effects run.
+    return { ...emptySnapshot(owner), results };
+  });
   const snapshotRef = useRef(snapshot);
   const [retryKey, setRetryKey] = useState(0);
   const retry = useCallback(() => setRetryKey(value => value + 1), []);

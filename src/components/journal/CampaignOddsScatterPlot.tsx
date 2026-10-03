@@ -1,4 +1,5 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { readChartViewState, saveChartViewState } from '@/lib/chartViewState';
 import { ArrowLeft, CircleHelp } from 'lucide-react';
 import {
   createCampaignMetricDomain,
@@ -128,6 +129,7 @@ type CampaignMetricScatterPlotProps = {
   distributionSpec?: CampaignMetricDistributionSpec;
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
+  viewStateKey?: string;
   /** 批量下载的选择模式：点点位只增减选择、不进战役；选择集由列表页持有，与卡片勾选框共用。 */
   selectionMode?: boolean;
   selectedCampaignIds?: ReadonlySet<string>;
@@ -462,12 +464,14 @@ export function CampaignMetricScatterPlot({
   distributionSpec,
   onBack,
   onSelectCampaign,
+  viewStateKey,
   selectionMode = false,
   selectedCampaignIds,
   onToggleCampaign,
 }: CampaignMetricScatterPlotProps) {
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(() => readChartViewState(viewStateKey).guideOpen ?? false);
+  useEffect(() => { saveChartViewState(viewStateKey, { guideOpen }); }, [guideOpen, viewStateKey]);
   const distribution = view === 'distribution';
   const geometricDistribution = distribution && metricKey === 'geometricExpectancyDistribution';
   const formatValue = geometricDistribution ? formatGeometricDistributionValue : suppliedFormatValue;
@@ -1044,6 +1048,7 @@ export function CampaignMetricScatterPlot({
       emptyMessage={`暂无同时具备客观操作时间与${missingValueLabel}的战役。`}
       testId={plotTestId}
       scrollAreaTestId={scrollTestId}
+      viewStateKey={viewStateKey}
       rootDataAttrs={{ 'data-metric-key': metricKey, 'data-x-scale': geometricDistribution ? 'log' : undefined }}
       header={header}
       guidePanel={guidePanel}

@@ -2149,16 +2149,44 @@ export default function JournalCampaignsPage() {
     return () => { cancelled = true; };
   }, [userId]);
 
-  useEffect(() => {
-    if (loading) return;
-    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
-    const savedScroll = Number(sessionStorage.getItem(storageKey));
+  const listScrollRestoreCancelled = useRef(false);
+  useLayoutEffect(() => {
+    listScrollRestoreCancelled.current = false;
+    const cancel = () => {
+      if (listScrollRestoreCancelled.current) return;
+      listScrollRestoreCancelled.current = true;
+      try { sessionStorage.removeItem(`${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${userId}:${location.key}`); } catch { /* Optional view state. */ }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) cancel();
+    };
+    window.addEventListener('wheel', cancel, { passive: true });
+    window.addEventListener('touchstart', cancel, { passive: true });
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('wheel', cancel);
+      window.removeEventListener('touchstart', cancel);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [location.key, userId]);
+
+  useLayoutEffect(() => {
+    if (!campaignRowsComplete || listScrollRestoreCancelled.current) return;
+    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${userId}:${location.key}`;
+    let raw: string | null;
+    try { raw = sessionStorage.getItem(storageKey); } catch { return; }
+    if (raw == null) return;
+    const savedScroll = Number(raw);
     if (!Number.isFinite(savedScroll) || savedScroll < 0) return;
-    sessionStorage.removeItem(storageKey);
-    if (savedScroll === 0) return;
-    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: savedScroll }));
+    // Cached points render immediately; restore before paint and again after chart measurement.
+    // Consume only after restoration so StrictMode's setup/cleanup replay cannot discard it.
+    window.scrollTo({ top: savedScroll, behavior: 'auto' });
+    const frame = window.requestAnimationFrame(() => {
+      if (!listScrollRestoreCancelled.current) window.scrollTo({ top: savedScroll, behavior: 'auto' });
+      try { sessionStorage.removeItem(storageKey); } catch { /* Optional view state. */ }
+    });
     return () => window.cancelAnimationFrame(frame);
-  }, [loading, location.key]);
+  }, [campaignRowsComplete, location.key, userId]);
 
   /**
    * 所选操作时间段内的战役。统计、卡片、散点图全部读它，**只有**批量操作读原始 rows——
@@ -2907,11 +2935,11 @@ export default function JournalCampaignsPage() {
   });
 
   const handleCampaignOpen = useCallback((campaignId: string) => {
-    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${location.key}`;
-    sessionStorage.setItem(storageKey, String(window.scrollY));
+    const storageKey = `${CAMPAIGN_LIST_SCROLL_KEY_PREFIX}${userId}:${location.key}`;
+    try { sessionStorage.setItem(storageKey, String(window.scrollY)); } catch { /* Navigation still works without storage. */ }
     const state: CampaignListNavigationState = { fromCampaignList: true };
     nav(`/journal/campaigns/${campaignId}${location.search}`, { state });
-  }, [location.key, location.search, nav]);
+  }, [location.key, location.search, nav, userId]);
 
   const openFormulaPopover = (
     event: MouseEvent<HTMLButtonElement>,
@@ -5046,7 +5074,8 @@ export default function JournalCampaignsPage() {
                 ) : null}
                 {campaignRowsComplete ? (
                   <MemoCampaignMetricScatterPlot
-                    key={selectedMetricConfig.key}
+                    key={`${userId}:${location.key}:${selectedMetricConfig.key}`}
+                    viewStateKey={`${userId}:${location.key}:${selectedMetricConfig.key}`}
                     points={selectedMetricSeries.points}
                     metricKey={selectedMetricConfig.key}
                     metricLabel={selectedMetricConfig.label}

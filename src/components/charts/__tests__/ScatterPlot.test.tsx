@@ -26,9 +26,9 @@ function makePoints(count: number, valueAt: (index: number) => number = index =>
   });
 }
 
-function renderOrdinal(count: number, extra: Partial<Parameters<typeof ScatterPlot>[0]> = {}) {
+function ordinalTree(count: number, extra: Partial<Parameters<typeof ScatterPlot>[0]> = {}) {
   const points = makePoints(count);
-  return render(
+  return (
     <ScatterPlot
       points={points}
       series={SERIES}
@@ -49,8 +49,12 @@ function renderOrdinal(count: number, extra: Partial<Parameters<typeof ScatterPl
       testId="plot"
       scrollAreaTestId="scroll"
       {...extra}
-    />,
+    />
   );
+}
+
+function renderOrdinal(count: number, extra: Partial<Parameters<typeof ScatterPlot>[0]> = {}) {
+  return render(ordinalTree(count, extra));
 }
 
 describe('ScatterPlot 结构', () => {
@@ -88,6 +92,30 @@ describe('ScatterPlot 结构', () => {
 });
 
 describe('ScatterPlot 布局：尺寸恒定，让位的是排布', () => {
+  it.each([0, 317])('详情返回保留横向位置 %s，不随分批补点回到末端；不同历史记录不串位置', scrollLeft => {
+    sessionStorage.clear();
+    const width = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(6000);
+    try {
+      const first = renderOrdinal(192, { viewStateKey: 'owner:entry:time' });
+      const track = screen.getByTestId('scroll').firstElementChild as HTMLElement;
+      expect(track.scrollLeft).toBe(6000);
+      track.scrollLeft = scrollLeft;
+      fireEvent.scroll(track);
+      first.rerender(ordinalTree(250, { viewStateKey: 'owner:entry:time' }));
+      expect(track.scrollLeft).toBe(scrollLeft);
+      // A sort/filter URL replace keeps the mounted chart; its new history entry must inherit the viewport.
+      first.rerender(ordinalTree(250, { viewStateKey: 'owner:replaced-entry:time' }));
+      first.unmount();
+      const returned = renderOrdinal(250, { viewStateKey: 'owner:replaced-entry:time' });
+      expect((screen.getByTestId('scroll').firstElementChild as HTMLElement).scrollLeft).toBe(scrollLeft);
+      returned.unmount();
+      renderOrdinal(250, { viewStateKey: 'other-owner:new-entry:time' });
+      expect((screen.getByTestId('scroll').firstElementChild as HTMLElement).scrollLeft).toBe(6000);
+    } finally {
+      width.mockRestore();
+    }
+  });
+
   it('点少时 fit，点多时滚动，两种情况下点位都是 8px', () => {
     const { unmount } = renderOrdinal(20);
     const small = screen.getByTestId('scroll');
@@ -427,6 +455,30 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     mode: 'linear' as const, min: -12, max: 10,
     boundaries: [{ value: -10, inclusiveSide: 'left' as const }, { value: -1, inclusiveSide: 'right' as const }],
   };
+
+  it('分布图返回保留横向位置与合并点展开，不重新抢焦点滚动页面', () => {
+    sessionStorage.clear();
+    const restore = mockNarrowTrack();
+    const values = Array.from({ length: 100 }, () => -11);
+    const extra = { xAxis: narrowRiskAxis, viewStateKey: 'owner:entry:distribution' };
+    try {
+      const first = renderStack(values, extra);
+      const track = screen.getByTestId('scroll').firstElementChild as HTMLElement;
+      track.scrollLeft = 80;
+      fireEvent.scroll(track);
+      fireEvent.click(screen.getByTestId('chart-stack-overflow-hit'));
+      expect(screen.getByTestId('chart-overflow-picker')).toHaveFocus();
+      const entries = screen.getByTestId('chart-overflow-picker').textContent;
+      first.unmount();
+      const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+      try {
+        renderStack(values, extra);
+        expect((screen.getByTestId('scroll').firstElementChild as HTMLElement).scrollLeft).toBe(80);
+        expect(screen.getByTestId('chart-overflow-picker').textContent).toBe(entries);
+        expect(focus).not.toHaveBeenCalled();
+      } finally { focus.mockRestore(); }
+    } finally { restore(); }
+  });
 
   it('硬边界窄屏可横向滚动但默认停在左侧风险区，时序仍从最新一端看起', () => {
     const restore = mockNarrowTrack();
