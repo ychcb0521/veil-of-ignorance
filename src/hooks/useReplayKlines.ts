@@ -5,12 +5,100 @@ import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
 
+export type ReplayKlineRequestPriority = 'interactive' | 'background';
+
+type PendingKlineRequest = {
+  priority: ReplayKlineRequestPriority;
+  signal?: AbortSignal;
+  run: () => Promise<Response>;
+  resolve: (response: Response) => void;
+  reject: (reason: unknown) => void;
+};
+
+const pendingKlineRequests: PendingKlineRequest[] = [];
+let klineRequestPumpRunning = false;
+let nextKlineRequestAt = 0;
+let klineCooldownUntil = 0;
+
+// Interactive charts retain their existing immediate behaviour. Only bulk/background pagination is
+// paced; it is the source of sustained request pressure and must yield to detail-page work.
+const requestGapMs = (priority: ReplayKlineRequestPriority) => priority === 'background' ? 1_500 : 0;
+
+const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
+
+/**
+ * All replay-Kline pages share one queue. A background list scan can therefore never burst four
+ * pagination requests or overtake a detail-page chart. 418/429 opens a circuit breaker, so queued
+ * work fails fast instead of extending Binance's IP ban by continuing to hit the endpoint.
+ */
+async function pumpKlineRequests(): Promise<void> {
+  if (klineRequestPumpRunning) return;
+  klineRequestPumpRunning = true;
+  try {
+    while (pendingKlineRequests.length > 0) {
+      const interactiveIndex = pendingKlineRequests.findIndex(item => item.priority === 'interactive');
+      const [item] = pendingKlineRequests.splice(interactiveIndex >= 0 ? interactiveIndex : 0, 1);
+      if (!item) continue;
+      if (item.signal?.aborted) {
+        item.reject(new DOMException('Aborted', 'AbortError'));
+        continue;
+      }
+      const now = Date.now();
+      if (klineCooldownUntil > now) {
+        item.reject(new Error('API 429'));
+        continue;
+      }
+      const delay = Math.max(0, nextKlineRequestAt - now);
+      if (delay > 0) await wait(delay);
+      if (item.signal?.aborted) {
+        item.reject(new DOMException('Aborted', 'AbortError'));
+        continue;
+      }
+      try {
+        const response = await item.run();
+        nextKlineRequestAt = Date.now() + requestGapMs(item.priority);
+        if (item.priority === 'background' && (response.status === 418 || response.status === 429)) {
+          const retryAfterSeconds = Number(response.headers?.get?.('retry-after'));
+          const fallbackMs = response.status === 418 ? 120_000 : 30_000;
+          klineCooldownUntil = Date.now() + (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1_000
+            : fallbackMs);
+        }
+        item.resolve(response);
+      } catch (error) {
+        item.reject(error);
+      }
+    }
+  } finally {
+    klineRequestPumpRunning = false;
+    if (pendingKlineRequests.length > 0) void pumpKlineRequests();
+  }
+}
+
+function governedKlineFetch(
+  url: string,
+  signal: AbortSignal | undefined,
+  priority: ReplayKlineRequestPriority,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    pendingKlineRequests.push({
+      priority,
+      signal,
+      run: () => fetch(url, { signal }),
+      resolve,
+      reject,
+    });
+    void pumpKlineRequests();
+  });
+}
+
 export async function fetchReplayKlineRange(
   symbol: string,
   interval: string,
   fromTime: number,
   toTime: number,
   signal?: AbortSignal,
+  options?: { priority?: ReplayKlineRequestPriority },
 ): Promise<KlineData[]> {
   const out: KlineData[] = [];
   let cursor = fromTime;
@@ -25,7 +113,11 @@ export async function fetchReplayKlineRange(
       endTime: String(toTime),
       limit: String(limit),
     });
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?${qs}`, { signal });
+    const res = await governedKlineFetch(
+      `https://fapi.binance.com/fapi/v1/klines?${qs}`,
+      signal,
+      options?.priority ?? 'interactive',
+    );
     if (!res.ok) throw new Error(`API ${res.status}`);
     const raw: unknown[][] = await res.json();
     if (raw.length === 0) break;

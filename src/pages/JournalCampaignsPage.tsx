@@ -2256,6 +2256,7 @@ export default function JournalCampaignsPage() {
           startMs - barMs,
           endMs + barMs,
           controller.signal,
+          { priority: 'background' },
         );
         const value = computePeakPriceChangePct({
           side: change.side,
@@ -2282,20 +2283,12 @@ export default function JournalCampaignsPage() {
         return 'requested';
       }
     };
-    const waitForRequestGap = () => new Promise<void>(resolve => {
-      const timer = window.setTimeout(resolve, 2_000);
-      controller.signal.addEventListener('abort', () => {
-        window.clearTimeout(timer);
-        resolve();
-      }, { once: true });
-    });
     const worker = async () => {
       while (!cancelled) {
         const row = pending[cursor++];
         if (!row) return;
         const result = await loadOne(row);
         if (result === 'rate-limited') return;
-        if (result === 'requested' && !cancelled) await waitForRequestGap();
       }
     };
     void worker();
@@ -2538,9 +2531,9 @@ export default function JournalCampaignsPage() {
   );
   /** 同一个顺序、换回真实的行：卡片、选择、批量下载读它，显示的是新自评。 */
   const sortedRows = useMemo(() => {
-    // 涨幅未兑现依赖逐场历史 K 线。加载期间不展示一个不断变长、反复跳位的残缺列表；
-    // 全部算完后一次性显示，并由排序键把无读数的战役留在末尾。
-    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return [];
+    // 计算未完成或触发交易所冷却时始终保留完整列表，并冻结原顺序；全部完成后再一次性排序。
+    // 这既不会让卡片逐场跳位，也不会因为一个派生指标失败而遮掉所有原始战役功能。
+    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return displayRows;
     if (sortBasisInput === displayRows) return sortBasisRows;
     const real = new Map(displayRows.map(row => [row.campaign.id, row]));
     return sortBasisRows.map(row => real.get(row.campaign.id) ?? row);
@@ -2561,6 +2554,7 @@ export default function JournalCampaignsPage() {
    * 各组场数加起来必须正好是列表长度，否则（理论上不会）退回不分区的列表，不冒险切错。
    */
   const cardSections = useMemo(() => {
+    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return null;
     if (sortGroupStats.length < 2 || sortGroupStats[0].key.kind === 'all') return null;
     if (sortGroupStats.reduce((sum, group) => sum + group.count, 0) !== sortedRows.length) return null;
     let offset = 0;
@@ -2569,7 +2563,7 @@ export default function JournalCampaignsPage() {
       offset += group.count;
       return { id: `${index}:${JSON.stringify(group.key)}`, group, rows };
     });
-  }, [sortGroupStats, sortedRows]);
+  }, [primarySort.mode, sortGroupStats, sortedRows, unrealizedMetricLoadError, unrealizedMetricLoading]);
   /** 收起的分区：换了排序链就全部展开（组都变了）。 */
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => { setCollapsedSections(new Set()); }, [sortChainKeyForSections]);
@@ -5209,6 +5203,34 @@ export default function JournalCampaignsPage() {
           ) : null}
           </div>
         </section>
+
+        {primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoadError ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-[12px] dark:bg-amber-950/20"
+            role="status"
+            data-testid="campaign-unrealized-rate-limit"
+          >
+            <div>
+              <span className="font-medium text-foreground">涨幅未兑现暂缓更新；全部战役仍可正常查看。</span>
+              <span className="ml-2 text-muted-foreground">{unrealizedMetricLoadError}</span>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 shrink-0 items-center justify-center rounded border border-border bg-background px-2.5 text-[11px] hover:bg-accent"
+              onClick={() => setUnrealizedMetricRetryKey(value => value + 1)}
+            >
+              重新计算
+            </button>
+          </div>
+        ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
+          <div
+            className="rounded border border-border bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground"
+            role="status"
+            data-testid="campaign-unrealized-loading"
+          >
+            正在后台计算涨幅未兑现；全部完成后一次性应用排序，当前完整列表可正常使用。
+          </div>
+        ) : null}
 
         {loading ? (
           <div className="border border-border rounded p-10 text-center text-[12px] text-muted-foreground">加载中…</div>
