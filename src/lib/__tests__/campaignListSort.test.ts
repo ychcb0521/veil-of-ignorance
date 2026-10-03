@@ -171,6 +171,12 @@ describe('每个排序项的独立比较器', () => {
         expect(key.missing(empty)).toBe(true);
         continue;
       }
+      if (mode === 'unrealizedPriceChangePct') {
+        // 无读数的战役保留在列表末尾，不因峰值未越过预期回撤而消失。
+        expect(key.include(empty)).toBe(true);
+        expect(key.missing(empty)).toBe(true);
+        continue;
+      }
       expect(key.missing(withValue), `${mode} 有读数`).toBe(false);
       expect(key.missing(empty), `${mode} 缺值`).toBe(!key.include(empty));
     }
@@ -179,7 +185,7 @@ describe('每个排序项的独立比较器', () => {
     expect(keys.alpha.missing(empty)).toBe(false);
   });
 
-  it('涨幅未兑现：只纳入峰值涨幅高于预期回撤的战役，并按未兑现百分点排序', () => {
+  it('涨幅未兑现：有读数的按未兑现百分点排序，无读数的战役保留在末尾', () => {
     const rows = [
       makeSortRow({ id: 'half', dd: 5, mpc: 10, peak: 20 }),
       makeSortRow({ id: 'three-quarters', dd: 5, mpc: 10, peak: 40 }),
@@ -187,7 +193,7 @@ describe('每个排序项的独立比较器', () => {
       makeSortRow({ id: 'missing', dd: 5, mpc: 2, peak: null }),
     ];
     expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'desc' }])))
-      .toEqual(['three-quarters', 'half']);
+      .toEqual(['three-quarters', 'half', 'missing', 'threshold']);
   });
 
   it('方向：desc 大的在前、asc 小的在前；字母按标题', () => {

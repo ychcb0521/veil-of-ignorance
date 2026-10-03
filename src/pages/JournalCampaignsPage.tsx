@@ -2538,10 +2538,13 @@ export default function JournalCampaignsPage() {
   );
   /** 同一个顺序、换回真实的行：卡片、选择、批量下载读它，显示的是新自评。 */
   const sortedRows = useMemo(() => {
+    // 涨幅未兑现依赖逐场历史 K 线。加载期间不展示一个不断变长、反复跳位的残缺列表；
+    // 全部算完后一次性显示，并由排序键把无读数的战役留在末尾。
+    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return [];
     if (sortBasisInput === displayRows) return sortBasisRows;
     const real = new Map(displayRows.map(row => [row.campaign.id, row]));
     return sortBasisRows.map(row => real.get(row.campaign.id) ?? row);
-  }, [sortBasisRows, sortBasisInput, displayRows]);
+  }, [displayRows, primarySort.mode, sortBasisInput, sortBasisRows, unrealizedMetricLoadError, unrealizedMetricLoading]);
   /** 第一级的四分位分档（连续指标作第一级、链上不止一级时才有）：排序链芯片上标「分档」，悬停看档界。 */
   const sortBinning = useMemo(() => resolveSortBinning(sortBasisRows, sortChain), [sortBasisRows, sortChain]);
   /** 第二级起每一级的作用（本级排了几场）：排序链芯片上的反馈。 */
@@ -5241,7 +5244,7 @@ export default function JournalCampaignsPage() {
             ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
               <>
                 <div className="text-[13px] font-medium" data-testid="campaign-unrealized-loading">正在计算涨幅未兑现…</div>
-                <div className="text-[12px] text-muted-foreground">正在按战役读取历史 K 线，结果会逐场出现并自动重排。</div>
+                <div className="text-[12px] text-muted-foreground">正在按战役读取历史 K 线；全部完成后一次性显示，无读数的战役会保留在末尾。</div>
               </>
             ) : SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0 ? (
               <>

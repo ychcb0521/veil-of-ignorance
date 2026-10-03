@@ -356,11 +356,20 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       (a, b, direction) => compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
-    unrealizedPriceChangePct: metric(
-      unrealizedPriceChangePct,
-      (a, b, direction) => compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, direction)
+    unrealizedPriceChangePct: {
+      // 【用户要求】涨幅未兑现算不出的战役也保留在列表里、统一排在末尾显示「—」；
+      // 不能因为峰值尚未越过预期回撤，或历史 K 线缺失，就让整场战役从列表消失。
+      include: always,
+      missing: row => !finite(unrealizedPriceChangePct(row)),
+      compare: (a, b, direction) => compareFiniteMetric(
+        unrealizedPriceChangePct(a) ?? Number.NaN,
+        unrealizedPriceChangePct(b) ?? Number.NaN,
+        direction,
+      ),
+      tieBreak: (a, b, direction) => compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
-    ),
+      value: row => unrealizedPriceChangePct(row),
+    },
     addEfficiency: metric(
       addEfficiency,
       (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
