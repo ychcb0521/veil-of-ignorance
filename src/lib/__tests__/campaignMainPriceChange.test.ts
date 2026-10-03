@@ -10,6 +10,7 @@ import {
   campaignPriceChangeLegInputs,
   computeAddEfficiency,
   computeMainPriceEfficiency,
+  computePeakPriceChangePct,
   counterfactualHasMainAdd,
   counterfactualMainLegPriceChangePct,
   counterfactualPriceChange,
@@ -31,6 +32,24 @@ const record = (over: Partial<TradeRecord>): TradeRecord => ({
   entryPrice: 100, exitPrice: 112, quantity: 100, leverage: 10, pnl: 1200, fee: 0, slippage: 0,
   openTime: Date.parse('2026-01-01T00:00:00.000Z'), closeTime: Date.parse('2026-01-02T00:00:00.000Z'),
   ...over,
+});
+
+describe('峰值涨幅：主力持有窗口里的最有利 K 线极值', () => {
+  const bars = [
+    { time: 0, open: 100, high: 104, low: 96, close: 101, volume: 1 },
+    { time: 60_000, open: 101, high: 112, low: 99, close: 110, volume: 1 },
+    { time: 120_000, open: 110, high: 130, low: 90, close: 95, volume: 1 },
+  ];
+
+  it('主多取最高价、主空取最低价，并排除主力平仓后的 K 线', () => {
+    expect(computePeakPriceChangePct({ side: 'long', entryPrice: 100, klines: bars, startMs: 30_000, endMs: 119_999, barMs: 60_000 })).toBeCloseTo(12, 9);
+    expect(computePeakPriceChangePct({ side: 'short', entryPrice: 100, klines: bars, startMs: 30_000, endMs: 119_999, barMs: 60_000 })).toBeCloseTo(4, 9);
+  });
+
+  it('纳入与开仓时刻相交的那根 K 线；没有可用 K 线时不冒充普通涨跌幅', () => {
+    expect(computePeakPriceChangePct({ side: 'long', entryPrice: 100, klines: bars, startMs: 30_000, endMs: 30_000, barMs: 60_000 })).toBeCloseTo(4, 9);
+    expect(computePeakPriceChangePct({ side: 'long', entryPrice: 100, klines: bars, startMs: 300_000, endMs: 360_000, barMs: 60_000 })).toBeNull();
+  });
 });
 
 const T_OPEN = 1700000000000;

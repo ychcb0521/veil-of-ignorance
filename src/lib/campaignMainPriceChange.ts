@@ -5,6 +5,7 @@ import { computeLegPriceChangePct } from '@/lib/legPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { CampaignCounterfactualManualLeg, TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
+import type { KlineData } from '@/hooks/useBinanceData';
 
 /** 参与「涨跌幅」的主力角色：main_open 全部；一条都没有才取 reentry_main（与 pickPrimaryMainLeg 同一套角色分档）。 */
 const PRIMARY_MAIN_ROLES = ['main_open', 'reentry_main'] as const;
@@ -89,6 +90,32 @@ export const EMPTY_CAMPAIGN_PRICE_CHANGE: CampaignPriceChange = Object.freeze({
   pct: null, side: null, entryPrice: null, entryLegId: null, exitPrice: null, exitSource: null, exitLegId: null, mainCloseTime: null,
 });
 const NO_PRICE_CHANGE = EMPTY_CAMPAIGN_PRICE_CHANGE;
+
+/**
+ * 主力持有窗口内的最大有利价格涨幅：主多看最高价，主空看最低价。
+ * K 线按「与持有窗口相交」纳入，避免主力开在一根 K 线中间时漏掉开仓那根；结果至少为 0%。
+ */
+export function computePeakPriceChangePct(args: {
+  side: PriceChangeSide | null;
+  entryPrice: number | null;
+  klines: readonly KlineData[];
+  startMs: number;
+  endMs: number;
+  barMs: number;
+}): number | null {
+  const { side, entryPrice, klines, startMs, endMs, barMs } = args;
+  if (side == null || entryPrice == null || !Number.isFinite(entryPrice) || entryPrice <= 0
+    || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs || !(barMs > 0)) return null;
+  const bars = klines.filter(bar => bar.time <= endMs && bar.time + barMs > startMs);
+  if (bars.length === 0) return null;
+  const extreme = side === 'long'
+    ? Math.max(...bars.map(bar => bar.high))
+    : Math.min(...bars.map(bar => bar.low));
+  const directedPct = side === 'long'
+    ? ((extreme - entryPrice) / entryPrice) * 100
+    : ((entryPrice - extreme) / entryPrice) * 100;
+  return Math.max(0, directedPct);
+}
 
 function usable(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);

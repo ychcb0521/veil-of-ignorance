@@ -26,11 +26,11 @@ const GOLDEN_LABELS = [
   '算术期望',
   '最大预期亏损',
   '已实现 P&L',
+  '峰值涨幅',
+  '峰值涨幅倍数',
   '峰值浮盈',
   '主力开仓名义仓位',
   '多方总名义仓位',
-  '杠杆倍数',
-  'DSI/USI 贡献',
 ];
 
 const GOLDEN_KEYS = [
@@ -43,11 +43,11 @@ const GOLDEN_KEYS = [
   'arithmeticExpectancy',
   'initialExpectedMaxLoss',
   'realizedPnl',
+  'peakPriceChange',
+  'peakPriceEfficiency',
   'peakUnrealizedPnl',
   'initialMainExposureNotional',
   'mainSideNotional',
-  'mainLeverage',
-  'asymmetricRiskContribution',
 ];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
@@ -57,6 +57,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
     mainLeverage: 1,
     initialMainExposureNotional: 1000,
     peakUnrealizedPnl: 250.5,
+    peakPriceChangePct: 25,
     initialExpectedMaxLoss: 100,
     mainSideNotional: { side: 'long', total: 1500 },
     expectedMaxDrawdownPct: 10,
@@ -87,21 +88,21 @@ describe('buildCampaignPnlOverviewItems', () => {
       '+0.50R',
       '100.00 USDT',
       '200.00 USDT',
+      '+25.00%',
+      '+2.50',
       '250.50 USDT',
       '1000.00 USDT',
       '1500.00 USDT',
-      '1x',
-      'USI 100.0%',
     ]);
     const G = '#0ECB81';
     expect(items.map(item => item.color)).toEqual([
       undefined, G, G, G, G, G, G,
-      undefined, G, undefined, undefined, undefined, undefined, undefined,
+      undefined, G, G, G, undefined, undefined, undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
       undefined, T, T, T, T, T, T,
-      undefined, T, undefined, undefined, undefined, undefined, undefined,
+      undefined, T, T, T, undefined, undefined, undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -117,6 +118,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       mainLeverage: null,
       initialMainExposureNotional: 0,
       peakUnrealizedPnl: 0,
+      peakPriceChangePct: null,
       initialExpectedMaxLoss: 0,
       expectedMaxDrawdownPct: 0,
       payoffRatio: null,
@@ -180,19 +182,18 @@ describe('buildCampaignPnlOverviewItems', () => {
   });
 
   it('【用户要求】说明（ⓘ）里引用的 b 与盈亏比读数同一个写法：取整为 0 写 0.00，不写 -0.00', () => {
-    // 已实现 -0.3、L 100 → b = -0.003：盈亏比读「0.00」，加仓效用 / DSI 贡献 / 算术期望的说明里也只能是「0.00」
+    // 已实现 -0.3、L 100 → b = -0.003：盈亏比读「0.00」，加仓效用 / 算术期望的说明里也只能是「0.00」
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       payoffRatio: -0.3,
       asymmetricRiskContribution: { group: 'loss', sampleCount: 1, meanSquareTerm: 0, meanSquareShare: 1 },
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     expect(byKey.payoffRatio.value).toBe('0.00');
-    for (const key of ['addEfficiency', 'asymmetricRiskContribution', 'arithmeticExpectancy']) {
+    for (const key of ['addEfficiency', 'arithmeticExpectancy']) {
       const text = render(<>{byKey[key].help}</>).container.textContent ?? '';
       expect(text, key).not.toContain('-0.00');
     }
     expect(render(<>{byKey.addEfficiency.help}</>).container.textContent).toContain('本场 = 0.00 ÷ |+2.00|');
-    expect(render(<>{byKey.asymmetricRiskContribution.help}</>).container.textContent).toContain('本场：DSI 下行组，b = 0.00，');
     expect(render(<>{byKey.arithmeticExpectancy.help}</>).container.textContent).toContain('本场：50.00% × 0.00 − 50.00%');
   });
 
@@ -234,16 +235,17 @@ describe('CampaignPnlOverviewPanel', () => {
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望', '算术期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['最大预期亏损', '已实现 P&L', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位', '杠杆倍数', 'DSI/USI 贡献']);
+      .toEqual(['最大预期亏损', '已实现 P&L', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('预期回撤')).toBe('1');
     // 【用户要求】最大预期亏损在右栏第一个，与预期回撤同一行
     expect(rowOf('最大预期亏损')).toBe('1');
     expect(rowOf('已实现 P&L')).toBe('2');
-    expect(rowOf('峰值浮盈')).toBe('3');
-    expect(rowOf('多方总名义仓位')).toBe('5');
-    expect(rowOf('DSI/USI 贡献')).toBe('7');
+    expect(rowOf('峰值涨幅')).toBe('3');
+    expect(rowOf('峰值涨幅倍数')).toBe('4');
+    expect(rowOf('峰值浮盈')).toBe('5');
+    expect(rowOf('多方总名义仓位')).toBe('7');
     expect(rowOf('算术期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
@@ -258,8 +260,6 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('本场：50.00% × 2.00 − 50.00%')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '几何期望说明' }));
     expect(screen.getByText('本场 x = 1.00%')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'DSI/USI 贡献说明' }));
-    expect(screen.getByText(/b = 2\.00，n = 1，b²\/n = 4\.0000，组内占比 100\.00%/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '涨跌幅倍数说明' }));
@@ -311,20 +311,16 @@ describe('CampaignPnlOverviewPanel', () => {
   });
 });
 
-describe('【用户要求】盈亏概览简化：DSI/USI 贡献只写组与占比，细节进说明；脚注删掉、资产分母写进几何期望的说明', () => {
+describe('【用户要求】盈亏概览：峰值价格指标、峰值浮盈与几何期望', () => {
   const byKey = (overrides: Partial<CampaignPnlOverviewMetrics> = {}) =>
     Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics(overrides)).map(item => [item.key, item]));
   const helpText = (help: ReactNode) => render(<>{help}</>).container.textContent ?? '';
 
-  it('DSI/USI 贡献：读数「USI 12.3%」，不到 0.1% 写「<0.1%」；均方项、b、n 在说明里', () => {
-    expect(byKey({ asymmetricRiskContribution: { group: 'win', sampleCount: 7, meanSquareTerm: 0.0498, meanSquareShare: 0.1234 } })
-      .asymmetricRiskContribution.value).toBe('USI 12.3%');
-    const tiny = byKey({ asymmetricRiskContribution: { group: 'loss', sampleCount: 30, meanSquareTerm: 0.0018, meanSquareShare: 0.0002 } }).asymmetricRiskContribution;
-    expect(tiny.value).toBe('DSI <0.1%');
-    const text = helpText(tiny.help);
-    expect(text).toContain('组内占比 = 本场 b² ÷ 对应组 Σb²');
-    expect(text).toContain('本场：DSI 下行组，b = 2.00，n = 30，b²/n = 0.0018，组内占比 0.02%');
-    expect(byKey({ asymmetricRiskContribution: null }).asymmetricRiskContribution.value).toBe('—');
+  it('峰值涨幅与峰值涨幅倍数在峰值浮盈上方；没有价格路径时均为「—」', () => {
+    expect(byKey().peakPriceChange.value).toBe('+25.00%');
+    expect(byKey().peakPriceEfficiency.value).toBe('+2.50');
+    expect(byKey({ peakPriceChangePct: null }).peakPriceChange.value).toBe('—');
+    expect(byKey({ peakPriceChangePct: null }).peakPriceEfficiency.value).toBe('—');
   });
 
   it('峰值浮盈带单位 USDT', () => {

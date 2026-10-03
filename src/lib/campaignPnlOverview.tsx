@@ -23,7 +23,7 @@ import { formatLegPriceChangePct } from '@/lib/legPriceChange';
  * 盈亏概览的**唯一**一份指标清单构造器。
  *
  * 详情页的「盈亏概览」、导出 PNG 里的同名面板、以及反事实分支的「反事实盈亏概览」
- * 都从这里拿同一组 12 项（同顺序、同文案、同着色）。它只吃一个已经算好的
+ * 都从这里拿同一组 14 项（同顺序、同文案、同着色）。它只吃一个已经算好的
  * 纯数字对象，不碰 campaign / legs / tradeRecords——谁来算这些数字是调用方的事：
  * 真实战役由详情页的各 memo 算，反事实由 counterfactualOverview 从落库结果里还原。
  * 这样「同一指标两处两个数」在结构上就不可能发生。
@@ -33,6 +33,8 @@ export type CampaignPnlOverviewItemKey =
   | 'realizedPnl'
   | 'mainLeverage'
   | 'initialMainExposureNotional'
+  | 'peakPriceChange'
+  | 'peakPriceEfficiency'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -69,18 +71,17 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
 ];
 
 /**
- * 右栏：结果与仓位。【用户要求】「已实现 P&L、主力开仓名义仓位、最大预期亏损放在一起，放在前三，第四再增加一个多方的总名义仓位」，
- * 又要求「最大预期亏损放在那一列的第一个」——与左栏第一个的预期回撤同一行（最大预期亏损 = 主力开仓名义仓位 × 预期回撤）；
- * 「峰值浮盈放在已实现 P&L 的紧贴的后面」；之后是两项名义仓位、杠杆倍数、DSI/USI 贡献。
+ * 右栏：结果与仓位。最大预期亏损、已实现 P&L 后依次放峰值涨幅、峰值涨幅倍数、峰值浮盈，再放两项名义仓位。
+ * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'initialExpectedMaxLoss',
   'realizedPnl',
+  'peakPriceChange',
+  'peakPriceEfficiency',
   'peakUnrealizedPnl',
   'initialMainExposureNotional',
   'mainSideNotional',
-  'mainLeverage',
-  'asymmetricRiskContribution',
 ];
 
 /**
@@ -106,6 +107,8 @@ export interface CampaignPnlOverviewMetrics {
   mainLeverage: number | null;
   initialMainExposureNotional: number;
   peakUnrealizedPnl: number;
+  /** 主力持有窗口内相对基准开仓价的最大有利价格涨幅；老反事实分支没有价格路径时为 null。 */
+  peakPriceChangePct?: number | null;
   initialExpectedMaxLoss: number;
   /**
    * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
@@ -198,6 +201,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     mainLeverage,
     initialMainExposureNotional,
     peakUnrealizedPnl,
+    peakPriceChangePct = null,
     initialExpectedMaxLoss,
     mainSideNotional,
     expectedMaxDrawdownPct: expectedDrawdownPct,
@@ -211,6 +215,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     initialRisk,
   } = metrics;
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
+  const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency)
     : null;
@@ -272,6 +277,36 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <p>入场时主方向的全部初始敞口：M 加镜像仓位，按镜像 TP 落袋之前的真实全暴露计算。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">主力开仓名义仓位 = 初始 M 名义仓位 + 初始镜像名义仓位</div>
           <p>后续加仓、重入仓位和反向对冲均不计入；历史战役从成交记录、Leg 快照及事件流去重还原。</p>
+        </>
+      ),
+    },
+    {
+      key: 'peakPriceChange',
+      label: '峰值涨幅',
+      value: formatLegPriceChangePct(peakPriceChangePct),
+      color: pnlExportColor(peakPriceChangePct),
+      valueClassName: pnlColor(peakPriceChangePct),
+      help: (
+        <>
+          <p>主力持有期间，价格相对主力基准开仓价曾经走出的最大有利涨幅：主多取 K 线最高价，主空取 K 线最低价。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值涨幅 = maxₜ（按主力方向计的价格涨跌幅ₜ）</div>
+          <p>开仓价与普通「涨跌幅」相同；终点改为主力持有窗口内的盘中最有利价，因此它不等于整套多空组合的「峰值浮盈」。</p>
+        </>
+      ),
+    },
+    {
+      key: 'peakPriceEfficiency',
+      label: '峰值涨幅倍数',
+      value: formatEfficiency(peakPriceEfficiency),
+      color: pnlExportColor(peakPriceEfficiency),
+      valueClassName: pnlColor(peakPriceEfficiency),
+      help: (
+        <>
+          <p>峰值行情走出了几个初始预期回撤，用于把不同波动尺度的战役放在同一把尺上比较。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值涨幅倍数 = 峰值涨幅 ÷ 预期回撤</div>
+          {peakPriceEfficiency == null
+            ? <p>缺少 K 线、主力基准开仓价或有效预期回撤时不计算。</p>
+            : <p className="font-mono text-foreground">本场 = {formatLegPriceChangePct(peakPriceChangePct)} ÷ {expectedDrawdownPct.toFixed(2)}% = {formatEfficiency(peakPriceEfficiency)}</p>}
         </>
       ),
     },

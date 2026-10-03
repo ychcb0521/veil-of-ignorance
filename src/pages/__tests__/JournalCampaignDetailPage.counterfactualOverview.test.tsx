@@ -331,11 +331,11 @@ const OVERVIEW_LABELS = [
   '算术期望',
   '最大预期亏损',
   '已实现 P&L',
+  '峰值涨幅',
+  '峰值涨幅倍数',
   '峰值浮盈',
   '主力开仓名义仓位',
   '多方总名义仓位',
-  '杠杆倍数',
-  'DSI/USI 贡献',
 ];
 
 function helpButtonLabels(panel: HTMLElement) {

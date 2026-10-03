@@ -133,7 +133,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.payoffRatio.value).toBe('1.33');
     expect(byKey.payoffRatio.value).not.toBe('1.00');
     expect(byKey.realizedPnl.value).toBe('80.00 USDT');
-    expect(byKey.mainLeverage.value).toBe('3x');
+    expect(metrics.mainLeverage).toBe(3);
     expect(byKey.initialMainExposureNotional.value).toBe('1500.00 USDT');
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
@@ -141,7 +141,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
     expect(byKey.geometricExpectancy.value).toBe('1.13');
     // 盈利 → USI 组，b² / n = 1.7778 / 1，组内占比 1.7778 / 4
-    expect(byKey.asymmetricRiskContribution.value).toBe('USI 44.4%');
+    expect(metrics.asymmetricRiskContribution).toEqual(expect.objectContaining({
+      group: 'win',
+      meanSquareShare: expect.closeTo(4 / 9, 6),
+    }));
     // 【用户要求】「今日账户总资产」不单列，只作几何期望的估算分母（见脚注）
     expect(byKey.todayAccountEquity).toBeUndefined();
     // 没有主力开仓资产快照 → 退到今日总资产，几何期望的说明跟着写明
@@ -196,7 +199,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.initialExpectedMaxLoss.value).toBe('123.00 USDT');
     expect(byKey.initialMainExposureNotional.value).toBe('999.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
-    expect(byKey.mainLeverage.value).toBe('9x');
+    expect(metrics.mainLeverage).toBe(9);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);
     expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 123) * 100));
   });
@@ -217,9 +220,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
       expectedMaxDrawdownPct: 4,
       mainLeverage: 3,
     });
-    const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result: withoutLeverage }, shared));
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: withoutLeverage }, shared);
+    const { byKey } = itemsByKey(metrics);
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
-    expect(byKey.mainLeverage.value).toBe('3x');
+    expect(metrics.mainLeverage).toBe(3);
   });
 
   it('main_only 战役的老 SOP 行按 main_only 模板重算：没有保护线 → L = 0，L 派生项印「—」而不是被默认模板造出止损线', () => {
@@ -266,7 +270,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(legacyMetrics.extraNotes?.payoffRatio).toContainEqual({ warning: '本分支没有初始对冲 A/B，读不到止损线，本项不计算。' });
   });
 
-  it('L = 0（手动腿里没有初始对冲 A/B）：八个 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
+  it('L = 0（手动腿里没有初始对冲 A/B）：七个概览内 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
     const mainOnly = params([leg({ id: 'main', leg_role: 'main_open', exit_price: 106 })]);
     const result = simulateManualLegScenario(mainOnly, NO_KLINES);
     expect(result.initial_expected_max_loss).toBe(0);
@@ -281,7 +285,6 @@ describe('buildCounterfactualOverviewMetrics', () => {
       'mainPriceEfficiency',
       'payoffRatio',
       'addEfficiency',
-      'asymmetricRiskContribution',
       'arithmeticExpectancy',
       'geometricExpectancy',
     ];
@@ -344,14 +347,17 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(caveat).not.toContain('最高价、最低价重估');
   });
 
-  it('DSI/USI 贡献标成假设值：本场反事实不在账户样本内', () => {
+  it('迁入元数据的 DSI/USI 贡献仍标成假设值：本场反事实不在账户样本内', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
-    render(<CampaignPnlOverviewPanel title="反事实盈亏概览" items={itemsByKey(metrics).items} />);
-    fireEvent.click(screen.getByRole('button', { name: 'DSI/USI 贡献说明' }));
-    expect(screen.getByText(/假设值：本场反事实不在账户样本内/)).toBeInTheDocument();
-    expect(screen.getByText(/b = 1\.33，n = 1，/)).toBeInTheDocument();
+    expect(metrics.asymmetricRiskContribution).toEqual(expect.objectContaining({
+      group: 'win',
+      meanSquareShare: expect.closeTo(4 / 9, 6),
+    }));
+    expect(metrics.extraNotes?.asymmetricRiskContribution).toContainEqual({
+      warning: expect.stringMatching(/假设值：本场反事实不在账户样本内/),
+    });
   });
 
   it('非所有者不用今日总资产当几何期望的资产分母', () => {

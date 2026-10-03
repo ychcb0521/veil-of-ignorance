@@ -88,6 +88,8 @@ export type CampaignBoardExportInput = ExportInput & {
     items: CampaignBoardPnlItem[];
     note?: string;
   };
+  /** 页面从盈亏概览移到「战役原数据」的指标；导出图保持同一位置。 */
+  metadataMetrics?: CampaignBoardPnlItem[];
   emotionDiary?: EmotionDiaryExportSummary | null;
   /** 页面上情绪日记折叠着时为 true：导出图跟着只画标题栏，不画日记正文与量表。 */
   emotionDiaryCollapsed?: boolean;
@@ -1400,6 +1402,7 @@ export function buildCampaignBoardOverview(input: CampaignBoardExportInput): Cam
         value: `${initialMainExposureNotional > 0 ? fmtAmount(initialMainExposureNotional, ' USDT') : '—'} / ${formatCampaignLeverage(mainLeverage)}`,
       },
       { label: '最终 R', value: fmtAmount(input.campaign.final_r_multiple) },
+      ...(input.metadataMetrics ?? []).map(({ label, value, color }) => ({ label, value, color })),
       {
         label: '战役编号',
         value: formatCampaignDisplayCode(

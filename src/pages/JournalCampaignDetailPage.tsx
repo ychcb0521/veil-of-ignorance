@@ -4,7 +4,7 @@ import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
@@ -33,7 +33,7 @@ import {
   withCampaignReviewSummary,
   type CampaignReviewRule,
 } from '@/lib/campaignReviewSummary';
-import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
+import { CampaignPnlOverviewPanel, PnlMetricLabel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { QuietInfo } from '@/components/journal/QuietInfo';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -86,6 +86,7 @@ import {
 } from '@/lib/campaignRealizedPnl';
 import {
   computeCampaignExpectancies,
+  formatCampaignLeverage,
   resolveCampaignMainLeverage,
 } from '@/lib/campaignMetrics';
 import {
@@ -1621,12 +1622,33 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       events: campaign.actual_evolution,
     }),
   ) : null), [campaign, legs, tradeRecords, legExitPriceCorrections, unfilledOrderIds, reverseHedgeOrders]);
+  /**
+   * 峰值涨幅与普通「涨跌幅」共用同一个主力基准开仓价；区别只是终点取主力持有窗口内最有利的 K 线极值。
+   * 主多取最高价、主空取最低价。K 线请求还带着图表前后文，因此必须再按战役 / 主力平仓窗口裁一次。
+   */
+  const peakPriceChangePct = useMemo(() => {
+    if (!campaign || actualPriceChange.entryPrice == null || actualPriceChange.side == null || klines.length === 0) return null;
+    const entryLegOpenTime = actualPriceChange.entryLegId == null
+      ? null
+      : actualMainPriceChange.byLegId[actualPriceChange.entryLegId]?.openTime;
+    const startMs = entryLegOpenTime ?? new Date(campaign.opened_at).getTime();
+    const fallbackEndMs = new Date(effectiveClosedAt).getTime();
+    const endMs = actualPriceChange.mainCloseTime ?? fallbackEndMs;
+    return computePeakPriceChangePct({
+      side: actualPriceChange.side,
+      entryPrice: actualPriceChange.entryPrice,
+      klines,
+      startMs,
+      endMs,
+      barMs: intervalToMs(computeInterval),
+    });
+  }, [actualMainPriceChange.byLegId, actualPriceChange.entryLegId, actualPriceChange.entryPrice, actualPriceChange.mainCloseTime, actualPriceChange.side, campaign, computeInterval, effectiveClosedAt, klines]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
     // 系统一直算得出这个差额，却从来不显示——分歧被静默吞掉正是「两页两个数」能长期存在的原因。
     const pnlDrift = pnlSettlement && hasMaterialDrift(pnlSettlement) ? pnlSettlement.drift : null;
-    // 12 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
+    // 14 项的顺序、文案与着色只在 buildCampaignPnlOverviewItems 里写一次；
     // 这里只负责把真实战役的各个 memo 收成一个纯数字对象。反事实面板走同一个构造器。
     const items = buildCampaignPnlOverviewItems({
       realizedPnl: pnlReconciliation?.correctedPnl ?? campaign.final_realized_pnl,
@@ -1636,6 +1658,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       mainLeverage: resolveCampaignMainLeverage(campaign, legs, tradeRecords),
       initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: accuracy.campaign_max_profit_real,
+      peakPriceChangePct,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
       mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
@@ -1648,10 +1671,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });
-    // 峰值浮盈是这里唯一读 K 线的一项。计算用 K 线还在路上时它只是「至少取到已实现」的兜底值；
+    // 峰值涨幅、峰值涨幅倍数和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
     // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
     if (!klinesLoading) return items;
-    return items.map(item => (item.key === 'peakUnrealizedPnl'
+    return items.map(item => (item.key === 'peakUnrealizedPnl' || item.key === 'peakPriceChange' || item.key === 'peakPriceEfficiency'
       ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
       : item));
   }, [
@@ -1663,10 +1686,32 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     klinesLoading,
     legs,
     mainSideNotional,
+    peakPriceChangePct,
     pnlReconciliation,
     settlement,
     tradeRecords,
   ]);
+  const campaignMetadataMetrics = useMemo<CampaignPnlOverviewItem[]>(() => {
+    const leverage = campaign ? resolveCampaignMainLeverage(campaign, legs, tradeRecords) : null;
+    const share = asymmetricRiskContribution?.meanSquareShare;
+    const shareText = share == null || !Number.isFinite(share)
+      ? ''
+      : share > 0 && share * 100 < 0.05 ? '<0.1%' : `${(share * 100).toFixed(1)}%`;
+    return [
+      {
+        key: 'mainLeverage', label: '杠杆倍数', value: formatCampaignLeverage(leverage), help: (
+          <><p>本场战役主力头仓开仓时使用的杠杆倍数，不把后续加仓或对冲腿的杠杆混入。</p><p>历史战役依次从主力 Leg、关联成交记录、战役初始字段和主力开仓事件回填。</p></>
+        ),
+      },
+      {
+        key: 'asymmetricRiskContribution', label: 'DSI/USI 贡献',
+        value: asymmetricRiskContribution == null ? '—' : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} ${shareText}`.trim(),
+        help: (
+          <><p>本场盈亏比 b 对账户不对称风险指标的贡献：盈利战役进入 USI 上行组，亏损或持平战役进入 DSI 下行组。</p><div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div></>
+        ),
+      },
+    ];
+  }, [asymmetricRiskContribution, campaign, legs, tradeRecords]);
   const chart = useMemo(
     () => (campaign ? buildChartArtifacts(campaign, legs, tradeRecords, legExitPriceCorrections) : { markers: [], timeBoundPriceLines: [], verticalLines: [], events: [] }),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
@@ -2372,6 +2417,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           })),
           ...(batchOverviewNote ? { note: batchOverviewNote } : {}),
         },
+        metadataMetrics: campaignMetadataMetrics.map(({ key, label, value, color }) => ({ key, label, value, color })),
         emotionDiary: campaignEmotionDiarySummary,
         emotionDiaryCollapsed: batchExport ? false : emotionDiaryCollapsed,
         ...(batchExport ? {
@@ -2625,6 +2671,12 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             <div>开始：{fmtMdHm(campaign.opened_at)}</div>
             <div>结束：{fmtMdHm(campaign.closed_at)}</div>
             <div>持续时间：{fmtDuration(campaign.opened_at, campaign.closed_at)}</div>
+            {campaignMetadataMetrics.map(item => (
+              <div key={item.key} className="flex max-w-sm items-baseline justify-between gap-6">
+                <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+                <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+              </div>
+            ))}
           </div>
 
           <CampaignPnlOverviewPanel
