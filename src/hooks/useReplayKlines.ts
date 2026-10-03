@@ -7,30 +7,70 @@ import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
 
 export type ReplayKlineRequestPriority = 'interactive' | 'background';
 
+export type ReplayKlineErrorKind = 'rate-limit' | 'timeout' | 'network' | 'server' | 'invalid-response' | 'invalid-request';
+
+/** Machine-readable failures let background work retry without mistaking an incomplete range for data. */
+export class ReplayKlineRequestError extends Error {
+  constructor(
+    message: string,
+    readonly kind: ReplayKlineErrorKind,
+    readonly retryable: boolean,
+    readonly status?: number,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = 'ReplayKlineRequestError';
+  }
+}
+
 type PendingKlineRequest = {
   priority: ReplayKlineRequestPriority;
   signal?: AbortSignal;
-  run: () => Promise<Response>;
-  resolve: (response: Response) => void;
+  run: () => Promise<KlineData[]>;
+  resolve: (data: KlineData[]) => void;
   reject: (reason: unknown) => void;
+  cleanup: () => void;
 };
 
 const pendingKlineRequests: PendingKlineRequest[] = [];
 let klineRequestPumpRunning = false;
-let nextKlineRequestAt = 0;
-let klineCooldownUntil = 0;
+let nextBackgroundKlineRequestAt = 0;
+let backgroundKlineCooldownUntil = 0;
 let preferAlternateKlineEndpointUntil = 0;
+let wakeKlineRequestPump: (() => void) | undefined;
 
-// Interactive charts retain their existing immediate behaviour. Only bulk/background pagination is
-// paced; it is the source of sustained request pressure and must yield to detail-page work.
-const requestGapMs = (priority: ReplayKlineRequestPriority) => priority === 'background' ? 750 : 0;
+const BACKGROUND_REQUEST_GAP_MS = 750;
+const KLINE_REQUEST_TIMEOUT_MS = 15_000;
+const abortError = () => new DOMException('Aborted', 'AbortError');
+const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError';
 
-const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw abortError();
+}
+
+function backgroundCooldownError(): ReplayKlineRequestError | undefined {
+  const remainingMs = backgroundKlineCooldownUntil - Date.now();
+  return remainingMs > 0
+    ? new ReplayKlineRequestError('API 429', 'rate-limit', true, 429, remainingMs)
+    : undefined;
+}
+
+function waitForKlineQueue(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    const wake = () => {
+      clearTimeout(timer);
+      if (wakeKlineRequestPump === wake) wakeKlineRequestPump = undefined;
+      resolve();
+    };
+    const timer = setTimeout(wake, ms);
+    wakeKlineRequestPump = wake;
+  });
+}
 
 /**
- * All replay-Kline pages share one queue. A background list scan can therefore never burst four
- * pagination requests or overtake a detail-page chart. 418/429 opens a circuit breaker, so queued
- * work fails fast instead of extending Binance's IP ban by continuing to hit the endpoint.
+ * One network page (including its response body) at a time. Choose the next item only after the
+ * background pacing wait; a detail request arriving during that wait wakes it and goes first.
+ * Failed and cancelled background pages are paced too, so retries cannot create request bursts.
  */
 async function pumpKlineRequests(): Promise<void> {
   if (klineRequestPumpRunning) return;
@@ -38,25 +78,35 @@ async function pumpKlineRequests(): Promise<void> {
   try {
     while (pendingKlineRequests.length > 0) {
       const interactiveIndex = pendingKlineRequests.findIndex(item => item.priority === 'interactive');
+      if (interactiveIndex < 0) {
+        const delay = Math.max(0, nextBackgroundKlineRequestAt - Date.now());
+        if (delay > 0) {
+          await waitForKlineQueue(delay);
+          continue;
+        }
+      }
       const [item] = pendingKlineRequests.splice(interactiveIndex >= 0 ? interactiveIndex : 0, 1);
       if (!item) continue;
       if (item.signal?.aborted) {
-        item.reject(new DOMException('Aborted', 'AbortError'));
+        item.cleanup();
+        item.reject(abortError());
         continue;
       }
-      const now = Date.now();
-      const delay = Math.max(0, nextKlineRequestAt - now);
-      if (delay > 0) await wait(delay);
-      if (item.signal?.aborted) {
-        item.reject(new DOMException('Aborted', 'AbortError'));
+      const cooldown = item.priority === 'background' ? backgroundCooldownError() : undefined;
+      if (cooldown) {
+        item.cleanup();
+        item.reject(cooldown);
         continue;
       }
       try {
-        const response = await item.run();
-        nextKlineRequestAt = Date.now() + requestGapMs(item.priority);
-        item.resolve(response);
+        item.resolve(await item.run());
       } catch (error) {
         item.reject(error);
+      } finally {
+        if (item.priority === 'background') {
+          nextBackgroundKlineRequestAt = Date.now() + BACKGROUND_REQUEST_GAP_MS;
+        }
+        item.cleanup();
       }
     }
   } finally {
@@ -65,19 +115,111 @@ async function pumpKlineRequests(): Promise<void> {
   }
 }
 
+function responseError(response: Response): ReplayKlineRequestError {
+  const rateLimited = response.status === 418 || response.status === 429;
+  const retryAfter = response.headers?.get?.('retry-after');
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : NaN;
+  const retryAfterDate = retryAfter ? Date.parse(retryAfter) : NaN;
+  const retryAfterMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+    ? retryAfterSeconds * 1_000
+    : Number.isFinite(retryAfterDate) && retryAfterDate > Date.now()
+      ? retryAfterDate - Date.now()
+      : rateLimited ? (response.status === 418 ? 120_000 : 30_000) : undefined;
+  return new ReplayKlineRequestError(
+    `API ${response.status}`,
+    rateLimited ? 'rate-limit' : response.status >= 500 ? 'server' : 'invalid-request',
+    rateLimited || response.status >= 500 || response.status === 408,
+    response.status,
+    retryAfterMs,
+  );
+}
+
+/** Timeout covers fetch AND body reading. Racing also releases the queue if an adapter ignores abort. */
+async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineData[]> {
+  throwIfAborted(signal);
+  const controller = new AbortController();
+  let rejectInterruption: (error: unknown) => void = () => undefined;
+  const interruption = new Promise<never>((_, reject) => { rejectInterruption = reject; });
+  const onAbort = () => {
+    rejectInterruption(abortError());
+    controller.abort();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const timer = setTimeout(() => {
+    rejectInterruption(new ReplayKlineRequestError('K 线请求超时', 'timeout', true));
+    controller.abort();
+  }, KLINE_REQUEST_TIMEOUT_MS);
+  try {
+    return await Promise.race([
+      interruption,
+      (async () => {
+        const response = await fetch(url, { signal: controller.signal });
+        throwIfAborted(signal);
+        if (!response.ok) throw responseError(response);
+        let raw: unknown;
+        try {
+          raw = await response.json();
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          throw new ReplayKlineRequestError('K 线响应格式无效', 'invalid-response', true);
+        }
+        throwIfAborted(signal);
+        if (!Array.isArray(raw)) throw new ReplayKlineRequestError('K 线响应格式无效', 'invalid-response', true);
+        return raw.map((row: unknown) => {
+          if (!Array.isArray(row) || row.length < 6) {
+            throw new ReplayKlineRequestError('K 线数据不完整', 'invalid-response', true);
+          }
+          const values = row.slice(0, 6).map(value => (
+            typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')
+              ? Number(value)
+              : NaN
+          ));
+          if (values.some(value => !Number.isFinite(value))) {
+            throw new ReplayKlineRequestError('K 线数据不完整', 'invalid-response', true);
+          }
+          const [time, open, high, low, close, volume] = values;
+          return { time, open, high, low, close, volume };
+        });
+      })(),
+    ]);
+  } catch (error) {
+    if (signal?.aborted) throw abortError();
+    if (error instanceof ReplayKlineRequestError || isAbortError(error)) throw error;
+    throw new ReplayKlineRequestError('K 线网络请求失败', 'network', true);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 function governedKlineFetch(
   url: string,
   signal: AbortSignal | undefined,
   priority: ReplayKlineRequestPriority,
-): Promise<Response> {
+): Promise<KlineData[]> {
   return new Promise((resolve, reject) => {
-    pendingKlineRequests.push({
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const onAbort = () => {
+      const index = pendingKlineRequests.indexOf(item);
+      if (index >= 0) pendingKlineRequests.splice(index, 1);
+      item.cleanup();
+      reject(abortError());
+      wakeKlineRequestPump?.();
+    };
+    const item: PendingKlineRequest = {
       priority,
       signal,
-      run: () => fetch(url, { signal }),
+      run: () => fetchKlinePage(url, signal),
       resolve,
       reject,
-    });
+      cleanup: () => signal?.removeEventListener('abort', onAbort),
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    pendingKlineRequests.push(item);
+    wakeKlineRequestPump?.();
     void pumpKlineRequests();
   });
 }
@@ -90,12 +232,17 @@ export async function fetchReplayKlineRange(
   signal?: AbortSignal,
   options?: { priority?: ReplayKlineRequestPriority },
 ): Promise<KlineData[]> {
+  throwIfAborted(signal);
+  if (!symbol || !Number.isFinite(fromTime) || !Number.isFinite(toTime)) {
+    throw new ReplayKlineRequestError('K 线请求参数无效', 'invalid-request', false);
+  }
   const out: KlineData[] = [];
   let cursor = fromTime;
+  const priority = options?.priority ?? 'interactive';
   // Binance fapi limit 1500 per request
   const limit = 1500;
   while (cursor < toTime) {
-    if (signal?.aborted) break;
+    throwIfAborted(signal);
     const qs = new URLSearchParams({
       symbol,
       interval,
@@ -103,50 +250,50 @@ export async function fetchReplayKlineRange(
       endTime: String(toTime),
       limit: String(limit),
     });
-    const priority = options?.priority ?? 'interactive';
-    if (klineCooldownUntil > Date.now()) throw new Error('API 429');
+    const cooldown = priority === 'background' ? backgroundCooldownError() : undefined;
+    if (cooldown) throw cooldown;
     const primaryUrl = `https://fapi.binance.com/fapi/v1/klines?${qs}`;
     const alternateUrl = `https://www.binance.com/fapi/v1/klines?${qs}`;
-    let res: Response;
-    if (preferAlternateKlineEndpointUntil > Date.now()) {
-      res = await governedKlineFetch(alternateUrl, signal, priority);
-      if (res.status === 418 || res.status === 429) preferAlternateKlineEndpointUntil = 0;
-    } else {
-      res = await governedKlineFetch(primaryUrl, signal, priority);
-      if (res.status === 418 || res.status === 429) {
-        const alternate = await governedKlineFetch(alternateUrl, signal, priority);
-        if (alternate.ok) {
-          preferAlternateKlineEndpointUntil = Date.now() + 5 * 60_000;
-          res = alternate;
-        } else if (priority === 'background' && (alternate.status === 418 || alternate.status === 429)) {
-          const retryAfterSeconds = Number(alternate.headers?.get?.('retry-after'));
-          const fallbackMs = alternate.status === 418 ? 120_000 : 30_000;
-          klineCooldownUntil = Date.now() + (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-            ? retryAfterSeconds * 1_000
-            : fallbackMs);
+    const alternateFirst = preferAlternateKlineEndpointUntil > Date.now();
+    let page: KlineData[];
+    try {
+      page = await governedKlineFetch(alternateFirst ? alternateUrl : primaryUrl, signal, priority);
+    } catch (firstError) {
+      throwIfAborted(signal);
+      if (!(firstError instanceof ReplayKlineRequestError) || !firstError.retryable) throw firstError;
+      try {
+        page = await governedKlineFetch(alternateFirst ? primaryUrl : alternateUrl, signal, priority);
+        preferAlternateKlineEndpointUntil = alternateFirst ? 0 : Date.now() + 5 * 60_000;
+      } catch (secondError) {
+        throwIfAborted(signal);
+        const rateLimitErrors = [firstError, secondError].filter(
+          (error): error is ReplayKlineRequestError => error instanceof ReplayKlineRequestError && error.kind === 'rate-limit',
+        );
+        if (rateLimitErrors.length > 0) {
+          const rateLimitError = rateLimitErrors.reduce((longest, error) => (
+            (error.retryAfterMs ?? 0) > (longest.retryAfterMs ?? 0) ? error : longest
+          ));
+          const retryAfterMs = rateLimitError.retryAfterMs ?? 120_000;
+          // A detail request can discover the ban too. Stop bulk work in either case while
+          // allowing a user-triggered detail retry to probe whether access has recovered.
+          // A failed alternate must not erase the first endpoint's Retry-After with a network/5xx error.
+          backgroundKlineCooldownUntil = Math.max(backgroundKlineCooldownUntil, Date.now() + retryAfterMs);
+          throw new ReplayKlineRequestError(rateLimitError.message, 'rate-limit', true, rateLimitError.status, retryAfterMs);
         }
+        throw secondError;
       }
     }
-    if (!res.ok) throw new Error(`API ${res.status}`);
-    const raw: unknown[][] = await res.json();
-    if (raw.length === 0) break;
-    for (const k of raw) {
-      out.push({
-        time: k[0] as number,
-        open: parseFloat(String(k[1])),
-        high: parseFloat(String(k[2])),
-        low: parseFloat(String(k[3])),
-        close: parseFloat(String(k[4])),
-        volume: parseFloat(String(k[5])),
-      });
-    }
+    throwIfAborted(signal);
+    if (page.length === 0) break;
+    out.push(...page);
     const last = out[out.length - 1];
     if (!last) break;
     const next = last.time + intervalToMs(interval);
-    if (next <= cursor) break;
+    if (next <= cursor) throw new ReplayKlineRequestError('K 线分页未前进', 'invalid-response', true);
     cursor = next;
-    if (raw.length < limit) break;
+    if (page.length < limit) break;
   }
+  throwIfAborted(signal);
   return normalizeReplayKlines(out);
 }
 

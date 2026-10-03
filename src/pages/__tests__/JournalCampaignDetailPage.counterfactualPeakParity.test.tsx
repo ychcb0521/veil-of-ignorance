@@ -1,5 +1,6 @@
 /**
- * 「原样重跑一遍 Legs 副本」的峰值浮盈，必须和上面那格真实「盈亏概览」印出来的是同一个数。
+ * 「原样重跑一遍 Legs 副本」的峰值涨幅、涨幅未兑现，必须与真实「盈亏概览」一致。
+ * 峰值浮盈不再作为概览字段展示，仍直接检查真实引擎返回的 peak_unrealized_pnl，防止回归。
  *
  * 用真实的页面 + 真实的编辑器 + 真实的手动 Legs 引擎跑一遍：两块面板并排摆着，
  * 未改动的副本读数对不上，用户就会把「推演引擎的口径差」误读成「方案的差别」。
@@ -267,23 +268,33 @@ beforeEach(() => {
 });
 
 describe('JournalCampaignDetailPage：未改动的 Legs 副本与真实盈亏概览峰值一致', () => {
-  it('对冲在 K 线中间、高点之后才成交：重跑的峰值浮盈 = 战役页的 300，不是两腿同在高点的 210', async () => {
+  it('对冲在 K 线中间才成交：真实与副本的价格指标一致，引擎峰值浮盈仍为 300 而非 210', async () => {
     renderPage('midbar');
     const { campaignPanel, draft } = await runUnchangedCopy('112');
 
     expect(metricValue(campaignPanel, '已实现 P&L')).toBe('110.00 USDT');
     expect(metricValue(draft, '已实现 P&L')).toBe('110.00 USDT');
-    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00 USDT');
-    expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
+    expect(metricValue(campaignPanel, '峰值涨幅')).toBe('+30.00%');
+    expect(metricValue(draft, '峰值涨幅')).toBe(metricValue(campaignPanel, '峰值涨幅'));
+    expect(metricValue(campaignPanel, '涨幅未兑现')).toBe('18.00%');
+    expect(metricValue(draft, '涨幅未兑现')).toBe(metricValue(campaignPanel, '涨幅未兑现'));
+    expect(runCustomCounterfactualMock).toHaveBeenCalledTimes(1);
+    const { result } = await runCustomCounterfactualMock.mock.results[0].value;
+    expect(result.peak_unrealized_pnl).toBe(300);
     expect(createCounterfactualMock).not.toHaveBeenCalled();
   }, 20_000);
 
-  it('主力持有期间一根 K 线内开平完的对冲：两块面板的峰值浮盈同样对得上', async () => {
+  it('一根 K 线内开平完的对冲：两块面板价格指标一致，引擎保持正确的 300 峰值浮盈', async () => {
     renderPage('single');
     const { campaignPanel, draft } = await runUnchangedCopy('116');
 
     expect(metricValue(draft, '已实现 P&L')).toBe(metricValue(campaignPanel, '已实现 P&L'));
-    expect(metricValue(campaignPanel, '峰值浮盈')).toBe('300.00 USDT');
-    expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
+    expect(metricValue(campaignPanel, '峰值涨幅')).toBe('+30.00%');
+    expect(metricValue(draft, '峰值涨幅')).toBe(metricValue(campaignPanel, '峰值涨幅'));
+    expect(metricValue(campaignPanel, '涨幅未兑现')).toBe('20.00%');
+    expect(metricValue(draft, '涨幅未兑现')).toBe(metricValue(campaignPanel, '涨幅未兑现'));
+    expect(runCustomCounterfactualMock).toHaveBeenCalledTimes(1);
+    const { result } = await runCustomCounterfactualMock.mock.results[0].value;
+    expect(result.peak_unrealized_pnl).toBe(300);
   }, 20_000);
 });

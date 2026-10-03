@@ -41,13 +41,10 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
-import { fetchReplayKlineRange } from '@/hooks/useReplayKlines';
-import { intervalToMs } from '@/hooks/useBinanceData';
-import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
+import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, formatEfficiency, resolveHoldingDynamicDrawdownEndMs } from '@/lib/campaignMainPriceChange';
-import { pickCampaignComputeInterval } from '@/lib/campaignChartContentSpan';
+import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -1985,19 +1982,7 @@ export default function JournalCampaignsPage() {
   );
   const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
-  const [peakPriceChangeByCampaign, setPeakPriceChangeByCampaign] = useState<ReadonlyMap<string, number | null>>(() => new Map());
-  const [dynamicDrawdownByCampaign, setDynamicDrawdownByCampaign] = useState<ReadonlyMap<string, number | null>>(() => new Map());
   const [summaryExportPending, setSummaryExportPending] = useState(false);
-  const [unrealizedMetricLoadError, setUnrealizedMetricLoadError] = useState<string | null>(null);
-  const [unrealizedMetricRetryKey, setUnrealizedMetricRetryKey] = useState(0);
-  const peakPriceChangeRef = useRef<ReadonlyMap<string, number | null>>(peakPriceChangeByCampaign);
-  useEffect(() => {
-    const empty = new Map<string, number | null>();
-    peakPriceChangeRef.current = empty;
-    setPeakPriceChangeByCampaign(empty);
-    setDynamicDrawdownByCampaign(empty);
-    setUnrealizedMetricLoadError(null);
-  }, [userId]);
   const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -2188,157 +2173,14 @@ export default function JournalCampaignsPage() {
       operationRange,
     ));
   }, [rows, operationRange]);
-  /**
-   * 峰值涨幅依赖历史 K 线，列表基础快照里没有。只在用户查看或排序「涨幅未兑现」时按需加载，
-   * 严格串行、每次远端请求后留出间隔，并按战役更新时间放进会话缓存；不上传盈亏、仓位或复盘内容。
-   * 这里不能抢占详情页 K 线的交易所额度：遇到 418 / 429 立即停掉整条指标队列，绝不继续撞接口。
-   * 标签页退到后台时仍保留队列：浏览器会自行节流定时器；若主动 abort，回来后 effect 不会重跑，
-   * 就会永远停在诸如「104 / 295」的中间状态。
-   */
   const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
     || summaryExportPending
     || (metricChartOpen && (metricChartKey === 'unrealizedPriceChangePct' || metricChartKey === 'unrealizedPriceChangePctDistribution'));
-  useEffect(() => {
-    if (!unrealizedMetricNeeded || !campaignRowsComplete || scopedRows.length === 0) return;
-    const controller = new AbortController();
-    let cancelled = false;
-    setUnrealizedMetricLoadError(null);
-    const pending = scopedRows.filter(row => !peakPriceChangeRef.current.has(row.campaign.id));
-    if (pending.length === 0) return () => {
-      controller.abort();
-    };
-    const PUBLISH_BATCH_SIZE = 12;
-    const peakBatch = new Map<string, number | null>();
-    const drawdownBatch = new Map<string, number | null>();
-    const flushBatch = () => {
-      if (cancelled) return;
-      if (peakBatch.size > 0) {
-        const published = new Map(peakPriceChangeRef.current);
-        peakBatch.forEach((value, campaignId) => published.set(campaignId, value));
-        peakPriceChangeRef.current = published;
-        setPeakPriceChangeByCampaign(published);
-        peakBatch.clear();
-      }
-      if (drawdownBatch.size > 0) {
-        setDynamicDrawdownByCampaign(current => {
-          const published = new Map(current);
-          drawdownBatch.forEach((value, campaignId) => published.set(campaignId, value));
-          return published;
-        });
-        drawdownBatch.clear();
-      }
-    };
-    const publish = (campaignId: string, value: number | null, dynamicValue: number | null = null) => {
-      if (cancelled) return;
-      // Keep the ref current so a retry resumes after completed work, but commit React state only in
-      // small batches: the list makes visible progress without re-sorting after every single campaign.
-      peakPriceChangeRef.current = new Map(peakPriceChangeRef.current).set(campaignId, value);
-      peakBatch.set(campaignId, value);
-      drawdownBatch.set(campaignId, dynamicValue);
-      if (peakBatch.size >= PUBLISH_BATCH_SIZE) flushBatch();
-    };
-    let cursor = 0;
-    const loadOne = async (row: CampaignCardData): Promise<'cached' | 'requested' | 'rate-limited'> => {
-      const cacheKey = `campaign-price-path-v2:${row.campaign.id}:${row.campaign.updated_at}`;
-      const cached = sessionStorage.getItem(cacheKey);
-      if (cached != null) {
-        try {
-          const parsed = JSON.parse(cached) as { peak: number | null; drawdown: number | null };
-          if ((parsed.peak == null || Number.isFinite(parsed.peak)) && (parsed.drawdown == null || Number.isFinite(parsed.drawdown))) {
-            publish(row.campaign.id, parsed.peak, parsed.drawdown);
-            return 'cached';
-          }
-        } catch { sessionStorage.removeItem(cacheKey); }
-      }
-      const inputs = campaignPriceChangeLegInputs(row.campaign, row.legs, row.tradeRecords);
-      const change = campaignPriceChange(row.campaign, row.legs, row.tradeRecords);
-      if (change.entryPrice == null || change.side == null) {
-        sessionStorage.setItem(cacheKey, JSON.stringify({ peak: null, drawdown: null }));
-        publish(row.campaign.id, null);
-        return 'cached';
-      }
-      const startMs = new Date(row.campaign.opened_at).getTime();
-      const endMs = change.mainCloseTime ?? new Date(row.campaign.closed_at ?? Date.now()).getTime();
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
-        sessionStorage.setItem(cacheKey, 'null');
-        publish(row.campaign.id, null);
-        return 'cached';
-      }
-      const window = buildCampaignKlineTimeWindow(startMs, endMs, startMs, endMs);
-      const interval = pickCampaignComputeInterval({ startMs: window.fromTime, endMs: window.toTime });
-      const barMs = intervalToMs(interval);
-      try {
-        const klines = await fetchReplayKlineRange(
-          row.campaign.symbol,
-          interval,
-          startMs - barMs,
-          endMs + barMs,
-          controller.signal,
-          { priority: 'background' },
-        );
-        const value = computePeakPriceChangePct({
-          side: change.side,
-          entryPrice: change.entryPrice,
-          klines,
-          startMs,
-          endMs,
-          barMs,
-        });
-        const drawdownEndMs = resolveHoldingDynamicDrawdownEndMs(inputs, change.mainCloseTime, endMs);
-        const drawdown = computeHoldingDynamicMaxDrawdownPct({ klines, startMs: change.entryOpenTime ?? startMs, endMs: drawdownEndMs, barMs });
-        sessionStorage.setItem(cacheKey, JSON.stringify({ peak: value, drawdown }));
-        publish(row.campaign.id, value, drawdown);
-        return 'requested';
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.warn('Failed to load campaign peak price change', row.campaign.id, error);
-          if (error instanceof Error && /^API (418|429)$/.test(error.message)) {
-            setUnrealizedMetricLoadError('交易所接口正在限流，已停止“涨幅未兑现”的后台计算，以免影响战役 K 线。');
-            return 'rate-limited';
-          }
-          publish(row.campaign.id, null);
-        }
-        return 'requested';
-      }
-    };
-    const worker = async () => {
-      while (!cancelled) {
-        const row = pending[cursor++];
-        if (!row) {
-          flushBatch();
-          return;
-        }
-        const result = await loadOne(row);
-        if (result === 'rate-limited') {
-          flushBatch();
-          return;
-        }
-      }
-    };
-    void worker();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [campaignRowsComplete, scopedRows, unrealizedMetricNeeded, unrealizedMetricRetryKey]);
-  const unrealizedMetricProgress = useMemo(() => {
-    const total = scopedRows.length;
-    const processed = scopedRows.reduce(
-      (count, row) => count + (peakPriceChangeByCampaign.has(row.campaign.id) ? 1 : 0),
-      0,
-    );
-    return { processed, total };
-  }, [peakPriceChangeByCampaign, scopedRows]);
-  const unrealizedMetricLoading = unrealizedMetricNeeded
-    && unrealizedMetricLoadError == null
-    && scopedRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id));
-  // Rate limiting is an implementation detail, not a reason to interrupt the list UI. Cool down
-  // silently and resume from the per-campaign session cache; completed batches are never repeated.
-  useEffect(() => {
-    if (!unrealizedMetricNeeded || unrealizedMetricLoadError == null) return;
-    const timer = window.setTimeout(() => setUnrealizedMetricRetryKey(value => value + 1), 120_000);
-    return () => window.clearTimeout(timer);
-  }, [unrealizedMetricLoadError, unrealizedMetricNeeded]);
+  const pricePaths = useCampaignPricePaths(scopedRows, userId ?? '', unrealizedMetricNeeded && campaignRowsComplete, campaignRowsComplete);
+  const peakPriceChangeByCampaign = pricePaths.peaks;
+  const dynamicDrawdownByCampaign = pricePaths.drawdowns;
+  const unrealizedMetricLoading = pricePaths.loading;
+  const unrealizedMetricProgress = pricePaths;
   useEffect(() => {
     if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
   }, [scopedRows, campaignRowsComplete]);
@@ -2493,6 +2335,8 @@ export default function JournalCampaignsPage() {
       const kept = before
         && Object.is(before.arithmeticExpectancy, next.arithmeticExpectancy)
         && Object.is(before.geometricExpectancy, next.geometricExpectancy)
+        && Object.is(before.peakPriceChangePct, next.peakPriceChangePct)
+        && Object.is(before.dynamicMaxDrawdownPct, next.dynamicMaxDrawdownPct)
         ? before
         : next;
       byRow.set(row, kept);
@@ -2502,6 +2346,14 @@ export default function JournalCampaignsPage() {
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
   }, [dynamicDrawdownByCampaign, peakPriceChangeByCampaign, scopedRows]);
+  const unrealizedReadableCount = useMemo(
+    () => metricRows.filter(row => rowUnrealizedPriceChangePct(row) != null).length,
+    [metricRows],
+  );
+  const unrealizedMissingFinalCount = useMemo(
+    () => scopedRows.filter(row => row.mainPriceChangePct == null || !Number.isFinite(row.mainPriceChangePct)).length,
+    [scopedRows],
+  );
   /**
    * 账户权益随行情每个 tick 变，但只有没记开仓权益快照的场次才拿它兜底。
    * 解析出的三个数与上次相同就沿用上一个行对象（整表都没变就沿用同一个数组）：
@@ -2656,12 +2508,13 @@ export default function JournalCampaignsPage() {
    * 【用户要求】导出 Excel 汇总表（统计分析、找相关性）：当前时间段（含回收站视图）里的全部战役，
    * 按当前排序的次序排，被当前排序口径筛掉的战役接在最后（样本不缺）；列见 campaignSummaryColumns。
    */
-  const handleExportSummaryXlsx = useCallback(() => {
+  const handleExportSummaryXlsx = useCallback((availableOnly = false) => {
     try {
-      if (displayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) {
+      if (!availableOnly && displayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) {
         setSummaryExportPending(true);
         return;
       }
+      setSummaryExportPending(false);
       const listed = new Set(sortedRows.map(row => row.campaign.id));
       const rowsForExport = [...sortedRows, ...displayRows.filter(row => !listed.has(row.campaign.id))];
       const blob = buildXlsx(buildCampaignSummarySheets(rowsForExport, {
@@ -2684,15 +2537,10 @@ export default function JournalCampaignsPage() {
   }, [asymmetricRisk, displayRows, dynamicDrawdownByCampaign, peakPriceChangeByCampaign, sortedRows]);
   useEffect(() => {
     if (!summaryExportPending) return;
-    if (unrealizedMetricLoadError) {
-      setSummaryExportPending(false);
-      toast.error('导出所需的 K 线指标加载失败，请稍后重试');
-      return;
-    }
     if (displayRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id) || !dynamicDrawdownByCampaign.has(row.campaign.id))) return;
     setSummaryExportPending(false);
     handleExportSummaryXlsx();
-  }, [displayRows, dynamicDrawdownByCampaign, handleExportSummaryXlsx, peakPriceChangeByCampaign, summaryExportPending, unrealizedMetricLoadError]);
+  }, [displayRows, dynamicDrawdownByCampaign, handleExportSummaryXlsx, peakPriceChangeByCampaign, summaryExportPending]);
   const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
     const samples = metricRows.map(row => ({
       row,
@@ -2810,7 +2658,7 @@ export default function JournalCampaignsPage() {
   }, [updateChartParam]);
 
   const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
-    if (metricSeriesByKey[key].points.length === 0) return;
+    if (metricSeriesByKey[key].points.length === 0 && key !== 'unrealizedPriceChangePct') return;
     if (metricChartOpen && openSourceKey === key) {
       setMetricChartOpen(false);
       updateChartParam(null);
@@ -4168,7 +4016,7 @@ export default function JournalCampaignsPage() {
                   ? 0
                   : metricSeriesByKey[sortChartKey].points.length;
                 const sortChartProgressLabel = option.value === 'unrealizedPriceChangePct'
-                  ? `${unrealizedMetricProgress.processed} / ${unrealizedMetricProgress.total}`
+                  ? `${sortChartPointCount} / ${unrealizedMetricProgress.total}`
                   : String(sortChartPointCount);
                 const sortChartActive = sortChartKey != null
                   && metricChartOpen
@@ -4483,7 +4331,7 @@ export default function JournalCampaignsPage() {
                             ? `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，已处理 ${unrealizedMetricProgress.processed} / ${unrealizedMetricProgress.total} 场，可绘制 ${sortChartPointCount} 场`
                             : `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，共 ${sortChartPointCount} 场`}
                           title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图`}
-                          disabled={sortChartPointCount === 0}
+                          disabled={sortChartPointCount === 0 && option.value !== 'unrealizedPriceChangePct'}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleMetricChartToggle(sortChartKey);
@@ -4515,12 +4363,18 @@ export default function JournalCampaignsPage() {
                   : campaignRowsComplete
                   ? `导出 Excel 汇总表：当前时间段里的全部 ${displayRows.length} 场战役，一场一行，排序方式与盈亏概览的全部参数（数值不带单位，便于做相关性分析）`
                   : '战役还在加载，全部读完后才能导出'}
-                onClick={handleExportSummaryXlsx}
+                onClick={() => handleExportSummaryXlsx()}
                 className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/70 px-2 text-muted-foreground transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <FileSpreadsheet aria-hidden="true" className="h-3 w-3" />
                 {summaryExportPending ? '准备数据…' : '导出 Excel'}
               </button>
+              {summaryExportPending ? (
+                <>
+                  <button type="button" data-testid="campaign-export-xlsx-available" className="px-1 text-muted-foreground underline underline-offset-2" title="立即导出全部战役，尚未加载的新指标留空" onClick={() => handleExportSummaryXlsx(true)}>导出现有数据</button>
+                  <button type="button" className="px-1 text-muted-foreground" onClick={() => setSummaryExportPending(false)}>取消等待</button>
+                </>
+              ) : null}
               {/* 批量下载不是排序项：排序按钮照旧左对齐，它与「导出 Excel」一起靠在这一行最右端；进入选择模式后下方展开选择条。 */}
               <button
                 ref={batchToggleRef}
@@ -5245,13 +5099,23 @@ export default function JournalCampaignsPage() {
           </div>
         </section>
 
-        {primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
+        {unrealizedMetricNeeded && campaignRowsComplete && pricePaths.total > 0 ? (
           <div
-            className="rounded border border-border bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 py-1 text-[11px] text-muted-foreground"
             role="status"
-            data-testid="campaign-unrealized-loading"
+            data-testid={unrealizedMetricLoading ? 'campaign-unrealized-loading' : 'campaign-unrealized-progress'}
           >
-            正在后台分批计算涨幅未兑现：已处理 {unrealizedMetricProgress.processed} / {unrealizedMetricProgress.total} 场；每完成 12 场更新一次读数和排序，未计算战役保留在末尾。
+            <span>涨幅未兑现 · 已计算 {unrealizedReadableCount} / {pricePaths.total} 场{unrealizedMetricLoading ? '，持续加载中' : ''}</span>
+            {unrealizedMissingFinalCount > 0 ? <span>{unrealizedMissingFinalCount} 场主力未平仓或缺少最终价格</span> : null}
+            {pricePaths.retrying > 0 ? <span>{pricePaths.retrying} 场等待自动重试，已有结果可正常查看</span> : null}
+            {pricePaths.unavailable.size > 0 ? (
+              <>
+                <span title={scopedRows.filter(row => pricePaths.unavailable.has(row.campaign.id)).map(row => `${row.campaign.title}：${pricePaths.unavailable.get(row.campaign.id)}`).join('\n')}>
+                  {pricePaths.unavailable.size} 场资料不完整
+                </span>
+                <button type="button" className="underline underline-offset-2" onClick={pricePaths.retry}>重试缺失项</button>
+              </>
+            ) : null}
           </div>
         ) : null}
 
@@ -5271,20 +5135,6 @@ export default function JournalCampaignsPage() {
                 <div className="text-[12px] text-muted-foreground">
                   整表共 {rows.length} 场。换一个时间段，或点上方「操作时间」选回全部。
                 </div>
-              </>
-            ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoadError ? (
-              <>
-                <div className="text-[13px] font-medium text-destructive" data-testid="campaign-unrealized-rate-limit">
-                  涨幅未兑现已暂停计算
-                </div>
-                <div className="text-[12px] text-muted-foreground">{unrealizedMetricLoadError}</div>
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center justify-center rounded border border-border bg-background px-3 text-[12px] hover:bg-accent"
-                  onClick={() => setUnrealizedMetricRetryKey(value => value + 1)}
-                >
-                  稍后重试
-                </button>
               </>
             ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
               <>

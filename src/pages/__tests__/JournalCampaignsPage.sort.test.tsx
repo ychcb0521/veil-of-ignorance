@@ -5,11 +5,16 @@ import { clearCampaignListCaches } from '@/lib/campaignListCache';
 import { fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
+import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
+import { CAMPAIGN_PRICE_PATH_CACHE_PREFIX } from '@/hooks/useCampaignPricePaths';
+import * as xlsxWorkbook from '@/lib/xlsxWorkbook';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
 beforeEach(() => {
   clearCampaignListCaches();
   sessionStorage.clear();
+  Object.keys(localStorage).filter(key => key.startsWith(CAMPAIGN_PRICE_PATH_CACHE_PREFIX))
+    .forEach(key => localStorage.removeItem(key));
   restoredIds.clear();
   purgedIds.clear();
   mockFetchReplayKlineRange.mockReset();
@@ -330,6 +335,53 @@ function cardOrder(): string[] {
 /** 封面指标格读作「名称：数值」：上一行 dt 是指标名、下一行 dd 是数值（格子里不写冒号）。 */
 function metricReading(cell: Element): string {
   return `${cell.querySelector('dt')?.textContent ?? ''}：${cell.querySelector('dd')?.textContent ?? ''}`;
+}
+
+/** Keep the four main trades inside their campaign windows; each has a 10% final move. */
+function preparePricePathFixtures() {
+  const originalRecords = tradeHistory.map(record => ({ ...record }));
+  const originalLegs = { ...legsByCampaign };
+  tradeHistory.forEach((record, index) => {
+    const campaign = campaigns[index];
+    record.openTime = Date.parse(campaign.opened_at) + 60_000;
+    record.closeTime = record.openTime + 3_600_000;
+    record.entryPrice = 100;
+    record.exitPrice = 110;
+    legsByCampaign[campaign.id] = [originalLegs[campaign.id][0]];
+  });
+  return () => {
+    tradeHistory.forEach((record, index) => Object.assign(record, originalRecords[index]));
+    Object.assign(legsByCampaign, originalLegs);
+  };
+}
+
+function deferredPricePathRequests() {
+  const pending: { campaignId: string; resolve: (bars: KlineData[]) => void; bars: KlineData[]; signal?: AbortSignal }[] = [];
+  const highs = [130, 160, 120, 150];
+  mockFetchReplayKlineRange.mockImplementation((_symbol, _interval, fromTime, _toTime, signal) => {
+    const campaign = [...campaigns].sort((left, right) => (
+      Math.abs(Date.parse(left.opened_at) - fromTime) - Math.abs(Date.parse(right.opened_at) - fromTime)
+    ))[0];
+    const index = campaigns.indexOf(campaign);
+    const barMs = intervalToMs(_interval);
+    const firstBarTime = Math.floor(Date.parse(campaign.opened_at) / barMs) * barMs;
+    const bars: KlineData[] = Array.from({ length: Math.floor((tradeHistory[index].closeTime - firstBarTime) / barMs) + 1 }, (_, bar) => ({
+      time: firstBarTime + bar * barMs,
+      open: bar === 0 ? 100 : 110,
+      high: bar === 0 ? highs[index] : 110,
+      low: bar === 0 ? 99 : 109,
+      close: 110,
+      volume: 1,
+    }));
+    return new Promise<KlineData[]>(resolve => pending.push({ campaignId: campaign.id, resolve, bars, signal }));
+  });
+  return pending;
+}
+
+function unrealizedPlotIds(): string[] {
+  return [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('button[data-campaign-id]')]
+    .map(node => node.getAttribute('data-campaign-id')!)
+    .sort();
 }
 
 function LocationProbe() {
@@ -2169,6 +2221,142 @@ describe('JournalCampaignsPage sorting', () => {
     await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
     await waitFor(() => expect(screen.queryByTestId('deleted-campaign-row')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
+  });
+
+  it('异步涨幅未兑现完成后立即更新封面、全部图点与升降序，无需重新读取战役', async () => {
+    const restore = preparePricePathFixtures();
+    const pending = deferredPricePathRequests();
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const detailCalls = vi.mocked(getCampaignFullData).mock.calls.length;
+      const sourceCalls = vi.mocked(fetchCampaignSourceRows).mock.calls.length;
+      expect(screen.getAllByTestId('campaign-unrealized-price-change-value').map(node => node.textContent))
+        .toEqual(['—', '—', '—', '—']);
+
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+      for (let index = 0; index < campaigns.length; index += 1) {
+        await waitFor(() => expect(pending.length).toBeGreaterThan(index));
+        await act(async () => { pending[index].resolve(pending[index].bars); });
+      }
+
+      await waitFor(() => expect(screen.getAllByTestId('campaign-unrealized-price-change-value').map(node => node.textContent))
+        .toEqual(['50.00%', '40.00%', '20.00%', '10.00%']));
+      expect(cardOrder()).toEqual(['Newest Operation', 'Late Close', 'High Importance', 'Best PnL']);
+      expect(unrealizedPlotIds()).toEqual(['best-pnl', 'high-importance', 'late-close', 'newest']);
+
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+      expect(cardOrder()).toEqual(['Best PnL', 'High Importance', 'Late Close', 'Newest Operation']);
+      expect(screen.getAllByTestId('campaign-unrealized-price-change-value').map(node => node.textContent))
+        .toEqual(['10.00%', '20.00%', '40.00%', '50.00%']);
+      expect(unrealizedPlotIds()).toHaveLength(4);
+      expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(4);
+      expect(vi.mocked(getCampaignFullData).mock.calls.length).toBe(detailCalls);
+      expect(vi.mocked(fetchCampaignSourceRows).mock.calls.length).toBe(sourceCalls);
+    } finally {
+      restore();
+    }
+  }, 15_000);
+
+  it('小批次分别返回时持续绘制新点，切到后台再回来仍加载至全部完成', async () => {
+    const restore = preparePricePathFixtures();
+    const pending = deferredPricePathRequests();
+    const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await act(async () => { pending[0].resolve(pending[0].bars); });
+      // A slow second request must not hold the first completed campaign until the 12-row batch fills.
+      await waitFor(() => expect(unrealizedPlotIds()).toEqual([pending[0].campaignId]), { timeout: 4_000 });
+      expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      fireEvent(document, new Event('visibilitychange'));
+      expect(pending[1].signal?.aborted).toBe(false);
+      await act(async () => { pending[1].resolve(pending[1].bars); });
+      await waitFor(() => expect(unrealizedPlotIds()).toEqual(pending.slice(0, 2).map(item => item.campaignId).sort()), { timeout: 4_000 });
+
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      fireEvent(document, new Event('visibilitychange'));
+      for (let index = 2; index < campaigns.length; index += 1) {
+        await waitFor(() => expect(pending.length).toBeGreaterThan(index));
+        await act(async () => { pending[index].resolve(pending[index].bars); });
+      }
+      await waitFor(() => expect(unrealizedPlotIds()).toHaveLength(4));
+      expect(screen.getAllByTestId('campaign-unrealized-price-change-value').every(node => node.textContent !== '—')).toBe(true);
+      expect(screen.queryByTestId('campaign-unrealized-loading')).not.toBeInTheDocument();
+      expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(4);
+    } finally {
+      if (originalVisibility) Object.defineProperty(document, 'visibilityState', originalVisibility);
+      else Reflect.deleteProperty(document, 'visibilityState');
+      restore();
+    }
+  }, 20_000);
+
+  it('新指标仍在等待行情时可以立即导出现有数据，保留全部战役与原指标，未完成项留空', async () => {
+    const restore = preparePricePathFixtures();
+    const pending = deferredPricePathRequests();
+    const createUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const revokeUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    const createUrl = vi.fn(() => 'blob:campaign-summary-test');
+    const revokeUrl = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl });
+    const workbook = vi.spyOn(xlsxWorkbook, 'buildXlsx');
+    const downloads: { href: string; filename: string }[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push({ href: this.href, filename: this.download });
+    });
+    const view = render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    try {
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      fireEvent.click(screen.getByTestId('campaign-export-xlsx'));
+      await waitFor(() => expect(pending).toHaveLength(1));
+      expect(screen.getByTestId('campaign-export-xlsx')).toBeDisabled();
+      expect(workbook).not.toHaveBeenCalled();
+
+      vi.useFakeTimers();
+      fireEvent.click(screen.getByTestId('campaign-export-xlsx-available'));
+      expect(workbook).toHaveBeenCalledTimes(1);
+      const summary = workbook.mock.calls[0][0].find(sheet => sheet.name === '战役汇总')!;
+      expect(summary.rows).toHaveLength(4);
+      const column = (header: string) => summary.columns.findIndex(item => item.header === header);
+      for (const row of summary.rows) {
+        expect(row[column('涨跌幅（%）')]).toBeCloseTo(10);
+        expect(row[column('已实现 P&L（USDT）')]).toEqual(expect.any(Number));
+        expect(row[column('峰值涨幅（%）')]).toBeNull();
+        expect(row[column('涨幅未兑现（%）')]).toBeNull();
+        expect(row[column('动态最大回撤（%）')]).toBeNull();
+      }
+      expect(createUrl).toHaveBeenCalledWith(expect.any(Blob));
+      expect(downloads).toEqual([{ href: 'blob:campaign-summary-test', filename: expect.stringMatching(/^交易战役汇总-\d+\.xlsx$/) }]);
+      expect(screen.getByTestId('campaign-export-xlsx')).not.toBeDisabled();
+      expect(screen.queryByTestId('campaign-export-xlsx-available')).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(revokeUrl).toHaveBeenCalledWith('blob:campaign-summary-test');
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+      workbook.mockRestore();
+      click.mockRestore();
+      if (createUrlDescriptor) Object.defineProperty(URL, 'createObjectURL', createUrlDescriptor);
+      else Reflect.deleteProperty(URL, 'createObjectURL');
+      if (revokeUrlDescriptor) Object.defineProperty(URL, 'revokeObjectURL', revokeUrlDescriptor);
+      else Reflect.deleteProperty(URL, 'revokeObjectURL');
+      restore();
+    }
   });
 
   it('【隔离】涨幅未兑现遇到 API 418 只请求一次就停队列，切回普通排序不再占用 K 线接口', async () => {
