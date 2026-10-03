@@ -46,6 +46,7 @@ export type CampaignPnlOverviewItemKey =
   | 'mainPriceEfficiency'
   | 'payoffRatio'
   | 'addEfficiency'
+  | 'addCount'
   | 'asymmetricRiskContribution'
   | 'arithmeticExpectancy'
   | 'geometricExpectancy';

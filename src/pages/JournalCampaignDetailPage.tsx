@@ -4,7 +4,7 @@ import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignMainAddCount, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
@@ -1721,6 +1721,11 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         value: asymmetricRiskContribution == null ? '—' : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} ${shareText}`.trim(),
         help: (
           <><p>本场盈亏比 b 对账户不对称风险指标的贡献：盈利战役进入 USI 上行组，亏损或持平战役进入 DSI 下行组。</p><div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div></>
+        ),
+      },
+      {
+        key: 'addCount', label: '加仓次数', value: String(campaignMainAddCount(legs)), help: (
+          <><p>本场战役真正成交过的主力加仓 Legs 数量，与列表、排序和散点图使用同一口径。</p><p>只挂单但未成交的加仓不计入；没有加仓时显示 0。</p></>
         ),
       },
     ];
