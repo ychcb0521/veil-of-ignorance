@@ -2,20 +2,20 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-/** 源码守卫：真实战役的元数据与盈亏概览纵向排布；反事实变化与反事实概览仍保持自己的双栏。 */
+/** 源码守卫：真实战役与反事实结果都保持左右双栏。 */
 const read = (rel: string) => readFileSync(join(process.cwd(), 'src', rel), 'utf8');
 
-describe('真实战役纵排、反事实结果双栏（源码守卫）', () => {
+describe('真实战役与反事实结果双栏（源码守卫）', () => {
   const page = read('pages/JournalCampaignDetailPage.tsx');
   const row = read('components/journal/CounterfactualOverviewRow.tsx');
 
-  it('战役元数据在第一行、盈亏概览在第二行；反事实行仍为双栏', () => {
+  it('战役元数据在左、盈亏概览在右；反事实行仍为双栏', () => {
     const originalAt = page.indexOf('<div className="font-medium">战役元数据</div>');
     expect(originalAt).toBeGreaterThan(-1);
     const originalOpen = page.lastIndexOf('<section className="', originalAt);
     const originalClass = page.slice(originalOpen, page.indexOf('">', originalOpen));
-    expect(originalClass).toContain('space-y-4');
-    expect(originalClass).not.toContain('md:grid-cols-2');
+    expect(originalClass).toContain('grid-cols-1');
+    expect(originalClass).toContain('md:grid-cols-2');
     expect(page.slice(originalAt, page.indexOf('</section>', originalAt))).toContain('title="盈亏概览"');
 
     // 反事实战役卡片：整张卡片只有均匀的 p-N 与 1px 边框

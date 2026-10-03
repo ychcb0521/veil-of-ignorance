@@ -2658,11 +2658,11 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           </div>
         )}
 
-        <section className="space-y-4">
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="bg-card border border-border rounded p-4 text-[12px]">
             <div className="font-medium">战役元数据</div>
-            {/* 元数据在自己的紧凑信息带里就近对齐；盈亏概览另起第二行，避免半宽卡片把名称和数字横向拉散。 */}
-            <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {/* 恢复元数据 | 盈亏概览的左右双卡布局；元数据内部保持纵向、就近对齐，不再把名称与数值撑到两端。 */}
+            <div className="mt-3 space-y-2.5">
               {/* 【用户要求】操作时间非常重要、要加强显示：客观操作时间（北京时间，与列表卡片同一写法）用加粗等宽的琥珀底读数。 */}
               <div data-testid="campaign-meta-operation-time" className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
                 <span className="text-muted-foreground">操作时间：</span>

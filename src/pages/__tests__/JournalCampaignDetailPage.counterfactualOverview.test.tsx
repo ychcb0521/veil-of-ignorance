@@ -792,19 +792,18 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     expect(overviewSkeleton(overview)).toEqual(overviewSkeleton(real));
   }, 15_000);
 
-  it('真实元数据与盈亏概览纵向排布；反事实行挂在「反事实战役」卡片内并保持双栏', async () => {
+  it('真实元数据与盈亏概览左右排布；反事实行挂在「反事实战役」卡片内并保持双栏', async () => {
     renderPage();
     const row = await runFromEditor();
     const real = screen.getByText('盈亏概览').parentElement as HTMLElement;
-    const originalStack = real.parentElement as HTMLElement;
+    const originalGrid = real.parentElement as HTMLElement;
     const cfSection = row.parentElement as HTMLElement;
-    const main = originalStack.parentElement as HTMLElement;
+    const main = originalGrid.parentElement as HTMLElement;
 
-    // 上方：main 的直接子 section，元数据第一行、盈亏概览第二行
+    // 上方：main 的直接子 section，元数据左栏、盈亏概览右栏
     expect(main.tagName).toBe('MAIN');
-    expect(originalStack.tagName).toBe('SECTION');
-    expect(originalStack.className.split(/\s+/)).toContain('space-y-4');
-    expect(originalStack.className).not.toContain('md:grid-cols-2');
+    expect(originalGrid.tagName).toBe('SECTION');
+    expect(originalGrid.className.split(/\s+/)).toEqual(expect.arrayContaining(['grid', 'grid-cols-1', 'md:grid-cols-2']));
     expect(real.previousElementSibling).toHaveTextContent('战役元数据');
     // 反事实行：直接挂在同一个 main 下的「反事实战役」卡片里，中间没有别的内缩层
     expect(cfSection.tagName).toBe('SECTION');
