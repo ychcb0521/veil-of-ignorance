@@ -2188,7 +2188,8 @@ describe('JournalCampaignsPage sorting', () => {
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
 
       fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
-      expect(await screen.findByTestId('campaign-unrealized-rate-limit')).toHaveTextContent('全部战役仍可正常查看');
+      await waitFor(() => expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(1));
+      expect(screen.queryByTestId('campaign-unrealized-rate-limit')).not.toBeInTheDocument();
       expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
       expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(1);
 

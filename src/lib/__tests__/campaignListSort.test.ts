@@ -194,6 +194,8 @@ describe('每个排序项的独立比较器', () => {
     ];
     expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'desc' }])))
       .toEqual(['three-quarters', 'half', 'missing', 'threshold']);
+    expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'asc' }])))
+      .toEqual(['half', 'three-quarters', 'missing', 'threshold']);
   });
 
   it('方向：desc 大的在前、asc 小的在前；字母按标题', () => {

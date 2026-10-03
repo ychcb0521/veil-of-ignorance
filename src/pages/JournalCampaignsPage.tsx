@@ -2212,12 +2212,35 @@ export default function JournalCampaignsPage() {
       controller.abort();
       document.removeEventListener('visibilitychange', stopWhenPageLeavesForeground);
     };
+    const PUBLISH_BATCH_SIZE = 12;
+    const peakBatch = new Map<string, number | null>();
+    const drawdownBatch = new Map<string, number | null>();
+    const flushBatch = () => {
+      if (cancelled) return;
+      if (peakBatch.size > 0) {
+        const published = new Map(peakPriceChangeRef.current);
+        peakBatch.forEach((value, campaignId) => published.set(campaignId, value));
+        peakPriceChangeRef.current = published;
+        setPeakPriceChangeByCampaign(published);
+        peakBatch.clear();
+      }
+      if (drawdownBatch.size > 0) {
+        setDynamicDrawdownByCampaign(current => {
+          const published = new Map(current);
+          drawdownBatch.forEach((value, campaignId) => published.set(campaignId, value));
+          return published;
+        });
+        drawdownBatch.clear();
+      }
+    };
     const publish = (campaignId: string, value: number | null, dynamicValue: number | null = null) => {
       if (cancelled) return;
-      const next = new Map(peakPriceChangeRef.current).set(campaignId, value);
-      peakPriceChangeRef.current = next;
-      setPeakPriceChangeByCampaign(next);
-      setDynamicDrawdownByCampaign(current => new Map(current).set(campaignId, dynamicValue));
+      // Keep the ref current so a retry resumes after completed work, but commit React state only in
+      // small batches: the list makes visible progress without re-sorting after every single campaign.
+      peakPriceChangeRef.current = new Map(peakPriceChangeRef.current).set(campaignId, value);
+      peakBatch.set(campaignId, value);
+      drawdownBatch.set(campaignId, dynamicValue);
+      if (peakBatch.size >= PUBLISH_BATCH_SIZE) flushBatch();
     };
     let cursor = 0;
     const loadOne = async (row: CampaignCardData): Promise<'cached' | 'requested' | 'rate-limited'> => {
@@ -2286,9 +2309,15 @@ export default function JournalCampaignsPage() {
     const worker = async () => {
       while (!cancelled) {
         const row = pending[cursor++];
-        if (!row) return;
+        if (!row) {
+          flushBatch();
+          return;
+        }
         const result = await loadOne(row);
-        if (result === 'rate-limited') return;
+        if (result === 'rate-limited') {
+          flushBatch();
+          return;
+        }
       }
     };
     void worker();
@@ -2301,6 +2330,13 @@ export default function JournalCampaignsPage() {
   const unrealizedMetricLoading = unrealizedMetricNeeded
     && unrealizedMetricLoadError == null
     && scopedRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id));
+  // Rate limiting is an implementation detail, not a reason to interrupt the list UI. Cool down
+  // silently and resume from the per-campaign session cache; completed batches are never repeated.
+  useEffect(() => {
+    if (!unrealizedMetricNeeded || unrealizedMetricLoadError == null) return;
+    const timer = window.setTimeout(() => setUnrealizedMetricRetryKey(value => value + 1), 120_000);
+    return () => window.clearTimeout(timer);
+  }, [unrealizedMetricLoadError, unrealizedMetricNeeded]);
   useEffect(() => {
     if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
   }, [scopedRows, campaignRowsComplete]);
@@ -2531,13 +2567,12 @@ export default function JournalCampaignsPage() {
   );
   /** 同一个顺序、换回真实的行：卡片、选择、批量下载读它，显示的是新自评。 */
   const sortedRows = useMemo(() => {
-    // 计算未完成或触发交易所冷却时始终保留完整列表，并冻结原顺序；全部完成后再一次性排序。
-    // 这既不会让卡片逐场跳位，也不会因为一个派生指标失败而遮掉所有原始战役功能。
-    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return displayRows;
+    // 涨幅未兑现会按小批次提交读数；每批更新一次排序，未算出的战役始终留在末尾。
+    // 任何派生指标失败都不能遮掉完整战役列表。
     if (sortBasisInput === displayRows) return sortBasisRows;
     const real = new Map(displayRows.map(row => [row.campaign.id, row]));
     return sortBasisRows.map(row => real.get(row.campaign.id) ?? row);
-  }, [displayRows, primarySort.mode, sortBasisInput, sortBasisRows, unrealizedMetricLoadError, unrealizedMetricLoading]);
+  }, [displayRows, sortBasisInput, sortBasisRows]);
   /** 第一级的四分位分档（连续指标作第一级、链上不止一级时才有）：排序链芯片上标「分档」，悬停看档界。 */
   const sortBinning = useMemo(() => resolveSortBinning(sortBasisRows, sortChain), [sortBasisRows, sortChain]);
   /** 第二级起每一级的作用（本级排了几场）：排序链芯片上的反馈。 */
@@ -2554,7 +2589,6 @@ export default function JournalCampaignsPage() {
    * 各组场数加起来必须正好是列表长度，否则（理论上不会）退回不分区的列表，不冒险切错。
    */
   const cardSections = useMemo(() => {
-    if (primarySort.mode === 'unrealizedPriceChangePct' && (unrealizedMetricLoading || unrealizedMetricLoadError != null)) return null;
     if (sortGroupStats.length < 2 || sortGroupStats[0].key.kind === 'all') return null;
     if (sortGroupStats.reduce((sum, group) => sum + group.count, 0) !== sortedRows.length) return null;
     let offset = 0;
@@ -2563,7 +2597,7 @@ export default function JournalCampaignsPage() {
       offset += group.count;
       return { id: `${index}:${JSON.stringify(group.key)}`, group, rows };
     });
-  }, [primarySort.mode, sortGroupStats, sortedRows, unrealizedMetricLoadError, unrealizedMetricLoading]);
+  }, [sortGroupStats, sortedRows]);
   /** 收起的分区：换了排序链就全部展开（组都变了）。 */
   const [collapsedSections, setCollapsedSections] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => { setCollapsedSections(new Set()); }, [sortChainKeyForSections]);
@@ -5204,31 +5238,13 @@ export default function JournalCampaignsPage() {
           </div>
         </section>
 
-        {primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoadError ? (
-          <div
-            className="flex flex-wrap items-center justify-between gap-2 rounded border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-[12px] dark:bg-amber-950/20"
-            role="status"
-            data-testid="campaign-unrealized-rate-limit"
-          >
-            <div>
-              <span className="font-medium text-foreground">涨幅未兑现暂缓更新；全部战役仍可正常查看。</span>
-              <span className="ml-2 text-muted-foreground">{unrealizedMetricLoadError}</span>
-            </div>
-            <button
-              type="button"
-              className="inline-flex h-7 shrink-0 items-center justify-center rounded border border-border bg-background px-2.5 text-[11px] hover:bg-accent"
-              onClick={() => setUnrealizedMetricRetryKey(value => value + 1)}
-            >
-              重新计算
-            </button>
-          </div>
-        ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
+        {primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
           <div
             className="rounded border border-border bg-muted/25 px-3 py-2 text-[12px] text-muted-foreground"
             role="status"
             data-testid="campaign-unrealized-loading"
           >
-            正在后台计算涨幅未兑现；全部完成后一次性应用排序，当前完整列表可正常使用。
+            正在后台分批计算涨幅未兑现；每完成 12 场更新一次读数和排序，未计算战役保留在末尾。
           </div>
         ) : null}
 
@@ -5266,7 +5282,7 @@ export default function JournalCampaignsPage() {
             ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
               <>
                 <div className="text-[13px] font-medium" data-testid="campaign-unrealized-loading">正在计算涨幅未兑现…</div>
-                <div className="text-[12px] text-muted-foreground">正在按战役读取历史 K 线；全部完成后一次性显示，无读数的战役会保留在末尾。</div>
+                <div className="text-[12px] text-muted-foreground">正在分批读取历史 K 线；无读数的战役会保留在末尾。</div>
               </>
             ) : SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0 ? (
               <>
