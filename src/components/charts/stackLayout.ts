@@ -13,8 +13,9 @@ export type StackLayoutPoint = {
   id: string;
   x: number;
   /**
-   * 类目柱状专用：同一列里相邻两点的 group 不同时，后一个另起一行——一行里不会混着两组（盈利 / 亏损泾渭分明）。
-   * 缺省 = 不分组，照原样一格接一格码放。
+   * 连续分布在同一档内按 group 升序自下而上分组，组内再按 x / id 排；不插空行，场数保持准确。
+   * 类目柱状在相邻两点的 group 改变时另起一行，一行里不会混着两组。
+   * 缺省 = 不分组。
    */
   group?: string;
   /**
@@ -181,7 +182,7 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
 
   // 先分档：越出显示区间的点落到最边上的一档，并记下方向，之后画成三角。
   const entries = points.map(point => {
-    if (isolatedIds.has(point.id)) return { id: point.id, x: point.x, bin: numericBinCount, clamped: null };
+    if (isolatedIds.has(point.id)) return { id: point.id, x: point.x, group: point.group, bin: numericBinCount, clamped: null };
     const clamped: ClampDirection | null = point.x < xMin ? 'left' : point.x > xMax ? 'right' : null;
     if (hardBoundaries) {
       const sectionIndex = hardBoundaries.findIndex(boundary => (
@@ -190,11 +191,11 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
       const section = hardSections[sectionIndex < 0 ? hardSections.length - 1 : sectionIndex];
       const fraction = (point.x - section.lower) / (section.upper - section.lower);
       const within = Math.min(section.count - 1, Math.max(0, Math.floor(fraction * section.count)));
-      return { id: point.id, x: point.x, bin: section.firstBin + within, clamped };
+      return { id: point.id, x: point.x, group: point.group, bin: section.firstBin + within, clamped };
     }
     const px = clamped === 'left' ? left : clamped === 'right' ? right : xPx(point.x);
     const bin = Math.min(numericBinCount - 1, Math.max(0, Math.floor((px - zeroPx) / binPx) - firstBin));
-    return { id: point.id, x: point.x, bin, clamped };
+    return { id: point.id, x: point.x, group: point.group, bin, clamped };
   });
 
   // 往上堆与往下堆（镜像）各自成桶：同一档里两侧分开计数、分开排位。
@@ -207,7 +208,8 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
     if (bucket) bucket.push(entry);
     else byBin.set(key, [entry]);
   }
-  // 档内按数值升序、再按 id 排，重复渲染永远得到同一张图（往下堆的一侧 rank 0 也是贴着 0 线的那一格）。
+  // 同档先按组分层，再按数值 / id 排；下半图反转组序，视觉上仍是亏损在下、盈利在上。
+  // 不留组间空位：每一行仍恰好代表一场，柱高与密度曲线的场数尺度一致。
   const rankById = new Map<string, number>();
   const binCounts = Array.from({ length: binCount }, () => 0);
   const upCounts = Array.from({ length: binCount }, () => 0);
@@ -216,7 +218,10 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   let tallestDown = 0;
   for (const [key, bucket] of byBin) {
     const bin = Number(key.slice(1));
-    bucket.sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    bucket.sort((a, b) => (
+      (a.group ?? '').localeCompare(b.group ?? '') * (key[0] === 'd' ? -1 : 1)
+      || a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    ));
     bucket.forEach((entry, rank) => rankById.set(entry.id, rank));
     binCounts[bin] += bucket.length;
     if (key[0] === 'd') {
@@ -277,8 +282,8 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
     placed.push({ id: entry.id, cx, cy, yPct: pctAt(cy), bin: entry.bin, rank, clamped: entry.clamped });
   }
 
-  if (hardBoundaries) {
-    // Keep the overflow picker in the same value/id order as the visible stack.
+  if (hardBoundaries || points.some(point => point.group != null)) {
+    // Keep the overflow picker in the same group/value/id order as the visible stack.
     for (const overflow of overflowByBin.values()) {
       overflow.ids.sort((a, b) => (rankById.get(a) ?? 0) - (rankById.get(b) ?? 0));
     }

@@ -180,8 +180,8 @@ function stackMagnitude(payoffRatio: number | null | undefined): number {
 }
 
 /**
- * 【用户要求】柱状散点图「盈亏泾渭分明」（预期回撤、自评、加仓次数）：柱子上部放盈利、下部放亏损。
- * 自底向上：亏损（0）→ 持平或算不出 b（1）→ 盈利（2）；换组时另起一行（stackGroup），一行里不混色。
+ * 【用户要求】散点图「盈亏泾渭分明」：同一档上部放盈利、下部放亏损。
+ * 自底向上：亏损（0）→ 持平或算不出 b（1）→ 盈利（2）；类目柱状换组另起一行，连续分布按组连续堆叠。
  * 与点的颜色同一个判定（metricSeriesIndex：按这一场盈亏比 b 的正负）。
  */
 function drawdownStackOrder(point: { payoffRatio?: number | null }): number {
@@ -705,7 +705,7 @@ export function CampaignMetricScatterPlot({
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
-        stackGroup: segregatedBars ? String(drawdownStackOrder(point)) : undefined,
+        stackGroup: distribution || segregatedBars ? String(drawdownStackOrder(point)) : undefined,
         // 【用户要求】加仓效用分布：涨跌幅倍数为负的战役从 0 线往下镜像堆
         stackBelow: distribution && !geometricDistribution && point.stackBelow === true ? true : undefined,
         dataAttrs: {
@@ -991,7 +991,7 @@ export function CampaignMetricScatterPlot({
                 : genericReferences.length
                   ? `：档网格锚在 0 上，${genericReferences.map(reference => referenceValueText(reference.value)).join('、')} 也是档边界，点位不会吸附到参考线或${genericSpec?.zeroMeaning ?? '盈亏分界'}的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
                   : `：档网格锚在 0 上，${genericSpec?.zeroMeaning ?? '盈亏分界'}两侧的点不会混进同一档；精确数值看提示框。`}
-              纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数；点击三角可展开其中的战役。{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}
+              同一档内亏损在下、持平或算不出 b 居中、盈利在上，红绿各自连续排列。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数；点击三角可展开其中的战役。{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}
             </dd>
           ) : (
             <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>

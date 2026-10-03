@@ -47,14 +47,14 @@ function renderChart(
   spec: CampaignMetricDistributionSpec,
   axisLabel: string,
   formatValue: (value: number) => string,
-  extra: { excluded?: number } = {},
+  extra: { excluded?: number; payoffRatios?: Array<number | null> } = {},
 ) {
   const onSelect = vi.fn();
   render(<CampaignMetricScatterPlot
     points={values.map((value, index) => ({
       campaignId: `c${String(index).padStart(2, '0')}`, title: `战役 ${index}`, symbol: 'TESTUSDT',
       value, sequence: index + 1, operationTime: 1_700_000_000_000 + index * 86_400_000,
-      pnl: value, payoffRatio: value * 1.5,
+      pnl: value, payoffRatio: extra.payoffRatios ? extra.payoffRatios[index] : value * 1.5,
     }))}
     metricKey={metricKey} metricLabel={`${axisLabel}分布`} seriesLabel={`${axisLabel}分布`}
     axisLabel={axisLabel} missingValueLabel={axisLabel} view="distribution"
@@ -68,6 +68,27 @@ function renderChart(
 }
 
 describe('通用连续指标的分布图', () => {
+  it('涨幅未兑现同一区间内红绿连续分层，盈利在上、亏损在下，保留真实数值与战役点击', () => {
+    const values = [5.1, 5.1001, 5.1002, 5.1003, 5.1004, 5.1005, 50];
+    const onSelect = renderChart(values, 'unrealizedPriceChangePctDistribution', PRICE_SPEC, '涨幅未兑现', formatPct, {
+      payoffRatios: [2, -1, 0, 1, -2, null, 3],
+    });
+    const point = (index: number) => screen.getByTestId(`campaign-metric-point-unrealizedPriceChangePctDistribution-c${String(index).padStart(2, '0')}`);
+    const top = (index: number) => Number.parseFloat(point(index).style.top);
+    expect(new Set(values.slice(0, 6).map((_, index) => point(index).style.left)).size).toBe(1);
+    expect(Math.max(top(0), top(3))).toBeLessThan(Math.min(top(2), top(5)));
+    expect(Math.max(top(2), top(5))).toBeLessThan(Math.min(top(1), top(4)));
+    expect(point(0)).toHaveAttribute('data-series-token', 'profit');
+    expect(point(1)).toHaveAttribute('data-series-token', 'loss');
+    expect(point(2)).toHaveAttribute('data-series-token', 'neutral');
+    expect(document.querySelectorAll('button[data-campaign-id]')).toHaveLength(values.length);
+    values.forEach((value, index) => expect(point(index)).toHaveAttribute('data-metric-value', String(value)));
+    fireEvent.focus(point(1));
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('+5.10% · b -1.00R');
+    fireEvent.click(point(1));
+    expect(onSelect).toHaveBeenCalledWith('c01');
+  });
+
   // 加仓效用的真实形状：主群 0.3~2.5，几场亏损（负值）、一场恰为 0、一场恰为 1、一个 +18 的离群值
   const addValues = [
     -2.4, -1.1, -0.35, 0, 0.18, 0.32, 0.41, 0.55, 0.62, 0.7, 0.78, 0.84, 0.9, 0.96, 1,

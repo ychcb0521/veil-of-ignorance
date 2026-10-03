@@ -416,7 +416,7 @@ export function ScatterPlot({
       // 硬边界两侧不能混档；窄屏仅在必要时扩展轨道，保持点距与真实线性比例。
       const contentWidth = Math.max(trackWidth,
         minimumBoundaryPlotWidth(xAxis.min, xAxis.max, xAxis.boundaries) + numericLeft + PLOT_INSET.right);
-      const result = stackLayout(points.map(point => ({ id: point.id, x: point.x, below: point.stackBelow })), {
+      const result = stackLayout(points.map(point => ({ id: point.id, x: point.x, group: point.stackGroup, below: point.stackBelow })), {
         xMin: xAxis.min,
         xMax: xAxis.max,
         left: numericLeft,

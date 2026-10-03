@@ -73,6 +73,43 @@ describe('stackLayout 频数堆叠', () => {
     }
   });
 
+  it.each([false, true])('同档按盈亏分层，镜像=%s 时盈利仍在亏损上方，场数与档位不变', below => {
+    const points = [
+      { id: 'win-a', x: 3.01, group: '2', below },
+      { id: 'loss-a', x: 3.02, group: '0', below },
+      { id: 'neutral', x: 3.03, group: '1', below },
+      { id: 'win-b', x: 3.04, group: '2', below },
+      { id: 'loss-b', x: 3.05, group: '0', below },
+    ];
+    const result = stackLayout(points, OPTS);
+    const original = stackLayout(points.map(({ id, x, below }) => ({ id, x, below })), OPTS);
+    const byId = new Map(result.placed.map(point => [point.id, point]));
+    const y = (id: string) => byId.get(id)!.cy;
+    expect(Math.max(y('win-a'), y('win-b'))).toBeLessThan(y('neutral'));
+    expect(y('neutral')).toBeLessThan(Math.min(y('loss-a'), y('loss-b')));
+    expect(result.binCounts).toEqual(original.binCounts);
+    expect(result.requiredPlotHeight).toBe(original.requiredPlotHeight);
+    expect(result.placed.map(point => point.rank).sort()).toEqual([0, 1, 2, 3, 4]);
+    for (const point of original.placed) expect(byId.get(point.id)!.cx).toBe(point.cx);
+    const reversed = stackLayout([...points].reverse(), OPTS);
+    for (const point of reversed.placed) expect(point).toEqual(byId.get(point.id));
+  });
+
+  it('分组后的越界点与溢出列表保留全部样本，溢出项沿分组顺序排列', () => {
+    const points = [
+      { id: 'win-high', x: 90, group: '2' },
+      { id: 'win-low', x: 50, group: '2' },
+      { id: 'loss', x: 80, group: '0' },
+      { id: 'neutral', x: 70, group: '1' },
+    ];
+    const result = stackLayout(points, { ...OPTS, plotHeight: 36 });
+    expect(result.placed.map(point => point.id).sort()).toEqual(['loss', 'neutral']);
+    expect(result.placed.every(point => point.clamped === 'right')).toBe(true);
+    expect(result.overflow).toHaveLength(1);
+    expect(result.overflow[0].ids).toEqual(['win-low', 'win-high']);
+    expect(result.placed.length + result.overflow[0].count).toBe(points.length);
+  });
+
   it('越出窗口的点贴边：左侧 clamped left、右侧 clamped right，并在边缘一档堆成一列', () => {
     const result = stackLayout(pts([-3, 12.5, 17, 38.19, 0.2]), OPTS);
     const byId = new Map(result.placed.map(item => [item.id, item]));
