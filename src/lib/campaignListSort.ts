@@ -42,9 +42,9 @@ export type CampaignSortDirection = 'asc' | 'desc';
 /** 排序链的一级：按哪一项、哪个方向。 */
 export type CampaignSortLevel = {
   mode: CampaignSortMode;
-  /** 本级实际的方向；follow 的级别恒等于上一级的方向（由 normalizeSortChain 维持）。 */
+  /** 本级显示的方向；follow（界面称“双向”）恒等于上一级方向（由 normalizeSortChain 维持）。 */
   direction: CampaignSortDirection;
-  /** 第二级起可选「跟随上一级」：上一级切方向时本级随之切。第一级没有上一级，不带这个标记。 */
+  /** 第二级起可选“双向”：不以本级指标打乱上一级，而按上一级原始读数继续排。 */
   follow?: true;
 };
 
@@ -591,7 +591,10 @@ export function sortCampaignRows<T extends CampaignSortRow>(rows: readonly T[], 
   const keys = buildCampaignSortKeys<T>();
   const [first, ...rest] = levels;
   const firstKey = keys[first.mode];
-  const thenKeys = rest.map(level => ({ key: keys[level.mode], direction: level.direction }));
+  const thenKeys = rest.map((level, index) => {
+    const source = level.follow ? levels[index] : level;
+    return { key: keys[source.mode], direction: source.direction };
+  });
   const included = rows.filter(row => firstKey.include(row));
   const binning = resolveSortBinning(included, levels, keys);
   const primaryCompare: RowCompare<T> = binning
@@ -658,7 +661,10 @@ export function describeSortLevelEffects<T extends CampaignSortRow>(
   const primaryCompare: RowCompare<T> = binning
     ? binnedCompare(firstKey, binning, first.direction)
     : (a, b, direction) => firstKey.compare(a, b, direction);
-  const thenKeys = rest.map(level => ({ key: keys[level.mode], direction: level.direction }));
+  const thenKeys = rest.map((level, index) => {
+    const source = level.follow ? levels[index] : level;
+    return { key: keys[source.mode], direction: source.direction };
+  });
   /** 第 level 级（0 = 第一级）上两行是否打平。 */
   const tiedAt = (a: T, b: T, level: number): boolean => {
     if (level === 0) return primaryCompare(a, b, first.direction) === 0;
@@ -962,7 +968,7 @@ export function normalizeSortChain(chain: CampaignSortChain): CampaignSortChain 
   return changed ? next : chain;
 }
 
-/** 第二级起的方向选项：跟随上一级 / 倒序（从大到小）/ 顺序（从小到大）。 */
+/** 第二级起的方向选项：双向（完整沿用上一级排序）/ 降序 / 升序。 */
 export type CampaignSortLevelOrder = 'follow' | 'desc' | 'asc';
 
 export function sortLevelOrder(level: CampaignSortLevel): CampaignSortLevelOrder {
@@ -988,7 +994,7 @@ export function selectSortMode(chain: CampaignSortChain, mode: CampaignSortMode)
   return [{ mode, direction: defaultSortDirection(mode) }];
 }
 
-/** 「+」：把这一项追加为下一级，默认跟随上一级的方向；已在链里的不重复加。 */
+/** 「+」：把这一项追加为下一级，默认“双向”完整沿用上一级排序；已在链里的不重复加。 */
 export function appendSortLevel(chain: CampaignSortChain, mode: CampaignSortMode): CampaignSortChain {
   if (chain.some(level => level.mode === mode)) return chain;
   const previous = chain[chain.length - 1];
@@ -996,7 +1002,7 @@ export function appendSortLevel(chain: CampaignSortChain, mode: CampaignSortMode
   return [...chain, { mode, direction: previous.direction, follow: true }];
 }
 
-/** 第二级起单击依次切换：跟随上一级 → 倒序 → 顺序 → 跟随上一级。 */
+/** 第二级起单击依次切换：双向 → 降序 → 升序 → 双向。 */
 const LEVEL_ORDER_CYCLE: readonly CampaignSortLevelOrder[] = ['follow', 'desc', 'asc'];
 
 /**

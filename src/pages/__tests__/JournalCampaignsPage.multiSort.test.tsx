@@ -131,19 +131,20 @@ describe('战役列表：多级排序', () => {
     expect(screen.getByTestId('campaign-sort-mirrorTp')).toHaveAttribute('data-sort-direction', 'desc');
   }, 15_000);
 
-  it('【用户要求】点「+」把加仓效用加为第二级：镜像止盈同档内按加仓效用从大到小，算不出的留在档尾', async () => {
+  it('【用户要求】点「+」把加仓效用加为第二级：默认双向完整保留上一级顺序', async () => {
     renderPage('?sort=mirrorTp&direction=desc');
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
     fireEvent.click(screen.getByTestId('sort-chain-add-addEfficiency'));
 
-    await waitFor(() => expect(order()).toEqual(MIRROR_THEN_ADD));
+    await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
     expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
-    // 排序链：① 镜像止盈 ↓ › ② 加仓效用 ↓
+    // 排序链：① 镜像止盈 ↓ › ② 加仓效用 ↓ 双向
     const chain = screen.getByTestId('sort-chain');
     expect(within(chain).getByTestId('sort-chain-level-1')).toHaveAttribute('data-sort-mode', 'mirrorTp');
     expect(within(chain).getByTestId('sort-chain-level-1')).toHaveTextContent('1镜像止盈');
     expect(within(chain).getByTestId('sort-chain-level-2')).toHaveAttribute('data-sort-mode', 'addEfficiency');
     expect(within(chain).getByTestId('sort-chain-level-2')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(within(chain).getByTestId('sort-chain-follow-2')).toHaveTextContent('双向');
     expect(within(chain).getByTestId('sort-chain-clear')).toHaveTextContent('清除');
     // 折行时成组：「›」跟着它后面那一级走，ⓘ 与「清除」不分开；折下去的行在标签右边那块里（与 ① 对齐）
     const levels = within(chain).getByTestId('sort-chain-levels');
@@ -184,8 +185,8 @@ describe('战役列表：多级排序', () => {
     // 第三级：盈亏比默认跟随第 2 级（升序，标「同上」）——只有未实现·亏损那一档（两场都算不出加仓效用）被它重排
     fireEvent.click(screen.getByTestId('sort-chain-add-captureRate'));
     await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.follow'));
-    expect(screen.getByTestId('sort-chain-follow-3')).toHaveTextContent('同上');
-    expect(order().slice(-2)).toEqual(['APT 抄底', 'OP 追高']);
+    expect(screen.getByTestId('sort-chain-follow-3')).toHaveTextContent('双向');
+    expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']);
     // 跟随 → 倒序
     fireEvent.click(screen.getByTestId('sort-chain-toggle-3'));
     await waitFor(() => expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']));
@@ -584,6 +585,8 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-add-mirrorTp'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('sort-chain-toggle-2'));
+    await waitFor(() => expect(search()).toContain('then=mirrorTp.desc'));
     // 盈亏比 › 镜像止盈：0 为界两侧对半后四档都有并列；-0.90 ~ 0 与 < -0.90 两档里镜像止盈读数相同（先后未变）不算排了 → 7 场
     expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('7 场');
     expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toContain('按镜像止盈排了 7 场；4 场与同组其它场读数相同，先后未变');
@@ -602,6 +605,8 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-add-leverage'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('sort-chain-toggle-2'));
+    await waitFor(() => expect(search()).toContain('then=leverage.desc'));
     expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('未起作用');
     expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toBe('第 2 级「杠杆倍数」未起作用：前面各级并列的 4 组、11 场都算不出杠杆倍数');
   }, 15_000);

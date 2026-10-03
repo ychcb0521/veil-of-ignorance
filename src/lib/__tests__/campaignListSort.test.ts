@@ -254,6 +254,7 @@ describe('【用户要求】第二级起三个方向选项：跟随上一级 / �
     expect(parseCampaignSortChain(params)).toEqual(chain);
     expect(sortChainKey(chain)).not.toBe(sortChainKey(setSortLevelOrder(chain, 1, 'asc')));
   });
+
 });
 
 describe('URL 参数', () => {
@@ -413,6 +414,17 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     makeSortRow({ id: 'r8', pnl: 800, add: true, pcr: 800, dd: 2, mpc: 4 }),
     makeSortRow({ id: 'r9', pnl: 750, tp: true, pcr: 750, dd: 2, mpc: 4 }),
   ];
+
+  it('双向完整沿用上一级：分档内仍按上一级原始读数排序，不被本级指标打乱', () => {
+    const follow = appendSortLevel([{ mode: 'captureRate', direction: 'desc' }], 'mirrorTp');
+    const explicit = setSortLevelOrder(follow, 1, 'desc');
+    expect(ids(sortCampaignRows(BINNED, follow))).toEqual([
+      'r8', 'r9', 'r7', 'r6', 'r5', 'r4', 'r3', 'r2', 'r1',
+    ]);
+    expect(ids(sortCampaignRows(BINNED, explicit))).toEqual([
+      'r9', 'r7', 'r8', 'r5', 'r6', 'r3', 'r4', 'r1', 'r2',
+    ]);
+  });
 
   it('链上不止一级且第一级是连续指标时才分档：档界按进入列表的战役算', () => {
     const binning = resolveSortBinning(BINNED, [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }]);

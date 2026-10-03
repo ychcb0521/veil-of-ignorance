@@ -137,7 +137,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('<strong>第二级起算不出的战役留在本档、排到本档末尾</strong>（不论这一级是升序还是降序）');
     expect(guide).toContain('之后每级一个 then=项.方向');
     expect(guide).toContain('跟随上一级的写 then=项.follow');
-    expect(guide).toContain('「跟随上一级 → 倒序 → 顺序」');
+    expect(guide).toContain('「双向 → 降序 → 升序」');
+    expect(guide).toContain('严格按照上一级的原始读数与升降序排列');
     // 与实现对得上：清除保留第一级、URL 第一级仍是 sort / direction、之后 then；长按 450ms
     expect(sortLib).toContain('return chain.length <= 1 ? chain : [chain[0]];');
     expect(sortLib).toContain("params.append('then', `${level.mode}.${level.follow ? 'follow' : level.direction}`);");
