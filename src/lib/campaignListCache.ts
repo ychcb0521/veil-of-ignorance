@@ -49,6 +49,8 @@ export type CampaignCardData = {
   mainPriceChangePct: number | null;
   /** 列表页按需加载 K 线后写入；null 表示尚未加载或算不出。 */
   peakPriceChangePct?: number | null;
+  /** 列表页与 Excel 导出按需加载 K 线后写入。 */
+  dynamicMaxDrawdownPct?: number | null;
 };
 
 type CampaignDetails = Awaited<ReturnType<typeof getCampaignFullData>>;

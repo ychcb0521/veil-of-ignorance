@@ -4,6 +4,7 @@
  * 每一列与卡片 / 详情页「盈亏概览」读同一个函数，导出的数与页面上的字一致（只差显示精度）。
  */
 import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
+import { computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import {
   campaignLeverage,
   importanceValue,
@@ -12,6 +13,7 @@ import {
   rowMainPriceEfficiency,
   rowMirrorTpRank,
   rowPayoffRatio,
+  rowUnrealizedPriceChangePct,
   selfRatingLabel,
   type CampaignSortRow,
 } from '@/lib/campaignListSort';
@@ -58,6 +60,11 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { campaign: row.campaign, payoffRatio: rowPayoffRatio(row) },
     options.asymmetricSummary,
   );
+  const initialNotional = (row: CampaignSortRow) => finite(computeInitialMainExposureNotional(row.campaign, row.legs, row.tradeRecords));
+  const mainSideNotional = (row: CampaignSortRow) => {
+    const inputs = buildLegPositionShareInputs(row.legs, buildTradeRecordLookup(row.tradeRecords), undefined, { events: row.campaign.actual_evolution });
+    return finite(campaignMainSideNotional(row.campaign.direction, inputs).total);
+  };
   return [
     { header: '序号', width: 6, note: '按导出时列表的排序次序编号。', value: (_row, index) => index + 1 },
     { header: '战役编号', width: 30, note: '战役的唯一编号（campaign_code）。', value: row => row.campaign.campaign_code ?? row.campaign.id },
@@ -91,15 +98,11 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '算术期望（R）', width: 10, note: '单场算术期望 Eᵢ = P(赢) × bᵢ − (1 − P(赢))，单位 R。', value: row => finite(row.arithmeticExpectancy) },
     { header: '最大预期亏损（USDT）', width: 14, note: '初始最大预期亏损 L：主力从开仓价跌到初始对冲边界时的亏损（盈亏概览同名项）。', value: row => (row.initialExpectedMaxLoss > 0 ? row.initialExpectedMaxLoss : null) },
     { header: '已实现 P&L（USDT）', width: 14, note: '已实现盈亏（含平仓价校正，与盈亏概览同名项）。', value: row => finite(row.campaign.final_realized_pnl) },
-    { header: '峰值浮盈（USDT）', width: 13, note: '持仓期间的最高浮盈。列表页没有 K 线，这里取战役记录上的落库值（打开过详情页、算过一次的战役才有），可能为空。', value: row => finite(row.campaign.peak_unrealized_pnl) },
-    { header: '主力开仓名义仓位（USDT）', width: 16, note: '主力开仓那一笔（同一次开仓并组）的名义仓位（盈亏概览同名项）。', value: row => finite(computeInitialMainExposureNotional(row.campaign, row.legs, row.tradeRecords)) },
-    {
-      header: '主方向总名义仓位（USDT）', width: 16, note: '主方向（主多为多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算（盈亏概览「多方 / 空方总名义仓位」）。',
-      value: row => {
-        const inputs = buildLegPositionShareInputs(row.legs, buildTradeRecordLookup(row.tradeRecords), undefined, { events: row.campaign.actual_evolution });
-        return finite(campaignMainSideNotional(row.campaign.direction, inputs).total);
-      },
-    },
+    { header: '峰值涨幅（%）', width: 11, note: '主力有效持仓窗口内按方向计算的最大有利价格涨幅。', value: row => finite(row.peakPriceChangePct) },
+    { header: '峰值涨幅倍数', width: 11, note: '峰值涨幅 ÷ 预期回撤（倍）。', value: row => computeMainPriceEfficiency(row.peakPriceChangePct, row.initialExpectedMaxDrawdownPct) },
+    { header: '涨幅未兑现（%）', width: 12, note: '峰值涨幅 − 最终涨跌幅；仅峰值涨幅严格大于预期回撤时计算。', value: row => rowUnrealizedPriceChangePct(row) },
+    { header: '动态最大回撤（%）', width: 13, note: '有效持仓期间此前峰值到此后谷值的最大回撤；最后一次滚动对冲与主力同平时，窗口结束于该对冲开仓。', value: row => finite(row.dynamicMaxDrawdownPct) },
+    { header: '仓位放大（倍）', width: 11, note: '主方向总名义仓位 ÷ 主力开仓名义仓位。', value: row => { const initial = initialNotional(row); const total = mainSideNotional(row); return initial != null && initial > 0 && total != null ? total / initial : null; } },
     { header: 'DSI 贡献（%）', width: 10, note: '这场亏损战役 b² 占全表亏损组平方和的比例（百分数）；盈利战役为空。', value: row => finite(contribution(row).dsiContributionPct) },
     { header: 'USI 贡献（%）', width: 10, note: '这场盈利战役 b² 占全表盈利组平方和的比例（百分数）；亏损战役为空。', value: row => finite(contribution(row).usiContributionPct) },
   ];
