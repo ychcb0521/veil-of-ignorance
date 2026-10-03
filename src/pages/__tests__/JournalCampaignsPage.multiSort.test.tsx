@@ -656,6 +656,8 @@ describe('战役列表：多级排序', () => {
     fireEvent.click(toggle, { detail: 2 });
     fireEvent.doubleClick(toggle);
     const stats = await screen.findByTestId('sort-chain-stats');
+    // 统计卡片按当前实际列数扩宽，不再固定 30rem 截掉左侧档位或右侧列。
+    expect(Number.parseFloat(screen.getByTestId('sort-chain-popover').style.width)).toBeGreaterThan(30);
     expect(screen.getByTestId('sort-chain-level-1')).toHaveAttribute('data-sort-direction', 'desc');
     expect(order()).toEqual(before);
     expect(within(stats).getByTestId('sort-chain-stats-row-1')).toHaveTextContent('≥ 2.10');

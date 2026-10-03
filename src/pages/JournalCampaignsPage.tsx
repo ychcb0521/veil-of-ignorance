@@ -2387,6 +2387,14 @@ export default function JournalCampaignsPage() {
     [sortBasisRows, sortChain],
   );
   /**
+   * 分组统计浮层按最宽交叉表的列数自适应：基础 30rem，每个分布列预留约 5.25rem，最多 64rem；
+   * 最终仍受视口宽度约束。镜像止盈 / 自评这类 6 列表不再被固定 30rem 的卡片截断。
+   */
+  const sortStatsPopoverWidthRem = useMemo(() => {
+    const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
+    return Math.min(64, Math.max(30, 19 + columns * 5.25));
+  }, [sortCrossTabs]);
+  /**
    * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
    * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
    * 首次加载时战役分批到达，新到的一场读数更宽，这一列就跟着放宽；加载完就定下来。
@@ -3192,7 +3200,7 @@ export default function JournalCampaignsPage() {
       <div data-testid="sort-chain-stats" className="mt-2 border-b border-border/50 pb-2">
         <div className="mb-1 font-medium text-foreground/80">排序后的分组统计</div>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[10px] text-muted-foreground">
+          <table className="w-max min-w-full border-collapse text-[10px] text-muted-foreground">
             <thead>
               <tr className="border-b border-border/50 text-foreground/70">
                 <th className="px-1.5 py-1 text-left font-medium">
@@ -3273,7 +3281,7 @@ export default function JournalCampaignsPage() {
           <span className="ml-1 font-normal text-muted-foreground">的分布（占本档）</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[10px] text-muted-foreground">
+          <table className="w-max min-w-full border-collapse text-[10px] text-muted-foreground">
             <thead>
               <tr className="border-b border-border/50 text-foreground/70">
                 <th className="px-1.5 py-1 text-left font-medium">{SORT_LABEL_BY_MODE[firstMode]} ＼ {label}</th>
@@ -3451,7 +3459,13 @@ export default function JournalCampaignsPage() {
             <Info aria-hidden="true" className="h-3 w-3" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={POPOVER_COLLISION_PADDING} className={`${sortGroupStats.length ? 'w-[30rem]' : 'w-80'} border-border bg-card p-3 text-[11px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto ${POPOVER_VIEWPORT_MAX_W}`}>
+        <PopoverContent
+          align="start"
+          collisionPadding={POPOVER_COLLISION_PADDING}
+          data-testid="sort-chain-popover"
+          style={sortGroupStats.length ? { width: `${sortStatsPopoverWidthRem}rem` } : undefined}
+          className={`${sortGroupStats.length ? '' : 'w-80'} border-border bg-card p-3 text-[11px] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto ${POPOVER_VIEWPORT_MAX_W}`}
+        >
           <div className="font-medium text-foreground">多级排序</div>
           {sortGroupStats.length > 0 && renderSortGroupStats()}
           <div data-testid="sort-chain-rules" className="mt-2 space-y-1 text-muted-foreground">
