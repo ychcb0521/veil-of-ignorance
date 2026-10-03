@@ -395,6 +395,14 @@ function counterfactualDelta(branchRealizedPnl: number, actualPnl: number): numb
   return Math.abs(delta) < 0.005 ? 0 : delta;
 }
 
+/** 相对实际增加百分比：以实际 P&L 的绝对值为基数，避免实际亏损时正负含义反转。 */
+function counterfactualDeltaPct(delta: number, actualPnl: number): number | null {
+  if (!Number.isFinite(delta) || !Number.isFinite(actualPnl) || Math.abs(actualPnl) < 0.005) return null;
+  const value = (delta / Math.abs(actualPnl)) * 100;
+  if (!Number.isFinite(value)) return null;
+  return Math.abs(value) < 0.005 ? 0 : value;
+}
+
 function counterfactualLabel(role: string) {
   switch (role) {
     case 'main_open': return 'CF-M';
@@ -3293,6 +3301,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             ) : (
               visibleBranches.map(branch => {
                     const delta = counterfactualDelta(branch.result.final_realized_pnl, actualPnl);
+                    const deltaPct = counterfactualDeltaPct(delta, actualPnl);
                     const active = branch.id === selectedCounterfactualId;
                     // 手动 Legs 分支的 sop_score 恒为 0，没有信息量，只给 SOP 推演分支看。
                     const manualRun = isManualLegScenario(branch.params);
@@ -3331,6 +3340,16 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                           <div className="text-[9px] leading-none text-muted-foreground">相对实际</div>
                           <div className={`mt-1 font-mono text-[11px] leading-none ${pnlColor(delta)}`}>
                             {delta >= 0 ? '+' : ''}{delta.toFixed(2)}
+                          </div>
+                        </div>
+                        <div
+                          data-testid={`counterfactual-branch-delta-pct-${branch.id}`}
+                          className="shrink-0 px-2 py-1 text-right"
+                          title="（分支 P&L − 实际战役已实现 P&L）÷ |实际战役已实现 P&L| × 100%"
+                        >
+                          <div className="text-[9px] leading-none text-muted-foreground">相对实际增加</div>
+                          <div className={`mt-1 font-mono text-[11px] leading-none ${pnlColor(deltaPct)}`}>
+                            {deltaPct == null ? '—' : `${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%`}
                           </div>
                         </div>
                         {!manualRun && (
