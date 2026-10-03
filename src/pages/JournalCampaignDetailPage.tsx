@@ -4,7 +4,7 @@ import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
@@ -1643,6 +1643,17 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       barMs: intervalToMs(computeInterval),
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryLegId, actualPriceChange.entryPrice, actualPriceChange.mainCloseTime, actualPriceChange.side, campaign, computeInterval, effectiveClosedAt, klines]);
+  const dynamicMaxDrawdownPct = useMemo(() => {
+    if (!campaign || klines.length === 0) return null;
+    const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
+    const endMs = actualPriceChange.mainCloseTime ?? new Date(effectiveClosedAt).getTime();
+    return computeHoldingDynamicMaxDrawdownPct({
+      klines,
+      startMs,
+      endMs,
+      barMs: intervalToMs(computeInterval),
+    });
+  }, [actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
@@ -1659,6 +1670,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: accuracy.campaign_max_profit_real,
       peakPriceChangePct,
+      dynamicMaxDrawdownPct,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
       mainSideNotional,
       expectedMaxDrawdownPct: campaignMetricValues?.initialExpectedMaxDrawdownPct ?? 0,
@@ -1674,7 +1686,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 峰值涨幅、峰值涨幅倍数和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
     // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
     if (!klinesLoading) return items;
-    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' || item.key === 'peakPriceEfficiency'
+    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' || item.key === 'peakPriceEfficiency' || item.key === 'dynamicMaxDrawdownPct'
       ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
       : item));
   }, [
@@ -1687,6 +1699,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     legs,
     mainSideNotional,
     peakPriceChangePct,
+    dynamicMaxDrawdownPct,
     pnlReconciliation,
     settlement,
     tradeRecords,
@@ -1728,6 +1741,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     actualMain: actualMainPriceChange,
     // 反事实的「多方总名义仓位」数哪一侧：与上方同一个主方向
     mainSide: mainSideNotional?.side ?? 'long',
+    klines,
+    barMs: intervalToMs(computeInterval),
   }), [
     campaign,
     campaignAsymmetricRisk,
@@ -1735,6 +1750,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     isOwner,
     actualMainPriceChange,
     mainSideNotional?.side,
+    klines,
+    computeInterval,
   ]);
   const counterfactualDraftOverview = useMemo(
     () => (counterfactualDraft ? buildCounterfactualOverview(counterfactualDraft, counterfactualOverviewShared) : null),

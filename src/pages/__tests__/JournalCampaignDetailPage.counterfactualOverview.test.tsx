@@ -334,8 +334,8 @@ const OVERVIEW_LABELS = [
   '峰值涨幅',
   '峰值涨幅倍数',
   '涨幅未兑现',
-  '主力开仓名义仓位',
-  '多方总名义仓位',
+  '动态最大回撤',
+  '仓位放大',
 ];
 
 function helpButtonLabels(panel: HTMLElement) {

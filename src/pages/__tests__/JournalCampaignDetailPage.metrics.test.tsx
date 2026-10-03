@@ -485,8 +485,8 @@ describe('JournalCampaignDetailPage metrics', () => {
       .find((row): row is HTMLElement => row != null);
     expect(payoffRow?.lastElementChild?.textContent).toBe('2.00');
     expect(screen.queryByText('200.0% (2.00)')).not.toBeInTheDocument();
-    // 主力开仓名义仓位；这场只有一笔主力多单，多方总名义仓位也是 1000
-    expect(screen.getAllByText('1000.00 USDT').length).toBeGreaterThanOrEqual(1);
+    // 只有初始主力、没有累计加仓时，仓位放大为 1 倍。
+    expect(screen.getByText('1.00x')).toBeInTheDocument();
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '今日账户总资产说明' })).not.toBeInTheDocument();
@@ -503,10 +503,10 @@ describe('JournalCampaignDetailPage metrics', () => {
     for (const label of [
       '已实现 P&L',
       '杠杆倍数',
-      '主力开仓名义仓位',
+      '动态最大回撤',
       '涨幅未兑现',
       '最大预期亏损',
-      '多方总名义仓位',
+      '仓位放大',
       '预期回撤',
       '盈亏比',
       'DSI/USI 贡献',
@@ -537,13 +537,13 @@ describe('JournalCampaignDetailPage metrics', () => {
       '峰值涨幅',
       '峰值涨幅倍数',
       '涨幅未兑现',
-      '主力开仓名义仓位',
-      '多方总名义仓位',
+      '动态最大回撤',
+      '仓位放大',
     ]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '主力开仓名义仓位', '多方总名义仓位']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大']);
     expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));

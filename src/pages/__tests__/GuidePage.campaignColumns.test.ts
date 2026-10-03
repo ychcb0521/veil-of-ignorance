@@ -17,7 +17,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     const labels = [...block.matchAll(/label: '([^']+)'/g)].map(match => match[1]);
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（自评在杠杆倍数之后、字母之前；「DSI 贡献」「USI 贡献」已删）
     expect(labels).toEqual([
-      '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '几何期望',
+      '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '涨幅未兑现', '几何期望',
       '算术期望', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
@@ -114,13 +114,12 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toMatch(/主力有几笔时取涨(跌)?幅最大的那笔/);
     expect(page).not.toContain('主力 = 名义最大的 main_open');
   });
-  it('【用户要求】盈亏概览：左右对调（递进链在左）；右栏前三是已实现 P&L、主力开仓名义仓位、最大预期亏损，第四是多方总名义仓位', () => {
+  it('【用户要求】盈亏概览：右栏加入动态最大回撤，并将两项名义仓位合并为仓位放大', () => {
     expect(guide).toContain('左栏是<strong>层层递进的一列</strong>——预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、几何期望、算术期望');
     // 【用户要求】「最大预期亏损放在那一列的第一个」
     expect(guide).toContain('右栏是结果与仓位——第一个是<strong>最大预期亏损</strong>，与左栏第一个的预期回撤同一行');
-    // 【用户要求】「峰值浮盈放在已实现 P&L 的紧贴的后面」
-    expect(guide).toContain('之后是<strong>已实现 P&amp;L</strong>、紧跟着的<strong>峰值浮盈</strong>');
-    expect(guide).toContain('第五是<strong>多方总名义仓位</strong>');
+    expect(guide).toContain('<strong>动态最大回撤</strong>');
+    expect(guide).toContain('<strong>仓位放大</strong>');
     expect(guide).toContain('同一份 14 项指标（左栏：预期回撤');
   });
   it('【用户要求】多级排序：单击替换、「+」加层、手机长按、排序链、缺值规则、清除保留第一级', () => {
@@ -161,7 +160,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('（悬停或点它看明细）');
     expect(guide).toContain('<strong>「未起作用」</strong>= 前面各级没有并列、并列的读数全相同（比如某一档里全是 5 分），或并列的都算不出这一项');
     // 与实现对得上：七个连续指标；只有一级永远不分档；分档按封面精度取整；第一级分档后各级都打平再按它本身的数值；读数全相同的组记 tied
-    expect(sortLib).toContain("'expectedDrawdownPct',\n  'mainPriceChange',\n  'mainPriceEfficiency',\n  'captureRate',\n  'addEfficiency',\n  'geometricExpectancy',\n  'arithmeticExpectancy',\n]);");
+    expect(sortLib).toContain("'expectedDrawdownPct',\n  'mainPriceChange',\n  'mainPriceEfficiency',\n  'unrealizedPriceChangePct',\n  'captureRate',\n  'addEfficiency',\n  'geometricExpectancy',\n  'arithmeticExpectancy',\n]);");
     expect(sortLib).toContain('return chain.length > 1 && isContinuousSortMode(chain[0].mode);');
     expect(sortLib).toContain('export function sortBinValue(');
     expect(sortLib).toContain('const own = firstKey.compare(a, b, first.direction);');

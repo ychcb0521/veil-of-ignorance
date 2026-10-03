@@ -6,6 +6,8 @@ import {
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
 import {
   PRICE_CHANGE_EXIT_RULE_TEXT,
+  computeHoldingDynamicMaxDrawdownPct,
+  computePeakPriceChangePct,
   counterfactualHasMainAdd,
   counterfactualPriceChange,
   describePriceChangeExitSource,
@@ -57,6 +59,9 @@ export interface CounterfactualOverviewShared {
   actualMain?: ActualMainPriceChange | null;
   /** 真实战役的主方向（主多是多单）：反事实的「多方总名义仓位」数这一侧。缺省按多单。 */
   mainSide?: LegPositionSide;
+  /** 详情页已经加载的同一份 K 线，用于反事实的峰值涨幅与动态最大回撤；不触发额外请求。 */
+  klines?: readonly KlineData[];
+  barMs?: number;
 }
 
 /**
@@ -277,6 +282,29 @@ export function buildCounterfactualOverviewMetrics(
   // 手动 Legs 分支：副本里的主力与能锁平仓价的对冲（改过就按改后的）按与上方同一条规则算；SOP 推演没有逐腿开平价，不算。
   const priceChange = manual ? counterfactualPriceChange(branch.params.manual_legs, shared.actualMain) : null;
   const mainPriceChangePct = priceChange?.pct ?? null;
+  const pathStartMs = priceChange?.entryOpenTime ?? null;
+  const pathEndMs = priceChange?.mainCloseTime
+    ?? (shared.klines?.length ? shared.klines[shared.klines.length - 1].time + (shared.barMs ?? 0) : null);
+  const hasPricePath = manual && pathStartMs != null && pathEndMs != null
+    && (shared.barMs ?? 0) > 0 && (shared.klines?.length ?? 0) > 0;
+  const peakPriceChangePct = hasPricePath
+    ? computePeakPriceChangePct({
+      side: priceChange?.side ?? null,
+      entryPrice: priceChange?.entryPrice ?? null,
+      klines: shared.klines ?? [],
+      startMs: pathStartMs,
+      endMs: pathEndMs,
+      barMs: shared.barMs as number,
+    })
+    : null;
+  const dynamicMaxDrawdownPct = hasPricePath
+    ? computeHoldingDynamicMaxDrawdownPct({
+      klines: shared.klines ?? [],
+      startMs: pathStartMs,
+      endMs: pathEndMs,
+      barMs: shared.barMs as number,
+    })
+    : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   const expectancies = computeCampaignExpectancies(payoffRatio);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
@@ -348,9 +376,9 @@ export function buildCounterfactualOverviewMetrics(
           + '停用、标着「挂单中」的腿不参与；实际还没平仓、平仓价也没改过的腿视为未平仓（引擎只是按数据末端强行结算）。'
         : 'SOP 推演没有逐腿的开平价，本项与涨跌幅倍数、加仓效用不计算。',
     ],
-    mainSideNotional: [
+    positionAmplification: [
       manual
-        ? '反事实分支按 Legs 副本里参与运行的同方向各腿「仓位」一格合计：没改过的腿与上方同一个数，改过「仓位」、新增或停用的腿按改后的算；标着「挂单中」的腿不算。'
+        ? '分子按反事实 Legs 副本里参与运行的同方向各腿「仓位」合计；改过仓位、新增或停用的腿按改后结果，挂单不计。分母取副本的初始主力与镜像敞口。'
         : 'SOP 推演没有逐腿的仓位，本项不计算。',
     ],
   };
@@ -369,6 +397,8 @@ export function buildCounterfactualOverviewMetrics(
     mainLeverage: anchors.mainLeverage,
     initialMainExposureNotional: anchors.initialMainExposureNotional > 0 ? anchors.initialMainExposureNotional : 0,
     peakUnrealizedPnl: finiteOrNull(branch.result.peak_unrealized_pnl) ?? 0,
+    peakPriceChangePct,
+    dynamicMaxDrawdownPct,
     initialExpectedMaxLoss,
     mainSideNotional: {
       side: shared.mainSide ?? 'long',

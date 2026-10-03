@@ -28,8 +28,8 @@ const GOLDEN_LABELS = [
   '峰值涨幅',
   '峰值涨幅倍数',
   '涨幅未兑现',
-  '主力开仓名义仓位',
-  '多方总名义仓位',
+  '动态最大回撤',
+  '仓位放大',
 ];
 
 const GOLDEN_KEYS = [
@@ -45,8 +45,8 @@ const GOLDEN_KEYS = [
   'peakPriceChange',
   'peakPriceEfficiency',
   'unrealizedPriceChangePct',
-  'initialMainExposureNotional',
-  'mainSideNotional',
+  'dynamicMaxDrawdownPct',
+  'positionAmplification',
 ];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
@@ -57,6 +57,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
     initialMainExposureNotional: 1000,
     peakUnrealizedPnl: 250.5,
     peakPriceChangePct: 25,
+    dynamicMaxDrawdownPct: 12.5,
     initialExpectedMaxLoss: 100,
     mainSideNotional: { side: 'long', total: 1500 },
     expectedMaxDrawdownPct: 10,
@@ -90,19 +91,19 @@ describe('buildCampaignPnlOverviewItems', () => {
       '+25.00%',
       '+2.50',
       '5.00%',
-      '1000.00 USDT',
-      '1500.00 USDT',
+      '12.50%',
+      '1.50x',
     ]);
     const G = '#0ECB81';
     const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual([
       G, undefined, G, G, G, G, G,
-      G, undefined, G, G, R, undefined, undefined,
+      G, undefined, G, G, R, R, undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
       T, undefined, T, T, T, T, T,
-      T, undefined, T, T, 'text-[#F6465D]', undefined, undefined,
+      T, undefined, T, T, 'text-[#F6465D]', 'text-[#F6465D]', undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -119,6 +120,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       initialMainExposureNotional: 0,
       peakUnrealizedPnl: 0,
       peakPriceChangePct: null,
+      dynamicMaxDrawdownPct: null,
       initialExpectedMaxLoss: 0,
       expectedMaxDrawdownPct: 0,
       payoffRatio: null,
@@ -233,7 +235,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '主力开仓名义仓位', '多方总名义仓位']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('算术期望')).toBe('1');
@@ -244,7 +246,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(rowOf('峰值涨幅')).toBe('3');
     expect(rowOf('峰值涨幅倍数')).toBe('4');
     expect(rowOf('涨幅未兑现')).toBe('5');
-    expect(rowOf('多方总名义仓位')).toBe('7');
+    expect(rowOf('仓位放大')).toBe('7');
     expect(rowOf('几何期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();

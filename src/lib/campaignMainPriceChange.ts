@@ -79,6 +79,8 @@ export interface CampaignPriceChange {
   side: PriceChangeSide | null;
   entryPrice: number | null;
   entryLegId: string | null;
+  /** 基准主力腿的开仓时刻；峰值涨幅与持仓期间动态最大回撤共用这一窗口起点。 */
+  entryOpenTime: number | null;
   exitPrice: number | null;
   exitSource: CampaignPriceChangeExitSource | null;
   exitLegId: string | null;
@@ -87,7 +89,7 @@ export interface CampaignPriceChange {
 }
 
 export const EMPTY_CAMPAIGN_PRICE_CHANGE: CampaignPriceChange = Object.freeze({
-  pct: null, side: null, entryPrice: null, entryLegId: null, exitPrice: null, exitSource: null, exitLegId: null, mainCloseTime: null,
+  pct: null, side: null, entryPrice: null, entryLegId: null, entryOpenTime: null, exitPrice: null, exitSource: null, exitLegId: null, mainCloseTime: null,
 });
 const NO_PRICE_CHANGE = EMPTY_CAMPAIGN_PRICE_CHANGE;
 
@@ -115,6 +117,39 @@ export function computePeakPriceChangePct(args: {
     ? ((extreme - entryPrice) / entryPrice) * 100
     : ((entryPrice - extreme) / entryPrice) * 100;
   return Math.max(0, directedPct);
+}
+
+/**
+ * 主力持仓窗口内的动态最大回撤（标准 peak-to-trough 口径）：
+ * max[(此前峰值 − 此后谷值) / 此前峰值] × 100%。
+ *
+ * 只允许已经完成的 K 线高点成为“此前峰值”，再用后续 K 线低点计算回撤；这样不会把同一根 OHLC
+ * 中先后顺序未知的 high/low 强行解释成一次峰谷。首根 K 线以开盘价作为初始可观察峰值。
+ */
+export function computeHoldingDynamicMaxDrawdownPct(args: {
+  klines: readonly KlineData[];
+  startMs: number;
+  endMs: number;
+  barMs: number;
+}): number | null {
+  const { klines, startMs, endMs, barMs } = args;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs || !(barMs > 0)) return null;
+  const bars = klines
+    .filter(bar => bar.time <= endMs && bar.time + barMs > startMs)
+    .sort((a, b) => a.time - b.time);
+  if (bars.length === 0) return null;
+
+  let runningPeak = Number.isFinite(bars[0].open) && bars[0].open > 0 ? bars[0].open : null;
+  let maxDrawdown = 0;
+  for (const bar of bars) {
+    if (runningPeak != null && Number.isFinite(bar.low) && bar.low >= 0) {
+      maxDrawdown = Math.max(maxDrawdown, ((runningPeak - bar.low) / runningPeak) * 100);
+    }
+    if (Number.isFinite(bar.high) && bar.high > 0) {
+      runningPeak = runningPeak == null ? bar.high : Math.max(runningPeak, bar.high);
+    }
+  }
+  return runningPeak == null ? null : Math.max(0, maxDrawdown);
 }
 
 function usable(value: number | null | undefined): value is number {
@@ -156,7 +191,7 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
   const entryPrice = entryLeg.entryPrice as number;
 
   const closed = mains.filter(leg => usable(leg.exitPrice) && leg.exitPrice > 0);
-  if (closed.length === 0) return { ...NO_PRICE_CHANGE, side, entryPrice, entryLegId: entryLeg.id };
+  if (closed.length === 0) return { ...NO_PRICE_CHANGE, side, entryPrice, entryLegId: entryLeg.id, entryOpenTime: entryLeg.openTime };
   // 只有平仓价快照、没有平仓时间的主力（Legs 表照样判「已平仓」）也算已平：平仓时刻按记了时间的那几笔；
   // 一笔都没记时间时读不出主力何时平的，对冲锁没锁住也就判不了，按主力自己的平仓价算。
   const timed = closed.filter(leg => usable(leg.closeTime));
@@ -194,6 +229,7 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
     side,
     entryPrice,
     entryLegId: entryLeg.id,
+    entryOpenTime: entryLeg.openTime,
     exitPrice,
     exitSource: lockingHedge ? EXIT_SOURCE_BY_HEDGE_ROLE[lockingHedge.role] : 'main',
     exitLegId: lockingHedge ? lockingHedge.id : exitLeg.id,

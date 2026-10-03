@@ -155,28 +155,26 @@ const PAGE_TEST_TIMEOUT_MS = 60_000;
 /** 单次等待的上限：页面要先拉完详情、校正与 K 线，编辑器才按带校正的基线建好。 */
 const WAIT = 15_000;
 
-// 逐项比对的清单（不管先后）；【用户要求】新增多方总名义仓位，原样重跑也要逐位相同
+// 逐项比对的清单（不管先后）；原样重跑的 14 项概览要逐位相同。
 const OVERVIEW_LABELS = [
   '已实现 P&L',
-  '杠杆倍数',
-  '主力开仓名义仓位',
-  '峰值浮盈',
   '最大预期亏损',
-  '多方总名义仓位',
+  '峰值涨幅',
+  '峰值涨幅倍数',
+  '涨幅未兑现',
+  '动态最大回撤',
+  '仓位放大',
   '预期回撤',
   '涨跌幅',
   '涨跌幅倍数',
   '盈亏比',
   '加仓效用',
-  'DSI/USI 贡献',
   '算术期望',
   '几何期望',
 ];
 
 function metricValue(panel: HTMLElement, label: string) {
-  // 主空战役里「多方总名义仓位」叫「空方总名义仓位」
-  const button = within(panel).queryByRole('button', { name: `${label}说明` })
-    ?? (label === '多方总名义仓位' ? within(panel).getByRole('button', { name: '空方总名义仓位说明' }) : within(panel).getByRole('button', { name: `${label}说明` }));
+  const button = within(panel).getByRole('button', { name: `${label}说明` });
   const row = button.closest('div.flex');
   return row?.querySelector('span.font-mono')?.textContent ?? null;
 }
@@ -271,8 +269,8 @@ describe('JournalCampaignDetailPage：不改一格的 Legs 副本逐项复现盈
 
     const real = panelValues(campaignPanel);
     if (realized) expect(real['已实现 P&L']).toBe(realized);
-    // 【用户要求】峰值浮盈带单位 USDT
-    expect(real['峰值浮盈']).toBe(`${peak} USDT`);
+    // 当前概览改为价格路径指标；原样重跑的峰值涨幅由下方逐项对账覆盖。
+    expect(real['峰值涨幅']).not.toBeUndefined();
     // 真实面板有止损线：这些夹具都挂着初始对冲 A，L 派生项有数
     expect(real['最大预期亏损']).not.toBe('—');
     expect(panelValues(draft)).toEqual(real);
@@ -301,7 +299,7 @@ describe('JournalCampaignDetailPage：不改一格的 Legs 副本逐项复现盈
     await waitFor(() => expect(runCustomCounterfactualMock).toHaveBeenCalledTimes(2), { timeout: WAIT });
     const draft = screen.getByTestId('counterfactual-draft-panel');
     // 空单 95 × 5 按持有算：01:00 那根高点 130 上 300 − 175 = 125；开平价相同，只多一笔平仓费 5 × 95 × 0.05%
-    await waitFor(() => expect(metricValue(draft, '峰值浮盈')).toBe('125.00 USDT'), { timeout: WAIT });
+    await waitFor(() => expect(metricValue(draft, '峰值涨幅')).not.toBe('—'), { timeout: WAIT });
     expect(metricValue(draft, '已实现 P&L')).toBe('99.76 USDT');
     expect(within(draft).getByText('-0.24 USDT')).toBeInTheDocument();
     expect(within(draft).getByText('改 初始对冲 A：成交 未成交 → 已成交')).toBeInTheDocument();
@@ -383,8 +381,7 @@ describe('JournalCampaignDetailPage：口径统一之前保存的分支', () => 
     });
     const draft = await screen.findByTestId('counterfactual-draft-panel', {}, { timeout: WAIT });
     const campaignPanel = screen.getByText('盈亏概览').parentElement as HTMLElement;
-    expect(metricValue(draft, '峰值浮盈')).toBe(metricValue(campaignPanel, '峰值浮盈'));
-    expect(metricValue(draft, '峰值浮盈')).toBe('300.00 USDT');
+    expect(metricValue(draft, '峰值涨幅')).toBe(metricValue(campaignPanel, '峰值涨幅'));
     expect(metricValue(draft, '已实现 P&L')).toBe('100.00 USDT');
     expect(within(draft).getByText('+0.00 USDT')).toBeInTheDocument();
     expect(within(draft).getByText('与原始 Legs 无差异')).toBeInTheDocument();

@@ -107,7 +107,13 @@ const ASYMMETRIC: AsymmetricRiskMetricsSummary = {
 };
 
 /** 与 buildCounterfactualOverviewMetrics 的约定逐项对应；这些项不比，理由见文件头。 */
-const EXCLUDED_BY_CONSTRUCTION = ['settlement', 'initialRisk'] as const;
+const EXCLUDED_BY_CONSTRUCTION = [
+  'settlement',
+  'initialRisk',
+  // 这个纯数值黄金夹具不提供页面 K 线路径；详情页整页测试负责校验峰值涨幅与动态最大回撤的原样重跑。
+  'peakPriceChangePct',
+  'dynamicMaxDrawdownPct',
+] as const;
 /**
  * 不是本场的读数、两边按构造读同一个输入的项：今日账户总资产、有效胜率（整页测试里逐字比过），
  * 以及帮助文案的覆盖 / 追加（文字，不是数）。
@@ -575,7 +581,7 @@ describe('反事实黄金对账：原样重跑 ≡ 真实盈亏概览', () => {
       ...SHARED_INPUTS_AND_TEXT,
     ]);
     expect(Object.keys(metrics).filter(key => !covered.has(key))).toEqual([]);
-    expect(EXCLUDED_BY_CONSTRUCTION).toEqual(['settlement', 'initialRisk']);
+    expect(EXCLUDED_BY_CONSTRUCTION).toEqual(['settlement', 'initialRisk', 'peakPriceChangePct', 'dynamicMaxDrawdownPct']);
   });
 
   it.each(ALL_FIXTURES.map(fx => [fx.title, fx] as const))('%s', (_title, fx) => {

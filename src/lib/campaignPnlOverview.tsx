@@ -36,6 +36,8 @@ export type CampaignPnlOverviewItemKey =
   | 'peakPriceChange'
   | 'peakPriceEfficiency'
   | 'unrealizedPriceChangePct'
+  | 'dynamicMaxDrawdownPct'
+  | 'positionAmplification'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -80,8 +82,8 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'peakPriceChange',
   'peakPriceEfficiency',
   'unrealizedPriceChangePct',
-  'initialMainExposureNotional',
-  'mainSideNotional',
+  'dynamicMaxDrawdownPct',
+  'positionAmplification',
 ];
 
 /**
@@ -109,6 +111,8 @@ export interface CampaignPnlOverviewMetrics {
   peakUnrealizedPnl: number;
   /** 主力持有窗口内相对基准开仓价的最大有利价格涨幅；老反事实分支没有价格路径时为 null。 */
   peakPriceChangePct?: number | null;
+  /** 持仓期间此前峰值到此后谷值的最大标准化回撤率。 */
+  dynamicMaxDrawdownPct?: number | null;
   initialExpectedMaxLoss: number;
   /**
    * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
@@ -218,6 +222,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     mainLeverage,
     initialMainExposureNotional,
     peakPriceChangePct = null,
+    dynamicMaxDrawdownPct = null,
     initialExpectedMaxLoss,
     mainSideNotional,
     expectedMaxDrawdownPct: expectedDrawdownPct,
@@ -233,6 +238,10 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
   const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
   const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct, expectedDrawdownPct);
+  const positionAmplification = initialMainExposureNotional > 0
+    && mainSideNotional?.total != null && Number.isFinite(mainSideNotional.total)
+    ? mainSideNotional.total / initialMainExposureNotional
+    : null;
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency)
     : null;
@@ -347,6 +356,21 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
+      key: 'dynamicMaxDrawdownPct',
+      label: '动态最大回撤',
+      value: dynamicMaxDrawdownPct == null ? '—' : `${dynamicMaxDrawdownPct.toFixed(2)}%`,
+      color: dynamicMaxDrawdownPct == null || Number(dynamicMaxDrawdownPct.toFixed(2)) === 0 ? '#848E9C' : '#F6465D',
+      valueClassName: dynamicMaxDrawdownPct == null || Number(dynamicMaxDrawdownPct.toFixed(2)) === 0
+        ? 'text-muted-foreground' : 'text-[#F6465D]',
+      help: (
+        <>
+          <p>主力持仓期间，从此前已经出现的价格高点到此后低点的最大跌幅。它衡量持仓过程真正经历过的最深峰谷回撤，而不是开仓到平仓的涨跌幅。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">动态最大回撤 = maxₜ［（此前峰值 − 此后谷值）÷ 此前峰值］× 100%</div>
+          <p>高点必须早于低点；按当前计算周期 K 线估计，同一根 K 线内 high 与 low 的先后未知，因此不把同根 K 线强行解释成一次完整峰谷。</p>
+        </>
+      ),
+    },
+    {
       key: 'initialExpectedMaxLoss',
       label: '最大预期亏损',
       value: initialExpectedMaxLoss > 0
@@ -386,6 +410,21 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
             反向的对冲腿不在这一侧，不计入。
           </p>
           <p>它是整场累计投入的名义，不是某一刻同时持有的最大仓位：先平掉再开的腿会各算一次。</p>
+        </>
+      ),
+    },
+    {
+      key: 'positionAmplification',
+      label: '仓位放大',
+      value: positionAmplification == null ? '—' : `${positionAmplification.toFixed(2)}x`,
+      help: (
+        <>
+          <p>本场主方向累计名义仓位，相对于入场时主力与镜像初始敞口的放大倍数。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">仓位放大 = {mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位 ÷ 主力开仓名义仓位</div>
+          <p>分子包含同方向已成交的主力、镜像、加仓和重新入场腿；挂单与反向对冲不计。它表示整场累计投入的名义倍数，不等于任一时刻同时持有的最大仓位。</p>
+          {positionAmplification != null && (
+            <p className="font-mono text-foreground">本场 = {mainSideNotional?.total?.toFixed(2)} ÷ {initialMainExposureNotional.toFixed(2)} = {positionAmplification.toFixed(2)}x</p>
+          )}
         </>
       ),
     },

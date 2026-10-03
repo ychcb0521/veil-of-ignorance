@@ -9,6 +9,7 @@ import {
   campaignPriceChange,
   campaignPriceChangeLegInputs,
   computeAddEfficiency,
+  computeHoldingDynamicMaxDrawdownPct,
   computeMainPriceEfficiency,
   computePeakPriceChangePct,
   counterfactualHasMainAdd,
@@ -49,6 +50,24 @@ describe('峰值涨幅：主力持有窗口里的最有利 K 线极值', () => {
   it('纳入与开仓时刻相交的那根 K 线；没有可用 K 线时不冒充普通涨跌幅', () => {
     expect(computePeakPriceChangePct({ side: 'long', entryPrice: 100, klines: bars, startMs: 30_000, endMs: 30_000, barMs: 60_000 })).toBeCloseTo(4, 9);
     expect(computePeakPriceChangePct({ side: 'long', entryPrice: 100, klines: bars, startMs: 300_000, endMs: 360_000, barMs: 60_000 })).toBeNull();
+  });
+});
+
+describe('持仓期间动态最大回撤：此前峰值到此后谷值', () => {
+  const bars = [
+    { time: 0, open: 100, high: 110, low: 98, close: 108, volume: 1 },
+    { time: 60_000, open: 108, high: 120, low: 105, close: 118, volume: 1 },
+    { time: 120_000, open: 118, high: 119, low: 90, close: 95, volume: 1 },
+  ];
+
+  it('只用此前已经形成的峰值计算后续谷值，并以峰值归一化', () => {
+    // 先到 120，再到 90：最大回撤 = 25%。首根同根 high/low 不会被强行排序。
+    expect(computeHoldingDynamicMaxDrawdownPct({ klines: bars, startMs: 0, endMs: 180_000, barMs: 60_000 })).toBeCloseTo(25, 9);
+  });
+
+  it('没有相交 K 线或窗口非法时返回 null', () => {
+    expect(computeHoldingDynamicMaxDrawdownPct({ klines: bars, startMs: 300_000, endMs: 360_000, barMs: 60_000 })).toBeNull();
+    expect(computeHoldingDynamicMaxDrawdownPct({ klines: bars, startMs: 10, endMs: 0, barMs: 60_000 })).toBeNull();
   });
 });
 
