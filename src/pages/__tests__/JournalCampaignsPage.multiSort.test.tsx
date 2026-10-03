@@ -674,6 +674,10 @@ describe('战役列表：多级排序', () => {
     expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('≥ 2.10');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
+    // 分布权重的背景色阶要有足够区分度：常见区间不再都挤在非常浅的 10%～20% 琥珀底里。
+    const heatCells = Array.from(crossTab.querySelectorAll<HTMLElement>('td[data-distribution-share]'));
+    const heatOpacities = heatCells.map(cell => Number(cell.style.backgroundColor.match(/[,/]\s*([\d.]+)\)?$/)?.[1] ?? 0));
+    expect(Math.max(...heatOpacities) - Math.min(...heatOpacities)).toBeGreaterThan(0.15);
     expect(within(stats).getByTestId('sort-chain-quartile-note')).toHaveTextContent('「≥ x」含 x；「a ~ b」含 a、不含 b；「< x」不含 x');
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('sort-chain-stats')).not.toBeInTheDocument());

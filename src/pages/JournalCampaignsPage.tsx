@@ -307,6 +307,16 @@ const SORT_CHAIN_NOTE = `${SORT_CHAIN_CONTROL} select-none border-l border-[#F0B
 const SORT_CHAIN_NOTE_BINNED = 'font-medium text-[#8F6B00] dark:text-[#F0B90B]/85';
 const SORT_CHAIN_NOTE_EFFECT = 'font-mono tabular-nums text-muted-foreground/70';
 const SORT_CHAIN_NOTE_IDLE = 'text-[#B7860B]/75 dark:text-[#F0B90B]/55';
+
+/**
+ * 分布交叉表的琥珀热力色阶。原来的 6% + 占比 × 40% 在常见的 10%～40% 区间只差约 12 个百分点，
+ * 肉眼几乎分不出。现在放大常用区间、在 50% 后封顶：12% / 25% / 37% 分别约为 14% / 25% / 34%，
+ * 同时避免极端单元格变成实心黄块而压住文字。
+ */
+export function sortCrossTabHeatOpacity(share: number): number {
+  if (!Number.isFinite(share) || share <= 0) return 0;
+  return Math.min(0.445, 0.045 + Math.min(share, 0.5) * 0.8);
+}
 /** 触屏长按排序项多久算「加为下一级」。 */
 const SORT_LONG_PRESS_MS = 450;
 
@@ -3280,7 +3290,8 @@ export default function JournalCampaignsPage() {
                       <td
                         key={index}
                         className={cell}
-                        style={count > 0 ? { backgroundColor: `rgba(240, 185, 11, ${(0.06 + share * 0.4).toFixed(3)})` } : undefined}
+                        data-distribution-share={count > 0 ? share.toFixed(4) : undefined}
+                        style={count > 0 ? { backgroundColor: `rgba(240, 185, 11, ${sortCrossTabHeatOpacity(share).toFixed(3)})` } : undefined}
                       >
                         <div className={count > 0 ? 'text-foreground/85' : 'text-muted-foreground/40'}>{count}</div>
                         <div className="text-[9px] text-muted-foreground/70">{count > 0 ? `${Math.round(share * 100)}%` : ''}</div>
