@@ -152,6 +152,32 @@ export function computeHoldingDynamicMaxDrawdownPct(args: {
   return runningPeak == null ? null : Math.max(0, maxDrawdown);
 }
 
+/**
+ * 「动态最大回撤」的有效持仓终点：通常是主力平仓时刻；但若最后一次成交的滚动对冲
+ * 与主力属于同一次平仓操作，则从这张对冲开仓起主力风险已经被锁住，窗口在其开仓时刻结束。
+ *
+ * “同一次平仓”沿用全站统一的一分钟容差；初始对冲 A/B 不冒充“最后一次滚动对冲”。
+ */
+export function resolveHoldingDynamicDrawdownEndMs(
+  inputs: readonly PriceChangeLegInput[],
+  mainCloseTime: number | null,
+  fallbackEndMs: number,
+): number {
+  const ordinaryEndMs = usable(mainCloseTime) ? mainCloseTime : fallbackEndMs;
+  if (!usable(mainCloseTime)) return ordinaryEndMs;
+
+  const lastRollingHedge = inputs
+    .filter(leg => leg.role === 'hedge_rolling'
+      && usable(leg.openTime) && leg.openTime < mainCloseTime
+      && usable(leg.closeTime) && leg.closeTime > leg.openTime)
+    .sort((a, b) => (b.openTime as number) - (a.openTime as number) || b.id.localeCompare(a.id))[0];
+
+  return lastRollingHedge
+    && Math.abs((lastRollingHedge.closeTime as number) - mainCloseTime) <= SAME_CLOSE_TOLERANCE_MS
+    ? (lastRollingHedge.openTime as number)
+    : ordinaryEndMs;
+}
+
 function usable(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }

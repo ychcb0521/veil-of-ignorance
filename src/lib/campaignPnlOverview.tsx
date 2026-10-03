@@ -364,8 +364,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: dynamicMaxDrawdownPct == null ? 'text-muted-foreground' : 'text-foreground',
       help: (
         <>
-          <p>主力持仓期间，从此前已经出现的价格高点到此后低点的最大跌幅。它衡量持仓过程真正经历过的最深峰谷回撤，而不是开仓到平仓的涨跌幅。</p>
+          <p>主力有效持仓期间，从此前已经出现的价格高点到此后低点的最大跌幅。它衡量持仓过程真正经历过的最深峰谷回撤，而不是开仓到平仓的涨跌幅。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">动态最大回撤 = maxₜ［（此前峰值 − 此后谷值）÷ 此前峰值］× 100%</div>
+          <p>通常计算到主力平仓；若最后一次滚动对冲与主力在同一次操作中平仓，则该对冲触发后风险已被锁住，计算窗口提前结束于这张对冲的开仓时刻。</p>
           <p>高点必须早于低点；按当前计算周期 K 线估计，同一根 K 线内 high 与 low 的先后未知，因此不把同根 K 线强行解释成一次完整峰谷。</p>
         </>
       ),

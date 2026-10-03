@@ -4,7 +4,7 @@ import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { Button } from '@/components/ui/button';
-import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignMainAddCount, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
+import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignMainAddCount, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, resolveHoldingDynamicDrawdownEndMs, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
 import {
   AlertDialog,
@@ -1646,14 +1646,18 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const dynamicMaxDrawdownPct = useMemo(() => {
     if (!campaign || klines.length === 0) return null;
     const startMs = actualPriceChange.entryOpenTime ?? new Date(campaign.opened_at).getTime();
-    const endMs = actualPriceChange.mainCloseTime ?? new Date(effectiveClosedAt).getTime();
+    const endMs = resolveHoldingDynamicDrawdownEndMs(
+      Object.values(actualMainPriceChange.byLegId),
+      actualPriceChange.mainCloseTime,
+      new Date(effectiveClosedAt).getTime(),
+    );
     return computeHoldingDynamicMaxDrawdownPct({
       klines,
       startMs,
       endMs,
       barMs: intervalToMs(computeInterval),
     });
-  }, [actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
+  }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;

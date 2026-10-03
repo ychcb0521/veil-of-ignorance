@@ -17,6 +17,7 @@ import {
   counterfactualPriceChange,
   describePriceChangeExitSource,
   formatEfficiency,
+  resolveHoldingDynamicDrawdownEndMs,
   SAME_CLOSE_TOLERANCE_MS,
 } from '@/lib/campaignMainPriceChange';
 import type { CampaignCounterfactualManualLeg, CampaignEvent, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -68,6 +69,25 @@ describe('持仓期间动态最大回撤：此前峰值到此后谷值', () => {
   it('没有相交 K 线或窗口非法时返回 null', () => {
     expect(computeHoldingDynamicMaxDrawdownPct({ klines: bars, startMs: 300_000, endMs: 360_000, barMs: 60_000 })).toBeNull();
     expect(computeHoldingDynamicMaxDrawdownPct({ klines: bars, startMs: 10, endMs: 0, barMs: 60_000 })).toBeNull();
+  });
+
+  it('最后一次滚动对冲与主力同平时，持仓窗口结束于该对冲的开仓时刻', () => {
+    const mainClose = 600_000;
+    const inputs = [
+      { id: 'main', role: 'main_open', side: 'long', entryPrice: 100, exitPrice: 110, openTime: 0, closeTime: mainClose },
+      { id: 'roll-1', role: 'hedge_rolling', side: 'short', entryPrice: 105, exitPrice: 101, openTime: 180_000, closeTime: mainClose },
+      { id: 'roll-2', role: 'hedge_rolling', side: 'short', entryPrice: 108, exitPrice: 102, openTime: 420_000, closeTime: mainClose + 30_000 },
+    ] as const;
+    expect(resolveHoldingDynamicDrawdownEndMs(inputs, mainClose, 900_000)).toBe(420_000);
+  });
+
+  it('只看最后一次滚动对冲：它没有与主力同平时保持主力平仓为终点', () => {
+    const mainClose = 600_000;
+    const inputs = [
+      { id: 'roll-1', role: 'hedge_rolling', side: 'short', entryPrice: 105, exitPrice: 101, openTime: 180_000, closeTime: mainClose },
+      { id: 'roll-2', role: 'hedge_rolling', side: 'short', entryPrice: 108, exitPrice: 102, openTime: 420_000, closeTime: mainClose - SAME_CLOSE_TOLERANCE_MS - 1 },
+    ] as const;
+    expect(resolveHoldingDynamicDrawdownEndMs(inputs, mainClose, 900_000)).toBe(mainClose);
   });
 });
 
