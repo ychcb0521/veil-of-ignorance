@@ -340,14 +340,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'unrealizedPriceChangePct',
       label: '涨幅未兑现',
       value: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
-      color: unrealizedPriceChangePct == null || Number(unrealizedPriceChangePct.toFixed(2)) === 0
-        ? '#848E9C' : unrealizedPriceChangePct > 0 ? '#F6465D' : '#0ECB81',
-      valueClassName: unrealizedPriceChangePct == null || Number(unrealizedPriceChangePct.toFixed(2)) === 0
-        ? 'text-muted-foreground' : unrealizedPriceChangePct > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]',
+      color: unrealizedPriceChangePct == null ? '#848E9C' : unrealizedPriceChangePct > 2 * expectedDrawdownPct ? '#F6465D' : '#181A20',
+      valueClassName: unrealizedPriceChangePct == null
+        ? 'text-muted-foreground' : unrealizedPriceChangePct > 2 * expectedDrawdownPct ? 'text-[#F6465D]' : 'text-foreground',
       help: (
         <>
           <p>主力曾经走出的峰值涨幅与最终涨跌幅之差。数值越高，表示从峰值回吐的百分点越多。</p>
           <p>仅当峰值涨幅严格大于预期回撤时计算；行情尚未越过初始风险尺度时，本项不成立。</p>
+          <p>读数大于 2 倍预期回撤时标红，否则使用正文色。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅未兑现 = 峰值涨幅 − 涨跌幅</div>
           {unrealizedPriceChangePct == null
             ? <p>缺少必要数据、预期回撤无效，或峰值涨幅不大于预期回撤时不计算。</p>
@@ -359,9 +359,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'dynamicMaxDrawdownPct',
       label: '动态最大回撤',
       value: dynamicMaxDrawdownPct == null ? '—' : `${dynamicMaxDrawdownPct.toFixed(2)}%`,
-      color: dynamicMaxDrawdownPct == null || Number(dynamicMaxDrawdownPct.toFixed(2)) === 0 ? '#848E9C' : '#F6465D',
-      valueClassName: dynamicMaxDrawdownPct == null || Number(dynamicMaxDrawdownPct.toFixed(2)) === 0
-        ? 'text-muted-foreground' : 'text-[#F6465D]',
+      color: dynamicMaxDrawdownPct == null ? '#848E9C' : '#181A20',
+      valueClassName: dynamicMaxDrawdownPct == null ? 'text-muted-foreground' : 'text-foreground',
       help: (
         <>
           <p>主力持仓期间，从此前已经出现的价格高点到此后低点的最大跌幅。它衡量持仓过程真正经历过的最深峰谷回撤，而不是开仓到平仓的涨跌幅。</p>

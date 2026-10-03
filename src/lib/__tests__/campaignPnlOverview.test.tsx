@@ -98,12 +98,12 @@ describe('buildCampaignPnlOverviewItems', () => {
     const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual([
       G, undefined, G, G, G, G, G,
-      G, undefined, G, G, R, R, undefined,
+      G, undefined, G, G, '#181A20', '#181A20', undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
       T, undefined, T, T, T, T, T,
-      T, undefined, T, T, 'text-[#F6465D]', 'text-[#F6465D]', undefined,
+      T, undefined, T, T, 'text-foreground', 'text-foreground', undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -325,12 +325,14 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey({ peakPriceChangePct: null }).unrealizedPriceChangePct.value).toBe('—');
   });
 
-  it('涨幅未兑现 = 25% − 20% = 5%；正值用风险色', () => {
+  it('涨幅未兑现 = 25% − 20% = 5%；不超过两倍预期回撤用正文色，超过才用风险色', () => {
     expect(byKey().unrealizedPriceChangePct.value).toBe('5.00%');
-    expect(byKey().unrealizedPriceChangePct.color).toBe('#F6465D');
+    expect(byKey().unrealizedPriceChangePct.color).toBe('#181A20');
+    expect(byKey({ mainPriceChangePct: 5 }).unrealizedPriceChangePct.color).toBe('#181A20');
+    expect(byKey({ mainPriceChangePct: 4.99 }).unrealizedPriceChangePct.color).toBe('#F6465D');
     expect(byKey({ mainPriceChangePct: 25 }).unrealizedPriceChangePct.value).toBe('0.00%');
     expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.value).toBe('-5.00%');
-    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.color).toBe('#0ECB81');
+    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.color).toBe('#181A20');
     expect(byKey({ peakPriceChangePct: 0 }).unrealizedPriceChangePct.value).toBe('—');
     expect(byKey({ peakPriceChangePct: 10, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).toBe('—');
     expect(byKey({ peakPriceChangePct: 9.99, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).toBe('—');
