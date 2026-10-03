@@ -35,6 +35,7 @@ export type CampaignPnlOverviewItemKey =
   | 'initialMainExposureNotional'
   | 'peakPriceChange'
   | 'peakPriceEfficiency'
+  | 'unrealizedPriceChangePct'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -70,7 +71,7 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
 ];
 
 /**
- * 右栏：结果与仓位。已实现 P&L 置顶，其后是最大预期亏损、峰值涨幅、峰值涨幅倍数、峰值浮盈，再放两项名义仓位。
+ * 右栏：结果与仓位。已实现 P&L 置顶，其后是最大预期亏损、峰值涨幅、峰值涨幅倍数、涨幅未兑现，再放两项名义仓位。
  * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
@@ -78,7 +79,7 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
-  'peakUnrealizedPnl',
+  'unrealizedPriceChangePct',
   'initialMainExposureNotional',
   'mainSideNotional',
 ];
@@ -135,6 +136,17 @@ export interface CampaignPnlOverviewMetrics {
   helpOverrides?: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>>;
   /** 在标准帮助文案末尾追加的说明（口径相同、只差一个前提时用）。 */
   extraNotes?: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>>;
+}
+
+/** 涨幅未兑现 = (1 − 最终涨跌幅 ÷ 峰值涨幅) × 100%。峰值缺失或为 0 时没有可比较的分母。 */
+export function computeUnrealizedPriceChangePct(
+  mainPriceChangePct: number | null | undefined,
+  peakPriceChangePct: number | null | undefined,
+): number | null {
+  if (mainPriceChangePct == null || !Number.isFinite(mainPriceChangePct)
+    || peakPriceChangePct == null || !Number.isFinite(peakPriceChangePct) || peakPriceChangePct <= 0) return null;
+  const value = (1 - mainPriceChangePct / peakPriceChangePct) * 100;
+  return Number.isFinite(value) ? value : null;
 }
 
 export function pnlColor(value: number | null) {
@@ -199,7 +211,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     settlement: pnlSettlement,
     mainLeverage,
     initialMainExposureNotional,
-    peakUnrealizedPnl,
     peakPriceChangePct = null,
     initialExpectedMaxLoss,
     mainSideNotional,
@@ -215,6 +226,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   } = metrics;
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
   const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
+  const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency)
     : null;
@@ -310,18 +322,20 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
-      key: 'peakUnrealizedPnl',
-      label: '峰值浮盈',
-      // 【用户要求】「峰值浮盈带上单位」：与已实现 P&L、名义仓位同样写 USDT，右端对齐
-      value: `${peakUnrealizedPnl.toFixed(2)} USDT`,
+      key: 'unrealizedPriceChangePct',
+      label: '涨幅未兑现',
+      value: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
+      color: unrealizedPriceChangePct == null || Number(unrealizedPriceChangePct.toFixed(2)) === 0
+        ? '#848E9C' : unrealizedPriceChangePct > 0 ? '#F6465D' : '#0ECB81',
+      valueClassName: unrealizedPriceChangePct == null || Number(unrealizedPriceChangePct.toFixed(2)) === 0
+        ? 'text-muted-foreground' : unrealizedPriceChangePct > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]',
       help: (
         <>
-          <p>战役期间某一时点的未实现盈亏，加上截至该时点已经落袋的盈亏之后，所得累计战役权益的最高值。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值浮盈 = maxₜ（未实现盈亏ₜ + 累计已实现盈亏ₜ）</div>
-          <p>已落袋部分包含镜像 TP 的已实现盈亏，与上方「已实现 P&amp;L」认领同一批成交记录，平仓价被 K 线校正过的腿按校正后的盈亏计入。还原不出持仓时段的腿不进路径（本地没有成交记录、事件流里也没有触发时刻或历史快照的对冲，只剩复盘快照的回场对冲等），它们的盈亏只在「已实现 P&amp;L」里；历史归类时还挂着的保护单（事件快照里既没有成交 id 也没有已实现）从未成交，也不持有；通过「记录决策」挂出的保护单，事件里的 id 其实是委托 id，本地委托记录显示它已撤单或仍挂着时同样按从未成交处理，本地查不到这张委托（换了浏览器）时无法判定，仍按归类快照从挂出时刻持有到战役结束。峰值浮盈至少取到最终已实现 P&amp;L，所以仍可与战役最终盈利直接比较。</p>
-          <p>每根 K 线同时使用最高价和最低价重估当时仍持有的完整多空组合；分批平仓、镜像落袋和对冲拆除均按各自发生时点切换仓位状态。本地有成交记录时，一条腿分几刀平掉（M 减仓、并仓后的镜像止盈），每一刀都计入，各按自己的数量与平仓时刻进出；本地没有成交记录时（换了浏览器、清过历史成交），主力 / 镜像腿按 Leg 快照整条还原——按计划仓位从开仓持有到最后一刀，先平掉的几刀还原不出来，这台浏览器上的峰值浮盈可能高于实际峰值。</p>
-          <p>已结束的战役从开仓扫到结束时间，但不早于最后一次平仓：结束时间记得比最后一次平仓还早的老战役（旧版结束对话框在东八区会把结束时间记早 8 小时），扫到最后一次平仓为止，平仓时刻不明的腿也持有到那一刻。</p>
-          <p>历史战役会从关联成交、Leg 快照和事件快照还原，同一个仓位只持有一次；按事件快照还原的腿，平仓时刻与已实现取腿上的（与「已实现 P&amp;L」同一份，归类之后补上或改过的也算），腿上没有时才取事件里的。精度以可用 K 线粒度为限，不将不同腿分别放在不可能同时出现的最优价格上。</p>
+          <p>主力曾经走出的峰值涨幅中，最终没有保留下来的比例。数值越高，表示从峰值回吐得越多。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅未兑现 =（1 − 涨跌幅 ÷ 峰值涨幅）× 100%</div>
+          {unrealizedPriceChangePct == null
+            ? <p>缺少涨跌幅、峰值涨幅，或峰值涨幅为 0 时不计算。</p>
+            : <p className="font-mono text-foreground">本场 =（1 − {formatLegPriceChangePct(mainPriceChangePct)} ÷ {formatLegPriceChangePct(peakPriceChangePct)}）× 100% = {unrealizedPriceChangePct.toFixed(2)}%</p>}
         </>
       ),
     },

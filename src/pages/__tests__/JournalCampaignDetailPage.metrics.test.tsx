@@ -504,7 +504,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '已实现 P&L',
       '杠杆倍数',
       '主力开仓名义仓位',
-      '峰值浮盈',
+      '涨幅未兑现',
       '最大预期亏损',
       '多方总名义仓位',
       '预期回撤',
@@ -536,14 +536,14 @@ describe('JournalCampaignDetailPage metrics', () => {
       '最大预期亏损',
       '峰值涨幅',
       '峰值涨幅倍数',
-      '峰值浮盈',
+      '涨幅未兑现',
       '主力开仓名义仓位',
       '多方总名义仓位',
     ]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '主力开仓名义仓位', '多方总名义仓位']);
     expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));

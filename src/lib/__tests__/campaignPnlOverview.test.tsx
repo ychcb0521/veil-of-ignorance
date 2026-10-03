@@ -27,7 +27,7 @@ const GOLDEN_LABELS = [
   '最大预期亏损',
   '峰值涨幅',
   '峰值涨幅倍数',
-  '峰值浮盈',
+  '涨幅未兑现',
   '主力开仓名义仓位',
   '多方总名义仓位',
 ];
@@ -44,7 +44,7 @@ const GOLDEN_KEYS = [
   'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
-  'peakUnrealizedPnl',
+  'unrealizedPriceChangePct',
   'initialMainExposureNotional',
   'mainSideNotional',
 ];
@@ -89,19 +89,20 @@ describe('buildCampaignPnlOverviewItems', () => {
       '100.00 USDT',
       '+25.00%',
       '+2.50',
-      '250.50 USDT',
+      '20.00%',
       '1000.00 USDT',
       '1500.00 USDT',
     ]);
     const G = '#0ECB81';
+    const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual([
       G, undefined, G, G, G, G, G,
-      G, undefined, G, G, undefined, undefined, undefined,
+      G, undefined, G, G, R, undefined, undefined,
     ]);
     const T = 'text-[#0ECB81]';
     expect(items.map(item => item.valueClassName)).toEqual([
       T, undefined, T, T, T, T, T,
-      T, undefined, T, T, undefined, undefined, undefined,
+      T, undefined, T, T, 'text-[#F6465D]', undefined, undefined,
     ]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([
       // 左栏 7 项（递进链），右栏 7 项（结果与仓位）；两栏排 7 行
@@ -129,11 +130,9 @@ describe('buildCampaignPnlOverviewItems', () => {
       mainSideNotional: null,
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
-    for (const key of GOLDEN_KEYS.filter(item => item !== 'peakUnrealizedPnl')) {
+    for (const key of GOLDEN_KEYS) {
       expect(byKey[key].value, key).toBe('—');
     }
-    // 【用户要求】峰值浮盈带单位；0 就印 0.00 USDT
-    expect(byKey.peakUnrealizedPnl.value).toBe('0.00 USDT');
     expect(byKey.realizedPnl.color).toBe('#64748B');
     expect(byKey.realizedPnl.valueClassName).toBe('text-muted-foreground');
     expect(byKey.payoffRatio.color).toBe('#64748B');
@@ -234,7 +233,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '峰值浮盈', '主力开仓名义仓位', '多方总名义仓位']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '主力开仓名义仓位', '多方总名义仓位']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('算术期望')).toBe('1');
@@ -244,7 +243,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(rowOf('最大预期亏损')).toBe('2');
     expect(rowOf('峰值涨幅')).toBe('3');
     expect(rowOf('峰值涨幅倍数')).toBe('4');
-    expect(rowOf('峰值浮盈')).toBe('5');
+    expect(rowOf('涨幅未兑现')).toBe('5');
     expect(rowOf('多方总名义仓位')).toBe('7');
     expect(rowOf('几何期望')).toBe('7');
     // 【用户要求】底部「期望口径」那行脚注删掉
@@ -283,7 +282,7 @@ describe('CampaignPnlOverviewPanel', () => {
   it('helpOverrides 整段替换、extraNotes 追加在标准文案之后；testId 落在卡片上，卡片里只有 13 个说明按钮', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       helpOverrides: { realizedPnl: ['替换后的说明', { formula: 'P&L = Σ 手动腿' }] },
-      extraNotes: { peakUnrealizedPnl: [{ warning: '按 1h K 线估计' }] },
+      extraNotes: { unrealizedPriceChangePct: [{ warning: '按 1h K 线估计' }] },
     }));
     render(
       <CampaignPnlOverviewPanel
@@ -305,53 +304,37 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('P&L = Σ 手动腿')).toBeInTheDocument();
     expect(screen.queryByText(/这个数与下方 Legs 表的「合计」行/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '峰值浮盈说明' }));
-    expect(screen.getByText(/每根 K 线同时使用最高价和最低价重估/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '涨幅未兑现说明' }));
+    expect(screen.getByText(/涨幅未兑现 =（1 − 涨跌幅 ÷ 峰值涨幅）× 100%/)).toBeInTheDocument();
     expect(screen.getByText('按 1h K 线估计')).toHaveClass('text-[#F0B90B]');
   });
 });
 
-describe('【用户要求】盈亏概览：峰值价格指标、峰值浮盈与几何期望', () => {
+describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现与几何期望', () => {
   const byKey = (overrides: Partial<CampaignPnlOverviewMetrics> = {}) =>
     Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics(overrides)).map(item => [item.key, item]));
   const helpText = (help: ReactNode) => render(<>{help}</>).container.textContent ?? '';
 
-  it('峰值涨幅与峰值涨幅倍数在峰值浮盈上方；没有价格路径时均为「—」', () => {
+  it('峰值涨幅、峰值涨幅倍数与涨幅未兑现使用同一价格路径；没有路径时均为「—」', () => {
     expect(byKey().peakPriceChange.value).toBe('+25.00%');
     expect(byKey().peakPriceEfficiency.value).toBe('+2.50');
     expect(byKey({ peakPriceChangePct: null }).peakPriceChange.value).toBe('—');
     expect(byKey({ peakPriceChangePct: null }).peakPriceEfficiency.value).toBe('—');
+    expect(byKey({ peakPriceChangePct: null }).unrealizedPriceChangePct.value).toBe('—');
   });
 
-  it('峰值浮盈带单位 USDT', () => {
-    expect(byKey().peakUnrealizedPnl.value).toBe('250.50 USDT');
+  it('涨幅未兑现 = (1 − 20% ÷ 25%) × 100% = 20%；正值用风险色', () => {
+    expect(byKey().unrealizedPriceChangePct.value).toBe('20.00%');
+    expect(byKey().unrealizedPriceChangePct.color).toBe('#F6465D');
+    expect(byKey({ mainPriceChangePct: 25 }).unrealizedPriceChangePct.value).toBe('0.00%');
+    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.value).toBe('-20.00%');
+    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.color).toBe('#0ECB81');
+    expect(byKey({ peakPriceChangePct: 0 }).unrealizedPriceChangePct.value).toBe('—');
   });
 
   it('几何期望的说明写明本场资产分母用的是哪一种（原来在脚注里）', () => {
     expect(helpText(byKey().geometricExpectancy.help)).toContain('本场的资产分母：主力开仓那一刻的账户总资产快照。');
     expect(helpText(byKey({ initialRisk: { drawdownFraction: 0.01, source: 'current_account_fallback' } }).geometricExpectancy.help))
       .toContain('本场的资产分母：这场没有开仓时的资产快照，用今日当前总账户资产估算。');
-  });
-});
-
-describe('峰值浮盈的说明：分刀还原只在本地有成交记录时成立', () => {
-  const peakHelp = () => {
-    const item = buildCampaignPnlOverviewItems(winnerMetrics()).find(entry => entry.key === 'peakUnrealizedPnl');
-    const { container } = render(<>{item?.help}</>);
-    return container.textContent ?? '';
-  };
-
-  it('「每一刀都计入」带着前提；本地没有成交记录时按 Leg 快照整条还原、峰值可能偏高，这一句写明', () => {
-    const help = peakHelp();
-    expect(help).toContain('本地有成交记录时，一条腿分几刀平掉（M 减仓、并仓后的镜像止盈），每一刀都计入');
-    expect(help).not.toContain('切换仓位状态，一条腿分几刀平掉时每一刀都计入');
-    expect(help).toContain('本地没有成交记录时（换了浏览器、清过历史成交），主力 / 镜像腿按 Leg 快照整条还原');
-    expect(help).toContain('峰值浮盈可能高于实际峰值');
-  });
-
-  it('已结束战役的窗口不早于最后一次平仓；挂着委托 id 的保护单按本地委托记录判定', () => {
-    const help = peakHelp();
-    expect(help).toContain('已结束的战役从开仓扫到结束时间，但不早于最后一次平仓');
-    expect(help).toContain('本地委托记录显示它已撤单或仍挂着时同样按从未成交处理');
   });
 });
