@@ -148,7 +148,7 @@ export function createSynthFapiFetch() {
   };
   const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
-    if (url.hostname !== 'fapi.binance.com' || url.pathname !== '/fapi/v1/klines') {
+    if (!['fapi.binance.com', 'www.binance.com'].includes(url.hostname) || url.pathname !== '/fapi/v1/klines') {
       throw new Error(`测试里不许发真实网络请求：${url.href}`);
     }
     const interval = url.searchParams.get('interval') ?? '';

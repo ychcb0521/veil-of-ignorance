@@ -87,7 +87,7 @@ describe('useReplayKlines：停用后原样回来不重拉', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBeNull();
     expect(result.current.klines).toEqual(synthKlineRange('15m', FROM, TO));
-    expect(synth.calls).toHaveLength(2);
+    expect(synth.calls).toHaveLength(3);
   });
 
   it('还在拉的时候被停用：回来照常重拉（被中断的那一趟不算数）', async () => {

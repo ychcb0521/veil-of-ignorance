@@ -4,7 +4,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
-import { supabase } from '@/integrations/supabase/client';
 
 export type ReplayKlineRequestPriority = 'interactive' | 'background';
 
@@ -20,7 +19,7 @@ const pendingKlineRequests: PendingKlineRequest[] = [];
 let klineRequestPumpRunning = false;
 let nextKlineRequestAt = 0;
 let klineCooldownUntil = 0;
-let preferKlineProxyUntil = 0;
+let preferAlternateKlineEndpointUntil = 0;
 
 // Interactive charts retain their existing immediate behaviour. Only bulk/background pagination is
 // paced; it is the source of sustained request pressure and must yield to detail-page work.
@@ -46,10 +45,6 @@ async function pumpKlineRequests(): Promise<void> {
         continue;
       }
       const now = Date.now();
-      if (klineCooldownUntil > now) {
-        item.reject(new Error('API 429'));
-        continue;
-      }
       const delay = Math.max(0, nextKlineRequestAt - now);
       if (delay > 0) await wait(delay);
       if (item.signal?.aborted) {
@@ -59,13 +54,6 @@ async function pumpKlineRequests(): Promise<void> {
       try {
         const response = await item.run();
         nextKlineRequestAt = Date.now() + requestGapMs(item.priority);
-        if (item.priority === 'background' && (response.status === 418 || response.status === 429)) {
-          const retryAfterSeconds = Number(response.headers?.get?.('retry-after'));
-          const fallbackMs = response.status === 418 ? 120_000 : 30_000;
-          klineCooldownUntil = Date.now() + (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-            ? retryAfterSeconds * 1_000
-            : fallbackMs);
-        }
         item.resolve(response);
       } catch (error) {
         item.reject(error);
@@ -94,24 +82,6 @@ function governedKlineFetch(
   });
 }
 
-async function fetchAuthenticatedKlineFallback(qs: URLSearchParams, signal?: AbortSignal): Promise<Response> {
-  const { data } = await supabase.auth.getSession();
-  const accessToken = data.session?.access_token;
-  if (!accessToken) return new Response(null, { status: 401 });
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-  return fetch(`${supabaseUrl}/functions/v1/binance-klines`, {
-    method: 'POST',
-    signal,
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: publishableKey,
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(Object.fromEntries(qs.entries())),
-  });
-}
-
 export async function fetchReplayKlineRange(
   symbol: string,
   interval: string,
@@ -134,23 +104,26 @@ export async function fetchReplayKlineRange(
       limit: String(limit),
     });
     const priority = options?.priority ?? 'interactive';
+    if (klineCooldownUntil > Date.now()) throw new Error('API 429');
+    const primaryUrl = `https://fapi.binance.com/fapi/v1/klines?${qs}`;
+    const alternateUrl = `https://www.binance.com/fapi/v1/klines?${qs}`;
     let res: Response;
-    if (priority === 'interactive' && preferKlineProxyUntil > Date.now()) {
-      res = await fetchAuthenticatedKlineFallback(qs, signal);
-      if (!res.ok) preferKlineProxyUntil = 0;
+    if (preferAlternateKlineEndpointUntil > Date.now()) {
+      res = await governedKlineFetch(alternateUrl, signal, priority);
+      if (res.status === 418 || res.status === 429) preferAlternateKlineEndpointUntil = 0;
     } else {
-      res = await governedKlineFetch(
-        `https://fapi.binance.com/fapi/v1/klines?${qs}`,
-        signal,
-        priority,
-      );
-      // The authenticated fallback is reserved for the campaign the user is actively viewing.
-      // Bulk list metrics remain on the paced direct queue and can never transfer their load here.
-      if (priority === 'interactive' && (res.status === 418 || res.status === 429)) {
-        const fallback = await fetchAuthenticatedKlineFallback(qs, signal);
-        if (fallback.ok) {
-          preferKlineProxyUntil = Date.now() + 5 * 60_000;
-          res = fallback;
+      res = await governedKlineFetch(primaryUrl, signal, priority);
+      if (res.status === 418 || res.status === 429) {
+        const alternate = await governedKlineFetch(alternateUrl, signal, priority);
+        if (alternate.ok) {
+          preferAlternateKlineEndpointUntil = Date.now() + 5 * 60_000;
+          res = alternate;
+        } else if (priority === 'background' && (alternate.status === 418 || alternate.status === 429)) {
+          const retryAfterSeconds = Number(alternate.headers?.get?.('retry-after'));
+          const fallbackMs = alternate.status === 418 ? 120_000 : 30_000;
+          klineCooldownUntil = Date.now() + (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1_000
+            : fallbackMs);
         }
       }
     }
