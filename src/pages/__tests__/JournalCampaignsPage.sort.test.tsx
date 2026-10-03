@@ -9,9 +9,20 @@ import JournalCampaignsPage from '../JournalCampaignsPage';
 
 beforeEach(() => {
   clearCampaignListCaches();
+  sessionStorage.clear();
   restoredIds.clear();
   purgedIds.clear();
+  mockFetchReplayKlineRange.mockReset();
+  mockFetchReplayKlineRange.mockResolvedValue([]);
 });
+
+const { mockFetchReplayKlineRange } = vi.hoisted(() => ({
+  mockFetchReplayKlineRange: vi.fn(),
+}));
+
+vi.mock('@/hooks/useReplayKlines', () => ({
+  fetchReplayKlineRange: mockFetchReplayKlineRange,
+}));
 
 vi.mock('@/lib/campaignLegExecution', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/campaignLegExecution')>();
@@ -2158,6 +2169,37 @@ describe('JournalCampaignsPage sorting', () => {
     await waitFor(() => expect(mockRestoreCampaign).toHaveBeenCalledWith('deleted-campaign'));
     await waitFor(() => expect(screen.queryByTestId('deleted-campaign-row')).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(5));
+  });
+
+  it('【隔离】涨幅未兑现遇到 API 418 只请求一次就停队列，切回普通排序不再占用 K 线接口', async () => {
+    mockFetchReplayKlineRange.mockRejectedValue(new Error('API 418'));
+    const originalTimes = tradeHistory.map(record => [record.openTime, record.closeTime] as const);
+    tradeHistory.forEach((record, index) => {
+      const campaign = campaigns[index];
+      record.openTime = Date.parse(campaign.opened_at) + 60_000;
+      record.closeTime = Date.parse(campaign.closed_at!) - 60_000;
+    });
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+      expect(await screen.findByTestId('campaign-unrealized-rate-limit')).toHaveTextContent('涨幅未兑现已暂停计算');
+      expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+      await new Promise(resolve => window.setTimeout(resolve, 50));
+      expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('aria-pressed', 'true');
+    } finally {
+      tradeHistory.forEach((record, index) => {
+        [record.openTime, record.closeTime] = originalTimes[index];
+      });
+    }
   });
 });
 

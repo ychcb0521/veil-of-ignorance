@@ -1986,11 +1986,14 @@ export default function JournalCampaignsPage() {
   const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
   const [peakPriceChangeByCampaign, setPeakPriceChangeByCampaign] = useState<ReadonlyMap<string, number | null>>(() => new Map());
+  const [unrealizedMetricLoadError, setUnrealizedMetricLoadError] = useState<string | null>(null);
+  const [unrealizedMetricRetryKey, setUnrealizedMetricRetryKey] = useState(0);
   const peakPriceChangeRef = useRef<ReadonlyMap<string, number | null>>(peakPriceChangeByCampaign);
   useEffect(() => {
     const empty = new Map<string, number | null>();
     peakPriceChangeRef.current = empty;
     setPeakPriceChangeByCampaign(empty);
+    setUnrealizedMetricLoadError(null);
   }, [userId]);
   const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
@@ -2184,7 +2187,8 @@ export default function JournalCampaignsPage() {
   }, [rows, operationRange]);
   /**
    * 峰值涨幅依赖历史 K 线，列表基础快照里没有。只在用户查看或排序「涨幅未兑现」时按需加载，
-   * 四路并发并按战役更新时间放进会话缓存；不上传盈亏、仓位或复盘内容。
+   * 严格串行、每次远端请求后留出间隔，并按战役更新时间放进会话缓存；不上传盈亏、仓位或复盘内容。
+   * 这里不能抢占详情页 K 线的交易所额度：遇到 418 / 429 立即停掉整条指标队列，绝不继续撞接口。
    */
   const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
     || (metricChartOpen && (metricChartKey === 'unrealizedPriceChangePct' || metricChartKey === 'unrealizedPriceChangePctDistribution'));
@@ -2192,8 +2196,18 @@ export default function JournalCampaignsPage() {
     if (!unrealizedMetricNeeded || !campaignRowsComplete || scopedRows.length === 0) return;
     const controller = new AbortController();
     let cancelled = false;
+    const stopWhenPageLeavesForeground = () => {
+      if (document.visibilityState !== 'hidden') return;
+      cancelled = true;
+      controller.abort();
+    };
+    document.addEventListener('visibilitychange', stopWhenPageLeavesForeground);
+    setUnrealizedMetricLoadError(null);
     const pending = scopedRows.filter(row => !peakPriceChangeRef.current.has(row.campaign.id));
-    if (pending.length === 0) return () => controller.abort();
+    if (pending.length === 0) return () => {
+      controller.abort();
+      document.removeEventListener('visibilitychange', stopWhenPageLeavesForeground);
+    };
     const publish = (campaignId: string, value: number | null) => {
       if (cancelled) return;
       const next = new Map(peakPriceChangeRef.current).set(campaignId, value);
@@ -2201,28 +2215,28 @@ export default function JournalCampaignsPage() {
       setPeakPriceChangeByCampaign(next);
     };
     let cursor = 0;
-    const loadOne = async (row: CampaignCardData): Promise<void> => {
+    const loadOne = async (row: CampaignCardData): Promise<'cached' | 'requested' | 'rate-limited'> => {
       const cacheKey = `campaign-peak-price-v1:${row.campaign.id}:${row.campaign.updated_at}`;
       const cached = sessionStorage.getItem(cacheKey);
       if (cached != null) {
         const parsed = cached === 'null' ? null : Number(cached);
         if (parsed == null || Number.isFinite(parsed)) {
           publish(row.campaign.id, parsed);
-          return;
+          return 'cached';
         }
       }
       const change = campaignPriceChange(row.campaign, row.legs, row.tradeRecords);
       if (change.entryPrice == null || change.side == null) {
         sessionStorage.setItem(cacheKey, 'null');
         publish(row.campaign.id, null);
-        return;
+        return 'cached';
       }
       const startMs = new Date(row.campaign.opened_at).getTime();
       const endMs = change.mainCloseTime ?? new Date(row.campaign.closed_at ?? Date.now()).getTime();
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
         sessionStorage.setItem(cacheKey, 'null');
         publish(row.campaign.id, null);
-        return;
+        return 'cached';
       }
       const window = buildCampaignKlineTimeWindow(startMs, endMs, startMs, endMs);
       const interval = pickCampaignComputeInterval({ startMs: window.fromTime, endMs: window.toTime });
@@ -2245,27 +2259,44 @@ export default function JournalCampaignsPage() {
         });
         sessionStorage.setItem(cacheKey, value == null ? 'null' : String(value));
         publish(row.campaign.id, value);
+        return 'requested';
       } catch (error) {
         if (!controller.signal.aborted) {
           console.warn('Failed to load campaign peak price change', row.campaign.id, error);
+          if (error instanceof Error && /^API (418|429)$/.test(error.message)) {
+            setUnrealizedMetricLoadError('交易所接口正在限流，已停止“涨幅未兑现”的后台计算，以免影响战役 K 线。');
+            return 'rate-limited';
+          }
           publish(row.campaign.id, null);
         }
+        return 'requested';
       }
     };
+    const waitForRequestGap = () => new Promise<void>(resolve => {
+      const timer = window.setTimeout(resolve, 2_000);
+      controller.signal.addEventListener('abort', () => {
+        window.clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    });
     const worker = async () => {
       while (!cancelled) {
         const row = pending[cursor++];
         if (!row) return;
-        await loadOne(row);
+        const result = await loadOne(row);
+        if (result === 'rate-limited') return;
+        if (result === 'requested' && !cancelled) await waitForRequestGap();
       }
     };
-    void Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+    void worker();
     return () => {
       cancelled = true;
       controller.abort();
+      document.removeEventListener('visibilitychange', stopWhenPageLeavesForeground);
     };
-  }, [campaignRowsComplete, scopedRows, unrealizedMetricNeeded]);
+  }, [campaignRowsComplete, scopedRows, unrealizedMetricNeeded, unrealizedMetricRetryKey]);
   const unrealizedMetricLoading = unrealizedMetricNeeded
+    && unrealizedMetricLoadError == null
     && scopedRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id));
   useEffect(() => {
     if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
@@ -5164,6 +5195,20 @@ export default function JournalCampaignsPage() {
                 <div className="text-[12px] text-muted-foreground">
                   整表共 {rows.length} 场。换一个时间段，或点上方「操作时间」选回全部。
                 </div>
+              </>
+            ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoadError ? (
+              <>
+                <div className="text-[13px] font-medium text-destructive" data-testid="campaign-unrealized-rate-limit">
+                  涨幅未兑现已暂停计算
+                </div>
+                <div className="text-[12px] text-muted-foreground">{unrealizedMetricLoadError}</div>
+                <button
+                  type="button"
+                  className="inline-flex h-8 items-center justify-center rounded border border-border bg-background px-3 text-[12px] hover:bg-accent"
+                  onClick={() => setUnrealizedMetricRetryKey(value => value + 1)}
+                >
+                  稍后重试
+                </button>
               </>
             ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
               <>
