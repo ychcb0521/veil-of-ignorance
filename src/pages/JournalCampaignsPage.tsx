@@ -374,7 +374,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   },
   unrealizedPriceChangePct: {
     noun: '可计算涨幅未兑现',
-    hint: '只有峰值涨幅严格大于预期回撤、且主力涨跌幅与历史 K 线峰值都可计算的战役会进入当前排序',
+    hint: '需要主力涨跌幅与历史 K 线峰值；暂时缺少读数的战役保留在末尾',
   },
   addEfficiency: {
     noun: '可计算加仓效用',
@@ -796,7 +796,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-unrealizedPriceChangePct-view-time',
     seriesLabel: '涨幅未兑现时序',
     guide: {
-      yAxis: '涨幅未兑现 = 峰值涨幅 − 涨跌幅。只有峰值涨幅严格大于预期回撤时才计算，单位为百分点。',
+      yAxis: '涨幅未兑现 = 峰值涨幅 − 涨跌幅，单位为百分点。',
       point: '数值越高，代表主力曾经走出的有利行情最终兑现得越少；0% 表示全部兑现。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色 0% 线：峰值涨幅全部兑现。'],
@@ -816,7 +816,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '涨幅未兑现分布',
     guide: {
       yAxis: '落在该涨幅未兑现区间的战役数量：点从底线向上堆叠，堆得越高，这一档出现得越多。',
-      point: '每个点是一场满足“峰值涨幅 > 预期回撤”的战役；横向按涨幅未兑现百分点排列，不考虑时间先后。',
+      point: '每个点是一场可计算峰值涨幅与最终涨跌幅的战役；横向按涨幅未兑现百分点排列，不考虑时间先后。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色 0% 竖线：峰值行情全部兑现；线右仍有涨幅未兑现。',
@@ -1816,7 +1816,7 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-unrealized-price-change"
             title={unrealizedPriceChangePct == null
-              ? '涨幅未兑现只在峰值涨幅严格大于预期回撤、且主力涨跌幅与峰值涨幅都可计算时显示'
+              ? '涨幅未兑现会在主力涨跌幅与峰值涨幅都可计算时显示'
               : `涨幅未兑现 = 峰值涨幅 − 涨跌幅 = ${readings.unrealizedPriceChangePct}`}
             className={metricCell('unrealizedPriceChangePct')}
             data-sort-highlight={litAttr('unrealizedPriceChangePct')}
@@ -4407,7 +4407,7 @@ export default function JournalCampaignsPage() {
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>峰值涨幅按主力方向取持有窗口内最有利的 K 线极值：主多取最高价，主空取最低价。</div>
-                          <div>只有峰值涨幅严格大于预期回撤时才计算；不满足此前提、主力未平仓或历史 K 线暂未加载时显示「—」。</div>
+                          <div>主力未平仓或历史 K 线暂未加载时显示「—」。</div>
                           <div>0% 表示峰值行情全部兑现；数值越高，代表最终没有兑现的有利涨幅越多。</div>
                         </div>
                       </>

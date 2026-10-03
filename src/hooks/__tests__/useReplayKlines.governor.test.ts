@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/integrations/supabase/client', () => ({
+  supabase: { auth: { getSession: vi.fn(async () => ({ data: { session: { access_token: 'test-token' } } })) } },
+}));
+
 const candle = (time: number) => [time, '1', '2', '0.5', '1.5', '10'];
 
 afterEach(() => {
@@ -37,5 +41,20 @@ describe('replay K-line request governor', () => {
     await expect(fetchReplayKlineRange('ETHUSDT', '5m', 0, 60_000, undefined, { priority: 'background' }))
       .rejects.toThrow('API 429');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the authenticated fallback only for an interactive chart after direct API 418', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 418 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([candle(0)]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchReplayKlineRange } = await import('@/hooks/useReplayKlines');
+
+    const result = await fetchReplayKlineRange('BNBUSDT', '1h', 0, 60_000);
+    expect(result).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('fapi.binance.com/fapi/v1/klines');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/functions/v1/binance-klines');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'POST' });
   });
 });

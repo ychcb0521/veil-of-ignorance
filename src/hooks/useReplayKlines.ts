@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
+import { supabase } from '@/integrations/supabase/client';
 
 export type ReplayKlineRequestPriority = 'interactive' | 'background';
 
@@ -19,6 +20,7 @@ const pendingKlineRequests: PendingKlineRequest[] = [];
 let klineRequestPumpRunning = false;
 let nextKlineRequestAt = 0;
 let klineCooldownUntil = 0;
+let preferKlineProxyUntil = 0;
 
 // Interactive charts retain their existing immediate behaviour. Only bulk/background pagination is
 // paced; it is the source of sustained request pressure and must yield to detail-page work.
@@ -92,6 +94,24 @@ function governedKlineFetch(
   });
 }
 
+async function fetchAuthenticatedKlineFallback(qs: URLSearchParams, signal?: AbortSignal): Promise<Response> {
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+  if (!accessToken) return new Response(null, { status: 401 });
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+  return fetch(`${supabaseUrl}/functions/v1/binance-klines`, {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: publishableKey,
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(Object.fromEntries(qs.entries())),
+  });
+}
+
 export async function fetchReplayKlineRange(
   symbol: string,
   interval: string,
@@ -113,11 +133,27 @@ export async function fetchReplayKlineRange(
       endTime: String(toTime),
       limit: String(limit),
     });
-    const res = await governedKlineFetch(
-      `https://fapi.binance.com/fapi/v1/klines?${qs}`,
-      signal,
-      options?.priority ?? 'interactive',
-    );
+    const priority = options?.priority ?? 'interactive';
+    let res: Response;
+    if (priority === 'interactive' && preferKlineProxyUntil > Date.now()) {
+      res = await fetchAuthenticatedKlineFallback(qs, signal);
+      if (!res.ok) preferKlineProxyUntil = 0;
+    } else {
+      res = await governedKlineFetch(
+        `https://fapi.binance.com/fapi/v1/klines?${qs}`,
+        signal,
+        priority,
+      );
+      // The authenticated fallback is reserved for the campaign the user is actively viewing.
+      // Bulk list metrics remain on the paced direct queue and can never transfer their load here.
+      if (priority === 'interactive' && (res.status === 418 || res.status === 429)) {
+        const fallback = await fetchAuthenticatedKlineFallback(qs, signal);
+        if (fallback.ok) {
+          preferKlineProxyUntil = Date.now() + 5 * 60_000;
+          res = fallback;
+        }
+      }
+    }
     if (!res.ok) throw new Error(`API ${res.status}`);
     const raw: unknown[][] = await res.json();
     if (raw.length === 0) break;

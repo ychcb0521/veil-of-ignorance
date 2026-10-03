@@ -333,9 +333,9 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey({ mainPriceChangePct: 25 }).unrealizedPriceChangePct.value).toBe('0.00%');
     expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.value).toBe('-5.00%');
     expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.color).toBe('#181A20');
-    expect(byKey({ peakPriceChangePct: 0 }).unrealizedPriceChangePct.value).toBe('—');
-    expect(byKey({ peakPriceChangePct: 10, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).toBe('—');
-    expect(byKey({ peakPriceChangePct: 9.99, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).toBe('—');
+    expect(byKey({ peakPriceChangePct: 0 }).unrealizedPriceChangePct.value).toBe('-20.00%');
+    expect(byKey({ peakPriceChangePct: 10, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).not.toBe('—');
+    expect(byKey({ peakPriceChangePct: 9.99, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).not.toBe('—');
     expect(byKey({ peakPriceChangePct: 10.01, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).not.toBe('—');
   });
 

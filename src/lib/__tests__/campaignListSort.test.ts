@@ -193,9 +193,9 @@ describe('每个排序项的独立比较器', () => {
       makeSortRow({ id: 'missing', dd: 5, mpc: 2, peak: null }),
     ];
     expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'desc' }])))
-      .toEqual(['three-quarters', 'half', 'missing', 'threshold']);
+      .toEqual(['three-quarters', 'half', 'threshold', 'missing']);
     expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'asc' }])))
-      .toEqual(['half', 'three-quarters', 'missing', 'threshold']);
+      .toEqual(['threshold', 'half', 'three-quarters', 'missing']);
   });
 
   it('方向：desc 大的在前、asc 小的在前；字母按标题', () => {

@@ -170,9 +170,9 @@ export function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceCha
   return computeMainPriceEfficiency(row.mainPriceChangePct, row.initialExpectedMaxDrawdownPct);
 }
 
-/** 涨幅未兑现 = 峰值涨幅 − 涨跌幅；仅峰值涨幅高于预期回撤时成立。 */
+/** 涨幅未兑现 = 峰值涨幅 − 涨跌幅。 */
 export function rowUnrealizedPriceChangePct(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'peakPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
-  return computeUnrealizedPriceChangePct(row.mainPriceChangePct, row.peakPriceChangePct, row.initialExpectedMaxDrawdownPct);
+  return computeUnrealizedPriceChangePct(row.mainPriceChangePct, row.peakPriceChangePct);
 }
 
 /** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */

@@ -145,17 +145,14 @@ export interface CampaignPnlOverviewMetrics {
 
 /**
  * 涨幅未兑现 = 峰值涨幅 − 最终涨跌幅。
- * 只有峰值涨幅严格大于预期回撤时才计算：行情先越过初始风险尺度，峰值兑现比例才有比较意义。
+ * 只要峰值涨幅与最终涨跌幅可用就计算。
  */
 export function computeUnrealizedPriceChangePct(
   mainPriceChangePct: number | null | undefined,
   peakPriceChangePct: number | null | undefined,
-  expectedDrawdownPct: number | null | undefined,
 ): number | null {
   if (mainPriceChangePct == null || !Number.isFinite(mainPriceChangePct)
-    || peakPriceChangePct == null || !Number.isFinite(peakPriceChangePct)
-    || expectedDrawdownPct == null || !Number.isFinite(expectedDrawdownPct) || expectedDrawdownPct <= 0
-    || peakPriceChangePct <= expectedDrawdownPct) return null;
+    || peakPriceChangePct == null || !Number.isFinite(peakPriceChangePct)) return null;
   const value = peakPriceChangePct - mainPriceChangePct;
   return Number.isFinite(value) ? value : null;
 }
@@ -238,7 +235,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   } = metrics;
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
   const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
-  const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct, expectedDrawdownPct);
+  const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
   const positionAmplification = initialMainExposureNotional > 0
     && mainSideNotional?.total != null && Number.isFinite(mainSideNotional.total)
     ? mainSideNotional.total / initialMainExposureNotional
@@ -347,11 +344,11 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       help: (
         <>
           <p>主力曾经走出的峰值涨幅与最终涨跌幅之差。数值越高，表示从峰值回吐的百分点越多。</p>
-          <p>仅当峰值涨幅严格大于预期回撤时计算；行情尚未越过初始风险尺度时，本项不成立。</p>
+          <p>只要峰值涨幅与最终涨跌幅可用就计算。</p>
           <p>读数大于 2 倍预期回撤时标红，否则使用正文色。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅未兑现 = 峰值涨幅 − 涨跌幅</div>
           {unrealizedPriceChangePct == null
-            ? <p>缺少必要数据、预期回撤无效，或峰值涨幅不大于预期回撤时不计算。</p>
+            ? <p>缺少最终涨跌幅或历史 K 线峰值时不计算。</p>
             : <p className="font-mono text-foreground">本场 = {formatLegPriceChangePct(peakPriceChangePct)} − {formatLegPriceChangePct(mainPriceChangePct)} = {unrealizedPriceChangePct.toFixed(2)}%</p>}
         </>
       ),
