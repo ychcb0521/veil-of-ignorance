@@ -1992,7 +1992,7 @@ export default function JournalCampaignsPage() {
   const [stickyControlsHeight, setStickyControlsHeight] = useState(0);
   useEffect(() => {
     const node = stickyControlsRef.current;
-    if (!selectionMode || !narrowViewport || !node) {
+    if (!node) {
       setStickyControlsHeight(0);
       return;
     }
@@ -2002,7 +2002,7 @@ export default function JournalCampaignsPage() {
     const observer = new ResizeObserver(update);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [selectionMode, narrowViewport]);
+  }, []);
   // 宽屏上选择条在吸顶区里，吸顶区只在列表上半段（统计与散点图那一节）吸顶；往下翻卡片时它会滚出视野。
   // 窄屏上它本来就跟着页面滚。滚出视野后在屏幕底部浮出一条精简的「已选 N 场 · 下载选中」，勾到哪都能直接下载，不必翻回顶部。
   const [selectionBarInView, setSelectionBarInView] = useState(true);
@@ -5017,7 +5017,8 @@ export default function JournalCampaignsPage() {
                     aria-expanded={!collapsed}
                     onClick={() => toggleSection(id)}
                     title={collapsed ? '展开这一档' : '收起这一档'}
-                    className="group/section mb-2.5 flex w-full items-center gap-2 rounded text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70"
+                    style={{ top: 57 + stickyControlsHeight }}
+                    className="group/section sticky z-[9] mb-2.5 flex w-full items-center gap-2 rounded border border-border/70 bg-background/95 px-2.5 py-2 text-left shadow-[0_7px_14px_-13px_rgba(15,23,42,0.55)] backdrop-blur-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70"
                   >
                     <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-150 group-hover/section:text-foreground ${collapsed ? '' : 'rotate-90'}`} />
                     <span aria-hidden="true" className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_FIRST}`}>1</span>

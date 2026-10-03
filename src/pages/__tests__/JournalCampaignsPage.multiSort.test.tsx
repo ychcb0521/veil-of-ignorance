@@ -768,6 +768,19 @@ describe('【用户要求】多级排序后卡片按第一级的档分区', () =
     expect(within(sections[1]).getAllByTestId('campaign-card')).toHaveLength(3);
   }, 15_000);
 
+  it('镜像止盈作第一级时实际存在的档会生成分区；当前档标题吸顶，不会被上方排序区滚走', async () => {
+    renderPage('?sort=mirrorTp&direction=desc&then=captureRate.follow');
+    await waitFor(() => expect(screen.getByTestId('campaign-sort-section-1')).toBeInTheDocument());
+    const sections = screen.getAllByTestId(/^campaign-sort-section-\d+$/);
+    expect(sections).toHaveLength(4);
+    expect(screen.getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('镜像止盈已实现·盈利');
+    expect(screen.getByTestId('campaign-sort-section-toggle-4')).toHaveTextContent('未实现·亏损');
+    for (const toggle of screen.getAllByTestId(/^campaign-sort-section-toggle-\d+$/)) {
+      expect(toggle).toHaveClass('sticky');
+      expect(toggle.style.top).toBe('57px');
+    }
+  }, 15_000);
+
   it('只按一项排、或第一级是字母（几乎一场一组）时不分区', async () => {
     renderPage('?sort=captureRate&direction=desc');
     await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeGreaterThan(0));
