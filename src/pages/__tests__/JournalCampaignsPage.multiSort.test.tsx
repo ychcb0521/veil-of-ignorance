@@ -671,9 +671,17 @@ describe('战役列表：多级排序', () => {
     expect(headers.some(text => /镜像止盈生效场数/.test(text))).toBe(true);
     // 第一级每一档里第二级的分布：一档一行，行合计 = 这一档的场数
     const crossTab = within(stats).getByTestId('sort-chain-crosstab-2');
-    expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（场数）');
+    expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（占本档）');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('≥ 2.10');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
+    // 单元格默认只保留百分比；点击后原位显示对应数量，再点恢复百分比。
+    const percentage = within(crossTab).getByTestId('sort-chain-crosstab-2-cell-1-1');
+    expect(percentage).toHaveTextContent('75%');
+    expect(percentage).not.toHaveTextContent('3 场');
+    fireEvent.click(percentage);
+    expect(percentage).toHaveTextContent('3 场');
+    fireEvent.click(percentage);
+    expect(percentage).toHaveTextContent('75%');
     // 分布权重的背景色阶要有足够区分度：常见区间不再都挤在非常浅的 10%～20% 琥珀底里。
     const heatCells = Array.from(crossTab.querySelectorAll<HTMLElement>('td[data-distribution-share]'));
     const heatOpacities = heatCells.map(cell => Number(cell.style.backgroundColor.match(/[,/]\s*([\d.]+)\)?$/)?.[1] ?? 0));

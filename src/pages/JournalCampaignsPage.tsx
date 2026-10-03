@@ -1889,6 +1889,11 @@ export default function JournalCampaignsPage() {
     () => parseCampaignRangeParams(location.search),
   );
   const [formulaPopover, setFormulaPopover] = useState<CampaignFormulaPopover | null>(null);
+  /** 分布交叉表默认只显百分比；用户点某格后，原位临时切换为对应场数。 */
+  const [revealedSortCountCell, setRevealedSortCountCell] = useState<string | null>(null);
+  useEffect(() => {
+    if (formulaPopover !== 'sortChain') setRevealedSortCountCell(null);
+  }, [formulaPopover]);
   const initialChartState = useMemo(
     () => parseCampaignChartParams(location.search),
     // 只取首帧快照：后续 URL 变化由下方 effect 同步，避免每次 search 变动都重建。
@@ -3246,8 +3251,8 @@ export default function JournalCampaignsPage() {
   };
 
   /**
-   * 交叉表：行是第一级的档（与上面分组统计同一套、同一顺序），列是这一级按整张列表分出的档，格子是场数。
-   * 格子底色按「占本行的比例」深浅：一眼看出每一档里这一级集中在哪一段；百分比写在场数下面。
+   * 交叉表：行是第一级的档（与上面分组统计同一套、同一顺序），列是这一级按整张列表分出的档。
+   * 格子默认只显示占本行的比例、底色也按该比例深浅；点击百分比时原位切换为对应场数。
    */
   const renderSortCrossTab = (crossTab: SortCrossTab, levelIndex: number) => {
     const firstMode = sortChain[0].mode;
@@ -3265,7 +3270,7 @@ export default function JournalCampaignsPage() {
           <span className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_FIRST} mr-1`}>1</span>{SORT_LABEL_BY_MODE[firstMode]}
           <span className="mx-1 text-muted-foreground/60">×</span>
           <span className={`${SORT_LEVEL_BADGE} ${SORT_LEVEL_BADGE_THEN} mr-1`}>{levelIndex + 1}</span>{label}
-          <span className="ml-1 font-normal text-muted-foreground">的分布（场数）</span>
+          <span className="ml-1 font-normal text-muted-foreground">的分布（占本档）</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[10px] text-muted-foreground">
@@ -3286,6 +3291,8 @@ export default function JournalCampaignsPage() {
                   </td>
                   {row.counts.map((count, index) => {
                     const share = row.count > 0 ? count / row.count : 0;
+                    const cellId = `${levelIndex}-${rowIndex}-${index}`;
+                    const countRevealed = revealedSortCountCell === cellId;
                     return (
                       <td
                         key={index}
@@ -3293,8 +3300,20 @@ export default function JournalCampaignsPage() {
                         data-distribution-share={count > 0 ? share.toFixed(4) : undefined}
                         style={count > 0 ? { backgroundColor: `rgba(240, 185, 11, ${sortCrossTabHeatOpacity(share).toFixed(3)})` } : undefined}
                       >
-                        <div className={count > 0 ? 'text-foreground/85' : 'text-muted-foreground/40'}>{count}</div>
-                        <div className="text-[9px] text-muted-foreground/70">{count > 0 ? `${Math.round(share * 100)}%` : ''}</div>
+                        {count > 0 ? (
+                          <button
+                            type="button"
+                            data-testid={`sort-chain-crosstab-${levelIndex + 1}-cell-${rowIndex + 1}-${index + 1}`}
+                            aria-label={countRevealed
+                              ? `${Math.round(share * 100)}%，对应 ${count} 场；点击恢复百分比`
+                              : `${Math.round(share * 100)}%，点击查看对应数量`}
+                            title={countRevealed ? '点击恢复百分比' : '点击查看对应数量'}
+                            onClick={() => setRevealedSortCountCell(current => current === cellId ? null : cellId)}
+                            className="inline-flex min-h-5 min-w-8 items-center justify-end rounded px-1 font-mono text-[10px] tabular-nums text-foreground/85 transition-colors hover:bg-background/35 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70"
+                          >
+                            {countRevealed ? `${count} 场` : `${Math.round(share * 100)}%`}
+                          </button>
+                        ) : <span aria-hidden="true">—</span>}
                       </td>
                     );
                   })}
