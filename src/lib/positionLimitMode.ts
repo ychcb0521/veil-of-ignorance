@@ -1,5 +1,5 @@
 /**
- * 持仓限制模式——两套规则，使用者在主屏幕顶栏「直接交易」右边自己选（SessionModeControls）。
+ * 持仓限制模式——两套规则，使用者在主屏幕顶栏「模式」菜单的「持仓」一行自己选（SessionModeControls）。
  *
  *   · 'unlimited' 无限制（**默认**，从没选过的老用户也是它）：
  *       任何币种（U 本位、币本位、合成币本位一样）杠杆 1–150x（UNLIMITED_MAX_LEVERAGE），

@@ -42,7 +42,9 @@ describe('SessionModeControls', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle(/时间模式：当前隔离/));
+    // 时间模式收在顶栏「模式」菜单里；隔离不是默认，触发按钮上带一枚「隔离」
+    expect(screen.getByTestId('session-modes-isolated-tag')).toHaveTextContent('隔离');
+    fireEvent.click(screen.getByTestId('session-modes-trigger'));
     fireEvent.click(screen.getByRole('button', { name: '同步' }));
 
     const dialogTitle = screen.getByText('无法切换模式');

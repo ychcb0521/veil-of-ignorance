@@ -249,7 +249,7 @@ export function PositionPanel({
     setSymbolLeverage: setSharedSymbolLeverage, tradingMode, setTradeHistory, setBalance, positionLimitMode,
   } = useTradingContext();
   /**
-   * 持仓限制模式（顶栏「直接交易」右边）：无限制时不标「触发时将超限」「触发时将超单笔上限」、市价平仓与按成数的
+   * 持仓限制模式（顶栏「模式」菜单的「持仓」一行）：无限制时不标「触发时将超限」「触发时将超单笔上限」、市价平仓与按成数的
    * 止盈止损不受单笔上限约束、杠杆对话框 1–150x。读不到（旧的测试替身）按币安标准。
    */
   const limitMode = positionLimitMode;

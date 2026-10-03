@@ -1,14 +1,16 @@
 /**
  * 会话模式控制条 —— 从 TimeControl 抽出、移到主 Header（复盘中心左侧）。
- * 包含三组开关：
- *   ① 交易模式：决策记录 ↔ 直接交易（全局会话开关，直接显示）；
- *   ② 持仓限制模式：无限制 ↔ 币安标准（紧挨在「直接交易」右边，默认无限制，见 lib/positionLimitMode）；
- *   ③ 时间模式：同步 ↔ 隔离（折叠进一个极小、近乎隐形的符号，点开才切换）。
+ * 「加仓」按钮直接放在顶栏；其余四组开关收进一个「模式」菜单（触发按钮写出当前的交易模式与持仓限制模式）：
+ *   ① 播放：正序 ↔ 倒叙播放；
+ *   ② 交易模式：决策记录 ↔ 直接交易（全局会话开关）；
+ *   ③ 持仓限制模式：无限制 ↔ 币安标准（默认无限制，见 lib/positionLimitMode）；
+ *   ④ 时间模式：同步 ↔ 隔离。
  * 时间模式的切换守卫（持仓阻断 / 运行中币种确认弹窗）一并迁来，逻辑与原 TimeControl 一致。
  */
 
 import { useState } from 'react';
-import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator } from 'lucide-react';
+import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator, Play, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AddSizingCalculator } from '@/components/AddSizingCalculator';
 import { toast } from '@/lib/notificationCenter';
 import {
@@ -54,6 +56,9 @@ interface Props {
   activeQuantityPrecision?: number;
 }
 
+/** 「模式」菜单里每一行左侧的名字：淡、小、左对齐。 */
+const MENU_LABEL = 'text-[10px] text-muted-foreground/70';
+
 type GuardedCoin = {
   sym: string;
   status: 'playing' | 'paused';
@@ -74,7 +79,7 @@ export function SessionModeControls({
 }: Props) {
   const ctx = useTradingContext();
   const [addSizingOpen, setAddSizingOpen] = useState(false);
-  const [timeModeOpen, setTimeModeOpen] = useState(false);
+  const [modesOpen, setModesOpen] = useState(false);
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
   const [isStoppingAll, setIsStoppingAll] = useState(false);
@@ -201,6 +206,11 @@ export function SessionModeControls({
         : 'text-muted-foreground hover:text-foreground hover:bg-accent'
     }`;
 
+  const segmentCls = (active: boolean, activeCls: string) =>
+    `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
+      active ? activeCls : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+    }`;
+
   const timeModeBtnCls = (active: boolean, disabled: boolean) =>
     `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
       active
@@ -211,7 +221,7 @@ export function SessionModeControls({
     }`;
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex items-center gap-1">
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
           只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}
       <button
@@ -238,124 +248,159 @@ export function SessionModeControls({
         />
       )}
 
-      {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
-      <button
-        onClick={handleDirectionToggle}
-        data-testid="time-direction-toggle"
-        aria-pressed={reverseActive}
-        title={reverseActive
-          ? '倒叙播放中：时间倒序推进，K 线逐根回退（客观操作时间不受影响）· 点击恢复正序'
-          : '倒叙播放：让时间机器倒着走，K 线逐根回退；默认正序 · 点击开启'}
-        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
-          reverseActive
-            ? 'bg-[#B080FF]/20 text-[#B080FF]'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-        }`}
-      >
-        <Rewind className="w-3 h-3" /> 倒叙播放
-      </button>
-
-      {/* 交易模式：直接显示 */}
-      <button
-        onClick={() => handleTradingModeClick('decision')}
-        aria-label="决策记录：完整快照 / 评价 / 错题集 / 元监控"
-        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
-          ctx.tradingMode === 'decision'
-            ? 'bg-primary/20 text-primary'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-        }`}
-      >
-        <Brain className="w-3 h-3" /> 决策记录
-      </button>
-      <button
-        onClick={() => handleTradingModeClick('direct')}
-        // 不用 title：浏览器的悬停提示会盖在右上角的模拟时钟上。
-        // 两种模式的说明在切换时记入「历史消息」（见 handleTradingModeClick）。
-        aria-label="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
-        className={`flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
-          ctx.tradingMode === 'direct'
-            ? 'bg-[#F0B90B]/20 text-[#F0B90B]'
-            : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-        }`}
-      >
-        <Zap className="w-3 h-3" /> 直接交易
-      </button>
-
-      {/* 持仓限制模式：紧挨「直接交易」右边，用细分隔线与交易模式分开。
-          不用 title（浏览器的悬停提示跟着鼠标走，会盖住右上角的模拟时钟）：说明写在 aria-label 里，
-          悬停时在按钮**正下方**弹一个定位好的说明（Radix Tooltip，贴着按钮、不跟鼠标），切换时记入「历史消息」。 */}
-      {/* 说明不可点，关掉「悬停在说明上保持打开」：否则从一段移到紧挨着的另一段时，鼠标落在前一段说明的保持区里，另一段的说明打不开 */}
-      <TooltipProvider delayDuration={300} disableHoverableContent>
-        <div
-          role="group"
-          aria-label="持仓限制模式"
-          data-testid="position-limit-mode"
-          className="flex items-center gap-0.5 border-l border-border/60 pl-1.5 ml-0.5"
-        >
-          {(['unlimited', 'binance'] as const).map(mode => (
-            <Tooltip key={mode}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => handlePositionLimitModeClick(mode)}
-                  data-testid={`position-limit-mode-${mode}`}
-                  aria-pressed={positionLimitMode === mode}
-                  aria-label={POSITION_LIMIT_MODE_HINT[mode]}
-                  className={limitSegmentCls(positionLimitMode === mode)}
-                >
-                  {POSITION_LIMIT_MODE_LABEL[mode]}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                align="end"
-                collisionPadding={8}
-                data-testid={`position-limit-mode-tip-${mode}`}
-                className="max-w-[260px] text-[11px] leading-5"
-              >
-                {POSITION_LIMIT_MODE_HINT[mode]}
-                {mode === 'unlimited' ? '（默认）' : ''}
-              </TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
-      </TooltipProvider>
-
-      {/* 时间模式：折叠进一个极小、近乎隐形的符号；点开才露出 同步 / 隔离 */}
-      {onSetTimeMode && (
-        <div className="flex items-center gap-1 border-l border-border/60 pl-2 ml-1">
+      {/* 【用户要求】顶栏合成一行：倒叙播放、交易模式、持仓限制模式、时间模式收进一个「模式」菜单，加仓留在外面。
+          触发按钮直接写出当前的交易模式与持仓限制模式；倒叙、隔离不是默认，开着时多一枚小标签。
+          不用 title：浏览器的悬停提示会盖在右上角的模拟时钟上，说明写在 aria-label 里。 */}
+      <Popover open={modesOpen} onOpenChange={setModesOpen}>
+        <PopoverTrigger asChild>
           <button
-            onClick={() => setTimeModeOpen(o => !o)}
-            title={`时间模式：当前${timeMode === 'isolated' ? '隔离' : '同步'}${showGuardLock ? `（${blockedReason}）` : ''} · 点击展开切换`}
-            className={`flex items-center gap-0.5 transition-colors ${
-              timeModeOpen ? 'text-primary' : 'text-muted-foreground/30 hover:text-muted-foreground'
-            }`}
+            type="button"
+            data-testid="session-modes-trigger"
+            aria-label={`模式：${ctx.tradingMode === 'direct' ? '直接交易' : '决策记录'} · ${POSITION_LIMIT_MODE_LABEL[positionLimitMode]}${reverseActive ? ' · 倒叙播放' : ''}${timeMode === 'isolated' ? ' · 隔离' : ''}；点击展开切换`}
+            className={`flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium transition-all duration-100 ease-out hover:bg-foreground/[0.05] active:scale-[0.97] ${modesOpen ? 'bg-foreground/[0.06]' : ''}`}
           >
-            {showGuardLock && <Lock className="w-3 h-3 shrink-0" />}
-            {timeMode === 'isolated' ? <Split className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+            <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
+            <span className={ctx.tradingMode === 'direct' ? 'text-[#F0B90B]' : 'text-primary'}>
+              {ctx.tradingMode === 'direct' ? '直接交易' : '决策记录'}
+            </span>
+            <span aria-hidden="true" className="text-muted-foreground/40">·</span>
+            <span className="text-sky-600 dark:text-sky-400">{POSITION_LIMIT_MODE_LABEL[positionLimitMode]}</span>
+            {reverseActive && <span data-testid="session-modes-reverse-tag" className="rounded bg-[#B080FF]/20 px-1 text-[#B080FF]">倒叙</span>}
+            {timeMode === 'isolated' && <span data-testid="session-modes-isolated-tag" className="rounded bg-primary/15 px-1 text-primary">隔离</span>}
+            <ChevronDown className={`h-3 w-3 text-muted-foreground/60 transition-transform ${modesOpen ? 'rotate-180' : ''}`} />
           </button>
-          {timeModeOpen && (
-            <>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          sideOffset={6}
+          collisionPadding={8}
+          data-testid="session-modes-menu"
+          className="w-auto p-2"
+        >
+          <div className="grid grid-cols-[auto_auto] items-center gap-x-3 gap-y-1.5">
+            <span className={MENU_LABEL}>播放</span>
+            {/* 倒叙播放：默认正序，选中后时间倒序推进 */}
+            <div className="flex items-center gap-0.5">
               <button
-                onClick={(e) => handleModeSwitchClick(e, 'synced')}
-                title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
-                aria-disabled={hasBlockingPositions || hasRunningCoins}
-                className={timeModeBtnCls(timeMode === 'synced', showGuardLock && timeMode !== 'synced')}
+                type="button"
+                onClick={() => { if (reverseActive) handleDirectionToggle(); }}
+                aria-pressed={!reverseActive}
+                className={segmentCls(!reverseActive, 'bg-primary/20 text-primary')}
               >
-                <Globe className="w-3 h-3" /> 同步
+                <Play className="w-3 h-3" /> 正序
               </button>
               <button
-                onClick={(e) => handleModeSwitchClick(e, 'isolated')}
-                title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
-                aria-disabled={hasBlockingPositions}
-                className={timeModeBtnCls(timeMode === 'isolated', hasBlockingPositions && timeMode !== 'isolated')}
+                type="button"
+                onClick={() => { if (!reverseActive) handleDirectionToggle(); }}
+                data-testid="time-direction-toggle"
+                aria-pressed={reverseActive}
+                aria-label={reverseActive
+                  ? '倒叙播放中：时间倒序推进，K 线逐根回退（客观操作时间不受影响）'
+                  : '倒叙播放：让时间机器倒着走，K 线逐根回退；默认正序'}
+                className={segmentCls(reverseActive, 'bg-[#B080FF]/20 text-[#B080FF]')}
               >
-                <Split className="w-3 h-3" /> 隔离
+                <Rewind className="w-3 h-3" /> 倒叙播放
               </button>
-            </>
-          )}
-        </div>
-      )}
+            </div>
+
+            <span className={MENU_LABEL}>交易</span>
+            {/* 交易模式 */}
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => handleTradingModeClick('decision')}
+                aria-label="决策记录：完整快照 / 评价 / 错题集 / 元监控"
+                aria-pressed={ctx.tradingMode === 'decision'}
+                className={segmentCls(ctx.tradingMode === 'decision', 'bg-primary/20 text-primary')}
+              >
+                <Brain className="w-3 h-3" /> 决策记录
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTradingModeClick('direct')}
+                // 两种模式的说明在切换时记入「历史消息」（见 handleTradingModeClick）。
+                aria-label="直接交易：跳过快照与评价，仍可在交易战役中归类，但不进错题集/元监控"
+                aria-pressed={ctx.tradingMode === 'direct'}
+                className={segmentCls(ctx.tradingMode === 'direct', 'bg-[#F0B90B]/20 text-[#F0B90B]')}
+              >
+                <Zap className="w-3 h-3" /> 直接交易
+              </button>
+            </div>
+
+            <span className={MENU_LABEL}>持仓</span>
+            {/* 持仓限制模式：紧跟在「直接交易」那一行下面。
+                说明写在 aria-label 里，悬停 / 聚焦时在按钮**正下方**弹一个定位好的说明（Radix Tooltip，贴着按钮、不跟鼠标），切换时记入「历史消息」。
+                说明不可点，关掉「悬停在说明上保持打开」：否则从一段移到紧挨着的另一段时，鼠标落在前一段说明的保持区里，另一段的说明打不开 */}
+            <TooltipProvider delayDuration={300} disableHoverableContent>
+              <div
+                role="group"
+                aria-label="持仓限制模式"
+                data-testid="position-limit-mode"
+                className="flex items-center gap-0.5"
+              >
+                {(['unlimited', 'binance'] as const).map(mode => (
+                  <Tooltip key={mode}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => handlePositionLimitModeClick(mode)}
+                        data-testid={`position-limit-mode-${mode}`}
+                        aria-pressed={positionLimitMode === mode}
+                        aria-label={POSITION_LIMIT_MODE_HINT[mode]}
+                        className={limitSegmentCls(positionLimitMode === mode)}
+                      >
+                        {POSITION_LIMIT_MODE_LABEL[mode]}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="bottom"
+                      align="end"
+                      collisionPadding={8}
+                      data-testid={`position-limit-mode-tip-${mode}`}
+                      className="max-w-[260px] text-[11px] leading-5"
+                    >
+                      {POSITION_LIMIT_MODE_HINT[mode]}
+                      {mode === 'unlimited' ? '（默认）' : ''}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+            </TooltipProvider>
+
+            {/* 时间模式：同步 / 隔离；有持仓或有币种在跑时带锁，说明写在按钮的 title 里（菜单里不挡时钟） */}
+            {onSetTimeMode && (
+              <>
+                <span className={`${MENU_LABEL} flex items-center gap-0.5`}>
+                  时间
+                  {showGuardLock && <Lock data-testid="time-mode-lock" aria-label={blockedReason ?? undefined} className="h-2.5 w-2.5" />}
+                </span>
+                <div data-testid="time-mode" className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={(e) => handleModeSwitchClick(e, 'synced')}
+                    title={blockedReason ? `当前不可切换：${blockedReason}` : '切换到同步模式'}
+                    aria-disabled={hasBlockingPositions || hasRunningCoins}
+                    aria-pressed={timeMode === 'synced'}
+                    className={timeModeBtnCls(timeMode === 'synced', showGuardLock && timeMode !== 'synced')}
+                  >
+                    <Globe className="w-3 h-3" /> 同步
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleModeSwitchClick(e, 'isolated')}
+                    title={hasBlockingPositions ? `当前不可切换：${blockedReason}` : '切换到隔离模式'}
+                    aria-disabled={hasBlockingPositions}
+                    aria-pressed={timeMode === 'isolated'}
+                    className={timeModeBtnCls(timeMode === 'isolated', hasBlockingPositions && timeMode !== 'isolated')}
+                  >
+                    <Split className="w-3 h-3" /> 隔离
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       {/* 切换守卫弹窗：隔离→同步 但仍有币种在运行时 */}
       {guardDialogOpen && (

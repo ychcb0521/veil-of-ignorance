@@ -170,7 +170,7 @@ export function OrderPanel({
   const marginMode = ctx.getSymbolMarginMode(symbol);
   const leverage = ctx.getSymbolLeverage(symbol);
   /**
-   * 持仓限制模式（顶栏「直接交易」右边）。无限制：不判分层上限与单笔上限，不显示杠杆分层、上限小字与各种「将超限」预警；
+   * 持仓限制模式（顶栏「模式」菜单的「持仓」一行）。无限制：不判分层上限与单笔上限，不显示杠杆分层、上限小字与各种「将超限」预警；
    * 币安标准：下面所有判定照旧。读不到（旧的测试替身）按币安标准——与纯函数库的缺省同一个取向。
    */
   const limitMode = ctx.positionLimitMode;

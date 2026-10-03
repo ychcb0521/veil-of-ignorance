@@ -7,7 +7,7 @@ import { toast } from '@/lib/notificationCenter';
 import type { PositionLimitMode } from '@/lib/positionLimitMode';
 
 /**
- * 顶栏「直接交易」右边的持仓限制模式开关：默认无限制、两段互斥、切换时记一条说明。
+ * 顶栏「模式」菜单的「持仓」一行的持仓限制模式开关：默认无限制、两段互斥、切换时记一条说明。
  * context 用可切换的替身：setPositionLimitMode 真的改值，界面跟着变——持久化本身见 TradingContext.positionLimitMode.test。
  */
 const ctx = vi.hoisted(() => ({
@@ -53,17 +53,28 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const segment = (mode: PositionLimitMode) => screen.getByTestId(`position-limit-mode-${mode}`);
+/** 开关收在顶栏「模式」菜单里：没展开就先点开触发按钮。 */
+const openModes = () => {
+  if (!screen.queryByTestId('session-modes-menu')) fireEvent.click(screen.getByTestId('session-modes-trigger'));
+};
+const segment = (mode: PositionLimitMode) => {
+  openModes();
+  return screen.getByTestId(`position-limit-mode-${mode}`);
+};
 
-describe('顶栏：持仓限制模式开关', () => {
-  it('紧挨在「直接交易」右边、时间模式图标之前；两段「无限制 / 币安标准」，默认无限制', () => {
+describe('顶栏「模式」菜单：持仓限制模式开关', () => {
+  it('【用户要求】收进「模式」菜单，排在交易模式那一行下面、时间模式之前；触发按钮写出当前模式；两段「无限制 / 币安标准」，默认无限制', () => {
     render(<Harness initial="unlimited" />);
+    expect(screen.queryByTestId('position-limit-mode')).toBeNull();
+    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('直接交易·无限制');
+    openModes();
     const group = screen.getByTestId('position-limit-mode');
     expect(group).toHaveAttribute('role', 'group');
     expect(within(group).getAllByRole('button').map(b => b.textContent)).toEqual(['无限制', '币安标准']);
-    const direct = screen.getByRole('button', { name: /直接交易/ });
-    expect(direct.nextElementSibling).toBe(group);
-    expect(group.nextElementSibling?.querySelector('[title^="时间模式"]')).not.toBeNull();
+    const direct = screen.getByRole('button', { name: /直接交易：/ });
+    const timeMode = screen.getByTestId('time-mode');
+    expect(direct.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(group.compareDocumentPosition(timeMode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(segment('unlimited')).toHaveAttribute('aria-pressed', 'true');
     expect(segment('binance')).toHaveAttribute('aria-pressed', 'false');
     // 与决策记录 / 直接交易同一套尺寸与选中样式
@@ -82,6 +93,7 @@ describe('顶栏：持仓限制模式开关', () => {
     fireEvent.click(segment('binance'));
     expect(ctx.calls).toEqual(['binance']);
     expect(segment('binance')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('币安标准');
     expect(segment('unlimited')).toHaveAttribute('aria-pressed', 'false');
     expect(message).toHaveBeenCalledTimes(1);
     const [title, opts] = message.mock.calls[0] as [string, { description: string }];

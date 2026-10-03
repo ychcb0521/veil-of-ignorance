@@ -763,16 +763,17 @@ describe('B 本账建议值按操作时间框定本场', () => {
 });
 
 describe('顶栏「加仓」按钮', () => {
-  it('在倒叙播放左边；没有标的时禁用，有标的时点开计算器', () => {
+  it('【用户要求】留在「模式」菜单外面、在它左边；没有标的时禁用，有标的时点开计算器', () => {
     const { unmount } = render(<MemoryRouter><SessionModeControls /></MemoryRouter>);
     expect(screen.getByTestId('add-sizing-open')).toBeDisabled();
     unmount();
 
     render(<MemoryRouter><SessionModeControls activeSymbol="RAVEUSDT" /></MemoryRouter>);
     const open = screen.getByTestId('add-sizing-open');
-    const reverse = screen.getByTestId('time-direction-toggle');
-    // DOM 顺序：加仓在倒叙播放之前
-    expect(open.compareDocumentPosition(reverse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const modes = screen.getByTestId('session-modes-trigger');
+    // DOM 顺序：加仓在「模式」菜单之前；倒叙播放等收在菜单里，菜单没开时不在页面上
+    expect(open.compareDocumentPosition(modes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('time-direction-toggle')).toBeNull();
     fireEvent.click(open);
     expect(screen.getByTestId('add-sizing-dialog')).toBeInTheDocument();
     // 标题与标的现在是两个元素（标题黑、标的灰等宽），分别断言

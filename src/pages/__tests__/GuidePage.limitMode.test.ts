@@ -19,11 +19,12 @@ describe('指南：持仓限制模式', () => {
   const guide = read('pages/GuidePage.tsx');
   const s31 = guide.slice(guide.indexOf('<section id="s3-0"'), guide.indexOf('<section id="s3-1"'));
 
-  it('3.1 写明开关在「直接交易」右边、默认无限制、两档各自是什么', () => {
+  it('3.1 写明开关在「模式」菜单的「持仓」一行、默认无限制、两档各自是什么', () => {
     expect(DEFAULT_POSITION_LIMIT_MODE).toBe('unlimited');
     expect(UNLIMITED_MAX_LEVERAGE).toBe(150);
     expect(s31).toContain('3.1 交易模式与持仓限制');
-    expect(s31).toContain('紧挨在「直接交易」右边');
+    expect(s31).toContain('<strong>「模式」菜单</strong>');
+    expect(s31).toContain('下面一行「持仓」是另一对开关');
     expect(s31).toContain('<strong>持仓限制模式</strong>');
     expect(s31).toContain('系统默认 <strong>无限制</strong>');
     expect(s31).toContain('无限制（默认）');
@@ -33,9 +34,10 @@ describe('指南：持仓限制模式', () => {
     expect(s31).toContain('<strong>都只在币安标准模式下生效</strong>');
     expect(s31).toContain('<strong>切换不改写任何现有仓位与挂单</strong>');
     expect(s31).toContain('<strong>每一次判定都按那一刻的模式</strong>');
-    // 时间模式图标不再「紧挨着」交易模式
-    expect(s31).not.toContain('紧挨着它右侧那个极小、近乎隐形的符号');
-    expect(s31).toContain('再往右那个极小、近乎隐形的符号');
+    // 【用户要求】顶栏合成一行：四组开关收进「模式」菜单，加仓留在外面
+    expect(s31).not.toContain('近乎隐形的符号');
+    expect(s31).toContain('最后一行「时间」是「<strong>同步 / 隔离</strong>」');
+    expect(s31).toContain('「加仓」按钮常用，单独留在菜单外面');
   });
 
   it('第 8 节的三行币安规则开头都写明只在币安标准下生效，并指回 3.1', () => {
@@ -85,11 +87,11 @@ describe('指南：持仓限制模式', () => {
     expect(read('components/TradingPreferencesDrawer.tsx')).toContain('无限制模式下最高 150x');
   });
 
-  it('界面上开关的位置与指南一致：SessionModeControls 里紧跟在「直接交易」按钮后面', () => {
+  it('界面上开关的位置与指南一致：「模式」菜单里紧跟在「直接交易」按钮后面、时间模式之前', () => {
     const src = read('components/SessionModeControls.tsx');
     const direct = src.indexOf('<Zap className="w-3 h-3" /> 直接交易');
     const toggle = src.indexOf('data-testid="position-limit-mode"');
-    const timeMode = src.indexOf('{/* 时间模式：折叠进一个极小、近乎隐形的符号');
+    const timeMode = src.indexOf('{/* 时间模式：同步 / 隔离');
     expect(direct).toBeGreaterThan(-1);
     expect(toggle).toBeGreaterThan(direct);
     expect(timeMode).toBeGreaterThan(toggle);

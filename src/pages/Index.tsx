@@ -2194,25 +2194,28 @@ const Index = () => {
             }}
           />
         </div>
-        <SessionModeControls
-          timeMode={timeMode}
-          onSetTimeMode={handleSetTimeMode}
-          onStopAllAndSwitchToSynced={handleStopAllAndSwitchToSynced}
-          totalPositionCount={totalPositionCount}
-          coinTimelines={coinTimelines}
-          onSymbolChange={handleSymbolChange}
-          activeSymbol={activeSymbol}
-          activePrice={displayCurrentPrice}
-          // 加仓计算器的 S₂ 要种在引擎成交的基准价上——与 handlePlaceOrderForActiveSymbol 的 freshPrice 同一个式子，
-          // 不是平滑后的 displayCurrentPrice。每次显示价刷新都会重渲染，这个值随之跟上。
-          activeFillBasePrice={latestChartPriceRef.current || priceMap[activeSymbol] || currentPrice}
-          activePricePrecision={chartPricePrecision}
-          activeQuantityPrecision={quantityPrecision}
-        />
-        {/* 顶栏放不下时（中间一排多了持仓限制模式开关），先让邮箱让位，复盘中心与登出不被挤出屏幕。
+        {/* 顶栏放不下时先让邮箱让位，复盘中心与登出不被挤出屏幕。
             邮箱在 1280px 以下整个藏起来（1,120–1,260px 之间它只剩几个像素的残影），1280px 起完整显示、需要时再截短 */}
         <div className="ml-auto flex items-center gap-3 min-w-0">
           {loading && <span className="text-[10px] text-primary animate-pulse font-mono whitespace-nowrap shrink-0">加载历史数据...</span>}
+          {/* 【用户要求】顶栏一行：加仓 + 「模式」菜单紧挨在复盘中心左边 */}
+          <div className="shrink-0">
+            <SessionModeControls
+              timeMode={timeMode}
+              onSetTimeMode={handleSetTimeMode}
+              onStopAllAndSwitchToSynced={handleStopAllAndSwitchToSynced}
+              totalPositionCount={totalPositionCount}
+              coinTimelines={coinTimelines}
+              onSymbolChange={handleSymbolChange}
+              activeSymbol={activeSymbol}
+              activePrice={displayCurrentPrice}
+              // 加仓计算器的 S₂ 要种在引擎成交的基准价上——与 handlePlaceOrderForActiveSymbol 的 freshPrice 同一个式子，
+              // 不是平滑后的 displayCurrentPrice。每次显示价刷新都会重渲染，这个值随之跟上。
+              activeFillBasePrice={latestChartPriceRef.current || priceMap[activeSymbol] || currentPrice}
+              activePricePrecision={chartPricePrecision}
+              activeQuantityPrecision={quantityPrecision}
+            />
+          </div>
           <div className="shrink-0">
             <JournalNavMenu
               onOpenAssets={() => setAssetsOpen(true)}
