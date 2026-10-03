@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
 
-async function fetchRange(
+export async function fetchReplayKlineRange(
   symbol: string,
   interval: string,
   fromTime: number,
@@ -92,7 +92,7 @@ export function useReplayKlines(
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchRange(symbol, interval, fromTime, toTime, controller.signal)
+    fetchReplayKlineRange(symbol, interval, fromTime, toTime, controller.signal)
       .then(data => {
         if (cancelled) return;
         setKlines(data);

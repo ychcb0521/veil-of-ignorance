@@ -1,5 +1,6 @@
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
@@ -34,6 +35,7 @@ export type CampaignSortMode =
   | 'leverage'
   | 'mainPriceChange'
   | 'mainPriceEfficiency'
+  | 'unrealizedPriceChangePct'
   | 'addEfficiency'
   | 'addCount'
   | 'alpha';
@@ -57,6 +59,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
+  'unrealizedPriceChangePct',
   'captureRate',
   'addEfficiency',
   'addCount',
@@ -79,6 +82,7 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
+  'unrealizedPriceChangePct',
   'captureRate',
   'addEfficiency',
   'geometricExpectancy',
@@ -164,6 +168,11 @@ export function campaignLeverage(campaign: TradeCampaign, legs: TradeJournal[]):
 /** 涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤（公式与说明见 computeMainPriceEfficiency，盈亏概览同一个函数）。 */
 export function rowMainPriceEfficiency(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
   return computeMainPriceEfficiency(row.mainPriceChangePct, row.initialExpectedMaxDrawdownPct);
+}
+
+/** 涨幅未兑现 = 峰值涨幅 − 涨跌幅；仅峰值涨幅高于预期回撤时成立。 */
+export function rowUnrealizedPriceChangePct(row: Pick<CampaignCardData, 'mainPriceChangePct' | 'peakPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
+  return computeUnrealizedPriceChangePct(row.mainPriceChangePct, row.peakPriceChangePct, row.initialExpectedMaxDrawdownPct);
 }
 
 /** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */
@@ -266,6 +275,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
   const mirrorRank = memoizeByRow<T, number>(rowMirrorTpRank);
   const leverage = memoizeByRow<T, number>(row => campaignLeverage(row.campaign, row.legs));
   const mainPriceEfficiency = memoizeByRow<T, number | null>(rowMainPriceEfficiency);
+  const unrealizedPriceChangePct = memoizeByRow<T, number | null>(rowUnrealizedPriceChangePct);
   const addEfficiency = memoizeByRow<T, number | null>(rowAddEfficiency);
   const addCount = memoizeByRow<T, number>(rowAddCount);
 
@@ -346,6 +356,11 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       (a, b, direction) => compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
+    unrealizedPriceChangePct: metric(
+      unrealizedPriceChangePct,
+      (a, b, direction) => compareFiniteMetric(a.mainPriceChangePct ?? Number.NaN, b.mainPriceChangePct ?? Number.NaN, direction)
+        || importanceTimeAlpha(a, b),
+    ),
     addEfficiency: metric(
       addEfficiency,
       (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
@@ -411,6 +426,7 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'expectedDrawdownPct':
     case 'mainPriceChange':
     case 'mainPriceEfficiency':
+    case 'unrealizedPriceChangePct':
     case 'addEfficiency': return Number(value.toFixed(2));
     default: return value;
   }
@@ -496,7 +512,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy',
+  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy',
 ]);
 
 /** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */

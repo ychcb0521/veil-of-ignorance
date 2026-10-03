@@ -41,9 +41,13 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
+import { fetchReplayKlineRange } from '@/hooks/useReplayKlines';
+import { intervalToMs } from '@/hooks/useBinanceData';
+import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, campaignPriceChange, computePeakPriceChangePct, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { pickCampaignComputeInterval } from '@/lib/campaignChartContentSpan';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -127,6 +131,7 @@ import {
   rowAddEfficiency,
   rowAddCount,
   rowMainPriceEfficiency,
+  rowUnrealizedPriceChangePct,
   rowMirrorTpRank,
   rowPayoffRatio,
   selectSortMode,
@@ -190,6 +195,8 @@ type CampaignMetricChartKey =
   | 'mainPriceChangeDistribution'
   | 'mainPriceEfficiency'
   | 'mainPriceEfficiencyDistribution'
+  | 'unrealizedPriceChangePct'
+  | 'unrealizedPriceChangePctDistribution'
   | 'addEfficiency'
   | 'addEfficiencyDistribution'
   | 'addCount'
@@ -237,6 +244,7 @@ type CampaignFormulaPopover =
   | 'asymmetricRisk'
   | 'mainPriceChangeSort'
   | 'mainPriceEfficiencySort'
+  | 'unrealizedPriceChangePctSort'
   | 'addEfficiencySort'
   | 'addCountSort'
   | 'sortChain';
@@ -258,6 +266,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addEfficiency', label: '加仓效用' },
   // 【用户要求】加仓次数：紧跟加仓效用（排序行、封面同一位置）
   { value: 'addCount', label: '加仓次数' },
+  { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'leverage', label: '杠杆倍数' },
@@ -362,6 +371,10 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   mainPriceEfficiency: {
     noun: '可计算涨跌幅倍数',
     hint: '涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
+  },
+  unrealizedPriceChangePct: {
+    noun: '可计算涨幅未兑现',
+    hint: '只有峰值涨幅严格大于预期回撤、且主力涨跌幅与历史 K 线峰值都可计算的战役会进入当前排序',
   },
   addEfficiency: {
     noun: '可计算加仓效用',
@@ -776,6 +789,52 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     },
   },
   {
+    key: 'unrealizedPriceChangePct',
+    label: '涨幅未兑现',
+    chartLabel: '涨幅未兑现图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-unrealizedPriceChangePct-view-time',
+    seriesLabel: '涨幅未兑现时序',
+    guide: {
+      yAxis: '涨幅未兑现 = 峰值涨幅 − 涨跌幅。只有峰值涨幅严格大于预期回撤时才计算，单位为百分点。',
+      point: '数值越高，代表主力曾经走出的有利行情最终兑现得越少；0% 表示全部兑现。',
+      colors: PAYOFF_SIGN_COLORS,
+      referenceLines: ['灰色 0% 线：峰值涨幅全部兑现。'],
+    },
+    missingValueLabel: '涨幅未兑现',
+    colorMode: 'signed',
+    formatValue: value => `${value.toFixed(2)}%`,
+  },
+  {
+    key: 'unrealizedPriceChangePctDistribution',
+    sourceKey: 'unrealizedPriceChangePct',
+    view: 'distribution',
+    label: '涨幅未兑现分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-unrealizedPriceChangePct-view-distribution',
+    seriesLabel: '涨幅未兑现分布',
+    guide: {
+      yAxis: '落在该涨幅未兑现区间的战役数量：点从底线向上堆叠，堆得越高，这一档出现得越多。',
+      point: '每个点是一场满足“峰值涨幅 > 预期回撤”的战役；横向按涨幅未兑现百分点排列，不考虑时间先后。',
+      colors: PAYOFF_SIGN_COLORS,
+      referenceLines: [
+        '灰色 0% 竖线：峰值行情全部兑现；线右仍有涨幅未兑现。',
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '涨幅未兑现',
+    colorMode: 'signed',
+    formatValue: value => `${value.toFixed(2)}%`,
+    distribution: {
+      unit: '%',
+      zeroLabel: '0% 全部兑现',
+      zeroMeaning: '兑现分界',
+      positiveShareLabel: '未完全兑现',
+    },
+  },
+  {
     key: 'addEfficiency',
     label: '加仓效用',
     chartLabel: '加仓效用图',
@@ -869,6 +928,7 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   mirrorTp: 'mirrorTpSort',
   mainPriceChange: 'mainPriceChangeSort',
   mainPriceEfficiency: 'mainPriceEfficiencySort',
+  unrealizedPriceChangePct: 'unrealizedPriceChangePctSort',
   addEfficiency: 'addEfficiencySort',
   addCount: 'addCountSort',
 };
@@ -882,6 +942,7 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   mirrorTp: 'mirrorTp',
   mainPriceChange: 'mainPriceChange',
   mainPriceEfficiency: 'mainPriceEfficiency',
+  unrealizedPriceChangePct: 'unrealizedPriceChangePct',
   addEfficiency: 'addEfficiency',
   addCount: 'addCount',
 };
@@ -909,6 +970,7 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   // 【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望同盈亏比：默认看分布，「时序 | 分布」随时切回。
   mainPriceChange: 'mainPriceChangeDistribution',
   mainPriceEfficiency: 'mainPriceEfficiencyDistribution',
+  unrealizedPriceChangePct: 'unrealizedPriceChangePctDistribution',
   addEfficiency: 'addEfficiencyDistribution',
   arithmeticExpectancy: 'arithmeticExpectancyDistribution',
   // 【用户要求】加仓次数同预期回撤：默认看柱状，「时序 | 柱状」随时切回
@@ -1063,6 +1125,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'captureRate': return formatCampaignPayoffRatio(value);
     case 'expectedDrawdownPct': return `${value.toFixed(2)}%`;
     case 'mainPriceChange': return formatLegPriceChangePct(value);
+    case 'unrealizedPriceChangePct': return `${value.toFixed(2)}%`;
     case 'mainPriceEfficiency':
     case 'addEfficiency': return formatEfficiency(value);
     case 'geometricExpectancy': return formatGeometricExpectancy(value);
@@ -1227,6 +1290,7 @@ const CARD_METRIC_LABEL = {
   captureRate: '盈亏比',
   addEfficiency: '加仓效用',
   addCount: '加仓次数',
+  unrealizedPriceChangePct: '涨幅未兑现',
   geometricExpectancy: '几何期望',
   arithmeticExpectancy: '算术期望',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
@@ -1245,6 +1309,7 @@ const CARD_METRIC_WIDTH_CLASS = {
   captureRate: 'sm:w-[var(--cm-w-captureRate)]',
   addEfficiency: 'sm:w-[var(--cm-w-addEfficiency)]',
   addCount: 'sm:w-[var(--cm-w-addCount)]',
+  unrealizedPriceChangePct: 'sm:w-[var(--cm-w-unrealizedPriceChangePct)]',
   geometricExpectancy: 'sm:w-[var(--cm-w-geometricExpectancy)]',
   arithmeticExpectancy: 'sm:w-[var(--cm-w-arithmeticExpectancy)]',
 } as const satisfies Record<CardMetricMode, string>;
@@ -1260,6 +1325,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
   const { profitCaptureRatio, initialExpectedMaxDrawdownPct } = row;
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
+  const unrealizedPriceChangePct = rowUnrealizedPriceChangePct(row);
   const readings: CardMetricReadings = {
     mirrorTp: !campaignAchievedMirrorTp(row.legs, row.tradeRecords)
       ? '未实现'
@@ -1274,6 +1340,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
     addCount: String(rowAddCount(row)),
+    unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
     arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
   };
@@ -1406,6 +1473,7 @@ const CampaignCard = memo(function CampaignCard({
   const mainPriceChangePct = row.mainPriceChangePct;
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
+  const unrealizedPriceChangePct = rowUnrealizedPriceChangePct(row);
   const importance = importanceValue(campaign);
   /** 自评量表上悬停 / 聚焦的那一档（预览文字用）；null = 显示已选的那一档。 */
   const [ratingPreview, setRatingPreview] = useState<number | null>(null);
@@ -1746,6 +1814,21 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div
+            data-testid="campaign-unrealized-price-change"
+            title={unrealizedPriceChangePct == null
+              ? '涨幅未兑现只在峰值涨幅严格大于预期回撤、且主力涨跌幅与峰值涨幅都可计算时显示'
+              : `涨幅未兑现 = 峰值涨幅 − 涨跌幅 = ${readings.unrealizedPriceChangePct}`}
+            className={metricCell('unrealizedPriceChangePct')}
+            data-sort-highlight={litAttr('unrealizedPriceChangePct')}
+          >
+            <dt className={metricName('unrealizedPriceChangePct')}>{CARD_METRIC_LABEL.unrealizedPriceChangePct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
+                {readings.unrealizedPriceChangePct}
+              </span>
+            </dd>
+          </div>
+          <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
             title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
@@ -1902,6 +1985,13 @@ export default function JournalCampaignsPage() {
   );
   const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
+  const [peakPriceChangeByCampaign, setPeakPriceChangeByCampaign] = useState<ReadonlyMap<string, number | null>>(() => new Map());
+  const peakPriceChangeRef = useRef<ReadonlyMap<string, number | null>>(peakPriceChangeByCampaign);
+  useEffect(() => {
+    const empty = new Map<string, number | null>();
+    peakPriceChangeRef.current = empty;
+    setPeakPriceChangeByCampaign(empty);
+  }, [userId]);
   const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -2092,6 +2182,91 @@ export default function JournalCampaignsPage() {
       operationRange,
     ));
   }, [rows, operationRange]);
+  /**
+   * 峰值涨幅依赖历史 K 线，列表基础快照里没有。只在用户查看或排序「涨幅未兑现」时按需加载，
+   * 四路并发并按战役更新时间放进会话缓存；不上传盈亏、仓位或复盘内容。
+   */
+  const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
+    || (metricChartOpen && (metricChartKey === 'unrealizedPriceChangePct' || metricChartKey === 'unrealizedPriceChangePctDistribution'));
+  useEffect(() => {
+    if (!unrealizedMetricNeeded || !campaignRowsComplete || scopedRows.length === 0) return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const pending = scopedRows.filter(row => !peakPriceChangeRef.current.has(row.campaign.id));
+    if (pending.length === 0) return () => controller.abort();
+    const publish = (campaignId: string, value: number | null) => {
+      if (cancelled) return;
+      const next = new Map(peakPriceChangeRef.current).set(campaignId, value);
+      peakPriceChangeRef.current = next;
+      setPeakPriceChangeByCampaign(next);
+    };
+    let cursor = 0;
+    const loadOne = async (row: CampaignCardData): Promise<void> => {
+      const cacheKey = `campaign-peak-price-v1:${row.campaign.id}:${row.campaign.updated_at}`;
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached != null) {
+        const parsed = cached === 'null' ? null : Number(cached);
+        if (parsed == null || Number.isFinite(parsed)) {
+          publish(row.campaign.id, parsed);
+          return;
+        }
+      }
+      const change = campaignPriceChange(row.campaign, row.legs, row.tradeRecords);
+      if (change.entryPrice == null || change.side == null) {
+        sessionStorage.setItem(cacheKey, 'null');
+        publish(row.campaign.id, null);
+        return;
+      }
+      const startMs = new Date(row.campaign.opened_at).getTime();
+      const endMs = change.mainCloseTime ?? new Date(row.campaign.closed_at ?? Date.now()).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+        sessionStorage.setItem(cacheKey, 'null');
+        publish(row.campaign.id, null);
+        return;
+      }
+      const window = buildCampaignKlineTimeWindow(startMs, endMs, startMs, endMs);
+      const interval = pickCampaignComputeInterval({ startMs: window.fromTime, endMs: window.toTime });
+      const barMs = intervalToMs(interval);
+      try {
+        const klines = await fetchReplayKlineRange(
+          row.campaign.symbol,
+          interval,
+          startMs - barMs,
+          endMs + barMs,
+          controller.signal,
+        );
+        const value = computePeakPriceChangePct({
+          side: change.side,
+          entryPrice: change.entryPrice,
+          klines,
+          startMs,
+          endMs,
+          barMs,
+        });
+        sessionStorage.setItem(cacheKey, value == null ? 'null' : String(value));
+        publish(row.campaign.id, value);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn('Failed to load campaign peak price change', row.campaign.id, error);
+          publish(row.campaign.id, null);
+        }
+      }
+    };
+    const worker = async () => {
+      while (!cancelled) {
+        const row = pending[cursor++];
+        if (!row) return;
+        await loadOne(row);
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [campaignRowsComplete, scopedRows, unrealizedMetricNeeded]);
+  const unrealizedMetricLoading = unrealizedMetricNeeded
+    && scopedRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id));
   useEffect(() => {
     if (campaignRowsComplete) setSelectedCampaignIds(current => retainCampaignSelection(current, new Set(scopedRows.map(row => row.campaign.id))));
   }, [scopedRows, campaignRowsComplete]);
@@ -2237,6 +2412,7 @@ export default function JournalCampaignsPage() {
     const rows = scopedRows.map(row => {
       const next: CampaignMetricData = {
         ...row,
+        peakPriceChangePct: peakPriceChangeByCampaign.get(row.campaign.id) ?? null,
         // 单场算术期望的胜率统一取 50%（与详情页同一个函数），不随账户实时胜率变动
         ...computeCampaignExpectancies(row.profitCaptureRatio),
       };
@@ -2252,7 +2428,7 @@ export default function JournalCampaignsPage() {
     const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
-  }, [scopedRows]);
+  }, [peakPriceChangeByCampaign, scopedRows]);
   /**
    * 账户权益随行情每个 tick 变，但只有没记开仓权益快照的场次才拿它兜底。
    * 解析出的三个数与上次相同就沿用上一个行对象（整表都没变就沿用同一个数组）：
@@ -2466,6 +2642,7 @@ export default function JournalCampaignsPage() {
       row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
     ));
     const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
+    const unrealizedPriceChangePct = buildSeries(row => rowUnrealizedPriceChangePct(row));
     // 加仓次数：每一场都有读数（没加仓 = 0）
     const addCount = buildSeries(row => rowAddCount(row));
     // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
@@ -2495,6 +2672,8 @@ export default function JournalCampaignsPage() {
       mainPriceChangeDistribution: mainPriceChange,
       mainPriceEfficiency,
       mainPriceEfficiencyDistribution: mainPriceEfficiency,
+      unrealizedPriceChangePct,
+      unrealizedPriceChangePctDistribution: unrealizedPriceChangePct,
       addEfficiency,
       addEfficiencyDistribution: addEfficiency,
       addCount,
@@ -2632,7 +2811,8 @@ export default function JournalCampaignsPage() {
   const handleSortChange = (mode: CampaignSortMode) => {
     const nextSort = selectSortMode(sortChain, mode);
     const sortChartKey = SORT_CHART_BY_MODE[mode] ?? null;
-    const nextChartKey = metricChartOpen && sortChartKey != null && metricSeriesByKey[sortChartKey].points.length > 0
+    const nextChartKey = metricChartOpen && sortChartKey != null
+      && (mode === 'unrealizedPriceChangePct' || metricSeriesByKey[sortChartKey].points.length > 0)
       ? DEFAULT_CHART_VIEW_BY_SOURCE[sortChartKey] ?? sortChartKey
       : undefined;
     setSortChain(nextSort);
@@ -4131,6 +4311,18 @@ export default function JournalCampaignsPage() {
                           <div>主力未平仓，或缺少主力开仓价 / 初始对冲 A/B 价格（算不出预期回撤）的战役不参与排序与散点图。</div>
                         </div>
                       </>
+                    ) : formula === 'unrealizedPriceChangePctSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">涨幅未兑现计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          涨幅未兑现ᵢ = 峰值涨幅ᵢ − 涨跌幅ᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>峰值涨幅按主力方向取持有窗口内最有利的 K 线极值：主多取最高价，主空取最低价。</div>
+                          <div>只有峰值涨幅严格大于预期回撤时才计算；不满足此前提、主力未平仓或历史 K 线暂未加载时显示「—」。</div>
+                          <div>0% 表示峰值行情全部兑现；数值越高，代表最终没有兑现的有利涨幅越多。</div>
+                        </div>
+                      </>
                     ) : formula === 'addEfficiencySort' ? (
                       <>
                         <div className="font-medium text-foreground">加仓效用计算公式</div>
@@ -4972,6 +5164,11 @@ export default function JournalCampaignsPage() {
                 <div className="text-[12px] text-muted-foreground">
                   整表共 {rows.length} 场。换一个时间段，或点上方「操作时间」选回全部。
                 </div>
+              </>
+            ) : primarySort.mode === 'unrealizedPriceChangePct' && unrealizedMetricLoading ? (
+              <>
+                <div className="text-[13px] font-medium" data-testid="campaign-unrealized-loading">正在计算涨幅未兑现…</div>
+                <div className="text-[12px] text-muted-foreground">正在按战役读取历史 K 线，结果会逐场出现并自动重排。</div>
               </>
             ) : SORT_EMPTY_HINTS[primarySort.mode] && scopedRows.length > 0 ? (
               <>

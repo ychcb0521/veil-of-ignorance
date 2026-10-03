@@ -139,7 +139,7 @@ export interface CampaignPnlOverviewMetrics {
 }
 
 /**
- * 涨幅未兑现 = (1 − 最终涨跌幅 ÷ 峰值涨幅) × 100%。
+ * 涨幅未兑现 = 峰值涨幅 − 最终涨跌幅。
  * 只有峰值涨幅严格大于预期回撤时才计算：行情先越过初始风险尺度，峰值兑现比例才有比较意义。
  */
 export function computeUnrealizedPriceChangePct(
@@ -151,7 +151,7 @@ export function computeUnrealizedPriceChangePct(
     || peakPriceChangePct == null || !Number.isFinite(peakPriceChangePct)
     || expectedDrawdownPct == null || !Number.isFinite(expectedDrawdownPct) || expectedDrawdownPct <= 0
     || peakPriceChangePct <= expectedDrawdownPct) return null;
-  const value = (1 - mainPriceChangePct / peakPriceChangePct) * 100;
+  const value = peakPriceChangePct - mainPriceChangePct;
   return Number.isFinite(value) ? value : null;
 }
 
@@ -337,12 +337,12 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         ? 'text-muted-foreground' : unrealizedPriceChangePct > 0 ? 'text-[#F6465D]' : 'text-[#0ECB81]',
       help: (
         <>
-          <p>主力曾经走出的峰值涨幅中，最终没有保留下来的比例。数值越高，表示从峰值回吐得越多。</p>
+          <p>主力曾经走出的峰值涨幅与最终涨跌幅之差。数值越高，表示从峰值回吐的百分点越多。</p>
           <p>仅当峰值涨幅严格大于预期回撤时计算；行情尚未越过初始风险尺度时，本项不成立。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅未兑现 =（1 − 涨跌幅 ÷ 峰值涨幅）× 100%</div>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">涨幅未兑现 = 峰值涨幅 − 涨跌幅</div>
           {unrealizedPriceChangePct == null
             ? <p>缺少必要数据、预期回撤无效，或峰值涨幅不大于预期回撤时不计算。</p>
-            : <p className="font-mono text-foreground">本场 =（1 − {formatLegPriceChangePct(mainPriceChangePct)} ÷ {formatLegPriceChangePct(peakPriceChangePct)}）× 100% = {unrealizedPriceChangePct.toFixed(2)}%</p>}
+            : <p className="font-mono text-foreground">本场 = {formatLegPriceChangePct(peakPriceChangePct)} − {formatLegPriceChangePct(mainPriceChangePct)} = {unrealizedPriceChangePct.toFixed(2)}%</p>}
         </>
       ),
     },

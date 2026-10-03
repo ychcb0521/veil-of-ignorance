@@ -47,6 +47,8 @@ export type CampaignCardData = {
   opportunityQuality: number | null;
   /** 战役的涨跌幅（%，按主力方向计：开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）；主力都未平仓时为 null。「涨跌幅」排序与卡片读数用它。 */
   mainPriceChangePct: number | null;
+  /** 列表页按需加载 K 线后写入；null 表示尚未加载或算不出。 */
+  peakPriceChangePct?: number | null;
 };
 
 type CampaignDetails = Awaited<ReturnType<typeof getCampaignFullData>>;

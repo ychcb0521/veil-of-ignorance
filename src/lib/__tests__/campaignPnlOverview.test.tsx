@@ -89,7 +89,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       '100.00 USDT',
       '+25.00%',
       '+2.50',
-      '20.00%',
+      '5.00%',
       '1000.00 USDT',
       '1500.00 USDT',
     ]);
@@ -305,7 +305,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.queryByText(/这个数与下方 Legs 表的「合计」行/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '涨幅未兑现说明' }));
-    expect(screen.getByText(/涨幅未兑现 =（1 − 涨跌幅 ÷ 峰值涨幅）× 100%/)).toBeInTheDocument();
+    expect(screen.getByText(/涨幅未兑现 = 峰值涨幅 − 涨跌幅/)).toBeInTheDocument();
     expect(screen.getByText('按 1h K 线估计')).toHaveClass('text-[#F0B90B]');
   });
 });
@@ -323,11 +323,11 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey({ peakPriceChangePct: null }).unrealizedPriceChangePct.value).toBe('—');
   });
 
-  it('涨幅未兑现 = (1 − 20% ÷ 25%) × 100% = 20%；正值用风险色', () => {
-    expect(byKey().unrealizedPriceChangePct.value).toBe('20.00%');
+  it('涨幅未兑现 = 25% − 20% = 5%；正值用风险色', () => {
+    expect(byKey().unrealizedPriceChangePct.value).toBe('5.00%');
     expect(byKey().unrealizedPriceChangePct.color).toBe('#F6465D');
     expect(byKey({ mainPriceChangePct: 25 }).unrealizedPriceChangePct.value).toBe('0.00%');
-    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.value).toBe('-20.00%');
+    expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.value).toBe('-5.00%');
     expect(byKey({ mainPriceChangePct: 30 }).unrealizedPriceChangePct.color).toBe('#0ECB81');
     expect(byKey({ peakPriceChangePct: 0 }).unrealizedPriceChangePct.value).toBe('—');
     expect(byKey({ peakPriceChangePct: 10, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).toBe('—');

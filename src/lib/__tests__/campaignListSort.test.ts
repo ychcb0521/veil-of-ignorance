@@ -179,6 +179,17 @@ describe('每个排序项的独立比较器', () => {
     expect(keys.alpha.missing(empty)).toBe(false);
   });
 
+  it('涨幅未兑现：只纳入峰值涨幅高于预期回撤的战役，并按未兑现百分点排序', () => {
+    const rows = [
+      makeSortRow({ id: 'half', dd: 5, mpc: 10, peak: 20 }),
+      makeSortRow({ id: 'three-quarters', dd: 5, mpc: 10, peak: 40 }),
+      makeSortRow({ id: 'threshold', dd: 5, mpc: 2, peak: 5 }),
+      makeSortRow({ id: 'missing', dd: 5, mpc: 2, peak: null }),
+    ];
+    expect(ids(sortCampaignRows(rows, [{ mode: 'unrealizedPriceChangePct', direction: 'desc' }])))
+      .toEqual(['three-quarters', 'half']);
+  });
+
   it('方向：desc 大的在前、asc 小的在前；字母按标题', () => {
     const small = makeSortRow({ id: 's', title: 'Alpha', leverage: 2, importance: 1 });
     const big = makeSortRow({ id: 'b', title: 'Beta', leverage: 20, importance: 4 });
@@ -440,7 +451,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     // 七个连续指标都分档（DSI / USI 贡献已从排序栏删掉）
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'expectedDrawdownPct',
-      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency',
+      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct',
     ]);
     // 第一级算不出的战役本来就不进列表，也不参与档界
     const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
@@ -662,8 +673,8 @@ describe('【用户要求】分档时负值与正值不同档：0 一定是档�
 });
 
 describe('【用户要求】与 0 相关的分档：0 的分界线保留，正负两侧各自按场数对半分', () => {
-  it('哪些指标这样分：盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望；预期回撤照旧整体四分位', () => {
-    for (const mode of ['captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy'] as const) {
+  it('哪些指标这样分：盈亏比、涨跌幅、涨跌幅倍数、涨幅未兑现、加仓效用、算术期望、几何期望；预期回撤照旧整体四分位', () => {
+    for (const mode of ['captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy'] as const) {
       expect(isSignSplitSortMode(mode)).toBe(true);
     }
     expect(isSignSplitSortMode('expectedDrawdownPct')).toBe(false);

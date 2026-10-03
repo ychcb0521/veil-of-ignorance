@@ -32,6 +32,8 @@ export type SortRowSpec = {
   dd?: number;
   /** 主力涨跌幅（%）。 */
   mpc?: number | null;
+  /** 峰值涨幅（%）；未给时为有主力涨跌幅的测试行生成一个满足前提的峰值。 */
+  peak?: number | null;
   arith?: number | null;
   geo?: number | null;
 };
@@ -127,6 +129,11 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
     initialExpectedMaxDrawdownPct: spec.dd ?? 0,
     opportunityQuality: null,
     mainPriceChangePct: spec.mpc ?? null,
+    peakPriceChangePct: spec.peak !== undefined
+      ? spec.peak
+      : spec.mpc != null
+        ? Math.max(Math.abs(spec.mpc) + 1, (spec.dd ?? 0) + 1)
+        : null,
     arithmeticExpectancy: spec.arith ?? null,
     geometricExpectancy: spec.geo ?? null,
   };
