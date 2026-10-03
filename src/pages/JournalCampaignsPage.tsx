@@ -2192,6 +2192,8 @@ export default function JournalCampaignsPage() {
    * 峰值涨幅依赖历史 K 线，列表基础快照里没有。只在用户查看或排序「涨幅未兑现」时按需加载，
    * 严格串行、每次远端请求后留出间隔，并按战役更新时间放进会话缓存；不上传盈亏、仓位或复盘内容。
    * 这里不能抢占详情页 K 线的交易所额度：遇到 418 / 429 立即停掉整条指标队列，绝不继续撞接口。
+   * 标签页退到后台时仍保留队列：浏览器会自行节流定时器；若主动 abort，回来后 effect 不会重跑，
+   * 就会永远停在诸如「104 / 295」的中间状态。
    */
   const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
     || summaryExportPending
@@ -2200,17 +2202,10 @@ export default function JournalCampaignsPage() {
     if (!unrealizedMetricNeeded || !campaignRowsComplete || scopedRows.length === 0) return;
     const controller = new AbortController();
     let cancelled = false;
-    const stopWhenPageLeavesForeground = () => {
-      if (document.visibilityState !== 'hidden') return;
-      cancelled = true;
-      controller.abort();
-    };
-    document.addEventListener('visibilitychange', stopWhenPageLeavesForeground);
     setUnrealizedMetricLoadError(null);
     const pending = scopedRows.filter(row => !peakPriceChangeRef.current.has(row.campaign.id));
     if (pending.length === 0) return () => {
       controller.abort();
-      document.removeEventListener('visibilitychange', stopWhenPageLeavesForeground);
     };
     const PUBLISH_BATCH_SIZE = 12;
     const peakBatch = new Map<string, number | null>();
@@ -2324,9 +2319,16 @@ export default function JournalCampaignsPage() {
     return () => {
       cancelled = true;
       controller.abort();
-      document.removeEventListener('visibilitychange', stopWhenPageLeavesForeground);
     };
   }, [campaignRowsComplete, scopedRows, unrealizedMetricNeeded, unrealizedMetricRetryKey]);
+  const unrealizedMetricProgress = useMemo(() => {
+    const total = scopedRows.length;
+    const processed = scopedRows.reduce(
+      (count, row) => count + (peakPriceChangeByCampaign.has(row.campaign.id) ? 1 : 0),
+      0,
+    );
+    return { processed, total };
+  }, [peakPriceChangeByCampaign, scopedRows]);
   const unrealizedMetricLoading = unrealizedMetricNeeded
     && unrealizedMetricLoadError == null
     && scopedRows.some(row => !peakPriceChangeByCampaign.has(row.campaign.id));
@@ -4165,6 +4167,9 @@ export default function JournalCampaignsPage() {
                 const sortChartPointCount = sortChartKey == null
                   ? 0
                   : metricSeriesByKey[sortChartKey].points.length;
+                const sortChartProgressLabel = option.value === 'unrealizedPriceChangePct'
+                  ? `${unrealizedMetricProgress.processed} / ${unrealizedMetricProgress.total}`
+                  : String(sortChartPointCount);
                 const sortChartActive = sortChartKey != null
                   && metricChartOpen
                   && openSourceKey === sortChartKey;
@@ -4474,7 +4479,9 @@ export default function JournalCampaignsPage() {
                           data-testid={sortChartTestId}
                           aria-expanded={sortChartActive}
                           aria-controls="campaign-odds-scatter-panel"
-                          aria-label={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，共 ${sortChartPointCount} 场`}
+                          aria-label={option.value === 'unrealizedPriceChangePct'
+                            ? `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，已处理 ${unrealizedMetricProgress.processed} / ${unrealizedMetricProgress.total} 场，可绘制 ${sortChartPointCount} 场`
+                            : `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，共 ${sortChartPointCount} 场`}
                           title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图`}
                           disabled={sortChartPointCount === 0}
                           onClick={(event) => {
@@ -4490,7 +4497,7 @@ export default function JournalCampaignsPage() {
                         >
                           <ChartScatter aria-hidden="true" className="h-3 w-3" />
                           <span>{sortChartActive ? '收起散点图' : '查看散点图'}</span>
-                          <span className="text-muted-foreground/45">{sortChartPointCount}</span>
+                          <span className="text-muted-foreground/45">{sortChartProgressLabel}</span>
                         </button>
                       </div>
                     ) : null}
@@ -5244,7 +5251,7 @@ export default function JournalCampaignsPage() {
             role="status"
             data-testid="campaign-unrealized-loading"
           >
-            正在后台分批计算涨幅未兑现；每完成 12 场更新一次读数和排序，未计算战役保留在末尾。
+            正在后台分批计算涨幅未兑现：已处理 {unrealizedMetricProgress.processed} / {unrealizedMetricProgress.total} 场；每完成 12 场更新一次读数和排序，未计算战役保留在末尾。
           </div>
         ) : null}
 

@@ -20,7 +20,7 @@ describe('replay K-line request governor', () => {
 
     const result = fetchReplayKlineRange('BTCUSDT', '1m', 0, 100_000_000, undefined, { priority: 'background' });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    await vi.advanceTimersByTimeAsync(1_499);
+    await vi.advanceTimersByTimeAsync(749);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     await result;

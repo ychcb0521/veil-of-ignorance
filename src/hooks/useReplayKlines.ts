@@ -23,7 +23,7 @@ let preferAlternateKlineEndpointUntil = 0;
 
 // Interactive charts retain their existing immediate behaviour. Only bulk/background pagination is
 // paced; it is the source of sustained request pressure and must yield to detail-page work.
-const requestGapMs = (priority: ReplayKlineRequestPriority) => priority === 'background' ? 1_500 : 0;
+const requestGapMs = (priority: ReplayKlineRequestPriority) => priority === 'background' ? 750 : 0;
 
 const wait = (ms: number) => new Promise<void>(resolve => window.setTimeout(resolve, ms));
 
