@@ -95,7 +95,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('点排序项把图滚进视野时，图的顶边停在吸顶区正下方');
     expect(guide).toContain('<strong>把这一图的行距均匀压紧</strong>');
     expect(guide).toContain('行距压到 4px（相邻两点只露出一半）还放不下，才把顶上那一截合成一个三角并在脚注报数');
-    expect(guide).toContain('窗口够高时图盒最高撑到 44rem，窗口很矮时不低于 18rem');
+    expect(guide).toContain('<strong>图盒的高度拉满这一屏</strong>');
+    expect(guide).toContain('窗口很矮时不低于 18rem');
     expect(guide).not.toContain('堆得比图高还高时先把图盒撑高，撑到上限仍放不下的那一截在柱顶合成一个三角');
     // 实现里的三个数：行距下限 4px、盒高上限 704px（44rem）与下限 288px（18rem）
     expect(read('components/charts/stackLayout.ts')).toContain('export const STACK_PITCH_FLOOR = 4;');

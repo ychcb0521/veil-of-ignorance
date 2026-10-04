@@ -394,7 +394,7 @@ export function ScatterPlot({
         plotHeight,
         // 盒子高度由宽度定（aspect-[8/5]，下限 18rem），所以排版的参考高度也只从宽度推；
         // 一屏看全的上限来自视口而不是实测盒高，同样不会和排版互相追。
-        referenceHeight: Math.min(Math.max(STACK_BOX_FLOOR, trackWidth * STACK_BOX_ASPECT), boxCap ?? Number.POSITIVE_INFINITY)
+        referenceHeight: (boxCap ?? Math.max(STACK_BOX_FLOOR, trackWidth * STACK_BOX_ASPECT))
           - PLOT_INSET.top - PLOT_INSET.bottom - STACK_BOX_BORDER,
       });
       const byId = new Map(points.map(point => [point.id, point]));
@@ -620,12 +620,14 @@ export function ScatterPlot({
   };
   // 堆得比图高还高时先把盒子撑高（有上限：44rem 与一屏看全的 boxCap 取小），撑不到所需高度时布局压紧行距，
   // 而不是把点丢掉；盒子高度只由宽度与视口决定，不会和测量结果互相追着改。
-  const stackBoxMinHeight = stack
-    ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, boxCap ?? STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
+  // 【用户要求】高度拉满屏幕：调用方给了 boxCap（按视口算出的可用高度）时，盒子就取这个高度——
+  // 不再按 8:5 由宽度推、也不受 44rem 限制，时序 / 分布 / 柱状都一样；没给时照旧（堆叠图按需撑高到 44rem）。
+  const stackBoxMinHeight = boxCap != null ? boxCap : stack
+    ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
     : null;
-  const boxStyle: CSSProperties | undefined = stackBoxMinHeight == null && boxCap == null ? undefined : {
-    ...(stackBoxMinHeight == null ? {} : { minHeight: stackBoxMinHeight, width: '100%' }),
-    // 时序图的盒高由宽度按 8:5 推出来，宽屏矮窗口上同样可能超出一屏：用同一个上限压住。
+  const boxStyle: CSSProperties | undefined = stackBoxMinHeight == null ? undefined : {
+    minHeight: stackBoxMinHeight,
+    width: '100%',
     ...(boxCap == null ? {} : { maxHeight: boxCap }),
   };
   /**

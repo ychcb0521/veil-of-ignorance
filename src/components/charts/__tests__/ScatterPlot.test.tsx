@@ -547,17 +547,17 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '288px', maxHeight: '288px' });
     tiny.unmount();
 
-    // 上限比 44rem 还高（大屏）：堆叠图仍只撑到 44rem
+    // 【用户要求】高度拉满屏幕：给了可用高度就取这个高度，大屏上不再停在 44rem
     const roomy = renderStack(values, { maxBoxHeight: 900 });
-    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '704px', maxHeight: '900px' });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '900px', maxHeight: '900px' });
     roomy.unmount();
 
-    // 用不着撑高的小图：只带上限，不写 min-height 以外的东西
+    // 点很少的图同样拉满，不缩回 18rem
     renderStack([0.5, 0.5, 0.5], { maxBoxHeight: 434 });
-    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '288px', maxHeight: '434px' });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '434px', maxHeight: '434px' });
   });
 
-  it('时序图（非堆叠）同样带上限：盒高由宽度按 8:5 推出来，矮窗口上由 max-height 压住', () => {
+  it('时序图（非堆叠）同样拉满：盒高取可用高度，不再按 8:5 由宽度推', () => {
     render(
       <ScatterPlot
         points={makeStackPoints([0.5, 1.5]).map((point, index) => ({ ...point, x: index, y: point.x }))}
@@ -572,7 +572,7 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     );
     const box = screen.getByTestId('scroll');
     expect(box.style.maxHeight).toBe('434px');
-    expect(box.style.minHeight).toBe('');
+    expect(box.style.minHeight).toBe('434px');
     expect(box).not.toHaveAttribute('data-stack-pitch');
   });
 
