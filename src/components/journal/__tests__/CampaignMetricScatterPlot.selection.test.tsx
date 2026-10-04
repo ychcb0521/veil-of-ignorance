@@ -106,7 +106,8 @@ describe('CampaignMetricScatterPlot batch selection', () => {
 
   it('opens overflow to select actual hidden campaign IDs, including keyboard deselection', () => {
     const navigate = vi.fn();
-    const points = Array.from({ length: 90 }, (_, index) => ({ ...POINTS[0], campaignId: `c${index}`, title: `战役 ${index}`, sequence: index + 1, value: 0.5 }));
+    // 200 场同一档：行距压到下限也装不下，才有合并三角
+    const points = Array.from({ length: 200 }, (_, index) => ({ ...POINTS[0], campaignId: `c${index}`, title: `战役 ${index}`, sequence: index + 1, value: 0.5 }));
     render(<SelectionHarness points={points} onSelectCampaign={navigate} />);
     const overflow = screen.getByTestId('chart-stack-overflow-hit');
     fireEvent.click(overflow);
@@ -137,7 +138,7 @@ describe('CampaignMetricScatterPlot batch selection', () => {
 
   it('overflow entries navigate normally outside selection mode', () => {
     const navigate = vi.fn();
-    const points = Array.from({ length: 90 }, (_, index) => ({ ...POINTS[0], campaignId: `c${index}`, title: `战役 ${index}`, value: 0.5 }));
+    const points = Array.from({ length: 200 }, (_, index) => ({ ...POINTS[0], campaignId: `c${index}`, title: `战役 ${index}`, value: 0.5 }));
     render(<CampaignMetricScatterPlot {...BASE} points={points} onSelectCampaign={navigate} />);
     fireEvent.click(screen.getByTestId('chart-stack-overflow-hit'));
     const hidden = screen.getByTestId('chart-overflow-picker').querySelector<HTMLButtonElement>('button[data-campaign-id]')!;

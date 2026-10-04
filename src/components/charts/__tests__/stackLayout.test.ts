@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MARK_FOOTPRINT, MIN_PITCH } from '@/lib/chartTokens';
-import { columnStackLayout, minimumBoundaryPlotWidth, stackLayout, type StackLayoutBoundary } from '../stackLayout';
+import { STACK_PITCH_FLOOR, columnStackLayout, minimumBoundaryPlotWidth, stackLayout, stackPitchFor, type StackLayoutBoundary } from '../stackLayout';
 
 const OPTS = { xMin: -2, xMax: 10, left: 12, right: 840, top: 12, plotHeight: 492 };
 
@@ -102,7 +102,9 @@ describe('stackLayout 频数堆叠', () => {
       { id: 'loss', x: 80, group: '0' },
       { id: 'neutral', x: 70, group: '1' },
     ];
-    const result = stackLayout(points, { ...OPTS, plotHeight: 36 });
+    // 4 场、图高 12px：行距压到下限 4px 也只装得下 3 行，最顶一格让给三角
+    const result = stackLayout(points, { ...OPTS, plotHeight: 12 });
+    expect(result.pitchY).toBe(STACK_PITCH_FLOOR);
     expect(result.placed.map(point => point.id).sort()).toEqual(['loss', 'neutral']);
     expect(result.placed.every(point => point.clamped === 'right')).toBe(true);
     expect(result.overflow).toHaveLength(1);
@@ -126,7 +128,7 @@ describe('stackLayout 频数堆叠', () => {
     expect(beyondWall.cx).toBeLessThan(OPTS.left + ((-1 + 2) / 12) * (OPTS.right - OPTS.left));
   });
 
-  it('装不下时先退到 12px 行距；仍装不下则顶格合成一个三角并只报真正超出的场数', () => {
+  it('【用户要求】一屏看全：装不下时先退到 12px 行距，再装不下把行距均匀压紧到刚好装下，全部画出、不合成三角', () => {
     const eight = stackLayout(pts(Array(8).fill(1)), { ...OPTS, plotHeight: 100 });
     // 8 × 14 = 112 > 100 ≥ 8 × 12：退到 12px，全部画出。
     expect(eight.pitchY).toBe(MARK_FOOTPRINT);
@@ -134,23 +136,81 @@ describe('stackLayout 频数堆叠', () => {
     expect(eight.overflow).toHaveLength(0);
     expect(eight.requiredPlotHeight).toBe(8 * MARK_FOOTPRINT);
 
+    // 12 × 12 = 144 > 100：行距压到 100 ÷ 12，12 场全部画出，最高一档正好顶到图顶。
     const twelve = stackLayout(pts(Array(12).fill(1)), { ...OPTS, plotHeight: 100 });
-    expect(twelve.pitchY).toBe(MARK_FOOTPRINT);
-    expect(twelve.rowsFit).toBe(8);
-    // 前 7 行是真实点位，第 8 格让给三角：三角代表 12 − 7 = 5 场。
-    expect(twelve.placed).toHaveLength(7);
-    expect(twelve.placed.every(item => item.rank < 7)).toBe(true);
-    expect(twelve.overflow).toHaveLength(1);
-    expect(twelve.overflow[0].count).toBe(5);
-    expect(twelve.overflow[0].ids).toHaveLength(5);
-    const topSlotCy = OPTS.top + 100 - (8 - 0.5) * MARK_FOOTPRINT;
-    expect(twelve.overflow[0].cy).toBeCloseTo(topSlotCy, 6);
+    expect(twelve.pitchY).toBeCloseTo(100 / 12, 9);
+    expect(twelve.rowsFit).toBe(12);
+    expect(twelve.placed).toHaveLength(12);
+    expect(twelve.overflow).toHaveLength(0);
+    // 盒子仍按 12px 行距报所需高度：调用方先尽量撑高，撑不到才压紧
+    expect(twelve.requiredPlotHeight).toBe(12 * MARK_FOOTPRINT);
+    const cys = twelve.placed.map(item => item.cy).sort((a, b) => b - a);
+    for (let i = 1; i < cys.length; i += 1) expect(cys[i - 1] - cys[i]).toBeCloseTo(100 / 12, 6);
+    // 柱高仍等于场数：第 c 场的圆心在底线上方 (c − 0.5) 个行距，最顶一场不越过图顶
+    expect(cys[0]).toBeCloseTo(OPTS.top + 100 - (100 / 12) / 2, 6);
+    expect(cys[cys.length - 1]).toBeCloseTo(OPTS.top + (100 / 12) / 2, 6);
+    expect(twelve.placed.every(item => item.yPct >= 0 && item.yPct <= 100)).toBe(true);
 
-    // 恰好装满（8 场 / 8 行）不算溢出，最顶一格是真实点位而不是三角。
-    const exact = stackLayout(pts(Array(8).fill(1)), { ...OPTS, plotHeight: 96 });
-    expect(exact.rowsFit).toBe(8);
-    expect(exact.placed).toHaveLength(8);
+    // 除出来的行距是小数（100 ÷ 7、100 ÷ 9、100 ÷ 13 …），不能因为浮点误差少算一行而冒出三角
+    for (const rows of [9, 11, 13, 17, 19, 21, 23]) {
+      const result = stackLayout(pts(Array(rows).fill(1)), { ...OPTS, plotHeight: 100 });
+      expect(result.rowsFit).toBe(rows);
+      expect(result.overflow).toHaveLength(0);
+      expect(result.placed).toHaveLength(rows);
+    }
+  });
+
+  it('行距压到下限（4px，相邻点位只露出一半）还装不下，才顶格合成一个三角并只报真正超出的场数', () => {
+    expect(STACK_PITCH_FLOOR).toBe(4);
+    expect(stackPitchFor(5, 100)).toBe(MIN_PITCH);
+    expect(stackPitchFor(8, 100)).toBe(MARK_FOOTPRINT);
+    expect(stackPitchFor(20, 100)).toBe(5);
+    expect(stackPitchFor(25, 100)).toBe(STACK_PITCH_FLOOR);
+    expect(stackPitchFor(400, 100)).toBe(STACK_PITCH_FLOOR);
+
+    // 恰好装满（25 场 / 25 行）不算溢出，最顶一格是真实点位而不是三角。
+    const exact = stackLayout(pts(Array(25).fill(1)), { ...OPTS, plotHeight: 100 });
+    expect(exact.pitchY).toBe(STACK_PITCH_FLOOR);
+    expect(exact.rowsFit).toBe(25);
+    expect(exact.placed).toHaveLength(25);
     expect(exact.overflow).toHaveLength(0);
+
+    const thirty = stackLayout(pts(Array(30).fill(1)), { ...OPTS, plotHeight: 100 });
+    expect(thirty.pitchY).toBe(STACK_PITCH_FLOOR);
+    expect(thirty.rowsFit).toBe(25);
+    // 前 24 行是真实点位，第 25 格让给三角：三角代表 30 − 24 = 6 场。
+    expect(thirty.placed).toHaveLength(24);
+    expect(thirty.placed.every(item => item.rank < 24)).toBe(true);
+    expect(thirty.overflow).toHaveLength(1);
+    expect(thirty.overflow[0].count).toBe(6);
+    expect(thirty.overflow[0].ids).toHaveLength(6);
+    const topSlotCy = OPTS.top + 100 - (25 - 0.5) * STACK_PITCH_FLOOR;
+    expect(thirty.overflow[0].cy).toBeCloseTo(topSlotCy, 6);
+  });
+
+  it('镜像堆叠同样压紧：上下两侧合计的行数装进图高，0 线按两侧场数分配，不出三角', () => {
+    const points = [
+      ...Array.from({ length: 12 }, (_, index) => ({ id: `u${index}`, x: 1 })),
+      ...Array.from({ length: 8 }, (_, index) => ({ id: `d${index}`, x: 1, below: true })),
+    ];
+    const result = stackLayout(points, { ...OPTS, plotHeight: 100 });
+    expect(result.pitchY).toBe(5);
+    expect(result.rowsFit).toBe(20);
+    expect(result.rowsBelow).toBe(8);
+    expect(result.overflow).toHaveLength(0);
+    expect(result.placed).toHaveLength(20);
+    expect(result.baselineY).toBeCloseTo(OPTS.top + 100 - 8 * 5, 6);
+    const up = result.placed.filter(item => item.id.startsWith('u'));
+    const down = result.placed.filter(item => item.id.startsWith('d'));
+    expect(up.every(item => item.cy < result.baselineY)).toBe(true);
+    expect(down.every(item => item.cy > result.baselineY)).toBe(true);
+
+    // 全部往下堆：不给空着的上方留行，压紧到刚好装下时一场都不并进三角
+    const allBelow = stackLayout(Array.from({ length: 50 }, (_, index) => ({ id: `d${index}`, x: 1, below: true })), { ...OPTS, plotHeight: 400 });
+    expect(allBelow.pitchY).toBe(8);
+    expect(allBelow.rowsBelow).toBe(50);
+    expect(allBelow.overflow).toHaveLength(0);
+    expect(allBelow.placed).toHaveLength(50);
   });
 
   it('横向相距不足 13.5px 的两点绝不共用同一个 cy', () => {
@@ -283,7 +343,8 @@ describe('stackLayout 硬风险边界', () => {
   it('归零阈值全同值、overflow与独立左栏同时存在时各自计数准确且顺序确定', () => {
     const options = {
       ...riskOptions(240),
-      plotHeight: 96,
+      // 20 场同值、图高 32px：行距压到下限 4px 只装 8 行，前 7 行是点位，其余 13 场合成三角
+      plotHeight: 32,
       isolatedLeft: { ids: ['isolated'], cx: -30 },
     };
     const points = [...pts(Array(20).fill(-10)), { id: 'isolated', x: 0 }];
@@ -331,6 +392,25 @@ describe('columnStackLayout 类目柱状堆叠', () => {
         expect(Math.abs(item.cx - center)).toBeLessThanOrEqual(result.columnPx / 2);
       }
     }
+  });
+
+  it('【用户要求】一屏看全：实际图高比参考高度矮时柱子压紧行距、全部画出；压到下限还装不下才合成三角', () => {
+    // 列只够并排放 1 个点（每行点数被列宽夹住），60 场要 60 行
+    const narrow = { columns: [0], left: 12, right: 12 + MIN_PITCH, top: 12, referenceHeight: 480 };
+    const squeezed = columnStackLayout(colPts({ 0: 60 }), { ...narrow, plotHeight: 300 });
+    expect(squeezed.perRow).toBe(1);
+    expect(squeezed.pitchY).toBe(5);
+    expect(squeezed.rowsFit).toBe(60);
+    expect(squeezed.placed).toHaveLength(60);
+    expect(squeezed.overflow).toEqual([]);
+    expect(squeezed.requiredPlotHeight).toBe(60 * MARK_FOOTPRINT);
+
+    const floored = columnStackLayout(colPts({ 0: 60 }), { ...narrow, plotHeight: 200 });
+    expect(floored.pitchY).toBe(STACK_PITCH_FLOOR);
+    expect(floored.rowsFit).toBe(50);
+    expect(floored.placed).toHaveLength(49);
+    expect(floored.overflow).toHaveLength(1);
+    expect(floored.overflow[0].count).toBe(11);
   });
 
   it('场数多时一行并排放 perRow 个点，最高一柱正好占满参考高度', () => {

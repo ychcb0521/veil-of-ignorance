@@ -74,6 +74,25 @@ export function minimumBoundaryPlotWidth(
   return Math.ceil((xMax - xMin) / narrowest * MIN_PITCH);
 }
 
+/**
+ * 行距下限（px）。【用户要求】图要在一屏里看全：最高一档按 12px 行距装不下时不再先丢点，
+ * 而是把行距均匀压紧到刚好装下——8px 的点位上下相互压住一部分，像一串珠子，柱高仍然等于场数。
+ * 压到这个下限（相邻两点只露出一半）还装不下，才把顶上那一截合成三角。
+ */
+export const STACK_PITCH_FLOOR = 4;
+
+/** rows 行要装进 plotHeight：装得下用 14px，其次 12px（环贴环），再不够就均匀压紧，最低到 STACK_PITCH_FLOOR。 */
+export function stackPitchFor(rows: number, plotHeight: number): number {
+  if (rows * MIN_PITCH <= plotHeight) return MIN_PITCH;
+  if (rows * MARK_FOOTPRINT <= plotHeight) return MARK_FOOTPRINT;
+  return Math.max(STACK_PITCH_FLOOR, plotHeight / Math.max(1, rows));
+}
+
+/** 这个行距下图高装得下几行；压紧后的行距是除出来的小数，留一点余量免得浮点误差少算一行。 */
+function rowsThatFit(plotHeight: number, pitchY: number): number {
+  return Math.max(1, Math.floor(plotHeight / pitchY + 1e-6));
+}
+
 export type StackPlacedPoint = {
   id: string;
   cx: number;
@@ -105,13 +124,13 @@ export type StackLayoutResult = {
   /** 标准档宽（数值单位），密度曲线按此近似换算「每档期望场数」。 */
   binWidth: number;
   binCount: number;
-  /** 纵向步距：默认 14px；最高一档装不下时退到 12px（环贴环，2px 表面环仍是分隔）。 */
+  /** 纵向步距：默认 14px；最高一档装不下时退到 12px（环贴环，2px 表面环仍是分隔），再装不下均匀压紧（见 STACK_PITCH_FLOOR）。 */
   pitchY: number;
   /** 当前图高能装下的行数。 */
   rowsFit: number;
   /** 最高一档的场数。 */
   tallest: number;
-  /** 以 12px 步距装下最高一档所需的绘图区高度；调用方据此把盒子撑高而不是丢点。 */
+  /** 以 12px 步距装下最高一档所需的绘图区高度；调用方据此把盒子撑高（有上限），撑不到再压紧行距。 */
   requiredPlotHeight: number;
   /** 每档计数，按档序号索引。 */
   binCounts: number[];
@@ -235,10 +254,11 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   const tallest = Math.max(tallestUp, tallestDown);
   const stackedRows = tallestUp + tallestDown;
 
-  const pitchY = stackedRows * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
-  const rowsFit = Math.max(1, Math.floor(plotHeight / pitchY));
+  const pitchY = stackPitchFor(stackedRows, plotHeight);
+  const rowsFit = rowsThatFit(plotHeight, pitchY);
   // 镜像时 0 线下方按两侧最高一档的比例分行（至少一行，也给上方至少留一行）；不镜像时 0 线就是底边。
-  const rowsBelow = !mirrored ? 0 : rowsFit < 2 ? 0 : Math.min(rowsFit - 1, Math.max(1,
+  // 上方一场都没有时不必给上方留行：整幅都给下方，否则压紧到刚好装下时会白白挤出一个三角。
+  const rowsBelow = !mirrored ? 0 : tallestUp === 0 ? rowsFit : rowsFit < 2 ? 0 : Math.min(rowsFit - 1, Math.max(1,
     stackedRows <= rowsFit ? tallestDown + Math.floor((rowsFit - stackedRows) * tallestDown / Math.max(1, stackedRows))
       : Math.round(rowsFit * tallestDown / stackedRows),
   ));
@@ -335,7 +355,7 @@ export type ColumnStackResult = {
   rowsFit: number;
   /** 最多的一列有多少场。 */
   tallest: number;
-  /** 以 12px 行距把最高一柱完整画出来所需的绘图区高度；调用方据此撑高盒子而不是丢点。 */
+  /** 以 12px 行距把最高一柱完整画出来所需的绘图区高度；调用方据此撑高盒子（有上限），撑不到再压紧行距。 */
   requiredPlotHeight: number;
   /** 每列场数，按列序号索引。 */
   columnCounts: number[];
@@ -397,9 +417,9 @@ export function columnStackLayout(points: StackLayoutPoint[], options: ColumnSta
   const slotted = buckets.map(bucket => slotRanks(bucket, perRow));
   const tallestCells = slotted.reduce((max, item) => Math.max(max, item.cells), 0);
   const rowsNeeded = Math.max(1, Math.ceil(tallestCells / perRow));
-  // 行距和 linear 一路一样：装得下就用 14px，装不下退到 12px（环贴环）。
-  const pitchY = rowsNeeded * MIN_PITCH <= plotHeight ? MIN_PITCH : MARK_FOOTPRINT;
-  const rowsFit = Math.max(1, Math.floor(plotHeight / pitchY));
+  // 行距和 linear 一路一样：装得下就用 14px，装不下退到 12px（环贴环），再装不下均匀压紧。
+  const pitchY = stackPitchFor(rowsNeeded, plotHeight);
+  const rowsFit = rowsThatFit(plotHeight, pitchY);
   const pitchX = Math.min(MIN_PITCH, columnPx / perRow);
 
   const baseline = top + plotHeight;

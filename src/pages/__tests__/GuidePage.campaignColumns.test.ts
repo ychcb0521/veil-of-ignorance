@@ -90,6 +90,26 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toMatch(new RegExp(`${key}: '${key}',`));
     }
   });
+  it('【用户要求】散点图一屏看全：图盒高度按窗口算、放不下时压紧行距——指南与实现对得上', () => {
+    expect(guide).toContain('<strong>整张图一屏看全</strong>：图盒的高度按窗口算');
+    expect(guide).toContain('点排序项把图滚进视野时，图的顶边停在吸顶区正下方');
+    expect(guide).toContain('<strong>把这一图的行距均匀压紧</strong>');
+    expect(guide).toContain('行距压到 4px（相邻两点只露出一半）还放不下，才把顶上那一截合成一个三角并在脚注报数');
+    expect(guide).toContain('窗口够高时图盒最高撑到 44rem，窗口很矮时不低于 18rem');
+    expect(guide).not.toContain('堆得比图高还高时先把图盒撑高，撑到上限仍放不下的那一截在柱顶合成一个三角');
+    // 实现里的三个数：行距下限 4px、盒高上限 704px（44rem）与下限 288px（18rem）
+    expect(read('components/charts/stackLayout.ts')).toContain('export const STACK_PITCH_FLOOR = 4;');
+    const plot = read('components/charts/ScatterPlot.tsx');
+    expect(plot).toContain('const STACK_BOX_CAP = 704;');
+    expect(plot).toContain('const STACK_BOX_FLOOR = 288;');
+    expect(guide).toContain('展开「说明」或点开合并三角的战役列表时图盒高度不变');
+    expect(guide).toContain('盒高不超过窗口高减 14rem');
+    expect(plot).toContain('max-h-[max(18rem,calc(100dvh-14rem))]');
+    expect(plot).toContain('data-chart-fit="ignore"');
+    // 页面把按视口算出的上限传给图，并让面板滚进视野时停在吸顶区下方
+    expect(page).toContain('maxBoxHeight={chartMaxBoxHeight}');
+    expect(page).toContain('style={{ scrollMarginTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight }}');
+  });
   it('【用户要求】涨幅未兑现的图点开就完整：沿用上次读数、整图一次换新、旧读数只在图上——指南与页面的文案对得上', () => {
     expect(guide).toContain('<strong>涨幅未兑现也有散点图，点开就是完整的图。</strong>');
     expect(guide).toContain('<strong>行情需要重算时（改过腿、口径升级、缓存失效）先沿用上次的读数把整张图画出来</strong>');

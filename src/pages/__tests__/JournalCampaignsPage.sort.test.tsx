@@ -494,6 +494,47 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 20_000);
 
+  it('【用户要求】散点图一屏看全：绘图盒的高度上限按视口算（视口 − 面板顶边 − 盒子以外的部分）并传给图；滚进视野时面板停在吸顶区正下方', async () => {
+    const innerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 778 });
+    const rectOf = (top: number, height: number) => ({
+      x: 0, y: top, top, left: 0, right: 1000, bottom: top + height, width: 1000, height, toJSON: () => ({}),
+    }) as DOMRect;
+    // 用户截图的情形：吸顶区 91px 高，面板顶边在 168px、872px 高，其中绘图盒 704px
+    const rects = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.id === 'campaign-odds-scatter-panel') return rectOf(168, 872);
+      if (this.getAttribute('data-layout') === 'campaign-scatter-landscape') return rectOf(300, 704);
+      const scope = this.parentElement;
+      if (scope?.getAttribute('data-testid') === 'campaign-sticky-scope' && scope.firstElementChild === this) return rectOf(57, 91);
+      return rectOf(0, 0);
+    });
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    try {
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const box = () => document.querySelector<HTMLElement>('[data-layout="campaign-scatter-landscape"]')!;
+      // 778 − 168（面板顶边）− 168（标题、图例、脚注等）− 8（留白）= 434
+      await waitFor(() => expect(box().style.maxHeight).toBe('434px'));
+      expect(screen.getByTestId('campaign-odds-scatter-panel').style.scrollMarginTop).toBe('148px');
+
+      // 换一张图（时序视图）上限照样带着
+      fireEvent.click(screen.getByTestId('campaign-mainPriceChange-view-time'));
+      await waitFor(() => expect(box().style.maxHeight).toBe('434px'));
+
+      // 窗口变高：上限跟着放宽
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1150 });
+      await act(async () => { window.dispatchEvent(new Event('resize')); });
+      expect(box().style.maxHeight).toBe('806px');
+    } finally {
+      view.unmount();
+      rects.mockRestore();
+      if (innerHeight) Object.defineProperty(window, 'innerHeight', innerHeight);
+    }
+  });
+
   it('第一次算（没有任何缓存）：点开先是等高的进度占位，不写「暂无…」；第一批算出来就换成图', async () => {
     const restore = preparePricePathFixtures();
     const requests = deferredPricePathRequests();

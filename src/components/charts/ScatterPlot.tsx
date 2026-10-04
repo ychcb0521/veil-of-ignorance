@@ -148,6 +148,11 @@ export type ScatterPlotProps = {
   legendExtra?: ReactNode;
   footnote?: ReactNode;
   directionHint?: ReactNode;
+  /**
+   * 【用户要求】图要在一屏里看全：绘图盒的高度上限（px），由调用方按视口算（视口高 − 吸顶区 − 盒子以外的标题、图例、脚注）。
+   * 不低于 18rem 的下限；缺省时只受 STACK_BOX_CAP 限制。堆叠图在这个高度里装不下最高一档时压紧行距，而不是把盒子撑出屏幕。
+   */
+  maxBoxHeight?: number | null;
 };
 
 type PlacedPoint = ScatterPoint & {
@@ -176,7 +181,7 @@ type StackInfo = {
   rowsBelow: number;
 };
 
-/** 场数轴的盒子最高撑到这里（44rem）：再高就让最高一档合成一个三角并在脚注报数。 */
+/** 场数轴的盒子最高撑到这里（44rem）；调用方给了 maxBoxHeight（一屏看全）时取两者较小的。撑不到所需高度就压紧行距。 */
 const STACK_BOX_CAP = 704;
 /** 与绘图盒 class 里的 min-h-[18rem] 同值，行内 minHeight 不能把手机上的下限压掉。 */
 const STACK_BOX_FLOOR = 288;
@@ -330,6 +335,7 @@ export function ScatterPlot({
   legendExtra,
   footnote,
   directionHint,
+  maxBoxHeight,
 }: ScatterPlotProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -345,6 +351,10 @@ export function ScatterPlot({
   const overflowButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const seriesById = useMemo(() => new Map(series.map(item => [item.id, item])), [series]);
+  /** 一屏看全的盒高上限；没给就不限（null）。 */
+  const boxCap = maxBoxHeight == null || !Number.isFinite(maxBoxHeight)
+    ? null
+    : Math.max(STACK_BOX_FLOOR, Math.round(maxBoxHeight));
   const boxHeight = size.height;
   const plotHeight = Math.max(1, boxHeight - PLOT_INSET.top - PLOT_INSET.bottom);
   const trackWidth = Math.max(1, size.width);
@@ -382,8 +392,9 @@ export function ScatterPlot({
         right: contentWidth - PLOT_INSET.right,
         top: PLOT_INSET.top,
         plotHeight,
-        // 盒子高度由宽度定（aspect-[8/5]，下限 18rem），所以排版的参考高度也只从宽度推。
-        referenceHeight: Math.max(STACK_BOX_FLOOR, trackWidth * STACK_BOX_ASPECT)
+        // 盒子高度由宽度定（aspect-[8/5]，下限 18rem），所以排版的参考高度也只从宽度推；
+        // 一屏看全的上限来自视口而不是实测盒高，同样不会和排版互相追。
+        referenceHeight: Math.min(Math.max(STACK_BOX_FLOOR, trackWidth * STACK_BOX_ASPECT), boxCap ?? Number.POSITIVE_INFINITY)
           - PLOT_INSET.top - PLOT_INSET.bottom - STACK_BOX_BORDER,
       });
       const byId = new Map(points.map(point => [point.id, point]));
@@ -561,7 +572,7 @@ export function ScatterPlot({
       placed,
       stack: null as StackInfo | null,
     };
-  }, [innerWidth, plotHeight, points, series, seriesById, stackMode, trackWidth, xAxis, valueMax, valueMin, valueFraction, numericLeft, hasIsolatedBucket, isolatedLeftBucket, isolatedCx]);
+  }, [innerWidth, plotHeight, points, series, seriesById, stackMode, trackWidth, xAxis, valueMax, valueMin, valueFraction, numericLeft, hasIsolatedBucket, isolatedLeftBucket, isolatedCx, boxCap]);
 
   const { contentWidth, pitch, fitMode, placed, stack } = layout;
   const activePoint = placed.find(point => point.id === activeId) ?? null;
@@ -607,11 +618,28 @@ export function ScatterPlot({
     const span = xAxis.max - xAxis.min || 1;
     return (value - xAxis.min) / span;
   };
-  // 堆得比图高还高时先把盒子撑高（有上限），而不是把点丢掉；盒子高度只由宽度决定，
-  // 不会和测量结果互相追着改。
+  // 堆得比图高还高时先把盒子撑高（有上限：44rem 与一屏看全的 boxCap 取小），撑不到所需高度时布局压紧行距，
+  // 而不是把点丢掉；盒子高度只由宽度与视口决定，不会和测量结果互相追着改。
   const stackBoxMinHeight = stack
-    ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
+    ? Math.max(STACK_BOX_FLOOR, Math.min(STACK_BOX_CAP, boxCap ?? STACK_BOX_CAP, stack.requiredPlotHeight + PLOT_INSET.top + PLOT_INSET.bottom + STACK_BOX_BORDER))
     : null;
+  const boxStyle: CSSProperties | undefined = stackBoxMinHeight == null && boxCap == null ? undefined : {
+    ...(stackBoxMinHeight == null ? {} : { minHeight: stackBoxMinHeight, width: '100%' }),
+    // 时序图的盒高由宽度按 8:5 推出来，宽屏矮窗口上同样可能超出一屏：用同一个上限压住。
+    ...(boxCap == null ? {} : { maxHeight: boxCap }),
+  };
+  /**
+   * 行距压到比点位还密时相邻点位相互压住：按离 0 线由近到远画，外层的压住里层的，整柱是一串连贯的珠子；
+   * 悬停 / 聚焦的那一场最后画，整颗露出来。行距够（≥ 12px）时不重排，保持原来的绘制顺序。
+   */
+  const marksInPaintOrder = useMemo(() => {
+    if (!stack || stack.pitchY >= MARK_FOOTPRINT) return placed;
+    const baseline = stack.baselineY;
+    return [...placed].sort((a, b) => (
+      Number(a.id === activeId) - Number(b.id === activeId)
+      || Math.abs(a.cy - baseline) - Math.abs(b.cy - baseline)
+    ));
+  }, [activeId, placed, stack]);
   const stackOverflowCount = stack ? stack.overflow.reduce((sum, glyph) => sum + glyph.count, 0) : 0;
   const expandedOverflow = stack?.overflow.find(glyph => glyph.ids[0] === expandedOverflowId);
   const overflowPoints = expandedOverflow
@@ -755,12 +783,15 @@ export function ScatterPlot({
             // data-layout 由元件自己挂，不由调用方传：三张图的绘图盒必须是同一个盒子。
             data-layout="campaign-scatter-landscape"
             onMouseLeave={clearHover}
-            className="relative aspect-[8/5] min-h-[18rem] w-full min-w-0 overflow-hidden rounded-[6px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface)] sm:min-h-0"
+            // 【用户要求】其它页面的散点图（决策散点、心态-收益）没有按视口量过上限：给一个通用的兜底——
+            // 盒高不超过「视口高 − 14rem」（页眉 + 图自己的标题、图例、脚注），不低于 18rem，矮窗口上同样一屏看全。
+            className={`relative aspect-[8/5] min-h-[18rem] w-full min-w-0 overflow-hidden rounded-[6px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface)] sm:min-h-0 ${boxCap == null ? 'max-h-[max(18rem,calc(100dvh-14rem))]' : ''}`}
             // 带 aspect-ratio 的网格项一旦被 min-height 撑高，浏览器会反过来按比例推宽度而不是
             // 拉伸到列宽（justify-self: normal 对有比例的盒子按 start 处理）；写死 100% 宽度切断这条回路。
             // 手机上 min-h-[18rem] 本身就会这样：288px × 8/5 推出约 461px 宽，撑破 270px 的列、整页横向溢出，
             // 所以 w-full 一直挂着，堆叠档的内联 width 只是同一件事。
-            style={stackBoxMinHeight == null ? undefined : { minHeight: stackBoxMinHeight, width: '100%' }}
+            data-stack-pitch={stack ? Math.round(stack.pitchY * 100) / 100 : undefined}
+            style={boxStyle}
           >
             <div
               ref={trackRef}
@@ -895,7 +926,7 @@ export function ScatterPlot({
                       />
                     </g>
                   ) : null}
-                  {placed.map(point => (
+                  {marksInPaintOrder.map(point => (
                     <g key={`mark-${point.id}`} data-mark-for={point.id}>
                       {point.clamped ? (
                         <path
@@ -994,8 +1025,9 @@ export function ScatterPlot({
                       aria-controls={`${testId}-overflow-picker`}
                       title={`另有 ${glyph.count} 场超出图高，点击展开${glyph.warning ? `；${glyph.warning}` : ''}`}
                       onClick={() => { setActive(null); setExpandedOverflowId(current => current === glyph.ids[0] ? null : glyph.ids[0]); }}
-                      className="absolute z-10 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
-                      style={{ left: `${glyph.cx}px`, top: `${glyph.yPct}%`, width: `${hitWidth}px`, height: `${hitHeight}px` }}
+                      // 三角只在行距压到下限时出现：按钮不跟着缩到 4px，至少一个点位那么高，并压在相邻点位按钮之上，点三角不会点到下面那一场
+                      className="absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer rounded-full bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--ring))]"
+                      style={{ left: `${glyph.cx}px`, top: `${glyph.yPct}%`, width: `${hitWidth}px`, height: `${Math.max(hitHeight, MARK_FOOTPRINT)}px` }}
                     />
                   ))}
                   {placed.map((point, index) => (
@@ -1221,6 +1253,8 @@ export function ScatterPlot({
         {expandedOverflow && <section
           ref={overflowPickerRef}
           id={`${testId}-overflow-picker`}
+          // 临时展开的列表不参与「一屏看全」的盒高测量（否则展开它会把图压矮、三角换人、列表又消失）
+          data-chart-fit="ignore"
           data-testid="chart-overflow-picker"
           aria-label="合并散点中的战役"
           tabIndex={-1}

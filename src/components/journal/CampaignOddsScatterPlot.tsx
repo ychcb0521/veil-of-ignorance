@@ -130,6 +130,8 @@ type CampaignMetricScatterPlotProps = {
   onBack?: () => void;
   onSelectCampaign: (campaignId: string) => void;
   viewStateKey?: string;
+  /** 绘图盒的高度上限（px）：列表页按视口算，让整张图留在一屏里（见 ScatterPlot 的 maxBoxHeight）。 */
+  maxBoxHeight?: number | null;
   /** 批量下载的选择模式：点点位只增减选择、不进战役；选择集由列表页持有，与卡片勾选框共用。 */
   selectionMode?: boolean;
   selectedCampaignIds?: ReadonlySet<string>;
@@ -465,6 +467,7 @@ export function CampaignMetricScatterPlot({
   onBack,
   onSelectCampaign,
   viewStateKey,
+  maxBoxHeight,
   selectionMode = false,
   selectedCampaignIds,
   onToggleCampaign,
@@ -941,6 +944,8 @@ export function CampaignMetricScatterPlot({
   const guidePanel = guideOpen ? (
     <div
       id={`campaign-metric-guide-${metricKey}`}
+      // 用户主动展开的说明不参与「一屏看全」的盒高测量：读说明时图不跟着变形
+      data-chart-fit="ignore"
       data-testid={`campaign-metric-guide-${metricKey}`}
       className="mb-3 rounded-sm border border-[color:var(--chart-border)] bg-[color:var(--chart-surface-raised)] px-3 py-2.5 text-[10px] leading-[1.6] text-[color:var(--chart-ink-secondary)]"
     >
@@ -1049,6 +1054,7 @@ export function CampaignMetricScatterPlot({
       testId={plotTestId}
       scrollAreaTestId={scrollTestId}
       viewStateKey={viewStateKey}
+      maxBoxHeight={maxBoxHeight}
       rootDataAttrs={{ 'data-metric-key': metricKey, 'data-x-scale': geometricDistribution ? 'log' : undefined }}
       header={header}
       guidePanel={guidePanel}

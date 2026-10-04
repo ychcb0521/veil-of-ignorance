@@ -527,9 +527,87 @@ describe('ScatterPlot 堆叠（场数）布局', () => {
     }
   });
 
+  it('【用户要求】一屏看全：maxBoxHeight 压住绘图盒的高度，堆叠图不再把盒子撑出这个上限；不低于 18rem 的下限', () => {
+    // 60 场同一档：按 12px 行距要 60 × 12 + 内边距 + 边框 = 762px，原来会撑到 704px 上限
+    const values = Array.from({ length: 60 }, () => 0.5);
+    const free = renderStack(values);
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '704px' });
+    expect(screen.getByTestId('scroll').style.maxHeight).toBe('');
+    // 没给上限的图（其它页面）带通用兜底：不超过视口高 − 14rem
+    expect(screen.getByTestId('scroll').className).toContain('max-h-[max(18rem,calc(100dvh-14rem))]');
+    free.unmount();
+
+    const capped = renderStack(values, { maxBoxHeight: 434 });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '434px', maxHeight: '434px', width: '100%' });
+    expect(screen.getByTestId('scroll').className).not.toContain('max-h-[');
+    capped.unmount();
+
+    // 上限比下限还小（窗口太矮）：宁可超出一点也不把图压扁
+    const tiny = renderStack(values, { maxBoxHeight: 120 });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '288px', maxHeight: '288px' });
+    tiny.unmount();
+
+    // 上限比 44rem 还高（大屏）：堆叠图仍只撑到 44rem
+    const roomy = renderStack(values, { maxBoxHeight: 900 });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '704px', maxHeight: '900px' });
+    roomy.unmount();
+
+    // 用不着撑高的小图：只带上限，不写 min-height 以外的东西
+    renderStack([0.5, 0.5, 0.5], { maxBoxHeight: 434 });
+    expect(screen.getByTestId('scroll')).toHaveStyle({ minHeight: '288px', maxHeight: '434px' });
+  });
+
+  it('时序图（非堆叠）同样带上限：盒高由宽度按 8:5 推出来，矮窗口上由 max-height 压住', () => {
+    render(
+      <ScatterPlot
+        points={makeStackPoints([0.5, 1.5]).map((point, index) => ({ ...point, x: index, y: point.x }))}
+        series={SERIES}
+        yAxis={{ min: 0, max: 2, ticks: [] }}
+        xAxis={{ mode: 'ordinal', count: 2, labelAt: () => null }}
+        emptyMessage="暂无数据"
+        testId="plot"
+        scrollAreaTestId="scroll"
+        maxBoxHeight={434}
+      />,
+    );
+    const box = screen.getByTestId('scroll');
+    expect(box.style.maxHeight).toBe('434px');
+    expect(box.style.minHeight).toBe('');
+    expect(box).not.toHaveAttribute('data-stack-pitch');
+  });
+
+  it('行距压紧后点位相互压住：按离 0 线由近到远画（上面的压下面的），悬停的那一场最后画；行距够时保持原顺序', () => {
+    // jsdom 的图高 550px → 绘图区 510px；100 场同一档 → 行距压到 5.1px，8px 的点位上下相互压住
+    const dense = Array.from({ length: 100 }, () => 0.5);
+    const view = renderStack(dense);
+    const box = screen.getByTestId('scroll');
+    expect(Number(box.getAttribute('data-stack-pitch'))).toBeCloseTo(510 / 100, 2);
+    expect(screen.queryByTestId('chart-stack-overflow')).not.toBeInTheDocument();
+    const markIds = () => [...screen.getByTestId('plot').querySelectorAll('[data-mark-for]')].map(node => node.getAttribute('data-mark-for')!);
+    const topOf = (id: string) => Number.parseFloat(screen.getByTestId(`st-${id.slice(1)}`).style.top);
+    // 画的先后 = 自下而上：按钮的 top% 沿绘制顺序严格递减
+    const order = markIds();
+    expect(order).toHaveLength(100);
+    for (let i = 1; i < order.length; i += 1) expect(topOf(order[i])).toBeLessThan(topOf(order[i - 1]));
+
+    // 悬停中间那一场：它挪到最后画（整颗露出来），其余相对顺序不变
+    const middle = order[40];
+    fireEvent.mouseEnter(screen.getByTestId(`st-${middle.slice(1)}`));
+    const hovered = markIds();
+    expect(hovered[hovered.length - 1]).toBe(middle);
+    expect(hovered.slice(0, -1)).toEqual(order.filter(id => id !== middle));
+    view.unmount();
+
+    // 行距够（14px）：不重排，绘制顺序就是传入的顺序
+    renderStack([0.5, 3, 0.5, 3, 0.5]);
+    expect(Number(screen.getByTestId('scroll').getAttribute('data-stack-pitch'))).toBe(14);
+    expect(markIds()).toEqual(['s0', 's1', 's2', 's3', 's4']);
+  });
+
   it('超出图高的归零样本合并三角保留红色黄边和风险文字，普通档仍中性色', () => {
     const warning = '按 10% 下注，本金归零；非实际账户强平判定。';
-    const values = [...Array.from({ length: 100 }, () => -11), ...Array.from({ length: 100 }, () => 0.5)];
+    // 每档 200 场：行距压到下限 4px 也装不下（图高约 510px 只放 127 行），顶上那一截才合成三角
+    const values = [...Array.from({ length: 200 }, () => -11), ...Array.from({ length: 200 }, () => 0.5)];
     renderStack(values, {
       xAxis: narrowRiskAxis,
       points: makeStackPoints(values).map(point => ({ ...point, warning: point.x <= -10 ? warning : undefined })),

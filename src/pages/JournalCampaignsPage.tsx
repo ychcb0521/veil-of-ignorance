@@ -43,6 +43,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
+import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
 import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
@@ -151,6 +152,9 @@ import {
   type SortLevelEffect,
 } from '@/lib/campaignListSort';
 const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
+
+/** 页眉高度（h-14 + 1px 下边框）：统计 / 排序吸顶区的 top-[57px] 与它对齐。 */
+const CAMPAIGN_PAGE_HEADER_HEIGHT = 57;
 
 /** 散点图还画不出来时的等高占位：一句话 + 进度条 + 「已完成 / 总数」。读战役目录与算涨幅未兑现共用。 */
 function ChartPreparingPlaceholder({ testId, title, loaded, total, emptyLabel, hint }: {
@@ -2746,6 +2750,47 @@ export default function JournalCampaignsPage() {
     && unrealizedMetricLoading
     && unrealizedChartPending
     && selectedMetricSeries.points.length === 0;
+  /**
+   * 【用户要求】散点图要在一屏里看全：绘图盒的高度上限 = 视口高 − 面板顶边的位置 − 面板里绘图盒以外的部分
+   * （视图切换、标题、图例、脚注，量出来原样扣掉）。面板顶边按「吸顶区下沿」与「页面没滚动时面板自己的位置」
+   * 取靠下的那个算，两种情况下整张图都在视口里。量不到（没开图、空态、jsdom）= 不设上限。
+   */
+  const [chartMaxBoxHeight, setChartMaxBoxHeight] = useState<number | null>(null);
+  const chartHasPlot = selectedMetricSeries.points.length > 0;
+  useLayoutEffect(() => {
+    const panel = metricChartPanelRef.current;
+    if (!metricChartOpen || !panel) {
+      setChartMaxBoxHeight(null);
+      return;
+    }
+    const update = () => {
+      const box = panel.querySelector<HTMLElement>('[data-layout="campaign-scatter-landscape"]');
+      const panelRect = panel.getBoundingClientRect();
+      // 临时展开的块（说明、合并三角的战役列表）不算进「盒子以外的部分」：展开它们时图盒高度不变，允许暂时超出一屏
+      let ignored = 0;
+      panel.querySelectorAll<HTMLElement>('[data-chart-fit="ignore"]').forEach(node => {
+        const style = window.getComputedStyle(node);
+        ignored += node.getBoundingClientRect().height + (Number.parseFloat(style.marginTop) || 0) + (Number.parseFloat(style.marginBottom) || 0);
+      });
+      const next = box ? chartBoxHeightToFitViewport({
+        viewportHeight: window.innerHeight,
+        panelTop: Math.max(CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight, panelRect.top + window.scrollY),
+        panelHeight: panelRect.height - ignored,
+        boxHeight: box.getBoundingClientRect().height,
+      }) : null;
+      setChartMaxBoxHeight(current => (current === next ? current : next));
+    };
+    update();
+    window.addEventListener('resize', update);
+    // 面板高度变了（图例换行、说明展开、脚注多一行）就重量一次：盒子以外的部分变了，上限跟着变
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(panel);
+    return () => {
+      window.removeEventListener('resize', update);
+      observer?.disconnect();
+    };
+    // 面板上方的内容增减（窄屏的批量选择条、时间段筛选改了行数）会挪动面板而不改它的尺寸，也要重量
+  }, [metricChartOpen, stickyControlsHeight, selectedMetricConfig.key, campaignRowsComplete, unrealizedChartComputing, chartHasPlot, selectionMode, narrowViewport, scopedRows.length]);
   /** 同一指标的几种看法（时序 / 分布 / 柱状）；只有一种时不画切换键。 */
   const familyViewOptions = useMemo(
     () => CAMPAIGN_METRIC_CHART_CONFIGS.filter(
@@ -5114,6 +5159,8 @@ export default function JournalCampaignsPage() {
               // isolate：面板自成层叠上下文。图里提示框（z-20）、合并三角（z-10）只在面板内部比层级，
               // 往下翻时整块面板都在吸顶的统计与排序区（sticky z-10）底下，提示框不会画到吸顶区上面。
               className="order-3 isolate border-t border-border/70 bg-background/35"
+              // 点排序项把图滚进视野时，面板顶边停在吸顶区正下方，而不是钻到吸顶区底下
+              style={{ scrollMarginTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight }}
             >
               <div id="campaign-metric-scatter-view">
                 <div className="h-5 px-4 text-right text-[10px] text-muted-foreground" role="status">
@@ -5179,6 +5226,7 @@ export default function JournalCampaignsPage() {
                   <MemoCampaignMetricScatterPlot
                     key={`${userId}:${location.key}:${selectedMetricConfig.key}`}
                     viewStateKey={`${userId}:${location.key}:${selectedMetricConfig.key}`}
+                    maxBoxHeight={chartMaxBoxHeight}
                     points={selectedMetricSeries.points}
                     metricKey={selectedMetricConfig.key}
                     metricLabel={selectedMetricConfig.label}
