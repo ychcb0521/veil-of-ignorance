@@ -3960,6 +3960,9 @@ export async function attachJournalToCampaign(
   }
 }
 
+/** PostgREST 单次最多返回 1000 行：日志多于这个数时必须分页读，否则排在后面的（模拟时间早的）整批读不到。 */
+const JOURNAL_LIST_PAGE_SIZE = 1000;
+
 export async function listUnclassifiedJournals(
   userId: string,
   filters: {
@@ -3969,19 +3972,28 @@ export async function listUnclassifiedJournals(
     includeClassified?: boolean;
   } = {},
 ): Promise<TradeJournal[]> {
-  let query = supabase
-    .from('trade_journals' as never)
-    .select('*')
-    .eq('user_id', userId);
+  const rows: TradeJournal[] = [];
+  for (let offset = 0; ; offset += JOURNAL_LIST_PAGE_SIZE) {
+    let query = supabase
+      .from('trade_journals' as never)
+      .select('*')
+      .eq('user_id', userId);
 
-  if (filters.symbol) query = query.eq('symbol', filters.symbol);
-  if (filters.dateFrom) query = query.gte('pre_simulated_time', filters.dateFrom);
-  if (filters.dateTo) query = query.lte('pre_simulated_time', filters.dateTo);
-  if (!filters.includeClassified) query = query.is('campaign_id', null);
+    if (filters.symbol) query = query.eq('symbol', filters.symbol);
+    if (filters.dateFrom) query = query.gte('pre_simulated_time', filters.dateFrom);
+    if (filters.dateTo) query = query.lte('pre_simulated_time', filters.dateTo);
+    if (!filters.includeClassified) query = query.is('campaign_id', null);
 
-  const { data, error } = await query.order('pre_simulated_time', { ascending: false });
-  if (error && isMissingTradeJournalsFeatureError(error)) return [];
-  return wrap('加载待归类 journals', error, (data ?? []) as unknown as TradeJournal[]);
+    const { data, error } = await query
+      .order('pre_simulated_time', { ascending: false })
+      // 同一模拟时间的多条日志跨页时靠 id 定序，不重不漏
+      .order('id', { ascending: true })
+      .range(offset, offset + JOURNAL_LIST_PAGE_SIZE - 1);
+    if (error && isMissingTradeJournalsFeatureError(error)) return [];
+    const page = wrap('加载待归类 journals', error, (data ?? []) as unknown as TradeJournal[]);
+    rows.push(...page);
+    if (page.length < JOURNAL_LIST_PAGE_SIZE) return rows;
+  }
 }
 
 export interface ListUnclassifiedItemsFilters {
@@ -4023,11 +4035,22 @@ export async function listOrphanTradeRecords(
 ): Promise<TradeRecord[]> {
   const tradeHistory = readUserScopedStorage<TradeRecord[]>(userId, 'trade_history', [])
     .filter(isTradeRecordClassifiable);
-  const { data, error } = await supabase
-    .from('trade_journals' as never)
-    .select('trade_record_id')
-    .eq('user_id', userId)
-    .not('trade_record_id', 'is', null);
+  // 同样要分页：只读到前 1000 行的话，后面的日志引用的成交会被当成「未归类」重复列出来
+  let data: Array<{ trade_record_id: string | null }> = [];
+  let error: { message: string } | null = null;
+  for (let offset = 0; ; offset += JOURNAL_LIST_PAGE_SIZE) {
+    const page = await supabase
+      .from('trade_journals' as never)
+      .select('trade_record_id')
+      .eq('user_id', userId)
+      .not('trade_record_id', 'is', null)
+      .order('id', { ascending: true })
+      .range(offset, offset + JOURNAL_LIST_PAGE_SIZE - 1);
+    if (page.error) { error = page.error; break; }
+    const rows = (page.data ?? []) as Array<{ trade_record_id: string | null }>;
+    data = data.concat(rows);
+    if (rows.length < JOURNAL_LIST_PAGE_SIZE) break;
+  }
   if (error && isMissingTradeJournalsFeatureError(error)) {
     return tradeHistory
       .filter(record => matchesTradeRecordFilters(record, filters))
