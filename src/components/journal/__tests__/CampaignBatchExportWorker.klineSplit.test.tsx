@@ -1,5 +1,6 @@
 /**
- * 批量导出：盘面按指定周期 / 视窗倍数显示；盈亏概览（峰值浮盈等）读计算用 K 线，与详情页逐位一致。
+ * 批量导出：盘面按指定周期 / 视窗倍数显示；盈亏概览里读 K 线的四项（峰值涨幅、峰值涨幅倍数、涨幅未兑现、动态最大回撤）
+ * 读计算用 K 线，与详情页逐位一致。
  * 真实 useCampaignKlines / useReplayKlines + 本地合成 fapi 数据的 fetch 垫片（不发真实请求），按周期数请求次数。
  */
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -93,7 +94,18 @@ async function runBatch(id: SynthCampaignId, options: CampaignBatchExportWorkerP
   return { input, result, calls };
 }
 
-/** 详情页里「盈亏概览」逐项的字（与导出图同一份清单）。 */
+/**
+ * 盈亏概览里读 K 线的四项（导出图里的 key、详情页那一格的名字）：峰值涨幅与动态最大回撤直接扫 K 线，另两项由峰值涨幅派生。
+ * 「峰值浮盈」已不在盈亏概览里；合成 K 线的影线按周期放大，这四项换一个周期的 K 线算就是另一个数。
+ */
+const KLINE_READINGS = [
+  ['peakPriceChange', '峰值涨幅'],
+  ['peakPriceEfficiency', '峰值涨幅倍数'],
+  ['unrealizedPriceChangePct', '涨幅未兑现'],
+  ['dynamicMaxDrawdownPct', '动态最大回撤'],
+] as const;
+
+/** 详情页里「盈亏概览」读 K 线的四项的字（与导出图同一份清单）。 */
 async function detailOverview(id: SynthCampaignId) {
   const view = render(
     <TooltipProvider>
@@ -103,16 +115,13 @@ async function detailOverview(id: SynthCampaignId) {
     </TooltipProvider>,
   );
   const panel = (await screen.findByText('盈亏概览', {}, { timeout: WAIT })).parentElement as HTMLElement;
-  const peakValue = () => within(panel).getByRole('button', { name: '峰值浮盈说明' }).closest('div.flex')?.querySelector('span.font-mono')?.textContent;
-  // 计算用 K 线到位之前峰值浮盈按已实现兜底：等请求停下再读
+  const reading = (label: string) => within(panel).getByRole('button', { name: `${label}说明` }).closest('div.flex')?.querySelector('span.font-mono')?.textContent;
+  // 计算用 K 线到位之前这四项写「加载中…」（盘面那一份可能先到）：等盘面画好、四项都换成读数再读
   await waitFor(() => expect(within(screen.getByTestId('campaign-chart-frame')).queryByTestId('kline-probe')).not.toBeNull(), { timeout: WAIT });
-  await waitFor(() => expect(synth.calls.length).toBeGreaterThan(0), { timeout: WAIT });
-  const settled = synth.calls.length;
-  await waitFor(() => expect(synth.calls.length).toBe(settled), { timeout: WAIT });
-  const rows = [...panel.querySelectorAll('span.font-mono')].map(node => node.textContent);
-  const peak = peakValue();
+  await waitFor(() => { for (const [, label] of KLINE_READINGS) expect(reading(label)).not.toBe('加载中…'); }, { timeout: WAIT });
+  const klineReadings = KLINE_READINGS.map(([key, label]) => [key, reading(label)]);
   view.unmount();
-  return { rows, peak };
+  return { klineReadings };
 }
 
 beforeEach(() => {
@@ -137,11 +146,13 @@ describe('批量导出：盘面按指定周期，盈亏概览按计算用 K 线�
     // 盘面：「自动」默认 5 分钟线；指定的周期照画（短战役放得下）
     expect(runs.map(run => run.result.chartInterval)).toEqual(['5m', '1m', '15m', '1h']);
     expect(runs.map(run => run.input.chartInterval)).toEqual(['5m', '1m', '15m', '1h']);
-    // 盈亏概览：每一次都与第一次逐项相同，且峰值浮盈与详情页那一格同字
+    // 盈亏概览：每一次都与第一次逐项相同，且读 K 线的四项与详情页那几格同字
     const itemsOf = (run: (typeof runs)[number]) => run.input.pnlOverview.items.map(item => [item.key, item.value]);
     for (const run of runs) expect(itemsOf(run)).toEqual(itemsOf(runs[0]));
-    const peak = runs[0].input.pnlOverview.items.find(item => item.key === 'peakUnrealizedPnl')!.value;
-    expect(peak).toBe(detail.peak);
+    const exported = KLINE_READINGS.map(([key]) => [key, runs[0].input.pnlOverview.items.find(item => item.key === key)?.value]);
+    expect(exported).toEqual(detail.klineReadings);
+    // 四项都是真读数（不是缺 K 线时的「—」，也不是「加载中…」）：盘面周期各不相同的几次导出逐项相同，才说明没有偷读盘面那一份
+    for (const [key, value] of exported) expect(value, key).toMatch(/^[+-]?\d+\.\d{2}%?$/);
     // 请求：计算用 1m 一份（3 页）；盘面周期不同时另拉一份，相同（1m）时共用、不再重复
     expect(runs.map(run => run.calls)).toEqual([
       { '1m': 3, '5m': 1 },

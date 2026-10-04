@@ -136,11 +136,13 @@ describe('CampaignBatchExportWorker', () => {
     expect(input.exportedAt).toBe(props.snapshot.exportedAt);
     // 与详情页同一个 14 项盈亏概览，按两栏次序（左栏递进链 → 右栏结果与仓位；见 PNL_OVERVIEW_LEFT_COLUMN / RIGHT_COLUMN），
     // 右栏各项带 rightColumn：导出图与页面一样按两栏从上往下排。
+    // 左栏算术期望置顶、几何期望收尾；右栏已实现 P&L 置顶，其后最大预期亏损、峰值涨幅、峰值涨幅倍数、涨幅未兑现、
+    // 动态最大回撤、仓位放大。「峰值浮盈」已不在清单里；杠杆倍数、DSI/USI 贡献迁到「战役元数据」，两项名义仓位不再单列、只留它们的比值「仓位放大」。
     expect(input.pnlOverview.items.map(item => item.key)).toEqual([
-      'expectedMaxDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'payoffRatio', 'addEfficiency',
-      'geometricExpectancy', 'arithmeticExpectancy',
-      'initialExpectedMaxLoss', 'realizedPnl', 'peakUnrealizedPnl', 'initialMainExposureNotional',
-      'mainSideNotional', 'mainLeverage', 'asymmetricRiskContribution',
+      'arithmeticExpectancy', 'expectedMaxDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'payoffRatio',
+      'addEfficiency', 'geometricExpectancy',
+      'realizedPnl', 'initialExpectedMaxLoss', 'peakPriceChange', 'peakPriceEfficiency',
+      'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'positionAmplification',
     ]);
     expect(input.pnlOverview.items.map(item => Boolean(item.rightColumn))).toEqual([
       false, false, false, false, false, false, false,

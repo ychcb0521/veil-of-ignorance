@@ -1,10 +1,12 @@
 /**
  * 【用户要求】交易战役原始盘面默认 5 分钟线、2.1 倍。
- * 【用户已定】计算与显示分开：峰值浮盈、决策准确度、反事实副本与一键运行只读「计算用 K 线」
+ * 【用户已定】计算与显示分开：盈亏概览里读 K 线的四项（峰值涨幅、峰值涨幅倍数、涨幅未兑现、动态最大回撤）、
+ * 决策准确度（含结束对话框写库用的峰值浮盈）、反事实副本与一键运行只读「计算用 K 线」
  * （改版前默认打开时的那一份：基准窗口 + 自动周期），盘面只管显示。
+ * 「峰值浮盈」已不在盈亏概览里（换成峰值涨幅等四项），页面上能读到的 K 线读数就是这四项。
  *
  * 整页真跑：真实 useCampaignKlines / useReplayKlines，fetch 换成本地合成 fapi 数据的垫片（不发真实请求），
- * 合成 K 线的影线按周期放大——哪一处计算偷读了盘面那一份，峰值浮盈就会变，这里就会翻红。
+ * 合成 K 线的影线按周期放大——哪一处计算偷读了盘面那一份，峰值涨幅与动态最大回撤就会变，这里就会翻红。
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useEffect } from 'react';
@@ -13,8 +15,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { KlineData } from '@/hooks/useBinanceData';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
-import { computeDecisionAccuracy } from '@/lib/campaignAnalysis';
+import { computeDecisionAccuracy, computeInitialExpectedMaxDrawdownPct } from '@/lib/campaignAnalysis';
 import { buildCampaignChartContentTimeSpan, pickCampaignOverviewInterval } from '@/lib/campaignChartContentSpan';
+import {
+  campaignPriceChange,
+  campaignPriceChangeLegInputs,
+  computeHoldingDynamicMaxDrawdownPct,
+  computePeakPriceChangePct,
+  resolveHoldingDynamicDrawdownEndMs,
+} from '@/lib/campaignMainPriceChange';
+import { buildCampaignPnlOverviewItems } from '@/lib/campaignPnlOverview';
 import { buildManualLegs, simulateManualLegScenario } from '@/lib/campaignSimulationEngine';
 import { listCounterfactuals, runCustomCounterfactual } from '@/lib/journalApi';
 import type { CampaignCounterfactual } from '@/types/journal';
@@ -167,6 +177,51 @@ function metricValue(label: string) {
   return row?.querySelector('span.font-mono')?.textContent ?? null;
 }
 
+/**
+ * 盈亏概览里读 K 线的四项：详情页按计算用 K 线现算（峰值涨幅、动态最大回撤直接扫 K 线，另两项由峰值涨幅派生），
+ * 计算用 K 线还在路上时四项都写「加载中…」。其余各项不读 K 线。
+ */
+const KLINE_READING_LABELS = ['峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤'] as const;
+type KlineReadings = Record<(typeof KLINE_READING_LABELS)[number], string | null>;
+
+/** 页面上这四项此刻的字。 */
+function klineReadings(): KlineReadings {
+  return Object.fromEntries(KLINE_READING_LABELS.map(label => [label, metricValue(label)])) as KlineReadings;
+}
+
+/**
+ * 参考答案：拿给定的一份 K 线（连同它的周期）按详情页同一条口径重算这四项的字。
+ * 基准开仓价与主力持有窗口取自战役自己的腿（campaignPriceChange，与 K 线无关），只有 K 线和每根的时长随「哪一份」变；
+ * 字由盈亏概览那份唯一的清单构造器写出，这里不另抄一套格式。喂计算用那一份就是页面该显示的字，喂盘面那一份就是「泄漏」后的字。
+ */
+function klineReadingsFrom(id: SynthCampaignId, interval: string, klines: KlineData[]): KlineReadings {
+  const { campaign, legs, tradeRecords } = synthCampaign(id);
+  const change = campaignPriceChange(campaign, legs, tradeRecords);
+  const closedAtMs = Date.parse(campaign.closed_at!);
+  const startMs = change.entryOpenTime ?? Date.parse(campaign.opened_at);
+  const barMs = SYNTH_INTERVAL_MS[interval];
+  const items = buildCampaignPnlOverviewItems({
+    peakPriceChangePct: computePeakPriceChangePct({
+      side: change.side, entryPrice: change.entryPrice, klines, startMs, endMs: change.mainCloseTime ?? closedAtMs, barMs,
+    }),
+    dynamicMaxDrawdownPct: computeHoldingDynamicMaxDrawdownPct({
+      klines,
+      startMs,
+      endMs: resolveHoldingDynamicDrawdownEndMs(campaignPriceChangeLegInputs(campaign, legs, tradeRecords), change.mainCloseTime, closedAtMs),
+      barMs,
+    }),
+    mainPriceChangePct: change.pct,
+    expectedMaxDrawdownPct: computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, []),
+    // 以下各项不影响这四项的字，给空值即可
+    realizedPnl: null, settlement: null, mainLeverage: null, initialMainExposureNotional: 0, peakUnrealizedPnl: 0,
+    initialExpectedMaxLoss: 0, mainSideNotional: null, payoffRatio: null, hasMainAdd: false,
+    asymmetricRiskContribution: null, arithmeticExpectancy: null, geometricExpectancy: null, initialRisk: null,
+  });
+  return Object.fromEntries(
+    KLINE_READING_LABELS.map(label => [label, items.find(item => item.label === label)?.value ?? null]),
+  ) as KlineReadings;
+}
+
 function intervalGroup() {
   return screen.getByRole('group', { name: '盘面 K 线周期' });
 }
@@ -192,18 +247,36 @@ function computeFirstPageRequests(id: SynthCampaignId) {
 
 /**
  * 对照：所有带 K 线的 computeDecisionAccuracy 调用都用改版前默认那一份（逐根相同、同一个数组），
- * 结果与拿那一份重算逐位相同；「峰值浮盈」一格也还是打开时的字。
+ * 结果与拿那一份重算逐位相同；盈亏概览里读 K 线的四项也还是打开时的字，而且就是拿那一份算出来的字
+ * （不只是「没变」：打开时若已经读了盘面那一份，这里同样翻红）。
  */
-async function expectComputationsUnchanged(id: SynthCampaignId, peakAtOpen: string | null) {
+async function expectComputationsUnchanged(id: SynthCampaignId, readingsAtOpen: KlineReadings) {
   const actual = await vi.importActual<typeof import('@/lib/campaignAnalysis')>('@/lib/campaignAnalysis');
-  const { klines: reference } = legacyDefaultKlines(id);
+  const { interval, klines: reference } = legacyDefaultKlines(id);
   const calls = accuracyCallsWithKlines();
   expect(new Set(calls.map(call => call.args[3])).size).toBe(1);
   const [campaignArg, legsArg, recordsArg, klinesArg, ...rest] = calls[calls.length - 1].args;
   expect(klinesArg).toEqual(reference);
   expect(calls[calls.length - 1].result).toEqual(actual.computeDecisionAccuracy(campaignArg, legsArg, recordsArg, reference, ...rest));
-  expect(metricValue('峰值浮盈')).toBe(peakAtOpen);
+  expect(klineReadings()).toEqual(readingsAtOpen);
+  expect(readingsAtOpen).toEqual(klineReadingsFrom(id, interval, reference));
   expect(computeFirstPageRequests(id)).toBe(1);
+}
+
+/**
+ * 造出「盘面已画好、计算用 K 线还在路上」。
+ * K 线请求现在全站串行（useReplayKlines 的请求队列一次只发一页），计算用那份排在盘面那份前面：
+ * 把它整份压住（第一页就不回），盘面那一页只能一直排在后面，这个局面反而造不出来。
+ * 真实里它出现在计算用的第 1 页回来之后——盘面那一页插在计算用的第 2 页之前。所以只压计算用的第 2 页，
+ * synth.releaseHeld() 放行后第 3 页照常走。
+ */
+function holdComputeKlinesAfterFirstPage(interval: string) {
+  let pages = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.searchParams.get('interval') === interval && ++pages === 2) synth.holdIntervals.add(interval);
+    return synth.fetchImpl(input);
+  }));
 }
 
 beforeEach(() => {
@@ -450,11 +523,13 @@ describe('悬停提示说对放宽的原因', () => {
   }, PAGE_TEST_TIMEOUT_MS);
 });
 
-describe('单张 PNG：计算用 K 线没到之前不让导出（免得峰值浮盈写成「加载中…」）', () => {
+describe('单张 PNG：计算用 K 线没到之前不让导出（免得峰值涨幅等四项写成「加载中…」）', () => {
   it('盘面已画好、计算用 K 线还在路上：PNG 按钮停用，到位后恢复', async () => {
-    synth.holdIntervals.add('1m');
+    holdComputeKlinesAfterFirstPage('1m');
     renderPage('tut-1h');
     await waitMainProbe('5m');
+    // 确实是「盘面已画好、计算用还在路上」的那个局面：决策准确度还没拿到过 K 线
+    expect(accuracyCallsWithKlines()).toHaveLength(0);
     const png = screen.getByRole('button', { name: 'PNG' });
     expect(png).toBeDisabled();
     synth.releaseHeld();
@@ -472,21 +547,29 @@ describe('计算与显示分开：任意显示周期、任意倍数下，读数�
     renderPage(id);
     await waitComputeLoaded();
     await waitFor(() => expect(mainProbe()).not.toBeNull(), { timeout: WAIT });
-    const peakAtOpen = metricValue('峰值浮盈');
-    await expectComputationsUnchanged(id, peakAtOpen);
+    const readingsAtOpen = klineReadings();
+    await expectComputationsUnchanged(id, readingsAtOpen);
     const legsTableAtOpen = screen.getByTestId('counterfactual-legs-table').textContent;
 
-    // 夹具确实能抓到泄漏：换成盘面那一份（1 小时线）重算，峰值浮盈就不是这个数
+    // 夹具确实能抓到泄漏：换成盘面那一份（1 小时线）重算，决策准确度里的峰值浮盈就不是这个数
     const actual = await vi.importActual<typeof import('@/lib/campaignAnalysis')>('@/lib/campaignAnalysis');
-    const { base, klines: reference } = legacyDefaultKlines(id);
+    const { interval: computeInterval, base, klines: reference } = legacyDefaultKlines(id);
     const args = accuracyCallsWithKlines().at(-1)!.args;
     const leaked = actual.computeDecisionAccuracy(args[0], args[1], args[2], synthKlineRange(id === 'tut-8d' ? '15m' : '1h', base.fromTime, base.toTime), ...args.slice(4) as []);
     expect(leaked.campaign_max_profit_real).not.toBe(actual.computeDecisionAccuracy(args[0], args[1], args[2], reference, ...args.slice(4) as []).campaign_max_profit_real);
+    // 页面上的四项同理：下面要切到的每一个显示周期，只要与计算周期不同，拿那个周期的 K 线重算，四项的字全都对不上——
+    // 所以每切一次周期后「四项还是打开时的字」都是真能翻红的断言。
+    const leakIntervals = intervals.filter(interval => interval !== computeInterval);
+    expect(leakIntervals.length).toBeGreaterThan(0);
+    for (const interval of leakIntervals) {
+      const leakedReadings = klineReadingsFrom(id, interval, synthKlineRange(interval, base.fromTime, base.toTime));
+      for (const label of KLINE_READING_LABELS) expect(leakedReadings[label], `${interval} ${label}`).not.toBe(readingsAtOpen[label]);
+    }
 
     for (const interval of intervals) {
       fireEvent.click(within(intervalGroup()).getByRole('button', { name: interval }));
       await waitMainProbe(interval);
-      await expectComputationsUnchanged(id, peakAtOpen);
+      await expectComputationsUnchanged(id, readingsAtOpen);
       // 「还原 Legs」重建副本基线：仍按计算用那一份
       fireEvent.click(screen.getByRole('button', { name: /还原 Legs/ }));
       const manualCalls = vi.mocked(buildManualLegs).mock.calls.filter(call => call[2].length > 0);
@@ -500,11 +583,11 @@ describe('计算与显示分开：任意显示周期、任意倍数下，读数�
     renderPage(id);
     await waitComputeLoaded();
     await waitFor(() => expect(mainProbe()).not.toBeNull(), { timeout: WAIT });
-    const peakAtOpen = metricValue('峰值浮盈');
+    const readingsAtOpen = klineReadings();
     for (const multiplier of [1.1, 3.1, 5, 21, 51]) {
       fireEvent.click(screen.getByRole('button', { name: `显示 ${multiplier} 倍战役时间范围` }));
       await waitFor(() => expect(mainProbe()).not.toBeNull(), { timeout: WAIT });
-      await expectComputationsUnchanged(id, peakAtOpen);
+      await expectComputationsUnchanged(id, readingsAtOpen);
     }
   }, PAGE_TEST_TIMEOUT_MS);
 
@@ -512,12 +595,12 @@ describe('计算与显示分开：任意显示周期、任意倍数下，读数�
     renderPage(id);
     await waitComputeLoaded();
     await waitFor(() => expect(mainProbe()).not.toBeNull(), { timeout: WAIT });
-    const peakAtOpen = metricValue('峰值浮盈');
+    const readingsAtOpen = klineReadings();
     const legsBefore = vi.mocked(buildManualLegs).mock.calls.filter(call => call[2].length > 0);
     const { interval: computeInterval, klines: reference } = legacyDefaultKlines(id);
     fireEvent.click(screen.getByRole('button', { name: '显示 1周 K 线范围' }));
     await waitFor(() => expect(mainProbe()).not.toBeNull(), { timeout: WAIT });
-    await expectComputationsUnchanged(id, peakAtOpen);
+    await expectComputationsUnchanged(id, readingsAtOpen);
     for (const call of legsBefore) expect(call[2]).toEqual(reference);
 
     // 改版前绝对预设下禁止运行（K 线跟着预设变）；分开之后直接跑，用的是计算那一份与计算周期
@@ -534,8 +617,8 @@ describe('唯一的例外：选中的已保存反事实分支越出 Legs 跨度�
     // 先按页面一键运行拿到一份真实的反事实参数，把主力的平仓时间挪到战役结束后 30 小时
     const first = renderPage('tut-5h');
     await waitComputeLoaded();
-    await waitFor(() => expect(metricValue('峰值浮盈')).toMatch(/USDT$/), { timeout: WAIT });
-    const peakWithoutBranch = metricValue('峰值浮盈');
+    await waitFor(() => expect(metricValue('峰值涨幅')).toMatch(/%$/), { timeout: WAIT });
+    const readingsWithoutBranch = klineReadings();
     fireEvent.click(screen.getByRole('button', { name: '一键运行' }));
     await waitFor(() => expect(runCustomCounterfactual).toHaveBeenCalledTimes(1), { timeout: WAIT });
     const [, params, runKlines] = vi.mocked(runCustomCounterfactual).mock.calls[0];
@@ -559,6 +642,10 @@ describe('唯一的例外：选中的已保存反事实分支越出 Legs 跨度�
     // 夹具确实越出了 Legs 跨度：撑宽后的计算周期更粗
     expect(widened.base.toTime).toBeGreaterThan(plain.base.toTime);
     expect(widened.interval).not.toBe(plain.interval);
+    // 没有分支时的四项就是按战役本身那一份算的；按撑宽后的那一份算，四项的字全都不同（主力持有窗口没变，变的只是 K 线粒度）
+    expect(readingsWithoutBranch).toEqual(klineReadingsFrom('tut-5h', plain.interval, plain.klines));
+    const readingsWithBranch = klineReadingsFrom('tut-5h', widened.interval, widened.klines);
+    for (const label of KLINE_READING_LABELS) expect(readingsWithBranch[label], label).not.toBe(readingsWithoutBranch[label]);
 
     vi.mocked(listCounterfactuals).mockResolvedValue([branch]);
     try {
@@ -566,14 +653,12 @@ describe('唯一的例外：选中的已保存反事实分支越出 Legs 跨度�
       const row = await screen.findByTestId('counterfactual-branch-row-cf-long', {}, { timeout: WAIT });
       // 打开时自动选中第一条分支：计算用那一份按撑宽后的窗口与周期拉，读数随之变
       await waitFor(() => expect(accuracyCallsWithKlines().at(-1)!.args[3]).toEqual(widened.klines), { timeout: WAIT });
-      const peakWithBranch = `${accuracyCallsWithKlines().at(-1)!.result.campaign_max_profit_real.toFixed(2)} USDT`;
-      await waitFor(() => expect(metricValue('峰值浮盈')).toBe(peakWithBranch), { timeout: WAIT });
-      expect(peakWithBranch).not.toBe(peakWithoutBranch);
+      await waitFor(() => expect(klineReadings()).toEqual(readingsWithBranch), { timeout: WAIT });
 
       // 取消选中：回到只按战役本身的那一份，读数与没有分支时（也就是批量导出）逐位相同
       fireEvent.click(row);
       await waitFor(() => expect(accuracyCallsWithKlines().at(-1)!.args[3]).toEqual(plain.klines), { timeout: WAIT });
-      await waitFor(() => expect(metricValue('峰值浮盈')).toBe(peakWithoutBranch), { timeout: WAIT });
+      await waitFor(() => expect(klineReadings()).toEqual(readingsWithoutBranch), { timeout: WAIT });
     } finally {
       vi.mocked(listCounterfactuals).mockResolvedValue([]);
     }
@@ -581,26 +666,31 @@ describe('唯一的例外：选中的已保存反事实分支越出 Legs 跨度�
 });
 
 describe('加载与错误：显示用失败不影响读数；计算用失败单独提示', () => {
-  it('盘面已画好、计算用 K 线还在路上：峰值浮盈显示「加载中…」，不拿兜底值冒充读数', async () => {
-    synth.holdIntervals.add('1m');
+  it('盘面已画好、计算用 K 线还在路上：读 K 线的四项显示「加载中…」，不拿缺数时的「—」冒充读数', async () => {
+    holdComputeKlinesAfterFirstPage('1m');
     renderPage('tut-1h');
     await waitMainProbe('5m');
-    expect(metricValue('峰值浮盈')).toBe('加载中…');
+    // 计算用 K 线一根都还没交出来：四项本来会各自写成算不出的「—」，摆在画好的盘面旁边就像最终读数
+    expect(accuracyCallsWithKlines()).toHaveLength(0);
+    expect(klineReadings()).toEqual({ 峰值涨幅: '加载中…', 峰值涨幅倍数: '加载中…', 涨幅未兑现: '加载中…', 动态最大回撤: '加载中…' });
     // 不读 K 线的项照常显示
     expect(metricValue('已实现 P&L')).toMatch(/USDT$/);
+    expect(metricValue('涨跌幅')).toMatch(/%$/);
     synth.releaseHeld();
     await waitComputeLoaded();
-    const { result } = accuracyCallsWithKlines().at(-1)!;
-    await waitFor(() => expect(metricValue('峰值浮盈')).toBe(`${result.campaign_max_profit_real.toFixed(2)} USDT`), { timeout: WAIT });
+    const { interval, klines: reference } = legacyDefaultKlines('tut-1h');
+    const loaded = klineReadingsFrom('tut-1h', interval, reference);
+    for (const label of KLINE_READING_LABELS) expect(loaded[label], label).toMatch(/^[+-]?\d+\.\d{2}%?$/);
+    await waitFor(() => expect(klineReadings()).toEqual(loaded), { timeout: WAIT });
   }, PAGE_TEST_TIMEOUT_MS);
 
-  it('显示用 K 线加载失败：盘面显示错误与重试，峰值浮盈照常按计算那一份', async () => {
+  it('显示用 K 线加载失败：盘面显示错误与重试，读 K 线的四项照常按计算那一份', async () => {
     synth.failIntervals.add('5m');
     renderPage('tut-1h');
     await waitComputeLoaded();
     const frame = screen.getByTestId('campaign-chart-frame');
     await waitFor(() => expect(frame).toHaveTextContent('K 线加载失败：API 429'), { timeout: WAIT });
-    await expectComputationsUnchanged('tut-1h', metricValue('峰值浮盈'));
+    await expectComputationsUnchanged('tut-1h', klineReadings());
     expect(screen.queryByTestId('campaign-compute-klines-error')).toBeNull();
     synth.failIntervals.clear();
     fireEvent.click(within(frame).getByRole('button', { name: '重试' }));
@@ -621,5 +711,8 @@ describe('加载与错误：显示用失败不影响读数；计算用失败单�
     const call = accuracyCallsWithKlines().at(-1)!;
     expect(call.args[3]).toEqual(legacyDefaultKlines('tut-1h').klines);
     expect(call.result).toEqual(actual.computeDecisionAccuracy(call.args[0], call.args[1], call.args[2], legacyDefaultKlines('tut-1h').klines, ...call.args.slice(4) as []));
+    // 重试拉回来之后，盈亏概览里读 K 线的四项也是按计算那一份（1m）算的，不是手边现成的盘面那一份（5m）
+    const { interval, klines: reference } = legacyDefaultKlines('tut-1h');
+    await waitFor(() => expect(klineReadings()).toEqual(klineReadingsFrom('tut-1h', interval, reference)), { timeout: WAIT });
   }, PAGE_TEST_TIMEOUT_MS);
 });
