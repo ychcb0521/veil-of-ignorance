@@ -3,19 +3,24 @@ import { StrictMode } from 'react';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCampaignListCaches } from '@/lib/campaignListCache';
+import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { fetchCampaignSourceRows, getCampaignFullData } from '@/lib/journalApi';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
-import { CAMPAIGN_PRICE_PATH_CACHE_PREFIX } from '@/hooks/useCampaignPricePaths';
+import { CAMPAIGN_PRICE_PATH_CACHE_PREFIX, clearCampaignPricePathMemoryCacheForTests } from '@/hooks/useCampaignPricePaths';
+import { clearUnrealizedChartSnapshotMemoryForTests, UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX } from '@/hooks/useUnrealizedChartSnapshot';
 import * as xlsxWorkbook from '@/lib/xlsxWorkbook';
 import JournalCampaignsPage from '../JournalCampaignsPage';
 
 beforeEach(() => {
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   clearCampaignListCaches();
+  clearCampaignPricePathMemoryCacheForTests();
+  clearUnrealizedChartSnapshotMemoryForTests();
   sessionStorage.clear();
-  Object.keys(localStorage).filter(key => key.startsWith(CAMPAIGN_PRICE_PATH_CACHE_PREFIX))
+  Object.keys(localStorage).filter(key => key.startsWith(CAMPAIGN_PRICE_PATH_CACHE_PREFIX)
+    || key.startsWith(UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX))
     .forEach(key => localStorage.removeItem(key));
   restoredIds.clear();
   purgedIds.clear();
@@ -357,27 +362,44 @@ function preparePricePathFixtures() {
   };
 }
 
+/** 一次行情请求对应哪场战役、该回什么 K 线（按请求的起点认战役；四场的峰值各不相同）。 */
+function pricePathResponse(interval: string, fromTime: number) {
+  const highs = [130, 160, 120, 150];
+  const campaign = [...campaigns].sort((left, right) => (
+    Math.abs(Date.parse(left.opened_at) - fromTime) - Math.abs(Date.parse(right.opened_at) - fromTime)
+  ))[0];
+  const index = campaigns.indexOf(campaign);
+  const barMs = intervalToMs(interval);
+  const firstBarTime = Math.floor(Date.parse(campaign.opened_at) / barMs) * barMs;
+  const bars: KlineData[] = Array.from({ length: Math.floor((tradeHistory[index].closeTime - firstBarTime) / barMs) + 1 }, (_, bar) => ({
+    time: firstBarTime + bar * barMs,
+    open: bar === 0 ? 100 : 110,
+    high: bar === 0 ? highs[index] : 110,
+    low: bar === 0 ? 99 : 109,
+    close: 110,
+    volume: 1,
+  }));
+  return { campaign, bars };
+}
+
 function deferredPricePathRequests() {
   const pending: { campaignId: string; resolve: (bars: KlineData[]) => void; bars: KlineData[]; signal?: AbortSignal }[] = [];
-  const highs = [130, 160, 120, 150];
   mockFetchReplayKlineRange.mockImplementation((_symbol, _interval, fromTime, _toTime, signal) => {
-    const campaign = [...campaigns].sort((left, right) => (
-      Math.abs(Date.parse(left.opened_at) - fromTime) - Math.abs(Date.parse(right.opened_at) - fromTime)
-    ))[0];
-    const index = campaigns.indexOf(campaign);
-    const barMs = intervalToMs(_interval);
-    const firstBarTime = Math.floor(Date.parse(campaign.opened_at) / barMs) * barMs;
-    const bars: KlineData[] = Array.from({ length: Math.floor((tradeHistory[index].closeTime - firstBarTime) / barMs) + 1 }, (_, bar) => ({
-      time: firstBarTime + bar * barMs,
-      open: bar === 0 ? 100 : 110,
-      high: bar === 0 ? highs[index] : 110,
-      low: bar === 0 ? 99 : 109,
-      close: 110,
-      volume: 1,
-    }));
+    const { campaign, bars } = pricePathResponse(_interval, fromTime);
     return new Promise<KlineData[]>(resolve => pending.push({ campaignId: campaign.id, resolve, bars, signal }));
   });
   return pending;
+}
+
+/** 上次看图留下的展示快照：四场都画过，读数是 value。 */
+function seedUnrealizedChartSnapshot(value: number) {
+  localStorage.setItem(`${UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX}${JSON.stringify([mockUser.id, 'active'])}`, JSON.stringify({
+    samples: campaigns.map(campaign => ({
+      campaignId: campaign.id, title: campaign.title, symbol: campaign.symbol, value,
+      operationTime: campaignOperationTime(legsByCampaign[campaign.id], tradeHistory),
+      pnl: campaign.final_realized_pnl,
+    })),
+  }));
 }
 
 function unrealizedPlotIds(): string[] {
@@ -408,6 +430,215 @@ function DetailReturn() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
+  it('行情重载时点击立即保持完整旧图，分批返回不打散旧点，完成后整体更新', async () => {
+    const restore = preparePricePathFixtures();
+    const firstRequests = deferredPricePathRequests();
+    const snapshot = () => [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]')]
+      .map(point => [point.dataset.campaignId, point.dataset.metricValue, point.style.left, point.style.top]);
+    let view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    try {
+      for (let index = 0; index < campaigns.length; index += 1) {
+        await waitFor(() => expect(firstRequests.length).toBeGreaterThan(index), { timeout: 5_000 });
+        await act(async () => { firstRequests[index].resolve(firstRequests[index].bars); });
+      }
+      await waitFor(() => expect(unrealizedPlotIds()).toHaveLength(4));
+      const before = snapshot();
+      view.unmount();
+      // Simulate expired/invalidated calculations without removing the display-only snapshot.
+      clearCampaignPricePathMemoryCacheForTests();
+      clearUnrealizedChartSnapshotMemoryForTests();
+      Object.keys(localStorage).filter(key => key.startsWith(CAMPAIGN_PRICE_PATH_CACHE_PREFIX))
+        .forEach(key => localStorage.removeItem(key));
+      const refreshRequests = deferredPricePathRequests();
+      view = render(
+        <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+          <JournalCampaignsPage />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      expect(refreshRequests).toHaveLength(0);
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+
+      // The complete old chart is already there in this click, before any request resolves.
+      expect(snapshot()).toEqual(before);
+      expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument();
+      expect(screen.queryByTestId('campaign-unrealized-chart-computing')).not.toBeInTheDocument();
+      // 时序视图读的是同一份沿用的读数：四个点、同一句状态；切回分布还是原图
+      fireEvent.click(screen.getByTestId('campaign-unrealizedPriceChangePct-view-time'));
+      expect(new Map(snapshot().map(point => [point[0], point[1]]))).toEqual(new Map(before.map(point => [point[0], point[1]])));
+      expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('campaign-unrealizedPriceChangePct-view-distribution'));
+      expect(snapshot()).toEqual(before);
+      expect(screen.getAllByTestId('campaign-unrealized-price-change-value').every(node => node.textContent === '—')).toBe(true);
+      await waitFor(() => expect(refreshRequests).toHaveLength(1), { timeout: 5_000 });
+      await act(async () => { refreshRequests[0].resolve(refreshRequests[0].bars.map(bar => ({ ...bar, high: bar.high + 10 }))); });
+      await waitFor(() => expect(screen.getAllByTestId('campaign-unrealized-price-change-value').some(node => node.textContent !== '—')).toBe(true), { timeout: 4_000 });
+      expect(snapshot()).toEqual(before);
+
+      for (let index = 1; index < campaigns.length; index += 1) {
+        await waitFor(() => expect(refreshRequests.length).toBeGreaterThan(index), { timeout: 5_000 });
+        await act(async () => { refreshRequests[index].resolve(refreshRequests[index].bars.map(bar => ({ ...bar, high: bar.high + 10 }))); });
+      }
+      await waitFor(() => expect(screen.queryByText(/沿用上次读数/)).not.toBeInTheDocument());
+      expect(unrealizedPlotIds()).toHaveLength(4);
+      const afterValues = new Map(snapshot().map(point => [point[0], Number(point[1])]));
+      for (const point of before) expect(afterValues.get(point[0])).toBeCloseTo(Number(point[1]) + 10);
+      expect(refreshRequests).toHaveLength(4);
+    } finally {
+      view.unmount();
+      restore();
+    }
+  }, 20_000);
+
+  it('第一次算（没有任何缓存）：点开先是等高的进度占位，不写「暂无…」；第一批算出来就换成图', async () => {
+    const restore = preparePricePathFixtures();
+    const requests = deferredPricePathRequests();
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=mainPriceChangeDistribution']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    try {
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+
+      const placeholder = screen.getByTestId('campaign-unrealized-chart-computing');
+      expect(placeholder).toHaveTextContent('正在计算涨幅未兑现…');
+      expect(placeholder).toHaveTextContent('0 / 4 场');
+      expect(placeholder.className).toContain('min-h-[22rem]');
+      expect(screen.queryByText(/暂无同时具备/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('campaign-metric-scatter-plot')).not.toBeInTheDocument();
+      // 没有旧读数可沿用，状态行不写「沿用上次读数」
+      expect(screen.queryByText(/沿用上次读数/)).not.toBeInTheDocument();
+      // 视图切换键还在：占位期间也能切时序 / 分布
+      expect(screen.getByTestId('campaign-unrealizedPriceChangePct-view-time')).toBeInTheDocument();
+
+      await waitFor(() => expect(requests).toHaveLength(1), { timeout: 5_000 });
+      await act(async () => { requests[0].resolve(requests[0].bars); });
+      await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('button[data-campaign-id]')).toHaveLength(1), { timeout: 4_000 });
+      expect(screen.queryByTestId('campaign-unrealized-chart-computing')).not.toBeInTheDocument();
+      // 首扫补点期间画的都是当前值，不算「沿用上次读数」
+      expect(screen.queryByText(/沿用上次读数/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('campaign-unrealized-loading')).toHaveTextContent('已计算 1 / 4 场，持续加载中');
+    } finally {
+      view.unmount();
+      restore();
+    }
+  }, 20_000);
+
+  it('沿用旧读数的图：点进详情再返回，仍是同一张完整的旧图与同一句状态，不出现占位', async () => {
+    const restore = preparePricePathFixtures();
+    const requests = deferredPricePathRequests();
+    seedUnrealizedChartSnapshot(42);
+    const pointValues = () => [...screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]')]
+      .map(point => [point.dataset.campaignId, point.dataset.metricValue]).sort();
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+          <Route path="/journal/campaigns/:id" element={<DetailReturn />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    try {
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const before = pointValues();
+      expect(before).toHaveLength(4);
+      expect(before.every(point => point[1] === '42')).toBe(true);
+      expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('campaign-metric-scatter-plot').querySelector('button[data-campaign-id]')!);
+      fireEvent.click(screen.getByText('返回战役图'));
+
+      // 返回的第一帧就是那张旧图
+      expect(pointValues()).toEqual(before);
+      expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument();
+      expect(screen.queryByTestId('campaign-unrealized-chart-computing')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('campaign-metric-loading')).not.toBeInTheDocument();
+      // 卡片上仍是当前值（还没算出来 = 「—」），旧读数只在图上
+      expect(screen.getAllByTestId('campaign-unrealized-price-change-value').every(node => node.textContent === '—')).toBe(true);
+    } finally {
+      view.unmount();
+      for (const request of requests) request.resolve(request.bars);
+      restore();
+    }
+  }, 20_000);
+
+  it('断网时行情队列走不动：图照样先画上次的读数，状态行与进度行写明离线、不写「后台更新中」；联网后接着算', async () => {
+    const restore = preparePricePathFixtures();
+    const requests = deferredPricePathRequests();
+    seedUnrealizedChartSnapshot(42);
+    const onLine = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    try {
+      await waitFor(() => expect(screen.getByText('沿用上次读数 4 场 · 离线，联网后继续')).toBeInTheDocument());
+      expect(unrealizedPlotIds()).toHaveLength(4);
+      expect(screen.getByTestId('campaign-unrealized-offline')).toHaveTextContent('当前离线，联网后继续计算');
+      expect(screen.queryByText(/后台更新中/)).not.toBeInTheDocument();
+      expect(requests).toHaveLength(0);
+
+      onLine.mockReturnValue(true);
+      await act(async () => { window.dispatchEvent(new Event('online')); });
+      await waitFor(() => expect(requests).toHaveLength(1), { timeout: 5_000 });
+      await waitFor(() => expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument());
+      expect(screen.queryByTestId('campaign-unrealized-offline')).not.toBeInTheDocument();
+    } finally {
+      view.unmount();
+      onLine.mockRestore();
+      for (const request of requests) request.resolve(request.bars);
+      restore();
+    }
+  }, 20_000);
+
+  it('资料不完整的战役本次会话只判定一次：关图再开不重新请求，图不进「沿用上次读数」，也不闪「持续加载中」', async () => {
+    const restore = preparePricePathFixtures();
+    const unavailableId = campaigns[1].id;
+    mockFetchReplayKlineRange.mockImplementation(async (_symbol, interval, fromTime) => {
+      const { campaign, bars } = pricePathResponse(interval, fromTime);
+      if (campaign.id === unavailableId) throw Object.assign(new Error('API 400'), { status: 400 });
+      return bars;
+    });
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns?chart=unrealizedPriceChangePctDistribution']}>
+        <JournalCampaignsPage />
+      </MemoryRouter>,
+    );
+    try {
+      await waitFor(() => expect(unrealizedPlotIds()).toHaveLength(3), { timeout: 15_000 });
+      await waitFor(() => expect(screen.getByTestId('campaign-unrealized-progress')).toHaveTextContent('1 场资料不完整'), { timeout: 5_000 });
+      expect(unrealizedPlotIds()).not.toContain(unavailableId);
+      const calls = mockFetchReplayKlineRange.mock.calls.length;
+      expect(calls).toBe(4);
+
+      // 换到别的图再点回来（行情队列先停再启）
+      fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+      await waitFor(() => expect(screen.queryByTestId('campaign-unrealized-progress')).not.toBeInTheDocument());
+      fireEvent.click(screen.getByTestId('campaign-sort-unrealizedPriceChangePct'));
+
+      expect(unrealizedPlotIds()).toHaveLength(3);
+      expect(screen.queryByText(/沿用上次读数/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('campaign-unrealized-loading')).not.toBeInTheDocument();
+      expect(screen.getByTestId('campaign-unrealized-progress')).toHaveTextContent('1 场资料不完整');
+      await new Promise(resolve => window.setTimeout(resolve, 100));
+      expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(calls);
+
+      // 「重试缺失项」才重新问一次
+      fireEvent.click(screen.getByText('重试缺失项'));
+      await waitFor(() => expect(mockFetchReplayKlineRange).toHaveBeenCalledTimes(calls + 1), { timeout: 5_000 });
+    } finally {
+      view.unmount();
+      restore();
+    }
+  }, 30_000);
+
   it.each(['unrealizedPriceChangePctDistribution', 'unrealizedPriceChangePct'])(
     '%s 点位进入详情再返回：保留视图、排序筛选、点位、说明和页面位置，不重算已加载行情', async chartKey => {
       const restore = preparePricePathFixtures();
@@ -2364,7 +2595,10 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 20_000);
 
-  it('新指标仍在等待行情时可以立即导出现有数据，保留全部战役与原指标，未完成项留空', async () => {
+  it.each([
+    { name: '新指标仍在等待行情时可以立即导出现有数据，保留全部战役与原指标，未完成项留空', retained: false },
+    { name: '图上沿用旧读数时导出仍只用当前数据，旧读数不进表', retained: true },
+  ])('$name', async ({ retained }) => {
     const restore = preparePricePathFixtures();
     const pending = deferredPricePathRequests();
     const createUrlDescriptor = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
@@ -2378,9 +2612,18 @@ describe('JournalCampaignsPage sorting', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
       downloads.push({ href: this.href, filename: this.download });
     });
-    const view = render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    if (retained) seedUnrealizedChartSnapshot(99);
+    // 普通列表（不按涨幅未兑现排、也没开它的图）：单靠点「导出」就要把行情队列叫起来
+    const view = render(<MemoryRouter initialEntries={[`/journal/campaigns${retained ? '?chart=unrealizedPriceChangePctDistribution' : ''}`]}><JournalCampaignsPage /></MemoryRouter>);
     try {
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      if (retained) {
+        expect(unrealizedPlotIds()).toHaveLength(4);
+        expect(screen.getByText('沿用上次读数 4 场 · 后台更新中')).toBeInTheDocument();
+      } else {
+        await new Promise(resolve => window.setTimeout(resolve, 50));
+        expect(pending).toHaveLength(0);
+      }
       fireEvent.click(screen.getByTestId('campaign-export-xlsx'));
       await waitFor(() => expect(pending).toHaveLength(1));
       expect(screen.getByTestId('campaign-export-xlsx')).toBeDisabled();

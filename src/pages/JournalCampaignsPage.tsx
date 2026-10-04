@@ -42,6 +42,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
+import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
 import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
@@ -150,6 +151,38 @@ import {
   type SortLevelEffect,
 } from '@/lib/campaignListSort';
 const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
+
+/** 散点图还画不出来时的等高占位：一句话 + 进度条 + 「已完成 / 总数」。读战役目录与算涨幅未兑现共用。 */
+function ChartPreparingPlaceholder({ testId, title, loaded, total, emptyLabel, hint }: {
+  testId: string;
+  title: string;
+  loaded: number;
+  total: number;
+  /** total 还是 0 时写在进度条下面的话 */
+  emptyLabel: string;
+  hint?: string;
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="mx-auto flex min-h-[22rem] w-full max-w-[58rem] flex-col items-center justify-center gap-3 px-6 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="text-[12px] font-medium text-foreground">{title}</div>
+      <div className="h-1.5 w-full max-w-72 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+          style={{ width: `${total > 0 ? Math.round((loaded / total) * 100) : 0}%` }}
+        />
+      </div>
+      <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+        {total > 0 ? `${loaded} / ${total} 场` : emptyLabel}
+      </div>
+      {hint ? <div className="text-[10px] text-muted-foreground/70">{hint}</div> : null}
+    </div>
+  );
+}
 const LazyCampaignBatchExportDialog = lazy(() => import('@/components/journal/CampaignBatchExportDialog')
   .then(module => ({ default: module.CampaignBatchExportDialog })));
 
@@ -2194,12 +2227,18 @@ export default function JournalCampaignsPage() {
    *
    * 全选时返回同一个数组引用，不产生新对象：默认路径下所有下游 memo 一次都不会白算。
    */
+  const scopedRowsRef = useRef<CampaignCardData[]>([]);
   const scopedRows = useMemo(() => {
     if (isAllRange(operationRange)) return rows;
-    return rows.filter(row => isWithinOperationRange(
+    const next = rows.filter(row => isWithinOperationRange(
       campaignOperationTime(row.legs, row.tradeRecords),
       operationRange,
     ));
+    // 时间段外的行变了（rows 换了数组）而段内的行一个没变：沿用上一个数组，下游的统计、排序、散点序列都不白算。
+    const previous = scopedRowsRef.current;
+    if (next.length === previous.length && next.every((row, index) => row === previous[index])) return previous;
+    scopedRowsRef.current = next;
+    return next;
   }, [rows, operationRange]);
   const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
     || summaryExportPending
@@ -2569,17 +2608,21 @@ export default function JournalCampaignsPage() {
     setSummaryExportPending(false);
     handleExportSummaryXlsx();
   }, [displayRows, dynamicDrawdownByCampaign, handleExportSummaryXlsx, peakPriceChangeByCampaign, summaryExportPending]);
-  const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => {
-    const samples = metricRows.map(row => ({
-      row,
-      campaignId: row.campaign.id,
-      title: row.campaign.title,
-      symbol: row.campaign.symbol,
-      operationTime: campaignOperationTime(row.legs, row.tradeRecords),
-      pnl: row.campaign.final_realized_pnl ?? null,
-      payoffRatio: rowPayoffRatio(row),
-    }));
-    const buildSeries = (valueForRow: (row: typeof metricRows[number]) => number | null) => (
+  // 行情分批算出涨幅未兑现时，别的散点序列不跟着重建：它们只依赖战役行本身。
+  const baseMetricSeriesByKey = useMemo(() => {
+    const samples = scopedRows.map(source => {
+      const row = { ...source, ...computeCampaignExpectancies(source.profitCaptureRatio) };
+      return {
+        row,
+        campaignId: row.campaign.id,
+        title: row.campaign.title,
+        symbol: row.campaign.symbol,
+        operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+        pnl: row.campaign.final_realized_pnl ?? null,
+        payoffRatio: rowPayoffRatio(row),
+      };
+    });
+    const buildSeries = (valueForRow: (row: typeof samples[number]['row']) => number | null) => (
       buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
         ...sample,
         value: valueForRow(row),
@@ -2608,7 +2651,6 @@ export default function JournalCampaignsPage() {
       row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct) ? row.mainPriceChangePct : null
     ));
     const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
-    const unrealizedPriceChangePct = buildSeries(row => rowUnrealizedPriceChangePct(row));
     // 加仓次数：每一场都有读数（没加仓 = 0）
     const addCount = buildSeries(row => rowAddCount(row));
     // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
@@ -2638,14 +2680,43 @@ export default function JournalCampaignsPage() {
       mainPriceChangeDistribution: mainPriceChange,
       mainPriceEfficiency,
       mainPriceEfficiencyDistribution: mainPriceEfficiency,
-      unrealizedPriceChangePct,
-      unrealizedPriceChangePctDistribution: unrealizedPriceChangePct,
       addEfficiency,
       addEfficiencyDistribution: addEfficiency,
       addCount,
       addCountBars: addCount,
     };
-  }, [metricRows]);
+  }, [scopedRows]);
+  const unrealizedChartSamples = useMemo(() => metricRows.map(row => ({
+    campaignId: row.campaign.id,
+    title: row.campaign.title,
+    symbol: row.campaign.symbol,
+    operationTime: campaignOperationTime(row.legs, row.tradeRecords),
+    pnl: row.campaign.final_realized_pnl ?? null,
+    payoffRatio: rowPayoffRatio(row),
+    value: rowUnrealizedPriceChangePct(row),
+  })), [metricRows]);
+  const unrealizedChartPendingIds = useMemo(() => new Set(scopedRows
+    .filter(row => row.mainPriceChangePct != null && Number.isFinite(row.mainPriceChangePct)
+      && !peakPriceChangeByCampaign.has(row.campaign.id))
+    .map(row => row.campaign.id)), [scopedRows, peakPriceChangeByCampaign]);
+  /**
+   * 行情队列此刻走不动（断网、在冷却期，或剩下没算出的全在等自动重试，见 useCampaignPricePathTasks 的 stalled）：
+   * 不再整图等它——已经重算出来的场次显示新值，只有还在等的那几场沿用上次的点（见 useUnrealizedChartSnapshot 的 stalled）。
+   */
+  const unrealizedQueueStalled = pricePaths.stalled;
+  const unrealizedChart = useUnrealizedChartSnapshot({
+    owner: userId ?? '', scope: binView ? 'deleted' : 'active',
+    samples: unrealizedChartSamples, pendingIds: unrealizedChartPendingIds, ready: campaignRowsComplete,
+    stalled: unrealizedQueueStalled,
+  });
+  /** 当前时间段里还有会进图、但行情没算出来的场次（主力未平仓、已判定资料不完整的不算）。 */
+  const unrealizedChartPending = unrealizedChartPendingIds.size > 0;
+  // 【用户要求】沿用的旧读数只是图上的展示层：卡片、排序、统计、「已计算 x / y 场」与导出一律用当前值。
+  const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => ({
+    ...baseMetricSeriesByKey,
+    unrealizedPriceChangePct: unrealizedChart.series,
+    unrealizedPriceChangePctDistribution: unrealizedChart.series,
+  }), [baseMetricSeriesByKey, unrealizedChart.series]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
@@ -2663,6 +2734,18 @@ export default function JournalCampaignsPage() {
   const selectFirstValid = Number.isInteger(selectFirstNumber) && selectFirstNumber >= 1;
   // 「当前打开的是哪份数据」：分布图打开时，盈亏比的排序行按钮也要读成「收起」。
   const openSourceKey: CampaignMetricChartKey = selectedMetricConfig.sourceKey ?? selectedMetricConfig.key;
+  /**
+   * 【用户要求】涨幅未兑现的图点开就完整：行情还在重算时先画上次的读数。这一行写明图上有几场是上次的读数；
+   * 全部是当前值时不写（新结束的场次算出来会自己加进来，进度见图下那一行）。
+   */
+  const unrealizedChartStatus = openSourceKey === 'unrealizedPriceChangePct' && unrealizedChart.cachedCount > 0
+    ? `沿用上次读数 ${unrealizedChart.cachedCount} 场 · ${pricePaths.offline ? '离线，联网后继续' : unrealizedQueueStalled ? '等待自动重试' : '后台更新中'}`
+    : null;
+  /** 一个点都还画不出来、而行情正在算（第一次用、或这个时间段的战役都没算过）：给等高的进度占位，不写「暂无…」。 */
+  const unrealizedChartComputing = openSourceKey === 'unrealizedPriceChangePct'
+    && unrealizedMetricLoading
+    && unrealizedChartPending
+    && selectedMetricSeries.points.length === 0;
   /** 同一指标的几种看法（时序 / 分布 / 柱状）；只有一种时不画切换键。 */
   const familyViewOptions = useMemo(
     () => CAMPAIGN_METRIC_CHART_CONFIGS.filter(
@@ -4043,7 +4126,8 @@ export default function JournalCampaignsPage() {
                 const sortChartPointCount = sortChartKey == null
                   ? 0
                   : metricSeriesByKey[sortChartKey].points.length;
-                const sortChartProgressLabel = option.value === 'unrealizedPriceChangePct'
+                // 「查看散点图」后面的数是图上画得出的点数（涨幅未兑现沿用旧读数时也算在内，与图一致）；计算进度在 aria-label 的「已处理」与图下那一行
+                const sortChartCountLabel = option.value === 'unrealizedPriceChangePct'
                   ? `${sortChartPointCount} / ${unrealizedMetricProgress.total}`
                   : String(sortChartPointCount);
                 const sortChartActive = sortChartKey != null
@@ -4373,7 +4457,7 @@ export default function JournalCampaignsPage() {
                         >
                           <ChartScatter aria-hidden="true" className="h-3 w-3" />
                           <span>{sortChartActive ? '收起散点图' : '查看散点图'}</span>
-                          <span className="text-muted-foreground/45">{sortChartProgressLabel}</span>
+                          <span className="text-muted-foreground/45">{sortChartCountLabel}</span>
                         </button>
                       </div>
                     ) : null}
@@ -5033,7 +5117,7 @@ export default function JournalCampaignsPage() {
             >
               <div id="campaign-metric-scatter-view">
                 <div className="h-5 px-4 text-right text-[10px] text-muted-foreground" role="status">
-                  {campaignRowsComplete && refreshing ? '正在更新数据…' : ''}
+                  {unrealizedChartStatus ?? (campaignRowsComplete && refreshing ? '正在更新数据…' : '')}
                 </div>
                 {familyViewOptions.length > 1 ? (
                   // 视图切换键放在面板层而不是图表表头：空序列时元件只渲染空态、没有表头，
@@ -5072,7 +5156,26 @@ export default function JournalCampaignsPage() {
                     </div>
                   </div>
                 ) : null}
-                {campaignRowsComplete ? (
+                {!campaignRowsComplete ? (
+                  campaignLoadError ? null : (
+                    <ChartPreparingPlaceholder
+                      testId="campaign-metric-loading"
+                      title="正在准备完整散点图…"
+                      loaded={campaignLoadProgress.loaded}
+                      total={campaignLoadProgress.total}
+                      emptyLabel="正在读取战役目录"
+                    />
+                  )
+                ) : unrealizedChartComputing ? (
+                  <ChartPreparingPlaceholder
+                    testId="campaign-unrealized-chart-computing"
+                    title="正在计算涨幅未兑现…"
+                    loaded={pricePaths.processed}
+                    total={pricePaths.total}
+                    emptyLabel="正在读取历史行情"
+                    hint="第一次要读每场持仓期间的历史行情；算过的战役以后点开就是完整的图"
+                  />
+                ) : (
                   <MemoCampaignMetricScatterPlot
                     key={`${userId}:${location.key}:${selectedMetricConfig.key}`}
                     viewStateKey={`${userId}:${location.key}:${selectedMetricConfig.key}`}
@@ -5097,30 +5200,6 @@ export default function JournalCampaignsPage() {
                     selectedCampaignIds={selectedCampaignIds}
                     onToggleCampaign={toggleExportSelection}
                   />
-                ) : campaignLoadError ? null : (
-                  <div
-                    data-testid="campaign-metric-loading"
-                    className="mx-auto flex min-h-[22rem] w-full max-w-[58rem] flex-col items-center justify-center gap-3 px-6 text-center"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <div className="text-[12px] font-medium text-foreground">正在准备完整散点图…</div>
-                    <div className="h-1.5 w-full max-w-72 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
-                        style={{
-                          width: `${campaignLoadProgress.total > 0
-                            ? Math.round((campaignLoadProgress.loaded / campaignLoadProgress.total) * 100)
-                            : 0}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
-                      {campaignLoadProgress.total > 0
-                        ? `${campaignLoadProgress.loaded} / ${campaignLoadProgress.total} 场`
-                        : '正在读取战役目录'}
-                    </div>
-                  </div>
                 )}
               </div>
             </div>
@@ -5132,10 +5211,12 @@ export default function JournalCampaignsPage() {
           <div
             className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 py-1 text-[11px] text-muted-foreground"
             role="status"
-            data-testid={unrealizedMetricLoading ? 'campaign-unrealized-loading' : 'campaign-unrealized-progress'}
+            // 「持续加载中」只跟会进图的未决场次走：进行中战役每次打开都要重读行情，但它本来就不进这张图，不让一张完整的图闪「加载中」
+            data-testid={unrealizedChartPending ? 'campaign-unrealized-loading' : 'campaign-unrealized-progress'}
           >
-            <span>涨幅未兑现 · 已计算 {unrealizedReadableCount} / {pricePaths.total} 场{unrealizedMetricLoading ? '，持续加载中' : ''}</span>
+            <span>涨幅未兑现 · 已计算 {unrealizedReadableCount} / {pricePaths.total} 场{unrealizedChartPending ? '，持续加载中' : ''}</span>
             {unrealizedMissingFinalCount > 0 ? <span>{unrealizedMissingFinalCount} 场主力未平仓或缺少最终价格</span> : null}
+            {pricePaths.offline ? <span data-testid="campaign-unrealized-offline">当前离线，联网后继续计算</span> : null}
             {pricePaths.retrying > 0 ? <span>{pricePaths.retrying} 场等待自动重试，已有结果可正常查看</span> : null}
             {pricePaths.unavailable.size > 0 ? (
               <>

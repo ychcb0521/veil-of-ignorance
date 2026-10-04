@@ -6,6 +6,7 @@ import { fetchReplayKlineRange } from '@/hooks/useReplayKlines';
 import {
   CAMPAIGN_PRICE_PATH_CACHE_PREFIX,
   buildCampaignPricePathTask,
+  clearCampaignPricePathMemoryCacheForTests,
   useCampaignPricePathTasks,
   type CampaignPricePathTask,
 } from '@/hooks/useCampaignPricePaths';
@@ -34,6 +35,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function renderTaskFrames(tasks: CampaignPricePathTask[], owner = OWNER, enabled = true) {
+  const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
+  const view = renderHook(({ tasks, owner, enabled }) => {
+    const frame = useCampaignPricePathTasks(tasks, owner, enabled);
+    frames.push(frame);
+    return frame;
+  }, { initialProps: { tasks, owner, enabled } });
+  return { ...view, frames };
+}
+
 async function advance(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 }
@@ -42,6 +53,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-03T13:00:00Z'));
   localStorage.clear();
+  clearCampaignPricePathMemoryCacheForTests();
   fetchRange.mockReset().mockResolvedValue(candles);
 });
 
@@ -176,6 +188,7 @@ describe('useCampaignPricePathTasks', () => {
     expect(first.result.current.loaded).toBe(2);
     first.unmount();
     expect(localStorage.getItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:one`)).not.toBeNull();
+    clearCampaignPricePathMemoryCacheForTests();
     fetchRange.mockClear();
 
     const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
@@ -192,6 +205,339 @@ describe('useCampaignPricePathTasks', () => {
     expect(fetchRange).not.toHaveBeenCalled();
     expect(remounted.result.current).toMatchObject({ processed: 2, loaded: 2, loading: false });
     expect(remounted.result.current.peaks.get('one')).toBeCloseTo(20);
+  });
+
+  it('hydrates the first render when tasks arrive after mount without fetching while disabled', async () => {
+    const cached = task('cached');
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${cached.id}`, JSON.stringify({
+      fingerprint: cached.fingerprint, peak: 20, drawdown: 25, savedAt: Date.now(),
+    }));
+    const tasks = [cached, task('missing')];
+    const view = renderTaskFrames([], OWNER, false);
+    view.frames.length = 0;
+
+    view.rerender({ tasks, owner: OWNER, enabled: false });
+
+    expect(view.frames[0]).toMatchObject({ total: 2, processed: 1, loaded: 1, loading: false });
+    expect([...view.frames[0].peaks]).toEqual([['cached', 20]]);
+    expect([...view.frames[0].drawdowns]).toEqual([['cached', 25]]);
+    expect(fetchRange).not.toHaveBeenCalled();
+    view.rerender({ tasks, owner: OWNER, enabled: true });
+    await advance();
+    expect(view.result.current).toMatchObject({ total: 2, processed: 2, loaded: 2, loading: false });
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    expect(fetchRange.mock.calls[0][0]).toBe('missing');
+  });
+
+  it.each([false, true])('hydrates subset-to-all on the first render (storage unavailable: %s)', async storageUnavailable => {
+    if (storageUnavailable) vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded'); });
+    const tasks = [task('one'), task('two'), task('three')];
+    const view = renderTaskFrames(tasks);
+    await advance();
+    expect(view.result.current.loaded).toBe(3);
+    fetchRange.mockClear();
+
+    view.frames.length = 0;
+    view.rerender({ tasks: [tasks[1]], owner: OWNER, enabled: true });
+    expect(view.frames[0]).toMatchObject({ total: 1, processed: 1, loaded: 1, loading: false });
+    expect([...view.frames[0].peaks.keys()]).toEqual(['two']);
+    view.frames.length = 0;
+    view.rerender({ tasks, owner: OWNER, enabled: true });
+
+    expect(view.frames[0]).toMatchObject({ total: 3, processed: 3, loaded: 3, loading: false });
+    expect([...view.frames[0].peaks.keys()]).toEqual(['one', 'two', 'three']);
+    expect([...view.frames[0].drawdowns.values()]).toEqual([25, 25, 25]);
+    expect(fetchRange).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('keeps successful results across remount when storage writes fail (reads also fail: %s)', async readsFail => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded'); });
+    if (readsFail) vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new DOMException('Storage unavailable'); });
+    const tasks = [task('one'), task('two')];
+    const first = renderTaskFrames(tasks);
+    await advance();
+    expect(first.result.current.loaded).toBe(2);
+    first.unmount();
+    expect(localStorage.length).toBe(0);
+    fetchRange.mockClear();
+
+    const returned = renderTaskFrames(tasks);
+
+    expect(returned.frames[0]).toMatchObject({ total: 2, processed: 2, loaded: 2, loading: false });
+    expect(returned.frames[0].peaks.get('one')).toBeCloseTo(20);
+    expect(returned.frames[0].drawdowns.get('two')).toBeCloseTo(25);
+    expect(fetchRange).not.toHaveBeenCalled();
+  });
+
+  it.each(['owner', 'fingerprint'] as const)('does not reuse memory results on the first render after the %s changes', async changed => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded'); });
+    const original = task('edited');
+    const view = renderTaskFrames([original]);
+    await advance();
+    expect(view.result.current.loaded).toBe(1);
+    fetchRange.mockClear();
+    view.frames.length = 0;
+    const replacement = changed === 'fingerprint' ? task('edited', { fingerprint: 'edited:entry-200', entryPrice: 200 }) : original;
+
+    view.rerender({ tasks: [replacement], owner: changed === 'owner' ? 'other-owner' : OWNER, enabled: false });
+
+    expect(view.frames[0]).toMatchObject({ total: 1, processed: 0, loaded: 0, loading: false });
+    expect(view.frames[0].peaks.size).toBe(0);
+    expect(view.frames[0].drawdowns.size).toBe(0);
+    expect(fetchRange).not.toHaveBeenCalled();
+    view.frames.length = 0;
+    view.rerender({ tasks: [original], owner: OWNER, enabled: false });
+    expect(view.frames[0]).toMatchObject({ processed: 1, loaded: 1 });
+    expect(view.frames[0].peaks.get('edited')).toBeCloseTo(20);
+  });
+
+  it('expires ongoing memory results after exactly one minute without extending their lifetime on a read', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded'); });
+    const tasks = [task('ongoing', { historical: false })];
+    const first = renderTaskFrames(tasks);
+    await advance();
+    first.unmount();
+    fetchRange.mockClear();
+    await advance(60_000);
+
+    const boundary = renderTaskFrames(tasks);
+    expect(boundary.frames[0]).toMatchObject({ processed: 1, loaded: 1, loading: false });
+    expect(fetchRange).not.toHaveBeenCalled();
+    boundary.unmount();
+    await advance(1);
+    const pending = deferred<KlineData[]>();
+    fetchRange.mockImplementationOnce(() => pending.promise);
+    const expired = renderTaskFrames(tasks);
+    expect(expired.frames[0]).toMatchObject({ processed: 0, loaded: 0, loading: true });
+    expect(expired.frames[0].peaks.size).toBe(0);
+    expect(expired.frames[0].drawdowns.size).toBe(0);
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    await act(async () => { pending.resolve(candles); });
+    expect(expired.result.current).toMatchObject({ processed: 1, loaded: 1, loading: false });
+  });
+
+  it('keeps an ongoing result that is already on screen when the chart is closed, reopened, retried or re-scoped after its 60 s cross-mount lifetime', async () => {
+    const ongoing = task('ongoing', { historical: false });
+    const historical = task('historical');
+    const view = renderTaskFrames([ongoing, historical]);
+    await advance();
+    expect(view.result.current.loaded).toBe(2);
+    await advance(60_001);
+    fetchRange.mockClear();
+
+    // Closing the chart (enabled -> false) and opening it again must not drop or refetch the value.
+    view.frames.length = 0;
+    view.rerender({ tasks: [ongoing, historical], owner: OWNER, enabled: false });
+    expect(view.frames.every(frame => frame.processed === 2 && frame.loaded === 2)).toBe(true);
+    view.frames.length = 0;
+    view.rerender({ tasks: [ongoing, historical], owner: OWNER, enabled: true });
+    await advance();
+    expect(view.frames.every(frame => frame.processed === 2 && !frame.loading)).toBe(true);
+    // "重试缺失项" only re-queues what is missing.
+    view.frames.length = 0;
+    act(() => view.result.current.retry());
+    await advance();
+    expect(view.frames.every(frame => frame.processed === 2 && !frame.loading)).toBe(true);
+    // A narrower date range keeps the same reading as long as the inputs (fingerprint) are unchanged.
+    view.frames.length = 0;
+    view.rerender({ tasks: [ongoing], owner: OWNER, enabled: false });
+    expect(view.frames[0]).toMatchObject({ total: 1, processed: 1, loaded: 1, loading: false });
+    expect(view.frames[0].peaks.get('ongoing')).toBeCloseTo(20);
+    expect(fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('remembers an unavailable verdict for the session: reopening, remounting and re-scoping do not probe again, retry does', async () => {
+    fetchRange.mockResolvedValue([]);
+    const missing = task('no-history');
+    const view = renderTaskFrames([missing]);
+    await advance(6_000);
+    expect(fetchRange).toHaveBeenCalledTimes(3);
+    expect(view.result.current).toMatchObject({ processed: 1, loaded: 0, loading: false, retrying: 0 });
+    fetchRange.mockClear();
+
+    // Close and reopen the chart.
+    view.rerender({ tasks: [missing], owner: OWNER, enabled: false });
+    view.frames.length = 0;
+    view.rerender({ tasks: [missing], owner: OWNER, enabled: true });
+    await advance(6_000);
+    expect(view.frames.every(frame => frame.processed === 1 && !frame.loading && frame.unavailable.has('no-history'))).toBe(true);
+    // Change the scope (date range) and come back.
+    view.rerender({ tasks: [missing, task('other', { unavailableReason: '缺少开仓价' })], owner: OWNER, enabled: true });
+    await advance(6_000);
+    expect(view.result.current).toMatchObject({ total: 2, processed: 2, loaded: 0, loading: false });
+    view.unmount();
+    // Return from a detail page: the very first frame already carries the verdict.
+    const returned = renderTaskFrames([missing]);
+    expect(returned.frames[0]).toMatchObject({ processed: 1, loaded: 0, loading: false });
+    expect(returned.frames[0].unavailable.get('no-history')).toBeTruthy();
+    await advance(6_000);
+    expect(fetchRange).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:no-history`)).toBeNull();
+
+    // The retry button asks the exchange again, and a later success replaces the verdict.
+    fetchRange.mockResolvedValue(candles);
+    act(() => returned.result.current.retry());
+    await advance();
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    expect(returned.result.current).toMatchObject({ processed: 1, loaded: 1, loading: false });
+    expect(returned.result.current.unavailable.size).toBe(0);
+    returned.unmount();
+    localStorage.clear();
+    fetchRange.mockClear();
+    const afterSuccess = renderTaskFrames([missing], OWNER, false);
+    expect(afterSuccess.frames[0]).toMatchObject({ processed: 1, loaded: 1 });
+    expect(afterSuccess.frames[0].unavailable.size).toBe(0);
+  });
+
+  it.each([
+    { change: 'ten minutes pass', owner: OWNER, replacement: {}, waitMs: 10 * 60_000 + 1 },
+    { change: 'the inputs change', owner: OWNER, replacement: { fingerprint: 'no-history:entry-200', entryPrice: 200 }, waitMs: 0 },
+    { change: 'another account signs in', owner: 'other-owner', replacement: {}, waitMs: 0 },
+  ])('rechecks an unavailable verdict once $change', async ({ owner, replacement, waitMs }) => {
+    fetchRange.mockResolvedValue([]);
+    const first = renderTaskFrames([task('no-history')]);
+    await advance(6_000);
+    expect(first.result.current.unavailable.has('no-history')).toBe(true);
+    first.unmount();
+    await advance(waitMs);
+    fetchRange.mockClear();
+
+    const next = renderTaskFrames([task('no-history', replacement)], owner);
+
+    expect(next.frames[0]).toMatchObject({ processed: 0, loaded: 0, loading: true });
+    await advance();
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unavailable verdict for exactly ten minutes', async () => {
+    fetchRange.mockResolvedValue([]);
+    const first = renderTaskFrames([task('no-history')]);
+    await advance(6_000);
+    expect(first.result.current.unavailable.has('no-history')).toBe(true);
+    first.unmount();
+    fetchRange.mockClear();
+
+    await advance(10 * 60_000);
+    const boundary = renderTaskFrames([task('no-history')]);
+    expect(boundary.frames[0]).toMatchObject({ processed: 1, loaded: 0, loading: false });
+    await advance();
+    expect(fetchRange).not.toHaveBeenCalled();
+    boundary.unmount();
+
+    await advance(1);
+    const expired = renderTaskFrames([task('no-history')]);
+    expect(expired.frames[0]).toMatchObject({ processed: 0, loading: true });
+    await advance();
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a stalled queue while offline without sending requests, and resumes when the connection returns', async () => {
+    const onLine = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
+    const view = renderTaskFrames([task('waiting')]);
+    await advance();
+    expect(view.result.current).toMatchObject({ processed: 0, loading: true, retrying: 0, retryAt: null, offline: true, stalled: true });
+    await advance(29_000);
+    expect(fetchRange).not.toHaveBeenCalled();
+
+    onLine.mockReturnValue(true);
+    await act(async () => { window.dispatchEvent(new Event('online')); });
+    await advance();
+
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    expect(view.result.current).toMatchObject({ processed: 1, loaded: 1, loading: false, offline: false, stalled: false });
+  });
+
+  it('is stalled only when everything left is waiting for a retry or a rate-limit cooldown', async () => {
+    // "flaky" fails once with a retryable error while "steady" has not been tried yet: the queue still moves.
+    const steady = deferred<KlineData[]>();
+    fetchRange.mockRejectedValue(new Error('API 503'));
+    fetchRange.mockRejectedValueOnce(new Error('API 503')).mockImplementationOnce(() => steady.promise);
+    const view = renderTaskFrames([task('flaky'), task('steady')]);
+    await advance();
+    expect(view.result.current).toMatchObject({ processed: 0, retrying: 1, stalled: false });
+    // Once "steady" is done, the only campaign left is the one that keeps waiting for its retry.
+    await act(async () => { steady.resolve(candles); });
+    await advance(2_000);
+    expect(view.result.current).toMatchObject({ processed: 1, retrying: 1, loading: true, stalled: true, offline: false });
+    fetchRange.mockResolvedValue(candles);
+    await advance(4_000);
+    expect(view.result.current).toMatchObject({ processed: 2, retrying: 0, loading: false, stalled: false });
+    view.unmount();
+
+    // A rate limit pauses the whole queue even though other campaigns were never tried.
+    fetchRange.mockReset().mockRejectedValue(Object.assign(new Error('API 429'), { status: 429, retryAfterMs: 5_000 }));
+    const limited = renderTaskFrames([task('limited-one'), task('limited-two')]);
+    await advance();
+    expect(limited.result.current.retryAt).not.toBeNull();
+    expect(limited.result.current).toMatchObject({ processed: 0, retrying: 1, stalled: true, offline: false });
+    // Not enabled (the metric is not on screen): nothing is reported as stalled.
+    limited.rerender({ tasks: [task('limited-one'), task('limited-two')], owner: OWNER, enabled: false });
+    expect(limited.result.current).toMatchObject({ loading: false, stalled: false, offline: false });
+  });
+
+  it('does not remember an unavailable verdict for an ongoing campaign', async () => {
+    fetchRange.mockRejectedValue(Object.assign(new Error('API 400'), { status: 400 }));
+    const first = renderTaskFrames([task('ongoing', { historical: false })]);
+    await advance();
+    expect(first.result.current.unavailable.has('ongoing')).toBe(true);
+    first.unmount();
+    fetchRange.mockClear();
+
+    const next = renderTaskFrames([task('ongoing', { historical: false })]);
+    await advance();
+
+    expect(next.frames[0]).toMatchObject({ processed: 0, loading: true });
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts only complete cached pairs and explicit unavailable tasks when expanding the task set', () => {
+    const complete = task('complete');
+    const partial = task('partial');
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${complete.id}`, JSON.stringify({
+      fingerprint: complete.fingerprint, peak: 0, drawdown: 0, savedAt: Date.now(),
+    }));
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${partial.id}`, JSON.stringify({
+      fingerprint: partial.fingerprint, peak: 20, drawdown: null, savedAt: Date.now(),
+    }));
+    const view = renderTaskFrames([], OWNER, false);
+    view.frames.length = 0;
+
+    view.rerender({ tasks: [complete, partial, task('invalid', { unavailableReason: '缺少开仓价' })], owner: OWNER, enabled: false });
+
+    expect(view.frames[0]).toMatchObject({ total: 3, processed: 2, loaded: 1, loading: false });
+    expect([...view.frames[0].peaks]).toEqual([['complete', 0], ['invalid', null]]);
+    expect([...view.frames[0].drawdowns]).toEqual([['complete', 0], ['invalid', null]]);
+    expect([...view.frames[0].unavailable]).toEqual([['invalid', '缺少开仓价']]);
+    expect(fetchRange).not.toHaveBeenCalled();
+  });
+
+  it('bounds the shared memory cache at 1,024 results and evicts the least recently used one', () => {
+    const tasks = Array.from({ length: 1_025 }, (_, index) => task(`cached-${index}`));
+    const persist = (items: CampaignPricePathTask[]) => items.forEach(item => {
+      localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${item.id}`, JSON.stringify({
+        fingerprint: item.fingerprint, peak: 20, drawdown: 25, savedAt: Date.now(),
+      }));
+    });
+    persist(tasks.slice(0, 1_024));
+    const filled = renderTaskFrames(tasks.slice(0, 1_024), OWNER, false);
+    expect(filled.result.current.loaded).toBe(1_024);
+    filled.unmount();
+    localStorage.clear();
+
+    // Exactly 1,024 entries fit; reading the oldest one makes it the most recently used.
+    const touched = renderTaskFrames([tasks[0], tasks[1_023]], OWNER, false);
+    expect([...touched.frames[0].peaks.keys()]).toEqual(['cached-0', 'cached-1023']);
+    touched.unmount();
+    // One more result evicts the entry that was not read for the longest time (cached-1), not the first inserted.
+    persist([tasks[1_024]]);
+    renderTaskFrames([tasks[1_024]], OWNER, false).unmount();
+    localStorage.clear();
+
+    const returned = renderTaskFrames([tasks[0], tasks[1], tasks[2], tasks[1_024]], OWNER, false);
+
+    expect(returned.frames[0]).toMatchObject({ processed: 3, loaded: 3, total: 4 });
+    expect([...returned.frames[0].peaks.keys()]).toEqual(['cached-0', 'cached-2', 'cached-1024']);
+    expect(fetchRange).not.toHaveBeenCalled();
   });
 
   it('restores a partial scan on the first render and loads only the remaining campaigns', async () => {

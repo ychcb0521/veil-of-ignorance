@@ -90,6 +90,26 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toMatch(new RegExp(`${key}: '${key}',`));
     }
   });
+  it('【用户要求】涨幅未兑现的图点开就完整：沿用上次读数、整图一次换新、旧读数只在图上——指南与页面的文案对得上', () => {
+    expect(guide).toContain('<strong>涨幅未兑现也有散点图，点开就是完整的图。</strong>');
+    expect(guide).toContain('<strong>行情需要重算时（改过腿、口径升级、缓存失效）先沿用上次的读数把整张图画出来</strong>');
+    expect(guide).toContain('图右上角写「沿用上次读数 N 场 · 后台更新中」');
+    expect(guide).toContain('<strong>整张图一次换成新值</strong>');
+    expect(guide).toContain('接口暂时不通时改写「等待自动重试」、断网时改写「离线，联网后继续」');
+    expect(guide).toContain('<strong>沿用的旧读数只在图上</strong>：卡片封面、排序、统计、「已计算 x / y 场」与导出一律只用当前算出来的值');
+    expect(guide).toContain('图区先显示「正在计算涨幅未兑现… x / N 场」的进度');
+    expect(guide).toContain('主力已平仓的战役历史行情确实取不到时记为「资料不完整」，十分钟内不再重复请求，点「重试缺失项」或刷新页面才重新读取；主力还在持仓的战役窗口一直在变，每次重新计算都会再读一次');
+    // 页面上的文案与默认视图
+    expect(page).toContain("`沿用上次读数 ${unrealizedChart.cachedCount} 场 · ${pricePaths.offline ? '离线，联网后继续' : unrealizedQueueStalled ? '等待自动重试' : '后台更新中'}`");
+    expect(page).toContain('title="正在计算涨幅未兑现…"');
+    expect(page).toContain("unrealizedPriceChangePct: 'unrealizedPriceChangePctDistribution'");
+    expect(page).toContain('重试缺失项');
+    // 「十分钟」与实现一致
+    const hook = readFileSync(join(process.cwd(), 'src/hooks/useCampaignPricePaths.ts'), 'utf8');
+    expect(hook).toContain('const TERMINAL_MEMORY_TTL_MS = 10 * 60_000;');
+    // 「资料不完整」只对主力已平仓的战役记住；进行中的每次重读
+    expect(hook).toContain("// An ongoing campaign's window keeps moving, so its verdict is never final.\n  if (!task.historical) return;");
+  });
   it('【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望默认看分布，可切回时序；加仓效用另有 1.00 参照线', () => {
     expect(guide).toContain('<strong>盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望与几何期望默认展开的是分布图；镜像止盈、预期回撤、自评与加仓次数默认展开的是柱状图</strong>');
     // 【用户要求】预期回撤柱状按倒数 100 ÷ D% 等间距分档，默认打开。
