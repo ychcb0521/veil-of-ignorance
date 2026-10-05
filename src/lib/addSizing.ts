@@ -931,11 +931,11 @@ export function pickHeldSide(symbol: string, positions: Position[] | undefined, 
 }
 
 export interface BankedMirrorProfit {
-  /** 以 USD 计的可用落袋净额：镜像止盈 / tp1 正利润 − 本轮（不论先后）已实现亏损（含强平）；可为负 */
+  /** 以 USD 计的可用落袋净额：本轮每一笔已实现的盈亏之和——落袋的利润（不问退出方式）− 已实现亏损（含强平）；可为负 */
   usd: number;
   /** 以币计的可用落袋净额：优先取成交记录的 pnlCoin，缺失时按平仓价折算 */
   coin: number;
-  /** 计入的镜像止盈 / tp1 笔数；用于说明建议值来源，不含被扣除的亏损笔数。 */
+  /** 计入的盈利落袋笔数（止盈委托、手动减仓都算）；用于说明建议值来源，不含被扣除的亏损笔数。 */
   count: number;
   /** 最后一笔落袋的时刻（模拟时钟）。G 是从这一刻起才存在的。 */
   lastBankedAt: number | null;
@@ -956,7 +956,7 @@ export interface BankedMirrorProfit {
    */
   addsSinceBanked: number;
   /**
-   * 同标的、同方向、止盈1、模拟时间也在本场之内，却因**操作时间早于当前持仓开仓**（或根本没有 closedRealAt）而没计入的笔数。
+   * 同标的、同方向、盈利落袋、模拟时间也在本场之内，却因**操作时间早于当前持仓开仓**（或根本没有 closedRealAt）而没计入的笔数。
    * 典型来源：同一段历史的另一次重放，模拟时刻与本场撞车。只为透明，不参与计算。
    */
   excludedByOperationTime: number;
@@ -981,8 +981,12 @@ export interface BankedMirrorOptions {
 }
 
 /**
- * 本场可用于 Plan B 的落袋净额：正向只认「止盈1」，本轮已经实现的亏损（平仓或强平，不论在止盈之前还是之后）一并扣除，
- * 净额可以是负数；普通减仓 / 手动平仓的正利润不混入。所有记录都必须不早于当前最早一条持仓的开仓时间。
+ * 本场可用于 Plan B 的落袋净额：本轮每一笔已实现的盈亏都算——落袋的利润不问退出方式（止盈委托触发、手动减仓、手动平仓），
+ * 已经实现的亏损（平仓或强平，不论在落袋之前还是之后）一并扣除，净额可以是负数。所有记录都必须不早于当前最早一条持仓的开仓时间。
+ *
+ * 【用户要求】原来正向只认「止盈1」。镜像止盈手动做（减仓 61%）的那一场，+22 万落袋被整个丢掉，建议 G 是 0；
+ * 而且手动减掉的币已经不在 X₁ 里、利润又不进 G，落袋反而让可加仓位变小。口径是战役级的：已落袋利润 + 持仓浮盈垫。
+ * 函数名里的 Mirror 是历史叫法：镜像止盈是落袋最常见的来源，不是唯一来源。
  * 没有持仓就没有「本场」可言，返回 0，不把历史上所有止盈都算进来。
  * 这是建议值——界面上要用户点一下才填进 G。
  *
@@ -1019,21 +1023,19 @@ export function detectBankedMirrorProfit(
     if (r.action !== 'CLOSE' && r.action !== 'LIQUIDATION') continue;
     if (!((r.closeTime ?? 0) >= earliestOpenTime)) continue;
     if (!fin(r.pnl)) continue;
-    const mirrorCredit = r.exit_method === 'tp1';
-    const realizedLoss = r.pnl < 0;
-    // Plan B 的正向来源只认镜像止盈；任何本轮已实现亏损都要把可用 G 扣回来。
-    if (!mirrorCredit && !realizedLoss) continue;
+    // 盈利的一刀是落袋（不问退出方式）；亏损的一刀把可用 G 扣回来；恰好为 0 的不影响净额。
+    const bankedProfit = r.pnl > 0;
     const opAt = realTs(r.closedRealAt);
-    // 操作时间筛选：持仓有真实起点时，止盈必须在这之后才操作过；没有 closedRealAt 的一并排除。
+    // 操作时间筛选：持仓有真实起点时，这一刀必须在这之后才操作过；没有 closedRealAt 的一并排除。
     if (realStart != null && !(opAt != null && opAt >= realStart)) {
-      if (mirrorCredit) excludedByOperationTime += 1;
+      if (bankedProfit) excludedByOperationTime += 1;
       continue;
     }
     usd += r.pnl;
     coin += fin(r.pnlCoin)
       ? (r.pnlCoin as number)
       : (fin(r.exitPrice) && (r.exitPrice as number) > 0 ? r.pnl / (r.exitPrice as number) : 0);
-    if (mirrorCredit) {
+    if (bankedProfit) {
       count += 1;
       const t = fin(r.closeTime) ? (r.closeTime as number) : null;
       if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;

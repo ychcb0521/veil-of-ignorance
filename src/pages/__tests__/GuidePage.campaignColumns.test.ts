@@ -181,6 +181,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('右栏是结果与仓位——第一个是<strong>最大预期亏损</strong>，与左栏第一个的预期回撤同一行');
     expect(guide).toContain('<strong>动态最大回撤</strong>');
     expect(guide).toContain('<strong>仓位放大</strong>');
+    // 【用户要求】「仓位这里是按照什么计的？需要加上单位」
+    expect(guide).toContain('分子分母都是<strong>名义仓位，单位 USDT</strong>（每条腿的名义仓位 = 开仓价 × 币量，不是币量，也不是保证金）');
     expect(guide).toContain('同一份 14 项指标（左栏：预期回撤');
   });
   it('【用户要求】多级排序：单击替换、「+」加层、手机长按、排序链、缺值规则、清除保留第一级', () => {

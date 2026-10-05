@@ -182,4 +182,20 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     const orderPanel = read('components/OrderPanel.tsx');
     expect(orderPanel).toContain('const planned = peekAddSizingSnapshotForOrder({');
   });
+
+  it('【用户要求】G 是本轮已实现的净盈亏、不问退出方式：手动减仓做的镜像止盈同样计入——指南、Legs 表头说明与两处实现对得上', () => {
+    expect(guide).toContain('<strong>G 是本轮持仓在这笔加仓之前已经实现的净盈亏，不问退出方式</strong>');
+    expect(guide).toContain('镜像止盈用手动减仓来做——比如减仓 61%——与止盈委托触发同样算数');
+    expect(guide).toContain('系统会检测本轮持仓已经落袋的利润——止盈委托触发的、手动减仓或手动平仓的都算');
+    expect(guide).not.toContain('G 的正向来源只认成交记录上退出方式为止盈1 的那几刀');
+    expect(guide).not.toContain('普通减仓或手动平仓的正利润不会混进来');
+    expect(read('components/journal/CampaignLegsList.tsx')).toContain('已实现的盈利都算——止盈委托触发与手动减仓一样');
+    // 两处实现都不再按退出方式筛盈利
+    const check = read('lib/campaignAddSizingCheck.ts');
+    expect(check).not.toContain('mirrorProfit');
+    expect(check).not.toContain("exit_method === 'tp1'");
+    const sizing = read('lib/addSizing.ts');
+    expect(sizing).toContain('const bankedProfit = r.pnl > 0;');
+    expect(sizing).not.toContain("r.exit_method === 'tp1'");
+  });
 });

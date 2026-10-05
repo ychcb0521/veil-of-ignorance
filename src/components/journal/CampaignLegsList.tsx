@@ -454,7 +454,7 @@ function PositionShareSortHeader({
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
 const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
-  + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前逐刀落袋的净额（正向只认止盈1 / 镜像止盈，本轮已实现亏损含强平一律扣掉，可为负）。'
+  + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前逐刀落袋的净额（已实现的盈利都算——止盈委托触发与手动减仓一样；已实现亏损含强平一律扣掉，可为负）。'
   + 'S₁ 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；不计手续费，与加仓计算器同一口径。';
 
 function signedUsdt(value: number | null): string {
@@ -758,8 +758,8 @@ export function CampaignLegsList({
 
   // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
-    () => evaluateCampaignAddSizing({ legs, tradeRecords, campaignEvents, legExitPriceCorrections, reverseHedgeOrders }),
-    [legs, tradeRecords, campaignEvents, legExitPriceCorrections, reverseHedgeOrders],
+    () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
+    [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
   );
   const selectedAddSizingLeg = addSizingDetailLegId == null
     ? null

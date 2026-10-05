@@ -694,11 +694,11 @@ describe('B 本账建议值按操作时间框定本场', () => {
     renderCalc();
     const fill = screen.getByTestId('add-sizing-fill-banked');
     expect(fill).toHaveTextContent('+1.2');
-    expect(fill).toHaveTextContent('（1 笔止盈）');
+    expect(fill).toHaveTextContent('（1 笔落袋）');
     // 操作时间完整且已确认属于当前持仓周期：打开即默认进入 Plan B，不再要求额外点一次。
     expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
     expect(screen.getByTestId('add-sizing-banked-excluded'))
-      .toHaveTextContent('1 笔止盈的操作时间早于当前持仓开仓（或缺失），未计入');
+      .toHaveTextContent('1 笔落袋的操作时间早于当前持仓开仓（或缺失），未计入');
     fireEvent.click(fill);
     expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
   });
@@ -720,7 +720,7 @@ describe('B 本账建议值按操作时间框定本场', () => {
     type('add-sizing-s1', '130');
     const fill = screen.getByTestId('add-sizing-fill-banked');
     expect(fill).toHaveTextContent('+1.2');
-    expect(fill).toHaveTextContent('（1 笔止盈）');
+    expect(fill).toHaveTextContent('（1 笔落袋）');
     expect(screen.queryByTestId('add-sizing-banked-excluded')).not.toBeInTheDocument();
     fireEvent.click(fill);
     expect(num('add-sizing-g')).toBeCloseTo(1.2, 6);
@@ -737,7 +737,7 @@ describe('B 本账建议值按操作时间框定本场', () => {
     renderCalc();
     const fill = screen.getByTestId('add-sizing-fill-banked');
     expect(fill).toHaveTextContent('−1.2');
-    expect(fill).toHaveTextContent('（1 笔止盈）');
+    expect(fill).toHaveTextContent('（1 笔落袋）');
     expect(num('add-sizing-g')).toBeCloseTo(-1.2, 6);
     type('add-sizing-s1', '130');
     expect(screen.queryByTestId('add-sizing-banked-off')).not.toBeInTheDocument();

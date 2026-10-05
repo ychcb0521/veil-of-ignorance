@@ -5,7 +5,13 @@
  *   Y₁        加仓那一刻仍持有的旧仓，退回 S₁ 时的净浮盈（逐腿按剩余币量计算，可为负）
  *   G         本轮持仓加仓之前已经落袋的净已实现盈亏
  *   加仓合规 ⇔ Y₁ + G ≥ X₂ (S₂ − S₁)（主多；主空符号翻转）
- * 即「价格退回 S₁ 时，旧仓浮盈垫 + 已落袋镜像止盈足以抹平新加仓最大预期亏损」。
+ * 即「价格退回 S₁ 时，旧仓浮盈垫 + 已落袋的净盈亏足以抹平新加仓最大预期亏损」。
+ *
+ * **G 是本轮主方向全部已实现的净盈亏，不问退出方式。**【用户要求】HEIUSDT 2026-06-25：镜像止盈是手动减仓 61% 做的
+ * （不是止盈委托触发），原来只认成交记录上退出方式为「止盈1」的利润，这 +22 万被整个丢掉，三笔加仓全按 G = 0 判，
+ * 加仓 1 的上限写成 0 币。更根本的是那条规则自相矛盾：手动减掉的币不再进浮盈垫 Y₁，它的利润又不进 G——
+ * 落袋反而让可用额变小。用户的口径是战役级的：「已落袋利润 + Σ 持仓 ×（S₁ − 开仓价）」，落袋就是落袋。
+ * 因此也不再需要拿战役事件去补认「这一刀是不是镜像止盈」：老成交缺退出方式、显式写着手动，都一样计入。
  *
  * 每次加仓都必须重算 Y₁：更早的加仓若在新 S₁ 上浮亏，会以负数进入 Y₁，
  * 自然扣掉此前已经动用的垫子；已平掉的部分则转入 G，因而不会重复花同一笔利润。
@@ -58,7 +64,7 @@ import {
   journalCloseOperationTime,
   journalOpenOperationTime,
 } from '@/lib/objectiveOperationTime';
-import type { CampaignEvent, TradeJournal } from '@/types/journal';
+import type { TradeJournal } from '@/types/journal';
 import type { AddSizingSnapshot, CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export type AddSizingStatus = 'ok' | 'fail' | 'unknown';
@@ -90,8 +96,8 @@ export interface AddSizingVerdict {
    */
   cushion: number | null;
   /**
-   * G 本轮持仓在加仓之前可用于 Plan B 的已落袋净额（USDT；币本位按 S₁ 折算）。
-   * 正向只认镜像止盈 / tp1；同一轮里先前已经实现的亏损从中扣掉——花掉的 G 不能再花一次。
+   * G 本轮持仓在加仓之前已落袋的净额（USDT；币本位按 S₁ 折算）：每一刀已实现的盈亏都算，不问退出方式——
+   * 止盈委托、手动减仓的利润加进来，止损、强平、亏着平掉的扣出去；花掉的 G 不能再花一次。
    */
   banked: number | null;
   /** 旧仓在 S₁ 的浮亏绝对额，仅作诊断明细；正式判定使用有正有负的 cushion 净额。 */
@@ -132,8 +138,6 @@ export interface AddSizingVerdict {
 export interface CampaignAddSizingInput {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
-  /** 本战役事件：仅在老成交缺失 exit_method 时，用明确的镜像触发事件补证。 */
-  campaignEvents?: CampaignEvent[];
   legExitPriceCorrections?: LegExitPriceCorrections;
   /** 与 Legs 表收到的同一份可见反向委托 */
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
@@ -214,8 +218,6 @@ interface LegCut {
   positionId: string | null;
   /** 真实钱包时钟；有持仓操作起点时，用它排除别次回放的落袋。 */
   operationTime: number | null;
-  /** 正利润只有镜像止盈 / tp1 才能成为 G；其他来源的盈利不混入 Plan B。 */
-  mirrorProfit: boolean;
   coins: number | null;
   usd: number | null;
   coin: number | null;
@@ -243,7 +245,6 @@ function buildLedger(
   records: TradeRecord[],
   snapshotUsd: number | null,
   corrections: LegExitPriceCorrections,
-  mirrorTriggerTimes: ReadonlySet<number>,
 ): LegLedger {
   const open = execution.openTime;
   const recordOpenTimes = records.map(record => realTime(record.openedRealAt));
@@ -262,7 +263,6 @@ function buildLedger(
         time: close,
         positionId: null,
         operationTime: journalCloseOperationTime(leg),
-        mirrorProfit: leg.leg_role === 'mirror_tp',
         coins,
         usd: snapshotUsd,
         coin: null,
@@ -294,14 +294,6 @@ function buildLedger(
       time: record.closeTime,
       positionId: record.positionId ?? null,
       operationTime: realTime(record.closedRealAt),
-      // 有明确退出方式就只认 tp1；不能只看 leg_role：合并仓位的手动 / 止损减仓
-      // 也会按成交占比拆到镜像腿，它们的正利润并不是镜像止盈。
-      // 老成交缺退出方式时，才用本战役明确的镜像触发时刻补证。
-      // 老记录可能没有 exit_method，但战役事件明确记着镜像止盈触发。
-      // 只在方式缺失且平仓模拟时刻与触发事件完全对应时补认；显式 manual/sl 不覆盖。
-      // 同向合并仓位在触发那一刀拆成主力、镜像等多条，均应计入这次落袋。
-      mirrorProfit: record.exit_method === 'tp1'
-        || (record.exit_method == null && mirrorTriggerTimes.has(record.closeTime)),
       coins: finite(closedCoins),
       usd,
       coin,
@@ -373,10 +365,6 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
   const result = new Map<string, AddSizingVerdict>();
   const addLegs = legs.filter(leg => (leg.leg_role ?? '').startsWith('main_add_'));
   if (addLegs.length === 0) return result;
-  const mirrorTriggerTimes = new Set((input.campaignEvents ?? [])
-    .filter(event => event.event_type === 'mirror_tp_triggered')
-    .map(event => Date.parse(event.timestamp))
-    .filter(Number.isFinite));
 
   const recordMap = buildTradeRecordLookup(tradeRecords);
   // 每条腿认领哪几刀、快照盈亏是多少，走已实现盈亏的唯一真源，与 Legs「贡献 / 盈亏」列同源
@@ -399,7 +387,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
      * 没有成交、没有盈亏，开仓价还是止盈触发价。把它当旧仓会凭空拿触发价算出一大块负浮盈垫。
      */
     if (leg.leg_role === 'mirror_tp' && !leg.trade_record_id && records.length === 0 && snapshotUsd == null) return [];
-    return [[leg.id, buildLedger(leg, executions.get(leg.id)!, records, snapshotUsd, corrections, mirrorTriggerTimes)] as const];
+    return [[leg.id, buildLedger(leg, executions.get(leg.id)!, records, snapshotUsd, corrections)] as const];
   }));
 
   for (const add of addLegs) {
@@ -475,8 +463,8 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     let banked = 0;
     let incomplete = false;
     for (const ledger of sameSide) {
-      // 落袋 G：只把本轮镜像止盈 / tp1 的正利润记作垫子；任何已实现亏损都要扣掉，
-      // 但普通减仓或手动平仓的正利润不能混进来冒充镜像止盈。
+      // 落袋 G：本轮每一刀已实现的盈亏都记，盈利加、亏损扣，不问退出方式（止盈委托、手动减仓、止损、强平一视同仁）。
+      // 这一刀平掉的币已经不在下面的浮盈垫里了，利润再不进 G 就凭空消失。与计算器 detectBankedMirrorProfit 同一判据。
       for (const cut of ledger.cuts) {
         if (cut.time < holdingStart || cut.time > t) continue;
         if (holdingStartOperation != null) {
@@ -489,7 +477,6 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
         }
         // 币本位：落袋是币，按 S₁ 估值——与计算器币本位条件两边同乘 S₁ 等价
         const realized = cut.coin != null ? cut.coin * s1 : cut.usd ?? 0;
-        if (realized > 0 && !cut.mirrorProfit) continue;
         banked += realized;
       }
 

@@ -1161,7 +1161,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
                         : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
-                  本场可用 G {signed(bankedSuggest, v => (isCoin ? fmtCoins(v, 4) : fmtUsd(v)))}（{banked.count} 笔止盈）
+                  本场可用 G {signed(bankedSuggest, v => (isCoin ? fmtCoins(v, 4) : fmtUsd(v)))}（{banked.count} 笔落袋）
                 </button>
               )}
               {gPositive && (
@@ -1201,7 +1201,7 @@ export function AddSizingCalculator({ open, onClose, symbol, currentPrice = 0, f
                 排除的既有「操作时间早于当前持仓开仓」的，也有根本没有操作时间的（6 月以前的老记录）。 */}
             {banked.excludedByOperationTime > 0 && (
               <div data-testid="add-sizing-banked-excluded" className="text-[10px] text-muted-foreground/60">
-                {banked.excludedByOperationTime} 笔止盈的操作时间早于当前持仓开仓（或缺失），未计入
+                {banked.excludedByOperationTime} 笔落袋的操作时间早于当前持仓开仓（或缺失），未计入
               </div>
             )}
             {bankedMaybeSpent && (

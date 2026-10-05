@@ -418,10 +418,20 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       help: (
         <>
           <p>本场主方向累计名义仓位，相对于入场时主力与镜像初始敞口的放大倍数。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">仓位放大 = {mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位 ÷ 主力开仓名义仓位</div>
+          {/* 算式一行一项：接成一行在 18rem 的浮层里放不下，会从名字中间（最后一个字单独掉到下一行）或数字与单位之间折断 */}
+          <div className="grid grid-cols-[max-content_max-content_max-content] gap-x-1.5 rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
+            <span>仓位放大</span><span>=</span><span>{mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位</span>
+            <span /><span>÷</span><span>主力开仓名义仓位</span>
+          </div>
+          {/* 【用户要求】「仓位这里是按照什么计的？需要加上单位」 */}
+          <p>两项都是<strong>名义仓位，单位 USDT</strong>：每条腿的名义仓位 = 开仓价 × 币量，不是币量，也不是保证金。</p>
           <p>分子包含同方向已成交的主力、镜像、加仓和重新入场腿；挂单与反向对冲不计。它表示整场累计投入的名义倍数，不等于任一时刻同时持有的最大仓位。</p>
-          {positionAmplification != null && (
-            <p className="font-mono text-foreground">本场 = {mainSideNotional?.total?.toFixed(2)} ÷ {initialMainExposureNotional.toFixed(2)} = {positionAmplification.toFixed(2)}x</p>
+          {positionAmplification != null && mainSideNotional?.total != null && (
+            <div data-testid="position-amplification-worked" className="grid grid-cols-[max-content_max-content_max-content] gap-x-1.5 font-mono tabular-nums text-foreground">
+              <span>本场</span><span>=</span><span className="text-right">{mainSideNotional.total.toFixed(2)} USDT</span>
+              <span /><span>÷</span><span className="text-right">{initialMainExposureNotional.toFixed(2)} USDT</span>
+              <span /><span>=</span><span>{positionAmplification.toFixed(2)}x</span>
+            </div>
           )}
         </>
       ),

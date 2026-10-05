@@ -4,7 +4,7 @@ import { addSizingSnapshotLines, describeAddSizingVerdict, evaluateCampaignAddSi
 import { pickBookLine } from '@/lib/hedgeLines';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCloseRecords } from '@/lib/tradingSettlement';
-import type { CampaignEvent, TradeJournal } from '@/types/journal';
+import type { TradeJournal } from '@/types/journal';
 import { calcSlippage, type AddSizingSnapshot, type CampaignReverseHedgeOrder, type Position, type TradeRecord } from '@/types/trading';
 
 /** 成本线式复核的注入口：两条路在数学上恒等，走正门造不出分歧；要测「对不上就不给对错号」只能把成本线算坏。 */
@@ -402,73 +402,81 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(covered.banked).toBeCloseTo(500, 6);
   });
 
-  it('【HEIUSDT 回归】止盈后连续三笔：前两笔可覆盖，第三笔超额仍提示缺口', () => {
+  describe('【用户要求 · HEIUSDT 2026-06-25】镜像止盈是手动减仓 61% 做的：落袋的 +22 万计入 G', () => {
+    /**
+     * 照导出图逐项还原（主多，U 本位）：
+     *   开仓 7,000 万币 @0.161673（主力 2,730 万 + 镜像 4,270 万），名义按下单参考价记 4,402,300 / 6,885,640
+     *   01:06 手动减仓 61%（4,270 万币）@0.166938，净落袋 +220,831.21——成交记录的退出方式是「手动」
+     *   加仓 1  01:32  1,100 万币 @0.172473  止损线 0.159550
+     *   加仓 2  02:04  2,400 万币 @0.177327  止损线 0.165703
+     *   加仓 3  03:25  9,200 万币 @0.182355  止损线 0.174813
+     * 原来只认「止盈1」：G = 0，页面写的上限是 0 币 / 3,037,870.91 币 / 42,860,291.28 币——恰好是只算浮盈垫的结果。
+     */
     const opened = T('2026-06-25T23:58:00+08:00');
-    const tpAt = T('2026-06-26T01:06:00+08:00');
-    const addTimes = [
-      T('2026-06-26T01:32:00+08:00'),
-      T('2026-06-26T02:04:00+08:00'),
-      T('2026-06-26T03:25:00+08:00'),
+    const reducedAt = T('2026-06-26T01:06:00+08:00');
+    const closed = T('2026-06-26T03:38:00+08:00');
+    const realOpen = T('2026-10-05T17:10:00+08:00');
+    const realReduce = T('2026-10-05T17:23:00+08:00');
+    const realClose = T('2026-10-05T17:35:00+08:00');
+    const MIRROR_NET = 220_831.21;
+    const adds = [
+      { id: 'hei-add-1', role: 'main_add_1' as const, at: T('2026-06-26T01:32:00+08:00'), real: T('2026-10-05T17:26:00+08:00'), fill: 0.172473, notional: 1_896_290, coins: 11_000_000, stop: 0.159550 },
+      { id: 'hei-add-2', role: 'main_add_2' as const, at: T('2026-06-26T02:04:00+08:00'), real: T('2026-10-05T17:29:00+08:00'), fill: 0.177327, notional: 4_251_800, coins: 24_000_000, stop: 0.165703 },
+      { id: 'hei-add-3', role: 'main_add_3' as const, at: T('2026-06-26T03:25:00+08:00'), real: T('2026-10-05T17:33:00+08:00'), fill: 0.182355, notional: 16_719_090, coins: 92_000_000, stop: 0.174813 },
     ];
-    const actualMainImport = T('2026-10-05T09:00:00Z');
-    const earlierTpImport = actualMainImport - 60 * MIN;
-    const close = T('2026-06-26T03:38:00+08:00');
-    const sharedPosition = 'hei-merged-position';
-    const mainCoins = 27_229_737.39;
-    const mirrorCoins = 42_590_848.15;
-    const addCoins = [10_994_688.81, 23_977_177.33, 91_684_219.68];
-    const addPrices = [0.172473, 0.173727, 0.182355];
-    const stopPrices = [0.159550, 0.165703, 0.174813];
-    const tradeRecords = [
-      record({ id: 'hei-main', positionId: sharedPosition, fillId: 'hei-main',
-        entryPrice: 0.161673, quantity: mainCoins, openTime: opened, closeTime: close,
-        openedRealAt: actualMainImport, closedRealAt: actualMainImport + 4 * 60 * MIN }),
-      record({ id: 'hei-mirror', positionId: sharedPosition, fillId: 'hei-mirror',
-        entryPrice: 0.161673, quantity: mirrorCoins, openTime: opened, closeTime: tpAt,
-        pnl: 228_831.21, openedRealAt: earlierTpImport,
-        closedRealAt: earlierTpImport + 10 * MIN }),
-      ...addTimes.map((time, index) => record({
-        id: `hei-add-${index + 1}`, positionId: sharedPosition, fillId: `hei-add-${index + 1}`,
-        entryPrice: addPrices[index], quantity: addCoins[index], openTime: time, closeTime: close,
-        openedRealAt: actualMainImport + (index + 1) * 60 * MIN,
-        closedRealAt: actualMainImport + 4 * 60 * MIN,
-      })),
-    ];
-    const legs = [
-      mainLeg({ id: 'hei-main-leg', trade_record_id: 'hei-main', pre_simulated_time: iso(opened),
-        pre_entry_price: 0.161673, pre_position_size: mainCoins * 0.161673 }),
-      leg({ id: 'hei-mirror-leg', leg_role: 'mirror_tp', trade_record_id: 'hei-mirror',
-        pre_simulated_time: iso(opened), pre_entry_price: 0.161673,
-        pre_position_size: mirrorCoins * 0.161673 }),
-      ...addTimes.map((time, index) => leg({
-        id: `hei-add-leg-${index + 1}`, leg_role: `main_add_${index + 1}`,
-        trade_record_id: `hei-add-${index + 1}`, pre_simulated_time: iso(time),
-        pre_entry_price: addPrices[index], pre_position_size: addCoins[index] * addPrices[index],
-      })),
-    ];
-    const orders = addTimes.map((time, index) => short(stopPrices[index], time - MIN, index < 2 ? addTimes[index + 1] - 2 * MIN : null));
-    const campaignEvents = [{
-      id: 'hei-mirror-trigger', timestamp: iso(tpAt), event_type: 'mirror_tp_triggered',
-      leg_role: 'mirror_tp', journal_id: 'hei-mirror-leg', trade_record_id: 'hei-mirror',
-      pending_order_id: null, price: 0.166938, size_usdt: null, notes: null, recorded_at: iso(earlierTpImport),
-    }] as CampaignEvent[];
-    const withoutEvent = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: orders });
-    expect(withoutEvent.get('hei-add-leg-1')!.banked).toBe(0);
-    const verdicts = evaluateCampaignAddSizing({ legs, tradeRecords, campaignEvents, reverseHedgeOrders: orders });
-    const first = verdicts.get('hei-add-leg-1')!;
-    const second = verdicts.get('hei-add-leg-2')!;
-    const third = verdicts.get('hei-add-leg-3')!;
-    expect([first.status, second.status, third.status]).toEqual(['ok', 'ok', 'fail']);
-    expect(first.banked).toBeCloseTo(228_831.21, 2);
-    expect(second.banked).toBeCloseTo(228_831.21, 2);
-    expect(third.banked).toBeCloseTo(228_831.21, 2);
-    expect(first.maxAllowedCoins).toBeGreaterThan(addCoins[0]);
-    expect(second.maxAllowedCoins).toBeGreaterThan(addCoins[1]);
-    expect(third.maxAllowedCoins).toBeLessThan(addCoins[2]);
-    const explicitManual = tradeRecords.map(record => record.id === 'hei-mirror'
-      ? { ...record, exit_method: 'manual' as const } : record);
-    expect(evaluateCampaignAddSizing({ legs, tradeRecords: explicitManual, campaignEvents, reverseHedgeOrders: orders })
-      .get('hei-add-leg-1')!.banked).toBe(0);
+    const build = (mirrorExit: TradeRecord['exit_method']) => {
+      const base = { symbol: 'HEIUSDT', positionId: 'hei-position', openedRealAt: realOpen };
+      const tradeRecords = [
+        record({ ...base, id: 'hei-main', fillId: 'hei-main', entryPrice: 0.161673, exitPrice: 0.184841, quantity: 27_300_000,
+          openTime: opened, closeTime: closed, closedRealAt: realClose, pnl: 628_671.07, exit_method: 'manual' }),
+        record({ ...base, id: 'hei-mirror', fillId: 'hei-mirror', entryPrice: 0.161673, exitPrice: 0.166938, quantity: 42_700_000,
+          openTime: opened, closeTime: reducedAt, closedRealAt: realReduce, pnl: MIRROR_NET, exit_method: mirrorExit }),
+        ...adds.map(add => record({ ...base, id: add.id, fillId: add.id, entryPrice: add.fill, exitPrice: 0.184841, quantity: add.coins,
+          openTime: add.at, closeTime: closed, openedRealAt: add.real, closedRealAt: realClose, exit_method: 'manual' })),
+      ];
+      const legs = [
+        mainLeg({ id: 'hei-main-leg', symbol: 'HEIUSDT', trade_record_id: 'hei-main', pre_simulated_time: iso(opened),
+          pre_entry_price: 0.161673, pre_position_size: 4_402_300 }),
+        leg({ id: 'hei-mirror-leg', symbol: 'HEIUSDT', leg_role: 'mirror_tp', trade_record_id: 'hei-mirror',
+          pre_simulated_time: iso(opened), pre_entry_price: 0.161673, pre_position_size: 6_885_640 }),
+        ...adds.map(add => leg({ id: `${add.id}-leg`, symbol: 'HEIUSDT', leg_role: add.role, trade_record_id: add.id,
+          pre_simulated_time: iso(add.at), pre_entry_price: add.fill, pre_position_size: add.notional })),
+      ];
+      // 每次加仓那一刻换上新的止损线，下一次加仓时撤掉
+      const orders = adds.map((add, index) => short(add.stop, add.at, adds[index + 1]?.at ?? null));
+      return evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: orders });
+    };
+
+    it.each([['manual'], ['tp1'], [undefined]] as const)('镜像那一刀的退出方式是 %s：三笔加仓的 G 都是 +220,831.21', mirrorExit => {
+      const verdicts = build(mirrorExit);
+      const [first, second, third] = adds.map(add => verdicts.get(`${add.id}-leg`)!);
+      for (const verdict of [first, second, third]) expect(verdict.banked).toBeCloseTo(MIRROR_NET, 2);
+
+      // 加仓 1：止损线在主力成本之下，旧仓垫是负的（−5.78 万），靠落袋补上——原来判成「上限 0 币」
+      expect(first.s1).toBe(0.159550);
+      expect(first.cushion!).toBeCloseTo((4_402_300 / 0.161673) * (0.159550 - 0.161673), 2);
+      expect(first.cushion!).toBeLessThan(-57_000);
+      expect(first.required!).toBeCloseTo(first.cushion! + MIRROR_NET, 2);
+      expect(first.maxAllowedCoins!).toBeGreaterThan(12_600_000);
+      expect(first.maxAllowedCoins!).toBeLessThan(12_630_000);
+      expect(first.status).toBe('ok');
+
+      // 加仓 2：按成交价 0.177327 上限约 2,203 万币，实际 2,400 万，超出约 9%——不再是 304 万那个数
+      expect(second.s1).toBe(0.165703);
+      expect(second.maxAllowedCoins!).toBeGreaterThan(22_000_000);
+      expect(second.maxAllowedCoins!).toBeLessThan(22_070_000);
+      expect(second.status).toBe('fail');
+      expect(second.shortfall!).toBeGreaterThan(22_000);
+      expect(second.shortfall!).toBeLessThan(23_000);
+
+      // 加仓 3：按成交价 0.182355 上限约 7,214 万币，实际 9,200 万——不再是 4,286 万那个数
+      expect(third.s1).toBe(0.174813);
+      expect(third.maxAllowedCoins!).toBeGreaterThan(72_100_000);
+      expect(third.maxAllowedCoins!).toBeLessThan(72_200_000);
+      expect(third.status).toBe('fail');
+      expect(third.shortfall!).toBeGreaterThan(147_000);
+      expect(third.shortfall!).toBeLessThan(148_000);
+    });
   });
 
   it('【回归】合并仓位：止盈那一刀拆到主力、镜像两条记录——已平掉的币不进浮盈垫，两条的利润都进 G', () => {
@@ -528,7 +536,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(v.shortfall).toBeCloseTo(400, 6);
   });
 
-  it('普通减仓的正利润不混入 G：Plan B 正向垫子只认镜像止盈 / tp1', () => {
+  it('【用户要求】手动减仓落袋的利润计入 G：减掉的币离开浮盈垫、利润进 G，可用额不因落袋变小', () => {
     const tradeRecords = [
       record({
         id: 'r1', positionId: 'P', fillId: 'P', quantity: 1_000,
@@ -544,10 +552,16 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     const v = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: stopAt(1.1) }).get('add')!;
     expect(v.x1Coins).toBeCloseTo(9_000, 6);
     expect(v.cushion).toBeCloseTo(900, 6);
-    expect(v.banked).toBe(0);
+    // 原来这 +200 不算：减仓之后可用额 900，反而比不减仓的 1,000 还少，5,000 币的加仓被判超限
+    expect(v.banked).toBeCloseTo(200, 6);
+    expect(v.required).toBeCloseTo(1_100, 6);
     expect(v.maxLoss).toBeCloseTo(1_000, 6);
-    expect(v.status).toBe('fail');
-    expect(v.shortfall).toBeCloseTo(100, 6);
+    expect(v.status).toBe('ok');
+    expect(v.shortfall).toBe(0);
+    // 对照：一币都不减，可用额就是浮盈垫 1,000——落袋只会让可用额更多（在 1.2 落袋比在 S₁ = 1.1 的浮盈值钱）
+    const untouched = evaluateCampaignAddSizing({ legs: [mainLeg(), addLeg(5_000)], tradeRecords: [], reverseHedgeOrders: stopAt(1.1) }).get('add')!;
+    expect(untouched.required).toBeCloseTo(1_000, 6);
+    expect(v.required!).toBeGreaterThan(untouched.required!);
   });
 
   it('再入场：上一轮落袋的止盈与止损都不是这一轮的 G', () => {
@@ -683,7 +697,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
     ...over,
   } as TradeRecord);
 
-  it('【回归】合并仓位的手动减仓按成交占比分给镜像腿的正利润，不进 G（V4）', () => {
+  it('【回归】合并仓位的手动减仓按成交占比拆到每条腿：盈利的几片进 G、亏损的那片扣掉，计算器与 Legs 同一个数（V4）', () => {
     // 主力 10,000 @1.0 与镜像 15,000 @1.0 合并；止盈1 平 15,000 @1.2；加仓1 5,000 @1.3 合并进来；
     // 手动减仓 20% @1.25 拆成主力 +200、镜像 +300、加仓1 −50。加仓2 @1.4，S₁ = 1.2。
     const position = (units: { main: number; mirror: number; add?: number }): Position => {
@@ -715,21 +729,21 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       mainLeg({ trade_record_id: 'P' }),
       leg({ id: 'mirror', leg_role: 'mirror_tp', trade_record_id: 'M', pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 15_000 }),
       leg({ id: 'add1', leg_role: 'main_add_1', trade_record_id: 'A', pre_simulated_time: iso(T0 + 90 * MIN), pre_entry_price: 1.3, pre_position_size: 6_500 }),
-      // 计算器上限 20,750 × 1.02 ≈ 21,165 币
-      leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(tAdd2), pre_entry_price: 1.4, pre_position_size: 21_165 * 1.4 }),
+      // 计算器上限 23,250 × 1.02 = 23,715 币
+      leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(tAdd2), pre_entry_price: 1.4, pre_position_size: 23_715 * 1.4 }),
     ];
     const tradeRecords = [...tp, ...reduce];
     const v = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: [short(1.2, tAdd2 - MIN, null)] }).get('add2')!;
     expect(v.x1Coins).toBeCloseTo(12_000, 6);
     expect(v.cushion).toBeCloseTo(1_200, 6);
-    // G = 止盈1 +3,000 − 加仓1 那一片 −50；主力 +200、镜像 +300 是手动减仓，不算
-    expect(v.banked).toBeCloseTo(2_950, 6);
+    // G = 止盈1 +3,000 + 手动减仓的三片（主力 +200、镜像 +300、加仓1 −50）= 这一轮已实现的净盈亏
+    expect(v.banked).toBeCloseTo(3_450, 6);
 
     const calc = detectBankedMirrorProfit('TUTUSDT', 'LONG', tradeRecords, T0);
     expect(calc.usd).toBeCloseTo(v.banked!, 6);
     // 仍持有：主力 3,200 @1、镜像 4,800 @1、加仓1 4,000 @1.3 → S̄ = 1.1
     const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1.1, s1: 1.2, s2: 1.4, x1: 12_000, g: calc.usd })!;
-    expect(plan.addCoinsMax).toBeCloseTo(20_750, 6);
+    expect(plan.addCoinsMax).toBeCloseTo(23_250, 6);
     expect(v.maxAllowedCoins).toBeCloseTo(plan.addCoinsMax, 6);
     // 超出计算器上限 2% 的加仓，Legs 也必须是红叉
     expect(v.status).toBe('fail');

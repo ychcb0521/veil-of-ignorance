@@ -57,13 +57,23 @@ describe('落袋是否已经被花掉', () => {
     expect(b.addsSinceBanked).toBe(0);
   });
 
-  it('本轮已实现亏损会从镜像止盈扣掉；普通手动平仓盈利不会混入 G', () => {
+  it('【用户要求】G 是本轮已实现的净盈亏：亏损扣掉，手动减仓落袋的利润同样计入（不再只认止盈1）', () => {
     const loss = { ...tp('2026-05-13T00:10:00Z', -2_000), exit_method: 'sl' } as TradeRecord;
-    const unrelatedProfit = { ...tp('2026-05-13T00:20:00Z', 9_000), exit_method: 'manual' } as TradeRecord;
-    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, loss, unrelatedProfit], MAIN_OPEN);
-    expect(b.usd).toBeCloseTo(82_742.24, 2);
-    expect(b.count).toBe(1);
-    expect(b.lastBankedAt).toBe(T('2026-05-12T23:19:00Z'));
+    const manualProfit = { ...tp('2026-05-13T00:20:00Z', 9_000), exit_method: 'manual' } as TradeRecord;
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, loss, manualProfit], MAIN_OPEN);
+    expect(b.usd).toBeCloseTo(84_742.24 - 2_000 + 9_000, 2);
+    // 笔数数的是盈利落袋的刀（止盈那一刀 + 手动那一刀），亏损那一刀不算
+    expect(b.count).toBe(2);
+    expect(b.lastBankedAt).toBe(T('2026-05-13T00:20:00Z'));
+    // 镜像止盈整个是手动减仓做的（没有任何止盈1 记录）：照样有 G
+    const manualOnly = detectBankedMirrorProfit('SAGAUSDT', 'LONG',
+      HISTORY.map(record => (record.exit_method === 'tp1' ? { ...record, exit_method: 'manual' as const } : record)), MAIN_OPEN);
+    expect(manualOnly.usd).toBeCloseTo(84_742.24, 2);
+    expect(manualOnly.count).toBe(1);
+    // 老成交没写退出方式：同样计入
+    const legacy = detectBankedMirrorProfit('SAGAUSDT', 'LONG',
+      HISTORY.map(record => (record.exit_method === 'tp1' ? { ...record, exit_method: undefined } : record)), MAIN_OPEN);
+    expect(legacy.usd).toBeCloseTo(84_742.24, 2);
   });
 
   it('【回归】强平也是已实现亏损：LIQUIDATION 记录同样从 G 扣掉（与 Legs 的 isSettlementRecord 同一判据）', () => {
