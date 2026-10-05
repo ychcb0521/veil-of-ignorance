@@ -1814,6 +1814,64 @@ describe('【回归 · 三审】顶栏把面板的精度交给计算器', () => 
     expect(setSeed).toHaveBeenCalledWith(expect.objectContaining({ currentPrice: 3_500, side: 'LONG' }));
   });
 
+  it('【用户要求】打开就带上当前持仓：均价、币数、真实均价都种进去（原来按标的多取了一层，永远读不到持仓、真实均价种成 0）', () => {
+    scene.positions = [{
+      id: 'short-1', side: 'SHORT', entryPrice: 2.84893217, quantity: 9_986.31, leverage: 10, marginMode: 'isolated',
+      settlementMode: 'usdt', settlementAsset: 'USDT', margin: 2_845, openTime: 1_000,
+    }];
+    scene.tradeHistory = [];
+    render(<MemoryRouter><SessionModeControls activeSymbol="RAVEUSDT" activePrice={2.99} activeFillBasePrice={2.9920289}
+      activePricePrecision={4} activeQuantityPrecision={2} /></MemoryRouter>);
+    fireEvent.click(screen.getByTestId('add-sizing-open'));
+    const frame = screen.getByTestId('add-position-calculator-frame') as HTMLIFrameElement;
+    const setSeed = vi.fn();
+    Object.assign(frame.contentWindow!, { AddPositionMath: { setSeed } });
+    fireEvent.load(frame);
+    expect(setSeed).toHaveBeenCalledTimes(1);
+    const seed = setSeed.mock.calls[0][0];
+    // 只有空单：方向跟着持仓走（原来读不到持仓，恒为 LONG）
+    expect(seed).toMatchObject({ side: 'SHORT', currentPrice: 2.9920289, strategyCost: 2.84893217, realAverage: 2.84893217, coins: 9_986.31 });
+    // 价格缺省的小数位数 = 主界面「仓位」里开仓价的位数（1 ≤ 价 < 1000 → 4 位）
+    expect(seed.priceDecimals).toBe(4);
+  });
+
+  it('没有持仓时：均价与币数留空，真实均价不种成有效值，位数按现价', () => {
+    scene.positions = [];
+    scene.tradeHistory = [];
+    render(<MemoryRouter><SessionModeControls activeSymbol="RAVEUSDT" activePrice={0.0312345} activeFillBasePrice={0.0312345}
+      activePricePrecision={6} activeQuantityPrecision={0} /></MemoryRouter>);
+    fireEvent.click(screen.getByTestId('add-sizing-open'));
+    const frame = screen.getByTestId('add-position-calculator-frame') as HTMLIFrameElement;
+    const setSeed = vi.fn();
+    Object.assign(frame.contentWindow!, { AddPositionMath: { setSeed } });
+    fireEvent.load(frame);
+    expect(setSeed.mock.calls[0][0]).toMatchObject({ side: 'LONG', strategyCost: 0, realAverage: 0, coins: 0, priceDecimals: 6 });
+  });
+
+  it('策略成本线按显示位数写（2.8489）而真实均价是完整精度：仍算同一条线，可以带入下单；手改出半个刻度以外的差才算新风险垫', () => {
+    scene.positions = [{
+      id: 'u1', side: 'LONG', entryPrice: 2.84893217, quantity: 10_000, leverage: 5, marginMode: 'isolated',
+      settlementMode: 'usdt', settlementAsset: 'USDT', margin: 5_700, openTime: 1_000,
+    }];
+    scene.tradeHistory = [];
+    render(<MemoryRouter><SessionModeControls activeSymbol="RAVEUSDT" activePrice={2.992}
+      activeFillBasePrice={2.992} activePricePrecision={4} activeQuantityPrecision={1} /></MemoryRouter>);
+    fireEvent.click(screen.getByTestId('add-sizing-open'));
+    const frame = screen.getByTestId('add-position-calculator-frame') as HTMLIFrameElement;
+    Object.assign(frame.contentWindow!, { AddPositionMath: { setSeed: vi.fn() } });
+    fireEvent.load(frame);
+    const bridge = (frame.contentWindow as Window & { VeilAddSizingBridge: (value: unknown) => void }).VeilAddSizingBridge;
+    fireEvent.change(screen.getByLabelText('下单方式'), { target: { value: 'limit' } });
+    const reading = (S: number) => {
+      const T = 2.992, K = 2.9, Q = 10_000;
+      return { T, K, S, Q, P: 0, realAverage: 2.84893217, side: 'LONG', addQty: Q * (K - S) / (T - K) };
+    };
+    act(() => bridge(reading(2.8489)));
+    expect(screen.getByRole('button', { name: /按上限下单/ })).toBeEnabled();
+    act(() => bridge(reading(2.8480)));   // 比真实均价低 0.0009：凭空多出 9 U 的垫子
+    expect(screen.getByRole('button', { name: /按上限下单/ })).toBeDisabled();
+  });
+
   it('新计算器只把实际持仓与真实策略风险垫的结果带入下单计划', () => {
     scene.positions = [{
       id: 'u1', side: 'LONG', entryPrice: 3_400, quantity: 2_000, leverage: 5, marginMode: 'isolated',

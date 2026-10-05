@@ -92,12 +92,14 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
       return;
     }
     const current = latestRef.current;
-    const held = pickHeldSide(current.symbol, current.positions[current.symbol], current.face);
+    // latestRef 里的 positions 已经是这个标的自己的那一组（ctx.positionsMap[symbol]），不能再按标的取一次：
+    // 那样读到的永远是 undefined——持仓的均价与币数填不进去，真实均价还被种成 0，之后怎么填都报「须为有效数字」。
+    const held = pickHeldSide(current.symbol, current.positions, current.face);
     const side = held?.side ?? 'LONG';
     const fingerprint = fingerprintFor(side);
     const prior = current.saved[`${current.symbol}:${side}`];
     const banked = held ? detectBankedMirrorProfit(current.symbol, side, current.ctx.tradeHistory,
-      held.earliestOpenTime ?? null, current.positions[current.symbol], { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null }) : null;
+      held.earliestOpenTime ?? null, current.positions, { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null }) : null;
     const initialProfit = Math.max(0, banked?.usd ?? 0);
     const carried = prior?.fingerprint === fingerprint ? prior.state : null;
     const state = carried
@@ -116,8 +118,12 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
       setSaved(previous => ({ ...previous, [key]: { fingerprint: fingerprintFor(raw.side), state: outcome.result.next! } }));
       setReading(null);
     };
+    const seedPrice = existing?.s2Ref ?? (fillBasePrice > 0 ? fillBasePrice : currentPrice);
     child.AddPositionMath.setSeed({
-      currentPrice: existing?.s2Ref ?? (fillBasePrice > 0 ? fillBasePrice : currentPrice),
+      currentPrice: seedPrice,
+      // 【用户要求】价格缺省的小数位数与主界面「仓位」里开仓价的位数一致（PositionPanel 用 formatPrice → getPriceDecimals）；
+      // 没有持仓时按现价的位数。只是缺省值的写法，输入框本身不限制小数位。
+      priceDecimals: getPriceDecimals(held?.avgEntry && held.avgEntry > 0 ? held.avgEntry : seedPrice),
       support: existing?.s1 ?? 0,
       strategyCost: state.strategyCost,
       realAverage: state.realAverage,
@@ -140,8 +146,12 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     if (!held || !closeEnough(held.coins, raw.Q) || !closeEnough(held.avgEntry, raw.realAverage)) return null;
     // A typed strategy line must not manufacture a new risk cushion for a live order.
     const allocated = saved[`${symbol}:${raw.side}`];
-    const budgetFromLine = (raw.realAverage - raw.S) * (raw.side === 'SHORT' ? -1 : 1) * raw.Q;
     const knownAllocated = allocated?.fingerprint === fingerprintFor(raw.side) ? allocated.state.mirrorProfitAllocated : 0;
+    const lineBudget = (raw.realAverage - raw.S) * (raw.side === 'SHORT' ? -1 : 1) * raw.Q;
+    // 策略成本线在输入框里按开仓价的显示位数写（2.8489），真实均价是完整精度（2.84893…）：
+    // 差出半个显示刻度以内的，是同一条线的两种写法，不是手填出来的新风险垫。
+    const lineTolerance = raw.Q * 0.5 * 10 ** -getPriceDecimals(raw.realAverage);
+    const budgetFromLine = Math.abs(lineBudget - knownAllocated) <= lineTolerance ? knownAllocated : lineBudget;
     if (budgetFromLine < -1e-8 || !closeEnough(budgetFromLine, knownAllocated)) return null;
     const settlement: SettlementMode = (positions ?? []).find(p => p?.side === raw.side)?.settlementMode ?? ctx.getSymbolSettlementMode(symbol);
     const isCoin = settlement === 'coin';

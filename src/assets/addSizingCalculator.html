@@ -432,6 +432,8 @@ tr.page-hidden{display:none}
  function nonnegative(raw,name){const n=numeric(raw);if(!(n>=0))throw new Error(name+'须为不小于 0 的有效数字；没有则填 0。');return n;}
  function finite(values){if(!values.every(Number.isFinite))throw new Error('数值过大或价差过小，超出计算范围；请调整数值。');}
  function calc({T,K,S,Q,P=0,realAverage=S,side='LONG'}){
+   // 真实均价没有承接到（宿主没读到持仓时传来的是 0）：按策略成本线算，不能因此判成「输入无效」。
+   if(!(Number.isFinite(realAverage)&&realAverage>0))realAverage=S;
    if(![T,K,S,realAverage].every(v=>Number.isFinite(v)&&v>0))throw new Error('现价、支撑位和策略成本线均须为大于 0 的有效数字。');
    const d=side==='SHORT'?-1:1;
    if((T-K)*d<=0)throw new Error(side==='SHORT'?'本次加仓价必须低于新支撑位。':'本次加仓价必须高于新支撑位。');
@@ -510,7 +512,7 @@ tr.page-hidden{display:none}
    updateConversion();$('single-error').hidden=true;$('single-info').hidden=true;
    try{
      const T=positive($('current').value,'现价 T'),K=positive($('support').value,'支撑位 K'),S=positive($('cost').value,'策略成本线 S'),v=positive($('position').value,'原持仓币数 Q'),P=nonnegative($('mirror').value,'可用镜像利润 P');
-     const r=calc({T,K,S,Q:v,P,realAverage:realAverageState??S,side:side()});
+     const r=calc({T,K,S,Q:v,P,realAverage:realAverageState>0?realAverageState:S,side:side()});
      const L=numeric($('leverage').value),validLeverage=L>=1,u=profitUnit(),pk=profitKind(),inv=inverse();
      lastSingle={...r,L:validLeverage?L:null};
      notifyParent(lastSingle);
@@ -629,17 +631,19 @@ tr.page-hidden{display:none}
  });
  try{
    const raw=JSON.parse(localStorage.getItem(STORAGE)||'null');
-   if(raw&&raw.single&&raw.sequence){$('contract-model').value=raw.side==='SHORT'?'short':'long';fillSingle({...defaults.single,...raw.single});fillSequence({...defaults.sequence,...raw.sequence});activeTab=raw.tab==='sequence'?'sequence':'single';realAverageState=Number.isFinite(raw.realAverageState)?raw.realAverageState:null;mirrorProfitRealized=Number.isFinite(raw.mirrorProfitRealized)?raw.mirrorProfitRealized:0;mirrorProfitAllocated=Number.isFinite(raw.mirrorProfitAllocated)?raw.mirrorProfitAllocated:0;}
+   if(raw&&raw.single&&raw.sequence){$('contract-model').value=raw.side==='SHORT'?'short':'long';fillSingle({...defaults.single,...raw.single});fillSequence({...defaults.sequence,...raw.sequence});activeTab=raw.tab==='sequence'?'sequence':'single';realAverageState=Number.isFinite(raw.realAverageState)&&raw.realAverageState>0?raw.realAverageState:null;mirrorProfitRealized=Number.isFinite(raw.mirrorProfitRealized)?raw.mirrorProfitRealized:0;mirrorProfitAllocated=Number.isFinite(raw.mirrorProfitAllocated)?raw.mirrorProfitAllocated:0;}
    else{fillSingle(defaults.single);fillSequence(defaults.sequence);}
  }catch(_){$('contract-model').value='long';fillSingle(defaults.single);fillSequence(defaults.sequence);$('save-state').textContent='未启用本地保存';}
  priorMode=$('position-mode').value;modeLabels();computeSingle({quiet:true});computeSequence();activateTab(activeTab,{persist:false});
- // 同源宿主只读回调。价格与仓位以完整精度赋值；展示精度留给界面。
+ // 同源宿主只读回调。仓位以完整精度赋值；价格缺省按宿主给的小数位数（与主界面「仓位」里开仓价的位数一致）写进输入框，
+ // 之后怎么改、改成几位小数都不受限制——输入框是纯文本，numeric() 不限制小数位。
+ const seedPrice=(value,digits)=>!(value>0)?'':Number.isInteger(digits)&&digits>=0&&digits<=12?value.toFixed(digits):String(value);
  window.AddPositionMath=Object.freeze({calculate:calc,parse:numeric,setSeed(seed){
-   realAverageState=Number.isFinite(seed.realAverage)?seed.realAverage:null;
+   realAverageState=Number.isFinite(seed.realAverage)&&seed.realAverage>0?seed.realAverage:null;
    $('contract-model').value=seed.side==='SHORT'?'short':'long';
    mirrorProfitRealized=Number.isFinite(seed.mirrorProfitRealized)?seed.mirrorProfitRealized:0;
    mirrorProfitAllocated=Number.isFinite(seed.mirrorProfitAllocated)?seed.mirrorProfitAllocated:0;
-   fillSingle({...readSingle(),current:seed.currentPrice>0?String(seed.currentPrice):'',support:seed.support>0?String(seed.support):'',cost:seed.strategyCost>0?String(seed.strategyCost):'',position:seed.coins>0?String(seed.coins):'',mode:'quantity',mirror:seed.mirrorProfitAvailable>=0?String(seed.mirrorProfitAvailable):'0',leverage:seed.leverage>0?String(seed.leverage):'10'});
+   fillSingle({...readSingle(),current:seedPrice(seed.currentPrice,seed.priceDecimals),support:seedPrice(seed.support,seed.priceDecimals),cost:seedPrice(seed.strategyCost,seed.priceDecimals),position:seed.coins>0?String(seed.coins):'',mode:'quantity',mirror:seed.mirrorProfitAvailable>=0?String(seed.mirrorProfitAvailable):'0',leverage:seed.leverage>0?String(seed.leverage):'10'});
    priorMode='quantity';computeSingle({quiet:true});save();
  }});
 })();
