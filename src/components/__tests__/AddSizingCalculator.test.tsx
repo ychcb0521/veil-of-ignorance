@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AddSizingCalculator } from '@/components/AddSizingCalculator';
@@ -775,11 +775,7 @@ describe('顶栏「加仓」按钮', () => {
     expect(open.compareDocumentPosition(modes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId('time-direction-toggle')).toBeNull();
     fireEvent.click(open);
-    expect(screen.getByTestId('add-sizing-dialog')).toBeInTheDocument();
-    // 标题与标的现在是两个元素（标题黑、标的灰等宽），分别断言
-    const dialog = screen.getByTestId('add-sizing-dialog');
-    expect(within(dialog).getByText('加仓计算器')).toBeInTheDocument();
-    expect(within(dialog).getByText('RAVEUSDT')).toBeInTheDocument();
+    expect(screen.getByTestId('add-position-calculator-frame')).toHaveAttribute('title', 'RAVEUSDT 加仓计算器');
   });
 });
 
@@ -1798,7 +1794,7 @@ describe('【回归 · 三审】重新打开：计划只记得它算出来那一
 describe('【回归 · 三审】顶栏把面板的精度交给计算器', () => {
   afterEach(() => { scene.positions = null; scene.tradeHistory = null; __resetAddSizingPlanForTests(); });
 
-  it('基准价、价格精度、数量精度都从 SessionModeControls 传进来：S₂ 种在基准价上，U 本位按钮按数量精度向下取整', () => {
+  it('基准价从 SessionModeControls 传进新的内嵌计算器', () => {
     scene.positions = [{
       id: 'u1', side: 'LONG', entryPrice: 3_400, quantity: 2_000, leverage: 5, marginMode: 'isolated',
       settlementMode: 'usdt', settlementAsset: 'USDT', margin: 3_400 * 400, openTime: 1_000,
@@ -1811,15 +1807,35 @@ describe('【回归 · 三审】顶栏把面板的精度交给计算器', () => 
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId('add-sizing-open'));
-    expect(num('add-sizing-s2')).toBe(3_500);
-    type('add-sizing-s1', '3490');
-    const plan = sizeAddAtExpectedFill({ side: 'LONG', settlement: 'usdt', coverage: 180_000, s1: 3_490, s2Ref: 3_500, orderKind: 'market' })!;
-    const qty = Math.floor(plan.addCoinsMax * 10 + 1e-7) / 10;
-    expect(screen.getByTestId('add-sizing-place-at-limit').textContent)
-      .toBe(`按上限下单 · ${qty.toLocaleString('en-US', { maximumFractionDigits: 1 })} RAVE`);
-    // 价格精度 2 位：手填 3,500.004 与基准价差不到一格，仍是市价
-    type('add-sizing-s2', '3500.004');
-    expect(screen.getByTestId('add-sizing-order-kind-market')).toHaveAttribute('aria-pressed', 'true');
+    const frame = screen.getByTestId('add-position-calculator-frame') as HTMLIFrameElement;
+    const setSeed = vi.fn();
+    Object.assign(frame.contentWindow!, { AddPositionMath: { setSeed } });
+    fireEvent.load(frame);
+    expect(setSeed).toHaveBeenCalledWith(expect.objectContaining({ currentPrice: 3_500, side: 'LONG' }));
+  });
+
+  it('新计算器只把实际持仓与真实策略风险垫的结果带入下单计划', () => {
+    scene.positions = [{
+      id: 'u1', side: 'LONG', entryPrice: 3_400, quantity: 2_000, leverage: 5, marginMode: 'isolated',
+      settlementMode: 'usdt', settlementAsset: 'USDT', margin: 3_400 * 400, openTime: 1_000,
+    }];
+    scene.tradeHistory = [];
+    render(<MemoryRouter><SessionModeControls activeSymbol="RAVEUSDT" activePrice={3_500}
+      activeFillBasePrice={3_500} activePricePrecision={2} activeQuantityPrecision={1} /></MemoryRouter>);
+    fireEvent.click(screen.getByTestId('add-sizing-open'));
+    const frame = screen.getByTestId('add-position-calculator-frame') as HTMLIFrameElement;
+    Object.assign(frame.contentWindow!, { AddPositionMath: { setSeed: vi.fn() } });
+    fireEvent.load(frame);
+    const bridge = (frame.contentWindow as Window & { VeilAddSizingBridge: (value: unknown) => void }).VeilAddSizingBridge;
+    fireEvent.change(screen.getByLabelText('下单方式'), { target: { value: 'limit' } });
+    act(() => bridge({ T: 3_500, K: 3_490, S: 3_300, Q: 2_000, P: 0,
+      realAverage: 3_400, side: 'LONG', addQty: 38_000 }));
+    expect(screen.getByRole('button', { name: /按上限下单/ })).toBeDisabled();
+    act(() => bridge({ T: 3_500, K: 3_490, S: 3_400, Q: 2_000, P: 0,
+      realAverage: 3_400, side: 'LONG', addQty: 18_000 }));
+    expect(screen.getByRole('button', { name: /按上限下单/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /按上限下单/ }));
+    expect(getAddSizingPlan('RAVEUSDT')?.prefill?.coins).toBe(18_000);
   });
 });
 

@@ -11,7 +11,7 @@
 import { useState } from 'react';
 import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator, Play, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { AddSizingCalculator } from '@/components/AddSizingCalculator';
+import { AddPositionCalculator } from '@/components/AddPositionCalculator';
 import { toast } from '@/lib/notificationCenter';
 import {
   Dialog,
@@ -237,7 +237,7 @@ export function SessionModeControls({
         <Calculator className="w-3 h-3" /> 加仓
       </button>
       {addSizingOpen && activeSymbol && (
-        <AddSizingCalculator
+        <AddPositionCalculator
           open
           symbol={activeSymbol}
           currentPrice={activePrice}
