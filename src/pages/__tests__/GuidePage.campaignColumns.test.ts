@@ -92,7 +92,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
   });
   it('【用户要求】散点图一屏看全：图盒高度按窗口算、放不下时压紧行距——指南与实现对得上', () => {
     expect(guide).toContain('<strong>绘图区和这一屏一样高</strong>：图盒的高度按窗口算');
-    expect(guide).toContain('点排序项把图滚进视野时，图的顶边停在吸顶区正下方');
+    expect(guide).toContain('点开散点图或点排序项时<strong>直接滚到绘图区</strong>');
     expect(guide).toContain('<strong>把这一图的行距均匀压紧</strong>');
     expect(guide).toContain('行距压到 4px（相邻两点只露出一半）还放不下，才把顶上那一截合成一个三角并在脚注报数');
     expect(guide).toContain('窗口很矮时不低于 18rem');

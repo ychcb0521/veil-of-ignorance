@@ -521,6 +521,12 @@ describe('JournalCampaignsPage sorting', () => {
       expect(box().style.minHeight).toBe('559px');
       expect(screen.getByTestId('campaign-odds-scatter-panel').style.scrollMarginTop).toBe('148px');
 
+      // 【用户要求】点排序项直接滚到绘图区：绘图盒顶边（300）停在吸顶区（148）下方 6px
+      const scrollTo = vi.mocked(window.scrollTo);
+      scrollTo.mockClear();
+      fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledWith({ top: 300 - 148 - 6, behavior: 'smooth' }));
+
       // 换一张图（时序视图）上限照样带着
       fireEvent.click(screen.getByTestId('campaign-mainPriceChange-view-time'));
       await waitFor(() => expect(box().style.maxHeight).toBe('559px'));

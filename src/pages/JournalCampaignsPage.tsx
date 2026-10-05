@@ -157,6 +157,8 @@ const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
 const CAMPAIGN_PAGE_HEADER_HEIGHT = 57;
 /** 散点图绘图区的高度占「窗口高 − 吸顶区」的比例。 */
 const CHART_BOX_SCREEN_RATIO = 0.9;
+/** 滚到绘图区时，绘图盒顶边与吸顶区之间留的空。 */
+const CHART_SCROLL_GAP = 6;
 
 /** 散点图还画不出来时的等高占位：一句话 + 进度条 + 「已完成 / 总数」。读战役目录与算涨幅未兑现共用。 */
 function ChartPreparingPlaceholder({ testId, title, loaded, total, emptyLabel, hint }: {
@@ -2825,6 +2827,7 @@ export default function JournalCampaignsPage() {
     setMetricChartKey(openKey);
     setMetricChartOpen(true);
     updateChartParam(openKey);
+    scrollMetricChartIntoView();
   };
   const winRateLabel = performance.winRate == null ? '—' : `${(performance.winRate * 100).toFixed(2)}%`;
   const payoffRatioLabel = performance.payoffRatio == null ? '—' : performance.payoffRatio.toFixed(2);
@@ -2881,7 +2884,17 @@ export default function JournalCampaignsPage() {
   const scrollMetricChartIntoView = () => {
     const schedule = window.requestAnimationFrame ?? ((callback: FrameRequestCallback) => window.setTimeout(callback, 0));
     schedule(() => {
-      metricChartPanelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+      const panel = metricChartPanelRef.current;
+      // 【用户要求】点开图直接到绘图区：跳过上方的视图切换、标题、图例，绘图盒的顶边停在吸顶区正下方
+      const box = panel?.querySelector<HTMLElement>('[data-layout="campaign-scatter-landscape"]');
+      const rect = box?.getBoundingClientRect();
+      if (rect && rect.height > 0) {
+        const top = rect.top + window.scrollY - (CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight) - CHART_SCROLL_GAP;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        return;
+      }
+      // 还没有绘图盒（空态、占位）或量不到尺寸：退回滚到面板顶边
+      panel?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     });
   };
 
