@@ -18,6 +18,7 @@ const EXEMPT: Record<string, string> = {
   'hooks/useTimeSimulator.ts': '__tm_live_time 是崩溃恢复用的心跳，重启即重建',
   'lib/simStateSync.ts': '同步层自身（写影子时间戳与水化回写）',
   'hooks/usePersistedState.ts': '已在 setState 里接入推送',
+  'lib/persistedStateStorage.ts': 'usePersistedState / 同步水化共用的原子读写与配额兜底；云端推送仍由调用方负责，仅回收可重建图表缓存，不删除交易数据。',
   'pages/JournalCampaignDetailPage.tsx': '反事实/反向委托的「本地隐藏」是查看偏好，非数据',
   'lib/signalLibrary.ts': '已在 saveSignals 里接入推送',
   'hooks/useCampaignPricePaths.ts': '每场战役的峰值涨幅 / 动态最大回撤是由历史 K 线算出来的可重算缓存（按用户分区）：换设备重算一遍即可，不属于交易状态，账户资产不由它推导。',

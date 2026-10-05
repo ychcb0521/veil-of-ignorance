@@ -3,6 +3,8 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
+import { getPersistedStateHydrationRevision, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
+import { REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { Button } from '@/components/ui/button';
 import { EMPTY_CAMPAIGN_PRICE_CHANGE, campaignHasMainAdd, campaignMainAddCount, campaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, resolveHoldingDynamicDrawdownEndMs, type ActualMainPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
@@ -909,6 +911,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     [campaign, campaignAccountName],
   );
   const [legs, setLegs] = useState<TradeJournal[]>([]);
+  const localRecoverySourceRef = useRef({ campaign, legs });
+  const initialLocalReadRevisionRef = useRef(0);
+  useLayoutEffect(() => { localRecoverySourceRef.current = { campaign, legs }; }, [campaign, legs]);
+  const [localRecoveryRevision, setLocalRecoveryRevision] = useState(0);
   const [tradeRecords, setTradeRecords] = useState<TradeRecord[]>([]);
   const [legExitPriceCorrections, setLegExitPriceCorrections] = useState<LegExitPriceCorrections>({});
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -1053,6 +1059,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         // 分支读取失败不是致命错误：战役本身照常打开，「已保存分支」一块显示原因与「重试」，
         // 而不是把人踢回战役列表（分支表偶发超时、权限抖动都不该让整场战役打不开）。
         // 批量导出不需要反事实分支，直接给空列表。
+        initialLocalReadRevisionRef.current = getPersistedStateHydrationRevision();
         const [full, branchesResult] = await Promise.all([
           batchExport ? loadBatchCampaignData(id, batchExport.snapshot) : getCampaignFullData(id),
           batchExport
@@ -1126,6 +1133,50 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const campaignOwnerId = campaign?.user_id ?? null;
 
   useEffect(() => {
+    if (!id || !campaignOwnerId || !viewerUserId || batchExport) return;
+    let cancelled = false;
+    let generation = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      const request = ++generation;
+      clearTimeout(timer);
+      // hydrate 同一轮会恢复多个键；等这一批全部写入后才重建一次委托归属。
+      timer = setTimeout(() => {
+        const source = localRecoverySourceRef.current;
+        if (!source.campaign || source.campaign.id !== id || source.campaign.user_id !== campaignOwnerId) return;
+        // 只重读本地事实。复用当前战役/腿，不触发自愈写库，也不覆盖正在编辑的备注或分支。
+        void getCampaignFullData(id, { heal: false, source: { campaign: source.campaign, legs: source.legs } })
+          .then(full => {
+            const current = localRecoverySourceRef.current;
+            if (cancelled || request !== generation || current.campaign !== source.campaign || current.legs !== source.legs) return;
+            // 没变的成交引用保持不动，否则 Legs 副本会把编辑到一半的草稿当作新基线重置。
+            setTradeRecords(previous => JSON.stringify(previous) === JSON.stringify(full.tradeRecords) ? previous : full.tradeRecords);
+            setPendingOrders(previous => JSON.stringify(previous) === JSON.stringify(full.pendingOrders) ? previous : full.pendingOrders);
+            setReverseHedgeOrders(previous => JSON.stringify(previous) === JSON.stringify(full.reverseHedgeOrders) ? previous : full.reverseHedgeOrders);
+            const foreignOrders = full.foreignLiveOrders ?? [];
+            setForeignLiveOrders(previous => JSON.stringify(previous) === JSON.stringify(foreignOrders) ? previous : foreignOrders);
+            adoptUnfilledOrderIds(full.unfilledOrderIds);
+            setLocalRecoveryRevision(previous => previous + 1);
+          })
+          .catch(error => {
+            if (!cancelled && request === generation) console.warn('[JournalCampaignDetailPage] 恢复本地成交/委托失败', error);
+          });
+      }, 0);
+    };
+    const storageKeys = ['trade_history', 'orders_map', 'cancelled_orders', 'filled_orders', 'positions_map', REPLAY_TIMELINES_STORAGE_KEY]
+      .map(key => `sim_${campaignOwnerId}_${key}`);
+    const unsubscribe = storageKeys.map(key => subscribePersistedStateHydration(key, schedule));
+    // 初次读取旧快照后可能仍在等分支/校正，这时通知先于订阅。仅这次读取期间
+    // owner 的相关键确实恢复过才补一次；正常首屏不会额外解析整份成交历史。
+    if (storageKeys.some(key => getPersistedStateHydrationRevision(key) > initialLocalReadRevisionRef.current)) schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      unsubscribe.forEach(stop => stop());
+    };
+  }, [id, campaign?.id, campaignOwnerId, viewerUserId, batchExport, adoptUnfilledOrderIds]);
+
+  useEffect(() => {
     if (!campaignOwnerId || !viewerUserId) return;
     if (batchExport?.options.sections.overview === false) {
       setCampaignPerformanceLoading(false);
@@ -1175,7 +1226,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     return () => {
       cancelled = true;
     };
-  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError]);
+  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;

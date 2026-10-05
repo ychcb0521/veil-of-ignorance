@@ -24,6 +24,7 @@ import {
 import { INITIAL_COGNITIVE_ASSETS } from '@/lib/cognitiveAssetsInitialContent';
 import { applyLocalMirror, mirrorDroppedColumns, reconcileLocalMirror } from '@/lib/journalLocalMirror';
 import { hydrateJournalReviews } from '@/lib/journalReviewIdentity';
+import { readPersistedStateRaw, removePersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import {
   buildTradeRecordLookup,
   journalOperationTime,
@@ -181,7 +182,7 @@ function getUserStoragePrefix(userId: string): string {
 
 function readUserScopedStorage<T>(userId: string, key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(`${getUserStoragePrefix(userId)}${key}`);
+    const raw = readPersistedStateRaw(`${getUserStoragePrefix(userId)}${key}`);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -191,7 +192,7 @@ function readUserScopedStorage<T>(userId: string, key: string, fallback: T): T {
 
 function writeUserScopedStorage<T>(userId: string, key: string, value: T): void {
   try {
-    localStorage.setItem(`${getUserStoragePrefix(userId)}${key}`, JSON.stringify(value));
+    writePersistedStateRaw(`${getUserStoragePrefix(userId)}${key}`, JSON.stringify(value));
   } catch (error) {
     console.warn(`[journalApi] 写入本地缓存失败: ${key}`, error);
   }
@@ -241,7 +242,7 @@ export async function saveCampaignDeviationNotes(
 
 function removeUserScopedStorage(userId: string, key: string): void {
   try {
-    localStorage.removeItem(`${getUserStoragePrefix(userId)}${key}`);
+    removePersistedStateRaw(`${getUserStoragePrefix(userId)}${key}`);
   } catch (error) {
     console.warn(`[journalApi] 删除本地缓存失败: ${key}`, error);
   }
@@ -2547,7 +2548,7 @@ export function createUserLocalSnapshotReader(userId: string): UserLocalSnapshot
   const read = <T>(key: string, fallback: T): T => {
     let raw: string | null = null;
     try {
-      raw = localStorage.getItem(`${getUserStoragePrefix(userId)}${key}`);
+      raw = readPersistedStateRaw(`${getUserStoragePrefix(userId)}${key}`);
     } catch {
       raw = null;
     }

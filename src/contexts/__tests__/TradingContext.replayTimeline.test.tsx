@@ -11,6 +11,7 @@ vi.mock('@/integrations/supabase/client', () => ({
 
 import { TradingProvider, useTradingContext, type PlaceOrderParams } from '@/contexts/TradingContext';
 import { REPLAY_STAMP_PERSIST_THROTTLE_MS, type ReplayTimelineRegistry } from '@/lib/replayTimeline';
+import { clearPersistedStateMemoryForTests, notifyPersistedStateHydrated, readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { CancelledOrderSnapshot } from '@/types/trading';
 
 /**
@@ -50,13 +51,104 @@ const marketLong = (over: Partial<PlaceOrderParams> = {}): PlaceOrderParams => (
 
 beforeEach(() => {
   localStorage.clear();
+  clearPersistedStateMemoryForTests();
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
   vi.setSystemTime(T0);
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   localStorage.clear();
+  clearPersistedStateMemoryForTests();
+});
+
+describe('回放登记表晚恢复：运行时 ref 与持久化同步', () => {
+  const fullKey = 'sim_anon_replay_timelines_v1';
+  const remoteNode = (id: string) => ({
+    id, scope: 'synced' as const, parentId: null, cause: 'start' as const, direction: 1 as const,
+    forkSimTime: SIM0, startedRealAt: T0 - 1_000, endSimTime: null, endedRealAt: null,
+    carried: {}, lastSimTime: SIM0, lastRealAt: T0 - 1_000,
+  });
+  const restoreRemote = (value: ReplayTimelineRegistry, key = fullKey) => {
+    writePersistedStateRaw(key, JSON.stringify(value), { source: 'remote', updatedAt: Date.now() });
+    notifyPersistedStateHydrated(key);
+  };
+
+  it.each([false, true])('挂载后晚恢复的当前节点能用于下一次盖章和分叉，quota=%s', async quota => {
+    const { result } = mount();
+    if (quota) {
+      const original = Storage.prototype.setItem;
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+        if (key === fullKey) throw new DOMException('Synthetic quota failure', 'QuotaExceededError');
+        original.call(this, key, value);
+      });
+    }
+    const remote = { v: 1 as const, nodes: { restored: remoteNode('restored') }, current: { synced: 'restored' } };
+    act(() => restoreRemote(remote));
+    act(() => result.current.sim.startSimulation(SIM0));
+    expect(result.current.getTimelineId('BTCUSDT')).toBe('restored');
+    expect(result.current.stampClock('BTCUSDT')).toBe('restored');
+    let child = '';
+    act(() => { child = result.current.forkReplayTimeline('BTCUSDT', 'jump', SIM0 - MIN); });
+    await flush();
+
+    const saved = JSON.parse(readPersistedStateRaw(fullKey)!) as ReplayTimelineRegistry;
+    expect(Object.keys(saved.nodes).sort()).toEqual(['restored', child].sort());
+    expect(saved.nodes[child]).toMatchObject({ parentId: 'restored', cause: 'jump' });
+    expect(saved.current.synced).toBe(child);
+  });
+
+  it('晚恢复与本地尚未落盘的分叉同批发生，已排队微任务也必须持久化两端节点', async () => {
+    const { result } = mount();
+    let localRoot = '';
+    act(() => {
+      localRoot = result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+      // 本地分叉尚在微任务中，恢复写入还不知道这条新节点。
+      restoreRemote({ v: 1, nodes: { remote: remoteNode('remote') }, current: { synced: 'remote' } });
+    });
+    await flush();
+
+    expect(result.current.stampClock('BTCUSDT')).toBe(localRoot);
+    const afterRestore = storedRegistry();
+    expect(Object.keys(afterRestore.nodes).sort()).toEqual([localRoot, 'remote'].sort());
+    expect(afterRestore.current.synced).toBe(localRoot);
+
+    let child = '';
+    act(() => { child = result.current.forkReplayTimeline('BTCUSDT', 'jump', SIM0 - MIN); });
+    await flush();
+    const afterFork = storedRegistry();
+    expect(Object.keys(afterFork.nodes).sort()).toEqual([localRoot, child, 'remote'].sort());
+    expect(afterFork.nodes[child].parentId).toBe(localRoot);
+  });
+
+  it('晚恢复保留尚在节流窗口内的更新盖章，不回退本地指针，也不接受其他owner通知', async () => {
+    const { result } = mount();
+    let localRoot = '';
+    act(() => {
+      localRoot = result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+    });
+    await flush();
+    const staleLocal = storedRegistry().nodes[localRoot];
+    vi.setSystemTime(T0 + 1_000);
+    expect(result.current.stampClock('BTCUSDT')).toBe(localRoot);
+    expect(storedRegistry().nodes[localRoot].lastSimTime).toBe(SIM0);
+    act(() => {
+      restoreRemote({
+        v: 1, nodes: { [localRoot]: staleLocal, remote: remoteNode('remote') }, current: { synced: 'remote' },
+      });
+      restoreRemote({ v: 1, nodes: { foreign: remoteNode('foreign') }, current: { synced: 'foreign' } }, 'sim_other_replay_timelines_v1');
+    });
+    await flush();
+
+    const saved = storedRegistry();
+    expect(Object.keys(saved.nodes).sort()).toEqual([localRoot, 'remote'].sort());
+    expect(saved.current.synced).toBe(localRoot);
+    expect(saved.nodes[localRoot]).toMatchObject({ lastSimTime: SIM0 + 1_000, lastRealAt: T0 + 1_000 });
+    expect(result.current.stampClock('BTCUSDT')).toBe(localRoot);
+  });
 });
 
 describe('回放时间线：分叉与不分叉的入口', () => {

@@ -17,6 +17,14 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
+import {
+  clearPersistedStateMemoryForTests,
+  getUnpersistedStateMetadata,
+  markPersistedStateSynced,
+  notifyPersistedStateHydrated,
+  readPersistedStateRaw,
+  writePersistedStateRaw,
+} from '@/lib/persistedStateStorage';
 
 /**
  * 不同步的键：
@@ -100,6 +108,33 @@ function writeShadowTs(fullKey: string, ts: number): void {
   }
 }
 
+/** 影子戳只能代表确实落盘的内容，不能替尚未写入磁盘的内存值盖章。 */
+function writePersistedValueShadowTs(fullKey: string, raw: string | undefined, ts: number): void {
+  if (raw === undefined) return;
+  try {
+    if (localStorage.getItem(fullKey) === raw) writeShadowTs(fullKey, ts);
+  } catch {
+    /* 读不到真实存储时也不能声称这份数据已落盘。 */
+  }
+}
+
+/** JSONB 可能重排对象属性；数组顺序与实际字段内容仍须完全相同。 */
+function sameJsonContent(localRaw: string, remoteRaw: string): boolean {
+  if (localRaw === remoteRaw) return true;
+  const sortedObject = (_key: string, value: unknown): unknown => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const object = value as Record<string, unknown>;
+      return Object.fromEntries(Object.keys(object).sort().map(key => [key, object[key]]));
+    }
+    return value;
+  };
+  try {
+    return JSON.stringify(JSON.parse(localRaw), sortedObject) === JSON.stringify(JSON.parse(remoteRaw), sortedObject);
+  } catch {
+    return false;
+  }
+}
+
 function isMissingSimStateTableError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   const message = error.message ?? '';
@@ -119,6 +154,11 @@ const pending = new Map<string, PendingPush>();
  * 那笔新成交抹掉。用户看到的就是「删过历史成交、又交易了一笔，那笔没了」。
  */
 const generation = new Map<string, number>();
+/**
+ * 最新本地版本尚未推送成功时，水化不能用刚查询到的远端值覆盖它。
+ * 包括防抖、进行中与失败重试窗口；按账号隔离，成功也只解除同一代的保护。
+ */
+const unsyncedGeneration = new Map<string, number>();
 /**
  * 版本号必须按 **(用户, 键)** 记，不能只按键。
  * 只按键的话，切换用户时为了不让 A 的版本号压掉 B 的推送就得整张清空，
@@ -163,7 +203,8 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
   // 已经被更新的版本取代 → 这一笔（含它的重试）整个作废，绝不把旧值写上云。
   if ((generation.get(genKey(userId, key)) ?? 0) !== gen) return;
   try {
-    const approxBytes = JSON.stringify(value)?.length ?? 0;
+    const valueJson = JSON.stringify(value);
+    const approxBytes = valueJson?.length ?? 0;
     if (approxBytes > LARGE_PAYLOAD_WARN_BYTES) {
       console.warn(
         `[simStateSync] ${key} 体积已达 ${(approxBytes / 1024 / 1024).toFixed(1)}MB，`
@@ -186,9 +227,15 @@ async function pushNow(userId: string, key: string, value: unknown, gen: number,
         { onConflict: 'user_id,key' },
       );
     if (!error) {
-      // 推送成功：本地内容至少和这一行一样新。注意即使期间又有更新的本地写入
-      // （gen 已经变了）也要写——那时本地只会更新，不会更旧。
-      writeShadowTs(storageKeyFor(key, userId), Date.parse(updatedAt));
+      // 云端成功不等于本地落盘成功（例如大数据写入遭遇 quota，而小影子戳仍能写）。
+      // 也不能用旧推送的回调给期间出现的另一份本地内容盖章。
+      writePersistedValueShadowTs(storageKeyFor(key, userId), valueJson, Date.parse(updatedAt));
+      const gk = genKey(userId, key);
+      if (unsyncedGeneration.get(gk) === gen) {
+        // 最新内存值已获云端确认，不再永久当作未提交的本地修改；磁盘影子戳仍须实际落盘。
+        if (valueJson !== undefined) markPersistedStateSynced(storageKeyFor(key, userId), valueJson, Date.parse(updatedAt));
+        unsyncedGeneration.delete(gk);
+      }
     }
     if (error) {
       if (isMissingSimStateTableError(error)) {
@@ -256,9 +303,14 @@ export function queueSimStatePush(userId: string, key: string, value: unknown): 
   const gk = genKey(userId, key);
   const gen = (generation.get(gk) ?? 0) + 1;
   generation.set(gk, gen);
+  unsyncedGeneration.set(gk, gen);
   // 先按入队时刻记一次，保证「写了但还没推上去」的本地值也受护栏保护；
   // 推送成功后会再对齐到那一行真正的 updated_at（writeShadowTs 只进不退）。
-  writeShadowTs(storageKeyFor(key, userId), Date.now());
+  try {
+    writePersistedValueShadowTs(storageKeyFor(key, userId), JSON.stringify(value), Date.now());
+  } catch {
+    /* 非序列化值由推送路径处理，不能阻断当前状态更新。 */
+  }
 
   const existing = pending.get(key);
   if (existing) clearTimeout(existing.timer);
@@ -306,8 +358,10 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
       if (EXCLUDED_KEYS.has(row.key)) continue;
       const fullKey = storageKeyFor(row.key, userId);
       const remoteTs = new Date(row.updated_at).getTime();
-      const localTs = readShadowTs(fullKey);
-      const localRaw = localStorage.getItem(fullKey);
+      const memoryMetadata = getUnpersistedStateMetadata(fullKey);
+      // 远端值因 quota 只能暂存在内存时，也要保留它的时间戳参与下次新旧判断。
+      const localTs = Math.max(readShadowTs(fullKey), memoryMetadata?.source === 'remote' ? memoryMetadata.updatedAt ?? 0 : 0);
+      const localRaw = readPersistedStateRaw(fullKey);
       const hasLocal = localRaw != null;
       const merge = UNION_MERGE_KEYS[row.key];
       if (merge && hasLocal) {
@@ -317,23 +371,34 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
           try { localValue = JSON.parse(localRaw); } catch { /* 坏的本地值按空登记表处理 */ }
           const merged = merge(localValue, row.value);
           const mergedJson = JSON.stringify(merged);
+          const needsPush = mergedJson !== JSON.stringify(row.value)
+            || (mergedJson !== localRaw && unsyncedGeneration.has(genKey(userId, row.key)));
           if (mergedJson !== localRaw) {
-            localStorage.setItem(fullKey, mergedJson);
+            writePersistedStateRaw(fullKey, mergedJson, needsPush ? undefined : { source: 'remote', updatedAt: remoteTs });
             applied += 1;
           }
-          // 合并结果里有远端没有的东西 → 推回去；否则本地与远端已一致，对齐影子戳即可。
-          if (mergedJson !== JSON.stringify(row.value)) queueSimStatePush(userId, row.key, merged);
-          else writeShadowTs(fullKey, remoteTs);
+          // 合并结果里有远端没有的东西 → 推回去。
+          // 即使合并后恰好等于远端，也要替换尚未完成的旧本地推送，避免它稍后丢掉新节点。
+          if (needsPush) queueSimStatePush(userId, row.key, merged);
+          else writePersistedValueShadowTs(fullKey, mergedJson, remoteTs);
+          if (mergedJson !== localRaw) notifyPersistedStateHydrated(fullKey);
         } catch (e) {
           console.warn(`[simStateSync] 合并 ${row.key} 失败：`, e);
         }
         continue;
       }
-      if (hasLocal && localTs >= remoteTs) continue; // 本地不比远端旧，保留本地
+      // 查询期间可能已有新操作；内存兜底与尚未推送成功的版本都比该查询更可信。
+      // 历史登记表已在上方并集合并，不会以远端整键覆盖这些本地新节点。
+      if (memoryMetadata?.source === 'local' || unsyncedGeneration.has(genKey(userId, row.key))) continue;
+      const remoteRaw = JSON.stringify(row.value);
+      // 修复旧版本留下的「影子戳已追平云端，数据写入却失败」：等戳还须内容一致。
+      // 真正更晚的本地写入仍然保留，正在推送的同毫秒本地写入已由上方保护。
+      if (hasLocal && (localTs > remoteTs || (localTs === remoteTs && sameJsonContent(localRaw, remoteRaw)))) continue;
       try {
-        localStorage.setItem(fullKey, JSON.stringify(row.value));
-        writeShadowTs(fullKey, remoteTs);
+        writePersistedStateRaw(fullKey, remoteRaw, { source: 'remote', updatedAt: remoteTs });
+        writePersistedValueShadowTs(fullKey, remoteRaw, remoteTs);
         applied += 1;
+        notifyPersistedStateHydrated(fullKey);
       } catch (e) {
         console.warn(`[simStateSync] 写回 ${row.key} 失败：`, e);
       }
@@ -364,7 +429,7 @@ function backfillLocalOnlyKeys(userId: string, remoteKeys: Set<string>): void {
     }
     for (const [logical, storageKeyName] of candidates) {
       if (remoteKeys.has(logical) || EXCLUDED_KEYS.has(logical)) continue;
-      const raw = localStorage.getItem(storageKeyName);
+      const raw = readPersistedStateRaw(storageKeyName);
       if (raw == null) continue;
       try {
         queueSimStatePush(userId, logical, JSON.parse(raw));
@@ -383,6 +448,8 @@ export function __resetSimStateSyncForTests(): void {
   for (const entry of pending.values()) clearTimeout(entry.timer);
   pending.clear();
   generation.clear();
+  unsyncedGeneration.clear();
+  clearPersistedStateMemoryForTests();
   tableMissing = false;
   flushHooksInstalled = false;
   activeUserId = null;

@@ -27,6 +27,7 @@ import {
 } from '@/lib/walletTransfer';
 import { usePersistedState, loadPersistedSimState, saveSimState, clearSimState } from '@/hooks/usePersistedState';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
+import { readPersistedStateRaw, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -120,6 +121,7 @@ import {
   isCoinTimelineClockActive,
   isImplicitReplayFork,
   isWithinDirectionFlips,
+  mergeReplayTimelineRegistries,
   normalizeReplayTimelineRegistry,
   pruneReplayTimelineRegistry,
   recordReplayTimelineStamp,
@@ -904,6 +906,24 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const [initialTimelines] = useState(() =>
     pruneReplayTimelineRegistry(normalizeReplayTimelineRegistry(persistedTimelines), { now: Date.now() }));
   const timelineRegistryRef = useRef<ReplayTimelineRegistry>(initialTimelines);
+  const timelineStorageKey = getUserPrefix() + REPLAY_TIMELINES_STORAGE_KEY;
+  useLayoutEffect(() => {
+    const restore = () => {
+      const raw = readPersistedStateRaw(timelineStorageKey);
+      if (raw == null) return;
+      try {
+        // 通知时立即合并：已排队的落盘微任务可能先于 React 提交执行，不能让旧 ref
+        // 盖掉刚恢复的节点。本地尚未落盘的节点、盖章和 current 指针同样不能被回滚。
+        timelineRegistryRef.current = pruneReplayTimelineRegistry(
+          mergeReplayTimelineRegistries(timelineRegistryRef.current, JSON.parse(raw)),
+          { now: Date.now() },
+        );
+      } catch { /* 坏的恢复值不影响当前运行中的登记表。 */ }
+    };
+    const unsubscribe = subscribePersistedStateHydration(timelineStorageKey, restore);
+    restore(); // 补上首次读取之后、订阅建立之前的恢复。
+    return unsubscribe;
+  }, [timelineStorageKey]);
   const timelinePersistQueuedRef = useRef(false);
   const timelineStampPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 本次页面加载里盖过章、或刚分叉出来的时间线。第一次盖章的兜底判据要给恢复会话留余量。 */

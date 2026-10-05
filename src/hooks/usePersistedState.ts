@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { queueSimStatePush } from '@/lib/simStateSync';
+import { readPersistedStateRaw, subscribePersistedStateHydration, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { TimeMachineStatus } from './useTimeSimulator';
 
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
@@ -16,21 +17,39 @@ export function usePersistedState<T>(key: string, defaultValue: T): [T, (value: 
 
   const [state, setStateRaw] = useState<T>(() => {
     try {
-      const stored = localStorage.getItem(fullKey);
+      const stored = readPersistedStateRaw(fullKey);
       if (stored !== null) return JSON.parse(stored);
-    } catch {}
+    } catch { /* Invalid persisted JSON falls back to the caller's default. */ }
     return defaultValue;
   });
 
-  const stateRef = useRef(state);
+  useEffect(() => {
+    const refresh = () => {
+      setStateRaw(previous => {
+        // React may already have a functional local update queued. Read when this
+        // updater executes, so an earlier local edit wins over a captured cloud value.
+        const raw = readPersistedStateRaw(fullKey);
+        if (raw === null) return previous;
+        try {
+          return JSON.stringify(previous) === raw ? previous : JSON.parse(raw) as T;
+        } catch { return previous; /* Malformed data must not disturb live state. */ }
+      });
+    };
+    const unsubscribe = subscribePersistedStateHydration(fullKey, refresh);
+    // Catch a restore between the initial render and this subscription.
+    refresh();
+    return unsubscribe;
+  }, [fullKey]);
 
   const setState = useCallback((value: T | ((prev: T) => T)) => {
     setStateRaw(prev => {
       const next = typeof value === 'function' ? (value as (prev: T) => T)(prev) : value;
-      stateRef.current = next;
+      // Mount-time normalization often returns the original object. It is not a
+      // user edit and must not upload an empty default over a slow cloud restore.
+      if (Object.is(next, prev)) return prev;
       try {
-        localStorage.setItem(fullKey, JSON.stringify(next));
-      } catch {}
+        writePersistedStateRaw(fullKey, JSON.stringify(next));
+      } catch { /* A non-serializable value must not interrupt the live UI. */ }
       // 云端镜像：换浏览器后数据跟账号走。防抖、降级都在同步层内处理。
       if (userId) queueSimStatePush(userId, key, next);
       return next;
@@ -69,18 +88,18 @@ export function loadPersistedSimState(): PersistedSimState | null {
       }
       return parsed;
     }
-  } catch {}
+  } catch { /* Unavailable storage leaves the simulator at its default state. */ }
   return null;
 }
 
 export function saveSimState(state: PersistedSimState) {
   try {
     localStorage.setItem(getSimKey(), JSON.stringify(state));
-  } catch {}
+  } catch { /* The simulator remains usable without persistence. */ }
 }
 
 export function clearSimState() {
   try {
     localStorage.removeItem(getSimKey());
-  } catch {}
+  } catch { /* A blocked storage area must not prevent leaving the simulator. */ }
 }

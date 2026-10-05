@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
 import { getCampaignFullData, saveCampaignDeviationNotes } from '@/lib/journalApi';
+import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
 import { readCampaignReviewSummary, withCampaignReviewSummary } from '@/lib/campaignReviewSummary';
 import type { CampaignCounterfactual, TradeCampaign, TradeJournal } from '@/types/journal';
 import JournalCampaignDetailPage from '../JournalCampaignDetailPage';
@@ -290,6 +291,165 @@ function ListLocationProbe() {
 }
 
 describe('JournalCampaignDetailPage metrics', () => {
+  it('晚恢复保护单时同批只重建一次本地事实，风险恢复且不丢盘面倍率/未保存总结', async () => {
+    const initial = { ...detailsById.winner, legs: [detailsById.winner.legs[0]] };
+    const restoredOrders = [95, 96].map((price, index) => ({
+      id: `restored-protection-${index}`, tradeRecordId: null, side: 'SHORT' as const, price, fillPrice: null,
+      createdAt: Date.parse('2026-01-01T00:01:00.000Z'), triggeredAt: null,
+      cancelledAt: Date.parse('2026-01-01T00:30:00.000Z'), status: 'cancelled' as const,
+    }));
+    let restored = false;
+    vi.mocked(getCampaignFullData).mockImplementation(async id => id === 'winner'
+      ? { ...initial, reverseHedgeOrders: restored ? restoredOrders : [] }
+      : detailsById[id]);
+    const recoveryReads = () => vi.mocked(getCampaignFullData).mock.calls.filter(([, options]) => options?.source);
+    const view = render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    const range = await screen.findByRole('button', { name: '显示 51 倍战役时间范围' });
+    fireEvent.click(range);
+    fireEvent.change(screen.getByRole('textbox', { name: '复盘总结' }), { target: { value: '尚未保存的复盘草稿' } });
+    const lossValue = () => screen.getByRole('button', { name: '最大预期亏损说明' }).closest('[data-column]')?.lastElementChild?.textContent;
+    expect(lossValue()).toBe('—');
+    expect(screen.queryAllByTestId('reverse-order-chip')).toHaveLength(0);
+    const scrollCount = scrollToMock.mock.calls.length;
+    const recoveryCount = recoveryReads().length;
+    const branchesCount = listCounterfactualsMock.mock.calls.length;
+    restored = true;
+    act(() => {
+      notifyPersistedStateHydrated('sim_user-1_cancelled_orders');
+      notifyPersistedStateHydrated('sim_user-1_trade_history');
+      notifyPersistedStateHydrated('sim_user-1_orders_map');
+    });
+    // main-only 且无委托时本来就没有管理入口；恢复到保护单后才可打开它。
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }, { timeout: 10_000 }));
+    await waitFor(() => expect(screen.getAllByTestId('reverse-order-chip')).toHaveLength(2), { timeout: 10_000 });
+    expect(recoveryReads()).toHaveLength(recoveryCount + 1);
+    expect(recoveryReads().at(-1)?.[1]).toMatchObject({ heal: false, source: { campaign: { id: 'winner', user_id: 'user-1' } } });
+    expect(lossValue()).not.toBe('—');
+    expect(screen.getByRole('button', { name: '显示 51 倍战役时间范围' })).toBe(range);
+    expect(range).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('textbox', { name: '复盘总结' })).toHaveValue('尚未保存的复盘草稿');
+    expect(scrollToMock).toHaveBeenCalledTimes(scrollCount);
+    expect(listCounterfactualsMock).toHaveBeenCalledTimes(branchesCount);
+    view.unmount();
+    act(() => notifyPersistedStateHydrated('sim_user-1_cancelled_orders'));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(recoveryReads()).toHaveLength(recoveryCount + 1);
+  }, 30_000);
+
+  it('只订阅实际战役owner的恢复，不把viewer账号或无关行情键混入详情', async () => {
+    vi.mocked(getCampaignFullData).mockImplementation(async id => ({
+      ...detailsById[id], campaign: { ...detailsById[id].campaign, user_id: 'campaign-owner' },
+    }));
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('winner campaign');
+    const recoveryReads = () => vi.mocked(getCampaignFullData).mock.calls.filter(([, options]) => options?.source);
+    const count = recoveryReads().length;
+    act(() => {
+      notifyPersistedStateHydrated('sim_user-1_cancelled_orders');
+      notifyPersistedStateHydrated('sim_campaign-owner_price_map');
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(recoveryReads()).toHaveLength(count);
+    act(() => notifyPersistedStateHydrated('sim_campaign-owner_cancelled_orders'));
+    await waitFor(() => expect(recoveryReads()).toHaveLength(count + 1), { timeout: 10_000 });
+    expect(recoveryReads().at(-1)?.[1]?.source?.campaign.user_id).toBe('campaign-owner');
+  }, 30_000);
+
+  it('初次full已经读旧快照但还在等分支时发生恢复，装好订阅后补读一次', async () => {
+    let releaseBranches!: (branches: CampaignCounterfactual[]) => void;
+    listCounterfactualsMock.mockReturnValueOnce(new Promise(resolve => { releaseBranches = resolve; }));
+    let restored = false;
+    let initialRead = false;
+    let recoveryCalls = 0;
+    vi.mocked(getCampaignFullData).mockImplementation(async (id, options) => {
+      if (!options) initialRead = true;
+      if (options?.source) recoveryCalls += 1;
+      return { ...detailsById[id], reverseHedgeOrders: id === 'winner' && restored ? [{
+        id: 'caught-up-order', tradeRecordId: null, side: 'SHORT', price: 95, fillPrice: null,
+        createdAt: Date.parse('2026-01-01T00:01:00.000Z'), triggeredAt: null, cancelledAt: null, status: 'pending',
+      }] : [] };
+    });
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(initialRead).toBe(true), { timeout: 10_000 });
+    expect(screen.queryByText('winner campaign')).not.toBeInTheDocument();
+    restored = true;
+    act(() => notifyPersistedStateHydrated('sim_user-1_cancelled_orders'));
+    await act(async () => { releaseBranches([]); });
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+    await waitFor(() => expect(screen.getByTestId('reverse-order-chip')).toHaveTextContent('95'), { timeout: 10_000 });
+    expect(recoveryCalls).toBe(1);
+  }, 30_000);
+
+  it('较旧恢复请求迟到时不覆盖已经采用的新委托', async () => {
+    const base = detailsById.winner;
+    const resultWithOrder = (price: number) => ({ ...base, reverseHedgeOrders: [{
+      id: `restored-${price}`, tradeRecordId: null, side: 'SHORT' as const, price, fillPrice: null,
+      createdAt: Date.parse('2026-01-01T00:01:00.000Z'), triggeredAt: null,
+      cancelledAt: Date.parse('2026-01-01T00:30:00.000Z'), status: 'cancelled' as const,
+    }] });
+    let resolveOld!: (value: Awaited<ReturnType<typeof getCampaignFullData>>) => void;
+    const oldRequest = new Promise<Awaited<ReturnType<typeof getCampaignFullData>>>(resolve => { resolveOld = resolve; });
+    let recoveryCalls = 0;
+    vi.mocked(getCampaignFullData).mockImplementation(async (id, options) => {
+      if (!options?.source) return detailsById[id];
+      recoveryCalls += 1;
+      return recoveryCalls === 1 ? oldRequest : resultWithOrder(94);
+    });
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }));
+    act(() => notifyPersistedStateHydrated('sim_user-1_cancelled_orders'));
+    await waitFor(() => expect(recoveryCalls).toBe(1), { timeout: 10_000 });
+    act(() => notifyPersistedStateHydrated('sim_user-1_cancelled_orders'));
+    await waitFor(() => expect(screen.getByTestId('reverse-order-chip')).toHaveTextContent('94'), { timeout: 10_000 });
+    await act(async () => { resolveOld(resultWithOrder(95)); });
+    expect(screen.getByTestId('reverse-order-chip')).toHaveTextContent('94');
+    expect(screen.getByTestId('reverse-order-chip')).not.toHaveTextContent('95');
+  }, 30_000);
+
+  it('切换战役后丢弃旧战役仍在进行中的恢复', async () => {
+    let resolveOld!: (value: Awaited<ReturnType<typeof getCampaignFullData>>) => void;
+    const oldRequest = new Promise<Awaited<ReturnType<typeof getCampaignFullData>>>(resolve => { resolveOld = resolve; });
+    let recoveryCalls = 0;
+    vi.mocked(getCampaignFullData).mockImplementation(async (id, options) => {
+      if (options?.source) { recoveryCalls += 1; return oldRequest; }
+      return detailsById[id];
+    });
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+        <Link to="/journal/campaigns/loser">切换测试战役</Link>
+        <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText('winner campaign');
+    act(() => notifyPersistedStateHydrated('sim_user-1_cancelled_orders'));
+    await waitFor(() => expect(recoveryCalls).toBe(1), { timeout: 10_000 });
+    fireEvent.click(screen.getByRole('link', { name: '切换测试战役' }));
+    await screen.findByText('loser campaign');
+    await act(async () => { resolveOld({ ...detailsById.winner, reverseHedgeOrders: [{
+      id: 'stale-order', tradeRecordId: null, side: 'SHORT', price: 95, fillPrice: null,
+      createdAt: Date.parse('2026-01-01T00:01:00.000Z'), triggeredAt: null, cancelledAt: null, status: 'pending',
+    }] }); });
+    fireEvent.click(screen.getByRole('button', { name: '管理' }));
+    expect(screen.queryAllByTestId('reverse-order-chip')).toHaveLength(0);
+    expect(screen.getByText('loser campaign')).toBeInTheDocument();
+  }, 30_000);
+
   it('【用户要求】defaults to 1.1x and jumps to the selected centered K-line range', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>

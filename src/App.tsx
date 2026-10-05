@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { hydrateSimState } from "@/lib/simStateSync";
+import { useSimStateHydration } from "@/hooks/useSimStateHydration";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -28,30 +27,6 @@ import OAuthConsent from "./pages/OAuthConsent.tsx";
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 
 const queryClient = new QueryClient();
-
-/**
- * 登录后、交易组件树挂载前，把云端的引擎状态镜像水化回 localStorage。
- * 换浏览器登录同一账号时，持仓 / 成交历史 / 挂单 / 余额 / 各币时间线 / 信号库
- * 由此恢复；水化必须先于 TradingProvider——它的各 usePersistedState 在首次
- * render 就从 localStorage 取初值，晚了就只能读到空。
- * 失败或超时（4s）直接放行：离线也要能交易，同步永远不阻塞使用。
- */
-function useSimStateHydration(userId: string | null | undefined): boolean {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    const timeout = setTimeout(() => { if (!cancelled) setReady(true); }, 4000);
-    // 云端存档未启用时不弹提示——同步层已在 console 记录，仓库 SETUP_云端存档.md
-    // 有完整说明；每次登录都弹一遍只是噪音。
-    hydrateSimState(userId).finally(() => {
-      clearTimeout(timeout);
-      if (!cancelled) setReady(true);
-    });
-    return () => { cancelled = true; clearTimeout(timeout); };
-  }, [userId]);
-  return !userId || ready;
-}
 
 function AppRoutes() {
   const { user, profile, loading } = useAuth();
