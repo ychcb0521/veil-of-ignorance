@@ -2765,18 +2765,14 @@ export default function JournalCampaignsPage() {
     }
     const update = () => {
       const box = panel.querySelector<HTMLElement>('[data-layout="campaign-scatter-landscape"]');
-      const panelRect = panel.getBoundingClientRect();
-      // 临时展开的块（说明、合并三角的战役列表）不算进「盒子以外的部分」：展开它们时图盒高度不变，允许暂时超出一屏
-      let ignored = 0;
-      panel.querySelectorAll<HTMLElement>('[data-chart-fit="ignore"]').forEach(node => {
-        const style = window.getComputedStyle(node);
-        ignored += node.getBoundingClientRect().height + (Number.parseFloat(style.marginTop) || 0) + (Number.parseFloat(style.marginBottom) || 0);
-      });
+      // 【用户要求】绘图区本身和这一屏一样高：窗口高 − 吸顶区（页眉 + 统计 / 排序）。标题、图例、脚注不再挤在同一屏里，
+      // 上下稍微滚一下就能看到；所以这里不扣它们的高度（传 panelHeight = boxHeight）。
+      const boxHeight = box?.getBoundingClientRect().height ?? 0;
       const next = box ? chartBoxHeightToFitViewport({
         viewportHeight: window.innerHeight,
-        panelTop: Math.max(CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight, panelRect.top + window.scrollY),
-        panelHeight: panelRect.height - ignored,
-        boxHeight: box.getBoundingClientRect().height,
+        panelTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight,
+        panelHeight: boxHeight,
+        boxHeight,
       }) : null;
       setChartMaxBoxHeight(current => (current === next ? current : next));
     };

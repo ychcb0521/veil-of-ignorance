@@ -516,18 +516,19 @@ describe('JournalCampaignsPage sorting', () => {
     try {
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
       const box = () => document.querySelector<HTMLElement>('[data-layout="campaign-scatter-landscape"]')!;
-      // 778 − 168（面板顶边）− 168（标题、图例、脚注等）− 8（留白）= 434
-      await waitFor(() => expect(box().style.maxHeight).toBe('434px'));
+      // 绘图区本身占满一屏：778 − 148（页眉 57 + 吸顶区 91）− 8（留白）= 622
+      await waitFor(() => expect(box().style.maxHeight).toBe('622px'));
+      expect(box().style.minHeight).toBe('622px');
       expect(screen.getByTestId('campaign-odds-scatter-panel').style.scrollMarginTop).toBe('148px');
 
       // 换一张图（时序视图）上限照样带着
       fireEvent.click(screen.getByTestId('campaign-mainPriceChange-view-time'));
-      await waitFor(() => expect(box().style.maxHeight).toBe('434px'));
+      await waitFor(() => expect(box().style.maxHeight).toBe('622px'));
 
       // 窗口变高：上限跟着放宽
       Object.defineProperty(window, 'innerHeight', { configurable: true, value: 1150 });
       await act(async () => { window.dispatchEvent(new Event('resize')); });
-      expect(box().style.maxHeight).toBe('806px');
+      expect(box().style.maxHeight).toBe('994px');
     } finally {
       view.unmount();
       rects.mockRestore();
