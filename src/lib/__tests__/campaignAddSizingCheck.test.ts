@@ -4,7 +4,7 @@ import { addSizingSnapshotLines, describeAddSizingVerdict, evaluateCampaignAddSi
 import { pickBookLine } from '@/lib/hedgeLines';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { buildCloseRecords } from '@/lib/tradingSettlement';
-import type { TradeJournal } from '@/types/journal';
+import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import { calcSlippage, type AddSizingSnapshot, type CampaignReverseHedgeOrder, type Position, type TradeRecord } from '@/types/trading';
 
 /** 成本线式复核的注入口：两条路在数学上恒等，走正门造不出分歧；要测「对不上就不给对错号」只能把成本线算坏。 */
@@ -425,7 +425,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
         openedRealAt: actualMainImport, closedRealAt: actualMainImport + 4 * 60 * MIN }),
       record({ id: 'hei-mirror', positionId: sharedPosition, fillId: 'hei-mirror',
         entryPrice: 0.161673, quantity: mirrorCoins, openTime: opened, closeTime: tpAt,
-        pnl: 228_831.21, exit_method: 'tp1', openedRealAt: earlierTpImport,
+        pnl: 228_831.21, openedRealAt: earlierTpImport,
         closedRealAt: earlierTpImport + 10 * MIN }),
       ...addTimes.map((time, index) => record({
         id: `hei-add-${index + 1}`, positionId: sharedPosition, fillId: `hei-add-${index + 1}`,
@@ -447,7 +447,14 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
       })),
     ];
     const orders = addTimes.map((time, index) => short(stopPrices[index], time - MIN, index < 2 ? addTimes[index + 1] - 2 * MIN : null));
-    const verdicts = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: orders });
+    const campaignEvents = [{
+      id: 'hei-mirror-trigger', timestamp: iso(tpAt), event_type: 'mirror_tp_triggered',
+      leg_role: 'mirror_tp', journal_id: 'hei-mirror-leg', trade_record_id: 'hei-mirror',
+      pending_order_id: null, price: 0.166938, size_usdt: null, notes: null, recorded_at: iso(earlierTpImport),
+    }] as CampaignEvent[];
+    const withoutEvent = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: orders });
+    expect(withoutEvent.get('hei-add-leg-1')!.banked).toBe(0);
+    const verdicts = evaluateCampaignAddSizing({ legs, tradeRecords, campaignEvents, reverseHedgeOrders: orders });
     const first = verdicts.get('hei-add-leg-1')!;
     const second = verdicts.get('hei-add-leg-2')!;
     const third = verdicts.get('hei-add-leg-3')!;
@@ -458,6 +465,10 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(first.maxAllowedCoins).toBeGreaterThan(addCoins[0]);
     expect(second.maxAllowedCoins).toBeGreaterThan(addCoins[1]);
     expect(third.maxAllowedCoins).toBeLessThan(addCoins[2]);
+    const explicitManual = tradeRecords.map(record => record.id === 'hei-mirror'
+      ? { ...record, exit_method: 'manual' as const } : record);
+    expect(evaluateCampaignAddSizing({ legs, tradeRecords: explicitManual, campaignEvents, reverseHedgeOrders: orders })
+      .get('hei-add-leg-1')!.banked).toBe(0);
   });
 
   it('【回归】合并仓位：止盈那一刀拆到主力、镜像两条记录——已平掉的币不进浮盈垫，两条的利润都进 G', () => {

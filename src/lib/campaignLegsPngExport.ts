@@ -695,6 +695,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
   const addSizingMap = evaluateCampaignAddSizing({
     legs: input.legs,
     tradeRecords: input.tradeRecords,
+    campaignEvents: input.campaign.actual_evolution,
     legExitPriceCorrections: input.legExitPriceCorrections,
     reverseHedgeOrders: input.reverseHedgeOrders,
   });

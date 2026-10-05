@@ -758,8 +758,8 @@ export function CampaignLegsList({
 
   // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
-    () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
-    [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
+    () => evaluateCampaignAddSizing({ legs, tradeRecords, campaignEvents, legExitPriceCorrections, reverseHedgeOrders }),
+    [legs, tradeRecords, campaignEvents, legExitPriceCorrections, reverseHedgeOrders],
   );
   const selectedAddSizingLeg = addSizingDetailLegId == null
     ? null

@@ -58,7 +58,7 @@ import {
   journalCloseOperationTime,
   journalOpenOperationTime,
 } from '@/lib/objectiveOperationTime';
-import type { TradeJournal } from '@/types/journal';
+import type { CampaignEvent, TradeJournal } from '@/types/journal';
 import type { AddSizingSnapshot, CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export type AddSizingStatus = 'ok' | 'fail' | 'unknown';
@@ -132,6 +132,8 @@ export interface AddSizingVerdict {
 export interface CampaignAddSizingInput {
   legs: TradeJournal[];
   tradeRecords: TradeRecord[];
+  /** 本战役事件：仅在老成交缺失 exit_method 时，用明确的镜像触发事件补证。 */
+  campaignEvents?: CampaignEvent[];
   legExitPriceCorrections?: LegExitPriceCorrections;
   /** 与 Legs 表收到的同一份可见反向委托 */
   reverseHedgeOrders?: CampaignReverseHedgeOrder[];
@@ -241,6 +243,7 @@ function buildLedger(
   records: TradeRecord[],
   snapshotUsd: number | null,
   corrections: LegExitPriceCorrections,
+  mirrorTriggerTimes: ReadonlySet<number>,
 ): LegLedger {
   const open = execution.openTime;
   const recordOpenTimes = records.map(record => realTime(record.openedRealAt));
@@ -291,11 +294,14 @@ function buildLedger(
       time: record.closeTime,
       positionId: record.positionId ?? null,
       operationTime: realTime(record.closedRealAt),
-      // 有成交记录就只认记录上的退出方式，与计算器 detectBankedMirrorProfit 同一判据。
-      // 不能再看 leg_role：引擎把同向成交合并成一个仓位，手动 / 止损减仓按成交占比拆到每一笔，
-      // 镜像腿因此会分到一片正利润——那不是镜像止盈，混进 G 会让 Legs 比计算器多放出上千币。
-      // leg_role 兜底只留给没有记录、只剩复盘快照的腿（见上方 records.length === 0 分支）。
-      mirrorProfit: record.exit_method === 'tp1',
+      // 有明确退出方式就只认 tp1；不能只看 leg_role：合并仓位的手动 / 止损减仓
+      // 也会按成交占比拆到镜像腿，它们的正利润并不是镜像止盈。
+      // 老成交缺退出方式时，才用本战役明确的镜像触发时刻补证。
+      // 老记录可能没有 exit_method，但战役事件明确记着镜像止盈触发。
+      // 只在方式缺失且平仓模拟时刻与触发事件完全对应时补认；显式 manual/sl 不覆盖。
+      // 同向合并仓位在触发那一刀拆成主力、镜像等多条，均应计入这次落袋。
+      mirrorProfit: record.exit_method === 'tp1'
+        || (record.exit_method == null && mirrorTriggerTimes.has(record.closeTime)),
       coins: finite(closedCoins),
       usd,
       coin,
@@ -367,6 +373,10 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
   const result = new Map<string, AddSizingVerdict>();
   const addLegs = legs.filter(leg => (leg.leg_role ?? '').startsWith('main_add_'));
   if (addLegs.length === 0) return result;
+  const mirrorTriggerTimes = new Set((input.campaignEvents ?? [])
+    .filter(event => event.event_type === 'mirror_tp_triggered')
+    .map(event => Date.parse(event.timestamp))
+    .filter(Number.isFinite));
 
   const recordMap = buildTradeRecordLookup(tradeRecords);
   // 每条腿认领哪几刀、快照盈亏是多少，走已实现盈亏的唯一真源，与 Legs「贡献 / 盈亏」列同源
@@ -389,7 +399,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
      * 没有成交、没有盈亏，开仓价还是止盈触发价。把它当旧仓会凭空拿触发价算出一大块负浮盈垫。
      */
     if (leg.leg_role === 'mirror_tp' && !leg.trade_record_id && records.length === 0 && snapshotUsd == null) return [];
-    return [[leg.id, buildLedger(leg, executions.get(leg.id)!, records, snapshotUsd, corrections)] as const];
+    return [[leg.id, buildLedger(leg, executions.get(leg.id)!, records, snapshotUsd, corrections, mirrorTriggerTimes)] as const];
   }));
 
   for (const add of addLegs) {
