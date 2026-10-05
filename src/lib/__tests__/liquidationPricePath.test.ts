@@ -317,9 +317,9 @@ describe('【复审】跳时间、换方向不得让仓位永久免死', () => {
     expect(nextExposure(undefined, naorisShort(), t('07:26') - 20_000, 1, tol).start).toBe(t('07:26'));
   });
 
-  it('带着仓位跳回更早的日期：起点改从此刻算，之后的价照常判；此后随时钟前进不再变', () => {
+  it('明确带仓跳回更早的日期：起点改从操作时钟算，之后的价照常判且起点不再变', () => {
     const pos = naorisShort();
-    const jumped = nextExposure(nextExposure(undefined, pos, t('07:30'), 1, tol), pos, t('05:00'), 1, tol);
+    const jumped = nextExposure(nextExposure(undefined, pos, t('07:30'), 1, tol), pos, t('05:00'), 1, tol, { rebaseAt: t('05:00') });
     expect(jumped.start).toBe(t('05:00'));
     expect(priceObservedWhilePositionOpen(t('05:01'), pos, 1)).toBe(false);   // 只比时间戳：要等回到 07:26
     expect(priceObservedAfter(t('05:01'), jumped.start, 1)).toBe(true);
@@ -328,9 +328,14 @@ describe('【复审】跳时间、换方向不得让仓位永久免死', () => {
 
   it('正放开仓后倒放：起点改从倒放开始的那一刻算', () => {
     const pos = naorisShort();
-    const rev = nextExposure(nextExposure(undefined, pos, t('07:40'), 1, tol), pos, t('07:40'), -1, tol);
+    const rev = nextExposure(nextExposure(undefined, pos, t('07:40'), 1, tol), pos, t('07:40'), -1, tol, { rebaseAt: t('07:40') });
     expect(rev.start).toBe(t('07:40'));
     expect(priceObservedAfter(t('07:35'), rev.start, -1)).toBe(true);
+    expect(evaluateIsolatedLiquidation({
+      symbol: 'NAORISUSDT', position: pos, price: 0.12,
+      priceAsOf: t('07:35'), nowSim: t('07:35'), toleranceMs: tol,
+      direction: -1, riskSince: rev.start,
+    }).liquidate).toBe(true);
   });
 
   it('高倍速下跳得近不重置：空窗是时钟走回开仓时刻的那一段，不超过 5 秒真实时间', () => {
@@ -348,12 +353,90 @@ describe('【复审】跳时间、换方向不得让仓位永久免死', () => {
       .toEqual({ since: null, start: null });
   });
 
-  it('逐根判定的下限同样会重置；落后在容忍度内则不动', () => {
+  it('逐根判定仅明确操作才重置；重置采用操作时钟而不是迟到的旧 K 线时间', () => {
     const pos = naorisShort();
     const first = updateRiskFloors(new Map(), [pos], t('07:25'), t('07:26'), 60_000);
-    expect(updateRiskFloors(first, [pos], t('07:27'), t('05:00'), 60_000).get(pos.id)?.floor).toBe(t('05:00'));
-    expect(updateRiskFloors(new Map(), [pos], t('05:00'), t('05:01'), 60_000).get(pos.id)?.floor).toBe(t('05:01'));
+    const reset = updateRiskFloors(first, [pos], t('07:27'), t('04:00'), 60_000, { rebaseAt: t('05:00') });
+    expect(reset.get(pos.id)?.floor).toBe(t('05:00'));
+    const next = updateRiskFloors(reset, [pos], t('05:00'), t('05:01'), 60_000);
+    expect(next.get(pos.id)?.floor).toBe(t('05:00'));
+    expect(evaluateIsolatedLiquidationOnCandle({
+      symbol: 'NAORISUSDT', position: pos, riskSince: next.get(pos.id)!.floor,
+      candle: { high: 0.14, low: 0.13, close: 0.135, startTime: t('05:00'), endTime: t('05:01') },
+    }).liquidate).toBe(true);
     expect(updateRiskFloors(first, [pos], t('07:26'), t('07:25') + 30_000, 60_000).get(pos.id)).toBe(first.get(pos.id));
+  });
+
+  it('旧仓位的明确重置也会保留，无效重置不移除开仓保护', () => {
+    const legacy = naorisShort({ openTime: undefined, fills: undefined });
+    const reset = nextExposure(undefined, legacy, t('05:00'), 1, tol, { rebaseAt: t('05:00') });
+    expect(nextExposure(reset, legacy, t('05:01'), 1, tol).start).toBe(t('05:00'));
+    for (const invalid of [NaN, Infinity, 0, -1]) {
+      expect(nextExposure(undefined, naorisShort(), t('05:00'), 1, tol, { rebaseAt: invalid }).start).toBe(t('07:26'));
+      expect(updateRiskFloors(new Map(), [naorisShort()], undefined, t('05:00'), tol, { rebaseAt: invalid })
+        .get('hedge-3')?.floor).toBe(t('07:26'));
+    }
+  });
+});
+
+describe('【回归】BEL：6 月开仓不得被 4 月旧行情重置风险后强平', () => {
+  const april = Date.parse('2026-04-21T16:15:00+08:00');
+  const juneMain = Date.parse('2026-06-22T21:46:00+08:00');
+  const juneAdd = Date.parse('2026-06-23T00:21:00+08:00');
+  const positions = [
+    { id: 'bel-main', entryPrice: 0.211083, openTime: juneMain },
+    { id: 'bel-add', entryPrice: 0.224863, openTime: juneAdd },
+  ].map(({ id, entryPrice, openTime }) => naorisShort({
+    id, side: 'LONG', entryPrice, openTime, quantity: 1_000, leverage: 10,
+    margin: entryPrice * 100, isolatedMargin: entryPrice * 100,
+    fills: [{ id, openTime, entryPrice, units: 1_000 }],
+  }));
+
+  it('未知旧时钟不能自动授权兜底风控重置，即使超出高倍速容差', () => {
+    for (const position of positions) {
+      const first = nextExposure(undefined, position, juneAdd + MIN, 1, staleToleranceMs(3600));
+      const stale = nextExposure(first, position, april + MIN, 1, staleToleranceMs(3600));
+      expect(stale.start).toBe(position.openTime);
+      expect(nextExposure(undefined, position, april, 1, staleToleranceMs(3600)).start).toBe(position.openTime);
+      expect(evaluateIsolatedLiquidation({
+        symbol: 'BELUSDT', position, price: 0.013350, priceAsOf: april + MIN,
+        nowSim: april + MIN, toleranceMs: staleToleranceMs(3600), riskSince: stale.start,
+      })).toEqual({ liquidate: false, reason: 'price_before_open' });
+    }
+  });
+
+  it('首次加载与恢复后连续收到多根旧 K 线，风险下限都不能倒退', () => {
+    for (const initial of [
+      new Map(),
+      updateRiskFloors(new Map(), positions, juneAdd, juneAdd + MIN, 60_000),
+    ]) {
+      let floors = initial;
+      let lastSeen: number | undefined = juneAdd + MIN;
+      for (let i = 0; i < 4; i += 1) {
+        const startTime = april + i * MIN;
+        const endTime = startTime + MIN;
+        floors = updateRiskFloors(floors, positions, lastSeen, endTime, 60_000);
+        lastSeen = endTime;
+        for (const position of positions) {
+          const riskSince = floors.get(position.id)!.floor;
+          expect(riskSince).toBeGreaterThanOrEqual(position.openTime!);
+          expect(evaluateIsolatedLiquidationOnCandle({
+            symbol: 'BELUSDT', position, riskSince,
+            candle: { high: 0.013350, low: 0.013000, close: 0.013200, startTime, endTime },
+          })).toEqual({ liquidate: false, reason: 'candle_before_open' });
+        }
+      }
+    }
+  });
+
+  it('回到真正开仓之后，同样跌破强平价的行情仍正常触发风控', () => {
+    const floors = updateRiskFloors(new Map(), positions, juneAdd, juneAdd + MIN, 60_000);
+    for (const position of positions) {
+      expect(evaluateIsolatedLiquidationOnCandle({
+        symbol: 'BELUSDT', position, riskSince: floors.get(position.id)!.floor,
+        candle: { high: 0.013350, low: 0.013000, close: 0.013200, startTime: juneAdd + MIN, endTime: juneAdd + 2 * MIN },
+      }).liquidate).toBe(true);
+    }
   });
 });
 

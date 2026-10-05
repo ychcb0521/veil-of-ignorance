@@ -383,10 +383,10 @@ describe('useBackgroundPrices', () => {
       return { setPositionsMap, setFilledOrders, stampClock };
     }
 
-    it('【回归】BBB 没有自己的钟：价照取，单不撮合，也不去取一枚空章', async () => {
+    it('【回归】BBB 没有自己的钟：不借全局时间取价，不撮合，也不去取一枚空章', async () => {
       const { setPositionsMap, setFilledOrders, stampClock } = mountIsolated(null);
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-      expect(fetchCanonicalTimePriceAt).toHaveBeenCalledWith('BBBUSDT', 1_000);
+      expect(fetchCanonicalTimePriceAt).not.toHaveBeenCalledWith('BBBUSDT', expect.any(Number));
       expect(setPositionsMap).not.toHaveBeenCalled();
       expect(setFilledOrders).not.toHaveBeenCalled();
       expect(stampClock).not.toHaveBeenCalled();
@@ -398,8 +398,16 @@ describe('useBackgroundPrices', () => {
       expect(setPositionsMap).not.toHaveBeenCalled();
     });
 
-    it('BBB 的钟在跑（暂停也算）：照常撮合、照常盖章', async () => {
+    it('BBB 的钟暂停：即使 AAA 仍在播放，也不更新价格、不撮合', async () => {
       const { setPositionsMap, stampClock } = mountIsolated({ status: 'paused', time: 1_000, speed: 1, historicalAnchorTime: 1_000, realStartTime: null, originTime: 1_000 });
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCanonicalTimePriceAt).not.toHaveBeenCalledWith('BBBUSDT', expect.any(Number));
+      expect(setPositionsMap).not.toHaveBeenCalled();
+      expect(stampClock).not.toHaveBeenCalled();
+    });
+
+    it('BBB 的钟确实在播放：照常撮合、照常盖章', async () => {
+      const { setPositionsMap, stampClock } = mountIsolated(running);
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
       expect(setPositionsMap).toHaveBeenCalledTimes(1);
       expect(stampClock).toHaveBeenCalledWith('BBBUSDT');
@@ -461,6 +469,177 @@ describe('useBackgroundPrices', () => {
       await advance(3000);
       const ethCalls = vi.mocked(fetchCanonicalTimePriceAt).mock.calls.filter(c => c[0] === 'ETHUSDT');
       expect(ethCalls.length).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  describe('【回归】迟到的行情不能越过暂停或时间线切换', () => {
+    function mountPendingRequest() {
+      let resolvePrice!: (value: { high: number; low: number; close: number }) => void;
+      const pending = new Promise<{ high: number; low: number; close: number }>((resolve) => { resolvePrice = resolve; });
+      vi.mocked(fetchCanonicalTimePriceAt).mockReturnValue(pending);
+      const order: PendingOrder = {
+        id: 'background-tp', side: 'SHORT', type: 'CONDITIONAL', price: 0, stopPrice: 1,
+        quantity: 1, leverage: 5, marginMode: 'isolated', status: 'PENDING', createdAt: 100,
+        operator: '>=', triggerDirection: 'UP', reduceOnly: true,
+        reduceSymbol: 'BACKGROUNDUSDT', linkedPositionId: 'held', reduceKind: 'TP',
+      };
+      let replayTime = 1_000;
+      const clock = { status: 'playing', time: 1_000, speed: 1, historicalAnchorTime: 1_000, realStartTime: 1, originTime: 1_000 };
+      const context = {
+        sim: { isRunning: true, status: 'playing', direction: 1, historicalAnchorTime: 1_000, realStartTime: 1, speed: 1 },
+        activeSymbol: 'ACTIVEUSDT',
+        activeSymbols: ['ACTIVEUSDT', 'BACKGROUNDUSDT'],
+        timeMode: 'synced',
+        coinTimelines: { ACTIVEUSDT: { ...clock }, BACKGROUNDUSDT: { ...clock } },
+        setPriceMap: vi.fn((updater: (prev: Record<string, number>) => Record<string, number>) => updater({})),
+        markPriceAsOf: vi.fn(),
+        ordersMap: { BACKGROUNDUSDT: [order] },
+        setOrdersMap: vi.fn(),
+        setPositionsMap: vi.fn(),
+        setFilledOrders: vi.fn(),
+        settleFillDebit: vi.fn(() => true),
+        tradingMode: 'direct',
+        getEffectiveTime: vi.fn(() => replayTime),
+        stampClock: vi.fn(() => 'timeline'),
+        recordExecutionTrade: vi.fn(),
+        executeReduceOnlyTrigger: vi.fn(() => ({ ok: true })),
+        applyAttachedTpSl: vi.fn(),
+        applyMergeSideEffects: vi.fn(),
+        canExecuteReplayOrder: vi.fn((_symbol: string, candidate: PendingOrder, at: number) => at >= candidate.createdAt),
+      };
+      vi.mocked(useTradingContext).mockImplementation(() => context as unknown as ReturnType<typeof useTradingContext>);
+      const view = render(<Harness />);
+      return {
+        context, order, view,
+        rerender: () => view.rerender(<Harness />),
+        setTime: (time: number) => { replayTime = time; view.rerender(<Harness />); },
+        start: async () => { await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); },
+        finish: async () => { await act(async () => { resolvePrice({ high: 1, low: 1, close: 1 }); }); },
+      };
+    }
+
+    it('请求未结束时暂停：返回后不改价格、不盖新鲜戳、不成交', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.context.sim = { ...run.context.sim, isRunning: false, status: 'paused' };
+      run.rerender();
+      await run.finish();
+      expect(run.context.setPriceMap).not.toHaveBeenCalled();
+      expect(run.context.markPriceAsOf).not.toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('暂停后立刻继续，也不能接纳暂停前的旧请求；下一轮恢复正常', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.context.sim = { ...run.context.sim, isRunning: false, status: 'paused' };
+      run.rerender();
+      run.context.sim = { ...run.context.sim, isRunning: true, status: 'playing' };
+      run.rerender();
+      await run.finish();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+      expect(run.context.setPriceMap).not.toHaveBeenCalled();
+      await run.start();
+      expect(run.context.executeReduceOnlyTrigger).toHaveBeenCalledTimes(1);
+    });
+
+    it('暂停前的请求一直未返回，也不能阻塞恢复后的新一轮取价', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.context.sim = { ...run.context.sim, isRunning: false, status: 'paused' };
+      run.rerender();
+      run.context.sim = { ...run.context.sim, isRunning: true, status: 'playing' };
+      run.rerender();
+      vi.mocked(fetchCanonicalTimePriceAt).mockResolvedValue({ high: 2, low: 2, close: 2 });
+      await run.start();
+      expect(run.context.markPriceAsOf).toHaveBeenCalledWith('BACKGROUNDUSDT', 1_000, 2);
+      expect(run.context.executeReduceOnlyTrigger).toHaveBeenCalledTimes(1);
+      await run.finish();
+      expect(run.context.markPriceAsOf).not.toHaveBeenCalledWith('BACKGROUNDUSDT', 1_000, 1);
+      expect(run.context.executeReduceOnlyTrigger).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['activeSymbol', 'timeMode', 'anchor', 'direction'] as const)('请求途中切换 %s：旧上下文的行情和撮合全部作废', async (kind) => {
+      const run = mountPendingRequest();
+      await run.start();
+      if (kind === 'activeSymbol') run.context.activeSymbol = 'BACKGROUNDUSDT';
+      if (kind === 'timeMode') run.context.timeMode = 'isolated';
+      if (kind === 'anchor') run.context.sim.historicalAnchorTime = 500;
+      if (kind === 'direction') run.context.sim.direction = -1;
+      run.rerender();
+      await run.finish();
+      expect(run.context.setPriceMap).not.toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('独立模式后台币暂停：全局仍播放时，迟到请求也不得成交', async () => {
+      const run = mountPendingRequest();
+      run.context.timeMode = 'isolated';
+      run.rerender();
+      await run.start();
+      run.context.coinTimelines.BACKGROUNDUSDT = { ...run.context.coinTimelines.BACKGROUNDUSDT, status: 'paused' };
+      run.rerender();
+      await run.finish();
+      expect(run.context.markPriceAsOf).not.toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('正常模拟时间推进不作废请求，但行情戳和成交时间必须仍是请求时刻', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.setTime(61_000);
+      await run.finish();
+      expect(run.context.markPriceAsOf).toHaveBeenCalledWith('BACKGROUNDUSDT', 1_000, 1);
+      expect(run.context.executeReduceOnlyTrigger).toHaveBeenCalledWith('BACKGROUNDUSDT', run.order, 1, 1_000);
+    });
+
+    it('时钟意外倒退但控制信息未刷新时，也不得接纳新时钟未来的行情', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.setTime(500);
+      await run.finish();
+      expect(run.context.markPriceAsOf).not.toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('正常倒放仍可接纳请求时刻的行情，不把时间递减误判为跨时钟', async () => {
+      const run = mountPendingRequest();
+      run.context.sim.direction = -1;
+      run.rerender();
+      await run.start();
+      run.setTime(500);
+      await run.finish();
+      expect(run.context.markPriceAsOf).toHaveBeenCalledWith('BACKGROUNDUSDT', 1_000, 1);
+      expect(run.context.executeReduceOnlyTrigger).toHaveBeenCalledTimes(1);
+    });
+
+    it('等待行情期间撤销的订单不会被旧列表重新成交', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.context.ordersMap = { BACKGROUNDUSDT: [] };
+      run.rerender();
+      await run.finish();
+      expect(run.context.setPriceMap).toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('等待行情期间新增的订单不消费挂单之前的行情', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.context.ordersMap = { BACKGROUNDUSDT: [{ ...run.order, createdAt: 2_000 }] };
+      run.setTime(2_000);
+      await run.finish();
+      expect(run.context.canExecuteReplayOrder).toHaveBeenCalledWith('BACKGROUNDUSDT', expect.objectContaining({ createdAt: 2_000 }), 1_000);
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
+    });
+
+    it('卸载后返回的行情不能产生任何写入', async () => {
+      const run = mountPendingRequest();
+      await run.start();
+      run.view.unmount();
+      await run.finish();
+      expect(run.context.setPriceMap).not.toHaveBeenCalled();
+      expect(run.context.executeReduceOnlyTrigger).not.toHaveBeenCalled();
     });
   });
 });

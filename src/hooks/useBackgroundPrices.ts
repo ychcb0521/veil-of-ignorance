@@ -51,17 +51,51 @@ export function useBackgroundPrices() {
     applyAttachedTpSl,
     applyMergeSideEffects,
     judgePlannedAddFill,
+    canExecuteReplayOrder,
   } = useTradingContext();
 
   const lastPollRef = useRef<number>(0);
-  const pollingRef = useRef(false);
+  const pollingEpochRef = useRef<number | null>(null);
+  const mountedRef = useRef(false);
+  // Normal RAF time flushes must not cancel a request (or a fast replay would
+  // never receive prices). Only playback/session controls advance this epoch.
+  const controlKey = JSON.stringify([
+    timeMode, tradingMode, activeSymbol, sim.isRunning, sim.status, sim.direction,
+    timeMode === 'isolated' ? null : [sim.historicalAnchorTime, sim.realStartTime, sim.speed],
+    [...new Set([...activeSymbols, activeSymbol])].sort().map((symbol) => {
+      const ct = timeMode === 'isolated' ? coinTimelines[symbol] : null;
+      return [symbol, ct && [ct.status, ct.historicalAnchorTime, ct.realStartTime, ct.originTime, ct.speed]];
+    }),
+  ]);
+  const requestEpochRef = useRef({ key: controlKey, value: 0 });
+  if (requestEpochRef.current.key !== controlKey) {
+    requestEpochRef.current = { key: controlKey, value: requestEpochRef.current.value + 1 };
+  }
+  const latestInputsRef = useRef({ sim, timeMode, coinTimelines, activeSymbol, activeSymbols, ordersMap, getEffectiveTime });
+  latestInputsRef.current = { sim, timeMode, coinTimelines, activeSymbol, activeSymbols, ordersMap, getEffectiveTime };
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const isSymbolPlaying = useCallback((symbol: string) => {
+    const current = latestInputsRef.current;
+    if (!current.sim.isRunning) return false;
+    if (current.timeMode !== 'isolated') return current.sim.status == null || current.sim.status === 'playing';
+    const ct = current.coinTimelines[symbol];
+    return ct?.status === 'playing' && isCoinTimelineClockActive(ct);
+  }, []);
 
   // Simple matching for background symbols
   const matchBackgroundOrders = useCallback(
-    (symbol: string, kline: KlinePrice, orders: PendingOrder[]) => {
+    (symbol: string, kline: KlinePrice, orders: PendingOrder[], simulatedTime: number) => {
       const filledIds: string[] = [];
 
       for (const order of orders) {
+        if (!isSymbolPlaying(symbol)) break;
+        // The response describes its request time, not the later time at which
+        // it arrives. An order created in between must not consume that price.
+        if (canExecuteReplayOrder && !canExecuteReplayOrder(symbol, order, simulatedTime)) continue;
         let triggered = false;
         let fillPrice = 0;
 
@@ -109,7 +143,7 @@ export function useBackgroundPrices() {
         if (triggered) {
           // === REDUCE-ONLY (TP/SL) PATH ===
           if (order.reduceOnly && order.linkedPositionId) {
-            executeReduceOnlyTrigger(symbol, order, fillPrice, getEffectiveTime(order.reduceSymbol || symbol));
+            executeReduceOnlyTrigger(symbol, order, fillPrice, simulatedTime);
             continue;
           }
 
@@ -128,7 +162,6 @@ export function useBackgroundPrices() {
           // executeSettlementFill 是纯函数,盘面撮合(Index.tsx:545,1251)用的就是它:
           // 归一化 → 滑点 → 手续费 → 保证金 → 造出带齐结算字段的 Position。
           filledIds.push(order.id);
-          const simulatedTime = getEffectiveTime(symbol);
           // 与盘面撮合（Index.tsx）同一口径、也是币安的口径：挂在盘口成交的限价单是 Maker，
           // 触发后按市价成交的是 Taker。这里原来一律按 Taker 收，后台标的的限价单多付了一倍半。
           const isMaker = order.type === 'LIMIT' || order.type === 'POST_ONLY' || order.type === 'LIMIT_TP_SL';
@@ -261,74 +294,73 @@ export function useBackgroundPrices() {
         }));
       }
     },
-    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, getPositionLimitMode, executeReduceOnlyTrigger, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, recordExecutionTrade, tradingMode, getEffectiveTime, stampClock],
+    [setPositionsMap, setOrdersMap, setFilledOrders, settleFillDebit, getPositionLimitMode, executeReduceOnlyTrigger, applyAttachedTpSl, applyMergeSideEffects, judgePlannedAddFill, recordExecutionTrade, tradingMode, stampClock, isSymbolPlaying, canExecuteReplayOrder],
   );
 
   const pollBackgroundSymbols = useCallback(async () => {
-    if (!sim.isRunning || pollingRef.current) return;
+    const epoch = requestEpochRef.current.value;
+    if (!sim.isRunning || pollingEpochRef.current === epoch) return;
 
     const now = Date.now();
     const MIN_POLL_MS = 1000;
     if (now - lastPollRef.current < MIN_POLL_MS) return;
 
-    const priceSymbols = Array.from(new Set([...activeSymbols, activeSymbol]));
+    const priceSymbols = Array.from(new Set([...activeSymbols, activeSymbol])).filter(isSymbolPlaying);
     if (priceSymbols.length === 0) return;
-    // Keep refreshing the visible symbol's canonical price, but never match its
-    // orders here: Index's candle engine owns that path.
-    const backgroundOrderSymbols = priceSymbols.filter((symbol) => symbol !== activeSymbol);
-
-    pollingRef.current = true;
+    pollingEpochRef.current = epoch;
     lastPollRef.current = now;
+    const requestIsCurrent = () => mountedRef.current && requestEpochRef.current.value === epoch;
 
     try {
       const batchSize = 10;
-      const newPrices: Record<string, KlinePrice> = {};
 
       for (let i = 0; i < priceSymbols.length; i += batchSize) {
+        if (!requestIsCurrent()) return;
         const batch = priceSymbols.slice(i, i + batchSize);
         const results = await Promise.all(
           batch.map((sym) => {
-            const effectiveTime = getEffectiveTime(sym);
-            return fetchCanonicalTimePriceAt(sym, effectiveTime).then((r) => ({ sym, r })).catch(() => ({ sym, r: null }));
+            const requestedTime = latestInputsRef.current.getEffectiveTime(sym);
+            return fetchCanonicalTimePriceAt(sym, requestedTime)
+              .then((r) => ({ sym, r, requestedTime }))
+              .catch(() => ({ sym, r: null, requestedTime }));
           }),
         );
-        for (const { sym, r } of results) {
-          if (!r) continue;
-          newPrices[sym] = r;
-          // 登记这个价属于哪一刻：用发起请求时的 effectiveTime，不是落地时刻。
-          // 只给**真正取到价**的标的盖戳——取失败的（catch → r=null）保持旧戳，
-          // 于是它继续被强平判据视为陈价。这是整条闸门的关键：
-          // 盖戳绝不能按「结果 map 里的所有键」来，那会把陈价一起认证成新鲜的。
-          markPriceAsOf(sym, getEffectiveTime(sym), r.close);
+        // Pause, resume, seek, direction/mode change, or chart handover makes
+        // every result from the previous control generation ineligible.
+        if (!requestIsCurrent()) return;
+        const usable = results.filter(({ sym, r, requestedTime }) => {
+          if (!r || !isSymbolPlaying(sym)) return false;
+          const latest = latestInputsRef.current;
+          const currentTime = latest.getEffectiveTime(sym);
+          return latest.sim.direction === -1 ? requestedTime >= currentTime : requestedTime <= currentTime;
+        });
+        for (const { sym, r, requestedTime } of usable) {
+          markPriceAsOf(sym, requestedTime, r!.close);
+        }
+        if (usable.length > 0) {
+          setPriceMap((prev) => {
+            if (!requestIsCurrent()) return prev;
+            const next = { ...prev };
+            for (const { sym, r } of usable) {
+              if (isSymbolPlaying(sym)) next[sym] = r!.close;
+            }
+            return next;
+          });
+        }
+        for (const { sym, r, requestedTime } of usable) {
+          if (!requestIsCurrent() || !isSymbolPlaying(sym)) continue;
+          // Index owns the current chart's orders. Read the latest list so a
+          // cancellation while fetching cannot be resurrected by this response.
+          const latest = latestInputsRef.current;
+          if (sym === latest.activeSymbol) continue;
+          const orders = latest.ordersMap[sym];
+          if (orders?.length) matchBackgroundOrders(sym, r!, orders, requestedTime);
         }
       }
-
-      if (Object.keys(newPrices).length > 0) {
-        setPriceMap((prev) => {
-          const next = { ...prev };
-          for (const [sym, kline] of Object.entries(newPrices)) {
-            next[sym] = kline.close;
-          }
-          return next;
-        });
-      }
-
-      for (const sym of backgroundOrderSymbols) {
-        const kline = newPrices[sym];
-        if (!kline) continue;
-        const orders = ordersMap[sym];
-        if (!orders || orders.length === 0) continue;
-        /**
-         * 隔离模式一个币一只钟：没启动过（或已停）的币没有时间，它的委托不撮合。
-         * getEffectiveTime 对这样的币退回全局 sim 的时刻——那只钟在隔离模式下只是「有没有币在跑」的开关，
-         * 走到哪与这个币无关（同步模式切过来时它甚至还在原地跑）。拿它撮合出的成交没有回放时间线可盖，
-         * 委托的挂单章却指向已结束的同步时间线，读取侧只能判成「另一条线上的单」。
-         */
-        if (timeMode === "isolated" && !isCoinTimelineClockActive(coinTimelines[sym])) continue;
-        matchBackgroundOrders(sym, kline, orders);
-      }
     } finally {
-      pollingRef.current = false;
+      // A stale unresolved request must not block the resumed clock, nor may
+      // its eventual completion unlock a newer in-flight polling generation.
+      if (pollingEpochRef.current === epoch) pollingEpochRef.current = null;
     }
   }, [
     sim.isRunning,
@@ -341,6 +373,7 @@ export function useBackgroundPrices() {
     setPriceMap,
     markPriceAsOf,
     matchBackgroundOrders,
+    isSymbolPlaying,
   ]);
 
   /**

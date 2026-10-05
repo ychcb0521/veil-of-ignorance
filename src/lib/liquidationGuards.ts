@@ -296,29 +296,38 @@ export interface ExposureEntry {
 }
 
 /**
- * 兜底判定用的风险起点：通常就是仓位（当前构成）形成的那一刻；时钟一旦落到它「之前」
- * 超过容忍度——只有跳时间、换方向才会这样——就改从此刻算起。
- *
- * 只比原始时间戳，会把两种正当操作变成永久免死：
- *   · 带着仓位跳回更早的日期：时钟走回开仓时刻之前，每一个价都被当成「成形之前」；
- *   · 正放开仓后倒放（或反过来）：倒放时「之后」是更早的时刻，正放开的仓一个价都不认。
- * 容忍度与陈价同一个（staleToleranceMs：60 秒，或 5 秒真实时间 × 倍速）。界面时钟的落后
- * 只有 250 毫秒真实时间 × 倍速，远小于它，正常播放不会误触重置；重置前的空窗也不超过这么多。
+ * 仅由明确的跳时间／换方向操作传入，不能从行情日期倒退推断。
+ * rebaseAt 必须是用户操作后的回放时钟，而不是某根刚收到的 K 线日期。
+ */
+export interface ExplicitRiskRebase {
+  rebaseAt: number;
+}
+
+function explicitRiskRebaseTime(rebase?: ExplicitRiskRebase): number | null {
+  const time = rebase?.rebaseAt;
+  return time != null && Number.isFinite(time) && time > 0 ? time : null;
+}
+
+/**
+ * 兜底判定用的风险起点：默认保持仓位当前构成的形成时刻。
+ * 迟到的旧行情、暂停恢复或尚未就绪的时钟，均不得把风险起点退回开仓之前。
+ * 用户明确跳时间／换方向时，调用方可一次性传 rebase；之后保留该起点，
+ * 不会让带仓跳时间变成永久免死，也不会把异常的旧行情自动认证为新时间线。
+ * clock / toleranceMs 保留以兼容调用方；它们不再构成重置风险起点的授权。
  */
 export function nextExposure(
   prev: ExposureEntry | undefined,
   position: Position,
-  clock: number,
+  _clock: number,
   direction: 1 | -1,
-  toleranceMs: number,
+  _toleranceMs: number,
+  rebase?: ExplicitRiskRebase,
 ): ExposureEntry {
   const since = positionRiskSince(position, direction);
-  if (since == null) return { since: null, start: null };
+  const rebaseAt = explicitRiskRebaseTime(rebase);
+  if (rebaseAt != null) return { since, start: rebaseAt };
   const base = prev && prev.since === since && prev.start != null ? prev.start : since;
-  if (!Number.isFinite(clock) || clock <= 0) return { since, start: base };
-  const tol = Math.max(0, toleranceMs);
-  const clockBehind = direction === 1 ? base - clock > tol : clock - base > tol;
-  return { since, start: clockBehind ? clock : base };
+  return { since, start: base };
 }
 
 /**
@@ -480,29 +489,34 @@ export interface RiskFloorEntry {
  * 时钟倒退（跳时间、换方向）或第一次判定时没有可信的「上一次」，下限取这一次的最后时刻：
  * 这一根整根跳过，从下一根开始判——偏向不强平。已不在的仓位顺手清掉。
  *
- * 时钟落到下限之前超过 discontinuityMs（带着仓位跳回更早的日期、倒放之后再正放），
- * 下限改从这一刻算起——否则仓位要等时钟走回它的开仓时刻才重新可判，跳得远就等于永久免死。
+ * 旧行情日期倒退绝不是跳时间的证据：默认不降低已有下限，也不早于仓位形成时刻。
+ * 明确跳时间／换方向时可一次性传 rebase，以操作后的时钟为新下限；
+ * 下一根及后续 K 线照常承担风险。discontinuityMs 仅为兼容调用方保留。
  */
 export function updateRiskFloors(
   prev: ReadonlyMap<string, RiskFloorEntry>,
   positions: readonly Position[],
   lastSeenEnd: number | undefined,
   candleEnd: number,
-  discontinuityMs = Number.POSITIVE_INFINITY,
+  _discontinuityMs = Number.POSITIVE_INFINITY,
+  rebase?: ExplicitRiskRebase,
 ): Map<string, RiskFloorEntry> {
   const trusted = lastSeenEnd != null && Number.isFinite(lastSeenEnd) && candleEnd >= lastSeenEnd;
   const bound = trusted ? (lastSeenEnd as number) : candleEnd;
+  const rebaseAt = explicitRiskRebaseTime(rebase);
   const next = new Map<string, RiskFloorEntry>();
   for (const position of positions) {
     const since = positionRiskSince(position, 1);
-    const kept = prev.get(position.id);
-    if (kept && kept.since === since) {
-      next.set(position.id, kept.floor - candleEnd > discontinuityMs ? { since, floor: candleEnd } : kept);
+    if (rebaseAt != null) {
+      next.set(position.id, { since, floor: rebaseAt });
       continue;
     }
-    const floor = since == null
-      ? bound
-      : since - candleEnd > discontinuityMs ? candleEnd : Math.max(since, bound);
+    const kept = prev.get(position.id);
+    if (kept && kept.since === since) {
+      next.set(position.id, kept);
+      continue;
+    }
+    const floor = since == null ? bound : Math.max(since, bound);
     next.set(position.id, { since, floor });
   }
   return next;

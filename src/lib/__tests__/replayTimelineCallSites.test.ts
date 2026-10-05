@@ -119,3 +119,134 @@ describe('回放时间线的分叉 / 结束调用点', () => {
     }
   });
 });
+
+/**
+ * 【用户要求】暂停 / 恢复 / 行情补载之间的时间隔离，委托与强平的时序校验。
+ * 行为在 replayExecution.test.ts、liquidationPricePath.test.ts、useBackgroundPrices.test.tsx、
+ * TradingContext.replayTimeline.test.tsx 里验过；这里守住「每一条成交路径都过了这一关」——漏接一条就是无声的。
+ */
+describe('时序校验的调用点：每条撮合路径都问 canExecuteReplayOrder，强平写入前再核一遍', () => {
+  const index = read('pages/Index.tsx');
+  const ctx = read('contexts/TradingContext.tsx');
+  const background = read('hooks/useBackgroundPrices.ts');
+
+  it('盘面逐根撮合（条件单 / 跟踪委托 / 止盈止损）先按这根 K 线的时刻筛委托', () => {
+    const body = handlerBody(index, 'runConditionalMatchingForSymbol');
+    expect(body).toContain('.filter(order => canExecuteReplayOrder(symbol, order, openTime))');
+  });
+
+  it('限价撮合：K 线先映回真实时间、夹到撮合时钟上，早于委托生效时刻的不撮合', () => {
+    const at = index.indexOf('const klineEventTime = timeDirection === -1');
+    expect(at).toBeGreaterThan(-1);
+    const block = index.slice(at, index.indexOf('switch (order.type)', at));
+    expect(block).toContain('Math.max(matchClock, klineRealStart)');
+    expect(block).toContain('Math.min(matchClock, klineRealStart + iMs)');
+    expect(block).toContain('if (!canExecuteReplayOrder(activeSymbol, order, klineEventTime)) {');
+    expect(index).toContain('mirrorTime(activeReverseCap, kline.time)');
+  });
+
+  it('正放每帧推进按时间戳取「哪几根刚收线」，游标身份含数据集代次与时间线；数据集不是当前标的 / 周期时整帧不执行', () => {
+    expect(index).toContain('const key = `${sym}|${iMs}|${context.generation}|${getTimelineId(sym)}`;');
+    expect(index).toContain('const step = planForwardReplayStep({');
+    // 时钟落在水位之前的那一帧不执行（持续太久则重新播种，见下一条）
+    expect(index).toContain('if (step.regressed) {');
+    expect(index).toContain('forwardRegressedSinceRef.current = null;');
+    expect(index).toContain('if (!context || context.symbol !== sym || intervalToMs(context.interval) !== iMs) return;');
+    // 原来按数组下标数「新收线了几根」：换了数据集、历史补进来，下标对应的就不是同一段时间了
+    expect(index).not.toContain('while (cursorRef.current < data.length) {');
+  });
+
+  it('后台标的轮询：请求时刻之后才挂的委托不吃这次的价；成交时刻记请求时刻；暂停 / 跳转作废在途请求', () => {
+    expect(background).toContain('canExecuteReplayOrder(symbol, order, simulatedTime)');
+    expect(background).toContain('matchBackgroundOrders(sym, r!, orders, requestedTime)');
+    expect(background).toContain('const requestIsCurrent = () => mountedRef.current && requestEpochRef.current.value === epoch;');
+    expect(background).toContain('if (!isSymbolPlaying(symbol)) break;');
+  });
+
+  it('强平：风险起点只由显式时间操作重置；逐仓强平写入前按独立规则再核一遍时刻', () => {
+    // 这个回调的第一个花括号是参数的类型字面量，不能用 handlerBody：按前后两个声明切
+    const settleAt = ctx.indexOf('const settleIsolatedLiquidations = useCallback');
+    const settle = ctx.slice(settleAt, ctx.indexOf('const candleLiqLastEndRef', settleAt));
+    expect(settleAt).toBeGreaterThan(-1);
+    expect(settle).toContain('explicitRiskRebaseFor(timeline, sym, pos)?.rebaseAt ?? positionRiskSince(pos, direction)');
+    expect(settle).toContain('replayEventIsAfterOrigin(closeTime, origin, direction)');
+    expect(settle).toContain('for (const { symbol: sym, position: pos, exitPrice, closeTime } of admissible) {');
+    const onCandle = handlerBody(ctx, 'liquidateIsolatedOnCandle');
+    expect(onCandle).toContain('explicitRiskRebaseFor(timeline, symbol, pos)');
+    expect(ctx).toContain('explicitRiskRebaseFor(timeline, sym, pos) ?? undefined,');
+    // 时钟落后不再是重置风险起点的理由
+    const guards = read('lib/liquidationGuards.ts');
+    expect(guards).not.toContain('clockBehind');
+    expect(guards).not.toContain('since - candleEnd > discontinuityMs');
+  });
+
+  it('【评审发现】倒放帧与限价撮合同样只认当前标的 / 周期的数据集；换了数据集或时间线的第一帧只播种', () => {
+    const reverseAt = index.indexOf('const runReverseChartTick = (');
+    const reverse = index.slice(reverseAt, index.indexOf('// ① 本帧被完整揭示的蜡烛', reverseAt));
+    expect(reverse).toContain('if (!context || context.symbol !== sym || intervalToMs(context.interval) !== iMs) return;');
+    expect(reverse).toContain('const reverseKey = `${sym}|${iMs}|${context.generation}|${getTimelineId(sym)}`;');
+    expect(reverse).toContain('lastReverseSimTimeRef.current = null;');
+    const limitAt = index.indexOf('// ===== MATCHING ENGINE for active symbol =====');
+    const limit = index.slice(limitAt, index.indexOf('const newKlines = plan.match;', limitAt));
+    expect(limit).toContain("if (!matchContext || matchContext.symbol !== activeSymbol || intervalToMs(matchContext.interval) !== iMs) return;");
+    expect(limit).toContain('}|${matchContext.generation}`,');
+  });
+
+  it('【评审发现】TWAP 按自己标的的钟走：独立时间轴下没在播放的币整组跳过，切片之前过时序校验', () => {
+    const at = index.indexOf('// ===== TWAP ENGINE =====');
+    const twap = index.slice(at, index.indexOf('// ===== ISOLATED-MODE HANDLERS =====', at));
+    expect(twap).toContain('if (timeMode === "isolated" && coinTimelines[symbol]?.status !== "playing") continue;');
+    expect(twap).toContain('const symbolNow = timeMode === "isolated" ? getEffectiveTime(symbol) : effectiveSimTime;');
+    expect(twap).toContain('if (!canExecuteReplayOrder(symbol, order, now)) return order;');
+    expect(twap).not.toContain('const now = effectiveSimTime;');
+  });
+
+  it('【评审发现】独立时间轴的开始 / 跳转：新钟与分叉在同一段同步代码里写进 ref（撮合循环看不到「新时间线 + 旧时钟」的那一帧）', () => {
+    const start = handlerBody(index, 'handleStart');
+    const forkAt = start.indexOf('forkReplayTimeline(activeSymbol, "start", startTs, timeDirection)');
+    const refAt = start.indexOf('coinTimelinesRef.current = { ...coinTimelinesRef.current, [activeSymbol]: started };');
+    expect(refAt).toBeGreaterThan(forkAt);
+    expect(refAt).toBeLessThan(start.indexOf('setCoinTimelines('));
+    const jump = handlerBody(index, 'handleJumpToSignal');
+    const jumpRefAt = jump.indexOf('coinTimelinesRef.current = { ...coinTimelinesRef.current, [normalized]: jumped };');
+    expect(jumpRefAt).toBeGreaterThan(jump.indexOf('forkReplayTimeline(normalized, "jump", startTs, timeDirection)'));
+    expect(jumpRefAt).toBeLessThan(jump.indexOf('setCoinTimelines('));
+    // 兜底：水位之前的时钟持续 1 秒以上就重新播种，循环不会永久停摆
+    expect(index).toContain('else if (now - forwardRegressedSinceRef.current > FORWARD_REGRESSION_RESEED_MS) {');
+    expect(index).toContain('const FORWARD_REGRESSION_RESEED_MS = 1_000;');
+  });
+
+  it('【评审发现】被取代的取数静默放弃；信号跳转先验后提交；数据集对不上时限次自动重取', () => {
+    const start = handlerBody(index, 'handleStart');
+    expect(start.indexOf('if (data === SUPERSEDED_INIT_LOAD) return;')).toBeGreaterThan(-1);
+    expect(start.indexOf('if (data === SUPERSEDED_INIT_LOAD) return;')).toBeLessThan(start.indexOf('toast.error("数据获取失败"'));
+    const jump = handlerBody(index, 'handleJumpToSignal');
+    expect(jump).toContain('accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, iMs),');
+    expect(jump.match(/if \(data === SUPERSEDED_INIT_LOAD\) return superseded;/g)).toHaveLength(2);
+    expect(jump.indexOf('if (data === SUPERSEDED_INIT_LOAD) return superseded;')).toBeLessThan(jump.indexOf('diagnoseSignalJump('));
+    expect(index).toContain('if (datasetRehomeRef.current.attempts >= DATASET_REHOME_MAX_ATTEMPTS) return;');
+    expect(index).toContain('const DATASET_REHOME_MAX_ATTEMPTS = 2;');
+    const hook = read('hooks/useBinanceData.ts');
+    expect(hook).toContain('if (opts?.accept && !opts.accept(merged)) return merged;');
+    expect(hook.indexOf('if (opts?.accept && !opts.accept(merged)) return merged;'))
+      .toBeLessThan(hook.indexOf('dataContextRef.current = { symbol, interval, generation: requestId };'));
+  });
+
+  it('【评审发现】保护单的挂单时刻不取界面时钟：随单的取成交时刻，手动设置的取撮合时钟', () => {
+    const attach = handlerBody(ctx, 'applyAttachedTpSl');
+    expect(attach).toContain('const fillTimes = [position.openTime, ...(position.fills ?? []).map(fill => fill.openTime)]');
+    expect(attach).not.toContain('const now = getEffectiveTime(symbol);');
+    expect(ctx).toContain('const now = getLiveSimTime(symbol);\n    const newOrders = buildTpSlOrders({');
+  });
+
+  it('指南写明这套规则', () => {
+    const guide = read('pages/GuidePage.tsx');
+    expect(guide).toContain('<strong>暂停、恢复与行情补载互不串时间。</strong>');
+    expect(guide).toContain('<strong>委托只会被它生效之后的行情触发</strong>');
+    expect(guide).toContain('每一笔强平写入之前还要再核一遍「强平时刻不早于仓位形成时刻」');
+    expect(guide).toContain('恢复后从暂停那一刻正在走的那根 K 线接着走完，不会跳过它');
+    expect(guide).toContain('<strong>数据也只认自己的</strong>');
+    expect(guide).toContain('它的 TWAP 也不会被图上那只币的时钟带着切片或提前结束');
+  });
+});
+

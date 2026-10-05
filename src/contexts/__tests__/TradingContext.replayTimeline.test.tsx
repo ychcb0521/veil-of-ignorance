@@ -581,3 +581,174 @@ describe('回放时间线：写入时盖章', () => {
     expect(Object.keys(storedRegistry().nodes)).toHaveLength(0);
   });
 });
+
+/**
+ * 【用户要求】委托与强平的时序校验，走真实的 TradingProvider。
+ * 实盘 BELUSDT：6 月挂的滚动对冲被 4 月的 K 线触发、6 月开的仓被 4 月的行情强平。
+ */
+describe('回放时间线：委托只能被它生效之后的行情触发（canExecuteReplayOrder）', () => {
+  const limitLong = () => marketLong({ type: 'LIMIT', price: 90, priceSelection: 'LIMIT' });
+
+  it('本线挂的委托：挂单时刻之前的行情不触发；显式跳回更早的日期带过去的，从跳转那一刻起生效', async () => {
+    const { result } = mount();
+    act(() => { result.current.setPriceMap({ BTCUSDT: 100 }); });
+    act(() => {
+      result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+    });
+    act(() => { result.current.handlePlaceOrder('BTCUSDT', limitLong()); });
+    const order = result.current.ordersMap.BTCUSDT[0];
+    expect(order.createdAt).toBe(SIM0);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 90 * 24 * 60 * MIN)).toBe(false);   // 三个月前的旧 K 线
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 1)).toBe(false);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0)).toBe(true);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 + MIN)).toBe(true);
+
+    // 用户显式跳回 60 分钟前，挂单活进新时间线
+    act(() => {
+      result.current.forkReplayTimeline('BTCUSDT', 'jump', SIM0 - 60 * MIN);
+      result.current.sim.startSimulation(SIM0 - 60 * MIN);
+    });
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 61 * MIN)).toBe(false);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 59 * MIN)).toBe(true);
+    // 跳转之后新挂的单只认它自己的挂单时刻
+    act(() => { result.current.handlePlaceOrder('BTCUSDT', limitLong()); });
+    const later = result.current.ordersMap.BTCUSDT.find(candidate => candidate.id !== order.id)!;
+    expect(later.createdAt).toBe(SIM0 - 60 * MIN);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', later, SIM0 - 60 * MIN)).toBe(true);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', later, SIM0 - 61 * MIN)).toBe(false);
+  });
+
+  it('【BEL】钟被拨回去却没有任何显式分叉（implicit）：挂着的委托不会被更早的行情触发', async () => {
+    const { result } = mount();
+    act(() => { result.current.setPriceMap({ BTCUSDT: 100 }); });
+    let root = '';
+    act(() => {
+      root = result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+    });
+    act(() => { result.current.handlePlaceOrder('BTCUSDT', limitLong()); });
+    const order = result.current.ordersMap.BTCUSDT[0];
+    // 一条没接分叉的改钟路径：现实过了 10 秒，同步时钟被直接拨回 3 小时
+    vi.setSystemTime(T0 + 10_000);
+    act(() => result.current.sim.startSimulation(SIM0 - 180 * MIN));
+    // 还没盖章（仍是原来那条线）与盖章之后（补出 implicit 线）都一样：早于挂单时刻的行情不算数
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 179 * MIN)).toBe(false);
+    const implicit = result.current.stampClock('BTCUSDT');
+    expect(implicit).not.toBe(root);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 - 179 * MIN)).toBe(false);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 + MIN)).toBe(true);
+  });
+
+  it('翻转方向带过去的委托：倒放时只认翻转点及更早的行情', async () => {
+    const { result } = mount();
+    act(() => { result.current.setPriceMap({ BTCUSDT: 100 }); });
+    act(() => {
+      result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+    });
+    act(() => { result.current.handlePlaceOrder('BTCUSDT', limitLong()); });
+    const order = result.current.ordersMap.BTCUSDT[0];
+    act(() => { result.current.setTimeDirection(-1); });
+    const flippedAt = result.current.getLiveSimTime('BTCUSDT');
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, flippedAt - 5 * MIN)).toBe(true);
+    expect(result.current.canExecuteReplayOrder('BTCUSDT', order, flippedAt + 10 * MIN)).toBe(false);
+  });
+});
+
+describe('回放时间线：强平只看仓位在这条线上承担风险之后的行情（逐根判定 + 写入前的时序校验）', () => {
+  const DAY = 24 * 60 * MIN;
+  /** 一根把价格砸到 1 的 K 线：10 倍逐仓多单 @100 必爆——只要这根 K 线算数。 */
+  const crash = (start: number) => ({ high: 100, low: 1, close: 1, startTime: start, endTime: start + MIN });
+  function openIsolatedLong() {
+    const view = mount();
+    act(() => { view.result.current.setPriceMap({ BTCUSDT: 100 }); });
+    act(() => {
+      view.result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      view.result.current.sim.startSimulation(SIM0);
+    });
+    act(() => { view.result.current.handlePlaceOrder('BTCUSDT', marketLong()); });
+    expect(view.result.current.positionsMap.BTCUSDT).toHaveLength(1);
+    expect(view.result.current.positionsMap.BTCUSDT[0].openTime).toBe(SIM0);
+    return view;
+  }
+  const liquidations = (view: ReturnType<typeof mount>) => view.result.current.tradeHistory.filter(record => record.action === 'LIQUIDATION');
+
+  it('【BEL】迟到的旧行情（三个月前的 K 线，连着几根）判不到之后才开的仓；开仓之后的同样行情照常强平', () => {
+    const view = openIsolatedLong();
+    for (let i = 0; i < 4; i += 1) {
+      act(() => { view.result.current.liquidateIsolatedOnCandle('BTCUSDT', crash(SIM0 - 90 * DAY + i * MIN)); });
+    }
+    expect(view.result.current.positionsMap.BTCUSDT).toHaveLength(1);
+    expect(liquidations(view)).toHaveLength(0);
+
+    act(() => { view.result.current.liquidateIsolatedOnCandle('BTCUSDT', crash(SIM0 + MIN)); });
+    expect(view.result.current.positionsMap.BTCUSDT ?? []).toHaveLength(0);
+    expect(liquidations(view)).toHaveLength(1);
+    // 强平写下的时刻在开仓之后，不会出现「6 月开仓、4 月强平」
+    expect(liquidations(view)[0].closeTime).toBeGreaterThan(liquidations(view)[0].openTime);
+  });
+
+  it('【BEL】钟被拨回去却没有任何显式分叉：风险起点不跟着倒退，倒回去那段行情不强平', () => {
+    const view = openIsolatedLong();
+    vi.setSystemTime(T0 + 10_000);
+    act(() => view.result.current.sim.startSimulation(SIM0 - 180 * MIN));
+    view.result.current.stampClock('BTCUSDT');   // 补出 implicit 时间线
+    for (const start of [SIM0 - 179 * MIN, SIM0 - 178 * MIN]) {
+      act(() => { view.result.current.liquidateIsolatedOnCandle('BTCUSDT', crash(start)); });
+    }
+    expect(view.result.current.positionsMap.BTCUSDT).toHaveLength(1);
+    expect(liquidations(view)).toHaveLength(0);
+  });
+
+  it('用户显式带仓跳回更早的日期：跳转点之前的行情不算，之后的照常强平（不会永久免死）', () => {
+    const view = openIsolatedLong();
+    act(() => {
+      view.result.current.forkReplayTimeline('BTCUSDT', 'jump', SIM0 - 60 * MIN);
+      view.result.current.sim.startSimulation(SIM0 - 60 * MIN);
+    });
+    act(() => { view.result.current.liquidateIsolatedOnCandle('BTCUSDT', crash(SIM0 - 62 * MIN)); });
+    expect(view.result.current.positionsMap.BTCUSDT).toHaveLength(1);
+    expect(liquidations(view)).toHaveLength(0);
+
+    act(() => { view.result.current.liquidateIsolatedOnCandle('BTCUSDT', crash(SIM0 - 59 * MIN)); });
+    expect(view.result.current.positionsMap.BTCUSDT ?? []).toHaveLength(0);
+    expect(liquidations(view)).toHaveLength(1);
+    expect(liquidations(view)[0].closeTime).toBe(SIM0 - 58 * MIN);
+  });
+});
+
+describe('回放时间线：保护单的挂单时刻与触发它的那笔成交同源（时序校验拿它当生效时刻）', () => {
+  it('随单止盈止损取成交时刻、手动设置的取撮合时钟——都不取落后的界面时钟，挂出来当场就能被之后的行情触发', async () => {
+    const { result } = mount();
+    act(() => { result.current.setPriceMap({ BTCUSDT: 100 }); });
+    act(() => {
+      result.current.forkReplayTimeline('BTCUSDT', 'start', SIM0);
+      result.current.sim.startSimulation(SIM0);
+    });
+    // 现实过了 10 秒：撮合时钟走到 SIM0 + 10 秒，界面时钟（React state）还停在 SIM0
+    vi.setSystemTime(T0 + 10_000);
+    expect(result.current.getLiveSimTime('BTCUSDT')).toBe(SIM0 + 10_000);
+    expect(result.current.getEffectiveTime('BTCUSDT')).toBe(SIM0);
+    act(() => {
+      result.current.handlePlaceOrder('BTCUSDT', marketLong({ tpTriggerPrice: 120, slTriggerPrice: 80, tpSlPercentage: 100 }));
+    });
+    const position = result.current.positionsMap.BTCUSDT[0];
+    expect(position.openTime).toBe(SIM0 + 10_000);
+    const attached = result.current.ordersMap.BTCUSDT;
+    expect(attached.map(order => order.createdAt)).toEqual([SIM0 + 10_000, SIM0 + 10_000]);
+    for (const order of attached) {
+      expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 + 10_000)).toBe(true);
+      // 开仓之前的行情触发不了它
+      expect(result.current.canExecuteReplayOrder('BTCUSDT', order, SIM0 + 9_000)).toBe(false);
+    }
+
+    // 手动在仓位上重设止盈止损：又过 5 秒
+    vi.setSystemTime(T0 + 15_000);
+    act(() => { result.current.handlePlaceTpSl('BTCUSDT', position, 125, 85, 100); });
+    const manual = result.current.ordersMap.BTCUSDT;
+    expect(manual).toHaveLength(2);
+    expect(manual.map(order => order.createdAt)).toEqual([SIM0 + 15_000, SIM0 + 15_000]);
+  });
+});
+

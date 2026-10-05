@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from "@/contexts/TradingContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useBinanceData, intervalToMs, type KlineData } from "@/hooks/useBinanceData";
+import { SUPERSEDED_INIT_LOAD, useBinanceData, intervalToMs, type KlineData } from "@/hooks/useBinanceData";
 import { useBackgroundPrices } from "@/hooks/useBackgroundPrices";
 import { loadPersistedSimState } from "@/hooks/usePersistedState";
 import { usePersistedState, clearSimState } from "@/hooks/usePersistedState";
@@ -49,6 +49,7 @@ import {
 import { stepTrailingStop } from "@/lib/trailingStop";
 import { upsertOrderSnapshot } from "@/lib/orderSnapshotHistory";
 import { replayTimelineScope } from "@/lib/replayTimeline";
+import { planForwardReplayStep, type ForwardReplayCursor } from "@/lib/replayExecution";
 import {
   diagnoseSignalJump,
   hasKlineCoveringSignalTime,
@@ -153,6 +154,9 @@ const Index = () => {
     setCoinTimelines,
     totalPositionCount,
     getEffectiveTime,
+    getLiveSimTime,
+    getTimelineId,
+    canExecuteReplayOrder,
     stampClock,
     forkReplayTimeline,
     endReplayTimeline,
@@ -161,7 +165,7 @@ const Index = () => {
     getEffectiveAvailable,
   } = ctx;
 
-  const { allData, allDataRef, loading, loadingOlder, error, initLoad, loadOlder, loadNewer, isFetchingNewer, isFetchingOlder, getVisibleData, reset } =
+  const { allData, allDataRef, dataContextRef, loading, loadingOlder, error, initLoad, loadOlder, loadNewer, isFetchingNewer, isFetchingOlder, getVisibleData, reset } =
     useBinanceData();
 
   // Background price polling for non-active symbols
@@ -211,6 +215,11 @@ const Index = () => {
   const persistedSim = useMemo(() => loadPersistedSimState(), []);
   const restoredActive = persistedSim?.status === "playing" || persistedSim?.status === "paused";
 
+  /**
+   * 刷新后把上次会话的 K 线取回来。这里只负责取数：取回来的窗口属于哪一刻、能不能拿来成交，
+   * 由撮合那一侧按时间戳判（planForwardReplayStep 在数据集换代时从撮合时钟播种，canExecuteReplayOrder 与
+   * 强平的风险起点各自把关）——本机存的会话若比云端恢复的旧（4 月的窗口配 6 月的时钟），这批旧 K 线一根都不会执行。
+   */
   useEffect(() => {
     if (!restoredActive || hasRestoredRef.current || !persistedSim) return;
     hasRestoredRef.current = true;
@@ -310,6 +319,11 @@ const Index = () => {
   // ===== REFS =====
   const chartApiRef = useRef<{ updateData: (candle: any) => void } | null>(null);
   const cursorRef = useRef(0);
+  const forwardReplayCursorRef = useRef<ForwardReplayCursor | null>(null);
+  /** 正放游标连续处于「时钟落在水位之前」的起始真实时刻；见 runForwardChartTick 里的自愈。 */
+  const forwardRegressedSinceRef = useRef<number | null>(null);
+  /** 倒放帧上一次看到的数据集身份（标的|周期|数据集代次|时间线）：换了就只播种、不算越过。 */
+  const reverseReplayKeyRef = useRef<string | null>(null);
   const gameLoopInitRef = useRef(false);
   const clockRef = useRef<HTMLSpanElement>(null);
 
@@ -445,6 +459,36 @@ const Index = () => {
     void refreshCanonicalPrice(activeSymbol, canonicalPriceRefreshTime);
   }, [activeSymbol, interval, activeCoinState.status, canonicalPriceRefreshTime, refreshCanonicalPrice]);
 
+  /**
+   * 数据层里装的不是当前标的 / 周期的数据集，又没有取数在途——云端恢复晚到、直接改掉了标的或周期，
+   * 或某次切换的取数失败了。撮合循环此时整帧不执行（不拿别人的 K 线成交），但也就一直停着、没有任何提示。
+   * 等一小会儿仍对不上，就按当前撮合时钟把这个标的的数据集取回来；同一组「标的|周期」最多自动取 DATASET_REHOME_MAX_ATTEMPTS 次，
+   * 取不回来（断网、该时刻没有行情）就停手，不反复请求。取回来的是新一代数据集，游标从时钟播种，旧 K 线一根都不执行。
+   */
+  const datasetRehomeRef = useRef({ key: "", attempts: 0 });
+  useEffect(() => {
+    if (activeCoinState.status === "stopped" || loading) return;
+    const mismatched = () => {
+      const context = dataContextRef.current;
+      return !context || context.symbol !== activeSymbol || context.interval !== interval;
+    };
+    if (!mismatched()) {
+      datasetRehomeRef.current = { key: "", attempts: 0 };
+      return;
+    }
+    const key = `${activeSymbol}|${interval}`;
+    if (datasetRehomeRef.current.key !== key) datasetRehomeRef.current = { key, attempts: 0 };
+    if (datasetRehomeRef.current.attempts >= DATASET_REHOME_MAX_ATTEMPTS) return;
+    const timer = setTimeout(() => {
+      if (!mismatched()) return;
+      const clock = getLiveSimTime(activeSymbol);
+      if (!(clock > 0)) return;
+      datasetRehomeRef.current.attempts += 1;
+      void initLoad(activeSymbol, interval, clock, { reverse: timeDirection === -1 });
+    }, DATASET_REHOME_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [activeSymbol, interval, activeCoinState.status, loading, allData, initLoad, timeDirection, getLiveSimTime, dataContextRef]);
+
   useEffect(() => {
     const activeOrderIds = new Set(
       Object.values(ordersMap).flatMap((symbolOrders) => symbolOrders.map((order) => order.id)),
@@ -473,6 +517,11 @@ const Index = () => {
   const loadNewerVoid = useCallback(() => { void loadNewer(); }, [loadNewer]);
   const PERSIST_MS = 500;
   const CANONICAL_PRICE_MAX_SIM_AGE_MS = 90_000;
+  /** 数据集与当前标的 / 周期对不上时，等这么久（真实时间）仍没有取数在途才自动重取；见 datasetRehomeRef。 */
+  const DATASET_REHOME_DELAY_MS = 1_500;
+  const DATASET_REHOME_MAX_ATTEMPTS = 2;
+  /** 正放游标「时钟落在水位之前」持续这么久（真实时间）就重新播种，见 runForwardChartTick。 */
+  const FORWARD_REGRESSION_RESEED_MS = 1_000;
 
   const flushDisplayPrice = useCallback((price: number, now: number) => {
     if (!Number.isFinite(price) || price <= 0) return price;
@@ -612,7 +661,8 @@ const Index = () => {
 
   const runConditionalMatchingForSymbol = useCallback(
     (symbol: string, candle: Pick<KlineData, "high" | "low">, openTime: number) => {
-      const symbolOrders = ordersMapRef.current[symbol] || [];
+      const symbolOrders = (ordersMapRef.current[symbol] || [])
+        .filter(order => canExecuteReplayOrder(symbol, order, openTime));
 
       // ===== 跟踪委托：逐根 K 线推进极值，回调触及即按市价成交 =====
       // 状态映射：SHORT 追最高价存 peakPrice，LONG 追最低价存 troughPrice。
@@ -692,7 +742,7 @@ const Index = () => {
         }
       }
     },
-    [createTriggeredConditionalPosition],
+    [createTriggeredConditionalPosition, canExecuteReplayOrder],
   );
 
   // ===== UNIFIED GAME LOOP =====
@@ -731,16 +781,32 @@ const Index = () => {
       now: number,
       speed: number,
     ) => {
-      let newCandles = 0;
-      while (cursorRef.current < data.length) {
-        const candleEnd = data[cursorRef.current].time + iMs;
-        if (candleEnd <= simTime) {
-          newCandles++;
-          cursorRef.current++;
-        } else break;
+      const context = dataContextRef.current;
+      if (!context || context.symbol !== sym || intervalToMs(context.interval) !== iMs) return;
+      const key = `${sym}|${iMs}|${context.generation}|${getTimelineId(sym)}`;
+      const step = planForwardReplayStep({
+        cursor: forwardReplayCursorRef.current, key, data, simTime, intervalMs: iMs,
+      });
+      forwardReplayCursorRef.current = step.cursor;
+      // An unexpected clock regression is not a user-authorized replay fork.
+      if (step.regressed) {
+        /**
+         * 这一帧不执行。但水位只增不减、游标身份又没变时，时钟要是一直在水位之前，循环就永久停摆——
+         * 撮合、强平、显示价、预取统统不动，暂停再恢复也救不回。持续超过 1 秒真实时间就放弃这枚水位，
+         * 下一帧按当时的时钟重新播种：播种只认之后才收线的 K 线，委托与强平又各有时序闸，旧行情放不进来。
+         */
+        if (forwardRegressedSinceRef.current == null) forwardRegressedSinceRef.current = now;
+        else if (now - forwardRegressedSinceRef.current > FORWARD_REGRESSION_RESEED_MS) {
+          forwardReplayCursorRef.current = null;
+          forwardRegressedSinceRef.current = null;
+        }
+        return;
       }
+      forwardRegressedSinceRef.current = null;
+      cursorRef.current = step.settledEnd;
+      const newCandles = step.settledEnd - step.settledStart;
       if (newCandles > 0) {
-        const settledStart = Math.max(0, cursorRef.current - newCandles);
+        const settledStart = step.settledStart;
         for (let i = settledStart; i < cursorRef.current; i++) {
           const settledCandle = {
             high: data[i].high, low: data[i].low, close: data[i].close,
@@ -780,7 +846,7 @@ const Index = () => {
           flushDisplayPrice(settledClose, now);
         }
       }
-      if (cursorRef.current < data.length) {
+      if (step.formingIndex >= 0) {
         const candle = data[cursorRef.current];
         if (candle.time <= simTime) {
           const isLiveCandle = candle.time + iMs > Date.now() - 60000;
@@ -877,6 +943,15 @@ const Index = () => {
     ) => {
       const cap = activeReverseCapRef.current;
       if (cap == null) return;
+      // 与正放同一条规则：数据层里装的不是这一帧要撮合的标的 / 周期（切换、跳转还没落定）时整帧不执行；
+      // 换了标的、数据集或时间线的第一帧只播种、不算「越过」——否则会把新标的早已走过的 K 线整批再撮合一遍。
+      const context = dataContextRef.current;
+      if (!context || context.symbol !== sym || intervalToMs(context.interval) !== iMs) return;
+      const reverseKey = `${sym}|${iMs}|${context.generation}|${getTimelineId(sym)}`;
+      if (reverseReplayKeyRef.current !== reverseKey) {
+        reverseReplayKeyRef.current = reverseKey;
+        lastReverseSimTimeRef.current = null;
+      }
       const prevSim = lastReverseSimTimeRef.current;
       lastReverseSimTimeRef.current = simTime;
 
@@ -1176,9 +1251,13 @@ const Index = () => {
      * 一笔用户从未下过的成交，带着过去的时间戳写进 trade_history。
      * 详见 lib/matchingWindow.ts 的长注释。
      */
+    // 数据层里装的不是当前标的 / 周期的 K 线（切换、跳转还没落定，或云端恢复改了标的）：一根都不撮合，水位也不动。
+    const matchContext = dataContextRef.current;
+    if (!matchContext || matchContext.symbol !== activeSymbol || intervalToMs(matchContext.interval) !== iMs) return;
     const plan = planMatchBatch({
       cursor: matchCursorRef.current,
-      key: matchDatasetKey(activeSymbol, iMs, timeDirection === -1 ? -1 : 1),
+      // 数据集代次并进身份：整批换过的数据集重新播种水位，历史不会被当成新 K 线
+      key: `${matchDatasetKey(activeSymbol, iMs, timeDirection === -1 ? -1 : 1)}|${matchContext.generation}`,
       candles: visibleData,
       // 倒放的 visibleData 走**镜像时间**（getReverseVisibleData 返回 mirrorTime(cap, t)）：
       // 真实时间越早 → 镜像时间越大，新露头的那根仍在数组末尾、时间仍是**变大**的。
@@ -1209,6 +1288,17 @@ const Index = () => {
     const attachAfterFill: { position: Position; order: PendingOrder; merged: PositionMergeResult | null }[] = [];
 
     for (const kline of newKlines) {
+      /**
+       * 【时序校验 · 委托】这根 K 线在真实时间轴上的位置（倒放的 visibleData 是镜像时间，先映回去），
+       * 再夹到撮合时钟上：正放取「时钟与收线时刻里较早的」，倒放取「时钟与开线时刻里较晚的」。
+       * 水位（planMatchBatch）只管「这根见没见过」，不管「它是哪一天的」——刷新恢复后先到的是 4 月的旧窗口，
+       * 之后补进来的每一根对水位都是「新」的，6 月挂的限价单就会被 4 月的行情撮合。时刻早于委托生效的，不撮合。
+       */
+      const klineRealStart = timeDirection === -1 && activeReverseCap != null ? mirrorTime(activeReverseCap, kline.time) : kline.time;
+      const matchClock = getLiveSimTime(activeSymbol);
+      const klineEventTime = timeDirection === -1
+        ? Math.max(matchClock, klineRealStart)
+        : Math.min(matchClock, klineRealStart + iMs);
       setOrdersMap((prev) => {
         const orders = prev[activeSymbol] || [];
         if (orders.length === 0) return prev;
@@ -1217,6 +1307,10 @@ const Index = () => {
         for (const order of orders) {
           if (filledIds.includes(order.id)) continue;
           if (order.type === "CONDITIONAL") {
+            remaining.push(order);
+            continue;
+          }
+          if (!canExecuteReplayOrder(activeSymbol, order, klineEventTime)) {
             remaining.push(order);
             continue;
           }
@@ -1497,6 +1591,13 @@ const Index = () => {
       if (price <= 0) continue;
       const twapOrders = orders.filter((o) => o.type === "TWAP");
       if (twapOrders.length === 0) continue;
+      /**
+       * 【时序校验 · TWAP】每张 TWAP 按**它自己标的**的钟走。独立时间轴下这只钟没在播放（暂停 / 没启动）就整组跳过：
+       * 不切片，也不因为图上那只币的时钟越过了它的结束时刻而把它删掉。原来一律拿当前图表标的的时钟去比——
+       * BEL 暂停着、ETH 的钟走到 40 分钟之后，BEL 的七片会按冻结的旧价一口气成交。
+       */
+      if (timeMode === "isolated" && coinTimelines[symbol]?.status !== "playing") continue;
+      const symbolNow = timeMode === "isolated" ? getEffectiveTime(symbol) : effectiveSimTime;
 
       setOrdersMap((prev) => {
         let changed = false;
@@ -1512,7 +1613,9 @@ const Index = () => {
         const updated = symOrders
           .map((order) => {
             if (order.type !== "TWAP") return order;
-            const now = effectiveSimTime;
+            const now = symbolNow;
+            // 这一刻早于这张单的生效时刻（迟到的旧时钟、另一段日期）：原样留着，不切片也不删
+            if (!canExecuteReplayOrder(symbol, order, now)) return order;
             if (
               order.twapFilledQty !== undefined &&
               order.twapTotalQty !== undefined &&
@@ -1597,7 +1700,7 @@ const Index = () => {
     }
 
     for (const { symbol, merged } of twapMerges) applyMergeSideEffects(symbol, merged);
-  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock, getPositionLimitMode]);
+  }, [effectiveSimTime, activeCoinState.status, ordersMap, priceMap, getEffectiveTime, settleFillDebit, applyMergeSideEffects, stampClock, getPositionLimitMode, timeMode, coinTimelines, canExecuteReplayOrder]);
 
   // ===== ISOLATED-MODE HANDLERS =====
   const handlePause = useCallback(() => {
@@ -1737,6 +1840,7 @@ const Index = () => {
       matchCursorRef.current = null;
       cursorRef.current = 0;
       gameLoopInitRef.current = false;
+      lastReverseSimTimeRef.current = null;
       latestChartPriceRef.current = 0;
 
       if (activeCoinState.status !== "stopped") {
@@ -1749,6 +1853,8 @@ const Index = () => {
   const handleStart = useCallback(
     async (timestamp: number) => {
       const data = await initLoad(activeSymbol, interval, timestamp, { reverse: timeDirection === -1 });
+      // 取数期间用户又切了标的 / 周期：以后一次操作为准，这次静默放弃，不报「数据获取失败」。
+      if (data === SUPERSEDED_INIT_LOAD) return;
       if (data.length > 0) {
         matchCursorRef.current = null;
         gameLoopInitRef.current = false;
@@ -1765,18 +1871,19 @@ const Index = () => {
 
         if (timeMode === "isolated") {
           const now = Date.now();
-          setCoinTimelines((prev) => ({
-            ...prev,
-            [activeSymbol]: {
-              status: "playing",
-              time: startTs,
-              speed: 1,
-              historicalAnchorTime: startTs,
-              realStartTime: now,
-              originTime: startTs,
-              reverseCapTime: timeDirection === -1 ? startTs : null,
-            },
-          }));
+          const started: CoinTimelineState = {
+            status: "playing",
+            time: startTs,
+            speed: 1,
+            historicalAnchorTime: startTs,
+            realStartTime: now,
+            originTime: startTs,
+            reverseCapTime: timeDirection === -1 ? startTs : null,
+          };
+          // 与分叉同一段同步代码里就把新钟写进 ref：撮合循环读的是 ref，等 React 提交再同步的话，
+          // 中间那一帧看到的是「新时间线 + 旧时钟」，游标会被旧时钟播种。
+          coinTimelinesRef.current = { ...coinTimelinesRef.current, [activeSymbol]: started };
+          setCoinTimelines((prev) => ({ ...prev, [activeSymbol]: started }));
           if (sim.status === "stopped") {
             sim.startSimulation(startTs);
           }
@@ -1806,7 +1913,16 @@ const Index = () => {
       // 「信号库」（按信号自动启动）与「手动启动」必须相互独立——一次失败的跳转
       // 绝不能污染手动模式。因此在 initLoad 成功前，不切换 activeSymbol、不清空行情、
       // 不重置数据层；失败时直接返回，手动模式所见状态原封不动。
-      let data = await initLoad(normalized, interval, timeMs, { reverse: timeDirection === -1 });
+      // 「取到了但不覆盖信号时刻」同样算失败：先验后提交（accept），验不过的那批 K 线不进数据层——
+      // 否则数据层里留着另一个标的的行情，当前标的的委托会拿它撮合。
+      const loadOptions = {
+        reverse: timeDirection === -1,
+        accept: (candles: KlineData[]) => hasKlineCoveringSignalTime(candles, timeMs, iMs),
+      };
+      // 取数期间用户又做了别的操作（切周期 / 切标的 / 再启动）：以后一次为准，这次跳转静默放弃——不诊断、不重试、不给信号打标记。
+      const superseded: SignalJumpResult = { ok: false, reason: "已被后一次操作取代" };
+      let data = await initLoad(normalized, interval, timeMs, loadOptions);
+      if (data === SUPERSEDED_INIT_LOAD) return superseded;
       let coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
 
       if (!coversSignalTime) {
@@ -1815,7 +1931,8 @@ const Index = () => {
         // 首次取数可能刚好碰上短暂请求抖动；诊断确认行情存在时只重试一次，
         // 不把可恢复问题错误写成信号库的永久标记。
         if (diagnostic.status === "available") {
-          data = await initLoad(normalized, interval, timeMs, { reverse: timeDirection === -1 });
+          data = await initLoad(normalized, interval, timeMs, loadOptions);
+          if (data === SUPERSEDED_INIT_LOAD) return superseded;
           coversSignalTime = hasKlineCoveringSignalTime(data, timeMs, iMs);
         }
 
@@ -1863,18 +1980,18 @@ const Index = () => {
 
       if (timeMode === "isolated") {
         const now = Date.now();
-        setCoinTimelines((prev) => ({
-          ...prev,
-          [normalized]: {
-            status: "playing",
-            time: startTs,
-            speed: 1,
-            historicalAnchorTime: startTs,
-            realStartTime: now,
-            originTime: startTs,
-            reverseCapTime: timeDirection === -1 ? startTs : null,
-          },
-        }));
+        const jumped: CoinTimelineState = {
+          status: "playing",
+          time: startTs,
+          speed: 1,
+          historicalAnchorTime: startTs,
+          realStartTime: now,
+          originTime: startTs,
+          reverseCapTime: timeDirection === -1 ? startTs : null,
+        };
+        // 同 handleStart：新钟与分叉同步写进 ref，撮合循环看不到「新时间线 + 旧时钟」的那一帧。
+        coinTimelinesRef.current = { ...coinTimelinesRef.current, [normalized]: jumped };
+        setCoinTimelines((prev) => ({ ...prev, [normalized]: jumped }));
         if (sim.status === "stopped") sim.startSimulation(startTs);
       } else {
         setSyncedOriginTime(startTs);

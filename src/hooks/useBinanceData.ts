@@ -106,13 +106,31 @@ async function fetchBatch(
 /**
  * useBinanceData — lazy-loading kline data manager with sub-candle interpolation.
  */
+/**
+ * 「这次取数被后一次操作取代了」的返回值——不是失败。按**身份**识别：`data === SUPERSEDED_INIT_LOAD`。
+ * 调用方拿到它应当静默放弃（以后发的操作为准）：不提示「数据获取失败」，不诊断、不重试——
+ * 重试会反过来取代那次更新的请求。它同时是空数组，只看 `data.length > 0` 的老调用方照样不会拿它开局。
+ */
+export const SUPERSEDED_INIT_LOAD: KlineData[] = Object.freeze([] as KlineData[]) as KlineData[];
+
+export interface InitLoadOptions {
+  reverse?: boolean;
+  /**
+   * 提交之前由调用方先验这批数据（信号跳转：必须覆盖信号时刻）。返回 false = 不提交：
+   * 数据原样交回供诊断，数据层（allData、数据集身份、分页水位）一个字不动——
+   * 否则一次失败的跳转会把别的标的的 K 线留在数据层里，当前标的的委托就拿它撮合。
+   */
+  accept?: (candles: KlineData[]) => boolean;
+}
+
 export function useBinanceData() {
   const [allData, setAllData] = useState<KlineData[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ctxRef = useRef<{ symbol: string; interval: string }>({ symbol: "", interval: "" });
+  /** Committed dataset identity; streaming appends keep the same generation. */
+  const dataContextRef = useRef({ symbol: "", interval: "", generation: 0 });
   const oldestRef = useRef<number>(Infinity);
   const noMoreRef = useRef(false);
   const newestRef = useRef<number>(0);
@@ -123,22 +141,29 @@ export function useBinanceData() {
   const inflightNewerRef = useRef(false);
   const inflightOlderRef = useRef(false);
   const initLoadRequestIdRef = useRef(0);
+  const initLoadPendingRef = useRef(false);
 
   /** Direct ref access to allData — avoids stale closures in RAF loops */
   const allDataRef = useRef<KlineData[]>([]);
 
-  // Keep ref in sync
+  // RAF consumers must see a committed dataset immediately, not only after React
+  // eventually evaluates a state updater (which can otherwise run after reset).
   const setAllDataAndRef = useCallback((updater: KlineData[] | ((prev: KlineData[]) => KlineData[])) => {
-    setAllData((prev) => {
-      const next = typeof updater === "function" ? (updater as (prev: KlineData[]) => KlineData[])(prev) : updater;
-      allDataRef.current = next;
-      return next;
-    });
+    const next = typeof updater === "function" ? updater(allDataRef.current) : updater;
+    allDataRef.current = next;
+    setAllData(next);
   }, []);
 
   const initLoad = useCallback(
-    async (symbol: string, interval: string, anchorTime: number, opts?: { reverse?: boolean }) => {
+    async (symbol: string, interval: string, anchorTime: number, opts?: InitLoadOptions) => {
       const requestId = ++initLoadRequestIdRef.current;
+      initLoadPendingRef.current = true;
+      // Invalidate paging requests from the previous dataset immediately. Their
+      // finally blocks must not release locks acquired for the replacement.
+      inflightNewerRef.current = false;
+      inflightOlderRef.current = false;
+      setLoadingNewer(false);
+      setLoadingOlder(false);
       setLoading(true);
       setError(null);
 
@@ -170,13 +195,15 @@ export function useBinanceData() {
         const merged = opts?.reverse ? [...extra, ...historyData] : [...historyData, ...extra];
 
         if (requestId !== initLoadRequestIdRef.current) {
-          return merged;
+          // Callers must not start a simulation using superseded candle data.
+          return SUPERSEDED_INIT_LOAD;
         }
+        if (opts?.accept && !opts.accept(merged)) return merged;
 
-        // 仅在「确实拿到数据且本次请求仍是最新」时，才提交数据层上下文。
-        // 这样一次失败 / 被取代的取数不会改动 ctxRef / oldestRef / noMoreRef / allData——
+        // 仅在「确实拿到数据、本次请求仍是最新、调用方也验过」时，才提交数据层上下文。
+        // 这样一次失败 / 被取代 / 没验过的取数不会改动已提交上下文 / oldestRef / noMoreRef / allData——
         // 失败的「信号库」跳转对「手动启动」所依赖的数据层是彻底的 no-op。
-        ctxRef.current = { symbol, interval };
+        dataContextRef.current = { symbol, interval, generation: requestId };
         oldestRef.current = merged[0].time;
         noMoreRef.current = false;
         newestRef.current = merged[merged.length - 1].time;
@@ -188,10 +215,12 @@ export function useBinanceData() {
       } catch (e: any) {
         if (requestId === initLoadRequestIdRef.current) {
           setError(e.message);
+          return [];
         }
-        return [];
+        return SUPERSEDED_INIT_LOAD;
       } finally {
         if (requestId === initLoadRequestIdRef.current) {
+          initLoadPendingRef.current = false;
           setLoading(false);
         }
       }
@@ -204,8 +233,9 @@ export function useBinanceData() {
    * 向左拖动即需要它；追加在数组尾部，保持升序。
    */
   const loadNewer = useCallback(async (): Promise<number> => {
-    if (inflightNewerRef.current || noMoreNewerRef.current) return 0;
-    const { symbol, interval } = ctxRef.current;
+    if (initLoadPendingRef.current || inflightNewerRef.current || noMoreNewerRef.current) return 0;
+    const requestId = initLoadRequestIdRef.current;
+    const { symbol, interval } = dataContextRef.current;
     if (!symbol || newestRef.current <= 0) return 0;
 
     inflightNewerRef.current = true;
@@ -213,6 +243,7 @@ export function useBinanceData() {
     try {
       const startTime = newestRef.current + 1;
       const newer = await fetchBatch(symbol, interval, { startTime, limit: PREFETCH_BATCH_BARS });
+      if (requestId !== initLoadRequestIdRef.current) return 0;
 
       if (newer.length === 0) {
         noMoreNewerRef.current = true;
@@ -230,17 +261,20 @@ export function useBinanceData() {
 
       return newer.length;
     } catch (e: any) {
-      console.error("Failed to load newer data:", e);
+      if (requestId === initLoadRequestIdRef.current) console.error("Failed to load newer data:", e);
       return 0;
     } finally {
-      inflightNewerRef.current = false;
-      setLoadingNewer(false);
+      if (requestId === initLoadRequestIdRef.current) {
+        inflightNewerRef.current = false;
+        setLoadingNewer(false);
+      }
     }
   }, [setAllDataAndRef]);
 
   const loadOlder = useCallback(async (): Promise<number> => {
-    if (inflightOlderRef.current || noMoreRef.current) return 0;
-    const { symbol, interval } = ctxRef.current;
+    if (initLoadPendingRef.current || inflightOlderRef.current || noMoreRef.current) return 0;
+    const requestId = initLoadRequestIdRef.current;
+    const { symbol, interval } = dataContextRef.current;
     if (!symbol) return 0;
 
     inflightOlderRef.current = true;
@@ -248,6 +282,7 @@ export function useBinanceData() {
     try {
       const endTime = oldestRef.current - 1;
       const older = await fetchBatch(symbol, interval, { endTime, limit: PREFETCH_BATCH_BARS });
+      if (requestId !== initLoadRequestIdRef.current) return 0;
 
       if (older.length === 0) {
         noMoreRef.current = true;
@@ -266,11 +301,13 @@ export function useBinanceData() {
 
       return older.length;
     } catch (e: any) {
-      console.error("Failed to load older data:", e);
+      if (requestId === initLoadRequestIdRef.current) console.error("Failed to load older data:", e);
       return 0;
     } finally {
-      inflightOlderRef.current = false;
-      setLoadingOlder(false);
+      if (requestId === initLoadRequestIdRef.current) {
+        inflightOlderRef.current = false;
+        setLoadingOlder(false);
+      }
     }
   }, [setAllDataAndRef]);
 
@@ -331,6 +368,12 @@ export function useBinanceData() {
 
   const reset = useCallback(() => {
     initLoadRequestIdRef.current += 1;
+    initLoadPendingRef.current = false;
+    dataContextRef.current = { symbol: "", interval: "", generation: initLoadRequestIdRef.current };
+    inflightNewerRef.current = false;
+    inflightOlderRef.current = false;
+    setLoadingNewer(false);
+    setLoadingOlder(false);
     setAllDataAndRef([]);
     oldestRef.current = Infinity;
     noMoreRef.current = false;
@@ -343,6 +386,7 @@ export function useBinanceData() {
   return {
     allData,
     allDataRef,
+    dataContextRef,
     loading,
     loadingOlder,
     loadingNewer,

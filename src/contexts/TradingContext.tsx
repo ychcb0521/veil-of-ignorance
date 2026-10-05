@@ -42,6 +42,7 @@ import {
   type RiskFloorEntry,
   updateRiskFloors,
   nextExposure,
+  positionRiskSince,
   priceObservedAfter,
   stopLossVersusLiquidation,
   type ExposureEntry,
@@ -134,6 +135,7 @@ import {
   type ReplayTimelineRegistry,
   type ReplayTimelineScope,
 } from '@/lib/replayTimeline';
+import { canExecuteReplayOrderAt, explicitRiskRebaseFor, replayEventIsAfterOrigin } from '@/lib/replayExecution';
 import { formatPrice, getPriceDecimals } from '@/lib/formatters';
 import { buildTpSlOrders, keepValidTpSlLegs, replaceTpSlOrders, tpSlCloseUnits, validateTpSlLevels } from '@/lib/tpSlOrders';
 import { removableMarginUsd } from '@/lib/positionGroupRisk';
@@ -393,6 +395,18 @@ interface TradingState {
    * 钟在跑却还没有时间线（上线前就开着的会话）时，当场补一个 bootstrap 根。
    */
   getTimelineId: (symbol?: string) => string | null;
+  /** 此刻的模拟时间，按撮合时钟现算（不是每 250 毫秒才刷新一次的界面时钟）。函数身份稳定。 */
+  getLiveSimTime: (symbol?: string) => number;
+  /**
+   * 【时序校验 · 委托】at 这一刻的行情能不能触发这张委托（规则见 lib/replayExecution.replayOrderOrigin）：
+   * 早于委托生效时刻的行情——迟到的旧 K 线、暂停前发出的取价、另一段日期的数据——一概不算数。
+   * 每一条撮合路径（盘面逐根、限价撮合、后台标的轮询）成交之前都要过这一关。同步读 ref，函数身份稳定。
+   */
+  canExecuteReplayOrder: (
+    symbol: string,
+    order: Pick<PendingOrder, 'id' | 'createdAt' | 'createdTimelineId'>,
+    at: number,
+  ) => boolean;
   /** 写入前取章：同 getTimelineId，外加「时钟逆着播放方向明显回落」的兜底分叉，并记下这次盖章的时钟。 */
   stampClock: (symbol?: string) => string | null;
   /**
@@ -1007,6 +1021,21 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     return mintReplayTimeline(scope, 'bootstrap', getLiveSimTime(symbol), direction, false);
   }, [timelineScopeOf, isTimelineScopeClockActive, mintReplayTimeline, getLiveSimTime]);
 
+  /** 这个标的此刻所在的时间线节点；钟没在跑、或还没有时间线时为 null。只读，不补根。 */
+  const currentTimelineNodeOf = useCallback((symbol?: string) => {
+    const scope = timelineScopeOf(symbol);
+    return isTimelineScopeClockActive(scope) ? currentReplayTimeline(timelineRegistryRef.current, scope) : null;
+  }, [timelineScopeOf, isTimelineScopeClockActive]);
+
+  const canExecuteReplayOrder = useCallback((
+    symbol: string,
+    order: Pick<PendingOrder, 'id' | 'createdAt' | 'createdTimelineId'>,
+    at: number,
+  ): boolean => canExecuteReplayOrderAt(
+    currentTimelineNodeOf(symbol), symbol, order, at,
+    liveClockInputsRef.current.direction === -1 ? -1 : 1,
+  ), [currentTimelineNodeOf]);
+
   const stampClock = useCallback((symbol?: string): string | null => {
     const id = getTimelineId(symbol);
     if (!id) return null;
@@ -1417,11 +1446,27 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
   const settleIsolatedLiquidations = useCallback((
     items: { symbol: string; position: Position; exitPrice: number; closeTime: number }[],
   ) => {
-    if (items.length === 0) return;
+    /**
+     * 【时序校验 · 强平】写入之前的最后一道闸：强平时刻不许早于这副仓位在当前时间线上开始承担风险的那一刻
+     * （显式跳转带过来的从跳转点算，其余从仓位形成时刻算；倒放方向相反）。上游两条判定路径各有各的风险起点，
+     * 这里用独立的一条规则再核一遍——实盘 BELUSDT 的 6 月仓位就是被写成「4 月 21 日强平」的。
+     * 过不了闸的不结算、不动仓位，只留一条日志。老仓位没有任何开仓时刻时不加这道约束。
+     */
+    const admissible = items.filter(({ symbol: sym, position: pos, closeTime }) => {
+      const timeline = currentTimelineNodeOf(sym);
+      const direction: 1 | -1 = timeline?.direction ?? (liveClockInputsRef.current.direction === -1 ? -1 : 1);
+      const origin = explicitRiskRebaseFor(timeline, sym, pos)?.rebaseAt ?? positionRiskSince(pos, direction);
+      if (origin == null || replayEventIsAfterOrigin(closeTime, origin, direction)) return true;
+      console.warn('[liquidation] 拒绝一笔早于仓位形成时刻的强平（时序校验）', {
+        symbol: sym, positionId: pos.id, closeTime, riskOrigin: origin, direction,
+      });
+      return false;
+    });
+    if (admissible.length === 0) return;
     const records: TradeRecord[] = [];
     const idsBySymbol = new Map<string, Set<string>>();
     let lost = 0;
-    for (const { symbol: sym, position: pos, exitPrice, closeTime } of items) {
+    for (const { symbol: sym, position: pos, exitPrice, closeTime } of admissible) {
       const totals = isolatedLiquidationSettlement({ symbol: sym, position: pos, exitPrice });
       records.push(...buildCloseRecords({
         symbol: sym, pos,
@@ -1462,14 +1507,15 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       return changed ? next : prev;
     });
     openLiquidationModal({
-      lostAmount: lost, liquidatedPositions: items.length, scope: 'isolated',
-      maintenance: summarizeRiskModels(items.map(i => i.position)),
+      lostAmount: lost, liquidatedPositions: admissible.length, scope: 'isolated',
+      maintenance: summarizeRiskModels(admissible.map(i => i.position)),
     });
-  }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal, stampClock]);
+  }, [setTradeHistory, setPositionsMap, setOrdersMap, openLiquidationModal, stampClock, currentTimelineNodeOf]);
 
   /** 逐根判定：每个标的上一次判定看到的最后时刻，与每副仓位构成的风险下限（见 updateRiskFloors）。 */
   const candleLiqLastEndRef = useRef(new Map<string, number>());
   const candleLiqFloorsRef = useRef(new Map<string, Map<string, RiskFloorEntry>>());
+
   const liquidateIsolatedOnCandle = useCallback((
     symbol: string,
     candle: LiquidationCandle,
@@ -1485,10 +1531,29 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     const positions = (positionsMapRef.current[symbol] || [])
       .filter(p => p.marginMode === 'isolated' && isPositionOpen(p));
     // 没有仓位也要走一遍：「上一次看到哪」必须每次都记，下限才可信。
+    const prevFloors = candleLiqFloorsRef.current.get(symbol) ?? new Map<string, RiskFloorEntry>();
+    /**
+     * 风险下限默认留在仓位形成的那一刻，迟到的旧行情、暂停恢复、时钟自己倒退都改不了它——
+     * BELUSDT 那一场，6 月开的仓就是被「时钟落后 → 自动重置风险起点」放进了 4 月的 K 线里强平的。
+     * 只有用户显式开始 / 跳转 / 翻转方向、把仓位带进新时间线时，带过来的那几笔才改从操作后的时钟算
+     * （explicitRiskRebaseFor：只看仓位与时间线，每次照传结果都一样）。
+     */
+    const timeline = currentTimelineNodeOf(symbol);
+    const rebases = new Map(positions.flatMap(pos => {
+      const rebase = explicitRiskRebaseFor(timeline, symbol, pos);
+      return rebase ? [[pos.id, rebase] as const] : [];
+    }));
     const floors = updateRiskFloors(
-      candleLiqFloorsRef.current.get(symbol) ?? new Map(), positions, lastSeenEnd, candle.endTime,
+      prevFloors, positions.filter(pos => !rebases.has(pos.id)), lastSeenEnd, candle.endTime,
       staleToleranceMs(sim.speed),
     );
+    for (const pos of positions) {
+      const rebase = rebases.get(pos.id);
+      if (!rebase) continue;
+      for (const [id, entry] of updateRiskFloors(
+        prevFloors, [pos], lastSeenEnd, candle.endTime, staleToleranceMs(sim.speed), rebase,
+      )) floors.set(id, entry);
+    }
     candleLiqFloorsRef.current.set(symbol, floors);
     if (positions.length === 0) return;
     const items: { symbol: string; position: Position; exitPrice: number; closeTime: number }[] = [];
@@ -1502,7 +1567,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       items.push({ symbol, position: pos, exitPrice: decision.exitPrice, closeTime: candle.endTime });
     }
     settleIsolatedLiquidations(items);
-  }, [settleIsolatedLiquidations, sim.speed]);
+  }, [settleIsolatedLiquidations, sim.speed, currentTimelineNodeOf]);
 
   // ===== LIQUIDATION ENGINE (Cross + Isolated) =====
   const liquidationCheckRef = useRef(false);
@@ -1516,12 +1581,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     // 逐根判定刚打掉的仓位此刻已从 ref 移除，闭包里那份还在，读它会再强平一次。
     const direction: 1 | -1 = sim.direction === -1 ? -1 : 1;
     const tolerance = staleToleranceMs(sim.speed);
-    // 每副仓位的风险起点：通常是它形成的那一刻；跳了时间或换了方向就改从此刻算（见 nextExposure）。
+    // 每副仓位的风险起点：它形成的那一刻；只有用户显式跳了时间或换了方向、把它带进新时间线时，
+    // 带过来的那几笔才改从操作后的时钟算（见 nextExposure / explicitRiskRebaseFor）。时钟落后本身不构成重置的理由。
     const exposures = new Map<string, ExposureEntry>();
     for (const [sym, positions] of Object.entries(positionsMapRef.current)) {
       const clock = getEffectiveTime(sym);
+      const timeline = currentTimelineNodeOf(sym);
       for (const pos of positions) {
-        exposures.set(pos.id, nextExposure(exposureRef.current.get(pos.id), pos, clock, direction, tolerance));
+        exposures.set(pos.id, nextExposure(
+          exposureRef.current.get(pos.id), pos, clock, direction, tolerance,
+          explicitRiskRebaseFor(timeline, sym, pos) ?? undefined,
+        ));
       }
     }
     exposureRef.current = exposures;
@@ -1921,7 +1991,17 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
      * 唯一的信号是委托列表里少了两行。现在坏哪腿丢哪腿,并且说出来。
      */
     const { levels, dropped } = keepValidTpSlLegs(position.side, requested, position.entryPrice);
-    const now = getEffectiveTime(symbol);
+    /**
+     * 保护单的挂单时刻与触发它的那笔成交同源：取这副仓位按播放方向最晚的一笔成交时刻（就是刚成交的那一笔）。
+     * 原来取界面时钟（getEffectiveTime）——它落后撮合时钟、调用方手里的还可能是上一次渲染的闭包：
+     * 显式跳回更早的日期后头几帧里成交的单，保护单会被盖上跳转之前的时刻；时序校验拿它当生效时刻，
+     * 这张止损就挂在列表里永远不触发。成交时刻读不到（老仓位）才退到撮合时钟。
+     */
+    const fillTimes = [position.openTime, ...(position.fills ?? []).map(fill => fill.openTime)]
+      .filter((time): time is number => typeof time === 'number' && Number.isFinite(time) && time > 0);
+    const now = fillTimes.length === 0
+      ? getLiveSimTime(symbol)
+      : liveClockInputsRef.current.direction === -1 ? Math.min(...fillTimes) : Math.max(...fillTimes);
     const newOrders = buildTpSlOrders({
       symbol, position, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
     }).map(o => ({ ...o, ...ORDER_LOT_SIZE_STAMP }));
@@ -1935,7 +2015,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [symbol]: replaceTpSlOrders(prev[symbol] || [], position.id, newOrders),
     }));
-  }, [getEffectiveTime, setOrdersMap, stampClock]);
+  }, [getLiveSimTime, setOrdersMap, stampClock]);
 
   /**
    * 合并成交之后的收尾。**不做这一步，就是拿一个安静的 bug 换掉一个吵闹的 bug。**
@@ -2830,7 +2910,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const now = getEffectiveTime(symbol);
+    // 挂单时刻取撮合时钟（与普通委托同一只钟）：界面时钟落后，时序校验拿它当生效时刻会有一小段对不上。
+    const now = getLiveSimTime(symbol);
     const newOrders = buildTpSlOrders({
       symbol, position: pos, levels, now, newId: () => crypto.randomUUID(), timelineId: stampClock(symbol),
     }).map(o => ({ ...o, ...ORDER_LOT_SIZE_STAMP }));
@@ -3206,6 +3287,8 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     getEffectiveTime,
     getCoinState,
     getTimelineId,
+    getLiveSimTime,
+    canExecuteReplayOrder,
     stampClock,
     forkReplayTimeline,
     endReplayTimeline,
