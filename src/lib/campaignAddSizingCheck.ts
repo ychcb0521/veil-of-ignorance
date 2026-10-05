@@ -208,6 +208,8 @@ function coinGrossAtExit(record: TradeRecord, exitPrice: number): number | null 
 /** 一刀：什么时候平的、平掉多少币、落袋多少（USD 与币本位的币数，后者按 S₁ 估值时用）。 */
 interface LegCut {
   time: number;
+  /** 同一合并持仓的成交可以直接证明属于本轮，不依赖复盘录入顺序。 */
+  positionId: string | null;
   /** 真实钱包时钟；有持仓操作起点时，用它排除别次回放的落袋。 */
   operationTime: number | null;
   /** 正利润只有镜像止盈 / tp1 才能成为 G；其他来源的盈利不混入 Plan B。 */
@@ -220,6 +222,7 @@ interface LegCut {
 /** 一条同向主力侧腿的逐刀账本。 */
 interface LegLedger {
   leg: TradeJournal;
+  positionIds: string[];
   open: number | null;
   /** 这笔成交真实发生的时刻；老记录没有。 */
   openOperationTime: number | null;
@@ -251,9 +254,10 @@ function buildLedger(
   if (records.length === 0) {
     const close = execution.closeTime;
     return {
-      leg, open, openOperationTime, entry, coins, journalClose,
+      leg, positionIds: [], open, openOperationTime, entry, coins, journalClose,
       cuts: close == null ? [] : [{
         time: close,
+        positionId: null,
         operationTime: journalCloseOperationTime(leg),
         mirrorProfit: leg.leg_role === 'mirror_tp',
         coins,
@@ -285,6 +289,7 @@ function buildLedger(
     }
     return {
       time: record.closeTime,
+      positionId: record.positionId ?? null,
       operationTime: realTime(record.closedRealAt),
       // 有成交记录就只认记录上的退出方式，与计算器 detectBankedMirrorProfit 同一判据。
       // 不能再看 leg_role：引擎把同向成交合并成一个仓位，手动 / 止损减仓按成交占比拆到每一笔，
@@ -296,7 +301,7 @@ function buildLedger(
       coin,
     };
   }).sort((a, b) => a.time - b.time);
-  return { leg, open, openOperationTime, entry, coins, cuts, journalClose };
+  return { leg, positionIds: [...new Set(records.map(record => record.positionId).filter((id): id is string => !!id))], open, openOperationTime, entry, coins, cuts, journalClose };
 }
 
 /** t 时刻（含）之前平掉的币量；有一刀读不出币数就返回 null。 */
@@ -444,6 +449,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       const openedBefore = ledger.open < t || (ledger.open === t && sequence(ledger.leg) < sequence(add));
       return openedBefore && !closedBy(ledger, t);
     });
+    const heldPositionIds = new Set(heldAtAdd.flatMap(ledger => ledger.positionIds));
     const heldOperationTimes = heldAtAdd.map(ledger => ledger.openOperationTime);
     const holdingStartOperation = heldOperationTimes.length > 0
       && heldOperationTimes.every((time): time is number => time != null)
@@ -464,8 +470,11 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       for (const cut of ledger.cuts) {
         if (cut.time < holdingStart || cut.time > t) continue;
         if (holdingStartOperation != null) {
-          // 真实起点可知时，没有操作时间的老刀、以及早于本轮持仓的别次回放，一律不进 G。
-          if (cut.operationTime == null || cut.operationTime < holdingStartOperation) continue;
+          // 同一合并持仓是比复盘录入顺序更强的归属证据：历史成交可能晚于
+          // 止盈刀才被导入战役，此时 openedRealAt 不应抹掉已实现的镜像利润。
+          // 没有持仓 ID 关联时仍按真实操作时间隔离别次回放。
+          const samePosition = cut.positionId != null && heldPositionIds.has(cut.positionId);
+          if (!samePosition && (cut.operationTime == null || cut.operationTime < holdingStartOperation)) continue;
           if (addOperationTime != null && cut.operationTime > addOperationTime) continue;
         }
         // 币本位：落袋是币，按 S₁ 估值——与计算器币本位条件两边同乘 S₁ 等价

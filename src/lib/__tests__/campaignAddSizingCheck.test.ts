@@ -368,6 +368,98 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(verdict.status).toBe('ok');
   });
 
+  it('【回归】同一合并持仓的镜像止盈先录入、主力后录入：成本线以下仍可由落袋利润覆盖加仓', () => {
+    const mainReal = T('2026-10-05T09:00:00Z');
+    const mirrorReal = mainReal - 60 * MIN;
+    const addReal = mainReal + 60 * MIN;
+    const tradeRecords = [
+      record({ id: 'main-rec', positionId: 'held-position', fillId: 'main-rec', quantity: 10_000,
+        openTime: T0, closeTime: t + 60 * MIN, openedRealAt: mainReal, closedRealAt: addReal + 60 * MIN }),
+      record({ id: 'mirror-rec', positionId: 'held-position', fillId: 'mirror-rec', quantity: 5_000,
+        openTime: T0, closeTime: T0 + 60 * MIN, pnl: 500, exit_method: 'tp1',
+        openedRealAt: mirrorReal, closedRealAt: mirrorReal + 10 * MIN }),
+      record({ id: 'add-rec', positionId: 'held-position', fillId: 'add-rec', quantity: 1_000,
+        entryPrice: 1.3, openTime: t, closeTime: t + 60 * MIN,
+        openedRealAt: addReal, closedRealAt: addReal + 60 * MIN }),
+    ];
+    const legs = [
+      mainLeg({ trade_record_id: 'main-rec' }),
+      leg({ id: 'mirror', leg_role: 'mirror_tp', trade_record_id: 'mirror-rec',
+        pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 5_000 }),
+      addLeg(1_000, { trade_record_id: 'add-rec' }),
+    ];
+    // S₁=0.98 低于原成本 1：旧仓亏 200 U；镜像已落袋 500 U；
+    // 加仓 1,000 币的新增风险 320 U，仍超出 20 U。收小至 900 币则合规。
+    const stop = stopAt(0.98);
+    const oversized = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: stop }).get('add')!;
+    expect(oversized.banked).toBeCloseTo(500, 6);
+    expect(oversized.cushion).toBeCloseTo(-200, 6);
+    expect(oversized.maxAllowedCoins).toBeCloseTo(937.5, 6);
+    expect(oversized.status).toBe('fail');
+    legs[2].pre_position_size = 900 * 1.3;
+    const covered = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: stop }).get('add')!;
+    expect(covered.status).toBe('ok');
+    expect(covered.banked).toBeCloseTo(500, 6);
+  });
+
+  it('【HEIUSDT 回归】止盈后连续三笔：前两笔可覆盖，第三笔超额仍提示缺口', () => {
+    const opened = T('2026-06-25T23:58:00+08:00');
+    const tpAt = T('2026-06-26T01:06:00+08:00');
+    const addTimes = [
+      T('2026-06-26T01:32:00+08:00'),
+      T('2026-06-26T02:04:00+08:00'),
+      T('2026-06-26T03:25:00+08:00'),
+    ];
+    const actualMainImport = T('2026-10-05T09:00:00Z');
+    const earlierTpImport = actualMainImport - 60 * MIN;
+    const close = T('2026-06-26T03:38:00+08:00');
+    const sharedPosition = 'hei-merged-position';
+    const mainCoins = 27_229_737.39;
+    const mirrorCoins = 42_590_848.15;
+    const addCoins = [10_994_688.81, 23_977_177.33, 91_684_219.68];
+    const addPrices = [0.172473, 0.173727, 0.182355];
+    const stopPrices = [0.159550, 0.165703, 0.174813];
+    const tradeRecords = [
+      record({ id: 'hei-main', positionId: sharedPosition, fillId: 'hei-main',
+        entryPrice: 0.161673, quantity: mainCoins, openTime: opened, closeTime: close,
+        openedRealAt: actualMainImport, closedRealAt: actualMainImport + 4 * 60 * MIN }),
+      record({ id: 'hei-mirror', positionId: sharedPosition, fillId: 'hei-mirror',
+        entryPrice: 0.161673, quantity: mirrorCoins, openTime: opened, closeTime: tpAt,
+        pnl: 228_831.21, exit_method: 'tp1', openedRealAt: earlierTpImport,
+        closedRealAt: earlierTpImport + 10 * MIN }),
+      ...addTimes.map((time, index) => record({
+        id: `hei-add-${index + 1}`, positionId: sharedPosition, fillId: `hei-add-${index + 1}`,
+        entryPrice: addPrices[index], quantity: addCoins[index], openTime: time, closeTime: close,
+        openedRealAt: actualMainImport + (index + 1) * 60 * MIN,
+        closedRealAt: actualMainImport + 4 * 60 * MIN,
+      })),
+    ];
+    const legs = [
+      mainLeg({ id: 'hei-main-leg', trade_record_id: 'hei-main', pre_simulated_time: iso(opened),
+        pre_entry_price: 0.161673, pre_position_size: mainCoins * 0.161673 }),
+      leg({ id: 'hei-mirror-leg', leg_role: 'mirror_tp', trade_record_id: 'hei-mirror',
+        pre_simulated_time: iso(opened), pre_entry_price: 0.161673,
+        pre_position_size: mirrorCoins * 0.161673 }),
+      ...addTimes.map((time, index) => leg({
+        id: `hei-add-leg-${index + 1}`, leg_role: `main_add_${index + 1}`,
+        trade_record_id: `hei-add-${index + 1}`, pre_simulated_time: iso(time),
+        pre_entry_price: addPrices[index], pre_position_size: addCoins[index] * addPrices[index],
+      })),
+    ];
+    const orders = addTimes.map((time, index) => short(stopPrices[index], time - MIN, index < 2 ? addTimes[index + 1] - 2 * MIN : null));
+    const verdicts = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: orders });
+    const first = verdicts.get('hei-add-leg-1')!;
+    const second = verdicts.get('hei-add-leg-2')!;
+    const third = verdicts.get('hei-add-leg-3')!;
+    expect([first.status, second.status, third.status]).toEqual(['ok', 'ok', 'fail']);
+    expect(first.banked).toBeCloseTo(228_831.21, 2);
+    expect(second.banked).toBeCloseTo(228_831.21, 2);
+    expect(third.banked).toBeCloseTo(228_831.21, 2);
+    expect(first.maxAllowedCoins).toBeGreaterThan(addCoins[0]);
+    expect(second.maxAllowedCoins).toBeGreaterThan(addCoins[1]);
+    expect(third.maxAllowedCoins).toBeLessThan(addCoins[2]);
+  });
+
   it('【回归】合并仓位：止盈那一刀拆到主力、镜像两条记录——已平掉的币不进浮盈垫，两条的利润都进 G', () => {
     // 主力 10,000 币 @1.0 与镜像 15,000 币 @1.02 在引擎里是同一个仓位 P 的两笔成交
     const position = (mainUnits: number, mirrorUnits: number): Position => ({
