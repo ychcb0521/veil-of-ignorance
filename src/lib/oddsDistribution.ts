@@ -2,6 +2,7 @@ import type { CampaignMetricPoint } from '@/lib/campaignMetricSeries';
 import type { ScatterStackScale } from '@/components/charts/stackLayout';
 import { gaussianKde, silvermanBandwidth } from '@/lib/kernelDensity';
 import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
+import { ROBUST_FENCE_FACTOR, robustFenceRange } from '@/lib/robustRange';
 
 /** 固定 10% 风险下注的本金归零界限；不是用户真实账户的强平判定。 */
 export const CAPITAL_RUIN_THRESHOLD = -1 / FIXED_DRAWDOWN_FRACTION;
@@ -79,14 +80,40 @@ export function oddsDistributionDomain(values: number[]): OddsDistributionDomain
   return { min, max, ticks };
 }
 
-/** 1 / 2 / 5 × 10ⁿ 里取一个不小于 raw 的步距——刻度落在人能心算的数上。 */
+/**
+ * 1 / 2 / 2.5 / 5 × 10ⁿ 里取一个不小于 raw 的步距——刻度落在人能心算的数上。
+ * 2.5 这一档是后加的：窗口按步距对齐，从 2 直接跳到 5 会让窗口白白宽出一倍多，主体又被挤回去。
+ * 只在 0.25 及以上用它：0.025 这样的步距印成两位小数会变成 0.03、0.05、0.07，刻度与标签对不上。
+ */
 function niceStep(raw: number): number {
   if (!Number.isFinite(raw) || raw <= 0) return 1;
   const exponent = Math.floor(Math.log10(raw));
   const base = raw / 10 ** exponent;
   // 容差：base 在浮点里常是 1.0000000000000002，不留余地会一路顶到 2。
-  const multiplier = base <= 1 + 1e-9 ? 1 : base <= 2 + 1e-9 ? 2 : base <= 5 + 1e-9 ? 5 : 10;
-  return multiplier * 10 ** exponent;
+  const multiplier = base <= 1 + 1e-9 ? 1 : base <= 2 + 1e-9 ? 2 : base <= 2.5 + 1e-9 && exponent >= -1 ? 2.5 : base <= 5 + 1e-9 ? 5 : 10;
+  return Number((multiplier * 10 ** exponent).toPrecision(12));
+}
+
+/**
+ * 分布图一屏里大约放得下的列数与行数（桌面：绘图区约 830px 宽、510px 高，每点 14px）。
+ * 只用来在几个候选窗口之间挑一个「最高一柱放得下」的，不决定排版；实际尺寸不同也只是挑得保守或激进一点。
+ */
+export const DISTRIBUTION_NOMINAL_COLUMNS = 54;
+/** 按 12px 行距（点位不相互压住的最小行距）一屏约放 43 行；留一点余量，免得最高一柱刚好卡在线上时窗口来回跳。 */
+export const DISTRIBUTION_NOMINAL_ROWS = 40;
+/** 栅栏倍数的候选：先用远栅栏（3·IQR），最高一柱还是放不下就逐步收紧，让主体占更多列。 */
+const FENCE_FACTORS = [ROBUST_FENCE_FACTOR, 2.5, 2, 1.5] as const;
+
+/** 把 [min, max] 等分成 columns 列时最高一列有几场；窗口外的点记在最边上的一列（与图上贴边的三角同一处）。 */
+export function tallestColumnEstimate(sorted: readonly number[], min: number, max: number, columns: number): number {
+  if (!(max > min) || columns < 1) return sorted.length;
+  const counts = new Array<number>(columns).fill(0);
+  const width = (max - min) / columns;
+  for (const value of sorted) {
+    const index = Math.min(columns - 1, Math.max(0, Math.floor((value - min) / width)));
+    counts[index] += 1;
+  }
+  return counts.reduce((tallest, count) => Math.max(tallest, count), 0);
 }
 
 /**
@@ -102,7 +129,14 @@ function niceStep(raw: number): number {
  * 参照线画在窗口外等于没画，所以和 0 一样，窗口只许把它们圈进来、不许裁掉；
  * 而且不许让它们压在窗口边上——那样线外一侧永远是空的，读不出「有没有战役越过这条线」。
  */
-export function metricDistributionDomain(values: number[], anchors: readonly number[] = []): OddsDistributionDomain {
+export function metricDistributionDomain(
+  values: number[],
+  anchors: readonly number[] = [],
+  /** 估「最高一柱放不放得下」用的容量；缺省是一屏的大致列数与行数。rows 给 Infinity = 只用远栅栏、不收紧。 */
+  capacity: { columns?: number; rows?: number } = {},
+): OddsDistributionDomain {
+  const columns = capacity.columns ?? DISTRIBUTION_NOMINAL_COLUMNS;
+  const rows = capacity.rows ?? DISTRIBUTION_NOMINAL_ROWS;
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
   const extraAnchors = anchors.filter(anchor => Number.isFinite(anchor) && anchor !== 0);
   const pinned = [0, ...extraAnchors];
@@ -126,32 +160,46 @@ export function metricDistributionDomain(values: number[], anchors: readonly num
     return finish(Math.floor(Math.min(-1, ...pinned) / step) * step, Math.ceil(Math.max(1, ...pinned) / step) * step, step);
   }
 
-  const smallest = sorted[0];
-  const largest = sorted[sorted.length - 1];
-  const p2 = quantile(sorted, 0.02);
-  const p98 = quantile(sorted, 0.98);
   /**
-   * 样本小到分位数切不动尾巴时（n ≲ 26，p98 就等于最大值），换 Tukey 栅栏兜底。
-   * 否则一场 Gᵢ = 12 会把窗口撑成二十几倍，其余几十场全挤进最左边那一档——
-   * 盈亏比那一套靠 +10R 硬封顶避开了这件事，通用窗口没有天然的封顶可用。
+   * 【用户要求】窗口留给主体，长尾贴边——与盈亏比分布同一个思路，只是封顶不是写死的 +10R，
+   * 而是 Tukey 栅栏（见 robustRange）：p2–p98 之内，再裁到 Q1 − k·IQR ~ Q3 + k·IQR。
+   * 原来只在小样本（p98 就是最大值）时才用栅栏，样本一多就照 p98 走：右尾 +30R 把窗口撑开，
+   * 过半数战役挤进同一档里摞成一柱，比例根本读不出来。
+   *
+   * 先用远栅栏（k = 3）；按一屏的大致容量估一下，最高一柱还是放不下就把 k 收紧一档再试，
+   * 都放不下取最高一柱最矮的那个。收紧只是让更多尾部贴边，样本一个不丢。
    */
-  const q1 = quantile(sorted, 0.25);
-  const q3 = quantile(sorted, 0.75);
-  const iqr = q3 - q1;
-  const lowRaw = p2 > smallest || iqr <= 0 ? p2 : Math.max(p2, q1 - 3 * iqr);
-  const highRaw = p98 < largest || iqr <= 0 ? p98 : Math.min(p98, q3 + 3 * iqr);
-  const low = Math.min(lowRaw, ...pinned);
-  const high = Math.max(highRaw, ...pinned);
-  // 按 6 格切而不是 5：span 略大于 5 时，/5 会把步距从 1 顶成 2，窗口白白多出一倍空白。
-  const step = niceStep((high - low || 1) / 6);
-  let min = Math.floor(low / step) * step;
-  let max = Math.ceil(high / step) * step;
-  // 全是 0（例如时间段筛出来的全是进行中战役）时窗口会塌成一个点：左右各放一格。
-  if (max - min < step / 2) {
-    min -= step;
-    max += step;
+  const windowFor = (factor: number) => {
+    const fence = robustFenceRange(sorted, factor);
+    const low = Math.min(fence.low, ...pinned);
+    const high = Math.max(fence.high, ...pinned);
+    // 按 6 格切而不是 5：span 略大于 5 时，/5 会把步距从 1 顶成 2，窗口白白多出一倍空白。
+    const step = niceStep((high - low || 1) / 6);
+    let min = Math.floor(low / step + 1e-9) * step;
+    let max = Math.ceil(high / step - 1e-9) * step;
+    // 全是 0（例如时间段筛出来的全是进行中战役）时窗口会塌成一个点：左右各放一格。
+    if (max - min < step / 2) {
+      min -= step;
+      max += step;
+    }
+    // 0 压在窗口边上、而边外还有被裁掉的战役：向外多让一格。否则贴边的那一列会画在 0 线的另一侧——
+    // 一摞亏损的战役出现在盈利区里（或反过来），正是「档不许跨 0」要防的那种误读。
+    if (Math.abs(min) < step * 1e-9 && sorted[0] < 0) min -= step;
+    if (Math.abs(max) < step * 1e-9 && sorted[sorted.length - 1] > 0) max += step;
+    return { min, max, step };
+  };
+  let best = windowFor(FENCE_FACTORS[0]);
+  let bestTallest = tallestColumnEstimate(sorted, best.min, best.max, columns);
+  for (const factor of FENCE_FACTORS.slice(1)) {
+    if (bestTallest <= rows) break;
+    const candidate = windowFor(factor);
+    const tallest = tallestColumnEstimate(sorted, candidate.min, candidate.max, columns);
+    if (tallest < bestTallest) {
+      best = candidate;
+      bestTallest = tallest;
+    }
   }
-  return finish(min, max, step);
+  return finish(best.min, best.max, best.step);
 }
 
 function median(sorted: number[]) {

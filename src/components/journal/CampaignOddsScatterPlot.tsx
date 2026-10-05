@@ -3,6 +3,7 @@ import { readChartViewState, saveChartViewState } from '@/lib/chartViewState';
 import { ArrowLeft, CircleHelp } from 'lucide-react';
 import {
   createCampaignMetricDomain,
+  type CampaignMetricDomain,
   type CampaignMetricPoint,
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -33,6 +34,7 @@ import {
   CAPITAL_RUIN_THRESHOLD,
   isFixedBetRuin,
 } from '@/lib/oddsDistribution';
+import { robustFenceRange } from '@/lib/robustRange';
 
 const RUIN_ASSUMPTION = `按 ${FIXED_DRAWDOWN_FRACTION * 100}% 下注，本金归零`;
 const RUIN_BOUNDARIES = [
@@ -255,8 +257,62 @@ function createIntegerOddsTicks(min: number, max: number) {
   }));
 }
 
-function createContinuousMetricScale(values: number[]): CampaignMetricScale {
-  const baseDomain = createCampaignMetricDomain(values);
+/** 取值不超过这么多种的序列（加仓次数一类的计数）不裁：四分位数落在同一个值上是常态，谈不上谁是离群值。 */
+const ROBUST_WINDOW_MAX_DISCRETE_VALUES = 8;
+
+type RobustMetricDomain = CampaignMetricDomain & {
+  clippedLow: boolean;
+  clippedHigh: boolean;
+  /** 不带边距的窗口本身：自己另算刻度的轴（预期回撤）用它，免得 12% 的边距再被取整放大一次。 */
+  window: CampaignMetricDomain | null;
+};
+
+/**
+ * 【用户要求】时序图的纵轴留给主体：窗口按稳健范围（见 robustRange）定，窗口外的点贴边。
+ * 没有点被裁掉的那一侧照旧留 12% 的边距（最外面的点不压在边框上）；被裁的那一侧边上本来就是贴边的三角，不再留白。
+ * extra：无论如何要留在视野里的参照值（盈亏比的 −1R 止损线）。
+ */
+function robustMetricDomain(pointValues: number[], extra: number[] = []): RobustMetricDomain {
+  if (pointValues.length === 0) return { ...createCampaignMetricDomain(extra), clippedLow: false, clippedHigh: false, window: null };
+  const rawMin = Math.min(...pointValues);
+  const rawMax = Math.max(...pointValues);
+  // 只用栅栏、不套 p2–p98：没有离群值时一个点都不贴边，与原来逐位相同
+  const robust = new Set(pointValues).size <= ROBUST_WINDOW_MAX_DISCRETE_VALUES
+    ? { low: rawMin, high: rawMax }
+    : robustFenceRange(pointValues, undefined, { quantileBounds: false });
+  let { low, high } = robust;
+  /**
+   * 参照线必须留在图上，并且不许压在被裁的那条边上：贴边的三角要画在线自己那一侧，不能叠在线上被读成线上的值。
+   * 参照线 = 有正有负时的 0（盈亏分界）＋ extra（−1R 止损线）。被裁的一侧离最近的参照线至少留 12% 的跨度；
+   * 留出来的边距盖过了最外面的点，这一侧就等于没裁，照常留边距。
+   */
+  const references = [...(rawMin < 0 && rawMax > 0 ? [0] : []), ...extra];
+  if (references.length > 0) {
+    const margin = (Math.max(high, ...references) - Math.min(low, ...references)) * 0.12;
+    if (low > rawMin) low = Math.min(low, Math.max(rawMin, Math.min(...references) - margin));
+    if (high < rawMax) high = Math.max(high, Math.min(rawMax, Math.max(...references) + margin));
+  }
+  const padded = createCampaignMetricDomain([low, high, ...extra]);
+  const clippedLow = low > rawMin;
+  const clippedHigh = high < rawMax;
+  return {
+    min: clippedLow ? low : padded.min,
+    max: clippedHigh ? high : padded.max,
+    clippedLow,
+    clippedHigh,
+    window: { min: low, max: high },
+  };
+}
+
+/**
+ * exact：这一侧有点被裁到边上时，轴的端点就停在窗口边界上，不再向外凑到整刻度——
+ * 否则裁掉长尾腾出来的地方又被取整吃回去一截（+4.2 凑成 +6）。刻度仍落在整步距上，只是最外一条不一定贴边。
+ */
+function createContinuousMetricScale(
+  values: number[],
+  baseDomain: CampaignMetricDomain = createCampaignMetricDomain(values),
+  exact: { min?: boolean; max?: boolean } = {},
+): CampaignMetricScale {
   let step = niceContinuousTickStep((baseDomain.max - baseDomain.min) / 5);
   let min = Math.floor(baseDomain.min / step) * step;
   let max = Math.ceil(baseDomain.max / step) * step;
@@ -275,12 +331,14 @@ function createContinuousMetricScale(values: number[]): CampaignMetricScale {
   min = normalizeTickValue(min);
   max = normalizeTickValue(max);
   const tickCount = Math.round((max - min) / step);
-  const ticks = Array.from({ length: tickCount + 1 }, (_, index) => {
-    const value = normalizeTickValue(max - index * step);
-    return { value, top: valuePosition(value, min, max) };
-  });
+  const tickValues = Array.from({ length: tickCount + 1 }, (_, index) => normalizeTickValue(max - index * step));
+  const axisMin = exact.min && baseDomain.min > min && baseDomain.min < max ? baseDomain.min : min;
+  const axisMax = exact.max && baseDomain.max < max && baseDomain.max > axisMin ? baseDomain.max : max;
+  const ticks = tickValues
+    .filter(value => value >= axisMin - 1e-9 && value <= axisMax + 1e-9)
+    .map(value => ({ value, top: valuePosition(value, axisMin, axisMax) }));
 
-  return { min, max, ticks };
+  return { min: axisMin, max: axisMax, ticks };
 }
 
 function createExpectedDrawdownScale(values: number[]): CampaignMetricScale {
@@ -355,9 +413,14 @@ function createContinuousMetricBands(
 
   return boundaries.slice(0, -1).map((lower, index) => {
     const upper = boundaries[index + 1];
+    const isFirst = index === 0;
     const isLast = index === boundaries.length - 2;
+    // 纵轴窗口只留给主体，窗口外的点贴在上 / 下边缘：它们算进最边上的那一档，各档场数之和才等于总场数。
+    // 贴边与否照 ScatterPlot 的口径、拿轴端点的原值比：档边界过了 12 位有效数字的归一，恰在端点上的点会被多算成贴边。
+    const below = isFirst ? points.filter(point => point.value < scale.min).length : 0;
+    const above = isLast ? points.filter(point => point.value > scale.max).length : 0;
     const count = points.filter(point => (
-      point.value >= lower && (isLast ? point.value <= upper : point.value < upper)
+      (isFirst || point.value >= lower) && (isLast || point.value < upper)
     )).length;
 
     return {
@@ -366,7 +429,13 @@ function createContinuousMetricBands(
       upper,
       top: valuePosition((lower + upper) / 2, scale.min, scale.max),
       count,
-      label: `${formatValue(lower)} 至 ${formatValue(upper)}`,
+      label: above > 0 && below > 0
+        ? `全部（含贴边的 ${below + above} 场）`
+        : above > 0
+          ? `${formatValue(lower)} 及以上（含贴边的 ${above} 场）`
+          : below > 0
+            ? `${formatValue(upper)} 及以下（含贴边的 ${below} 场）`
+            : `${formatValue(lower)} 至 ${formatValue(upper)}`,
     };
   });
 }
@@ -527,13 +596,20 @@ export function CampaignMetricScatterPlot({
   const ruinCount = oddsFamily ? chartPoints.filter(point => isFixedBetRuin(point.value)).length : 0;
   const showRuinBoundary = ruinCount > 0;
   const scale = useMemo(() => {
-    const values = [
-      ...chartPoints.map(point => point.value),
-      ...(lossBoundaryValue == null ? [] : [lossBoundaryValue]),
-    ];
+    /**
+     * 【用户要求】时序图的纵轴同样留给主体：几场极端值不再把轴撑开几十倍、把其余的点压成一条线。
+     * 窗口按 Tukey 远栅栏（Q1 − 3·IQR ~ Q3 + 3·IQR，见 robustRange）定，没有离群值时与原来逐位相同；
+     * 不足 10 场、或取值只有几种（加仓次数）时不裁，每一侧最多约一成的战役贴边。
+     * 窗口外的点由 ScatterPlot 贴在上 / 下边缘画成三角并在脚注报数；悬停读到的仍是原值。
+     * 离散指标（自评、镜像止盈）的刻度是固定档位，不走这里。
+     */
+    const pointValues = chartPoints.map(point => point.value).filter(Number.isFinite);
+    const extra = lossBoundaryValue == null ? [] : [lossBoundaryValue];
+    const robustDomain = robustMetricDomain(pointValues, extra);
+    const values = [...(pointValues.length ? [robustDomain.min, robustDomain.max] : []), ...extra];
 
     if (metricKey === 'odds') {
-      const oddsDomain = createCampaignMetricDomain(values);
+      const oddsDomain = { min: robustDomain.min, max: robustDomain.max };
       if (showRuinBoundary) oddsDomain.min = Math.min(oddsDomain.min, CAPITAL_RUIN_THRESHOLD - 1);
       return {
         ...oddsDomain,
@@ -542,13 +618,17 @@ export function CampaignMetricScatterPlot({
     }
 
     if (metricKey === 'expectedDrawdownPct') {
-      return createExpectedDrawdownScale(values);
+      // 这条轴自己从 0 向下铺刻度：给它不带边距的窗口
+      return createExpectedDrawdownScale(robustDomain.window ? [robustDomain.window.min, robustDomain.window.max] : values);
     }
 
-    return createDiscreteMetricScale(metricKey) ?? createContinuousMetricScale(values);
+    return createDiscreteMetricScale(metricKey)
+      ?? createContinuousMetricScale(values, robustDomain, { min: robustDomain.clippedLow, max: robustDomain.clippedHigh });
   }, [chartPoints, lossBoundaryValue, metricKey, showRuinBoundary]);
   const domain = scale;
   const ticks = scale.ticks;
+  /** 自评、镜像止盈的时序图：纵轴是固定档位，说明里不提「贴边」。 */
+  const discreteTimeAxis = createDiscreteMetricScale(metricKey) != null;
   const activePoint = chartPoints.find(point => point.campaignId === activeCampaignId) ?? null;
   // 分布视图的窗口、摘要、带宽都由同一份纯函数派生，和时序视图互不影响。
   const dist = useMemo(
@@ -962,9 +1042,9 @@ export function CampaignMetricScatterPlot({
           ) : geometricDist ? (
             <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。0.90 处另画黄色参考线，与 1.00 盈亏平衡线区分；0.90 不是本金归零。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
           ) : dist ? (
-            <dd>横轴就是{axisLabel ?? metricLabel}本身{genericSpec ? `（单位 ${genericSpec.unit}）` : ''}，线性刻度，不考虑时间先后。显示区间取 p2–p98 的稳健窗口（样本太小时改用四分位栅栏兜底），并且无论如何把{windowAnchorText}圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
+            <dd>横轴就是{axisLabel ?? metricLabel}本身{genericSpec ? `（单位 ${genericSpec.unit}）` : ''}，线性刻度，不考虑时间先后。显示区间留给主体：p2–p98 之内再用四分位距裁掉长尾（Q1 − 3×IQR ~ Q3 + 3×IQR，最高一柱仍放不下时倍数收紧；每一侧最多约一成的战役贴边，不足 10 场不裁），并且无论如何把{windowAnchorText}圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数，统计与悬停仍用原值。盈亏比专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
-            <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。</dd>
+            <dd>按客观操作时间从早到晚等距排列，每一格代表一场战役；横向距离只表示先后顺序，不表示真实时间间隔。战役较多时图区可左右滚动，点位大小固定不缩小。{discreteTimeAxis ? '纵轴是固定的档位，每个点都画在自己的档上。' : '纵轴留给主体：越过 Q1 − 3×IQR ~ Q3 + 3×IQR 的极端值贴在上 / 下边缘画成三角并在脚注计数（每一侧最多约一成；不足 10 场、取值只有几种或没有极端值时一个点都不贴边），悬停读到的仍是原值。'}</dd>
           )}
         </div>
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
@@ -1003,7 +1083,7 @@ export function CampaignMetricScatterPlot({
               同一档内亏损在下、持平或算不出 b 居中、盈利在上，红绿各自连续排列。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数；点击三角可展开其中的战役。{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}
             </dd>
           ) : (
-            <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}右侧 n= 是各纵轴区间的全域点数，可用来读出被长尾压扁的中段密度。</dd>
+            <dd>{guide.point} 横向位置对应操作先后，纵向位置对应本指标数值；{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}{discreteTimeAxis ? '右侧 n= 是各档的全域场数，图区左右滚动时也不变。' : '右侧 n= 是各纵轴区间的全域点数（贴边的点算进最边上的一档），图区左右滚动时也不变。'}</dd>
           )}
         </div>
         {guide.referenceLines?.length ? (

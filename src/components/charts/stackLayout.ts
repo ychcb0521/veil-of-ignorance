@@ -202,7 +202,8 @@ export function stackLayout(points: StackLayoutPoint[], options: StackLayoutOpti
   // 先分档：越出显示区间的点落到最边上的一档，并记下方向，之后画成三角。
   const entries = points.map(point => {
     if (isolatedIds.has(point.id)) return { id: point.id, x: point.x, group: point.group, bin: numericBinCount, clamped: null };
-    const clamped: ClampDirection | null = point.x < xMin ? 'left' : point.x > xMax ? 'right' : null;
+    // 窗口端点是取整到刻度上的（1.2），恰在端点上的样本常带浮点尾差（12 × 0.1 = 1.2000000000000002）：不算越界
+    const clamped: ClampDirection | null = point.x < xMin - span * 1e-9 ? 'left' : point.x > xMax + span * 1e-9 ? 'right' : null;
     if (hardBoundaries) {
       const sectionIndex = hardBoundaries.findIndex(boundary => (
         point.x < boundary.value || (point.x === boundary.value && boundary.inclusiveSide === 'left')

@@ -6,10 +6,13 @@ import {
   DOMAIN_CAP,
   TAIL_THRESHOLD,
   buildOddsDistributionModel,
+  DISTRIBUTION_NOMINAL_COLUMNS,
+  DISTRIBUTION_NOMINAL_ROWS,
   kdeCountPath,
   isFixedBetRuin,
   metricDistributionDomain,
   oddsDistributionDomain,
+  tallestColumnEstimate,
 } from '@/lib/oddsDistribution';
 import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
 
@@ -219,14 +222,24 @@ describe('【用户要求】通用分布窗口（盈亏比之外的指标）', (
     expect(allNegative.ticks).toContain(0);
   });
 
-  it('刻度落在 1/2/5 × 10ⁿ 上，且不超过 ~6 格', () => {
+  it('刻度落在 1/2/2.5/5 × 10ⁿ 上，且不超过 ~6 格', () => {
     const domain = metricDistributionDomain([-0.36, 0.1, 0.5, 1.2, 4.65]);
     expect(domain.ticks.length).toBeLessThanOrEqual(8);
     const step = Number((domain.ticks[1] - domain.ticks[0]).toFixed(6));
     const base = step / 10 ** Math.floor(Math.log10(step));
-    expect([1, 2, 5]).toContain(Number(base.toFixed(6)));
+    expect([1, 2, 2.5, 5]).toContain(Number(base.toFixed(6)));
     // 浮点脏值不能漏到刻度上
     for (const tick of domain.ticks) expect(String(tick)).not.toMatch(/\d{8,}/);
+  });
+
+  it('2.5 这一档只用在 0.25 及以上：0.025 印成两位小数会变成 0.03、0.05、0.07，刻度与标签对不上', () => {
+    const stepOf = (domain: { ticks: number[] }) => Number((domain.ticks[1] - domain.ticks[0]).toFixed(6));
+    // 跨度 1.4：1.4 ÷ 6 ≈ 0.23 → 0.25
+    expect(stepOf(metricDistributionDomain(Array.from({ length: 29 }, (_, index) => index * 0.05)))).toBe(0.25);
+    // 跨度 0.14：0.14 ÷ 6 ≈ 0.023 → 跳过 0.025，取 0.05
+    expect(stepOf(metricDistributionDomain(Array.from({ length: 29 }, (_, index) => index * 0.005)))).toBe(0.05);
+    // 跨度 14：14 ÷ 6 ≈ 2.3 → 2.5
+    expect(stepOf(metricDistributionDomain(Array.from({ length: 29 }, (_, index) => index * 0.5)))).toBe(2.5);
   });
 
   it('窄样本也给得出窗口，空样本不炸', () => {
@@ -263,12 +276,89 @@ describe('【评审发现】通用窗口的两个退化情形', () => {
     expect(domain.ticks).toContain(0);
   });
 
-  it('样本够大时仍按 p98 走，不被栅栏提前收紧', () => {
-    // 200 场贴着 0 + 一条真实右尾：右尾要看得见，这正是分布图的用途
+  it('【用户要求】样本再大也不让右尾把窗口撑开：窗口留给主体，尾部贴边（原来样本一多就照 p98 走）', () => {
+    // 200 场贴着 0 + 一条真实右尾：照 p98（1.2）走窗口会开到 1.5 以上，主体只占左边四分之一
     const bulk = Array.from({ length: 200 }, (_, i) => -0.1 + (i % 40) * 0.01);
     const tail = [1.2, 1.6, 2.4, 3.1, 4.5];
     const domain = metricDistributionDomain([...bulk, ...tail]);
-    expect(domain.max).toBeGreaterThanOrEqual(0.3);
+    expect(domain.max).toBeGreaterThanOrEqual(0.3);   // 主体（−0.1 ~ 0.29）整个在窗口里
+    expect(domain.max).toBeLessThanOrEqual(1);        // 右尾五场贴边，不再占着大半个横轴
+  });
+
+  it('【用户要求】照用户账户的形状（过半数贴着 0、几场上百 R）：窗口只有几个 R 宽，最高一柱比照 p98 开窗口时矮一半以上，贴边的不超过一成', () => {
+    const random = lcg(20261005);
+    const between = (a: number, b: number) => a + random() * (b - a);
+    // 单场算术期望 = (b − 1) ÷ 2
+    const values = Array.from({ length: 296 }, () => {
+      const u = random();
+      const b = u < 0.09 ? between(-3, -1)
+        : u < 0.29 ? -(random() ** 1.6)
+          : u < 0.65 ? random() ** 1.4
+            : u < 0.81 ? between(1, 3)
+              : u < 0.87 ? between(3, 5)
+                : u < 0.93 ? between(5, 11)
+                  : u < 0.98 ? between(11, 60)
+                    : between(60, 300);
+      return (b - 1) / 2;
+    });
+    const sorted = [...values].sort((a, b) => a - b);
+    const domain = metricDistributionDomain(values);
+    expect(domain.min).toBeGreaterThanOrEqual(-4);
+    expect(domain.max).toBeLessThanOrEqual(8);         // 原来是 p98：几十 R
+    expect(domain.ticks).toContain(0);
+    const tallest = tallestColumnEstimate(sorted, domain.min, domain.max, DISTRIBUTION_NOMINAL_COLUMNS);
+    // 对照：照 p98 开窗口时最高一柱远超一屏
+    const p98 = sorted[Math.round(0.98 * (sorted.length - 1))];
+    const tallestAtP98 = tallestColumnEstimate(sorted, -5, Math.ceil(p98 / 5) * 5, DISTRIBUTION_NOMINAL_COLUMNS);
+    expect(tallestAtP98).toBeGreaterThan(DISTRIBUTION_NOMINAL_ROWS * 2);
+    expect(tallest).toBeLessThan(tallestAtP98 / 2);
+    // 【评审发现】裁掉的只能是极端值：收紧栅栏也不许让一成以上的战役贴边
+    expect(sorted.filter(value => value > domain.max).length).toBeLessThanOrEqual(sorted.length * 0.1);
+    expect(sorted.filter(value => value < domain.min).length).toBeLessThanOrEqual(sorted.length * 0.1);
+  });
+
+  it('【评审发现】0 压在窗口边上而边外还有战役时向外多让一格：贴边的一列画在 0 线自己那一侧', () => {
+    // 主体全在 2 ~ 3，另有 3 场大亏：栅栏落在 0 以上，窗口左端被 0 钉住——贴边的三角原来会落在 0 线右边第一档（盈利区）
+    const bulk = Array.from({ length: 60 }, (_, index) => 2 + index / 60);
+    const domain = metricDistributionDomain([...bulk, -40, -55, -80]);
+    expect(domain.min).toBeLessThan(0);
+    expect(domain.min).toBeGreaterThanOrEqual(-1);
+    expect(domain.ticks).toContain(0);
+    // 边外没有战役时 0 照旧可以压边
+    expect(metricDistributionDomain(bulk).min).toBe(0);
+  });
+
+  it('【评审发现】不足 10 场不裁：三四场战役的窗口把每一场都圈进来', () => {
+    const domain = metricDistributionDomain([0.2, 0.4, 0.5, 6]);
+    expect(domain.min).toBeLessThanOrEqual(0);
+    expect(domain.max).toBeGreaterThanOrEqual(6);
+  });
+
+  it('远栅栏下最高一柱还是放不下时把栅栏收紧一档再试：窗口更窄、最高一柱更矮；放得下就不动', () => {
+    // 主体尖在 0 上（250 场，越靠近 0 越密），另有 46 场散在 1 ~ 4：远栅栏的窗口里贴着 0 的那一列仍然太高
+    const random = lcg(7);
+    const values = [
+      ...Array.from({ length: 250 }, () => random() ** 2.5),
+      ...Array.from({ length: 46 }, () => 1 + random() * 3),
+    ];
+    const sorted = [...values].sort((a, b) => a - b);
+    const tallestOf = (domain: { min: number; max: number }) => tallestColumnEstimate(sorted, domain.min, domain.max, DISTRIBUTION_NOMINAL_COLUMNS);
+    // rows = Infinity：只用远栅栏（k = 3），不收紧
+    const far = metricDistributionDomain(values, [], { rows: Number.POSITIVE_INFINITY });
+    expect(tallestOf(far)).toBeGreaterThan(DISTRIBUTION_NOMINAL_ROWS);
+    const fitted = metricDistributionDomain(values);
+    expect(fitted.max).toBeLessThan(far.max);
+    expect(tallestOf(fitted)).toBeLessThan(tallestOf(far));
+    expect(fitted.ticks).toContain(0);
+    // 容量够大时两者相同：收紧只在放不下时发生
+    expect(metricDistributionDomain(values, [], { rows: 500 })).toEqual(far);
+  });
+
+  it('tallestColumnEstimate：窗口外的点记在最边上的一列，与图上贴边的三角同一处', () => {
+    expect(tallestColumnEstimate([0.1, 0.2, 0.3, 9, 9, 9, 9], 0, 1, 10)).toBe(4);   // 四场越界都压在最右一列
+    expect(tallestColumnEstimate([-5, -4, 0.55], 0, 1, 10)).toBe(2);                // 两场越界压在最左一列
+    expect(tallestColumnEstimate([0.05, 0.15, 0.25], 0, 1, 10)).toBe(1);
+    expect(tallestColumnEstimate([1, 2, 3], 2, 2, 10)).toBe(3);                     // 窗口塌了：全算一列
   });
 });
 

@@ -90,6 +90,27 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
       expect(page).toMatch(new RegExp(`${key}: '${key}',`));
     }
   });
+  it('【用户要求】坐标轴留给主体、极端值贴边：分布图的横轴与时序图的纵轴——指南与实现对得上', () => {
+    expect(guide).toContain('<strong>横轴的窗口留给主体，极端值贴边</strong>');
+    expect(guide).toContain('下界不低于 Q1 − 3×IQR、上界不高于 Q3 + 3×IQR');
+    expect(guide).toContain('裁尾的倍数从 3 依次收紧到 2.5、2、1.5');
+    expect(guide).toContain('<strong>时序图的纵轴同样留给主体</strong>');
+    expect(guide).toContain('没有极端值时一个点都不贴边');
+    // 【评审发现】裁掉的只能是极端值：每侧最多一成、不足 10 场不裁
+    expect(guide).toContain('每一侧最多约一成的战役贴边（裁尾不切进 p10–p90），不足 10 场时不裁');
+    expect(guide).toContain('有正有负时 0 线一定留在图上，而且离被裁的那条边至少一成');
+    expect(guide).toContain('裁了省不出三分之一的轴长，等于白裁');
+    expect(guide).not.toContain('被长尾压扁的中段密度');
+    expect(guide).not.toContain('窗口取 p2–p98 并一定把 0（和 1.00）圈进来，超出的极端值贴边画成三角并计数。');
+    const robust = read('lib/robustRange.ts');
+    expect(robust).toContain('export const ROBUST_FENCE_FACTOR = 3;');
+    expect(robust).toContain('export const ROBUST_FENCE_MIN_SAMPLES = 10;');
+    expect(robust).toContain('export const ROBUST_MAX_CLIPPED_SHARE = 0.1;');
+    expect(robust).toContain('export const ROBUST_MIN_CLIP_GAIN = 1 / 3;');
+    expect(read('lib/oddsDistribution.ts')).toContain('const FENCE_FACTORS = [ROBUST_FENCE_FACTOR, 2.5, 2, 1.5] as const;');
+    // 时序图只用栅栏、不套 p2–p98
+    expect(read('components/journal/CampaignOddsScatterPlot.tsx')).toContain('robustFenceRange(pointValues, undefined, { quantileBounds: false })');
+  });
   it('【用户要求】散点图一屏看全：图盒高度按窗口算、放不下时压紧行距——指南与实现对得上', () => {
     expect(guide).toContain('<strong>绘图区和这一屏一样高</strong>：图盒的高度按窗口算');
     expect(guide).toContain('点开散点图或点排序项时<strong>直接滚到绘图区</strong>');

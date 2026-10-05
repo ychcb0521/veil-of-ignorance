@@ -576,6 +576,11 @@ export function ScatterPlot({
 
   const { contentWidth, pitch, fitMode, placed, stack } = layout;
   const activePoint = placed.find(point => point.id === activeId) ?? null;
+  /**
+   * 时序图的提示框缺省挂在点位上方；上方放不下（贴在上边缘的三角、靠近顶边的点）时改挂到下方，
+   * 否则会被绘图盒裁掉上半截。四行文字约 68px 高，带警示语的再多几行。
+   */
+  const tooltipBelow = activePoint != null && activePoint.cy - 10 < (activePoint.warning ? 120 : 78);
   const clampedCount = placed.filter(point => point.clamped != null).length;
 
   // 场数轴由布局派生：max = 图高 ÷ 行距（非整数），这样 count c 的网格线恰好落在
@@ -1090,7 +1095,7 @@ export function ScatterPlot({
                     aria-hidden="true"
                     className={`pointer-events-none absolute z-20 max-w-[15rem] rounded-[4px] border border-[color:var(--chart-border)] bg-[color:var(--chart-surface-raised)] px-2 py-1.5 text-left shadow-[0_2px_8px_rgba(0,0,0,0.18)] ${
                       // 堆叠布局里提示框挂在点位旁边而不是上方，否则会盖住正在读的这一柱。
-                      stack ? '-translate-y-1/2' : '-translate-x-1/2 -translate-y-full'
+                      stack ? '-translate-y-1/2' : tooltipBelow ? '-translate-x-1/2' : '-translate-x-1/2 -translate-y-full'
                     }`}
                     style={stack ? {
                       // 右侧放不下 15rem 时改用 right 锚到点位左侧：用 left + translate 翻转会让
@@ -1107,7 +1112,7 @@ export function ScatterPlot({
                       top: `${Math.min(boxHeight - (activePoint.warning ? 80 : STACK_TOOLTIP_HALF), Math.max(PLOT_INSET.top + (activePoint.warning ? 80 : STACK_TOOLTIP_HALF), activePoint.cy))}px`,
                     } : {
                       left: `${Math.min(contentWidth - 90, Math.max(90, activePoint.cx))}px`,
-                      top: `${Math.max(activePoint.warning ? 120 : 38, activePoint.cy - 10)}px`,
+                      top: `${tooltipBelow ? activePoint.cy + 12 : activePoint.cy - 10}px`,
                     }}
                   >
                     <div className="flex items-center gap-1.5">

@@ -463,7 +463,7 @@ function formatMirrorTpMetric(value: number): string {
  * 四张分布图共用的两句参考线说明：密度曲线与越界三角的读法四张图一字不差，写一份免得各自漂移。
  */
 const METRIC_DISTRIBUTION_DENSITY_NOTE = '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与点列共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。';
-const METRIC_DISTRIBUTION_CLAMP_NOTE = '显示区间取 p2–p98 的稳健窗口，超出的极端值贴边画成三角并在图下计数；提示框、摘要统计与点击跳转仍用原值。';
+const METRIC_DISTRIBUTION_CLAMP_NOTE = '显示区间留给主体（p2–p98 之内再按四分位距裁掉长尾，每一侧最多约一成），超出的极端值贴边画成三角并在图下计数；提示框、摘要统计与点击跳转仍用原值。';
 /** 单场算术期望的胜率是常数（见 ARITHMETIC_EXPECTANCY_WIN_RATE）：说明里的式子与「0R ↔ b」的换算都从它推，不手写数字。 */
 const ARITHMETIC_WIN_RATE_PCT = Math.round(ARITHMETIC_EXPECTANCY_WIN_RATE * 100);
 /** Eᵢ = 0 ⇔ bᵢ = (1 − P) ÷ P；P = 50% 时是 +1R。 */

@@ -208,6 +208,25 @@ describe('ScatterPlot 点位绘制', () => {
 });
 
 describe('ScatterPlot 交互与可达性', () => {
+  it('【评审发现】提示框缺省挂在点位上方；贴在上边缘的点上方放不下，改挂到下方，不被绘图盒裁掉', () => {
+    // 6 个点、纵轴 −6 ~ +6：把第 5 个点改到轴外（贴上边缘），第 0 个点在最下面
+    const points = makePoints(6, index => (index === 5 ? 400 : index - 3));
+    renderOrdinal(6, { points });
+    fireEvent.mouseEnter(screen.getByTestId('pt-5'));
+    const below = screen.getByTestId('chart-tooltip');
+    expect(below.className).not.toContain('-translate-y-full');
+    const edgeTop = Number.parseFloat(screen.getByTestId('pt-5').style.top);
+    expect(edgeTop).toBe(0);                              // 确实贴在上边缘
+    const belowTop = Number.parseFloat(below.style.top);
+
+    fireEvent.mouseEnter(screen.getByTestId('pt-0'));
+    const above = screen.getByTestId('chart-tooltip');
+    expect(above.className).toContain('-translate-y-full');
+    // 上方的提示框底边在点位之上；下方的提示框顶边在贴边三角之下
+    expect(Number.parseFloat(above.style.top)).toBeGreaterThan(belowTop);
+    expect(belowTop).toBeGreaterThan(0);
+  });
+
   it('悬停与聚焦给出同一套激活状态、十字线和提示框', () => {
     const onActiveChange = vi.fn();
     renderOrdinal(6, { onActiveChange });

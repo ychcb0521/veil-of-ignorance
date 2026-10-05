@@ -124,8 +124,13 @@ describe('盈亏比分布的固定 10% 下注归零界限', () => {
     const ruinY = Number(screen.getByTestId('campaign-metric-capital-ruin-odds').getAttribute('y1'));
     const lossY = Number(screen.getByTestId('campaign-odds-loss-boundary-line').getAttribute('y1'));
     expect(ruinY).toBeGreaterThan(lossY);
-    const tickValues = screen.getAllByTestId('campaign-odds-y-tick').map(tick => Number(tick.getAttribute('data-tick-value')));
-    expect(Math.min(...tickValues)).toBeLessThanOrEqual(-10);
+    // 纵轴现在留给主体：−85.51 那一场贴在下边缘，轴只开到 −11（归零线下方留 1R），不再被它撑到 −100
+    const gridValues = screen.getAllByTestId('campaign-odds-integer-grid-line').map(line => Number(line.getAttribute('data-grid-value')));
+    expect(Math.min(...gridValues)).toBe(-10);
+    expect(screen.getByTestId('campaign-odds-capital-ruin-label')).toHaveTextContent('-10R');
+    // 归零线画在绘图区里面（jsdom 的盒高 550，下内边距 28）
+    expect(ruinY).toBeLessThan(550 - 28);
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveTextContent('1 个点位超出显示区间，已贴边标记');
   });
 
   it('不把其他指标的 −10 误当盈亏比归零界限', () => {
