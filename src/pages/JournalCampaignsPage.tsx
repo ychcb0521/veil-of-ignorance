@@ -155,6 +155,8 @@ const MemoCampaignMetricScatterPlot = memo(CampaignMetricScatterPlot);
 
 /** 页眉高度（h-14 + 1px 下边框）：统计 / 排序吸顶区的 top-[57px] 与它对齐。 */
 const CAMPAIGN_PAGE_HEADER_HEIGHT = 57;
+/** 散点图绘图区的高度占「窗口高 − 吸顶区」的比例。 */
+const CHART_BOX_SCREEN_RATIO = 0.9;
 
 /** 散点图还画不出来时的等高占位：一句话 + 进度条 + 「已完成 / 总数」。读战役目录与算涨幅未兑现共用。 */
 function ChartPreparingPlaceholder({ testId, title, loaded, total, emptyLabel, hint }: {
@@ -2768,12 +2770,14 @@ export default function JournalCampaignsPage() {
       // 【用户要求】绘图区本身和这一屏一样高：窗口高 − 吸顶区（页眉 + 统计 / 排序）。标题、图例、脚注不再挤在同一屏里，
       // 上下稍微滚一下就能看到；所以这里不扣它们的高度（传 panelHeight = boxHeight）。
       const boxHeight = box?.getBoundingClientRect().height ?? 0;
-      const next = box ? chartBoxHeightToFitViewport({
+      const full = box ? chartBoxHeightToFitViewport({
         viewportHeight: window.innerHeight,
         panelTop: CAMPAIGN_PAGE_HEADER_HEIGHT + stickyControlsHeight,
         panelHeight: boxHeight,
         boxHeight,
       }) : null;
+      // 【用户要求】比占满一屏稍低一点：取它的 0.9 倍
+      const next = full == null ? null : Math.floor(full * CHART_BOX_SCREEN_RATIO);
       setChartMaxBoxHeight(current => (current === next ? current : next));
     };
     update();
