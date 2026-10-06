@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { CampaignPnlOverviewItem } from '@/lib/campaignPnlOverview';
 
 /** 指标名 + ⓘ 弹层。aria-label 固定为「{label}说明」，页面测试靠它定位每一项。 */
 export function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
@@ -54,9 +53,25 @@ const ROW_START = [
   '[@container(min-width:540px)]:row-start-9', '[@container(min-width:540px)]:row-start-10',
 ];
 
+/**
+ * 面板只读条目的这几项。盈亏概览的条目（CampaignPnlOverviewItem）与「战役元数据」的条目都满足——
+ * 【用户要求】「战役元数据的排布与盈亏概览保持一致，字体大小、间距等等」：两张卡用同一个面板，排版不可能各写各的。
+ */
+export interface OverviewPanelItem {
+  key: string;
+  label: string;
+  value: string;
+  help: ReactNode;
+  valueClassName?: string;
+  /** 放右栏；一项都不放右栏时面板只有左边一栏，中间那道分隔线也不画。 */
+  rightColumn?: boolean;
+  /** 这一行的 data-testid（战役元数据的操作时间那一行）。 */
+  testId?: string;
+}
+
 export interface CampaignPnlOverviewPanelProps {
   title: string;
-  items: CampaignPnlOverviewItem[];
+  items: readonly OverviewPanelItem[];
   testId?: string;
 }
 
@@ -78,20 +93,24 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
           【用户要求】「空隙不好看」：两栏整块靠左时卡片右侧空出一大片。改为左栏贴左（与标题对齐）、右栏贴右（与卡片右内边距对齐），
           富余全部落在两栏正中间，正中一道淡竖线（第二列）把这段空白变成两组之间的分隔；两栏之间至少 64px。 */}
       <div className={`mt-3 grid grid-cols-[minmax(0,max-content)] gap-y-2 ${TWO_COLUMN_GRID}`}>
-        <div
-          aria-hidden="true"
-          data-testid="pnl-overview-column-divider"
-          // 跨满两栏的行数（隐式行上 row-end:-1 不起作用，按行数写）；一栏时 hidden，不占格
-          style={{ gridRow: `1 / span ${Math.max(1, leftRows.size, rightRows.size)}` }}
-          className="hidden [@container(min-width:540px)]:col-start-2 [@container(min-width:540px)]:block"
-        >
-          <div className="mx-auto h-full w-px bg-border/70" />
-        </div>
+        {/* 只有左栏（战役元数据）时没有两组可分：不画分隔线 */}
+        {rightRows.size > 0 && (
+          <div
+            aria-hidden="true"
+            data-testid="pnl-overview-column-divider"
+            // 跨满两栏的行数（隐式行上 row-end:-1 不起作用，按行数写）；一栏时 hidden，不占格
+            style={{ gridRow: `1 / span ${Math.max(1, leftRows.size, rightRows.size)}` }}
+            className="hidden [@container(min-width:540px)]:col-start-2 [@container(min-width:540px)]:block"
+          >
+            <div className="mx-auto h-full w-px bg-border/70" />
+          </div>
+        )}
         {items.map(item => {
           const row = (item.rightColumn ? rightRows : leftRows).get(item.key) ?? 0;
           return (
             <div
               key={item.key}
+              data-testid={item.testId}
               data-column={item.rightColumn ? 'right' : 'left'}
               className={`flex min-w-0 items-baseline justify-between gap-6 ${item.rightColumn ? COL_START.right : COL_START.left} ${ROW_START[row] ?? ''} ${item.rightColumn && row === 0 ? SINGLE_COLUMN_GROUP_BREAK : ''}`}
             >

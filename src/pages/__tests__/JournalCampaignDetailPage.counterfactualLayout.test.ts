@@ -10,7 +10,10 @@ describe('真实战役与反事实结果双栏（源码守卫）', () => {
   const row = read('components/journal/CounterfactualOverviewRow.tsx');
 
   it('战役元数据在左、盈亏概览在右；反事实行仍为双栏', () => {
-    const originalAt = page.indexOf('<div className="font-medium">战役元数据</div>');
+    // 【用户要求】战役元数据与盈亏概览同一个面板
+    const originalAt = page.indexOf('title="战役元数据"');
+    expect(page).not.toContain('<div className="font-medium">战役元数据</div>');
+    expect(page.match(/<CampaignPnlOverviewPanel\b/g)).toHaveLength(2);
     expect(originalAt).toBeGreaterThan(-1);
     const originalOpen = page.lastIndexOf('<section className="', originalAt);
     const originalClass = page.slice(originalOpen, page.indexOf('">', originalOpen));

@@ -714,12 +714,58 @@ describe('JournalCampaignDetailPage：反事实结果与上方「战役元数据
     renderPage();
     const operation = await screen.findByTestId('campaign-meta-operation-time');
     // 与列表卡片同一口径（campaignOperationTime）：这场取到的是 2026-07-19 11:00 UTC = 北京 19:00
-    expect(operation).toHaveTextContent('操作时间：2026-07-19 19:00');
-    expect(operation.lastElementChild).toHaveClass('font-semibold');
+    expect(operation.firstElementChild).toHaveTextContent('操作时间');
+    expect(operation.lastElementChild).toHaveTextContent('2026-07-19 19:00');
+    // 仍是加强显示：琥珀底、加粗；字号不再单独放大（与其它行、与盈亏概览同一个字号）
+    expect(operation.lastElementChild).toHaveClass('font-semibold', 'bg-[#F0B90B]/10');
+    expect(operation.lastElementChild?.className).not.toMatch(/text-\[1[3-9]px\]/);
     const card = operation.parentElement!.parentElement!;
+    expect(card).toHaveAttribute('data-testid', 'campaign-metadata');
     expect(card.firstElementChild).toHaveTextContent('战役元数据');
     expect(card).toHaveTextContent('开始');
     expect(card.textContent).not.toContain('legs 数');
+  });
+
+  it('【用户要求】战役元数据的排布与盈亏概览保持一致：同一个面板——卡片、标题、网格、每一行的类名逐字相同，七行与盈亏概览每栏逐行齐平', async () => {
+    renderPage();
+    const metadata = await screen.findByTestId('campaign-metadata');
+    const overview = metadata.nextElementSibling as HTMLElement;
+    expect(overview.firstElementChild).toHaveTextContent('盈亏概览');
+    const meta = overviewSkeleton(metadata);
+    const real = overviewSkeleton(overview);
+    // 同一张卡片样式、同一行标题、同一套网格（字号 12px、行距、名称在左读数在栏内右对齐）
+    expect(meta.card).toBe(real.card);
+    expect(meta.title).toBe(real.title);
+    expect(meta.grid).toBe(real.grid);
+    // 元数据只有左栏：没有中间那道分隔线；七行，每一行与盈亏概览左栏同一行的类名逐字相同
+    expect(metadata.querySelector('[data-testid="pnl-overview-column-divider"]')).toBeNull();
+    const metaRows = Array.from(metadata.lastElementChild!.children) as HTMLElement[];
+    const realLeftRows = (Array.from(overview.lastElementChild!.children) as HTMLElement[]).filter(row => row.dataset.column === 'left');
+    expect(metaRows).toHaveLength(7);
+    expect(realLeftRows).toHaveLength(7);
+    expect(metaRows.map(row => row.className)).toEqual(realLeftRows.map(row => row.className));
+    expect(metaRows.map(row => row.firstElementChild?.textContent)).toEqual(['操作时间', '开始', '结束', '持续时间', '杠杆倍数', 'DSI/USI 贡献', '加仓次数']);
+    // 每一行：名称（带 ⓘ 说明）在左，读数在右、等宽数字不折行
+    for (const row of metaRows) {
+      expect(row.children).toHaveLength(2);
+      expect(row.firstElementChild?.querySelector('button[aria-label$="说明"]')).not.toBeNull();
+      expect(row.lastElementChild).toHaveClass('shrink-0', 'whitespace-nowrap', 'font-mono', 'tabular-nums');
+    }
+    expect(screen.getByRole('button', { name: '操作时间说明' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '持续时间说明' })).toBeInTheDocument();
+    // 每一行的读数：开始 / 结束是战役的 K 线时间（按本机时区写成 MM/DD HH:mm），持续时间是两者之差
+    const local = (iso: string) => {
+      const d = new Date(iso);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    expect(metaRows.slice(0, 4).map(row => row.lastElementChild?.textContent)).toEqual([
+      '2026-07-19 19:00', local('2026-01-01T00:00:00.000Z'), local('2026-01-01T01:00:00.000Z'), '1 小时 0 分钟',
+    ]);
+    // 新加的四条 ⓘ：说清哪个是真实操作时间、哪个是 K 线模拟时间
+    fireEvent.click(screen.getByRole('button', { name: '操作时间说明' }));
+    expect(await screen.findByText(/真实操作发生的时刻（北京时间）/)).toBeInTheDocument();
+    expect(screen.getByText(/不是时光机里 K 线走到的模拟时间/)).toBeInTheDocument();
   });
 
   it('草稿一行：左「相对原始的变化情况」（相对实际 / 逐腿改动 / 运行信息 / 分支名·保存·丢弃），右面板与真实盈亏概览同骨架、同 14 项', async () => {

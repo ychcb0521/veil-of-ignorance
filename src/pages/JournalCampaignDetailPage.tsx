@@ -35,7 +35,7 @@ import {
   withCampaignReviewSummary,
   type CampaignReviewRule,
 } from '@/lib/campaignReviewSummary';
-import { CampaignPnlOverviewPanel, PnlMetricLabel } from '@/components/journal/CampaignPnlOverviewPanel';
+import { CampaignPnlOverviewPanel, type OverviewPanelItem } from '@/components/journal/CampaignPnlOverviewPanel';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { QuietInfo } from '@/components/journal/QuietInfo';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -299,6 +299,42 @@ function fmtMdHm(value: string | null) {
   const d = new Date(value);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/**
+ * 操作时间的读数：琥珀底、加粗——【用户要求】操作时间非常重要、要加强显示。
+ * 字号、行高与其它行相同（【用户要求】元数据与盈亏概览同一套排版）；-mr-1.5 抵掉右内边距，
+ * 数字的右端仍与下面各行的读数对齐，琥珀底向右多出 6px。
+ */
+const OPERATION_TIME_VALUE_CLASS = '-mr-1.5 rounded-[3px] bg-[#F0B90B]/10 px-1.5 font-semibold text-[#8F6B00] dark:text-[#F0B90B]';
+
+/**
+ * 「战役元数据」的七行：操作时间、开始、结束、持续时间，后面接杠杆倍数、DSI/USI 贡献、加仓次数。
+ * 【用户要求】排布与「盈亏概览」保持一致：同一个面板，名称在左、读数在栏内右对齐、每项一行、细节进 ⓘ；
+ * 七行正好与盈亏概览每栏的七行逐行齐平。
+ */
+function buildCampaignMetadataItems(
+  campaign: Pick<TradeCampaign, 'opened_at' | 'closed_at'>,
+  objectiveOperationTime: number | null,
+  metrics: readonly OverviewPanelItem[],
+): OverviewPanelItem[] {
+  return [
+    {
+      key: 'operationTime', label: '操作时间', testId: 'campaign-meta-operation-time',
+      value: objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16),
+      valueClassName: OPERATION_TIME_VALUE_CLASS,
+      help: (
+        <><p>这场战役真实操作发生的时刻（北京时间），与列表卡片、排序用的是同一个数。</p><p>它是客观的操作时间，不是时光机里 K 线走到的模拟时间；读不出时写「—」。</p></>
+      ),
+    },
+    { key: 'openedAt', label: '开始', value: fmtMdHm(campaign.opened_at), help: <p>战役开始的 K 线（模拟）时间。</p> },
+    { key: 'closedAt', label: '结束', value: fmtMdHm(campaign.closed_at), help: <p>战役结束的 K 线（模拟）时间；还没结束时写「进行中」。</p> },
+    {
+      key: 'duration', label: '持续时间', value: fmtDuration(campaign.opened_at, campaign.closed_at),
+      help: <p>从开始到结束的时间跨度（两头都是 K 线模拟时间）；还没结束的战役，终点按现在的真实时刻算。</p>,
+    },
+    ...metrics,
+  ];
 }
 
 function fmtReverseOrderChipTime(value: number | null | undefined) {
@@ -2744,37 +2780,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         )}
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="bg-card border border-border rounded p-4 text-[12px]">
-            <div className="font-medium">战役元数据</div>
-            {/* 恢复元数据 | 盈亏概览的左右双卡布局；元数据内部保持纵向、就近对齐，不再把名称与数值撑到两端。 */}
-            <div className="mt-3 space-y-2.5">
-              {/* 【用户要求】操作时间非常重要、要加强显示：客观操作时间（北京时间，与列表卡片同一写法）用加粗等宽的琥珀底读数。 */}
-              <div data-testid="campaign-meta-operation-time" className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-                <span className="text-muted-foreground">操作时间：</span>
-                <span className="rounded-[3px] bg-[#F0B90B]/10 px-1.5 py-0.5 font-mono text-[14px] font-semibold leading-none tabular-nums text-[#8F6B00] dark:text-[#F0B90B]">
-                  {objectiveOperationTime == null ? '—' : formatBeijingTime(objectiveOperationTime).slice(0, 16)}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
-                <span className="text-muted-foreground">开始</span>
-                <span className="font-mono tabular-nums">{fmtMdHm(campaign.opened_at)}</span>
-              </div>
-              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
-                <span className="text-muted-foreground">结束</span>
-                <span className="font-mono tabular-nums">{fmtMdHm(campaign.closed_at)}</span>
-              </div>
-              <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
-                <span className="text-muted-foreground">持续时间</span>
-                <span className="font-mono tabular-nums">{fmtDuration(campaign.opened_at, campaign.closed_at)}</span>
-              </div>
-              {campaignMetadataMetrics.map(item => (
-                <div key={item.key} className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
-                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-                  <span className={`shrink-0 font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* 【用户要求】战役元数据的排布与盈亏概览保持一致：同一个面板（字号、行距、名称在左读数在栏内右对齐、ⓘ），
+              七行与盈亏概览每栏的七行逐行齐平；操作时间仍是琥珀底加粗，字号与其它行相同。 */}
+          <CampaignPnlOverviewPanel
+            title="战役元数据"
+            testId="campaign-metadata"
+            items={buildCampaignMetadataItems(campaign, objectiveOperationTime, campaignMetadataMetrics)}
+          />
 
           <CampaignPnlOverviewPanel
             title="盈亏概览"
