@@ -302,8 +302,8 @@ const HANDPICKED: CampaignSortRow[] = [
   makeSortRow({ id: 'o', title: '', symbol: 'XRPUSDT', pnl: 0, time: null, add: true, pcr: 0, dd: 0, mpc: 0 }),
 ];
 
-/** 改动前就有的排序项：之后新增的（加仓次数）没有老实现可对照，另由 campaignListSort.test 覆盖。 */
-const LEGACY_SORT_MODES = CAMPAIGN_SORT_MODES.filter(mode => mode !== 'addCount' && mode !== 'unrealizedPriceChangePct');
+/** 改动前就有的排序项：之后新增的（加仓次数、仓位放大）没有老实现可对照，另由 campaignListSort.test 覆盖。 */
+const LEGACY_SORT_MODES = CAMPAIGN_SORT_MODES.filter(mode => mode !== 'addCount' && mode !== 'unrealizedPriceChangePct' && mode !== 'positionAmplification');
 
 describe('排序链只有一级时与改动前的单级排序逐位相同', () => {
   it('十二个排序项 × 两个方向，手写的一批战役', () => {

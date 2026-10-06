@@ -3,6 +3,7 @@ import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, compute
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
+import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 /**
@@ -38,6 +39,7 @@ export type CampaignSortMode =
   | 'unrealizedPriceChangePct'
   | 'addEfficiency'
   | 'addCount'
+  | 'positionAmplification'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -63,6 +65,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'captureRate',
   'addEfficiency',
   'addCount',
+  'positionAmplification',
   'geometricExpectancy',
   'arithmeticExpectancy',
   'leverage',
@@ -85,6 +88,7 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'unrealizedPriceChangePct',
   'captureRate',
   'addEfficiency',
+  'positionAmplification',
   'geometricExpectancy',
   'arithmeticExpectancy',
 ]);
@@ -187,6 +191,28 @@ export function rowAddCount(row: Pick<CampaignCardData, 'legs'>): number {
   return campaignMainAddCount(row.legs);
 }
 
+/** 没带现成读数的行（旧缓存、手工拼的行）按腿现算一次，按行对象缓存：行对象不变读数就不变。 */
+const positionAmplificationCache = new WeakMap<object, number | null>();
+
+/**
+ * 仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位（倍）：与盈亏概览同名项同一个算式（computePositionAmplification）。
+ * 没有加仓时就是 1.00；读不出主力开仓名义仓位、或主方向一条成交的腿都没有时为 null。卡片、散点图、排序与导出共用。
+ * 建卡时已经按详情页同一份挂单凭据算好（row.positionAmplification）；没有这个字段的行才在这里现算。
+ */
+export function rowPositionAmplification(
+  row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionAmplification'>,
+): number | null {
+  if (row.positionAmplification !== undefined) return row.positionAmplification;
+  if (positionAmplificationCache.has(row)) return positionAmplificationCache.get(row) ?? null;
+  let value: number | null = null;
+  // 只是一格展示读数：腿数据怪到算不下去时写「—」，不能让排序或整张列表跟着出错
+  try {
+    value = computeCampaignPositionAmplification(row.campaign, row.legs, row.tradeRecords);
+  } catch { /* 算不出 */ }
+  positionAmplificationCache.set(row, value);
+  return value;
+}
+
 // ─── 比较的基本件 ─────────────────────────────────────────────────────────────
 
 const CAMPAIGN_TITLE_COLLATOR = new Intl.Collator(['zh-Hans-CN', 'en'], {
@@ -278,6 +304,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
   const unrealizedPriceChangePct = memoizeByRow<T, number | null>(rowUnrealizedPriceChangePct);
   const addEfficiency = memoizeByRow<T, number | null>(rowAddEfficiency);
   const addCount = memoizeByRow<T, number>(rowAddCount);
+  const positionAmplification = memoizeByRow<T, number | null>(rowPositionAmplification);
 
   const importanceDesc = (a: T, b: T) => compareNumber(importance(a), importance(b), 'desc');
   const timeDesc = (a: T, b: T) => compareNumber(sortTime(a), sortTime(b), 'desc');
@@ -384,6 +411,17 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
         || importanceTimeAlpha(a, b),
       value: addCount,
     },
+    // 【用户要求】仓位放大：紧跟加仓次数；同倍数按盈亏比、再按自评 → 操作时间 → 字母（与加仓效用、加仓次数同一串收尾）
+    // 【复核】按封面读数（两位小数）比：没有加仓的战役原值带着成交滑点的尾差（0.9998、1.0002……），封面都写 1.00x，
+    // 而这样的战役常常过半——按原值比，这一大摞会被尾差排出先后，「同倍数按盈亏比」与多级排序后面各级都轮不到它们。
+    positionAmplification: metric(
+      row => {
+        const value = positionAmplification(row);
+        return value == null ? null : sortBinValue('positionAmplification', value);
+      },
+      (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
+        || importanceTimeAlpha(a, b),
+    ),
     alpha: {
       include: always,
       missing: never,
@@ -417,7 +455,7 @@ export type CampaignSortBinning = {
 /**
  * 分档用的读数：按封面显示精度取整，取整表达式与各自的封面格式化函数逐字相同——
  *   · 盈亏比封面写 b = pct ÷ 100 保留两位（campaignPayoffRatioMultiple）→ pct 取整到 1；
- *   · 涨跌幅（roundedPct）、涨跌幅倍数 / 加仓效用（formatEfficiency）、预期回撤、算术期望两位小数；
+ *   · 涨跌幅（roundedPct）、涨跌幅倍数 / 加仓效用（formatEfficiency）、仓位放大、预期回撤、算术期望两位小数；
  *   · 几何期望封面写因子 1 + v 两位小数（formatGeometricExpectancy）→ 取整后再减回 1；
  * 于是封面显示相同的读数必然取整成同一个数、必然同档；档界显示出来对每张封面都字面成立。
  * 分档指标（镜像止盈 / 重要性 / 杠杆 / 字母 / 操作时间）原样返回。
@@ -436,7 +474,8 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'mainPriceChange':
     case 'mainPriceEfficiency':
     case 'unrealizedPriceChangePct':
-    case 'addEfficiency': return Number(value.toFixed(2));
+    case 'addEfficiency':
+    case 'positionAmplification': return Number(value.toFixed(2));
     default: return value;
   }
 }
@@ -551,8 +590,33 @@ export function signSplitThresholds(values: readonly number[]): readonly [number
   return [sideMedianThreshold(negatives), 0, sideMedianThreshold(nonNegatives)];
 }
 
-/** 分档用的档界：以 0 为界的指标正负两侧各对半分，其余（预期回撤）整体四分位。 */
+/** 仓位放大的分界线：1.00x = 没有放大（没有加仓）。 */
+export const POSITION_AMPLIFICATION_UNIT = 1;
+
+/** 这一项分档时是否以 1.00x 为界（未放大的自成一档）。 */
+export function isUnitSplitSortMode(mode: CampaignSortMode): boolean {
+  return mode === 'positionAmplification';
+}
+
+/**
+ * 【复核】仓位放大在 1.00 上有一个大质点（没有加仓的战役，常常过半）：整体四分位会让档界叠在 1.00 上——
+ * 「没加仓」与「加了一点仓」并进同一档，没加仓的过四分之三时整张表只剩一档，第一级形同虚设。
+ * 与以 0 为界的指标同一个思路，有意义的分界线保留：未放大（封面读数 ≤ 1.00x）自成一档，放大了的按场数三等分。
+ * 档界 = [放大了的最小读数, 三等分第一刀, 三等分第二刀]，都是真实出现的读数（相等的值必同档）。
+ * 一场放大的都没有、或全都放大了时，1.00 分不出东西，照常整体四分位。
+ */
+export function unitSplitThresholds(values: readonly number[]): readonly [number, number, number] | null {
+  const sorted = values.filter(value => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const amplified = sorted.filter(value => value > POSITION_AMPLIFICATION_UNIT);
+  if (amplified.length === 0 || amplified.length === sorted.length) return quartileThresholds(sorted);
+  const cut = (share: number) => amplified[Math.min(amplified.length - 1, Math.ceil(amplified.length * share))];
+  return [amplified[0], cut(1 / 3), cut(2 / 3)];
+}
+
+/** 分档用的档界：以 0 为界的指标正负两侧各对半分；仓位放大以 1.00x 为界；其余（预期回撤）整体四分位。 */
 export function sortBinThresholds(mode: CampaignSortMode, values: readonly number[]): readonly [number, number, number] | null {
+  if (isUnitSplitSortMode(mode)) return unitSplitThresholds(values);
   return isSignSplitSortMode(mode) ? signSplitThresholds(values) : quartileThresholds(values);
 }
 

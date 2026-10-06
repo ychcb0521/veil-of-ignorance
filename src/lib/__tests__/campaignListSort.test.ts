@@ -13,11 +13,14 @@ import {
   quartileOf,
   quartileThresholds,
   isSignSplitSortMode,
+  isUnitSplitSortMode,
+  unitSplitThresholds,
   signSplitThresholds,
   sortBinThresholds,
   removeSortLevel,
   resolveSortBinning,
   rowAddCount,
+  rowPositionAmplification,
   selectSortMode,
   sortBinValue,
   sortCampaignRows,
@@ -160,7 +163,7 @@ describe('排序链：依次比较', () => {
 
 describe('每个排序项的独立比较器', () => {
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1 });
+  const withValue = makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 });
   const empty = makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null });
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {
@@ -456,10 +459,10 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
       expect(resolveSortBinning(BINNED, [{ mode, direction: 'desc' }, { mode: 'captureRate', direction: 'desc' }]), mode).toBeNull();
       expect(CONTINUOUS_SORT_MODES.has(mode)).toBe(false);
     }
-    // 七个连续指标都分档（DSI / USI 贡献已从排序栏删掉）
+    // 连续指标都分档（DSI / USI 贡献已从排序栏删掉；仓位放大是后加的）
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'expectedDrawdownPct',
-      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct',
+      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'unrealizedPriceChangePct',
     ]);
     // 第一级算不出的战役本来就不进列表，也不参与档界
     const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
@@ -746,5 +749,132 @@ describe('【用户要求】加仓次数：排序项与封面读数', () => {
       [{ kind: 'value', value: 1 }, 2],
       [{ kind: 'value', value: 0 }, 1],
     ]);
+  });
+});
+
+describe('【用户要求】仓位放大：排序项（放在加仓次数的后面）', () => {
+  const rows = [
+    makeSortRow({ id: 'flat-win', pnl: 50, pcr: 50, amp: 1 }),
+    makeSortRow({ id: 'flat-loss', pnl: -30, pcr: -30, amp: 1 }),
+    makeSortRow({ id: 'double', pnl: 120, adds: 1, pcr: 120, amp: 2.004 }),
+    makeSortRow({ id: 'big', pnl: 900, adds: 4, pcr: 605, amp: 7.66 }),
+    makeSortRow({ id: 'big-loss', pnl: -200, adds: 3, pcr: -110, amp: 7.66 }),
+    makeSortRow({ id: 'unknown', pnl: 10, pcr: 10, amp: null }),
+  ];
+
+  it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
+    expect(CAMPAIGN_SORT_MODES.indexOf('positionAmplification')).toBe(CAMPAIGN_SORT_MODES.indexOf('addCount') + 1);
+    expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
+  });
+
+  it('从大到小 / 从小到大；同倍数按盈亏比；没有加仓的 1.00 照样进列表，算不出的不进这一档', () => {
+    expect(ids(sortCampaignRows(rows, [{ mode: 'positionAmplification', direction: 'desc' }])))
+      .toEqual(['big', 'big-loss', 'double', 'flat-win', 'flat-loss']);
+    expect(ids(sortCampaignRows(rows, [{ mode: 'positionAmplification', direction: 'asc' }])))
+      .toEqual(['flat-loss', 'flat-win', 'double', 'big-loss', 'big']);
+  });
+
+  it('作第二级时算不出的留在本档末尾（不论方向）', () => {
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'positionAmplification', direction: 'asc' }];
+    const sorted = ids(sortCampaignRows(rows, chain));
+    expect(sorted).toHaveLength(rows.length);
+    // 这批战役镜像止盈都未实现：盈利一档（flat-win、double、big、unknown）里 unknown 垫底
+    const winners = sorted.filter(id => ['flat-win', 'double', 'big', 'unknown'].includes(id));
+    expect(winners).toEqual(['flat-win', 'double', 'big', 'unknown']);
+  });
+
+  it('【复核】按封面读数比：没有加仓的战役原值带着滑点尾差，封面都写 1.00x 就算并列，再按盈亏比排', () => {
+    // 原值 1.000002 / 0.999998 / 0.9963（滑点 0.37%）封面都是 1.00x；按原值比的话尾差会决定先后
+    const noisy = [
+      makeSortRow({ id: 'tail-up-loss', pcr: -100, amp: 1.000002 }),
+      makeSortRow({ id: 'tail-down-win', pcr: 500, amp: 0.999998 }),
+      makeSortRow({ id: 'slippage-mid', pcr: 80, amp: 0.9963 }),
+      makeSortRow({ id: 'amplified', pcr: -50, adds: 2, amp: 2.4 }),
+    ];
+    expect(ids(sortCampaignRows(noisy, [{ mode: 'positionAmplification', direction: 'desc' }])))
+      .toEqual(['amplified', 'tail-down-win', 'slippage-mid', 'tail-up-loss']);
+    // 从小到大时三场 1.00x 仍并列，并列裁决（盈亏比）跟着方向走
+    expect(ids(sortCampaignRows(noisy, [{ mode: 'positionAmplification', direction: 'asc' }])))
+      .toEqual(['tail-up-loss', 'slippage-mid', 'tail-down-win', 'amplified']);
+    // 多级：第二级（仓位放大）在这三场上打平，第三级（盈亏比）才轮得到它们
+    const chain: CampaignSortChain = [
+      { mode: 'mirrorTp', direction: 'desc' }, { mode: 'positionAmplification', direction: 'desc' }, { mode: 'captureRate', direction: 'asc' },
+    ];
+    const flatWinners = makeSortRow({ id: 'flat-a', pcr: 300, amp: 1.000004 });
+    const flatWinnersB = makeSortRow({ id: 'flat-b', pcr: 20, amp: 0.999991 });
+    expect(ids(sortCampaignRows([flatWinners, flatWinnersB], chain))).toEqual(['flat-b', 'flat-a']);
+    // 原值不动：导出与悬停仍读得到没取整的数
+    expect(rowPositionAmplification(noisy[0])).toBe(1.000002);
+  });
+
+  it('【复核】以 1.00x 为界分档：没有放大的自成一档，放大了的按场数三等分；分档按封面两位小数', () => {
+    expect(CONTINUOUS_SORT_MODES.has('positionAmplification')).toBe(true);
+    expect(isSignSplitSortMode('positionAmplification')).toBe(false);
+    expect(isUnitSplitSortMode('positionAmplification')).toBe(true);
+    expect(isUnitSplitSortMode('expectedDrawdownPct')).toBe(false);
+    expect(sortBinValue('positionAmplification', 2.004)).toBe(2);
+    expect(sortBinValue('positionAmplification', 7.656)).toBe(7.66);
+    // 六成没加仓：整体四分位会给出 [1, 1, 2.5]，把没加仓的 12 场和 1.2 / 1.5 / 2 并进同一档
+    const sixty = [...Array.from({ length: 12 }, () => 1), 1.2, 1.5, 2, 2.5, 3, 4, 5, 7];
+    expect(quartileThresholds(sixty)).toEqual([1, 1, 2.5]);
+    expect(unitSplitThresholds(sixty)).toEqual([1.2, 2.5, 5]);
+    expect(sortBinThresholds('positionAmplification', sixty)).toEqual([1.2, 2.5, 5]);
+    expect(sixty.map(value => quartileOf(value, [1.2, 2.5, 5]))).toEqual([...Array.from({ length: 12 }, () => 1), 2, 2, 2, 3, 3, 3, 4, 4]);
+    // 八成没加仓：整体四分位三条档界全是 1，整张表只剩一档；以 1.00x 为界仍分得开
+    const eighty = [...Array.from({ length: 16 }, () => 1), 2, 3, 5, 7];
+    expect(quartileThresholds(eighty)).toEqual([1, 1, 1]);
+    expect(unitSplitThresholds(eighty)).toEqual([2, 5, 7]);
+    // 封面读数低于 1.00x 的（滑点大的没加仓战役写 0.99x）也在「没有放大」那一档
+    expect(quartileOf(0.99, unitSplitThresholds([0.99, 1, 1, 1.5, 3])!)).toBe(1);
+    // 只有一两场放大了：档界落在真实读数上，相等的值必同档
+    expect(unitSplitThresholds([1, 1, 1, 3])).toEqual([3, 3, 3]);
+    expect(unitSplitThresholds([1, 1, 2, 3])).toEqual([2, 3, 3]);
+    // 一场放大的都没有、或全都放大了：1.00 分不出东西，照常整体四分位
+    expect(unitSplitThresholds([1, 1, 1, 1])).toEqual(quartileThresholds([1, 1, 1, 1]));
+    expect(unitSplitThresholds([1.2, 1.5, 2, 3, 4])).toEqual(quartileThresholds([1.2, 1.5, 2, 3, 4]));
+    expect(unitSplitThresholds([])).toBeNull();
+
+    const chain: CampaignSortChain = [{ mode: 'positionAmplification', direction: 'desc' }, { mode: 'captureRate', direction: 'desc' }];
+    expect(sortChainBinsFirstLevel(chain)).toBe(true);
+    // 十四场：八场没加仓（原值带尾差），六场放大，一场算不出（不参与档界）
+    const many = [
+      ...Array.from({ length: 8 }, (_, index) => makeSortRow({ id: `flat${index}`, pcr: index * 10, amp: 1 + (index % 2 ? 0.000003 : -0.000003) })),
+      ...[1.2, 1.5, 2, 3, 4.5, 6].map((amp, index) => makeSortRow({ id: `amp${index}`, pcr: 100 + index, adds: 1, amp })),
+      makeSortRow({ id: 'none', pcr: 5, amp: null }),
+    ];
+    const binning = resolveSortBinning(many, chain)!;
+    expect(binning.total).toBe(14);
+    expect(binning.thresholds).toEqual([1.2, 2, 4.5]);
+    expect(binning.counts).toEqual([8, 2, 2, 2]);
+    const sorted = sortCampaignRows(many, chain);
+    expect(ids(sorted)).not.toContain('none');
+    // 放大了的在前（从大到小的档），没有放大的八场同在最后一档，档内按第二级（盈亏比）从大到小
+    expect(ids(sorted).slice(0, 6)).toEqual(['amp5', 'amp4', 'amp3', 'amp2', 'amp1', 'amp0']);
+    expect(ids(sorted).slice(6)).toEqual(['flat7', 'flat6', 'flat5', 'flat4', 'flat3', 'flat2', 'flat1', 'flat0']);
+    const groups = summarizeSortGroups(sorted, chain);
+    expect(groups.map(group => [group.key.kind === 'quartile' ? group.key.quartile : null, group.count])).toEqual([[4, 2], [3, 2], [2, 2], [1, 8]]);
+  });
+
+  it('作第二级的交叉表：按整张列表统一分四档，算不出的另起一列', () => {
+    const chain: CampaignSortChain = [{ mode: 'mirrorTp', direction: 'desc' }, { mode: 'positionAmplification', direction: 'desc' }];
+    const table = summarizeSortCrossTab(sortCampaignRows(rows, chain), chain, 1)!;
+    expect(table.mode).toBe('positionAmplification');
+    expect(table.thresholds).not.toBeNull();
+    expect(table.columns.some(column => column.kind === 'missing')).toBe(true);
+    expect(table.totals.reduce((sum, count) => sum + count, 0)).toBe(rows.length);
+  });
+
+  it('地址栏：sort / then 认得出仓位放大，写回去逐字相同', () => {
+    const chain = parseCampaignSortChain('?sort=positionAmplification&direction=asc&then=addCount.desc');
+    expect(chain).toEqual([{ mode: 'positionAmplification', direction: 'asc' }, { mode: 'addCount', direction: 'desc' }]);
+    const params = new URLSearchParams();
+    writeCampaignSortParams(params, chain);
+    expect(params.toString()).toBe('sort=positionAmplification&direction=asc&then=addCount.desc');
+    expect(parseCampaignSortChain('?sort=mirrorTp&then=positionAmplification.follow')[1])
+      .toEqual({ mode: 'positionAmplification', direction: 'desc', follow: true });
+    // 单击：新选中默认从大到小，再单击切方向
+    const picked = selectSortMode(DEFAULT_CAMPAIGN_SORT_CHAIN, 'positionAmplification');
+    expect(picked).toEqual([{ mode: 'positionAmplification', direction: 'desc' }]);
+    expect(selectSortMode(picked, 'positionAmplification')).toEqual([{ mode: 'positionAmplification', direction: 'asc' }]);
   });
 });

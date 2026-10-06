@@ -26,6 +26,7 @@ import {
   type CampaignRealizedPnl,
 } from '@/lib/campaignRealizedPnl';
 import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
+import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
 import { resolveCampaignOpportunityQuality } from '@/lib/campaignMetrics';
 import {
   fetchLegExitPriceCorrectionsResult,
@@ -51,9 +52,29 @@ export type CampaignCardData = {
   peakPriceChangePct?: number | null;
   /** 列表页与 Excel 导出按需加载 K 线后写入。 */
   dynamicMaxDrawdownPct?: number | null;
+  /**
+   * 仓位放大（倍，= 主方向总名义仓位 ÷ 主力开仓名义仓位）：建卡时按详情页盈亏概览同一份输入算好，算不出为 null。
+   * 没有这个字段的行（旧缓存）由 rowPositionAmplification 按腿现算。
+   */
+  positionAmplification?: number | null;
 };
 
 type CampaignDetails = Awaited<ReturnType<typeof getCampaignFullData>>;
+
+/**
+ * 封面的「仓位放大」：与详情页盈亏概览同名项同一份输入（平仓价校正、本地从未成交的委托 id、反向对冲委托）。
+ * 它只是一格展示读数——哪一场的腿数据怪到算不下去，这一格写「—」，不能让整场战役从列表里消失。
+ */
+function positionAmplificationOf(details: CampaignDetails, corrections: LegExitPriceCorrections): number | null {
+  try {
+    return computeCampaignPositionAmplification(details.campaign, details.legs, details.tradeRecords, corrections, {
+      unfilledOrderIds: new Set(details.unfilledOrderIds ?? []),
+      orders: details.reverseHedgeOrders,
+    });
+  } catch {
+    return null;
+  }
+}
 
 export function buildCampaignCardData(
   details: CampaignDetails,
@@ -84,6 +105,7 @@ export function buildCampaignCardData(
     opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, profitCaptureRatio, initialExpectedMaxDrawdownPct),
     // 与详情页同一份挂单判定（本地从未成交的委托 id），挂着没成交的滚动对冲不算在手
     mainPriceChangePct: campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) }),
+    positionAmplification: positionAmplificationOf(details, corrections),
   };
 }
 

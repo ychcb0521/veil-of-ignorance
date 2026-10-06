@@ -88,6 +88,10 @@ vi.mock('@/lib/journalApi', async importOriginal => {
 import { buildCampaignCardData, createCampaignListCache, type CampaignCardData } from '@/lib/campaignListCache';
 import { getCampaignFullData, listAllCampaigns, readUserLocalSnapshot } from '@/lib/journalApi';
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { computeInitialMainExposureNotional } from '@/lib/campaignAnalysis';
+import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
+import { buildLegPositionShareInputs, campaignMainSideNotional } from '@/lib/legPositionShareInputs';
+import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 
 const USER = 'user-1';
 const HOUR = 3_600_000;
@@ -454,6 +458,31 @@ describe('campaign list cache parity with the per-campaign path', () => {
     const projection = project(old.rows, old.details);
     if (GOLDEN.length === 0) console.log(`GOLDEN=${JSON.stringify(projection)}`);
     else expect(projection).toEqual(GOLDEN);
+  });
+
+  it('【用户要求】封面的仓位放大与详情页盈亏概览同名项是同一个数：同一份腿、同一份校正、同一份挂单凭据', async () => {
+    const { rows, details } = await buildRowsTheOldWay();
+    let finite = 0;
+    for (const row of rows) {
+      const full = details.get(row.campaign.id)!;
+      const corrections = await fetchLegExitPriceCorrections(full.campaign.symbol, full.legs, full.tradeRecords);
+      // 详情页的算法（JournalCampaignDetailPage：mainSideNotional + computeInitialMainExposureNotional）
+      const mainSide = campaignMainSideNotional(full.campaign.direction, buildLegPositionShareInputs(
+        full.legs, buildTradeRecordLookup(full.tradeRecords), corrections,
+        { unfilledOrderIds: new Set(full.unfilledOrderIds ?? []), orders: full.reverseHedgeOrders, events: full.campaign.actual_evolution },
+      ));
+      const expected = computePositionAmplification(
+        computeInitialMainExposureNotional(full.campaign, full.legs, full.tradeRecords),
+        mainSide.total,
+      );
+      expect(row.positionAmplification, row.campaign.id).toBe(expected);
+      if (expected != null) {
+        finite += 1;
+        expect(expected).toBeGreaterThan(0);
+      }
+    }
+    // 这批战役里确实有算得出的（不是全都是 null 的空对空）
+    expect(finite).toBeGreaterThan(0);
   });
 
   it('a local trade-data change reconciles only that symbol without touching Supabase; an unchanged remote refresh recomputes nothing', async () => {

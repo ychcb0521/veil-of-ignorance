@@ -106,11 +106,12 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
     expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-testid^="sort-chain-rank-"]')).toHaveLength(0);
-    // 第一级自己没有「+」；其余十三项（含涨幅未兑现）各一个，平时透明、触屏改用长按。
+    // 第一级自己没有「+」；其余十四项（含涨幅未兑现、仓位放大）各一个，平时透明、触屏改用长按。
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    expect(adds).toHaveLength(13);
+    expect(adds).toHaveLength(14);
     expect(screen.getByTestId('sort-chain-add-unrealizedPriceChangePct')).toBeInTheDocument();
+    expect(screen.getByTestId('sort-chain-add-positionAmplification')).toBeInTheDocument();
     for (const add of adds) {
       // 「+」挂在右上角（与多级时的级数角标同一个位置），不再叠在 Σ 那一格上；没显形时不接收指针
       expect(add).toHaveClass(

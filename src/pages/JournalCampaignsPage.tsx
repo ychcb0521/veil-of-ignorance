@@ -124,16 +124,20 @@ import {
   selfRatingLabel,
   isContinuousSortMode,
   isSignSplitSortMode,
+  isUnitSplitSortMode,
+  POSITION_AMPLIFICATION_UNIT,
   parseCampaignSortChain,
   removeSortLevel,
   resolveSortBinning,
   rowAddEfficiency,
   rowAddCount,
+  rowPositionAmplification,
   rowMainPriceEfficiency,
   rowUnrealizedPriceChangePct,
   rowMirrorTpRank,
   rowPayoffRatio,
   selectSortMode,
+  sortBinValue,
   sortCampaignRows,
   sortChainKey,
   summarizeSortCrossTab,
@@ -239,6 +243,8 @@ type CampaignMetricChartKey =
   | 'addEfficiencyDistribution'
   | 'addCount'
   | 'addCountBars'
+  | 'positionAmplification'
+  | 'positionAmplificationDistribution'
   | 'arithmeticExpectancyDistribution';
 
 type CampaignMetricChartConfig = {
@@ -285,6 +291,7 @@ type CampaignFormulaPopover =
   | 'unrealizedPriceChangePctSort'
   | 'addEfficiencySort'
   | 'addCountSort'
+  | 'positionAmplificationSort'
   | 'sortChain';
 
 /**
@@ -304,6 +311,8 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addEfficiency', label: '加仓效用' },
   // 【用户要求】加仓次数：紧跟加仓效用（排序行、封面同一位置）
   { value: 'addCount', label: '加仓次数' },
+  // 【用户要求】仓位放大：放在加仓次数的后面（排序行、封面同一位置）
+  { value: 'positionAmplification', label: '仓位放大' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
@@ -417,6 +426,10 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   addEfficiency: {
     noun: '可计算加仓效用',
     hint: '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|，只算做过加仓、且涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
+  },
+  positionAmplification: {
+    noun: '可计算仓位放大',
+    hint: '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位；读不出主力开仓名义仓位的战役不会进入当前排序（没有加仓的是 1.00x，照样进入）',
   },
 };
 
@@ -955,6 +968,52 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'signed',
     formatValue: value => `${Math.round(value)} 次`,
   },
+  // 【用户要求】仓位放大的散点图：与其它连续指标同一套——默认分布，「时序 | 分布」随时切回。
+  // 它恒为正（没有加仓 = 1.00），分界不在 0 而在 1.00：分布图不画 0 线，参照线是 1.00「没有加仓」。
+  {
+    key: 'positionAmplification',
+    label: '仓位放大',
+    chartLabel: '仓位放大图',
+    viewLabel: '时序',
+    viewTestId: 'campaign-positionAmplification-view-time',
+    seriesLabel: '仓位放大时序',
+    guide: {
+      yAxis: '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位，单位为倍（两项都是名义仓位，USDT）。没有加仓是 1.00；3.50 表示整场在主方向上累计投入的名义是主力开仓时的 3.5 倍。',
+      point: '点越高，这场在主方向上累计投入的名义越多。点位只说仓位放大了几倍，颜色才报这一场的盈亏（按 b 的正负）。读不出主力开仓名义仓位的战役不进图。',
+      colors: PAYOFF_SIGN_COLORS,
+    },
+    missingValueLabel: '仓位放大',
+    colorMode: 'signed',
+    formatValue: value => `${value.toFixed(2)}x`,
+  },
+  {
+    key: 'positionAmplificationDistribution',
+    sourceKey: 'positionAmplification',
+    view: 'distribution',
+    label: '仓位放大分布',
+    chartLabel: '分布图',
+    viewLabel: '分布',
+    viewTestId: 'campaign-positionAmplification-view-distribution',
+    seriesLabel: '仓位放大分布',
+    guide: {
+      yAxis: '落在该仓位放大倍数附近的战役数量：点从底线向上堆叠，堆得越高，这一档出现得越多。',
+      point: '每个点是一场战役，横向位置就是它的仓位放大（倍，取封面的两位小数），不考虑时间先后。',
+      colors: PAYOFF_SIGN_COLORS,
+      referenceLines: [
+        '琥珀色 1.00 虚线：没有加仓——主方向累计名义就是主力开仓时的名义，恰好 1.00 的战役贴在线右。摘要条的「放大（> 1）」是仓位确实放大了的场数占比。仓位放大恒为正，0 不是分界，所以不画 0 线。',
+        METRIC_DISTRIBUTION_DENSITY_NOTE,
+        METRIC_DISTRIBUTION_CLAMP_NOTE,
+      ],
+    },
+    missingValueLabel: '仓位放大',
+    colorMode: 'signed',
+    formatValue: value => `${value.toFixed(2)}x`,
+    distribution: {
+      unit: '倍',
+      zeroLine: false,
+      references: [{ value: 1, label: '1.00 没有加仓', shareLabel: '放大（> 1）' }],
+    },
+  },
 ] as const;
 
 const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
@@ -969,6 +1028,7 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   unrealizedPriceChangePct: 'unrealizedPriceChangePctSort',
   addEfficiency: 'addEfficiencySort',
   addCount: 'addCountSort',
+  positionAmplification: 'positionAmplificationSort',
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
@@ -983,6 +1043,7 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   unrealizedPriceChangePct: 'unrealizedPriceChangePct',
   addEfficiency: 'addEfficiency',
   addCount: 'addCount',
+  positionAmplification: 'positionAmplification',
 };
 
 /**
@@ -1013,6 +1074,8 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   arithmeticExpectancy: 'arithmeticExpectancyDistribution',
   // 【用户要求】加仓次数同预期回撤：默认看柱状，「时序 | 柱状」随时切回
   addCount: 'addCountBars',
+  // 【用户要求】仓位放大同其它连续指标：默认看分布
+  positionAmplification: 'positionAmplificationDistribution',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1168,6 +1231,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'addEfficiency': return formatEfficiency(value);
     case 'geometricExpectancy': return formatGeometricExpectancy(value);
     case 'arithmeticExpectancy': return formatArithmeticExpectancy(value);
+    case 'positionAmplification': return formatPositionAmplification(value);
     default: return value.toFixed(2);
   }
 }
@@ -1181,7 +1245,12 @@ function formatQuartileRange(mode: CampaignSortMode, quartile: SortQuartile, thr
   if (!thresholds) return '—';
   const value = (index: number) => formatSortBinValue(mode, thresholds[index]);
   if (quartile === 4) return `≥ ${value(2)}`;
-  if (quartile === 1) return `< ${value(0)}`;
+  if (quartile === 1) {
+    // 仓位放大以 1.00x 为界：最低一档就是没有放大的，档名直接写「≤ 1.00x」，不写成「< 放大了的最小读数」
+    return isUnitSplitSortMode(mode) && thresholds[0] > POSITION_AMPLIFICATION_UNIT
+      ? `≤ ${formatSortBinValue(mode, POSITION_AMPLIFICATION_UNIT)}`
+      : `< ${value(0)}`;
+  }
   return `${value(quartile - 2)} ~ ${value(quartile - 1)}`;
 }
 
@@ -1200,6 +1269,8 @@ function describeSortBinning(binning: CampaignSortBinning): string {
  * phrase 用在整句里（「盈亏比以 0 为界、正负两侧各对半分成四档」），short 用在排序项提示的附注里。
  */
 function sortBinningPhrase(mode: CampaignSortMode): { phrase: string; short: string } {
+  // 仓位放大：没有加仓的常常过半，按四分位切会把它们和加了仓的并进同一档
+  if (isUnitSplitSortMode(mode)) return { phrase: '以 1.00x 为界分成四档（没有放大的一档，放大了的按场数三等分）', short: '以 1.00x 为界分档' };
   return isSignSplitSortMode(mode)
     ? { phrase: '以 0 为界、正负两侧各按场数对半分成四档', short: '以 0 为界分档' }
     : { phrase: '按四分位分成四档', short: '四分位分档' };
@@ -1294,6 +1365,11 @@ function signedTone(value: number): LegPriceChangeDirection {
   return rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'flat';
 }
 
+/** 仓位放大的读数：两位小数加「x」（1.00x = 没有加仓），与盈亏概览同名项同一个写法。 */
+function formatPositionAmplification(value: number): string {
+  return `${value.toFixed(2)}x`;
+}
+
 /** 10 → 「10x」；7.5 → 「7.5x」。 */
 function formatLeverage(value: number): string {
   return `${Number.isInteger(value) ? value : Number(value.toFixed(1))}x`;
@@ -1328,6 +1404,7 @@ const CARD_METRIC_LABEL = {
   captureRate: '盈亏比',
   addEfficiency: '加仓效用',
   addCount: '加仓次数',
+  positionAmplification: '仓位放大',
   unrealizedPriceChangePct: '涨幅未兑现',
   geometricExpectancy: '几何期望',
   arithmeticExpectancy: '算术期望',
@@ -1347,6 +1424,7 @@ const CARD_METRIC_WIDTH_CLASS = {
   captureRate: 'sm:w-[var(--cm-w-captureRate)]',
   addEfficiency: 'sm:w-[var(--cm-w-addEfficiency)]',
   addCount: 'sm:w-[var(--cm-w-addCount)]',
+  positionAmplification: 'sm:w-[var(--cm-w-positionAmplification)]',
   unrealizedPriceChangePct: 'sm:w-[var(--cm-w-unrealizedPriceChangePct)]',
   geometricExpectancy: 'sm:w-[var(--cm-w-geometricExpectancy)]',
   arithmeticExpectancy: 'sm:w-[var(--cm-w-arithmeticExpectancy)]',
@@ -1364,6 +1442,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
   const unrealizedPriceChangePct = rowUnrealizedPriceChangePct(row);
+  const positionAmplification = rowPositionAmplification(row);
   const readings: CardMetricReadings = {
     mirrorTp: !campaignAchievedMirrorTp(row.legs, row.tradeRecords)
       ? '未实现'
@@ -1378,6 +1457,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
     addCount: String(rowAddCount(row)),
+    positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
     arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
@@ -1512,6 +1592,7 @@ const CampaignCard = memo(function CampaignCard({
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
   const unrealizedPriceChangePct = rowUnrealizedPriceChangePct(row);
+  const positionAmplification = rowPositionAmplification(row);
   const importance = importanceValue(campaign);
   /** 自评量表上悬停 / 聚焦的那一档（预览文字用）；null = 显示已选的那一档。 */
   const [ratingPreview, setRatingPreview] = useState<number | null>(null);
@@ -1848,6 +1929,22 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
                 {readings.addCount}
+              </span>
+            </dd>
+          </div>
+          {/* 【用户要求】仓位放大：紧跟加仓次数；没有加仓是 1.00x，与「加仓次数 0」一样淡一档 */}
+          <div
+            data-testid="campaign-position-amplification"
+            title={positionAmplification == null
+              ? '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位：这场读不出主力开仓名义仓位，不计算'
+              : `仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位 = ${readings.positionAmplification}（两项都是名义仓位，单位 USDT；没有加仓是 1.00x）`}
+            className={metricCell('positionAmplification')}
+            data-sort-highlight={litAttr('positionAmplification')}
+          >
+            <dt className={metricName('positionAmplification')}>{CARD_METRIC_LABEL.positionAmplification}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-position-amplification-value" className={`${CARD_METRIC_VALUE} ${positionAmplification == null || sortBinValue('positionAmplification', positionAmplification) <= POSITION_AMPLIFICATION_UNIT ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+                {readings.positionAmplification}
               </span>
             </dd>
           </div>
@@ -2661,6 +2758,12 @@ export default function JournalCampaignsPage() {
     const mainPriceEfficiency = buildSeries(row => rowMainPriceEfficiency(row));
     // 加仓次数：每一场都有读数（没加仓 = 0）
     const addCount = buildSeries(row => rowAddCount(row));
+    // 仓位放大：读不出主力开仓名义仓位的战役不进图。图上取封面读数（两位小数）：没有加仓的战役原值带着成交滑点的尾差
+    //（0.9998、1.0002……），按原值画会被 1.00 参照线劈成左右两摞、还把尾差算进「放大（> 1）」。
+    const positionAmplification = buildSeries(row => {
+      const value = rowPositionAmplification(row);
+      return value == null ? null : sortBinValue('positionAmplification', value);
+    });
     // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
     const addEfficiency = buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
       ...sample,
@@ -2692,6 +2795,8 @@ export default function JournalCampaignsPage() {
       addEfficiencyDistribution: addEfficiency,
       addCount,
       addCountBars: addCount,
+      positionAmplification,
+      positionAmplificationDistribution: positionAmplification,
     };
   }, [scopedRows]);
   const unrealizedChartSamples = useMemo(() => metricRows.map(row => ({
@@ -3539,7 +3644,7 @@ export default function JournalCampaignsPage() {
         {/* 区间怎么读（含不含端点、档界从哪来）：一行很小的脚注 */}
         {(sortBinning || sortCrossTabs.some(crossTab => crossTab?.thresholds)) && (
           <div data-testid="sort-chain-quartile-note" className="mt-2 text-[9px] leading-snug text-muted-foreground/60">
-            注：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分，负值永不与正值同档；预期回撤按四分位分。档界按当前列表算，就是那一档里最小的读数（0 除外）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。
+            注：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分，负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算，就是那一档里最小的读数（0 除外）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。
           </div>
         )}
       </div>
@@ -3760,7 +3865,7 @@ export default function JournalCampaignsPage() {
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
-            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（盈亏比、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点第一级的名称或箭头切换方向；第二级起点击依次切换「双向 → 降序 → 升序」。新加一级默认“双向”：在上一级同一档内继续严格按上一级原始读数及其升降序排列，不用本级指标打乱；选降序或升序才按本级指标重排。× 移除这一级；「清除」只保留第一级。</div>
@@ -4464,6 +4569,22 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>与「加仓效用」判断有没有加仓同一个口径：带成交记录、或腿上已有结算结果的加仓腿才算，只挂了单、没成交的不算。</div>
                           <div>没有加仓的战役记 0，照样进入排序；同次数再按盈亏比、自评、操作时间排。</div>
+                        </div>
+                      </>
+                    ) : formula === 'positionAmplificationSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">仓位放大计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          仓位放大ᵢ = 主方向总名义仓位ᵢ ÷ 主力开仓名义仓位ᵢ
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div>两项都是<span className="text-foreground">名义仓位（开仓价 × 币量），单位 USDT</span>，不是币量，也不是保证金；结果是倍数。</div>
+                          <div>分子是主方向已成交的主力、镜像、加仓与重新入场腿的名义合计；挂单与反向对冲不计。它是整场累计投入的名义，不是某一刻同时持有的最大仓位。</div>
+                          <div>
+                            例：主力开仓 100,000 USDT，之后加仓两次共 250,000 USDT，仓位放大 = 350,000 ÷ 100,000 = <span className="text-foreground">3.50x</span>。
+                          </div>
+                          <div>没有加仓的战役是 1.00x，照样进入排序；读不出主力开仓名义仓位的战役不进入这一档排序。同倍数再按盈亏比、自评、操作时间排。</div>
+                          <div>排序、分档与散点图都按封面的两位小数读：没有加仓的战役原值会带一点成交滑点的尾差，封面写 1.00x 的就按 1.00 算、彼此并列。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

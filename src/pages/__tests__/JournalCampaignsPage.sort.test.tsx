@@ -924,6 +924,7 @@ describe('JournalCampaignsPage sorting', () => {
       'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
       'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
+      'positionAmplification',
       'unrealizedPriceChangePct', 'geometricExpectancy', 'arithmeticExpectancy',
       'divider-leverage',
       'leverage', 'importance', 'alpha',
@@ -949,6 +950,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-payoff-ratio',
       'campaign-add-efficiency',
       'campaign-add-count',
+      'campaign-position-amplification',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',
@@ -956,7 +958,7 @@ describe('JournalCampaignsPage sorting', () => {
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = [...metricRows[0].children];
     expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
-      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '涨幅未兑现', '几何期望', '算术期望',
+      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '涨幅未兑现', '几何期望', '算术期望',
     ]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
@@ -1278,6 +1280,111 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('chart=');
     } finally {
       tradeHistory.forEach((record, index) => { record.exitPrice = originals[index]; });
+      legsByCampaign['high-importance'] = hiLegs;
+    }
+  }, 30_000);
+
+  it('【用户要求】仓位放大：封面紧跟加仓次数；排序行里点它从大到小排；公式浮层「查看散点图」默认打开分布图（不画 0 线、参照线 1.00）', async () => {
+    // 四场主力各带上名义仓位（≈ 成交记录的数量 × 开仓价 100）；High Importance 另有一条成交过的加仓腿 250 → (100 + 250) ÷ 100 = 3.50x。
+    // 【复核】腿上的名义是委托时按参考价算、取到分的，与成交价算出来的分母差一点尾差：Newest 原值 1.00002、Late Close 原值 0.99998，
+    // 封面都写 1.00x——图上不能被 1.00 线劈开，也不能算进「放大（> 1）」。
+    const notionals: Record<string, number> = { 'high-importance': 100, newest: 1_000.02, 'best-pnl': 100_000, 'late-close': 49.999 };
+    const mains = Object.entries(notionals).map(([id, notional]) => {
+      const leg = legsByCampaign[id][0];
+      const before = leg.pre_position_size;
+      leg.pre_position_size = notional;
+      return { leg, before };
+    });
+    const hiLegs = legsByCampaign['high-importance'];
+    legsByCampaign['high-importance'] = [...hiLegs, {
+      ...makeLeg({ id: 'high-importance-add', campaign_id: 'high-importance', leg_role: 'main_add_1', post_real_close_time: '2025-12-01T00:00:00.000Z' } as Partial<TradeJournal>),
+      pre_position_size: 250, pre_entry_price: 100, post_realized_pnl: 0,
+    } as TradeJournal];
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns']}>
+          <Routes>
+            <Route path="/journal/campaigns" element={<><JournalCampaignsPage /><SearchProbe /></>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const reading = (title: string) => screen.getAllByTestId('campaign-card')
+        .find(card => card.textContent?.includes(title))!
+        .querySelector('[data-testid="campaign-position-amplification-value"]')!;
+      expect(reading('High Importance')).toHaveTextContent('3.50x');
+      for (const title of ['Newest Operation', 'Best PnL', 'Late Close']) expect(reading(title)).toHaveTextContent('1.00x');
+      // 没有加仓的 1.00x 与「加仓次数 0」一样淡一档；放大了的是正常颜色
+      expect(reading('Newest Operation')).toHaveClass('text-muted-foreground/70');
+      expect(reading('High Importance')).toHaveClass('text-foreground/85');
+      // 封面上紧跟加仓次数，悬停给出算式与单位
+      const cell = screen.getAllByTestId('campaign-position-amplification')[0];
+      expect(cell.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
+      expect(cell.querySelector('dt')).toHaveTextContent('仓位放大');
+      expect(cell.getAttribute('title')).toContain('主方向总名义仓位 ÷ 主力开仓名义仓位');
+      expect(cell.getAttribute('title')).toContain('单位 USDT');
+
+      // 排序：单击从大到小，四场都进列表（没有加仓的 1.00x 照样排）；再单击从小到大
+      const sortButton = screen.getByTestId('campaign-sort-positionAmplification');
+      expect(sortButton).toHaveTextContent('仓位放大');
+      expect(sortButton.closest('[data-sort-item]')!.previousElementSibling).toHaveAttribute('data-sort-item', 'addCount');
+      fireEvent.click(sortButton);
+      await waitFor(() => expect(sortButton).toHaveAttribute('data-sort-direction', 'desc'));
+      expect(screen.getAllByTestId('campaign-card')).toHaveLength(4);
+      expect(cardOrder()[0]).toBe('High Importance');
+      expect(screen.getAllByTestId('campaign-position-amplification-value').map(node => node.textContent))
+        .toEqual(['3.50x', '1.00x', '1.00x', '1.00x']);
+      // 当前排序项在封面上高亮
+      expect(screen.getAllByTestId('campaign-position-amplification')[0]).toHaveAttribute('data-sort-highlight', 'true');
+      expect(screen.getByTestId('location-probe-search')).toHaveTextContent('sort=positionAmplification');
+      fireEvent.click(sortButton);
+      await waitFor(() => expect(sortButton).toHaveAttribute('data-sort-direction', 'asc'));
+      expect(cardOrder()[3]).toBe('High Importance');
+
+      // 【复核】加一级：仓位放大作第一级时以 1.00x 为界分档——没有放大的三场自成一档（档名「≤ 1.00x」），不与放大了的混在一起
+      expect(screen.getByTestId('sort-chain-add-captureRate').getAttribute('title'))
+        .toBe('加为第 2 级：仓位放大以 1.00x 为界分成四档（没有放大的一档，放大了的按场数三等分）后，同档内再按盈亏比排');
+      fireEvent.click(screen.getByTestId('sort-chain-add-captureRate'));
+      await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
+      const binnedTitle = screen.getByTestId('sort-chain-binned').getAttribute('title') ?? '';
+      expect(binnedTitle).toContain('第 1 级「仓位放大」以 1.00x 为界分成四档（没有放大的一档，放大了的按场数三等分）（档界按当前列表 4 场算）');
+      expect(binnedTitle).toContain('≥ 3.50x（1 场）· ≤ 1.00x（3 场）');
+      expect(sortButton.getAttribute('title')).toContain('以 1.00x 为界分档');
+      fireEvent.click(screen.getByTestId('sort-chain-clear'));
+      await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
+
+      // 公式浮层：算式、单位、例子、哪些战役不参与
+      fireEvent.doubleClick(sortButton);
+      expect(screen.getByText('仓位放大计算公式')).toBeInTheDocument();
+      expect(screen.getByText('仓位放大ᵢ = 主方向总名义仓位ᵢ ÷ 主力开仓名义仓位ᵢ')).toBeInTheDocument();
+      expect(screen.getByText(/350,000 ÷ 100,000 =/)).toBeInTheDocument();
+      expect(screen.getByText(/没有加仓的战役是 1.00x，照样进入排序/)).toBeInTheDocument();
+      const toggle = screen.getByTestId('campaign-positionAmplification-chart-toggle');
+      expect(toggle).toHaveAccessibleName('查看仓位放大散点图，共 4 场');
+      fireEvent.click(toggle);
+      // 默认落在分布视图；恒为正的倍数不画 0 线、不报正值占比，参照线是 1.00「没有加仓」
+      const plot = screen.getByTestId('campaign-metric-scatter-plot');
+      expect(plot).toHaveAttribute('data-metric-key', 'positionAmplificationDistribution');
+      expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=positionAmplificationDistribution');
+      expect(screen.getByTestId('campaign-positionAmplification-view-distribution')).toHaveAttribute('aria-pressed', 'true');
+      expect(plot.querySelectorAll('button[data-campaign-id]')).toHaveLength(4);
+      expect(Number(screen.getByTestId('campaign-metric-point-positionAmplificationDistribution-high-importance').dataset.metricValue)).toBeCloseTo(3.5, 6);
+      expect(screen.queryByTestId('campaign-metric-break-even-positionAmplificationDistribution')).toBeNull();
+      expect(screen.queryByTestId('campaign-metric-win-rate-positionAmplificationDistribution')).toBeNull();
+      expect(screen.getByTestId('campaign-metric-reference-positionAmplificationDistribution-1-label')).toHaveTextContent('1.00 没有加仓');
+      expect(screen.getByTestId('campaign-metric-reference-share-positionAmplificationDistribution-1')).toHaveTextContent('放大（> 1） 25% (1/4)');
+      // 三场没加仓的（原值 1、1.00002、0.99998）在图上是同一个读数、同一档，都贴在 1.00 线右侧
+      const flat = ['newest', 'best-pnl', 'late-close'].map(id => screen.getByTestId(`campaign-metric-point-positionAmplificationDistribution-${id}`));
+      expect(flat.map(point => point.dataset.metricValue)).toEqual(['1', '1', '1']);
+      expect(new Set(flat.map(point => point.style.left)).size).toBe(1);
+      const referenceX = Number(screen.getByTestId('campaign-metric-reference-positionAmplificationDistribution-1').getAttribute('x1'));
+      expect(Number.parseFloat(flat[0].style.left)).toBeGreaterThan(referenceX);
+      // 「时序」随时切回：同一份读数，纵轴是倍数
+      fireEvent.click(screen.getByTestId('campaign-positionAmplification-view-time'));
+      expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'positionAmplification');
+      expect(screen.getByTestId('location-probe-search')).toHaveTextContent('chart=positionAmplification');
+    } finally {
+      for (const { leg, before } of mains) leg.pre_position_size = before;
       legsByCampaign['high-importance'] = hiLegs;
     }
   }, 30_000);
@@ -2214,6 +2321,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-captureRate',
       'campaign-sort-addEfficiency',
       'campaign-sort-addCount',
+      'campaign-sort-positionAmplification',
       'campaign-sort-unrealizedPriceChangePct',
       'campaign-sort-geometricExpectancy',
       'campaign-sort-arithmeticExpectancy',
@@ -2240,6 +2348,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-payoff-ratio',
       'campaign-add-efficiency',
       'campaign-add-count',
+      'campaign-position-amplification',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',
       'campaign-arithmetic-expectancy',

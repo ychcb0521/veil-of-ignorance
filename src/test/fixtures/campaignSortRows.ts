@@ -36,6 +36,8 @@ export type SortRowSpec = {
   peak?: number | null;
   arith?: number | null;
   geo?: number | null;
+  /** 仓位放大（倍）；不给时按腿现算——这里的腿不带名义仓位，算出来是 null（算不出）。 */
+  amp?: number | null;
 };
 
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -136,6 +138,7 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
         : null,
     arithmeticExpectancy: spec.arith ?? null,
     geometricExpectancy: spec.geo ?? null,
+    ...(spec.amp !== undefined ? { positionAmplification: spec.amp } : {}),
   };
 }
 

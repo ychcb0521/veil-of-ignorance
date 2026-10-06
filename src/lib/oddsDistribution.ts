@@ -132,14 +132,17 @@ export function tallestColumnEstimate(sorted: readonly number[], min: number, ma
 export function metricDistributionDomain(
   values: number[],
   anchors: readonly number[] = [],
-  /** 估「最高一柱放不放得下」用的容量；缺省是一屏的大致列数与行数。rows 给 Infinity = 只用远栅栏、不收紧。 */
-  capacity: { columns?: number; rows?: number } = {},
+  /**
+   * 估「最高一柱放不放得下」用的容量；缺省是一屏的大致列数与行数。rows 给 Infinity = 只用远栅栏、不收紧。
+   * pinZero: false——恒为正的倍数（仓位放大）：0 不是分界，窗口只圈参照值，不为了 0 向左撑开一截空白。
+   */
+  capacity: { columns?: number; rows?: number; pinZero?: boolean } = {},
 ): OddsDistributionDomain {
   const columns = capacity.columns ?? DISTRIBUTION_NOMINAL_COLUMNS;
   const rows = capacity.rows ?? DISTRIBUTION_NOMINAL_ROWS;
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
   const extraAnchors = anchors.filter(anchor => Number.isFinite(anchor) && anchor !== 0);
-  const pinned = [0, ...extraAnchors];
+  const pinned = capacity.pinZero === false && extraAnchors.length > 0 ? extraAnchors : [0, ...extraAnchors];
   /** 按步距铺刻度；额外锚点压在边缘上时向外多让一格。 */
   const finish = (rawMin: number, rawMax: number, step: number): OddsDistributionDomain => {
     let min = rawMin;

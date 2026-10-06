@@ -89,15 +89,24 @@ export type CampaignMetricScatterGuide = {
  * 其余指标共用线性横轴、稳健窗口、密度曲线与摘要条，只有「0 叫什么」「正值占比叫什么」
  * 「还有没有别的参照值」各不相同——写错一个字，图旁边就多了一句与指标不符的话。
  */
-export type CampaignMetricDistributionSpec = {
-  /** 横轴单位，缀在方向提示里：「%」「倍」「R」。 */
-  unit: string;
+export type CampaignMetricDistributionSpec = ({
+  /** 缺省画 0 线。 */
+  zeroLine?: true;
   /** 0 竖线的标签全文：「0% 不涨不跌」「0R 盈亏平衡」。 */
   zeroLabel: string;
   /** 0 在这项指标上是什么分界，写进说明面板的横轴一行：「涨跌分界」「盈亏分界」。 */
   zeroMeaning: string;
   /** 摘要条里正值占比那一项的名字：「顺向」「盈利」「正期望」。 */
   positiveShareLabel: string;
+} | {
+  /**
+   * 恒为正的倍数（仓位放大）：0 不是分界——不画 0 线、不报正值占比，窗口也不为了圈进 0 向左撑开；
+   * 这时必须给参照值（1.00「没有加仓」），窗口与档边界都以它为准。
+   */
+  zeroLine: false;
+}) & {
+  /** 横轴单位，缀在方向提示里：「%」「倍」「R」。 */
+  unit: string;
   /**
    * 0 以外的参照值（加仓效用的 1.00「加仓没有额外放大」）：画成琥珀色虚线，
    * 同时是档边界（点位不会吸附到线的另一侧），窗口也一定把它圈进来。
@@ -562,6 +571,9 @@ export function CampaignMetricScatterPlot({
    */
   const genericSpec = distribution && !oddsFamily && !geometricDistribution ? distributionSpec : undefined;
   const genericReferences = genericSpec?.references ?? NO_DISTRIBUTION_REFERENCES;
+  /** 画 0 线的通用分布（涨跌幅一族）；恒为正的倍数（仓位放大）为 null。 */
+  const zeroSpec = genericSpec && genericSpec.zeroLine !== false ? genericSpec : null;
+  const noZeroLine = genericSpec?.zeroLine === false;
   // 参照值同时是档边界：恰好落在线上的归右侧，与 0 线同一个约定。
   const genericBoundaries = useMemo(
     () => (genericReferences.length
@@ -572,10 +584,10 @@ export function CampaignMetricScatterPlot({
   /** 说明面板里念参照值：「1.00」，不带正号。 */
   const referenceValueText = (value: number) => formatValue(value).replace(/^\+/, '');
   /** 横轴说明里「窗口一定圈进来的值」：通用分布写出 0 的名字与各参照值，其余沿用「盈亏分界」。 */
-  const windowAnchorText = genericSpec
-    ? `${genericSpec.zeroMeaning} 0${genericReferences.length
-      ? ` 与参照值 ${genericReferences.map(reference => referenceValueText(reference.value)).join('、')}`
-      : ''} `
+  const referenceListText = genericReferences.map(reference => referenceValueText(reference.value)).join('、');
+  const windowAnchorText = zeroSpec
+    ? `${zeroSpec.zeroMeaning} 0${genericReferences.length ? ` 与参照值 ${referenceListText}` : ''} `
+    : noZeroLine ? `参照值 ${referenceListText} `
     : '盈亏分界';
   /**
    * 提示框一律补上这一场的 b。
@@ -634,10 +646,10 @@ export function CampaignMetricScatterPlot({
   const dist = useMemo(
     () => (distribution
       ? buildOddsDistributionModel(chartPoints, oddsFamily ? {} : {
-        domain: values => metricDistributionDomain(values, genericReferences.map(reference => reference.value)),
+        domain: values => metricDistributionDomain(values, genericReferences.map(reference => reference.value), { pinZero: !noZeroLine }),
       })
       : null),
-    [chartPoints, distribution, genericReferences, oddsFamily],
+    [chartPoints, distribution, genericReferences, noZeroLine, oddsFamily],
   );
   const geometricDist = useMemo(
     () => geometricDistribution ? buildGeometricDistributionModel(chartPoints) : null,
@@ -850,7 +862,7 @@ export function CampaignMetricScatterPlot({
       kind: 'zero',
       // 0 在各指标上是同一件事（盈亏分界），但读数不同：盈亏比读 0，几何期望读 1.00；
       // 涨跌幅一族的 0 是「不涨不跌」，由 distributionSpec 给全文。
-      label: genericSpec?.zeroLabel ?? `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
+      label: zeroSpec?.zeroLabel ?? `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
       labelSide: geometricDistribution ? 'right' : undefined,
       testId: `campaign-metric-break-even-${metricKey}`,
       dataAttrs: { 'data-reference-value': 0 },
@@ -874,7 +886,8 @@ export function CampaignMetricScatterPlot({
         testId: `campaign-metric-reference-${metricKey}-${reference.value}`,
         dataAttrs: { 'data-reference-value': reference.value },
       })),
-      breakEven,
+      // 恒为正的倍数没有 0 线：0 不是分界，画出来只会多一条读不出意思的线
+      ...(noZeroLine ? [] : [breakEven]),
     ];
     return [
       ...(showRuinBoundary ? [{
@@ -893,7 +906,7 @@ export function CampaignMetricScatterPlot({
       },
       breakEven,
     ];
-  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution, genericSpec, genericReferences]);
+  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution, zeroSpec, noZeroLine, genericReferences]);
 
   /** 镜像堆叠（加仓效用里涨跌幅倍数为负的战役）：往下那一侧的数值，密度曲线另画一条在 0 线下方。 */
   const mirroredValues = useMemo(() => (
@@ -1077,9 +1090,11 @@ export function CampaignMetricScatterPlot({
                   ? '：在 −10R、−1R、0 分区内分别等宽分档，点不跨越边界；恰好 −10R 归入左侧风险区。密度曲线按标准档宽近似换算，边界附近档宽可能略有不同。窄屏必要时可左右滑动；精确 b 看提示框。'
                   : '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
                 : geometricDist ? '：按对数空间分档，0.90 和 1.00 为档边界，点位不会跨过参考线或盈亏分界；精确倍数看提示框，原始指标计算不变。'
+                : noZeroLine
+                  ? `：${referenceListText} 是档边界，点位不会吸附到参考线的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
                 : genericReferences.length
-                  ? `：档网格锚在 0 上，${genericReferences.map(reference => referenceValueText(reference.value)).join('、')} 也是档边界，点位不会吸附到参考线或${genericSpec?.zeroMeaning ?? '盈亏分界'}的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
-                  : `：档网格锚在 0 上，${genericSpec?.zeroMeaning ?? '盈亏分界'}两侧的点不会混进同一档；精确数值看提示框。`}
+                  ? `：档网格锚在 0 上，${referenceListText} 也是档边界，点位不会吸附到参考线或${zeroSpec?.zeroMeaning ?? '盈亏分界'}的另一侧；恰好落在线上的归右侧。精确数值看提示框。`
+                  : `：档网格锚在 0 上，${zeroSpec?.zeroMeaning ?? '盈亏分界'}两侧的点不会混进同一档；精确数值看提示框。`}
               同一档内亏损在下、持平或算不出 b 居中、盈利在上，红绿各自连续排列。纵向位置是同一档里的堆叠序号，从底线往上数。图高放不下的档会撑高图盒，撑到上限仍放不下时顶端合成一个三角并在脚注报数；点击三角可展开其中的战役。{selectionMode ? '点击点位选择或取消选择，不会进入战役。' : '点击任一点进入对应战役。'}
             </dd>
           ) : (
@@ -1148,10 +1163,15 @@ export function CampaignMetricScatterPlot({
           <span>中位数 {formatValue(dist.summary.median)}</span>
           <span className="text-[color:var(--chart-axis)]">|</span>
           <span>均值 {formatValue(dist.summary.mean)}</span>
-          <span className="text-[color:var(--chart-axis)]">|</span>
-          <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
-            {genericSpec?.positiveShareLabel ?? '胜率'} {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
-          </span>
+          {/* 恒为正的倍数没有「正值占比」可报（一定是 100%）：这一项连同分隔线一起省掉，参照值的占比照常 */}
+          {noZeroLine ? null : (
+            <>
+              <span className="text-[color:var(--chart-axis)]">|</span>
+              <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
+                {zeroSpec?.positiveShareLabel ?? '胜率'} {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
+              </span>
+            </>
+          )}
           {genericReferences.map(reference => {
             const above = dist.values.filter(value => value > reference.value).length;
             return (

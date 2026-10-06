@@ -222,6 +222,34 @@ describe('【用户要求】通用分布窗口（盈亏比之外的指标）', (
     expect(allNegative.ticks).toContain(0);
   });
 
+  it('【用户要求】恒为正的倍数（仓位放大）不为了 0 向左撑开：窗口只圈参照值 1.00，并且不让它压在窗口边上', () => {
+    // 六成没加仓（1.00），其余散在 1.2 ~ 4.5，一个 12 倍的离群值
+    const values = [...Array.from({ length: 30 }, () => 1), 1.2, 1.35, 1.5, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3, 3.2, 3.5, 3.8, 4, 4.2, 4.5, 2.1, 1.9, 2.6, 12];
+    const free = metricDistributionDomain(values, [1], { pinZero: false });
+    // 参照值在窗口里，而且左边留着一格：读得出「有没有战役落在 1.00 左边」
+    expect(free.min).toBeGreaterThanOrEqual(0);
+    expect(free.min).toBeLessThan(1);
+    expect(free.max).toBeGreaterThan(1);
+    expect(free.ticks).toContain(1);
+    // 主体都在窗口里；12 倍的离群值贴边、不把窗口撑开
+    expect(free.max).toBeGreaterThanOrEqual(4.5);
+    expect(free.max).toBeLessThan(12);
+    // 加得不多、读数都贴着 1.00 时差别最大：圈进 0 的话左边近一半是空的，不圈就从 1.00 左边一格起
+    const close = [1, 1, 1, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.2];
+    const pinnedClose = metricDistributionDomain(close, [1]);
+    const freeClose = metricDistributionDomain(close, [1], { pinZero: false });
+    expect(pinnedClose.min).toBeLessThanOrEqual(0);
+    expect(freeClose.min).toBeGreaterThan(0.4);
+    expect(freeClose.min).toBeLessThan(1);
+    expect(freeClose.max - freeClose.min).toBeLessThan(pinnedClose.max - pinnedClose.min);
+    // 没给参照值时 0 仍然是唯一的参照点：pinZero: false 不生效
+    expect(metricDistributionDomain([1.2, 1.5, 2, 3.4], [], { pinZero: false }).min).toBeLessThanOrEqual(0);
+    // 全部是 1.00（没有一场加仓）：窗口不塌成一个点
+    const flat = metricDistributionDomain([1, 1, 1, 1], [1], { pinZero: false });
+    expect(flat.min).toBeLessThan(1);
+    expect(flat.max).toBeGreaterThan(1);
+  });
+
   it('刻度落在 1/2/2.5/5 × 10ⁿ 上，且不超过 ~6 格', () => {
     const domain = metricDistributionDomain([-0.36, 0.1, 0.5, 1.2, 4.65]);
     expect(domain.ticks.length).toBeLessThanOrEqual(8);

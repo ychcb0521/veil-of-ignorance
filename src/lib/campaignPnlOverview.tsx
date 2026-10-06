@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { campaignPayoffRatioMultiple, formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
+import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   formatArithmeticExpectancy,
@@ -236,10 +237,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
   const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
   const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
-  const positionAmplification = initialMainExposureNotional > 0
-    && mainSideNotional?.total != null && Number.isFinite(mainSideNotional.total)
-    ? mainSideNotional.total / initialMainExposureNotional
-    : null;
+  const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total);
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoffRatio == null ? null : payoffRatio / 100, mainPriceEfficiency)
     : null;

@@ -67,6 +67,60 @@ function renderChart(
   return onSelect;
 }
 
+const AMPLIFICATION_SPEC: CampaignMetricDistributionSpec = {
+  unit: '倍',
+  zeroLine: false,
+  references: [{ value: 1, label: '1.00 没有加仓', shareLabel: '放大（> 1）' }],
+};
+
+describe('【用户要求】仓位放大的分布图：恒为正的倍数，分界在 1.00 而不在 0', () => {
+  // 六场没加仓（1.00），九场放大了，其中一场 12 倍
+  const values = [1, 1, 1, 1, 1, 1, 1.2, 1.5, 1.8, 2.2, 2.6, 3.1, 3.5, 4.2, 12];
+  const formatAmplification = (value: number) => `${value.toFixed(2)}x`;
+  const KEY = 'positionAmplificationDistribution';
+
+  it('不画 0 线、不报正值占比；1.00 参照线照画，摘要条报放大了的场数占比', () => {
+    renderChart(values, KEY, AMPLIFICATION_SPEC, '仓位放大', formatAmplification);
+    expect(document.querySelectorAll('button[data-campaign-id]')).toHaveLength(values.length);
+    expect(screen.queryByTestId(`campaign-metric-break-even-${KEY}`)).toBeNull();
+    expect(screen.queryByTestId(`campaign-metric-win-rate-${KEY}`)).toBeNull();
+    const reference = screen.getByTestId(`campaign-metric-reference-${KEY}-1`);
+    expect(reference).toHaveAttribute('data-reference-kind', 'threshold');
+    expect(screen.getByTestId(`campaign-metric-reference-${KEY}-1-label`)).toHaveTextContent('1.00 没有加仓');
+    expect(screen.getByTestId(`campaign-metric-reference-share-${KEY}-1`)).toHaveTextContent('放大（> 1） 60% (9/15)');
+    const summary = screen.getByTestId(`campaign-metric-summary-${KEY}`);
+    expect(summary).toHaveTextContent('范围 1.00x – 12.00x');
+    expect(summary).toHaveTextContent('中位数 1.50x');
+    // 省掉正值占比时连它前面的分隔线一起省：均值后面紧跟的就是「放大」，没有连着两条分隔线
+    expect(summary.textContent).toMatch(/均值 [\d.]+x\|放大（> 1）/);
+    expect(summary.textContent).not.toMatch(/\|\s*\|/);
+  });
+
+  it('恰好 1.00 的战役贴在参照线右侧，放大了的在它右边；读数与点击照旧', () => {
+    const onSelect = renderChart(values, KEY, AMPLIFICATION_SPEC, '仓位放大', formatAmplification);
+    const point = (index: number) => screen.getByTestId(`campaign-metric-point-${KEY}-c${String(index).padStart(2, '0')}`);
+    const left = (index: number) => Number.parseFloat(point(index).style.left);
+    // 六场 1.00 落在同一档
+    expect(new Set([0, 1, 2, 3, 4, 5].map(index => point(index).style.left)).size).toBe(1);
+    expect(left(6)).toBeGreaterThan(left(0));
+    expect(left(13)).toBeGreaterThan(left(6));
+    values.forEach((value, index) => expect(point(index)).toHaveAttribute('data-metric-value', String(value)));
+    fireEvent.focus(point(7));
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('1.50x');
+    fireEvent.click(point(7));
+    expect(onSelect).toHaveBeenCalledWith('c07');
+  });
+
+  it('说明面板不提 0：窗口圈进来的是参照值 1.00，档边界也是它', () => {
+    renderChart(values, KEY, AMPLIFICATION_SPEC, '仓位放大', formatAmplification);
+    fireEvent.click(screen.getByRole('button', { name: /说明|读图/ }));
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('无论如何把参照值 1.00x 圈在窗口内');
+    expect(text).toContain('1.00x 是档边界，点位不会吸附到参考线的另一侧');
+    expect(text).not.toContain('档网格锚在 0 上');
+  });
+});
+
 describe('通用连续指标的分布图', () => {
   it('涨幅未兑现同一区间内红绿连续分层，盈利在上、亏损在下，保留真实数值与战役点击', () => {
     const values = [5.1, 5.1001, 5.1002, 5.1003, 5.1004, 5.1005, 50];
