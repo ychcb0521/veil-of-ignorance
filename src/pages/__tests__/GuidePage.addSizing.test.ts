@@ -196,6 +196,29 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     expect(check).not.toContain("exit_method === 'tp1'");
     const sizing = read('lib/addSizing.ts');
     expect(sizing).toContain('const bankedProfit = r.pnl > 0;');
-    expect(sizing).not.toContain("r.exit_method === 'tp1'");
+    // 净额 G 不按退出方式筛（「止盈1」只出现在仓位卡保本线用的 mirrorUsd 那一支里）
+    expect(sizing).not.toContain('if (!mirrorCredit && !realizedLoss) continue;');
+    expect(sizing.indexOf('usd += r.pnl;')).toBeGreaterThan(-1);
+    expect(sizing.indexOf('usd += r.pnl;')).toBeLessThan(sizing.indexOf("r.exit_method === 'tp1' || reducedHeldPosition"));
+  });
+
+  it('【用户要求】仓位卡：保本线 / 开仓均价共用一格、默认保本线、落袋利润只算镜像止盈——指南与实现对得上', () => {
+    expect(guide).toContain('<span className="guide-note__title">仓位卡的保本线与开仓均价</span>');
+    expect(guide).toContain('<strong>「保本线」与「开仓均价」共用一格</strong>');
+    expect(guide).toContain('<strong>默认显示保本线</strong>，刷新或重开页面都回到保本线');
+    expect(guide).toContain('<strong>已落袋利润只算镜像止盈</strong>');
+    expect(guide).toContain('多 = 均价 − 利润 ÷ 币数，空 = 均价 + 利润 ÷ 币数');
+    expect(guide).toContain('多 = 名义 ÷（币数 + 利润币），空 = 名义 ÷（币数 − 利润币）');
+    expect(guide).toContain('<strong>按上限加满时它正好落在对冲线上</strong>');
+    const panel = read('components/PositionPanel.tsx');
+    // 默认保本线，且不持久化（useState，不是 usePersistedState）
+    expect(panel).toContain("const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('breakeven');");
+    expect(panel).toContain('out.set(`${mg.symbol}_${mg.side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });');
+    const sizing = read('lib/addSizing.ts');
+    expect(sizing).toContain("if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation'");
+    expect(sizing).toContain("&& (r.exit_method === 'tp1' || reducedHeldPosition)) {");
+    const breakeven = read('lib/positionBreakeven.ts');
+    expect(breakeven).toContain("const line = side === 'SHORT' ? avgEntry + profit / coinsAtEntry : avgEntry - profit / coinsAtEntry;");
+    expect(breakeven).toContain("const coins = side === 'SHORT' ? coinsAtEntry - profit : coinsAtEntry + profit;");
   });
 });

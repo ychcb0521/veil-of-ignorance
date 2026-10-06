@@ -91,6 +91,49 @@ describe('落袋是否已经被花掉', () => {
   });
 });
 
+describe('【用户要求】只算镜像止盈的那一部分（仓位卡「保本线」用）', () => {
+  const held = [{ id: 'main-position', side: 'LONG' as const, openTime: MAIN_OPEN, fills: [{ id: 'main-fill', openTime: MAIN_OPEN }, { id: 'mirror-fill', openTime: MAIN_OPEN }] }];
+  const cut = (over: Partial<TradeRecord>): TradeRecord => ({ ...tp('2026-05-13T00:10:00Z', 0), exit_method: 'manual', ...over } as TradeRecord);
+
+  it('止盈委托触发的盈利算；手动从这副仓位上减仓落袋的盈利也算（镜像止盈常常是手动减仓做的）', () => {
+    const manualMirror = cut({ pnl: 9_000, positionId: 'main-position', fillId: 'mirror-fill' });
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, manualMirror], MAIN_OPEN, held);
+    expect(b.mirrorUsd).toBeCloseTo(84_742.24 + 9_000, 2);
+    expect(b.mirrorCount).toBe(2);
+    // 只凭成交片的 id 也认得出（合并仓位里记录的 positionId 可能是存活仓位的 id，也可能只带 fillId）
+    const byFill = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [cut({ pnl: 500, positionId: undefined, fillId: 'mirror-fill' })], MAIN_OPEN, held);
+    expect(byFill.mirrorUsd).toBe(500);
+  });
+
+  it('亏损的减仓不扣、止损与强平不算、另开另平的仓位不算——这些仍照常进净额 usd', () => {
+    const history = [
+      ...HISTORY,
+      cut({ pnl: -2_000, positionId: 'main-position' }),                                  // 亏着减仓
+      cut({ pnl: 700, positionId: 'main-position', exit_method: 'sl' }),                  // 移动止损在盈利处打掉一部分
+      cut({ pnl: 300, positionId: 'main-position', action: 'LIQUIDATION', exit_method: 'liquidation' }),
+      cut({ pnl: 1_200, positionId: 'another-position', fillId: 'another-fill' }),        // 另一副已平掉的仓位
+    ];
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', history, MAIN_OPEN, held);
+    expect(b.mirrorUsd).toBeCloseTo(84_742.24, 2);
+    expect(b.mirrorCount).toBe(1);
+    expect(b.usd).toBeCloseTo(84_742.24 - 2_000 + 700 + 300 + 1_200, 2);
+  });
+
+  it('币本位记录按 pnlCoin 累计利润币；不传持仓时只认止盈1', () => {
+    const coinCut = cut({ pnl: 420, pnlCoin: 150, positionId: 'main-position' });
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [coinCut], MAIN_OPEN, held);
+    expect(b.mirrorCoin).toBe(150);
+    expect(b.mirrorUsd).toBe(420);
+    const withoutPositions = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, coinCut], MAIN_OPEN);
+    expect(withoutPositions.mirrorUsd).toBeCloseTo(84_742.24, 2);
+    expect(withoutPositions.mirrorCount).toBe(1);
+  });
+
+  it('没有持仓（没有「本场」）时都是 0', () => {
+    expect(detectBankedMirrorProfit('SAGAUSDT', 'LONG', HISTORY, null, held)).toMatchObject({ mirrorUsd: 0, mirrorCoin: 0, mirrorCount: 0 });
+  });
+});
+
 describe('加仓后的综合成本线（R0 复核）', () => {
   const X1 = 12_053_122.94, SBAR = 0.0447220, S1 = 0.0453230, S2 = 0.0481123;
 
@@ -175,6 +218,8 @@ describe('加仓 B 方案：按操作时间框定本场落袋', () => {
     expect(old).toEqual({
       usd: 84_742.24, coin: old.coin, count: 1, lastBankedAt: T('2026-05-12T23:19:00Z'),
       lastBankedRealAt: null, addsSinceBanked: 0, excludedByOperationTime: 0,
+      // 后加的三项：只算镜像止盈的那一部分（这条记录是止盈1，整笔都算）
+      mirrorUsd: 84_742.24, mirrorCoin: old.coin, mirrorCount: 1,
     });
   });
 

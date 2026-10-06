@@ -937,6 +937,15 @@ export interface BankedMirrorProfit {
   coin: number;
   /** 计入的盈利落袋笔数（止盈委托、手动减仓都算）；用于说明建议值来源，不含被扣除的亏损笔数。 */
   count: number;
+  /**
+   * 其中**只算镜像止盈**的那一部分（仓位卡「保本线」用，【用户要求】「已落袋利润只算镜像止盈」）：
+   * 本轮里从**当前仍持有的这副仓位**上减仓落袋的盈利——止盈委托触发的，或手动减仓的（镜像止盈常常是手动减仓做的）；
+   * 以及退出方式为「止盈1」的盈利。亏损的减仓不扣，止损、强平、另开另平的仓位都不算。
+   * mirrorUsd 以 USD 计，mirrorCoin 以币计（币本位的保本线按币算）。不传 positions 时只认「止盈1」。
+   */
+  mirrorUsd: number;
+  mirrorCoin: number;
+  mirrorCount: number;
   /** 最后一笔落袋的时刻（模拟时钟）。G 是从这一刻起才存在的。 */
   lastBankedAt: number | null;
   /** 最后一笔落袋的**操作时间**（计入记录的 closedRealAt 取最大）；老记录没有时为 null。 */
@@ -1005,14 +1014,24 @@ export function detectBankedMirrorProfit(
   options?: BankedMirrorOptions,
 ): BankedMirrorProfit {
   const empty = {
-    usd: 0, coin: 0, count: 0, lastBankedAt: null, lastBankedRealAt: null,
+    usd: 0, coin: 0, count: 0, mirrorUsd: 0, mirrorCoin: 0, mirrorCount: 0, lastBankedAt: null, lastBankedRealAt: null,
     addsSinceBanked: 0, excludedByOperationTime: 0,
   };
   if (earliestOpenTime == null) return empty;
   const realStart = realTs(options?.earliestOpenedRealAt);
+  // 当前仍持有的仓位与其中每一笔成交的 id：减仓记录靠它认出「是从这副仓位上减下来的」。
+  const heldIds = new Set<string>();
+  for (const p of positions ?? []) {
+    if (!p || p.side !== side) continue;
+    if (p.id) heldIds.add(p.id);
+    for (const f of p.fills ?? []) if (f?.id) heldIds.add(f.id);
+  }
   let usd = 0;
   let coin = 0;
   let count = 0;
+  let mirrorUsd = 0;
+  let mirrorCoin = 0;
+  let mirrorCount = 0;
   let excludedByOperationTime = 0;
   let lastBankedAt: number | null = null;
   let lastBankedRealAt: number | null = null;
@@ -1031,11 +1050,19 @@ export function detectBankedMirrorProfit(
       if (bankedProfit) excludedByOperationTime += 1;
       continue;
     }
-    usd += r.pnl;
-    coin += fin(r.pnlCoin)
+    const pnlCoin = fin(r.pnlCoin)
       ? (r.pnlCoin as number)
       : (fin(r.exitPrice) && (r.exitPrice as number) > 0 ? r.pnl / (r.exitPrice as number) : 0);
+    usd += r.pnl;
+    coin += pnlCoin;
     if (bankedProfit) {
+      const reducedHeldPosition = (r.positionId != null && heldIds.has(r.positionId)) || (r.fillId != null && heldIds.has(r.fillId));
+      if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation'
+        && (r.exit_method === 'tp1' || reducedHeldPosition)) {
+        mirrorUsd += r.pnl;
+        mirrorCoin += pnlCoin;
+        mirrorCount += 1;
+      }
       count += 1;
       const t = fin(r.closeTime) ? (r.closeTime as number) : null;
       if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
@@ -1060,7 +1087,7 @@ export function detectBankedMirrorProfit(
     }
   }
 
-  return { usd, coin, count, lastBankedAt, lastBankedRealAt, addsSinceBanked, excludedByOperationTime };
+  return { usd, coin, count, mirrorUsd, mirrorCoin, mirrorCount, lastBankedAt, lastBankedRealAt, addsSinceBanked, excludedByOperationTime };
 }
 
 /**

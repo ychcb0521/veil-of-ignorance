@@ -3,7 +3,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import type { Position, PendingOrder, SettlementMode, TradeRecord } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
-import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
+import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ArrowLeftRight, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { toast } from '@/lib/notificationCenter';
 import { LeverageModal } from '@/components/LeverageModal';
@@ -29,7 +29,9 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { PostTradeReviewSheet } from '@/components/journal/PostTradeReviewSheet';
 import { ExitMethodBadge } from '@/components/journal/ExitMethodBadge';
 import {
-  getCoinContracts, coinNotionalAmount, formatCoinAmount, getSettlementAsset } from '@/lib/coinMargined';
+  getCoinContracts, coinNotionalAmount, formatCoinAmount, getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
+import { detectBankedMirrorProfit, readHeldPosition } from '@/lib/addSizing';
+import { positionBreakevenPrice } from '@/lib/positionBreakeven';
 import { orderPriceKindLabel, orderReferencePrice } from '@/lib/orderReferencePrice';
 import { restingOrderSize, withRemainingUnits } from '@/lib/restingOrderSize';
 import { firstLiquidationPrice, initialMarginUsd } from '@/lib/positionGroupRisk';
@@ -283,6 +285,11 @@ export function PositionPanel({
    */
   const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
+  /**
+   * 【用户要求】仓位卡上「保本线 / 开仓均价」共用一格，点一下切换，**默认保本线**。
+   * 只记在这次会话里、不持久化：刷新或重开都回到保本线（与「下单面板默认币本位」同一个取向）。
+   */
+  const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('breakeven');
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
   // Rollback modal state
@@ -609,6 +616,25 @@ export function PositionPanel({
     }
     return Array.from(groups.values());
   }, [displayedPositions]);
+
+  /**
+   * 每张仓位卡「保本线」要用的镜像止盈已落袋利润（只算镜像止盈，口径见 detectBankedMirrorProfit 的 mirrorUsd）。
+   * 按「标的_方向」存；只在持仓或成交历史变了时重算——仓位卡每一次报价都会重渲染，成交历史可能有上万条。
+   */
+  const mirrorBankedByGroup = useMemo(() => {
+    const out = new Map<string, { usd: number; coin: number; count: number }>();
+    for (const mg of mergedPositions) {
+      const positions = positionsMap[mg.symbol];
+      const held = readHeldPosition(mg.symbol, positions, mg.side, getCoinMarginedContractSizeUsd(mg.symbol));
+      if (!held) continue;
+      const banked = detectBankedMirrorProfit(
+        mg.symbol, mg.side, tradeHistory, held.earliestOpenTime ?? null, positions,
+        { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null },
+      );
+      out.set(`${mg.symbol}_${mg.side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });
+    }
+    return out;
+  }, [mergedPositions, positionsMap, tradeHistory]);
 
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
@@ -1029,6 +1055,22 @@ export function PositionPanel({
                     const isCoinGroup = isCoinSettled(firstChild);
                     const quoteUnitLabel = isCoinGroup ? 'USD' : 'USDT';
                     const baseCoin = getSettlementAsset(mg.symbol);
+                    // 保本线：镜像止盈已落袋的利润摊回这副仓位之后的成本线（公式见 lib/positionBreakeven）。
+                    // 整组都是币本位才按反向合约算；混着 U 本位的组按线性近似。
+                    const mirrorBanked = mirrorBankedByGroup.get(`${mg.symbol}_${mg.side}`);
+                    const inverseGroup = mg.children.every(c => isCoinSettled(c.position));
+                    const breakevenPrice = positionBreakevenPrice({
+                      side: mg.side, inverse: inverseGroup,
+                      coinsAtEntry: mg.totalCoinsAtEntry, avgEntry: mg.weightedEntryPrice,
+                      mirrorUsd: mirrorBanked?.usd ?? 0, mirrorCoin: mirrorBanked?.coin ?? 0,
+                    });
+                    const mirrorBankedAmount = inverseGroup ? mirrorBanked?.coin ?? 0 : mirrorBanked?.usd ?? 0;
+                    const breakevenTitle = mirrorBankedAmount > 0
+                      ? '保本线：把镜像止盈已落袋的利润摊回这副仓位之后的成本线——价格回到这里，持仓的浮动盈亏与落袋利润正好相抵。'
+                        + `镜像止盈已落袋 +${inverseGroup ? formatCoinAmount(mirrorBankedAmount, baseCoin) : `${formatUSDT(mirrorBankedAmount)} USDT`}`
+                        + `（${mirrorBanked?.count ?? 0} 笔，只算从这副仓位上减仓落袋的盈利与止盈委托的盈利），开仓均价 ${formatPrice(mg.weightedEntryPrice, mg.symbol)}。`
+                        + (breakevenPrice == null ? '落袋的利润已经超过这副仓位的全部成本，价格走到哪都不亏。' : '')
+                      : '保本线：把镜像止盈已落袋的利润摊回这副仓位之后的成本线。这副仓位还没有镜像止盈落袋，保本线就是开仓均价。';
                     const totalUnits = mg.children.reduce((sum, c) => sum + getPositionUnits(c.position), 0);
                     const totalMarginCoin = mg.children.reduce((sum, c) => sum + (c.position.marginCoin ?? 0), 0);
                     const effectiveMargin = mg.totalIsolatedMargin != null ? mg.totalIsolatedMargin : mg.totalMargin;
@@ -1258,7 +1300,13 @@ export function PositionPanel({
                             + (mixedWithCross ? '（卡上的全仓腿不计入：全仓是另一个共用的保证金池。）' : '')
                           : undefined}
                       />
-                      <DetailCell label="开仓均价" value={formatPrice(mg.weightedEntryPrice, mg.symbol)} />
+                      <EntryPriceCell
+                        mode={entryCellMode}
+                        onToggle={() => setEntryCellMode(mode => (mode === 'breakeven' ? 'entry' : 'breakeven'))}
+                        entryText={formatPrice(mg.weightedEntryPrice, mg.symbol)}
+                        breakevenText={breakevenPrice != null ? formatPrice(breakevenPrice, mg.symbol) : '--'}
+                        breakevenTitle={breakevenTitle}
+                      />
                       <DetailCell label="标记价格" value={price > 0 ? formatPrice(price, mg.symbol) : '-'} />
                       <DetailCell
                         key={`liq-${mg.totalIsolatedMargin ?? mg.totalMargin}-${mg.totalQuantity}-${mg.weightedEntryPrice}`}
@@ -2292,6 +2340,40 @@ export function PositionPanel({
 }
 
 /* ===== Sub-components ===== */
+
+/**
+ * 仓位卡上「保本线 / 开仓均价」共用的那一格：点一下在两者之间切换（见 entryCellMode）。
+ * 标签后面那枚小箭头说明这一格能切；悬停说明里写清两个数各是什么。
+ */
+function EntryPriceCell({ mode, onToggle, entryText, breakevenText, breakevenTitle }: {
+  mode: 'breakeven' | 'entry';
+  onToggle: () => void;
+  entryText: string;
+  breakevenText: string;
+  breakevenTitle: string;
+}) {
+  const breakeven = mode === 'breakeven';
+  const label = breakeven ? '保本线' : '开仓均价';
+  const other = breakeven ? '开仓均价' : '保本线';
+  const value = breakeven ? breakevenText : entryText;
+  return (
+    <button
+      type="button"
+      data-testid="position-entry-cell"
+      data-mode={mode}
+      onClick={event => { event.stopPropagation(); onToggle(); }}
+      aria-label={`${label} ${value}，点击切换为${other}`}
+      title={`${breakeven ? breakevenTitle : '开仓均价：各笔成交价按币量加权，不扣已落袋的利润。'}点一下切换为「${other}」。`}
+      className="group/entry min-w-0 text-left"
+    >
+      <div className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+        <span className="truncate">{label}</span>
+        <ArrowLeftRight aria-hidden="true" className="h-2.5 w-2.5 shrink-0 opacity-40 transition-opacity group-hover/entry:opacity-100" />
+      </div>
+      <div className="text-xs font-mono tabular-nums text-foreground">{value}</div>
+    </button>
+  );
+}
 
 function DetailCell({ label, value, valueClassName, title }: {
   label: string; value: string; valueClassName?: string; title?: string;

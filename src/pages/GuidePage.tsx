@@ -2119,6 +2119,17 @@ P 不再一把手填，而是拆成三个更可回答的问题：<strong>「这�
               </details>
               <details className="guide-note">
                 <summary className="guide-note__summary">
+                  <span className="guide-note__title">仓位卡的保本线与开仓均价</span>
+                  <span className="guide-note__gist">两个数共用一格，点一下切换，默认保本线；落袋利润只算镜像止盈。</span>
+                  <ChevronDown aria-hidden="true" className="guide-note__chevron" />
+                </summary>
+                <div className="guide-note__body">
+                  <div className="guide-note__rule">仓位卡上<strong>「保本线」与「开仓均价」共用一格</strong>，标签后面有一枚小小的 ⇄：点一下在两者之间切换，同屏每张卡一起切；<strong>默认显示保本线</strong>，刷新或重开页面都回到保本线。<strong>开仓均价</strong>是交易里的真实均价——各笔成交价按币量加权，减仓不改它，落袋的利润也不从里面扣。<strong>保本线</strong>是把<strong>镜像止盈已落袋的利润</strong>摊回这副仓位之后的成本线：价格回到这里，持仓的浮动盈亏与落袋利润正好相抵。U 本位：多 = 均价 − 利润 ÷ 币数，空 = 均价 + 利润 ÷ 币数；币本位（反向合约）按币算：多 = 名义 ÷（币数 + 利润币），空 = 名义 ÷（币数 − 利润币）。<strong>已落袋利润只算镜像止盈</strong>：本轮里从这副仓位上减仓落袋的盈利（止盈委托触发的、手动减仓的都算）；亏着减仓不扣，止损、强平、另开另平的仓位都不算。还没有镜像止盈落袋时，保本线就是开仓均价。悬停这一格可以看到落袋了多少、几笔。</div>
+                  <div className="guide-note__why"><span className="guide-note__why-label">为什么</span>用镜像止盈的利润加仓之后，真实均价会比对冲空单的价格高（主多）——高出的正是「用掉的镜像利润 ÷ 加仓后总币数」，拿它去对空单价怎么都对不上。加仓计算那套逻辑里的「数学均价」是保本线：<strong>按上限加满时它正好落在对冲线上</strong>，没加满时在对冲线的安全一侧。例：开 7,000 万币 @0.161673，减仓 61% 落袋 +220,831；剩下 2,730 万币的保本线是 0.153584，再加仓 1,100 万币 @0.172473 之后，开仓均价 0.164775、保本线 0.159009（当时空单挂在 0.159550）。它与加仓校验里的 G 不是同一个数：G 是本轮全部已实现的净盈亏（亏损也扣），保本线只摊镜像止盈。</div>
+                </div>
+              </details>
+              <details className="guide-note">
+                <summary className="guide-note__summary">
                   <span className="guide-note__title">合并持仓卡的强平价与追加保证金</span>
                   <span className="guide-note__gist">强平价写最先爆的那一笔；「+」追加 / 减少保证金按各笔等比摊分。</span>
                   <ChevronDown aria-hidden="true" className="guide-note__chevron" />
