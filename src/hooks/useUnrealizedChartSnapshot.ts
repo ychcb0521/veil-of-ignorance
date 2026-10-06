@@ -8,8 +8,12 @@ import { writeRebuildableCache } from '@/lib/persistedStateStorage';
 
 export const UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX = 'campaign-unrealized-chart-v1:';
 const MAX_MEMORY_PARTITIONS = 8;
-const MAX_SAMPLES_PER_PARTITION = 2_000;
-const MAX_STORED_CHARACTERS = 2_000_000;
+/**
+ * 【用户要求】「涨幅未兑现的缓存可以适当清理一部分，要始终能够有内存可用」：每个分区最多留 800 场的上次读数
+ * （原来 2,000 场、单键可到约 0.5 MB），更早的先丢；读回时超过 400 KB 的旧版大缓存直接不用，下次写入即被新的小缓存取代。
+ */
+export const MAX_SAMPLES_PER_PARTITION = 800;
+const MAX_STORED_CHARACTERS = 400_000;
 
 type CompleteSample = CampaignMetricSeriesInput & { value: number; operationTime: number };
 type CachedSamples = ReadonlyMap<string, CompleteSample>;

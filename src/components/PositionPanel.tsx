@@ -620,21 +620,23 @@ export function PositionPanel({
   /**
    * 每张仓位卡「保本线」要用的镜像止盈已落袋利润（只算镜像止盈，口径见 detectBankedMirrorProfit 的 mirrorUsd）。
    * 按「标的_方向」存；只在持仓或成交历史变了时重算——仓位卡每一次报价都会重渲染，成交历史可能有上万条。
+   * 直接遍历 positionsMap：合并后的卡片列表每次渲染都是新数组，拿它当依赖这份缓存一次也命不中。
    */
   const mirrorBankedByGroup = useMemo(() => {
     const out = new Map<string, { usd: number; coin: number; count: number }>();
-    for (const mg of mergedPositions) {
-      const positions = positionsMap[mg.symbol];
-      const held = readHeldPosition(mg.symbol, positions, mg.side, getCoinMarginedContractSizeUsd(mg.symbol));
-      if (!held) continue;
-      const banked = detectBankedMirrorProfit(
-        mg.symbol, mg.side, tradeHistory, held.earliestOpenTime ?? null, positions,
-        { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null },
-      );
-      out.set(`${mg.symbol}_${mg.side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });
+    for (const [symbol, positions] of Object.entries(positionsMap)) {
+      for (const side of ['LONG', 'SHORT'] as const) {
+        const held = readHeldPosition(symbol, positions, side, getCoinMarginedContractSizeUsd(symbol));
+        if (!held) continue;
+        const banked = detectBankedMirrorProfit(
+          symbol, side, tradeHistory, held.earliestOpenTime ?? null, positions,
+          { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null },
+        );
+        out.set(`${symbol}_${side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });
+      }
     }
     return out;
-  }, [mergedPositions, positionsMap, tradeHistory]);
+  }, [positionsMap, tradeHistory]);
 
   const allOrders: { symbol: string; order: PendingOrder }[] = [];
   for (const [sym, orders] of Object.entries(ordersMap)) {
@@ -1068,7 +1070,7 @@ export function PositionPanel({
                     const breakevenTitle = mirrorBankedAmount > 0
                       ? '保本线：把镜像止盈已落袋的利润摊回这副仓位之后的成本线——价格回到这里，持仓的浮动盈亏与落袋利润正好相抵。'
                         + `镜像止盈已落袋 +${inverseGroup ? formatCoinAmount(mirrorBankedAmount, baseCoin) : `${formatUSDT(mirrorBankedAmount)} USDT`}`
-                        + `（${mirrorBanked?.count ?? 0} 笔，只算从这副仓位上减仓落袋的盈利与止盈委托的盈利），开仓均价 ${formatPrice(mg.weightedEntryPrice, mg.symbol)}。`
+                        + `（${mirrorBanked?.count ?? 0} 刀，只算从这副仓位上减仓落袋的盈利与止盈委托的盈利；一刀按净额算，净亏的减仓不计），开仓均价 ${formatPrice(mg.weightedEntryPrice, mg.symbol)}。`
                         + (breakevenPrice == null ? '落袋的利润已经超过这副仓位的全部成本，价格走到哪都不亏。' : '')
                       : '保本线：把镜像止盈已落袋的利润摊回这副仓位之后的成本线。这副仓位还没有镜像止盈落袋，保本线就是开仓均价。';
                     const totalUnits = mg.children.reduce((sum, c) => sum + getPositionUnits(c.position), 0);

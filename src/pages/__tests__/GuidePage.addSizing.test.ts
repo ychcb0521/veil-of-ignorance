@@ -199,7 +199,8 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     // 净额 G 不按退出方式筛（「止盈1」只出现在仓位卡保本线用的 mirrorUsd 那一支里）
     expect(sizing).not.toContain('if (!mirrorCredit && !realizedLoss) continue;');
     expect(sizing.indexOf('usd += r.pnl;')).toBeGreaterThan(-1);
-    expect(sizing.indexOf('usd += r.pnl;')).toBeLessThan(sizing.indexOf("r.exit_method === 'tp1' || reducedHeldPosition"));
+    expect(sizing.indexOf('usd += r.pnl;')).toBeGreaterThan(-1);
+    expect(sizing.indexOf('usd += r.pnl;')).toBeLessThan(sizing.indexOf("r.exit_method === 'tp1' && (realStart != null || heldIds.size === 0)"));
   });
 
   it('【用户要求】仓位卡：保本线 / 开仓均价共用一格、默认保本线、落袋利润只算镜像止盈——指南与实现对得上', () => {
@@ -213,10 +214,16 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     const panel = read('components/PositionPanel.tsx');
     // 默认保本线，且不持久化（useState，不是 usePersistedState）
     expect(panel).toContain("const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('breakeven');");
-    expect(panel).toContain('out.set(`${mg.symbol}_${mg.side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });');
+    expect(panel).toContain('out.set(`${symbol}_${side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });');
+    // 缓存只依赖持仓与成交历史：合并后的卡片列表每次渲染都是新数组，不能当依赖
+    expect(panel).toContain('}, [positionsMap, tradeHistory]);');
+    // 按刀算净额：一刀拆成一赚一亏两条时不能只收盈利那一条
+    expect(guide).toContain('<strong>按刀算净额</strong>');
     const sizing = read('lib/addSizing.ts');
-    expect(sizing).toContain("if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation'");
-    expect(sizing).toContain("&& (r.exit_method === 'tp1' || reducedHeldPosition)) {");
+    expect(sizing).toContain('const mirror = netMirrorCuts(mirrorSlices);');
+    expect(sizing).toContain("if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation') {");
+    // 老仓位没有真实开仓时刻时，裸的止盈1 可能来自别的回放：只认从这副仓位上减下来的
+    expect(sizing).toContain("if (reducedHeldPosition || (r.exit_method === 'tp1' && (realStart != null || heldIds.size === 0))) {");
     const breakeven = read('lib/positionBreakeven.ts');
     expect(breakeven).toContain("const line = side === 'SHORT' ? avgEntry + profit / coinsAtEntry : avgEntry - profit / coinsAtEntry;");
     expect(breakeven).toContain("const coins = side === 'SHORT' ? coinsAtEntry - profit : coinsAtEntry + profit;");

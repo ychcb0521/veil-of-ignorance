@@ -10,7 +10,7 @@
  * 摆到屏幕上。读数只取长度、数量与到期时刻，不读令牌内容。
  */
 import { BUILD_STAMP } from '@/lib/buildStamp';
-import { CRITICAL_STORAGE_HEADROOM_CHARS, ensureCriticalStorageHeadroom, measureRebuildableCaches, type StorageHeadroom } from '@/lib/persistedStateStorage';
+import { describeStorageUsage, ensureCriticalStorageHeadroom, measureRebuildableCaches, type StorageHeadroom } from '@/lib/persistedStateStorage';
 
 /** 超过这么久还没恢复出登录态，就不再只转圈。刷新令牌自带的重试最长 30 秒，页面继续等它。 */
 export const AUTH_BOOT_TIMEOUT_MS = 12_000;
@@ -43,16 +43,20 @@ export function classifyAuthBootError(error: unknown): Exclude<AuthBootIssueKind
   const message = errorMessage(error);
   if (name === 'QuotaExceededError' || name === 'NS_ERROR_DOM_QUOTA_REACHED' || /quota/i.test(message)) return 'storage-full';
   // 发布包里类名被压缩，认不得类名：登录库给这类错误都打了 isAcquireTimeout。
-  if ((error as { isAcquireTimeout?: unknown })?.isAcquireTimeout === true || /lock\b.*(stole|not released|immediately failed)/i.test(message)) return 'lock-stolen';
+  if ((error as { isAcquireTimeout?: unknown })?.isAcquireTimeout === true || /lock\b.*(stole|steal|not released|immediately failed)/i.test(message)) return 'lock-stolen';
+  // 靠抢锁拿到锁的标签页再被别人抢走时，登录库没有包这一层：抛出来的是浏览器原生的 AbortError
+  //（Chrome：Lock broken by another request with the 'steal' option.）。启动期只有抢锁会产生它。
+  if (name === 'AbortError') return 'lock-stolen';
   return 'error';
 }
 
 export function authBootReason(kind: AuthBootIssueKind, headroom?: StorageHeadroom): string {
   if (kind === 'lock-stolen') return '登录锁被另一个无知之幕标签页抢走了。把其它无知之幕标签页关掉，只留这一个再重试。';
   if (kind === 'storage-full') {
-    return headroom === 'reclaimed'
-      ? '浏览器给本站的本地存储写满了，新的登录令牌存不进去。可重建的行情缓存已经清掉腾出了位置，重试即可。'
-      : '浏览器给本站的本地存储写满了，新的登录令牌存不进去，而且已经没有可清理的行情缓存。';
+    // 只有确知「能清的都清了仍然不够」才这么说；其余情况位置已经腾出来了
+    return headroom === 'full'
+      ? '浏览器给本站的本地存储写满了，新的登录令牌存不进去；可重建的缓存与消息记录都已清掉，剩下的全是交易数据（见下方占用）。'
+      : '浏览器给本站的本地存储写满了，新的登录令牌存不进去。可重建的缓存已经清掉腾出了位置，重试即可。';
   }
   if (kind === 'timeout') return `向登录服务刷新令牌已经等了 ${AUTH_BOOT_TIMEOUT_MS / 1000} 秒没有回应，多半是这个浏览器到登录服务的连接卡住了。页面还在等，回应一到会自动进入。`;
   return '恢复登录态时出错。';
@@ -74,17 +78,33 @@ export function reloadPage(): void {
   window.location.reload();
 }
 
-/** 只清登录令牌：持仓、成交、日志的本地数据按用户 id 分区存放，重新登录同一账号后原样接上。 */
+/**
+ * 只清登录令牌：持仓、成交、日志的本地数据按用户 id 分区存放，重新登录同一账号后原样接上。
+ *
+ * 令牌是同源各标签页共用的。直接删掉它，别的正在交易的标签页收不到任何登录事件，却会从下一次读写起
+ * 认不出自己是谁（用户 id 取自这个键）：状态写进匿名分区、不再推云，等令牌回来又被删令牌之前的旧值盖回。
+ * 所以先在登录库自己的跨标签通道上发一条退出——别的标签页照正常退出处理（回到登录页、卸掉交易界面），再删令牌。
+ */
 export function forgetStoredSession(): number {
   let removed = 0;
   try {
     for (const key of Object.keys(localStorage)) {
       if (!AUTH_TOKEN_KEY.test(key)) continue;
+      if (AUTH_SESSION_KEY.test(key)) announceSignOut(key);
       localStorage.removeItem(key);
       removed += 1;
     }
   } catch { /* 存储不可用时没有令牌可清，重载后自然回到登录页。 */ }
   return removed;
+}
+
+/** 登录库的跨标签通道以令牌键命名，消息就是它自己退出时发的那一条。 */
+function announceSignOut(storageKey: string): void {
+  try {
+    const channel = new BroadcastChannel(storageKey);
+    channel.postMessage({ event: 'SIGNED_OUT', session: null });
+    channel.close();
+  } catch { /* 没有 BroadcastChannel 的环境里也就没有别的标签页在听。 */ }
 }
 
 function megabytes(chars: number): string {
@@ -124,11 +144,17 @@ function storageUsage(): string {
 }
 
 const HEADROOM_TEXT: Record<StorageHeadroom, string> = {
-  ok: `充足（还能再写 ${CRITICAL_STORAGE_HEADROOM_CHARS / 1024} KB）`,
-  reclaimed: '清掉行情缓存后充足',
-  full: `不足 ${CRITICAL_STORAGE_HEADROOM_CHARS / 1024} KB，且没有可清理的缓存`,
+  ok: '写得下登录令牌',
+  reclaimed: '清掉缓存后写得下登录令牌',
+  full: '写不下登录令牌，且已没有可清理的缓存',
   unavailable: '浏览器不允许本站写本地存储',
 };
+
+/** 「成交历史 3.21 MB · 撤单快照 0.84 MB」：是什么把存储占满的。 */
+export function storageUsageBreakdown(): string {
+  const { categories } = describeStorageUsage();
+  return categories.length ? categories.map(item => `${item.label} ${megabytes(item.chars)}`).join(' · ') : '空';
+}
 
 async function authLockState(): Promise<string> {
   try {
@@ -140,15 +166,19 @@ async function authLockState(): Promise<string> {
   }
 }
 
-/** 一屏截图就能定因的现场读数；探余量会顺手清掉可重建缓存，所以把结果一并交回。 */
-export async function collectAuthBootDiagnostics(error?: unknown, now: number = Date.now()): Promise<{ diagnostics: AuthBootDiagnostic[]; headroom: StorageHeadroom }> {
-  const headroom = ensureCriticalStorageHeadroom();
+/**
+ * 一屏截图就能定因的现场读数。探余量会顺手清掉可重建缓存：调用方已经探过（并清过）时把那次结果传进来，
+ * 不然这里再探一次只会得到「写得下」，把「刚清过」误报成「本来就够」。
+ */
+export async function collectAuthBootDiagnostics(error?: unknown, now: number = Date.now(), knownHeadroom?: StorageHeadroom): Promise<{ diagnostics: AuthBootDiagnostic[]; headroom: StorageHeadroom }> {
+  const headroom = knownHeadroom ?? ensureCriticalStorageHeadroom();
   const diagnostics: AuthBootDiagnostic[] = [
     { label: '版本', value: BUILD_STAMP },
     { label: '网络', value: typeof navigator !== 'undefined' && navigator.onLine === false ? '浏览器报告离线' : '在线' },
     { label: '登录令牌', value: storedTokenState(now) },
     { label: '登录锁', value: await authLockState() },
     { label: '本地存储', value: storageUsage() },
+    { label: '占用最大', value: storageUsageBreakdown() },
     { label: '存储余量', value: HEADROOM_TEXT[headroom] },
   ];
   if (error !== undefined) {

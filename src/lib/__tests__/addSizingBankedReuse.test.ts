@@ -92,38 +92,89 @@ describe('落袋是否已经被花掉', () => {
 });
 
 describe('【用户要求】只算镜像止盈的那一部分（仓位卡「保本线」用）', () => {
-  const held = [{ id: 'main-position', side: 'LONG' as const, openTime: MAIN_OPEN, fills: [{ id: 'main-fill', openTime: MAIN_OPEN }, { id: 'mirror-fill', openTime: MAIN_OPEN }] }];
-  const cut = (over: Partial<TradeRecord>): TradeRecord => ({ ...tp('2026-05-13T00:10:00Z', 0), exit_method: 'manual', ...over } as TradeRecord);
+  // 现在的仓位每一笔成交都带真实开仓时刻；记录带操作时间。各刀的操作时间错开，才是各自独立的一刀。
+  const REAL = T('2026-09-10T08:00:00Z');
+  const MIN = 60_000;
+  const held = [{
+    id: 'main-position', side: 'LONG' as const, openTime: MAIN_OPEN, openedRealAt: REAL,
+    fills: [{ id: 'main-fill', openTime: MAIN_OPEN, openedRealAt: REAL }, { id: 'mirror-fill', openTime: MAIN_OPEN, openedRealAt: REAL }],
+  }];
+  const opts = { earliestOpenedRealAt: REAL };
+  const at = (r: TradeRecord, minutes: number): TradeRecord => ({ ...r, closedRealAt: REAL + minutes * MIN } as TradeRecord);
+  const TP1 = at(tp('2026-05-12T23:19:00Z', 84_742.24), 30);
+  const cut = (minutes: number, over: Partial<TradeRecord>): TradeRecord =>
+    at({ ...tp('2026-05-13T00:10:00Z', 0), exit_method: 'manual', ...over } as TradeRecord, minutes);
+  const detect = (history: TradeRecord[], positions: Parameters<typeof detectBankedMirrorProfit>[4] = held, options = opts) =>
+    detectBankedMirrorProfit('SAGAUSDT', 'LONG', history, MAIN_OPEN, positions, options);
 
   it('止盈委托触发的盈利算；手动从这副仓位上减仓落袋的盈利也算（镜像止盈常常是手动减仓做的）', () => {
-    const manualMirror = cut({ pnl: 9_000, positionId: 'main-position', fillId: 'mirror-fill' });
-    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, manualMirror], MAIN_OPEN, held);
+    const b = detect([TP1, cut(60, { pnl: 9_000, positionId: 'main-position', fillId: 'mirror-fill' })]);
     expect(b.mirrorUsd).toBeCloseTo(84_742.24 + 9_000, 2);
     expect(b.mirrorCount).toBe(2);
     // 只凭成交片的 id 也认得出（合并仓位里记录的 positionId 可能是存活仓位的 id，也可能只带 fillId）
-    const byFill = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [cut({ pnl: 500, positionId: undefined, fillId: 'mirror-fill' })], MAIN_OPEN, held);
-    expect(byFill.mirrorUsd).toBe(500);
+    expect(detect([cut(60, { pnl: 500, positionId: undefined, fillId: 'mirror-fill' })]).mirrorUsd).toBe(500);
   });
 
-  it('亏损的减仓不扣、止损与强平不算、另开另平的仓位不算——这些仍照常进净额 usd', () => {
-    const history = [
-      ...HISTORY,
-      cut({ pnl: -2_000, positionId: 'main-position' }),                                  // 亏着减仓
-      cut({ pnl: 700, positionId: 'main-position', exit_method: 'sl' }),                  // 移动止损在盈利处打掉一部分
-      cut({ pnl: 300, positionId: 'main-position', action: 'LIQUIDATION', exit_method: 'liquidation' }),
-      cut({ pnl: 1_200, positionId: 'another-position', fillId: 'another-fill' }),        // 另一副已平掉的仓位
-    ];
-    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', history, MAIN_OPEN, held);
+  it('亏损的减仓不扣、止损与强平不算、手动整笔平掉的别的仓位不算——这些仍照常进净额 usd', () => {
+    const b = detect([
+      TP1,
+      cut(60, { pnl: -2_000, positionId: 'main-position' }),                                  // 亏着减仓
+      cut(70, { pnl: 700, positionId: 'main-position', exit_method: 'sl' }),                  // 移动止损在盈利处打掉一部分
+      cut(80, { pnl: 300, positionId: 'main-position', action: 'LIQUIDATION', exit_method: 'liquidation' }),
+      cut(90, { pnl: 1_200, positionId: 'another-position', fillId: 'another-fill' }),        // 另一副已平掉的仓位
+    ]);
     expect(b.mirrorUsd).toBeCloseTo(84_742.24, 2);
     expect(b.mirrorCount).toBe(1);
     expect(b.usd).toBeCloseTo(84_742.24 - 2_000 + 700 + 300 + 1_200, 2);
   });
 
-  it('币本位记录按 pnlCoin 累计利润币；不传持仓时只认止盈1', () => {
-    const coinCut = cut({ pnl: 420, pnlCoin: 150, positionId: 'main-position' });
-    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [coinCut], MAIN_OPEN, held);
+  it('【回归】一刀减仓按成交拆成一赚一亏两条：按整刀净额算，净亏的一刀整刀不计，净赚的一刀只计净额', () => {
+    // HEIUSDT：主力 @0.161673 与加仓 @0.172473 合成一副仓位，再减仓 50%，记录按成交拆成两片（同一时刻）。
+    const slices = (minutes: number, main: number, add: number) => [
+      cut(minutes, { pnl: main, positionId: 'main-position', fillId: 'main-fill' }),
+      cut(minutes, { pnl: add, positionId: 'main-position', fillId: 'mirror-fill' }),
+    ];
+    // 平在 0.1640：主力片 +31,764、加仓片 −46,602，这一刀净亏 −14,838。逐条只收盈利的会多算 31,764。
+    const loss = detect([TP1, ...slices(60, 31_764, -46_602)]);
+    expect(loss.mirrorUsd).toBeCloseTo(84_742.24, 2);
+    expect(loss.mirrorCount).toBe(1);
+    // 平在 0.1680：+86,364 与 −24,602，净赚 +61,762——计入的是净额，不是 86,364。
+    const win = detect([TP1, ...slices(60, 86_364, -24_602)]);
+    expect(win.mirrorUsd).toBeCloseTo(84_742.24 + 61_762, 2);
+    expect(win.mirrorCount).toBe(2);
+    // 两刀隔得开（不同的操作）就各算各的：先赚的一刀计入，后亏的一刀不计
+    const separate = detect([cut(60, { pnl: 86_364, positionId: 'main-position' }), cut(90, { pnl: -24_602, positionId: 'main-position' })]);
+    expect(separate.mirrorUsd).toBe(86_364);
+    // 合并卡上两笔仓位按同一成数逐笔下发，操作时间只差几百毫秒：仍是同一刀
+    const twoPositions = [...held, { id: 'second-position', side: 'LONG' as const, openTime: MAIN_OPEN, openedRealAt: REAL, fills: [] }];
+    const together = detect([
+      cut(60, { pnl: 5_000, positionId: 'main-position' }),
+      { ...cut(60, { pnl: -8_000, positionId: 'second-position' }), closedRealAt: REAL + 60 * MIN + 400 } as TradeRecord,
+    ], twoPositions);
+    expect(together.mirrorUsd).toBe(0);
+    expect(together.mirrorCount).toBe(0);
+  });
+
+  it('【回归】老仓位没有真实开仓时刻：分不清是不是别的回放留下的止盈，只认从这副仓位上减下来的', () => {
+    const legacyHeld = [{ id: 'main-position', side: 'LONG' as const, openTime: MAIN_OPEN, fills: [{ id: 'main-fill', openTime: MAIN_OPEN }] }];
+    const otherReplayTp = tp('2026-05-12T23:19:00Z', 50_000);
+    const ownCut = { ...tp('2026-05-13T00:10:00Z', 9_000), exit_method: 'manual', positionId: 'main-position' } as TradeRecord;
+    const b = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [otherReplayTp, ownCut], MAIN_OPEN, legacyHeld);
+    expect(b.mirrorUsd).toBe(9_000);
+    expect(b.mirrorCount).toBe(1);
+    // 净额 usd 的口径不变：两条都算
+    expect(b.usd).toBe(59_000);
+    // 带真实时刻的持仓：操作时间早于开仓的止盈（别的回放）不计，本场的照算
+    const stale = at(tp('2026-05-12T23:19:00Z', 50_000), -600);
+    expect(detect([stale, TP1]).mirrorUsd).toBeCloseTo(84_742.24, 2);
+  });
+
+  it('币本位记录按 pnlCoin 累计利润币并扣掉以币计的平仓手续费；不传持仓时只认止盈1', () => {
+    const coinCut = cut(60, { pnl: 420, pnlCoin: 150, positionId: 'main-position' });
+    const b = detect([coinCut]);
     expect(b.mirrorCoin).toBe(150);
     expect(b.mirrorUsd).toBe(420);
+    expect(detect([cut(60, { pnl: 420, pnlCoin: 150, feeCoin: 6.69, positionId: 'main-position' })]).mirrorCoin).toBeCloseTo(143.31, 6);
     const withoutPositions = detectBankedMirrorProfit('SAGAUSDT', 'LONG', [...HISTORY, coinCut], MAIN_OPEN);
     expect(withoutPositions.mirrorUsd).toBeCloseTo(84_742.24, 2);
     expect(withoutPositions.mirrorCount).toBe(1);

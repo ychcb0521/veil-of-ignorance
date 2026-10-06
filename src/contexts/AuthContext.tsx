@@ -7,10 +7,10 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import { setActiveSyncUser } from '@/lib/simStateSync';
-import { ensureCriticalStorageHeadroom } from '@/lib/persistedStateStorage';
+import { ensureCriticalStorageHeadroom, restoreAuthStorageReserve, type StorageHeadroom } from '@/lib/persistedStateStorage';
 import {
   AUTH_BOOT_TIMEOUT_MS, authBootReason, claimAuthBootAutoReload, classifyAuthBootError,
-  collectAuthBootDiagnostics, reloadPage, type AuthBootIssue, type AuthBootIssueKind,
+  collectAuthBootDiagnostics, reloadPage, storageUsageBreakdown, type AuthBootIssue, type AuthBootIssueKind,
 } from '@/lib/authBootRecovery';
 
 interface Profile {
@@ -88,8 +88,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
      */
     let active = true;
     let settled = false;
-    const report = async (kind: AuthBootIssueKind, error?: unknown) => {
-      const { diagnostics, headroom } = await collectAuthBootDiagnostics(error);
+    const report = async (kind: AuthBootIssueKind, error?: unknown, knownHeadroom?: StorageHeadroom) => {
+      const { diagnostics, headroom } = await collectAuthBootDiagnostics(error, Date.now(), knownHeadroom);
       // 读现场要等一拍：这期间登录态可能已经恢复，迟到的超时提示不能再盖上去。
       if (!active || (kind === 'timeout' && settled)) return;
       setBootIssue({ kind, reason: authBootReason(kind, headroom), diagnostics });
@@ -107,6 +107,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         fetchProfile(session.user.id);
       }
       setLoading(false);
+      // 令牌已经落盘（或确认没有登录）：把给令牌留的位置占回去，赶在交易界面挂载、交易数据开始写入之前
+      restoreAuthStorageReserve();
     }, (error: unknown) => {
       settled = true;
       clearTimeout(watchdog);
@@ -114,12 +116,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const kind = classifyAuthBootError(error);
       // 锁被抢之后这个客户端此后每次取登录态都会失败，只有重载才换得到新的客户端；
       // 存储写满则要先腾出位置，否则重载后令牌照样存不进去。各自动重载一次，再不行就摆出原因。
-      const recoverable = kind === 'lock-stolen' || (kind === 'storage-full' && ensureCriticalStorageHeadroom() !== 'full');
+      const headroom = kind === 'storage-full' ? ensureCriticalStorageHeadroom() : undefined;
+      const recoverable = kind === 'lock-stolen' || (kind === 'storage-full' && headroom !== 'full');
       if (recoverable && claimAuthBootAutoReload()) {
         reloadPage();
         return;
       }
-      void report(kind, error);
+      void report(kind, error, headroom);
     });
 
     return () => {
@@ -139,17 +142,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const attempt = async () => (await supabase.auth.signInWithPassword({ email, password })).error?.message ?? null;
+    const attempt = async () => {
+      const failure = (await supabase.auth.signInWithPassword({ email, password })).error?.message ?? null;
+      // 登录成功、令牌已落盘：把给令牌留的位置占回去
+      if (failure === null) restoreAuthStorageReserve();
+      return failure;
+    };
+    const storageFull = () => `浏览器给本站的本地存储已写满，登录令牌存不进去。占用最大的是：${storageUsageBreakdown()}`;
+    // 登录前先把位置腾好（放出令牌预留、清可重建缓存与消息记录），省得白签一枚存不下的令牌
+    ensureCriticalStorageHeadroom();
     try {
       return { error: await attempt() };
     } catch (error) {
       // 令牌签发了却存不进本地存储时登录库直接抛错：不接住的话登录按钮会一直转圈。
       if (classifyAuthBootError(error) !== 'storage-full') return { error: error instanceof Error ? error.message : String(error) };
-      if (ensureCriticalStorageHeadroom() === 'full') return { error: '浏览器给本站的本地存储已写满，登录令牌存不进去' };
+      // 腾出多少算多少，一定再试一次：令牌只要约 3 KB，未必需要腾满
+      ensureCriticalStorageHeadroom();
       try {
         return { error: await attempt() };
       } catch (again) {
-        return { error: again instanceof Error ? again.message : String(again) };
+        return { error: classifyAuthBootError(again) === 'storage-full' ? storageFull() : again instanceof Error ? again.message : String(again) };
       }
     }
   }, []);
@@ -165,6 +177,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     setProfile(null);
+    // 令牌删掉了，位置空出来：趁现在把给下一次登录留的位置占好
+    restoreAuthStorageReserve();
   }, []);
 
   const initializeAccount = useCallback(async (capital: number) => {

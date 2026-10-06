@@ -67,7 +67,7 @@ describe('仓位卡：保本线 / 开仓均价共用一格', () => {
     expect(cell()).toHaveTextContent('保本线');
     expect(cell()).toHaveTextContent('0.153584');
     expect(cell()).not.toHaveTextContent('0.161673');
-    expect(cell().getAttribute('title')).toContain('镜像止盈已落袋 +220,831.21 USDT（1 笔');
+    expect(cell().getAttribute('title')).toContain('镜像止盈已落袋 +220,831.21 USDT（1 刀');
     expect(cell().getAttribute('title')).toContain('点一下切换为「开仓均价」');
 
     fireEvent.click(cell());

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CampaignMetricSeriesInput } from '@/lib/campaignMetricSeries';
 import {
   clearUnrealizedChartSnapshotMemoryForTests,
+  MAX_SAMPLES_PER_PARTITION,
   UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX,
   useUnrealizedChartSnapshot,
   type UnrealizedChartSnapshotOptions,
@@ -292,12 +293,14 @@ describe('useUnrealizedChartSnapshot', () => {
   });
 
   it('bounds persisted history without dropping fresh points from the current graph', () => {
-    const samples = Array.from({ length: 2_001 }, (_, index) => sample(`campaign-${index}`, index));
+    const samples = Array.from({ length: MAX_SAMPLES_PER_PARTITION + 1 }, (_, index) => sample(`campaign-${index}`, index));
     const { result } = renderHook(useUnrealizedChartSnapshot, { initialProps: options(samples) });
-    expect(result.current.series.points).toHaveLength(2_001);
+    expect(result.current.series.points).toHaveLength(MAX_SAMPLES_PER_PARTITION + 1);
     const persisted = JSON.parse(localStorage.getItem(storageKey())!).samples as CampaignMetricSeriesInput[];
-    expect(persisted).toHaveLength(2_000);
-    expect(persisted.some(item => item.campaignId === 'campaign-2000')).toBe(true);
+    // 【用户要求】缓存适当清理：每个分区最多留 800 场，最新的那一场一定在
+    expect(MAX_SAMPLES_PER_PARTITION).toBe(800);
+    expect(persisted).toHaveLength(MAX_SAMPLES_PER_PARTITION);
+    expect(persisted.some(item => item.campaignId === `campaign-${MAX_SAMPLES_PER_PARTITION}`)).toBe(true);
     expect(persisted.some(item => item.campaignId === 'campaign-0')).toBe(false);
   });
 });

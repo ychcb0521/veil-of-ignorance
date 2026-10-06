@@ -106,7 +106,10 @@ describe('登录态恢复不再无限转圈', () => {
     await flush();
     expect(reloadPage).not.toHaveBeenCalled();
     expect(latest.bootIssue?.kind).toBe('storage-full');
-    expect(view.getByTestId('auth-boot-recovery').textContent).toContain('已经没有可清理的行情缓存');
+    const screen = view.getByTestId('auth-boot-recovery').textContent ?? '';
+    expect(screen).toContain('剩下的全是交易数据');
+    // 说明与同屏读数说的是同一件事（处理器里探到的那次结果）
+    expect(screen).toContain('写不下登录令牌，且已没有可清理的缓存');
   });
 
   it('刷新令牌的请求一直不回：到点摆出提示并继续等，回应一到自动进入', async () => {
@@ -167,20 +170,88 @@ describe('恢复界面的两条出路', () => {
 });
 
 describe('登录时令牌存不进去', () => {
-  it('写满就清缓存再登一次；别的异常变成错误文案而不是一直转圈', async () => {
+  /** 让 localStorage 有总量上限（只在变大且超限时拒绝）。 */
+  function enforceQuota(limit: number) {
+    const original = Storage.prototype.setItem;
+    return vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (this === localStorage) {
+        let others = 0;
+        for (let index = 0; index < this.length; index += 1) {
+          const existing = this.key(index)!;
+          if (existing !== key) others += existing.length + (this.getItem(existing)?.length ?? 0);
+        }
+        const previous = this.getItem(key);
+        if ((previous === null || value.length > previous.length) && others + key.length + value.length > limit) throw new DOMException('exceeded the quota', 'QuotaExceededError');
+      }
+      original.call(this, key, value);
+    });
+  }
+  /** 登录库的行为：签发成功后把令牌写进本地存储，写不进就抛出配额错误。 */
+  const storesToken = async () => {
+    localStorage.setItem('sb-ref-auth-token', 't'.repeat(3_000));
+    return { data: {}, error: null };
+  };
+  const used = () => Object.keys(localStorage).reduce((sum, key) => sum + key.length + localStorage.getItem(key)!.length, 0);
+  const signedOut = async () => {
     auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
     mount();
     await flush();
-    auth.signInWithPassword
-      .mockRejectedValueOnce(new DOMException('exceeded the quota', 'QuotaExceededError'))
-      .mockResolvedValueOnce({ data: {}, error: null });
-    await expect(latest.signIn('a@b.c', 'pw')).resolves.toEqual({ error: null });
-    expect(auth.signInWithPassword).toHaveBeenCalledTimes(2);
+  };
 
+  it('【事故】存储写满、缓存早已清光：登录前先清消息记录腾位置，一次就登得进去，交易数据不动', async () => {
+    const limit = 40_000;
+    localStorage.setItem('sim_user-1_notification_history', 'n'.repeat(6_000));
+    localStorage.setItem('sim_user-1_trade_history', 'h'.repeat(limit - used() - 'sim_user-1_trade_history'.length));
+    const history = localStorage.getItem('sim_user-1_trade_history');
+    enforceQuota(limit);
+    await signedOut();
+    auth.signInWithPassword.mockImplementation(storesToken);
+    await expect(latest.signIn('a@b.c', 'pw')).resolves.toEqual({ error: null });
+    expect(auth.signInWithPassword).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('sb-ref-auth-token')).toHaveLength(3_000);
+    expect(localStorage.getItem('sim_user-1_notification_history')).toBeNull();
+    expect(localStorage.getItem('sim_user-1_trade_history')).toBe(history);
+  });
+
+  it('实在腾不出位置：再试一次仍存不进去，就把原因和占用最大的几项直接交给登录页', async () => {
+    const limit = 30_000;
+    localStorage.setItem('sim_user-1_trade_history', 'h'.repeat(limit - 'sim_user-1_trade_history'.length - 10));
+    enforceQuota(limit);
+    await signedOut();
+    auth.signInWithPassword.mockImplementation(storesToken);
+    const result = await latest.signIn('a@b.c', 'pw');
+    expect(auth.signInWithPassword).toHaveBeenCalledTimes(2);
+    expect(result.error).toContain('浏览器给本站的本地存储已写满，登录令牌存不进去');
+    expect(result.error).toContain('成交历史 0.03 MB');
+  });
+
+  it('别的异常变成错误文案而不是一直转圈；登录服务的拒绝原样交回', async () => {
+    await signedOut();
     auth.signInWithPassword.mockRejectedValueOnce(new TypeError('Failed to fetch'));
     await expect(latest.signIn('a@b.c', 'pw')).resolves.toEqual({ error: 'Failed to fetch' });
-
     auth.signInWithPassword.mockResolvedValueOnce({ data: {}, error: { message: 'Invalid login credentials' } });
     await expect(latest.signIn('a@b.c', 'pw')).resolves.toEqual({ error: 'Invalid login credentials' });
+  });
+
+  it('令牌落盘之后把给令牌留的位置占回去：恢复出登录态时、登录成功时、退出之后', async () => {
+    const RESERVE = 'veil.storage.auth-reserve';
+    auth.getSession.mockResolvedValue({ data: { session }, error: null });
+    mount();
+    expect(localStorage.getItem(RESERVE)).toBeNull();
+    await flush();
+    expect(localStorage.getItem(RESERVE)).not.toBeNull();
+
+    localStorage.removeItem(RESERVE);
+    auth.signInWithPassword.mockResolvedValueOnce({ data: {}, error: { message: 'Invalid login credentials' } });
+    await latest.signIn('a@b.c', 'pw');
+    expect(localStorage.getItem(RESERVE)).toBeNull();
+    auth.signInWithPassword.mockResolvedValueOnce({ data: {}, error: null });
+    await latest.signIn('a@b.c', 'pw');
+    expect(localStorage.getItem(RESERVE)).not.toBeNull();
+
+    localStorage.removeItem(RESERVE);
+    auth.signOut.mockResolvedValue({ error: null });
+    await act(async () => { await latest.signOut(); });
+    expect(localStorage.getItem(RESERVE)).not.toBeNull();
   });
 });

@@ -940,8 +940,13 @@ export interface BankedMirrorProfit {
   /**
    * 其中**只算镜像止盈**的那一部分（仓位卡「保本线」用，【用户要求】「已落袋利润只算镜像止盈」）：
    * 本轮里从**当前仍持有的这副仓位**上减仓落袋的盈利——止盈委托触发的，或手动减仓的（镜像止盈常常是手动减仓做的）；
-   * 以及退出方式为「止盈1」的盈利。亏损的减仓不扣，止损、强平、另开另平的仓位都不算。
-   * mirrorUsd 以 USD 计，mirrorCoin 以币计（币本位的保本线按币算）。不传 positions 时只认「止盈1」。
+   * 以及本轮里止盈委托（「止盈1」）的盈利，不问落在哪一笔仓位上（镜像单独成仓、被止盈委托整笔平掉的那种也算）。
+   * 止损、强平与手动整笔平掉的别的仓位都不算。
+   *
+   * **按刀算净额**：一刀减仓会按成交拆成几条记录、各按自己的开仓价算盈亏（主力与加仓开仓价不同，平在两者之间就是一赚一亏两条）。
+   * 逐条只收盈利的会把亏损那一片漏掉、落袋被高估，所以同一刀的各片先求净额：净赚的一刀整刀计入，净亏的一刀整刀不计。
+   * mirrorCount 数的是刀数。持仓没有真实开仓时刻（老仓位）时分不清是不是别的回放留下的止盈，只认从这副仓位上减下来的。
+   * mirrorUsd 以 USD 计（已扣手续费），mirrorCoin 以币计并扣掉以币计的平仓手续费（币本位的保本线按币算）。不传 positions 时只认「止盈1」。
    */
   mirrorUsd: number;
   mirrorCoin: number;
@@ -1004,6 +1009,42 @@ export interface BankedMirrorOptions {
  * 否则同一段历史重放第二遍时，上一遍在同一模拟时刻落袋的止盈会被当成本场的 G 再填一次。
  * 能拿到真实起点就说明持仓每一笔成交都带时间戳（9-07 之后），而没有 closedRealAt 的止盈只可能来自 6 月以前，一律不计。
  */
+/** 同一次操作里先后落下的各片，真实时刻相差不超过这么多就算同一刀（合并卡上几笔仓位按同一成数逐笔下发）。 */
+const MIRROR_CUT_WINDOW_MS = 2_000;
+
+/**
+ * 把各片归成刀再求净额：同一种退出方式、真实时刻相差不超过 MIRROR_CUT_WINDOW_MS（没有真实时刻的按模拟时刻相同）算同一刀；
+ * 净赚的刀整刀计入，净亏或打平的刀整刀不计。
+ */
+function netMirrorCuts(slices: { opAt: number | null; closeTime: number; method: string; usd: number; coin: number }[]) {
+  const ordered = [...slices].sort((a, b) => a.method.localeCompare(b.method)
+    || (a.opAt ?? Number.NEGATIVE_INFINITY) - (b.opAt ?? Number.NEGATIVE_INFINITY) || a.closeTime - b.closeTime);
+  const total = { usd: 0, coin: 0, count: 0 };
+  let cut: { start: typeof ordered[number]; usd: number; coin: number } | null = null;
+  const settle = () => {
+    if (cut && cut.usd > 0) {
+      total.usd += cut.usd;
+      total.coin += cut.coin;
+      total.count += 1;
+    }
+  };
+  for (const slice of ordered) {
+    const sameCut = cut != null && cut.start.method === slice.method && (
+      cut.start.opAt != null && slice.opAt != null
+        ? slice.opAt - cut.start.opAt <= MIRROR_CUT_WINDOW_MS
+        : cut.start.opAt == null && slice.opAt == null && cut.start.closeTime === slice.closeTime
+    );
+    if (!sameCut) {
+      settle();
+      cut = { start: slice, usd: 0, coin: 0 };
+    }
+    cut!.usd += slice.usd;
+    cut!.coin += slice.coin;
+  }
+  settle();
+  return total;
+}
+
 export function detectBankedMirrorProfit(
   symbol: string,
   side: AddSide,
@@ -1029,9 +1070,8 @@ export function detectBankedMirrorProfit(
   let usd = 0;
   let coin = 0;
   let count = 0;
-  let mirrorUsd = 0;
-  let mirrorCoin = 0;
-  let mirrorCount = 0;
+  /** 可能属于镜像止盈的各片：盈亏都收，循环结束后按刀求净额。 */
+  const mirrorSlices: { opAt: number | null; closeTime: number; method: string; usd: number; coin: number }[] = [];
   let excludedByOperationTime = 0;
   let lastBankedAt: number | null = null;
   let lastBankedRealAt: number | null = null;
@@ -1055,20 +1095,28 @@ export function detectBankedMirrorProfit(
       : (fin(r.exitPrice) && (r.exitPrice as number) > 0 ? r.pnl / (r.exitPrice as number) : 0);
     usd += r.pnl;
     coin += pnlCoin;
-    if (bankedProfit) {
+    if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation') {
       const reducedHeldPosition = (r.positionId != null && heldIds.has(r.positionId)) || (r.fillId != null && heldIds.has(r.fillId));
-      if (r.action === 'CLOSE' && r.exit_method !== 'sl' && r.exit_method !== 'liquidation'
-        && (r.exit_method === 'tp1' || reducedHeldPosition)) {
-        mirrorUsd += r.pnl;
-        mirrorCoin += pnlCoin;
-        mirrorCount += 1;
+      // 没有真实起点时，裸的「止盈1」可能是别的回放在同一模拟时刻留下的：只认从这副仓位上减下来的
+      if (reducedHeldPosition || (r.exit_method === 'tp1' && (realStart != null || heldIds.size === 0))) {
+        mirrorSlices.push({
+          opAt,
+          closeTime: r.closeTime ?? 0,
+          method: r.exit_method ?? '',
+          usd: r.pnl,
+          coin: pnlCoin - (fin(r.feeCoin) ? (r.feeCoin as number) : 0),
+        });
       }
+    }
+    if (bankedProfit) {
       count += 1;
       const t = fin(r.closeTime) ? (r.closeTime as number) : null;
       if (t != null && (lastBankedAt == null || t > lastBankedAt)) lastBankedAt = t;
       if (opAt != null && (lastBankedRealAt == null || opAt > lastBankedRealAt)) lastBankedRealAt = opAt;
     }
   }
+
+  const mirror = netMirrorCuts(mirrorSlices);
 
   let addsSinceBanked = 0;
   if ((lastBankedAt != null || lastBankedRealAt != null) && positions) {
@@ -1087,7 +1135,10 @@ export function detectBankedMirrorProfit(
     }
   }
 
-  return { usd, coin, count, mirrorUsd, mirrorCoin, mirrorCount, lastBankedAt, lastBankedRealAt, addsSinceBanked, excludedByOperationTime };
+  return {
+    usd, coin, count, mirrorUsd: mirror.usd, mirrorCoin: mirror.coin, mirrorCount: mirror.count,
+    lastBankedAt, lastBankedRealAt, addsSinceBanked, excludedByOperationTime,
+  };
 }
 
 /**

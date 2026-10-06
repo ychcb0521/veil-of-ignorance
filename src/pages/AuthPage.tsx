@@ -5,6 +5,14 @@ import { toast } from '@/lib/notificationCenter';
 
 type AuthStep = 'form' | 'verify';
 
+/** 登录服务的英文报错里最常见的几种，换成一句看得懂的话；其余原样给出。 */
+function describeAuthError(error: string): string {
+  if (/invalid login credentials/i.test(error)) return '邮箱或密码不对';
+  if (/failed to fetch|network|load failed/i.test(error)) return '连不上登录服务，检查网络后再试';
+  if (/rate limit|too many/i.test(error)) return '尝试太频繁，稍等一会儿再试';
+  return error;
+}
+
 export default function AuthPage() {
   const { signIn, signUp } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
@@ -14,11 +22,17 @@ export default function AuthPage() {
   const [step, setStep] = useState<AuthStep>('form');
   const [otp, setOtp] = useState('');
   const [resending, setResending] = useState(false);
+  /**
+   * 表单下方那一行失败原因。提示默认只进「消息记录」、不弹出，而登录之前根本打不开消息记录——
+   * 只靠提示的话登录失败就是点了没反应，分不清是密码不对、网络不通还是本地存储写满。
+   */
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) return;
     setLoading(true);
+    setFormError(null);
 
     if (isLogin) {
       const { error } = await signIn(email, password);
@@ -29,6 +43,7 @@ export default function AuthPage() {
           setStep('verify');
         } else {
           toast.error('登录失败', { description: error });
+          setFormError(`登录失败：${describeAuthError(error)}`);
         }
       }
     } else {
@@ -37,10 +52,13 @@ export default function AuthPage() {
       if (error) {
         if (error.includes('already registered') || error.includes('already been registered')) {
           toast.error('该邮箱已被注册');
+          setFormError('注册失败：该邮箱已被注册');
         } else if (error.includes('password')) {
           toast.error('密码长度不足', { description: '密码至少需要6位字符' });
+          setFormError('注册失败：密码至少需要 6 位字符');
         } else {
           toast.error('注册失败', { description: error });
+          setFormError(`注册失败：${describeAuthError(error)}`);
         }
       } else {
         toast.success('注册成功', { description: '验证邮件已发送，请查收' });
@@ -189,7 +207,7 @@ export default function AuthPage() {
             ].map(({ key, label }) => (
               <button
                 key={label}
-                onClick={() => setIsLogin(key)}
+                onClick={() => { setIsLogin(key); setFormError(null); }}
                 className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
                   isLogin === key
                     ? 'bg-primary text-primary-foreground shadow-sm'
@@ -236,12 +254,17 @@ export default function AuthPage() {
             >
               {loading ? '处理中...' : isLogin ? '登录' : '注册'}
             </button>
+            {formError && (
+              <p role="alert" data-testid="auth-form-error" className="text-xs leading-relaxed text-[#F6465D]">
+                {formError}
+              </p>
+            )}
           </form>
 
           <p className="text-center text-[11px] text-muted-foreground">
             {isLogin ? '还没有账号？' : '已有账号？'}
             <button
-              onClick={() => setIsLogin(!isLogin)}
+              onClick={() => { setIsLogin(!isLogin); setFormError(null); }}
               className="text-primary hover:underline ml-1"
             >
               {isLogin ? '立即注册' : '去登录'}
