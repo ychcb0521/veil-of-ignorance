@@ -21,6 +21,9 @@ const options = (samples: CampaignMetricSeriesInput[], pendingIds = noPending, o
 const seed = (samples: CampaignMetricSeriesInput[], user = owner, scope = 'active') => {
   localStorage.setItem(storageKey(user, scope), JSON.stringify({ samples }));
 };
+/** Writes of the snapshot itself: each one is followed by a headroom probe on another key, which is not a rewrite. */
+const snapshotWrites = (write: { mock: { calls: unknown[][] } }) =>
+  write.mock.calls.filter(([key]) => String(key).startsWith(UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX)).length;
 const values = (series: ReturnType<typeof useUnrealizedChartSnapshot>['series']) => series.points.map(point => [point.campaignId, point.value]);
 
 beforeEach(() => {
@@ -215,7 +218,7 @@ describe('useUnrealizedChartSnapshot', () => {
     rerender(options([sample('a', 10), sample('b', 20)], new Set(['elsewhere'])));
     expect(write).not.toHaveBeenCalled();
     rerender(options([sample('a', 11), sample('b', 20)]));
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(snapshotWrites(write)).toBe(1);
   });
 
   it('does not use or persist snapshots before the row membership is complete', () => {
@@ -234,7 +237,7 @@ describe('useUnrealizedChartSnapshot', () => {
     expect(values(result.current.series)).toEqual([['a', 10], ['b', 20]]);
     expect(result.current.cachedCount).toBe(2);
     rerender(options([sample('a', 15), sample('b', 25)]));
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(snapshotWrites(write)).toBe(1);
     expect(JSON.parse(localStorage.getItem(storageKey())!).samples.map((item: CampaignMetricSeriesInput) => item.value)).toEqual([15, 25]);
   });
 
@@ -267,7 +270,7 @@ describe('useUnrealizedChartSnapshot', () => {
     });
     expect(values(result.current.series)).toEqual([['a', 30]]);
     expect(result.current.cachedCount).toBe(0);
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(snapshotWrites(write)).toBe(1);
   });
 
   it('bounds optional memory across accounts while keeping the most recently used account available', () => {

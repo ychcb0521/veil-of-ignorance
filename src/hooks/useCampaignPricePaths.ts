@@ -5,6 +5,7 @@ import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import { pickCampaignComputeInterval } from '@/lib/campaignChartContentSpan';
 import { intervalToMs } from '@/hooks/useBinanceData';
 import { fetchReplayKlineRange } from '@/hooks/useReplayKlines';
+import { writeRebuildableCache } from '@/lib/persistedStateStorage';
 
 export const CAMPAIGN_PRICE_PATH_CACHE_PREFIX = 'campaign-price-path-v3:';
 const PUBLISH_MS = 2_000;
@@ -123,9 +124,8 @@ function readCache(owner: string, task: CampaignPricePathTask): Result | null {
 function saveCache(owner: string, task: CampaignPricePathTask, result: Result) {
   if (!isReusableResult(task, result)) return;
   rememberResult(owner, task, result);
-  try {
-    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${owner}:${task.id}`, JSON.stringify(result));
-  } catch { /* Successful in-memory results are still usable when persistence is unavailable. */ }
+  // Successful in-memory results are still usable when persistence is unavailable or has no room to spare.
+  writeRebuildableCache(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${owner}:${task.id}`, JSON.stringify(result));
 }
 
 function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], previous?: Snapshot) {

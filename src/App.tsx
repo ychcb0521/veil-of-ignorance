@@ -25,14 +25,17 @@ import GuidePage from "./pages/GuidePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import OAuthConsent from "./pages/OAuthConsent.tsx";
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
+import { AuthBootRecoveryScreen } from "./components/AuthBootRecoveryScreen.tsx";
 
 const queryClient = new QueryClient();
 
 function AppRoutes() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, bootIssue } = useAuth();
   const simStateReady = useSimStateHydration(user?.id);
 
   if (loading) {
+    // 登录态恢复不出来时不再只转圈：摆出原因、出路与现场读数。
+    if (bootIssue) return <AuthBootRecoveryScreen issue={bootIssue} />;
     return (
       <div className="h-screen flex items-center justify-center" style={{ background: '#0B0E11' }}>
         <div className="text-center space-y-3">

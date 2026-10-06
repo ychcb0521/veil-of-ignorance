@@ -4,6 +4,7 @@ import {
   type CampaignMetricSeries,
   type CampaignMetricSeriesInput,
 } from '@/lib/campaignMetricSeries';
+import { writeRebuildableCache } from '@/lib/persistedStateStorage';
 
 export const UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX = 'campaign-unrealized-chart-v1:';
 const MAX_MEMORY_PARTITIONS = 8;
@@ -159,9 +160,8 @@ export function useUnrealizedChartSnapshot({ owner, scope, samples, pendingIds, 
     while (next.size > MAX_SAMPLES_PER_PARTITION) next.delete(next.keys().next().value!);
     cached.current = { key, samples: next };
     remember(key, next);
-    try {
-      localStorage.setItem(`${UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX}${key}`, JSON.stringify({ samples: [...next.values()] }));
-    } catch { /* The memory snapshot remains available when persistence is blocked or full. */ }
+    // The memory snapshot remains available when persistence is blocked, full, or has no room to spare.
+    writeRebuildableCache(`${UNREALIZED_CHART_SNAPSHOT_CACHE_PREFIX}${key}`, JSON.stringify({ samples: [...next.values()] }));
   }, [key, owner, samples, pendingIds, ready, stalled]);
 
   return result;

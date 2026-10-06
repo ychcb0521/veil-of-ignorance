@@ -78,6 +78,70 @@ export function writePersistedStateRaw(fullKey: string, raw: string, origin: Sta
   return false;
 }
 
+/**
+ * Supabase stores its auth token with a plain localStorage write, so it never reaches the
+ * eviction path above. A token that cannot be stored leaves the app on its loading screen
+ * (boot) or failing every request (hourly refresh), so derived caches must leave it room.
+ */
+export const CRITICAL_STORAGE_HEADROOM_CHARS = 16 * 1024;
+const HEADROOM_PROBE_KEY = 'veil.storage.headroom-probe';
+const HEADROOM_PROBE = 'x'.repeat(CRITICAL_STORAGE_HEADROOM_CHARS);
+export type StorageHeadroom = 'ok' | 'reclaimed' | 'full' | 'unavailable';
+
+function probeCriticalHeadroom(): Exclude<StorageHeadroom, 'reclaimed'> {
+  try {
+    localStorage.setItem(HEADROOM_PROBE_KEY, HEADROOM_PROBE);
+    return 'ok';
+  } catch (error) {
+    return isQuotaError(error) ? 'full' : 'unavailable';
+  } finally {
+    try { localStorage.removeItem(HEADROOM_PROBE_KEY); } catch { /* Nothing was written. */ }
+  }
+}
+
+function rebuildableCacheKeys(): string[] {
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && REBUILDABLE_CACHE_PREFIXES.some(prefix => key.startsWith(prefix))) keys.push(key);
+  }
+  return keys;
+}
+
+/** Characters held by derived chart caches: what a reclaim could release. */
+export function measureRebuildableCaches(): { entries: number; chars: number } {
+  try {
+    const keys = rebuildableCacheKeys();
+    return { entries: keys.length, chars: keys.reduce((sum, key) => sum + key.length + (localStorage.getItem(key)?.length ?? 0), 0) };
+  } catch { return { entries: 0, chars: 0 }; }
+}
+
+/** Free room for the auth token before it is written; only derived chart caches are removed. */
+export function ensureCriticalStorageHeadroom(): StorageHeadroom {
+  const before = probeCriticalHeadroom();
+  if (before !== 'full') return before;
+  try {
+    let released = 0;
+    for (const key of rebuildableCacheKeys()) {
+      released += key.length + (localStorage.getItem(key)?.length ?? 0);
+      localStorage.removeItem(key);
+      // Probe only once enough was released: each probe writes the whole reserve.
+      if (released < CRITICAL_STORAGE_HEADROOM_CHARS) continue;
+      if (probeCriticalHeadroom() === 'ok') return 'reclaimed';
+      released = 0;
+    }
+  } catch { return 'unavailable'; }
+  return probeCriticalHeadroom() === 'ok' ? 'reclaimed' : 'full';
+}
+
+/** Derived caches yield the last stretch of storage: an entry that would use it is not kept. */
+export function writeRebuildableCache(fullKey: string, raw: string): boolean {
+  try { localStorage.setItem(fullKey, raw); } catch { return false; }
+  if (probeCriticalHeadroom() !== 'full') return true;
+  try { localStorage.removeItem(fullKey); } catch { /* The next boot reclaims it. */ }
+  return false;
+}
+
 /** Deletion must also remove a failed-write overlay, even if storage is blocked. */
 export function removePersistedStateRaw(fullKey: string): void {
   unpersisted.set(fullKey, { source: 'local', raw: null });

@@ -7,6 +7,11 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import { setActiveSyncUser } from '@/lib/simStateSync';
+import { ensureCriticalStorageHeadroom } from '@/lib/persistedStateStorage';
+import {
+  AUTH_BOOT_TIMEOUT_MS, authBootReason, claimAuthBootAutoReload, classifyAuthBootError,
+  collectAuthBootDiagnostics, reloadPage, type AuthBootIssue, type AuthBootIssueKind,
+} from '@/lib/authBootRecovery';
 
 interface Profile {
   id: string;
@@ -21,6 +26,8 @@ interface AuthState {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  /** 登录态没能恢复出来的原因；有值时 loading 可能一直为 true，界面不能只转圈。 */
+  bootIssue: AuthBootIssue | null;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
@@ -41,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bootIssue, setBootIssue] = useState<AuthBootIssue | null>(null);
 
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -74,17 +82,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     );
 
+    /**
+     * getSession() 不保证返回：登录锁被别的标签页抢走、本地存储写满时它直接报错，
+     * 刷新令牌的请求卡住时它一直不返回。三种都不能表现为无限的「加载中...」。
+     */
+    let active = true;
+    let settled = false;
+    const report = async (kind: AuthBootIssueKind, error?: unknown) => {
+      const { diagnostics, headroom } = await collectAuthBootDiagnostics(error);
+      // 读现场要等一拍：这期间登录态可能已经恢复，迟到的超时提示不能再盖上去。
+      if (!active || (kind === 'timeout' && settled)) return;
+      setBootIssue({ kind, reason: authBootReason(kind, headroom), diagnostics });
+    };
+    const watchdog = setTimeout(() => { if (!settled) void report('timeout'); }, AUTH_BOOT_TIMEOUT_MS);
+
     // Then get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      settled = true;
+      clearTimeout(watchdog);
+      setBootIssue(null);
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
       }
       setLoading(false);
+    }, (error: unknown) => {
+      settled = true;
+      clearTimeout(watchdog);
+      if (!active) return;
+      const kind = classifyAuthBootError(error);
+      // 锁被抢之后这个客户端此后每次取登录态都会失败，只有重载才换得到新的客户端；
+      // 存储写满则要先腾出位置，否则重载后令牌照样存不进去。各自动重载一次，再不行就摆出原因。
+      const recoverable = kind === 'lock-stolen' || (kind === 'storage-full' && ensureCriticalStorageHeadroom() !== 'full');
+      if (recoverable && claimAuthBootAutoReload()) {
+        reloadPage();
+        return;
+      }
+      void report(kind, error);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      clearTimeout(watchdog);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -97,8 +139,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    const attempt = async () => (await supabase.auth.signInWithPassword({ email, password })).error?.message ?? null;
+    try {
+      return { error: await attempt() };
+    } catch (error) {
+      // 令牌签发了却存不进本地存储时登录库直接抛错：不接住的话登录按钮会一直转圈。
+      if (classifyAuthBootError(error) !== 'storage-full') return { error: error instanceof Error ? error.message : String(error) };
+      if (ensureCriticalStorageHeadroom() === 'full') return { error: '浏览器给本站的本地存储已写满，登录令牌存不进去' };
+      try {
+        return { error: await attempt() };
+      } catch (again) {
+        return { error: again instanceof Error ? again.message : String(again) };
+      }
+    }
   }, []);
 
   const signOut = useCallback(async () => {
@@ -129,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, session, profile, loading,
+      user, session, profile, loading, bootIssue,
       signUp, signIn, signOut,
       initializeAccount, refreshProfile,
     }}>
