@@ -286,10 +286,10 @@ export function PositionPanel({
   const [adjustMarginModal, setAdjustMarginModal] = useState<{ symbol: string; positionIds: string[] } | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
   /**
-   * 【用户要求】仓位卡上「保本线 / 开仓均价」共用一格，点一下切换，**默认保本线**。
-   * 只记在这次会话里、不持久化：刷新或重开都回到保本线（与「下单面板默认币本位」同一个取向）。
+   * 仓位卡上「保本线 / 开仓均价」共用一格，点一下切换，默认开仓均价。
+   * 只记在这次会话里、不持久化：刷新或重开都回到开仓均价。
    */
-  const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('breakeven');
+  const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('entry');
   const [hideOtherContracts, setHideOtherContracts] = useState(false);
   const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
   // Rollback modal state

@@ -215,17 +215,17 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     expect(campaignCheckSection).not.toContain('币本位 G 按 S₁ 折成 U');
   });
 
-  it('【用户要求】仓位卡：保本线 / 开仓均价共用一格、默认保本线、落袋利润只算镜像止盈——指南与实现对得上', () => {
+  it('【用户要求】仓位卡：保本线 / 开仓均价共用一格、默认开仓均价、落袋利润只算镜像止盈——指南与实现对得上', () => {
     expect(guide).toContain('<span className="guide-note__title">仓位卡的保本线与开仓均价</span>');
     expect(guide).toContain('<strong>「保本线」与「开仓均价」共用一格</strong>');
-    expect(guide).toContain('<strong>默认显示保本线</strong>，刷新或重开页面都回到保本线');
+    expect(guide).toContain('<strong>默认显示开仓均价</strong>，刷新或重开页面都回到开仓均价');
     expect(guide).toContain('<strong>已落袋利润只算镜像止盈</strong>');
     expect(guide).toContain('多 = 均价 − 利润 ÷ 币数，空 = 均价 + 利润 ÷ 币数');
     expect(guide).toContain('多 = 名义 ÷（币数 + 利润币），空 = 名义 ÷（币数 − 利润币）');
     expect(guide).toContain('<strong>按上限加满时它正好落在对冲线上</strong>');
     const panel = read('components/PositionPanel.tsx');
-    // 默认保本线，且不持久化（useState，不是 usePersistedState）
-    expect(panel).toContain("const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('breakeven');");
+    // 默认开仓均价，且不持久化（useState，不是 usePersistedState）
+    expect(panel).toContain("const [entryCellMode, setEntryCellMode] = useState<'breakeven' | 'entry'>('entry');");
     expect(panel).toContain('out.set(`${symbol}_${side}`, { usd: banked.mirrorUsd, coin: banked.mirrorCoin, count: banked.mirrorCount });');
     // 缓存只依赖持仓与成交历史：合并后的卡片列表每次渲染都是新数组，不能当依赖
     expect(panel).toContain('}, [positionsMap, tradeHistory]);');
