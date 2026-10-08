@@ -89,7 +89,7 @@ export interface AddSizingVerdict {
   s1: number | null;
   /** T 加仓价 */
   s2: number | null;
-  /** Q₁ 加仓那一刻仍持有的同向旧仓币量（含更早的加仓；已部分平掉的只算剩下的） */
+  /** Q 加仓那一刻仍持有的同向旧仓币量（含更早的加仓；已部分平掉的只算剩下的） */
   x1Coins: number | null;
   /** Q₂实际 本次加仓币量 = 名义 ÷ T（与 Legs「币量」列同一个算式） */
   x2Coins: number | null;
@@ -117,10 +117,10 @@ export interface AddSizingVerdict {
   maxAllowedNotional: number | null;
   /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null（self_check_mismatch 时仍给垫子式的数，供对照） */
   shortfall: number | null;
-  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + Q₂实际T) ÷ (Q₁ + Q₂实际)——成本线式复核的中间量 */
+  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + Q₂实际T) ÷ (Q + Q₂实际)——成本线式复核的中间量 */
   blendedCost: number | null;
   /**
-   * 成本线式算出的缺口 = max(0, (Q₁ + Q₂实际)(C − K)·d − G)。与 shortfall（垫子式）在代数上恒等；
+   * 成本线式算出的缺口 = max(0, (Q + Q₂实际)(C − K)·d − G)。与 shortfall（垫子式）在代数上恒等；
    * 两者对不上即 self_check_mismatch，两个数都留在这里供诊断。
    */
   costLineShortfall: number | null;
@@ -496,7 +496,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
 
     /**
      * 成本线式：同一条判据换一条路。加仓后综合成本线越过 K 的那一段折成钱，减掉 G 就是缺口。
-     * Q₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 T，S₁ 不参与。
+     * Q = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 T，S₁ 不参与。
      */
     const post = evaluatePostAddCostLine({
       side: d > 0 ? 'LONG' : 'SHORT',

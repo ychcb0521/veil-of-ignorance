@@ -932,7 +932,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
   });
 
   /**
-   * COMMONUSDT 那一场：两边同一个 G、同一条 K、同一个 Q₁，用户严格按计算器上限下单，Legs 仍判超限——
+   * COMMONUSDT 那一场：两边同一个 G、同一条 K、同一个 Q，用户严格按计算器上限下单，Legs 仍判超限——
    * 计算器读的 T 是下单前的基准价，市价单在引擎里按 calcSlippage 成交，Legs 读的是成交价。
    * 此组保留旧版计算器的历史滑点回归；快照腿直接提供净 U，校验不再按币数重估落袋。
    */
@@ -1370,7 +1370,7 @@ describe('【复核】Legs 校验也走两条路：垫子式与成本线式对�
     expect(Math.abs(v.costLineShortfall! - v.shortfall!)).toBeLessThanOrEqual(1e-6 * v.shortfall!);
   });
 
-  it('旧仓在加仓前已全部平掉：这是再入场，Q₁ = 0、上一轮的 G 不跨轮；成本线就是 T，两条路给同一个缺口', () => {
+  it('旧仓在加仓前已全部平掉：这是再入场，Q = 0、上一轮的 G 不跨轮；成本线就是 T，两条路给同一个缺口', () => {
     const legs = [
       // 主力在止盈之后以零盈亏整腿平掉：加仓那一刻没有任何旧仓还开着
       mainLeg({ post_simulated_close_time: iso(T0 + 90 * MIN), post_realized_pnl: 0 }),
