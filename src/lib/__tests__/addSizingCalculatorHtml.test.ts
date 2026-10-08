@@ -13,6 +13,33 @@ type CalculatorWindow = Window & {
 };
 
 describe('embedded add calculator source of truth', () => {
+  it('defaults to the latest opening average and switches to breakeven without changing the risk budget', () => {
+    const dom = new JSDOM(html, { url: 'https://app.test', runScripts: 'dangerously' });
+    const win = dom.window as unknown as CalculatorWindow;
+    const field = (id: string) => win.document.getElementById(id) as HTMLInputElement;
+    win.AddPositionMath.setSeed({ currentPrice: 150, support: 120, strategyCost: 100, realAverage: 110, coins: 2, mirrorProfitAvailable: 30, side: 'LONG' });
+    expect(field('cost-view').value).toBe('110');
+    const quantity = field('r-add').textContent;
+    field('cost-breakeven').click();
+    expect(field('cost-view').value).toBe('85');
+    expect(field('cost-view').readOnly).toBe(true);
+    expect(field('cost').value).toBe('100');
+    expect(field('r-add').textContent).toBe(quantity);
+    field('cost-latest').click();
+    expect(field('cost-view').value).toBe('110');
+    expect(field('cost-view').readOnly).toBe(false);
+    field('cost-view').value = '112';
+    field('cost-view').dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    expect(field('cost').value).toBe('102');
+    expect(field('r-new-cost').textContent).not.toBe('—');
+    field('cost-breakeven').click();
+    expect(field('cost-view').value).toBe('87');
+    win.AddPositionMath.setSeed({ currentPrice: 80, support: 90, strategyCost: 100, realAverage: 95, coins: 2, mirrorProfitAvailable: 30, side: 'SHORT' });
+    expect(field('cost-view').value).toBe('95');
+    field('cost-breakeven').click();
+    expect(field('cost-view').value).toBe('115');
+    dom.window.close();
+  });
   it('shows the same compact calculator and carries strategy cost without spending P twice', () => {
     const dom = new JSDOM(html, { url: 'https://app.test', runScripts: 'dangerously' });
     const win = dom.window as unknown as CalculatorWindow;
