@@ -67,7 +67,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(coins.nextElementSibling!.nextElementSibling).toBe(header);
     expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
     expect(header.nextElementSibling).toBe(fees);
-    expect(header.getAttribute('title')).toContain('X₂(S₂ − S₁)');
+    expect(header.getAttribute('title')).toContain('X₂(T − K)');
     expect(header.getAttribute('title')).toContain('止损线不必越过旧仓成本线');
     expect(header.getAttribute('title')).toContain('G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险');
     expect(header.getAttribute('title')).toContain('币本位同样取成交时的已实现金额，不按止损线重估');
@@ -108,7 +108,7 @@ describe('Legs 列表的「加仓校验」列', () => {
   });
 
   it('仓位合规：几乎隐形的小对号，不带红色', () => {
-    // 浮盈垫 ≈ 2,931 + 落袋 15,117.55 ≈ 18,049；每币退回 S₁ 亏 0.0072445 → 两百万币以内都兜得住
+    // 浮盈垫 ≈ 2,931 + 落袋 15,117.55 ≈ 18,049；每币退回 K 亏 0.0072445 → 两百万币以内都兜得住
     renderList(2_000_000 * 0.0419705);
     const mark = screen.getByTestId('add-sizing-check-ok-add1');
     expect(mark.textContent).toBe('✓');
@@ -256,7 +256,7 @@ describe('两套算法对不上时的「加仓校验」格', () => {
 /**
  * 成交记录带着加仓计算器当时的计划：点开红叉的计算框并排写出「计算时 / 实际成交」，
  * 再说超出从哪来——真是滑点才点名滑点。判定本身仍按成交价。
- * COMMONUSDT 加仓 1：主力 10,346,400 @0.006974，镜像落袋 55,994,538.5 COMMON，S₁ 0.007069，
+ * COMMONUSDT 加仓 1：主力 10,346,400 @0.006974，镜像落袋 55,994,538.5 COMMON，K 0.007069，
  * 计算时现价 0.00770146、成交 0.0077123（+0.14%）、实际 653,602 张。
  *   · 那一场的计划按现价、不计滑点（限价档，上限 848,689,579 币）→ 超出全部来自滑点；
  *   · 市价档计划已含 +0.14%（上限 834,590,798 币），同一笔就是量超了计划。
@@ -310,7 +310,7 @@ describe('计算框里的计算器快照', () => {
     fireEvent.click(mark);
     const dialog = screen.getByTestId('add-sizing-detail-dialog');
     const line = screen.getByTestId('add-sizing-snapshot-line');
-    expect(line.textContent).toContain('加仓计算器当时的计划（限价 @S₂）');
+    expect(line.textContent).toContain('加仓计算器当时的计划（限价 @T）');
     expect(line.textContent).toContain('计算时 限价 0.00770146，挂单价 0.00770146（限价），上限 848,689,579.33 币；');
     expect(line.textContent).not.toContain('现价');
     expect(line.textContent).toMatch(/实际成交 0\.00771230（\+0\.14%），上限 834,391,89\d(\.\d+)? 币。/);
@@ -344,7 +344,7 @@ describe('计算框里的计算器快照', () => {
     expect(screen.queryByTestId('add-sizing-slippage-line')).toBeNull();
   });
 
-  it('【回归 · 三审】条件委托计划（突破加仓）的触发价挂高了 0.2%：抬头写「条件委托 @S₂ · 触发后市价」，计算时写触发价，原因写触发价偏离', () => {
+  it('【回归 · 三审】条件委托计划（突破加仓）的触发价挂高了 0.2%：抬头写「条件委托 @T · 触发后市价」，计算时写触发价，原因写触发价偏离', () => {
     const TRIG = 0.0077015;
     const conditionalPlan: AddSizingSnapshot = {
       ...common, s2Ref: TRIG, s2AtOrder: TRIG * 1.002, s2Fill: 0.0077121837, slippagePct: 0.1387,
@@ -353,7 +353,7 @@ describe('计算框里的计算器快照', () => {
     renderCommon(6_436_140, conditionalPlan, calcSlippage(TRIG * 1.002, 6_436_140, 'LONG'));
     fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
     const line = screen.getByTestId('add-sizing-snapshot-line');
-    expect(line.textContent).toContain('加仓计算器当时的计划（条件委托 @S₂ · 触发后市价，含滑点）');
+    expect(line.textContent).toContain('加仓计算器当时的计划（条件委托 @T · 触发后市价，含滑点）');
     expect(line.textContent).toContain('计算时 触发价 0.00770150，预计成交 0.00771218（+0.14%），上限 834,542,712.37 币；');
     expect(line.textContent).not.toContain('现价');
     expect(screen.getByTestId('add-sizing-order-line').textContent).toBe('下单时 参考价 0.00771690（触发价偏离计划触发价 +0.20%）；');

@@ -2,26 +2,26 @@
  * Legs 表「加仓校验」列：每一笔加仓的仓位大小是否合规。
  *
  * 规则与最新加仓计算器（addPositionCoverage.ts）共享覆盖预算：
- *   Y₁        加仓那一刻仍持有的旧仓，退回 S₁ 时的净浮盈（逐腿按剩余币量计算，可为负）
+ *   Y₁        加仓那一刻仍持有的旧仓，退回 K 时的净浮盈（逐腿按剩余币量计算，可为负）
  *   G         本轮持仓加仓之前已经落袋的净已实现盈亏
- *   加仓合规 ⇔ Y₁ + G ≥ X₂ (S₂ − S₁)（主多；主空符号翻转）
- * 即「价格退回 S₁ 时，旧仓浮盈垫 + 已落袋的净盈亏足以抹平新加仓最大预期亏损」。
- * S₁ 不必越过旧仓成本线：G 先补旧仓亏损，余额才可承担新加仓风险。
+ *   加仓合规 ⇔ Y₁ + G ≥ X₂ (T − K)（主多；主空符号翻转）
+ * 即「价格退回 K 时，旧仓浮盈垫 + 已落袋的净盈亏足以抹平新加仓最大预期亏损」。
+ * K 不必越过旧仓成本线：G 先补旧仓亏损，余额才可承担新加仓风险。
  *
  * **G 是本轮主方向全部已实现的净盈亏，不问退出方式。**【用户要求】HEIUSDT 2026-06-25：镜像止盈是手动减仓 61% 做的
  * （不是止盈委托触发），原来只认成交记录上退出方式为「止盈1」的利润，这 +22 万被整个丢掉，三笔加仓全按 G = 0 判，
  * 加仓 1 的上限写成 0 币。更根本的是那条规则自相矛盾：手动减掉的币不再进浮盈垫 Y₁，它的利润又不进 G——
- * 落袋反而让可用额变小。用户的口径是战役级的：「已落袋利润 + Σ 持仓 ×（S₁ − 开仓价）」，落袋就是落袋。
+ * 落袋反而让可用额变小。用户的口径是战役级的：「已落袋利润 + Σ 持仓 ×（K − 开仓价）」，落袋就是落袋。
  * 因此也不再需要拿战役事件去补认「这一刀是不是镜像止盈」：老成交缺退出方式、显式写着手动，都一样计入。
  *
- * 每次加仓都必须重算 Y₁：更早的加仓若在新 S₁ 上浮亏，会以负数进入 Y₁，
+ * 每次加仓都必须重算 Y₁：更早的加仓若在新 K 上浮亏，会以负数进入 Y₁，
  * 自然扣掉此前已经动用的垫子；已平掉的部分则转入 G，因而不会重复花同一笔利润。
  *
- * 与最新计算器一致：G 使用实际已实现净 U（含记录已有费用），不按 S₁ 重估币本位利润；
+ * 与最新计算器一致：G 使用实际已实现净 U（含记录已有费用），不按 K 重估币本位利润；
  * 新加仓的风险只算价格距离，不额外估算未来手续费。
  *
- * S₁ 从哪来：腿上不存加仓的止损价（pre_planned_stop_loss 已弃用），
- * 只能读加仓那一刻挂着的反向委托——对冲 @ S₁ 就是那张反向单的挂单价。
+ * K 从哪来：腿上不存加仓的止损价（pre_planned_stop_loss 已弃用），
+ * 只能读加仓那一刻挂着的反向委托——对冲 @ K 就是那张反向单的挂单价。
  * 反向委托列表与 Legs 表收到的是**同一份**（盘面上隐藏掉的不算），
  * 页面与导出 PNG 各自调用本函数、喂同样的输入，两处读数不可能打架。
  *
@@ -32,13 +32,13 @@
  * 所以：加仓时刻 t 持有的币量 = 开仓币量 − Σ(t 之前平掉的刀)，落袋 = Σ(t 之前那几刀的盈亏)。
  *
  * **同一条判据走两条路再对账。** 上面的垫子式之外，再按加仓后综合成本线算一遍：
- * 成本线越过 S₁ 的那一段折成钱、减掉 G 就是缺口——展开即 X₂·险 − Y₁ − G，与垫子式恒等。
+ * 成本线越过 K 的那一段折成钱、减掉 G 就是缺口——展开即 X₂·险 − Y₁ − G，与垫子式恒等。
  * 成本线由计算器那边的 evaluatePostAddCostLine 算，与这里的逐刀账本是两套代码；
  * 两条路对不上（某个数错了单位 / 符号，或哪里改坏了）就既不给 ✓ 也不给 ✗，标成 unknown 把两个数都摆出来。
  *
- * **S₂ 一律按成交价判，计算器的快照只用来解释。** COMMONUSDT 那一场：用户严格按计算器上限下单，
+ * **T 一律按成交价判，计算器的快照只用来解释。** COMMONUSDT 那一场：用户严格按计算器上限下单，
  * 这里却判超限 1.57% / 3.70%——计算器读的是下单前的盘面价，市价单按 0.01% + 名义/50亿 滑点成交，
- * 而（张数 / 名义）上限对 S₂ 的弹性是 S₁/(S₂ − S₁) ≈ 十几倍。判定不能改：真正的风险就在成交价上。
+ * 而（张数 / 名义）上限对 T 的弹性是 K/(T − K) ≈ 十几倍。判定不能改：真正的风险就在成交价上。
  * 但成交记录带着计算器当时的计划（record.addSizingSnapshot）时，这里把它原样交出去，再按**本函数自己的**
  * Y₁ + G 与判定同一个容差，走 attributeAddExcess 说清超出从哪来：
  *   计划价（市价计划已含预计滑点）→ 下单价（计算后价格变动）→ 成交价（比预计多出来的滑点）。
@@ -75,9 +75,9 @@ export type AddSizingStatus = 'ok' | 'fail' | 'unknown';
 export type AddSizingUnknownReason =
   | 'no_direction'          // 腿没有多空方向
   | 'no_open_time'          // 加仓开仓时刻缺失
-  | 'no_entry_price'        // 加仓价 S₂ 缺失或非正
+  | 'no_entry_price'        // 加仓价 T 缺失或非正
   | 'no_position_size'      // 加仓名义缺失或非正，推不出 X₂
-  | 'no_stop_line'          // 加仓那一刻没有挂在亏损侧的反向委托，S₁ 无从读起
+  | 'no_stop_line'          // 加仓那一刻没有挂在亏损侧的反向委托，K 无从读起
   | 'old_leg_incomplete'    // 旧仓或落袋账本缺价格 / 名义 / 时刻 / 已实现盈亏
   | 'non_finite'            // 算出来的数不是有限数
   | 'self_check_mismatch';  // 垫子式与成本线式两套算法对不上——不给对错号，只摆出两个数
@@ -85,16 +85,16 @@ export type AddSizingUnknownReason =
 export interface AddSizingVerdict {
   status: AddSizingStatus;
   reason?: AddSizingUnknownReason;
-  /** S₁ 止损 / 对冲线（反向委托挂单价） */
+  /** K 止损 / 对冲线（反向委托挂单价） */
   s1: number | null;
-  /** S₂ 加仓价 */
+  /** T 加仓价 */
   s2: number | null;
   /** X₁ 加仓那一刻仍持有的同向旧仓币量（含更早的加仓；已部分平掉的只算剩下的） */
   x1Coins: number | null;
-  /** X₂ 本次加仓币量 = 名义 ÷ S₂（与 Legs「币量」列同一个算式） */
+  /** X₂ 本次加仓币量 = 名义 ÷ T（与 Legs「币量」列同一个算式） */
   x2Coins: number | null;
   /**
-   * Y₁ 浮盈垫 = Σ 旧腿剩余币量 × (S₁ − 开仓价) × d。
+   * Y₁ 浮盈垫 = Σ 旧腿剩余币量 × (K − 开仓价) × d。
    * 这是加仓当下的旧仓净浮盈，可为负；与 G 一起参与 Plan B 判定。
    */
   cushion: number | null;
@@ -103,34 +103,34 @@ export interface AddSizingVerdict {
    * 止盈委托、手动减仓的利润加进来，止损、强平、亏着平掉的扣出去；花掉的 G 不能再花一次。
    */
   banked: number | null;
-  /** 旧仓在 S₁ 的浮亏绝对额，仅作诊断明细；正式判定使用有正有负的 cushion 净额。 */
+  /** 旧仓在 K 的浮亏绝对额，仅作诊断明细；正式判定使用有正有负的 cushion 净额。 */
   consumedByHeld: number | null;
-  /** 新腿退回 S₁ 的最大预期亏损 = X₂ × (S₂ − S₁) × d */
+  /** 新腿退回 K 的最大预期亏损 = X₂ × (T − K) × d */
   maxLoss: number | null;
   /** Plan B 可用垫子 = cushion + banked；合规 ⇔ required ≥ maxLoss */
   required: number | null;
-  /** 每加 1 币从 S₂ 退回 S₁ 的预期亏损（USDT / 币） */
+  /** 每加 1 币从 T 退回 K 的预期亏损（USDT / 币） */
   riskPerCoin: number | null;
   /** Plan B 允许的最大加仓币量；required ≤ 0 时为 0 */
   maxAllowedCoins: number | null;
-  /** 最大加仓币量按 S₂ 折算的 U 本位名义仓位 */
+  /** 最大加仓币量按 T 折算的 U 本位名义仓位 */
   maxAllowedNotional: number | null;
   /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null（self_check_mismatch 时仍给垫子式的数，供对照） */
   shortfall: number | null;
-  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + X₂S₂) ÷ (X₁ + X₂)——成本线式复核的中间量 */
+  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + X₂T) ÷ (X₁ + X₂)——成本线式复核的中间量 */
   blendedCost: number | null;
   /**
-   * 成本线式算出的缺口 = max(0, (X₁ + X₂)(C − S₁)·d − G)。与 shortfall（垫子式）在代数上恒等；
+   * 成本线式算出的缺口 = max(0, (X₁ + X₂)(C − K)·d − G)。与 shortfall（垫子式）在代数上恒等；
    * 两者对不上即 self_check_mismatch，两个数都留在这里供诊断。
    */
   costLineShortfall: number | null;
   /** 成交记录带着的计算器计划（下单那一刻的输入与输出）；老记录 / 没经计算器的单子为 null。 */
   snapshot: AddSizingSnapshot | null;
-  /** 本函数自己的 Y₁ + G 在快照参考价 S₂（市价计划 = 现价、限价计划 = 手填限价、条件委托 = 触发价，不计滑点）上给出的上限（币）；没有快照或参考价没有风险距离为 null。 */
+  /** 本函数自己的 Y₁ + G 在快照参考价 T（市价计划 = 现价、限价计划 = 手填限价、条件委托 = 触发价，不计滑点）上给出的上限（币）；没有快照或参考价没有风险距离为 null。 */
   snapshotLimitAtRef: number | null;
   /** 实际成交价相对**这张单的下单参考价**（快照的 s2AtOrder，缺省为计划的下单价）的偏移（%），带符号。 */
   fillSlippagePct: number | null;
-  /** 只因成交价偏离快照参考价 S₂ 而少掉的额度：snapshotLimitAtRef ÷ maxAllowedCoins − 1（%）。 */
+  /** 只因成交价偏离快照参考价 T 而少掉的额度：snapshotLimitAtRef ÷ maxAllowedCoins − 1（%）。 */
   slippageOvershootPct: number | null;
   /** 判超限时超出从哪来（attributeAddExcess）；合规、无法判断或没有快照时为 null。 */
   excess: AddExcessAttribution | null;
@@ -312,14 +312,14 @@ function closedBy(ledger: LegLedger, t: number, operationTime: number | null): b
 }
 
 /**
- * 读加仓那一刻的止损线 S₁。
+ * 读加仓那一刻的止损线 K。
  *
  * 候选 = 加仓时刻 t 仍挂着的反向委托（createdAt ≤ t < 失效时刻）∪ 加仓之后 5 分钟内挂出的——
  * 先加仓、随手补对冲（或把旧止损撤掉换一张更近的）是常见节奏，
  * 窗口与委托归属加仓行的预挂缓冲同一口径（PRE_MAIN_LOOKBACK_MS）。
  * 不能「有挂着的就不看补挂的」：那样一张马上要撤的旧止损会顶替刚补上的新线，
  * 把合规的加仓标成大红叉。
- * 亏损侧才算止损（多：价 < S₂）；有多张时离 S₂ 最近的那张先被打到，它才是生效的那条线。
+ * 亏损侧才算止损（多：价 < T）；有多张时离 T 最近的那张先被打到，它才是生效的那条线。
  */
 function resolveStopLine(
   orders: CampaignReverseHedgeOrder[],
@@ -394,7 +394,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       continue;
     }
     const x2Coins = add.pre_position_size / s2;
-    // 反向委托列表目前只收空单，主空战役读不到 S₁，自然落到 no_stop_line
+    // 反向委托列表目前只收空单，主空战役读不到 K，自然落到 no_stop_line
     const s1 = resolveStopLine(orders, d > 0 ? 'SHORT' : 'LONG', t, s2, d);
     if (s1 == null) {
       result.set(add.id, unknown('no_stop_line', { s2, x2Coins }));
@@ -481,7 +481,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       x1Coins += coins;
       costBasis += coins * ledger.entry;
       cushion += pnlAtS1;
-      // 不对称：在 S₁ 是浮盈的腿不抵扣任何东西，浮亏的腿按亏损占用落袋
+      // 不对称：在 K 是浮盈的腿不抵扣任何东西，浮亏的腿按亏损占用落袋
       consumedByHeld += Math.max(0, -pnlAtS1);
     }
 
@@ -490,13 +490,13 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const budget = calculateAddRiskBudget(cushion, banked, riskPerCoin);
     const required = budget?.available ?? Number.NaN;
     // “正确加仓”不是一个新的拍脑袋目标，而是 Plan B 的数学上限：低于它都合规，超过它就会失去覆盖。
-    // X₂ 是币量；乘回 S₂ 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
+    // X₂ 是币量；乘回 T 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
     const maxAllowedCoins = budget?.maxAddCoins ?? null;
     const maxAllowedNotional = maxAllowedCoins == null ? null : maxAllowedCoins * s2;
 
     /**
-     * 成本线式：同一条判据换一条路。加仓后综合成本线越过 S₁ 的那一段折成钱，减掉 G 就是缺口。
-     * X₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 S₂，S̄ 不参与。
+     * 成本线式：同一条判据换一条路。加仓后综合成本线越过 K 的那一段折成钱，减掉 G 就是缺口。
+     * X₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 T，S₁ 不参与。
      */
     const post = evaluatePostAddCostLine({
       side: d > 0 ? 'LONG' : 'SHORT',
@@ -591,7 +591,7 @@ const UNKNOWN_REASON_TEXT: Record<AddSizingUnknownReason, string> = {
   no_open_time: '加仓价、名义或时刻缺失',
   no_entry_price: '加仓价、名义或时刻缺失',
   no_position_size: '加仓价、名义或时刻缺失',
-  no_stop_line: '加仓时没有挂在亏损侧的反向委托，读不到止损线 S₁',
+  no_stop_line: '加仓时没有挂在亏损侧的反向委托，读不到止损线 K',
   old_leg_incomplete: '旧仓开仓价、名义或已实现盈亏缺失，覆盖预算算不准',
   non_finite: '计算结果不是有限数',
   self_check_mismatch: '两种算法结果不一致',
@@ -608,7 +608,7 @@ export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
     return `加仓校验：无法判断——${reason}${routes}`;
   }
   // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
-  const detail = `止损线不必越过成本线，已落袋利润先补旧仓亏损、余额覆盖新增风险。退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
+  const detail = `止损线不必越过成本线，已落袋利润先补旧仓亏损、余额覆盖新增风险。退回 K ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
   if (verdict.status === 'ok') return `加仓校验：仓位合规。${detail}`;
   const snapshotText = describeAddSizingSnapshot(verdict);
   return `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}${snapshotText ? `。${snapshotText}` : ''}`;
@@ -671,7 +671,7 @@ export function addSizingSnapshotLines(verdict: AddSizingVerdict): AddSizingSnap
           : conditionalPlan ? '触发价要挂在计划的价上，改了触发价就按新触发价重算' : '下单前该按新价重算');
       break;
     case 'inputs':
-      cause = `实际量在计算器的上限之内，差在计算器的输入与这里读到的不一致（计算器 S₁ ${px(snap.s1)}，校验 S₁ ${px(verdict.s1)}；或 G / 旧仓不同）`;
+      cause = `实际量在计算器的上限之内，差在计算器的输入与这里读到的不一致（计算器 K ${px(snap.s1)}，校验 K ${px(verdict.s1)}；或 G / 旧仓不同）`;
       break;
     case 'oversize':
       cause = `实际加仓比计算时的上限多 ${formatSignedPct(excess.planOvershootPct)}——超出来自仓位本身，不是滑点`;

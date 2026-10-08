@@ -51,8 +51,8 @@ function short(price: number, createdAt: number, cancelledAt: number | null, ove
  *   主力     94,300 USD @0.0336792  08-07 19:41 → 08-09 01:46
  *   镜像止盈 141,460 USD @0.0336792  08-08 00:36 落袋 +15,117.55
  *   加仓1    22,057,330 USD @0.0419705  08-08 12:02
- *   反向空单 0.0347260  12:01 挂 → 15:18 撤   ← 加仓那一刻的 S₁
- * 退回 S₁ 新腿要亏 380 万，浮盈垫 + 落袋一共不到 2 万。
+ *   反向空单 0.0347260  12:01 挂 → 15:18 撤   ← 加仓那一刻的 K
+ * 退回 K 新腿要亏 380 万，浮盈垫 + 落袋一共不到 2 万。
  */
 function tutusdt() {
   const legs = [
@@ -82,7 +82,7 @@ const mainLeg = (over: Partial<TradeJournal> = {}) => leg({
   id: 'main', leg_role: 'main_open', pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 10_000, ...over,
 });
 
-describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', () => {
+describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 K 的亏损', () => {
   it('【回归】TUTUSDT 加仓1 仓位远超两本账——判 fail，缺口三百多万', () => {
     const { legs, orders } = tutusdt();
     const verdicts = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: orders });
@@ -110,7 +110,7 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     expect(v.riskPerCoin).toBeCloseTo(0.0419705 - 0.034726, 8);
     expect(v.maxAllowedCoins).toBeCloseTo(expectedMaxCoins, 4);
     expect(v.maxAllowedNotional).toBeCloseTo(expectedMaxCoins * 0.0419705, 2);
-    // “正确加仓”的主单位是币；U 只是按 S₂ 乘回去的名义仓位，不能把两者相加。
+    // “正确加仓”的主单位是币；U 只是按 T 乘回去的名义仓位，不能把两者相加。
     expect(v.maxAllowedNotional).toBeCloseTo(v.maxAllowedCoins! * v.s2!, 8);
   });
 
@@ -132,7 +132,7 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
   });
 
   describe('落袋 G 能补上浮盈垫不够的部分', () => {
-    // 浮盈垫 = 10,000 × (1.1 − 1.0) = 1,000；新腿每币退回 S₁ 亏 0.2；已落袋 G = 500
+    // 浮盈垫 = 10,000 × (1.1 − 1.0) = 1,000；新腿每币退回 K 亏 0.2；已落袋 G = 500
     const t = T0 + 120 * MIN;
     const legsWith = (addCoins: number) => [
       mainLeg(),
@@ -175,14 +175,14 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     expect(v.maxAllowedNotional).toBe(0);
   });
 
-  it('第二次加仓：先前那笔加仓在新 S₁ 上是亏的，从浮盈垫里扣掉', () => {
+  it('第二次加仓：先前那笔加仓在新 K 上是亏的，从浮盈垫里扣掉', () => {
     const t1 = T0 + 60 * MIN;
     const t2 = T0 + 180 * MIN;
     const legs = [
       mainLeg(),
-      // 加仓1：2,000 币 @1.2，退回 S₁=1.1 亏 200 ≤ 1,000 → ok
+      // 加仓1：2,000 币 @1.2，退回 K=1.1 亏 200 ≤ 1,000 → ok
       leg({ id: 'add1', leg_role: 'main_add_1', pre_simulated_time: iso(t1), pre_entry_price: 1.2, pre_position_size: 2_400 }),
-      // 加仓2 @1.3，新 S₁=1.15：主力垫 1,500，加仓1 在 1.15 上亏 100 → 垫子 1,400；新腿亏 1,450
+      // 加仓2 @1.3，新 K=1.15：主力垫 1,500，加仓1 在 1.15 上亏 100 → 垫子 1,400；新腿亏 1,450
       leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(t2), pre_entry_price: 1.3, pre_position_size: (1_450 / 0.15) * 1.3 }),
     ];
     const orders = [
@@ -203,14 +203,14 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     expect(second.shortfall).toBeCloseTo(50, 6);
   });
 
-  describe('S₁ 的来源', () => {
+  describe('K 的来源', () => {
     const t = T0 + 60 * MIN;
     const legs = [
       mainLeg(),
       leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 1.3, pre_position_size: 1_300 }),
     ];
 
-    it('加仓后 2 分钟才补挂的对冲算 S₁；加仓前已经撤掉的委托不算', () => {
+    it('加仓后 2 分钟才补挂的对冲算 K；加仓前已经撤掉的委托不算', () => {
       const orders = [
         short(1.05, t - 120 * MIN, t - 60 * MIN),     // 早撤了
         short(1.1, t + 2 * MIN, null),                // 加仓后补挂
@@ -244,7 +244,7 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
       expect(v.shortfall).toBeNull();
     });
 
-    it('主空战役：反向委托列表只收空单，读不到 S₁ → unknown', () => {
+    it('主空战役：反向委托列表只收空单，读不到 K → unknown', () => {
       const shortLegs = [
         mainLeg({ direction: 'short' }),
         leg({ id: 'add', leg_role: 'main_add_1', direction: 'short', pre_simulated_time: iso(t), pre_entry_price: 0.7, pre_position_size: 700 }),
@@ -255,7 +255,7 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 S₁ 的亏损', ()
     });
   });
 
-  it('币本位：落袋 G 与新计算器一致，使用实际净 U，不按 S₁ 重估', () => {
+  it('币本位：落袋 G 与新计算器一致，使用实际净 U，不按 K 重估', () => {
     const t = T0 + 120 * MIN;
     const record = {
       id: 'mirror-rec', symbol: 'TUTUSD_PERP', side: 'LONG', type: 'MARKET', action: 'CLOSE',
@@ -521,7 +521,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
         pre_simulated_time: iso(T0), pre_entry_price: 1, pre_position_size: 5_000 }),
       addLeg(1_000, { trade_record_id: 'add-rec' }),
     ];
-    // S₁=0.98 低于原成本 1：旧仓亏 200 U；镜像已落袋 500 U；
+    // K=0.98 低于原成本 1：旧仓亏 200 U；镜像已落袋 500 U；
     // 加仓 1,000 币的新增风险 320 U，仍超出 20 U。收小至 900 币则合规。
     const stop = stopAt(0.98);
     const oversized = evaluateCampaignAddSizing({ legs, tradeRecords, reverseHedgeOrders: stop }).get('add')!;
@@ -640,7 +640,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     const legs = [
       mainLeg({ trade_record_id: 'P' }),
       leg({ id: 'mirror', leg_role: 'mirror_tp', trade_record_id: 'M', pre_simulated_time: iso(T0), pre_entry_price: 1.02, pre_position_size: 15_300 }),
-      // 17,000 币 @1.3，退回 S₁=1.1 亏 3,400
+      // 17,000 币 @1.3，退回 K=1.1 亏 3,400
       addLeg(17_000),
     ];
     const v = evaluateCampaignAddSizing({ legs, tradeRecords: [...tp, ...last], reverseHedgeOrders: stopAt(1.1) }).get('add')!;
@@ -691,7 +691,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(v.maxLoss).toBeCloseTo(1_000, 6);
     expect(v.status).toBe('ok');
     expect(v.shortfall).toBe(0);
-    // 对照：一币都不减，可用额就是浮盈垫 1,000——落袋只会让可用额更多（在 1.2 落袋比在 S₁ = 1.1 的浮盈值钱）
+    // 对照：一币都不减，可用额就是浮盈垫 1,000——落袋只会让可用额更多（在 1.2 落袋比在 K = 1.1 的浮盈值钱）
     const untouched = evaluateCampaignAddSizing({ legs: [mainLeg(), addLeg(5_000)], tradeRecords: [], reverseHedgeOrders: stopAt(1.1) }).get('add')!;
     expect(untouched.required).toBeCloseTo(1_000, 6);
     expect(v.required!).toBeGreaterThan(untouched.required!);
@@ -706,7 +706,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
         pre_position_size: 5_000, post_simulated_close_time: iso(T0 + 60 * MIN), post_realized_pnl: 500,
       }),
       leg({ id: 'reentry', leg_role: 'reentry_main', pre_simulated_time: iso(T0 + 240 * MIN), pre_entry_price: 1.2, pre_position_size: 10_000 }),
-      // 退回 S₁=1.25 亏 800
+      // 退回 K=1.25 亏 800
       leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(tAdd), pre_entry_price: 1.4, pre_position_size: (800 / 0.15) * 1.4 }),
     ];
     const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(1.25, tAdd - MIN, null)] }).get('add')!;
@@ -731,7 +731,7 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
         id: 'add1', leg_role: 'main_add_1', pre_simulated_time: iso(t1), pre_entry_price: 1.3, pre_position_size: 2_000 * 1.3,
         post_simulated_close_time: iso(T0 + 120 * MIN), post_realized_pnl: -200,
       }),
-      // 7,000 币 @1.3 退回 S₁=1.1 亏 1,400；浮盈垫 1,000 + 剩下的 G 300 = 1,300
+      // 7,000 币 @1.3 退回 K=1.1 亏 1,400；浮盈垫 1,000 + 剩下的 G 300 = 1,300
       leg({ id: 'add2', leg_role: 'main_add_2', pre_simulated_time: iso(t2), pre_entry_price: 1.3, pre_position_size: 7_000 * 1.3 }),
     ];
     const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(1.1, t1 - MIN, null)] }).get('add2')!;
@@ -820,9 +820,9 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
 
 /**
  * 计算器（detectBankedMirrorProfit + computePlanBCoverageAtS1）与 Legs（evaluateCampaignAddSizing）
- * 必须对同一笔加仓给出同一个 G、同一条 S₁、同一个上限——否则按计算器上限下的单会在 Legs 吃红叉，或反过来。
+ * 必须对同一笔加仓给出同一个 G、同一条 K、同一个上限——否则按计算器上限下的单会在 Legs 吃红叉，或反过来。
  */
-describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
+describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
   const recordOf = (over: Partial<TradeRecord> & { id: string }): TradeRecord => ({
     symbol: 'TUTUSDT', side: 'LONG', type: 'MARKET', action: 'CLOSE', settlementMode: 'usdt',
     entryPrice: 1, exitPrice: 1, quantity: 0, leverage: 10, pnl: 0, fee: 0, slippage: 0,
@@ -832,7 +832,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
 
   it('【回归】合并仓位的手动减仓按成交占比拆到每条腿：盈利的几片进 G、亏损的那片扣掉，计算器与 Legs 同一个数（V4）', () => {
     // 主力 10,000 @1.0 与镜像 15,000 @1.0 合并；止盈1 平 15,000 @1.2；加仓1 5,000 @1.3 合并进来；
-    // 手动减仓 20% @1.25 拆成主力 +200、镜像 +300、加仓1 −50。加仓2 @1.4，S₁ = 1.2。
+    // 手动减仓 20% @1.25 拆成主力 +200、镜像 +300、加仓1 −50。加仓2 @1.4，K = 1.2。
     const position = (units: { main: number; mirror: number; add?: number }): Position => {
       const fills = [
         { id: 'P', openTime: T0, entryPrice: 1, units: units.main },
@@ -874,7 +874,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
 
     const calc = detectBankedMirrorProfit('TUTUSDT', 'LONG', tradeRecords, T0);
     expect(calc.usd).toBeCloseTo(v.banked!, 6);
-    // 仍持有：主力 3,200 @1、镜像 4,800 @1、加仓1 4,000 @1.3 → S̄ = 1.1
+    // 仍持有：主力 3,200 @1、镜像 4,800 @1、加仓1 4,000 @1.3 → S₁ = 1.1
     const plan = computePlanBCoverageAtS1({ side: 'LONG', settlement: 'usdt', sBar: 1.1, s1: 1.2, s2: 1.4, x1: 12_000, g: calc.usd })!;
     expect(plan.addCoinsMax).toBeCloseTo(23_250, 6);
     expect(v.maxAllowedCoins).toBeCloseTo(plan.addCoinsMax, 6);
@@ -918,7 +918,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
     },
   );
 
-  it('【回归】多张止损同时挂着：Legs 的 S₁ 与计算器 pickBookLine 选同一张（V7）', () => {
+  it('【回归】多张止损同时挂着：Legs 的 K 与计算器 pickBookLine 选同一张（V7）', () => {
     const t = T0 + 60 * MIN;
     const legs = [
       mainLeg(),
@@ -932,11 +932,11 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
   });
 
   /**
-   * COMMONUSDT 那一场：两边同一个 G、同一条 S₁、同一个 X₁，用户严格按计算器上限下单，Legs 仍判超限——
-   * 计算器读的 S₂ 是下单前的基准价，市价单在引擎里按 calcSlippage 成交，Legs 读的是成交价。
+   * COMMONUSDT 那一场：两边同一个 G、同一条 K、同一个 X₁，用户严格按计算器上限下单，Legs 仍判超限——
+   * 计算器读的 T 是下单前的基准价，市价单在引擎里按 calcSlippage 成交，Legs 读的是成交价。
    * 此组保留旧版计算器的历史滑点回归；快照腿直接提供净 U，校验不再按币数重估落袋。
    */
-  describe('【复核】S₂：计算器按下单前基准价、Legs 按成交价——滑点被 S₁/(S₂−S₁) 放大', () => {
+  describe('【复核】T：计算器按下单前基准价、Legs 按成交价——滑点被 K/(T−K) 放大', () => {
     const FACE = 10;
     const S_BAR = 0.006974;
     const G_COIN = 55_994_538.5;
@@ -989,7 +989,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       }
     });
 
-    it('【回归】按基准价（不含滑点）取满计算器上限 → 引擎按 calcSlippage 成交 → Legs 判超限，幅度 = (1 − S₁/成交价)/(1 − S₁/基准价) − 1 ≈ 滑点 × S₁/(S₂−S₁)', () => {
+    it('【回归】按基准价（不含滑点）取满计算器上限 → 引擎按 calcSlippage 成交 → Legs 判超限，幅度 = (1 − K/成交价)/(1 − K/基准价) − 1 ≈ 滑点 × K/(T−K)', () => {
       for (const [which, add] of [[1, ADD1], [2, ADD2]] as const) {
         const ref = refOf(add);
         const calc = calculator(which, ref);
@@ -1003,10 +1003,10 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
         const v = campaign(which, fill, notional);
         expect(v.status).toBe('fail');
         const overshoot = v.x2Coins! / v.maxAllowedCoins! - 1;
-        // 解析式：X_实际/X_上限 = (1 − S₁/成交价) ÷ (1 − S₁/基准价)；整张取整让名义差不到 10 USD（< 1e-6）
+        // 解析式：X_实际/X_上限 = (1 − K/成交价) ÷ (1 − K/基准价)；整张取整让名义差不到 10 USD（< 1e-6）
         const analytic = (1 - calc.s1 / fill) / (1 - calc.s1 / ref) - 1;
         expect(Math.abs(overshoot - analytic)).toBeLessThan(2e-6);
-        // 一阶：滑点 × S₁/(S₂−S₁)，放大 11–13 倍
+        // 一阶：滑点 × K/(T−K)，放大 11–13 倍
         const slip = fill / ref - 1;
         const amplification = calc.s1 / (ref - calc.s1);
         expect(amplification).toBeGreaterThan(11);
@@ -1031,7 +1031,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
         expect(v.shortfall).toBe(0);
         expect(Math.abs(v.maxAllowedCoins! / plan.addCoinsMax - 1)).toBeLessThan(1e-4);
         expect(v.x2Coins!).toBeLessThanOrEqual(v.maxAllowedCoins!);
-        // 成交价与预计的 S₂′ 只差整张取整那一点名义带来的滑点差
+        // 成交价与预计的 T′ 只差整张取整那一点名义带来的滑点差
         expect(Math.abs(fill / plan.s2Fill - 1)).toBeLessThan(1e-6);
       }
     });
@@ -1170,7 +1170,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       expect(v.excess?.cause).toBe('slippage');
       expect(v.excess?.unexpectedSlippagePct).toBeCloseTo((ADD1.fill / plan.s2Fill - 1) * 100, 9);
       expect(addSizingSnapshotLines(v)!.slippage).toBe('超出部分全部来自成交滑点 +0.0020%（比计划预计的成交价 0.00771215 更差）');
-      // 基准价没动、成交正是预计的 S₂′：合规，快照照给，不说原因
+      // 基准价没动、成交正是预计的 T′：合规，快照照给，不说原因
       const ok = withSnapshot(643_648, { kind: 'market' }).verdict;
       expect(ok.status).toBe('ok');
       expect(ok.snapshot).not.toBeNull();
@@ -1199,7 +1199,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       expect(withSnapshot(Math.round(653_602 * 1.05)).verdict.excess?.cause).toBe('oversize');
     });
 
-    it('【回归 · 复审】限价计划按未取整的 S₂ 0.0077018 定量，挂单价却被四舍五入到 0.007702 原价成交：不写「滑点 +0.00%」，写下单价偏离计划挂单价；向有利侧取整则合规', () => {
+    it('【回归 · 复审】限价计划按未取整的 T 0.0077018 定量，挂单价却被四舍五入到 0.007702 原价成交：不写「滑点 +0.00%」，写下单价偏离计划挂单价；向有利侧取整则合规', () => {
       const s2Plan = 0.0077018;
       const planned = withSnapshot(0, { s2Plan }).plan;
       expect(planned.contracts).toBe(653_295);
@@ -1277,7 +1277,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       expect(describeAddSizingVerdict(moved)).not.toContain('计算后价格变动');
     });
 
-    it('量在计算器的上限之内、按这里读到的 S₁ 却超了：写输入不一致，两个 S₁ 都摆出来', () => {
+    it('量在计算器的上限之内、按这里读到的 K 却超了：写输入不一致，两个 K 都摆出来', () => {
       const refLimit = calculator(1, refOf(ADD1)).plan.addCoinsMax;
       const contracts = Math.floor((refLimit * 1.05 * refOf(ADD1)) / FACE);
       const { verdict: v } = withSnapshot(contracts, {
@@ -1285,7 +1285,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
       });
       expect(v.status).toBe('fail');
       expect(v.excess?.cause).toBe('inputs');
-      expect(addSizingSnapshotLines(v)!.cause).toBe('实际量在计算器的上限之内，差在计算器的输入与这里读到的不一致（计算器 S₁ 0.00710000，校验 S₁ 0.00706900；或 G / 旧仓不同）');
+      expect(addSizingSnapshotLines(v)!.cause).toBe('实际量在计算器的上限之内，差在计算器的输入与这里读到的不一致（计算器 K 0.00710000，校验 K 0.00706900；或 G / 旧仓不同）');
     });
 
     it('方向不符的快照不认；没有快照的记录什么也不多说（腿上的 pre_entry_price 不当下单前的价用）', () => {
@@ -1337,7 +1337,7 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 S₁', () => {
 describe('【复核】Legs 校验也走两条路：垫子式与成本线式对不上就不给对错号', () => {
   afterEach(() => { costLineSeam.offset = 0; });
 
-  // 浮盈垫 1,000 + 落袋 500；新腿每币退回 S₁ 亏 0.2
+  // 浮盈垫 1,000 + 落袋 500；新腿每币退回 K 亏 0.2
   const t = T0 + 120 * MIN;
   const legsWith = (addCoins: number) => [
     mainLeg(),
@@ -1370,7 +1370,7 @@ describe('【复核】Legs 校验也走两条路：垫子式与成本线式对�
     expect(Math.abs(v.costLineShortfall! - v.shortfall!)).toBeLessThanOrEqual(1e-6 * v.shortfall!);
   });
 
-  it('旧仓在加仓前已全部平掉：这是再入场，X₁ = 0、上一轮的 G 不跨轮；成本线就是 S₂，两条路给同一个缺口', () => {
+  it('旧仓在加仓前已全部平掉：这是再入场，X₁ = 0、上一轮的 G 不跨轮；成本线就是 T，两条路给同一个缺口', () => {
     const legs = [
       // 主力在止盈之后以零盈亏整腿平掉：加仓那一刻没有任何旧仓还开着
       mainLeg({ post_simulated_close_time: iso(T0 + 90 * MIN), post_realized_pnl: 0 }),
@@ -1392,7 +1392,7 @@ describe('【复核】Legs 校验也走两条路：垫子式与成本线式对�
   });
 
   it('【回归】旧仓深度浮亏被 G 补上（|Y₁| ≫ 可用垫）：缺两分钱 Legs 判 ✗，计算器的交叉复核用同一条截断容差也判非法', () => {
-    // 主力 100,000 币 @1.0，S₁ = 0.5 → Y₁ = −50,000；落袋 50,100 → 可用只有 100；加 500.1 币 @0.7 退回 S₁ 亏 100.02
+    // 主力 100,000 币 @1.0，K = 0.5 → Y₁ = −50,000；落袋 50,100 → 可用只有 100；加 500.1 币 @0.7 退回 K 亏 100.02
     const legs = [
       mainLeg({ pre_position_size: 100_000 }),
       leg({

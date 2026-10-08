@@ -373,10 +373,10 @@ tr.page-hidden{display:none}
 <section aria-labelledby="inputs-title" class="card pad input-card">
 <div class="card-head"><h2 id="inputs-title">输入价格与仓位</h2><span class="micro">高价在上，低价在下</span></div>
 <form id="single-form" novalidate="">
-<div class="field compact-field"><div class="labelrow"><label for="current"><span class="symbol">T</span>现价 / 本次加仓价</label></div><div class="input-wrap"><input autocomplete="off" id="current" inputmode="decimal" name="current" placeholder="输入本次加仓价格" spellcheck="false" type="text" value="150"/><span class="unit">价格</span></div></div>
-<div class="field compact-field"><div class="labelrow"><label for="support"><span class="symbol">K</span>新的支撑位 / 止损线</label></div><div class="input-wrap"><input autocomplete="off" id="support" inputmode="decimal" name="support" placeholder="输入新的支撑价格" spellcheck="false" type="text" value="120"/><span class="unit">价格</span></div></div>
-<div class="field compact-field"><div class="labelrow"><span class="symbol">S</span><button class="text-button" id="cost-latest" type="button" aria-pressed="true">最新成本线</button><span> / </span><button class="text-button" id="cost-breakeven" type="button" aria-pressed="false">保本线</button></div><div class="input-wrap"><input id="cost" name="cost" type="hidden" value="100"/><input autocomplete="off" aria-label="最新成本线" id="cost-view" inputmode="decimal" placeholder="输入最新开仓均价" spellcheck="false" type="text" value="100"/><span class="unit">价格</span></div><div class="helper">最新的开仓价 = 最新成本线（当前剩余仓位的开仓均价，不扣落袋利润）。保本线扣除净落袋利润；主多有镜像止盈净利润时，保本线低于最新成本线，主空则高于。切换只影响显示，不重复使用利润。</div></div>
-<div class="field compact-field position-field"><div class="labelrow"><label for="position"><span class="symbol" id="position-symbol">Q</span><span id="position-label">原持币数量</span></label></div><div class="input-wrap"><input autocomplete="off" id="position" inputmode="decimal" name="position" placeholder="填镜像止盈后剩余的币数" spellcheck="false" type="text" value="1"/><span class="unit" id="position-unit">币</span></div><div class="position-mode-row"><span>仓位输入口径</span><select aria-label="仓位输入口径" class="mode-select" id="position-mode"><option selected="selected" value="quantity">按持币数量输入</option></select></div><div class="helper" id="position-help">填写当前剩余币数；S 是策略成本线，真实持仓均价单独承接。</div><div class="helper" id="position-conversion">原持币数量：1</div></div>
+<div class="field compact-field"><div class="labelrow"><label for="current"><span class="symbol">T</span>加仓线 / 本次加仓价</label></div><div class="input-wrap"><input autocomplete="off" id="current" inputmode="decimal" name="current" placeholder="输入本次加仓价格" spellcheck="false" type="text" value="150"/><span class="unit">价格</span></div></div>
+<div class="field compact-field"><div class="labelrow"><label for="support"><span class="symbol">K</span>新支撑线 / 止损线</label></div><div class="input-wrap"><input autocomplete="off" id="support" inputmode="decimal" name="support" placeholder="输入新的支撑价格" spellcheck="false" type="text" value="120"/><span class="unit">价格</span></div></div>
+<div class="field compact-field"><div class="labelrow"><span class="symbol">S₁</span><button class="text-button" id="cost-latest" type="button" aria-pressed="true">最新成本线</button><span> / </span><button class="text-button" id="cost-breakeven" type="button" aria-pressed="false">保本线</button></div><div class="input-wrap"><input id="cost" name="cost" type="hidden" value="100"/><input autocomplete="off" aria-label="最新成本线" id="cost-view" inputmode="decimal" placeholder="输入最新开仓均价" spellcheck="false" type="text" value="100"/><span class="unit">价格</span></div><div class="helper">最新的开仓价 = 最新成本线（当前剩余仓位的开仓均价，不扣落袋利润）。保本线扣除净落袋利润；主多有镜像止盈净利润时，保本线低于最新成本线，主空则高于。切换只影响显示，不重复使用利润。</div></div>
+<div class="field compact-field position-field"><div class="labelrow"><label for="position"><span class="symbol" id="position-symbol">Q</span><span id="position-label">原持币数量</span></label></div><div class="input-wrap"><input autocomplete="off" id="position" inputmode="decimal" name="position" placeholder="填镜像止盈后剩余的币数" spellcheck="false" type="text" value="1"/><span class="unit" id="position-unit">币</span></div><div class="position-mode-row"><span>仓位输入口径</span><select aria-label="仓位输入口径" class="mode-select" id="position-mode"><option selected="selected" value="quantity">按持币数量输入</option></select></div><div class="helper" id="position-help">填写当前剩余币数；S₁ 是最新成本线（开仓均价），S₀ 是扣除净落袋利润后的保本线。</div><div class="helper" id="position-conversion">原持币数量：1</div></div>
 <div class="field mirror-field compact-field"><div class="labelrow"><label for="mirror"><span class="symbol">P</span><span>镜像止盈<span class="label-secondary">已落袋利润</span></span></label></div><div class="input-wrap"><input autocomplete="off" id="mirror" inputmode="decimal" name="mirror" placeholder="只填净利润，不含卖出本金" spellcheck="false" type="text" value="0"/><span class="unit" id="mirror-unit">U</span></div><div class="helper" id="mirror-help">只填尚未被未平仓风险占用的可用已落袋利润；本轮承接后即归入已占用。</div></div><div class="compact-settings"><div class="advanced-body"><label><span class="small-label">杠杆倍数</span><input aria-label="杠杆倍数" class="small-input" id="leverage" inputmode="decimal" type="text" value="10"/></label><label><span class="small-label">金额显示小数位</span><select aria-label="金额显示小数位" class="small-input" id="decimals"><option value="2">2 位</option><option value="4">4 位</option><option value="6">6 位</option><option value="8">8 位</option></select></label><p class="advanced-note">杠杆只估算保证金，不放大可加币数；内部计算保留完整精度。</p></div></div>
 <div class="actions"><button class="btn primary" type="submit">计算加仓</button><button class="btn" id="reset-single" type="button">恢复示例</button><button class="btn subtle" id="clear-single" type="button">清空</button><label class="auto-row"><input checked="" id="auto-calc" type="checkbox"/>修改后自动计算</label></div>
 
@@ -427,6 +427,7 @@ tr.page-hidden{display:none}
    $('cost-view').value=Number.isFinite(value)&&value>0?String(value):'';
    $('cost-view').readOnly=costViewMode==='breakeven';
    $('cost-view').setAttribute('aria-label',costViewMode==='latest'?'最新成本线':'保本线');
+   $('cost-latest').parentElement.querySelector('.symbol').textContent=costViewMode==='latest'?'S₁':'S₀';
    $('cost-latest').setAttribute('aria-pressed',String(costViewMode==='latest'));
    $('cost-breakeven').setAttribute('aria-pressed',String(costViewMode==='breakeven'));
  }
@@ -496,7 +497,7 @@ tr.page-hidden{display:none}
    $('position-symbol').textContent='Q';$('position-unit').textContent='币';
    $('position-mode').querySelector('[value="quantity"]').textContent='按持币数量输入';
    $('position').placeholder='填镜像止盈后剩余的币数';
-   $('position-help').textContent='填写当前剩余币数；S 是策略成本线，真实持仓均价单独承接。';
+   $('position-help').textContent='填写当前剩余币数；S₁ 是最新成本线（开仓均价），S₀ 是扣除净落袋利润后的保本线。';
    $('mirror-unit').textContent='U';
    $('mirror-help').textContent='只填尚未被未平仓风险占用的可用已落袋利润；本轮承接后即归入已占用。';
    $('model-note').textContent='仓位按币数；利润按 U 计。';
@@ -509,9 +510,9 @@ tr.page-hidden{display:none}
    $('seq-mirror-label').textContent='初始可用镜像利润（U）';
    $('seq-model-tag').textContent='按币数计算';
    $('seq-quantity-note').textContent='包含原持仓及全部新增币数';
-   $('formula-main').textContent=side()==='SHORT'?'总可加币数 X = [Q × (S − K) + P] ÷ (K − T)':'总可加币数 X = [Q × (K − S) + P] ÷ (T − K)';
+   $('formula-main').textContent=side()==='SHORT'?'总可加币数 X = max(0, Q × (S₀ − K)) ÷ (K − T)':'总可加币数 X = max(0, Q × (K − S₀)) ÷ (T − K)';
    $('formula-condition').textContent='Q 为当前剩余币数，P 为尚未被未平仓风险占用的可用镜像利润。'+(side()==='SHORT'?'K ＞ T ＞ 0':'T ＞ K ＞ 0')+'；若原仓在 K 亏损，先由 P 补足。';
-   $('formula-explanation').textContent=(side()==='SHORT'?'当 K ≤ S：基础加仓 = Q(S−K)/(K−T)；镜像加仓 = P/(K−T)。':'当 K ≥ S：基础加仓 = Q(K−S)/(T−K)；镜像加仓 = P/(T−K)。')+'真实均价按旧真实均价和新加仓价加权；承接的策略成本线为 K。已用于本轮的 P 随承接归入占用，不在下一轮再次使用。';
+   $('formula-explanation').textContent='T 为加仓线，K 为新支撑线；S₁ 为最新成本线（最新开仓均价），S₀ 为保本线。S₀ = S₁ − 方向 × 净落袋利润 / Q，主多方向 +1，主空 −1。风险预算 = Q × 方向 × (K − S₀)，每币风险 = 方向 × (T − K)。风险预算为负时不允许加仓；为零时额度为零。保本线已扣利润，不再额外加一次 P。内部承接的占用利润与本轮可用 P 合计只计入一次；加仓后 S₁ 按真实加权均价更新，风险预算承接线为 K，不把 K 当开仓均价。';
    $('formula-model-note').textContent='只按价格距离 × 币数计算；U 只作损益单位。';
  }
  function updateConversion(){
@@ -545,7 +546,7 @@ tr.page-hidden{display:none}
      const lines=[`原仓在 K 的安全垫 = ${exact(r.Q)} × ${exact(d*(K-S))} = ${exact(r.buffer)} ${u}`,`每枚新增币的预期亏损 = ${exact(d*(T-K))} ${u}`,`可用风险垫 = 原仓安全垫 ${exact(r.buffer)} + 本轮可用已落袋利润 ${exact(r.P)} = ${exact(r.budget)} ${u}`];
      if(r.feasible){lines.push(`总可加币数 X = ${exact(r.budget)} ÷ ${exact(r.lossPerQty)} = ${exact(r.addQty)}`,`拆分：浮盈支持 ${exact(r.baseQty)} + 镜像支持 ${exact(r.mirrorQty)} = ${exact(r.addQty)} 币`);}
      else lines.push(`原仓保本资金尚缺 ${exact(r.shortfall)} ${u}；不增加仓位，整体也未达到保本条件。`);
-     lines.push(`最新的开仓价 = 最新成本线 = ${exact(r.realAverage)}（不扣落袋利润）`,`本轮保本线 = 风险预算承接线 S − 方向 × 可用落袋利润 / 剩余币数 = ${exact(S-d*r.P/r.Q)}；S 已包含此前占用的利润，不再重复计入 P`, `新增名义金额（仅展示）= ${exact(r.addQty)} × ${exact(T)} = ${exact(r.X)}`,`加仓后最新成本线（实际开仓均价）= (${exact(r.Q)} × ${exact(r.realAverage)} + ${exact(r.addQty)} × ${exact(T)}) ÷ (${exact(r.Q)} + ${exact(r.addQty)}) = ${r.newQ>0?exact(r.newCost):'无持仓'}`,`下一轮风险预算承接线 = ${exact(r.breakeven)}（不是最新开仓均价）`,`按 K 退出的整体盈亏 = ${exact(r.P)} + ${exact(r.buffer)} − ${exact(r.newLoss)} = ${exact(r.netAtK)} ${u}`);
+     lines.push(`最新的开仓价 = 最新成本线 S₁ = ${exact(r.realAverage)}（不扣落袋利润）`,`本轮保本线 S₀ = 风险预算承接线 − 方向 × 可用落袋利润 / 剩余币数 = ${exact(S-d*r.P/r.Q)}；承接线已包含此前占用的利润，不再重复计入 P`, `新增名义金额（仅展示）= ${exact(r.addQty)} × ${exact(T)} = ${exact(r.X)}`,`加仓后最新成本线（实际开仓均价）= (${exact(r.Q)} × ${exact(r.realAverage)} + ${exact(r.addQty)} × ${exact(T)}) ÷ (${exact(r.Q)} + ${exact(r.addQty)}) = ${r.newQ>0?exact(r.newCost):'无持仓'}`,`下一轮风险预算承接线 = ${exact(r.breakeven)}（不是最新开仓均价）`,`按 K 退出的整体盈亏 = ${exact(r.P)} + ${exact(r.buffer)} − ${exact(r.newLoss)} = ${exact(r.netAtK)} ${u}`);
      $('substitution').replaceChildren(...lines.map(text=>{const p=document.createElement('p');p.className='mathline';p.textContent=text;return p;}));
      const notices=[];
      if(!r.feasible)display('single-error','镜像止盈利润不足以覆盖原仓到新支撑位的亏损，不允许新增仓位；尚缺 '+fmt(r.shortfall,pk)+' '+u+'。');
@@ -606,7 +607,7 @@ tr.page-hidden{display:none}
    try{if(!navigator.clipboard?.writeText)throw new Error('fallback');await navigator.clipboard.writeText(text);toast('已复制到剪贴板');}
    catch(_){const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.append(ta);ta.select();let ok=false;try{ok=document.execCommand('copy');}catch(_){}ta.remove();if(ok)toast('已复制到剪贴板');else window.prompt('浏览器限制了自动复制，请手动复制以下内容：',text);}
  }
- function singleText(r){return[`加仓计算结果（${r.side==='SHORT'?'主空':'主多'}；不另扣未来费用）`,'模型：价格距离 × 币数',`现价 T：${exact(r.T)}`,`支撑位 K：${exact(r.K)}`,`风险预算承接线 S：${exact(r.S)}`,`原仓真实均价：${exact(r.realAverage)}`,`剩余币数 Q：${exact(r.Q)}`,`本轮可用镜像利润 P：${exact(r.P)} U`,`基础可加仓币数：${exact(r.baseQty)}`,`镜像利润支持的额外可加仓币数：${exact(r.mirrorQty)}`,`总可加币数 X：${exact(r.addQty)}`,`对应加仓金额（仅展示）：${exact(r.X)}`,`原仓在支撑位安全垫：${exact(r.buffer)} U`,`新增仓位在支撑位预期亏损：${exact(r.newLoss)} U`,`加仓后实际均价：${exact(r.newCost)}`,`下一轮风险预算承接线：${exact(r.breakeven)}`,`加仓后总币数：${exact(r.newQ)}`,`加仓后名义总额：${exact(r.newM)}`,`按支撑位退出的整体净盈亏：${exact(r.netAtK)} U`,r.feasible?'支撑价成交、不另扣未来费用的理论保本上限。':'原仓仍有保本缺口，不能按保本条件加仓。','已落袋利润只计入一次；不能同时扣减均价并再次加入 P。'].join('\n');}
+ function singleText(r){return[`加仓计算结果（${r.side==='SHORT'?'主空':'主多'}；不另扣未来费用）`,'模型：价格距离 × 币数',`现价 T：${exact(r.T)}`,`支撑位 K：${exact(r.K)}`,`风险预算承接线：${exact(r.S)}`,`原仓真实均价：${exact(r.realAverage)}`,`剩余币数 Q：${exact(r.Q)}`,`本轮可用镜像利润 P：${exact(r.P)} U`,`基础可加仓币数：${exact(r.baseQty)}`,`镜像利润支持的额外可加仓币数：${exact(r.mirrorQty)}`,`总可加币数 X：${exact(r.addQty)}`,`对应加仓金额（仅展示）：${exact(r.X)}`,`原仓在支撑位安全垫：${exact(r.buffer)} U`,`新增仓位在支撑位预期亏损：${exact(r.newLoss)} U`,`加仓后实际均价：${exact(r.newCost)}`,`下一轮风险预算承接线：${exact(r.breakeven)}`,`加仓后总币数：${exact(r.newQ)}`,`加仓后名义总额：${exact(r.newM)}`,`按支撑位退出的整体净盈亏：${exact(r.netAtK)} U`,r.feasible?'支撑价成交、不另扣未来费用的理论保本上限。':'原仓仍有保本缺口，不能按保本条件加仓。','已落袋利润只计入一次；不能同时扣减均价并再次加入 P。'].join('\n');}
  $('single-form').addEventListener('submit',e=>{e.preventDefault();computeSingle();save();});
  for(const [id,mode] of [['cost-latest','latest'],['cost-breakeven','breakeven']])$(id).addEventListener('click',()=>{costViewMode=mode;updateCostView();});
  $('cost-view').addEventListener('input',()=>{

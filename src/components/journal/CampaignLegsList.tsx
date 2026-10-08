@@ -453,10 +453,10 @@ function PositionShareSortHeader({
 }
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
-const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(S₁ − S̄) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(S₂ − S₁) 即为合规（主空符号翻转）。'
+const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(K − S₁) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(T − K) 即为合规（主空符号翻转）。'
   + '止损线不必越过旧仓成本线：G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险；不是只要有落袋收益就自动合规。'
   + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前实际已实现的 USDT 净额（已实现的盈利都算——止盈委托触发与手动减仓一样，含镜像止盈；已实现亏损含强平一律扣掉，可为负）。币本位同样取成交时的已实现金额，不按止损线重估。'
-  + 'S₁ 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；新增风险不另计未来手续费，与加仓计算器同一口径。';
+  + 'K 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；新增风险不另计未来手续费，与加仓计算器同一口径。';
 
 function signedUsdt(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
@@ -485,15 +485,17 @@ function AddSizingDetailDialog({
     && verdict.s1 != null && verdict.cushion != null
     ? verdict.s1 - verdict.cushion / (verdict.x1Coins * d)
     : null;
-  const lossFormula = leg.direction === 'short' ? 'S₁ − S₂' : 'S₂ − S₁';
+  const lossFormula = leg.direction === 'short' ? 'K − T' : 'T − K';
   const lossPriceTerms = leg.direction === 'short'
     ? `${fmtPrice(verdict.s1)} − ${fmtPrice(verdict.s2)}`
     : `${fmtPrice(verdict.s2)} − ${fmtPrice(verdict.s1)}`;
-  const cushionFormula = leg.direction === 'short' ? 'X₁ × (S̄ − S₁)' : 'X₁ × (S₁ − S̄)';
+  const cushionFormula = leg.direction === 'short' ? 'X₁ × (S₁ − K)' : 'X₁ × (K − S₁)';
   const cushionPriceTerms = leg.direction === 'short'
     ? `${fmtPrice(averageEntry)} − ${fmtPrice(verdict.s1)}`
     : `${fmtPrice(verdict.s1)} − ${fmtPrice(averageEntry)}`;
   const snapshotLines = addSizingSnapshotLines(verdict);
+  const breakevenLine = averageEntry != null && verdict.x1Coins != null && verdict.x1Coins > 0 && verdict.banked != null
+    ? averageEntry - d * verdict.banked / verdict.x1Coins : null;
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
@@ -501,9 +503,10 @@ function AddSizingDetailDialog({
         <DialogHeader>
           <DialogTitle>加仓{addOrdinal} · Plan B 仓位校验</DialogTitle>
           <DialogDescription>
-            “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 S₂ 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
+            “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 T 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
             止损线不必越过旧仓成本线：已落袋 G 先覆盖旧仓在止损线的亏损，余额才可覆盖新增风险。
             G 取加仓前实际已实现的 USDT 净额，币本位也不按止损线重估。
+            T 为加仓线（实际成交价），K 为新支撑线；S₁ 为当前旧仓成本线（最新开仓均价），S₀ 为扣除净落袋利润后的保本线。
           </DialogDescription>
         </DialogHeader>
 
@@ -525,7 +528,7 @@ function AddSizingDetailDialog({
             判定仍按成交价；这里只解释红叉从哪来——真是滑点才点名滑点，价格变了、量超了各说各的。 */}
         {snapshotLines && (
           <div data-testid="add-sizing-snapshot-line" className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
-            <div className="text-muted-foreground">加仓计算器当时的计划{verdict.snapshot?.orderKind === 'limit' ? '（限价 @S₂）' : verdict.snapshot?.orderKind === 'conditional' ? '（条件委托 @S₂ · 触发后市价，含滑点）' : '（市价 · 含滑点）'}</div>
+            <div className="text-muted-foreground">加仓计算器当时的计划{verdict.snapshot?.orderKind === 'limit' ? '（限价 @T）' : verdict.snapshot?.orderKind === 'conditional' ? '（条件委托 @T · 触发后市价，含滑点）' : '（市价 · 含滑点）'}</div>
             <div className="font-mono tabular-nums">{snapshotLines.calc}；</div>
             {snapshotLines.order && <div data-testid="add-sizing-order-line" className="font-mono tabular-nums">{snapshotLines.order}；</div>}
             <div className="font-mono tabular-nums">{snapshotLines.actual}。</div>
@@ -540,6 +543,10 @@ function AddSizingDetailDialog({
 
         <div className="space-y-2 text-xs">
           <div className="font-medium text-foreground">计算过程</div>
+          <div className="rounded bg-muted/35 px-3 py-2 font-mono tabular-nums" data-testid="add-sizing-symbol-lines">
+            S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − 方向 × G / X₁ = {fmtPrice(breakevenLine)}。
+            主多方向为 +1，主空为 −1；主多有净利润落袋时 S₀ &lt; S₁，主空相反。无旧仓时 S₀ 不适用。
+          </div>
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
             <span className="text-muted-foreground">① 旧仓浮盈垫 Y₁</span>
             <span className="col-span-2 text-right font-mono tabular-nums">
@@ -571,7 +578,7 @@ function AddSizingDetailDialog({
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
             <span className="text-muted-foreground">⑥ 折算 U 仓位</span>
             <span className="col-span-2 text-right font-mono tabular-nums">
-              {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} × S₂ {fmtPrice(verdict.s2)} = {formatAddSizingNotional(verdict.maxAllowedNotional)} U
+              {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} × T {fmtPrice(verdict.s2)} = {formatAddSizingNotional(verdict.maxAllowedNotional)} U
             </span>
           </div>
         </div>
@@ -759,7 +766,7 @@ export function CampaignLegsList({
   // 合计行「占比」只在列出了本列那一侧的 Σ 时写 100.0%；Σ 固定先多后空，排在它之前的每一组都要垫一组隐形占位才同行。
   const shareTotalsAt = positionShares.sides.findIndex(totals => totals.side === shareSide);
 
-  // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 S₁ 的亏损。与导出 PNG 同一个函数、同一份输入。
+  // 加仓校验：浮盈垫 + 已落袋能否抹平新加仓退回 K 的亏损。与导出 PNG 同一个函数、同一份输入。
   const addSizingMap = useMemo(
     () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
     [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],

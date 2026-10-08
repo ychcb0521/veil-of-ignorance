@@ -19,10 +19,13 @@ describe('embedded add calculator source of truth', () => {
     const field = (id: string) => win.document.getElementById(id) as HTMLInputElement;
     win.AddPositionMath.setSeed({ currentPrice: 150, support: 120, strategyCost: 100, realAverage: 110, coins: 2, mirrorProfitAvailable: 30, side: 'LONG' });
     expect(field('cost-view').value).toBe('110');
+    expect(field('formula-main').textContent).toContain('Q × (K − S₀)');
+    expect(field('formula-explanation').textContent).toContain('保本线已扣利润，不再额外加一次 P');
     const quantity = field('r-add').textContent;
     field('cost-breakeven').click();
     expect(field('cost-view').value).toBe('85');
     expect(field('cost-view').readOnly).toBe(true);
+    expect(field('cost-breakeven').parentElement!.textContent).toContain('S₀');
     expect(field('cost').value).toBe('100');
     expect(field('r-add').textContent).toBe(quantity);
     field('cost-latest').click();
