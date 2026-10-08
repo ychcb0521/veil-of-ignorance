@@ -4,7 +4,7 @@
  * 规则与最新加仓计算器（addPositionCoverage.ts）共享覆盖预算：
  *   Y₁        加仓那一刻仍持有的旧仓，退回 K 时的净浮盈（逐腿按剩余币量计算，可为负）
  *   G         本轮持仓加仓之前已经落袋的净已实现盈亏
- *   加仓合规 ⇔ Y₁ + G ≥ X₂ (T − K)（主多；主空符号翻转）
+ *   加仓合规 ⇔ Y₁ + G ≥ Q₂实际 (T − K)（主多；主空符号翻转）
  * 即「价格退回 K 时，旧仓浮盈垫 + 已落袋的净盈亏足以抹平新加仓最大预期亏损」。
  * K 不必越过旧仓成本线：G 先补旧仓亏损，余额才可承担新加仓风险。
  *
@@ -32,7 +32,7 @@
  * 所以：加仓时刻 t 持有的币量 = 开仓币量 − Σ(t 之前平掉的刀)，落袋 = Σ(t 之前那几刀的盈亏)。
  *
  * **同一条判据走两条路再对账。** 上面的垫子式之外，再按加仓后综合成本线算一遍：
- * 成本线越过 K 的那一段折成钱、减掉 G 就是缺口——展开即 X₂·险 − Y₁ − G，与垫子式恒等。
+ * 成本线越过 K 的那一段折成钱、减掉 G 就是缺口——展开即 Q₂实际·险 − Y₁ − G，与垫子式恒等。
  * 成本线由计算器那边的 evaluatePostAddCostLine 算，与这里的逐刀账本是两套代码；
  * 两条路对不上（某个数错了单位 / 符号，或哪里改坏了）就既不给 ✓ 也不给 ✗，标成 unknown 把两个数都摆出来。
  *
@@ -76,7 +76,7 @@ export type AddSizingUnknownReason =
   | 'no_direction'          // 腿没有多空方向
   | 'no_open_time'          // 加仓开仓时刻缺失
   | 'no_entry_price'        // 加仓价 T 缺失或非正
-  | 'no_position_size'      // 加仓名义缺失或非正，推不出 X₂
+  | 'no_position_size'      // 加仓名义缺失或非正，推不出 Q₂实际
   | 'no_stop_line'          // 加仓那一刻没有挂在亏损侧的反向委托，K 无从读起
   | 'old_leg_incomplete'    // 旧仓或落袋账本缺价格 / 名义 / 时刻 / 已实现盈亏
   | 'non_finite'            // 算出来的数不是有限数
@@ -89,9 +89,9 @@ export interface AddSizingVerdict {
   s1: number | null;
   /** T 加仓价 */
   s2: number | null;
-  /** X₁ 加仓那一刻仍持有的同向旧仓币量（含更早的加仓；已部分平掉的只算剩下的） */
+  /** Q₁ 加仓那一刻仍持有的同向旧仓币量（含更早的加仓；已部分平掉的只算剩下的） */
   x1Coins: number | null;
-  /** X₂ 本次加仓币量 = 名义 ÷ T（与 Legs「币量」列同一个算式） */
+  /** Q₂实际 本次加仓币量 = 名义 ÷ T（与 Legs「币量」列同一个算式） */
   x2Coins: number | null;
   /**
    * Y₁ 浮盈垫 = Σ 旧腿剩余币量 × (K − 开仓价) × d。
@@ -105,7 +105,7 @@ export interface AddSizingVerdict {
   banked: number | null;
   /** 旧仓在 K 的浮亏绝对额，仅作诊断明细；正式判定使用有正有负的 cushion 净额。 */
   consumedByHeld: number | null;
-  /** 新腿退回 K 的最大预期亏损 = X₂ × (T − K) × d */
+  /** 新腿退回 K 的最大预期亏损 = Q₂实际 × (T − K) × d */
   maxLoss: number | null;
   /** Plan B 可用垫子 = cushion + banked；合规 ⇔ required ≥ maxLoss */
   required: number | null;
@@ -117,10 +117,10 @@ export interface AddSizingVerdict {
   maxAllowedNotional: number | null;
   /** fail 时差多少（USDT）= maxLoss − required；ok 为 0；unknown 为 null（self_check_mismatch 时仍给垫子式的数，供对照） */
   shortfall: number | null;
-  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + X₂T) ÷ (X₁ + X₂)——成本线式复核的中间量 */
+  /** 加仓后综合成本线 C = (Σ 旧腿币量 × 开仓价 + Q₂实际T) ÷ (Q₁ + Q₂实际)——成本线式复核的中间量 */
   blendedCost: number | null;
   /**
-   * 成本线式算出的缺口 = max(0, (X₁ + X₂)(C − K)·d − G)。与 shortfall（垫子式）在代数上恒等；
+   * 成本线式算出的缺口 = max(0, (Q₁ + Q₂实际)(C − K)·d − G)。与 shortfall（垫子式）在代数上恒等；
    * 两者对不上即 self_check_mismatch，两个数都留在这里供诊断。
    */
   costLineShortfall: number | null;
@@ -490,13 +490,13 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const budget = calculateAddRiskBudget(cushion, banked, riskPerCoin);
     const required = budget?.available ?? Number.NaN;
     // “正确加仓”不是一个新的拍脑袋目标，而是 Plan B 的数学上限：低于它都合规，超过它就会失去覆盖。
-    // X₂ 是币量；乘回 T 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
+    // Q₂实际 是币量；乘回 T 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
     const maxAllowedCoins = budget?.maxAddCoins ?? null;
     const maxAllowedNotional = maxAllowedCoins == null ? null : maxAllowedCoins * s2;
 
     /**
      * 成本线式：同一条判据换一条路。加仓后综合成本线越过 K 的那一段折成钱，减掉 G 就是缺口。
-     * X₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 T，S₁ 不参与。
+     * Q₁ = 0（旧仓在加仓前已全部平掉、只剩落袋）时成本线就是 T，S₁ 不参与。
      */
     const post = evaluatePostAddCostLine({
       side: d > 0 ? 'LONG' : 'SHORT',

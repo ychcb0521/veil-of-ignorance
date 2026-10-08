@@ -67,7 +67,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(coins.nextElementSibling!.nextElementSibling).toBe(header);
     expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
     expect(header.nextElementSibling).toBe(fees);
-    expect(header.getAttribute('title')).toContain('X₂(T − K)');
+    expect(header.getAttribute('title')).toContain('Q₂实际(T − K)');
     expect(header.getAttribute('title')).toContain('止损线不必越过旧仓成本线');
     expect(header.getAttribute('title')).toContain('G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险');
     expect(header.getAttribute('title')).toContain('币本位同样取成交时的已实现金额，不按止损线重估');
@@ -101,7 +101,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(dialog.textContent).toContain('① 旧仓浮盈垫 Y₁');
     expect(dialog.textContent).toContain('② 已落袋 G');
     expect(dialog.textContent).toContain('④ 每币风险');
-    expect(dialog.textContent).toContain('⑤ 正确币量上限');
+    expect(dialog.textContent).toContain('⑤ 可加仓 Q₂');
     expect(dialog.textContent).toContain('实际新仓最大预期亏损');
     expect(dialog.textContent).toContain('止损线不必越过旧仓成本线');
     expect(dialog.textContent).toContain('G 取加仓前实际已实现的 USDT 净额');
@@ -319,7 +319,7 @@ describe('计算框里的计算器快照', () => {
     expect(screen.queryByTestId('add-sizing-order-line')).toBeNull();
     // 判定本身没变：上限仍是成交价上的那个数
     expect(screen.getByTestId('add-sizing-correct-coins').textContent).toMatch(/^834,391,89\d(\.\d+)? 币$/);
-    expect(dialog.textContent).toContain('⑤ 正确币量上限');
+    expect(dialog.textContent).toContain('⑤ 可加仓 Q₂');
   });
 
   it('【回归 · 复审】市价计划（已含滑点）却下了 653,602 张：计算框说量超了计划 +1.55%，不点名滑点', () => {

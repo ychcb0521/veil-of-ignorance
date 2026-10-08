@@ -453,9 +453,9 @@ function PositionShareSortHeader({
 }
 
 /** 「加仓校验」列表头的说明：两本账合起来能否抹平新加仓退回止损线的亏损。 */
-const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 X₁(K − S₁) + 已落袋 G ≥ 新加仓最大预期亏损 X₂(T − K) 即为合规（主空符号翻转）。'
+const ADD_SIZING_COLUMN_HINT = '仅加仓行：旧仓浮盈垫 Q₁(K − S₁) + 已落袋 G ≥ 新加仓最大预期亏损 Q₂实际(T − K) 即为合规（主空符号翻转）。'
   + '止损线不必越过旧仓成本线：G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险；不是只要有落袋收益就自动合规。'
-  + 'X₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前实际已实现的 USDT 净额（已实现的盈利都算——止盈委托触发与手动减仓一样，含镜像止盈；已实现亏损含强平一律扣掉，可为负）。币本位同样取成交时的已实现金额，不按止损线重估。'
+  + 'Q₁ 只算加仓那一刻还拿着的币；G 是本轮持仓加仓前实际已实现的 USDT 净额（已实现的盈利都算——止盈委托触发与手动减仓一样，含镜像止盈；已实现亏损含强平一律扣掉，可为负）。币本位同样取成交时的已实现金额，不按止损线重估。'
   + 'K 取加仓那一刻挂着（或加仓后 5 分钟内补挂）、在亏损侧离加仓价最近的反向委托价；新增风险不另计未来手续费，与加仓计算器同一口径。';
 
 function signedUsdt(value: number | null): string {
@@ -489,7 +489,7 @@ function AddSizingDetailDialog({
   const lossPriceTerms = leg.direction === 'short'
     ? `${fmtPrice(verdict.s1)} − ${fmtPrice(verdict.s2)}`
     : `${fmtPrice(verdict.s2)} − ${fmtPrice(verdict.s1)}`;
-  const cushionFormula = leg.direction === 'short' ? 'X₁ × (S₁ − K)' : 'X₁ × (K − S₁)';
+  const cushionFormula = leg.direction === 'short' ? 'Q₁ × (S₁ − K)' : 'Q₁ × (K − S₁)';
   const cushionPriceTerms = leg.direction === 'short'
     ? `${fmtPrice(averageEntry)} − ${fmtPrice(verdict.s1)}`
     : `${fmtPrice(verdict.s1)} − ${fmtPrice(averageEntry)}`;
@@ -544,8 +544,10 @@ function AddSizingDetailDialog({
         <div className="space-y-2 text-xs">
           <div className="font-medium text-foreground">计算过程</div>
           <div className="rounded bg-muted/35 px-3 py-2 font-mono tabular-nums" data-testid="add-sizing-symbol-lines">
-            S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − 方向 × G / X₁ = {fmtPrice(breakevenLine)}。
+            S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − 方向 × G / Q₁ = {fmtPrice(breakevenLine)}。
             主多方向为 +1，主空为 −1；主多有净利润落袋时 S₀ &lt; S₁，主空相反。无旧仓时 S₀ 不适用。
+            Q₀ 为基于保本线的旧仓币量，Q₁ 为基于成本线的旧仓币量；Q₀ = Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，是同一仓位的两种表达，不能相加。
+            Q₂ 为可加仓币量上限，Q₂实际为实际成交币量。
           </div>
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
             <span className="text-muted-foreground">① 旧仓浮盈垫 Y₁</span>
@@ -570,15 +572,16 @@ function AddSizingDetailDialog({
             </span>
           </div>
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
-            <span className="text-muted-foreground">⑤ 正确币量上限</span>
+            <span className="text-muted-foreground">⑤ 可加仓 Q₂</span>
             <span className="col-span-2 text-right font-mono tabular-nums">
-              max(0, Y₁ + G) ÷ 每币风险 = {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
+              Q₂ = max(0, Y₁ + G) ÷ 每币风险 = {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
+              {breakevenLine != null && <>；等价于 max(0, Q₀ × 方向 × (K − S₀)) ÷ |T − K|</>}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
             <span className="text-muted-foreground">⑥ 折算 U 仓位</span>
             <span className="col-span-2 text-right font-mono tabular-nums">
-              {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} × T {fmtPrice(verdict.s2)} = {formatAddSizingNotional(verdict.maxAllowedNotional)} U
+              Q₂ × T = {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} × {fmtPrice(verdict.s2)} = {formatAddSizingNotional(verdict.maxAllowedNotional)} U
             </span>
           </div>
         </div>
