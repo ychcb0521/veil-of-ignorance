@@ -166,7 +166,6 @@ import {
 import type { PositionMergeResult } from '@/lib/tradingSettlement';
 import { orderReferencePrice } from '@/lib/orderReferencePrice';
 import {
-  CARD_TPSL_PERCENT_STEP,
   ORDER_LOT_SIZE_STAMP,
   checkLotSize,
   formatClosePercent,
@@ -2893,17 +2892,9 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (!(Number(px) > 0)) continue;
         const lot = checkLotSize({ symbol, settlement: pos.settlementMode, kind: 'market', units, price: Number(px) });
         if (!lot.ok) {
-          // 同弹窗的比例选择精度检查最小正比例，避免建议一个仍超出交易所上限的数量。
-          const smallestFits = checkLotSize({
-            symbol, settlement: pos.settlementMode, kind: 'market',
-            units: tpSlCloseUnits(pos, CARD_TPSL_PERCENT_STEP), price: Number(px),
-          }).ok;
-          toast.error(`${label}（${Math.min(100, Math.max(1, pct))}% 仓位）：${lot.title}`, {
-            description: smallestFits
-              ? `${lot.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
-                + '或选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。'
-              : `${lot.source}。按成数挂的止盈止损触发后是一笔市价单，连最小的一格（${CARD_TPSL_PERCENT_STEP}%）都超过上限：`
-                + '只能选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。',
+          toast.error(`${label}（${Math.min(100, Math.max(0, pct))}% 仓位）：${lot.title}`, {
+            description: `${lot.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
+              + '或选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。',
           });
           return;
         }
@@ -2923,7 +2914,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
     }));
 
     toast.success('止盈/止损委托已下达', {
-      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${Math.min(100, Math.max(1, pct))}% 仓位`,
+      description: `TP: ${tp || '-'} / SL: ${sl || '-'} · ${Math.min(100, Math.max(0, pct))}% 仓位`,
     });
   }, [getEffectiveTime]);
 

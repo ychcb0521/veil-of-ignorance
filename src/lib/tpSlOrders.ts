@@ -89,7 +89,8 @@ export function keepValidTpSlLegs(
 
 /** 按成数算出要平掉的量；币本位只能是整数张，且不足一张时至少一张。 */
 export function tpSlCloseUnits(position: Position, percentage: number): number {
-  const safePct = Math.min(100, Math.max(1, percentage));
+  if (!Number.isFinite(percentage) || percentage <= 0) return 0;
+  const safePct = Math.min(100, percentage);
   const totalUnits = getPositionUnits(position);
   if (!(totalUnits > 0)) return 0;
   return isCoinSettled(position)
@@ -110,7 +111,7 @@ export function buildTpSlOrders(args: {
   const closeQty = tpSlCloseUnits(position, levels.percentage);
   if (!(closeQty > 0)) return [];
 
-  const safePct = Math.min(100, Math.max(1, levels.percentage));
+  const safePct = Math.min(100, levels.percentage);
   const closeSide: OrderSide = position.side === 'LONG' ? 'SHORT' : 'LONG';
   const coin = isCoinSettled(position);
 

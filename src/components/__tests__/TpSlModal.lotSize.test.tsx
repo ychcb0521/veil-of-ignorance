@@ -38,6 +38,32 @@ const setPct = (steps: number) => {
 };
 
 describe('TpSlModal：单笔市价上限', () => {
+  it('手输比例与滑条同步，支持小数；空值和超出100%不提交旧比例', () => {
+    const onConfirm = renderModal();
+    const input = screen.getByRole('textbox', { name: '平仓比例百分比' });
+    const slider = screen.getByRole('slider');
+    fireEvent.change(tpInput(), { target: { value: '1.3' } });
+    fireEvent.change(input, { target: { value: '33.5' } });
+    expect(slider).toHaveAttribute('aria-valuenow', '33.5');
+    fireEvent.click(confirm());
+    expect(onConfirm).toHaveBeenLastCalledWith(1.3, null, 33.5);
+    fireEvent.change(input, { target: { value: '0.5' } });
+    fireEvent.click(confirm());
+    expect(onConfirm).toHaveBeenLastCalledWith(1.3, null, 0.5);
+    for (const value of ['', '.', '100.1']) {
+      onConfirm.mockClear();
+      fireEvent.change(input, { target: { value } });
+      expect(confirm().disabled).toBe(true);
+      fireEvent.click(confirm());
+      expect(onConfirm).not.toHaveBeenCalled();
+    }
+    fireEvent.change(input, { target: { value: '50' } });
+    fireEvent.keyDown(slider, { key: 'ArrowRight' });
+    expect(input).toHaveValue('51');
+    fireEvent.keyDown(slider, { key: 'Home' });
+    expect(input).toHaveValue('0');
+  });
+
   it('100%：不判（平掉整个仓位）', () => {
     const onConfirm = renderModal();
     fireEvent.change(slInput(), { target: { value: '0.9' } });

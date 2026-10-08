@@ -40,7 +40,11 @@ export function TpSlModal({
 }: Props) {
   const [tpPrice, setTpPrice] = useState('');
   const [slPrice, setSlPrice] = useState('');
-  const [pct, setPct] = useState(100);
+  const [pctInput, setPctInput] = useState('100');
+  const parsedPct = Number(pctInput);
+  const validPct = pctInput.trim() !== '' && Number.isFinite(parsedPct) && parsedPct >= 0 && parsedPct <= 100;
+  const pct = validPct ? parsedPct : 0;
+  const sliderPct = Number.isFinite(parsedPct) ? Math.min(100, Math.max(0, parsedPct)) : 0;
   const baseCoin = getSettlementAsset(symbol);
   const quoteUnitLabel = settlementMode === 'coin' ? 'USD' : 'USDT';
 
@@ -55,9 +59,7 @@ export function TpSlModal({
       if (!(px > 0)) continue;
       const verdict = lotSizeCheck(pct / 100, px);
       if (verdict.refusal) {
-        // 按可选择的最小正比例检查，交易所数量上限与比例滑条分开处理。
-        const smallestFits = lotSizeCheck(CARD_TPSL_PERCENT_STEP / 100, px).refusal == null;
-        return { label, check: verdict.refusal, smallestFits };
+        return { label, check: verdict.refusal };
       }
     }
     return null;
@@ -67,7 +69,7 @@ export function TpSlModal({
     const tp = tpPrice ? parseFloat(tpPrice) : null;
     const sl = slPrice ? parseFloat(slPrice) : null;
     if (tp === null && sl === null) return;
-    if (lotRefusal || pct <= 0) return;
+    if (lotRefusal || !validPct || pct <= 0) return;
     onConfirm(tp, sl, pct);
   };
 
@@ -135,18 +137,32 @@ export function TpSlModal({
           <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-foreground">平仓数量</span>
-              <span className="inline-flex min-w-14 items-center justify-center rounded-lg bg-amber-500/10 px-2 py-1 font-mono text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-                {pct}%
-              </span>
+              <label className="inline-flex items-center gap-0.5 rounded-lg border border-transparent bg-amber-500/10 px-2 py-1 font-mono text-sm font-semibold tabular-nums text-amber-600 transition-shadow focus-within:border-amber-500/50 focus-within:ring-2 focus-within:ring-amber-500/15 dark:text-amber-400">
+                <input
+                  aria-label="平仓比例百分比"
+                  aria-invalid={!validPct}
+                  type="text"
+                  inputMode="decimal"
+                  lang="en"
+                  autoComplete="off"
+                  value={pctInput}
+                  onChange={e => {
+                    if (/^\d*(?:\.\d*)?$/.test(e.target.value)) setPctInput(e.target.value);
+                  }}
+                  onBlur={() => { if (validPct) setPctInput(String(pct)); }}
+                  className="w-14 bg-transparent text-right text-inherit outline-none"
+                />
+                <span aria-hidden="true">%</span>
+              </label>
             </div>
             <div className="px-2.5 pt-4">
               <Slider
                 aria-label="平仓比例"
-                value={[pct]}
+                value={[sliderPct]}
                 min={0}
                 max={100}
                 step={CARD_TPSL_PERCENT_STEP}
-                onValueChange={([v]) => setPct(v)}
+                onValueChange={([v]) => setPctInput(String(v))}
                 className="h-5 [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&>span:first-child>span]:bg-amber-500 [&_[role=slider]]:border-amber-500 [&_[role=slider]]:shadow-sm"
               />
               <div aria-hidden="true" className="relative mt-1 h-2">
@@ -177,11 +193,8 @@ export function TpSlModal({
               <span className="space-y-0.5">
                 <span className="block">{lotRefusal.label}（{pct}% 仓位）：{lotRefusal.check.title}</span>
                 <span className="block text-[9px] opacity-80">
-                  {lotRefusal.smallestFits
-                    ? `${lotRefusal.check.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
-                      + '或选 100%（平掉整个仓位的不受此限）。'
-                    : `${lotRefusal.check.source}。按成数挂的止盈止损触发后是一笔市价单，`
-                      + `连最小的一格（${CARD_TPSL_PERCENT_STEP}%）都超过上限：只能选 100%（平掉整个仓位的不受此限）。`}
+                  {`${lotRefusal.check.source}。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，`
+                    + '或选 100%（平掉整个仓位的不受此限）。'}
                 </span>
               </span>
             </div>
@@ -190,7 +203,7 @@ export function TpSlModal({
           {/* Confirm */}
           <button
             onClick={handleConfirm}
-            disabled={(!tpPrice && !slPrice) || pct <= 0 || lotRefusal != null}
+            disabled={(!tpPrice && !slPrice) || !validPct || pct <= 0 || lotRefusal != null}
             className="w-full py-2.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             确认

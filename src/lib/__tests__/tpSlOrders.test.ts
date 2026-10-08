@@ -18,6 +18,18 @@ const coinPos = (over: Partial<Position> = {}): Position => ({
 } as Position);
 
 describe('止盈止损减仓单', () => {
+  it('手输不到1%的比例按原值生成数量，0%和无效比例不生成委托', () => {
+    const position = coinPos({ contracts: 1_000, quantity: 1_000 });
+    const [order] = buildTpSlOrders({ symbol: 'NOMUSD', position,
+      levels: { tp: 0.015, sl: null, percentage: 0.5 }, now: 0, newId });
+    expect(order.quantity).toBe(5);
+    expect(order.reducePercentage).toBe(0.5);
+    for (const percentage of [0, -1, NaN, Infinity]) {
+      expect(buildTpSlOrders({ symbol: 'NOMUSD', position,
+        levels: { tp: 0.015, sl: null, percentage }, now: 0, newId })).toEqual([]);
+    }
+  });
+
   it('造出的是**减仓条件单**，不是会开仓的单子', () => {
     const [tp, sl] = buildTpSlOrders({
       symbol: 'NOMUSD', position: coinPos(), levels: { tp: 0.015, sl: 0.009, percentage: 100 },
