@@ -146,6 +146,39 @@ describe('市价单的预计成交价', () => {
 });
 
 describe('「按上限下单」预填', () => {
+  it('加仓建议不是额外下单上限：有同向持仓时，超过旧计算计划的数量仍进入成交引擎', async () => {
+    panel.positionsMap = { API3USD: [{ id: 'held', side: 'LONG', entryPrice: 0.38,
+      settlementMode: 'coin', quantity: 1_000, contracts: 1_000, contractSizeUsd: 10,
+      leverage: 6, marginMode: 'isolated', margin: 1_666.67, openTime: 1_000 }] };
+    const onPlaceOrder = renderPanel();
+    act(() => {
+      requestAddSizingPrefill('API3USD', snapshot({ addCoinsMax: 1, contracts: 1 }),
+        { contracts: 3_000_000, coins: 71_563_206, orderType: 'MARKET', limitPrice: null, side: 'LONG', settlement: 'coin' });
+    });
+    expect(screen.getByText('开多')).not.toBeDisabled();
+    fireEvent.click(screen.getByText('开多'));
+    await waitFor(() => expect(onPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ quantity: 3_000_000, contracts: 3_000_000,
+      addSizingSnapshot: { addCoinsMax: 1, contracts: 1 } });
+  });
+
+  it('决策模式中的加仓也不额外拦截：快照提交将填写的数量原样送入引擎', async () => {
+    panel.tradingMode = 'decision';
+    panel.positionsMap = { API3USD: [{ id: 'held', side: 'LONG', entryPrice: 0.38,
+      settlementMode: 'coin', quantity: 1_000, contracts: 1_000, contractSizeUsd: 10,
+      leverage: 6, marginMode: 'isolated', margin: 1_666.67, openTime: 1_000 }] };
+    const onPlaceOrder = renderPanel();
+    act(() => {
+      requestAddSizingPrefill('API3USD', snapshot({ addCoinsMax: 1, contracts: 1 }),
+        { contracts: 3_000_000, coins: 71_563_206, orderType: 'MARKET', limitPrice: null, side: 'LONG', settlement: 'coin' });
+    });
+    fireEvent.click(screen.getByText('开多'));
+    expect(onPlaceOrder).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByTestId('pre-trade-submit'));
+    await waitFor(() => expect(onPlaceOrder).toHaveBeenCalledTimes(1));
+    expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ quantity: 3_000_000, contracts: 3_000_000 });
+  });
+
   it('市价计划：切到市价、「张」档，数量就是整张的上限；点开多下出去的就是这张单；预填只应用一次', () => {
     const onPlaceOrder = renderPanel();
     act(() => {

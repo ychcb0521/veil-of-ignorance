@@ -31,7 +31,6 @@ import {
   getSettlementAsset,
 } from '@/lib/coinMargined';
 import { orderPriceKindLabel, panelReferencePrice } from '@/lib/orderReferencePrice';
-import { checkVerifiedAddOrder } from '@/lib/addSizingVerifiedProfit';
 import {
   LIVE_PRICE_TIER_HEADROOM,
   checkPlacementPositionLimit,
@@ -1266,23 +1265,6 @@ export function OrderPanel({
     };
   };
 
-  const latestCalculatorOrderPrice = useRef(currentPrice);
-  latestCalculatorOrderPrice.current = currentPrice;
-  const verifyCalculatorOrder = async (params: PlaceOrderParams): Promise<PlaceOrderParams | null> => {
-    if (!params.addSizingSnapshot) return params;
-    const kind = params.type === 'CONDITIONAL' ? 'conditional' : params.type === 'LIMIT' || params.type === 'POST_ONLY' ? 'limit' : 'market';
-    const referencePrice = kind === 'conditional' ? params.stopPrice : kind === 'limit' ? params.price : () => latestCalculatorOrderPrice.current;
-    const checked = await checkVerifiedAddOrder({ symbol, snapshot: params.addSizingSnapshot,
-      positions: ctx.positionsMap[symbol] ?? [], history: ctx.tradeHistory ?? [], kind,
-      referencePrice, units: params.contracts ?? params.quantity,
-      face: params.contractSizeUsd ?? contractSizeUsd });
-    if (!checked.ok) {
-      toast.error('加仓计划需要重新计算', { description: checked.message });
-      return null;
-    }
-    return { ...params, ...(kind === 'market' ? { latestPrice: checked.snapshot.s2Ref } : {}), addSizingSnapshot: checked.snapshot };
-  };
-
   const handleOrder = async (rawSide: OrderSide) => {
     const built = buildOrderParams(rawSide);
     if (!built) return;
@@ -1294,10 +1276,10 @@ export function OrderPanel({
     const planned = peekAddSizingSnapshotForOrder({
       symbol, side: rawSide, type: built.type, settlement: built.settlementMode,
     });
-    const proposed: PlaceOrderParams = planned ? { ...built, addSizingSnapshot: planned } : built;
-    const params = planned && (ctx.positionsMap[symbol] ?? []).some(position => position.side === rawSide)
-      ? await verifyCalculatorOrder(proposed) : proposed;
-    if (!params) return;
+    // Calculator snapshots explain the decision in campaign review; they are not
+    // an additional order limit. Submit the authored quantity to the same engine
+    // as an ordinary order, including after a price change or a manual quantity edit.
+    const params: PlaceOrderParams = planned ? { ...built, addSizingSnapshot: planned } : built;
     // 直接交易模式：跳过快照对话框，直接下单。journal 不会被创建，
     // 因此错题集 / 元监控 不会收录；但 tradeHistory 仍记录，可在战役中归类。
     if (ctx.tradingMode === 'direct') {
@@ -2167,10 +2149,7 @@ export function OrderPanel({
         })()}
         onAutoPause={onAutoPauseTimeMachine}
         onPlaceOrder={async (params) => {
-          const checked = params.addSizingSnapshot && (ctx.positionsMap[symbol] ?? []).some(position => position.side === params.side)
-            ? await verifyCalculatorOrder(params) : params;
-          if (!checked) return null;
-          const result = await onPlaceOrder(checked);
+          const result = await onPlaceOrder(params);
           if (result && typeof result === 'object' && 'id' in result) {
             return result as { id: string };
           }

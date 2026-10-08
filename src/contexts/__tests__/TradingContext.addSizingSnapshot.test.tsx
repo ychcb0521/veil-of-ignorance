@@ -85,6 +85,7 @@ describe('加仓计划的往返：委托 → 成交 → 记录', () => {
     // 同向第二笔并进同一仓位：没有新计划，这一笔不带
     act(() => { result.current.handlePlaceOrder('ETHUSDT', marketLong({ quantity: 5, inputAmount: 5 })); });
     const merged = result.current.positionsMap.ETHUSDT[0];
+    expect(merged.quantity).toBe(15);
     expect(merged.fills).toHaveLength(2);
     expect(merged.fills![0].addSizingSnapshot).toMatchObject({ s1: 105 });
     expect(merged.fills![1].addSizingSnapshot).toBeUndefined();
