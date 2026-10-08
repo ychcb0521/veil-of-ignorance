@@ -19,6 +19,12 @@ describe('embedded add calculator source of truth', () => {
     const field = (id: string) => win.document.getElementById(id) as HTMLInputElement;
     win.AddPositionMath.setSeed({ currentPrice: 150, support: 120, strategyCost: 100, realAverage: 110, coins: 2, mirrorProfitAvailable: 30, side: 'LONG' });
     expect(field('cost-view').value).toBe('110');
+    expect(field('process-1').textContent).toContain('Q × (K − S₁)');
+    expect(field('process-2').textContent).toContain('50.00 U');
+    expect(field('process-3').textContent).toContain('70.00 U');
+    expect(field('process-4').textContent).toContain('|T − K|');
+    expect(field('process-5').textContent).toContain('2.33 币');
+    expect(field('process-6').textContent).toContain('350.00 U');
     expect(field('formula-main').textContent).toContain('Q × (K − S₀)');
     expect(field('formula-explanation').textContent).toContain('保本线已扣利润，不再额外加一次 P');
     const quantity = field('r-add').textContent;
@@ -41,6 +47,9 @@ describe('embedded add calculator source of truth', () => {
     expect(field('cost-view').value).toBe('95');
     field('cost-breakeven').click();
     expect(field('cost-view').value).toBe('115');
+    expect(field('process-1').textContent).toContain('Q × (S₁ − K)');
+    field('clear-single').click();
+    expect(field('process-3').textContent).toBe('—');
     dom.window.close();
   });
   it('shows the same compact calculator and carries strategy cost without spending P twice', () => {
