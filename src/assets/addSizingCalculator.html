@@ -386,6 +386,7 @@ tr.page-hidden{display:none}
 .cost-note[open] summary::after{content:'−'}
 .cost-note p{margin:8px 0 2px;padding:10px 12px;border-radius:8px;background:#f5f8fa}
 #single-form .helper{color:#778497;font-size:10.5px}
+#cost-input-help{grid-column:1/-1}
 #single-form .position-mode-row{font-size:10.5px}
 #single-form .mirror-field{border-top:1px solid #e8edf2;padding-top:15px}
 #single-form .actions{gap:8px;grid-template-columns:auto auto auto;}
@@ -405,7 +406,7 @@ tr.page-hidden{display:none}
 <form id="single-form" novalidate="">
 <div class="field compact-field"><div class="labelrow"><label for="current"><span class="symbol">T</span>加仓线 / 本次加仓价</label></div><div class="input-wrap"><input autocomplete="off" id="current" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" name="current" placeholder="输入本次加仓价格" spellcheck="false" type="text" value="150"/><span class="unit">价格</span></div></div>
 <div class="field compact-field"><div class="labelrow"><label for="support"><span class="symbol">K</span>新支撑线 / 止损线</label></div><div class="input-wrap"><input autocomplete="off" id="support" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" name="support" placeholder="输入新的支撑价格" spellcheck="false" type="text" value="120"/><span class="unit">价格</span></div></div>
-<div class="field compact-field"><div class="labelrow"><span class="symbol">S₁</span><button class="text-button" id="cost-latest" type="button" aria-pressed="true">当下成本线</button><span> / </span><button class="text-button" id="cost-breakeven" type="button" aria-pressed="false">保本线</button></div><div class="input-wrap"><input id="cost" name="cost" type="hidden" value="100"/><input autocomplete="off" aria-label="当下成本线" id="cost-view" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" placeholder="输入最新开仓均价" spellcheck="false" type="text" value="100"/><span class="unit">价格</span></div><details class="cost-note"><summary>开仓均价与保本线 · 口径说明</summary><p>最新的开仓价 = 当下成本线（当前剩余仓位的开仓均价，不扣落袋利润）。保本线扣除净落袋利润；主多有镜像止盈净利润时，保本线低于当下成本线，主空则高于。保本线随镜像止盈利润自动计算。切换只影响显示，不重复使用利润。</p></details></div>
+<div class="field compact-field"><div class="labelrow"><span class="symbol">S₁</span><button class="text-button" id="cost-latest" type="button" aria-pressed="true">当下成本线</button><span> / </span><button class="text-button" id="cost-breakeven" type="button" aria-pressed="false">保本线</button></div><div class="input-wrap"><input id="cost" name="cost" type="hidden" value="100"/><input autocomplete="off" aria-label="当下成本线" id="cost-view" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" placeholder="输入最新开仓均价" spellcheck="false" type="text" value="100"/><span class="unit">价格</span></div><div class="helper" id="cost-input-help" role="status" hidden=""></div><details class="cost-note"><summary>开仓均价与保本线 · 口径说明</summary><p>最新的开仓价 = 当下成本线（当前剩余仓位的开仓均价，不扣落袋利润）。保本线扣除净落袋利润；主多有镜像止盈净利润时，保本线低于当下成本线，主空则高于。保本线随镜像止盈利润自动计算。切换只影响显示，不重复使用利润。</p></details></div>
 <div class="field compact-field position-field"><div class="labelrow"><label for="position"><span class="symbol" id="position-symbol">Q₁</span><span id="position-label">原持币数量</span></label></div><div class="input-wrap"><input autocomplete="off" id="position" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" name="position" placeholder="填镜像止盈后剩余的币数" spellcheck="false" type="text" value="1"/><span class="unit" id="position-unit">币</span></div><div class="position-mode-row"><span>仓位输入口径</span><select aria-label="仓位输入口径" class="mode-select" id="position-mode"><option selected="selected" value="quantity">按持币数量输入</option></select></div><div class="helper" id="position-help">填写当前剩余币数；S₁ 是当下成本线（开仓均价），S₀ 是扣除净落袋利润后的保本线。</div><div class="helper" id="position-conversion">原持币数量：1</div></div>
 <div class="field mirror-field compact-field"><div class="labelrow"><label for="mirror"><span class="symbol">P</span><span>镜像止盈<span class="label-secondary">已落袋利润</span></span></label></div><div class="input-wrap"><input autocomplete="off" id="mirror" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" name="mirror" placeholder="只填净利润，不含卖出本金" spellcheck="false" type="text" value="0"/><span class="unit" id="mirror-unit">U</span></div><div class="helper" id="mirror-help">只填尚未被未平仓风险占用的可用已落袋利润；本轮承接后即归入已占用。</div></div><div class="compact-settings"><div class="advanced-body"><label><span class="small-label">杠杆倍数</span><input aria-label="杠杆倍数" class="small-input" id="leverage" inputmode="decimal" lang="en" autocapitalize="off" autocorrect="off" type="text" value="10"/></label><label><span class="small-label">金额显示小数位</span><select aria-label="金额显示小数位" class="small-input" id="decimals"><option value="2">2 位</option><option value="4">4 位</option><option value="6">6 位</option><option value="8">8 位</option></select></label><p class="advanced-note">杠杆只估算保证金，不放大可加币数；内部计算保留完整精度。</p></div></div>
 <div class="actions"><button class="btn primary" type="submit">计算加仓</button><button class="btn" id="reset-single" type="button">恢复示例</button><button class="btn subtle" id="clear-single" type="button">清空</button><label class="auto-row"><input checked="" id="auto-calc" type="checkbox"/>修改后自动计算</label></div>
@@ -448,15 +449,21 @@ tr.page-hidden{display:none}
  const defaults={tab:'single',model:'linear',single:{current:'150',support:'120',cost:'100',position:'1',mode:'quantity',mirror:'0',leverage:'10',decimals:'2',auto:true},sequence:{cost:'100',amount:'1',stop:'95',leverage:'10',mirror:'0',stages:[[150,120],[200,180],[250,220],[300,280],[350,320],[400,380]].map(([t,k])=>({t:String(t),k:String(k),p:'',enabled:true}))}};
  const clone=o=>JSON.parse(JSON.stringify(o));
  let lastSingle=null,lastSequence=null,toastTimer=null,activeTab='single',stages=clone(defaults.sequence.stages),priorMode='quantity';
- let realAverageState=null,mirrorProfitRealized=0,mirrorProfitAllocated=0,costViewMode='latest';
+ let realAverageState=null,mirrorProfitRealized=0,mirrorProfitAllocated=0,costViewMode='latest',costBasisCredit=0;
+ // Preserve A − S while the user clears/retypes A, including a saved unfinished draft.
+ // The host seeds A/S from positions; standalone files must never invent a missing cost.
  // Keep the risk-budget S separate from the actual opening average and the display-only breakeven.
- function updateCostView(){
+ function updateCostView({preserveDraft=false}={}){
    const S=numeric($('cost').value),Q=numeric($('position').value),P=numeric($('mirror').value),d=side()==='SHORT'?-1:1;
-   const latest=realAverageState>0?realAverageState:S;
+   const hasCost=S>0;
+   if(hasCost&&realAverageState>0)costBasisCredit=realAverageState-S;
+   if(!hasCost)costViewMode='latest';
+   const latest=hasCost?(realAverageState>0?realAverageState:S):NaN;
    const value=costViewMode==='latest'?latest:(Q>0&&P>=0?S-d*P/Q:NaN);
-   if(document.activeElement!==$('cost-view'))$('cost-view').value=Number.isFinite(value)&&value>=0?String(value):'';
+   if(!preserveDraft)$('cost-view').value=Number.isFinite(value)?String(value):'';
    $('cost-view').readOnly=costViewMode==='breakeven';
    $('cost-view').placeholder=costViewMode==='breakeven'?'根据镜像止盈自动计算':'输入最新开仓均价';
+   display('cost-input-help',!hasCost?'请先填写当下成本线（当前剩余仓位的开仓均价），保本线会根据持币数和镜像止盈自动生成。':costViewMode==='breakeven'&&!(Q>0)?'请填写原持币数量，保本线会自动生成。':costViewMode==='breakeven'&&!(P>=0)?'请填写镜像止盈利润；没有利润填 0。':'',!hasCost||(costViewMode==='breakeven'&&(!(Q>0)||!(P>=0))));
    $('cost-view').setAttribute('aria-label',costViewMode==='latest'?'当下成本线':'保本线');
    $('cost-latest').parentElement.querySelector('.symbol').textContent=costViewMode==='latest'?'S₁':'S₀';
    $('cost-latest').setAttribute('aria-pressed',String(costViewMode==='latest'));
@@ -520,7 +527,7 @@ tr.page-hidden{display:none}
  function toast(text){clearTimeout(toastTimer);display('toast',text);toastTimer=setTimeout(()=>$('toast').hidden=true,3000);}
  function readSingle(){return {current:$('current').value,support:$('support').value,cost:$('cost').value,position:$('position').value,mode:$('position-mode').value,mirror:$('mirror').value,leverage:$('leverage').value,decimals:$('decimals').value,auto:$('auto-calc').checked};}
  function readSequence(){return{cost:$('seq-cost').value,amount:$('seq-amount').value,stop:$('seq-stop').value,leverage:$('seq-leverage').value,mirror:$('seq-mirror').value,stages:clone(stages)};}
- function save(){try{localStorage.setItem(STORAGE,JSON.stringify({tab:activeTab,side:side(),single:readSingle(),sequence:readSequence(),realAverageState,mirrorProfitRealized,mirrorProfitAllocated}));$('save-state').textContent='输入已存本机';}catch(_){$('save-state').textContent='未启用本地保存';}}
+ function save(){try{localStorage.setItem(STORAGE,JSON.stringify({tab:activeTab,side:side(),single:readSingle(),sequence:readSequence(),realAverageState,mirrorProfitRealized,mirrorProfitAllocated,costBasisCredit}));$('save-state').textContent='输入已存本机';}catch(_){$('save-state').textContent='未启用本地保存';}}
  function fillSingle(s){for(const k of ['current','support','cost','position','mirror','leverage','decimals'])$(k).value=s[k]??defaults.single[k];$('position-mode').value='quantity';$('auto-calc').checked=s.auto!==false;modeLabels();}
  function fillSequence(s){for(const k of ['cost','amount','stop','leverage','mirror'])$('seq-'+k).value=s[k]??defaults.sequence[k];stages=Array.isArray(s.stages)?s.stages.slice(0,100).filter(x=>x&&typeof x==='object').map(x=>({t:String(x.t??''),k:String(x.k??''),p:String(x.p??''),enabled:x.enabled!==false})):clone(defaults.sequence.stages);buildRows();}
  function modeLabels(){
@@ -546,8 +553,8 @@ tr.page-hidden{display:none}
    $('formula-explanation').textContent='T 为加仓线，K 为新支撑线；S₁ 为当下成本线（最新开仓均价），S₀ 为保本线。S₀ = S₁ − 方向 × 净落袋利润 / Q₁，主多方向 +1，主空 −1。风险预算 = Q₁ × 方向 × (K − S₀)，每币风险 = 方向 × (T − K)。风险预算为负时不允许加仓；为零时额度为零。保本线已扣利润，不再额外加一次 P。内部承接的占用利润与本轮可用 P 合计只计入一次；加仓后 S₁ 按真实加权均价更新，风险预算承接线为 K，不把 K 当开仓均价。';
    $('formula-model-note').textContent='只按价格距离 × 币数计算；U 只作损益单位。';
  }
- function updateConversion(){
-   updateCostView();
+ function updateConversion({preserveCostDraft=false}={}){
+   updateCostView({preserveDraft:preserveCostDraft});
    const v=numeric($('position').value);
    display('position-conversion',v>=0?'原持币数量：'+fmt(v,'qty'):'',v>=0);
  }
@@ -577,10 +584,12 @@ tr.page-hidden{display:none}
  function clearResults(){lastSingle=null;for(const id of resultIDs){$(id).textContent='—';$(id).removeAttribute('title');}$('r-check').classList.remove('bad');$('copy-single').disabled=true;$('carry-next').disabled=true;display('mirror-coverage','可用镜像利润 ÷ 每币预期亏损 = 额外可加币数。');$('substitution').replaceChildren();const p=document.createElement('p');p.textContent='输入有效数值后，显示本次完整计算过程。';$('substitution').append(p);notifyParent(null);}
  // The host installs this callback only on a same-origin iframe Window; no cross-origin messages.
  function notifyParent(result){if(typeof window.VeilAddSizingBridge==='function')window.VeilAddSizingBridge(result);}
- function computeSingle({quiet=false}={}){
-   updateCostView();updateConversion();$('single-error').hidden=true;$('single-info').hidden=true;
+ function computeSingle({quiet=false,preserveCostDraft=false}={}){
+   updateConversion({preserveCostDraft});$('single-error').hidden=true;$('single-info').hidden=true;
    try{
-     const T=positive($('current').value,'现价 T'),K=positive($('support').value,'支撑位 K'),S=positive($('cost').value,'策略成本线 S'),v=positive($('position').value,'原持仓币数 Q'),P=nonnegative($('mirror').value,'可用镜像利润 P');
+     const T=positive($('current').value,'现价 T'),K=positive($('support').value,'支撑位 K');
+     if(!(numeric($('cost').value)>0))throw new Error('请先填写当下成本线（开仓均价）；保本线会自动生成，无需手动输入。');
+     const S=numeric($('cost').value),v=positive($('position').value,'原持仓币数 Q'),P=nonnegative($('mirror').value,'可用镜像利润 P');
      const r=calc({T,K,S,Q:v,P,realAverage:realAverageState>0?realAverageState:S,side:side()});
      const L=numeric($('leverage').value),validLeverage=L>=1,u=profitUnit(),pk=profitKind(),inv=inverse();
      lastSingle={...r,L:validLeverage?L:null};
@@ -610,7 +619,7 @@ tr.page-hidden{display:none}
      if(notices.length)display('single-info',notices.join(' '));
    }catch(e){clearResults();if(!quiet)display('single-error',e.message);}
  }
- function handleSingleEdit(){if($('auto-calc').checked)computeSingle();else{clearResults();updateConversion();$('single-error').hidden=true;display('single-info','输入已修改，请点击“计算加仓”更新结果。');}save();}
+ function handleSingleEdit(event){const preserveCostDraft=event?.target===$('cost-view');if($('auto-calc').checked)computeSingle({preserveCostDraft});else{clearResults();updateConversion({preserveCostDraft});$('single-error').hidden=true;display('single-info','输入已修改，请点击“计算加仓”更新结果。');}save();}
  function activateTab(tab,{persist=true,focus=false}={}){activeTab=tab==='sequence'?'sequence':'single';for(const name of ['single','sequence']){$(name+'-panel').hidden=name!==activeTab;$('tab-'+name).setAttribute('aria-selected',String(name===activeTab));$('tab-'+name).tabIndex=name===activeTab?0:-1;}if(focus)$('tab-'+activeTab).focus();if(activeTab==='sequence')computeSequence();if(persist)save();}
  function buildRows(){
    const body=$('stage-body');body.replaceChildren();
@@ -663,22 +672,21 @@ tr.page-hidden{display:none}
  }
  function singleText(r){return[`加仓计算结果（${r.side==='SHORT'?'主空':'主多'}；不另扣未来费用）`,'模型：价格距离 × 币数',`现价 T：${exact(r.T)}`,`支撑位 K：${exact(r.K)}`,`风险预算承接线：${exact(r.S)}`,`原仓真实均价：${exact(r.realAverage)}`,`剩余币数 Q₁：${exact(r.Q)}`,`本轮可用镜像利润 P：${exact(r.P)} U`,`基础可加仓币数：${exact(r.baseQty)}`,`镜像利润支持的额外可加仓币数：${exact(r.mirrorQty)}`,`总可加币数 Q₂：${exact(r.addQty)}`,`对应加仓金额（仅展示）：${exact(r.X)}`,`原仓在支撑位安全垫：${exact(r.buffer)} U`,`新增仓位在支撑位预期亏损：${exact(r.newLoss)} U`,`加仓后实际均价：${exact(r.newCost)}`,`下一轮风险预算承接线：${exact(r.breakeven)}`,`加仓后总币数：${exact(r.newQ)}`,`加仓后名义总额：${exact(r.newM)}`,`按支撑位退出的整体净盈亏：${exact(r.netAtK)} U`,r.feasible?'支撑价成交、不另扣未来费用的理论保本上限。':'原仓仍有保本缺口，不能按保本条件加仓。','已落袋利润只计入一次；不能同时扣减均价并再次加入 P。'].join('\n');}
  $('single-form').addEventListener('submit',e=>{e.preventDefault();computeSingle();save();});
- for(const [id,mode] of [['cost-latest','latest'],['cost-breakeven','breakeven']])$(id).addEventListener('click',()=>{costViewMode=mode;updateCostView();});
- $('cost-view').addEventListener('input',()=>{
+ for(const [id,mode] of [['cost-latest','latest'],['cost-breakeven','breakeven']])$(id).addEventListener('click',()=>{costViewMode=mode;updateCostView();if(mode==='breakeven'&&costViewMode==='latest')$('cost-view').focus();});
+ $('cost-view').addEventListener('input',event=>{
    if(costViewMode!=='latest')return;
-   const average=numeric($('cost-view').value),prior=realAverageState>0?realAverageState:numeric($('cost').value);
-   const credit=Number.isFinite(prior-numeric($('cost').value))?prior-numeric($('cost').value):0;
+   const average=numeric($('cost-view').value);
    realAverageState=average>0?average:null;
-   $('cost').value=Number.isFinite(average)?String(average-credit):'';
-   handleSingleEdit();
+   $('cost').value=average>0?String(average-costBasisCredit):'';
+   handleSingleEdit(event);
  });
  for(const id of ['current','support','cost','position','mirror','leverage'])$(id).addEventListener('input',handleSingleEdit);
  $('decimals').addEventListener('change',()=>{computeSingle();computeSequence();save();});
  $('auto-calc').addEventListener('change',()=>{if($('auto-calc').checked)computeSingle();save();});
  $('position-mode').addEventListener('change',()=>{priorMode='quantity';$('position-mode').value='quantity';modeLabels();handleSingleEdit();});
  $('contract-model').addEventListener('change',()=>{modeLabels();computeSingle();computeSequence();save();});
- $('reset-single').addEventListener('click',()=>{realAverageState=null;mirrorProfitRealized=0;mirrorProfitAllocated=0;costViewMode='latest';fillSingle(defaults.single);priorMode='quantity';computeSingle();save();toast('已恢复当前口径的第一组价格示例；镜像利润为 0');});
- $('clear-single').addEventListener('click',()=>{realAverageState=null;mirrorProfitRealized=0;mirrorProfitAllocated=0;costViewMode='latest';for(const id of ['current','support','cost','position'])$(id).value='';$('mirror').value='0';clearResults();updateConversion();$('single-error').hidden=true;$('single-info').hidden=true;save();$('current').focus();});
+ $('reset-single').addEventListener('click',()=>{realAverageState=null;mirrorProfitRealized=0;mirrorProfitAllocated=0;costBasisCredit=0;costViewMode='latest';fillSingle(defaults.single);priorMode='quantity';computeSingle();save();toast('已恢复当前口径的第一组价格示例；镜像利润为 0');});
+ $('clear-single').addEventListener('click',()=>{realAverageState=null;mirrorProfitRealized=0;mirrorProfitAllocated=0;costBasisCredit=0;costViewMode='latest';for(const id of ['current','support','cost','position'])$(id).value='';$('mirror').value='0';clearResults();updateConversion();$('single-error').hidden=true;$('single-info').hidden=true;save();$('current').focus();});
  $('carry-next').addEventListener('click',()=>{
    if(!lastSingle||lastSingle.addQty<=0||!lastSingle.feasible)return;const r=lastSingle;
    if(typeof window.VeilAddSizingCarry==='function')window.VeilAddSizingCarry(r);
@@ -710,6 +718,7 @@ tr.page-hidden{display:none}
  });
  try{
    const raw=JSON.parse(localStorage.getItem(STORAGE)||'null');
+   costBasisCredit=Number.isFinite(raw?.costBasisCredit)?raw.costBasisCredit:0;
    if(raw&&raw.single&&raw.sequence){$('contract-model').value=raw.side==='SHORT'?'short':'long';fillSingle({...defaults.single,...raw.single});fillSequence({...defaults.sequence,...raw.sequence});activeTab=raw.tab==='sequence'?'sequence':'single';realAverageState=Number.isFinite(raw.realAverageState)&&raw.realAverageState>0?raw.realAverageState:null;mirrorProfitRealized=Number.isFinite(raw.mirrorProfitRealized)?raw.mirrorProfitRealized:0;mirrorProfitAllocated=Number.isFinite(raw.mirrorProfitAllocated)?raw.mirrorProfitAllocated:0;}
    else{fillSingle(defaults.single);fillSequence(defaults.sequence);}
  }catch(_){$('contract-model').value='long';fillSingle(defaults.single);fillSequence(defaults.sequence);$('save-state').textContent='未启用本地保存';}
@@ -719,6 +728,7 @@ tr.page-hidden{display:none}
  const seedPrice=(value,digits)=>!(value>0)?'':Number.isInteger(digits)&&digits>=0&&digits<=12?value.toFixed(digits):String(value);
  window.AddPositionMath=Object.freeze({calculate:calc,parse:numeric,setSeed(seed){
    costViewMode='latest';
+   costBasisCredit=0;
    realAverageState=Number.isFinite(seed.realAverage)&&seed.realAverage>0?seed.realAverage:null;
    $('contract-model').value=seed.side==='SHORT'?'short':'long';
    mirrorProfitRealized=Number.isFinite(seed.mirrorProfitRealized)?seed.mirrorProfitRealized:0;
