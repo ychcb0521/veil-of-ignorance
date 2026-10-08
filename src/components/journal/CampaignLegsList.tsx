@@ -546,7 +546,7 @@ function AddSizingDetailDialog({
           <div className="rounded bg-muted/35 px-3 py-2 font-mono tabular-nums" data-testid="add-sizing-symbol-lines">
             S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − G / Q₁ = {fmtPrice(breakevenLine)}。
             有净利润落袋时 S₀ &lt; S₁。无旧仓时 S₀ 不适用。
-            Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，表示加仓前当前剩余币数，与加仓计算器的 Q 同义；不按保本线、成本线拆分。
+            Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，表示加仓前当前剩余币数，与加仓计算器的 Q₁ 同义；不按保本线、成本线拆分。
             Q₂ 为可加仓币量上限，Q₂实际为实际成交币量。
           </div>
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
