@@ -34,7 +34,7 @@ const [tpInput, slInput] = [0, 1].map(i => () => screen.getAllByPlaceholderText(
 const confirm = () => screen.getByRole('button', { name: '确认' }) as HTMLButtonElement;
 const setPct = (steps: number) => {
   const thumb = screen.getByRole('slider');
-  for (let i = 0; i < steps; i++) fireEvent.keyDown(thumb, { key: 'ArrowLeft' });
+  for (let i = 0; i < steps * 10; i++) fireEvent.keyDown(thumb, { key: 'ArrowLeft' });
 };
 
 describe('TpSlModal：单笔市价上限', () => {
@@ -63,17 +63,31 @@ describe('TpSlModal：单笔市价上限', () => {
     expect(onConfirm).toHaveBeenCalledWith(1.3, 1, 40);
   });
 
-  it('连最小的一格（10% = 5,000 张）都超过上限（止损 0.1 上一笔最多 2,000 张）：只说只能选 100%，不叫人把成数调小', () => {
-    renderModal();
+  it('取消10%门槛：止损0.1允许4%（2,000张），仍按交易所上限拦截5%，0%不生成委托', () => {
+    const onConfirm = renderModal();
     fireEvent.change(slInput(), { target: { value: '0.1' } });
     setPct(5);
     const atHalf = screen.getByTestId('tpsl-lot-size-warning');
     expect(atHalf).toHaveTextContent('止损（50% 仓位）：单笔市价单最多 2,000 张，这一单 25,000 张');
-    expect(atHalf).toHaveTextContent('连最小的一格（10%）都超过上限：只能选 100%（平掉整个仓位的不受此限）');
-    expect(atHalf).not.toHaveTextContent('调小');
+    expect(atHalf).toHaveTextContent('把成数调小');
     setPct(4);
     expect(screen.getByTestId('tpsl-lot-size-warning')).toHaveTextContent('止损（10% 仓位）：单笔市价单最多 2,000 张，这一单 5,000 张');
-    expect(screen.getByTestId('tpsl-lot-size-warning')).not.toHaveTextContent('调小');
+    expect(screen.getByTestId('tpsl-lot-size-warning')).toHaveTextContent('把成数调小');
     expect(confirm().disabled).toBe(true);
+    const thumb = screen.getByRole('slider');
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(thumb, { key: 'ArrowLeft' });
+    expect(thumb).toHaveAttribute('aria-valuenow', '5');
+    expect(confirm().disabled).toBe(true);
+    fireEvent.keyDown(thumb, { key: 'ArrowLeft' });
+    expect(thumb).toHaveAttribute('aria-valuenow', '4');
+    expect(screen.queryByTestId('tpsl-lot-size-warning')).toBeNull();
+    fireEvent.click(confirm());
+    expect(onConfirm).toHaveBeenCalledWith(null, 0.1, 4);
+    onConfirm.mockClear();
+    fireEvent.keyDown(thumb, { key: 'Home' });
+    expect(thumb).toHaveAttribute('aria-valuenow', '0');
+    expect(confirm().disabled).toBe(true);
+    fireEvent.click(confirm());
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

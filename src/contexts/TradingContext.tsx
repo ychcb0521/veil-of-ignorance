@@ -2893,7 +2893,7 @@ export function TradingProvider({ children }: { children: React.ReactNode }) {
         if (!(Number(px) > 0)) continue;
         const lot = checkLotSize({ symbol, settlement: pos.settlementMode, kind: 'market', units, price: Number(px) });
         if (!lot.ok) {
-          // 持仓卡弹窗的最小一格（10%）在这个触发价上也放不下：没有「调小」这条路，只剩 100%
+          // 同弹窗的比例选择精度检查最小正比例，避免建议一个仍超出交易所上限的数量。
           const smallestFits = checkLotSize({
             symbol, settlement: pos.settlementMode, kind: 'market',
             units: tpSlCloseUnits(pos, CARD_TPSL_PERCENT_STEP), price: Number(px),

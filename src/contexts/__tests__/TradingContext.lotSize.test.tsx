@@ -444,7 +444,7 @@ describe('触发 / 执行时再判：撤单留痕、消息中心说清', () => {
     stop(view);
   });
 
-  it('连最小的一格（10%）都超过上限（2,500,000 KAITO 的 10% = 250,000）：只说只能选 100%，不叫人把成数调小', () => {
+  it('10%超过上限时可继续调小：2,500,000 KAITO的8%=200,000，允许挂单', () => {
     const view = seedAndMount({ positions: [storedUsdtPosition('huge', 2_500_000)], price: 1 });
     const error = vi.spyOn(toast, 'error');
     const [pos] = openPositions(view);
@@ -452,8 +452,10 @@ describe('触发 / 执行时再判：撤单留痕、消息中心说清', () => {
     expect(view.result.current.ordersMap[SYMBOL] ?? []).toHaveLength(0);
     const last = errorCalls(error).at(-1)!;
     expect(last.title).toBe('止损（10% 仓位）：单笔市价单最多 200,000 KAITO，这一单 250,000 KAITO');
-    expect(last.description).toBe('币安 KAITOUSDT 的市价单单笔上限（快照 2026-09-23）。按成数挂的止盈止损触发后是一笔市价单，'
-      + '连最小的一格（10%）都超过上限：只能选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。');
+    expect(last.description).toBe('币安 KAITOUSDT 的市价单单笔上限（快照 2026-09-23）。按成数挂的止盈止损触发后是一笔市价单：把成数调小到不超过上限，'
+      + '或选 100%（平掉整个仓位的止盈止损不受单笔上限约束）。');
+    act(() => { view.result.current.handlePlaceTpSl(SYMBOL, pos, null, 0.9, 8); });
+    expect((view.result.current.ordersMap[SYMBOL] ?? []).map(o => o.quantity)).toEqual([200_000]);
     stop(view);
   });
 });

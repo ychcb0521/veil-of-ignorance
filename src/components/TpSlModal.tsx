@@ -49,13 +49,13 @@ export function TpSlModal({
    * 按各自的触发价判（合成币本位的张数上限随价变化）；100% 平掉整个仓位的不受限（相当于 closePosition）。
    */
   const lotRefusal = (() => {
-    if (!lotSizeCheck || pct >= 100) return null;
+    if (!lotSizeCheck || pct <= 0 || pct >= 100) return null;
     for (const [label, raw] of [['止盈', tpPrice], ['止损', slPrice]] as const) {
       const px = parseFloat(raw);
       if (!(px > 0)) continue;
       const verdict = lotSizeCheck(pct / 100, px);
       if (verdict.refusal) {
-        // 滑条最小一格（10%）在这个触发价上也放不下：没有「调小」这条路，只剩 100%
+        // 按可选择的最小正比例检查，交易所数量上限与比例滑条分开处理。
         const smallestFits = lotSizeCheck(CARD_TPSL_PERCENT_STEP / 100, px).refusal == null;
         return { label, check: verdict.refusal, smallestFits };
       }
@@ -67,7 +67,7 @@ export function TpSlModal({
     const tp = tpPrice ? parseFloat(tpPrice) : null;
     const sl = slPrice ? parseFloat(slPrice) : null;
     if (tp === null && sl === null) return;
-    if (lotRefusal) return;
+    if (lotRefusal || pct <= 0) return;
     onConfirm(tp, sl, pct);
   };
 
@@ -141,12 +141,12 @@ export function TpSlModal({
             </div>
             <div className="px-2.5 pt-4">
               <Slider
-                aria-label="平仓比例，最少 10%"
+                aria-label="平仓比例"
                 value={[pct]}
                 min={0}
                 max={100}
                 step={CARD_TPSL_PERCENT_STEP}
-                onValueChange={([v]) => setPct(Math.max(CARD_TPSL_PERCENT_STEP, v))}
+                onValueChange={([v]) => setPct(v)}
                 className="h-5 [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&>span:first-child>span]:bg-amber-500 [&_[role=slider]]:border-amber-500 [&_[role=slider]]:shadow-sm"
               />
               <div aria-hidden="true" className="relative mt-1 h-2">
@@ -160,11 +160,12 @@ export function TpSlModal({
               </div>
               <div aria-hidden="true" className="relative mt-1 h-4 font-mono text-[10px] tabular-nums text-muted-foreground">
                 <span className="absolute left-0 -translate-x-1/2">0%</span>
+                <span className="absolute left-1/4 -translate-x-1/2">25%</span>
                 <span className="absolute left-1/2 -translate-x-1/2 font-medium text-amber-600 dark:text-amber-400">50%</span>
+                <span className="absolute left-3/4 -translate-x-1/2">75%</span>
                 <span className="absolute right-0 translate-x-1/2">100%</span>
               </div>
             </div>
-            <p className="mt-2 text-center text-[10px] text-muted-foreground">最少 {CARD_TPSL_PERCENT_STEP}% · 每格 {CARD_TPSL_PERCENT_STEP}%</p>
           </div>
 
           {lotRefusal && (
@@ -189,7 +190,7 @@ export function TpSlModal({
           {/* Confirm */}
           <button
             onClick={handleConfirm}
-            disabled={(!tpPrice && !slPrice) || lotRefusal != null}
+            disabled={(!tpPrice && !slPrice) || pct <= 0 || lotRefusal != null}
             className="w-full py-2.5 rounded-lg bg-amber-500 text-black text-sm font-bold hover:bg-amber-400 active:scale-[0.98] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             确认

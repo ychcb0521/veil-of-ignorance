@@ -710,10 +710,10 @@ export function formatClosePercent(fraction: number): string {
 }
 
 /**
- * 持仓卡「止盈/止损」弹窗的成数滑条：最小一格 10%、每格 10%。按成数挂的止盈止损超过单笔上限时，
- * 连这一格都放不下就只剩 100%（平掉整个仓位的不受限）——别叫人「把成数调小」，滑条上没有更小的数。
+ * 持仓卡「止盈/止损」弹窗的比例选择精度。轨道覆盖 0–100%，实际委托须有正数量。
+ * 合约的最小数量、数量步长和单笔上限由交易所数量规则处理，不额外设置 10% 门槛。
  */
-export const CARD_TPSL_PERCENT_STEP = 10;
+export const CARD_TPSL_PERCENT_STEP = 1;
 
 /**
  * 引擎给一笔仓位按成数平掉多少（与 handleClosePosition / tpSlCloseUnits 同一个取整）。
