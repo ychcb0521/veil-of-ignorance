@@ -3,16 +3,14 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
-import {
-  detectBankedMirrorProfit,
-} from '@/lib/addSizing';
+import { addSizingProfitRecords, verifiedAddSizingProfit } from '@/lib/addSizingVerifiedProfit';
 import { getPriceDecimals } from '@/lib/formatters';
 import { checkLotSize } from '@/lib/marketLotSize';
 import { LIVE_PRICE_TIER_HEADROOM } from '@/lib/positionLimit';
 import { addTierHeadroom } from '@/lib/addTierHeadroom';
 import { getFreshAddSizingPlan, publishAddSizingPlan, requestAddSizingPrefill, touchAddSizingPlan } from '@/lib/addSizingPlan';
 import { pickHeldSide, readHeldPosition, roundLimitPriceFavorable, sizeAddAtExpectedFill, type AddOrderKind, type AddSide } from '@/lib/addSizing';
-import { addRealizedMirrorProfit, calculateAddPosition, initialAddPositionState, type AddPositionResult, type AddPositionState } from '@/lib/addPositionCoverage';
+import { calculateAddPosition, initialAddPositionState, type AddPositionResult, type AddPositionState } from '@/lib/addPositionCoverage';
 import type { AddSizingSnapshot, SettlementMode } from '@/types/trading';
 import calculatorHtml from '@/assets/addSizingCalculator.html?raw';
 
@@ -64,6 +62,16 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
   const [reading, setReading] = useState<{ raw: CalculatorReading; result: AddPositionResult } | null>(null);
   const [orderKind, setOrderKind] = useState<AddOrderKind>('limit');
   const [frameError, setFrameError] = useState(false);
+  const [selectedSide, setSelectedSide] = useState<AddSide | null>(null);
+  const [verifiedProfit, setVerifiedProfit] = useState<{ key: string; usd: number; complete: boolean } | null>(null);
+  const profitGeneration = useRef(0);
+  const profitSide = selectedSide ?? pickHeldSide(symbol, positions, face)?.side ?? 'LONG';
+  const heldSide = readHeldPosition(symbol, positions, profitSide, face);
+  const profitRecords = useMemo(() => addSizingProfitRecords(symbol, heldSide?.side ?? 'LONG', ctx.tradeHistory,
+    heldSide?.earliestOpenTime ?? null, heldSide?.earliestOpenedRealAt ?? null),
+  [symbol, heldSide?.side, heldSide?.earliestOpenTime, heldSide?.earliestOpenedRealAt, ctx.tradeHistory]);
+  const profitKey = `${symbol}:${profitSide}:${heldSide?.earliestOpenedRealAt}:${heldSide?.earliestOpenTime}:`
+    + profitRecords.map(record => `${record.id}:${record.fillId}:${record.settlementMode}:${record.pnl}:${record.entryPrice}:${record.exitPrice}:${record.closeTime}:${record.quantity}:${record.contracts}:${record.contractSizeUsd}`).join('|');
 
   const fingerprintFor = useCallback((side: AddSide) => {
     const held = readHeldPosition(symbol, positions, side, face);
@@ -85,7 +93,7 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     return { raw, result };
   }, [fingerprintFor]);
 
-  const onFrameLoad = useCallback(() => {
+  const onFrameLoad = useCallback(async () => {
     const child = frameRef.current?.contentWindow as CalculatorFrame | null;
     if (!child?.AddPositionMath) {
       setFrameError(true);
@@ -94,23 +102,35 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     const current = latestRef.current;
     // latestRef 里的 positions 已经是这个标的自己的那一组（ctx.positionsMap[symbol]），不能再按标的取一次：
     // 那样读到的永远是 undefined——持仓的均价与币数填不进去，真实均价还被种成 0，之后怎么填都报「须为有效数字」。
-    const held = pickHeldSide(current.symbol, current.positions, current.face);
-    const side = held?.side ?? 'LONG';
+    const side = profitSide;
+    const held = readHeldPosition(current.symbol, current.positions, side, current.face);
     const fingerprint = fingerprintFor(side);
     const prior = current.saved[`${current.symbol}:${side}`];
-    const banked = held ? detectBankedMirrorProfit(current.symbol, side, current.ctx.tradeHistory,
-      held.earliestOpenTime ?? null, current.positions, { earliestOpenedRealAt: held.earliestOpenedRealAt ?? null }) : null;
-    const initialProfit = Math.max(0, banked?.usd ?? 0);
+    const generation = ++profitGeneration.current;
+    setReady(false);
+    setVerifiedProfit(null);
+    const verified = profitRecords.length ? await verifiedAddSizingProfit(current.symbol, side, profitRecords)
+      .catch(() => ({ complete: false, usd: 0 })) : { complete: true, usd: 0 };
+    if (generation !== profitGeneration.current) return;
+    setVerifiedProfit({ key: profitKey, ...verified });
+    if (!verified.complete) return;
+    const initialProfit = Math.max(0, verified.usd);
     const carried = prior?.fingerprint === fingerprint ? prior.state : null;
-    const state = carried
-      ? initialProfit > carried.mirrorProfitRealized
-        ? addRealizedMirrorProfit(carried, initialProfit - carried.mirrorProfitRealized)
-        : { ...carried, mirrorProfitRealized: Math.max(carried.mirrorProfitAllocated, initialProfit),
-          mirrorProfitAvailable: Math.max(0, initialProfit - carried.mirrorProfitAllocated) }
-      : initialAddPositionState(held?.avgEntry ?? 0, held?.coins ?? 0, initialProfit);
+    // Rebase carried simulations on the actual position and verified net profit.
+    // A realized loss also consumes the old cushion; clipping G to zero would enlarge it.
+    const allocated = Math.min(carried?.mirrorProfitAllocated ?? 0, initialProfit);
+    const lineCredit = Math.min(allocated, verified.usd);
+    const actualAverage = held?.avgEntry ?? 0;
+    const actualCoins = held?.coins ?? 0;
+    const strategyCost = actualCoins > 0 ? actualAverage - lineCredit * (side === 'SHORT' ? -1 : 1) / actualCoins : actualAverage;
+    const state = { ...initialAddPositionState(strategyCost, actualCoins, initialProfit, actualAverage),
+      mirrorProfitAllocated: allocated, mirrorProfitAvailable: Math.max(0, verified.usd - lineCredit) };
     const candidate = getFreshAddSizingPlan(current.symbol);
     const existing = candidate?.side === side ? candidate : null;
-    child.VeilAddSizingBridge = raw => setReading(calculateReading(raw));
+    child.VeilAddSizingBridge = raw => {
+      if (raw) setSelectedSide(raw.side);
+      setReading(calculateReading(raw));
+    };
     child.VeilAddSizingCarry = raw => {
       const outcome = calculateReading(raw);
       if (!outcome?.result.next) return;
@@ -136,29 +156,41 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     });
     if (existing) setOrderKind(existing.orderKind);
     setReady(true);
-  }, [calculateReading, currentPrice, fillBasePrice, fingerprintFor, setSaved]);
+  }, [calculateReading, currentPrice, fillBasePrice, fingerprintFor, setSaved, profitKey, profitRecords, profitSide]);
+
+  const reloadProfit = useRef(onFrameLoad);
+  reloadProfit.current = onFrameLoad;
+  useEffect(() => {
+    profitGeneration.current += 1;
+    if (open && (frameRef.current?.contentWindow as CalculatorFrame | null)?.AddPositionMath) void reloadProfit.current();
+  }, [open, profitKey]);
 
   const execution = useMemo(() => {
-    if (!reading || !open) return null;
+    if (!reading || !open || reading.raw.side !== profitSide) return null;
     const { raw, result } = reading;
     const held = readHeldPosition(symbol, positions, raw.side, face);
     // Simulated subsequent rounds remain viewable; an order plan needs the actual held coins and cost.
     if (!held || !closeEnough(held.coins, raw.Q) || !closeEnough(held.avgEntry, raw.realAverage)) return null;
+    if (!verifiedProfit?.complete || verifiedProfit.key !== profitKey) return null;
     // A typed strategy line must not manufacture a new risk cushion for a live order.
     const allocated = saved[`${symbol}:${raw.side}`];
-    const knownAllocated = allocated?.fingerprint === fingerprintFor(raw.side) ? allocated.state.mirrorProfitAllocated : 0;
+    const savedAllocated = allocated?.fingerprint === fingerprintFor(raw.side) ? allocated.state.mirrorProfitAllocated : 0;
+    const knownAllocated = Math.min(savedAllocated, verifiedProfit.usd);
     const lineBudget = (raw.realAverage - raw.S) * (raw.side === 'SHORT' ? -1 : 1) * raw.Q;
     // 策略成本线在输入框里按开仓价的显示位数写（2.8489），真实均价是完整精度（2.84893…）：
     // 差出半个显示刻度以内的，是同一条线的两种写法，不是手填出来的新风险垫。
     const lineTolerance = raw.Q * 0.5 * 10 ** -getPriceDecimals(raw.realAverage);
     const budgetFromLine = Math.abs(lineBudget - knownAllocated) <= lineTolerance ? knownAllocated : lineBudget;
-    if (budgetFromLine < -1e-8 || !closeEnough(budgetFromLine, knownAllocated)) return null;
+    if (!closeEnough(budgetFromLine, knownAllocated)) return null;
+    const requestedBanked = budgetFromLine + raw.P;
+    if (requestedBanked > verifiedProfit.usd + Math.max(1e-8, Math.abs(verifiedProfit.usd) * 1e-8)) return null;
     const settlement: SettlementMode = (positions ?? []).find(p => p?.side === raw.side)?.settlementMode ?? ctx.getSymbolSettlementMode(symbol);
     const isCoin = settlement === 'coin';
     const decimals = pricePrecision != null && Number.isFinite(pricePrecision) ? pricePrecision : getPriceDecimals(raw.T);
     const refPrice = orderKind === 'market' ? seedPx : roundLimitPriceFavorable(raw.T, decimals, raw.side);
     if (!(refPrice > 0)) return null;
-    const availableU = result.oldCushion + raw.P;
+    const availableU = Math.min(result.oldCushion + raw.P,
+      raw.Q * (raw.K - held.avgEntry) * (raw.side === 'SHORT' ? -1 : 1) + verifiedProfit.usd);
     const guarded = sizeAddAtExpectedFill({
       side: raw.side, settlement, coverage: isCoin ? availableU / raw.K : availableU,
       s1: raw.K, s2Ref: refPrice, orderKind, contractFaceUsd: isCoin ? face : null,
@@ -189,6 +221,7 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     // is the same budget expressed against the real average, without repledging old P.
     const virtualBankedU = budgetFromLine + raw.P;
     const snapshot: Omit<AddSizingSnapshot, 'at'> = {
+      profitBasis: 'verified_net',
       plan: Math.abs(virtualBankedU) > 1e-12 ? 'B' : 'A', side: raw.side, settlement,
       s1: raw.K, s2Ref: refPrice, s2Fill: guarded.s2Fill, slippagePct: guarded.slippagePct,
       x1: raw.Q, sBar: raw.realAverage,
@@ -197,13 +230,15 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
       addCoinsMax: placeableCoins, contracts, orderKind,
     };
     return { snapshot, coins: placeableCoins, contracts, refPrice, settlement };
-  }, [reading, open, symbol, positions, face, ctx, pricePrecision, quantityPrecision, orderKind, seedPx, saved, fingerprintFor]);
+  }, [reading, open, symbol, positions, face, ctx, pricePrecision, quantityPrecision, orderKind, seedPx, saved, fingerprintFor, verifiedProfit, profitKey, profitSide]);
 
   useEffect(() => {
     if (!open) {
+      profitGeneration.current += 1;
       setReady(false);
       setReading(null);
       setFrameError(false);
+      setSelectedSide(null);
     }
   }, [open]);
   useEffect(() => {
@@ -236,8 +271,10 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
         {frameError && <div className="px-4 py-2 text-sm text-destructive">加仓计算器未能加载，请关闭后重试。</div>}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-[#f4f6fa] px-4 py-2 text-xs text-[#182536]">
           <span className="mr-auto text-[#6c7889]">{reading && !execution
-            ? '可继续模拟；仅实际持仓、已承接利润与交易规则一致时才能带入下单。'
-            : '理论结果按输入价格计算；下单量按实际委托价和交易规则向下收敛。'}</span>
+            ? '可继续模拟；带入下单的利润不能超过本轮已核验的落袋净收益。'
+            : verifiedProfit?.complete ? '理论结果按输入价格计算；下单量按实际委托价和交易规则向下收敛。'
+              : verifiedProfit ? '落袋收益核验暂未完成，请重试。' : '正在核对本轮落袋收益…'}</span>
+          {verifiedProfit && !verifiedProfit.complete && <button type="button" onClick={() => void onFrameLoad()}>重新核验</button>}
           <select aria-label="下单方式" value={orderKind} onChange={event => setOrderKind(event.target.value as AddOrderKind)}
             className="rounded-lg border border-[#dce3eb] bg-white px-2 py-1.5">
             <option value="market">市价（含滑点）</option>

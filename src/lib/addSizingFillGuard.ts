@@ -32,6 +32,7 @@ import {
   type PostFillAddSizing,
 } from '@/lib/addSizing';
 import { getCoinMarginedContractSizeUsd, getSettlementAsset } from '@/lib/coinMargined';
+import { addSizingProfitRecords, cachedVerifiedAddSizingProfit } from '@/lib/addSizingVerifiedProfit';
 import { PRE_MAIN_LOOKBACK_MS, pickBookLine, readHedgeLines } from '@/lib/hedgeLines';
 import { toast } from '@/lib/notificationCenter';
 import { getPositionNotionalUsd, isCoinSettled, isPositionOpen } from '@/lib/tradingSettlement';
@@ -125,7 +126,12 @@ export function evaluateMarketAddFill(input: MarketAddFillGuardInput): MarketAdd
 
   const banked = detectBankedMirrorProfit(symbol, side, input.tradeHistory, summary.earliestOpenTime, held,
     { earliestOpenedRealAt: summary.earliestOpenedRealAt });
-  const g = isCoin ? banked.coin : banked.usd;
+  const verified = snapshot.profitBasis === 'verified_net' ? cachedVerifiedAddSizingProfit(symbol, side,
+    addSizingProfitRecords(symbol, side, input.tradeHistory, summary.earliestOpenTime, summary.earliestOpenedRealAt)) : null;
+  // Never emit an over/under-size verdict from a different profit source. A changed
+  // history without verification is unknown; campaign review can verify it later.
+  if (snapshot.profitBasis === 'verified_net' && !verified) return null;
+  const g = verified ? (isCoin ? verified.usd / s1 : verified.usd) : (isCoin ? banked.coin : banked.usd);
   const verdict = evaluatePostFillAddSizing({
     side, settlement: input.settlement, sBar: summary.avgEntry, s1, x1: summary.coins, g,
     s2Ref: referencePrice, s2Fill: fillPrice, addCoins, contractFaceUsd: isCoin ? face : null,

@@ -1892,6 +1892,12 @@ describe('【回归 · 三审】顶栏把面板的精度交给计算器', () => 
     act(() => bridge({ T: 3_500, K: 3_490, S: 3_400, Q: 2_000, P: 0,
       realAverage: 3_400, side: 'LONG', addQty: 18_000 }));
     expect(screen.getByRole('button', { name: /按上限下单/ })).toBeEnabled();
+    // 手填或缓存的 P 不能在真实下单计划中制造不存在的落袋收益。
+    act(() => bridge({ T: 3_500, K: 3_490, S: 3_400, Q: 2_000, P: 50,
+      realAverage: 3_400, side: 'LONG', addQty: 18_005 }));
+    expect(screen.getByRole('button', { name: /按上限下单/ })).toBeDisabled();
+    act(() => bridge({ T: 3_500, K: 3_490, S: 3_400, Q: 2_000, P: 0,
+      realAverage: 3_400, side: 'LONG', addQty: 18_000 }));
     fireEvent.click(screen.getByRole('button', { name: /按上限下单/ }));
     expect(getAddSizingPlan('RAVEUSDT')?.prefill?.coins).toBe(18_000);
   });

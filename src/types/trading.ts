@@ -56,6 +56,8 @@ export type TriggerOperator = ">=" | "<=";
  * 加一个可选字段不需要任何表结构变更；老数据没有这个字段（undefined）。
  */
 export interface AddSizingSnapshot {
+  /** New calculator plans use the same verified net profit as campaign checks. */
+  profitBasis?: 'verified_net';
   /** 计划最后一次仍然现行的真实时刻（Date.now()）：发布、或计算器关闭时续上；保鲜期从它算起。 */
   at: number;
   /** A = G 为 0（Plan B 与 Plan A 同值）；B = G ≠ 0。 */

@@ -261,6 +261,35 @@ export async function fetchLegExitPriceCorrections(
   return (await fetchLegExitPriceCorrectionsResult(symbol, legs, tradeRecords, fetchPriceAt)).corrections;
 }
 
+/** Live add sizing uses the same last-cut correction and request cache as campaign reviews. */
+export async function verifyAddSizingRealizedRecords(
+  symbol: string,
+  records: TradeRecord[],
+  fetchPriceAt: CanonicalTimePriceFetcher = fetchCanonicalTimePriceAt,
+): Promise<{ records: TradeRecord[]; complete: boolean }> {
+  const latestByFill = new Map<string, TradeRecord>();
+  for (const record of records) {
+    const key = record.fillId ?? record.id;
+    const prior = latestByFill.get(key);
+    if (!prior || record.closeTime > prior.closeTime) latestByFill.set(key, record);
+  }
+  const checked = await Promise.all([...latestByFill.values()].map(async record => {
+    if (isLiquidationRecord(record)) return { id: record.id, failed: false, pnl: record.pnl };
+    if (!(record.closeTime > 0) || !(record.exitPrice > 0) || !Number.isFinite(record.pnl)) {
+      return { id: record.id, failed: true, pnl: record.pnl };
+    }
+    const outcome = await fetchCachedCanonicalTimePrice(symbol, record.closeTime, fetchPriceAt);
+    const correction = buildLegExitPriceCorrection(record.exitPrice, outcome.price);
+    const delta = correction ? buildTradeRecordPnlCorrection(record, correction) : null;
+    return { id: record.id, failed: outcome.failed, pnl: delta?.correctedNetPnl ?? record.pnl };
+  }));
+  const pnlById = new Map(checked.map(item => [item.id, item.pnl]));
+  return {
+    records: records.map(record => pnlById.has(record.id) ? { ...record, pnl: pnlById.get(record.id)! } : record),
+    complete: checked.every(item => !item.failed),
+  };
+}
+
 export function resolveLegExecution(
   leg: TradeJournal,
   record: TradeRecord | null,

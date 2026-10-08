@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrderPanel } from '@/components/OrderPanel';
@@ -427,7 +427,7 @@ describe('【分层】按分层余量预填的单：面板放行，多一张就�
 describe('【复核 v1】突破加仓（条件单）：计算器单看这一单的余量按触发价那一道算，与面板「可开」同一个数', () => {
   beforeEach(() => { tierSeam.wide = false; });
 
-  it('KAITOUSDT 15x、多 20,000 @0.9（现价 1.0）、触发价 1.2：可开 21,666.66 币（触发时 24,000 + 26,000）；预填不标红，多 1 个币就按触发价标红', () => {
+  it('KAITOUSDT 15x、多 20,000 @0.9（现价 1.0）、触发价 1.2：可开 21,666.66 币（触发时 24,000 + 26,000）；预填不标红，多 1 个币就按触发价标红', async () => {
     panel.mode = 'usdt';
     panel.leverage = 15;
     const held = {
@@ -443,13 +443,15 @@ describe('【复核 v1】突破加仓（条件单）：计算器单看这一单�
     expect(room.coins).toBeCloseTo(26_000 / 1.2, 6);
     const onPlaceOrder = renderPanel(vi.fn(), 'KAITOUSDT', { price: 1, quantityPrecision: 2 });
     act(() => {
-      requestAddSizingPrefill('KAITOUSDT', snapshot({ settlement: 'usdt', gUnit: 'USD', contracts: null, orderKind: 'conditional', s2Ref: 1.2, s2Fill: 1.2001 }),
+      requestAddSizingPrefill('KAITOUSDT', snapshot({ settlement: 'usdt', gUnit: 'USD', contracts: null,
+        sBar: 0.9, x1: 20_000, s1: 1.19, g: 0, orderKind: 'conditional', s2Ref: 1.2, s2Fill: 1.2001 }),
         { contracts: null, coins: room.coins, orderType: 'CONDITIONAL', limitPrice: null, triggerPrice: 1.2, side: 'LONG', settlement: 'usdt' });
     });
     expect(qtyInput().value).toBe('21666.66');
     expect(screen.getByTestId('max-open-LONG-main')).toHaveTextContent('21,666.66 KAITO');
     expect(screen.queryByTestId('position-limit-warning')).toBeNull();
     fireEvent.click(screen.getByText('开多'));
+    await waitFor(() => expect(onPlaceOrder).toHaveBeenCalled());
     expect(onPlaceOrder.mock.calls[0][0]).toMatchObject({ type: 'CONDITIONAL', stopPrice: 1.2, quantity: 21_666.66 });
     fireEvent.change(qtyInput(), { target: { value: '21667.66' } });
     expect(screen.getByTestId('position-limit-warning')).toHaveTextContent(`按触发价 ${formatPrice(1.2)} 估值：`);
