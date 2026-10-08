@@ -132,22 +132,39 @@ export function TpSlModal({
           </div>
 
           {/* Quantity slider */}
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">平仓数量</span>
-              <span className="font-mono font-bold text-foreground">{pct}%</span>
+          <div className="rounded-xl border border-border/70 bg-secondary/30 px-3 py-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">平仓数量</span>
+              <span className="inline-flex min-w-14 items-center justify-center rounded-lg bg-amber-500/10 px-2 py-1 font-mono text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">
+                {pct}%
+              </span>
             </div>
-            <Slider
-              value={[pct]}
-              min={CARD_TPSL_PERCENT_STEP}
-              max={100}
-              step={CARD_TPSL_PERCENT_STEP}
-              onValueChange={([v]) => setPct(v)}
-            />
-            <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-              <span>{CARD_TPSL_PERCENT_STEP}%</span>
-              <span>100%</span>
+            <div className="px-2.5 pt-4">
+              <Slider
+                aria-label="平仓比例，最少 10%"
+                value={[pct]}
+                min={0}
+                max={100}
+                step={CARD_TPSL_PERCENT_STEP}
+                onValueChange={([v]) => setPct(Math.max(CARD_TPSL_PERCENT_STEP, v))}
+                className="h-5 [&>span:first-child]:h-1.5 [&>span:first-child]:bg-border [&>span:first-child>span]:bg-amber-500 [&_[role=slider]]:border-amber-500 [&_[role=slider]]:shadow-sm"
+              />
+              <div aria-hidden="true" className="relative mt-1 h-2">
+                {[0, 25, 50, 75, 100].map(tick => (
+                  <span
+                    key={tick}
+                    className={`absolute top-0 w-px -translate-x-1/2 ${tick === 50 ? 'h-2 bg-amber-500/60' : 'h-1 bg-border'}`}
+                    style={{ left: `${tick}%` }}
+                  />
+                ))}
+              </div>
+              <div aria-hidden="true" className="relative mt-1 h-4 font-mono text-[10px] tabular-nums text-muted-foreground">
+                <span className="absolute left-0 -translate-x-1/2">0%</span>
+                <span className="absolute left-1/2 -translate-x-1/2 font-medium text-amber-600 dark:text-amber-400">50%</span>
+                <span className="absolute right-0 translate-x-1/2">100%</span>
+              </div>
             </div>
+            <p className="mt-2 text-center text-[10px] text-muted-foreground">最少 {CARD_TPSL_PERCENT_STEP}% · 每格 {CARD_TPSL_PERCENT_STEP}%</p>
           </div>
 
           {lotRefusal && (
