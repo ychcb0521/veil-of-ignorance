@@ -68,6 +68,9 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
     expect(header.nextElementSibling).toBe(fees);
     expect(header.getAttribute('title')).toContain('X₂(S₂ − S₁)');
+    expect(header.getAttribute('title')).toContain('止损线不必越过旧仓成本线');
+    expect(header.getAttribute('title')).toContain('G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险');
+    expect(header.getAttribute('title')).toContain('币本位同样取成交时的已实现金额，不按止损线重估');
   });
 
   it('【回归】TUTUSDT 加仓1 仓位过大：红色放大的叉 + 正确币量上限 + U 折算额', () => {
@@ -100,6 +103,8 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(dialog.textContent).toContain('④ 每币风险');
     expect(dialog.textContent).toContain('⑤ 正确币量上限');
     expect(dialog.textContent).toContain('实际新仓最大预期亏损');
+    expect(dialog.textContent).toContain('止损线不必越过旧仓成本线');
+    expect(dialog.textContent).toContain('G 取加仓前实际已实现的 USDT 净额');
   });
 
   it('仓位合规：几乎隐形的小对号，不带红色', () => {
@@ -180,6 +185,54 @@ describe('Legs 列表的「加仓校验」列', () => {
     const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
     expect(phaseRows).toHaveLength(3);
     for (const row of phaseRows) expect(row.children.length).toBe(headerCells);
+  });
+});
+
+describe('止损线仍低于成本线时，已落袋收益可覆盖加仓', () => {
+  const openedAt = Date.parse('2026-08-07T11:41:00.000Z');
+  const addAt = openedAt + 2 * 60_000;
+
+  const renderBelowCost = (banked: number) => render(
+    <MemoryRouter>
+      <CampaignLegsList
+        legs={[
+          legFor({ id: 'main', pre_entry_price: 100, pre_position_size: 10_000 }),
+          legFor({
+            id: 'mirror', leg_role: 'mirror_tp', leg_sequence: 2,
+            pre_entry_price: 100, pre_position_size: 3_000,
+            post_simulated_close_time: new Date(openedAt + 60_000).toISOString(),
+            post_exit_price_snapshot: 100 + banked / 30, post_realized_pnl: banked,
+          }),
+          legFor({
+            id: 'add1', leg_role: 'main_add_1', leg_sequence: 3,
+            pre_simulated_time: new Date(addAt).toISOString(),
+            pre_entry_price: 110, pre_position_size: 1_100,
+          }),
+        ]}
+        tradeRecords={[]}
+        reverseHedgeOrders={[{
+          id: 'below-cost-stop', side: 'SHORT', price: 99, status: 'pending',
+          createdAt: addAt - 1_000, triggeredAt: null, cancelledAt: null,
+        }]}
+        initialExpectedMaxLoss={1_000}
+      />
+    </MemoryRouter>,
+  );
+
+  it('旧仓在止损线亏 100 U，落袋 300 U 足以覆盖新增 110 U 风险：显示合规', () => {
+    renderBelowCost(300);
+    expect(screen.getByTestId('add-sizing-check-ok-add1').textContent).toBe('✓');
+    expect(screen.queryByTestId('add-sizing-check-fail-add1')).toBeNull();
+  });
+
+  it('虽有落袋收益，但覆盖旧仓亏损后不足以承担新增风险：保留红叉与缺口', () => {
+    renderBelowCost(150);
+    fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
+    expect(screen.queryByTestId('add-sizing-check-ok-add1')).toBeNull();
+    const detail = screen.getByTestId('add-sizing-detail-dialog');
+    expect(detail.textContent).toContain('Y₁ + G = -100.00 U + +150.00 U = +50.00 U');
+    expect(detail.textContent).toContain('实际新仓最大预期亏损 110.00 U，可用覆盖额 50.00 U');
+    expect(detail.textContent).toContain('尚缺 60.00 U');
   });
 });
 

@@ -56,6 +56,28 @@ export function addRealizedMirrorProfit(state: AddPositionState, profit: number)
   };
 }
 
+/**
+ * Shared by live sizing and campaign validation. All amounts use price × coins (U).
+ * A stop below cost is allowed: banked profit first covers the old loss, then new risk.
+ * Keep the signed budget so realized losses cannot silently become extra allowance.
+ */
+export function calculateAddRiskBudget(oldCushion: number, bankedProfit: number, riskPerCoin: number) {
+  if (![oldCushion, bankedProfit, riskPerCoin].every(Number.isFinite) || riskPerCoin <= 0) return null;
+  const available = oldCushion + bankedProfit;
+  const oldLoss = Math.max(0, -oldCushion);
+  // Preserve the live calculator's split and full-precision arithmetic order.
+  const baseCoins = Math.max(0, oldCushion + Math.min(0, bankedProfit)) / riskPerCoin;
+  const bankedCoins = Math.max(0, bankedProfit - oldLoss) / riskPerCoin;
+  return {
+    available,
+    oldLoss,
+    shortfall: Math.max(0, -available),
+    baseCoins,
+    bankedCoins,
+    maxAddCoins: baseCoins + bankedCoins,
+  };
+}
+
 export function calculateAddPosition({ currentPrice: T, support: K, state, side = 'LONG' }: AddPositionInput): AddPositionResult {
   const { strategyCost: S, realAverage, coins: Q, mirrorProfitAvailable: P,
     mirrorProfitRealized, mirrorProfitAllocated } = state;
@@ -77,15 +99,17 @@ export function calculateAddPosition({ currentPrice: T, support: K, state, side 
   const safeDistance = (K - S) * direction;
   const riskDistance = (T - K) * direction;
   const oldCushion = safeDistance * Q;
-  const oldLoss = Math.max(0, -oldCushion);
+  const budget = calculateAddRiskBudget(oldCushion, P, riskDistance);
+  if (!budget) return blank('invalid_input');
+  const oldLoss = budget.oldLoss;
   if (P < oldLoss && oldLoss - P > 64 * Number.EPSILON * Math.max(1, P, oldLoss)) {
     return blank('mirror_profit_insufficient', oldLoss - P);
   }
 
-  const baseCoins = Math.max(0, oldCushion) / riskDistance;
+  const baseCoins = budget.baseCoins;
   const mirrorRiskBudget = Math.max(0, P - oldLoss);
-  const mirrorCoins = mirrorRiskBudget / riskDistance;
-  const addCoins = baseCoins + mirrorCoins;
+  const mirrorCoins = budget.bankedCoins;
+  const addCoins = budget.maxAddCoins;
   const newCoins = Q + addCoins;
   const newRealAverage = (Q * realAverage + addCoins * T) / newCoins;
   const expectedNewLoss = addCoins * riskDistance;

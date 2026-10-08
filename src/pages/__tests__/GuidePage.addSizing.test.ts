@@ -203,6 +203,18 @@ describe('指南：加仓计算器的 S₂ 是预计成交价', () => {
     expect(sizing.indexOf('usd += r.pnl;')).toBeLessThan(sizing.indexOf("r.exit_method === 'tp1' && (realStart != null || heldIds.size === 0)"));
   });
 
+  it('战役加仓校验与新加仓模块一致：止损未过成本线也可用实际落袋净 U 覆盖风险', () => {
+    const campaignCheckSection = guide.slice(
+      guide.indexOf('<li><strong>「加仓校验」列</strong>'),
+      guide.indexOf('<li><strong>镜像止盈即使没有触发'),
+    );
+    expect(campaignCheckSection).toContain('U 本位与币本位的 G 都取实际已实现净 U，不按 S₁ 重估');
+    expect(campaignCheckSection).toContain('<strong>止损线不必越过旧仓成本线</strong>');
+    expect(campaignCheckSection).toContain('先用已落袋 G 覆盖这部分亏损，剩余额度才可覆盖新加仓的风险');
+    expect(campaignCheckSection).toContain('仅有落袋收益不代表任意仓位都合规');
+    expect(campaignCheckSection).not.toContain('币本位 G 按 S₁ 折成 U');
+  });
+
   it('【用户要求】仓位卡：保本线 / 开仓均价共用一格、默认保本线、落袋利润只算镜像止盈——指南与实现对得上', () => {
     expect(guide).toContain('<span className="guide-note__title">仓位卡的保本线与开仓均价</span>');
     expect(guide).toContain('<strong>「保本线」与「开仓均价」共用一格</strong>');

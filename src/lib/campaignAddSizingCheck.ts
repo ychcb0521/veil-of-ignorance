@@ -1,11 +1,12 @@
 /**
  * Legs 表「加仓校验」列：每一笔加仓的仓位大小是否合规。
  *
- * 规则来自加仓计算器（addSizing.ts）与使用说明 3.4 —— 镜像止盈落袋后统一按 Plan B 判：
+ * 规则与最新加仓计算器（addPositionCoverage.ts）共享覆盖预算：
  *   Y₁        加仓那一刻仍持有的旧仓，退回 S₁ 时的净浮盈（逐腿按剩余币量计算，可为负）
  *   G         本轮持仓加仓之前已经落袋的净已实现盈亏
  *   加仓合规 ⇔ Y₁ + G ≥ X₂ (S₂ − S₁)（主多；主空符号翻转）
  * 即「价格退回 S₁ 时，旧仓浮盈垫 + 已落袋的净盈亏足以抹平新加仓最大预期亏损」。
+ * S₁ 不必越过旧仓成本线：G 先补旧仓亏损，余额才可承担新加仓风险。
  *
  * **G 是本轮主方向全部已实现的净盈亏，不问退出方式。**【用户要求】HEIUSDT 2026-06-25：镜像止盈是手动减仓 61% 做的
  * （不是止盈委托触发），原来只认成交记录上退出方式为「止盈1」的利润，这 +22 万被整个丢掉，三笔加仓全按 G = 0 判，
@@ -16,7 +17,8 @@
  * 每次加仓都必须重算 Y₁：更早的加仓若在新 S₁ 上浮亏，会以负数进入 Y₁，
  * 自然扣掉此前已经动用的垫子；已平掉的部分则转入 G，因而不会重复花同一笔利润。
  *
- * **手续费不计**，与计算器一致：这一列校验的是仓位几何，不是净额。
+ * 与最新计算器一致：G 使用实际已实现净 U（含记录已有费用），不按 S₁ 重估币本位利润；
+ * 新加仓的风险只算价格距离，不额外估算未来手续费。
  *
  * S₁ 从哪来：腿上不存加仓的止损价（pre_planned_stop_loss 已弃用），
  * 只能读加仓那一刻挂着的反向委托——对冲 @ S₁ 就是那张反向单的挂单价。
@@ -51,6 +53,7 @@ import {
   formatSignedPct,
   type AddExcessAttribution,
 } from '@/lib/addSizing';
+import { calculateAddRiskBudget } from '@/lib/addPositionCoverage';
 import {
   buildTradeRecordPnlCorrection,
   resolveLegExecution,
@@ -75,7 +78,7 @@ export type AddSizingUnknownReason =
   | 'no_entry_price'        // 加仓价 S₂ 缺失或非正
   | 'no_position_size'      // 加仓名义缺失或非正，推不出 X₂
   | 'no_stop_line'          // 加仓那一刻没有挂在亏损侧的反向委托，S₁ 无从读起
-  | 'old_leg_incomplete'    // 旧仓里有腿缺开仓价 / 名义 / 时刻，浮盈垫算不准
+  | 'old_leg_incomplete'    // 旧仓或落袋账本缺价格 / 名义 / 时刻 / 已实现盈亏
   | 'non_finite'            // 算出来的数不是有限数
   | 'self_check_mismatch';  // 垫子式与成本线式两套算法对不上——不给对错号，只摆出两个数
 
@@ -96,7 +99,7 @@ export interface AddSizingVerdict {
    */
   cushion: number | null;
   /**
-   * G 本轮持仓在加仓之前已落袋的净额（USDT；币本位按 S₁ 折算）：每一刀已实现的盈亏都算，不问退出方式——
+   * G 本轮持仓在加仓之前已落袋的净额（USDT；币本位也用成交时已实现净 U）：每一刀已实现的盈亏都算，不问退出方式——
    * 止盈委托、手动减仓的利润加进来，止损、强平、亏着平掉的扣出去；花掉的 G 不能再花一次。
    */
   banked: number | null;
@@ -201,17 +204,7 @@ function unknown(reason: AddSizingUnknownReason, partial: Partial<AddSizingVerdi
   };
 }
 
-/** 币本位一张合约的毛盈亏折成币：名义 × (1/开仓价 − 1/平仓价)，与 tradeRecordGrossPnlAtExit ÷ 平仓价同一个数。 */
-function coinGrossAtExit(record: TradeRecord, exitPrice: number): number | null {
-  const contracts = Math.max(0, Number(record.contracts ?? record.quantity ?? 0));
-  const notionalUsd = contracts * Math.max(0, Number(record.contractSizeUsd ?? 10));
-  if (!(notionalUsd > 0) || !positive(record.entryPrice) || !positive(exitPrice)) return null;
-  return record.side === 'LONG'
-    ? notionalUsd * (1 / record.entryPrice - 1 / exitPrice)
-    : notionalUsd * (1 / exitPrice - 1 / record.entryPrice);
-}
-
-/** 一刀：什么时候平的、平掉多少币、落袋多少（USD 与币本位的币数，后者按 S₁ 估值时用）。 */
+/** 一刀：什么时候平的、平掉多少币、实际落袋的净 U。 */
 interface LegCut {
   time: number;
   /** 同一合并持仓的成交可以直接证明属于本轮，不依赖复盘录入顺序。 */
@@ -220,7 +213,6 @@ interface LegCut {
   operationTime: number | null;
   coins: number | null;
   usd: number | null;
-  coin: number | null;
 }
 
 /** 一条同向主力侧腿的逐刀账本。 */
@@ -265,7 +257,6 @@ function buildLedger(
         operationTime: journalCloseOperationTime(leg),
         coins,
         usd: snapshotUsd,
-        coin: null,
       }],
     };
   }
@@ -279,34 +270,31 @@ function buildLedger(
     const sized = coinSettled && !record.settlementMode ? { ...record, settlementMode: 'coin' as const } : record;
     const closedCoins = positive(record.entryPrice) ? tradeRecordNotionalAt(sized) / record.entryPrice : null;
     let usd = finite(record.pnl);
-    let coin = coinSettled ? finite(record.pnlCoin) : null;
     const delta = correction && record === closing ? buildTradeRecordPnlCorrection(sized, correction) : null;
-    if (delta) {
-      usd = (usd ?? 0) + delta.pnlDelta;
-      if (coin != null) {
-        const before = coinGrossAtExit(sized, correction!.originalExitPrice);
-        const after = coinGrossAtExit(sized, correction!.exitPrice);
-        // 折不出币数时宁可退回校正后的 USD，也不拿没校正的币数去估值
-        coin = before != null && after != null ? coin + (after - before) : null;
-      }
-    }
+    if (delta && usd != null) usd += delta.pnlDelta;
     return {
       time: record.closeTime,
       positionId: record.positionId ?? null,
       operationTime: realTime(record.closedRealAt),
       coins: finite(closedCoins),
       usd,
-      coin,
     };
   }).sort((a, b) => a.time - b.time);
   return { leg, positionIds: [...new Set(records.map(record => record.positionId).filter((id): id is string => !!id))], open, openOperationTime, entry, coins, cuts, journalClose };
 }
 
-/** t 时刻（含）之前平掉的币量；有一刀读不出币数就返回 null。 */
-function closedCoinsBy(ledger: LegLedger, t: number): number | null {
+/** 暂停时多次操作共享模拟时刻；有真实盖章时，不可把加仓后的止盈提前入账。 */
+function cutClosedBy(cut: LegCut, t: number, operationTime: number | null): boolean {
+  return cut.time <= t
+    && !(operationTime != null && cut.operationTime != null && cut.operationTime > operationTime);
+}
+
+/** 同一截止口径同时用于旧仓扣量和落袋 G；有一刀读不出币数就返回 null。 */
+function closedCoinsBy(ledger: LegLedger, t: number, operationTime: number | null): number | null {
   let sum = 0;
   for (const cut of ledger.cuts) {
     if (cut.time > t) break;
+    if (!cutClosedBy(cut, t, operationTime)) continue;
     if (cut.coins == null) return null;
     sum += cut.coins;
   }
@@ -314,19 +302,13 @@ function closedCoinsBy(ledger: LegLedger, t: number): number | null {
 }
 
 /** 到 t 时刻（含）为止这条腿是否已经平完。之后还有刀的腿一定还开着。 */
-function closedBy(ledger: LegLedger, t: number): boolean {
-  if (ledger.cuts.length === 0 || ledger.cuts.some(cut => cut.time > t)) return false;
+function closedBy(ledger: LegLedger, t: number, operationTime: number | null): boolean {
+  if (ledger.cuts.length === 0 || ledger.cuts.some(cut => !cutClosedBy(cut, t, operationTime))) return false;
   if (ledger.journalClose != null && ledger.journalClose <= t) return true;
-  const closed = closedCoinsBy(ledger, t);
+  const closed = closedCoinsBy(ledger, t, operationTime);
   // 开仓币量或刀的币数读不出来：有刀、之后再没有刀，只能按平完处理
   if (ledger.coins == null || closed == null) return true;
   return ledger.coins - closed <= ledger.coins * CLOSED_DUST_RATIO;
-}
-
-/** 腿最终平完的时刻；到现在还开着为 +∞。 */
-function ledgerEnd(ledger: LegLedger): number {
-  const last = ledger.cuts.at(-1)?.time ?? null;
-  return last != null && closedBy(ledger, Math.max(last, ledger.journalClose ?? last)) ? last : Number.POSITIVE_INFINITY;
 }
 
 /**
@@ -419,7 +401,11 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       continue;
     }
 
-    const sameSide = [...ledgers.values()].filter(ledger => ledger.leg.id !== add.id && ledger.leg.direction === add.direction);
+    const addOperationTime = realTime(execution.record?.openedRealAt) ?? journalOpenOperationTime(add);
+    const sameSide = [...ledgers.values()].filter(ledger => ledger.leg.id !== add.id
+      && ledger.leg.direction === add.direction
+      // 别次回放可以撞上同一模拟时刻；真实还没开出的腿不能贡献旧仓或落袋。
+      && !(addOperationTime != null && ledger.openOperationTime != null && ledger.openOperationTime > addOperationTime));
 
     /**
      * 本轮持仓从哪一刻开始：从 t 往回，把与之重叠的同向腿一条条接上，直到接不上为止。
@@ -430,7 +416,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     for (let extended = true; extended;) {
       extended = false;
       for (const ledger of sameSide) {
-        if (ledger.open != null && ledger.open < holdingStart && ledgerEnd(ledger) > holdingStart) {
+        if (ledger.open != null && ledger.open < holdingStart && !closedBy(ledger, holdingStart, addOperationTime)) {
           holdingStart = ledger.open;
           extended = true;
         }
@@ -445,7 +431,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const heldAtAdd = sameSide.filter(ledger => {
       if (ledger.open == null) return false;
       const openedBefore = ledger.open < t || (ledger.open === t && sequence(ledger.leg) < sequence(add));
-      return openedBefore && !closedBy(ledger, t);
+      return openedBefore && !closedBy(ledger, t, addOperationTime);
     });
     const heldPositionIds = new Set(heldAtAdd.flatMap(ledger => ledger.positionIds));
     const heldOperationTimes = heldAtAdd.map(ledger => ledger.openOperationTime);
@@ -453,7 +439,6 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       && heldOperationTimes.every((time): time is number => time != null)
       ? Math.min(...heldOperationTimes)
       : null;
-    const addOperationTime = realTime(execution.record?.openedRealAt) ?? journalOpenOperationTime(add);
 
     let x1Coins = 0;
     let cushion = 0;
@@ -466,28 +451,27 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       // 落袋 G：本轮每一刀已实现的盈亏都记，盈利加、亏损扣，不问退出方式（止盈委托、手动减仓、止损、强平一视同仁）。
       // 这一刀平掉的币已经不在下面的浮盈垫里了，利润再不进 G 就凭空消失。与计算器 detectBankedMirrorProfit 同一判据。
       for (const cut of ledger.cuts) {
-        if (cut.time < holdingStart || cut.time > t) continue;
+        if (cut.time < holdingStart || !cutClosedBy(cut, t, addOperationTime)) continue;
         if (holdingStartOperation != null) {
           // 同一合并持仓是比复盘录入顺序更强的归属证据：历史成交可能晚于
           // 止盈刀才被导入战役，此时 openedRealAt 不应抹掉已实现的镜像利润。
           // 没有持仓 ID 关联时仍按真实操作时间隔离别次回放。
           const samePosition = cut.positionId != null && heldPositionIds.has(cut.positionId);
           if (!samePosition && (cut.operationTime == null || cut.operationTime < holdingStartOperation)) continue;
-          if (addOperationTime != null && cut.operationTime > addOperationTime) continue;
         }
-        // 币本位：落袋是币，按 S₁ 估值——与计算器币本位条件两边同乘 S₁ 等价
-        const realized = cut.coin != null ? cut.coin * s1 : cut.usd ?? 0;
-        banked += realized;
+        // 新线性计算器取 detectBankedMirrorProfit().usd；不可按本次止损价重估已落袋利润。
+        if (cut.usd == null) incomplete = true;
+        else banked += cut.usd;
       }
 
       // 旧仓：加仓时刻仍持有的部分。同一刻开出的，按 leg_sequence 排在前面的才算旧仓。
       if (ledger.open == null) {
-        if (!closedBy(ledger, t)) incomplete = true;
+        if (!closedBy(ledger, t, addOperationTime)) incomplete = true;
         continue;
       }
       const openedBefore = ledger.open < t || (ledger.open === t && sequence(ledger.leg) < sequence(add));
-      if (!openedBefore || closedBy(ledger, t)) continue;
-      const closed = closedCoinsBy(ledger, t);
+      if (!openedBefore || closedBy(ledger, t, addOperationTime)) continue;
+      const closed = closedCoinsBy(ledger, t, addOperationTime);
       if (!positive(ledger.entry) || ledger.coins == null || closed == null) {
         incomplete = true;
         continue;
@@ -503,10 +487,11 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
 
     const riskPerCoin = Math.max(0, (s2 - s1) * d);
     const maxLoss = Math.max(0, x2Coins * riskPerCoin);
-    const required = cushion + banked;
+    const budget = calculateAddRiskBudget(cushion, banked, riskPerCoin);
+    const required = budget?.available ?? Number.NaN;
     // “正确加仓”不是一个新的拍脑袋目标，而是 Plan B 的数学上限：低于它都合规，超过它就会失去覆盖。
     // X₂ 是币量；乘回 S₂ 才是交易面板里常见的 U 名义仓位。两种单位一起给，避免把币当 U 下单。
-    const maxAllowedCoins = riskPerCoin > 0 ? Math.max(0, required) / riskPerCoin : null;
+    const maxAllowedCoins = budget?.maxAddCoins ?? null;
     const maxAllowedNotional = maxAllowedCoins == null ? null : maxAllowedCoins * s2;
 
     /**
@@ -607,7 +592,7 @@ const UNKNOWN_REASON_TEXT: Record<AddSizingUnknownReason, string> = {
   no_entry_price: '加仓价、名义或时刻缺失',
   no_position_size: '加仓价、名义或时刻缺失',
   no_stop_line: '加仓时没有挂在亏损侧的反向委托，读不到止损线 S₁',
-  old_leg_incomplete: '旧仓有腿缺开仓价或名义，浮盈垫算不准',
+  old_leg_incomplete: '旧仓开仓价、名义或已实现盈亏缺失，覆盖预算算不准',
   non_finite: '计算结果不是有限数',
   self_check_mismatch: '两种算法结果不一致',
 };
@@ -623,7 +608,7 @@ export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
     return `加仓校验：无法判断——${reason}${routes}`;
   }
   // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
-  const detail = `退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
+  const detail = `止损线不必越过成本线，已落袋利润先补旧仓亏损、余额覆盖新增风险。退回 S₁ ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
   if (verdict.status === 'ok') return `加仓校验：仓位合规。${detail}`;
   const snapshotText = describeAddSizingSnapshot(verdict);
   return `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}${snapshotText ? `。${snapshotText}` : ''}`;

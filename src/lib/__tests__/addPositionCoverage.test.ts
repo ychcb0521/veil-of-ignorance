@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { addRealizedMirrorProfit, calculateAddPosition, initialAddPositionState } from '../addPositionCoverage';
+import { addRealizedMirrorProfit, calculateAddPosition, calculateAddRiskBudget, initialAddPositionState } from '../addPositionCoverage';
 
 describe('coin-denominated add sizing', () => {
+  it('shares a signed coverage budget with campaign checks, including realized losses', () => {
+    for (const [cushion, banked] of [[100, 50], [-100, 300], [-100, 100], [100, -50], [100, -200], [-100, -50]]) {
+      const budget = calculateAddRiskBudget(cushion, banked, 10)!;
+      expect(budget.available).toBe(cushion + banked);
+      expect(budget.maxAddCoins).toBeCloseTo(Math.max(0, cushion + banked) / 10, 12);
+    }
+    expect(calculateAddRiskBudget(100, Number.NaN, 10)).toBeNull();
+    expect(calculateAddRiskBudget(100, 0, 0)).toBeNull();
+  });
+
   it('sizes from price distances and keeps full precision', () => {
     const result = calculateAddPosition({ currentPrice: 150, support: 120, state: initialAddPositionState(100, 1) });
     expect(result.error).toBeNull();
