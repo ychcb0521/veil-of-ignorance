@@ -387,6 +387,11 @@
       if (cached.mode === 'T' && typeof cached.X === 'string') { mode='T'; xField.value=cached.X; }
     }
   } catch (_) {}
+  // 系统打开时只预填一次；后续行情变化不覆盖手动输入。
+  window.ReductionCalculator = { setSeed(seed) {
+    ids.forEach(id => { fields[id].value = Number.isFinite(seed[id]) && seed[id] > 0 ? String(seed[id]) : ''; });
+    setMode('X'); calculate();
+  } };
   window.addEventListener('resize', fitX);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitX);
   setMode(mode);

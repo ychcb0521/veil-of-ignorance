@@ -13,6 +13,8 @@ import { Globe, Split, Lock, Brain, Zap, Rewind, Minus, Plus, Play, SlidersHoriz
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AddPositionCalculator } from '@/components/AddPositionCalculator';
 import { ReductionCalculator } from '@/components/ReductionCalculator';
+import { readHeldPosition } from '@/lib/addSizing';
+import { getCoinMarginedContractSizeUsd } from '@/lib/coinMargined';
 import { toast } from '@/lib/notificationCenter';
 import {
   Dialog,
@@ -234,7 +236,15 @@ export function SessionModeControls({
         <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600/[0.08] text-teal-700 dark:bg-teal-400/10 dark:text-teal-400"><Minus className="h-3.5 w-3.5" strokeWidth={2.5} /></span>
         减仓
       </button>
-      {reductionOpen && <ReductionCalculator open onClose={() => setReductionOpen(false)} />}
+      {reductionOpen && <ReductionCalculator open onClose={() => setReductionOpen(false)} seed={{
+        T: activeFillBasePrice || activePrice,
+        S: activeSymbol ? readHeldPosition(activeSymbol, ctx.positionsMap[activeSymbol], 'LONG', getCoinMarginedContractSizeUsd(activeSymbol))?.avgEntry : undefined,
+        K: activeSymbol ? (ctx.ordersMap[activeSymbol] ?? [])
+          .filter(order => order.side === 'SHORT' && !order.reduceOnly && ['NEW', 'PENDING', 'ACTIVE'].includes(order.status))
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map(order => order.stopPrice > 0 ? order.stopPrice : order.price)
+          .find(price => price > 0) : undefined,
+      }} />}
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
           只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}
       <button
