@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>减仓计算器 · X / T 双向计算</title>
+<style>
+:root{--bg:#f4f6f6;--paper:#fff;--ink:#172d30;--muted:#647578;--line:#dae4e3;--teal:#12685c;--teal-soft:#eaf4ef;--amber:#8a591d;--amber-bg:#fff6e8;--red:#a4423a;--red-bg:#fff0ee;--radius:22px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6}button,input{font:inherit}button{cursor:pointer}main{max-width:1040px;margin:auto;padding:44px 28px 34px}.eyebrow{font-size:12px;font-weight:750;letter-spacing:.14em;color:var(--teal);margin:0 0 9px}header{margin-bottom:25px}h1{font-size:34px;line-height:1.3;letter-spacing:-.03em;margin:0 0 10px}header p{color:var(--muted);font-size:15px;margin:0}.workspace{display:grid;grid-template-columns:1fr 1fr;gap:22px}.panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:27px 28px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:23px}.panel-head h2{font-size:17px;margin:0}.pill{font-size:11px;line-height:1.5;padding:5px 9px;background:var(--teal-soft);color:var(--teal);border-radius:99px;white-space:nowrap}.field{margin-bottom:18px}label{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:650;margin-bottom:7px}.symbol{width:27px;height:27px;display:inline-grid;place-items:center;border-radius:7px;background:#eef2f2;color:var(--teal);font-size:14px;font-weight:800}input{width:100%;height:52px;padding:10px 14px;border:1px solid #cad7d5;background:#fff;color:var(--ink);border-radius:11px;outline:none;font-size:21px;font-variant-numeric:tabular-nums;transition:border-color .15s,box-shadow .15s}input:focus{border-color:var(--teal);box-shadow:0 0 0 3px #12685c16}input[aria-invalid="true"]{border-color:var(--red)}.hint{font-size:12px;color:var(--muted);margin:6px 0 0}.buttons{display:flex;gap:10px;margin-top:23px}button{border-radius:10px;padding:11px 15px;border:1px solid transparent;font-weight:650;font-size:14px;line-height:1.4;transition:background .15s}button:focus-visible{outline:3px solid #82b5a8;outline-offset:3px}.primary{background:var(--teal);color:white;flex:1}.primary:hover{background:#0d554a}.secondary{background:#f0f4f3;color:#425f5b;border-color:#e1e9e7}.secondary:hover{background:#e4ecea}.text-button{border:0;background:none;padding:3px 0;color:var(--muted);font-size:12px;text-decoration:underline;text-underline-offset:3px}.utility{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:12px}.auto-note{font-size:12px;color:var(--muted)}.result{display:flex;flex-direction:column;background:#fbfdfb;border-color:#d0dfd8}.result-label{font-size:14px;font-weight:650;color:#4c6861;margin:0 0 8px}.big-number{font-size:72px;line-height:1.12;font-weight:750;letter-spacing:-.045em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-height:81px;color:var(--teal)}.big-number.compact{font-size:48px;letter-spacing:-.03em}.percent{font-size:.44em;margin-left:5px;font-weight:650;letter-spacing:0}.retained{margin:10px 0 18px;font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums}.retained strong{color:var(--ink);font-size:18px;margin:0 3px}.status{font-size:13px;border-radius:10px;background:var(--teal-soft);color:#285e4d;padding:11px 13px;min-height:63px;display:flex;align-items:center;margin:0 0 19px}.status.warning{background:var(--amber-bg);color:var(--amber)}.status.error{background:var(--red-bg);color:var(--red)}.formula-box{border-top:1px solid var(--line);padding-top:18px}.mini-label{font-size:11px;color:var(--muted);margin:0 0 11px;letter-spacing:.06em}.equation{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:19px;font-weight:650;line-height:1.3;min-height:49px}.fraction{display:inline-flex;flex-direction:column;align-items:stretch;text-align:center;font-size:17px;vertical-align:middle}.fraction span:first-child{padding:0 10px 5px;border-bottom:1.5px solid #819791}.fraction span:last-child{padding:5px 10px 0}.substitution{font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.8;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.check{font-size:12px;padding:11px 13px;border:1px solid #dfe9e4;border-radius:10px;color:#4a625b;margin-top:14px;overflow-wrap:anywhere;line-height:1.8}.copy{width:100%;background:white;border:1px solid #ccdcd4;color:var(--teal);margin-top:auto}.copy-wrap{padding-top:20px;margin-top:auto}.copy:disabled{opacity:.45;cursor:not-allowed}.info{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}.note{padding:17px 20px;border:1px solid var(--line);border-radius:15px;background:#ffffff85}.note h3{font-size:13px;margin:0 0 5px}.note p{font-size:12px;color:var(--muted);margin:0}.note code{font-family:inherit;color:var(--ink)}footer{font-size:11px;color:#788985;text-align:center;margin-top:22px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(max-width:720px){main{padding:25px 17px}.workspace,.info{grid-template-columns:1fr;gap:15px}h1{font-size:29px}.panel{padding:23px 22px;border-radius:18px}.panel-head{margin-bottom:18px}.field{margin-bottom:14px}.big-number{font-size:68px}.big-number.compact{font-size:44px}.info{margin-top:15px}header{margin-bottom:20px}.buttons{margin-top:19px}}
+@media print{body{background:white}main{padding:10px;max-width:none}.workspace{grid-template-columns:1fr 1fr}.buttons,.utility,.copy-wrap{display:none}.panel,.note{break-inside:avoid;box-shadow:none}footer{display:none}}
+
+/* X 在原结果位置直接编辑；未聚焦时保持原来的大数字外观。 */
+.big-number{display:flex;align-items:baseline;gap:0}
+.big-number .x-input{flex:0 1 auto;min-width:0;width:4.8ch;max-width:calc(100% - .8em - 5px);height:1.12em;margin:0;padding:0;border:0;border-radius:3px;background:transparent;color:inherit;font-family:inherit;font-size:inherit;font-weight:inherit;line-height:1.12;letter-spacing:inherit;font-variant-numeric:tabular-nums;box-shadow:none;appearance:none;cursor:text}
+.big-number .x-input:focus{box-shadow:inset 0 -2px 0 #12685c70;outline:none}
+.big-number .x-input[aria-invalid="true"]{box-shadow:inset 0 -2px 0 var(--red)}
+.big-number .x-input::placeholder{color:inherit;opacity:1}
+.big-number .percent{flex:0 0 auto}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="eyebrow">仓位管理 · 保本计算</p>
+<h1>减仓计算器</h1>
+<p>输入 T、S、K 计算 X；直接修改右侧 X，可反推 T。</p>
+</header>
+<div class="workspace">
+<section class="panel" aria-labelledby="input-title">
+<div class="panel-head"><h2 id="input-title">输入三个价格</h2><span class="pill">修改后自动计算</span></div>
+<form id="calculator" novalidate>
+<div class="field"><label for="T"><span class="symbol">T</span>现价</label><input id="T" name="T" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="103" placeholder="例如 103" aria-describedby="T-help"><p class="hint" id="T-help">假设本次减仓能够按此价格成交。</p></div>
+<div class="field"><label for="S"><span class="symbol">S</span>成本线</label><input id="S" name="S" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="100" placeholder="例如 100" aria-describedby="S-help"><p class="hint" id="S-help">减仓前这笔持仓的开仓均价。</p></div>
+<div class="field"><label for="K"><span class="symbol">K</span>新的止损线</label><input id="K" name="K" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="98" placeholder="例如 98" aria-describedby="K-help"><p class="hint" id="K-help">假设剩余仓位最终在此价格全部退出。</p></div>
+<div class="buttons"><button type="submit" class="primary" id="calculate-button">计算 X</button><button type="button" class="secondary" id="example">恢复示例</button></div>
+<div class="utility"><span class="auto-note">价格使用相同计价单位</span><button type="button" class="text-button" id="clear">清空输入</button></div>
+</form>
+</section>
+<section class="panel result" aria-labelledby="result-title">
+<div class="panel-head"><h2 id="result-title">计算结果</h2><span class="pill" id="state-badge">保本减仓</span></div>
+<div aria-live="polite" aria-atomic="true">
+<p class="result-label" id="result-label" title="点击下方数字，可直接输入 X 并反推 T">减仓比例 X</p>
+<div class="big-number" id="result"><input class="x-input" id="X" name="X" form="calculator" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" value="40.00" placeholder="—" aria-label="减仓比例 X，按百分比输入" aria-describedby="X-help" title="点击修改 X，自动反推 T；输入 40 表示减仓 40%"><span class="percent" id="percent-suffix" aria-hidden="true">%</span></div>
+<span class="sr-only" id="X-help">按百分比输入，40 表示减仓 40%。修改 X 后反推左侧 T；修改 T 后切回计算 X。S 和 K 按当前方向继续计算。</span>
+<p class="retained" id="retained">保留原持仓的 <strong>60.00%</strong></p>
+<p class="status" id="status">在 103 减仓 40.00%，剩余仓位在 98 退出时，整笔交易恰好保本。</p>
+</div>
+<div class="formula-box">
+<p class="mini-label" id="formula-caption">使用你确认的公式</p>
+<div class="equation"><span id="equation-left">X =</span><span class="fraction" id="equation-fraction" aria-label="成本线减止损线，除以现价减止损线"><span>S − K</span><span id="equation-denominator">T − K</span></span></div>
+<p class="substitution" id="substitution">（100 − 98）÷（103 − 98）= 0.4 = 40.00%</p>
+<div class="check" id="check">减仓兑现利润 = 剩余仓位止损亏损。<br>比例按持仓数量计算，不是按保证金计算。</div>
+</div>
+<div class="copy-wrap"><button type="button" class="copy" id="copy">复制计算结果</button><span class="sr-only" id="copy-feedback" aria-live="polite"></span></div>
+</section>
+</div>
+<div class="info">
+<section class="note"><h3>这里的“保本”指什么？</h3><p>减掉的部分在 T 兑现利润，保留的部分在 K 止损，两部分累计盈亏为 0。标准情形是 <code>K &lt; S &lt; T</code>。</p></section>
+<section class="note"><h3>模型边界</h3><p>仅实现上述多头、线性价差公式，假设没有此前已实现盈亏；不计手续费、资金费和滑点。不计算保证金或强平风险，也不适用于反向合约。数学保本不等于实盘绝对零风险。</p></section>
+</div>
+<footer>单文件离线工具 · 不发送任何输入数据 · 可保存到本地反复使用</footer>
+</main>
+<script>
+'use strict';
+(() => {
+  const $ = id => document.getElementById(id);
+  const ids = ['K', 'S', 'T'];
+  const fields = Object.fromEntries(ids.map(id => [id, $(id)]));
+  const xField = $('X');
+  const storeKey = 'reduce-position-calculator-v3';
+  const oldStoreKey = 'reduce-position-calculator-v1';
+  const caveat = '按线性价差模型，假设没有此前已实现盈亏；不计费用和滑点，且按输入价格成交。';
+  let mode = 'X'; // 计算目标。手动修改 T 时求 X，手动修改 X 时求 T。
+  let summary = '';
+
+  // 使用十进制定点整数和有理数，避免小数价格相减的浮点误差。
+  function parseDecimal(raw, allowZero=false) {
+    const text = raw.trim();
+    if (!text) return {empty:true};
+    if (text.length > 240) throw new Error('数字过长，请使用不超过 240 个字符的数字。');
+    const match = /^\+?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(text);
+    if (!match) throw new Error(allowZero ? '请填写 0 至 100 之间的百分比数字，例如 40 表示 40%。' : '请填写大于 0 的有效数字，不要输入逗号、百分号或货币符号。');
+    const whole = match[1] || '0';
+    const fraction = match[2] === undefined ? (match[3] || '') : match[2];
+    const exponent = Number(match[4] || 0);
+    if (!Number.isInteger(exponent) || Math.abs(exponent) > 120 || fraction.length > 120)
+      throw new Error('最多支持 120 位小数；科学计数法的指数须在 −120 至 120 之间。');
+    let coefficient = BigInt(whole + fraction);
+    if (!allowZero && coefficient === 0n) throw new Error('三个价格都必须大于 0。');
+    let scale = fraction.length - exponent;
+    if (scale < 0) { coefficient *= 10n ** BigInt(-scale); scale = 0; }
+    while (scale > 0 && coefficient % 10n === 0n) { coefficient /= 10n; scale--; }
+    return {coefficient, scale, text};
+  }
+
+  function formatRatio(numerator, denominator, places=6, minimumPlaces=0) {
+    if (denominator === 0n) return '未定义';
+    const negative = (numerator < 0n) !== (denominator < 0n);
+    const n = numerator < 0n ? -numerator : numerator;
+    const d = denominator < 0n ? -denominator : denominator;
+    const factor = 10n ** BigInt(places);
+    const rounded = (n * factor * 2n + d) / (2n * d);
+    const integer = (rounded / factor).toString();
+    let decimals = places ? (rounded % factor).toString().padStart(places, '0') : '';
+    while (decimals.length > minimumPlaces && decimals.endsWith('0')) decimals = decimals.slice(0, -1);
+    return (negative && rounded !== 0n ? '−' : '') + integer + (decimals ? '.' + decimals : '');
+  }
+  function percentage(n, d) { return formatRatio(n * 100n, d, 6, 2); }
+  function boundedPercentage(n, d) {
+    const value = percentage(n, d);
+    if (n > 0n && n < d && value === '0.00') return '< 0.000001';
+    if (n > 0n && n < d && value === '100.00') return '> 99.999999';
+    return value;
+  }
+
+  // 用约 18 位有效数字展示反推的 T。内部验证仍使用未舍入的精确分数。
+  function formatPrice(n, d) {
+    let exponent = n.toString().length - d.toString().length;
+    if (exponent >= 0) {
+      if (n < d * 10n ** BigInt(exponent)) exponent--;
+    } else if (n * 10n ** BigInt(-exponent) < d) exponent--;
+    if (exponent >= -12 && exponent <= 18)
+      return formatRatio(n, d, Math.max(0, 17 - exponent));
+    const scaledN = exponent < 0 ? n * 10n ** BigInt(-exponent) : n;
+    const scaledD = exponent > 0 ? d * 10n ** BigInt(exponent) : d;
+    return formatRatio(scaledN, scaledD, 17) + 'e' + (exponent >= 0 ? '+' : '') + exponent;
+  }
+  function editablePercentage(n, d) {
+    const value = percentage(n, d);
+    if (n > 0n && n < d && (value === '0.00' || value === '100.00')) {
+      // 不把非零比例伪装为 0%，也不把不足全仓的比例伪装为 100%。
+      if (value === '0.00') return formatPrice(n * 100n, d);
+      for (let p=7; p<=120; p++) {
+        const precise = formatRatio(n * 100n, d, p, 2);
+        if (precise !== '100.00') return precise;
+      }
+    }
+    return value;
+  }
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  function fitX() {
+    const text = xField.value || xField.placeholder || '—';
+    $('result').classList.toggle('compact', text.length > 7 || text === '无法保本');
+    const style = getComputedStyle(xField);
+    if (ctx) {
+      ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const spacing = parseFloat(style.letterSpacing) || 0;
+      xField.style.width = Math.max(38, Math.ceil(ctx.measureText(text).width + spacing * Math.max(0, text.length - 1) + 3)) + 'px';
+    }
+    $('percent-suffix').hidden = !xField.value;
+  }
+  function putX(value, placeholder='—') {
+    xField.value = value;
+    xField.placeholder = placeholder;
+    fitX();
+  }
+  function putRetained(value) {
+    const p = $('retained');
+    p.replaceChildren(document.createTextNode('保留原持仓的 '));
+    const b = document.createElement('strong'); b.textContent = value + '%'; p.append(b);
+  }
+  function setMode(next) {
+    mode = next;
+    const inverse = mode === 'T';
+    $('calculate-button').textContent = inverse ? '计算 T' : '计算 X';
+    $('equation-left').textContent = inverse ? 'T = K +' : 'X =';
+    $('equation-denominator').textContent = inverse ? 'X' : 'T − K';
+    $('equation-fraction').setAttribute('aria-label', inverse ? '成本线减止损线，除以减仓比例 X' : '成本线减止损线，除以现价减止损线');
+    $('formula-caption').textContent = inverse ? '反推公式（X 按比例代入）' : '使用你确认的公式';
+    $('T-help').textContent = inverse ? '由 K、S、X 反推；直接修改 T 可切回计算 X。' : '假设本次减仓能够按此价格成交。';
+    fields.T.placeholder = inverse ? '等待反推' : '例如 103';
+  }
+  function noResult(message, type='error', placeholder='—') {
+    if (mode === 'X') putX('', placeholder);
+    else { fields.T.value = ''; fitX(); }
+    $('result-label').textContent = '减仓比例 X';
+    $('retained').textContent = '等待有效的输入组合';
+    $('state-badge').textContent = type === 'error' ? '请检查输入' : (type === 'warning' ? '请检查条件' : '等待输入');
+    $('status').textContent = message;
+    $('status').className = 'status' + (type === 'error' || type === 'warning' ? ' ' + type : '');
+    $('substitution').textContent = mode === 'T' ? '输入 K、S、X 后自动反推 T；X 填 40 即表示 40%。' : '输入后自动代入公式。';
+    $('check').textContent = mode === 'T' ? '标准反推条件：K < S，0% < X ≤ 100%。修改 T 可切回计算 X。' : '标准情形：止损线 K < 成本线 S < 现价 T。';
+    $('copy').disabled = true;
+    summary = '';
+  }
+  function save() {
+    try {
+      localStorage.setItem(storeKey, JSON.stringify({mode, X:xField.value, ...Object.fromEntries(ids.map(id => [id, fields[id].value]))}));
+    } catch (_) {}
+  }
+  function complete(text) {
+    summary = text + '\n' + caveat;
+    $('copy').disabled = false;
+    save();
+    fitX();
+  }
+  function readPrices(required) {
+    const parsed = {};
+    for (const id of required) {
+      try { parsed[id] = parseDecimal(fields[id].value); }
+      catch(error) { fields[id].setAttribute('aria-invalid', 'true'); noResult(id + '：' + error.message); return null; }
+    }
+    if (required.some(id => parsed[id].empty)) {
+      noResult(mode === 'T' ? '请输入 K（止损线）、S（成本线）和 X（减仓百分比），自动反推 T。' : '请输入 T（现价）、S（成本线）和 K（止损线）。', 'empty');
+      return null;
+    }
+    return parsed;
+  }
+
+  function calculateX() {
+    const parsed = readPrices(ids);
+    if (!parsed) return;
+    const scale = Math.max(...ids.map(id => parsed[id].scale));
+    const [K,S,T] = ids.map(id => parsed[id].coefficient * 10n ** BigInt(scale - parsed[id].scale));
+    const k = parsed.K.text, s = parsed.S.text, t = parsed.T.text;
+    if (K >= T) {
+      fields.K.setAttribute('aria-invalid', 'true');
+      noResult(K === T ? '止损线 K 与现价 T 相同，分母为 0，无法计算。请填写低于现价的止损线。' : '本工具按多头下方止损计算：止损线 K 必须低于现价 T。');
+      return;
+    }
+    const n = S - K, d = T - K;
+    const raw = percentage(n,d);
+    $('result-label').textContent = '减仓比例 X';
+    $('status').className = 'status';
+    $('substitution').textContent = `（${s} − ${k}）÷（${t} − ${k}）= ${formatRatio(n,d,10)}，即约 ${raw}%。`;
+
+    if (S > T) {
+      putX('', '无法保本');
+      $('state-badge').textContent = '超出可减仓范围';
+      $('retained').textContent = '公式结果 X ≈ ' + raw + '%，大于 100%';
+      $('status').className = 'status warning';
+      $('status').textContent = '现价低于成本线：即使现在全部平仓也会亏损，不能仅靠本次减仓达到保本。';
+      $('check').textContent = '不是要求你减仓超过 100%。可直接输入 X，反推实现保本所需的 T。';
+      complete(`T=${t}，S=${s}，K=${k}\n无法仅靠本次减仓达到保本。公式结果 X≈${raw}%（超过100%，不可执行）。`);
+    } else if (K >= S) {
+      putX('0.00'); putRetained('100.00');
+      $('result-label').textContent = '为保本所需的最低减仓比例';
+      $('state-badge').textContent = '无需减仓';
+      $('status').textContent = K === S ? '止损线已等于成本线。按本模型，即使不减仓，在止损位退出也恰好保本。' : '止损线已经高于成本线。按本模型，即使不减仓，在止损位退出仍有利润。';
+      $('check').textContent = K === S ? 'X = 0：没有需要填补的止损亏损。' : '原公式值为负；实际所需减仓取 0%。负值不作为本工具的加仓建议。';
+      complete(`T=${t}，S=${s}，K=${k}\n为保本无需减仓（最低0%）；保留100%。\n原公式 X=${formatRatio(n,d,10)}≈${raw}%。`);
+    } else {
+      const sold = editablePercentage(n,d), keep = boundedPercentage(d-n,d);
+      putX(sold); putRetained(keep);
+      const full = S === T;
+      $('state-badge').textContent = full ? '需要全部平仓' : '保本减仓';
+      $('status').textContent = full ? `现价恰好等于成本线 ${s}。没有已兑现利润可覆盖后续止损亏损，因此需减仓 100%。` : `在 ${t} 减仓 ${sold}%，剩余仓位在 ${k} 退出时，整笔交易恰好保本。`;
+      const profit = formatRatio(n * (T-S), d * (10n ** BigInt(scale)), 10);
+      $('check').textContent = full ? '按成本价全部退出：已实现盈亏为 0，剩余持仓为 0。' : `按原持仓 1 个单位验证：减仓兑现利润约 ${profit}；剩余仓位止损亏损约 ${profit}；合计为 0。比例展示值有四舍五入。`;
+      complete(`T=${t}，S=${s}，K=${k}\n减仓比例 X=${sold}%\n保留比例=${keep}%\nX=(S-K)/(T-K)=(${s}-${k})/(${t}-${k})`);
+    }
+  }
+
+  function calculateT() {
+    const parsed = readPrices(['K', 'S']);
+    if (!parsed) return;
+    let x;
+    try { x = parseDecimal(xField.value.trim().replace(/[%％]\s*$/, ''), true); }
+    catch(error) { xField.setAttribute('aria-invalid', 'true'); noResult('X：' + error.message); return; }
+    if (x.empty) { noResult('请直接输入 X 的百分比数字，例如 40 表示减仓 40%。', 'empty'); return; }
+    const scale = Math.max(parsed.K.scale, parsed.S.scale);
+    const unit = 10n ** BigInt(scale);
+    const K = parsed.K.coefficient * 10n ** BigInt(scale - parsed.K.scale);
+    const S = parsed.S.coefficient * 10n ** BigInt(scale - parsed.S.scale);
+    const xn = x.coefficient, xd = 100n * 10n ** BigInt(x.scale);
+    const k = parsed.K.text, s = parsed.S.text;
+    if (xn > xd) {
+      xField.setAttribute('aria-invalid', 'true');
+      noResult('减仓比例不能超过 100%。请按百分比输入，例如 40 表示 40%。');
+      return;
+    }
+    if (xn === 0n) {
+      if (K < S) {
+        xField.setAttribute('aria-invalid', 'true');
+        noResult('X = 0%，且止损线低于成本线：不减仓就无法填补止损亏损，不能反推出有限的保本价格 T。', 'warning');
+      } else {
+        noResult(K === S ? 'K = S 且 X = 0%：无需减仓即可保本，T 不唯一；任意 T > K 都满足本模型。' : '止损线已高于成本线，无需为保本减仓；X = 0% 无法唯一确定 T。', 'warning');
+        fields.T.placeholder = '不唯一';
+        $('state-badge').textContent = 'T 不唯一';
+        putRetained('100.00');
+      }
+      return;
+    }
+    if (K >= S) {
+      noResult(K === S ? '止损线等于成本线，本已无需减仓。在 T > K 时减掉正比例仓位会产生利润，不能反推出唯一的恰好保本价格。' : '止损线高于成本线，本已无需为保本减仓。当前 X 无法反推出满足 T > K 的恰好保本价格。', 'warning');
+      return;
+    }
+
+    // X 的输入单位为百分比：T = K + (S-K)/(X/100)。
+    const tn = K * xn + (S-K) * xd;
+    const td = unit * xn;
+    const t = formatPrice(tn, td);
+    fields.T.value = t;
+    fields.T.placeholder = '等待反推';
+    let displayed;
+    try { displayed = parseDecimal(t); }
+    catch (_) { noResult('反推的 T 超出本工具支持的数值范围，请调整价格或减仓比例。'); return; }
+    const rounded = displayed.coefficient * td !== tn * 10n ** BigInt(displayed.scale);
+    const sold = x.text;
+    const keep = boundedPercentage(xd-xn, xd);
+    const ratio = formatRatio(xn, xd, Math.min(124, x.scale + 2));
+    const profit = formatRatio((xd-xn) * (S-K), xd * unit, 10);
+    $('result-label').textContent = '减仓比例 X';
+    putRetained(keep);
+    $('state-badge').textContent = '已反推 T';
+    $('status').className = 'status';
+    $('status').textContent = `减仓 ${sold}% 时，理论保本价格 T ${rounded ? '≈' : '='} ${t}；剩余仓位在 ${k} 退出时，整笔交易累计盈亏为 0。`;
+    $('substitution').textContent = `${k} +（${s} − ${k}）÷（${sold} ÷ 100）${rounded ? '≈' : '='} ${t}。X = ${sold}% = ${ratio}。`;
+    $('check').textContent = xn === xd ? `减仓 100% 时，T = 成本线 ${s}，全部按成本价退出，累计盈亏为 0。` : `按原持仓 1 个单位验证：减仓兑现利润约 ${profit}；剩余仓位止损亏损约 ${profit}；理论合计为 0。${rounded ? 'T 展示值已四舍五入。' : ''}`;
+    complete(`K=${k}，S=${s}，X=${sold}%\n反推价格 T${rounded ? '≈' : '='}${t}\n保留比例=${keep}%\nT=K+(S-K)/(X/100)=${k}+(${s}-${k})/(${sold}/100)${rounded ? '\nT 展示值已四舍五入。' : ''}`);
+  }
+  function calculate() {
+    [...ids.map(id => fields[id]), xField].forEach(field => field.removeAttribute('aria-invalid'));
+    if (mode === 'T') calculateT(); else calculateX();
+  }
+
+  fields.T.addEventListener('input', () => { setMode('X'); calculate(); });
+  xField.addEventListener('input', () => {
+    // 支持粘贴 40% / 40％，显示区已有固定的百分号。
+    if (/[%％]\s*$/.test(xField.value)) xField.value = xField.value.trim().replace(/[%％]\s*$/, '');
+    setMode('T'); fitX(); calculate();
+  });
+  for (const id of ['S', 'K']) fields[id].addEventListener('input', calculate);
+  xField.addEventListener('focus', () => { xField.select(); });
+  $('calculator').addEventListener('submit', event => { event.preventDefault(); calculate(); });
+  $('example').addEventListener('click', () => {
+    fields.K.value='98'; fields.S.value='100'; fields.T.value='103';
+    setMode('X'); calculate();
+  });
+  $('clear').addEventListener('click', () => {
+    ids.forEach(id => fields[id].value=''); putX('');
+    try { localStorage.removeItem(storeKey); localStorage.removeItem(oldStoreKey); } catch (_) {}
+    setMode('X'); calculate(); fields.T.focus();
+  });
+  $('copy').addEventListener('click', async () => {
+    if (!summary) return;
+    let ok = false;
+    try { await navigator.clipboard.writeText(summary); ok = true; } catch (_) {
+      const area = document.createElement('textarea'); area.value = summary; area.style.cssText='position:fixed;left:-9999px;top:0';
+      document.body.append(area); area.select();
+      try { ok = document.execCommand('copy'); } catch (_) {} area.remove();
+    }
+    $('copy').textContent = ok ? '已复制' : '复制失败，请手动选取结果';
+    $('copy-feedback').textContent = ok ? '结果已复制到剪贴板' : '无法自动复制';
+    setTimeout(() => { $('copy').textContent='复制计算结果'; }, 2000);
+  });
+  try {
+    const cached = JSON.parse(localStorage.getItem(storeKey) || localStorage.getItem(oldStoreKey) || 'null');
+    if (cached && ids.every(id => typeof cached[id] === 'string')) {
+      ids.forEach(id => fields[id].value=cached[id]);
+      if (cached.mode === 'T' && typeof cached.X === 'string') { mode='T'; xField.value=cached.X; }
+    }
+  } catch (_) {}
+  window.addEventListener('resize', fitX);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitX);
+  setMode(mode);
+  calculate();
+})();
+</script>
+</body>
+</html>

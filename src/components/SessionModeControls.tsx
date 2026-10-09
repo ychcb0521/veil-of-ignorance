@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator, Play, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AddPositionCalculator } from '@/components/AddPositionCalculator';
+import { ReductionCalculator } from '@/components/ReductionCalculator';
 import { toast } from '@/lib/notificationCenter';
 import {
   Dialog,
@@ -79,6 +80,7 @@ export function SessionModeControls({
 }: Props) {
   const ctx = useTradingContext();
   const [addSizingOpen, setAddSizingOpen] = useState(false);
+  const [reductionOpen, setReductionOpen] = useState(false);
   const [modesOpen, setModesOpen] = useState(false);
   const [guardDialogOpen, setGuardDialogOpen] = useState(false);
   const [guardedCoins, setGuardedCoins] = useState<GuardedCoin[]>([]);
@@ -222,6 +224,16 @@ export function SessionModeControls({
 
   return (
     <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => setReductionOpen(true)}
+        data-testid="reduction-calculator-open"
+        title="减仓计算器 · X / T 双向计算"
+        className="flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium text-muted-foreground transition-all duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
+      >
+        <Calculator className="w-3 h-3" /> 减仓
+      </button>
+      {reductionOpen && <ReductionCalculator open onClose={() => setReductionOpen(false)} />}
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
           只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}
       <button
