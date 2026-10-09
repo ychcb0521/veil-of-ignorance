@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { toast } from '@/lib/notificationCenter';
 import './GuidePage.css';
+import tradingSystemIntroduction from '@/assets/tradingSystemIntroduction.txt?raw';
 
 interface TocItem {
   id: string;
@@ -14,7 +15,7 @@ interface TocItem {
 }
 
 const TOC: TocItem[] = [
-  { id: 's1', label: '1. 系统定位' },
+  { id: 's1', label: '1. 系统定位', children: [{ id: 's1-system', label: '1.1 交易体系：期望值与复利' }] },
   {
     id: 's2',
     label: '2. 推荐使用流程',
@@ -488,6 +489,13 @@ export default function GuidePage() {
             </div>
           </section>
 
+          <section id="s1-system" className="scroll-mt-20">
+            <SectionTitle>1.1 交易体系：期望值与复利</SectionTitle>
+            {tradingSystemIntroduction.trim().split(/\n\s*\n/).map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
+            ))}
+          </section>
+
           <section id="s2" className="scroll-mt-20">
             <SectionTitle accent="#0ECB81">2. 推荐使用流程</SectionTitle>
             <P>如果只记一条路径，就按“筛掉坏结构 → 记录一笔决策 → 评价一笔结果 → 看见预测误差与错误类型 → 归类战役 → 写入规则 → 用元监控验证”执行。</P>
@@ -534,7 +542,7 @@ export default function GuidePage() {
             <section id="s3-0" className="scroll-mt-20">
               <SubTitle anchor>3.1 交易模式与持仓限制</SubTitle>
               <P>
-                交易页<strong>顶部 Header</strong> 右侧、「复盘中心」左边有一个<strong>「模式」菜单</strong>（触发按钮直接写着当前的交易模式与持仓限制模式，如「直接交易 · 无限制」；开着倒叙播放或隔离时多一枚小标签），点开是四行开关：播放、交易、持仓、时间。其中「交易」一行是一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。下面一行「持仓」是另一对开关「<strong>无限制 / 币安标准</strong>」——<strong>持仓限制模式</strong>，决定杠杆、持仓与单笔下单有没有上限（见本节末尾）。最后一行「时间」是「<strong>同步 / 隔离</strong>」<strong>时间模式</strong>开关（详见 3.2）——那是切换币种时的时间推进方式，别和这里的两组模式混为一谈。「加仓」按钮常用，单独留在菜单外面、紧挨在它左边。
+                交易页<strong>顶部 Header</strong> 右侧、「复盘中心」左边有一个<strong>「模式」菜单</strong>（顶栏只保留中性色的「模式」入口，当前状态和切换选项收进展开菜单），点开是四行开关：播放、交易、持仓、时间。其中「交易」一行是一对开关：<strong>决策记录</strong> 与 <strong>直接交易</strong>。这是进入交易页后你做的第一个决定，也是整套系统里最大的一个分叉——它决定本次会话产生的数据是否进入复盘体系。系统默认 <strong>直接交易</strong>，需要训练时手动切换到决策记录。下面一行「持仓」是另一对开关「<strong>无限制 / 币安标准</strong>」——<strong>持仓限制模式</strong>，决定杠杆、持仓与单笔下单有没有上限（见本节末尾）。最后一行「时间」是「<strong>同步 / 隔离</strong>」<strong>时间模式</strong>开关（详见 3.2）——那是切换币种时的时间推进方式，别和这里的两组模式混为一谈。「减仓」和「加仓」单独留在菜单外面：冷青色“−”减仓在左，暖橙色“＋”加仓在右。减仓计算器原样保留 T/S/K 输入和 X/T 双向计算：修改价格计算减仓比例 X，直接修改 X 则反推现价 T；仅提供计算，不直接执行交易。
               </P>
               <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <div className="flex h-full flex-col rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
@@ -598,7 +606,7 @@ export default function GuidePage() {
                     <div className="text-[13px] font-semibold tracking-[0.01em] text-foreground">币安标准</div>
                   </div>
                   <div className="pt-3 text-[13px] leading-7 text-muted-foreground">
-                    完全按币安：各币种的杠杆分层（KAITOUSDT 75x、BTCUSDT 150x、不少合约只到 10x）、「持仓 + 当前委托 + 本单」不得超过当前杠杆的最高可持有头寸、单笔市价 / 限价数量上限（MARKET_LOT_SIZE / LOT_SIZE）、逐仓有持仓只能升杠杆、分层维持保证金。第 6 节「<strong>调整杠杆</strong>」「<strong>杠杆分层与仓位上限</strong>」「<strong>单笔数量上限（市价单）</strong>」三行写的全部规则，以及 3.4 里加仓计算器按分层封顶，<strong>都只在币安标准模式下生效</strong>。想在模拟里就练出真实账户下单会不会被拒，用这一档。
+                    完全按币安：各币种的杠杆分层（KAITOUSDT 75x、BTCUSDT 150x、不少合约只到 10x）、「持仓 + 当前委托 + 本单」不得超过当前杠杆的最高可持有头寸、单笔市价 / 限价数量上限（MARKET_LOT_SIZE / LOT_SIZE）、逐仓有持仓只能升杠杆、分层维持保证金。第 6 节「<strong>调整杠杆</strong>」「<strong>杠杆分层与仓位上限</strong>」「<strong>单笔数量上限（市价单）</strong>」三行写的全部规则，<strong>都只在币安标准模式下生效</strong>。想在模拟里就练出真实账户下单会不会被拒，用这一档。
                   </div>
                 </div>
               </div>
