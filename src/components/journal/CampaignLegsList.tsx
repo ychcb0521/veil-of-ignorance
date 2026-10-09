@@ -1084,17 +1084,9 @@ export function CampaignLegsList({
                           onClick={() => setAddSizingDetailLegId(leg.id)}
                           className="w-full rounded px-0.5 text-center leading-none text-[#F6465D] transition-colors hover:bg-[#F6465D]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F6465D]/50"
                         >
-                          <div className="text-[18px] font-bold">✗</div>
-                          <div className="mt-1 text-[10px] font-semibold leading-tight tabular-nums">
+                          <div className="py-1 text-[10px] font-semibold leading-tight tabular-nums">
                             多加 {formatAddSizingExcessPercent(verdict.x2Coins, verdict.maxAllowedCoins)}
                           </div>
-                          <div className="mt-0.5 text-[9px] font-semibold leading-tight tabular-nums">
-                            上限 {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
-                          </div>
-                          <div className="mt-0.5 text-[8px] leading-tight tabular-nums text-[#F6465D]/80">
-                            ≈ {formatAddSizingNotional(verdict.maxAllowedNotional)} U
-                          </div>
-                          <div className="mt-1 text-[8px] font-sans leading-tight text-[#F6465D]/70">点击看计算</div>
                         </button>
                       );
                     }

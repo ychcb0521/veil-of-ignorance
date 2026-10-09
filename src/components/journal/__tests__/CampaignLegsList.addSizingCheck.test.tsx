@@ -77,13 +77,9 @@ describe('Legs 列表的「加仓校验」列', () => {
     renderList(22_057_330);
     const mark = screen.getByTestId('add-sizing-check-fail-add1');
     expect(mark.className).toContain('text-[#F6465D]');
-    const cross = mark.firstElementChild!;
-    expect(cross.textContent).toBe('✗');
-    expect(cross.className).toContain('text-[18px]');
-    expect(cross.className).toContain('font-bold');
-    expect(mark.textContent).toMatch(/上限 [\d,.]+ 币/);
-    expect(mark.textContent).toMatch(/≈ [\d,.]+ U/);
-    expect(mark.textContent).toContain('点击看计算');
+    expect(mark.textContent?.trim()).toMatch(/^多加 \d+\.\d{2}%$/);
+    expect(mark.textContent).not.toContain('上限');
+    expect(mark.textContent).not.toContain('点击看计算');
     expect(mark.getAttribute('title')).toBeNull();
     expect(mark.getAttribute('aria-label')).toContain('仓位过大');
     expect(mark.getAttribute('aria-label')).toContain('U 名义仓位');
