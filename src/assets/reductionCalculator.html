@@ -389,7 +389,9 @@
   } catch (_) {}
   // 系统打开时只预填一次；后续行情变化不覆盖手动输入。
   window.ReductionCalculator = { setSeed(seed) {
-    ids.forEach(id => { fields[id].value = Number.isFinite(seed[id]) && seed[id] > 0 ? String(seed[id]) : ''; });
+    const precision = Number.isInteger(seed.pricePrecision) ? Math.max(0, Math.min(20, seed.pricePrecision)) : null;
+    ids.forEach(id => { fields[id].value = Number.isFinite(seed[id]) && seed[id] > 0
+      ? (precision == null ? String(seed[id]) : seed[id].toFixed(precision)) : ''; });
     setMode('X'); calculate();
   } };
   window.addEventListener('resize', fitX);

@@ -237,6 +237,7 @@ export function SessionModeControls({
         减仓
       </button>
       {reductionOpen && <ReductionCalculator open onClose={() => setReductionOpen(false)} seed={{
+        pricePrecision: activePricePrecision,
         T: activeFillBasePrice || activePrice,
         S: activeSymbol ? readHeldPosition(activeSymbol, ctx.positionsMap[activeSymbol], 'LONG', getCoinMarginedContractSizeUsd(activeSymbol))?.avgEntry : undefined,
         K: activeSymbol ? (ctx.ordersMap[activeSymbol] ?? [])
