@@ -210,13 +210,13 @@ export function SessionModeControls({
 
   const segmentCls = (active: boolean, activeCls: string) =>
     `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
-      active ? activeCls : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+      active ? 'bg-foreground/[0.07] text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
     }`;
 
   const timeModeBtnCls = (active: boolean, disabled: boolean) =>
     `flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.97] ${
       active
-        ? 'bg-primary/20 text-primary'
+        ? 'bg-foreground/[0.07] text-foreground'
         : disabled
           ? 'bg-secondary text-muted-foreground opacity-50 cursor-not-allowed hover:bg-secondary'
           : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -272,13 +272,7 @@ export function SessionModeControls({
             className={`flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium transition-all duration-100 ease-out hover:bg-foreground/[0.05] active:scale-[0.97] ${modesOpen ? 'bg-foreground/[0.06]' : ''}`}
           >
             <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
-            <span className={ctx.tradingMode === 'direct' ? 'text-[#F0B90B]' : 'text-primary'}>
-              {ctx.tradingMode === 'direct' ? '直接交易' : '决策记录'}
-            </span>
-            <span aria-hidden="true" className="text-muted-foreground/40">·</span>
-            <span className="text-sky-600 dark:text-sky-400">{POSITION_LIMIT_MODE_LABEL[positionLimitMode]}</span>
-            {reverseActive && <span data-testid="session-modes-reverse-tag" className="rounded bg-[#B080FF]/20 px-1 text-[#B080FF]">倒叙</span>}
-            {timeMode === 'isolated' && <span data-testid="session-modes-isolated-tag" className="rounded bg-primary/15 px-1 text-primary">隔离</span>}
+            <span className="text-muted-foreground">模式</span>
             <ChevronDown className={`h-3 w-3 text-muted-foreground/60 transition-transform ${modesOpen ? 'rotate-180' : ''}`} />
           </button>
         </PopoverTrigger>

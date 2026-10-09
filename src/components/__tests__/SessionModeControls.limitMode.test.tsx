@@ -66,7 +66,8 @@ describe('顶栏「模式」菜单：持仓限制模式开关', () => {
   it('【用户要求】收进「模式」菜单，排在交易模式那一行下面、时间模式之前；触发按钮写出当前模式；两段「无限制 / 币安标准」，默认无限制', () => {
     render(<Harness initial="unlimited" />);
     expect(screen.queryByTestId('position-limit-mode')).toBeNull();
-    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('直接交易·无限制');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('模式');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveAttribute('aria-label', expect.stringContaining('直接交易 · 无限制'));
     openModes();
     const group = screen.getByTestId('position-limit-mode');
     expect(group).toHaveAttribute('role', 'group');
@@ -93,7 +94,7 @@ describe('顶栏「模式」菜单：持仓限制模式开关', () => {
     fireEvent.click(segment('binance'));
     expect(ctx.calls).toEqual(['binance']);
     expect(segment('binance')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('币安标准');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveAttribute('aria-label', expect.stringContaining('币安标准'));
     expect(segment('unlimited')).toHaveAttribute('aria-pressed', 'false');
     expect(message).toHaveBeenCalledTimes(1);
     const [title, opts] = message.mock.calls[0] as [string, { description: string }];

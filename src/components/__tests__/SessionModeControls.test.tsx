@@ -43,7 +43,9 @@ describe('SessionModeControls', () => {
     );
 
     // 时间模式收在顶栏「模式」菜单里；隔离不是默认，触发按钮上带一枚「隔离」
-    expect(screen.getByTestId('session-modes-isolated-tag')).toHaveTextContent('隔离');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveTextContent('模式');
+    expect(screen.getByTestId('session-modes-trigger')).not.toHaveTextContent('隔离');
+    expect(screen.getByTestId('session-modes-trigger')).toHaveAttribute('aria-label', expect.stringContaining('隔离'));
     fireEvent.click(screen.getByTestId('session-modes-trigger'));
     fireEvent.click(screen.getByRole('button', { name: '同步' }));
 
