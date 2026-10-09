@@ -95,6 +95,11 @@ describe('Legs 列表的「加仓校验」列', () => {
     fireEvent.click(screen.getByTestId('add-sizing-check-fail-add1'));
 
     const dialog = screen.getByTestId('add-sizing-detail-dialog');
+    const help = screen.getByTestId('add-sizing-help');
+    expect(help).not.toHaveAttribute('open');
+    expect(screen.getByTestId('add-sizing-correct-coins').closest('details')).toBeNull();
+    expect(screen.getByText('计算过程').closest('details')).toBeNull();
+    expect(screen.getByTestId('add-sizing-symbol-lines').closest('details')).toBe(help);
     expect(dialog.textContent).toContain('“正确加仓”指 Plan B 允许的最大币量');
     expect(screen.getByTestId('add-sizing-correct-coins').textContent).toMatch(/[\d,.]+ 币/);
     expect(screen.getByTestId('add-sizing-correct-notional').textContent).toMatch(/[\d,.]+ U 名义仓位/);

@@ -499,15 +499,10 @@ function AddSizingDetailDialog({
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-[600px]" data-testid="add-sizing-detail-dialog">
+      <DialogContent className="max-h-[94vh] overflow-y-auto gap-3 sm:max-w-[760px]" data-testid="add-sizing-detail-dialog">
         <DialogHeader>
           <DialogTitle>加仓{addOrdinal} · Plan B 仓位校验</DialogTitle>
-          <DialogDescription>
-            “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 T 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
-            止损线不必越过旧仓成本线：已落袋 G 先覆盖旧仓在止损线的亏损，余额才可覆盖新增风险。
-            G 取加仓前实际已实现的 USDT 净额，币本位也不按止损线重估。
-            T 为加仓线（实际成交价），K 为新支撑线；S₁ 为当前旧仓成本线（最新开仓均价），S₀ 为扣除净落袋利润后的保本线。
-          </DialogDescription>
+          <DialogDescription className="sr-only">加仓上限与完整计算过程；点击说明图标查看口径与计划对比。</DialogDescription>
         </DialogHeader>
 
         <div className="rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/[0.07] p-4">
@@ -518,37 +513,14 @@ function AddSizingDetailDialog({
           <div className="mt-1 text-sm tabular-nums text-foreground/70" data-testid="add-sizing-correct-notional">
             ≈ {formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位
           </div>
-          <div className="mt-3 border-t border-[#F6465D]/20 pt-3 text-xs leading-relaxed text-foreground/65">
-            实际加仓 {formatAddSizingCoinQuantity(actualCoins)} 币（{formatAddSizingNotional(actualNotional)} U），
-            超出 {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
-          </div>
+
         </div>
 
-        {/* 成交记录带着计算器当时的计划：把「计算时」「下单时」「实际成交」并排摆出来。
-            判定仍按成交价；这里只解释红叉从哪来——真是滑点才点名滑点，价格变了、量超了各说各的。 */}
-        {snapshotLines && (
-          <div data-testid="add-sizing-snapshot-line" className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
-            <div className="text-muted-foreground">加仓计算器当时的计划{verdict.snapshot?.orderKind === 'limit' ? '（限价 @T）' : verdict.snapshot?.orderKind === 'conditional' ? '（条件委托 @T · 触发后市价，含滑点）' : '（市价 · 含滑点）'}</div>
-            <div className="font-mono tabular-nums">{snapshotLines.calc}；</div>
-            {snapshotLines.order && <div data-testid="add-sizing-order-line" className="font-mono tabular-nums">{snapshotLines.order}；</div>}
-            <div className="font-mono tabular-nums">{snapshotLines.actual}。</div>
-            {snapshotLines.slippage && (
-              <div data-testid="add-sizing-slippage-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.slippage}。</div>
-            )}
-            {snapshotLines.cause && (
-              <div data-testid="add-sizing-cause-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.cause}。</div>
-            )}
-          </div>
-        )}
+
 
         <div className="space-y-2 text-xs">
           <div className="font-medium text-foreground">计算过程</div>
-          <div className="rounded bg-muted/35 px-3 py-2 font-mono tabular-nums" data-testid="add-sizing-symbol-lines">
-            S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − G / Q₁ = {fmtPrice(breakevenLine)}。
-            有净利润落袋时 S₀ &lt; S₁。无旧仓时 S₀ 不适用。
-            Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，表示加仓前当前剩余币数，与加仓计算器的 Q₁ 同义；不按保本线、成本线拆分。
-            Q₂ 为可加仓币量上限，Q₂实际为实际成交币量。
-          </div>
+
           <div className="grid grid-cols-3 gap-3 rounded bg-muted/35 px-3 py-2">
             <span className="text-muted-foreground">① 旧仓浮盈垫 Y₁</span>
             <span className="col-span-2 text-right font-mono tabular-nums">
@@ -586,10 +558,52 @@ function AddSizingDetailDialog({
           </div>
         </div>
 
+
+
+        <details className="group text-xs" data-testid="add-sizing-help">
+          <summary aria-label="展开加仓校验使用说明" title="使用说明与计划对比" className="absolute right-12 top-4 flex h-6 w-6 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <span aria-hidden="true" className="text-sm">ⓘ</span>
+          </summary>
+          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3 leading-relaxed text-muted-foreground">
+            <div className="font-medium text-foreground">使用说明与计划对比</div>
+          <div>
+            “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 T 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
+            止损线不必越过旧仓成本线：已落袋 G 先覆盖旧仓在止损线的亏损，余额才可覆盖新增风险。
+            G 取加仓前实际已实现的 USDT 净额，币本位也不按止损线重估。
+            T 为加仓线（实际成交价），K 为新支撑线；S₁ 为当前旧仓成本线（最新开仓均价），S₀ 为扣除净落袋利润后的保本线。
+          </div>
+          <div className="rounded bg-muted/35 px-3 py-2 font-mono tabular-nums" data-testid="add-sizing-symbol-lines">
+            S₁ 成本线 = {fmtPrice(averageEntry)}；S₀ 保本线 = S₁ − G / Q₁ = {fmtPrice(breakevenLine)}。
+            有净利润落袋时 S₀ &lt; S₁。无旧仓时 S₀ 不适用。
+            Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，表示加仓前当前剩余币数，与加仓计算器的 Q₁ 同义；不按保本线、成本线拆分。
+            Q₂ 为可加仓币量上限，Q₂实际为实际成交币量。
+          </div>
+          <div className="mt-3 border-t border-[#F6465D]/20 pt-3 text-xs leading-relaxed text-foreground/65">
+            实际加仓 {formatAddSizingCoinQuantity(actualCoins)} 币（{formatAddSizingNotional(actualNotional)} U），
+            超出 {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
+          </div>
+        {/* 成交记录带着计算器当时的计划：把「计算时」「下单时」「实际成交」并排摆出来。
+            判定仍按成交价；这里只解释红叉从哪来——真是滑点才点名滑点，价格变了、量超了各说各的。 */}
+        {snapshotLines && (
+          <div data-testid="add-sizing-snapshot-line" className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
+            <div className="text-muted-foreground">加仓计算器当时的计划{verdict.snapshot?.orderKind === 'limit' ? '（限价 @T）' : verdict.snapshot?.orderKind === 'conditional' ? '（条件委托 @T · 触发后市价，含滑点）' : '（市价 · 含滑点）'}</div>
+            <div className="font-mono tabular-nums">{snapshotLines.calc}；</div>
+            {snapshotLines.order && <div data-testid="add-sizing-order-line" className="font-mono tabular-nums">{snapshotLines.order}；</div>}
+            <div className="font-mono tabular-nums">{snapshotLines.actual}。</div>
+            {snapshotLines.slippage && (
+              <div data-testid="add-sizing-slippage-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.slippage}。</div>
+            )}
+            {snapshotLines.cause && (
+              <div data-testid="add-sizing-cause-line" className="mt-1 font-medium text-[#F6465D]">{snapshotLines.cause}。</div>
+            )}
+          </div>
+        )}
         <div className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
           实际新仓最大预期亏损 {formatAddSizingNotional(verdict.maxLoss)} U，可用覆盖额 {formatAddSizingNotional(verdict.required)} U，
           尚缺 <span className="font-semibold text-[#F6465D]">{formatAddSizingShortfall(verdict.shortfall ?? 0)} U</span>。
         </div>
+          </div>
+        </details>
       </DialogContent>
     </Dialog>
   );
