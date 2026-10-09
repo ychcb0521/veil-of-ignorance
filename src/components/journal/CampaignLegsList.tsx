@@ -566,6 +566,7 @@ function AddSizingDetailDialog({
           </summary>
           <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3 leading-relaxed text-muted-foreground">
             <div className="font-medium text-foreground">使用说明与计划对比</div>
+            <p>实际加仓币量超过理论上限不超过 1%（含 1%），默认判为合格。容差只用于复盘判定，不改变理论上限与实际计算数值。</p>
           <div>
             “正确加仓”指 Plan B 允许的最大币量；U 是它按加仓价 T 折算的名义仓位。两者是同一仓位，不是两个可相加的额度。
             止损线不必越过旧仓成本线：已落袋 G 先覆盖旧仓在止损线的亏损，余额才可覆盖新增风险。

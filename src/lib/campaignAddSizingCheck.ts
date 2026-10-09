@@ -507,6 +507,8 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const costLineGap = post ? (x1Coins + x2Coins) * (post.blendedCost - s1) * d - banked : Number.NaN;
     // 容差只吸收浮点误差：取满计算器 Plan B 上限的加仓应判 ok，而不是差 1e-9 被判 fail；两条路对账用同一条容差
     const tolerance = Math.max(0.01, 1e-6 * Math.max(Math.abs(required), maxLoss));
+    // 复盘允许实际币量比理论上限多至 1%；数值对账仍只使用原浮点容差。
+    const qualificationTolerance = tolerance + Math.max(0, required) * 0.01;
     const ledgerGap = maxLoss - required;
     const costLineShortfall = costLineGap > tolerance ? costLineGap : 0;
     /**
@@ -554,8 +556,8 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       result.set(add.id, unknown('self_check_mismatch', { ...partial, shortfall: ledgerGap > tolerance ? ledgerGap : 0 }));
       continue;
     }
-    if (required >= maxLoss - tolerance) {
-      result.set(add.id, { status: 'ok', ...partial, shortfall: 0 });
+    if (required >= maxLoss - qualificationTolerance) {
+      result.set(add.id, { status: 'ok', ...partial, shortfall: ledgerGap > tolerance ? ledgerGap : 0 });
     } else {
       result.set(add.id, { status: 'fail', ...partial, shortfall: ledgerGap });
     }
@@ -650,7 +652,8 @@ export function addSizingSnapshotLines(verdict: AddSizingVerdict): AddSizingSnap
   const conditionalPlan = snap.orderKind === 'conditional';
   // s2Ref 的称呼跟着下单方式走：只有市价计划的 s2Ref 是计算那一刻的盘面价
   const refWord = limitPlan ? '限价' : conditionalPlan ? '触发价' : '现价';
-  const excess = verdict.status === 'fail' ? verdict.excess : null;
+  // 1%容差只改变合格标记；说明里仍保留原始超额归因，避免掩盖计划偏差。
+  const excess = verdict.excess;
   const planOrderPrice = limitPlan ? snap.s2Fill : snap.s2Ref;
   const orderPrice = positive(snap.s2AtOrder) ? snap.s2AtOrder : planOrderPrice;
   const drifted = Math.abs(orderPrice / planOrderPrice - 1) > 1e-9;

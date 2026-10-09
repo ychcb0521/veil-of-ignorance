@@ -152,6 +152,12 @@ describe('加仓校验：浮盈垫 + 落袋 ≥ 新腿退回 K 的亏损', () =>
       expect(v.status).toBe('ok');
     });
 
+    it.each([[1.005, 'ok'], [1.01, 'ok'], [1.011, 'fail']] as const)('加仓上限的 %s 倍按1%%容差判 %s', (factor, status) => {
+      const v = evaluateCampaignAddSizing({ legs: legsWith(7500 * factor), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
+      expect(v.status).toBe(status);
+      expect(v.maxAllowedCoins).toBeCloseTo(7500, 6);
+    });
+
     it('比浮盈垫 + G 还大 → fail，缺口正好是超出的部分', () => {
       const v = evaluateCampaignAddSizing({ legs: legsWith(8_000), tradeRecords: [], reverseHedgeOrders: orders }).get('add')!;
       expect(v.maxLoss).toBeCloseTo(1_600, 6);
@@ -338,9 +344,9 @@ describe('【最新线性规则】止损未过成本，落袋先补旧仓亏损'
         expect(verdict.banked).toBe(300);
         expect(verdict.cushion).toBe(-100);
         expect(verdict.maxAllowedCoins).toBeCloseTo(200 / 11, 10);
-        expect(verdict.maxAllowedCoins).toBeCloseTo(calc.addCoins, 10);
-        expect(verdict.status).toBe(factor === 1 ? 'ok' : 'fail');
-      }
+       expect(verdict.maxAllowedCoins).toBeCloseTo(calc.addCoins, 10);
+        expect(verdict.status).toBe(factor <= 1.01 ? 'ok' : 'fail');
+     }
     }
   });
 
@@ -1146,9 +1152,9 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
     it('【回归 · 三审】有利价格变动后下了比计划大的量（665,500 张 vs 643,648 张）：说量超了计算时的上限 +3.39%，不点名滑点', () => {
       const ref = refOf(ADD1);
       const { verdict: v, plan } = withSnapshot(665_500, { kind: 'market', snapshot: { s2AtOrder: ref * 0.997 } });
-      expect(plan.contracts).toBe(643_648);
-      expect(v.status).toBe('fail');
-      expect(v.excess?.priceDriftPct).toBeCloseTo(-0.3, 9);
+     expect(plan.contracts).toBe(643_648);
+      expect(v.status).toBe('ok');
+     expect(v.excess?.priceDriftPct).toBeCloseTo(-0.3, 9);
       // 旧判据的前提仍在：按应有成交价，这个量在本函数的上限之内
       expect(v.excess!.limitAtAnchor).toBeGreaterThan(v.excess!.coinsAtPlan * (plan.s2Fill / v.excess!.anchorPrice));
       expect(v.excess?.withinPlanLimit).toBe(false);
@@ -1165,9 +1171,9 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
     });
 
     it('市价计划按整张下单、成交却比预计更差：这才是「全部来自成交滑点」，写的是多出来的那一截 +0.0020%，不是整段 +0.14%', () => {
-      const { verdict: v, plan } = withSnapshot(643_648, { kind: 'market', fill: ADD1.fill });
-      expect(v.status).toBe('fail');
-      expect(v.excess?.cause).toBe('slippage');
+     const { verdict: v, plan } = withSnapshot(643_648, { kind: 'market', fill: ADD1.fill });
+      expect(v.status).toBe('ok');
+     expect(v.excess?.cause).toBe('slippage');
       expect(v.excess?.unexpectedSlippagePct).toBeCloseTo((ADD1.fill / plan.s2Fill - 1) * 100, 9);
       expect(addSizingSnapshotLines(v)!.slippage).toBe('超出部分全部来自成交滑点 +0.0020%（比计划预计的成交价 0.00771215 更差）');
       // 基准价没动、成交正是预计的 T′：合规，快照照给，不说原因
@@ -1203,9 +1209,9 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
       const s2Plan = 0.0077018;
       const planned = withSnapshot(0, { s2Plan }).plan;
       expect(planned.contracts).toBe(653_295);
-      const { verdict: v } = withSnapshot(653_295, { s2Plan, fill: 0.007702, snapshot: { s2AtOrder: 0.007702 }, record: { type: 'LIMIT' } });
-      expect(v.status).toBe('fail');
-      expect(v.shortfall).toBeCloseTo(155.63, 1);
+     const { verdict: v } = withSnapshot(653_295, { s2Plan, fill: 0.007702, snapshot: { s2AtOrder: 0.007702 }, record: { type: 'LIMIT' } });
+      expect(v.status).toBe('ok');
+     expect(v.shortfall).toBeCloseTo(155.63, 1);
       expect(v.fillSlippagePct).toBe(0);
       expect(v.excess?.cause).toBe('price_drift');
       expect(v.withinSnapshotLimit).toBe(false);
@@ -1401,9 +1407,9 @@ describe('【复核】Legs 校验也走两条路：垫子式与成本线式对�
       }),
       leg({ id: 'add', leg_role: 'main_add_1', pre_simulated_time: iso(t), pre_entry_price: 0.7, pre_position_size: 500.1 * 0.7 }),
     ];
-    const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(0.5, t - MIN, null)] }).get('add')!;
-    expect(v.status).toBe('fail');
-    expect(v.cushion).toBeCloseTo(-50_000, 6);
+   const v = evaluateCampaignAddSizing({ legs, tradeRecords: [], reverseHedgeOrders: [short(0.5, t - MIN, null)] }).get('add')!;
+    expect(v.status).toBe('ok');
+   expect(v.cushion).toBeCloseTo(-50_000, 6);
     expect(v.required).toBeCloseTo(100, 6);
     expect(v.shortfall).toBeCloseTo(0.02, 6);
     // 同一批数喂给计算器那条交叉复核：截断容差不许被 5 万的成本线越过额放宽到 0.05，两边同判
