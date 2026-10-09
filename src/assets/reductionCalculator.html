@@ -19,6 +19,37 @@
 .big-number .x-input::placeholder{color:inherit;opacity:1}
 .big-number .percent{flex:0 0 auto}
 [hidden]{display:none!important}
+/* 桌面单屏布局：保留完整内容，以紧凑节奏代替整体缩放。 */
+@media screen and (min-width:721px){
+ main{max-width:1100px;padding:22px 28px 16px}
+ header{margin-bottom:16px} .eyebrow{margin-bottom:4px;font-size:10px}
+ h1{font-size:26px;margin-bottom:4px} header p{font-size:12px}
+ .workspace{gap:18px}.panel{padding:20px 22px;border-radius:18px}
+ .panel-head{margin-bottom:14px}.panel-head h2{font-size:15px}
+ .field{margin-bottom:12px}label{font-size:13px;margin-bottom:5px}
+ .symbol{height:24px;width:24px}input{height:42px;font-size:18px;padding:8px 12px}
+ .hint{font-size:11px;margin-top:4px;line-height:1.45}
+ .buttons{margin-top:14px}button{padding:9px 13px;font-size:13px}
+ .utility{margin-top:8px}.auto-note{font-size:11px}
+ .big-number{font-size:56px;min-height:63px}.big-number.compact{font-size:40px}
+ .result-label{font-size:13px;margin-bottom:4px}
+ .retained{margin:6px 0 12px;font-size:12px}.retained strong{font-size:16px}
+ .status{font-size:12px;padding:9px 11px;min-height:48px;margin-bottom:12px;line-height:1.5}
+ .formula-box{padding-top:12px}.mini-label{margin-bottom:6px}
+ .equation{font-size:17px;min-height:40px}.fraction{font-size:15px}
+ .fraction span:first-child{padding-bottom:3px}.fraction span:last-child{padding-top:3px}
+ .substitution{margin-top:8px;font-size:11px;line-height:1.5}
+ .check{padding:8px 10px;margin-top:9px;font-size:11px;line-height:1.5}
+ .copy-wrap{padding-top:12px}.info{gap:18px;margin-top:14px}
+ .note{padding:10px 14px;border-radius:12px}.note h3{font-size:12px;margin-bottom:3px}
+ .note p{font-size:11px;line-height:1.5}footer{margin-top:10px;font-size:10px}
+}
+@media screen and (min-width:721px) and (max-height:700px){
+ main{padding-top:16px}header{margin-bottom:12px}
+ .panel{padding:16px 20px}.panel-head{margin-bottom:10px}
+ .field{margin-bottom:9px}.big-number{font-size:48px;min-height:54px}
+ .info{margin-top:10px}footer{margin-top:7px}
+}
 </style>
 </head>
 <body>
