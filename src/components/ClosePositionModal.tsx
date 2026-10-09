@@ -69,6 +69,8 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
   const [closeAmount, setCloseAmount] = useState<number>(() => normalizeAmount(totalUnits));
   // Raw input string so users can freely type (e.g. "0.", "0.00")
   const [amountInput, setAmountInput] = useState<string>(() => normalizeAmount(totalUnits).toString());
+  const [percentInput, setPercentInput] = useState<string | null>(null);
+  const percentInvalid = percentInput !== null && (percentInput.trim() === '' || !Number.isFinite(Number(percentInput)) || Number(percentInput) < 0 || Number(percentInput) > 100);
 
   /**
    * 打开时按全部可用数量起步；弹窗**开着的时候**可用数量变了（卡上有一笔被强平 / 被止盈平掉，
@@ -90,6 +92,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
     sessionRef.current = { open: true, units: totalUnits, amount: next };
     setCloseAmount(next);
     setAmountInput(next.toString());
+    setPercentInput(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, totalUnits, position.id, isCoinMargined]);
 
@@ -120,6 +123,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
   };
 
   const setAmountFromInput = (raw: string) => {
+    setPercentInput(null);
     setAmountInput(raw);
     const parsed = parseFloat(raw);
     if (isNaN(parsed)) return;
@@ -141,18 +145,21 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
   };
 
   const setFromPercent = (pct: number) => {
+    setPercentInput(null);
     const next = clampAmount(totalUnits * (pct / 100));
     setCloseAmount(next);
     setAmountInput(next.toString());
   };
 
   const handleMax = () => {
+    setPercentInput(null);
     const max = normalizeAmount(totalUnits);
     setCloseAmount(max);
     setAmountInput(max.toString());
   };
 
   const handleConfirm = () => {
+    if (percentInvalid) return;
     const parsed = parseFloat(amountInput);
     const finalAmount = clampAmount(isNaN(parsed) ? closeAmount : parsed);
     if (finalAmount < minQty || totalUnits <= 0) return;
@@ -285,9 +292,21 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
               className="w-full"
             />
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground font-mono">
-                ≈ {currentPercentage.toFixed(1)}% · {formatUSDT(notionalValue)} {quoteUnitLabel}
-              </span>
+              <label className="flex items-center gap-1 rounded-md border border-border bg-secondary/40 px-2 py-1 font-mono text-xs focus-within:ring-1 focus-within:ring-primary/60">
+                <input aria-label="市价平仓百分比" type="text" inputMode="decimal" lang="en" autoComplete="off"
+                  value={percentInput ?? String(Number(currentPercentage.toFixed(6)))}
+                  aria-invalid={percentInvalid}
+                  onChange={event => {
+                    const raw = event.target.value;
+                    if (!/^\d*(?:\.\d*)?$/.test(raw)) return;
+                    const pct = Number(raw);
+                    if (raw !== '' && Number.isFinite(pct) && pct >= 0 && pct <= 100) setFromPercent(pct);
+                    setPercentInput(raw);
+                  }}
+                  onBlur={() => { if (!percentInvalid) setPercentInput(null); }}
+                  className="w-16 bg-transparent text-right font-semibold text-foreground outline-none" />
+                <span className="text-muted-foreground">%</span>
+              </label>
               <div className="flex gap-1">
                 {QUICK_PERCENTAGES.map(pct => {
                   const active = sliderPct === pct;
@@ -371,7 +390,7 @@ export function ClosePositionModal({ open, onClose, symbol, position, currentPri
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={submitDisabled}
+            disabled={submitDisabled || percentInvalid}
             className={`flex-1 ${
               position.side === 'LONG'
                 ? 'bg-trading-red hover:bg-trading-red/90 text-white'
