@@ -9,7 +9,7 @@
  */
 
 import { useState } from 'react';
-import { Globe, Split, Lock, Brain, Zap, Rewind, Calculator, Play, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Globe, Split, Lock, Brain, Zap, Rewind, Minus, Plus, Play, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { AddPositionCalculator } from '@/components/AddPositionCalculator';
 import { ReductionCalculator } from '@/components/ReductionCalculator';
@@ -231,7 +231,8 @@ export function SessionModeControls({
         title="减仓计算器 · X / T 双向计算"
         className="flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium text-muted-foreground transition-all duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97]"
       >
-        <Calculator className="w-3 h-3" /> 减仓
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-600/[0.08] text-teal-700 dark:bg-teal-400/10 dark:text-teal-400"><Minus className="h-3.5 w-3.5" strokeWidth={2.5} /></span>
+        减仓
       </button>
       {reductionOpen && <ReductionCalculator open onClose={() => setReductionOpen(false)} />}
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
@@ -246,7 +247,8 @@ export function SessionModeControls({
           : '加仓计算器：先选一个标的'}
         className="flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium text-muted-foreground transition-all duration-100 ease-out hover:bg-accent hover:text-foreground active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <Calculator className="w-3 h-3" /> 加仓
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-orange-500/[0.08] text-orange-600 dark:bg-orange-400/10 dark:text-orange-400"><Plus className="h-3.5 w-3.5" strokeWidth={2.5} /></span>
+        加仓
       </button>
       {addSizingOpen && activeSymbol && (
         <AddPositionCalculator
