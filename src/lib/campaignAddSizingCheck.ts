@@ -582,6 +582,12 @@ export function formatAddSizingCoinQuantity(value: number | null): string {
 }
 
 /** 交易面板使用的 U 名义仓位统一保留两位。 */
+export function formatAddSizingExcessPercent(actual: number | null, allowed: number | null): string {
+  if (actual == null || allowed == null || !Number.isFinite(actual) || !Number.isFinite(allowed)) return '—';
+  if (allowed <= 0) return '无法计算（上限为0）';
+  return `${Math.max(0, (actual - allowed) / allowed * 100).toFixed(2)}%`;
+}
+
 export function formatAddSizingNotional(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
