@@ -143,14 +143,15 @@ describe('「止盈/止损」弹窗：按成数的那一截按市价上限判，
 
   it('70%（210,000）超过上限：说明并置灰；60%（180,000）放行', () => {
     const { onPlaceTpSl } = openTpSl();
-    stepDown(3);
+    // 成数滑块现在一格 1%（b61c37aa 去掉了「只能按 10% 走」的限制）：从 100% 退 30 格到 70%
+    stepDown(30);
     const warning = screen.getByTestId('tpsl-lot-size-warning');
     expect(warning).toHaveTextContent('止损（70% 仓位）：单笔市价单最多 200,000 KAITO，这一单 210,000 KAITO');
     expect(warning).toHaveTextContent('把成数调小到不超过上限，或选 100%');
     expect(confirm().disabled).toBe(true);
     fireEvent.click(confirm());
     expect(onPlaceTpSl).not.toHaveBeenCalled();
-    stepDown(1);
+    stepDown(10);
     expect(screen.queryByTestId('tpsl-lot-size-warning')).toBeNull();
     fireEvent.click(confirm());
     expect(onPlaceTpSl).toHaveBeenCalledTimes(1);

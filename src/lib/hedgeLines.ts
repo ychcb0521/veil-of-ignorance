@@ -44,7 +44,7 @@ type OrderLike = PendingOrder & {
  * handlePlaceTpSl 造的 CONDITIONAL + reduceOnly + linkedPositionId。
  * 照抄原判据会把带止盈止损的对冲开仓单误排除。
  */
-function isClosingOrder(o: OrderLike): boolean {
+export function isClosingOrder(o: OrderLike): boolean {
   if (o.reduceOnly === true || o.reduceKind != null) return true;
   if (o.linkedPositionId || o.reducePositionSide) return true;
   return false;

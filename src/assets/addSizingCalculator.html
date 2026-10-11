@@ -726,6 +726,9 @@ tr.page-hidden{display:none}
  // 同源宿主只读回调。仓位以完整精度赋值；价格缺省按宿主给的小数位数（与主界面「仓位」里开仓价的位数一致）写进输入框，
  // 之后怎么改、改成几位小数都不受限制——输入框是纯文本，numeric() 不限制小数位。
  const seedPrice=(value,digits)=>!(value>0)?'':Number.isInteger(digits)&&digits>=0&&digits<=12?value.toFixed(digits):String(value);
+ // 用户有没有亲手敲过 K（脚本写值不触发 input 事件）；上一次种值的方向。
+ let supportTyped=false,lastSeedSide=null;
+ $('support').addEventListener('input',()=>{supportTyped=true;});
  window.AddPositionMath=Object.freeze({calculate:calc,parse:numeric,setSeed(seed){
    costViewMode='latest';
    costBasisCredit=0;
@@ -733,7 +736,12 @@ tr.page-hidden{display:none}
    $('contract-model').value=seed.side==='SHORT'?'short':'long';
    mirrorProfitRealized=Number.isFinite(seed.mirrorProfitRealized)?seed.mirrorProfitRealized:0;
    mirrorProfitAllocated=Number.isFinite(seed.mirrorProfitAllocated)?seed.mirrorProfitAllocated:0;
-   fillSingle({...readSingle(),current:seedPrice(seed.currentPrice,seed.priceDecimals),support:seedPrice(seed.support,seed.priceDecimals),cost:seedPrice(seed.strategyCost,seed.priceDecimals),position:seed.coins>0?String(seed.coins):'',mode:'quantity',mirror:seed.mirrorProfitAvailable>=0?String(seed.mirrorProfitAvailable):'0',leverage:seed.leverage>0?String(seed.leverage):'10'});
+   // K 是缺省值不是锁：宿主在弹窗开着时重新取数（落袋核验回来、持仓变了），用户已经手敲进去的 K 原样留着；换了方向才重填。
+   const typedSupport=supportTyped&&(lastSeedSide===null||lastSeedSide===seed.side)?$('support').value.trim():'';
+   lastSeedSide=seed.side;if(!typedSupport)supportTyped=false;
+   fillSingle({...readSingle(),current:seedPrice(seed.currentPrice,seed.priceDecimals),support:typedSupport||seedPrice(seed.support,Number.isInteger(seed.supportDecimals)?seed.supportDecimals:seed.priceDecimals),cost:seedPrice(seed.strategyCost,seed.priceDecimals),position:seed.coins>0?String(seed.coins):'',mode:'quantity',mirror:seed.mirrorProfitAvailable>=0?String(seed.mirrorProfitAvailable):'0',leverage:seed.leverage>0?String(seed.leverage):'10'});
+   // 宿主说明 K 的缺省值从哪来（最新挂着的对冲委托）：只写进悬停提示，输入框照常可改。
+   $('support').title=!typedSupport&&typeof seed.supportSource==='string'?seed.supportSource:'';
    priorMode='quantity';computeSingle({quiet:true});save();
  }});
 })();

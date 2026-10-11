@@ -140,6 +140,72 @@ describe('embedded add calculator source of truth', () => {
     dom.window.close();
   });
 
+  it('【用户要求】「新支撑线 / 止损线」缺省取最新委托空单的价格，并且可以手动输入', () => {
+    const dom = new JSDOM(html, { url: 'https://app.test', runScripts: 'dangerously' });
+    const win = dom.window as unknown as CalculatorWindow;
+    const field = (id: string) => win.document.getElementById(id) as HTMLInputElement;
+    const type = (id: string, value: string) => {
+      field(id).value = value;
+      field(id).dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    };
+    const added = () => Number(field('r-add').textContent!.replace(/,/g, ''));
+    // 截图那一场：VIRTUAL 主多 3,492,441.79 币 @1.39515282，加仓线 1.4907，对冲空单挂在 1.3728，可用落袋利润 152,110.06 U
+    const seed = {
+      currentPrice: 1.4907, strategyCost: 1.39515282, realAverage: 1.39515282, coins: 3_492_441.78857,
+      mirrorProfitAvailable: 152_110.06, leverage: 10, side: 'LONG', priceDecimals: 4,
+    };
+    win.AddPositionMath.setSeed({ ...seed, support: 1.3728, supportDecimals: 4, supportSource: '缺省取最新挂着的空单价格，可直接改写' });
+    // 打开就是那张空单的价格，直接算出结果，不用再手填
+    expect(field('support').value).toBe('1.3728');
+    expect(field('support').title).toBe('缺省取最新挂着的空单价格，可直接改写');
+    expect(field('single-error').hidden).toBe(true);
+    // 成本线按开仓价的显示位数写进输入框（1.3952），计算读的就是输入框里的数
+    expect(field('cost').value).toBe('1.3952');
+    const expected = (k: number) => (3_492_441.78857 * (k - 1.3952) + 152_110.06) / (1.4907 - k);
+    expect(added()).toBeCloseTo(expected(1.3728), 0);
+    // 输入框照常可改：不是只读、没有被锁住，改成别的价格立刻按新的算
+    expect(field('support').readOnly).toBe(false);
+    expect(field('support').disabled).toBe(false);
+    type('support', '1.38');
+    expect(field('support').value).toBe('1.38');
+    expect(added()).toBeCloseTo(expected(1.38), 0);
+    expect(added()).toBeGreaterThan(expected(1.3728));
+    // 【复核】弹窗开着时宿主重新取数：用户亲手敲进去的 K 原样留着，不被缺省值盖掉；其余各项照常更新
+    win.AddPositionMath.setSeed({ ...seed, currentPrice: 1.5, support: 1.3728, supportDecimals: 4, supportSource: '缺省取最新挂着的空单价格，可直接改写' });
+    expect(field('support').value).toBe('1.38');
+    expect(field('support').title).toBe('');
+    expect(field('current').value).toBe('1.5000');
+    // 换了方向才重填（K 的含义翻过来了）；清空之后也按缺省值填
+    win.AddPositionMath.setSeed({ ...seed, side: 'SHORT', currentPrice: 1.3, support: 1.45, supportDecimals: 4, supportSource: '缺省取最新挂着的多单价格，可直接改写' });
+    expect(field('support').value).toBe('1.4500');
+    expect(field('support').title).toBe('缺省取最新挂着的多单价格，可直接改写');
+    type('support', '');
+    win.AddPositionMath.setSeed({ ...seed, side: 'SHORT', currentPrice: 1.3, support: 1.46, supportDecimals: 4 });
+    expect(field('support').value).toBe('1.4600');
+    dom.window.close();
+  });
+
+  it('K 的缺省值按宿主给的位数原样写；没有对冲委托时留空；旧宿主不给位数时沿用价格位数', () => {
+    const dom = new JSDOM(html, { url: 'https://app.test', runScripts: 'dangerously' });
+    const win = dom.window as unknown as CalculatorWindow;
+    const field = (id: string) => win.document.getElementById(id) as HTMLInputElement;
+    const seed = {
+      currentPrice: 1.4907, strategyCost: 1.39515282, realAverage: 1.39515282, coins: 3_492_441.78857,
+      mirrorProfitAvailable: 152_110.06, leverage: 10, side: 'LONG', priceDecimals: 4,
+    };
+    // 委托价的位数比开仓价的显示位数多：不被四舍五入成 4 位
+    win.AddPositionMath.setSeed({ ...seed, support: 1.372815, supportDecimals: 6, supportSource: '缺省取最新挂着的空单价格，可直接改写' });
+    expect(field('support').value).toBe('1.372815');
+    expect(field('current').value).toBe('1.4907');
+    // 没有挂着的对冲委托：留空等用户手填，悬停提示也清掉
+    win.AddPositionMath.setSeed({ ...seed, support: 0, supportSource: '' });
+    expect(field('support').value).toBe('');
+    expect(field('support').title).toBe('');
+    win.AddPositionMath.setSeed({ ...seed, support: 1.37284 });
+    expect(field('support').value).toBe('1.3728');
+    dom.window.close();
+  });
+
   it('keeps a missing standalone cost editable when the user requests the breakeven view', () => {
     const { win, field, type } = standaloneCalculator();
     field('clear-single').click();

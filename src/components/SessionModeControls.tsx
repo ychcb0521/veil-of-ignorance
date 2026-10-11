@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { AddPositionCalculator } from '@/components/AddPositionCalculator';
 import { ReductionCalculator } from '@/components/ReductionCalculator';
 import { readHeldPosition } from '@/lib/addSizing';
+import { latestHedgeOrderPrice } from '@/lib/latestHedgeOrder';
 import { getCoinMarginedContractSizeUsd } from '@/lib/coinMargined';
 import { toast } from '@/lib/notificationCenter';
 import {
@@ -240,11 +241,8 @@ export function SessionModeControls({
         pricePrecision: activePricePrecision,
         T: activeFillBasePrice || activePrice,
         S: activeSymbol ? readHeldPosition(activeSymbol, ctx.positionsMap[activeSymbol], 'LONG', getCoinMarginedContractSizeUsd(activeSymbol))?.avgEntry : undefined,
-        K: activeSymbol ? (ctx.ordersMap[activeSymbol] ?? [])
-          .filter(order => order.side === 'SHORT' && !order.reduceOnly && ['NEW', 'PENDING', 'ACTIVE'].includes(order.status))
-          .sort((a, b) => b.createdAt - a.createdAt)
-          .map(order => order.stopPrice > 0 ? order.stopPrice : order.price)
-          .find(price => price > 0) : undefined,
+        // 与加仓计算器的 K 同一条规则：现价下方、最新挂着的对冲空单价格（lib/latestHedgeOrder）
+        K: activeSymbol ? latestHedgeOrderPrice(ctx.ordersMap[activeSymbol], 'LONG', { referencePrice: activeFillBasePrice || activePrice }) ?? undefined : undefined,
       }} />}
       {/* 加仓计算器：浮盈垫锁死的加仓量与对冲量（使用说明 3.4）。
           只在打开时挂载弹窗，按钮本身不读持仓，不给顶栏增加任何渲染负担。 */}

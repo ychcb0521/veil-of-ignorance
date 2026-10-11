@@ -8,9 +8,10 @@ import { getPriceDecimals } from '@/lib/formatters';
 import { checkLotSize } from '@/lib/marketLotSize';
 import { LIVE_PRICE_TIER_HEADROOM } from '@/lib/positionLimit';
 import { addTierHeadroom } from '@/lib/addTierHeadroom';
-import { getFreshAddSizingPlan, publishAddSizingPlan, requestAddSizingPrefill, touchAddSizingPlan } from '@/lib/addSizingPlan';
+import { ADD_SIZING_PLAN_TTL_MS, getFreshAddSizingPlan, publishAddSizingPlan, requestAddSizingPrefill, touchAddSizingPlan } from '@/lib/addSizingPlan';
 import { pickHeldSide, readHeldPosition, roundLimitPriceFavorable, sizeAddAtExpectedFill, type AddOrderKind, type AddSide } from '@/lib/addSizing';
 import { calculateAddPosition, initialAddPositionState, type AddPositionResult, type AddPositionState } from '@/lib/addPositionCoverage';
+import { exactPriceDecimals, latestHedgeOrder } from '@/lib/latestHedgeOrder';
 import type { AddSizingSnapshot, SettlementMode } from '@/types/trading';
 import calculatorHtml from '@/assets/addSizingCalculator.html?raw';
 
@@ -48,6 +49,21 @@ type CalculatorFrame = Window & {
 
 const closeEnough = (a: number, b: number) => Math.abs(a - b) <= Math.max(1e-10, Math.abs(a), Math.abs(b)) * 1e-8;
 
+/**
+ * 「新支撑线 / 止损线」K 的缺省值从哪来的留痕（按「标的:方向」记，只活在本次页面里，与计算计划同样 30 分钟保鲜）。
+ *
+ * 【用户要求】K 缺省取最新委托空单的价格，并且可以手动输入。两件事要分清：
+ *   · manual：用户**手改**过的 K。关掉再打开、或弹窗开着时宿主重新取数，都不能把它盖回委托价；
+ *     之后又挂了更新的对冲委托，才以新委托为准。
+ *   · auto：上一次**自动带入**的委托价。那张委托后来撤了 / 成交了，它的价就不该再借着计算计划留在 K 里。
+ * 只看计算计划分不出这两种：K 一带入就算出结果、计划随即发布，关弹窗还会给计划续期。
+ */
+const supportMemory = new Map<string, { manual?: { k: number; at: number }; auto?: number }>();
+
+export function __resetAddCalculatorSupportMemoryForTests(): void {
+  supportMemory.clear();
+}
+
 /** The standalone calculator's exact markup, styles and interactions are embedded unchanged in the dialog. */
 export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0, fillBasePrice = 0, pricePrecision, quantityPrecision }: Props) {
   const ctx = useTradingContext();
@@ -64,6 +80,8 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
   const [frameError, setFrameError] = useState(false);
   const [selectedSide, setSelectedSide] = useState<AddSide | null>(null);
   const [verifiedProfit, setVerifiedProfit] = useState<{ key: string; usd: number; complete: boolean } | null>(null);
+  /** 最近一次种进 K 输入框的值：计算器报回来的 K 与它不同，就是用户手改过。 */
+  const seededSupportRef = useRef<{ side: AddSide; value: number } | null>(null);
   const profitGeneration = useRef(0);
   const profitSide = selectedSide ?? pickHeldSide(symbol, positions, face)?.side ?? 'LONG';
   const heldSide = readHeldPosition(symbol, positions, profitSide, face);
@@ -129,6 +147,14 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     const existing = candidate?.side === side ? candidate : null;
     child.VeilAddSizingBridge = raw => {
       if (raw) setSelectedSide(raw.side);
+      // 输入框里的 K 与种进去的不一样 = 用户手改过：记下来；改回缺省值就取消
+      const seeded = seededSupportRef.current;
+      if (raw && seeded?.side === raw.side && Number.isFinite(raw.K) && raw.K > 0) {
+        const key = `${current.symbol}:${raw.side}`;
+        const entry = supportMemory.get(key) ?? {};
+        if (!closeEnough(raw.K, seeded.value)) supportMemory.set(key, { ...entry, manual: { k: raw.K, at: Date.now() } });
+        else if (entry.manual && !closeEnough(entry.manual.k, raw.K)) supportMemory.set(key, { ...entry, manual: undefined });
+      }
       setReading(calculateReading(raw));
     };
     child.VeilAddSizingCarry = raw => {
@@ -139,12 +165,35 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
       setReading(null);
     };
     const seedPrice = existing?.s2Ref ?? (fillBasePrice > 0 ? fillBasePrice : currentPrice);
+    // 【用户要求】价格缺省的小数位数与主界面「仓位」里开仓价的位数一致（PositionPanel 用 formatPrice → getPriceDecimals）；
+    // 没有持仓时按现价的位数。只是缺省值的写法，输入框本身不限制小数位。
+    const priceDecimals = getPriceDecimals(held?.avgEntry && held.avgEntry > 0 ? held.avgEntry : seedPrice);
+    // 【用户要求】「新支撑线 / 止损线」缺省取最新委托空单的价格（主空则是最新委托多单），并且可以手动输入：
+    // 只是填进输入框的缺省值，之后怎么改都由用户定。先后次序（见 supportMemory）：
+    //   手改过的 K（30 分钟内、且之后没有再挂更新的对冲委托）→ 最新挂着的对冲委托价 → 上一次计算计划里的 K → 留空。
+    const hedge = latestHedgeOrder(current.ctx.ordersMap?.[current.symbol], side, {
+      referencePrice: seedPrice, heldSinceMs: held?.earliestOpenTime ?? null,
+    });
+    const memoryKey = `${current.symbol}:${side}`;
+    const memory = supportMemory.get(memoryKey) ?? {};
+    const typed = memory.manual && Date.now() - memory.manual.at <= ADD_SIZING_PLAN_TTL_MS
+      // 手改之后又挂了更新的对冲委托：新委托才是这一轮的止损线
+      && (hedge?.placedRealAt == null || memory.manual.at >= hedge.placedRealAt) ? memory.manual.k : null;
+    const hedgeOrderPrice = typed == null && hedge ? hedge.price : null;
+    // 没有挂着的对冲委托时沿用上一次计算计划里的 K——除非它正是上次自动带入的委托价（那张委托已经不在了）
+    const planSupport = existing && existing.s1 > 0 && !(memory.auto != null && closeEnough(existing.s1, memory.auto)) ? existing.s1 : null;
+    const support = typed ?? hedgeOrderPrice ?? planSupport ?? 0;
+    supportMemory.set(memoryKey, { manual: typed != null ? memory.manual : undefined, auto: hedgeOrderPrice ?? memory.auto });
+    seededSupportRef.current = { side, value: support };
     child.AddPositionMath.setSeed({
       currentPrice: seedPrice,
-      // 【用户要求】价格缺省的小数位数与主界面「仓位」里开仓价的位数一致（PositionPanel 用 formatPrice → getPriceDecimals）；
-      // 没有持仓时按现价的位数。只是缺省值的写法，输入框本身不限制小数位。
-      priceDecimals: getPriceDecimals(held?.avgEntry && held.avgEntry > 0 ? held.avgEntry : seedPrice),
-      support: existing?.s1 ?? 0,
+      priceDecimals,
+      support,
+      // 委托价（或上次手填的 K）原样写：位数不够时按它自己的位数，不四舍五入掉
+      supportDecimals: support > 0 ? Math.max(priceDecimals, exactPriceDecimals(support)) : priceDecimals,
+      supportSource: hedgeOrderPrice != null
+        ? `缺省取最新挂着的${side === 'SHORT' ? '多单' : '空单'}价格，可直接改写`
+        : typed != null ? '沿用你上次手填的价格' : '',
       strategyCost: state.strategyCost,
       realAverage: state.realAverage,
       coins: state.coins,
