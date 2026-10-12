@@ -106,7 +106,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏按用户指定的阅读顺序：算术期望、预期回撤、涨跌幅、涨跌幅倍数、神奇的 b、加仓效用、几何期望。
+ * 左栏保留优先五项及基础行情指标；有效涨幅、加仓效用移至右栏，两栏各九项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
@@ -118,8 +118,6 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'effectivePriceChangePct',
-  'addEfficiency',
 ];
 
 /**
@@ -134,6 +132,8 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
   'positionAmplification',
+  'effectivePriceChangePct',
+  'addEfficiency',
 ];
 
 /**
