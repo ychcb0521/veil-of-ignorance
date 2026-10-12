@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { resolveUnifiedMagicB } from '@/lib/campaignB';
+import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
+import { computeSettlementPayoffRatio, resolveUnifiedMagicB } from '@/lib/campaignB';
 import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeEffectivePriceChangeMultiple, computeMagicB, MAGIC_B_FORMULA, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeEffectivePriceChangeMultiple, computeMagicB, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
@@ -107,12 +108,12 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏保留优先五项及基础行情指标；有效涨幅、加仓效用移至右栏，两栏各九项。
+ * 左栏优先展示加仓次数、仓位几何累积倍数、有效涨幅、神奇的 b、几何期望。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
   'positionGeometricMultiple',
-  'effectivePriceChangeMultiple',
+  'effectivePriceChangePct',
   'magicB',
   'geometricExpectancy',
   'arithmeticExpectancy',
@@ -127,13 +128,13 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'realizedPnl',
+  'payoffRatio',
   'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
   'positionAmplification',
-  'effectivePriceChangePct',
   'addEfficiency',
 ];
 
@@ -171,12 +172,12 @@ export interface CampaignPnlOverviewMetrics {
    */
   mainSideNotional: { side: 'long' | 'short'; total: number | null } | null;
   expectedMaxDrawdownPct: number;
-  /** 旧净盈亏风险比缓存（百分数）；保留接口兼容，但不参与神奇的 b 或派生指标。 */
+  /** 原净盈亏风险比缓存（百分数）；盈亏概览按已实现净盈亏与初始风险金额重算。 */
   payoffRatio: number | null;
   /**
    * 战役的涨跌幅（%，按主力方向计；见 computeCampaignPriceChange：开仓价取主力最有利的一笔，主力平仓时若有对冲锁住行情，
    * 平仓价取最早那张对冲的开仓价），与战役卡片同一个数；主力都未平仓时 null。
-   * 涨跌幅倍数与加仓效用由它和预期回撤、神奇的 b在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
+   * 涨跌幅倍数与加仓效用由它和预期回撤、原盈亏比在构造器里现算（computeMainPriceEfficiency / computeAddEfficiency）。
    */
   mainPriceChangePct: number | null;
   /** 涨跌幅的依据（只进 ⓘ 说明）：开仓价、平仓价、平仓价取自主力还是哪张对冲；SOP 推演没有逐腿数据时可缺省。 */
@@ -241,8 +242,8 @@ function withHelpCustomisation(
   standard: ReactNode,
   metrics: CampaignPnlOverviewMetrics,
 ): ReactNode {
-  const override = metrics.helpOverrides?.[key] ?? (key === 'magicB' ? metrics.helpOverrides?.payoffRatio : undefined);
-  const extra = metrics.extraNotes?.[key] ?? (key === 'magicB' ? metrics.extraNotes?.payoffRatio : undefined);
+  const override = metrics.helpOverrides?.[key];
+  const extra = metrics.extraNotes?.[key];
   const body = override ? renderHelpParagraphs(override, `${key}-override`) : standard;
   if (!extra || extra.length === 0) return body;
   return (
@@ -290,13 +291,22 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
   const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total);
   const magicB = resolveUnifiedMagicB(metrics.magicB);
-  const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(magicB);
+  const payoff = computeSettlementPayoffRatio(realizedPnl, initialExpectedMaxLoss);
+  const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
   const addEfficiency = hasMainAdd
-    ? computeAddEfficiency(magicB, mainPriceEfficiency)
+    ? computeAddEfficiency(payoff, mainPriceEfficiency)
     : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
 
   const built: CampaignPnlOverviewItem[] = [
+    {
+      key: 'payoffRatio', label: '盈亏比',
+      value: payoff == null ? '—' : formatOverviewPayoffRatio(payoff * 100),
+      color: pnlExportColor(payoff), valueClassName: pnlColor(payoff == null ? null : Number(payoff.toFixed(2))),
+      help: <><p className="font-mono">盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀</p>
+        {payoff != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-worked">本场：{realizedPnl!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {payoff.toFixed(8)}</div>}
+        <p>已实现净盈亏与本场结算同源，包含各次交易的结算结果。L₀ 使用交易开始时的最大预期亏损；盈利为正，亏损保留负号。没有加仓的战役同样计算，缺少有效初始风险时显示「—」。</p></>,
+    },
     {
       key: 'addCount', label: '加仓次数',
       value: metrics.addCount == null ? '—' : String(metrics.addCount),
@@ -550,17 +560,17 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       label: '加仓效用',
       value: formatEfficiency(addEfficiency),
       // 【用户要求】颜色按这一场的 b：效用正负与本场 b 一致
-      color: pnlExportColor(addEfficiency == null ? null : magicB),
-      valueClassName: pnlColor(addEfficiency == null ? null : magicB),
+      color: pnlExportColor(addEfficiency == null ? null : payoff),
+      valueClassName: pnlColor(addEfficiency == null ? null : payoff),
       help: (
         <>
-          <p>比较神奇的 b 几何指标与原始行情的风险倍数，<strong>只在做过加仓时计算</strong>。分母取涨跌幅倍数的绝对值，正负与颜色跟随 b；涨跌幅倍数显示为 0.00 或 b 缺失时不计算。它不是实际净盈利的放大倍数。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 神奇的 b ÷ |涨跌幅倍数|</div>
+          <p>比较实际盈亏比与行情的风险倍数，<strong>只在做过加仓时计算</strong>。分母取涨跌幅倍数的绝对值；涨跌幅倍数显示为 0.00 或盈亏比缺失时不计算。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 盈亏比 ÷ |涨跌幅倍数|</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
-              本场 = {formatCampaignPayoffRatio((magicB ?? 0) * 100)} ÷ |{formatEfficiency(mainPriceEfficiency)}| = {formatEfficiency(addEfficiency)}
+              本场 = {formatCampaignPayoffRatio((payoff ?? 0) * 100)} ÷ |{formatEfficiency(mainPriceEfficiency)}| = {formatEfficiency(addEfficiency)}
             </p>
-          ) : <p>{hasMainAdd ? '本场涨跌幅倍数显示为 0.00 或算不出，或算不出神奇的 b，不计算。' : '本场没有加仓，不计算加仓效用。'}</p>}
+          ) : <p>{hasMainAdd ? '本场涨跌幅倍数显示为 0.00 或算不出，或算不出盈亏比，不计算。' : '本场没有加仓，不计算加仓效用。'}</p>}
         </>
       ),
     },
@@ -573,13 +583,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} ${formatContributionShare(asymmetricRiskContribution.meanSquareShare)}`.trim(),
       help: (
         <>
-          <p>本场神奇的 b 对账户不对称风险指标的贡献：盈利战役进入 USI 的上行组，亏损或持平战役进入 DSI 的下行组。</p>
+          <p>本场盈亏比对账户不对称风险指标的贡献：盈利战役进入 USI 的上行组，亏损或持平战役进入 DSI 的下行组。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div>
           <p>读数就是这个占比，用于定位哪些战役拉高了 DSI 或支撑了 USI；不到 0.1% 写「&lt;0.1%」。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">本场均方贡献 = b² ÷ 对应组样本数 n</div>
           {asymmetricRiskContribution != null ? (
             <p className="font-mono text-foreground">
-              {`本场：${asymmetricRiskContribution.group === 'win' ? 'USI 上行组' : 'DSI 下行组'}，b = ${formatCampaignPayoffRatio((magicB ?? 0) * 100)}，n = ${asymmetricRiskContribution.sampleCount}，b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}`}
+              {`本场：${asymmetricRiskContribution.group === 'win' ? 'USI 上行组' : 'DSI 下行组'}，b = ${formatCampaignPayoffRatio((payoff ?? 0) * 100)}，n = ${asymmetricRiskContribution.sampleCount}，b²/n = ${asymmetricRiskContribution.meanSquareTerm.toFixed(4)}`}
               {asymmetricRiskContribution.meanSquareShare == null
                 ? ''
                 : `，组内占比 ${(asymmetricRiskContribution.meanSquareShare * 100).toFixed(2)}%`}
@@ -596,13 +606,13 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(arithmeticExpectancy),
       help: (
         <>
-          <p>胜率 P 统一取 50%，以本场神奇的 b 几何指标计算模型期望，不代表实际已实现收益。P 不随账户实时胜率变动，同一场战役的读数只由它自己的 b 决定。</p>
+          <p>胜率 P 统一取 50%，以本场盈亏比计算期望。P 不随账户实时胜率变动，同一场战役的读数由它自己的盈亏比决定。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P），P = 50%</div>
-          {magicB != null ? (
+          {payoff != null ? (
             <p className="font-mono text-foreground">
-              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {formatCampaignPayoffRatio(magicB * 100)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
+              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {formatCampaignPayoffRatio(payoff * 100)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
             </p>
-          ) : <p>缺少有效神奇的 b时不计算。</p>}
+          ) : <p>缺少有效盈亏比时不计算。</p>}
         </>
       ),
     },
@@ -614,9 +624,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       valueClassName: pnlColor(geometricExpectancy),
       help: (
         <>
-          <p>以本场神奇的 b 和固定风险比例 x = 10% 计算几何模型因子；不使用实际账户仓位，也不代表账户真实增长。</p>
+          <p>以本场盈亏比和固定风险比例 x = 10% 计算几何增长因子。</p>
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + b × 10%)</div>
-          {magicB != null ? <p className="font-mono text-foreground">本场：max(0, 1 + {formatCampaignPayoffRatio(magicB * 100)} × 10%) ≈ {formatGeometricExpectancy(geometricExpectancy)}</p> : <p>缺少有效神奇的 b 时不计算。</p>}
+          {payoff != null ? <p className="font-mono text-foreground">本场：max(0, 1 + {formatCampaignPayoffRatio(payoff * 100)} × 10%) ≈ {formatGeometricExpectancy(geometricExpectancy)}</p> : <p>缺少有效盈亏比时不计算。</p>}
         </>
       ),
     },
@@ -638,15 +648,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const effectiveMultiple = metrics.effectivePriceChangeMultiple !== undefined
     ? metrics.effectivePriceChangeMultiple
     : computeEffectivePriceChangeMultiple(metrics.effectivePriceChangePct, expectedDrawdownPct);
-  built.push({
-    key: 'effectivePriceChangeMultiple', label: '有效涨幅倍数',
-    value: effectiveMultiple == null ? '—' : `${effectiveMultiple.toFixed(2)}x`,
-    color: pnlExportColor(effectiveMultiple), valueClassName: pnlColor(effectiveMultiple),
-    help: <><p className="font-mono">有效涨幅倍数 = 有效涨幅 ÷ 预期回撤</p>
-      <p>两个百分数相除得到倍数；写作百分比时再乘 100%。例如 45% ÷ 9% = 5.00 倍 = 500%。</p>
-      {effectiveMultiple != null && metrics.effectivePriceChangePct != null && expectedDrawdownPct > 0 && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums" data-testid="effective-rise-multiple-worked">本场：{metrics.effectivePriceChangePct.toFixed(2)}% ÷ {expectedDrawdownPct.toFixed(2)}% ≈ {effectiveMultiple.toFixed(2)}x</div>}
-      <p>有效涨幅沿用 F 与 Kₘ 的口径；预期回撤沿用左栏指标。预期回撤为零或依据缺失时显示「—」。</p></>,
-  });
   {
     const basis = metrics.geometricMetricBasis?.magicBInputs;
     const worked = basis ? computeMagicB(effectiveMultiple, metrics.positionGeometricMultiple, basis.basePositionRatio) : null;
@@ -655,8 +656,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'magicB', label: '神奇的 b',
       value: magicB == null ? '—' : formatOverviewPayoffRatio(magicB * 100),
       color: pnlExportColor(magicB == null ? null : Number(magicB.toFixed(2))), valueClassName: pnlColor(magicB == null ? null : Number(magicB.toFixed(2))),
-      help: <><p className="font-mono">{MAGIC_B_FORMULA}</p>
-      {worked != null && basis && <div className="space-y-2 rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="magic-b-worked">
+      help: <><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
+      worked != null && basis && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
         <div>基数仓位比例 β = Q基 × T₁ ÷ V₀</div>
         <div>= {number(basis.referenceCoins)} × {number(basis.firstAddPrice)} ÷ {number(basis.initialExposure)} ≈ {number(basis.basePositionRatio)}（{(basis.basePositionRatio * 100).toFixed(4)}%）</div>
@@ -664,7 +665,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <div className="border-t border-border/60 pt-2">b = {metrics.positionGeometricMultiple!.toFixed(6)} × {basis.basePositionRatio.toFixed(6)} × {(metrics.effectivePriceChangePct ?? effectiveMultiple! * basis.initialDrawdownPct).toFixed(6)}% ÷ {basis.initialDrawdownPct.toFixed(6)}%</div>
         <div className="font-semibold">≈ {worked.toFixed(8)}</div>
         <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
-      </div>}
+      </div>} />
       {magicB == null && <p>没有实际加仓，或首次加仓价、基数币数、初始名义仓位、有效涨幅、预期回撤缺失时显示「—」。</p>}
       <p>{MAGIC_B_RULE}</p></>,
     });

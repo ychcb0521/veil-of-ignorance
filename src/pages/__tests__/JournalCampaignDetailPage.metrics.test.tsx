@@ -654,11 +654,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '今日账户总资产说明' })).not.toBeInTheDocument();
-    for (const label of ['算术期望', '几何期望', '加仓效用']) {
+    for (const [label, value] of [['算术期望', '+0.50R'], ['几何期望', '1.20'], ['加仓效用', '—'], ['盈亏比', '2.00']]) {
       const row = screen.getAllByText(label).map(node => node.closest('[data-column]')).find(node => node != null);
-      expect(row?.lastElementChild?.textContent).toBe('—');
+      expect(row?.lastElementChild?.textContent).toBe(value);
     }
-    expect(screen.queryByText('USI 100.0%')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('USI 100.0%')).toBeInTheDocument());
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
     expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
@@ -676,7 +676,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '几何期望',
       '有效涨幅',
       '仓位几何累积倍数',
-      '有效涨幅倍数',
+      '盈亏比',
       '神奇的 b',
     ]) {
       expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
@@ -690,11 +690,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
     expect(exportInput.chartInterval).toBe('5m');
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
-    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅倍数","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","有效涨幅","加仓效用"]);
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(["已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","有效涨幅","加仓效用"]);
+      .toEqual(["已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
     expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
@@ -1058,12 +1058,12 @@ describe('JournalCampaignDetailPage metrics', () => {
           <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
         </MemoryRouter>,
       );
-      await waitFor(() => expect(screen.getByText('+1.50')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
       const bRow = screen.getByText('神奇的 b').closest('[data-column]');
       expect(bRow?.lastElementChild?.textContent).toBe('4.00');
       const growthRow = screen.getByText('几何期望').closest('[data-column]');
-      expect(growthRow?.lastElementChild?.textContent).toBe('1.40');
-      expect(screen.queryByText('+0.50')).not.toBeInTheDocument();
+      expect(growthRow?.lastElementChild?.textContent).toBe('1.20');
+      expect(screen.getByText('盈亏比').closest('[data-column]')?.lastElementChild?.textContent).toBe('2.00');
       fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
       await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
       const items = exportCampaignBoardPngMock.mock.calls[0][0].pnlOverview.items;
@@ -1090,7 +1090,7 @@ describe('JournalCampaignDetailPage metrics', () => {
 
     await waitFor(() => expect(screen.getByText('算术期望')).toBeInTheDocument());
     const row = screen.getByText('算术期望').closest('[data-column]');
-    expect(row?.lastElementChild?.textContent).toBe('—');
+    expect(row?.lastElementChild?.textContent).toBe('+0.50R');
     expect(screen.queryByText(/期望口径加载失败/)).not.toBeInTheDocument();
   });
 

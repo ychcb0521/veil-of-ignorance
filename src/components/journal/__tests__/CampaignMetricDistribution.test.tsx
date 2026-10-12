@@ -138,7 +138,7 @@ describe('通用连续指标的分布图', () => {
     expect(document.querySelectorAll('button[data-campaign-id]')).toHaveLength(values.length);
     values.forEach((value, index) => expect(point(index)).toHaveAttribute('data-metric-value', String(value)));
     fireEvent.focus(point(1));
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('+5.10% · b -1.00');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('+5.10% · 盈亏比 -1.00R');
     fireEvent.click(point(1));
     expect(onSelect).toHaveBeenCalledWith('c01');
   });
@@ -196,7 +196,7 @@ describe('通用连续指标的分布图', () => {
     expect(screen.getByText(/2 个点位超出显示区间，已贴边标记/)).toBeInTheDocument();
     const outlier = byValue(18);
     fireEvent.focus(outlier);
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('+18.00 · b +27.00');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('+18.00 · 盈亏比 +27.00R');
     fireEvent.click(outlier);
     expect(onSelect).toHaveBeenCalledWith(outlier.dataset.campaignId);
 

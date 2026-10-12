@@ -31,8 +31,8 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
   it('排序方式与盈亏概览的参数都在表里，「说明」逐列写口径', () => {
     for (const header of [
       '操作时间（北京）', '镜像止盈', '预期回撤（%）', '涨跌幅（%）', '涨跌幅倍数 η', '神奇的 b', '加仓效用', '加仓次数',
-      '几何期望 Gᵢ', '算术期望（模型）', '杠杆倍数', '自评（0–5）',
-      '有效涨幅（%）', '有效涨幅倍数', '仓位几何累积倍数（倍）', '神奇的 b',
+      '几何期望 Gᵢ', '算术期望（R）', '杠杆倍数', '自评（0–5）',
+      '有效涨幅（%）', '盈亏比', '仓位几何累积倍数（倍）', '神奇的 b',
       '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '峰值涨幅倍数', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
     ]) expect(headers, header).toContain(header);
     expect(notes.rows.map(row => row[0])).toEqual(headers);
@@ -44,7 +44,7 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
   });
 
   it('数值与页面同一组函数、写成数字；几何期望写因子 1 + v；读不出的留空', () => {
-    expect(cell(0, '神奇的 b')).toBe(rowPayoffRatio(rows[0]));
+    expect(cell(0, '盈亏比')).toBe(rowPayoffRatio(rows[0]));
     expect(cell(0, '涨跌幅倍数 η')).toBe(rowMainPriceEfficiency(rows[0]));
     expect(cell(0, '加仓效用')).toBe(rowAddEfficiency(rows[0]));
     expect(cell(0, '加仓次数')).toBe(rowAddCount(rows[0]));
@@ -53,14 +53,14 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(cell(0, '峰值涨幅倍数')).toBeCloseTo((rows[0].peakPriceChangePct as number) / 2, 9);
     expect(cell(0, '涨幅未兑现（%）')).toBeCloseTo((rows[0].peakPriceChangePct as number) - 6, 9);
     expect(cell(0, '动态最大回撤（%）')).toBe(4.5);
-    expect(cell(0, '几何期望 Gᵢ')).toBeCloseTo(1.3, 9);
-    expect(cell(0, '算术期望（模型）')).toBe(1);
+    expect(cell(0, '几何期望 Gᵢ')).toBeCloseTo(1.9, 9);
+    expect(cell(0, '算术期望（R）')).toBe(4);
     expect(cell(0, '仓位几何累积倍数（倍）')).toBe(6.25);
     expect(cell(0, '有效涨幅（%）')).toBeCloseTo(29.4117647059);
-    expect(cell(0, '有效涨幅倍数')).toBeCloseTo(29.4117647059 / 2);
+    expect(headers).not.toContain('有效涨幅倍数');
     expect(cell(0, '神奇的 b')).toBe(3);
     expect(cell(1, '神奇的 b')).toBe(-0.5);
-    expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 4)).toEqual(['仓位几何累积倍数（倍）', '有效涨幅（%）', '有效涨幅倍数', '神奇的 b']);
+    expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 4)).toEqual(['仓位几何累积倍数（倍）', '有效涨幅（%）', '盈亏比', '神奇的 b']);
     expect(cell(0, '自评（0–5）')).toBe(4);
     expect(cell(0, '自评（文字）')).toBe('很好');
     expect(cell(0, '预期回撤（%）')).toBe(2);

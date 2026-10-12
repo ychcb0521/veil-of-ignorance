@@ -308,9 +308,10 @@ export function buildCounterfactualOverviewMetrics(
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   // 分支快照没有保存逐次加仓的有效保护线；不能拿净结算 R 或初始止损线替代这个几何指标。
   const b: number | null = null;
-  const expectancies = computeCampaignExpectanciesFromMagicB(b);
+  const settlementRatio = payoffRatio == null ? null : payoffRatio / 100;
+  const expectancies = computeCampaignExpectanciesFromMagicB(settlementRatio);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
-    b,
+    settlementRatio,
     shared.asymmetricRiskSummary,
   );
   // 反事实没有主力开仓时的账户快照，与老战役一样退到今日总资产（仅所有者可见）。

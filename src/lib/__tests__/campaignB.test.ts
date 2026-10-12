@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveUnifiedMagicB } from '@/lib/campaignB';
+import { computeSettlementPayoffRatio, resolveUnifiedMagicB } from '@/lib/campaignB';
 import { computeCampaignExpectancies, computeCampaignExpectanciesFromMagicB } from '@/lib/campaignMetrics';
 import { parseCampaignSortChain, rowMagicB, rowPayoffRatio, rowAddEfficiency, sortCampaignRows } from '@/lib/campaignListSort';
 import { makeSortRow } from '@/test/fixtures/campaignSortRows';
@@ -14,15 +14,17 @@ describe('unified campaign b', () => {
     expect(resolveUnifiedMagicB(Infinity)).toBeNull();
     expect(resolveUnifiedMagicB(NaN)).toBeNull();
   });
-  it('ignores conflicting historical net ratios in readers, add efficiency and sorting', () => {
+  it('restores original payoff independently of geometric b, including no-add campaigns', () => {
     const high = makeSortRow({id: 'high', pcr: -500, magicB: 4, add: true, mpc: 20, dd: 10});
     const low = makeSortRow({id: 'low', pcr: 10000, magicB: 2, add: true, mpc: 20, dd: 10});
     const missing = makeSortRow({id: 'missing', pcr: 10000, magicB: null});
     expect(rowMagicB(high)).toBe(4);
-    expect(rowPayoffRatio(high)).toBe(4);
-    expect(rowAddEfficiency(high)).toBe(2);
+    expect(rowPayoffRatio(high)).toBe(-5);
+    expect(rowAddEfficiency(high)).toBe(-2.5);
+    expect(rowPayoffRatio(missing)).toBe(100);
     expect(rowMagicB(missing)).toBeNull();
     expect(sortCampaignRows([low, high, missing], [{mode: 'magicB', direction: 'desc'}]).map(row => row.campaign.id)).toEqual(['high', 'low']);
+    expect(sortCampaignRows([low, high, missing], [{mode: 'captureRate', direction: 'asc'}])[0].campaign.id).toBe('high');
   });
   it('all existing expectancy calculations are adapters to the canonical b API', () => {
     for (const b of [-12, -1, -0.5, 0, 2, 496.29]) {
@@ -30,9 +32,16 @@ describe('unified campaign b', () => {
     }
     expect(computeCampaignExpectanciesFromMagicB(null)).toEqual({arithmeticExpectancy: null, geometricExpectancy: null});
   });
-  it('old b URLs migrate without duplicate sort levels or changed directions', () => {
+  it('restored payoff and geometric b retain separate URL sort levels', () => {
     expect(parseCampaignSortChain('?sort=captureRate&direction=asc&then=magicB.desc&then=addCount.follow')).toEqual([
-      {mode: 'magicB', direction: 'asc'}, {mode: 'addCount', direction: 'asc', follow: true},
+      {mode: 'captureRate', direction: 'asc'}, {mode: 'magicB', direction: 'desc'}, {mode: 'addCount', direction: 'desc', follow: true},
     ]);
+  });
+  it('computes original settlement ratio with signed results and rejects invalid initial risk', () => {
+    expect(computeSettlementPayoffRatio(385282.96,172785.43)).toBeCloseTo(2.23,2);
+    expect(computeSettlementPayoffRatio(-50,100)).toBe(-0.5);
+    expect(computeSettlementPayoffRatio(0,100)).toBe(0);
+    expect(computeSettlementPayoffRatio(50,0)).toBeNull();
+    expect(computeSettlementPayoffRatio(null,100)).toBeNull();
   });
 });

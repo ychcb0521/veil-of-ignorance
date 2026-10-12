@@ -137,9 +137,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.positionAmplification.value).toBe('1.00x');
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
-    expect(byKey.arithmeticExpectancy.value).toBe('—');
-    expect(byKey.geometricExpectancy.value).toBe('—');
-    expect(metrics.asymmetricRiskContribution).toBeNull();
+    expect(byKey.payoffRatio.value).toBe('1.33');
+    expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
+    expect(byKey.geometricExpectancy.value).toBe('1.13');
+    expect(metrics.asymmetricRiskContribution?.meanSquareTerm).toBeCloseTo((80 / 60) ** 2);
     expect(metrics.extraNotes?.magicB).toContainEqual({ warning: expect.stringContaining('不使用已实现净盈亏 ÷ L₀ 替代') });
     // 【用户要求】「今日账户总资产」不单列，只作几何期望的估算分母（见脚注）
     expect(byKey.todayAccountEquity).toBeUndefined();
@@ -184,11 +185,11 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(metrics.realizedPnl).toBeGreaterThan(0);
     expect(metrics.payoffRatio).toBeGreaterThan(0);
     expect(metrics.magicB).toBeNull();
-    expect(metrics.arithmeticExpectancy).toBeNull();
-    expect(metrics.geometricExpectancy).toBeNull();
+    expect(metrics.arithmeticExpectancy).toBeCloseTo(0.5 * metrics.payoffRatio! / 100 - 0.5);
+    expect(metrics.geometricExpectancy).toBeCloseTo(metrics.payoffRatio! / 100 * 0.1);
     const { byKey } = itemsByKey(metrics);
     expect(byKey.magicB.value).toBe('—');
-    expect(byKey.addEfficiency.value).toBe('—');
+    expect(byKey.addEfficiency.value).not.toBe('—');
   });
 
   it('落库的锚优先于按 params 重算：四个字段都在就一律读落库值，盈亏比也按落库的 L 算', () => {
@@ -365,7 +366,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
-    expect(metrics.asymmetricRiskContribution).toBeNull();
+    expect(metrics.asymmetricRiskContribution?.meanSquareTerm).toBeCloseTo((metrics.payoffRatio! / 100) ** 2);
     expect(metrics.extraNotes?.asymmetricRiskContribution).toContainEqual({
       warning: expect.stringMatching(/假设值：本场反事实不在账户样本内/),
     });

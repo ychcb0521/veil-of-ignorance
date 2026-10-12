@@ -64,7 +64,7 @@ export type CampaignSortChain = readonly CampaignSortLevel[];
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addCount',
   'positionGeometricMultiple',
-  'effectivePriceChangeMultiple',
+  'effectivePriceChangePct',
   'magicB',
   'geometricExpectancy',
   'time',
@@ -72,7 +72,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'effectivePriceChangePct',
+  'captureRate',
   'addEfficiency',
   'positionAmplification',
   'unrealizedPriceChangePct',
@@ -153,9 +153,9 @@ function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): numb
   return Number.isFinite(value) ? value : Number.NaN;
 }
 
-/** Historical name retained for consumers; all reads now use the geometric b. */
-export function rowPayoffRatio(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'>): number | null {
-  return rowMagicB(row);
+/** Original signed net-PnL / initial-risk ratio, stored in percentage units. */
+export function rowPayoffRatio(row: Pick<CampaignCardData, 'profitCaptureRatio'>): number | null {
+  return row.profitCaptureRatio != null && Number.isFinite(row.profitCaptureRatio) ? row.profitCaptureRatio / 100 : null;
 }
 
 /** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
@@ -193,7 +193,7 @@ export function rowUnrealizedPriceChangePct(row: Pick<CampaignCardData, 'mainPri
 }
 
 /** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */
-export function rowAddEfficiency(row: Pick<CampaignCardData, 'campaign' | 'tradeRecords' | 'magicB' | 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
+export function rowAddEfficiency(row: Pick<CampaignCardData, 'profitCaptureRatio' | 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
   // 【用户要求】没有加仓的战役不算加仓效用（campaignHasMainAdd，与盈亏概览同一个判断）
   if (!campaignHasMainAdd(row.legs)) return null;
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
@@ -377,7 +377,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       tieBreak: (a, b) => importanceDesc(a, b) || pnlDesc(a, b) || alphaAsc(a, b),
     },
     captureRate: metric(
-      row => { const b = rowMagicB(row); return b == null ? null : b * 100; },
+      row => row.profitCaptureRatio,
       (a, b, direction) => comparePnl(a.campaign, b.campaign, direction) || importanceTimeAlpha(a, b),
     ),
     expectedDrawdownPct: {
@@ -437,7 +437,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
     },
     addEfficiency: metric(
       addEfficiency,
-      (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
+      (a, b, direction) => compareFiniteMetric(rowPayoffRatio(a) ?? Number.NaN, rowPayoffRatio(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
     // 每一场都有读数（没加仓 = 0），同次数按盈亏比、再按自评 → 操作时间 → 字母
@@ -445,7 +445,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       include: always,
       missing: never,
       compare: (a, b, direction) => compareNumber(addCount(a), addCount(b), direction),
-      tieBreak: (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
+      tieBreak: (a, b, direction) => compareFiniteMetric(rowPayoffRatio(a) ?? Number.NaN, rowPayoffRatio(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
       value: addCount,
     },
@@ -457,7 +457,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
         const value = positionAmplification(row);
         return value == null ? null : sortBinValue('positionAmplification', value);
       },
-      (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
+      (a, b, direction) => compareFiniteMetric(rowPayoffRatio(a) ?? Number.NaN, rowPayoffRatio(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
     positionGeometricMultiple: metric(row => {
@@ -1191,10 +1191,11 @@ export function sortChainKey(chain: CampaignSortChain): string {
  */
 export function parseCampaignSortChain(search: string | URLSearchParams): CampaignSortChain {
   const params = typeof search === 'string' ? new URLSearchParams(search) : search;
-  const requestedMode = params.get('sort');
+  const legacyMode = params.get('sort');
+  const requestedMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct' : legacyMode;
   // 认不出的 sort（含已删除的 dsiContribution / usiContribution 旧链接）整条退回默认：操作时间从新到旧，不沿用它的方向与 then
   if (requestedMode != null && !isCampaignSortMode(requestedMode)) return DEFAULT_CAMPAIGN_SORT_CHAIN;
-  const mode: CampaignSortMode = requestedMode === 'captureRate' ? 'magicB' : isCampaignSortMode(requestedMode) ? requestedMode : DEFAULT_CAMPAIGN_SORT_CHAIN[0].mode;
+  const mode: CampaignSortMode = isCampaignSortMode(requestedMode) ? requestedMode : DEFAULT_CAMPAIGN_SORT_CHAIN[0].mode;
   const requestedDirection = params.get('direction');
   const direction: CampaignSortDirection = requestedDirection === 'asc' || requestedDirection === 'desc'
     ? requestedDirection
@@ -1202,7 +1203,7 @@ export function parseCampaignSortChain(search: string | URLSearchParams): Campai
   const chain: CampaignSortLevel[] = [{ mode, direction }];
   for (const raw of params.getAll('then')) {
     const [legacyMode, thenDirection] = raw.split('.');
-    const thenMode = legacyMode === 'captureRate' ? 'magicB' : legacyMode;
+    const thenMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct' : legacyMode;
     if (!isCampaignSortMode(thenMode) || chain.some(level => level.mode === thenMode)) continue;
     if (thenDirection === 'follow') {
       chain.push({ mode: thenMode, direction: chain[chain.length - 1].direction, follow: true });

@@ -15,9 +15,9 @@ import {
  * 【用户要求】主力涨跌幅 +20% → 涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","有效涨幅倍数","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","有效涨幅","加仓效用"];
+const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","有效涨幅","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"];
 
-const GOLDEN_KEYS = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","arithmeticExpectancy","expectedMaxDrawdownPct","mainPriceChange","mainPriceEfficiency","realizedPnl","initialExpectedMaxLoss","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","positionAmplification","effectivePriceChangePct","addEfficiency"];
+const GOLDEN_KEYS = ["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","geometricExpectancy","arithmeticExpectancy","expectedMaxDrawdownPct","mainPriceChange","mainPriceEfficiency","realizedPnl","payoffRatio","initialExpectedMaxLoss","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","positionAmplification","addEfficiency"];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
   return {
@@ -50,10 +50,9 @@ describe('buildCampaignPnlOverviewItems', () => {
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100,
         magicBInputs: {referenceCoins: 5, firstAddPrice: 120, initialExposure: 1000, initialDrawdownPct: 10, basePositionRatio: 0.6} } }));
     const keys = items.map(item => item.key);
-    expect(keys.slice(0, 5)).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy"]);
-    const riseMultiple = items.find(item => item.key === 'effectivePriceChangeMultiple')!;
-    expect(riseMultiple.value).toBe('5.00x');
-    expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('50.00% ÷ 10.00% ≈ 5.00x');
+    expect(keys.slice(0, 5)).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","geometricExpectancy"]);
+    expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('50.00%');
+    expect(items.find(item => item.key === 'effectivePriceChangeMultiple')).toBeUndefined();
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBeUndefined();
     expect(magic.value).toBe('6.00');
@@ -63,24 +62,28 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(worked).toHaveTextContent('5 × 120 ÷ 1000 ≈ 0.6（60.0000%）');
     expect(worked).toHaveTextContent('2.000000 × 0.600000 × 50.000000% ÷ 10.000000%');
     expect(worked).toHaveTextContent('≈ 6.00000000');
-    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toBeNull();
+    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toHaveTextContent('200 U ÷ 100 U ≈ 2.00000000');
     expect(help).not.toHaveTextContent('+ 结算修正');
     expect(worked).not.toHaveTextContent('结算修正');
-    expect(help).not.toHaveTextContent('算法一');
+    expect(help).toHaveTextContent('算法一 · 原盈亏比');
+    expect(help).toHaveTextContent('算法二 · 几何公式');
     expect(help).toHaveTextContent('不等同于已实现净盈亏');
-    expect(items.find(item => item.key === 'addEfficiency')?.value).toBe('+3.00');
-    expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+2.50');
-    expect(items.find(item => item.key === 'geometricExpectancy')?.value).toBe('1.60');
+    expect(items.find(item => item.key === 'payoffRatio')?.value).toBe('2.00');
+    expect(items.find(item => item.key === 'addEfficiency')?.value).toBe('+1.00');
+    expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+0.50R');
+    expect(items.find(item => item.key === 'geometricExpectancy')?.value).toBe('1.20');
   });
   it('does not fall back to legacy realized b when the new geometric b is missing', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ magicB: null }));
-    for (const key of ['magicB', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy']) {
+    for (const key of ['magicB']) {
       expect(items.find(item => item.key === key)?.value).toBe('—');
     }
     const help = render(<>{items.find(item => item.key === 'magicB')?.help}</>).container;
     expect(help).toHaveTextContent('显示「—」');
     expect(help).not.toHaveTextContent('使用净结算法');
     expect(items.find(item => item.key === 'realizedPnl')?.value).toBe('200.00 USDT');
+    expect(items.find(item => item.key === 'payoffRatio')?.value).toBe('2.00');
+    expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+0.50R');
   });
   it('expands every actual plus-alpha factor without multiplying by early retention', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
@@ -143,12 +146,12 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["1", "—", "—", "2.00", "1.20", "+0.50", "10.00%", "+20.00%", "+2.00", "200.00 USDT", "100.00 USDT", "+25.00%", "+2.50", "5.00%", "12.50%", "1.50x", "—", "+1.00"]);
+    expect(items.map(item => item.value)).toEqual(["1", "—", "—", "2.00", "1.20", "+0.50R", "10.00%", "+20.00%", "+2.00", "200.00 USDT", "2.00", "100.00 USDT", "+25.00%", "+2.50", "5.00%", "12.50%", "1.50x", "+1.00"]);
     const G = '#0ECB81';
     const R = '#F6465D';
-    expect(items.map(item => item.color)).toEqual(["#1E2329", "#1E2329", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#181A20", "#181A20", undefined, "#64748B", "#0ECB81"]);
+    expect(items.map(item => item.color)).toEqual(["#1E2329", "#1E2329", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#181A20", "#181A20", undefined, "#0ECB81"]);
     const T = 'text-[#0ECB81]';
-    expect(items.map(item => item.valueClassName)).toEqual(["text-foreground/85", "text-foreground/85", "text-muted-foreground", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground", undefined, "text-muted-foreground", "text-[#0ECB81]"]);
+    expect(items.map(item => item.valueClassName)).toEqual(["text-foreground/85", "text-foreground/85", "text-muted-foreground", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground", undefined, "text-[#0ECB81]"]);
     expect(items.map(item => item.rightColumn ?? false)).toEqual([false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true]);
   });
 
@@ -205,7 +208,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.realizedPnl.color).toBe('#F6465D');
     expect(byKey.magicB.value).toBe('-0.50');
     expect(byKey.magicB.valueClassName).toBe('text-[#F6465D]');
-    expect(byKey.arithmeticExpectancy.value).toBe('-0.75');
+    expect(byKey.arithmeticExpectancy.value).toBe('-0.75R');
     expect(byKey.geometricExpectancy.value).toBe('0.95');
   });
 
@@ -228,7 +231,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     // 已实现 -0.3、L 100 → b = -0.003：盈亏比读「0.00」，加仓效用 / 算术期望的说明里也只能是「0.00」
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       payoffRatio: -0.3,
-      magicB: -0.003,
+      magicB: -0.003, realizedPnl: -0.3,
       asymmetricRiskContribution: { group: 'loss', sampleCount: 1, meanSquareTerm: 0, meanSquareShare: 1 },
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
@@ -277,20 +280,20 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(["加仓次数", "仓位几何累积倍数", "有效涨幅倍数", "神奇的 b", "几何期望", "算术期望", "预期回撤", "涨跌幅", "涨跌幅倍数"]);
+      .toEqual(['加仓次数', '仓位几何累积倍数', '有效涨幅', '神奇的 b', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(["已实现 P&L", "最大预期亏损", "峰值涨幅", "峰值涨幅倍数", "涨幅未兑现", "动态最大回撤", "仓位放大", "有效涨幅", "加仓效用"]);
+      .toEqual(['已实现 P&L', '盈亏比', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '加仓效用']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
       .find(node => node.firstElementChild?.textContent === label)?.className.match(/:row-start-(\d+)/)?.[1];
     expect(rowOf('算术期望')).toBe('6');
     expect(rowOf('预期回撤')).toBe('7');
     expect(rowOf('神奇的 b')).toBe('4');
     expect(rowOf('已实现 P&L')).toBe('1');
-    expect(rowOf('最大预期亏损')).toBe('2');
-    expect(rowOf('峰值涨幅')).toBe('3');
-    expect(rowOf('峰值涨幅倍数')).toBe('4');
-    expect(rowOf('涨幅未兑现')).toBe('5');
-    expect(rowOf('仓位放大')).toBe('7');
+    expect(rowOf('最大预期亏损')).toBe('3');
+    expect(rowOf('峰值涨幅')).toBe('4');
+    expect(rowOf('峰值涨幅倍数')).toBe('5');
+    expect(rowOf('涨幅未兑现')).toBe('6');
+    expect(rowOf('仓位放大')).toBe('8');
     expect(rowOf('几何期望')).toBe('5');
     // 【用户要求】底部「期望口径」那行脚注删掉
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();

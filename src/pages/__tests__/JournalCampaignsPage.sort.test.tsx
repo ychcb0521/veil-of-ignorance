@@ -902,7 +902,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cardOrder().slice(0, addCards.length)).toEqual(['High Importance']);
       const withAdd = addCards.find(card => card.textContent?.includes('High Importance'))!;
       expect(withAdd.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('+1.00');
-      expect(screen.getAllByTestId('campaign-add-efficiency')[0].getAttribute('title')).toContain('神奇的 b');
+      expect(screen.getAllByTestId('campaign-add-efficiency')[0].getAttribute('title')).toContain('盈亏比');
     } finally {
       tradeHistory.forEach((record, index) => { record.exitPrice = originals[index]; });
       legsByCampaign['high-importance'] = hiLegs;
@@ -939,7 +939,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","time","mirrorTp","divider-expectedDrawdownPct","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy","divider-leverage","leverage","importance","alpha"]);
+    expect(sequence).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","geometricExpectancy","time","mirrorTp","divider-expectedDrawdownPct","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","captureRate","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy","divider-leverage","leverage","importance","alpha"]);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
@@ -954,10 +954,10 @@ describe('JournalCampaignsPage sorting', () => {
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
-    expect(cardCells).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change-multiple","campaign-magic-b","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-effective-price-change","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
+    expect(cardCells).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-capture-rate","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅倍数","神奇的 b","几何期望","镜像止盈","预期回撤","涨跌幅","涨跌幅倍数","有效涨幅","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅","神奇的 b","几何期望","镜像止盈","预期回撤","涨跌幅","涨跌幅倍数","盈亏比","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
@@ -1205,7 +1205,7 @@ describe('JournalCampaignsPage sorting', () => {
       // 说明面板与其他图同一结构：纵轴 / 颜色 / 点位 / 参考线
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-mainPriceChange'));
       const priceGuide = screen.getByTestId('campaign-metric-guide-mainPriceChange');
-      for (const text of ['纵轴', '颜色', '点位', '参考线', 'Legs 表「涨跌幅」列', '绿色圆点：这一场神奇的 b > 0', '红色菱形：这一场神奇的 b < 0', '灰色零线']) {
+      for (const text of ['纵轴', '颜色', '点位', '参考线', 'Legs 表「涨跌幅」列', '绿色圆点：这一场盈亏比 > 0', '红色菱形：这一场盈亏比 < 0', '灰色零线']) {
         expect(priceGuide).toHaveTextContent(text);
       }
 
@@ -1265,7 +1265,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-reference-share-addEfficiencyDistribution-1')).toHaveTextContent(/比值 > 1 (0|100)% \([01]\/1\)/);
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiencyDistribution'));
       const addGuide = screen.getByTestId('campaign-metric-guide-addEfficiencyDistribution');
-      for (const text of ['几何 b 正负分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：b 等于涨跌幅倍数的绝对值', '没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图', '涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆']) {
+      for (const text of ['盈亏比 正负分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：b 等于涨跌幅倍数的绝对值', '没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图', '涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆']) {
         expect(addGuide).toHaveTextContent(text);
       }
       // 时序那张图原样保留：1 仍只是读数参照、不画线
@@ -1422,18 +1422,19 @@ describe('JournalCampaignsPage sorting', () => {
       const growth = within(card).getByTestId('campaign-position-geometric-multiple');
       const rise = within(card).getByTestId('campaign-effective-price-change');
       expect(growth.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
-      expect(rise.previousElementSibling).toHaveAttribute('data-testid', 'campaign-main-price-efficiency');
+      expect(rise.previousElementSibling).toHaveAttribute('data-testid', 'campaign-position-geometric-multiple');
       expect(growth.querySelector('dd')).toHaveTextContent('2.50x');
       // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
       expect(rise.querySelector('dd')).toHaveTextContent('44.44%');
-      expect(within(card).getByTestId('campaign-effective-price-change-multiple').querySelector('dd')).toHaveTextContent('4.44x');
+      expect(within(card).queryByTestId('campaign-effective-price-change-multiple')).not.toBeInTheDocument();
       // β = 1 coin × first add price 120 / initial nominal 100 = 1.2.
       // b = 2.5 × 1.2 × 44.4444% / 10% = 13.3333, not net P&L / L0 = 6.
       expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('13.33');
-      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['effectivePriceChangeMultiple', 4.44], ['magicB', 13.33]] as const) {
+      expect(within(card).getByTestId('campaign-capture-rate-value')).toHaveTextContent('6.00');
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['magicB', 13.33]] as const) {
         fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
         const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
-        expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'effectivePriceChangeMultiple' ? 'campaign-effective-price-change-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
+        expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
         fireEvent.contextMenu(screen.getByTestId(`campaign-sort-${key}`));
         fireEvent.click(screen.getByTestId(`campaign-${key}-chart-toggle`));
         expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', `${key}Distribution`);
@@ -1444,6 +1445,11 @@ describe('JournalCampaignsPage sorting', () => {
         fireEvent.contextMenu(screen.getByTestId(`campaign-sort-${key}`));
         fireEvent.click(screen.getByTestId(`campaign-${key}-chart-toggle`));
       }
+      fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
+      fireEvent.contextMenu(screen.getByTestId('campaign-sort-captureRate'));
+      fireEvent.click(screen.getByTestId('campaign-odds-chart-toggle'));
+      expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key','oddsDistribution');
+      expect(Number(screen.getByTestId('campaign-metric-point-oddsDistribution-high-importance').dataset.metricValue)).toBe(6);
     } finally {
       legsByCampaign['high-importance'] = beforeLegs;
       tradeHistory[0] = beforeRecord;
@@ -1562,7 +1568,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-metric-tail-count-arithmeticExpectancyDistribution')).toBeNull();
     expect(screen.queryByTestId('campaign-metric-capital-ruin-count-arithmeticExpectancyDistribution')).toBeNull();
     const summary = screen.getByTestId('campaign-metric-summary-arithmeticExpectancyDistribution');
-    expect(summary).toHaveTextContent('范围 -0.90 – +1.00');
+    expect(summary).toHaveTextContent('范围 -0.90R – +1.00R');
     expect(summary).toHaveTextContent('中位数 -0.25');
     expect(screen.getByTestId('campaign-metric-win-rate-arithmeticExpectancyDistribution')).toHaveTextContent('正期望 33% (1/3)');
     expect(summary).not.toHaveTextContent('胜率');
@@ -1572,7 +1578,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(ticks.some(text => /^[-+]?\d+(\.\d*[1-9])?$/.test(text))).toBe(true);
     expect(ticks.filter(text => /^[-+]\d+\.\d*0$/.test(text))).toEqual([]);
     // 提示框照例补上这一场的 b
-    expect(buttons.some(node => /· b [+-]\d+\.\d{2}(?![\dR])/.test(node.getAttribute('aria-label') ?? ''))).toBe(true);
+    expect(buttons.some(node => /· 盈亏比 [+-]\d+\.\d{2}R/.test(node.getAttribute('aria-label') ?? ''))).toBe(true);
 
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-arithmeticExpectancyDistribution'));
     const guide = screen.getByTestId('campaign-metric-guide-arithmeticExpectancyDistribution');
@@ -1582,7 +1588,7 @@ describe('JournalCampaignsPage sorting', () => {
     ]) {
       expect(guide).toHaveTextContent(text);
     }
-    expect(guide).not.toHaveTextContent('单位 R');
+    expect(guide).toHaveTextContent('单位 R');
 
     // 切回时序：原来那张算术期望时序图
     fireEvent.click(screen.getByTestId('campaign-arithmeticExpectancy-view-time'));
@@ -1885,9 +1891,9 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.click(drawdownGuideToggle);
     const drawdownGuide = screen.getByTestId('campaign-metric-guide-expectedDrawdownPct');
     expect(drawdownGuide).toHaveTextContent('占主力开仓价的百分比');
-    expect(drawdownGuide).toHaveTextContent('绿色圆点：这一场神奇的 b > 0');
-    expect(drawdownGuide).toHaveTextContent('红色菱形：这一场神奇的 b < 0');
-    expect(drawdownGuide).toHaveTextContent('颜色不代表实际结算盈亏');
+    expect(drawdownGuide).toHaveTextContent('绿色圆点：这一场盈亏比 > 0');
+    expect(drawdownGuide).toHaveTextContent('红色菱形：这一场盈亏比 < 0');
+    expect(drawdownGuide).toHaveTextContent('灰色空心圈：盈亏比 = 0，或缺少有效初始风险依据');
     expect(drawdownGuide).toHaveTextContent('0%');
     expect(drawdownGuide).toHaveTextContent('纵轴向下');
 
@@ -2001,7 +2007,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     // 点开一个点要读得到这一场的无量纲几何 b，不能标成已实现收益 R。
     const labelled = buttons.map(node => node.getAttribute('aria-label') ?? '');
-    expect(labelled.some(label => /· b [+-]\d+\.\d{2}(?![\dR])/.test(label))).toBe(true);
+    expect(labelled.some(label => /· 盈亏比 [+-]\d+\.\d{2}R/.test(label))).toBe(true);
 
     // 【用户要求】颜色报盈亏而不是档位：同一根柱里盈利的绿、亏损的红
     const tokensByColumn = new Map<number, Set<string>>();
@@ -2138,7 +2144,7 @@ describe('JournalCampaignsPage sorting', () => {
     const geoPoints = [...screen.getByTestId('campaign-metric-scatter-plot')
       .querySelectorAll<HTMLElement>('button[data-campaign-id]')];
     expect(geoPoints.length).toBeGreaterThan(0);
-    expect(geoPoints.some(node => /· b [+-]\d+\.\d{2}(?![\dR])/.test(node.getAttribute('aria-label') ?? ''))).toBe(true);
+    expect(geoPoints.some(node => /· 盈亏比 [+-]\d+\.\d{2}R/.test(node.getAttribute('aria-label') ?? ''))).toBe(true);
 
     // 【评审发现】说明面板的「横轴」一行必须说这张图自己的事，
     // 不能照抄神奇的 b那套（单位 R、+10R 封顶、−1R 止损墙——这里一样都不成立）
@@ -2224,7 +2230,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot'))
       .toHaveAttribute('data-metric-key', 'magicBDistribution'));
-    expect(screen.getByTestId('campaign-sort-magicB')).toHaveAttribute('data-sort-direction', 'desc');
+    expect(screen.getByTestId('campaign-sort-captureRate')).toHaveAttribute('data-sort-direction', 'desc');
 
     fireEvent.click(screen.getByTestId('campaign-sort-geometricExpectancy'));
 
@@ -2376,7 +2382,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(
       [...screen.getByTestId('campaign-sort-controls').querySelectorAll('button[data-testid^="campaign-sort-"]')]
         .map(node => node.getAttribute('data-testid')),
-    ).toEqual(["campaign-sort-addCount","campaign-sort-positionGeometricMultiple","campaign-sort-effectivePriceChangeMultiple","campaign-sort-magicB","campaign-sort-geometricExpectancy","campaign-sort-time","campaign-sort-mirrorTp","campaign-sort-expectedDrawdownPct","campaign-sort-mainPriceChange","campaign-sort-mainPriceEfficiency","campaign-sort-effectivePriceChangePct","campaign-sort-addEfficiency","campaign-sort-positionAmplification","campaign-sort-unrealizedPriceChangePct","campaign-sort-arithmeticExpectancy","campaign-sort-leverage","campaign-sort-importance","campaign-sort-alpha"]);
+    ).toEqual(["campaign-sort-addCount","campaign-sort-positionGeometricMultiple","campaign-sort-effectivePriceChangePct","campaign-sort-magicB","campaign-sort-geometricExpectancy","campaign-sort-time","campaign-sort-mirrorTp","campaign-sort-expectedDrawdownPct","campaign-sort-mainPriceChange","campaign-sort-mainPriceEfficiency","campaign-sort-captureRate","campaign-sort-addEfficiency","campaign-sort-positionAmplification","campaign-sort-unrealizedPriceChangePct","campaign-sort-arithmeticExpectancy","campaign-sort-leverage","campaign-sort-importance","campaign-sort-alpha"]);
     expect(screen.getAllByTestId('campaign-operation-time').map(node => node.textContent)).toEqual([
       '操作时间：2026-04-03 08:00',
       '操作时间：2026-03-02 08:00',
@@ -2387,7 +2393,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(
       [...screen.getAllByTestId('campaign-expected-drawdown-pct')[0].parentElement!.querySelectorAll('div')].filter(node => node.firstElementChild?.tagName === 'DT')
         .map(node => node.getAttribute('data-testid')),
-    ).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change-multiple","campaign-magic-b","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-effective-price-change","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
+    ).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-capture-rate","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     fireEvent.click(screen.getAllByRole('button', { name: '展开战役详情' })[0]);
     const expandedDetails = screen.getByTestId('campaign-card-details');
     expect(expandedDetails).toHaveClass('flex');
@@ -2421,9 +2427,9 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-opportunity-quality-value')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(metricReading)).toEqual([
       // 【用户要求】胜率统一 50%：E = 0.5 × b − 0.5
-      '算术期望：+1.00',   // b = +3.00
-      '算术期望：-0.25',   // b = +0.50
-      '算术期望：-0.90',   // b = −0.80
+      '算术期望：+1.00R',   // b = +3.00
+      '算术期望：-0.25R',   // b = +0.50
+      '算术期望：-0.90R',   // b = −0.80
       '算术期望：—',
     ]);
     // 【用户要求】单场几何期望以 Gᵢ = 1 + bᵢ×0.1 呈现；1.00 是本金不增不减的分界
@@ -2462,7 +2468,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText(/Lᵢ = 主力开仓名义仓位 × max/)).toBeInTheDocument();
     expect(screen.getByText(/主力开仓名义仓位按初始 M 与镜像 Legs 去重求和/)).toBeInTheDocument();
     expect(screen.getByText(/历史战役优先使用保存的原始委托价/)).toBeInTheDocument();
-    expect(screen.getByText(/此处有效战役为：已结束、初始风险有效/)).toBeInTheDocument();
+    expect(screen.getByText(/此处有效战役为：已结束，并具备有效已实现净盈亏与初始最大预期亏损/)).toBeInTheDocument();
     expect(screen.getByText('盈利').parentElement).toHaveTextContent('盈利2');
     expect(screen.getByText('亏损').parentElement).toHaveTextContent('亏损1');
     fireEvent.click(screen.getByTestId('campaign-valid-count'));
@@ -2480,8 +2486,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
     // 【用户要求】概览那一项只报盈利战役的平均 b（赢的时候平均赢多少 R），不报混合均值 0.90
     const payoffChip = screen.getByTestId('campaign-average-payoff-ratio');
-    expect(payoffChip.textContent).toMatch(/平均神奇的 b \+\d+\.\d{2}/);
-    expect(payoffChip.textContent).not.toContain('R');
+    expect(payoffChip.textContent).toMatch(/平均盈亏比 \+\d+\.\d{2}/);
+    expect(payoffChip.textContent).toContain('R');
     expect(payoffChip.textContent).not.toContain('0.90');
     expect(payoffChip.getAttribute('aria-label')).toContain('盈利战役 2 场');
     expect(payoffChip.getAttribute('aria-label')).toContain('亏损战役平均');
@@ -2489,7 +2495,7 @@ describe('JournalCampaignsPage sorting', () => {
     // 浮层里盈利侧的数就是概览那一项显示的数
     expect(payoffChip.textContent)
       .toContain(screen.getByTestId('campaign-win-payoff-ratio').textContent!);
-    expect(screen.getByText('平均神奇的 b 计算公式')).toBeInTheDocument();
+    expect(screen.getByText('平均盈亏比 计算公式')).toBeInTheDocument();
     expect(screen.getByText('b̄赢 = Σ 盈利战役 bᵢ ÷ 盈利战役数')).toBeInTheDocument();
     // 【用户要求】亏损侧也要看得到
     expect(screen.getByText('盈利战役（2 场）')).toBeInTheDocument();
@@ -2516,8 +2522,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('= 2.700000 ÷ 3')).toBeInTheDocument();
     // 理论公式仍并列展示，注明它假设亏损恰为 −1R、b 取赢时均值
     expect(screen.getByText('E = P(赢) × b − (1 − P(赢))')).toBeInTheDocument();
-    expect(screen.getByText('= +0.90')).toBeInTheDocument();
-    expect(screen.getByText(/胜率仍按同一有效样本池的实际已实现盈亏判定/)).toBeInTheDocument();
+    expect(screen.getByText('= +0.90R')).toBeInTheDocument();
+    expect(screen.getByText(/胜率按同一有效样本池的实际已实现盈亏判定/)).toBeInTheDocument();
     // 【用户要求】复合战役增长率撤掉：几何期望的 W = G^n 已经表达了同一件事
     expect(screen.queryByTestId('campaign-compound-growth-rate')).not.toBeInTheDocument();
     expect(screen.queryByText('复合战役增长率计算公式')).not.toBeInTheDocument();
@@ -2529,13 +2535,13 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('几何期望（每笔复利率）')).toBeInTheDocument();
     expect(screen.getByText('几何指标连乘')).toBeInTheDocument();
     expect(screen.getByText(/G = \(1\+b·x\)\^p[\s\S]*W = G\^n/)).toBeInTheDocument();
-    expect(screen.getByText(/∏（1\+bᵢ·x），bᵢ = 每场几何指标/)).toBeInTheDocument();
+    expect(screen.getByText(/∏（1\+bᵢ·x），bᵢ = 每场盈亏比/)).toBeInTheDocument();
     // 公式行里代入的 b 就是概览那一项显示的盈利侧均值，x 是 10%
     const winMeanText = screen.getByTestId('campaign-average-payoff-ratio')
       .textContent!.match(/\+(\d+\.\d{2})/)![1];
     expect(screen.getByText(new RegExp(`G = \\(1 \\+ ${winMeanText} × 10%\\)`))).toBeInTheDocument();
     expect(screen.getByText(/W = G\^3 = ×/)).toBeInTheDocument();
-    expect(screen.getByText(/b = 盈利战役的平均几何指标（.*2 场）/)).toBeInTheDocument();
+    expect(screen.getByText(/b = 盈利战役的平均盈亏比（.*2 场）/)).toBeInTheDocument();
     expect(screen.getByText(/n = 有效战役数（3 场）/)).toBeInTheDocument();
     // 【用户要求】另一种统计口径：把每场的 (1+bᵢ·x) 连乘起来，并给出每场几何平均
     expect(screen.getByText(/∏（1\+bᵢ·x）= ×/)).toBeInTheDocument();
@@ -2559,7 +2565,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByText('1.756')).toBeInTheDocument();
     expect(screen.getByText('0.462')).toBeInTheDocument();
     expect(screen.getByText('口径：3 场有效战役，其中正 b 2 场 / 非正 b 1 场')).toBeInTheDocument();
-    expect(screen.getByText('另有 1 场已结束战役因神奇的 b 依据不完整而排除。')).toBeInTheDocument();
+    expect(screen.getByText('另有 1 场已结束战役因盈亏比 依据不完整而排除。')).toBeInTheDocument();
     expect(screen.getByText('校验：Sortino = UPR − D1/σ_d（通过）')).toBeInTheDocument();
     expect(screen.getByText('U1 1.167')).toBeInTheDocument();
     expect(screen.getByText('D1 0.267')).toBeInTheDocument();
@@ -2616,7 +2622,7 @@ describe('JournalCampaignsPage sorting', () => {
     fireEvent.doubleClick(screen.getByTestId('campaign-sort-magicB'));
     expect(screen.getByText('神奇的 b 计算公式')).toBeInTheDocument();
     expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 基数仓位比例（β）× 有效涨幅百分比 ÷ 初始最大预期回撤百分比')).toBeInTheDocument();
-    expect(screen.queryByText('神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀')).not.toBeInTheDocument();
+    expect(screen.getByText('神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-magicB')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);
 
@@ -2647,7 +2653,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     fireEvent.click(screen.getByTestId('campaign-average-payoff-ratio'));
     expect(screen.queryByText('胜率计算公式')).not.toBeInTheDocument();
-    expect(screen.getByText('平均神奇的 b 计算公式')).toBeInTheDocument();
+    expect(screen.getByText('平均盈亏比 计算公式')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
     expect(screen.getByTestId('campaign-sort-arithmeticExpectancy')).toHaveAttribute('aria-pressed', 'true');

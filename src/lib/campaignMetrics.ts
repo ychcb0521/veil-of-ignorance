@@ -144,7 +144,7 @@ export function computeCampaignExpectanciesFromMagicB(b: number | null): Campaig
 export function formatArithmeticExpectancy(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}`;
+  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}R`;
 }
 
 /**

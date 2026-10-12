@@ -112,7 +112,7 @@ describe('战役列表：多级排序', () => {
     expect(adds).toHaveLength(17);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
-    expect(screen.getByTestId('sort-chain-add-effectivePriceChangeMultiple')).toBeInTheDocument();
+    expect(screen.queryByTestId('sort-chain-add-effectivePriceChangeMultiple')).not.toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-magicB')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-unrealizedPriceChangePct')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-positionAmplification')).toBeInTheDocument();

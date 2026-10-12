@@ -273,7 +273,7 @@ describe('【用户要求】第二级起三个方向选项：跟随上一级 / �
     const params = new URLSearchParams();
     writeCampaignSortParams(params, chain);
     expect(params.getAll('then')).toEqual(['captureRate.follow']);
-    expect(parseCampaignSortChain(params)).toEqual(chain.map(level => level.mode === 'captureRate' ? {...level, mode: 'magicB'} : level));
+    expect(parseCampaignSortChain(params)).toEqual(chain);
     expect(sortChainKey(chain)).not.toBe(sortChainKey(setSortLevelOrder(chain, 1, 'asc')));
   });
 
@@ -293,7 +293,7 @@ describe('URL 参数', () => {
     expect(parseCampaignSortChain('?sort=usiContribution&direction=desc&then=mirrorTp.asc')).toEqual(DEFAULT_CAMPAIGN_SORT_CHAIN);
     expect(parseCampaignSortChain('?sort=mirrorTp&direction=desc&then=dsiContribution.desc&then=usiContribution.asc&then=captureRate.asc')).toEqual([
       { mode: 'mirrorTp', direction: 'desc' },
-      { mode: 'magicB', direction: 'asc' },
+      { mode: 'captureRate', direction: 'asc' },
     ]);
   });
 
@@ -303,7 +303,7 @@ describe('URL 参数', () => {
         { mode: 'mirrorTp', direction: 'desc' },
         { mode: 'addEfficiency', direction: 'asc' },
         { mode: 'alpha', direction: 'asc' },
-        { mode: 'magicB', direction: 'desc' },
+        { mode: 'captureRate', direction: 'desc' },
       ]);
   });
 
@@ -763,8 +763,8 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    expect(CAMPAIGN_SORT_MODES.slice(0, 5)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangeMultiple', 'magicB', 'geometricExpectancy']);
-    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(CAMPAIGN_SORT_MODES.indexOf('mainPriceEfficiency') + 1);
+    expect(CAMPAIGN_SORT_MODES.slice(0, 5)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'geometricExpectancy']);
+    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(2);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });
 

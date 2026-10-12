@@ -107,8 +107,8 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(formatGeometricExpectancy(null)).toBe('—');
     // 算术期望是另一个量：胜率统一 50%，E = 0.5 × 2 − 0.5
     expect(result.arithmeticExpectancy).toBeCloseTo(0.5, 8);
-    expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50');
-    expect(formatArithmeticExpectancy(-1)).toBe('-1.00');
+    expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50R');
+    expect(formatArithmeticExpectancy(-1)).toBe('-1.00R');
     expect(formatArithmeticExpectancy(null)).toBe('—');
   });
 

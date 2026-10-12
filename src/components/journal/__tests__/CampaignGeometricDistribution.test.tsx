@@ -48,7 +48,7 @@ describe('campaign geometric distribution', () => {
     expect(summary).toHaveTextContent('胜率 33% (3/9)');
     expect(summary).toHaveTextContent('模型归零 1 场');
     fireEvent.focus(point(3));
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.50 · b -5.00');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.50 · 盈亏比 -5.00R');
     fireEvent.click(point(3));
     expect(onSelect).toHaveBeenCalledWith('c3');
     fireEvent.focus(point(0));
@@ -84,7 +84,7 @@ describe('campaign geometric distribution', () => {
     const point = screen.getByTestId('campaign-metric-point-geometricExpectancyDistribution-c0');
     expect(point).toHaveAttribute('data-metric-value', '-0.9');
     fireEvent.focus(point);
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.10 · b -9.00');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.10 · 盈亏比 -9.00R');
   });
 
   it('does not transform other distribution metrics', () => {

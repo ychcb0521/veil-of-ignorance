@@ -4,6 +4,7 @@ import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeSettlementPayoffRatio } from '@/lib/campaignB';
 import { getPersistedStateHydrationRevision, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { Button } from '@/components/ui/button';
@@ -780,15 +781,8 @@ async function loadAccountCampaignPerformance(
       details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
     );
     const reconciledCampaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);
-    const geometry = computeCampaignGeometricMetrics(
-      details.campaign,
-      details.legs,
-      details.tradeRecords,
-      details.reverseHedgeOrders,
-      exitPriceCorrections,
-      { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) },
-    );
-    return { campaign: reconciledCampaign, payoffRatio: geometry.magicB ?? null };
+    const initialRisk = computeInitialExpectedMaxLoss(details.campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders);
+    return { campaign: reconciledCampaign, payoffRatio: computeSettlementPayoffRatio(reconciledCampaign.final_realized_pnl, initialRisk) };
   };
   const settledSamples = await Promise.allSettled(campaigns.map(loadSample));
   let missing: TradeCampaign[] = [];
@@ -1667,7 +1661,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       isOwner ? currentAccountEquity : null,
     );
     // 单场算术期望的胜率统一取 50%（ARITHMETIC_EXPECTANCY_WIN_RATE），不等账户样本加载。
-    const expectancies = computeCampaignExpectanciesFromMagicB(campaignGeometricMetrics?.magicB ?? null);
+    const expectancies = computeCampaignExpectanciesFromMagicB(profitCaptureRatio == null ? null : profitCaptureRatio / 100);
 
     return {
       profitCaptureRatio,
@@ -1687,9 +1681,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     tradeRecords,
   ]);
   const asymmetricRiskContribution = useMemo(() => computeAsymmetricRiskContribution(
-    campaignGeometricMetrics?.magicB ?? null,
+    campaignMetricValues?.profitCaptureRatio == null ? null : campaignMetricValues.profitCaptureRatio / 100,
     campaignAsymmetricRisk,
-  ), [campaignAsymmetricRisk, campaignGeometricMetrics?.magicB]);
+  ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
   // 战役涨跌幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）：与战役列表卡片同一个函数。
   // 真实「盈亏概览」与反事实面板共用这份逐腿的开平价与时间（反事实没改的腿沿用它）。
   // 挂单判定与触发时刻读权益路径同一份事实（localOrderFacts），与反事实副本 buildManualLegs 同源。

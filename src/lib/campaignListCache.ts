@@ -109,7 +109,7 @@ export function buildCampaignCardData(
     initialExpectedMaxLoss,
     initialExpectedMaxDrawdownPct,
     profitCaptureRatio,
-    opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, geometricMetrics.magicB ?? null, initialExpectedMaxDrawdownPct),
+    opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, profitCaptureRatio == null ? null : profitCaptureRatio / 100, initialExpectedMaxDrawdownPct),
     // 与详情页同一份挂单判定（本地从未成交的委托 id），挂着没成交的滚动对冲不算在手
     mainPriceChangePct: campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) }),
     positionAmplification: positionAmplificationOf(details, corrections),
