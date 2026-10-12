@@ -4680,7 +4680,7 @@ export default function JournalCampaignsPage() {
                         <div className="mt-1 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_DIRECT_FORMULA}</div>
                         <div className="mt-2 font-medium">算法二 · 几何分解</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_FORMULA}</div>
-                        <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的结算恒等式。尚未完整结算、没有加仓或依据缺失时显示「—」。</div></div>
+                        <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的 b。几何分解依据不足时沿用净结算法；缺少有效净盈亏或初始风险时显示「—」。</div></div>
                       </>
                     ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' || formula === 'effectivePriceChangeMultipleSort' ? (
                       <>
