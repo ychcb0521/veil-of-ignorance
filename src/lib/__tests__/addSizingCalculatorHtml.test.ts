@@ -39,6 +39,32 @@ function standaloneCalculator(saved?: string) {
 }
 
 describe('embedded add calculator source of truth', () => {
+  it.each([
+    { support: 1, alpha: '50.00%', factor: '1.50×', quantity: '0.50' },
+    { support: 1.4, alpha: '150.00%', factor: '2.50×', quantity: '1.50' },
+    { support: 0.5, alpha: '0.00%', factor: '1.00×', quantity: '0.00' },
+  ])('emphasizes alpha and the position multiplier at $alpha without changing the quantity', ({ support, alpha, factor, quantity }) => {
+    const { win, field } = standaloneCalculator();
+    win.AddPositionMath.setSeed({ currentPrice: 2, support, strategyCost: 0.5, realAverage: 0.5, coins: 1, mirrorProfitAvailable: 0, side: 'LONG' });
+    expect(field('r-add').textContent).toBe(quantity);
+    expect(field('r-add-ratio').textContent).toBe(alpha);
+    expect(field('r-growth-factor').textContent).toBe(factor);
+    expect(field('r-growth-factor').closest('.output-compound')?.textContent).toContain('仓位的几何复利');
+    expect(field('r-add-ratio').closest('.alpha-row')?.textContent).toContain('α');
+    expect(win.document.querySelector('.big-output')?.textContent).not.toContain('相对原币数');
+    field('clear-single').click();
+    expect(field('r-add-ratio').textContent).toBe('—');
+    expect(field('r-growth-factor').textContent).toBe('—');
+  });
+
+  it('clears alpha and the position multiplier when input becomes invalid', () => {
+    const { win, field, type } = standaloneCalculator();
+    win.AddPositionMath.setSeed({ currentPrice: 2, support: 1, strategyCost: 0.5, realAverage: 0.5, coins: 1, mirrorProfitAvailable: 0, side: 'LONG' });
+    type('position', '');
+    expect(field('r-add-ratio').textContent).toBe('—');
+    expect(field('r-growth-factor').textContent).toBe('—');
+  });
+
   it('defaults to the latest opening average and switches to breakeven without changing the risk budget', () => {
     const dom = new JSDOM(html, { url: 'https://app.test', runScripts: 'dangerously' });
     const win = dom.window as unknown as CalculatorWindow;
