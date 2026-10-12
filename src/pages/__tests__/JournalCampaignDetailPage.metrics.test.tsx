@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
+import * as campaignGeometry from '@/lib/campaignGeometricMetrics';
 import type { CampaignBoardExportInput } from '@/lib/campaignLegsPngExport';
 import { getCampaignFullData, saveCampaignDeviationNotes } from '@/lib/journalApi';
 import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
@@ -627,7 +628,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.getByRole('button', { name: '显示测试反事实' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('shows the same payoff and expectancy metrics as the campaign list', async () => {
+  it('does not substitute net settlement for geometric b when the campaign has no add', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
         <Routes>
@@ -639,11 +640,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('涨跌幅倍数')).toBeInTheDocument());
     // 【用户要求】「机会质量」已删掉（涨跌幅倍数更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
-    // 【用户要求】神奇的 b只写倍数 b：「2.00」，不再写「200.0% (2.00)」
+    // 没有首次加仓的 T₁ 与基数，不能拿净盈亏 200 ÷ L₀ 100 的 2.00 冒充新几何 b。
     const payoffRow = screen.getAllByText('神奇的 b')
       .map(node => node.closest('[data-column]'))
       .find((row): row is HTMLElement => row != null);
-    expect(payoffRow?.lastElementChild?.textContent).toBe('2.00');
+    expect(payoffRow?.lastElementChild?.textContent).toBe('—');
     expect(screen.queryByText('200.0% (2.00)')).not.toBeInTheDocument();
     // 没有加仓时，名义仓位放大与加仓因子空乘积都为 1 倍。
     for (const label of ['仓位放大', '仓位几何累积倍数']) {
@@ -653,12 +654,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '今日账户总资产说明' })).not.toBeInTheDocument();
-    // 算术期望胜率统一 50%：b = 2 → +0.50R，不等账户样本加载。
-    await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
-    // 【用户要求】单场几何期望以 Gᵢ 呈现；这场 b = 2.00 → G = 1 + 2×0.1 = 1.20
-    expect(screen.getByText('1.20')).toBeInTheDocument();
-    // 【用户要求】DSI/USI 贡献简化：只写组与组内占比；底部「期望口径」脚注删掉
-    expect(screen.getByText('USI 100.0%')).toBeInTheDocument();
+    for (const label of ['算术期望', '几何期望', '加仓效用']) {
+      const row = screen.getAllByText(label).map(node => node.closest('[data-column]')).find(node => node != null);
+      expect(row?.lastElementChild?.textContent).toBe('—');
+    }
+    expect(screen.queryByText('USI 100.0%')).not.toBeInTheDocument();
     expect(screen.queryByText(/期望口径/)).not.toBeInTheDocument();
     expect(screen.queryByText('逐腿 P&L 对账')).not.toBeInTheDocument();
     expect(screen.queryByText(/逐腿 P&L 对账已校正/)).not.toBeInTheDocument();
@@ -1048,7 +1048,33 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(within(group).getAllByTestId('foreign-replay-order-chip')).toHaveLength(3);
   }, 30_000);
 
-  it('keeps verified expectancy values when another campaign fails to load', async () => {
+  it('uses geometric b for expectancy and exported overview instead of the old settlement ratio', async () => {
+    const source = detailsById.winner;
+    const computed = campaignGeometry.computeCampaignGeometricMetrics(source.campaign, source.legs, []);
+    const spy = vi.spyOn(campaignGeometry, 'computeCampaignGeometricMetrics').mockReturnValue({ ...computed, magicB: 4 });
+    try {
+      render(
+        <MemoryRouter initialEntries={['/journal/campaigns/winner']}>
+          <Routes><Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} /></Routes>
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(screen.getByText('+1.50')).toBeInTheDocument());
+      const bRow = screen.getByText('神奇的 b').closest('[data-column]');
+      expect(bRow?.lastElementChild?.textContent).toBe('4.00');
+      const growthRow = screen.getByText('几何期望').closest('[data-column]');
+      expect(growthRow?.lastElementChild?.textContent).toBe('1.40');
+      expect(screen.queryByText('+0.50')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
+      await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));
+      const items = exportCampaignBoardPngMock.mock.calls[0][0].pnlOverview.items;
+      expect(items.find(item => item.label === '神奇的 b')?.value).toBe('4.00');
+      expect(items.find(item => item.label === '已实现 P&L')?.value).toBe('200.00 USDT');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('keeps unavailable geometric b empty when another campaign fails to load', async () => {
     vi.mocked(getCampaignFullData).mockImplementation(async (id: string) => {
       if (id === 'loser') throw new Error('transient campaign load failure');
       return detailsById[id];
@@ -1062,8 +1088,9 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    // 【用户要求】胜率统一 50%：b = 2 → E = 0.5 × 2 − 0.5，不受别的战役加载成败影响
-    await waitFor(() => expect(screen.getByText('+0.50R')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('算术期望')).toBeInTheDocument());
+    const row = screen.getByText('算术期望').closest('[data-column]');
+    expect(row?.lastElementChild?.textContent).toBe('—');
     expect(screen.queryByText(/期望口径加载失败/)).not.toBeInTheDocument();
   });
 

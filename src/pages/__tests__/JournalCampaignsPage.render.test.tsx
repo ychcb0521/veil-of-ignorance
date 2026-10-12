@@ -18,6 +18,17 @@ import JournalCampaignsPage from '../JournalCampaignsPage';
 
 const counters = vi.hoisted(() => ({ page: 0, scatter: 0, card: 0 }));
 
+// These tests exercise render/cache boundaries, not the geometric calculator.
+// Supply explicit canonical b values: source legs intentionally omit add execution facts.
+vi.mock('@/lib/campaignGeometricMetrics', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaignGeometricMetrics')>();
+  return { ...actual, computeCampaignGeometricMetrics: (campaign: TradeCampaign) => ({
+    magicB: ({ 'high-importance': 3, 'best-pnl': 0.5, newest: null } as Record<string, number | null>)[campaign.id] ?? null,
+    positionGeometricMultiple: null, effectivePriceChangePct: null, effectivePriceChangeMultiple: null,
+    geometricMetricBasis: { initialCoins: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
+  }) };
+});
+
 /** 行情 tick：换一个 priceMap 引用并通知订阅者，成交 / 委托 / 仓位引用保持不变。 */
 const trading = vi.hoisted(() => {
   const listeners = new Set<() => void>();

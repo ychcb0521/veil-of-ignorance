@@ -14,7 +14,6 @@ import {
   type ActualMainPriceChange,
 } from '@/lib/campaignMainPriceChange';
 import { computeCampaignExpectanciesFromMagicB } from '@/lib/campaignMetrics';
-import { resolveUnifiedMagicB } from '@/lib/campaignB';
 import { legPositionSideFromDirection, type LegPositionSide } from '@/lib/legPositionShare';
 import type {
   CampaignPnlOverviewHelpParagraph,
@@ -41,9 +40,9 @@ import type {
  *     没有 fees_total 的老行是毛盈亏，帮助文案必须如实说明；
  *   · L / 名义仓位 / d / 杠杆优先读 result 上落库的四个字段，老行没有就按 params 重算——
  *     重算必须用这场战役自己的推演模板（main_only 没有保护线），否则老 SOP 行会被造出 L；
- *   · 盈亏比 b = L > 0 ? 已实现 ÷ L × 100 : null——**绝不**拿 result.profit_capture_ratio
- *     （那是 已实现 ÷ 峰值），也不拿 final_r_multiple（L = 0 时它是 0，会印成 0.00 而不是「—」）；
- *   · 算术与几何期望 / 加仓效用 / DSI-USI 贡献全部由这个 b 推出，用的是战役页同一批函数。
+ *   · 旧盈亏比仅作为净结算诊断保留，不再替代神奇的 b；反事实快照尚未保存末次加仓时
+ *     有效止损线 Kₘ，不能由净盈亏反推或用初始止损线冒充，本项显示「—」。
+ *   · 算术与几何期望 / 加仓效用 / DSI-USI 贡献全部由新的几何 b 推出；依据缺失则同步为空。
  */
 
 export interface CounterfactualOverviewShared {
@@ -307,7 +306,8 @@ export function buildCounterfactualOverviewMetrics(
     })
     : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
-  const b = resolveUnifiedMagicB(payoffRatio);
+  // 分支快照没有保存逐次加仓的有效保护线；不能拿净结算 R 或初始止损线替代这个几何指标。
+  const b: number | null = null;
   const expectancies = computeCampaignExpectanciesFromMagicB(b);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
     b,
@@ -348,6 +348,10 @@ export function buildCounterfactualOverviewMetrics(
   };
 
   const extraNotes: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
+    magicB: [{ warning: '本反事实分支尚未保存首次加仓基数及末次加仓有效止损线 Kₘ 的完整计算依据，神奇的 b 显示「—」，不使用已实现净盈亏 ÷ L₀ 替代。' }],
+    arithmeticExpectancy: [{ warning: '神奇的 b 的几何计算依据不完整，算术期望暂不计算。' }],
+    geometricExpectancy: [{ warning: '神奇的 b 的几何计算依据不完整，几何期望暂不计算。' }],
+    addEfficiency: [{ warning: '神奇的 b 的几何计算依据不完整，加仓效用暂不计算。' }],
     initialMainExposureNotional: [
       manual
         ? '反事实分支从手动 Legs 里角色为主力开仓与镜像止盈的腿的名义仓位还原：有成交记录的腿取上方分给它的那份开仓名义'
@@ -408,6 +412,7 @@ export function buildCounterfactualOverviewMetrics(
     },
     expectedMaxDrawdownPct,
     payoffRatio,
+    magicB: b,
     mainPriceChangePct,
     mainPriceChangeBasis: priceChange ? { entryPrice: priceChange.entryPrice, exitPrice: priceChange.exitPrice, exitSource: priceChange.exitSource } : null,
     hasMainAdd: manual && counterfactualHasMainAdd(branch.params.manual_legs),

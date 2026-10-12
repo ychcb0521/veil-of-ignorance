@@ -3,7 +3,6 @@ import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
-import { resolveUnifiedMagicB } from '@/lib/campaignB';
 
 export interface CampaignExpectancies {
   arithmeticExpectancy: number | null;
@@ -59,10 +58,10 @@ export function isCampaignResolved(campaign: Pick<TradeCampaign, 'status' | 'fin
 
 export function resolveCampaignOpportunityQuality(
   campaign: TradeCampaign,
-  profitCaptureRatio: number | null,
+  magicB: number | null,
   initialExpectedMaxDrawdownPct: number,
 ): number | null {
-  return resolveResolvedOpportunityQuality(isCampaignResolved(campaign), profitCaptureRatio, initialExpectedMaxDrawdownPct);
+  return resolveResolvedOpportunityQuality(isCampaignResolved(campaign), magicB, initialExpectedMaxDrawdownPct);
 }
 
 /**
@@ -71,13 +70,13 @@ export function resolveCampaignOpportunityQuality(
  */
 export function resolveResolvedOpportunityQuality(
   resolved: boolean,
-  profitCaptureRatio: number | null,
+  magicB: number | null,
   initialExpectedMaxDrawdownPct: number,
 ): number | null {
   if (
     !resolved
-    || profitCaptureRatio == null
-    || !Number.isFinite(profitCaptureRatio)
+    || magicB == null
+    || !Number.isFinite(magicB)
     || !Number.isFinite(initialExpectedMaxDrawdownPct)
     || initialExpectedMaxDrawdownPct <= 0
   ) {
@@ -85,7 +84,7 @@ export function resolveResolvedOpportunityQuality(
   }
 
   return computeRealizedOpportunityQuality({
-    payoffRatio: resolveUnifiedMagicB(profitCaptureRatio)!,
+    payoffRatio: magicB,
     drawdownPct: initialExpectedMaxDrawdownPct,
   });
 }
@@ -122,7 +121,8 @@ export const ARITHMETIC_EXPECTANCY_WIN_RATE = 0.5;
 export function computeCampaignExpectancies(
   profitCaptureRatio: number | null,
 ): CampaignExpectancies {
-  return computeCampaignExpectanciesFromMagicB(resolveUnifiedMagicB(profitCaptureRatio));
+  // Legacy percent-unit adapter for external callers only. Live campaign views use the geometric b API.
+  return computeCampaignExpectanciesFromMagicB(profitCaptureRatio == null ? null : profitCaptureRatio / 100);
 }
 
 /** Canonical b in risk units; the old percent API above is an adapter only. */
@@ -144,7 +144,7 @@ export function computeCampaignExpectanciesFromMagicB(b: number | null): Campaig
 export function formatArithmeticExpectancy(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}R`;
+  return `${normalized >= 0 ? '+' : ''}${normalized.toFixed(2)}`;
 }
 
 /**

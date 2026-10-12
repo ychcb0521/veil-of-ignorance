@@ -94,7 +94,7 @@ const keyboardClick = (element: HTMLElement) => {
   element.focus();
   fireEvent.click(element, { detail: 0 });
 };
-const CAPTURE_FORMULA_TITLE = '单场盈亏比计算公式';
+const CAPTURE_FORMULA_TITLE = '神奇的 b 计算公式';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -109,7 +109,7 @@ describe('战役列表：多级排序', () => {
     // 第一级自己没有「+」；其余十四项（含涨幅未兑现、仓位放大）各一个，平时透明、触屏改用长按。
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    expect(adds).toHaveLength(18);
+    expect(adds).toHaveLength(17);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangeMultiple')).toBeInTheDocument();
@@ -168,7 +168,7 @@ describe('战役列表：多级排序', () => {
     expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('campaign-sort-mirrorTp')).toHaveAttribute('aria-pressed', 'true');
     // 下一个「+」说的是第 3 级
-    expect(screen.getByTestId('sort-chain-add-captureRate')).toHaveAccessibleName('把「盈亏比」加为第 3 级排序');
+    expect(screen.getByTestId('sort-chain-add-magicB')).toHaveAccessibleName('把「神奇的 b」加为第 3 级排序');
     // 封面：第一级原样高亮，第二级轻一档
     const first = screen.getAllByTestId('campaign-card')[0];
     expect(highlights(first)).toEqual(['campaign-mirror-tp-status:true', 'campaign-add-efficiency:then']);
@@ -188,26 +188,26 @@ describe('战役列表：多级排序', () => {
     expect(order().slice(0, 4)).toEqual(['SOL 趋势回踩', 'BTC 周线共振', 'ETH 突破加仓', 'BNB 镜像止盈']);
     expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('data-sort-direction', 'asc');
 
-    // 第三级：盈亏比默认跟随第 2 级（升序，标「同上」）——只有未实现·亏损那一档（两场都算不出加仓效用）被它重排
-    fireEvent.click(screen.getByTestId('sort-chain-add-captureRate'));
-    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.follow'));
+    // 第三级：神奇的 b默认跟随第 2 级（升序，标「同上」）——只有未实现·亏损那一档（两场都算不出加仓效用）被它重排
+    fireEvent.click(screen.getByTestId('sort-chain-add-magicB'));
+    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=magicB.follow'));
     expect(screen.getByTestId('sort-chain-follow-3')).toHaveTextContent('双向');
     expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']);
     // 跟随 → 倒序
     fireEvent.click(screen.getByTestId('sort-chain-toggle-3'));
     await waitFor(() => expect(order().slice(-2)).toEqual(['OP 追高', 'APT 抄底']));
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.asc&then=magicB.desc');
     expect(screen.queryByTestId('sort-chain-follow-3')).not.toBeInTheDocument();
     // 倒序 → 顺序
     fireEvent.click(screen.getByTestId('sort-chain-toggle-3'));
     await waitFor(() => expect(order().slice(-2)).toEqual(['APT 抄底', 'OP 追高']));
     expect(order().slice(0, 4)).toEqual(['SOL 趋势回踩', 'BTC 周线共振', 'ETH 突破加仓', 'BNB 镜像止盈']);
-    expect(screen.getByTestId('sort-chain-rank-captureRate')).toHaveTextContent('3');
+    expect(screen.getByTestId('sort-chain-rank-magicB')).toHaveTextContent('3');
 
-    // 移除第 2 级：盈亏比升为第 2 级
+    // 移除第 2 级：神奇的 b升为第 2 级
     fireEvent.click(screen.getByTestId('sort-chain-remove-2'));
-    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.asc'));
-    expect(screen.getByTestId('sort-chain-level-2')).toHaveAttribute('data-sort-mode', 'captureRate');
+    await waitFor(() => expect(search()).toBe('?sort=mirrorTp&direction=desc&then=magicB.asc'));
+    expect(screen.getByTestId('sort-chain-level-2')).toHaveAttribute('data-sort-mode', 'magicB');
     expect(screen.getByTestId('sort-chain-add-addEfficiency')).toBeInTheDocument();
 
     // 清除：只留第一级（连同方向），排序链消失，回到与只按镜像止盈时完全一样
@@ -238,20 +238,20 @@ describe('战役列表：多级排序', () => {
     // 单击不在链上的项：换成它
     fireEvent.click(screen.getByTestId('sort-chain-add-mirrorTp'));
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
-    await waitFor(() => expect(search()).toBe('?sort=captureRate&direction=desc'));
+    fireEvent.click(screen.getByTestId('campaign-sort-magicB'));
+    await waitFor(() => expect(search()).toBe('?sort=magicB&direction=desc'));
   }, 15_000);
 
   it('URL 往返：带 then 的链接直接还原排序链；进详情再返回，排序链原样回来', async () => {
-    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.asc');
-    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toHaveAttribute('data-sort-mode', 'captureRate'));
+    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=magicB.asc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toHaveAttribute('data-sort-mode', 'magicB'));
     expect(screen.getByTestId('sort-chain-level-3')).toHaveAttribute('data-sort-direction', 'asc');
     expect(order().slice(-2)).toEqual(['APT 抄底', 'OP 追高']);
     fireEvent.click(screen.getAllByTestId('campaign-card')[0]);
     await waitFor(() => expect(screen.getByRole('button', { name: '返回列表' })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: '返回列表' }));
-    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toHaveAttribute('data-sort-mode', 'captureRate'));
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.asc');
+    await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toHaveAttribute('data-sort-mode', 'magicB'));
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=magicB.asc');
     expect(order().slice(0, 4)).toEqual(['ETH 突破加仓', 'BTC 周线共振', 'SOL 趋势回踩', 'BNB 镜像止盈']);
   }, 15_000);
 
@@ -271,8 +271,8 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'mirrorTpBars');
     expect(search()).toBe('?sort=mirrorTp&direction=desc&chart=mirrorTpBars&then=addEfficiency.follow');
-    fireEvent.click(screen.getByTestId('campaign-sort-captureRate'));
-    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'oddsDistribution'));
+    fireEvent.click(screen.getByTestId('campaign-sort-magicB'));
+    await waitFor(() => expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'magicBDistribution'));
   }, 15_000);
 
   it('批量下载：「前 N 场按当前排序」按排序链选；被第一级筛掉的已选仍说明「因当前排序口径未显示」', async () => {
@@ -313,13 +313,13 @@ describe('战役列表：多级排序', () => {
       expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
 
       // 短按（没到 450ms 就松手）仍是只按这一项排
-      const capture = screen.getByTestId('campaign-sort-captureRate');
+      const capture = screen.getByTestId('campaign-sort-magicB');
       fireEvent(capture, pointer('pointerdown', 'touch'));
       act(() => { vi.advanceTimersByTime(200); });
       fireEvent(capture, pointer('pointerup', 'touch'));
       fireEvent.click(capture, { detail: 1 });
       act(() => { vi.advanceTimersByTime(600); });
-      expect(search()).toBe('?sort=captureRate&direction=desc');
+      expect(search()).toBe('?sort=magicB&direction=desc');
       expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument();
 
       // 鼠标长按不算（桌面用「+」）
@@ -345,12 +345,12 @@ describe('战役列表：多级排序', () => {
       fireEvent(button, pointer('pointercancel', 'touch'));
       act(() => { vi.advanceTimersByTime(500); });
       // 键盘的菜单键（contextmenu）：照常看说明
-      const capture = screen.getByTestId('campaign-sort-captureRate');
+      const capture = screen.getByTestId('campaign-sort-magicB');
       fireEvent(capture, createEvent.contextMenu(capture));
       expect(screen.getByText(CAPTURE_FORMULA_TITLE)).toBeInTheDocument();
-      // 键盘回车：照常只按盈亏比排
+      // 键盘回车：照常只按神奇的 b排
       fireEvent.click(capture, { detail: 0 });
-      expect(search()).toBe('?sort=captureRate&direction=desc');
+      expect(search()).toBe('?sort=magicB&direction=desc');
     } finally {
       vi.useRealTimers();
     }
@@ -366,8 +366,8 @@ describe('战役列表：多级排序', () => {
       act(() => { vi.advanceTimersByTime(500); });
       fireEvent(button, pointer('pointercancel', 'touch'));
       // 复位前（400ms 内）用键盘单击另一项
-      fireEvent.click(screen.getByTestId('campaign-sort-captureRate'), { detail: 0 });
-      expect(search()).toBe('?sort=captureRate&direction=desc');
+      fireEvent.click(screen.getByTestId('campaign-sort-magicB'), { detail: 0 });
+      expect(search()).toBe('?sort=magicB&direction=desc');
     } finally {
       vi.useRealTimers();
     }
@@ -376,9 +376,9 @@ describe('战役列表：多级排序', () => {
   it('「+」不挡 Σ：右键 / 双击 Σ 与原来一样；右键「+」同样看说明、不加层', async () => {
     renderPage('?sort=mirrorTp&direction=desc');
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
-    const sortButton = screen.getByTestId('campaign-sort-captureRate');
-    const sigma = screen.getByTestId('campaign-sort-captureRate-icon');
-    const add = screen.getByTestId('sort-chain-add-captureRate');
+    const sortButton = screen.getByTestId('campaign-sort-magicB');
+    const sigma = screen.getByTestId('campaign-sort-magicB-icon');
+    const add = screen.getByTestId('sort-chain-add-magicB');
     // Σ 在排序按钮里；「+」在按钮外那一层、挂在右上角
     expect(sortButton).toContainElement(sigma);
     expect(sortButton).not.toContainElement(add);
@@ -402,11 +402,11 @@ describe('战役列表：多级排序', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByText(CAPTURE_FORMULA_TITLE)).not.toBeInTheDocument());
 
-    // 双击 Σ：第一击只按盈亏比排，第二击不算，dblclick 打开说明——不会悄悄多出一级
+    // 双击 Σ：第一击只按神奇的 b排，第二击不算，dblclick 打开说明——不会悄悄多出一级
     fireEvent.click(sigma, { detail: 1 });
     fireEvent.click(sigma, { detail: 2 });
     fireEvent.dblClick(sigma);
-    await waitFor(() => expect(search()).toBe('?sort=captureRate&direction=desc'));
+    await waitFor(() => expect(search()).toBe('?sort=magicB&direction=desc'));
     expect(await screen.findByText(CAPTURE_FORMULA_TITLE)).toBeInTheDocument();
     expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument();
   }, 15_000);
@@ -414,25 +414,25 @@ describe('战役列表：多级排序', () => {
   it('双击「+」只加一级：第一击加层后「+」卸载，第二击落到排序按钮上，不改排序、也不顺带弹说明', async () => {
     renderPage('?sort=mirrorTp&direction=desc');
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
-    fireEvent.click(screen.getByTestId('sort-chain-add-captureRate'), { detail: 1 });
-    await waitFor(() => expect(screen.queryByTestId('sort-chain-add-captureRate')).not.toBeInTheDocument());
-    const sortButton = screen.getByTestId('campaign-sort-captureRate');
+    fireEvent.click(screen.getByTestId('sort-chain-add-magicB'), { detail: 1 });
+    await waitFor(() => expect(screen.queryByTestId('sort-chain-add-magicB')).not.toBeInTheDocument());
+    const sortButton = screen.getByTestId('campaign-sort-magicB');
     fireEvent.click(sortButton, { detail: 2 });
     fireEvent.dblClick(sortButton);
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=magicB.follow');
     expect(screen.queryByText(CAPTURE_FORMULA_TITLE)).not.toBeInTheDocument();
     // 过了双击间隔再双击排序按钮：照常看说明
     await new Promise(resolve => setTimeout(resolve, 850));
     fireEvent.click(sortButton, { detail: 2 });
     fireEvent.dblClick(sortButton);
     expect(await screen.findByText(CAPTURE_FORMULA_TITLE)).toBeInTheDocument();
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=magicB.follow');
   }, 15_000);
 
   it('多级时双击排序项看说明：第一击收成的单级在双击时还原，排序链不变', async () => {
     renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-2')).toBeInTheDocument());
-    const sortButton = screen.getByTestId('campaign-sort-captureRate');
+    const sortButton = screen.getByTestId('campaign-sort-magicB');
     fireEvent.click(sortButton, { detail: 1 });
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
     fireEvent.click(sortButton, { detail: 2 });
@@ -445,20 +445,20 @@ describe('战役列表：多级排序', () => {
   it('键盘在「+」上连按两下：第二下不把刚建好的链收成单级；过了间隔再按才是只按这一项排', async () => {
     renderPage('?sort=mirrorTp&direction=desc');
     await waitFor(() => expect(order()).toEqual(MIRROR_ONLY));
-    keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
-    await waitFor(() => expect(screen.getByTestId('campaign-sort-captureRate')).toHaveFocus());
-    keyboardClick(screen.getByTestId('campaign-sort-captureRate'));
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=captureRate.follow');
+    keyboardClick(screen.getByTestId('sort-chain-add-magicB'));
+    await waitFor(() => expect(screen.getByTestId('campaign-sort-magicB')).toHaveFocus());
+    keyboardClick(screen.getByTestId('campaign-sort-magicB'));
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=magicB.follow');
     await new Promise(resolve => setTimeout(resolve, 850));
-    keyboardClick(screen.getByTestId('campaign-sort-captureRate'));
+    keyboardClick(screen.getByTestId('campaign-sort-magicB'));
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
   }, 15_000);
 
   it('链上的名称、×、清除忽略连击的第二下；× / 清除之后紧跟的连击不会落到挪过来的东西上', async () => {
-    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.desc');
+    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=magicB.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-toggle-2'), { detail: 2 });
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.desc');
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=magicB.desc');
     fireEvent.click(screen.getByTestId('sort-chain-remove-3'), { detail: 1 });
     await waitFor(() => expect(screen.queryByTestId('sort-chain-level-3')).not.toBeInTheDocument());
     // 双击的第二下落到挪过来的下一级 × 上（detail 2）：忽略
@@ -480,19 +480,19 @@ describe('战役列表：多级排序', () => {
     // 「+」：焦点落到同一项的排序按钮上（「+」随即换成级数角标），接着 Tab 仍从这一项往后走
     keyboardClick(screen.getByTestId('sort-chain-add-addEfficiency'));
     await waitFor(() => expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveFocus());
-    keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
-    await waitFor(() => expect(screen.getByTestId('campaign-sort-captureRate')).toHaveFocus());
-    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow&then=captureRate.follow');
+    keyboardClick(screen.getByTestId('sort-chain-add-magicB'));
+    await waitFor(() => expect(screen.getByTestId('campaign-sort-magicB')).toHaveFocus());
+    expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow&then=magicB.follow');
 
     // ×：还剩多级时落到前一级的名称上
     keyboardClick(screen.getByTestId('sort-chain-remove-3'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-toggle-2')).toHaveFocus());
     expect(search()).toBe('?sort=mirrorTp&direction=desc&then=addEfficiency.follow');
-    keyboardClick(screen.getByTestId('sort-chain-add-captureRate'));
+    keyboardClick(screen.getByTestId('sort-chain-add-magicB'));
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
     // 移除第 1 级：落到新的第 1 级上
     keyboardClick(screen.getByTestId('sort-chain-remove-1'));
-    await waitFor(() => expect(search()).toBe('?sort=addEfficiency&direction=desc&then=captureRate.follow'));
+    await waitFor(() => expect(search()).toBe('?sort=addEfficiency&direction=desc&then=magicB.follow'));
     expect(screen.getByTestId('sort-chain-toggle-1')).toHaveFocus();
 
     // 清除：排序链消失，落到第一级的排序按钮上
@@ -560,7 +560,7 @@ describe('战役列表：多级排序', () => {
   }, 15_000);
 
   it('【用户反馈】第二级起每一级标出「本级排了 N 场」：前一级并列的战役里按这一项排了几场，算不出的几场留在组尾（悬停看明细）', async () => {
-    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=captureRate.asc');
+    renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc&then=magicB.asc');
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
     // 第一级没有「作用」可标
     expect(screen.queryByTestId('sort-chain-effect-1')).not.toBeInTheDocument();
@@ -572,7 +572,7 @@ describe('战役列表：多级排序', () => {
     // 第三级：前两级都打平的只有未实现·亏损那一档（两场都算不出加仓效用）
     const third = screen.getByTestId('sort-chain-effect-3');
     expect(third).toHaveTextContent('2 场');
-    expect(third.getAttribute('title')).toContain('前面各级并列的 1 组、2 场里，按盈亏比排了 2 场');
+    expect(third.getAttribute('title')).toContain('前面各级并列的 1 组、2 场里，按神奇的 b排了 2 场');
     expect(third.getAttribute('title')).not.toContain('算不出');
     // 芯片仍在同一个圆角框里：作用标记夹在名称与 × 之间
     const chip = screen.getByTestId('sort-chain-level-2');
@@ -582,11 +582,11 @@ describe('战役列表：多级排序', () => {
 
   it('前一级没有并列时第二级标「未起作用」并说明原因；并列的都算不出这一项时也标「未起作用」', async () => {
     // 字母作第一级：十一场标题各不相同 → 没有并列
-    renderPage('?sort=alpha&direction=asc&then=captureRate.desc');
+    renderPage('?sort=alpha&direction=asc&then=magicB.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     const effect = screen.getByTestId('sort-chain-effect-2');
     expect(effect).toHaveTextContent('未起作用');
-    expect(effect.getAttribute('title')).toBe('第 2 级「盈亏比」未起作用：前面各级没有并列，每一场的先后都已由前面各级决定');
+    expect(effect.getAttribute('title')).toBe('第 2 级「神奇的 b」未起作用：前面各级没有并列，每一场的先后都已由前面各级决定');
     // 换成镜像止盈 › 加仓效用：又有作用了
     fireEvent.click(screen.getByTestId('sort-chain-remove-1'));
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
@@ -594,7 +594,7 @@ describe('战役列表：多级排序', () => {
     await waitFor(() => expect(screen.getByTestId('sort-chain-effect-2')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('sort-chain-toggle-2'));
     await waitFor(() => expect(search()).toContain('then=mirrorTp.desc'));
-    // 盈亏比 › 镜像止盈：0 为界两侧对半后四档都有并列；-0.90 ~ 0 与 < -0.90 两档里镜像止盈读数相同（先后未变）不算排了 → 7 场
+    // 神奇的 b › 镜像止盈：0 为界两侧对半后四档都有并列；-0.90 ~ 0 与 < -0.90 两档里镜像止盈读数相同（先后未变）不算排了 → 7 场
     expect(screen.getByTestId('sort-chain-effect-2')).toHaveTextContent('7 场');
     expect(screen.getByTestId('sort-chain-effect-2').getAttribute('title')).toContain('按镜像止盈排了 7 场；4 场与同组其它场读数相同，先后未变');
   }, 15_000);
@@ -619,11 +619,11 @@ describe('战役列表：多级排序', () => {
   }, 15_000);
 
   it('【用户已定】连续指标作第一级、链上不止一级时先按四分位分档：第一级芯片标「分档」，悬停写明档界；封面第一级高亮不变', async () => {
-    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    renderPage('?sort=magicB&direction=desc&then=mirrorTp.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     // 【用户要求】0 的分界线保留、正负两侧各对半：非负 7 场以中位数 2.10 分成 ≥ 2.10 {BTC, SOL, ETH, TIA} 与 0 ~ 2.10 {BNB, LINK, ARB}；
     // 负 4 场以中位数档界 -0.90 分成 -0.90 ~ 0 {DOGE, AVAX} 与 < -0.90 {OP, APT}
-    // 同档内按镜像止盈（已实现在前），再打平按盈亏比本身从大到小
+    // 同档内按镜像止盈（已实现在前），再打平按神奇的 b本身从大到小
     expect(order()).toEqual([
       'BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓', 'TIA 二次加仓',
       'BNB 镜像止盈', 'LINK 区间', 'ARB 回踩',
@@ -634,27 +634,27 @@ describe('战役列表：多级排序', () => {
     expect(binned).toHaveTextContent('分档');
     expect(screen.getByTestId('sort-chain-level-1')).toContainElement(binned);
     const title = binned.getAttribute('title') ?? '';
-    expect(title).toContain('第 1 级「盈亏比」以 0 为界、正负两侧各按场数对半分成四档（档界按当前列表 11 场算）');
+    expect(title).toContain('第 1 级「神奇的 b」以 0 为界、正负两侧各按场数对半分成四档（档界按当前列表 11 场算）');
     // 负侧中位数 −0.95 不是任何一场的读数：档界写成那一档里最小的读数（−0.90），与封面对得上
     expect(title).toContain('≥ 2.10（4 场）· 0.00 ~ 2.10（3 场）· -0.90 ~ 0.00（2 场）· < -0.90（2 场）');
-    expect(title).toContain('同档内按后面各级排；各级都打平再按盈亏比本身从大到小');
+    expect(title).toContain('同档内按后面各级排；各级都打平再按神奇的 b本身从大到小');
     // 排序行上第一级的提示也写明分档；「+」的提示说清加层后会分档
-    expect(screen.getByTestId('campaign-sort-captureRate').getAttribute('title')).toContain('第 1 级：按盈亏比从大到小，以 0 为界分档');
+    expect(screen.getByTestId('campaign-sort-magicB').getAttribute('title')).toContain('第 1 级：按神奇的 b从大到小，以 0 为界分档');
     // 封面：第一级仍是原来的高亮，第二级轻一档
     const first = screen.getAllByTestId('campaign-card')[0];
-    expect(highlights(first)).toEqual(['campaign-mirror-tp-status:then', 'campaign-payoff-ratio:true']);
-    // 只剩一级：不分档、没有「分档」标记，顺序回到纯按盈亏比
+    expect(highlights(first)).toEqual(['campaign-magic-b:true', 'campaign-mirror-tp-status:then']);
+    // 只剩一级：不分档、没有「分档」标记，顺序回到纯按神奇的 b
     fireEvent.click(screen.getByTestId('sort-chain-clear'));
     await waitFor(() => expect(screen.queryByTestId('sort-chain')).not.toBeInTheDocument());
     expect(screen.queryByTestId('sort-chain-binned')).not.toBeInTheDocument();
     expect(order().slice(0, 3)).toEqual(['BTC 周线共振', 'SOL 趋势回踩', 'ETH 突破加仓']);
     expect(order().slice(-3)).toEqual(['AVAX 反抽', 'OP 追高', 'APT 抄底']);
     // 单级时「+」的提示说清加层后第一级会分档
-    expect(screen.getByTestId('sort-chain-add-mirrorTp').getAttribute('title')).toBe('加为第 2 级：盈亏比以 0 为界、正负两侧各按场数对半分成四档后，同档内再按镜像止盈排');
+    expect(screen.getByTestId('sort-chain-add-mirrorTp').getAttribute('title')).toBe('加为第 2 级：神奇的 b以 0 为界、正负两侧各按场数对半分成四档后，同档内再按镜像止盈排');
   }, 15_000);
 
   it('【用户要求】双击或右键排序链上任一级打开分组统计：一档一行，方向不因双击改变', async () => {
-    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    renderPage('?sort=magicB&direction=desc&then=mirrorTp.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     const before = order();
     const toggle = screen.getByTestId('sort-chain-toggle-1');
@@ -675,14 +675,14 @@ describe('战役列表：多级排序', () => {
     // 【用户要求】分档写实际数值区间，不写 Q1–Q4
     expect(stats.textContent).not.toMatch(/Q[1-4]/);
     expect(within(stats).getByTestId('sort-chain-stats-total')).toHaveTextContent('合计11');
-    // 【用户要求】盈亏比的平均值就是「平均 b」：不再另起一列「盈亏比 平均值」
+    // 【用户要求】神奇的 b的平均值就是「平均 b」：不再另起一列「神奇的 b 平均值」
     const headers = within(stats).getAllByRole('columnheader').map(th => th.textContent ?? '');
     expect(headers).toContain('平均 b');
-    expect(headers.some(text => /盈亏比平均值/.test(text))).toBe(false);
+    expect(headers.some(text => /神奇的 b平均值/.test(text))).toBe(false);
     expect(headers.some(text => /镜像止盈生效场数/.test(text))).toBe(true);
     // 第一级每一档里第二级的分布：一档一行，行合计 = 这一档的场数
     const crossTab = within(stats).getByTestId('sort-chain-crosstab-2');
-    expect(crossTab).toHaveTextContent('盈亏比×2镜像止盈的分布（占本档）');
+    expect(crossTab).toHaveTextContent('神奇的 b×2镜像止盈的分布（占本档）');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-row-1')).toHaveTextContent('≥ 2.10');
     expect(within(crossTab).getByTestId('sort-chain-crosstab-2-total')).toHaveTextContent(/11$/);
     // 单元格默认只保留百分比；点击后原位显示对应数量，再点恢复百分比。
@@ -705,7 +705,7 @@ describe('战役列表：多级排序', () => {
   }, 15_000);
 
   it('分档指标作第一级时不分档：芯片上没有「分档」，「+」的提示与原来一样', async () => {
-    renderPage('?sort=mirrorTp&direction=desc&then=captureRate.desc');
+    renderPage('?sort=mirrorTp&direction=desc&then=magicB.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain')).toBeInTheDocument());
     expect(screen.queryByTestId('sort-chain-binned')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-mirrorTp').getAttribute('title')).not.toContain('分档');
@@ -713,7 +713,7 @@ describe('战役列表：多级排序', () => {
   }, 15_000);
 
   it('【复核】档界与本级作用不只在悬停提示里：ⓘ 的「当前」段写出档界与各级作用；「分档」「N 场」是可聚焦的按钮，点它打开 ⓘ', async () => {
-    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc&then=addEfficiency.desc');
+    renderPage('?sort=magicB&direction=desc&then=mirrorTp.desc&then=addEfficiency.desc');
     await waitFor(() => expect(screen.getByTestId('sort-chain-level-3')).toBeInTheDocument());
     const binned = screen.getByTestId('sort-chain-binned');
     const effect2 = screen.getByTestId('sort-chain-effect-2');
@@ -728,7 +728,7 @@ describe('战役列表：多级排序', () => {
     // 点「分档」：打开 ⓘ 弹层，「当前」段第一行是档界（与悬停提示同一串），之后每级一行
     fireEvent.click(binned);
     const current = await screen.findByTestId('sort-chain-current');
-    expect(current).toHaveTextContent('第 1 级「盈亏比」以 0 为界、正负两侧各按场数对半分成四档（档界按当前列表 11 场算）：≥ 2.10（4 场）· 0.00 ~ 2.10（3 场）· -0.90 ~ 0.00（2 场）· < -0.90（2 场）');
+    expect(current).toHaveTextContent('第 1 级「神奇的 b」以 0 为界、正负两侧各按场数对半分成四档（档界按当前列表 11 场算）：≥ 2.10（4 场）· 0.00 ~ 2.10（3 场）· -0.90 ~ 0.00（2 场）· < -0.90（2 场）');
     expect(current).toHaveTextContent('第 2 级「镜像止盈」：前面各级并列的 4 组、11 场里，按镜像止盈排了 7 场；4 场与同组其它场读数相同，先后未变');
     expect(current).toHaveTextContent(effect3.getAttribute('title') ?? '∅');
     // 一级一行：档界行、第 2 级行、第 3 级行
@@ -745,13 +745,13 @@ describe('战役列表：多级排序', () => {
 
 describe('【用户要求】多级排序后卡片按第一级的档分区', () => {
   it('每一档一个分区：标题写档界、场数、胜率、平均 b；分区里的卡片顺序与原列表一致；可以收起', async () => {
-    renderPage('?sort=captureRate&direction=desc&then=mirrorTp.desc');
+    renderPage('?sort=magicB&direction=desc&then=mirrorTp.desc');
     await waitFor(() => expect(screen.getByTestId('campaign-sort-section-1')).toBeInTheDocument());
     const sections = [1, 2, 3, 4].map(index => screen.getByTestId(`campaign-sort-section-${index}`));
     expect(screen.queryByTestId('campaign-sort-section-5')).toBeNull();
     // 与分组统计同一套组：≥ 2.10 4 场 · 0 ~ 2.10 3 场 · -0.90 ~ 0 2 场 · < -0.90 2 场
     expect(sections.map(section => within(section).getAllByTestId('campaign-card').length)).toEqual([4, 3, 2, 2]);
-    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('盈亏比≥ 2.10');
+    expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('神奇的 b≥ 2.10');
     expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('4 场');
     expect(within(sections[0]).getByTestId('campaign-sort-section-toggle-1')).toHaveTextContent('胜率 100%');
     expect(within(sections[1]).getByTestId('campaign-sort-section-toggle-2')).toHaveTextContent('0.00 ~ 2.10');
@@ -776,7 +776,7 @@ describe('【用户要求】多级排序后卡片按第一级的档分区', () =
   }, 15_000);
 
   it('镜像止盈作第一级时实际存在的档会生成分区；当前档标题吸顶，不会被上方排序区滚走', async () => {
-    renderPage('?sort=mirrorTp&direction=desc&then=captureRate.follow');
+    renderPage('?sort=mirrorTp&direction=desc&then=magicB.follow');
     await waitFor(() => expect(screen.getByTestId('campaign-sort-section-1')).toBeInTheDocument());
     const sections = screen.getAllByTestId(/^campaign-sort-section-\d+$/);
     expect(sections).toHaveLength(4);
@@ -789,7 +789,7 @@ describe('【用户要求】多级排序后卡片按第一级的档分区', () =
   }, 15_000);
 
   it('只按一项排、或第一级是字母（几乎一场一组）时不分区', async () => {
-    renderPage('?sort=captureRate&direction=desc');
+    renderPage('?sort=magicB&direction=desc');
     await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeGreaterThan(0));
     expect(screen.queryByTestId('campaign-sort-section-1')).toBeNull();
   }, 15_000);

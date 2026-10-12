@@ -69,20 +69,28 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(formatCampaignLeverage(null)).toBe('—');
   });
 
-  it('战役机会质量将小于 1 的实际盈亏比统一按 1 计算', () => {
+  it('战役机会质量将小于 1 的几何 b 统一按 1 计算', () => {
     const value = resolveCampaignOpportunityQuality(
       campaign({ status: 'closed_loss', final_realized_pnl: -80 }),
-      -80,
+      -0.8,
       4,
     );
 
-    expect(value).toBeCloseTo(0.25, 8); // max（−80/100, 1） ÷ 4 = 0.25
+    expect(value).toBeCloseTo(0.25, 8); // max（−0.8, 1） ÷ 4 = 0.25
+  });
+
+  it('机会质量直接使用无百分数缩放的几何 b，不再除以 100 或回退净结算', () => {
+    // 净结算 200 不参与：几何 b=4，回撤4%，结果=max(4,1)/4=1。
+    expect(resolveCampaignOpportunityQuality(campaign(), 4, 4)).toBe(1);
+    expect(resolveCampaignOpportunityQuality(campaign(), 1.5, 4)).toBe(0.375);
+    expect(resolveCampaignOpportunityQuality(campaign(), null, 4)).toBeNull();
+    expect(resolveCampaignOpportunityQuality(campaign(), Number.NaN, 4)).toBeNull();
   });
 
   it('does not calculate opportunity quality for an active campaign', () => {
     expect(resolveCampaignOpportunityQuality(
       campaign({ status: 'active', closed_at: null, final_realized_pnl: null }),
-      200,
+      2,
       10,
     )).toBeNull();
   });
@@ -99,7 +107,9 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(formatGeometricExpectancy(null)).toBe('—');
     // 算术期望是另一个量：胜率统一 50%，E = 0.5 × 2 − 0.5
     expect(result.arithmeticExpectancy).toBeCloseTo(0.5, 8);
-    expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50R');
+    expect(formatArithmeticExpectancy(result.arithmeticExpectancy)).toBe('+0.50');
+    expect(formatArithmeticExpectancy(-1)).toBe('-1.00');
+    expect(formatArithmeticExpectancy(null)).toBe('—');
   });
 
   it('【用户要求】算术期望的胜率统一取 50%：Eᵢ = (bᵢ − 1) ÷ 2，不需要也不受账户胜率影响', () => {

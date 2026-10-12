@@ -102,13 +102,13 @@ const EXIT_COL = 5;
 /** 开仓和平仓分别记录，不与前后数值列混在一起。 */
 const EXECUTION_METHOD_COL = 6;
 /** 「委托」列。 */
-const ORDER_COL = 12;
+const ORDER_COL = 13;
 /** 「手续费」列。 */
-const FEE_COL = 11;
+const FEE_COL = 12;
 /** 「加仓校验」列（紧跟「币量 / 仓位」与「多单占比」；没有「空单占比」列）。 */
-const ADD_SIZING_COL = 10;
+const ADD_SIZING_COL = 11;
 /** 导出图的列数（没有页面上的「操作」列）。 */
-const EXPORT_COLUMN_COUNT = 13;
+const EXPORT_COLUMN_COUNT = 14;
 /** 「涨跌幅」列（操作方式右侧）。 */
 const PRICE_CHANGE_COL = 7;
 
@@ -474,7 +474,7 @@ describe('【用户要求】情绪日记折叠后，导出图片也只保留标�
 });
 
 describe('【用户要求】导出图要把 Legs 里的信息全部纳入', () => {
-  it('表尾有合计行：盈亏取数来源、Σ盈亏、Σ Δb、手续费合计——与页面合计行同源', () => {
+  it('表尾有合计行：盈亏取数来源、Σ盈亏、Σ ΔR、手续费合计——与页面合计行同源', () => {
     const rows = buildCampaignLegsExportRows(input());
     const total = rows.at(-1)!;
     expect(total.kind).toBe('total');
@@ -587,7 +587,7 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     const widths = new Set(rows.map(row => row.cells.length));
     expect(widths).toEqual(new Set([EXPORT_COLUMN_COUNT]));
     // 列序：币量（及其多单占比）之后、手续费之前
-    expect(add.cells[ADD_SIZING_COL - 2][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
+    expect(add.cells[ADD_SIZING_COL - 3][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
   });
 
   it('仓位合规：只是一枚淡灰小 ✓，不是红色', () => {
@@ -1007,7 +1007,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（操作方式右�
     const at = texts.indexOf('涨跌幅');
     expect(at).toBeGreaterThan(0);
     expect(texts.slice(at - 3, at + 2)).toEqual(['开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位']);
-    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'Δb', '开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托']);
+    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '仓位的几何复利（1+α）', '加仓校验', '手续费', '委托']);
     expect(texts).not.toContain('空单占比');
     expect(texts).toContain('+127.02%');
   });
@@ -1202,8 +1202,8 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
 
     const at = drawn.indexOf('多单占比');
     expect(at).toBeGreaterThan(0);
-    expect(drawn.slice(at - 1, at + 2)).toEqual(['币量 / 仓位', '多单占比', '加仓校验']);
-    expect(LONG_COL + 1).toBe(ADD_SIZING_COL);
+    expect(drawn.slice(at - 1, at + 3)).toEqual(['币量 / 仓位', '多单占比', '仓位的几何复利（1+α）', '加仓校验']);
+    expect(LONG_COL + 2).toBe(ADD_SIZING_COL);
     expect(drawn).not.toContain('空单占比');
     expect(drawn).not.toContain('占比');
     expect(drawn).toEqual(expect.arrayContaining(['34.9%', '33.6%', '44.2%', '45.1%', '79,042,835.4', '8981040.00', '100.0%']));
@@ -1402,7 +1402,7 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       get: (_target, key) => (key === 'measureText' ? () => ({ width: 0 }) : () => undefined),
     }) as never);
     const canvas = buildCampaignLegsListCanvas({ ...input(), legs: [] }, { includeHeader: false, scale: 1 });
-    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 102 + 120 + 184 + 88 + 170 + 132 + 444 + 40 * 2);
+    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 102 + 120 + 184 + 88 + 172 + 170 + 132 + 444 + 40 * 2);
   });
 
   it('按真实等宽字体量宽：「100.0%」与「—」在 88 宽的「多单占比」里都不折行；列头「多单占比」（12px 粗体 4 个汉字）放得进去、不被压扁', async () => {
@@ -1593,7 +1593,8 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       // 「多单占比」紧挨在 Σ 格右边（左起差一个 184 宽的「币量 / 仓位」）；它右边 88 处就是「加仓校验」的列头
       expect(longTop.x - longTag.x).toBe(184);
       const header = (title: string) => drawn.find(item => item.text === title)!;
-      expect(header('加仓校验').x - header('多单占比').x).toBe(88);
+      expect(header('仓位的几何复利（1+α）').x - header('多单占比').x).toBe(88);
+      expect(header('加仓校验').x - header('仓位的几何复利（1+α）').x).toBe(172);
       expect(drawn.some(item => item.text === '空单占比')).toBe(false);
     });
 
@@ -1698,10 +1699,11 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
 
       const at = drawn.findIndex(item => item.text === '空单占比');
       expect(at).toBeGreaterThan(0);
-      expect(drawn.slice(at - 1, at + 2).map(item => item.text)).toEqual(['币量 / 仓位', '空单占比', '加仓校验']);
+      expect(drawn.slice(at - 1, at + 3).map(item => item.text)).toEqual(['币量 / 仓位', '空单占比', '仓位的几何复利（1+α）', '加仓校验']);
       expect(drawn.some(item => item.text === '多单占比')).toBe(false);
       const header = (title: string) => drawn.find(item => item.text === title)!;
-      expect(header('加仓校验').x - header('空单占比').x).toBe(88);
+      expect(header('仓位的几何复利（1+α）').x - header('空单占比').x).toBe(88);
+      expect(header('加仓校验').x - header('仓位的几何复利（1+α）').x).toBe(172);
       // 合计行：「空」标签那一行的 y 与占比格第一个「100.0%」相同（垫的两行空白把它顶到了第二组）
       const totalFrom = drawn.findIndex(item => item.text === '合计');
       const tags = drawn.slice(totalFrom).filter(item => item.text === '多' || item.text === '空');
@@ -1870,13 +1872,13 @@ describe('【用户要求】导出图的第一列只有「角色」：不印序�
 });
 
 describe('【用户要求】导出图的盈亏概览与页面同样两栏：递进链排在同一列', () => {
-  it('标了 rightColumn 的按栏从上往下排：左栏递进链七项、右栏结果与仓位七项，同一行齐平；战役元数据仍按行排', () => {
+  it('标了 rightColumn 的按栏从上往下排：左右各九项，同一行齐平；战役元数据仍按行排', () => {
     const items = buildCampaignPnlOverviewItems(pnlMetricsForColumns());
     const { cells, rows } = overviewItemCells(items);
-    expect(rows).toBe(7);
+    expect(rows).toBe(9);
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
-    expect(column(0)).toEqual(['算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '几何期望']);
-    expect(column(1)).toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大']);
+    expect(column(0)).toEqual(['加仓次数', '仓位几何累积倍数', '有效涨幅倍数', '神奇的 b', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
+    expect(column(1)).toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '有效涨幅', '加仓效用']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);
     expect(metadata.cells.map(cell => [cell.item.label, cell.column, cell.row])).toEqual([['A', 0, 0], ['B', 1, 0], ['C', 0, 1]]);

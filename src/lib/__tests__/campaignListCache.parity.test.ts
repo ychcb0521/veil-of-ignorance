@@ -456,8 +456,11 @@ describe('campaign list cache parity with the per-campaign path', () => {
     // 行序也一致：都是「重要性优先，其余按时间倒序」
     expect(snapshot.rows.map(row => row.campaign.id)).toEqual(old.rows.map(row => row.campaign.id));
     const projection = project(old.rows, old.details);
-    if (GOLDEN.length === 0) console.log(`GOLDEN=${JSON.stringify(projection)}`);
-    else expect(projection).toEqual(GOLDEN);
+    // 这份冻结数据没有加仓。新 b 缺少 T₁ / Q基，不再用旧净结算 R 代填机会质量；
+    // 只迁移这个派生字段，保留 GOLDEN 原始净盈亏、风险、归属与委托数值作为回归证据。
+    expect(old.rows.every(row => !row.legs.some(leg => (leg.leg_role ?? '').startsWith('main_add_')))).toBe(true);
+    expect(old.rows.every(row => row.magicB === null && row.opportunityQuality === null)).toBe(true);
+    expect(projection).toEqual(GOLDEN.map(row => ({ ...row, quality: null })));
   });
 
   it('【用户要求】封面的仓位放大与详情页盈亏概览同名项是同一个数：同一份腿、同一份校正、同一份挂单凭据', async () => {

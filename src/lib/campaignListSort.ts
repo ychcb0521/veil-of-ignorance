@@ -153,9 +153,9 @@ function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): numb
   return Number.isFinite(value) ? value : Number.NaN;
 }
 
-/** 每场战役的实际盈亏比 b = 已实现盈亏 ÷ 初始最大预期亏损（列表口径 = 利润捕获率 ÷ 100）。 */
-export function rowPayoffRatio(row: { profitCaptureRatio: number | null }): number | null {
-  return resolveUnifiedMagicB(row.profitCaptureRatio);
+/** Historical name retained for consumers; all reads now use the geometric b. */
+export function rowPayoffRatio(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'>): number | null {
+  return rowMagicB(row);
 }
 
 /** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
@@ -193,7 +193,7 @@ export function rowUnrealizedPriceChangePct(row: Pick<CampaignCardData, 'mainPri
 }
 
 /** 加仓效用 = 盈亏比 ÷ 涨跌幅倍数（见 computeAddEfficiency）。 */
-export function rowAddEfficiency(row: Pick<CampaignCardData, 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct' | 'profitCaptureRatio'>): number | null {
+export function rowAddEfficiency(row: Pick<CampaignCardData, 'campaign' | 'tradeRecords' | 'magicB' | 'legs' | 'mainPriceChangePct' | 'initialExpectedMaxDrawdownPct'>): number | null {
   // 【用户要求】没有加仓的战役不算加仓效用（campaignHasMainAdd，与盈亏概览同一个判断）
   if (!campaignHasMainAdd(row.legs)) return null;
   return computeAddEfficiency(rowPayoffRatio(row), rowMainPriceEfficiency(row));
@@ -229,8 +229,7 @@ export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'cam
 }
 
 export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'> & {profitCaptureRatio?: number | null}): number | null {
-  if (row.profitCaptureRatio !== undefined) return resolveUnifiedMagicB(row.profitCaptureRatio);
-  return resolveUnifiedMagicB(undefined, row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB);
+  return resolveUnifiedMagicB(row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB);
 }
 
 /**
@@ -378,7 +377,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       tieBreak: (a, b) => importanceDesc(a, b) || pnlDesc(a, b) || alphaAsc(a, b),
     },
     captureRate: metric(
-      row => row.profitCaptureRatio,
+      row => { const b = rowMagicB(row); return b == null ? null : b * 100; },
       (a, b, direction) => comparePnl(a.campaign, b.campaign, direction) || importanceTimeAlpha(a, b),
     ),
     expectedDrawdownPct: {
@@ -438,7 +437,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
     },
     addEfficiency: metric(
       addEfficiency,
-      (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
+      (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
     // 每一场都有读数（没加仓 = 0），同次数按盈亏比、再按自评 → 操作时间 → 字母
@@ -446,7 +445,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       include: always,
       missing: never,
       compare: (a, b, direction) => compareNumber(addCount(a), addCount(b), direction),
-      tieBreak: (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
+      tieBreak: (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
       value: addCount,
     },
@@ -458,7 +457,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
         const value = positionAmplification(row);
         return value == null ? null : sortBinValue('positionAmplification', value);
       },
-      (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
+      (a, b, direction) => compareFiniteMetric(rowMagicB(a) ?? Number.NaN, rowMagicB(b) ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
     positionGeometricMultiple: metric(row => {

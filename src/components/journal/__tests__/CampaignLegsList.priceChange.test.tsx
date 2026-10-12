@@ -52,7 +52,7 @@ describe('Legs 列表的「涨跌幅」列', () => {
     expect(header.getAttribute('title')).toContain('与「贡献 / 盈亏」同号');
   });
 
-  it('多单 2.8717 → 6.5194：+127.02%，绿色，与开平价同字号（不是 Δb 的大号粗体）', () => {
+  it('多单 2.8717 → 6.5194：+127.02%，绿色，与开平价同字号（不是 ΔR 的大号粗体）', () => {
     renderList([legFor({
       id: 'long', pre_entry_price: 2.8717, post_exit_price_snapshot: 6.5194,
       post_simulated_close_time: '2026-08-07T09:00:00.000Z',
@@ -235,21 +235,21 @@ describe('Legs 列表的「涨跌幅」列', () => {
       renderList(phaseLegs);
       expandPhases();
       const titles = headerTitles();
-      expect(titles).toHaveLength(13);
+      expect(titles).toHaveLength(14);
       const column = titles.indexOf('涨跌幅');
       const total = screen.getByTestId('legs-total-row');
-      expect(total.children).toHaveLength(13);
+      expect(total.children).toHaveLength(14);
       expect(total.children[column].textContent).toBe('');
       expect(total.children[column].children).toHaveLength(0);
       for (const id of ['main', 'hedge-roll']) {
         const row = screen.getByTestId(`leg-price-change-${id}`).parentElement!;
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-price-change-${id}`));
       }
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
       expect(phaseRows).toHaveLength(3);
       phaseRows.forEach((row, index) => {
-        expect(row.children).toHaveLength(13);
+        expect(row.children).toHaveLength(14);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-phase-price-change-main-${index + 1}`));
       });
     });

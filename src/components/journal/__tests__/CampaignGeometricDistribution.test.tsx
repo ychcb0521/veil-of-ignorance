@@ -35,7 +35,7 @@ describe('campaign geometric distribution', () => {
     const breakEvenX = Number(screen.getByTestId('campaign-metric-break-even-geometricExpectancyDistribution').getAttribute('x1'));
     expect([1, 2, 3, 4].every(index => x(index) < breakEvenX)).toBe(true);
     expect([6, 7, 8].every(index => x(index) > breakEvenX)).toBe(true);
-    expect(screen.getByTestId('chart-isolated-bucket-label')).toHaveTextContent('0本金归零');
+    expect(screen.getByTestId('chart-isolated-bucket-label')).toHaveTextContent('0模型归零');
     const zeroDivider = screen.getByTestId('chart-isolated-bucket-divider');
     expect(zeroDivider).toHaveAttribute('data-divider-kind', 'threshold');
     expect(zeroDivider).toHaveStyle({ stroke: CHART_THRESHOLD_VAR });
@@ -46,9 +46,9 @@ describe('campaign geometric distribution', () => {
     expect(summary).toHaveTextContent('范围 0.00 – 50.00');
     expect(summary).toHaveTextContent('中位数 0.80');
     expect(summary).toHaveTextContent('胜率 33% (3/9)');
-    expect(summary).toHaveTextContent('本金归零 1 场');
+    expect(summary).toHaveTextContent('模型归零 1 场');
     fireEvent.focus(point(3));
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.50 · b -5.00R');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.50 · b -5.00');
     fireEvent.click(point(3));
     expect(onSelect).toHaveBeenCalledWith('c3');
     fireEvent.focus(point(0));
@@ -58,12 +58,12 @@ describe('campaign geometric distribution', () => {
     expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution').getAttribute('d')).not.toMatch(/NaN|Infinity/);
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
     expect(screen.getByTestId('campaign-metric-guide-geometricExpectancyDistribution')).toHaveTextContent('ln(Gᵢ) 对数刻度');
-    expect(screen.getByTestId('campaign-metric-guide-geometricExpectancyDistribution')).toHaveTextContent('黄色分隔线');
+    expect(screen.getByTestId('campaign-metric-guide-geometricExpectancyDistribution')).toHaveTextContent('模型归零，不是账户真实本金归零');
   });
 
   it('shows all-zero results without a misleading continuous density', () => {
     renderChart([0, 0, 0]);
-    expect(screen.getByTestId('campaign-metric-summary-geometricExpectancyDistribution')).toHaveTextContent('本金归零 3 场');
+    expect(screen.getByTestId('campaign-metric-summary-geometricExpectancyDistribution')).toHaveTextContent('模型归零 3 场');
     expect(screen.getByTestId('campaign-metric-density-curve-geometricExpectancyDistribution')).toHaveAttribute('d', '');
     const points = screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll<HTMLButtonElement>('button[data-campaign-id]');
     expect(points).toHaveLength(3);
@@ -84,7 +84,7 @@ describe('campaign geometric distribution', () => {
     const point = screen.getByTestId('campaign-metric-point-geometricExpectancyDistribution-c0');
     expect(point).toHaveAttribute('data-metric-value', '-0.9');
     fireEvent.focus(point);
-    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.10 · b -9.00R');
+    expect(screen.getByTestId('chart-tooltip')).toHaveTextContent('0.10 · b -9.00');
   });
 
   it('does not transform other distribution metrics', () => {

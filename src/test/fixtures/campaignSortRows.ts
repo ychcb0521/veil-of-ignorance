@@ -28,6 +28,8 @@ export type SortRowSpec = {
   pendingAdds?: number;
   /** 利润捕获率（%，= 盈亏比 b × 100）。 */
   pcr?: number | null;
+  /** Explicit geometric b for consumer/sort tests; pcr remains a legacy scalar fixture convenience. */
+  magicB?: number | null;
   /** 预期回撤（%）。 */
   dd?: number;
   /** 主力涨跌幅（%）。 */
@@ -127,6 +129,7 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
     tradeRecords,
     settlement: {} as CampaignSortRow['settlement'],
     profitCaptureRatio: spec.pcr ?? null,
+    magicB: spec.magicB !== undefined ? spec.magicB : spec.pcr == null ? null : spec.pcr / 100,
     initialExpectedMaxLoss: 100,
     initialExpectedMaxDrawdownPct: spec.dd ?? 0,
     opportunityQuality: null,

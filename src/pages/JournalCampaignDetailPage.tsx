@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
-import { resolveUnifiedMagicB } from '@/lib/campaignB';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { getPersistedStateHydrationRevision, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -78,7 +77,6 @@ import {
   computeInitialExpectedMaxDrawdownPct,
   computeInitialExpectedMaxLoss,
   computeMirrorTpReductionPct,
-  computeProfitCaptureRatio,
   resolveCampaignInitialRiskFraction,
   shouldSuggestCampaignEnd,
   type CampaignLocalOrderFacts,
@@ -782,22 +780,15 @@ async function loadAccountCampaignPerformance(
       details.campaign, details.legs, details.tradeRecords, exitPriceCorrections,
     );
     const reconciledCampaign = reconcileCampaignWithSettlement(details.campaign, details.legs, settlement);
-    const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(
+    const geometry = computeCampaignGeometricMetrics(
       details.campaign,
       details.legs,
       details.tradeRecords,
       details.reverseHedgeOrders,
+      exitPriceCorrections,
+      { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) },
     );
-    const payoffRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
-      ? computeProfitCaptureRatio(
-        details.campaign,
-        details.legs,
-        details.tradeRecords,
-        details.reverseHedgeOrders,
-        exitPriceCorrections,
-      ) / 100
-      : null;
-    return { campaign: reconciledCampaign, payoffRatio };
+    return { campaign: reconciledCampaign, payoffRatio: geometry.magicB ?? null };
   };
   const settledSamples = await Promise.allSettled(campaigns.map(loadSample));
   let missing: TradeCampaign[] = [];
@@ -1656,6 +1647,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     () => batchExport ? batchExport.snapshot.currentAccountEquity ?? 0 : computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap, batchExport],
   );
+  const campaignGeometricMetrics = useMemo(() => campaign
+    ? computeCampaignGeometricMetrics(campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts)
+    : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts]);
   const campaignMetricValues = useMemo(() => {
     if (!campaign || !displayCampaign || !accuracy) return null;
     const profitCaptureRatio = accuracy.initial_expected_max_loss > 0
@@ -1673,7 +1667,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       isOwner ? currentAccountEquity : null,
     );
     // 单场算术期望的胜率统一取 50%（ARITHMETIC_EXPECTANCY_WIN_RATE），不等账户样本加载。
-    const expectancies = computeCampaignExpectanciesFromMagicB(resolveUnifiedMagicB(profitCaptureRatio));
+    const expectancies = computeCampaignExpectanciesFromMagicB(campaignGeometricMetrics?.magicB ?? null);
 
     return {
       profitCaptureRatio,
@@ -1684,6 +1678,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   }, [
     accuracy,
     campaign,
+    campaignGeometricMetrics,
     displayCampaign,
     currentAccountEquity,
     isOwner,
@@ -1692,9 +1687,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     tradeRecords,
   ]);
   const asymmetricRiskContribution = useMemo(() => computeAsymmetricRiskContribution(
-    resolveUnifiedMagicB(campaignMetricValues?.profitCaptureRatio),
+    campaignGeometricMetrics?.magicB ?? null,
     campaignAsymmetricRisk,
-  ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
+  ), [campaignAsymmetricRisk, campaignGeometricMetrics?.magicB]);
   // 战役涨跌幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）：与战役列表卡片同一个函数。
   // 真实「盈亏概览」与反事实面板共用这份逐腿的开平价与时间（反事实没改的腿沿用它）。
   // 挂单判定与触发时刻读权益路径同一份事实（localOrderFacts），与反事实副本 buildManualLegs 同源。
@@ -1753,9 +1748,6 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       barMs: intervalToMs(computeInterval),
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
-  const campaignGeometricMetrics = useMemo(() => campaign
-    ? computeCampaignGeometricMetrics(campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts)
-    : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;

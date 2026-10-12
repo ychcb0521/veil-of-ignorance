@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { CampaignPnlOverviewPanel } from '@/components/journal/CampaignPnlOverviewPanel';
 import type { AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
-import { buildCampaignPnlOverviewItems, formatOverviewPayoffRatio } from '@/lib/campaignPnlOverview';
+import { buildCampaignPnlOverviewItems } from '@/lib/campaignPnlOverview';
 import { deriveCounterfactualRiskAnchors, simulateCampaign, simulateManualLegScenario } from '@/lib/campaignSimulationEngine';
 import {
   buildCounterfactualOverviewMetrics,
@@ -112,7 +112,7 @@ function itemsByKey(metrics: ReturnType<typeof buildCounterfactualOverviewMetric
 }
 
 describe('buildCounterfactualOverviewMetrics', () => {
-  it('新行：L / 名义 / d / 杠杆读落库字段，盈亏比 = 已实现 ÷ L，绝不是 result.profit_capture_ratio', () => {
+  it('新行：L / 名义 / d / 杠杆读落库字段，净结算诊断不再冒充几何 b', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     expect(result.initial_expected_max_loss).toBeCloseTo(60, 4);
@@ -127,30 +127,26 @@ describe('buildCounterfactualOverviewMetrics', () => {
     // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
     expect(result.final_realized_pnl).toBeCloseTo(80, 4);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 60) * 100, 6);
-    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
+    expect(metrics.magicB).toBeNull();
     // 峰值权益 = 80 → profit_capture_ratio = 100，与 b 完全不同，盈亏比列不能印它
     expect(result.profit_capture_ratio).toBe(100);
-    expect(byKey.magicB.value).toBe('1.33');
+    expect(byKey.magicB.value).toBe('—');
     expect(byKey.magicB.value).not.toBe('1.00');
     expect(byKey.realizedPnl.value).toBe('80.00 USDT');
     expect(metrics.mainLeverage).toBe(3);
     expect(byKey.positionAmplification.value).toBe('1.00x');
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
-    // E = 0.5 × 1.3333 − 0.5 = +0.17R；G = 1 + 1.3333 × 0.1 = 1.13
-    expect(byKey.arithmeticExpectancy.value).toBe('+0.17R');
-    expect(byKey.geometricExpectancy.value).toBe('1.13');
-    // 盈利 → USI 组，b² / n = 1.7778 / 1，组内占比 1.7778 / 4
-    expect(metrics.asymmetricRiskContribution).toEqual(expect.objectContaining({
-      group: 'win',
-      meanSquareShare: expect.closeTo(4 / 9, 6),
-    }));
+    expect(byKey.arithmeticExpectancy.value).toBe('—');
+    expect(byKey.geometricExpectancy.value).toBe('—');
+    expect(metrics.asymmetricRiskContribution).toBeNull();
+    expect(metrics.extraNotes?.magicB).toContainEqual({ warning: expect.stringContaining('不使用已实现净盈亏 ÷ L₀ 替代') });
     // 【用户要求】「今日账户总资产」不单列，只作几何期望的估算分母（见脚注）
     expect(byKey.todayAccountEquity).toBeUndefined();
-    // 没有主力开仓资产快照 → 退到今日总资产，几何期望的说明跟着写明
+    // 风险快照仍保留，但不能混入新几何 b 与固定 10% 的几何模型因子。
     expect(metrics.initialRisk).toEqual({ drawdownFraction: 60 / 10_000, source: 'current_account_fallback' });
     expect(render(<>{byKey.geometricExpectancy.help}</>).container.textContent)
-      .toContain('本场的资产分母：这场没有开仓时的资产快照，用今日当前总账户资产估算。');
+      .toContain('固定风险比例 x = 10%');
   });
 
   it('老行（结果上没有锚字段）按 params 重算，得到与新行完全一样的四个锚', () => {
@@ -177,6 +173,24 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(itemsByKey(legacyMetrics).byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
   });
 
+  it('即使副本有实际加仓和正净盈亏，没有末次加仓 Kₘ 依据也不伪造 b', () => {
+    const branchParams = params([
+      ...FULL_LEGS,
+      leg({ id: 'add', leg_role: 'main_add_1', entry_price: 105, exit_price: 110, size_usdt: 1050, open_time: iso(10) }),
+    ]);
+    const result = simulateManualLegScenario(branchParams, NO_KLINES);
+    const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
+    expect(metrics.addCount).toBe(1);
+    expect(metrics.realizedPnl).toBeGreaterThan(0);
+    expect(metrics.payoffRatio).toBeGreaterThan(0);
+    expect(metrics.magicB).toBeNull();
+    expect(metrics.arithmeticExpectancy).toBeNull();
+    expect(metrics.geometricExpectancy).toBeNull();
+    const { byKey } = itemsByKey(metrics);
+    expect(byKey.magicB.value).toBe('—');
+    expect(byKey.addEfficiency.value).toBe('—');
+  });
+
   it('落库的锚优先于按 params 重算：四个字段都在就一律读落库值，盈亏比也按落库的 L 算', () => {
     const branchParams = params(FULL_LEGS);
     const fresh = simulateManualLegScenario(branchParams, NO_KLINES);
@@ -201,7 +215,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
     expect(metrics.mainLeverage).toBe(9);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);
-    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 123) * 100));
+    expect(byKey.magicB.value).toBe('—');
   });
 
   it('缺 main_leverage 键的行按老行处理：整组退回 params 重算，不混用半套落库值', () => {
@@ -351,10 +365,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const branchParams = params(FULL_LEGS);
     const result = simulateManualLegScenario(branchParams, NO_KLINES);
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
-    expect(metrics.asymmetricRiskContribution).toEqual(expect.objectContaining({
-      group: 'win',
-      meanSquareShare: expect.closeTo(4 / 9, 6),
-    }));
+    expect(metrics.asymmetricRiskContribution).toBeNull();
     expect(metrics.extraNotes?.asymmetricRiskContribution).toContainEqual({
       warning: expect.stringMatching(/假设值：本场反事实不在账户样本内/),
     });
@@ -466,7 +477,7 @@ describe('已实现 P&L 的手续费口径', () => {
     expect(result.events.every(event => !String(event.leg_role).startsWith('hedge_'))).toBe(true);
     const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared));
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
-    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
+    expect(byKey.magicB.value).toBe('—');
   });
 });
 

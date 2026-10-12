@@ -159,7 +159,7 @@ describe('【用户要求】主力与其他多单的阶段子行默认折叠，�
     expect(toggleOf('main').getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('折叠与否不改变合计：合计行的盈亏与 Δb 一样', () => {
+  it('折叠与否不改变合计：合计行的盈亏与 ΔR 一样', () => {
     renderList();
     const before = screen.getByTestId('legs-total-row').textContent;
     fireEvent.click(toggleOf('main'));

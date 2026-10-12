@@ -52,10 +52,11 @@ import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+import { buildCampaignLegGeometricFactors, formatLegGeometricFactor, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
 
 type ExportInput = {
   campaign: TradeCampaign;
-  /** Δb 列的分母：战役初始最大预期亏损 L。 */
+  /** ΔR 列的分母：战役初始最大预期亏损 L。 */
   initialExpectedMaxLoss?: number | null;
   accountName?: string | null;
   legs: TradeJournal[];
@@ -128,7 +129,7 @@ export type CampaignLegsExportCellLine = {
   color?: string;
   bold?: boolean;
   /**
-   * 字号（px）。缺省 13——三个数值列靠它拉开主次：Δb 16 / 盈亏 13 / 手续费 11。
+   * 字号（px）。缺省 13——三个数值列靠它拉开主次：ΔR 16 / 盈亏 13 / 手续费 11。
    * 超过 16 的（加仓校验的红叉）行高跟着撑开，见 exportLineHeight。
    */
   size?: number;
@@ -197,7 +198,7 @@ const COLUMNS = [
   // 300：主力阶段子行的「2026-08-07 19:41 → 2026-08-08 13:00」要一行放下，别把时刻和日期拆开
   { title: '时间', width: 300 },
   { title: '贡献 / 盈亏', width: 150 },
-  { title: 'Δb', width: 104 },
+  { title: 'ΔR', width: 104 },
   { title: '开仓价', width: 118 },
   { title: '平仓价', width: 118 },
   // 开 / 平各一行；业务显示约定与页面一致，仅手动对冲开仓突出，未成交且无来源时仍写「未记录」。
@@ -210,6 +211,7 @@ const COLUMNS = [
   // 88：留 68px 文字宽，「100.0%」（13px 约 47px）与列头「多单占比」/「空单占比」（12px 粗体 48px）都一行放下。
   // 与页面一样只有这一列占比，且按战役主方向取一侧：主多看多单、主空看空单（表头的列名由 drawLegsTable 按那一侧写，见 SHARE_COLUMN_INDEX）
   { title: LEG_POSITION_SHARE_COLUMN_TITLES.long, width: 88 },
+  { title: LEG_GEOMETRIC_FACTOR_LABEL, width: 172 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
   { title: '手续费', width: 132 },
@@ -603,7 +605,7 @@ export function wrapCampaignLegsExportLine(
 }
 
 /**
- * 一条绘制行占多高。16px 及以下沿用固定行高——Δb 的 16px 本来就排得下，老表格的行高一格不变；
+ * 一条绘制行占多高。16px 及以下沿用固定行高——ΔR 的 16px 本来就排得下，老表格的行高一格不变；
  * 更大的字（加仓校验的红叉）按字号 + 4 撑开，否则会顶到下一行。
  */
 function exportLineHeight(line: CampaignLegsExportCellLine): number {
@@ -698,6 +700,10 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     legExitPriceCorrections: input.legExitPriceCorrections,
     reverseHedgeOrders: input.reverseHedgeOrders,
   });
+  const legGeometricFactors = buildCampaignLegGeometricFactors({
+    legs: input.legs, tradeRecords: input.tradeRecords,
+    legExitPriceCorrections: input.legExitPriceCorrections, reverseHedgeOrders: input.reverseHedgeOrders,
+  });
 
   // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入（buildShareInputs）。
   // 「占比」的分母只有战役主方向那一侧（主多看多单、主空看空单），另一侧的 Σ 只写进合计行。
@@ -712,6 +718,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ? resolveMirrorCloseRatio(input.campaign, leg, input.legs, input.tradeRecords)?.reductionPct : null;
     const executionMethods = resolveLegExecutionMethods(leg, record, input.executionMethodOrders ?? input.reverseHedgeOrders, input.tradeRecords, mirrorRatio);
     const status = legRowStatus(leg, record, fillEvidence);
+    const showGeometricFactor = legGeometricFactors.has(leg.id) && status !== 'pending'
+      && (record != null || !input.unfilledOrderIds?.has(leg.trade_record_id ?? ''));
     // 与页面同源：两笔及以上主力时带上序号，导出图里也能核对归类。
     const roleOrdinal = hedgeLegOrdinals.get(leg.id) ?? mainLegOrdinals.get(leg.id) ?? null;
     const displayRole = resolveLegDisplayRole(leg);
@@ -812,7 +820,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         const pnl = legPnlMap.get(leg.id)?.pnl ?? null;
         const delta = legDeltaB(pnl, input.initialExpectedMaxLoss ?? null);
         if (delta == null) return [{ text: '—', color: '#848E9C' }];
-        // Δb 是主角：导出图里也用最大字号把它顶出来
+        // ΔR 是主角：导出图里也用最大字号把它顶出来
         return [{
           text: formatDeltaB(delta),
           color: roundedDeltaB(delta) === 0 ? '#5F6B7A' : delta > 0 ? '#0ECB81' : '#F6465D',
@@ -837,6 +845,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       // 另一侧（对冲）的行空白；百分数中性色（与页面同源）；挂单中的腿两行都是「—」。
       // 导出图不跟页面的点击排序走：腿按传入的先后画
       legShareCell(position, shareSide),
+      [{ text: showGeometricFactor
+        ? formatLegGeometricFactor(legGeometricFactors.get(leg.id)) : '', color: '#475569', bold: true }],
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
@@ -938,6 +948,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -993,6 +1004,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         '#5F6B7A',
       )),
     totalShareCell(positionShares, shareSide),
+    // Per-add factors are multiplied in the overview, not summed in the footer.
+    [{ text: '' }],
     // 加仓校验
     [{ text: '' }],
     feeTotals == null

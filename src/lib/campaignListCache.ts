@@ -100,6 +100,7 @@ export function buildCampaignCardData(
   const profitCaptureRatio = Number.isFinite(initialExpectedMaxLoss) && initialExpectedMaxLoss > 0
     ? computeProfitCaptureRatio(campaign, legs, tradeRecords, reverseHedgeOrders, corrections)
     : null;
+  const geometricMetrics = geometricMetricsOf(reconciledCampaign, details, corrections);
   return {
     campaign: reconciledCampaign,
     legs,
@@ -108,11 +109,11 @@ export function buildCampaignCardData(
     initialExpectedMaxLoss,
     initialExpectedMaxDrawdownPct,
     profitCaptureRatio,
-    opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, profitCaptureRatio, initialExpectedMaxDrawdownPct),
+    opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, geometricMetrics.magicB ?? null, initialExpectedMaxDrawdownPct),
     // 与详情页同一份挂单判定（本地从未成交的委托 id），挂着没成交的滚动对冲不算在手
     mainPriceChangePct: campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) }),
     positionAmplification: positionAmplificationOf(details, corrections),
-    ...geometricMetricsOf(reconciledCampaign, details, corrections),
+    ...geometricMetrics,
   };
 }
 

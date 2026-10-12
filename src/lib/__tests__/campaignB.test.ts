@@ -1,23 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { magicBFromRealizedPnl, resolveUnifiedMagicB } from '@/lib/campaignB';
+import { resolveUnifiedMagicB } from '@/lib/campaignB';
 import { computeCampaignExpectancies, computeCampaignExpectanciesFromMagicB } from '@/lib/campaignMetrics';
-import { parseCampaignSortChain } from '@/lib/campaignListSort';
+import { parseCampaignSortChain, rowMagicB, rowPayoffRatio, rowAddEfficiency, sortCampaignRows } from '@/lib/campaignListSort';
+import { makeSortRow } from '@/test/fixtures/campaignSortRows';
 
 describe('unified campaign b', () => {
-  it('uses net settlement for wins, losses and zero without requiring an add', () => {
-    expect(magicBFromRealizedPnl(200, 100)).toBe(2);
-    expect(magicBFromRealizedPnl(-50, 100)).toBe(-0.5);
-    expect(magicBFromRealizedPnl(0, 100)).toBe(0);
-    expect(magicBFromRealizedPnl(200, 0)).toBeNull();
-    expect(magicBFromRealizedPnl(null, 100)).toBeNull();
-    expect(magicBFromRealizedPnl(Infinity, 100)).toBeNull();
+  it('retains canonical b and rejects missing or non-finite values without unit conversion', () => {
+    expect(resolveUnifiedMagicB(2)).toBe(2);
+    expect(resolveUnifiedMagicB(-0.5)).toBe(-0.5);
+    expect(resolveUnifiedMagicB(0)).toBe(0);
+    expect(resolveUnifiedMagicB(null)).toBeNull();
+    expect(resolveUnifiedMagicB(undefined)).toBeNull();
+    expect(resolveUnifiedMagicB(Infinity)).toBeNull();
+    expect(resolveUnifiedMagicB(NaN)).toBeNull();
   });
-  it('adapts historical percent fields and never prefers a stale cached product', () => {
-    expect(resolveUnifiedMagicB(223, 4.69)).toBe(2.23);
-    expect(resolveUnifiedMagicB(-50, 4.69)).toBe(-0.5);
-    expect(resolveUnifiedMagicB(null, 4.69)).toBeNull();
-    expect(resolveUnifiedMagicB(undefined, 2.23)).toBe(2.23);
-    expect(resolveUnifiedMagicB(NaN, 4.69)).toBeNull();
+  it('ignores conflicting historical net ratios in readers, add efficiency and sorting', () => {
+    const high = makeSortRow({id: 'high', pcr: -500, magicB: 4, add: true, mpc: 20, dd: 10});
+    const low = makeSortRow({id: 'low', pcr: 10000, magicB: 2, add: true, mpc: 20, dd: 10});
+    const missing = makeSortRow({id: 'missing', pcr: 10000, magicB: null});
+    expect(rowMagicB(high)).toBe(4);
+    expect(rowPayoffRatio(high)).toBe(4);
+    expect(rowAddEfficiency(high)).toBe(2);
+    expect(rowMagicB(missing)).toBeNull();
+    expect(sortCampaignRows([low, high, missing], [{mode: 'magicB', direction: 'desc'}]).map(row => row.campaign.id)).toEqual(['high', 'low']);
   });
   it('all existing expectancy calculations are adapters to the canonical b API', () => {
     for (const b of [-12, -1, -0.5, 0, 2, 496.29]) {

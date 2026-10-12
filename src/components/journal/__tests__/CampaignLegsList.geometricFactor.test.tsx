@@ -1,0 +1,74 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, expect, it } from 'vitest';
+import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
+import { buildCampaignLegsExportRows } from '@/lib/campaignLegsPngExport';
+import { buildCampaignLegGeometricFactors, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
+import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import type { TradeRecord } from '@/types/trading';
+
+const time = (hour: number) => Date.parse(`2026-10-12T0${hour}:00:00Z`);
+function example() {
+  const campaign = { id: 'c', direction: 'main_long', status: 'closed_profit', initial_main_size_usdt: 2000, actual_evolution: [] } as unknown as TradeCampaign;
+  const sizes = [10, 10, 50.9, 30.45];
+  const entries = [100, 100, 120, 140];
+  const roles = ['main_open', 'mirror_tp', 'main_add_1', 'main_add_2'] as const;
+  const ids = ['main', 'mirror', 'add1', 'add2'];
+  const tradeRecords = ids.map((id, index) => ({
+    id: `${id}-record`, fillId: id, symbol: 'TESTUSDT', side: 'LONG', action: 'CLOSE', type: 'MARKET',
+    entryPrice: entries[index], exitPrice: 160, quantity: sizes[index], fee: 0,
+    pnl: sizes[index] * (160 - entries[index]), openTime: time(index < 2 ? 0 : index), closeTime: time(index === 1 ? 1 : 8),
+  } as TradeRecord));
+  const legs = ids.map((id, index) => ({
+    id, campaign_id: 'c', leg_role: roles[index], leg_sequence: index, direction: 'long', trade_record_id: `${id}-record`,
+    pre_position_size: sizes[index] * entries[index], pre_entry_price: entries[index],
+    pre_simulated_time: new Date(tradeRecords[index].openTime).toISOString(),
+    post_simulated_close_time: new Date(tradeRecords[index].closeTime).toISOString(),
+  } as TradeJournal));
+  return { campaign, legs, tradeRecords, reverseHedgeOrders: [] };
+}
+
+describe('Legs per-add geometric factor', () => {
+  it('renders the actual factor after share; its product matches campaign geometry and PNG', () => {
+    const data = example();
+    render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
+    const header = screen.getByLabelText(LEG_GEOMETRIC_FACTOR_LABEL);
+    expect(header.querySelector('span')).toHaveClass('block');
+    expect(header.querySelector('span')).toHaveTextContent('（1+α）');
+    expect(header.previousElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
+    expect(header.nextElementSibling).toHaveTextContent('加仓校验');
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
+    expect(screen.getByTestId('leg-geometric-factor-add2')).toHaveTextContent('1.50×');
+    expect(screen.getByTestId('leg-geometric-factor-main')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('leg-geometric-factor-mirror')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveAttribute('title', expect.stringContaining('1 + 50.9 ÷ 10'));
+    const factors = buildCampaignLegGeometricFactors(data);
+    const product = factors.get('add1')!.multiple * factors.get('add2')!.multiple;
+    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).positionGeometricMultiple).toBeCloseTo(product, 12);
+    const png = buildCampaignLegsExportRows(data);
+    expect(png.find(row => row.legId === 'add1')!.cells[10][0].text).toBe('6.09×');
+    expect(png.find(row => row.legId === 'add2')!.cells[10][0].text).toBe('1.50×');
+    expect(png.every(row => row.cells.length === 14)).toBe(true);
+    expect(screen.getByTestId('legs-total-row').children).toHaveLength(14);
+    fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
+  });
+
+  it('missing prior quantity is unknown and never substituted with an allowable maximum', () => {
+    const data = example();
+    data.legs[0].pre_position_size = null;
+    render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('—');
+    expect(buildCampaignLegsExportRows(data).find(row => row.legId === 'add1')!.cells[10][0].text).toBe('—');
+  });
+  it('an add without actual-fill evidence never invents a geometric factor', () => {
+    const data = example();
+    data.tradeRecords = data.tradeRecords.filter(record => record.id !== 'add2-record');
+    data.legs[3].trade_record_id = null;
+    data.legs[3].post_simulated_close_time = null;
+    render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
+    expect(screen.getByTestId('leg-geometric-factor-add2')).toBeEmptyDOMElement();
+    expect(buildCampaignLegsExportRows(data).find(row => row.legId === 'add2')!.cells[10][0].text).toBe('');
+  });
+});

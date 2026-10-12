@@ -30,6 +30,19 @@ function SelectionHarness(props: Partial<ChartProps>) {
 }
 
 describe('CampaignMetricScatterPlot batch selection', () => {
+  it('labels geometric b as a dimensionless model rather than realized R or a stop loss', () => {
+    render(<CampaignMetricScatterPlot {...BASE} metricKey="magicBDistribution"
+      metricLabel="神奇的 b" seriesLabel="神奇的 b" missingValueLabel="神奇的 b"
+      formatValue={value => value.toFixed(2)} />);
+    expect(screen.getByTestId('campaign-metric-summary-magicBDistribution')).toHaveTextContent('b 正值占比');
+    expect(screen.getByText('-1 参考线')).toBeInTheDocument();
+    expect(screen.getByText('0 · b 正负分界')).toBeInTheDocument();
+    expect(screen.queryByText('-1R 止损')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-magicBDistribution'));
+    expect(screen.getByTestId('campaign-metric-guide-magicBDistribution')).toHaveTextContent('无量纲指标');
+    expect(screen.getByTestId('campaign-metric-guide-magicBDistribution')).toHaveTextContent('不等于账户结算盈亏平衡');
+  });
+
   it('keeps default point navigation unchanged and does not show selection rings', () => {
     const navigate = vi.fn();
     const toggle = vi.fn();

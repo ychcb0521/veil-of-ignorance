@@ -57,6 +57,7 @@ import {
   type AddSizingVerdict,
 } from '@/lib/campaignAddSizingCheck';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+import { buildCampaignLegGeometricFactors, describeLegGeometricFactor, formatLegGeometricFactor, LEG_GEOMETRIC_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
 
 interface Props {
   campaign?: TradeCampaign;
@@ -73,7 +74,7 @@ interface Props {
   onToggleHighlight?: (leg: TradeJournal) => void;
   onHideReverseHedgeOrder?: (order: CampaignReverseHedgeOrder) => void;
   onDetach?: (leg: TradeJournal) => void;
-  /** 战役的初始最大预期亏损 L（USDT）；Δb 列 = 各腿盈亏 ÷ L。缺失时 Δb 显示「—」。 */
+  /** 战役的初始最大预期亏损 L（USDT）；ΔR 列 = 各腿盈亏 ÷ L。缺失时 ΔR 显示「—」。 */
   initialExpectedMaxLoss?: number | null;
   /**
    * 战役主方向（campaign.direction）。「占比」这一列按它取一侧：主多看多单、主空看空单
@@ -142,7 +143,7 @@ function fmtPrice(value: number | null | undefined): string {
  * 让它吃掉所有富余宽度，富余就会变成表格中段一片空洞，而右侧的委托卡片反倒挤到发虚。
  * 委托是唯一"越宽越有用"的列，多出来的宽度停在它和操作列之间，视觉上是留白而不是裂口。
  *
- * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 Δb 紧跟在时间之后，落在从左往右
+ * 列序按**阅读价值**排，不按录入顺序排：贡献 / 盈亏与 ΔR 紧跟在时间之后，落在从左往右
  * 扫视最先停留的那一段；开平价、涨跌幅、币量、占比、手续费这些"怎么来的"排在后面；委托与操作收在右端。
  * 第一列只有「角色」：不再印腿的序号，也不再挂「回填」标签（来源写在角色标签的悬停说明里）。
  * 「状态」不单独占一列——已平仓是绝大多数，只在**没有**平仓时把角色标签本身画成另一种样子
@@ -156,7 +157,7 @@ function fmtPrice(value: number | null | undefined): string {
  * 放不下「操作 2026-08-21 11:03」，导致文字逐字竖排。
  */
 /**
- * Δb 是这张表的主角（这条腿把整场的 b 推高/拉低了多少），用最大字号 + 淡色底的胶囊固定住视线。
+ * ΔR 是这张表的主角（本腿实际净盈亏的初始风险倍数），用最大字号 + 淡色底的胶囊固定住视线。
  * 底色只取 12% 透明度：密排表格里满色块会盖过数字本身。
  */
 function deltaTone(delta: number | null): string {
@@ -179,20 +180,21 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 
 // 角色 132px：最长的「重新入场主力 2」标签带「进行中」小圆点（实测 95.4px）+ 最小间距 4 + 阶段开关 28 + 开关离右缘 4 = 131.4px，一行放下
 // 币量 / 仓位 136px：合计行的 Σ币量前面多了一枚「多 / 空」标签，百亿级（17 个字符）加上标签也要一行放下
-// 占比 72px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
+// 占比 60px：列头「标签 + 占比 + 排序图标」（实测 57px）与「100.0%」（约 40px）都一行放下；
 // 再宽，右对齐的百分数就离左边的币量太远，读不成一组。占比只有这一列：按战役主方向取一侧（主多看多单、主空看空单）
 // 【用户要求】「Legs 列表需要完整展示」「手续费不是重点，简化」「委托挺重要的」（2026-09-28）：
-// 整张表在 1440 宽的窗口里放得下、不用横向滚动；委托列一格不少、吃掉全部富余。
-// 手续费只留一行合计（开 / 平拆分进悬停提示）148 → 64；开仓价 / 平仓价并成一列两行（与时间列的开 / 平两行对齐）；
-// 其余按实测内容收紧：时间 148（标签 30 + 「2025-09-19 22:42」约 106）、盈亏 100、Δb 64、操作方式 64（两栏各 3em）、
-// 涨跌幅 68、加仓校验 88（「上限 1,234,567 币」约 81）、操作 56（两枚 24px 图标）；列间距 10 → 8px。
-const LEGS_GRID = 'grid-cols-[132px_148px_100px_64px_80px_64px_68px_136px_72px_88px_64px_minmax(184px,1fr)_56px]';
+// 委托列一格不少、吃掉全部富余；保留角色、时间、价格和币量的可读宽度，1440px 窗口仍完整显示。
+// 手续费只留一行合计 56px；开仓价 / 平仓价并成一列两行（与时间列的开 / 平两行对齐）。
+// 时间 148（标签 30 + 「2025-09-19 22:42」约 106）、盈亏 96、ΔR 64、操作方式 64（两栏各 3em）；
+// 几何复利 76px：中文标题 70px、1+α 独立第二行；加仓校验 64px 仅显示多加百分比，较长数字自然换行。
+// 涨跌幅 68、操作 56（两枚 24px 图标）；统一列间距 5px，不缩小数字字号或挤压 ΔR 胶囊。
+const LEGS_GRID = 'grid-cols-[132px_148px_96px_64px_80px_64px_68px_136px_60px_76px_64px_56px_minmax(184px,1fr)_56px]';
 
 /**
  * 各列合计的下限，与 LEGS_GRID 对应；不足时容器横向滚动而不是压扁列。
- * = Σ轨道 + 列间距 gap-x-2 × (列数 − 1) + 左右 px-3。加一列要连同它带来的那一道 8px 间距一起加上。
+ * = Σ轨道 + 列间距 5px × (列数 − 1) + 左右 px-3。窄于下限时才横向滚动。
  */
-const LEGS_MIN_WIDTH = 'min-w-[1376px]';
+const LEGS_MIN_WIDTH = 'min-w-[1373px]';
 
 /**
  * 冻结列：「角色」横向滚动时钉在左缘，滑到右边的列也认得出是哪条腿。
@@ -801,6 +803,10 @@ export function CampaignLegsList({
     () => evaluateCampaignAddSizing({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
     [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
   );
+  const legGeometricFactors = useMemo(
+    () => buildCampaignLegGeometricFactors({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
+    [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
+  );
   const selectedAddSizingLeg = addSizingDetailLegId == null
     ? null
     : legs.find(leg => leg.id === addSizingDetailLegId) ?? null;
@@ -822,17 +828,18 @@ export function CampaignLegsList({
         <div className={LEGS_MIN_WIDTH}>
           <div
             data-testid="legs-header-row"
-            className={`sticky top-0 z-20 grid ${LEGS_GRID} gap-x-2 text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
+            className={`sticky top-0 z-20 grid ${LEGS_GRID} items-center gap-x-[5px] text-[10px] font-medium text-muted-foreground ${HEADER_FILL} py-2 px-3`}
           >
             <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.header} ${FROZEN_SHADOW_BOTTOM.flush} ${HEADER_FILL}`}>角色</div>
             <div>时间</div>
             <div className="text-right text-foreground/70" title="上行：该腿在本场各腿盈亏绝对值之和里所占的份额；下行：已实现盈亏金额（已扣平仓费，开仓费在开仓当时从钱包扣除，见手续费列）">贡献 / 盈亏</div>
-            <div className="text-right font-semibold tracking-wide text-foreground/85" title="该腿盈亏 ÷ 初始最大预期亏损 L：这条腿把整场 b 推高 / 拉低了多少">Δb</div>
+            <div className="text-right font-semibold tracking-wide text-foreground/85" title="本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分">ΔR</div>
             <div className="text-right" title="上行开仓价、下行平仓价，与左边时间列的开 / 平两行对齐">开 / 平价</div>
             <div className="text-center" title="上行开仓、下行平仓；平仓方式对应当前显示的最后一笔平仓。手动操作以琥珀色提示关注，委托/止盈止损触发及强平显示自动。主力开仓按业务约定记为手动，其他无可靠依据的记录显示未记录。">操作方式</div>
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
             <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
+            <div className="text-right leading-snug" title={LEG_GEOMETRIC_FACTOR_HINT} aria-label={LEG_GEOMETRIC_FACTOR_LABEL}>仓位的几何复利<span className="block whitespace-nowrap text-muted-foreground/65">（1+α）</span></div>
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
@@ -843,6 +850,8 @@ export function CampaignLegsList({
               const record = leg.trade_record_id ? recordMap.get(leg.trade_record_id) ?? null : null;
               const execution = resolveLegExecution(leg, record, legExitPriceCorrections);
               const status = legRowStatus(leg, record, fillEvidence);
+              const showGeometricFactor = legGeometricFactors.has(leg.id) && status !== 'pending'
+                && (record != null || !unfilledOrderIds?.has(leg.trade_record_id ?? ''));
               const highlighted = highlightedSet.has(leg.id);
               const openLabel = fmtClock(execution.openTime ?? leg.pre_simulated_time);
               const closeLabel = fmtClock(execution.closeTime);
@@ -897,7 +906,7 @@ export function CampaignLegsList({
               return (
                 <div key={leg.id}>
                 <div
-                  className={`group/row grid ${LEGS_GRID} gap-x-2 items-start text-[11px] font-mono py-2.5 px-3 ${ROW_RULE} hover:bg-accent transition-colors ${
+                  className={`group/row grid ${LEGS_GRID} gap-x-[5px] items-start text-[11px] font-mono py-2.5 px-3 ${ROW_RULE} hover:bg-accent transition-colors ${
                     highlighted ? 'bg-[#002FA7]/5 ring-1 ring-inset ring-[#002FA7]/12' : ''
                   }`}
                 >
@@ -989,7 +998,7 @@ export function CampaignLegsList({
                       <div className="flex justify-end">
                         <span
                           data-testid={`leg-delta-b-${leg.id}`}
-                          title="该腿盈亏 ÷ 初始最大预期亏损 L —— 这条腿把整场 b 推高 / 拉低了多少个单位"
+                          title="本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分"
                           className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[14px] font-semibold leading-tight tabular-nums ${deltaTone(delta)}`}
                         >
                           {formatDeltaB(delta)}
@@ -1019,7 +1028,7 @@ export function CampaignLegsList({
                   </div>
                   {/* 涨跌幅：开仓价走到平仓价的百分比，按这条腿的方向计——空单价格跌了才是正数，
                       按所示这一对开平价看与盈亏同号（分几刀平掉时盈亏是各刀合计，可能不同号）。
-                      与开平价同字号，不抢 Δb 的主角位。 */}
+                      与开平价同字号，不抢 ΔR 的主角位。 */}
                   <div
                     data-testid={`leg-price-change-${leg.id}`}
                     className={`text-right tabular-nums ${priceChangeTone(priceChangePct)}`}
@@ -1055,6 +1064,14 @@ export function CampaignLegsList({
                       </div>
                     </div>
                   ) : <div />}
+                  <div
+                    data-testid={`leg-geometric-factor-${leg.id}`}
+                    title={showGeometricFactor ? describeLegGeometricFactor(legGeometricFactors.get(leg.id)) : undefined}
+                    className="text-right font-medium tabular-nums leading-snug text-foreground/80"
+                  >
+                    {showGeometricFactor
+                      ? formatLegGeometricFactor(legGeometricFactors.get(leg.id)) : ''}
+                  </div>
                   {(() => {
                     /**
                      * 合规是常态，对号几乎隐形；过大则直接写出 Plan B 的币量上限与 U 名义仓位。
@@ -1104,7 +1121,7 @@ export function CampaignLegsList({
                   {(() => {
                     /**
                      * 三列的主次由**字号与字重**定，不靠发灰：
-                     *   Δb 14px 半粗 + 淡色底（主角）→ 盈亏 12px 中粗（次角）→ 手续费 11px 常规（注脚）。
+                     *   ΔR 14px 半粗 + 淡色底（主角）→ 盈亏 12px 中粗（次角）→ 手续费 11px 常规（注脚）。
                      * 手续费用中性前景色而不是灰调，密排小字下灰调会显脏。
                      * 费率、Maker/Taker、估算依据都在 tooltip 里。
                      */
@@ -1236,7 +1253,7 @@ export function CampaignLegsList({
                       return (
                         <div
                           key={phase.index}
-                          className={`grid ${LEGS_GRID} gap-x-2 items-center py-1 px-3 text-[10px] font-mono text-muted-foreground ${
+                          className={`grid ${LEGS_GRID} gap-x-[5px] items-center py-1 px-3 text-[10px] font-mono text-muted-foreground ${
                             hedgedPhase ? 'bg-blue-500/[0.055]' : 'bg-card'
                           }`}
                         >
@@ -1289,6 +1306,7 @@ export function CampaignLegsList({
                           <div />
                           <div />
                           <div />
+                          <div />
                         </div>
                       );
                     })}
@@ -1304,7 +1322,7 @@ export function CampaignLegsList({
                 保留不透明底色与层级，覆盖相邻冻结列的分隔线延伸。 */}
             <div
               data-testid="legs-total-row"
-              className={`relative z-20 bg-card grid ${LEGS_GRID} items-center gap-x-2 border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
+              className={`relative z-20 bg-card grid ${LEGS_GRID} items-center gap-x-[5px] border-t-2 border-border px-3 py-2 text-[11px] font-medium`}
             >
               <div className={`${FROZEN_ROLE_CELL} ${FROZEN_PAD.total} ${FROZEN_SHADOW_BOTTOM.flush} ${FROZEN_TOTAL_DIVIDER} flex items-center bg-card text-muted-foreground`}>合计</div>
               <div className="text-[10px] text-muted-foreground">{settlementBasisLabel(settlement.basis)}</div>
@@ -1364,6 +1382,7 @@ export function CampaignLegsList({
                   </>
                 )}
               </div>
+              <div />
               <div />
               <div
                 data-testid="legs-total-fees"

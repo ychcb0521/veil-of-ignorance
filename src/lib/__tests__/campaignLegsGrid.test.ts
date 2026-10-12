@@ -21,7 +21,8 @@ const src = () =>
  */
 const LONG_SHARE_HEADER = '<PositionShareSortHeader ';
 const headerAt = (s: string, title: string) => (
-  title === '多单占比' ? s.indexOf(LONG_SHARE_HEADER) : s.indexOf(`>${title}</div>`)
+  title === '多单占比' ? s.indexOf(LONG_SHARE_HEADER)
+    : title === '仓位的几何复利（1+α）' ? s.indexOf('aria-label={LEG_GEOMETRIC_FACTOR_LABEL}') : s.indexOf(`>${title}</div>`)
 );
 
 describe('Legs 表栅格', () => {
@@ -40,9 +41,9 @@ describe('Legs 表栅格', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '';
     // 用下划线分隔，但 minmax(200px,1fr) 内部没有下划线，可安全按 _ 切
     const columnCount = grid.split('_').length;
-    expect(columnCount).toBe(13);
+    expect(columnCount).toBe(14);
     // 【用户要求】开仓价 / 平仓价并成一列「开 / 平价」（两行，与时间列的开 / 平对齐）
-    const titles = ['角色', '时间', '贡献 / 盈亏', 'Δb', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '加仓校验', '手续费', '委托', '操作'];
+    const titles = ['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '仓位的几何复利（1+α）', '加仓校验', '手续费', '委托', '操作'];
     expect(titles).toHaveLength(columnCount);
     for (const title of titles) expect(headerAt(s, title)).toBeGreaterThan(-1);
     // 只有一列占比：列头只调用一次，列名与 PNG 表头同一份
@@ -80,12 +81,12 @@ describe('Legs 表栅格', () => {
     expect(s).not.toContain('leg.leg_sequence ??');
   });
 
-  it('贡献 / 盈亏与 Δb 紧跟时间——扫视最先停留的那一段留给要读的结论', () => {
+  it('贡献 / 盈亏与 ΔR 紧跟时间——扫视最先停留的那一段留给要读的结论', () => {
     const s = src();
     const at = (title: string) => headerAt(s, title);
     expect(at('时间')).toBeLessThan(at('贡献 / 盈亏'));
-    expect(at('贡献 / 盈亏')).toBeLessThan(at('Δb'));
-    expect(at('Δb')).toBeLessThan(at('开 / 平价'));     // 结论在前，"怎么来的"在后
+    expect(at('贡献 / 盈亏')).toBeLessThan(at('ΔR'));
+    expect(at('ΔR')).toBeLessThan(at('开 / 平价'));     // 结论在前，"怎么来的"在后
     expect(at('开 / 平价')).toBeLessThan(at('涨跌幅'));  // 涨跌幅紧跟开平价（中间只隔操作方式）——它就是这两个数算出来的
     expect(at('涨跌幅')).toBeLessThan(at('币量 / 仓位'));
     expect(at('币量 / 仓位')).toBeLessThan(at('多单占比'));   // 多单占比紧贴在币量 / 仓位右边——它就是这一格算出来的
@@ -130,16 +131,16 @@ describe('Legs 表栅格', () => {
   it('弹性列是「委托」而不是「时间」——时间内容定宽，让它吃富余会在表格中段留下空洞', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
     const tracks = grid.split('_');
-    expect(tracks).toHaveLength(13);
+    expect(tracks).toHaveLength(14);
     expect(tracks.filter(track => track.includes('fr'))).toHaveLength(1);
     // 【用户要求】「委托挺重要的」：唯一越宽越有用的列，吃掉全部富余，下限 184px 放得下一张委托卡片
-    expect(tracks[11]).toMatch(/^minmax\(1(8[4-9]|9\d)px,1fr\)$/);
+    expect(tracks[12]).toMatch(/^minmax\(1(8[4-9]|9\d)px,1fr\)$/);
     expect(tracks[1]).toBe('148px');                        // 时间：标签 30px + 「2025-09-19 22:42」约 106px
   });
 
-  it('【用户要求】手续费不是重点：一行合计、64px；不列开 / 平拆分，也不挂黑框提示', () => {
+  it('【用户要求】手续费不是重点：一行合计、56px；不列开 / 平拆分，也不挂黑框提示', () => {
     const grid = /grid-cols-\[([^\]]+)\]/.exec(src())?.[1] ?? '';
-    expect(grid.split('_')[10]).toBe('64px');
+    expect(grid.split('_')[11]).toBe('56px');
     const cell = /data-testid=\{`leg-fees-\$\{leg\.id\}`\}[\s\S]{0,400}?className="([^"]+)"/.exec(src())?.[1] ?? '';
     // 窄轨道里收得住：min-w-0 + truncate
     expect(cell).toContain('min-w-0');
@@ -150,7 +151,7 @@ describe('Legs 表栅格', () => {
     expect(cellSource).not.toContain('开 ');
   });
 
-  it('【用户要求】只有「多单占比」一列，紧跟「币量 / 仓位」、72px；最小宽度 = Σ轨道 + 每道 8px 列间距 + 左右 24px，1440 宽的窗口放得下', () => {
+  it('新增几何复利列仍完整适配1440窗口；表头、数据、阶段、合计共用5px间距', () => {
     const s = src();
     const tracks = (/grid-cols-\[([^\]]+)\]/.exec(s)?.[1] ?? '').split('_');
     // 角色：最长的「重新入场主力 2」标签带进行中圆点（95.4px）+ 最小间距 4 + 阶段开关 28 + 离右缘 4，一行放下（浏览器里量过）
@@ -161,17 +162,21 @@ describe('Legs 表栅格', () => {
     // 币量 / 仓位：合计行的 Σ币量前多了一枚「多 / 空」标签（约 18px），百亿级 17 个字符（11px 等宽约 112px）加上标签要一行放下
     expect(tracks[7]).toBe('136px');
     // 多单占比：列头「标签 + 占比 + 排序图标」（57px）与「100.0%」（40px）都一行放下（浏览器里量过）
-    expect(tracks[8]).toBe('72px');
-    // 加仓校验：「上限 1,234,567 币」（9px）约 81px
-    expect(tracks[9]).toBe('88px');
-    expect(tracks.filter(track => track === '72px')).toHaveLength(1);
+    expect(tracks[8]).toBe('60px');
+    // 几何复利标题固定两行；校验只显示多加比例，不再塞入上限金额。
+    expect(tracks[9]).toBe('76px');
+    expect(tracks[10]).toBe('64px');
+    expect(tracks[3]).toBe('64px'); // Keep room for the 14px ΔR capsule.
+    expect(tracks.filter(track => track === '60px')).toHaveLength(1);
     // minmax(216px,1fr) 按下限计
     const trackSum = tracks.reduce((sum, track) => sum + Number.parseInt(track.replace(/^minmax\(/, ''), 10), 0);
     const minWidth = Number(/const LEGS_MIN_WIDTH = 'min-w-\[(\d+)px\]'/.exec(s)?.[1]);
-    expect(minWidth).toBe(trackSum + 8 * (tracks.length - 1) + 24);
-    expect(minWidth).toBe(1376);
-    // 【用户要求】「Legs 列表需要完整展示」：1440 宽的窗口里（详情页左右各 24px 内边距、卡片边框）不用横向滚动
+    expect(minWidth).toBe(trackSum + 5 * (tracks.length - 1) + 24);
+    expect(minWidth).toBe(1373);
     expect(minWidth).toBeLessThanOrEqual(1440 - 48 - 2);
+    expect(s.match(/gap-x-\[5px\]/g)).toHaveLength(4);
+    expect(s).not.toContain('gap-x-2');
+    expect(s).toContain('overflow-x-auto');
   });
 
   it('【用户要求】只冻结「角色」一列：钉在 left-0，负外边距盖住行的左内边距；四种行都用同一个常量', () => {

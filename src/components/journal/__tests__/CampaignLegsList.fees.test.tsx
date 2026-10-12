@@ -62,13 +62,17 @@ describe('Legs 列表的手续费列', () => {
     expect(screen.getByTestId('legs-total-fees').textContent).not.toContain('估');
   });
 
-  it('主次：Δb 最重、盈亏次之、手续费最轻，且手续费排在盈亏之前', () => {
+  it('主次：ΔR 最重、盈亏次之、手续费最轻，且手续费排在盈亏之前', () => {
     const record = hpeRecord();
     renderList([record], [legFor(record)]);
     const fees = screen.getByTestId('leg-fees-leg-1');
     const pnl = screen.getByTestId('leg-pnl-leg-1');
     const delta = screen.getByTestId('leg-delta-b-leg-1');
-    // DOM 顺序 = 栅格列序：结论（贡献 / Δb）在前，成本注脚在后
+    const riskHint = '本腿实际净盈亏 ÷ 初始最大预期亏损 L₀；不是几何公式 b 的拆分';
+    expect(screen.getByText('ΔR').getAttribute('title')).toBe(riskHint);
+    expect(delta.getAttribute('title')).toBe(riskHint);
+    expect(delta.textContent).toBe('-0.01'); // Actual net PnL / L₀ is unchanged by the label correction.
+    // DOM 顺序 = 栅格列序：结论（贡献 / ΔR）在前，成本注脚在后
     expect(pnl.compareDocumentPosition(delta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(delta.compareDocumentPosition(fees) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // 状态不再单独占一列：已平仓是常态，不必每行都写一遍
@@ -97,7 +101,7 @@ describe('Legs 列表的手续费列', () => {
     expect(lines[1]).toContain('-223.39');          // 次行才是金额
   });
 
-  it('小到取不出两位小数的 Δb 显示 0.00，不是「−0.00」，且用中性底色', () => {
+  it('小到取不出两位小数的 ΔR 显示 0.00，不是「−0.00」，且用中性底色', () => {
     const record = hpeRecord({ pnl: -122.4 });
     renderList([record], [legFor(record)], 30_487);          // −122.4 ÷ 30487 = −0.004
     const delta = screen.getByTestId('leg-delta-b-leg-1');

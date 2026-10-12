@@ -69,7 +69,6 @@ import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import { MAGIC_B_FORMULA, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA } from '@/lib/campaignGeometricMetrics';
-import { MAGIC_B_DIRECT_FORMULA } from '@/lib/campaignB';
 import {
   BULK_CLOSE_STATUS_LABELS,
   CLOSE_TIME_SOURCE_LABELS,
@@ -426,12 +425,12 @@ const POPOVER_VIEWPORT_MAX_W = 'max-w-[calc(100vw_-_24px)]';
  * 此前杠杆这一档同样在过滤，却只显示「尚无战役」，看上去像战役丢了。
  */
 const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: string }>> = {
-  captureRate: { noun: '可计算神奇的 b', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
+  captureRate: { noun: '可计算神奇的 b', hint: '没有实际加仓，或缺少公式所需的币数、价格、初始名义仓位与回撤依据时不计算' },
   expectedDrawdownPct: { noun: '可计算预期回撤', hint: '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
-  arithmeticExpectancy: { noun: '可计算算术期望', hint: '未设置初始最大预期亏损的战役不会进入当前排序' },
+  arithmeticExpectancy: { noun: '可计算算术期望', hint: '缺少可计算的几何 b 时不计算；不使用净结算值替代' },
   geometricExpectancy: {
     noun: '可计算几何期望',
-    hint: '旧战役缺少开仓资产快照时会按当前总资产估算；缺少初始最大预期亏损的战役仍不会进入当前排序',
+    hint: '使用几何 b 和固定 10% 的模型权重；缺少可计算的 b 时不计算，不使用账户资产或净结算值补齐',
   },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
   mainPriceChange: { noun: '主力已平仓', hint: '涨跌幅按战役算（开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
@@ -455,7 +454,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
 
 const CAMPAIGN_LIST_SCROLL_KEY_PREFIX = 'journal-campaign-list-scroll:';
 
-function formatSignedMetric(value: number, suffix: string, digits = 2): string {
+function formatSignedMetric(value: number, suffix = '', digits = 2): string {
   const normalized = Math.abs(value) < 10 ** -(digits + 1) ? 0 : value;
   return `${normalized > 0 ? '+' : ''}${normalized.toFixed(digits)}${suffix}`;
 }
@@ -463,7 +462,7 @@ function formatSignedMetric(value: number, suffix: string, digits = 2): string {
 /** 分组神奇的 b均值：带符号显示，无样本时给「—」而不是 0，避免把「没有」读成「打平」。 */
 function formatGroupPayoffRatio(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  return `${value > 0 ? '+' : ''}${value.toFixed(2)}R`;
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}`;
 }
 
 /**
@@ -497,19 +496,19 @@ function formatMirrorTpMetric(value: number): string {
  */
 const METRIC_DISTRIBUTION_DENSITY_NOTE = '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与点列共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。';
 const METRIC_DISTRIBUTION_CLAMP_NOTE = '显示区间留给主体（p2–p98 之内再按四分位距裁掉长尾，每一侧最多约一成），超出的极端值贴边画成三角并在图下计数；提示框、摘要统计与点击跳转仍用原值。';
-/** 单场算术期望的胜率是常数（见 ARITHMETIC_EXPECTANCY_WIN_RATE）：说明里的式子与「0R ↔ b」的换算都从它推，不手写数字。 */
+/** 单场算术期望的胜率是常数（见 ARITHMETIC_EXPECTANCY_WIN_RATE）：说明里的式子与「E = 0 ↔ b」的换算都从它推，不手写数字。 */
 const ARITHMETIC_WIN_RATE_PCT = Math.round(ARITHMETIC_EXPECTANCY_WIN_RATE * 100);
-/** Eᵢ = 0 ⇔ bᵢ = (1 − P) ÷ P；P = 50% 时是 +1R。 */
-const ARITHMETIC_BREAK_EVEN_PAYOFF = `+${Number(((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) / ARITHMETIC_EXPECTANCY_WIN_RATE).toFixed(2))}R`;
+/** Eᵢ = 0 ⇔ bᵢ = (1 − P) ÷ P；P = 50% 时是无量纲的 +1。 */
+const ARITHMETIC_BREAK_EVEN_PAYOFF = `+${Number(((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) / ARITHMETIC_EXPECTANCY_WIN_RATE).toFixed(2))}`;
 
 /**
  * 【用户要求】散点颜色一律按这一场的神奇的 b 的正负分（镜像止盈图另按 |b| ≤ 0.1 记持平，与它的柱子分档一致）：
  * 纵 / 横轴是什么指标都一样，颜色只报「这一场最后是赚是亏」。与 CampaignMetricScatterPlot 的 signed / risk / importance 配色同序。
  */
 const PAYOFF_SIGN_COLORS: CampaignMetricChartConfig['guide']['colors'] = [
-  { token: 'profit', label: '绿色圆点：这一场神奇的 b > 0（盈利）。' },
-  { token: 'loss', label: '红色菱形：这一场神奇的 b < 0（亏损）。' },
-  { token: 'neutral', label: '灰色空心圈：b = 0，或算不出 b（没有初始最大预期亏损、尚未结束）。' },
+  { token: 'profit', label: '绿色圆点：这一场神奇的 b > 0。' },
+  { token: 'loss', label: '红色菱形：这一场神奇的 b < 0。' },
+  { token: 'neutral', label: '灰色空心圈：b = 0，或缺少首次加仓、有效涨幅或初始风险依据。颜色不代表实际结算盈亏。' },
 ];
 
 const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
@@ -521,14 +520,14 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     const definition = quantity
       ? `${POSITION_GEOMETRIC_FORMULA}。${POSITION_GEOMETRIC_ALPHA_RULE}以首次加仓前币量为基准，不再乘早期减仓比例。`
       : riseMultiple ? '有效涨幅 ÷ 预期回撤，两个百分数相除得到倍数；例如 45% ÷ 9% = 5.00x。'
-      : magic ? `${MAGIC_B_DIRECT_FORMULA}；${MAGIC_B_FORMULA}。${MAGIC_B_RULE}`
+      : magic ? `${MAGIC_B_FORMULA}。${MAGIC_B_RULE}`
       : '(F − Kₘ) ÷ Kₘ，F 与「涨跌幅」的平仓价同源，Kₘ 为最后一次实际加仓时的新支撑线。';
-    const formatValue = (value: number) => magic ? formatSignedMetric(value, 'R') : `${value.toFixed(2)}${quantity || riseMultiple ? 'x' : '%'}`;
+    const formatValue = (value: number) => magic ? formatSignedMetric(value) : `${value.toFixed(2)}${quantity || riseMultiple ? 'x' : '%'}`;
     return [{
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
       viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
       guide: { yAxis: magic ? definition : `${label} = ${definition}`, point: '每个点是一场战役，按客观操作时间排列；点位表示本指标，颜色按该战役神奇的 b的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
-        ...(magic ? { referenceLines: ['黄色 -1R 虚线：亏损达到初始最大预期亏损；灰色 0R 线：整场净盈亏持平。'] } : {}) },
+        ...(magic ? { referenceLines: ['b = 0 表示有效涨幅为零（F = Kₘ），不是整场净盈亏持平；b = −1 仅为几何指标参照值。'] } : {}) },
     }, {
       key: `${key}Distribution`, sourceKey: key,
       view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
@@ -538,7 +537,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
       distribution: quantity ? { unit: '倍', zeroLine: false, references: [{ value: 1, label: '1.00 首次加仓前币量基准', shareLabel: '加仓累积放大（> 1）' }] }
         : riseMultiple ? { unit: '倍', zeroLine: true, zeroLabel: '有效涨幅 = 0', zeroMeaning: '有效涨幅为零', positiveShareLabel: '有效涨幅倍数为正' }
-        : magic ? { unit: 'R', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '完整结算后的净盈亏为零', positiveShareLabel: '神奇的 b 为正' }
+        : magic ? { unit: '倍', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '有效涨幅为零（F = Kₘ），不代表净结算持平', positiveShareLabel: '神奇的 b 为正' }
         : { unit: '%', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '有效涨幅为正' },
     }];
   }),
@@ -550,17 +549,17 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-odds-view-time',
     seriesLabel: '神奇的 b时序',
     guide: {
-      yAxis: '每场战役的实际神奇的 b，单位为 R。b = 已实现盈亏 ÷ 初始最大预期亏损；正数表示盈利，负数表示亏损。',
-      point: '点越高，实际神奇的 b越大；点越低，亏损相对初始风险越深。每个点代表一场具备有效风险分母的战役。',
+      yAxis: `${MAGIC_B_FORMULA}。${MAGIC_B_RULE}`,
+      point: '点越高，几何指标 b 越大。每个点代表一场公式依据完整的战役；点位不是实际净结算的 R 倍数。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '灰色零线：盈亏平衡线。',
-        '黄色 -1R 虚线：实际亏损等于初始最大预期亏损；低于该线表示亏损超过原定风险边界。',
+        '灰色零线：有效涨幅为零（F = Kₘ），不是净结算盈亏平衡线。',
+        '黄色 −1 线仅作为几何指标参照，不代表止损是否越界。',
       ],
     },
     missingValueLabel: '有效神奇的 b',
     colorMode: 'signed',
-    formatValue: value => formatSignedMetric(value, 'R'),
+    formatValue: value => formatSignedMetric(value),
   },
   {
     key: 'oddsDistribution',
@@ -576,16 +575,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       point: '每个点仍是一场战役，横向位置就是它的实际神奇的 b，不考虑时间先后；同一档内的点按 b 从小到大自下而上排。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '琥珀色 -1R 虚线：止损墙，实际亏损等于初始最大预期亏损；墙左侧的点是止损滑点或超出原定风险的亏损。',
-        '存在 b ≤ -10 时，额外显示黄色 -10R 归零线：按固定 10% 下注，1 + 0.1b ≤ 0。含等号的风险点用红色方点与黄色描边区分；这不是实际账户的强平判定。',
-        '灰色 0 线：盈亏平衡。',
+        '琥珀色 −1 线仅作为几何指标参照，不代表止损是否越界。',
+        '存在 b ≤ −10 时，1 + 0.1b ≤ 0，按既有规则将几何模型因子记零；这不是实际账户的资金归零或强平判定。',
+        '灰色 0 线：有效涨幅为零（F = Kₘ）。',
         '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与柱共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。',
-        '超出显示区间的极端值贴边画成三角并在脚注计数。存在归零样本时左界为 -12R，极端亏损仍保留黄色描边、原始数值和统计。',
+        '超出显示区间的极端值贴边画成三角并在脚注计数。存在模型因子归零样本时左界为 −12，极端负值仍保留黄色描边、原始数值和统计。',
       ],
     },
     missingValueLabel: '有效神奇的 b',
     colorMode: 'signed',
-    formatValue: value => formatSignedMetric(value, 'R'),
+    formatValue: value => formatSignedMetric(value),
   },
   {
     key: 'expectedDrawdownPct',
@@ -634,8 +633,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-arithmeticExpectancy-view-time',
     seriesLabel: '算术期望时序',
     guide: {
-      yAxis: '该场战役在当前有效样本胜率下的算术期望，单位为 R。E = P(赢) × b − (1 − P(赢))。',
-      point: '点越高，代表按当前胜率与本场实际神奇的 b计算的期望越高；低于零表示算术期望为负。',
+      yAxis: '将该场几何 b 代入固定 50% 权重的模型：Eᵢ = 50% × bᵢ − 50%；结果是无量纲模型值，不代表实际净收益。',
+      point: '点越高，模型读数越高；低于零表示模型算术期望为负。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：正、负算术期望的分界。'],
     },
@@ -654,11 +653,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '算术期望分布',
     guide: {
       yAxis: '落在该算术期望附近的战役数量：点从底线向上堆叠，堆得越高，这一档 Eᵢ 出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: `每个点仍是一场战役，横向位置就是它的单场算术期望 Eᵢ = ${ARITHMETIC_WIN_RATE_PCT}% × bᵢ − ${100 - ARITHMETIC_WIN_RATE_PCT}%（单位 R，胜率统一取 ${ARITHMETIC_WIN_RATE_PCT}%），不考虑时间先后；同一档内的点按 Eᵢ 从小到大自下而上排。`
-        + `胜率固定之后 Eᵢ 只是 bᵢ 的线性变换，分布形状与神奇的 b分布一致、只是刻度不同：Eᵢ = 0R 对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}，Eᵢ = −1R 仍对应 bᵢ = −1R。`,
+      point: `每个点仍是一场战役，横向位置就是它的单场算术期望 Eᵢ = ${ARITHMETIC_WIN_RATE_PCT}% × bᵢ − ${100 - ARITHMETIC_WIN_RATE_PCT}%（无量纲模型值，胜率统一取 ${ARITHMETIC_WIN_RATE_PCT}%），不考虑时间先后；同一档内的点按 Eᵢ 从小到大自下而上排。`
+        + `胜率固定之后 Eᵢ 只是 bᵢ 的线性变换，分布形状与神奇的 b分布一致、只是刻度不同：Eᵢ = 0 对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}，Eᵢ = −1 对应 bᵢ = −1。`,
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        `灰色 0R 竖线：盈亏平衡，正、负算术期望的分界（对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}）；摘要条的「正期望」是 Eᵢ > 0 的场数占比。`,
+        `灰色 0 竖线：正、负模型算术期望的分界（对应 bᵢ = ${ARITHMETIC_BREAK_EVEN_PAYOFF}），不是净结算盈亏平衡线；摘要条的「正期望」是 Eᵢ > 0 的场数占比。`,
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
@@ -667,9 +666,9 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'signed',
     formatValue: formatArithmeticExpectancy,
     distribution: {
-      unit: 'R',
-      zeroLabel: '0R 盈亏平衡',
-      zeroMeaning: '盈亏分界',
+      unit: '模型值',
+      zeroLabel: '0 模型零点',
+      zeroMeaning: '模型算术期望正负分界',
       positiveShareLabel: '正期望',
     },
   },
@@ -681,11 +680,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-geometricExpectancy-view-time',
     seriesLabel: '几何期望时序',
     guide: {
-      yAxis: '按固定 10% 的资金比例下这一注，本场把本金乘成了多少：Gᵢ = 1 + bᵢ×0.1，纵轴直接读 Gᵢ——1.00 是本金不增不减。',
-      point: '点越高，本场按同一下注比例换算出的资本增长越大；低于 1.00 的是亏损场（bᵢ 为负）。'
+      yAxis: '按固定 10% 的模型权重代入几何 b：Gᵢ = max(0, 1 + bᵢ×0.1)，纵轴直接读模型因子 Gᵢ；不是账户真实增长。',
+      point: '点越高，模型因子越大；低于 1.00 表示 bᵢ 为负。'
         + '固定 x 之后 Gᵢ 是 bᵢ 的线性变换，所以它的形状与神奇的 b图一致——差别只在单位。',
       colors: PAYOFF_SIGN_COLORS,
-      referenceLines: ['灰色的 1.00 线：本金不增不减，线上为增长、线下为损耗。'],
+      referenceLines: ['灰色的 1.00 线：几何模型因子的中性参照，对应 b = 0。'],
     },
     missingValueLabel: '几何期望',
     colorMode: 'signed',
@@ -703,11 +702,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     guide: {
       yAxis: '落在该 Gᵢ 附近的战役数量：点从底线向上堆叠，堆得越高，这一档结果出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
       point: '每个点仍是一场战役，横向按 Gᵢ 的对数排布，不考虑时间先后。'
-        + '相同倍率变化占相同距离，例如 0.5 → 1 → 2 等距，方便比较本金减半与翻倍；'
+        + '相同倍率变化占相同距离，例如 0.5 → 1 → 2 等距，方便比较模型因子的相对变化；'
         + 'Gᵢ = 0 在独立栏显示，不能只凭分布偏斜判断风控是否合格。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '灰色 1.00 竖线：盈亏分界，线右为增长、线左为损耗。',
+        '灰色 1.00 竖线：模型中性参照，对应 b = 0，不代表实际净结算盈亏。',
         '灰色曲线：在 ln(Gᵢ) 空间计算核密度，再换算成「每个对数档的期望场数」，与点列共用场数轴；归零点不纳入曲线。',
       ],
     },
@@ -724,7 +723,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '自评时序',
     guide: {
       yAxis: '战役自评，五点量表：1 非常差、2 很差、3 一般、4 很好、5 非常好；未评为 0。纵坐标数值就是自评分。',
-      point: '点越高，代表这场战役自评越好；点位只反映人工自评，颜色才报这一场的盈亏（按 b 的正负）。',
+      point: '点越高，代表这场战役自评越好；点位只反映人工自评，颜色表示几何 b 的正负。',
       colors: PAYOFF_SIGN_COLORS,
     },
     missingValueLabel: '自评',
@@ -757,7 +756,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-mirrorTp-view-time',
     seriesLabel: '镜像止盈结果时序',
     guide: {
-      yAxis: '镜像止盈结果采用离散等级：0–2 = 未实现·亏损 / 持平 / 盈利，3–5 = 已实现·亏损 / 持平 / 盈利；盈亏按实际神奇的 b 判，|b| ≤ 0.1 记持平。纵向高度表示结果等级，不是连续金额差。',
+      yAxis: '镜像止盈结果沿用六档标签：0–2 = 未实现·亏损 / 持平 / 盈利，3–5 = 已实现·亏损 / 持平 / 盈利；优先按几何 b 分档，|b| ≤ 0.1 记中性，b 缺失时沿用实际净盈亏正负。这些分档不补算 b，也不代表连续金额差。',
       point: '点越高，镜像止盈结果等级越好；同一水平线上的点属于同一种结果，点与点的垂直距离不代表实际盈亏差额。',
       colors: [
         { token: 'profit', label: '绿色圆点：该战役最终盈利（b > 0.1）。' },
@@ -942,10 +941,10 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-addEfficiency-view-time',
     seriesLabel: '加仓效用时序',
     guide: {
-      yAxis: '加仓效用 = 神奇的 b ÷ |涨跌幅倍数|，单位为倍。只拿主力、不加仓时约为 1；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓、对冲或止盈吃掉了行情。',
-      point: '点越高，加仓对同一段行情的放大越多。只画做过加仓（有一条成交过的加仓腿）的战役；涨跌幅倍数为负的也画，读数照 b ÷ |η| 计算，正负跟随 b。涨跌幅倍数显示为 0.00 的不进图。',
+      yAxis: '加仓效用 = 神奇的 b ÷ |涨跌幅倍数|，是两个模型读数的相对比例，不直接衡量实际加仓盈利。',
+      point: '点越高，几何 b 相对涨跌幅倍数绝对值的比值越大。只画实际加仓且 b 可计算的战役；正负跟随 b。涨跌幅倍数显示为 0.00 的不进图。',
       colors: PAYOFF_SIGN_COLORS,
-      referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 是「加仓没有额外放大」的参照，不单独画线。'],
+      referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 表示 b 等于涨跌幅倍数的绝对值。'],
     },
     missingValueLabel: '加仓效用',
     colorMode: 'signed',
@@ -962,11 +961,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '加仓效用分布',
     guide: {
       yAxis: '落在该加仓效用附近的战役数量，上下镜像：涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆，堆得越远，这一档出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度（下半边的刻度也是场数）。',
-      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 神奇的 b ÷ |涨跌幅倍数|，带符号除），不考虑时间先后；0 线上方是涨跌幅倍数为正的、下方是为负的（价格朝主力反方向走）；同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图。',
+      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 神奇的 b ÷ |涨跌幅倍数|），不考虑时间先后；分母取绝对值，因此指标正负随 b，不表示价格方向或实际净盈亏。同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '琥珀色 1.00 虚线：加仓没有额外放大——只拿主力、不加仓时加仓效用约为 1。线右是加仓把同一段行情放大成了更多的 R（摘要条的「放大（> 1）」是加仓效用 > 1 的场数占比），线左是加仓、对冲或止盈吃掉了行情；1.00 也是档边界，恰好等于 1.00 的点归线右。',
-        '灰色 0.00 竖线：加仓效用为 0，即 b = 0。线右是 b 与涨跌幅倍数同号（上半边：主力涨了、本场赚了；下半边：价格逆行、本场亏了），线左是异号；摘要条的「同号」是加仓效用 > 0 的场数占比。颜色另按 b 分，绿是这一场赚了。',
+        '琥珀色 1.00 虚线：b 等于涨跌幅倍数的绝对值；线右表示比值大于 1。1.00 也是档边界，恰好等于 1.00 的点归线右。',
+        '灰色 0.00 竖线：加仓效用为 0，即 b = 0。因为分母取绝对值，线右仅表示 b > 0、线左表示 b < 0，不表示实际净盈亏；颜色同样按 b 的正负区分。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
@@ -976,10 +975,10 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     formatValue: value => formatEfficiency(value),
     distribution: {
       unit: '倍',
-      zeroLabel: '0.00 盈亏平衡',
-      zeroMeaning: '盈亏分界',
-      positiveShareLabel: '同号',
-      references: [{ value: 1, label: '1.00 加仓没有额外放大', shareLabel: '放大（> 1）' }],
+      zeroLabel: '0.00 模型零点',
+      zeroMeaning: '几何 b 正负分界',
+      positiveShareLabel: 'b 为正',
+      references: [{ value: 1, label: '1.00 两项等值', shareLabel: '比值 > 1' }],
     },
   },
   // 【用户要求】加仓次数的散点图：模式与预期回撤一致——默认柱状（一次一根柱），柱内盈亏泾渭分明
@@ -992,7 +991,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '加仓次数时序',
     guide: {
       yAxis: '每场战役真的成交过的加仓腿有几条（只挂了单、没成交的不算）；没有加仓为 0。纵坐标数值就是次数。',
-      point: '点越高，这场加仓越多；点位只说加了几次，颜色才报这一场的盈亏（按 b 的正负）。',
+      point: '点越高，这场加仓越多；点位表示次数，颜色表示几何 b 的正负，不表示实际结算盈亏。',
       colors: PAYOFF_SIGN_COLORS,
     },
     missingValueLabel: '加仓次数',
@@ -1510,7 +1509,7 @@ const cardMetricReadingsCache = new WeakMap<CampaignDisplayData, CardMetricReadi
 function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
   const cached = cardMetricReadingsCache.get(row);
   if (cached) return cached;
-  const { profitCaptureRatio, initialExpectedMaxDrawdownPct } = row;
+  const { initialExpectedMaxDrawdownPct } = row;
   const mainPriceEfficiency = rowMainPriceEfficiency(row);
   const addEfficiency = rowAddEfficiency(row);
   const unrealizedPriceChangePct = rowUnrealizedPriceChangePct(row);
@@ -1655,7 +1654,6 @@ const CampaignCard = memo(function CampaignCard({
     campaign,
     legs,
     tradeRecords,
-    profitCaptureRatio,
     initialExpectedMaxDrawdownPct,
     initialRiskFraction,
     riskAccountEquity,
@@ -1697,7 +1695,8 @@ const CampaignCard = memo(function CampaignCard({
   const realizedPnl = campaign.final_realized_pnl;
   const realizedPnlTone = signTone(realizedPnl, 'text-foreground/80');
   // 红绿跟着读数上的 b（两位小数）走：只亏一点手续费、读作「0.00」的战役用中性色，不出现红色的 0.00
-  const payoffRatioTone = signTone(campaignPayoffRatioMultiple(profitCaptureRatio), 'text-foreground/85');
+  const b = rowMagicB(row);
+  const payoffRatioTone = signTone(campaignPayoffRatioMultiple(b == null ? null : b * 100), 'text-foreground/85');
   const arithmeticTone = signTone(arithmeticExpectancy, 'text-foreground/80');
   // 本场真实下注比例（最大预期亏损 ÷ 账户总资产）≥ 100%：这一注押上了全部本金。
   // 这是仓位大小的结论，不进几何期望公式，也不是本场盈亏，所以会和正的算术期望同时出现。
@@ -2020,7 +2019,7 @@ const CampaignCard = memo(function CampaignCard({
               ? (campaignHasMainAdd(legs)
                 ? '加仓效用 = 神奇的 b ÷ |涨跌幅倍数|：这场涨跌幅倍数显示为 0.00 或算不出（或算不出神奇的 b），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 神奇的 b ${readings.magicB} ÷ |涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；大于 1 说明加仓把同一段行情放大成了更多的 R，小于 1 说明加仓 / 对冲 / 止盈吃掉了行情`}
+                : `加仓效用 = 神奇的 b ${readings.magicB} ÷ |涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
@@ -3042,7 +3041,6 @@ export default function JournalCampaignsPage() {
   const winPayoffRatioLabel = formatGroupPayoffRatio(performance.winPayoffRatio);
   const lossPayoffRatioLabel = formatGroupPayoffRatio(performance.lossPayoffRatio);
   // 期望值浮层里的分组项：某一组没有样本时该项为 0（n = 0），不是「—」。
-  const groupTerm = (value: number | null) => (value == null ? '0' : value.toFixed(2));
   const validCampaignCount = performance.payoffRatioSampleCount;
   const breakevenCampaignCount = Math.max(
     0,
@@ -3053,13 +3051,13 @@ export default function JournalCampaignsPage() {
     : performance.payoffRatio * performance.payoffRatioSampleCount;
   const expectedRLabel = performance.expectedR == null
     ? '—'
-    : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
+    : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}`;
   const geometricEdgeLabel = geometric == null
     ? '—'
     : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
   // 累计倍数：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
   const formatGrowthFactor = (factor: number) => {
-    if (factor === 0) return '×0（本金归零）';
+    if (factor === 0) return '×0（模型归零）';
     // G^n 在 n 上千时会溢出成 Infinity；「×Infinity」读起来像 bug，不如直说超出可表示范围。
     if (!Number.isFinite(factor)) return '×超出可表示范围';
     if (factor >= 10000 || factor < 0.0001) return `×${factor.toExponential(2)}`;
@@ -4526,7 +4524,7 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">单场神奇的 b计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ
+                          {MAGIC_B_FORMULA}
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>初始最大预期亏损：</div>
@@ -4534,8 +4532,8 @@ export default function JournalCampaignsPage() {
                             Lᵢ = 主力开仓名义仓位 × max（|开仓价 − 对冲 A 价|，|开仓价 − 对冲 B 价|）÷ 开仓价
                           </div>
                           <div>主力开仓名义仓位为入场时 M 加镜像的真实全暴露；后续加仓、重入和反向对冲不计入。</div>
-                          <div>排序使用带正负号的 bᵢ：盈利为正，亏损为负。</div>
-                          <div>没有有效初始最大预期亏损的战役不参与排序。</div>
+                          <div>{MAGIC_B_RULE}</div>
+                          <div>排序使用带正负号的几何 bᵢ，不使用旧的净结算值。</div>
                         </div>
                       </>
                     ) : formula === 'expectedDrawdownPct' ? (
@@ -4558,37 +4556,35 @@ export default function JournalCampaignsPage() {
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>P(赢) 统一取 50%，不随账户实时胜率变动。</div>
-                          <div>bᵢ 使用该战役带正负号的实际神奇的 b。</div>
-                          <div>算术期望按 R 展示；同一场战役的读数只由它自己的 bᵢ 决定。</div>
-                          <div>缺少有效初始最大预期亏损的战役不参与排序。</div>
+                          <div>bᵢ 使用该战役带正负号的几何指标，不使用净结算值。</div>
+                          <div>读数只由 bᵢ 决定，是无量纲模型值，不是实际净收益。</div>
+                          <div>没有实际加仓或公式依据不完整、无法计算 b 的战役不参与排序。</div>
                         </div>
                       </>
                     ) : formula === 'geometricExpectancy' ? (
                       <>
                         <div className="font-medium text-foreground">单场几何期望计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          单场几何期望 = Gᵢ = 1 + bᵢ·x
+                          单场几何期望 = Gᵢ = max(0, 1 + bᵢ·x)
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            x = {fixedFractionLabel}（每场统一）；bᵢ = 该战役带正负号的实际神奇的 b
+                            x = {fixedFractionLabel}（每场统一的模型权重）；bᵢ = 该战役带正负号的几何指标
                           </div>
                           <div>
-                            读法：按固定 {fixedFractionLabel} 的资金比例下这一注，赚 bᵢ 个 R 就等于本金乘上 1 + bᵢ×0.1 倍。
-                            列里直接显示这个倍数：bᵢ = +2 → <span className="text-foreground">1.20</span>（本金 ×1.20）；
+                            读法：以固定 {fixedFractionLabel} 的模型权重，将 bᵢ 代入 1 + bᵢ×0.1。
+                            列里直接显示模型因子：bᵢ = +2 → <span className="text-foreground">1.20</span>；
                             bᵢ = −1 → <span className="text-foreground">0.90</span>。
-                            <span className="text-foreground">1.00</span> 是本金不增不减的分界。
+                            <span className="text-foreground">1.00</span> 对应 b = 0，不代表账户真实增长或净结算持平。
                           </div>
                           <div>
-                            这里不乘胜率：汇总那条 G 要按胜率把赢腿与亏腿加权，因为它推演的是重复下注的长期路径；
-                            单场的结果已经发生，bᵢ 就是它的全部。
+                            单场直接代入各自的 bᵢ，不再乘胜率；汇总模型则另用胜率与分组均值。
                           </div>
                           <div>
-                            x 也不再按该场真实的「最大预期亏损 ÷ 开仓时账户资产」取值：那样会把「这场赔率结构好不好」
-                            和「当时账户有多大」搅在一起——同样一场 +2R，早期小账户算出来像重仓豪赌、后期大账户算出来几乎没下注。
+                            x 固定，不读取账户资产与实际下注比例，方便在同一模型尺度上比较。
                           </div>
-                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），代表这一注把本金打穿，Gᵢ 记为 0.00。</div>
-                          <div>缺少有效初始最大预期亏损（因而没有 bᵢ）的战役不参与几何期望排序。</div>
+                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），按既有规则将模型因子 Gᵢ 记为 0.00，不代表实际账户归零。</div>
+                          <div>没有实际加仓或公式依据不完整、无法计算 b 的战役不参与几何期望排序。</div>
                         </div>
                       </>
                     ) : formula === 'mainPriceChangeSort' ? (
@@ -4650,16 +4646,15 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {/* 两个式子各自不断行，只在「；」之后换行：不会把「涨跌幅ᵢ」拆成「涨跌幅」和另起一行的「ᵢ」 */}
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            <span className="whitespace-nowrap">bᵢ = 已实现盈亏ᵢ ÷ 初始最大预期亏损ᵢ；</span>
+                            <span>{MAGIC_B_FORMULA}；</span>
                             <wbr />
                             <span className="whitespace-nowrap">ηᵢ = 涨跌幅ᵢ ÷ 预期回撤ᵢ</span>
                           </div>
-                          <div>只拿主力、不加仓时，bᵢ 大致就是主力的涨跌幅倍数，比值约为 1。</div>
-                          <div>大于 1：加仓把同一段行情放大成了更多的 R；小于 1：加仓、对冲或止盈吃掉了行情。</div>
+                          <div>这是几何指标与原始行情风险倍数的比较，不是实际净盈利的放大倍数。</div>
                           <div>
-                            例：bᵢ = +6.00、ηᵢ = +3.00，加仓效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>——同一段行情，加仓后多赚了一倍的 R。
+                            例：bᵢ = +6.00、ηᵢ = +3.00，加仓效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>。
                           </div>
-                          <div>只算做过加仓（有一条成交过的加仓腿）的战役。<span className="text-foreground">涨跌幅倍数为负的也算，分母取绝对值、正负跟随 b</span>：例 bᵢ = −3.00、ηᵢ = −2.00，加仓效用 = −3 ÷ |−2| = −1.50——价格逆行 2 个预期回撤，亏成了 3R，同样放大了 1.5 倍；分布图里这类战役从 0 线往下堆。颜色按 bᵢ 的正负。涨跌幅倍数显示为 0.00 时分母过小不算；算不出的战役不参与排序与散点图，封面显示「—」。</div>
+                          <div>只算做过加仓且 b 有完整依据的战役。<span className="text-foreground">分母取绝对值、正负跟随 b</span>：例 −3 ÷ |−2| = −1.50。涨跌幅倍数显示为 0.00 时分母过小不算；缺失项不参与排序与散点图，封面显示「—」。</div>
                         </div>
                       </>
                     ) : formula === 'addCountSort' ? (
@@ -4676,11 +4671,8 @@ export default function JournalCampaignsPage() {
                     ) : formula === 'magicBSort' ? (
                       <>
                         <div className="font-medium text-foreground">神奇的 b 计算公式</div>
-                        <div className="mt-2 font-medium">算法一 · 净结算（原盈亏比）</div>
-                        <div className="mt-1 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_DIRECT_FORMULA}</div>
-                        <div className="mt-2 font-medium">算法二 · 几何分解</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_FORMULA}</div>
-                        <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的 b。几何分解依据不足时沿用净结算法；缺少有效净盈亏或初始风险时显示「—」。</div></div>
+                        <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的 b。没有实际加仓，或任一公式依据缺失时显示「—」，不以净结算值补齐。</div></div>
                       </>
                     ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' || formula === 'effectivePriceChangeMultipleSort' ? (
                       <>
@@ -4731,7 +4723,7 @@ export default function JournalCampaignsPage() {
                           已实现·盈利 ＞ 已实现·持平 ＞ 已实现·亏损 ＞ 未实现·盈利 ＞ 未实现·持平 ＞ 未实现·亏损
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div>先判断镜像止盈委托是否真正成交，再按战役实际神奇的 b 区分结果（|b| ≤ 0.1 记持平），共六档。</div>
+                          <div>先判断镜像止盈委托是否真正成交，再优先按几何 b 分档（|b| ≤ 0.1 记中性）；b 缺失时沿用实际净盈亏正负，共六档，不据此补算 b。</div>
                           <div>成交与否是第一层：这套动作首先要考核的是「镜像止盈到底有没有生效」，赚亏是在那之后的事。</div>
                           <div>相同结果再按客观操作时间排序。</div>
                         </div>
@@ -4966,8 +4958,8 @@ export default function JournalCampaignsPage() {
                   <div>主力开仓名义仓位按初始 M 与镜像 Legs 去重求和，采用镜像 TP 落袋前的真实全暴露；后续加仓、重入和反向对冲不计入。</div>
                   <div>若 A、B 都存在，取离主力开仓价更远的一档；只有一档时使用该档。</div>
                   <div>历史战役优先使用保存的原始委托价，不使用触发成交后的滑点价；旧记录缺失委托快照时，才回退到 Legs、成交记录或事件数据。</div>
-                  <div>只有战役已结束，且主力开仓价、主力开仓名义仓位、初始对冲价完整，使 Lᵢ 为有限正数时，才属于有效战役。</div>
-                  <div>无有效 Lᵢ 的战役不参与神奇的 b、胜率、平均神奇的 b、算术期望与几何期望统计。</div>
+                  <div>此处有效战役为：已结束、初始风险有效，并且首次加仓前币数、首次实际加仓价格 T₁、加仓比例及 F、Kₘ 均有依据，可完整计算神奇的 b 的战役。</div>
+                  <div>无加仓或缺少公式依据的战役不纳入本组胜率、平均 b、算术与几何期望统计。统计仅代表这一子集，不代表账户全部交易。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-1 border-t border-border/60 pt-2 text-center">
                   <div><span className="text-muted-foreground">盈利</span><strong className={`ml-1 ${TONE_UP}`}>{performance.winCount}</strong></div>
@@ -4998,7 +4990,7 @@ export default function JournalCampaignsPage() {
                 <div className="mt-2 space-y-1 text-muted-foreground">
                   <div>「实现镜像止盈」= 该战役的镜像止盈委托真正成交（触发后进入「已锁定不亏」）。口径为当前列表全部 {mirrorTp.total} 场战役。</div>
                   <div>达成率 = 实现 ÷ 全部；达成盈利率 = 实现且盈利 ÷ 实现。</div>
-                  <div>盈亏按战役实际神奇的 b 判定：<span className="text-foreground">|b| ≤ 0.1 记持平</span>，不计入盈利或亏损——这个幅度是手续费与滑点级别的噪声，不是镜像止盈的功劳或过失。缺少有效初始最大预期亏损时退回按已实现盈亏的正负判。</div>
+                  <div>分档优先按几何 b 判定：<span className="text-foreground">|b| ≤ 0.1 记为中性档</span>。这是既有的展示阈值，不代表手续费范围或实际净盈亏持平；b 无法计算时，该分档沿用已实现盈亏的正负，仍不据此补算 b。</div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-1 border-t border-border/60 pt-2 text-center">
                   <div><span className="text-muted-foreground">实现</span><strong className="ml-1 text-foreground">{mirrorTp.achieved}</strong><span className="ml-1 text-muted-foreground">（{mirrorTpRateLabel}）</span></div>
@@ -5048,7 +5040,7 @@ export default function JournalCampaignsPage() {
                       = {performance.winCount} ÷（{performance.winCount} + {performance.lossCount}）
                     </div>
                     <div className="font-mono text-foreground">= {winRateLabel}</div>
-                    <div>仅统计存在有效初始最大预期亏损的已结束战役。</div>
+                    <div>仅统计能按新公式计算神奇的 b 的已结束战役；无加仓或公式依据缺失的战役不纳入。</div>
                     <div>进行中、盈亏平衡、已删除及分母无效的战役不计入胜负。</div>
                   </div>
                 ) : (
@@ -5075,8 +5067,8 @@ export default function JournalCampaignsPage() {
               </PopoverTrigger>
               <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-72 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
                 <div className="font-medium text-foreground">平均神奇的 b 计算公式</div>
-                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_DIRECT_FORMULA}</div>
-                <div className="mt-2 text-muted-foreground">原盈亏比已统一为神奇的 b；净结算与几何分解是同一指标的两种算法，不相加、不重复统计。没有加仓的有效战役仍纳入。</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_FORMULA}</div>
+                <div className="mt-2 text-muted-foreground">β = 首次加仓前币数 × 首次加仓价格 T₁ ÷ 初始名义仓位 V₀。不加结算修正，也不以净盈亏 ÷ L₀ 替代。只统计公式依据完整的已结束战役；没有加仓的战役不纳入。</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                   b̄赢 = Σ 盈利战役 bᵢ ÷ 盈利战役数
                 </div>
@@ -5103,10 +5095,10 @@ export default function JournalCampaignsPage() {
                       </span>
                     </div>
                     <div className="leading-relaxed">
-                      分别是「赢的时候平均赢多少 R」与「亏的时候平均亏多少 R」，按已实现盈亏的正负切分，盈亏持平的战役两侧都不计入。
+                      分别为实际盈利与实际亏损战役的平均几何指标 b，按已实现盈亏的正负切分；b 本身不代表净结算的 R 倍数，正负也可能与实际盈亏不同。盈亏持平的战役两侧都不计入。
                       上方那一项只报盈利侧：混合均值会让赢和亏互相抵消，看不出赔率结构。
                     </div>
-                    <div>没有有效初始最大预期亏损的战役不计入统计。</div>
+                    <div>没有实际加仓或缺少公式依据的战役不计入统计；本统计不代表全部战役。</div>
 
                     <div className="mt-2 border-t border-border/60 pt-2">
                       <div className="flex items-baseline justify-between gap-2">
@@ -5152,20 +5144,17 @@ export default function JournalCampaignsPage() {
                 </div>
                 {performance.expectedWinRate != null && performance.payoffRatio != null && performance.expectedR != null ? (
                   <div className="mt-2 space-y-1 text-muted-foreground">
-                    <div>全部有效战役神奇的 b的平均值，等价于按盈亏分组：</div>
-                    <div className="font-mono">= (n赢 × b̄赢 + n亏 × b̄亏) ÷ N</div>
+                    <div>全部有效战役几何 b 的算术平均，使用每场完整精度数值：</div>
                     <div className="font-mono">
-                      = ({performance.winCount} × {groupTerm(performance.winPayoffRatio)} + {performance.lossCount} × {groupTerm(performance.lossPayoffRatio)}) ÷ {performance.payoffRatioSampleCount}
+                      = {payoffRatioSum?.toFixed(6)} ÷ {performance.payoffRatioSampleCount}
                     </div>
                     <div className="font-mono text-foreground">= {expectedRLabel}</div>
-                    <div>b̄赢 / b̄亏 = 盈利 / 亏损战役各自的平均神奇的 b；盈亏平衡战役计入 N，贡献为 0</div>
-                    <div>P(赢) 仅统计设置了最大预期亏损的有效战役</div>
-                    <div className="mt-2 border-t border-border/60 pt-2 text-foreground">理论公式</div>
+                    <div>实际盈亏持平的战役也按其几何 b 原值参与求和；它的 b 不一定为 0。此处不能只加盈利组与亏损组而漏掉持平组。</div>
+                    <div>胜率仍按同一有效样本池的实际已实现盈亏判定，与 b 的正负不是同一含义。</div>
+                    <div className="mt-2 border-t border-border/60 pt-2 text-foreground">与二结果模型的区别</div>
                     <div className="font-mono">E = P(赢) × b − (1 − P(赢))</div>
                     <div>
-                      其中 b 是「赢时的平均神奇的 b」、每次亏损按恰好 −1R 计。这里的 b̄ 是全部战役的混合均值，
-                      亏损已以负值计入，再减 (1 − P(赢)) 会把亏损扣两遍；实盘亏损平均 {groupTerm(performance.lossPayoffRatio)}R 也不恰好是 −1R，
-                      所以统计值直接取平均。
+                      该式假定只有两个结果：正向结果为 b、另一结果固定为 −1。当前统计使用全部几何 b 的样本均值，不作这一假定，也不表示实际净结算收益。
                     </div>
                   </div>
                 ) : (
@@ -5217,42 +5206,42 @@ export default function JournalCampaignsPage() {
                       <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
                       <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}</div>
                       <div>
-                        它回答：<span className="text-foreground">若按这套参数重复下注 {validCampaignCount} 次，理论上本金按什么速度复利</span>。
-                        b = 盈利战役的平均实际神奇的 b（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；
+                        它回答：<span className="text-foreground">将几何 b 作为模型参数、重复 {validCampaignCount} 次时的增长因子</span>，不代表真实资金复利。
+                        b = 盈利战役的平均几何指标（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；
                         p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；
                         n = 有效战役数（{validCampaignCount} 场）；
                         x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}——固定仓位后，这个数的变化只反映 edge 本身，可以纵向比较。
                       </div>
-                      <div>它与算术期望（{expectedRLabel}）的差 = <span className="text-foreground">波动拖累</span>：押太大时算术为正、几何却翻负、本金长期归零。</div>
+                      <div>算术与几何展示均沿用原模型、以新 b 代入；不能据此还原账户实际收益或决定下注比例。</div>
                       {geometric.bleeds ? (
-                        <div className="text-[#F6465D]">当前为长期缩水（G&lt;1）——这套 edge 不该按此仓位下注。</div>
+                        <div className="text-[#F6465D]">当前模型增长因子 G&lt;1。</div>
                       ) : null}
                     </section>
 
                     <section className="space-y-1 border-t border-border/60 pt-2">
                       <div className="flex items-baseline gap-1.5">
-                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">实测</span>
-                        <span className="text-foreground">实际复利结果</span>
+                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">逐场</span>
+                        <span className="text-foreground">几何指标连乘</span>
                       </div>
                       <div className="rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                        ∏（1+bᵢ·x），bᵢ = 每场真实神奇的 b
+                        ∏（1+bᵢ·x），bᵢ = 每场几何指标
                       </div>
                       <div className="font-mono text-foreground">
                         ∏（1+bᵢ·x）= {realizedGrowthLabel}
                         <span className="ml-1 text-muted-foreground">（{realizedGrowth.count} 场逐场连乘）</span>
                       </div>
                       <div>
-                        它回答：<span className="text-foreground">每场按同样 {fixedFractionLabel} 的比例下注，真实发生的 bᵢ 一场一场走下来，本金实际成了几倍</span>。
+                        它回答：<span className="text-foreground">每场取同样 {fixedFractionLabel} 的模型权重，将各场 bᵢ 依次代入后得到多少倍</span>。
                         这里不用胜率、也不用平均值，样本是什么就走什么。
                       </div>
                       {realizedGrowth.wipedOut ? (
-                        <div className="text-[#F6465D]">其中有一场 bᵢ ≤ −10，按 {fixedFractionLabel} 下注足以打穿本金，连乘因此归零。</div>
+                        <div className="text-[#F6465D]">其中有一场 bᵢ ≤ −10，模型因子不为正，按既有规则将连乘记为零。</div>
                       ) : null}
                     </section>
 
                     <div className="border-t border-border/60 pt-2">
                       两者之差 = <span className="text-foreground">真实样本的分布</span>相对「按均值推演」的代价或红利：
-                      理论那条把所有盈利战役压成一个平均数，实测这条保留了每一场的原样。
+                      理论那条按均值推演，逐场连乘保留了每个样本的 b；两者均不是实际净结算收益。
                     </div>
                   </div>
                 ) : (
@@ -5302,46 +5291,46 @@ export default function JournalCampaignsPage() {
                     <div className="absolute right-3 top-12 z-10 max-h-[70vh] w-[min(90vw,36rem)] overflow-y-auto rounded border border-border bg-card p-3 shadow-lg">
                       <div className="font-medium text-foreground">计算口径与符号</div>
                       <div className="mt-1.5 space-y-1 leading-relaxed">
-                        <div><span className="font-mono text-foreground">bᵢ = 已实现 P&amp;Lᵢ ÷ 最大预期亏损ᵢ</span>。只使用与实时胜率完全相同、且属于当前账户的有效战役。</div>
-                        <div><span className="font-mono text-foreground">N</span> = 全部有效战役数；<span className="font-mono text-foreground">n_win</span> = bᵢ &gt; 0 的盈利战役数；<span className="font-mono text-foreground">n_loss</span> = bᵢ ≤ 0 的亏损战役数。</div>
-                        <div>不做任何异常值剔除，bᵢ &lt; −1 的超额实亏完整保留。神奇的 b为空的已结束战役整场排除，并在模块脚注明示数量。</div>
+                        <div><span className="font-mono text-foreground">{MAGIC_B_FORMULA}</span>。只使用与本组胜率相同、属于当前账户且 b 可计算的有效战役；这些指标描述几何 b 的分布，不代表实际资金收益分布。</div>
+                        <div><span className="font-mono text-foreground">N</span> = 有效样本数；<span className="font-mono text-foreground">n_win</span> = bᵢ &gt; 0 的正值样本数；<span className="font-mono text-foreground">n_loss</span> = bᵢ ≤ 0 的非正值样本数。</div>
+                        <div>不做任何异常值剔除，bᵢ &lt; −1 的数值完整保留。神奇的 b为空的已结束战役排除，并在模块脚注明示数量。</div>
                       </div>
 
                       <div className="mt-3 space-y-2">
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">1. DSI 下行纪律系数</div>
                           <div className="mt-1 font-mono text-foreground">DSI = √[Σ(bᵢ² | bᵢ ≤ 0) ÷ n_loss]</div>
-                          <div className="mt-1 leading-relaxed">只在亏损组内计算每笔亏损 R 倍数的均方根。设计亏损都贴近 −1R 时，DSI 接近 1；超过 1 的部分反映止损或对冲委托被越过。越小越好：≤1.05 绿，1.05–1.15 黄，&gt;1.15 红。</div>
+                          <div className="mt-1 leading-relaxed">非正 b 样本的均方根，衡量几何指标负向数值的尺度，不代表实际亏损或止损越界。保留既有色阶：≤1.05 绿，1.05–1.15 黄，&gt;1.15 红。</div>
                         </div>
 
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">2. USI 上行保留系数</div>
                           <div className="mt-1 font-mono text-foreground">USI = √[Σ(bᵢ² | bᵢ &gt; 0) ÷ n_win] ÷ [Σ(bᵢ | bᵢ &gt; 0) ÷ n_win]</div>
-                          <div className="mt-1 leading-relaxed">盈利组的均方根除以盈利组均值，用来观察盈利分布是否仍保留少数大额右尾。若所有盈利几乎一样，分子与分母接近，USI 趋近 1；右尾越长，USI 越大。≥1.80 绿，1.50–1.80 黄，&lt;1.50 红。</div>
+                          <div className="mt-1 leading-relaxed">正 b 样本的均方根除以其均值，描述几何指标的右尾形态。若所有正值几乎一样，USI 趋近 1；正值越集中于少数大读数，USI 越大。保留既有色阶：≥1.80 绿，1.50–1.80 黄，&lt;1.50 红。</div>
                         </div>
 
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">3. 上行标准差 σ_u</div>
                           <div className="mt-1 font-mono text-foreground">σ_u = √[Σ max(bᵢ, 0)² ÷ N]</div>
-                          <div className="mt-1 leading-relaxed">每场只保留正向 R 倍数，亏损场按 0 进入求和，最后除以全部有效战役数 N。它描述整个战役序列中的上行波动强度；对本策略而言右尾是产出，应关注它是否被保留，而不是机械压低。</div>
+                          <div className="mt-1 leading-relaxed">每场只保留正 b，非正值按 0 进入求和，最后除以全部有效战役数 N。它描述几何指标序列的上行尺度，不是实际资金收益波动。</div>
                         </div>
 
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">4. 下行标准差 σ_d</div>
                           <div className="mt-1 font-mono text-foreground">σ_d = √[Σ min(bᵢ, 0)² ÷ N]</div>
-                          <div className="mt-1 leading-relaxed">每场只保留负向 R 倍数，盈利场按 0 进入求和，分母仍是全部有效战役数 N。这是 MAR=0 的教科书 Sortino 口径，越小越好；它与只除以 n_loss 的 DSI 是不同口径，不能互换。</div>
+                          <div className="mt-1 leading-relaxed">每场只保留负 b，非负值按 0 进入求和，分母仍是全部有效战役数 N。它描述几何指标相对 0 的下行尺度；与只除以 n_loss 的 DSI 不同，不能互换。</div>
                         </div>
 
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">5. UPR 上行潜力比</div>
                           <div className="mt-1 font-mono text-foreground">U1 = Σ max(bᵢ, 0) ÷ N；UPR = U1 ÷ σ_d</div>
-                          <div className="mt-1 leading-relaxed">U1 是每场战役贡献的平均正向 R，上行只进入分子；σ_d 只度量下行并进入分母。UPR 因此直接衡量每单位下行波动换来了多少上行潜力，越大越好，是本模块主指标。</div>
+                          <div className="mt-1 leading-relaxed">U1 是全样本平均正 b；UPR 将它与负 b 的下行尺度比较。本模块沿用该比值观察几何指标分布，不将其解释成实际资金收益。</div>
                         </div>
 
                         <div className="rounded border border-border/70 p-2">
                           <div className="font-medium text-foreground">6. Omega 比率</div>
                           <div className="mt-1 font-mono text-foreground">D1 = Σ max(−bᵢ, 0) ÷ N；Omega = U1 ÷ D1</div>
-                          <div className="mt-1 leading-relaxed">D1 是每场战役贡献的平均负向 R 绝对值。Omega 比较累计上行与累计下行：等于 1 为盈亏平衡，大于 1 表示上行总量超过下行总量，越大越好。</div>
+                          <div className="mt-1 leading-relaxed">D1 是全样本平均负 b 的绝对值。Omega 等于 1 表示正 b 总和等于负 b 绝对值总和，不代表实际净结算盈亏平衡。</div>
                         </div>
                       </div>
 
@@ -5354,7 +5343,7 @@ export default function JournalCampaignsPage() {
 
                       <div className="mt-3 border-t border-border/70 pt-2 leading-relaxed">
                         <div className="font-medium text-foreground">空值与样本提示</div>
-                        <div className="mt-1">无亏损样本时，DSI、σ_d、UPR、Omega、Sortino 显示「—」；无盈利样本时，USI、σ_u、U1、UPR、Omega 显示「—」。任何除数为 0 也返回「—」，不会显示 0 或 ∞。</div>
+                        <div className="mt-1">无非正 b 样本时，DSI、σ_d、UPR、Omega、Sortino 显示「—」；无正 b 样本时，USI、σ_u、U1、UPR、Omega 显示「—」。任何除数为 0 也返回「—」，不会显示 ∞。</div>
                         <div className="mt-1">n_loss &lt; 5 或 n_win &lt; 5 时仍显示可计算结果，同时加灰色「样本不足 n=X」角标。</div>
                       </div>
                     </div>
@@ -5366,17 +5355,17 @@ export default function JournalCampaignsPage() {
                     <div className="mt-1 text-xl font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.upr, 3)}</div>
                     <div className="mt-1 text-[10px] text-muted-foreground">U1 ÷ σ_d，越大越好</div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">盈利样本不足 n={asymmetricRisk.winCount}</span> : null}
-                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">亏损样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">正 b 样本不足 n={asymmetricRisk.winCount}</span> : null}
+                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">非正 b 样本不足 n={asymmetricRisk.lossCount}</span> : null}
                     </div>
                   </div>
                   <div className="col-span-1 bg-card px-4 py-3 sm:col-span-2">
                     <div className="text-muted-foreground">Omega 比率</div>
                     <div className="mt-1 text-xl font-semibold text-foreground">{formatAsymmetricMetric(asymmetricRisk.omega, 3)}</div>
-                    <div className="mt-1 text-[10px] text-muted-foreground">U1 ÷ D1，1 为盈亏平衡线</div>
+                    <div className="mt-1 text-[10px] text-muted-foreground">U1 ÷ D1，1 为正负 b 总量平衡</div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">盈利样本不足 n={asymmetricRisk.winCount}</span> : null}
-                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">亏损样本不足 n={asymmetricRisk.lossCount}</span> : null}
+                      {asymmetricRisk.winCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">正 b 样本不足 n={asymmetricRisk.winCount}</span> : null}
+                      {asymmetricRisk.lossCount < 5 ? <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">非正 b 样本不足 n={asymmetricRisk.lossCount}</span> : null}
                     </div>
                   </div>
                   <div className="bg-card px-4 py-3">
@@ -5416,8 +5405,8 @@ export default function JournalCampaignsPage() {
                       ? `（${Math.abs(asymmetricRisk.sortino - asymmetricRisk.sortinoIdentityRhs) < 1e-12 ? '通过' : '异常'}）`
                       : '（—）'}
                   </div>
-                  <div>口径：{asymmetricRisk.sampleCount} 场有效战役，其中盈利 {asymmetricRisk.winCount} 场 / 亏损 {asymmetricRisk.lossCount} 场</div>
-                  {asymmetricRisk.excludedPayoffCount > 0 ? <div>另有 {asymmetricRisk.excludedPayoffCount} 场已结束战役因神奇的 b未回填而排除。</div> : null}
+                  <div>口径：{asymmetricRisk.sampleCount} 场有效战役，其中正 b {asymmetricRisk.winCount} 场 / 非正 b {asymmetricRisk.lossCount} 场</div>
+                  {asymmetricRisk.excludedPayoffCount > 0 ? <div>另有 {asymmetricRisk.excludedPayoffCount} 场已结束战役因神奇的 b 依据不完整而排除。</div> : null}
                 </div>
               </PopoverContent>
             </Popover>

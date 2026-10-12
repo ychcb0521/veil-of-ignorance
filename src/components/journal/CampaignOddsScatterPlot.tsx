@@ -563,8 +563,9 @@ export function CampaignMetricScatterPlot({
   const drawdownBars = bars && metricKey === 'expectedDrawdownPctBars';
   /** 【用户要求】盈亏泾渭分明的柱状图：柱内亏损在下、盈利在上，换组另起一行（预期回撤、自评、加仓次数）。 */
   const segregatedBars = drawdownBars || (bars && (metricKey === 'importanceBars' || metricKey === 'addCountBars'));
-  /** 神奇的 b那一族：轴本身就是 b。窗口也只有它带 −1R 止损墙与 +10R 封顶。 */
-  const oddsFamily = metricKey.startsWith('odds') || metricKey === 'magicB' || metricKey === 'magicBDistribution';
+  const magicFamily = metricKey === 'magicB' || metricKey === 'magicBDistribution';
+  /** 新 b 沿用旧图的数值窗口；参考值不再解释为实际结算 R 或止损。 */
+  const oddsFamily = metricKey.startsWith('odds') || magicFamily;
   /**
    * 通用连续指标的分布（涨跌幅、涨跌幅倍数、加仓效用、算术期望）：线性横轴、稳健窗口，
    * 0 线叫什么、正值占比叫什么、另有哪些参照值由 distributionSpec 给。
@@ -658,7 +659,7 @@ export function CampaignMetricScatterPlot({
   const isolatedLeftBucket = useMemo(
     () => geometricDist?.zeroIds.length ? {
       pointIds: geometricDist.zeroIds,
-      label: '本金归零',
+      label: '模型归零',
       dividerKind: 'threshold' as const,
       dividerLabel: '归零界限',
     } : undefined,
@@ -749,8 +750,8 @@ export function CampaignMetricScatterPlot({
       label: showRuinBoundary && item.token === 'loss' ? `${CAPITAL_RUIN_THRESHOLD} < b < 0` : visibleLegendLabel(item.label),
       token: item.token,
       shape: seriesShapeAt(index, colorMode),
-    })), ...(showRuinBoundary ? [{ id: 'capital-ruin', label: `b ≤ ${CAPITAL_RUIN_THRESHOLD} · 10% 下注归零`, token: 'loss' as const, shape: 'square' as const }] : [])],
-    [colorMode, guide.colors, showRuinBoundary],
+    })), ...(showRuinBoundary ? [{ id: 'capital-ruin', label: `b ≤ ${CAPITAL_RUIN_THRESHOLD} · 10% ${magicFamily ? '模型' : '下注'}归零`, token: 'loss' as const, shape: 'square' as const }] : [])],
+    [colorMode, guide.colors, magicFamily, showRuinBoundary],
   );
 
   // 分布视图按 b 升序喂给元件：按钮顺序 = 键盘左右键的漫游顺序 = 沿横轴从左到右。
@@ -787,7 +788,7 @@ export function CampaignMetricScatterPlot({
         // 先按显示精度定成符号：直接看原值会把 −0.001 印成「−0.00R」——一个不存在的负零。
         ? (() => {
           const rounded = Number(point.payoffRatio.toFixed(2)) + 0;
-          return ` · b ${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}R`;
+          return ` · b ${rounded > 0 ? '+' : ''}${rounded.toFixed(2)}`;
         })()
         : '';
       return {
@@ -799,8 +800,8 @@ export function CampaignMetricScatterPlot({
         valueText: `${formatValue(point.value)}${payoffSuffix}`,
         label: `#${point.sequence} ${point.title}`,
         metaText: `操作时间 ${operationTime}`,
-        warning: ruin ? `${RUIN_ASSUMPTION}（b ≤ ${CAPITAL_RUIN_THRESHOLD}R）；非实际账户强平判定。` : undefined,
-        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
+        warning: ruin ? `${magicFamily ? '固定 10% 参数的模型归零' : RUIN_ASSUMPTION}（b ≤ ${CAPITAL_RUIN_THRESHOLD}${magicFamily ? '' : 'R'}）；非实际账户强平判定。` : undefined,
+        ariaLabel: `第 ${point.sequence} 场，${point.title}，${metricLabel} ${formatValue(point.value)}${payoffSuffix}${ruin ? `，${magicFamily ? '固定 10% 参数的模型归零' : RUIN_ASSUMPTION}` : ''}，操作时间 ${operationTime}${selectionMode ? '' : '，进入战役'}`,
         testId: legacyOddsTestIds
           ? `campaign-odds-point-${point.campaignId}`
           : `campaign-metric-point-${metricKey}-${point.campaignId}`,
@@ -818,7 +819,7 @@ export function CampaignMetricScatterPlot({
         },
       };
     }),
-    [barModel, colorMode, distribution, formatValue, geometricDistribution, legacyOddsTestIds, metricKey, metricLabel, oddsFamily, orderedPoints, segregatedBars, selectionMode, series.length, showPayoffRatio, stacked],
+    [barModel, colorMode, distribution, formatValue, geometricDistribution, legacyOddsTestIds, magicFamily, metricKey, metricLabel, oddsFamily, orderedPoints, segregatedBars, selectionMode, series.length, showPayoffRatio, stacked],
   );
 
   const countAxis = useMemo<ScatterCountAxis>(() => ({
@@ -840,10 +841,10 @@ export function CampaignMetricScatterPlot({
     max: dist.domain.max,
     // 步距细于格式化精度时会连着印出两个「1.00」；重复的直接丢掉，留第一个。
     labels: dist.domain.ticks
-      .map(value => ({ at: value, text: oddsFamily ? formatIntegerOddsTick(value) : compactDistributionTick(formatValue(value)) }))
+      .map(value => ({ at: value, text: oddsFamily && !magicFamily ? formatIntegerOddsTick(value) : compactDistributionTick(formatValue(value)) }))
       .filter((label, index, list) => index === 0 || label.text !== list[index - 1].text),
     boundaries: showRuinBoundary ? RUIN_BOUNDARIES : genericBoundaries,
-  } : null), [dist, geometricDist, oddsFamily, formatValue, showRuinBoundary, genericBoundaries]);
+  } : null), [dist, geometricDist, oddsFamily, magicFamily, formatValue, showRuinBoundary, genericBoundaries]);
 
   const barsXAxis = useMemo<ScatterXAxis | null>(() => (barColumns ? {
     mode: 'category',
@@ -862,7 +863,7 @@ export function CampaignMetricScatterPlot({
       kind: 'zero',
       // 0 在各指标上是同一件事（盈亏分界），但读数不同：神奇的 b读 0，几何期望读 1.00；
       // 涨跌幅一族的 0 是「不涨不跌」，由 distributionSpec 给全文。
-      label: zeroSpec?.zeroLabel ?? `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`,
+      label: zeroSpec?.zeroLabel ?? (magicFamily ? '0 · b 正负分界' : geometricDistribution ? '1.00 模型中性' : `${oddsFamily ? '0' : formatValue(0)} 盈亏平衡`),
       labelSide: geometricDistribution ? 'right' : undefined,
       testId: `campaign-metric-break-even-${metricKey}`,
       dataAttrs: { 'data-reference-value': 0 },
@@ -892,7 +893,7 @@ export function CampaignMetricScatterPlot({
     return [
       ...(showRuinBoundary ? [{
         axis: 'x' as const, value: CAPITAL_RUIN_THRESHOLD, kind: 'threshold' as const,
-        label: `${CAPITAL_RUIN_THRESHOLD}R 归零（10%）`,
+        label: magicFamily ? `${CAPITAL_RUIN_THRESHOLD} 模型归零（10%）` : `${CAPITAL_RUIN_THRESHOLD}R 归零（10%）`,
         testId: `campaign-metric-capital-ruin-${metricKey}`,
         dataAttrs: { 'data-reference-value': CAPITAL_RUIN_THRESHOLD },
       }] : []),
@@ -900,13 +901,13 @@ export function CampaignMetricScatterPlot({
         axis: 'x',
         value: -1,
         kind: 'threshold',
-        label: '-1R 止损',
+        label: magicFamily ? '-1 参考线' : '-1R 止损',
         testId: `campaign-metric-loss-wall-${metricKey}`,
         dataAttrs: { 'data-reference-value': -1 },
       },
       breakEven,
     ];
-  }, [dist, metricKey, oddsFamily, formatValue, showRuinBoundary, geometricDistribution, zeroSpec, noZeroLine, genericReferences]);
+  }, [dist, metricKey, oddsFamily, magicFamily, formatValue, showRuinBoundary, geometricDistribution, zeroSpec, noZeroLine, genericReferences]);
 
   /** 镜像堆叠（加仓效用里涨跌幅倍数为负的战役）：往下那一侧的数值，密度曲线另画一条在 0 线下方。 */
   const mirroredValues = useMemo(() => (
@@ -954,7 +955,7 @@ export function CampaignMetricScatterPlot({
     max: domain.max,
     ticks: ticks.map(tick => ({
       value: tick.value,
-      label: (metricKey === 'odds' || metricKey === 'magicB') ? formatIntegerOddsTick(tick.value) : formatValue(tick.value),
+      label: metricKey === 'odds' ? formatIntegerOddsTick(tick.value) : formatValue(tick.value),
       testId: (metricKey === 'odds' || metricKey === 'magicB') ? 'campaign-odds-y-tick' : `campaign-metric-y-tick-${metricKey}`,
       dataAttrs: { 'data-tick-value': tick.value },
       gridTestId: (metricKey === 'odds' || metricKey === 'magicB') ? 'campaign-odds-integer-grid-line' : undefined,
@@ -965,10 +966,10 @@ export function CampaignMetricScatterPlot({
       ? undefined
       // -1R 标签留在不随图滚动的纵轴栏里，否则横向滚动后阈值就没了参照。
       : [
-        { value: lossBoundaryValue, text: '-1R', testId: 'campaign-odds-loss-boundary-label' },
-        ...(showRuinBoundary ? [{ value: CAPITAL_RUIN_THRESHOLD, text: '-10R', testId: 'campaign-odds-capital-ruin-label' }] : []),
+        { value: lossBoundaryValue, text: magicFamily ? '-1' : '-1R', testId: 'campaign-odds-loss-boundary-label' },
+        ...(showRuinBoundary ? [{ value: CAPITAL_RUIN_THRESHOLD, text: magicFamily ? '-10' : '-10R', testId: 'campaign-odds-capital-ruin-label' }] : []),
       ],
-  }), [domain.max, domain.min, formatValue, lossBoundaryValue, metricKey, ticks, showRuinBoundary]);
+  }), [domain.max, domain.min, formatValue, lossBoundaryValue, magicFamily, metricKey, ticks, showRuinBoundary]);
 
   const referenceLines = useMemo<ScatterReferenceLine[]>(() => {
     const lines: ScatterReferenceLine[] = [];
@@ -1050,10 +1051,12 @@ export function CampaignMetricScatterPlot({
             <dd>按预期回撤百分比的倒数 100 ÷ D% 等间距分柱（D = 2% → 50），标注写的是对应的实际预期回撤区间，所以百分比刻度左疏右密；不考虑时间先后：越往右止损越紧，越往左回撤空间越宽。样本够多且有极远的离群值时，最右一根并成「≤ 下界」柱。一场都没有的区间也保留空柱。柱内自底向上是亏损 → 持平或算不出 b → 盈利（按这一场 b 的正负），换组时另起一行、一行里不混色；亏损越大越靠底、盈利越大越靠顶。柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
           ) : bars ? (
             <dd>按{metricLabel}的档位分柱，不考虑时间先后；一场都没有的档位也保留空柱，「某一档 0 场」本身就是结论。{segregatedBars ? '柱内自底向上是亏损 → 持平或算不出 b → 盈利（按这一场 b 的正负），换组时另起一行、一行里不混色；亏损越大越靠底、盈利越大越靠顶。' : ''}柱内的左右位置不携带含义——一行放不下时点会并排铺开。</dd>
+          ) : dist && magicFamily ? (
+            <dd>横轴为神奇的 b，按几何公式计算的无量纲指标，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10；出现 b ≤ −10 时，左端固定为 −12。超出窗口的点贴边画三角，保留原值及统计。−1 为参考线，不代表实际止损；0 只表示 b 的正负分界，不等于账户结算盈亏平衡。</dd>
           ) : dist && oddsFamily ? (
             <dd>横轴就是神奇的 b 本身，单位 R，线性刻度，不考虑时间先后。通常取 p2–p98 的稳健窗口并封顶在 +10R；出现 b ≤ −10 时，左端固定为 −12R，保证归零界限可见且不被极端亏损挤压。超出窗口的点贴边画三角，保留原值、黄色风险描边及统计；−1R 止损线仍保留。</dd>
           ) : geometricDist ? (
-            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。0.90 处另画黄色参考线，与 1.00 盈亏平衡线区分；0.90 不是本金归零。Gᵢ = 0 无法取对数，单独列在左侧「本金归零」栏，以黄色分隔线标注「归零界限」：按固定 10% 下注，bᵢ ≤ −10 时归零；这条线分隔独立栏与正值对数轴，不是把 0 放入对数刻度。归零样本不纳入密度曲线，但保留在样本总数、胜率和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记；−1R 止损墙与 +10R 封顶在这里不适用。</dd>
+            <dd>横轴按 ln(Gᵢ) 对数刻度排布，标签仍显示几何期望倍数：0.5 → 1 → 2 等距，表示相同的倍率变化；不考虑时间先后。小于 1 和大于 1 使用同一尺度。0.90 处另画黄色参考线，与 1.00 模型中性线区分。Gᵢ = 0 无法取对数，单独列在左侧归零栏；固定参数 x = 10% 时，bᵢ ≤ −10 表示模型归零，不是账户真实本金归零。这些样本不纳入密度曲线，但保留在样本总数和摘要统计中。正值在对数空间取稳健窗口，超出窗口的点贴边标记。</dd>
           ) : dist ? (
             <dd>横轴就是{axisLabel ?? metricLabel}本身{genericSpec ? `（单位 ${genericSpec.unit}）` : ''}，线性刻度，不考虑时间先后。显示区间留给主体：p2–p98 之内再用四分位距裁掉长尾（Q1 − 3×IQR ~ Q3 + 3×IQR，最高一柱仍放不下时倍数收紧；每一侧最多约一成的战役贴边，不足 10 场不裁），并且无论如何把{windowAnchorText}圈在窗口内；超出边缘的极端值贴边画成三角并在脚注计数，统计与悬停仍用原值。神奇的 b专属的 −1R 止损墙与 +10R 封顶在这里不适用，也不会画出来。</dd>
           ) : (
@@ -1075,7 +1078,7 @@ export function CampaignMetricScatterPlot({
                 <span>{item.label}</span>
               </span>
             ))}
-            {showRuinBoundary && <span className="inline-flex items-start gap-1"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><GuideSwatch token="loss" shape="square" /></svg><span>红色方点＋黄圈：{RUIN_ASSUMPTION}（b ≤ {CAPITAL_RUIN_THRESHOLD}R）。贴边三角仍保留黄圈。</span></span>}
+            {showRuinBoundary && <span className="inline-flex items-start gap-1"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><GuideSwatch token="loss" shape="square" /></svg><span>红色方点＋黄圈：{magicFamily ? '固定 10% 参数的模型归零' : RUIN_ASSUMPTION}（b ≤ {CAPITAL_RUIN_THRESHOLD}{magicFamily ? '' : 'R'}）。贴边三角仍保留黄圈。</span></span>}
           </dd>
         </div>
         <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2">
@@ -1085,7 +1088,11 @@ export function CampaignMetricScatterPlot({
           ) : dist ? (
             <dd>
               {guide.point} 横向位置吸附到所在档的中心（每档至少 14px 宽）
-              {oddsFamily
+              {magicFamily
+                ? showRuinBoundary
+                  ? '：在 −10、−1、0 分区内分别等宽分档，点不跨越边界；恰好 −10 归入左侧模型归零区。窄屏可左右滑动；精确 b 看提示框。'
+                  : '：每 1 个单位等分成若干档，−1 与 0 恰好是档边界；精确 b 看提示框。'
+                : oddsFamily
                 ? showRuinBoundary
                   ? '：在 −10R、−1R、0 分区内分别等宽分档，点不跨越边界；恰好 −10R 归入左侧风险区。密度曲线按标准档宽近似换算，边界附近档宽可能略有不同。窄屏必要时可左右滑动；精确 b 看提示框。'
                   : '：每 1R 等分成若干档，−1R 与 0 恰好是档边界，越过止损墙的亏损永远画在墙左边；精确 b 看提示框。'
@@ -1107,7 +1114,7 @@ export function CampaignMetricScatterPlot({
             <dd>{guide.referenceLines.join(' ')}</dd>
           </div>
         ) : null}
-        {oddsFamily && <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2"><dt className="font-medium text-[color:var(--chart-ink)]">归零线</dt><dd>按固定 x = 10% 下注，1 + b·x ≤ 0 等价于 b ≤ −10。存在这类样本时显示黄色 −10R 界限（分布为竖线，时序为横线），并单独计数，包含恰好 −10R。这里描述固定下注模型，不代表真实账户已发生强平。</dd></div>}
+        {oddsFamily && <div className="grid grid-cols-[34px_minmax(0,1fr)] gap-2"><dt className="font-medium text-[color:var(--chart-ink)]">归零线</dt><dd>固定参数 x = 10% 时，1 + b·x ≤ 0 等价于 b ≤ −10。存在这类样本时显示黄色 −10{magicFamily ? '' : 'R'} 界限并单独计数。这里只描述固定参数模型，不代表实际账户收益、止损或强平。</dd></div>}
       </dl>
     </div>
   ) : null;
@@ -1168,7 +1175,7 @@ export function CampaignMetricScatterPlot({
             <>
               <span className="text-[color:var(--chart-axis)]">|</span>
               <span data-testid={`campaign-metric-win-rate-${metricKey}`}>
-                {zeroSpec?.positiveShareLabel ?? '胜率'} {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
+                {zeroSpec?.positiveShareLabel ?? (magicFamily ? 'b 正值占比' : '胜率')} {Math.round(dist.summary.winRate * 100)}% ({dist.summary.winCount}/{dist.summary.n})
               </span>
             </>
           )}
@@ -1188,9 +1195,9 @@ export function CampaignMetricScatterPlot({
             <>
               <span className="text-[color:var(--chart-axis)]">|</span>
               <span data-testid={`campaign-metric-tail-count-${metricKey}`}>
-                右尾 &gt;+{TAIL_THRESHOLD}R {dist.summary.tailCount} 场
+                右尾 &gt;+{TAIL_THRESHOLD}{magicFamily ? '' : 'R'} {dist.summary.tailCount} 场
               </span>
-              <span data-testid={`campaign-metric-capital-ruin-count-${metricKey}`} className={showRuinBoundary ? 'text-[color:var(--chart-threshold)]' : undefined}>10% 下注归零 {ruinCount} 场</span>
+              <span data-testid={`campaign-metric-capital-ruin-count-${metricKey}`} className={showRuinBoundary ? 'text-[color:var(--chart-threshold)]' : undefined}>10% {magicFamily ? '模型' : '下注'}归零 {ruinCount} 场</span>
             </>
           ) : null}
           <span className="text-[color:var(--chart-axis)]">|</span>
@@ -1201,7 +1208,7 @@ export function CampaignMetricScatterPlot({
             <span>{geometricDist ? '对数分档密度（每档期望场数）' : '平滑密度（每档期望场数）'}</span>
           </span>
           {geometricDist && <span>对数刻度 · 0.5 → 1 → 2 等距</span>}
-          {geometricDist && geometricDist.zeroIds.length > 0 && <span>本金归零 {geometricDist.zeroIds.length} 场</span>}
+          {geometricDist && geometricDist.zeroIds.length > 0 && <span>模型归零 {geometricDist.zeroIds.length} 场</span>}
         </div>
       ) : barColumns ? (
         <div
@@ -1224,7 +1231,7 @@ export function CampaignMetricScatterPlot({
           <span>范围 {formatValue(summary.min)} – {formatValue(summary.max)}</span>
           <span className="text-[color:var(--chart-axis)]">|</span>
           <span>中位数 {formatValue(summary.median)}</span>
-          {oddsFamily && <span data-testid={`campaign-metric-capital-ruin-count-${metricKey}`} className={showRuinBoundary ? 'text-[color:var(--chart-threshold)]' : undefined}>10% 下注归零 {ruinCount} 场</span>}
+          {oddsFamily && <span data-testid={`campaign-metric-capital-ruin-count-${metricKey}`} className={showRuinBoundary ? 'text-[color:var(--chart-threshold)]' : undefined}>10% {magicFamily ? '模型' : '下注'}归零 {ruinCount} 场</span>}
         </div>
       )}
       directionHint={dist

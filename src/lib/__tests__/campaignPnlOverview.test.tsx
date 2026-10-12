@@ -10,11 +10,11 @@ import {
 } from '@/lib/campaignPnlOverview';
 
 /**
- * 黄金样本：与详情页内联版本（提取前）在 metrics 页面测试那场「winner」战役上的输出逐字对照。
- * 已实现 200、L 100 → b = 200%；P 统一 50% → E = +0.50R；G = 1 + 2×0.1 = 1.20。
+ * 展示样本：显式输入几何 b = 2；已实现 200、L 100 是独立结算字段，不参与这里的 b 计算。
+ * P 统一 50% → 模型 E = +0.50；G = 1 + 2×0.1 = 1.20。
  * 【用户要求】主力涨跌幅 +20% → 涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
-// 【用户要求】盈亏比与已实现 P&L 分别置顶左右栏；其余递进指标与结果 / 仓位指标依序向下。
+// 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
 const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","有效涨幅倍数","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","有效涨幅","加仓效用"];
 
 const GOLDEN_KEYS = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","arithmeticExpectancy","expectedMaxDrawdownPct","mainPriceChange","mainPriceEfficiency","realizedPnl","initialExpectedMaxLoss","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","positionAmplification","effectivePriceChangePct","addEfficiency"];
@@ -32,6 +32,7 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
     mainSideNotional: { side: 'long', total: 1500 },
     expectedMaxDrawdownPct: 10,
     payoffRatio: 200,
+    magicB: 2,
     mainPriceChangePct: 20,
     hasMainAdd: true,
     addCount: 1,
@@ -45,11 +46,9 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 
 describe('buildCampaignPnlOverviewItems', () => {
   it('places the effective rise multiple before magic b and shows the new worked formula', () => {
-    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 2,
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 6,
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100,
-        magicBReconciliation: {referenceCoins: 5, projectedCoins: 10, settledCoins: 10, initialExposure: 1000, initialRisk: 100,
-          normalization: 0.5, rawProduct: 10, modelPnl: 500, balanceAtSupport: -100, exitPriceAdjustment: -200,
-          otherNetPnl: 10, netSettlementAdjustment: -10, quantityAdjustment: 0, totalAdjustment: -300, reconstructedPnl: 200} } }));
+        magicBInputs: {referenceCoins: 5, firstAddPrice: 120, initialExposure: 1000, initialDrawdownPct: 10, basePositionRatio: 0.6} } }));
     const keys = items.map(item => item.key);
     expect(keys.slice(0, 5)).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy"]);
     const riseMultiple = items.find(item => item.key === 'effectivePriceChangeMultiple')!;
@@ -57,11 +56,31 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('50.00% ÷ 10.00% ≈ 5.00x');
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBeUndefined();
-    expect(magic.value).toBe('2.00');
-    const worked = render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]');
-    expect(worked).toHaveTextContent('5 × 100 ÷ 1000 ≈ 0.5（50.0000%）');
-    expect(worked).toHaveTextContent('2.000000 × 0.500000 × 50.000000% ÷ 10.000000% ≈ 5.00000000');
-    expect(worked).toHaveTextContent('b ≈ 5.00000000 + (-3.00000000) ≈ 2.00000000');
+    expect(magic.value).toBe('6.00');
+    const help = render(<>{magic.help}</>).container;
+    const worked = help.querySelector('[data-testid="magic-b-worked"]');
+    expect(worked).toHaveTextContent('β = Q基 × T₁ ÷ V₀');
+    expect(worked).toHaveTextContent('5 × 120 ÷ 1000 ≈ 0.6（60.0000%）');
+    expect(worked).toHaveTextContent('2.000000 × 0.600000 × 50.000000% ÷ 10.000000%');
+    expect(worked).toHaveTextContent('≈ 6.00000000');
+    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toBeNull();
+    expect(help).not.toHaveTextContent('+ 结算修正');
+    expect(worked).not.toHaveTextContent('结算修正');
+    expect(help).not.toHaveTextContent('算法一');
+    expect(help).toHaveTextContent('不等同于已实现净盈亏');
+    expect(items.find(item => item.key === 'addEfficiency')?.value).toBe('+3.00');
+    expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+2.50');
+    expect(items.find(item => item.key === 'geometricExpectancy')?.value).toBe('1.60');
+  });
+  it('does not fall back to legacy realized b when the new geometric b is missing', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ magicB: null }));
+    for (const key of ['magicB', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy']) {
+      expect(items.find(item => item.key === key)?.value).toBe('—');
+    }
+    const help = render(<>{items.find(item => item.key === 'magicB')?.help}</>).container;
+    expect(help).toHaveTextContent('显示「—」');
+    expect(help).not.toHaveTextContent('使用净结算法');
+    expect(items.find(item => item.key === 'realizedPnl')?.value).toBe('200.00 USDT');
   });
   it('expands every actual plus-alpha factor without multiplying by early retention', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
@@ -124,7 +143,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["1", "—", "—", "2.00", "1.20", "+0.50R", "10.00%", "+20.00%", "+2.00", "200.00 USDT", "100.00 USDT", "+25.00%", "+2.50", "5.00%", "12.50%", "1.50x", "—", "+1.00"]);
+    expect(items.map(item => item.value)).toEqual(["1", "—", "—", "2.00", "1.20", "+0.50", "10.00%", "+20.00%", "+2.00", "200.00 USDT", "100.00 USDT", "+25.00%", "+2.50", "5.00%", "12.50%", "1.50x", "—", "+1.00"]);
     const G = '#0ECB81';
     const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual(["#1E2329", "#1E2329", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#181A20", "#181A20", undefined, "#64748B", "#0ECB81"]);
@@ -146,6 +165,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       initialExpectedMaxLoss: 0,
       expectedMaxDrawdownPct: 0,
       payoffRatio: null,
+      magicB: null,
       asymmetricRiskContribution: null,
       arithmeticExpectancy: null,
       geometricExpectancy: null,
@@ -176,6 +196,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       realizedPnl: -50,
       payoffRatio: -50,
+      magicB: -0.5,
       arithmeticExpectancy: -0.75,
       geometricExpectancy: -0.05,
     }));
@@ -184,20 +205,20 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.realizedPnl.color).toBe('#F6465D');
     expect(byKey.magicB.value).toBe('-0.50');
     expect(byKey.magicB.valueClassName).toBe('text-[#F6465D]');
-    expect(byKey.arithmeticExpectancy.value).toBe('-0.75R');
+    expect(byKey.arithmeticExpectancy.value).toBe('-0.75');
     expect(byKey.geometricExpectancy.value).toBe('0.95');
   });
 
   it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，颜色跟着读者看到的数走（同涨跌幅倍数）', () => {
     // 已实现 -3、L 1000 → b = -0.003，读数「0.00」：不能是红色的 0.00
     for (const payoffRatio of [-0.3, 0.3, -0.49]) {
-      const byKey = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ payoffRatio })).map(item => [item.key, item]));
+      const byKey = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ magicB: payoffRatio / 100 })).map(item => [item.key, item]));
       expect(byKey.magicB.value, String(payoffRatio)).toBe('0.00');
       expect(byKey.magicB.valueClassName, String(payoffRatio)).toBe('text-muted-foreground');
       expect(byKey.magicB.color, String(payoffRatio)).toBe('#64748B');
     }
     // 取整后不为 0 的仍按正负上色
-    const loss = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ payoffRatio: -0.6 })).map(item => [item.key, item]));
+    const loss = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ magicB: -0.006 })).map(item => [item.key, item]));
     expect(loss.magicB.value).toBe('-0.01');
     expect(loss.magicB.valueClassName).toBe('text-[#F6465D]');
     expect(loss.magicB.color).toBe('#F6465D');
@@ -207,6 +228,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     // 已实现 -0.3、L 100 → b = -0.003：盈亏比读「0.00」，加仓效用 / 算术期望的说明里也只能是「0.00」
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       payoffRatio: -0.3,
+      magicB: -0.003,
       asymmetricRiskContribution: { group: 'loss', sampleCount: 1, meanSquareTerm: 0, meanSquareShare: 1 },
     }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
@@ -282,7 +304,7 @@ describe('CampaignPnlOverviewPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '算术期望说明' }));
     expect(screen.getByText('本场：50.00% × 2.00 − 50.00%')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '几何期望说明' }));
-    expect(screen.getByText('本场 x = 1.00%')).toBeInTheDocument();
+    expect(screen.getByText('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '涨跌幅倍数说明' }));
@@ -389,9 +411,9 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey({ peakPriceChangePct: 10.01, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).not.toBe('—');
   });
 
-  it('几何期望的说明写明本场资产分母用的是哪一种（原来在脚注里）', () => {
-    expect(helpText(byKey().geometricExpectancy.help)).toContain('本场的资产分母：主力开仓那一刻的账户总资产快照。');
+  it('几何期望使用固定 10% 模型，不随实际资产风险比例变化', () => {
+    expect(helpText(byKey().geometricExpectancy.help)).toContain('固定风险比例 x = 10%');
     expect(helpText(byKey({ initialRisk: { drawdownFraction: 0.01, source: 'current_account_fallback' } }).geometricExpectancy.help))
-      .toContain('本场的资产分母：这场没有开仓时的资产快照，用今日当前总账户资产估算。');
+      .toContain('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20');
   });
 });
