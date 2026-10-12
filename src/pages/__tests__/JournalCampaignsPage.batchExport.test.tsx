@@ -105,7 +105,10 @@ function renderPage(search = '?sort=time&direction=desc&chart=importance') {
   const view = render(pageTree(search));
   return { ...view, rerenderPage: () => view.rerender(pageTree(search)) };
 }
-const selectMode = () => fireEvent.click(screen.getByTestId('campaign-batch-select-toggle'));
+const selectMode = () => {
+  if (screen.getByTestId('campaign-actions-toggle').getAttribute('aria-expanded') !== 'true') fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
+  fireEvent.click(screen.getByTestId('campaign-batch-select-toggle'));
+};
 /** 假 IntersectionObserver：记下观察目标与参数，测试里手动回报可见比例。 */
 function stubIntersectionObserver() {
   const observers: Array<{ callback: IntersectionObserverCallback; options?: IntersectionObserverInit; target?: Element }> = [];
@@ -139,6 +142,20 @@ async function openPreview() {
 }
 
 describe('JournalCampaignsPage batch export wiring', () => {
+  it('folds secondary actions into one subtle accessible control and closes the menu after choosing batch selection', () => {
+    renderPage();
+    const more = screen.getByRole('button', { name: '导出与下载', exact: true });
+    expect(more).toHaveClass('text-muted-foreground/40');
+    expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
+    fireEvent.click(more);
+    expect(screen.getByTestId('campaign-export-xlsx')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-batch-select-toggle'));
+    expect(more).toHaveAttribute('data-selection-mode', 'true');
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
+  });
+
   it('shares selection between actual scatter points and list checkboxes without navigation', async () => {
     renderPage();
     await screen.findAllByTestId('campaign-card');
@@ -275,6 +292,9 @@ describe('JournalCampaignsPage batch export wiring', () => {
     expect(check('Bravo')).toBeChecked();
     expect(check('Charlie')).toBeChecked();
     expect(screen.getByTestId('campaign-batch-selected-count')).toHaveTextContent('2');
+    if (!screen.queryByTestId('campaign-range-clear')) {
+      fireEvent.click(screen.getByTestId('campaign-operation-range'));
+    }
     fireEvent.click(screen.getByTestId('campaign-range-clear'));
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
     expect(check('Alpha')).not.toBeChecked();
@@ -301,6 +321,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
   it('disables entry before the complete dataset is ready, and disables download for an empty selection', async () => {
     fixture.complete = false;
     const { unmount } = renderPage();
+    fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
     expect(screen.getByTestId('campaign-batch-select-toggle')).toBeDisabled();
     unmount();
     fixture.complete = true;
@@ -336,7 +357,7 @@ describe('JournalCampaignsPage batch export wiring', () => {
     expect(screen.getByTestId('campaign-batch-selection-bar')).toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
-    expect(screen.getByTestId('campaign-batch-select-toggle')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('campaign-actions-toggle')).toHaveAttribute('data-selection-mode', 'false');
     selectMode();
     expect(check('Alpha')).toBeChecked();
   }, 15_000);
@@ -394,8 +415,8 @@ describe('JournalCampaignsPage batch export wiring', () => {
       await screen.findByTestId('export-preview');
       fireEvent.click(screen.getByRole('button', { name: '全部下载后关闭' }));
       expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
-      await waitFor(() => expect(screen.getByTestId('campaign-batch-select-toggle')).toHaveFocus());
-      expect(screen.getByTestId('campaign-batch-select-toggle')).toHaveTextContent('批量下载');
+      await waitFor(() => expect(screen.getByTestId('campaign-actions-toggle')).toHaveFocus());
+      expect(screen.getByTestId('campaign-actions-toggle')).toHaveAccessibleName('导出与下载');
     } finally {
       vi.unstubAllGlobals();
     }
@@ -427,13 +448,13 @@ describe('JournalCampaignsPage batch export wiring', () => {
       renderPage();
       selectMode();
       fireEvent.click(check('Alpha'));
-      const toggle = screen.getByTestId('campaign-batch-select-toggle');
+      const toggle = screen.getByTestId('campaign-actions-toggle');
       // 焦点在选择条的「下载选中」上按 Esc：选择条卸载，焦点交给「批量下载」开关
       screen.getByTestId('campaign-batch-export-open').focus();
       fireEvent.keyDown(screen.getByTestId('campaign-batch-export-open'), { key: 'Escape' });
       expect(screen.queryByTestId('campaign-batch-selection-bar')).not.toBeInTheDocument();
       await waitFor(() => expect(toggle).toHaveFocus());
-      expect(toggle).toHaveTextContent('批量下载');
+      expect(toggle).toHaveAccessibleName('导出与下载');
       // 底部浮条上的「退出选择」：同样交给开关
       selectMode();
       report(0);

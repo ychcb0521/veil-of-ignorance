@@ -15,6 +15,7 @@ import {
   Layers,
   ListChecks,
   ListOrdered,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Sigma,
@@ -1518,8 +1519,6 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
  */
 function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperties {
   const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));
-  widths.positionAmplification = widths.positionGeometricMultiple = Math.max(widths.positionAmplification, widths.positionGeometricMultiple);
-  widths.geometricExpectancy = widths.effectivePriceChangePct = Math.max(widths.geometricExpectancy, widths.effectivePriceChangePct);
   const style: Record<string, string> = {};
   for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;
   return style as CSSProperties;
@@ -1980,8 +1979,7 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
-          {/* 币量累积因子置于名义仓位放大下方；上下格共用列宽。 */}
-          <div className="flex min-w-0 shrink-0 flex-col sm:w-[var(--cm-w-positionAmplification)]">
+          {/* 币量累积因子紧跟名义仓位放大，同排展示。 */}
           <div
             data-testid="campaign-position-amplification"
             title={positionAmplification == null
@@ -2002,7 +2000,6 @@ const CampaignCard = memo(function CampaignCard({
             <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
           </div>
-          </div>
           <div
             data-testid="campaign-unrealized-price-change"
             title={unrealizedPriceChangePct == null
@@ -2018,7 +2015,6 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
-          <div className="flex min-w-0 shrink-0 flex-col sm:w-[var(--cm-w-geometricExpectancy)]">
           <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
@@ -2042,7 +2038,6 @@ const CampaignCard = memo(function CampaignCard({
             title="有效涨幅 = (F − Kₘ) ÷ Kₘ，最终平仓价相对末次加仓支撑线的涨幅">
             <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangePct(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
-          </div>
           </div>
           <div
             data-testid="campaign-arithmetic-expectancy"
@@ -2183,6 +2178,7 @@ export default function JournalCampaignsPage() {
   const [metricChartOpen, setMetricChartOpen] = useState(initialChartState.open);
   const [metricChartKey, setMetricChartKey] = useState<CampaignMetricChartKey>(initialChartState.key);
   const [summaryExportPending, setSummaryExportPending] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const metricChartPanelRef = useRef<HTMLDivElement | null>(null);
   const [deletedOpen, setDeletedOpen] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -4346,7 +4342,7 @@ export default function JournalCampaignsPage() {
                 左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
             <div
               data-testid="campaign-sort-controls"
-              className={`order-2 flex min-h-11 flex-wrap items-center gap-x-1 gap-y-1 border-t border-border/60 py-2 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
+              className={`order-2 flex min-h-10 flex-wrap items-center gap-x-0.5 gap-y-0.5 border-t border-border/60 py-1.5 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
             >
               {renderSortRow(SORT_OPTIONS.map(option => {
                 /** 这一项在排序链上的第几级（0 = 第一级，-1 = 不在链上）。 */
@@ -4419,7 +4415,7 @@ export default function JournalCampaignsPage() {
                       if (formula) openFormulaPopover(event, formula);
                     }}
                     {...sortLongPressHandlers(option.value, !inChain)}
-                    className={`inline-flex h-7 shrink-0 select-none items-center gap-0.5 whitespace-nowrap rounded border px-1.5 transition-[color,background-color,border-color,box-shadow] duration-150 [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
+                    className={`inline-flex h-7 shrink-0 select-none items-center gap-0.5 whitespace-nowrap rounded border px-1 transition-[color,background-color,border-color,box-shadow] duration-150 [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
                       active
                         ? 'border-border bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:border-foreground/15 dark:bg-accent'
                         : thenLevel
@@ -4731,7 +4727,22 @@ export default function JournalCampaignsPage() {
                 </Popover>,
               );
               }))}
-              {/* 【用户要求】导出 Excel 汇总表：与批量下载一起靠在这一行最右端 */}
+              {/* 次要操作默认折叠：只保留淡色更多符号，键盘仍可聚焦。 */}
+              <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    ref={batchToggleRef}
+                    type="button"
+                    data-testid="campaign-actions-toggle"
+                    aria-label="导出与下载"
+                    data-selection-mode={selectionMode}
+                    title={summaryExportPending ? '导出正在准备数据，点击查看操作' : '更多操作：导出与批量下载'}
+                    className={`ml-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-transparent transition-colors hover:border-border/60 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${selectionMode || summaryExportPending ? 'text-[#B7860B]' : 'text-muted-foreground/40 hover:text-foreground/80 focus-visible:text-foreground/80'}`}
+                  >
+                    <MoreHorizontal aria-hidden="true" className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" sideOffset={6} collisionPadding={POPOVER_COLLISION_PADDING} aria-label="导出与下载操作" className={`w-44 p-1.5 ${POPOVER_VIEWPORT_MAX_W}`}>
               <button
                 type="button"
                 data-testid="campaign-export-xlsx"
@@ -4741,21 +4752,19 @@ export default function JournalCampaignsPage() {
                   : campaignRowsComplete
                   ? `导出 Excel 汇总表：当前时间段里的全部 ${displayRows.length} 场战役，一场一行，排序方式与盈亏概览的全部参数（数值不带单位，便于做相关性分析）`
                   : '战役还在加载，全部读完后才能导出'}
-                onClick={() => handleExportSummaryXlsx()}
-                className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border border-border/70 px-2 text-muted-foreground transition-[color,background-color,border-color] duration-150 hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={() => { setActionsOpen(false); void handleExportSummaryXlsx(); }}
+                className="flex h-8 w-full items-center gap-2 rounded px-2 text-xs text-foreground/80 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <FileSpreadsheet aria-hidden="true" className="h-3 w-3" />
                 {summaryExportPending ? '准备数据…' : '导出 Excel'}
               </button>
               {summaryExportPending ? (
                 <>
-                  <button type="button" data-testid="campaign-export-xlsx-available" className="px-1 text-muted-foreground underline underline-offset-2" title="立即导出全部战役，尚未加载的新指标留空" onClick={() => handleExportSummaryXlsx(true)}>导出现有数据</button>
-                  <button type="button" className="px-1 text-muted-foreground" onClick={() => setSummaryExportPending(false)}>取消等待</button>
+                  <button type="button" data-testid="campaign-export-xlsx-available" className="flex h-8 w-full items-center rounded px-2 text-xs text-muted-foreground hover:bg-muted/70" title="立即导出全部战役，尚未加载的新指标留空" onClick={() => { setActionsOpen(false); void handleExportSummaryXlsx(true); }}>导出现有数据</button>
+                  <button type="button" className="flex h-8 w-full items-center rounded px-2 text-xs text-muted-foreground hover:bg-muted/70" onClick={() => { setActionsOpen(false); setSummaryExportPending(false); }}>取消等待</button>
                 </>
               ) : null}
-              {/* 批量下载不是排序项：排序按钮照旧左对齐，它与「导出 Excel」一起靠在这一行最右端；进入选择模式后下方展开选择条。 */}
               <button
-                ref={batchToggleRef}
                 type="button"
                 aria-pressed={selectionMode}
                 data-testid="campaign-batch-select-toggle"
@@ -4763,16 +4772,18 @@ export default function JournalCampaignsPage() {
                 title={campaignRowsComplete
                   ? selectionMode ? '退出选择模式（Esc）；已选的战役保留' : '勾选卡片或点击散点，把多场战役一次下载成 PNG 压缩包'
                   : '战役还在加载，全部读完后才能批量下载'}
-                onClick={() => setSelectionMode(current => !current)}
-                className={`inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded border px-2 transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
+                onClick={() => { setActionsOpen(false); setSelectionMode(current => !current); }}
+                className={`flex h-8 w-full items-center gap-2 rounded border border-transparent px-2 text-xs transition-[color,background-color,border-color] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-40 ${
                   selectionMode
                     ? 'border-[#F0B90B]/45 bg-[#F0B90B]/10 font-medium text-[#8F6B00] dark:text-[#E8B21C]'
-                    : 'border-border/70 text-muted-foreground hover:border-border hover:bg-foreground/[0.04] hover:text-foreground/85'
+                    : 'text-foreground/80 hover:bg-muted/70'
                 }`}
               >
                 {selectionMode ? <X aria-hidden="true" className="h-3 w-3" /> : <Download aria-hidden="true" className="h-3 w-3" />}
                 {selectionMode ? '退出选择' : '批量下载'}
               </button>
+                </PopoverContent>
+              </Popover>
             </div>
             {sortChain.length > 1 && renderSortChainBar()}
             {selectionMode && !narrowViewport && renderBatchSelectionBar(false)}

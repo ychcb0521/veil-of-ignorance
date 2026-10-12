@@ -902,21 +902,22 @@ describe('JournalCampaignsPage sorting', () => {
     const sortRow = screen.getByTestId('campaign-sort-controls');
     // 「排序方式这里不美观。这里还是用左对齐吧」：不再读封面的列模板，按钮依次排开、间距均匀
     expect([...sortRow.classList].some(cls => cls.startsWith('xl:grid'))).toBe(false);
-    expect(sortRow).toHaveClass('flex', 'flex-wrap', 'gap-x-1');
+    expect(sortRow).toHaveClass('flex', 'flex-wrap', 'gap-x-0.5', 'min-h-10', 'py-1.5');
     // 行首与封面左缘对齐：同一套内边距 + 一条透明 1px 边框抵掉卡片外框
     expect(sortRow).toHaveClass('px-4', 'sm:px-5', 'border-x', 'border-transparent');
     // 子节点：标签，然后按钮与分隔线按次序排开，没有按列分组的外壳；
     // 最末两个是「导出 Excel」与「批量下载」——不是排序项，「导出 Excel」带 ml-auto，两个一起贴在这一行最右端
     const children = [...sortRow.children];
     expect(children[0]).toHaveTextContent('排序方式');
-    const exportButton = children.at(-2)!;
-    expect(exportButton).toHaveAttribute('data-testid', 'campaign-export-xlsx');
-    expect(exportButton).toHaveClass('ml-auto');
-    const batchToggle = children.at(-1)!;
-    expect(batchToggle).toHaveAttribute('data-testid', 'campaign-batch-select-toggle');
+    const actions = children.at(-1)!;
+    expect(actions).toHaveAttribute('data-testid', 'campaign-actions-toggle');
+    expect(actions).toHaveClass('ml-auto');
+    expect(actions).toHaveAccessibleName('导出与下载');
+    expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
     // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点
-    const sequence = children.slice(1, -2).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
-    for (const item of children.slice(1, -2).filter(node => node.hasAttribute('data-sort-item'))) {
+    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    for (const item of children.slice(1, -1).filter(node => node.hasAttribute('data-sort-item'))) {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
@@ -1322,7 +1323,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(reading('High Importance')).toHaveClass('text-foreground/85');
       // 封面上紧跟加仓次数，悬停给出算式与单位
       const cell = screen.getAllByTestId('campaign-position-amplification')[0];
-      expect(cell.parentElement!.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
+      expect(cell.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
       expect(cell.nextElementSibling).toHaveAttribute('data-testid', 'campaign-position-geometric-multiple');
       expect(cell.querySelector('dt')).toHaveTextContent('仓位放大');
       expect(cell.getAttribute('title')).toContain('主方向总名义仓位 ÷ 主力开仓名义仓位');
@@ -2834,8 +2835,10 @@ describe('JournalCampaignsPage sorting', () => {
         await new Promise(resolve => window.setTimeout(resolve, 50));
         expect(pending).toHaveLength(0);
       }
+      fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
       fireEvent.click(screen.getByTestId('campaign-export-xlsx'));
       await waitFor(() => expect(pending).toHaveLength(1));
+      fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
       expect(screen.getByTestId('campaign-export-xlsx')).toBeDisabled();
       expect(workbook).not.toHaveBeenCalled();
 
@@ -2854,6 +2857,8 @@ describe('JournalCampaignsPage sorting', () => {
       }
       expect(createUrl).toHaveBeenCalledWith(expect.any(Blob));
       expect(downloads).toEqual([{ href: 'blob:campaign-summary-test', filename: expect.stringMatching(/^交易战役汇总-\d+\.xlsx$/) }]);
+      expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
       expect(screen.getByTestId('campaign-export-xlsx')).not.toBeDisabled();
       expect(screen.queryByTestId('campaign-export-xlsx-available')).not.toBeInTheDocument();
       await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });

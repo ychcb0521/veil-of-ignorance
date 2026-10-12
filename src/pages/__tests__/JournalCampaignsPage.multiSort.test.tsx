@@ -276,6 +276,7 @@ describe('战役列表：多级排序', () => {
   it('批量下载：「前 N 场按当前排序」按排序链选；被第一级筛掉的已选仍说明「因当前排序口径未显示」', async () => {
     renderPage('?sort=mirrorTp&direction=desc&then=addEfficiency.desc');
     await waitFor(() => expect(order()).toEqual(MIRROR_THEN_ADD));
+    fireEvent.click(screen.getByTestId('campaign-actions-toggle'));
     fireEvent.click(screen.getByTestId('campaign-batch-select-toggle'));
     fireEvent.change(screen.getByLabelText('选择前几场'), { target: { value: '3' } });
     fireEvent.click(screen.getByText('按当前排序选择'));
