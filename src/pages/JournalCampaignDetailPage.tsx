@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
+import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { getPersistedStateHydrationRevision, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { Button } from '@/components/ui/button';
@@ -1753,6 +1754,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       barMs: intervalToMs(computeInterval),
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
+  const campaignGeometricMetrics = useMemo(() => campaign
+    ? computeCampaignGeometricMetrics(campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections)
+    : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;
@@ -1780,6 +1784,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       asymmetricRiskContribution,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
+      effectivePriceChangePct: campaignGeometricMetrics?.effectivePriceChangePct ?? null,
+      positionGeometricMultiple: campaignGeometricMetrics?.positionGeometricMultiple ?? null,
+      geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });
     // 峰值涨幅、峰值涨幅倍数和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
@@ -1793,6 +1800,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     asymmetricRiskContribution,
     campaign,
     campaignMetricValues,
+    campaignGeometricMetrics,
     actualPriceChange,
     klinesLoading,
     legs,

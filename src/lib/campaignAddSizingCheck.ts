@@ -565,6 +565,44 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
   return result;
 }
 
+/** Actual add ratios use the same partial-close ledger as validation, but do not require a stop order. */
+export function resolveCampaignAddQuantitySteps(input: CampaignAddSizingInput): Array<{
+  legId: string; openTime: number; beforeCoins: number | null; addCoins: number | null;
+}> {
+  const corrections = input.legExitPriceCorrections ?? {};
+  const records = buildTradeRecordLookup(input.tradeRecords);
+  const settlement = computeCampaignRealizedPnl({ final_realized_pnl: null, actual_evolution: [] }, input.legs, input.tradeRecords, corrections);
+  const executions = new Map(input.legs.map(leg => [leg.id, resolveLegExecution(leg, leg.trade_record_id ? records.get(leg.trade_record_id) ?? null : null, corrections)]));
+  const ledgers = input.legs.filter(leg => isMainSideRole(leg.leg_role)).flatMap(leg => {
+    const cuts = settlement.recordsByLeg.get(leg.id) ?? [];
+    const snapshot = settlement.byLeg.get(leg.id) ?? null;
+    if (leg.leg_role === 'mirror_tp' && !leg.trade_record_id && !cuts.length && snapshot == null) return [];
+    return [buildLedger(leg, executions.get(leg.id)!, cuts, snapshot, corrections)];
+  });
+  return input.legs.filter(leg => (leg.leg_role ?? '').startsWith('main_add_') && (
+    !!leg.trade_record_id || leg.post_realized_pnl != null || !!leg.post_real_close_time || !!leg.post_simulated_close_time
+  )).map(add => {
+    const execution = executions.get(add.id)!;
+    const t = execution.openTime;
+    const operation = realTime(execution.record?.openedRealAt) ?? journalOpenOperationTime(add);
+    let beforeCoins: number | null = t == null ? null : 0;
+    if (t != null) for (const ledger of ledgers) {
+      if (ledger.leg.id === add.id || ledger.leg.direction !== add.direction) continue;
+      if (operation != null && ledger.openOperationTime != null && ledger.openOperationTime > operation) continue;
+      if (ledger.open == null) { if (!closedBy(ledger, t, operation)) beforeCoins = null; continue; }
+      const earlier = ledger.open < t || (ledger.open === t && sequence(ledger.leg) < sequence(add));
+      if (!earlier || closedBy(ledger, t, operation)) continue;
+      const closed = closedCoinsBy(ledger, t, operation);
+      if (ledger.coins == null || closed == null) beforeCoins = null;
+      else if (beforeCoins != null) beforeCoins += Math.max(0, ledger.coins - closed);
+    }
+    return {
+      legId: add.id, openTime: t ?? Number.NaN, beforeCoins,
+      addCoins: positive(execution.entryPrice) && positive(add.pre_position_size) ? add.pre_position_size / execution.entryPrice : null,
+    };
+  }).sort((a, b) => a.openTime - b.openTime || sequence(input.legs.find(leg => leg.id === a.legId)!) - sequence(input.legs.find(leg => leg.id === b.legId)!));
+}
+
 /** 缺口金额：千位以上取整带千分位（「缺 3,789,250」），以下保留两位。页面与导出图共用。 */
 export function formatAddSizingShortfall(value: number): string {
   if (!Number.isFinite(value)) return '—';

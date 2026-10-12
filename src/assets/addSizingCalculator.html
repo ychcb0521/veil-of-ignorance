@@ -417,6 +417,15 @@ tr.page-hidden{display:none}
 .output-compound .alpha-row{margin-top:12px;padding-top:10px;align-self:start}
 .output-compound .compound-note{grid-column:1;margin-top:7px}
 @media(max-width:600px){.big-output{grid-template-rows:none;row-gap:14px}.output-main{display:block;grid-column:auto;grid-row:auto}.output-compound{display:flex;grid-column:auto;grid-row:auto}}
+/* Keep footer rules on the same shared grid row at every viewport height. */
+.big-output .output-caption{font-weight:600}
+.big-output .output-sub,.big-output .compound-details{border-top:1px solid #d6e9e2;margin-top:12px;padding-top:12px;align-self:start;align-content:start}
+.big-output .output-sub{display:grid;gap:8px}
+.big-output .output-sub>span{align-self:start}
+.big-output .compound-details{display:grid;gap:8px}
+.big-output .output-compound .alpha-row{border-top:0;margin:0;padding:0;align-self:start}
+.big-output .compound-note{margin:0;font-size:11px;line-height:1.5}
+.big-output .output-unit{min-height:16px}
 </style></head>
 <body>
 <noscript><div class="noscript">请用开启 JavaScript 的浏览器打开此文件，才能使用自动计算功能。</div></noscript>

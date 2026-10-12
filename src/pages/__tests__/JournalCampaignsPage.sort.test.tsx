@@ -924,8 +924,8 @@ describe('JournalCampaignsPage sorting', () => {
       'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
       'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
-      'positionAmplification',
-      'unrealizedPriceChangePct', 'geometricExpectancy', 'arithmeticExpectancy',
+      'positionAmplification', 'positionGeometricMultiple',
+      'unrealizedPriceChangePct', 'geometricExpectancy', 'effectivePriceChangePct', 'arithmeticExpectancy',
       'divider-leverage',
       'leverage', 'importance', 'alpha',
     ]);
@@ -941,7 +941,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后涨跌幅…几何期望、算术期望（操作时间留在标题行）
-    const cardCells = [...metricRows[0].children].map(node => node.getAttribute('data-testid'));
+    const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
+    const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
     expect(cardCells).toEqual([
       'campaign-mirror-tp-status',
       'campaign-expected-drawdown-pct',
@@ -951,14 +952,16 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-add-efficiency',
       'campaign-add-count',
       'campaign-position-amplification',
+      'campaign-position-geometric-multiple',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',
+      'campaign-effective-price-change',
       'campaign-arithmetic-expectancy',
     ]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
-    const cells = [...metricRows[0].children];
+    const cells = metricCells(metricRows[0]);
     expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
-      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '涨幅未兑现', '几何期望', '算术期望',
+      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '仓位几何累积倍数', '涨幅未兑现', '几何期望', '有效涨幅', '算术期望',
     ]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
@@ -970,7 +973,7 @@ describe('JournalCampaignsPage sorting', () => {
     }
     // 各张卡的同名项宽度类相同
     for (const row of metricRows) {
-      expect([...row.children].map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))))
+      expect(metricCells(row).map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))))
         .toEqual(cells.map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))));
     }
     // 【用户要求】「分布要非常均匀，不要有没必要的空隙」：列宽按当前列表里实际出现的读数定，八个变量挂在列表容器上，
@@ -1319,7 +1322,8 @@ describe('JournalCampaignsPage sorting', () => {
       expect(reading('High Importance')).toHaveClass('text-foreground/85');
       // 封面上紧跟加仓次数，悬停给出算式与单位
       const cell = screen.getAllByTestId('campaign-position-amplification')[0];
-      expect(cell.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
+      expect(cell.parentElement!.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-count');
+      expect(cell.nextElementSibling).toHaveAttribute('data-testid', 'campaign-position-geometric-multiple');
       expect(cell.querySelector('dt')).toHaveTextContent('仓位放大');
       expect(cell.getAttribute('title')).toContain('主方向总名义仓位 ÷ 主力开仓名义仓位');
       expect(cell.getAttribute('title')).toContain('单位 USDT');
@@ -1388,6 +1392,51 @@ describe('JournalCampaignsPage sorting', () => {
       legsByCampaign['high-importance'] = hiLegs;
     }
   }, 30_000);
+
+  it('新增币量累积倍数与有效涨幅：上下位置、排序高亮、分布/时序共用实际成交读数', async () => {
+    const beforeLegs = legsByCampaign['high-importance'];
+    const beforeRecord = tradeHistory[0];
+    const openTime = Date.parse('2026-04-01T00:00:00Z');
+    const addTime = openTime + 3_600_000;
+    const closeTime = openTime + 14_400_000;
+    const main = { ...beforeLegs[0], pre_position_size: 100, pre_entry_price: 100, pre_simulated_time: new Date(openTime).toISOString(), pre_real_time: new Date(openTime).toISOString() };
+    const add = { ...main, id: 'growth-add', trade_record_id: 'growth-add-record', leg_role: 'main_add_1' as const,
+      pre_position_size: 180, pre_entry_price: 120, pre_simulated_time: new Date(addTime).toISOString(), pre_real_time: new Date(addTime).toISOString() };
+    legsByCampaign['high-importance'] = [main, add];
+    tradeHistory[0] = { ...beforeRecord, entryPrice: 100, exitPrice: 130, quantity: 1, openTime, closeTime, openedRealAt: openTime };
+    tradeHistory.push({ ...tradeHistory[0], id: 'growth-add-record', entryPrice: 120, quantity: 1.5,
+      openTime: addTime, openedRealAt: addTime, addSizingSnapshot: { s1: 110 } as TradeRecord['addSizingSnapshot'] });
+    try {
+      render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /><SearchProbe /></MemoryRouter>);
+      await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+      const card = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
+      const growth = within(card).getByTestId('campaign-position-geometric-multiple');
+      const rise = within(card).getByTestId('campaign-effective-price-change');
+      expect(growth.previousElementSibling).toHaveAttribute('data-testid', 'campaign-position-amplification');
+      expect(rise.previousElementSibling).toHaveAttribute('data-testid', 'campaign-geometric-expectancy');
+      expect(growth.querySelector('dd')).toHaveTextContent('2.50x');
+      // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
+      expect(rise.querySelector('dd')).toHaveTextContent('44.44%');
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44]] as const) {
+        fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
+        const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
+        expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
+        fireEvent.contextMenu(screen.getByTestId(`campaign-sort-${key}`));
+        fireEvent.click(screen.getByTestId(`campaign-${key}-chart-toggle`));
+        expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', `${key}Distribution`);
+        expect(Number(screen.getByTestId(`campaign-metric-point-${key}Distribution-high-importance`).dataset.metricValue)).toBeCloseTo(value);
+        fireEvent.click(screen.getByTestId(`campaign-${key}-view-time`));
+        expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', key);
+        expect(Number(screen.getByTestId(`campaign-metric-point-${key}-high-importance`).dataset.metricValue)).toBeCloseTo(value);
+        fireEvent.contextMenu(screen.getByTestId(`campaign-sort-${key}`));
+        fireEvent.click(screen.getByTestId(`campaign-${key}-chart-toggle`));
+      }
+    } finally {
+      legsByCampaign['high-importance'] = beforeLegs;
+      tradeHistory[0] = beforeRecord;
+      tradeHistory.pop();
+    }
+  });
 
   it('?chart=mainPriceEfficiency / ?chart=mainPriceChange 从 URL 恢复新增的散点图', async () => {
     const { unmount } = render(
@@ -2322,8 +2371,10 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-addEfficiency',
       'campaign-sort-addCount',
       'campaign-sort-positionAmplification',
+      'campaign-sort-positionGeometricMultiple',
       'campaign-sort-unrealizedPriceChangePct',
       'campaign-sort-geometricExpectancy',
+      'campaign-sort-effectivePriceChangePct',
       'campaign-sort-arithmeticExpectancy',
       'campaign-sort-leverage',
       'campaign-sort-importance',
@@ -2337,7 +2388,7 @@ describe('JournalCampaignsPage sorting', () => {
     ]);
     expect(screen.queryByTestId('campaign-card-details')).not.toBeInTheDocument();
     expect(
-      [...screen.getAllByTestId('campaign-expected-drawdown-pct')[0].parentElement!.children]
+      [...screen.getAllByTestId('campaign-expected-drawdown-pct')[0].parentElement!.querySelectorAll('div')].filter(node => node.firstElementChild?.tagName === 'DT')
         .map(node => node.getAttribute('data-testid')),
     ).toEqual([
       // 与排序行同序：镜像止盈、预期回撤，之后涨跌幅…几何期望、算术期望
@@ -2349,8 +2400,10 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-add-efficiency',
       'campaign-add-count',
       'campaign-position-amplification',
+      'campaign-position-geometric-multiple',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',
+      'campaign-effective-price-change',
       'campaign-arithmetic-expectancy',
     ]);
     fireEvent.click(screen.getAllByRole('button', { name: '展开战役详情' })[0]);

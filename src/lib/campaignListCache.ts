@@ -27,6 +27,7 @@ import {
 } from '@/lib/campaignRealizedPnl';
 import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
+import { computeCampaignGeometricMetrics, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { resolveCampaignOpportunityQuality } from '@/lib/campaignMetrics';
 import {
   fetchLegExitPriceCorrectionsResult,
@@ -57,6 +58,9 @@ export type CampaignCardData = {
    * 没有这个字段的行（旧缓存）由 rowPositionAmplification 按腿现算。
    */
   positionAmplification?: number | null;
+  effectivePriceChangePct?: number | null;
+  positionGeometricMultiple?: number | null;
+  geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
 };
 
 type CampaignDetails = Awaited<ReturnType<typeof getCampaignFullData>>;
@@ -106,7 +110,16 @@ export function buildCampaignCardData(
     // 与详情页同一份挂单判定（本地从未成交的委托 id），挂着没成交的滚动对冲不算在手
     mainPriceChangePct: campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) }),
     positionAmplification: positionAmplificationOf(details, corrections),
+    ...geometricMetricsOf(reconciledCampaign, details, corrections),
   };
+}
+
+function geometricMetricsOf(campaign: TradeCampaign, details: CampaignDetails, corrections: LegExitPriceCorrections): Partial<CampaignGeometricMetrics> {
+  try {
+    return computeCampaignGeometricMetrics(campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders, corrections);
+  } catch {
+    return { effectivePriceChangePct: null, positionGeometricMultiple: null };
+  }
 }
 
 /**

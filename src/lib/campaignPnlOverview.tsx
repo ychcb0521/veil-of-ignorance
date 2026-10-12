@@ -3,6 +3,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { campaignPayoffRatioMultiple, formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
+import type { CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   formatArithmeticExpectancy,
@@ -39,6 +40,8 @@ export type CampaignPnlOverviewItemKey =
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
   | 'positionAmplification'
+  | 'positionGeometricMultiple'
+  | 'effectivePriceChangePct'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -72,6 +75,7 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
+  'effectivePriceChangePct',
 ];
 
 /**
@@ -86,6 +90,7 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
   'positionAmplification',
+  'positionGeometricMultiple',
 ];
 
 /**
@@ -137,6 +142,9 @@ export interface CampaignPnlOverviewMetrics {
   asymmetricRiskContribution: AsymmetricRiskContribution | null;
   arithmeticExpectancy: number | null;
   geometricExpectancy: number | null;
+  effectivePriceChangePct?: number | null;
+  positionGeometricMultiple?: number | null;
+  geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
   initialRisk: { drawdownFraction: number; source: CampaignInitialRiskSource } | null;
   /** 整段替换某一项的帮助文案（含义与真实战役不同时用）。 */
   helpOverrides?: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>>;
@@ -589,10 +597,22 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   ];
 
   // 按两栏次序重排：先左栏（递进链）、再右栏（结果与仓位，标 rightColumn），窄屏单栏时也是这个先后。
+  if (metrics.effectivePriceChangePct !== undefined) built.push({
+    key: 'effectivePriceChangePct', label: '有效涨幅',
+    value: metrics.effectivePriceChangePct == null ? '—' : `${metrics.effectivePriceChangePct.toFixed(2)}%`,
+    color: pnlExportColor(metrics.effectivePriceChangePct), valueClassName: pnlColor(metrics.effectivePriceChangePct),
+    help: <><p className="font-mono">有效涨幅 = (F − Kₘ) ÷ Kₘ</p><p>F 为最终主方向平仓成交价（同一末次平仓批次按币量加权）；Kₘ 为最后一次实际加仓时的新支撑线，与加仓校验共用依据。没有实际加仓、尚未结束或缺少价格依据时显示「—」。</p>{metrics.geometricMetricBasis && <p className="font-mono">F = {metrics.geometricMetricBasis.finalExitPrice ?? '—'}；Kₘ = {metrics.geometricMetricBasis.lastSupport ?? '—'}</p>}</>,
+  });
+  if (metrics.positionGeometricMultiple !== undefined) built.push({
+    key: 'positionGeometricMultiple', label: '仓位几何累积倍数',
+    value: metrics.positionGeometricMultiple == null ? '—' : `${metrics.positionGeometricMultiple.toFixed(2)}x`,
+    color: '#1E2329', valueClassName: 'text-foreground/85',
+    help: <><p className="font-mono">仓位几何累积倍数 = (1 − m%) × ∏ₖ(1 + αₖ)</p><p>m% 为首次加仓前实际减掉的初始币量比例，不固定为 50%。αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。按币量计算，不是名义金额或资金收益率；没有加仓时乘积为 1。</p><p>这是早期减仓与历次加仓的累积因子；若加仓之间还发生减仓或重新入场，不等同于最终持仓 ÷ 初始持仓。依据不完整时显示「—」。</p>{metrics.geometricMetricBasis && <p className="font-mono">m% = {metrics.geometricMetricBasis.earlyReductionFraction == null ? '—' : `${(metrics.geometricMetricBasis.earlyReductionFraction * 100).toFixed(2)}%`}；αₖ = {metrics.geometricMetricBasis.addRatios?.map(value => `${(value * 100).toFixed(2)}%`).join('、') || '无'}</p>}</>,
+  });
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [
-    ...PNL_OVERVIEW_LEFT_COLUMN.map(key => byKey.get(key)!),
-    ...PNL_OVERVIEW_RIGHT_COLUMN.map(key => ({ ...byKey.get(key)!, rightColumn: true })),
+    ...PNL_OVERVIEW_LEFT_COLUMN.filter(key => byKey.has(key)).map(key => byKey.get(key)!),
+    ...PNL_OVERVIEW_RIGHT_COLUMN.filter(key => byKey.has(key)).map(key => ({ ...byKey.get(key)!, rightColumn: true })),
   ];
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;

@@ -132,6 +132,8 @@ import {
   rowAddEfficiency,
   rowAddCount,
   rowPositionAmplification,
+  rowPositionGeometricMultiple,
+  rowEffectivePriceChangePct,
   rowMainPriceEfficiency,
   rowUnrealizedPriceChangePct,
   rowMirrorTpRank,
@@ -245,6 +247,10 @@ type CampaignMetricChartKey =
   | 'addCountBars'
   | 'positionAmplification'
   | 'positionAmplificationDistribution'
+  | 'positionGeometricMultiple'
+  | 'positionGeometricMultipleDistribution'
+  | 'effectivePriceChangePct'
+  | 'effectivePriceChangePctDistribution'
   | 'arithmeticExpectancyDistribution';
 
 type CampaignMetricChartConfig = {
@@ -292,6 +298,8 @@ type CampaignFormulaPopover =
   | 'addEfficiencySort'
   | 'addCountSort'
   | 'positionAmplificationSort'
+  | 'positionGeometricMultipleSort'
+  | 'effectivePriceChangePctSort'
   | 'sortChain';
 
 /**
@@ -313,8 +321,10 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addCount', label: '加仓次数' },
   // 【用户要求】仓位放大：放在加仓次数的后面（排序行、封面同一位置）
   { value: 'positionAmplification', label: '仓位放大' },
+  { value: 'positionGeometricMultiple', label: '仓位几何累积倍数' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'geometricExpectancy', label: '几何期望' },
+  { value: 'effectivePriceChangePct', label: '有效涨幅' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '自评' },
@@ -493,6 +503,28 @@ const PAYOFF_SIGN_COLORS: CampaignMetricChartConfig['guide']['colors'] = [
 ];
 
 const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
+  ...(['positionGeometricMultiple', 'effectivePriceChangePct'] as const).flatMap((key): CampaignMetricChartConfig[] => {
+    const quantity = key === 'positionGeometricMultiple';
+    const label = quantity ? '仓位几何累积倍数' : '有效涨幅';
+    const definition = quantity
+      ? '(1 − m%) × ∏ₖ(1 + αₖ)，m% 按首次加仓前实际减仓币量统计；αₖ = 本次实际加仓币数 ÷ 加仓前持币数。不是资金收益率。'
+      : '(F − Kₘ) ÷ Kₘ，F 为最终主方向平仓成交价，Kₘ 为最后一次实际加仓时的新支撑线。';
+    const formatValue = (value: number) => `${value.toFixed(2)}${quantity ? 'x' : '%'}`;
+    return [{
+      key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
+      viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
+      guide: { yAxis: `${label} = ${definition}`, point: '每个点是一场战役，按客观操作时间排列；点位表示本指标，颜色按该战役盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS },
+    }, {
+      key: quantity ? 'positionGeometricMultipleDistribution' : 'effectivePriceChangePctDistribution', sourceKey: key,
+      view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
+      label: `${label}分布`, chartLabel: '分布图', seriesLabel: `${label}分布`, missingValueLabel: label,
+      colorMode: 'signed', formatValue,
+      guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${label} = ${definition} 横轴按封面两位小数读数，点的颜色按盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
+        referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
+      distribution: quantity ? { unit: '倍', zeroLine: false, references: [{ value: 1, label: '1.00 初始币量基准', shareLabel: '超过初始基准（> 1）' }] }
+        : { unit: '%', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '有效涨幅为正' },
+    }];
+  }),
   {
     key: 'odds',
     label: '盈亏比',
@@ -1029,6 +1061,8 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   addEfficiency: 'addEfficiencySort',
   addCount: 'addCountSort',
   positionAmplification: 'positionAmplificationSort',
+  positionGeometricMultiple: 'positionGeometricMultipleSort',
+  effectivePriceChangePct: 'effectivePriceChangePctSort',
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
@@ -1044,6 +1078,8 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   addEfficiency: 'addEfficiency',
   addCount: 'addCount',
   positionAmplification: 'positionAmplification',
+  positionGeometricMultiple: 'positionGeometricMultiple',
+  effectivePriceChangePct: 'effectivePriceChangePct',
 };
 
 /**
@@ -1076,6 +1112,8 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   addCount: 'addCountBars',
   // 【用户要求】仓位放大同其它连续指标：默认看分布
   positionAmplification: 'positionAmplificationDistribution',
+  positionGeometricMultiple: 'positionGeometricMultipleDistribution',
+  effectivePriceChangePct: 'effectivePriceChangePctDistribution',
 };
 
 export type CampaignMetricChartViewState = {
@@ -1231,6 +1269,8 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'addEfficiency': return formatEfficiency(value);
     case 'geometricExpectancy': return formatGeometricExpectancy(value);
     case 'arithmeticExpectancy': return formatArithmeticExpectancy(value);
+    case 'effectivePriceChangePct': return `${value.toFixed(2)}%`;
+    case 'positionGeometricMultiple':
     case 'positionAmplification': return formatPositionAmplification(value);
     default: return value.toFixed(2);
   }
@@ -1405,8 +1445,10 @@ const CARD_METRIC_LABEL = {
   addEfficiency: '加仓效用',
   addCount: '加仓次数',
   positionAmplification: '仓位放大',
+  positionGeometricMultiple: '仓位几何累积倍数',
   unrealizedPriceChangePct: '涨幅未兑现',
   geometricExpectancy: '几何期望',
+  effectivePriceChangePct: '有效涨幅',
   arithmeticExpectancy: '算术期望',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
 type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
@@ -1425,8 +1467,10 @@ const CARD_METRIC_WIDTH_CLASS = {
   addEfficiency: 'sm:w-[var(--cm-w-addEfficiency)]',
   addCount: 'sm:w-[var(--cm-w-addCount)]',
   positionAmplification: 'sm:w-[var(--cm-w-positionAmplification)]',
+  positionGeometricMultiple: 'sm:w-[var(--cm-w-positionGeometricMultiple)]',
   unrealizedPriceChangePct: 'sm:w-[var(--cm-w-unrealizedPriceChangePct)]',
   geometricExpectancy: 'sm:w-[var(--cm-w-geometricExpectancy)]',
+  effectivePriceChangePct: 'sm:w-[var(--cm-w-effectivePriceChangePct)]',
   arithmeticExpectancy: 'sm:w-[var(--cm-w-arithmeticExpectancy)]',
 } as const satisfies Record<CardMetricMode, string>;
 
@@ -1458,8 +1502,10 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
     addCount: String(rowAddCount(row)),
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
+    positionGeometricMultiple: rowPositionGeometricMultiple(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultiple(row)!),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
+    effectivePriceChangePct: rowEffectivePriceChangePct(row) == null ? '—' : `${rowEffectivePriceChangePct(row)!.toFixed(2)}%`,
     arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
   };
   cardMetricReadingsCache.set(row, readings);
@@ -1472,6 +1518,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
  */
 function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperties {
   const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));
+  widths.positionAmplification = widths.positionGeometricMultiple = Math.max(widths.positionAmplification, widths.positionGeometricMultiple);
+  widths.geometricExpectancy = widths.effectivePriceChangePct = Math.max(widths.geometricExpectancy, widths.effectivePriceChangePct);
   const style: Record<string, string> = {};
   for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;
   return style as CSSProperties;
@@ -1932,7 +1980,8 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
-          {/* 【用户要求】仓位放大：紧跟加仓次数；没有加仓是 1.00x，与「加仓次数 0」一样淡一档 */}
+          {/* 币量累积因子置于名义仓位放大下方；上下格共用列宽。 */}
+          <div className="flex min-w-0 shrink-0 flex-col sm:w-[var(--cm-w-positionAmplification)]">
           <div
             data-testid="campaign-position-amplification"
             title={positionAmplification == null
@@ -1947,6 +1996,12 @@ const CampaignCard = memo(function CampaignCard({
                 {readings.positionAmplification}
               </span>
             </dd>
+          </div>
+          <div data-testid="campaign-position-geometric-multiple" className={metricCell('positionGeometricMultiple')} data-sort-highlight={litAttr('positionGeometricMultiple')}
+            title="仓位几何累积倍数 = (1 − m%) × ∏(1 + αₖ)，按实际币量计算">
+            <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
+          </div>
           </div>
           <div
             data-testid="campaign-unrealized-price-change"
@@ -1963,6 +2018,7 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
+          <div className="flex min-w-0 shrink-0 flex-col sm:w-[var(--cm-w-geometricExpectancy)]">
           <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
@@ -1981,6 +2037,12 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}>
               <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
             </dd>
+          </div>
+          <div data-testid="campaign-effective-price-change" className={metricCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
+            title="有效涨幅 = (F − Kₘ) ÷ Kₘ，最终平仓价相对末次加仓支撑线的涨幅">
+            <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangePct(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
+          </div>
           </div>
           <div
             data-testid="campaign-arithmetic-expectancy"
@@ -2745,6 +2807,14 @@ export default function JournalCampaignsPage() {
         : null
     ));
     const geometric = buildSeries(row => row.geometricExpectancy);
+    const positionGeometricMultiple = buildSeries(row => {
+      const value = rowPositionGeometricMultiple(row);
+      return value == null ? null : sortBinValue('positionGeometricMultiple', value);
+    });
+    const effectivePriceChangePct = buildSeries(row => {
+      const value = rowEffectivePriceChangePct(row);
+      return value == null ? null : sortBinValue('effectivePriceChangePct', value);
+    });
     const arithmetic = buildSeries(row => row.arithmeticExpectancy);
     const importance = buildSeries(row => importanceValue(row.campaign));
     const importanceBars = buildSeries(row => {
@@ -2797,6 +2867,10 @@ export default function JournalCampaignsPage() {
       addCountBars: addCount,
       positionAmplification,
       positionAmplificationDistribution: positionAmplification,
+      positionGeometricMultiple,
+      positionGeometricMultipleDistribution: positionGeometricMultiple,
+      effectivePriceChangePct,
+      effectivePriceChangePctDistribution: effectivePriceChangePct,
     };
   }, [scopedRows]);
   const unrealizedChartSamples = useMemo(() => metricRows.map(row => ({
@@ -4569,6 +4643,19 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>与「加仓效用」判断有没有加仓同一个口径：带成交记录、或腿上已有结算结果的加仓腿才算，只挂了单、没成交的不算。</div>
                           <div>没有加仓的战役记 0，照样进入排序；同次数再按盈亏比、自评、操作时间排。</div>
+                        </div>
+                      </>
+                    ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">{formula === 'positionGeometricMultipleSort' ? '仓位几何累积倍数' : '有效涨幅'}计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                          {formula === 'positionGeometricMultipleSort' ? '(1 − m%) × ∏ₖ(1 + αₖ)' : '(F − Kₘ) ÷ Kₘ'}
+                        </div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          {formula === 'positionGeometricMultipleSort'
+                            ? <><div>m% 按首次加仓前实际减仓币量 ÷ 初始币量统计，不固定为 50%；αₖ = 第 k 次实际加仓币数 ÷ 加仓前持币数。</div><div>结果是币量累积因子，不是名义金额或资金收益率。没有加仓时乘积为 1；若加仓之间另有减仓或重新入场，不等同于最终持仓倍数。</div></>
+                            : <><div>F 为最终主方向平仓成交价，同一末次平仓批次按币量加权；Kₘ 为最后一次实际加仓时的新支撑线，与加仓校验使用同一份依据。</div><div>没有加仓、未结束或缺少 F / Kₘ 时不计算。</div></>}
+                          <div>详情、封面、排序与散点图共用同一份计算；按两位小数排序、分档。缺少有效依据时显示「—」。</div>
                         </div>
                       </>
                     ) : formula === 'positionAmplificationSort' ? (

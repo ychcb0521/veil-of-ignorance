@@ -4,6 +4,7 @@ import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
+import { computeCampaignGeometricMetrics, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 /**
@@ -40,6 +41,8 @@ export type CampaignSortMode =
   | 'addEfficiency'
   | 'addCount'
   | 'positionAmplification'
+  | 'positionGeometricMultiple'
+  | 'effectivePriceChangePct'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -66,7 +69,9 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addEfficiency',
   'addCount',
   'positionAmplification',
+  'positionGeometricMultiple',
   'geometricExpectancy',
+  'effectivePriceChangePct',
   'arithmeticExpectancy',
   'leverage',
   'importance',
@@ -89,7 +94,9 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'captureRate',
   'addEfficiency',
   'positionAmplification',
+  'positionGeometricMultiple',
   'geometricExpectancy',
+  'effectivePriceChangePct',
   'arithmeticExpectancy',
 ]);
 
@@ -193,6 +200,22 @@ export function rowAddCount(row: Pick<CampaignCardData, 'legs'>): number {
 
 /** 没带现成读数的行（旧缓存、手工拼的行）按腿现算一次，按行对象缓存：行对象不变读数就不变。 */
 const positionAmplificationCache = new WeakMap<object, number | null>();
+const geometricMetricsCache = new WeakMap<object, CampaignGeometricMetrics>();
+function rowGeometricMetrics(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords'>): CampaignGeometricMetrics {
+  const cached = geometricMetricsCache.get(row);
+  if (cached) return cached;
+  let metrics: CampaignGeometricMetrics;
+  try { metrics = computeCampaignGeometricMetrics(row.campaign, row.legs, row.tradeRecords); }
+  catch { metrics = { effectivePriceChangePct: null, positionGeometricMultiple: null, geometricMetricBasis: { initialCoins: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null } }; }
+  geometricMetricsCache.set(row, metrics);
+  return metrics;
+}
+export function rowPositionGeometricMultiple(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionGeometricMultiple'>): number | null {
+  return row.positionGeometricMultiple !== undefined ? row.positionGeometricMultiple : rowGeometricMetrics(row).positionGeometricMultiple;
+}
+export function rowEffectivePriceChangePct(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'effectivePriceChangePct'>): number | null {
+  return row.effectivePriceChangePct !== undefined ? row.effectivePriceChangePct : rowGeometricMetrics(row).effectivePriceChangePct;
+}
 
 /**
  * 仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位（倍）：与盈亏概览同名项同一个算式（computePositionAmplification）。
@@ -422,6 +445,14 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       (a, b, direction) => compareFiniteMetric(a.profitCaptureRatio ?? Number.NaN, b.profitCaptureRatio ?? Number.NaN, direction)
         || importanceTimeAlpha(a, b),
     ),
+    positionGeometricMultiple: metric(row => {
+      const value = rowPositionGeometricMultiple(row);
+      return value == null ? null : sortBinValue('positionGeometricMultiple', value);
+    }, importanceTimeAlpha),
+    effectivePriceChangePct: metric(row => {
+      const value = rowEffectivePriceChangePct(row);
+      return value == null ? null : sortBinValue('effectivePriceChangePct', value);
+    }, importanceTimeAlpha),
     alpha: {
       include: always,
       missing: never,
@@ -475,6 +506,8 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'mainPriceEfficiency':
     case 'unrealizedPriceChangePct':
     case 'addEfficiency':
+    case 'positionGeometricMultiple':
+    case 'effectivePriceChangePct':
     case 'positionAmplification': return Number(value.toFixed(2));
     default: return value;
   }
@@ -560,7 +593,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy',
+  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct',
 ]);
 
 /** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */
@@ -595,7 +628,7 @@ export const POSITION_AMPLIFICATION_UNIT = 1;
 
 /** 这一项分档时是否以 1.00x 为界（未放大的自成一档）。 */
 export function isUnitSplitSortMode(mode: CampaignSortMode): boolean {
-  return mode === 'positionAmplification';
+  return mode === 'positionAmplification' || mode === 'positionGeometricMultiple';
 }
 
 /**

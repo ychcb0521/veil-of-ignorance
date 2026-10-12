@@ -10,6 +10,8 @@ const rows = [
   makeSortRow({ id: 'none', title: '算不出', pnl: null, time: null }),
 ];
 rows[0].dynamicMaxDrawdownPct = 4.5;
+rows[0].positionGeometricMultiple = 6.25;
+rows[0].effectivePriceChangePct = 29.4117647059;
 const options = {
   mirrorTpLabel: () => '未实现',
   asymmetricSummary: summarizeAsymmetricRiskMetrics(rows.map(row => ({ campaign: row.campaign, payoffRatio: rowPayoffRatio(row) }))),
@@ -24,6 +26,7 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     for (const header of [
       '操作时间（北京）', '镜像止盈', '预期回撤（%）', '涨跌幅（%）', '涨跌幅倍数 η', '盈亏比 b（R）', '加仓效用', '加仓次数',
       '几何期望 Gᵢ', '算术期望（R）', '杠杆倍数', '自评（0–5）',
+      '有效涨幅（%）', '仓位几何累积倍数（倍）',
       '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '峰值涨幅倍数', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
     ]) expect(headers, header).toContain(header);
     expect(notes.rows.map(row => row[0])).toEqual(headers);
@@ -41,6 +44,8 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(cell(0, '涨幅未兑现（%）')).toBeCloseTo((rows[0].peakPriceChangePct as number) - 6, 9);
     expect(cell(0, '动态最大回撤（%）')).toBe(4.5);
     expect(cell(0, '几何期望 Gᵢ')).toBeCloseTo(1.3, 9);
+    expect(cell(0, '仓位几何累积倍数（倍）')).toBe(6.25);
+    expect(cell(0, '有效涨幅（%）')).toBeCloseTo(29.4117647059);
     expect(cell(0, '自评（0–5）')).toBe(4);
     expect(cell(0, '自评（文字）')).toBe('很好');
     expect(cell(0, '预期回撤（%）')).toBe(2);
