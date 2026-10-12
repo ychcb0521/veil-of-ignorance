@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeCampaignGeometricMetrics, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
 import { resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
+import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { buildCampaignPnlOverviewItems } from '@/lib/campaignPnlOverview';
 import { rowEffectivePriceChangePct, rowPositionGeometricMultiple, sortCampaignRows, type CampaignSortRow } from '@/lib/campaignListSort';
@@ -38,6 +39,69 @@ function scenario(reduction = 0.5) {
 }
 
 describe('campaign geometric metrics', () => {
+  it('F reuses the main-price-change exit, never the weighted or later add-leg exits', () => {
+    const data = scenario();
+    data.tradeRecords[2].exitPrice = 280;
+    data.tradeRecords[3].exitPrice = 300;
+    data.tradeRecords[3].closeTime = at(9);
+    const basis = campaignPriceChange(data.campaign, data.legs, data.tradeRecords);
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    expect(basis.exitPrice).toBe(220);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
+    expect(result.effectivePriceChangePct).toBeCloseTo((220 - 140) / 140 * 100);
+    expect(buildCampaignCardData(data as Parameters<typeof buildCampaignCardData>[0]).effectivePriceChangePct).toBe(result.effectivePriceChangePct);
+  });
+
+  it.each(['hedge_rolling', 'hedge_initial_a', 'hedge_initial_b', 'reentry_hedge'] as const)('F shares the %s lock-price rule, including the same-close tolerance', role => {
+    const data = scenario();
+    data.legs.push({ ...data.legs[0], id: 'hedge', leg_role: role, direction: 'short', trade_record_id: 'hedge-record' });
+    data.tradeRecords.push({ ...data.tradeRecords[0], id: 'hedge-record', fillId: 'hedge', side: 'SHORT', entryPrice: 200, exitPrice: 220, openTime: at(7), closeTime: at(8) - 60_000 });
+    const basis = campaignPriceChange(data.campaign, data.legs, data.tradeRecords);
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    expect(basis.exitPrice).toBe(200);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
+    expect(result.effectivePriceChangePct).toBeCloseTo((200 - 140) / 140 * 100);
+    const card = buildCampaignCardData(data as Parameters<typeof buildCampaignCardData>[0]);
+    expect(card.geometricMetricBasis?.finalExitPrice).toBe(basis.exitPrice);
+    expect(card.mainPriceChangePct).toBe(basis.pct);
+    // Just outside the shared one-minute window: no lock.
+    data.tradeRecords.at(-1)!.closeTime = at(8) - 60_001;
+    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).geometricMetricBasis.finalExitPrice).toBe(220);
+  });
+
+  it('F shares earliest hedge selection instead of averaging multiple lock prices', () => {
+    const data = scenario();
+    for (const [id, entry, open] of [['early', 200, 6], ['late', 210, 7]] as const) {
+      data.legs.push({ ...data.legs[0], id, leg_role: 'hedge_rolling', direction: 'short', trade_record_id: `${id}-record` });
+      data.tradeRecords.push({ ...data.tradeRecords[0], id: `${id}-record`, fillId: id, side: 'SHORT', entryPrice: entry, openTime: at(open) });
+    }
+    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).geometricMetricBasis.finalExitPrice).toBe(200);
+  });
+
+  it('unfilled local-order evidence is identical for F and the card price-change basis', () => {
+    const data = scenario();
+    data.legs.push({ ...data.legs[0], id: 'pending', leg_role: 'hedge_rolling', direction: 'short', trade_record_id: 'pending-order', pre_entry_price: 200, pre_simulated_time: iso(7), post_simulated_close_time: null, post_exit_price_snapshot: null });
+    const local = { unfilledOrderIds: new Set(['pending-order']) };
+    const basis = campaignPriceChange(data.campaign, data.legs, data.tradeRecords, {}, local);
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, [], {}, local);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
+    const card = buildCampaignCardData({ ...data, unfilledOrderIds: ['pending-order'] } as Parameters<typeof buildCampaignCardData>[0]);
+    expect(card.geometricMetricBasis?.finalExitPrice).toBe(basis.exitPrice);
+    expect(card.mainPriceChangePct).toBe(basis.pct);
+  });
+
+  it('F shares corrected main exits and does not impose a separate campaign-status rule', () => {
+    const data = scenario();
+    data.campaign.status = 'active';
+    const corrections = { main: { exitPrice: 225, originalExitPrice: 220, candleLow: 224, candleHigh: 226 } };
+    const basis = campaignPriceChange(data.campaign, data.legs, data.tradeRecords, corrections);
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, [], corrections);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(225);
+    expect(result.effectivePriceChangePct).toBeCloseTo((225 - 140) / 140 * 100);
+  });
+
   it('uses plus alpha, including adds greater than 100%; never the erroneous minus product', () => {
     expect(positionGeometricMultiple(0.5, [1.5, 1.5, 1])).toBe(6.25);
     expect(positionGeometricMultiple(0.4, [0.5, 1])).toBeCloseTo(1.8);

@@ -1755,8 +1755,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     });
   }, [actualMainPriceChange.byLegId, actualPriceChange.entryOpenTime, actualPriceChange.mainCloseTime, campaign, computeInterval, effectiveClosedAt, klines]);
   const campaignGeometricMetrics = useMemo(() => campaign
-    ? computeCampaignGeometricMetrics(campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections)
-    : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections]);
+    ? computeCampaignGeometricMetrics(campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts)
+    : null, [campaign, legs, tradeRecords, reverseHedgeOrders, legExitPriceCorrections, localOrderFacts]);
   const campaignPnlOverviewItems = useMemo<CampaignPnlOverviewItem[]>(() => {
     if (!campaign || !accuracy) return [];
     const pnlSettlement = settlement;

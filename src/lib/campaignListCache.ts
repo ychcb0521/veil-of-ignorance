@@ -116,7 +116,9 @@ export function buildCampaignCardData(
 
 function geometricMetricsOf(campaign: TradeCampaign, details: CampaignDetails, corrections: LegExitPriceCorrections): Partial<CampaignGeometricMetrics> {
   try {
-    return computeCampaignGeometricMetrics(campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders, corrections);
+    return computeCampaignGeometricMetrics(campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders, corrections, {
+      unfilledOrderIds: new Set(details.unfilledOrderIds ?? []),
+    });
   } catch {
     return { effectivePriceChangePct: null, positionGeometricMultiple: null };
   }

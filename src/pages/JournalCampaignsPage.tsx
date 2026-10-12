@@ -509,7 +509,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     const label = quantity ? '仓位几何累积倍数' : '有效涨幅';
     const definition = quantity
       ? '(1 − m%) × ∏ₖ(1 + αₖ)，m% 按首次加仓前实际减仓币量统计；αₖ = 本次实际加仓币数 ÷ 加仓前持币数。不是资金收益率。'
-      : '(F − Kₘ) ÷ Kₘ，F 为最终主方向平仓成交价，Kₘ 为最后一次实际加仓时的新支撑线。';
+      : '(F − Kₘ) ÷ Kₘ，F 与「涨跌幅」的平仓价同源，Kₘ 为最后一次实际加仓时的新支撑线。';
     const formatValue = (value: number) => `${value.toFixed(2)}${quantity ? 'x' : '%'}`;
     return [{
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
@@ -2035,7 +2035,7 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div data-testid="campaign-effective-price-change" className={metricCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
-            title="有效涨幅 = (F − Kₘ) ÷ Kₘ，最终平仓价相对末次加仓支撑线的涨幅">
+            title="有效涨幅 = (F − Kₘ) ÷ Kₘ，F 与涨跌幅的平仓价使用相同取值逻辑">
             <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangePct(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
           </div>
@@ -4650,7 +4650,7 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {formula === 'positionGeometricMultipleSort'
                             ? <><div>m% 按首次加仓前实际减仓币量 ÷ 初始币量统计，不固定为 50%；αₖ = 第 k 次实际加仓币数 ÷ 加仓前持币数。</div><div>结果是币量累积因子，不是名义金额或资金收益率。没有加仓时乘积为 1；若加仓之间另有减仓或重新入场，不等同于最终持仓倍数。</div></>
-                            : <><div>F 为最终主方向平仓成交价，同一末次平仓批次按币量加权；Kₘ 为最后一次实际加仓时的新支撑线，与加仓校验使用同一份依据。</div><div>没有加仓、未结束或缺少 F / Kₘ 时不计算。</div></>}
+                            : <><div>F 与「涨跌幅」指标的平仓价使用同一份取值逻辑和依据；Kₘ 为最后一次实际加仓时的新支撑线，与加仓校验使用同一份依据。</div><div>{PRICE_CHANGE_EXIT_RULE_TEXT}</div><div>没有加仓、主力尚未平仓或缺少 F / Kₘ 时不计算。</div></>}
                           <div>详情、封面、排序与散点图共用同一份计算；按两位小数排序、分档。缺少有效依据时显示「—」。</div>
                         </div>
                       </>

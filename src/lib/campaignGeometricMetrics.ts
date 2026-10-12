@@ -1,7 +1,8 @@
-import { computeInitialMainExposureNotional, resolveInitialExposureLegAttribution } from '@/lib/campaignAnalysis';
+import { computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
 import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -36,6 +37,7 @@ export function effectivePriceChangePct(exitPrice: number | null, stopLine: numb
 export function computeCampaignGeometricMetrics(
   campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[],
   orders: CampaignReverseHedgeOrder[] = [], corrections: LegExitPriceCorrections = {},
+  localOrders: CampaignLocalOrderFacts = {},
 ): CampaignGeometricMetrics {
   const empty: CampaignGeometricMetrics = {
     effectivePriceChangePct: null, positionGeometricMultiple: null,
@@ -88,10 +90,9 @@ export function computeCampaignGeometricMetrics(
   }
   const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status);
   const finalTime = closes.length ? Math.max(...closes.map(close => close.time)) : null;
-  // One final close action can settle several legs a few seconds apart.
-  const terminal = finalTime == null ? [] : closes.filter(close => !close.mirror && close.time >= finalTime - 60_000 && (!steps.length || close.time > steps.at(-1)!.openTime));
-  const finalExitPrice = resolved && terminal.length
-    ? terminal.reduce((sum, close) => sum + close.coins * close.price, 0) / terminal.reduce((sum, close) => sum + close.coins, 0) : null;
+  // F is exactly the exit basis of 涨跌幅, including hedge locks, execution
+  // corrections and unfilled-order evidence. Never average the main/add exits.
+  const finalExitPrice = campaignPriceChange(campaign, legs, tradeRecords, corrections, localOrders).exitPrice;
   let reduction: number | null = null;
   if (initialCoins != null) {
     const initialIds = new Set(initial.map(leg => leg.id));

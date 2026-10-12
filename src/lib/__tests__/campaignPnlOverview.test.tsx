@@ -73,6 +73,45 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
+  it('expands the actual retention and every plus-alpha factor, then shows the full-precision result', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: 3,
+      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0.6, addRatios: [0.5, 1.5, 1], finalExitPrice: 220, lastSupport: 140 },
+    }));
+    const item = items.find(value => value.key === 'positionGeometricMultiple')!;
+    const { container } = render(<>{item.help}</>);
+    expect(container.querySelector('[data-testid="position-geometric-substitution"]')).toHaveTextContent('(1 − 60.00%)× (1 + 50.00%)× (1 + 150.00%)× (1 + 100.00%)');
+    expect(container.querySelector('[data-testid="position-geometric-factors"]')).toHaveTextContent('≈ 0.4× 1.5× 2.5× 2');
+    expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('≈ 3.00 倍');
+    expect(container.textContent).toContain('3 次加仓');
+    expect(item.value).toBe('3.00x');
+  });
+
+  it('does not invent missing factors, and an empty add product retains the actual initial fraction', () => {
+    const overview = (reduction: number | null, ratios: number[] | null, multiple: number | null) => buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: multiple,
+      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: reduction, addRatios: ratios, finalExitPrice: null, lastSupport: null },
+    })).find(value => value.key === 'positionGeometricMultiple')!;
+    const empty = render(<>{overview(0.4, [], 0.6).help}</>);
+    expect(empty.container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('0.60 倍');
+    expect(empty.container.textContent).toContain('0 次加仓');
+    empty.unmount();
+    const missing = render(<>{overview(null, null, null).help}</>);
+    expect(missing.container.querySelector('[data-testid="position-geometric-worked"]')).toBeNull();
+    expect(missing.container.textContent).toContain('暂不能展开计算');
+  });
+
+  it('explains that F is exactly the same exit basis as the price-change metric', () => {
+    const item = buildCampaignPnlOverviewItems(winnerMetrics({
+      effectivePriceChangePct: 50,
+      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 210, lastSupport: 140 },
+    })).find(value => value.key === 'effectivePriceChangePct')!;
+    const { container } = render(<>{item.help}</>);
+    expect(container.textContent).toContain('F 与「涨跌幅」指标的平仓价使用同一份取值逻辑和依据');
+    expect(container.textContent).toContain('F = 210；Kₘ = 140');
+    expect(container.textContent).not.toContain('按币量加权');
+  });
+
   it('输出 14 项（新增多方总名义仓位）：键、标签、值、着色、分栏', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
 
