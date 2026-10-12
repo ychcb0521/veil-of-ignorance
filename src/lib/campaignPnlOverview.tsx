@@ -675,8 +675,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       </div>
       <div className="text-[10px] font-medium text-muted-foreground">算法二 · 几何分解</div><p className="font-mono">{MAGIC_B_FORMULA}</p>{worked != null && bridge && <div className="space-y-2 rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程 · 与初始风险 L₀ 统一</div>
-        <div>风险基准换算 = Q基 × Kₘ ÷ 初始名义敞口 ≈ {Number(bridge.normalization.toPrecision(12))}</div>
-        <div>模型项 = {effectiveMultiple!.toFixed(6)} × {metrics.positionGeometricMultiple!.toFixed(6)} × {bridge.normalization.toFixed(6)} ≈ {(bridge.modelPnl / bridge.initialRisk).toFixed(8)}</div>
+        <div>基数仓位比例 β = Q基 × Kₘ ÷ V₀</div>
+        <div>= {Number(bridge.referenceCoins.toPrecision(12))} × {metrics.geometricMetricBasis!.lastSupport} ÷ {Number(bridge.initialExposure.toPrecision(12))} ≈ {Number(bridge.normalization.toPrecision(12))}（{(bridge.normalization * 100).toFixed(4)}%）</div>
+        <div>模型项 = {metrics.positionGeometricMultiple!.toFixed(6)} × {bridge.normalization.toFixed(6)} × {(metrics.effectivePriceChangePct ?? effectiveMultiple! * expectedDrawdownPct).toFixed(6)}% ÷ {expectedDrawdownPct.toFixed(6)}% ≈ {(bridge.modelPnl / bridge.initialRisk).toFixed(8)}</div>
         {([
           ['保本余额', bridge.balanceAtSupport], ['实际退出与 F 的价差', bridge.exitPriceAdjustment],
           ['对冲及其他腿净盈亏', bridge.otherNetPnl], ['后续净结算调整（含费用）', bridge.netSettlementAdjustment],

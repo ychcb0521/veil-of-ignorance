@@ -10,8 +10,8 @@ import { magicBFromRealizedPnl } from '@/lib/campaignB';
 
 export const POSITION_GEOMETRIC_FORMULA = '∏ₖ(1 + αₖ)';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
-export const MAGIC_B_FORMULA = '神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数 × 风险基准换算 + 结算修正 ÷ L₀';
-export const MAGIC_B_RULE = '同一个 b 的两种算法：净盈亏 ÷ 初始风险，或几何分解。风险基准换算 = 首次加仓前币数 × Kₘ ÷ 初始名义敞口。结算修正包含保本余额、实际退出价差、其他腿净盈亏、费用和中途仓位变化。没有加仓或缺少几何依据时仍使用净结算法；缺少有效初始风险时不计算。';
+export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 基数仓位比例 × 有效涨幅百分比 ÷ 初始最大预期回撤百分比 + 结算修正 ÷ L₀';
+export const MAGIC_B_RULE = '基数仓位比例 β = 首次加仓前币数 Q基 × 最后一次加仓的止损价 Kₘ ÷ 初始名义仓位 V₀。币数按 Kₘ 折算为名义金额，再与 V₀ 相除；β 按小数参与计算。有效涨幅与初始最大预期回撤使用同一百分数口径，相除无需再乘 100。L₀ = V₀ × 初始最大预期回撤比例。模型项等价于 仓位几何累积倍数 × Q基 × (F − Kₘ) ÷ L₀；结算修正为零时即得到完整 b。实际结算修正包含保本余额、实际退出价差、其他腿净盈亏、费用和中途仓位变化，使其与净盈亏 ÷ L₀ 一致。没有加仓或缺少几何依据时仍使用净结算法；缺少有效初始风险时不计算。';
 
 export interface GeometricFirstAddBasis {
   beforeCoins: number;

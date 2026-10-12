@@ -45,8 +45,8 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 
 describe('buildCampaignPnlOverviewItems', () => {
   it('places the effective rise multiple before magic b and shows the new worked formula', () => {
-    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 45, expectedMaxDrawdownPct: 9, magicB: 2,
-      geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 200, lastSupport: 100,
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 2,
+      geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100,
         magicBReconciliation: {referenceCoins: 5, projectedCoins: 10, settledCoins: 10, initialExposure: 1000, initialRisk: 100,
           normalization: 0.5, rawProduct: 10, modelPnl: 500, balanceAtSupport: -100, exitPriceAdjustment: -200,
           otherNetPnl: 10, netSettlementAdjustment: -10, quantityAdjustment: 0, totalAdjustment: -300, reconstructedPnl: 200} } }));
@@ -54,11 +54,14 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(keys.slice(0, 5)).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy"]);
     const riseMultiple = items.find(item => item.key === 'effectivePriceChangeMultiple')!;
     expect(riseMultiple.value).toBe('5.00x');
-    expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('45.00% ÷ 9.00% ≈ 5.00x');
+    expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('50.00% ÷ 10.00% ≈ 5.00x');
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBeUndefined();
     expect(magic.value).toBe('2.00');
-    expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('5.000000 × 2.000000 × 0.500000 ≈ 5.00000000');
+    const worked = render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]');
+    expect(worked).toHaveTextContent('5 × 100 ÷ 1000 ≈ 0.5（50.0000%）');
+    expect(worked).toHaveTextContent('2.000000 × 0.500000 × 50.000000% ÷ 10.000000% ≈ 5.00000000');
+    expect(worked).toHaveTextContent('b ≈ 5.00000000 + (-3.00000000) ≈ 2.00000000');
   });
   it('expands every actual plus-alpha factor without multiplying by early retention', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
