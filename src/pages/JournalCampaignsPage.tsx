@@ -4467,7 +4467,7 @@ export default function JournalCampaignsPage() {
                       if (formula) openFormulaPopover(event, formula);
                     }}
                     {...sortLongPressHandlers(option.value, !inChain)}
-                    className={`inline-flex h-7 shrink-0 select-none items-center gap-0.5 whitespace-nowrap rounded border px-1 transition-[color,background-color,border-color,box-shadow] duration-150 [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
+                    className={`inline-flex h-7 shrink-0 select-none items-center gap-0.5 whitespace-nowrap rounded border px-0.5 transition-[color,background-color,border-color,box-shadow] duration-150 [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/70 ${
                       active
                         ? 'border-border bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:border-foreground/15 dark:bg-accent'
                         : thenLevel
