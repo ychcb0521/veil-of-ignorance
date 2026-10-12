@@ -5,7 +5,9 @@ import { calculateAddPosition, initialAddPositionState } from '@/lib/addPosition
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { buildCampaignPnlOverviewItems } from '@/lib/campaignPnlOverview';
-import { rowEffectivePriceChangePct, rowPositionGeometricMultiple, sortCampaignRows, type CampaignSortRow } from '@/lib/campaignListSort';
+import { rowEffectivePriceChangePct, rowMagicB, rowPositionGeometricMultiple, sortCampaignRows, type CampaignSortRow } from '@/lib/campaignListSort';
+import { computeInitialExpectedMaxLoss } from '@/lib/campaignAnalysis';
+import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
@@ -40,17 +42,19 @@ function scenario(reduction = 0.5) {
 }
 
 describe('campaign geometric metrics', () => {
-  it('rise multiples use the initial drawdown and magic b multiplies the two full-precision factors', () => {
+  it('magic b requires risk normalization and adds the signed settlement correction', () => {
     expect(computeEffectivePriceChangeMultiple(45, 9)).toBe(5);
     expect(computeEffectivePriceChangeMultiple(-10, 5)).toBe(-2);
     expect(computeEffectivePriceChangeMultiple(45, 0)).toBeNull();
     expect(computeEffectivePriceChangeMultiple(null, 9)).toBeNull();
-    expect(computeMagicB(5, 2)).toBe(10);
-    expect(computeMagicB(-2, 3)).toBe(-6);
-    expect(computeMagicB(0, 3)).toBe(0);
-    expect(computeMagicB(null, 3)).toBeNull();
-    expect(computeMagicB(45, null)).toBeNull();
-    expect(computeMagicB(Infinity, 3)).toBeNull();
+    expect(computeMagicB(5, 2, 0.5, -0.1)).toBe(4.9);
+    expect(computeMagicB(-2, 3, 0.5, -0.1)).toBe(-3.1);
+    expect(computeMagicB(0, 3, 1, 0.1)).toBe(0.1);
+    expect(computeMagicB(null, 3, 1)).toBeNull();
+    expect(computeMagicB(45, null, 1)).toBeNull();
+    expect(computeMagicB(Infinity, 3, 1)).toBeNull();
+    expect(computeMagicB(5, 2, null)).toBeNull();
+    expect(computeMagicB(5, 2, 0)).toBeNull();
   });
   it('F reuses the main-price-change exit, never the weighted or later add-leg exits', () => {
     const data = scenario();
@@ -204,11 +208,14 @@ describe('campaign geometric metrics', () => {
       { id: 'k2', side: 'SHORT', price: 140, status: 'cancelled', createdAt: at(4), cancelledAt: at(8) },
     ] as CampaignReverseHedgeOrder[];
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
-    expect(result.geometricMetricBasis.firstAdd).toEqual({
+    expect(result.geometricMetricBasis.firstAdd).toMatchObject({
       beforeCoins: 5, addCoins: 7.5, costLine: 100, breakevenLine: 80, bankedProfit: 100,
       support: 110, addPrice: 130, actualRatio: 1.5, allowedRatio: 1.5,
     });
     const first = calculateAddPosition({ currentPrice: 130, support: 110, state: initialAddPositionState(100, 5, 100) });
+    expect(result.geometricMetricBasis.firstAdd!.afterCoins).toBe(12.5);
+    expect(result.geometricMetricBasis.firstAdd!.afterCostLine).toBe(118);
+    expect(result.geometricMetricBasis.firstAdd!.afterBreakevenLine).toBe(110);
     expect(first.addCoins / 5).toBe(result.geometricMetricBasis.firstAdd!.allowedRatio);
     expect(first.next!.mirrorProfitAvailable).toBe(0);
     const second = calculateAddPosition({ currentPrice: 160, support: 140, state: first.next! });
@@ -233,11 +240,95 @@ describe('campaign geometric metrics', () => {
     const row = (id: string, multiple: number, rise: number) => ({
       ...scenario(), campaign: { ...scenario().campaign, id }, positionGeometricMultiple: multiple, effectivePriceChangePct: rise,
       profitCaptureRatio: 10, initialExpectedMaxDrawdownPct: 10, arithmeticExpectancy: 0, geometricExpectancy: 0,
+      magicB: multiple * rise / 10,
     } as unknown as CampaignSortRow);
     const rows = [row('a', 2, -10), row('b', 4, 20), row('c', 1, 5)];
     expect(sortCampaignRows(rows, [{ mode: 'positionGeometricMultiple', direction: 'desc' }]).map(value => value.campaign.id)).toEqual(['b', 'a', 'c']);
     expect(sortCampaignRows(rows, [{ mode: 'effectivePriceChangePct', direction: 'asc' }]).map(value => value.campaign.id)).toEqual(['a', 'c', 'b']);
     expect(sortCampaignRows(rows, [{ mode: 'effectivePriceChangeMultiple', direction: 'asc' }]).map(value => value.campaign.id)).toEqual(['a', 'c', 'b']);
     expect(sortCampaignRows(rows, [{ mode: 'magicB', direction: 'desc' }]).map(value => value.campaign.id)).toEqual(['b', 'c', 'a']);
+  });
+
+  it('reconstructs EVAA 2.23 from 4.69 with mirror profit, overshoot, partial hedge and fees', () => {
+    const E = 1.9344530604459202, T = 2.12834119256148, K = 1.9009;
+    const F = 2.599662936, D = 2.574768235, M = 2.0292560416666667, X = 2.562348235;
+    const data = scenario();
+    data.campaign.initial_main_size_usdt = 1740380;
+    const values = [
+      ['main', 'main_open', 'long', 870190, E, D, 0, 8, 435.095],
+      ['mirror', 'mirror_tp', 'long', 870190, E, M, 0, 1, 435.095],
+      ['add1', 'main_add_1', 'long', 255270, T, D, 2, 8, 127.635],
+      ['hedge', 'hedge_rolling', 'short', 148200, F, X, 7, 8, 74.1],
+    ] as const;
+    data.legs = values.map(([id, role, side, notional, entry, exit, open, close]) => ({ ...scenario().legs[0], id, leg_role: role,
+      direction: side, trade_record_id: `${id}-record`, pre_position_size: notional, pre_entry_price: entry,
+      pre_simulated_time: iso(open), post_simulated_close_time: iso(close), post_exit_price_snapshot: exit } as TradeJournal));
+    data.tradeRecords = values.map(([id, , side, notional, entry, exit, open, close, fee]) => ({ ...scenario().tradeRecords[0],
+      id: `${id}-record`, fillId: id, side: side === 'long' ? 'LONG' : 'SHORT', entryPrice: entry, exitPrice: exit,
+      quantity: notional / entry, openTime: at(open), closeTime: at(close), fee,
+      pnl: (side === 'long' ? 1 : -1) * notional / entry * (exit - entry) - fee,
+      addSizingSnapshot: id === 'add1' ? { s1: K } : undefined } as TradeRecord));
+    const orders = [{ id: 'initial', side: 'SHORT', price: 1.7424, status: 'cancelled', createdAt: at(0), cancelledAt: at(1) },
+      { id: 'k1', side: 'SHORT', price: K, status: 'cancelled', createdAt: at(2), cancelledAt: at(8) }] as CampaignReverseHedgeOrder[];
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    const bridge = result.geometricMetricBasis.magicBReconciliation!;
+    expect(bridge).not.toBeNull();
+    expect(result.positionGeometricMultiple).toBeCloseTo(1.266626084915328, 10);
+    expect(bridge.rawProduct).toBeCloseTo(4.689817919369583, 9);
+    expect(bridge.normalization).toBeCloseTo(0.49132750720811347, 10);
+    expect(bridge.balanceAtSupport).toBeCloseTo(-161.51895461644745, 6);
+    expect(bridge.exitPriceAdjustment).toBeCloseTo(-14184.408637467137, 6);
+    expect(bridge.otherNetPnl).toBeCloseTo(2053.1137289878325, 6);
+    expect(bridge.netSettlementAdjustment).toBeCloseTo(-562.73, 6);
+    expect(bridge.quantityAdjustment).toBeCloseTo(0, 6);
+    expect(bridge.reconstructedPnl).toBeCloseTo(385282.9605897309, 6);
+    expect(result.magicB).toBeCloseTo(2.229834766100436, 9);
+    expect(result.geometricMetricBasis.firstAdd!.afterBreakevenLine).toBeCloseTo(1.9011834778793941, 10);
+    const card = buildCampaignCardData({ ...data, reverseHedgeOrders: orders } as Parameters<typeof buildCampaignCardData>[0]);
+    expect(rowMagicB(card)).toBe(result.magicB);
+    expect(result.magicB).toBeCloseTo(card.profitCaptureRatio! / 100, 10);
+  });
+
+  it.each([false, true])('multiple adds, intermediate reduction=%s, attributed split closes reconcile independently', intermediate => {
+    const data = scenario();
+    const orders = [{ id: 'initial', side: 'SHORT', price: 90, status: 'cancelled', createdAt: at(0), cancelledAt: at(1) }] as CampaignReverseHedgeOrder[];
+    if (intermediate) {
+      data.legs[0].trade_record_id = 'main-position';
+      data.tradeRecords[0].positionId = 'main-position';
+      data.tradeRecords[0].quantity = 3;
+      data.tradeRecords[0].pnl = 3 * 120 - 2;
+      data.tradeRecords.push({ ...data.tradeRecords[0], id: 'middle-cut', quantity: 2, exitPrice: 150, closeTime: at(3), pnl: 2 * 50 - 1 });
+    }
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    const settlement = computeCampaignRealizedPnl(data.campaign, data.legs, data.tradeRecords);
+    const L0 = computeInitialExpectedMaxLoss(data.campaign, data.legs, data.tradeRecords, orders);
+    expect(L0).toBe(100);
+    expect(result.magicB).toBeCloseTo(settlement.total! / L0, 10);
+    expect(result.geometricMetricBasis.magicBReconciliation!.reconstructedPnl).toBeCloseTo(settlement.total!, 8);
+    if (intermediate) expect(result.geometricMetricBasis.magicBReconciliation!.quantityAdjustment).not.toBe(0);
+    else expect(result.geometricMetricBasis.magicBReconciliation!.quantityAdjustment).toBeCloseTo(0);
+  });
+
+  it('corrected last slices and liquidation adjustments retain the official net settlement basis', () => {
+    const data = scenario();
+    const orders = [{ id: 'initial', side: 'SHORT', price: 90, status: 'cancelled', createdAt: at(0), cancelledAt: at(1) }] as CampaignReverseHedgeOrder[];
+    const corrections = {add2: {originalExitPrice: 220, exitPrice: 210, candleLow: 200, candleHigh: 215}};
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders, corrections);
+    expect(result.magicB).toBeCloseTo(computeCampaignRealizedPnl(data.campaign, data.legs, data.tradeRecords, corrections).total! / 100, 10);
+    data.tradeRecords[3].action = 'LIQUIDATION';
+    data.tradeRecords[3].pnl = -500;
+    const liquidation = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders, corrections);
+    expect(liquidation.magicB).toBeCloseTo(computeCampaignRealizedPnl(data.campaign, data.legs, data.tradeRecords, corrections).total! / 100, 10);
+    expect(liquidation.geometricMetricBasis.magicBReconciliation!.netSettlementAdjustment).not.toBe(0);
+  });
+
+  it('never falls back to the unnormalized product or stored campaign total with incomplete evidence', () => {
+    const data = scenario();
+    const orders = [{ id: 'initial', side: 'SHORT', price: 90, status: 'cancelled', createdAt: at(0), cancelledAt: at(1) }] as CampaignReverseHedgeOrder[];
+    data.tradeRecords.pop();
+    data.legs[3].post_realized_pnl = null;
+    data.campaign.final_realized_pnl = 999999;
+    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders).magicB).toBeNull();
+    expect(rowMagicB({...data, magicB: null, initialExpectedMaxDrawdownPct: 10})).toBeNull();
   });
 });

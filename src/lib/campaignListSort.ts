@@ -4,7 +4,7 @@ import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 /**
@@ -229,7 +229,7 @@ export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'cam
 }
 
 export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB' | 'effectivePriceChangePct' | 'effectivePriceChangeMultiple' | 'initialExpectedMaxDrawdownPct' | 'positionGeometricMultiple'>): number | null {
-  return row.magicB !== undefined ? row.magicB : computeMagicB(rowEffectivePriceChangeMultiple(row), rowPositionGeometricMultiple(row));
+  return row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB ?? null;
 }
 
 /**

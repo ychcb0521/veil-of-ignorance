@@ -3,7 +3,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { campaignPayoffRatioMultiple, formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeEffectivePriceChangeMultiple, computeMagicB, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeEffectivePriceChangeMultiple, computeMagicB, MAGIC_B_FORMULA, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   formatArithmeticExpectancy,
@@ -42,11 +42,18 @@ function PositionGeometricWorked({ basis }: { basis?: CampaignGeometricMetrics['
       <div data-testid="position-geometric-result" className="border-t border-border/60 pt-2 font-mono font-semibold tabular-nums">≈ {result.toFixed(2)} 倍</div>
       <div className="text-[10px] text-muted-foreground">按完整精度计算；上述代入值与结果仅作四舍五入展示。</div>
       {first && <div data-testid="position-geometric-first-add" className="space-y-1.5 border-t border-border/60 pt-2">
-        <div className="text-[10px] font-medium text-muted-foreground">首次加仓 · {first.bankedProfit > 0 ? '镜像落袋利润计入保本线' : '成本线与覆盖预算'}</div>
-        <div className="font-mono tabular-nums break-words">S₀ = S₁ − G ÷ Q₁ = {number(first.costLine)} − {number(first.bankedProfit)} ÷ {number(first.beforeCoins)} ≈ {number(first.breakevenLine)}</div>
-        <div className="font-mono tabular-nums break-words">α₁上限 = max(0, {number(first.support)} − {number(first.breakevenLine)}) ÷ ({number(first.addPrice)} − {number(first.support)}) ≈ {(first.allowedRatio * 100).toFixed(2)}%</div>
+        <div className="text-[10px] font-medium text-muted-foreground">首次加仓 · 覆盖预算与整体保本价</div>
+        <div className="text-[10px] text-muted-foreground">加仓前 Q₁；旧仓成本 S₁；实际止损 K₁ 不变。</div>
+        <div className="font-mono tabular-nums break-words">α₁上限 = max(0, K₁ − S₁ + G ÷ Q₁) ÷ (T₁ − K₁)</div>
+        <div className="font-mono tabular-nums break-words">= max(0, {number(first.support)} − {number(first.costLine)} + {number(first.bankedProfit)} ÷ {number(first.beforeCoins)}) ÷ ({number(first.addPrice)} − {number(first.support)}) ≈ {(first.allowedRatio * 100).toFixed(2)}%</div>
         <div className="font-mono tabular-nums break-words">α₁实际 = {number(first.addCoins)} ÷ {number(first.beforeCoins)} ≈ {(first.actualRatio * 100).toFixed(2)}%</div>
-        <div className="text-[10px] text-muted-foreground">本场乘积使用实际成交比例；G 通过 S₀ 计入一次。</div>
+        {first.afterCoins != null && first.afterCostLine != null && first.afterBreakevenLine != null && <div className="space-y-1.5 border-t border-border/60 pt-2" data-testid="position-geometric-after-breakeven">
+          <div className="text-[10px] font-medium text-muted-foreground">加仓后 · 整体保本价（未扣未来平仓费）</div>
+          <div className="font-mono tabular-nums break-words">Q后 = Q₁ + ΔQ₁ = {number(first.beforeCoins)} + {number(first.addCoins)} = {number(first.afterCoins)}</div>
+          <div className="font-mono tabular-nums break-words">S后 = (Q₁S₁ + ΔQ₁T₁) ÷ Q后 ≈ {number(first.afterCostLine)}</div>
+          <div className="font-mono tabular-nums break-words">K保本 = S后 − G ÷ Q后 = {number(first.afterCostLine)} − {number(first.bankedProfit)} ÷ {number(first.afterCoins)} ≈ {number(first.afterBreakevenLine)}</div>
+        </div>}
+        <div className="text-[10px] text-muted-foreground">G 只计入一次。K保本是整体保本门槛，不是重新下移实际止损；未加满或超额成交时，两者可以不同。</div>
       </div>}
     </div>
   );
@@ -660,12 +667,24 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   });
   if (metrics.magicB !== undefined) {
     const value = metrics.magicB;
-    const worked = computeMagicB(effectiveMultiple, metrics.positionGeometricMultiple);
+    const bridge = metrics.geometricMetricBasis?.magicBReconciliation;
+    const worked = bridge ? computeMagicB(effectiveMultiple, metrics.positionGeometricMultiple, bridge.normalization, bridge.totalAdjustment / bridge.initialRisk) : null;
     built.push({
       key: 'magicB', label: '神奇的 b',
       value: value == null ? '—' : value.toFixed(2),
       color: pnlExportColor(value), valueClassName: pnlColor(value),
-      help: <><p className="font-mono">神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数</p>{worked != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums" data-testid="magic-b-worked">本场：{effectiveMultiple!.toFixed(2)}x × {metrics.positionGeometricMultiple!.toFixed(2)}x ≈ {worked.toFixed(2)}</div>}<p>有效涨幅倍数按有效涨幅与预期回撤的完整精度相除；展示值四舍五入。任一依据缺失时显示「—」。</p><p>这是价格涨幅倍数与币量累积因子的乘积，不替代以初始预期亏损为分母的实际盈亏比。</p></>,
+      help: <><p className="font-mono">{MAGIC_B_FORMULA}</p>{worked != null && bridge && <div className="space-y-2 rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="magic-b-worked">
+        <div className="text-[10px] font-medium text-muted-foreground">本场计算过程 · 与初始风险 L₀ 统一</div>
+        <div>风险基准换算 = Q基 × Kₘ ÷ 初始名义敞口 ≈ {Number(bridge.normalization.toPrecision(12))}</div>
+        <div>模型项 = {effectiveMultiple!.toFixed(6)} × {metrics.positionGeometricMultiple!.toFixed(6)} × {bridge.normalization.toFixed(6)} ≈ {(bridge.modelPnl / bridge.initialRisk).toFixed(8)}</div>
+        {([
+          ['保本余额', bridge.balanceAtSupport], ['实际退出与 F 的价差', bridge.exitPriceAdjustment],
+          ['对冲及其他腿净盈亏', bridge.otherNetPnl], ['后续净结算调整（含费用）', bridge.netSettlementAdjustment],
+          ['中途仓位变化修正', bridge.quantityAdjustment],
+        ] as const).map(([label, amount]) => <div key={label} className="flex items-baseline justify-between gap-3"><span className="font-sans text-muted-foreground">{label}</span><span className="shrink-0">{amount.toFixed(2)} U</span></div>)}
+        <div className="border-t border-border/60 pt-2">结算修正合计 {bridge.totalAdjustment.toFixed(2)} U ÷ L₀ {bridge.initialRisk.toFixed(2)} U ≈ {(bridge.totalAdjustment / bridge.initialRisk).toFixed(8)}</div>
+        <div className="border-t border-border/60 pt-2 font-semibold">b ≈ {(bridge.modelPnl / bridge.initialRisk).toFixed(8)} + ({(bridge.totalAdjustment / bridge.initialRisk).toFixed(8)}) ≈ {worked.toFixed(8)}</div>
+      </div>}<p>{MAGIC_B_RULE}</p><p>逐笔净结算调整保留现有费用口径，不重复扣除镜像或对冲费用。按完整精度计算，展示值四舍五入。依据不完整、尚未结算或没有实际加仓时显示「—」。</p></>,
     });
   }
   const byKey = new Map(built.map(item => [item.key, item]));

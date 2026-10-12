@@ -1421,8 +1421,10 @@ describe('JournalCampaignsPage sorting', () => {
       // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
       expect(rise.querySelector('dd')).toHaveTextContent('44.44%');
       expect(within(card).getByTestId('campaign-effective-price-change-multiple').querySelector('dd')).toHaveTextContent('4.44x');
-      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('11.11');
-      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['effectivePriceChangeMultiple', 4.44], ['magicB', 11.11]] as const) {
+      // Each settlement slice has net P&L 30; initial risk = 100 × 10% = 10.
+      // Raw price × quantity was 11.11; the risk-normalized settlement identity is 6.
+      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('6.00');
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['effectivePriceChangeMultiple', 4.44], ['magicB', 6]] as const) {
         fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
         const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
         expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'effectivePriceChangeMultiple' ? 'campaign-effective-price-change-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');

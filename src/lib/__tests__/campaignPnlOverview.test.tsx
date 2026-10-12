@@ -74,7 +74,11 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 
 describe('buildCampaignPnlOverviewItems', () => {
   it('places the effective rise multiple before magic b and shows the new worked formula', () => {
-    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 45, expectedMaxDrawdownPct: 9, magicB: 10 }));
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 45, expectedMaxDrawdownPct: 9, magicB: 2,
+      geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 200, lastSupport: 100,
+        magicBReconciliation: {referenceCoins: 5, projectedCoins: 10, settledCoins: 10, initialExposure: 1000, initialRisk: 100,
+          normalization: 0.5, rawProduct: 10, modelPnl: 500, balanceAtSupport: -100, exitPriceAdjustment: -200,
+          otherNetPnl: 10, netSettlementAdjustment: -10, quantityAdjustment: 0, totalAdjustment: -300, reconstructedPnl: 200} } }));
     const keys = items.map(item => item.key);
     expect(keys.slice(keys.indexOf('positionGeometricMultiple'), keys.indexOf('positionGeometricMultiple') + 4)).toEqual(['positionGeometricMultiple', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB']);
     const riseMultiple = items.find(item => item.key === 'effectivePriceChangeMultiple')!;
@@ -82,8 +86,8 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('45.00% ÷ 9.00% ≈ 5.00x');
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBe(true);
-    expect(magic.value).toBe('10.00');
-    expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('5.00x × 2.00x ≈ 10.00');
+    expect(magic.value).toBe('2.00');
+    expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('5.000000 × 2.000000 × 0.500000 ≈ 5.00000000');
   });
   it('expands every actual plus-alpha factor without multiplying by early retention', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
@@ -118,12 +122,14 @@ describe('buildCampaignPnlOverviewItems', () => {
     const item = buildCampaignPnlOverviewItems(winnerMetrics({
       positionGeometricMultiple: 2,
       geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 220, lastSupport: 110,
-        firstAdd: { beforeCoins: 5, addCoins: 5, costLine: 100, breakevenLine: 80, bankedProfit: 100, support: 110, addPrice: 130, allowedRatio: 1.5, actualRatio: 1 } },
+        firstAdd: { beforeCoins: 5, addCoins: 5, costLine: 100, breakevenLine: 80, bankedProfit: 100, support: 110, addPrice: 130, allowedRatio: 1.5, actualRatio: 1,
+          afterCoins: 10, afterCostLine: 115, afterBreakevenLine: 105 } },
     })).find(value => value.key === 'positionGeometricMultiple')!;
     const { container } = render(<>{item.help}</>);
     const first = container.querySelector('[data-testid="position-geometric-first-add"]');
-    expect(first).toHaveTextContent('100 − 100 ÷ 5 ≈ 80');
-    expect(first).toHaveTextContent('max(0, 110 − 80) ÷ (130 − 110) ≈ 150.00%');
+    expect(first).toHaveTextContent('实际止损 K₁ 不变');
+    expect(first).toHaveTextContent('max(0, 110 − 100 + 100 ÷ 5) ÷ (130 − 110) ≈ 150.00%');
+    expect(first).toHaveTextContent('115 − 100 ÷ 10 ≈ 105');
     expect(first).toHaveTextContent('α₁实际 = 5 ÷ 5 ≈ 100.00%');
     expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('2.00 倍');
   });

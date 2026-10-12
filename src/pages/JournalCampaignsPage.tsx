@@ -68,7 +68,7 @@ import {
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
-import { POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { MAGIC_B_FORMULA, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA } from '@/lib/campaignGeometricMetrics';
 import {
   BULK_CLOSE_STATUS_LABELS,
   CLOSE_TIME_SOURCE_LABELS,
@@ -523,7 +523,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     const definition = quantity
       ? `${POSITION_GEOMETRIC_FORMULA}。${POSITION_GEOMETRIC_ALPHA_RULE}以首次加仓前币量为基准，不再乘早期减仓比例。`
       : riseMultiple ? '有效涨幅 ÷ 预期回撤，两个百分数相除得到倍数；例如 45% ÷ 9% = 5.00x。'
-      : magic ? '有效涨幅倍数 × 仓位几何累积倍数；例如 5.00x × 2.00x = 10.00。不替代实际盈亏比。'
+      : magic ? `${MAGIC_B_FORMULA}。${MAGIC_B_RULE}`
       : '(F − Kₘ) ÷ Kₘ，F 与「涨跌幅」的平仓价同源，Kₘ 为最后一次实际加仓时的新支撑线。';
     const formatValue = (value: number) => `${value.toFixed(2)}${quantity || riseMultiple ? 'x' : magic ? '' : '%'}`;
     return [{
@@ -539,7 +539,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
       distribution: quantity ? { unit: '倍', zeroLine: false, references: [{ value: 1, label: '1.00 首次加仓前币量基准', shareLabel: '加仓累积放大（> 1）' }] }
         : riseMultiple ? { unit: '倍', zeroLine: true, zeroLabel: '有效涨幅 = 0', zeroMeaning: '有效涨幅为零', positiveShareLabel: '有效涨幅倍数为正' }
-        : magic ? { zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '有效涨幅或币量累积因子为零', positiveShareLabel: '神奇的 b 为正' }
+        : magic ? { unit: 'R', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '完整结算后的净盈亏为零', positiveShareLabel: '神奇的 b 为正' }
         : { unit: '%', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '有效涨幅为正' },
     }];
   }),
@@ -2042,7 +2042,7 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangeMultiple(row), 'text-foreground/80')}`}>{readings.effectivePriceChangeMultiple}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={metricCell('magicB')} data-sort-highlight={litAttr('magicB')}
-            title="神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数">
+            title={MAGIC_B_FORMULA}>
             <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowMagicB(row), 'text-foreground/80')}`}>{readings.magicB}</span></dd>
           </div>
@@ -4697,8 +4697,8 @@ export default function JournalCampaignsPage() {
                     ) : formula === 'magicBSort' ? (
                       <>
                         <div className="font-medium text-foreground">神奇的 b 计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数</div>
-                        <div className="mt-2 space-y-1 text-muted-foreground"><div>有效涨幅倍数 = 有效涨幅 ÷ 预期回撤。例如 45% ÷ 9% = 5.00x，再乘仓位几何累积倍数 2.00x，得到 10.00。按完整精度计算。</div><div>这是价格与币量因子的乘积，不替代实际盈亏比；缺少任一依据时不计算。</div></div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{MAGIC_B_FORMULA}</div>
+                        <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的结算恒等式。尚未完整结算、没有加仓或依据缺失时显示「—」。</div></div>
                       </>
                     ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' || formula === 'effectivePriceChangeMultipleSort' ? (
                       <>

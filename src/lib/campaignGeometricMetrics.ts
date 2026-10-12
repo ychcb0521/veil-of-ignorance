@@ -1,14 +1,16 @@
-import { computeInitialExpectedMaxDrawdownPct, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
+import { computeInitialExpectedMaxDrawdownPct, computeInitialExpectedMaxLoss, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps, type AddSizingVerdict } from '@/lib/campaignAddSizingCheck';
-import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
-import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
+import { buildTradeRecordPnlCorrection, resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
+import { closingSettlementRecord, computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export const POSITION_GEOMETRIC_FORMULA = '∏ₖ(1 + αₖ)';
-export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次加仓若有净落袋利润 G，以 S₀ = S₁ − G ÷ Q₁ 作为覆盖预算的成本线；可加仓比例上限 = max(0, K₁ − S₀) ÷ (T₁ − K₁)。落袋利润只计入一次；后续沿用加仓计算器的预算承接逻辑。';
+export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
+export const MAGIC_B_FORMULA = '神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数 × 风险基准换算 + 结算修正 ÷ L₀';
+export const MAGIC_B_RULE = '风险基准换算 = 首次加仓前币数 × Kₘ ÷ 初始名义敞口。结算修正逐项包含保本余额、实际退出与 F 的价差、对冲及其他腿净盈亏、费用和中途仓位变化。F 与涨跌幅同源，L₀ 与盈亏比同源；完整结算时与实际盈亏比一致，缺少依据时不计算。';
 
 export interface GeometricFirstAddBasis {
   beforeCoins: number;
@@ -20,6 +22,27 @@ export interface GeometricFirstAddBasis {
   addPrice: number;
   actualRatio: number;
   allowedRatio: number;
+  afterCoins?: number;
+  afterCostLine?: number;
+  afterBreakevenLine?: number;
+}
+
+export interface MagicBReconciliation {
+  referenceCoins: number;
+  projectedCoins: number;
+  settledCoins: number;
+  initialExposure: number;
+  initialRisk: number;
+  normalization: number;
+  rawProduct: number;
+  modelPnl: number;
+  balanceAtSupport: number;
+  exitPriceAdjustment: number;
+  otherNetPnl: number;
+  netSettlementAdjustment: number;
+  quantityAdjustment: number;
+  totalAdjustment: number;
+  reconstructedPnl: number;
 }
 
 export interface CampaignGeometricMetrics {
@@ -34,6 +57,7 @@ export interface CampaignGeometricMetrics {
     finalExitPrice: number | null;
     lastSupport: number | null;
     firstAdd?: GeometricFirstAddBasis | null;
+    magicBReconciliation?: MagicBReconciliation | null;
   };
 }
 
@@ -56,7 +80,10 @@ export function geometricFirstAddBasis(verdict: AddSizingVerdict | undefined): G
   const breakevenLine = costLine - G / Q;
   const allowedRatio = Math.max(0, K - breakevenLine) / (T - K);
   if (![costLine, breakevenLine, allowedRatio].every(Number.isFinite)) return null;
+  const afterCoins = Q + addCoins;
+  const afterCostLine = (Q * costLine + addCoins * T) / afterCoins;
   return { beforeCoins: Q, addCoins, costLine, breakevenLine, bankedProfit: G,
+    afterCoins, afterCostLine, afterBreakevenLine: afterCostLine - G / afterCoins,
     support: K, addPrice: T, actualRatio: addCoins / Q, allowedRatio };
 }
 
@@ -73,10 +100,66 @@ export function computeEffectivePriceChangeMultiple(risePct: number | null | und
   return Number.isFinite(value) ? value : null;
 }
 
-export function computeMagicB(effectiveMultiple: number | null | undefined, positionMultiple: number | null | undefined): number | null {
-  if (effectiveMultiple == null || positionMultiple == null || !Number.isFinite(effectiveMultiple) || !Number.isFinite(positionMultiple)) return null;
-  const value = effectiveMultiple * positionMultiple;
+export function computeMagicB(effectiveMultiple: number | null | undefined, positionMultiple: number | null | undefined, normalization: number | null | undefined, correctionR = 0): number | null {
+  if (effectiveMultiple == null || positionMultiple == null || normalization == null
+    || ![effectiveMultiple, positionMultiple, normalization, correctionR].every(Number.isFinite) || normalization <= 0) return null;
+  const value = effectiveMultiple * positionMultiple * normalization + correctionR;
   return Number.isFinite(value) ? value : null;
+}
+
+/** A settlement identity, not a copy of total/L₀. Every claimed slice is counted once.
+ * Late closes are repriced at K and F, preserving their official net adjustments.
+ * Intermediate reductions/re-entry appear explicitly as a quantity correction.
+ */
+function reconcileMagicB(campaign: TradeCampaign, legs: TradeJournal[], records: TradeRecord[], corrections: LegExitPriceCorrections,
+  referenceCoins: number | null, multiple: number | null, F: number | null, K: number | null,
+  lastAddTime: number | undefined, initialExposure: number, initialRisk: number): MagicBReconciliation | null {
+  if (referenceCoins == null || multiple == null || F == null || K == null || lastAddTime == null
+    || ![referenceCoins, multiple, F, K, lastAddTime, initialExposure, initialRisk].every(Number.isFinite)
+    || referenceCoins <= 0 || initialExposure <= 0 || initialRisk <= 0) return null;
+  const settlement = computeCampaignRealizedPnl(campaign, legs, records, corrections);
+  if (!settlement.settled || settlement.total == null) return null;
+  let earlyNet = 0, settledCoins = 0, atSupport = 0, exitPriceAdjustment = 0, netSettlementAdjustment = 0, otherNetPnl = 0;
+  for (const leg of legs) {
+    const net = settlement.byLeg.get(leg.id);
+    if (net == null || !Number.isFinite(net)) return null;
+    if (leg.direction !== 'long') { otherNetPnl += net; continue; }
+    const claimed = settlement.recordsByLeg.get(leg.id) ?? [];
+    const closing = closingSettlementRecord(claimed);
+    const slices = claimed.length ? claimed.map(record => {
+      const correction = record === closing ? corrections[leg.id] : null;
+      const delta = correction ? buildTradeRecordPnlCorrection(record, correction) : null;
+      const sized = !record.settlementMode && leg.pre_settlement_mode === 'coin' ? { ...record, settlementMode: 'coin' as const } : record;
+      return { q: tradeRecordNotionalAt(sized) / record.entryPrice, entry: record.entryPrice,
+        exit: delta?.correctedExitPrice ?? record.exitPrice, time: record.closeTime,
+        net: delta?.correctedNetPnl ?? record.pnl };
+    }) : [{ q: leg.pre_position_size != null && leg.pre_entry_price ? leg.pre_position_size / leg.pre_entry_price : NaN,
+      entry: leg.pre_entry_price ?? NaN, exit: resolveLegExecution(leg, null, corrections).exitPrice ?? NaN,
+      time: resolveLegExecution(leg, null, corrections).closeTime ?? NaN, net }];
+    let sliceNet = 0;
+    for (const s of slices) {
+      if (![s.q, s.entry, s.exit, s.time, s.net].every(Number.isFinite) || s.q <= 0 || s.entry <= 0 || s.exit <= 0 || s.time <= 0) return null;
+      sliceNet += s.net;
+      if (s.time <= lastAddTime) { earlyNet += s.net; continue; }
+      settledCoins += s.q;
+      atSupport += s.q * (K - s.entry);
+      exitPriceAdjustment += s.q * (s.exit - F);
+      netSettlementAdjustment += s.net - s.q * (s.exit - s.entry);
+    }
+    if (Math.abs(sliceNet - net) > 1e-7 * Math.max(1, Math.abs(net))) return null;
+  }
+  const projectedCoins = referenceCoins * multiple;
+  const modelPnl = projectedCoins * (F - K);
+  const balanceAtSupport = earlyNet + atSupport;
+  const quantityAdjustment = (settledCoins - projectedCoins) * (F - K);
+  const totalAdjustment = balanceAtSupport + exitPriceAdjustment + otherNetPnl + netSettlementAdjustment + quantityAdjustment;
+  const reconstructedPnl = modelPnl + totalAdjustment;
+  if (Math.abs(reconstructedPnl - settlement.total) > 1e-7 * Math.max(1, Math.abs(settlement.total))) return null;
+  return { referenceCoins, projectedCoins, settledCoins, initialExposure, initialRisk,
+    normalization: referenceCoins * K / initialExposure,
+    rawProduct: modelPnl / initialRisk / (referenceCoins * K / initialExposure),
+    modelPnl, balanceAtSupport, exitPriceAdjustment, otherNetPnl, netSettlementAdjustment,
+    quantityAdjustment, totalAdjustment, reconstructedPnl };
 }
 
 /** Shared by list, detail, sorting and charts. Missing evidence remains null. */
@@ -166,11 +249,15 @@ export function computeCampaignGeometricMetrics(
   // Early reduction sets Q₁ in the actual add ledger; it is not a second factor.
   const multiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(addRatios);
   const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
+  const bridge = reconcileMagicB(campaign, legs, tradeRecords, corrections, steps[0]?.beforeCoins ?? null,
+    multiple, finalExitPrice, lastSupport, lastAdd?.openTime,
+    computeInitialMainExposureNotional(campaign, legs, tradeRecords),
+    computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, orders));
   return {
     effectivePriceChangePct: rise,
     effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
-    magicB: computeMagicB(riseMultiple, multiple),
-    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd },
+    magicB: bridge ? computeMagicB(riseMultiple, multiple, bridge.normalization, bridge.totalAdjustment / bridge.initialRisk) : null,
+    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, magicBReconciliation: bridge },
   };
 }

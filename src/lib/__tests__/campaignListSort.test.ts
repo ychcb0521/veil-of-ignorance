@@ -163,7 +163,7 @@ describe('排序链：依次比较', () => {
 
 describe('每个排序项的独立比较器', () => {
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, effectivePriceChangePct: 10 };
+  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, effectivePriceChangePct: 10, magicB: 1 };
   const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, effectivePriceChangePct: null };
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {

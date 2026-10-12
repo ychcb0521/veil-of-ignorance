@@ -12,6 +12,7 @@ const rows = [
 rows[0].dynamicMaxDrawdownPct = 4.5;
 rows[0].positionGeometricMultiple = 6.25;
 rows[0].effectivePriceChangePct = 29.4117647059;
+rows[0].magicB = 3;
 const options = {
   mirrorTpLabel: () => '未实现',
   asymmetricSummary: summarizeAsymmetricRiskMetrics(rows.map(row => ({ campaign: row.campaign, payoffRatio: rowPayoffRatio(row) }))),
@@ -47,7 +48,8 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(cell(0, '仓位几何累积倍数（倍）')).toBe(6.25);
     expect(cell(0, '有效涨幅（%）')).toBeCloseTo(29.4117647059);
     expect(cell(0, '有效涨幅倍数')).toBeCloseTo(29.4117647059 / 2);
-    expect(cell(0, '神奇的 b')).toBeCloseTo(29.4117647059 / 2 * 6.25);
+    expect(cell(0, '神奇的 b')).toBe(3);
+    expect(cell(1, '神奇的 b')).toBeNull();
     expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 4)).toEqual(['仓位几何累积倍数（倍）', '有效涨幅（%）', '有效涨幅倍数', '神奇的 b']);
     expect(cell(0, '自评（0–5）')).toBe(4);
     expect(cell(0, '自评（文字）')).toBe('很好');
