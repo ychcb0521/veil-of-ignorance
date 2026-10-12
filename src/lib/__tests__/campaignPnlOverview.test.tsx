@@ -85,32 +85,47 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(magic.value).toBe('10.00');
     expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('5.00x × 2.00x ≈ 10.00');
   });
-  it('expands the actual retention and every plus-alpha factor, then shows the full-precision result', () => {
+  it('expands every actual plus-alpha factor without multiplying by early retention', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
-      positionGeometricMultiple: 3,
+      positionGeometricMultiple: 7.5,
       geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0.6, addRatios: [0.5, 1.5, 1], finalExitPrice: 220, lastSupport: 140 },
     }));
     const item = items.find(value => value.key === 'positionGeometricMultiple')!;
     const { container } = render(<>{item.help}</>);
-    expect(container.querySelector('[data-testid="position-geometric-substitution"]')).toHaveTextContent('(1 − 60.00%)× (1 + 50.00%)× (1 + 150.00%)× (1 + 100.00%)');
-    expect(container.querySelector('[data-testid="position-geometric-factors"]')).toHaveTextContent('≈ 0.4× 1.5× 2.5× 2');
-    expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('≈ 3.00 倍');
+    expect(container.querySelector('[data-testid="position-geometric-substitution"]')).toHaveTextContent('(1 + 50.00%)× (1 + 150.00%)× (1 + 100.00%)');
+    expect(container.querySelector('[data-testid="position-geometric-substitution"]')).not.toHaveTextContent('60.00%');
+    expect(container.querySelector('[data-testid="position-geometric-factors"]')).toHaveTextContent('≈ 1.5× 2.5× 2');
+    expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('≈ 7.50 倍');
     expect(container.textContent).toContain('3 次加仓');
-    expect(item.value).toBe('3.00x');
+    expect(item.value).toBe('7.50x');
   });
 
-  it('does not invent missing factors, and an empty add product retains the actual initial fraction', () => {
+  it('does not require the early-reduction fraction, and an empty add product is one', () => {
     const overview = (reduction: number | null, ratios: number[] | null, multiple: number | null) => buildCampaignPnlOverviewItems(winnerMetrics({
       positionGeometricMultiple: multiple,
       geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: reduction, addRatios: ratios, finalExitPrice: null, lastSupport: null },
     })).find(value => value.key === 'positionGeometricMultiple')!;
-    const empty = render(<>{overview(0.4, [], 0.6).help}</>);
-    expect(empty.container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('0.60 倍');
+    const empty = render(<>{overview(null, [], 1).help}</>);
+    expect(empty.container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('1.00 倍');
     expect(empty.container.textContent).toContain('0 次加仓');
     empty.unmount();
     const missing = render(<>{overview(null, null, null).help}</>);
     expect(missing.container.querySelector('[data-testid="position-geometric-worked"]')).toBeNull();
     expect(missing.container.textContent).toContain('暂不能展开计算');
+  });
+
+  it('shows substituted first-add S0 and distinguishes the allowable ratio from the actual factor', () => {
+    const item = buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: 2,
+      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 220, lastSupport: 110,
+        firstAdd: { beforeCoins: 5, addCoins: 5, costLine: 100, breakevenLine: 80, bankedProfit: 100, support: 110, addPrice: 130, allowedRatio: 1.5, actualRatio: 1 } },
+    })).find(value => value.key === 'positionGeometricMultiple')!;
+    const { container } = render(<>{item.help}</>);
+    const first = container.querySelector('[data-testid="position-geometric-first-add"]');
+    expect(first).toHaveTextContent('100 − 100 ÷ 5 ≈ 80');
+    expect(first).toHaveTextContent('max(0, 110 − 80) ÷ (130 − 110) ≈ 150.00%');
+    expect(first).toHaveTextContent('α₁实际 = 5 ÷ 5 ≈ 100.00%');
+    expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('2.00 倍');
   });
 
   it('explains that F is exactly the same exit basis as the price-change metric', () => {

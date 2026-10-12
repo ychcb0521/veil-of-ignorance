@@ -1,11 +1,26 @@
 import { computeInitialExpectedMaxDrawdownPct, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
-import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
+import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps, type AddSizingVerdict } from '@/lib/campaignAddSizingCheck';
 import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+
+export const POSITION_GEOMETRIC_FORMULA = '∏ₖ(1 + αₖ)';
+export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次加仓若有净落袋利润 G，以 S₀ = S₁ − G ÷ Q₁ 作为覆盖预算的成本线；可加仓比例上限 = max(0, K₁ − S₀) ÷ (T₁ − K₁)。落袋利润只计入一次；后续沿用加仓计算器的预算承接逻辑。';
+
+export interface GeometricFirstAddBasis {
+  beforeCoins: number;
+  addCoins: number;
+  costLine: number;
+  breakevenLine: number;
+  bankedProfit: number;
+  support: number;
+  addPrice: number;
+  actualRatio: number;
+  allowedRatio: number;
+}
 
 export interface CampaignGeometricMetrics {
   effectivePriceChangePct: number | null;
@@ -18,15 +33,31 @@ export interface CampaignGeometricMetrics {
     addRatios: number[] | null;
     finalExitPrice: number | null;
     lastSupport: number | null;
+    firstAdd?: GeometricFirstAddBasis | null;
   };
 }
 
-/** Coin-position growth: actual early retention times each actual add factor. */
-export function positionGeometricMultiple(reduction: number | null, ratios: readonly number[] | null): number | null {
-  if (reduction == null || !Number.isFinite(reduction) || reduction < 0 || reduction > 1 || ratios == null
+/** Growth from the coin position immediately before the first add; an empty product is 1. */
+export function positionGeometricMultiple(ratios: readonly number[] | null): number | null {
+  if (ratios == null
     || ratios.some(ratio => !Number.isFinite(ratio) || ratio < 0)) return null;
-  const value = ratios.reduce((product, ratio) => product * (1 + ratio), 1 - reduction);
+  const value = ratios.reduce((product, ratio) => product * (1 + ratio), 1);
   return Number.isFinite(value) ? value : null;
+}
+
+/** The calculator's signed risk budget written once as S₀, without adding G a second time. */
+export function geometricFirstAddBasis(verdict: AddSizingVerdict | undefined): GeometricFirstAddBasis | null {
+  if (!verdict || verdict.status === 'unknown') return null;
+  const { x1Coins: Q, x2Coins: addCoins, s1: K, s2: T, cushion: Y, banked: G } = verdict;
+  if (Q == null || !(Q > 0) || addCoins == null || !(addCoins > 0)
+    || K == null || T == null || !(T > K) || Y == null || G == null
+    || ![Q, addCoins, K, T, Y, G].every(Number.isFinite)) return null;
+  const costLine = K - Y / Q;
+  const breakevenLine = costLine - G / Q;
+  const allowedRatio = Math.max(0, K - breakevenLine) / (T - K);
+  if (![costLine, breakevenLine, allowedRatio].every(Number.isFinite)) return null;
+  return { beforeCoins: Q, addCoins, costLine, breakevenLine, bankedProfit: G,
+    support: K, addPrice: T, actualRatio: addCoins / Q, allowedRatio };
 }
 
 export function effectivePriceChangePct(exitPrice: number | null, stopLine: number | null): number | null {
@@ -123,7 +154,8 @@ export function computeCampaignGeometricMetrics(
     else if (reduction != null) reduction = Math.max(0, Math.min(1, reduction));
   }
   const lastAdd = steps.at(-1);
-  const verdict = lastAdd ? evaluateCampaignAddSizing(input).get(lastAdd.legId) : null;
+  const verdicts = steps.length ? evaluateCampaignAddSizing(input) : null;
+  const verdict = lastAdd ? verdicts?.get(lastAdd.legId) : null;
   const lastLeg = lastAdd ? legs.find(leg => leg.id === lastAdd.legId) : null;
   const snapshotStop = lastLeg?.trade_record_id ? lookup.get(lastLeg.trade_record_id)?.addSizingSnapshot?.s1 : null;
   const stop = verdict?.s1 ?? snapshotStop ?? null;
@@ -131,12 +163,14 @@ export function computeCampaignGeometricMetrics(
   const rise = effectivePriceChangePct(finalExitPrice, lastSupport);
   const drawdownPct = computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, orders);
   const riseMultiple = computeEffectivePriceChangeMultiple(rise, drawdownPct);
-  const multiple = positionGeometricMultiple(reduction, addRatios);
+  // Early reduction sets Q₁ in the actual add ledger; it is not a second factor.
+  const multiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(addRatios);
+  const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
   return {
     effectivePriceChangePct: rise,
     effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
     magicB: computeMagicB(riseMultiple, multiple),
-    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport },
+    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd },
   };
 }

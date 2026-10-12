@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
-import { resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
+import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, effectivePriceChangePct, geometricFirstAddBasis, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
+import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
+import { calculateAddPosition, initialAddPositionState } from '@/lib/addPositionCoverage';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
 import { buildCampaignPnlOverviewItems } from '@/lib/campaignPnlOverview';
 import { rowEffectivePriceChangePct, rowPositionGeometricMultiple, sortCampaignRows, type CampaignSortRow } from '@/lib/campaignListSort';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
-import type { TradeRecord } from '@/types/trading';
+import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 const START = Date.parse('2026-08-01T00:00:00Z');
 const at = (hour: number) => START + hour * 3_600_000;
@@ -115,12 +116,12 @@ describe('campaign geometric metrics', () => {
   });
 
   it('uses plus alpha, including adds greater than 100%; never the erroneous minus product', () => {
-    expect(positionGeometricMultiple(0.5, [1.5, 1.5, 1])).toBe(6.25);
-    expect(positionGeometricMultiple(0.4, [0.5, 1])).toBeCloseTo(1.8);
-    expect(positionGeometricMultiple(0, [])).toBe(1);
-    expect(positionGeometricMultiple(0.5, [])).toBe(0.5);
-    expect(positionGeometricMultiple(null, [1])).toBeNull();
-    expect(positionGeometricMultiple(0.5, [Number.NaN])).toBeNull();
+    expect(positionGeometricMultiple([1.5, 1.5, 1])).toBe(12.5);
+    expect(positionGeometricMultiple([0.5, 1])).toBeCloseTo(3);
+    expect(positionGeometricMultiple([])).toBe(1);
+    expect(positionGeometricMultiple(null)).toBeNull();
+    expect(positionGeometricMultiple([Number.NaN])).toBeNull();
+    expect(positionGeometricMultiple([-0.1])).toBeNull();
   });
   it('effective rise allows losses and zero; requires positive Km', () => {
     expect(effectivePriceChangePct(220, 170)).toBeCloseTo(29.4117647059);
@@ -139,7 +140,8 @@ describe('campaign geometric metrics', () => {
     expect(result.geometricMetricBasis.initialCoins).toBeCloseTo(10);
     expect(result.geometricMetricBasis.earlyReductionFraction).toBeCloseTo(reduction);
     expect(result.geometricMetricBasis.addRatios).toEqual([1.5, 1.5]);
-    expect(result.positionGeometricMultiple).toBeCloseTo((1 - reduction) * 2.5 * 2.5);
+    // Actual pre-add coins already reflect early reduction; never multiply by retention again.
+    expect(result.positionGeometricMultiple).toBeCloseTo(2.5 * 2.5);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
     expect(result.geometricMetricBasis.lastSupport).toBe(140);
     expect(result.effectivePriceChangePct).toBeCloseTo(80 / 140 * 100);
@@ -157,13 +159,13 @@ describe('campaign geometric metrics', () => {
     expect(result.effectivePriceChangeMultiple).toBeNull();
     expect(result.magicB).toBeNull();
   });
-  it('no adds: actual retained factor, no Km; unfilled adds do not invent factors', () => {
+  it('no adds: product is one, no Km; unfilled adds do not invent factors', () => {
     const data = scenario(0.4);
     data.legs = data.legs.slice(0, 2);
     data.tradeRecords = data.tradeRecords.slice(0, 2);
     const pending = { ...scenario().legs[2], id: 'pending', trade_record_id: null, post_simulated_close_time: null, post_exit_price_snapshot: null };
     const result = computeCampaignGeometricMetrics(data.campaign, [...data.legs, pending], data.tradeRecords);
-    expect(result.positionGeometricMultiple).toBeCloseTo(0.6);
+    expect(result.positionGeometricMultiple).toBe(1);
     expect(result.effectivePriceChangePct).toBeNull();
   });
   it('missing prices stay unknown; cached null is not replaced with a guessed value', () => {
@@ -179,7 +181,7 @@ describe('campaign geometric metrics', () => {
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
     expect(result.geometricMetricBasis.initialCoins).toBe(10);
     expect(result.geometricMetricBasis.earlyReductionFraction).toBe(0.5);
-    expect(result.positionGeometricMultiple).toBe(3.125);
+    expect(result.positionGeometricMultiple).toBe(6.25);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
   });
   it('a main position closed in slices uses actual early cut and actual final cut price', () => {
@@ -193,7 +195,39 @@ describe('campaign geometric metrics', () => {
     expect(result.geometricMetricBasis.earlyReductionFraction).toBe(0.5);
     expect(result.geometricMetricBasis.addRatios).toEqual([1.5, 1.5]);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
-    expect(result.positionGeometricMultiple).toBe(3.125);
+    expect(result.positionGeometricMultiple).toBe(6.25);
+  });
+  it('first add uses mirror-adjusted S0 once, then the next risk-budget line equals the prior support', () => {
+    const data = scenario();
+    const orders = [
+      { id: 'k1', side: 'SHORT', price: 110, status: 'cancelled', createdAt: at(2), cancelledAt: at(3) },
+      { id: 'k2', side: 'SHORT', price: 140, status: 'cancelled', createdAt: at(4), cancelledAt: at(8) },
+    ] as CampaignReverseHedgeOrder[];
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    expect(result.geometricMetricBasis.firstAdd).toEqual({
+      beforeCoins: 5, addCoins: 7.5, costLine: 100, breakevenLine: 80, bankedProfit: 100,
+      support: 110, addPrice: 130, actualRatio: 1.5, allowedRatio: 1.5,
+    });
+    const first = calculateAddPosition({ currentPrice: 130, support: 110, state: initialAddPositionState(100, 5, 100) });
+    expect(first.addCoins / 5).toBe(result.geometricMetricBasis.firstAdd!.allowedRatio);
+    expect(first.next!.mirrorProfitAvailable).toBe(0);
+    const second = calculateAddPosition({ currentPrice: 160, support: 140, state: first.next! });
+    expect(second.addCoins / first.newCoins).toBe(1.5);
+    const verdicts = evaluateCampaignAddSizing({ ...data, reverseHedgeOrders: orders });
+    // Recomputed real average − the same banked profit gives K1; it never creates a second profit allowance.
+    expect(geometricFirstAddBasis(verdicts.get('add2'))!.breakevenLine).toBe(110);
+    expect(result.positionGeometricMultiple).toBe((1 + 1.5) * (1 + 1.5));
+    expect(rowPositionGeometricMultiple(buildCampaignCardData({ ...data, reverseHedgeOrders: orders } as Parameters<typeof buildCampaignCardData>[0]))).toBe(6.25);
+  });
+  it('does not substitute the allowable cap for an actual partial add', () => {
+    const data = scenario();
+    data.legs[2].pre_position_size = 5 * 130;
+    data.tradeRecords[2].quantity = 5;
+    const orders = [{ id: 'k1', side: 'SHORT', price: 110, status: 'cancelled', createdAt: at(2), cancelledAt: at(3) }] as CampaignReverseHedgeOrder[];
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    expect(result.geometricMetricBasis.firstAdd!.allowedRatio).toBe(1.5);
+    expect(result.geometricMetricBasis.firstAdd!.actualRatio).toBe(1);
+    expect(result.positionGeometricMultiple).toBeCloseTo((1 + 1) * (1 + 18.75 / 10));
   });
   it('the rise multiple sorts independently from raw rise and magic b', () => {
     const row = (id: string, multiple: number, rise: number) => ({

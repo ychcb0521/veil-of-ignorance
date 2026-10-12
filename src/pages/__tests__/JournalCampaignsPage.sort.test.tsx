@@ -964,7 +964,7 @@ describe('JournalCampaignsPage sorting', () => {
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
     expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
-      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '剩余仓位几何累积倍数', '有效涨幅', '有效涨幅倍数', '神奇的 b', '涨幅未兑现', '几何期望', '算术期望',
+      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '仓位几何累积倍数', '有效涨幅', '有效涨幅倍数', '神奇的 b', '涨幅未兑现', '几何期望', '算术期望',
     ]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);

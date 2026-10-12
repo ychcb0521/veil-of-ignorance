@@ -101,10 +101,10 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '涨幅未兑现（%）', width: 12, note: '峰值涨幅 − 最终涨跌幅。', value: row => rowUnrealizedPriceChangePct(row) },
     { header: '动态最大回撤（%）', width: 13, note: '有效持仓期间此前峰值到此后谷值的最大回撤；最后一次滚动对冲与主力同平时，窗口结束于该对冲开仓。', value: row => finite(row.dynamicMaxDrawdownPct) },
     { header: '仓位放大（倍）', width: 11, note: '主方向总名义仓位 ÷ 主力开仓名义仓位；两项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
-    { header: '剩余仓位几何累积倍数（倍）', width: 28, note: '(1 − m%) × ∏(1 + αₖ)；m% 为首次加仓前实际减仓比例；αₖ 为实际加仓币数 ÷ 加仓前持币数。按币量计算。', value: row => finite(rowPositionGeometricMultiple(row)) },
+    { header: '仓位几何累积倍数（倍）', width: 25, note: '∏(1 + αₖ)；αₖ 为实际加仓币数 ÷ 加仓前实际持币数。首次有净落袋利润 G 时，S₀ = S₁ − G/Q₁，比例上限 = max(0, K₁ − S₀)/(T₁ − K₁)，G 只计入一次。以首次加仓前币量为基准，不乘早期减仓比例。', value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '有效涨幅（%）', width: 12, note: '(F − Kₘ) ÷ Kₘ × 100；F 与涨跌幅的平仓价同源，Kₘ 为末次加仓的新支撑线。', value: row => finite(rowEffectivePriceChangePct(row)) },
     { header: '有效涨幅倍数', width: 14, note: '有效涨幅 ÷ 预期回撤；两者均为百分数，相除得到倍数（5 = 500%）。', value: row => finite(rowEffectivePriceChangeMultiple(row)) },
-    { header: '神奇的 b', width: 12, note: '有效涨幅倍数 × 剩余仓位几何累积倍数；不替代实际盈亏比。', value: row => finite(rowMagicB(row)) },
+    { header: '神奇的 b', width: 12, note: '有效涨幅倍数 × 仓位几何累积倍数；不替代实际盈亏比。', value: row => finite(rowMagicB(row)) },
     { header: 'DSI 贡献（%）', width: 10, note: '这场亏损战役 b² 占全表亏损组平方和的比例（百分数）；盈利战役为空。', value: row => finite(contribution(row).dsiContributionPct) },
     { header: 'USI 贡献（%）', width: 10, note: '这场盈利战役 b² 占全表盈利组平方和的比例（百分数）；亏损战役为空。', value: row => finite(contribution(row).usiContributionPct) },
   ];
