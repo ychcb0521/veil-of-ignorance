@@ -1,4 +1,4 @@
-import { computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
+import { computeInitialExpectedMaxDrawdownPct, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
 import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
@@ -9,6 +9,7 @@ import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 
 export interface CampaignGeometricMetrics {
   effectivePriceChangePct: number | null;
+  effectivePriceChangeMultiple: number | null;
   positionGeometricMultiple: number | null;
   magicB?: number | null;
   geometricMetricBasis: {
@@ -34,10 +35,16 @@ export function effectivePriceChangePct(exitPrice: number | null, stopLine: numb
     ? (exitPrice - stopLine) / stopLine * 100 : null;
 }
 
-/** Effective rise is stored in percentage points; convert to a fraction once. */
-export function computeMagicB(risePct: number | null | undefined, multiple: number | null | undefined): number | null {
-  if (risePct == null || multiple == null || !Number.isFinite(risePct) || !Number.isFinite(multiple)) return null;
-  const value = risePct / 100 * multiple;
+/** Both inputs are percentages; their ratio is a dimensionless multiple (e.g. 45% / 9% = 5x). */
+export function computeEffectivePriceChangeMultiple(risePct: number | null | undefined, drawdownPct: number | null | undefined): number | null {
+  if (risePct == null || drawdownPct == null || !Number.isFinite(risePct) || !Number.isFinite(drawdownPct) || drawdownPct <= 0) return null;
+  const value = risePct / drawdownPct;
+  return Number.isFinite(value) ? value : null;
+}
+
+export function computeMagicB(effectiveMultiple: number | null | undefined, positionMultiple: number | null | undefined): number | null {
+  if (effectiveMultiple == null || positionMultiple == null || !Number.isFinite(effectiveMultiple) || !Number.isFinite(positionMultiple)) return null;
+  const value = effectiveMultiple * positionMultiple;
   return Number.isFinite(value) ? value : null;
 }
 
@@ -48,7 +55,7 @@ export function computeCampaignGeometricMetrics(
   localOrders: CampaignLocalOrderFacts = {},
 ): CampaignGeometricMetrics {
   const empty: CampaignGeometricMetrics = {
-    effectivePriceChangePct: null, positionGeometricMultiple: null, magicB: null,
+    effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null,
     geometricMetricBasis: { initialCoins: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
   };
   if (campaign.direction !== 'main_long') return empty;
@@ -122,11 +129,14 @@ export function computeCampaignGeometricMetrics(
   const stop = verdict?.s1 ?? snapshotStop ?? null;
   const lastSupport = stop != null && Number.isFinite(stop) && stop > 0 ? stop : null;
   const rise = effectivePriceChangePct(finalExitPrice, lastSupport);
+  const drawdownPct = computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, orders);
+  const riseMultiple = computeEffectivePriceChangeMultiple(rise, drawdownPct);
   const multiple = positionGeometricMultiple(reduction, addRatios);
   return {
     effectivePriceChangePct: rise,
+    effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
-    magicB: computeMagicB(rise, multiple),
+    magicB: computeMagicB(riseMultiple, multiple),
     geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport },
   };
 }

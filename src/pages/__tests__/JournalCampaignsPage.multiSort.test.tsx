@@ -109,9 +109,10 @@ describe('战役列表：多级排序', () => {
     // 第一级自己没有「+」；其余十四项（含涨幅未兑现、仓位放大）各一个，平时透明、触屏改用长按。
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    expect(adds).toHaveLength(17);
+    expect(adds).toHaveLength(18);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
+    expect(screen.getByTestId('sort-chain-add-effectivePriceChangeMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-magicB')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-unrealizedPriceChangePct')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-positionAmplification')).toBeInTheDocument();

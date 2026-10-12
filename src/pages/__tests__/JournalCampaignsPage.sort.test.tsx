@@ -925,7 +925,7 @@ describe('JournalCampaignsPage sorting', () => {
       'time', 'mirrorTp',
       'divider-expectedDrawdownPct',
       'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
-      'positionAmplification', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB',
+      'positionAmplification', 'positionGeometricMultiple', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
       'unrealizedPriceChangePct', 'geometricExpectancy', 'arithmeticExpectancy',
       'divider-leverage',
       'leverage', 'importance', 'alpha',
@@ -955,6 +955,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-position-amplification',
       'campaign-position-geometric-multiple',
       'campaign-effective-price-change',
+      'campaign-effective-price-change-multiple',
       'campaign-magic-b',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',
@@ -963,7 +964,7 @@ describe('JournalCampaignsPage sorting', () => {
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
     expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual([
-      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '仓位几何累积倍数', '有效涨幅', '神奇的 b', '涨幅未兑现', '几何期望', '算术期望',
+      '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '仓位几何累积倍数', '有效涨幅', '有效涨幅倍数', '神奇的 b', '涨幅未兑现', '几何期望', '算术期望',
     ]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
@@ -1419,11 +1420,12 @@ describe('JournalCampaignsPage sorting', () => {
       expect(growth.querySelector('dd')).toHaveTextContent('2.50x');
       // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
       expect(rise.querySelector('dd')).toHaveTextContent('44.44%');
-      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('1.11');
-      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['magicB', 1.11]] as const) {
+      expect(within(card).getByTestId('campaign-effective-price-change-multiple').querySelector('dd')).toHaveTextContent('4.44x');
+      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('11.11');
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 44.44], ['effectivePriceChangeMultiple', 4.44], ['magicB', 11.11]] as const) {
         fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
         const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
-        expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
+        expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'effectivePriceChangeMultiple' ? 'campaign-effective-price-change-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
         fireEvent.contextMenu(screen.getByTestId(`campaign-sort-${key}`));
         fireEvent.click(screen.getByTestId(`campaign-${key}-chart-toggle`));
         expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', `${key}Distribution`);
@@ -2376,6 +2378,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-sort-positionAmplification',
       'campaign-sort-positionGeometricMultiple',
       'campaign-sort-effectivePriceChangePct',
+      'campaign-sort-effectivePriceChangeMultiple',
       'campaign-sort-magicB',
       'campaign-sort-unrealizedPriceChangePct',
       'campaign-sort-geometricExpectancy',
@@ -2406,6 +2409,7 @@ describe('JournalCampaignsPage sorting', () => {
       'campaign-position-amplification',
       'campaign-position-geometric-multiple',
       'campaign-effective-price-change',
+      'campaign-effective-price-change-multiple',
       'campaign-magic-b',
       'campaign-unrealized-price-change',
       'campaign-geometric-expectancy',

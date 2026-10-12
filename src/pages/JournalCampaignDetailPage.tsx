@@ -1785,6 +1785,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
       effectivePriceChangePct: campaignGeometricMetrics?.effectivePriceChangePct ?? null,
+      effectivePriceChangeMultiple: campaignGeometricMetrics?.effectivePriceChangeMultiple ?? null,
       positionGeometricMultiple: campaignGeometricMetrics?.positionGeometricMultiple ?? null,
       magicB: campaignGeometricMetrics?.magicB ?? null,
       geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,

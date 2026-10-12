@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCampaignGeometricMetrics, computeMagicB, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
 import { resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
@@ -39,9 +39,13 @@ function scenario(reduction = 0.5) {
 }
 
 describe('campaign geometric metrics', () => {
-  it('magic b converts percentage to fraction, preserves signs and does not guess missing inputs', () => {
-    expect(computeMagicB(45, 2)).toBe(0.9);
-    expect(computeMagicB(-10, 3)).toBeCloseTo(-0.3);
+  it('rise multiples use the initial drawdown and magic b multiplies the two full-precision factors', () => {
+    expect(computeEffectivePriceChangeMultiple(45, 9)).toBe(5);
+    expect(computeEffectivePriceChangeMultiple(-10, 5)).toBe(-2);
+    expect(computeEffectivePriceChangeMultiple(45, 0)).toBeNull();
+    expect(computeEffectivePriceChangeMultiple(null, 9)).toBeNull();
+    expect(computeMagicB(5, 2)).toBe(10);
+    expect(computeMagicB(-2, 3)).toBe(-6);
     expect(computeMagicB(0, 3)).toBe(0);
     expect(computeMagicB(null, 3)).toBeNull();
     expect(computeMagicB(45, null)).toBeNull();
@@ -146,8 +150,12 @@ describe('campaign geometric metrics', () => {
     const keys = items.map(item => item.key);
     expect(keys[keys.indexOf('positionAmplification') + 1]).toBe('positionGeometricMultiple');
     expect(keys[keys.indexOf('positionGeometricMultiple') + 1]).toBe('effectivePriceChangePct');
-    expect(keys[keys.indexOf('effectivePriceChangePct') + 1]).toBe('magicB');
-    expect(result.magicB).toBeCloseTo(result.effectivePriceChangePct! / 100 * result.positionGeometricMultiple!);
+    expect(keys[keys.indexOf('effectivePriceChangePct') + 1]).toBe('effectivePriceChangeMultiple');
+    expect(keys[keys.indexOf('effectivePriceChangeMultiple') + 1]).toBe('magicB');
+    // The synthetic campaign has no initial hedge boundary, so the risk denominator is genuinely missing.
+    expect(card.initialExpectedMaxDrawdownPct).toBe(0);
+    expect(result.effectivePriceChangeMultiple).toBeNull();
+    expect(result.magicB).toBeNull();
   });
   it('no adds: actual retained factor, no Km; unfilled adds do not invent factors', () => {
     const data = scenario(0.4);
@@ -187,7 +195,7 @@ describe('campaign geometric metrics', () => {
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
     expect(result.positionGeometricMultiple).toBe(3.125);
   });
-  it('both metrics support ascending/descending and multi-level sort', () => {
+  it('the rise multiple sorts independently from raw rise and magic b', () => {
     const row = (id: string, multiple: number, rise: number) => ({
       ...scenario(), campaign: { ...scenario().campaign, id }, positionGeometricMultiple: multiple, effectivePriceChangePct: rise,
       profitCaptureRatio: 10, initialExpectedMaxDrawdownPct: 10, arithmeticExpectancy: 0, geometricExpectancy: 0,
@@ -195,5 +203,7 @@ describe('campaign geometric metrics', () => {
     const rows = [row('a', 2, -10), row('b', 4, 20), row('c', 1, 5)];
     expect(sortCampaignRows(rows, [{ mode: 'positionGeometricMultiple', direction: 'desc' }]).map(value => value.campaign.id)).toEqual(['b', 'a', 'c']);
     expect(sortCampaignRows(rows, [{ mode: 'effectivePriceChangePct', direction: 'asc' }]).map(value => value.campaign.id)).toEqual(['a', 'c', 'b']);
+    expect(sortCampaignRows(rows, [{ mode: 'effectivePriceChangeMultiple', direction: 'asc' }]).map(value => value.campaign.id)).toEqual(['a', 'c', 'b']);
+    expect(sortCampaignRows(rows, [{ mode: 'magicB', direction: 'desc' }]).map(value => value.campaign.id)).toEqual(['b', 'c', 'a']);
   });
 });

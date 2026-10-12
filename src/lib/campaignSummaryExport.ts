@@ -15,6 +15,7 @@ import {
   rowPositionAmplification,
   rowPositionGeometricMultiple,
   rowEffectivePriceChangePct,
+  rowEffectivePriceChangeMultiple,
   rowMagicB,
   rowUnrealizedPriceChangePct,
   selfRatingLabel,
@@ -102,7 +103,8 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '仓位放大（倍）', width: 11, note: '主方向总名义仓位 ÷ 主力开仓名义仓位；两项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
     { header: '仓位几何累积倍数（倍）', width: 19, note: '(1 − m%) × ∏(1 + αₖ)；m% 为首次加仓前实际减仓比例；αₖ 为实际加仓币数 ÷ 加仓前持币数。按币量计算。', value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '有效涨幅（%）', width: 12, note: '(F − Kₘ) ÷ Kₘ × 100；F 与涨跌幅的平仓价同源，Kₘ 为末次加仓的新支撑线。', value: row => finite(rowEffectivePriceChangePct(row)) },
-    { header: '神奇的 b', width: 12, note: '有效涨幅（比例）× 仓位几何累积倍数；百分数除以 100 后代入，不替代实际盈亏比。', value: row => finite(rowMagicB(row)) },
+    { header: '有效涨幅倍数', width: 14, note: '有效涨幅 ÷ 预期回撤；两者均为百分数，相除得到倍数（5 = 500%）。', value: row => finite(rowEffectivePriceChangeMultiple(row)) },
+    { header: '神奇的 b', width: 12, note: '有效涨幅倍数 × 仓位几何累积倍数；不替代实际盈亏比。', value: row => finite(rowMagicB(row)) },
     { header: 'DSI 贡献（%）', width: 10, note: '这场亏损战役 b² 占全表亏损组平方和的比例（百分数）；盈利战役为空。', value: row => finite(contribution(row).dsiContributionPct) },
     { header: 'USI 贡献（%）', width: 10, note: '这场盈利战役 b² 占全表盈利组平方和的比例（百分数）；亏损战役为空。', value: row => finite(contribution(row).usiContributionPct) },
   ];

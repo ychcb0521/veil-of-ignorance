@@ -73,14 +73,17 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
-  it('places effective rise and magic b directly after the coin accumulation metric in the right column', () => {
-    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 45, magicB: 0.9 }));
+  it('places the effective rise multiple before magic b and shows the new worked formula', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 45, expectedMaxDrawdownPct: 9, magicB: 10 }));
     const keys = items.map(item => item.key);
-    expect(keys.slice(keys.indexOf('positionGeometricMultiple'), keys.indexOf('positionGeometricMultiple') + 3)).toEqual(['positionGeometricMultiple', 'effectivePriceChangePct', 'magicB']);
+    expect(keys.slice(keys.indexOf('positionGeometricMultiple'), keys.indexOf('positionGeometricMultiple') + 4)).toEqual(['positionGeometricMultiple', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB']);
+    const riseMultiple = items.find(item => item.key === 'effectivePriceChangeMultiple')!;
+    expect(riseMultiple.value).toBe('5.00x');
+    expect(render(<>{riseMultiple.help}</>).container.querySelector('[data-testid="effective-rise-multiple-worked"]')).toHaveTextContent('45.00% ÷ 9.00% ≈ 5.00x');
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBe(true);
-    expect(magic.value).toBe('0.90');
-    expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('45.00% × 2.00 ≈ 0.90');
+    expect(magic.value).toBe('10.00');
+    expect(render(<>{magic.help}</>).container.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('5.00x × 2.00x ≈ 10.00');
   });
   it('expands the actual retention and every plus-alpha factor, then shows the full-precision result', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({

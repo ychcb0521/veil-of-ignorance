@@ -59,6 +59,7 @@ export type CampaignCardData = {
    */
   positionAmplification?: number | null;
   effectivePriceChangePct?: number | null;
+  effectivePriceChangeMultiple?: number | null;
   positionGeometricMultiple?: number | null;
   magicB?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
@@ -121,7 +122,7 @@ function geometricMetricsOf(campaign: TradeCampaign, details: CampaignDetails, c
       unfilledOrderIds: new Set(details.unfilledOrderIds ?? []),
     });
   } catch {
-    return { effectivePriceChangePct: null, positionGeometricMultiple: null };
+    return { effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null };
   }
 }
 
