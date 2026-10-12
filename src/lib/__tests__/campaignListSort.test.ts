@@ -462,7 +462,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     // 连续指标都分档（DSI / USI 贡献已从排序栏删掉；仓位放大是后加的）
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangePct', 'expectedDrawdownPct',
-      'geometricExpectancy', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'unrealizedPriceChangePct',
+      'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'unrealizedPriceChangePct',
     ]);
     // 第一级算不出的战役本来就不进列表，也不参与档界
     const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];

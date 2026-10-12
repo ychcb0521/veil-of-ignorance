@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCampaignGeometricMetrics, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeMagicB, effectivePriceChangePct, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
 import { resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
@@ -39,6 +39,14 @@ function scenario(reduction = 0.5) {
 }
 
 describe('campaign geometric metrics', () => {
+  it('magic b converts percentage to fraction, preserves signs and does not guess missing inputs', () => {
+    expect(computeMagicB(45, 2)).toBe(0.9);
+    expect(computeMagicB(-10, 3)).toBeCloseTo(-0.3);
+    expect(computeMagicB(0, 3)).toBe(0);
+    expect(computeMagicB(null, 3)).toBeNull();
+    expect(computeMagicB(45, null)).toBeNull();
+    expect(computeMagicB(Infinity, 3)).toBeNull();
+  });
   it('F reuses the main-price-change exit, never the weighted or later add-leg exits', () => {
     const data = scenario();
     data.tradeRecords[2].exitPrice = 280;
@@ -137,7 +145,9 @@ describe('campaign geometric metrics', () => {
     const items = buildCampaignPnlOverviewItems({ ...result } as Parameters<typeof buildCampaignPnlOverviewItems>[0]);
     const keys = items.map(item => item.key);
     expect(keys[keys.indexOf('positionAmplification') + 1]).toBe('positionGeometricMultiple');
-    expect(keys[keys.indexOf('geometricExpectancy') + 1]).toBe('effectivePriceChangePct');
+    expect(keys[keys.indexOf('positionGeometricMultiple') + 1]).toBe('effectivePriceChangePct');
+    expect(keys[keys.indexOf('effectivePriceChangePct') + 1]).toBe('magicB');
+    expect(result.magicB).toBeCloseTo(result.effectivePriceChangePct! / 100 * result.positionGeometricMultiple!);
   });
   it('no adds: actual retained factor, no Km; unfilled adds do not invent factors', () => {
     const data = scenario(0.4);

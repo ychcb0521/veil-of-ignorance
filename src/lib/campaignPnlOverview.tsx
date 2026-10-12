@@ -3,7 +3,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { campaignPayoffRatioMultiple, formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { positionGeometricMultiple, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, positionGeometricMultiple, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   formatArithmeticExpectancy,
@@ -66,6 +66,7 @@ export type CampaignPnlOverviewItemKey =
   | 'positionAmplification'
   | 'positionGeometricMultiple'
   | 'effectivePriceChangePct'
+  | 'magicB'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -99,7 +100,6 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'payoffRatio',
   'addEfficiency',
   'geometricExpectancy',
-  'effectivePriceChangePct',
 ];
 
 /**
@@ -115,6 +115,8 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'dynamicMaxDrawdownPct',
   'positionAmplification',
   'positionGeometricMultiple',
+  'effectivePriceChangePct',
+  'magicB',
 ];
 
 /**
@@ -168,6 +170,7 @@ export interface CampaignPnlOverviewMetrics {
   geometricExpectancy: number | null;
   effectivePriceChangePct?: number | null;
   positionGeometricMultiple?: number | null;
+  magicB?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
   initialRisk: { drawdownFraction: number; source: CampaignInitialRiskSource } | null;
   /** 整段替换某一项的帮助文案（含义与真实战役不同时用）。 */
@@ -633,6 +636,16 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     color: '#1E2329', valueClassName: 'text-foreground/85',
     help: <><p className="font-mono">仓位几何累积倍数 = (1 − m%) × ∏ₖ(1 + αₖ)</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>m% 为首次加仓前实际减掉的初始币量比例，不固定为 50%。αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。按币量计算，不是名义金额或资金收益率；没有加仓时乘积为 1。</p><p>这是早期减仓与历次加仓的累积因子；若加仓之间还发生减仓或重新入场，不等同于最终持仓 ÷ 初始持仓。依据不完整时显示「—」。</p></>,
   });
+  if (metrics.magicB !== undefined) {
+    const value = metrics.magicB;
+    const worked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultiple);
+    built.push({
+      key: 'magicB', label: '神奇的 b',
+      value: value == null ? '—' : value.toFixed(2),
+      color: pnlExportColor(value), valueClassName: pnlColor(value),
+      help: <><p className="font-mono">神奇的 b = 有效涨幅 × 仓位几何累积倍数</p>{worked != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums" data-testid="magic-b-worked">本场：{metrics.effectivePriceChangePct!.toFixed(2)}% × {metrics.positionGeometricMultiple!.toFixed(2)} ≈ {worked.toFixed(2)}</div>}<p>有效涨幅按比例代入，例如 45% = 0.45。按完整精度计算，展示值四舍五入；任一依据缺失时显示「—」。</p><p>这是价格有效涨幅与币量累积因子的乘积，不替代以初始预期亏损为分母的实际盈亏比。</p></>,
+    });
+  }
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [
     ...PNL_OVERVIEW_LEFT_COLUMN.filter(key => byKey.has(key)).map(key => byKey.get(key)!),

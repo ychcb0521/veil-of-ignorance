@@ -60,6 +60,7 @@ export type CampaignCardData = {
   positionAmplification?: number | null;
   effectivePriceChangePct?: number | null;
   positionGeometricMultiple?: number | null;
+  magicB?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
 };
 

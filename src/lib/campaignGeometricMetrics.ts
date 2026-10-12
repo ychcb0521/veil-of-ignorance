@@ -10,6 +10,7 @@ import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 export interface CampaignGeometricMetrics {
   effectivePriceChangePct: number | null;
   positionGeometricMultiple: number | null;
+  magicB?: number | null;
   geometricMetricBasis: {
     initialCoins: number | null;
     earlyReductionFraction: number | null;
@@ -33,6 +34,13 @@ export function effectivePriceChangePct(exitPrice: number | null, stopLine: numb
     ? (exitPrice - stopLine) / stopLine * 100 : null;
 }
 
+/** Effective rise is stored in percentage points; convert to a fraction once. */
+export function computeMagicB(risePct: number | null | undefined, multiple: number | null | undefined): number | null {
+  if (risePct == null || multiple == null || !Number.isFinite(risePct) || !Number.isFinite(multiple)) return null;
+  const value = risePct / 100 * multiple;
+  return Number.isFinite(value) ? value : null;
+}
+
 /** Shared by list, detail, sorting and charts. Missing evidence remains null. */
 export function computeCampaignGeometricMetrics(
   campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[],
@@ -40,7 +48,7 @@ export function computeCampaignGeometricMetrics(
   localOrders: CampaignLocalOrderFacts = {},
 ): CampaignGeometricMetrics {
   const empty: CampaignGeometricMetrics = {
-    effectivePriceChangePct: null, positionGeometricMultiple: null,
+    effectivePriceChangePct: null, positionGeometricMultiple: null, magicB: null,
     geometricMetricBasis: { initialCoins: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
   };
   if (campaign.direction !== 'main_long') return empty;
@@ -113,9 +121,12 @@ export function computeCampaignGeometricMetrics(
   const snapshotStop = lastLeg?.trade_record_id ? lookup.get(lastLeg.trade_record_id)?.addSizingSnapshot?.s1 : null;
   const stop = verdict?.s1 ?? snapshotStop ?? null;
   const lastSupport = stop != null && Number.isFinite(stop) && stop > 0 ? stop : null;
+  const rise = effectivePriceChangePct(finalExitPrice, lastSupport);
+  const multiple = positionGeometricMultiple(reduction, addRatios);
   return {
-    effectivePriceChangePct: effectivePriceChangePct(finalExitPrice, lastSupport),
-    positionGeometricMultiple: positionGeometricMultiple(reduction, addRatios),
+    effectivePriceChangePct: rise,
+    positionGeometricMultiple: multiple,
+    magicB: computeMagicB(rise, multiple),
     geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport },
   };
 }

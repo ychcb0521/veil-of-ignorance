@@ -4,7 +4,7 @@ import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeCampaignGeometricMetrics, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeMagicB, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 
 /**
@@ -43,6 +43,7 @@ export type CampaignSortMode =
   | 'positionAmplification'
   | 'positionGeometricMultiple'
   | 'effectivePriceChangePct'
+  | 'magicB'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -70,8 +71,9 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addCount',
   'positionAmplification',
   'positionGeometricMultiple',
-  'geometricExpectancy',
   'effectivePriceChangePct',
+  'magicB',
+  'geometricExpectancy',
   'arithmeticExpectancy',
   'leverage',
   'importance',
@@ -95,8 +97,9 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'addEfficiency',
   'positionAmplification',
   'positionGeometricMultiple',
-  'geometricExpectancy',
   'effectivePriceChangePct',
+  'magicB',
+  'geometricExpectancy',
   'arithmeticExpectancy',
 ]);
 
@@ -215,6 +218,10 @@ export function rowPositionGeometricMultiple(row: Pick<CampaignCardData, 'campai
 }
 export function rowEffectivePriceChangePct(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'effectivePriceChangePct'>): number | null {
   return row.effectivePriceChangePct !== undefined ? row.effectivePriceChangePct : rowGeometricMetrics(row).effectivePriceChangePct;
+}
+
+export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB' | 'effectivePriceChangePct' | 'positionGeometricMultiple'>): number | null {
+  return row.magicB !== undefined ? row.magicB : computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultiple(row));
 }
 
 /**
@@ -453,6 +460,10 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowEffectivePriceChangePct(row);
       return value == null ? null : sortBinValue('effectivePriceChangePct', value);
     }, importanceTimeAlpha),
+    magicB: metric(row => {
+      const value = rowMagicB(row);
+      return value == null ? null : sortBinValue('magicB', value);
+    }, importanceTimeAlpha),
     alpha: {
       include: always,
       missing: never,
@@ -508,6 +519,7 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'addEfficiency':
     case 'positionGeometricMultiple':
     case 'effectivePriceChangePct':
+    case 'magicB':
     case 'positionAmplification': return Number(value.toFixed(2));
     default: return value;
   }
@@ -593,7 +605,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct',
+  'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'magicB',
 ]);
 
 /** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */
