@@ -330,7 +330,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addCount', label: '加仓次数' },
   // 【用户要求】仓位放大：放在加仓次数的后面（排序行、封面同一位置）
   { value: 'positionAmplification', label: '仓位放大' },
-  { value: 'positionGeometricMultiple', label: '仓位几何累积倍数' },
+  { value: 'positionGeometricMultiple', label: '剩余仓位几何累积倍数' },
   { value: 'effectivePriceChangePct', label: '有效涨幅' },
   { value: 'effectivePriceChangeMultiple', label: '有效涨幅倍数' },
   { value: 'magicB', label: '神奇的 b' },
@@ -518,11 +518,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     const quantity = key === 'positionGeometricMultiple';
     const riseMultiple = key === 'effectivePriceChangeMultiple';
     const magic = key === 'magicB';
-    const label = quantity ? '仓位几何累积倍数' : riseMultiple ? '有效涨幅倍数' : magic ? '神奇的 b' : '有效涨幅';
+    const label = quantity ? '剩余仓位几何累积倍数' : riseMultiple ? '有效涨幅倍数' : magic ? '神奇的 b' : '有效涨幅';
     const definition = quantity
       ? '(1 − m%) × ∏ₖ(1 + αₖ)，m% 按首次加仓前实际减仓币量统计；αₖ = 本次实际加仓币数 ÷ 加仓前持币数。不是资金收益率。'
       : riseMultiple ? '有效涨幅 ÷ 预期回撤，两个百分数相除得到倍数；例如 45% ÷ 9% = 5.00x。'
-      : magic ? '有效涨幅倍数 × 仓位几何累积倍数；例如 5.00x × 2.00x = 10.00。不替代实际盈亏比。'
+      : magic ? '有效涨幅倍数 × 剩余仓位几何累积倍数；例如 5.00x × 2.00x = 10.00。不替代实际盈亏比。'
       : '(F − Kₘ) ÷ Kₘ，F 与「涨跌幅」的平仓价同源，Kₘ 为最后一次实际加仓时的新支撑线。';
     const formatValue = (value: number) => `${value.toFixed(2)}${quantity || riseMultiple ? 'x' : magic ? '' : '%'}`;
     return [{
@@ -1470,7 +1470,7 @@ const CARD_METRIC_LABEL = {
   addEfficiency: '加仓效用',
   addCount: '加仓次数',
   positionAmplification: '仓位放大',
-  positionGeometricMultiple: '仓位几何累积倍数',
+  positionGeometricMultiple: '剩余仓位几何累积倍数',
   effectivePriceChangePct: '有效涨幅',
   effectivePriceChangeMultiple: '有效涨幅倍数',
   magicB: '神奇的 b',
@@ -2026,7 +2026,7 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div data-testid="campaign-position-geometric-multiple" className={metricCell('positionGeometricMultiple')} data-sort-highlight={litAttr('positionGeometricMultiple')}
-            title="仓位几何累积倍数 = (1 − m%) × ∏(1 + αₖ)，按实际币量计算">
+            title="剩余仓位几何累积倍数 = (1 − m%) × ∏(1 + αₖ)，按实际币量计算">
             <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
           </div>
@@ -2041,7 +2041,7 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangeMultiple(row), 'text-foreground/80')}`}>{readings.effectivePriceChangeMultiple}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={metricCell('magicB')} data-sort-highlight={litAttr('magicB')}
-            title="神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数">
+            title="神奇的 b = 有效涨幅倍数 × 剩余仓位几何累积倍数">
             <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowMagicB(row), 'text-foreground/80')}`}>{readings.magicB}</span></dd>
           </div>
@@ -4696,12 +4696,12 @@ export default function JournalCampaignsPage() {
                     ) : formula === 'magicBSort' ? (
                       <>
                         <div className="font-medium text-foreground">神奇的 b 计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数</div>
-                        <div className="mt-2 space-y-1 text-muted-foreground"><div>有效涨幅倍数 = 有效涨幅 ÷ 预期回撤。例如 45% ÷ 9% = 5.00x，再乘仓位几何累积倍数 2.00x，得到 10.00。按完整精度计算。</div><div>这是价格与币量因子的乘积，不替代实际盈亏比；缺少任一依据时不计算。</div></div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">神奇的 b = 有效涨幅倍数 × 剩余仓位几何累积倍数</div>
+                        <div className="mt-2 space-y-1 text-muted-foreground"><div>有效涨幅倍数 = 有效涨幅 ÷ 预期回撤。例如 45% ÷ 9% = 5.00x，再乘剩余仓位几何累积倍数 2.00x，得到 10.00。按完整精度计算。</div><div>这是价格与币量因子的乘积，不替代实际盈亏比；缺少任一依据时不计算。</div></div>
                       </>
                     ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' || formula === 'effectivePriceChangeMultipleSort' ? (
                       <>
-                        <div className="font-medium text-foreground">{formula === 'positionGeometricMultipleSort' ? '仓位几何累积倍数' : formula === 'effectivePriceChangeMultipleSort' ? '有效涨幅倍数' : '有效涨幅'}计算公式</div>
+                        <div className="font-medium text-foreground">{formula === 'positionGeometricMultipleSort' ? '剩余仓位几何累积倍数' : formula === 'effectivePriceChangeMultipleSort' ? '有效涨幅倍数' : '有效涨幅'}计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                           {formula === 'positionGeometricMultipleSort' ? '(1 − m%) × ∏ₖ(1 + αₖ)' : formula === 'effectivePriceChangeMultipleSort' ? '有效涨幅 ÷ 预期回撤' : '(F − Kₘ) ÷ Kₘ'}
                         </div>

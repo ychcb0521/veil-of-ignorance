@@ -673,6 +673,9 @@ describe('JournalCampaignDetailPage metrics', () => {
       '算术期望',
       '几何期望',
       '有效涨幅',
+      '剩余仓位几何累积倍数',
+      '有效涨幅倍数',
+      '神奇的 b',
     ]) {
       expect(screen.getByRole('button', { name: `${label}说明` })).toBeInTheDocument();
     }
@@ -693,7 +696,6 @@ describe('JournalCampaignDetailPage metrics', () => {
       '盈亏比',
       '加仓效用',
       '几何期望',
-      '有效涨幅',
       '已实现 P&L',
       '最大预期亏损',
       '峰值涨幅',
@@ -701,12 +703,15 @@ describe('JournalCampaignDetailPage metrics', () => {
       '涨幅未兑现',
       '动态最大回撤',
       '仓位放大',
-      '仓位几何累积倍数',
+      '剩余仓位几何累积倍数',
+      '有效涨幅',
+      '有效涨幅倍数',
+      '神奇的 b',
     ]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '仓位几何累积倍数']);
+      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '剩余仓位几何累积倍数', '有效涨幅', '有效涨幅倍数', '神奇的 b']);
     expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献', '加仓次数']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
