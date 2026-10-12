@@ -16,10 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
 
-const METRIC_MODES = [
-  'mirrorTp', 'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency',
-  'captureRate', 'addEfficiency', 'addCount', 'positionAmplification', 'positionGeometricMultiple', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB', 'unrealizedPriceChangePct', 'geometricExpectancy', 'arithmeticExpectancy',
-];
+const METRIC_MODES = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","mirrorTp","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy"];
 
 function constBlock(s: string, name: string): string {
   return new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\}`).exec(s)?.[1] ?? '';
@@ -52,14 +49,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(s)?.[1] ?? '';
     const order = [...block.matchAll(/value: '([A-Za-z]+)'/g)].map(match => match[1]);
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(order).toEqual([
-      'time', 'mirrorTp',
-      'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'captureRate', 'addEfficiency', 'addCount',
-      // 【用户要求】仓位放大放在加仓次数的后面
-      'positionAmplification', 'positionGeometricMultiple', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
-      'unrealizedPriceChangePct', 'geometricExpectancy', 'arithmeticExpectancy',
-      'leverage', 'importance', 'alpha',
-    ]);
+    expect(order).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","time","mirrorTp","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy","leverage","importance","alpha"]);
   });
 
   it('封面指标项与排序行同序，每项按它对应的排序项取宽度与高亮', () => {
@@ -69,23 +59,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     const strip = s.slice(start, end);
     const cells = [...strip.matchAll(/metricCell\('(\w+)'\)\}[\s\S]{0,40}?data-testid="(campaign-[a-z-]+)"|data-testid="(campaign-[a-z-]+)"\s+[^>]*?className=\{metricCell\('(\w+)'\)\}/g)]
       .map(match => [match[1] ?? match[4], match[2] ?? match[3]]);
-    expect(cells).toEqual([
-      ['mirrorTp', 'campaign-mirror-tp-status'],
-      ['expectedDrawdownPct', 'campaign-expected-drawdown-pct'],
-      ['mainPriceChange', 'campaign-main-price-change'],
-      ['mainPriceEfficiency', 'campaign-main-price-efficiency'],
-      ['captureRate', 'campaign-payoff-ratio'],
-      ['addEfficiency', 'campaign-add-efficiency'],
-      ['addCount', 'campaign-add-count'],
-      ['positionAmplification', 'campaign-position-amplification'],
-      ['positionGeometricMultiple', 'campaign-position-geometric-multiple'],
-      ['effectivePriceChangePct', 'campaign-effective-price-change'],
-      ['effectivePriceChangeMultiple', 'campaign-effective-price-change-multiple'],
-      ['magicB', 'campaign-magic-b'],
-      ['unrealizedPriceChangePct', 'campaign-unrealized-price-change'],
-      ['geometricExpectancy', 'campaign-geometric-expectancy'],
-      ['arithmeticExpectancy', 'campaign-arithmetic-expectancy'],
-    ]);
+    expect(cells).toEqual([["addCount","campaign-add-count"],["positionGeometricMultiple","campaign-position-geometric-multiple"],["effectivePriceChangeMultiple","campaign-effective-price-change-multiple"],["magicB","campaign-magic-b"],["geometricExpectancy","campaign-geometric-expectancy"],["mirrorTp","campaign-mirror-tp-status"],["expectedDrawdownPct","campaign-expected-drawdown-pct"],["mainPriceChange","campaign-main-price-change"],["mainPriceEfficiency","campaign-main-price-efficiency"],["effectivePriceChangePct","campaign-effective-price-change"],["addEfficiency","campaign-add-efficiency"],["positionAmplification","campaign-position-amplification"],["unrealizedPriceChangePct","campaign-unrealized-price-change"],["arithmeticExpectancy","campaign-arithmetic-expectancy"]]);
     // 排序行里这八项的先后与封面一致
     const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(s)?.[1] ?? '';
     const order = [...block.matchAll(/value: '([A-Za-z]+)'/g)].map(match => match[1]);
@@ -99,10 +73,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(s).not.toMatch(/sm:w-\[\d+px\]/);
     // 八项指标名一份常量（dt 与宽度估算共用），次序与排序行一致
     const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
-    expect(labels).toEqual([
-      ['mirrorTp', '镜像止盈'], ['expectedDrawdownPct', '预期回撤'], ['mainPriceChange', '涨跌幅'], ['mainPriceEfficiency', '涨跌幅倍数'],
-      ['captureRate', '盈亏比'], ['addEfficiency', '加仓效用'], ['addCount', '加仓次数'], ['positionAmplification', '仓位放大'], ['positionGeometricMultiple', '仓位几何累积倍数'], ['effectivePriceChangePct', '有效涨幅'], ['effectivePriceChangeMultiple', '有效涨幅倍数'], ['magicB', '神奇的 b'], ['unrealizedPriceChangePct', '涨幅未兑现'], ['geometricExpectancy', '几何期望'], ['arithmeticExpectancy', '算术期望'],
-    ]);
+    expect(labels).toEqual([["addCount","加仓次数"],["positionGeometricMultiple","仓位几何累积倍数"],["effectivePriceChangeMultiple","有效涨幅倍数"],["magicB","神奇的 b"],["geometricExpectancy","几何期望"],["mirrorTp","镜像止盈"],["expectedDrawdownPct","预期回撤"],["mainPriceChange","涨跌幅"],["mainPriceEfficiency","涨跌幅倍数"],["effectivePriceChangePct","有效涨幅"],["addEfficiency","加仓效用"],["positionAmplification","仓位放大"],["unrealizedPriceChangePct","涨幅未兑现"],["arithmeticExpectancy","算术期望"]]);
     // 每项的宽度类读 --cm-w-<项>（Tailwind 要完整类名，逐个写出）
     const widthClasses = [...constBlock(s, 'CARD_METRIC_WIDTH_CLASS').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
     expect(widthClasses).toEqual(METRIC_MODES.map(mode => [mode, `sm:w-[var(--cm-w-${mode})]`]));
@@ -146,7 +117,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
   it('【用户要求】盈亏比只写倍数 b；「仓位击穿」在标题行、紧跟杠杆标签，几何期望格里不再有徽标', () => {
     const s = src();
     const strip = stripSource(s);
-    expect(s).toContain("captureRate: profitCaptureRatio == null ? '—' : formatCampaignPayoffRatio(profitCaptureRatio),");
+    expect(s).toContain("magicB: rowMagicB(row) == null ? '—' : formatCampaignPayoffRatio(rowMagicB(row)! * 100)");
     // 红绿按读数上的 b（两位小数取整后）定：读作「0.00」的用中性色
     expect(s).toContain("const payoffRatioTone = signTone(campaignPayoffRatioMultiple(profitCaptureRatio), 'text-foreground/85');");
     // 几何期望格里不再渲染徽标（悬停说明里提到标题行的「仓位击穿」可以）

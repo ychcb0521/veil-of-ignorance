@@ -26,6 +26,7 @@ import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { XlsxCell, XlsxSheet } from '@/lib/xlsxWorkbook';
 import { MAGIC_B_FORMULA, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE } from '@/lib/campaignGeometricMetrics';
+import { MAGIC_B_DIRECT_FORMULA } from '@/lib/campaignB';
 
 type AsymmetricSummary = Parameters<typeof computeAsymmetricRiskContributionRates>[1];
 
@@ -90,7 +91,6 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '预期回撤（%）', width: 11, note: '主力开仓价到初始对冲边界的距离，占开仓价的百分数（3.35 表示 3.35%）。', value: row => (row.initialExpectedMaxDrawdownPct > 0 ? row.initialExpectedMaxDrawdownPct : null) },
     { header: '涨跌幅（%）', width: 10, note: '战役的涨跌幅，按主力方向计（空单价跌为正），百分数；主力未平仓为空。', value: row => finite(row.mainPriceChangePct) },
     { header: '涨跌幅倍数 η', width: 11, note: '涨跌幅 ÷ 预期回撤（倍）。', value: row => rowMainPriceEfficiency(row) },
-    { header: '盈亏比 b（R）', width: 11, note: '已实现盈亏 ÷ 初始最大预期亏损（倍数，2 表示赚到 2R）。', value: row => rowPayoffRatio(row) },
     { header: '加仓效用', width: 9, note: 'b ÷ |η|，正负跟随 b；只算做过加仓的战役，涨跌幅倍数显示为 0.00 时不算。', value: row => rowAddEfficiency(row) },
     { header: '加仓次数', width: 8, note: '真的成交过的加仓腿条数；没加仓为 0。', value: row => rowAddCount(row) },
     { header: '几何期望 Gᵢ', width: 10, note: '单场几何期望因子 Gᵢ = 1 + bᵢ × x（x 为每场统一的下注比例）；与卡片显示同一个数（卡片取两位小数）。', value: row => { const v = finite(row.geometricExpectancy); return v == null ? null : 1 + v; } },
@@ -105,7 +105,7 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '仓位几何累积倍数（倍）', width: 25, note: `∏(1 + αₖ)；${POSITION_GEOMETRIC_ALPHA_RULE}以首次加仓前币量为基准，不乘早期减仓比例。`, value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '有效涨幅（%）', width: 12, note: '(F − Kₘ) ÷ Kₘ × 100；F 与涨跌幅的平仓价同源，Kₘ 为末次加仓的新支撑线。', value: row => finite(rowEffectivePriceChangePct(row)) },
     { header: '有效涨幅倍数', width: 14, note: '有效涨幅 ÷ 预期回撤；两者均为百分数，相除得到倍数（5 = 500%）。', value: row => finite(rowEffectivePriceChangeMultiple(row)) },
-    { header: '神奇的 b', width: 12, note: `${MAGIC_B_FORMULA}。${MAGIC_B_RULE}`, value: row => finite(rowMagicB(row)) },
+    { header: '神奇的 b', width: 12, note: `${MAGIC_B_DIRECT_FORMULA}；${MAGIC_B_FORMULA}。${MAGIC_B_RULE}两种算法等价，不重复统计。`, value: row => finite(rowMagicB(row)) },
     { header: 'DSI 贡献（%）', width: 10, note: '这场亏损战役 b² 占全表亏损组平方和的比例（百分数）；盈利战役为空。', value: row => finite(contribution(row).dsiContributionPct) },
     { header: 'USI 贡献（%）', width: 10, note: '这场盈利战役 b² 占全表盈利组平方和的比例（百分数）；亏损战役为空。', value: row => finite(contribution(row).usiContributionPct) },
   ];

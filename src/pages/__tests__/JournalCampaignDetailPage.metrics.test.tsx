@@ -639,8 +639,8 @@ describe('JournalCampaignDetailPage metrics', () => {
     await waitFor(() => expect(screen.getByText('涨跌幅倍数')).toBeInTheDocument());
     // 【用户要求】「机会质量」已删掉（涨跌幅倍数更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
-    // 【用户要求】盈亏比只写倍数 b：「2.00」，不再写「200.0% (2.00)」
-    const payoffRow = screen.getAllByText('盈亏比')
+    // 【用户要求】神奇的 b只写倍数 b：「2.00」，不再写「200.0% (2.00)」
+    const payoffRow = screen.getAllByText('神奇的 b')
       .map(node => node.closest('[data-column]'))
       .find((row): row is HTMLElement => row != null);
     expect(payoffRow?.lastElementChild?.textContent).toBe('2.00');
@@ -671,7 +671,6 @@ describe('JournalCampaignDetailPage metrics', () => {
       '最大预期亏损',
       '仓位放大',
       '预期回撤',
-      '盈亏比',
       'DSI/USI 贡献',
       '算术期望',
       '几何期望',
@@ -691,31 +690,12 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
     expect(exportInput.chartInterval).toBe('5m');
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
-    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual([
-      '算术期望',
-      '预期回撤',
-      '涨跌幅',
-      '涨跌幅倍数',
-      '盈亏比',
-      '加仓效用',
-      '几何期望',
-      '已实现 P&L',
-      '最大预期亏损',
-      '峰值涨幅',
-      '峰值涨幅倍数',
-      '涨幅未兑现',
-      '动态最大回撤',
-      '仓位放大',
-      '仓位几何累积倍数',
-      '有效涨幅',
-      '有效涨幅倍数',
-      '神奇的 b',
-    ]);
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅倍数","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","有效涨幅","加仓效用","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大"]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '仓位几何累积倍数', '有效涨幅', '有效涨幅倍数', '神奇的 b']);
-    expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献', '加仓次数']);
+      .toEqual(["已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大"]);
+    expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));
     expect(exportCampaignPostReviewsTxtMock).toHaveBeenCalledTimes(1);

@@ -6,11 +6,12 @@ import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
+import { magicBFromRealizedPnl } from '@/lib/campaignB';
 
 export const POSITION_GEOMETRIC_FORMULA = '∏ₖ(1 + αₖ)';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
 export const MAGIC_B_FORMULA = '神奇的 b = 有效涨幅倍数 × 仓位几何累积倍数 × 风险基准换算 + 结算修正 ÷ L₀';
-export const MAGIC_B_RULE = '风险基准换算 = 首次加仓前币数 × Kₘ ÷ 初始名义敞口。结算修正逐项包含保本余额、实际退出与 F 的价差、对冲及其他腿净盈亏、费用和中途仓位变化。F 与涨跌幅同源，L₀ 与盈亏比同源；完整结算时与实际盈亏比一致，缺少依据时不计算。';
+export const MAGIC_B_RULE = '同一个 b 的两种算法：净盈亏 ÷ 初始风险，或几何分解。风险基准换算 = 首次加仓前币数 × Kₘ ÷ 初始名义敞口。结算修正包含保本余额、实际退出价差、其他腿净盈亏、费用和中途仓位变化。没有加仓或缺少几何依据时仍使用净结算法；缺少有效初始风险时不计算。';
 
 export interface GeometricFirstAddBasis {
   beforeCoins: number;
@@ -257,7 +258,7 @@ export function computeCampaignGeometricMetrics(
     effectivePriceChangePct: rise,
     effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
-    magicB: bridge ? computeMagicB(riseMultiple, multiple, bridge.normalization, bridge.totalAdjustment / bridge.initialRisk) : null,
+    magicB: magicBFromRealizedPnl(settlement.total, computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, orders)),
     geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, magicBReconciliation: bridge },
   };
 }

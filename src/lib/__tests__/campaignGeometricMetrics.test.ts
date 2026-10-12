@@ -154,10 +154,8 @@ describe('campaign geometric metrics', () => {
     expect(rowEffectivePriceChangePct(card)).toBe(result.effectivePriceChangePct);
     const items = buildCampaignPnlOverviewItems({ ...result } as Parameters<typeof buildCampaignPnlOverviewItems>[0]);
     const keys = items.map(item => item.key);
-    expect(keys[keys.indexOf('positionAmplification') + 1]).toBe('positionGeometricMultiple');
-    expect(keys[keys.indexOf('positionGeometricMultiple') + 1]).toBe('effectivePriceChangePct');
-    expect(keys[keys.indexOf('effectivePriceChangePct') + 1]).toBe('effectivePriceChangeMultiple');
-    expect(keys[keys.indexOf('effectivePriceChangeMultiple') + 1]).toBe('magicB');
+    expect(keys.slice(0, 5)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangeMultiple', 'magicB', 'geometricExpectancy']);
+    expect(keys[keys.indexOf('mainPriceEfficiency') + 1]).toBe('effectivePriceChangePct');
     // The synthetic campaign has no initial hedge boundary, so the risk denominator is genuinely missing.
     expect(card.initialExpectedMaxDrawdownPct).toBe(0);
     expect(result.effectivePriceChangeMultiple).toBeNull();
@@ -239,7 +237,7 @@ describe('campaign geometric metrics', () => {
   it('the rise multiple sorts independently from raw rise and magic b', () => {
     const row = (id: string, multiple: number, rise: number) => ({
       ...scenario(), campaign: { ...scenario().campaign, id }, positionGeometricMultiple: multiple, effectivePriceChangePct: rise,
-      profitCaptureRatio: 10, initialExpectedMaxDrawdownPct: 10, arithmeticExpectancy: 0, geometricExpectancy: 0,
+      profitCaptureRatio: multiple * rise * 10, initialExpectedMaxDrawdownPct: 10, arithmeticExpectancy: 0, geometricExpectancy: 0,
       magicB: multiple * rise / 10,
     } as unknown as CampaignSortRow);
     const rows = [row('a', 2, -10), row('b', 4, 20), row('c', 1, 5)];
@@ -328,7 +326,9 @@ describe('campaign geometric metrics', () => {
     data.tradeRecords.pop();
     data.legs[3].post_realized_pnl = null;
     data.campaign.final_realized_pnl = 999999;
-    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders).magicB).toBeNull();
-    expect(rowMagicB({...data, magicB: null, initialExpectedMaxDrawdownPct: 10})).toBeNull();
+    const partial = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    expect(partial.geometricMetricBasis.magicBReconciliation).toBeNull();
+    expect(partial.magicB).toBeCloseTo(computeCampaignRealizedPnl(data.campaign, data.legs, data.tradeRecords).total! / 100);
+    expect(rowMagicB({...data, magicB: null})).toBeNull();
   });
 });

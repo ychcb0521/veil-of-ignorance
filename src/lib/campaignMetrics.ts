@@ -3,6 +3,7 @@ import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
+import { resolveUnifiedMagicB } from '@/lib/campaignB';
 
 export interface CampaignExpectancies {
   arithmeticExpectancy: number | null;
@@ -84,7 +85,7 @@ export function resolveResolvedOpportunityQuality(
   }
 
   return computeRealizedOpportunityQuality({
-    payoffRatio: profitCaptureRatio / 100,
+    payoffRatio: resolveUnifiedMagicB(profitCaptureRatio)!,
     drawdownPct: initialExpectedMaxDrawdownPct,
   });
 }
@@ -121,18 +122,22 @@ export const ARITHMETIC_EXPECTANCY_WIN_RATE = 0.5;
 export function computeCampaignExpectancies(
   profitCaptureRatio: number | null,
 ): CampaignExpectancies {
-  if (profitCaptureRatio == null || !Number.isFinite(profitCaptureRatio)) {
+  return computeCampaignExpectanciesFromMagicB(resolveUnifiedMagicB(profitCaptureRatio));
+}
+
+/** Canonical b in risk units; the old percent API above is an adapter only. */
+export function computeCampaignExpectanciesFromMagicB(b: number | null): CampaignExpectancies {
+  if (b == null || !Number.isFinite(b)) {
     return { arithmeticExpectancy: null, geometricExpectancy: null };
   }
 
-  const payoffRatio = profitCaptureRatio / 100;
   // Eᵢ = P × bᵢ −（1 − P），P 固定 50%；几何那一项只由 bᵢ 决定。
   const p = ARITHMETIC_EXPECTANCY_WIN_RATE;
-  const arithmeticExpectancy = p * payoffRatio - (1 - p);
+  const arithmeticExpectancy = p * b - (1 - p);
 
   return {
     arithmeticExpectancy,
-    geometricExpectancy: campaignGrowthFactor(payoffRatio) - 1,
+    geometricExpectancy: campaignGrowthFactor(b) - 1,
   };
 }
 

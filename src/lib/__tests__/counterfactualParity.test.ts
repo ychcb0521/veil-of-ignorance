@@ -26,7 +26,7 @@
  * 第二组断言守「相对实际只反映改动」：从原样副本出发改一格，相对实际挪动的量必须恰好是这一格值多少钱，
  * 不能因为「改过了」就整条腿换一套算法，把滑点、分刀、老费率的差额一起算进去。
  */
-import { campaignHasMainAdd, campaignMainLegPriceChangePct, campaignPriceChangeLegInputs, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
+import { campaignHasMainAdd, campaignMainAddCount, campaignMainLegPriceChangePct, campaignPriceChangeLegInputs, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { describe, expect, it } from 'vitest';
 import { computeAsymmetricRiskContribution, type AsymmetricRiskMetricsSummary } from '@/lib/asymmetricRiskMetrics';
 import {
@@ -138,6 +138,7 @@ type PanelNumbers = Record<ParityMetric, number | null> & {
   mainPriceChangePct: number | null;
   mainPriceEfficiency: number | null;
   addEfficiency: number | null;
+  addCount: number | null;
 };
 
 /**
@@ -191,6 +192,7 @@ function realPanel(fx: ParityFixture) {
     initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
     // 【用户要求】多方总名义仓位：与页面、Legs 表合计行同一份输入
     mainSideNotional: realMainSide(fx).total,
+    addCount: campaignMainAddCount(legs),
     payoffRatio,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,
@@ -251,6 +253,7 @@ function rerunPanel(fx: ParityFixture, edit?: (legs: CampaignCounterfactualManua
     geometricExpectancy: metrics.geometricExpectancy,
     dsiUsiTerm: metrics.asymmetricRiskContribution?.meanSquareTerm ?? null,
     mainSideNotional: metrics.mainSideNotional?.total ?? null,
+    addCount: metrics.addCount ?? null,
     ...efficiencyNumbers(metrics.mainPriceChangePct, metrics.expectedMaxDrawdownPct, metrics.payoffRatio, metrics.hasMainAdd),
   };
   return { numbers, result, manualLegs, metrics };

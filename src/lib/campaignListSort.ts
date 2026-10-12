@@ -6,6 +6,7 @@ import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
 import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
+import { resolveUnifiedMagicB } from '@/lib/campaignB';
 
 /**
  * 交易战役列表的排序：每个排序项是一个独立的比较器，排序链按次序依次比较。
@@ -61,21 +62,20 @@ export type CampaignSortLevel = {
 export type CampaignSortChain = readonly CampaignSortLevel[];
 
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
+  'addCount',
+  'positionGeometricMultiple',
+  'effectivePriceChangeMultiple',
+  'magicB',
+  'geometricExpectancy',
   'time',
   'mirrorTp',
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'unrealizedPriceChangePct',
-  'captureRate',
-  'addEfficiency',
-  'addCount',
-  'positionAmplification',
-  'positionGeometricMultiple',
   'effectivePriceChangePct',
-  'effectivePriceChangeMultiple',
-  'magicB',
-  'geometricExpectancy',
+  'addEfficiency',
+  'positionAmplification',
+  'unrealizedPriceChangePct',
   'arithmeticExpectancy',
   'leverage',
   'importance',
@@ -83,7 +83,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
 ];
 
 export function isCampaignSortMode(value: unknown): value is CampaignSortMode {
-  return typeof value === 'string' && (CAMPAIGN_SORT_MODES as readonly string[]).includes(value);
+  return value === 'captureRate' || (typeof value === 'string' && (CAMPAIGN_SORT_MODES as readonly string[]).includes(value));
 }
 
 /**
@@ -155,7 +155,7 @@ function pnlSortValue(campaign: Pick<TradeCampaign, 'final_realized_pnl'>): numb
 
 /** 每场战役的实际盈亏比 b = 已实现盈亏 ÷ 初始最大预期亏损（列表口径 = 利润捕获率 ÷ 100）。 */
 export function rowPayoffRatio(row: { profitCaptureRatio: number | null }): number | null {
-  return row.profitCaptureRatio == null ? null : row.profitCaptureRatio / 100;
+  return resolveUnifiedMagicB(row.profitCaptureRatio);
 }
 
 /** 每场战役的镜像止盈排序权重（成交判定 + 盈亏比 → mirrorTpRank）。 */
@@ -228,8 +228,9 @@ export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'cam
     : computeEffectivePriceChangeMultiple(rowEffectivePriceChangePct(row), row.initialExpectedMaxDrawdownPct);
 }
 
-export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB' | 'effectivePriceChangePct' | 'effectivePriceChangeMultiple' | 'initialExpectedMaxDrawdownPct' | 'positionGeometricMultiple'>): number | null {
-  return row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB ?? null;
+export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'> & {profitCaptureRatio?: number | null}): number | null {
+  if (row.profitCaptureRatio !== undefined) return resolveUnifiedMagicB(row.profitCaptureRatio);
+  return resolveUnifiedMagicB(undefined, row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB);
 }
 
 /**
@@ -1194,14 +1195,15 @@ export function parseCampaignSortChain(search: string | URLSearchParams): Campai
   const requestedMode = params.get('sort');
   // 认不出的 sort（含已删除的 dsiContribution / usiContribution 旧链接）整条退回默认：操作时间从新到旧，不沿用它的方向与 then
   if (requestedMode != null && !isCampaignSortMode(requestedMode)) return DEFAULT_CAMPAIGN_SORT_CHAIN;
-  const mode: CampaignSortMode = isCampaignSortMode(requestedMode) ? requestedMode : DEFAULT_CAMPAIGN_SORT_CHAIN[0].mode;
+  const mode: CampaignSortMode = requestedMode === 'captureRate' ? 'magicB' : isCampaignSortMode(requestedMode) ? requestedMode : DEFAULT_CAMPAIGN_SORT_CHAIN[0].mode;
   const requestedDirection = params.get('direction');
   const direction: CampaignSortDirection = requestedDirection === 'asc' || requestedDirection === 'desc'
     ? requestedDirection
     : defaultSortDirection(mode);
   const chain: CampaignSortLevel[] = [{ mode, direction }];
   for (const raw of params.getAll('then')) {
-    const [thenMode, thenDirection] = raw.split('.');
+    const [legacyMode, thenDirection] = raw.split('.');
+    const thenMode = legacyMode === 'captureRate' ? 'magicB' : legacyMode;
     if (!isCampaignSortMode(thenMode) || chain.some(level => level.mode === thenMode)) continue;
     if (thenDirection === 'follow') {
       chain.push({ mode: thenMode, direction: chain[chain.length - 1].direction, follow: true });

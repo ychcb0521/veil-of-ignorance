@@ -13,7 +13,8 @@ import {
   describePriceChangeExitSource,
   type ActualMainPriceChange,
 } from '@/lib/campaignMainPriceChange';
-import { computeCampaignExpectancies } from '@/lib/campaignMetrics';
+import { computeCampaignExpectanciesFromMagicB } from '@/lib/campaignMetrics';
+import { resolveUnifiedMagicB } from '@/lib/campaignB';
 import { legPositionSideFromDirection, type LegPositionSide } from '@/lib/legPositionShare';
 import type {
   CampaignPnlOverviewHelpParagraph,
@@ -163,7 +164,7 @@ const L_DERIVED_KEYS: CampaignPnlOverviewItemKey[] = [
   'initialExpectedMaxLoss',
   'expectedMaxDrawdownPct',
   'mainPriceEfficiency',
-  'payoffRatio',
+  'magicB',
   'addEfficiency',
   'asymmetricRiskContribution',
   'arithmeticExpectancy',
@@ -306,9 +307,10 @@ export function buildCounterfactualOverviewMetrics(
     })
     : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
-  const expectancies = computeCampaignExpectancies(payoffRatio);
+  const b = resolveUnifiedMagicB(payoffRatio);
+  const expectancies = computeCampaignExpectanciesFromMagicB(b);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
-    payoffRatio == null ? null : payoffRatio / 100,
+    b,
     shared.asymmetricRiskSummary,
   );
   // 反事实没有主力开仓时的账户快照，与老战役一样退到今日总资产（仅所有者可见）。
@@ -409,6 +411,7 @@ export function buildCounterfactualOverviewMetrics(
     mainPriceChangePct,
     mainPriceChangeBasis: priceChange ? { entryPrice: priceChange.entryPrice, exitPrice: priceChange.exitPrice, exitSource: priceChange.exitSource } : null,
     hasMainAdd: manual && counterfactualHasMainAdd(branch.params.manual_legs),
+    addCount: manual ? (branch.params.manual_legs ?? []).filter(leg => counterfactualHasMainAdd([leg])).length : null,
     asymmetricRiskContribution,
     arithmeticExpectancy: expectancies.arithmeticExpectancy,
     geometricExpectancy: expectancies.geometricExpectancy,

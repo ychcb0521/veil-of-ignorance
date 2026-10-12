@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
+import { resolveUnifiedMagicB } from '@/lib/campaignB';
 import { waitForCampaignListHeal } from '@/lib/campaignListCache';
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import { getPersistedStateHydrationRevision, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -88,7 +89,7 @@ import {
   reconcileCampaignWithSettlement,
 } from '@/lib/campaignRealizedPnl';
 import {
-  computeCampaignExpectancies,
+  computeCampaignExpectanciesFromMagicB,
   formatCampaignLeverage,
   resolveCampaignMainLeverage,
 } from '@/lib/campaignMetrics';
@@ -1672,7 +1673,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       isOwner ? currentAccountEquity : null,
     );
     // 单场算术期望的胜率统一取 50%（ARITHMETIC_EXPECTANCY_WIN_RATE），不等账户样本加载。
-    const expectancies = computeCampaignExpectancies(profitCaptureRatio);
+    const expectancies = computeCampaignExpectanciesFromMagicB(resolveUnifiedMagicB(profitCaptureRatio));
 
     return {
       profitCaptureRatio,
@@ -1691,9 +1692,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     tradeRecords,
   ]);
   const asymmetricRiskContribution = useMemo(() => computeAsymmetricRiskContribution(
-    campaignMetricValues?.profitCaptureRatio == null
-      ? null
-      : campaignMetricValues.profitCaptureRatio / 100,
+    resolveUnifiedMagicB(campaignMetricValues?.profitCaptureRatio),
     campaignAsymmetricRisk,
   ), [campaignAsymmetricRisk, campaignMetricValues?.profitCaptureRatio]);
   // 战役涨跌幅（【用户要求】开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）：与战役列表卡片同一个函数。
@@ -1781,6 +1780,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       mainPriceChangePct: actualPriceChange.pct,
       mainPriceChangeBasis: { entryPrice: actualPriceChange.entryPrice, exitPrice: actualPriceChange.exitPrice, exitSource: actualPriceChange.exitSource },
       hasMainAdd: campaignHasMainAdd(legs),
+      addCount: campaignMainAddCount(legs),
       asymmetricRiskContribution,
       arithmeticExpectancy: campaignMetricValues?.arithmeticExpectancy ?? null,
       geometricExpectancy: campaignMetricValues?.geometricExpectancy ?? null,
@@ -1829,12 +1829,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         key: 'asymmetricRiskContribution', label: 'DSI/USI 贡献',
         value: asymmetricRiskContribution == null ? '—' : `${asymmetricRiskContribution.group === 'win' ? 'USI' : 'DSI'} ${shareText}`.trim(),
         help: (
-          <><p>本场盈亏比 b 对账户不对称风险指标的贡献：盈利战役进入 USI 上行组，亏损或持平战役进入 DSI 下行组。</p><div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div></>
-        ),
-      },
-      {
-        key: 'addCount', label: '加仓次数', value: String(campaignMainAddCount(legs)), help: (
-          <><p>本场战役真正成交过的主力加仓 Legs 数量，与列表、排序和散点图使用同一口径。</p><p>只挂单但未成交的加仓不计入；没有加仓时显示 0。</p></>
+          <><p>本场神奇的 b 对账户不对称风险指标的贡献：盈利战役进入 USI 上行组，亏损或持平战役进入 DSI 下行组。</p><div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">组内占比 = 本场 b² ÷ 对应组 Σb²</div></>
         ),
       },
     ];

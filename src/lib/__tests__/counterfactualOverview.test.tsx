@@ -122,16 +122,16 @@ describe('buildCounterfactualOverviewMetrics', () => {
 
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
     const { items, byKey } = itemsByKey(metrics);
-    expect(items).toHaveLength(14);
+    expect(items).toHaveLength(18);
 
     // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
     expect(result.final_realized_pnl).toBeCloseTo(80, 4);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 60) * 100, 6);
-    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
+    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
     // 峰值权益 = 80 → profit_capture_ratio = 100，与 b 完全不同，盈亏比列不能印它
     expect(result.profit_capture_ratio).toBe(100);
-    expect(byKey.payoffRatio.value).toBe('1.33');
-    expect(byKey.payoffRatio.value).not.toBe('1.00');
+    expect(byKey.magicB.value).toBe('1.33');
+    expect(byKey.magicB.value).not.toBe('1.00');
     expect(byKey.realizedPnl.value).toBe('80.00 USDT');
     expect(metrics.mainLeverage).toBe(3);
     expect(byKey.positionAmplification.value).toBe('1.00x');
@@ -201,7 +201,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
     expect(metrics.mainLeverage).toBe(9);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);
-    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 123) * 100));
+    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 123) * 100));
   });
 
   it('缺 main_leverage 键的行按老行处理：整组退回 params 重算，不混用半套落库值', () => {
@@ -264,10 +264,10 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(strip(legacyMetrics)).toEqual(strip(freshMetrics));
     const { byKey } = itemsByKey(legacyMetrics);
     expect(byKey.realizedPnl.value).toBe('60.00 USDT');
-    for (const key of ['initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'mainPriceEfficiency', 'payoffRatio', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy']) {
+    for (const key of ['initialExpectedMaxLoss', 'expectedMaxDrawdownPct', 'mainPriceEfficiency', 'magicB', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy']) {
       expect(byKey[key].value, key).toBe('—');
     }
-    expect(legacyMetrics.extraNotes?.payoffRatio).toContainEqual({ warning: '本分支没有初始对冲 A/B，读不到止损线，本项不计算。' });
+    expect(legacyMetrics.extraNotes?.magicB).toContainEqual({ warning: '本分支没有初始对冲 A/B，读不到止损线，本项不计算。' });
   });
 
   it('L = 0（手动腿里没有初始对冲 A/B）：七个概览内 L 派生项全印「—」，没有一个 0.00，并解释原因', () => {
@@ -283,7 +283,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
       'initialExpectedMaxLoss',
       'expectedMaxDrawdownPct',
       'mainPriceEfficiency',
-      'payoffRatio',
+      'magicB',
       'addEfficiency',
       'arithmeticExpectancy',
       'geometricExpectancy',
@@ -302,7 +302,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     }
 
     render(<CampaignPnlOverviewPanel title="反事实盈亏概览 · 未保存" items={itemsByKey(metrics).items} />);
-    fireEvent.click(screen.getByRole('button', { name: '盈亏比说明' }));
+    fireEvent.click(screen.getByRole('button', { name: '神奇的 b说明' }));
     expect(screen.getByText('手动 Legs 里没有初始对冲 A/B，读不到止损线，本项不计算。')).toBeInTheDocument();
   });
 
@@ -466,7 +466,7 @@ describe('已实现 P&L 的手续费口径', () => {
     expect(result.events.every(event => !String(event.leg_role).startsWith('hedge_'))).toBe(true);
     const { byKey } = itemsByKey(buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared));
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
-    expect(byKey.payoffRatio.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
+    expect(byKey.magicB.value).toBe(formatOverviewPayoffRatio((80 / 60) * 100));
   });
 });
 
