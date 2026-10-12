@@ -6,7 +6,7 @@
 import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.22.0";
 
 // src/lib/mcp/tools/list_recent_journals.ts
-import { createClient } from "npm:@supabase/supabase-js@^2.100.1";
+import { createClient } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z } from "npm:zod@^4.4.3";
 function sb(ctx) {
@@ -42,7 +42,7 @@ var list_recent_journals_default = defineTool({
 });
 
 // src/lib/mcp/tools/get_journal.ts
-import { createClient as createClient2 } from "npm:@supabase/supabase-js@^2.100.1";
+import { createClient as createClient2 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z2 } from "npm:zod@^4.4.3";
 function sb2(ctx) {
@@ -74,7 +74,7 @@ var get_journal_default = defineTool2({
 });
 
 // src/lib/mcp/tools/list_trading_rules.ts
-import { createClient as createClient3 } from "npm:@supabase/supabase-js@^2.100.1";
+import { createClient as createClient3 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z3 } from "npm:zod@^4.4.3";
 function sb3(ctx) {
@@ -107,7 +107,7 @@ var list_trading_rules_default = defineTool3({
 });
 
 // src/lib/mcp/tools/list_error_patterns.ts
-import { createClient as createClient4 } from "npm:@supabase/supabase-js@^2.100.1";
+import { createClient as createClient4 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z4 } from "npm:zod@^4.4.3";
 function sb4(ctx) {
@@ -141,7 +141,7 @@ var list_error_patterns_default = defineTool4({
 });
 
 // src/lib/mcp/tools/whoami.ts
-import { createClient as createClient5 } from "npm:@supabase/supabase-js@^2.100.1";
+import { createClient as createClient5 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.22.0";
 function sb5(ctx) {
   return createClient5(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {

@@ -81,6 +81,51 @@ async function settled(cache: ReturnType<typeof createCampaignListCache>) {
 }
 
 describe('campaign list retained snapshots', () => {
+  it('renders a persisted source before a stalled cloud response and then removes remotely deleted rows', async () => {
+    const remote = deferred<SourceRows>();
+    vi.mocked(fetchCampaignSourceRows).mockReturnValueOnce(remote.promise);
+    const snapshots = { read: vi.fn(async () => asRows(data.sources)), write: vi.fn(async () => {}) };
+    const cache = createCampaignListCache('user-1', { sourceSnapshots: snapshots });
+    const pending = cache.refresh();
+    await vi.waitFor(() => expect(cache.getSnapshot()).toMatchObject({ complete: true, cached: true, refreshing: true, loaded: 2 }));
+    expect(cache.getSnapshot().rows.map(row => row.campaign.id)).toEqual(['one', 'two']);
+    expect(snapshots.write).not.toHaveBeenCalled();
+    expect(fetchLegExitPriceCorrections).not.toHaveBeenCalled();
+    remote.resolve(asRows([data.sources[1]]));
+    await pending;
+    expect(cache.getSnapshot()).toMatchObject({ complete: true, cached: false, refreshing: false, loaded: 1 });
+    expect(cache.getSnapshot().rows.map(row => row.campaign.id)).toEqual(['two']);
+    expect(snapshots.write).toHaveBeenCalledWith('user-1', asRows([data.sources[1]]));
+  });
+
+  it('retains readable startup rows after a cloud timeout and aborts the abandoned request', async () => {
+    vi.mocked(fetchCampaignSourceRows).mockReturnValueOnce(new Promise(() => {}));
+    const snapshots = { read: vi.fn(async () => asRows(data.sources)), write: vi.fn(async () => {}) };
+    const cache = createCampaignListCache('user-1', { sourceSnapshots: snapshots, remoteTimeoutMs: 40 });
+    await cache.refresh();
+    const signal = vi.mocked(fetchCampaignSourceRows).mock.calls[0][1]?.signal;
+    expect(signal?.aborted).toBe(true);
+    expect(cache.getSnapshot()).toMatchObject({ complete: true, cached: true, refreshing: false, loaded: 2 });
+    expect(cache.getSnapshot().error).toMatch(/超时/);
+    expect(snapshots.write).not.toHaveBeenCalled();
+    expect(fetchLegExitPriceCorrections).not.toHaveBeenCalled();
+  });
+
+  it('does not delay a fast cloud response behind a blocked snapshot store', async () => {
+    const snapshots = { read: vi.fn(() => new Promise<SourceRows | null>(() => {})), write: vi.fn(async () => {}) };
+    const cache = createCampaignListCache('user-1', { sourceSnapshots: snapshots });
+    await cache.refresh();
+    expect(cache.getSnapshot()).toMatchObject({ complete: true, cached: false, loaded: 2 });
+    expect(snapshots.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cloud results when the persisted cache is unavailable or over quota', async () => {
+    const snapshots = { read: vi.fn(async () => { throw new Error('blocked'); }), write: vi.fn(async () => { throw new Error('quota'); }) };
+    const cache = createCampaignListCache('user-1', { sourceSnapshots: snapshots });
+    await cache.refresh();
+    expect(cache.getSnapshot()).toMatchObject({ complete: true, cached: false, error: null, loaded: 2 });
+  });
+
   it('returns the same completed rows immediately and only checks the batch source on return', async () => {
     const cache = getCampaignListCache('user-1');
     await cache.refresh();

@@ -2354,7 +2354,7 @@ const CAMPAIGN_SOURCE_ID_CHUNK = 100;
 async function readCampaignSourcePages(
   table: 'trade_campaigns' | 'trade_journals',
   userId: string,
-  options: { columns?: string; ids?: string[] } = {},
+  options: { columns?: string; ids?: string[]; signal?: AbortSignal } = {},
 ) {
   const rows: unknown[] = [];
   for (let offset = 0; ; offset += CAMPAIGN_SOURCE_PAGE_SIZE) {
@@ -2363,10 +2363,11 @@ async function readCampaignSourcePages(
       .select(options.columns ?? '*')
       .eq('user_id', userId);
     if (options.ids) query = query.in('id', options.ids);
-    const { data, error } = await query
+    const page = query
       // 唯一键稳定排序，避免同时间记录在跨页时重复或漏读。
       .order('id', { ascending: true })
       .range(offset, offset + CAMPAIGN_SOURCE_PAGE_SIZE - 1);
+    const { data, error } = await (options.signal ? page.abortSignal(options.signal) : page);
     if (error) return { data: [], error };
     rows.push(...(data ?? []));
     if ((data?.length ?? 0) < CAMPAIGN_SOURCE_PAGE_SIZE) return { data: rows, error: null };
@@ -2388,8 +2389,9 @@ async function readCampaignSourceDelta(
   table: 'trade_campaigns' | 'trade_journals',
   userId: string,
   previous: unknown[],
+  signal?: AbortSignal,
 ) {
-  const versions = await readCampaignSourcePages(table, userId, { columns: 'id, updated_at' });
+  const versions = await readCampaignSourcePages(table, userId, { columns: 'id, updated_at', signal });
   if (versions.error) return versions;
   const previousById = new Map(previous.map(row => [sourceRowId(row), row]));
   const changedIds: string[] = [];
@@ -2400,7 +2402,7 @@ async function readCampaignSourceDelta(
   if (changedIds.length === 0 && versions.data.length === previous.length) return { data: previous, error: null };
   const changedById = new Map<string | undefined, unknown>();
   for (let offset = 0; offset < changedIds.length; offset += CAMPAIGN_SOURCE_ID_CHUNK) {
-    const page = await readCampaignSourcePages(table, userId, { ids: changedIds.slice(offset, offset + CAMPAIGN_SOURCE_ID_CHUNK) });
+    const page = await readCampaignSourcePages(table, userId, { ids: changedIds.slice(offset, offset + CAMPAIGN_SOURCE_ID_CHUNK), signal });
     if (page.error) return page;
     for (const row of page.data) changedById.set(sourceRowId(row), row);
   }
@@ -2426,16 +2428,18 @@ export interface CampaignSourceRows {
 export interface FetchCampaignSourceRowsOptions {
   /** 上次读到的行：给了就只读变了的（见 readCampaignSourceDelta），没变的行沿用同一引用。 */
   previous?: CampaignSourceRows;
+  /** The list deadline cancels HTTP work as well as releasing its in-flight slot. */
+  signal?: AbortSignal;
 }
 
 export async function fetchCampaignSourceRows(
   userId: string,
   options: FetchCampaignSourceRowsOptions = {},
 ): Promise<CampaignSourceRows> {
-  const { previous } = options;
+  const { previous, signal } = options;
   const [campaignResult, journalResult] = await Promise.all([
-    previous ? readCampaignSourceDelta('trade_campaigns', userId, previous.campaigns) : readCampaignSourcePages('trade_campaigns', userId),
-    previous ? readCampaignSourceDelta('trade_journals', userId, previous.journals) : readCampaignSourcePages('trade_journals', userId),
+    previous ? readCampaignSourceDelta('trade_campaigns', userId, previous.campaigns, signal) : readCampaignSourcePages('trade_campaigns', userId, { signal }),
+    previous ? readCampaignSourceDelta('trade_journals', userId, previous.journals, signal) : readCampaignSourcePages('trade_journals', userId, { signal }),
   ]);
   if (campaignResult.error && !isMissingTradeCampaignsTableError(campaignResult.error)) {
     throw new Error(`加载战役列表失败：${campaignResult.error.message}`);

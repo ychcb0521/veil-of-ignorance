@@ -8,6 +8,7 @@ import {
   type CampaignWithLegs,
   type UserLocalSnapshot,
 } from '@/lib/journalApi';
+import { campaignSourceSnapshotStore, type CampaignSourceSnapshotStore } from '@/lib/campaignSourceSnapshot';
 import {
   CAMPAIGN_LEGACY_ORDER_RECORD_MATCH_MS,
   CAMPAIGN_ORDER_WINDOW_LOOKBACK_MS,
@@ -171,6 +172,8 @@ export interface CampaignListSnapshot {
   total: number;
   failedCount: number;
   error: string | null;
+  /** Showing a persisted read-only snapshot until cloud verification succeeds. */
+  cached?: boolean;
 }
 
 export type CampaignListRefreshKind = 'remote' | 'local';
@@ -563,8 +566,11 @@ const yieldToMainThread = typeof MessageChannel === 'function'
 /** 远端读取封顶：睡醒后的死连接不会永远占着「正在读」，让错误路径（保留旧行、可重试）接手。 */
 export const CAMPAIGN_LIST_REMOTE_TIMEOUT_MS = 30_000;
 
-const withTimeout = <T>(promise: Promise<T>, ms: number) => new Promise<T>((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error(`读取战役列表超时（${Math.round(ms / 1000)} 秒没有回应）`)), ms);
+const withTimeout = <T>(promise: Promise<T>, ms: number, onTimeout?: () => void) => new Promise<T>((resolve, reject) => {
+  const timer = setTimeout(() => {
+    reject(new Error(`读取战役列表超时（${Math.round(ms / 1000)} 秒没有回应）`));
+    onTimeout?.();
+  }, ms);
   promise.then(
     value => { clearTimeout(timer); resolve(value); },
     error => { clearTimeout(timer); reject(error); },
@@ -679,6 +685,8 @@ let cacheGeneration = 0;
 let activeUserId: string | null = null;
 
 export interface CampaignListCacheOptions {
+  /** Injectable read-only startup store; null disables persisted caching. */
+  sourceSnapshots?: CampaignSourceSnapshotStore | null;
   /** 连续计算多久让出一次主线程。 */
   sliceMs?: number;
   /** 首次加载期间至少隔多久才向页面提交一次进度：每次提交都会重排已有卡片。 */
@@ -719,7 +727,8 @@ export interface CampaignListCacheOptions {
  *     同一场同时至多一次拉取（correctionsInFlight），落地时按当时的校正输入归到当前条目上。
  */
 export function createCampaignListCache(userId: string, options: CampaignListCacheOptions = {}) {
-  const sliceMs = options.sliceMs ?? 40;
+  const sliceMs = options.sliceMs ?? 16;
+  const sourceSnapshots = options.sourceSnapshots === undefined ? campaignSourceSnapshotStore : options.sourceSnapshots;
   const publishMs = options.publishMs ?? 200;
   const remoteTimeoutMs = options.remoteTimeoutMs ?? CAMPAIGN_LIST_REMOTE_TIMEOUT_MS;
   const healGapMs = options.healGapMs ?? CAMPAIGN_LIST_HEAL_GAP_MS;
@@ -973,11 +982,133 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
     correctionRows.set(details.campaign.id, row);
   };
 
-  async function load(kind: CampaignListRefreshKind) {
+  async function assembleRows(remote: boolean, startRevision: number, remoteError: string | null, verified: boolean) {
     const firstLoad = !snapshot.complete;
+    // 快照要在远端读完后取，减少网络等待期间交易变化带来的陈旧窗口。
+    const local = localReader.read(localInputs ?? undefined);
+    const sources = assembleSources(remoteRows as CampaignSourceRows, local, remote);
+    if (firstLoad) publish({ total: sources.length });
+    for (const [symbol, group] of groupLocalBySymbol(local, sources.map(source => source.campaign.symbol))) {
+      const previous = localGroups.get(symbol);
+      if (previous && deepEqual(previous.group, group)) continue;
+      localGroups.set(symbol, {
+        group,
+        version: (previous?.version ?? 0) + 1,
+        diff: previous ? diffSymbolGroup(previous.group, group) : null,
+      });
+    }
+    const recordsByKey = recordsByKeyOf(local.tradeHistory);
+    const nextEntries: CachedRow[] = [];
+    const nextCache = new Map<string, CachedRow>();
+    const correctionsNeeded: CachedRow[] = [];
+    let failedCount = 0;
+    // 按时间分片让出主线程：首屏第一片一到就提交，之后每隔 publishMs 提交一次；后台核对静默、片更细。
+    const slice = firstLoad ? sliceMs : Math.min(sliceMs, 16);
+    if (!firstLoad) await yieldToMainThread();
+    let sliceStart = now();
+    let lastPublish = sliceStart;
+    for (let index = 0; index < sources.length; index += 1) {
+      const source = sources[index];
+      const { campaign, legs } = source;
+      const crossRecords = crossSymbolRecords(recordsByKey, legs, campaign.symbol);
+      const symbolState = localGroups.get(campaign.symbol);
+      const localVersion = symbolState?.version ?? 0;
+      const cached = cachedRows.get(campaign.id);
+      let reusable = Boolean(cached)
+        && (cached!.source === source || deepEqual(cached!.source, source))
+        && deepEqual(cached!.crossRecords, crossRecords);
+      if (reusable && cached!.localVersion !== localVersion) {
+        // 本标的的本地数据变了，但这一场用到的那部分没变：不重算，只把版本记到最新
+        reusable = cached!.localVersion === localVersion - 1
+          && Boolean(symbolState?.diff)
+          && !localChangeTouchesCampaign(cached!, symbolState!.diff!);
+        if (reusable) cached!.localVersion = localVersion;
+      }
+      if (cached && reusable) {
+        nextCache.set(campaign.id, cached);
+        nextEntries.push(cached);
+        // 上次没拉齐（或抛错）：输入没变也要重拉，否则一次 429 会让这一场整个会话停在未校正的数上；
+        // 只是按退避来——远端核对、过了间隔（correctionRetries）
+        if (!cached.correctionsComplete && !correctionsFetching(cached)
+          && correctionRetryAllowed(campaign.id, remote)) correctionsNeeded.push(cached);
+      } else {
+        try {
+          const details = await getCampaignFullData(campaign.id, { source, local, heal: false });
+          // 平仓价校正输入没变：它是这些输入的确定函数，沿用——不会先跳回未校正的数再跳回来；
+          // 只有拉齐了的才算定论，没拉齐的先照旧显示、再按退避重拉。输入变了（或没有旧条目）是新的问题，立即拉。
+          const sameInputs = Boolean(cached) && sameCorrectionInputs(cached!.details, details);
+          const corrections = sameInputs ? cached!.corrections : null;
+          const correctionsComplete = sameInputs && cached!.correctionsComplete;
+          let row = buildCampaignCardData(details, corrections ?? {});
+          // 逐字段相同就沿用原对象：卡片与散点图不为一次无差别的重算重绘。
+          if (cached && deepEqual(cached.row, row)) row = cached.row;
+          const entry: CachedRow = { source, crossRecords, localVersion, details, corrections, correctionsComplete, row };
+          nextCache.set(campaign.id, entry);
+          nextEntries.push(entry);
+          if (!correctionsComplete && !correctionsFetching(entry)
+            && (!sameInputs || correctionRetryAllowed(campaign.id, remote))) {
+            correctionsNeeded.push(entry);
+          }
+        } catch {
+          failedCount += 1;
+          // 更新失败的场次保留旧值，但不更新签名，下次重试仍会真正读取。
+          if (cached) nextEntries.push(cached);
+        }
+      }
+      const elapsedAt = now();
+      if (elapsedAt - sliceStart >= slice && index + 1 < sources.length) {
+        if (firstLoad && (snapshot.rows.length === 0 || elapsedAt - lastPublish >= publishMs)) {
+          // 首载中途点了星 / 删了行：进度提交也要盖上乐观编辑，不能先闪回旧值、加载完再跳回来
+          publish({ rows: applyOptimistic(rowsOf(nextEntries), startRevision).rows, loaded: index + 1, total: sources.length });
+          lastPublish = elapsedAt;
+        }
+        await yieldToMainThread();
+        sliceStart = now();
+      }
+    }
+    const activeIds = new Set(sources.map(source => source.campaign.id));
+    const { rows, overridden } = applyOptimistic(rowsOf(nextEntries), startRevision);
+    for (const id of cachedRows.keys()) if (!activeIds.has(id)) cachedRows.delete(id);
+    for (const [id, entry] of nextCache) if (!overridden.has(id)) cachedRows.set(id, entry);
+    publish({
+      rows: retainRowReferences(rows),
+      complete: true, loaded: sources.length,
+      total: sources.length, failedCount, error: remoteError, cached: !verified,
+    });
+    if (verified) queueDivergedCampaigns();
+
+    // 不阻塞基础快照/下次刷新；过期校正由校正输入拦截，不能覆盖新编辑或复活已删战役。
+    // 每一场各自落地：一个永不落定的 K 线请求只耽误它自己。它们曾经挂在同一个 Promise.all 上，
+    // 于是同批的场次拿到的校正被一起丢掉、在飞槽位也一起不还，整个会话再也发不出第二次。
+    for (const entry of verified ? correctionsNeeded : []) {
+      const { details } = entry;
+      const id = details.campaign.id;
+      correctionsInFlight.set(id, details);
+      void (async () => {
+        let result: LegExitPriceCorrectionsResult | null = null;
+        try {
+          result = await fetchLegExitPriceCorrectionsResult(details.campaign.symbol, details.legs, details.tradeRecords);
+        } catch {
+          // 抛错与没拉齐同等对待：条目保持 correctionsComplete === false，按退避重拉
+          result = null;
+        } finally {
+          // 校正输入变了、已由另一次拉取接手这个槽位：这一次作废，退避与落地都由接手的那次负责
+          if (correctionsInFlight.get(id) === details) {
+            correctionsInFlight.delete(id);
+            // 退避按 id 记，一次拉取记一次：请求确实发出去了
+            recordCorrectionOutcome(id, Boolean(result?.complete));
+            applyCorrections(details, result);
+          }
+        }
+      })();
+    }
+  }
+
+  async function load(kind: CampaignListRefreshKind) {
     const startRevision = revision;
     const remote = kind === 'remote' || remoteRows === null;
     let remoteError: string | null = null;
+    let verified = !snapshot.cached;
     if (remote) {
       remoteStartedAt = Date.now();
       publish({ refreshing: true, error: null });
@@ -985,141 +1116,44 @@ export function createCampaignListCache(userId: string, options: CampaignListCac
     try {
       if (remote) {
         fetchPending = true;
+        const controller = new AbortController();
+        // Start the network immediately; reading a warm cache never delays the request.
+        const outcome = withTimeout(
+          fetchCampaignSourceRows(userId, { previous: remoteRows ?? undefined, signal: controller.signal }),
+          remoteTimeoutMs,
+          () => controller.abort(),
+        ).then(rows => ({ rows, error: null }), error => ({ rows: null, error }));
         try {
-          remoteRows = await withTimeout(
-            fetchCampaignSourceRows(userId, { previous: remoteRows ?? undefined }),
-            remoteTimeoutMs,
-          );
+          if (!snapshot.complete && remoteRows === null && sourceSnapshots) {
+            // A quick cloud response wins over IndexedDB. A slow/offline cloud must not hide cached rows.
+            const saved = await Promise.race([
+              sourceSnapshots.read(userId).catch(() => null),
+              outcome.then(() => null),
+            ]);
+            if (saved) {
+              remoteRows = saved;
+              verified = false;
+              try { await assembleRows(false, startRevision, null, false); }
+              catch { remoteRows = null; } // A damaged optional cache cannot discard a valid cloud response.
+            }
+          }
+          const result = await outcome;
+          if (result.error) throw result.error;
+          remoteRows = result.rows!;
+          verified = true;
         } catch (error) {
-          // 读失败不算「刚读过」：下一次焦点 / 联网立刻重读，不用等满一分钟
           remoteStartedAt = null;
           if (remoteRows === null) throw error;
-          // 有上次的行：照样用最新的本地数据核对一遍（等远端期间的成交变化不能丢），失败留到最后提示
           remoteError = errorMessage(error);
         } finally {
           fetchPending = false;
         }
       }
-      // 后台核对是从合并定时器 / 写入收尾里发起的：先让那个任务结束，读快照、装配、分组另起一个任务。
-      // 首载的这一段本来就跑在网络回调之后的新任务里，不必再让。
-      if (!firstLoad) await yieldToMainThread();
-      // 快照要在远端读完后取，减少网络等待期间交易变化带来的陈旧窗口。
-      const local = localReader.read(localInputs ?? undefined);
-      const sources = assembleSources(remoteRows as CampaignSourceRows, local, remote);
-      if (firstLoad) publish({ total: sources.length });
-      for (const [symbol, group] of groupLocalBySymbol(local, sources.map(source => source.campaign.symbol))) {
-        const previous = localGroups.get(symbol);
-        if (previous && deepEqual(previous.group, group)) continue;
-        localGroups.set(symbol, {
-          group,
-          version: (previous?.version ?? 0) + 1,
-          diff: previous ? diffSymbolGroup(previous.group, group) : null,
-        });
-      }
-      const recordsByKey = recordsByKeyOf(local.tradeHistory);
-      const nextEntries: CachedRow[] = [];
-      const nextCache = new Map<string, CachedRow>();
-      const correctionsNeeded: CachedRow[] = [];
-      let failedCount = 0;
-      // 按时间分片让出主线程：首屏第一片一到就提交，之后每隔 publishMs 提交一次；后台核对静默、片更细。
-      const slice = firstLoad ? sliceMs : Math.min(sliceMs, 16);
-      if (!firstLoad) await yieldToMainThread();
-      let sliceStart = now();
-      let lastPublish = sliceStart;
-      for (let index = 0; index < sources.length; index += 1) {
-        const source = sources[index];
-        const { campaign, legs } = source;
-        const crossRecords = crossSymbolRecords(recordsByKey, legs, campaign.symbol);
-        const symbolState = localGroups.get(campaign.symbol);
-        const localVersion = symbolState?.version ?? 0;
-        const cached = cachedRows.get(campaign.id);
-        let reusable = Boolean(cached)
-          && (cached!.source === source || deepEqual(cached!.source, source))
-          && deepEqual(cached!.crossRecords, crossRecords);
-        if (reusable && cached!.localVersion !== localVersion) {
-          // 本标的的本地数据变了，但这一场用到的那部分没变：不重算，只把版本记到最新
-          reusable = cached!.localVersion === localVersion - 1
-            && Boolean(symbolState?.diff)
-            && !localChangeTouchesCampaign(cached!, symbolState!.diff!);
-          if (reusable) cached!.localVersion = localVersion;
-        }
-        if (cached && reusable) {
-          nextCache.set(campaign.id, cached);
-          nextEntries.push(cached);
-          // 上次没拉齐（或抛错）：输入没变也要重拉，否则一次 429 会让这一场整个会话停在未校正的数上；
-          // 只是按退避来——远端核对、过了间隔（correctionRetries）
-          if (!cached.correctionsComplete && !correctionsFetching(cached)
-            && correctionRetryAllowed(campaign.id, remote)) correctionsNeeded.push(cached);
-        } else {
-          try {
-            const details = await getCampaignFullData(campaign.id, { source, local, heal: false });
-            // 平仓价校正输入没变：它是这些输入的确定函数，沿用——不会先跳回未校正的数再跳回来；
-            // 只有拉齐了的才算定论，没拉齐的先照旧显示、再按退避重拉。输入变了（或没有旧条目）是新的问题，立即拉。
-            const sameInputs = Boolean(cached) && sameCorrectionInputs(cached!.details, details);
-            const corrections = sameInputs ? cached!.corrections : null;
-            const correctionsComplete = sameInputs && cached!.correctionsComplete;
-            let row = buildCampaignCardData(details, corrections ?? {});
-            // 逐字段相同就沿用原对象：卡片与散点图不为一次无差别的重算重绘。
-            if (cached && deepEqual(cached.row, row)) row = cached.row;
-            const entry: CachedRow = { source, crossRecords, localVersion, details, corrections, correctionsComplete, row };
-            nextCache.set(campaign.id, entry);
-            nextEntries.push(entry);
-            if (!correctionsComplete && !correctionsFetching(entry)
-              && (!sameInputs || correctionRetryAllowed(campaign.id, remote))) {
-              correctionsNeeded.push(entry);
-            }
-          } catch {
-            failedCount += 1;
-            // 更新失败的场次保留旧值，但不更新签名，下次重试仍会真正读取。
-            if (cached) nextEntries.push(cached);
-          }
-        }
-        const elapsedAt = now();
-        if (elapsedAt - sliceStart >= slice && index + 1 < sources.length) {
-          if (firstLoad && (snapshot.rows.length === 0 || elapsedAt - lastPublish >= publishMs)) {
-            // 首载中途点了星 / 删了行：进度提交也要盖上乐观编辑，不能先闪回旧值、加载完再跳回来
-            publish({ rows: applyOptimistic(rowsOf(nextEntries), startRevision).rows, loaded: index + 1, total: sources.length });
-            lastPublish = elapsedAt;
-          }
-          await yieldToMainThread();
-          sliceStart = now();
-        }
-      }
-      const activeIds = new Set(sources.map(source => source.campaign.id));
-      const { rows, overridden } = applyOptimistic(rowsOf(nextEntries), startRevision);
-      for (const id of cachedRows.keys()) if (!activeIds.has(id)) cachedRows.delete(id);
-      for (const [id, entry] of nextCache) if (!overridden.has(id)) cachedRows.set(id, entry);
-      publish({
-        rows: retainRowReferences(rows),
-        complete: true, loaded: sources.length,
-        total: sources.length, failedCount, error: remoteError,
-      });
-      queueDivergedCampaigns();
-
-      // 不阻塞基础快照/下次刷新；过期校正由校正输入拦截，不能覆盖新编辑或复活已删战役。
-      // 每一场各自落地：一个永不落定的 K 线请求只耽误它自己。它们曾经挂在同一个 Promise.all 上，
-      // 于是同批的场次拿到的校正被一起丢掉、在飞槽位也一起不还，整个会话再也发不出第二次。
-      for (const entry of correctionsNeeded) {
-        const { details } = entry;
-        const id = details.campaign.id;
-        correctionsInFlight.set(id, details);
-        void (async () => {
-          let result: LegExitPriceCorrectionsResult | null = null;
-          try {
-            result = await fetchLegExitPriceCorrectionsResult(details.campaign.symbol, details.legs, details.tradeRecords);
-          } catch {
-            // 抛错与没拉齐同等对待：条目保持 correctionsComplete === false，按退避重拉
-            result = null;
-          } finally {
-            // 校正输入变了、已由另一次拉取接手这个槽位：这一次作废，退避与落地都由接手的那次负责
-            if (correctionsInFlight.get(id) === details) {
-              correctionsInFlight.delete(id);
-              // 退避按 id 记，一次拉取记一次：请求确实发出去了
-              recordCorrectionOutcome(id, Boolean(result?.complete));
-              applyCorrections(details, result);
-            }
-          }
-        })();
+      if (snapshot.complete) await yieldToMainThread();
+      await assembleRows(remote, startRevision, remoteError, verified);
+      // Only a successful cloud read is persisted. Cache display/recalculation never writes business data.
+      if (remote && verified && !remoteError && remoteRows && sourceSnapshots) {
+        void sourceSnapshots.write(userId, remoteRows).catch(() => {});
       }
     } catch (error) {
       publish({ error: errorMessage(error) });

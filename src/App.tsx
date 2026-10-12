@@ -1,5 +1,6 @@
+import { lazy } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { useSimStateHydration } from "@/hooks/useSimStateHydration";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -7,29 +8,31 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TradingProvider } from "@/contexts/TradingContext";
-import Index from "./pages/Index.tsx";
-import AuthPage from "./pages/AuthPage.tsx";
-import OnboardingPage from "./pages/OnboardingPage.tsx";
-import JournalTagsPage from "./pages/JournalTagsPage.tsx";
-import JournalListPage from "./pages/JournalListPage.tsx";
-import JournalPlaybackPage from "./pages/JournalPlaybackPage.tsx";
-import JournalInsightsPage from "./pages/JournalInsightsPage.tsx";
-import JournalRulesPage from "./pages/JournalRulesPage.tsx";
-import JournalCampaignsPage from "./pages/JournalCampaignsPage.tsx";
-import JournalCampaignDetailPage from "./pages/JournalCampaignDetailPage.tsx";
-import JournalCampaignClassifyPage from "./pages/JournalCampaignClassifyPage.tsx";
-import JournalEmotionDiaryPage from "./pages/JournalEmotionDiaryPage.tsx";
-import CognitiveAssetsPage from "./pages/CognitiveAssetsPage.tsx";
-import ExecutionAssetsPage from "./pages/ExecutionAssetsPage.tsx";
-import GuidePage from "./pages/GuidePage.tsx";
+import { RouteLoadBoundary } from './components/RouteLoadBoundary';
+const Index = lazy(() => import('./pages/Index.tsx'));
+const AuthPage = lazy(() => import('./pages/AuthPage.tsx'));
+const OnboardingPage = lazy(() => import('./pages/OnboardingPage.tsx'));
+const JournalTagsPage = lazy(() => import('./pages/JournalTagsPage.tsx'));
+const JournalListPage = lazy(() => import('./pages/JournalListPage.tsx'));
+const JournalPlaybackPage = lazy(() => import('./pages/JournalPlaybackPage.tsx'));
+const JournalInsightsPage = lazy(() => import('./pages/JournalInsightsPage.tsx'));
+const JournalRulesPage = lazy(() => import('./pages/JournalRulesPage.tsx'));
+const JournalCampaignsPage = lazy(() => import('./pages/JournalCampaignsPage.tsx'));
+const JournalCampaignDetailPage = lazy(() => import('./pages/JournalCampaignDetailPage.tsx'));
+const JournalCampaignClassifyPage = lazy(() => import('./pages/JournalCampaignClassifyPage.tsx'));
+const JournalEmotionDiaryPage = lazy(() => import('./pages/JournalEmotionDiaryPage.tsx'));
+const CognitiveAssetsPage = lazy(() => import('./pages/CognitiveAssetsPage.tsx'));
+const ExecutionAssetsPage = lazy(() => import('./pages/ExecutionAssetsPage.tsx'));
+const GuidePage = lazy(() => import('./pages/GuidePage.tsx'));
 import NotFound from "./pages/NotFound.tsx";
-import OAuthConsent from "./pages/OAuthConsent.tsx";
+const OAuthConsent = lazy(() => import('./pages/OAuthConsent.tsx'));
 import { MandatoryRuleQueueRoot } from "./components/journal/MandatoryRuleQueueRoot.tsx";
 import { AuthBootRecoveryScreen } from "./components/AuthBootRecoveryScreen.tsx";
 
 const queryClient = new QueryClient();
 
 function AppRoutes() {
+  const location = useLocation();
   const { user, profile, loading, bootIssue } = useAuth();
   const simStateReady = useSimStateHydration(user?.id);
 
@@ -53,9 +56,9 @@ function AppRoutes() {
   // so after sign-in the consent route below matches automatically).
   if (!user || !user.email_confirmed_at) {
     return (
-      <Routes>
+      <RouteLoadBoundary key={location.pathname}><Routes>
         <Route path="*" element={<AuthPage />} />
-      </Routes>
+      </Routes></RouteLoadBoundary>
     );
   }
 
@@ -63,18 +66,18 @@ function AppRoutes() {
   // the auth surface, not the app shell.
   if (isConsentRoute) {
     return (
-      <Routes>
+      <RouteLoadBoundary key={location.pathname}><Routes>
         <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
-      </Routes>
+      </Routes></RouteLoadBoundary>
     );
   }
 
   // Authenticated but not initialized → onboarding
   if (profile && !profile.is_initialized) {
     return (
-      <Routes>
+      <RouteLoadBoundary key={location.pathname}><Routes>
         <Route path="*" element={<OnboardingPage />} />
-      </Routes>
+      </Routes></RouteLoadBoundary>
     );
   }
 
@@ -95,7 +98,7 @@ function AppRoutes() {
   return (
     <TradingProvider>
       <MandatoryRuleQueueRoot />
-      <Routes>
+      <RouteLoadBoundary key={location.pathname}><Routes>
         <Route path="/" element={<Index />} />
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
@@ -110,7 +113,7 @@ function AppRoutes() {
         <Route path="/cognitive-assets" element={<CognitiveAssetsPage />} />
         <Route path="/guide" element={<GuidePage />} />
         <Route path="*" element={<NotFound />} />
-      </Routes>
+      </Routes></RouteLoadBoundary>
     </TradingProvider>
   );
 }

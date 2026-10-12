@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   journals: [] as TradeJournal[],
   errors: {} as Record<string, { code: string; message: string }>,
   requests: [] as Array<{ table: string; range?: [number, number]; columns?: string; ids?: unknown[] }>,
+  signals: [] as AbortSignal[],
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -53,6 +54,7 @@ vi.mock('@/integrations/supabase/client', () => ({
           range = [from, to];
           return builder;
         },
+        abortSignal(signal: AbortSignal) { state.signals.push(signal); return builder; },
         single() {
           const response = result();
           return Promise.resolve({
@@ -201,6 +203,19 @@ describe('complete campaign batch source', () => {
     expect(second).toEqual(first);
     expect(first[0].legs[0].pre_real_time).toBe(timestamp);
     expect(await getCampaignWithLegs('legacy')).toEqual(first[0]);
+  });
+
+  it('passes one cancellation signal to every campaign and journal page, including delta reads', async () => {
+    state.campaigns = Array.from({ length: 501 }, (_, index) => campaign(`signal-${index}`));
+    state.signals = [];
+    const controller = new AbortController();
+    const previous = await fetchCampaignSourceRows('user-1', { signal: controller.signal });
+    expect(state.signals).toHaveLength(3);
+    expect(state.signals.every(signal => signal === controller.signal)).toBe(true);
+    state.signals = [];
+    await fetchCampaignSourceRows('user-1', { previous, signal: controller.signal });
+    expect(state.signals).toHaveLength(3);
+    expect(state.signals.every(signal => signal === controller.signal)).toBe(true);
   });
 
   it('a delta read lists id + updated_at, fetches only changed rows by id, drops deleted ones and keeps unchanged rows by reference', async () => {

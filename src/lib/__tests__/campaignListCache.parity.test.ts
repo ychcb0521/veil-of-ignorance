@@ -47,6 +47,7 @@ vi.mock('@/integrations/supabase/client', () => ({
         in(column: string, values: unknown[]) { filters.push(row => values.includes(row[column])); return builder; },
         order(column: string, options: { ascending: boolean }) { order = { column, ascending: options.ascending }; return builder; },
         range(from: number, to: number) { range = [from, to]; return builder; },
+        abortSignal(_signal: AbortSignal) { return builder; },
         single() {
           const response = result();
           return Promise.resolve({ data: response.data?.[0] ?? null, error: response.data?.length ? null : { code: 'PGRST116', message: '0 rows' } });

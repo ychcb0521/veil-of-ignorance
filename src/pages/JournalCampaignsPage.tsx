@@ -2161,7 +2161,7 @@ export default function JournalCampaignsPage() {
     [balance, positionsMap, priceMap],
   );
   const {
-    rows, setRows, complete: campaignRowsComplete, refreshing, loaded, total,
+    rows, setRows, complete: campaignRowsComplete, refreshing, loaded, total, cached: campaignRowsCached,
     error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
   } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap }, binView ? 'deleted' : 'active');
   const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
@@ -4345,6 +4345,11 @@ export default function JournalCampaignsPage() {
           </DialogContent>
         </Dialog>
 
+        {campaignRowsCached && !campaignLoadError && (
+          <div role="status" className="mb-2 px-1 text-[11px] text-muted-foreground">
+            已显示上次缓存的战役，正在后台核对云端数据…
+          </div>
+        )}
         {(campaignLoadError || failedCount > 0) && (
           <div role="status" className="mb-2 flex items-center gap-3 rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
             <span>
