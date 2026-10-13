@@ -2261,6 +2261,7 @@ describe('JournalCampaignsPage sorting', () => {
 
     const plot = await screen.findByTestId('campaign-metric-scatter-plot');
     expect(plot).toHaveAttribute('data-metric-key', 'magicBDistribution');
+    expect(screen.getByText(/横轴 神奇的 b（无量纲）/)).toBeInTheDocument();
     expect(screen.queryByTestId('campaign-odds-scatter-plot')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-magicB-view-distribution')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('campaign-magicB-view-time')).toHaveAttribute('aria-pressed', 'false');

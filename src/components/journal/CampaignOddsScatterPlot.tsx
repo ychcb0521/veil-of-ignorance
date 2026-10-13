@@ -1235,7 +1235,7 @@ export function CampaignMetricScatterPlot({
         </div>
       )}
       directionHint={dist
-        ? `横轴 ${oddsFamily ? '盈亏比（R）' : `${axisLabel ?? metricLabel}${genericSpec ? `（${genericSpec.unit}）` : ''}`}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
+        ? `横轴 ${magicFamily ? '神奇的 b（无量纲）' : oddsFamily ? '盈亏比（R）' : `${axisLabel ?? metricLabel}${genericSpec ? `（${genericSpec.unit}）` : ''}`}${geometricDist ? '（对数刻度）' : ''} · 纵轴 场数 · 不按时间排列`
         : drawdownBars
           // 【用户要求】倒数只是分档的梯子，不是重点：横轴说明与提示框里都不再出现 100÷D
           ? '横轴 预期回撤% · 纵轴 场数 · 不按时间排列'
