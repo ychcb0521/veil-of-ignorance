@@ -163,8 +163,8 @@ describe('排序链：依次比较', () => {
 
 describe('每个排序项的独立比较器', () => {
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, effectivePriceChangePct: 10, magicB: 1 };
-  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, effectivePriceChangePct: null };
+  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1 };
+  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null };
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {
     for (const [mode, key] of Object.entries(keys)) {
@@ -462,7 +462,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     // 连续指标都分档（DSI / USI 贡献已从排序栏删掉；仓位放大是后加的）
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangeMultiple', 'effectivePriceChangePct', 'expectedDrawdownPct',
-      'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'unrealizedPriceChangePct',
+      'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'unrealizedPriceChangePct',
     ]);
     // 第一级算不出的战役本来就不进列表，也不参与档界
     const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
@@ -763,8 +763,8 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    expect(CAMPAIGN_SORT_MODES.slice(0, 6)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate', 'geometricExpectancy']);
-    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(2);
+    expect(CAMPAIGN_SORT_MODES.slice(0, 7)).toEqual(['addCount', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'effectivePriceChangePct', 'magicB', 'captureRate', 'geometricExpectancy']);
+    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(3);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });
 

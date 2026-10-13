@@ -235,21 +235,21 @@ describe('Legs 列表的「涨跌幅」列', () => {
       renderList(phaseLegs);
       expandPhases();
       const titles = headerTitles();
-      expect(titles).toHaveLength(14);
+      expect(titles).toHaveLength(15);
       const column = titles.indexOf('涨跌幅');
       const total = screen.getByTestId('legs-total-row');
-      expect(total.children).toHaveLength(14);
+      expect(total.children).toHaveLength(15);
       expect(total.children[column].textContent).toBe('');
       expect(total.children[column].children).toHaveLength(0);
       for (const id of ['main', 'hedge-roll']) {
         const row = screen.getByTestId(`leg-price-change-${id}`).parentElement!;
-        expect(row.children).toHaveLength(14);
+        expect(row.children).toHaveLength(15);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-price-change-${id}`));
       }
       const phaseRows = Array.from(screen.getByTestId('leg-phases-main').children);
       expect(phaseRows).toHaveLength(3);
       phaseRows.forEach((row, index) => {
-        expect(row.children).toHaveLength(14);
+        expect(row.children).toHaveLength(15);
         expect(row.children[column]).toBe(screen.getByTestId(`leg-phase-price-change-main-${index + 1}`));
       });
     });

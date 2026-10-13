@@ -38,7 +38,8 @@ describe('Legs per-add geometric factor', () => {
     expect(header).not.toHaveTextContent('仓位的几何复利');
     expect(within(header).getByRole('button', { name: '仓位的几何复利说明' })).toBeInTheDocument();
     expect(header.previousElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
-    expect(header.nextElementSibling).toHaveTextContent('加仓校验');
+    expect(header.nextElementSibling).toHaveTextContent('1+α（理论）');
+    expect(header.nextElementSibling?.nextElementSibling).toHaveTextContent('加仓校验');
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
     expect(screen.getByTestId('leg-geometric-factor-add2')).toHaveTextContent('1.50×');
     expect(screen.getByTestId('leg-geometric-factor-main')).toBeEmptyDOMElement();
@@ -46,12 +47,12 @@ describe('Legs per-add geometric factor', () => {
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveAttribute('title', expect.stringContaining('1 + 50.9 ÷ 10'));
     const factors = buildCampaignLegGeometricFactors(data);
     const product = factors.get('add1')!.multiple * factors.get('add2')!.multiple;
-    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).positionGeometricMultiple).toBeCloseTo(product, 12);
+    expect(computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords).positionGeometricMultiple).toBeCloseTo(0.5 * product, 12);
     const png = buildCampaignLegsExportRows(data);
     expect(png.find(row => row.legId === 'add1')!.cells[10][0].text).toBe('6.09×');
     expect(png.find(row => row.legId === 'add2')!.cells[10][0].text).toBe('1.50×');
-    expect(png.every(row => row.cells.length === 14)).toBe(true);
-    expect(screen.getByTestId('legs-total-row').children).toHaveLength(14);
+    expect(png.every(row => row.cells.length === 15)).toBe(true);
+    expect(screen.getByTestId('legs-total-row').children).toHaveLength(15);
     fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
   });
@@ -93,6 +94,33 @@ describe('Legs per-add geometric factor', () => {
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('—');
     expect(within(screen.getByTestId('leg-geometric-factor-add1')).queryByRole('button')).not.toBeInTheDocument();
     expect(buildCampaignLegsExportRows(data).find(row => row.legId === 'add1')!.cells[10][0].text).toBe('—');
+  });
+  it('theoretical column is separate, shows substituted budget once, and later uses actual weighted cost', () => {
+    const data = example();
+    const orders = [
+      { id: 'k1', side: 'SHORT', price: 110, status: 'cancelled', createdAt: time(2), cancelledAt: time(3) },
+      { id: 'k2', side: 'SHORT', price: 130, status: 'cancelled', createdAt: time(3), cancelledAt: time(8) },
+    ] as typeof data.reverseHedgeOrders;
+    render(<MemoryRouter><CampaignLegsList {...data} reverseHedgeOrders={orders} /></MemoryRouter>);
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
+    expect(screen.getByTestId('leg-geometric-factor-theoretical-add1')).toHaveTextContent('8.00×');
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-theoretical-add1')).getByRole('button'));
+    let dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(dialog).toHaveTextContent('G = 600 U');
+    expect(dialog).toHaveTextContent('K* = K + G ÷ Q前 = 170');
+    expect(dialog).toHaveTextContent('170 − 100');
+    expect(dialog).toHaveTextContent('|120 − 110|');
+    expect(dialog).toHaveTextContent('700.00%');
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-theoretical-add2')).getByRole('button'));
+    dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(dialog).toHaveTextContent('使用当次实际持仓加权成本 S前，不使用扣除 G 的保本线');
+    expect(dialog).not.toHaveTextContent('G = 600');
+    const metrics = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
+    expect(metrics.positionGeometricMultiple).toBeCloseTo(0.5 * 6.09 * 1.5);
+    expect(metrics.positionGeometricMultipleTheoretical).toBeCloseTo(0.5 * 8 * (1 + (130 - (1000 + 50.9 * 120) / 60.9) / 10));
+    const png = buildCampaignLegsExportRows({ ...data, reverseHedgeOrders: orders });
+    expect(png.find(row => row.legId === 'add1')!.cells[11][0].text).toBe('8.00×');
   });
   it('an add without actual-fill evidence never invents a geometric factor', () => {
     const data = example();

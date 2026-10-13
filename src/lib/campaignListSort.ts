@@ -43,6 +43,7 @@ export type CampaignSortMode =
   | 'addCount'
   | 'positionAmplification'
   | 'positionGeometricMultiple'
+  | 'positionGeometricMultipleTheoretical'
   | 'effectivePriceChangePct'
   | 'effectivePriceChangeMultiple'
   | 'magicB'
@@ -64,6 +65,7 @@ export type CampaignSortChain = readonly CampaignSortLevel[];
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addCount',
   'positionGeometricMultiple',
+  'positionGeometricMultipleTheoretical',
   'effectivePriceChangePct',
   'magicB',
   'captureRate',
@@ -99,6 +101,7 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'addEfficiency',
   'positionAmplification',
   'positionGeometricMultiple',
+  'positionGeometricMultipleTheoretical',
   'effectivePriceChangePct',
   'effectivePriceChangeMultiple',
   'magicB',
@@ -218,6 +221,9 @@ function rowGeometricMetrics(row: Pick<CampaignCardData, 'campaign' | 'legs' | '
 }
 export function rowPositionGeometricMultiple(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionGeometricMultiple'>): number | null {
   return row.positionGeometricMultiple !== undefined ? row.positionGeometricMultiple : rowGeometricMetrics(row).positionGeometricMultiple;
+}
+export function rowPositionGeometricMultipleTheoretical(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionGeometricMultipleTheoretical'>): number | null {
+  return row.positionGeometricMultipleTheoretical !== undefined ? row.positionGeometricMultipleTheoretical : rowGeometricMetrics(row).positionGeometricMultipleTheoretical ?? null;
 }
 export function rowEffectivePriceChangePct(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'effectivePriceChangePct'>): number | null {
   return row.effectivePriceChangePct !== undefined ? row.effectivePriceChangePct : rowGeometricMetrics(row).effectivePriceChangePct;
@@ -464,6 +470,10 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowPositionGeometricMultiple(row);
       return value == null ? null : sortBinValue('positionGeometricMultiple', value);
     }, importanceTimeAlpha),
+    positionGeometricMultipleTheoretical: metric(row => {
+      const value = rowPositionGeometricMultipleTheoretical(row);
+      return value == null ? null : sortBinValue('positionGeometricMultipleTheoretical', value);
+    }, importanceTimeAlpha),
     effectivePriceChangePct: metric(row => {
       const value = rowEffectivePriceChangePct(row);
       return value == null ? null : sortBinValue('effectivePriceChangePct', value);
@@ -529,6 +539,7 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'mainPriceEfficiency':
     case 'unrealizedPriceChangePct':
     case 'addEfficiency':
+    case 'positionGeometricMultipleTheoretical':
     case 'positionGeometricMultiple':
     case 'effectivePriceChangePct':
     case 'effectivePriceChangeMultiple':
@@ -653,7 +664,7 @@ export const POSITION_AMPLIFICATION_UNIT = 1;
 
 /** 这一项分档时是否以 1.00x 为界（未放大的自成一档）。 */
 export function isUnitSplitSortMode(mode: CampaignSortMode): boolean {
-  return mode === 'positionAmplification' || mode === 'positionGeometricMultiple';
+  return mode === 'positionAmplification' || mode === 'positionGeometricMultiple' || mode === 'positionGeometricMultipleTheoretical';
 }
 
 /**

@@ -1773,6 +1773,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       effectivePriceChangePct: campaignGeometricMetrics?.effectivePriceChangePct ?? null,
       effectivePriceChangeMultiple: campaignGeometricMetrics?.effectivePriceChangeMultiple ?? null,
       positionGeometricMultiple: campaignGeometricMetrics?.positionGeometricMultiple ?? null,
+      positionGeometricMultipleTheoretical: campaignGeometricMetrics?.positionGeometricMultipleTheoretical ?? null,
       magicB: campaignGeometricMetrics?.magicB ?? null,
       geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,
       initialRisk: campaignMetricValues?.initialRisk ?? null,

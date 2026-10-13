@@ -128,8 +128,8 @@ describe('Legs 列表的「多单占比」列', () => {
   it('只有「多单占比」一列，紧跟在「币量 / 仓位」之后、「加仓校验」之前；列头是按钮：「多」标签 +「占比」+ 排序图标，右对齐', () => {
     renderList(screenshotLegs());
     const col = colOf(LONG);
-    expect(titlesOf().slice(col - 1, col + 3)).toEqual(['币量 / 仓位', LONG, '1+α', '加仓校验']);
-    expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', LONG, '1+α', '加仓校验', '手续费', '委托', '操作']);
+    expect(titlesOf().slice(col - 1, col + 4)).toEqual(['币量 / 仓位', LONG, '1+α', '1+α（理论）', '加仓校验']);
+    expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', LONG, '1+α', '1+α（理论）', '加仓校验', '手续费', '委托', '操作']);
     // 【用户要求】「空单占比」一列不再存在：表头里没有它，也没有第二个排序按钮、第二枚标签
     expect(titlesOf()).not.toContain(SHORT);
     expect(headerCells().filter(cell => cell.tagName === 'BUTTON')).toHaveLength(1);
@@ -176,7 +176,7 @@ describe('Legs 列表的「多单占比」列', () => {
     for (const row of SCREENSHOT) {
       // 有数的那一格就是 leg-position-share-<id>
       expect(shareCellOf(row.id, LONG)).toBe(screen.getByTestId(`leg-position-share-${row.id}`));
-      expect(rowOf(row.id).children).toHaveLength(14);
+      expect(rowOf(row.id).children).toHaveLength(15);
     }
 
     const sum = (index: 0 | 1) => SCREENSHOT
@@ -196,7 +196,7 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(screen.getByTestId('legs-total-position').getAttribute('title'))
       .toBe('多单一组是「多单占比」的分母；上行 Σ币量、下行 Σ名义仓位（挂单中的腿不计入）');
     const total = screen.getByTestId('legs-total-row');
-    expect(total.children).toHaveLength(14);
+    expect(total.children).toHaveLength(15);
     expect(total.children[colOf(LONG)]).toBe(screen.getByTestId('legs-total-position-share-long'));
     // 合计行「多单占比」右边就是加仓校验那一格（留空）
     expect(total.children[colOf(LONG) + 1].textContent).toBe('');
@@ -404,12 +404,12 @@ describe('Legs 列表的「多单占比」列', () => {
     expect(bullet).not.toContain('（紧跟「币量 / 仓位」与「多单占比」之后）');
     expect(bullet).not.toContain('「空单占比」');
     // 列名跟着战役主方向变，指南里因此按列称呼它
-    expect(bullet).toContain('（紧跟「仓位的几何复利」列之后）');
+    expect(bullet).toContain('（紧跟「1+α（理论）」列之后）');
     // 与页面表头顺序一致：币量 / 仓位 → 占比 → 加仓校验
     renderList(screenshotLegs());
     const titles = titlesOf();
     expect(titles.indexOf(LONG)).toBe(titles.indexOf('币量 / 仓位') + 1);
-    expect(titles.indexOf('加仓校验')).toBe(titles.indexOf(LONG) + 2);
+    expect(titles.indexOf('加仓校验')).toBe(titles.indexOf(LONG) + 3);
     expect(titles).not.toContain(SHORT);
   });
 
@@ -454,7 +454,7 @@ describe('Legs 列表的「多单占比」列', () => {
       const coinsCol = colOf('币量 / 仓位');
       const longCol = colOf(LONG);
       expect(longCol).toBe(coinsCol + 1);
-      expect(colOf('加仓校验')).toBe(longCol + 2);
+      expect(colOf('加仓校验')).toBe(longCol + 3);
 
       // 已平仓的对冲是仓位，但它是空单，不进多单的分母：94,300 ÷ 0.0336792 = 2,799,947.74 币（多）；50,000 ÷ 0.05 = 1,000,000 币（空）
       // （一个分母时曾印成 73.7% / 26.3%）
@@ -499,7 +499,7 @@ describe('Legs 列表的「多单占比」列', () => {
       renderList([...phaseLegs, pendingHedge]);
       expandPhases('main');
       const count = headerCells().length;
-      expect(count).toBe(14);
+      expect(count).toBe(15);
       const longCol = colOf(LONG);
       const cell = screen.getByTestId('leg-position-share-main');
       expect(cell.parentElement!.children).toHaveLength(count);
@@ -718,7 +718,7 @@ describe('Legs 列表的「多单占比」列', () => {
       expect(long.getAttribute('title')).toBe('多单各腿合计为 100%');
       // 格子数不变
       const count = headerCells().length;
-      expect(count).toBe(14);
+      expect(count).toBe(15);
       expect(total.children).toHaveLength(count);
       for (const id of ['main', 'mirror', 'hedge', 'add']) {
         expect(rowOf(id).children).toHaveLength(count);
@@ -776,7 +776,7 @@ describe('Legs 列表的「多单占比」列', () => {
     it('列头改成红「空」标签 +「占比」，读屏名与列说明都按空单写；列位不变（币量 / 仓位 → 占比 → 加仓校验）', () => {
       renderMainShort();
       const col = colOf(SHORT);
-      expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', SHORT, '1+α', '加仓校验', '手续费', '委托', '操作']);
+      expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', SHORT, '1+α', '1+α（理论）', '加仓校验', '手续费', '委托', '操作']);
       expect(titlesOf()).not.toContain(LONG);
       const header = headerCells()[col];
       expect(header).toBe(screen.getByTestId('legs-share-sort-short'));
@@ -817,7 +817,7 @@ describe('Legs 列表的「多单占比」列', () => {
       // 腿行里一枚方向标签都没有（列头已写明方向）
       for (const id of ['main-short', 'hedge-long', 'add-short']) {
         expect(tagsIn(rowOf(id))).toHaveLength(0);
-        expect(rowOf(id).children).toHaveLength(14);
+        expect(rowOf(id).children).toHaveLength(15);
       }
     });
 
@@ -848,7 +848,7 @@ describe('Legs 列表的「多单占比」列', () => {
       // 占比合计格不挂标签；合计行的标签只有 Σ 格里那两枚
       expect(tagsIn(share)).toHaveLength(0);
       expect(tagsIn(screen.getByTestId('legs-total-row')).map(tag => tag.textContent)).toEqual(['多', '空']);
-      expect(screen.getByTestId('legs-total-row').children).toHaveLength(14);
+      expect(screen.getByTestId('legs-total-row').children).toHaveLength(15);
     });
 
     it('只有空单（没开对冲）时占比格不垫占位：空单那组就是第一组', () => {

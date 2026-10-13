@@ -65,7 +65,7 @@ describe('Legs 列表的「加仓校验」列', () => {
     const fees = screen.getByText('手续费');
     expect(coins.nextElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(coins.nextElementSibling!.nextElementSibling).toHaveAttribute('aria-label', '仓位的几何复利（1+α）');
-    expect(coins.nextElementSibling!.nextElementSibling!.nextElementSibling).toBe(header);
+    expect(coins.nextElementSibling!.nextElementSibling!.nextElementSibling!.nextElementSibling).toBe(header);
     expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
     expect(header.nextElementSibling).toBe(fees);
     expect(header.getAttribute('title')).toContain('Q₂实际(T − K)');
@@ -139,7 +139,7 @@ describe('Legs 列表的「加仓校验」列', () => {
   it('每一行的格子数与表头一致：加列没有让合计行错位', () => {
     renderList(22_057_330);
     const headerCells = screen.getByText('加仓校验').parentElement!.children.length;
-    expect(headerCells).toBe(14);
+    expect(headerCells).toBe(15);
     expect(screen.getByTestId('legs-total-row').children.length).toBe(headerCells);
     const addRow = screen.getByTestId('add-sizing-check-fail-add1').parentElement!;
     expect(addRow.children.length).toBe(headerCells);

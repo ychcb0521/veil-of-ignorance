@@ -60,7 +60,7 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(headers).not.toContain('有效涨幅倍数');
     expect(cell(0, '神奇的 b')).toBe(3);
     expect(cell(1, '神奇的 b')).toBe(-0.5);
-    expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 4)).toEqual(['仓位几何累积倍数（倍）', '有效涨幅（%）', '盈亏比', '神奇的 b']);
+    expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 5)).toEqual(['仓位几何累积倍数（倍）', '仓位几何累积倍数（理论）', '有效涨幅（%）', '盈亏比', '神奇的 b']);
     expect(cell(0, '自评（0–5）')).toBe(4);
     expect(cell(0, '自评（文字）')).toBe('很好');
     expect(cell(0, '预期回撤（%）')).toBe(2);
