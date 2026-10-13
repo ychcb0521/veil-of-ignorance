@@ -32,7 +32,7 @@ export function LegGeometricFactorDialog({ ordinal, factor, theoretical, onClose
       <DialogContent className="max-h-[94vh] overflow-y-auto gap-3 sm:max-w-[760px]" data-testid="leg-geometric-factor-detail-dialog">
         <DialogHeader>
           <DialogTitle className="pr-8">加仓{ordinal} · 仓位的几何复利{theoretical ? '（理论）' : ''}</DialogTitle>
-          <DialogDescription className="sr-only">本次实际加仓的 1+α 倍数与完整计算过程。</DialogDescription>
+          <DialogDescription className="sr-only">本次加仓的 1+α 倍数与完整计算过程，区分实际成交与理论计算。</DialogDescription>
         </DialogHeader>
         <div className="rounded-lg border border-[#0ECB81]/25 bg-[#0ECB81]/[0.07] p-4">
           <div className="flex items-center gap-1 text-xs font-medium text-foreground/65">
