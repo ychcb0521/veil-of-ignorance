@@ -326,13 +326,13 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'positionGeometricMultiple', label: '仓位几何累积倍数' },
   { value: 'effectivePriceChangePct', label: '有效涨幅' },
   { value: 'magicB', label: '神奇的 b' },
+  { value: 'captureRate', label: '盈亏比' },
   { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'time', label: '操作时间' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'expectedDrawdownPct', label: '预期回撤' },
   { value: 'mainPriceChange', label: '涨跌幅' },
   { value: 'mainPriceEfficiency', label: '涨跌幅倍数' },
-  { value: 'captureRate', label: '盈亏比' },
   { value: 'addEfficiency', label: '加仓效用' },
   { value: 'positionAmplification', label: '仓位放大' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
@@ -1466,12 +1466,12 @@ const CARD_METRIC_LABEL = {
   positionGeometricMultiple: '仓位几何累积倍数',
   effectivePriceChangePct: '有效涨幅',
   magicB: '神奇的 b',
+  captureRate: '盈亏比',
   geometricExpectancy: '几何期望',
   mirrorTp: '镜像止盈',
   expectedDrawdownPct: '预期回撤',
   mainPriceChange: '涨跌幅',
   mainPriceEfficiency: '涨跌幅倍数',
-  captureRate: '盈亏比',
   addEfficiency: '加仓效用',
   positionAmplification: '仓位放大',
   unrealizedPriceChangePct: '涨幅未兑现',
@@ -1945,6 +1945,10 @@ const CampaignCard = memo(function CampaignCard({
             <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
           </div>
+          <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
+            <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{readings.captureRate}</span></dd>
+          </div>
           <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
@@ -2007,10 +2011,6 @@ const CampaignCard = memo(function CampaignCard({
                 {readings.mainPriceEfficiency}
               </span>
             </dd>
-          </div>
-          <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
-            <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{readings.captureRate}</span></dd>
           </div>
           <div
             data-testid="campaign-add-efficiency"

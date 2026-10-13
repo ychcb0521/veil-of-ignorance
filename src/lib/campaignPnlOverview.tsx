@@ -108,13 +108,14 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
  * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
  *
- * 左栏优先展示加仓次数、仓位几何累积倍数、有效涨幅、神奇的 b、几何期望。
+ * 左栏优先展示加仓次数、仓位几何累积倍数、有效涨幅、神奇的 b、盈亏比、几何期望。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
   'positionGeometricMultiple',
   'effectivePriceChangePct',
   'magicB',
+  'payoffRatio',
   'geometricExpectancy',
   'arithmeticExpectancy',
   'expectedMaxDrawdownPct',
@@ -128,7 +129,6 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'realizedPnl',
-  'payoffRatio',
   'initialExpectedMaxLoss',
   'peakPriceChange',
   'peakPriceEfficiency',
