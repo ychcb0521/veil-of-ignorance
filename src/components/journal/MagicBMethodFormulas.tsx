@@ -35,7 +35,7 @@ export function MagicBMethodFormulas({ realizedPnl, initialRisk, geometricWorked
       <div className="text-[10px] font-medium text-foreground/85">方法三 · 神奇的 b（理论）<span className="ml-2 text-muted-foreground">理论对照</span></div>
       <p className="font-mono break-words">{MAGIC_B_THEORETICAL_FORMULA}</p>
       {theoreticalWorked}
-      <p className="text-[10px]">使用理论可加仓比例累积的仓位倍数；有效涨幅按小数计算，例如 20% = 0.20。与方法二共用同一有效涨幅，不替换当前指标。</p>
+      <p className="text-[10px]">使用理论可加仓比例累积的仓位倍数；相对涨幅按公式比值计算，例如 2.00× 参与计算为 2。与方法二共用同一相对涨幅，不替换当前指标。</p>
     </div>
     <p className="text-[10px]">盈亏比及相关统计使用算法一；神奇的 b 使用算法二；方法三仅作理论对照。按完整精度计算，展示值四舍五入。</p>
   </div>;

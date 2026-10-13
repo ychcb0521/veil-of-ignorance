@@ -228,6 +228,12 @@ export function rowEffectivePriceChangePct(row: Pick<CampaignCardData, 'campaign
   return row.effectivePriceChangePct !== undefined ? row.effectivePriceChangePct : rowGeometricMetrics(row).effectivePriceChangePct;
 }
 
+/** Relative rise is displayed/sorted as a multiple; the legacy cache field remains percentage points. */
+export function rowRelativePriceChange(row: Parameters<typeof rowEffectivePriceChangePct>[0]): number | null {
+  const percentage = rowEffectivePriceChangePct(row);
+  return percentage == null || !Number.isFinite(percentage) ? null : percentage / 100;
+}
+
 export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'effectivePriceChangePct' | 'effectivePriceChangeMultiple' | 'initialExpectedMaxDrawdownPct'>): number | null {
   return row.effectivePriceChangeMultiple !== undefined ? row.effectivePriceChangeMultiple
     : computeEffectivePriceChangeMultiple(rowEffectivePriceChangePct(row), row.initialExpectedMaxDrawdownPct);
@@ -474,7 +480,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       return value == null ? null : sortBinValue('positionGeometricMultipleTheoretical', value);
     }, importanceTimeAlpha),
     effectivePriceChangePct: metric(row => {
-      const value = rowEffectivePriceChangePct(row);
+      const value = rowRelativePriceChange(row);
       return value == null ? null : sortBinValue('effectivePriceChangePct', value);
     }, importanceTimeAlpha),
     effectivePriceChangeMultiple: metric(row => {

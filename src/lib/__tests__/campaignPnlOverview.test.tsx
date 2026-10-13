@@ -15,7 +15,7 @@ import {
  * 【用户要求】主力涨跌幅 +20% → 涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","有效涨幅","神奇的 b","盈亏比","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"];
+const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"];
 
 const GOLDEN_KEYS = ["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","payoffRatio","geometricExpectancy","arithmeticExpectancy","expectedMaxDrawdownPct","mainPriceChange","mainPriceEfficiency","realizedPnl","initialExpectedMaxLoss","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","positionAmplification","addEfficiency"];
 
@@ -48,19 +48,20 @@ describe('buildCampaignPnlOverviewItems', () => {
   it('shows the initial-entry denominator and its substitution in both actual and theoretical b methods', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       positionGeometricMultiple: 3, positionGeometricMultipleTheoretical: 2.5,
-      effectivePriceChangePct: 80, magicB: 2.4,
-      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 100, earlyReductionFraction: 0.5,
+      effectivePriceChangePct: 800, magicB: 24,
+      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 100, initialStopPrice: 90, earlyReductionFraction: 0.5,
         addRatios: [5], finalExitPrice: 220, lastSupport: 140 },
     }));
     const riseHelp = render(<>{items.find(item => item.key === 'effectivePriceChangePct')!.help}</>).container;
-    expect(riseHelp).toHaveTextContent('有效涨幅 = (F − Kₘ) ÷ E');
-    expect(riseHelp).toHaveTextContent('(F − Kₘ) ÷ E = (220 − 140) ÷ 100 ≈ 0.8');
+    expect(riseHelp).toHaveTextContent('相对涨幅 = (F − Kₘ) ÷ (E − K初)');
+    expect(riseHelp).toHaveTextContent('(F − Kₘ) ÷ (E − K初) = (220 − 140) ÷ (100 − 90) ≈ 8');
+    expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('8.00×');
     const help = render(<>{items.find(item => item.key === 'magicB')!.help}</>).container;
     for (const id of ['magic-b-worked', 'magic-b-theoretical-worked']) {
-      expect(help.querySelector(`[data-testid="${id}"]`)).toHaveTextContent('(220 − 140) ÷ 100 ≈ 0.8');
+      expect(help.querySelector(`[data-testid="${id}"]`)).toHaveTextContent('(220 − 140) ÷ (100 − 90) ≈ 8');
     }
-    expect(help.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('≈ 2.40000000');
-    expect(help.querySelector('[data-testid="magic-b-theoretical-worked"]')).toHaveTextContent('≈ 2.00000000');
+    expect(help.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent('≈ 24.00000000');
+    expect(help.querySelector('[data-testid="magic-b-theoretical-worked"]')).toHaveTextContent('≈ 20.00000000');
     expect(items.some(item => item.key === 'positionGeometricMultipleTheoretical')).toBe(false);
     const growthHelp = render(<>{items.find(item => item.key === 'positionGeometricMultiple')!.help}</>).container;
     expect(growthHelp.querySelector('[data-testid="position-geometric-theoretical-help"]')).toHaveTextContent('仓位几何累积倍数（理论） 2.50x');
@@ -76,7 +77,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(magic.value).toBe('0.43');
     const help = render(<>{magic.help}</>).container;
     expect(help).toHaveTextContent('方法三 · 神奇的 b（理论）');
-    expect(help).toHaveTextContent('神奇的 b（理论） = 仓位几何累积倍数（理论） × 有效涨幅');
+    expect(help).toHaveTextContent('神奇的 b（理论） = 仓位几何累积倍数（理论） × 相对涨幅');
     const worked = help.querySelector('[data-testid="magic-b-theoretical-worked"]');
     expect(worked).toHaveTextContent('b（理论） = 3.14159265359 × 0.214240630332');
     expect(worked).toHaveTextContent(`≈ ${(multiple * rise / 100).toFixed(8)}`);
@@ -106,14 +107,14 @@ describe('buildCampaignPnlOverviewItems', () => {
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100 } }));
     const keys = items.map(item => item.key);
     expect(keys.slice(0, 6)).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","payoffRatio","geometricExpectancy"]);
-    expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('50.00%');
+    expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('0.50×');
     expect(items.find(item => item.key === 'effectivePriceChangeMultiple')).toBeUndefined();
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBeUndefined();
     expect(magic.value).toBe('1.00');
     const help = render(<>{magic.help}</>).container;
     const worked = help.querySelector('[data-testid="magic-b-worked"]');
-    expect(worked).toHaveTextContent('有效涨幅 = 50% = 0.5');
+    expect(worked).toHaveTextContent('相对涨幅 = 0.5 倍');
     expect(worked).toHaveTextContent('b = 2 × 0.5');
     expect(worked).toHaveTextContent('≈ 1.00000000');
     expect(worked).not.toHaveTextContent('β');
@@ -123,7 +124,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(worked).not.toHaveTextContent('结算修正');
     expect(help).toHaveTextContent('算法一 · 原盈亏比');
     expect(help).toHaveTextContent('算法二 · 几何公式');
-    expect(help).toHaveTextContent('不等同于已实现净盈亏');
+    expect(help).toHaveTextContent('结算口径可能存在差异');
     expect(items.find(item => item.key === 'payoffRatio')?.value).toBe('2.00');
     expect(items.find(item => item.key === 'addEfficiency')?.value).toBe('+1.00');
     expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+0.50R');
@@ -189,7 +190,7 @@ describe('buildCampaignPnlOverviewItems', () => {
   it('explains that F is exactly the same exit basis as the price-change metric', () => {
     const item = buildCampaignPnlOverviewItems(winnerMetrics({
       effectivePriceChangePct: 50,
-      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 140, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 210, lastSupport: 140 },
+      geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 140, initialStopPrice: 100, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 210, lastSupport: 140 },
     })).find(value => value.key === 'effectivePriceChangePct')!;
     const { container } = render(<>{item.help}</>);
     expect(container.textContent).toContain('F 与「涨跌幅」的平仓价同源');
@@ -336,7 +337,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['加仓次数', '仓位几何累积倍数', '有效涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
+      .toEqual(['加仓次数', '仓位几何累积倍数', '相对涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '加仓效用']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]

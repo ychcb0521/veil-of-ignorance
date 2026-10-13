@@ -957,7 +957,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(cardCells).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","有效涨幅","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","涨跌幅","涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","涨跌幅","涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
@@ -1402,7 +1402,7 @@ describe('JournalCampaignsPage sorting', () => {
     }
   }, 30_000);
 
-  it('新增币量累积倍数与有效涨幅：上下位置、排序高亮、分布/时序共用实际成交读数', async () => {
+  it('新增币量累积倍数与相对涨幅：上下位置、排序高亮、分布/时序共用实际成交读数', async () => {
     const beforeLegs = legsByCampaign['high-importance'];
     const beforeRecord = tradeHistory[0];
     const openTime = Date.parse('2026-04-01T00:00:00Z');
@@ -1425,12 +1425,12 @@ describe('JournalCampaignsPage sorting', () => {
       expect(rise.previousElementSibling).toHaveAttribute('data-testid', 'campaign-position-geometric-multiple');
       expect(growth.querySelector('dd')).toHaveTextContent('2.50x');
       // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
-      expect(rise.querySelector('dd')).toHaveTextContent('40.00%');
+      expect(rise.querySelector('dd')).toHaveTextContent('4.00×');
       expect(within(card).queryByTestId('campaign-effective-price-change-multiple')).not.toBeInTheDocument();
-      // E = 100, F = 130, K = 90; b = 2.5 × 40% = 1, independent of net P&L / L0 = 6.
-      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('1.00');
+      // E = 100, K0 = 90, F = 130, Km = 90; b = 2.5 × 4 = 10.
+      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('10.00');
       expect(within(card).getByTestId('campaign-capture-rate-value')).toHaveTextContent('6.00');
-      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 40], ['magicB', 1]] as const) {
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['effectivePriceChangePct', 4], ['magicB', 10]] as const) {
         fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
         const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
         expect(within(selected).getByTestId(key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
@@ -2621,7 +2621,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByText('神奇的 b 计算公式')).not.toBeInTheDocument();
     fireEvent.doubleClick(screen.getByTestId('campaign-sort-magicB'));
     expect(screen.getByText('神奇的 b 计算公式')).toBeInTheDocument();
-    expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 有效涨幅')).toBeInTheDocument();
+    expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 相对涨幅')).toBeInTheDocument();
     expect(screen.getByText('神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-magicB')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);

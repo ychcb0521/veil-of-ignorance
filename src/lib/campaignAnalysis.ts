@@ -436,6 +436,8 @@ function findInitialMainLeg(legs: TradeJournal[]): TradeJournal | null {
 }
 
 interface InitialRiskAnchor {
+  entryPrice: number;
+  stopPrice: number | null;
   initialMainExposureNotional: number;
   drawdownFraction: number;
 }
@@ -1011,6 +1013,10 @@ function resolveInitialRiskAnchor(
 
   return {
     initialMainExposureNotional,
+    entryPrice,
+    stopPrice: campaign.direction === 'main_long'
+      ? hedgePrices.filter(price => price < entryPrice).sort((a, b) => a - b)[0] ?? null
+      : hedgePrices.filter(price => price > entryPrice).sort((a, b) => b - a)[0] ?? null,
     drawdownFraction: Math.max(...hedgePrices.map(price => Math.abs(price - entryPrice) / entryPrice)),
   };
 }
@@ -1048,6 +1054,8 @@ export function computeInitialExpectedMaxDrawdownPct(
  */
 /** 一笔主力自己的风险锚。 */
 export interface MainRiskAnchor {
+  entryPrice?: number;
+  stopPrice?: number | null;
   mainLegId: string;
   exposureNotional: number;
   /** 到它**自己**的初始保护线的跌幅；取不到时为 null。 */
@@ -1104,6 +1112,8 @@ export function resolveMainRiskAnchors(
     return {
       anchors: [{
         mainLegId: mainLegs[0]?.id ?? '',
+        entryPrice: anchor.entryPrice,
+        stopPrice: anchor.stopPrice,
         exposureNotional: anchor.initialMainExposureNotional,
         drawdownFraction: anchor.drawdownFraction,
         expectedMaxLoss: anchor.drawdownFraction * anchor.initialMainExposureNotional,
@@ -1240,6 +1250,10 @@ export function resolveMainRiskAnchors(
     const drawdownFraction = resolvable ? Math.max(...lossSideFractions) : null;
     anchors.push({
       mainLegId: mainLeg.id,
+      entryPrice: entryPrice ?? undefined,
+      stopPrice: drawdownFraction == null || entryPrice == null ? null : campaign.direction === 'main_long'
+        ? Math.min(...hedgePrices.filter(price => price < entryPrice))
+        : Math.max(...hedgePrices.filter(price => price > entryPrice)),
       exposureNotional,
       drawdownFraction,
       // 锚不出来就记 0,绝不借用别的腿的跌幅——那等于凭空发明一条从未挂过的止损。

@@ -73,7 +73,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(s).not.toMatch(/sm:w-\[\d+px\]/);
     // 八项指标名一份常量（dt 与宽度估算共用），次序与排序行一致
     const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
-    expect(labels).toEqual([["addCount","加仓次数"],["positionGeometricMultiple","仓位几何累积倍数"],["effectivePriceChangeMultiple","有效涨幅倍数"],["magicB","神奇的 b"],["geometricExpectancy","几何期望"],["mirrorTp","镜像止盈"],["expectedDrawdownPct","预期回撤"],["mainPriceChange","涨跌幅"],["mainPriceEfficiency","涨跌幅倍数"],["effectivePriceChangePct","有效涨幅"],["addEfficiency","加仓效用"],["positionAmplification","仓位放大"],["unrealizedPriceChangePct","涨幅未兑现"],["arithmeticExpectancy","算术期望"]]);
+    expect(labels).toEqual([["addCount","加仓次数"],["positionGeometricMultiple","仓位几何累积倍数"],["effectivePriceChangeMultiple","相对涨幅倍数"],["magicB","神奇的 b"],["geometricExpectancy","几何期望"],["mirrorTp","镜像止盈"],["expectedDrawdownPct","预期回撤"],["mainPriceChange","涨跌幅"],["mainPriceEfficiency","涨跌幅倍数"],["effectivePriceChangePct","相对涨幅"],["addEfficiency","加仓效用"],["positionAmplification","仓位放大"],["unrealizedPriceChangePct","涨幅未兑现"],["arithmeticExpectancy","算术期望"]]);
     // 每项的宽度类读 --cm-w-<项>（Tailwind 要完整类名，逐个写出）
     const widthClasses = [...constBlock(s, 'CARD_METRIC_WIDTH_CLASS').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
     expect(widthClasses).toEqual(METRIC_MODES.map(mode => [mode, `sm:w-[var(--cm-w-${mode})]`]));

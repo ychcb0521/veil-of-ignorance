@@ -30,6 +30,13 @@ function example() {
 }
 
 describe('Legs per-add geometric factor', () => {
+  it('counterfactual or legacy tables without a campaign never crash while mirror evidence is unavailable', () => {
+    const data = example();
+    render(<MemoryRouter><CampaignLegsList legs={data.legs} tradeRecords={data.tradeRecords} /></MemoryRouter>);
+    expect(screen.getByTestId('leg-geometric-factor-mirror')).toHaveTextContent('—');
+    expect(screen.getByTestId('leg-geometric-factor-theoretical-mirror')).toHaveTextContent('—');
+    expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
+  });
   it('renders the actual factor after share; its product matches campaign geometry and PNG', () => {
     const data = example();
     render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);

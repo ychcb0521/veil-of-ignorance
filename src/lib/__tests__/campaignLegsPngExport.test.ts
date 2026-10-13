@@ -1875,9 +1875,9 @@ describe('【用户要求】导出图的盈亏概览与页面同样两栏：递�
   it('标了 rightColumn 的按栏从上往下排：盈亏比紧随神奇的 b，同一行齐平；战役元数据仍按行排', () => {
     const items = buildCampaignPnlOverviewItems(pnlMetricsForColumns());
     const { cells, rows } = overviewItemCells(items);
-    expect(rows).toBe(11);
+    expect(rows).toBe(10);
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
-    expect(column(0)).toEqual(['加仓次数', '仓位几何累积倍数', '仓位几何累积倍数（理论）', '有效涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
+    expect(column(0)).toEqual(['加仓次数', '仓位几何累积倍数', '相对涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
     expect(column(1)).toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '加仓效用']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);

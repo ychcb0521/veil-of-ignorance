@@ -139,7 +139,7 @@ import {
   rowPositionAmplification,
   rowPositionGeometricMultiple,
   rowPositionGeometricMultipleTheoretical,
-  rowEffectivePriceChangePct,
+  rowRelativePriceChange,
   rowEffectivePriceChangeMultiple,
   rowMagicB,
   rowMainPriceEfficiency,
@@ -329,7 +329,7 @@ type CampaignFormulaPopover =
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addCount', label: '加仓次数' },
   { value: 'positionGeometricMultiple', label: '仓位几何累积倍数' },
-  { value: 'effectivePriceChangePct', label: '有效涨幅' },
+  { value: 'effectivePriceChangePct', label: '相对涨幅' },
   { value: 'magicB', label: '神奇的 b' },
   { value: 'captureRate', label: '盈亏比' },
   { value: 'geometricExpectancy', label: '几何期望' },
@@ -523,17 +523,17 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     const quantity = key === 'positionGeometricMultiple' || key === 'positionGeometricMultipleTheoretical';
     const theoretical = key === 'positionGeometricMultipleTheoretical';
     const magic = key === 'magicB';
-    const label = quantity ? theoretical ? '仓位几何累积倍数（理论）' : '仓位几何累积倍数' : magic ? '神奇的 b' : '有效涨幅';
+    const label = quantity ? theoretical ? '仓位几何累积倍数（理论）' : '仓位几何累积倍数' : magic ? '神奇的 b' : '相对涨幅';
     const definition = quantity
       ? `${theoretical ? POSITION_THEORETICAL_FORMULA : POSITION_GEOMETRIC_FORMULA}。${theoretical ? LEG_THEORETICAL_FACTOR_HINT : POSITION_GEOMETRIC_ALPHA_RULE}最初的 1 对应初始主力与镜像币数之和；αf 为首次实际减仓比例。`
       : magic ? `${MAGIC_B_METHODS_DESCRIPTION} ${MAGIC_B_RULE}`
       : `${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`;
-    const formatValue = (value: number) => magic ? formatSignedMetric(value) : `${value.toFixed(2)}${quantity ? 'x' : '%'}`;
+    const formatValue = (value: number) => magic ? formatSignedMetric(value) : `${value.toFixed(2)}${quantity ? 'x' : '×'}`;
     return [{
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
       viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
       guide: { yAxis: magic ? definition : `${label} = ${definition}`, point: '每个点是一场战役，按客观操作时间排列；点位表示本指标，颜色按该战役原盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
-        ...(magic ? { referenceLines: ['b = 0 表示有效涨幅为零（F = Kₘ），不是整场净盈亏持平；b = −1 仅为几何指标参照值。'] } : {}) },
+        ...(magic ? { referenceLines: ['b = 0 表示相对涨幅为零（F = Kₘ），不是整场净盈亏持平；b = −1 仅为几何指标参照值。'] } : {}) },
     }, {
       key: `${key}Distribution`, sourceKey: key,
       view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
@@ -542,8 +542,8 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${magic ? definition : `${label} = ${definition}`} 横轴按封面两位小数读数，点的颜色按原盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
       distribution: quantity ? { unit: '倍', zeroLine: false, references: [{ value: 1, label: '1.00 初始主力与镜像总币量基准', shareLabel: '加仓累积放大（> 1）' }] }
-        : magic ? { unit: '倍', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '有效涨幅为零（F = Kₘ），不代表净结算持平', positiveShareLabel: '神奇的 b 为正' }
-        : { unit: '%', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '有效涨幅为正' },
+        : magic ? { unit: '倍', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '相对涨幅为零（F = Kₘ），不代表净结算持平', positiveShareLabel: '神奇的 b 为正' }
+        : { unit: '倍', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '相对涨幅为正' },
     }];
   }),
   {
@@ -1303,7 +1303,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'addEfficiency': return formatEfficiency(value);
     case 'geometricExpectancy': return formatGeometricExpectancy(value);
     case 'arithmeticExpectancy': return formatArithmeticExpectancy(value);
-    case 'effectivePriceChangePct': return `${value.toFixed(2)}%`;
+    case 'effectivePriceChangePct': return `${value.toFixed(2)}×`;
     case 'effectivePriceChangeMultiple': return `${value.toFixed(2)}x`;
     case 'magicB': return value.toFixed(2);
     case 'positionGeometricMultipleTheoretical':
@@ -1476,7 +1476,7 @@ const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2
 const CARD_METRIC_LABEL = {
   addCount: '加仓次数',
   positionGeometricMultiple: '仓位几何累积倍数',
-  effectivePriceChangePct: '有效涨幅',
+  effectivePriceChangePct: '相对涨幅',
   magicB: '神奇的 b',
   captureRate: '盈亏比',
   geometricExpectancy: '几何期望',
@@ -1545,7 +1545,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     magicB: rowMagicB(row) == null ? '—' : formatCampaignPayoffRatio(rowMagicB(row)! * 100),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
-    effectivePriceChangePct: rowEffectivePriceChangePct(row) == null ? '—' : `${rowEffectivePriceChangePct(row)!.toFixed(2)}%`,
+    effectivePriceChangePct: rowRelativePriceChange(row) == null ? '—' : `${rowRelativePriceChange(row)!.toFixed(2)}×`,
     arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
   };
   cardMetricReadingsCache.set(row, readings);
@@ -1950,7 +1950,7 @@ const CampaignCard = memo(function CampaignCard({
           <div data-testid="campaign-effective-price-change" className={metricCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
             title={`${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`}>
             <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowEffectivePriceChangePct(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={metricCell('magicB')} data-sort-highlight={litAttr('magicB')}
             title={MAGIC_B_METHODS_DESCRIPTION}>
@@ -2842,7 +2842,7 @@ export default function JournalCampaignsPage() {
       return value == null ? null : sortBinValue('positionGeometricMultipleTheoretical', value);
     });
     const effectivePriceChangePct = buildSeries(row => {
-      const value = rowEffectivePriceChangePct(row);
+      const value = rowRelativePriceChange(row);
       return value == null ? null : sortBinValue('effectivePriceChangePct', value);
     });
     const effectivePriceChangeMultiple = buildSeries(row => {
@@ -4697,14 +4697,14 @@ export default function JournalCampaignsPage() {
                       <><div className="font-medium text-foreground">仓位几何累积倍数（理论）计算公式</div><div className="mt-2 font-mono">{POSITION_THEORETICAL_FORMULA}</div><p className="mt-2">{LEG_THEORETICAL_FACTOR_HINT}</p><p>αf 为首次减仓币数 ÷ 初始主力与镜像总币数；无减仓取 0。详情、排序与散点图共用同一读数。</p></>
                     ) : formula === 'positionGeometricMultipleSort' || formula === 'effectivePriceChangePctSort' ? (
                       <>
-                        <div className="font-medium text-foreground">{formula === 'positionGeometricMultipleSort' ? '仓位几何累积倍数' : '有效涨幅'}计算公式</div>
+                        <div className="font-medium text-foreground">{formula === 'positionGeometricMultipleSort' ? '仓位几何累积倍数' : '相对涨幅'}计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
                           {formula === 'positionGeometricMultipleSort' ? POSITION_GEOMETRIC_FORMULA : EFFECTIVE_PRICE_CHANGE_FORMULA}
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {formula === 'positionGeometricMultipleSort'
                             ? <><div>{POSITION_GEOMETRIC_ALPHA_RULE}</div><div>最初的 1 对应初始主力与镜像总币量；先乘首次减仓保留比例，再乘实际加仓因子。若另有减仓或重新入场，不等同于最终持仓倍数。</div><div className="border-t border-border/60 pt-2"><span className="font-medium text-foreground">仓位几何累积倍数（理论）</span><p className="font-mono">{POSITION_THEORETICAL_FORMULA}</p><p>{LEG_THEORETICAL_FACTOR_HINT}</p></div></>
-                            : <><div>{EFFECTIVE_PRICE_CHANGE_RULE}</div><div>{PRICE_CHANGE_EXIT_RULE_TEXT}</div><div>没有加仓、主力尚未平仓或缺少 F / Kₘ / E 时不计算。</div></>}
+                            : <><div>{EFFECTIVE_PRICE_CHANGE_RULE}</div><div>{PRICE_CHANGE_EXIT_RULE_TEXT}</div><div>没有加仓、主力尚未平仓、缺少 F / Kₘ / E / K初 或 E − K初 不大于 0 时不计算。按倍数显示公式比值，b 直接使用该比值。</div></>}
                           <div>详情、封面、排序与散点图共用同一份计算；按两位小数排序、分档。缺少有效依据时显示「—」。</div>
                         </div>
                       </>
