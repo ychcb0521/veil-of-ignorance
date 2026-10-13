@@ -12,8 +12,9 @@ export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
 export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 有效涨幅';
+export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 仓位几何累积倍数（理论） × 有效涨幅';
 export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀';
-export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二。`;
+export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二，方法三仅作理论对照。`;
 export const MAGIC_B_RULE = '采用实际仓位几何累积倍数（含首次减仓因子），有效涨幅按小数参与计算，例如 20% = 0.20。不再乘基数仓位比例 β，不除以初始最大预期回撤，不追加结算修正。此 b 是独立的几何指标，不等同于已实现净盈亏 ÷ L₀；缺少有效依据时显示「—」。';
 
 export interface GeometricFirstAddBasis {

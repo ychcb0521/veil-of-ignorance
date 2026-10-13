@@ -45,6 +45,42 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
+  it('shows method three with the theoretical multiple and full-precision decimal rise without changing actual b', () => {
+    const multiple = 3.141592653589793;
+    const rise = 21.4240630332;
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: multiple,
+      effectivePriceChangePct: rise, magicB: 2 * rise / 100,
+    }));
+    const magic = items.find(item => item.key === 'magicB')!;
+    expect(magic.value).toBe('0.43');
+    const help = render(<>{magic.help}</>).container;
+    expect(help).toHaveTextContent('方法三 · 神奇的 b（理论）');
+    expect(help).toHaveTextContent('神奇的 b（理论） = 仓位几何累积倍数（理论） × 有效涨幅');
+    const worked = help.querySelector('[data-testid="magic-b-theoretical-worked"]');
+    expect(worked).toHaveTextContent('b（理论） = 3.14159265359 × 0.214240630332');
+    expect(worked).toHaveTextContent(`≈ ${(multiple * rise / 100).toFixed(8)}`);
+    expect(worked).not.toHaveTextContent('β');
+    expect(worked).not.toHaveTextContent('÷');
+    expect(help.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent(`≈ ${(2 * rise / 100).toFixed(8)}`);
+    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toHaveTextContent('≈ 2.00000000');
+  });
+  it.each([0, -20])('method three preserves a zero or negative effective rise (%s)', rise => {
+    const help = render(<>{buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: rise,
+    })).find(item => item.key === 'magicB')!.help}</>).container;
+    expect(help.querySelector('[data-testid="magic-b-theoretical-worked"]')).toHaveTextContent(`≈ ${(3 * rise / 100).toFixed(8)}`);
+  });
+  it.each([
+    [null, 20], [undefined, 20], [Infinity, 20], [3, null], [3, undefined], [3, NaN],
+  ])('method three marks missing/invalid inputs unavailable (%s, %s) without falling back to actual b', (multiple, rise) => {
+    const help = render(<>{buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: multiple,
+      effectivePriceChangePct: rise,
+    })).find(item => item.key === 'magicB')!.help}</>).container;
+    expect(help.querySelector('[data-testid="magic-b-theoretical-worked"]')).toBeNull();
+    expect(help.querySelector('[data-testid="magic-b-theoretical-unavailable"]')).toHaveTextContent('本场：—');
+  });
   it('places effective rise before magic b and substitutes the decimal percentage', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 1,
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100 } }));

@@ -657,6 +657,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   {
     built.push({ key: 'positionGeometricMultipleTheoretical', label: '仓位几何累积倍数（理论）', value: metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`, color: '#1E2329', valueClassName: 'text-foreground/85', help: <><p className="font-mono">仓位几何累积倍数（理论） = {POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p></> });
     const worked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultiple);
+    const theoreticalWorked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
     const number = (value: number) => Number(value.toPrecision(12)).toString();
     built.push({
       key: 'magicB', label: '神奇的 b',
@@ -669,7 +670,16 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <div>b = {number(metrics.positionGeometricMultiple!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
         <div className="font-semibold">≈ {worked.toFixed(8)}</div>
         <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
-      </div>} />
+      </div>} theoreticalWorked={
+        theoreticalWorked != null ? <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-theoretical-worked">
+          <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
+          <div>仓位几何累积倍数（理论） = {number(metrics.positionGeometricMultipleTheoretical!)}</div>
+          <div>有效涨幅 = {number(metrics.effectivePriceChangePct!)}% = {number(metrics.effectivePriceChangePct! / 100)}</div>
+          <div>b（理论） = {number(metrics.positionGeometricMultipleTheoretical!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
+          <div className="font-semibold">≈ {theoreticalWorked.toFixed(8)}</div>
+          <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
+        </div> : <p data-testid="magic-b-theoretical-unavailable">本场：—（理论仓位几何累积倍数或有效涨幅缺少有效依据）</p>
+      } />
       {magicB == null && <p>仓位几何累积倍数或有效涨幅缺少有效依据时显示「—」。</p>}
       <p>{MAGIC_B_RULE}</p></>,
     });
