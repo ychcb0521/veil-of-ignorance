@@ -38,7 +38,9 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(notes.rows.map(row => row[0])).toEqual(headers);
     expect(notes.rows.every(row => typeof row[1] === 'string' && (row[1] as string).length > 0)).toBe(true);
     const bNote = notes.rows.find(row => row[0] === '神奇的 b')?.[1];
-    expect(bNote).toContain('首次实际加仓价格 T₁');
+    expect(bNote).toContain('神奇的 b = 仓位几何累积倍数 × 有效涨幅');
+    expect(bNote).toContain('20% = 0.20');
+    expect(bNote).not.toContain('首次实际加仓价格 T₁');
     expect(bNote).not.toContain('+ 结算修正');
     expect(bNote).not.toContain('两种算法等价');
   });

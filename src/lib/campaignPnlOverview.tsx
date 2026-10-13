@@ -5,7 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeEffectivePriceChangeMultiple, computeMagicB, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
@@ -654,29 +654,23 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     color: '#1E2329', valueClassName: 'text-foreground/85',
     help: <><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p></>,
   });
-  const effectiveMultiple = metrics.effectivePriceChangeMultiple !== undefined
-    ? metrics.effectivePriceChangeMultiple
-    : computeEffectivePriceChangeMultiple(metrics.effectivePriceChangePct, expectedDrawdownPct);
   {
     built.push({ key: 'positionGeometricMultipleTheoretical', label: '仓位几何累积倍数（理论）', value: metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`, color: '#1E2329', valueClassName: 'text-foreground/85', help: <><p className="font-mono">仓位几何累积倍数（理论） = {POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p></> });
-  const basis = metrics.geometricMetricBasis?.magicBInputs;
-    const worked = basis ? computeMagicB(effectiveMultiple, metrics.positionGeometricMultiple, basis.basePositionRatio) : null;
+    const worked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultiple);
     const number = (value: number) => Number(value.toPrecision(12)).toString();
     built.push({
       key: 'magicB', label: '神奇的 b',
       value: magicB == null ? '—' : formatOverviewPayoffRatio(magicB * 100),
       color: pnlExportColor(magicB == null ? null : Number(magicB.toFixed(2))), valueClassName: pnlColor(magicB == null ? null : Number(magicB.toFixed(2))),
       help: <><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
-      worked != null && basis && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
+      worked != null && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
-        <div>基数仓位比例 β = Q初 × T₁ ÷ V₀</div>
-        <div>= {number(basis.referenceCoins)} × {number(basis.firstAddPrice)} ÷ {number(basis.initialExposure)} ≈ {number(basis.basePositionRatio)}（{(basis.basePositionRatio * 100).toFixed(4)}%）</div>
-        <div className="font-sans text-[10px] text-muted-foreground">Q初为镜像减仓前初始主力与镜像合计币数；乘首次加仓价 T₁ 得到名义金额，再除以初始名义仓位 V₀。分子、分母均为 U。</div>
-        <div className="border-t border-border/60 pt-2">b = {metrics.positionGeometricMultiple!.toFixed(6)} × {basis.basePositionRatio.toFixed(6)} × {(metrics.effectivePriceChangePct ?? effectiveMultiple! * basis.initialDrawdownPct).toFixed(6)}% ÷ {basis.initialDrawdownPct.toFixed(6)}%</div>
+        <div>有效涨幅 = {number(metrics.effectivePriceChangePct!)}% = {number(metrics.effectivePriceChangePct! / 100)}</div>
+        <div>b = {number(metrics.positionGeometricMultiple!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
         <div className="font-semibold">≈ {worked.toFixed(8)}</div>
         <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
       </div>} />
-      {magicB == null && <p>没有实际加仓，或首次加仓价、基数币数、初始名义仓位、有效涨幅、预期回撤缺失时显示「—」。</p>}
+      {magicB == null && <p>仓位几何累积倍数或有效涨幅缺少有效依据时显示「—」。</p>}
       <p>{MAGIC_B_RULE}</p></>,
     });
   }

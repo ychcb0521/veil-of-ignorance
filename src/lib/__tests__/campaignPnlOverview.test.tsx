@@ -45,23 +45,23 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
 }
 
 describe('buildCampaignPnlOverviewItems', () => {
-  it('places the effective rise multiple before magic b and shows the new worked formula', () => {
-    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 6,
-      geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100,
-        magicBInputs: {referenceCoins: 5, firstAddPrice: 120, initialExposure: 1000, initialDrawdownPct: 10, basePositionRatio: 0.6} } }));
+  it('places effective rise before magic b and substitutes the decimal percentage', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 1,
+      geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100 } }));
     const keys = items.map(item => item.key);
     expect(keys.slice(0, 7)).toEqual(["addCount","positionGeometricMultiple","positionGeometricMultipleTheoretical","effectivePriceChangePct","magicB","payoffRatio","geometricExpectancy"]);
     expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('50.00%');
     expect(items.find(item => item.key === 'effectivePriceChangeMultiple')).toBeUndefined();
     const magic = items.find(item => item.key === 'magicB')!;
     expect(magic.rightColumn).toBeUndefined();
-    expect(magic.value).toBe('6.00');
+    expect(magic.value).toBe('1.00');
     const help = render(<>{magic.help}</>).container;
     const worked = help.querySelector('[data-testid="magic-b-worked"]');
-    expect(worked).toHaveTextContent('β = Q初 × T₁ ÷ V₀');
-    expect(worked).toHaveTextContent('5 × 120 ÷ 1000 ≈ 0.6（60.0000%）');
-    expect(worked).toHaveTextContent('2.000000 × 0.600000 × 50.000000% ÷ 10.000000%');
-    expect(worked).toHaveTextContent('≈ 6.00000000');
+    expect(worked).toHaveTextContent('有效涨幅 = 50% = 0.5');
+    expect(worked).toHaveTextContent('b = 2 × 0.5');
+    expect(worked).toHaveTextContent('≈ 1.00000000');
+    expect(worked).not.toHaveTextContent('β');
+    expect(worked).not.toHaveTextContent('÷');
     expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toHaveTextContent('200 U ÷ 100 U ≈ 2.00000000');
     expect(help).not.toHaveTextContent('+ 结算修正');
     expect(worked).not.toHaveTextContent('结算修正');

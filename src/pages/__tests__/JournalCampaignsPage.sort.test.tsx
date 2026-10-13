@@ -1427,11 +1427,10 @@ describe('JournalCampaignsPage sorting', () => {
       // 实际保护委托 K = 90 优先于计算器计划快照 K = 110，与加仓校验口径一致。
       expect(rise.querySelector('dd')).toHaveTextContent('44.44%');
       expect(within(card).queryByTestId('campaign-effective-price-change-multiple')).not.toBeInTheDocument();
-      // β = 1 coin × first add price 120 / initial nominal 100 = 1.2.
-      // b = 2.5 × 1.2 × 44.4444% / 10% = 13.3333, not net P&L / L0 = 6.
-      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('13.33');
+      // b = 2.5 × 44.4444% = 1.1111, independent of original net P&L / L0 = 6.
+      expect(within(card).getByTestId('campaign-magic-b').querySelector('dd')).toHaveTextContent('1.11');
       expect(within(card).getByTestId('campaign-capture-rate-value')).toHaveTextContent('6.00');
-      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['positionGeometricMultipleTheoretical', 1], ['effectivePriceChangePct', 44.44], ['magicB', 13.33]] as const) {
+      for (const [key, value] of [['positionGeometricMultiple', 2.5], ['positionGeometricMultipleTheoretical', 1], ['effectivePriceChangePct', 44.44], ['magicB', 1.11]] as const) {
         fireEvent.click(screen.getByTestId(`campaign-sort-${key}`));
         const selected = screen.getAllByTestId('campaign-card').find(item => item.textContent?.includes('High Importance'))!;
         expect(within(selected).getByTestId(key === 'positionGeometricMultipleTheoretical' ? 'campaign-position-geometric-multiple-theoretical' : key === 'positionGeometricMultiple' ? 'campaign-position-geometric-multiple' : key === 'magicB' ? 'campaign-magic-b' : 'campaign-effective-price-change')).toHaveAttribute('data-sort-highlight', 'true');
@@ -2621,7 +2620,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByText('神奇的 b 计算公式')).not.toBeInTheDocument();
     fireEvent.doubleClick(screen.getByTestId('campaign-sort-magicB'));
     expect(screen.getByText('神奇的 b 计算公式')).toBeInTheDocument();
-    expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 基数仓位比例（β）× 有效涨幅百分比 ÷ 初始最大预期回撤百分比')).toBeInTheDocument();
+    expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 有效涨幅')).toBeInTheDocument();
     expect(screen.getByText('神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-magicB')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);

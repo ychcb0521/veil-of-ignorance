@@ -11,10 +11,10 @@ import { buildCampaignLegTheoreticalFactors, type LegTheoreticalGeometricFactor 
 export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
-export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 基数仓位比例（β）× 有效涨幅百分比 ÷ 初始最大预期回撤百分比';
+export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 有效涨幅';
 export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀';
 export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二。`;
-export const MAGIC_B_RULE = '基数仓位比例 β = 镜像减仓前初始总币数 Q初 × 首次实际加仓价格 T₁ ÷ 初始名义仓位 V₀。Q初包括初始主力与镜像仓位，不含后续加仓或反向对冲；减仓因子只在实际仓位几何累积倍数中计入一次。β 按小数参与计算，不使用 Kₘ 折算。此 b 是独立的几何指标，不追加结算修正，不等同于已实现净盈亏 ÷ L₀；缺少有效依据时显示「—」。';
+export const MAGIC_B_RULE = '采用实际仓位几何累积倍数（含首次减仓因子），有效涨幅按小数参与计算，例如 20% = 0.20。不再乘基数仓位比例 β，不除以初始最大预期回撤，不追加结算修正。此 b 是独立的几何指标，不等同于已实现净盈亏 ÷ L₀；缺少有效依据时显示「—」。';
 
 export interface GeometricFirstAddBasis {
   beforeCoins: number;
@@ -31,14 +31,6 @@ export interface GeometricFirstAddBasis {
   afterBreakevenLine?: number;
 }
 
-export interface MagicBInputs {
-  referenceCoins: number;
-  firstAddPrice: number;
-  initialExposure: number;
-  initialDrawdownPct: number;
-  basePositionRatio: number;
-}
-
 export interface CampaignGeometricMetrics {
   effectivePriceChangePct: number | null;
   effectivePriceChangeMultiple: number | null;
@@ -53,7 +45,6 @@ export interface CampaignGeometricMetrics {
     lastSupport: number | null;
     firstAdd?: GeometricFirstAddBasis | null;
     theoreticalFactors?: Array<LegTheoreticalGeometricFactor | null> | null;
-    magicBInputs?: MagicBInputs | null;
   };
 }
 
@@ -97,10 +88,11 @@ export function computeEffectivePriceChangeMultiple(risePct: number | null | und
   return Number.isFinite(value) ? value : null;
 }
 
-export function computeMagicB(effectiveMultiple: number | null | undefined, positionMultiple: number | null | undefined, normalization: number | null | undefined): number | null {
-  if (effectiveMultiple == null || positionMultiple == null || normalization == null
-    || ![effectiveMultiple, positionMultiple, normalization].every(Number.isFinite) || normalization <= 0 || positionMultiple < 0) return null;
-  const value = effectiveMultiple * positionMultiple * normalization;
+/** Effective rise is stored in percentage points; 20% participates as 0.20. */
+export function computeMagicB(risePct: number | null | undefined, positionMultiple: number | null | undefined): number | null {
+  if (risePct == null || positionMultiple == null
+    || ![risePct, positionMultiple].every(Number.isFinite) || positionMultiple < 0) return null;
+  const value = positionMultiple * (risePct / 100);
   return Number.isFinite(value) ? value : null;
 }
 
@@ -204,24 +196,12 @@ export function computeCampaignGeometricMetrics(
   const theoreticalRatios = theoreticalFactors.every(Boolean) ? theoreticalFactors.map(factor => factor!.alpha) : null;
   const theoreticalMultiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(theoreticalRatios, reduction);
   const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
-  // Price the pre-mirror initial coin base at the first actual fill, independent of whether
-  // the sizing checker has enough evidence to judge that fill's allowable cap.
-  const firstStep = steps[0];
-  const referenceCoins = firstStep ? initialCoins : null;
-  const firstAddPrice = firstStep ? executions.get(firstStep.legId)?.entryPrice ?? null : null;
-  const initialExposure = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
-  const basePositionRatio = referenceCoins != null && firstAddPrice != null
-    ? referenceCoins * firstAddPrice / initialExposure : NaN;
-  const magicBInputs: MagicBInputs | null = referenceCoins != null && firstAddPrice != null
-    && [referenceCoins, firstAddPrice, initialExposure, drawdownPct, basePositionRatio].every(value => Number.isFinite(value) && value > 0)
-    ? { referenceCoins, firstAddPrice, initialExposure, initialDrawdownPct: drawdownPct, basePositionRatio }
-    : null;
   return {
     effectivePriceChangePct: rise,
     effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
     positionGeometricMultipleTheoretical: theoreticalMultiple,
-    magicB: computeMagicB(riseMultiple, multiple, magicBInputs?.basePositionRatio),
-    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, magicBInputs, theoreticalFactors },
+    magicB: computeMagicB(rise, multiple),
+    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
   };
 }
