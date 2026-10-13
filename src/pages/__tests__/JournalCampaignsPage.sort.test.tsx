@@ -1334,7 +1334,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cell.previousElementSibling).toHaveAttribute('data-testid', 'campaign-add-efficiency');
       expect(cell.nextElementSibling).toHaveAttribute('data-testid', 'campaign-unrealized-price-change');
       expect(cell.querySelector('dt')).toHaveTextContent('仓位放大');
-      expect(cell.getAttribute('title')).toContain('主方向总名义仓位 ÷ 主力开仓名义仓位');
+      expect(cell.getAttribute('title')).toContain('主方向总名义仓位 − 镜像止盈名义仓位');
       expect(cell.getAttribute('title')).toContain('单位 USDT');
 
       // 排序：单击从大到小，四场都进列表（没有加仓的 1.00x 照样排）；再单击从小到大
@@ -1369,9 +1369,9 @@ describe('JournalCampaignsPage sorting', () => {
       // 公式浮层：算式、单位、例子、哪些战役不参与
       fireEvent.doubleClick(sortButton);
       expect(screen.getByText('仓位放大计算公式')).toBeInTheDocument();
-      expect(screen.getByText('仓位放大ᵢ = 主方向总名义仓位ᵢ ÷ 主力开仓名义仓位ᵢ')).toBeInTheDocument();
+      expect(screen.getByText('仓位放大ᵢ =（主方向总名义仓位ᵢ − 镜像止盈名义仓位ᵢ）÷ 初始开仓名义仓位ᵢ')).toBeInTheDocument();
       expect(screen.getByText(/350,000 ÷ 100,000 =/)).toBeInTheDocument();
-      expect(screen.getByText(/没有加仓的战役是 1.00x，照样进入排序/)).toBeInTheDocument();
+      expect(screen.getByText(/扣除镜像后可以低于 1.00x，照样进入排序/)).toBeInTheDocument();
       const toggle = screen.getByTestId('campaign-positionAmplification-chart-toggle');
       expect(toggle).toHaveAccessibleName('查看仓位放大散点图，共 4 场');
       fireEvent.click(toggle);
@@ -1384,7 +1384,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(Number(screen.getByTestId('campaign-metric-point-positionAmplificationDistribution-high-importance').dataset.metricValue)).toBeCloseTo(3.5, 6);
       expect(screen.queryByTestId('campaign-metric-break-even-positionAmplificationDistribution')).toBeNull();
       expect(screen.queryByTestId('campaign-metric-win-rate-positionAmplificationDistribution')).toBeNull();
-      expect(screen.getByTestId('campaign-metric-reference-positionAmplificationDistribution-1-label')).toHaveTextContent('1.00 没有加仓');
+      expect(screen.getByTestId('campaign-metric-reference-positionAmplificationDistribution-1-label')).toHaveTextContent('1.00 初始名义基准');
       expect(screen.getByTestId('campaign-metric-reference-share-positionAmplificationDistribution-1')).toHaveTextContent('放大（> 1） 25% (1/4)');
       // 三场没加仓的（原值 1、1.00002、0.99998）在图上是同一个读数、同一档，都贴在 1.00 线右侧
       const flat = ['newest', 'best-pnl', 'late-close'].map(id => screen.getByTestId(`campaign-metric-point-positionAmplificationDistribution-${id}`));

@@ -477,6 +477,7 @@ describe('campaign list cache parity with the per-campaign path', () => {
       const expected = computePositionAmplification(
         computeInitialMainExposureNotional(full.campaign, full.legs, full.tradeRecords),
         mainSide.total,
+        mainSide.mirrorTotal,
       );
       expect(row.positionAmplification, row.campaign.id).toBe(expected);
       if (expected != null) {

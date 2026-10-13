@@ -101,7 +101,7 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '峰值涨幅倍数', width: 11, note: '峰值涨幅 ÷ 预期回撤（倍）。', value: row => computeMainPriceEfficiency(row.peakPriceChangePct, row.initialExpectedMaxDrawdownPct) },
     { header: '涨幅未兑现（%）', width: 12, note: '峰值涨幅 − 最终涨跌幅。', value: row => rowUnrealizedPriceChangePct(row) },
     { header: '动态最大回撤（%）', width: 13, note: '有效持仓期间此前峰值到此后谷值的最大回撤；最后一次滚动对冲与主力同平时，窗口结束于该对冲开仓。', value: row => finite(row.dynamicMaxDrawdownPct) },
-    { header: '仓位放大（倍）', width: 11, note: '主方向总名义仓位 ÷ 主力开仓名义仓位；两项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
+    { header: '仓位放大（倍）', width: 11, note: '（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位；分母保留最初主力与镜像合计敞口，各项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
     { header: '仓位几何累积倍数（倍）', width: 25, note: `(1−αf) × ∏(1 + αₖ)；αf 为首次减仓比例，初始主力与镜像币数之和为 1。${POSITION_GEOMETRIC_ALPHA_RULE}`, value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '仓位几何累积倍数（理论）', width: 24, note: '(1−αf) × ∏(1+α理论)；首次计入落袋预算，后续按实际加仓前成本线推算，不扣 G。', value: row => finite(rowPositionGeometricMultipleTheoretical(row)) },
     { header: '相对涨幅（倍）', width: 12, note: `${EFFECTIVE_PRICE_CHANGE_FORMULA}，按倍数导出公式比值。${EFFECTIVE_PRICE_CHANGE_RULE}`, value: row => finite(rowRelativePriceChange(row)) },

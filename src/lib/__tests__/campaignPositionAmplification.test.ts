@@ -33,6 +33,23 @@ describe('仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位', 
     expect(computePositionAmplification(100_000, null)).toBeNull();
     expect(computePositionAmplification(100_000, Number.NaN)).toBeNull();
     expect(computePositionAmplification(Number.POSITIVE_INFINITY, 1)).toBeNull();
+    expect(computePositionAmplification(100_000, 350_000, 50_000)).toBe(3);
+    expect(computePositionAmplification(100_000, 100_000, 100_000)).toBe(0);
+    expect(computePositionAmplification(100_000, 100_000, null)).toBeNull();
+    expect(computePositionAmplification(100_000, 100_000, 110_000)).toBeNull();
+  });
+
+  it('deducts filled same-side mirror notional from the numerator while preserving initial main plus mirror in the denominator', () => {
+    const main = leg('main', 'main_open', 100_000);
+    const mirror = leg('mirror', 'mirror_tp', 100_000);
+    const add = leg('add', 'main_add_1', 150_000);
+    const records = [record('main'), record('mirror'), record('add', 150_000)];
+    expect(computeCampaignPositionAmplification(campaign(), [main, mirror], records)).toBe(0.5);
+    expect(computeCampaignPositionAmplification(campaign(), [main, mirror, add], records)).toBe(1.25);
+    const items = buildCampaignPnlOverviewItems({ initialMainExposureNotional: 200_000,
+      mainSideNotional: { side: 'long', total: 350_000, mirrorTotal: 100_000 }, initialExpectedMaxLoss: 100,
+    } as Parameters<typeof buildCampaignPnlOverviewItems>[0]);
+    expect(items.find(item => item.key === 'positionAmplification')?.value).toBe('1.25x');
   });
 
   it('只有主力：1.00；加仓两次：累计名义 ÷ 主力开仓名义；反向对冲不计', () => {

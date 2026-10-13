@@ -45,6 +45,8 @@ export interface MainSideNotional {
   side: LegPositionSide;
   /** 这一侧所有已成交腿的名义仓位合计（USDT）；一条都没有时为 null。 */
   total: number | null;
+  /** Same-direction filled mirror TP notional, excluded only from position amplification. */
+  mirrorTotal: number | null;
 }
 
 /**
@@ -56,5 +58,8 @@ export function campaignMainSideNotional(
   inputs: readonly LegPositionShareInput[],
 ): MainSideNotional {
   const side = resolveLegPositionShareSide(campaignDirection, inputs);
-  return { side, total: computeLegPositionShares(inputs).bySide[side].totalNotional };
+  const mirrors = inputs.filter(input => input.counted && input.side === side && input.role === 'mirror_tp');
+  const mirrorTotal = mirrors.every(input => input.notional != null && Number.isFinite(input.notional) && input.notional >= 0)
+    ? mirrors.reduce((sum, input) => sum + input.notional!, 0) : null;
+  return { side, total: computeLegPositionShares(inputs).bySide[side].totalNotional, mirrorTotal };
 }

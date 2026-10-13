@@ -390,15 +390,15 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.textContent).toContain('两项都是名义仓位，单位 USDT：每条腿的名义仓位 = 开仓价 × 币量，不是币量，也不是保证金。');
     // 本场：被除数、除数、结果各占一行，数字与单位在同一格里（不会从中间折断）
     expect([...worked.children].map(node => node.textContent))
-      .toEqual(['本场', '=', '34155120.00 USDT', '', '÷', '11287940.00 USDT', '', '=', '3.03x']);
-    for (const cell of [2, 5]) expect(worked.children[cell]).toHaveClass('text-right');
+      .toEqual(['本场', '=', '34155120.00 USDT', '', '−', '0.00 USDT', '', '=', '34155120.00 USDT', '', '÷', '11287940.00 USDT', '', '=', '3.03x']);
+    for (const cell of [2, 5, 8, 11]) expect(worked.children[cell]).toHaveClass('text-right');
     // 公式同样一行一项：原来接成一行，「主力开仓名义仓位」的最后一个字被挤到第二行
-    expect(container.textContent).toContain('仓位放大=多方总名义仓位÷主力开仓名义仓位');
+    expect(container.textContent).toContain('仓位放大=（多方总名义仓位−镜像止盈名义仓位）÷主力开仓名义仓位');
     expect(container.textContent).not.toContain('本场 = 34155120.00 ÷ 11287940.00');
     // 主空战役：分子是空方
     const short = buildCampaignPnlOverviewItems(winnerMetrics({ mainSideNotional: { side: 'short', total: 1500 } }))
       .find(item => item.key === 'positionAmplification')!;
-    expect(render(<>{short.help}</>).container.textContent).toContain('仓位放大=空方总名义仓位÷主力开仓名义仓位');
+    expect(render(<>{short.help}</>).container.textContent).toContain('仓位放大=（空方总名义仓位−镜像止盈名义仓位）÷主力开仓名义仓位');
     // 算不出时不写「本场」
     const missing = buildCampaignPnlOverviewItems(winnerMetrics({ mainSideNotional: null }))
       .find(item => item.key === 'positionAmplification')!;

@@ -85,6 +85,13 @@ export function counterfactualMainSideNotional(
   return counted > 0 ? total : null;
 }
 
+function counterfactualMirrorSideNotional(manualLegs: CampaignCounterfactualParams['manual_legs'], side: LegPositionSide): number | null {
+  const mirrors = (manualLegs ?? []).filter(leg => leg.enabled && leg.filled !== false
+    && leg.leg_role === 'mirror_tp' && legPositionSideFromDirection(leg.direction) === side);
+  return mirrors.every(leg => Number.isFinite(leg.size_usdt) && leg.size_usdt >= 0)
+    ? mirrors.reduce((sum, leg) => sum + leg.size_usdt, 0) : null;
+}
+
 export interface CounterfactualOverviewBranch {
   params: CampaignCounterfactualParams;
   result: CampaignCounterfactualResult;
@@ -385,7 +392,7 @@ export function buildCounterfactualOverviewMetrics(
     ],
     positionAmplification: [
       manual
-        ? '分子按反事实 Legs 副本里参与运行的同方向各腿「仓位」合计；改过仓位、新增或停用的腿按改后结果，挂单不计。分母取副本的初始主力与镜像敞口。'
+        ? '分子按反事实 Legs 副本里参与运行的同方向各腿「仓位」合计，再扣除其中镜像止盈仓位；改过仓位、新增或停用的腿按改后结果，挂单不计。分母保留副本的初始主力与镜像敞口。'
         : 'SOP 推演没有逐腿的仓位，本项不计算。',
     ],
   };
@@ -410,6 +417,7 @@ export function buildCounterfactualOverviewMetrics(
     mainSideNotional: {
       side: shared.mainSide ?? 'long',
       total: manual ? counterfactualMainSideNotional(branch.params.manual_legs, shared.mainSide ?? 'long') : null,
+      mirrorTotal: manual ? counterfactualMirrorSideNotional(branch.params.manual_legs, shared.mainSide ?? 'long') : null,
     },
     expectedMaxDrawdownPct,
     payoffRatio,

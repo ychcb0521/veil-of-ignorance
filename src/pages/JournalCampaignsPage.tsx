@@ -1032,7 +1032,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-positionAmplification-view-time',
     seriesLabel: '仓位放大时序',
     guide: {
-      yAxis: '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位，单位为倍（两项都是名义仓位，USDT）。没有加仓是 1.00；3.50 表示整场在主方向上累计投入的名义是主力开仓时的 3.5 倍。',
+      yAxis: '仓位放大 =（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位，单位为倍（各项都是名义仓位，USDT）。分母保留最初主力与镜像总敞口；镜像减仓后即使没有加仓，也可能小于 1。',
       point: '点越高，这场在主方向上累计投入的名义越多。点位只说仓位放大了几倍，颜色才报这一场的盈亏（按 b 的正负）。读不出主力开仓名义仓位的战役不进图。',
       colors: PAYOFF_SIGN_COLORS,
     },
@@ -1054,7 +1054,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       point: '每个点是一场战役，横向位置就是它的仓位放大（倍，取封面的两位小数），不考虑时间先后。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '琥珀色 1.00 虚线：没有加仓——主方向累计名义就是主力开仓时的名义，恰好 1.00 的战役贴在线右。摘要条的「放大（> 1）」是仓位确实放大了的场数占比。仓位放大恒为正，0 不是分界，所以不画 0 线。',
+        '琥珀色 1.00 虚线：扣除镜像后的累计名义等于初始总名义仓位。摘要条的「放大（> 1）」是超过初始名义基准的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
@@ -1065,7 +1065,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     distribution: {
       unit: '倍',
       zeroLine: false,
-      references: [{ value: 1, label: '1.00 没有加仓', shareLabel: '放大（> 1）' }],
+      references: [{ value: 1, label: '1.00 初始名义基准', shareLabel: '放大（> 1）' }],
     },
   },
 ] as const;
@@ -2046,7 +2046,7 @@ const CampaignCard = memo(function CampaignCard({
             data-testid="campaign-position-amplification"
             title={positionAmplification == null
               ? '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位：这场读不出主力开仓名义仓位，不计算'
-              : `仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位 = ${readings.positionAmplification}（两项都是名义仓位，单位 USDT；没有加仓是 1.00x）`}
+              : `仓位放大 =（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位 = ${readings.positionAmplification}（各项都是名义仓位，单位 USDT；分母保留最初主力与镜像总敞口）`}
             className={metricCell('positionAmplification')}
             data-sort-highlight={litAttr('positionAmplification')}
           >
@@ -4713,16 +4713,16 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">仓位放大计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          仓位放大ᵢ = 主方向总名义仓位ᵢ ÷ 主力开仓名义仓位ᵢ
+                          仓位放大ᵢ =（主方向总名义仓位ᵢ − 镜像止盈名义仓位ᵢ）÷ 初始开仓名义仓位ᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>两项都是<span className="text-foreground">名义仓位（开仓价 × 币量），单位 USDT</span>，不是币量，也不是保证金；结果是倍数。</div>
-                          <div>分子是主方向已成交的主力、镜像、加仓与重新入场腿的名义合计；挂单与反向对冲不计。它是整场累计投入的名义，不是某一刻同时持有的最大仓位。</div>
+                          <div>分子从主方向已成交腿的名义合计中扣除镜像止盈仓位；分母保留最初主力与镜像总敞口。挂单与反向对冲不计；它是累计名义，不是某一刻同时持有的最大仓位。</div>
                           <div>
                             例：主力开仓 100,000 USDT，之后加仓两次共 250,000 USDT，仓位放大 = 350,000 ÷ 100,000 = <span className="text-foreground">3.50x</span>。
                           </div>
-                          <div>没有加仓的战役是 1.00x，照样进入排序；读不出主力开仓名义仓位的战役不进入这一档排序。同倍数再按盈亏比、自评、操作时间排。</div>
-                          <div>排序、分档与散点图都按封面的两位小数读：没有加仓的战役原值会带一点成交滑点的尾差，封面写 1.00x 的就按 1.00 算、彼此并列。</div>
+                          <div>扣除镜像后可以低于 1.00x，照样进入排序；读不出初始开仓名义仓位或镜像扣除依据时不进入这一档排序。同倍数再按盈亏比、自评、操作时间排。</div>
+                          <div>排序、分档与散点图都按封面的两位小数读；1.00x 表示扣除镜像后的累计名义等于初始总敞口。</div>
                         </div>
                       </>
                     ) : formula === 'importanceSort' ? (

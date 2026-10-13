@@ -26,13 +26,13 @@ describe('多方总名义仓位', () => {
 
   it('主多战役：主力 + 镜像 + 加仓的多单合计，空单对冲不算', () => {
     const inputs = buildLegPositionShareInputs(legs, new Map(), {}, EVIDENCE);
-    expect(campaignMainSideNotional('main_long', inputs)).toEqual({ side: 'long', total: 25_000 });
+    expect(campaignMainSideNotional('main_long', inputs)).toEqual({ side: 'long', total: 25_000, mirrorTotal: 10_000 });
   });
 
   it('主空战役数空方', () => {
     const shortLegs = legs.map(item => ({ ...item, direction: item.direction === 'long' ? 'short' : 'long' } as TradeJournal));
     const inputs = buildLegPositionShareInputs(shortLegs, new Map(), {}, EVIDENCE);
-    expect(campaignMainSideNotional('main_short', inputs)).toEqual({ side: 'short', total: 25_000 });
+    expect(campaignMainSideNotional('main_short', inputs)).toEqual({ side: 'short', total: 25_000, mirrorTotal: 10_000 });
   });
 
   it('一条同方向的腿都没有：null（显示「—」）', () => {

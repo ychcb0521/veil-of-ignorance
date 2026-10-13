@@ -134,7 +134,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     expect(byKey.magicB.value).not.toBe('1.00');
     expect(byKey.realizedPnl.value).toBe('80.00 USDT');
     expect(metrics.mainLeverage).toBe(3);
-    expect(byKey.positionAmplification.value).toBe('1.00x');
+    expect(byKey.positionAmplification.value).toBe('0.67x');
     expect(byKey.initialExpectedMaxLoss.value).toBe('60.00 USDT');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('4.00%');
     expect(byKey.payoffRatio.value).toBe('1.33');
@@ -212,7 +212,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result: stored }, shared);
     const { byKey } = itemsByKey(metrics);
     expect(byKey.initialExpectedMaxLoss.value).toBe('123.00 USDT');
-    expect(byKey.positionAmplification.value).toBe('1.50x');
+    expect(byKey.positionAmplification.value).toBe('1.00x');
     expect(byKey.expectedMaxDrawdownPct.value).toBe('7.00%');
     expect(metrics.mainLeverage).toBe(9);
     expect(metrics.payoffRatio).toBeCloseTo((80 / 123) * 100, 6);

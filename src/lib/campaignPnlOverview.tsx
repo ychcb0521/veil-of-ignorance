@@ -188,7 +188,7 @@ export interface CampaignPnlOverviewMetrics {
    * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
    * 与 Legs 表合计行这一侧的 Σ名义仓位同一个数（campaignMainSideNotional）。读不到（SOP 推演没有逐腿）时为 null。
    */
-  mainSideNotional: { side: 'long' | 'short'; total: number | null } | null;
+  mainSideNotional: { side: 'long' | 'short'; total: number | null; mirrorTotal?: number | null } | null;
   expectedMaxDrawdownPct: number;
   /** 原净盈亏风险比缓存（百分数）；盈亏概览按已实现净盈亏与初始风险金额重算。 */
   payoffRatio: number | null;
@@ -308,7 +308,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
   const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
   const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
-  const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total);
+  const mirrorNotional = mainSideNotional?.mirrorTotal === undefined ? 0 : mainSideNotional.mirrorTotal;
+  const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total, mirrorNotional);
   const magicB = resolveUnifiedMagicB(metrics.magicB);
   const payoff = computeSettlementPayoffRatio(realizedPnl, initialExpectedMaxLoss);
   const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
@@ -503,18 +504,21 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       value: positionAmplification == null ? '—' : `${positionAmplification.toFixed(2)}x`,
       help: (
         <>
-          <p>本场主方向累计名义仓位，相对于入场时主力与镜像初始敞口的放大倍数。</p>
+          <p>本场主方向累计名义仓位扣除镜像止盈仓位后，相对于入场时主力与镜像初始敞口的放大倍数。</p>
           {/* 算式一行一项：接成一行在 18rem 的浮层里放不下，会从名字中间（最后一个字单独掉到下一行）或数字与单位之间折断 */}
           <div className="grid grid-cols-[max-content_max-content_max-content] gap-x-1.5 rounded bg-muted/60 px-2 py-1 font-mono text-foreground">
-            <span>仓位放大</span><span>=</span><span>{mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位</span>
+            <span>仓位放大</span><span>=</span><span>（{mainSideNotional?.side === 'short' ? '空方' : '多方'}总名义仓位</span>
+            <span /><span>−</span><span>镜像止盈名义仓位）</span>
             <span /><span>÷</span><span>主力开仓名义仓位</span>
           </div>
           {/* 【用户要求】「仓位这里是按照什么计的？需要加上单位」 */}
           <p>两项都是<strong>名义仓位，单位 USDT</strong>：每条腿的名义仓位 = 开仓价 × 币量，不是币量，也不是保证金。</p>
-          <p>分子包含同方向已成交的主力、镜像、加仓和重新入场腿；挂单与反向对冲不计。它表示整场累计投入的名义倍数，不等于任一时刻同时持有的最大仓位。</p>
+          <p>先从主方向总名义仓位中扣除同方向已成交的镜像止盈仓位；分母保留最初主力与镜像合计的名义仓位。挂单与反向对冲不计；它表示累计名义倍数，不等于任一时刻同时持有的最大仓位。镜像减仓后即使没有加仓，也可能小于 1。</p>
           {positionAmplification != null && mainSideNotional?.total != null && (
             <div data-testid="position-amplification-worked" className="grid grid-cols-[max-content_max-content_max-content] gap-x-1.5 font-mono tabular-nums text-foreground">
               <span>本场</span><span>=</span><span className="text-right">{mainSideNotional.total.toFixed(2)} USDT</span>
+              <span /><span>−</span><span className="text-right">{mirrorNotional?.toFixed(2)} USDT</span>
+              <span /><span>=</span><span className="text-right">{(mainSideNotional.total - mirrorNotional!).toFixed(2)} USDT</span>
               <span /><span>÷</span><span className="text-right">{initialMainExposureNotional.toFixed(2)} USDT</span>
               <span /><span>=</span><span>{positionAmplification.toFixed(2)}x</span>
             </div>
