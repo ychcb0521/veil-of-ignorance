@@ -65,7 +65,7 @@ describe('campaign geometric metrics', () => {
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
     expect(basis.exitPrice).toBe(220);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
-    expect(result.effectivePriceChangePct).toBeCloseTo((220 - 140) / 140 * 100);
+    expect(result.effectivePriceChangePct).toBeCloseTo((220 - 140) / 100 * 100);
     expect(buildCampaignCardData(data as Parameters<typeof buildCampaignCardData>[0]).effectivePriceChangePct).toBe(result.effectivePriceChangePct);
   });
 
@@ -77,7 +77,7 @@ describe('campaign geometric metrics', () => {
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
     expect(basis.exitPrice).toBe(200);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
-    expect(result.effectivePriceChangePct).toBeCloseTo((200 - 140) / 140 * 100);
+    expect(result.effectivePriceChangePct).toBeCloseTo((200 - 140) / 100 * 100);
     const card = buildCampaignCardData(data as Parameters<typeof buildCampaignCardData>[0]);
     expect(card.geometricMetricBasis?.finalExitPrice).toBe(basis.exitPrice);
     expect(card.mainPriceChangePct).toBe(basis.pct);
@@ -116,7 +116,7 @@ describe('campaign geometric metrics', () => {
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, [], corrections);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(basis.exitPrice);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(225);
-    expect(result.effectivePriceChangePct).toBeCloseTo((225 - 140) / 140 * 100);
+    expect(result.effectivePriceChangePct).toBeCloseTo((225 - 140) / 100 * 100);
   });
 
   it('uses plus alpha, including adds greater than 100%; never the erroneous minus product', () => {
@@ -127,12 +127,48 @@ describe('campaign geometric metrics', () => {
     expect(positionGeometricMultiple([Number.NaN])).toBeNull();
     expect(positionGeometricMultiple([-0.1])).toBeNull();
   });
-  it('effective rise allows losses and zero; requires positive Km', () => {
-    expect(effectivePriceChangePct(220, 170)).toBeCloseTo(29.4117647059);
-    expect(effectivePriceChangePct(140, 140)).toBe(0);
-    expect(effectivePriceChangePct(126, 140)).toBe(-10);
-    expect(effectivePriceChangePct(220, 0)).toBeNull();
-    expect(effectivePriceChangePct(null, 140)).toBeNull();
+  it('effective rise uses fixed initial entry, allows losses and zero, and rejects missing/nonfinite prices', () => {
+    expect(effectivePriceChangePct(220, 170, 100)).toBe(50);
+    expect(effectivePriceChangePct(140, 140, 100)).toBe(0);
+    expect(effectivePriceChangePct(126, 140, 100)).toBeCloseTo(-14);
+    expect(effectivePriceChangePct(220, 0, 100)).toBeNull();
+    expect(effectivePriceChangePct(null, 140, 100)).toBeNull();
+    expect(effectivePriceChangePct(220, 140, null)).toBeNull();
+    expect(effectivePriceChangePct(220, 140, 0)).toBeNull();
+    expect(effectivePriceChangePct(220, 140, Infinity)).toBeNull();
+    expect(effectivePriceChangePct(220, Number.NaN, 100)).toBeNull();
+    expect(effectivePriceChangePct(220, 140, Number.MIN_VALUE)).toBeNull();
+  });
+  it('E is fixed to the initial main + mirror entry even when later adds and reentries use different prices', () => {
+    const data = scenario();
+    const later = { ...data.legs[0], id: 'later-main', trade_record_id: 'later-record', pre_entry_price: 50, pre_position_size: 100,
+      pre_simulated_time: iso(3) };
+    data.legs.push(later);
+    data.tradeRecords.push({ ...data.tradeRecords[0], id: 'later-record', fillId: 'later', entryPrice: 50, quantity: 2, openTime: at(3) });
+    // The general price-change metric may choose a later main's more favorable entry.
+    expect(campaignPriceChange(data.campaign, data.legs, data.tradeRecords).entryPrice).toBe(50);
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    expect(result.geometricMetricBasis.initialEntryPrice).toBe(100);
+    expect(result.effectivePriceChangePct).toBe(80);
+    expect(result.magicB).toBeCloseTo(result.positionGeometricMultiple! * 0.8);
+  });
+  it('initial main and mirror entries are coin-weighted using the same cohort as Q0', () => {
+    const data = scenario();
+    data.legs[1].pre_entry_price = 110;
+    data.legs[1].pre_position_size = 550;
+    data.tradeRecords[1].entryPrice = 110;
+    data.campaign.initial_main_size_usdt = 1050;
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    expect(result.geometricMetricBasis.initialCoins).toBeCloseTo(10);
+    expect(result.geometricMetricBasis.initialEntryPrice).toBeCloseTo(105);
+    expect(result.effectivePriceChangePct).toBeCloseTo(80 / 105 * 100);
+  });
+  it('actual geometric product times effective rise equals modeled profit over initial notional', () => {
+    const data = scenario();
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    const finalCoins = 5 + 7.5 + 18.75;
+    expect(result.magicB).toBeCloseTo(finalCoins * (220 - 140) / 1000);
+    expect(result.geometricMetricBasis.initialEntryPrice).toBe(100);
   });
   it('initial 1 includes main and mirror but excludes a later reentry mirror; first cut is not the sum of all cuts', () => {
     const data = scenario();
@@ -164,18 +200,18 @@ describe('campaign geometric metrics', () => {
     expect(result.positionGeometricMultiple).toBeCloseTo((1 - reduction) * 2.5 * 2.5);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
     expect(result.geometricMetricBasis.lastSupport).toBe(140);
-    expect(result.effectivePriceChangePct).toBeCloseTo(80 / 140 * 100);
+    expect(result.effectivePriceChangePct).toBeCloseTo(80 / 100 * 100);
     const card = buildCampaignCardData(data as Parameters<typeof buildCampaignCardData>[0]);
     expect(rowPositionGeometricMultiple(card)).toBe(result.positionGeometricMultiple);
     expect(rowEffectivePriceChangePct(card)).toBe(result.effectivePriceChangePct);
     const items = buildCampaignPnlOverviewItems({ ...result } as Parameters<typeof buildCampaignPnlOverviewItems>[0]);
     const keys = items.map(item => item.key);
-    expect(keys.slice(0, 6)).toEqual(['addCount', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'effectivePriceChangePct', 'magicB', 'payoffRatio']);
-    expect(keys[keys.indexOf('positionGeometricMultiple') + 1]).toBe('positionGeometricMultipleTheoretical');
+    expect(keys.slice(0, 5)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'payoffRatio']);
+    expect(keys).not.toContain('positionGeometricMultipleTheoretical');
     // No initial risk boundary: geometric b is nevertheless known, because it no longer divides by risk.
     expect(card.initialExpectedMaxDrawdownPct).toBe(0);
     expect(result.effectivePriceChangeMultiple).toBeNull();
-    expect(result.magicB).toBeCloseTo(result.positionGeometricMultiple! * 80 / 140);
+    expect(result.magicB).toBeCloseTo(result.positionGeometricMultiple! * 80 / 100);
   });
   it('no adds: product is one, no Km; unfilled adds do not invent factors', () => {
     const data = scenario(0.4);
@@ -203,6 +239,9 @@ describe('campaign geometric metrics', () => {
     data.legs[0].pre_position_size = null;
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
     expect(result.positionGeometricMultiple).toBeNull();
+    expect(result.geometricMetricBasis.initialEntryPrice).toBe(100);
+    expect(result.effectivePriceChangePct).toBe(80);
+    expect(result.magicB).toBeNull();
     expect(rowPositionGeometricMultiple({ ...data, positionGeometricMultiple: null })).toBeNull();
   });
   it('shared opening fill is counted once; early mirror profit is not a terminal exit', () => {
@@ -300,9 +339,9 @@ describe('campaign geometric metrics', () => {
       { id: 'k1', side: 'SHORT', price: K, status: 'cancelled', createdAt: at(2), cancelledAt: at(8) }] as CampaignReverseHedgeOrder[];
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
     expect(result.positionGeometricMultiple).toBeCloseTo(0.5 * 1.266626084915328, 10);
-    const expected = result.positionGeometricMultiple! * (F - K) / K;
+    const expected = result.positionGeometricMultiple! * (F - K) / E;
     expect(result.magicB).toBeCloseTo(expected, 10);
-    expect(result.magicB).toBeCloseTo(0.5 * 1.266626084915328 * (F - K) / K, 10);
+    expect(result.magicB).toBeCloseTo(0.5 * 1.266626084915328 * (F - K) / E, 10);
     expect(result.magicB).not.toBeCloseTo(2.229834766100436, 5);
     expect(result.geometricMetricBasis.firstAdd!.afterBreakevenLine).toBeCloseTo(1.9011834778793941, 10);
     const card = buildCampaignCardData({ ...data, reverseHedgeOrders: orders } as Parameters<typeof buildCampaignCardData>[0]);
@@ -326,7 +365,7 @@ describe('campaign geometric metrics', () => {
     const steps = resolveCampaignAddQuantitySteps({ ...data, reverseHedgeOrders: orders });
     const expectedC = steps.reduce((product, step) => product * (1 + step.addCoins! / step.beforeCoins!), 1);
     expect(result.positionGeometricMultiple).toBeCloseTo(0.5 * expectedC, 10);
-    expect(result.magicB).toBeCloseTo(expectedC * 0.5 * 80 / 140, 10);
+    expect(result.magicB).toBeCloseTo(expectedC * 0.5 * 80 / 100, 10);
   });
 
   it('changed net settlement, fees and liquidation PnL never override the same geometric inputs', () => {
@@ -350,7 +389,7 @@ describe('campaign geometric metrics', () => {
     data.tradeRecords[2].addSizingSnapshot = undefined;
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
     expect(result.geometricMetricBasis.firstAdd).toBeNull();
-    expect(result.magicB).toBeCloseTo(3.125 * 80 / 140, 10);
+    expect(result.magicB).toBeCloseTo(3.125 * 80 / 100, 10);
   });
 
   it('b uses actual quantity geometry, without mapping coins onto T1 for beta', () => {
@@ -359,7 +398,7 @@ describe('campaign geometric metrics', () => {
     data.legs[2].pre_entry_price = 120;
     data.tradeRecords[2].entryPrice = 132;
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords, orders);
-    expect(result.magicB).toBeCloseTo(result.positionGeometricMultiple! * 80 / 140, 10);
+    expect(result.magicB).toBeCloseTo(result.positionGeometricMultiple! * 80 / 100, 10);
   });
 
   it('missing first-add price never falls back to net settlement, Km, or stored campaign total', () => {

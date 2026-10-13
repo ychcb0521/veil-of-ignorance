@@ -6,10 +6,12 @@ import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
 import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
-import { buildCampaignLegTheoreticalFactors, type LegTheoreticalGeometricFactor } from '@/lib/campaignLegGeometricFactor';
+import { buildCampaignLegTheoreticalFactors, type LegGeometricFactor, type LegTheoreticalGeometricFactor } from '@/lib/campaignLegGeometricFactor';
 
 export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
+export const EFFECTIVE_PRICE_CHANGE_FORMULA = '有效涨幅 = (F − Kₘ) ÷ E';
+export const EFFECTIVE_PRICE_CHANGE_RULE = 'E 为最初开仓时主力与镜像仓位合计的币数加权开仓价，固定不变；后续加仓均价不改变 E。F 与「涨跌幅」的平仓价同源；Kₘ 为最后一次实际加仓时的新支撑线。';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
 export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 有效涨幅';
 export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 仓位几何累积倍数（理论） × 有效涨幅';
@@ -40,6 +42,8 @@ export interface CampaignGeometricMetrics {
   magicB?: number | null;
   geometricMetricBasis: {
     initialCoins: number | null;
+    initialEntryPrice?: number | null;
+    initialReductionFactors?: Array<LegGeometricFactor & { legId: string }>;
     earlyReductionFraction: number | null;
     addRatios: number[] | null;
     finalExitPrice: number | null;
@@ -76,10 +80,12 @@ export function geometricFirstAddBasis(verdict: AddSizingVerdict | undefined): G
     support: K, addPrice: T, actualRatio: addCoins / Q, allowedRatio };
 }
 
-export function effectivePriceChangePct(exitPrice: number | null, stopLine: number | null): number | null {
-  return exitPrice != null && Number.isFinite(exitPrice) && exitPrice > 0
-    && stopLine != null && Number.isFinite(stopLine) && stopLine > 0
-    ? (exitPrice - stopLine) / stopLine * 100 : null;
+export function effectivePriceChangePct(exitPrice: number | null, stopLine: number | null, initialEntryPrice: number | null): number | null {
+  if (exitPrice == null || stopLine == null || initialEntryPrice == null
+    || ![exitPrice, stopLine, initialEntryPrice].every(Number.isFinite)
+    || exitPrice <= 0 || stopLine <= 0 || initialEntryPrice <= 0) return null;
+  const value = (exitPrice - stopLine) / initialEntryPrice * 100;
+  return Number.isFinite(value) ? value : null;
 }
 
 /** Both inputs are percentages; their ratio is a dimensionless multiple (e.g. 45% / 9% = 5x). */
@@ -105,7 +111,7 @@ export function computeCampaignGeometricMetrics(
 ): CampaignGeometricMetrics {
   const empty: CampaignGeometricMetrics = {
     effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null,
-    geometricMetricBasis: { initialCoins: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
+    geometricMetricBasis: { initialCoins: null, initialEntryPrice: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
   };
   if (campaign.direction !== 'main_long') return empty;
   const lookup = buildTradeRecordLookup(tradeRecords);
@@ -116,20 +122,26 @@ export function computeCampaignGeometricMetrics(
   const initial = initialCandidates.filter(leg => executions.get(leg.id)?.openTime === firstOpen);
   const attribution = resolveInitialExposureLegAttribution(campaign, initial, tradeRecords);
   let initialCoins: number | null = 0;
+  let initialNotional = 0;
   if (attribution.shares.size) {
     for (const [id, share] of attribution.shares) {
       const entry = executions.get(id)?.entryPrice;
       if (entry == null || entry <= 0) { initialCoins = null; break; }
       initialCoins += share.notionalUsd / entry;
+      initialNotional += share.notionalUsd;
     }
   } else {
     const mains = initial.filter(leg => leg.leg_role === 'main_open');
     const entry = mains.length === 1 ? executions.get(mains[0].id)?.entryPrice : null;
     const exposure = computeInitialMainExposureNotional(campaign, legs, tradeRecords);
     initialCoins = entry != null && entry > 0 && exposure > 0 ? exposure / entry : null;
+    initialNotional = exposure;
   }
   if (initialCoins == null || !Number.isFinite(initialCoins) || initialCoins <= 0) initialCoins = null;
   if (initialCandidates.some(leg => executions.get(leg.id)?.openTime == null)) initialCoins = null;
+  // E and Q₀ describe the same original main + mirror cohort, before any cuts/adds.
+  const entry = initialCoins != null ? initialNotional / initialCoins : null;
+  const initialEntryPrice = entry != null && Number.isFinite(entry) && entry > 0 ? entry : null;
 
   const input = { legs, tradeRecords, reverseHedgeOrders: orders, legExitPriceCorrections: corrections };
   const steps = resolveCampaignAddQuantitySteps(input).filter(step => legs.find(leg => leg.id === step.legId)?.direction === 'long');
@@ -162,11 +174,23 @@ export function computeCampaignGeometricMetrics(
   // corrections and unfilled-order evidence. Never average the main/add exits.
   const finalExitPrice = campaignPriceChange(campaign, legs, tradeRecords, corrections, localOrders).exitPrice;
   let reduction: number | null = null;
+  const initialReductionFactors: Array<LegGeometricFactor & { legId: string }> = [];
   if (initialCoins != null) {
     const firstReductionFraction = (cuts: typeof closes) => {
       if (!cuts.length) return 0;
       const firstTime = Math.min(...cuts.map(cut => cut.time));
-      return cuts.filter(cut => cut.time === firstTime).reduce((sum, cut) => sum + cut.coins, 0) / initialCoins!;
+      const batch = cuts.filter(cut => cut.time === firstTime);
+      const quantities = new Map<string, number>();
+      for (const cut of batch) quantities.set(cut.legId, (quantities.get(cut.legId) ?? 0) + cut.coins);
+      let before = initialCoins!;
+      for (const [legId, removed] of [...quantities.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        if (before > 0 && removed > 0 && removed <= before + 1e-8) {
+          initialReductionFactors.push({ legId, kind: 'reduction', beforeCoins: before, addCoins: removed,
+            multiple: Math.max(0, 1 - removed / before) });
+        }
+        before -= removed;
+      }
+      return batch.reduce((sum, cut) => sum + cut.coins, 0) / initialCoins!;
     };
     const initialIds = new Set(initial.map(leg => leg.id));
     const firstAdd = steps[0];
@@ -188,7 +212,7 @@ export function computeCampaignGeometricMetrics(
   const snapshotStop = lastLeg?.trade_record_id ? lookup.get(lastLeg.trade_record_id)?.addSizingSnapshot?.s1 : null;
   const stop = verdict?.s1 ?? snapshotStop ?? null;
   const lastSupport = stop != null && Number.isFinite(stop) && stop > 0 ? stop : null;
-  const rise = effectivePriceChangePct(finalExitPrice, lastSupport);
+  const rise = effectivePriceChangePct(finalExitPrice, lastSupport, initialEntryPrice);
   const drawdownPct = computeInitialExpectedMaxDrawdownPct(campaign, legs, tradeRecords, orders);
   const riseMultiple = computeEffectivePriceChangeMultiple(rise, drawdownPct);
   const multiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(addRatios, reduction);
@@ -203,6 +227,6 @@ export function computeCampaignGeometricMetrics(
     positionGeometricMultiple: multiple,
     positionGeometricMultipleTheoretical: theoreticalMultiple,
     magicB: computeMagicB(rise, multiple),
-    geometricMetricBasis: { initialCoins, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
+    geometricMetricBasis: { initialCoins, initialEntryPrice, initialReductionFactors: reduction == null ? [] : initialReductionFactors, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
   };
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { MAGIC_B_FORMULA, MAGIC_B_SETTLEMENT_FORMULA, MAGIC_B_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, MAGIC_B_FORMULA, MAGIC_B_SETTLEMENT_FORMULA, MAGIC_B_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 
 /** Three methods stay visible together; the numerical indicator still uses actual geometry. */
 export function MagicBMethodFormulas({ realizedPnl, initialRisk, geometricWorked, theoreticalWorked }: {
@@ -27,6 +27,8 @@ export function MagicBMethodFormulas({ realizedPnl, initialRisk, geometricWorked
     <div className="space-y-1.5 rounded border border-border/60 bg-muted/40 p-2.5">
       <div className="text-[10px] font-medium text-foreground/85">算法二 · 几何公式<span className="ml-2 text-muted-foreground">当前指标</span></div>
       <p className="font-mono break-words">{MAGIC_B_FORMULA}</p>
+      <p className="font-mono break-words">{EFFECTIVE_PRICE_CHANGE_FORMULA}</p>
+      <p className="text-[10px]">{EFFECTIVE_PRICE_CHANGE_RULE}</p>
       {geometricWorked}
     </div>
     <div className="space-y-1.5 rounded border border-border/60 bg-muted/40 p-2.5">

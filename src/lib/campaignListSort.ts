@@ -65,7 +65,6 @@ export type CampaignSortChain = readonly CampaignSortLevel[];
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addCount',
   'positionGeometricMultiple',
-  'positionGeometricMultipleTheoretical',
   'effectivePriceChangePct',
   'magicB',
   'captureRate',
@@ -1203,7 +1202,8 @@ export function sortChainKey(chain: CampaignSortChain): string {
 export function parseCampaignSortChain(search: string | URLSearchParams): CampaignSortChain {
   const params = typeof search === 'string' ? new URLSearchParams(search) : search;
   const legacyMode = params.get('sort');
-  const requestedMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct' : legacyMode;
+  const requestedMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct'
+    : legacyMode === 'positionGeometricMultipleTheoretical' ? 'positionGeometricMultiple' : legacyMode;
   // 认不出的 sort（含已删除的 dsiContribution / usiContribution 旧链接）整条退回默认：操作时间从新到旧，不沿用它的方向与 then
   if (requestedMode != null && !isCampaignSortMode(requestedMode)) return DEFAULT_CAMPAIGN_SORT_CHAIN;
   const mode: CampaignSortMode = isCampaignSortMode(requestedMode) ? requestedMode : DEFAULT_CAMPAIGN_SORT_CHAIN[0].mode;
@@ -1214,7 +1214,8 @@ export function parseCampaignSortChain(search: string | URLSearchParams): Campai
   const chain: CampaignSortLevel[] = [{ mode, direction }];
   for (const raw of params.getAll('then')) {
     const [legacyMode, thenDirection] = raw.split('.');
-    const thenMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct' : legacyMode;
+    const thenMode = legacyMode === 'effectivePriceChangeMultiple' ? 'effectivePriceChangePct'
+      : legacyMode === 'positionGeometricMultipleTheoretical' ? 'positionGeometricMultiple' : legacyMode;
     if (!isCampaignSortMode(thenMode) || chain.some(level => level.mode === thenMode)) continue;
     if (thenDirection === 'follow') {
       chain.push({ mode: thenMode, direction: chain[chain.length - 1].direction, follow: true });

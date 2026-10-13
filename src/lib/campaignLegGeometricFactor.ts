@@ -4,6 +4,7 @@ export const LEG_GEOMETRIC_FACTOR_LABEL = '仓位的几何复利（1+α）';
 export const LEG_GEOMETRIC_FACTOR_HINT = '仓位的几何复利：本次仓位倍数 = 1 + α；α = 本次实际加仓币数 ÷ 加仓前实际持币数。按实际成交计算，不是可允许加仓上限。各次倍数的乘积再乘 (1−αf)，得到实际仓位几何累积倍数；αf 为首次减仓币数占初始主力与镜像合计币数的比例。';
 
 export interface LegGeometricFactor {
+  kind?: 'reduction';
   beforeCoins: number;
   addCoins: number;
   multiple: number;
@@ -53,6 +54,7 @@ export function formatLegGeometricFactor(factor: LegGeometricFactor | null | und
 }
 
 export function describeLegGeometricFactor(factor: LegGeometricFactor | null | undefined): string {
+  if (factor?.kind === 'reduction') return `1 − αf = 1 − ${formatAddSizingCoinQuantity(factor.addCoins)} ÷ ${formatAddSizingCoinQuantity(factor.beforeCoins)} ≈ ${formatLegGeometricFactor(factor)}；减仓前基数包含初始主力与镜像币数。`;
   return factor
     ? `1 + α = 1 + ${formatAddSizingCoinQuantity(factor.addCoins)} ÷ ${formatAddSizingCoinQuantity(factor.beforeCoins)} ≈ ${formatLegGeometricFactor(factor)}；按完整精度计算，显示值四舍五入。`
     : '缺少实际加仓币数或加仓前持币数，无法计算。';

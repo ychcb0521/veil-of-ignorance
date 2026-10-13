@@ -25,7 +25,7 @@ import { computeAsymmetricRiskContributionRates } from '@/lib/asymmetricRiskMetr
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { XlsxCell, XlsxSheet } from '@/lib/xlsxWorkbook';
-import { MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE } from '@/lib/campaignGeometricMetrics';
+import { EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE } from '@/lib/campaignGeometricMetrics';
 import { computeCampaignExpectanciesFromMagicB } from '@/lib/campaignMetrics';
 
 type AsymmetricSummary = Parameters<typeof computeAsymmetricRiskContributionRates>[1];
@@ -104,7 +104,7 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '仓位放大（倍）', width: 11, note: '主方向总名义仓位 ÷ 主力开仓名义仓位；两项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
     { header: '仓位几何累积倍数（倍）', width: 25, note: `(1−αf) × ∏(1 + αₖ)；αf 为首次减仓比例，初始主力与镜像币数之和为 1。${POSITION_GEOMETRIC_ALPHA_RULE}`, value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '仓位几何累积倍数（理论）', width: 24, note: '(1−αf) × ∏(1+α理论)；首次计入落袋预算，后续按实际加仓前成本线推算，不扣 G。', value: row => finite(rowPositionGeometricMultipleTheoretical(row)) },
-    { header: '有效涨幅（%）', width: 12, note: '(F − Kₘ) ÷ Kₘ × 100；F 与涨跌幅的平仓价同源，Kₘ 为末次加仓的新支撑线。', value: row => finite(rowEffectivePriceChangePct(row)) },
+    { header: '有效涨幅（%）', width: 12, note: `${EFFECTIVE_PRICE_CHANGE_FORMULA}，百分比数值乘以 100。${EFFECTIVE_PRICE_CHANGE_RULE}`, value: row => finite(rowEffectivePriceChangePct(row)) },
     { header: '盈亏比', width: 12, note: '已实现净盈亏 ÷ 初始最大预期亏损 L₀；没有加仓的战役同样计算。', value: row => finite(rowPayoffRatio(row)) },
     { header: '神奇的 b', width: 12, note: `${MAGIC_B_METHODS_DESCRIPTION} ${MAGIC_B_RULE}`, value: row => finite(rowMagicB(row)) },
     { header: 'DSI 贡献（%）', width: 10, note: '这场亏损战役 b² 占全表亏损组平方和的比例（百分数）；盈利战役为空。', value: row => finite(contribution(row).dsiContributionPct) },

@@ -5,7 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeMagicB, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
@@ -27,6 +27,16 @@ import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
 
 /** Actual factors, kept together when wrapping; full-precision product, rounded display only. */
+function EffectivePriceChangeWorked({ basis }: { basis?: CampaignGeometricMetrics['geometricMetricBasis'] }) {
+  const F = basis?.finalExitPrice, K = basis?.lastSupport, E = basis?.initialEntryPrice;
+  if (F == null || K == null || E == null || ![F, K, E].every(Number.isFinite) || E <= 0) return null;
+  const number = (value: number) => Number(value.toPrecision(12)).toString();
+  return <div className="font-mono tabular-nums break-words" data-testid="effective-price-change-worked">
+    <div>F = {number(F)}；Kₘ = {number(K)}；E = {number(E)}</div>
+    <div>(F − Kₘ) ÷ E = ({number(F)} − {number(K)}) ÷ {number(E)} ≈ {number((F - K) / E)}</div>
+  </div>;
+}
+
 function PositionGeometricWorked({ basis, theoretical = false }: { basis?: CampaignGeometricMetrics['geometricMetricBasis']; theoretical?: boolean }) {
   const factors = basis?.theoreticalFactors;
   const ratios = theoretical ? factors?.every(Boolean) ? factors.map(factor => factor!.alpha) : null : basis?.addRatios ?? null;
@@ -120,7 +130,6 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
   'positionGeometricMultiple',
-  'positionGeometricMultipleTheoretical',
   'effectivePriceChangePct',
   'magicB',
   'payoffRatio',
@@ -646,16 +655,19 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     key: 'effectivePriceChangePct', label: '有效涨幅',
     value: metrics.effectivePriceChangePct == null ? '—' : `${metrics.effectivePriceChangePct.toFixed(2)}%`,
     color: pnlExportColor(metrics.effectivePriceChangePct), valueClassName: pnlColor(metrics.effectivePriceChangePct),
-    help: <><p className="font-mono">有效涨幅 = (F − Kₘ) ÷ Kₘ</p><p>F 与「涨跌幅」指标的平仓价使用同一份取值逻辑和依据；Kₘ 为最后一次实际加仓时的新支撑线，与加仓校验共用依据。没有实际加仓、主力尚未平仓或缺少价格依据时显示「—」。</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p>{metrics.geometricMetricBasis && <p className="font-mono">F = {metrics.geometricMetricBasis.finalExitPrice ?? '—'}；Kₘ = {metrics.geometricMetricBasis.lastSupport ?? '—'}</p>}</>,
+    help: <><p className="font-mono">{EFFECTIVE_PRICE_CHANGE_FORMULA}</p><p>{EFFECTIVE_PRICE_CHANGE_RULE}</p><EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} /><p>百分比展示为上述比值 × 100%。没有实际加仓、主力尚未平仓或缺少 F / Kₘ / E 时显示「—」。</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p></>,
   });
   built.push({
     key: 'positionGeometricMultiple', label: '仓位几何累积倍数',
     value: metrics.positionGeometricMultiple == null ? '—' : `${metrics.positionGeometricMultiple.toFixed(2)}x`,
     color: '#1E2329', valueClassName: 'text-foreground/85',
-    help: <><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p></>,
+    help: <><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p>
+      <div className="space-y-2 border-t border-border/60 pt-2" data-testid="position-geometric-theoretical-help">
+        <p className="font-medium text-foreground">仓位几何累积倍数（理论） <span className="font-mono tabular-nums">{metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`}</span></p>
+        <p className="font-mono">{POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p>
+      </div></>,
   });
   {
-    built.push({ key: 'positionGeometricMultipleTheoretical', label: '仓位几何累积倍数（理论）', value: metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`, color: '#1E2329', valueClassName: 'text-foreground/85', help: <><p className="font-mono">仓位几何累积倍数（理论） = {POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p></> });
     const worked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultiple);
     const theoreticalWorked = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
     const number = (value: number) => Number(value.toPrecision(12)).toString();
@@ -666,6 +678,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       help: <><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
       worked != null && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
+        <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />
         <div>有效涨幅 = {number(metrics.effectivePriceChangePct!)}% = {number(metrics.effectivePriceChangePct! / 100)}</div>
         <div>b = {number(metrics.positionGeometricMultiple!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
         <div className="font-semibold">≈ {worked.toFixed(8)}</div>
@@ -674,6 +687,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         theoreticalWorked != null ? <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-theoretical-worked">
           <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
           <div>仓位几何累积倍数（理论） = {number(metrics.positionGeometricMultipleTheoretical!)}</div>
+          <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />
           <div>有效涨幅 = {number(metrics.effectivePriceChangePct!)}% = {number(metrics.effectivePriceChangePct! / 100)}</div>
           <div>b（理论） = {number(metrics.positionGeometricMultipleTheoretical!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
           <div className="font-semibold">≈ {theoreticalWorked.toFixed(8)}</div>

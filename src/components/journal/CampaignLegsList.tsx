@@ -60,6 +60,7 @@ import {
 } from '@/lib/campaignAddSizingCheck';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 import { buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, describeLegGeometricFactor, formatLegGeometricFactor, LEG_THEORETICAL_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_HINT, LEG_GEOMETRIC_FACTOR_LABEL } from '@/lib/campaignLegGeometricFactor';
+import { buildCampaignMirrorReductionFactors, MIRROR_REDUCTION_FACTOR_HINT } from '@/lib/campaignMirrorReductionFactor';
 
 interface Props {
   campaign?: TradeCampaign;
@@ -808,8 +809,9 @@ export function CampaignLegsList({
     [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
   );
   const legGeometricFactors = useMemo(
-    () => buildCampaignLegGeometricFactors({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
-    [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
+    () => new Map([...buildCampaignLegGeometricFactors({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }),
+      ...buildCampaignMirrorReductionFactors(campaign, { legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders })]),
+    [campaign, legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders],
   );
   const selectedAddSizingLeg = addSizingDetailLegId == null
     ? null
@@ -820,7 +822,8 @@ export function CampaignLegsList({
   const selectedGeometricLeg = geometricDetailLegId == null ? null : legs.find(leg => leg.id === geometricDetailLegId) ?? null;
   const theoreticalFactors = useMemo(() => buildCampaignLegTheoreticalFactors({ legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders }, addSizingMap), [legs, tradeRecords, legExitPriceCorrections, reverseHedgeOrders, addSizingMap]);
   const selectedTheoreticalFactor = geometricDetailLegId == null ? null : theoreticalFactors.get(geometricDetailLegId) ?? null;
-  const selectedGeometricFactor = geometricDetailLegId == null ? null : (geometricDetailTheoretical ? selectedTheoreticalFactor : legGeometricFactors.get(geometricDetailLegId)) ?? null;
+  const selectedReductionFactor = selectedGeometricLeg?.leg_role === 'mirror_tp' ? legGeometricFactors.get(selectedGeometricLeg.id) : null;
+  const selectedGeometricFactor = geometricDetailLegId == null ? null : (geometricDetailTheoretical ? selectedTheoreticalFactor ?? selectedReductionFactor : legGeometricFactors.get(geometricDetailLegId)) ?? null;
 
   return (
     <>
@@ -849,11 +852,11 @@ export function CampaignLegsList({
             <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
             <div className="flex items-center justify-end gap-0.5 whitespace-nowrap" aria-label={LEG_GEOMETRIC_FACTOR_LABEL}>
               <span>1+α</span>
-              <QuietInfo label="仓位的几何复利"><p>{LEG_GEOMETRIC_FACTOR_HINT}</p><p>点击加仓行的倍数，查看实际币数代入的完整计算过程。</p></QuietInfo>
+              <QuietInfo label="仓位的几何复利"><p>{LEG_GEOMETRIC_FACTOR_HINT}</p><p>{MIRROR_REDUCTION_FACTOR_HINT}</p><p>点击加仓行的倍数，查看实际币数代入的完整计算过程；镜像止盈行显示 1−αf，点击展开减仓过程。</p></QuietInfo>
             </div>
             <div className="flex items-center justify-end gap-0.5 whitespace-nowrap" aria-label="仓位的几何复利（理论）">
               <span>1+α<span className="text-[9px]">（理论）</span></span>
-              <QuietInfo label="仓位的几何复利（理论）"><p>{LEG_THEORETICAL_FACTOR_HINT}</p></QuietInfo>
+              <QuietInfo label="仓位的几何复利（理论）"><p>{LEG_THEORETICAL_FACTOR_HINT}</p><p>{MIRROR_REDUCTION_FACTOR_HINT}</p></QuietInfo>
             </div>
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
@@ -1085,7 +1088,7 @@ export function CampaignLegsList({
                     className="text-right font-medium tabular-nums leading-snug text-foreground/80"
                   >
                     {showGeometricFactor && (legGeometricFactors.get(leg.id)
-                      ? <button type="button" aria-label={`查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的仓位几何复利计算过程`}
+                      ? <button type="button" aria-label={leg.leg_role === 'mirror_tp' ? '查看镜像止盈的减仓因子计算过程' : `查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的仓位几何复利计算过程`}
                           onClick={() => { setGeometricDetailTheoretical(false); setGeometricDetailLegId(leg.id); }}
                           className="w-full rounded py-0.5 text-right transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
                           {formatLegGeometricFactor(legGeometricFactors.get(leg.id))}
@@ -1093,11 +1096,11 @@ export function CampaignLegsList({
                       : '—')}
                   </div>
                   <div data-testid={`leg-geometric-factor-theoretical-${leg.id}`} className="text-right font-medium tabular-nums leading-snug text-foreground/70">
-                    {showGeometricFactor && (theoreticalFactors.get(leg.id)
-                      ? <button type="button" aria-label={`查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的理论仓位几何复利计算过程`}
+                    {showGeometricFactor && ((leg.leg_role === 'mirror_tp' ? legGeometricFactors.get(leg.id) : theoreticalFactors.get(leg.id))
+                      ? <button type="button" aria-label={leg.leg_role === 'mirror_tp' ? '查看镜像止盈的理论减仓因子计算过程' : `查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的理论仓位几何复利计算过程`}
                           onClick={() => { setGeometricDetailTheoretical(true); setGeometricDetailLegId(leg.id); }}
                           className="w-full rounded py-0.5 text-right transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
-                          {formatLegGeometricFactor(theoreticalFactors.get(leg.id))}
+                          {formatLegGeometricFactor(leg.leg_role === 'mirror_tp' ? legGeometricFactors.get(leg.id) : theoreticalFactors.get(leg.id))}
                         </button> : '—')}
                   </div>
                   {(() => {
@@ -1448,7 +1451,7 @@ export function CampaignLegsList({
     )}
     {selectedGeometricLeg && selectedGeometricFactor && (
       <LegGeometricFactorDialog ordinal={selectedGeometricLeg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}
-        factor={selectedGeometricFactor} theoretical={geometricDetailTheoretical ? selectedTheoreticalFactor ?? undefined : undefined} onClose={() => setGeometricDetailLegId(null)} />
+        factor={selectedGeometricFactor} theoretical={geometricDetailTheoretical ? selectedTheoreticalFactor ?? undefined : undefined} reductionTheoretical={geometricDetailTheoretical && selectedGeometricFactor.kind === 'reduction'} onClose={() => setGeometricDetailLegId(null)} />
     )}
     </>
   );

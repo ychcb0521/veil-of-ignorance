@@ -763,8 +763,8 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    expect(CAMPAIGN_SORT_MODES.slice(0, 7)).toEqual(['addCount', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'effectivePriceChangePct', 'magicB', 'captureRate', 'geometricExpectancy']);
-    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(3);
+    expect(CAMPAIGN_SORT_MODES.slice(0, 6)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate', 'geometricExpectancy']);
+    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(2);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });
 

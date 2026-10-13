@@ -53,6 +53,7 @@ import type { EmotionDiaryExportSummary } from '@/types/emotionDiary';
 import { formatForeignReplayOrdersNote } from '@/lib/campaignReverseOrderLines';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 import { buildCampaignLegGeometricFactors, buildCampaignLegTheoreticalFactors, formatLegGeometricFactor } from '@/lib/campaignLegGeometricFactor';
+import { buildCampaignMirrorReductionFactors } from '@/lib/campaignMirrorReductionFactor';
 
 type ExportInput = {
   campaign: TradeCampaign;
@@ -706,6 +707,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     legExitPriceCorrections: input.legExitPriceCorrections, reverseHedgeOrders: input.reverseHedgeOrders,
   });
   const theoreticalFactors = buildCampaignLegTheoreticalFactors({ legs: input.legs, tradeRecords: input.tradeRecords, legExitPriceCorrections: input.legExitPriceCorrections, reverseHedgeOrders: input.reverseHedgeOrders }, addSizingMap);
+  for (const [id, factor] of buildCampaignMirrorReductionFactors(input.campaign, { legs: input.legs, tradeRecords: input.tradeRecords, legExitPriceCorrections: input.legExitPriceCorrections, reverseHedgeOrders: input.reverseHedgeOrders })) legGeometricFactors.set(id, factor);
 
   // 「币量 / 仓位」与「占比」：与页面同一个 helper、同一组输入（buildShareInputs）。
   // 「占比」的分母只有战役主方向那一侧（主多看多单、主空看空单），另一侧的 Σ 只写进合计行。
@@ -849,7 +851,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       legShareCell(position, shareSide),
       [{ text: showGeometricFactor
         ? formatLegGeometricFactor(legGeometricFactors.get(leg.id)) : '', color: '#475569', bold: true }],
-      [{ text: showGeometricFactor ? formatLegGeometricFactor(theoreticalFactors.get(leg.id)) : '', color: '#475569', bold: true }],
+      [{ text: showGeometricFactor ? formatLegGeometricFactor(leg.leg_role === 'mirror_tp' ? legGeometricFactors.get(leg.id) : theoreticalFactors.get(leg.id)) : '', color: '#475569', bold: true }],
       // 加仓校验：与页面同构——合规只是一枚淡灰小对号，过大则写明正确币量上限及 U 名义仓位；非加仓行留空
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);

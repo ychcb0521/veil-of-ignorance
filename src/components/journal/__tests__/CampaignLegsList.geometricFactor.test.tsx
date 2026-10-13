@@ -43,7 +43,8 @@ describe('Legs per-add geometric factor', () => {
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
     expect(screen.getByTestId('leg-geometric-factor-add2')).toHaveTextContent('1.50×');
     expect(screen.getByTestId('leg-geometric-factor-main')).toBeEmptyDOMElement();
-    expect(screen.getByTestId('leg-geometric-factor-mirror')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('leg-geometric-factor-mirror')).toHaveTextContent('0.50×');
+    expect(screen.getByTestId('leg-geometric-factor-theoretical-mirror')).toHaveTextContent('0.50×');
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveAttribute('title', expect.stringContaining('1 + 50.9 ÷ 10'));
     const factors = buildCampaignLegGeometricFactors(data);
     const product = factors.get('add1')!.multiple * factors.get('add2')!.multiple;
@@ -51,10 +52,42 @@ describe('Legs per-add geometric factor', () => {
     const png = buildCampaignLegsExportRows(data);
     expect(png.find(row => row.legId === 'add1')!.cells[10][0].text).toBe('6.09×');
     expect(png.find(row => row.legId === 'add2')!.cells[10][0].text).toBe('1.50×');
+    expect(png.find(row => row.legId === 'mirror')!.cells[10][0].text).toBe('0.50×');
+    expect(png.find(row => row.legId === 'mirror')!.cells[11][0].text).toBe('0.50×');
     expect(png.every(row => row.cells.length === 15)).toBe(true);
     expect(screen.getByTestId('legs-total-row').children).toHaveLength(15);
     fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
+  });
+
+  it('mirror actual and theoretical cells open the first-cut process based on main plus mirror coins', () => {
+    render(<MemoryRouter><CampaignLegsList {...example()} /></MemoryRouter>);
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-mirror')).getByRole('button'));
+    let dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(dialog).toHaveTextContent('镜像止盈 · 减仓因子');
+    expect(dialog).toHaveTextContent('Q前 = 20 币（主力 + 镜像）');
+    expect(dialog).toHaveTextContent('αf = ΔQ减 ÷ Q前 = 10 ÷ 20 ≈ 0.5（50.00%）');
+    expect(dialog).toHaveTextContent('Q后 = Q前 − ΔQ减 = 20 − 10 = 10 币');
+    expect(dialog).toHaveTextContent('1 − αf = Q后 ÷ Q前 = 10 ÷ 20 ≈ 0.5 ≈ 0.50×');
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-theoretical-mirror')).getByRole('button'));
+    dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(dialog).toHaveTextContent('镜像止盈 · 减仓因子（理论）');
+    expect(dialog).toHaveTextContent('理论累计公式也使用实际首次减仓比例，故此减仓因子与实际值相同');
+  });
+
+  it('simultaneous mirror cuts multiply to the one first-reduction factor instead of counting the cut twice', () => {
+    const data = example();
+    data.tradeRecords[1].quantity = 7;
+    data.legs[1].pre_position_size = 700;
+    data.legs.push({ ...data.legs[1], id: 'mirror2', trade_record_id: 'mirror2-record', pre_position_size: 300 });
+    data.tradeRecords.push({ ...data.tradeRecords[1], id: 'mirror2-record', fillId: 'mirror2', quantity: 3 });
+    const metrics = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    const factors = metrics.geometricMetricBasis.initialReductionFactors!;
+    expect(factors).toHaveLength(2);
+    expect(factors.reduce((product, factor) => product * factor.multiple, 1)).toBeCloseTo(1 - metrics.geometricMetricBasis.earlyReductionFraction!);
+    expect(factors.find(factor => factor.legId === 'mirror')?.beforeCoins).toBeCloseTo(20);
+    expect(factors.find(factor => factor.legId === 'mirror2')?.beforeCoins).toBeCloseTo(13);
   });
 
   it('clicking each actual factor opens its own substituted process; close and sorting preserve row identity', () => {
