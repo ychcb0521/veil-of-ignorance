@@ -128,9 +128,9 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
+  'effectivePriceChangePct',
   'addCount',
   'positionGeometricMultiple',
-  'effectivePriceChangePct',
   'magicB',
   'payoffRatio',
 ];
@@ -664,12 +664,12 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     help: <><p className="font-mono">{EFFECTIVE_PRICE_CHANGE_FORMULA}</p><p>{EFFECTIVE_PRICE_CHANGE_RULE}</p><EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} /><p>按倍数展示，例如比值 2 显示 2.00×，参与 b 计算也是 2。没有实际加仓、主力尚未平仓、缺少 F / Kₘ / E / K初 或初始每币风险不大于 0 时显示「—」。</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p></>,
   });
   built.push({
-    key: 'positionGeometricMultiple', label: '仓位几何累积倍数',
+    key: 'positionGeometricMultiple', label: '几何仓位',
     value: formatActualTheoreticalMetric(metrics.positionGeometricMultiple, metrics.positionGeometricMultipleTheoretical, value => `${value.toFixed(2)}x`),
     color: '#1E2329', valueClassName: 'text-foreground/85',
-    help: <><p>读数括号内为理论值，括号前为实际值。</p><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p>
+    help: <><p>几何仓位，即仓位几何累积倍数。</p><p>读数括号内为理论值，括号前为实际值。</p><p className="font-mono">几何仓位 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p>
       <div className="space-y-2 border-t border-border/60 pt-2" data-testid="position-geometric-theoretical-help">
-        <p className="font-medium text-foreground">仓位几何累积倍数（理论） <span className="font-mono tabular-nums">{metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`}</span></p>
+        <p className="font-medium text-foreground">几何仓位（理论） <span className="font-mono tabular-nums">{metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`}</span></p>
         <p className="font-mono">{POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p>
       </div></>,
   });
@@ -692,15 +692,15 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       </div>} theoreticalWorked={
         theoreticalWorked != null ? <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-theoretical-worked">
           <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
-          <div>仓位几何累积倍数（理论） = {number(metrics.positionGeometricMultipleTheoretical!)}</div>
+          <div>几何仓位（理论） = {number(metrics.positionGeometricMultipleTheoretical!)}</div>
           <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />
           <div>相对涨幅 = {number(metrics.effectivePriceChangePct! / 100)} 倍</div>
           <div>b（理论） = {number(metrics.positionGeometricMultipleTheoretical!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
           <div className="font-semibold">≈ {theoreticalWorked.toFixed(8)}</div>
           <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
-        </div> : <p data-testid="magic-b-theoretical-unavailable">本场：—（理论仓位几何累积倍数或相对涨幅缺少有效依据）</p>
+        </div> : <p data-testid="magic-b-theoretical-unavailable">本场：—（理论几何仓位或相对涨幅缺少有效依据）</p>
       } />
-      {magicB == null && <p>仓位几何累积倍数或相对涨幅缺少有效依据时显示「—」。</p>}
+      {magicB == null && <p>几何仓位或相对涨幅缺少有效依据时显示「—」。</p>}
       <p>{MAGIC_B_RULE}</p></>,
     });
   }

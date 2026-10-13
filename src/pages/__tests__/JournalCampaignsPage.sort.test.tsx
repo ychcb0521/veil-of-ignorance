@@ -451,7 +451,7 @@ describe('JournalCampaignsPage sorting', () => {
   it('三列概览对应排序顺序：操作时间在最前且默认选中，新增金额指标可排序和查看散点图', async () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
-    const expected = ['time', 'expectedDrawdownPct', 'addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate',
+    const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate',
       'initialExpectedMaxLoss', 'realizedPnl', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
       'mainPriceChange', 'mainPriceEfficiency', 'peakPriceChange', 'peakPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct'];
     const controls = screen.getByTestId('campaign-sort-controls');
@@ -956,7 +956,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","captureRate","geometricExpectancy","time","mirrorTp","divider-expectedDrawdownPct","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy","divider-leverage","leverage","importance","alpha"]);
+    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'divider-initialExpectedMaxLoss', 'initialExpectedMaxLoss', 'realizedPnl', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'peakPriceChange', 'peakPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
@@ -971,10 +971,10 @@ describe('JournalCampaignsPage sorting', () => {
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
-    expect(cardCells).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
+    expect(cardCells).toEqual(["campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
@@ -2410,7 +2410,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(
       [...screen.getAllByTestId('campaign-expected-drawdown-pct')[0].parentElement!.querySelectorAll('div')].filter(node => node.firstElementChild?.tagName === 'DT')
         .map(node => node.getAttribute('data-testid')),
-    ).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
+    ).toEqual(["campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     fireEvent.click(screen.getAllByRole('button', { name: '展开战役详情' })[0]);
     const expandedDetails = screen.getByTestId('campaign-card-details');
     expect(expandedDetails).toHaveClass('flex');
@@ -2638,7 +2638,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByText('神奇的 b 计算公式')).not.toBeInTheDocument();
     fireEvent.doubleClick(screen.getByTestId('campaign-sort-magicB'));
     expect(screen.getByText('神奇的 b 计算公式')).toBeInTheDocument();
-    expect(screen.getByText('神奇的 b = 仓位几何累积倍数 × 相对涨幅')).toBeInTheDocument();
+    expect(screen.getByText('神奇的 b = 几何仓位 × 相对涨幅')).toBeInTheDocument();
     expect(screen.getByText('神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-magicB')).toHaveAttribute('data-sort-direction', 'asc');
     expect(cardOrder()).toEqual(['Late Close', 'Best PnL', 'High Importance']);

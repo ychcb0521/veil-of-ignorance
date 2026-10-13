@@ -32,13 +32,13 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     for (const header of [
       '操作时间（北京）', '镜像止盈', '预期回撤（%）', '首仓涨跌幅（%）', '首仓涨跌幅倍数 η', '神奇的 b', '加仓效用', '加仓次数',
       '几何期望 Gᵢ', '算术期望（R）', '杠杆倍数', '自评（0–5）',
-      '相对涨幅（倍）', '盈亏比', '仓位几何累积倍数（倍）', '神奇的 b',
+      '相对涨幅（倍）', '盈亏比', '几何仓位（倍）', '神奇的 b',
       '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '峰值涨幅倍数', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
     ]) expect(headers, header).toContain(header);
     expect(notes.rows.map(row => row[0])).toEqual(headers);
     expect(notes.rows.every(row => typeof row[1] === 'string' && (row[1] as string).length > 0)).toBe(true);
     const bNote = notes.rows.find(row => row[0] === '神奇的 b')?.[1];
-    expect(bNote).toContain('神奇的 b = 仓位几何累积倍数 × 相对涨幅');
+    expect(bNote).toContain('神奇的 b = 几何仓位 × 相对涨幅');
     expect(bNote).toContain('相对涨幅 2.00× 参与计算为 2');
     expect(bNote).not.toContain('首次实际加仓价格 T₁');
     expect(bNote).not.toContain('+ 结算修正');
@@ -57,12 +57,12 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(cell(0, '动态最大回撤（%）')).toBe(4.5);
     expect(cell(0, '几何期望 Gᵢ')).toBeCloseTo(1.9, 9);
     expect(cell(0, '算术期望（R）')).toBe(4);
-    expect(cell(0, '仓位几何累积倍数（倍）')).toBe(6.25);
+    expect(cell(0, '几何仓位（倍）')).toBe(6.25);
     expect(cell(0, '相对涨幅（倍）')).toBeCloseTo(0.294117647059);
     expect(headers).not.toContain('相对涨幅倍数');
     expect(cell(0, '神奇的 b')).toBe(3);
     expect(cell(1, '神奇的 b')).toBe(-0.5);
-    expect(headers.slice(headers.indexOf('仓位几何累积倍数（倍）'), headers.indexOf('仓位几何累积倍数（倍）') + 5)).toEqual(['仓位几何累积倍数（倍）', '仓位几何累积倍数（理论）', '相对涨幅（倍）', '盈亏比', '神奇的 b']);
+    expect(headers.slice(headers.indexOf('几何仓位（倍）'), headers.indexOf('几何仓位（倍）') + 5)).toEqual(['几何仓位（倍）', '几何仓位（理论）', '相对涨幅（倍）', '盈亏比', '神奇的 b']);
     expect(cell(0, '自评（0–5）')).toBe(4);
     expect(cell(0, '自评（文字）')).toBe('很好');
     expect(cell(0, '预期回撤（%）')).toBe(2);

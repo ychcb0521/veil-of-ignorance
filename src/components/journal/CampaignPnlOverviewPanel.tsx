@@ -22,7 +22,7 @@ export function PnlMetricLabel({ label, children }: { label: string; children: R
           side="bottom"
           sideOffset={4}
           collisionPadding={12}
-          className={`${label.startsWith('仓位几何累积倍数') || label === '神奇的 b' ? 'w-96' : 'w-72'} max-w-[calc(100vw_-_24px)] max-h-[min(80vh,var(--radix-popover-content-available-height))] overflow-y-auto border-border bg-card p-3 text-[11px] leading-relaxed shadow-md`}
+          className={`${label.startsWith('几何仓位') || label === '神奇的 b' ? 'w-96' : 'w-72'} max-w-[calc(100vw_-_24px)] max-h-[min(80vh,var(--radix-popover-content-available-height))] overflow-y-auto border-border bg-card p-3 text-[11px] leading-relaxed shadow-md`}
         >
           <div className="font-medium text-foreground">{label}</div>
           <div className="mt-1.5 space-y-1.5 text-muted-foreground">{children}</div>

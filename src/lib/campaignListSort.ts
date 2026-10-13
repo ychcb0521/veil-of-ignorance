@@ -70,9 +70,9 @@ export type CampaignSortChain = readonly CampaignSortLevel[];
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'time',
   'expectedDrawdownPct',
+  'effectivePriceChangePct',
   'addCount',
   'positionGeometricMultiple',
-  'effectivePriceChangePct',
   'magicB',
   'captureRate',
   'initialExpectedMaxLoss',

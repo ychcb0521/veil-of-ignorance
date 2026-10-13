@@ -13,11 +13,11 @@ export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理�
 export const EFFECTIVE_PRICE_CHANGE_FORMULA = '相对涨幅 = (F − Kₘ) ÷ (E − K初)';
 export const EFFECTIVE_PRICE_CHANGE_RULE = '最后一截的有效涨幅价差相对于初始回撤价差的倍数 = 最后一截的有效涨幅价差 ÷ 初始回撤价差。E 为最初开仓时主力与镜像仓位合计的币数加权开仓价；K初 为该批开仓的初始止损线，沿用初始风险的委托依据，多条初始保护线取最大亏损边界，多笔初始主力按币数加权。E 与 K初 均固定，不随加仓或止损上移变化。F 与「首仓涨跌幅」的平仓价同源；Kₘ 为最后一次实际加仓时的新支撑线。';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
-export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 相对涨幅';
-export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 仓位几何累积倍数（理论） × 相对涨幅';
+export const MAGIC_B_FORMULA = '神奇的 b = 几何仓位 × 相对涨幅';
+export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 几何仓位（理论） × 相对涨幅';
 export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀';
 export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二，方法三仅作理论对照。`;
-export const MAGIC_B_RULE = '采用实际仓位几何累积倍数（含首次减仓因子），相对涨幅以初始每币风险 E − K初 为分母。b 直接乘该比值，初始风险不再重复除一次；例如相对涨幅 2.00× 参与计算为 2。不再乘基数仓位比例 β，不追加结算修正。几何公式与已实现净盈亏 ÷ L₀ 的结算口径可能存在差异；缺少有效依据时显示「—」。';
+export const MAGIC_B_RULE = '采用实际几何仓位（含首次减仓因子），相对涨幅以初始每币风险 E − K初 为分母。b 直接乘该比值，初始风险不再重复除一次；例如相对涨幅 2.00× 参与计算为 2。不再乘基数仓位比例 β，不追加结算修正。几何公式与已实现净盈亏 ÷ L₀ 的结算口径可能存在差异；缺少有效依据时显示「—」。';
 
 /** One compact reading: actual followed by the optional theoretical comparison. */
 export function formatActualTheoreticalMetric(actual: number | null | undefined, theoretical: number | null | undefined, format: (value: number) => string): string {
