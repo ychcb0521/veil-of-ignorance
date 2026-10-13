@@ -11,7 +11,7 @@ import { buildCampaignLegTheoreticalFactors, type LegGeometricFactor, type LegTh
 export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
 export const EFFECTIVE_PRICE_CHANGE_FORMULA = '相对涨幅 = (F − Kₘ) ÷ (E − K初)';
-export const EFFECTIVE_PRICE_CHANGE_RULE = '最后一截的有效涨幅价差相对于初始回撤价差的倍数 = 最后一截的有效涨幅价差 ÷ 初始回撤价差。E 为最初开仓时主力与镜像仓位合计的币数加权开仓价；K初 为该批开仓的初始止损线，沿用初始风险的委托依据，多条初始保护线取最大亏损边界，多笔初始主力按币数加权。E 与 K初 均固定，不随加仓或止损上移变化。F 与「涨跌幅」的平仓价同源；Kₘ 为最后一次实际加仓时的新支撑线。';
+export const EFFECTIVE_PRICE_CHANGE_RULE = '最后一截的有效涨幅价差相对于初始回撤价差的倍数 = 最后一截的有效涨幅价差 ÷ 初始回撤价差。E 为最初开仓时主力与镜像仓位合计的币数加权开仓价；K初 为该批开仓的初始止损线，沿用初始风险的委托依据，多条初始保护线取最大亏损边界，多笔初始主力按币数加权。E 与 K初 均固定，不随加仓或止损上移变化。F 与「首仓涨跌幅」的平仓价同源；Kₘ 为最后一次实际加仓时的新支撑线。';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
 export const MAGIC_B_FORMULA = '神奇的 b = 仓位几何累积倍数 × 相对涨幅';
 export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 仓位几何累积倍数（理论） × 相对涨幅';
@@ -186,7 +186,7 @@ export function computeCampaignGeometricMetrics(
   }
   const resolved = ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status);
   const finalTime = closes.length ? Math.max(...closes.map(close => close.time)) : null;
-  // F is exactly the exit basis of 涨跌幅, including hedge locks, execution
+  // F is exactly the exit basis of 首仓涨跌幅, including hedge locks, execution
   // corrections and unfilled-order evidence. Never average the main/add exits.
   const finalExitPrice = campaignPriceChange(campaign, legs, tradeRecords, corrections, localOrders).exitPrice;
   let reduction: number | null = null;

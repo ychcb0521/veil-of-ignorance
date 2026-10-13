@@ -324,8 +324,8 @@ vi.mock('@/components/journal/CampaignWhatIfEditor', () => ({
 const OVERVIEW_LABELS = [
   '算术期望',
   '预期回撤',
-  '涨跌幅',
-  '涨跌幅倍数',
+  '首仓涨跌幅',
+  '首仓涨跌幅倍数',
   '盈亏比',
   '加仓效用',
   '几何期望',
@@ -539,7 +539,7 @@ describe('JournalCampaignDetailPage counterfactual overview flow', () => {
     expect(within(panel).getByText('反事实盈亏概览 · 手动调整')).toBeInTheDocument();
     expect(helpButtonLabels(panel)).toEqual(OVERVIEW_LABELS);
     expect(metricValue(panel, '已实现 P&L')).toBe('200.00 USDT');
-    for (const label of ['最大预期亏损', '预期回撤', '涨跌幅倍数', '盈亏比', '加仓效用', '算术期望', '几何期望']) {
+    for (const label of ['最大预期亏损', '预期回撤', '首仓涨跌幅倍数', '盈亏比', '加仓效用', '算术期望', '几何期望']) {
       expect(metricValue(panel, label)).toBe('—');
     }
     expect(within(panel).getByText('早期分支未记录改动摘要')).toBeInTheDocument();

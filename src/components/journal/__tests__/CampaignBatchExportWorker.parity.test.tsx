@@ -1,7 +1,7 @@
 /**
  * 批量导出看板的「盈亏概览」与详情页逐位相同：同一场战役，批量工人交给 renderCampaignBoardPng 的 14 项读数，
  * 等于详情页面板上印出来的字。两边走的是详情页同一个构造器（campaignPnlOverviewItems），这里用真实夹具把它钉住：
- * 涨跌幅的取价（初始对冲 A/B、滚动对冲锁价、平仓价校正、币本位空单）、盈亏比只写倍数 b（不再带百分比）。
+ * 首仓涨跌幅的取价（初始对冲 A/B、滚动对冲锁价、平仓价校正、币本位空单）、盈亏比只写倍数 b（不再带百分比）。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -17,7 +17,7 @@ const BALANCE = 10_000;
 
 /**
  * 从「滚动对冲成交」派生：那张对冲改成已成交的初始对冲 A，与主力同一刻（02:00）在 110 平掉，
- * 于是主力平仓时它锁住行情，涨跌幅的平仓价取 A 的开仓价 120（+20%），而不是主力的平仓价 110（+10%）。
+ * 于是主力平仓时它锁住行情，首仓涨跌幅的平仓价取 A 的开仓价 120（+20%），而不是主力的平仓价 110（+10%）。
  */
 async function currentFixture() {
   const { parityFixture, PARITY_T0, PARITY_MINUTE } = await import('@/test/fixtures/counterfactualParityFixtures');
@@ -183,7 +183,7 @@ describe('批量导出看板的盈亏概览 ↔ 详情页', () => {
     const items = vi.mocked(renderCampaignBoardPng).mock.calls[0][0].pnlOverview.items;
     expect(items).toHaveLength(14);
     const boardValues = Object.fromEntries(items.map(item => [item.label, item.value]));
-    expect(boardValues['涨跌幅']).toBe(priceChange);
+    expect(boardValues['首仓涨跌幅']).toBe(priceChange);
     // 盈亏比只写倍数 b（如「34.60」），不带百分比
     expect(items.find(item => item.key === 'payoffRatio')?.value).toMatch(/^(-?\d+\.\d{2}|—)$/);
     expect(Object.values(boardValues).join(' ')).not.toMatch(/盈亏比.*%/);

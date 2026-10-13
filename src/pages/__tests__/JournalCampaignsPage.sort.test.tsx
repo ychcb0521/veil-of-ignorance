@@ -817,7 +817,7 @@ describe('JournalCampaignsPage sorting', () => {
       .toEqual(['3x', '10x', '20x']);
   }, 15_000);
 
-  it('【用户要求】涨跌幅 / 涨跌幅倍数 / 加仓效用三档排序：读数亮在卡片上、按它排、算不出的战役不进入这一档', async () => {
+  it('【用户要求】首仓涨跌幅 / 首仓涨跌幅倍数 / 加仓效用三档排序：读数亮在卡片上、按它排、算不出的战役不进入这一档', async () => {
     // 四场主力的平仓价拉开：+30% / +5% / −10% / +20%
     const exits: Record<string, number> = {
       'high-importance-record': 130, 'newest-record': 105, 'best-pnl-record': 90, 'late-close-record': 120,
@@ -838,21 +838,21 @@ describe('JournalCampaignsPage sorting', () => {
         </MemoryRouter>,
       );
       await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-      // 【用户要求】封面常驻显示涨跌幅、涨跌幅倍数、加仓效用：默认排序下每张卡片都有这三格，算不出的写「—」
+      // 【用户要求】封面常驻显示首仓涨跌幅、首仓涨跌幅倍数、加仓效用：默认排序下每张卡片都有这三格，算不出的写「—」
       expect(screen.getAllByTestId('campaign-main-price-change')).toHaveLength(4);
       expect(screen.getAllByTestId('campaign-main-price-efficiency')).toHaveLength(4);
       expect(screen.getAllByTestId('campaign-add-efficiency')).toHaveLength(4);
       const newest = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('Newest Operation'))!;
       expect(newest.querySelector('[data-testid="campaign-main-price-change-value"]')?.textContent).toBe('+5.00%');
-      // 这场没有对冲边界、算不出预期回撤：涨跌幅倍数、加仓效用两格是「—」
+      // 这场没有对冲边界、算不出预期回撤：首仓涨跌幅倍数、加仓效用两格是「—」
       expect(newest.querySelector('[data-testid="campaign-main-price-efficiency-value"]')?.textContent).toBe('—');
       expect(newest.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('—');
-      // 没有加仓的战役：涨跌幅倍数照算，加仓效用不算
+      // 没有加仓的战役：首仓涨跌幅倍数照算，加仓效用不算
       const bestPnl = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('Best PnL'))!;
       expect(bestPnl.querySelector('[data-testid="campaign-main-price-efficiency-value"]')?.textContent).not.toBe('—');
       expect(bestPnl.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('—');
       expect(bestPnl.querySelector('[data-testid="campaign-add-efficiency"]')?.getAttribute('title')).toContain('没有加仓');
-      // 杠杆旁不再另挂一枚重复的涨跌幅标签
+      // 杠杆旁不再另挂一枚重复的首仓涨跌幅标签
       expect(newest.querySelectorAll('[data-testid="campaign-main-price-change"]')).toHaveLength(1);
 
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceChange'));
@@ -869,7 +869,7 @@ describe('JournalCampaignsPage sorting', () => {
       };
       const pctOf: Record<string, number> = { 'High Importance': 30, 'Late Close': 20, 'Newest Operation': 5, 'Best PnL': -10 };
 
-      // 涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；预期回撤为「—」的战役（没有对冲边界）不进入这一档
+      // 首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤；预期回撤为「—」的战役（没有对冲边界）不进入这一档
       fireEvent.click(screen.getByTestId('campaign-sort-mainPriceEfficiency'));
       await waitFor(() => expect(screen.getAllByTestId('campaign-card').length).toBeLessThan(4));
       const effCards = screen.getAllByTestId('campaign-card');
@@ -885,7 +885,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(effCards.length).toBeLessThan(4);
       expect(screen.getAllByTestId('campaign-main-price-efficiency')[0].getAttribute('title')).toContain('÷ 预期回撤');
 
-      // 加仓效用 = 神奇的 b ÷ |涨跌幅倍数|
+      // 加仓效用 = 神奇的 b ÷ |首仓涨跌幅倍数|
       fireEvent.click(screen.getByTestId('campaign-sort-addEfficiency'));
       await waitFor(() => expect(screen.getByTestId('campaign-sort-addEfficiency')).toHaveAttribute('data-sort-direction', 'desc'));
       const addCards = screen.getAllByTestId('campaign-card');
@@ -898,7 +898,7 @@ describe('JournalCampaignsPage sorting', () => {
         const payoff = Number(card.querySelector('[data-testid="campaign-magic-b-value"]')?.textContent);
         expect(cardNumber(card, 'campaign-add-efficiency')).toBeCloseTo(payoff / efficiency, 1);
       }
-      // 只有做过加仓的战役进这一档：夹具里只有 High Importance（加仓腿盈亏 0，b 仍等于它的涨跌幅倍数 → 恰为 1）
+      // 只有做过加仓的战役进这一档：夹具里只有 High Importance（加仓腿盈亏 0，b 仍等于它的首仓涨跌幅倍数 → 恰为 1）
       expect(cardOrder().slice(0, addCards.length)).toEqual(['High Importance']);
       const withAdd = addCards.find(card => card.textContent?.includes('High Importance'))!;
       expect(withAdd.querySelector('[data-testid="campaign-add-efficiency-value"]')?.textContent).toBe('+1.00');
@@ -951,13 +951,13 @@ describe('JournalCampaignsPage sorting', () => {
     expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-wrap');
     expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
-    // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后涨跌幅…几何期望、算术期望（操作时间留在标题行）
+    // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
     expect(cardCells).toEqual(["campaign-add-count","campaign-position-geometric-multiple","campaign-effective-price-change","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","涨跌幅","涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
@@ -1041,7 +1041,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(initial.magicB).toBe('70px');
     for (const mode of modes) expect(initial[mode], mode).toMatch(/^\d+px$/);
 
-    // 会筛掉战役的排序：涨跌幅倍数 / 神奇的 b / 两个期望 / 杠杆倍数各剩 3 场——列宽不变，各格位置不动
+    // 会筛掉战役的排序：首仓涨跌幅倍数 / 神奇的 b / 两个期望 / 杠杆倍数各剩 3 场——列宽不变，各格位置不动
     for (const [mode, count] of [
       ['mainPriceEfficiency', 3], ['magicB', 3],
       ['geometricExpectancy', 3], ['arithmeticExpectancy', 3], ['leverage', 3],
@@ -1105,7 +1105,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(cards.some(card => card.textContent?.includes('Best PnL'))).toBe(false);
   });
 
-  it('【用户要求】涨跌幅 / 涨跌幅倍数 / 加仓效用：双击或右键看公式与例子，浮层里「查看散点图」默认打开分布图（同神奇的 b），「时序」仍在', async () => {
+  it('【用户要求】首仓涨跌幅 / 首仓涨跌幅倍数 / 加仓效用：双击或右键看公式与例子，浮层里「查看散点图」默认打开分布图（同神奇的 b），「时序」仍在', async () => {
     // 四场主力的平仓价拉开：+30% / +5% / −10% / +20%（与三档排序那条用例同一组）
     const exits: Record<string, number> = {
       'high-importance-record': 130, 'newest-record': 105, 'best-pnl-record': 90, 'late-close-record': 120,
@@ -1132,10 +1132,10 @@ describe('JournalCampaignsPage sorting', () => {
         .map(node => node.getAttribute('data-campaign-id'))
         .sort();
 
-      // —— 涨跌幅：双击打开公式浮层，排序方向不因为看说明而变 ——
+      // —— 首仓涨跌幅：双击打开公式浮层，排序方向不因为看说明而变 ——
       fireEvent.doubleClick(screen.getByTestId('campaign-sort-mainPriceChange'));
-      expect(screen.getByText('主力涨跌幅计算公式')).toBeInTheDocument();
-      expect(screen.getByText('涨跌幅ᵢ = s ×（平仓价 − 开仓价）÷ 开仓价 × 100%')).toBeInTheDocument();
+      expect(screen.getByText('主力首仓涨跌幅计算公式')).toBeInTheDocument();
+      expect(screen.getByText('首仓涨跌幅ᵢ = s ×（平仓价 − 开仓价）÷ 开仓价 × 100%')).toBeInTheDocument();
       expect(screen.getByText(/s = \+1（主多）\/ −1（主空）/)).toBeInTheDocument();
       expect(screen.getByText(/主多 100 → 112/)).toBeInTheDocument();
       expect(screen.getByText(/主力都还没平仓（没有平仓价）的战役显示「—」，不参与排序与散点图/)).toBeInTheDocument();
@@ -1148,7 +1148,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
       const priceToggle = screen.getByTestId('campaign-mainPriceChange-chart-toggle');
       expect(priceToggle).toHaveAttribute('aria-expanded', 'false');
-      expect(priceToggle).toHaveAccessibleName('查看涨跌幅散点图，共 4 场');
+      expect(priceToggle).toHaveAccessibleName('查看首仓涨跌幅散点图，共 4 场');
       expect(priceToggle).toHaveTextContent('查看散点图');
       fireEvent.click(priceToggle);
       // 【用户要求】默认落在分布视图，像神奇的 b那样；「时序 | 分布」切换键在面板右上角
@@ -1164,7 +1164,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(priceButtons.map(node => node.dataset.campaignId)).toEqual(['best-pnl', 'newest', 'late-close', 'high-importance']);
       const priceLefts = priceButtons.map(node => Number.parseFloat(node.style.left));
       expect([...priceLefts].sort((a, b) => a - b)).toEqual(priceLefts);
-      // 【用户要求】颜色按这一场的神奇的 b 分，不按横轴指标：Best PnL 涨跌幅 −10%、b 却为正 → 绿圆
+      // 【用户要求】颜色按这一场的神奇的 b 分，不按横轴指标：Best PnL 首仓涨跌幅 −10%、b 却为正 → 绿圆
       expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-series-token', 'profit');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-best-pnl')).toHaveAttribute('data-marker-shape', 'circle');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChangeDistribution-high-importance')).toHaveAttribute('data-series-token', 'profit');
@@ -1181,10 +1181,10 @@ describe('JournalCampaignsPage sorting', () => {
       expect(priceSummary).toHaveTextContent('中位数 +12.50%');
       expect(priceSummary).toHaveTextContent('均值 +11.25%');
       expect(screen.getByTestId('campaign-metric-win-rate-mainPriceChangeDistribution')).toHaveTextContent('顺向 75% (3/4)');
-      expect(screen.getByText(/横轴 涨跌幅（%） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
+      expect(screen.getByText(/横轴 首仓涨跌幅（%） · 纵轴 场数 · 不按时间排列/)).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-mainPriceChangeDistribution'));
       const priceDistGuide = screen.getByTestId('campaign-metric-guide-mainPriceChangeDistribution');
-      for (const text of ['横轴就是涨跌幅本身（单位 %）', '涨跌分界 0 圈在窗口内', 'Legs 表「涨跌幅」列', '灰色 0% 竖线', '「顺向」是涨跌幅 > 0 的场数占比', '核密度']) {
+      for (const text of ['横轴就是首仓涨跌幅本身（单位 %）', '涨跌分界 0 圈在窗口内', 'Legs 表「涨跌幅」列', '灰色 0% 竖线', '「顺向」是首仓涨跌幅 > 0 的场数占比', '核密度']) {
         expect(priceDistGuide).toHaveTextContent(text);
       }
       expect(priceDistGuide).not.toHaveTextContent('神奇的 b 本身');
@@ -1197,7 +1197,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('location-probe-search')).not.toHaveTextContent('chart=mainPriceChangeDistribution');
       expect(screen.getByTestId('campaign-mainPriceChange-view-time')).toHaveAttribute('aria-pressed', 'true');
       expect(plotIds()).toEqual(['best-pnl', 'high-importance', 'late-close', 'newest']);
-      // 【用户要求】颜色按这一场的 b 分（形状也跟着：绿圆、红菱）：Best PnL 涨跌幅为负、b 为正 → 绿圆
+      // 【用户要求】颜色按这一场的 b 分（形状也跟着：绿圆、红菱）：Best PnL 首仓涨跌幅为负、b 为正 → 绿圆
       expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-series-token', 'profit');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChange-best-pnl')).toHaveAttribute('data-marker-shape', 'circle');
       expect(screen.getByTestId('campaign-metric-point-mainPriceChange-high-importance')).toHaveAttribute('data-series-token', 'profit');
@@ -1209,10 +1209,10 @@ describe('JournalCampaignsPage sorting', () => {
         expect(priceGuide).toHaveTextContent(text);
       }
 
-      // —— 涨跌幅倍数：右键打开；算不出预期回撤的 Newest Operation 不进图 ——
+      // —— 首仓涨跌幅倍数：右键打开；算不出预期回撤的 Newest Operation 不进图 ——
       fireEvent.contextMenu(screen.getByTestId('campaign-sort-mainPriceEfficiency'));
-      expect(screen.getByText('涨跌幅倍数计算公式')).toBeInTheDocument();
-      expect(screen.getByText('ηᵢ = 涨跌幅ᵢ ÷ 预期回撤ᵢ')).toBeInTheDocument();
+      expect(screen.getByText('首仓涨跌幅倍数计算公式')).toBeInTheDocument();
+      expect(screen.getByText('ηᵢ = 首仓涨跌幅ᵢ ÷ 预期回撤ᵢ')).toBeInTheDocument();
       expect(screen.getByText(/dᵢ = max（\|主力开仓价 − 初始对冲 A 价\|/)).toBeInTheDocument();
       expect(screen.getByText(/ηᵢ = 12 ÷ 4 =/)).toBeInTheDocument();
       expect(screen.getByText(/算不出预期回撤）的战役不参与排序与散点图/)).toBeInTheDocument();
@@ -1220,26 +1220,26 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'mainPriceEfficiencyDistribution');
       expect(screen.getByTestId('campaign-mainPriceEfficiency-view-distribution')).toHaveAttribute('aria-pressed', 'true');
       expect(plotIds()).toEqual(['best-pnl', 'high-importance', 'late-close']);
-      // 点上的数与卡片同一个函数：High Importance 涨跌幅 +30%、预期回撤 10% → +3.00
+      // 点上的数与卡片同一个函数：High Importance 首仓涨跌幅 +30%、预期回撤 10% → +3.00
       expect(Number(screen.getByTestId('campaign-metric-point-mainPriceEfficiencyDistribution-high-importance').dataset.metricValue)).toBeCloseTo(3, 6);
       expect(screen.getByTestId('campaign-metric-point-mainPriceEfficiencyDistribution-best-pnl')).toHaveAttribute('data-series-token', 'profit'); // 按 b 着色：倍数为负、b 为正
       expect(screen.getByTestId('campaign-metric-break-even-mainPriceEfficiencyDistribution-label')).toHaveTextContent('0.00 不涨不跌');
       expect(screen.getByTestId('campaign-metric-win-rate-mainPriceEfficiencyDistribution')).toHaveTextContent('顺向 67% (2/3)');
       // 算不出的场数照样写在图下脚注里
-      expect(screen.getByText(/无涨跌幅倍数 1 场/)).toBeInTheDocument();
+      expect(screen.getByText(/无首仓涨跌幅倍数 1 场/)).toBeInTheDocument();
       fireEvent.click(screen.getByTestId('campaign-mainPriceEfficiency-view-time'));
       expect(screen.getByTestId('campaign-metric-scatter-plot')).toHaveAttribute('data-metric-key', 'mainPriceEfficiency');
       expect(Number(screen.getByTestId('campaign-metric-point-mainPriceEfficiency-high-importance').dataset.metricValue)).toBeCloseTo(3, 6);
-      expect(screen.getByText(/无涨跌幅倍数 1 场/)).toBeInTheDocument();
+      expect(screen.getByText(/无首仓涨跌幅倍数 1 场/)).toBeInTheDocument();
 
       // —— 加仓效用：只画做过加仓的战役 ——
       fireEvent.contextMenu(screen.getByTestId('campaign-sort-addEfficiency'));
       expect(screen.getByText('加仓效用计算公式')).toBeInTheDocument();
       expect(screen.getByText('加仓效用ᵢ = bᵢ ÷ |ηᵢ|')).toBeInTheDocument();
-      // 两个式子各自不断行，只在「；」之后换行：「涨跌幅ᵢ」不会被拆成「涨跌幅」和另起一行的「ᵢ」
+      // 两个式子各自不断行，只在「；」之后换行：「首仓涨跌幅ᵢ」不会被拆成「首仓涨跌幅」和另起一行的「ᵢ」
       const addPopover = screen.getByText('加仓效用计算公式').closest('[role="dialog"]')!;
       expect([...addPopover.querySelectorAll('span.whitespace-nowrap')].map(node => node.textContent))
-        .toEqual(['ηᵢ = 涨跌幅ᵢ ÷ 预期回撤ᵢ']);
+        .toEqual(['ηᵢ = 首仓涨跌幅ᵢ ÷ 预期回撤ᵢ']);
       expect(addPopover).not.toHaveTextContent('bᵢ = 已实现盈亏');
       expect(screen.getByText(/加仓效用 = 6 ÷ 3 =/)).toBeInTheDocument();
       expect(screen.getByText(/只算做过加仓且 b 有完整依据的战役/)).toBeInTheDocument();
@@ -1265,7 +1265,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(screen.getByTestId('campaign-metric-reference-share-addEfficiencyDistribution-1')).toHaveTextContent(/比值 > 1 (0|100)% \([01]\/1\)/);
       fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-addEfficiencyDistribution'));
       const addGuide = screen.getByTestId('campaign-metric-guide-addEfficiencyDistribution');
-      for (const text of ['盈亏比 正负分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：b 等于涨跌幅倍数的绝对值', '没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图', '涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆']) {
+      for (const text of ['盈亏比 正负分界 0 与参照值 1.00 圈在窗口内', '1.00 也是档边界', '琥珀色 1.00 虚线：b 等于首仓涨跌幅倍数的绝对值', '没有加仓、或首仓涨跌幅倍数显示为 0.00 的战役不进图', '首仓涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆']) {
         expect(addGuide).toHaveTextContent(text);
       }
       // 时序那张图原样保留：1 仍只是读数参照、不画线
@@ -2423,7 +2423,7 @@ describe('JournalCampaignsPage sorting', () => {
       '预期回撤：50.00%',
       '预期回撤：—',
     ]);
-    // 【用户要求】「机会质量」删掉（涨跌幅倍数更合理）：卡片上不再有这一格
+    // 【用户要求】「机会质量」删掉（首仓涨跌幅倍数更合理）：卡片上不再有这一格
     expect(screen.queryByTestId('campaign-opportunity-quality-value')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('campaign-arithmetic-expectancy').map(metricReading)).toEqual([
       // 【用户要求】胜率统一 50%：E = 0.5 × b − 0.5
@@ -2838,7 +2838,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(summary.rows).toHaveLength(4);
       const column = (header: string) => summary.columns.findIndex(item => item.header === header);
       for (const row of summary.rows) {
-        expect(row[column('涨跌幅（%）')]).toBeCloseTo(10);
+        expect(row[column('首仓涨跌幅（%）')]).toBeCloseTo(10);
         expect(row[column('已实现 P&L（USDT）')]).toEqual(expect.any(Number));
         expect(row[column('峰值涨幅（%）')]).toBeNull();
         expect(row[column('涨幅未兑现（%）')]).toBeNull();

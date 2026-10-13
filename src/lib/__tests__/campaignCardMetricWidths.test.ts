@@ -106,6 +106,12 @@ describe('estimateCardMetricValueWidth / estimateCardMetricLabelWidth', () => {
 });
 
 describe('cardMetricColumnWidths', () => {
+  it('首仓指标改名后按完整名称撑宽，保持统一列宽而不截断标题', () => {
+    const renamed = { mainPriceChange: '首仓涨跌幅', mainPriceEfficiency: '首仓涨跌幅倍数' };
+    expect(cardMetricColumnWidths(renamed, [{ mainPriceChange: '+34.01%', mainPriceEfficiency: '+3.69' }]))
+      .toEqual({ mainPriceChange: 70, mainPriceEfficiency: 90 });
+  });
+
   it('用户截图那场：每项取指标名与读数的宽者 + 20px，向上取整到偶数', () => {
     expect(CARD_METRIC_CELL_PADDING_X).toBe(20);
     expect(cardMetricColumnWidths(LABELS, [TUT])).toEqual({

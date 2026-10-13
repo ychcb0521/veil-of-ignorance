@@ -12,10 +12,10 @@ import {
 /**
  * 展示样本：显式输入几何 b = 2；已实现 200、L 100 是独立结算字段，不参与这里的 b 计算。
  * P 统一 50% → 模型 E = +0.50；G = 1 + 2×0.1 = 1.20。
- * 【用户要求】主力涨跌幅 +20% → 涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
+ * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"];
+const GOLDEN_LABELS = ["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","盈亏比","几何期望","算术期望","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","已实现 P&L","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"];
 
 const GOLDEN_KEYS = ["addCount","positionGeometricMultiple","effectivePriceChangePct","magicB","payoffRatio","geometricExpectancy","arithmeticExpectancy","expectedMaxDrawdownPct","mainPriceChange","mainPriceEfficiency","realizedPnl","initialExpectedMaxLoss","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","positionAmplification","addEfficiency"];
 
@@ -195,7 +195,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       geometricMetricBasis: { initialCoins: 10, initialEntryPrice: 140, initialStopPrice: 100, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 210, lastSupport: 140 },
     })).find(value => value.key === 'effectivePriceChangePct')!;
     const { container } = render(<>{item.help}</>);
-    expect(container.textContent).toContain('F 与「涨跌幅」的平仓价同源');
+    expect(container.textContent).toContain('F 与「首仓涨跌幅」的平仓价同源');
     expect(container.textContent).toContain('F = 210；Kₘ = 140');
     expect(container.textContent).not.toContain('按币量加权');
   });
@@ -244,7 +244,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.magicB.color).toBe('#64748B');
   });
 
-  it('【用户要求】没有加仓的战役不算加仓效用：印「—」，说明里写明原因；涨跌幅与涨跌幅倍数照算', () => {
+  it('【用户要求】没有加仓的战役不算加仓效用：印「—」，说明里写明原因；首仓涨跌幅与首仓涨跌幅倍数照算', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ hasMainAdd: false, addCount: 0 }));
     const byKey = Object.fromEntries(items.map(item => [item.key, item]));
     expect(byKey.addEfficiency.value).toBe('—');
@@ -271,7 +271,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.geometricExpectancy.value).toBe('0.95');
   });
 
-  it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，颜色跟着读者看到的数走（同涨跌幅倍数）', () => {
+  it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，颜色跟着读者看到的数走（同首仓涨跌幅倍数）', () => {
     // 已实现 -3、L 1000 → b = -0.003，读数「0.00」：不能是红色的 0.00
     for (const payoffRatio of [-0.3, 0.3, -0.49]) {
       const byKey = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ magicB: payoffRatio / 100 })).map(item => [item.key, item]));
@@ -339,7 +339,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-column]')).toHaveClass('gap-6');
     // 【用户要求】左右对调：递进链七项在左栏、结果与仓位七项在右栏，各自从上往下排；每项按本栏序号落行，左右同一行齐平
     expect([...container.querySelectorAll('[data-column="left"]')].map(node => node.firstElementChild?.textContent))
-      .toEqual(['加仓次数', '仓位几何累积倍数', '相对涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '涨跌幅', '涨跌幅倍数']);
+      .toEqual(['加仓次数', '仓位几何累积倍数', '相对涨幅', '神奇的 b', '盈亏比', '几何期望', '算术期望', '预期回撤', '首仓涨跌幅', '首仓涨跌幅倍数']);
     expect([...container.querySelectorAll('[data-column="right"]')].map(node => node.firstElementChild?.textContent))
       .toEqual(['已实现 P&L', '最大预期亏损', '峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤', '仓位放大', '加仓效用']);
     const rowOf = (label: string) => [...container.querySelectorAll('[data-column]')]
@@ -370,7 +370,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '涨跌幅倍数说明' }));
+    fireEvent.click(screen.getByRole('button', { name: '首仓涨跌幅倍数说明' }));
     expect(screen.getByText('本场 = +20.00% ÷ 10.00% = +2.00')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '加仓效用说明' }));
     expect(screen.getByText('本场 = 2.00 ÷ |+2.00| = +1.00')).toBeInTheDocument();
@@ -442,7 +442,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.queryByText(/这个数与下方 Legs 表的「合计」行/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '涨幅未兑现说明' }));
-    expect(screen.getByText(/涨幅未兑现 = 峰值涨幅 − 涨跌幅/)).toBeInTheDocument();
+    expect(screen.getByText(/涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅/)).toBeInTheDocument();
     expect(screen.getByText('按 1h K 线估计')).toHaveClass('text-[#F0B90B]');
   });
 });

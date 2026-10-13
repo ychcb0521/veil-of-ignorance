@@ -30,7 +30,7 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
 
   it('排序方式与盈亏概览的参数都在表里，「说明」逐列写口径', () => {
     for (const header of [
-      '操作时间（北京）', '镜像止盈', '预期回撤（%）', '涨跌幅（%）', '涨跌幅倍数 η', '神奇的 b', '加仓效用', '加仓次数',
+      '操作时间（北京）', '镜像止盈', '预期回撤（%）', '首仓涨跌幅（%）', '首仓涨跌幅倍数 η', '神奇的 b', '加仓效用', '加仓次数',
       '几何期望 Gᵢ', '算术期望（R）', '杠杆倍数', '自评（0–5）',
       '相对涨幅（倍）', '盈亏比', '仓位几何累积倍数（倍）', '神奇的 b',
       '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '峰值涨幅倍数', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
@@ -47,7 +47,7 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
 
   it('数值与页面同一组函数、写成数字；几何期望写因子 1 + v；读不出的留空', () => {
     expect(cell(0, '盈亏比')).toBe(rowPayoffRatio(rows[0]));
-    expect(cell(0, '涨跌幅倍数 η')).toBe(rowMainPriceEfficiency(rows[0]));
+    expect(cell(0, '首仓涨跌幅倍数 η')).toBe(rowMainPriceEfficiency(rows[0]));
     expect(cell(0, '加仓效用')).toBe(rowAddEfficiency(rows[0]));
     expect(cell(0, '加仓次数')).toBe(rowAddCount(rows[0]));
     expect(cell(0, '加仓次数')).toBe(2);

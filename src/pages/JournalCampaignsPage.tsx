@@ -284,7 +284,7 @@ type CampaignMetricChartConfig = {
   missingValueLabel: string;
   colorMode: CampaignMetricColorMode;
   formatValue: (value: number) => string;
-  /** 通用分布图（涨跌幅、涨跌幅倍数、加仓效用、算术期望）的读法：单位、0 线、正值占比、额外参照线。 */
+  /** 通用分布图（首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望）的读法：单位、0 线、正值占比、额外参照线。 */
   distribution?: CampaignMetricDistributionSpec;
 };
 
@@ -321,7 +321,7 @@ type CampaignFormulaPopover =
   | 'sortChain';
 
 /**
- * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、涨跌幅、涨跌幅倍数、神奇的 b、加仓效用、几何期望、算术期望 ┆
+ * 【用户要求】排序行依次是：操作时间、镜像止盈 ┆ 预期回撤、首仓涨跌幅、首仓涨跌幅倍数、神奇的 b、加仓效用、几何期望、算术期望 ┆
  * 杠杆倍数、自评、字母（默认仍按操作时间排序）。
  * 【用户要求】删掉「DSI 贡献」「USI 贡献」两个排序项（几乎跟神奇的 b重复）；详情页盈亏概览的 DSI/USI 贡献与统计概览的「不对称风险」保留。
  * 【用户要求】封面指标格的先后与这里一致：镜像止盈之后就是中间那一组七项（见 CampaignCard 的指标格）。
@@ -337,8 +337,8 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'time', label: '操作时间' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'expectedDrawdownPct', label: '预期回撤' },
-  { value: 'mainPriceChange', label: '涨跌幅' },
-  { value: 'mainPriceEfficiency', label: '涨跌幅倍数' },
+  { value: 'mainPriceChange', label: '首仓涨跌幅' },
+  { value: 'mainPriceEfficiency', label: '首仓涨跌幅倍数' },
   { value: 'addEfficiency', label: '加仓效用' },
   { value: 'positionAmplification', label: '仓位放大' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
@@ -351,7 +351,7 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 /**
  * 【用户要求】排序行「还是用左对齐吧」：按钮按 SORT_OPTIONS 的次序从左依次排开、间距均匀，不再为了对齐封面的列线而拉开空隙。
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
- *   操作时间 · 镜像止盈 ┆ 预期回撤 · 涨跌幅 · 涨跌幅倍数 · 神奇的 b · 加仓效用 · 加仓次数 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
+ *   操作时间 · 镜像止盈 ┆ 预期回撤 · 首仓涨跌幅 · 首仓涨跌幅倍数 · 神奇的 b · 加仓效用 · 加仓次数 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
@@ -422,7 +422,7 @@ const CAMPAIGN_COLUMNS_FRAME = 'border-x border-transparent';
 const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';
 
 /**
- * 公式 / 统计浮层与视口边缘至少留 12px：靠左的按钮（如排序行的「涨跌幅」、概览的「有效战役」）用 align="end" 打开时，
+ * 公式 / 统计浮层与视口边缘至少留 12px：靠左的按钮（如排序行的「首仓涨跌幅」、概览的「有效战役」）用 align="end" 打开时，
  * 浮层被推回视口内也不会贴着屏幕左缘；很窄的屏幕上宽度同样让出两侧这 12px（POPOVER_VIEWPORT_MAX_W）。
  */
 const POPOVER_COLLISION_PADDING = 12;
@@ -441,18 +441,18 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
     hint: '使用实际盈亏比和固定 10% 风险比例；缺少有效盈亏比时不计算',
   },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
-  mainPriceChange: { noun: '主力已平仓', hint: '涨跌幅按战役算（开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
+  mainPriceChange: { noun: '主力已平仓', hint: '首仓涨跌幅按战役算（开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
   mainPriceEfficiency: {
-    noun: '可计算涨跌幅倍数',
-    hint: '涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
+    noun: '可计算首仓涨跌幅倍数',
+    hint: '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤；主力还没平仓、或缺少主力开仓价 / 初始对冲 A/B 价格的战役不会进入当前排序',
   },
   unrealizedPriceChangePct: {
     noun: '可计算涨幅未兑现',
-    hint: '需要主力涨跌幅与历史 K 线峰值；暂时缺少读数的战役保留在末尾',
+    hint: '需要主力首仓涨跌幅与历史 K 线峰值；暂时缺少读数的战役保留在末尾',
   },
   addEfficiency: {
     noun: '可计算加仓效用',
-    hint: '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|，只算做过加仓、且涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
+    hint: '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|，只算做过加仓、且首仓涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
   },
   positionAmplification: {
     noun: '可计算仓位放大',
@@ -499,7 +499,7 @@ function formatMirrorTpMetric(value: number): string {
 }
 
 /**
- * 【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望也配「分布」看法并默认打开（同神奇的 b）。
+ * 【用户要求】首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望也配「分布」看法并默认打开（同神奇的 b）。
  * 四张分布图共用的两句参考线说明：密度曲线与越界三角的读法四张图一字不差，写一份免得各自漂移。
  */
 const METRIC_DISTRIBUTION_DENSITY_NOTE = '灰色曲线：高斯核密度估计（Silverman 带宽）换算成每档期望场数，与点列共用同一条场数轴；带宽约两档宽，尖峰处会低于实际堆高，是趋势轮廓而不是包络。';
@@ -800,21 +800,21 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     colorMode: 'pnlBand',
     formatValue: formatMirrorTpMetric,
   },
-  // 【用户要求】涨跌幅、涨跌幅倍数、加仓效用与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
+  // 【用户要求】首仓涨跌幅、首仓涨跌幅倍数、加仓效用与已有指标一样各配一张散点图；三者都带方向，按正绿负红着色（同盈亏比）。
   {
     key: 'mainPriceChange',
-    label: '涨跌幅',
-    chartLabel: '涨跌幅图',
+    label: '首仓涨跌幅',
+    chartLabel: '首仓涨跌幅图',
     viewLabel: '时序',
     viewTestId: 'campaign-mainPriceChange-view-time',
-    seriesLabel: '涨跌幅时序',
+    seriesLabel: '首仓涨跌幅时序',
     guide: {
-      yAxis: '每场战役的涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价（开平价与详情页 Legs 表「涨跌幅」列同源）。',
+      yAxis: '每场战役的首仓涨跌幅，单位 %：（平仓价 − 开仓价）÷ 开仓价，按主力方向计——空单价格跌了为正，与盈亏同号。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价（开平价与详情页 Legs 表「涨跌幅」列同源）。',
       point: '点越高，主力吃到的价格行情越大；低于 0% 表示价格朝主力的反方向走。每个点代表一场主力已平仓的战役。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色零线：价格不涨不跌的分界。'],
     },
-    missingValueLabel: '主力涨跌幅',
+    missingValueLabel: '主力首仓涨跌幅',
     colorMode: 'signed',
     formatValue: value => formatLegPriceChangePct(value),
   },
@@ -822,22 +822,22 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'mainPriceChangeDistribution',
     sourceKey: 'mainPriceChange',
     view: 'distribution',
-    label: '涨跌幅分布',
+    label: '首仓涨跌幅分布',
     chartLabel: '分布图',
     viewLabel: '分布',
     viewTestId: 'campaign-mainPriceChange-view-distribution',
-    seriesLabel: '涨跌幅分布',
+    seriesLabel: '首仓涨跌幅分布',
     guide: {
-      yAxis: '落在该涨跌幅附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨跌幅出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: '每个点仍是一场主力已平仓的战役，横向位置就是这场战役的涨跌幅（%，按主力方向计，空单价格跌了为正；开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价；开平价与 Legs 表「涨跌幅」列同源），不考虑时间先后；同一档内的点按涨跌幅从小到大自下而上排。',
+      yAxis: '落在该首仓涨跌幅附近的战役数量：点从底线向上堆叠，堆得越高，这一档首仓涨跌幅出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场主力已平仓的战役，横向位置就是这场战役的首仓涨跌幅（%，按主力方向计，空单价格跌了为正；开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价；开平价与 Legs 表「涨跌幅」列同源），不考虑时间先后；同一档内的点按首仓涨跌幅从小到大自下而上排。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '灰色 0% 竖线：价格不涨不跌的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨跌幅 > 0 的场数占比。',
+        '灰色 0% 竖线：价格不涨不跌的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是首仓涨跌幅 > 0 的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
     },
-    missingValueLabel: '主力涨跌幅',
+    missingValueLabel: '主力首仓涨跌幅',
     colorMode: 'signed',
     formatValue: value => formatLegPriceChangePct(value),
     distribution: {
@@ -849,18 +849,18 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   },
   {
     key: 'mainPriceEfficiency',
-    label: '涨跌幅倍数',
-    chartLabel: '涨跌幅倍数图',
+    label: '首仓涨跌幅倍数',
+    chartLabel: '首仓涨跌幅倍数图',
     viewLabel: '时序',
     viewTestId: 'campaign-mainPriceEfficiency-view-time',
-    seriesLabel: '涨跌幅倍数时序',
+    seriesLabel: '首仓涨跌幅倍数时序',
     guide: {
-      yAxis: '涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤，单位为倍：价格走出了几个「预期回撤」。+3.00 表示主力吃到的行情是入场到对冲边界距离的 3 倍。',
+      yAxis: '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤，单位为倍：价格走出了几个「预期回撤」。+3.00 表示主力吃到的行情是入场到对冲边界距离的 3 倍。',
       point: '点越高，同样的风险距离换来的价格行情越大；低于 0 表示价格朝主力反方向走。每个点代表一场主力已平仓、且算得出预期回撤的战役。',
       colors: PAYOFF_SIGN_COLORS,
-      referenceLines: ['灰色零线：正、负涨跌幅倍数的分界。'],
+      referenceLines: ['灰色零线：正、负首仓涨跌幅倍数的分界。'],
     },
-    missingValueLabel: '涨跌幅倍数',
+    missingValueLabel: '首仓涨跌幅倍数',
     colorMode: 'signed',
     formatValue: value => formatEfficiency(value),
   },
@@ -868,22 +868,22 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     key: 'mainPriceEfficiencyDistribution',
     sourceKey: 'mainPriceEfficiency',
     view: 'distribution',
-    label: '涨跌幅倍数分布',
+    label: '首仓涨跌幅倍数分布',
     chartLabel: '分布图',
     viewLabel: '分布',
     viewTestId: 'campaign-mainPriceEfficiency-view-distribution',
-    seriesLabel: '涨跌幅倍数分布',
+    seriesLabel: '首仓涨跌幅倍数分布',
     guide: {
-      yAxis: '落在该涨跌幅倍数附近的战役数量：点从底线向上堆叠，堆得越高，这一档涨跌幅倍数出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: '每个点仍是一场战役，横向位置就是它的涨跌幅倍数（= 主力涨跌幅 ÷ 预期回撤：价格走出了几个「预期回撤」），不考虑时间先后；同一档内的点按涨跌幅倍数从小到大自下而上排。只画主力已平仓、且算得出预期回撤的战役。',
+      yAxis: '落在该首仓涨跌幅倍数附近的战役数量：点从底线向上堆叠，堆得越高，这一档首仓涨跌幅倍数出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
+      point: '每个点仍是一场战役，横向位置就是它的首仓涨跌幅倍数（= 主力首仓涨跌幅 ÷ 预期回撤：价格走出了几个「预期回撤」），不考虑时间先后；同一档内的点按首仓涨跌幅倍数从小到大自下而上排。只画主力已平仓、且算得出预期回撤的战役。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '灰色 0.00 竖线：正、负涨跌幅倍数的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是涨跌幅倍数 > 0 的场数占比。',
+        '灰色 0.00 竖线：正、负首仓涨跌幅倍数的分界，线右是价格朝主力方向走、线左是朝反方向走；摘要条的「顺向」是首仓涨跌幅倍数 > 0 的场数占比。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
       ],
     },
-    missingValueLabel: '涨跌幅倍数',
+    missingValueLabel: '首仓涨跌幅倍数',
     colorMode: 'signed',
     formatValue: value => formatEfficiency(value),
     distribution: {
@@ -901,7 +901,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-unrealizedPriceChangePct-view-time',
     seriesLabel: '涨幅未兑现时序',
     guide: {
-      yAxis: '涨幅未兑现 = 峰值涨幅 − 涨跌幅，单位为百分点。',
+      yAxis: '涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅，单位为百分点。',
       point: '数值越高，代表主力曾经走出的有利行情最终兑现得越少；0% 表示全部兑现。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: ['灰色 0% 线：峰值涨幅全部兑现。'],
@@ -921,7 +921,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     seriesLabel: '涨幅未兑现分布',
     guide: {
       yAxis: '落在该涨幅未兑现区间的战役数量：点从底线向上堆叠，堆得越高，这一档出现得越多。',
-      point: '每个点是一场可计算峰值涨幅与最终涨跌幅的战役；横向按涨幅未兑现百分点排列，不考虑时间先后。',
+      point: '每个点是一场可计算峰值涨幅与最终首仓涨跌幅的战役；横向按涨幅未兑现百分点排列，不考虑时间先后。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
         '灰色 0% 竖线：峰值行情全部兑现；线右仍有涨幅未兑现。',
@@ -947,10 +947,10 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-addEfficiency-view-time',
     seriesLabel: '加仓效用时序',
     guide: {
-      yAxis: '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|，按实际结算风险倍数与行情风险倍数比较。',
-      point: '点越高，盈亏比 相对涨跌幅倍数绝对值的比值越大。只画实际加仓且 b 可计算的战役；正负跟随 b。涨跌幅倍数显示为 0.00 的不进图。',
+      yAxis: '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|，按实际结算风险倍数与行情风险倍数比较。',
+      point: '点越高，盈亏比 相对首仓涨跌幅倍数绝对值的比值越大。只画实际加仓且 b 可计算的战役；正负跟随 b。首仓涨跌幅倍数显示为 0.00 的不进图。',
       colors: PAYOFF_SIGN_COLORS,
-      referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 表示 b 等于涨跌幅倍数的绝对值。'],
+      referenceLines: ['灰色零线：正、负加仓效用的分界；读数 1 表示 b 等于首仓涨跌幅倍数的绝对值。'],
     },
     missingValueLabel: '加仓效用',
     colorMode: 'signed',
@@ -966,11 +966,11 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
     viewTestId: 'campaign-addEfficiency-view-distribution',
     seriesLabel: '加仓效用分布',
     guide: {
-      yAxis: '落在该加仓效用附近的战役数量，上下镜像：涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆，堆得越远，这一档出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度（下半边的刻度也是场数）。',
-      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 盈亏比 ÷ |涨跌幅倍数|），不考虑时间先后；分母取绝对值，因此指标正负随原盈亏比，表示实际净盈亏的方向，而非价格方向。同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或涨跌幅倍数显示为 0.00 的战役不进图。',
+      yAxis: '落在该加仓效用附近的战役数量，上下镜像：首仓涨跌幅倍数为正的战役从 0 线往上堆，为负的从 0 线往下堆，堆得越远，这一档出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度（下半边的刻度也是场数）。',
+      point: '每个点是一场做过加仓的战役，横向位置就是它的加仓效用（倍，= 盈亏比 ÷ |首仓涨跌幅倍数|），不考虑时间先后；分母取绝对值，因此指标正负随原盈亏比，表示实际净盈亏的方向，而非价格方向。同一档内的点按加仓效用从小到大、由 0 线往外排。没有加仓、或首仓涨跌幅倍数显示为 0.00 的战役不进图。',
       colors: PAYOFF_SIGN_COLORS,
       referenceLines: [
-        '琥珀色 1.00 虚线：b 等于涨跌幅倍数的绝对值；线右表示比值大于 1。1.00 也是档边界，恰好等于 1.00 的点归线右。',
+        '琥珀色 1.00 虚线：b 等于首仓涨跌幅倍数的绝对值；线右表示比值大于 1。1.00 也是档边界，恰好等于 1.00 的点归线右。',
         '灰色 0.00 竖线：加仓效用为 0，即原盈亏比 b = 0。因为分母取绝对值，线右表示实际净盈利、线左表示实际净亏损；颜色同样按原盈亏比的正负区分。',
         METRIC_DISTRIBUTION_DENSITY_NOTE,
         METRIC_DISTRIBUTION_CLAMP_NOTE,
@@ -1130,7 +1130,7 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   expectedDrawdownPct: 'expectedDrawdownPctBars',
   // 几何期望也一样：要判断的是这套打法的资本增长偏不偏、右尾够不够长——那是形状问题。
   geometricExpectancy: 'geometricExpectancyDistribution',
-  // 【用户要求】涨跌幅、涨跌幅倍数、加仓效用、算术期望同神奇的 b：默认看分布，「时序 | 分布」随时切回。
+  // 【用户要求】首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望同神奇的 b：默认看分布，「时序 | 分布」随时切回。
   mainPriceChange: 'mainPriceChangeDistribution',
   mainPriceEfficiency: 'mainPriceEfficiencyDistribution',
   unrealizedPriceChangePct: 'unrealizedPriceChangePctDistribution',
@@ -1293,7 +1293,7 @@ function usiTone(value: number | null): string {
   return 'text-[#F6465D]';
 }
 
-/** 分档档界的读数：与封面上这一项的读数同一种写法（神奇的 b写倍数 b、涨跌幅带正负号与 %……）。 */
+/** 分档档界的读数：与封面上这一项的读数同一种写法（神奇的 b写倍数 b、首仓涨跌幅带正负号与 %……）。 */
 function formatSortBinValue(mode: CampaignSortMode, value: number): string {
   switch (mode) {
     case 'captureRate': return formatCampaignPayoffRatio(value);
@@ -1430,7 +1430,7 @@ const MIRROR_TP_STATUS_LABEL: Record<MirrorTpOutcome, string> = {
 
 const formatMainPriceEfficiency = formatEfficiency;
 
-/** 卡片上主力涨跌幅的字色：与 Legs 表「涨跌幅」列同一套判定（按显示到两位小数后的值，正绿负红，0 中性）。 */
+/** 卡片上主力首仓涨跌幅的字色：与 Legs 表「涨跌幅」列同一套判定（按显示到两位小数后的值，正绿负红，0 中性）。 */
 const MAIN_PRICE_CHANGE_TONE: Record<LegPriceChangeDirection, string> = {
   up: TONE_UP,
   down: TONE_DOWN,
@@ -1483,8 +1483,8 @@ const CARD_METRIC_LABEL = {
   geometricExpectancy: '几何期望',
   mirrorTp: '镜像止盈',
   expectedDrawdownPct: '预期回撤',
-  mainPriceChange: '涨跌幅',
-  mainPriceEfficiency: '涨跌幅倍数',
+  mainPriceChange: '首仓涨跌幅',
+  mainPriceEfficiency: '首仓涨跌幅倍数',
   addEfficiency: '加仓效用',
   positionAmplification: '仓位放大',
   unrealizedPriceChangePct: '涨幅未兑现',
@@ -1924,7 +1924,7 @@ const CampaignCard = memo(function CampaignCard({
       </div>
 
       {/* 封面指标行：左对齐、按当前列表的读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH_CLASS），上标签、下数值；【用户要求】顺序与排序行一致：
-          镜像止盈、预期回撤、涨跌幅、涨跌幅倍数、神奇的 b、加仓效用、几何期望、算术期望。当前排序项高亮。 */}
+          镜像止盈、预期回撤、首仓涨跌幅、首仓涨跌幅倍数、神奇的 b、加仓效用、几何期望、算术期望。当前排序项高亮。 */}
       <div className={`relative border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
@@ -1998,8 +1998,8 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-main-price-change"
             title={mainPriceChangePct == null
-              ? '涨跌幅：主力都还没平仓（没有平仓价），显示「—」'
-              : '涨跌幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「涨跌幅」的说明'}
+              ? '首仓涨跌幅：主力都还没平仓（没有平仓价），显示「—」'
+              : '首仓涨跌幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「首仓涨跌幅」的说明'}
             className={metricCell('mainPriceChange')}
             data-sort-highlight={litAttr('mainPriceChange')}
           >
@@ -2013,8 +2013,8 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-main-price-efficiency"
             title={mainPriceEfficiency == null
-              ? '涨跌幅倍数 = 主力涨跌幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
-              : `涨跌幅倍数 = 主力涨跌幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
+              ? '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
+              : `首仓涨跌幅倍数 = 主力首仓涨跌幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
             className={metricCell('mainPriceEfficiency')}
             data-sort-highlight={litAttr('mainPriceEfficiency')}
           >
@@ -2029,9 +2029,9 @@ const CampaignCard = memo(function CampaignCard({
             data-testid="campaign-add-efficiency"
             title={addEfficiency == null || mainPriceEfficiency == null
               ? (campaignHasMainAdd(legs)
-                ? '加仓效用 = 盈亏比 ÷ |涨跌幅倍数|：这场涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
+                ? '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|：这场首仓涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ |涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
+                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
@@ -2060,8 +2060,8 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-unrealized-price-change"
             title={unrealizedPriceChangePct == null
-              ? '涨幅未兑现会在主力涨跌幅与峰值涨幅都可计算时显示'
-              : `涨幅未兑现 = 峰值涨幅 − 涨跌幅 = ${readings.unrealizedPriceChangePct}`}
+              ? '涨幅未兑现会在主力首仓涨跌幅与峰值涨幅都可计算时显示'
+              : `涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅 = ${readings.unrealizedPriceChangePct}`}
             className={metricCell('unrealizedPriceChangePct')}
             data-sort-highlight={litAttr('unrealizedPriceChangePct')}
           >
@@ -2873,7 +2873,7 @@ export default function JournalCampaignsPage() {
       const value = rowPositionAmplification(row);
       return value == null ? null : sortBinValue('positionAmplification', value);
     });
-    // 【用户要求】涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
+    // 【用户要求】首仓涨跌幅倍数为负的战役也算加仓效用（b ÷ |η|，正负跟随 b）；分布图里它们从 0 线往下镜像堆
     const addEfficiency = buildCampaignMetricSeries(samples.map(({ row, ...sample }) => ({
       ...sample,
       value: rowAddEfficiency(row),
@@ -2895,7 +2895,7 @@ export default function JournalCampaignsPage() {
       mirrorTp: mirrorTp,
       // 柱状图与时序图读的是同一份镜像止盈序列，只是横轴换成了结果档位。
       mirrorTpBars: mirrorTp,
-      // 涨跌幅三项与算术期望同理：分布图与时序图共用同一份序列。
+      // 首仓涨跌幅三项与算术期望同理：分布图与时序图共用同一份序列。
       mainPriceChange,
       mainPriceChangeDistribution: mainPriceChange,
       mainPriceEfficiency,
@@ -3762,7 +3762,7 @@ export default function JournalCampaignsPage() {
         {/* 区间怎么读（含不含端点、档界从哪来）：一行很小的脚注 */}
         {(sortBinning || sortCrossTabs.some(crossTab => crossTab?.thresholds)) && (
           <div data-testid="sort-chain-quartile-note" className="mt-2 text-[9px] leading-snug text-muted-foreground/60">
-            注：与 0 相关的指标（神奇的 b、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分，负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算，就是那一档里最小的读数（0 除外）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。
+            注：与 0 相关的指标（神奇的 b、首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分，负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算，就是那一档里最小的读数（0 除外）。「≥ x」含 x；「a ~ b」含 a、不含 b；「&lt; x」不含 x。
           </div>
         )}
       </div>
@@ -3983,7 +3983,7 @@ export default function JournalCampaignsPage() {
             <div>第一级决定哪些战役进列表，与只按它排时同一口径。</div>
             <div>第一级打平时按第二级比较，再打平看第三级……各级都打平后，按第一级原有的并列规则收尾。</div>
             <div>第二级起算不出的战役留在本档、排到本档末尾（不论升序还是降序），封面照常显示「—」。</div>
-            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（神奇的 b、涨跌幅、涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
+            <div>第一级是连续数值指标且链上不止一级时，先把列表分成四档，同档内按后面各级排：与 0 相关的指标（神奇的 b、首仓涨跌幅、首仓涨跌幅倍数、加仓效用、算术期望、几何期望）以 0 为界，负的一侧与正的一侧各按场数对半分（恰好为 0 的归正的一侧），负值永不与正值同档；预期回撤按四分位分；仓位放大以 1.00x 为界，没有放大的（≤ 1.00x）自成一档，放大了的按场数三等分。档界按当前列表算、按封面精度取整，就是那一档里最小的读数（0 除外）。各级都打平再按第一级本身的数值。镜像止盈 / 自评 / 杠杆倍数 / 字母 / 操作时间不分档；只有一级时也不分档。</div>
             <div>第二级起每一级标出本级排了几场：前面各级并列的战役里按这一项分出先后的几场，算不出的留在组尾；「未起作用」= 前面各级没有并列、并列的读数全相同，或并列的都算不出这一项。</div>
             <div>档界与各级的作用见下方「当前」；点排序链上的「分档」「N 场」，或双击、右键任一级，也能打开这里。</div>
             <div>点第一级的名称或箭头切换方向；第二级起点击依次切换「双向 → 降序 → 升序」。新加一级默认“双向”：在上一级同一档内继续严格按上一级原始读数及其升降序排列，不用本级指标打乱；选降序或升序才按本级指标重排。× 移除这一级；「清除」只保留第一级。</div>
@@ -4609,9 +4609,9 @@ export default function JournalCampaignsPage() {
                       </>
                     ) : formula === 'mainPriceChangeSort' ? (
                       <>
-                        <div className="font-medium text-foreground">主力涨跌幅计算公式</div>
+                        <div className="font-medium text-foreground">主力首仓涨跌幅计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          涨跌幅ᵢ = s ×（平仓价 − 开仓价）÷ 开仓价 × 100%
+                          首仓涨跌幅ᵢ = s ×（平仓价 − 开仓价）÷ 开仓价 × 100%
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
@@ -4620,24 +4620,24 @@ export default function JournalCampaignsPage() {
                           <div>开仓价取主力（main_open，没有才取 reentry_main）各笔里最有利的那个：主多最低、主空最高。{PRICE_CHANGE_EXIT_RULE_TEXT}开平价与详情页 Legs 表同源（含 1 分钟 K 线平仓价校正）。</div>
                           <div>按主力方向计：空单价格跌了为正，与盈亏同号。</div>
                           <div>
-                            例：主多 100 → 112，涨跌幅 = (112 − 100) ÷ 100 = <span className="text-foreground">+12.00%</span>；
-                            主空 50 → 47，涨跌幅 = −1 × (47 − 50) ÷ 50 = <span className="text-foreground">+6.00%</span>。
+                            例：主多 100 → 112，首仓涨跌幅 = (112 − 100) ÷ 100 = <span className="text-foreground">+12.00%</span>；
+                            主空 50 → 47，首仓涨跌幅 = −1 × (47 − 50) ÷ 50 = <span className="text-foreground">+6.00%</span>。
                           </div>
                           <div>主力都还没平仓（没有平仓价）的战役显示「—」，不参与排序与散点图。</div>
                         </div>
                       </>
                     ) : formula === 'mainPriceEfficiencySort' ? (
                       <>
-                        <div className="font-medium text-foreground">涨跌幅倍数计算公式</div>
+                        <div className="font-medium text-foreground">首仓涨跌幅倍数计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          ηᵢ = 涨跌幅ᵢ ÷ 预期回撤ᵢ
+                          ηᵢ = 首仓涨跌幅ᵢ ÷ 预期回撤ᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>预期回撤：</div>
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                             dᵢ = max（|主力开仓价 − 初始对冲 A 价|，|主力开仓价 − 初始对冲 B 价|）÷ 主力开仓价 × 100%
                           </div>
-                          <div>涨跌幅与预期回撤都是价格层面的百分数，相除得到倍数：价格走出了几个「预期回撤」。</div>
+                          <div>首仓涨跌幅与预期回撤都是价格层面的百分数，相除得到倍数：价格走出了几个「预期回撤」。</div>
                           <div>
                             例：主力涨了 12%、入场到对冲边界 4%，ηᵢ = 12 ÷ 4 = <span className="text-foreground">+3.00</span>；
                             价格朝反方向走 −2%，ηᵢ = −2 ÷ 4 = <span className="text-foreground">−0.50</span>。
@@ -4649,7 +4649,7 @@ export default function JournalCampaignsPage() {
                       <>
                         <div className="font-medium text-foreground">涨幅未兑现计算公式</div>
                         <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          涨幅未兑现ᵢ = 峰值涨幅ᵢ − 涨跌幅ᵢ
+                          涨幅未兑现ᵢ = 峰值涨幅ᵢ − 首仓涨跌幅ᵢ
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>峰值涨幅按主力方向取持有窗口内最有利的 K 线极值：主多取最高价，主空取最低价。</div>
@@ -4664,17 +4664,17 @@ export default function JournalCampaignsPage() {
                           加仓效用ᵢ = bᵢ ÷ |ηᵢ|
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          {/* 两个式子各自不断行，只在「；」之后换行：不会把「涨跌幅ᵢ」拆成「涨跌幅」和另起一行的「ᵢ」 */}
+                          {/* 两个式子各自不断行，只在「；」之后换行：不会把「首仓涨跌幅ᵢ」拆成「首仓涨跌幅」和另起一行的「ᵢ」 */}
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
                             <span>{MAGIC_B_FORMULA}；</span>
                             <wbr />
-                            <span className="whitespace-nowrap">ηᵢ = 涨跌幅ᵢ ÷ 预期回撤ᵢ</span>
+                            <span className="whitespace-nowrap">ηᵢ = 首仓涨跌幅ᵢ ÷ 预期回撤ᵢ</span>
                           </div>
                           <div>这是几何指标与原始行情风险倍数的比较，不是实际净盈利的放大倍数。</div>
                           <div>
                             例：bᵢ = +6.00、ηᵢ = +3.00，加仓效用 = 6 ÷ 3 = <span className="text-foreground">+2.00</span>。
                           </div>
-                          <div>只算做过加仓且 b 有完整依据的战役。<span className="text-foreground">分母取绝对值、正负跟随 b</span>：例 −3 ÷ |−2| = −1.50。涨跌幅倍数显示为 0.00 时分母过小不算；缺失项不参与排序与散点图，封面显示「—」。</div>
+                          <div>只算做过加仓且 b 有完整依据的战役。<span className="text-foreground">分母取绝对值、正负跟随 b</span>：例 −3 ÷ |−2| = −1.50。首仓涨跌幅倍数显示为 0.00 时分母过小不算；缺失项不参与排序与散点图，封面显示「—」。</div>
                         </div>
                       </>
                     ) : formula === 'addCountSort' ? (

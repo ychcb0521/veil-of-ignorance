@@ -637,8 +637,8 @@ describe('JournalCampaignDetailPage metrics', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByText('涨跌幅倍数')).toBeInTheDocument());
-    // 【用户要求】「机会质量」已删掉（涨跌幅倍数更合理）
+    await waitFor(() => expect(screen.getByText('首仓涨跌幅倍数')).toBeInTheDocument());
+    // 【用户要求】「机会质量」已删掉（首仓涨跌幅倍数更合理）
     expect(screen.queryByText('机会质量')).not.toBeInTheDocument();
     // 没有首次加仓的 T₁ 与基数，不能拿净盈亏 200 ÷ L₀ 100 的 2.00 冒充新几何 b。
     const payoffRow = screen.getAllByText('神奇的 b')
@@ -690,7 +690,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
     expect(exportInput.chartInterval).toBe('5m');
     // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
-    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","几何期望","算术期望","预期回撤","涨跌幅","涨跌幅倍数","已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","仓位几何累积倍数","相对涨幅","神奇的 b","几何期望","算术期望","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
