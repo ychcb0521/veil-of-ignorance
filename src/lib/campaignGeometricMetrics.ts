@@ -19,6 +19,12 @@ export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ �
 export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二，方法三仅作理论对照。`;
 export const MAGIC_B_RULE = '采用实际仓位几何累积倍数（含首次减仓因子），相对涨幅以初始每币风险 E − K初 为分母。b 直接乘该比值，初始风险不再重复除一次；例如相对涨幅 2.00× 参与计算为 2。不再乘基数仓位比例 β，不追加结算修正。几何公式与已实现净盈亏 ÷ L₀ 的结算口径可能存在差异；缺少有效依据时显示「—」。';
 
+/** One compact reading: actual followed by the optional theoretical comparison. */
+export function formatActualTheoreticalMetric(actual: number | null | undefined, theoretical: number | null | undefined, format: (value: number) => string): string {
+  const reading = actual == null || !Number.isFinite(actual) ? '—' : format(actual);
+  return theoretical == null || !Number.isFinite(theoretical) ? reading : `${reading}（${format(theoretical)}）`;
+}
+
 export interface GeometricFirstAddBasis {
   beforeCoins: number;
   addCoins: number;

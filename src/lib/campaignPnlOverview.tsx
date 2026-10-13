@@ -5,7 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
@@ -660,9 +660,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   });
   built.push({
     key: 'positionGeometricMultiple', label: '仓位几何累积倍数',
-    value: metrics.positionGeometricMultiple == null ? '—' : `${metrics.positionGeometricMultiple.toFixed(2)}x`,
+    value: formatActualTheoreticalMetric(metrics.positionGeometricMultiple, metrics.positionGeometricMultipleTheoretical, value => `${value.toFixed(2)}x`),
     color: '#1E2329', valueClassName: 'text-foreground/85',
-    help: <><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p>
+    help: <><p>读数括号内为理论值，括号前为实际值。</p><p className="font-mono">仓位几何累积倍数 = {POSITION_GEOMETRIC_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} /><p>{POSITION_GEOMETRIC_ALPHA_RULE}</p><p>最初的 1 对应初始主力与镜像仓位合计币数；先乘首次实际减仓后的保留比例，再累乘实际成交加仓因子。若还有其他减仓或重新入场，不等同于最终持仓 ÷ 初始总币数。依据不完整时显示「—」。</p>
       <div className="space-y-2 border-t border-border/60 pt-2" data-testid="position-geometric-theoretical-help">
         <p className="font-medium text-foreground">仓位几何累积倍数（理论） <span className="font-mono tabular-nums">{metrics.positionGeometricMultipleTheoretical == null ? '—' : `${metrics.positionGeometricMultipleTheoretical.toFixed(2)}x`}</span></p>
         <p className="font-mono">{POSITION_THEORETICAL_FORMULA}</p><PositionGeometricWorked basis={metrics.geometricMetricBasis} theoretical /><p>{LEG_THEORETICAL_FACTOR_HINT}</p>
@@ -674,9 +674,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     const number = (value: number) => Number(value.toPrecision(12)).toString();
     built.push({
       key: 'magicB', label: '神奇的 b',
-      value: magicB == null ? '—' : formatOverviewPayoffRatio(magicB * 100),
+      value: formatActualTheoreticalMetric(magicB, theoreticalWorked, value => formatOverviewPayoffRatio(value * 100)),
       color: pnlExportColor(magicB == null ? null : Number(magicB.toFixed(2))), valueClassName: pnlColor(magicB == null ? null : Number(magicB.toFixed(2))),
-      help: <><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
+      help: <><p>读数括号内为神奇的 b（理论），括号前为实际几何公式 b。</p><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
       worked != null && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
         <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />

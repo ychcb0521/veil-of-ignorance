@@ -56,6 +56,8 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(riseHelp).toHaveTextContent('相对涨幅 = (F − Kₘ) ÷ (E − K初)');
     expect(riseHelp).toHaveTextContent('(F − Kₘ) ÷ (E − K初) = (220 − 140) ÷ (100 − 90) ≈ 8');
     expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('8.00×');
+    expect(items.find(item => item.key === 'positionGeometricMultiple')?.value).toBe('3.00x（2.50x）');
+    expect(items.find(item => item.key === 'magicB')?.value).toBe('24.00（20.00）');
     const help = render(<>{items.find(item => item.key === 'magicB')!.help}</>).container;
     for (const id of ['magic-b-worked', 'magic-b-theoretical-worked']) {
       expect(help.querySelector(`[data-testid="${id}"]`)).toHaveTextContent('(220 − 140) ÷ (100 − 90) ≈ 8');
@@ -74,7 +76,7 @@ describe('buildCampaignPnlOverviewItems', () => {
       effectivePriceChangePct: rise, magicB: 2 * rise / 100,
     }));
     const magic = items.find(item => item.key === 'magicB')!;
-    expect(magic.value).toBe('0.43');
+    expect(magic.value).toBe('0.43（0.67）');
     const help = render(<>{magic.help}</>).container;
     expect(help).toHaveTextContent('方法三 · 神奇的 b（理论）');
     expect(help).toHaveTextContent('神奇的 b（理论） = 仓位几何累积倍数（理论） × 相对涨幅');

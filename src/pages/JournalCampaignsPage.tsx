@@ -69,7 +69,7 @@ import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, MAGIC_B_FORMULA, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_FORMULA, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
 import {
@@ -140,6 +140,7 @@ import {
   rowPositionGeometricMultiple,
   rowPositionGeometricMultipleTheoretical,
   rowRelativePriceChange,
+  rowEffectivePriceChangePct,
   rowEffectivePriceChangeMultiple,
   rowMagicB,
   rowMainPriceEfficiency,
@@ -1541,8 +1542,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
     addCount: String(rowAddCount(row)),
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
-    positionGeometricMultiple: rowPositionGeometricMultiple(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultiple(row)!),
-    magicB: rowMagicB(row) == null ? '—' : formatCampaignPayoffRatio(rowMagicB(row)! * 100),
+    positionGeometricMultiple: formatActualTheoreticalMetric(rowPositionGeometricMultiple(row), rowPositionGeometricMultipleTheoretical(row), formatPositionAmplification),
+    magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
     effectivePriceChangePct: rowRelativePriceChange(row) == null ? '—' : `${rowRelativePriceChange(row)!.toFixed(2)}×`,
