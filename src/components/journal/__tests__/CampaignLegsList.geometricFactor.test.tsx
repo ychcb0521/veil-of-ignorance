@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
@@ -34,8 +34,9 @@ describe('Legs per-add geometric factor', () => {
     const data = example();
     render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
     const header = screen.getByLabelText(LEG_GEOMETRIC_FACTOR_LABEL);
-    expect(header.querySelector('span')).toHaveClass('block');
-    expect(header.querySelector('span')).toHaveTextContent('（1+α）');
+    expect(header.querySelector('span')).toHaveTextContent('1+α');
+    expect(header).not.toHaveTextContent('仓位的几何复利');
+    expect(within(header).getByRole('button', { name: '仓位的几何复利说明' })).toBeInTheDocument();
     expect(header.previousElementSibling).toBe(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(header.nextElementSibling).toHaveTextContent('加仓校验');
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
@@ -55,11 +56,42 @@ describe('Legs per-add geometric factor', () => {
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
   });
 
+  it('clicking each actual factor opens its own substituted process; close and sorting preserve row identity', () => {
+    const data = example();
+    render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-add1')).getByRole('button'));
+    let dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(within(dialog).getByRole('heading')).toHaveTextContent('加仓1 · 仓位的几何复利');
+    expect(dialog).toHaveTextContent('Q前 = 10 币');
+    expect(dialog).toHaveTextContent('ΔQ = 50.9 币');
+    expect(dialog).toHaveTextContent('α = ΔQ ÷ Q前 = 50.9 ÷ 10 ≈ 5.09（509.00%）');
+    expect(dialog).toHaveTextContent('Q后 = Q前 + ΔQ = 10 + 50.9 = 60.9 币');
+    expect(dialog).toHaveTextContent('60.9 ÷ 10 ≈ 6.09 ≈ 6.09×');
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+    expect(screen.queryByTestId('leg-geometric-factor-detail-dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
+    fireEvent.click(within(screen.getByTestId('leg-geometric-factor-add2')).getByRole('button'));
+    dialog = screen.getByTestId('leg-geometric-factor-detail-dialog');
+    expect(within(dialog).getByRole('heading')).toHaveTextContent('加仓2 · 仓位的几何复利');
+    expect(dialog).toHaveTextContent('Q前 = 60.9 币');
+    expect(dialog).toHaveTextContent('ΔQ = 30.45 币');
+    expect(dialog).toHaveTextContent('30.45 ÷ 60.9 ≈ 0.5（50.00%）');
+    expect(within(dialog).getByTestId('leg-geometric-factor-detail-value')).toHaveTextContent('1.50×');
+  });
+
+  it('the quiet header explanation names the metric without adding a second header line', () => {
+    render(<MemoryRouter><CampaignLegsList {...example()} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: '仓位的几何复利说明' }));
+    expect(screen.getByText('仓位的几何复利', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(/点击加仓行的倍数/)).toBeInTheDocument();
+  });
+
   it('missing prior quantity is unknown and never substituted with an allowable maximum', () => {
     const data = example();
     data.legs[0].pre_position_size = null;
     render(<MemoryRouter><CampaignLegsList {...data} /></MemoryRouter>);
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('—');
+    expect(within(screen.getByTestId('leg-geometric-factor-add1')).queryByRole('button')).not.toBeInTheDocument();
     expect(buildCampaignLegsExportRows(data).find(row => row.legId === 'add1')!.cells[10][0].text).toBe('—');
   });
   it('an add without actual-fill evidence never invents a geometric factor', () => {

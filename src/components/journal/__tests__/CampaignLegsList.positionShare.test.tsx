@@ -128,8 +128,8 @@ describe('Legs 列表的「多单占比」列', () => {
   it('只有「多单占比」一列，紧跟在「币量 / 仓位」之后、「加仓校验」之前；列头是按钮：「多」标签 +「占比」+ 排序图标，右对齐', () => {
     renderList(screenshotLegs());
     const col = colOf(LONG);
-    expect(titlesOf().slice(col - 1, col + 3)).toEqual(['币量 / 仓位', LONG, '仓位的几何复利（1+α）', '加仓校验']);
-    expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', LONG, '仓位的几何复利（1+α）', '加仓校验', '手续费', '委托', '操作']);
+    expect(titlesOf().slice(col - 1, col + 3)).toEqual(['币量 / 仓位', LONG, '1+α', '加仓校验']);
+    expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', LONG, '1+α', '加仓校验', '手续费', '委托', '操作']);
     // 【用户要求】「空单占比」一列不再存在：表头里没有它，也没有第二个排序按钮、第二枚标签
     expect(titlesOf()).not.toContain(SHORT);
     expect(headerCells().filter(cell => cell.tagName === 'BUTTON')).toHaveLength(1);
@@ -776,7 +776,7 @@ describe('Legs 列表的「多单占比」列', () => {
     it('列头改成红「空」标签 +「占比」，读屏名与列说明都按空单写；列位不变（币量 / 仓位 → 占比 → 加仓校验）', () => {
       renderMainShort();
       const col = colOf(SHORT);
-      expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', SHORT, '仓位的几何复利（1+α）', '加仓校验', '手续费', '委托', '操作']);
+      expect(titlesOf()).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开 / 平价', '操作方式', '涨跌幅', '币量 / 仓位', SHORT, '1+α', '加仓校验', '手续费', '委托', '操作']);
       expect(titlesOf()).not.toContain(LONG);
       const header = headerCells()[col];
       expect(header).toBe(screen.getByTestId('legs-share-sort-short'));

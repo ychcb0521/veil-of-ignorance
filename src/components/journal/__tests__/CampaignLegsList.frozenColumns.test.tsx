@@ -169,7 +169,7 @@ describe('【用户要求】Legs 表冻结「角色」一列', () => {
     // 空单对冲排在前面：按多单占比排序会把主力挪到第一行
     renderList(undefined, { hedgeFirst: true });
     const header = screen.getByTestId('legs-header-row');
-    const buttons = Array.from(header.querySelectorAll('button'));
+    const buttons = Array.from(header.children).filter(cell => cell.tagName === 'BUTTON');
     expect(buttons).toHaveLength(1);
     for (const button of buttons) {
       expect(isSticky(button)).toBe(false);

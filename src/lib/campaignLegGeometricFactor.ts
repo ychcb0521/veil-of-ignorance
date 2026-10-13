@@ -1,7 +1,7 @@
 import { formatAddSizingCoinQuantity, resolveCampaignAddQuantitySteps, type CampaignAddSizingInput } from '@/lib/campaignAddSizingCheck';
 
 export const LEG_GEOMETRIC_FACTOR_LABEL = '仓位的几何复利（1+α）';
-export const LEG_GEOMETRIC_FACTOR_HINT = '本次仓位倍数 = 1 + α；α = 本次实际加仓币数 ÷ 加仓前实际持币数。按实际成交计算，不是可允许加仓上限；各次倍数的乘积为仓位几何累积倍数。';
+export const LEG_GEOMETRIC_FACTOR_HINT = '仓位的几何复利：本次仓位倍数 = 1 + α；α = 本次实际加仓币数 ÷ 加仓前实际持币数。按实际成交计算，不是可允许加仓上限；各次倍数的乘积为仓位几何累积倍数。';
 
 export interface LegGeometricFactor {
   beforeCoins: number;

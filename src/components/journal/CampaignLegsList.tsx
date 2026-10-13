@@ -2,6 +2,8 @@ import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { UIEvent } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Crosshair, EyeOff, Unlink } from 'lucide-react';
 import { LegRoleChip } from '@/components/journal/LegRoleChip';
+import { QuietInfo } from '@/components/journal/QuietInfo';
+import { LegGeometricFactorDialog } from '@/components/journal/LegGeometricFactorDialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { resolveLegExecution, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { buildLegPositionShareInputs } from '@/lib/legPositionShareInputs';
@@ -186,7 +188,7 @@ const FEE_COLUMN_HINT = '币安口径：手续费 = 名义 × 费率，开仓、
 // 委托列一格不少、吃掉全部富余；保留角色、时间、价格和币量的可读宽度，1440px 窗口仍完整显示。
 // 手续费只留一行合计 56px；开仓价 / 平仓价并成一列两行（与时间列的开 / 平两行对齐）。
 // 时间 148（标签 30 + 「2025-09-19 22:42」约 106）、盈亏 96、ΔR 64、操作方式 64（两栏各 3em）；
-// 几何复利 76px：中文标题 70px、1+α 独立第二行；加仓校验 64px 仅显示多加百分比，较长数字自然换行。
+// 几何复利 76px：表头只留 1+α 与淡说明图标，数字与原列右沿对齐；加仓校验 64px 仅显示多加百分比。
 // 涨跌幅 68、操作 56（两枚 24px 图标）；统一列间距 5px，不缩小数字字号或挤压 ΔR 胶囊。
 const LEGS_GRID = 'grid-cols-[132px_148px_96px_64px_80px_64px_68px_136px_60px_76px_64px_56px_minmax(184px,1fr)_56px]';
 
@@ -643,6 +645,7 @@ export function CampaignLegsList({
   unfilledOrderIds,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
+  const [geometricDetailLegId, setGeometricDetailLegId] = useState<string | null>(null);
   // 「占比」列的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是本列那一侧
   const [shareSort, setShareSort] = useState<LegPositionShareSort | null>(null);
   const legsScrollRef = useRef<HTMLDivElement>(null);
@@ -813,6 +816,8 @@ export function CampaignLegsList({
   const selectedAddSizingVerdict = addSizingDetailLegId == null
     ? null
     : addSizingMap.get(addSizingDetailLegId) ?? null;
+  const selectedGeometricLeg = geometricDetailLegId == null ? null : legs.find(leg => leg.id === geometricDetailLegId) ?? null;
+  const selectedGeometricFactor = geometricDetailLegId == null ? null : legGeometricFactors.get(geometricDetailLegId) ?? null;
 
   return (
     <>
@@ -839,7 +844,10 @@ export function CampaignLegsList({
             <div className="text-right" title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>
             <div className="text-right" title="上行：按开仓价折算的币量，即加仓公式里的 X；下行：名义仓位（USD）">币量 / 仓位</div>
             <PositionShareSortHeader side={shareSide} sort={activeShareSort} onSort={toggleShareSort} />
-            <div className="text-right leading-snug" title={LEG_GEOMETRIC_FACTOR_HINT} aria-label={LEG_GEOMETRIC_FACTOR_LABEL}>仓位的几何复利<span className="block whitespace-nowrap text-muted-foreground/65">（1+α）</span></div>
+            <div className="flex items-center justify-end gap-0.5 whitespace-nowrap" aria-label={LEG_GEOMETRIC_FACTOR_LABEL}>
+              <span>1+α</span>
+              <QuietInfo label="仓位的几何复利"><p>{LEG_GEOMETRIC_FACTOR_HINT}</p><p>点击加仓行的倍数，查看实际币数代入的完整计算过程。</p></QuietInfo>
+            </div>
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
@@ -1069,8 +1077,13 @@ export function CampaignLegsList({
                     title={showGeometricFactor ? describeLegGeometricFactor(legGeometricFactors.get(leg.id)) : undefined}
                     className="text-right font-medium tabular-nums leading-snug text-foreground/80"
                   >
-                    {showGeometricFactor
-                      ? formatLegGeometricFactor(legGeometricFactors.get(leg.id)) : ''}
+                    {showGeometricFactor && (legGeometricFactors.get(leg.id)
+                      ? <button type="button" aria-label={`查看加仓${leg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}的仓位几何复利计算过程`}
+                          onClick={() => setGeometricDetailLegId(leg.id)}
+                          className="w-full rounded py-0.5 text-right transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+                          {formatLegGeometricFactor(legGeometricFactors.get(leg.id))}
+                        </button>
+                      : '—')}
                   </div>
                   {(() => {
                     /**
@@ -1415,6 +1428,10 @@ export function CampaignLegsList({
         verdict={selectedAddSizingVerdict}
         onClose={() => setAddSizingDetailLegId(null)}
       />
+    )}
+    {selectedGeometricLeg && selectedGeometricFactor && (
+      <LegGeometricFactorDialog ordinal={selectedGeometricLeg.leg_role?.match(/^main_add_(\d+)$/)?.[1] ?? ''}
+        factor={selectedGeometricFactor} onClose={() => setGeometricDetailLegId(null)} />
     )}
     </>
   );
