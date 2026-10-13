@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import {
   appendSortLevel,
   CAMPAIGN_SORT_MODES,
+  OVERVIEW_EXTRA_SORT_MODES,
+  rowOverviewSortMetric,
   CONTINUOUS_SORT_MODES,
   buildCampaignSortKeys,
   clearSortChain,
@@ -162,6 +164,22 @@ describe('排序链：依次比较', () => {
 });
 
 describe('每个排序项的独立比较器', () => {
+  it('新增概览排序复用读数：升降序都把缺值留在末尾，零盈亏与零回撤保留为有效值', () => {
+    const a = { ...makeSortRow({ id: 'a', pnl: 10, dd: 5 }), initialExpectedMaxLoss: 100, peakPriceChangePct: 10, dynamicMaxDrawdownPct: 0 };
+    const b = { ...makeSortRow({ id: 'b', pnl: -5, dd: 5 }), initialExpectedMaxLoss: 50, peakPriceChangePct: 20, dynamicMaxDrawdownPct: 10 };
+    const missing = { ...makeSortRow({ id: 'missing', pnl: null, dd: 0 }), initialExpectedMaxLoss: 0, peakPriceChangePct: null, dynamicMaxDrawdownPct: null };
+    expect(rowOverviewSortMetric(a, 'peakPriceEfficiency')).toBe(2);
+    for (const mode of OVERVIEW_EXTRA_SORT_MODES) {
+      const descending = sortCampaignRows([missing, a, b], [{ mode, direction: 'desc' }]);
+      const ascending = sortCampaignRows([missing, a, b], [{ mode, direction: 'asc' }]);
+      expect(descending[descending.length - 1]?.campaign.id, mode).toBe('missing');
+      expect(ascending[ascending.length - 1]?.campaign.id, mode).toBe('missing');
+      expect(descending.slice(0, 2).map(row => row.campaign.id)).toEqual(ascending.slice(0, 2).reverse().map(row => row.campaign.id));
+      expect(parseCampaignSortChain(new URLSearchParams(`sort=${mode}&direction=asc`))[0]).toEqual({ mode, direction: 'asc' });
+    }
+    expect(rowOverviewSortMetric(a, 'dynamicMaxDrawdownPct')).toBe(0);
+    expect(rowOverviewSortMetric(makeSortRow({ id: 'flat', pnl: 0 }), 'realizedPnl')).toBe(0);
+  });
   const keys = buildCampaignSortKeys<CampaignSortRow>();
   const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1 };
   const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null };
@@ -174,10 +192,10 @@ describe('每个排序项的独立比较器', () => {
         expect(key.missing(empty)).toBe(true);
         continue;
       }
-      if (mode === 'unrealizedPriceChangePct') {
+      if (mode === 'unrealizedPriceChangePct' || OVERVIEW_EXTRA_SORT_MODES.includes(mode as typeof OVERVIEW_EXTRA_SORT_MODES[number])) {
         // 无读数的战役保留在列表末尾，不因峰值未越过预期回撤而消失。
         expect(key.include(empty)).toBe(true);
-        expect(key.missing(empty)).toBe(true);
+        expect(key.missing(empty)).toBe(mode === 'unrealizedPriceChangePct' || rowOverviewSortMetric(empty, mode as typeof OVERVIEW_EXTRA_SORT_MODES[number]) == null);
         continue;
       }
       expect(key.missing(withValue), `${mode} 有读数`).toBe(false);
@@ -463,7 +481,8 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangeMultiple', 'effectivePriceChangePct', 'expectedDrawdownPct',
       'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'unrealizedPriceChangePct',
-    ]);
+      ...OVERVIEW_EXTRA_SORT_MODES,
+    ].sort());
     // 第一级算不出的战役本来就不进列表，也不参与档界
     const withMissing = [...BINNED, makeSortRow({ id: 'none', pcr: null })];
     expect(resolveSortBinning(withMissing, [{ mode: 'captureRate', direction: 'desc' }, { mode: 'mirrorTp', direction: 'desc' }])?.total).toBe(9);
@@ -763,8 +782,8 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    expect(CAMPAIGN_SORT_MODES.slice(0, 6)).toEqual(['addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate', 'geometricExpectancy']);
-    expect(CAMPAIGN_SORT_MODES.indexOf('effectivePriceChangePct')).toBe(2);
+    expect(CAMPAIGN_SORT_MODES.slice(0, 7)).toEqual(['time', 'expectedDrawdownPct', 'addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate']);
+    expect(DEFAULT_CAMPAIGN_SORT_CHAIN).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });
 

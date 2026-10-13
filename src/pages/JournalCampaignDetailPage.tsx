@@ -2521,12 +2521,13 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         chartInterval: displayInterval,
         pnlOverview: {
           // rightColumn 要带上：导出图与页面一样按两栏从上往下排（左栏递进链、右栏结果与仓位）
-          items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn }) => ({
+          items: campaignPnlOverviewItems.map(({ key, label, value, color, rightColumn, column }) => ({
             key,
             label,
             value,
             color,
             rightColumn,
+            column,
           })),
           ...(batchOverviewNote ? { note: batchOverviewNote } : {}),
         },
@@ -2771,7 +2772,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           </div>
         )}
 
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(240px,1fr)_minmax(0,3fr)]">
           {/* 【用户要求】战役元数据的排布与盈亏概览保持一致：同一个面板（字号、行距、名称在左读数在栏内右对齐、ⓘ），
               七行与盈亏概览每栏的七行逐行齐平；操作时间仍是琥珀底加粗，字号与其它行相同。 */}
           <CampaignPnlOverviewPanel

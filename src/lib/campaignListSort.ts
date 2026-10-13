@@ -47,6 +47,11 @@ export type CampaignSortMode =
   | 'effectivePriceChangePct'
   | 'effectivePriceChangeMultiple'
   | 'magicB'
+  | 'initialExpectedMaxLoss'
+  | 'realizedPnl'
+  | 'peakPriceChange'
+  | 'peakPriceEfficiency'
+  | 'dynamicMaxDrawdownPct'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -63,21 +68,26 @@ export type CampaignSortLevel = {
 export type CampaignSortChain = readonly CampaignSortLevel[];
 
 export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
+  'time',
+  'expectedDrawdownPct',
   'addCount',
   'positionGeometricMultiple',
   'effectivePriceChangePct',
   'magicB',
   'captureRate',
+  'initialExpectedMaxLoss',
+  'realizedPnl',
+  'positionAmplification',
+  'addEfficiency',
   'geometricExpectancy',
-  'time',
-  'mirrorTp',
-  'expectedDrawdownPct',
+  'arithmeticExpectancy',
   'mainPriceChange',
   'mainPriceEfficiency',
-  'addEfficiency',
-  'positionAmplification',
+  'peakPriceChange',
+  'peakPriceEfficiency',
   'unrealizedPriceChangePct',
-  'arithmeticExpectancy',
+  'dynamicMaxDrawdownPct',
+  'mirrorTp',
   'leverage',
   'importance',
   'alpha',
@@ -92,6 +102,7 @@ export function isCampaignSortMode(value: unknown): value is CampaignSortMode {
  * 镜像止盈 / 重要性 / 杠杆倍数 / 字母本来就是分档的；操作时间按【用户已定】的清单不在其列。
  */
 export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
+  'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct',
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -327,6 +338,19 @@ function finite(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value);
 }
 
+export type OverviewExtraSortMode = 'initialExpectedMaxLoss' | 'realizedPnl' | 'peakPriceChange' | 'peakPriceEfficiency' | 'dynamicMaxDrawdownPct';
+export const OVERVIEW_EXTRA_SORT_MODES: readonly OverviewExtraSortMode[] = ['initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'];
+
+/** 新增概览排序项直接复用已有概览/行情读数，不另算一套口径。 */
+export function rowOverviewSortMetric(row: CampaignSortRow, mode: OverviewExtraSortMode): number | null {
+  const value = mode === 'initialExpectedMaxLoss' ? (row.initialExpectedMaxLoss > 0 ? row.initialExpectedMaxLoss : null)
+    : mode === 'realizedPnl' ? row.campaign.final_realized_pnl
+    : mode === 'peakPriceChange' ? row.peakPriceChangePct
+    : mode === 'peakPriceEfficiency' ? computeMainPriceEfficiency(row.peakPriceChangePct ?? null, row.initialExpectedMaxDrawdownPct)
+    : row.dynamicMaxDrawdownPct;
+  return finite(value) ? value : null;
+}
+
 /** 一次排序内按行缓存读数：比较器会对同一行反复取值（镜像止盈档位、加仓效用都要扫一遍腿）。 */
 function memoizeByRow<T extends object, V>(read: (row: T) => V): (row: T) => V {
   const cache = new Map<T, V>();
@@ -379,8 +403,16 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
 
   const never = () => false;
   const always = () => true;
+  const overviewMetric = (mode: OverviewExtraSortMode): CampaignSortKey<T> => ({
+    ...metric(row => rowOverviewSortMetric(row, mode), importanceTimeAlpha), include: always,
+  });
 
   return {
+    initialExpectedMaxLoss: overviewMetric('initialExpectedMaxLoss'),
+    realizedPnl: overviewMetric('realizedPnl'),
+    peakPriceChange: overviewMetric('peakPriceChange'),
+    peakPriceEfficiency: overviewMetric('peakPriceEfficiency'),
+    dynamicMaxDrawdownPct: overviewMetric('dynamicMaxDrawdownPct'),
     time: {
       include: always,
       missing: row => operationTime(row) == null,
@@ -634,6 +666,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
+  'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency',
   'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
 ]);
 

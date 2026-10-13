@@ -16,7 +16,7 @@ export const COUNTERFACTUAL_CHANGES_TITLE = '相对原始的变化情况';
  * 改了外层卡片的内边距 / 边框或上方的 gap，这里的 17px 要一起算；本行自己的 gap 只影响左栏，不用改它。
  */
 export const COUNTERFACTUAL_OVERVIEW_ROW_GRID_CLASS =
-  'grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_calc(50%_+_17px)]';
+  'grid grid-cols-1 gap-4 xl:grid-cols-[minmax(240px,1fr)_minmax(0,3fr)]';
 
 export interface CounterfactualOverviewRowProps {
   /** 整行与左右两张卡的 test id 前缀：`{prefix}-panel` / `{prefix}-changes` / `{prefix}-overview`。 */

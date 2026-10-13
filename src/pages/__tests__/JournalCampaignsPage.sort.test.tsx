@@ -448,6 +448,23 @@ function DetailReturn() {
 }
 
 describe('JournalCampaignsPage sorting', () => {
+  it('三列概览对应排序顺序：操作时间在最前且默认选中，新增金额指标可排序和查看散点图', async () => {
+    render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
+    await screen.findAllByTestId('campaign-card');
+    const expected = ['time', 'expectedDrawdownPct', 'addCount', 'positionGeometricMultiple', 'effectivePriceChangePct', 'magicB', 'captureRate',
+      'initialExpectedMaxLoss', 'realizedPnl', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
+      'mainPriceChange', 'mainPriceEfficiency', 'peakPriceChange', 'peakPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct'];
+    const controls = screen.getByTestId('campaign-sort-controls');
+    expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item')).slice(0, 19)).toEqual(expected);
+    expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByTestId('campaign-sort-realizedPnl'));
+    expect(screen.getByTestId('campaign-sort-realizedPnl')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.doubleClick(screen.getByTestId('campaign-sort-realizedPnl'));
+    expect(screen.getByText('已实现 P&L计算说明')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('campaign-realizedPnl-chart-toggle'));
+    expect(await screen.findByTestId('campaign-metric-scatter-plot')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('button[data-campaign-id]').length).toBeGreaterThan(0);
+  });
   it('行情重载时点击立即保持完整旧图，分批返回不打散旧点，完成后整体更新', async () => {
     const restore = preparePricePathFixtures();
     const firstRequests = deferredPricePathRequests();

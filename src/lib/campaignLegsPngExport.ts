@@ -123,6 +123,7 @@ export type CampaignBoardPnlItem = {
   color?: string;
   /** 排在右栏（盈亏概览的递进链）；导出图与页面一样按栏从上往下排。 */
   rightColumn?: boolean;
+  column?: 0 | 1 | 2;
 };
 
 export type CampaignLegsExportCellLine = {
@@ -1353,6 +1354,7 @@ type OverviewItem = {
   value: string;
   color?: string;
   rightColumn?: boolean;
+  column?: 0 | 1 | 2;
 };
 
 /**
@@ -1360,6 +1362,16 @@ type OverviewItem = {
  * 与页面上的盈亏概览一致；都没标（战役元数据）时仍按行从左到右排。
  */
 export function overviewItemCells(items: OverviewItem[]): { cells: { item: OverviewItem; column: number; row: number }[]; rows: number } {
+  if (items.some(item => item.column != null)) {
+    const counts = [0, 0, 0];
+    return {
+      cells: items.map(item => {
+        const column = item.column ?? 0;
+        return { item, column, row: counts[column]++ };
+      }),
+      rows: Math.max(...counts),
+    };
+  }
   if (!items.some(item => item.rightColumn)) {
     return {
       cells: items.map((item, index) => ({ item, column: index % 2, row: Math.floor(index / 2) })),
@@ -1455,7 +1467,7 @@ function drawOverviewPanel(
   ctx.fillStyle = '#334155';
   ctx.fillText(title, x + 16, y + 25, width - 32);
 
-  const columns = 2;
+  const columns = items.some(item => item.column === 2) ? 3 : 2;
   const columnWidth = (width - 32) / columns;
   const { cells, rows: itemRows } = overviewItemCells(items);
   cells.forEach(({ item, column, row }) => {
@@ -1701,9 +1713,13 @@ export async function renderCampaignBoardPng(input: CampaignBoardExportInput): P
     const chartDisplayHeight = chart ? chart.height * (chartDisplayWidth / chart.width) : 0;
     const contentWidth = width - MARGIN_X * 2;
     const overviewGap = 16;
-    const overviewWidth = sections.metadata && sections.overview ? (contentWidth - overviewGap) / 2 : contentWidth;
+    const threeColumnOverview = overview.pnlItems.some(item => item.column === 2);
+    const metadataWidth = sections.metadata && sections.overview
+      ? (contentWidth - overviewGap) * (threeColumnOverview ? 0.25 : 0.5) : contentWidth;
+    const overviewWidth = sections.metadata && sections.overview
+      ? contentWidth - overviewGap - metadataWidth : contentWidth;
     const overviewHeight = Math.max(
-      sections.metadata ? overviewPanelHeight(overview.metadataItems, undefined, overviewWidth) : 0,
+      sections.metadata ? overviewPanelHeight(overview.metadataItems, undefined, metadataWidth) : 0,
       sections.overview ? overviewPanelHeight(overview.pnlItems, overview.pnlNote, overviewWidth) : 0,
     );
     const emotionDiary = sections.emotionDiary ? overview.emotionDiary : null;
@@ -1751,9 +1767,9 @@ export async function renderCampaignBoardPng(input: CampaignBoardExportInput): P
 
     let y = BOARD_HEADER_H;
     if (overviewHeight > 0) {
-      if (sections.metadata) drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, undefined, MARGIN_X, y, overviewWidth, overviewHeight);
+      if (sections.metadata) drawOverviewPanel(ctx, '战役原数据', overview.metadataItems, undefined, MARGIN_X, y, metadataWidth, overviewHeight);
       if (sections.overview) drawOverviewPanel(ctx, '盈亏概览', overview.pnlItems, overview.pnlNote,
-        sections.metadata ? MARGIN_X + overviewWidth + overviewGap : MARGIN_X, y, overviewWidth, overviewHeight);
+        sections.metadata ? MARGIN_X + metadataWidth + overviewGap : MARGIN_X, y, overviewWidth, overviewHeight);
       y += overviewHeight + BOARD_SECTION_GAP;
     }
 

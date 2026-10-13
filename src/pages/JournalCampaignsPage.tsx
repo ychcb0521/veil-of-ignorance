@@ -135,6 +135,9 @@ import {
   removeSortLevel,
   resolveSortBinning,
   rowAddEfficiency,
+  rowOverviewSortMetric,
+  OVERVIEW_EXTRA_SORT_MODES,
+  type OverviewExtraSortMode,
   rowAddCount,
   rowPositionAmplification,
   rowPositionGeometricMultiple,
@@ -233,6 +236,7 @@ type CampaignDisplayData = CampaignMetricData & {
 };
 
 type CampaignMetricChartKey =
+  | OverviewExtraSortMode
   | 'odds'
   | 'oddsDistribution'
   | 'expectedDrawdownPct'
@@ -293,6 +297,7 @@ type CampaignListNavigationState = {
 };
 
 type CampaignFormulaPopover =
+  | `${OverviewExtraSortMode}Sort`
   | 'captureRate'
   | 'expectedDrawdownPct'
   | 'arithmeticExpectancy'
@@ -328,21 +333,26 @@ type CampaignFormulaPopover =
  * 排序行左对齐依次排开。
  */
 const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
+  { value: 'time', label: '操作时间' },
+  { value: 'expectedDrawdownPct', label: '预期回撤' },
   { value: 'addCount', label: '加仓次数' },
   { value: 'positionGeometricMultiple', label: '仓位几何累积倍数' },
   { value: 'effectivePriceChangePct', label: '相对涨幅' },
   { value: 'magicB', label: '神奇的 b' },
   { value: 'captureRate', label: '盈亏比' },
+  { value: 'initialExpectedMaxLoss', label: '最大预期亏损' },
+  { value: 'realizedPnl', label: '已实现 P&L' },
+  { value: 'positionAmplification', label: '仓位放大' },
+  { value: 'addEfficiency', label: '加仓效用' },
   { value: 'geometricExpectancy', label: '几何期望' },
-  { value: 'time', label: '操作时间' },
-  { value: 'mirrorTp', label: '镜像止盈' },
-  { value: 'expectedDrawdownPct', label: '预期回撤' },
+  { value: 'arithmeticExpectancy', label: '算术期望' },
   { value: 'mainPriceChange', label: '首仓涨跌幅' },
   { value: 'mainPriceEfficiency', label: '首仓涨跌幅倍数' },
-  { value: 'addEfficiency', label: '加仓效用' },
-  { value: 'positionAmplification', label: '仓位放大' },
+  { value: 'peakPriceChange', label: '峰值涨幅' },
+  { value: 'peakPriceEfficiency', label: '峰值涨幅倍数' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
-  { value: 'arithmeticExpectancy', label: '算术期望' },
+  { value: 'dynamicMaxDrawdownPct', label: '动态最大回撤' },
+  { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '自评' },
   { value: 'alpha', label: '字母' },
@@ -353,8 +363,16 @@ const SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
  * 两条短分隔线把它分成三组，中间一组正是封面上镜像止盈之后的七项指标：
  *   操作时间 · 镜像止盈 ┆ 预期回撤 · 首仓涨跌幅 · 首仓涨跌幅倍数 · 神奇的 b · 加仓效用 · 加仓次数 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
  */
-const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'leverage']);
+const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'initialExpectedMaxLoss', 'mainPriceChange', 'mirrorTp']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
+
+const OVERVIEW_SORT_DETAILS: Record<OverviewExtraSortMode, { label: string; unit: string; formula: string }> = {
+  initialExpectedMaxLoss: { label: '最大预期亏损', unit: 'USDT', formula: '沿用初始开仓的最大预期亏损 L₀，与盈亏概览一致。' },
+  realizedPnl: { label: '已实现 P&L', unit: 'USDT', formula: '沿用本场已实现净盈亏，包含现有平仓价校正及结算口径。' },
+  peakPriceChange: { label: '峰值涨幅', unit: '%', formula: '主力有效持仓期间，按主力方向计算的最大有利价格涨幅。' },
+  peakPriceEfficiency: { label: '峰值涨幅倍数', unit: '倍', formula: '峰值涨幅倍数 = 峰值涨幅 ÷ 预期回撤。' },
+  dynamicMaxDrawdownPct: { label: '动态最大回撤', unit: '%', formula: '主力有效持仓期间，从此前峰值到后续谷值的最大价格回撤。' },
+};
 
 /**
  * 【用户要求】多级排序（「先让镜像止盈的排序固定下来，然后在此基础上再排序加仓效用」）：
@@ -1068,9 +1086,24 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       references: [{ value: 1, label: '1.00 初始名义基准', shareLabel: '放大（> 1）' }],
     },
   },
+  ...OVERVIEW_EXTRA_SORT_MODES.map(key => {
+    const detail = OVERVIEW_SORT_DETAILS[key];
+    return {
+      key, label: detail.label, chartLabel: `${detail.label}图`, seriesLabel: `${detail.label}时序`,
+      guide: {
+        yAxis: `${detail.formula} 单位：${detail.unit}。`,
+        point: '每个点对应一场战役，读数与盈亏概览和排序使用同一来源。',
+        colors: PAYOFF_SIGN_COLORS,
+        referenceLines: ['横轴为操作时间；缺少有效读数的战役不绘制。'],
+      },
+      missingValueLabel: detail.label, colorMode: 'signed' as const,
+      formatValue: (value: number) => `${value.toFixed(2)}${detail.unit === '倍' ? 'x' : detail.unit === '%' ? '%' : ' USDT'}`,
+    };
+  }),
 ] as const;
 
 const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopover>> = {
+  ...Object.fromEntries(OVERVIEW_EXTRA_SORT_MODES.map(mode => [mode, `${mode}Sort`])) as Record<OverviewExtraSortMode, CampaignFormulaPopover>,
   importance: 'importanceSort',
   captureRate: 'captureRate',
   expectedDrawdownPct: 'expectedDrawdownPct',
@@ -1091,6 +1124,7 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
 };
 
 const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKey>> = {
+  ...Object.fromEntries(OVERVIEW_EXTRA_SORT_MODES.map(mode => [mode, mode])) as Record<OverviewExtraSortMode, CampaignMetricChartKey>,
   importance: 'importance',
   captureRate: 'odds',
   expectedDrawdownPct: 'expectedDrawdownPct',
@@ -1296,6 +1330,11 @@ function usiTone(value: number | null): string {
 /** 分档档界的读数：与封面上这一项的读数同一种写法（神奇的 b写倍数 b、首仓涨跌幅带正负号与 %……）。 */
 function formatSortBinValue(mode: CampaignSortMode, value: number): string {
   switch (mode) {
+    case 'initialExpectedMaxLoss':
+    case 'realizedPnl': return `${value.toFixed(2)} USDT`;
+    case 'peakPriceChange': return formatLegPriceChangePct(value);
+    case 'dynamicMaxDrawdownPct': return `${value.toFixed(2)}%`;
+    case 'peakPriceEfficiency': return formatEfficiency(value);
     case 'captureRate': return formatCampaignPayoffRatio(value);
     case 'expectedDrawdownPct': return `${value.toFixed(2)}%`;
     case 'mainPriceChange': return formatLegPriceChangePct(value);
@@ -2436,9 +2475,9 @@ export default function JournalCampaignsPage() {
     scopedRowsRef.current = next;
     return next;
   }, [rows, operationRange]);
-  const unrealizedMetricNeeded = sortChain.some(level => level.mode === 'unrealizedPriceChangePct')
+  const unrealizedMetricNeeded = sortChain.some(level => ['unrealizedPriceChangePct', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'].includes(level.mode))
     || summaryExportPending
-    || (metricChartOpen && (metricChartKey === 'unrealizedPriceChangePct' || metricChartKey === 'unrealizedPriceChangePctDistribution'));
+    || (metricChartOpen && ['unrealizedPriceChangePct', 'unrealizedPriceChangePctDistribution', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'].includes(metricChartKey));
   const pricePaths = useCampaignPricePaths(scopedRows, userId ?? '', unrealizedMetricNeeded && campaignRowsComplete, campaignRowsComplete);
   const peakPriceChangeByCampaign = pricePaths.peaks;
   const dynamicDrawdownByCampaign = pricePaths.drawdowns;
@@ -2944,11 +2983,19 @@ export default function JournalCampaignsPage() {
   /** 当前时间段里还有会进图、但行情没算出来的场次（主力未平仓、已判定资料不完整的不算）。 */
   const unrealizedChartPending = unrealizedChartPendingIds.size > 0;
   // 【用户要求】沿用的旧读数只是图上的展示层：卡片、排序、统计、「已计算 x / y 场」与导出一律用当前值。
+  const extraOverviewSeries = useMemo(() => Object.fromEntries(OVERVIEW_EXTRA_SORT_MODES.map(mode => [mode,
+    buildCampaignMetricSeries(metricRows.map(row => ({
+      campaignId: row.campaign.id, title: row.campaign.title, symbol: row.campaign.symbol,
+      operationTime: campaignOperationTime(row.legs, row.tradeRecords), pnl: row.campaign.final_realized_pnl ?? null,
+      payoffRatio: rowPayoffRatio(row), value: rowOverviewSortMetric(row, mode),
+    }))),
+  ])) as Record<OverviewExtraSortMode, CampaignMetricSeries>, [metricRows]);
   const metricSeriesByKey = useMemo<Record<CampaignMetricChartKey, CampaignMetricSeries>>(() => ({
     ...baseMetricSeriesByKey,
+    ...extraOverviewSeries,
     unrealizedPriceChangePct: unrealizedChart.series,
     unrealizedPriceChangePctDistribution: unrealizedChart.series,
-  }), [baseMetricSeriesByKey, unrealizedChart.series]);
+  }), [baseMetricSeriesByKey, extraOverviewSeries, unrealizedChart.series]);
   const selectedMetricConfig = CAMPAIGN_METRIC_CHART_CONFIGS.find(
     config => config.key === metricChartKey,
   ) ?? CAMPAIGN_METRIC_CHART_CONFIGS[0];
@@ -4543,6 +4590,13 @@ export default function JournalCampaignsPage() {
                 >
                   <PopoverAnchor asChild>{sortButton}</PopoverAnchor>
                   <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
+                    {OVERVIEW_EXTRA_SORT_MODES.includes(option.value as OverviewExtraSortMode) && (
+                      <div className="space-y-2">
+                        <div className="font-medium text-foreground">{option.label}计算说明</div>
+                        <div>{OVERVIEW_SORT_DETAILS[option.value as OverviewExtraSortMode].formula}</div>
+                        <div className="text-muted-foreground">与盈亏概览使用同一读数；缺值排在末尾，不使用 0 代替缺失数据。</div>
+                      </div>
+                    )}
                     {formula === 'captureRate' ? (
                       <>
                         <div className="font-medium text-foreground">盈亏比计算公式</div>

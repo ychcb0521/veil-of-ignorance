@@ -67,6 +67,7 @@ export interface OverviewPanelItem {
   valueClassName?: string;
   /** 放右栏；一项都不放右栏时面板只有左边一栏，中间那道分隔线也不画。 */
   rightColumn?: boolean;
+  column?: 0 | 1 | 2;
   /** 这一行的 data-testid（战役元数据的操作时间那一行）。 */
   testId?: string;
 }
@@ -83,6 +84,25 @@ export interface CampaignPnlOverviewPanelProps {
  * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
 export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOverviewPanelProps) {
+  if (items.some(item => item.column != null)) {
+    return (
+      <div className="min-w-0 rounded border border-border bg-card p-4 text-[12px] [container-type:inline-size]" data-testid={testId}>
+        <div className="truncate font-medium" title={title}>{title}</div>
+        <div className="mt-4 grid grid-cols-1 gap-y-4 [@container(min-width:840px)]:grid-cols-3 [@container(min-width:840px)]:gap-x-6 [@container(min-width:840px)]:gap-y-0" data-testid="pnl-overview-three-columns">
+          {[0, 1, 2].map(column => (
+            <div key={column} data-overview-column={column} className={`min-w-0 space-y-2.5 ${column > 0 ? 'border-t border-border/60 pt-4 [@container(min-width:840px)]:border-l [@container(min-width:840px)]:border-t-0 [@container(min-width:840px)]:pl-6 [@container(min-width:840px)]:pt-0' : ''}`}>
+              {items.filter(item => (item.column ?? 0) === column).map(item => (
+                <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} className="flex min-h-5 min-w-0 items-baseline justify-between gap-3">
+                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+                  <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   const leftRows = new Map(items.filter(item => !item.rightColumn).map((item, row) => [item.key, row]));
   const rightRows = new Map(items.filter(item => item.rightColumn).map((item, row) => [item.key, row]));
   return (

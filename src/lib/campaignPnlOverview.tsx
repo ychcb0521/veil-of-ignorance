@@ -123,37 +123,38 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 };
 
 /**
- * 盈亏概览两栏各自从上往下的次序，只在这里写一次（页面面板、反事实面板、导出图都按它排）。
- * 【用户要求】「左右两列对调一下，反事实部分也是」：递进链在左栏，结果与仓位在右栏。
- *
- * 左栏优先展示加仓次数、仓位几何累积倍数、相对涨幅、神奇的 b、盈亏比、几何期望。
+ * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
+ * 页面、反事实与 PNG 导出都使用这份清单，每列六项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'expectedMaxDrawdownPct',
   'addCount',
   'positionGeometricMultiple',
   'effectivePriceChangePct',
   'magicB',
   'payoffRatio',
-  'geometricExpectancy',
-  'arithmeticExpectancy',
-  'expectedMaxDrawdownPct',
-  'mainPriceChange',
-  'mainPriceEfficiency',
 ];
 
 /**
- * 右栏：结果与仓位。已实现 P&L 置顶，其后是最大预期亏损、峰值涨幅、峰值涨幅倍数、涨幅未兑现，再放两项名义仓位。
+ * 第二列：初始亏损预算、实际结算、仓位与期望。
  * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
-  'realizedPnl',
   'initialExpectedMaxLoss',
+  'realizedPnl',
+  'positionAmplification',
+  'addEfficiency',
+  'geometricExpectancy',
+  'arithmeticExpectancy',
+];
+
+export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
+  'mainPriceChange',
+  'mainPriceEfficiency',
   'peakPriceChange',
   'peakPriceEfficiency',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
-  'positionAmplification',
-  'addEfficiency',
 ];
 
 /**
@@ -655,7 +656,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     },
   ];
 
-  // 按两栏次序重排：先左栏（递进链）、再右栏（结果与仓位，标 rightColumn），窄屏单栏时也是这个先后。
+  // 最终按三列的列优先顺序重排；窄屏下保留相同阅读顺序。
   built.push({
     key: 'effectivePriceChangePct', label: '相对涨幅',
     value: metrics.effectivePriceChangePct == null ? '—' : `${(metrics.effectivePriceChangePct / 100).toFixed(2)}×`,
@@ -705,8 +706,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   }
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [
-    ...PNL_OVERVIEW_LEFT_COLUMN.filter(key => byKey.has(key)).map(key => byKey.get(key)!),
-    ...PNL_OVERVIEW_RIGHT_COLUMN.filter(key => byKey.has(key)).map(key => ({ ...byKey.get(key)!, rightColumn: true })),
+    ...[PNL_OVERVIEW_LEFT_COLUMN, PNL_OVERVIEW_RIGHT_COLUMN, PNL_OVERVIEW_THIRD_COLUMN].flatMap((keys, column) =>
+      keys.filter(key => byKey.has(key)).map(key => ({ ...byKey.get(key)!, column: column as 0 | 1 | 2 }))),
   ];
 
   if (!metrics.helpOverrides && !metrics.extraNotes) return items;
