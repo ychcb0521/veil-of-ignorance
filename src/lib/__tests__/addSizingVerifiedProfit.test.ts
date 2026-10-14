@@ -90,11 +90,27 @@ describe('verified calculator profit and actual order budget', () => {
     expect(checked.records[1].pnl).toBeCloseTo(54662.7407, 2);
   });
 
-  it('isolates replay sessions, symbols and directions and deduplicates record ids', () => {
+  it('isolates replay sessions and symbols and deduplicates record ids; keeps the opposite-side hedge closes', () => {
     const current = { ...mirror(), closedRealAt: 5000 };
+    const hedge = { ...mirror(), side: 'SHORT' as const, closedRealAt: 5000 };
     const records = addSizingProfitRecords('BILLUSDT', 'LONG', [current, current,
       { ...mirror(), closedRealAt: 1000 }, { ...mirror(), symbol: 'OTHER' },
-      { ...mirror(), side: 'SHORT' }], 1000, 2000);
-    expect(records).toEqual([current]);
+      hedge, { ...hedge, id: 'old-hedge', closedRealAt: 1000 }], 1000, 2000);
+    expect(records).toEqual([current, hedge]);
+  });
+
+  it('【用户要求】中途对冲空单盈亏带号并入：盈利加、亏损减，分别报主方向与空单两部分', async () => {
+    const hedge = (pnl: number): TradeRecord => ({ ...mirror(), id: `hedge-${pnl}`, fillId: `hedge-${pnl}`,
+      side: 'SHORT', action: 'CLOSE', pnl, exitPrice: 0, closeTime: 0 } as TradeRecord);
+    // 强平记录不走核价，直接取原值
+    const liq = (pnl: number) => ({ ...hedge(pnl), action: 'LIQUIDATION' as const, exitPrice: 0.18, closeTime: 200000 });
+    const record = mirror();
+    const gain = await verifiedAddSizingProfit('BILLUSDT', 'LONG', [record, liq(1000)]);
+    expect(gain.mainUsd).toBeCloseTo(54662.7407, 2);
+    expect(gain.hedgeUsd).toBeCloseTo(1000, 6);
+    expect(gain.usd).toBeCloseTo(55662.7407, 2);
+    const loss = await verifiedAddSizingProfit('BILLUSDT', 'LONG', [record, liq(-1000)]);
+    expect(loss.hedgeUsd).toBeCloseTo(-1000, 6);
+    expect(loss.usd).toBeCloseTo(53662.7407, 2);
   });
 });

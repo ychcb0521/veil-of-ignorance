@@ -748,6 +748,28 @@ describe('【复核】旧仓与落袋按成交记录逐刀读，不看腿的「�
     expect(v.shortfall).toBeCloseTo(100, 6);
   });
 
+  it('【用户要求】中途对冲空单已平仓：盈利与镜像止盈一样进 G，亏损带「−」从 G 扣掉', () => {
+    const t1 = T0 + 180 * MIN;
+    const run = (hedgePnl: number) => evaluateCampaignAddSizing({ legs: [
+      mainLeg(),
+      leg({
+        id: 'mirror', leg_role: 'mirror_tp', pre_simulated_time: iso(T0), pre_entry_price: 1,
+        pre_position_size: 5_000, post_simulated_close_time: iso(T0 + 60 * MIN), post_realized_pnl: 500,
+      }),
+      leg({
+        id: 'hedge', leg_role: 'hedge_initial_a', direction: 'short', pre_simulated_time: iso(T0 + 30 * MIN),
+        pre_entry_price: 1.05, pre_position_size: 2_000, post_simulated_close_time: iso(T0 + 120 * MIN),
+        post_realized_pnl: hedgePnl,
+      }),
+      leg({ id: 'add1', leg_role: 'main_add_1', pre_simulated_time: iso(t1), pre_entry_price: 1.3, pre_position_size: 1_000 * 1.3 }),
+    ], tradeRecords: [], reverseHedgeOrders: [short(1.1, t1 - MIN, null)] }).get('add1')!;
+    expect(run(0).banked).toBeCloseTo(500, 6);
+    expect(run(120).banked).toBeCloseTo(620, 6);
+    expect(run(-120).banked).toBeCloseTo(380, 6);
+    // 浮盈垫不受对冲腿影响
+    expect(run(-120).cushion).toBeCloseTo(1_000, 6);
+  });
+
   it('加仓后随手把旧止损换成更近的一张：取补挂的那张，马上要撤的旧单不顶替它', () => {
     const tAdd = T0 + 60 * MIN;
     const legs = [

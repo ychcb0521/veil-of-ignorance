@@ -160,6 +160,11 @@ function isMainSideRole(role: TradeJournal['leg_role']): boolean {
     || (role ?? '').startsWith('main_add_');
 }
 
+/** 对冲腿：初始对冲、滚动对冲、再入场对冲。方向与主力相反。 */
+function isHedgeRole(role: TradeJournal['leg_role']): boolean {
+  return (role ?? '').startsWith('hedge_') || role === 'reentry_hedge';
+}
+
 function positive(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
@@ -372,6 +377,10 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     return [[leg.id, buildLedger(leg, executions.get(leg.id)!, records, snapshotUsd, corrections)] as const];
   }));
 
+  /** 对冲腿（及再入场对冲）：不进浮盈垫，只把本场中途已平掉的盈亏带号并入 G。 */
+  const hedgeLedgers = legs.filter(leg => isHedgeRole(leg.leg_role)).map(leg => buildLedger(
+    leg, executions.get(leg.id)!, settlement.recordsByLeg.get(leg.id) ?? [], settlement.byLeg.get(leg.id) ?? null, corrections));
+
   for (const add of addLegs) {
     if (add.direction !== 'long' && add.direction !== 'short') {
       result.set(add.id, unknown('no_direction'));
@@ -483,6 +492,17 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       cushion += pnlAtS1;
       // 不对称：在 K 是浮盈的腿不抵扣任何东西，浮亏的腿按亏损占用落袋
       consumedByHeld += Math.max(0, -pnlAtS1);
+    }
+
+    // 本场中途反向对冲腿已平掉的盈亏带号并入 G：赚了加、亏了减——与计算器 addSizingProfitRecords 同一口径
+    for (const ledger of hedgeLedgers) {
+      if (ledger.leg.direction === add.direction) continue;
+      for (const cut of ledger.cuts) {
+        if (cut.time < holdingStart || !cutClosedBy(cut, t, addOperationTime)) continue;
+        if (holdingStartOperation != null && (cut.operationTime == null || cut.operationTime < holdingStartOperation)) continue;
+        if (cut.usd == null) incomplete = true;
+        else banked += cut.usd;
+      }
     }
 
     const riskPerCoin = Math.max(0, (s2 - s1) * d);

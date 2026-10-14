@@ -34,6 +34,9 @@ interface CalculatorReading {
   realAverage: number;
   side: AddSide;
   addQty: number;
+  /** 镜像止盈输入框里的原值与空单盈亏 H（带号）；P 是二者净额折进安全垫后剩下的可用利润 */
+  mirrorInput?: number;
+  H?: number;
 }
 
 interface SavedCalculatorState {
@@ -46,6 +49,10 @@ type CalculatorFrame = Window & {
   VeilAddSizingBridge?: (reading: CalculatorReading | null) => void;
   VeilAddSizingCarry?: (reading: CalculatorReading) => void;
 };
+
+/** 镜像止盈 + 空单盈亏的带号净额；老页面没报 H 时就是 P。 */
+const netProfit = (raw: CalculatorReading) => Number.isFinite(raw.H) && Number.isFinite(raw.mirrorInput)
+  ? raw.mirrorInput! + raw.H! : raw.P;
 
 const closeEnough = (a: number, b: number) => Math.abs(a - b) <= Math.max(1e-10, Math.abs(a), Math.abs(b)) * 1e-8;
 
@@ -79,7 +86,7 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
   const [orderKind, setOrderKind] = useState<AddOrderKind>('limit');
   const [frameError, setFrameError] = useState(false);
   const [selectedSide, setSelectedSide] = useState<AddSide | null>(null);
-  const [verifiedProfit, setVerifiedProfit] = useState<{ key: string; usd: number; complete: boolean } | null>(null);
+  const [verifiedProfit, setVerifiedProfit] = useState<{ key: string; usd: number; mainUsd: number; complete: boolean } | null>(null);
   /** 最近一次种进 K 输入框的值：计算器报回来的 K 与它不同，就是用户手改过。 */
   const seededSupportRef = useRef<{ side: AddSide; value: number } | null>(null);
   const profitGeneration = useRef(0);
@@ -101,10 +108,13 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     const current = latestRef.current;
     const prior = current.saved[`${current.symbol}:${raw.side}`];
     const allocated = prior?.fingerprint === fingerprintFor(raw.side) ? prior.state.mirrorProfitAllocated : 0;
+    // 空单亏损超过镜像利润的那一截从原仓安全垫里扣：等价于把策略成本线往不利方向挪 −净额 ÷ Q₁
+    const net = netProfit(raw);
+    const strategyCost = raw.S - (raw.side === 'SHORT' ? -1 : 1) * Math.min(0, net) / raw.Q;
     const state = {
-      ...initialAddPositionState(raw.S, raw.Q, allocated + raw.P, raw.realAverage),
+      ...initialAddPositionState(strategyCost, raw.Q, allocated + Math.max(0, net), raw.realAverage),
       mirrorProfitAllocated: allocated,
-      mirrorProfitAvailable: raw.P,
+      mirrorProfitAvailable: Math.max(0, net),
     };
     const result = calculateAddPosition({ currentPrice: raw.T, support: raw.K, state, side: raw.side });
     if (result.error || !closeEnough(result.addCoins, raw.addQty)) return null;
@@ -128,21 +138,22 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     setReady(false);
     setVerifiedProfit(null);
     const verified = profitRecords.length ? await verifiedAddSizingProfit(current.symbol, side, profitRecords)
-      .catch(() => ({ complete: false, usd: 0 })) : { complete: true, usd: 0 };
+      .catch(() => ({ complete: false, usd: 0, mainUsd: 0, hedgeUsd: 0 })) : { complete: true, usd: 0, mainUsd: 0, hedgeUsd: 0 };
     if (generation !== profitGeneration.current) return;
     setVerifiedProfit({ key: profitKey, ...verified });
     if (!verified.complete) return;
-    const initialProfit = Math.max(0, verified.usd);
+    // 镜像止盈一栏只放主方向的落袋净额；空单盈亏单列一栏（带号），计算器里再合并
+    const initialProfit = Math.max(0, verified.mainUsd);
     const carried = prior?.fingerprint === fingerprint ? prior.state : null;
     // Rebase carried simulations on the actual position and verified net profit.
     // A realized loss also consumes the old cushion; clipping G to zero would enlarge it.
     const allocated = Math.min(carried?.mirrorProfitAllocated ?? 0, initialProfit);
-    const lineCredit = Math.min(allocated, verified.usd);
+    const lineCredit = Math.min(allocated, verified.mainUsd);
     const actualAverage = held?.avgEntry ?? 0;
     const actualCoins = held?.coins ?? 0;
     const strategyCost = actualCoins > 0 ? actualAverage - lineCredit * (side === 'SHORT' ? -1 : 1) / actualCoins : actualAverage;
     const state = { ...initialAddPositionState(strategyCost, actualCoins, initialProfit, actualAverage),
-      mirrorProfitAllocated: allocated, mirrorProfitAvailable: Math.max(0, verified.usd - lineCredit) };
+      mirrorProfitAllocated: allocated, mirrorProfitAvailable: Math.max(0, verified.mainUsd - lineCredit) };
     const candidate = getFreshAddSizingPlan(current.symbol);
     const existing = candidate?.side === side ? candidate : null;
     child.VeilAddSizingBridge = raw => {
@@ -200,6 +211,7 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
       mirrorProfitRealized: state.mirrorProfitRealized,
       mirrorProfitAllocated: state.mirrorProfitAllocated,
       mirrorProfitAvailable: state.mirrorProfitAvailable,
+      hedgeProfit: verified.hedgeUsd,
       side,
       leverage: 10,
     });
@@ -224,14 +236,15 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     // A typed strategy line must not manufacture a new risk cushion for a live order.
     const allocated = saved[`${symbol}:${raw.side}`];
     const savedAllocated = allocated?.fingerprint === fingerprintFor(raw.side) ? allocated.state.mirrorProfitAllocated : 0;
-    const knownAllocated = Math.min(savedAllocated, verifiedProfit.usd);
+    const knownAllocated = Math.min(savedAllocated, verifiedProfit.mainUsd);
     const lineBudget = (raw.realAverage - raw.S) * (raw.side === 'SHORT' ? -1 : 1) * raw.Q;
     // 策略成本线在输入框里按开仓价的显示位数写（2.8489），真实均价是完整精度（2.84893…）：
     // 差出半个显示刻度以内的，是同一条线的两种写法，不是手填出来的新风险垫。
     const lineTolerance = raw.Q * 0.5 * 10 ** -getPriceDecimals(raw.realAverage);
     const budgetFromLine = Math.abs(lineBudget - knownAllocated) <= lineTolerance ? knownAllocated : lineBudget;
     if (!closeEnough(budgetFromLine, knownAllocated)) return null;
-    const requestedBanked = budgetFromLine + raw.P;
+    const net = netProfit(raw);
+    const requestedBanked = budgetFromLine + net;
     if (requestedBanked > verifiedProfit.usd + Math.max(1e-8, Math.abs(verifiedProfit.usd) * 1e-8)) return null;
     const settlement: SettlementMode = (positions ?? []).find(p => p?.side === raw.side)?.settlementMode ?? ctx.getSymbolSettlementMode(symbol);
     const isCoin = settlement === 'coin';
@@ -268,7 +281,7 @@ export function AddPositionCalculator({ open, onClose, symbol, currentPrice = 0,
     if (!(placeableCoins > 0) || (isCoin && !(contracts! > 0))) return null;
     // Existing journal and fill checks use actual average plus banked U; the strategy cost
     // is the same budget expressed against the real average, without repledging old P.
-    const virtualBankedU = budgetFromLine + raw.P;
+    const virtualBankedU = budgetFromLine + net;
     const snapshot: Omit<AddSizingSnapshot, 'at'> = {
       profitBasis: 'verified_net',
       plan: Math.abs(virtualBankedU) > 1e-12 ? 'B' : 'A', side: raw.side, settlement,

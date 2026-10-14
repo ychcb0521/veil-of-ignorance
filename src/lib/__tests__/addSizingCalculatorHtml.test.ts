@@ -57,6 +57,24 @@ describe('embedded add calculator source of truth', () => {
     expect(field('r-growth-factor').textContent).toBe('—');
   });
 
+  it('【用户要求】「空单盈亏」紧挨在「镜像止盈」下面：盈利与镜像止盈一样计入，亏损带「−」扣掉', () => {
+    const { win, field, type } = standaloneCalculator();
+    const mirror = field('mirror').closest('.field')!;
+    expect(mirror.nextElementSibling).toBe(field('hedge').closest('.field'));
+    expect(field('hedge').closest('.field')?.textContent).toContain('空单盈亏');
+    // T 2、K 1、S 0.5、Q 1：安全垫 0.5，每币风险 1
+    win.AddPositionMath.setSeed({ currentPrice: 2, support: 1, strategyCost: 0.5, realAverage: 0.5, coins: 1,
+      mirrorProfitAvailable: 0.3, hedgeProfit: 0.2, side: 'LONG' });
+    expect(field('hedge').value).toBe('0.2');
+    expect(field('r-add').textContent).toBe('1.00');
+    type('hedge', '-0.2');
+    expect(field('r-add').textContent).toBe('0.60');
+    // 空单亏损超过镜像利润：多出的那截从安全垫里扣
+    type('hedge', '-0.5');
+    expect(field('r-add').textContent).toBe('0.30');
+    expect(win.AddPositionMath.calculate({ T: 2, K: 1, S: 0.5, Q: 1, P: 0.3, H: -0.5 }).addQty).toBeCloseTo(0.3, 12);
+  });
+
   it('clears alpha and the position multiplier when input becomes invalid', () => {
     const { win, field, type } = standaloneCalculator();
     win.AddPositionMath.setSeed({ currentPrice: 2, support: 1, strategyCost: 0.5, realAverage: 0.5, coins: 1, mirrorProfitAvailable: 0, side: 'LONG' });

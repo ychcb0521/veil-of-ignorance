@@ -4,16 +4,25 @@ import { calculateAddRiskBudget } from '@/lib/addPositionCoverage';
 import { verifyAddSizingRealizedRecords } from '@/lib/campaignLegExecution';
 import { calcSlippage, type AddSizingSnapshot, type Position, type TradeRecord } from '@/types/trading';
 
+/**
+ * 本场已实现的盈亏记录：主方向的每一刀，加上本场中途**反向对冲腿**（主多的空单、主空的多单）已平掉的每一刀。
+ *
+ * 【用户要求】中途对冲单已产生的盈亏也要并进加仓：以盈利结束与镜像止盈一致（加进 G），
+ * 以亏损结束则相反（带「−」从 G 里扣掉）。所以按带号的净额累加，不只收盈利。
+ */
 export function addSizingProfitRecords(symbol: string, side: AddSide, history: TradeRecord[] = [],
   openTime: number | null, openedRealAt: number | null): TradeRecord[] {
   if (openTime == null) return [];
-  return [...new Map(history.filter(record => record.symbol === symbol && record.side === side
+  return [...new Map(history.filter(record => record.symbol === symbol
+    && (record.side === 'LONG' || record.side === 'SHORT')
     && (record.action === 'CLOSE' || record.action === 'LIQUIDATION') && record.closeTime >= openTime
     && (openedRealAt == null || (record.closedRealAt != null && record.closedRealAt >= openedRealAt)))
     .map(record => [record.id, record])).values()];
 }
 
-const verifiedProfitCache = new Map<string, { complete: boolean; usd: number }>();
+/** usd = mainUsd + hedgeUsd：主方向落袋净额与反向对冲腿已实现盈亏（带号）。 */
+export interface VerifiedAddSizingProfit { complete: boolean; usd: number; mainUsd: number; hedgeUsd: number }
+const verifiedProfitCache = new Map<string, VerifiedAddSizingProfit>();
 const profitCacheKey = (symbol: string, side: AddSide, records: TradeRecord[]) => `${symbol}:${side}:`
   + records.map(record => `${record.id}:${record.fillId}:${record.settlementMode}:${record.pnl}:${record.entryPrice}:${record.exitPrice}:${record.closeTime}:${record.quantity}:${record.contracts}:${record.contractSizeUsd}`).sort().join('|');
 
@@ -21,12 +30,16 @@ export function cachedVerifiedAddSizingProfit(symbol: string, side: AddSide, rec
   return verifiedProfitCache.get(profitCacheKey(symbol, side, records)) ?? null;
 }
 
-export async function verifiedAddSizingProfit(symbol: string, side: AddSide, records: TradeRecord[]) {
+export async function verifiedAddSizingProfit(symbol: string, side: AddSide, records: TradeRecord[]): Promise<VerifiedAddSizingProfit> {
   const key = profitCacheKey(symbol, side, records);
   const cached = verifiedProfitCache.get(key);
   if (cached) return cached;
   const checked = await verifyAddSizingRealizedRecords(symbol, records);
-  const result = { complete: checked.complete, usd: detectBankedMirrorProfit(symbol, side, checked.records, 0).usd };
+  // 反向对冲腿已平掉的盈亏带号并入：赚了加、亏了减（磨损）
+  const hedgeUsd = checked.records.reduce((sum, record) => record.side !== side && Number.isFinite(record.pnl)
+    ? sum + record.pnl : sum, 0);
+  const mainUsd = detectBankedMirrorProfit(symbol, side, checked.records, 0).usd;
+  const result = { complete: checked.complete, usd: mainUsd + hedgeUsd, mainUsd, hedgeUsd };
   if (result.complete) {
     verifiedProfitCache.set(key, result);
     if (verifiedProfitCache.size > 128) verifiedProfitCache.delete(verifiedProfitCache.keys().next().value!);
