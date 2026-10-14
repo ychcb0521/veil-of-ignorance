@@ -109,7 +109,7 @@ describe('战役列表：多级排序', () => {
     // 第一级自己没有「+」；其余十四项（含涨幅未兑现、仓位放大）各一个，平时透明、触屏改用长按。
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    expect(adds).toHaveLength(18);
+    expect(adds).toHaveLength(17);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
     expect(screen.queryByTestId('sort-chain-add-effectivePriceChangeMultiple')).not.toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('战役列表：多级排序', () => {
     expect(screen.getByTestId('sort-chain-add-magicB')).toHaveAccessibleName('把「神奇的 b」加为第 3 级排序');
     // 封面：第一级原样高亮，第二级轻一档
     const first = screen.getAllByTestId('campaign-card')[0];
-    expect(highlights(first)).toEqual(['campaign-mirror-tp-status:true', 'campaign-add-efficiency:then']);
+    expect(highlights(first)).toEqual(['campaign-add-efficiency:then', 'campaign-mirror-tp-status:true']);
     const addCell = within(first).getByTestId('campaign-add-efficiency');
     expect(addCell).toHaveClass('ring-1', 'ring-[#F0B90B]/20');
     expect(addCell).not.toHaveClass('ring-[#F0B90B]/40');

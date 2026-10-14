@@ -13,12 +13,14 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
   const page = read('pages/JournalCampaignsPage.tsx');
 
   it('排序行的次序与页面 SORT_OPTIONS 一致', () => {
-    const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(page)?.[1] ?? '';
-    const labels = [...block.matchAll(/label: '([^']+)'/g)].map(match => match[1]);
-    // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（自评在杠杆倍数之后、字母之前；「DSI 贡献」「USI 贡献」已删）
+    const block = /const ALL_SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(page)?.[1] ?? '';
+    const rowModes = /const SORT_ROW_MODES[^=]*= new Set<CampaignSortMode>\(\[([\s\S]*?)\]\);/.exec(page)?.[1] ?? '';
+    const shown = new Set([...rowModes.matchAll(/'([A-Za-z]+)'/g)].map(match => match[1]));
+    const labels = [...block.matchAll(/value: '([A-Za-z]+)', label: '([^']+)'/g)].filter(match => shown.has(match[1])).map(match => match[2]);
+    // 【用户要求】排序行只放封面上有的指标，再加操作时间与自评、字母，次序沿用原表
     expect(labels).toEqual([
-      '操作时间', '镜像止盈', '预期回撤', '涨跌幅', '涨跌幅倍数', '盈亏比', '加仓效用', '加仓次数', '仓位放大', '涨幅未兑现', '几何期望',
-      '算术期望', '杠杆倍数', '自评', '字母',
+      '操作时间', '预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', '仓位放大', '加仓效用', '几何期望', '算术期望',
+      '首仓涨跌幅', '首仓涨跌幅倍数', '涨幅未兑现', '镜像止盈', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
     expect(guide).not.toContain('<SubTitle>DSI 贡献率与 USI 贡献率</SubTitle>');
@@ -38,9 +40,10 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('排序行<strong>左对齐</strong>、按钮依次排开、间距均匀');
     expect(guide).not.toContain('与上方排序行的同名按钮共用同一套列');
     // 【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布」：左对齐、按读数定宽，顺序与排序行一致
-    expect(guide).toContain('第二层<strong>左对齐、紧凑排开</strong>');
+    // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」
+    expect(guide).toContain('第二层<strong>同宽、靠左、一行排开</strong>');
     expect(guide).not.toContain('<strong>等宽的统计格</strong>');
-    expect(guide).toContain('<strong>顺序与排序行一致</strong>：镜像止盈状态、预期回撤、涨跌幅、涨跌幅倍数、盈亏比、加仓效用、加仓次数、仓位放大、涨幅未兑现、单场几何期望、单场算术期望');
+    expect(guide).toContain('<strong>顺序与排序行一致</strong>：预期回撤、相对涨幅、加仓次数、几何仓位、神奇的 b、盈亏比、仓位放大、加仓效用、单场几何期望、单场算术期望、首仓涨跌幅、首仓涨跌幅倍数、涨幅未兑现、镜像止盈状态');
     // 【用户要求】仓位放大：排序行与封面都放在加仓次数的后面
     expect(guide).toContain('<strong>仓位放大</strong>紧跟加仓次数：主方向总名义仓位 ÷ 主力开仓名义仓位');
     expect(guide).toContain('<strong>同名的项在上下各张卡片上落在同一条竖线上</strong>');
@@ -51,7 +54,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('列宽按真实最长的读数定');
     expect(guide).not.toContain('卡片按原顺序自然换行');
     // 【用户要求】「分布要做的非常均匀，美观，不要有没必要的空隙」：宽度按当前列表里实际出现的读数定，不再按理论最长读数写死
-    expect(guide).toContain('每项的宽度按<strong>当前列表里实际出现的读数</strong>定');
+    expect(guide).toContain('宽度按<strong>当前列表里实际出现的读数</strong>定');
     expect(guide).not.toContain('每项的宽度按它自己最长的真实读数定');
     // 宽度按整个时间段算、不随排序变：切换排序（会筛掉算不出这一项的战役）时文字不挪，与「高亮只换底色」同一句话不打架
     expect(page).toContain('const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);');
@@ -60,7 +63,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('换一个排序或时间段');
     expect(guide).toContain('首次加载时战役分批到达，宽度可能随新到的读数放宽，加载完就定下来');
     // 【用户要求】「盈亏比只保留括号内的数字，把百分比部分删除」
-    expect(guide).toContain('<strong>盈亏比只写倍数 b</strong>（如「34.60」「-0.80」），不再写百分数和括号');
+    expect(guide).toContain('<strong>盈亏比只写倍数 b</strong>（如「34.60」「-0.80」），不再写百分数');
     expect(guide).toContain('页面只写倍数 bᵢ（两位小数，如 34.60、-0.80），不写百分数');
     expect(guide).toContain('不到 0.005 的读作 0.00、用中性色，不按原始正负上红绿');
     expect(guide).not.toContain('页面同时显示百分数和括号内数字');
@@ -71,7 +74,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('几何期望连同「仓位击穿」徽标');
     expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
     // 与页面常量一致：手机两列、≥ 640px 左对齐排开
-    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-2 sm:gap-y-1';");
+    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-nowrap sm:gap-x-1 sm:gap-y-1 sm:pr-6';");
     expect(guide).toContain('自评放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是自评');
     expect(guide).toContain('涨跌幅、涨跌幅倍数、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');

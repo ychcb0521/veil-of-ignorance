@@ -587,7 +587,7 @@ describe('排序链每一级的作用（芯片反馈）', () => {
 describe('排序项清单只有一份来源', () => {
   it('CAMPAIGN_SORT_MODES 与页面 SORT_OPTIONS 的 value 集合一致（新增排序项两边都要加，否则 URL 会悄悄退回操作时间）', () => {
     const page = readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
-    const block = /const SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(page)?.[1] ?? '';
+    const block = /const ALL_SORT_OPTIONS[^=]*= \[([\s\S]*?)\n\];/.exec(page)?.[1] ?? '';
     const values = [...block.matchAll(/value: '([A-Za-z]+)'/g)].map(match => match[1]);
     expect(values.length).toBeGreaterThan(0);
     expect([...CAMPAIGN_SORT_MODES].sort()).toEqual([...values].sort());

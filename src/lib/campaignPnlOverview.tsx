@@ -331,7 +331,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'payoffRatio', label: '盈亏比',
       value: payoff == null ? '—' : formatOverviewPayoffRatio(payoff * 100),
       color: pnlExportColor(payoff), valueClassName: pnlColor(payoff == null ? null : Number(payoff.toFixed(2))),
-      valueSuffix: hedgeWear && <span data-testid="payoff-ratio-hedge-wear" className="text-muted-foreground">（{hedgeWear.b != null && <span className="text-foreground/85">{hedgeWear.b} </span>}<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>）</span>,
+      valueSuffix: hedgeWear && <span data-testid="payoff-ratio-hedge-wear" className="text-muted-foreground">({hedgeWear.b != null && <span className="text-foreground/85">{hedgeWear.b} </span>}<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>,
       help: <><div className="text-[10px] font-medium text-foreground/85">方法一</div>
         <p className="font-mono">盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀</p>
         {payoff != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-worked">本场：{realizedPnl!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {payoff.toFixed(8)}</div>}

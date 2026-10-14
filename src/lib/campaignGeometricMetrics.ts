@@ -30,7 +30,7 @@ export function payoffRatioHedgeWear(magicB: number | null | undefined, wearR: n
   const rounded = Number(wearR.toFixed(2));
   const wear = `${rounded < 0 ? '−' : '+'}${Math.abs(rounded).toFixed(2)}`;
   const b = magicB == null || !Number.isFinite(magicB) ? null : magicB.toFixed(2);
-  return { b, wear, negative: rounded < 0, text: `（${b == null ? '' : `${b} `}${wear}）` };
+  return { b, wear, negative: rounded < 0, text: `(${b == null ? '' : `${b} `}${wear})` };
 }
 
 /** One compact reading: actual followed by the optional theoretical comparison. */

@@ -24,9 +24,9 @@ describe('【用户要求】盈亏比方法二：神奇的 b − 中途对冲空
   });
 
   it('括号读数：亏损写「−」并标红，盈利写「+」；没有中途对冲空单不加括号', () => {
-    expect(payoffRatioHedgeWear(2.1, -0.345)).toEqual({ b: '2.10', wear: '−0.34', negative: true, text: '（2.10 −0.34）' });
-    expect(payoffRatioHedgeWear(2.1, 0.5)?.text).toBe('（2.10 +0.50）');
-    expect(payoffRatioHedgeWear(null, -0.5)?.text).toBe('（−0.50）');
+    expect(payoffRatioHedgeWear(2.1, -0.345)).toEqual({ b: '2.10', wear: '−0.34', negative: true, text: '(2.10 −0.34)' });
+    expect(payoffRatioHedgeWear(2.1, 0.5)?.text).toBe('(2.10 +0.50)');
+    expect(payoffRatioHedgeWear(null, -0.5)?.text).toBe('(−0.50)');
     expect(payoffRatioHedgeWear(2.1, null)).toBeNull();
   });
 });

@@ -451,19 +451,14 @@ describe('JournalCampaignsPage sorting', () => {
   it('三列概览对应排序顺序：操作时间在最前且默认选中，新增金额指标可排序和查看散点图', async () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
+    // 【用户要求】排序行只放封面上有的指标（再加操作时间、杠杆倍数与自评、字母），次序沿用原表
     const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate',
-      'initialExpectedMaxLoss', 'realizedPnl', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
-      'mainPriceChange', 'mainPriceEfficiency', 'peakPriceChange', 'peakPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct'];
+      'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
+      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha'];
     const controls = screen.getByTestId('campaign-sort-controls');
-    expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item')).slice(0, 19)).toEqual(expected);
+    expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item'))).toEqual(expected);
+    expect(screen.queryByTestId('campaign-sort-realizedPnl')).not.toBeInTheDocument();
     expect(screen.getByTestId('campaign-sort-time')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByTestId('campaign-sort-realizedPnl'));
-    expect(screen.getByTestId('campaign-sort-realizedPnl')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.doubleClick(screen.getByTestId('campaign-sort-realizedPnl'));
-    expect(screen.getByText('已实现 P&L计算说明')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('campaign-realizedPnl-chart-toggle'));
-    expect(await screen.findByTestId('campaign-metric-scatter-plot')).toBeInTheDocument();
-    expect(screen.getByTestId('campaign-metric-scatter-plot').querySelectorAll('button[data-campaign-id]').length).toBeGreaterThan(0);
   });
   it('行情重载时点击立即保持完整旧图，分批返回不打散旧点，完成后整体更新', async () => {
     const restore = preparePricePathFixtures();
@@ -956,7 +951,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'divider-initialExpectedMaxLoss', 'initialExpectedMaxLoss', 'realizedPnl', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'peakPriceChange', 'peakPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
+    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
@@ -965,42 +960,31 @@ describe('JournalCampaignsPage sorting', () => {
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-wrap');
+    // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：≥ 640px 一行排开不换行
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-nowrap');
     expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
-    expect(cardCells).toEqual(["campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-mirror-tp-status","campaign-expected-drawdown-pct","campaign-main-price-change","campaign-main-price-efficiency","campaign-add-efficiency","campaign-position-amplification","campaign-unrealized-price-change","campaign-arithmetic-expectancy"]);
+    expect(cardCells).toEqual(["campaign-expected-drawdown-pct","campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-position-amplification","campaign-add-efficiency","campaign-geometric-expectancy","campaign-arithmetic-expectancy","campaign-main-price-change","campaign-main-price-efficiency","campaign-unrealized-price-change","campaign-mirror-tp-status"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何期望","镜像止盈","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","加仓效用","仓位放大","涨幅未兑现","算术期望"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","涨幅未兑现","镜像止盈"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
       expect(cell.children[1].tagName).toBe('DD');
-      expect(cell).toHaveClass('flex-col', 'px-2.5', 'shrink-0');
-      // 宽度读列表容器上的 CSS 变量，不再是写死的 px
-      expect([...cell.classList].some(cls => /^sm:w-\[var\(--cm-w-\w+\)\]$/.test(cls))).toBe(true);
+      expect(cell).toHaveClass('flex-col', 'px-2.5', 'sm:px-1.5', 'shrink-0');
+      // 【用户要求】「每个指标所占的空间要均匀」：十四项同一个宽度类，读列表容器上的 --cm-w-uniform，整行放不下时按 1/14 收窄
+      expect(cell).toHaveClass('sm:w-[min(var(--cm-w-uniform),calc((100%_-_3.25rem)/14))]');
     }
-    // 各张卡的同名项宽度类相同
-    for (const row of metricRows) {
-      expect(metricCells(row).map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))))
-        .toEqual(cells.map(cell => [...cell.classList].find(cls => cls.startsWith('sm:w-'))));
-    }
-    // 【用户要求】「分布要非常均匀，不要有没必要的空隙」：列宽按当前列表里实际出现的读数定，八个变量挂在列表容器上，
-    // 每个都是偶数 px、至少装得下指标名（10px × 字数）+ 左右内边距 20px；所有卡片都在这个容器里
     const cardList = screen.getByTestId('campaign-card-list');
     for (const card of screen.getAllByTestId('campaign-card')) expect(cardList).toContainElement(card);
-    const cellVars = cells.map(cell => /^sm:w-\[var\((--cm-w-\w+)\)\]$/.exec([...cell.classList].find(cls => cls.startsWith('sm:w-')) ?? '')?.[1] ?? '');
-    cellVars.forEach((name, index) => {
-      const px = /^(\d+)px$/.exec(cardList.style.getPropertyValue(name))?.[1];
-      expect(px, name).toBeDefined();
-      expect(Number(px) % 2, name).toBe(0);
-      expect(Number(px), name).toBeGreaterThanOrEqual((cells[index].querySelector('dt')?.textContent?.length ?? 0) * 10 + 20);
-    });
-    // 神奇的 b这一列：读数 3.00 / 0.50 / -0.80 / —，最宽的「-0.80」5 个半角按 SF Mono ≈ 34.0px，比指标名 30px 宽 → 56px；
-    // 预期回撤：「50.00%」6 个半角按 SF Mono ≈ 40.8px，比指标名 40px 宽 → 62px（按 Menlo 的 39.8px 算会是 60px，Safari 里被省略号截断）
+    // 统一宽度 = 各项（指标名与读数取宽者 + 内边距）里最宽的那一个，偶数 px；各项自己的估宽仍挂着
+    const uniform = Number(/^(\d+)px$/.exec(cardList.style.getPropertyValue('--cm-w-uniform'))?.[1]);
+    expect(uniform % 2).toBe(0);
+    expect(uniform).toBeGreaterThanOrEqual(Number(/^(\d+)px$/.exec(cardList.style.getPropertyValue('--cm-w-mainPriceEfficiency'))?.[1]));
     expect(screen.getAllByTestId('campaign-magic-b-value').map(node => node.textContent)).toEqual(['3.00', '0.50', '-0.80', '—']);
     expect(cardList.style.getPropertyValue('--cm-w-magicB')).toBe('70px');
     expect(cardList.style.getPropertyValue('--cm-w-expectedDrawdownPct')).toBe('62px');
