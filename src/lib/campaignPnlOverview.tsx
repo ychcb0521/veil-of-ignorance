@@ -696,7 +696,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'magicB', label: '神奇的 b',
       value: formatActualTheoreticalMetric(magicB, theoreticalWorked, value => formatOverviewPayoffRatio(value * 100)),
       color: pnlExportColor(magicB == null ? null : Number(magicB.toFixed(2))), valueClassName: pnlColor(magicB == null ? null : Number(magicB.toFixed(2))),
-      help: <><p>读数括号内为神奇的 b（理论），括号前为实际几何公式 b。</p><MagicBMethodFormulas realizedPnl={realizedPnl} initialRisk={initialExpectedMaxLoss} geometricWorked={
+      help: <><p>读数括号内为神奇的 b（理论），括号前为实际几何公式 b。</p><MagicBMethodFormulas geometricWorked={
       worked != null && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
         <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />

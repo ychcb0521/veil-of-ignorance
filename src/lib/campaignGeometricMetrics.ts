@@ -16,7 +16,7 @@ export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币�
 export const MAGIC_B_FORMULA = '神奇的 b = 几何仓位 × 相对涨幅';
 export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 几何仓位（理论） × 相对涨幅';
 export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀';
-export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二，方法三仅作理论对照。`;
+export const MAGIC_B_METHODS_DESCRIPTION = `算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。神奇的 b 指标采用算法二，方法三仅作理论对照。`;
 export const PAYOFF_RATIO_HEDGE_WEAR_FORMULA = '盈亏比（方法二） = 神奇的 b − 中途对冲空单的累积磨损值（−ΔR）';
 export const PAYOFF_RATIO_HEDGE_WEAR_RULE = 'ΔR = 中途对冲空单已实现盈亏之和 ÷ 初始最大预期亏损 L₀，亏损为负。中途对冲空单不包括参与「相对涨幅」计算的已触发空单（主力平仓那一刻把行情锁住、平仓价 F 取自它们的那几张）；只计已平仓、已实现的部分。空单以亏损结束时磨损为负、从神奇的 b 里扣掉；以盈利结束时为正、加回来。';
 export const MAGIC_B_RULE = '采用实际几何仓位（含首次减仓因子），相对涨幅以初始每币风险 E − K初 为分母。b 直接乘该比值，初始风险不再重复除一次；例如相对涨幅 2.00× 参与计算为 2。不再乘基数仓位比例 β，不追加结算修正。几何公式与已实现净盈亏 ÷ L₀ 的结算口径可能存在差异；缺少有效依据时显示「—」。';

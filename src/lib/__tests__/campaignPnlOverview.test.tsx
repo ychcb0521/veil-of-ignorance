@@ -86,7 +86,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(worked).not.toHaveTextContent('β');
     expect(worked).not.toHaveTextContent('÷');
     expect(help.querySelector('[data-testid="magic-b-worked"]')).toHaveTextContent(`≈ ${(2 * rise / 100).toFixed(8)}`);
-    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toHaveTextContent('≈ 2.00000000');
+    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toBeNull();
   });
   it.each([0, -20])('method three preserves a zero or negative effective rise (%s)', rise => {
     const help = render(<>{buildCampaignPnlOverviewItems(winnerMetrics({
@@ -121,10 +121,11 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(worked).toHaveTextContent('≈ 1.00000000');
     expect(worked).not.toHaveTextContent('β');
     expect(worked).not.toHaveTextContent('÷');
-    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toHaveTextContent('200 U ÷ 100 U ≈ 2.00000000');
+    expect(help.querySelector('[data-testid="magic-b-direct-worked"]')).toBeNull();
     expect(help).not.toHaveTextContent('+ 结算修正');
     expect(worked).not.toHaveTextContent('结算修正');
-    expect(help).toHaveTextContent('算法一 · 原盈亏比');
+    // 【用户要求】神奇的 b 的说明不再列方法一（原盈亏比）
+    expect(help).not.toHaveTextContent('算法一 · 原盈亏比');
     expect(help).toHaveTextContent('算法二 · 几何公式');
     expect(help).toHaveTextContent('结算口径可能存在差异');
     expect(items.find(item => item.key === 'payoffRatio')?.value).toBe('2.00');
