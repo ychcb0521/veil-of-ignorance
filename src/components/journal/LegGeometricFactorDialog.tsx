@@ -27,7 +27,9 @@ export function LegGeometricFactorDialog({ ordinal, factor, theoretical, reducti
   ] : theoretical ? [
     ['① 当次实际持仓基数', `Q前 = ${coins(factor.beforeCoins)} 币；成本线 S前 = ${decimal(theoretical.costLine)}`],
     ['② 实际加仓价与支撑线', `T = ${decimal(theoretical.addPrice)}；K = ${decimal(theoretical.support)}`],
-    ...(theoretical.firstAdd ? [['③ 首次覆盖预算调整', `G = ${coins(theoretical.bankedProfit)} U；K* = K ${theoretical.addPrice > theoretical.support ? '+' : '−'} G ÷ Q前 = ${decimal(theoretical.adjustedSupport)}`]] : [['③ 后续成本线口径', '使用当次实际持仓加权成本 S前，不使用扣除 G 的保本线。']]),
+    ...(theoretical.firstAdd ? [['③ 首次覆盖预算调整', `G = ${coins(theoretical.bankedProfit)} U；K* = K ${theoretical.addPrice > theoretical.support ? '+' : '−'} G ÷ Q前 = ${decimal(theoretical.adjustedSupport)}`]] : [['③ 后续成本线口径', theoretical.bankedProfit
+      ? `使用当次实际持仓加权成本 S前，不使用扣除 G 的保本线；上次加仓之后平掉的空单盈亏 H = ${coins(theoretical.bankedProfit)} U，K* = K ${theoretical.addPrice > theoretical.support ? '+' : '−'} H ÷ Q前 = ${decimal(theoretical.adjustedSupport)}`
+      : '使用当次实际持仓加权成本 S前，不使用扣除 G 的保本线。']]),
     ['④ 理论加仓比例', `α理论 = max(0, ${theoretical.addPrice > theoretical.support ? `${decimal(theoretical.adjustedSupport)} − ${decimal(theoretical.costLine)}` : `${decimal(theoretical.costLine)} − ${decimal(theoretical.adjustedSupport)}`}) ÷ |${decimal(theoretical.addPrice)} − ${decimal(theoretical.support)}| ≈ ${decimal(ratio)}（${(ratio * 100).toFixed(2)}%）`],
     ['⑤ 理论可加币数', `ΔQ理论 = Q前 × α理论 ≈ ${coins(factor.addCoins)} 币`],
     ['⑥ 仓位的几何复利（理论）', `1 + α理论 = 1 + ${decimal(ratio)} ≈ ${formatLegGeometricFactor(factor)}`],

@@ -15,19 +15,24 @@ export interface LegTheoreticalGeometricFactor extends LegGeometricFactor {
   bankedProfit: number; firstAdd: boolean; alpha: number;
 }
 
-export const LEG_THEORETICAL_FACTOR_HINT = '仓位的几何复利（理论）：α₁ = max(0, K₁ + G ÷ Q₁ − S₁) ÷ (T₁ − K₁)。K₁ + G ÷ Q₁ 只用于分子的等效覆盖预算，分母保留实际支撑线。之后 αₖ = max(0, Kₖ − S前) ÷ (Tₖ − Kₖ)，S前为当次加仓前实际仓位的加权成本线，不扣 G。各轮按实际持仓状态独立推算，不模拟另一套理论成交；缺少依据显示「—」。空单方向按价格距离对称计算。';
+export const LEG_THEORETICAL_FACTOR_HINT = '仓位的几何复利（理论）：α₁ = max(0, K₁ + G ÷ Q₁ − S₁) ÷ (T₁ − K₁)。K₁ + G ÷ Q₁ 只用于分子的等效覆盖预算，分母保留实际支撑线。之后 αₖ = max(0, Kₖ + Hₖ ÷ Qₖ − S前) ÷ (Tₖ − Kₖ)，S前为当次加仓前实际仓位的加权成本线，不扣 G。G 含本场中途对冲空单（主空则是对冲多单）已平掉的盈亏；Hₖ 是上一次加仓之后才平掉的那部分空单盈亏。空单以盈利结束与镜像止盈一致、加进来，以亏损结束则相反、带「−」扣掉——与加仓计算器的「空单盈亏」同一口径。各轮按实际持仓状态独立推算，不模拟另一套理论成交；缺少依据显示「—」。空单方向按价格距离对称计算。';
 
 /** Price-derived capacities, distinct from actual fills and the ongoing Plan B verdict. */
 export function buildCampaignLegTheoreticalFactors(input: CampaignAddSizingInput, verdicts?: Map<string, AddSizingVerdict>): Map<string, LegTheoreticalGeometricFactor | null> {
   const checks = verdicts ?? evaluateCampaignAddSizing(input);
   const firstDirections = new Set<string>();
+  /** 每个方向上一次加仓时已计入的空单盈亏：之后的加仓只再计新平掉的那部分，同一笔不计两次 */
+  const hedgeSeen = new Map<string, number>();
   return new Map(resolveCampaignAddQuantitySteps(input).map(step => {
     const leg = input.legs.find(item => item.id === step.legId)!;
     const firstAdd = !firstDirections.has(leg.direction ?? 'long');
     firstDirections.add(leg.direction ?? 'long');
     const v = checks.get(step.legId), d = leg.direction === 'short' ? -1 : 1;
     const Q = step.beforeCoins, K = v?.s1, T = v?.s2, Y = v?.cushion;
-    const G = firstAdd ? v?.banked : 0;
+    const direction = leg.direction ?? 'long';
+    const hedgeTotal = v?.hedgeBanked ?? 0;
+    const G = firstAdd ? v?.banked : hedgeTotal - (hedgeSeen.get(direction) ?? 0);
+    if (Number.isFinite(hedgeTotal)) hedgeSeen.set(direction, hedgeTotal);
     if (!v || v.status === 'unknown' || Q == null || !(Q > 0) || K == null || T == null || Y == null || G == null
       || ![Q, K, T, Y, G].every(Number.isFinite) || (T - K) * d <= 0) return [step.legId, null];
     const costLine = K - Y / (Q * d), adjustedSupport = K + d * G / Q;

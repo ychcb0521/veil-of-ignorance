@@ -103,6 +103,8 @@ export interface AddSizingVerdict {
    * 止盈委托、手动减仓的利润加进来，止损、强平、亏着平掉的扣出去；花掉的 G 不能再花一次。
    */
   banked: number | null;
+  /** banked 里来自本场中途反向对冲腿（已平掉的那几刀）的部分，带号：盈利为正、亏损为负 */
+  hedgeBanked?: number | null;
   /** 旧仓在 K 的浮亏绝对额，仅作诊断明细；正式判定使用有正有负的 cushion 净额。 */
   consumedByHeld: number | null;
   /** 新腿退回 K 的最大预期亏损 = Q₂实际 × (T − K) × d */
@@ -199,7 +201,7 @@ function orderEnd(order: CampaignReverseHedgeOrder): number | null {
 function unknown(reason: AddSizingUnknownReason, partial: Partial<AddSizingVerdict> = {}): AddSizingVerdict {
   return {
     s1: null, s2: null, x1Coins: null, x2Coins: null,
-    cushion: null, banked: null, consumedByHeld: null, maxLoss: null, required: null,
+    cushion: null, banked: null, hedgeBanked: null, consumedByHeld: null, maxLoss: null, required: null,
     riskPerCoin: null, maxAllowedCoins: null, maxAllowedNotional: null, shortfall: null,
     blendedCost: null, costLineShortfall: null,
     snapshot: null, snapshotLimitAtRef: null, fillSlippagePct: null, slippageOvershootPct: null, excess: null, withinSnapshotLimit: null,
@@ -495,13 +497,17 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     }
 
     // 本场中途反向对冲腿已平掉的盈亏带号并入 G：赚了加、亏了减——与计算器 addSizingProfitRecords 同一口径
+    let hedgeBanked = 0;
     for (const ledger of hedgeLedgers) {
       if (ledger.leg.direction === add.direction) continue;
       for (const cut of ledger.cuts) {
         if (cut.time < holdingStart || !cutClosedBy(cut, t, addOperationTime)) continue;
         if (holdingStartOperation != null && (cut.operationTime == null || cut.operationTime < holdingStartOperation)) continue;
         if (cut.usd == null) incomplete = true;
-        else banked += cut.usd;
+        else {
+          banked += cut.usd;
+          hedgeBanked += cut.usd;
+        }
       }
     }
 
@@ -559,7 +565,7 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
     const fillSlippagePct = snapshotOrderPrice != null ? (s2 / snapshotOrderPrice - 1) * 100 : null;
     const withinSnapshotLimit = usableSnapshot && failing ? excess?.cause === 'slippage' : null;
     const partial = {
-      s1, s2, x1Coins, x2Coins, cushion, banked, consumedByHeld, maxLoss, required,
+      s1, s2, x1Coins, x2Coins, cushion, banked, hedgeBanked, consumedByHeld, maxLoss, required,
       riskPerCoin, maxAllowedCoins, maxAllowedNotional, blendedCost, costLineShortfall,
       snapshot: usableSnapshot, snapshotLimitAtRef, fillSlippagePct, slippageOvershootPct, excess, withinSnapshotLimit,
     };

@@ -60,7 +60,7 @@ function PositionGeometricWorked({ basis, theoretical = false }: { basis?: Campa
       <div data-testid="position-geometric-result" className="border-t border-border/60 pt-2 font-mono font-semibold tabular-nums">≈ {result.toFixed(2)} 倍</div>
       <div className="text-[10px] text-muted-foreground">按完整精度计算；上述代入值与结果仅作四舍五入展示。</div>
       <div className="text-[10px] text-muted-foreground">αf = 首次实际减仓币数 ÷ 初始主力与镜像合计币数；没有减仓取 0。不是所有早期减仓比例的累加。</div>
-      {theoretical && factors?.map((factor, index) => factor && <div key={index} className="border-t border-border/60 pt-2 font-mono break-words">α{index + 1}理论 = max(0, {number(factor.support)} − {number(factor.costLine)}{factor.firstAdd ? ` + ${number(factor.bankedProfit)} ÷ ${number(factor.beforeCoins)}` : ''}) ÷ ({number(factor.addPrice)} − {number(factor.support)}) ≈ {(factor.alpha * 100).toFixed(2)}%</div>)}
+      {theoretical && factors?.map((factor, index) => factor && <div key={index} className="border-t border-border/60 pt-2 font-mono break-words">α{index + 1}理论 = max(0, {number(factor.support)} − {number(factor.costLine)}{factor.firstAdd || factor.bankedProfit ? ` + ${number(factor.bankedProfit)} ÷ ${number(factor.beforeCoins)}` : ''}) ÷ ({number(factor.addPrice)} − {number(factor.support)}) ≈ {(factor.alpha * 100).toFixed(2)}%</div>)}
       {first && <div data-testid="position-geometric-first-add" className="space-y-1.5 border-t border-border/60 pt-2">
         <div className="text-[10px] font-medium text-muted-foreground">首次加仓 · 覆盖预算与整体保本价</div>
         <div className="text-[10px] text-muted-foreground">加仓前 Q₁；旧仓成本 S₁；实际止损 K₁ 不变。</div>
