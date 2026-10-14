@@ -23,6 +23,7 @@ import type {
 import {
   deriveCounterfactualRiskAnchors,
   isManualLegScenario,
+  resolveManualLegEconomics,
   type CounterfactualRiskAnchors,
   type SupportedTemplate,
 } from '@/lib/campaignSimulationEngine';
@@ -315,6 +316,15 @@ export function buildCounterfactualOverviewMetrics(
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   // 分支快照没有保存逐次加仓的有效保护线；不能拿净结算 R 或初始止损线替代这个几何指标。
   const b: number | null = null;
+  // 中途对冲空单的累积磨损（盈亏比方法二）：副本里参与运行的对冲空单逐腿已实现盈亏，锁住行情、参与相对涨幅的那几张不算——与真实一侧同一条规则
+  const lockingIds = new Set(priceChange?.lockingLegIds ?? []);
+  const hedgePnls = manual && (shared.mainSide ?? 'long') === 'long' ? (branch.params.manual_legs ?? [])
+    .filter(leg => leg.enabled && leg.filled !== false && leg.direction === 'short' && !lockingIds.has(leg.id)
+      && (leg.leg_role.startsWith('hedge_') || leg.leg_role === 'reentry_hedge'))
+    .map(leg => resolveManualLegEconomics(leg).netPnl)
+    .filter(pnl => Number.isFinite(pnl)) : [];
+  const hedgeWearUsd = hedgePnls.length ? hedgePnls.reduce((sum, pnl) => sum + pnl, 0) : null;
+  const hedgeWearR = hedgeWearUsd != null && initialExpectedMaxLoss > 0 ? hedgeWearUsd / initialExpectedMaxLoss : null;
   const settlementRatio = payoffRatio == null ? null : payoffRatio / 100;
   const expectancies = computeCampaignExpectanciesFromMagicB(settlementRatio);
   const asymmetricRiskContribution = computeAsymmetricRiskContribution(
@@ -422,6 +432,7 @@ export function buildCounterfactualOverviewMetrics(
     expectedMaxDrawdownPct,
     payoffRatio,
     magicB: b,
+    hedgeWearR, hedgeWearUsd, hedgeWearLegCount: hedgePnls.length,
     mainPriceChangePct,
     mainPriceChangeBasis: priceChange ? { entryPrice: priceChange.entryPrice, exitPrice: priceChange.exitPrice, exitSource: priceChange.exitSource } : null,
     hasMainAdd: manual && counterfactualHasMainAdd(branch.params.manual_legs),

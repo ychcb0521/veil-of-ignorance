@@ -65,6 +65,8 @@ export interface OverviewPanelItem {
   value: string;
   help: ReactNode;
   valueClassName?: string;
+  /** 紧跟读数之后的补充（自带颜色）。 */
+  valueSuffix?: ReactNode;
   /** 放右栏；一项都不放右栏时面板只有左边一栏，中间那道分隔线也不画。 */
   rightColumn?: boolean;
   column?: 0 | 1 | 2;
@@ -94,7 +96,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
               {items.filter(item => (item.column ?? 0) === column).map(item => (
                 <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} className="flex min-h-5 min-w-0 items-baseline justify-between gap-3">
                   <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
-                  <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+                  <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
                 </div>
               ))}
             </div>
@@ -138,7 +140,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
             >
               <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
               {/* 【用户要求】「要对齐」：每项一行，数值不折行、右端对齐；名称过长时截断（悬停看全名），不把这一行撑高。 */}
-              <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}</span>
+              <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
             </div>
           );
         })}

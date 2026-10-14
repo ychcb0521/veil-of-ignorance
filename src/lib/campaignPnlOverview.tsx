@@ -5,7 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, PAYOFF_RATIO_HEDGE_WEAR_RULE, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
@@ -120,6 +120,8 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
   key: CampaignPnlOverviewItemKey;
   help: ReactNode;
   valueClassName?: string;
+  /** 紧跟读数之后的补充（自带颜色），例如盈亏比后面的磨损括号；导出图只读 value。 */
+  valueSuffix?: ReactNode;
 };
 
 /**
@@ -212,6 +214,9 @@ export interface CampaignPnlOverviewMetrics {
   positionGeometricMultipleTheoretical?: number | null;
   addCount?: number | null;
   magicB?: number | null;
+  hedgeWearR?: number | null;
+  hedgeWearUsd?: number | null;
+  hedgeWearLegCount?: number;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
   initialRisk: { drawdownFraction: number; source: CampaignInitialRiskSource } | null;
   /** 整段替换某一项的帮助文案（含义与真实战役不同时用）。 */
@@ -318,15 +323,25 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     ? computeAddEfficiency(payoff, mainPriceEfficiency)
     : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
+  const hedgeWear = payoffRatioHedgeWear(magicB, metrics.hedgeWearR);
+  const methodTwo = magicB != null && metrics.hedgeWearR != null ? magicB + metrics.hedgeWearR : null;
 
   const built: CampaignPnlOverviewItem[] = [
     {
       key: 'payoffRatio', label: '盈亏比',
       value: payoff == null ? '—' : formatOverviewPayoffRatio(payoff * 100),
       color: pnlExportColor(payoff), valueClassName: pnlColor(payoff == null ? null : Number(payoff.toFixed(2))),
-      help: <><p className="font-mono">盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀</p>
+      valueSuffix: hedgeWear && <span data-testid="payoff-ratio-hedge-wear" className="text-muted-foreground">（{hedgeWear.b != null && <span className="text-foreground/85">{hedgeWear.b} </span>}<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>）</span>,
+      help: <><div className="text-[10px] font-medium text-foreground/85">方法一</div>
+        <p className="font-mono">盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀</p>
         {payoff != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-worked">本场：{realizedPnl!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {payoff.toFixed(8)}</div>}
-        <p>已实现净盈亏与本场结算同源，包含各次交易的结算结果。L₀ 使用交易开始时的最大预期亏损；盈利为正，亏损保留负号。没有加仓的战役同样计算，缺少有效初始风险时显示「—」。</p></>,
+        <p>已实现净盈亏与本场结算同源，包含各次交易的结算结果。L₀ 使用交易开始时的最大预期亏损；盈利为正，亏损保留负号。没有加仓的战役同样计算，缺少有效初始风险时显示「—」。</p>
+        <div className="text-[10px] font-medium text-foreground/85">方法二</div>
+        <p className="font-mono">{PAYOFF_RATIO_HEDGE_WEAR_FORMULA}</p>
+        <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-hedge-wear-worked">{metrics.hedgeWearR == null
+          ? '本场：没有中途对冲空单已实现盈亏（或缺少 L₀），不计磨损。'
+          : <>ΔR = {metrics.hedgeWearUsd!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {metrics.hedgeWearR.toFixed(4)}（{metrics.hedgeWearLegCount} 张）{methodTwo != null && <><br />本场：{magicB!.toFixed(4)} {metrics.hedgeWearR < 0 ? '−' : '+'} {Math.abs(metrics.hedgeWearR).toFixed(4)} ≈ {methodTwo.toFixed(4)}</>}</>}</div>
+        <p>{PAYOFF_RATIO_HEDGE_WEAR_RULE}读数后的括号写「神奇的 b 磨损值」，磨损为负时标红。</p></>,
     },
     {
       key: 'addCount', label: '加仓次数',

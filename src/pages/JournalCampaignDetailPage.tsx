@@ -1775,6 +1775,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       positionGeometricMultiple: campaignGeometricMetrics?.positionGeometricMultiple ?? null,
       positionGeometricMultipleTheoretical: campaignGeometricMetrics?.positionGeometricMultipleTheoretical ?? null,
       magicB: campaignGeometricMetrics?.magicB ?? null,
+      hedgeWearR: campaignGeometricMetrics?.hedgeWearR ?? null,
+      hedgeWearUsd: campaignGeometricMetrics?.hedgeWearUsd ?? null,
+      hedgeWearLegCount: campaignGeometricMetrics?.hedgeWearLegCount,
       geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });

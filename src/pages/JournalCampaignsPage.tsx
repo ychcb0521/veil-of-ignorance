@@ -69,7 +69,7 @@ import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { computeMagicB, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_FORMULA, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_FORMULA, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
 import {
@@ -1576,7 +1576,9 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     expectedDrawdownPct: initialExpectedMaxDrawdownPct > 0 ? `${initialExpectedMaxDrawdownPct.toFixed(2)}%` : '—',
     mainPriceChange: formatLegPriceChangePct(row.mainPriceChangePct),
     mainPriceEfficiency: mainPriceEfficiency == null ? '—' : formatMainPriceEfficiency(mainPriceEfficiency),
-    captureRate: rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100),
+    // 列宽要算上括号里的磨损值（神奇的 b 磨损值）
+    captureRate: (rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100))
+      + (payoffRatioHedgeWear(rowMagicB(row), row.hedgeWearR)?.text ?? ''),
     // 【用户要求】神奇的 b只保留倍数 b，不写百分数
     addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
     addCount: String(rowAddCount(row)),
@@ -1729,6 +1731,8 @@ const CampaignCard = memo(function CampaignCard({
   );
   /** 封面八项的读数：与列表容器上的列宽估算同一份（cardMetricReadings）。 */
   const readings = cardMetricReadings(row);
+  const hedgeWear = payoffRatioHedgeWear(rowMagicB(row), row.hedgeWearR);
+  const payoffReading = rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100);
   const mirrorTpStatus = readings.mirrorTp;
   const statusLabel = campaign.status === 'active'
     ? '进行中'
@@ -1999,7 +2003,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
             <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{readings.captureRate}</span></dd>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}</span>{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className={`${CARD_METRIC_VALUE} text-muted-foreground`} title={PAYOFF_RATIO_HEDGE_WEAR_FORMULA}>（{hedgeWear.b != null && <span className="text-foreground/85">{hedgeWear.b} </span>}<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>）</span>}</dd>
           </div>
           <div
             data-testid="campaign-geometric-expectancy"
@@ -2070,7 +2074,7 @@ const CampaignCard = memo(function CampaignCard({
               ? (campaignHasMainAdd(legs)
                 ? '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|：这场首仓涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 盈亏比 ${readings.captureRate} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
+                : `加仓效用 = 盈亏比 ${payoffReading} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >

@@ -86,6 +86,8 @@ export interface CampaignPriceChange {
   exitLegId: string | null;
   /** 主力各笔里最晚的平仓时刻；主力都还没平仓时 null。 */
   mainCloseTime: number | null;
+  /** 主力平仓那一刻把行情锁住的全部对冲腿（平仓价取其中最早开的那张）；没有时为空。 */
+  lockingLegIds?: string[];
 }
 
 export const EMPTY_CAMPAIGN_PRICE_CHANGE: CampaignPriceChange = Object.freeze({
@@ -242,12 +244,13 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
     }
     return closedInTime && Math.abs((leg.closeTime as number) - closeAt) <= SAME_CLOSE_TOLERANCE_MS;
   };
-  const lockingHedge = mainCloseTime == null ? null : inputs
+  const lockingHedges = mainCloseTime == null ? [] : inputs
     .filter(leg => isLockingHedgeRole(leg.role) && leg.side !== side
       && usable(leg.entryPrice) && leg.entryPrice > 0
       && usable(leg.openTime) && leg.openTime < mainCloseTime
       && locks(leg, mainCloseTime))
-    .sort((a, b) => (a.openTime as number) - (b.openTime as number) || a.id.localeCompare(b.id))[0] ?? null;
+    .sort((a, b) => (a.openTime as number) - (b.openTime as number) || a.id.localeCompare(b.id));
+  const lockingHedge = lockingHedges[0] ?? null;
 
   const exitPrice = lockingHedge ? (lockingHedge.entryPrice as number) : (exitLeg.exitPrice as number);
   return {
@@ -260,6 +263,7 @@ export function computeCampaignPriceChange(inputs: readonly PriceChangeLegInput[
     exitSource: lockingHedge ? EXIT_SOURCE_BY_HEDGE_ROLE[lockingHedge.role] : 'main',
     exitLegId: lockingHedge ? lockingHedge.id : exitLeg.id,
     mainCloseTime,
+    lockingLegIds: lockingHedges.map(leg => leg.id),
   };
 }
 

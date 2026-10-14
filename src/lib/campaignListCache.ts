@@ -64,6 +64,8 @@ export type CampaignCardData = {
   positionGeometricMultiple?: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
+  /** 中途对冲空单的累积磨损值 ΔR（带号）；见 computeCampaignGeometricMetrics。 */
+  hedgeWearR?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
 };
 

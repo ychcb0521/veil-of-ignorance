@@ -1,4 +1,4 @@
-import { computeInitialExpectedMaxDrawdownPct, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, resolveMainRiskAnchors, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
+import { computeInitialExpectedMaxDrawdownPct, computeInitialExpectedMaxLoss, computeInitialMainExposureNotional, resolveInitialExposureLegAttribution, resolveMainRiskAnchors, type CampaignLocalOrderFacts } from '@/lib/campaignAnalysis';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps, type AddSizingVerdict } from '@/lib/campaignAddSizingCheck';
 import { resolveLegExecution, tradeRecordNotionalAt, type LegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import { computeCampaignRealizedPnl } from '@/lib/campaignRealizedPnl';
@@ -17,7 +17,21 @@ export const MAGIC_B_FORMULA = '神奇的 b = 几何仓位 × 相对涨幅';
 export const MAGIC_B_THEORETICAL_FORMULA = '神奇的 b（理论） = 几何仓位（理论） × 相对涨幅';
 export const MAGIC_B_SETTLEMENT_FORMULA = '神奇的 b = 已实现净盈亏 ÷ 初始最大预期亏损 L₀';
 export const MAGIC_B_METHODS_DESCRIPTION = `算法一 · 原盈亏比：${MAGIC_B_SETTLEMENT_FORMULA}。算法二 · 几何公式：${MAGIC_B_FORMULA}。方法三 · 神奇的 b（理论）：${MAGIC_B_THEORETICAL_FORMULA}。盈亏比及相关统计采用算法一，神奇的 b 指标采用算法二，方法三仅作理论对照。`;
+export const PAYOFF_RATIO_HEDGE_WEAR_FORMULA = '盈亏比（方法二） = 神奇的 b − 中途对冲空单的累积磨损值（−ΔR）';
+export const PAYOFF_RATIO_HEDGE_WEAR_RULE = 'ΔR = 中途对冲空单已实现盈亏之和 ÷ 初始最大预期亏损 L₀，亏损为负。中途对冲空单不包括参与「相对涨幅」计算的已触发空单（主力平仓那一刻把行情锁住、平仓价 F 取自它们的那几张）；只计已平仓、已实现的部分。空单以亏损结束时磨损为负、从神奇的 b 里扣掉；以盈利结束时为正、加回来。';
 export const MAGIC_B_RULE = '采用实际几何仓位（含首次减仓因子），相对涨幅以初始每币风险 E − K初 为分母。b 直接乘该比值，初始风险不再重复除一次；例如相对涨幅 2.00× 参与计算为 2。不再乘基数仓位比例 β，不追加结算修正。几何公式与已实现净盈亏 ÷ L₀ 的结算口径可能存在差异；缺少有效依据时显示「—」。';
+
+/**
+ * 盈亏比读数后面的括号：（神奇的 b  磨损值）。磨损值带号、两位小数，亏损写「−0.35」（标红），盈利写「+0.35」。
+ * 没有中途对冲空单（或缺 L₀）时返回 null，不加括号。
+ */
+export function payoffRatioHedgeWear(magicB: number | null | undefined, wearR: number | null | undefined) {
+  if (wearR == null || !Number.isFinite(wearR)) return null;
+  const rounded = Number(wearR.toFixed(2));
+  const wear = `${rounded < 0 ? '−' : '+'}${Math.abs(rounded).toFixed(2)}`;
+  const b = magicB == null || !Number.isFinite(magicB) ? null : magicB.toFixed(2);
+  return { b, wear, negative: rounded < 0, text: `（${b == null ? '' : `${b} `}${wear}）` };
+}
 
 /** One compact reading: actual followed by the optional theoretical comparison. */
 export function formatActualTheoreticalMetric(actual: number | null | undefined, theoretical: number | null | undefined, format: (value: number) => string): string {
@@ -46,6 +60,11 @@ export interface CampaignGeometricMetrics {
   positionGeometricMultiple: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
+  /** 中途对冲空单的累积磨损值 ΔR（带号，亏损为负）；没有中途对冲空单或缺 L₀ 时 null。 */
+  hedgeWearR?: number | null;
+  /** 中途对冲空单已实现盈亏之和（U）与参与计数的腿数，供说明代入。 */
+  hedgeWearUsd?: number | null;
+  hedgeWearLegCount?: number;
   geometricMetricBasis: {
     initialCoins: number | null;
     initialEntryPrice?: number | null;
@@ -188,7 +207,16 @@ export function computeCampaignGeometricMetrics(
   const finalTime = closes.length ? Math.max(...closes.map(close => close.time)) : null;
   // F is exactly the exit basis of 首仓涨跌幅, including hedge locks, execution
   // corrections and unfilled-order evidence. Never average the main/add exits.
-  const finalExitPrice = campaignPriceChange(campaign, legs, tradeRecords, corrections, localOrders).exitPrice;
+  const priceChange = campaignPriceChange(campaign, legs, tradeRecords, corrections, localOrders);
+  const finalExitPrice = priceChange.exitPrice;
+  // 中途对冲空单的累积磨损：对冲腿已实现盈亏（带号）÷ L₀；锁住行情、参与相对涨幅的那几张不算
+  const lockingIds = new Set(priceChange.lockingLegIds ?? []);
+  const hedgeLegs = legs.filter(leg => leg.direction === 'short' && !lockingIds.has(leg.id)
+    && ((leg.leg_role ?? '').startsWith('hedge_') || leg.leg_role === 'reentry_hedge'));
+  const hedgePnls = hedgeLegs.map(leg => settlement.byLeg.get(leg.id)).filter((pnl): pnl is number => pnl != null && Number.isFinite(pnl));
+  const hedgeWearUsd = hedgePnls.length ? hedgePnls.reduce((sum, pnl) => sum + pnl, 0) : null;
+  const initialExpectedMaxLoss = computeInitialExpectedMaxLoss(campaign, legs, tradeRecords, orders);
+  const hedgeWearR = hedgeWearUsd != null && initialExpectedMaxLoss > 0 ? hedgeWearUsd / initialExpectedMaxLoss : null;
   let reduction: number | null = null;
   const initialReductionFactors: Array<LegGeometricFactor & { legId: string }> = [];
   if (initialCoins != null) {
@@ -243,6 +271,7 @@ export function computeCampaignGeometricMetrics(
     positionGeometricMultiple: multiple,
     positionGeometricMultipleTheoretical: theoreticalMultiple,
     magicB: computeMagicB(rise, multiple),
+    hedgeWearR, hedgeWearUsd, hedgeWearLegCount: hedgePnls.length,
     geometricMetricBasis: { initialCoins, initialEntryPrice, initialStopPrice, initialReductionFactors: reduction == null ? [] : initialReductionFactors, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
   };
 }
