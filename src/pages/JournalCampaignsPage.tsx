@@ -47,7 +47,7 @@ import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
 import { buildCampaignCardData, waitForCampaignListHeal, type CampaignCardData } from '@/lib/campaignListCache';
 import { formatLegPriceChangePct, legPriceChangeDirection, type LegPriceChangeDirection } from '@/lib/legPriceChange';
-import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, formatEfficiency } from '@/lib/campaignMainPriceChange';
+import { PRICE_CHANGE_EXIT_RULE_TEXT, campaignHasMainAdd, computeAddEfficiency, formatEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeCurrentAccountEquity } from '@/lib/accountEquity';
 import { formatCampaignDisplayCode, resolveCampaignAccountName } from '@/lib/campaignCode';
 import {
@@ -69,7 +69,7 @@ import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_FORMULA, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
 import {
@@ -1568,6 +1568,11 @@ const CARD_METRIC_WIDTH_CLASS = {
   arithmeticExpectancy: CARD_METRIC_UNIFORM_WIDTH,
 } as const satisfies Record<CardMetricMode, string>;
 
+/** 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅：加仓效用、几何期望、算术期望括号里的读数都从它算。 */
+function rowTheoreticalMagicB(row: CampaignDisplayData): number | null {
+  return computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row));
+}
+
 /** 每行的封面读数按行对象缓存：行对象不变，读数就不变（行情 tick 不会换掉没变的行）。 */
 const cardMetricReadingsCache = new WeakMap<CampaignDisplayData, CardMetricReadings>();
 /**
@@ -1596,15 +1601,19 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
       // 封面上神奇的 b 就在左边一格，括号里只写磨损值
       + (payoffRatioHedgeWear(null, row.hedgeWearR)?.text ?? ''),
     // 【用户要求】神奇的 b只保留倍数 b，不写百分数
-    addEfficiency: addEfficiency == null ? '—' : formatMainPriceEfficiency(addEfficiency),
+    // 【用户要求】括号外基于盈亏比，括号里基于神奇的 b（理论）
+    addEfficiency: addEfficiency == null ? '—'
+      : formatActualTheoreticalMetric(addEfficiency, computeAddEfficiency(rowTheoreticalMagicB(row), mainPriceEfficiency), formatMainPriceEfficiency),
     addCount: String(rowAddCount(row)),
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
     positionGeometricMultiple: formatActualTheoreticalMetric(rowPositionGeometricMultiple(row), rowPositionGeometricMultipleTheoretical(row), formatPositionAmplification),
     magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
-    geometricExpectancy: formatGeometricExpectancy(row.geometricExpectancy),
+    geometricExpectancy: formatActualTheoreticalMetric(row.geometricExpectancy,
+      computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).geometricExpectancy, value => formatGeometricExpectancy(value)),
     effectivePriceChangePct: rowRelativePriceChange(row) == null ? '—' : `${rowRelativePriceChange(row)!.toFixed(2)}×`,
-    arithmeticExpectancy: formatArithmeticExpectancy(row.arithmeticExpectancy),
+    arithmeticExpectancy: formatActualTheoreticalMetric(row.arithmeticExpectancy,
+      computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).arithmeticExpectancy, value => formatArithmeticExpectancy(value)),
   };
   cardMetricReadingsCache.set(row, readings);
   return readings;
@@ -1764,6 +1773,7 @@ const CampaignCard = memo(function CampaignCard({
   /** 封面八项的读数：与列表容器上的列宽估算同一份（cardMetricReadings）。 */
   const readings = cardMetricReadings(row);
   const hedgeWear = payoffRatioHedgeWear(rowMagicB(row), row.hedgeWearR);
+  const theoreticalB = rowTheoreticalMagicB(row);
   const payoffReading = rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100);
   const mirrorTpStatus = readings.mirrorTp;
   const statusLabel = campaign.status === 'active'
@@ -2066,7 +2076,9 @@ const CampaignCard = memo(function CampaignCard({
               ? (campaignHasMainAdd(legs)
                 ? '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|：这场首仓涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
-                : `加仓效用 = 盈亏比 ${payoffReading} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}；这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利`}
+                : `方法一（括号外）：加仓效用 = 盈亏比 ${payoffReading} ÷ |首仓涨跌幅倍数 ${formatMainPriceEfficiency(mainPriceEfficiency)}| = ${formatMainPriceEfficiency(addEfficiency)}。`
+                  + `方法二（括号内）：神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)} ÷ |首仓涨跌幅倍数| = ${formatMainPriceEfficiency(computeAddEfficiency(theoreticalB, mainPriceEfficiency))}。`
+                  + '这是两个模型读数的相对比例，1 表示两项等值，正负随 b，不直接衡量实际加仓盈利'}
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
@@ -2080,7 +2092,7 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-            title={`单场几何期望 = Gᵢ − 1，Gᵢ = 1 + bᵢ·x，x 每场统一取 ${fixedFractionLabel}`
+            title={`单场几何期望 Gᵢ = max(0, 1 + b·x)，x 每场统一取 ${fixedFractionLabel}。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`
               + (initialRiskFraction == null
                 ? ''
                 : ruinousSizing
@@ -2098,7 +2110,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-arithmetic-expectancy"
-            title="Eᵢ = 50% × 该战役盈亏比 − 50%（胜率统一取 50%）"
+            title={`Eᵢ = 50% × b − 50%（胜率统一取 50%）。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`}
             className={metricCell('arithmeticExpectancy')}
             data-sort-highlight={litAttr('arithmeticExpectancy')}
           >
@@ -4665,8 +4677,12 @@ export default function JournalCampaignsPage() {
                           Eᵢ = P(赢) × bᵢ −（1 − P(赢)）
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
+                            <div><span className="font-medium">方法一（读数括号外）</span>：bᵢ = 盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀。</div>
+                            <div><span className="font-medium">方法二（读数括号内）</span>：bᵢ = 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅。</div>
+                            <div>排序、分档与散点图按方法一；方法二只作理论对照，算不出时不写括号。</div>
+                          </div>
                           <div>P(赢) 统一取 50%，不随账户实时胜率变动。</div>
-                          <div>bᵢ 使用该战役带正负号的几何指标，不使用净结算值。</div>
                           <div>读数只由 bᵢ 决定，是无量纲模型值，不是实际净收益。</div>
                           <div>没有实际加仓或公式依据不完整、无法计算 b 的战役不参与排序。</div>
                         </div>
@@ -4679,7 +4695,12 @@ export default function JournalCampaignsPage() {
                         </div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            x = {fixedFractionLabel}（每场统一的模型权重）；bᵢ = 该战役带正负号的几何指标
+                            x = {fixedFractionLabel}（每场统一的模型权重）
+                          </div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
+                            <div><span className="font-medium">方法一（读数括号外）</span>：bᵢ = 盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀。</div>
+                            <div><span className="font-medium">方法二（读数括号内）</span>：bᵢ = 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅。</div>
+                            <div>排序、分档与散点图按方法一；方法二只作理论对照，算不出时不写括号。</div>
                           </div>
                           <div>
                             读法：以固定 {fixedFractionLabel} 的模型权重，将 bᵢ 代入 1 + bᵢ×0.1。
@@ -4756,9 +4777,12 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           {/* 两个式子各自不断行，只在「；」之后换行：不会把「首仓涨跌幅ᵢ」拆成「首仓涨跌幅」和另起一行的「ᵢ」 */}
                           <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            <span>{MAGIC_B_FORMULA}；</span>
-                            <wbr />
                             <span className="whitespace-nowrap">ηᵢ = 首仓涨跌幅ᵢ ÷ 预期回撤ᵢ</span>
+                          </div>
+                          <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
+                            <div><span className="font-medium">方法一（读数括号外）</span>：bᵢ = 盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀。</div>
+                            <div><span className="font-medium">方法二（读数括号内）</span>：bᵢ = 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅。</div>
+                            <div>排序、分档与散点图按方法一；方法二只作理论对照，算不出时不写括号。</div>
                           </div>
                           <div>这是几何指标与原始行情风险倍数的比较，不是实际净盈利的放大倍数。</div>
                           <div>

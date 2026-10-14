@@ -319,10 +319,19 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const magicB = resolveUnifiedMagicB(metrics.magicB);
   const payoff = computeSettlementPayoffRatio(realizedPnl, initialExpectedMaxLoss);
   const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
+  // 【用户要求】加仓效用、几何期望、算术期望各算两遍：括号外基于盈亏比，括号里基于神奇的 b（理论）
+  const theoreticalB = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
+  const theoreticalExpectancies = computeCampaignExpectanciesFromMagicB(theoreticalB);
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoff, mainPriceEfficiency)
     : null;
   const pnlDrift = pnlSettlement?.drift ?? null;
+  const theoreticalAddEfficiency = addEfficiency != null ? computeAddEfficiency(theoreticalB, mainPriceEfficiency) : null;
+  const bText = (b: number) => formatCampaignPayoffRatio(b * 100);
+  const methodTitle = (text: string) => <div className="text-[10px] font-medium text-foreground/85">{text}</div>;
+  const theoreticalBLine = theoreticalB != null
+    ? <p className="font-mono text-foreground">神奇的 b（理论）= 几何仓位（理论）{metrics.positionGeometricMultipleTheoretical?.toFixed(2)} × 相对涨幅 {((metrics.effectivePriceChangePct ?? 0) / 100).toFixed(2)} ≈ {bText(theoreticalB)}</p>
+    : <p>神奇的 b（理论）算不出（缺几何仓位（理论）或相对涨幅），括号里不写。</p>;
   const hedgeWear = payoffRatioHedgeWear(magicB, metrics.hedgeWearR);
   const methodTwo = magicB != null && metrics.hedgeWearR != null ? magicB + metrics.hedgeWearR : null;
 
@@ -597,19 +606,24 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     {
       key: 'addEfficiency',
       label: '加仓效用',
-      value: formatEfficiency(addEfficiency),
+      value: formatActualTheoreticalMetric(addEfficiency, theoreticalAddEfficiency, formatEfficiency),
       // 【用户要求】颜色按这一场的 b：效用正负与本场 b 一致
       color: pnlExportColor(addEfficiency == null ? null : payoff),
       valueClassName: pnlColor(addEfficiency == null ? null : payoff),
       help: (
         <>
-          <p>比较实际盈亏比与行情的风险倍数，<strong>只在做过加仓时计算</strong>。分母取首仓涨跌幅倍数的绝对值；首仓涨跌幅倍数显示为 0.00 或盈亏比缺失时不计算。</p>
+          <p>比较 b 与行情的风险倍数，<strong>只在做过加仓时计算</strong>。分母取首仓涨跌幅倍数的绝对值；首仓涨跌幅倍数显示为 0.00 或 b 缺失时不计算。读数括号外是方法一，括号里是方法二。</p>
+          {methodTitle('方法一 · 基于盈亏比（括号外）')}
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|</div>
           {addEfficiency != null ? (
             <p className="font-mono text-foreground">
               本场 = {formatCampaignPayoffRatio((payoff ?? 0) * 100)} ÷ |{formatEfficiency(mainPriceEfficiency)}| = {formatEfficiency(addEfficiency)}
             </p>
           ) : <p>{hasMainAdd ? '本场首仓涨跌幅倍数显示为 0.00 或算不出，或算不出盈亏比，不计算。' : '本场没有加仓，不计算加仓效用。'}</p>}
+          {methodTitle('方法二 · 基于神奇的 b（理论）（括号内）')}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">加仓效用 = 神奇的 b（理论）÷ |首仓涨跌幅倍数|</div>
+          {theoreticalBLine}
+          {theoreticalAddEfficiency != null && <p className="font-mono text-foreground">本场 = {bText(theoreticalB!)} ÷ |{formatEfficiency(mainPriceEfficiency)}| = {formatEfficiency(theoreticalAddEfficiency)}</p>}
         </>
       ),
     },
@@ -640,32 +654,42 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     {
       key: 'arithmeticExpectancy',
       label: '算术期望',
-      value: formatArithmeticExpectancy(arithmeticExpectancy),
+      value: formatActualTheoreticalMetric(arithmeticExpectancy, theoreticalExpectancies.arithmeticExpectancy, value => formatArithmeticExpectancy(value)),
       color: pnlExportColor(arithmeticExpectancy),
       valueClassName: pnlColor(arithmeticExpectancy),
       help: (
         <>
-          <p>胜率 P 统一取 50%，以本场盈亏比计算期望。P 不随账户实时胜率变动，同一场战役的读数由它自己的盈亏比决定。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × b −（1 − P），P = 50%</div>
+          <p>胜率 P 统一取 50%，P 不随账户实时胜率变动。读数括号外是方法一，括号里是方法二。</p>
+          {methodTitle('方法一 · 基于盈亏比（括号外）')}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × 盈亏比 −（1 − P），P = 50%</div>
           {payoff != null ? (
             <p className="font-mono text-foreground">
-              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {formatCampaignPayoffRatio(payoff * 100)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}%
+              本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {formatCampaignPayoffRatio(payoff * 100)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}% = {formatArithmeticExpectancy(arithmeticExpectancy)}
             </p>
           ) : <p>缺少有效盈亏比时不计算。</p>}
+          {methodTitle('方法二 · 基于神奇的 b（理论）（括号内）')}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × 神奇的 b（理论）−（1 − P），P = 50%</div>
+          {theoreticalBLine}
+          {theoreticalB != null && <p className="font-mono text-foreground">本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {bText(theoreticalB)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}% = {formatArithmeticExpectancy(theoreticalExpectancies.arithmeticExpectancy)}</p>}
         </>
       ),
     },
     {
       key: 'geometricExpectancy',
       label: '几何期望',
-      value: formatGeometricExpectancy(geometricExpectancy),
+      value: formatActualTheoreticalMetric(geometricExpectancy, theoreticalExpectancies.geometricExpectancy, value => formatGeometricExpectancy(value)),
       color: pnlExportColor(geometricExpectancy),
       valueClassName: pnlColor(geometricExpectancy),
       help: (
         <>
-          <p>以本场盈亏比和固定风险比例 x = 10% 计算几何增长因子。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + b × 10%)</div>
+          <p>以固定风险比例 x = 10% 计算几何增长因子。读数括号外是方法一，括号里是方法二。</p>
+          {methodTitle('方法一 · 基于盈亏比（括号外）')}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + 盈亏比 × 10%)</div>
           {payoff != null ? <p className="font-mono text-foreground">本场：max(0, 1 + {formatCampaignPayoffRatio(payoff * 100)} × 10%) ≈ {formatGeometricExpectancy(geometricExpectancy)}</p> : <p>缺少有效盈亏比时不计算。</p>}
+          {methodTitle('方法二 · 基于神奇的 b（理论）（括号内）')}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + 神奇的 b（理论）× 10%)</div>
+          {theoreticalBLine}
+          {theoreticalB != null && <p className="font-mono text-foreground">本场：max(0, 1 + {bText(theoreticalB)} × 10%) ≈ {formatGeometricExpectancy(theoreticalExpectancies.geometricExpectancy)}</p>}
         </>
       ),
     },

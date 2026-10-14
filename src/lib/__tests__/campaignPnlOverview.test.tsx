@@ -44,6 +44,22 @@ function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): Cam
   };
 }
 
+describe('【用户要求】加仓效用、几何期望、算术期望：括号外基于盈亏比，括号里基于神奇的 b（理论）', () => {
+  it('理论 b = 几何仓位（理论）1.5 × 相对涨幅 2.00 = 3：三项括号里按 b = 3 算', () => {
+    // 盈亏比 2；首仓涨跌幅 20% ÷ 预期回撤 10% = 2.00
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultipleTheoretical: 1.5, effectivePriceChangePct: 200 }));
+    const value = (key: string) => items.find(item => item.key === key)!.value;
+    expect(value('addEfficiency')).toBe('+1.00（+1.50）');
+    expect(value('arithmeticExpectancy')).toBe('+0.50R（+1.00R）');
+    expect(value('geometricExpectancy')).toBe('1.20（1.30）');
+  });
+
+  it('理论 b 算不出时不加括号', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics());
+    expect(items.find(item => item.key === 'geometricExpectancy')!.value).toBe('1.20');
+  });
+});
+
 describe('buildCampaignPnlOverviewItems', () => {
   it('shows the initial-entry denominator and its substitution in both actual and theoretical b methods', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
@@ -344,7 +360,9 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.firstElementChild?.children).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: '算术期望说明' }));
-    expect(screen.getByText('本场：50.00% × 2.00 − 50.00%')).toBeInTheDocument();
+    expect(screen.getByText('本场：50.00% × 2.00 − 50.00% = +0.50R')).toBeInTheDocument();
+    expect(screen.getByText('方法一 · 基于盈亏比（括号外）')).toBeInTheDocument();
+    expect(screen.getByText('方法二 · 基于神奇的 b（理论）（括号内）')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '几何期望说明' }));
     expect(screen.getByText('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
