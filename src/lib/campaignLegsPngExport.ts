@@ -857,6 +857,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
       ((): CampaignLegsExportCellLine[] => {
         const verdict = addSizingMap.get(leg.id);
         if (!verdict) return [{ text: '' }];
+        if (verdict.status === 'ok' && verdict.underAdded) {
+          // 【用户要求】少加超过 1% 与多加同一套写法，蓝色
+          return [
+            { text: '✗', color: '#1E88E5', bold: true, size: 20 },
+            { text: `上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币`, color: '#1E88E5', bold: true, size: 11 },
+            { text: `≈ ${formatAddSizingNotional(verdict.maxAllowedNotional)} U`, color: '#1E88E5', size: 10 },
+          ];
+        }
         if (verdict.status === 'ok') return [{ text: '✓', color: '#C4CAD3', size: 11 }];
         if (verdict.status === 'fail') {
           // 成交记录带着计算器的计划时，把「计算时 /（下单时）/ 实际成交」并上，再点一句超出从哪来。没有快照的行与之前逐字不变。

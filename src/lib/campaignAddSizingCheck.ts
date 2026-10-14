@@ -84,6 +84,8 @@ export type AddSizingUnknownReason =
 
 export interface AddSizingVerdict {
   status: AddSizingStatus;
+  /** 合规（ok）但少加超过 1%（实际币量 < 上限 × 99%）：与多加同样点名，蓝色标注。 */
+  underAdded?: boolean;
   reason?: AddSizingUnknownReason;
   /** K 止损 / 对冲线（反向委托挂单价） */
   s1: number | null;
@@ -583,7 +585,9 @@ export function evaluateCampaignAddSizing(input: CampaignAddSizingInput): Map<st
       continue;
     }
     if (required >= maxLoss - qualificationTolerance) {
-      result.set(add.id, { status: 'ok', ...partial, shortfall: ledgerGap > tolerance ? ledgerGap : 0 });
+      // 【用户要求】少加超过 1% 也点名（蓝色），与多加同一套写法；容差与多加对称
+      const under = maxAllowedCoins != null && maxAllowedCoins > 0 && x2Coins < maxAllowedCoins * (1 - UNDER_ADD_TOLERANCE);
+      result.set(add.id, { status: 'ok', underAdded: under, ...partial, shortfall: ledgerGap > tolerance ? ledgerGap : 0 });
     } else {
       result.set(add.id, { status: 'fail', ...partial, shortfall: ledgerGap });
     }
@@ -646,6 +650,16 @@ export function formatAddSizingCoinQuantity(value: number | null): string {
 }
 
 /** 交易面板使用的 U 名义仓位统一保留两位。 */
+/** 少加的判定容差：实际币量比上限少超过 1% 才点名（与多加的 1% 对称）。 */
+export const UNDER_ADD_TOLERANCE = 0.01;
+
+/** 少加占比 =（可允许增加仓位 − 实际已加仓位）/ 可允许增加仓位。 */
+export function formatAddSizingShortPercent(actual: number | null, allowed: number | null): string {
+  if (actual == null || allowed == null || !Number.isFinite(actual) || !Number.isFinite(allowed)) return '—';
+  if (allowed <= 0) return '无法计算（上限为0）';
+  return `${Math.max(0, (allowed - actual) / allowed * 100).toFixed(2)}%`;
+}
+
 export function formatAddSizingExcessPercent(actual: number | null, allowed: number | null): string {
   if (actual == null || allowed == null || !Number.isFinite(actual) || !Number.isFinite(allowed)) return '—';
   if (allowed <= 0) return '无法计算（上限为0）';
@@ -681,6 +695,7 @@ export function describeAddSizingVerdict(verdict: AddSizingVerdict): string {
   }
   // 与点开红叉后的计算框同一套写法：可用额在 max(0,·) 处截断，金额带单位
   const detail = `止损线不必越过成本线，已落袋利润先补旧仓亏损、余额覆盖新增风险。退回 K ${verdict.s1 ?? '—'} 时，旧仓浮盈垫 Y₁ ${n(verdict.cushion)} + 已落袋 G ${n(verdict.banked)}，可用 max(0, Y₁ + G) = ${n(verdict.required == null ? null : Math.max(0, verdict.required))}；新加仓最大亏损 ${n(verdict.maxLoss)}；Plan B 加仓上限 ${formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币（${formatAddSizingNotional(verdict.maxAllowedNotional)} U 名义仓位）`;
+  if (verdict.status === 'ok' && verdict.underAdded) return `加仓校验：少加 ${formatAddSizingShortPercent(verdict.x2Coins, verdict.maxAllowedCoins)}。${detail}`;
   if (verdict.status === 'ok') return `加仓校验：仓位合规。${detail}`;
   const snapshotText = describeAddSizingSnapshot(verdict);
   return `加仓校验：仓位过大，缺 ${n(verdict.shortfall)}。${detail}${snapshotText ? `。${snapshotText}` : ''}`;

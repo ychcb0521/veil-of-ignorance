@@ -590,8 +590,18 @@ describe('【用户要求】导出图也带「加仓校验」列', () => {
     expect(add.cells[ADD_SIZING_COL - 4][0].text).toMatch(/^525,54\d,\d{3}(\.\d+)?$/);
   });
 
-  it('仓位合规：只是一枚淡灰小 ✓，不是红色', () => {
+  it('【用户要求】少加超过 1%：蓝色 ✗ + 上限，与多加同一套写法', () => {
     const add = rowsFor(2_000_000 * 0.0419705).find(row => row.legId === 'add1')!;
+    const [cross, coins, notional] = add.cells[ADD_SIZING_COL];
+    expect(cross).toEqual(expect.objectContaining({ text: '✗', color: '#1E88E5', bold: true }));
+    expect(coins.text).toMatch(/^上限 [\d,.]+ 币$/);
+    expect(notional.color).toBe('#1E88E5');
+  });
+
+  it('仓位合规（离上限不到 1%）：只是一枚淡灰小 ✓，不是红色', () => {
+    const limit = rowsFor(2_000_000 * 0.0419705).find(row => row.legId === 'add1')!.cells[ADD_SIZING_COL][1].text;
+    const coinsLimit = Number(/^上限 ([\d,.]+) 币$/.exec(limit)![1].replace(/,/g, ''));
+    const add = rowsFor(coinsLimit * 0.995 * 0.0419705).find(row => row.legId === 'add1')!;
     const [check] = add.cells[ADD_SIZING_COL];
     expect(add.cells[ADD_SIZING_COL]).toHaveLength(1);
     expect(check.text).toBe('✓');

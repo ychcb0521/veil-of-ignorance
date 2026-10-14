@@ -51,6 +51,7 @@ import { formatFeeCoin, sumTradeRecordFees, tradeRecordFees } from '@/lib/tradeF
 import {
   addSizingSnapshotLines,
   formatAddSizingExcessPercent,
+  formatAddSizingShortPercent,
   describeAddSizingVerdict,
   evaluateCampaignAddSizing,
   formatAddSizingCoinQuantity,
@@ -478,10 +479,15 @@ function AddSizingDetailDialog({
   verdict: AddSizingVerdict;
   onClose: () => void;
 }) {
+  // 【用户要求】少加（under）与多加同一套框，换成蓝色
+  const under = verdict.status === 'ok' && !!verdict.underAdded;
+  const tone = under
+    ? { text: 'text-[#1E88E5]', border: 'border-[#1E88E5]/30', bg: 'bg-[#1E88E5]/[0.07]', rule: 'border-[#1E88E5]/20' }
+    : { text: 'text-[#F6465D]', border: 'border-[#F6465D]/30', bg: 'bg-[#F6465D]/[0.07]', rule: 'border-[#F6465D]/20' };
   const actualCoins = verdict.x2Coins;
   const actualNotional = actualCoins != null && verdict.s2 != null ? actualCoins * verdict.s2 : null;
   const excessCoins = actualCoins != null && verdict.maxAllowedCoins != null
-    ? Math.max(0, actualCoins - verdict.maxAllowedCoins)
+    ? Math.abs(actualCoins - verdict.maxAllowedCoins)
     : null;
   const excessNotional = excessCoins != null && verdict.s2 != null ? excessCoins * verdict.s2 : null;
   const d = leg.direction === 'short' ? -1 : 1;
@@ -511,9 +517,9 @@ function AddSizingDetailDialog({
           <DialogDescription className="sr-only">加仓上限与完整计算过程；点击说明图标查看口径与计划对比。</DialogDescription>
         </DialogHeader>
 
-        <div className="rounded-lg border border-[#F6465D]/30 bg-[#F6465D]/[0.07] p-4">
-          <div className="text-xs font-medium text-[#F6465D]">Plan B 加仓上限</div>
-          <div className="mt-1 text-2xl font-semibold tabular-nums text-[#F6465D]" data-testid="add-sizing-correct-coins">
+        <div className={`rounded-lg border ${tone.border} ${tone.bg} p-4`}>
+          <div className={`text-xs font-medium ${tone.text}`}>Plan B 加仓上限</div>
+          <div className={`mt-1 text-2xl font-semibold tabular-nums ${tone.text}`} data-testid="add-sizing-correct-coins">
             {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} 币
           </div>
           <div className="mt-1 text-sm tabular-nums text-foreground/70" data-testid="add-sizing-correct-notional">
@@ -527,6 +533,17 @@ function AddSizingDetailDialog({
               <div className="mt-1 font-mono tabular-nums text-foreground/65">
                 （实际已加仓位 − 可允许增加仓位）/ 可允许增加仓位<br />
                 =（{formatAddSizingCoinQuantity(actualCoins)} − {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)}）/ {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)}
+              </div>
+            </div>
+          )}
+          {under && (
+            <div className={`mt-3 border-t ${tone.rule} pt-3 text-xs leading-relaxed`}>
+              <div className={`font-semibold ${tone.text}`} data-testid="add-sizing-short-percent">
+                少加仓位占比 {formatAddSizingShortPercent(actualCoins, verdict.maxAllowedCoins)}
+              </div>
+              <div className="mt-1 font-mono tabular-nums text-foreground/65">
+                （可允许增加仓位 − 实际已加仓位）/ 可允许增加仓位<br />
+                =（{formatAddSizingCoinQuantity(verdict.maxAllowedCoins)} − {formatAddSizingCoinQuantity(actualCoins)}）/ {formatAddSizingCoinQuantity(verdict.maxAllowedCoins)}
               </div>
             </div>
           )}
@@ -596,9 +613,9 @@ function AddSizingDetailDialog({
             Q₁ = {formatAddSizingCoinQuantity(verdict.x1Coins)} 币，表示加仓前当前剩余币数，与加仓计算器的 Q₁ 同义；不按保本线、成本线拆分。
             Q₂ 为可加仓币量上限，Q₂实际为实际成交币量。
           </div>
-          <div className="mt-3 border-t border-[#F6465D]/20 pt-3 text-xs leading-relaxed text-foreground/65">
+          <div className={`mt-3 border-t ${tone.rule} pt-3 text-xs leading-relaxed text-foreground/65`}>
             实际加仓 {formatAddSizingCoinQuantity(actualCoins)} 币（{formatAddSizingNotional(actualNotional)} U），
-            超出 {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
+            {under ? '少加' : '超出'} {formatAddSizingCoinQuantity(excessCoins)} 币（{formatAddSizingNotional(excessNotional)} U）。
           </div>
         {/* 成交记录带着计算器当时的计划：把「计算时」「下单时」「实际成交」并排摆出来。
             判定仍按成交价；这里只解释红叉从哪来——真是滑点才点名滑点，价格变了、量超了各说各的。 */}
@@ -618,7 +635,9 @@ function AddSizingDetailDialog({
         )}
         <div className="rounded border border-border px-3 py-2 text-xs leading-relaxed text-foreground/70">
           实际新仓最大预期亏损 {formatAddSizingNotional(verdict.maxLoss)} U，可用覆盖额 {formatAddSizingNotional(verdict.required)} U，
-          尚缺 <span className="font-semibold text-[#F6465D]">{formatAddSizingShortfall(verdict.shortfall ?? 0)} U</span>。
+          {under
+            ? <>还剩 <span className={`font-semibold ${tone.text}`}>{formatAddSizingShortfall(Math.max(0, (verdict.required ?? 0) - (verdict.maxLoss ?? 0)))} U</span> 未用。</>
+            : <>尚缺 <span className="font-semibold text-[#F6465D]">{formatAddSizingShortfall(verdict.shortfall ?? 0)} U</span>。</>}
         </div>
           </div>
         </details>
@@ -1111,6 +1130,21 @@ export function CampaignLegsList({
                     const verdict = addSizingMap.get(leg.id);
                     if (!verdict) return <div />;
                     const label = describeAddSizingVerdict(verdict);
+                    if (verdict.status === 'ok' && verdict.underAdded) {
+                      return (
+                        <button
+                          type="button"
+                          data-testid={`add-sizing-check-under-${leg.id}`}
+                          aria-label={label}
+                          onClick={() => setAddSizingDetailLegId(leg.id)}
+                          className="w-full rounded px-0.5 text-center leading-none text-[#1E88E5] transition-colors hover:bg-[#1E88E5]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E88E5]/50"
+                        >
+                          <div className="py-1 text-[10px] font-semibold leading-tight tabular-nums">
+                            少加 {formatAddSizingShortPercent(verdict.x2Coins, verdict.maxAllowedCoins)}
+                          </div>
+                        </button>
+                      );
+                    }
                     if (verdict.status === 'ok') {
                       return (
                         <div
@@ -1442,7 +1476,7 @@ export function CampaignLegsList({
         {foreignLiveOrdersNote}
       </div>
     )}
-    {selectedAddSizingLeg && selectedAddSizingVerdict?.status === 'fail' && (
+    {selectedAddSizingLeg && (selectedAddSizingVerdict?.status === 'fail' || selectedAddSizingVerdict?.underAdded) && (
       <AddSizingDetailDialog
         leg={selectedAddSizingLeg}
         verdict={selectedAddSizingVerdict}

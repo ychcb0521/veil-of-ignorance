@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
+import { evaluateCampaignAddSizing } from '@/lib/campaignAddSizingCheck';
 import type { TradeJournal } from '@/types/journal';
 import { calcSlippage, type AddSizingSnapshot, type CampaignReverseHedgeOrder, type TradeRecord } from '@/types/trading';
 
@@ -50,6 +51,10 @@ const orders: CampaignReverseHedgeOrder[] = [{
   createdAt: Date.parse('2026-08-08T12:01:00+08:00'), triggeredAt: null,
   cancelledAt: Date.parse('2026-08-08T15:18:00+08:00'),
 }];
+
+/** 与 Plan B 上限相差不到 1%（取上限的 99.5%）的加仓名义：合规且不算少加。 */
+const nearLimitNotional = () => evaluateCampaignAddSizing({ legs: legs(1), tradeRecords: [], reverseHedgeOrders: orders })
+  .get('add1')!.maxAllowedCoins! * 0.995 * 0.0419705;
 
 const renderList = (addNotional: number, reverseHedgeOrders = orders) => render(
   <MemoryRouter>
@@ -109,9 +114,8 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(dialog.textContent).toContain('G 取加仓前实际已实现的 USDT 净额');
   });
 
-  it('仓位合规：几乎隐形的小对号，不带红色', () => {
-    // 浮盈垫 ≈ 2,931 + 落袋 15,117.55 ≈ 18,049；每币退回 K 亏 0.0072445 → 两百万币以内都兜得住
-    renderList(2_000_000 * 0.0419705);
+  it('仓位合规（离上限不到 1%）：几乎隐形的小对号，不带红色', () => {
+    renderList(nearLimitNotional());
     const mark = screen.getByTestId('add-sizing-check-ok-add1');
     expect(mark.textContent).toBe('✓');
     expect(mark.className).toContain('text-muted-foreground/30');
@@ -154,8 +158,23 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(fail.getAttribute('aria-label')).toContain('加仓上限');
   });
 
+  it('【用户要求】少加超过 1%：蓝色「少加 x%」，与多加同一套写法；点开弹窗是蓝色框与少加占比', () => {
+    // 浮盈垫 ≈ 2,931 + 落袋 15,117.55 ≈ 18,049；每币退回 K 亏 0.0072445 → 上限约 249 万币，只加 200 万币
+    renderList(2_000_000 * 0.0419705);
+    const mark = screen.getByTestId('add-sizing-check-under-add1');
+    expect(mark.className).toContain('text-[#1E88E5]');
+    expect(mark.textContent?.trim()).toMatch(/^少加 \d+\.\d{2}%$/);
+    expect(mark.getAttribute('aria-label')).toContain('加仓校验：少加');
+    expect(screen.queryByTestId('add-sizing-check-ok-add1')).toBeNull();
+    fireEvent.click(mark);
+    const detail = screen.getByTestId('add-sizing-detail-dialog');
+    expect(screen.getByTestId('add-sizing-short-percent').textContent).toMatch(/^少加仓位占比 \d+\.\d{2}%$/);
+    expect(screen.getByTestId('add-sizing-correct-coins').className).toContain('text-[#1E88E5]');
+    expect(detail.textContent).not.toContain('多加仓位占比');
+  });
+
   it('合规与无法判断的记号同样带 role="img"', () => {
-    const { unmount } = renderList(2_000_000 * 0.0419705);
+    const { unmount } = renderList(nearLimitNotional());
     expect(screen.getByRole('img', { name: /加仓校验：仓位合规/ })).toBe(screen.getByTestId('add-sizing-check-ok-add1'));
     unmount();
     renderList(22_057_330, []);
@@ -221,8 +240,8 @@ describe('止损线仍低于成本线时，已落袋收益可覆盖加仓', () =
     </MemoryRouter>,
   );
 
-  it('旧仓在止损线亏 100 U，落袋 300 U 足以覆盖新增 110 U 风险：显示合规', () => {
-    renderBelowCost(300);
+  it('旧仓在止损线亏 100 U，落袋 210 U 正好覆盖新增 110 U 风险：显示合规', () => {
+    renderBelowCost(210);
     expect(screen.getByTestId('add-sizing-check-ok-add1').textContent).toBe('✓');
     expect(screen.queryByTestId('add-sizing-check-fail-add1')).toBeNull();
   });

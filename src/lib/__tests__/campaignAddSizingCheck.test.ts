@@ -1355,7 +1355,10 @@ describe('【复核】计算器与 Legs 同一个 G、同一条 K', () => {
       tradeRecords: [],
       reverseHedgeOrders: [short(1.1, t - MIN, null)],
     }).get('add')!;
-    const text = describeAddSizingVerdict(ok);
+    // 可用 1000 U、只用了 200 U：合规但少加 80%
+    expect(ok.underAdded).toBe(true);
+    expect(describeAddSizingVerdict(ok)).toContain('加仓校验：少加 80.00%');
+    const text = describeAddSizingVerdict({ ...ok, underAdded: false });
     expect(text).toContain('加仓校验：仓位合规');
     expect(text).toContain('可用 max(0, Y₁ + G) = 1000.00 U');
     expect(text).toContain('新加仓最大亏损 200.00 U');
