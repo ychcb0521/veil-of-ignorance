@@ -1665,6 +1665,11 @@ const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace
  * 万一装不下也在本格内收住、不压到隔壁一格。行高给足 16px。
  */
 const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';
+/**
+ * 【用户要求】「镜像止盈的字号不和谐」：中文读数（已实现·盈利 / 未实现）不走等宽字体——等宽字体里的汉字回落到系统黑体，
+ * 11px 加粗比旁边的数字大一圈。改用正文字体、与指标名同一个 10px、常规字重，视觉高度与 11px 等宽数字齐平。
+ */
+const CARD_METRIC_TEXT_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[10px] font-normal leading-4';
 /** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
 const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums';
 
@@ -2140,7 +2145,7 @@ const CampaignCard = memo(function CampaignCard({
           <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
             <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+              <span className={`${CARD_METRIC_TEXT_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
             </dd>
           </div>
         </dl>
