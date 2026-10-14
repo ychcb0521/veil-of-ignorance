@@ -441,7 +441,7 @@ const SORT_LONG_PRESS_MS = 450;
  * 切换排序时文字不能挪。换时间段才重算。
  * 手机（< 640px）放不下一行，退回两列网格；≥ 640px 起按宽度依次排开，放不下时整行换行（各卡在同一处换行）。
  */
-const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-nowrap sm:gap-x-1 sm:gap-y-1 sm:pr-6';
+const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:flex-nowrap';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -1521,7 +1521,7 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  * 封面指标项：上标签、下数值，左右各 10px 内边距、圆角。每一项都预留同样的内边距，
  * 高亮（当前排序项）只换底色与描边，切换排序时文字一个像素都不动。
  */
-const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 sm:px-1.5 transition-[background-color,box-shadow] duration-150';
+const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 sm:px-1.5 [container-type:inline-size] transition-[background-color,box-shadow] duration-150';
 /** 封面八项的指标名（与排序行同序）：卡片上的 dt 与列宽估算读同一份。 */
 const CARD_METRIC_LABEL = {
   effectivePriceChangePct: '相对涨幅',
@@ -1550,7 +1550,7 @@ const CARD_METRIC_MODES = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
  * 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：十四项一律同宽，取当前列表里最宽的那一项（指标名与读数取宽者，
  * --cm-w-uniform）；整行放不下时按 (100% − 13 个间距) ÷ 14 收窄，仍是一行、仍同宽、从左排起。
  */
-const CARD_METRIC_UNIFORM_WIDTH = 'sm:w-[min(var(--cm-w-uniform),calc((100%_-_3.25rem)/14))]';
+const CARD_METRIC_UNIFORM_WIDTH = 'sm:w-[calc((100%_-_1.5rem)/7)] xl:w-[min(var(--cm-w-uniform),calc((100%_-_3.25rem)/14))]';
 const CARD_METRIC_WIDTH_CLASS = {
   addCount: CARD_METRIC_UNIFORM_WIDTH,
   positionGeometricMultiple: CARD_METRIC_UNIFORM_WIDTH,
@@ -1669,6 +1669,16 @@ const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowr
  * 【用户要求】「镜像止盈的字号不和谐」：中文读数（已实现·盈利 / 未实现）不走等宽字体——等宽字体里的汉字回落到系统黑体，
  * 11px 加粗比旁边的数字大一圈。改用正文字体、与指标名同一个 10px、常规字重，视觉高度与 11px 等宽数字齐平。
  */
+/**
+ * 【用户要求】「封面上的数字一定要完整显示，数字长的可以字号小一点」：每格是一个尺寸容器（CARD_METRIC_CELL 的
+ * container-type），读数字号 = min(常规字号, 格宽 ÷ 这串字的宽度)。短读数保持 11px，长读数（带理论值括号的几何仓位、
+ * 神奇的 b、盈亏比磨损）按格宽等比缩小到正好放下，不再出省略号。字宽按等宽字体半角 0.6182em、汉字 1em 估，另留 0.15em 余量。窄于 1280px 时十四项分两行、每行七项，免得字号缩到看不清。
+ */
+function fitMetricValue(text: string, basePx: number): CSSProperties {
+  let em = 0.15;
+  for (const ch of text) em += /[\u2E80-\u9FFF\uFF00-\uFFEF]/.test(ch) ? 1 : 0.6182;
+  return { fontSize: `min(${basePx}px, calc(100cqw / ${em.toFixed(2)}))` };
+}
 const CARD_METRIC_TEXT_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[10px] font-normal leading-4';
 /** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
 const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums';
@@ -1996,17 +2006,17 @@ const CampaignCard = memo(function CampaignCard({
           className={CARD_METRIC_STRIP}
         >
           <div className={metricCell('expectedDrawdownPct')} data-testid="campaign-expected-drawdown-pct" data-sort-highlight={litAttr('expectedDrawdownPct')}>
-            <dt className={metricName('expectedDrawdownPct')}>{CARD_METRIC_LABEL.expectedDrawdownPct}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.expectedDrawdownPct, 10)} className={metricName('expectedDrawdownPct')}>{CARD_METRIC_LABEL.expectedDrawdownPct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
+              <span style={fitMetricValue(readings.expectedDrawdownPct, 11)} className={`${CARD_METRIC_VALUE} text-foreground/85`}>
                 {readings.expectedDrawdownPct}
               </span>
             </dd>
           </div>
           <div data-testid="campaign-effective-price-change" className={metricCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
             title={`${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`}>
-            <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.effectivePriceChangePct, 10)} className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.effectivePriceChangePct, 11)} className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
           </div>
           <div
             data-testid="campaign-add-count"
@@ -2014,26 +2024,26 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('addCount')}
             data-sort-highlight={litAttr('addCount')}
           >
-            <dt className={metricName('addCount')}>{CARD_METRIC_LABEL.addCount}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.addCount, 10)} className={metricName('addCount')}>{CARD_METRIC_LABEL.addCount}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+              <span style={fitMetricValue(readings.addCount, 11)} data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
                 {readings.addCount}
               </span>
             </dd>
           </div>
           <div data-testid="campaign-position-geometric-multiple" className={metricCell('positionGeometricMultiple')} data-sort-highlight={litAttr('positionGeometricMultiple')}
             title={`几何仓位，即仓位几何累积倍数。几何仓位 = ${POSITION_GEOMETRIC_FORMULA}，初始主力与镜像币量为 1；αf 为首次实际减仓比例。几何仓位（理论）：${rowPositionGeometricMultipleTheoretical(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultipleTheoretical(row)!)}。${LEG_THEORETICAL_FACTOR_HINT}`}>
-            <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.positionGeometricMultiple, 10)} className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.positionGeometricMultiple, 11)} className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={metricCell('magicB')} data-sort-highlight={litAttr('magicB')}
             title={MAGIC_B_METHODS_DESCRIPTION}>
-            <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.magicB, 10)} className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.magicB, 11)} data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
           </div>
           <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
-            <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.captureRate, 10)} className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.captureRate, 11)} data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
           </div>
           <div
             data-testid="campaign-position-amplification"
@@ -2043,9 +2053,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('positionAmplification')}
             data-sort-highlight={litAttr('positionAmplification')}
           >
-            <dt className={metricName('positionAmplification')}>{CARD_METRIC_LABEL.positionAmplification}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.positionAmplification, 10)} className={metricName('positionAmplification')}>{CARD_METRIC_LABEL.positionAmplification}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-position-amplification-value" className={`${CARD_METRIC_VALUE} ${positionAmplification == null || sortBinValue('positionAmplification', positionAmplification) <= POSITION_AMPLIFICATION_UNIT ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+              <span style={fitMetricValue(readings.positionAmplification, 11)} data-testid="campaign-position-amplification-value" className={`${CARD_METRIC_VALUE} ${positionAmplification == null || sortBinValue('positionAmplification', positionAmplification) <= POSITION_AMPLIFICATION_UNIT ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
                 {readings.positionAmplification}
               </span>
             </dd>
@@ -2060,9 +2070,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
-            <dt className={metricName('addEfficiency')}>{CARD_METRIC_LABEL.addEfficiency}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.addEfficiency, 10)} className={metricName('addEfficiency')}>{CARD_METRIC_LABEL.addEfficiency}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(rowPayoffRatio(row) ?? 0)]}`}>
+              <span style={fitMetricValue(readings.addEfficiency, 11)} data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(rowPayoffRatio(row) ?? 0)]}`}>
                 {readings.addEfficiency}
               </span>
             </dd>
@@ -2081,9 +2091,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('geometricExpectancy')}
             data-sort-highlight={litAttr('geometricExpectancy')}
           >
-            <dt className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.geometricExpectancy, 10)} className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
+              <span style={fitMetricValue(readings.geometricExpectancy, 11)} className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
             </dd>
           </div>
           <div
@@ -2092,9 +2102,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('arithmeticExpectancy')}
             data-sort-highlight={litAttr('arithmeticExpectancy')}
           >
-            <dt className={metricName('arithmeticExpectancy')}>{CARD_METRIC_LABEL.arithmeticExpectancy}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.arithmeticExpectancy, 10)} className={metricName('arithmeticExpectancy')}>{CARD_METRIC_LABEL.arithmeticExpectancy}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{readings.arithmeticExpectancy}</span>
+              <span style={fitMetricValue(readings.arithmeticExpectancy, 11)} className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{readings.arithmeticExpectancy}</span>
             </dd>
           </div>
           <div
@@ -2105,9 +2115,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('mainPriceChange')}
             data-sort-highlight={litAttr('mainPriceChange')}
           >
-            <dt className={metricName('mainPriceChange')}>{CARD_METRIC_LABEL.mainPriceChange}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.mainPriceChange, 10)} className={metricName('mainPriceChange')}>{CARD_METRIC_LABEL.mainPriceChange}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
+              <span style={fitMetricValue(readings.mainPriceChange, 11)} data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
                 {readings.mainPriceChange}
               </span>
             </dd>
@@ -2120,9 +2130,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('mainPriceEfficiency')}
             data-sort-highlight={litAttr('mainPriceEfficiency')}
           >
-            <dt className={metricName('mainPriceEfficiency')}>{CARD_METRIC_LABEL.mainPriceEfficiency}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.mainPriceEfficiency, 10)} className={metricName('mainPriceEfficiency')}>{CARD_METRIC_LABEL.mainPriceEfficiency}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
+              <span style={fitMetricValue(readings.mainPriceEfficiency, 11)} data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
                 {readings.mainPriceEfficiency}
               </span>
             </dd>
@@ -2135,17 +2145,17 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('unrealizedPriceChangePct')}
             data-sort-highlight={litAttr('unrealizedPriceChangePct')}
           >
-            <dt className={metricName('unrealizedPriceChangePct')}>{CARD_METRIC_LABEL.unrealizedPriceChangePct}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.unrealizedPriceChangePct, 10)} className={metricName('unrealizedPriceChangePct')}>{CARD_METRIC_LABEL.unrealizedPriceChangePct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
+              <span style={fitMetricValue(readings.unrealizedPriceChangePct, 11)} data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
                 {readings.unrealizedPriceChangePct}
               </span>
             </dd>
           </div>
           <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
-            <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.mirrorTp, 10)} className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_TEXT_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+              <span style={fitMetricValue(readings.mirrorTp, 10)} className={`${CARD_METRIC_TEXT_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
             </dd>
           </div>
         </dl>

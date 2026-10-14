@@ -74,7 +74,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('几何期望连同「仓位击穿」徽标');
     expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
     // 与页面常量一致：手机两列、≥ 640px 左对齐排开
-    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-nowrap sm:gap-x-1 sm:gap-y-1 sm:pr-6';");
+    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:flex-nowrap';");
     expect(guide).toContain('自评放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是自评');
     expect(guide).toContain('涨跌幅、涨跌幅倍数、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');

@@ -961,7 +961,8 @@ describe('JournalCampaignsPage sorting', () => {
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
     // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：≥ 640px 一行排开不换行
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-nowrap');
+    // ≥ 1280px 一行排开不换行；更窄时分两行、每行七项
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-wrap', 'xl:flex-nowrap');
     expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
@@ -977,7 +978,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cell.children[1].tagName).toBe('DD');
       expect(cell).toHaveClass('flex-col', 'px-2.5', 'sm:px-1.5', 'shrink-0');
       // 【用户要求】「每个指标所占的空间要均匀」：十四项同一个宽度类，读列表容器上的 --cm-w-uniform，整行放不下时按 1/14 收窄
-      expect(cell).toHaveClass('sm:w-[min(var(--cm-w-uniform),calc((100%_-_3.25rem)/14))]');
+      expect(cell).toHaveClass('sm:w-[calc((100%_-_1.5rem)/7)]', 'xl:w-[min(var(--cm-w-uniform),calc((100%_-_3.25rem)/14))]');
     }
     const cardList = screen.getByTestId('campaign-card-list');
     for (const card of screen.getAllByTestId('campaign-card')) expect(cardList).toContainElement(card);

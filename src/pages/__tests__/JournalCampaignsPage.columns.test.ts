@@ -48,7 +48,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
   it('指标行读一份常量：手机两列网格，≥ 640px 左对齐依次排开；不再均分整行', () => {
     const s = src();
     // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：≥ 640px 一行排开不换行，右边给删除按钮留位
-    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-nowrap sm:gap-x-1 sm:gap-y-1 sm:pr-6';");
+    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:flex-nowrap';");
     expect(s).toMatch(/data-testid="campaign-card-metrics"\s+className=\{CARD_METRIC_STRIP\}/);
     // 旧的等宽网格（一行八格均分）不再出现
     expect(s).not.toContain('CAMPAIGN_COLUMNS_GRID');
