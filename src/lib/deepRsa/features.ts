@@ -108,7 +108,8 @@ function signedWeightedR2(bars: readonly ResearchBar[], w: readonly number[]): n
   return finiteOrNull(Math.sign(sxy) * (sxy * sxy) / (sxx * syy));
 }
 
-function weightedPoc(bars: readonly ResearchBar[], w: readonly number[]): number | null {
+/** 成交密集区 POC：每根 K 线的 wᵢVᵢ 按 [L, H] 与各档的重叠长度均摊到 48 个价格档，取量最大那一档的中点。 */
+export function weightedPoc(bars: readonly ResearchBar[], w: readonly number[]): number | null {
   const lo = Math.min(...bars.map(b => b.low));
   const hi = Math.max(...bars.map(b => b.high));
   if (!(hi > lo)) return null;
@@ -133,6 +134,16 @@ function weightedPoc(bars: readonly ResearchBar[], w: readonly number[]): number
   let bestMass = 0;
   hist.forEach((m, k) => { if (m > bestMass) { bestMass = m; best = k; } });
   return best >= 0 ? lo + (best + 0.5) * width : null;
+}
+
+/** t₀ 前 12 小时（最后 144 根 5m K 线）的成交量加权均价，典型价 TP = (H + L + C) ÷ 3；没有成交量时 null。 */
+export function rollingVwap(bars: readonly ResearchBar[], anchorMs: number): number | null {
+  let pv = 0; let v = 0;
+  for (const b of bars) {
+    if (b.openTime < anchorMs - VWAP_BARS * BAR_MS) continue;
+    pv += b.volume * (b.high + b.low + b.close) / 3; v += b.volume;
+  }
+  return v > 0 ? pv / v : null;
 }
 
 export interface FeatureOptions {
@@ -193,10 +204,8 @@ export function computeFeatures(window: ObservationWindow, options: FeatureOptio
   out.updown_vol_w = up > 0 && down > 0 ? Math.log(up / down) : null;
 
   // ── 谢林表征（候选代理，待确认）──
-  const vwapBars = bars.filter(b => b.openTime >= window.anchorMs - VWAP_BARS * BAR_MS);
-  let pv = 0; let v = 0;
-  for (const b of vwapBars) { pv += b.volume * (b.high + b.low + b.close) / 3; v += b.volume; }
-  out.vwap12_dev = v > 0 ? finiteOrNull(Math.log(last.close / (pv / v))) : null;
+  const vwap = rollingVwap(bars, window.anchorMs);
+  out.vwap12_dev = vwap != null && vwap > 0 ? finiteOrNull(Math.log(last.close / vwap)) : null;
   const poc = weightedPoc(bars, w);
   out.poc_dev_w = poc != null && poc > 0 ? finiteOrNull(Math.log(last.close / poc)) : null;
   const fb = options.fallbackPrice;

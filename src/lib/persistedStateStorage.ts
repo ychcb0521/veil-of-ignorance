@@ -4,7 +4,7 @@
  * journals, auth, settings or cloud mirrors. Cloud synchronization stays in callers.
  */
 // 不带版本号：换了版本留下的旧缓存同样可重建，同样该清
-const REBUILDABLE_CACHE_PREFIXES = ['campaign-price-path-', 'campaign-unrealized-chart-'];
+const REBUILDABLE_CACHE_PREFIXES = ['campaign-price-path-', 'campaign-unrealized-chart-', 'campaign-entry-schelling-'];
 type StateOrigin = { source: 'local' | 'remote'; updatedAt?: number };
 const unpersisted = new Map<string, StateOrigin & { raw: string | null }>();
 const hydrationListeners = new Map<string, Set<() => void>>();
@@ -282,7 +282,7 @@ const STORAGE_CATEGORIES: readonly [label: string, match: RegExp][] = [
   ['信号库', /^veil\.signalLibrary/],
   ['情绪日记', /^decision_emotion_diaries/],
   ['消息记录', /_notification_history$/],
-  ['图表缓存', /^campaign-(price-path|unrealized-chart)-/],
+  ['图表缓存', /^campaign-(price-path|unrealized-chart|entry-schelling)-/],
   ['登录令牌', /^sb-.+-auth-token/],
 ];
 

@@ -23,7 +23,7 @@
  * 注意：用 `offsetTop[1] - offsetTop[0]` 算行距会得到 24 而不是 25——首行没有分隔线。
  */
 import {
-  memo, useCallback, useEffect, useLayoutEffect, useRef, useState,
+  memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type FocusEvent, type ReactNode,
 } from 'react';
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
@@ -33,6 +33,8 @@ import { normalizeSignalQuality } from '@/lib/signalLibrary';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
 import { signalJumpIssueLabel, type SignalJumpIssue } from '@/lib/signalJumpDiagnostics';
 import { hasCampaignOnSignalDay, hasTradeOnSignalDay } from '@/lib/signalCampaignIndex';
+import { SignalEntrySchelling } from '@/components/journal/EntrySchelling';
+import { parseFallbackPrice } from '@/lib/deepRsa/entrySnapshot';
 
 /** 默认行距：24px 内容 + 1px 分隔线。量不到真实行距时用它。 */
 export const SIGNAL_ROW_HEIGHT = 25;
@@ -187,6 +189,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 interface RowProps {
   id: string;
   symbol: string;
+  /** 信号时刻（epoch 毫秒）：谢林偏离以它为 t₀。 */
+  timeMs: number;
   timeLabel: string;
   fallbackZone: string;
   /** 已归一化的评分；undefined = 未评分。 */
@@ -213,7 +217,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, fallbackZone, quality, jumpIssue,
+  id, symbol, timeMs, timeLabel, fallbackZone, quality, jumpIssue,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow,
 }: RowProps) {
@@ -222,6 +226,7 @@ function SignalLibraryRowImpl({
   const handleRate = useCallback((next: number) => onRate(id, next), [onRate, id]);
   // React 的 onFocus 走 focusin，会冒泡：行内哪个按钮拿到焦点都算这一行。
   const handleFocus = useCallback(() => onFocusRow(id), [onFocusRow, id]);
+  const fallbackPrice = useMemo(() => parseFallbackPrice(fallbackZone), [fallbackZone]);
 
   return (
     <div
@@ -274,6 +279,8 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
+      {/* 【用户要求】每条信号在信号时刻的谢林偏离：VWAP · POC · 兜底，与表头同宽三列 */}
+      <SignalEntrySchelling symbol={symbol} timeMs={timeMs} fallbackPrice={fallbackPrice} />
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       <span className="min-w-0 flex-1" aria-hidden />
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
@@ -525,6 +532,7 @@ function SignalLibraryListImpl({
         key={sig.id}
         id={sig.id}
         symbol={sig.symbol}
+        timeMs={sig.timeMs}
         timeLabel={sig.timeLabel}
         fallbackZone={sig.fallbackZone}
         quality={normalizeSignalQuality(sig.quality)}

@@ -13,6 +13,7 @@ import {
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
+import { ENTRY_SCHELLING_CAVEAT, ENTRY_SIGNAL_GRID } from '@/components/journal/EntrySchelling';
 import {
   preflightSignalJumpIssues,
   type SignalJumpResult,
@@ -624,7 +625,7 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_74px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
+                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_74px_150px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
                   <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
                     <span aria-hidden />
                     <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />
@@ -632,6 +633,10 @@ export function TimeControl({
                   <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => toggleSort('time')} />
                   <span>兜底区</span>
                   <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => toggleSort('quality')} />
+                  {/* 谢林偏离三列：与行里的 ENTRY_SIGNAL_GRID 同宽；悬停给出口径 */}
+                  <span className={ENTRY_SIGNAL_GRID} title={`信号时刻的谢林偏离（对数偏离换算成百分比，正 = 现价在参考价上方）：偏离 12h VWAP、偏离成交密集区 POC（半衰期 6 小时）、偏离兜底价。数据：信号时刻前 48 小时的币安 5m K 线，算法同 Deep RSA。${ENTRY_SCHELLING_CAVEAT}`}>
+                    <span>VWAP</span><span>POC</span><span>兜底</span>
+                  </span>
                   {/* 吸收剩余宽度的空列。放在评分**之后**——之前它在兜底区那一列，
                       于是兜底区把所有余量吃掉、评分被顶到最右边去了。 */}
                   <span aria-hidden />

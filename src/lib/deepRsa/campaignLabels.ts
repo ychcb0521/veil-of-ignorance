@@ -112,6 +112,19 @@ export function buildCampaignLabelRecord(
 type CardRow = ReturnType<typeof buildCampaignCardData>;
 
 /**
+ * 进场锚点 B（列表口径）：有成交记录、或本来就没挂成交 id（回填）的 main_open 腿里最早的模拟时间。
+ * 挂了成交 id 却一条记录都没认领到的腿视为未成交，不参与。Deep RSA 分组、战役封面与详情的「进场时的谢林偏离」共用。
+ */
+export function campaignEntryAnchorMs(
+  legs: readonly { id: string; leg_role: string; trade_record_id?: string | null; pre_simulated_time?: string | null }[],
+  recordsByLeg: ReadonlyMap<string, readonly unknown[]>,
+): number | null {
+  return minOrNull(legs
+    .filter(leg => leg.leg_role === 'main_open' && (!leg.trade_record_id || (recordsByLeg.get(leg.id)?.length ?? 0) > 0))
+    .map(leg => parseMs(leg.pre_simulated_time)));
+}
+
+/**
  * 从战役列表已经算好的一行取分组输入（Deep RSA 页面用，读数与列表是同一个数，不重算）。
  * 与 buildCampaignLabelRecord 的两处差别，都如实交给调用方：
  * - 列表行里没有「本地从未成交的委托 id」：锚点 B 只取有成交记录、或本来就没挂成交 id（回填）的 main_open 腿，
@@ -119,10 +132,7 @@ type CardRow = ReturnType<typeof buildCampaignCardData>;
  * - 列表不对外给出平仓价校正是否拉齐：由调用方传 correctionsComplete（不知道就传 null）。
  */
 export function labelInputFromCardRow(row: CardRow, correctionsComplete: boolean | null): CampaignLabelInput {
-  const B = minOrNull(row.legs
-    .filter(leg => leg.leg_role === 'main_open'
-      && (!leg.trade_record_id || (row.settlement.recordsByLeg.get(leg.id)?.length ?? 0) > 0))
-    .map(leg => parseMs(leg.pre_simulated_time)));
+  const B = campaignEntryAnchorMs(row.legs, row.settlement.recordsByLeg);
   const total = row.settlement.total;
   const l0 = row.initialExpectedMaxLoss;
   return {

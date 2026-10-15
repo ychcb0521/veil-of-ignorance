@@ -38,6 +38,8 @@ import {
   type CampaignReviewRule,
 } from '@/lib/campaignReviewSummary';
 import { CampaignPnlOverviewPanel, type OverviewPanelItem } from '@/components/journal/CampaignPnlOverviewPanel';
+import { EntrySchellingPanel } from '@/components/journal/EntrySchelling';
+import { campaignEntryAnchorMs } from '@/lib/deepRsa/campaignLabels';
 import { CounterfactualOverviewRow } from '@/components/journal/CounterfactualOverviewRow';
 import { QuietInfo } from '@/components/journal/QuietInfo';
 import { formatBeijingTime } from '@/lib/timeFormat';
@@ -1632,6 +1634,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     () => (campaign ? computeCampaignRealizedPnl(campaign, legs, tradeRecords, legExitPriceCorrections) : null),
     [campaign, legs, tradeRecords, legExitPriceCorrections],
   );
+  /** 进场锚点 B：与战役封面、Deep RSA 同一个口径（首次已成交的主力开仓模拟时间）。 */
+  const entryAnchorMs = useMemo(() => (settlement ? campaignEntryAnchorMs(legs, settlement.recordsByLeg) : null), [legs, settlement]);
   /** 落库行套上结算结果：已结算 → 状态 / 金额 / R 由结算推出；未结算 → 原样保留落库状态。 */
   const displayCampaign = useMemo(
     () => (campaign && settlement ? reconcileCampaignWithSettlement(campaign, legs, settlement) : campaign),
@@ -2798,6 +2802,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           />
 
         </section>
+
+        {/* 【用户要求】每一场战役在进场时的谢林偏离（具体数值 + 参考价，便于在看盘软件上核对） */}
+        <EntrySchellingPanel symbol={campaign.symbol} anchorMs={entryAnchorMs} />
 
         {isOwner && campaignOperationDate && (
           <section className="border border-border bg-card" data-testid="campaign-emotion-diary">
