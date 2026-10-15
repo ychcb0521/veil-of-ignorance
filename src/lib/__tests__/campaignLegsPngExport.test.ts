@@ -102,13 +102,15 @@ const EXIT_COL = 5;
 /** 开仓和平仓分别记录，不与前后数值列混在一起。 */
 const EXECUTION_METHOD_COL = 6;
 /** 「委托」列。 */
-const ORDER_COL = 14;
+const ORDER_COL = 15;
 /** 「手续费」列。 */
-const FEE_COL = 13;
+const FEE_COL = 14;
+/** 「磨损」列（L_磨损逐腿，紧跟「加仓校验」）。 */
+const EXECUTION_WEAR_COL = 13;
 /** 「加仓校验」列（紧跟「币量 / 仓位」与「多单占比」；没有「空单占比」列）。 */
 const ADD_SIZING_COL = 12;
 /** 导出图的列数（没有页面上的「操作」列）。 */
-const EXPORT_COLUMN_COUNT = 15;
+const EXPORT_COLUMN_COUNT = 16;
 /** 「涨跌幅」列（操作方式右侧）。 */
 const PRICE_CHANGE_COL = 7;
 
@@ -1017,7 +1019,7 @@ describe('【用户要求】导出图也带「涨跌幅」列（操作方式右�
     const at = texts.indexOf('涨跌幅');
     expect(at).toBeGreaterThan(0);
     expect(texts.slice(at - 3, at + 2)).toEqual(['开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位']);
-    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '1+α', '1+α（理论）', '加仓校验', '手续费', '委托']);
+    expect(texts.slice(0, EXPORT_COLUMN_COUNT)).toEqual(['角色', '时间', '贡献 / 盈亏', 'ΔR', '开仓价', '平仓价', '操作方式', '涨跌幅', '币量 / 仓位', '多单占比', '1+α', '1+α（理论）', '加仓校验', '磨损', '手续费', '委托']);
     expect(texts).not.toContain('空单占比');
     expect(texts).toContain('+127.02%');
   });
@@ -1412,7 +1414,8 @@ describe('【用户要求】导出图也带「占比」一列（币量 / 仓位�
       get: (_target, key) => (key === 'measureText' ? () => ({ width: 0 }) : () => undefined),
     }) as never);
     const canvas = buildCampaignLegsListCanvas({ ...input(), legs: [] }, { includeHeader: false, scale: 1 });
-    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 102 + 120 + 184 + 88 + 112 + 112 + 170 + 132 + 444 + 40 * 2);
+    // 「磨损」132（L_磨损逐腿）紧跟加仓校验
+    expect(canvas.width).toBe(152 + 300 + 150 + 104 + 118 + 118 + 102 + 120 + 184 + 88 + 112 + 112 + 170 + 132 + 132 + 444 + 40 * 2);
   });
 
   it('按真实等宽字体量宽：「100.0%」与「—」在 88 宽的「多单占比」里都不折行；列头「多单占比」（12px 粗体 4 个汉字）放得进去、不被压扁', async () => {
@@ -1889,7 +1892,7 @@ describe('【用户要求】导出图的盈亏概览与页面同样两栏：递�
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
     expect(column(0)).toEqual(['预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', '几何期望']);
     expect(column(1)).toEqual(['最大预期亏损', '已实现 P&L', '仓位放大', '加仓效用', '算术期望', '单位涨幅 G', '单位利润 U', '仓位利润 W']);
-    expect(column(2)).toEqual(['首仓涨跌幅', '首仓涨跌幅倍数', '峰值涨幅', '涨幅未兑现', '动态最大回撤']);
+    expect(column(2)).toEqual(['首仓涨跌幅', '首仓涨跌幅倍数', '峰值涨幅', '涨幅未兑现', '动态最大回撤', 'L_磨损']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);
     expect(metadata.cells.map(cell => [cell.item.label, cell.column, cell.row])).toEqual([['A', 0, 0], ['B', 1, 0], ['C', 0, 1]]);

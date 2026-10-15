@@ -3,6 +3,7 @@
  * 数值一律写成数字（不带单位、不按屏幕取整），单位写在表头；读不出的格子留空（不是 0）。
  * 每一列与卡片 / 详情页「盈亏概览」读同一个函数，导出的数与页面上的字一致（只差显示精度）。
  */
+import { EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE } from '@/lib/campaignExecutionWear';
 import { GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_RULE, POSITION_PROFIT_FORMULA, UNIT_METRICS_MISSING_RULE, UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE } from '@/lib/campaignUnitProfit';
 import {
   campaignLeverage,
@@ -116,6 +117,9 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '相对涨幅（倍）', width: 12, note: `${EFFECTIVE_PRICE_CHANGE_FORMULA}，按倍数导出公式比值。${EFFECTIVE_PRICE_CHANGE_RULE}`, value: row => finite(rowRelativePriceChange(row)) },
     { header: '盈亏比', width: 12, note: '已实现净盈亏 ÷ 初始最大预期亏损 L₀；没有加仓的战役同样计算。', value: row => finite(rowPayoffRatio(row)) },
     { header: '神奇的 b', width: 12, note: `${MAGIC_B_METHODS_DESCRIPTION} ${MAGIC_B_RULE}`, value: row => finite(rowMagicB(row)) },
+    // 【用户要求】L_磨损：多空平仓价差、委托/成交滑点、加仓数量偏差，与中途对冲磨损合并
+    { header: 'L_磨损（USDT）', width: 13, note: `${EXECUTION_WEAR_FORMULA}。${Object.values(EXECUTION_WEAR_COMPONENT_RULES).join('')}${EXECUTION_WEAR_RULE}`, value: row => finite(row.executionWearUsd) },
+    { header: 'L_磨损（R）', width: 11, note: 'L_磨损 ÷ 初始最大预期亏损 L₀；与盈亏比括号里的磨损值同一个数。', value: row => finite(row.executionWearR) },
     { header: '单位涨幅 G', width: 12, note: `${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`, value: row => finite(rowUnitRise(row)) },
     { header: '单位利润 U（USDT）', width: 14, note: `${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}`, value: row => finite(rowUnitProfit(row)) },
     { header: '仓位利润 W（USDT）', width: 14, note: `${POSITION_PROFIT_FORMULA}，几何仓位取实际值。单位 USDT。`, value: row => finite(rowPositionProfit(row)) },

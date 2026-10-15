@@ -5,6 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearUsd, PAYOFF_RATIO_WEAR_FORMULA, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, PAYOFF_RATIO_HEDGE_WEAR_RULE, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
@@ -100,6 +101,7 @@ export type CampaignPnlOverviewItemKey =
   | 'peakPriceChange'
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
+  | 'executionWear'
   | 'positionAmplification'
   | 'positionGeometricMultiple'
   | 'positionGeometricMultipleTheoretical'
@@ -134,7 +136,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
  * 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望、按三种算法）；
- * 单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面。三列 7 / 8 / 5 项。
+ * 单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面；L_磨损 放在第三列最后。三列 7 / 8 / 6 项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -167,6 +169,7 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
+  'executionWear',
 ];
 
 /**
@@ -234,6 +237,10 @@ export interface CampaignPnlOverviewMetrics {
   hedgeWearR?: number | null;
   hedgeWearUsd?: number | null;
   hedgeWearLegCount?: number;
+  /** L_磨损（见 campaignExecutionWear）；反事实没有委托价与逐笔滑点，不传——盈亏比括号退回只计中途对冲。 */
+  executionWearR?: number | null;
+  executionWearUsd?: number | null;
+  executionWear?: CampaignExecutionWear | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
   initialRisk: { drawdownFraction: number; source: CampaignInitialRiskSource } | null;
   /** 整段替换某一项的帮助文案（含义与真实战役不同时用）。 */
@@ -352,8 +359,16 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const theoreticalBLine = theoreticalB != null
     ? <p className="font-mono text-foreground">神奇的 b（理论）= 几何仓位（理论）{metrics.positionGeometricMultipleTheoretical?.toFixed(2)} × 相对涨幅 {((metrics.effectivePriceChangePct ?? 0) / 100).toFixed(2)} ≈ {bText(theoreticalB)}</p>
     : <p>神奇的 b（理论）算不出（缺几何仓位（理论）或相对涨幅），括号里不写。</p>;
-  const hedgeWear = payoffRatioHedgeWear(magicB, metrics.hedgeWearR);
-  const methodTwo = magicB != null && metrics.hedgeWearR != null ? magicB + metrics.hedgeWearR : null;
+  // 【用户要求】括号里的磨损 = L_磨损 ÷ L₀（已含原来的中途对冲磨损）；没有 L_磨损 的（反事实）退回只计中途对冲
+  const hasExecutionWear = metrics.executionWearR !== undefined;
+  const wearR = hasExecutionWear ? metrics.executionWearR ?? null : metrics.hedgeWearR ?? null;
+  const wearUsd = hasExecutionWear ? metrics.executionWearUsd ?? null : metrics.hedgeWearUsd ?? null;
+  const hedgeWear = payoffRatioHedgeWear(magicB, wearR);
+  const methodTwo = magicB != null && wearR != null ? magicB + wearR : null;
+  const wearParts = metrics.executionWear?.components;
+  const wearPartsText = wearParts
+    ? EXECUTION_WEAR_COMPONENTS.filter(part => wearParts[part] != null).map(part => `${EXECUTION_WEAR_COMPONENT_LABEL[part]} ${formatExecutionWearUsd(wearParts[part])}`).join(' ＋ ')
+    : '';
 
   const built: CampaignPnlOverviewItem[] = [
     {
@@ -366,11 +381,14 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         {payoff != null && <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-worked">本场：{realizedPnl!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {payoff.toFixed(8)}</div>}
         <p>已实现净盈亏与本场结算同源，包含各次交易的结算结果。L₀ 使用交易开始时的最大预期亏损；盈利为正，亏损保留负号。没有加仓的战役同样计算，缺少有效初始风险时显示「—」。</p>
         <div className="text-[10px] font-medium text-foreground/85">方法二</div>
-        <p className="font-mono">{PAYOFF_RATIO_HEDGE_WEAR_FORMULA}</p>
-        <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-hedge-wear-worked">{metrics.hedgeWearR == null
-          ? '本场：没有中途对冲空单已实现盈亏（或缺少 L₀），不计磨损。'
-          : <>ΔR = {metrics.hedgeWearUsd!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {metrics.hedgeWearR.toFixed(4)}（{metrics.hedgeWearLegCount} 张）{methodTwo != null && <><br />本场：{magicB!.toFixed(4)} {metrics.hedgeWearR < 0 ? '−' : '+'} {Math.abs(metrics.hedgeWearR).toFixed(4)} ≈ {methodTwo.toFixed(4)}</>}</>}</div>
-        <p>{PAYOFF_RATIO_HEDGE_WEAR_RULE}读数后的括号写「神奇的 b 磨损值」，磨损为负时标红。</p></>,
+        <p className="font-mono">{hasExecutionWear ? PAYOFF_RATIO_WEAR_FORMULA : PAYOFF_RATIO_HEDGE_WEAR_FORMULA}</p>
+        <div className="rounded border border-border/60 bg-muted/40 p-2.5 font-mono tabular-nums break-words" data-testid="payoff-ratio-hedge-wear-worked">{wearR == null
+          ? (hasExecutionWear ? '本场：L_磨损 算不出（或缺少 L₀），不计磨损。' : '本场：没有中途对冲空单已实现盈亏（或缺少 L₀），不计磨损。')
+          : <>{hasExecutionWear
+            ? <>L_磨损 = {wearPartsText ? `${wearPartsText} = ` : ''}{formatExecutionWearUsd(wearUsd)} U；÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {wearR.toFixed(4)}</>
+            : <>ΔR = {wearUsd!.toFixed(2)} U ÷ {initialExpectedMaxLoss.toFixed(2)} U ≈ {wearR.toFixed(4)}（{metrics.hedgeWearLegCount} 张）</>}
+            {methodTwo != null && <><br />本场：{magicB!.toFixed(4)} {wearR < 0 ? '−' : '+'} {Math.abs(wearR).toFixed(4)} ≈ {methodTwo.toFixed(4)}</>}</>}</div>
+        <p>{hasExecutionWear ? `磨损合并为 L_磨损：${EXECUTION_WEAR_FORMULA}（各项口径见「L_磨损」的说明）。` : PAYOFF_RATIO_HEDGE_WEAR_RULE}读数后的括号写「神奇的 b 磨损值」，磨损为负时标红。</p></>,
     },
     {
       key: 'addCount', label: '加仓次数',
@@ -517,6 +535,27 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">动态最大回撤 = maxₜ［（此前峰值 − 此后谷值）÷ 此前峰值］× 100%</div>
           <p>通常计算到主力平仓；若最后一次滚动对冲与主力在同一次操作中平仓，则该对冲触发后风险已被锁住，计算窗口提前结束于这张对冲的开仓时刻。</p>
           <p>高点必须早于低点；按当前计算周期 K 线估计，同一根 K 线内 high 与 low 的先后未知，因此不把同根 K 线强行解释成一次完整峰谷。</p>
+        </>
+      ),
+    },
+    {
+      // 【用户要求】L_磨损：多空最终平仓价不一致、委托价与成交价不一致、加仓数量超覆盖 / 不够覆盖，与中途对冲磨损合并
+      key: 'executionWear',
+      label: 'L_磨损',
+      value: wearUsd == null || !hasExecutionWear ? '—' : `${formatExecutionWearUsd(wearUsd)} USDT${wearR == null ? '' : `（${formatExecutionWearUsd(wearR)}）`}`,
+      color: pnlExportColor(hasExecutionWear && wearUsd != null ? Number(wearUsd.toFixed(2)) : null),
+      valueClassName: pnlColor(hasExecutionWear && wearUsd != null ? Number(wearUsd.toFixed(2)) : null),
+      help: (
+        <>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">{EXECUTION_WEAR_FORMULA}</div>
+          {EXECUTION_WEAR_COMPONENTS.map(part => (
+            <div key={part} className="space-y-0.5" data-testid={`execution-wear-${part}`}>
+              <p className="font-mono text-foreground">{EXECUTION_WEAR_COMPONENT_LABEL[part]}：{wearParts?.[part] == null ? '—（本场不适用或读不到依据）' : `${formatExecutionWearUsd(wearParts[part])} U`}</p>
+              <p>{EXECUTION_WEAR_COMPONENT_RULES[part]}</p>
+            </div>
+          ))}
+          {hasExecutionWear && wearUsd != null && <p className="font-mono text-foreground">本场：L_磨损 = {formatExecutionWearUsd(wearUsd)} U{wearR != null && <>；÷ L₀ {initialExpectedMaxLoss.toFixed(2)} U ≈ {formatExecutionWearUsd(wearR)}（盈亏比括号里的磨损值）</>}</p>}
+          <p>{EXECUTION_WEAR_RULE}Legs 表「磨损」列逐腿列出，合计行等于 L_磨损。</p>
         </>
       ),
     },

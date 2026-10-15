@@ -61,8 +61,8 @@ describe('Legs per-add geometric factor', () => {
     expect(png.find(row => row.legId === 'add2')!.cells[10][0].text).toBe('1.50×');
     expect(png.find(row => row.legId === 'mirror')!.cells[10][0].text).toBe('0.50×');
     expect(png.find(row => row.legId === 'mirror')!.cells[11][0].text).toBe('0.50×');
-    expect(png.every(row => row.cells.length === 15)).toBe(true);
-    expect(screen.getByTestId('legs-total-row').children).toHaveLength(15);
+    expect(png.every(row => row.cells.length === 16)).toBe(true);
+    expect(screen.getByTestId('legs-total-row').children).toHaveLength(16);
     fireEvent.click(screen.getByRole('button', { name: /^按多单占比排序/ }));
     expect(screen.getByTestId('leg-geometric-factor-add1')).toHaveTextContent('6.09×');
   });

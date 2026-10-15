@@ -1782,6 +1782,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       hedgeWearR: campaignGeometricMetrics?.hedgeWearR ?? null,
       hedgeWearUsd: campaignGeometricMetrics?.hedgeWearUsd ?? null,
       hedgeWearLegCount: campaignGeometricMetrics?.hedgeWearLegCount,
+      executionWearR: campaignGeometricMetrics?.executionWearR ?? null,
+      executionWearUsd: campaignGeometricMetrics?.executionWearUsd ?? null,
+      executionWear: campaignGeometricMetrics?.executionWear ?? null,
       geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });
@@ -2524,6 +2527,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
         foreignLiveOrders: visibleForeignLiveOrders,
         legExitPriceCorrections,
         unfilledOrderIds,
+        executionWear: campaignGeometricMetrics?.executionWear ?? null,
         chartElement: campaignChartExportRef.current,
         chartInterval: displayInterval,
         pnlOverview: {
@@ -3231,6 +3235,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             executionMethodOrders={reverseHedgeOrders}
             foreignLiveOrders={visibleForeignLiveOrders}
             unfilledOrderIds={unfilledOrderIds}
+            executionWear={campaignGeometricMetrics?.executionWear ?? null}
             highlightedLegIds={selectedLegMarkerIds}
             onToggleHighlight={(leg) => {
               setFocusTime(null);

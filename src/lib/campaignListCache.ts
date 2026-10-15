@@ -74,6 +74,10 @@ export type CampaignCardData = {
   positionProfitTheoretical?: number | null;
   /** 中途对冲空单的累积磨损值 ΔR（带号）；见 computeCampaignGeometricMetrics。 */
   hedgeWearR?: number | null;
+  /** L_磨损 ÷ L₀（带号，已含中途对冲磨损）：盈亏比括号里显示它；旧缓存没有时退回 hedgeWearR。 */
+  executionWearR?: number | null;
+  /** L_磨损（USDT）。 */
+  executionWearUsd?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
 };
 
@@ -131,9 +135,11 @@ export function buildCampaignCardData(
 
 function geometricMetricsOf(campaign: TradeCampaign, details: CampaignDetails, corrections: LegExitPriceCorrections): Partial<CampaignGeometricMetrics> {
   try {
-    return computeCampaignGeometricMetrics(campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders, corrections, {
+    // 逐腿拆分只给详情页 / Legs 表用，不进列表行
+    const { executionWear: _byLeg, ...metrics } = computeCampaignGeometricMetrics(campaign, details.legs, details.tradeRecords, details.reverseHedgeOrders, corrections, {
       unfilledOrderIds: new Set(details.unfilledOrderIds ?? []),
     });
+    return metrics;
   } catch {
     return { effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null, unitRise: null, unitProfit: null, positionProfit: null, positionProfitTheoretical: null };
   }

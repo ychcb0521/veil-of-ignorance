@@ -1,3 +1,5 @@
+import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENTS, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
   buildTradeRecordLookup,
@@ -70,6 +72,25 @@ type ExportInput = {
   legExitPriceCorrections?: LegExitPriceCorrections;
   /** 本地委托快照证明从未成交的 id：「挂单中」按成交判定的负证据，与页面同一份（legRowStatus）。 */
   unfilledOrderIds?: ReadonlySet<string>;
+  /** L_磨损逐腿拆分（与页面同一份）；不传时按同一组输入现算（批量导出）。 */
+  executionWear?: CampaignExecutionWear | null;
+};
+
+/** 「磨损」列的数据：优先用页面算好的那份，否则按同一组输入现算；算不出就整列写「—」。 */
+function exportExecutionWear(input: ExportInput): CampaignExecutionWear | null {
+  if (input.executionWear !== undefined) return input.executionWear;
+  try {
+    return computeCampaignGeometricMetrics(input.campaign, input.legs, input.tradeRecords,
+      input.executionMethodOrders ?? input.reverseHedgeOrders, input.legExitPriceCorrections ?? {},
+      { unfilledOrderIds: input.unfilledOrderIds ? new Set(input.unfilledOrderIds) : undefined }).executionWear ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const wearColor = (value: number | null | undefined) => {
+  const rounded = value == null ? 0 : Number(value.toFixed(2));
+  return rounded < 0 ? '#F6465D' : rounded > 0 ? '#0ECB81' : '#A3ABB8';
 };
 
 /** 「挂单中」按成交判定的凭据：与页面 CampaignLegsList 同一份（完整委托列表、事件流、本地从未成交的 id）。 */
@@ -217,6 +238,8 @@ const COLUMNS = [
   { title: '1+α（理论）', width: 112 },
   // 170：红叉下面把 Plan B 正确上限的币量与 U 名义仓位都写清。
   { title: '加仓校验', width: 170 },
+  // 【用户要求】L_磨损逐腿列出（与页面「磨损」列同源）：上行合计，下行最大的那一项
+  { title: '磨损', width: 132 },
   { title: '手续费', width: 132 },
   { title: '委托', width: 444 },
 ] as const;
@@ -678,6 +701,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     input.legs,
     leg => settlement.byLeg.get(leg.id) ?? null,
   );
+  const executionWear = exportExecutionWear(input);
 
   // 阶段拆解（与页面同源）：按对冲的完整存续窗口切换暴露状态
   const hedgeBoundaries = input.legs
@@ -886,6 +910,17 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         }
         return [{ text: '—', color: '#C4CAD3', size: 11 }];
       })(),
+      // 磨损：这条腿贡献的 L_磨损，下行写主要来自哪一项
+      (() => {
+        const wear = executionWear?.byLeg[leg.id];
+        if (!wear) return [{ text: '—', color: '#C4CAD3', size: 11 }];
+        const main = EXECUTION_WEAR_COMPONENTS.filter(part => wear[part] != null)
+          .sort((a, b) => Math.abs(wear[b]!) - Math.abs(wear[a]!))[0];
+        return [
+          { text: formatExecutionWearUsd(wear.total), color: wearColor(wear.total), size: 12 },
+          ...(main ? [{ text: EXECUTION_WEAR_COMPONENT_LABEL[main], color: '#9AA4B2', size: 10 }] : []),
+        ];
+      })(),
       // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
       (() => {
         const fees = execution.record ? tradeRecordFees(execution.record) : null;
@@ -964,6 +999,7 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
           [{ text: '' }],
           [{ text: '' }],
           [{ text: '' }],
+          [{ text: '' }],
       ];
       return {
         legId: `${leg.id}-phase-${phase.index}`,
@@ -1024,6 +1060,13 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     // 加仓校验
     [{ text: '' }],
+    // 磨损：合计 = L_磨损，下行 ÷ L₀
+    executionWear?.usd == null
+      ? [{ text: '—', color: '#A3ABB8' }]
+      : [
+        { text: formatExecutionWearUsd(executionWear.usd), color: wearColor(executionWear.usd), size: 12 },
+        ...(executionWear.r != null ? [{ text: `(${formatExecutionWearUsd(executionWear.r)})`, color: '#9AA4B2', size: 10 }] : []),
+      ],
     feeTotals == null
       ? [{ text: '—', color: '#A3ABB8' }]
       : [

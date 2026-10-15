@@ -68,7 +68,8 @@ import {
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
+import { PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
+import { computeMagicB, payoffRatioHedgeWear, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
 import {
@@ -1586,6 +1587,11 @@ function rowTheoreticalMagicB(row: CampaignDisplayData): number | null {
   return computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row));
 }
 
+/** 【用户要求】盈亏比括号里的磨损 = L_磨损 ÷ L₀（已含中途对冲磨损）；旧缓存行没有时退回只计中途对冲。 */
+function rowWearR(row: Pick<CampaignDisplayData, 'executionWearR' | 'hedgeWearR'>): number | null | undefined {
+  return row.executionWearR !== undefined ? row.executionWearR : row.hedgeWearR;
+}
+
 /** 每行的封面读数按行对象缓存：行对象不变，读数就不变（行情 tick 不会换掉没变的行）。 */
 const cardMetricReadingsCache = new WeakMap<CampaignDisplayData, CardMetricReadings>();
 /**
@@ -1612,7 +1618,7 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     // 列宽要算上括号里的磨损值（神奇的 b 磨损值）
     captureRate: (rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100))
       // 封面上神奇的 b 就在左边一格，括号里只写磨损值
-      + (payoffRatioHedgeWear(null, row.hedgeWearR)?.text ?? ''),
+      + (payoffRatioHedgeWear(null, rowWearR(row))?.text ?? ''),
     // 【用户要求】神奇的 b只保留倍数 b，不写百分数
     // 【用户要求】括号外基于盈亏比，括号里基于神奇的 b（理论）
     addEfficiency: addEfficiency == null ? '—'
@@ -1769,7 +1775,7 @@ const CampaignCard = memo(function CampaignCard({
   );
   /** 封面八项的读数：与列表容器上的列宽估算同一份（cardMetricReadings）。 */
   const readings = cardMetricReadings(row);
-  const hedgeWear = payoffRatioHedgeWear(rowMagicB(row), row.hedgeWearR);
+  const hedgeWear = payoffRatioHedgeWear(rowMagicB(row), rowWearR(row));
   const theoreticalB = rowTheoreticalMagicB(row);
   const payoffReading = rowPayoffRatio(row) == null ? '—' : formatCampaignPayoffRatio(rowPayoffRatio(row)! * 100);
   const mirrorTpStatus = readings.mirrorTp;
@@ -2053,7 +2059,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
             <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损（L_磨损 ÷ L₀）${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
           </div>
           {/* 【用户要求】「几何增长」与「几何期望」合并为几何期望，放在盈亏比后面：方法一（方法二/方法三） */}
           <div

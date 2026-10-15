@@ -72,7 +72,9 @@ describe('Legs 列表的「加仓校验」列', () => {
     expect(coins.nextElementSibling!.nextElementSibling).toHaveAttribute('aria-label', '仓位的几何复利（1+α）');
     expect(coins.nextElementSibling!.nextElementSibling!.nextElementSibling!.nextElementSibling).toBe(header);
     expect(screen.queryByRole('button', { name: /^按空单占比排序/ })).toBeNull();
-    expect(header.nextElementSibling).toBe(fees);
+    // 【用户要求】L_磨损逐腿列出：「磨损」紧跟加仓校验，再往后才是手续费
+    expect(header.nextElementSibling).toHaveAttribute('aria-label', 'L_磨损（逐腿）');
+    expect(header.nextElementSibling!.nextElementSibling).toBe(fees);
     expect(header.getAttribute('title')).toContain('Q₂实际(T − K)');
     expect(header.getAttribute('title')).toContain('止损线不必越过旧仓成本线');
     expect(header.getAttribute('title')).toContain('G 先覆盖旧仓在止损线的亏损，余额再覆盖新增风险');
@@ -143,7 +145,7 @@ describe('Legs 列表的「加仓校验」列', () => {
   it('每一行的格子数与表头一致：加列没有让合计行错位', () => {
     renderList(22_057_330);
     const headerCells = screen.getByText('加仓校验').parentElement!.children.length;
-    expect(headerCells).toBe(15);
+    expect(headerCells).toBe(16);
     expect(screen.getByTestId('legs-total-row').children.length).toBe(headerCells);
     const addRow = screen.getByTestId('add-sizing-check-fail-add1').parentElement!;
     expect(addRow.children.length).toBe(headerCells);

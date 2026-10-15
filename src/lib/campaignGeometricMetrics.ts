@@ -7,6 +7,7 @@ import { buildTradeRecordLookup } from '@/lib/objectiveOperationTime';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
 import { buildCampaignLegTheoreticalFactors, type LegGeometricFactor, type LegTheoreticalGeometricFactor } from '@/lib/campaignLegGeometricFactor';
+import { computeCampaignExecutionWear, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 
 export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
@@ -23,11 +24,13 @@ export const MAGIC_B_RULE = '采用实际几何仓位（含首次减仓因子）
 
 /**
  * 盈亏比读数后面的括号：（神奇的 b  磨损值）。磨损值带号、两位小数，亏损写「−0.35」（标红），盈利写「+0.35」。
- * 没有中途对冲空单（或缺 L₀）时返回 null，不加括号。
+ * 磨损算不出（或缺 L₀）、或读作 0.00 时返回 null，不加括号。
  */
 export function payoffRatioHedgeWear(magicB: number | null | undefined, wearR: number | null | undefined) {
   if (wearR == null || !Number.isFinite(wearR)) return null;
   const rounded = Number(wearR.toFixed(2));
+  // 读作 0.00 的磨损不加括号（不做冗余视觉呈现）
+  if (rounded === 0) return null;
   const wear = `${rounded < 0 ? '−' : '+'}${Math.abs(rounded).toFixed(2)}`;
   const b = magicB == null || !Number.isFinite(magicB) ? null : magicB.toFixed(2);
   return { b, wear, negative: rounded < 0, text: `(${b == null ? '' : `${b} `}${wear})` };
@@ -73,6 +76,12 @@ export interface CampaignGeometricMetrics {
   /** 中途对冲空单已实现盈亏之和（U）与参与计数的腿数，供说明代入。 */
   hedgeWearUsd?: number | null;
   hedgeWearLegCount?: number;
+  /** L_磨损 ÷ L₀（带号）：中途对冲 + 多空平仓价差 + 委托/成交滑点 + 加仓数量偏差；盈亏比括号里显示它。 */
+  executionWearR?: number | null;
+  /** L_磨损（USDT）。 */
+  executionWearUsd?: number | null;
+  /** 各项与逐腿拆分；只在详情页 / Legs 表 / 导出图用。 */
+  executionWear?: CampaignExecutionWear | null;
   geometricMetricBasis: {
     initialCoins: number | null;
     initialEntryPrice?: number | null;
@@ -295,6 +304,11 @@ export function computeCampaignGeometricMetrics(
   const theoreticalRatios = theoreticalFactors.every(Boolean) ? theoreticalFactors.map(factor => factor!.alpha) : null;
   const theoreticalMultiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(theoreticalRatios, reduction);
   const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
+  const executionWear = computeCampaignExecutionWear({
+    legs, executions, lookup, settlement, corrections, orders,
+    finalExitPrice, lockingLegIds: priceChange.lockingLegIds ?? [],
+    addSteps: steps, theoreticalFactors, initialExpectedMaxLoss,
+  });
   const unitRise = computeUnitRise(finalExitPrice, lastSupport);
   const unitProfit = computeUnitProfit(initialCoins, unitRise);
   return {
@@ -308,6 +322,7 @@ export function computeCampaignGeometricMetrics(
     positionProfit: computePositionProfit(unitProfit, multiple),
     positionProfitTheoretical: computePositionProfit(unitProfit, theoreticalMultiple),
     hedgeWearR, hedgeWearUsd, hedgeWearLegCount: hedgePnls.length,
+    executionWearR: executionWear.r, executionWearUsd: executionWear.usd, executionWear,
     geometricMetricBasis: { initialCoins, initialEntryPrice, initialStopPrice, initialReductionFactors: reduction == null ? [] : initialReductionFactors, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
   };
 }
