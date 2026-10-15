@@ -26,7 +26,7 @@ import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
 import {
-  computeGeometricGrowth, formatGeometricGrowth, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
+  computeGeometricGrowth, formatGeometricGrowth, formatGeometricGrowthMethods, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
@@ -340,7 +340,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
   // 【用户要求】加仓效用、几何期望、算术期望各算两遍：括号外基于盈亏比，括号里基于神奇的 b（理论）
   const theoreticalB = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
-  const geometricGrowth = computeGeometricGrowth(magicB);
+  // 【用户要求】W（b）三种算法：方法一基于盈亏比，方法二基于几何仓位（神奇的 b），方法三基于几何仓位（理论）
+  const geometricGrowth = computeGeometricGrowth(payoff);
+  const geometricGrowthMagic = computeGeometricGrowth(magicB);
   const geometricGrowthTheoretical = computeGeometricGrowth(theoreticalB);
   const theoreticalExpectancies = computeCampaignExpectanciesFromMagicB(theoreticalB);
   const addEfficiency = hasMainAdd
@@ -452,10 +454,10 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
-      // 【用户要求】两种算法：括号外基于几何仓位，括号里基于几何仓位（理论）
+      // 【用户要求】三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
       key: 'geometricGrowth',
       label: '几何增长 W（b）',
-      value: formatActualTheoreticalMetric(geometricGrowth, geometricGrowthTheoretical, formatGeometricGrowth),
+      value: formatGeometricGrowthMethods(geometricGrowth, geometricGrowthMagic, geometricGrowthTheoretical),
       color: pnlExportColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
       valueClassName: pnlColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
       help: (
@@ -463,13 +465,20 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
           <div className="space-y-1">
             <div className="text-[10px] font-medium text-foreground/85">方法一（读数括号外）</div>
-            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位</p>
-            {geometricGrowth != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultiple != null
-              ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultiple.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowth)}</p>
-              : <p>本场：—</p>}
+            <p className="font-mono">W（b）= 1 + 0.1 × 盈亏比</p>
+            {geometricGrowth != null && payoff != null
+              ? <p className="font-mono text-foreground">本场：1 + 0.1 × {bText(payoff)} ≈ {formatGeometricGrowth(geometricGrowth)}</p>
+              : <p>本场：—（缺少有效盈亏比）</p>}
           </div>
           <div className="space-y-1 border-t border-border/60 pt-2">
-            <div className="text-[10px] font-medium text-foreground/85">方法二（读数括号内）</div>
+            <div className="text-[10px] font-medium text-foreground/85">方法二（括号内第一个）</div>
+            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位</p>
+            {geometricGrowthMagic != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultiple != null
+              ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultiple.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowthMagic)}</p>
+              : <p>本场：—（几何仓位或相对涨幅缺少有效依据）</p>}
+          </div>
+          <div className="space-y-1 border-t border-border/60 pt-2">
+            <div className="text-[10px] font-medium text-foreground/85">方法三（括号内第二个）</div>
             <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）</p>
             {geometricGrowthTheoretical != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultipleTheoretical != null
               ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultipleTheoretical.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowthTheoretical)}</p>

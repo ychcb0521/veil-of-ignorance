@@ -58,7 +58,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('列宽按真实最长的读数定');
     expect(guide).not.toContain('卡片按原顺序自然换行');
     // 【用户要求】两排等宽网格取代「按读数定宽」：不再随读数、时间段或排序改宽度，切换排序时文字不挪
-    expect(guide).toContain('屏幕 ≥ 1024px 时每排九格、十八项正好两排，640–1023px 每排六格，手机每行两项');
+    expect(guide).toContain('屏幕 ≥ 1280px 时每排九格、十八项正好两排，640–1279px 每排六格，手机每行两项');
     expect(guide).not.toContain('宽度按<strong>当前列表里实际出现的读数</strong>定');
     expect(page).not.toContain('cardMetricWidthStyle');
     expect(guide).toContain('切换排序时文字不会挪动');
@@ -76,7 +76,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('几何期望连同「仓位击穿」徽标');
     expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
     // 与页面常量一致：手机两列、640px 起每排六格、1024px 起每排九格
-    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9';");
+    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';");
     expect(guide).toContain('自评放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是自评');
     expect(guide).toContain('涨跌幅、涨跌幅倍数、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');

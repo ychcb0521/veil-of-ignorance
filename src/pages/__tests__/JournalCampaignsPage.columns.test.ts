@@ -47,9 +47,9 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
       .toContain('title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>');
   });
 
-  it('【用户要求】封面指标分成两排：等宽网格，手机两列、640px 起每排六格、1024px 起每排九格（十八项正好两排）', () => {
+  it('【用户要求】封面指标分成两排：等宽网格，手机两列、640px 起每排六格、1280px 起每排九格（十八项正好两排）', () => {
     const s = src();
-    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9';");
+    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';");
     expect(s).toMatch(/data-testid="campaign-card-metrics"\s+className=\{CARD_METRIC_STRIP\}/);
     expect(s).not.toContain('xl:flex-nowrap');
     // 封面适当增高：格子上下内边距 py-2

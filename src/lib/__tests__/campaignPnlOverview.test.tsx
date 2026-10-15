@@ -245,7 +245,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "2.00", "1.20", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "+0.50R", "—", "—", "—", "+20.00%", "+2.00", "+25.00%", "5.00%", "12.50%", "1.20"]);
+    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "2.00", "1.20（1.20/—）", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "+0.50R", "—", "—", "—", "+20.00%", "+2.00", "+25.00%", "5.00%", "12.50%", "1.20"]);
     const G = '#0ECB81';
     const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#64748B", "#64748B", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20", "#0ECB81"]);
@@ -481,23 +481,26 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey()).not.toHaveProperty('peakPriceEfficiency');
   });
 
-  it('【用户要求】几何增长 W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位：括号外基于几何仓位，括号里基于几何仓位（理论）', () => {
-    const item = byKey({ magicB: 25, effectivePriceChangePct: 800, positionGeometricMultiple: 3.125, positionGeometricMultipleTheoretical: 2.5 }).geometricGrowth;
+  it('【用户要求】几何增长 W（b）三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）；负数照常算', () => {
+    const item = byKey({ realizedPnl: 2500, magicB: 24, effectivePriceChangePct: 800, positionGeometricMultiple: 3, positionGeometricMultipleTheoretical: 2.5 }).geometricGrowth;
     expect(item.label).toBe('几何增长 W（b）');
-    expect(item.value).toBe('3.50（3.00）');
+    expect(item.value).toBe('3.50（3.40/3.00）');
     expect(item.valueClassName).toBe('text-[#0ECB81]');
     expect(item.column).toBe(0);
     const help = helpText(item.help);
     expect(help).toContain('方法一（读数括号外）');
-    expect(help).toContain('本场：1 + 0.1 × 8.0000 × 3.1250 ≈ 3.50');
-    expect(help).toContain('方法二（读数括号内）');
+    expect(help).toContain('本场：1 + 0.1 × 25.00 ≈ 3.50');
+    expect(help).toContain('方法二（括号内第一个）');
+    expect(help).toContain('本场：1 + 0.1 × 8.0000 × 3.0000 ≈ 3.40');
+    expect(help).toContain('方法三（括号内第二个）');
     expect(help).toContain('本场：1 + 0.1 × 8.0000 × 2.5000 ≈ 3.00');
-    // b < 0：W < 1 用风险色；不设 0 的下限
-    const loss = byKey({ magicB: -12, effectivePriceChangePct: null }).geometricGrowth;
-    expect(loss.value).toBe('-0.20');
+    // 盈亏比、神奇的 b 都可以是负数：不设下限，b < −10 时为负；颜色跟方法一
+    const loss = byKey({ realizedPnl: -1200, magicB: -12, effectivePriceChangePct: null }).geometricGrowth;
+    expect(loss.value).toBe('-0.20（-0.20/—）');
     expect(loss.valueClassName).toBe('text-[#F6465D]');
-    expect(byKey({ magicB: 0 }).geometricGrowth.value).toBe('1.00');
-    expect(byKey({ magicB: null }).geometricGrowth.value).toBe('—');
+    expect(byKey({ realizedPnl: -80, magicB: null }).geometricGrowth.value).toBe('0.92');
+    expect(byKey({ realizedPnl: 0, magicB: null }).geometricGrowth.value).toBe('1.00');
+    expect(byKey({ realizedPnl: null, magicB: null }).geometricGrowth.value).toBe('—');
   });
 
   it('涨幅未兑现 = 25% − 20% = 5%；不超过两倍预期回撤用正文色，超过才用风险色', () => {

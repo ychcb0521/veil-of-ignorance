@@ -45,3 +45,26 @@ describe('【用户要求】封面紧凑读数：长数字加 w（万），单�
     expect(formatGeometricGrowth(1.0002)).toBe('1.00');
   });
 });
+
+describe('【用户要求】W（b）三种算法的读数：方法一（方法二/方法三）', () => {
+  it('括号里两个都算不出时不写括号；单个算不出写「—」', async () => {
+    const { formatGeometricGrowthMethods } = await import('@/lib/campaignUnitProfit');
+    expect(formatGeometricGrowthMethods(3.5, 3.4, 3)).toBe('3.50（3.40/3.00）');
+    expect(formatGeometricGrowthMethods(0.92, null, null)).toBe('0.92');
+    expect(formatGeometricGrowthMethods(1.2, 1.2, null)).toBe('1.20（1.20/—）');
+    expect(formatGeometricGrowthMethods(null, 3.4, 3)).toBe('—（3.40/3.00）');
+    expect(formatGeometricGrowthMethods(-0.2, -0.2, null)).toBe('-0.20（-0.20/—）');
+  });
+});
+
+describe('【美观】W（b）≥ 10 时只留一位小数，封面三个读数放得下', () => {
+  it('显示与分档同一个取整', async () => {
+    const { formatGeometricGrowth, geometricGrowthBinValue } = await import('@/lib/campaignUnitProfit');
+    expect(formatGeometricGrowth(12.345)).toBe('12.3');
+    expect(formatGeometricGrowth(9.996)).toBe('10.0');
+    expect(formatGeometricGrowth(9.24)).toBe('9.24');
+    expect(geometricGrowthBinValue(12.345)).toBe(12.3);
+    expect(geometricGrowthBinValue(9.243)).toBe(9.24);
+    expect(geometricGrowthBinValue(1.0002)).toBe(1);
+  });
+});

@@ -1,4 +1,4 @@
-import { computeGeometricGrowth, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
+import { computeGeometricGrowth, geometricGrowthBinValue, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
@@ -278,11 +278,15 @@ export function rowPositionProfitTheoretical(row: Pick<CampaignCardData, 'campai
   return row.positionProfitTheoretical !== undefined ? row.positionProfitTheoretical : rowGeometricMetrics(row).positionProfitTheoretical ?? null;
 }
 
-/** W（b）（几何增长）= 1 + 0.1 × 神奇的 b（与封面同一个 b）。 */
-export function rowGeometricGrowth(row: Parameters<typeof rowMagicB>[0]): number | null {
+/** W（b）方法一（排序、分档、散点图用）= 1 + 0.1 × 盈亏比（与封面同一个盈亏比）。 */
+export function rowGeometricGrowth(row: Pick<CampaignCardData, 'profitCaptureRatio'>): number | null {
+  return computeGeometricGrowth(rowPayoffRatio(row));
+}
+/** W（b）方法二 = 1 + 0.1 × 神奇的 b = 1 + 0.1 × 相对涨幅 × 几何仓位。 */
+export function rowGeometricGrowthMagic(row: Parameters<typeof rowMagicB>[0]): number | null {
   return computeGeometricGrowth(rowMagicB(row));
 }
-/** W（b）理论 = 1 + 0.1 × 神奇的 b（理论）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）。 */
+/** W（b）方法三 = 1 + 0.1 × 神奇的 b（理论）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）。 */
 export function rowGeometricGrowthTheoretical(row: Parameters<typeof rowEffectivePriceChangePct>[0] & Parameters<typeof rowPositionGeometricMultipleTheoretical>[0]): number | null {
   return computeGeometricGrowth(computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)));
 }
@@ -616,8 +620,9 @@ export type CampaignSortBinning = {
 export function sortBinValue(mode: CampaignSortMode, value: number): number {
   switch (mode) {
     case 'captureRate': return Math.round(Number((value / 100).toFixed(2)) * 100);
-    case 'geometricExpectancy':
-    case 'geometricGrowth': return Number((1 + (Math.abs(value) < 0.0005 ? 0 : value)).toFixed(2)) - 1;
+    case 'geometricExpectancy': return Number((1 + (Math.abs(value) < 0.0005 ? 0 : value)).toFixed(2)) - 1;
+    // W（b）读的是 W − 1（0 = 1.00 不增不减）；取整与封面一致（|W| ≥ 10 时一位小数）
+    case 'geometricGrowth': return geometricGrowthBinValue(1 + value) - 1;
     case 'arithmeticExpectancy': {
       const normalized = Math.abs(value) < 0.0005 ? 0 : value;
       const rounded = Number(normalized.toFixed(2));

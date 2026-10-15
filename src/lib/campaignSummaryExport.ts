@@ -3,7 +3,7 @@
  * 数值一律写成数字（不带单位、不按屏幕取整），单位写在表头；读不出的格子留空（不是 0）。
  * 每一列与卡片 / 详情页「盈亏概览」读同一个函数，导出的数与页面上的字一致（只差显示精度）。
  */
-import { GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_RULE, POSITION_PROFIT_FORMULA, UNIT_METRICS_MISSING_RULE, UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE } from '@/lib/campaignUnitProfit';
+import { GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_RULE, POSITION_PROFIT_FORMULA, UNIT_METRICS_MISSING_RULE, UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE } from '@/lib/campaignUnitProfit';
 import {
   campaignLeverage,
   importanceValue,
@@ -17,6 +17,7 @@ import {
   rowPositionGeometricMultipleTheoretical,
   rowUnitRise,
   rowGeometricGrowth,
+  rowGeometricGrowthMagic,
   rowGeometricGrowthTheoretical,
   rowUnitProfit,
   rowPositionProfit,
@@ -104,9 +105,10 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '最大预期亏损（USDT）', width: 14, note: '初始最大预期亏损 L：主力从开仓价跌到初始对冲边界时的亏损（盈亏概览同名项）。', value: row => (row.initialExpectedMaxLoss > 0 ? row.initialExpectedMaxLoss : null) },
     { header: '已实现 P&L（USDT）', width: 14, note: '已实现盈亏（含平仓价校正，与盈亏概览同名项）。', value: row => finite(row.campaign.final_realized_pnl) },
     { header: '峰值涨幅（%）', width: 11, note: '主力有效持仓窗口内按方向计算的最大有利价格涨幅。', value: row => finite(row.peakPriceChangePct) },
-    // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置：两种算法各一列
+    // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置：三种算法各一列
     { header: '几何增长 W（b）', width: 13, note: `${GEOMETRIC_GROWTH_METHOD_ONE}。${GEOMETRIC_GROWTH_RULE}`, value: row => finite(rowGeometricGrowth(row)) },
-    { header: '几何增长 W（b）（理论）', width: 16, note: GEOMETRIC_GROWTH_METHOD_TWO, value: row => finite(rowGeometricGrowthTheoretical(row)) },
+    { header: '几何增长 W（b）（几何仓位）', width: 18, note: GEOMETRIC_GROWTH_METHOD_TWO, value: row => finite(rowGeometricGrowthMagic(row)) },
+    { header: '几何增长 W（b）（理论）', width: 16, note: GEOMETRIC_GROWTH_METHOD_THREE, value: row => finite(rowGeometricGrowthTheoretical(row)) },
     { header: '涨幅未兑现（%）', width: 12, note: '峰值涨幅 − 最终首仓涨跌幅。', value: row => rowUnrealizedPriceChangePct(row) },
     { header: '动态最大回撤（%）', width: 13, note: '有效持仓期间此前峰值到此后谷值的最大回撤；最后一次滚动对冲与主力同平时，窗口结束于该对冲开仓。', value: row => finite(row.dynamicMaxDrawdownPct) },
     { header: '仓位放大（倍）', width: 11, note: '（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位；分母保留最初主力与镜像合计敞口，各项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },

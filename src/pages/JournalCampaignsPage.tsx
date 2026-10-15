@@ -117,7 +117,7 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
-  formatGeometricGrowth, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
+  formatGeometricGrowth, formatGeometricGrowthMethods, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatCompactUnitRise, formatCompactUsd, formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
@@ -152,6 +152,7 @@ import {
   rowMagicB,
   rowUnitRise,
   rowGeometricGrowth,
+  rowGeometricGrowthMagic,
   rowGeometricGrowthTheoretical,
   rowUnitProfit,
   rowPositionProfit,
@@ -463,8 +464,8 @@ const SORT_LONG_PRESS_MS = 450;
  * 【用户要求】「交易战役上的指标分成两排吧，战役的封面可以适当增高，这样每个指标数值的字体大小就可以设置成一致的了」：
  * 不再按读数估宽、不再按格宽缩字号——数值一律 11px、指标名一律 10px。
  */
-// 【用户要求】封面指标分成两排、字号一致：≥ 1024px 每排九格（十八项正好两排），640–1023px 每排六格，手机两列；格子等宽，从左排起
-const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9';
+// 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格（几何增长三个读数在九格的窄格里放不下），手机两列；格子等宽，从左排起
+const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -605,13 +606,13 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
   // 【用户要求】W（b）（几何增长）：时序 + 分布（默认分布），图上按方法一（几何仓位实际值）
   ...(['geometricGrowth'] as const).flatMap((key): CampaignMetricChartConfig[] => {
     const label = 'W（b）几何增长';
-    const definition = `${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}`;
+    const definition = `${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}`;
     const formatValue = (value: number) => formatGeometricGrowth(value);
     return [{
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
       viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
       guide: { yAxis: definition, point: '每个点是一场战役，按客观操作时间排列；点位表示方法一的读数，颜色按该战役原盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
-        referenceLines: ['1.00 表示不增不减（神奇的 b = 0）；0 表示这一注把本金输光（b = −10）。'] },
+        referenceLines: ['1.00 表示不增不减（盈亏比 = 0）；0 表示这一注把本金输光（盈亏比 = −10）。'] },
     }, {
       key: `${key}Distribution`, sourceKey: key,
       view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
@@ -619,7 +620,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       colorMode: 'signed', formatValue,
       guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${definition} 横轴按封面两位小数读数（方法一），点的颜色按原盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
-      distribution: { unit: '倍', zeroLine: true, zeroLabel: '0 本金归零', zeroMeaning: '这一注把本金输光（b = −10）', positiveShareLabel: 'W（b）为正',
+      distribution: { unit: '倍', zeroLine: true, zeroLabel: '0 本金归零', zeroMeaning: '这一注把本金输光（盈亏比 = −10）', positiveShareLabel: 'W（b）为正',
         references: [{ value: 1, label: '1.00 不增不减', shareLabel: '增长（> 1）' }] },
     }];
   }),
@@ -1439,7 +1440,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'effectivePriceChangePct': return `${value.toFixed(2)}×`;
     case 'effectivePriceChangeMultiple': return `${value.toFixed(2)}x`;
     case 'magicB': return value.toFixed(2);
-    case 'geometricGrowth': return formatGeometricExpectancy(value);
+    case 'geometricGrowth': return formatGeometricGrowth(1 + value);
     case 'unitRise': return formatCompactUnitRise(value);
     case 'unitProfit':
     case 'positionProfit': return formatCompactUsd(value);
@@ -1675,8 +1676,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
     positionGeometricMultiple: formatActualTheoreticalMetric(rowPositionGeometricMultiple(row), rowPositionGeometricMultipleTheoretical(row), formatPositionAmplification),
     magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
-    // 【用户要求】括号外基于几何仓位，括号里基于几何仓位（理论）
-    geometricGrowth: formatActualTheoreticalMetric(rowGeometricGrowth(row), rowGeometricGrowthTheoretical(row), formatGeometricGrowth),
+    // 【用户要求】三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
+    geometricGrowth: formatGeometricGrowthMethods(rowGeometricGrowth(row), rowGeometricGrowthMagic(row), rowGeometricGrowthTheoretical(row)),
     // 【用户要求】封面数字不能太长：≥ 1 万写「w」，G 统一约 4 位有效数字（详情页盈亏概览仍写完整精度）
     unitRise: formatCompactUnitRise(rowUnitRise(row)),
     unitProfit: formatCompactUsd(rowUnitProfit(row)),
@@ -2108,7 +2109,7 @@ const CampaignCard = memo(function CampaignCard({
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
           </div>
           <div data-testid="campaign-geometric-growth" className={metricCell('geometricGrowth')} data-sort-highlight={litAttr('geometricGrowth')}
-            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
+            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
             <dt className={metricName('geometricGrowth')}>{CARD_METRIC_LABEL.geometricGrowth}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-geometric-growth-value" className={`${CARD_METRIC_VALUE} ${signTone(rowGeometricGrowth(row) == null ? null : rowGeometricGrowth(row)! - 1, 'text-foreground/80')}`}>{readings.geometricGrowth}</span></dd>
           </div>
@@ -4906,10 +4907,11 @@ export default function JournalCampaignsPage() {
                           <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
                             <div>{GEOMETRIC_GROWTH_METHOD_ONE}</div>
                             <div>{GEOMETRIC_GROWTH_METHOD_TWO}</div>
+                            <div>{GEOMETRIC_GROWTH_METHOD_THREE}</div>
                           </div>
                           <div>{GEOMETRIC_GROWTH_RULE}</div>
                           <div>{GEOMETRIC_GROWTH_MISSING_RULE}</div>
-                          <div>例：相对涨幅 8.00×、几何仓位 3.00x → b = 24.00，W（b）= 1 + 0.1 × 24.00 = <span className="text-foreground">3.40</span>；几何仓位（理论）2.50x 时括号里是 1 + 0.1 × 20.00 = 3.00。</div>
+                          <div>例：盈亏比 25.00 → 方法一 = 1 + 0.1 × 25.00 = <span className="text-foreground">3.50</span>；相对涨幅 8.00×、几何仓位 3.00x → b = 24.00，方法二 = 3.40；几何仓位（理论）2.50x → b = 20.00，方法三 = 3.00。读数写成「3.50（3.40/3.00）」。亏损的战役照常算：盈亏比 −0.80 → 0.92。</div>
                           <div>详情、封面、排序、散点图与导出共用同一份计算；按两位小数排序、分档，以 1.00 为界。</div>
                         </div>
                       </>

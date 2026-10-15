@@ -960,8 +960,8 @@ describe('JournalCampaignsPage sorting', () => {
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
-    // 【用户要求】封面指标分成两排：≥ 1024px 每排九格，640–1023px 每排六格，手机两列
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-6', 'lg:grid-cols-9');
+    // 【用户要求】封面指标分成两排：≥ 1280px 每排九格，640–1279px 每排六格，手机两列
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-6', 'xl:grid-cols-9');
     expect(metricRows[0]).not.toHaveClass('sm:flex');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
@@ -1030,7 +1030,7 @@ describe('JournalCampaignsPage sorting', () => {
       cells: [...dl.children].map(cell => cell.getAttribute('data-testid')),
     }));
     const initial = layout()[0];
-    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9');
+    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9');
     expect(initial.cells).toHaveLength(18);
     // 列表容器上不再挂列宽变量；读数不带内联字号
     expect(screen.getByTestId('campaign-card-list').getAttribute('style')).toBeNull();

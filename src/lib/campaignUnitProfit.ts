@@ -125,12 +125,16 @@ export function unitUsdBinValue(value: number): number {
 
 /** 固定下注比例 10%：W（b）= 1 + 0.1 × b。 */
 export const GEOMETRIC_GROWTH_FRACTION = 0.1;
-export const GEOMETRIC_GROWTH_FORMULA = 'W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位';
-/** 【用户要求】两种算法：第一种基于几何仓位（读数括号外），第二种基于几何仓位的理论值（读数括号内）。 */
-export const GEOMETRIC_GROWTH_METHOD_ONE = '方法一（读数括号外）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位';
-export const GEOMETRIC_GROWTH_METHOD_TWO = '方法二（读数括号内）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）';
-export const GEOMETRIC_GROWTH_RULE = '相对涨幅 × 几何仓位就是神奇的 b，所以方法一 = 1 + 0.1 × 神奇的 b、方法二 = 1 + 0.1 × 神奇的 b（理论）：每场按 10% 固定比例下注时的资金增长因子，1.00 不增不减、> 1 增长、< 1 缩水。排序、分档与散点图按方法一。按公式原样计算、不设 0 的下限（与几何期望的 max(0, …) 不同），b < −10 时为负。';
-export const GEOMETRIC_GROWTH_MISSING_RULE = '与神奇的 b 同口径：没有实际加仓、或相对涨幅 / 几何仓位缺少依据时显示「—」。';
+export const GEOMETRIC_GROWTH_FORMULA = 'W（b）= 1 + 0.1 × b';
+/**
+ * 【用户要求】三种算法，读数写成「方法一（方法二/方法三）」：
+ * 方法一基于盈亏比（2026-10-15 新增，作为第一种）；方法二基于几何仓位；方法三基于几何仓位的理论值。
+ */
+export const GEOMETRIC_GROWTH_METHOD_ONE = '方法一（读数括号外）：W（b）= 1 + 0.1 × 盈亏比';
+export const GEOMETRIC_GROWTH_METHOD_TWO = '方法二（括号内第一个）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位';
+export const GEOMETRIC_GROWTH_METHOD_THREE = '方法三（括号内第二个）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）';
+export const GEOMETRIC_GROWTH_RULE = '每场按 10% 固定比例下注时的资金增长因子：1.00 不增不减、> 1 增长、< 1 缩水。相对涨幅 × 几何仓位就是神奇的 b，所以方法二 = 1 + 0.1 × 神奇的 b、方法三 = 1 + 0.1 × 神奇的 b（理论）。盈亏比、神奇的 b 都可以是负数，按公式原样计算、不设 0 的下限，b < −10 时 W（b）为负（方法一与几何期望同一个式子，只是几何期望取 max(0, …)）。排序、分档与散点图按方法一。';
+export const GEOMETRIC_GROWTH_MISSING_RULE = '方法一缺少有效盈亏比（没有初始风险 L₀）时写「—」；方法二、方法三与神奇的 b 同口径，没有实际加仓、或相对涨幅 / 几何仓位缺少依据时写「—」，括号里对应位置也写「—」。';
 
 /** W（b）= 1 + 0.1 × b；b 缺失时 null。 */
 export function computeGeometricGrowth(b: number | null | undefined): number | null {
@@ -139,8 +143,29 @@ export function computeGeometricGrowth(b: number | null | undefined): number | n
   return Number.isFinite(value) ? value : null;
 }
 
-/** 两位小数；|W − 1| < 0.0005 记 1.00（与几何期望同一个取整）。 */
+/** 显示位数：两位小数，|W| ≥ 10 时一位（封面格子放得下三个读数）。 */
+function geometricGrowthDigits(value: number): number {
+  return Math.abs(Number(value.toFixed(2))) >= 10 ? 1 : 2;
+}
+
+/** |W − 1| < 0.0005 记 1.00（与几何期望同一个取整）；|W| ≥ 10 只留一位小数。 */
 export function formatGeometricGrowth(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  return (Math.abs(value - 1) < 0.0005 ? 1 : value).toFixed(2);
+  const v = Math.abs(value - 1) < 0.0005 ? 1 : value;
+  return v.toFixed(geometricGrowthDigits(v));
+}
+
+/** 排序 / 分档读数：与 formatGeometricGrowth 同一个取整。 */
+export function geometricGrowthBinValue(value: number): number {
+  const v = Math.abs(value - 1) < 0.0005 ? 1 : value;
+  return Number(v.toFixed(geometricGrowthDigits(v)));
+}
+
+/** 三种算法的读数：「方法一（方法二/方法三）」；括号里两个都算不出时不写括号。 */
+export function formatGeometricGrowthMethods(one: number | null | undefined, two: number | null | undefined, three: number | null | undefined): string {
+  const head = formatGeometricGrowth(one);
+  const inner = [two, three].map(formatGeometricGrowth);
+  if (inner.every(text => text === '—')) return head;
+  // 分隔符不带空格：封面格子窄（1280px 时约 112px），三个读数要放得下
+  return `${head}（${inner.join('/')}）`;
 }
