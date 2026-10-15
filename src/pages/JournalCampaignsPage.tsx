@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -116,6 +116,7 @@ import {
   type CampaignMetricSeries,
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
+import { cardMetricGridTemplate, cardMetricItemWidths } from '@/lib/campaignCardMetricWidths';
 import {
   formatGeometricGrowth, formatGeometricGrowthMethods, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatCompactUnitRise, formatCompactUsd, formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
@@ -460,12 +461,14 @@ export function sortCrossTabHeatOpacity(share: number): number {
 const SORT_LONG_PRESS_MS = 450;
 
 /**
- * 战役封面指标行：等宽网格、从左排起，上一行淡色指标名、下一行等宽数字；上下各张卡的同名项落在同一条竖线上。
+ * 战役封面指标行：从左排起，上一行淡色指标名、下一行等宽数字；上下各张卡的同名项落在同一条竖线上。
  * 【用户要求】「交易战役上的指标分成两排吧，战役的封面可以适当增高，这样每个指标数值的字体大小就可以设置成一致的了」：
  * 不再按读数估宽、不再按格宽缩字号——数值一律 11px、指标名一律 10px。
  */
-// 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格（几何增长三个读数在九格的窄格里放不下），手机两列；格子等宽，从左排起
-const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';
+// 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格，手机两列。
+// 【用户要求】「统一向左对齐，不必完全占满右边的空间，我喜欢留白；能够完整显示即可，不要有太大间隙」：
+// 每列只取这一列实际最宽的读数（列表容器上的 --cm-cols-6 / --cm-cols-9，见 cardMetricGridStyle），从左排起，右边留白
+const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -1353,6 +1356,9 @@ const STATUS_ACCENT_STYLES: Record<string, string> = {
   abandoned: 'bg-[#848E9C]',
 };
 
+/** 颜色就能表明的状态（绿 = 盈利结束、红 = 亏损结束、黄 = 进行中）：封面上不再另写状态字。 */
+const STATUS_SHOWN_BY_COLOR: ReadonlySet<string> = new Set(['closed_profit', 'closed_loss', 'active']);
+
 const DIRECTION_STYLES: Record<string, string> = {
   main_long: `bg-[#0ECB81]/10 ${TONE_UP}`,
   main_short: `bg-[#F6465D]/10 ${TONE_DOWN}`,
@@ -1903,7 +1909,7 @@ const CampaignCard = memo(function CampaignCard({
             />
           )}
           {/* 状态圆点用实色（与左侧色条同一套），淡底色的圆点在浅色主题里几乎看不见 */}
-          <span aria-hidden="true" data-testid="campaign-status-dot" className={`mt-[7px] inline-flex h-1.5 w-1.5 shrink-0 self-start rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
+          <span role="img" aria-label={statusLabel} title={statusLabel} data-testid="campaign-status-dot" className={`mt-[7px] inline-flex h-1.5 w-1.5 shrink-0 self-start rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
           {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
@@ -2056,13 +2062,17 @@ const CampaignCard = memo(function CampaignCard({
               </button>
             </>
           ) : null}
-          <div className={`inline-flex h-7 items-center rounded px-2.5 text-[10px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
-            {statusLabel}
-          </div>
+          {/* 【用户要求】「盈利结束」「亏损结束」不再写出来：左侧色条与圆点的颜色已经表明（绿 / 红，进行中是黄）。
+              打平结束、已放弃、计划中三种都是灰色，颜色分不出，仍写字。 */}
+          {!STATUS_SHOWN_BY_COLOR.has(campaign.status) && (
+            <div data-testid="campaign-status-label" className={`inline-flex h-7 items-center rounded px-2.5 text-[10px] font-medium ${STATUS_STYLES[campaign.status] || 'bg-muted text-muted-foreground'}`}>
+              {statusLabel}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 封面指标：两排等宽网格（CARD_METRIC_STRIP），上标签、下数值；【用户要求】顺序与排序行一致，当前排序项高亮。 */}
+      {/* 封面指标：两排、靠左、每列按内容取宽的网格（CARD_METRIC_STRIP + cardMetricGridStyle），上标签、下数值；【用户要求】顺序与排序行一致，当前排序项高亮。 */}
       <div className={`relative border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
@@ -2917,6 +2927,15 @@ export default function JournalCampaignsPage() {
    * 20rem 留给行名、内边距与合计列，整体最少 30rem、最多 52rem，最终仍受视口宽度约束。
    * 这样镜像止盈 / 自评的 6 列表能完整显示，又不会为了少量短读数把卡片撑到接近整页宽。
    */
+  // 封面两排指标的列宽：按当前时间段里全部战役的读数定（不随排序变），每列只取实际需要的宽度，从左排起
+  const cardMetricGridStyle = useMemo(() => {
+    const widths = cardMetricItemWidths(CARD_METRIC_LABEL, displayRows.map(cardMetricReadings));
+    const order = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
+    return {
+      '--cm-cols-6': cardMetricGridTemplate(order, widths, 6),
+      '--cm-cols-9': cardMetricGridTemplate(order, widths, 9),
+    } as CSSProperties;
+  }, [displayRows]);
   const sortStatsPopoverWidthRem = useMemo(() => {
     const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
     return Math.min(52, Math.max(30, 20 + columns * 3.4));
@@ -5855,7 +5874,7 @@ export default function JournalCampaignsPage() {
           </div>
         ) : (
           // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
-          <div data-testid="campaign-card-list">
+          <div data-testid="campaign-card-list" style={cardMetricGridStyle}>
             {cardSections ? cardSections.map(({ id, group, rows: sectionRows }, sectionIndex) => {
               const collapsed = collapsedSections.has(id);
               const winRate = group.payoffCount > 0 ? `${Math.round((group.wins / group.payoffCount) * 100)}%` : '—';

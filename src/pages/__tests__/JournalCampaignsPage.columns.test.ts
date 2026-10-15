@@ -47,9 +47,9 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
       .toContain('title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>');
   });
 
-  it('【用户要求】封面指标分成两排：等宽网格，手机两列、640px 起每排六格、1280px 起每排九格（十八项正好两排）', () => {
+  it('【用户要求】封面指标分成两排、靠左、每列按内容取宽：手机两列、640px 起每排六格、1280px 起每排九格（十八项正好两排）', () => {
     const s = src();
-    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';");
+    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]';");
     expect(s).toMatch(/data-testid="campaign-card-metrics"\s+className=\{CARD_METRIC_STRIP\}/);
     expect(s).not.toContain('xl:flex-nowrap');
     // 封面适当增高：格子上下内边距 py-2
@@ -88,7 +88,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     }
     expect(s).toContain("const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';");
     expect(s).toContain('const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, \'\')}`;');
-    expect(s).toContain('<div data-testid="campaign-card-list">');
+    expect(s).toContain('<div data-testid="campaign-card-list" style={cardMetricGridStyle}>');
     const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => match[1]);
     expect(labels).toEqual(CARD_MODES);
     const strip = stripSource(s);

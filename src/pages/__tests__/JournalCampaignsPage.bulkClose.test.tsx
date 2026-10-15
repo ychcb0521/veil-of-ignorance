@@ -189,6 +189,9 @@ function rowByCampaign(id: string): HTMLElement {
   return row as HTMLElement;
 }
 
+// 【用户要求】封面不再写「盈利结束」「亏损结束」，状态由圆点与左边线的颜色表明；圆点带状态名（aria-label）
+const cardStatus = (card: HTMLElement | undefined) => card?.querySelector('[data-testid="campaign-status-dot"]')?.getAttribute('aria-label');
+
 describe('战役列表 · 一键结束进行中的战役', () => {
   it('黄条本身就是按钮，点开后逐场摊出「会变成什么」', async () => {
     mockCloseCampaign.mockClear();
@@ -247,7 +250,7 @@ describe('战役列表 · 一键结束进行中的战役', () => {
     const banner = screen.getByTestId('active-campaigns-banner');
     expect(banner).toHaveTextContent('你有 1 个进行中的战役');
     const winCard = screen.getAllByTestId('campaign-card').find(card => card.textContent?.includes('赢的那场'));
-    expect(winCard).toHaveTextContent('盈利结束');
+    expect(cardStatus(winCard)).toBe('盈利结束');
   });
 
   it('事件流写失败不推翻已经落库的结束——那是审计副产物，不是这场的成败', async () => {
@@ -265,7 +268,7 @@ describe('战役列表 · 一键结束进行中的战役', () => {
     expect(mockCloseCampaign).toHaveBeenCalledTimes(2);
     expect(screen.queryByTestId('bulk-close-failures')).not.toBeInTheDocument();
     const winCard = screen.getAllByTestId('campaign-card').find(c => c.textContent?.includes('赢的那场'));
-    expect(winCard).toHaveTextContent('盈利结束');
+    expect(cardStatus(winCard)).toBe('盈利结束');
   });
 
   it('结束失败时对话框不关，逐场把原因摆在原地——不是一条停两秒半的 toast', async () => {
@@ -284,8 +287,8 @@ describe('战役列表 · 一键结束进行中的战役', () => {
     expect(screen.getByTestId('bulk-close-confirm')).toHaveTextContent('重试');
     // 失败的那一场不动，成功的那一场照样当场翻面——一场失败不该拖累另一场
     const cards = screen.getAllByTestId('campaign-card');
-    expect(cards.find(c => c.textContent?.includes('赢的那场'))).toHaveTextContent('进行中');
-    expect(cards.find(c => c.textContent?.includes('亏的那场'))).toHaveTextContent('亏损结束');
+    expect(cardStatus(cards.find(c => c.textContent?.includes('赢的那场')))).toBe('进行中');
+    expect(cardStatus(cards.find(c => c.textContent?.includes('亏的那场')))).toBe('亏损结束');
   });
 
   it('写完回读不到 closed_at 就算失败——不许把没落库的写入报告成成功', async () => {

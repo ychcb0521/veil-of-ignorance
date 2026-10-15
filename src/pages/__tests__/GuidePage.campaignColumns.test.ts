@@ -42,7 +42,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布」：左对齐、按读数定宽，顺序与排序行一致
     // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」
     // 【用户要求】「交易战役上的指标分成两排吧……每个指标数值的字体大小就可以设置成一致的了」
-    expect(guide).toContain('第二层<strong>分成两排、等宽、靠左</strong>');
+    expect(guide).toContain('第二层<strong>分成两排、统一靠左</strong>');
     expect(guide).toContain('<strong>所有数值同一个字号</strong>');
     // 【用户要求】封面长数字加「w」（万）、单位涨幅统一有效数字
     expect(guide).toContain('满 1 万写「w」（万，如 2.80w）');
@@ -75,8 +75,8 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('卡片标题行紧跟杠杆倍数的「仓位击穿」标签');
     expect(guide).not.toContain('几何期望连同「仓位击穿」徽标');
     expect(page.indexOf('data-testid="campaign-ruinous-sizing"')).toBeGreaterThan(page.indexOf('data-testid="campaign-leverage"'));
-    // 与页面常量一致：手机两列、640px 起每排六格、1024px 起每排九格
-    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9';");
+    // 与页面常量一致：手机两列、640px 起每排六格、1280px 起每排九格，每列按内容取宽
+    expect(page).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]';");
     expect(guide).toContain('自评放在后面，排在字母之前');
     expect(guide).not.toContain('排序行依次是自评');
     expect(guide).toContain('涨跌幅、涨跌幅倍数、加仓效用与其他公式指标一样，<strong>双击或右键</strong>打开公式浮层');

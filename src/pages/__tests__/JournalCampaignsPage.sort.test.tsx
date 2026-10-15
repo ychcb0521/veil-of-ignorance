@@ -960,8 +960,8 @@ describe('JournalCampaignsPage sorting', () => {
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
-    // 【用户要求】封面指标分成两排：≥ 1280px 每排九格，640–1279px 每排六格，手机两列
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-6', 'xl:grid-cols-9');
+    // 【用户要求】封面指标分成两排：≥ 1280px 每排九格，640–1279px 每排六格，手机两列；每列按内容取宽、靠左
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))]', 'xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]');
     expect(metricRows[0]).not.toHaveClass('sm:flex');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
@@ -975,14 +975,18 @@ describe('JournalCampaignsPage sorting', () => {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
       expect(cell.children[1].tagName).toBe('DD');
-      // 【用户要求】封面适当增高（py-2），格子等宽由网格给出，不再有逐项宽度类
+      // 【用户要求】封面适当增高（py-2），列宽由网格模板给出，不再有逐项宽度类
       expect(cell).toHaveClass('flex-col', 'px-2.5', 'sm:px-2', 'py-2');
       expect(cell.className).not.toMatch(/w-\[/);
     }
     const cardList = screen.getByTestId('campaign-card-list');
     for (const card of screen.getAllByTestId('campaign-card')) expect(cardList).toContainElement(card);
-    // 两排等宽网格：列表容器上不再挂列宽变量
-    expect(cardList.getAttribute('style')).toBeNull();
+    // 【用户要求】靠左、完整显示即可：列表容器上挂两套列宽模板（6 列 / 9 列），每列按这一列最宽的指标名或读数取宽
+    const cols9 = cardList.style.getPropertyValue('--cm-cols-9').split(' ');
+    const cols6 = cardList.style.getPropertyValue('--cm-cols-6').split(' ');
+    expect(cols9).toHaveLength(9);
+    expect(cols6).toHaveLength(6);
+    for (const col of [...cols9, ...cols6]) expect(col).toMatch(/^\d+px$/);
     expect(screen.getAllByTestId('campaign-magic-b-value').map(node => node.textContent)).toEqual(['3.00', '0.50', '-0.80', '—']);
 
     // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：默认按操作时间排——每张卡的操作时间亮，指标项都不亮
@@ -1015,7 +1019,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toBeEmptyDOMElement();
   }, 15_000);
 
-  it('【用户要求】封面两排等宽网格：切换排序（哪怕筛掉战役）、换时间段，格子类名与次序都不变；数值字号一致、不按长度缩小', async () => {
+  it('【用户要求】封面两排靠左网格：切换排序（哪怕筛掉战役）列宽不变，换时间段格子类名与次序不变；数值字号一致、不按长度缩小', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <Routes>
@@ -1030,10 +1034,12 @@ describe('JournalCampaignsPage sorting', () => {
       cells: [...dl.children].map(cell => cell.getAttribute('data-testid')),
     }));
     const initial = layout()[0];
-    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:grid-cols-9');
+    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]');
     expect(initial.cells).toHaveLength(18);
-    // 列表容器上不再挂列宽变量；读数不带内联字号
-    expect(screen.getByTestId('campaign-card-list').getAttribute('style')).toBeNull();
+    // 列宽模板挂在列表容器上；读数不带内联字号
+    const gridStyle = () => screen.getByTestId('campaign-card-list').getAttribute('style');
+    const initialStyle = gridStyle();
+    expect(initialStyle).toMatch(/--cm-cols-9:/);
     for (const dl of screen.getAllByTestId('campaign-card-metrics')) {
       for (const node of dl.querySelectorAll('dt, dd span')) expect((node as HTMLElement).style.fontSize).toBe('');
     }
@@ -1044,6 +1050,7 @@ describe('JournalCampaignsPage sorting', () => {
       fireEvent.click(screen.getByTestId(`campaign-sort-${mode}`));
       await waitFor(() => expect(screen.getAllByTestId('campaign-card'), mode).toHaveLength(count));
       for (const card of layout()) expect(card, mode).toEqual(initial);
+      expect(gridStyle(), mode).toBe(initialStyle);
     }
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     fireEvent.click(screen.getByTestId('campaign-operation-range'));

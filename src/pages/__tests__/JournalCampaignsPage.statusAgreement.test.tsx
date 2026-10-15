@@ -87,8 +87,9 @@ describe('战役列表 · 卡片状态与详情页同源', () => {
 
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
     const card = screen.getAllByTestId('campaign-card')[0];
-    await waitFor(() => expect(within(card).getByText('亏损结束')).toBeInTheDocument());
-    expect(within(card).queryByText('盈利结束')).not.toBeInTheDocument();
+    // 【用户要求】封面不再写状态字，状态由圆点与左边线的颜色表明；圆点带状态名
+    await waitFor(() => expect(within(card).getByTestId('campaign-status-dot')).toHaveAttribute('aria-label', '亏损结束'));
+    expect(within(card).queryByTestId('campaign-status-label')).not.toBeInTheDocument();
 
     // 详情页的派生规则，用同一份夹具算一遍：两处必须给同一个答案
     const settlement = computeCampaignRealizedPnl(
