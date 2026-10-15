@@ -104,7 +104,7 @@ export function LegExecutionWearDialog({
               {wear.slippage != null && (
                 <Step
                   part="slippage"
-                  formula="对冲委托/成交差 = 对冲币数 ×（成交价 − 委托价）"
+                  formula="对冲委托/成交差 = 对冲币数 ×（开仓价 − 委托价）"
                   worked={`${formatAddSizingCoinQuantity(detail.coins)} ×（${fmtPrice(detail.fillPrice)} − ${fmtPrice(detail.orderPrice)}）`}
                 />
               )}

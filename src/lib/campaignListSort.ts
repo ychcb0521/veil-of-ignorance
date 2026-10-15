@@ -1,4 +1,5 @@
 import { computeGeometricGrowth, geometricGrowthBinValue, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
+import { compactExecutionWearR } from '@/lib/campaignExecutionWear';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
@@ -656,8 +657,8 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'unitRise': return unitRiseBinValue(value);
     case 'unitProfit':
     case 'positionProfit': return unitUsdBinValue(value);
-    // L_磨损与盈亏比同一单位（R），按两位小数分档
-    case 'executionWear': return Number(value.toFixed(2)) + 0;
+    // L_磨损与盈亏比同一单位（R），按封面的紧凑读数分档（< 10 两位、10–100 一位、100 起取整）
+    case 'executionWear': return compactExecutionWearR(value);
     default: return value;
   }
 }

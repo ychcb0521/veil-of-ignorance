@@ -68,7 +68,7 @@ import {
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearParts, formatExecutionWearR, PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatCompactExecutionWearR, formatExecutionWearParts, formatExecutionWearR, PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
 import { computeMagicB, payoffRatioHedgeWear, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
@@ -1423,7 +1423,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'unitRise': return formatCompactUnitRise(value);
     case 'unitProfit':
     case 'positionProfit': return formatCompactUsd(value);
-    case 'executionWear': return formatExecutionWearR(value);
+    case 'executionWear': return formatCompactExecutionWearR(value);
     case 'positionGeometricMultipleTheoretical':
     case 'positionGeometricMultiple':
     case 'positionAmplification': return formatPositionAmplification(value);
@@ -1669,7 +1669,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     // 【用户要求】L_磨损：与盈亏比同一单位（R）；数值写总的，括号里是中途对冲的损益 + 最终对冲磨损
     executionWear: (() => {
       const wear = rowExecutionWear(row);
-      return formatExecutionWearParts(wear.total, wear.hedge, wear.other, formatExecutionWearR);
+      // 封面用紧凑写法（< 10 两位小数、10–100 一位、100 起取整），不让个别大读数撑宽整列
+      return formatExecutionWearParts(wear.total, wear.hedge, wear.other, formatCompactExecutionWearR);
     })(),
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
     positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatCompactUsd),

@@ -52,6 +52,7 @@ describe('【用户要求】Legs 表的「磨损」列：与盈亏比同一单�
     expect(within(dialog).getByTestId('leg-wear-detail-r')).toHaveTextContent('-0.12');
     expect(within(dialog).getByTestId('leg-wear-detail-usd')).toHaveTextContent('= −12.00 U ÷ L₀ 100.00 U');
     expect(within(dialog).getByTestId('leg-wear-step-exit')).toHaveTextContent('10 ×（111.0000 − 112.0000）= −10.00 U ÷ L₀ 100.00 U = -0.10');
+    expect(within(dialog).getByTestId('leg-wear-step-slippage')).toHaveTextContent('对冲委托/成交差 = 对冲币数 ×（开仓价 − 委托价）');
     expect(within(dialog).getByTestId('leg-wear-step-slippage')).toHaveTextContent('10 ×（108.0000 − 108.5000）= −5.00 U ÷ L₀ 100.00 U = -0.05');
     expect(within(dialog).getByTestId('leg-wear-step-sizing')).toHaveTextContent('（11 − 10）×（111.0000 − 108.0000）= +3.00 U ÷ L₀ 100.00 U = 0.03');
   });

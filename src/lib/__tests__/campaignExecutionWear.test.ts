@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCampaignExecutionWear, finalHedgeWear, formatExecutionWearParts, formatExecutionWearUsd, type ExecutionWearInput } from '../campaignExecutionWear';
+import { compactExecutionWearR, computeCampaignExecutionWear, finalHedgeWear, formatCompactExecutionWearR, formatExecutionWearParts, formatExecutionWearUsd, type ExecutionWearInput } from '../campaignExecutionWear';
 import { formatCompactUsd } from '../campaignUnitProfit';
 import type { CampaignRealizedPnl } from '../campaignRealizedPnl';
 import type { ResolvedLegExecution } from '../campaignLegExecution';
@@ -88,6 +88,15 @@ describe('【用户要求】L_磨损 = 中途对冲 + 最终对冲磨损（多�
     expect(wear.byLeg.lock.hedge).toBe(-40);
   });
 
+  it('【用户要求】对冲委托/成交差的成交价取空单的开仓价，不取委托快照里的 fillPrice', () => {
+    const input = example();
+    // 条件委托触发时委托快照的 fillPrice 写成了触发价本身（108.5）；实际开仓价是 108
+    input.orders = [{ ...input.orders[0], fillPrice: 108.5 }];
+    const wear = computeCampaignExecutionWear(input);
+    expect(wear.components.slippage).toBeCloseTo(10 * (108 - 108.5), 9);
+    expect(wear.byLeg.lock.detail).toMatchObject({ fillPrice: 108, orderPrice: 108.5 });
+  });
+
   it('多单平仓价被 K 线校正过时取校正价', () => {
     const wear = computeCampaignExecutionWear(example({ addExit: null, corrections: { main: { exitPrice: 109 } as never } }));
     expect(wear.components.exit).toBeCloseTo(10 * (109 - 112), 9);
@@ -112,5 +121,24 @@ describe('【用户要求】L_磨损读数：总的在外，括号里中途对�
     expect(formatExecutionWearParts(-30, -30, 0, formatExecutionWearUsd)).toBe('−30.00');
     expect(formatExecutionWearParts(-5, 0.001, -5.001, formatExecutionWearUsd)).toBe('−5.00');
     expect(formatExecutionWearParts(null, -30, -5, formatExecutionWearUsd)).toBe('—');
+  });
+});
+
+describe('【用户要求】封面上 L_磨损那列不能太宽：紧凑写法', () => {
+  it('< 10 两位小数，10–100 一位，100–1 万取整，≥ 1 万写 w；负号「-」，读作 0 时不带负号', () => {
+    expect(formatCompactExecutionWearR(-0.69)).toBe('-0.69');
+    expect(formatCompactExecutionWearR(4.944)).toBe('4.94');
+    expect(formatCompactExecutionWearR(-57.94)).toBe('-57.9');
+    expect(formatCompactExecutionWearR(-199.24)).toBe('-199');
+    expect(formatCompactExecutionWearR(-24390.24)).toBe('-2.44w');
+    expect(formatCompactExecutionWearR(-0.001)).toBe('0.00');
+    expect(formatExecutionWearParts(-257.18, -57.94, -199.24, formatCompactExecutionWearR)).toBe('-257（-57.9-199）');
+  });
+  it('分档按同一个取整：封面读数相同的必在同一档', () => {
+    expect(compactExecutionWearR(-57.94)).toBe(-57.9);
+    expect(compactExecutionWearR(-199.24)).toBe(-199);
+    expect(compactExecutionWearR(-24390.24)).toBe(-24400);
+    expect(compactExecutionWearR(4.944)).toBe(4.94);
+    expect(Object.is(compactExecutionWearR(-0.001), -0)).toBe(false);
   });
 });
