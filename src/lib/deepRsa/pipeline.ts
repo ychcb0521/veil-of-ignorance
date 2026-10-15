@@ -8,6 +8,7 @@
  * 3. 特征：观察窗覆盖率 ≥ 95% 才算；h ∈ {2, 6, 12} 三套；结果期覆盖率 ≥ 95% 才有结果值。
  * 4. 按时间 60/20/20 切分（隔离带 72h）；训练集上 3 类表征 × 3 个 h × 2 个目标做 Mantel 检验，整面板 Holm。
  * 5. 验证集上为每个 表征 × 目标 选 h 并冻结；训练集在该 h 上通过 Holm 的，才在测试集上检验（测试集只读一次）。
+ * 5b. 测试集之后做 5 项稳健性检验（控制波动率 / 只看战役 / 换目标 / 按标的分块 / 标签用全部时间段），只描述，不改判定。
  * 6. 标签目标有样本外通过的，才拟合中心模型、在测试期逐 5m 扫描并与基线一起回测（滑点 0 / 5 / 10 个基点）。
  *
  * 用户确认（2026-10-15）：谢林三个候选并列算；订单流用 5m K 线主动买入量作代理；
@@ -23,7 +24,10 @@ import {
   bhAdjust, holmAdjust, rsaEvaluate, runRsaPanel, selectHalfLife, type PanelRow, type RepresentationSpec, type Row, type RsaEvent,
 } from '@/lib/deepRsa/rsa';
 import { alwaysScorer, centroidScore, fitCentroidModel, modelScorer, momentumScorer, pickThreshold, prepareBars, scanSymbol } from '@/lib/deepRsa/scan';
+import { featureContrast, runRobustness, type FeatureContrastRow, type RobustnessResult } from '@/lib/deepRsa/robustness';
 import { chronologicalSplit } from '@/lib/deepRsa/splits';
+
+export type { FeatureContrastRow };
 import { simulateLongTrade, summarizeTrades, type TradeResult, type TradeSummary } from '@/lib/deepRsa/backtest';
 import { BAR_MS, extractWindow, HALF_LIFE_CANDIDATES_H, type ResearchBar } from '@/lib/deepRsa/window';
 
@@ -36,7 +40,7 @@ export const SLIPPAGE_SCENARIOS = [0, 0.0005, 0.001] as const;
 export const REPRESENTATIONS: readonly (RepresentationSpec & { name: FeatureFamily })[] = (['price', 'orderFlow', 'schelling'] as const)
   .map(name => ({ name, keys: FEATURE_DEFINITIONS.filter(d => d.family === name).map(d => d.key) }));
 
-export type RunStage = 'events' | 'fetch' | 'features' | 'rsa' | 'oos' | 'backtest_fetch' | 'backtest' | 'done';
+export type RunStage = 'events' | 'fetch' | 'features' | 'rsa' | 'oos' | 'robustness' | 'backtest_fetch' | 'backtest' | 'done';
 export interface RunProgress { stage: RunStage; done: number; total: number }
 
 export interface RunItem {
@@ -85,16 +89,6 @@ export interface OosRow {
   verdict: Verdict;
 }
 
-export interface FeatureContrastRow {
-  key: FeatureKey;
-  posMean: number | null;
-  ctlMean: number | null;
-  /** 标准化均值差（正 − 对照，合并标准差）。只作描述，未检验。 */
-  smd: number | null;
-  nPos: number;
-  nCtl: number;
-}
-
 export interface StrategyResult { name: string; signals: number; skipped: number; summary: TradeSummary }
 
 export interface BacktestResult {
@@ -135,6 +129,8 @@ export interface DeepRsaRunResult {
   panel: PanelResultRow[];
   selection: SelectionRow[];
   oos: OosRow[];
+  /** 测试集之后的 5 项稳健性检验（不改判定）。旧版导出的 JSON 没有这一项。 */
+  robustness?: RobustnessResult;
   backtest: BacktestResult;
   conclusions: { rsa: Verdict; backtest: Verdict };
 }
@@ -212,29 +208,6 @@ function checkAbort(signal?: AbortSignal) {
 
 function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function mean(xs: number[]): number | null {
-  return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
-}
-
-function contrast(train: readonly RunEvent[], h: number): FeatureContrastRow[] {
-  return FEATURE_DEFINITIONS.map(d => {
-    const vals = (label: string) => train.filter(e => e.label === label)
-      .map(e => e.featuresByH[h]?.[d.key]).filter((v): v is number => v != null && Number.isFinite(v));
-    const pos = vals('positive');
-    const ctl = vals('control');
-    const mp = mean(pos);
-    const mc = mean(ctl);
-    let smd: number | null = null;
-    if (mp != null && mc != null && pos.length > 1 && ctl.length > 1) {
-      const vp = pos.reduce((s, v) => s + (v - mp) ** 2, 0) / (pos.length - 1);
-      const vc = ctl.reduce((s, v) => s + (v - mc) ** 2, 0) / (ctl.length - 1);
-      const pooled = Math.sqrt(((pos.length - 1) * vp + (ctl.length - 1) * vc) / (pos.length + ctl.length - 2));
-      smd = pooled > 0 ? (mp - mc) / pooled : null;
-    }
-    return { key: d.key, posMean: mp, ctlMean: mc, smd, nPos: pos.length, nCtl: ctl.length };
-  });
 }
 
 /** 第 1–3 步：事件簇 + 随机背景 → 拉 5m K 线 → 观察窗特征（h = 2 / 6 / 12）与客观结果。 */
@@ -368,6 +341,15 @@ export async function runDeepRsa(report: CampaignGroupReport, options: RunOption
     ...r, pHolm: oosHolm[i], verdict: r.rho > 0 && oosHolm[i] < ALPHA ? '已验证' : '检验未获支持',
   }));
 
+  // ── 6b. 稳健性检验（不改判定）：对测试集检验过的「结果」项 + 标签用全部时间段 ──
+  progress('robustness', 0, 1);
+  const robustness = await runRobustness(
+    split, oos, REPRESENTATIONS,
+    name => selection.find(s => s.representation === name && s.target === 'label')?.selectedH ?? null,
+    { permutations, seed, alpha: ALPHA },
+    { onStep: async (done, total) => { progress('robustness', done, total); await tick(); checkAbort(signal); } },
+  );
+
   // ── 7. 回测（标签目标样本外通过才做）──
   const backtest = await runBacktest(oos, split, { fetchFn, signal, progress });
 
@@ -389,10 +371,11 @@ export async function runDeepRsa(report: CampaignGroupReport, options: RunOption
       train: split.train.length, val: split.val.length, test: split.test.length, embargoed: split.embargoed.length,
       valCut: split.cutoffs.val, testCut: split.cutoffs.test,
     },
-    featureContrast: { halfLifeHours: hContrast, rows: contrast(split.train, hContrast) },
+    featureContrast: { halfLifeHours: hContrast, rows: featureContrast(split.train, hContrast) },
     panel,
     selection,
     oos,
+    robustness,
     backtest,
     conclusions: {
       rsa: oos.some(r => r.verdict === '已验证') ? '已验证' : '检验未获支持',

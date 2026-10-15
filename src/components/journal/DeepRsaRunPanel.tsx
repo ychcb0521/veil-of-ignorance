@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { FEATURE_DEFINITIONS, type FeatureFamily } from '@/lib/deepRsa/features';
 import type { DeepRsaRunResult, RunProgress, RunStage, RsaTarget, Verdict } from '@/lib/deepRsa/pipeline';
+import { ROBUSTNESS_CHECKS, type RobustnessCheckResult, type RobustnessResult } from '@/lib/deepRsa/robustness';
 import { HALF_LIFE_CANDIDATES_H } from '@/lib/deepRsa/window';
 
 export type RunStatus = 'idle' | 'running' | 'error' | 'cancelled';
@@ -25,7 +26,7 @@ export interface DeepRsaRunPanelProps {
 }
 
 const STAGE_LABEL: Record<RunStage, string> = {
-  events: '整理事件', fetch: '拉取 K 线', features: '计算特征', rsa: 'RSA 训练集检验', oos: '测试集检验',
+  events: '整理事件', fetch: '拉取 K 线', features: '计算特征', rsa: 'RSA 训练集检验', oos: '测试集检验', robustness: '稳健性检验',
   backtest_fetch: '拉取回测行情', backtest: '扫描与回测', done: '完成',
 };
 
@@ -250,7 +251,125 @@ function RunResult({ result }: { result: DeepRsaRunResult }) {
         )}
         {result.oos.length > 0 && <Backtest result={result} />}
       </Sub>
+
+      {result.robustness && <Robustness robustness={result.robustness} />}
     </div>
+  );
+}
+
+function RhoP({ r }: { r: RobustnessCheckResult | undefined }) {
+  return (
+    <span className="font-mono tabular-nums">
+      {num(r?.rho)} <span className="text-muted-foreground">p {pValue(r?.p)}</span>
+    </span>
+  );
+}
+
+/** 稳健性检验：读法按测试期（测试期算不出时按发现期）的原始 p；阴性对照显著是警报。 */
+function Robustness({ robustness }: { robustness: RobustnessResult }) {
+  const alpha = robustness.alpha;
+  const la = robustness.labelsAllPeriods;
+  return (
+    <Sub title="稳健性检验（不改判定）" note="原始单侧 p，未做多重校正 · 读法按测试期 · 只帮助理解上面的结论">
+      {robustness.rows.length === 0 ? (
+        <div className="text-muted-foreground">测试集没有检验「24h 最大涨幅」目标，① – ④ 不做；下面只有 ⑤。</div>
+      ) : robustness.rows.map(row => (
+        <div key={`${row.representation}-${row.halfLifeHours}`} className="space-y-1">
+          <div className="text-[12px]">
+            {REP_LABEL[row.representation as FeatureFamily] ?? row.representation} → {TARGET_LABEL.outcome}
+            <span className="text-muted-foreground"> · h = <N>{row.halfLifeHours}</N></span>
+          </div>
+          <div className="max-w-full overflow-x-auto">
+            <table>
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className={TH}>检验</th><th className={TH}>发现期 ρ</th><th className={TH}>测试期 ρ</th>
+                  <th className={cn(TH, 'max-sm:hidden')}>事件</th><th className={cn(TH, 'max-sm:hidden')}>读法</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ROBUSTNESS_CHECKS.map(c => {
+                  const disc = row.checks.find(x => x.check === c.id && x.period === 'discovery');
+                  const test = row.checks.find(x => x.check === c.id && x.period === 'test');
+                  const basis = test && Number.isFinite(test.rho) ? test : disc;
+                  const sig = !!basis && Number.isFinite(basis.p) && basis.rho > 0 && basis.p < alpha;
+                  const known = !!basis && Number.isFinite(basis.rho);
+                  const tone = !known ? 'text-muted-foreground'
+                    : c.id === 'maxDown' ? (sig ? 'text-[#C99400]' : VERDICT_TONE.已验证)
+                    : sig ? VERDICT_TONE.已验证 : VERDICT_TONE.检验未获支持;
+                  const reading = (
+                    <>
+                      {!known ? '算不出' : sig ? c.pass : c.fail}
+                      {basis?.movable != null && <span className="text-muted-foreground">（可在币内互换 <N>{basis.movable}</N> 个）</span>}
+                    </>
+                  );
+                  return (
+                    <tr key={c.id} className="border-b border-border/40 align-top" title={c.question}>
+                      <td className={cn(TD, 'max-sm:whitespace-normal')}>
+                        {c.title}
+                        {/* 手机：读法折到检验名下面，不占一列 */}
+                        <div className={cn('text-[11px] sm:hidden', tone)}>{reading}</div>
+                      </td>
+                      <td className={TD}><RhoP r={disc} /></td>
+                      <td className={TD}><RhoP r={test} /></td>
+                      <td className={cn(TD, 'font-mono tabular-nums text-muted-foreground max-sm:hidden')}>{disc?.nEvents ?? '—'} / {test?.nEvents ?? '—'}</td>
+                      <td className={cn(TD, tone, 'max-sm:hidden')}>{reading}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+
+      <div className="space-y-1 pt-1">
+        <div className="text-[12px]">
+          ⑤ 标签用全部时间段
+          <span className="text-muted-foreground"> · 正 <N>{la.rsa[0]?.nPos ?? 0}</N> · 对照 <N>{la.rsa[0]?.nCtl ?? 0}</N> · 验证 / 测试期（含隔离带）的标签也放进来，只作描述</span>
+        </div>
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-2">
+          <table>
+            <thead>
+              <tr className="border-b border-border text-muted-foreground">
+                <th className={TH}>表征</th><th className={TH}>h</th><th className={TH}>RSA ρ</th><th className={TH}>事件</th>
+              </tr>
+            </thead>
+            <tbody>
+              {la.rsa.map(r => (
+                <tr key={r.representation} className="border-b border-border/40">
+                  <td className={TD}>{REP_LABEL[r.representation as FeatureFamily] ?? r.representation}</td>
+                  <td className={cn(TD, 'font-mono tabular-nums')}>{r.halfLifeHours}</td>
+                  <td className={TD}>
+                    <span className="font-mono tabular-nums">{num(r.rho)} <span className="text-muted-foreground">p {pValue(r.p)}</span></span>
+                  </td>
+                  <td className={cn(TD, 'font-mono tabular-nums text-muted-foreground')}>{r.nEvents}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="max-w-full overflow-x-auto">
+            <table>
+              <thead>
+                <tr className="border-b border-border text-muted-foreground">
+                  <th className={TH}>特征（h = {la.contrast.halfLifeHours}）</th><th className={TH}>正样本均值</th><th className={TH}>对照均值</th><th className={TH}>标准化差</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono tabular-nums">
+                {la.contrast.rows.map(r => (
+                  <tr key={r.key} className="border-b border-border/40">
+                    <td className={cn(TD, 'font-sans max-sm:whitespace-normal')}>{FEATURE_LABEL[r.key]}</td>
+                    <td className={TD}>{num(r.posMean, 4)}</td>
+                    <td className={TD}>{num(r.ctlMean, 4)}</td>
+                    <td className={cn(TD, r.smd != null && Math.abs(r.smd) >= 0.5 && 'font-medium')}>{num(r.smd, 2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Sub>
   );
 }
 

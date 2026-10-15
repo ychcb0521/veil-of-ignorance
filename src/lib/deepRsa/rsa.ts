@@ -266,6 +266,82 @@ export function bhAdjust(ps: readonly number[]): number[] {
   return out;
 }
 
+/**
+ * 偏 Mantel（稳健性检验用）：表征 RDM 与目标 RDM 的 Spearman，剔除控制 RDM（例如 |Δ 波动率|）的单调影响。
+ * 三个 RDM 都有限的事件对取秩，表征秩与目标秩各自对控制秩回归取残差，再求相关；
+ * 置换与 rsaMantel 相同（在块内重新编号目标 RDM 的事件），单侧 H₁：剔除后仍 ρ > 0。
+ */
+export function rsaPartialMantel(featureRdm: Rdm, targetRdm: Rdm, controlRdm: Rdm, options: MantelOptions = {}): RsaResult {
+  const n = featureRdm.length;
+  const permutations = options.permutations ?? 2000;
+  const I: number[] = [];
+  const J: number[] = [];
+  const X: number[] = [];
+  const Z: number[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (Number.isFinite(featureRdm[i][j]) && Number.isFinite(controlRdm[i][j]) && Number.isFinite(targetRdm[i][j])) {
+        I.push(i); J.push(j); X.push(featureRdm[i][j]); Z.push(controlRdm[i][j]);
+      }
+    }
+  }
+  const m = X.length;
+  if (m < 4) return { rho: Number.NaN, p: Number.NaN, nEvents: n, nPairs: m, permutations: 0 };
+  const rz = ranks(Z);
+  const mz = rz.reduce((s, v) => s + v, 0) / m;
+  const zc = rz.map(v => v - mz);
+  const szz = zc.reduce((s, v) => s + v * v, 0);
+  const rx = ranks(X);
+  const mx = rx.reduce((s, v) => s + v, 0) / m;
+  let szx = 0;
+  for (let q = 0; q < m; q++) szx += zc[q] * (rx[q] - mx);
+  const betaX = szz > 0 ? szx / szz : 0;
+  // 表征秩对控制秩的残差：均值 0、与控制秩正交
+  const resX = Float64Array.from(rx, (v, q) => v - mx - betaX * zc[q]);
+  const sxx = resX.reduce((s, v) => s + v * v, 0);
+  // 目标一侧对全体有限事件对取秩一次，置换只重新编号（与 rankStatistic 同一个做法，观测值与置换值用同一个统计量）
+  const tVals: number[] = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) tVals.push(Number.isFinite(targetRdm[i][j]) ? targetRdm[i][j] : 0);
+  const tRanks = ranks(tVals);
+  const RT = new Float64Array(n * n);
+  let k0 = 0;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { RT[i * n + j] = tRanks[k0]; RT[j * n + i] = tRanks[k0]; k0++; }
+  // resX 与常数、控制秩都正交，所以 corr(resX, resY) = Σ resX·y ÷ √(Σ resX² · 残差平方和(y))，一遍扫完、不分配数组
+  const partialAt = (perm: readonly number[]) => {
+    let sy = 0; let syy = 0; let sxy = 0; let szy = 0;
+    for (let q = 0; q < m; q++) {
+      const y = RT[perm[I[q]] * n + perm[J[q]]];
+      sy += y; syy += y * y; sxy += resX[q] * y; szy += zc[q] * y;
+    }
+    const vy = syy - (sy * sy) / m - (szz > 0 ? (szy * szy) / szz : 0);
+    return sxx > 0 && vy > 1e-9 ? sxy / Math.sqrt(sxx * vy) : Number.NaN;
+  };
+  const identity = Array.from({ length: n }, (_, i) => i);
+  const rho = partialAt(identity);
+  if (!Number.isFinite(rho)) return { rho, p: Number.NaN, nEvents: n, nPairs: m, permutations: 0 };
+  const random = mulberry32(options.seed ?? 1);
+  const groups = new Map<string, number[]>();
+  for (let i = 0; i < n; i++) {
+    const key = options.blocks?.[i] ?? '';
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+  const perm = [...identity];
+  let atLeast = 0;
+  for (let t = 0; t < permutations; t++) {
+    for (const idx of groups.values()) {
+      const shuffled = [...idx];
+      for (let k = shuffled.length - 1; k > 0; k--) {
+        const r = Math.floor(random() * (k + 1));
+        [shuffled[k], shuffled[r]] = [shuffled[r], shuffled[k]];
+      }
+      idx.forEach((orig, k) => { perm[orig] = shuffled[k]; });
+    }
+    const r = partialAt(perm);
+    if (Number.isFinite(r) && r >= rho - 1e-12) atLeast++;
+  }
+  return { rho, p: (1 + atLeast) / (1 + permutations), nEvents: n, nPairs: m, permutations };
+}
+
 // ===================== 检验面板 =====================
 
 export interface RsaEvent {

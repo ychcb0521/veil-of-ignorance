@@ -163,7 +163,14 @@ describe('一键流程：植入结构能被检出，且全程不看未来', () =
     // 描述性对比：正样本主动买入失衡更高
     const imb = result.featureContrast.rows.find(r => r.key === 'taker_imb_w')!;
     expect(imb.smd!).toBeGreaterThan(0);
-    expect([...stages]).toEqual(expect.arrayContaining(['fetch', 'features', 'rsa', 'oos', 'backtest_fetch', 'backtest']));
+    expect([...stages]).toEqual(expect.arrayContaining(['fetch', 'features', 'rsa', 'oos', 'robustness', 'backtest_fetch', 'backtest']));
+    // 稳健性检验：测试集检验过的每个「结果」项各 5 项 × 发现 / 测试两期；⑤ 每个表征一行，计数用全部时间段
+    const outcomeTested = result.oos.filter(r => r.target === 'outcome');
+    expect(result.robustness!.rows.map(r => r.representation)).toEqual(outcomeTested.map(r => r.representation));
+    for (const row of result.robustness!.rows) expect(row.checks).toHaveLength(10);
+    expect(result.robustness!.labelsAllPeriods.rsa.map(r => r.representation)).toEqual(['price', 'orderFlow', 'schelling']);
+    expect(result.robustness!.labelsAllPeriods.rsa[0]).toMatchObject({ nPos: 24, nCtl: 24 });
+    expect(result.conclusions.rsa).toBe('已验证');
     expect(JSON.parse(JSON.stringify(result)).codeVersion).toBe(result.codeVersion);
   }, 60_000);
 
