@@ -108,3 +108,36 @@ export function buildCampaignLabelRecord(
     codeVersion: CODE_VERSION,
   };
 }
+
+type CardRow = ReturnType<typeof buildCampaignCardData>;
+
+/**
+ * 从战役列表已经算好的一行取分组输入（Deep RSA 页面用，读数与列表是同一个数，不重算）。
+ * 与 buildCampaignLabelRecord 的两处差别，都如实交给调用方：
+ * - 列表行里没有「本地从未成交的委托 id」：锚点 B 只取有成交记录、或本来就没挂成交 id（回填）的 main_open 腿，
+ *   挂了成交 id 却一条记录都没认领到的腿视为未成交，不参与。
+ * - 列表不对外给出平仓价校正是否拉齐：由调用方传 correctionsComplete（不知道就传 null）。
+ */
+export function labelInputFromCardRow(row: CardRow, correctionsComplete: boolean | null): CampaignLabelInput {
+  const B = minOrNull(row.legs
+    .filter(leg => leg.leg_role === 'main_open'
+      && (!leg.trade_record_id || (row.settlement.recordsByLeg.get(leg.id)?.length ?? 0) > 0))
+    .map(leg => parseMs(leg.pre_simulated_time)));
+  const total = row.settlement.total;
+  const l0 = row.initialExpectedMaxLoss;
+  return {
+    campaignId: row.campaign.id,
+    symbol: row.campaign.symbol,
+    direction: row.campaign.direction,
+    deleted: row.campaign.deleted_at != null,
+    status: row.campaign.status,
+    settled: row.settlement.settled,
+    payoffBasis: row.settlement.basis as PayoffBasis,
+    correctionsComplete,
+    anchorMs: B,
+    theoreticalB: computeMagicB(row.effectivePriceChangePct ?? null, row.positionGeometricMultipleTheoretical ?? null),
+    theoreticalBApplicable: row.campaign.direction === 'main_long' && campaignHasMainAdd(row.legs),
+    payoffRatio: total != null && Number.isFinite(l0) && l0 > 0 ? total / l0 : null,
+    initialExpectedMaxLoss: l0,
+  };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCampaignCardData } from '@/lib/campaignListCache';
-import { buildCampaignLabelRecord, CODE_VERSION, resolveCampaignAnchors } from '@/lib/deepRsa/campaignLabels';
+import { buildCampaignLabelRecord, CODE_VERSION, labelInputFromCardRow, resolveCampaignAnchors } from '@/lib/deepRsa/campaignLabels';
 import { groupCampaign } from '@/lib/deepRsa/grouping';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 import { correctedLossLegs, correctedLossStoredCampaign, correctedLossTradeRecords, CORRECTED_LOSS_OPENED_AT } from '@/test/fixtures/correctedLossCampaign';
@@ -50,5 +50,19 @@ describe('战役标签：复用应用现有口径，同时交出「这个数有�
   it('校正状态未知时分组为待判定；回收站战役排除', () => {
     expect(groupCampaign(buildCampaignLabelRecord(details(), {}, null).input).pendingReasons).toContain('corrections_unknown');
     expect(groupCampaign(buildCampaignLabelRecord(details({ deleted: true }), {}, true).input).group).toBe('excluded');
+  });
+
+  it('从列表行取分组输入：与从完整数据算的同一个数（页面不重算）', () => {
+    const d = details();
+    const row = buildCampaignCardData(d, {});
+    expect(labelInputFromCardRow(row, true)).toEqual(buildCampaignLabelRecord(d, {}, true).input);
+    expect(labelInputFromCardRow(row, null).correctionsComplete).toBeNull();
+  });
+
+  it('列表行里挂了成交 id 却没认领到记录的 main_open 腿视为未成交，不当锚点', () => {
+    const d = details();
+    const row = buildCampaignCardData(d, {});
+    const unclaimed = { ...row, settlement: { ...row.settlement, recordsByLeg: new Map() } };
+    expect(labelInputFromCardRow(unclaimed, true).anchorMs).toBeNull();
   });
 });

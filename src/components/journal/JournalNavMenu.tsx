@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   LayoutGrid, ChevronDown, CheckCheck,
-  Wallet, BookMarked, BookOpen, Layers, NotebookPen, ShieldCheck, Zap,
+  Wallet, BookMarked, BookOpen, Layers, NotebookPen, ShieldCheck, Zap, Microscope,
 } from 'lucide-react';
 
 interface NavItem {
@@ -55,7 +55,7 @@ function useNavItems(
       key: 'journal', icon: BookOpen, label: '错题集',
       action: () => nav('/journal'),
       isActive: () => loc.pathname === '/journal' || (loc.pathname.startsWith('/journal/') &&
-        !['/journal/campaigns', '/journal/emotion-diary', '/journal/insights', '/journal/rules'].includes(loc.pathname)),
+        !['/journal/campaigns', '/journal/emotion-diary', '/journal/insights', '/journal/rules', '/journal/deep-rsa'].includes(loc.pathname)),
     },
     {
       key: 'emotion-diary',
@@ -70,6 +70,8 @@ function useNavItems(
       isActive: () => loc.pathname === '/journal/campaigns' || loc.pathname.startsWith('/journal/campaigns/'),
     },
     { key: 'rules', icon: ShieldCheck, label: '规则', action: () => nav('/journal/rules'), isActive: () => loc.pathname === '/journal/rules' },
+    // 【用户要求】Deep RSA 放在「规则」正下方，与之并列
+    { key: 'deep-rsa', icon: Microscope, label: 'Deep RSA', action: () => nav('/journal/deep-rsa'), isActive: () => loc.pathname === '/journal/deep-rsa' },
   ];
 }
 

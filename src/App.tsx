@@ -17,6 +17,7 @@ const JournalListPage = lazy(() => import('./pages/JournalListPage.tsx'));
 const JournalPlaybackPage = lazy(() => import('./pages/JournalPlaybackPage.tsx'));
 const JournalInsightsPage = lazy(() => import('./pages/JournalInsightsPage.tsx'));
 const JournalRulesPage = lazy(() => import('./pages/JournalRulesPage.tsx'));
+const JournalDeepRsaPage = lazy(() => import('./pages/JournalDeepRsaPage.tsx'));
 const JournalCampaignsPage = lazy(() => import('./pages/JournalCampaignsPage.tsx'));
 const JournalCampaignDetailPage = lazy(() => import('./pages/JournalCampaignDetailPage.tsx'));
 const JournalCampaignClassifyPage = lazy(() => import('./pages/JournalCampaignClassifyPage.tsx'));
@@ -103,6 +104,7 @@ function AppRoutes() {
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
         <Route path="/journal/rules" element={<JournalRulesPage />} />
+        <Route path="/journal/deep-rsa" element={<JournalDeepRsaPage />} />
         <Route path="/journal/insights" element={<JournalInsightsPage />} />
         <Route path="/journal/emotion-diary" element={<JournalEmotionDiaryPage />} />
         <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
