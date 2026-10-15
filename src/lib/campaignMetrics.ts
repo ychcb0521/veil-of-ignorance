@@ -1,4 +1,4 @@
-import { fixedBetGrowthFactor } from '@/lib/geometricExpectancy';
+import { computeGeometricGrowth, formatGeometricGrowth } from '@/lib/campaignUnitProfit';
 import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
@@ -90,17 +90,16 @@ export function resolveResolvedOpportunityQuality(
 }
 
 /**
- * 单场资本增长因子：Gᵢ = 1 + bᵢ·x，x 每场统一取 10%。
+ * 单场几何期望（增长因子）：1 + 0.1 × bᵢ，x 每场统一取 10%。
  *
  * 这是「这一场把本金乘成了多少」的直接口径：按固定 10% 的资金比例下这一注，
- * 赚 bᵢ 个 R 就等于本金变成 1 + bᵢ×0.1 倍。它与汇总那条 G 不同——汇总那条要
- * 按胜率把「赢的一腿」和「亏的一腿」加权，因为它推演的是重复下注的长期路径；
- * 单场的结果已经发生，bᵢ 就是它的全部，不需要再乘概率。
+ * 赚 bᵢ 个 R 就等于本金变成 1 + bᵢ×0.1 倍。单场的结果已经发生，bᵢ 就是它的全部，不需要再乘概率。
  *
- * 1 + bᵢ·x ≤ 0（bᵢ ≤ −10）代表这一注亏光了本金，因子按 0 记、几何期望记 −100%。
+ * 【用户要求】2026-10-15「几何增长」与「几何期望」合并为「几何期望」，按几何增长的口径：
+ * 盈亏比可以是负数，按公式原样计算、不设 0 的下限（bᵢ < −10 时为负）。
  */
 export function campaignGrowthFactor(payoffRatio: number): number {
-  return fixedBetGrowthFactor(payoffRatio);
+  return computeGeometricGrowth(payoffRatio) ?? 1;
 }
 
 /**
@@ -157,6 +156,6 @@ export function formatArithmeticExpectancy(value: number | null): string {
  */
 export function formatGeometricExpectancy(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
-  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
-  return (1 + normalized).toFixed(2);
+  // 与封面「方法一」同一个写法：两位小数，|因子| ≥ 10 时一位
+  return formatGeometricGrowth(1 + value);
 }

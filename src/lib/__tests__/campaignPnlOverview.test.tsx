@@ -15,9 +15,9 @@ import {
  * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何增长 W（b）","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 G","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤","几何期望"];
+const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 G","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤"];
 
-const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","geometricGrowth","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","peakPriceChange","unrealizedPriceChangePct","dynamicMaxDrawdownPct","geometricExpectancy"];
+const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","geometricExpectancy","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","peakPriceChange","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
   return {
@@ -51,12 +51,13 @@ describe('【用户要求】加仓效用、几何期望、算术期望：括号�
     const value = (key: string) => items.find(item => item.key === key)!.value;
     expect(value('addEfficiency')).toBe('+1.00（+1.50）');
     expect(value('arithmeticExpectancy')).toBe('+0.50R（+1.00R）');
-    expect(value('geometricExpectancy')).toBe('1.20（1.30）');
+    // 几何期望（原几何增长与几何期望合并）：方法一（方法二/方法三）
+    expect(value('geometricExpectancy')).toBe('1.20（1.20/1.30）');
   });
 
   it('理论 b 算不出时不加括号', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics());
-    expect(items.find(item => item.key === 'geometricExpectancy')!.value).toBe('1.20');
+    expect(items.find(item => item.key === 'geometricExpectancy')!.value).toBe('1.20（1.20/—）');
   });
 });
 
@@ -124,7 +125,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 1,
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100 } }));
     const keys = items.map(item => item.key);
-    expect(keys.slice(0, 7)).toEqual(["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","geometricGrowth"]);
+    expect(keys.slice(0, 7)).toEqual(["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","geometricExpectancy"]);
     expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('0.50×');
     expect(items.find(item => item.key === 'effectivePriceChangeMultiple')).toBeUndefined();
     const magic = items.find(item => item.key === 'magicB')!;
@@ -147,7 +148,8 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(items.find(item => item.key === 'payoffRatio')?.value).toBe('2.00');
     expect(items.find(item => item.key === 'addEfficiency')?.value).toBe('+1.00');
     expect(items.find(item => item.key === 'arithmeticExpectancy')?.value).toBe('+0.50R');
-    expect(items.find(item => item.key === 'geometricExpectancy')?.value).toBe('1.20');
+    // 方法一 b = 盈亏比 2 → 1.20；方法二 b = 神奇的 b 1 → 1.10；方法三缺理论几何仓位
+    expect(items.find(item => item.key === 'geometricExpectancy')?.value).toBe('1.20（1.10/—）');
   });
   it('does not fall back to legacy realized b when the new geometric b is missing', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ magicB: null }));
@@ -245,13 +247,13 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "2.00", "1.20（1.20/—）", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "+0.50R", "—", "—", "—", "+20.00%", "+2.00", "+25.00%", "5.00%", "12.50%", "1.20"]);
+    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "2.00", "1.20（1.20/—）", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "+0.50R", "—", "—", "—", "+20.00%", "+2.00", "+25.00%", "5.00%", "12.50%"]);
     const G = '#0ECB81';
     const R = '#F6465D';
-    expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#64748B", "#64748B", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20", "#0ECB81"]);
+    expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#0ECB81", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#64748B", "#64748B", "#64748B", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20"]);
     const T = 'text-[#0ECB81]';
-    expect(items.map(item => item.valueClassName)).toEqual([undefined, "text-muted-foreground", "text-foreground/85", "text-foreground/85", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-muted-foreground", "text-muted-foreground", "text-muted-foreground", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground", "text-[#0ECB81]"]);
-    expect(items.map(item => item.column)).toEqual([0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2,2]);
+    expect(items.map(item => item.valueClassName)).toEqual([undefined, "text-muted-foreground", "text-foreground/85", "text-foreground/85", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-muted-foreground", "text-muted-foreground", "text-muted-foreground", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground"]);
+    expect(items.map(item => item.column)).toEqual([0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,2,2,2,2,2]);
   });
 
   it('全空 / 全零输入时每一项都印「—」而不是 0.00，着色退回灰色', () => {
@@ -308,7 +310,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.magicB.value).toBe('-0.50');
     expect(byKey.magicB.valueClassName).toBe('text-[#F6465D]');
     expect(byKey.arithmeticExpectancy.value).toBe('-0.75R');
-    expect(byKey.geometricExpectancy.value).toBe('0.95');
+    expect(byKey.geometricExpectancy.value).toBe('0.95（0.95/—）');
   });
 
   it('【用户要求】盈亏比只写两位小数的 b：取整为 0.00 的读数用中性色，颜色跟着读者看到的数走（同首仓涨跌幅倍数）', () => {
@@ -369,8 +371,8 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-testid="pnl-overview-three-columns"]')).toHaveClass('[@container(min-width:840px)]:grid-cols-3');
     for (const [index, name] of ['left', 'middle', 'right'].entries()) {
       const rows = [...container.querySelectorAll('[data-column="' + name + '"]')];
-      // 【用户要求】三列 7 / 8 / 6：几何增长接在盈亏比后，单位涨幅 / 单位利润 / 仓位利润接在算术期望后，几何期望接在动态最大回撤后
-      const [from, to] = [[0, 7], [7, 15], [15, 21]][index];
+      // 【用户要求】三列 7 / 8 / 5：几何期望（原几何增长与几何期望合并）接在盈亏比后，单位涨幅 / 单位利润 / 仓位利润接在算术期望后
+      const [from, to] = [[0, 7], [7, 15], [15, 20]][index];
       expect(rows.map(node => node.firstElementChild?.textContent)).toEqual(GOLDEN_LABELS.slice(from, to));
       expect(rows).toHaveLength(to - from);
       for (const row of rows) expect(row).toHaveClass('min-h-5', 'gap-3');
@@ -389,7 +391,7 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(screen.getByText('方法一 · 基于盈亏比（括号外）')).toBeInTheDocument();
     expect(screen.getByText('方法二 · 基于神奇的 b（理论）（括号内）')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '几何期望说明' }));
-    expect(screen.getByText('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20')).toBeInTheDocument();
+    expect(screen.getByText('本场：1 + 0.1 × 2.00 ≈ 1.20')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '已实现 P&L说明' }));
     expect(screen.getByText('复盘快照')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '首仓涨跌幅倍数说明' }));
@@ -481,9 +483,9 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey()).not.toHaveProperty('peakPriceEfficiency');
   });
 
-  it('【用户要求】几何增长 W（b）三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）；负数照常算', () => {
-    const item = byKey({ realizedPnl: 2500, magicB: 24, effectivePriceChangePct: 800, positionGeometricMultiple: 3, positionGeometricMultipleTheoretical: 2.5 }).geometricGrowth;
-    expect(item.label).toBe('几何增长 W（b）');
+  it('【用户要求】几何期望（原几何增长与几何期望合并）三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）；负数照常算', () => {
+    const item = byKey({ realizedPnl: 2500, magicB: 24, effectivePriceChangePct: 800, positionGeometricMultiple: 3, positionGeometricMultipleTheoretical: 2.5 }).geometricExpectancy;
+    expect(item.label).toBe('几何期望');
     expect(item.value).toBe('3.50（3.40/3.00）');
     expect(item.valueClassName).toBe('text-[#0ECB81]');
     expect(item.column).toBe(0);
@@ -495,12 +497,12 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(help).toContain('方法三（括号内第二个）');
     expect(help).toContain('本场：1 + 0.1 × 8.0000 × 2.5000 ≈ 3.00');
     // 盈亏比、神奇的 b 都可以是负数：不设下限，b < −10 时为负；颜色跟方法一
-    const loss = byKey({ realizedPnl: -1200, magicB: -12, effectivePriceChangePct: null }).geometricGrowth;
+    const loss = byKey({ realizedPnl: -1200, magicB: -12, effectivePriceChangePct: null }).geometricExpectancy;
     expect(loss.value).toBe('-0.20（-0.20/—）');
     expect(loss.valueClassName).toBe('text-[#F6465D]');
-    expect(byKey({ realizedPnl: -80, magicB: null }).geometricGrowth.value).toBe('0.92');
-    expect(byKey({ realizedPnl: 0, magicB: null }).geometricGrowth.value).toBe('1.00');
-    expect(byKey({ realizedPnl: null, magicB: null }).geometricGrowth.value).toBe('—');
+    expect(byKey({ realizedPnl: -80, magicB: null }).geometricExpectancy.value).toBe('0.92');
+    expect(byKey({ realizedPnl: 0, magicB: null }).geometricExpectancy.value).toBe('1.00');
+    expect(byKey({ realizedPnl: null, magicB: null }).geometricExpectancy.value).toBe('—');
   });
 
   it('涨幅未兑现 = 25% − 20% = 5%；不超过两倍预期回撤用正文色，超过才用风险色', () => {
@@ -517,9 +519,10 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     expect(byKey({ peakPriceChangePct: 10.01, expectedMaxDrawdownPct: 10 }).unrealizedPriceChangePct.value).not.toBe('—');
   });
 
-  it('几何期望使用固定 10% 模型，不随实际资产风险比例变化', () => {
-    expect(helpText(byKey().geometricExpectancy.help)).toContain('固定风险比例 x = 10%');
+  it('几何期望使用固定 10% 模型，不随实际资产风险比例变化；不再取 max(0, …)', () => {
+    expect(helpText(byKey().geometricExpectancy.help)).toContain('几何期望 = 1 + 0.1 × b');
     expect(helpText(byKey({ initialRisk: { drawdownFraction: 0.01, source: 'current_account_fallback' } }).geometricExpectancy.help))
-      .toContain('本场：max(0, 1 + 2.00 × 10%) ≈ 1.20');
+      .toContain('本场：1 + 0.1 × 2.00 ≈ 1.20');
+    expect(helpText(byKey().geometricExpectancy.help)).not.toContain('max(0');
   });
 });

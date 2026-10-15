@@ -135,10 +135,11 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(result.geometricExpectancy).toBeCloseTo(-0.1, 8);
   });
 
-  it('bᵢ ≤ −10 时 1+bᵢ·x ≤ 0，本金被打穿，因子记 0、几何期望记 −100%', () => {
-    expect(campaignGrowthFactor(-10)).toBe(0);
-    expect(campaignGrowthFactor(-25)).toBe(0);
+  it('【用户要求】几何增长与几何期望合并：不设 0 的下限，bᵢ < −10 时因子照实为负', () => {
+    expect(campaignGrowthFactor(-10)).toBeCloseTo(0, 12);
+    expect(campaignGrowthFactor(-25)).toBeCloseTo(-1.5, 12);
+    // 入参是百分数：−1000% = b −10，−2500% = b −25；几何期望存因子 − 1
     expect(computeCampaignExpectancies(-1000).geometricExpectancy).toBeCloseTo(-1, 8);
-    expect(computeCampaignExpectancies(-2500).geometricExpectancy).toBeCloseTo(-1, 8);
+    expect(computeCampaignExpectancies(-2500).geometricExpectancy).toBeCloseTo(-2.5, 8);
   });
 });

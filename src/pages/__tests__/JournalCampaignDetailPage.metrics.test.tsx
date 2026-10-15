@@ -1062,7 +1062,8 @@ describe('JournalCampaignDetailPage metrics', () => {
       const bRow = screen.getByText('神奇的 b').closest('[data-column]');
       expect(bRow?.lastElementChild?.textContent).toBe('4.00');
       const growthRow = screen.getByText('几何期望').closest('[data-column]');
-      expect(growthRow?.lastElementChild?.textContent).toBe('1.20');
+      // 几何期望三种算法：方法一 b = 盈亏比 2 → 1.20；方法二 b = 神奇的 b 4 → 1.40；方法三缺理论几何仓位
+      expect(growthRow?.lastElementChild?.textContent).toBe('1.20（1.40/—）');
       expect(screen.getByText('盈亏比').closest('[data-column]')?.lastElementChild?.textContent).toBe('2.00');
       fireEvent.click(screen.getByRole('button', { name: 'PNG' }));
       await waitFor(() => expect(exportCampaignBoardPngMock).toHaveBeenCalledTimes(1));

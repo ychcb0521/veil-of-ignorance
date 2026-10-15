@@ -367,12 +367,11 @@ export function buildCounterfactualOverviewMetrics(
 
   const extraNotes: Partial<Record<CampaignPnlOverviewItemKey, CampaignPnlOverviewHelpParagraph[]>> = {
     magicB: [{ warning: '本反事实分支尚未保存首次加仓基数及末次加仓有效止损线 Kₘ 的完整计算依据，神奇的 b 显示「—」，不使用已实现净盈亏 ÷ L₀ 替代。' }],
-    geometricGrowth: [{ warning: '方法一按本分支的盈亏比照常计算；方法二、方法三需要神奇的 b，本分支几何计算依据不完整，括号里写「—」。' }],
+    geometricExpectancy: [{ warning: '方法一按本分支的盈亏比照常计算；方法二、方法三需要神奇的 b，本分支几何计算依据不完整，括号里写「—」。' }],
     unitRise: [{ warning: '本反事实分支尚未保存末次加仓有效止损线 Kₘ 的完整计算依据，单位涨幅 G 显示「—」。' }],
     unitProfit: [{ warning: '本反事实分支尚未保存末次加仓有效止损线 Kₘ 与首仓币数 Q 的完整计算依据，单位利润 U 显示「—」。' }],
     positionProfit: [{ warning: '本反事实分支尚未保存几何仓位与单位利润 U 的完整计算依据，仓位利润 W 显示「—」。' }],
     arithmeticExpectancy: [{ warning: '神奇的 b 的几何计算依据不完整，算术期望暂不计算。' }],
-    geometricExpectancy: [{ warning: '神奇的 b 的几何计算依据不完整，几何期望暂不计算。' }],
     addEfficiency: [{ warning: '神奇的 b 的几何计算依据不完整，加仓效用暂不计算。' }],
     initialMainExposureNotional: [
       manual

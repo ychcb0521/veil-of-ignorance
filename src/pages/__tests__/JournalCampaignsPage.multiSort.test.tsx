@@ -109,8 +109,8 @@ describe('战役列表：多级排序', () => {
     // 第一级自己没有「+」；其余十四项（含涨幅未兑现、仓位放大）各一个，平时透明、触屏改用长按。
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
-    // 加上单位涨幅、单位利润、仓位利润、几何增长四项
-    expect(adds).toHaveLength(21);
+    // 加上单位涨幅、单位利润、仓位利润三项（几何增长与几何期望已合并为一项）
+    expect(adds).toHaveLength(20);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
     expect(screen.queryByTestId('sort-chain-add-effectivePriceChangeMultiple')).not.toBeInTheDocument();

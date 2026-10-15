@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  summarizeGeometricExpectancy,
   compactUnitRiseBinValue, compactUsdBinValue, computeGeometricGrowth, formatCompactUnitRise, formatCompactUsd, formatGeometricGrowth,
 } from '@/lib/campaignUnitProfit';
 
@@ -66,5 +67,26 @@ describe('【美观】W（b）≥ 10 时只留一位小数，封面三个读数�
     expect(geometricGrowthBinValue(12.345)).toBe(12.3);
     expect(geometricGrowthBinValue(9.243)).toBe(9.24);
     expect(geometricGrowthBinValue(1.0002)).toBe(1);
+  });
+});
+
+describe('【用户要求】统计概览的几何期望：单场几何期望逐场连乘、取几何平均', () => {
+  it('连乘与几何平均；算不出的场不计入 n', () => {
+    const summary = summarizeGeometricExpectancy([1.2, 0.9, null, undefined, Number.NaN, 1.5]);
+    expect(summary.count).toBe(3);
+    expect(summary.product).toBeCloseTo(1.2 * 0.9 * 1.5, 12);
+    expect(summary.mean).toBeCloseTo(Math.cbrt(1.2 * 0.9 * 1.5), 12);
+    expect(summary.ruinCount).toBe(0);
+  });
+
+  it('有一场 ≤ 0（b ≤ −10）时连乘与几何平均归零，并报出场数', () => {
+    expect(summarizeGeometricExpectancy([1.2, 0, -0.5])).toEqual({ count: 3, product: 0, mean: 0, ruinCount: 2 });
+  });
+
+  it('没有样本时为 null；几百场也不会上溢', () => {
+    expect(summarizeGeometricExpectancy([])).toEqual({ count: 0, product: null, mean: null, ruinCount: 0 });
+    const many = summarizeGeometricExpectancy(Array.from({ length: 2000 }, () => 3));
+    expect(many.mean).toBeCloseTo(3, 9);
+    expect(many.product).toBe(Number.POSITIVE_INFINITY);
   });
 });

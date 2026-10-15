@@ -81,10 +81,9 @@ import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
   computeCampaignExpectanciesFromMagicB,
   formatArithmeticExpectancy,
-  formatGeometricExpectancy,
 } from '@/lib/campaignMetrics';
 import { summarizeAsymmetricRiskMetrics } from '@/lib/asymmetricRiskMetrics';
-import { selectValidCampaignPerformanceSamples, summarizeCampaignPerformance } from '@/lib/kellySizing';
+import { isResolvedCampaign, summarizeCampaignPerformance } from '@/lib/kellySizing';
 import {
   ALL_CAMPAIGN_OPERATION_RANGE,
   CAMPAIGN_RANGE_PRESETS,
@@ -97,12 +96,7 @@ import {
   presetOperationRange,
   type CampaignOperationRange,
 } from '@/lib/campaignOperationRange';
-import {
-  FIXED_DRAWDOWN_FRACTION,
-  compoundGrowthFactor,
-  computeGeometricExpectancy,
-  realizedCompoundGrowth,
-} from '@/lib/geometricExpectancy';
+import { FIXED_DRAWDOWN_FRACTION } from '@/lib/geometricExpectancy';
 import {
   campaignAchievedMirrorTp,
   mirrorTpOutcome,
@@ -118,7 +112,7 @@ import {
 import { formatBeijingTime } from '@/lib/timeFormat';
 import { cardMetricGridTemplate, cardMetricItemWidths } from '@/lib/campaignCardMetricWidths';
 import {
-  formatGeometricGrowth, formatGeometricGrowthMethods, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
+  formatGeometricGrowth, formatGeometricGrowthMethods, geometricGrowthBinValue, summarizeGeometricExpectancy, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatCompactUnitRise, formatCompactUsd, formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
@@ -282,8 +276,6 @@ type CampaignMetricChartKey =
   | 'effectivePriceChangeMultipleDistribution'
   | 'magicB'
   | 'magicBDistribution'
-  | 'geometricGrowth'
-  | 'geometricGrowthDistribution'
   | 'unitRise'
   | 'unitRiseDistribution'
   | 'unitProfit'
@@ -343,7 +335,6 @@ type CampaignFormulaPopover =
   | 'effectivePriceChangePctSort'
   | 'effectivePriceChangeMultipleSort'
   | 'magicBSort'
-  | 'geometricGrowthSort'
   | 'unitRiseSort'
   | 'unitProfitSort'
   | 'positionProfitSort'
@@ -364,8 +355,8 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'positionGeometricMultiple', label: '几何仓位' },
   { value: 'magicB', label: '神奇的 b' },
   { value: 'captureRate', label: '盈亏比' },
-  // 【用户要求】W（b）（几何增长）放在盈亏比后面
-  { value: 'geometricGrowth', label: '几何增长' },
+  // 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望）
+  { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'initialExpectedMaxLoss', label: '最大预期亏损' },
   { value: 'realizedPnl', label: '已实现 P&L' },
   { value: 'positionAmplification', label: '仓位放大' },
@@ -380,8 +371,6 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'peakPriceChange', label: '峰值涨幅' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'dynamicMaxDrawdownPct', label: '动态最大回撤' },
-  // 【用户要求】几何期望放在动态最大回撤后面（动态最大回撤不在排序行，排序行与封面上几何期望紧跟涨幅未兑现）
-  { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '自评' },
@@ -392,9 +381,9 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
  * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅、动态最大回撤不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
  */
 const SORT_ROW_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth',
+  'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricExpectancy',
   'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
-  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'mirrorTp', 'leverage', 'importance', 'alpha',
+  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha',
 ]);
 const SORT_OPTIONS = ALL_SORT_OPTIONS.filter(option => SORT_ROW_MODES.has(option.value));
 
@@ -465,7 +454,7 @@ const SORT_LONG_PRESS_MS = 450;
  * 【用户要求】「交易战役上的指标分成两排吧，战役的封面可以适当增高，这样每个指标数值的字体大小就可以设置成一致的了」：
  * 不再按读数估宽、不再按格宽缩字号——数值一律 11px、指标名一律 10px。
  */
-// 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格，手机两列。
+// 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十七项分两排），640–1279px 每排六格，手机两列。
 // 【用户要求】「统一向左对齐，不必完全占满右边的空间，我喜欢留白；能够完整显示即可，不要有太大间隙」：
 // 每列只取这一列实际最宽的读数（列表容器上的 --cm-cols-6 / --cm-cols-9，见 cardMetricGridStyle），从左排起，右边留白
 const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]';
@@ -491,10 +480,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
   captureRate: { noun: '可计算盈亏比', hint: '已实现净盈亏除以初始最大预期亏损；缺少有效初始风险时不计算' },
   expectedDrawdownPct: { noun: '可计算预期回撤', hint: '缺少主力开仓价或初始对冲 A/B 价格的战役不会进入当前排序' },
   arithmeticExpectancy: { noun: '可计算算术期望', hint: '缺少有效盈亏比时不计算' },
-  geometricExpectancy: {
-    noun: '可计算几何期望',
-    hint: '使用实际盈亏比和固定 10% 风险比例；缺少有效盈亏比时不计算',
-  },
+  geometricExpectancy: { noun: '可计算几何期望', hint: `${GEOMETRIC_GROWTH_FORMULA}；${GEOMETRIC_GROWTH_MISSING_RULE}` },
   leverage: { noun: '记录了杠杆倍数', hint: '没有记录杠杆倍数、各腿也没有杠杆的战役不会进入当前排序' },
   mainPriceChange: { noun: '主力已平仓', hint: '首仓涨跌幅按战役算（开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价），主力都还没平仓的战役不会进入当前排序' },
   mainPriceEfficiency: {
@@ -509,7 +495,6 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
     noun: '可计算加仓效用',
     hint: '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|，只算做过加仓、且首仓涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
   },
-  geometricGrowth: { noun: '可计算几何增长', hint: `${GEOMETRIC_GROWTH_FORMULA}；${GEOMETRIC_GROWTH_MISSING_RULE}` },
   unitRise: { noun: '可计算单位涨幅', hint: `${UNIT_RISE_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
   unitProfit: { noun: '可计算单位利润', hint: `${UNIT_PROFIT_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
   positionProfit: { noun: '可计算仓位利润', hint: `${POSITION_PROFIT_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
@@ -606,9 +591,9 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
         : { unit: '倍', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '相对涨幅为正' },
     }];
   }),
-  // 【用户要求】W（b）（几何增长）：时序 + 分布（默认分布），图上按方法一（几何仓位实际值）
-  ...(['geometricGrowth'] as const).flatMap((key): CampaignMetricChartConfig[] => {
-    const label = 'W（b）几何增长';
+  // 【用户要求】几何期望（原「几何增长」与「几何期望」合并）：时序 + 分布（默认分布），图上按方法一（盈亏比）
+  ...(['geometricExpectancy'] as const).flatMap((key): CampaignMetricChartConfig[] => {
+    const label = '几何期望';
     const definition = `${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}`;
     const formatValue = (value: number) => formatGeometricGrowth(value);
     return [{
@@ -623,7 +608,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       colorMode: 'signed', formatValue,
       guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${definition} 横轴按封面两位小数读数（方法一），点的颜色按原盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
-      distribution: { unit: '倍', zeroLine: true, zeroLabel: '0 本金归零', zeroMeaning: '这一注把本金输光（盈亏比 = −10）', positiveShareLabel: 'W（b）为正',
+      distribution: { unit: '倍', zeroLine: true, zeroLabel: '0 本金归零', zeroMeaning: '这一注把本金输光（盈亏比 = −10）', positiveShareLabel: '几何期望为正',
         references: [{ value: 1, label: '1.00 不增不减', shareLabel: '增长（> 1）' }] },
     }];
   }),
@@ -780,48 +765,6 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       zeroMeaning: '模型算术期望正负分界',
       positiveShareLabel: '正期望',
     },
-  },
-  {
-    key: 'geometricExpectancy',
-    label: '几何期望',
-    chartLabel: '几何图',
-    viewLabel: '时序',
-    viewTestId: 'campaign-geometricExpectancy-view-time',
-    seriesLabel: '几何期望时序',
-    guide: {
-      yAxis: '按固定 10% 的模型权重代入盈亏比：Gᵢ = max(0, 1 + bᵢ×0.1)，纵轴直接读模型因子 Gᵢ；不是账户真实增长。',
-      point: '点越高，模型因子越大；低于 1.00 表示 bᵢ 为负。'
-        + '固定 x 之后 Gᵢ 是 bᵢ 的线性变换，所以它的形状与盈亏比图一致——差别只在单位。',
-      colors: PAYOFF_SIGN_COLORS,
-      referenceLines: ['灰色的 1.00 线：几何模型因子的中性参照，对应 b = 0。'],
-    },
-    missingValueLabel: '几何期望',
-    colorMode: 'signed',
-    formatValue: formatGeometricExpectancy,
-  },
-  {
-    key: 'geometricExpectancyDistribution',
-    sourceKey: 'geometricExpectancy',
-    view: 'distribution',
-    label: '几何期望分布',
-    chartLabel: '分布图',
-    viewLabel: '分布',
-    viewTestId: 'campaign-geometricExpectancy-view-distribution',
-    seriesLabel: '几何期望分布',
-    guide: {
-      yAxis: '落在该 Gᵢ 附近的战役数量：点从底线向上堆叠，堆得越高，这一档结果出现得越多。刻度随图高变化，读柱高时对照左侧场数刻度。',
-      point: '每个点仍是一场战役，横向按 Gᵢ 的对数排布，不考虑时间先后。'
-        + '相同倍率变化占相同距离，例如 0.5 → 1 → 2 等距，方便比较模型因子的相对变化；'
-        + 'Gᵢ = 0 在独立栏显示，不能只凭分布偏斜判断风控是否合格。',
-      colors: PAYOFF_SIGN_COLORS,
-      referenceLines: [
-        '灰色 1.00 竖线：模型中性参照，对应 b = 0，不代表实际净结算盈亏。',
-        '灰色曲线：在 ln(Gᵢ) 空间计算核密度，再换算成「每个对数档的期望场数」，与点列共用场数轴；归零点不纳入曲线。',
-      ],
-    },
-    missingValueLabel: '几何期望',
-    colorMode: 'signed',
-    formatValue: formatGeometricExpectancy,
   },
   {
     key: 'importance',
@@ -1206,7 +1149,6 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   effectivePriceChangePct: 'effectivePriceChangePctSort',
   effectivePriceChangeMultiple: 'effectivePriceChangePctSort',
   magicB: 'magicBSort',
-  geometricGrowth: 'geometricGrowthSort',
   unitRise: 'unitRiseSort',
   unitProfit: 'unitProfitSort',
   positionProfit: 'positionProfitSort',
@@ -1231,7 +1173,6 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   effectivePriceChangePct: 'effectivePriceChangePct',
   effectivePriceChangeMultiple: 'effectivePriceChangePct',
   magicB: 'magicB',
-  geometricGrowth: 'geometricGrowth',
   unitRise: 'unitRise',
   unitProfit: 'unitProfit',
   positionProfit: 'positionProfit',
@@ -1273,7 +1214,6 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   effectivePriceChangeMultiple: 'effectivePriceChangePctDistribution',
   magicB: 'magicBDistribution',
   // 【用户要求】三个新指标同神奇的 b：默认看分布
-  geometricGrowth: 'geometricGrowthDistribution',
   unitRise: 'unitRiseDistribution',
   unitProfit: 'unitProfitDistribution',
   positionProfit: 'positionProfitDistribution',
@@ -1441,12 +1381,12 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'unrealizedPriceChangePct': return `${value.toFixed(2)}%`;
     case 'mainPriceEfficiency':
     case 'addEfficiency': return formatEfficiency(value);
-    case 'geometricExpectancy': return formatGeometricExpectancy(value);
+    // 几何期望读的是因子 − 1：与封面方法一同一个写法
+    case 'geometricExpectancy': return formatGeometricGrowth(1 + value);
     case 'arithmeticExpectancy': return formatArithmeticExpectancy(value);
     case 'effectivePriceChangePct': return `${value.toFixed(2)}×`;
     case 'effectivePriceChangeMultiple': return `${value.toFixed(2)}x`;
     case 'magicB': return value.toFixed(2);
-    case 'geometricGrowth': return formatGeometricGrowth(1 + value);
     case 'unitRise': return formatCompactUnitRise(value);
     case 'unitProfit':
     case 'positionProfit': return formatCompactUsd(value);
@@ -1617,7 +1557,7 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  */
 // 【用户要求】封面适当增高：上下内边距加大一档
 const CARD_METRIC_CELL = 'flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 sm:px-2 transition-[background-color,box-shadow] duration-150';
-/** 封面十八项的指标名，次序与排序行、卡片上的格子一致。 */
+/** 封面十七项的指标名，次序与排序行、卡片上的格子一致。 */
 const CARD_METRIC_LABEL = {
   expectedDrawdownPct: '预期回撤',
   effectivePriceChangePct: '相对涨幅',
@@ -1625,7 +1565,7 @@ const CARD_METRIC_LABEL = {
   positionGeometricMultiple: '几何仓位',
   magicB: '神奇的 b',
   captureRate: '盈亏比',
-  geometricGrowth: '几何增长',
+  geometricExpectancy: '几何期望',
   positionAmplification: '仓位放大',
   addEfficiency: '加仓效用',
   arithmeticExpectancy: '算术期望',
@@ -1635,14 +1575,13 @@ const CARD_METRIC_LABEL = {
   mainPriceChange: '首仓涨跌幅',
   mainPriceEfficiency: '首仓涨跌幅倍数',
   unrealizedPriceChangePct: '涨幅未兑现',
-  geometricExpectancy: '几何期望',
   mirrorTp: '镜像止盈',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
 type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
 type CardMetricReadings = Record<CardMetricMode, string>;
 
 
-/** 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅：加仓效用、几何期望、算术期望括号里的读数都从它算。 */
+/** 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅：加仓效用、算术期望括号里的读数都从它算。 */
 function rowTheoreticalMagicB(row: CampaignDisplayData): number | null {
   return computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row));
 }
@@ -1682,16 +1621,14 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
     positionGeometricMultiple: formatActualTheoreticalMetric(rowPositionGeometricMultiple(row), rowPositionGeometricMultipleTheoretical(row), formatPositionAmplification),
     magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
-    // 【用户要求】三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
-    geometricGrowth: formatGeometricGrowthMethods(rowGeometricGrowth(row), rowGeometricGrowthMagic(row), rowGeometricGrowthTheoretical(row)),
+    // 【用户要求】几何期望（原「几何增长」与「几何期望」合并）三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
+    geometricExpectancy: formatGeometricGrowthMethods(rowGeometricGrowth(row), rowGeometricGrowthMagic(row), rowGeometricGrowthTheoretical(row)),
     // 【用户要求】封面数字不能太长：≥ 1 万写「w」，G 统一约 4 位有效数字（详情页盈亏概览仍写完整精度）
     unitRise: formatCompactUnitRise(rowUnitRise(row)),
     unitProfit: formatCompactUsd(rowUnitProfit(row)),
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
     positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatCompactUsd),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
-    geometricExpectancy: formatActualTheoreticalMetric(row.geometricExpectancy,
-      computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).geometricExpectancy, value => formatGeometricExpectancy(value)),
     effectivePriceChangePct: rowRelativePriceChange(row) == null ? '—' : `${rowRelativePriceChange(row)!.toFixed(2)}×`,
     arithmeticExpectancy: formatActualTheoreticalMetric(row.arithmeticExpectancy,
       computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).arithmeticExpectancy, value => formatArithmeticExpectancy(value)),
@@ -1862,7 +1799,7 @@ const CampaignCard = memo(function CampaignCard({
   /** 下注比例的算式，分子分母都代入：标题行「仓位击穿」与几何期望格的悬停说明共用。 */
   const riskFractionFormula = `最大预期亏损 ÷ 账户总资产 = ${row.initialExpectedMaxLoss.toFixed(2)} ÷ ${riskAccountEquity?.toFixed(2) ?? '—'}`
     + ` = ${((initialRiskFraction ?? 0) * 100).toFixed(2)}%`;
-  const geometricTone = signTone(geometricExpectancy, 'text-foreground/80');
+  const geometricTone = signTone(geometricExpectancy == null ? null : sortBinValue('geometricExpectancy', geometricExpectancy), 'text-foreground/80');
   const detailsExpanded = expanded;
   /** 这一项在排序链上的第几级（0 = 第一级；-1 = 不在链上）。 */
   const sortLevel = (mode: CampaignSortMode) => sortHighlight.indexOf(mode);
@@ -2118,10 +2055,23 @@ const CampaignCard = memo(function CampaignCard({
             <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
           </div>
-          <div data-testid="campaign-geometric-growth" className={metricCell('geometricGrowth')} data-sort-highlight={litAttr('geometricGrowth')}
-            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
-            <dt className={metricName('geometricGrowth')}>{CARD_METRIC_LABEL.geometricGrowth}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-geometric-growth-value" className={`${CARD_METRIC_VALUE} ${signTone(rowGeometricGrowth(row) == null ? null : rowGeometricGrowth(row)! - 1, 'text-foreground/80')}`}>{readings.geometricGrowth}</span></dd>
+          {/* 【用户要求】「几何增长」与「几何期望」合并为几何期望，放在盈亏比后面：方法一（方法二/方法三） */}
+          <div
+            data-testid="campaign-geometric-expectancy"
+            data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
+            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`
+              + (ruinousSizing
+                ? `另：本场真实下注比例 = ${riskFractionFormula} ≥ 100%，`
+                  + '这一注押上了全部本金（标题行的「仓位击穿」）。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
+                  + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
+                : '')}
+            className={metricCell('geometricExpectancy')}
+            data-sort-highlight={litAttr('geometricExpectancy')}
+          >
+            <dt className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-geometric-expectancy-value" className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
+            </dd>
           </div>
           <div
             data-testid="campaign-position-amplification"
@@ -2226,25 +2176,6 @@ const CampaignCard = memo(function CampaignCard({
               <span data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
                 {readings.unrealizedPriceChangePct}
               </span>
-            </dd>
-          </div>
-          <div
-            data-testid="campaign-geometric-expectancy"
-            data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-            title={`单场几何期望 Gᵢ = max(0, 1 + b·x)，x 每场统一取 ${fixedFractionLabel}。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`
-              + (initialRiskFraction == null
-                ? ''
-                : ruinousSizing
-                  ? `。另：本场真实下注比例 = ${riskFractionFormula} ≥ 100%，`
-                    + '这一注押上了全部本金（标题行的「仓位击穿」）。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
-                    + `注意卡片左侧的「预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}%」是价格层面的口径（主力入场到对冲边界的距离），与账户层面的下注比例不是同一个量。`
-                  : '')}
-            className={metricCell('geometricExpectancy')}
-            data-sort-highlight={litAttr('geometricExpectancy')}
-          >
-            <dt className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}>
-              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
             </dd>
           </div>
           <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
@@ -2713,26 +2644,17 @@ export default function JournalCampaignsPage() {
     [performanceSamples],
   );
   /**
-   * 实测连乘 ∏(1+bᵢ·x)：每场按固定 10% 下注，这条真实路径把本金走成了几倍。
-   * 与 W = G^n 同一口径下的两个问题——那个是按均值推演，这个是照真实 bᵢ 逐场走。
-   * 取样population 与「有效战役 / 平均神奇的 b」完全一致，n 才对得上。
+   * 【用户要求】统计概览的几何期望基于新的数据和逻辑：与封面同一个单场几何期望（三种算法），
+   * 对这批已结束的战役逐场连乘、取几何平均——平均每场把本金乘上几倍。取样与「有效战役」同一批（已结束）。
    */
-  const realizedGrowth = useMemo(
-    () => realizedCompoundGrowth(
-      selectValidCampaignPerformanceSamples(performanceSamples)
-        .map(sample => sample.payoffRatio as number),
-    ),
-    [performanceSamples],
-  );
-  /**
-   * 全表几何期望：G = (1+b·x)^p·(1−x)^(1−p)，x 固定 10%、b 取盈利战役的平均 b、p 取有效战役胜率。
-   * b 只用盈利侧：公式里 (1+b·x) 是「赢的那一腿乘多少」，混进亏损战役的负 b 会同时压低赢腿，
-   * 而亏损已经由 (1−x)^(1−p) 这一腿表达了，等于罚两次。
-   */
-  const geometric = useMemo(
-    () => computeGeometricExpectancy(performance.expectedWinRate, performance.winPayoffRatio, FIXED_DRAWDOWN_FRACTION),
-    [performance.expectedWinRate, performance.winPayoffRatio],
-  );
+  const geometricSummary = useMemo(() => {
+    const resolved = scopedRows.filter(row => isResolvedCampaign(row.campaign));
+    return {
+      one: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowth(row))),
+      two: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowthMagic(row))),
+      three: summarizeGeometricExpectancy(resolved.map(row => rowGeometricGrowthTheoretical(row))),
+    };
+  }, [scopedRows]);
   // 镜像止盈达成统计（战役维度，全表口径）。
   const mirrorTp = useMemo(
     () => summarizeMirrorTp(scopedRows.map(row => ({
@@ -3006,7 +2928,6 @@ export default function JournalCampaignsPage() {
         ? row.initialExpectedMaxDrawdownPct
         : null
     ));
-    const geometric = buildSeries(row => row.geometricExpectancy);
     const positionGeometricMultiple = buildSeries(row => {
       const value = rowPositionGeometricMultiple(row);
       return value == null ? null : sortBinValue('positionGeometricMultiple', value);
@@ -3028,9 +2949,10 @@ export default function JournalCampaignsPage() {
       const value = rowMagicB(row);
       return value == null ? null : sortBinValue('magicB', value);
     });
-    const geometricGrowth = buildSeries(row => {
+    // 几何期望图读因子本身（方法一，与封面同一个取整）：1.00 不增不减、0 本金归零
+    const geometric = buildSeries(row => {
       const value = rowGeometricGrowth(row);
-      return value == null ? null : 1 + sortBinValue('geometricGrowth', value - 1);
+      return value == null ? null : 1 + sortBinValue('geometricExpectancy', value - 1);
     });
     const unitRise = buildSeries(row => {
       const value = rowUnitRise(row);
@@ -3105,8 +3027,6 @@ export default function JournalCampaignsPage() {
       effectivePriceChangeMultipleDistribution: effectivePriceChangeMultiple,
       magicB,
       magicBDistribution: magicB,
-      geometricGrowth,
-      geometricGrowthDistribution: geometricGrowth,
       unitRise,
       unitRiseDistribution: unitRise,
       unitProfit,
@@ -3275,23 +3195,16 @@ export default function JournalCampaignsPage() {
   const expectedRLabel = performance.expectedR == null
     ? '—'
     : `${performance.expectedR >= 0 ? '+' : ''}${performance.expectedR.toFixed(2)}R`;
-  const geometricEdgeLabel = geometric == null
-    ? '—'
-    : `${geometric.geometricEdge >= 0 ? '+' : ''}${(geometric.geometricEdge * 100).toFixed(1)}%`;
-  // 累计倍数：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
-  const formatGrowthFactor = (factor: number) => {
-    if (factor === 0) return '×0（模型归零）';
-    // G^n 在 n 上千时会溢出成 Infinity；「×Infinity」读起来像 bug，不如直说超出可表示范围。
+  const geometricEdgeLabel = formatGeometricGrowthMethods(geometricSummary.one.mean, geometricSummary.two.mean, geometricSummary.three.mean);
+  const geometricEdgeTone = geometricSummary.one.mean == null ? null : geometricGrowthBinValue(geometricSummary.one.mean) - 1;
+  // 连乘倍数：几百场复利动辄上亿倍，超过 4 位数就换科学计数，别让一串零占满一行。
+  const formatGrowthFactor = (factor: number | null) => {
+    if (factor == null) return '—';
+    if (factor === 0) return '×0（归零）';
     if (!Number.isFinite(factor)) return '×超出可表示范围';
     if (factor >= 10000 || factor < 0.0001) return `×${factor.toExponential(2)}`;
     return `×${factor.toFixed(2)}`;
   };
-  const compoundGrowthLabel = geometric == null
-    ? '—'
-    : formatGrowthFactor(compoundGrowthFactor(geometric.growthFactor, validCampaignCount));
-  const realizedGrowthLabel = realizedGrowth.count === 0
-    ? '—'
-    : formatGrowthFactor(realizedGrowth.factor);
 
   const updateListParams = (
     nextSort: CampaignSortChain,
@@ -4799,33 +4712,19 @@ export default function JournalCampaignsPage() {
                       </>
                     ) : formula === 'geometricExpectancy' ? (
                       <>
-                        <div className="font-medium text-foreground">单场几何期望计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                          单场几何期望 = Gᵢ = max(0, 1 + bᵢ·x)
-                        </div>
+                        <div className="font-medium text-foreground">几何期望计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
                         <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div className="rounded border border-border/60 px-2 py-1.5 font-mono leading-relaxed text-foreground/85">
-                            x = {fixedFractionLabel}（每场统一的模型权重）
-                          </div>
                           <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
-                            <div><span className="font-medium">方法一（读数括号外）</span>：bᵢ = 盈亏比 = 已实现净盈亏 ÷ 初始最大预期亏损 L₀。</div>
-                            <div><span className="font-medium">方法二（读数括号内）</span>：bᵢ = 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅。</div>
-                            <div>排序、分档与散点图按方法一；方法二只作理论对照，算不出时不写括号。</div>
+                            <div>{GEOMETRIC_GROWTH_METHOD_ONE}</div>
+                            <div>{GEOMETRIC_GROWTH_METHOD_TWO}</div>
+                            <div>{GEOMETRIC_GROWTH_METHOD_THREE}</div>
                           </div>
-                          <div>
-                            读法：以固定 {fixedFractionLabel} 的模型权重，将 bᵢ 代入 1 + bᵢ×0.1。
-                            列里直接显示模型因子：bᵢ = +2 → <span className="text-foreground">1.20</span>；
-                            bᵢ = −1 → <span className="text-foreground">0.90</span>。
-                            <span className="text-foreground">1.00</span> 对应 b = 0，不代表账户真实增长或净结算持平。
-                          </div>
-                          <div>
-                            单场直接代入各自的 bᵢ，不再乘胜率；汇总模型则另用胜率与分组均值。
-                          </div>
-                          <div>
-                            x 固定，不读取账户资产与实际下注比例，方便在同一模型尺度上比较。
-                          </div>
-                          <div>若 1+bᵢ·x ≤ 0（即 bᵢ ≤ −10），按既有规则将模型因子 Gᵢ 记为 0.00，不代表实际账户归零。</div>
-                          <div>没有实际加仓或公式依据不完整、无法计算 b 的战役不参与几何期望排序。</div>
+                          <div>{GEOMETRIC_GROWTH_RULE}</div>
+                          <div>{GEOMETRIC_GROWTH_MISSING_RULE}</div>
+                          <div>例：盈亏比 25.00 → 方法一 = 1 + 0.1 × 25.00 = <span className="text-foreground">3.50</span>；相对涨幅 8.00×、几何仓位 3.00x → b = 24.00，方法二 = 3.40；几何仓位（理论）2.50x → b = 20.00，方法三 = 3.00。读数写成「3.50（3.40/3.00）」。亏损的战役照常算：盈亏比 −0.80 → 0.92。</div>
+                          <div>原「几何增长」与「几何期望」本质一样，已合并为几何期望（不再取 max(0, …)，亏光以上的亏损也照实算）。统计概览的几何期望是这些单场读数的几何平均。</div>
+                          <div>详情、封面、排序、散点图与导出共用同一份计算；按两位小数排序、分档，以 1.00 为界。</div>
                         </div>
                       </>
                     ) : formula === 'mainPriceChangeSort' ? (
@@ -4917,22 +4816,6 @@ export default function JournalCampaignsPage() {
                         <div className="font-medium text-foreground">神奇的 b 计算公式</div>
                         <div className="mt-2"><MagicBMethodFormulas /></div>
                         <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的 b。没有实际加仓，或任一公式依据缺失时显示「—」，不以净结算值补齐。</div></div>
-                      </>
-                    ) : formula === 'geometricGrowthSort' ? (
-                      <>
-                        <div className="font-medium text-foreground">W（b）（几何增长）计算公式</div>
-                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
-                        <div className="mt-2 space-y-1 text-muted-foreground">
-                          <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
-                            <div>{GEOMETRIC_GROWTH_METHOD_ONE}</div>
-                            <div>{GEOMETRIC_GROWTH_METHOD_TWO}</div>
-                            <div>{GEOMETRIC_GROWTH_METHOD_THREE}</div>
-                          </div>
-                          <div>{GEOMETRIC_GROWTH_RULE}</div>
-                          <div>{GEOMETRIC_GROWTH_MISSING_RULE}</div>
-                          <div>例：盈亏比 25.00 → 方法一 = 1 + 0.1 × 25.00 = <span className="text-foreground">3.50</span>；相对涨幅 8.00×、几何仓位 3.00x → b = 24.00，方法二 = 3.40；几何仓位（理论）2.50x → b = 20.00，方法三 = 3.00。读数写成「3.50（3.40/3.00）」。亏损的战役照常算：盈亏比 −0.80 → 0.92。</div>
-                          <div>详情、封面、排序、散点图与导出共用同一份计算；按两位小数排序、分档，以 1.00 为界。</div>
-                        </div>
                       </>
                     ) : formula === 'unitRiseSort' || formula === 'unitProfitSort' || formula === 'positionProfitSort' ? (
                       <>
@@ -5456,79 +5339,51 @@ export default function JournalCampaignsPage() {
                   type="button"
                   data-testid="campaign-geometric-edge"
                   className={`${STAT_TRIGGER} border-transparent`}
-                  aria-label={`几何期望 ${geometricEdgeLabel} 每笔，点击查看计算公式`}
+                  aria-label={`几何期望 ${geometricEdgeLabel}，点击查看计算公式`}
                   onClick={event => toggleFormulaPopover(event, 'geometricEdge')}
                 >
                   <span className={STAT_LABEL}>几何期望</span>{' '}
-                  <span className={`${STAT_VALUE} ${statSignTone(geometric?.geometricEdge ?? null)}`}>
+                  <span className={`${STAT_VALUE} ${statSignTone(geometricEdgeTone)}`}>
                     {geometricEdgeLabel}
-                    <span className="ml-px font-sans text-[10px] font-normal text-muted-foreground">/笔</span>
                   </span>
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
-                {/**
-                  * 这个浮层里其实是**两个概念**，过去挤在同一个标题下，读者很容易把
-                  * 「推演出来的复利速度」当成「账户真实走过的路径」。现在分成两块，
-                  * 各自带一句「它回答什么」，最后再点明两者之差的含义。
-                  */}
-                <div className="font-medium text-foreground">几何期望 · 两个口径</div>
-                {geometric != null && performance.expectedWinRate != null && performance.winPayoffRatio != null ? (
+                <div className="font-medium text-foreground">几何期望 · 每场几何平均</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
+                  几何期望 = (∏ 几何期望ᵢ)^(1/n)，几何期望ᵢ = 1 + 0.1 × bᵢ
+                </div>
+                {geometricSummary.one.count > 0 || geometricSummary.two.count > 0 || geometricSummary.three.count > 0 ? (
                   <div className="mt-2 space-y-2 text-muted-foreground">
-                    <section className="space-y-1">
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">理论</span>
-                        <span className="text-foreground">几何期望（每笔复利率）</span>
-                      </div>
-                      <div className="rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                        G = (1+b·x)^p · (1−x)^(1−p)，几何期望 = G − 1；W = G^n
-                      </div>
-                      <div className="font-mono">
-                        G = (1 + {performance.winPayoffRatio.toFixed(2)} × {fixedFractionLabel})^{(performance.expectedWinRate * 100).toFixed(1)}% · (1 − {fixedFractionLabel})^{((1 - performance.expectedWinRate) * 100).toFixed(1)}%
-                      </div>
-                      <div className="font-mono text-foreground">G − 1 = {geometricEdgeLabel}/笔</div>
-                      <div className="font-mono text-foreground">W = G^{validCampaignCount} = {compoundGrowthLabel}</div>
-                      <div>
-                        它回答：<span className="text-foreground">将盈亏比 作为模型参数、重复 {validCampaignCount} 次时的增长因子</span>，不代表真实资金复利。
-                        b = 盈利战役的平均盈亏比（{performance.winPayoffRatio.toFixed(2)}，{performance.winCount} 场）；
-                        p = 有效战役胜率（{(performance.expectedWinRate * 100).toFixed(1)}%）；
-                        n = 有效战役数（{validCampaignCount} 场）；
-                        x = 每笔按资金比例的最大预期回撤，统一取 {fixedFractionLabel}——固定仓位后，这个数的变化只反映 edge 本身，可以纵向比较。
-                      </div>
-                      <div>算术与几何展示均沿用原模型、以实际盈亏比代入；不能据此还原账户实际收益或决定下注比例。</div>
-                      {geometric.bleeds ? (
-                        <div className="text-[#F6465D]">当前模型增长因子 G&lt;1。</div>
-                      ) : null}
-                    </section>
-
-                    <section className="space-y-1 border-t border-border/60 pt-2">
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="rounded-sm bg-muted px-1 text-[9px] text-foreground/70">逐场</span>
-                        <span className="text-foreground">几何指标连乘</span>
-                      </div>
-                      <div className="rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">
-                        ∏（1+bᵢ·x），bᵢ = 每场盈亏比
-                      </div>
-                      <div className="font-mono text-foreground">
-                        ∏（1+bᵢ·x）= {realizedGrowthLabel}
-                        <span className="ml-1 text-muted-foreground">（{realizedGrowth.count} 场逐场连乘）</span>
-                      </div>
-                      <div>
-                        它回答：<span className="text-foreground">每场取同样 {fixedFractionLabel} 的模型权重，将各场 bᵢ 依次代入后得到多少倍</span>。
-                        这里不用胜率、也不用平均值，样本是什么就走什么。
-                      </div>
-                      {realizedGrowth.wipedOut ? (
-                        <div className="text-[#F6465D]">其中有一场 bᵢ ≤ −10，模型因子不为正，按既有规则将连乘记为零。</div>
-                      ) : null}
-                    </section>
-
+                    <div>
+                      它回答：<span className="text-foreground">每场按 {fixedFractionLabel} 下注、把这 n 场依次走一遍，平均每场把本金乘上几倍</span>。
+                      与封面上的单场几何期望同一个尺度：1.00 不增不减，&gt; 1 增长，&lt; 1 缩水。读数写成「方法一（方法二/方法三）」，与封面一致。
+                    </div>
+                    {([
+                      ['one', '方法一（读数括号外）', 'bᵢ = 盈亏比'],
+                      ['two', '方法二（括号内第一个）', 'bᵢ = 神奇的 b = 相对涨幅 × 几何仓位'],
+                      ['three', '方法三（括号内第二个）', 'bᵢ = 神奇的 b（理论）= 相对涨幅 × 几何仓位（理论）'],
+                    ] as const).map(([key, title, basis]) => {
+                      const summary = geometricSummary[key];
+                      return (
+                        <section key={key} data-testid={`campaign-geometric-edge-${key}`} className="space-y-0.5 border-t border-border/60 pt-2">
+                          <div className="text-foreground">{title}</div>
+                          <div>{basis}</div>
+                          <div className="font-mono text-foreground">
+                            n = {summary.count} 场 · ∏ = {formatGrowthFactor(summary.product)} · 几何平均 = {formatGeometricGrowth(summary.mean)}
+                          </div>
+                          {summary.ruinCount > 0 ? (
+                            <div className="text-[#F6465D]">其中 {summary.ruinCount} 场 b ≤ −10（这一注亏光本金，几何期望ᵢ ≤ 0），连乘与几何平均记为 0。</div>
+                          ) : null}
+                        </section>
+                      );
+                    })}
                     <div className="border-t border-border/60 pt-2">
-                      两者之差 = <span className="text-foreground">真实样本的分布</span>相对「按均值推演」的代价或红利：
-                      理论那条按均值推演，逐场连乘保留了每个样本的 b；两者均不是实际净结算收益。
+                      取样：当前列表里已结束的战役，各方法只数算得出的那几场。不用胜率、也不用平均值，样本是什么就走什么；这是固定 {fixedFractionLabel} 下注的模型值，不是账户实际净收益。
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 text-muted-foreground">需要可计算的胜率，以及至少一场盈利战役的平均盈亏比，才能得到几何期望。</div>
+                  <div className="mt-2 text-muted-foreground">当前列表需要至少一场已结束、算得出单场几何期望的战役。</div>
                 )}
               </PopoverContent>
             </Popover>

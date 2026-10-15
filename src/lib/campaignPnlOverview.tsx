@@ -11,7 +11,6 @@ import {
   computeCampaignExpectanciesFromMagicB,
   formatArithmeticExpectancy,
   formatCampaignLeverage,
-  formatGeometricExpectancy,
 } from '@/lib/campaignMetrics';
 import type { RealizedPnlBasis } from '@/lib/campaignRealizedPnl';
 import {
@@ -99,7 +98,6 @@ export type CampaignPnlOverviewItemKey =
   | 'mainLeverage'
   | 'initialMainExposureNotional'
   | 'peakPriceChange'
-  | 'geometricGrowth'
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
   | 'positionAmplification'
@@ -135,8 +133,8 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 /**
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
- * 【用户要求】W（b）（几何增长）放在盈亏比后面；单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面；
- * 几何期望放在动态最大回撤后面。三列 7 / 8 / 6 项。
+ * 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望、按三种算法）；
+ * 单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面。三列 7 / 8 / 5 项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -145,7 +143,7 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'positionGeometricMultiple',
   'magicB',
   'payoffRatio',
-  'geometricGrowth',
+  'geometricExpectancy',
 ];
 
 /**
@@ -169,7 +167,6 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
-  'geometricExpectancy',
 ];
 
 /**
@@ -337,10 +334,10 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total, mirrorNotional);
   const magicB = resolveUnifiedMagicB(metrics.magicB);
   const payoff = computeSettlementPayoffRatio(realizedPnl, initialExpectedMaxLoss);
-  const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
+  const { arithmeticExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
   // 【用户要求】加仓效用、几何期望、算术期望各算两遍：括号外基于盈亏比，括号里基于神奇的 b（理论）
   const theoreticalB = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
-  // 【用户要求】W（b）三种算法：方法一基于盈亏比，方法二基于几何仓位（神奇的 b），方法三基于几何仓位（理论）
+  // 【用户要求】几何期望三种算法：方法一基于盈亏比，方法二基于几何仓位（神奇的 b），方法三基于几何仓位（理论）
   const geometricGrowth = computeGeometricGrowth(payoff);
   const geometricGrowthMagic = computeGeometricGrowth(magicB);
   const geometricGrowthTheoretical = computeGeometricGrowth(theoreticalB);
@@ -454,9 +451,9 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
-      // 【用户要求】三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
-      key: 'geometricGrowth',
-      label: '几何增长 W（b）',
+      // 【用户要求】几何期望（原「几何增长」与「几何期望」合并）三种算法：括号外基于盈亏比，括号里依次基于几何仓位、几何仓位（理论）
+      key: 'geometricExpectancy',
+      label: '几何期望',
       value: formatGeometricGrowthMethods(geometricGrowth, geometricGrowthMagic, geometricGrowthTheoretical),
       color: pnlExportColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
       valueClassName: pnlColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
@@ -465,21 +462,21 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
           <div className="space-y-1">
             <div className="text-[10px] font-medium text-foreground/85">方法一（读数括号外）</div>
-            <p className="font-mono">W（b）= 1 + 0.1 × 盈亏比</p>
+            <p className="font-mono">几何期望 = 1 + 0.1 × 盈亏比</p>
             {geometricGrowth != null && payoff != null
               ? <p className="font-mono text-foreground">本场：1 + 0.1 × {bText(payoff)} ≈ {formatGeometricGrowth(geometricGrowth)}</p>
               : <p>本场：—（缺少有效盈亏比）</p>}
           </div>
           <div className="space-y-1 border-t border-border/60 pt-2">
             <div className="text-[10px] font-medium text-foreground/85">方法二（括号内第一个）</div>
-            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位</p>
+            <p className="font-mono">几何期望 = 1 + 0.1 × 相对涨幅 × 几何仓位</p>
             {geometricGrowthMagic != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultiple != null
               ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultiple.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowthMagic)}</p>
               : <p>本场：—（几何仓位或相对涨幅缺少有效依据）</p>}
           </div>
           <div className="space-y-1 border-t border-border/60 pt-2">
             <div className="text-[10px] font-medium text-foreground/85">方法三（括号内第二个）</div>
-            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）</p>
+            <p className="font-mono">几何期望 = 1 + 0.1 × 相对涨幅 × 几何仓位（理论）</p>
             {geometricGrowthTheoretical != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultipleTheoretical != null
               ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultipleTheoretical.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowthTheoretical)}</p>
               : <p>本场：—（理论几何仓位或相对涨幅缺少有效依据）</p>}
@@ -714,25 +711,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">E = P × 神奇的 b（理论）−（1 − P），P = 50%</div>
           {theoreticalBLine}
           {theoreticalB != null && <p className="font-mono text-foreground">本场：{(ARITHMETIC_EXPECTANCY_WIN_RATE * 100).toFixed(2)}% × {bText(theoreticalB)} − {((1 - ARITHMETIC_EXPECTANCY_WIN_RATE) * 100).toFixed(2)}% = {formatArithmeticExpectancy(theoreticalExpectancies.arithmeticExpectancy)}</p>}
-        </>
-      ),
-    },
-    {
-      key: 'geometricExpectancy',
-      label: '几何期望',
-      value: formatActualTheoreticalMetric(geometricExpectancy, theoreticalExpectancies.geometricExpectancy, value => formatGeometricExpectancy(value)),
-      color: pnlExportColor(geometricExpectancy),
-      valueClassName: pnlColor(geometricExpectancy),
-      help: (
-        <>
-          <p>以固定风险比例 x = 10% 计算几何增长因子。读数括号外是方法一，括号里是方法二。</p>
-          {methodTitle('方法一 · 基于盈亏比（括号外）')}
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + 盈亏比 × 10%)</div>
-          {payoff != null ? <p className="font-mono text-foreground">本场：max(0, 1 + {formatCampaignPayoffRatio(payoff * 100)} × 10%) ≈ {formatGeometricExpectancy(geometricExpectancy)}</p> : <p>缺少有效盈亏比时不计算。</p>}
-          {methodTitle('方法二 · 基于神奇的 b（理论）（括号内）')}
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">Gᵢ = max(0, 1 + 神奇的 b（理论）× 10%)</div>
-          {theoreticalBLine}
-          {theoreticalB != null && <p className="font-mono text-foreground">本场：max(0, 1 + {bText(theoreticalB)} × 10%) ≈ {formatGeometricExpectancy(theoreticalExpectancies.geometricExpectancy)}</p>}
         </>
       ),
     },

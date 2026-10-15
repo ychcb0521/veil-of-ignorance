@@ -31,9 +31,9 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
   it('排序方式与盈亏概览的参数都在表里，「说明」逐列写口径', () => {
     for (const header of [
       '操作时间（北京）', '镜像止盈', '预期回撤（%）', '首仓涨跌幅（%）', '首仓涨跌幅倍数 η', '神奇的 b', '加仓效用', '加仓次数',
-      '几何期望 Gᵢ', '算术期望（R）', '杠杆倍数', '自评（0–5）',
+      '算术期望（R）', '杠杆倍数', '自评（0–5）',
       '相对涨幅（倍）', '盈亏比', '几何仓位（倍）', '神奇的 b',
-      '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '几何增长 W（b）', '几何增长 W（b）（几何仓位）', '几何增长 W（b）（理论）', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
+      '最大预期亏损（USDT）', '已实现 P&L（USDT）', '峰值涨幅（%）', '几何期望', '几何期望（几何仓位）', '几何期望（理论）', '涨幅未兑现（%）', '动态最大回撤（%）', '仓位放大（倍）', 'DSI 贡献（%）', 'USI 贡献（%）',
     ]) expect(headers, header).toContain(header);
     expect(notes.rows.map(row => row[0])).toEqual(headers);
     expect(notes.rows.every(row => typeof row[1] === 'string' && (row[1] as string).length > 0)).toBe(true);
@@ -52,13 +52,14 @@ describe('【用户要求】交易战役 Excel 汇总表', () => {
     expect(cell(0, '加仓次数')).toBe(rowAddCount(rows[0]));
     expect(cell(0, '加仓次数')).toBe(2);
     expect(cell(0, '峰值涨幅（%）')).toBe(rows[0].peakPriceChangePct);
-    // 【用户要求】峰值涨幅倍数删除，原位置换成几何增长 W（b）（三种算法各一列）：方法一 1 + 0.1 × 盈亏比，方法二 1 + 0.1 × 神奇的 b
+    // 【用户要求】几何期望（原几何增长与几何期望合并，三种算法各一列）：方法一 1 + 0.1 × 盈亏比，方法二 1 + 0.1 × 神奇的 b
     expect(headers).not.toContain('峰值涨幅倍数');
-    expect(cell(0, '几何增长 W（b）')).toBeCloseTo(1 + 0.1 * (rowPayoffRatio(rows[0]) as number), 9);
-    expect(cell(0, '几何增长 W（b）（几何仓位）')).toBeCloseTo(1 + 0.1 * (rowMagicB(rows[0]) as number), 9);
+    expect(headers).not.toContain('几何期望 Gᵢ');
+    expect(cell(0, '几何期望')).toBeCloseTo(1 + 0.1 * (rowPayoffRatio(rows[0]) as number), 9);
+    expect(cell(0, '几何期望（几何仓位）')).toBeCloseTo(1 + 0.1 * (rowMagicB(rows[0]) as number), 9);
     expect(cell(0, '涨幅未兑现（%）')).toBeCloseTo((rows[0].peakPriceChangePct as number) - 6, 9);
     expect(cell(0, '动态最大回撤（%）')).toBe(4.5);
-    expect(cell(0, '几何期望 Gᵢ')).toBeCloseTo(1.9, 9);
+    expect(cell(0, '几何期望')).toBeCloseTo(1.9, 9);
     expect(cell(0, '算术期望（R）')).toBe(4);
     expect(cell(0, '几何仓位（倍）')).toBe(6.25);
     expect(cell(0, '相对涨幅（倍）')).toBeCloseTo(0.294117647059);

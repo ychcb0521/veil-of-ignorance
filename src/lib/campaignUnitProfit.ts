@@ -121,22 +121,23 @@ export function unitUsdBinValue(value: number): number {
   return compactUsdBinValue(value);
 }
 
-// ── W（b）（几何增长）【用户要求】2026-10-15：替换「峰值涨幅倍数」的位置 ──
+// ── 几何期望【用户要求】2026-10-15：先以「W（b）（几何增长）」替换「峰值涨幅倍数」的位置，
+//    随后与原「几何期望」合并（两者本质一样），统一叫「几何期望」、留在这个位置，按这里的三种算法 ──
 
-/** 固定下注比例 10%：W（b）= 1 + 0.1 × b。 */
+/** 固定下注比例 10%：几何期望 = 1 + 0.1 × b。 */
 export const GEOMETRIC_GROWTH_FRACTION = 0.1;
-export const GEOMETRIC_GROWTH_FORMULA = 'W（b）= 1 + 0.1 × b';
+export const GEOMETRIC_GROWTH_FORMULA = '几何期望 = 1 + 0.1 × b';
 /**
  * 【用户要求】三种算法，读数写成「方法一（方法二/方法三）」：
  * 方法一基于盈亏比（2026-10-15 新增，作为第一种）；方法二基于几何仓位；方法三基于几何仓位的理论值。
  */
-export const GEOMETRIC_GROWTH_METHOD_ONE = '方法一（读数括号外）：W（b）= 1 + 0.1 × 盈亏比';
-export const GEOMETRIC_GROWTH_METHOD_TWO = '方法二（括号内第一个）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位';
-export const GEOMETRIC_GROWTH_METHOD_THREE = '方法三（括号内第二个）：W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）';
-export const GEOMETRIC_GROWTH_RULE = '每场按 10% 固定比例下注时的资金增长因子：1.00 不增不减、> 1 增长、< 1 缩水。相对涨幅 × 几何仓位就是神奇的 b，所以方法二 = 1 + 0.1 × 神奇的 b、方法三 = 1 + 0.1 × 神奇的 b（理论）。盈亏比、神奇的 b 都可以是负数，按公式原样计算、不设 0 的下限，b < −10 时 W（b）为负（方法一与几何期望同一个式子，只是几何期望取 max(0, …)）。排序、分档与散点图按方法一。';
+export const GEOMETRIC_GROWTH_METHOD_ONE = '方法一（读数括号外）：几何期望 = 1 + 0.1 × 盈亏比';
+export const GEOMETRIC_GROWTH_METHOD_TWO = '方法二（括号内第一个）：几何期望 = 1 + 0.1 × 相对涨幅 × 几何仓位';
+export const GEOMETRIC_GROWTH_METHOD_THREE = '方法三（括号内第二个）：几何期望 = 1 + 0.1 × 相对涨幅 × 几何仓位（理论）';
+export const GEOMETRIC_GROWTH_RULE = '每场按 10% 固定比例下注时的资金增长因子：1.00 不增不减、> 1 增长、< 1 缩水。相对涨幅 × 几何仓位就是神奇的 b，所以方法二 = 1 + 0.1 × 神奇的 b、方法三 = 1 + 0.1 × 神奇的 b（理论）。盈亏比、神奇的 b 都可以是负数，按公式原样计算、不设 0 的下限，b < −10 时几何期望为负。排序、分档、散点图与统计概览按方法一。';
 export const GEOMETRIC_GROWTH_MISSING_RULE = '方法一缺少有效盈亏比（没有初始风险 L₀）时写「—」；方法二、方法三与神奇的 b 同口径，没有实际加仓、或相对涨幅 / 几何仓位缺少依据时写「—」，括号里对应位置也写「—」。';
 
-/** W（b）= 1 + 0.1 × b；b 缺失时 null。 */
+/** 几何期望 = 1 + 0.1 × b；b 缺失时 null。 */
 export function computeGeometricGrowth(b: number | null | undefined): number | null {
   if (b == null || !Number.isFinite(b)) return null;
   const value = 1 + GEOMETRIC_GROWTH_FRACTION * b;
@@ -148,7 +149,7 @@ function geometricGrowthDigits(value: number): number {
   return Math.abs(Number(value.toFixed(2))) >= 10 ? 1 : 2;
 }
 
-/** |W − 1| < 0.0005 记 1.00（与几何期望同一个取整）；|W| ≥ 10 只留一位小数。 */
+/** |因子 − 1| < 0.0005 记 1.00；|因子| ≥ 10 只留一位小数。 */
 export function formatGeometricGrowth(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   const v = Math.abs(value - 1) < 0.0005 ? 1 : value;
@@ -168,4 +169,38 @@ export function formatGeometricGrowthMethods(one: number | null | undefined, two
   if (inner.every(text => text === '—')) return head;
   // 分隔符不带空格：封面格子窄（1280px 时约 112px），三个读数要放得下
   return `${head}（${inner.join('/')}）`;
+}
+
+/**
+ * 统计概览的几何期望【用户要求】2026-10-15：「统计概览中的几何期望，也要基于新的数据和逻辑」。
+ * 不再用「盈利侧平均 b + 胜率」推演，而是把这批战役每一场的几何期望（单场因子）直接连乘：
+ *   连乘 ∏ᵢ 几何期望ᵢ —— 每场按 10% 下注、这一串战役走下来本金变成几倍；
+ *   几何平均 (∏)^(1/n) —— 平均每场把本金乘上几倍，与封面单场读数同一个尺度（1.00 不增不减）。
+ * 有一场因子 ≤ 0（盈亏比 ≤ −10，这一注亏光本金）时连乘与几何平均都记 0（归零）。
+ * 用 exp(Σ ln) 求连乘，几百场也不会中途上溢 / 下溢。
+ */
+export interface GeometricExpectancySummary {
+  /** 参与的场数（因子算得出的战役）。 */
+  count: number;
+  /** ∏ 因子；没有样本时 null。 */
+  product: number | null;
+  /** 几何平均 = product^(1/n)；没有样本时 null。 */
+  mean: number | null;
+  /** 因子 ≤ 0 的场数（> 0 即归零）。 */
+  ruinCount: number;
+}
+
+export function summarizeGeometricExpectancy(factors: Iterable<number | null | undefined>): GeometricExpectancySummary {
+  let count = 0;
+  let ruinCount = 0;
+  let logSum = 0;
+  for (const factor of factors) {
+    if (factor == null || !Number.isFinite(factor)) continue;
+    count += 1;
+    if (factor <= 0) ruinCount += 1;
+    else logSum += Math.log(factor);
+  }
+  if (count === 0) return { count, product: null, mean: null, ruinCount };
+  if (ruinCount > 0) return { count, product: 0, mean: 0, ruinCount };
+  return { count, product: Math.exp(logSum), mean: Math.exp(logSum / count), ruinCount };
 }

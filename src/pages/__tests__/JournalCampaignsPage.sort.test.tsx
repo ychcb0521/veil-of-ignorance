@@ -452,9 +452,9 @@ describe('JournalCampaignsPage sorting', () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
     // 【用户要求】排序行只放封面上有的指标（再加操作时间、杠杆倍数与自评、字母），次序沿用原表
-    const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth',
+    const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricExpectancy',
       'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
-      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'mirrorTp', 'leverage', 'importance', 'alpha'];
+      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha'];
     const controls = screen.getByTestId('campaign-sort-controls');
     expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item'))).toEqual(expected);
     expect(screen.queryByTestId('campaign-sort-realizedPnl')).not.toBeInTheDocument();
@@ -951,7 +951,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth', 'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
+    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricExpectancy', 'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
@@ -967,10 +967,10 @@ describe('JournalCampaignsPage sorting', () => {
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
-    expect(cardCells).toEqual(["campaign-expected-drawdown-pct","campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-growth","campaign-position-amplification","campaign-add-efficiency","campaign-arithmetic-expectancy","campaign-unit-rise","campaign-unit-profit","campaign-position-profit","campaign-main-price-change","campaign-main-price-efficiency","campaign-unrealized-price-change","campaign-geometric-expectancy","campaign-mirror-tp-status"]);
+    expect(cardCells).toEqual(["campaign-expected-drawdown-pct","campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-expectancy","campaign-position-amplification","campaign-add-efficiency","campaign-arithmetic-expectancy","campaign-unit-rise","campaign-unit-profit","campaign-position-profit","campaign-main-price-change","campaign-main-price-efficiency","campaign-unrealized-price-change","campaign-mirror-tp-status"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何增长","仓位放大","加仓效用","算术期望","单位涨幅","单位利润","仓位利润","首仓涨跌幅","首仓涨跌幅倍数","涨幅未兑现","几何期望","镜像止盈"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何期望","仓位放大","加仓效用","算术期望","单位涨幅","单位利润","仓位利润","首仓涨跌幅","首仓涨跌幅倍数","涨幅未兑现","镜像止盈"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
@@ -1035,7 +1035,7 @@ describe('JournalCampaignsPage sorting', () => {
     }));
     const initial = layout()[0];
     expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]');
-    expect(initial.cells).toHaveLength(18);
+    expect(initial.cells).toHaveLength(17);
     // 列宽模板挂在列表容器上；读数不带内联字号
     const gridStyle = () => screen.getByTestId('campaign-card-list').getAttribute('style');
     const initialStyle = gridStyle();
@@ -2128,9 +2128,11 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('location-probe-search'))
       .toHaveTextContent('chart=geometricExpectancyDistribution');
 
-    // 模型中性线读数是 1.00，不是实际结算盈亏平衡，也不展示 b 的 −1 参照线。
+    // 【用户要求】几何期望（原几何增长与几何期望合并）：线性横轴，0 线是本金归零，另有 1.00 不增不减参照线；不展示 b 的 −1 参照线。
     expect(screen.getByTestId('campaign-metric-break-even-geometricExpectancyDistribution-label'))
-      .toHaveTextContent('1.00 模型中性');
+      .toHaveTextContent('0 本金归零');
+    expect(screen.getByTestId('campaign-metric-reference-geometricExpectancyDistribution-1')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-metric-scatter-plot')).not.toHaveAttribute('data-x-scale');
     expect(screen.queryByTestId('campaign-metric-loss-wall-geometricExpectancyDistribution')).toBeNull();
     // 右尾那一项按 +5R 计数，只有神奇的 b读得出意思
     expect(screen.queryByTestId('campaign-metric-tail-count-geometricExpectancyDistribution')).toBeNull();
@@ -2147,12 +2149,11 @@ describe('JournalCampaignsPage sorting', () => {
     // 不能照抄神奇的 b那套（单位 R、+10R 封顶、−1R 止损墙——这里一样都不成立）
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
     const guide = await screen.findByTestId('campaign-metric-guide-geometricExpectancyDistribution');
-    expect(guide.textContent).toContain('横轴按 ln(Gᵢ) 对数刻度排布');
-    expect(guide.textContent).toContain('0.5 → 1 → 2 等距');
+    expect(guide.textContent).toContain('横轴就是几何期望本身（单位 倍）');
+    expect(guide.textContent).not.toContain('对数刻度');
     expect(guide.textContent).not.toContain('单位 R');
     expect(guide.textContent).not.toContain('封顶在 +10R');       // 神奇的 b才有的封顶
     expect(guide.textContent).not.toContain('落在墙外');           // 这里根本不画止损墙
-    expect(guide.textContent).toContain('模型归零，不是账户真实本金归零');
     expect(guide.textContent).not.toContain('按客观操作时间从早到晚等距排列');
     fireEvent.click(screen.getByTestId('campaign-metric-guide-toggle-geometricExpectancyDistribution'));
 

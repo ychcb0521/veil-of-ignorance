@@ -480,7 +480,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangeMultiple', 'effectivePriceChangePct', 'expectedDrawdownPct',
       'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'unrealizedPriceChangePct',
-      'unitRise', 'unitProfit', 'positionProfit', 'geometricGrowth',
+      'unitRise', 'unitProfit', 'positionProfit',
       ...OVERVIEW_EXTRA_SORT_MODES,
     ].sort());
     // 第一级算不出的战役本来就不进列表，也不参与档界
@@ -782,10 +782,11 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    // 【用户要求】几何增长紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后；几何期望在动态最大回撤之后
-    expect(CAMPAIGN_SORT_MODES.slice(0, 8)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth']);
+    // 【用户要求】几何期望（原几何增长与几何期望合并）紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后
+    expect(CAMPAIGN_SORT_MODES.slice(0, 8)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricExpectancy']);
     expect(CAMPAIGN_SORT_MODES.slice(12, 16)).toEqual(['arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit']);
-    expect(CAMPAIGN_SORT_MODES.slice(20, 22)).toEqual(['dynamicMaxDrawdownPct', 'geometricExpectancy']);
+    expect(CAMPAIGN_SORT_MODES.slice(20, 22)).toEqual(['dynamicMaxDrawdownPct', 'mirrorTp']);
+    expect(CAMPAIGN_SORT_MODES).not.toContain('geometricGrowth');
     expect(DEFAULT_CAMPAIGN_SORT_CHAIN).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });

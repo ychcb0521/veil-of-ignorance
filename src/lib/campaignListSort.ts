@@ -54,7 +54,6 @@ export type CampaignSortMode =
   | 'initialExpectedMaxLoss'
   | 'realizedPnl'
   | 'peakPriceChange'
-  | 'geometricGrowth'
   | 'dynamicMaxDrawdownPct'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
@@ -79,7 +78,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'positionGeometricMultiple',
   'magicB',
   'captureRate',
-  'geometricGrowth',
+  'geometricExpectancy',
   'initialExpectedMaxLoss',
   'realizedPnl',
   'positionAmplification',
@@ -93,7 +92,6 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
-  'geometricExpectancy',
   'mirrorTp',
   'leverage',
   'importance',
@@ -110,7 +108,6 @@ export function isCampaignSortMode(value: unknown): value is CampaignSortMode {
  */
 export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
   'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct',
-  'geometricGrowth',
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -278,15 +275,15 @@ export function rowPositionProfitTheoretical(row: Pick<CampaignCardData, 'campai
   return row.positionProfitTheoretical !== undefined ? row.positionProfitTheoretical : rowGeometricMetrics(row).positionProfitTheoretical ?? null;
 }
 
-/** W（b）方法一（排序、分档、散点图用）= 1 + 0.1 × 盈亏比（与封面同一个盈亏比）。 */
+/** 几何期望方法一（排序、分档、散点图、统计概览用）= 1 + 0.1 × 盈亏比（与封面同一个盈亏比）。 */
 export function rowGeometricGrowth(row: Pick<CampaignCardData, 'profitCaptureRatio'>): number | null {
   return computeGeometricGrowth(rowPayoffRatio(row));
 }
-/** W（b）方法二 = 1 + 0.1 × 神奇的 b = 1 + 0.1 × 相对涨幅 × 几何仓位。 */
+/** 几何期望方法二 = 1 + 0.1 × 神奇的 b = 1 + 0.1 × 相对涨幅 × 几何仓位。 */
 export function rowGeometricGrowthMagic(row: Parameters<typeof rowMagicB>[0]): number | null {
   return computeGeometricGrowth(rowMagicB(row));
 }
-/** W（b）方法三 = 1 + 0.1 × 神奇的 b（理论）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）。 */
+/** 几何期望方法三 = 1 + 0.1 × 神奇的 b（理论）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）。 */
 export function rowGeometricGrowthTheoretical(row: Parameters<typeof rowEffectivePriceChangePct>[0] & Parameters<typeof rowPositionGeometricMultipleTheoretical>[0]): number | null {
   return computeGeometricGrowth(computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)));
 }
@@ -562,11 +559,6 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowMagicB(row);
       return value == null ? null : sortBinValue('magicB', value);
     }, importanceTimeAlpha),
-    // 与几何期望同一个做法：排序 / 分档读 W（b）− 1，0 = 1.00 不增不减，正负两侧各自对半分
-    geometricGrowth: metric(row => {
-      const value = rowGeometricGrowth(row);
-      return value == null ? null : sortBinValue('geometricGrowth', value - 1);
-    }, importanceTimeAlpha),
     unitRise: metric(row => {
       const value = rowUnitRise(row);
       return value == null ? null : sortBinValue('unitRise', value);
@@ -613,16 +605,15 @@ export type CampaignSortBinning = {
  * 分档用的读数：按封面显示精度取整，取整表达式与各自的封面格式化函数逐字相同——
  *   · 盈亏比封面写 b = pct ÷ 100 保留两位（campaignPayoffRatioMultiple）→ pct 取整到 1；
  *   · 涨跌幅（roundedPct）、涨跌幅倍数 / 加仓效用（formatEfficiency）、仓位放大、预期回撤、算术期望两位小数；
- *   · 几何期望封面写因子 1 + v 两位小数（formatGeometricExpectancy）→ 取整后再减回 1；
+ *   · 几何期望封面写因子 1 + v 两位小数、≥ 10 一位（formatGeometricExpectancy）→ 取整后再减回 1；
  * 于是封面显示相同的读数必然取整成同一个数、必然同档；档界显示出来对每张封面都字面成立。
  * 分档指标（镜像止盈 / 重要性 / 杠杆 / 字母 / 操作时间）原样返回。
  */
 export function sortBinValue(mode: CampaignSortMode, value: number): number {
   switch (mode) {
     case 'captureRate': return Math.round(Number((value / 100).toFixed(2)) * 100);
-    case 'geometricExpectancy': return Number((1 + (Math.abs(value) < 0.0005 ? 0 : value)).toFixed(2)) - 1;
-    // W（b）读的是 W − 1（0 = 1.00 不增不减）；取整与封面一致（|W| ≥ 10 时一位小数）
-    case 'geometricGrowth': return geometricGrowthBinValue(1 + value) - 1;
+    // 几何期望读的是因子 − 1（0 = 1.00 不增不减）；取整与封面方法一一致（|因子| ≥ 10 时一位小数）
+    case 'geometricExpectancy': return geometricGrowthBinValue(1 + value) - 1;
     case 'arithmeticExpectancy': {
       const normalized = Math.abs(value) < 0.0005 ? 0 : value;
       const rounded = Number(normalized.toFixed(2));
@@ -727,7 +718,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'realizedPnl', 'peakPriceChange', 'geometricGrowth',
+  'realizedPnl', 'peakPriceChange',
   'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
   'unitRise', 'unitProfit', 'positionProfit',
 ]);

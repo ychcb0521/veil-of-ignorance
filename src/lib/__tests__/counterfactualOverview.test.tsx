@@ -122,7 +122,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
 
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
     const { items, byKey } = itemsByKey(metrics);
-    expect(items).toHaveLength(21);
+    expect(items).toHaveLength(20);
     // 反事实没有 Kₘ：单位涨幅、单位利润、仓位利润同神奇的 b 显示「—」并附说明
     for (const key of ['unitRise', 'unitProfit', 'positionProfit'] as const) {
       expect(byKey[key].value).toBe('—');
@@ -152,7 +152,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
     // 风险快照仍保留，但不能混入新几何 b 与固定 10% 的几何模型因子。
     expect(metrics.initialRisk).toEqual({ drawdownFraction: 60 / 10_000, source: 'current_account_fallback' });
     expect(render(<>{byKey.geometricExpectancy.help}</>).container.textContent)
-      .toContain('固定风险比例 x = 10%');
+      .toContain('每场按 10% 固定比例下注');
   });
 
   it('老行（结果上没有锚字段）按 params 重算，得到与新行完全一样的四个锚', () => {
