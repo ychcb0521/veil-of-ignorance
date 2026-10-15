@@ -118,7 +118,8 @@ import {
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
-  formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
+  formatGeometricGrowth, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
+  formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -151,6 +152,8 @@ import {
   rowEffectivePriceChangeMultiple,
   rowMagicB,
   rowUnitRise,
+  rowGeometricGrowth,
+  rowGeometricGrowthTheoretical,
   rowUnitProfit,
   rowPositionProfit,
   rowPositionProfitTheoretical,
@@ -278,6 +281,8 @@ type CampaignMetricChartKey =
   | 'effectivePriceChangeMultipleDistribution'
   | 'magicB'
   | 'magicBDistribution'
+  | 'geometricGrowth'
+  | 'geometricGrowthDistribution'
   | 'unitRise'
   | 'unitRiseDistribution'
   | 'unitProfit'
@@ -337,6 +342,7 @@ type CampaignFormulaPopover =
   | 'effectivePriceChangePctSort'
   | 'effectivePriceChangeMultipleSort'
   | 'magicBSort'
+  | 'geometricGrowthSort'
   | 'unitRiseSort'
   | 'unitProfitSort'
   | 'positionProfitSort'
@@ -370,7 +376,8 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'mainPriceChange', label: '首仓涨跌幅' },
   { value: 'mainPriceEfficiency', label: '首仓涨跌幅倍数' },
   { value: 'peakPriceChange', label: '峰值涨幅' },
-  { value: 'peakPriceEfficiency', label: '峰值涨幅倍数' },
+  // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置
+  { value: 'geometricGrowth', label: '几何增长' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'dynamicMaxDrawdownPct', label: '动态最大回撤' },
   { value: 'mirrorTp', label: '镜像止盈' },
@@ -380,13 +387,13 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 ];
 /**
  * 【用户要求】排序行只放交易战役封面上有的指标（指标格十四项，加标题行的操作时间、杠杆倍数，再加「自评」「字母」），次序沿用上面这张表；
- * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅、峰值涨幅倍数、动态最大回撤不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
+ * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅、动态最大回撤不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
  */
 const SORT_ROW_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
   'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB',
   'unitRise', 'unitProfit', 'positionProfit', 'captureRate',
   'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
-  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha',
+  'mainPriceChange', 'mainPriceEfficiency', 'geometricGrowth', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha',
 ]);
 const SORT_OPTIONS = ALL_SORT_OPTIONS.filter(option => SORT_ROW_MODES.has(option.value));
 
@@ -402,7 +409,6 @@ const OVERVIEW_SORT_DETAILS: Record<OverviewExtraSortMode, { label: string; unit
   initialExpectedMaxLoss: { label: '最大预期亏损', unit: 'USDT', formula: '沿用初始开仓的最大预期亏损 L₀，与盈亏概览一致。' },
   realizedPnl: { label: '已实现 P&L', unit: 'USDT', formula: '沿用本场已实现净盈亏，包含现有平仓价校正及结算口径。' },
   peakPriceChange: { label: '峰值涨幅', unit: '%', formula: '主力有效持仓期间，按主力方向计算的最大有利价格涨幅。' },
-  peakPriceEfficiency: { label: '峰值涨幅倍数', unit: '倍', formula: '峰值涨幅倍数 = 峰值涨幅 ÷ 预期回撤。' },
   dynamicMaxDrawdownPct: { label: '动态最大回撤', unit: '%', formula: '主力有效持仓期间，从此前峰值到后续谷值的最大价格回撤。' },
 };
 
@@ -504,6 +510,7 @@ const SORT_EMPTY_HINTS: Partial<Record<CampaignSortMode, { noun: string; hint: s
     noun: '可计算加仓效用',
     hint: '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|，只算做过加仓、且首仓涨跌幅倍数不为 0.00 的战役；其余战役不会进入当前排序',
   },
+  geometricGrowth: { noun: '可计算几何增长', hint: `${GEOMETRIC_GROWTH_FORMULA}；${GEOMETRIC_GROWTH_MISSING_RULE}` },
   unitRise: { noun: '可计算单位涨幅', hint: `${UNIT_RISE_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
   unitProfit: { noun: '可计算单位利润', hint: `${UNIT_PROFIT_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
   positionProfit: { noun: '可计算仓位利润', hint: `${POSITION_PROFIT_FORMULA}；${UNIT_METRICS_MISSING_RULE}` },
@@ -598,6 +605,27 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       distribution: quantity ? { unit: '倍', zeroLine: false, references: [{ value: 1, label: '1.00 初始主力与镜像总币量基准', shareLabel: '加仓累积放大（> 1）' }] }
         : magic ? { unit: '倍', zeroLine: true, zeroLabel: 'b = 0', zeroMeaning: '相对涨幅为零（F = Kₘ），不代表净结算持平', positiveShareLabel: '神奇的 b 为正' }
         : { unit: '倍', zeroLine: true, zeroLabel: 'F = Kₘ', zeroMeaning: '最终平仓价等于末次加仓支撑线', positiveShareLabel: '相对涨幅为正' },
+    }];
+  }),
+  // 【用户要求】W（b）（几何增长）：时序 + 分布（默认分布），图上按方法一（几何仓位实际值）
+  ...(['geometricGrowth'] as const).flatMap((key): CampaignMetricChartConfig[] => {
+    const label = 'W（b）几何增长';
+    const definition = `${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}`;
+    const formatValue = (value: number) => formatGeometricGrowth(value);
+    return [{
+      key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
+      viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
+      guide: { yAxis: definition, point: '每个点是一场战役，按客观操作时间排列；点位表示方法一的读数，颜色按该战役原盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
+        referenceLines: ['1.00 表示不增不减（神奇的 b = 0）；0 表示这一注把本金输光（b = −10）。'] },
+    }, {
+      key: `${key}Distribution`, sourceKey: key,
+      view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
+      label: `${label}分布`, chartLabel: '分布图', seriesLabel: `${label}分布`, missingValueLabel: label,
+      colorMode: 'signed', formatValue,
+      guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${definition} 横轴按封面两位小数读数（方法一），点的颜色按原盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
+        referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
+      distribution: { unit: '倍', zeroLine: true, zeroLabel: '0 本金归零', zeroMeaning: '这一注把本金输光（b = −10）', positiveShareLabel: 'W（b）为正',
+        references: [{ value: 1, label: '1.00 不增不减', shareLabel: '增长（> 1）' }] },
     }];
   }),
   // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W：与神奇的 b 同一套时序 + 分布，颜色按原盈亏比正负
@@ -1179,6 +1207,7 @@ const SORT_FORMULA_BY_MODE: Partial<Record<CampaignSortMode, CampaignFormulaPopo
   effectivePriceChangePct: 'effectivePriceChangePctSort',
   effectivePriceChangeMultiple: 'effectivePriceChangePctSort',
   magicB: 'magicBSort',
+  geometricGrowth: 'geometricGrowthSort',
   unitRise: 'unitRiseSort',
   unitProfit: 'unitProfitSort',
   positionProfit: 'positionProfitSort',
@@ -1203,6 +1232,7 @@ const SORT_CHART_BY_MODE: Partial<Record<CampaignSortMode, CampaignMetricChartKe
   effectivePriceChangePct: 'effectivePriceChangePct',
   effectivePriceChangeMultiple: 'effectivePriceChangePct',
   magicB: 'magicB',
+  geometricGrowth: 'geometricGrowth',
   unitRise: 'unitRise',
   unitProfit: 'unitProfit',
   positionProfit: 'positionProfit',
@@ -1244,6 +1274,7 @@ const DEFAULT_CHART_VIEW_BY_SOURCE: Partial<Record<CampaignMetricChartKey, Campa
   effectivePriceChangeMultiple: 'effectivePriceChangePctDistribution',
   magicB: 'magicBDistribution',
   // 【用户要求】三个新指标同神奇的 b：默认看分布
+  geometricGrowth: 'geometricGrowthDistribution',
   unitRise: 'unitRiseDistribution',
   unitProfit: 'unitProfitDistribution',
   positionProfit: 'positionProfitDistribution',
@@ -1402,7 +1433,6 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'realizedPnl': return `${value.toFixed(2)} USDT`;
     case 'peakPriceChange': return formatLegPriceChangePct(value);
     case 'dynamicMaxDrawdownPct': return `${value.toFixed(2)}%`;
-    case 'peakPriceEfficiency': return formatEfficiency(value);
     case 'captureRate': return formatCampaignPayoffRatio(value);
     case 'expectedDrawdownPct': return `${value.toFixed(2)}%`;
     case 'mainPriceChange': return formatLegPriceChangePct(value);
@@ -1414,6 +1444,7 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'effectivePriceChangePct': return `${value.toFixed(2)}×`;
     case 'effectivePriceChangeMultiple': return `${value.toFixed(2)}x`;
     case 'magicB': return value.toFixed(2);
+    case 'geometricGrowth': return formatGeometricExpectancy(value);
     case 'unitRise': return formatUnitRise(value);
     case 'unitProfit':
     case 'positionProfit': return formatUnitUsd(value);
@@ -1598,6 +1629,7 @@ const CARD_METRIC_LABEL = {
   expectedDrawdownPct: '预期回撤',
   mainPriceChange: '首仓涨跌幅',
   mainPriceEfficiency: '首仓涨跌幅倍数',
+  geometricGrowth: '几何增长',
   addEfficiency: '加仓效用',
   positionAmplification: '仓位放大',
   unrealizedPriceChangePct: '涨幅未兑现',
@@ -1614,8 +1646,8 @@ const CARD_METRIC_MODES = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
  * 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：十四项一律同宽，取当前列表里最宽的那一项（指标名与读数取宽者，
  * --cm-w-uniform）；整行放不下时按 (100% − 13 个间距) ÷ 14 收窄，仍是一行、仍同宽、从左排起。
  */
-// 【用户要求】新增单位涨幅、单位利润、仓位利润后共十七项：≥ 1280px 一行十七格（16 个间距），640–1279px 每行九格（9 + 8 两行）
-const CARD_METRIC_UNIFORM_WIDTH = 'sm:w-[calc((100%_-_2rem)/9)] xl:w-[min(var(--cm-w-uniform),calc((100%_-_4rem)/17))]';
+// 【用户要求】新增单位涨幅、单位利润、仓位利润、几何增长后共十八项：≥ 1280px 一行十八格（17 个间距），640–1279px 每行九格（9 + 9 两行）
+const CARD_METRIC_UNIFORM_WIDTH = 'sm:w-[calc((100%_-_2rem)/9)] xl:w-[min(var(--cm-w-uniform),calc((100%_-_4.25rem)/18))]';
 const CARD_METRIC_WIDTH_CLASS = {
   addCount: CARD_METRIC_UNIFORM_WIDTH,
   positionGeometricMultiple: CARD_METRIC_UNIFORM_WIDTH,
@@ -1628,6 +1660,7 @@ const CARD_METRIC_WIDTH_CLASS = {
   expectedDrawdownPct: CARD_METRIC_UNIFORM_WIDTH,
   mainPriceChange: CARD_METRIC_UNIFORM_WIDTH,
   mainPriceEfficiency: CARD_METRIC_UNIFORM_WIDTH,
+  geometricGrowth: CARD_METRIC_UNIFORM_WIDTH,
   captureRate: CARD_METRIC_UNIFORM_WIDTH,
   effectivePriceChangePct: CARD_METRIC_UNIFORM_WIDTH,
   addEfficiency: CARD_METRIC_UNIFORM_WIDTH,
@@ -1676,6 +1709,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     positionAmplification: positionAmplification == null ? '—' : formatPositionAmplification(positionAmplification),
     positionGeometricMultiple: formatActualTheoreticalMetric(rowPositionGeometricMultiple(row), rowPositionGeometricMultipleTheoretical(row), formatPositionAmplification),
     magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
+    // 【用户要求】括号外基于几何仓位，括号里基于几何仓位（理论）
+    geometricGrowth: formatActualTheoreticalMetric(rowGeometricGrowth(row), rowGeometricGrowthTheoretical(row), formatGeometricGrowth),
     unitRise: formatUnitRise(rowUnitRise(row)),
     unitProfit: formatUnitUsd(rowUnitProfit(row)),
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
@@ -2236,6 +2271,11 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
+          <div data-testid="campaign-geometric-growth" className={metricCell('geometricGrowth')} data-sort-highlight={litAttr('geometricGrowth')}
+            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
+            <dt style={fitMetricValue(CARD_METRIC_LABEL.geometricGrowth, 10)} className={metricName('geometricGrowth')}>{CARD_METRIC_LABEL.geometricGrowth}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.geometricGrowth, 11)} data-testid="campaign-geometric-growth-value" className={`${CARD_METRIC_VALUE} ${signTone(rowGeometricGrowth(row) == null ? null : rowGeometricGrowth(row)! - 1, 'text-foreground/80')}`}>{readings.geometricGrowth}</span></dd>
+          </div>
           <div
             data-testid="campaign-unrealized-price-change"
             title={unrealizedPriceChangePct == null
@@ -2610,9 +2650,9 @@ export default function JournalCampaignsPage() {
     scopedRowsRef.current = next;
     return next;
   }, [rows, operationRange]);
-  const unrealizedMetricNeeded = sortChain.some(level => ['unrealizedPriceChangePct', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'].includes(level.mode))
+  const unrealizedMetricNeeded = sortChain.some(level => ['unrealizedPriceChangePct', 'peakPriceChange', 'dynamicMaxDrawdownPct'].includes(level.mode))
     || summaryExportPending
-    || (metricChartOpen && ['unrealizedPriceChangePct', 'unrealizedPriceChangePctDistribution', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'].includes(metricChartKey));
+    || (metricChartOpen && ['unrealizedPriceChangePct', 'unrealizedPriceChangePctDistribution', 'peakPriceChange', 'dynamicMaxDrawdownPct'].includes(metricChartKey));
   const pricePaths = useCampaignPricePaths(scopedRows, userId ?? '', unrealizedMetricNeeded && campaignRowsComplete, campaignRowsComplete);
   const peakPriceChangeByCampaign = pricePaths.peaks;
   const dynamicDrawdownByCampaign = pricePaths.drawdowns;
@@ -3029,6 +3069,10 @@ export default function JournalCampaignsPage() {
       const value = rowMagicB(row);
       return value == null ? null : sortBinValue('magicB', value);
     });
+    const geometricGrowth = buildSeries(row => {
+      const value = rowGeometricGrowth(row);
+      return value == null ? null : 1 + sortBinValue('geometricGrowth', value - 1);
+    });
     const unitRise = buildSeries(row => {
       const value = rowUnitRise(row);
       return value == null ? null : sortBinValue('unitRise', value);
@@ -3102,6 +3146,8 @@ export default function JournalCampaignsPage() {
       effectivePriceChangeMultipleDistribution: effectivePriceChangeMultiple,
       magicB,
       magicBDistribution: magicB,
+      geometricGrowth,
+      geometricGrowthDistribution: geometricGrowth,
       unitRise,
       unitRiseDistribution: unitRise,
       unitProfit,
@@ -4913,6 +4959,21 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2"><MagicBMethodFormulas /></div>
                         <div className="mt-2 space-y-1 text-muted-foreground"><div>{MAGIC_B_RULE}</div><div>详情、封面、排序、散点图与导出共用完整精度的 b。没有实际加仓，或任一公式依据缺失时显示「—」，不以净结算值补齐。</div></div>
                       </>
+                    ) : formula === 'geometricGrowthSort' ? (
+                      <>
+                        <div className="font-medium text-foreground">W（b）（几何增长）计算公式</div>
+                        <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
+                        <div className="mt-2 space-y-1 text-muted-foreground">
+                          <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
+                            <div>{GEOMETRIC_GROWTH_METHOD_ONE}</div>
+                            <div>{GEOMETRIC_GROWTH_METHOD_TWO}</div>
+                          </div>
+                          <div>{GEOMETRIC_GROWTH_RULE}</div>
+                          <div>{GEOMETRIC_GROWTH_MISSING_RULE}</div>
+                          <div>例：相对涨幅 8.00×、几何仓位 3.00x → b = 24.00，W（b）= 1 + 0.1 × 24.00 = <span className="text-foreground">3.40</span>；几何仓位（理论）2.50x 时括号里是 1 + 0.1 × 20.00 = 3.00。</div>
+                          <div>详情、封面、排序、散点图与导出共用同一份计算；按两位小数排序、分档，以 1.00 为界。</div>
+                        </div>
+                      </>
                     ) : formula === 'unitRiseSort' || formula === 'unitProfitSort' || formula === 'positionProfitSort' ? (
                       <>
                         <div className="font-medium text-foreground">{formula === 'unitRiseSort' ? '单位涨幅' : formula === 'unitProfitSort' ? '单位利润' : '仓位利润'}计算公式</div>
@@ -4924,6 +4985,12 @@ export default function JournalCampaignsPage() {
                         <div className="mt-2 space-y-1 text-muted-foreground">
                           <div>{UNIT_RISE_RULE}</div>
                           <div>{UNIT_PROFIT_RULE}</div>
+                          {formula === 'positionProfitSort' && (
+                            <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
+                              <div>{POSITION_PROFIT_METHOD_ONE}</div>
+                              <div>{POSITION_PROFIT_METHOD_TWO}</div>
+                            </div>
+                          )}
                           <div>{POSITION_PROFIT_RULE}</div>
                           <div>{UNIT_METRICS_MISSING_RULE}</div>
                           <div>详情、封面、排序、散点图与导出共用同一份计算；排序、分档按封面读数（G 按价格精度，U、W 两位小数）。</div>

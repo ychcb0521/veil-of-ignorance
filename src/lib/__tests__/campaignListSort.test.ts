@@ -168,7 +168,6 @@ describe('每个排序项的独立比较器', () => {
     const a = { ...makeSortRow({ id: 'a', pnl: 10, dd: 5 }), initialExpectedMaxLoss: 100, peakPriceChangePct: 10, dynamicMaxDrawdownPct: 0 };
     const b = { ...makeSortRow({ id: 'b', pnl: -5, dd: 5 }), initialExpectedMaxLoss: 50, peakPriceChangePct: 20, dynamicMaxDrawdownPct: 10 };
     const missing = { ...makeSortRow({ id: 'missing', pnl: null, dd: 0 }), initialExpectedMaxLoss: 0, peakPriceChangePct: null, dynamicMaxDrawdownPct: null };
-    expect(rowOverviewSortMetric(a, 'peakPriceEfficiency')).toBe(2);
     for (const mode of OVERVIEW_EXTRA_SORT_MODES) {
       const descending = sortCampaignRows([missing, a, b], [{ mode, direction: 'desc' }]);
       const ascending = sortCampaignRows([missing, a, b], [{ mode, direction: 'asc' }]);
@@ -481,7 +480,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangeMultiple', 'effectivePriceChangePct', 'expectedDrawdownPct',
       'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'unrealizedPriceChangePct',
-      'unitRise', 'unitProfit', 'positionProfit',
+      'unitRise', 'unitProfit', 'positionProfit', 'geometricGrowth',
       ...OVERVIEW_EXTRA_SORT_MODES,
     ].sort());
     // 第一级算不出的战役本来就不进列表，也不参与档界

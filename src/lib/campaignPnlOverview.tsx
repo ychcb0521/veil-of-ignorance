@@ -26,6 +26,7 @@ import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
 import {
+  computeGeometricGrowth, formatGeometricGrowth, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
   formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
@@ -98,7 +99,7 @@ export type CampaignPnlOverviewItemKey =
   | 'mainLeverage'
   | 'initialMainExposureNotional'
   | 'peakPriceChange'
-  | 'peakPriceEfficiency'
+  | 'geometricGrowth'
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
   | 'positionAmplification'
@@ -165,7 +166,8 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'mainPriceChange',
   'mainPriceEfficiency',
   'peakPriceChange',
-  'peakPriceEfficiency',
+  // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置
+  'geometricGrowth',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
 ];
@@ -330,7 +332,6 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     asymmetricRiskContribution,
   } = metrics;
   const mainPriceEfficiency = computeMainPriceEfficiency(mainPriceChangePct, expectedDrawdownPct);
-  const peakPriceEfficiency = computeMainPriceEfficiency(peakPriceChangePct, expectedDrawdownPct);
   const unrealizedPriceChangePct = computeUnrealizedPriceChangePct(mainPriceChangePct, peakPriceChangePct);
   const mirrorNotional = mainSideNotional?.mirrorTotal === undefined ? 0 : mainSideNotional.mirrorTotal;
   const positionAmplification = computePositionAmplification(initialMainExposureNotional, mainSideNotional?.total, mirrorNotional);
@@ -339,6 +340,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const { arithmeticExpectancy, geometricExpectancy } = computeCampaignExpectanciesFromMagicB(payoff);
   // 【用户要求】加仓效用、几何期望、算术期望各算两遍：括号外基于盈亏比，括号里基于神奇的 b（理论）
   const theoreticalB = computeMagicB(metrics.effectivePriceChangePct, metrics.positionGeometricMultipleTheoretical);
+  const geometricGrowth = computeGeometricGrowth(magicB);
+  const geometricGrowthTheoretical = computeGeometricGrowth(theoreticalB);
   const theoreticalExpectancies = computeCampaignExpectanciesFromMagicB(theoreticalB);
   const addEfficiency = hasMainAdd
     ? computeAddEfficiency(payoff, mainPriceEfficiency)
@@ -449,18 +452,31 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       ),
     },
     {
-      key: 'peakPriceEfficiency',
-      label: '峰值涨幅倍数',
-      value: formatEfficiency(peakPriceEfficiency),
-      color: pnlExportColor(peakPriceEfficiency),
-      valueClassName: pnlColor(peakPriceEfficiency),
+      // 【用户要求】两种算法：括号外基于几何仓位，括号里基于几何仓位（理论）
+      key: 'geometricGrowth',
+      label: '几何增长 W（b）',
+      value: formatActualTheoreticalMetric(geometricGrowth, geometricGrowthTheoretical, formatGeometricGrowth),
+      color: pnlExportColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
+      valueClassName: pnlColor(geometricGrowth == null ? null : Number((geometricGrowth - 1).toFixed(2))),
       help: (
         <>
-          <p>峰值行情走出了几个初始预期回撤，用于把不同波动尺度的战役放在同一把尺上比较。</p>
-          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">峰值涨幅倍数 = 峰值涨幅 ÷ 预期回撤</div>
-          {peakPriceEfficiency == null
-            ? <p>缺少 K 线、主力基准开仓价或有效预期回撤时不计算。</p>
-            : <p className="font-mono text-foreground">本场 = {formatLegPriceChangePct(peakPriceChangePct)} ÷ {expectedDrawdownPct.toFixed(2)}% = {formatEfficiency(peakPriceEfficiency)}</p>}
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">{GEOMETRIC_GROWTH_FORMULA}</div>
+          <div className="space-y-1">
+            <div className="text-[10px] font-medium text-foreground/85">方法一（读数括号外）</div>
+            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位</p>
+            {geometricGrowth != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultiple != null
+              ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultiple.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowth)}</p>
+              : <p>本场：—</p>}
+          </div>
+          <div className="space-y-1 border-t border-border/60 pt-2">
+            <div className="text-[10px] font-medium text-foreground/85">方法二（读数括号内）</div>
+            <p className="font-mono">W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）</p>
+            {geometricGrowthTheoretical != null && metrics.effectivePriceChangePct != null && metrics.positionGeometricMultipleTheoretical != null
+              ? <p className="font-mono text-foreground">本场：1 + 0.1 × {(metrics.effectivePriceChangePct / 100).toFixed(4)} × {metrics.positionGeometricMultipleTheoretical.toFixed(4)} ≈ {formatGeometricGrowth(geometricGrowthTheoretical)}</p>
+              : <p>本场：—（理论几何仓位或相对涨幅缺少有效依据）</p>}
+          </div>
+          <p>{GEOMETRIC_GROWTH_RULE}</p>
+          <p>{GEOMETRIC_GROWTH_MISSING_RULE}</p>
         </>
       ),
     },
@@ -803,13 +819,22 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       key: 'positionProfit', label: '仓位利润 W',
       value: formatActualTheoreticalMetric(W, WT, formatUnitUsd),
       color: pnlExportColor(W), valueClassName: pnlColor(W),
-      help: <><p>读数括号内为理论值（U × 几何仓位（理论）），括号前为实际值。</p><p className="font-mono">{POSITION_PROFIT_FORMULA}</p><p>{POSITION_PROFIT_RULE}</p>
-        {W != null && U != null && m != null
-          ? worked(<>
-            <div>W = {formatUnitUsd(U)} × {m.toFixed(4)} ≈ {formatUnitUsd(W)} USDT</div>
-            {WT != null && mT != null && <div>W（理论）= {formatUnitUsd(U)} × {mT.toFixed(4)} ≈ {formatUnitUsd(WT)} USDT</div>}
-          </>)
-          : <p>本场：—</p>}
+      help: <><p className="font-mono">{POSITION_PROFIT_FORMULA}</p>
+        <div className="space-y-1">
+          <div className="text-[10px] font-medium text-foreground/85">方法一（读数括号外）</div>
+          <p className="font-mono">W = U × 几何仓位</p>
+          {W != null && U != null && m != null
+            ? worked(<div>W = {formatUnitUsd(U)} × {m.toFixed(4)} ≈ {formatUnitUsd(W)} USDT</div>)
+            : <p>本场：—</p>}
+        </div>
+        <div className="space-y-1 border-t border-border/60 pt-2">
+          <div className="text-[10px] font-medium text-foreground/85">方法二（读数括号内）</div>
+          <p className="font-mono">W = U × 几何仓位（理论）</p>
+          {WT != null && U != null && mT != null
+            ? worked(<div>W（理论）= {formatUnitUsd(U)} × {mT.toFixed(4)} ≈ {formatUnitUsd(WT)} USDT</div>)
+            : <p>本场：—（理论几何仓位或单位利润缺少有效依据）</p>}
+        </div>
+        <p>{POSITION_PROFIT_RULE}</p>
         <p>{UNIT_METRICS_MISSING_RULE}</p></>,
     });
   }

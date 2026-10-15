@@ -141,7 +141,7 @@ describe('CampaignBatchExportWorker', () => {
     expect(input.pnlOverview.items.map(item => item.key)).toEqual([
       'arithmeticExpectancy', 'expectedMaxDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency', 'payoffRatio',
       'addEfficiency', 'geometricExpectancy',
-      'realizedPnl', 'initialExpectedMaxLoss', 'peakPriceChange', 'peakPriceEfficiency',
+      'realizedPnl', 'initialExpectedMaxLoss', 'peakPriceChange', 'geometricGrowth',
       'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'positionAmplification',
     ]);
     expect(input.pnlOverview.items.map(item => Boolean(item.rightColumn))).toEqual([

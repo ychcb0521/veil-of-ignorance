@@ -100,7 +100,6 @@ async function runBatch(id: SynthCampaignId, options: CampaignBatchExportWorkerP
  */
 const KLINE_READINGS = [
   ['peakPriceChange', '峰值涨幅'],
-  ['peakPriceEfficiency', '峰值涨幅倍数'],
   ['unrealizedPriceChangePct', '涨幅未兑现'],
   ['dynamicMaxDrawdownPct', '动态最大回撤'],
 ] as const;

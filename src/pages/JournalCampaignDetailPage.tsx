@@ -1785,10 +1785,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       geometricMetricBasis: campaignGeometricMetrics?.geometricMetricBasis,
       initialRisk: campaignMetricValues?.initialRisk ?? null,
     });
-    // 峰值涨幅、峰值涨幅倍数和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
+    // 峰值涨幅和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
     // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
     if (!klinesLoading) return items;
-    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' || item.key === 'peakPriceEfficiency' || item.key === 'dynamicMaxDrawdownPct'
+    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' || item.key === 'dynamicMaxDrawdownPct'
       ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
       : item));
   }, [

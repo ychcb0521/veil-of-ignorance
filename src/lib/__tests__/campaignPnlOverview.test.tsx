@@ -15,9 +15,9 @@ import {
  * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","单位涨幅 G","单位利润 U","仓位利润 W","盈亏比","最大预期亏损","已实现 P&L","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤"];
+const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","单位涨幅 G","单位利润 U","仓位利润 W","盈亏比","最大预期亏损","已实现 P&L","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","几何增长 W（b）","涨幅未兑现","动态最大回撤"];
 
-const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","unitRise","unitProfit","positionProfit","payoffRatio","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","geometricExpectancy","arithmeticExpectancy","mainPriceChange","mainPriceEfficiency","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
+const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","unitRise","unitProfit","positionProfit","payoffRatio","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","geometricExpectancy","arithmeticExpectancy","mainPriceChange","mainPriceEfficiency","peakPriceChange","geometricGrowth","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
   return {
@@ -245,7 +245,7 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "—", "—", "—", "2.00", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "1.20", "+0.50R", "+20.00%", "+2.00", "+25.00%", "+2.50", "5.00%", "12.50%"]);
+    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "—", "—", "—", "2.00", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "1.20", "+0.50R", "+20.00%", "+2.00", "+25.00%", "1.20", "5.00%", "12.50%"]);
     const G = '#0ECB81';
     const R = '#F6465D';
     expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#64748B", "#64748B", "#64748B", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20"]);
@@ -474,12 +474,30 @@ describe('【用户要求】盈亏概览：峰值价格指标、涨幅未兑现�
     Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics(overrides)).map(item => [item.key, item]));
   const helpText = (help: ReactNode) => render(<>{help}</>).container.textContent ?? '';
 
-  it('峰值涨幅、峰值涨幅倍数与涨幅未兑现使用同一价格路径；没有路径时均为「—」', () => {
+  it('峰值涨幅与涨幅未兑现使用同一价格路径；没有路径时均为「—」；「峰值涨幅倍数」已删除', () => {
     expect(byKey().peakPriceChange.value).toBe('+25.00%');
-    expect(byKey().peakPriceEfficiency.value).toBe('+2.50');
     expect(byKey({ peakPriceChangePct: null }).peakPriceChange.value).toBe('—');
-    expect(byKey({ peakPriceChangePct: null }).peakPriceEfficiency.value).toBe('—');
     expect(byKey({ peakPriceChangePct: null }).unrealizedPriceChangePct.value).toBe('—');
+    expect(byKey()).not.toHaveProperty('peakPriceEfficiency');
+  });
+
+  it('【用户要求】几何增长 W（b）= 1 + 0.1 × 相对涨幅 × 几何仓位：括号外基于几何仓位，括号里基于几何仓位（理论）', () => {
+    const item = byKey({ magicB: 25, effectivePriceChangePct: 800, positionGeometricMultiple: 3.125, positionGeometricMultipleTheoretical: 2.5 }).geometricGrowth;
+    expect(item.label).toBe('几何增长 W（b）');
+    expect(item.value).toBe('3.50（3.00）');
+    expect(item.valueClassName).toBe('text-[#0ECB81]');
+    expect(item.column).toBe(2);
+    const help = helpText(item.help);
+    expect(help).toContain('方法一（读数括号外）');
+    expect(help).toContain('本场：1 + 0.1 × 8.0000 × 3.1250 ≈ 3.50');
+    expect(help).toContain('方法二（读数括号内）');
+    expect(help).toContain('本场：1 + 0.1 × 8.0000 × 2.5000 ≈ 3.00');
+    // b < 0：W < 1 用风险色；不设 0 的下限
+    const loss = byKey({ magicB: -12, effectivePriceChangePct: null }).geometricGrowth;
+    expect(loss.value).toBe('-0.20');
+    expect(loss.valueClassName).toBe('text-[#F6465D]');
+    expect(byKey({ magicB: 0 }).geometricGrowth.value).toBe('1.00');
+    expect(byKey({ magicB: null }).geometricGrowth.value).toBe('—');
   });
 
   it('涨幅未兑现 = 25% − 20% = 5%；不超过两倍预期回撤用正文色，超过才用风险色', () => {

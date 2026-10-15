@@ -1,11 +1,11 @@
-import { unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
+import { computeGeometricGrowth, unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
 import { campaignAchievedMirrorTp, mirrorTpRank } from '@/lib/mirrorTpSummary';
 import { campaignOperationTime } from '@/lib/objectiveOperationTime';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
-import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import { resolveUnifiedMagicB } from '@/lib/campaignB';
 
@@ -54,7 +54,7 @@ export type CampaignSortMode =
   | 'initialExpectedMaxLoss'
   | 'realizedPnl'
   | 'peakPriceChange'
-  | 'peakPriceEfficiency'
+  | 'geometricGrowth'
   | 'dynamicMaxDrawdownPct'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
@@ -91,7 +91,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'mainPriceChange',
   'mainPriceEfficiency',
   'peakPriceChange',
-  'peakPriceEfficiency',
+  'geometricGrowth',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
   'mirrorTp',
@@ -109,7 +109,8 @@ export function isCampaignSortMode(value: unknown): value is CampaignSortMode {
  * 镜像止盈 / 重要性 / 杠杆倍数 / 字母本来就是分档的；操作时间按【用户已定】的清单不在其列。
  */
 export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct',
+  'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct',
+  'geometricGrowth',
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -277,6 +278,15 @@ export function rowPositionProfitTheoretical(row: Pick<CampaignCardData, 'campai
   return row.positionProfitTheoretical !== undefined ? row.positionProfitTheoretical : rowGeometricMetrics(row).positionProfitTheoretical ?? null;
 }
 
+/** W（b）（几何增长）= 1 + 0.1 × 神奇的 b（与封面同一个 b）。 */
+export function rowGeometricGrowth(row: Parameters<typeof rowMagicB>[0]): number | null {
+  return computeGeometricGrowth(rowMagicB(row));
+}
+/** W（b）理论 = 1 + 0.1 × 神奇的 b（理论）= 1 + 0.1 × 相对涨幅 × 几何仓位（理论）。 */
+export function rowGeometricGrowthTheoretical(row: Parameters<typeof rowEffectivePriceChangePct>[0] & Parameters<typeof rowPositionGeometricMultipleTheoretical>[0]): number | null {
+  return computeGeometricGrowth(computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)));
+}
+
 export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'> & {profitCaptureRatio?: number | null}): number | null {
   return resolveUnifiedMagicB(row.magicB !== undefined ? row.magicB : rowGeometricMetrics(row).magicB);
 }
@@ -365,15 +375,14 @@ function finite(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value);
 }
 
-export type OverviewExtraSortMode = 'initialExpectedMaxLoss' | 'realizedPnl' | 'peakPriceChange' | 'peakPriceEfficiency' | 'dynamicMaxDrawdownPct';
-export const OVERVIEW_EXTRA_SORT_MODES: readonly OverviewExtraSortMode[] = ['initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency', 'dynamicMaxDrawdownPct'];
+export type OverviewExtraSortMode = 'initialExpectedMaxLoss' | 'realizedPnl' | 'peakPriceChange' | 'dynamicMaxDrawdownPct';
+export const OVERVIEW_EXTRA_SORT_MODES: readonly OverviewExtraSortMode[] = ['initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct'];
 
 /** 新增概览排序项直接复用已有概览/行情读数，不另算一套口径。 */
 export function rowOverviewSortMetric(row: CampaignSortRow, mode: OverviewExtraSortMode): number | null {
   const value = mode === 'initialExpectedMaxLoss' ? (row.initialExpectedMaxLoss > 0 ? row.initialExpectedMaxLoss : null)
     : mode === 'realizedPnl' ? row.campaign.final_realized_pnl
     : mode === 'peakPriceChange' ? row.peakPriceChangePct
-    : mode === 'peakPriceEfficiency' ? computeMainPriceEfficiency(row.peakPriceChangePct ?? null, row.initialExpectedMaxDrawdownPct)
     : row.dynamicMaxDrawdownPct;
   return finite(value) ? value : null;
 }
@@ -438,7 +447,6 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
     initialExpectedMaxLoss: overviewMetric('initialExpectedMaxLoss'),
     realizedPnl: overviewMetric('realizedPnl'),
     peakPriceChange: overviewMetric('peakPriceChange'),
-    peakPriceEfficiency: overviewMetric('peakPriceEfficiency'),
     dynamicMaxDrawdownPct: overviewMetric('dynamicMaxDrawdownPct'),
     time: {
       include: always,
@@ -550,6 +558,11 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowMagicB(row);
       return value == null ? null : sortBinValue('magicB', value);
     }, importanceTimeAlpha),
+    // 与几何期望同一个做法：排序 / 分档读 W（b）− 1，0 = 1.00 不增不减，正负两侧各自对半分
+    geometricGrowth: metric(row => {
+      const value = rowGeometricGrowth(row);
+      return value == null ? null : sortBinValue('geometricGrowth', value - 1);
+    }, importanceTimeAlpha),
     unitRise: metric(row => {
       const value = rowUnitRise(row);
       return value == null ? null : sortBinValue('unitRise', value);
@@ -603,7 +616,8 @@ export type CampaignSortBinning = {
 export function sortBinValue(mode: CampaignSortMode, value: number): number {
   switch (mode) {
     case 'captureRate': return Math.round(Number((value / 100).toFixed(2)) * 100);
-    case 'geometricExpectancy': return Number((1 + (Math.abs(value) < 0.0005 ? 0 : value)).toFixed(2)) - 1;
+    case 'geometricExpectancy':
+    case 'geometricGrowth': return Number((1 + (Math.abs(value) < 0.0005 ? 0 : value)).toFixed(2)) - 1;
     case 'arithmeticExpectancy': {
       const normalized = Math.abs(value) < 0.0005 ? 0 : value;
       const rounded = Number(normalized.toFixed(2));
@@ -708,7 +722,7 @@ function splitAtAnchors(
  * 此前的其它分界线（盈亏比 −1R、加仓效用 1、几何期望 0.90）随之不再是档界。预期回撤恒为正，照旧整体四分位。
  */
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency',
+  'realizedPnl', 'peakPriceChange', 'geometricGrowth',
   'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
   'unitRise', 'unitProfit', 'positionProfit',
 ]);

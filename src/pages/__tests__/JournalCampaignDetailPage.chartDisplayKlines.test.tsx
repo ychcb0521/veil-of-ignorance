@@ -181,7 +181,8 @@ function metricValue(label: string) {
  * 盈亏概览里读 K 线的四项：详情页按计算用 K 线现算（峰值涨幅、动态最大回撤直接扫 K 线，另两项由峰值涨幅派生），
  * 计算用 K 线还在路上时四项都写「加载中…」。其余各项不读 K 线。
  */
-const KLINE_READING_LABELS = ['峰值涨幅', '峰值涨幅倍数', '涨幅未兑现', '动态最大回撤'] as const;
+// 「峰值涨幅倍数」已删除（换成不读 K 线的几何增长 W（b）），读 K 线的剩三项
+const KLINE_READING_LABELS = ['峰值涨幅', '涨幅未兑现', '动态最大回撤'] as const;
 type KlineReadings = Record<(typeof KLINE_READING_LABELS)[number], string | null>;
 
 /** 页面上这四项此刻的字。 */
@@ -672,7 +673,7 @@ describe('加载与错误：显示用失败不影响读数；计算用失败单�
     await waitMainProbe('5m');
     // 计算用 K 线一根都还没交出来：四项本来会各自写成算不出的「—」，摆在画好的盘面旁边就像最终读数
     expect(accuracyCallsWithKlines()).toHaveLength(0);
-    expect(klineReadings()).toEqual({ 峰值涨幅: '加载中…', 峰值涨幅倍数: '加载中…', 涨幅未兑现: '加载中…', 动态最大回撤: '加载中…' });
+    expect(klineReadings()).toEqual({ 峰值涨幅: '加载中…', 涨幅未兑现: '加载中…', 动态最大回撤: '加载中…' });
     // 不读 K 线的项照常显示
     expect(metricValue('已实现 P&L')).toMatch(/USDT$/);
     expect(metricValue('涨跌幅')).toMatch(/%$/);
