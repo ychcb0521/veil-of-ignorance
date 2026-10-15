@@ -1,4 +1,5 @@
-import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
+import { LegExecutionWearDialog } from '@/components/journal/LegExecutionWearDialog';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear, type LegExecutionWear } from '@/lib/campaignExecutionWear';
 import { useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { UIEvent } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight, Crosshair, EyeOff, Unlink } from 'lucide-react';
@@ -98,10 +99,10 @@ interface Props {
   executionWear?: CampaignExecutionWear | null;
 }
 
-/** 「磨损」一格的悬停说明：各项带号金额。 */
-function executionWearTitle(row: LegExecutionWear): string {
-  return EXECUTION_WEAR_COMPONENTS.filter(part => row[part] != null)
-    .map(part => `${EXECUTION_WEAR_COMPONENT_LABEL[part]} ${formatExecutionWearUsd(row[part])} U`).join('\n');
+/** 「磨损」一格的悬停说明：各项读数（R）与金额。 */
+function executionWearTitle(row: LegExecutionWear, l0: number | null): string {
+  return [...EXECUTION_WEAR_COMPONENTS.filter(part => row[part] != null)
+    .map(part => `${EXECUTION_WEAR_COMPONENT_LABEL[part]} ${formatExecutionWearR(executionWearInR(row[part], l0))}（${formatExecutionWearUsd(row[part])} U）`), '点击查看计算过程'].join('\n');
 }
 
 /**
@@ -676,6 +677,9 @@ export function CampaignLegsList({
   executionWear = null,
 }: Props) {
   const [addSizingDetailLegId, setAddSizingDetailLegId] = useState<string | null>(null);
+  const [wearDetailLegId, setWearDetailLegId] = useState<string | null>(null);
+  /** L_磨损换算成 R 的分母：计算时用的 L₀，缺失时退回表头 ΔR 用的那个。 */
+  const wearL0 = executionWear?.initialExpectedMaxLoss ?? (initialExpectedMaxLoss != null && initialExpectedMaxLoss > 0 ? initialExpectedMaxLoss : null);
   const [geometricDetailLegId, setGeometricDetailLegId] = useState<string | null>(null);
   const [geometricDetailTheoretical, setGeometricDetailTheoretical] = useState(false);
   // 「占比」列的点击排序：只在本组件里记，不持久化；null = 默认顺序（legs 传进来的先后）。只有这一列能排，状态里只会是本列那一侧
@@ -891,7 +895,7 @@ export function CampaignLegsList({
             <div className="text-center" title={ADD_SIZING_COLUMN_HINT}>加仓校验</div>
             <div className="flex items-center justify-end gap-0.5 whitespace-nowrap" aria-label="L_磨损（逐腿）">
               <span>磨损</span>
-              <QuietInfo label="L_磨损（逐腿）"><p>{EXECUTION_WEAR_FORMULA}</p>{EXECUTION_WEAR_COMPONENTS.map(part => <p key={part}>{EXECUTION_WEAR_COMPONENT_RULES[part]}</p>)}<p>{EXECUTION_WEAR_RULE}每行是这条腿贡献的那部分（悬停看分项），合计行等于 L_磨损，括号里是 ÷ L₀ 的值。</p></QuietInfo>
+              <QuietInfo label="L_磨损（逐腿）"><p>{EXECUTION_WEAR_FORMULA}</p>{EXECUTION_WEAR_COMPONENTS.map(part => <p key={part}>{EXECUTION_WEAR_COMPONENT_RULES[part]}</p>)}<p>{EXECUTION_WEAR_RULE}每行是这条腿贡献的那部分（与盈亏比同一单位，括号里是金额；点开看计算过程），合计行等于 L_磨损。</p></QuietInfo>
             </div>
             <div className="text-right text-muted-foreground/60" title={FEE_COLUMN_HINT}>手续费</div>
             <div>委托</div>
@@ -1201,15 +1205,22 @@ export function CampaignLegsList({
                   {(() => {
                     const wear = executionWear?.byLeg[leg.id];
                     if (!wear) return <div data-testid={`leg-execution-wear-${leg.id}`} className="text-right text-[10px] leading-snug text-muted-foreground/30">—</div>;
-                    const rounded = Number(wear.total.toFixed(2));
+                    // 【用户要求】与盈亏比同一单位：核心读数是 R（÷ L₀），金额放在下面的括号里；点开看计算过程（同加仓校验）
+                    const r = executionWearInR(wear.total, wearL0);
+                    const rounded = Number((r ?? wear.total).toFixed(2));
+                    const tone = rounded < 0 ? 'text-[#F6465D] hover:bg-[#F6465D]/10 focus-visible:ring-[#F6465D]/50' : rounded > 0 ? 'text-[#0ECB81] hover:bg-[#0ECB81]/10 focus-visible:ring-[#0ECB81]/50' : 'text-foreground/45 hover:bg-foreground/[0.06] focus-visible:ring-foreground/30';
                     return (
-                      <div
+                      <button
+                        type="button"
                         data-testid={`leg-execution-wear-${leg.id}`}
-                        title={executionWearTitle(wear)}
-                        className={`min-w-0 truncate text-right text-[11px] leading-snug tabular-nums ${rounded < 0 ? 'text-[#F6465D]' : rounded > 0 ? 'text-[#0ECB81]' : 'text-foreground/45'}`}
+                        title={executionWearTitle(wear, wearL0)}
+                        aria-label={`L_磨损 ${formatExecutionWearR(r)}，点击查看计算过程`}
+                        onClick={() => setWearDetailLegId(leg.id)}
+                        className={`min-w-0 rounded px-0.5 text-right leading-snug tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 ${tone}`}
                       >
-                        {formatExecutionWearUsd(wear.total)}
-                      </div>
+                        <div className="truncate text-[11px] font-medium">{formatExecutionWearR(r)}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">({formatExecutionWearUsd(wear.total)} U)</div>
+                      </button>
                     );
                   })()}
                   {(() => {
@@ -1486,8 +1497,9 @@ export function CampaignLegsList({
                 title={executionWear ? `L_磨损 = ${EXECUTION_WEAR_COMPONENTS.filter(part => executionWear.components[part] != null).map(part => `${EXECUTION_WEAR_COMPONENT_LABEL[part]} ${formatExecutionWearUsd(executionWear.components[part])}`).join(' ＋ ')} U` : 'L_磨损算不出'}
                 className={`text-right text-[11px] font-medium tabular-nums leading-snug ${executionWear?.usd == null ? 'text-foreground/45' : Number(executionWear.usd.toFixed(2)) < 0 ? 'text-[#F6465D]' : Number(executionWear.usd.toFixed(2)) > 0 ? 'text-[#0ECB81]' : 'text-foreground/55'}`}
               >
-                <div>{formatExecutionWearUsd(executionWear?.usd)}</div>
-                {executionWear?.r != null && <div className="text-[10px] font-normal text-muted-foreground">({formatExecutionWearUsd(executionWear.r)})</div>}
+                {/* 【用户要求】核心读数是 R（与盈亏比同一单位），金额放进括号 */}
+                <div>{formatExecutionWearR(executionWear?.r)}</div>
+                {executionWear?.usd != null && <div className="text-[10px] font-normal text-muted-foreground">({formatExecutionWearUsd(executionWear.usd)} U)</div>}
               </div>
               <div
                 data-testid="legs-total-fees"
@@ -1513,6 +1525,14 @@ export function CampaignLegsList({
       >
         {foreignLiveOrdersNote}
       </div>
+    )}
+    {wearDetailLegId != null && executionWear?.byLeg[wearDetailLegId] && legs.find(item => item.id === wearDetailLegId) && (
+      <LegExecutionWearDialog
+        leg={legs.find(item => item.id === wearDetailLegId)!}
+        wear={executionWear.byLeg[wearDetailLegId]}
+        initialExpectedMaxLoss={wearL0}
+        onClose={() => setWearDetailLegId(null)}
+      />
     )}
     {selectedAddSizingLeg && (selectedAddSizingVerdict?.status === 'fail' || selectedAddSizingVerdict?.underAdded) && (
       <AddSizingDetailDialog

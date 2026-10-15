@@ -267,17 +267,18 @@ export function rowUnitRise(row: Pick<CampaignCardData, 'campaign' | 'legs' | 't
 }
 /** U（单位利润）= Q × G。 */
 /**
- * L_磨损（USDT）及其两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。
+ * L_磨损（R，与盈亏比同一单位：÷ L₀）及其两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。
  * 建卡时算好的字段优先；旧缓存 / 测试夹具没有时按腿现算（与几何指标同一份）。
  */
-export function rowExecutionWear(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'executionWearUsd' | 'hedgeWearUsd'>): { total: number | null; hedge: number | null; other: number | null } {
-  const total = row.executionWearUsd !== undefined ? row.executionWearUsd : rowGeometricMetrics(row).executionWearUsd ?? null;
-  const hedge = row.executionWearUsd !== undefined ? row.hedgeWearUsd ?? null : rowGeometricMetrics(row).hedgeWearUsd ?? null;
+export function rowExecutionWear(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'executionWearR' | 'hedgeWearR'>): { total: number | null; hedge: number | null; other: number | null } {
+  const cached = row.executionWearR !== undefined;
+  const total = cached ? row.executionWearR ?? null : rowGeometricMetrics(row).executionWearR ?? null;
+  const hedge = cached ? row.hedgeWearR ?? null : rowGeometricMetrics(row).hedgeWearR ?? null;
   if (total == null || !Number.isFinite(total)) return { total: null, hedge: null, other: null };
   const hedgePart = hedge != null && Number.isFinite(hedge) ? hedge : null;
   return { total, hedge: hedgePart, other: total - (hedgePart ?? 0) };
 }
-export function rowExecutionWearUsd(row: Parameters<typeof rowExecutionWear>[0]): number | null {
+export function rowExecutionWearR(row: Parameters<typeof rowExecutionWear>[0]): number | null {
   return rowExecutionWear(row).total;
 }
 export function rowUnitProfit(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitProfit'>): number | null {
@@ -581,7 +582,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       return value == null ? null : sortBinValue('unitRise', value);
     }, importanceTimeAlpha),
     executionWear: metric(row => {
-      const value = rowExecutionWearUsd(row);
+      const value = rowExecutionWearR(row);
       return value == null ? null : sortBinValue('executionWear', value);
     }, importanceTimeAlpha),
     unitProfit: metric(row => {
@@ -654,8 +655,9 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'positionAmplification': return Number(value.toFixed(2));
     case 'unitRise': return unitRiseBinValue(value);
     case 'unitProfit':
-    case 'executionWear':
     case 'positionProfit': return unitUsdBinValue(value);
+    // L_磨损与盈亏比同一单位（R），按两位小数分档
+    case 'executionWear': return Number(value.toFixed(2)) + 0;
     default: return value;
   }
 }

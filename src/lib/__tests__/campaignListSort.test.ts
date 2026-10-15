@@ -181,8 +181,8 @@ describe('每个排序项的独立比较器', () => {
     expect(rowOverviewSortMetric(makeSortRow({ id: 'flat', pnl: 0 }), 'realizedPnl')).toBe(0);
   });
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1, unitRise: 0.5, unitProfit: 5, positionProfit: 10, executionWearUsd: -5, hedgeWearUsd: -3 };
-  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null, unitRise: null, unitProfit: null, positionProfit: null, executionWearUsd: null };
+  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1, unitRise: 0.5, unitProfit: 5, positionProfit: 10, executionWearR: -0.05, hedgeWearR: -0.03 };
+  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null, unitRise: null, unitProfit: null, positionProfit: null, executionWearR: null };
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {
     for (const [mode, key] of Object.entries(keys)) {
@@ -905,14 +905,17 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
 });
 
 describe('【用户要求】L_磨损：排序项放在盈亏比后面，读数分成中途对冲 + 最终对冲磨损', () => {
-  it('建卡时算好的两部分：最终对冲磨损 = 总的 − 中途对冲；没有中途对冲时整个就是最终对冲磨损', () => {
-    const row = { ...makeSortRow({ id: 'w' }), executionWearUsd: -35, hedgeWearUsd: -30 };
-    expect(rowExecutionWear(row)).toEqual({ total: -35, hedge: -30, other: -5 });
-    expect(rowExecutionWear({ ...row, hedgeWearUsd: null })).toEqual({ total: -35, hedge: null, other: -35 });
-    expect(rowExecutionWear({ ...row, executionWearUsd: null })).toEqual({ total: null, hedge: null, other: null });
+  it('【用户要求】与盈亏比同一单位（R）：最终对冲磨损 = 总的 − 中途对冲；没有中途对冲时整个就是最终对冲磨损', () => {
+    const row = { ...makeSortRow({ id: 'w' }), executionWearR: -0.35, hedgeWearR: -0.3 };
+    const wear = rowExecutionWear(row);
+    expect(wear.total).toBe(-0.35);
+    expect(wear.hedge).toBe(-0.3);
+    expect(wear.other).toBeCloseTo(-0.05, 12);
+    expect(rowExecutionWear({ ...row, hedgeWearR: null })).toEqual({ total: -0.35, hedge: null, other: -0.35 });
+    expect(rowExecutionWear({ ...row, executionWearR: null })).toEqual({ total: null, hedge: null, other: null });
   });
-  it('按封面读数分档，以 0 为界', () => {
-    expect(sortBinValue('executionWear', -12345.678)).toBe(-12300);
+  it('与盈亏比一样按两位小数分档，以 0 为界', () => {
     expect(sortBinValue('executionWear', -3.456)).toBe(-3.46);
+    expect(Object.is(sortBinValue('executionWear', -0.001), -0)).toBe(false);
   });
 });

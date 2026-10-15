@@ -68,7 +68,7 @@ import {
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearParts, formatExecutionWearUsd, PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearParts, formatExecutionWearR, PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
 import { computeMagicB, payoffRatioHedgeWear, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { PAYOFF_RATIO_FORMULA } from '@/lib/campaignB';
@@ -152,7 +152,7 @@ import {
   rowGeometricGrowthTheoretical,
   rowUnitProfit,
   rowExecutionWear,
-  rowExecutionWearUsd,
+  rowExecutionWearR,
   rowPositionProfit,
   rowPositionProfitTheoretical,
   rowMainPriceEfficiency,
@@ -622,16 +622,16 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
         references: [{ value: 1, label: '1.00 不增不减', shareLabel: '增长（> 1）' }] },
     }];
   }),
-  // 【用户要求】L_磨损：时序 + 分布（默认分布），读总的 L_磨损（USDT），颜色按原盈亏比正负
+  // 【用户要求】L_磨损：时序 + 分布（默认分布），读总的 L_磨损（与盈亏比同一单位 R），颜色按原盈亏比正负
   ...(['executionWear'] as const).flatMap((key): CampaignMetricChartConfig[] => {
     const label = 'L_磨损';
     const definition = `${EXECUTION_WEAR_FORMULA}。${EXECUTION_WEAR_RULE}`;
-    const formatValue = (value: number) => `${formatExecutionWearUsd(value)} USDT`;
+    const formatValue = (value: number) => formatExecutionWearR(value);
     return [{
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
       viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
       guide: { yAxis: definition, point: '每个点是一场战役，按客观操作时间排列；点位是总的 L_磨损（含中途对冲的损益），颜色按该战役原盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
-        referenceLines: ['0 表示执行与模型一致；负数是磨损、正数是红利。L_磨损的单位是 USDT，可以跨标的比较。'] },
+        referenceLines: ['0 表示执行与模型一致；负数是磨损、正数是红利。L_磨损与盈亏比同一单位（÷ 初始最大预期亏损 L₀），可以跨标的比较。'] },
     }, {
       key: `${key}Distribution`, sourceKey: key,
       view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
@@ -639,7 +639,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       colorMode: 'signed', formatValue,
       guide: { yAxis: '同一读数附近的战役数量，点位向上堆叠。', point: `${definition} 横轴按封面读数，点的颜色按原盈亏比正负。`, colors: PAYOFF_SIGN_COLORS,
         referenceLines: [METRIC_DISTRIBUTION_DENSITY_NOTE, METRIC_DISTRIBUTION_CLAMP_NOTE] },
-      distribution: { unit: 'USDT', zeroLine: true, zeroLabel: '0 无磨损', zeroMeaning: '执行与模型一致', positiveShareLabel: '红利（> 0）' },
+      distribution: { unit: 'R', zeroLine: true, zeroLabel: '0 无磨损', zeroMeaning: '执行与模型一致', positiveShareLabel: '红利（> 0）' },
     }];
   }),
   // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W：与神奇的 b 同一套时序 + 分布，颜色按原盈亏比正负
@@ -1422,8 +1422,8 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'magicB': return value.toFixed(2);
     case 'unitRise': return formatCompactUnitRise(value);
     case 'unitProfit':
-    case 'executionWear':
     case 'positionProfit': return formatCompactUsd(value);
+    case 'executionWear': return formatExecutionWearR(value);
     case 'positionGeometricMultipleTheoretical':
     case 'positionGeometricMultiple':
     case 'positionAmplification': return formatPositionAmplification(value);
@@ -1666,10 +1666,10 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     // 【用户要求】封面数字不能太长：≥ 1 万写「w」，G 统一约 4 位有效数字（详情页盈亏概览仍写完整精度）
     unitRise: formatCompactUnitRise(rowUnitRise(row)),
     unitProfit: formatCompactUsd(rowUnitProfit(row)),
-    // 【用户要求】L_磨损：数值写总的，括号里是中途对冲的损益 + 最终对冲磨损；封面紧凑写法（≥ 1 万写 w）
+    // 【用户要求】L_磨损：与盈亏比同一单位（R）；数值写总的，括号里是中途对冲的损益 + 最终对冲磨损
     executionWear: (() => {
       const wear = rowExecutionWear(row);
-      return formatExecutionWearParts(wear.total, wear.hedge, wear.other, formatCompactUsd);
+      return formatExecutionWearParts(wear.total, wear.hedge, wear.other, formatExecutionWearR);
     })(),
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
     positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatCompactUsd),
@@ -2103,7 +2103,7 @@ const CampaignCard = memo(function CampaignCard({
           <div data-testid="campaign-execution-wear" className={metricCell('executionWear')} data-sort-highlight={litAttr('executionWear')}
             title={`${EXECUTION_WEAR_FORMULA}。读数写总的，括号里是中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。${EXECUTION_WEAR_RULE}`}>
             <dt className={metricName('executionWear')}>{CARD_METRIC_LABEL.executionWear}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-execution-wear-value" className={`${CARD_METRIC_VALUE} ${signTone(rowExecutionWearUsd(row) == null ? null : sortBinValue('executionWear', rowExecutionWearUsd(row)!), 'text-foreground/80')}`}>{readings.executionWear}</span></dd>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-execution-wear-value" className={`${CARD_METRIC_VALUE} ${signTone(rowExecutionWearR(row) == null ? null : sortBinValue('executionWear', rowExecutionWearR(row)!), 'text-foreground/80')}`}>{readings.executionWear}</span></dd>
           </div>
           {/* 【用户要求】「几何增长」与「几何期望」合并为几何期望，放在盈亏比后面：方法一（方法二/方法三） */}
           <div
@@ -2706,11 +2706,11 @@ export default function JournalCampaignsPage() {
     };
   }, [scopedRows]);
   /**
-   * 【用户要求】统计概览的 L_磨损：当前列表里已结束战役的 L_磨损加总（总磨损），括号里两部分相加——
-   * 中途对冲的损益 + 最终对冲磨损；浮层另写场数、每场平均与平均 ÷ L₀。
+   * 【用户要求】统计概览的 L_磨损（与盈亏比同一单位 R）：当前列表里已结束战役的 L_磨损加总（总磨损），括号里两部分相加——
+   * 中途对冲的损益 + 最终对冲磨损；浮层另写场数与每场平均。
    */
   const executionWearSummary = useMemo(() => {
-    let count = 0, total = 0, hedge = 0, other = 0, rSum = 0, rCount = 0;
+    let count = 0, total = 0, hedge = 0, other = 0;
     for (const row of scopedRows) {
       if (!isResolvedCampaign(row.campaign)) continue;
       const wear = rowExecutionWear(row);
@@ -2719,10 +2719,8 @@ export default function JournalCampaignsPage() {
       total += wear.total;
       hedge += wear.hedge ?? 0;
       other += wear.other ?? 0;
-      const r = row.executionWearR;
-      if (r != null && Number.isFinite(r)) { rSum += r; rCount += 1; }
     }
-    return count === 0 ? null : { count, total, hedge, other, mean: total / count, meanR: rCount ? rSum / rCount : null, rCount };
+    return count === 0 ? null : { count, total, hedge, other, mean: total / count };
   }, [scopedRows]);
   // 镜像止盈达成统计（战役维度，全表口径）。
   const mirrorTp = useMemo(
@@ -3028,7 +3026,7 @@ export default function JournalCampaignsPage() {
       return value == null ? null : sortBinValue('unitRise', value);
     });
     const executionWear = buildSeries(row => {
-      const value = rowExecutionWearUsd(row);
+      const value = rowExecutionWearR(row);
       return value == null ? null : sortBinValue('executionWear', value);
     });
     const unitProfit = buildSeries(row => {
@@ -4900,8 +4898,8 @@ export default function JournalCampaignsPage() {
                           <div className="rounded border border-border/60 px-2 py-1.5 leading-relaxed text-foreground/85">
                             {EXECUTION_WEAR_COMPONENTS.map(part => <div key={part}>{EXECUTION_WEAR_COMPONENT_RULES[part]}</div>)}
                           </div>
-                          <div>读数写总的 L_磨损（USDT），括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（{EXECUTION_WEAR_COMPONENTS.slice(1).map(part => EXECUTION_WEAR_COMPONENT_LABEL[part]).join('、')}），例如「-35.00（-30.00-5.00）」；任一部分为 0 时括号不写。封面满 1 万写「w」。</div>
-                          <div>{EXECUTION_WEAR_RULE}L_磨损 ÷ L₀ 就是盈亏比括号里的磨损值。</div>
+                          <div>读数写总的 L_磨损（与盈亏比同一单位：÷ L₀），括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（{EXECUTION_WEAR_COMPONENTS.slice(1).map(part => EXECUTION_WEAR_COMPONENT_LABEL[part]).join('、')}），例如「-0.35（-0.30-0.05）」；任一部分为 0 时括号不写。</div>
+                          <div>{EXECUTION_WEAR_RULE}</div>
                           <div>排序、分档按封面读数，以 0 为界：负的一侧与正的一侧各按场数对半分。</div>
                         </div>
                       </>
@@ -5384,13 +5382,13 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-execution-wear-stat"
-                  aria-label={`L_磨损 ${executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatCompactUsd) : '—'} USDT，点击查看计算公式`}
+                  aria-label={`L_磨损 ${executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatExecutionWearR) : '—'}，点击查看计算公式`}
                   onClick={event => toggleFormulaPopover(event, 'executionWearStat')}
                   className={`${STAT_TRIGGER} border-transparent`}
                 >
                   <span className={STAT_LABEL}>L_磨损</span>{' '}
                   <span className={`${STAT_VALUE} ${statSignTone(executionWearSummary == null ? null : sortBinValue('executionWear', executionWearSummary.total))}`}>
-                    {executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatCompactUsd) : '—'}
+                    {executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatExecutionWearR) : '—'}
                   </span>
                 </button>
               </PopoverTrigger>
@@ -5400,9 +5398,9 @@ export default function JournalCampaignsPage() {
                 {executionWearSummary ? (
                   <div className="mt-2 space-y-1 text-muted-foreground" data-testid="campaign-execution-wear-stat-worked">
                     <div className="font-mono text-foreground">
-                      {formatExecutionWearUsd(executionWearSummary.hedge)} {executionWearSummary.other < 0 ? '−' : '+'} {Math.abs(executionWearSummary.other).toFixed(2)} = {formatExecutionWearUsd(executionWearSummary.total)} USDT（{executionWearSummary.count} 场）
+                      {formatExecutionWearR(executionWearSummary.hedge)} {executionWearSummary.other < 0 ? '−' : '+'} {Math.abs(executionWearSummary.other).toFixed(2)} = {formatExecutionWearR(executionWearSummary.total)}（{executionWearSummary.count} 场）
                     </div>
-                    <div className="font-mono">每场平均 {formatExecutionWearUsd(executionWearSummary.mean)} USDT{executionWearSummary.meanR != null && <>；平均 ÷ L₀ {formatExecutionWearUsd(executionWearSummary.meanR)}</>}</div>
+                    <div className="font-mono">每场平均 {formatExecutionWearR(executionWearSummary.mean)}</div>
                     <div>读数写总的 L_磨损，括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。取样：当前列表里已结束、算得出 L_磨损的战役。</div>
                     <div>{EXECUTION_WEAR_RULE}</div>
                   </div>

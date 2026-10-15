@@ -64,6 +64,12 @@ describe('【用户要求】L_磨损 = 中途对冲 + 最终对冲磨损（多�
     expect(wear.byLeg.mid).toMatchObject({ hedge: -30, exit: null, slippage: null, sizing: null, total: -30 });
     expect(wear.byLeg.lock.total).toBeCloseTo(-5, 9);
     expect(wear.byLeg.lock.hedge).toBeNull();
+    // 点开 Legs「磨损」要代入的每一个数
+    expect(wear.byLeg.mid.detail).toEqual({ kind: 'midHedge', pnl: -30 });
+    expect(wear.byLeg.lock.detail).toMatchObject({ kind: 'finalHedge', coins: 10, entry: 108, shortExit: 112, finalExitPrice: 108,
+      longCoins: 15, hedgeCoinsTotal: 10, sizingOwner: true, orderPrice: 108.5, fillPrice: 108 });
+    expect((wear.byLeg.lock.detail as { longExit: number }).longExit).toBeCloseTo(longExit, 9);
+    expect(wear.initialExpectedMaxLoss).toBe(100);
   });
 
   it('多空同量、同一个价平掉：平仓价差与数量差都是 0，只剩委托/成交差', () => {

@@ -119,10 +119,9 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '盈亏比', width: 12, note: '已实现净盈亏 ÷ 初始最大预期亏损 L₀；没有加仓的战役同样计算。', value: row => finite(rowPayoffRatio(row)) },
     { header: '神奇的 b', width: 12, note: `${MAGIC_B_METHODS_DESCRIPTION} ${MAGIC_B_RULE}`, value: row => finite(rowMagicB(row)) },
     // 【用户要求】L_磨损：多空平仓价差、对冲委托/成交差、对冲数量差，与中途对冲磨损合并
-    { header: 'L_磨损（USDT）', width: 13, note: `总的 L_磨损。${EXECUTION_WEAR_FORMULA}。${Object.values(EXECUTION_WEAR_COMPONENT_RULES).join('')}${EXECUTION_WEAR_RULE}`, value: row => finite(rowExecutionWear(row).total) },
-    { header: 'L_磨损·中途对冲（USDT）', width: 16, note: 'L_磨损括号里的第一部分：中途对冲空单（不含锁住行情的那几张）的已实现盈亏之和。', value: row => finite(rowExecutionWear(row).hedge) },
-    { header: 'L_磨损·最终对冲（USDT）', width: 14, note: 'L_磨损括号里的第二部分：多空平仓价差 + 对冲委托/成交差 + 对冲数量差。', value: row => finite(rowExecutionWear(row).total == null ? null : rowExecutionWear(row).other) },
-    { header: 'L_磨损（R）', width: 11, note: 'L_磨损 ÷ 初始最大预期亏损 L₀；与盈亏比括号里的磨损值同一个数。', value: row => finite(row.executionWearR) },
+    { header: 'L_磨损', width: 10, note: `与盈亏比同一单位（金额 ÷ 初始最大预期亏损 L₀）。${EXECUTION_WEAR_FORMULA}。${Object.values(EXECUTION_WEAR_COMPONENT_RULES).join('')}${EXECUTION_WEAR_RULE}`, value: row => finite(rowExecutionWear(row).total) },
+    { header: 'L_磨损·中途对冲', width: 14, note: 'L_磨损括号里的第一部分（÷ L₀）：中途对冲空单（不含锁住行情的那几张）的已实现盈亏之和。', value: row => finite(rowExecutionWear(row).hedge) },
+    { header: 'L_磨损·最终对冲', width: 14, note: 'L_磨损括号里的第二部分（÷ L₀）：多空平仓价差 + 对冲委托/成交差 + 对冲数量差。', value: row => finite(rowExecutionWear(row).total == null ? null : rowExecutionWear(row).other) },
     { header: '单位涨幅 G', width: 12, note: `${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`, value: row => finite(rowUnitRise(row)) },
     { header: '单位利润 U（USDT）', width: 14, note: `${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}`, value: row => finite(rowUnitProfit(row)) },
     { header: '仓位利润 W（USDT）', width: 14, note: `${POSITION_PROFIT_FORMULA}，几何仓位取实际值。单位 USDT。`, value: row => finite(rowPositionProfit(row)) },

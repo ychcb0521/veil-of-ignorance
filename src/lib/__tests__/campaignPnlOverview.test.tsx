@@ -541,14 +541,15 @@ describe('【用户要求】L_磨损：盈亏概览新增一项，并与盈亏�
   it('L_磨损紧跟盈亏比：数值写总的，括号里是中途对冲 + 最终对冲磨损，红色；说明里列出各项，算不出的写「—」', () => {
     const item = items().executionWear;
     expect(item.label).toBe('L_磨损');
-    expect(item.value).toBe('−35.00 USDT（−30.00−5.00）');
+    // 【用户要求】与盈亏比同一单位：÷ L₀ 100
+    expect(item.value).toBe('-0.35（-0.30-0.05）');
     expect(item.valueClassName).toBe('text-[#F6465D]');
     expect(item.column).toBe(0);
-    expect(render(<>{item.help}</>).container.querySelector('[data-testid="execution-wear-worked"]')).toHaveTextContent('本场：L_磨损 = 中途对冲 −30.00 ＋ 最终对冲磨损 −5.00 = −35.00 U');
+    expect(render(<>{item.help}</>).container.querySelector('[data-testid="execution-wear-worked"]')).toHaveTextContent('本场：L_磨损 =（中途对冲 −30.00 ＋ 最终对冲磨损 −5.00）U ÷ L₀ 100.00 U = −35.00 ÷ 100.00 ≈ -0.35');
     const help = render(<>{item.help}</>).container;
-    expect(help.querySelector('[data-testid="execution-wear-hedge"]')).toHaveTextContent('中途对冲：−30.00 U');
+    expect(help.querySelector('[data-testid="execution-wear-hedge"]')).toHaveTextContent('中途对冲：-0.30（−30.00 U）');
     expect(help.querySelector('[data-testid="execution-wear-exit"]')).toHaveTextContent('多空平仓价差：—（本场不适用或读不到依据）');
-    expect(help.querySelector('[data-testid="execution-wear-slippage"]')).toHaveTextContent('对冲委托/成交差：−5.00 U');
+    expect(help.querySelector('[data-testid="execution-wear-slippage"]')).toHaveTextContent('对冲委托/成交差：-0.05（−5.00 U）');
   });
 
   it('盈亏比括号里的磨损 = L_磨损 ÷ L₀（不再只看中途对冲）；方法二按它代入', () => {

@@ -1,5 +1,5 @@
 import { computeCampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
-import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENTS, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
+import { executionWearInR, formatExecutionWearR, formatExecutionWearUsd, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { HEDGE_TYPE_LABELS } from '@/lib/hedgeTypes';
 import {
   buildTradeRecordLookup,
@@ -702,6 +702,8 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     leg => settlement.byLeg.get(leg.id) ?? null,
   );
   const executionWear = exportExecutionWear(input);
+  /** 【用户要求】L_磨损与盈亏比同一单位：核心读数是 R（÷ L₀），金额放进括号。 */
+  const wearL0 = executionWear?.initialExpectedMaxLoss ?? (input.initialExpectedMaxLoss != null && input.initialExpectedMaxLoss > 0 ? input.initialExpectedMaxLoss : null);
 
   // 阶段拆解（与页面同源）：按对冲的完整存续窗口切换暴露状态
   const hedgeBoundaries = input.legs
@@ -910,15 +912,14 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
         }
         return [{ text: '—', color: '#C4CAD3', size: 11 }];
       })(),
-      // 磨损：这条腿贡献的 L_磨损，下行写主要来自哪一项
+      // 磨损：这条腿贡献的 L_磨损（R），下行括号里是金额
       (() => {
         const wear = executionWear?.byLeg[leg.id];
         if (!wear) return [{ text: '—', color: '#C4CAD3', size: 11 }];
-        const main = EXECUTION_WEAR_COMPONENTS.filter(part => wear[part] != null)
-          .sort((a, b) => Math.abs(wear[b]!) - Math.abs(wear[a]!))[0];
+        const r = executionWearInR(wear.total, wearL0);
         return [
-          { text: formatExecutionWearUsd(wear.total), color: wearColor(wear.total), size: 12 },
-          ...(main ? [{ text: EXECUTION_WEAR_COMPONENT_LABEL[main], color: '#9AA4B2', size: 10 }] : []),
+          { text: formatExecutionWearR(r), color: wearColor(r ?? wear.total), size: 12 },
+          { text: `(${formatExecutionWearUsd(wear.total)} U)`, color: '#9AA4B2', size: 10 },
         ];
       })(),
       // 手续费：与页面同源，同样刻意做淡——合计在上、开/平拆分在下，明细在页面的 tooltip 里。
@@ -1060,12 +1061,12 @@ export function buildCampaignLegsExportRows(input: ExportInput): CampaignLegsExp
     [{ text: '' }],
     // 加仓校验
     [{ text: '' }],
-    // 磨损：合计 = L_磨损，下行 ÷ L₀
+    // 磨损：合计 = L_磨损（R），下行括号里是金额
     executionWear?.usd == null
       ? [{ text: '—', color: '#A3ABB8' }]
       : [
-        { text: formatExecutionWearUsd(executionWear.usd), color: wearColor(executionWear.usd), size: 12 },
-        ...(executionWear.r != null ? [{ text: `(${formatExecutionWearUsd(executionWear.r)})`, color: '#9AA4B2', size: 10 }] : []),
+        { text: formatExecutionWearR(executionWear.r), color: wearColor(executionWear.r ?? executionWear.usd), size: 12 },
+        { text: `(${formatExecutionWearUsd(executionWear.usd)} U)`, color: '#9AA4B2', size: 10 },
       ],
     feeTotals == null
       ? [{ text: '—', color: '#A3ABB8' }]
