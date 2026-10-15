@@ -279,7 +279,7 @@ export interface BackgroundAnchor {
 const FIVE_MINUTES_MS = 5 * 60_000;
 
 /** 确定性伪随机（mulberry32）：同一 seed 每次得到同一批点，便于复现。 */
-function mulberry32(seed: number): () => number {
+export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6D2B79F5) >>> 0;
