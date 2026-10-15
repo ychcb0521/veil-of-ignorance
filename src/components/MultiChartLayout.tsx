@@ -3,7 +3,7 @@ import type { ChartImperativeApi } from "./CandlestickChart";
 import { CandlestickChart } from "./CandlestickChart";
 import { TimeframeSelector } from "./TimeframeSelector";
 import { LayoutGrid, Columns, Square, Maximize2, Minimize2, Clock3, Gauge, ChevronDown } from "lucide-react";
-import type { KlineData } from "@/hooks/useBinanceData";
+import { klineAmountFields, type KlineData } from "@/hooks/useBinanceData";
 import type { TradeRecord, PendingOrder } from "@/types/trading";
 import { SIMULATION_SPEED_OPTIONS } from "@/lib/simulationSpeeds";
 
@@ -131,6 +131,7 @@ export function MultiChartLayout({
           low: +k[3],
           close: +k[4],
           volume: +k[5],
+          ...klineAmountFields(k),
         }));
         setSubCharts((prev) => {
           const next = [...prev];

@@ -665,7 +665,7 @@ export default function GuidePage() {
 
               <SubTitle>盘面指标</SubTitle>
               <P>
-                主图右上角的<strong>「指标」</strong>入口打开指标面板：可搜索、可按<strong>趋势 / 动量 / 波动率 / 量能</strong>分类筛选。目录共 106 项，其中 <strong>43 项已实现</strong>可直接加载，未实现的条目在列表中灰显、点不动——<strong>不会给你一条画不出数的空线</strong>。叠加类指标（均线、通道等）画在主图上，震荡类指标各占一个副图窗格。
+                主图右上角的<strong>「指标」</strong>入口打开指标面板：可搜索、可按<strong>趋势 / 动量 / 波动率 / 量能</strong>分类筛选。目录共 107 项，其中 <strong>44 项已实现</strong>可直接加载，未实现的条目在列表中灰显、点不动——<strong>不会给你一条画不出数的空线</strong>。叠加类指标（均线、通道等）画在主图上，震荡类指标各占一个副图窗格。
               </P>
               <SubTitle>衡量波动率方差：HV 历史波动率</SubTitle>
               <P>
@@ -683,6 +683,25 @@ export default function GuidePage() {
               <Highlight>
                 这条线回答的是「<strong>现在这段行情比平时躁动多少</strong>」。它与 P_gap 是互补的两件事：P_gap 用 K 与 T 的距离度量你<strong>主动设定</strong>的风险几何，HV 度量市场<strong>客观呈现</strong>的波动幅度。同样的止损距离，在高 HV 环境里被扫的概率要高得多——把止损放在多远才不算「送」，本就该随 HV 调整。
               </Highlight>
+
+              <SubTitle>动态谢林点 DSP：共识价往哪走、走多快</SubTitle>
+              <P>
+                量能分类下的<strong>「动态谢林点 DSP（含 V / A 副图）」</strong>按你给定的规格实现：把<strong>净资金力量</strong>、<strong>主动买方优势</strong>、<strong>价格实际变化</strong>和<strong>时间远近</strong>结合起来，
+                刻画多空博弈形成的共识价格（谢林点）的移动方向与速度。<strong>成交量一律用成交金额（USDT）</strong>：主动买入额直接取交易所 K 线自带的 Taker Buy 成交额，主动卖出额 = 成交额 − 主动买入额，绝不拿币数代替。
+              </P>
+              <div className="my-3 rounded bg-muted/60 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground">
+                Nₜ = |Bₜ − Sₜ|　　Fₜ = ln(1 + Nₜ ÷ (EMA(Bₜ + Sₜ) + ε))<br />
+                Aₜ = (Bₜ − Sₜ) ÷ (Bₜ + Sₜ + ε)　　Gₜ = 1 + α·max(Aₜ, 0)<br />
+                Rₜ = ln(Cₜ ÷ Cₜ₋₁)　　Uₜ = Fₜ × Gₜ × Rₜ<br />
+                Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Uₜ，ρ = 2^(−周期 ÷ h)　　DSPₜ = DSPₜ₋₁ × e^(κ·Vₜ)，DSP₀ = C₀
+              </div>
+              <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
+                <li><strong>一次加三样。</strong>主图一条 DSP 线（V &gt; 0 的段绿色、V &lt; 0 的段红色），下面两个副图：<strong>V 迁移速度</strong>（单位基点 / 根，即 × 10⁴）与 <strong>A 主动买方优势</strong>（−1 ~ 1 的柱，绿 = 主动买方占优），两个副图都以虚线 0 为多空平衡线，纵轴总是包含 0。</li>
+                <li><strong>默认参数。</strong>半衰期 h = 6 小时（指标面板里那个数字就是 h，单位小时），α = 1，κ = 1；5 分钟线 ρ = 2^(−5/360)。换到别的周期时 ρ 按实际周期换算，半衰期仍是 h 小时。EMA(Bₜ + Sₜ) 用同一个半衰期。</li>
+                <li><strong>宁缺勿假。</strong>某根 K 线没有成交额数据时，不拿币数凑：这一根不推动共识（Fₜ = 0）、A 留空，V 照常衰减。</li>
+                <li><strong>起点会变。</strong>DSP₀ 取图上最早一根的收盘价，所以图表往左加载更早的 K 线后，整条 DSP 会按新起点重算、整体平移；V 与 A 不受起点影响。</li>
+                <li><strong>读数与价格的距离。</strong>默认 κ = 1 时，DSP 每根只走 Fₜ·Gₜ·Rₜ 的平滑值，而 Fₜ 一般只有 0.05～0.3，所以趋势行情里 DSP 只跟上价格对数变动的一小部分，会与 K 线拉开距离；这是公式本身的性质，不是画错了。</li>
+              </ul>
 
               <SubTitle>多币种时间模式：同步 / 隔离</SubTitle>
               <P>

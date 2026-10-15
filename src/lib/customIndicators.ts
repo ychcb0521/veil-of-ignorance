@@ -3,7 +3,8 @@
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { registerIndicator, type KLineData } from 'klinecharts';
+import { IndicatorSeries, registerIndicator, type KLineData } from 'klinecharts';
+import { computeDsp, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -127,6 +128,37 @@ export function computeAnnualizedVolatility(
     }
   }
   return out;
+}
+
+/** klinecharts 数据 → DSP：成交额读 turnover，主动买入额读 takerBuyTurnover（toKLineData 写入）。 */
+function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
+  const h = Number(halfLifeHours);
+  return computeDsp(
+    dataList.map(d => ({
+      time: d.timestamp,
+      close: d.close,
+      quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+      takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+    })),
+    { halfLifeHours: Number.isFinite(h) && h > 0 ? h : DSP_DEFAULTS.halfLifeHours },
+  );
+}
+
+/** 副图的 0 轴（多空平衡线）：直接画一条虚线，不当成数据系列（否则纵轴上会多一个 0 的标签）。 */
+function drawZeroLine({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
+  const y = Math.round(yAxis.convertToPixel(0)) + 0.5;
+  if (y >= 0 && y <= bounding.height) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(132,142,156,0.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(bounding.width, y);
+    ctx.stroke();
+    ctx.restore();
+  }
+  return false;
 }
 
 let registered = false;
@@ -718,6 +750,67 @@ export function registerCustomIndicators() {
     },
   });
 
+  // ─── 动态谢林点 DSP（主图）+ 迁移速度 V、主动买方优势 A（两个副图）───
+  // 【用户要求】2026-10-15 按用户规格；计算在 dynamicSchellingPoint.ts。成交额来自 K 线的 turnover / takerBuyTurnover（USDT），缺失不拿币数凑。
+  // 三个指标各算一遍同一个 computeDsp（同一份数据、同一个半衰期），结果一致。
+  registerIndicator({
+    name: 'DSP_CUSTOM',
+    shortName: 'DSP',
+    series: IndicatorSeries.Price,
+    calcParams: [DSP_DEFAULTS.halfLifeHours],
+    figures: [{
+      key: 'dsp', title: 'DSP: ', type: 'line',
+      // V > 0 绿、V < 0 红：曲线往哪边走一眼可见
+      styles: (data) => {
+        const v = (data.current.indicatorData as { v?: number } | undefined)?.v;
+        return { color: v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D', size: 2 };
+      },
+    }],
+    calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.dsp == null ? {} : { dsp: p.dsp, v: p.v ?? undefined })),
+  });
+
+  registerIndicator({
+    name: 'DSP_V_CUSTOM',
+    shortName: 'DSP·V',
+    calcParams: [DSP_DEFAULTS.halfLifeHours],
+    precision: 3,
+    // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
+    minValue: 0,
+    maxValue: 0,
+    draw: drawZeroLine,
+    figures: [
+      {
+        key: 'v', title: 'V(基点/根): ', type: 'line',
+        styles: (data) => {
+          const v = (data.current.indicatorData as { v?: number } | undefined)?.v;
+          return { color: v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D', size: 1.5 };
+        },
+      },
+    ],
+    calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? {} : { v: p.v * DSP_V_DISPLAY_SCALE })),
+  });
+
+  registerIndicator({
+    name: 'DSP_A_CUSTOM',
+    shortName: 'DSP·A',
+    calcParams: [DSP_DEFAULTS.halfLifeHours],
+    precision: 3,
+    // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
+    minValue: 0,
+    maxValue: 0,
+    draw: drawZeroLine,
+    figures: [
+      {
+        key: 'a', title: '主动买方优势 A: ', type: 'bar', baseValue: 0,
+        styles: (data) => {
+          const a = (data.current.indicatorData as { a?: number } | undefined)?.a ?? 0;
+          return { color: a >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)' };
+        },
+      },
+    ],
+    calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.a == null ? {} : { a: p.a })),
+  });
+
     registered = true;
   } catch (e) {
     console.error('Failed to register custom indicators:', e);
@@ -762,6 +855,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   AROON: 'AROON_CUSTOM',
   STDEV: 'STDEV_CUSTOM',
   HV: 'HV_CUSTOM',
+  DSP: 'DSP_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

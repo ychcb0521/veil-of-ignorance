@@ -2,7 +2,7 @@
  * useReplayKlines — 拉取指定时间范围 + 周期的历史 K 线（只读，不挂在主 useBinanceData 上）
  */
 import { useEffect, useRef, useState } from 'react';
-import { intervalToMs, type KlineData } from '@/hooks/useBinanceData';
+import { intervalToMs, klineAmountFields, type KlineData } from '@/hooks/useBinanceData';
 import { normalizeReplayKlines } from '@/lib/replayKlineWindow';
 
 export type ReplayKlineRequestPriority = 'interactive' | 'background';
@@ -178,7 +178,7 @@ async function fetchKlinePage(url: string, signal?: AbortSignal): Promise<KlineD
             throw new ReplayKlineRequestError('K 线数据不完整', 'invalid-response', true);
           }
           const [time, open, high, low, close, volume] = values;
-          return { time, open, high, low, close, volume };
+          return { time, open, high, low, close, volume, ...klineAmountFields(row) };
         });
       })(),
     ]);

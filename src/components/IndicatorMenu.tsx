@@ -17,6 +17,9 @@ export interface IndicatorCatalogItem {
   color: string;
   /** Category for grouping */
   category: 'trend' | 'momentum' | 'volatility' | 'volume' | 'oscillator' | 'other';
+  /** 参数框的含义（悬停提示）与单位（框后小字）；不写就是普通的「周期」。 */
+  periodHint?: string;
+  periodUnit?: string;
 }
 
 // Determine support status dynamically: if we have a mapping, it's supported
@@ -140,6 +143,8 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   { id: 'CORR',   nameZh: '相关系数',                nameEn: 'Correlation Coefficient',     isOverlay: false, defaultPeriod: 20, color: '#67E8F9', category: 'volatility' },
 
   // --- Volume ---
+  // 【用户要求】动态谢林点：主图 DSP 线 + 副图 迁移速度 V、主动买方优势 A；参数 = 时间半衰期（小时），成交量一律用金额
+  { id: 'DSP',    nameZh: '动态谢林点 DSP（含 V / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h' },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },
@@ -363,8 +368,10 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
               value={active.period}
               onChange={e => { e.stopPropagation(); onUpdatePeriod(item.id, parseInt(e.target.value) || item.defaultPeriod); }}
               onClick={e => e.stopPropagation()}
+              title={item.periodHint}
               className="w-12 px-1 py-0.5 rounded text-[10px] font-mono text-right bg-secondary border border-border text-foreground"
             />
+            {item.periodUnit && <span className="-ml-1 text-[10px] text-muted-foreground">{item.periodUnit}</span>}
             <Check className="w-3.5 h-3.5 text-primary" />
           </>
         ) : (

@@ -99,7 +99,22 @@ const OVERLAY_INDICATOR_IDS = new Set([
   "TYPP",
   "AVGP",
   "VWAP",
+  "DSP",
 ]);
+
+/**
+ * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开两个副图——迁移速度 V、主动买方优势 A。
+ * 附属副图用「主项#后缀」作 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除。
+ */
+const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = {
+  DSP: [
+    { key: "DSP#V", kcName: "DSP_V_CUSTOM" },
+    { key: "DSP#A", kcName: "DSP_A_CUSTOM" },
+  ],
+};
+const COMPANION_KC_NAME: Record<string, string> = Object.fromEntries(
+  Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName]),
+);
 
 const MAIN_ADD_MARKER_PATTERN = /^A\d+$/;
 const ANALYSIS_ANNOTATION_GROUP_ID = "analysis_annotations";
@@ -280,6 +295,9 @@ function toKLineData(d: KlineData): KLineData {
     low: d.low,
     close: d.close,
     volume: d.volume,
+    // 金额两列（USDT）：动态谢林点只用金额；没有就不写，指标按缺失处理
+    ...(d.quoteVolume != null ? { turnover: d.quoteVolume } : {}),
+    ...(d.takerBuyQuoteVolume != null ? { takerBuyTurnover: d.takerBuyQuoteVolume } : {}),
   };
 }
 
@@ -2094,6 +2112,20 @@ function CandlestickChartComponent({
           chart.overrideIndicator({ name: kcName, calcParams: [ind.period] });
         } catch {}
       }
+
+      for (const companion of INDICATOR_COMPANIONS[ind.type] ?? []) {
+        currentActive.add(companion.key);
+        if (!activeIndicatorPanes.current.has(companion.key)) {
+          try {
+            const paneId = chart.createIndicator({ name: companion.kcName, calcParams: [ind.period] }, false, { height: 80 });
+            activeIndicatorPanes.current.set(companion.key, paneId);
+          } catch (e) {
+            console.warn(`Failed to create indicator ${companion.key}:`, e);
+          }
+        } else {
+          try { chart.overrideIndicator({ name: companion.kcName, calcParams: [ind.period] }); } catch {}
+        }
+      }
     }
 
     // Remove indicators that are no longer active
@@ -2101,7 +2133,7 @@ function CandlestickChartComponent({
       if (!currentActive.has(type)) {
         try {
           const isOverlay = OVERLAY_INDICATOR_IDS.has(type);
-          let kcName = KLINE_INDICATOR_MAP[type];
+          let kcName = COMPANION_KC_NAME[type] ?? KLINE_INDICATOR_MAP[type];
           if (!kcName) kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
           if (paneId) {
             chart.removeIndicator(paneId, kcName);

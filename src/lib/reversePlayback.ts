@@ -27,6 +27,13 @@ export function snapToBarStart(time: number, intervalMs: number): number {
   return Math.floor(time / intervalMs) * intervalMs;
 }
 
+/** 成交额两列随量一起按进度缩放；原始 K 线没有就不带。 */
+function amountFields(bar: KlineData, progress: number): Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'> {
+  return bar.quoteVolume != null && bar.takerBuyQuoteVolume != null
+    ? { quoteVolume: bar.quoteVolume * progress, takerBuyQuoteVolume: bar.takerBuyQuoteVolume * progress }
+    : {};
+}
+
 /** 时间反射（对合：mirrorTime(cap, mirrorTime(cap, t)) === t）。 */
 export function mirrorTime(capTime: number, time: number): number {
   return 2 * capTime - time;
@@ -41,6 +48,7 @@ export function mirrorSettledBar(bar: KlineData, capTime: number): KlineData {
     low: bar.low,
     close: bar.open,
     volume: bar.volume,
+    ...amountFields(bar, 1),
   };
 }
 
@@ -68,6 +76,7 @@ export function reverseFormingBar(
     low: Math.min(open, close, rawLow),
     close,
     volume: bar.volume * progress,
+    ...amountFields(bar, progress),
   };
 }
 

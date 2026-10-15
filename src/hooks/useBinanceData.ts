@@ -8,6 +8,18 @@ export interface KlineData {
   low: number;
   close: number;
   volume: number;
+  /** 成交额（USDT，币安 K 线第 8 列）。动态谢林点等指标只用金额，缺失时不拿币数凑。 */
+  quoteVolume?: number;
+  /** 主动买入成交额（USDT，币安 K 线第 11 列）。 */
+  takerBuyQuoteVolume?: number;
+}
+
+/** 币安 K 线数组的两列金额（第 8 列成交额、第 11 列主动买入额）；缺失或非法就不带这两个字段。 */
+export function klineAmountFields(row: readonly unknown[]): Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'> {
+  const q = Number(row[7]);
+  const b = Number(row[10]);
+  if (!(Number.isFinite(q) && q >= 0 && Number.isFinite(b) && b >= 0 && row[7] != null && row[10] != null)) return {};
+  return { quoteVolume: q, takerBuyQuoteVolume: Math.min(b, q) };
 }
 
 // Interval string → milliseconds
@@ -100,6 +112,7 @@ async function fetchBatch(
     low: parseFloat(k[3]),
     close: parseFloat(k[4]),
     volume: parseFloat(k[5]),
+    ...klineAmountFields(k),
   }));
 }
 
@@ -350,6 +363,9 @@ export function useBinanceData() {
           low,
           close,
           volume: last.volume * progress,
+          ...(last.quoteVolume != null && last.takerBuyQuoteVolume != null
+            ? { quoteVolume: last.quoteVolume * progress, takerBuyQuoteVolume: last.takerBuyQuoteVolume * progress }
+            : {}),
         };
       }
 
