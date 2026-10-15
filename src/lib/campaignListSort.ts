@@ -50,6 +50,7 @@ export type CampaignSortMode =
   | 'magicB'
   | 'unitRise'
   | 'unitProfit'
+  | 'executionWear'
   | 'positionProfit'
   | 'initialExpectedMaxLoss'
   | 'realizedPnl'
@@ -78,6 +79,7 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'positionGeometricMultiple',
   'magicB',
   'captureRate',
+  'executionWear',
   'geometricExpectancy',
   'initialExpectedMaxLoss',
   'realizedPnl',
@@ -123,6 +125,7 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'unitRise',
   'unitProfit',
   'positionProfit',
+  'executionWear',
   'geometricExpectancy',
   'arithmeticExpectancy',
 ]);
@@ -263,6 +266,20 @@ export function rowUnitRise(row: Pick<CampaignCardData, 'campaign' | 'legs' | 't
   return row.unitRise !== undefined ? row.unitRise : rowGeometricMetrics(row).unitRise ?? null;
 }
 /** U（单位利润）= Q × G。 */
+/**
+ * L_磨损（USDT）及其两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。
+ * 建卡时算好的字段优先；旧缓存 / 测试夹具没有时按腿现算（与几何指标同一份）。
+ */
+export function rowExecutionWear(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'executionWearUsd' | 'hedgeWearUsd'>): { total: number | null; hedge: number | null; other: number | null } {
+  const total = row.executionWearUsd !== undefined ? row.executionWearUsd : rowGeometricMetrics(row).executionWearUsd ?? null;
+  const hedge = row.executionWearUsd !== undefined ? row.hedgeWearUsd ?? null : rowGeometricMetrics(row).hedgeWearUsd ?? null;
+  if (total == null || !Number.isFinite(total)) return { total: null, hedge: null, other: null };
+  const hedgePart = hedge != null && Number.isFinite(hedge) ? hedge : null;
+  return { total, hedge: hedgePart, other: total - (hedgePart ?? 0) };
+}
+export function rowExecutionWearUsd(row: Parameters<typeof rowExecutionWear>[0]): number | null {
+  return rowExecutionWear(row).total;
+}
 export function rowUnitProfit(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitProfit'>): number | null {
   return row.unitProfit !== undefined ? row.unitProfit : rowGeometricMetrics(row).unitProfit ?? null;
 }
@@ -563,6 +580,10 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowUnitRise(row);
       return value == null ? null : sortBinValue('unitRise', value);
     }, importanceTimeAlpha),
+    executionWear: metric(row => {
+      const value = rowExecutionWearUsd(row);
+      return value == null ? null : sortBinValue('executionWear', value);
+    }, importanceTimeAlpha),
     unitProfit: metric(row => {
       const value = rowUnitProfit(row);
       return value == null ? null : sortBinValue('unitProfit', value);
@@ -633,6 +654,7 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'positionAmplification': return Number(value.toFixed(2));
     case 'unitRise': return unitRiseBinValue(value);
     case 'unitProfit':
+    case 'executionWear':
     case 'positionProfit': return unitUsdBinValue(value);
     default: return value;
   }
@@ -720,7 +742,7 @@ function splitAtAnchors(
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
   'realizedPnl', 'peakPriceChange',
   'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
-  'unitRise', 'unitProfit', 'positionProfit',
+  'unitRise', 'unitProfit', 'positionProfit', 'executionWear',
 ]);
 
 /** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */

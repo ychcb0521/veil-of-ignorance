@@ -76,7 +76,7 @@ export interface CampaignGeometricMetrics {
   /** 中途对冲空单已实现盈亏之和（U）与参与计数的腿数，供说明代入。 */
   hedgeWearUsd?: number | null;
   hedgeWearLegCount?: number;
-  /** L_磨损 ÷ L₀（带号）：中途对冲 + 多空平仓价差 + 委托/成交滑点 + 加仓数量偏差；盈亏比括号里显示它。 */
+  /** L_磨损 ÷ L₀（带号）：中途对冲 + 最终对冲磨损；盈亏比括号里显示它。 */
   executionWearR?: number | null;
   /** L_磨损（USDT）。 */
   executionWearUsd?: number | null;
@@ -306,8 +306,7 @@ export function computeCampaignGeometricMetrics(
   const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
   const executionWear = computeCampaignExecutionWear({
     legs, executions, lookup, settlement, corrections, orders,
-    finalExitPrice, lockingLegIds: priceChange.lockingLegIds ?? [],
-    addSteps: steps, theoreticalFactors, initialExpectedMaxLoss,
+    finalExitPrice, lockingLegIds: priceChange.lockingLegIds ?? [], initialExpectedMaxLoss,
   });
   const unitRise = computeUnitRise(finalExitPrice, lastSupport);
   const unitProfit = computeUnitProfit(initialCoins, unitRise);

@@ -19,7 +19,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     const labels = [...block.matchAll(/value: '([A-Za-z]+)', label: '([^']+)'/g)].filter(match => shown.has(match[1])).map(match => match[2]);
     // 【用户要求】排序行只放封面上有的指标，再加操作时间与自评、字母，次序沿用原表
     expect(labels).toEqual([
-      '操作时间', '预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', '几何期望', '仓位放大', '加仓效用', '算术期望', '单位涨幅', '单位利润', '仓位利润',
+      '操作时间', '预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', 'L_磨损', '几何期望', '仓位放大', '加仓效用', '算术期望', '单位涨幅', '单位利润', '仓位利润',
       '首仓涨跌幅', '首仓涨跌幅倍数', '涨幅未兑现', '镜像止盈', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
@@ -47,7 +47,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 【用户要求】封面长数字加「w」（万）、单位涨幅统一有效数字
     expect(guide).toContain('满 1 万写「w」（万，如 2.80w）');
     expect(guide).not.toContain('<strong>等宽的统计格</strong>');
-    expect(guide).toContain('<strong>顺序与排序行一致</strong>：预期回撤、相对涨幅、加仓次数、几何仓位、神奇的 b、盈亏比、几何期望、仓位放大、加仓效用、单场算术期望、单位涨幅、单位利润、仓位利润、首仓涨跌幅、首仓涨跌幅倍数、涨幅未兑现、镜像止盈状态');
+    expect(guide).toContain('<strong>顺序与排序行一致</strong>：预期回撤、相对涨幅、加仓次数、几何仓位、神奇的 b、盈亏比、L_磨损、几何期望、仓位放大、加仓效用、单场算术期望、单位涨幅、单位利润、仓位利润、首仓涨跌幅、首仓涨跌幅倍数、涨幅未兑现、镜像止盈状态');
     // 【用户要求】仓位放大：排序行与封面都放在加仓次数的后面
     expect(guide).toContain('<strong>仓位放大</strong>紧跟加仓次数：主方向总名义仓位 ÷ 主力开仓名义仓位');
     expect(guide).toContain('<strong>同名的项在上下各张卡片上落在同一条竖线上</strong>');
@@ -58,7 +58,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).not.toContain('列宽按真实最长的读数定');
     expect(guide).not.toContain('卡片按原顺序自然换行');
     // 【用户要求】两排等宽网格取代「按读数定宽」：不再随读数、时间段或排序改宽度，切换排序时文字不挪
-    expect(guide).toContain('屏幕 ≥ 1280px 时每排九格、十七项分两排，640–1279px 每排六格，手机每行两项');
+    expect(guide).toContain('屏幕 ≥ 1280px 时每排九格、十八项正好两排，640–1279px 每排六格，手机每行两项');
     expect(guide).not.toContain('宽度按<strong>当前列表里实际出现的读数</strong>定');
     expect(page).not.toContain('cardMetricWidthStyle');
     expect(guide).toContain('切换排序时文字不会挪动');

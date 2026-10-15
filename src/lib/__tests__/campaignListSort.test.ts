@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  rowExecutionWear,
   appendSortLevel,
   CAMPAIGN_SORT_MODES,
   OVERVIEW_EXTRA_SORT_MODES,
@@ -180,8 +181,8 @@ describe('每个排序项的独立比较器', () => {
     expect(rowOverviewSortMetric(makeSortRow({ id: 'flat', pnl: 0 }), 'realizedPnl')).toBe(0);
   });
   const keys = buildCampaignSortKeys<CampaignSortRow>();
-  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1, unitRise: 0.5, unitProfit: 5, positionProfit: 10 };
-  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null, unitRise: null, unitProfit: null, positionProfit: null };
+  const withValue = { ...makeSortRow({ id: 'v', time: '2026-01-01T00:00:00.000Z', leverage: 5, dd: 2, pcr: 100, mpc: 2, add: true, arith: 0.5, geo: 1.1, amp: 2.5 }), positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 3, effectivePriceChangePct: 10, magicB: 1, unitRise: 0.5, unitProfit: 5, positionProfit: 10, executionWearUsd: -5, hedgeWearUsd: -3 };
+  const empty = { ...makeSortRow({ id: 'e', time: null, leverage: null, dd: 0, pcr: null, mpc: null, arith: null, geo: null }), positionGeometricMultiple: null, positionGeometricMultipleTheoretical: null, effectivePriceChangePct: null, unitRise: null, unitProfit: null, positionProfit: null, executionWearUsd: null };
 
   it('缺值的判定与第一级的过滤一致（镜像止盈、重要性、字母没有缺值）', () => {
     for (const [mode, key] of Object.entries(keys)) {
@@ -480,7 +481,7 @@ describe('【用户已定】连续指标作第一级时按四分位分档', () =
     expect([...CONTINUOUS_SORT_MODES].sort()).toEqual([
       'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangeMultiple', 'effectivePriceChangePct', 'expectedDrawdownPct',
       'geometricExpectancy', 'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'positionAmplification', 'positionGeometricMultiple', 'positionGeometricMultipleTheoretical', 'unrealizedPriceChangePct',
-      'unitRise', 'unitProfit', 'positionProfit',
+      'unitRise', 'unitProfit', 'positionProfit', 'executionWear',
       ...OVERVIEW_EXTRA_SORT_MODES,
     ].sort());
     // 第一级算不出的战役本来就不进列表，也不参与档界
@@ -782,10 +783,10 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    // 【用户要求】几何期望（原几何增长与几何期望合并）紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后
-    expect(CAMPAIGN_SORT_MODES.slice(0, 8)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricExpectancy']);
-    expect(CAMPAIGN_SORT_MODES.slice(12, 16)).toEqual(['arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit']);
-    expect(CAMPAIGN_SORT_MODES.slice(20, 22)).toEqual(['dynamicMaxDrawdownPct', 'mirrorTp']);
+    // 【用户要求】L_磨损、几何期望紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后
+    expect(CAMPAIGN_SORT_MODES.slice(0, 9)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy']);
+    expect(CAMPAIGN_SORT_MODES.slice(13, 17)).toEqual(['arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit']);
+    expect(CAMPAIGN_SORT_MODES.slice(21, 23)).toEqual(['dynamicMaxDrawdownPct', 'mirrorTp']);
     expect(CAMPAIGN_SORT_MODES).not.toContain('geometricGrowth');
     expect(DEFAULT_CAMPAIGN_SORT_CHAIN).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
@@ -900,5 +901,18 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
     const picked = selectSortMode(DEFAULT_CAMPAIGN_SORT_CHAIN, 'positionAmplification');
     expect(picked).toEqual([{ mode: 'positionAmplification', direction: 'desc' }]);
     expect(selectSortMode(picked, 'positionAmplification')).toEqual([{ mode: 'positionAmplification', direction: 'asc' }]);
+  });
+});
+
+describe('【用户要求】L_磨损：排序项放在盈亏比后面，读数分成中途对冲 + 最终对冲磨损', () => {
+  it('建卡时算好的两部分：最终对冲磨损 = 总的 − 中途对冲；没有中途对冲时整个就是最终对冲磨损', () => {
+    const row = { ...makeSortRow({ id: 'w' }), executionWearUsd: -35, hedgeWearUsd: -30 };
+    expect(rowExecutionWear(row)).toEqual({ total: -35, hedge: -30, other: -5 });
+    expect(rowExecutionWear({ ...row, hedgeWearUsd: null })).toEqual({ total: -35, hedge: null, other: -35 });
+    expect(rowExecutionWear({ ...row, executionWearUsd: null })).toEqual({ total: null, hedge: null, other: null });
+  });
+  it('按封面读数分档，以 0 为界', () => {
+    expect(sortBinValue('executionWear', -12345.678)).toBe(-12300);
+    expect(sortBinValue('executionWear', -3.456)).toBe(-3.46);
   });
 });

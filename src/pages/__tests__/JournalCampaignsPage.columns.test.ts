@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
 
 /** 【用户要求】封面十八项的次序（2026-10-15）：几何增长紧跟盈亏比；单位涨幅 / 单位利润 / 仓位利润接在算术期望后；几何期望接在涨幅未兑现后。 */
-const CARD_MODES = ["expectedDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","captureRate","geometricExpectancy","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","unrealizedPriceChangePct","mirrorTp"];
+const CARD_MODES = ["expectedDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","captureRate","executionWear","geometricExpectancy","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","unrealizedPriceChangePct","mirrorTp"];
 const METRIC_MODES = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","mirrorTp","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy"];
 
 function constBlock(s: string, name: string): string {
@@ -81,7 +81,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(order.filter(mode => cells.some(([cellMode]) => cellMode === mode))).toEqual(cells.map(([mode]) => mode));
   });
 
-  it('【用户要求】数值字号一致：不再按读数估宽、不再按格宽缩字号；十七项次序与排序行一致', () => {
+  it('【用户要求】数值字号一致：不再按读数估宽、不再按格宽缩字号；十八项次序与排序行一致', () => {
     const s = src();
     for (const gone of ['fitMetricValue', 'cardMetricColumnWidths', 'cardMetricWidthStyle', '--cm-w-', 'CARD_METRIC_WIDTH_CLASS', 'CARD_METRIC_UNIFORM_WIDTH']) {
       expect(s, gone).not.toContain(gone);

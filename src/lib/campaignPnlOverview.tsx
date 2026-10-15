@@ -5,7 +5,7 @@ import type { AsymmetricRiskContribution } from '@/lib/asymmetricRiskMetrics';
 import { formatCampaignPayoffRatio, type CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import type { CampaignBoardPnlItem } from '@/lib/campaignLegsPngExport';
 import { computePositionAmplification } from '@/lib/campaignPositionAmplification';
-import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatExecutionWearUsd, PAYOFF_RATIO_WEAR_FORMULA, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
+import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, finalHedgeWear, formatExecutionWearParts, formatExecutionWearUsd, PAYOFF_RATIO_WEAR_FORMULA, type CampaignExecutionWear } from '@/lib/campaignExecutionWear';
 import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, PAYOFF_RATIO_HEDGE_WEAR_RULE, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_RULE, positionGeometricMultiple, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
 import {
   ARITHMETIC_EXPECTANCY_WIN_RATE,
@@ -136,7 +136,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
  * 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望、按三种算法）；
- * 单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面；L_磨损 放在第三列最后。三列 7 / 8 / 6 项。
+ * 【用户要求】L_磨损放在盈亏比后面；单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面。三列 8 / 8 / 5 项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -145,6 +145,7 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'positionGeometricMultiple',
   'magicB',
   'payoffRatio',
+  'executionWear',
   'geometricExpectancy',
 ];
 
@@ -169,7 +170,6 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
-  'executionWear',
 ];
 
 /**
@@ -366,6 +366,10 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   const hedgeWear = payoffRatioHedgeWear(magicB, wearR);
   const methodTwo = magicB != null && wearR != null ? magicB + wearR : null;
   const wearParts = metrics.executionWear?.components;
+  // 括号里的两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）
+  const wearOther = wearParts ? finalHedgeWear(wearParts) : null;
+  const wearReading = formatExecutionWearParts(wearUsd, wearParts?.hedge ?? null, wearOther, formatExecutionWearUsd)
+    .replace(/^([^（]+)/, '$1 USDT');
   const wearPartsText = wearParts
     ? EXECUTION_WEAR_COMPONENTS.filter(part => wearParts[part] != null).map(part => `${EXECUTION_WEAR_COMPONENT_LABEL[part]} ${formatExecutionWearUsd(wearParts[part])}`).join(' ＋ ')
     : '';
@@ -542,7 +546,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       // 【用户要求】L_磨损：多空最终平仓价不一致、委托价与成交价不一致、加仓数量超覆盖 / 不够覆盖，与中途对冲磨损合并
       key: 'executionWear',
       label: 'L_磨损',
-      value: wearUsd == null || !hasExecutionWear ? '—' : `${formatExecutionWearUsd(wearUsd)} USDT${wearR == null ? '' : `（${formatExecutionWearUsd(wearR)}）`}`,
+      // 【用户要求】数值写总的，括号里写两部分相加：中途对冲的损益 + 最终对冲磨损
+      value: wearUsd == null || !hasExecutionWear ? '—' : wearReading,
       color: pnlExportColor(hasExecutionWear && wearUsd != null ? Number(wearUsd.toFixed(2)) : null),
       valueClassName: pnlColor(hasExecutionWear && wearUsd != null ? Number(wearUsd.toFixed(2)) : null),
       help: (
@@ -554,7 +559,8 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
               <p>{EXECUTION_WEAR_COMPONENT_RULES[part]}</p>
             </div>
           ))}
-          {hasExecutionWear && wearUsd != null && <p className="font-mono text-foreground">本场：L_磨损 = {formatExecutionWearUsd(wearUsd)} U{wearR != null && <>；÷ L₀ {initialExpectedMaxLoss.toFixed(2)} U ≈ {formatExecutionWearUsd(wearR)}（盈亏比括号里的磨损值）</>}</p>}
+          {hasExecutionWear && wearUsd != null && <p className="font-mono text-foreground" data-testid="execution-wear-worked">本场：L_磨损 = 中途对冲 {formatExecutionWearUsd(wearParts?.hedge ?? 0)} ＋ 最终对冲磨损 {formatExecutionWearUsd(wearOther ?? 0)} = {formatExecutionWearUsd(wearUsd)} U{wearR != null && <>；÷ L₀ {initialExpectedMaxLoss.toFixed(2)} U ≈ {formatExecutionWearUsd(wearR)}（盈亏比括号里的磨损值）</>}</p>}
+          <p>读数写总的 L_磨损，括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）；任一部分为 0 时括号不写。</p>
           <p>{EXECUTION_WEAR_RULE}Legs 表「磨损」列逐腿列出，合计行等于 L_磨损。</p>
         </>
       ),

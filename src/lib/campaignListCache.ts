@@ -74,6 +74,8 @@ export type CampaignCardData = {
   positionProfitTheoretical?: number | null;
   /** 中途对冲空单的累积磨损值 ΔR（带号）；见 computeCampaignGeometricMetrics。 */
   hedgeWearR?: number | null;
+  /** 中途对冲空单已实现盈亏之和（USDT）：L_磨损括号里的第一部分。 */
+  hedgeWearUsd?: number | null;
   /** L_磨损 ÷ L₀（带号，已含中途对冲磨损）：盈亏比括号里显示它；旧缓存没有时退回 hedgeWearR。 */
   executionWearR?: number | null;
   /** L_磨损（USDT）。 */

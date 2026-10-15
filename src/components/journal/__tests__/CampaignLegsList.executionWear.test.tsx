@@ -19,6 +19,7 @@ const leg = {
   pre_position_size: 1000, post_realized_pnl: 100, post_simulated_close_time: new Date(record.closeTime).toISOString(),
   created_at: '2026-09-12T00:00:00.000Z', updated_at: '2026-09-12T00:00:00.000Z',
 } as TradeJournal;
+/** 只验证渲染：哪一行有磨损由计算决定（只有中途对冲单与最终对冲单），这里直接给一行。 */
 const wear: CampaignExecutionWear = {
   usd: -12.5, r: -0.125,
   components: { hedge: null, exit: -10.5, slippage: -2, sizing: null },
@@ -31,7 +32,7 @@ describe('【用户要求】Legs 表的「磨损」列：L_磨损逐腿列出', 
     const cell = screen.getByTestId('leg-execution-wear-leg-1');
     expect(cell).toHaveTextContent('−12.50');
     expect(cell).toHaveClass('text-[#F6465D]');
-    expect(cell.getAttribute('title')).toBe('多空平仓价差 −10.50 U\n委托/成交滑点 −2.00 U');
+    expect(cell.getAttribute('title')).toBe('多空平仓价差 −10.50 U\n对冲委托/成交差 −2.00 U');
     const total = screen.getByTestId('legs-total-execution-wear');
     expect(total).toHaveTextContent('−12.50(−0.13)');
     expect(screen.getByTestId('legs-header-row').children).toHaveLength(screen.getByTestId('legs-total-row').children.length);
