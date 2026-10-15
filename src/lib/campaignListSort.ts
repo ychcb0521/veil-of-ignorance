@@ -1,3 +1,4 @@
+import { unitRiseBinValue, unitUsdBinValue } from '@/lib/campaignUnitProfit';
 import type { CampaignCardData } from '@/lib/campaignListCache';
 import { campaignHasMainAdd, campaignMainAddCount, computeAddEfficiency, computeMainPriceEfficiency } from '@/lib/campaignMainPriceChange';
 import { computeUnrealizedPriceChangePct } from '@/lib/campaignPnlOverview';
@@ -47,6 +48,9 @@ export type CampaignSortMode =
   | 'effectivePriceChangePct'
   | 'effectivePriceChangeMultiple'
   | 'magicB'
+  | 'unitRise'
+  | 'unitProfit'
+  | 'positionProfit'
   | 'initialExpectedMaxLoss'
   | 'realizedPnl'
   | 'peakPriceChange'
@@ -74,6 +78,9 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'addCount',
   'positionGeometricMultiple',
   'magicB',
+  'unitRise',
+  'unitProfit',
+  'positionProfit',
   'captureRate',
   'initialExpectedMaxLoss',
   'realizedPnl',
@@ -115,6 +122,9 @@ export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<Camp
   'effectivePriceChangePct',
   'effectivePriceChangeMultiple',
   'magicB',
+  'unitRise',
+  'unitProfit',
+  'positionProfit',
   'geometricExpectancy',
   'arithmeticExpectancy',
 ]);
@@ -248,6 +258,23 @@ export function rowRelativePriceChange(row: Parameters<typeof rowEffectivePriceC
 export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'effectivePriceChangePct' | 'effectivePriceChangeMultiple' | 'initialExpectedMaxDrawdownPct'>): number | null {
   return row.effectivePriceChangeMultiple !== undefined ? row.effectivePriceChangeMultiple
     : computeEffectivePriceChangeMultiple(rowEffectivePriceChangePct(row), row.initialExpectedMaxDrawdownPct);
+}
+
+/** G（单位涨幅）= F − Kₘ；建卡时算好，没有这个字段的行（旧缓存）现算。 */
+export function rowUnitRise(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitRise'>): number | null {
+  return row.unitRise !== undefined ? row.unitRise : rowGeometricMetrics(row).unitRise ?? null;
+}
+/** U（单位利润）= Q × G。 */
+export function rowUnitProfit(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitProfit'>): number | null {
+  return row.unitProfit !== undefined ? row.unitProfit : rowGeometricMetrics(row).unitProfit ?? null;
+}
+/** W（仓位利润）= U × 几何仓位。 */
+export function rowPositionProfit(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionProfit'>): number | null {
+  return row.positionProfit !== undefined ? row.positionProfit : rowGeometricMetrics(row).positionProfit ?? null;
+}
+/** W（理论）= U × 几何仓位（理论）。 */
+export function rowPositionProfitTheoretical(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'positionProfitTheoretical'>): number | null {
+  return row.positionProfitTheoretical !== undefined ? row.positionProfitTheoretical : rowGeometricMetrics(row).positionProfitTheoretical ?? null;
 }
 
 export function rowMagicB(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'magicB'> & {profitCaptureRatio?: number | null}): number | null {
@@ -523,6 +550,18 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
       const value = rowMagicB(row);
       return value == null ? null : sortBinValue('magicB', value);
     }, importanceTimeAlpha),
+    unitRise: metric(row => {
+      const value = rowUnitRise(row);
+      return value == null ? null : sortBinValue('unitRise', value);
+    }, importanceTimeAlpha),
+    unitProfit: metric(row => {
+      const value = rowUnitProfit(row);
+      return value == null ? null : sortBinValue('unitProfit', value);
+    }, importanceTimeAlpha),
+    positionProfit: metric(row => {
+      const value = rowPositionProfit(row);
+      return value == null ? null : sortBinValue('positionProfit', value);
+    }, importanceTimeAlpha),
     alpha: {
       include: always,
       missing: never,
@@ -582,6 +621,9 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'effectivePriceChangeMultiple':
     case 'magicB':
     case 'positionAmplification': return Number(value.toFixed(2));
+    case 'unitRise': return unitRiseBinValue(value);
+    case 'unitProfit':
+    case 'positionProfit': return unitUsdBinValue(value);
     default: return value;
   }
 }
@@ -668,6 +710,7 @@ function splitAtAnchors(
 const SIGN_SPLIT_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
   'realizedPnl', 'peakPriceChange', 'peakPriceEfficiency',
   'captureRate', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'addEfficiency', 'arithmeticExpectancy', 'geometricExpectancy', 'effectivePriceChangePct', 'effectivePriceChangeMultiple', 'magicB',
+  'unitRise', 'unitProfit', 'positionProfit',
 ]);
 
 /** 这一项分档时是否以 0 为界、正负两侧各自对半分。 */

@@ -25,6 +25,10 @@ import {
 import { formatLegPriceChangePct } from '@/lib/legPriceChange';
 
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
+import {
+  formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
+  UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
+} from '@/lib/campaignUnitProfit';
 
 /** Actual factors, kept together when wrapping; full-precision product, rounded display only. */
 function EffectivePriceChangeWorked({ basis }: { basis?: CampaignGeometricMetrics['geometricMetricBasis'] }) {
@@ -103,6 +107,9 @@ export type CampaignPnlOverviewItemKey =
   | 'effectivePriceChangePct'
   | 'effectivePriceChangeMultiple'
   | 'magicB'
+  | 'unitRise'
+  | 'unitProfit'
+  | 'positionProfit'
   | 'peakUnrealizedPnl'
   | 'initialExpectedMaxLoss'
   | 'mainSideNotional'
@@ -126,7 +133,8 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 
 /**
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
- * 页面、反事实与 PNG 导出都使用这份清单，每列六项。
+ * 页面、反事实与 PNG 导出都使用这份清单。
+ * 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W 接在神奇的 b 之后（几何链：相对涨幅 → 几何仓位 → b → G → U → W），左列九项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -134,6 +142,9 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
   'positionGeometricMultiple',
   'magicB',
+  'unitRise',
+  'unitProfit',
+  'positionProfit',
   'payoffRatio',
 ];
 
@@ -214,6 +225,13 @@ export interface CampaignPnlOverviewMetrics {
   positionGeometricMultipleTheoretical?: number | null;
   addCount?: number | null;
   magicB?: number | null;
+  /** G（单位涨幅）= F − Kₘ。 */
+  unitRise?: number | null;
+  /** U（单位利润）= Q × G。 */
+  unitProfit?: number | null;
+  /** W（仓位利润）= U × 几何仓位；理论 = U × 几何仓位（理论）。 */
+  positionProfit?: number | null;
+  positionProfitTheoretical?: number | null;
   hedgeWearR?: number | null;
   hedgeWearUsd?: number | null;
   hedgeWearLegCount?: number;
@@ -741,6 +759,58 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       } />
       {magicB == null && <p>几何仓位或相对涨幅缺少有效依据时显示「—」。</p>}
       <p>{MAGIC_B_RULE}</p></>,
+    });
+  }
+  {
+    // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W：说明里给公式与本场代入
+    const basis = metrics.geometricMetricBasis;
+    const F = basis?.finalExitPrice ?? null;
+    const Km = basis?.lastSupport ?? null;
+    const Q = basis?.initialCoins ?? null;
+    const G = metrics.unitRise ?? null;
+    const U = metrics.unitProfit ?? null;
+    const W = metrics.positionProfit ?? null;
+    const WT = metrics.positionProfitTheoretical ?? null;
+    const m = metrics.positionGeometricMultiple ?? null;
+    const mT = metrics.positionGeometricMultipleTheoretical ?? null;
+    const coins = (value: number) => Number(value.toPrecision(8)).toString();
+    const worked = (lines: ReactNode) => (
+      <div className="space-y-1 border-t border-border/60 pt-2 font-mono tabular-nums break-words">
+        <div className="font-sans text-[10px] font-medium text-muted-foreground">本场计算过程</div>
+        {lines}
+        <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
+      </div>
+    );
+    built.push({
+      key: 'unitRise', label: '单位涨幅 G', value: formatUnitRise(G),
+      color: pnlExportColor(G), valueClassName: pnlColor(G),
+      help: <><p className="font-mono">{UNIT_RISE_FORMULA}</p><p>{UNIT_RISE_RULE}</p>
+        {G != null && F != null && Km != null
+          ? worked(<div>G = {formatUnitRise(F)} − {formatUnitRise(Km)} ≈ {formatUnitRise(G)}</div>)
+          : <p>本场：—</p>}
+        <p>{UNIT_METRICS_MISSING_RULE}</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p></>,
+    });
+    built.push({
+      key: 'unitProfit', label: '单位利润 U', value: formatUnitUsd(U),
+      color: pnlExportColor(U), valueClassName: pnlColor(U),
+      help: <><p className="font-mono">{UNIT_PROFIT_FORMULA}</p><p>{UNIT_PROFIT_RULE}</p>
+        {U != null && Q != null && G != null
+          ? worked(<div>U = {coins(Q)} 币 × {formatUnitRise(G)} ≈ {formatUnitUsd(U)} USDT</div>)
+          : <p>本场：—</p>}
+        <p>{UNIT_METRICS_MISSING_RULE}</p></>,
+    });
+    built.push({
+      key: 'positionProfit', label: '仓位利润 W',
+      value: formatActualTheoreticalMetric(W, WT, formatUnitUsd),
+      color: pnlExportColor(W), valueClassName: pnlColor(W),
+      help: <><p>读数括号内为理论值（U × 几何仓位（理论）），括号前为实际值。</p><p className="font-mono">{POSITION_PROFIT_FORMULA}</p><p>{POSITION_PROFIT_RULE}</p>
+        {W != null && U != null && m != null
+          ? worked(<>
+            <div>W = {formatUnitUsd(U)} × {m.toFixed(4)} ≈ {formatUnitUsd(W)} USDT</div>
+            {WT != null && mT != null && <div>W（理论）= {formatUnitUsd(U)} × {mT.toFixed(4)} ≈ {formatUnitUsd(WT)} USDT</div>}
+          </>)
+          : <p>本场：—</p>}
+        <p>{UNIT_METRICS_MISSING_RULE}</p></>,
     });
   }
   const byKey = new Map(built.map(item => [item.key, item]));

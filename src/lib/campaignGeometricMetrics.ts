@@ -60,6 +60,14 @@ export interface CampaignGeometricMetrics {
   positionGeometricMultiple: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
+  /** G（单位涨幅）= F − Kₘ：最终卖出价减末次加仓的成本线（价格差，U/币）；F、Kₘ 与相对涨幅同一份。 */
+  unitRise?: number | null;
+  /** U（单位利润）= Q × G：Q 为首仓币数（U）。 */
+  unitProfit?: number | null;
+  /** W（仓位利润）= U × 几何仓位（U）。 */
+  positionProfit?: number | null;
+  /** W（理论）= U × 几何仓位（理论）（U）。 */
+  positionProfitTheoretical?: number | null;
   /** 中途对冲空单的累积磨损值 ΔR（带号，亏损为负）；没有中途对冲空单或缺 L₀ 时 null。 */
   hedgeWearR?: number | null;
   /** 中途对冲空单已实现盈亏之和（U）与参与计数的腿数，供说明代入。 */
@@ -129,6 +137,27 @@ export function computeMagicB(risePct: number | null | undefined, positionMultip
   return Number.isFinite(value) ? value : null;
 }
 
+/** G（单位涨幅）= F − Kₘ；任一价格缺失或非正时 null（与相对涨幅同一套有效性判断）。 */
+export function computeUnitRise(exitPrice: number | null | undefined, stopLine: number | null | undefined): number | null {
+  if (exitPrice == null || stopLine == null || !Number.isFinite(exitPrice) || !Number.isFinite(stopLine) || exitPrice <= 0 || stopLine <= 0) return null;
+  const value = exitPrice - stopLine;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** U（单位利润）= Q × G。 */
+export function computeUnitProfit(initialCoins: number | null | undefined, unitRise: number | null | undefined): number | null {
+  if (initialCoins == null || unitRise == null || !Number.isFinite(initialCoins) || !Number.isFinite(unitRise) || initialCoins <= 0) return null;
+  const value = initialCoins * unitRise;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** W（仓位利润）= U × 几何仓位。 */
+export function computePositionProfit(unitProfit: number | null | undefined, positionMultiple: number | null | undefined): number | null {
+  if (unitProfit == null || positionMultiple == null || !Number.isFinite(unitProfit) || !Number.isFinite(positionMultiple) || positionMultiple < 0) return null;
+  const value = unitProfit * positionMultiple;
+  return Number.isFinite(value) ? value : null;
+}
+
 /** Shared by list, detail, sorting and charts. Missing evidence remains null. */
 export function computeCampaignGeometricMetrics(
   campaign: TradeCampaign, legs: TradeJournal[], tradeRecords: TradeRecord[],
@@ -137,6 +166,7 @@ export function computeCampaignGeometricMetrics(
 ): CampaignGeometricMetrics {
   const empty: CampaignGeometricMetrics = {
     effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null,
+    unitRise: null, unitProfit: null, positionProfit: null, positionProfitTheoretical: null,
     geometricMetricBasis: { initialCoins: null, initialEntryPrice: null, initialStopPrice: null, earlyReductionFraction: null, addRatios: null, finalExitPrice: null, lastSupport: null },
   };
   if (campaign.direction !== 'main_long') return empty;
@@ -265,12 +295,18 @@ export function computeCampaignGeometricMetrics(
   const theoreticalRatios = theoreticalFactors.every(Boolean) ? theoreticalFactors.map(factor => factor!.alpha) : null;
   const theoreticalMultiple = !steps.length && initialCoins == null ? null : positionGeometricMultiple(theoreticalRatios, reduction);
   const firstAdd = steps[0] ? geometricFirstAddBasis(verdicts?.get(steps[0].legId)) : null;
+  const unitRise = computeUnitRise(finalExitPrice, lastSupport);
+  const unitProfit = computeUnitProfit(initialCoins, unitRise);
   return {
     effectivePriceChangePct: rise,
     effectivePriceChangeMultiple: riseMultiple,
     positionGeometricMultiple: multiple,
     positionGeometricMultipleTheoretical: theoreticalMultiple,
     magicB: computeMagicB(rise, multiple),
+    unitRise,
+    unitProfit,
+    positionProfit: computePositionProfit(unitProfit, multiple),
+    positionProfitTheoretical: computePositionProfit(unitProfit, theoreticalMultiple),
     hedgeWearR, hedgeWearUsd, hedgeWearLegCount: hedgePnls.length,
     geometricMetricBasis: { initialCoins, initialEntryPrice, initialStopPrice, initialReductionFactors: reduction == null ? [] : initialReductionFactors, earlyReductionFraction: reduction, addRatios, finalExitPrice, lastSupport, firstAdd, theoreticalFactors },
   };

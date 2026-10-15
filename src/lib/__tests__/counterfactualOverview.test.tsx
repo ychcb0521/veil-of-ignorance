@@ -122,7 +122,12 @@ describe('buildCounterfactualOverviewMetrics', () => {
 
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
     const { items, byKey } = itemsByKey(metrics);
-    expect(items).toHaveLength(18);
+    expect(items).toHaveLength(21);
+    // 反事实没有 Kₘ：单位涨幅、单位利润、仓位利润同神奇的 b 显示「—」并附说明
+    for (const key of ['unitRise', 'unitProfit', 'positionProfit'] as const) {
+      expect(byKey[key].value).toBe('—');
+      expect(metrics.extraNotes?.[key]).toContainEqual({ warning: expect.stringContaining('显示「—」') });
+    }
 
     // 主力 +60，镜像 +20 → 80；b = 80 ÷ 60 = 1.3333 → 133.3%
     expect(result.final_realized_pnl).toBeCloseTo(80, 4);

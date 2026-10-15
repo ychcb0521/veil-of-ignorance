@@ -64,6 +64,14 @@ export type CampaignCardData = {
   positionGeometricMultiple?: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
+  /** G（单位涨幅）= F − Kₘ（U/币）。 */
+  unitRise?: number | null;
+  /** U（单位利润）= Q × G（U）。 */
+  unitProfit?: number | null;
+  /** W（仓位利润）= U × 几何仓位（U）。 */
+  positionProfit?: number | null;
+  /** W（理论）= U × 几何仓位（理论）（U）。 */
+  positionProfitTheoretical?: number | null;
   /** 中途对冲空单的累积磨损值 ΔR（带号）；见 computeCampaignGeometricMetrics。 */
   hedgeWearR?: number | null;
   geometricMetricBasis?: CampaignGeometricMetrics['geometricMetricBasis'];
@@ -127,7 +135,7 @@ function geometricMetricsOf(campaign: TradeCampaign, details: CampaignDetails, c
       unfilledOrderIds: new Set(details.unfilledOrderIds ?? []),
     });
   } catch {
-    return { effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null };
+    return { effectivePriceChangePct: null, effectivePriceChangeMultiple: null, positionGeometricMultiple: null, magicB: null, unitRise: null, unitProfit: null, positionProfit: null, positionProfitTheoretical: null };
   }
 }
 

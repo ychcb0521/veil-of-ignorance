@@ -15,9 +15,9 @@ import {
  * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","最大预期亏损","已实现 P&L","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤"];
+const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","单位涨幅 G","单位利润 U","仓位利润 W","盈亏比","最大预期亏损","已实现 P&L","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤"];
 
-const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","geometricExpectancy","arithmeticExpectancy","mainPriceChange","mainPriceEfficiency","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
+const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","unitRise","unitProfit","positionProfit","payoffRatio","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","geometricExpectancy","arithmeticExpectancy","mainPriceChange","mainPriceEfficiency","peakPriceChange","peakPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
 
 function winnerMetrics(overrides: Partial<CampaignPnlOverviewMetrics> = {}): CampaignPnlOverviewMetrics {
   return {
@@ -124,7 +124,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({ positionGeometricMultiple: 2, effectivePriceChangePct: 50, expectedMaxDrawdownPct: 10, magicB: 1,
       geometricMetricBasis: {initialCoins: 10, earlyReductionFraction: 0.5, addRatios: [1], finalExitPrice: 150, lastSupport: 100 } }));
     const keys = items.map(item => item.key);
-    expect(keys.slice(0, 6)).toEqual(["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio"]);
+    expect(keys.slice(0, 9)).toEqual(["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","unitRise","unitProfit","positionProfit","payoffRatio"]);
     expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('0.50×');
     expect(items.find(item => item.key === 'effectivePriceChangeMultiple')).toBeUndefined();
     const magic = items.find(item => item.key === 'magicB')!;
@@ -206,6 +206,29 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('1.00 倍');
   });
 
+  it('【用户要求】单位涨幅 G = F − Kₘ、单位利润 U = Q × G、仓位利润 W = U × 几何仓位：读数、颜色与本场代入', () => {
+    const items = buildCampaignPnlOverviewItems(winnerMetrics({
+      positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 2.5,
+      unitRise: 50, unitProfit: 500, positionProfit: 1000, positionProfitTheoretical: 1250,
+      geometricMetricBasis: { initialCoins: 10, earlyReductionFraction: 0, addRatios: [1], finalExitPrice: 150, lastSupport: 100 },
+    }));
+    const byKey = Object.fromEntries(items.map(item => [item.key, item]));
+    expect(byKey.unitRise.value).toBe('50.0000');
+    expect(byKey.unitProfit.value).toBe('500.00');
+    expect(byKey.positionProfit.value).toBe('1,000.00（1,250.00）');
+    expect(byKey.unitRise.valueClassName).toBe('text-[#0ECB81]');
+    expect(render(<>{byKey.unitRise.help}</>).container).toHaveTextContent('G = 150.0000 − 100.0000 ≈ 50.0000');
+    expect(render(<>{byKey.unitProfit.help}</>).container).toHaveTextContent('U = 10 币 × 50.0000 ≈ 500.00 USDT');
+    const w = render(<>{byKey.positionProfit.help}</>).container;
+    expect(w).toHaveTextContent('W = 500.00 × 2.0000 ≈ 1,000.00 USDT');
+    expect(w).toHaveTextContent('W（理论）= 500.00 × 2.5000 ≈ 1,250.00 USDT');
+    const loss = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ unitRise: -0.00012346, unitProfit: -12.3, positionProfit: null }))
+      .map(item => [item.key, item]));
+    expect(loss.unitRise.value).toBe('-0.0001235');
+    expect(loss.unitProfit.valueClassName).toBe('text-[#F6465D]');
+    expect(loss.positionProfit.value).toBe('—');
+  });
+
   it('explains that F is exactly the same exit basis as the price-change metric', () => {
     const item = buildCampaignPnlOverviewItems(winnerMetrics({
       effectivePriceChangePct: 50,
@@ -222,13 +245,13 @@ describe('buildCampaignPnlOverviewItems', () => {
 
     expect(items.map(item => item.key)).toEqual(GOLDEN_KEYS);
     expect(items.map(item => item.label)).toEqual(GOLDEN_LABELS);
-    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "2.00", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "1.20", "+0.50R", "+20.00%", "+2.00", "+25.00%", "+2.50", "5.00%", "12.50%"]);
+    expect(items.map(item => item.value)).toEqual(["10.00%", "—", "1", "—", "2.00", "—", "—", "—", "2.00", "100.00 USDT", "200.00 USDT", "1.50x", "+1.00", "1.20", "+0.50R", "+20.00%", "+2.00", "+25.00%", "+2.50", "5.00%", "12.50%"]);
     const G = '#0ECB81';
     const R = '#F6465D';
-    expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20"]);
+    expect(items.map(item => item.color)).toEqual([undefined, "#64748B", "#1E2329", "#1E2329", "#0ECB81", "#64748B", "#64748B", "#64748B", "#0ECB81", undefined, "#0ECB81", undefined, "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#0ECB81", "#181A20", "#181A20"]);
     const T = 'text-[#0ECB81]';
-    expect(items.map(item => item.valueClassName)).toEqual([undefined, "text-muted-foreground", "text-foreground/85", "text-foreground/85", "text-[#0ECB81]", "text-[#0ECB81]", undefined, "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground"]);
-    expect(items.map(item => item.column)).toEqual([0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2]);
+    expect(items.map(item => item.valueClassName)).toEqual([undefined, "text-muted-foreground", "text-foreground/85", "text-foreground/85", "text-[#0ECB81]", "text-muted-foreground", "text-muted-foreground", "text-muted-foreground", "text-[#0ECB81]", undefined, "text-[#0ECB81]", undefined, "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-[#0ECB81]", "text-foreground", "text-foreground"]);
+    expect(items.map(item => item.column)).toEqual([0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,2,2,2,2,2,2]);
   });
 
   it('全空 / 全零输入时每一项都印「—」而不是 0.00，着色退回灰色', () => {
@@ -346,8 +369,10 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(container.querySelector('[data-testid="pnl-overview-three-columns"]')).toHaveClass('[@container(min-width:840px)]:grid-cols-3');
     for (const [index, name] of ['left', 'middle', 'right'].entries()) {
       const rows = [...container.querySelectorAll('[data-column="' + name + '"]')];
-      expect(rows.map(node => node.firstElementChild?.textContent)).toEqual(GOLDEN_LABELS.slice(index * 6, index * 6 + 6));
-      expect(rows).toHaveLength(6);
+      // 左列九项（几何链接上单位涨幅 G、单位利润 U、仓位利润 W），另两列各六项
+      const [from, to] = [[0, 9], [9, 15], [15, 21]][index];
+      expect(rows.map(node => node.firstElementChild?.textContent)).toEqual(GOLDEN_LABELS.slice(from, to));
+      expect(rows).toHaveLength(to - from);
       for (const row of rows) expect(row).toHaveClass('min-h-5', 'gap-3');
     }
     // 【用户要求】底部「期望口径」那行脚注删掉

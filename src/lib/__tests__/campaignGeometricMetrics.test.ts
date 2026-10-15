@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, effectivePriceChangePct, geometricFirstAddBasis, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
+import { computeCampaignGeometricMetrics, computeEffectivePriceChangeMultiple, computeMagicB, computePositionProfit, computeUnitProfit, computeUnitRise, effectivePriceChangePct, geometricFirstAddBasis, positionGeometricMultiple } from '@/lib/campaignGeometricMetrics';
 import { evaluateCampaignAddSizing, resolveCampaignAddQuantitySteps } from '@/lib/campaignAddSizingCheck';
 import { calculateAddPosition, initialAddPositionState } from '@/lib/addPositionCoverage';
 import { campaignPriceChange } from '@/lib/campaignMainPriceChange';
@@ -195,6 +195,36 @@ describe('campaign geometric metrics', () => {
     const finalCoins = 5 + 7.5 + 18.75;
     expect(result.magicB).toBeCloseTo(finalCoins * (220 - 140) / (10 * (100 - 90)));
     expect(result.geometricMetricBasis.initialEntryPrice).toBe(100);
+  });
+  it('【用户要求】G = F − Kₘ、U = Q × G、W = U × 几何仓位（理论值同样乘几何仓位（理论））', () => {
+    const data = scenario();
+    const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    expect(result.geometricMetricBasis.finalExitPrice).toBe(220);
+    expect(result.geometricMetricBasis.lastSupport).toBe(140);
+    expect(result.geometricMetricBasis.initialCoins).toBeCloseTo(10);
+    expect(result.unitRise).toBeCloseTo(80);
+    expect(result.unitProfit).toBeCloseTo(800);
+    expect(result.positionProfit).toBeCloseTo(800 * result.positionGeometricMultiple!);
+    expect(result.positionProfit).toBeCloseTo((5 + 7.5 + 18.75) * 80);
+    expect(result.positionProfitTheoretical).toBeCloseTo(800 * result.positionGeometricMultipleTheoretical!);
+    // W ÷ (Q × (E − K初)) 就是神奇的 b：三者同一份 F、Kₘ、Q、几何仓位
+    expect(result.positionProfit! / (10 * (100 - 90))).toBeCloseTo(result.magicB!);
+  });
+  it('G / U / W 缺依据时为 null，不补 0', () => {
+    expect(computeUnitRise(null, 100)).toBeNull();
+    expect(computeUnitRise(120, 0)).toBeNull();
+    expect(computeUnitRise(90, 100)).toBe(-10);
+    expect(computeUnitProfit(null, 10)).toBeNull();
+    expect(computeUnitProfit(0, 10)).toBeNull();
+    expect(computeUnitProfit(2, -10)).toBe(-20);
+    expect(computePositionProfit(-20, null)).toBeNull();
+    expect(computePositionProfit(-20, 1.5)).toBe(-30);
+    const data = scenario();
+    data.legs.pop(); data.tradeRecords.pop();
+    const missing = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
+    // 初始止损缺失只影响相对涨幅；G / U 只用 F、Kₘ、Q，照常算
+    expect(missing.effectivePriceChangePct).toBeNull();
+    expect(missing.unitRise).toBeCloseTo(80);
   });
   it('initial 1 includes main and mirror but excludes a later reentry mirror; first cut is not the sum of all cuts', () => {
     const data = scenario();
