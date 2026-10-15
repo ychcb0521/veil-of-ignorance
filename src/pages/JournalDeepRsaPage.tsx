@@ -9,9 +9,12 @@ import { useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { BackButton } from '@/components/journal/BackButton';
 import { DeepRsaView } from '@/components/journal/DeepRsaView';
+import { DeepRsaRunPanel } from '@/components/journal/DeepRsaRunPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
+import { useDeepRsaRun } from '@/hooks/useDeepRsaRun';
+import { buildRunItems } from '@/lib/deepRsa/pipeline';
 import { buildCampaignGroupReport, GROUP_ORDER } from '@/lib/deepRsa/report';
 import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
 
@@ -31,6 +34,8 @@ export default function JournalDeepRsaPage() {
   // 平仓价校正是否拉齐在列表缓存内部、本页看不到：按已拉齐处理，页面上整组标「暂定」
   const report = useMemo(() => (rows.length ? buildCampaignGroupReport(rows, true) : null), [rows]);
   const group = useMemo(() => parseGroup(location.search), [location.search]);
+  const deepRun = useDeepRsaRun(user?.id);
+  const plannedItems = useMemo(() => (report ? buildRunItems(report, 20261015).items.length : 0), [report]);
 
   const setGroup = (next: DeepRsaGroup) => {
     const params = new URLSearchParams(location.search);
@@ -89,6 +94,21 @@ export default function JournalDeepRsaPage() {
           group={group}
           onGroupChange={setGroup}
           onOpenCampaign={openCampaign}
+          run={deepRun.result}
+          runPanel={(
+            <DeepRsaRunPanel
+              status={deepRun.status}
+              progress={deepRun.progress}
+              result={deepRun.result}
+              error={deepRun.error}
+              plannedItems={plannedItems}
+              // 战役列表读完才开跑：读到一半的分组会漏事件
+              canRun={!!report && complete && !!user}
+              onRun={() => { if (report) void deepRun.run(report); }}
+              onCancel={deepRun.cancel}
+              onDownload={deepRun.download}
+            />
+          )}
         />
       </main>
     </div>

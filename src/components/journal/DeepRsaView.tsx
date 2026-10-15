@@ -9,6 +9,8 @@ import { formatBeijingTime } from '@/lib/timeFormat';
 import { FEATURE_DEFINITIONS, type FeatureFamily } from '@/lib/deepRsa/features';
 import { GROUP_ORDER, type CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { CampaignExcludedReason, CampaignPendingReason, ConditionState, DeepRsaGroup } from '@/lib/deepRsa/grouping';
+import type { DeepRsaRunResult } from '@/lib/deepRsa/pipeline';
+import { REP_LABEL, TARGET_LABEL } from '@/components/journal/DeepRsaRunPanel';
 
 export const GROUP_LABEL: Record<DeepRsaGroup, string> = {
   positive: '正样本', control: '对照组', conflict: '冲突组', middle: '中间组', pending: '待判定', excluded: '排除',
@@ -44,21 +46,26 @@ const CONDITION_COLUMNS: { state: ConditionState; label: string }[] = [
   { state: 'na', label: '无加仓' },
 ];
 
-type StepStatus = 'done' | 'code' | 'here';
+type StepStatus = 'done' | 'partial' | 'todo' | 'ran' | 'here';
 const STEP_STATUS: Record<StepStatus, { label: string; tone: string }> = {
   done: { label: '已完成', tone: 'bg-[#0ECB81]/10 text-[#0B9F66] dark:text-[#0ECB81]' },
-  code: { label: '代码就绪 · 待数据', tone: 'bg-muted text-muted-foreground' },
+  partial: { label: '暂定分组已出', tone: 'bg-muted text-muted-foreground' },
+  todo: { label: '待运行', tone: 'bg-muted text-muted-foreground' },
+  ran: { label: '已运行', tone: 'bg-[#0ECB81]/10 text-[#0B9F66] dark:text-[#0ECB81]' },
   here: { label: '本页', tone: 'bg-[#F0B90B]/15 text-[#8F6B00] dark:text-[#F0B90B]' },
 };
 
-const STEPS: { n: number; name: string; status: StepStatus; doc: string }[] = [
-  { n: 1, name: '数据审计', status: 'done', doc: '01-data-audit.md' },
-  { n: 2, name: '正样本 / 对照组', status: 'code', doc: '02-grouping.md' },
-  { n: 3, name: '48h 窗口与特征', status: 'code', doc: '03-window-features.md' },
-  { n: 4, name: 'RSA（训练集）', status: 'code', doc: '04-rsa.md' },
-  { n: 5, name: '样本外与回测', status: 'code', doc: '05-oos-backtest.md' },
-  { n: 6, name: '复盘中心入口', status: 'here', doc: '—' },
-];
+function stepsOf(run: DeepRsaRunResult | null | undefined): { n: number; name: string; status: StepStatus; doc: string }[] {
+  const ran: StepStatus = run ? 'ran' : 'todo';
+  return [
+    { n: 1, name: '数据审计', status: 'done', doc: '01-data-audit.md' },
+    { n: 2, name: '正样本 / 对照组', status: 'partial', doc: '02-grouping.md' },
+    { n: 3, name: '48h 窗口与特征', status: ran, doc: '03-window-features.md' },
+    { n: 4, name: 'RSA（训练集）', status: ran, doc: '04-rsa.md' },
+    { n: 5, name: '样本外与回测', status: ran, doc: '05-oos-backtest.md' },
+    { n: 6, name: '复盘中心入口', status: 'here', doc: '06-ui.md' },
+  ];
+}
 
 type Verdict = '已验证' | '待验证' | '检验未获支持';
 const VERDICT_TONE: Record<Verdict, string> = {
@@ -67,21 +74,37 @@ const VERDICT_TONE: Record<Verdict, string> = {
   检验未获支持: 'text-[#F6465D]',
 };
 
-const CONCLUSIONS: { claim: string; verdict: Verdict; basis: string }[] = [
-  { claim: '分组、窗口、权重、特征、RSA 检验、回测的计算实现正确', verdict: '已验证', basis: '单元测试' },
-  { claim: '本页暂定分组的计数', verdict: '待验证', basis: '平仓价校正状态本页不可见' },
-  { claim: '任何表征与分组标签或未来结果同构', verdict: '待验证', basis: '缺行情数据' },
-  { claim: '谢林候选能代表真实的谢林点', verdict: '待验证', basis: '待你确认' },
-  { claim: '模型在样本外扣成本后优于基线', verdict: '待验证', basis: '缺行情数据' },
-];
+function conclusionsOf(run: DeepRsaRunResult | null | undefined): { claim: string; verdict: Verdict; basis: string }[] {
+  const oosPassed = run?.oos.filter(r => r.verdict === '已验证') ?? [];
+  return [
+    { claim: '分组、窗口、权重、特征、RSA 检验、回测的计算实现正确', verdict: '已验证', basis: '单元测试' },
+    { claim: '本页暂定分组的计数', verdict: '待验证', basis: '平仓价校正状态本页不可见' },
+    run
+      ? {
+        claim: '有表征与「正 / 对照标签」或「24h 最大涨幅」同构',
+        verdict: run.conclusions.rsa,
+        basis: oosPassed.length
+          ? `测试集 Holm p < 0.05：${oosPassed.map(r => `${REP_LABEL[r.representation]} × ${TARGET_LABEL[r.target]}`).join('、')}`
+          : run.oos.length ? '训练集通过的项在测试集未通过' : '训练集无项通过 Holm 校正',
+      }
+      : { claim: '有表征与「正 / 对照标签」或「24h 最大涨幅」同构', verdict: '待验证', basis: '尚未运行' },
+    { claim: '谢林候选能代表真实的谢林点', verdict: '待验证', basis: '三个候选并列计算，仅是代理' },
+    run
+      ? {
+        claim: '模型在样本外扣成本后优于基线',
+        verdict: run.conclusions.backtest,
+        basis: run.backtest.skippedReason ?? '5 个基点：95% 区间下限 > 0 且高于两条基线',
+      }
+      : { claim: '模型在样本外扣成本后优于基线', verdict: '待验证', basis: '尚未运行' },
+  ];
+}
 
 const FAMILY_LABEL: Record<FeatureFamily, string> = { price: '价格', orderFlow: '订单流（K 线代理）', schelling: '谢林（候选）' };
 
 const MISSING = [
-  '网络白名单放行 fapi.binance.com、data.binance.vision（5m K 线含主动买入量、资金费历史）',
   '正式分组的平仓价校正拉齐状态（或导出 trade_campaigns / trade_journals 离线核对）',
   '信号库（本机 veil.signalLibrary.v1）用于信号来源的分组',
-  '确认谢林候选 a / b / c 是否可用',
+  '订单流只有 K 线级主动买入量代理；逐笔成交、历史盘口、持仓量没有',
 ];
 
 function fmt(value: number | null, digits = 2): string {
@@ -108,15 +131,19 @@ export interface DeepRsaViewProps {
   group: DeepRsaGroup;
   onGroupChange: (group: DeepRsaGroup) => void;
   onOpenCampaign: (campaignId: string) => void;
+  /** 第 3–5 步的运行入口（页面外壳给）。 */
+  runPanel?: React.ReactNode;
+  /** 最近一次运行结果：进度与结论按它更新。 */
+  run?: DeepRsaRunResult | null;
 }
 
-export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign }: DeepRsaViewProps) {
+export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign, runPanel, run }: DeepRsaViewProps) {
   const listed = report?.rows.filter(r => r.grouping.group === group) ?? [];
   return (
     <div className="space-y-7 text-[12px]">
       <Section title="进度" note="文档在仓库 docs/deep-rsa/">
         <ol className="grid grid-cols-[auto_auto_auto_1fr] items-center gap-x-3 gap-y-1.5">
-          {STEPS.map(step => (
+          {stepsOf(run).map(step => (
             <li key={step.n} className="contents">
               <span className="font-mono tabular-nums text-muted-foreground">{step.n}</span>
               <span>{step.name}</span>
@@ -234,6 +261,12 @@ export function DeepRsaView({ report, loading, loaded, total, group, onGroupChan
         )}
       </Section>
 
+      {runPanel && (
+        <Section title="运行分析（第 3–5 步）" note="在你的浏览器里取币安公开行情 · 只读，不写数据、不下单">
+          {runPanel}
+        </Section>
+      )}
+
       <Section title="特征" note={`48h 窗口 · 5m · 衰减权重 w = 2^(−Δt/h)，h ∈ {2, 6, 12} 小时 · ${FEATURE_DEFINITIONS.length} 个`}>
         <table className="text-[11.5px]">
           <tbody>
@@ -247,7 +280,7 @@ export function DeepRsaView({ report, loading, loaded, total, group, onGroupChan
       <Section title="结论">
         <table className="text-[11.5px]">
           <tbody>
-            {CONCLUSIONS.map(c => (
+            {conclusionsOf(run).map(c => (
               <tr key={c.claim}>
                 <td className={cn('whitespace-nowrap py-0.5 pr-4 align-top', VERDICT_TONE[c.verdict])}>{c.verdict}</td>
                 <td className="py-0.5 pr-4 align-top">{c.claim}</td>

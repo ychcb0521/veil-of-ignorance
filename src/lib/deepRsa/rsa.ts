@@ -163,7 +163,7 @@ export function rsaMantel(featureRdm: Rdm, targetRdm: Rdm, options: MantelOption
   }
   let atLeast = 0;
   const perm = Array.from({ length: n }, (_, i) => i);
-  for (let t = 0; t < permutations; t++) {
+  const shuffle = () => {
     for (const idx of groups.values()) {
       const shuffled = [...idx];
       for (let k = shuffled.length - 1; k > 0; k--) {
@@ -172,11 +172,71 @@ export function rsaMantel(featureRdm: Rdm, targetRdm: Rdm, options: MantelOption
       }
       idx.forEach((orig, k) => { perm[orig] = shuffled[k]; });
     }
-    const [px, py] = pairedUpper(featureRdm, targetRdm, perm);
-    const r = spearman(px, py);
-    if (Number.isFinite(r) && r >= rho) atLeast++;
+  };
+  const fast = rankStatistic(featureRdm, targetRdm);
+  if (fast) {
+    // 快速路径：秩只算一次，每次置换只重排目标秩（浏览器里一次检验约十万对 × 上千次置换）
+    const observed = fast(perm);
+    for (let t = 0; t < permutations; t++) {
+      shuffle();
+      const r = fast(perm);
+      if (Number.isFinite(r) && r >= observed - 1e-12) atLeast++;
+    }
+  } else {
+    for (let t = 0; t < permutations; t++) {
+      shuffle();
+      const [px, py] = pairedUpper(featureRdm, targetRdm, perm);
+      const r = spearman(px, py);
+      if (Number.isFinite(r) && r >= rho) atLeast++;
+    }
   }
   return { rho, p: (1 + atLeast) / (1 + permutations), nEvents: n, nPairs: xs.length, permutations };
+}
+
+/**
+ * 目标 RDM 上三角全部有限时可用的秩统计量：表征一侧对有效事件对取秩，目标一侧对全体事件对取秩，
+ * 置换只是重新编号目标秩。表征 RDM 没有不可比的事件对时，它与 Spearman 完全相同；有时略有差别，
+ * 但观测值与置换值用的是同一个统计量，置换 p 值仍然有效（报告的 ρ 照旧是精确 Spearman）。
+ */
+function rankStatistic(featureRdm: Rdm, targetRdm: Rdm): ((perm: readonly number[]) => number) | null {
+  const n = featureRdm.length;
+  const tVals: number[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (!Number.isFinite(targetRdm[i][j])) return null;
+      tVals.push(targetRdm[i][j]);
+    }
+  }
+  const tRanks = ranks(tVals);
+  const RT = new Float64Array(n * n);
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) { RT[i * n + j] = tRanks[k]; RT[j * n + i] = tRanks[k]; k++; }
+  }
+  const I: number[] = [];
+  const J: number[] = [];
+  const X: number[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (Number.isFinite(featureRdm[i][j])) { I.push(i); J.push(j); X.push(featureRdm[i][j]); }
+    }
+  }
+  const m = X.length;
+  if (m < 3) return null;
+  const rx = ranks(X);
+  const mx = rx.reduce((s, v) => s + v, 0) / m;
+  const xc = Float64Array.from(rx, v => v - mx);
+  const sxx = xc.reduce((s, v) => s + v * v, 0);
+  if (!(sxx > 0)) return null;
+  return perm => {
+    let sy = 0; let syy = 0; let sxy = 0;
+    for (let q = 0; q < m; q++) {
+      const y = RT[perm[I[q]] * n + perm[J[q]]];
+      sy += y; syy += y * y; sxy += xc[q] * y;
+    }
+    const vy = syy - (sy * sy) / m;
+    return vy > 0 ? sxy / Math.sqrt(sxx * vy) : Number.NaN;
+  };
 }
 
 /** Holm 逐步校正（控制族错误率）。NaN 保持 NaN、不计入族。 */
@@ -287,4 +347,26 @@ export function nearestByDistance(rdm: Rdm, query: number, candidates: readonly 
     .map(c => ({ index: c, distance: rdm[query][c] }))
     .sort((a, b) => a.distance - b.distance || a.index - b.index)
     .slice(0, k);
+}
+
+/**
+ * 用 fitEvents（训练集）拟合标准化，在 evalEvents（验证 / 测试集）上做一次 RSA。
+ * 标签目标只用有正 / 对照标签的事件，结果目标只用有结果值的事件；permutations = 0 时只要 ρ。
+ */
+export function rsaEvaluate(
+  fitEvents: readonly RsaEvent[],
+  evalEvents: readonly RsaEvent[],
+  rep: RepresentationSpec,
+  halfLifeHours: number,
+  target: 'label' | 'outcome',
+  options: Omit<MantelOptions, 'blocks'> & { minDims?: number } = {},
+): RsaResult & { usedKeys: string[] } {
+  const keep = (e: RsaEvent) => (target === 'label' ? e.label != null : e.outcome != null);
+  const fit = fitEvents.filter(keep);
+  const evals = evalEvents.filter(keep);
+  const std = fitStandardizer(fit.map(e => e.featuresByH[halfLifeHours] ?? {}), rep.keys);
+  const fRdm = euclideanRdm(standardize(evals.map(e => e.featuresByH[halfLifeHours] ?? {}), std), options.minDims ?? 2);
+  const tRdm = target === 'label' ? categoricalRdm(evals.map(e => e.label)) : absDiffRdm(evals.map(e => e.outcome));
+  const blocks = evals.some(e => e.block) ? evals.map(e => e.block ?? '') : undefined;
+  return { ...rsaMantel(fRdm, tRdm, { ...options, blocks }), usedKeys: std.keys };
 }
