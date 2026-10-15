@@ -296,6 +296,7 @@ function Robustness({ robustness }: { robustness: RobustnessResult }) {
                   const known = !!basis && Number.isFinite(basis.rho);
                   const tone = !known ? 'text-muted-foreground'
                     : c.id === 'maxDown' ? (sig ? 'text-[#C99400]' : VERDICT_TONE.已验证)
+                    : c.id === 'endRet' ? (sig ? 'text-muted-foreground' : VERDICT_TONE.检验未获支持)
                     : sig ? VERDICT_TONE.已验证 : VERDICT_TONE.检验未获支持;
                   const reading = (
                     <>

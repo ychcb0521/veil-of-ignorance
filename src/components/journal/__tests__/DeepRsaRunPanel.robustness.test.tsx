@@ -14,7 +14,7 @@ const robustness: RobustnessResult = {
     checks: [
       check('volPartial', 'discovery', 0.02, 0.31), check('volPartial', 'test', 0.01, 0.42),
       check('campaignOnly', 'discovery', 0.12, 0.004), check('campaignOnly', 'test', 0.1, 0.03),
-      check('endRet', 'discovery', 0.01, 0.4), check('endRet', 'test', -0.02, 0.7),
+      check('endRet', 'discovery', 0.46, 0.0005), check('endRet', 'test', 0.56, 0.0005),
       check('maxDown', 'discovery', 0.15, 0.001), check('maxDown', 'test', 0.13, 0.002),
       check('symbolBlocks', 'discovery', 0.12, 0.02, { movable: 380 }), check('symbolBlocks', 'test', 0.1, 0.09, { movable: 64 }),
     ],
@@ -56,7 +56,7 @@ describe('Deep RSA 运行结果 · 稳健性检验（不改判定）', () => {
     const row = (title: string) => screen.getByText(title).closest('tr')!;
     expect(within(row('① 控制波动率')).getAllByText('剔除波动率后不显著：主要由波动率解释')).toHaveLength(2); // 桌面列 + 手机行内
     expect(within(row('② 只看战役时点')).getAllByText(/只看战役仍显著/)).toHaveLength(2);
-    expect(within(row('③ 换目标：24h 期末收益')).getAllByText(/看不到方向信息/)).toHaveLength(2);
+    expect(within(row('③ 换目标：24h 期末收益')).getAllByText(/含波动幅度，方向看第 6 步/)).toHaveLength(2); // 显著也不读成「有方向」
     expect(within(row('③ 阴性对照：24h 最大跌幅')).getAllByText(/多半是在说波动大小/)).toHaveLength(2);
     const blocks = row('④ 按标的分块置换');
     expect(within(blocks).getAllByText(/p 值主要被同币相关撑起来/)).toHaveLength(2);
