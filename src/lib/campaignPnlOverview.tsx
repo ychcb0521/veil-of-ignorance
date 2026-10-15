@@ -135,7 +135,8 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
 /**
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
- * 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W 接在神奇的 b 之后（几何链：相对涨幅 → 几何仓位 → b → G → U → W），左列九项。
+ * 【用户要求】W（b）（几何增长）放在盈亏比后面；单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面；
+ * 几何期望放在动态最大回撤后面。三列 7 / 8 / 6 项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -143,14 +144,12 @@ export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'addCount',
   'positionGeometricMultiple',
   'magicB',
-  'unitRise',
-  'unitProfit',
-  'positionProfit',
   'payoffRatio',
+  'geometricGrowth',
 ];
 
 /**
- * 第二列：初始亏损预算、实际结算、仓位与期望。
+ * 第二列：初始亏损预算、实际结算、仓位与期望，接单位涨幅 / 单位利润 / 仓位利润。
  * 杠杆倍数与 DSI/USI 贡献已经按用户要求迁到「战役元数据」。
  */
 export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
@@ -158,18 +157,19 @@ export const PNL_OVERVIEW_RIGHT_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'realizedPnl',
   'positionAmplification',
   'addEfficiency',
-  'geometricExpectancy',
   'arithmeticExpectancy',
+  'unitRise',
+  'unitProfit',
+  'positionProfit',
 ];
 
 export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'mainPriceChange',
   'mainPriceEfficiency',
   'peakPriceChange',
-  // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置
-  'geometricGrowth',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
+  'geometricExpectancy',
 ];
 
 /**

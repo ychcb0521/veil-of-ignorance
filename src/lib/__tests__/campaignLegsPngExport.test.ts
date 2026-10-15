@@ -1885,11 +1885,11 @@ describe('【用户要求】导出图的盈亏概览与页面同样两栏：递�
   it('标了 rightColumn 的按栏从上往下排：盈亏比紧随神奇的 b，同一行齐平；战役元数据仍按行排', () => {
     const items = buildCampaignPnlOverviewItems(pnlMetricsForColumns());
     const { cells, rows } = overviewItemCells(items);
-    expect(rows).toBe(9);
+    expect(rows).toBe(8);
     const column = (index: number) => cells.filter(cell => cell.column === index).sort((a, b) => a.row - b.row).map(cell => cell.item.label);
-    expect(column(0)).toEqual(['预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '单位涨幅 G', '单位利润 U', '仓位利润 W', '盈亏比']);
-    expect(column(1)).toEqual(['最大预期亏损', '已实现 P&L', '仓位放大', '加仓效用', '几何期望', '算术期望']);
-    expect(column(2)).toEqual(['首仓涨跌幅', '首仓涨跌幅倍数', '峰值涨幅', '几何增长 W（b）', '涨幅未兑现', '动态最大回撤']);
+    expect(column(0)).toEqual(['预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', '几何增长 W（b）']);
+    expect(column(1)).toEqual(['最大预期亏损', '已实现 P&L', '仓位放大', '加仓效用', '算术期望', '单位涨幅 G', '单位利润 U', '仓位利润 W']);
+    expect(column(2)).toEqual(['首仓涨跌幅', '首仓涨跌幅倍数', '峰值涨幅', '涨幅未兑现', '动态最大回撤', '几何期望']);
 
     const metadata = overviewItemCells([{ label: 'A', value: '1' }, { label: 'B', value: '2' }, { label: 'C', value: '3' }]);
     expect(metadata.cells.map(cell => [cell.item.label, cell.column, cell.row])).toEqual([['A', 0, 0], ['B', 1, 0], ['C', 0, 1]]);

@@ -16,6 +16,8 @@ import { describe, expect, it } from 'vitest';
 
 const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
 
+/** 【用户要求】封面十八项的次序（2026-10-15）：几何增长紧跟盈亏比；单位涨幅 / 单位利润 / 仓位利润接在算术期望后；几何期望接在涨幅未兑现后。 */
+const CARD_MODES = ["expectedDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","captureRate","geometricGrowth","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","unrealizedPriceChangePct","geometricExpectancy","mirrorTp"];
 const METRIC_MODES = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","mirrorTp","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy"];
 
 function constBlock(s: string, name: string): string {
@@ -45,17 +47,13 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
       .toContain('title={PRICE_CHANGE_COLUMN_HINT}>涨跌幅</div>');
   });
 
-  it('指标行读一份常量：手机两列网格，≥ 640px 左对齐依次排开；不再均分整行', () => {
+  it('【用户要求】封面指标分成两排：等宽网格，手机两列、640px 起每排六格、1024px 起每排九格（十八项正好两排）', () => {
     const s = src();
-    // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：≥ 640px 一行排开不换行，右边给删除按钮留位
-    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:flex-nowrap';");
+    expect(s).toContain("const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9';");
     expect(s).toMatch(/data-testid="campaign-card-metrics"\s+className=\{CARD_METRIC_STRIP\}/);
-    // 旧的等宽网格（一行八格均分）不再出现
-    expect(s).not.toContain('CAMPAIGN_COLUMNS_GRID');
-    expect(s).not.toMatch(/xl:grid-cols-8/);
-    expect(s).not.toContain('CARD_METRIC_LEAD_CELL');
-    expect(s).not.toContain('CAMPAIGN_COLUMN_TEXT_INSET');
-    expect(s).not.toContain('CAMPAIGN_SORT_COLUMNS');
+    expect(s).not.toContain('xl:flex-nowrap');
+    // 封面适当增高：格子上下内边距 py-2
+    expect(s).toContain("const CARD_METRIC_CELL = 'flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 sm:px-2 transition-[background-color,box-shadow] duration-150';");
   });
 
   it('排序行：左对齐 flex 换行，两条分隔线在「预期回撤」与「杠杆倍数」之前；行首与封面左缘对齐', () => {
@@ -83,52 +81,23 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     expect(order.filter(mode => cells.some(([cellMode]) => cellMode === mode))).toEqual(cells.map(([mode]) => mode));
   });
 
-  it('【用户要求】列宽按当前列表的读数定：静态宽度表删掉，每项读列表容器上的 CSS 变量；首项文字与标题行同一起点', () => {
+  it('【用户要求】数值字号一致：不再按读数估宽、不再按格宽缩字号；十八项次序与排序行一致', () => {
     const s = src();
-    // 按理论最长读数写死的静态宽度表不再出现
-    expect(s).not.toContain('CARD_METRIC_WIDTH =');
-    expect(s).not.toMatch(/sm:w-\[\d+px\]/);
-    // 八项指标名一份常量（dt 与宽度估算共用），次序与排序行一致
-    const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
-    expect(labels).toEqual([["addCount","加仓次数"],["positionGeometricMultiple","几何仓位"],["effectivePriceChangeMultiple","相对涨幅倍数"],["magicB","神奇的 b"],["geometricExpectancy","几何期望"],["mirrorTp","镜像止盈"],["expectedDrawdownPct","预期回撤"],["mainPriceChange","首仓涨跌幅"],["mainPriceEfficiency","首仓涨跌幅倍数"],["effectivePriceChangePct","相对涨幅"],["addEfficiency","加仓效用"],["positionAmplification","仓位放大"],["unrealizedPriceChangePct","涨幅未兑现"],["arithmeticExpectancy","算术期望"]]);
-    // 每项的宽度类读 --cm-w-<项>（Tailwind 要完整类名，逐个写出）
-    const widthClasses = [...constBlock(s, 'CARD_METRIC_WIDTH_CLASS').matchAll(/(\w+): '([^']+)'/g)].map(match => [match[1], match[2]]);
-    expect(widthClasses).toEqual(METRIC_MODES.map(mode => [mode, `sm:w-[var(--cm-w-${mode})]`]));
-    expect(s).toContain('const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ');
-    // 变量由当前时间段里的全部战役（displayRows）的读数算出，不随排序变——排序会筛掉算不出这一项的战役，
-    // 按筛完的列表算，切换排序时后面各格会整体左右挪；挂在包住全部卡片的列表容器上
-    expect(s).toContain("import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';");
-    expect(s).toContain('const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));');
-    expect(s).toContain('for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;');
-    expect(s).toContain('const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);');
-    expect(s).not.toContain('cardMetricWidthStyle(sortedRows)');
-    // 列宽变量挂在列表容器上；多级排序分区（【用户要求】分区模块）也在这个容器里，分区内外的卡片读同一个宽度
-    expect(s).toMatch(/<div data-testid="campaign-card-list" style=\{cardMetricWidths\}>\s*\{cardSections \? cardSections\.map\(/);
-    expect(s).toContain('{!collapsed && sectionRows.map(renderCampaignCard)}');
-    expect(s).toContain('}) : sortedRows.map(renderCampaignCard)}');
-    expect(s).toMatch(/const renderCampaignCard = \(row: CampaignDisplayData\) => \(\s*<CampaignCard/);
-    // 卡片上显示的字就是估算用的那一份：每格的 dt 读 CARD_METRIC_LABEL，数值读 cardMetricReadings
+    for (const gone of ['fitMetricValue', 'cardMetricColumnWidths', 'cardMetricWidthStyle', '--cm-w-', 'CARD_METRIC_WIDTH_CLASS', 'CARD_METRIC_UNIFORM_WIDTH']) {
+      expect(s, gone).not.toContain(gone);
+    }
+    expect(s).toContain("const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';");
+    expect(s).toContain('const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, \'\')}`;');
+    expect(s).toContain('<div data-testid="campaign-card-list">');
+    const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => match[1]);
+    expect(labels).toEqual(CARD_MODES);
     const strip = stripSource(s);
-    expect(s).toContain('const readings = cardMetricReadings(row);');
-    for (const mode of METRIC_MODES) {
+    for (const mode of CARD_MODES) {
       expect(strip, mode).toContain(`<dt className={metricName('${mode}')}>{CARD_METRIC_LABEL.${mode}}</dt>`);
     }
-    expect(strip).toContain('{mirrorTpStatus}');
-    expect(s).toContain('const mirrorTpStatus = readings.mirrorTp;');
-    for (const mode of METRIC_MODES.filter(mode => mode !== 'mirrorTp')) {
-      expect(strip, mode).toContain(`{readings.${mode}}`);
-    }
-    // 外框内边距 + 每项 10px = 标题行 px-4 / sm:px-5；每项左右内边距之和 20px 与估算里的 CARD_METRIC_CELL_PADDING_X 一致
-    expect(s).toContain("const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';");
-    expect(s).toContain("const CAMPAIGN_COLUMNS_INSET = 'px-4 sm:px-5';");
-    expect(s).toMatch(/const CARD_METRIC_CELL = '[^']*\bpx-2\.5\b[^']*'/);
-    const widthsModule = readFileSync(join(process.cwd(), 'src/lib/campaignCardMetricWidths.ts'), 'utf8');
-    expect(widthsModule).toContain('export const CARD_METRIC_CELL_PADDING_X = 20;');
-    expect(widthsModule).toContain('export const CARD_METRIC_VALUE_FONT_PX = 11;');
-    expect(widthsModule).toContain('export const CARD_METRIC_LABEL_FONT_PX = 10;');
-    // 估算用的字号与封面上的字号一致：数值 11px 等宽、指标名 10px
-    expect(s).toMatch(/const CARD_METRIC_VALUE = '[^']*\bfont-mono text-\[11px\] font-medium\b[^']*'/);
-    expect(s).toMatch(/const CARD_METRIC_NAME = '[^']*\btext-\[10px\][^']*'/);
+    // 卡片上的格子与 CARD_METRIC_LABEL 同序
+    const cellOrder = [...strip.matchAll(/<dt className=\{metricName\('(\w+)'\)\}>/g)].map(match => match[1]);
+    expect(cellOrder).toEqual(CARD_MODES);
   });
 
   it('【用户要求】盈亏比只写倍数 b；「仓位击穿」在标题行、紧跟杠杆标签，几何期望格里不再有徽标', () => {

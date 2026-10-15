@@ -782,8 +782,10 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
   ];
 
   it('排序行的次序：紧跟加仓次数；读数取建卡时算好的那个数', () => {
-    // 【用户要求】单位涨幅、单位利润、仓位利润紧跟神奇的 b
-    expect(CAMPAIGN_SORT_MODES.slice(0, 10)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'unitRise', 'unitProfit', 'positionProfit', 'captureRate']);
+    // 【用户要求】几何增长紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后；几何期望在动态最大回撤之后
+    expect(CAMPAIGN_SORT_MODES.slice(0, 8)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth']);
+    expect(CAMPAIGN_SORT_MODES.slice(12, 16)).toEqual(['arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit']);
+    expect(CAMPAIGN_SORT_MODES.slice(20, 22)).toEqual(['dynamicMaxDrawdownPct', 'geometricExpectancy']);
     expect(DEFAULT_CAMPAIGN_SORT_CHAIN).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);
   });

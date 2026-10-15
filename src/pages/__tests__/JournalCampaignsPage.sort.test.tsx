@@ -452,10 +452,9 @@ describe('JournalCampaignsPage sorting', () => {
     render(<MemoryRouter initialEntries={['/journal/campaigns']}><JournalCampaignsPage /></MemoryRouter>);
     await screen.findAllByTestId('campaign-card');
     // 【用户要求】排序行只放封面上有的指标（再加操作时间、杠杆倍数与自评、字母），次序沿用原表
-    const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB',
-      'unitRise', 'unitProfit', 'positionProfit', 'captureRate',
-      'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
-      'mainPriceChange', 'mainPriceEfficiency', 'geometricGrowth', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha'];
+    const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth',
+      'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
+      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'mirrorTp', 'leverage', 'importance', 'alpha'];
     const controls = screen.getByTestId('campaign-sort-controls');
     expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item'))).toEqual(expected);
     expect(screen.queryByTestId('campaign-sort-realizedPnl')).not.toBeInTheDocument();
@@ -952,7 +951,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）
-    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'unitRise', 'unitProfit', 'positionProfit', 'captureRate', 'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'geometricGrowth', 'unrealizedPriceChangePct', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
+    expect(sequence).toEqual(['time', 'divider-expectedDrawdownPct', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth', 'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit', 'divider-mainPriceChange', 'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'divider-mirrorTp', 'mirrorTp', 'leverage', 'importance', 'alpha']);
     expect(screen.getByTestId('campaign-sort-divider-expectedDrawdownPct')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByTestId('campaign-sort-lead')).not.toBeInTheDocument();
 
@@ -961,35 +960,30 @@ describe('JournalCampaignsPage sorting', () => {
     const metricRows = screen.getAllByTestId('campaign-card-metrics');
     expect(metricRows).toHaveLength(4);
     expect(metricRows[0].tagName).toBe('DL');
-    // 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：≥ 640px 一行排开不换行
-    // ≥ 1280px 一行排开不换行；更窄时分两行、每行七项
-    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:flex', 'sm:flex-wrap', 'xl:flex-nowrap');
-    expect(metricRows[0]).not.toHaveClass('xl:grid-cols-8');
+    // 【用户要求】封面指标分成两排：≥ 1024px 每排九格，640–1023px 每排六格，手机两列
+    expect(metricRows[0]).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-6', 'lg:grid-cols-9');
+    expect(metricRows[0]).not.toHaveClass('sm:flex');
     for (const row of metricRows) expect(row.className).toBe(metricRows[0].className);
     // 【用户要求】指标顺序与排序行一致：镜像止盈、预期回撤，之后首仓涨跌幅…几何期望、算术期望（操作时间留在标题行）
     const metricCells = (row: Element) => [...row.querySelectorAll('div')].filter(cell => cell.firstElementChild?.tagName === 'DT');
     const cardCells = metricCells(metricRows[0]).map(node => node.getAttribute('data-testid'));
-    expect(cardCells).toEqual(["campaign-expected-drawdown-pct","campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-unit-rise","campaign-unit-profit","campaign-position-profit","campaign-capture-rate","campaign-position-amplification","campaign-add-efficiency","campaign-geometric-expectancy","campaign-arithmetic-expectancy","campaign-main-price-change","campaign-main-price-efficiency","campaign-geometric-growth","campaign-unrealized-price-change","campaign-mirror-tp-status"]);
+    expect(cardCells).toEqual(["campaign-expected-drawdown-pct","campaign-effective-price-change","campaign-add-count","campaign-position-geometric-multiple","campaign-magic-b","campaign-capture-rate","campaign-geometric-growth","campaign-position-amplification","campaign-add-efficiency","campaign-arithmetic-expectancy","campaign-unit-rise","campaign-unit-profit","campaign-position-profit","campaign-main-price-change","campaign-main-price-efficiency","campaign-unrealized-price-change","campaign-geometric-expectancy","campaign-mirror-tp-status"]);
     // 每格：上面指标名（dt，不带冒号）、下面数值（dd）；八格同一套格子类名，没有给首格另开的特例
     const cells = metricCells(metricRows[0]);
-    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","单位涨幅","单位利润","仓位利润","盈亏比","仓位放大","加仓效用","几何期望","算术期望","首仓涨跌幅","首仓涨跌幅倍数","几何增长","涨幅未兑现","镜像止盈"]);
+    expect(cells.map(cell => cell.querySelector('dt')?.textContent)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","几何增长","仓位放大","加仓效用","算术期望","单位涨幅","单位利润","仓位利润","首仓涨跌幅","首仓涨跌幅倍数","涨幅未兑现","几何期望","镜像止盈"]);
     for (const cell of cells) {
       expect(cell.children).toHaveLength(2);
       expect(cell.children[0].tagName).toBe('DT');
       expect(cell.children[1].tagName).toBe('DD');
-      expect(cell).toHaveClass('flex-col', 'px-2.5', 'sm:px-1.5', 'shrink-0');
-      // 【用户要求】「每个指标所占的空间要均匀」：十八项同一个宽度类，读列表容器上的 --cm-w-uniform，整行放不下时按 1/18 收窄；640–1279px 每行九格
-      expect(cell).toHaveClass('sm:w-[calc((100%_-_2rem)/9)]', 'xl:w-[min(var(--cm-w-uniform),calc((100%_-_4.25rem)/18))]');
+      // 【用户要求】封面适当增高（py-2），格子等宽由网格给出，不再有逐项宽度类
+      expect(cell).toHaveClass('flex-col', 'px-2.5', 'sm:px-2', 'py-2');
+      expect(cell.className).not.toMatch(/w-\[/);
     }
     const cardList = screen.getByTestId('campaign-card-list');
     for (const card of screen.getAllByTestId('campaign-card')) expect(cardList).toContainElement(card);
-    // 统一宽度 = 各项（指标名与读数取宽者 + 内边距）里最宽的那一个，偶数 px；各项自己的估宽仍挂着
-    const uniform = Number(/^(\d+)px$/.exec(cardList.style.getPropertyValue('--cm-w-uniform'))?.[1]);
-    expect(uniform % 2).toBe(0);
-    expect(uniform).toBeGreaterThanOrEqual(Number(/^(\d+)px$/.exec(cardList.style.getPropertyValue('--cm-w-mainPriceEfficiency'))?.[1]));
+    // 两排等宽网格：列表容器上不再挂列宽变量
+    expect(cardList.getAttribute('style')).toBeNull();
     expect(screen.getAllByTestId('campaign-magic-b-value').map(node => node.textContent)).toEqual(['3.00', '0.50', '-0.80', '—']);
-    expect(cardList.style.getPropertyValue('--cm-w-magicB')).toBe('70px');
-    expect(cardList.style.getPropertyValue('--cm-w-expectedDrawdownPct')).toBe('62px');
 
     // 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：默认按操作时间排——每张卡的操作时间亮，指标项都不亮
     const lit = (card: HTMLElement) => [...card.querySelectorAll('[data-sort-highlight="true"]')];
@@ -1005,7 +999,7 @@ describe('JournalCampaignsPage sorting', () => {
       expect(lit(card).map(node => node.getAttribute('data-testid'))).toEqual(['campaign-magic-b']);
     }
     const payoffCell = screen.getAllByTestId('campaign-magic-b')[0];
-    expect(payoffCell).toHaveClass('ring-1', 'px-2.5', 'py-1.5');
+    expect(payoffCell).toHaveClass('ring-1', 'px-2.5', 'py-2');
     expect(payoffCell.querySelector('dt')).toHaveClass('text-[#B7860B]');
     expect(screen.getAllByTestId('campaign-expected-drawdown-pct')[0]).not.toHaveClass('ring-1');
     // 切到字母：比的是标题，标题亮（琥珀下划线）
@@ -1021,7 +1015,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toBeEmptyDOMElement();
   }, 15_000);
 
-  it('【用户要求】封面列宽按当前时间段里的全部战役定：切换排序（哪怕筛掉了撑宽某一列的战役）列宽不变、文字不挪；换时间段才重算', async () => {
+  it('【用户要求】封面两排等宽网格：切换排序（哪怕筛掉战役）、换时间段，格子类名与次序都不变；数值字号一致、不按长度缩小', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <Routes>
@@ -1031,38 +1025,32 @@ describe('JournalCampaignsPage sorting', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
-    const modes = [
-      'mirrorTp', 'expectedDrawdownPct', 'mainPriceChange', 'mainPriceEfficiency',
-      'magicB', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
-    ];
-    const widths = () => {
-      const list = screen.getByTestId('campaign-card-list');
-      return Object.fromEntries(modes.map(mode => [mode, list.style.getPropertyValue(`--cm-w-${mode}`)]));
-    };
-    const initial = widths();
-    // 神奇的 b这一列最宽的读数是 Late Close 的「-0.80」（5 个半角按 SF Mono ≈ 34.0px > 指标名 30px）→ 56px
-    expect(initial.magicB).toBe('70px');
-    for (const mode of modes) expect(initial[mode], mode).toMatch(/^\d+px$/);
-
-    // 会筛掉战役的排序：首仓涨跌幅倍数 / 神奇的 b / 两个期望 / 杠杆倍数各剩 3 场——列宽不变，各格位置不动
+    const layout = () => screen.getAllByTestId('campaign-card-metrics').map(dl => ({
+      className: dl.className,
+      cells: [...dl.children].map(cell => cell.getAttribute('data-testid')),
+    }));
+    const initial = layout()[0];
+    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9');
+    expect(initial.cells).toHaveLength(18);
+    // 列表容器上不再挂列宽变量；读数不带内联字号
+    expect(screen.getByTestId('campaign-card-list').getAttribute('style')).toBeNull();
+    for (const dl of screen.getAllByTestId('campaign-card-metrics')) {
+      for (const node of dl.querySelectorAll('dt, dd span')) expect((node as HTMLElement).style.fontSize).toBe('');
+    }
     for (const [mode, count] of [
       ['mainPriceEfficiency', 3], ['magicB', 3],
       ['geometricExpectancy', 3], ['arithmeticExpectancy', 3], ['leverage', 3],
     ] as const) {
       fireEvent.click(screen.getByTestId(`campaign-sort-${mode}`));
       await waitFor(() => expect(screen.getAllByTestId('campaign-card'), mode).toHaveLength(count));
-      expect(widths(), mode).toEqual(initial);
+      for (const card of layout()) expect(card, mode).toEqual(initial);
     }
-
-    // 换时间段：框到 3 月~4 月，只剩 High Importance（3.00）与 Best PnL（0.50）；「-0.80」不在这一段里，
-    // 神奇的 b这一列按指标名 30px + 20px = 50px 重算
     fireEvent.click(screen.getByTestId('campaign-sort-time'));
     fireEvent.click(screen.getByTestId('campaign-operation-range'));
     fireEvent.change(screen.getByLabelText('起始日期'), { target: { value: '2026-03-01' } });
     fireEvent.change(screen.getByLabelText('结束日期'), { target: { value: '2026-04-30' } });
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
-    expect(screen.getAllByTestId('campaign-magic-b-value').map(node => node.textContent)).toEqual(['3.00', '0.50']);
-    expect(widths().magicB).toBe('70px');
+    for (const card of layout()) expect(card).toEqual(initial);
   }, 15_000);
 
   it('【用户要求】神奇的 b只写两位小数的 b：取整为 0.00 的读数用中性色，不再按原始正负上红 / 绿', async () => {

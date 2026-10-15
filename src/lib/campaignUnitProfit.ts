@@ -45,13 +45,80 @@ export function formatUnitUsd(value: number | null | undefined): string {
   return `${value < 0 && Number(text) !== 0 ? '-' : ''}${withThousands(text)}`;
 }
 
-/** 排序 / 分档用的封面读数（与上面两个格式化函数同一个取整）。 */
+// ── 封面上的紧凑读数【用户要求】2026-10-15：「数字太长了，可以后面加上 w（万）；单位涨幅 G 都不统一」 ──
+// 详情页盈亏概览、Excel 仍写完整精度；封面、排序分档（档界写法）用下面这一套，排序 / 分档按同一个取整读，
+// 封面读数相同的战役必在同一档。
+
+const SUBSCRIPT_DIGITS = '₀₁₂₃₄₅₆₇₈₉';
+const toSubscript = (n: number) => String(n).split('').map(d => SUBSCRIPT_DIGITS[Number(d)]).join('');
+
+function signed(value: number, text: string): string {
+  return `${value < 0 && /[1-9]/.test(text) ? '-' : ''}${text}`;
+}
+
+/** |x| ≥ 1 万写成「x.xxw」（两位小数）。 */
+const WAN = 10_000;
+
+/**
+ * U、W（USDT）：≥ 1 万「2.80w」；1000–1 万取整「8225」；< 1000 两位小数「800.00」。最长 7 个字符左右。
+ */
+export function formatCompactUsd(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return signed(value, compactUsdText(Math.abs(value)));
+}
+
+function compactUsdText(abs: number): string {
+  if (abs >= WAN) return `${(abs / WAN).toFixed(2)}w`;
+  if (abs >= 1000) return abs.toFixed(0);
+  return abs.toFixed(2);
+}
+
+export function compactUsdBinValue(value: number): number {
+  const abs = Math.abs(value);
+  const rounded = abs >= WAN ? Math.round(abs / 100) * 100 : abs >= 1000 ? Math.round(abs) : Number(abs.toFixed(2));
+  return rounded === 0 ? 0 : Math.sign(value) * rounded;
+}
+
+/** G 的小数位：约 4 位有效数字；< 1 时首个非零数字起留 3 位。 */
+function unitRiseDigits(abs: number): number {
+  if (abs >= 1000) return 0;
+  if (abs >= 100) return 1;
+  if (abs >= 10) return 2;
+  if (abs >= 1) return 3;
+  if (abs === 0) return 2;
+  return Math.min(12, Math.max(0, -Math.floor(Math.log10(abs)) - 1) + 3);
+}
+
+/**
+ * G（价格差）：≥ 1 万「1.80w」；1–1 万约 4 位有效数字（84.00、140.0、1234）；
+ * < 1 时留 3 位有效数字（0.0500、0.0120），小数点后连着 3 个及以上的 0 时用下标记 0 的个数（0.0₄123 = 0.0000123）。
+ */
+export function formatCompactUnitRise(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const abs = Math.abs(value);
+  if (abs >= WAN) return signed(value, `${(abs / WAN).toFixed(2)}w`);
+  const digits = unitRiseDigits(abs);
+  const text = abs.toFixed(digits);
+  if (abs < 1) {
+    const zeros = /^0\.(0*)/.exec(text)?.[1].length ?? 0;
+    if (zeros >= 3) return signed(value, `0.0${toSubscript(zeros)}${text.slice(2 + zeros)}`);
+  }
+  return signed(value, text);
+}
+
+export function compactUnitRiseBinValue(value: number): number {
+  const abs = Math.abs(value);
+  const rounded = abs >= WAN ? Math.round(abs / 100) * 100 : Number(abs.toFixed(unitRiseDigits(abs)));
+  return rounded === 0 ? 0 : Math.sign(value) * rounded;
+}
+
+/** 排序 / 分档用的封面读数（与封面紧凑读数同一个取整）。 */
 export function unitRiseBinValue(value: number): number {
-  return Number(value.toFixed(unitRiseDecimals(value)));
+  return compactUnitRiseBinValue(value);
 }
 
 export function unitUsdBinValue(value: number): number {
-  return Number(value.toFixed(2));
+  return compactUsdBinValue(value);
 }
 
 // ── W（b）（几何增长）【用户要求】2026-10-15：替换「峰值涨幅倍数」的位置 ──

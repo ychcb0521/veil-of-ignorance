@@ -1,4 +1,4 @@
-import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
+import { Component, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -67,7 +67,6 @@ import {
 } from '@/lib/campaignAnalysis';
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
-import { cardMetricColumnWidths } from '@/lib/campaignCardMetricWidths';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
 import { computeMagicB, payoffRatioHedgeWear, PAYOFF_RATIO_HEDGE_WEAR_FORMULA, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
@@ -119,7 +118,7 @@ import {
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
   formatGeometricGrowth, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
-  formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
+  formatCompactUnitRise, formatCompactUsd, formatUnitRise, formatUnitUsd, POSITION_PROFIT_FORMULA, POSITION_PROFIT_METHOD_ONE, POSITION_PROFIT_METHOD_TWO, POSITION_PROFIT_RULE, UNIT_METRICS_MISSING_RULE,
   UNIT_PROFIT_FORMULA, UNIT_PROFIT_RULE, UNIT_RISE_FORMULA, UNIT_RISE_RULE,
 } from '@/lib/campaignUnitProfit';
 import type { CampaignStatus, LegRole, TradeCampaign, TradeJournal } from '@/types/journal';
@@ -362,24 +361,25 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'addCount', label: '加仓次数' },
   { value: 'positionGeometricMultiple', label: '几何仓位' },
   { value: 'magicB', label: '神奇的 b' },
-  // 【用户要求】三个新指标紧跟神奇的 b：单位涨幅 G、单位利润 U、仓位利润 W
-  { value: 'unitRise', label: '单位涨幅' },
-  { value: 'unitProfit', label: '单位利润' },
-  { value: 'positionProfit', label: '仓位利润' },
   { value: 'captureRate', label: '盈亏比' },
+  // 【用户要求】W（b）（几何增长）放在盈亏比后面
+  { value: 'geometricGrowth', label: '几何增长' },
   { value: 'initialExpectedMaxLoss', label: '最大预期亏损' },
   { value: 'realizedPnl', label: '已实现 P&L' },
   { value: 'positionAmplification', label: '仓位放大' },
   { value: 'addEfficiency', label: '加仓效用' },
-  { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
+  // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面
+  { value: 'unitRise', label: '单位涨幅' },
+  { value: 'unitProfit', label: '单位利润' },
+  { value: 'positionProfit', label: '仓位利润' },
   { value: 'mainPriceChange', label: '首仓涨跌幅' },
   { value: 'mainPriceEfficiency', label: '首仓涨跌幅倍数' },
   { value: 'peakPriceChange', label: '峰值涨幅' },
-  // 【用户要求】删除「峰值涨幅倍数」，W（b）（几何增长）放在它原来的位置
-  { value: 'geometricGrowth', label: '几何增长' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'dynamicMaxDrawdownPct', label: '动态最大回撤' },
+  // 【用户要求】几何期望放在动态最大回撤后面（动态最大回撤不在排序行，排序行与封面上几何期望紧跟涨幅未兑现）
+  { value: 'geometricExpectancy', label: '几何期望' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '自评' },
@@ -390,10 +390,9 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
  * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅、动态最大回撤不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
  */
 const SORT_ROW_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB',
-  'unitRise', 'unitProfit', 'positionProfit', 'captureRate',
-  'positionAmplification', 'addEfficiency', 'geometricExpectancy', 'arithmeticExpectancy',
-  'mainPriceChange', 'mainPriceEfficiency', 'geometricGrowth', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha',
+  'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'geometricGrowth',
+  'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
+  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'geometricExpectancy', 'mirrorTp', 'leverage', 'importance', 'alpha',
 ]);
 const SORT_OPTIONS = ALL_SORT_OPTIONS.filter(option => SORT_ROW_MODES.has(option.value));
 
@@ -460,16 +459,12 @@ export function sortCrossTabHeatOpacity(share: number): number {
 const SORT_LONG_PRESS_MS = 450;
 
 /**
- * 战役封面指标行：【用户要求】「交易战役的封面上的指标做成左对齐，要美观，不需要均匀分布。美观是第一位的」——
- * 八项按排序行的次序从左往右紧凑排开（上一行淡色指标名、下一行等宽数字），不把整行均分；右侧留白。
- * 【用户要求】「分布要做得非常均匀、美观，不要有没必要的空隙」：每项的宽度按**当前时间段里的全部战役实际出现的读数**定
- * （指标名与读数取宽者 + 左右内边距，见 cardMetricColumnWidths），以 CSS 变量挂在列表容器上（campaign-card-list），
- * 不再为列表里没出现的极端读数留空。每张卡片读同一套变量，上下各张卡的同名项仍落在同一条竖线上。
- * 列宽不看排序：有的排序会筛掉算不出这一项的战役，若按筛完的列表算，撑宽某一列的那场一被筛掉，后面各格就整体左移——
- * 切换排序时文字不能挪。换时间段才重算。
- * 手机（< 640px）放不下一行，退回两列网格；≥ 640px 起按宽度依次排开，放不下时整行换行（各卡在同一处换行）。
+ * 战役封面指标行：等宽网格、从左排起，上一行淡色指标名、下一行等宽数字；上下各张卡的同名项落在同一条竖线上。
+ * 【用户要求】「交易战役上的指标分成两排吧，战役的封面可以适当增高，这样每个指标数值的字体大小就可以设置成一致的了」：
+ * 不再按读数估宽、不再按格宽缩字号——数值一律 11px、指标名一律 10px。
  */
-const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:flex sm:flex-wrap sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:flex-nowrap';
+// 【用户要求】封面指标分成两排、字号一致：≥ 1024px 每排九格（十八项正好两排），640–1023px 每排六格，手机两列；格子等宽，从左排起
+const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:grid-cols-6 sm:gap-x-1 sm:gap-y-1 sm:pr-6 lg:grid-cols-9';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -1445,9 +1440,9 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'effectivePriceChangeMultiple': return `${value.toFixed(2)}x`;
     case 'magicB': return value.toFixed(2);
     case 'geometricGrowth': return formatGeometricExpectancy(value);
-    case 'unitRise': return formatUnitRise(value);
+    case 'unitRise': return formatCompactUnitRise(value);
     case 'unitProfit':
-    case 'positionProfit': return formatUnitUsd(value);
+    case 'positionProfit': return formatCompactUsd(value);
     case 'positionGeometricMultipleTheoretical':
     case 'positionGeometricMultiple':
     case 'positionAmplification': return formatPositionAmplification(value);
@@ -1613,61 +1608,32 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  * 封面指标项：上标签、下数值，左右各 10px 内边距、圆角。每一项都预留同样的内边距，
  * 高亮（当前排序项）只换底色与描边，切换排序时文字一个像素都不动。
  */
-const CARD_METRIC_CELL = 'flex min-w-0 shrink-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 sm:px-1.5 [container-type:inline-size] transition-[background-color,box-shadow] duration-150';
-/** 封面八项的指标名（与排序行同序）：卡片上的 dt 与列宽估算读同一份。 */
+// 【用户要求】封面适当增高：上下内边距加大一档
+const CARD_METRIC_CELL = 'flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 sm:px-2 transition-[background-color,box-shadow] duration-150';
+/** 封面十八项的指标名，次序与排序行、卡片上的格子一致。 */
 const CARD_METRIC_LABEL = {
+  expectedDrawdownPct: '预期回撤',
   effectivePriceChangePct: '相对涨幅',
   addCount: '加仓次数',
   positionGeometricMultiple: '几何仓位',
   magicB: '神奇的 b',
+  captureRate: '盈亏比',
+  geometricGrowth: '几何增长',
+  positionAmplification: '仓位放大',
+  addEfficiency: '加仓效用',
+  arithmeticExpectancy: '算术期望',
   unitRise: '单位涨幅',
   unitProfit: '单位利润',
   positionProfit: '仓位利润',
-  captureRate: '盈亏比',
-  geometricExpectancy: '几何期望',
-  mirrorTp: '镜像止盈',
-  expectedDrawdownPct: '预期回撤',
   mainPriceChange: '首仓涨跌幅',
   mainPriceEfficiency: '首仓涨跌幅倍数',
-  geometricGrowth: '几何增长',
-  addEfficiency: '加仓效用',
-  positionAmplification: '仓位放大',
   unrealizedPriceChangePct: '涨幅未兑现',
-  arithmeticExpectancy: '算术期望',
+  geometricExpectancy: '几何期望',
+  mirrorTp: '镜像止盈',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
 type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
 type CardMetricReadings = Record<CardMetricMode, string>;
-const CARD_METRIC_MODES = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
-/**
- * 每项的宽度（≥ 640px）读列表容器上的 CSS 变量 --cm-w-<项>（cardMetricWidthStyle 按当前时间段里全部战役的读数算出）。
- * Tailwind 要看到完整类名，所以逐个写出；手机（< 640px）是两列网格，不读这些变量。
- */
-/**
- * 【用户要求】「每个指标所占的空间要均匀，尽量靠左」：十四项一律同宽，取当前列表里最宽的那一项（指标名与读数取宽者，
- * --cm-w-uniform）；整行放不下时按 (100% − 13 个间距) ÷ 14 收窄，仍是一行、仍同宽、从左排起。
- */
-// 【用户要求】新增单位涨幅、单位利润、仓位利润、几何增长后共十八项：≥ 1280px 一行十八格（17 个间距），640–1279px 每行九格（9 + 9 两行）
-const CARD_METRIC_UNIFORM_WIDTH = 'sm:w-[calc((100%_-_2rem)/9)] xl:w-[min(var(--cm-w-uniform),calc((100%_-_4.25rem)/18))]';
-const CARD_METRIC_WIDTH_CLASS = {
-  addCount: CARD_METRIC_UNIFORM_WIDTH,
-  positionGeometricMultiple: CARD_METRIC_UNIFORM_WIDTH,
-  magicB: CARD_METRIC_UNIFORM_WIDTH,
-  unitRise: CARD_METRIC_UNIFORM_WIDTH,
-  unitProfit: CARD_METRIC_UNIFORM_WIDTH,
-  positionProfit: CARD_METRIC_UNIFORM_WIDTH,
-  geometricExpectancy: CARD_METRIC_UNIFORM_WIDTH,
-  mirrorTp: CARD_METRIC_UNIFORM_WIDTH,
-  expectedDrawdownPct: CARD_METRIC_UNIFORM_WIDTH,
-  mainPriceChange: CARD_METRIC_UNIFORM_WIDTH,
-  mainPriceEfficiency: CARD_METRIC_UNIFORM_WIDTH,
-  geometricGrowth: CARD_METRIC_UNIFORM_WIDTH,
-  captureRate: CARD_METRIC_UNIFORM_WIDTH,
-  effectivePriceChangePct: CARD_METRIC_UNIFORM_WIDTH,
-  addEfficiency: CARD_METRIC_UNIFORM_WIDTH,
-  positionAmplification: CARD_METRIC_UNIFORM_WIDTH,
-  unrealizedPriceChangePct: CARD_METRIC_UNIFORM_WIDTH,
-  arithmeticExpectancy: CARD_METRIC_UNIFORM_WIDTH,
-} as const satisfies Record<CardMetricMode, string>;
+
 
 /** 神奇的 b（理论）= 几何仓位（理论）× 相对涨幅：加仓效用、几何期望、算术期望括号里的读数都从它算。 */
 function rowTheoreticalMagicB(row: CampaignDisplayData): number | null {
@@ -1711,10 +1677,11 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     magicB: formatActualTheoreticalMetric(rowMagicB(row), computeMagicB(rowEffectivePriceChangePct(row), rowPositionGeometricMultipleTheoretical(row)), value => formatCampaignPayoffRatio(value * 100)),
     // 【用户要求】括号外基于几何仓位，括号里基于几何仓位（理论）
     geometricGrowth: formatActualTheoreticalMetric(rowGeometricGrowth(row), rowGeometricGrowthTheoretical(row), formatGeometricGrowth),
-    unitRise: formatUnitRise(rowUnitRise(row)),
-    unitProfit: formatUnitUsd(rowUnitProfit(row)),
+    // 【用户要求】封面数字不能太长：≥ 1 万写「w」，G 统一约 4 位有效数字（详情页盈亏概览仍写完整精度）
+    unitRise: formatCompactUnitRise(rowUnitRise(row)),
+    unitProfit: formatCompactUsd(rowUnitProfit(row)),
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
-    positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatUnitUsd),
+    positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatCompactUsd),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
     geometricExpectancy: formatActualTheoreticalMetric(row.geometricExpectancy,
       computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).geometricExpectancy, value => formatGeometricExpectancy(value)),
@@ -1726,17 +1693,6 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
   return readings;
 }
 
-/**
- * 列表容器上的列宽变量：当前时间段里的全部战役（displayRows，与排序无关）每一项的指标名与读数取宽者 + 左右内边距，
- * 向上取整到偶数 px（cardMetricColumnWidths）。读数短的列表不再为没出现的极端读数留空，相邻两项之间的空白因此匀称。
- */
-function cardMetricWidthStyle(rows: readonly CampaignDisplayData[]): CSSProperties {
-  const widths = cardMetricColumnWidths(CARD_METRIC_LABEL, rows.map(cardMetricReadings));
-  const style: Record<string, string> = {};
-  for (const mode of CARD_METRIC_MODES) style[`--cm-w-${mode}`] = `${widths[mode]}px`;
-  style['--cm-w-uniform'] = `${Math.max(...CARD_METRIC_MODES.map(mode => widths[mode]))}px`;
-  return style as CSSProperties;
-}
 /**
  * 【用户要求】「选中排序功能的时候，交易战役封面上对应的模块高亮显示」：淡琥珀底 + 细描边，
  * 指标名换成琥珀色（浅色主题用深一档的琥珀，白底上才看得清）。封面上的其它对应模块（操作时间、杠杆、自评、标题）同一套颜色。
@@ -1785,16 +1741,6 @@ const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowr
  * 【用户要求】「镜像止盈的字号不和谐」：中文读数（已实现·盈利 / 未实现）不走等宽字体——等宽字体里的汉字回落到系统黑体，
  * 11px 加粗比旁边的数字大一圈。改用正文字体、与指标名同一个 10px、常规字重，视觉高度与 11px 等宽数字齐平。
  */
-/**
- * 【用户要求】「封面上的数字一定要完整显示，数字长的可以字号小一点」：每格是一个尺寸容器（CARD_METRIC_CELL 的
- * container-type），读数字号 = min(常规字号, 格宽 ÷ 这串字的宽度)。短读数保持 11px，长读数（带理论值括号的几何仓位、
- * 神奇的 b、盈亏比磨损）按格宽等比缩小到正好放下，不再出省略号。字宽按等宽字体半角 0.6182em、汉字 1em 估，另留 0.15em 余量。窄于 1280px 时十四项分两行、每行七项，免得字号缩到看不清。
- */
-function fitMetricValue(text: string, basePx: number): CSSProperties {
-  let em = 0.15;
-  for (const ch of text) em += /[\u2E80-\u9FFF\uFF00-\uFFEF]/.test(ch) ? 1 : 0.6182;
-  return { fontSize: `min(${basePx}px, calc(100cqw / ${em.toFixed(2)}))` };
-}
 const CARD_METRIC_TEXT_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[10px] font-normal leading-4';
 /** 展开详情里的数值：比指标行轻一档（常规字重），层级上退后。 */
 const CARD_DETAIL_VALUE = 'whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums';
@@ -1919,7 +1865,7 @@ const CampaignCard = memo(function CampaignCard({
     return level === 0 ? first : level > 0 ? then : idle;
   };
   /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 排序链上的高亮。 */
-  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${CARD_METRIC_WIDTH_CLASS[mode]} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')}`;
+  const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')}`;
   const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${byLevel(mode, `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`;
   /** data-sort-highlight：第一级 'true'，之后各级 'then'。 */
   const litAttr = (mode: CampaignSortMode) => byLevel(mode, 'true', 'then', '') || undefined;
@@ -2115,25 +2061,24 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 封面指标行：左对齐、按当前列表的读数定宽（CARD_METRIC_STRIP / CARD_METRIC_WIDTH_CLASS），上标签、下数值；【用户要求】顺序与排序行一致：
-          镜像止盈、预期回撤、首仓涨跌幅、首仓涨跌幅倍数、神奇的 b、加仓效用、几何期望、算术期望。当前排序项高亮。 */}
+      {/* 封面指标：两排等宽网格（CARD_METRIC_STRIP），上标签、下数值；【用户要求】顺序与排序行一致，当前排序项高亮。 */}
       <div className={`relative border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
           className={CARD_METRIC_STRIP}
         >
           <div className={metricCell('expectedDrawdownPct')} data-testid="campaign-expected-drawdown-pct" data-sort-highlight={litAttr('expectedDrawdownPct')}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.expectedDrawdownPct, 10)} className={metricName('expectedDrawdownPct')}>{CARD_METRIC_LABEL.expectedDrawdownPct}</dt>
+            <dt className={metricName('expectedDrawdownPct')}>{CARD_METRIC_LABEL.expectedDrawdownPct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.expectedDrawdownPct, 11)} className={`${CARD_METRIC_VALUE} text-foreground/85`}>
+              <span className={`${CARD_METRIC_VALUE} text-foreground/85`}>
                 {readings.expectedDrawdownPct}
               </span>
             </dd>
           </div>
           <div data-testid="campaign-effective-price-change" className={metricCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
             title={`${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.effectivePriceChangePct, 10)} className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.effectivePriceChangePct, 11)} className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
+            <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
           </div>
           <div
             data-testid="campaign-add-count"
@@ -2141,41 +2086,31 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('addCount')}
             data-sort-highlight={litAttr('addCount')}
           >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.addCount, 10)} className={metricName('addCount')}>{CARD_METRIC_LABEL.addCount}</dt>
+            <dt className={metricName('addCount')}>{CARD_METRIC_LABEL.addCount}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.addCount, 11)} data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+              <span data-testid="campaign-add-count-value" className={`${CARD_METRIC_VALUE} ${readings.addCount === '0' ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
                 {readings.addCount}
               </span>
             </dd>
           </div>
           <div data-testid="campaign-position-geometric-multiple" className={metricCell('positionGeometricMultiple')} data-sort-highlight={litAttr('positionGeometricMultiple')}
             title={`几何仓位，即仓位几何累积倍数。几何仓位 = ${POSITION_GEOMETRIC_FORMULA}，初始主力与镜像币量为 1；αf 为首次实际减仓比例。几何仓位（理论）：${rowPositionGeometricMultipleTheoretical(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultipleTheoretical(row)!)}。${LEG_THEORETICAL_FACTOR_HINT}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.positionGeometricMultiple, 10)} className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.positionGeometricMultiple, 11)} className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
+            <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={metricCell('magicB')} data-sort-highlight={litAttr('magicB')}
             title={MAGIC_B_METHODS_DESCRIPTION}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.magicB, 10)} className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.magicB, 11)} data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
-          </div>
-          <div data-testid="campaign-unit-rise" className={metricCell('unitRise')} data-sort-highlight={litAttr('unitRise')}
-            title={`${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.unitRise, 10)} className={metricName('unitRise')}>{CARD_METRIC_LABEL.unitRise}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.unitRise, 11)} data-testid="campaign-unit-rise-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitRise(row), 'text-foreground/80')}`}>{readings.unitRise}</span></dd>
-          </div>
-          <div data-testid="campaign-unit-profit" className={metricCell('unitProfit')} data-sort-highlight={litAttr('unitProfit')}
-            title={`${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.unitProfit, 10)} className={metricName('unitProfit')}>{CARD_METRIC_LABEL.unitProfit}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.unitProfit, 11)} data-testid="campaign-unit-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitProfit(row), 'text-foreground/80')}`}>{readings.unitProfit}</span></dd>
-          </div>
-          <div data-testid="campaign-position-profit" className={metricCell('positionProfit')} data-sort-highlight={litAttr('positionProfit')}
-            title={`${POSITION_PROFIT_FORMULA}。${POSITION_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.positionProfit, 10)} className={metricName('positionProfit')}>{CARD_METRIC_LABEL.positionProfit}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.positionProfit, 11)} data-testid="campaign-position-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPositionProfit(row), 'text-foreground/80')}`}>{readings.positionProfit}</span></dd>
+            <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
           </div>
           <div data-testid="campaign-capture-rate" className={metricCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.captureRate, 10)} className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.captureRate, 11)} data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
+            <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_HEDGE_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损 ${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
+          </div>
+          <div data-testid="campaign-geometric-growth" className={metricCell('geometricGrowth')} data-sort-highlight={litAttr('geometricGrowth')}
+            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
+            <dt className={metricName('geometricGrowth')}>{CARD_METRIC_LABEL.geometricGrowth}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-geometric-growth-value" className={`${CARD_METRIC_VALUE} ${signTone(rowGeometricGrowth(row) == null ? null : rowGeometricGrowth(row)! - 1, 'text-foreground/80')}`}>{readings.geometricGrowth}</span></dd>
           </div>
           <div
             data-testid="campaign-position-amplification"
@@ -2185,9 +2120,9 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('positionAmplification')}
             data-sort-highlight={litAttr('positionAmplification')}
           >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.positionAmplification, 10)} className={metricName('positionAmplification')}>{CARD_METRIC_LABEL.positionAmplification}</dt>
+            <dt className={metricName('positionAmplification')}>{CARD_METRIC_LABEL.positionAmplification}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.positionAmplification, 11)} data-testid="campaign-position-amplification-value" className={`${CARD_METRIC_VALUE} ${positionAmplification == null || sortBinValue('positionAmplification', positionAmplification) <= POSITION_AMPLIFICATION_UNIT ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
+              <span data-testid="campaign-position-amplification-value" className={`${CARD_METRIC_VALUE} ${positionAmplification == null || sortBinValue('positionAmplification', positionAmplification) <= POSITION_AMPLIFICATION_UNIT ? 'text-muted-foreground/70' : 'text-foreground/85'}`}>
                 {readings.positionAmplification}
               </span>
             </dd>
@@ -2204,10 +2139,81 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('addEfficiency')}
             data-sort-highlight={litAttr('addEfficiency')}
           >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.addEfficiency, 10)} className={metricName('addEfficiency')}>{CARD_METRIC_LABEL.addEfficiency}</dt>
+            <dt className={metricName('addEfficiency')}>{CARD_METRIC_LABEL.addEfficiency}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.addEfficiency, 11)} data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(rowPayoffRatio(row) ?? 0)]}`}>
+              <span data-testid="campaign-add-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[addEfficiency == null ? 'flat' : signedTone(rowPayoffRatio(row) ?? 0)]}`}>
                 {readings.addEfficiency}
+              </span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-arithmetic-expectancy"
+            title={`Eᵢ = 50% × b − 50%（胜率统一取 50%）。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`}
+            className={metricCell('arithmeticExpectancy')}
+            data-sort-highlight={litAttr('arithmeticExpectancy')}
+          >
+            <dt className={metricName('arithmeticExpectancy')}>{CARD_METRIC_LABEL.arithmeticExpectancy}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{readings.arithmeticExpectancy}</span>
+            </dd>
+          </div>
+          <div data-testid="campaign-unit-rise" className={metricCell('unitRise')} data-sort-highlight={litAttr('unitRise')}
+            title={`${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            <dt className={metricName('unitRise')}>{CARD_METRIC_LABEL.unitRise}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-unit-rise-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitRise(row), 'text-foreground/80')}`}>{readings.unitRise}</span></dd>
+          </div>
+          <div data-testid="campaign-unit-profit" className={metricCell('unitProfit')} data-sort-highlight={litAttr('unitProfit')}
+            title={`${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            <dt className={metricName('unitProfit')}>{CARD_METRIC_LABEL.unitProfit}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-unit-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitProfit(row), 'text-foreground/80')}`}>{readings.unitProfit}</span></dd>
+          </div>
+          <div data-testid="campaign-position-profit" className={metricCell('positionProfit')} data-sort-highlight={litAttr('positionProfit')}
+            title={`${POSITION_PROFIT_FORMULA}。${POSITION_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            <dt className={metricName('positionProfit')}>{CARD_METRIC_LABEL.positionProfit}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-position-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPositionProfit(row), 'text-foreground/80')}`}>{readings.positionProfit}</span></dd>
+          </div>
+          <div
+            data-testid="campaign-main-price-change"
+            title={mainPriceChangePct == null
+              ? '首仓涨跌幅：主力都还没平仓（没有平仓价），显示「—」'
+              : '首仓涨跌幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「首仓涨跌幅」的说明'}
+            className={metricCell('mainPriceChange')}
+            data-sort-highlight={litAttr('mainPriceChange')}
+          >
+            <dt className={metricName('mainPriceChange')}>{CARD_METRIC_LABEL.mainPriceChange}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
+                {readings.mainPriceChange}
+              </span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-main-price-efficiency"
+            title={mainPriceEfficiency == null
+              ? '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
+              : `首仓涨跌幅倍数 = 主力首仓涨跌幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
+            className={metricCell('mainPriceEfficiency')}
+            data-sort-highlight={litAttr('mainPriceEfficiency')}
+          >
+            <dt className={metricName('mainPriceEfficiency')}>{CARD_METRIC_LABEL.mainPriceEfficiency}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
+                {readings.mainPriceEfficiency}
+              </span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-unrealized-price-change"
+            title={unrealizedPriceChangePct == null
+              ? '涨幅未兑现会在主力首仓涨跌幅与峰值涨幅都可计算时显示'
+              : `涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅 = ${readings.unrealizedPriceChangePct}`}
+            className={metricCell('unrealizedPriceChangePct')}
+            data-sort-highlight={litAttr('unrealizedPriceChangePct')}
+          >
+            <dt className={metricName('unrealizedPriceChangePct')}>{CARD_METRIC_LABEL.unrealizedPriceChangePct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
+                {readings.unrealizedPriceChangePct}
               </span>
             </dd>
           </div>
@@ -2225,76 +2231,15 @@ const CampaignCard = memo(function CampaignCard({
             className={metricCell('geometricExpectancy')}
             data-sort-highlight={litAttr('geometricExpectancy')}
           >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.geometricExpectancy, 10)} className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
+            <dt className={metricName('geometricExpectancy')}>{CARD_METRIC_LABEL.geometricExpectancy}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.geometricExpectancy, 11)} className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
-            </dd>
-          </div>
-          <div
-            data-testid="campaign-arithmetic-expectancy"
-            title={`Eᵢ = 50% × b − 50%（胜率统一取 50%）。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`}
-            className={metricCell('arithmeticExpectancy')}
-            data-sort-highlight={litAttr('arithmeticExpectancy')}
-          >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.arithmeticExpectancy, 10)} className={metricName('arithmeticExpectancy')}>{CARD_METRIC_LABEL.arithmeticExpectancy}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.arithmeticExpectancy, 11)} className={`${CARD_METRIC_VALUE} ${arithmeticTone}`}>{readings.arithmeticExpectancy}</span>
-            </dd>
-          </div>
-          <div
-            data-testid="campaign-main-price-change"
-            title={mainPriceChangePct == null
-              ? '首仓涨跌幅：主力都还没平仓（没有平仓价），显示「—」'
-              : '首仓涨跌幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「首仓涨跌幅」的说明'}
-            className={metricCell('mainPriceChange')}
-            data-sort-highlight={litAttr('mainPriceChange')}
-          >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.mainPriceChange, 10)} className={metricName('mainPriceChange')}>{CARD_METRIC_LABEL.mainPriceChange}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.mainPriceChange, 11)} data-testid="campaign-main-price-change-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceChangePct == null ? 'flat' : signedTone(mainPriceChangePct)]}`}>
-                {readings.mainPriceChange}
-              </span>
-            </dd>
-          </div>
-          <div
-            data-testid="campaign-main-price-efficiency"
-            title={mainPriceEfficiency == null
-              ? '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
-              : `首仓涨跌幅倍数 = 主力首仓涨跌幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
-            className={metricCell('mainPriceEfficiency')}
-            data-sort-highlight={litAttr('mainPriceEfficiency')}
-          >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.mainPriceEfficiency, 10)} className={metricName('mainPriceEfficiency')}>{CARD_METRIC_LABEL.mainPriceEfficiency}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.mainPriceEfficiency, 11)} data-testid="campaign-main-price-efficiency-value" className={`${CARD_METRIC_VALUE} ${MAIN_PRICE_CHANGE_TONE[mainPriceEfficiency == null ? 'flat' : signedTone(mainPriceEfficiency)]}`}>
-                {readings.mainPriceEfficiency}
-              </span>
-            </dd>
-          </div>
-          <div data-testid="campaign-geometric-growth" className={metricCell('geometricGrowth')} data-sort-highlight={litAttr('geometricGrowth')}
-            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.geometricGrowth, 10)} className={metricName('geometricGrowth')}>{CARD_METRIC_LABEL.geometricGrowth}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span style={fitMetricValue(readings.geometricGrowth, 11)} data-testid="campaign-geometric-growth-value" className={`${CARD_METRIC_VALUE} ${signTone(rowGeometricGrowth(row) == null ? null : rowGeometricGrowth(row)! - 1, 'text-foreground/80')}`}>{readings.geometricGrowth}</span></dd>
-          </div>
-          <div
-            data-testid="campaign-unrealized-price-change"
-            title={unrealizedPriceChangePct == null
-              ? '涨幅未兑现会在主力首仓涨跌幅与峰值涨幅都可计算时显示'
-              : `涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅 = ${readings.unrealizedPriceChangePct}`}
-            className={metricCell('unrealizedPriceChangePct')}
-            data-sort-highlight={litAttr('unrealizedPriceChangePct')}
-          >
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.unrealizedPriceChangePct, 10)} className={metricName('unrealizedPriceChangePct')}>{CARD_METRIC_LABEL.unrealizedPriceChangePct}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.unrealizedPriceChangePct, 11)} data-testid="campaign-unrealized-price-change-value" className={`${CARD_METRIC_VALUE} ${unrealizedPriceChangePct == null ? 'text-muted-foreground/70' : MAIN_PRICE_CHANGE_TONE[signedTone(-unrealizedPriceChangePct)]}`}>
-                {readings.unrealizedPriceChangePct}
-              </span>
+              <span className={`${CARD_METRIC_VALUE} ${geometricTone}`}>{readings.geometricExpectancy}</span>
             </dd>
           </div>
           <div className={metricCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
-            <dt style={fitMetricValue(CARD_METRIC_LABEL.mirrorTp, 10)} className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
+            <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
-              <span style={fitMetricValue(readings.mirrorTp, 10)} className={`${CARD_METRIC_TEXT_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
+              <span className={`${CARD_METRIC_TEXT_VALUE} ${mirrorTpStatus === MIRROR_TP_STATUS_LABEL.win ? TONE_UP : mirrorTpStatus === MIRROR_TP_STATUS_LABEL.loss ? TONE_DOWN : 'text-foreground/85'}`}>{mirrorTpStatus}</span>
             </dd>
           </div>
         </dl>
@@ -2975,12 +2920,6 @@ export default function JournalCampaignsPage() {
     const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
     return Math.min(52, Math.max(30, 20 + columns * 3.4));
   }, [sortCrossTabs]);
-  /**
-   * 封面指标行的列宽：按当前时间段里的全部战役（displayRows）实际出现的读数定，见 cardMetricWidthStyle。
-   * 不读 sortedRows：排序会筛掉算不出这一项的战役，按它算的话切换排序会让后面各格整体左右挪动。
-   * 首次加载时战役分批到达，新到的一场读数更宽，这一列就跟着放宽；加载完就定下来。
-   */
-  const cardMetricWidths = useMemo(() => cardMetricWidthStyle(displayRows), [displayRows]);
   /**
    * 【用户要求】导出 Excel 汇总表（统计分析、找相关性）：当前时间段（含回收站视图）里的全部战役，
    * 按当前排序的次序排，被当前排序口径筛掉的战役接在最后（样本不缺）；列见 campaignSummaryColumns。
@@ -5914,7 +5853,7 @@ export default function JournalCampaignsPage() {
           </div>
         ) : (
           // 列宽变量挂在列表容器上：每张卡的同名项读同一个宽度，上下对齐；宽度随时间段里的战役变（不随排序变），卡片本身不重画。
-          <div data-testid="campaign-card-list" style={cardMetricWidths}>
+          <div data-testid="campaign-card-list">
             {cardSections ? cardSections.map(({ id, group, rows: sectionRows }, sectionIndex) => {
               const collapsed = collapsedSections.has(id);
               const winRate = group.payoffCount > 0 ? `${Math.round((group.wins / group.payoffCount) * 100)}%` : '—';
