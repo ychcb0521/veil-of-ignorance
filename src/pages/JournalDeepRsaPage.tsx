@@ -14,6 +14,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useDeepRsaRun } from '@/hooks/useDeepRsaRun';
+import { useFeatureDeepDive } from '@/hooks/useFeatureDeepDive';
+import { FeatureDeepDivePanel } from '@/components/journal/FeatureDeepDivePanel';
 import { buildRunItems } from '@/lib/deepRsa/pipeline';
 import { buildCampaignGroupReport, GROUP_ORDER } from '@/lib/deepRsa/report';
 import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
@@ -35,6 +37,7 @@ export default function JournalDeepRsaPage() {
   const report = useMemo(() => (rows.length ? buildCampaignGroupReport(rows, true) : null), [rows]);
   const group = useMemo(() => parseGroup(location.search), [location.search]);
   const deepRun = useDeepRsaRun(user?.id);
+  const deepDive = useFeatureDeepDive(user?.id);
   const plannedItems = useMemo(() => (report ? buildRunItems(report, 20261015).items.length : 0), [report]);
 
   const setGroup = (next: DeepRsaGroup) => {
@@ -103,10 +106,24 @@ export default function JournalDeepRsaPage() {
               error={deepRun.error}
               plannedItems={plannedItems}
               // 战役列表读完才开跑：读到一半的分组会漏事件
-              canRun={!!report && complete && !!user}
+              canRun={!!report && complete && !!user && deepDive.status !== 'running'}
               onRun={() => { if (report) void deepRun.run(report); }}
               onCancel={deepRun.cancel}
               onDownload={deepRun.download}
+            />
+          )}
+          deepDivePanel={(
+            <FeatureDeepDivePanel
+              status={deepDive.status}
+              progress={deepDive.progress}
+              result={deepDive.result}
+              error={deepDive.error}
+              groupingReady={!!report && complete}
+              // 与第 3–5 步同一个前提：战役列表读完、登录；两个运行不同时跑，避免同时压币安接口
+              canRun={!!report && complete && !!user && deepRun.status !== 'running'}
+              onRun={() => { if (report) void deepDive.run(report); }}
+              onCancel={deepDive.cancel}
+              onDownload={deepDive.download}
             />
           )}
         />

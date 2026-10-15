@@ -139,11 +139,27 @@ export interface DeepRsaRunResult {
   conclusions: { rsa: Verdict; backtest: Verdict };
 }
 
-interface RunEvent extends RsaEvent {
+export interface RunEvent extends RsaEvent {
   anchorMs: number;
   symbol: string;
   kind: 'event' | 'background';
   momentum: number | null;
+  /** 客观结果三件套（结果期覆盖率 ≥ 95% 才有）：最大涨幅（= outcome）、最大跌幅、期末收益，都是对数。 */
+  maxUp: number | null;
+  maxDown: number | null;
+  endRet: number | null;
+}
+
+/** 第 1–3 步（事件、行情、特征）的产物：Deep RSA 主流程与特征深挖共用同一份。 */
+export interface CollectedEvents {
+  events: RunEvent[];
+  campaigns: number;
+  clusters: number;
+  fetchedCount: number;
+  failed: { id: string; symbol: string; reason: string }[];
+  lowCoverage: number;
+  outcomeMissing: number;
+  missingTakerEvents: number;
 }
 
 export interface RunOptions {
@@ -221,16 +237,16 @@ function contrast(train: readonly RunEvent[], h: number): FeatureContrastRow[] {
   });
 }
 
-export async function runDeepRsa(report: CampaignGroupReport, options: RunOptions = {}): Promise<DeepRsaRunResult> {
-  const startedAt = Date.now();
+/** 第 1–3 步：事件簇 + 随机背景 → 拉 5m K 线 → 观察窗特征（h = 2 / 6 / 12）与客观结果。 */
+export async function collectRunEvents(
+  report: CampaignGroupReport,
+  options: Pick<RunOptions, 'seed' | 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> = {},
+): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
-  // 18 个检验做 Holm：p 的下限是 1/(置换次数+1)，1999 次时校正后最低约 0.009，999 次约 0.018，199 次永远过不了 0.05
-  const permutations = options.permutations ?? 1999;
   const fetchFn = options.fetchFn;
   const signal = options.signal;
   const progress = (stage: RunStage, done: number, total: number) => options.onProgress?.({ stage, done, total });
   const H = [...HALF_LIFE_CANDIDATES_H];
-
   // ── 1. 事件 ──
   progress('events', 0, 1);
   const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap);
@@ -265,17 +281,40 @@ export async function runDeepRsa(report: CampaignGroupReport, options: RunOption
     const featuresByH: Record<number, Row> = {};
     for (const h of H) featuresByH[h] = computeFeatures(window, { halfLifeHours: h });
     const outcome = forwardOutcome(bars, item.anchorMs);
-    const outcomeValue = outcome && outcome.coverage >= MIN_WINDOW_COVERAGE ? outcome.maxUp : null;
+    const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;
+    const outcomeValue = outcomeOk ? outcome.maxUp : null;
     if (outcomeValue == null) outcomeMissing++;
     events.push({
       id: item.id, symbol: normalizeResearchSymbol(item.symbol), anchorMs: item.anchorMs, kind: item.kind,
       featuresByH, label: item.label, outcome: outcomeValue,
       block: new Date(item.anchorMs).toISOString().slice(0, 7),
       momentum: momentumScorer(window),
+      maxUp: outcomeValue, maxDown: outcomeOk ? outcome.maxDown : null, endRet: outcomeOk ? outcome.endRet : null,
     });
   });
   progress('features', items.length, items.length);
   checkAbort(signal);
+
+  return {
+    events, campaigns, clusters,
+    fetchedCount: fetched.filter(r => r.status === 'fulfilled').length,
+    failed, lowCoverage, outcomeMissing, missingTakerEvents,
+  };
+}
+
+export async function runDeepRsa(report: CampaignGroupReport, options: RunOptions = {}): Promise<DeepRsaRunResult> {
+  const startedAt = Date.now();
+  const seed = options.seed ?? 20261015;
+  // 18 个检验做 Holm：p 的下限是 1/(置换次数+1)，1999 次时校正后最低约 0.009，999 次约 0.018，199 次永远过不了 0.05
+  const permutations = options.permutations ?? 1999;
+  const fetchFn = options.fetchFn;
+  const signal = options.signal;
+  const progress = (stage: RunStage, done: number, total: number) => options.onProgress?.({ stage, done, total });
+  const H = [...HALF_LIFE_CANDIDATES_H];
+
+  const { events, campaigns, clusters, fetchedCount, failed, lowCoverage, outcomeMissing, missingTakerEvents } = await collectRunEvents(report, {
+    seed, fetchFn, signal, onProgress: options.onProgress, concurrency: options.concurrency, backgroundCap: options.backgroundCap,
+  });
 
   // ── 4. 切分 + 训练集面板 ──
   const split = chronologicalSplit(events);
@@ -343,7 +382,7 @@ export async function runDeepRsa(report: CampaignGroupReport, options: RunOption
       campaigns, clusters,
       labeled: { positive: events.filter(e => e.label === 'positive').length, control: events.filter(e => e.label === 'control').length },
       background: events.filter(e => e.kind === 'background').length,
-      fetched: fetched.filter(r => r.status === 'fulfilled').length,
+      fetched: fetchedCount,
       failed, lowCoverage, outcomeMissing, missingTakerEvents,
     },
     split: {

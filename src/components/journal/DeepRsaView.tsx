@@ -133,11 +133,13 @@ export interface DeepRsaViewProps {
   onOpenCampaign: (campaignId: string) => void;
   /** 第 3–5 步的运行入口（页面外壳给）。 */
   runPanel?: React.ReactNode;
+  /** 第 6 步「特征深挖」面板（失衡 · 偏移 · 谢林）。 */
+  deepDivePanel?: React.ReactNode;
   /** 最近一次运行结果：进度与结论按它更新。 */
   run?: DeepRsaRunResult | null;
 }
 
-export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign, runPanel, run }: DeepRsaViewProps) {
+export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign, runPanel, deepDivePanel, run }: DeepRsaViewProps) {
   const listed = report?.rows.filter(r => r.grouping.group === group) ?? [];
   return (
     <div className="space-y-7 text-[12px]">
@@ -264,6 +266,11 @@ export function DeepRsaView({ report, loading, loaded, total, group, onGroupChan
       {runPanel && (
         <Section title="运行分析（第 3–5 步）" note="在你的浏览器里取币安公开行情 · 只读，不写数据、不下单">
           {runPanel}
+        </Section>
+      )}
+      {deepDivePanel && (
+        <Section title="特征深挖（第 6 步）" note="加权主动买卖失衡 · 失衡的近期偏移 · 谢林候选 · 同一批事件，单独逐个检验">
+          {deepDivePanel}
         </Section>
       )}
 

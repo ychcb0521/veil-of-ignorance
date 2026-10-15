@@ -22,6 +22,7 @@ const EXEMPT: Record<string, string> = {
   'pages/JournalCampaignDetailPage.tsx': '反事实/反向委托的「本地隐藏」是查看偏好，非数据',
   'lib/signalLibrary.ts': '已在 saveSignals 里接入推送',
   'hooks/useCampaignPricePaths.ts': '每场战役的峰值涨幅 / 动态最大回撤是由历史 K 线算出来的可重算缓存（按用户分区）：换设备重算一遍即可，不属于交易状态，账户资产不由它推导。',
+  'hooks/useFeatureDeepDive.ts': 'Deep RSA 第 6 步特征深挖的最近一次结果：只读研究的展示缓存（按用户分区），可随时重跑重算；不进交易状态，不需要跨设备同步。',
   'hooks/useDeepRsaRun.ts': 'Deep RSA 最近一次研究运行结果：只读研究的展示缓存（按用户分区），可随时重跑重算；不进交易状态，账户资产与战役读数都不由它推导，不需要跨设备同步。',
   'hooks/useUnrealizedChartSnapshot.ts': '涨幅未兑现散点图的展示快照：只用来在行情重算期间先画上次的读数，不进卡片、排序、统计与导出；可重算，按用户与回收站视图分区，不需要跨设备同步。',
 };
