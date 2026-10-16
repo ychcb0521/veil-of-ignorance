@@ -152,22 +152,32 @@ function segmentEndV(data: SegmentData): number | undefined {
 }
 const vColor = (v: number | undefined) => (v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D');
 
-/** 副图的 0 轴（多空平衡线）：直接画一条虚线，不当成数据系列（否则纵轴上会多一个 0 的标签）。 */
-function drawZeroLine({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
-  const y = Math.round(yAxis.convertToPixel(0)) + 0.5;
-  if (y >= 0 && y <= bounding.height) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(132,142,156,0.55)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(bounding.width, y);
-    ctx.stroke();
-    ctx.restore();
-  }
-  return false;
+type ZeroLineStyle = { color: string; width: number; dash: number[] };
+/**
+ * 副图的 0 轴（多空平衡线）：直接画一条线，不当成数据系列（否则纵轴上会多一个 0 的标签）。
+ * 先于 V / A 本身画，所以数据线压在它上面。
+ */
+function zeroLine({ color, width, dash }: ZeroLineStyle) {
+  return ({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean => {
+    const y = Math.round(yAxis.convertToPixel(0)) + (width % 2 ? 0.5 : 0);
+    if (y >= 0 && y <= bounding.height) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(bounding.width, y);
+      ctx.stroke();
+      ctx.restore();
+    }
+    return false;
+  };
 }
+/** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：画成醒目的橘黄色实线。 */
+const V_ZERO_LINE = zeroLine({ color: 'rgba(245,158,11,0.9)', width: 1.5, dash: [] });
+/** A 的 0 轴保持灰色虚线，与 V 区分。 */
+const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
 
 let registered = false;
 
@@ -784,7 +794,7 @@ export function registerCustomIndicators() {
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
     maxValue: 0,
-    draw: drawZeroLine,
+    draw: V_ZERO_LINE,
     figures: [
       {
         key: 'v', title: 'V(基点/根): ', type: 'line',
@@ -802,7 +812,7 @@ export function registerCustomIndicators() {
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
     maxValue: 0,
-    draw: drawZeroLine,
+    draw: A_ZERO_LINE,
     figures: [
       {
         key: 'a', title: '主动买方优势 A: ', type: 'bar', baseValue: 0,
