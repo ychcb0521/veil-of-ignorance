@@ -293,7 +293,11 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, excl
       <Block title="细节">
         <ul className="list-disc space-y-1 pl-4 text-[11.5px] text-foreground/85" data-testid="deep-dig-details">
           <li>
-            样本：<N>{c.campaigns}</N> {def.source === 'signals' ? '条信号（时间点 = 信号时间）' : '场战役'}，同一个币 48 小时内的合为一簇 → <N>{c.clusters}</N> 簇，每簇取一个代表；
+            {def.source === 'signals' ? (
+              <>样本：信号库里的 <N>{c.campaigns}</N> 条信号，每条信号单独一个事件（时间点 = 信号时间，读数 = 它的评级），有没有交易战役都算；</>
+            ) : (
+              <>样本：<N>{c.campaigns}</N> 场战役，同一个币 48 小时内的合为一簇 → <N>{c.clusters}</N> 簇，每簇取一个代表；</>
+            )}
             另在同一批币、同一段时间里随机抽 <N>{byGroup.background?.n ?? 0}</N> 个时点作参照。
           </li>
           {DEEP_DIG_GROUPS.map(g => (

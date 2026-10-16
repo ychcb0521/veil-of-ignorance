@@ -165,6 +165,8 @@ export async function collectDeepDigData(
   const collected = await collectRunEvents(report, {
     ...options,
     eventRows: sampleEventRows(samples, groups),
+    // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
+    cluster: source !== 'signals',
     extraFeatures: window => ({ [DEEP_DIG_KEY]: computeFeatureValue(window, compiled) }),
   });
   const described = describeDeepDig(collected.events);

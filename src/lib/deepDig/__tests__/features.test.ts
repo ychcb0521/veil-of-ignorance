@@ -4,7 +4,8 @@ import {
   sampleEventRows, signalSample, translateLegacyGroupExpr, upgradeGroupVars,
 } from '@/lib/deepDig/features';
 import { groupCampaign, mulberry32, type CampaignLabelInput } from '@/lib/deepRsa/grouping';
-import type { CampaignGroupRow } from '@/lib/deepRsa/report';
+import { buildCampaignGroupReport, type CampaignGroupRow } from '@/lib/deepRsa/report';
+import { buildRunItems } from '@/lib/deepRsa/pipeline';
 
 function row(input: Partial<CampaignLabelInput>, letters: CampaignGroupRow['letters'] = { p: 10, c: 5, w: -0.1 }): CampaignGroupRow {
   const full: CampaignLabelInput = {
@@ -76,6 +77,23 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     expect(() => compileGroups('c > 1', 's < 2', 'signals')).toThrow('不认识「c」');
     expect(() => compileGroups('s > 1', 'b < 2', 'campaigns')).toThrow('不认识「s」');
     expect(sampleEventRows([sig('a', 5), sig('d'), sig('e', 5, '探顶区')], g).map(r => [r.id, r.group])).toEqual([['a', 'positive'], ['d', 'middle']]);
+  });
+
+  it('【用户要求】信号单独算数据：没有交易战役也纳入；同币 48 小时内的几条信号不合并，每条一个事件、各自带评级', () => {
+    const t0 = Date.parse('2026-08-12T01:30:00Z');
+    const sig = (id: string, hours: number, quality?: number) => signalSample({ id, symbol: 'SOLUSDT', timeMs: t0 + hours * 3_600_000, timeLabel: '', fallbackZone: '', quality });
+    const g = compileGroups('s >= 4', 's <= 2', 'signals');
+    // 战役汇总是空的（一场战役都没有），信号照样成为事件
+    const empty = buildCampaignGroupReport([], true);
+    const rows = sampleEventRows([sig('a', 0, 5), sig('b', 3, 1), sig('c', 10, 3)], g);
+    const { items } = buildRunItems(empty, 1, 0, rows, false);
+    expect(items.map(i => [i.id, i.label, i.anchorMs - t0])).toEqual([
+      ['a', 'positive', 0], ['b', 'control', 3 * 3_600_000], ['c', null, 10 * 3_600_000],
+    ]);
+    // 对照：按战役的做法合簇时，一正一负会被并成一个「冲突」事件，两条都进不了比较
+    const merged = buildRunItems(empty, 1, 0, rows, true).items;
+    expect(merged).toHaveLength(1);
+    expect(merged[0].label).toBeNull();
   });
 
   it('保存前检查：公式、分组标准、显示倍数', () => {

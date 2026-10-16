@@ -207,7 +207,7 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground">{value.source === 'signals' ? '每条信号一个事件，时间点 = 信号时间' : '每场战役一个事件，时间点 = 进场时刻'}</span>
+        <span className="text-[11px] text-muted-foreground">{value.source === 'signals' ? '信号库里每条信号单独一个事件（时间点 = 信号时间），与交易战役无关' : '每场战役一个事件，时间点 = 进场时刻'}</span>
       </div>
       <label className="flex items-center gap-2">
         <span className="w-[42px] shrink-0 text-[#0B9F66] dark:text-[#0ECB81]">实验组</span>

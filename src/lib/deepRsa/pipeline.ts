@@ -189,12 +189,19 @@ export function buildRunItems(
   backgroundCap = BACKGROUND_CAP,
   /** Deep dig：按特征值自己的分组标准与样本来源给出的事件行（排除项已去掉）；不给时用战役的默认分组。 */
   eventRows?: readonly EventRow[],
+  /**
+   * 同币 48h 内的事件合为一簇（战役的默认做法）。Deep dig 的信号样本不合并：
+   * 【用户要求】2026-10-16「有一个信号，有具体的时间和评级，来自于信号库……这个信号也属于数据，也要纳入进来运行」——每条信号单独一个事件。
+   */
+  cluster = true,
 ): { items: RunItem[]; campaigns: number; clusters: number } {
   const rows: EventRow[] = eventRows ? [...eventRows] : report.rows
     .filter(r => r.grouping.group !== 'excluded' && r.anchorMs != null)
     .map(r => ({ id: r.campaignId, symbol: r.symbol, anchorMs: r.anchorMs!, group: r.grouping.group }));
   const groupById = new Map(rows.map(r => [r.id, r.group]));
-  const clusters = clusterEvents(rows.map(r => ({ id: r.id, symbol: r.symbol, anchorMs: r.anchorMs })));
+  const clusters = cluster
+    ? clusterEvents(rows.map(r => ({ id: r.id, symbol: r.symbol, anchorMs: r.anchorMs })))
+    : [...rows].sort((a, b) => a.anchorMs - b.anchorMs).map(r => ({ clusterId: r.id, symbol: r.symbol, firstAnchorMs: r.anchorMs, memberIds: [r.id] }));
   const items: RunItem[] = clusters.map(c => ({
     id: c.clusterId, symbol: c.symbol, anchorMs: c.firstAnchorMs, kind: 'event',
     label: clusterLabel(c.memberIds.map(id => groupById.get(id)!)), memberIds: c.memberIds,
@@ -229,6 +236,8 @@ export async function collectRunEvents(
   report: CampaignGroupReport,
   options: Pick<RunOptions, 'seed' | 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
     eventRows?: readonly EventRow[];
+    /** false = 事件不按同币 48h 合簇（Deep dig 的信号样本）。 */
+    cluster?: boolean;
     /** Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。 */
     extraFeatures?: (window: ObservationWindow) => Row;
   } = {},
@@ -240,7 +249,7 @@ export async function collectRunEvents(
   const H = [...HALF_LIFE_CANDIDATES_H];
   // ── 1. 事件 ──
   progress('events', 0, 1);
-  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.eventRows);
+  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.eventRows, options.cluster ?? true);
 
   // ── 2. 行情 ──
   const failed: DeepRsaRunResult['coverage']['failed'] = [];
