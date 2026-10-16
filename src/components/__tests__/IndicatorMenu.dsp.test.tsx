@@ -10,6 +10,16 @@ function open(indicators: IndicatorConfig[]) {
 }
 
 describe('【用户要求】动态谢林点：可以隐去主图的 DSP 线，只要 V / A 副图', () => {
+  it('【用户要求】名称下面注明 V 的定义，悬停给出计算步骤（两项都有）', () => {
+    open([]);
+    const defs = screen.getAllByText(/谢林点迁移速度 V：共识价每根 K 线往上/);
+    expect(defs).toHaveLength(2);
+    for (const d of defs) {
+      expect(d.getAttribute('title')).toContain('⑥ 迁移速度 Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Uₜ');
+      expect(d.getAttribute('title')).toContain('V = 2.24 基点 / 根');
+    }
+  });
+
   it('菜单里有「只要副图」一项', () => {
     open([]);
     expect(screen.getByText('动态谢林点 V / A（只要副图）')).toBeInTheDocument();

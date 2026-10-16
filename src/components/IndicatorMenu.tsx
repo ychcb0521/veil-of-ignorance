@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useMemo, forwardRef } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
+import { DSP_V_DEFINITION, DSP_V_STEPS } from '@/lib/dynamicSchellingPoint';
 
 export interface IndicatorCatalogItem {
   id: string;
@@ -20,6 +21,9 @@ export interface IndicatorCatalogItem {
   /** 参数框的含义（悬停提示）与单位（框后小字）；不写就是普通的「周期」。 */
   periodHint?: string;
   periodUnit?: string;
+  /** 名称下面的一句说明；detail 是悬停时的完整说明（计算步骤）。 */
+  description?: string;
+  detail?: string;
 }
 
 // Determine support status dynamically: if we have a mapping, it's supported
@@ -147,9 +151,9 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
 
   // --- Volume ---
   // 【用户要求】动态谢林点：主图 DSP 线 + 副图 迁移速度 V、主动买方优势 A；参数 = 时间半衰期（小时），成交量一律用金额
-  { id: 'DSP',    nameZh: '动态谢林点 DSP（含 V / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h' },
+  { id: 'DSP',    nameZh: '动态谢林点 DSP（含 V / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
   // 【用户要求】可以隐去主图的 DSP 线：只要 V / A 两个副图；与上一项二选一
-  { id: 'DSP_VA', nameZh: '动态谢林点 V / A（只要副图）',   nameEn: 'DSP · V / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h' },
+  { id: 'DSP_VA', nameZh: '动态谢林点 V / A（只要副图）',   nameEn: 'DSP · V / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },
@@ -366,6 +370,10 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
             )}
           </div>
           <span className="text-[10px] text-muted-foreground">{item.nameEn}</span>
+          {item.description && (
+            // 【用户要求】在旁边注明定义；悬停给出完整计算步骤
+            <span className="mt-0.5 block whitespace-normal text-[10px] leading-4 text-muted-foreground/90" title={item.detail}>{item.description}</span>
+          )}
         </div>
       </div>
 

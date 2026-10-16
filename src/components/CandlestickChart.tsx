@@ -19,6 +19,7 @@ import {
   type OverlayCreate,
 } from "klinecharts";
 import { chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
+import { DSP_V_STEPS } from "@/lib/dynamicSchellingPoint";
 import type { PendingOrder } from "@/types/trading";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawingToolbar } from "./DrawingToolbar";
@@ -117,6 +118,8 @@ const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = 
 };
 /** 右上角小标签上的名字（默认用指标 id）。 */
 const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·V/A" };
+/** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
+const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
 const COMPANION_ONLY = new Set(["DSP_VA"]);
 const COMPANION_KC_NAME: Record<string, string> = Object.fromEntries(
@@ -2358,6 +2361,7 @@ function CandlestickChartComponent({
             {indicators.map((ind) => (
               <span
                 key={ind.type}
+                title={INDICATOR_CHIP_TITLE[ind.type]}
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
