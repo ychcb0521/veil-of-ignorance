@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeFeatureDeepDive, auc, clusterBootstrapCi, partialSpearman, permutationP, DEEP_DIVE_FEATURES } from '../deepDive';
+import { analyzeFeatureDeepDive, auc, clusterBootstrapCi, partialSpearman, permutationP, DEEP_DIVE_FEATURES, DSP_STUDY, FEATURES_STUDY } from '../deepDive';
 import { mulberry32 } from '../grouping';
 import type { RunEvent } from '../pipeline';
 
@@ -112,5 +112,71 @@ describe('Deep RSA 第 6 步 · 一整轮分析（合成数据）', { timeout: 6
   it('没有植入信号时，失衡 → 期末收益不被判定为已验证', () => {
     const none = analyzeFeatureDeepDive(syntheticEvents(360, 12, { signal: false }), { permutations: 599, bootstrap: 99 });
     expect(none.conclusions.verified.map(v => `${v.feature}:${v.target}`)).not.toContain('taker_imb_w:endRet');
+  });
+});
+
+/**
+ * 第 7 步（动态谢林点）：同一套统计、换特征清单。植入：
+ *  - dsp_v → 24h 期末收益（真实的方向信息）；
+ *  - dsp_gap 只通过波动率与最大涨幅相关——控制波动率后应消失，最大跌幅同样「相关」；
+ *  - dsp_a 纯噪声。
+ */
+function syntheticDspEvents(n: number, seed: number, { signal = true }: { signal?: boolean } = {}): RunEvent[] {
+  const rand = mulberry32(seed);
+  const t0 = Date.parse('2025-01-01T00:00:00Z');
+  return Array.from({ length: n }, (_, i) => {
+    const vol = 0.005 + 0.02 * rand();
+    const v = 2e-4 * normal(rand);
+    const a = 0.3 * normal(rand);
+    const gap = vol * 3 + 0.01 * normal(rand);
+    const endRet = (signal ? 300 * v : 0) + 0.03 * normal(rand);
+    const maxUp = vol * 4 + 0.005 * rand();
+    const maxDown = -(vol * 4 + 0.005 * rand());
+    const kind = i % 3 === 0 ? 'background' : 'event';
+    const label = kind === 'background' ? null : rand() < 0.2 ? 'positive' : 'control';
+    const features = { vol_w: vol, dsp_v: v, dsp_a: a, dsp_gap: gap };
+    return {
+      id: `d${i}`, symbol: `S${i % 25}USDT`, anchorMs: t0 + i * 6 * 3_600_000, kind,
+      featuresByH: { 2: { ...features, dsp_v: v * 1.1 }, 6: features, 12: { ...features, dsp_v: v * 0.9 } }, label, outcome: maxUp,
+      block: new Date(t0 + i * 6 * 3_600_000).toISOString().slice(0, 7), momentum: null,
+      maxUp, maxDown, endRet,
+    } as RunEvent;
+  });
+}
+
+// 9 个检验整族 Holm：599 次置换时校正后最小 p = 9 / 600 = 0.015
+describe('Deep RSA 第 7 步 · 动态谢林点检验（合成数据）', { timeout: 60_000 }, () => {
+  const result = analyzeFeatureDeepDive(syntheticDspEvents(360, 21), { permutations: 599, bootstrap: 99, study: DSP_STUDY });
+  const row = (feature: string, target: string) => result.association.find(r => r.feature === feature && r.target === target)!;
+
+  it('3 个特征 × 3 个结果 = 9 个主检验；植入的「V → 期末收益」被检出、在确认集复现、控制波动率后仍成立', () => {
+    expect(result.study).toBe('dsp');
+    expect(result.association).toHaveLength(9);
+    expect(row('dsp_v', 'endRet').rho).toBeGreaterThan(0.3);
+    expect(row('dsp_v', 'endRet').pHolm).toBeLessThan(0.05);
+    const conf = result.confirmation.find(r => r.feature === 'dsp_v' && r.target === 'endRet')!;
+    expect(conf.verdict).toBe('已验证');
+    expect(conf.survivesVolControl).toBe(true);
+    expect(row('dsp_a', 'endRet').pHolm).toBeGreaterThan(0.05);
+  });
+
+  it('只靠波动率的偏离：控制波动率后消失，最大跌幅同样「相关」；交叉表按 偏离 × V 分四格', () => {
+    expect(row('dsp_gap', 'maxUp').rho).toBeGreaterThan(0.5);
+    expect(Math.abs(row('dsp_gap', 'maxUp').rhoPartialVol)).toBeLessThan(0.2);
+    expect(row('dsp_gap', 'maxDown').rho).toBeLessThan(-0.5);
+    expect(result.interaction).toHaveLength(4);
+    expect(result.interaction.reduce((s, c) => s + c.n, 0)).toBe(360);
+    // 半衰期敏感性只对加权特征（dsp_v、dsp_gap）
+    expect(new Set(result.robustness.byHalfLife.map(r => r.feature))).toEqual(new Set(['dsp_v', 'dsp_gap']));
+  });
+
+  it('没有植入信号时不判定为已验证', () => {
+    const none = analyzeFeatureDeepDive(syntheticDspEvents(360, 22, { signal: false }), { permutations: 599, bootstrap: 99, study: DSP_STUDY });
+    expect(none.conclusions.verified.map(v => `${v.feature}:${v.target}`)).not.toContain('dsp_v:endRet');
+  });
+
+  it('默认仍是第 6 步：特征清单与交叉表不变', () => {
+    expect(FEATURES_STUDY.features.map(f => f.key)).toEqual(['taker_imb_w', 'taker_imb_shift_w', 'vwap12_dev', 'poc_dev_w']);
+    expect(FEATURES_STUDY.interaction.first.key).toBe('vwap12_dev');
   });
 });

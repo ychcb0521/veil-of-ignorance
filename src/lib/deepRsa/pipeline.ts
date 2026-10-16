@@ -15,6 +15,7 @@
  * 对照组保留现有规则，同时加跑「24h 真实涨幅」目标。
  */
 import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
+import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
 import { computeFeatures, FEATURE_DEFINITIONS, type FeatureFamily, type FeatureKey } from '@/lib/deepRsa/features';
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { fetchFundingHistory, fetchResearchKlines, mapLimit, MarketDataError, type FetchFn } from '@/lib/deepRsa/marketData';
@@ -252,7 +253,8 @@ export async function collectRunEvents(
     if (window.coverage < MIN_WINDOW_COVERAGE) { lowCoverage++; return; }
     if (window.missingTakerBars > 0) missingTakerEvents++;
     const featuresByH: Record<number, Row> = {};
-    for (const h of H) featuresByH[h] = computeFeatures(window, { halfLifeHours: h });
+    // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
+    for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h) };
     const outcome = forwardOutcome(bars, item.anchorMs);
     const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;
     const outcomeValue = outcomeOk ? outcome.maxUp : null;

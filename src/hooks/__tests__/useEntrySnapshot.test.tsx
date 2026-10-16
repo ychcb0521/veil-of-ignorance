@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EntrySchellingPanel, SignalEntrySchelling } from '@/components/journal/EntrySchelling';
+import { EntrySchellingPanel } from '@/components/journal/EntrySchelling';
 import { __setEntrySnapshotFetchForTests, useEntrySnapshot } from '@/hooks/useEntrySnapshot';
 import { clearMarketDataCache } from '@/lib/deepRsa/marketData';
 import { BAR_MS } from '@/lib/deepRsa/window';
@@ -95,16 +95,5 @@ describe('展示', () => {
     render(<EntrySchellingPanel symbol="ABCUSDT" anchorMs={null} />);
     expect(screen.getByTestId('campaign-entry-schelling-panel').textContent).toContain('还没有成交的主力开仓');
     expect(fetchFn).not.toHaveBeenCalled();
-  });
-
-  it('信号库三列：VWAP · POC · 兜底；兜底价相对收盘价', async () => {
-    __setEntrySnapshotFetchForTests(fakeFetch());
-    render(<SignalEntrySchelling symbol="ABCUSDT" timeMs={ANCHOR} fallbackPrice={1} />);
-    await waitFor(() => expect(screen.getByTestId('signal-entry-schelling').dataset.status).toBe('ready'));
-    const cells = [...screen.getByTestId('signal-entry-schelling').children].map(c => c.textContent);
-    expect(cells).toHaveLength(3);
-    expect(cells[0]).toMatch(/^\+\d+\.\d%$/);
-    // 收盘价约 1.2，兜底 1 → 约 +20%
-    expect(cells[2]).toMatch(/^\+(19|20)\.\d%$/);
   });
 });

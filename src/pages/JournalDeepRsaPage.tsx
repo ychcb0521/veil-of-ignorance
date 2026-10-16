@@ -16,6 +16,7 @@ import { useCampaignList } from '@/hooks/useCampaignList';
 import { useDeepRsaRun } from '@/hooks/useDeepRsaRun';
 import { useFeatureDeepDive } from '@/hooks/useFeatureDeepDive';
 import { FeatureDeepDivePanel } from '@/components/journal/FeatureDeepDivePanel';
+import { DSP_STUDY } from '@/lib/deepRsa/deepDive';
 import { buildRunItems } from '@/lib/deepRsa/pipeline';
 import { buildCampaignGroupReport, GROUP_ORDER } from '@/lib/deepRsa/report';
 import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
@@ -38,6 +39,9 @@ export default function JournalDeepRsaPage() {
   const group = useMemo(() => parseGroup(location.search), [location.search]);
   const deepRun = useDeepRsaRun(user?.id);
   const deepDive = useFeatureDeepDive(user?.id);
+  const dspStudy = useFeatureDeepDive(user?.id, 'dsp');
+  // 三个运行（第 3–5 步、第 6 步、第 7 步）不同时跑，避免同时压币安接口
+  const anyRunning = deepRun.status === 'running' || deepDive.status === 'running' || dspStudy.status === 'running';
   const plannedItems = useMemo(() => (report ? buildRunItems(report, 20261015).items.length : 0), [report]);
 
   const setGroup = (next: DeepRsaGroup) => {
@@ -106,7 +110,7 @@ export default function JournalDeepRsaPage() {
               error={deepRun.error}
               plannedItems={plannedItems}
               // 战役列表读完才开跑：读到一半的分组会漏事件
-              canRun={!!report && complete && !!user && deepDive.status !== 'running'}
+              canRun={!!report && complete && !!user && !anyRunning}
               onRun={() => { if (report) void deepRun.run(report); }}
               onCancel={deepRun.cancel}
               onDownload={deepRun.download}
@@ -120,10 +124,25 @@ export default function JournalDeepRsaPage() {
               error={deepDive.error}
               groupingReady={!!report && complete}
               // 与第 3–5 步同一个前提：战役列表读完、登录；两个运行不同时跑，避免同时压币安接口
-              canRun={!!report && complete && !!user && deepRun.status !== 'running'}
+              canRun={!!report && complete && !!user && !anyRunning}
               onRun={() => { if (report) void deepDive.run(report); }}
               onCancel={deepDive.cancel}
               onDownload={deepDive.download}
+            />
+          )}
+          dspPanel={(
+            <FeatureDeepDivePanel
+              study={DSP_STUDY}
+              testIdPrefix="dsp-study"
+              status={dspStudy.status}
+              progress={dspStudy.progress}
+              result={dspStudy.result}
+              error={dspStudy.error}
+              groupingReady={!!report && complete}
+              canRun={!!report && complete && !!user && !anyRunning}
+              onRun={() => { if (report) void dspStudy.run(report); }}
+              onCancel={dspStudy.cancel}
+              onDownload={dspStudy.download}
             />
           )}
         />

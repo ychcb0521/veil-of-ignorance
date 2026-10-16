@@ -1,13 +1,13 @@
 /**
- * 进场时的谢林偏离：战役封面一行小字、战役详情一块面板、信号库三列数字。
- * 【用户要求】2026-10-15 能看到每一场战役在进场时（以及每条信号）的具体数值；名字和数字挨着、左对齐紧凑。
+ * 进场时的谢林偏离：战役封面一行小字、战役详情一块面板。
+ * 【用户要求】2026-10-15 能看到每一场战役在进场时的具体数值；名字和数字挨着、左对齐紧凑。2026-10-16 信号库不显示。
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
-  ENTRY_SNAPSHOT_HALF_LIFE_H, ENTRY_SNAPSHOT_MIN_COVERAGE, fallbackDeviation, formatEntryDeviation, formatEntryPrice, type EntrySnapshot,
+  ENTRY_SNAPSHOT_HALF_LIFE_H, ENTRY_SNAPSHOT_MIN_COVERAGE, formatEntryDeviation, formatEntryPrice, type EntrySnapshot,
 } from '@/lib/deepRsa/entrySnapshot';
 import { useEntrySnapshot, type EntrySnapshotState } from '@/hooks/useEntrySnapshot';
 
@@ -26,13 +26,12 @@ function useInView<T extends Element>(ref: RefObject<T>): boolean {
   return inView;
 }
 
-export function entrySnapshotTitle(snapshot: EntrySnapshot, opts: { anchorLabel: string; fallbackPrice?: number | null }): string {
+export function entrySnapshotTitle(snapshot: EntrySnapshot, opts: { anchorLabel: string }): string {
   const parts = [
     `${opts.anchorLabel} ${formatBeijingTime(snapshot.anchorMs).slice(0, 16)}，进场前最后收盘价 ${formatEntryPrice(snapshot.close)}`,
     `偏离 12h VWAP ${formatEntryDeviation(snapshot.vwapDev)}（VWAP ${formatEntryPrice(snapshot.vwap)}）`,
     `偏离成交密集区 POC ${formatEntryDeviation(snapshot.pocDev)}（POC ${formatEntryPrice(snapshot.poc)}，半衰期 ${ENTRY_SNAPSHOT_HALF_LIFE_H} 小时）`,
   ];
-  if (opts.fallbackPrice != null) parts.push(`偏离兜底价 ${formatEntryDeviation(fallbackDeviation(snapshot.close, opts.fallbackPrice))}（兜底 ${formatEntryPrice(opts.fallbackPrice)}）`);
   if (snapshot.coverage < ENTRY_SNAPSHOT_MIN_COVERAGE) parts.push(`观察窗 K 线覆盖率 ${(snapshot.coverage * 100).toFixed(0)}%，低于 95%，读数仅供参考`);
   parts.push('正 = 现价在参考价上方。数据：进场前 48 小时的币安 5m K 线，算法同 Deep RSA');
   parts.push(ENTRY_SCHELLING_CAVEAT);
@@ -117,28 +116,5 @@ export function EntrySchellingPanel({ symbol, anchorMs }: { symbol: string; anch
       )}
       {anchorMs != null && <div className="mt-1 text-[10px] text-muted-foreground/80">正 = 现价在参考价上方。{ENTRY_SCHELLING_CAVEAT}</div>}
     </section>
-  );
-}
-
-/** 信号库一行里的三列：VWAP · POC · 兜底（宽度与表头 ENTRY_SIGNAL_COLUMNS 一致）。行是窗口化渲染的，渲染即在视野里。 */
-export const ENTRY_SIGNAL_GRID = 'grid w-[150px] shrink-0 grid-cols-[48px_48px_46px] items-center gap-x-1';
-
-export function SignalEntrySchelling({ symbol, timeMs, fallbackPrice }: { symbol: string; timeMs: number; fallbackPrice: number | null }) {
-  const state = useEntrySnapshot(symbol, timeMs, true);
-  const snap = state.status === 'ready' ? state.snapshot : null;
-  const cell = (ln: number | null | undefined) => (
-    <span className={cn('truncate font-mono text-[10px] leading-4 tabular-nums', snap ? 'text-foreground/80' : 'text-muted-foreground/50')}>
-      {snap ? formatEntryDeviation(ln) : stateText(state)}
-    </span>
-  );
-  const title = snap
-    ? entrySnapshotTitle(snap, { anchorLabel: '信号时间', fallbackPrice })
-    : state.status === 'unavailable' || state.status === 'error' ? `谢林偏离：${state.reason}` : '谢林偏离：读取中';
-  return (
-    <span data-testid="signal-entry-schelling" data-status={state.status} title={title} className={ENTRY_SIGNAL_GRID}>
-      {cell(snap?.vwapDev)}
-      {cell(snap?.pocDev)}
-      {cell(snap ? fallbackDeviation(snap.close, fallbackPrice) : null)}
-    </span>
   );
 }

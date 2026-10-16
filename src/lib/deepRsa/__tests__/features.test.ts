@@ -18,8 +18,15 @@ function series(n: number, make: (i: number) => Partial<ResearchBar>, start = T0
 describe('研究用 K 线解析：保留主动买入量，非法即丢弃', () => {
   const row = [T0, '100', '102', '99', '101', '10', T0 + BAR_MS - 1, '1000', 42, '6', '600', '0'];
 
-  it('取第 10 列（下标 9）作主动买入量', () => {
-    expect(parseBinanceKlineRow(row)).toEqual({ openTime: T0, open: 100, high: 102, low: 99, close: 101, volume: 10, takerBuyVolume: 6 });
+  it('取第 10 列（下标 9）作主动买入量；第 8 / 11 列作成交额 / 主动买入额（USDT，动态谢林点用）', () => {
+    expect(parseBinanceKlineRow(row)).toEqual({
+      openTime: T0, open: 100, high: 102, low: 99, close: 101, volume: 10, takerBuyVolume: 6, quoteVolume: 1000, takerBuyQuoteVolume: 600,
+    });
+  });
+
+  it('没有金额两列、或主动买入额超过成交额 → 金额记 null，不拿币数凑', () => {
+    expect(parseBinanceKlineRow(row.slice(0, 10))).toMatchObject({ quoteVolume: null, takerBuyQuoteVolume: null, takerBuyVolume: 6 });
+    expect(parseBinanceKlineRow([...row.slice(0, 10), '1001'])).toMatchObject({ quoteVolume: null, takerBuyQuoteVolume: null });
   });
 
   it('没有那一列、或主动买入量超过成交量 → null，不补 0', () => {

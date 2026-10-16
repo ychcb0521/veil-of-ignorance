@@ -26,6 +26,9 @@ export interface ResearchBar {
   volume: number;
   /** 主动买入成交量（基础币）；数据源没有这一列时为 null，绝不补 0。 */
   takerBuyVolume: number | null;
+  /** 成交额（USDT，第 8 列）与主动买入成交额（USDT，第 11 列）：动态谢林点只用金额；缺失为 null / 不带。 */
+  quoteVolume?: number | null;
+  takerBuyQuoteVolume?: number | null;
 }
 
 function num(value: unknown): number {
@@ -47,7 +50,15 @@ export function parseBinanceKlineRow(row: readonly unknown[]): ResearchBar | nul
   if (bar.open <= 0 || bar.close <= 0 || bar.low <= 0 || bar.high < bar.low || bar.volume < 0) return null;
   if (bar.high < Math.max(bar.open, bar.close) || bar.low > Math.min(bar.open, bar.close)) return null;
   const tb = row.length > 9 ? num(row[9]) : Number.NaN;
-  return { ...bar, takerBuyVolume: Number.isFinite(tb) && tb >= 0 && tb <= bar.volume * (1 + 1e-9) ? tb : null };
+  const qv = row.length > 7 ? num(row[7]) : Number.NaN;
+  const tbq = row.length > 10 ? num(row[10]) : Number.NaN;
+  const amountsOk = Number.isFinite(qv) && qv >= 0 && Number.isFinite(tbq) && tbq >= 0 && tbq <= qv * (1 + 1e-9);
+  return {
+    ...bar,
+    takerBuyVolume: Number.isFinite(tb) && tb >= 0 && tb <= bar.volume * (1 + 1e-9) ? tb : null,
+    quoteVolume: amountsOk ? qv : null,
+    takerBuyQuoteVolume: amountsOk ? Math.min(tbq, qv) : null,
+  };
 }
 
 export interface ObservationWindow {

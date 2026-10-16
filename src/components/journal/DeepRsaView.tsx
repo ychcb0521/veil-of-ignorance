@@ -135,11 +135,13 @@ export interface DeepRsaViewProps {
   runPanel?: React.ReactNode;
   /** 第 6 步「特征深挖」面板（失衡 · 偏移 · 谢林）。 */
   deepDivePanel?: React.ReactNode;
+  /** 第 7 步「动态谢林点检验」面板。 */
+  dspPanel?: React.ReactNode;
   /** 最近一次运行结果：进度与结论按它更新。 */
   run?: DeepRsaRunResult | null;
 }
 
-export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign, runPanel, deepDivePanel, run }: DeepRsaViewProps) {
+export function DeepRsaView({ report, loading, loaded, total, group, onGroupChange, onOpenCampaign, runPanel, deepDivePanel, dspPanel, run }: DeepRsaViewProps) {
   const listed = report?.rows.filter(r => r.grouping.group === group) ?? [];
   return (
     <div className="space-y-7 text-[12px]">
@@ -271,6 +273,11 @@ export function DeepRsaView({ report, loading, loaded, total, group, onGroupChan
       {deepDivePanel && (
         <Section title="特征深挖（第 6 步）" note="加权主动买卖失衡 · 失衡的近期偏移 · 谢林候选 · 同一批事件，单独逐个检验">
           {deepDivePanel}
+        </Section>
+      )}
+      {dspPanel && (
+        <Section title="动态谢林点检验（第 7 步）" note="DSP 指标进场时的三个读数 · 同一批事件、同一套统计 · 方案见 12-dsp-test.md">
+          {dspPanel}
         </Section>
       )}
 

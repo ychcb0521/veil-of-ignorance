@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeFeatures } from '../features';
-import { computeEntrySnapshot, fallbackDeviation, formatEntryDeviation, formatEntryPrice, parseFallbackPrice } from '../entrySnapshot';
+import { computeEntrySnapshot, formatEntryDeviation, formatEntryPrice } from '../entrySnapshot';
 import { mulberry32 } from '../grouping';
 import { BAR_MS, extractWindow, type ResearchBar } from '../window';
 
@@ -37,18 +37,6 @@ describe('进场时的谢林偏离', () => {
     expect(computeEntrySnapshot([], anchor)).toBeNull();
     const half = bars(anchor).filter((_, i) => i % 2 === 0);
     expect(computeEntrySnapshot(half, anchor)!.coverage).toBeCloseTo(0.5, 1);
-  });
-
-  it('兜底区文本 → 兜底价：开头一个价格；开头是区间取中点；纯备注 → null', () => {
-    expect(parseFallbackPrice('0.71')).toBe(0.71);
-    expect(parseFallbackPrice('189（无）')).toBe(189);
-    expect(parseFallbackPrice('2.38 触发 涨至2.907')).toBe(2.38);
-    expect(parseFallbackPrice('0.12-0.14')).toBeCloseTo(0.13, 12);
-    expect(parseFallbackPrice('0.12 ~ 0.14')).toBeCloseTo(0.13, 12);
-    expect(parseFallbackPrice('看情况')).toBeNull();
-    expect(parseFallbackPrice('')).toBeNull();
-    expect(fallbackDeviation(1.1, 1)).toBeCloseTo(Math.log(1.1), 12);
-    expect(fallbackDeviation(1.1, null)).toBeNull();
   });
 
   it('读数：对数偏离换算成百分比，带符号一位小数；价格按量级保留有效位', () => {

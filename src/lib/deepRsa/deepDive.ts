@@ -16,6 +16,8 @@
  *   - 确认：发现集 Holm 通过的，在确认集上按同一方向做单侧置换检验，再 Holm → 已验证 / 检验未获支持。
  *   - 标签：正 / 对照战役用 AUC（Mann–Whitney）比较，全部时间段（正样本太少，只能描述），置换 p + Holm。
  *   - 其余（分位数分档、子集、半衰期、谢林 × 失衡交叉）都是描述，不做判定。
+ *
+ * 第 7 步（动态谢林点 DSP，docs/deep-rsa/12-dsp-test.md）用同一套统计，只换特征清单与交叉表：见 DeepDiveStudy / DSP_STUDY。
  */
 import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
@@ -28,7 +30,8 @@ export const DEEP_DIVE_ALPHA = 0.05;
 export const DEEP_DIVE_PRIMARY_H = 6;
 export const DEEP_DIVE_SENSITIVITY_H = [2, 6, 12] as const;
 
-export type DeepDiveFeatureKey = 'taker_imb_w' | 'taker_imb_shift_w' | 'vwap12_dev' | 'poc_dev_w';
+/** 特征键：第 6 步是 taker_imb_w / taker_imb_shift_w / vwap12_dev / poc_dev_w，第 7 步是 dsp_v / dsp_a / dsp_gap。 */
+export type DeepDiveFeatureKey = string;
 export type DeepDiveTargetKey = 'endRet' | 'maxUp' | 'maxDown';
 
 export interface DeepDiveFeatureSpec {
@@ -40,6 +43,8 @@ export interface DeepDiveFeatureSpec {
   /** 正值的含义。 */
   reading: string;
   weighted: boolean;
+  /** 界面显示倍率与单位（只换单位，检验用原值）：V 在 10⁻⁵ 量级，按基点（× 10⁴）显示。 */
+  display?: { scale: number; unit: string };
 }
 
 export const DEEP_DIVE_FEATURES: readonly DeepDiveFeatureSpec[] = [
@@ -69,11 +74,96 @@ export const DEEP_DIVE_FEATURES: readonly DeepDiveFeatureSpec[] = [
   },
 ];
 
+/**
+ * 一项「逐个特征检验」研究：第 6 步（失衡 · 偏移 · 谢林）与第 7 步（动态谢林点 DSP）共用同一套统计，只换特征清单与交叉表。
+ * 交叉表 G：first > 0 记「上方」（结果里的 price = 'above'），second > 0 记「买盘」（flow = 'buy'）——沿用第 6 步的字段名，旧结果照样能读。
+ */
+export type DeepDiveStudyId = 'features' | 'dsp';
+export interface DeepDiveStudy {
+  id: DeepDiveStudyId;
+  /** 「第 6 步」「第 7 步」。 */
+  step: string;
+  /** 定义区的标题。 */
+  definitionsTitle: string;
+  features: readonly DeepDiveFeatureSpec[];
+  interaction: {
+    first: { key: DeepDiveFeatureKey; header: string; pos: string; neg: string };
+    second: { key: DeepDiveFeatureKey; header: string; pos: string; neg: string };
+    title: string;
+    how: string;
+  };
+  /** 确认集的独立性说明（C 节）。 */
+  confirmationNote: string;
+  /** 定义下面的补充一句（可空）。 */
+  definitionNote?: string;
+  runLabel: string;
+  rerunLabel: string;
+}
+
 export const DEEP_DIVE_TARGETS: readonly { key: DeepDiveTargetKey; name: string; reading: string }[] = [
   { key: 'endRet', name: '24h 期末收益', reading: 'ln(进场 24h 后收盘价 ÷ 进场价)：方向，主要看它' },
   { key: 'maxUp', name: '24h 最大涨幅', reading: 'ln(24h 内最高价 ÷ 进场价)：上一轮「已验证」用的目标' },
   { key: 'maxDown', name: '24h 最大跌幅', reading: 'ln(24h 内最低价 ÷ 进场价)：阴性对照，若也「相关」多半只是波动率' },
 ];
+
+export const FEATURES_STUDY: DeepDiveStudy = {
+  id: 'features',
+  step: '第 6 步',
+  definitionsTitle: '三个特征的定义',
+  features: DEEP_DIVE_FEATURES,
+  interaction: {
+    first: { key: 'vwap12_dev', header: '现价 vs 12h VWAP', pos: '上方', neg: '下方（或相等）' },
+    second: { key: 'taker_imb_w', header: '近期主动买卖', pos: '买盘占优', neg: '卖盘占优（或持平）' },
+    title: '谢林 × 失衡交叉',
+    how: '现价在 12h VWAP 上方 / 下方 × 近期主动买 / 卖占优，四格各自之后 24h 的平均结果，以及你的正 / 对照战役落在哪一格。描述，用来提出下一轮假设。',
+  },
+  confirmationNote: '确认集与第 3–5 步的测试集是同一段时间；其中「谢林 → 24h 最大涨幅」那一类关系上次已经在这段时间看过一次，这一项不算完全独立的确认。',
+  definitionNote: '谢林候选 c（偏离人工兜底价）：战役样本没有兜底价，只报可用场数。',
+  runLabel: '开始深挖',
+  rerunLabel: '重新深挖',
+};
+
+/** 【用户要求】2026-10-16「你要把这个指标在 deep RSA 那里做统计检验」：动态谢林点（docs/deep-rsa/12-dsp-test.md，运行前写定）。 */
+export const DSP_FEATURES: readonly DeepDiveFeatureSpec[] = [
+  {
+    key: 'dsp_v', name: '谢林点迁移速度 V', weighted: true,
+    definition: '动态谢林点指标在进场前最后一根 5m K 线上的 Vₜ：净资金力量 × 买方优势权重 × 价格变化，按半衰期 h 指数平滑。',
+    formula: 'Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Fₜ·Gₜ·Rₜ，Fₜ = ln(1 + |Bₜ − Sₜ| ÷ EMA(Bₜ + Sₜ))，Gₜ = 1 + max(Aₜ, 0)，Rₜ = ln(Cₜ ÷ Cₜ₋₁)；B / S 为主动买 / 卖成交金额',
+    reading: '正 = 共识价（谢林点）在往上移，越大移得越快（界面按基点 / 根显示）',
+    display: { scale: 1e4, unit: '基点/根' },
+  },
+  {
+    key: 'dsp_a', name: '主动买方优势 A', weighted: false,
+    definition: '进场前最后一根 5m K 线上，主动买入金额比主动卖出金额多出多少，占成交额的比例（单根读数，噪声大）。',
+    formula: 'Aₜ = (Bₜ − Sₜ) ÷ (Bₜ + Sₜ)，取值 −1 ~ +1',
+    reading: '正 = 最后 5 分钟主动买方占优',
+  },
+  {
+    key: 'dsp_gap', name: '现价偏离 DSP', weighted: true,
+    definition: '进场前最后收盘价相对动态谢林点 DSP 的对数偏离；DSP 从观察窗第一根 K 线（进场前 48h）的收盘价起算，κ = 1。',
+    formula: 'ln(Cₜ ÷ DSPₜ)，DSPₜ = DSPₜ₋₁ × e^(Vₜ)，DSP₀ = 窗口第一根收盘价',
+    reading: '正 = 现价跑在资金共识价上方',
+  },
+];
+
+export const DSP_STUDY: DeepDiveStudy = {
+  id: 'dsp',
+  step: '第 7 步',
+  definitionsTitle: '动态谢林点的三个读数（进场前最后一根 5m K 线）',
+  features: DSP_FEATURES,
+  interaction: {
+    first: { key: 'dsp_gap', header: '现价 vs DSP', pos: '上方', neg: '下方（或相等）' },
+    second: { key: 'dsp_v', header: '谢林点移动', pos: '上移（V > 0）', neg: '下移或不动' },
+    title: '偏离 × 迁移方向交叉',
+    how: '现价在 DSP 上方 / 下方 × 谢林点上移 / 下移，四格各自之后 24h 的平均结果，以及你的正 / 对照战役落在哪一格。描述，用来提出下一轮假设。',
+  },
+  confirmationNote: '确认集与第 3–6 步的测试集是同一段时间，那段时间已经看过好几轮（谢林 / VWAP 一类的关系也在那里看过）；这次只能算同一段数据上的再确认，真正独立的确认要用之后新产生的战役。',
+  definitionNote: '数据：主动买卖额用币安 K 线自带的成交金额（USDT）；观察窗里有金额数据的 K 线不到 95% 时这一场记为缺失，不拿币数凑。参数 α = 1、κ = 1。',
+  runLabel: '开始检验',
+  rerunLabel: '重新检验',
+};
+
+export const DEEP_DIVE_STUDIES: Record<DeepDiveStudyId, DeepDiveStudy> = { features: FEATURES_STUDY, dsp: DSP_STUDY };
 
 // ===================== 统计工具 =====================
 
@@ -280,6 +370,8 @@ export interface InteractionCell {
 }
 
 export interface FeatureDeepDiveResult {
+  /** 哪一项研究；旧版（第 6 步）结果没有这一项。 */
+  study?: DeepDiveStudyId;
   codeVersion: string;
   startedAt: number;
   finishedAt: number;
@@ -299,6 +391,8 @@ export interface FeatureDeepDiveResult {
     outcomeMissing: number;
     missingTakerEvents: number;
     fallbackAvailable: number;
+    /** 主半衰期下任一特征缺失的事件数（第 7 步：成交额覆盖不足）。旧结果没有。 */
+    featureMissing?: number;
     discovery: number;
     confirmation: number;
     embargoed: number;
@@ -323,6 +417,8 @@ export interface DeepDiveOptions {
   seed?: number;
   permutations?: number;
   bootstrap?: number;
+  /** 默认第 6 步。 */
+  study?: DeepDiveStudy;
 }
 
 const featureOf = (e: RunEvent, key: DeepDiveFeatureKey, h = DEEP_DIVE_PRIMARY_H): number | null => {
@@ -351,6 +447,8 @@ export function analyzeFeatureDeepDive(
   const seed = options.seed ?? 20261015;
   const permutations = options.permutations ?? 1999;
   const bootstrap = options.bootstrap ?? 999;
+  const study = options.study ?? FEATURES_STUDY;
+  const FEATURES = study.features;
   const split = chronologicalSplit(events);
   const discovery = [...split.train, ...split.val];
   const confirmationSet = split.test;
@@ -365,7 +463,7 @@ export function analyzeFeatureDeepDive(
     { group: 'positive', pick: e => e.label === 'positive' },
     { group: 'control', pick: e => e.label === 'control' },
   ];
-  const distribution: DistributionRow[] = DEEP_DIVE_FEATURES.flatMap(f => groups.map(({ group, pick }) => {
+  const distribution: DistributionRow[] = FEATURES.flatMap(f => groups.map(({ group, pick }) => {
     const vals = events.filter(pick).map(e => featureOf(e, f.key)).filter(finite).sort((a, b) => a - b);
     return {
       feature: f.key, group, n: vals.length, mean: meanOf(vals), median: quantile(vals, 0.5),
@@ -375,7 +473,7 @@ export function analyzeFeatureDeepDive(
   }));
 
   // B. 发现集：12 个主检验
-  const assocRaw = DEEP_DIVE_FEATURES.flatMap(f => DEEP_DIVE_TARGETS.map(t => {
+  const assocRaw = FEATURES.flatMap(f => DEEP_DIVE_TARGETS.map(t => {
     const d = paired(discovery, f.key, t.key);
     const stat = spearmanAgainst(d.x);
     const partial = partialSpearmanAgainst(d.x, d.z);
@@ -413,7 +511,7 @@ export function analyzeFeatureDeepDive(
   });
 
   // D. 五分位分档：切点取发现集，档内结果均值用全部事件（描述）
-  const quintiles = DEEP_DIVE_FEATURES.map(f => {
+  const quintiles = FEATURES.map(f => {
     const ref = discovery.map(e => featureOf(e, f.key)).filter(finite).sort((a, b) => a - b);
     const cuts = [0.2, 0.4, 0.6, 0.8].map(q => quantile(ref, q)).filter(finite);
     const binOf = (v: number) => cuts.filter(c => v >= c).length;
@@ -435,7 +533,7 @@ export function analyzeFeatureDeepDive(
   });
 
   // E. 标签：正 vs 对照（全部时间段）
-  const labelRaw = DEEP_DIVE_FEATURES.map(f => {
+  const labelRaw = FEATURES.map(f => {
     const rows = events.flatMap(e => {
       const v = featureOf(e, f.key);
       return v != null && (e.label === 'positive' || e.label === 'control') ? [{ v, pos: e.label === 'positive', symbol: e.symbol }] : [];
@@ -458,20 +556,20 @@ export function analyzeFeatureDeepDive(
   const labels: LabelRow[] = labelRaw.map((r, i) => ({ ...r, pHolm: labelHolm[i] }));
 
   // F. 稳健性（描述）：战役 / 背景子集；半衰期敏感性
-  const bySubset = DEEP_DIVE_FEATURES.flatMap(f => DEEP_DIVE_TARGETS.flatMap(t => (['campaign', 'background'] as const).map(subset => {
+  const bySubset = FEATURES.flatMap(f => DEEP_DIVE_TARGETS.flatMap(t => (['campaign', 'background'] as const).map(subset => {
     const d = paired(discovery.filter(e => (subset === 'campaign' ? e.kind === 'event' : e.kind === 'background')), f.key, t.key);
     return { feature: f.key, target: t.key, subset, n: d.x.length, rho: spearman(d.x, d.y) };
   })));
-  const byHalfLife = DEEP_DIVE_FEATURES.filter(f => f.weighted).flatMap(f => DEEP_DIVE_TARGETS.flatMap(t => DEEP_DIVE_SENSITIVITY_H.map(h => {
+  const byHalfLife = FEATURES.filter(f => f.weighted).flatMap(f => DEEP_DIVE_TARGETS.flatMap(t => DEEP_DIVE_SENSITIVITY_H.map(h => {
     const d = paired(discovery, f.key, t.key, h);
     return { feature: f.key, target: t.key, h, n: d.x.length, rho: spearman(d.x, d.y) };
   })));
 
-  // G. 谢林 × 失衡交叉（全部事件，描述）：现价在 12h VWAP 上 / 下 × 近期主动买 / 卖占优
+  // G. 交叉（全部事件，描述）：第 6 步 = 现价在 12h VWAP 上 / 下 × 近期主动买 / 卖占优；第 7 步 = 现价在 DSP 上 / 下 × 谢林点上移 / 下移
   const interaction: InteractionCell[] = (['above', 'below'] as const).flatMap(price => (['buy', 'sell'] as const).map(flow => {
     const members = events.filter(e => {
-      const dev = featureOf(e, 'vwap12_dev');
-      const imb = featureOf(e, 'taker_imb_w');
+      const dev = featureOf(e, study.interaction.first.key);
+      const imb = featureOf(e, study.interaction.second.key);
       return dev != null && imb != null && (price === 'above' ? dev > 0 : dev <= 0) && (flow === 'buy' ? imb > 0 : imb <= 0);
     });
     const means = Object.fromEntries(DEEP_DIVE_TARGETS.map(t => [t.key, meanOf(members.map(e => targetOf(e, t.key)).filter(finite))])) as Record<DeepDiveTargetKey, number | null>;
@@ -479,7 +577,7 @@ export function analyzeFeatureDeepDive(
   }));
 
   return {
-    seed, permutations, bootstrap, primaryH: DEEP_DIVE_PRIMARY_H,
+    study: study.id, seed, permutations, bootstrap, primaryH: DEEP_DIVE_PRIMARY_H,
     distribution, association, confirmation, quintiles, labels,
     robustness: { bySubset, byHalfLife }, interaction,
     conclusions: { verified: confirmation.filter(r => r.verdict === '已验证').map(r => ({ feature: r.feature, target: r.target, survivesVolControl: r.survivesVolControl })) },
@@ -516,6 +614,7 @@ export async function runFeatureDeepDive(
       outcomeMissing: collected.outcomeMissing,
       missingTakerEvents: collected.missingTakerEvents,
       fallbackAvailable: events.filter(e => finite(e.featuresByH[DEEP_DIVE_PRIMARY_H]?.fallback_dev)).length,
+      featureMissing: events.filter(e => (options.study ?? FEATURES_STUDY).features.some(f => !finite(e.featuresByH[DEEP_DIVE_PRIMARY_H]?.[f.key]))).length,
       discovery: split.train.length + split.val.length,
       confirmation: split.test.length,
       embargoed: split.embargoed.length,

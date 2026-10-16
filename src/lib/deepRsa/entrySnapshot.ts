@@ -1,7 +1,7 @@
 /**
- * 进场时的谢林偏离（单场 / 单条信号）：t₀ 前 48h 的 5m K 线 → 偏离 12h VWAP、偏离成交密集区 POC、偏离兜底价。
+ * 进场时的谢林偏离（单场战役）：t₀ 前 48h 的 5m K 线 → 偏离 12h VWAP、偏离成交密集区 POC。
  *
- * 【用户要求】2026-10-15「我想可以能够看到每一场战役在进场时的具体数值（或者信号的具体数值）」。
+ * 【用户要求】2026-10-15「我想可以能够看到每一场战役在进场时的具体数值」；2026-10-16 信号库不显示。
  * 与 Deep RSA 第 3 / 6 步同一套算法（rollingVwap、weightedPoc、extractWindow），POC 用主分析的半衰期 h = 6 小时；
  * 只描述当时的盘面，不是交易信号（第 6 步没有验证它能预测方向）。纯函数，不读网络。
  */
@@ -46,25 +46,6 @@ export function computeEntrySnapshot(bars: readonly ResearchBar[], anchorMs: num
     pocDev: poc != null && poc > 0 ? finiteOrNull(Math.log(last.close / poc)) : null,
     coverage: window.coverage,
   };
-}
-
-/** ln(C_N ÷ 兜底价)：信号库的候选 c。 */
-export function fallbackDeviation(close: number, fallbackPrice: number | null): number | null {
-  return fallbackPrice != null && fallbackPrice > 0 && close > 0 ? finiteOrNull(Math.log(close / fallbackPrice)) : null;
-}
-
-/**
- * 兜底区文本 → 兜底价：开头的一个价格（「0.71」「189（无）」「2.38 触发 涨至2.907」取 2.38），
- * 开头是区间（「0.12-0.13」「0.12~0.13」）取中点；开头不是数字（纯备注）→ null。
- */
-export function parseFallbackPrice(zone: string | null | undefined): number | null {
-  if (!zone) return null;
-  const m = /^\s*(\d+(?:\.\d+)?)(?:\s*[-~～—–至到]\s*(\d+(?:\.\d+)?))?/.exec(zone);
-  if (!m) return null;
-  const a = Number(m[1]);
-  const b = m[2] != null ? Number(m[2]) : null;
-  const price = b != null && b > 0 ? (a + b) / 2 : a;
-  return Number.isFinite(price) && price > 0 ? price : null;
 }
 
 /** 对数偏离 → 百分比读数（e^x − 1），带符号一位小数：0.0555 → +5.7%。 */

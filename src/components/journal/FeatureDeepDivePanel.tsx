@@ -1,5 +1,6 @@
 /**
- * Deep RSA 第 6 步「特征深挖」：加权主动买卖失衡 · 失衡的近期偏移 · 谢林候选。
+ * Deep RSA 第 6 步「特征深挖」（加权主动买卖失衡 · 失衡的近期偏移 · 谢林候选）与第 7 步「动态谢林点检验」共用这个面板：
+ * 特征清单、交叉表与几句说明来自 study（DeepDiveStudy）。
  * 【用户要求】「给我定义、分析方案、统计方法、操作流程，让我一步一步点击即可」：
  * 上面是定义与步骤；跑完后结果按 A → G 一节一节点开，每节先写「怎么读」。
  */
@@ -8,13 +9,18 @@ import { ChevronLeft, ChevronRight, Download, Loader2, Play, Square } from 'luci
 import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
-  DEEP_DIVE_ALPHA, DEEP_DIVE_FEATURES, DEEP_DIVE_PRIMARY_H, DEEP_DIVE_TARGETS,
-  type DeepDiveFeatureKey, type DeepDiveTargetKey, type FeatureDeepDiveResult,
+  DEEP_DIVE_ALPHA, DEEP_DIVE_PRIMARY_H, DEEP_DIVE_TARGETS, FEATURES_STUDY,
+  type DeepDiveFeatureKey, type DeepDiveStudy, type DeepDiveTargetKey, type FeatureDeepDiveResult,
 } from '@/lib/deepRsa/deepDive';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import { VERDICT_TONE, type RunStatus } from '@/components/journal/DeepRsaRunPanel';
 
-const FEATURE_NAME = Object.fromEntries(DEEP_DIVE_FEATURES.map(f => [f.key, f.name])) as Record<DeepDiveFeatureKey, string>;
+/** 特征值按该特征的显示倍率读（V 按基点 / 根）。 */
+const featureValueFormatter = (study: DeepDiveStudy) => {
+  const scale = Object.fromEntries(study.features.map(f => [f.key, f.display?.scale ?? 1]));
+  return (key: DeepDiveFeatureKey, v: number | null | undefined) => num(v == null ? v : v * (scale[key] ?? 1), 4);
+};
+const featureNames = (study: DeepDiveStudy) => Object.fromEntries(study.features.map(f => [f.key, f.name])) as Record<DeepDiveFeatureKey, string>;
 const TARGET_NAME = Object.fromEntries(DEEP_DIVE_TARGETS.map(t => [t.key, t.name])) as Record<DeepDiveTargetKey, string>;
 
 const STAGE_LABEL: Partial<Record<RunStage, string>> = {
@@ -43,15 +49,15 @@ function ci(v: [number, number] | null, d = 2, f: (x: number, d: number) => stri
 const N = ({ children }: { children: React.ReactNode }) => <span className="font-mono tabular-nums text-foreground">{children}</span>;
 const rhoTone = (v: number, p: number) => (p < DEEP_DIVE_ALPHA ? (v > 0 ? 'text-[#0B9F66] dark:text-[#0ECB81]' : 'text-[#F6465D]') : 'text-foreground/80');
 
-const SECTIONS = [
+const BASE_SECTIONS = [
   { id: 'A', title: '数据与分布', how: '先看样本够不够、各组的特征大致在什么范围。正样本太少时后面的标签比较只能当描述。' },
   { id: 'B', title: '与 24h 客观结果的关系（发现集）', how: '主检验。ρ > 0 = 特征越高，结果越大。Holm 校正后 p < 0.05 才算通过；看「控制波动率后」那一列判断是不是只是波动率。最大跌幅是阴性对照：如果它也明显「相关」，多半只是波动率。' },
   { id: 'C', title: '样本外确认（确认集，只读一次）', how: '发现集通过的项，在最后 20% 的时间段按同一方向再检验一次。同方向且校正后 p < 0.05 → 已验证。' },
   { id: 'D', title: '五分位分档', how: '把特征从低到高分五档（切点取发现集），看每档之后 24h 的平均结果。看是否单调、差距是否大于区间宽度。描述，不做判定。' },
   { id: 'E', title: '能否分开你的正 / 对照战役', how: 'AUC = 随机挑一个正样本和一个对照，正样本特征更高的概率。0.5 = 分不开，> 0.5 = 正样本偏高，< 0.5 = 偏低。正样本少，区间会很宽。' },
   { id: 'F', title: '稳健性', how: '同一个关系在战役时点、随机背景里分别是否同向；加权特征换半衰期（2 / 6 / 12 小时）是否同向。方向乱跳就说明不稳。' },
-  { id: 'G', title: '谢林 × 失衡交叉', how: '现价在 12h VWAP 上方 / 下方 × 近期主动买 / 卖占优，四格各自之后 24h 的平均结果，以及你的正 / 对照战役落在哪一格。描述，用来提出下一轮假设。' },
 ] as const;
+const sectionsOf = (study: DeepDiveStudy) => [...BASE_SECTIONS, { id: 'G', title: study.interaction.title, how: study.interaction.how }];
 
 export interface FeatureDeepDivePanelProps {
   status: RunStatus;
@@ -64,10 +70,16 @@ export interface FeatureDeepDivePanelProps {
   onRun: () => void;
   onCancel: () => void;
   onDownload: () => void;
+  /** 默认第 6 步。 */
+  study?: DeepDiveStudy;
+  /** data-testid 前缀：同一页上两个面板不重名。默认 deep-dive。 */
+  testIdPrefix?: string;
 }
 
-export function FeatureDeepDivePanel({ status, progress, result, error, canRun, groupingReady, onRun, onCancel, onDownload }: FeatureDeepDivePanelProps) {
+export function FeatureDeepDivePanel({ status, progress, result, error, canRun, groupingReady, onRun, onCancel, onDownload, study = FEATURES_STUDY, testIdPrefix = 'deep-dive' }: FeatureDeepDivePanelProps) {
   const running = status === 'running';
+  const SECTIONS = sectionsOf(study);
+  const tid = testIdPrefix;
   const [section, setSection] = useState(0);
   const step = (n: number, done: boolean, active: boolean, children: React.ReactNode) => (
     <li className="flex items-start gap-2">
@@ -78,20 +90,20 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
   );
 
   return (
-    <div className="space-y-4 text-[11.5px]" data-testid="deep-dive-panel">
+    <div className="space-y-4 text-[11.5px]" data-testid={`${tid}-panel`}>
       {/* 定义 */}
       <div className="space-y-1.5">
-        <h3 className="text-[12px] font-medium">三个特征的定义</h3>
+        <h3 className="text-[12px] font-medium">{study.definitionsTitle}</h3>
         <div className="space-y-2">
-          {DEEP_DIVE_FEATURES.map(f => (
-            <div key={f.key} className="space-y-0.5" data-testid={`deep-dive-def-${f.key}`}>
+          {study.features.map(f => (
+            <div key={f.key} className="space-y-0.5" data-testid={`${tid}-def-${f.key}`}>
               <div><span className="font-medium text-foreground">{f.name}</span> <span className="font-mono text-[10.5px] text-muted-foreground">{f.key}</span></div>
               <div className="text-foreground/80">{f.definition}</div>
               <div className="font-mono text-[10.5px] text-muted-foreground">{f.formula}</div>
               <div className="text-muted-foreground">{f.reading}{f.weighted ? `；主分析半衰期 h = ${DEEP_DIVE_PRIMARY_H} 小时` : ''}</div>
             </div>
           ))}
-          <div className="text-muted-foreground">谢林候选 c（偏离人工兜底价）：战役样本没有兜底价，只报可用场数。</div>
+          {study.definitionNote && <div className="text-muted-foreground">{study.definitionNote}</div>}
         </div>
         <div className="pt-1 text-muted-foreground">
           客观结果（与你的操作无关，从 t₀ 后第一根 5m K 线开盘价进场）：
@@ -108,19 +120,19 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span>点</span>
               {running ? (
-                <button type="button" data-testid="deep-dive-cancel" onClick={onCancel}
+                <button type="button" data-testid={`${tid}-cancel`} onClick={onCancel}
                   className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted">
                   <Square className="h-3 w-3" />取消
                 </button>
               ) : (
-                <button type="button" data-testid="deep-dive-run" disabled={!canRun} onClick={onRun}
+                <button type="button" data-testid={`${tid}-run`} disabled={!canRun} onClick={onRun}
                   className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[#F0B90B] px-2.5 text-[12px] font-medium text-black hover:bg-[#F0B90B]/90 disabled:cursor-not-allowed disabled:opacity-40">
-                  <Play className="h-3 w-3" />{result ? '重新深挖' : '开始深挖'}
+                  <Play className="h-3 w-3" />{result ? study.rerunLabel : study.runLabel}
                 </button>
               )}
               <span className="text-muted-foreground">拉行情、算特征、做统计，一般 1–3 分钟；可随时取消，点进战役再回来也会继续。</span>
               {running && progress && (
-                <span className="inline-flex items-center gap-1.5 text-muted-foreground" data-testid="deep-dive-progress">
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground" data-testid={`${tid}-progress`}>
                   <Loader2 className="h-3 w-3 animate-spin" />{STAGE_LABEL[progress.stage] ?? progress.stage}
                   {progress.total > 0 && progress.stage !== 'done' && <> <N>{progress.done}</N> / <N>{progress.total}</N></>}
                 </span>
@@ -132,11 +144,11 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
           {step(3, false, !!result && !running, <>按顺序点开下面的 A → G，每一节先看「怎么读」。</>)}
           {step(4, false, !!result && !running, (
             <span className="inline-flex flex-wrap items-center gap-x-2">
-              <button type="button" disabled={!result} onClick={onDownload} data-testid="deep-dive-download"
+              <button type="button" disabled={!result} onClick={onDownload} data-testid={`${tid}-download`}
                 className="inline-flex items-center gap-1 text-foreground/85 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40">
                 <Download className="h-3 w-3" />下载结果 JSON
               </button>
-              <span className="text-muted-foreground">发给我，我据此写第 6 步的报告。</span>
+              <span className="text-muted-foreground">发给我，我据此写{study.step}的报告。</span>
               {result && <span className="text-muted-foreground">上次运行 <span className="font-mono tabular-nums">{formatBeijingTime(result.finishedAt).slice(0, 16)}</span> · {result.codeVersion}</span>}
             </span>
           ))}
@@ -147,41 +159,44 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="特征深挖结果">
             {SECTIONS.map((s, i) => (
-              <button key={s.id} type="button" role="tab" aria-selected={section === i} data-testid={`deep-dive-tab-${s.id}`}
+              <button key={s.id} type="button" role="tab" aria-selected={section === i} data-testid={`${tid}-tab-${s.id}`}
                 onClick={() => setSection(i)}
                 className={cn('h-7 rounded-md border px-2 text-[11.5px]', section === i ? 'border-[#F0B90B]/60 bg-[#F0B90B]/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground')}>
                 {s.id} {s.title.replace(/（.*）/, '')}
               </button>
             ))}
           </div>
-          <div className="space-y-2 rounded-lg border border-border p-3" data-testid={`deep-dive-section-${SECTIONS[section].id}`}>
+          <div className="space-y-2 rounded-lg border border-border p-3" data-testid={`${tid}-section-${SECTIONS[section].id}`}>
             <h3 className="text-[12px] font-medium">{SECTIONS[section].id} · {SECTIONS[section].title}</h3>
             <p className="text-muted-foreground"><span className="text-foreground/85">怎么读：</span>{SECTIONS[section].how}</p>
             <div className="overflow-x-auto">
-              <SectionBody id={SECTIONS[section].id} result={result} />
+              <SectionBody id={SECTIONS[section].id} result={result} study={study} tid={tid} />
             </div>
             <div className="flex items-center justify-between pt-1">
               <button type="button" disabled={section === 0} onClick={() => setSection(section - 1)}
                 className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"><ChevronLeft className="h-3.5 w-3.5" />上一节</button>
-              <button type="button" disabled={section === SECTIONS.length - 1} onClick={() => setSection(section + 1)} data-testid="deep-dive-next"
+              <button type="button" disabled={section === SECTIONS.length - 1} onClick={() => setSection(section + 1)} data-testid={`${tid}-next`}
                 className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">下一节<ChevronRight className="h-3.5 w-3.5" /></button>
             </div>
           </div>
-          <Conclusion result={result} />
+          <Conclusion result={result} study={study} tid={tid} />
         </div>
       )}
     </div>
   );
 }
 
-function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult }) {
+function SectionBody({ id, result, study, tid }: { id: string; result: FeatureDeepDiveResult; study: DeepDiveStudy; tid: string }) {
   const c = result.coverage;
+  const FEATURE_NAME = featureNames(study);
+  const fv = featureValueFormatter(study);
   if (id === 'A') return (
     <div className="space-y-2">
       <div className="text-muted-foreground">
         战役 <N>{c.campaigns}</N> 场 → 去重 <N>{c.clusters}</N> 簇；有效事件 <N>{c.events}</N>（战役时点 <N>{c.campaignEvents}</N>、随机背景 <N>{c.background}</N>）；
         正样本 <N>{c.labeled.positive}</N>、对照 <N>{c.labeled.control}</N>；发现集 <N>{c.discovery}</N>、确认集 <N>{c.confirmation}</N>、隔离带剔除 <N>{c.embargoed}</N>；
-        观察窗覆盖不足剔除 <N>{c.lowCoverage}</N>、拉取失败 <N>{c.failed.length}</N>、缺主动买入量 <N>{c.missingTakerEvents}</N>；兜底价可用 <N>{c.fallbackAvailable}</N>。
+        观察窗覆盖不足剔除 <N>{c.lowCoverage}</N>、拉取失败 <N>{c.failed.length}</N>、缺主动买入量 <N>{c.missingTakerEvents}</N>
+        {study.id === 'features' ? <>；兜底价可用 <N>{c.fallbackAvailable}</N>。</> : <>；特征缺失（成交额覆盖不足）<N>{c.featureMissing ?? 0}</N>。</>}
       </div>
       <table className="w-full"><thead className="text-muted-foreground"><tr>
         <th className={TH}>特征</th><th className={TH}>组</th><th className={TH}>n</th><th className={TH}>中位数</th><th className={TH}>四分位区间</th><th className={TH}>大于 0 的比例</th>
@@ -191,8 +206,8 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
             <td className={TD}>{r.group === 'all' ? FEATURE_NAME[r.feature] : ''}</td>
             <td className={TD}>{GROUP_LABEL[r.group]}</td>
             <td className={TD}><N>{r.n}</N></td>
-            <td className={TD}><N>{num(r.median, 4)}</N></td>
-            <td className={TD}><N>{num(r.q25, 4)} ~ {num(r.q75, 4)}</N></td>
+            <td className={TD}><N>{fv(r.feature, r.median)}</N></td>
+            <td className={TD}><N>{fv(r.feature, r.q25)} ~ {fv(r.feature, r.q75)}</N></td>
             <td className={TD}><N>{r.sharePositive == null ? '—' : `${(r.sharePositive * 100).toFixed(0)}%`}</N></td>
           </tr>
         ))}
@@ -205,7 +220,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
       <th className={TH}>p</th><th className={TH}>Holm p</th><th className={TH}>控制波动率后 ρ</th><th className={TH}>其 p</th>
     </tr></thead><tbody>
       {result.association.map(r => (
-        <tr key={`${r.feature}-${r.target}`} className={cn('border-t border-border/50', r.pHolm < DEEP_DIVE_ALPHA && 'bg-[#F0B90B]/[0.06]')} data-testid={`deep-dive-assoc-${r.feature}-${r.target}`}>
+        <tr key={`${r.feature}-${r.target}`} className={cn('border-t border-border/50', r.pHolm < DEEP_DIVE_ALPHA && 'bg-[#F0B90B]/[0.06]')} data-testid={`${tid}-assoc-${r.feature}-${r.target}`}>
           <td className={TD}>{r.target === 'endRet' ? FEATURE_NAME[r.feature] : ''}</td>
           <td className={TD}>{TARGET_NAME[r.target]}</td>
           <td className={TD}><N>{r.n}</N></td>
@@ -220,7 +235,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
     </tbody></table>
   );
   if (id === 'C') return result.confirmation.length === 0 ? (
-    <div className="text-muted-foreground">发现集没有通过 Holm 的项，按事先约定不上确认集：这三个特征与 24h 客观结果的关系「检验未获支持」。</div>
+    <div className="text-muted-foreground">发现集没有通过 Holm 的项，按事先约定不上确认集：这些特征与 24h 客观结果的关系「检验未获支持」。</div>
   ) : (
     <div className="space-y-2">
       <table className="w-full"><thead className="text-muted-foreground"><tr>
@@ -228,7 +243,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
         <th className={TH}>单侧 p</th><th className={TH}>Holm p</th><th className={TH}>判定</th><th className={TH}>控制波动率后</th>
       </tr></thead><tbody>
         {result.confirmation.map(r => (
-          <tr key={`${r.feature}-${r.target}`} className="border-t border-border/50" data-testid={`deep-dive-conf-${r.feature}-${r.target}`}>
+          <tr key={`${r.feature}-${r.target}`} className="border-t border-border/50" data-testid={`${tid}-conf-${r.feature}-${r.target}`}>
             <td className={TD}>{FEATURE_NAME[r.feature]}</td><td className={TD}>{TARGET_NAME[r.target]}</td>
             <td className={TD}><N>{num(r.discoveryRho)}</N></td><td className={TD}><N>{r.n}</N></td><td className={TD}><N>{num(r.rho)}</N></td>
             <td className={TD}><N>{pv(r.p)}</N></td><td className={TD}><N>{pv(r.pHolm)}</N></td>
@@ -237,7 +252,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
           </tr>
         ))}
       </tbody></table>
-      <div className="text-muted-foreground">确认集与第 3–5 步的测试集是同一段时间；其中「谢林 → 24h 最大涨幅」那一类关系上次已经在这段时间看过一次，这一项不算完全独立的确认。</div>
+      <div className="text-muted-foreground">{study.confirmationNote}</div>
     </div>
   );
   if (id === 'D') return (
@@ -253,7 +268,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
               {qt.bins.map(b => (
                 <tr key={b.q} className="border-t border-border/50">
                   <td className={TD}>Q{b.q}</td>
-                  <td className={TD}><N>{num(b.lo, 4)} ~ {num(b.hi, 4)}</N></td>
+                  <td className={TD}><N>{fv(qt.feature, b.lo)} ~ {fv(qt.feature, b.hi)}</N></td>
                   <td className={TD}><N>{b.n}</N></td>
                   {DEEP_DIVE_TARGETS.map(t => (
                     <td key={t.key} className={TD}><N>{pctLog(b.means[t.key])}</N> <span className="text-muted-foreground">({ci(b.ci[t.key], 2, (x, d) => pctLog(x, d))})</span></td>
@@ -272,15 +287,15 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
       <th className={TH}>正样本中位数</th><th className={TH}>对照中位数</th>
     </tr></thead><tbody>
       {result.labels.map(r => (
-        <tr key={r.feature} className="border-t border-border/50" data-testid={`deep-dive-label-${r.feature}`}>
+        <tr key={r.feature} className="border-t border-border/50" data-testid={`${tid}-label-${r.feature}`}>
           <td className={TD}>{FEATURE_NAME[r.feature]}</td>
           <td className={TD}><N>{r.nPos}</N> / <N>{r.nCtl}</N></td>
           <td className={cn(TD, 'font-mono tabular-nums', rhoTone(r.auc - 0.5, r.pHolm))}>{num(r.auc)}</td>
           <td className={TD}><N>{ci(r.ci)}</N></td>
           <td className={TD}><N>{pv(r.p)}</N></td>
           <td className={TD}><N>{pv(r.pHolm)}</N></td>
-          <td className={TD}><N>{num(r.posMedian, 4)}</N></td>
-          <td className={TD}><N>{num(r.ctlMedian, 4)}</N></td>
+          <td className={TD}><N>{fv(r.feature, r.posMedian)}</N></td>
+          <td className={TD}><N>{fv(r.feature, r.ctlMedian)}</N></td>
         </tr>
       ))}
     </tbody></table>
@@ -293,7 +308,7 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
         <th className={TH}>特征</th><th className={TH}>结果</th><th className={TH}>只看战役时点 ρ（n）</th><th className={TH}>只看随机背景 ρ（n）</th>
         <th className={TH}>h = 2</th><th className={TH}>h = 6</th><th className={TH}>h = 12</th>
       </tr></thead><tbody>
-        {DEEP_DIVE_FEATURES.flatMap(f => DEEP_DIVE_TARGETS.map(t => {
+        {study.features.flatMap(f => DEEP_DIVE_TARGETS.map(t => {
           const a = sub(f.key, t.key, 'campaign');
           const b = sub(f.key, t.key, 'background');
           return (
@@ -310,14 +325,14 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
   }
   return (
     <table className="w-full"><thead className="text-muted-foreground"><tr>
-      <th className={TH}>现价 vs 12h VWAP</th><th className={TH}>近期主动买卖</th><th className={TH}>n</th>
+      <th className={TH}>{study.interaction.first.header}</th><th className={TH}>{study.interaction.second.header}</th><th className={TH}>n</th>
       {DEEP_DIVE_TARGETS.map(t => <th key={t.key} className={TH}>{t.name}均值</th>)}
       <th className={TH}>其中正 / 对照</th>
     </tr></thead><tbody>
       {result.interaction.map(cell => (
         <tr key={`${cell.price}-${cell.flow}`} className="border-t border-border/50">
-          <td className={TD}>{cell.price === 'above' ? '上方' : '下方（或相等）'}</td>
-          <td className={TD}>{cell.flow === 'buy' ? '买盘占优' : '卖盘占优（或持平）'}</td>
+          <td className={TD}>{cell.price === 'above' ? study.interaction.first.pos : study.interaction.first.neg}</td>
+          <td className={TD}>{cell.flow === 'buy' ? study.interaction.second.pos : study.interaction.second.neg}</td>
           <td className={TD}><N>{cell.n}</N></td>
           {DEEP_DIVE_TARGETS.map(t => <td key={t.key} className={TD}><N>{pctLog(cell.means[t.key])}</N></td>)}
           <td className={TD}><N>{cell.nPos}</N> / <N>{cell.nCtl}</N></td>
@@ -327,13 +342,15 @@ function SectionBody({ id, result }: { id: string; result: FeatureDeepDiveResult
   );
 }
 
-function Conclusion({ result }: { result: FeatureDeepDiveResult }) {
+function Conclusion({ result, study, tid }: { result: FeatureDeepDiveResult; study: DeepDiveStudy; tid: string }) {
   const verified = result.conclusions.verified;
+  const FEATURE_NAME = featureNames(study);
+  const count = study.features.length === 4 ? '四个' : study.features.length === 3 ? '三个' : `${study.features.length} 个`;
   return (
-    <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3" data-testid="deep-dive-conclusion">
+    <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3" data-testid={`${tid}-conclusion`}>
       <h3 className="text-[12px] font-medium">结论</h3>
       {verified.length === 0 ? (
-        <div><span className={VERDICT_TONE['检验未获支持']}>检验未获支持</span>：四个特征与三个 24h 客观结果之间，没有在发现集与确认集上都成立的关系。</div>
+        <div><span className={VERDICT_TONE['检验未获支持']}>检验未获支持</span>：{count}特征与三个 24h 客观结果之间，没有在发现集与确认集上都成立的关系。</div>
       ) : verified.map(v => (
         <div key={`${v.feature}-${v.target}`}>
           <span className={VERDICT_TONE['已验证']}>已验证</span>：{FEATURE_NAME[v.feature]} → {TARGET_NAME[v.target]}
