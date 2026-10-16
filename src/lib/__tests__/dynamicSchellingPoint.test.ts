@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDsp, dspDecay, DSP_DEFAULTS, inferIntervalMs, type DspBar } from '../dynamicSchellingPoint';
+import { computeDsp, dspDecay, DSP_DEFAULTS, dspHalfLifeForInterval, inferIntervalMs, type DspBar } from '../dynamicSchellingPoint';
 import { klineAmountFields } from '@/hooks/useBinanceData';
 
 const M5 = 5 * 60_000;
@@ -85,5 +85,42 @@ describe('图表喂数：金额字段（回放逐根推送也要带上）', () =
     expect(chartAmountFields({ quoteVolume: 1000, takerBuyQuoteVolume: 600 }, 0.25)).toEqual({ turnover: 250, takerBuyTurnover: 150 });
     expect(chartAmountFields({})).toEqual({});
     expect(chartAmountFields({ quoteVolume: 1000 })).toEqual({});
+  });
+});
+
+describe('【用户要求】记忆长度以 5 分钟图为准、随周期等比例缩放', () => {
+  const series = (step: number) => Array.from({ length: 120 }, (_, i) => ({
+    time: i * step, close: 100 * Math.exp(0.01 * Math.sin(i / 5)),
+    quoteVolume: 1000 + 300 * Math.cos(i / 3), takerBuyQuoteVolume: 500 + 200 * Math.sin(i / 4),
+  }));
+
+  it('h = 6 → 1 分钟 1.2 小时、15 分钟 18 小时、1 小时 72 小时；每根的 ρ 都等于 5 分钟线的 ρ', () => {
+    expect(dspHalfLifeForInterval(6, M5)).toBe(6);
+    expect(dspHalfLifeForInterval(6, 60_000)).toBeCloseTo(1.2, 12);
+    expect(dspHalfLifeForInterval(6, 15 * 60_000)).toBe(18);
+    expect(dspHalfLifeForInterval(6, 3_600_000)).toBe(72);
+    for (const iv of [60_000, 15 * 60_000, 3_600_000, 4 * 3_600_000]) {
+      expect(dspDecay(iv, dspHalfLifeForInterval(6, iv))).toBeCloseTo(dspDecay(M5, 6), 15);
+    }
+  });
+
+  it('图表计算：同样的 K 线序列放到 5 分钟 / 15 分钟 / 1 小时图上，V 与 A 逐根相同', async () => {
+    const { dspPoints } = await import('@/lib/customIndicators');
+    const toChart = (step: number) => series(step).map(b => ({
+      timestamp: b.time, open: b.close, high: b.close, low: b.close, close: b.close, volume: 1,
+      turnover: b.quoteVolume, takerBuyTurnover: b.takerBuyQuoteVolume,
+    }));
+    const base = dspPoints(toChart(M5), 6);
+    expect(base.at(-1)!.v).not.toBe(0);
+    for (const step of [15 * 60_000, 3_600_000]) {
+      const pts = dspPoints(toChart(step), 6);
+      pts.forEach((p, i) => {
+        expect(p.v).toBeCloseTo(base[i].v!, 15);
+        expect(p.a).toBeCloseTo(base[i].a!, 15);
+      });
+    }
+    // 对照：旧做法（半衰期固定 6 小时）在 1 小时图上 V 跟 5 分钟图不一样
+    const fixed = computeDsp(series(3_600_000), { halfLifeHours: 6 });
+    expect(Math.abs(fixed.at(-1)!.v! - base.at(-1)!.v!)).toBeGreaterThan(1e-6);
   });
 });

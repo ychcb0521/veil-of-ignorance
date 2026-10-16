@@ -4,7 +4,7 @@
  */
 
 import { registerIndicator, type IndicatorSeries, type KLineData } from 'klinecharts';
-import { computeDsp, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
+import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -130,18 +130,19 @@ export function computeAnnualizedVolatility(
   return out;
 }
 
-/** klinecharts 数据 → DSP：成交额读 turnover，主动买入额读 takerBuyTurnover（toKLineData 写入）。 */
-function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
+/** klinecharts 数据 → DSP：成交额读 turnover，主动买入额读 takerBuyTurnover（toKLineData 写入）；h 按 5 分钟图计，按实际周期等比例缩放。 */
+export function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
   const h = Number(halfLifeHours);
-  return computeDsp(
-    dataList.map(d => ({
-      time: d.timestamp,
-      close: d.close,
-      quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
-      takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
-    })),
-    { halfLifeHours: Number.isFinite(h) && h > 0 ? h : DSP_DEFAULTS.halfLifeHours },
-  );
+  const bars = dataList.map(d => ({
+    time: d.timestamp,
+    close: d.close,
+    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+  }));
+  // 【用户要求】参数 h 是 5 分钟图上的半衰期；其他周期的记忆时间等比例缩放（每根 K 线的权重相同）
+  const intervalMs = inferIntervalMs(bars) ?? DSP_BASE_INTERVAL_MS;
+  const h5m = Number.isFinite(h) && h > 0 ? h : DSP_DEFAULTS.halfLifeHours;
+  return computeDsp(bars, { halfLifeHours: dspHalfLifeForInterval(h5m, intervalMs) }, intervalMs);
 }
 
 type SegmentData = { current: { indicatorData?: unknown }; next: { indicatorData?: unknown } };
