@@ -113,7 +113,7 @@ type CardRow = ReturnType<typeof buildCampaignCardData>;
 
 /**
  * 进场锚点 B（列表口径）：有成交记录、或本来就没挂成交 id（回填）的 main_open 腿里最早的模拟时间。
- * 挂了成交 id 却一条记录都没认领到的腿视为未成交，不参与。Deep RSA 分组、战役封面与详情的「进场时的谢林偏离」共用。
+ * 挂了成交 id 却一条记录都没认领到的腿视为未成交，不参与。
  */
 export function campaignEntryAnchorMs(
   legs: readonly { id: string; leg_role: string; trade_record_id?: string | null; pre_simulated_time?: string | null }[],

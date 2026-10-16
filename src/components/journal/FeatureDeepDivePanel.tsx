@@ -2,7 +2,7 @@
  * Deep RSA 第 6 步「特征深挖」（加权主动买卖失衡 · 失衡的近期偏移 · 谢林候选）与第 7 步「动态谢林点检验」共用这个面板：
  * 特征清单、交叉表与几句说明来自 study（DeepDiveStudy）。
  * 【用户要求】「给我定义、分析方案、统计方法、操作流程，让我一步一步点击即可」：
- * 上面是定义与步骤；跑完后结果按 A → G 一节一节点开，每节先写「怎么读」。
+ * 上面是定义与步骤；跑完后结果按 A → G（第 7 步多一节 t 检验，到 H）一节一节点开，每节先写「怎么读」。
  */
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, Play, Square } from 'lucide-react';
@@ -57,7 +57,20 @@ const BASE_SECTIONS = [
   { id: 'E', title: '能否分开你的正 / 对照战役', how: 'AUC = 随机挑一个正样本和一个对照，正样本特征更高的概率。0.5 = 分不开，> 0.5 = 正样本偏高，< 0.5 = 偏低。正样本少，区间会很宽。' },
   { id: 'F', title: '稳健性', how: '同一个关系在战役时点、随机背景里分别是否同向；加权特征换半衰期（2 / 6 / 12 小时）是否同向。方向乱跳就说明不稳。' },
 ] as const;
-const sectionsOf = (study: DeepDiveStudy) => [...BASE_SECTIONS, { id: 'G', title: study.interaction.title, how: study.interaction.how }];
+/** H 节（第 7 步）：【用户要求】2026-10-16 用 t 检验比较实验组（正样本）与对照组。 */
+const T_TEST_SECTION = {
+  id: 'T', title: 't 检验：实验组 vs 对照组',
+  how: '你指定的主检验。实验组 = 正样本战役，对照组 = 对照战役（每簇一个代表，全部时间段）。Welch t 检验（不假定两组方差相等），双侧；三个指标整族 Holm 校正，p < 0.05 记「差异显著」。均值差 = 实验组 − 对照组；Hedges g 是效应量（约 0.2 小、0.5 中、0.8 大）。正样本只有十几个、也没有留出样本，这是全样本上的比较，不等于样本外「已验证」；下面的小表是发现期、确认期各自的均值差，看方向是否一致。',
+} as const;
+
+/**
+ * 各节按内容分（kind = 原来的 A–G，加 T = t 检验），字母按显示顺序重新编：第 6 步仍是 A–G；
+ * 第 7 步把 t 检验放在「数据与分布」之后，后面依次顺延。
+ */
+const sectionsOf = (study: DeepDiveStudy) => {
+  const kinds = [BASE_SECTIONS[0], ...(study.groupTTest ? [T_TEST_SECTION] : []), ...BASE_SECTIONS.slice(1), { id: 'G', title: study.interaction.title, how: study.interaction.how }];
+  return kinds.map((k, i) => ({ kind: k.id as string, id: String.fromCharCode(65 + i), title: k.title as string, how: k.how as string }));
+};
 
 export interface FeatureDeepDivePanelProps {
   status: RunStatus;
@@ -141,7 +154,7 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
               {!running && status === 'error' && <span className="text-[#F6465D]">运行失败：{error}</span>}
             </div>
           ))}
-          {step(3, false, !!result && !running, <>按顺序点开下面的 A → G，每一节先看「怎么读」。</>)}
+          {step(3, false, !!result && !running, <>按顺序点开下面的 A → {SECTIONS[SECTIONS.length - 1].id}，每一节先看「怎么读」。{study.groupTTest ? <span className="text-muted-foreground">t 检验在 B 节。</span> : null}</>)}
           {step(4, false, !!result && !running, (
             <span className="inline-flex flex-wrap items-center gap-x-2">
               <button type="button" disabled={!result} onClick={onDownload} data-testid={`${tid}-download`}
@@ -170,7 +183,7 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
             <h3 className="text-[12px] font-medium">{SECTIONS[section].id} · {SECTIONS[section].title}</h3>
             <p className="text-muted-foreground"><span className="text-foreground/85">怎么读：</span>{SECTIONS[section].how}</p>
             <div className="overflow-x-auto">
-              <SectionBody id={SECTIONS[section].id} result={result} study={study} tid={tid} />
+              <SectionBody id={SECTIONS[section].kind} result={result} study={study} tid={tid} />
             </div>
             <div className="flex items-center justify-between pt-1">
               <button type="button" disabled={section === 0} onClick={() => setSection(section - 1)}
@@ -179,7 +192,7 @@ export function FeatureDeepDivePanel({ status, progress, result, error, canRun, 
                 className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30">下一节<ChevronRight className="h-3.5 w-3.5" /></button>
             </div>
           </div>
-          <Conclusion result={result} study={study} tid={tid} />
+          <Conclusion result={result} study={study} tid={tid} labelSection={SECTIONS.find(x => x.kind === 'E')?.id ?? 'E'} tSection={SECTIONS.find(x => x.kind === 'T')?.id} />
         </div>
       )}
     </div>
@@ -214,6 +227,7 @@ function SectionBody({ id, result, study, tid }: { id: string; result: FeatureDe
       </tbody></table>
     </div>
   );
+  if (id === 'T') return <TTestTable result={result} study={study} tid={tid} />;
   if (id === 'B') return (
     <table className="w-full"><thead className="text-muted-foreground"><tr>
       <th className={TH}>特征</th><th className={TH}>结果</th><th className={TH}>n</th><th className={TH}>ρ</th><th className={TH}>95% 区间（按标的重抽样）</th>
@@ -342,13 +356,23 @@ function SectionBody({ id, result, study, tid }: { id: string; result: FeatureDe
   );
 }
 
-function Conclusion({ result, study, tid }: { result: FeatureDeepDiveResult; study: DeepDiveStudy; tid: string }) {
+function Conclusion({ result, study, tid, labelSection, tSection }: { result: FeatureDeepDiveResult; study: DeepDiveStudy; tid: string; labelSection: string; tSection?: string }) {
   const verified = result.conclusions.verified;
   const FEATURE_NAME = featureNames(study);
   const count = study.features.length === 4 ? '四个' : study.features.length === 3 ? '三个' : `${study.features.length} 个`;
   return (
     <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3" data-testid={`${tid}-conclusion`}>
       <h3 className="text-[12px] font-medium">结论</h3>
+      {result.tTests && (
+        <div data-testid={`${tid}-conclusion-ttest`}>
+          <span className="text-foreground/85">t 检验（实验组 vs 对照组{tSection ? `，${tSection} 节` : ''}）：</span>
+          {result.tTests.map((r, i) => (
+            <span key={r.feature}>{i ? '；' : ''}{FEATURE_NAME[r.feature]} <span className={r.verdict === '差异显著' ? 'text-[#0B9F66] dark:text-[#0ECB81]' : 'text-muted-foreground'}>{r.verdict}</span>
+              <span className="text-muted-foreground">（Holm p <span className="font-mono tabular-nums">{pv(r.pHolm)}</span>）</span></span>
+          ))}。
+          <span className="text-muted-foreground">全样本比较，不是样本外验证。</span>
+        </div>
+      )}
       {verified.length === 0 ? (
         <div><span className={VERDICT_TONE['检验未获支持']}>检验未获支持</span>：{count}特征与三个 24h 客观结果之间，没有在发现集与确认集上都成立的关系。</div>
       ) : verified.map(v => (
@@ -357,7 +381,63 @@ function Conclusion({ result, study, tid }: { result: FeatureDeepDiveResult; stu
           {v.survivesVolControl ? '，控制波动率后仍成立' : '，但控制波动率后不成立（多半是在说波动大小，不是方向）'}。
         </div>
       ))}
-      <div className="text-muted-foreground">标签（正 / 对照）比较只作描述，看 E 节；分档、稳健性、交叉表都不做判定。</div>
+      <div className="text-muted-foreground">{result.tTests ? '与 24h 客观结果的判定看上面一句；' : ''}标签（正 / 对照）的 AUC 比较只作描述，看 {labelSection} 节；分档、稳健性、交叉表都不做判定。</div>
+    </div>
+  );
+}
+
+/** t 检验表：均值、标准差、均值差与区间按特征的显示倍率读（V 按基点 / 根）。 */
+function TTestTable({ result, study, tid }: { result: FeatureDeepDiveResult; study: DeepDiveStudy; tid: string }) {
+  const rows = result.tTests ?? [];
+  if (rows.length === 0) return <div className="text-muted-foreground">这份结果没有 t 检验（旧版结果），重新运行即可。</div>;
+  const spec = Object.fromEntries(study.features.map(f => [f.key, f]));
+  const scaled = (key: string, v: number | null | undefined, d = 4) => num(v == null ? v : v * (spec[key]?.display?.scale ?? 1), d);
+  const meanSd = (key: string, m: number | null, sd: number | null) => <><N>{scaled(key, m)}</N> <span className="text-muted-foreground">± {scaled(key, sd)}</span></>;
+  return (
+    <div className="space-y-2">
+      <table className="w-full"><thead className="text-muted-foreground"><tr>
+        <th className={TH}>指标</th><th className={TH}>实验组 n · 均值 ± 标准差</th><th className={TH}>对照组 n · 均值 ± 标准差</th>
+        <th className={TH}>均值差（95% 区间）</th><th className={TH}>t（df）</th><th className={TH}>p</th><th className={TH}>Holm p</th>
+        <th className={TH}>g</th><th className={TH}>判定</th>
+      </tr></thead><tbody>
+        {rows.map(r => (
+          <tr key={r.feature} className={cn('border-t border-border/50', r.verdict === '差异显著' && 'bg-[#F0B90B]/[0.06]')} data-testid={`${tid}-ttest-${r.feature}`}>
+            <td className={TD}>{spec[r.feature]?.name ?? r.feature}{spec[r.feature]?.display && <span className="text-muted-foreground">（{spec[r.feature]!.display!.unit}）</span>}</td>
+            <td className={TD}><N>{r.nA}</N> · {meanSd(r.feature, r.meanA, r.sdA)}</td>
+            <td className={TD}><N>{r.nB}</N> · {meanSd(r.feature, r.meanB, r.sdB)}</td>
+            <td className={TD}><N>{scaled(r.feature, r.diff)}</N> <span className="text-muted-foreground">({r.ci95 ? `${scaled(r.feature, r.ci95[0])} ~ ${scaled(r.feature, r.ci95[1])}` : '—'})</span></td>
+            <td className={TD}><N>{num(r.t, 2)}</N> <span className="text-muted-foreground">({num(r.df, 0)})</span></td>
+            <td className={TD}><N>{pv(r.p)}</N></td>
+            <td className={TD}><N>{pv(r.pHolm)}</N></td>
+            <td className={TD}><N>{num(r.hedgesG, 2)}</N></td>
+            <td className={cn(TD, r.verdict === '差异显著' ? 'text-[#0B9F66] dark:text-[#0ECB81]' : 'text-muted-foreground')}>{r.verdict}</td>
+          </tr>
+        ))}
+      </tbody></table>
+      <div className="pt-1 text-foreground/85">分期一致性（描述，不判定）：同一个检验在发现期、确认期各算一遍，看均值差方向是否一致</div>
+      <table className="w-auto"><thead className="text-muted-foreground"><tr>
+        <th className={TH}>指标</th><th className={TH}>发现期 实验组 / 对照组 · 均值差 · p</th><th className={TH}>确认期 实验组 / 对照组 · 均值差 · p</th><th className={TH}>方向</th>
+      </tr></thead><tbody>
+        {rows.map(r => {
+          const d = r.byPeriod.discovery;
+          const c = r.byPeriod.confirmation;
+          const same = d.diff != null && c.diff != null && Math.sign(d.diff) === Math.sign(c.diff) && d.diff !== 0;
+          return (
+            <tr key={r.feature} className="border-t border-border/50" data-testid={`${tid}-ttest-period-${r.feature}`}>
+              <td className={TD}>{spec[r.feature]?.name ?? r.feature}</td>
+              {[d, c].map((x, i) => (
+                <td key={i} className={TD}><N>{x.nA}</N> / <N>{x.nB}</N> · <N>{scaled(r.feature, x.diff)}</N> <span className="text-muted-foreground">· p {pv(x.p)}</span></td>
+              ))}
+              <td className={cn(TD, d.diff == null || c.diff == null ? 'text-muted-foreground' : same ? 'text-foreground/85' : 'text-[#C99400]')}>
+                {d.diff == null || c.diff == null ? '算不出' : same ? '一致' : '相反'}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody></table>
+      <div className="text-muted-foreground">
+        实验组 = 正样本战役；g = Hedges g 效应量；t 后括号是自由度。t 检验假定两组均值的抽样分布近似正态；正样本少时对极端值敏感，可对照「能否分开你的正 / 对照战役」那一节基于排名的 AUC 一起看。同一个币的多场战役不完全独立，p 值会偏乐观。
+      </div>
     </div>
   );
 }

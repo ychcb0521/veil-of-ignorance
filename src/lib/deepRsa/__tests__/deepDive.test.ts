@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeFeatureDeepDive, auc, clusterBootstrapCi, partialSpearman, permutationP, DEEP_DIVE_FEATURES, DSP_STUDY, FEATURES_STUDY } from '../deepDive';
+import { analyzeFeatureDeepDive, auc, clusterBootstrapCi, partialSpearman, permutationP, DEEP_DIVE_FEATURES, DSP_STUDY, FEATURES_STUDY, studentCritical, studentTwoSidedP, welchTTest } from '../deepDive';
 import { mulberry32 } from '../grouping';
 import type { RunEvent } from '../pipeline';
 
@@ -121,7 +121,7 @@ describe('Deep RSA 第 6 步 · 一整轮分析（合成数据）', { timeout: 6
  *  - dsp_gap 只通过波动率与最大涨幅相关——控制波动率后应消失，最大跌幅同样「相关」；
  *  - dsp_a 纯噪声。
  */
-function syntheticDspEvents(n: number, seed: number, { signal = true }: { signal?: boolean } = {}): RunEvent[] {
+function syntheticDspEvents(n: number, seed: number, { signal = true, labelSignal = false }: { signal?: boolean; labelSignal?: boolean } = {}): RunEvent[] {
   const rand = mulberry32(seed);
   const t0 = Date.parse('2025-01-01T00:00:00Z');
   return Array.from({ length: n }, (_, i) => {
@@ -133,7 +133,7 @@ function syntheticDspEvents(n: number, seed: number, { signal = true }: { signal
     const maxUp = vol * 4 + 0.005 * rand();
     const maxDown = -(vol * 4 + 0.005 * rand());
     const kind = i % 3 === 0 ? 'background' : 'event';
-    const label = kind === 'background' ? null : rand() < 0.2 ? 'positive' : 'control';
+    const label = kind === 'background' ? null : (labelSignal ? v > 1.6e-4 : rand() < 0.2) ? 'positive' : 'control';
     const features = { vol_w: vol, dsp_v: v, dsp_a: a, dsp_gap: gap };
     return {
       id: `d${i}`, symbol: `S${i % 25}USDT`, anchorMs: t0 + i * 6 * 3_600_000, kind,
@@ -178,5 +178,53 @@ describe('Deep RSA 第 7 步 · 动态谢林点检验（合成数据）', { time
   it('默认仍是第 6 步：特征清单与交叉表不变', () => {
     expect(FEATURES_STUDY.features.map(f => f.key)).toEqual(['taker_imb_w', 'taker_imb_shift_w', 'vwap12_dev', 'poc_dev_w']);
     expect(FEATURES_STUDY.interaction.first.key).toBe('vwap12_dev');
+  });
+});
+
+describe('Welch t 检验：与 scipy.stats.ttest_ind(equal_var=False) 对照', () => {
+  it('t、df、双侧 p、95% 区间吻合', () => {
+    const r = welchTTest([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]);
+    expect(r.t).toBeCloseTo(-1.8973665961010275, 10);
+    expect(r.df).toBeCloseTo(5.882352941176471, 10);
+    expect(r.p).toBeCloseTo(0.10753119493062728, 8);
+    expect(r.ci95![0]).toBeCloseTo(-6.887741643736975, 6);
+    expect(r.ci95![1]).toBeCloseTo(0.887741643736975, 6);
+    const r2 = welchTTest([0.1, 0.5, -0.2, 0.9, 0.3, 0.4], [0.0, -0.1, 0.2, -0.3, 0.1, 0.05, -0.2, 0.15, 0.0]);
+    expect(r2.t).toBeCloseTo(2.13280174036693, 9);
+    expect(r2.df).toBeCloseTo(6.30291477359727, 9);
+    expect(r2.p).toBeCloseTo(0.07470966444636541, 8);
+    expect(r2.ci95![0]).toBeCloseTo(-0.046170010681601314, 6);
+    expect(r2.ci95![1]).toBeCloseTo(0.7350588995704902, 6);
+  });
+
+  it('t 分布：非整数自由度的临界值与 p', () => {
+    expect(studentCritical(3.2)).toBeCloseTo(3.0728289297131623, 6);
+    expect(studentTwoSidedP(2.5, 17.3)).toBeCloseTo(0.02274750017580115, 8);
+  });
+
+  it('任一组不足 2 个 → t、p 为 NaN，不硬算', () => {
+    const r = welchTTest([1], [1, 2, 3]);
+    expect(Number.isNaN(r.p)).toBe(true);
+    expect(r.ci95).toBeNull();
+  });
+});
+
+describe('Deep RSA 第 7 步 · t 检验（实验组 vs 对照组）', () => {
+  it('正样本的 V 偏高（植入）→ V 差异显著、均值差为正；A 纯噪声 → 不显著；三项整族 Holm，并分发现 / 确认期', () => {
+    const r = analyzeFeatureDeepDive(syntheticDspEvents(360, 23, { labelSignal: true }), { permutations: 99, bootstrap: 19, study: DSP_STUDY });
+    expect(r.tTests!.map(t => t.feature)).toEqual(['dsp_v', 'dsp_a', 'dsp_gap']);
+    const v = r.tTests!.find(t => t.feature === 'dsp_v')!;
+    expect(v.diff!).toBeGreaterThan(0);
+    expect(v.pHolm).toBeLessThan(0.05);
+    expect(v.verdict).toBe('差异显著');
+    expect(v.hedgesG!).toBeGreaterThan(0.8);
+    expect(v.byPeriod.discovery.nA + v.byPeriod.confirmation.nA).toBeLessThanOrEqual(v.nA);
+    const a = r.tTests!.find(t => t.feature === 'dsp_a')!;
+    expect(a.verdict).toBe('差异不显著');
+  });
+
+  it('第 6 步不做 t 检验（结果里没有 tTests）', () => {
+    const r = analyzeFeatureDeepDive(syntheticEvents(120, 3), { permutations: 19, bootstrap: 9 });
+    expect(r.tTests).toBeUndefined();
   });
 });

@@ -276,7 +276,7 @@ export function DeepRsaView({ report, loading, loaded, total, group, onGroupChan
         </Section>
       )}
       {dspPanel && (
-        <Section title="动态谢林点检验（第 7 步）" note="DSP 指标进场时的三个读数 · 同一批事件、同一套统计 · 方案见 12-dsp-test.md">
+        <Section title="动态谢林点检验（第 7 步）" note="DSP 指标进场时的三个读数 · t 检验比较实验组（正样本）与对照组 · 方案见 12-dsp-test.md">
           {dspPanel}
         </Section>
       )}

@@ -4,6 +4,7 @@
  * journals, auth, settings or cloud mirrors. Cloud synchronization stays in callers.
  */
 // 不带版本号：换了版本留下的旧缓存同样可重建，同样该清
+// campaign-entry-schelling-：已下线的「进场时的谢林偏离」缓存（2026-10-16 删除功能），留在名单里让浏览器里残留的旧数据可被回收
 const REBUILDABLE_CACHE_PREFIXES = ['campaign-price-path-', 'campaign-unrealized-chart-', 'campaign-entry-schelling-'];
 type StateOrigin = { source: 'local' | 'remote'; updatedAt?: number };
 const unpersisted = new Map<string, StateOrigin & { raw: string | null }>();

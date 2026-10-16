@@ -17,7 +17,8 @@
  *   - 标签：正 / 对照战役用 AUC（Mann–Whitney）比较，全部时间段（正样本太少，只能描述），置换 p + Holm。
  *   - 其余（分位数分档、子集、半衰期、谢林 × 失衡交叉）都是描述，不做判定。
  *
- * 第 7 步（动态谢林点 DSP，docs/deep-rsa/12-dsp-test.md）用同一套统计，只换特征清单与交叉表：见 DeepDiveStudy / DSP_STUDY。
+ * 第 7 步（动态谢林点 DSP，docs/deep-rsa/12-dsp-test.md）用同一套统计，只换特征清单与交叉表：见 DeepDiveStudy / DSP_STUDY；
+ * 另按用户要求加做 H 节：实验组（正样本）vs 对照组的 Welch t 检验。
  */
 import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
@@ -98,6 +99,8 @@ export interface DeepDiveStudy {
   definitionNote?: string;
   runLabel: string;
   rerunLabel: string;
+  /** 是否做「实验组（正样本）vs 对照组」的 Welch t 检验（H 节）。【用户要求】2026-10-16 第 7 步用 t 检验。 */
+  groupTTest?: boolean;
 }
 
 export const DEEP_DIVE_TARGETS: readonly { key: DeepDiveTargetKey; name: string; reading: string }[] = [
@@ -161,6 +164,7 @@ export const DSP_STUDY: DeepDiveStudy = {
   definitionNote: '数据：主动买卖额用币安 K 线自带的成交金额（USDT）；观察窗里有金额数据的 K 线不到 95% 时这一场记为缺失，不拿币数凑。参数 α = 1、κ = 1。',
   runLabel: '开始检验',
   rerunLabel: '重新检验',
+  groupTTest: true,
 };
 
 export const DEEP_DIVE_STUDIES: Record<DeepDiveStudyId, DeepDiveStudy> = { features: FEATURES_STUDY, dsp: DSP_STUDY };
@@ -286,6 +290,101 @@ export function auc(pos: readonly number[], ctl: readonly number[]): number {
   return (rankSumPos - pos.length * (pos.length + 1) / 2) / (pos.length * ctl.length);
 }
 
+// ---------- t 检验（Welch，不假定两组方差相等）----------
+
+/** ln Γ(x)，Lanczos 近似（x > 0）。 */
+function lnGamma(x: number): number {
+  const c = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
+  let y = x;
+  const tmp = x + 5.5 - (x + 0.5) * Math.log(x + 5.5);
+  let ser = 1.000000000190015;
+  for (const ci of c) ser += ci / ++y;
+  return -tmp + Math.log((2.5066282746310005 * ser) / x);
+}
+
+/** 不完全 Beta 函数的连分式（Numerical Recipes betacf）。 */
+function betaContinuedFraction(a: number, b: number, x: number): number {
+  const FPMIN = 1e-300;
+  const qab = a + b; const qap = a + 1; const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= 300; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d; h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-14) break;
+  }
+  return h;
+}
+
+/** 正则化不完全 Beta 函数 I_x(a, b)。 */
+function regularizedBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  return x < (a + 1) / (a + b + 2) ? (bt * betaContinuedFraction(a, b, x)) / a : 1 - (bt * betaContinuedFraction(b, a, 1 - x)) / b;
+}
+
+/** Student t 分布的双侧 p：P(|T| ≥ |t|)，自由度 df（可为非整数）。 */
+export function studentTwoSidedP(t: number, df: number): number {
+  if (!Number.isFinite(t) || !(df > 0)) return Number.NaN;
+  return regularizedBeta(df / (df + t * t), df / 2, 0.5);
+}
+
+/** 双侧临界值 t*：P(|T| ≥ t*) = alpha（二分法）。 */
+export function studentCritical(df: number, alpha = 0.05): number {
+  let lo = 0; let hi = 1e4;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    if (studentTwoSidedP(mid, df) > alpha) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+export interface WelchResult {
+  nA: number; nB: number;
+  meanA: number | null; meanB: number | null;
+  sdA: number | null; sdB: number | null;
+  /** meanA − meanB */
+  diff: number | null;
+  t: number; df: number; p: number;
+  /** 均值差的 95% 置信区间（Welch）。 */
+  ci95: [number, number] | null;
+  /** 效应量 Hedges g（合并标准差、小样本校正）。 */
+  hedgesG: number | null;
+}
+
+/** Welch 两样本 t 检验（双侧）：A = 实验组（正样本），B = 对照组。任一组少于 2 个或方差都为 0 → t、p 为 NaN。 */
+export function welchTTest(a: readonly number[], b: readonly number[]): WelchResult {
+  const nA = a.length; const nB = b.length;
+  const meanA = meanOf(a); const meanB = meanOf(b);
+  const variance = (xs: readonly number[], m: number | null) => (m != null && xs.length > 1 ? xs.reduce((s, v) => s + (v - m) ** 2, 0) / (xs.length - 1) : null);
+  const vA = variance(a, meanA); const vB = variance(b, meanB);
+  const diff = meanA != null && meanB != null ? meanA - meanB : null;
+  const base = { nA, nB, meanA, meanB, sdA: vA == null ? null : Math.sqrt(vA), sdB: vB == null ? null : Math.sqrt(vB), diff };
+  if (diff == null || vA == null || vB == null) return { ...base, t: Number.NaN, df: Number.NaN, p: Number.NaN, ci95: null, hedgesG: null };
+  const seA = vA / nA; const seB = vB / nB;
+  const se = Math.sqrt(seA + seB);
+  if (!(se > 0)) return { ...base, t: Number.NaN, df: Number.NaN, p: Number.NaN, ci95: null, hedgesG: null };
+  const t = diff / se;
+  const df = (seA + seB) ** 2 / (seA ** 2 / (nA - 1) + seB ** 2 / (nB - 1));
+  const crit = studentCritical(df);
+  const pooled = Math.sqrt(((nA - 1) * vA + (nB - 1) * vB) / (nA + nB - 2));
+  const hedgesG = pooled > 0 ? (diff / pooled) * (1 - 3 / (4 * (nA + nB) - 9)) : null;
+  return { ...base, t, df, p: studentTwoSidedP(t, df), ci95: [diff - crit * se, diff + crit * se], hedgesG };
+}
+
 function quantile(sorted: readonly number[], q: number): number | null {
   if (!sorted.length) return null;
   const pos = (sorted.length - 1) * q;
@@ -360,6 +459,16 @@ export interface LabelRow {
   ctlMedian: number | null;
 }
 
+export type TTestVerdict = '差异显著' | '差异不显著';
+export interface TTestRow extends WelchResult {
+  feature: DeepDiveFeatureKey;
+  /** 三个特征整族 Holm。 */
+  pHolm: number;
+  verdict: TTestVerdict;
+  /** 同一检验分别在发现期 / 确认期上算一遍（描述，看方向是否一致）。 */
+  byPeriod: { discovery: WelchResult; confirmation: WelchResult };
+}
+
 export interface InteractionCell {
   price: 'above' | 'below';
   flow: 'buy' | 'sell';
@@ -408,6 +517,8 @@ export interface FeatureDeepDiveResult {
     byHalfLife: { feature: DeepDiveFeatureKey; target: DeepDiveTargetKey; h: number; n: number; rho: number }[];
   };
   interaction: InteractionCell[];
+  /** H 节：实验组（正样本）vs 对照组的 Welch t 检验；只有 study.groupTTest 的研究有。 */
+  tTests?: TTestRow[];
   conclusions: { verified: { feature: DeepDiveFeatureKey; target: DeepDiveTargetKey; survivesVolControl: boolean }[] };
 }
 
@@ -576,8 +687,25 @@ export function analyzeFeatureDeepDive(
     return { price, flow, n: members.length, means, nPos: members.filter(e => e.label === 'positive').length, nCtl: members.filter(e => e.label === 'control').length };
   }));
 
+  // H. 实验组（正样本）vs 对照组：Welch 两样本 t 检验（双侧），全部时间段，三个特征整族 Holm
+  let tTests: TTestRow[] | undefined;
+  if (study.groupTTest) {
+    const groupValues = (pool: readonly RunEvent[], key: DeepDiveFeatureKey, label: 'positive' | 'control') =>
+      pool.filter(e => e.label === label).map(e => featureOf(e, key)).filter(finite);
+    const tRaw = FEATURES.map(f => ({
+      feature: f.key,
+      ...welchTTest(groupValues(events, f.key, 'positive'), groupValues(events, f.key, 'control')),
+      byPeriod: {
+        discovery: welchTTest(groupValues(discovery, f.key, 'positive'), groupValues(discovery, f.key, 'control')),
+        confirmation: welchTTest(groupValues(confirmationSet, f.key, 'positive'), groupValues(confirmationSet, f.key, 'control')),
+      },
+    }));
+    const tHolm = holmAdjust(tRaw.map(r => r.p));
+    tTests = tRaw.map((r, i) => ({ ...r, pHolm: tHolm[i], verdict: Number.isFinite(tHolm[i]) && tHolm[i] < DEEP_DIVE_ALPHA ? '差异显著' : '差异不显著' }));
+  }
+
   return {
-    study: study.id, seed, permutations, bootstrap, primaryH: DEEP_DIVE_PRIMARY_H,
+    study: study.id, seed, permutations, bootstrap, primaryH: DEEP_DIVE_PRIMARY_H, ...(tTests ? { tTests } : {}),
     distribution, association, confirmation, quintiles, labels,
     robustness: { bySubset, byHalfLife }, interaction,
     conclusions: { verified: confirmation.filter(r => r.verdict === '已验证').map(r => ({ feature: r.feature, target: r.target, survivesVolControl: r.survivesVolControl })) },

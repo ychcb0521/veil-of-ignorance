@@ -50,25 +50,31 @@ describe('【用户要求】Deep RSA 第 7 步「动态谢林点检验」：与�
     expect(onRun).toHaveBeenCalledTimes(1);
   });
 
-  it('跑完：B 节 9 行；A 节 V 按基点 / 根显示、写出特征缺失数；G 节是「现价 vs DSP × 谢林点移动」；C 节写明确认集不独立', () => {
+  it('跑完：B 节是 t 检验（实验组 vs 对照组，V 按基点）；C 节 9 行相关检验；D 节写明确认集不独立；H 节是交叉表；结论先写 t 检验', () => {
     render(<FeatureDeepDivePanel {...props} study={DSP_STUDY} testIdPrefix="dsp-study" result={result()} />);
     const a = screen.getByTestId('dsp-study-section-A');
     expect(a.textContent).toContain('特征缺失（成交额覆盖不足）4');
-    // V ~ ±1e-4：按基点显示是 ±1 左右的数，不会是 0.0000
     const vRow = within(a).getByText('谢林点迁移速度 V').closest('tr')!;
     expect(vRow.textContent).not.toMatch(/0\.0000 ~ 0\.0000/);
     fireEvent.click(screen.getByTestId('dsp-study-tab-B'));
     const b = screen.getByTestId('dsp-study-section-B');
-    for (const f of ['dsp_v', 'dsp_a', 'dsp_gap']) for (const t of ['endRet', 'maxUp', 'maxDown']) {
-      expect(within(b).getByTestId(`dsp-study-assoc-${f}-${t}`)).toBeInTheDocument();
-    }
+    expect(b.textContent).toContain('t 检验：实验组 vs 对照组');
+    expect(b.textContent).toContain('Welch');
+    for (const f of ['dsp_v', 'dsp_a', 'dsp_gap']) expect(within(b).getByTestId(`dsp-study-ttest-${f}`)).toBeInTheDocument();
+    expect(within(b).getByTestId('dsp-study-ttest-dsp_v').textContent).toContain('基点/根');
+    expect(within(b).getByTestId('dsp-study-ttest-dsp_v').textContent).toMatch(/差异显著|差异不显著/);
     fireEvent.click(screen.getByTestId('dsp-study-tab-C'));
-    expect(screen.getByTestId('dsp-study-section-C').textContent).toMatch(/检验未获支持|真正独立的确认要用之后新产生的战役/);
-    fireEvent.click(screen.getByTestId('dsp-study-tab-G'));
-    const g = screen.getByTestId('dsp-study-section-G');
-    expect(g.textContent).toContain('偏离 × 迁移方向交叉');
-    expect(g.textContent).toContain('现价 vs DSP');
-    expect(g.textContent).toContain('上移（V > 0）');
-    expect(screen.getByTestId('dsp-study-conclusion').textContent).toMatch(/已验证|三个特征/);
+    const c = screen.getByTestId('dsp-study-section-C');
+    for (const f of ['dsp_v', 'dsp_a', 'dsp_gap']) for (const t of ['endRet', 'maxUp', 'maxDown']) {
+      expect(within(c).getByTestId(`dsp-study-assoc-${f}-${t}`)).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByTestId('dsp-study-tab-D'));
+    expect(screen.getByTestId('dsp-study-section-D').textContent).toMatch(/检验未获支持|真正独立的确认要用之后新产生的战役/);
+    fireEvent.click(screen.getByTestId('dsp-study-tab-H'));
+    const h = screen.getByTestId('dsp-study-section-H');
+    expect(h.textContent).toContain('偏离 × 迁移方向交叉');
+    expect(h.textContent).toContain('上移（V > 0）');
+    expect(screen.getByTestId('dsp-study-conclusion-ttest').textContent).toContain('t 检验（实验组 vs 对照组，B 节）');
+    expect(screen.getByTestId('dsp-study-conclusion').textContent).toContain('看 F 节');
   });
 });

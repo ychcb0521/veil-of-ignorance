@@ -68,8 +68,6 @@ import {
 import { fetchLegExitPriceCorrections } from '@/lib/campaignLegExecution';
 import type { CampaignInitialRiskSource } from '@/lib/campaignAnalysis';
 import { LEG_THEORETICAL_FACTOR_HINT } from '@/lib/campaignLegGeometricFactor';
-import { EntrySchellingInline } from '@/components/journal/EntrySchelling';
-import { campaignEntryAnchorMs } from '@/lib/deepRsa/campaignLabels';
 import { EXECUTION_WEAR_COMPONENT_LABEL, EXECUTION_WEAR_COMPONENT_RULES, EXECUTION_WEAR_COMPONENTS, EXECUTION_WEAR_FORMULA, EXECUTION_WEAR_RULE, formatCompactExecutionWearR, formatExecutionWearParts, formatExecutionWearR, PAYOFF_RATIO_WEAR_FORMULA } from '@/lib/campaignExecutionWear';
 import { computeMagicB, payoffRatioHedgeWear, EFFECTIVE_PRICE_CHANGE_FORMULA, EFFECTIVE_PRICE_CHANGE_RULE, formatActualTheoreticalMetric, MAGIC_B_METHODS_DESCRIPTION, MAGIC_B_RULE, POSITION_GEOMETRIC_ALPHA_RULE, POSITION_GEOMETRIC_FORMULA, POSITION_THEORETICAL_FORMULA } from '@/lib/campaignGeometricMetrics';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
@@ -1810,7 +1808,6 @@ const CampaignCard = memo(function CampaignCard({
   /** 自评量表上悬停 / 聚焦的那一档（预览文字用）；null = 显示已选的那一档。 */
   const [ratingPreview, setRatingPreview] = useState<number | null>(null);
   const operationTime = campaignOperationTime(legs, tradeRecords);
-  const entryAnchorMs = useMemo(() => campaignEntryAnchorMs(legs, row.settlement.recordsByLeg), [legs, row.settlement]);
   const campaignDisplayCode = formatCampaignDisplayCode(
     campaign.campaign_code,
     campaignAccountName,
@@ -1955,8 +1952,6 @@ const CampaignCard = memo(function CampaignCard({
                 </span>
               </span>
             </span>
-            {/* 【用户要求】每一场战役在进场时的谢林偏离（偏离 12h VWAP / 成交密集区 POC），进入视野才去取，结果持久缓存 */}
-            <EntrySchellingInline symbol={campaign.symbol} anchorMs={entryAnchorMs} />
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1 self-end lg:self-auto" onClick={(event) => event.stopPropagation()}>
