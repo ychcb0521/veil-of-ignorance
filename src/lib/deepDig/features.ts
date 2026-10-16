@@ -27,6 +27,8 @@ export interface DeepDigFeatureDef {
   positive: string;
   control: string;
   builtin?: boolean;
+  /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
+  removed?: boolean;
   createdAt?: number;
 }
 
@@ -101,9 +103,15 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
   const byId = new Map(saved.map(d => [d.id, d]));
-  const builtins = BUILTIN_FEATURES.map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
+  const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   return [...builtins, ...custom];
+}
+
+/** 被删掉（隐藏）的内置项：目录底部给一个不起眼的「恢复」。 */
+export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
+  const removed = new Set(saved.filter(d => d.removed).map(d => d.id));
+  return BUILTIN_FEATURES.filter(b => removed.has(b.id));
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */

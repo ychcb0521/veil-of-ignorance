@@ -8,7 +8,7 @@ import { ChevronDown, ChevronRight, Pencil, RotateCcw, Trash2 } from 'lucide-rea
 import { cn } from '@/lib/utils';
 import { FUNCTIONS } from '@/lib/deepDig/formula';
 import {
-  BUILTIN_FEATURES, CAMPAIGN_VARIABLES, checkDefinition, compileGroups, definitionKey, MIN_AMOUNT_COVERAGE, previewGroups, SERIES_VARIABLES,
+  BUILTIN_FEATURES, CAMPAIGN_VARIABLES, checkDefinition, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, definitionKey, MIN_AMOUNT_COVERAGE, previewGroups, SERIES_VARIABLES,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
@@ -35,7 +35,7 @@ export function DefinitionPanel(props: DefinitionPanelProps) {
   return props.editing ? <DefinitionForm {...props} /> : <DefinitionView {...props} />;
 }
 
-function DefinitionView({ def, onEditingChange }: DefinitionPanelProps) {
+function DefinitionView({ def, onEditingChange, onSave, groupRows }: DefinitionPanelProps) {
   return (
     <div className="space-y-2.5" data-testid="deep-dig-definition">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -49,11 +49,8 @@ function DefinitionView({ def, onEditingChange }: DefinitionPanelProps) {
       <div className="grid max-w-[720px] grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
         <pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground" data-testid="deep-dig-def-formula">{def.formula}</pre>
-        <span className="text-muted-foreground">分组</span>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1" data-testid="deep-dig-def-groups">
-          <span><span className="text-[#0B9F66] dark:text-[#0ECB81]">实验组</span> <Code>{def.positive}</Code></span>
-          <span><span className={RED}>对照组</span> <Code>{def.control}</Code></span>
-        </div>
+        <span className="pt-px text-muted-foreground">分组</span>
+        <GroupCriteria def={def} groupRows={groupRows} onSave={onSave} testId="deep-dig-def-groups" />
         <span className="text-muted-foreground">显示</span>
         <span className="font-mono tabular-nums text-muted-foreground">× {def.scale}{def.unit ? ` · ${def.unit}` : ''}</span>
       </div>
@@ -142,14 +139,9 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, group
             <input value={draft.control} onChange={e => set('control', e.target.value)} spellCheck={false} className={cn(INPUT, 'min-w-0 flex-1 font-mono')} data-testid="deep-dig-def-control" />
           </label>
           {check.groups ? <div className={RED} data-testid="deep-dig-def-groups-error">{check.groups.replace(/^第 \d+ 行：/, '')}</div> : preview ? (
-            <div className="text-muted-foreground" data-testid="deep-dig-def-preview">
-              按这个标准，本机战役（去重前）：实验组 <b className="font-mono font-normal text-foreground">{preview.positive}</b> · 对照组 <b className="font-mono font-normal text-foreground">{preview.control}</b> · 冲突 <b className="font-mono font-normal text-foreground">{preview.conflict}</b> · 其他 <b className="font-mono font-normal text-foreground">{preview.other}</b>
-            </div>
+            <GroupPreview preview={preview} testId="deep-dig-def-preview" />
           ) : null}
-          <div className="text-muted-foreground">
-            可用读数：{CAMPAIGN_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
-            同时满足两组 → 冲突；用到的读数缺失、战役未结算或校正未拉齐 → 归「其他战役」，都不进两组比较。
-          </div>
+          <GroupHint />
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-[64px]">
@@ -166,6 +158,96 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, group
           <button type="button" className={BTN} onClick={() => setConfirmDelete(true)} data-testid="deep-dig-def-delete"><Trash2 className="h-3 w-3" />删除</button>
         ))}
         <span className="text-muted-foreground">保存后点「重新运行」按新定义算</span>
+      </div>
+    </div>
+  );
+}
+
+type Preview = ReturnType<typeof previewGroups>;
+const B = ({ children }: { children: React.ReactNode }) => <b className="font-mono font-normal text-foreground">{children}</b>;
+
+function GroupPreview({ preview, testId }: { preview: Preview; testId?: string }) {
+  return (
+    <div className="text-muted-foreground" data-testid={testId}>
+      按这个标准，本机战役（去重前）：实验组 <B>{preview.positive}</B> · 对照组 <B>{preview.control}</B> · 冲突 <B>{preview.conflict}</B> · 其他 <B>{preview.other}</B>
+    </div>
+  );
+}
+
+function GroupHint() {
+  return (
+    <div className="text-muted-foreground">
+      可用读数：{CAMPAIGN_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
+      可写 <Code>and or not</Code>、括号、<Code>&gt; &lt; &gt;= &lt;= == !=</Code>。同时满足两组 → 冲突；用到的读数缺失、战役未结算或校正未拉齐 → 归「其他战役」，都不进两组比较。
+    </div>
+  );
+}
+
+/**
+ * 分组标准：平时显示两个条件，点「改标准」就地改（不用打开整个定义表单），即时预览本机战役各组多少场。
+ * 【用户要求】2026-10-16「我希望分组这里的标准也可以手动改动」：定义区与描述统计的「分组」两处都能改，改的是同一份定义。
+ */
+export function GroupCriteria({ def, groupRows, onSave, testId }: {
+  def: DeepDigFeatureDef;
+  groupRows: readonly CampaignGroupRow[] | null;
+  onSave: (def: DeepDigFeatureDef) => void;
+  testId: string;
+}) {
+  const [draft, setDraft] = useState<{ positive: string; control: string } | null>(null);
+  const error = useMemo(() => {
+    if (!draft) return null;
+    try { compileGroups(draft.positive, draft.control); return null; } catch (e) { return e instanceof Error ? e.message.replace(/^第 \d+ 行：/, '') : String(e); }
+  }, [draft]);
+  const preview = useMemo(() => {
+    if (!draft || error || !groupRows) return null;
+    try { return previewGroups(groupRows, compileGroups(draft.positive, draft.control)); } catch { return null; }
+  }, [draft, error, groupRows]);
+
+  if (!draft) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]" data-testid={testId}>
+        <span><span className="text-[#0B9F66] dark:text-[#0ECB81]">实验组</span> <Code>{def.positive}</Code></span>
+        <span><span className={RED}>对照组</span> <Code>{def.control}</Code></span>
+        <button type="button" onClick={() => setDraft({ positive: def.positive, control: def.control })} data-testid={`${testId}-edit`}
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+          <Pencil className="h-3 w-3" />改标准
+        </button>
+      </div>
+    );
+  }
+  const isDefault = draft.positive.trim() === DEFAULT_POSITIVE && draft.control.trim() === DEFAULT_CONTROL;
+  const save = () => {
+    if (error) return;
+    const positive = draft.positive.trim();
+    const control = draft.control.trim();
+    if (positive !== def.positive || control !== def.control) onSave({ ...def, positive, control });
+    setDraft(null);
+  };
+  return (
+    <div className="max-w-[640px] space-y-1.5 text-[11.5px]" data-testid={`${testId}-form`}>
+      <label className="flex items-center gap-2">
+        <span className="w-[42px] shrink-0 text-[#0B9F66] dark:text-[#0ECB81]">实验组</span>
+        <input value={draft.positive} onChange={e => setDraft({ ...draft, positive: e.target.value })} spellCheck={false} autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setDraft(null); }}
+          className={cn(INPUT, 'min-w-0 flex-1 font-mono')} data-testid={`${testId}-positive`} />
+      </label>
+      <label className="flex items-center gap-2">
+        <span className={cn('w-[42px] shrink-0', RED)}>对照组</span>
+        <input value={draft.control} onChange={e => setDraft({ ...draft, control: e.target.value })} spellCheck={false}
+          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setDraft(null); }}
+          className={cn(INPUT, 'min-w-0 flex-1 font-mono')} data-testid={`${testId}-control`} />
+      </label>
+      {error ? <div className={RED} data-testid={`${testId}-error`}>{error}</div> : preview ? <GroupPreview preview={preview} testId={`${testId}-preview`} /> : null}
+      <GroupHint />
+      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+        <button type="button" className={cn(BTN, 'border-foreground/30 font-medium')} onClick={save} disabled={!!error} data-testid={`${testId}-save`}>保存</button>
+        <button type="button" className={BTN} onClick={() => setDraft(null)}>取消</button>
+        {!isDefault && (
+          <button type="button" className={BTN} onClick={() => setDraft({ positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL })} data-testid={`${testId}-default`}>
+            <RotateCcw className="h-3 w-3" />填回默认
+          </button>
+        )}
+        <span className="text-muted-foreground">保存后重新运行描述统计，按新标准分组</span>
       </div>
     </div>
   );

@@ -10,9 +10,9 @@
  * 特征值定义（改过的内置项 + 新增项）与手动修改的规律跟账号走；运行结果按特征值存在本机。
  * 只读研究页：不改交易逻辑，不自动实盘，不编造结果。分组取交易战役列表同一份缓存行。
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight, Plus, X as XIcon } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { DEEP_DIG_TABS, FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/journal/deepDig/FeatureView';
 import { useAuth } from '@/contexts/AuthContext';
@@ -21,7 +21,7 @@ import { useCampaignList } from '@/hooks/useCampaignList';
 import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/useDeepDigRun';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { applyExclusions, DEEP_DIG_GROUPS, exclusionKey, fmtValue, pText, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
-import { BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
 const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
@@ -55,6 +55,34 @@ export default function JournalDeepDigPage() {
   const excludedOf = (id: string) => (Array.isArray(excludedMap?.[id]) ? excludedMap[id] : []);
   const defs = useMemo(() => mergeFeatureDefs(Array.isArray(savedDefs) ? savedDefs : []), [savedDefs]);
   const def = slug ? defs.find(d => d.id === slug) : undefined;
+
+  /**
+   * 【用户要求】2026-10-16「特征值也做成可删减的，只是要非常隐形」：新增项连同规律、删减、本机结果一起删；
+   * 内置项只是隐藏（定义与结果都留着），目录底部可以恢复。
+   */
+  const deleteFeature = (target: DeepDigFeatureDef) => {
+    if (target.builtin) {
+      setSavedDefs(prev => {
+        const list = Array.isArray(prev) ? prev : [];
+        const current = list.find(d => d.id === target.id);
+        return [...list.filter(d => d.id !== target.id), { ...(current ?? { ...target, builtin: undefined }), removed: true }];
+      });
+      return;
+    }
+    setSavedDefs(prev => (Array.isArray(prev) ? prev : []).filter(d => d.id !== target.id));
+    setNotes(prev => { const copy = { ...prev }; delete copy[target.id]; return copy; });
+    setExcludedMap(prev => { const copy = { ...prev }; delete copy[target.id]; return copy; });
+    forgetDeepDigResult(user?.id, target.id);
+  };
+  const restoreFeature = (id: string) => setSavedDefs(prev => {
+    const list = Array.isArray(prev) ? prev : [];
+    const current = list.find(d => d.id === id);
+    if (!current) return list;
+    const { removed: _removed, ...rest } = current;
+    const builtin = BUILTIN_FEATURES.find(b => b.id === id);
+    const same = builtin && (['name', 'short', 'definition', 'formula', 'scale', 'unit', 'positive', 'control'] as const).every(k => builtin[k] === rest[k]);
+    return same ? list.filter(d => d.id !== id) : list.map(d => (d.id === id ? rest : d));
+  });
 
   const addFeature = () => {
     const created = newFeatureTemplate(Date.now());
@@ -105,10 +133,7 @@ export default function JournalDeepDigPage() {
               return same ? list : [...list, { ...next, builtin: undefined }];
             })}
             onDeleteDef={def.builtin ? undefined : () => {
-              setSavedDefs(prev => (Array.isArray(prev) ? prev : []).filter(d => d.id !== def.id));
-              setNotes(prev => { const copy = { ...prev }; delete copy[def.id]; return copy; });
-              setExcludedMap(prev => { const copy = { ...prev }; delete copy[def.id]; return copy; });
-              forgetDeepDigResult(user?.id, def.id);
+              deleteFeature(def);
               nav('/journal/deep-dig', { replace: true });
             }}
           />
@@ -120,6 +145,9 @@ export default function JournalDeepDigPage() {
             notes={notes}
             onOpen={(s, t) => nav(`/journal/deep-dig/${s}${t === 'describe' ? '' : `?tab=${t}`}`)}
             onAdd={addFeature}
+            onDelete={deleteFeature}
+            removed={removedBuiltins(Array.isArray(savedDefs) ? savedDefs : [])}
+            onRestore={restoreFeature}
           />
         )}
       </main>
@@ -231,7 +259,10 @@ function summaryOf(r: { data: DeepDigData | null; inference: DeepDigInference | 
   return parts.join(' · ');
 }
 
-export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, onAdd }: {
+export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, onAdd, onDelete, removed = [], onRestore }: {
+  onDelete?: (def: DeepDigFeatureDef) => void;
+  removed?: readonly DeepDigFeatureDef[];
+  onRestore?: (id: string) => void;
   defs: readonly DeepDigFeatureDef[];
   results: Record<string, { data: DeepDigData | null; inference: DeepDigInference | null }>;
   excluded?: Record<string, readonly string[]>;
@@ -239,23 +270,46 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
   onOpen: (id: string, tab: DeepDigTab) => void;
   onAdd: () => void;
 }) {
+  const [confirming, setConfirming] = useState<string | null>(null);
   return (
     <section className="space-y-2 text-[12px]" data-testid="deep-dig-directory">
       <h2 className="text-[12.5px] font-medium">目录<span className="ml-2 text-[11px] font-normal text-muted-foreground">特征值 {defs.length}</span></h2>
       <ol className="divide-y divide-border/60 border-y border-border/60">
         {defs.map((f, i) => (
-          <li key={f.id} className="grid grid-cols-[22px_1fr] gap-x-1 py-2.5" data-testid="deep-dig-entry">
+          <li key={f.id} className="group/entry grid grid-cols-[22px_1fr] gap-x-1 py-2.5" data-testid="deep-dig-entry" onMouseLeave={() => setConfirming(c => (c === f.id ? null : c))}>
             <span className="pt-px font-mono tabular-nums text-muted-foreground">{String(i + 1).padStart(2, '0')}</span>
             <div className="min-w-0 space-y-1">
-              <button
-                type="button"
-                data-testid={`deep-dig-open-${f.id}`}
-                onClick={() => onOpen(f.id, 'describe')}
-                className="group inline-flex items-center gap-0.5 text-left text-[13px] font-medium hover:underline"
-              >
-                {f.name}
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid={`deep-dig-open-${f.id}`}
+                  onClick={() => onOpen(f.id, 'describe')}
+                  className="group inline-flex items-center gap-0.5 text-left text-[13px] font-medium hover:underline"
+                >
+                  {f.name}
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
+                </button>
+                {/* 不常用：平时看不见，鼠标移到这一项上才淡淡出现；点了还要再确认一次 */}
+                {onDelete && (confirming === f.id ? (
+                  <span className="inline-flex items-center gap-2 text-[11px]">
+                    <button type="button" onClick={() => { onDelete(f); setConfirming(null); }} data-testid={`deep-dig-delete-confirm-${f.id}`} className="text-[#F6465D] hover:underline">
+                      {f.builtin ? '从目录删掉（可恢复）' : '删除这个特征值'}
+                    </button>
+                    <button type="button" onClick={() => setConfirming(null)} className="text-muted-foreground hover:text-foreground">取消</button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="删除特征值"
+                    title="删除特征值"
+                    data-testid={`deep-dig-delete-${f.id}`}
+                    onClick={() => setConfirming(f.id)}
+                    className="inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-[#F6465D] focus-visible:opacity-100 group-hover/entry:opacity-100 max-sm:opacity-30"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center gap-x-1 text-[11.5px]">
                 {DEEP_DIG_TABS.map((t, k) => (
                   <span key={t.key} className="inline-flex items-center gap-1">
@@ -285,6 +339,13 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
       >
         <Plus className="h-3.5 w-3.5" />新增特征值
       </button>
+      {removed.length > 0 && onRestore && (
+        <div className="text-[11px] text-muted-foreground/60" data-testid="deep-dig-removed-features">
+          已删：{removed.map((f, k) => (
+            <span key={f.id}>{k ? '、' : ''}{f.name} <button type="button" onClick={() => onRestore(f.id)} data-testid={`deep-dig-restore-${f.id}`} className="underline-offset-2 hover:text-foreground hover:underline">恢复</button></span>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

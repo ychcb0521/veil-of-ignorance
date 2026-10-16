@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkDefinition, classifyCampaign, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, DRIFT_SPEED_DEF, mergeFeatureDefs, newFeatureTemplate, previewGroups,
+  checkDefinition, classifyCampaign, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, DRIFT_SPEED_DEF, mergeFeatureDefs, newFeatureTemplate, previewGroups, removedBuiltins,
 } from '@/lib/deepDig/features';
 import { groupCampaign, mulberry32, type CampaignLabelInput } from '@/lib/deepRsa/grouping';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
@@ -61,5 +61,9 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     expect(merged.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, b.id, a.id]);
     expect(merged[0]).toMatchObject({ name: '改过的名字', builtin: true });
     expect(checkDefinition(a)).toEqual({ formula: null, groups: null, scale: null });
+    // 内置项删掉 = 隐藏，可恢复
+    const hidden = [{ ...DRIFT_SPEED_DEF, builtin: undefined, removed: true }];
+    expect(mergeFeatureDefs(hidden).map(d => d.id)).toEqual([]);
+    expect(removedBuiltins(hidden).map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id]);
   });
 });

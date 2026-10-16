@@ -61,6 +61,22 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(onAdd).toHaveBeenCalledTimes(1);
   });
 
+  it('【用户要求】删除特征值：平时隐形，点 × 还要确认；新增项直接删，内置项从目录删掉后底部可恢复', () => {
+    const onDelete = vi.fn();
+    const onRestore = vi.fn();
+    const custom = newFeatureTemplate(1);
+    render(<DeepDigDirectory defs={[custom]} results={{}} notes={{}} onOpen={vi.fn()} onAdd={vi.fn()} onDelete={onDelete} removed={[DRIFT_SPEED_DEF]} onRestore={onRestore} />);
+    const x = screen.getByTestId(`deep-dig-delete-${custom.id}`);
+    expect(x.className).toContain('opacity-0');
+    fireEvent.click(x);
+    expect(onDelete).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId(`deep-dig-delete-confirm-${custom.id}`));
+    expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: custom.id }));
+    expect(screen.getByTestId('deep-dig-removed-features')).toHaveTextContent('多空博弈均衡点漂移速度 V');
+    fireEvent.click(screen.getByTestId(`deep-dig-restore-${DRIFT_SPEED_DEF.id}`));
+    expect(onRestore).toHaveBeenCalledWith(DRIFT_SPEED_DEF.id);
+  });
+
   it('定义区：显示公式与分组标准；编辑时写错公式给出行号，分组标准即时预览本机战役各组多少场；保存后提示按旧定义算', () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
@@ -80,7 +96,32 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(screen.getByTestId('deep-dig-def-save'));
     expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ formula: 'ln(C / prev(C, 12))', positive: 'r > 2' }));
     expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('ln(C / prev(C, 12))');
-    expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('定义改过了');
+    expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('公式或分组标准改过了');
+  });
+
+  it('【用户要求】分组标准可以就地改：描述统计「分组」处点「改标准」，写错不能保存，预览各组场数，保存后提示按新标准重跑', () => {
+    const onSaveDef = vi.fn();
+    render(<Harness onSaveDef={onSaveDef} />);
+    const box = screen.getByTestId('deep-dig-describe-groups');
+    expect(box).toHaveTextContent('b > 3 or r > 3');
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-edit'));
+    fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 'b > ' } });
+    expect(screen.getByTestId('deep-dig-describe-groups-error')).toHaveTextContent('实验组条件');
+    expect(screen.getByTestId('deep-dig-describe-groups-save')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 'b > 2 and r > 0.5' } });
+    expect(screen.getByTestId('deep-dig-describe-groups-preview')).toHaveTextContent('实验组 1 · 对照组 1 · 冲突 0 · 其他 1');
+    expect(screen.getByTestId('deep-dig-describe-groups-default')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
+    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ positive: 'b > 2 and r > 0.5', control: 'b < 0.5 or r < 0.5', formula: DRIFT_SPEED_DEF.formula }));
+    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent('b > 2 and r > 0.5');
+    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b > 2 and r > 0.5');
+    expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('分组标准改过了');
+    // 定义区那一处也能改，Esc 取消不保存
+    fireEvent.click(screen.getByTestId('deep-dig-def-groups-edit'));
+    fireEvent.change(screen.getByTestId('deep-dig-def-groups-control'), { target: { value: 'r < 0' } });
+    fireEvent.keyDown(screen.getByTestId('deep-dig-def-groups-control'), { key: 'Escape' });
+    expect(onSaveDef).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b < 0.5 or r < 0.5');
   });
 
   it('描述统计与推断统计各有自己的运行按钮；推断统计没有描述数据时不能运行', () => {
@@ -108,7 +149,9 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(rows[0]);
     expect(onOpen).toHaveBeenCalledWith(expect.stringMatching(/^c\d+/));
     onOpen.mockClear();
-    fireEvent.click(within(rows[0]).getByTestId('deep-dig-row-delete'));
+    const del = within(rows[0]).getByTestId('deep-dig-row-delete');
+    expect(del.className).toContain('opacity-0'); // 不常用：平时隐形，鼠标移到这一行才出现
+    fireEvent.click(del);
     expect(onOpen).not.toHaveBeenCalled();
     expect(screen.getByTestId('deep-dig-group-positive')).toHaveTextContent(String(nPos - 1));
     expect(screen.getByTestId('deep-dig-details')).toHaveTextContent('手动删掉 1 行');

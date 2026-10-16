@@ -17,7 +17,7 @@ import {
 import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
-import { DefinitionPanel } from '@/components/journal/deepDig/DefinitionPanel';
+import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
 export const DEEP_DIG_TABS: { key: DeepDigTab; label: string }[] = [
@@ -143,7 +143,7 @@ export function FeatureView(props: FeatureViewProps) {
             canRun={props.canDescribe} blockedReason={props.blockedReason} onRun={props.onDescribe} onCancel={props.onCancel} onDownload={data ? props.onDownload : undefined}
             hint="取币安公开 5m K 线、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）"
           />
-          {defStale && <Notice testId="deep-dig-stale">定义改过了：下面是按旧定义算的数据，重新运行描述统计后按现在的公式和分组标准重算。</Notice>}
+          {defStale && <Notice testId="deep-dig-stale">公式或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的公式和标准重算。</Notice>}
           {effective && data ? <DescribeTab {...props} data={effective} raw={data} /> : <Empty>还没运行描述统计。</Empty>}
         </div>
       )}
@@ -235,7 +235,7 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   }
 }
 
-function DescribeTab({ data: result, raw, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
+function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
   const def = result.definition;
   const [showDeleted, setShowDeleted] = useState(false);
   const removed = useMemo(() => {
@@ -257,6 +257,7 @@ function DescribeTab({ data: result, raw, excluded, onExcludedChange, group, onG
   return (
     <div className="space-y-6" data-testid="deep-dig-describe">
       <Block title="分组" aside={def.unit ? <span className="text-[11px] text-muted-foreground">{X} 的单位：{def.unit}</span> : undefined}>
+        <GroupCriteria def={liveDef} groupRows={groupRows} onSave={onSaveDef} testId="deep-dig-describe-groups" />
         <table className="text-[11.5px]" data-testid="deep-dig-groups">
           <thead>
             <tr className="text-muted-foreground">
@@ -305,7 +306,7 @@ function DescribeTab({ data: result, raw, excluded, onExcludedChange, group, onG
         </ul>
       </Block>
 
-      <Block title="数据" aside={<span className="text-[11px] text-muted-foreground">点一行打开交易战役 · 归类不准的行点 × 删掉</span>}>
+      <Block title="数据" aside={<span className="text-[11px] text-muted-foreground">点一行打开交易战役</span>}>
         <div className="inline-flex flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="group" aria-label="数据分组">
           {DEEP_DIG_GROUPS.map(g => (
             <button
@@ -366,7 +367,7 @@ function DescribeTab({ data: result, raw, excluded, onExcludedChange, group, onG
                         title="删掉这一行（不进统计，可恢复）"
                         data-testid="deep-dig-row-delete"
                         onClick={e => { e.stopPropagation(); remove(r.id); }}
-                        className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 hover:bg-[#F6465D]/10 hover:text-[#F6465D]"
+                        className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-opacity hover:text-[#F6465D] focus-visible:opacity-100 group-hover:opacity-100 max-sm:opacity-25"
                       >
                         <XIcon className="h-3 w-3" />
                       </button>
@@ -384,7 +385,7 @@ function DescribeTab({ data: result, raw, excluded, onExcludedChange, group, onG
         )}
         {removed.length > 0 && (
           <div className="space-y-1.5 pt-1" data-testid="deep-dig-removed">
-            <button type="button" onClick={() => setShowDeleted(v => !v)} data-testid="deep-dig-removed-toggle" className="text-[11.5px] text-muted-foreground hover:text-foreground">
+            <button type="button" onClick={() => setShowDeleted(v => !v)} data-testid="deep-dig-removed-toggle" className="text-[11px] text-muted-foreground/60 hover:text-foreground">
               已删 <span className="font-mono tabular-nums">{removed.length}</span> 行 · {showDeleted ? '收起' : '查看 / 恢复'}
             </button>
             {showDeleted && (
