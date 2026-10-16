@@ -20,6 +20,12 @@ describe('【用户要求】动态谢林点：可以隐去主图的 DSP 线，�
     }
   });
 
+  it('面板底部显示当前页面的版本号（用来核对 Lovable 是否已发布）', async () => {
+    const { BUILD_STAMP } = await import('@/lib/buildStamp');
+    open([]);
+    expect(screen.getByTestId('indicator-menu-build').textContent).toBe(BUILD_STAMP.replace('veil-build:', '版本 '));
+  });
+
   it('菜单里有「只要副图」一项', () => {
     open([]);
     expect(screen.getByText('动态谢林点 V / A（只要副图）')).toBeInTheDocument();

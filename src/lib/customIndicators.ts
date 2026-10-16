@@ -174,8 +174,8 @@ function zeroLine({ color, width, dash }: ZeroLineStyle) {
     return false;
   };
 }
-/** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：画成醒目的橘黄色实线。 */
-const V_ZERO_LINE = zeroLine({ color: 'rgba(245,158,11,0.9)', width: 1.5, dash: [] });
+/** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：醒目的橘黄色虚线（2026-10-16 由实线改为虚线）。 */
+const V_ZERO_LINE = zeroLine({ color: '#F59E0B', width: 1.5, dash: [5, 3] });
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
 

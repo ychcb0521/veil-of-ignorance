@@ -8,6 +8,7 @@ import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 import { DSP_V_DEFINITION, DSP_V_STEPS } from '@/lib/dynamicSchellingPoint';
+import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
   id: string;
@@ -338,7 +339,11 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       </div>
 
       <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
-        <span className="text-[10px] text-muted-foreground">已启用 {indicators.length} 个指标</span>
+        <span className="text-[10px] text-muted-foreground">
+          已启用 {indicators.length} 个指标
+          {/* 线上跑的是哪一版：对照提交说明里的版本戳，就知道 Lovable 发布了没有 */}
+          <span className="ml-2 font-mono text-muted-foreground/70" data-testid="indicator-menu-build" title="当前页面的版本戳">{BUILD_STAMP.replace('veil-build:', '版本 ')}</span>
+        </span>
         <span className="text-[10px] text-muted-foreground">显示 {filtered.length} / {INDICATOR_CATALOG.length}</span>
       </div>
     </div>
