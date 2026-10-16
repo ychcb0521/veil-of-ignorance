@@ -3,6 +3,7 @@
  * 待判定原因、同一行情去重后的簇数。纯函数，不读网络、不写任何东西。
  */
 import { labelInputFromCardRow } from '@/lib/deepRsa/campaignLabels';
+import { campaignLetterValues } from '@/lib/campaignMetricLetters';
 import {
   clusterEvents, clusterLabelConflict, conditionBreakdown, countGroups, groupCampaign,
   type CampaignGrouping, type CampaignPendingReason, type DeepRsaGroup, type GroupCounts,
@@ -19,8 +20,8 @@ export interface CampaignGroupRow {
   theoreticalB: number | null;
   payoffRatio: number | null;
   grouping: CampaignGrouping;
-  /** Deep dig 分组标准可用的其他读数（缺失为 null）：已实现盈亏 USDT、主腿涨跌幅 %、L_磨损 ÷ L₀。 */
-  metrics?: { pnl: number | null; chg: number | null; wear: number | null };
+  /** Deep dig 分组标准可用的读数：指标字母表里每个字母的读数（缺失为 null）。 */
+  letters?: Record<string, number | null>;
 }
 
 export interface CampaignGroupReport {
@@ -33,8 +34,6 @@ export interface CampaignGroupReport {
   /** 簇内同时含正样本与对照的簇数。 */
   conflictingClusters: number;
 }
-
-const finiteOrNull = (v: number | null | undefined) => (v != null && Number.isFinite(v) ? v : null);
 
 export const GROUP_ORDER: readonly DeepRsaGroup[] = ['positive', 'control', 'conflict', 'middle', 'pending', 'excluded'];
 
@@ -49,11 +48,7 @@ export function buildCampaignGroupReport(rows: readonly CardRow[], correctionsCo
       theoreticalB: input.theoreticalB,
       payoffRatio: input.payoffRatio,
       grouping: groupCampaign(input),
-      metrics: {
-        pnl: finiteOrNull(row.settlement.total),
-        chg: finiteOrNull(row.mainPriceChangePct),
-        wear: finiteOrNull(row.executionWearR ?? row.hedgeWearR),
-      },
+      letters: campaignLetterValues(row),
     };
   });
   const groupings = out.map(r => r.grouping);

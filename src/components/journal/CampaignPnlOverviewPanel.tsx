@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
+import { MetricLetterTag } from '@/components/journal/MetricLetterTable';
+import { LETTER_BY_OVERVIEW_KEY } from '@/lib/campaignMetricLetters';
 import { Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 /** 指标名 + ⓘ 弹层。aria-label 固定为「{label}说明」，页面测试靠它定位每一项。 */
-export function PnlMetricLabel({ label, children }: { label: string; children: ReactNode }) {
+export function PnlMetricLabel({ label, letter, children }: { label: string; letter?: string; children: ReactNode }) {
   return (
     <span className="group/metric inline-flex min-w-0 items-center gap-0.5 text-muted-foreground">
+      {/* 【用户要求】指标名前标字母（与交易战役「指标表」同一份）；名字里已带字母的（单位涨幅 G 等）不重复标 */}
+      {letter && !label.endsWith(` ${letter}`) && <MetricLetterTag letter={letter} />}
       <span className="truncate" title={label}>{label}</span>
       <Popover>
         <PopoverTrigger asChild>
@@ -95,7 +99,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
             <div key={column} data-overview-column={column} className={`min-w-0 space-y-2.5 ${column > 0 ? 'border-t border-border/60 pt-4 [@container(min-width:840px)]:border-l [@container(min-width:840px)]:border-t-0 [@container(min-width:840px)]:pl-6 [@container(min-width:840px)]:pt-0' : ''}`}>
               {items.filter(item => (item.column ?? 0) === column).map(item => (
                 <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} className="flex min-h-5 min-w-0 items-baseline justify-between gap-3">
-                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+                  <PnlMetricLabel label={item.label} letter={LETTER_BY_OVERVIEW_KEY.get(item.key)}>{item.help}</PnlMetricLabel>
                   <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
                 </div>
               ))}
@@ -138,7 +142,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
               data-column={item.rightColumn ? 'right' : 'left'}
               className={`flex min-w-0 items-baseline justify-between gap-6 ${item.rightColumn ? COL_START.right : COL_START.left} ${ROW_START[row] ?? ''} ${item.rightColumn && row === 0 ? SINGLE_COLUMN_GROUP_BREAK : ''}`}
             >
-              <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
+              <PnlMetricLabel label={item.label} letter={LETTER_BY_OVERVIEW_KEY.get(item.key)}>{item.help}</PnlMetricLabel>
               {/* 【用户要求】「要对齐」：每项一行，数值不折行、右端对齐；名称过长时截断（悬停看全名），不把这一行撑高。 */}
               <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
             </div>

@@ -9,7 +9,8 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { collectDeepDigData, type DeepDigData } from '@/lib/deepDig/analysis';
 import { runInference, type DeepDigInference } from '@/lib/deepDig/commands';
-import { DRIFT_SPEED_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { DRIFT_SPEED_DEF, upgradeGroupVars, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import type { TradeSignal } from '@/lib/signalLibrary';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { RunProgress } from '@/lib/deepRsa/pipeline';
 
@@ -74,6 +75,9 @@ function write(key: string, value: unknown) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 存不了只是下次打开要重跑 */ }
 }
 
+/** 旧数据里的分组标准是旧变量名（b 理论 b、r 盈亏比……）：换成指标字母，意思不变，不会误报「定义改过了」。 */
+const upgradeData = (d: DeepDigData | null) => (d ? { ...d, definition: upgradeGroupVars(d.definition) } : null);
+
 /** 读本机存的最近一次结果（目录页的摘要也用它）。 */
 export function loadDeepDigResults(userId: string | undefined, featureId: string): { data: DeepDigData | null; inference: DeepDigInference | null } {
   if (!userId) return { data: null, inference: null };
@@ -81,7 +85,7 @@ export function loadDeepDigResults(userId: string | undefined, featureId: string
   if (live && live.userId === userId) return { data: live.state.data, inference: live.state.inference };
   migrate(userId);
   return {
-    data: read<DeepDigData>(dataKey(userId, featureId), d => Array.isArray(d.rows) && Array.isArray(d.groups) && !!d.definition),
+    data: upgradeData(read<DeepDigData>(dataKey(userId, featureId), d => Array.isArray(d.rows) && Array.isArray(d.groups) && !!d.definition)),
     // 旧版推断结果没有 blocks（还不是按命令算的）：不读，提示重跑
     inference: read<DeepDigInference>(inferKey(userId, featureId), r => typeof r.dataFinishedAt === 'number' && Array.isArray(r.blocks)),
   };
@@ -128,13 +132,13 @@ export function useDeepDigRun(userId: string | undefined, def: DeepDigFeatureDef
   const subscribe = useCallback((l: () => void) => { store.listeners.add(l); return () => { store.listeners.delete(l); }; }, [store]);
   const state = useSyncExternalStore(subscribe, () => store.state);
 
-  const describe = useCallback(async (report: CampaignGroupReport) => {
+  const describe = useCallback(async (report: CampaignGroupReport, signals: readonly TradeSignal[] = []) => {
     if (!userId || store.state.describeStatus === 'running') return;
     const mine = new AbortController();
     store.controller = mine;
     set(store, { describeStatus: 'running', describeProgress: { stage: 'events', done: 0, total: 0 }, describeError: null });
     try {
-      const data = await collectDeepDigData(report, def, { signal: mine.signal, onProgress: p => { if (store.controller === mine) set(store, { describeProgress: p }); } });
+      const data = await collectDeepDigData(report, def, { signals, signal: mine.signal, onProgress: p => { if (store.controller === mine) set(store, { describeProgress: p }); } });
       if (store.controller !== mine) return;
       write(dataKey(userId, def.id), data);
       set(store, { describeStatus: 'idle', describeProgress: null, data });

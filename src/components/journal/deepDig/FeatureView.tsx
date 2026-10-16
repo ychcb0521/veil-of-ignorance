@@ -10,11 +10,10 @@ import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import {
-  applyExclusions, dataSupportsInference, DEEP_DIG_GROUP_LABEL, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, pText,
+  applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
   type DeepDigData, type DeepDigInference, type DeepDigRowGroup, type DefinitionSnapshot,
 } from '@/lib/deepDig/analysis';
-import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import type { CampaignGroupRow } from '@/lib/deepRsa/report';
+import { definitionKey, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults } from '@/components/journal/deepDig/InferenceView';
@@ -72,7 +71,7 @@ export interface FeatureViewProps {
   onResetDef?: () => void;
   onDeleteDef?: () => void;
   /** 本机战役（分组标准即时预览）；还没读完时为 null。 */
-  groupRows: readonly CampaignGroupRow[] | null;
+  samples: Record<SampleSource, readonly SampleRow[] | null>;
   /** 描述统计的数据（未删减）。 */
   data: DeepDigData | null;
   inference: DeepDigInference | null;
@@ -118,7 +117,7 @@ export function FeatureView(props: FeatureViewProps) {
     <div className="space-y-5 text-[12px]" data-testid="deep-dig-feature">
       <DefinitionPanel
         def={def} editing={props.editing} onEditingChange={props.onEditingChange} onSave={props.onSaveDef}
-        onReset={props.onResetDef} onDelete={props.onDeleteDef} groupRows={props.groupRows}
+        onReset={props.onResetDef} onDelete={props.onDeleteDef} samples={props.samples}
       />
       <div className="inline-flex items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="tablist" aria-label="模块">
         {DEEP_DIG_TABS.map(t => (
@@ -236,12 +235,12 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   switch (g) {
     case 'positive': return <>满足 <Code>{def.positive}</Code>（且不满足对照组条件）</>;
     case 'control': return <>满足 <Code>{def.control}</Code>（且不满足实验组条件）</>;
-    case 'other': return '两组都满足（冲突）、都不满足、条件读数缺失或数据不可靠的战役：只作描述，不进两组比较。';
+    case 'other': return '两组都满足（冲突）、都不满足、条件读数缺失或数据不可靠的样本：只作描述，不进两组比较。';
     case 'background': return '同一批币、同一段时间里随机抽的时点：市场平时的读数。';
   }
 }
 
-function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
+function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
   const def = result.definition;
   const [showDeleted, setShowDeleted] = useState(false);
   const removed = useMemo(() => {
@@ -263,7 +262,7 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
   return (
     <div className="space-y-6" data-testid="deep-dig-describe">
       <Block title="分组" aside={def.unit ? <span className="text-[11px] text-muted-foreground">{X} 的单位：{def.unit}</span> : undefined}>
-        <GroupCriteria def={liveDef} groupRows={groupRows} onSave={onSaveDef} testId="deep-dig-describe-groups" />
+        <GroupCriteria def={liveDef} samples={samples} onSave={onSaveDef} testId="deep-dig-describe-groups" />
         <table className="text-[11.5px]" data-testid="deep-dig-groups">
           <thead>
             <tr className="text-muted-foreground">
@@ -276,7 +275,7 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
               const s = byGroup[g];
               return (
                 <tr key={g} className="border-t border-border/40">
-                  <td className={cn(TD, 'font-sans', GROUP_TONE[g])}>{DEEP_DIG_GROUP_LABEL[g]}</td>
+                  <td className={cn(TD, 'font-sans', GROUP_TONE[g])}>{groupLabel(g, def.source)}</td>
                   <td className={TD}>{s?.n ?? 0}</td>
                   <td className={TD}>{bp(s?.mean)}</td>
                   <td className={TD}>{bp(s?.sd)}</td>
@@ -294,11 +293,11 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
       <Block title="细节">
         <ul className="list-disc space-y-1 pl-4 text-[11.5px] text-foreground/85" data-testid="deep-dig-details">
           <li>
-            样本：<N>{c.campaigns}</N> 场战役，同一个币 48 小时内的合为一簇 → <N>{c.clusters}</N> 簇，每簇取一个代表；
+            样本：<N>{c.campaigns}</N> {def.source === 'signals' ? '条信号（时间点 = 信号时间）' : '场战役'}，同一个币 48 小时内的合为一簇 → <N>{c.clusters}</N> 簇，每簇取一个代表；
             另在同一批币、同一段时间里随机抽 <N>{byGroup.background?.n ?? 0}</N> 个时点作参照。
           </li>
           {DEEP_DIG_GROUPS.map(g => (
-            <li key={g}><span className={GROUP_TONE[g]}>{DEEP_DIG_GROUP_LABEL[g]}</span>：{groupNote(def, g)}</li>
+            <li key={g}><span className={GROUP_TONE[g]}>{groupLabel(g, def.source)}</span>：{groupNote(def, g)}</li>
           ))}
           <li>
             {X} 按上面的公式，在进场前 48 小时的已收盘 5m K 线上逐根算、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
@@ -324,7 +323,7 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
               className={cn('inline-flex h-6 items-center gap-1 rounded-[4px] px-2 text-[11.5px] transition-colors',
                 g === group ? 'bg-card font-medium shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent' : 'text-muted-foreground hover:text-foreground')}
             >
-              <span className={g === group ? GROUP_TONE[g] : undefined}>{DEEP_DIG_GROUP_LABEL[g]}</span>
+              <span className={g === group ? GROUP_TONE[g] : undefined}>{groupLabel(g, def.source)}</span>
               <span className="font-mono tabular-nums">{byGroup[g]?.n ?? 0}</span>
             </button>
           ))}
@@ -343,7 +342,8 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
             </thead>
             <tbody>
               {shown.map(r => {
-                const target = r.memberIds[0];
+                // 信号样本没有对应的战役可打开
+                const target = def.source === 'signals' ? undefined : r.memberIds[0];
                 return (
                   <tr
                     key={r.id}
@@ -401,7 +401,7 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
                     <tr key={r.id} className="border-b border-border/40" data-testid="deep-dig-removed-row">
                       <td className={cn(TD, 'font-mono tabular-nums')}>{formatBeijingTime(r.anchorMs).slice(5, 16)}</td>
                       <td className={TD}>{r.symbol.replace(/USDT$/, '')}</td>
-                      <td className={cn(TD, GROUP_TONE[r.group])}>{DEEP_DIG_GROUP_LABEL[r.group]}</td>
+                      <td className={cn(TD, GROUP_TONE[r.group])}>{groupLabel(r.group, def.source)}</td>
                       <td className={cn(TD, 'font-mono tabular-nums')}>{bp(r.v)}</td>
                       <td className="py-1">
                         <button type="button" onClick={() => restore(r.id)} data-testid="deep-dig-row-restore" className="inline-flex items-center gap-1 hover:text-foreground">
@@ -422,7 +422,8 @@ function DescribeTab({ def: liveDef, groupRows, onSaveDef, data: result, raw, ex
 
 /** 四组的特征值点阵：每个点一个事件，竖线 = 中位数，浅色条 = 四分位区间，橘黄虚线 = 0。两端 1% 的极端值压在边上。 */
 function StripPlot({ result }: { result: DeepDigData }) {
-  const SCALE = result.definition.scale;
+  const def = result.definition;
+  const SCALE = def.scale;
   const values = result.rows.map(r => r.v).filter(finite).map(v => v * SCALE).sort((a, b) => a - b);
   if (values.length < 2) return null;
   const at = (q: number) => values[Math.min(values.length - 1, Math.max(0, Math.round(q * (values.length - 1))))];
@@ -439,7 +440,7 @@ function StripPlot({ result }: { result: DeepDigData }) {
           const vs = result.rows.filter(r => r.group === g && finite(r.v)).map(r => r.v! * SCALE);
           return (
             <div key={g} className="contents">
-              <span className={cn('text-[11px]', GROUP_TONE[g])}>{DEEP_DIG_GROUP_LABEL[g]}</span>
+              <span className={cn('text-[11px]', GROUP_TONE[g])}>{groupLabel(g, def.source)}</span>
               <div className="relative h-4">
                 <div className="absolute inset-y-[7px] left-0 right-0 bg-border/50" />
                 {finite(s?.q25) && finite(s?.q75) && (

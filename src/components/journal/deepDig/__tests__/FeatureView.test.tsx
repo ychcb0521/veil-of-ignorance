@@ -5,12 +5,14 @@ import { FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/jou
 import { DeepDigDirectory } from '@/pages/JournalDeepDigPage';
 import { deepDigRules, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
-import { DRIFT_SPEED_DEF, newFeatureTemplate, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { campaignSample, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import type { TradeSignal } from '@/lib/signalLibrary';
 import { driftEvents, makeData } from '@/lib/deepDig/__tests__/fixtures';
 import { groupCampaign } from '@/lib/deepRsa/grouping';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 
 const DATA = makeData(driftEvents(240, -1e-4));
+const SIGNALS: TradeSignal[] = [5, 4, 2, 1, undefined].map((quality, i) => ({ id: `s${i}`, symbol: 'SOLUSDT', timeMs: Date.parse('2026-08-01T00:00:00Z') + i * 86_400_000, timeLabel: '', fallbackZone: '', quality }));
 const ALL_COMMANDS = `${DEFAULT_COMMANDS}\nregress(endRet ~ X + vol)\nanova(X, 实验组, 对照组, 其他, 随机)\nrsa(X, 组别, perm=19)\nml(实验组 ~ X + vol, cv=5, perm=9)`;
 const INF = runInference(DATA, ALL_COMMANDS, { excludedKey: '' });
 
@@ -19,7 +21,7 @@ function campaignRow(id: string, b: number, r: number): CampaignGroupRow {
     campaignId: id, symbol: 'BTCUSDT', direction: 'main_long', deleted: false, status: 'closed_profit', settled: true, payoffBasis: 'records',
     correctionsComplete: true, anchorMs: 1, theoreticalB: b, theoreticalBApplicable: true, payoffRatio: r, initialExpectedMaxLoss: 100,
   });
-  return { campaignId: id, symbol: 'BTCUSDT', title: '', anchorMs: 1, theoreticalB: b, payoffRatio: r, grouping, metrics: { pnl: r * 100 - 100, chg: 10, wear: 0 } };
+  return { campaignId: id, symbol: 'BTCUSDT', title: '', anchorMs: 1, theoreticalB: b, payoffRatio: r, grouping, letters: { p: r * 100 - 100, c: 10, w: 0 } };
 }
 
 function Harness(p: {
@@ -37,7 +39,7 @@ function Harness(p: {
   return (
     <FeatureView
       def={def} editing={editing} onEditingChange={setEditing} onSaveDef={d => { setDef(d); p.onSaveDef?.(d); }} onResetDef={() => {}}
-      groupRows={[campaignRow('a', 4, 1), campaignRow('b', 1, 0.2), campaignRow('c', 1, 1)]}
+      samples={{ campaigns: [campaignRow('a', 4, 1), campaignRow('b', 1, 0.2), campaignRow('c', 1, 1)].map(campaignSample), signals: SIGNALS.map(signalSample) }}
       data={p.data === undefined ? DATA : p.data} inference={p.inference === undefined ? INF : p.inference}
       describeStatus="idle" describeProgress={null} describeError={null} canDescribe blockedReason={null}
       onDescribe={p.onDescribe ?? vi.fn()} onCancel={vi.fn()} inferStatus="idle" inferError={null} onInfer={p.onInfer ?? vi.fn()} onDownload={vi.fn()}
@@ -84,7 +86,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
     expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('V = ema(U, 6, 0)');
-    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b > 3 or r > 3');
+    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ > 3 or b > 3');
     fireEvent.click(screen.getByTestId('deep-dig-def-edit'));
     expect(screen.getByTestId('deep-dig-def-preview')).toHaveTextContent('实验组 1 · 对照组 1 · 冲突 0 · 其他 1');
     fireEvent.change(screen.getByTestId('deep-dig-def-formula-input'), { target: { value: 'X = ln(C)\nY * 2' } });
@@ -106,25 +108,25 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
     const box = screen.getByTestId('deep-dig-describe-groups');
-    expect(box).toHaveTextContent('b > 3 or r > 3');
+    expect(box).toHaveTextContent('Bₜ > 3 or b > 3');
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-edit'));
     fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 'b > ' } });
     expect(screen.getByTestId('deep-dig-describe-groups-error')).toHaveTextContent('实验组条件');
     expect(screen.getByTestId('deep-dig-describe-groups-save')).toBeDisabled();
-    fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 'b > 2 and r > 0.5' } });
+    fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 'Bₜ > 2 and b > 0.5' } });
     expect(screen.getByTestId('deep-dig-describe-groups-preview')).toHaveTextContent('实验组 1 · 对照组 1 · 冲突 0 · 其他 1');
     expect(screen.getByTestId('deep-dig-describe-groups-default')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
-    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ positive: 'b > 2 and r > 0.5', control: 'b < 0.5 or r < 0.5', formula: DRIFT_SPEED_DEF.formula }));
-    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent('b > 2 and r > 0.5');
-    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b > 2 and r > 0.5');
+    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ positive: 'Bₜ > 2 and b > 0.5', control: 'Bₜ < 0.5 or b < 0.5', formula: DRIFT_SPEED_DEF.formula }));
+    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent('Bₜ > 2 and b > 0.5');
+    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ > 2 and b > 0.5');
     expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('分组标准改过了');
     // 定义区那一处也能改，Esc 取消不保存
     fireEvent.click(screen.getByTestId('deep-dig-def-groups-edit'));
     fireEvent.change(screen.getByTestId('deep-dig-def-groups-control'), { target: { value: 'r < 0' } });
     fireEvent.keyDown(screen.getByTestId('deep-dig-def-groups-control'), { key: 'Escape' });
     expect(onSaveDef).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b < 0.5 or r < 0.5');
+    expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ < 0.5 or b < 0.5');
   });
 
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {
@@ -143,6 +145,25 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(screen.getByTestId('deep-dig-def-formula-edit'));
     fireEvent.click(screen.getByTestId('deep-dig-def-formula-default'));
     expect((screen.getByTestId('deep-dig-def-formula-inline') as HTMLTextAreaElement).value).toBe(DRIFT_SPEED_DEF.formula);
+  });
+
+  it('【用户要求】分组样本可选信号库：切换后换成信号的默认条件（s 星级），预览按信号数；指标表列出可用字母', () => {
+    const onSaveDef = vi.fn();
+    render(<Harness onSaveDef={onSaveDef} />);
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-edit'));
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-letters-toggle'));
+    const table = screen.getByTestId('metric-letter-table');
+    expect(table).toHaveTextContent('首仓涨跌幅');
+    expect(table).toHaveTextContent('盈亏比');
+    expect(screen.getByTestId('metric-letter-Bt').className).toContain('bg-'); // 条件里用到的字母标亮
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-source-signals'));
+    expect((screen.getByTestId('deep-dig-describe-groups-positive') as HTMLInputElement).value).toBe('s >= 3');
+    expect(screen.getByTestId('deep-dig-describe-groups-preview')).toHaveTextContent('本机信号（去重前）：实验组 2 · 对照组 2 · 冲突 0 · 其他 1');
+    expect(screen.getByTestId('metric-letter-table')).toHaveTextContent('信号评分');
+    fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 's >= 4' } });
+    fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
+    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ source: 'signals', positive: 's >= 4', control: 's < 3', groupVars: 2 }));
+    expect(screen.getByTestId('deep-dig-describe-groups-source')).toHaveTextContent('信号库');
   });
 
   it('描述统计与推断统计各有自己的运行按钮；推断统计没有描述数据时不能运行', () => {

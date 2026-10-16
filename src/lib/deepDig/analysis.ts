@@ -13,8 +13,9 @@ import {
 import { collectRunEvents, type RunEvent, type RunOptions } from '@/lib/deepRsa/pipeline';
 import { chronologicalSplit } from '@/lib/deepRsa/splits';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
+import type { TradeSignal } from '@/lib/signalLibrary';
 import {
-  compileFeatureFormula, compileGroups, computeFeatureValue, DRIFT_SPEED_DEF, groupOverride,
+  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValue, DRIFT_SPEED_DEF, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
@@ -24,9 +25,11 @@ export const DEEP_DIG_KEY = 'deep_dig_x';
 export type DeepDigRowGroup = 'positive' | 'control' | 'other' | 'background';
 export const DEEP_DIG_GROUPS: readonly DeepDigRowGroup[] = ['positive', 'control', 'other', 'background'];
 export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive: '实验组', control: '对照组', other: '其他战役', background: '随机时点' };
+/** 组名：样本是信号时「其他」叫「其他信号」。 */
+export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars'>;
 
 export interface DeepDigRow {
   id: string;
@@ -98,7 +101,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2 };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -148,14 +151,20 @@ export const dataSupportsInference = (data: Pick<DeepDigData, 'rows'>) => data.r
 export async function collectDeepDigData(
   report: CampaignGroupReport,
   def: DeepDigFeatureDef,
-  options: Pick<RunOptions, 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> = {},
+  options: Pick<RunOptions, 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
+    /** 样本来源是信号库时用的信号（信号库的当前内容）。 */
+    signals?: readonly TradeSignal[];
+  } = {},
 ): Promise<DeepDigData> {
   const startedAt = Date.now();
   const compiled = compileFeatureFormula(def.formula);
-  const groups = compileGroups(def.positive, def.control);
+  const source = def.source ?? 'campaigns';
+  const groups = compileGroups(def.positive, def.control, source);
+  // 【用户要求】样本可以是交易战役，也可以是信号库的信号（时间点 = 那条信号的时间）
+  const samples = source === 'signals' ? (options.signals ?? []).map(signalSample) : report.rows.map(campaignSample);
   const collected = await collectRunEvents(report, {
     ...options,
-    groupOf: groupOverride(groups),
+    eventRows: sampleEventRows(samples, groups),
     extraFeatures: window => ({ [DEEP_DIG_KEY]: computeFeatureValue(window, compiled) }),
   });
   const described = describeDeepDig(collected.events);

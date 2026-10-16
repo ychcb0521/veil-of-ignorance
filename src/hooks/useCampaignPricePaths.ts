@@ -146,6 +146,21 @@ function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], 
   return results;
 }
 
+/**
+ * 只读已算好的峰值涨幅 / 动态最大回撤（交易战役列表算过并缓存的那份），不发请求；没有缓存返回 null。
+ * Deep dig 的分组标准（字母 h、D、z）用它，避免为分组单独再拉一遍 K 线。
+ */
+export function readCachedCampaignPricePath(row: CampaignCardData, owner: string): { peak: number | null; drawdown: number | null } | null {
+  try {
+    const task = buildCampaignPricePathTask(row);
+    if (task.unavailableReason) return null;
+    const cached = readCache(owner, task);
+    return cached && !cached.reason ? { peak: cached.peak, drawdown: cached.drawdown } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Retries temporary failures until completion; a single failed campaign never ends the remaining scan. */
 export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[], owner: string, enabled: boolean) {
   const tasksRef = useRef(tasks);

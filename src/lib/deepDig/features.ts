@@ -9,7 +9,9 @@
  */
 import type { ObservationWindow } from '@/lib/deepRsa/window';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
-import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
+import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
+import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
+import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, FormulaError, lastValue, parseFormula, type Program } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef {
@@ -26,6 +28,13 @@ export interface DeepDigFeatureDef {
   /** 分组标准（条件式）。 */
   positive: string;
   control: string;
+  /** 样本来源：交易战役（默认）或信号库。【用户要求】信号评分的时间点是那条信号的时间。 */
+  source?: SampleSource;
+  /**
+   * 分组标准用的是哪一版变量名：2 = 指标字母表（b 盈亏比、Bₜ 理论 b、c 首仓涨跌幅……）。
+   * 没有这一项的是旧写法（b 理论 b、r 盈亏比、pnl、chg、wear），读进来时自动换成新字母，意思不变。
+   */
+  groupVars?: 2;
   builtin?: boolean;
   /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
   removed?: boolean;
@@ -46,17 +55,33 @@ const AMOUNT_VARIABLES = new Set(['Q', 'B', 'S']);
 /** 用到成交额的公式：观察窗里有金额数据的 K 线不到这个比例，这一场记缺失（不拿币数凑）。 */
 export const MIN_AMOUNT_COVERAGE = 0.95;
 
-/** 分组标准里可用的战役读数。 */
-export const CAMPAIGN_VARIABLES: readonly { name: string; label: string }[] = [
-  { name: 'b', label: '理论 b（无加仓的战役没有这个读数，条件按不成立算，不算缺失）' },
-  { name: 'r', label: '盈亏比（盈亏 ÷ L₀；L₀ 无效或盈亏来源弱时缺失）' },
-  { name: 'pnl', label: '已实现盈亏（USDT）' },
-  { name: 'chg', label: '主腿涨跌幅（%）' },
-  { name: 'wear', label: 'L_磨损 ÷ L₀' },
-];
+export type SampleSource = 'campaigns' | 'signals';
+export const SOURCE_LABEL: Record<SampleSource, string> = { campaigns: '交易战役', signals: '信号库' };
 
-export const DEFAULT_POSITIVE = 'b > 3 or r > 3';
-export const DEFAULT_CONTROL = 'b < 0.5 or r < 0.5';
+/** 分组标准里可用的读数：交易战役用指标字母表里的战役指标，信号库用信号评分 s。 */
+export function groupVariables(source: SampleSource = 'campaigns'): readonly MetricLetter[] {
+  return CAMPAIGN_METRIC_LETTERS.filter(m => m.source === (source === 'signals' ? 'signal' : 'campaign'));
+}
+
+export const DEFAULT_GROUPS: Record<SampleSource, { positive: string; control: string }> = {
+  // 与原 Deep RSA 分组一致：理论 b 或盈亏比 > 3 为正样本，< 0.5 为对照
+  campaigns: { positive: 'Bₜ > 3 or b > 3', control: 'Bₜ < 0.5 or b < 0.5' },
+  // 与原信号分组一致：≥ 3 星为正样本，< 3 星为对照
+  signals: { positive: 's >= 3', control: 's < 3' },
+};
+export const DEFAULT_POSITIVE = DEFAULT_GROUPS.campaigns.positive;
+export const DEFAULT_CONTROL = DEFAULT_GROUPS.campaigns.control;
+
+const LEGACY_GROUP_VARS: Record<string, string> = { b: 'Bₜ', r: 'b', pnl: 'p', chg: 'c', wear: 'w' };
+/** 旧变量名 → 指标字母（同时换，b → Bₜ 与 r → b 不会互相串）。 */
+export function translateLegacyGroupExpr(expr: string): string {
+  return expr.replace(/[\p{L}_][\p{L}\p{N}_]*/gu, id => LEGACY_GROUP_VARS[id] ?? id);
+}
+/** 没标 groupVars 的定义（旧写法）换成指标字母；已是新写法的原样返回。 */
+export function upgradeGroupVars<T extends { positive: string; control: string; groupVars?: 2 }>(d: T): T {
+  if (d.groupVars === 2) return d;
+  return { ...d, positive: translateLegacyGroupExpr(d.positive), control: translateLegacyGroupExpr(d.control), groupVars: 2 };
+}
 
 export const DRIFT_SPEED_FORMULA = [
   '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S',
@@ -79,6 +104,8 @@ export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   unit: '基点/根',
   positive: DEFAULT_POSITIVE,
   control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
   builtin: true,
 };
 
@@ -96,15 +123,17 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
     unit: '%',
     positive: DEFAULT_POSITIVE,
     control: DEFAULT_CONTROL,
+    source: 'campaigns',
+    groupVars: 2,
     createdAt: now,
   };
 }
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  const byId = new Map(saved.map(d => [d.id, d]));
+  const byId = new Map(saved.map(d => [d.id, upgradeGroupVars(d)]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
-  const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+  const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   return [...builtins, ...custom];
 }
 
@@ -115,7 +144,10 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control'>) => JSON.stringify([d.formula.trim(), d.positive.trim(), d.control.trim()]);
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars'>) => {
+  const g = upgradeGroupVars(d);
+  return JSON.stringify([d.formula.trim(), g.positive.trim(), g.control.trim(), d.source ?? 'campaigns']);
+};
 
 // ===================== 公式 =====================
 
@@ -158,14 +190,33 @@ export function computeFeatureValue(window: ObservationWindow, compiled: Compile
 export type DeepDigGroup = 'positive' | 'control' | 'conflict' | 'other';
 export type DeepDigOtherReason = 'unreliable' | 'missing' | 'conflict' | 'neither';
 
+/**
+ * 分组用的一个样本：一场交易战役，或信号库里的一条信号（时间点 = 那条信号的时间）。
+ * values / missing 的键同时有字母与它的拼写（Bₜ 与 Bt 都能写）。
+ */
+export interface SampleRow {
+  id: string;
+  symbol: string;
+  anchorMs: number | null;
+  /** 不进研究（回收站、非主多；信号：探顶区、事后跟进记录、没有行情）。 */
+  excluded: boolean;
+  /** 数据本身不可靠（未结算、校正未拉齐、没有锚点 / 时间）：归其他，不进两组。 */
+  unreliable: boolean;
+  values: Record<string, number>;
+  missing: Set<string>;
+}
+
 export interface CompiledGroups {
+  source: SampleSource;
   positive: Program;
   control: Program;
   inputs: Set<string>;
 }
 
-export function compileGroups(positive: string, control: string): CompiledGroups {
-  const known = new Set(CAMPAIGN_VARIABLES.map(v => v.name));
+const namesOf = (m: MetricLetter) => [m.letter, ...m.aliases];
+
+export function compileGroups(positive: string, control: string, source: SampleSource = 'campaigns'): CompiledGroups {
+  const known = new Set(groupVariables(source).flatMap(namesOf));
   const wrap = (label: string, src: string) => {
     try {
       return parseFormula(src, known);
@@ -175,26 +226,51 @@ export function compileGroups(positive: string, control: string): CompiledGroups
   };
   const p = wrap('实验组条件', positive);
   const c = wrap('对照组条件', control);
-  return { positive: p, control: c, inputs: new Set([...p.inputs, ...c.inputs]) };
+  // 别名换成字母本身：判断「缺失」时按字母查
+  const canonical = new Map(groupVariables(source).flatMap(m => namesOf(m).map(n => [n, m.letter] as const)));
+  return { source, positive: p, control: c, inputs: new Set([...p.inputs, ...c.inputs].map(n => canonical.get(n) ?? n)) };
 }
 
 /** 战役本身数据不可靠（未结算、校正未拉齐、无锚点）：不进两组。条件读数是否缺失按条件里用到的读数单独判断。 */
 const UNRELIABLE = new Set(['unresolved_status', 'no_anchor', 'corrections_incomplete', 'corrections_unknown']);
 
-export function campaignVariables(row: CampaignGroupRow): { values: Record<string, number>; missing: Set<string> } {
+function withAliases(source: SampleSource, values: Record<string, number>, missing: Set<string>) {
+  for (const m of groupVariables(source)) for (const a of m.aliases) { values[a] = values[m.letter]; if (missing.has(m.letter)) missing.add(a); }
+}
+
+/**
+ * 战役 → 样本。读数来自指标字母表（report 里算好的 letters）；理论 b（Bₜ）与盈亏比（b）沿用原分组的口径：
+ * 没有加仓的战役没有 Bₜ（条件按不成立算，不算缺失）；L₀ 无效或盈亏来源弱时 b 缺失。
+ */
+export function campaignSample(row: CampaignGroupRow): SampleRow {
   const g = row.grouping;
   const missing = new Set<string>();
   const val = (v: number | null | undefined) => (v != null && Number.isFinite(v) ? v : Number.NaN);
-  if (g.theoreticalB === 'missing') missing.add('b');
-  if (g.payoff === 'missing') missing.add('r');
-  const m = row.metrics;
-  const values: Record<string, number> = {
-    b: g.theoreticalB === 'missing' || g.theoreticalB === 'na' ? Number.NaN : val(row.theoreticalB),
-    r: g.payoff === 'missing' ? Number.NaN : val(row.payoffRatio),
-    pnl: val(m?.pnl), chg: val(m?.chg), wear: val(m?.wear),
+  const values: Record<string, number> = {};
+  for (const m of groupVariables('campaigns')) {
+    values[m.letter] = val(row.letters?.[m.letter]);
+    if (Number.isNaN(values[m.letter])) missing.add(m.letter);
+  }
+  values['Bₜ'] = g.theoreticalB === 'missing' || g.theoreticalB === 'na' ? Number.NaN : val(row.theoreticalB);
+  if (g.theoreticalB === 'missing') missing.add('Bₜ'); else missing.delete('Bₜ');
+  values.b = g.payoff === 'missing' ? Number.NaN : val(row.payoffRatio);
+  if (g.payoff === 'missing') missing.add('b'); else missing.delete('b');
+  withAliases('campaigns', values, missing);
+  return {
+    id: row.campaignId, symbol: row.symbol, anchorMs: row.anchorMs,
+    excluded: g.group === 'excluded', unreliable: g.pendingReasons.some(r => UNRELIABLE.has(r)), values, missing,
   };
-  for (const k of ['pnl', 'chg', 'wear']) if (Number.isNaN(values[k])) missing.add(k);
-  return { values, missing };
+}
+
+/** 信号 → 样本：时间点 = 信号自己的时间，读数 s = 星级（没评分 = 缺失）。不进研究的规则与原信号分组相同。 */
+export function signalSample(signal: TradeSignal): SampleRow {
+  const g = groupSignal({ signalId: signal.id, symbol: signal.symbol, anchorMs: signal.timeMs, quality: signal.quality, fallbackZone: signal.fallbackZone, jumpIssue: signal.jumpIssue });
+  const values: Record<string, number> = { s: g.stars ?? Number.NaN };
+  const missing = new Set<string>(g.stars == null ? ['s'] : []);
+  return {
+    id: signal.id, symbol: signal.symbol, anchorMs: Number.isFinite(signal.timeMs) ? signal.timeMs : null,
+    excluded: g.excludedReasons.length > 0, unreliable: g.pendingReasons.includes('no_anchor'), values, missing,
+  };
 }
 
 const holds = (p: Program, values: Record<string, number>) => {
@@ -202,32 +278,37 @@ const holds = (p: Program, values: Record<string, number>) => {
   return v != null && v !== 0;
 };
 
-export function classifyCampaign(row: CampaignGroupRow, groups: CompiledGroups): { group: DeepDigGroup; reason: DeepDigOtherReason | null } {
-  if (row.grouping.pendingReasons.some(r => UNRELIABLE.has(r))) return { group: 'other', reason: 'unreliable' };
-  const { values, missing } = campaignVariables(row);
-  if ([...groups.inputs].some(k => missing.has(k))) return { group: 'other', reason: 'missing' };
-  const pos = holds(groups.positive, values);
-  const ctl = holds(groups.control, values);
+export function classifySample(row: SampleRow, groups: CompiledGroups): { group: DeepDigGroup; reason: DeepDigOtherReason | null } {
+  if (row.unreliable) return { group: 'other', reason: 'unreliable' };
+  if ([...groups.inputs].some(k => row.missing.has(k))) return { group: 'other', reason: 'missing' };
+  const pos = holds(groups.positive, row.values);
+  const ctl = holds(groups.control, row.values);
   if (pos && ctl) return { group: 'conflict', reason: 'conflict' };
   if (pos) return { group: 'positive', reason: null };
   if (ctl) return { group: 'control', reason: null };
   return { group: 'other', reason: 'neither' };
 }
 
-/** 给流水线用：映射到原有的组名（簇的标签照旧按「簇里有正有负 → 不进比较」）。 */
-export function groupOverride(groups: CompiledGroups): (row: CampaignGroupRow) => DeepRsaGroup {
-  return row => {
-    const { group } = classifyCampaign(row, groups);
-    return group === 'other' ? 'middle' : group;
-  };
+/** 兼容：按战役行直接分组。 */
+export function classifyCampaign(row: CampaignGroupRow, groups: CompiledGroups) {
+  return classifySample(campaignSample(row), groups);
 }
 
-/** 按当前标准数一下本机战役各组多少场（编辑时即时预览，不用跑行情）。 */
-export function previewGroups(rows: readonly CampaignGroupRow[], groups: CompiledGroups): Record<DeepDigGroup, number> {
+/** 给流水线用的事件行：排除项不进；组名映射到原有的组名（簇的标签照旧按「簇里有正有负 → 不进比较」）。 */
+export function sampleEventRows(samples: readonly SampleRow[], groups: CompiledGroups): { id: string; symbol: string; anchorMs: number; group: DeepRsaGroup }[] {
+  return samples.flatMap(row => {
+    if (row.excluded || row.anchorMs == null) return [];
+    const { group } = classifySample(row, groups);
+    return [{ id: row.id, symbol: row.symbol, anchorMs: row.anchorMs, group: group === 'other' ? 'middle' : group }];
+  });
+}
+
+/** 按当前标准数一下本机样本各组多少个（编辑时即时预览，不用跑行情）。 */
+export function previewGroups(samples: readonly SampleRow[], groups: CompiledGroups): Record<DeepDigGroup, number> {
   const out: Record<DeepDigGroup, number> = { positive: 0, control: 0, conflict: 0, other: 0 };
-  for (const row of rows) {
-    if (row.grouping.group === 'excluded' || row.anchorMs == null) continue;
-    out[classifyCampaign(row, groups).group]++;
+  for (const row of samples) {
+    if (row.excluded || row.anchorMs == null) continue;
+    out[classifySample(row, groups).group]++;
   }
   return out;
 }
@@ -239,13 +320,13 @@ export interface DefinitionCheck {
 }
 
 /** 保存前检查：公式、分组标准能否解析，显示倍率是不是正数。 */
-export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale'>): DefinitionCheck {
+export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source'>): DefinitionCheck {
   const msg = (f: () => unknown) => {
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
   return {
     formula: msg(() => compileFeatureFormula(d.formula)),
-    groups: msg(() => compileGroups(d.positive, d.control)),
+    groups: msg(() => compileGroups(d.positive, d.control, d.source ?? 'campaigns')),
     scale: Number.isFinite(d.scale) && d.scale > 0 ? null : '显示倍数要是正数',
   };
 }

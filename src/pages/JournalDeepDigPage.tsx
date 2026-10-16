@@ -22,10 +22,15 @@ import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { applyExclusions, DEEP_DIG_GROUPS, exclusionKey, fmtValue, pText, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
+import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
+import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
+import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
 import { BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
 const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
+/** 样本是信号时不需要战役：给流水线一个空的战役汇总（事件行由信号给）。 */
+const EMPTY_REPORT: CampaignGroupReport = buildCampaignGroupReport([], true);
 /** 手动修改过的「规律提取」：特征值 id → 内容（跟账号走）。 */
 const NOTES_KEY = 'deep_dig_notes_v1';
 /** 改过的内置特征值与新增的特征值（跟账号走）。 */
@@ -51,7 +56,18 @@ export default function JournalDeepDigPage() {
   const { user } = useAuth();
   const { tradeHistory, ordersMap, filledOrders, positionsMap } = useTradingContext();
   const { rows, complete, loaded, total } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap });
-  const report = useMemo(() => (rows.length ? buildCampaignGroupReport(rows, true) : null), [rows]);
+  // 峰值涨幅 / 动态最大回撤（字母 h、D、z）取交易战役列表算过的缓存，不另拉 K 线
+  const enrichedRows = useMemo(() => (user?.id ? rows.map(r => {
+    const cached = readCachedCampaignPricePath(r, user.id);
+    return cached ? { ...r, peakPriceChangePct: cached.peak, dynamicMaxDrawdownPct: cached.drawdown } : r;
+  }) : rows), [rows, user?.id]);
+  const report = useMemo(() => (enrichedRows.length ? buildCampaignGroupReport(enrichedRows, true) : null), [enrichedRows]);
+  // 【用户要求】信号库的信号也可以作样本：时间点 = 那条信号的时间，读数 s = 星级
+  const signals = useMemo(() => loadSignals(), []);
+  const samples = useMemo<Record<SampleSource, SampleRow[] | null>>(() => ({
+    campaigns: report && complete ? report.rows.map(campaignSample) : null,
+    signals: signals.map(signalSample),
+  }), [report, complete, signals]);
   const [notes, setNotes] = usePersistedState<Record<string, DeepDigNote>>(NOTES_KEY, {});
   const [savedDefs, setSavedDefs] = usePersistedState<DeepDigFeatureDef[]>(FEATURES_KEY, []);
   const [excludedMap, setExcludedMap] = usePersistedState<Record<string, string[]>>(EXCLUDED_KEY, {});
@@ -117,7 +133,11 @@ export default function JournalDeepDigPage() {
             def={def}
             userId={user?.id}
             report={report}
-            blockedReason={!user ? '登录后才能运行' : !report || !complete ? `读取战役中… ${loaded} / ${total}` : null}
+            blockedReason={!user ? '登录后才能运行'
+              : (def.source ?? 'campaigns') === 'signals' ? (signals.length ? null : '信号库是空的')
+                : !report || !complete ? `读取战役中… ${loaded} / ${total}` : null}
+            samples={samples}
+            signals={signals}
             note={notes[def.id] ?? null}
             excluded={excludedOf(def.id)}
             commands={typeof commandsMap?.[def.id] === 'string' ? commandsMap[def.id] : DEFAULT_COMMANDS}
@@ -166,9 +186,11 @@ export default function JournalDeepDigPage() {
   );
 }
 
-function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onSaveDef, onDeleteDef, excluded, onExcludedChange, commands, onCommandsChange }: {
+function FeaturePage({ def, userId, report, samples, signals, blockedReason, note, onSaveNote, onSaveDef, onDeleteDef, excluded, onExcludedChange, commands, onCommandsChange }: {
   commands: string;
   onCommandsChange: (text: string) => void;
+  samples: Record<SampleSource, SampleRow[] | null>;
+  signals: TradeSignal[];
   excluded: string[];
   onExcludedChange: (ids: string[]) => void;
   def: DeepDigFeatureDef;
@@ -228,7 +250,7 @@ function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onS
       onSaveDef={onSaveDef}
       onResetDef={def.builtin ? () => {} : undefined}
       onDeleteDef={onDeleteDef}
-      groupRows={report?.rows ?? null}
+      samples={samples}
       data={run.data}
       inference={run.inference}
       describeStatus={run.describeStatus}
@@ -236,7 +258,7 @@ function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onS
       describeError={run.describeError}
       canDescribe={!blockedReason && run.describeStatus !== 'running'}
       blockedReason={blockedReason}
-      onDescribe={() => { if (report) void run.describe(report); }}
+      onDescribe={() => { if (report || (def.source ?? 'campaigns') === 'signals') void run.describe(report ?? EMPTY_REPORT, signals); }}
       onCancel={run.cancel}
       inferStatus={run.inferStatus}
       inferError={run.inferError}

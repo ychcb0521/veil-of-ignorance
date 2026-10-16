@@ -20,7 +20,7 @@ import { computeFeatures, FEATURE_DEFINITIONS, type FeatureFamily, type FeatureK
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { fetchFundingHistory, fetchResearchKlines, mapLimit, MarketDataError, type FetchFn } from '@/lib/deepRsa/marketData';
 import { forwardOutcome, OUTCOME_HORIZON_MS } from '@/lib/deepRsa/outcome';
-import type { CampaignGroupReport, CampaignGroupRow } from '@/lib/deepRsa/report';
+import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import {
   bhAdjust, holmAdjust, rsaEvaluate, runRsaPanel, selectHalfLife, type PanelRow, type RepresentationSpec, type Row, type RsaEvent,
 } from '@/lib/deepRsa/rsa';
@@ -180,16 +180,21 @@ function clusterLabel(groups: readonly DeepRsaGroup[]): 'positive' | 'control' |
 }
 
 /** 事件簇代表 + 随机背景时点。 */
+/** 一个事件行：战役（或 Deep dig 的信号）的 id、标的、锚点与分组。 */
+export interface EventRow { id: string; symbol: string; anchorMs: number; group: DeepRsaGroup }
+
 export function buildRunItems(
   report: CampaignGroupReport,
   seed: number,
   backgroundCap = BACKGROUND_CAP,
-  /** Deep dig：按特征值自己的分组标准重新分组（排除项照旧不进）；不给时用默认分组。 */
-  groupOf?: (row: CampaignGroupRow) => DeepRsaGroup,
+  /** Deep dig：按特征值自己的分组标准与样本来源给出的事件行（排除项已去掉）；不给时用战役的默认分组。 */
+  eventRows?: readonly EventRow[],
 ): { items: RunItem[]; campaigns: number; clusters: number } {
-  const rows = report.rows.filter(r => r.grouping.group !== 'excluded' && r.anchorMs != null);
-  const groupById = new Map(rows.map(r => [r.campaignId, groupOf ? groupOf(r) : r.grouping.group]));
-  const clusters = clusterEvents(rows.map(r => ({ id: r.campaignId, symbol: r.symbol, anchorMs: r.anchorMs! })));
+  const rows: EventRow[] = eventRows ? [...eventRows] : report.rows
+    .filter(r => r.grouping.group !== 'excluded' && r.anchorMs != null)
+    .map(r => ({ id: r.campaignId, symbol: r.symbol, anchorMs: r.anchorMs!, group: r.grouping.group }));
+  const groupById = new Map(rows.map(r => [r.id, r.group]));
+  const clusters = clusterEvents(rows.map(r => ({ id: r.id, symbol: r.symbol, anchorMs: r.anchorMs })));
   const items: RunItem[] = clusters.map(c => ({
     id: c.clusterId, symbol: c.symbol, anchorMs: c.firstAnchorMs, kind: 'event',
     label: clusterLabel(c.memberIds.map(id => groupById.get(id)!)), memberIds: c.memberIds,
@@ -202,7 +207,7 @@ export function buildRunItems(
       toMs: Math.max(...anchors),
       count: Math.min(backgroundCap, items.length),
       seed,
-      avoid: rows.map(r => ({ id: r.campaignId, symbol: r.symbol, anchorMs: r.anchorMs! })),
+      avoid: rows.map(r => ({ id: r.id, symbol: r.symbol, anchorMs: r.anchorMs })),
     });
     items.push(...bg.map(b => ({ id: b.id, symbol: b.symbol, anchorMs: b.anchorMs, kind: 'background' as const, label: null, memberIds: [] })));
   }
@@ -223,7 +228,7 @@ function reasonOf(error: unknown): string {
 export async function collectRunEvents(
   report: CampaignGroupReport,
   options: Pick<RunOptions, 'seed' | 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
-    groupOf?: (row: CampaignGroupRow) => DeepRsaGroup;
+    eventRows?: readonly EventRow[];
     /** Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。 */
     extraFeatures?: (window: ObservationWindow) => Row;
   } = {},
@@ -235,7 +240,7 @@ export async function collectRunEvents(
   const H = [...HALF_LIFE_CANDIDATES_H];
   // ── 1. 事件 ──
   progress('events', 0, 1);
-  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.groupOf);
+  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.eventRows);
 
   // ── 2. 行情 ──
   const failed: DeepRsaRunResult['coverage']['failed'] = [];
