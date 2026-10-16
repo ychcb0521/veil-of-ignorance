@@ -61,8 +61,9 @@ describe('【用户要求】Deep RSA 第 7 步「动态谢林点检验」：与�
     expect(b.textContent).toContain('t 检验：实验组 vs 对照组');
     expect(b.textContent).toContain('Welch');
     for (const f of ['dsp_v', 'dsp_a', 'dsp_gap']) expect(within(b).getByTestId(`dsp-study-ttest-${f}`)).toBeInTheDocument();
-    expect(within(b).getByTestId('dsp-study-ttest-dsp_v').textContent).toContain('基点/根');
-    expect(within(b).getByTestId('dsp-study-ttest-dsp_v').textContent).toMatch(/差异显著|差异不显著/);
+    expect(b.textContent).toContain('谢林点迁移速度的单位是基点/根');
+    expect(within(b).getByTestId('dsp-study-ttest-verdict-dsp_v').textContent).toMatch(/差异显著|差异不显著/);
+    expect(b.textContent).toContain('均值差（实验组 − 对照组）');
     fireEvent.click(screen.getByTestId('dsp-study-tab-C'));
     const c = screen.getByTestId('dsp-study-section-C');
     for (const f of ['dsp_v', 'dsp_a', 'dsp_gap']) for (const t of ['endRet', 'maxUp', 'maxDown']) {

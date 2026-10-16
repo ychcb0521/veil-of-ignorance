@@ -1,6 +1,6 @@
 # Deep RSA · 第 7 步：动态谢林点 DSP 的统计检验
 
-> 状态：**方案与代码已就绪，尚未在你的数据上运行**。本文写于运行前，看到结果后不改检验清单和判定标准。
+> 状态：**已运行（2026-10-16），结果见 `13-results-dsp-2026-10-16.md`**。本文写于运行前，看到结果后没有改检验清单和判定标准。
 > 入口：复盘中心 → Deep RSA →「动态谢林点检验（第 7 步）」。代码：`src/lib/deepRsa/deepDive.ts`（`DSP_STUDY`，与第 6 步同一套统计）、`src/lib/deepRsa/dspFeatures.ts`（进场时的 DSP 读数）；指标本身见 `docs/indicators/dynamic-schelling-point.md`。
 
 ## 1. 要回答的问题

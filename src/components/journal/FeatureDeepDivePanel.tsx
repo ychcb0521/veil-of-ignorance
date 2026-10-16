@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import {
   DEEP_DIVE_ALPHA, DEEP_DIVE_PRIMARY_H, DEEP_DIVE_TARGETS, FEATURES_STUDY,
-  type DeepDiveFeatureKey, type DeepDiveStudy, type DeepDiveTargetKey, type FeatureDeepDiveResult,
+  type DeepDiveFeatureKey, type DeepDiveStudy, type DeepDiveTargetKey, type FeatureDeepDiveResult, type TTestRow,
 } from '@/lib/deepRsa/deepDive';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import { VERDICT_TONE, type RunStatus } from '@/components/journal/DeepRsaRunPanel';
@@ -391,26 +391,32 @@ function TTestTable({ result, study, tid }: { result: FeatureDeepDiveResult; stu
   const rows = result.tTests ?? [];
   if (rows.length === 0) return <div className="text-muted-foreground">这份结果没有 t 检验（旧版结果），重新运行即可。</div>;
   const spec = Object.fromEntries(study.features.map(f => [f.key, f]));
-  const scaled = (key: string, v: number | null | undefined, d = 4) => num(v == null ? v : v * (spec[key]?.display?.scale ?? 1), d);
+  // 有显示倍率的（V，按基点 / 根）写两位小数，其余四位：表格在窄屏上也放得下
+  const scaled = (key: string, v: number | null | undefined) => num(v == null ? v : v * (spec[key]?.display?.scale ?? 1), spec[key]?.display ? 2 : 4);
+  const units = study.features.filter(f => f.display).map(f => `${f.name.replace(/ [A-Z]$/, '')}的单位是${f.display!.unit}`);
   const meanSd = (key: string, m: number | null, sd: number | null) => <><N>{scaled(key, m)}</N> <span className="text-muted-foreground">± {scaled(key, sd)}</span></>;
   return (
     <div className="space-y-2">
-      <table className="w-full"><thead className="text-muted-foreground"><tr>
-        <th className={TH}>指标</th><th className={TH}>实验组 n · 均值 ± 标准差</th><th className={TH}>对照组 n · 均值 ± 标准差</th>
-        <th className={TH}>均值差（95% 区间）</th><th className={TH}>t（df）</th><th className={TH}>p</th><th className={TH}>Holm p</th>
-        <th className={TH}>g</th><th className={TH}>判定</th>
+      {/* 转置：三个指标作列、统计量作行——名字和数字挨着，窄屏也放得下 */}
+      <table className="w-auto"><thead className="text-muted-foreground"><tr>
+        <th className={TH} />
+        {rows.map(r => <th key={r.feature} className={cn(TH, 'text-foreground/85')} data-testid={`${tid}-ttest-${r.feature}`}>{spec[r.feature]?.name ?? r.feature}</th>)}
       </tr></thead><tbody>
-        {rows.map(r => (
-          <tr key={r.feature} className={cn('border-t border-border/50', r.verdict === '差异显著' && 'bg-[#F0B90B]/[0.06]')} data-testid={`${tid}-ttest-${r.feature}`}>
-            <td className={TD}>{spec[r.feature]?.name ?? r.feature}{spec[r.feature]?.display && <span className="text-muted-foreground">（{spec[r.feature]!.display!.unit}）</span>}</td>
-            <td className={TD}><N>{r.nA}</N> · {meanSd(r.feature, r.meanA, r.sdA)}</td>
-            <td className={TD}><N>{r.nB}</N> · {meanSd(r.feature, r.meanB, r.sdB)}</td>
-            <td className={TD}><N>{scaled(r.feature, r.diff)}</N> <span className="text-muted-foreground">({r.ci95 ? `${scaled(r.feature, r.ci95[0])} ~ ${scaled(r.feature, r.ci95[1])}` : '—'})</span></td>
-            <td className={TD}><N>{num(r.t, 2)}</N> <span className="text-muted-foreground">({num(r.df, 0)})</span></td>
-            <td className={TD}><N>{pv(r.p)}</N></td>
-            <td className={TD}><N>{pv(r.pHolm)}</N></td>
-            <td className={TD}><N>{num(r.hedgesG, 2)}</N></td>
-            <td className={cn(TD, r.verdict === '差异显著' ? 'text-[#0B9F66] dark:text-[#0ECB81]' : 'text-muted-foreground')}>{r.verdict}</td>
+        {([
+          ['n（实验组 / 对照组）', r => <><N>{r.nA}</N> <span className="text-muted-foreground">/</span> <N>{r.nB}</N></>],
+          ['实验组 均值 ± 标准差', r => meanSd(r.feature, r.meanA, r.sdA)],
+          ['对照组 均值 ± 标准差', r => meanSd(r.feature, r.meanB, r.sdB)],
+          ['均值差（实验组 − 对照组）', r => <N>{scaled(r.feature, r.diff)}</N>],
+          ['95% 区间', r => <span className="font-mono tabular-nums text-muted-foreground">{r.ci95 ? `${scaled(r.feature, r.ci95[0])} ~ ${scaled(r.feature, r.ci95[1])}` : '—'}</span>],
+          ['t（自由度）', r => <><N>{num(r.t, 2)}</N> <span className="text-muted-foreground">({num(r.df, 0)})</span></>],
+          ['p', r => <N>{pv(r.p)}</N>],
+          ['Holm p', r => <N>{pv(r.pHolm)}</N>],
+          ['效应量 Hedges g', r => <N>{num(r.hedgesG, 2)}</N>],
+          ['判定', r => <span data-testid={`${tid}-ttest-verdict-${r.feature}`} className={r.verdict === '差异显著' ? 'font-medium text-[#0B9F66] dark:text-[#0ECB81]' : 'text-muted-foreground'}>{r.verdict}</span>],
+        ] as [string, (r: TTestRow) => React.ReactNode][]).map(([label, cell]) => (
+          <tr key={label} className="border-t border-border/50">
+            <td className={cn(TD, 'text-muted-foreground')}>{label}</td>
+            {rows.map(r => <td key={r.feature} className={cn(TD, r.verdict === '差异显著' && 'bg-[#F0B90B]/[0.06]')}>{cell(r)}</td>)}
           </tr>
         ))}
       </tbody></table>
@@ -436,7 +442,7 @@ function TTestTable({ result, study, tid }: { result: FeatureDeepDiveResult; stu
         })}
       </tbody></table>
       <div className="text-muted-foreground">
-        实验组 = 正样本战役；g = Hedges g 效应量；t 后括号是自由度。t 检验假定两组均值的抽样分布近似正态；正样本少时对极端值敏感，可对照「能否分开你的正 / 对照战役」那一节基于排名的 AUC 一起看。同一个币的多场战役不完全独立，p 值会偏乐观。
+        实验组 = 正样本战役{units.length ? `；${units.join('，')}` : ''}。t 检验假定两组均值的抽样分布近似正态；正样本少时对极端值敏感，可对照「能否分开你的正 / 对照战役」那一节基于排名的 AUC 一起看。同一个币的多场战役不完全独立，p 值会偏乐观。
       </div>
     </div>
   );
