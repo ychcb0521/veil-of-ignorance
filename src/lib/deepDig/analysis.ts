@@ -2,14 +2,13 @@
  * Deep dig · 一个特征值的整套统计：按定义里的公式在每个事件的观察窗上算出特征值，按定义里的分组标准分组，
  * 再做描述统计与推断统计；「规律提取」的默认文字也从这里按结果生成。
  *
- * 分两步运行（用户要求分开）：描述统计 = 取行情、算特征值、分组（collectDeepDigData）；推断统计 = 在那份数据上做检验（inferDeepDig）。
+ * 分两步运行（用户要求分开）：描述统计 = 取行情、算特征值、分组（collectDeepDigData）；推断统计 = 在那份数据上按命令逐行检验（commands.ts 的 runInference）。
  * 事件与 24h 客观行情取自原 Deep RSA 同一条流水线（collectRunEvents：同币 48h 去重成簇、每簇一个代表、加随机时点），
- * 统计用 analyzeFeatureDeepDive（t 检验、AUC、相关 + 确认集、五分位）。
+ * 推断统计的方法与命令见 commands.ts。
  */
 import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import {
-  analyzeFeatureDeepDive, DEEP_DIVE_ALPHA, DEEP_DIVE_PRIMARY_H, DRIFT_STUDY,
-  type AssociationRow, type ConfirmationRow, type DeepDiveOptions, type DeepDiveStudy, type DeepDiveTargetKey, type LabelRow, type QuintileBin, type TTestRow,
+  DEEP_DIVE_ALPHA, DEEP_DIVE_PRIMARY_H, type DeepDiveTargetKey,
 } from '@/lib/deepRsa/deepDive';
 import { collectRunEvents, type RunEvent, type RunOptions } from '@/lib/deepRsa/pipeline';
 import { chronologicalSplit } from '@/lib/deepRsa/splits';
@@ -83,23 +82,9 @@ export interface DeepDigData {
   groups: DeepDigGroupStat[];
 }
 
-/** 推断统计的运行结果：在某一份描述统计数据上做检验（不联网，几秒）。 */
-export interface DeepDigInference {
-  /** 用的是哪一次描述统计（DeepDigData.finishedAt）：描述统计重跑后提示推断统计也要重跑。 */
-  dataFinishedAt: number;
-  /** 运行时删掉的行（exclusionKey）：删减改了也提示重跑。 */
-  excludedKey?: string;
-  startedAt: number;
-  finishedAt: number;
-  seed: number;
-  permutations: number;
-  bootstrap: number;
-  tTest: TTestRow | null;
-  label: LabelRow | null;
-  association: AssociationRow[];
-  confirmation: ConfirmationRow[];
-  quintiles: { cuts: number[]; bins: QuintileBin[] };
-}
+import type { DeepDigInference } from '@/lib/deepDig/commands';
+
+export type { DeepDigInference };
 
 const finite = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
 
@@ -159,44 +144,6 @@ export function describeDeepDig(events: readonly RunEvent[], key = DEEP_DIG_KEY)
 /** 旧数据没有波动率：推断统计的「控制波动」算不了，要先重跑描述统计。 */
 export const dataSupportsInference = (data: Pick<DeepDigData, 'rows'>) => data.rows.every(r => r.vol !== undefined);
 
-/** 明细行还原成统计要的事件（只有主半衰期的特征值与波动率）。 */
-function eventsFromRows(rows: readonly DeepDigRow[]): RunEvent[] {
-  return rows.map(r => ({
-    id: r.id, symbol: r.symbol, anchorMs: r.anchorMs,
-    kind: r.group === 'background' ? 'background' : 'event',
-    label: r.group === 'positive' || r.group === 'control' ? r.group : null,
-    featuresByH: { [DEEP_DIVE_PRIMARY_H]: { [DEEP_DIG_KEY]: r.v, vol_w: r.vol ?? null } },
-    outcome: r.maxUp, block: new Date(r.anchorMs).toISOString().slice(0, 7), momentum: null,
-    maxUp: r.maxUp, maxDown: r.maxDown, endRet: r.endRet, memberIds: r.memberIds,
-  }));
-}
-
-function studyOf(def: DefinitionSnapshot): DeepDiveStudy {
-  return {
-    ...DRIFT_STUDY,
-    definitionsTitle: def.name,
-    features: [{ key: DEEP_DIG_KEY, name: def.name, definition: '', formula: def.formula, reading: '', weighted: false, display: { scale: def.scale, unit: def.unit } }],
-  };
-}
-
-/** 推断统计（纯计算，不联网）：t 检验、排名比较、相关 + 确认集、五分位。 */
-export function inferDeepDig(
-  data: Pick<DeepDigData, 'rows' | 'definition' | 'finishedAt'>,
-  options: Omit<DeepDiveOptions, 'study'> & { excludedKey?: string } = {},
-): DeepDigInference {
-  const startedAt = Date.now();
-  const { split: _split, ...a } = analyzeFeatureDeepDive(eventsFromRows(data.rows), { ...options, study: studyOf(data.definition) });
-  return {
-    dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', startedAt, finishedAt: Date.now(),
-    seed: a.seed, permutations: a.permutations, bootstrap: a.bootstrap,
-    tTest: a.tTests?.[0] ?? null,
-    label: a.labels[0] ?? null,
-    association: a.association,
-    confirmation: a.confirmation,
-    quintiles: a.quintiles[0] ? { cuts: a.quintiles[0].cuts, bins: a.quintiles[0].bins } : { cuts: [], bins: [] },
-  };
-}
-
 /** 描述统计的运行：按定义分组 → 取行情、按公式算特征值 → 描述。定义写错时直接抛出（界面保存时已检查过）。 */
 export async function collectDeepDigData(
   report: CampaignGroupReport,
@@ -247,9 +194,12 @@ const TARGET_NAME: Record<DeepDiveTargetKey, string> = { endRet: '24h 期末收�
  */
 export function deepDigRules(data: DeepDigData, inference: DeepDigInference | null): string[] {
   const def = data.definition;
-  const result = { ...data, ...(inference ?? { tTest: null, label: null, association: [], confirmation: [] }) };
+  const result = data;
   const X = def.short || '特征值';
   const val = (v: number | null | undefined) => fmtValue(def, v);
+  /** 推断统计里的值已经是显示单位。 */
+  const shown = (v: number | null | undefined) => (finite(v) ? v.toFixed(2) : '—');
+  const blocks = inference?.blocks ?? [];
   const g = Object.fromEntries(result.groups.map(s => [s.group, s])) as Record<DeepDigRowGroup, DeepDigGroupStat>;
   const pos = g.positive; const ctl = g.control;
   const lines: string[] = [];
@@ -260,26 +210,41 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
   const lower = pos.median < ctl.median;
   lines.push(`实验组进场时 ${X} 的中位数 ${val(pos.median)}，对照组 ${val(ctl.median)}${def.unit ? `（${def.unit}）` : ''}：实验组${lower ? '更低' : '更高'}。`);
 
-  const t = result.tTest;
-  if (t && finite(t.p)) {
-    lines.push(`t 检验：均值差 ${val(t.diff)}（95% 区间 ${t.ci95 ? `${val(t.ci95[0])} ~ ${val(t.ci95[1])}` : '—'}），${pEq(t.p)}，${t.p < DEEP_DIVE_ALPHA ? '差异显著' : '差异不显著'}（α = 0.05）。`);
+  const isMain = (b: { a?: string; b?: string; x?: string; call: string }) => /^\w+\(\s*X\s*[,)]/.test(b.call);
+  const tb = blocks.find(b => b.kind === 'ttest' && b.a === '实验组' && b.b === '对照组' && isMain(b));
+  if (tb?.kind === 'ttest' && finite(tb.result.p)) {
+    const t = tb.result;
+    lines.push(`t 检验：均值差 ${shown(t.diff)}（95% 区间 ${t.ci95 ? `${shown(t.ci95[0])} ~ ${shown(t.ci95[1])}` : '—'}），${pEq(t.p)}，${t.p < DEEP_DIVE_ALPHA ? '差异显著' : '差异不显著'}（α = 0.05）。`);
   }
-  const l = result.label;
-  if (l && finite(l.auc)) {
-    const sep = l.auc < 0.5 ? 1 - l.auc : l.auc;
-    lines.push(`排名比较：AUC ${l.auc.toFixed(2)}，${pEq(l.p)}——随机挑一场实验组和一场对照组，实验组 ${X} ${l.auc < 0.5 ? '更低' : '更高'}的概率约 ${pct(sep)}。`);
+  const mb = blocks.find(b => b.kind === 'mannwhitney' && b.a === '实验组' && b.b === '对照组' && isMain(b));
+  if (mb?.kind === 'mannwhitney' && finite(mb.auc)) {
+    const sep = mb.auc < 0.5 ? 1 - mb.auc : mb.auc;
+    lines.push(`排名比较：AUC ${mb.auc.toFixed(2)}，${pEq(mb.p)}——随机挑一场实验组和一场对照组，实验组 ${X} ${mb.auc < 0.5 ? '更低' : '更高'}的概率约 ${pct(sep)}。`);
   }
 
-  const assoc = (k: DeepDiveTargetKey) => result.association.find(r => r.target === k);
+  const sb = blocks.find(b => b.kind === 'spearman' && b.x === 'X');
+  const assoc = (k: string) => (sb?.kind === 'spearman' ? sb.rows.find(r => r.target === k) : undefined);
   const end = assoc('endRet'); const up = assoc('maxUp'); const down = assoc('maxDown');
   if (end && finite(end.rho)) {
-    const conf = result.confirmation.find(r => r.target === 'endRet');
+    const conf = end.confirmation;
     lines.push(conf?.verdict === '已验证'
-      ? `${X} 能预测之后 24h 的方向：发现集 ρ = ${end.rho.toFixed(2)}，确认集复现${conf.survivesVolControl ? '，控制波动率后仍成立' : '，但控制波动率后不成立'}。`
+      ? `${X} 能预测之后 24h 的方向：发现集 ρ = ${end.rho.toFixed(2)}，确认集复现${conf.survivesControl === false ? '，但控制波动率后不成立' : conf.survivesControl ? '，控制波动率后仍成立' : ''}。`
       : `${X} 不能预测之后 24h 的方向：与${TARGET_NAME.endRet} ρ = ${end.rho.toFixed(2)}（Holm ${pEq(end.pHolm)}）${end.pHolm < DEEP_DIVE_ALPHA ? '，确认集没有复现' : ''}。`);
   }
   if (up && down && finite(up.rho) && finite(down.rho) && up.pHolm < DEEP_DIVE_ALPHA && down.pHolm < DEEP_DIVE_ALPHA && Math.sign(up.rho) !== Math.sign(down.rho)) {
     lines.push(`${X} 与 24h 最大涨幅（ρ = ${up.rho.toFixed(2)}）、最大跌幅（ρ = ${down.rho.toFixed(2)}）同时相关：${X} 大主要意味着之后波动大，不代表方向。`);
+  }
+  for (const b of blocks) {
+    if (b.kind === 'regress') {
+      const xt = b.terms.find(t => t.term === 'X');
+      if (xt && finite(xt.p)) lines.push(`${b.title}（${b.call}）：${X} 的系数 ${xt.beta.toFixed(3)}，${pEq(xt.p)}，R² = ${finite(b.r2) ? b.r2.toFixed(3) : '—'}${xt.p < DEEP_DIVE_ALPHA ? '' : '，不显著'}。`);
+    } else if (b.kind === 'anova' && finite(b.p)) {
+      lines.push(`方差分析（${b.groups.map(x => x.name).join(' / ')}）：F = ${b.f.toFixed(2)}，${pEq(b.p)}，η² = ${b.eta2.toFixed(3)}，${b.p < DEEP_DIVE_ALPHA ? '各组均值有差异' : '各组均值差异不显著'}。`);
+    } else if (b.kind === 'rsa' && finite(b.r)) {
+      lines.push(`RSA（${b.features.join(' + ')} ↔ ${b.target}）：r = ${b.r.toFixed(3)}，${pEq(b.p)}，${b.p < DEEP_DIVE_ALPHA ? '特征相近的事件，' + (b.target === '组别' ? '组别也更可能相同' : '结果也更相近') : '看不出特征相近与' + (b.target === '组别' ? '组别' : '结果') + '相近的对应'}。`);
+    } else if (b.kind === 'ml' && finite(b.auc)) {
+      lines.push(`${b.title}（${b.features.join(' + ')} → ${b.target}）：样本外 AUC ${b.auc.toFixed(2)}，${pEq(b.p)}，${b.p < DEEP_DIVE_ALPHA ? '能在没见过的战役上区分两组' : '在没见过的战役上分不开两组'}。`);
+    }
   }
 
   // 可操作的做法：以对照组中位数为界（对照组按定义约一半在界内），看实验组有多少落在同一侧
@@ -292,7 +257,7 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
   lines.push(`做法：进场前看 ${X}，${lower ? '≤' : '≥'} ${val(cut)}${def.unit ? ` ${def.unit}` : ''}（对照组中位数）时更像实验组——实验组 ${pct(share('positive'))} 满足，对照组 ${pct(share('control'))} 满足。`);
   const pickedAfter = def.id === DRIFT_SPEED_DEF.id && def.formula.trim() === DRIFT_SPEED_DEF.formula.trim()
     ? `；${X} 是看过三项结果后单独挑出来的，p 值偏乐观` : '';
-  if (!inference) lines.push('推断统计还没运行：运行后这里会补上 t 检验、排名比较与预测力的结论。');
+  if (!inference) lines.push('推断统计还没运行（或数据、删减、命令改过后没重跑）：运行后这里会补上检验的结论。');
   lines.push(`局限：实验组只有 ${pos.n} 个、对照组 ${ctl.n} 个，结论来自同一批数据${pickedAfter}，要用之后新产生的战役确认。`);
   return lines;
 }

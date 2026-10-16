@@ -26,10 +26,27 @@
 | 模块 | 运行 | 内容 |
 |---|---|---|
 | 描述统计 | 单独运行：取币安 5m K 线、按公式算、按标准分组（联网，1–3 分钟） | 四组的 n、均值、标准差、中位数、四分位、> 0 占比；点阵图；细节；逐场数据（点一行打开战役；归类不准的行可整行删掉——× 平时隐形，鼠标移到那一行才出现，可查看恢复，删减跟账号走 `deep_dig_excluded_v1`） |
-| 推断统计 | 单独运行：用描述统计的数据（去掉删掉的行），不联网，几秒 | ① Welch t 检验 ② Mann–Whitney（AUC）③ Spearman 相关 + 控制波动 + 确认集 ④ 五分位；描述数据或删减变了会提示重跑 |
+| 推断统计 | 单独运行：用描述统计的数据（去掉删掉的行），不联网，几秒 | 运行前先选方法、看 / 改命令（见下）；每条命令一张结果卡片；描述数据、删减或命令变了会提示重跑 |
 | 规律提取 | 不用运行 | 默认按统计结果写出（`deepDigRules`），可以手动改（`deep_dig_notes_v1`，跟账号同步），可恢复 |
 
-代码：`src/lib/deepDig/`（formula、features、analysis）、`src/hooks/useDeepDigRun.ts`、`src/components/journal/deepDig/`（FeatureView、DefinitionPanel）、`src/pages/JournalDeepDigPage.tsx`。
+### 推断统计的命令（2026-10-16 用户要求：运行前给出命令行、可选方法、可自己设计方法）
+
+`src/lib/deepDig/commands.ts`。方法勾选框：t 检验、排名比较、相关、五分位、回归分析、多元线性回归、方差分析、RSA、机器学习；勾上 = 命令里加一行默认写法，取消 = 删掉这个方法的行。命令窗口一行一个方法，可直接改、自己写，写错的行即时标红；命令按特征值存 `deep_dig_commands_v1`，跟账号同步。
+
+| 命令 | 做什么 |
+|---|---|
+| `ttest(变量, 组A, 组B)` | Welch t 检验，附发现期 / 确认期 |
+| `mannwhitney(变量, 组A, 组B, perm=1999)` | AUC、标签置换 p、按币整簇重抽样区间 |
+| `spearman(变量, 结果…, control=vol, perm=1999)` | 发现集 Spearman + 月内置换 + Holm，控制变量的偏相关，确认集按同方向复核 |
+| `quintiles(变量, 结果…)` | 五分位（切点取发现集）每档结果均值 |
+| `regress(y ~ x1 + x2 …, in=组)` | 最小二乘：系数、标准误、t、p、95% 区间、R²、调整 R²、整体 F（与 numpy / scipy 逐位核对） |
+| `anova(变量, 组…)` | 单因素方差分析：F、p、η²（与 scipy.stats.f_oneway 核对） |
+| `rsa(变量 + …, 组别 或 结果, in=组, perm=199)` | 表征相似性分析：特征距离与组别 / 结果距离的 Spearman r，置换 p（单侧） |
+| `ml(组 ~ 变量 + …, model=logistic\|knn, cv=5, k=15, in=组, perm=199)` | 分类模型，分层 k 折交叉验证的样本外 AUC、平衡准确率、打乱标签的置换 p |
+
+变量：`X`（特征值，显示单位）、`vol`（观察窗波动率 %）、`endRet / maxUp / maxDown`（24h 结果 %）、`实验组 / 对照组 / 其他 / 随机`（0 / 1）；可以写成式子。组可以用 + 合并（`实验组+对照组`），`全部` = 四组。
+
+代码：`src/lib/deepDig/`（formula、features、analysis、commands）、`src/hooks/useDeepDigRun.ts`、`src/components/journal/deepDig/`（FeatureView、DefinitionPanel）、`src/pages/JournalDeepDigPage.tsx`。
 
 **注意**：V 现在单独检验，不再与 A、偏离 DSP 一起做多重校正，p 值比第 7 步（`../deep-rsa/13-results-dsp-2026-10-16.md`，三项 Holm 后 0.144）小；V 是看过三项结果后单独挑出来的，p 值偏乐观，独立确认要用之后新产生的战役。
 

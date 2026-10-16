@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { welchTTest } from '@/lib/deepRsa/deepDive';
+import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
 import {
-  applyExclusions, dataSupportsInference, deepDigRules, describeGroup, exclusionKey, groupOf, inferDeepDig,
+  applyExclusions, dataSupportsInference, deepDigRules, describeGroup, exclusionKey, groupOf,
 } from '@/lib/deepDig/analysis';
 import { driftEvents, makeData } from './fixtures';
 
@@ -24,18 +25,17 @@ describe('【用户要求】Deep dig：描述统计与推断统计分开运行',
     expect(dataSupportsInference({ rows: data.rows.map(({ vol: _vol, ...r }) => r) })).toBe(false);
   });
 
-  it('推断统计只用描述统计的数据：t 检验与直接算一致、不做多重校正；记下用的是哪份数据', () => {
+  it('推断统计只用描述统计的数据：t 检验（显示单位）与直接算一致；记下用的是哪份数据与命令', () => {
     const events = driftEvents(240, -1e-4);
     const data = makeData(events);
-    const inf = inferDeepDig(data, { permutations: 199, bootstrap: 49, excludedKey: '' });
-    const pos = events.filter(e => e.label === 'positive').map(e => e.featuresByH[6].deep_dig_x as number);
-    const ctl = events.filter(e => e.label === 'control').map(e => e.featuresByH[6].deep_dig_x as number);
-    expect(inf.tTest!.p).toBeCloseTo(welchTTest(pos, ctl).p, 12);
-    expect(inf.tTest!.pHolm).toBeCloseTo(inf.tTest!.p, 12);
-    expect(inf.association.map(a => a.target)).toEqual(['endRet', 'maxUp', 'maxDown']);
-    expect(inf.association.every(a => a.n > 100)).toBe(true);
-    expect(inf.quintiles.bins).toHaveLength(5);
+    const inf = runInference(data, DEFAULT_COMMANDS);
+    const t = inf.blocks.find(b => b.kind === 'ttest');
+    const scale = data.definition.scale;
+    const pos = events.filter(e => e.label === 'positive').map(e => (e.featuresByH[6].deep_dig_x as number) * scale);
+    const ctl = events.filter(e => e.label === 'control').map(e => (e.featuresByH[6].deep_dig_x as number) * scale);
+    expect(t?.kind === 'ttest' && t.result.p).toBeCloseTo(welchTTest(pos, ctl).p, 10);
     expect(inf.dataFinishedAt).toBe(1);
+    expect(inf.commands).toBe(DEFAULT_COMMANDS);
   });
 
   it('【用户要求】整行删减：删掉的行不进分组描述与推断统计', () => {
@@ -44,7 +44,8 @@ describe('【用户要求】Deep dig：描述统计与推断统计分开运行',
     const cut = applyExclusions(data, drop);
     expect(cut.rows).toHaveLength(data.rows.length - 3);
     expect(cut.groups.find(g => g.group === 'positive')!.n).toBe(data.groups.find(g => g.group === 'positive')!.n - 3);
-    expect(inferDeepDig(cut, { permutations: 99, bootstrap: 19 }).tTest!.nA).toBe(cut.groups.find(g => g.group === 'positive')!.n);
+    const t = runInference(cut, 'ttest(X, 实验组, 对照组)').blocks[0];
+    expect(t.kind === 'ttest' && t.result.nA).toBe(cut.groups.find(g => g.group === 'positive')!.n);
     expect(exclusionKey(data, [...drop, 'not-a-row'])).toBe([...drop].sort().join(','));
     expect(applyExclusions(data, [])).toBe(data);
   });
@@ -54,7 +55,9 @@ describe('【用户要求】Deep dig：描述统计与推断统计分开运行',
     const only = deepDigRules(data, null);
     expect(only[0]).toContain('实验组更低');
     expect(only.some(l => l.startsWith('推断统计还没运行'))).toBe(true);
-    const full = deepDigRules(data, inferDeepDig(data, { permutations: 199, bootstrap: 49 }));
+    const full = deepDigRules(data, runInference(data, `${DEFAULT_COMMANDS}\nregress(endRet ~ X + vol)\nanova(X, 实验组, 对照组, 随机)`));
+    expect(full.some(l => l.startsWith('多元线性回归'))).toBe(true);
+    expect(full.some(l => l.startsWith('方差分析'))).toBe(true);
     expect(full.find(l => l.startsWith('t 检验'))).toContain('差异显著');
     expect(full.find(l => l.startsWith('做法'))).toMatch(/≤ .*对照组中位数/);
     expect(full.at(-1)).toMatch(/^局限.*看过三项结果/);

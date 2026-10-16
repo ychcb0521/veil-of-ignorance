@@ -48,7 +48,7 @@ function DefinitionView({ def, onEditingChange, onSave, groupRows }: DefinitionP
       {def.definition && <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{def.definition}</p>}
       <div className="grid max-w-[720px] grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
-        <pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground" data-testid="deep-dig-def-formula">{def.formula}</pre>
+        <FormulaEditor def={def} onSave={onSave} />
         <span className="pt-px text-muted-foreground">分组</span>
         <GroupCriteria def={def} groupRows={groupRows} onSave={onSave} testId="deep-dig-def-groups" />
         <span className="text-muted-foreground">显示</span>
@@ -248,6 +248,71 @@ export function GroupCriteria({ def, groupRows, onSave, testId }: {
           </button>
         )}
         <span className="text-muted-foreground">保存后重新运行描述统计，按新标准分组</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 公式：平时显示，点「改公式」就地改（不用打开整个定义表单）。
+ * 【用户要求】2026-10-16「公式也要做成能修改的」：写错时提示第几行、哪里不对，不能保存；内置项可填回默认。
+ * Ctrl / ⌘ + Enter 保存，Esc 取消。
+ */
+export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave: (def: DeepDigFeatureDef) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+  const error = useMemo(() => (draft == null ? null : checkDefinition({ ...def, formula: draft }).formula), [draft, def]);
+  const builtin = BUILTIN_FEATURES.find(b => b.id === def.id);
+
+  if (draft == null) {
+    return (
+      <div className="min-w-0 space-y-1">
+        <pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/60 px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-foreground" data-testid="deep-dig-def-formula">{def.formula}</pre>
+        <button type="button" onClick={() => setDraft(def.formula)} data-testid="deep-dig-def-formula-edit"
+          className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground">
+          <Pencil className="h-3 w-3" />改公式
+        </button>
+      </div>
+    );
+  }
+  const save = () => {
+    if (error) return;
+    if (draft.trim() !== def.formula.trim()) onSave({ ...def, formula: draft.trim() });
+    setDraft(null);
+    setHelp(false);
+  };
+  return (
+    <div className="min-w-0 space-y-1.5" data-testid="deep-dig-def-formula-form">
+      <textarea
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') setDraft(null);
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
+        }}
+        rows={Math.min(16, Math.max(4, draft.split('\n').length + 1))}
+        spellCheck={false}
+        wrap="off"
+        autoFocus
+        className={cn(INPUT, 'w-full overflow-x-auto whitespace-pre font-mono text-[11.5px] leading-relaxed')}
+        data-testid="deep-dig-def-formula-inline"
+        aria-label="公式"
+      />
+      {error ? <div className={RED} data-testid="deep-dig-def-formula-inline-error">{error}</div>
+        : <div className="text-muted-foreground">在进场前 48 小时的已收盘 5m K 线上逐根算，取最后一根的值作为这场的特征值。</div>}
+      <button type="button" onClick={() => setHelp(h => !h)} className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
+        {help ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}可用写法
+      </button>
+      {help && <FormulaHelp />}
+      <div className="flex flex-wrap items-center gap-2 pt-0.5">
+        <button type="button" className={cn(BTN, 'border-foreground/30 font-medium')} onClick={save} disabled={!!error} data-testid="deep-dig-def-formula-save">保存</button>
+        <button type="button" className={BTN} onClick={() => setDraft(null)}>取消</button>
+        {builtin && draft.trim() !== builtin.formula.trim() && (
+          <button type="button" className={BTN} onClick={() => setDraft(builtin.formula)} data-testid="deep-dig-def-formula-default">
+            <RotateCcw className="h-3 w-3" />填回默认
+          </button>
+        )}
+        <span className="text-muted-foreground">保存后重新运行描述统计，按新公式算</span>
       </div>
     </div>
   );

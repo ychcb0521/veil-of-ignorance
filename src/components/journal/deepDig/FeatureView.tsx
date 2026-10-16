@@ -8,7 +8,6 @@ import { useMemo, useState } from 'react';
 import { ArrowUpRight, Download, Loader2, Pencil, Play, RotateCcw, Square, Undo2, X as XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
-import { DEEP_DIVE_ALPHA, type DeepDiveTargetKey } from '@/lib/deepRsa/deepDive';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import {
   applyExclusions, dataSupportsInference, DEEP_DIG_GROUP_LABEL, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, pText,
@@ -18,6 +17,7 @@ import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
+import { CommandPanel, InferenceResults } from '@/components/journal/deepDig/InferenceView';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
 export const DEEP_DIG_TABS: { key: DeepDigTab; label: string }[] = [
@@ -35,9 +35,6 @@ export const GROUP_TONE: Record<DeepDigRowGroup, string> = { positive: GREEN, co
 const DOT: Record<DeepDigRowGroup, string> = { positive: 'bg-[#0ECB81]', control: 'bg-[#F6465D]', other: 'bg-foreground/45', background: 'bg-[#848E9C]/60' };
 
 const STAGE_LABEL: Partial<Record<RunStage, string>> = { events: '整理事件', fetch: '拉取 K 线', features: '计算特征值', rsa: '统计检验', done: '完成' };
-const TARGETS: { key: DeepDiveTargetKey; name: string }[] = [
-  { key: 'endRet', name: '24h 期末收益' }, { key: 'maxUp', name: '24h 最大涨幅' }, { key: 'maxDown', name: '24h 最大跌幅' },
-];
 
 const TH = 'py-1 pr-4 text-left font-normal whitespace-nowrap';
 const TD = 'py-1 pr-4 whitespace-nowrap';
@@ -92,6 +89,9 @@ export interface FeatureViewProps {
   /** 在删减后的数据上运行推断统计。 */
   onInfer: (data: DeepDigData, excludedKey: string) => void;
   onDownload: () => void;
+  /** 推断统计的命令原文。 */
+  commands: string;
+  onCommandsChange: (text: string) => void;
   /** 删掉的行（事件 id）。 */
   excluded: readonly string[];
   onExcludedChange: (ids: string[]) => void;
@@ -111,7 +111,8 @@ export function FeatureView(props: FeatureViewProps) {
   const { def, data, inference, excluded, tab, onTabChange } = props;
   const effective = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
   const exKey = data ? exclusionKey(data, excluded) : '';
-  const inferenceFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
+  const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
+  const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands;
   const defStale = data != null && definitionKey(data.definition) !== definitionKey(def);
   return (
     <div className="space-y-5 text-[12px]" data-testid="deep-dig-feature">
@@ -149,16 +150,21 @@ export function FeatureView(props: FeatureViewProps) {
       )}
       {tab === 'infer' && (
         <div className="space-y-4">
+          <CommandPanel commands={props.commands} onChange={props.onCommandsChange} />
           <RunStrip
             testId="deep-dig-infer-run" label="运行推断统计" hasResult={!!inference} finishedAt={inference?.finishedAt ?? null}
             status={props.inferStatus} error={props.inferError}
             canRun={!!effective && dataSupportsInference(effective) && props.inferStatus !== 'running'}
             blockedReason={!effective ? '先运行描述统计' : !dataSupportsInference(effective) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
             onRun={() => { if (effective) props.onInfer(effective, exKey); }}
-            hint="用描述统计的数据（已去掉删除的行）做检验，不联网，几秒"
+            hint="按上面的命令逐行算，用描述统计的数据（已去掉删除的行），不联网，几秒到十几秒"
           />
-          {inference && !inferenceFresh && <Notice testId="deep-dig-infer-stale">描述统计的数据或删减改过了：下面是旧数据的检验结果，重新运行推断统计。</Notice>}
-          {inference && effective ? <InferTab data={effective} inference={inference} /> : <Empty>还没运行推断统计。</Empty>}
+          {inference && !inferenceFresh && (
+            <Notice testId="deep-dig-infer-stale">
+              {inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
+            </Notice>
+          )}
+          {inference && effective ? <InferenceResults blocks={inference.blocks} /> : <Empty>还没运行推断统计。</Empty>}
         </div>
       )}
       {tab === 'rules' && <RulesTab {...props} data={effective} inference={inferenceFresh ? inference : null} />}
@@ -461,126 +467,6 @@ function StripPlot({ result }: { result: DeepDigData }) {
 
 // ===================== 推断统计 =====================
 
-function Verdict({ ok, yes = '差异显著', no = '差异不显著' }: { ok: boolean; yes?: string; no?: string }) {
-  return <span className={cn('rounded px-1.5 py-px text-[10.5px]', ok ? 'bg-[#0ECB81]/10 text-[#0B9F66] dark:text-[#0ECB81]' : 'bg-muted text-muted-foreground')}>{ok ? yes : no}</span>;
-}
-
-function KV({ rows }: { rows: [string, React.ReactNode][] }) {
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-[11.5px]">
-      {rows.map(([k, v]) => (
-        <div key={k} className="contents">
-          <dt className="whitespace-nowrap text-muted-foreground">{k}</dt>
-          <dd className="font-mono tabular-nums">{v}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-const How = ({ children }: { children: React.ReactNode }) => <p className="max-w-[720px] text-[11.5px] leading-relaxed text-muted-foreground">{children}</p>;
-
-function InferTab({ data, inference }: { data: DeepDigData; inference: DeepDigInference }) {
-  const result = { ...data, ...inference };
-  const def = result.definition;
-  const bp = (v: number | null | undefined, d = 2) => fmtValue(def, v, d);
-  const X = def.short || '特征值';
-  const t = result.tTest;
-  const l = result.label;
-  const conf = Object.fromEntries(result.confirmation.map(r => [r.target, r]));
-  return (
-    <div className="space-y-6" data-testid="deep-dig-infer">
-      <Block title="① t 检验 · 实验组 vs 对照组" aside={t && finite(t.p) ? <Verdict ok={t.p < DEEP_DIVE_ALPHA} /> : null} testId="deep-dig-ttest">
-        <How>比较两组 {X} 的均值：Welch t 检验（不假定两组方差相等），双侧，α = 0.05。均值差 = 实验组 − 对照组；Hedges g 是效应量（约 0.2 小、0.5 中、0.8 大）。</How>
-        {t ? (
-          <KV rows={[
-            ['实验组', <><N>{t.nA}</N> 个 · 均值 <N>{bp(t.meanA)}</N> ± <N>{bp(t.sdA)}</N></>],
-            ['对照组', <><N>{t.nB}</N> 个 · 均值 <N>{bp(t.meanB)}</N> ± <N>{bp(t.sdB)}</N></>],
-            ['均值差', <><N className={signTone(t.diff)}>{bp(t.diff)}</N> <span className="text-muted-foreground">95% 区间 {t.ci95 ? `${bp(t.ci95[0])} ~ ${bp(t.ci95[1])}` : '—'}</span></>],
-            ['t（自由度）', <>{finite(t.t) ? t.t.toFixed(2) : '—'}（{finite(t.df) ? t.df.toFixed(0) : '—'}）</>],
-            ['p', <N>{pText(t.p)}</N>],
-            ['Hedges g', <>{finite(t.hedgesG) ? t.hedgesG.toFixed(2) : '—'}</>],
-            ['分期', <span className="font-sans text-muted-foreground">发现期均值差 <N>{bp(t.byPeriod.discovery.diff)}</N>（p {pText(t.byPeriod.discovery.p)}）· 确认期 <N>{bp(t.byPeriod.confirmation.diff)}</N>（p {pText(t.byPeriod.confirmation.p)}）</span>],
-          ]} />
-        ) : <div className="text-muted-foreground">没有结果</div>}
-      </Block>
-
-      <Block title="② Mann–Whitney · 排名比较" aside={l && finite(l.p) ? <Verdict ok={l.p < DEEP_DIVE_ALPHA} /> : null} testId="deep-dig-auc">
-        <How>只看排名、不看具体数值，不怕极端值。AUC = 随机挑一场实验组和一场对照组，实验组 {X} 更高的概率：0.5 = 分不开，越偏离 0.5 越能分开。p：打乱组别 {result.permutations} 次；区间：按币整簇重抽样。</How>
-        {l ? (
-          <KV rows={[
-            ['AUC', <><N>{finite(l.auc) ? l.auc.toFixed(3) : '—'}</N> <span className="text-muted-foreground">95% 区间 {l.ci ? `${l.ci[0].toFixed(2)} ~ ${l.ci[1].toFixed(2)}` : '—'}</span></>],
-            ['中位数', <>实验组 <N>{bp(l.posMedian)}</N> · 对照组 <N>{bp(l.ctlMedian)}</N></>],
-            ['p', <N>{pText(l.p)}</N>],
-          ]} />
-        ) : <div className="text-muted-foreground">没有结果</div>}
-      </Block>
-
-      <Block title={`③ Spearman 相关 · ${X} 与之后 24h 行情`} testId="deep-dig-assoc">
-        <How>
-          全部事件（含随机时点），从进场后第一根 5m K 线开盘价算之后 24h 的结果。发现集 = 时间上前 80%：算 ρ，按月内打乱求 p，三个结果一起 Holm 校正；
-          「控制波动」= 扣掉观察窗波动率后的偏相关，回答是不是只是波动大小。发现集通过的项，到确认集（最后 20%）按同一方向复核，同向且 p &lt; 0.05 → 已验证。
-        </How>
-        <table className="text-[11.5px]">
-          <thead>
-            <tr className="text-muted-foreground">
-              <th className={TH}>结果</th><th className={TH}>ρ</th><th className={TH}>Holm p</th><th className={TH}>控制波动</th><th className={cn(TH, 'pr-0')}>确认集</th>
-            </tr>
-          </thead>
-          <tbody className="font-mono tabular-nums">
-            {TARGETS.map(tg => {
-              const r = result.association.find(a => a.target === tg.key);
-              const cf = conf[tg.key];
-              return (
-                <tr key={tg.key} className="border-t border-border/40" data-testid={`deep-dig-assoc-${tg.key}`}>
-                  <td className={cn(TD, 'font-sans')}>{tg.name}</td>
-                  <td className={cn(TD, r && r.pHolm < DEEP_DIVE_ALPHA ? signTone(r.rho) : undefined)}>
-                    {r && finite(r.rho) ? r.rho.toFixed(2) : '—'}
-                    {r?.ci && <span className="ml-1 text-[10.5px] text-muted-foreground max-sm:hidden">[{r.ci[0].toFixed(2)}, {r.ci[1].toFixed(2)}]</span>}
-                  </td>
-                  <td className={TD}>{pText(r?.pHolm)}</td>
-                  <td className={cn(TD, 'text-muted-foreground')}>{r && finite(r.rhoPartialVol) ? <>{r.rhoPartialVol.toFixed(2)}<span className="max-sm:hidden">（p {pText(r.pPartialVol)}）</span></> : '—'}</td>
-                  <td className={cn(TD, 'pr-0 font-sans')}>
-                    {cf ? (
-                      <span className={cf.verdict === '已验证' ? GREEN : RED}>
-                        {cf.verdict}<span className="ml-1 font-mono text-[10.5px] text-muted-foreground max-sm:hidden">ρ {finite(cf.rho) ? cf.rho.toFixed(2) : '—'}{cf.verdict === '已验证' && !cf.survivesVolControl ? ' · 控制波动后不成立' : ''}</span>
-                      </span>
-                    ) : <span className="text-muted-foreground">未进入</span>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="text-[11px] text-muted-foreground">发现集 <N>{result.coverage.discovery}</N> · 确认集 <N>{result.coverage.confirmation}</N> · 两段之间隔离剔除 <N>{result.coverage.embargoed}</N></div>
-      </Block>
-
-      <Block title="④ 五分位分档" testId="deep-dig-quintiles">
-        <How>把 {X} 从低到高分五档（切点取发现集），看每档之后 24h 的平均结果。看是否单调、差距是否大于噪声；描述，不做判定。</How>
-        {result.quintiles.bins.length ? (
-          <table className="text-[11.5px]">
-            <thead>
-              <tr className="text-muted-foreground">
-                <th className={TH}>档</th><th className={TH}>{X} 范围</th><th className={TH}>n</th>
-                {TARGETS.map(tg => <th key={tg.key} className={cn(TH, tg.key === 'maxDown' && 'pr-0')}>{tg.name.replace('24h ', '')}</th>)}
-              </tr>
-            </thead>
-            <tbody className="font-mono tabular-nums">
-              {result.quintiles.bins.map(b => (
-                <tr key={b.q} className="border-t border-border/40">
-                  <td className={TD}>Q{b.q}</td>
-                  <td className={cn(TD, 'text-muted-foreground')}>{bp(b.lo, 1)} ~ {bp(b.hi, 1)}</td>
-                  <td className={TD}>{b.n}</td>
-                  {TARGETS.map(tg => <td key={tg.key} className={cn(TD, tg.key === 'maxDown' && 'pr-0', retTone(b.means[tg.key]))}>{pct(b.means[tg.key])}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : <div className="text-muted-foreground">样本不够分档</div>}
-      </Block>
-    </div>
-  );
-}
 
 // ===================== 规律提取 =====================
 

@@ -3,14 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/journal/deepDig/FeatureView';
 import { DeepDigDirectory } from '@/pages/JournalDeepDigPage';
-import { deepDigRules, inferDeepDig, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { deepDigRules, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
 import { DRIFT_SPEED_DEF, newFeatureTemplate, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { driftEvents, makeData } from '@/lib/deepDig/__tests__/fixtures';
 import { groupCampaign } from '@/lib/deepRsa/grouping';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 
 const DATA = makeData(driftEvents(240, -1e-4));
-const INF = inferDeepDig(DATA, { permutations: 199, bootstrap: 49, excludedKey: '' });
+const ALL_COMMANDS = `${DEFAULT_COMMANDS}\nregress(endRet ~ X + vol)\nanova(X, 实验组, 对照组, 其他, 随机)\nrsa(X, 组别, perm=19)\nml(实验组 ~ X + vol, cv=5, perm=9)`;
+const INF = runInference(DATA, ALL_COMMANDS, { excludedKey: '' });
 
 function campaignRow(id: string, b: number, r: number): CampaignGroupRow {
   const grouping = groupCampaign({
@@ -30,6 +32,7 @@ function Harness(p: {
   const [showAll, setShowAll] = useState(false);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
+  const [commands, setCommands] = useState(ALL_COMMANDS);
   const [def, setDef] = useState<DeepDigFeatureDef>(p.initialDef ?? DRIFT_SPEED_DEF);
   return (
     <FeatureView
@@ -38,7 +41,7 @@ function Harness(p: {
       data={p.data === undefined ? DATA : p.data} inference={p.inference === undefined ? INF : p.inference}
       describeStatus="idle" describeProgress={null} describeError={null} canDescribe blockedReason={null}
       onDescribe={p.onDescribe ?? vi.fn()} onCancel={vi.fn()} inferStatus="idle" inferError={null} onInfer={p.onInfer ?? vi.fn()} onDownload={vi.fn()}
-      excluded={excluded} onExcludedChange={setExcluded}
+      excluded={excluded} onExcludedChange={setExcluded} commands={commands} onCommandsChange={setCommands}
       tab={tab} onTabChange={setTab} group={group} onGroupChange={setGroup} showAll={showAll} onShowAllChange={setShowAll}
       onOpenCampaign={p.onOpenCampaign ?? vi.fn()} note={note} onSaveNote={setNote}
     />
@@ -124,6 +127,24 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('b < 0.5 or r < 0.5');
   });
 
+  it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {
+    const onSaveDef = vi.fn();
+    render(<Harness onSaveDef={onSaveDef} />);
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-edit'));
+    const box = screen.getByTestId('deep-dig-def-formula-inline');
+    fireEvent.change(box, { target: { value: 'A = ln(C)\nZ + 1' } });
+    expect(screen.getByTestId('deep-dig-def-formula-inline-error')).toHaveTextContent('第 2 行：不认识「Z」');
+    expect(screen.getByTestId('deep-dig-def-formula-save')).toBeDisabled();
+    fireEvent.change(box, { target: { value: 'ln(C / prev(C, 12))' } });
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-save'));
+    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ formula: 'ln(C / prev(C, 12))', positive: DRIFT_SPEED_DEF.positive }));
+    expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('ln(C / prev(C, 12))');
+    expect(screen.getByTestId('deep-dig-stale')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-edit'));
+    fireEvent.click(screen.getByTestId('deep-dig-def-formula-default'));
+    expect((screen.getByTestId('deep-dig-def-formula-inline') as HTMLTextAreaElement).value).toBe(DRIFT_SPEED_DEF.formula);
+  });
+
   it('描述统计与推断统计各有自己的运行按钮；推断统计没有描述数据时不能运行', () => {
     const onDescribe = vi.fn();
     const onInfer = vi.fn();
@@ -169,19 +190,45 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(screen.queryByTestId('deep-dig-removed')).toBeNull();
   });
 
-  it('推断统计：t 检验、排名比较、相关（含确认集）、五分位', () => {
-    render(<Harness initialTab="infer" />);
-    expect(screen.getByTestId('deep-dig-ttest')).toHaveTextContent('Welch');
-    expect(screen.getByTestId('deep-dig-auc')).toHaveTextContent('AUC');
-    for (const k of ['endRet', 'maxUp', 'maxDown']) expect(screen.getByTestId(`deep-dig-assoc-${k}`)).toBeInTheDocument();
-    expect(within(screen.getByTestId('deep-dig-quintiles')).getAllByText(/^Q\d$/)).toHaveLength(5);
+  it('【用户要求】推断统计运行前给出命令与可选方法：勾选加行、取消删行，写错的行标红，改了命令提示重跑', () => {
+    const onInfer = vi.fn();
+    render(<Harness initialTab="infer" onInfer={onInfer} />);
+    const input = screen.getByTestId('deep-dig-commands-input') as HTMLTextAreaElement;
+    expect(input.value).toContain('ttest(X, 实验组, 对照组)');
+    expect(screen.getByTestId('deep-dig-method-ttest')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('deep-dig-method-regress')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByTestId('deep-dig-infer-stale')).toBeNull();
+    fireEvent.click(screen.getByTestId('deep-dig-method-regress'));
+    expect(input.value.trim().split('\n').at(-1)).toBe('regress(endRet ~ X)');
+    expect(screen.getByTestId('deep-dig-infer-stale')).toHaveTextContent('命令改过了');
+    fireEvent.click(screen.getByTestId('deep-dig-method-ttest'));
+    expect(input.value).not.toContain('ttest(');
+    fireEvent.change(input, { target: { value: `${input.value}\nttest(X, 甲组)` } });
+    expect(screen.getByTestId('deep-dig-commands-errors')).toHaveTextContent('不认识组名「甲组」');
+    fireEvent.click(screen.getByTestId('deep-dig-commands-help-toggle'));
+    expect(screen.getByTestId('deep-dig-commands-help')).toHaveTextContent('多元回归');
+    fireEvent.click(screen.getByTestId('deep-dig-infer-run-button'));
+    expect(onInfer).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('deep-dig-commands-default'));
+    expect(input.value).toBe(DEFAULT_COMMANDS);
+  });
+
+  it('推断统计结果：每条命令一张卡片（t 检验、排名比较、相关、五分位、多元回归、方差分析、RSA、机器学习）', () => {
+    render(<Harness initialTab="infer" />);
+    for (const k of ['ttest', 'mannwhitney', 'spearman', 'quintiles', 'regress', 'anova', 'rsa', 'ml']) expect(screen.getByTestId(`deep-dig-block-${k}`)).toBeInTheDocument();
+    expect(screen.getByTestId('deep-dig-block-ttest')).toHaveTextContent('Welch');
+    expect(screen.getByTestId('deep-dig-block-regress')).toHaveTextContent('多元线性回归');
+    expect(screen.getByTestId('deep-dig-block-regress')).toHaveTextContent('调整 R²');
+    expect(screen.getByTestId('deep-dig-block-anova')).toHaveTextContent('η²');
+    expect(screen.getByTestId('deep-dig-block-ml')).toHaveTextContent('样本外 AUC');
+    expect(within(screen.getByTestId('deep-dig-block-quintiles')).getAllByText(/^Q\d$/)).toHaveLength(5);
   });
 
   it('规律提取：默认是统计结果；可编辑、保存后标「手动修改」，可恢复为统计结果', () => {
     render(<Harness initialTab="rules" />);
     expect(screen.getByTestId('deep-dig-rules-source')).toHaveTextContent('统计得出');
     expect(within(screen.getByTestId('deep-dig-rules-list')).getAllByRole('listitem')).toHaveLength(deepDigRules(DATA, INF).length);
+    expect(screen.getByTestId('deep-dig-rules-list')).toHaveTextContent('方差分析');
     fireEvent.click(screen.getByTestId('deep-dig-rules-edit'));
     fireEvent.change(screen.getByTestId('deep-dig-rules-input'), { target: { value: '只在 V 回落到 0 附近时进场\n\n仓位减半' } });
     fireEvent.click(screen.getByTestId('deep-dig-rules-save'));

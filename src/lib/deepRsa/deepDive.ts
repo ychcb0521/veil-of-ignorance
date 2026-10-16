@@ -349,6 +349,13 @@ function regularizedBeta(x: number, a: number, b: number): number {
   return x < (a + 1) / (a + b + 2) ? (bt * betaContinuedFraction(a, b, x)) / a : 1 - (bt * betaContinuedFraction(b, a, 1 - x)) / b;
 }
 
+/** F 分布的上尾 p：P(F ≥ f)，自由度 d1、d2（方差分析、回归的整体 F 检验用）。 */
+export function fUpperP(f: number, d1: number, d2: number): number {
+  if (!Number.isFinite(f) || !(d1 > 0) || !(d2 > 0)) return Number.NaN;
+  if (f <= 0) return 1;
+  return regularizedBeta(d2 / (d2 + d1 * f), d2 / 2, d1 / 2);
+}
+
 /** Student t 分布的双侧 p：P(|T| ≥ |t|)，自由度 df（可为非整数）。 */
 export function studentTwoSidedP(t: number, df: number): number {
   if (!Number.isFinite(t) || !(df > 0)) return Number.NaN;

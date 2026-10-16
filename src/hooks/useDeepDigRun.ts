@@ -7,7 +7,8 @@
  * 旧页面的本机缓存顺手清掉；上一版「漂移速度 V」的结果（同一套默认公式与分组）迁过来。
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { collectDeepDigData, inferDeepDig, type DeepDigData, type DeepDigInference } from '@/lib/deepDig/analysis';
+import { collectDeepDigData, type DeepDigData } from '@/lib/deepDig/analysis';
+import { runInference, type DeepDigInference } from '@/lib/deepDig/commands';
 import { DRIFT_SPEED_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { RunProgress } from '@/lib/deepRsa/pipeline';
@@ -54,12 +55,7 @@ function migrate(userId: string) {
       definition: { id, name, short, formula, scale, unit, positive, control },
       codeVersion: p.codeVersion, startedAt: p.startedAt, finishedAt: p.finishedAt, coverage: p.coverage, rows: p.rows, groups: p.groups,
     };
-    const inference: DeepDigInference = {
-      dataFinishedAt: p.finishedAt, excludedKey: '', startedAt: p.startedAt, finishedAt: p.finishedAt, seed: p.seed, permutations: p.permutations, bootstrap: p.bootstrap,
-      tTest: p.tTest ?? null, label: p.label ?? null, association: p.association ?? [], confirmation: p.confirmation ?? [], quintiles: p.quintiles ?? { cuts: [], bins: [] },
-    };
     localStorage.setItem(dataKey(userId, DRIFT_SPEED_DEF.id), JSON.stringify(data));
-    localStorage.setItem(inferKey(userId, DRIFT_SPEED_DEF.id), JSON.stringify(inference));
   } catch {
     // 迁不过来只是要重跑一次
   }
@@ -86,7 +82,8 @@ export function loadDeepDigResults(userId: string | undefined, featureId: string
   migrate(userId);
   return {
     data: read<DeepDigData>(dataKey(userId, featureId), d => Array.isArray(d.rows) && Array.isArray(d.groups) && !!d.definition),
-    inference: read<DeepDigInference>(inferKey(userId, featureId), r => typeof r.dataFinishedAt === 'number'),
+    // 旧版推断结果没有 blocks（还不是按命令算的）：不读，提示重跑
+    inference: read<DeepDigInference>(inferKey(userId, featureId), r => typeof r.dataFinishedAt === 'number' && Array.isArray(r.blocks)),
   };
 }
 
@@ -152,14 +149,14 @@ export function useDeepDigRun(userId: string | undefined, def: DeepDigFeatureDef
 
   const cancel = useCallback(() => { store.controller?.abort(); }, [store]);
 
-  /** data 是删减后的数据；excludedKey 记下这次用了哪些删减。 */
-  const infer = useCallback(async (data: DeepDigData, excludedKey: string) => {
+  /** data 是删减后的数据；excludedKey 记下这次用了哪些删减；commands 是推断统计的命令原文。 */
+  const infer = useCallback(async (data: DeepDigData, excludedKey: string, commands: string) => {
     if (!userId || store.state.inferStatus === 'running') return;
     set(store, { inferStatus: 'running', inferError: null });
     // 让「运行中」先画出来：置换检验要算几秒
     await new Promise<void>(resolve => setTimeout(resolve, 30));
     try {
-      const inference = inferDeepDig(data, { excludedKey });
+      const inference = runInference(data, commands, { excludedKey });
       write(inferKey(userId, def.id), inference);
       set(store, { inferStatus: 'idle', inference });
     } catch (error) {

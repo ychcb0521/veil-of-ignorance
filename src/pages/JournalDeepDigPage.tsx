@@ -21,6 +21,7 @@ import { useCampaignList } from '@/hooks/useCampaignList';
 import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/useDeepDigRun';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { applyExclusions, DEEP_DIG_GROUPS, exclusionKey, fmtValue, pText, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
 import { BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
@@ -31,6 +32,8 @@ const NOTES_KEY = 'deep_dig_notes_v1';
 const FEATURES_KEY = 'deep_dig_features_v1';
 /** 描述统计里手动删掉的行：特征值 id → 事件 id（跟账号走）。 */
 const EXCLUDED_KEY = 'deep_dig_excluded_v1';
+/** 推断统计的命令：特征值 id → 命令原文（跟账号走）。 */
+const COMMANDS_KEY = 'deep_dig_commands_v1';
 
 function parseTab(search: string): DeepDigTab {
   const t = new URLSearchParams(search).get('tab');
@@ -53,6 +56,7 @@ export default function JournalDeepDigPage() {
   const [savedDefs, setSavedDefs] = usePersistedState<DeepDigFeatureDef[]>(FEATURES_KEY, []);
   const [excludedMap, setExcludedMap] = usePersistedState<Record<string, string[]>>(EXCLUDED_KEY, {});
   const excludedOf = (id: string) => (Array.isArray(excludedMap?.[id]) ? excludedMap[id] : []);
+  const [commandsMap, setCommandsMap] = usePersistedState<Record<string, string>>(COMMANDS_KEY, {});
   const defs = useMemo(() => mergeFeatureDefs(Array.isArray(savedDefs) ? savedDefs : []), [savedDefs]);
   const def = slug ? defs.find(d => d.id === slug) : undefined;
 
@@ -72,6 +76,7 @@ export default function JournalDeepDigPage() {
     setSavedDefs(prev => (Array.isArray(prev) ? prev : []).filter(d => d.id !== target.id));
     setNotes(prev => { const copy = { ...prev }; delete copy[target.id]; return copy; });
     setExcludedMap(prev => { const copy = { ...prev }; delete copy[target.id]; return copy; });
+    setCommandsMap(prev => { const copy = { ...prev }; delete copy[target.id]; return copy; });
     forgetDeepDigResult(user?.id, target.id);
   };
   const restoreFeature = (id: string) => setSavedDefs(prev => {
@@ -115,6 +120,12 @@ export default function JournalDeepDigPage() {
             blockedReason={!user ? '登录后才能运行' : !report || !complete ? `读取战役中… ${loaded} / ${total}` : null}
             note={notes[def.id] ?? null}
             excluded={excludedOf(def.id)}
+            commands={typeof commandsMap?.[def.id] === 'string' ? commandsMap[def.id] : DEFAULT_COMMANDS}
+            onCommandsChange={text => setCommandsMap(prev => {
+              const copy = { ...prev };
+              if (text === DEFAULT_COMMANDS) delete copy[def.id]; else copy[def.id] = text;
+              return copy;
+            })}
             onExcludedChange={ids => setExcludedMap(prev => {
               const copy = { ...prev };
               if (ids.length) copy[def.id] = ids; else delete copy[def.id];
@@ -155,7 +166,9 @@ export default function JournalDeepDigPage() {
   );
 }
 
-function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onSaveDef, onDeleteDef, excluded, onExcludedChange }: {
+function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onSaveDef, onDeleteDef, excluded, onExcludedChange, commands, onCommandsChange }: {
+  commands: string;
+  onCommandsChange: (text: string) => void;
   excluded: string[];
   onExcludedChange: (ids: string[]) => void;
   def: DeepDigFeatureDef;
@@ -227,7 +240,9 @@ function FeaturePage({ def, userId, report, blockedReason, note, onSaveNote, onS
       onCancel={run.cancel}
       inferStatus={run.inferStatus}
       inferError={run.inferError}
-      onInfer={(data, key) => { void run.infer(data, key); }}
+      onInfer={(data, key) => { void run.infer(data, key, commands); }}
+      commands={commands}
+      onCommandsChange={onCommandsChange}
       onDownload={run.download}
       excluded={excluded}
       onExcludedChange={onExcludedChange}
@@ -253,8 +268,10 @@ function summaryOf(r: { data: DeepDigData | null; inference: DeepDigInference | 
   const inf = r.inference;
   // 推断统计只在对应这份数据与删减时才进摘要
   if (inf && inf.dataFinishedAt === r.data.finishedAt && (inf.excludedKey ?? '') === exclusionKey(r.data, excluded)) {
-    if (inf.tTest) parts.push(`t 检验 p ${pText(inf.tTest.p)}`);
-    if (inf.label) parts.push(`AUC ${Number.isFinite(inf.label.auc) ? inf.label.auc.toFixed(2) : '—'}`);
+    const t = inf.blocks.find(b => b.kind === 'ttest');
+    const m = inf.blocks.find(b => b.kind === 'mannwhitney');
+    if (t?.kind === 'ttest') parts.push(`t 检验 p ${pText(t.result.p)}`);
+    if (m?.kind === 'mannwhitney') parts.push(`AUC ${Number.isFinite(m.auc) ? m.auc.toFixed(2) : '—'}`);
   }
   return parts.join(' · ');
 }
