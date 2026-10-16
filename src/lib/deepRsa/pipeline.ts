@@ -145,6 +145,8 @@ export interface RunEvent extends RsaEvent {
   maxUp: number | null;
   maxDown: number | null;
   endRet: number | null;
+  /** 这一簇里的战役 id（随机背景为空）；旧结果与测试数据可能没有。 */
+  memberIds?: string[];
 }
 
 /** 第 1–3 步（事件、行情、特征）的产物：Deep RSA 主流程与特征深挖共用同一份。 */
@@ -265,6 +267,7 @@ export async function collectRunEvents(
       block: new Date(item.anchorMs).toISOString().slice(0, 7),
       momentum: momentumScorer(window),
       maxUp: outcomeValue, maxDown: outcomeOk ? outcome.maxDown : null, endRet: outcomeOk ? outcome.endRet : null,
+      memberIds: item.memberIds,
     });
   });
   progress('features', items.length, items.length);

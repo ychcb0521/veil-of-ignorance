@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useSimStateHydration } from "@/hooks/useSimStateHydration";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -17,7 +17,7 @@ const JournalListPage = lazy(() => import('./pages/JournalListPage.tsx'));
 const JournalPlaybackPage = lazy(() => import('./pages/JournalPlaybackPage.tsx'));
 const JournalInsightsPage = lazy(() => import('./pages/JournalInsightsPage.tsx'));
 const JournalRulesPage = lazy(() => import('./pages/JournalRulesPage.tsx'));
-const JournalDeepRsaPage = lazy(() => import('./pages/JournalDeepRsaPage.tsx'));
+const JournalDeepDigPage = lazy(() => import('./pages/JournalDeepDigPage.tsx'));
 const JournalCampaignsPage = lazy(() => import('./pages/JournalCampaignsPage.tsx'));
 const JournalCampaignDetailPage = lazy(() => import('./pages/JournalCampaignDetailPage.tsx'));
 const JournalCampaignClassifyPage = lazy(() => import('./pages/JournalCampaignClassifyPage.tsx'));
@@ -104,7 +104,10 @@ function AppRoutes() {
         <Route path="/journal" element={<JournalListPage />} />
         <Route path="/journal/tags" element={<JournalTagsPage />} />
         <Route path="/journal/rules" element={<JournalRulesPage />} />
-        <Route path="/journal/deep-rsa" element={<JournalDeepRsaPage />} />
+        <Route path="/journal/deep-dig" element={<JournalDeepDigPage />} />
+        <Route path="/journal/deep-dig/:feature" element={<JournalDeepDigPage />} />
+        {/* 【用户要求】Deep RSA 改名 Deep dig：旧网址与书签跳到新页 */}
+        <Route path="/journal/deep-rsa" element={<Navigate to="/journal/deep-dig" replace />} />
         <Route path="/journal/insights" element={<JournalInsightsPage />} />
         <Route path="/journal/emotion-diary" element={<JournalEmotionDiaryPage />} />
         <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />

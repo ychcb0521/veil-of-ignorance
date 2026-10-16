@@ -79,7 +79,7 @@ export const DEEP_DIVE_FEATURES: readonly DeepDiveFeatureSpec[] = [
  * 一项「逐个特征检验」研究：第 6 步（失衡 · 偏移 · 谢林）与第 7 步（动态谢林点 DSP）共用同一套统计，只换特征清单与交叉表。
  * 交叉表 G：first > 0 记「上方」（结果里的 price = 'above'），second > 0 记「买盘」（flow = 'buy'）——沿用第 6 步的字段名，旧结果照样能读。
  */
-export type DeepDiveStudyId = 'features' | 'dsp';
+export type DeepDiveStudyId = 'features' | 'dsp' | 'drift';
 export interface DeepDiveStudy {
   id: DeepDiveStudyId;
   /** 「第 6 步」「第 7 步」。 */
@@ -167,7 +167,20 @@ export const DSP_STUDY: DeepDiveStudy = {
   groupTTest: true,
 };
 
-export const DEEP_DIVE_STUDIES: Record<DeepDiveStudyId, DeepDiveStudy> = { features: FEATURES_STUDY, dsp: DSP_STUDY };
+/**
+ * 【用户要求】2026-10-16 Deep dig：「目前我只关注多空博弈均衡点漂移速度这一个特征值」——只检验 V 一项，
+ * 统计与第 7 步相同（t 检验、AUC、相关 + 样本外确认、五分位）；只有一项，不再与 A、偏离 DSP 一起做多重校正。
+ * 交叉表沿用第 7 步的定义（界面不显示）。
+ */
+export const DRIFT_STUDY: DeepDiveStudy = {
+  ...DSP_STUDY,
+  id: 'drift',
+  step: 'Deep dig',
+  definitionsTitle: '多空博弈均衡点漂移速度 V',
+  features: DSP_FEATURES.filter(f => f.key === 'dsp_v'),
+};
+
+export const DEEP_DIVE_STUDIES: Record<DeepDiveStudyId, DeepDiveStudy> = { features: FEATURES_STUDY, dsp: DSP_STUDY, drift: DRIFT_STUDY };
 
 // ===================== 统计工具 =====================
 

@@ -701,7 +701,7 @@ export default function GuidePage() {
                 <li><strong>宁缺勿假。</strong>某根 K 线没有成交额数据时，不拿币数凑：这一根不推动共识（Fₜ = 0）、A 留空，V 照常衰减。</li>
                 <li><strong>起点会变。</strong>DSP₀ 取图上最早一根的收盘价，所以图表往左加载更早的 K 线后，整条 DSP 会按新起点重算、整体平移；V 与 A 不受起点影响。</li>
                 <li><strong>读数与价格的距离。</strong>默认 κ = 1 时，DSP 每根只走 Fₜ·Gₜ·Rₜ 的平滑值，而 Fₜ 一般只有 0.05～0.3，所以趋势行情里 DSP 只跟上价格对数变动的一小部分，会与 K 线拉开距离；这是公式本身的性质，不是画错了。</li>
-                <li><strong>统计检验。</strong>复盘中心 → Deep RSA →「动态谢林点检验（第 7 步）」：进场前最后一根 5m K 线上的 V、A 与现价偏离 DSP 三个读数。主检验是 <strong>t 检验</strong>：实验组（正样本战役）与对照组的均值是否不同（Welch 两样本、双侧、三项整族 Holm，附均值差的 95% 区间与效应量 Hedges g；全样本比较，不是样本外验证）。另外与之后 24h 的期末收益、最大涨幅、最大跌幅逐个检验（发现集 9 个检验整族 Holm，确认集只读一次），方法与第 6 步特征深挖相同。方案写在 docs/deep-rsa/12-dsp-test.md。</li>
+                <li><strong>统计检验。</strong>复盘中心 → Deep dig →「多空博弈均衡点漂移速度 V」：每场战役进场前最后一根 5m K 线上的 V，分三块看——<strong>描述统计</strong>（实验组 / 对照组 / 其他战役 / 随机时点各自的分布与逐场数据）、<strong>推断统计</strong>（Welch t 检验、Mann–Whitney 排名比较、与之后 24h 行情的 Spearman 相关及样本外确认、五分位分档）、<strong>规律提取</strong>（按统计结果自动写出的结论与做法，可以手动改，跟账号走）。</li>
               </ul>
 
               <SubTitle>谢林点迁移速度 V：定义与计算</SubTitle>
@@ -726,7 +726,7 @@ export default function GuidePage() {
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
                 <li><strong>单位。</strong>副图按「基点 / 根」显示（V × 10⁴，只换单位）：5 分钟图上 1 基点 / 根 ≈ 每 5 分钟 0.01%、每小时 0.12%。</li>
                 <li><strong>为什么会「慢」。</strong>一根 K 线只占约 1%，V 变号要靠一段持续的反向推动——这正是它要过滤的：单根的大阴大阳不算共识转移。想更快就把半衰期 h 调小（指标面板里那个数字）；最即时的读数是 A（单根，不平滑）。</li>
-                <li><strong>检验结果。</strong>Deep RSA 第 7 步：你的正样本战役进场时 V 中位数 2.3 基点 / 根，对照组 5.9（AUC 0.32）；V 大预示之后 24h 波动大，但没有验证出方向。</li>
+                <li><strong>检验结果。</strong>2026-10-16 的运行：你的正样本战役进场时 V 中位数 2.3 基点 / 根，对照组 5.9（AUC 0.32）；V 大预示之后 24h 波动大，但没有验证出方向。</li>
               </ul>
               <P>指标面板里「动态谢林点」两项的名称下面写着这句定义，鼠标停在上面、或停在图右上角的「DSP」小标签上，会显示上面这套计算步骤。</P>
 
