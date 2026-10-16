@@ -27,6 +27,9 @@ function isSupported(id: string): boolean {
   return id in CUSTOM_INDICATOR_MAP;
 }
 
+/** 二选一的菜单项：动态谢林点「主图线 + 副图」与「只要副图」。 */
+const EXCLUSIVE_PAIRS: Record<string, string> = { DSP: 'DSP_VA', DSP_VA: 'DSP' };
+
 export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // ═══════════════════════════════════════════
   // OVERLAYS (主图叠加)
@@ -145,6 +148,8 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // --- Volume ---
   // 【用户要求】动态谢林点：主图 DSP 线 + 副图 迁移速度 V、主动买方优势 A；参数 = 时间半衰期（小时），成交量一律用金额
   { id: 'DSP',    nameZh: '动态谢林点 DSP（含 V / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h' },
+  // 【用户要求】可以隐去主图的 DSP 线：只要 V / A 两个副图；与上一项二选一
+  { id: 'DSP_VA', nameZh: '动态谢林点 V / A（只要副图）',   nameEn: 'DSP · V / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '时间半衰期（小时）：越早的 K 线权重越小，每过这么多小时减半', periodUnit: 'h' },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },
@@ -223,7 +228,11 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       onIndicatorsChange(indicators.filter(i => i.type !== item.id));
       return;
     }
-    onIndicatorsChange([...indicators, { type: item.id, period: item.defaultPeriod, color: item.color, enabled: true }]);
+    // 互斥的一组（DSP 与「只要副图」）：打开一项就关掉另一项，半衰期沿用原来的设置
+    const rival = EXCLUSIVE_PAIRS[item.id];
+    const replaced = rival ? indicators.find(i => i.type === rival) : undefined;
+    const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
+    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? item.defaultPeriod, color: item.color, enabled: true }]);
   };
 
   const updatePeriod = (id: string, period: number) => {

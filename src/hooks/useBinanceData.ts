@@ -14,6 +14,17 @@ export interface KlineData {
   takerBuyQuoteVolume?: number;
 }
 
+/**
+ * 推给 klinecharts 的金额字段（turnover = 成交额，takerBuyTurnover = 主动买入额），progress 是成形中那根的进度。
+ * 图表的每一条喂数路径（整批 setData 的 toKLineData、回放逐根 updateData）都必须用它，
+ * 否则逐根推进的 K 线没有金额，动态谢林点要等下一次整批刷新才算得出来（看上去「滞后出现」）。
+ */
+export function chartAmountFields(d: Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'>, progress = 1): { turnover?: number; takerBuyTurnover?: number } {
+  return d.quoteVolume != null && d.takerBuyQuoteVolume != null
+    ? { turnover: d.quoteVolume * progress, takerBuyTurnover: d.takerBuyQuoteVolume * progress }
+    : {};
+}
+
 /** 币安 K 线数组的两列金额（第 8 列成交额、第 11 列主动买入额）；缺失或非法就不带这两个字段。 */
 export function klineAmountFields(row: readonly unknown[]): Pick<KlineData, 'quoteVolume' | 'takerBuyQuoteVolume'> {
   const q = Number(row[7]);

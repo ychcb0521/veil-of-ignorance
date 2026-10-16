@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { formatUTC8 } from "@/lib/timeFormat";
 import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from "@/contexts/TradingContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { SUPERSEDED_INIT_LOAD, useBinanceData, intervalToMs, type KlineData } from "@/hooks/useBinanceData";
+import { SUPERSEDED_INIT_LOAD, useBinanceData, intervalToMs, chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
 import { useBackgroundPrices } from "@/hooks/useBackgroundPrices";
 import { loadPersistedSimState } from "@/hooks/usePersistedState";
 import { usePersistedState, clearSimState } from "@/hooks/usePersistedState";
@@ -831,6 +831,7 @@ const Index = () => {
             low: c.low,
             close: c.close,
             volume: c.volume,
+            ...chartAmountFields(c),
           });
         }
         // 一帧越过多根（高倍速）时让 React 立即补齐其余，与倒放策略一致
@@ -875,6 +876,7 @@ const Index = () => {
             low: Math.min(matchLow, displayClose),
             close: displayClose,
             volume: candle.volume * progress,
+            ...chartAmountFields(candle, progress),
           });
           // 闸门与撮合必须同源，而「同源」的口径是**这根收线时撮合会用的区间**，
           // 即整根 high/low：这根一旦收线，落定分支就拿 data[i] 的完整 high/low 去撮合。
@@ -967,7 +969,7 @@ const Index = () => {
           runConditionalMatchingForSymbol(sym, c, Math.max(simTime, c.time));
           if (i <= loIdx + 2) {
             const m = mirrorSettledBar(c, cap);
-            api.updateData({ timestamp: m.time, open: m.open, high: m.high, low: m.low, close: m.close, volume: m.volume });
+            api.updateData({ timestamp: m.time, open: m.open, high: m.high, low: m.low, close: m.close, volume: m.volume, ...chartAmountFields(m) });
           }
         }
         if (crossed > 3) lastReactFlushRef.current = 0;
@@ -995,6 +997,7 @@ const Index = () => {
             low: Math.min(partial.low, displayClose),
             close: displayClose,
             volume: partial.volume,
+            ...chartAmountFields(partial),
           });
           // 与正放同源：倒放越过这根时撮合用的是整根 high/low，闸门必须看到同一个区间。
           // 倒放此前根本没有发布过区间，闸门读到的是上一次正放留下的、属于另一根的陈旧值。

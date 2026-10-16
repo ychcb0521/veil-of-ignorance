@@ -77,3 +77,13 @@ describe('动态谢林点 DSP：逐条对照规格', () => {
     expect(klineAmountFields([0, '1', '1', '1', '1', '10', 0, 'x', 9, '4', '1'])).toEqual({});
   });
 });
+
+describe('图表喂数：金额字段（回放逐根推送也要带上）', () => {
+  it('chartAmountFields：成交额 → turnover、主动买入额 → takerBuyTurnover；成形中的那根按进度缩放；缺列不带', async () => {
+    const { chartAmountFields } = await import('@/hooks/useBinanceData');
+    expect(chartAmountFields({ quoteVolume: 1000, takerBuyQuoteVolume: 600 })).toEqual({ turnover: 1000, takerBuyTurnover: 600 });
+    expect(chartAmountFields({ quoteVolume: 1000, takerBuyQuoteVolume: 600 }, 0.25)).toEqual({ turnover: 250, takerBuyTurnover: 150 });
+    expect(chartAmountFields({})).toEqual({});
+    expect(chartAmountFields({ quoteVolume: 1000 })).toEqual({});
+  });
+});

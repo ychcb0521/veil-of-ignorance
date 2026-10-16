@@ -665,7 +665,7 @@ export default function GuidePage() {
 
               <SubTitle>盘面指标</SubTitle>
               <P>
-                主图右上角的<strong>「指标」</strong>入口打开指标面板：可搜索、可按<strong>趋势 / 动量 / 波动率 / 量能</strong>分类筛选。目录共 107 项，其中 <strong>44 项已实现</strong>可直接加载，未实现的条目在列表中灰显、点不动——<strong>不会给你一条画不出数的空线</strong>。叠加类指标（均线、通道等）画在主图上，震荡类指标各占一个副图窗格。
+                主图右上角的<strong>「指标」</strong>入口打开指标面板：可搜索、可按<strong>趋势 / 动量 / 波动率 / 量能</strong>分类筛选。目录共 108 项，其中 <strong>45 项已实现</strong>可直接加载，未实现的条目在列表中灰显、点不动——<strong>不会给你一条画不出数的空线</strong>。叠加类指标（均线、通道等）画在主图上，震荡类指标各占一个副图窗格。
               </P>
               <SubTitle>衡量波动率方差：HV 历史波动率</SubTitle>
               <P>
@@ -696,7 +696,7 @@ export default function GuidePage() {
                 Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Uₜ，ρ = 2^(−周期 ÷ h)　　DSPₜ = DSPₜ₋₁ × e^(κ·Vₜ)，DSP₀ = C₀
               </div>
               <ul className="list-disc pl-6 text-[14px] text-foreground/90 space-y-1">
-                <li><strong>一次加三样。</strong>主图一条 DSP 线（V &gt; 0 的段绿色、V &lt; 0 的段红色），下面两个副图：<strong>V 迁移速度</strong>（单位基点 / 根，即 × 10⁴）与 <strong>A 主动买方优势</strong>（−1 ~ 1 的柱，绿 = 主动买方占优），两个副图都以虚线 0 为多空平衡线，纵轴总是包含 0。</li>
+                <li><strong>一次加三样。</strong>主图一条 DSP 线（每一段按这一段终点那根 K 线的 V 着色：V &gt; 0 绿色、V &lt; 0 红色，最新一根落定或成形时立刻跟着变），下面两个副图：<strong>V 迁移速度</strong>（单位基点 / 根，即 × 10⁴）与 <strong>A 主动买方优势</strong>（−1 ~ 1 的柱，绿 = 主动买方占优），两个副图都以虚线 0 为多空平衡线，纵轴总是包含 0。不想要主图那条线时，改选同一分类下的<strong>「动态谢林点 V / A（只要副图）」</strong>：两项二选一，切换时半衰期沿用。回放时每推进一根 K 线，成交额与主动买入额随之送进图表，A 柱和颜色当根就出来，不用等整批刷新。</li>
                 <li><strong>默认参数。</strong>半衰期 h = 6 小时（指标面板里那个数字就是 h，单位小时），α = 1，κ = 1；5 分钟线 ρ = 2^(−5/360)。换到别的周期时 ρ 按实际周期换算，半衰期仍是 h 小时。EMA(Bₜ + Sₜ) 用同一个半衰期。</li>
                 <li><strong>宁缺勿假。</strong>某根 K 线没有成交额数据时，不拿币数凑：这一根不推动共识（Fₜ = 0）、A 留空，V 照常衰减。</li>
                 <li><strong>起点会变。</strong>DSP₀ 取图上最早一根的收盘价，所以图表往左加载更早的 K 线后，整条 DSP 会按新起点重算、整体平移；V 与 A 不受起点影响。</li>

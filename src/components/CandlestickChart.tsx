@@ -18,7 +18,7 @@ import {
   type KLineData,
   type OverlayCreate,
 } from "klinecharts";
-import type { KlineData } from "@/hooks/useBinanceData";
+import { chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
 import type { PendingOrder } from "@/types/trading";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawingToolbar } from "./DrawingToolbar";
@@ -106,12 +106,19 @@ const OVERLAY_INDICATOR_IDS = new Set([
  * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开两个副图——迁移速度 V、主动买方优势 A。
  * 附属副图用「主项#后缀」作 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除。
  */
+const DSP_COMPANIONS = [
+  { key: "DSP#V", kcName: "DSP_V_CUSTOM" },
+  { key: "DSP#A", kcName: "DSP_A_CUSTOM" },
+];
 const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = {
-  DSP: [
-    { key: "DSP#V", kcName: "DSP_V_CUSTOM" },
-    { key: "DSP#A", kcName: "DSP_A_CUSTOM" },
-  ],
+  DSP: DSP_COMPANIONS,
+  // 【用户要求】可以隐去主图的 DSP 线：只开两个副图（与 DSP 共用同一组副图，菜单里两项二选一）
+  DSP_VA: DSP_COMPANIONS,
 };
+/** 右上角小标签上的名字（默认用指标 id）。 */
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·V/A" };
+/** 只有附属副图、没有主指标的菜单项。 */
+const COMPANION_ONLY = new Set(["DSP_VA"]);
 const COMPANION_KC_NAME: Record<string, string> = Object.fromEntries(
   Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName]),
 );
@@ -296,8 +303,7 @@ function toKLineData(d: KlineData): KLineData {
     close: d.close,
     volume: d.volume,
     // 金额两列（USDT）：动态谢林点只用金额；没有就不写，指标按缺失处理
-    ...(d.quoteVolume != null ? { turnover: d.quoteVolume } : {}),
-    ...(d.takerBuyQuoteVolume != null ? { takerBuyTurnover: d.takerBuyQuoteVolume } : {}),
+    ...chartAmountFields(d),
   };
 }
 
@@ -2096,7 +2102,9 @@ function CandlestickChartComponent({
         kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
       }
 
-      if (!activeIndicatorPanes.current.has(ind.type)) {
+      if (COMPANION_ONLY.has(ind.type)) {
+        // 不建主指标，只建下面的附属副图
+      } else if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
           const paneId = chart.createIndicator(
             { name: kcName, calcParams: [ind.period] },
@@ -2353,7 +2361,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {ind.type} {ind.period}
+                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

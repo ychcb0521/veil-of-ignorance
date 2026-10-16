@@ -3,7 +3,7 @@
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { IndicatorSeries, registerIndicator, type KLineData } from 'klinecharts';
+import { registerIndicator, type IndicatorSeries, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
@@ -143,6 +143,14 @@ function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
     { halfLifeHours: Number.isFinite(h) && h > 0 ? h : DSP_DEFAULTS.halfLifeHours },
   );
 }
+
+type SegmentData = { current: { indicatorData?: unknown }; next: { indicatorData?: unknown } };
+/** 折线这一段终点的 V：没有下一根（最后一根）时用这一根自己的。 */
+function segmentEndV(data: SegmentData): number | undefined {
+  const next = (data.next?.indicatorData as { v?: number } | undefined)?.v;
+  return next ?? (data.current.indicatorData as { v?: number } | undefined)?.v;
+}
+const vColor = (v: number | undefined) => (v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D');
 
 /** 副图的 0 轴（多空平衡线）：直接画一条虚线，不当成数据系列（否则纵轴上会多一个 0 的标签）。 */
 function drawZeroLine({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
@@ -756,15 +764,14 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'DSP_CUSTOM',
     shortName: 'DSP',
-    series: IndicatorSeries.Price,
+    // 与主图价格同精度（IndicatorSeries.Price 的值；只做类型导入，测试里的 klinecharts 替身没有这个枚举）
+    series: 'price' as IndicatorSeries,
     calcParams: [DSP_DEFAULTS.halfLifeHours],
     figures: [{
       key: 'dsp', title: 'DSP: ', type: 'line',
-      // V > 0 绿、V < 0 红：曲线往哪边走一眼可见
-      styles: (data) => {
-        const v = (data.current.indicatorData as { v?: number } | undefined)?.v;
-        return { color: v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D', size: 2 };
-      },
+      // V > 0 绿、V < 0 红：曲线往哪边走一眼可见。klinecharts 用这一根的样式画「这一根 → 下一根」那段线，
+      // 所以按段终点（下一根）的 V 着色：最新那段立刻反映最新一根的方向，不晚一根
+      styles: (data) => ({ color: vColor(segmentEndV(data)), size: 2 }),
     }],
     calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.dsp == null ? {} : { dsp: p.dsp, v: p.v ?? undefined })),
   });
@@ -781,10 +788,7 @@ export function registerCustomIndicators() {
     figures: [
       {
         key: 'v', title: 'V(基点/根): ', type: 'line',
-        styles: (data) => {
-          const v = (data.current.indicatorData as { v?: number } | undefined)?.v;
-          return { color: v == null || v === 0 ? '#F0B90B' : v > 0 ? '#0ECB81' : '#F6465D', size: 1.5 };
-        },
+        styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
       },
     ],
     calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? {} : { v: p.v * DSP_V_DISPLAY_SCALE })),
@@ -856,6 +860,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   STDEV: 'STDEV_CUSTOM',
   HV: 'HV_CUSTOM',
   DSP: 'DSP_CUSTOM',
+  DSP_VA: 'DSP_V_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',
