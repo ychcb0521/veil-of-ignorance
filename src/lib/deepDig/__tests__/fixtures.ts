@@ -1,5 +1,7 @@
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import type { RunEvent } from '@/lib/deepRsa/pipeline';
+import { describeDeepDig, snapshotOf, type DeepDigData } from '@/lib/deepDig/analysis';
+import { DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
 
 /** 合成事件：shift = 实验组 V 相对其他事件的平移（原值，对数 / 根）。 */
 export function driftEvents(n: number, shift = 0): RunEvent[] {
@@ -10,7 +12,7 @@ export function driftEvents(n: number, shift = 0): RunEvent[] {
     const kind = i % 3 ? 'event' : 'background';
     const label = kind === 'event' ? (rand() < 0.2 ? 'positive' : rand() < 0.8 ? 'control' : null) : null;
     const v = 2e-4 * (rand() - 0.3) + (label === 'positive' ? shift : 0);
-    const f = { vol_w: vol, dsp_v: v, dsp_a: rand() - 0.5, dsp_gap: vol * 2 * (rand() - 0.3) };
+    const f = { vol_w: vol, deep_dig_x: v, dsp_v: v, dsp_a: rand() - 0.5, dsp_gap: vol * 2 * (rand() - 0.3) };
     return {
       id: `e${i}`, symbol: `S${i % 20}USDT`, anchorMs: t0 + i * 8 * 3_600_000, kind,
       featuresByH: { 2: f, 6: f, 12: f }, label, outcome: vol * 4,
@@ -20,3 +22,13 @@ export function driftEvents(n: number, shift = 0): RunEvent[] {
     } as RunEvent;
   });
 }
+
+/** 合成数据跑一遍描述统计。 */
+export function makeData(events = driftEvents(240, -1e-4), finishedAt = 1): DeepDigData {
+  const { split, ...d } = describeDeepDig(events);
+  return {
+    ...d, definition: snapshotOf(DRIFT_SPEED_DEF), codeVersion: 'test', startedAt: 0, finishedAt,
+    coverage: { campaigns: 200, clusters: 160, failed: 0, lowCoverage: 0, outcomeMissing: 0, featureMissing: 0, ...split },
+  };
+}
+

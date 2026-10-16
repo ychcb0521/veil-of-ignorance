@@ -5,22 +5,31 @@
 
 ## 结构
 
-- **目录**（`/journal/deep-dig`）：特征值列表，每项下面是三个模块的入口和一行摘要。目前只有一项。
-- **特征值页**（`/journal/deep-dig/drift-speed`）：`?tab=` 选模块，`?g=` 选数据分组，`?all=1` 展开全部数据，都在网址上，所以从战役返回后能回到原来的位置。
+- **目录**（`/journal/deep-dig`）：特征值列表，每项下面是三个模块的入口和一行摘要；底部「新增特征值」。
+- **特征值页**（`/journal/deep-dig/<id>`）：`?tab=` 选模块，`?g=` 选数据分组，`?all=1` 展开全部数据，`?edit=1` 打开定义编辑，都在网址上，从战役返回后回到原来的位置。
 
-| 模块 | 内容 |
-|---|---|
-| 描述统计 | 分组（实验组 / 对照组 / 其他战役 / 随机时点）的 n、均值、标准差、中位数、四分位、V > 0 占比；点阵图（橘黄虚线 = 0）；细节说明；逐场数据（点一行打开战役） |
-| 推断统计 | ① Welch t 检验（实验组 vs 对照组）② Mann–Whitney 排名比较（AUC）③ Spearman 相关：V 与之后 24h 期末收益 / 最大涨幅 / 最大跌幅，月内置换 + Holm，控制波动率的偏相关，确认集复核 ④ 五分位分档 |
-| 规律提取 | 默认按这次运行的统计结果自动写出（`driftRules`）；可以手动修改，存在 `usePersistedState('deep_dig_notes_v1')`，跟账号同步；可「恢复为统计结果」 |
+### 定义（2026-10-16 用户要求：可以人为输入定义、公式、分组标准，运行时照这里算）
 
-## 特征值：多空博弈均衡点漂移速度 V
+- **公式**（`src/lib/deepDig/formula.ts`，自己解析、不用 eval）：在进场前 48h 的已收盘 5m K 线上逐根算，取最后一根。
+  序列 `C O H L Q B S`（Q = 成交额、B / S = 主动买 / 卖成交额，USDT）；运算 `+ − × ÷ ^`、比较、`and or not`；
+  函数 `ln exp abs sqrt sign max min prev ema(x, 半衰期小时, 初值) sma sum nz if has`；`名字 = 式子` 起中间量，最后一句是结果。
+  用到 Q / B / S 时，有金额的 K 线不到 95% 记缺失。写错时提示第几行、哪里不对。
+- **分组标准**：实验组、对照组各一个条件，可用 `b`（理论 b）、`r`（盈亏比）、`pnl`、`chg`（主腿涨跌幅 %）、`wear`（L_磨损 ÷ L₀）。
+  同时满足 → 冲突；用到的读数缺失、未结算、校正未拉齐 → 其他战役；都不进两组比较。编辑时即时预览本机战役各组多少场。
+- 内置「多空博弈均衡点漂移速度 V」的默认公式与主图 DSP 的 V 逐根一致，默认分组标准（`b > 3 or r > 3` / `b < 0.5 or r < 0.5`）与原 Deep RSA 分组逐场一致（单元测试核对）。
+- 定义（改过的内置项、新增项）存 `usePersistedState('deep_dig_features_v1')`，跟账号同步；定义改过后，旧结果上方提示重新运行。
 
-进场前最后一根已收盘 5m K 线上的动态谢林点 Vₜ（指标定义见 `docs/indicators/dynamic-schelling-point.md`），半衰期 6 小时，按基点 / 根显示。
-事件与 24h 客观行情沿用原 Deep RSA 流水线（同币 48h 去重成簇、每簇一个代表、加随机时点；发现集前 80%、确认集最后 20%）。
-代码：`src/lib/deepDig/driftSpeed.ts`（统计调用 `src/lib/deepRsa/deepDive.ts` 的 `DRIFT_STUDY`）、`src/hooks/useDriftSpeed.ts`、`src/components/journal/deepDig/DriftSpeedView.tsx`、`src/pages/JournalDeepDigPage.tsx`。
+### 三个模块（用户要求描述统计与推断统计分开运行）
 
-**注意**：现在只检验 V 一项，不再与主动买方优势 A、现价偏离 DSP 一起做多重校正，所以 V 的 p 值会比第 7 步（`../deep-rsa/13-results-dsp-2026-10-16.md`，三项 Holm 后 0.144）小。V 是看过三项结果后单独挑出来的，p 值偏乐观；独立的确认要用之后新产生的战役。
+| 模块 | 运行 | 内容 |
+|---|---|---|
+| 描述统计 | 单独运行：取币安 5m K 线、按公式算、按标准分组（联网，1–3 分钟） | 四组的 n、均值、标准差、中位数、四分位、> 0 占比；点阵图；细节；逐场数据（点一行打开战役；归类不准的行点 × 整行删掉，可查看恢复，删减跟账号走 `deep_dig_excluded_v1`） |
+| 推断统计 | 单独运行：用描述统计的数据（去掉删掉的行），不联网，几秒 | ① Welch t 检验 ② Mann–Whitney（AUC）③ Spearman 相关 + 控制波动 + 确认集 ④ 五分位；描述数据或删减变了会提示重跑 |
+| 规律提取 | 不用运行 | 默认按统计结果写出（`deepDigRules`），可以手动改（`deep_dig_notes_v1`，跟账号同步），可恢复 |
+
+代码：`src/lib/deepDig/`（formula、features、analysis）、`src/hooks/useDeepDigRun.ts`、`src/components/journal/deepDig/`（FeatureView、DefinitionPanel）、`src/pages/JournalDeepDigPage.tsx`。
+
+**注意**：V 现在单独检验，不再与 A、偏离 DSP 一起做多重校正，p 值比第 7 步（`../deep-rsa/13-results-dsp-2026-10-16.md`，三项 Holm 后 0.144）小；V 是看过三项结果后单独挑出来的，p 值偏乐观，独立确认要用之后新产生的战役。
 
 ## 删掉的部分
 

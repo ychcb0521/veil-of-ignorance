@@ -20,7 +20,7 @@ import { computeFeatures, FEATURE_DEFINITIONS, type FeatureFamily, type FeatureK
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { fetchFundingHistory, fetchResearchKlines, mapLimit, MarketDataError, type FetchFn } from '@/lib/deepRsa/marketData';
 import { forwardOutcome, OUTCOME_HORIZON_MS } from '@/lib/deepRsa/outcome';
-import type { CampaignGroupReport } from '@/lib/deepRsa/report';
+import type { CampaignGroupReport, CampaignGroupRow } from '@/lib/deepRsa/report';
 import {
   bhAdjust, holmAdjust, rsaEvaluate, runRsaPanel, selectHalfLife, type PanelRow, type RepresentationSpec, type Row, type RsaEvent,
 } from '@/lib/deepRsa/rsa';
@@ -30,7 +30,7 @@ import { chronologicalSplit } from '@/lib/deepRsa/splits';
 
 export type { FeatureContrastRow };
 import { simulateLongTrade, summarizeTrades, type TradeResult, type TradeSummary } from '@/lib/deepRsa/backtest';
-import { BAR_MS, extractWindow, HALF_LIFE_CANDIDATES_H, type ResearchBar } from '@/lib/deepRsa/window';
+import { BAR_MS, extractWindow, HALF_LIFE_CANDIDATES_H, type ObservationWindow, type ResearchBar } from '@/lib/deepRsa/window';
 
 export const ALPHA = 0.05;
 export const MIN_WINDOW_COVERAGE = 0.95;
@@ -180,9 +180,15 @@ function clusterLabel(groups: readonly DeepRsaGroup[]): 'positive' | 'control' |
 }
 
 /** 事件簇代表 + 随机背景时点。 */
-export function buildRunItems(report: CampaignGroupReport, seed: number, backgroundCap = BACKGROUND_CAP): { items: RunItem[]; campaigns: number; clusters: number } {
+export function buildRunItems(
+  report: CampaignGroupReport,
+  seed: number,
+  backgroundCap = BACKGROUND_CAP,
+  /** Deep dig：按特征值自己的分组标准重新分组（排除项照旧不进）；不给时用默认分组。 */
+  groupOf?: (row: CampaignGroupRow) => DeepRsaGroup,
+): { items: RunItem[]; campaigns: number; clusters: number } {
   const rows = report.rows.filter(r => r.grouping.group !== 'excluded' && r.anchorMs != null);
-  const groupById = new Map(rows.map(r => [r.campaignId, r.grouping.group]));
+  const groupById = new Map(rows.map(r => [r.campaignId, groupOf ? groupOf(r) : r.grouping.group]));
   const clusters = clusterEvents(rows.map(r => ({ id: r.campaignId, symbol: r.symbol, anchorMs: r.anchorMs! })));
   const items: RunItem[] = clusters.map(c => ({
     id: c.clusterId, symbol: c.symbol, anchorMs: c.firstAnchorMs, kind: 'event',
@@ -216,7 +222,11 @@ function reasonOf(error: unknown): string {
 /** 第 1–3 步：事件簇 + 随机背景 → 拉 5m K 线 → 观察窗特征（h = 2 / 6 / 12）与客观结果。 */
 export async function collectRunEvents(
   report: CampaignGroupReport,
-  options: Pick<RunOptions, 'seed' | 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> = {},
+  options: Pick<RunOptions, 'seed' | 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
+    groupOf?: (row: CampaignGroupRow) => DeepRsaGroup;
+    /** Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。 */
+    extraFeatures?: (window: ObservationWindow) => Row;
+  } = {},
 ): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
   const fetchFn = options.fetchFn;
@@ -225,7 +235,7 @@ export async function collectRunEvents(
   const H = [...HALF_LIFE_CANDIDATES_H];
   // ── 1. 事件 ──
   progress('events', 0, 1);
-  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap);
+  const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.groupOf);
 
   // ── 2. 行情 ──
   const failed: DeepRsaRunResult['coverage']['failed'] = [];
@@ -256,7 +266,8 @@ export async function collectRunEvents(
     if (window.missingTakerBars > 0) missingTakerEvents++;
     const featuresByH: Record<number, Row> = {};
     // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
-    for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h) };
+    const extra = options.extraFeatures?.(window) ?? {};
+    for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h), ...extra };
     const outcome = forwardOutcome(bars, item.anchorMs);
     const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;
     const outcomeValue = outcomeOk ? outcome.maxUp : null;
