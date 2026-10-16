@@ -70,18 +70,30 @@ export function clearMarketDataCache(): void {
   fundingCache.clear();
 }
 
-/** [fromMs, toMs) 内开盘的 5m K 线（含主动买入量）；非法行丢弃，由覆盖率体现。 */
+/** 研究可用的 K 线周期（币安 U 本位合约支持的）。默认 5m。 */
+export const RESEARCH_INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d'] as const;
+export type ResearchInterval = (typeof RESEARCH_INTERVALS)[number];
+export function intervalMs(interval: ResearchInterval): number {
+  const n = Number.parseInt(interval, 10);
+  const unit = interval.slice(String(n).length);
+  return n * (unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000);
+}
+
+/** [fromMs, toMs) 内开盘的 K 线（默认 5m，含主动买入量）；非法行丢弃，由覆盖率体现。 */
 export async function fetchResearchKlines(
   symbol: string, fromMs: number, toMs: number, fetchFn: FetchFn = fetch as unknown as FetchFn, signal?: AbortSignal,
+  /** Deep dig 可选别的周期；默认 5m（Deep RSA 各步与 24h 客观结果都用 5m）。 */
+  interval: ResearchInterval = '5m',
 ): Promise<ResearchBar[]> {
-  const from = Math.floor(fromMs / BAR_MS) * BAR_MS;
-  const key = `${symbol}|${from}|${toMs}`;
+  const barMs = intervalMs(interval);
+  const from = Math.floor(fromMs / barMs) * barMs;
+  const key = `${symbol}|${interval}|${from}|${toMs}`;
   const hit = klineCache.get(key);
   if (hit) return hit;
   const out: ResearchBar[] = [];
   let cursor = from;
   while (cursor < toMs) {
-    const qs = new URLSearchParams({ symbol, interval: '5m', startTime: String(cursor), endTime: String(toMs - 1), limit: String(KLINE_LIMIT) });
+    const qs = new URLSearchParams({ symbol, interval, startTime: String(cursor), endTime: String(toMs - 1), limit: String(KLINE_LIMIT) });
     const raw = await getJson(`/fapi/v1/klines?${qs}`, fetchFn, signal);
     if (!Array.isArray(raw)) throw new MarketDataError('K 线响应格式无效', 'invalid');
     if (raw.length === 0) break;
@@ -93,7 +105,7 @@ export async function fetchResearchKlines(
       if (Number.isFinite(open)) lastOpen = Math.max(lastOpen, open);
     }
     if (raw.length < KLINE_LIMIT) break;
-    cursor = lastOpen + BAR_MS;
+    cursor = lastOpen + barMs;
   }
   klineCache.set(key, out);
   return out;

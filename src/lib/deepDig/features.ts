@@ -8,6 +8,7 @@
  * 内置的「多空博弈均衡点漂移速度 V」默认公式与主图 DSP 指标的 V 逐根一致（单元测试核对），默认分组标准与原 Deep RSA 分组一致。
  */
 import type { ObservationWindow } from '@/lib/deepRsa/window';
+import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
@@ -35,13 +36,46 @@ export interface DeepDigFeatureDef {
    * 没有这一项的是旧写法（b 理论 b、r 盈亏比、pnl、chg、wear），读进来时自动换成新字母，意思不变。
    */
   groupVars?: 2;
+  /**
+   * 特征值用哪个周期的 K 线、半衰期多少小时（公式里写 hl）。
+   * 【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量。另外半衰期也要做成可以选择的」。
+   * 不给 = 5m、6 小时（与原 Deep RSA 第 7 步、主图 DSP 一致）。
+   */
+  interval?: ResearchInterval;
+  halfLifeHours?: number;
   builtin?: boolean;
   /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
   removed?: boolean;
   createdAt?: number;
 }
 
-/** 公式里可用的序列：每根 5m K 线一个值。 */
+export const DEFAULT_INTERVAL: ResearchInterval = '5m';
+export const DEFAULT_HALF_LIFE_HOURS = 6;
+/** 半衰期的快捷选项（小时）；也可以手填。 */
+export const HALF_LIFE_PRESETS = [1, 2, 3, 6, 12, 24, 48, 72] as const;
+/** 特征值的 K 线周期（不含太粗的 6h / 12h，界面上更简洁）。 */
+export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
+export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
+
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'>): ResearchInterval => d.interval ?? DEFAULT_INTERVAL;
+export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
+
+/**
+ * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
+ * 周期粗时至少 50 根。默认（5m、6 小时）正好 48 小时。
+ */
+export function featureWindowMs(d: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours'>): number {
+  return Math.max(48 * 3_600_000, 8 * halfLifeOf(d) * 3_600_000, 50 * intervalMs(intervalOf(d)));
+}
+/** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
+export const barsPerHalfLife = (d: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours'>) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));
+
+/** 公式里可用的参数（一个数）：hl = 上面选的半衰期（小时）。 */
+export const PARAM_VARIABLES: readonly { name: string; label: string }[] = [
+  { name: 'hl', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
+];
+
+/** 公式里可用的序列：每根 K 线（上面选的周期）一个值。 */
 export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
   { name: 'C', label: '收盘价' },
   { name: 'O', label: '开盘价' },
@@ -54,6 +88,8 @@ export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
 const AMOUNT_VARIABLES = new Set(['Q', 'B', 'S']);
 /** 用到成交额的公式：观察窗里有金额数据的 K 线不到这个比例，这一场记缺失（不拿币数凑）。 */
 export const MIN_AMOUNT_COVERAGE = 0.95;
+/** 观察窗的 K 线覆盖率至少这么多（与原研究同一标准）。 */
+export const MIN_WINDOW_COVERAGE = 0.95;
 
 export type SampleSource = 'campaigns' | 'signals';
 export const SOURCE_LABEL: Record<SampleSource, string> = { campaigns: '交易战役', signals: '信号库' };
@@ -83,7 +119,8 @@ export function upgradeGroupVars<T extends { positive: string; control: string; 
   return { ...d, positive: translateLegacyGroupExpr(d.positive), control: translateLegacyGroupExpr(d.control), groupVars: 2 };
 }
 
-export const DRIFT_SPEED_FORMULA = [
+/** 上一版的默认公式（半衰期写死 6）：用户存的若还是它，读进来换成跟随 hl 的新版。 */
+const LEGACY_DRIFT_SPEED_FORMULA = [
   '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S',
   'N = abs(B - S)              # 主动净资金',
   'F = ln(1 + N / ema(Q, 6))   # 资金力量：净资金比平时的成交额异常多少',
@@ -94,11 +131,22 @@ export const DRIFT_SPEED_FORMULA = [
   'V = ema(U, 6, 0)            # 漂移速度：半衰期 6 小时指数平滑',
 ].join('\n');
 
+export const DRIFT_SPEED_FORMULA = [
+  '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 上面选的半衰期（小时）',
+  'N = abs(B - S)              # 主动净资金',
+  'F = ln(1 + N / ema(Q, hl))  # 资金力量：净资金比平时的成交额异常多少',
+  'A = (B - S) / Q             # 主动买方优势',
+  'G = 1 + max(A, 0)           # 买方优势权重',
+  'R = ln(C / prev(C))         # 价格变化',
+  'U = nz(F * G * R)           # 单根推动力（缺数据的那根记 0）',
+  'V = ema(U, hl, 0)           # 漂移速度：按半衰期 hl 指数平滑',
+].join('\n');
+
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   id: 'drift-speed',
   name: '多空博弈均衡点漂移速度 V',
   short: 'V',
-  definition: '进场前最后一根 5m K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期 6 小时指数平滑。',
+  definition: '进场前最后一根 K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期指数平滑（周期、半衰期见下）。',
   formula: DRIFT_SPEED_FORMULA,
   scale: 1e4,
   unit: '基点/根',
@@ -118,7 +166,7 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
     name: '新特征值',
     short: 'X',
     definition: '',
-    formula: '# 例：进场前 12 小时（144 根 5m K 线）的涨跌幅\nln(C / prev(C, 144))',
+    formula: '# 例：最近 144 根 K 线的涨跌幅（5 分钟周期 = 12 小时）\nln(C / prev(C, 144))',
     scale: 100,
     unit: '%',
     positive: DEFAULT_POSITIVE,
@@ -131,10 +179,18 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  const byId = new Map(saved.map(d => [d.id, upgradeGroupVars(d)]));
+  const byId = new Map(saved.map(d => [d.id, upgradeFormula(upgradeGroupVars(d))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   return [...builtins, ...custom];
+}
+
+/** 存的还是上一版写死 6 小时的默认公式：换成跟随 hl 的新版（hl 默认 6，结果不变）。 */
+function upgradeFormula<T extends { formula?: string; definition?: string }>(d: T): T {
+  if (d.formula?.trim() !== LEGACY_DRIFT_SPEED_FORMULA) return d;
+  const definition = d.definition === '进场前最后一根 5m K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期 6 小时指数平滑。'
+    ? DRIFT_SPEED_DEF.definition : d.definition;
+  return { ...d, formula: DRIFT_SPEED_FORMULA, definition };
 }
 
 /** 被删掉（隐藏）的内置项：目录底部给一个不起眼的「恢复」。 */
@@ -144,9 +200,14 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours'>) => {
   const g = upgradeGroupVars(d);
-  return JSON.stringify([d.formula.trim(), g.positive.trim(), g.control.trim(), d.source ?? 'campaigns']);
+  const formula = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? DRIFT_SPEED_FORMULA : d.formula.trim();
+  const key: unknown[] = [formula, g.positive.trim(), g.control.trim(), d.source ?? 'campaigns'];
+  // 默认周期 / 半衰期不进键：旧结果没有这两项
+  if (intervalOf(d) !== DEFAULT_INTERVAL) key.push(intervalOf(d));
+  if (halfLifeOf(d) !== DEFAULT_HALF_LIFE_HOURS) key.push(`hl=${halfLifeOf(d)}`);
+  return JSON.stringify(key);
 };
 
 // ===================== 公式 =====================
@@ -157,14 +218,21 @@ export interface CompiledFeature {
 }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
-  const program = parseFormula(formula, new Set(SERIES_VARIABLES.map(v => v.name)));
+  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), 'hl', '半衰期']));
   return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)) };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
-export function computeFeatureValue(window: ObservationWindow, compiled: CompiledFeature): number | null {
+export function computeFeatureValue(
+  window: ObservationWindow | null,
+  compiled: CompiledFeature,
+  params: { interval?: ResearchInterval; halfLifeHours?: number } = {},
+): number | null {
+  if (!window) return null;
   const bars = window.bars;
   if (!bars.length) return null;
+  // 这个周期的观察窗缺太多 K 线：不算（5m 观察窗在流水线里已按同一标准筛过）
+  if (window.coverage < MIN_WINDOW_COVERAGE) return null;
   if (compiled.usesAmounts) {
     const withAmounts = bars.filter(b => b.quoteVolume != null && b.takerBuyQuoteVolume != null).length;
     if (withAmounts < MIN_AMOUNT_COVERAGE * bars.length) return null;
@@ -179,7 +247,8 @@ export function computeFeatureValue(window: ObservationWindow, compiled: Compile
     return lastValue(evaluateProgram(compiled.program, {
       C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
       Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
-    }));
+      hl: halfLifeOf(params), 半衰期: halfLifeOf(params),
+    }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 }));
   } catch {
     return null;
   }

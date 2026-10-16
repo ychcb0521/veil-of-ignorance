@@ -85,7 +85,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
   it('定义区：显示公式与分组标准；编辑时写错公式给出行号，分组标准即时预览本机战役各组多少场；保存后提示按旧定义算', () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
-    expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('V = ema(U, 6, 0)');
+    expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('V = ema(U, hl, 0)');
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ > 3 or b > 3');
     fireEvent.click(screen.getByTestId('deep-dig-def-edit'));
     expect(screen.getByTestId('deep-dig-def-preview')).toHaveTextContent('实验组 1 · 对照组 1 · 冲突 0 · 其他 1');
@@ -101,7 +101,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(screen.getByTestId('deep-dig-def-save'));
     expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ formula: 'ln(C / prev(C, 12))', positive: 'r > 2' }));
     expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('ln(C / prev(C, 12))');
-    expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('公式或分组标准改过了');
+    expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('公式、周期、半衰期或分组标准改过了');
   });
 
   it('【用户要求】分组标准可以就地改：描述统计「分组」处点「改标准」，写错不能保存，预览各组场数，保存后提示按新标准重跑', () => {
@@ -127,6 +127,34 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.keyDown(screen.getByTestId('deep-dig-def-groups-control'), { key: 'Escape' });
     expect(onSaveDef).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ < 0.5 or b < 0.5');
+  });
+
+  it('【用户要求】周期、半衰期可选：定义区点一下就保存，摘要换算成根数与观察窗；改了提示按旧定义算；默认值不写进定义', () => {
+    const onSaveDef = vi.fn();
+    render(<Harness onSaveDef={onSaveDef} />);
+    expect(screen.getByTestId('deep-dig-kline-interval-5m')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('deep-dig-kline-hl-6')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('= 72 根 5 分钟 K 线 · 观察窗 2 天');
+    fireEvent.click(screen.getByTestId('deep-dig-kline-interval-15m'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: '15m', halfLifeHours: undefined }));
+    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('= 24 根 15 分钟 K 线 · 观察窗 2 天');
+    expect(screen.getByTestId('deep-dig-stale')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-kline-hl-12'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: '15m', halfLifeHours: 12 }));
+    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('观察窗 4 天');
+    // 自定半衰期：回车生效；乱写不改
+    fireEvent.change(screen.getByTestId('deep-dig-kline-hl-custom'), { target: { value: '3' } });
+    fireEvent.keyDown(screen.getByTestId('deep-dig-kline-hl-custom'), { key: 'Enter' });
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ halfLifeHours: 3 }));
+    const calls = onSaveDef.mock.calls.length;
+    fireEvent.change(screen.getByTestId('deep-dig-kline-hl-custom'), { target: { value: 'abc' } });
+    fireEvent.keyDown(screen.getByTestId('deep-dig-kline-hl-custom'), { key: 'Enter' });
+    expect(onSaveDef).toHaveBeenCalledTimes(calls);
+    // 换回默认：不写进定义
+    fireEvent.click(screen.getByTestId('deep-dig-kline-interval-5m'));
+    fireEvent.click(screen.getByTestId('deep-dig-kline-hl-6'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: undefined, halfLifeHours: undefined }));
+    expect(screen.queryByTestId('deep-dig-stale')).not.toBeInTheDocument();
   });
 
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {

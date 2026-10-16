@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluateProgram, lastValue, parseFormula } from '@/lib/deepDig/formula';
 import { compileFeatureFormula, computeFeatureValue, DRIFT_SPEED_FORMULA } from '@/lib/deepDig/features';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
+import { computeDsp } from '@/lib/dynamicSchellingPoint';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import { BAR_MS, type ObservationWindow, type ResearchBar } from '@/lib/deepRsa/window';
 
@@ -72,6 +73,28 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
       expect(ref).not.toBeNull();
       expect(computeFeatureValue(w, compiled)).toBeCloseTo(ref, 12);
     }
+  });
+
+  it('【用户要求】周期、半衰期可选：15 分钟线 + 半衰期 2 / 6 小时，默认公式与主图 DSP 按同一周期、同一半衰期算出的 V 一致', () => {
+    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA);
+    const M15 = 15 * 60_000;
+    const w = window(400, 7, 0);
+    const bars15 = w.bars.map((b, i) => ({ ...b, openTime: i * M15 }));
+    const w15 = { ...w, bars: bars15 };
+    const dspInput = bars15.map(b => ({ time: b.openTime, close: b.close, quoteVolume: b.quoteVolume ?? null, takerBuyQuoteVolume: b.takerBuyQuoteVolume ?? null }));
+    for (const hl of [2, 6]) {
+      const ref = computeDsp(dspInput, { halfLifeHours: hl }, M15).at(-1)!.v!;
+      expect(computeFeatureValue(w15, compiled, { interval: '15m', halfLifeHours: hl })).toBeCloseTo(ref, 12);
+    }
+    // 不同周期 / 半衰期确实不同
+    expect(computeFeatureValue(w15, compiled, { interval: '15m', halfLifeHours: 2 })).not.toBeCloseTo(computeFeatureValue(w15, compiled, { interval: '15m', halfLifeHours: 6 })!, 8);
+    // ema 按周期换算：15 分钟、半衰期 1 小时 → ρ = 2^(−15/60)
+    const e = run('ema(x, 1)', { x: S([10, 20]) }) as Float64Array;
+    const e15 = evaluateProgram(parseFormula('ema(x, 1)', new Set(['x'])), { x: S([10, 20]) }, { barMinutes: 15 }) as Float64Array;
+    expect(e15[1]).toBeCloseTo(2 ** (-15 / 60) * 10 + (1 - 2 ** (-15 / 60)) * 20, 12);
+    expect(e[1]).not.toBeCloseTo(e15[1], 6);
+    // 观察窗 K 线不足 95% 不算
+    expect(computeFeatureValue({ ...w15, coverage: 0.9 }, compiled, { interval: '15m' })).toBeNull();
   });
 
   it('用到成交额的公式：有金额的 K 线不到 95% 记缺失；不用成交额的公式照算', () => {

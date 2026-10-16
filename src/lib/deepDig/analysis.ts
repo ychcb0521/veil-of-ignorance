@@ -14,8 +14,9 @@ import { collectRunEvents, type RunEvent, type RunOptions } from '@/lib/deepRsa/
 import { chronologicalSplit } from '@/lib/deepRsa/splits';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 import {
-  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValue, DRIFT_SPEED_DEF, sampleEventRows, signalSample,
+  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValue, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, halfLifeOf, intervalOf, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
@@ -29,7 +30,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours'>;
 
 export interface DeepDigRow {
   id: string;
@@ -101,7 +102,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2 };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -167,7 +168,9 @@ export async function collectDeepDigData(
     eventRows: sampleEventRows(samples, groups),
     // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
     cluster: source !== 'signals',
-    extraFeatures: window => ({ [DEEP_DIG_KEY]: computeFeatureValue(window, compiled) }),
+    // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
+    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: featureWindowMs(def) } } : {}),
+    extraFeatures: window => ({ [DEEP_DIG_KEY]: computeFeatureValue(window, compiled, { interval: intervalOf(def), halfLifeHours: halfLifeOf(def) }) }),
   });
   const described = describeDeepDig(collected.events);
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });

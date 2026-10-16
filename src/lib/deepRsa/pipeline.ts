@@ -18,7 +18,7 @@ import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
 import { computeFeatures, FEATURE_DEFINITIONS, type FeatureFamily, type FeatureKey } from '@/lib/deepRsa/features';
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
-import { fetchFundingHistory, fetchResearchKlines, mapLimit, MarketDataError, type FetchFn } from '@/lib/deepRsa/marketData';
+import { fetchFundingHistory, fetchResearchKlines, intervalMs, mapLimit, MarketDataError, type FetchFn, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { forwardOutcome, OUTCOME_HORIZON_MS } from '@/lib/deepRsa/outcome';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import {
@@ -238,8 +238,16 @@ export async function collectRunEvents(
     eventRows?: readonly EventRow[];
     /** false = 事件不按同币 48h 合簇（Deep dig 的信号样本）。 */
     cluster?: boolean;
-    /** Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。 */
-    extraFeatures?: (window: ObservationWindow) => Row;
+    /**
+     * Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。
+     * 给了 featureKlines 时，传进来的是那个周期、那段长度的观察窗（取不到为 null）；否则是 5m、48h 的观察窗。
+     */
+    extraFeatures?: (window: ObservationWindow | null) => Row;
+    /**
+     * Deep dig 特征值用别的 K 线周期 / 观察窗长度：【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量」。
+     * 另外再取一次这个周期的 K 线；24h 客观结果、波动率等仍按 5m 算（结果口径不随周期变）。
+     */
+    featureKlines?: { interval: ResearchInterval; windowMs: number };
   } = {},
 ): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
@@ -258,7 +266,14 @@ export async function collectRunEvents(
     checkAbort(signal);
     const entry = Math.ceil(item.anchorMs / BAR_MS) * BAR_MS;
     return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - WINDOW_MS, entry + OUTCOME_HORIZON_MS, fetchFn, signal);
-  }, done => progress('fetch', done, items.length));
+  }, done => progress('fetch', done, items.length * (options.featureKlines ? 2 : 1)));
+  checkAbort(signal);
+  const fk = options.featureKlines;
+  const fkBarMs = fk ? intervalMs(fk.interval) : BAR_MS;
+  const featureFetched = fk ? await mapLimit(items, options.concurrency ?? 4, item => {
+    checkAbort(signal);
+    return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - fk.windowMs, item.anchorMs, fetchFn, signal, fk.interval);
+  }, done => progress('fetch', items.length + done, items.length * 2)) : null;
   checkAbort(signal);
 
   // ── 3. 特征 ──
@@ -280,7 +295,12 @@ export async function collectRunEvents(
     if (window.missingTakerBars > 0) missingTakerEvents++;
     const featuresByH: Record<number, Row> = {};
     // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
-    const extra = options.extraFeatures?.(window) ?? {};
+    let featureWindow: ObservationWindow | null = window;
+    if (fk && featureFetched) {
+      const fr = featureFetched[i];
+      featureWindow = fr.status === 'fulfilled' ? extractWindow(fr.value, item.anchorMs, fk.windowMs, fkBarMs) : null;
+    }
+    const extra = options.extraFeatures?.(featureWindow) ?? {};
     for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h), ...extra };
     const outcome = forwardOutcome(bars, item.anchorMs);
     const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;

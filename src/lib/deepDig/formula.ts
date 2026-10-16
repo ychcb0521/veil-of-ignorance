@@ -24,7 +24,7 @@ export interface FunctionSpec {
   help: string;
 }
 
-/** 5m K 线：ema 的半衰期按小时给，换算成每根的衰减。 */
+/** 默认 5m K 线：ema 的半衰期按小时给，按 K 线周期换算成每根的衰减（evaluateProgram 的 barMinutes）。 */
 export const FORMULA_BAR_MINUTES = 5;
 
 export const FUNCTIONS: readonly FunctionSpec[] = [
@@ -37,7 +37,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'max', min: 2, max: 2, usage: 'max(a, b)', help: '逐根取较大的' },
   { name: 'min', min: 2, max: 2, usage: 'min(a, b)', help: '逐根取较小的' },
   { name: 'prev', min: 1, max: 2, usage: 'prev(x, k)', help: '前 k 根的值（k 默认 1）；开头没有前 k 根的记空' },
-  { name: 'ema', min: 2, max: 3, usage: 'ema(x, h, 初值)', help: '指数平滑，半衰期 h 小时（每根 5 分钟）：yₜ = ρ·yₜ₋₁ + (1 − ρ)·xₜ，ρ = 2^(−5 分钟 ÷ h)；x 为空的那根跳过；不给初值时从第一个非空值起算' },
+  { name: 'ema', min: 2, max: 3, usage: 'ema(x, h, 初值)', help: '指数平滑，半衰期 h 小时（h 可写 hl = 上面选的半衰期）：yₜ = ρ·yₜ₋₁ + (1 − ρ)·xₜ，ρ = 2^(−周期 ÷ h)，周期 = 上面选的 K 线周期；x 为空的那根跳过；不给初值时从第一个非空值起算' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
   { name: 'nz', min: 1, max: 2, usage: 'nz(x, v)', help: '空换成 v（默认 0）' },
@@ -285,7 +285,7 @@ function binary(op: string, a: Value, b: Value): Value {
   }
 }
 
-function call(name: string, args: Value[], line: number): Value {
+function call(name: string, args: Value[], line: number, barMinutes: number): Value {
   const [x, y, z] = args;
   switch (name) {
     case 'ln': case 'log': return map1(x, v => clean(Math.log(v)));
@@ -310,7 +310,7 @@ function call(name: string, args: Value[], line: number): Value {
       const h = scalarArg(y, 'ema', '半衰期', line);
       if (!(h > 0)) throw new FormulaError('ema 的半衰期要大于 0（单位：小时）', line);
       const init = z == null ? null : scalarArg(z, 'ema', '初值', line);
-      const rho = 2 ** (-FORMULA_BAR_MINUTES / (h * 60));
+      const rho = 2 ** (-barMinutes / (h * 60));
       if (!isSeries(x)) return x;
       const out = new Float64Array(x.length);
       let s: number | null = init;
@@ -338,7 +338,7 @@ function call(name: string, args: Value[], line: number): Value {
   }
 }
 
-function evaluateNode(n: Node, env: Map<string, Value>): Value {
+function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number): Value {
   switch (n.k) {
     case 'num': return n.v;
     case 'var': {
@@ -347,20 +347,21 @@ function evaluateNode(n: Node, env: Map<string, Value>): Value {
       return v;
     }
     case 'un': {
-      const a = evaluateNode(n.a, env);
+      const a = evaluateNode(n.a, env, barMinutes);
       return n.op === '-' ? map1(a, x => -x) : map1(a, x => (Number.isNaN(x) ? Number.NaN : truthy(x) ? 0 : 1));
     }
-    case 'bin': return binary(n.op, evaluateNode(n.a, env), evaluateNode(n.b, env));
-    case 'call': return call(n.name, n.args.map(a => evaluateNode(a, env)), n.line);
+    case 'bin': return binary(n.op, evaluateNode(n.a, env, barMinutes), evaluateNode(n.b, env, barMinutes));
+    case 'call': return call(n.name, n.args.map(a => evaluateNode(a, env, barMinutes)), n.line, barMinutes);
   }
 }
 
 /** 按顺序算完所有句子，返回最后一句的值。 */
-export function evaluateProgram(program: Program, inputs: Readonly<Record<string, Value>>): Value {
+export function evaluateProgram(program: Program, inputs: Readonly<Record<string, Value>>, options: { barMinutes?: number } = {}): Value {
   const env = new Map<string, Value>(Object.entries(inputs));
+  const barMinutes = options.barMinutes ?? FORMULA_BAR_MINUTES;
   let last: Value = Number.NaN;
   for (const s of program.statements) {
-    last = evaluateNode(s.expr, env);
+    last = evaluateNode(s.expr, env, barMinutes);
     if (s.name) env.set(s.name, last);
   }
   return last;

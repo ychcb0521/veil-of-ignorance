@@ -4,6 +4,8 @@ import { buildRunItems, runDeepRsa } from '@/lib/deepRsa/pipeline';
 import type { CampaignGroupReport, CampaignGroupRow } from '@/lib/deepRsa/report';
 import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { BAR_MS } from '@/lib/deepRsa/window';
+import { collectDeepDigData } from '@/lib/deepDig/analysis';
+import { DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
@@ -15,7 +17,7 @@ type Planted = { symbol: string; anchorMs: number; label: 'positive' | 'control'
  * 模拟币安 /fapi/v1/klines：价格与主动买入量由植入事件决定——
  * 正样本：t₀ 前 6h 主动买入占 80%，t₀ 后 24h 每根涨 0.3%；对照：前 6h 主动买入占 20%，之后每根跌 0.1%。
  */
-function fakeMarket(planted: readonly Planted[], options: { failSymbol?: string } = {}) {
+function fakeMarket(planted: readonly Planted[], options: { failSymbol?: string; quote?: boolean } = {}) {
   const calls: string[] = [];
   const logPrice = (symbol: string, t: number) => {
     let lp = Math.log(100) + 0.002 * Math.sin(t / (7 * BAR_MS) + symbol.length);
@@ -44,11 +46,12 @@ function fakeMarket(planted: readonly Planted[], options: { failSymbol?: string 
     const end = Number(u.searchParams.get('endTime'));
     const limit = Number(u.searchParams.get('limit'));
     const rows: unknown[] = [];
-    for (let t = Math.ceil(start / BAR_MS) * BAR_MS; t <= end && rows.length < limit; t += BAR_MS) {
+    const step = BAR_MS * ({ '15m': 3, '1h': 12 } as Record<string, number>)[u.searchParams.get('interval') ?? ''] || BAR_MS;
+    for (let t = Math.ceil(start / step) * step; t <= end && rows.length < limit; t += step) {
       const o = Math.exp(logPrice(symbol, t));
-      const c = Math.exp(logPrice(symbol, t + BAR_MS));
-      const v = 100 + 10 * Math.sin(t / (11 * BAR_MS));
-      rows.push([t, String(o), String(Math.max(o, c) * 1.0005), String(Math.min(o, c) * 0.9995), String(c), String(v), t + BAR_MS - 1, '0', 1, String(v * takerRatio(symbol, t)), '0', '0']);
+      const c = Math.exp(logPrice(symbol, t + step));
+      const v = (100 + 10 * Math.sin(t / (11 * BAR_MS))) * (step / BAR_MS);
+      rows.push([t, String(o), String(Math.max(o, c) * 1.0005), String(Math.min(o, c) * 0.9995), String(c), String(v), t + step - 1, options.quote ? String(v * c) : '0', 1, String(v * takerRatio(symbol, t)), options.quote ? String(v * c * takerRatio(symbol, t)) : '0', '0']);
     }
     return { ok: true, status: 200, json: async () => rows };
   };
@@ -196,5 +199,41 @@ describe('一键流程：植入结构能被检出，且全程不看未来', () =
     const controller = new AbortController();
     controller.abort();
     await expect(runDeepRsa(reportOf(planted), { fetchFn, signal: controller.signal, backgroundCap: 0 })).rejects.toMatchObject({ kind: 'aborted' });
+  });
+});
+
+describe('Deep dig：周期、半衰期可选', () => {
+  const planted: Planted[] = [
+    { symbol: 'AAAUSDT', anchorMs: T_START + 3 * DAY, label: 'positive' },
+    { symbol: 'BBBUSDT', anchorMs: T_START + 5 * DAY, label: 'control' },
+  ];
+
+  it('【用户要求】选 15 分钟：另取 15m K 线算特征值（观察窗 48 小时）；24h 结果仍按 5m；默认 5m 不多取', async () => {
+    const m15 = fakeMarket(planted, { quote: true });
+    const d15 = await collectDeepDigData(reportOf(planted), { ...DRIFT_SPEED_DEF, interval: '15m' }, { fetchFn: m15.fetchFn, backgroundCap: 0 });
+    expect(m15.calls.filter(u => u.includes('interval=15m'))).toHaveLength(2);
+    expect(m15.calls.filter(u => u.includes('interval=5m')).length).toBeGreaterThanOrEqual(2);
+    expect(d15.definition).toMatchObject({ interval: '15m', halfLifeHours: 6 });
+    clearMarketDataCache();
+    const m5 = fakeMarket(planted, { quote: true });
+    const d5 = await collectDeepDigData(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m5.fetchFn, backgroundCap: 0 });
+    expect(m5.calls.some(u => u.includes('interval=15m'))).toBe(false);
+    const v = (d: typeof d5) => d.rows.map(r => r.v);
+    expect(v(d15).every(x => x != null && Number.isFinite(x))).toBe(true);
+    expect(v(d5).every(x => x != null && Number.isFinite(x))).toBe(true);
+    expect(v(d15)[0]).not.toBeCloseTo(v(d5)[0]!, 10);
+    // 24h 结果两边一样（都按 5m）
+    expect(d15.rows.map(r => r.endRet)).toEqual(d5.rows.map(r => r.endRet));
+  });
+
+  it('半衰期 12 小时：观察窗放到 96 小时，同一周期结果和 6 小时不同', async () => {
+    const m = fakeMarket(planted, { quote: true });
+    const d12 = await collectDeepDigData(reportOf(planted), { ...DRIFT_SPEED_DEF, halfLifeHours: 12 }, { fetchFn: m.fetchFn, backgroundCap: 0 });
+    const featureCall = m.calls.find(u => u.includes('interval=5m') && Number(new URL(u).searchParams.get('endTime')) <= T_START + 3 * DAY && Number(new URL(u).searchParams.get('startTime')) <= T_START + 3 * DAY - 96 * HOUR);
+    expect(featureCall).toBeDefined();
+    clearMarketDataCache();
+    const d6 = await collectDeepDigData(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: fakeMarket(planted, { quote: true }).fetchFn, backgroundCap: 0 });
+    expect(d12.rows.every(r => r.v != null) && d6.rows.every(r => r.v != null)).toBe(true);
+    expect(d12.rows[0].v).not.toBeCloseTo(d6.rows[0].v!, 10);
   });
 });

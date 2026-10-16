@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   campaignSample, checkDefinition, classifyCampaign, classifySample, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, definitionKey, DRIFT_SPEED_DEF, mergeFeatureDefs, newFeatureTemplate, previewGroups, removedBuiltins,
-  sampleEventRows, signalSample, translateLegacyGroupExpr, upgradeGroupVars,
+  featureWindowMs, sampleEventRows, signalSample, translateLegacyGroupExpr, upgradeGroupVars,
 } from '@/lib/deepDig/features';
 import { groupCampaign, mulberry32, type CampaignLabelInput } from '@/lib/deepRsa/grouping';
 import { buildCampaignGroupReport, type CampaignGroupRow } from '@/lib/deepRsa/report';
@@ -63,6 +63,19 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     expect(upgradeGroupVars({ positive: 'b > 3', control: 'r < 0.5', groupVars: 2 as const }).positive).toBe('b > 3');
     // 旧结果里的定义也按同一规则换算：definitionKey 相同，不会误报「定义改过了」
     expect(definitionKey({ ...old })).toBe(definitionKey(merged));
+    // 上一版写死 6 小时的默认公式换成跟随 hl 的新版（hl 默认 6，结果不变、不误报改过）
+    const legacyFormula = DRIFT_SPEED_DEF.formula.replace('ema(Q, hl))  #', 'ema(Q, 6))   #').replace('ema(U, hl, 0)           # 漂移速度：按半衰期 hl 指数平滑', 'ema(U, 6, 0)            # 漂移速度：半衰期 6 小时指数平滑').replace('Q = B + S；hl = 上面选的半衰期（小时）', 'Q = B + S');
+    const upgraded = mergeFeatureDefs([{ ...DRIFT_SPEED_DEF, formula: legacyFormula, builtin: undefined }])[0];
+    expect(upgraded.formula).toBe(DRIFT_SPEED_DEF.formula);
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, formula: legacyFormula })).toBe(definitionKey(DRIFT_SPEED_DEF));
+    // 换周期 / 半衰期算定义改动；默认值不进键
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, interval: '15m' })).not.toBe(definitionKey(DRIFT_SPEED_DEF));
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, halfLifeHours: 12 })).not.toBe(definitionKey(DRIFT_SPEED_DEF));
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, interval: '5m', halfLifeHours: 6 })).toBe(definitionKey(DRIFT_SPEED_DEF));
+    // 观察窗：默认 48 小时；半衰期长了放到 8 个半衰期；周期粗了至少 50 根
+    expect(featureWindowMs({})).toBe(48 * 3_600_000);
+    expect(featureWindowMs({ halfLifeHours: 12 })).toBe(96 * 3_600_000);
+    expect(featureWindowMs({ interval: '4h' })).toBe(200 * 3_600_000);
   });
 
   it('【用户要求】样本来自信号库：时间点 = 信号时间，s = 星级；没评分缺失，探顶区等不进样本', () => {

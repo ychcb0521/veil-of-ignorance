@@ -76,9 +76,9 @@ export interface ObservationWindow {
 }
 
 /** 窗口里能完整容纳的 5m 槽位数。 */
-export function expectedWindowBars(anchorMs: number, windowMs = WINDOW_MS): number {
-  const first = Math.ceil((anchorMs - windowMs) / BAR_MS);
-  const last = Math.floor(anchorMs / BAR_MS) - 1;
+export function expectedWindowBars(anchorMs: number, windowMs = WINDOW_MS, barMs = BAR_MS): number {
+  const first = Math.ceil((anchorMs - windowMs) / barMs);
+  const last = Math.floor(anchorMs / barMs) - 1;
   return Math.max(0, last - first + 1);
 }
 
@@ -86,19 +86,19 @@ export function expectedWindowBars(anchorMs: number, windowMs = WINDOW_MS): numb
  * 从任意一段 K 线里切出 [t₀ − 48h, t₀) 的已收盘 K 线。传入的 bars 可以包含 t₀ 之后的数据，
  * 这里一律丢掉——下游特征因此不可能看到未来。
  */
-export function extractWindow(bars: readonly ResearchBar[], anchorMs: number, windowMs = WINDOW_MS): ObservationWindow {
+export function extractWindow(bars: readonly ResearchBar[], anchorMs: number, windowMs = WINDOW_MS, barMs = BAR_MS): ObservationWindow {
   const lower = anchorMs - windowMs;
   const byOpen = new Map<number, ResearchBar>();
   for (const bar of bars) {
-    if (bar.openTime < lower || bar.openTime + BAR_MS > anchorMs) continue;
-    if (bar.openTime % BAR_MS !== 0) continue;
+    if (bar.openTime < lower || bar.openTime + barMs > anchorMs) continue;
+    if (bar.openTime % barMs !== 0) continue;
     if (!byOpen.has(bar.openTime)) byOpen.set(bar.openTime, bar);
   }
   const inWindow = [...byOpen.values()].sort((a, b) => a.openTime - b.openTime);
-  const expectedBars = expectedWindowBars(anchorMs, windowMs);
+  const expectedBars = expectedWindowBars(anchorMs, windowMs, barMs);
   return {
     anchorMs,
-    aligned: anchorMs % BAR_MS === 0,
+    aligned: anchorMs % barMs === 0,
     bars: inWindow,
     expectedBars,
     missingBars: expectedBars - inWindow.length,

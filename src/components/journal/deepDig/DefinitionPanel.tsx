@@ -8,10 +8,12 @@ import { ChevronDown, ChevronRight, Pencil, RotateCcw, Trash2 } from 'lucide-rea
 import { cn } from '@/lib/utils';
 import { FUNCTIONS } from '@/lib/deepDig/formula';
 import {
-  BUILTIN_FEATURES, checkDefinition, compileGroups, DEFAULT_GROUPS, definitionKey, MIN_AMOUNT_COVERAGE, previewGroups, SERIES_VARIABLES, SOURCE_LABEL,
+  barsPerHalfLife, BUILTIN_FEATURES, checkDefinition, compileGroups, DEFAULT_GROUPS, DEFAULT_HALF_LIFE_HOURS, DEFAULT_INTERVAL, definitionKey, FEATURE_INTERVALS, featureWindowMs,
+  HALF_LIFE_PRESETS, halfLifeOf, INTERVAL_LABEL, intervalOf, MIN_AMOUNT_COVERAGE, PARAM_VARIABLES, previewGroups, SERIES_VARIABLES, SOURCE_LABEL,
   type DeepDigFeatureDef, type SampleRow, type SampleSource,
 } from '@/lib/deepDig/features';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
+import type { ResearchInterval } from '@/lib/deepRsa/marketData';
 
 const BTN = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
 const INPUT = 'rounded-md border border-border bg-background px-2 py-1 text-[12px] outline-none focus:border-foreground/40';
@@ -49,6 +51,12 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
       <div className="grid max-w-[720px] grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
         <FormulaEditor def={def} onSave={onSave} />
+        <span className="pt-1 text-muted-foreground">K 线</span>
+        <KlineSettings
+          value={{ interval: intervalOf(def), halfLifeHours: halfLifeOf(def) }}
+          onChange={v => onSave({ ...def, interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval, halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours })}
+          testId="deep-dig-kline"
+        />
         <span className="pt-px text-muted-foreground">分组</span>
         <GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" />
         <span className="text-muted-foreground">显示</span>
@@ -106,12 +114,20 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
             aria-label="公式"
           />
           {check.formula ? <div className={RED} data-testid="deep-dig-def-formula-error">{check.formula}</div>
-            : <div className="text-muted-foreground">在进场前 48 小时的已收盘 5m K 线上逐根算，取最后一根的值作为这场的特征值。</div>}
+            : <div className="text-muted-foreground">在进场前的已收盘 K 线（上面选的周期）上逐根算，取最后一根的值作为这场的特征值。</div>}
           <button type="button" onClick={() => setHelp(h => !h)} className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground" data-testid="deep-dig-def-help-toggle">
             {help ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}可用写法
           </button>
           {help && <FormulaHelp />}
         </div>
+      </div>
+      <div className="flex gap-2">
+        <span className={label}>K 线</span>
+        <KlineSettings
+          value={{ interval: intervalOf(draft), halfLifeHours: halfLifeOf(draft) }}
+          onChange={v => setDraft(d => ({ ...d, interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval, halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours }))}
+          testId="deep-dig-def-kline"
+        />
       </div>
       <div className="flex gap-2">
         <span className={label}>显示</span>
@@ -337,7 +353,7 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
         aria-label="公式"
       />
       {error ? <div className={RED} data-testid="deep-dig-def-formula-inline-error">{error}</div>
-        : <div className="text-muted-foreground">在进场前 48 小时的已收盘 5m K 线上逐根算，取最后一根的值作为这场的特征值。</div>}
+        : <div className="text-muted-foreground">在进场前的已收盘 K 线（上面选的周期）上逐根算，取最后一根的值作为这场的特征值。</div>}
       <button type="button" onClick={() => setHelp(h => !h)} className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground">
         {help ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}可用写法
       </button>
@@ -356,6 +372,68 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   );
 }
 
+/**
+ * K 线周期与半衰期：点一下就换（定义区直接保存；表单里先改草稿）。
+ * 【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量。另外半衰期也要做成可以选择的」。
+ */
+export function KlineSettings({ value, onChange, testId }: {
+  value: { interval: ResearchInterval; halfLifeHours: number };
+  onChange: (v: { interval: ResearchInterval; halfLifeHours: number }) => void;
+  testId: string;
+}) {
+  const [custom, setCustom] = useState<string | null>(null);
+  const preset = (HALF_LIFE_PRESETS as readonly number[]).includes(value.halfLifeHours);
+  const bars = barsPerHalfLife(value);
+  const windowH = featureWindowMs(value) / 3_600_000;
+  const chip = (active: boolean) => cn('h-6 whitespace-nowrap rounded-[4px] px-1.5 font-mono text-[11px] transition-colors',
+    active ? 'bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent' : 'text-muted-foreground hover:text-foreground');
+  const commitCustom = () => {
+    if (custom == null) return;
+    const h = Number(custom);
+    if (Number.isFinite(h) && h > 0 && h <= 24 * 30) onChange({ ...value, halfLifeHours: h });
+    setCustom(null);
+  };
+  return (
+    <div className="min-w-0 space-y-1 text-[11.5px]" data-testid={testId}>
+      <div className="flex items-start gap-x-2">
+        <span className="w-[42px] shrink-0 pt-[7px] leading-none text-muted-foreground">周期</span>
+        <div className="inline-flex min-w-0 flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="group" aria-label="K 线周期">
+          {FEATURE_INTERVALS.map(iv => (
+            <button key={iv} type="button" aria-pressed={value.interval === iv} title={INTERVAL_LABEL[iv]} data-testid={`${testId}-interval-${iv}`}
+              onClick={() => onChange({ ...value, interval: iv })} className={chip(value.interval === iv)}>{iv}</button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-start gap-x-2">
+        <span className="w-[42px] shrink-0 pt-[7px] leading-none text-muted-foreground">半衰期</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="inline-flex min-w-0 flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="group" aria-label="半衰期">
+          {HALF_LIFE_PRESETS.map(h => (
+            <button key={h} type="button" aria-pressed={value.halfLifeHours === h} data-testid={`${testId}-hl-${h}`}
+              onClick={() => { setCustom(null); onChange({ ...value, halfLifeHours: h }); }} className={chip(value.halfLifeHours === h)}>{h}h</button>
+          ))}
+          <input
+            value={custom ?? (preset ? '' : String(value.halfLifeHours))}
+            onChange={e => setCustom(e.target.value)}
+            onBlur={commitCustom}
+            onKeyDown={e => { if (e.key === 'Enter') commitCustom(); if (e.key === 'Escape') setCustom(null); }}
+            placeholder="自定"
+            inputMode="decimal"
+            aria-label="自定半衰期（小时）"
+            data-testid={`${testId}-hl-custom`}
+            className={cn('h-6 w-[52px] rounded-[4px] bg-transparent px-1.5 font-mono text-[11px] outline-none placeholder:text-muted-foreground/60 focus:bg-card',
+              !preset && custom == null && 'bg-card font-medium shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent')}
+          />
+        </div>
+        <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-summary`}>
+          = {Number.isInteger(bars) ? bars : bars.toFixed(1)} 根 {INTERVAL_LABEL[value.interval]} K 线 · 观察窗 {windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}
+        </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormulaHelp() {
   return (
     <div className="space-y-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] leading-relaxed" data-testid="deep-dig-def-help">
@@ -363,6 +441,8 @@ function FormulaHelp() {
         <span className="text-muted-foreground">序列（每根 K 线一个值）：</span>
         {SERIES_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
         用到 Q / B / S 时，观察窗里有成交额数据的 K 线不到 {Math.round(MIN_AMOUNT_COVERAGE * 100)}% 的那场记缺失。
+        <span className="text-muted-foreground">参数：</span>{PARAM_VARIABLES.map(v => <span key={v.name}><Code>{v.name}</Code> {v.label}</span>)}。
+        prev / sma / sum 的根数按上面选的周期数。
       </div>
       <div>
         <span className="text-muted-foreground">运算：</span><Code>+ − × ÷ ^</Code> 比较 <Code>&gt; &lt; &gt;= &lt;= == !=</Code>（真 1 假 0），<Code>and or not</Code>，括号。
