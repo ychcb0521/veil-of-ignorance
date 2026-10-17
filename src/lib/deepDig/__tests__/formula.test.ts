@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateProgram, lastValue, parseFormula } from '@/lib/deepDig/formula';
-import { compileFeatureFormula, computeFeatureValue, DRIFT_SPEED_FORMULA } from '@/lib/deepDig/features';
+import { compileFeatureFormula, computeFeatureValue, DRIFT_SPEED_FORMULA, EMA_DRIFT_SPEED_FORMULA } from '@/lib/deepDig/features';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
 import { computeDsp } from '@/lib/dynamicSchellingPoint';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
@@ -64,8 +64,8 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
     expect(err('C > 1 = 2')).toMatch(/「=」|==/);
   });
 
-  it('内置「漂移速度 V」的默认公式与主图 DSP 指标的 V 一致（含缺金额的 K 线）', () => {
-    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA);
+  it('「平时成交额」用 ema(Q, hl) 的那版公式（上一版默认）与主图 DSP 指标的 V 一致（含缺金额的 K 线）', () => {
+    const compiled = compileFeatureFormula(EMA_DRIFT_SPEED_FORMULA);
     expect(compiled.usesAmounts).toBe(true);
     for (const [seed, missingEvery] of [[1, 0], [2, 40], [3, 97]] as const) {
       const w = window(576, seed, missingEvery);
@@ -75,8 +75,8 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
     }
   });
 
-  it('【用户要求】周期、半衰期可选：15 分钟线 + 半衰期 2 / 6 小时，默认公式与主图 DSP 按同一周期、同一半衰期算出的 V 一致', () => {
-    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA);
+  it('【用户要求】周期、半衰期可选：15 分钟线 + 半衰期 2 / 6 小时，ema 版公式与主图 DSP 按同一周期、同一半衰期算出的 V 一致', () => {
+    const compiled = compileFeatureFormula(EMA_DRIFT_SPEED_FORMULA);
     const M15 = 15 * 60_000;
     const w = window(400, 7, 0);
     const bars15 = w.bars.map((b, i) => ({ ...b, openTime: i * M15 }));
@@ -95,6 +95,44 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
     expect(e[1]).not.toBeCloseTo(e15[1], 6);
     // 观察窗 K 线不足 95% 不算
     expect(computeFeatureValue({ ...w15, coverage: 0.9 }, compiled, { interval: '15m' })).toBeNull();
+  });
+
+  it('【用户要求】avg(x, h)：过去 h 小时的平均，按周期换算根数；空值跳过；开头不满用已有的', () => {
+    const x = S([1, 2, Number.NaN, 4, 5]);
+    // 5 分钟线，0.25 小时 = 3 根
+    expect(Array.from(run('avg(x, 0.25)', { x }) as Float64Array)).toEqual([1, 1.5, 1.5, 3, 4.5]);
+    // 15 分钟线，0.25 小时 = 1 根
+    const a15 = evaluateProgram(parseFormula('avg(x, 0.25)', new Set(['x'])), { x }, { barMinutes: 15 }) as Float64Array;
+    expect(Array.from(a15)).toEqual([1, 2, Number.NaN, 4, 5]);
+    expect(() => run('avg(x, 0)', { x })).toThrow('avg 的时长要大于 0');
+  });
+
+  it('【用户要求】默认公式：平时成交额 = 过去 avgh 小时（默认 24）的平均成交额；avgh 可点选、也可在公式里直接写数字', () => {
+    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA);
+    const w = window(576, 5, 41);
+    // 独立的逐根参考实现
+    const ref = (avgH: number, hl: number) => {
+      const n = (avgH * 60) / 5;
+      const rho = 2 ** (-5 / (hl * 60));
+      let v = 0;
+      w.bars.forEach((b, i) => {
+        const past = w.bars.slice(Math.max(0, i - n + 1), i + 1).map(p => p.quoteVolume).filter((q): q is number => q != null);
+        const mean = past.reduce((a, q) => a + q, 0) / past.length;
+        const q = b.quoteVolume; const buy = b.takerBuyQuoteVolume;
+        const u = i === 0 || q == null || buy == null ? 0 : Math.log(1 + Math.abs(2 * buy - q) / mean) * (1 + Math.max((2 * buy - q) / q, 0)) * Math.log(b.close / w.bars[i - 1].close);
+        v = rho * v + (1 - rho) * (Number.isFinite(u) ? u : 0);
+      });
+      return v;
+    };
+    expect(computeFeatureValue(w, compiled)).toBeCloseTo(ref(24, 6), 12);
+    expect(computeFeatureValue(w, compiled, { avgHours: 12 })).toBeCloseTo(ref(12, 6), 12);
+    expect(computeFeatureValue(w, compiled, { avgHours: 12 })).not.toBeCloseTo(ref(24, 6), 9);
+    // 在公式里直接写 12，与点选 12 小时一样
+    const literal = compileFeatureFormula(DRIFT_SPEED_FORMULA.replace('avg(Q, avgh)', 'avg(Q, 12)'));
+    expect(computeFeatureValue(w, literal)).toBeCloseTo(ref(12, 6), 12);
+    // 中文写法
+    const zh = compileFeatureFormula(DRIFT_SPEED_FORMULA.replace('avg(Q, avgh)', 'avg(Q, 平均时长)'));
+    expect(computeFeatureValue(w, zh, { avgHours: 12 })).toBeCloseTo(ref(12, 6), 12);
   });
 
   it('用到成交额的公式：有金额的 K 线不到 95% 记缺失；不用成交额的公式照算', () => {

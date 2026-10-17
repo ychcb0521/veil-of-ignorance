@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   campaignSample, checkDefinition, classifyCampaign, classifySample, compileGroups, DEFAULT_CONTROL, DEFAULT_POSITIVE, definitionKey, DRIFT_SPEED_DEF, mergeFeatureDefs, newFeatureTemplate, previewGroups, removedBuiltins,
-  featureWindowMs, sampleEventRows, signalSample, translateLegacyGroupExpr, upgradeGroupVars,
+  DRIFT_SPEED_FORMULA, EMA_DRIFT_SPEED_FORMULA, featureWindowMs, formulaParamUse, sampleEventRows, signalSample, translateLegacyGroupExpr, upgradeGroupVars,
 } from '@/lib/deepDig/features';
 import { groupCampaign, mulberry32, type CampaignLabelInput } from '@/lib/deepRsa/grouping';
 import { buildCampaignGroupReport, type CampaignGroupRow } from '@/lib/deepRsa/report';
@@ -63,11 +63,25 @@ describe('【用户要求】Deep dig 分组标准：按用户写的条件划分�
     expect(upgradeGroupVars({ positive: 'b > 3', control: 'r < 0.5', groupVars: 2 as const }).positive).toBe('b > 3');
     // 旧结果里的定义也按同一规则换算：definitionKey 相同，不会误报「定义改过了」
     expect(definitionKey({ ...old })).toBe(definitionKey(merged));
-    // 上一版写死 6 小时的默认公式换成跟随 hl 的新版（hl 默认 6，结果不变、不误报改过）
-    const legacyFormula = DRIFT_SPEED_DEF.formula.replace('ema(Q, hl))  #', 'ema(Q, 6))   #').replace('ema(U, hl, 0)           # 漂移速度：按半衰期 hl 指数平滑', 'ema(U, 6, 0)            # 漂移速度：半衰期 6 小时指数平滑').replace('Q = B + S；hl = 上面选的半衰期（小时）', 'Q = B + S');
-    const upgraded = mergeFeatureDefs([{ ...DRIFT_SPEED_DEF, formula: legacyFormula, builtin: undefined }])[0];
-    expect(upgraded.formula).toBe(DRIFT_SPEED_DEF.formula);
-    expect(definitionKey({ ...DRIFT_SPEED_DEF, formula: legacyFormula })).toBe(definitionKey(DRIFT_SPEED_DEF));
+    // 以前的两版默认公式（写死 6 小时；按 hl 平滑成交额）读进来都换成现在的默认公式（过去 avgh 小时平均成交额）
+    const legacyFormula = EMA_DRIFT_SPEED_FORMULA.replace('ema(Q, hl))  #', 'ema(Q, 6))   #').replace('ema(U, hl, 0)           # 漂移速度：按半衰期 hl 指数平滑', 'ema(U, 6, 0)            # 漂移速度：半衰期 6 小时指数平滑').replace('Q = B + S；hl = 上面选的半衰期（小时）', 'Q = B + S');
+    expect(legacyFormula).not.toBe(EMA_DRIFT_SPEED_FORMULA);
+    for (const formula of [legacyFormula, EMA_DRIFT_SPEED_FORMULA]) {
+      expect(mergeFeatureDefs([{ ...DRIFT_SPEED_DEF, formula, builtin: undefined }])[0].formula).toBe(DRIFT_SPEED_DEF.formula);
+      // 结果口径变了：按旧公式算的结果要提示重跑
+      expect(definitionKey({ ...DRIFT_SPEED_DEF, formula })).not.toBe(definitionKey(DRIFT_SPEED_DEF));
+    }
+    // 写死 6 小时那版与按 hl 那版（默认半衰期）结果一样
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, formula: legacyFormula })).toBe(definitionKey({ ...DRIFT_SPEED_DEF, formula: EMA_DRIFT_SPEED_FORMULA }));
+    // 改过的公式不动
+    expect(mergeFeatureDefs([{ ...DRIFT_SPEED_DEF, formula: 'ln(C)' }])[0].formula).toBe('ln(C)');
+    // 平均时长：改了算定义改动，默认 24 不进键；观察窗跟着放宽
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, avgHours: 48 })).not.toBe(definitionKey(DRIFT_SPEED_DEF));
+    expect(definitionKey({ ...DRIFT_SPEED_DEF, avgHours: 24 })).toBe(definitionKey(DRIFT_SPEED_DEF));
+    expect(featureWindowMs({ avgHours: 48 })).toBe(72 * 3_600_000);
+    expect(formulaParamUse(DRIFT_SPEED_FORMULA)).toEqual({ hl: true, avgh: true });
+    expect(formulaParamUse('ln(C / prev(C, 12))')).toEqual({ hl: false, avgh: false });
+    expect(formulaParamUse('ln(')).toBeNull();
     // 换周期 / 半衰期算定义改动；默认值不进键
     expect(definitionKey({ ...DRIFT_SPEED_DEF, interval: '15m' })).not.toBe(definitionKey(DRIFT_SPEED_DEF));
     expect(definitionKey({ ...DRIFT_SPEED_DEF, halfLifeHours: 12 })).not.toBe(definitionKey(DRIFT_SPEED_DEF));

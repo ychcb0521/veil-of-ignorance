@@ -8,8 +8,9 @@ import { ChevronDown, ChevronRight, Pencil, RotateCcw, Trash2 } from 'lucide-rea
 import { cn } from '@/lib/utils';
 import { FUNCTIONS } from '@/lib/deepDig/formula';
 import {
-  barsPerHalfLife, BUILTIN_FEATURES, checkDefinition, compileGroups, DEFAULT_GROUPS, DEFAULT_HALF_LIFE_HOURS, DEFAULT_INTERVAL, definitionKey, FEATURE_INTERVALS, featureWindowMs,
-  HALF_LIFE_PRESETS, halfLifeOf, INTERVAL_LABEL, intervalOf, MIN_AMOUNT_COVERAGE, PARAM_VARIABLES, previewGroups, SERIES_VARIABLES, SOURCE_LABEL,
+  AVG_HOURS_PRESETS, avgHoursOf, barsPerAvg, barsPerHalfLife, BUILTIN_FEATURES, checkDefinition, compileGroups, DEFAULT_AVG_HOURS, DEFAULT_GROUPS, DEFAULT_HALF_LIFE_HOURS, DEFAULT_INTERVAL,
+  definitionKey, FEATURE_INTERVALS, featureWindowMs, formulaParamUse, HALF_LIFE_PRESETS, halfLifeOf, INTERVAL_LABEL, intervalOf, MIN_AMOUNT_COVERAGE, PARAM_VARIABLES, previewGroups,
+  SERIES_VARIABLES, SOURCE_LABEL,
   type DeepDigFeatureDef, type SampleRow, type SampleSource,
 } from '@/lib/deepDig/features';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
@@ -51,12 +52,8 @@ function DefinitionView({ def, onEditingChange, onSave, samples }: DefinitionPan
       <div className="grid max-w-[720px] grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11.5px]">
         <span className="pt-1 text-muted-foreground">公式</span>
         <FormulaEditor def={def} onSave={onSave} />
-        <span className="pt-1 text-muted-foreground">K 线</span>
-        <KlineSettings
-          value={{ interval: intervalOf(def), halfLifeHours: halfLifeOf(def) }}
-          onChange={v => onSave({ ...def, interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval, halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours })}
-          testId="deep-dig-kline"
-        />
+        <span className="pt-1 text-muted-foreground">参数</span>
+        <KlineSettings value={paramsOf(def)} onChange={v => onSave({ ...def, ...paramPatch(v) })} uses={formulaParamUse(def.formula)} testId="deep-dig-kline" />
         <span className="pt-px text-muted-foreground">分组</span>
         <GroupCriteria def={def} samples={samples} onSave={onSave} testId="deep-dig-def-groups" />
         <span className="text-muted-foreground">显示</span>
@@ -122,12 +119,8 @@ function DefinitionForm({ def, onEditingChange, onSave, onReset, onDelete, sampl
         </div>
       </div>
       <div className="flex gap-2">
-        <span className={label}>K 线</span>
-        <KlineSettings
-          value={{ interval: intervalOf(draft), halfLifeHours: halfLifeOf(draft) }}
-          onChange={v => setDraft(d => ({ ...d, interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval, halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours }))}
-          testId="deep-dig-def-kline"
-        />
+        <span className={label}>参数</span>
+        <KlineSettings value={paramsOf(draft)} onChange={v => setDraft(d => ({ ...d, ...paramPatch(v) }))} uses={formulaParamUse(draft.formula)} testId="deep-dig-def-kline" />
       </div>
       <div className="flex gap-2">
         <span className={label}>显示</span>
@@ -372,63 +365,106 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   );
 }
 
-/**
- * K 线周期与半衰期：点一下就换（定义区直接保存；表单里先改草稿）。
- * 【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量。另外半衰期也要做成可以选择的」。
- */
-export function KlineSettings({ value, onChange, testId }: {
-  value: { interval: ResearchInterval; halfLifeHours: number };
-  onChange: (v: { interval: ResearchInterval; halfLifeHours: number }) => void;
-  testId: string;
+type ParamValue = { interval: ResearchInterval; halfLifeHours: number; avgHours: number };
+const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d) });
+/** 默认值不写进定义（旧定义没有这几项）。 */
+const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> => ({
+  interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval,
+  halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours,
+  avgHours: v.avgHours === DEFAULT_AVG_HOURS ? undefined : v.avgHours,
+});
+const fmtBars = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+const PARAM_LABEL = 'w-[52px] shrink-0 pt-[7px] leading-none text-muted-foreground';
+const SEGMENT = 'inline-flex min-w-0 flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5';
+const chip = (active: boolean) => cn('h-6 whitespace-nowrap rounded-[4px] px-1.5 font-mono text-[11px] transition-colors',
+  active ? 'bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent' : 'text-muted-foreground hover:text-foreground');
+
+/** 小时数：快捷选项点一下，或在「自定」里填（回车 / 移开生效，Esc 取消，乱填不改）。 */
+function HoursPicker({ label, ariaLabel, presets, value, onChange, summary, unused, testId }: {
+  label: string; ariaLabel: string; presets: readonly number[]; value: number; onChange: (h: number) => void;
+  summary: React.ReactNode; unused: string | null; testId: string;
 }) {
   const [custom, setCustom] = useState<string | null>(null);
-  const preset = (HALF_LIFE_PRESETS as readonly number[]).includes(value.halfLifeHours);
-  const bars = barsPerHalfLife(value);
-  const windowH = featureWindowMs(value) / 3_600_000;
-  const chip = (active: boolean) => cn('h-6 whitespace-nowrap rounded-[4px] px-1.5 font-mono text-[11px] transition-colors',
-    active ? 'bg-card font-medium text-foreground shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent' : 'text-muted-foreground hover:text-foreground');
-  const commitCustom = () => {
+  const preset = presets.includes(value);
+  const commit = () => {
     if (custom == null) return;
     const h = Number(custom);
-    if (Number.isFinite(h) && h > 0 && h <= 24 * 30) onChange({ ...value, halfLifeHours: h });
+    if (Number.isFinite(h) && h > 0 && h <= 24 * 30) onChange(h);
     setCustom(null);
   };
   return (
+    <div className="flex items-start gap-x-2">
+      <span className={PARAM_LABEL}>{label}</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className={SEGMENT} role="group" aria-label={ariaLabel}>
+          {presets.map(h => (
+            <button key={h} type="button" aria-pressed={value === h} data-testid={`${testId}-${h}`}
+              onClick={() => { setCustom(null); onChange(h); }} className={chip(value === h)}>{h}h</button>
+          ))}
+          <input
+            value={custom ?? (preset ? '' : String(value))}
+            onChange={e => setCustom(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setCustom(null); }}
+            placeholder="自定"
+            inputMode="decimal"
+            aria-label={`自定${ariaLabel}（小时）`}
+            data-testid={`${testId}-custom`}
+            className={cn('h-6 w-[52px] rounded-[4px] bg-transparent px-1.5 font-mono text-[11px] outline-none placeholder:text-muted-foreground/60 focus:bg-card',
+              !preset && custom == null && 'bg-card font-medium shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent')}
+          />
+        </div>
+        <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-summary`}>
+          {summary}
+          {unused && <span className="ml-1.5 text-muted-foreground/60" data-testid={`${testId}-unused`}>（公式里没用 {unused}）</span>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 公式参数：K 线周期、半衰期、平均时长，点一下就换（定义区直接保存；表单里先改草稿）。公式里写 hl / avgh 就用这里的值，也可以直接写数字。
+ * 【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量。另外半衰期也要做成可以选择的」；
+ * 2026-10-17「改成过去一段时间的平均值，时间的选取就选 24 小时（并且还要满足能够修改）…既可以在公式中改、也可以手动点击选取和填写」。
+ */
+export function KlineSettings({ value, onChange, uses, testId }: {
+  value: ParamValue;
+  onChange: (v: ParamValue) => void;
+  /** 公式里用到了哪些参数（没用到的旁边注一句）；公式写错时为 null，不注。 */
+  uses?: { hl: boolean; avgh: boolean } | null;
+  testId: string;
+}) {
+  const ivLabel = INTERVAL_LABEL[value.interval];
+  const windowH = featureWindowMs(value) / 3_600_000;
+  return (
     <div className="min-w-0 space-y-1 text-[11.5px]" data-testid={testId}>
       <div className="flex items-start gap-x-2">
-        <span className="w-[42px] shrink-0 pt-[7px] leading-none text-muted-foreground">周期</span>
-        <div className="inline-flex min-w-0 flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="group" aria-label="K 线周期">
+        <span className={PARAM_LABEL}>周期</span>
+        <div className={SEGMENT} role="group" aria-label="K 线周期">
           {FEATURE_INTERVALS.map(iv => (
             <button key={iv} type="button" aria-pressed={value.interval === iv} title={INTERVAL_LABEL[iv]} data-testid={`${testId}-interval-${iv}`}
               onClick={() => onChange({ ...value, interval: iv })} className={chip(value.interval === iv)}>{iv}</button>
           ))}
         </div>
       </div>
+      <HoursPicker
+        label="半衰期" ariaLabel="半衰期" presets={HALF_LIFE_PRESETS} value={value.halfLifeHours} testId={`${testId}-hl`}
+        onChange={h => onChange({ ...value, halfLifeHours: h })}
+        summary={<>hl = {fmtBars(barsPerHalfLife(value))} 根 {ivLabel} K 线</>}
+        unused={uses && !uses.hl ? 'hl' : null}
+      />
+      <HoursPicker
+        label="平均时长" ariaLabel="平均时长" presets={AVG_HOURS_PRESETS} value={value.avgHours} testId={`${testId}-avg`}
+        onChange={h => onChange({ ...value, avgHours: h })}
+        summary={<>avgh = {barsPerAvg(value)} 根</>}
+        unused={uses && !uses.avgh ? 'avgh' : null}
+      />
       <div className="flex items-start gap-x-2">
-        <span className="w-[42px] shrink-0 pt-[7px] leading-none text-muted-foreground">半衰期</span>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <div className="inline-flex min-w-0 flex-wrap items-center gap-0.5 rounded-md border border-border/70 bg-muted/40 p-0.5" role="group" aria-label="半衰期">
-          {HALF_LIFE_PRESETS.map(h => (
-            <button key={h} type="button" aria-pressed={value.halfLifeHours === h} data-testid={`${testId}-hl-${h}`}
-              onClick={() => { setCustom(null); onChange({ ...value, halfLifeHours: h }); }} className={chip(value.halfLifeHours === h)}>{h}h</button>
-          ))}
-          <input
-            value={custom ?? (preset ? '' : String(value.halfLifeHours))}
-            onChange={e => setCustom(e.target.value)}
-            onBlur={commitCustom}
-            onKeyDown={e => { if (e.key === 'Enter') commitCustom(); if (e.key === 'Escape') setCustom(null); }}
-            placeholder="自定"
-            inputMode="decimal"
-            aria-label="自定半衰期（小时）"
-            data-testid={`${testId}-hl-custom`}
-            className={cn('h-6 w-[52px] rounded-[4px] bg-transparent px-1.5 font-mono text-[11px] outline-none placeholder:text-muted-foreground/60 focus:bg-card',
-              !preset && custom == null && 'bg-card font-medium shadow-[0_1px_2px_rgba(15,23,42,0.08)] dark:bg-accent')}
-          />
-        </div>
+        <span className={PARAM_LABEL} />
         <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-summary`}>
-          = {Number.isInteger(bars) ? bars : bars.toFixed(1)} 根 {INTERVAL_LABEL[value.interval]} K 线 · 观察窗 {windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}
+          观察窗：进场前 {windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}的已收盘 {ivLabel} K 线
         </span>
-        </div>
       </div>
     </div>
   );
@@ -441,7 +477,7 @@ function FormulaHelp() {
         <span className="text-muted-foreground">序列（每根 K 线一个值）：</span>
         {SERIES_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
         用到 Q / B / S 时，观察窗里有成交额数据的 K 线不到 {Math.round(MIN_AMOUNT_COVERAGE * 100)}% 的那场记缺失。
-        <span className="text-muted-foreground">参数：</span>{PARAM_VARIABLES.map(v => <span key={v.name}><Code>{v.name}</Code> {v.label}</span>)}。
+        <span className="text-muted-foreground">参数：</span>{PARAM_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
         prev / sma / sum 的根数按上面选的周期数。
       </div>
       <div>

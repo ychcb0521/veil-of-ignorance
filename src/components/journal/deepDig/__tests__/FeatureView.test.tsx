@@ -134,14 +134,18 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     render(<Harness onSaveDef={onSaveDef} />);
     expect(screen.getByTestId('deep-dig-kline-interval-5m')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('deep-dig-kline-hl-6')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('= 72 根 5 分钟 K 线 · 观察窗 2 天');
+    expect(screen.getByTestId('deep-dig-kline-hl-summary')).toHaveTextContent('hl = 72 根 5 分钟 K 线');
+    expect(screen.getByTestId('deep-dig-kline-avg-summary')).toHaveTextContent('avgh = 288 根');
+    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('观察窗：进场前 2 天的已收盘 5 分钟 K 线');
+    expect(screen.queryByTestId('deep-dig-kline-avg-unused')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('deep-dig-kline-interval-15m'));
     expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: '15m', halfLifeHours: undefined }));
-    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('= 24 根 15 分钟 K 线 · 观察窗 2 天');
+    expect(screen.getByTestId('deep-dig-kline-hl-summary')).toHaveTextContent('hl = 24 根 15 分钟 K 线');
+    expect(screen.getByTestId('deep-dig-kline-avg-summary')).toHaveTextContent('avgh = 96 根');
     expect(screen.getByTestId('deep-dig-stale')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('deep-dig-kline-hl-12'));
     expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: '15m', halfLifeHours: 12 }));
-    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('观察窗 4 天');
+    expect(screen.getByTestId('deep-dig-kline-summary')).toHaveTextContent('进场前 4 天');
     // 自定半衰期：回车生效；乱写不改
     fireEvent.change(screen.getByTestId('deep-dig-kline-hl-custom'), { target: { value: '3' } });
     fireEvent.keyDown(screen.getByTestId('deep-dig-kline-hl-custom'), { key: 'Enter' });
@@ -150,11 +154,26 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.change(screen.getByTestId('deep-dig-kline-hl-custom'), { target: { value: 'abc' } });
     fireEvent.keyDown(screen.getByTestId('deep-dig-kline-hl-custom'), { key: 'Enter' });
     expect(onSaveDef).toHaveBeenCalledTimes(calls);
+    // 【用户要求】平均时长：点选、自定都行
+    fireEvent.click(screen.getByTestId('deep-dig-kline-avg-48'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ avgHours: 48 }));
+    expect(screen.getByTestId('deep-dig-kline-avg-summary')).toHaveTextContent('avgh = 192 根');
+    fireEvent.change(screen.getByTestId('deep-dig-kline-avg-custom'), { target: { value: '36' } });
+    fireEvent.blur(screen.getByTestId('deep-dig-kline-avg-custom'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ avgHours: 36 }));
+    expect(screen.getByTestId('deep-dig-kline-avg-custom')).toHaveValue('36');
     // 换回默认：不写进定义
     fireEvent.click(screen.getByTestId('deep-dig-kline-interval-5m'));
     fireEvent.click(screen.getByTestId('deep-dig-kline-hl-6'));
-    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: undefined, halfLifeHours: undefined }));
+    fireEvent.click(screen.getByTestId('deep-dig-kline-avg-24'));
+    expect(onSaveDef).toHaveBeenLastCalledWith(expect.objectContaining({ interval: undefined, halfLifeHours: undefined, avgHours: undefined }));
     expect(screen.queryByTestId('deep-dig-stale')).not.toBeInTheDocument();
+  });
+
+  it('公式里没用到的参数旁边注一句', () => {
+    render(<Harness initialDef={{ ...DRIFT_SPEED_DEF, formula: 'ln(C / prev(C, 12))' }} />);
+    expect(screen.getByTestId('deep-dig-kline-hl-unused')).toHaveTextContent('公式里没用 hl');
+    expect(screen.getByTestId('deep-dig-kline-avg-unused')).toHaveTextContent('公式里没用 avgh');
   });
 
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {

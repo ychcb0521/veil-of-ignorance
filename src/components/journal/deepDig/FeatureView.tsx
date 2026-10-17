@@ -13,7 +13,7 @@ import {
   applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
   type DeepDigData, type DeepDigInference, type DeepDigRowGroup, type DefinitionSnapshot,
 } from '@/lib/deepDig/analysis';
-import { definitionKey, featureWindowMs, halfLifeOf, intervalOf, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
+import { avgHoursOf, definitionKey, featureWindowMs, halfLifeOf, intervalOf, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults } from '@/components/journal/deepDig/InferenceView';
@@ -141,7 +141,7 @@ export function FeatureView(props: FeatureViewProps) {
             testId="deep-dig-describe-run" label="运行描述统计" hasResult={!!data} finishedAt={data?.finishedAt ?? null}
             status={props.describeStatus} progress={props.describeProgress} error={props.describeError}
             canRun={props.canDescribe} blockedReason={props.blockedReason} onRun={props.onDescribe} onCancel={props.onCancel} onDownload={data ? props.onDownload : undefined}
-            hint="取币安公开 5m K 线、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）"
+            hint={`取币安公开 ${intervalOf(def)} K 线${intervalOf(def) === '5m' ? '' : '（24h 结果仍按 5m）'}、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）`}
           />
           {defStale && <Notice testId="deep-dig-stale">公式、周期、半衰期或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的定义重算。</Notice>}
           {effective && data ? <DescribeTab {...props} data={effective} raw={data} /> : <Empty>还没运行描述统计。</Empty>}
@@ -304,7 +304,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, excl
             <li key={g}><span className={GROUP_TONE[g]}>{groupLabel(g, def.source)}</span>：{groupNote(def, g)}</li>
           ))}
           <li>
-            {X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
+            {X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
             {c.failed > 0 && <>，K 线没取到的 <N>{c.failed}</N> 个</>}。
           </li>
           {removed.length > 0 && <li>手动删掉 <N>{removed.length}</N> 行（归类不准确等）：不进上面的分组统计、推断统计与规律提取。</li>}

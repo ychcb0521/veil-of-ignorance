@@ -3,9 +3,9 @@
  *
  * 【用户要求】2026-10-16「我希望每个特征值的这里都可以人为输入定义概念、公式、分组标准，然后运行的时候，
  * 就按照这里的公式提取因变量，按分组标准进行划分组别」。
- *   - 公式：在进场前 48h 的已收盘 5m K 线上逐根算，取最后一根的值（见 formula.ts）。
+ *   - 公式：在进场前观察窗内的已收盘 K 线（周期可选，默认 5m）上逐根算，取最后一根的值（见 formula.ts）。
  *   - 分组标准：实验组、对照组各一个条件，按每场战役的读数判断；同时满足 → 冲突，都不满足 → 其他战役。
- * 内置的「多空博弈均衡点漂移速度 V」默认公式与主图 DSP 指标的 V 逐根一致（单元测试核对），默认分组标准与原 Deep RSA 分组一致。
+ * 内置的「多空博弈均衡点漂移速度 V」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
  */
 import type { ObservationWindow } from '@/lib/deepRsa/window';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -43,6 +43,12 @@ export interface DeepDigFeatureDef {
    */
   interval?: ResearchInterval;
   halfLifeHours?: number;
+  /**
+   * 平均时长（小时，公式里写 avgh，配 avg(x, avgh) 用）：过去多长时间的平均。
+   * 【用户要求】2026-10-17「如果想改成过去一段时间的平均值，时间的选取就选 24 小时（并且还要满足能够修改）…既可以在公式中改、也可以手动点击选取和填写」。
+   * 不给 = 24 小时。
+   */
+  avgHours?: number;
   builtin?: boolean;
   /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
   removed?: boolean;
@@ -53,27 +59,37 @@ export const DEFAULT_INTERVAL: ResearchInterval = '5m';
 export const DEFAULT_HALF_LIFE_HOURS = 6;
 /** 半衰期的快捷选项（小时）；也可以手填。 */
 export const HALF_LIFE_PRESETS = [1, 2, 3, 6, 12, 24, 48, 72] as const;
+export const DEFAULT_AVG_HOURS = 24;
+/** 平均时长的快捷选项（小时）；也可以手填。 */
+export const AVG_HOURS_PRESETS = [1, 4, 12, 24, 48, 72] as const;
 /** 特征值的 K 线周期（不含太粗的 6h / 12h，界面上更简洁）。 */
 export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'>): ResearchInterval => d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
+export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'>;
 
 /**
  * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
- * 周期粗时至少 50 根。默认（5m、6 小时）正好 48 小时。
+ * 平均时长长时放到「平均时长 + 4 个半衰期」（最后一段平滑用到的每根都有足够的过去可平均）；周期粗时至少 50 根。
+ * 默认（5m、半衰期 6 小时、平均 24 小时）正好 48 小时。
  */
-export function featureWindowMs(d: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours'>): number {
-  return Math.max(48 * 3_600_000, 8 * halfLifeOf(d) * 3_600_000, 50 * intervalMs(intervalOf(d)));
+export function featureWindowMs(d: ParamDef): number {
+  const H = 3_600_000;
+  return Math.max(48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
-export const barsPerHalfLife = (d: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours'>) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));
+export const barsPerHalfLife = (d: ParamDef) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));
+export const barsPerAvg = (d: ParamDef) => Math.max(1, Math.round((avgHoursOf(d) * 3_600_000) / intervalMs(intervalOf(d))));
 
-/** 公式里可用的参数（一个数）：hl = 上面选的半衰期（小时）。 */
-export const PARAM_VARIABLES: readonly { name: string; label: string }[] = [
-  { name: 'hl', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
+/** 公式里可用的参数（一个数）：上面点选 / 填写的值。 */
+export const PARAM_VARIABLES: readonly { name: string; alias: string; label: string }[] = [
+  { name: 'hl', alias: '半衰期', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
+  { name: 'avgh', alias: '平均时长', label: '平均时长（小时，上面选的；也可写「平均时长」），配 avg(x, avgh) 用' },
 ];
+const PARAM_NAMES = PARAM_VARIABLES.flatMap(p => [p.name, p.alias]);
 
 /** 公式里可用的序列：每根 K 线（上面选的周期）一个值。 */
 export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
@@ -131,7 +147,8 @@ const LEGACY_DRIFT_SPEED_FORMULA = [
   'V = ema(U, 6, 0)            # 漂移速度：半衰期 6 小时指数平滑',
 ].join('\n');
 
-export const DRIFT_SPEED_FORMULA = [
+/** 上一版的默认公式（平时成交额 = 按半衰期平滑的成交额，与主图 DSP 一致）。 */
+export const EMA_DRIFT_SPEED_FORMULA = [
   '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 上面选的半衰期（小时）',
   'N = abs(B - S)              # 主动净资金',
   'F = ln(1 + N / ema(Q, hl))  # 资金力量：净资金比平时的成交额异常多少',
@@ -140,6 +157,21 @@ export const DRIFT_SPEED_FORMULA = [
   'R = ln(C / prev(C))         # 价格变化',
   'U = nz(F * G * R)           # 单根推动力（缺数据的那根记 0）',
   'V = ema(U, hl, 0)           # 漂移速度：按半衰期 hl 指数平滑',
+].join('\n');
+
+/**
+ * 默认公式：平时成交额 = 过去 avgh 小时（默认 24）的平均成交额。
+ * 【用户要求】2026-10-17「如果想改成过去一段时间的平均值，时间的选取就选 24 小时」。想与主图 DSP 逐根一致，把 avg(Q, avgh) 换回 ema(Q, hl)。
+ */
+export const DRIFT_SPEED_FORMULA = [
+  '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 半衰期，avgh = 平均时长（小时，都在下面选）',
+  'N = abs(B - S)                 # 主动净资金',
+  'F = ln(1 + N / avg(Q, avgh))   # 资金力量：净资金比过去 avgh 小时的平均成交额异常多少',
+  'A = (B - S) / Q                # 主动买方优势',
+  'G = 1 + max(A, 0)              # 买方优势权重',
+  'R = ln(C / prev(C))            # 价格变化',
+  'U = nz(F * G * R)              # 单根推动力（缺数据的那根记 0）',
+  'V = ema(U, hl, 0)              # 漂移速度：按半衰期 hl 指数平滑',
 ].join('\n');
 
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
@@ -185,9 +217,13 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
   return [...builtins, ...custom];
 }
 
-/** 存的还是上一版写死 6 小时的默认公式：换成跟随 hl 的新版（hl 默认 6，结果不变）。 */
+/**
+ * 存的还是以前的默认公式（写死 6 小时的、按半衰期平滑成交额的）：换成现在的默认公式（过去 avgh 小时平均成交额）。
+ * 后一次换法改变结果：旧结果的定义键对不上，界面提示重新运行。
+ */
 function upgradeFormula<T extends { formula?: string; definition?: string }>(d: T): T {
-  if (d.formula?.trim() !== LEGACY_DRIFT_SPEED_FORMULA) return d;
+  const f = d.formula?.trim();
+  if (f !== LEGACY_DRIFT_SPEED_FORMULA && f !== EMA_DRIFT_SPEED_FORMULA) return d;
   const definition = d.definition === '进场前最后一根 5m K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期 6 小时指数平滑。'
     ? DRIFT_SPEED_DEF.definition : d.definition;
   return { ...d, formula: DRIFT_SPEED_FORMULA, definition };
@@ -200,13 +236,15 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours'>) => {
   const g = upgradeGroupVars(d);
-  const formula = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? DRIFT_SPEED_FORMULA : d.formula.trim();
+  // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
+  const formula = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
   const key: unknown[] = [formula, g.positive.trim(), g.control.trim(), d.source ?? 'campaigns'];
   // 默认周期 / 半衰期不进键：旧结果没有这两项
   if (intervalOf(d) !== DEFAULT_INTERVAL) key.push(intervalOf(d));
   if (halfLifeOf(d) !== DEFAULT_HALF_LIFE_HOURS) key.push(`hl=${halfLifeOf(d)}`);
+  if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   return JSON.stringify(key);
 };
 
@@ -217,8 +255,18 @@ export interface CompiledFeature {
   usesAmounts: boolean;
 }
 
+/** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
+export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean } | null {
+  try {
+    const { inputs } = compileFeatureFormula(formula).program;
+    return { hl: inputs.has('hl') || inputs.has('半衰期'), avgh: inputs.has('avgh') || inputs.has('平均时长') };
+  } catch {
+    return null;
+  }
+}
+
 export function compileFeatureFormula(formula: string): CompiledFeature {
-  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), 'hl', '半衰期']));
+  const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES]));
   return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)) };
 }
 
@@ -226,7 +274,7 @@ export function compileFeatureFormula(formula: string): CompiledFeature {
 export function computeFeatureValue(
   window: ObservationWindow | null,
   compiled: CompiledFeature,
-  params: { interval?: ResearchInterval; halfLifeHours?: number } = {},
+  params: ParamDef = {},
 ): number | null {
   if (!window) return null;
   const bars = window.bars;
@@ -247,7 +295,7 @@ export function computeFeatureValue(
     return lastValue(evaluateProgram(compiled.program, {
       C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
       Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
-      hl: halfLifeOf(params), 半衰期: halfLifeOf(params),
+      hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
     }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 }));
   } catch {
     return null;

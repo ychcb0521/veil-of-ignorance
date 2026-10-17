@@ -38,6 +38,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'min', min: 2, max: 2, usage: 'min(a, b)', help: '逐根取较小的' },
   { name: 'prev', min: 1, max: 2, usage: 'prev(x, k)', help: '前 k 根的值（k 默认 1）；开头没有前 k 根的记空' },
   { name: 'ema', min: 2, max: 3, usage: 'ema(x, h, 初值)', help: '指数平滑，半衰期 h 小时（h 可写 hl = 上面选的半衰期）：yₜ = ρ·yₜ₋₁ + (1 − ρ)·xₜ，ρ = 2^(−周期 ÷ h)，周期 = 上面选的 K 线周期；x 为空的那根跳过；不给初值时从第一个非空值起算' },
+  { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
   { name: 'nz', min: 1, max: 2, usage: 'nz(x, v)', help: '空换成 v（默认 0）' },
@@ -318,6 +319,23 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
         const v = x[i];
         if (Number.isFinite(v)) s = s == null ? v : rho * s + (1 - rho) * v;
         out[i] = s == null ? Number.NaN : s;
+      }
+      return out;
+    }
+    case 'avg': {
+      const h = scalarArg(y, 'avg', '时长', line);
+      if (!(h > 0)) throw new FormulaError('avg 的时长要大于 0（单位：小时）', line);
+      if (!isSeries(x)) return x;
+      // 过去 h 小时 = n 根（含当根），滑动求和；空值不计
+      const n = Math.max(1, Math.round((h * 60) / barMinutes));
+      const out = new Float64Array(x.length);
+      let sum = 0;
+      let count = 0;
+      for (let i = 0; i < x.length; i++) {
+        if (Number.isFinite(x[i])) { sum += x[i]; count++; }
+        const drop = i - n;
+        if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
+        out[i] = count > 0 ? clean(sum / count) : Number.NaN;
       }
       return out;
     }
