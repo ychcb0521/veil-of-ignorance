@@ -1,0 +1,143 @@
+/**
+ * Deep dig 描述统计的时间序列曲线：每个事件把公式里每个变量，从进场前一段到进场后一段逐点取值；画图时按组求平均。
+ * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均），比如 V 的时间序列曲线，
+ * 并且这个变量可以让我来选择（默认为当前的核心变量）」。
+ *
+ * 口径：
+ *   - 点的时刻 t = 进场 + τ，取 t 之前最后一根已收盘 K 线上的值（τ = 0 就是特征值本身）；
+ *   - 每个点往前都有完整的观察窗（K 线往前多取一段），曲线开头不会有平滑「没热起来」的假象；
+ *   - 进场后的部分只是描述（看进场后怎么走），特征值、分组、推断统计都只用进场前的数据。
+ */
+import { intervalMs } from '@/lib/deepRsa/marketData';
+import type { ResearchBar } from '@/lib/deepRsa/window';
+import { lastValue } from '@/lib/deepDig/formula';
+import { evaluateOnBars, featureWindowMs, intervalOf, RESULT_VAR, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { DEEP_DIG_GROUPS, type DeepDigRow, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+
+const HOUR = 3_600_000;
+
+export interface DeepDigSeries {
+  /** 对应哪一次描述统计（DeepDigData.finishedAt）。 */
+  finishedAt: number;
+  /** 各点相对进场的时间（毫秒）：负 = 进场前。 */
+  offsets: number[];
+  /** 变量（与 formulaVariables 同序）；最后一句没起名时最后一个是「结果」。 */
+  names: string[];
+  result: string;
+  /** 每个事件一条：names.length × offsets.length，按变量依次排；缺失为 NaN。 */
+  byEvent: Record<string, Float32Array>;
+}
+
+/** 曲线范围与点距：进场前后各 max(24 小时, 12 根)，点距 max(1 小时, 1 根)。5m 默认 = −24h … +24h 每小时一点。 */
+export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval'>): { beforeMs: number; afterMs: number; stepMs: number } {
+  const barMs = intervalMs(intervalOf(def));
+  const span = Math.max(24 * HOUR, 12 * barMs);
+  return { beforeMs: span, afterMs: span, stepMs: Math.max(HOUR, barMs) };
+}
+
+export function seriesOffsets(range: { beforeMs: number; afterMs: number; stepMs: number }): number[] {
+  const out: number[] = [];
+  for (let t = -range.beforeMs; t <= range.afterMs + 1e-6; t += range.stepMs) out.push(t);
+  return out;
+}
+
+/**
+ * 一个事件的曲线：在 [进场 − 观察窗 − 曲线前段, 进场 + 曲线后段] 的已收盘 K 线上逐根算公式，再按点取值。
+ * 公式写错、K 线太少 → null。
+ */
+export function computeEventSeries(
+  bars: readonly ResearchBar[],
+  anchorMs: number,
+  compiled: CompiledFeature,
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'>,
+  names: readonly string[],
+  offsets: readonly number[],
+): Float32Array | null {
+  const barMs = intervalMs(intervalOf(def));
+  const range = seriesRangeOf(def);
+  const start = anchorMs - featureWindowMs(def) - range.beforeMs;
+  const end = anchorMs + range.afterMs;
+  const seen = new Set<number>();
+  const sel = bars
+    .filter(b => b.openTime >= start && b.openTime + barMs <= end && b.openTime % barMs === 0 && !seen.has(b.openTime) && seen.add(b.openTime))
+    .sort((a, b) => a.openTime - b.openTime);
+  if (sel.length < 2) return null;
+  let out: ReturnType<typeof evaluateOnBars>;
+  try {
+    out = evaluateOnBars(sel, compiled, def);
+  } catch {
+    return null;
+  }
+  const closes = sel.map(b => b.openTime + barMs);
+  const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
+  const result = new Float32Array(names.length * offsets.length).fill(Number.NaN);
+  offsets.forEach((tau, k) => {
+    const t = anchorMs + tau;
+    // t 之前最后一根已收盘的；太久以前的（中间缺 K 线）不算
+    let lo = 0;
+    let hi = closes.length - 1;
+    let j = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (closes[mid] <= t) { j = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (j < 0 || t - closes[j] >= Math.max(barMs, range.stepMs)) return;
+    values.forEach((v, n) => {
+      const x = typeof v === 'number' ? v : v[j];
+      result[n * offsets.length + k] = Number.isFinite(x) ? x : Number.NaN;
+    });
+  });
+  return result;
+}
+
+export interface GroupCurve {
+  group: DeepDigRowGroup;
+  /** 有曲线的事件数。 */
+  n: number;
+  /** 每个点：组内平均与标准误（原值）；这个点没有数据为 null。 */
+  mean: (number | null)[];
+  se: (number | null)[];
+  count: number[];
+}
+
+/** 按组求每个点的平均（rows = 去掉删除行之后的数据）。 */
+export function groupCurves(rows: readonly DeepDigRow[], series: DeepDigSeries, name: string): GroupCurve[] {
+  const vi = series.names.indexOf(name);
+  const P = series.offsets.length;
+  return DEEP_DIG_GROUPS.map(group => {
+    const sum = new Float64Array(P);
+    const sq = new Float64Array(P);
+    const count = new Array<number>(P).fill(0);
+    let n = 0;
+    if (vi >= 0) {
+      for (const r of rows) {
+        if (r.group !== group || r.v == null) continue;
+        const s = series.byEvent[r.id];
+        if (!s) continue;
+        n++;
+        for (let k = 0; k < P; k++) {
+          const x = s[vi * P + k];
+          if (!Number.isFinite(x)) continue;
+          sum[k] += x; sq[k] += x * x; count[k]++;
+        }
+      }
+    }
+    const mean = count.map((c, k) => (c > 0 ? sum[k] / c : null));
+    const se = count.map((c, k) => {
+      if (c < 2) return null;
+      const m = sum[k] / c;
+      const variance = Math.max(0, (sq[k] - c * m * m) / (c - 1));
+      return Math.sqrt(variance / c);
+    });
+    return { group, n, mean, se, count };
+  });
+}
+
+/** τ = 0 那一点（应等于特征值本身，单元测试核对）。 */
+export const valueAt = (series: DeepDigSeries, eventId: string, name: string, offsetMs = 0): number | null => {
+  const s = series.byEvent[eventId];
+  const k = series.offsets.indexOf(offsetMs);
+  const vi = series.names.indexOf(name);
+  if (!s || k < 0 || vi < 0) return null;
+  return lastValue(s[vi * series.offsets.length + k]);
+};

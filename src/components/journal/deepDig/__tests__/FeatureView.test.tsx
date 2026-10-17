@@ -7,6 +7,7 @@ import { deepDigRules, type DeepDigData, type DeepDigInference, type DeepDigRowG
 import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
 import { campaignSample, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import type { DeepDigSeries } from '@/lib/deepDig/series';
 import { driftEvents, makeData } from '@/lib/deepDig/__tests__/fixtures';
 import { groupCampaign } from '@/lib/deepRsa/grouping';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
@@ -26,7 +27,7 @@ function campaignRow(id: string, b: number, r: number): CampaignGroupRow {
 
 function Harness(p: {
   data?: DeepDigData | null; inference?: DeepDigInference | null; initialTab?: DeepDigTab; onOpenCampaign?: (id: string) => void;
-  onDescribe?: () => void; onInfer?: (d: DeepDigData, k: string) => void; onSaveDef?: (d: DeepDigFeatureDef) => void; initialDef?: DeepDigFeatureDef;
+  onDescribe?: () => void; onInfer?: (d: DeepDigData, k: string) => void; onSaveDef?: (d: DeepDigFeatureDef) => void; initialDef?: DeepDigFeatureDef; series?: DeepDigSeries | null;
 }) {
   const [tab, setTab] = useState<DeepDigTab>(p.initialTab ?? 'describe');
   const [group, setGroup] = useState<DeepDigRowGroup>('positive');
@@ -40,7 +41,7 @@ function Harness(p: {
     <FeatureView
       def={def} editing={editing} onEditingChange={setEditing} onSaveDef={d => { setDef(d); p.onSaveDef?.(d); }} onResetDef={() => {}}
       samples={{ campaigns: [campaignRow('a', 4, 1), campaignRow('b', 1, 0.2), campaignRow('c', 1, 1)].map(campaignSample), signals: SIGNALS.map(signalSample) }}
-      data={p.data === undefined ? DATA : p.data} inference={p.inference === undefined ? INF : p.inference}
+      data={p.data === undefined ? DATA : p.data} series={p.series} inference={p.inference === undefined ? INF : p.inference}
       describeStatus="idle" describeProgress={null} describeError={null} canDescribe blockedReason={null}
       onDescribe={p.onDescribe ?? vi.fn()} onCancel={vi.fn()} inferStatus="idle" inferError={null} onInfer={p.onInfer ?? vi.fn()} onDownload={vi.fn()}
       excluded={excluded} onExcludedChange={setExcluded} commands={commands} onCommandsChange={setCommands}
@@ -212,6 +213,54 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(screen.getByTestId('deep-dig-target-F'));
     expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('描述统计的数据里还没有，先重新运行描述统计');
     expect(screen.getByTestId('deep-dig-infer-target')).toHaveTextContent('这次的因变量：X = F × 10000');
+  });
+
+  it('【用户要求】描述统计画各组的时间序列曲线：变量可选（默认公式最后一句），删掉的行不算；悬停看读数；可隐藏组、看数字', () => {
+    const H = 3_600_000;
+    const offsets = Array.from({ length: 49 }, (_, i) => (i - 24) * H);
+    const names = ['N', 'F', 'A', 'G', 'R', 'U', 'V'];
+    const byEvent: Record<string, Float32Array> = {};
+    for (const r of DATA.rows) {
+      if (r.v == null) continue;
+      const a = new Float32Array(names.length * 49).fill(0);
+      for (let k = 0; k < 49; k++) { a[6 * 49 + k] = r.v * (k / 24); a[1 * 49 + k] = -r.v; }
+      byEvent[r.id] = a;
+    }
+    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets, names, result: 'V', byEvent };
+    const { unmount } = render(<Harness series={null} />);
+    expect(screen.getByTestId('deep-dig-series-empty')).toHaveTextContent('重新运行描述统计后显示');
+    unmount();
+    render(<Harness series={series} />);
+    expect(screen.getByTestId('deep-dig-series-var-V')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('deep-dig-series-unit')).toHaveTextContent('V（公式最后一句） × 10000 · 基点/根');
+    for (const g of ['positive', 'control', 'other', 'background']) expect(screen.getByTestId(`deep-dig-series-line-${g}`)).toBeInTheDocument();
+    // 图例的 n = 有曲线的事件数（与分组表一致）
+    const posN = DATA.groups.find(g => g.group === 'positive')!.n;
+    expect(screen.getByTestId('deep-dig-series-legend-positive')).toHaveTextContent(`实验组${posN}`);
+    // 看数字：τ = 0 的平均 = 分组表的均值（V 在 τ = 0 就是特征值）
+    fireEvent.click(screen.getByTestId('deep-dig-series-table-toggle'));
+    const table = screen.getByTestId('deep-dig-series-table');
+    const head = within(table).getAllByRole('columnheader').map(h => h.textContent);
+    const zeroCol = head.indexOf('进场');
+    const posRow = within(table).getAllByRole('row').find(r => r.textContent?.startsWith('实验组'))!;
+    const meanAt0 = within(posRow).getAllByRole('cell')[zeroCol].textContent;
+    expect(meanAt0).toBe((DATA.groups.find(g => g.group === 'positive')!.mean! * 1e4).toFixed(2));
+    fireEvent.click(screen.getByTestId('deep-dig-series-table-toggle'));
+    // 换变量 F
+    fireEvent.click(screen.getByTestId('deep-dig-series-var-F'));
+    expect(screen.getByTestId('deep-dig-series-var-F')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('deep-dig-series-unit')).toHaveTextContent('F × 10000');
+    // 隐藏一组
+    fireEvent.click(screen.getByTestId('deep-dig-series-legend-other'));
+    expect(screen.queryByTestId('deep-dig-series-line-other')).not.toBeInTheDocument();
+    // 悬停
+    const hit = screen.getByTestId('deep-dig-series-hit');
+    hit.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.mouseMove(hit, { clientX: 50 });
+    expect(screen.getByTestId('deep-dig-series-tooltip')).toHaveTextContent('进场');
+    // 删掉一行实验组（数据表默认显示实验组）：图例的 n 少 1
+    fireEvent.click(screen.getAllByTestId('deep-dig-row-delete')[0]);
+    expect(screen.getByTestId('deep-dig-series-legend-positive')).toHaveTextContent(`实验组${posN - 1}`);
   });
 
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {

@@ -17,6 +17,8 @@ import { avgHoursOf, definitionKey, featureWindowMs, formulaVariables, halfLifeO
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
+import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
+import type { DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
@@ -75,6 +77,8 @@ export interface FeatureViewProps {
   samples: Record<SampleSource, readonly SampleRow[] | null>;
   /** 描述统计的数据（未删减）。 */
   data: DeepDigData | null;
+  /** 描述统计的时间序列曲线（本机 IndexedDB）；没有为 null / 不传。 */
+  series?: DeepDigSeries | null;
   inference: DeepDigInference | null;
   describeStatus: RunStatus;
   describeProgress: RunProgress | null;
@@ -247,9 +251,11 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   }
 }
 
-function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
+function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
   const def = result.definition;
   const [showDeleted, setShowDeleted] = useState(false);
+  /** 曲线的变量；null = 公式最后一句（核心变量）。 */
+  const [seriesVar, setSeriesVar] = useState<string | null>(null);
   const removed = useMemo(() => {
     const drop = new Set(excluded);
     return raw.rows.filter(r => drop.has(r.id)).sort((a, b) => b.anchorMs - a.anchorMs);
@@ -295,6 +301,10 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, excl
           </tbody>
         </table>
         <StripPlot result={result} />
+      </Block>
+
+      <Block title="时间序列" aside={<span className="text-[11px] text-muted-foreground">各组平均 · 进场前后</span>} testId="deep-dig-series-block">
+        <SeriesChart data={result} series={series && series.finishedAt === raw.finishedAt ? series : null} variable={seriesVar} onVariable={setSeriesVar} />
       </Block>
 
       <Block title="细节">

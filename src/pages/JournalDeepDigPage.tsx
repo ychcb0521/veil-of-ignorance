@@ -252,6 +252,7 @@ function FeaturePage({ def, userId, report, samples, signals, blockedReason, not
       onDeleteDef={onDeleteDef}
       samples={samples}
       data={run.data}
+      series={run.series}
       inference={run.inference}
       describeStatus={run.describeStatus}
       describeProgress={run.describeProgress}

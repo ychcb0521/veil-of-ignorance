@@ -16,7 +16,7 @@ import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 import {
-  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
+  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
@@ -91,6 +91,7 @@ export interface DeepDigData {
 }
 
 import type { DeepDigInference } from '@/lib/deepDig/commands';
+import { computeEventSeries, seriesOffsets, seriesRangeOf, type DeepDigSeries } from '@/lib/deepDig/series';
 
 export type { DeepDigInference };
 
@@ -154,16 +155,28 @@ export function describeDeepDig(events: readonly RunEvent[], key = DEEP_DIG_KEY)
 /** 旧数据没有波动率：推断统计的「控制波动」算不了，要先重跑描述统计。 */
 export const dataSupportsInference = (data: Pick<DeepDigData, 'rows'>) => data.rows.every(r => r.vol !== undefined);
 
+type CollectOptions = Pick<RunOptions, 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
+  /** 样本来源是信号库时用的信号（信号库的当前内容）。 */
+  signals?: readonly TradeSignal[];
+};
+
 /** 描述统计的运行：按定义分组 → 取行情、按公式算特征值 → 描述。定义写错时直接抛出（界面保存时已检查过）。 */
-export async function collectDeepDigData(
+export async function collectDeepDigData(report: CampaignGroupReport, def: DeepDigFeatureDef, options: CollectOptions = {}): Promise<DeepDigData> {
+  return (await collectDeepDigRun(report, def, options)).data;
+}
+
+/** 同上，另外带回每个事件的时间序列曲线（数据量大，另存在本机 IndexedDB）。 */
+export async function collectDeepDigRun(
   report: CampaignGroupReport,
   def: DeepDigFeatureDef,
-  options: Pick<RunOptions, 'fetchFn' | 'signal' | 'onProgress' | 'concurrency' | 'backgroundCap'> & {
-    /** 样本来源是信号库时用的信号（信号库的当前内容）。 */
-    signals?: readonly TradeSignal[];
-  } = {},
-): Promise<DeepDigData> {
+  options: CollectOptions = {},
+): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
+  const params = { interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
+  const range = seriesRangeOf(def);
+  const offsets = seriesOffsets(range);
+  const { names, result } = formulaVariables(def.formula);
+  const byEvent: Record<string, Float32Array> = {};
   const compiled = compileFeatureFormula(def.formula);
   const source = def.source ?? 'campaigns';
   const groups = compileGroups(def.positive, def.control, source);
@@ -176,18 +189,24 @@ export async function collectDeepDigData(
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
     ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: featureWindowMs(def) } } : {}),
-    extraFeatures: window => {
-      const { value, vars } = computeFeatureValues(window, compiled, { interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) });
+    seriesRange: range,
+    extraFeatures: (window, ctx) => {
+      const { value, vars } = computeFeatureValues(window, compiled, params);
+      if (value != null && ctx.bars) {
+        const s = computeEventSeries(ctx.bars, ctx.anchorMs, compiled, params, names, offsets);
+        if (s) byEvent[ctx.id] = s;
+      }
       return { [DEEP_DIG_KEY]: value, ...Object.fromEntries(Object.entries(vars).map(([k, x]) => [VAR_PREFIX + k, x])) };
     },
   });
   const described = describeDeepDig(collected.events);
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
-  return {
+  const finishedAt = Date.now();
+  const data: DeepDigData = {
     definition: snapshotOf(def),
     codeVersion: CODE_VERSION,
     startedAt,
-    finishedAt: Date.now(),
+    finishedAt,
     coverage: {
       campaigns: collected.campaigns,
       clusters: collected.clusters,
@@ -200,6 +219,7 @@ export async function collectDeepDigData(
     rows: described.rows,
     groups: described.groups,
   };
+  return { data, series: { finishedAt, offsets, names, result, byEvent } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================

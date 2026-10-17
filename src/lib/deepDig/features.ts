@@ -7,7 +7,7 @@
  *   - 分组标准：实验组、对照组各一个条件，按每场战役的读数判断；同时满足 → 冲突，都不满足 → 其他战役。
  * 内置的「多空博弈均衡点漂移速度 V」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
  */
-import type { ObservationWindow } from '@/lib/deepRsa/window';
+import type { ObservationWindow, ResearchBar } from '@/lib/deepRsa/window';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
@@ -295,22 +295,27 @@ export function computeFeatureValues(
     const withAmounts = bars.filter(b => b.quoteVolume != null && b.takerBuyQuoteVolume != null).length;
     if (withAmounts < MIN_AMOUNT_COVERAGE * bars.length) return none();
   }
-  const series = (f: (b: (typeof bars)[number]) => number | null | undefined) => Float64Array.from(bars, b => {
+  try {
+    const out = evaluateOnBars(bars, compiled, params);
+    return { value: lastValue(out.last), vars: Object.fromEntries(names.map(n => [n, lastValue(out.vars.get(n) ?? Number.NaN)])) };
+  } catch {
+    return none();
+  }
+}
+
+/** 在一串 K 线上逐根算公式：带回最后一句与每个起了名的变量的整条序列（会抛 FormulaError）。 */
+export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef = {}) {
+  const series = (f: (b: ResearchBar) => number | null | undefined) => Float64Array.from(bars, b => {
     const v = f(b);
     return v != null && Number.isFinite(v) ? v : Number.NaN;
   });
   const q = series(b => b.quoteVolume);
   const buy = series(b => b.takerBuyQuoteVolume);
-  try {
-    const out = evaluateProgramVars(compiled.program, {
-      C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
-      Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
-      hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
-    }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
-    return { value: lastValue(out.last), vars: Object.fromEntries(names.map(n => [n, lastValue(out.vars.get(n) ?? Number.NaN)])) };
-  } catch {
-    return none();
-  }
+  return evaluateProgramVars(compiled.program, {
+    C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
+    Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
+    hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
+  }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
 }
 
 /** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */

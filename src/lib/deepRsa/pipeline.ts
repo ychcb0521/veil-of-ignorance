@@ -242,12 +242,17 @@ export async function collectRunEvents(
      * Deep dig：按用户公式在观察窗上算出的额外特征，并进每个半衰期的特征里。
      * 给了 featureKlines 时，传进来的是那个周期、那段长度的观察窗（取不到为 null）；否则是 5m、48h 的观察窗。
      */
-    extraFeatures?: (window: ObservationWindow | null) => Row;
+    extraFeatures?: (window: ObservationWindow | null, ctx: { id: string; anchorMs: number; bars: readonly ResearchBar[] | null }) => Row;
     /**
      * Deep dig 特征值用别的 K 线周期 / 观察窗长度：【用户要求】2026-10-16「周期这里可以做成能够自主选择的。选择哪个周期，就统计哪个周期的变量」。
      * 另外再取一次这个周期的 K 线；24h 客观结果、波动率等仍按 5m 算（结果口径不随周期变）。
      */
     featureKlines?: { interval: ResearchInterval; windowMs: number };
+    /**
+     * Deep dig 的时间序列曲线：K 线往前多取 beforeMs、往后取到进场后 afterMs（ctx.bars 给全段）。观察窗与特征值不变。
+     * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均）」。
+     */
+    seriesRange?: { beforeMs: number; afterMs: number };
   } = {},
 ): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
@@ -262,17 +267,23 @@ export async function collectRunEvents(
   // ── 2. 行情 ──
   const failed: DeepRsaRunResult['coverage']['failed'] = [];
   progress('fetch', 0, items.length);
+  const fk = options.featureKlines;
+  const range = options.seriesRange;
+  // 5m 这份也拿来画曲线（特征值不另取周期时）：往前多取一段
+  const before5m = range && !fk ? range.beforeMs : 0;
   const fetched = await mapLimit(items, options.concurrency ?? 4, item => {
     checkAbort(signal);
     const entry = Math.ceil(item.anchorMs / BAR_MS) * BAR_MS;
-    return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - WINDOW_MS, entry + OUTCOME_HORIZON_MS, fetchFn, signal);
-  }, done => progress('fetch', done, items.length * (options.featureKlines ? 2 : 1)));
+    const end = Math.max(entry + OUTCOME_HORIZON_MS, range && !fk ? item.anchorMs + range.afterMs : 0);
+    return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - WINDOW_MS - before5m, end, fetchFn, signal);
+  }, done => progress('fetch', done, items.length * (fk ? 2 : 1)));
   checkAbort(signal);
-  const fk = options.featureKlines;
   const fkBarMs = fk ? intervalMs(fk.interval) : BAR_MS;
   const featureFetched = fk ? await mapLimit(items, options.concurrency ?? 4, item => {
     checkAbort(signal);
-    return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - fk.windowMs, item.anchorMs, fetchFn, signal, fk.interval);
+    return fetchResearchKlines(
+      normalizeResearchSymbol(item.symbol), item.anchorMs - fk.windowMs - (range?.beforeMs ?? 0), item.anchorMs + (range?.afterMs ?? 0), fetchFn, signal, fk.interval,
+    );
   }, done => progress('fetch', items.length + done, items.length * 2)) : null;
   checkAbort(signal);
 
@@ -296,11 +307,13 @@ export async function collectRunEvents(
     const featuresByH: Record<number, Row> = {};
     // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
     let featureWindow: ObservationWindow | null = window;
+    let featureBars: readonly ResearchBar[] | null = bars;
     if (fk && featureFetched) {
       const fr = featureFetched[i];
-      featureWindow = fr.status === 'fulfilled' ? extractWindow(fr.value, item.anchorMs, fk.windowMs, fkBarMs) : null;
+      featureBars = fr.status === 'fulfilled' ? fr.value : null;
+      featureWindow = featureBars ? extractWindow(featureBars, item.anchorMs, fk.windowMs, fkBarMs) : null;
     }
-    const extra = options.extraFeatures?.(featureWindow) ?? {};
+    const extra = options.extraFeatures?.(featureWindow, { id: item.id, anchorMs: item.anchorMs, bars: featureBars }) ?? {};
     for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h), ...extra };
     const outcome = forwardOutcome(bars, item.anchorMs);
     const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;

@@ -7,7 +7,9 @@
  * 旧页面的本机缓存顺手清掉；上一版「漂移速度 V」的结果（同一套默认公式与分组）迁过来。
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { collectDeepDigData, type DeepDigData } from '@/lib/deepDig/analysis';
+import { collectDeepDigRun, type DeepDigData } from '@/lib/deepDig/analysis';
+import type { DeepDigSeries } from '@/lib/deepDig/series';
+import { forgetDeepDigSeries, loadDeepDigSeries, saveDeepDigSeries } from '@/lib/deepDig/seriesStore';
 import { runInference, type DeepDigInference } from '@/lib/deepDig/commands';
 import { DRIFT_SPEED_DEF, upgradeGroupVars, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -25,6 +27,8 @@ const DRIFT_V1_PREFIX = 'veil.deepDig.driftSpeed.v1:';
 interface RunState {
   data: DeepDigData | null;
   inference: DeepDigInference | null;
+  /** 时间序列曲线（本机 IndexedDB，异步读进来）；没有或对不上这份数据为 null。 */
+  series: DeepDigSeries | null;
   describeStatus: RunStatus;
   describeProgress: RunProgress | null;
   describeError: string | null;
@@ -96,6 +100,7 @@ export function forgetDeepDigResult(userId: string | undefined, featureId: strin
   stores.get(featureId)?.controller?.abort();
   stores.delete(featureId);
   if (!userId) return;
+  void forgetDeepDigSeries(userId, featureId);
   try {
     localStorage.removeItem(dataKey(userId, featureId));
     localStorage.removeItem(inferKey(userId, featureId));
@@ -108,7 +113,7 @@ function storeOf(featureId: string, userId: string | undefined): Store {
   const id = userId ?? null;
   let store = stores.get(featureId);
   if (!store) {
-    store = { userId: null, state: { data: null, inference: null, ...IDLE }, controller: null, listeners: new Set() };
+    store = { userId: null, state: { data: null, inference: null, series: null, ...IDLE }, controller: null, listeners: new Set() };
     stores.set(featureId, store);
   }
   if (store.userId !== id) {
@@ -117,7 +122,14 @@ function storeOf(featureId: string, userId: string | undefined): Store {
     store.userId = null;
     const loaded = loadDeepDigResults(userId, featureId);
     store.userId = id;
-    store.state = { ...loaded, ...IDLE };
+    store.state = { ...loaded, series: null, ...IDLE };
+    const s = store;
+    const finishedAt = loaded.data?.finishedAt;
+    if (userId && finishedAt != null) {
+      void loadDeepDigSeries(userId, featureId, finishedAt).then(series => {
+        if (series && s.userId === id && s.state.data?.finishedAt === finishedAt && !s.state.series) set(s, { series });
+      });
+    }
   }
   return store;
 }
@@ -138,10 +150,11 @@ export function useDeepDigRun(userId: string | undefined, def: DeepDigFeatureDef
     store.controller = mine;
     set(store, { describeStatus: 'running', describeProgress: { stage: 'events', done: 0, total: 0 }, describeError: null });
     try {
-      const data = await collectDeepDigData(report, def, { signals, signal: mine.signal, onProgress: p => { if (store.controller === mine) set(store, { describeProgress: p }); } });
+      const { data, series } = await collectDeepDigRun(report, def, { signals, signal: mine.signal, onProgress: p => { if (store.controller === mine) set(store, { describeProgress: p }); } });
       if (store.controller !== mine) return;
       write(dataKey(userId, def.id), data);
-      set(store, { describeStatus: 'idle', describeProgress: null, data });
+      void saveDeepDigSeries(userId, def.id, series);
+      set(store, { describeStatus: 'idle', describeProgress: null, data, series });
     } catch (error) {
       if (store.controller !== mine) return;
       if (mine.signal.aborted) set(store, { describeStatus: 'cancelled', describeProgress: null });

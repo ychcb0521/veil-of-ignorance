@@ -4,7 +4,8 @@ import { buildRunItems, runDeepRsa } from '@/lib/deepRsa/pipeline';
 import type { CampaignGroupReport, CampaignGroupRow } from '@/lib/deepRsa/report';
 import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { BAR_MS } from '@/lib/deepRsa/window';
-import { collectDeepDigData } from '@/lib/deepDig/analysis';
+import { collectDeepDigData, collectDeepDigRun } from '@/lib/deepDig/analysis';
+import { valueAt } from '@/lib/deepDig/series';
 import { DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
 
 const HOUR = 60 * 60_000;
@@ -232,11 +233,25 @@ describe('Deep dig：周期、半衰期可选', () => {
   it('半衰期 12 小时：观察窗放到 96 小时，同一周期结果和 6 小时不同', async () => {
     const m = fakeMarket(planted, { quote: true });
     const d12 = await collectDeepDigData(reportOf(planted), { ...DRIFT_SPEED_DEF, halfLifeHours: 12 }, { fetchFn: m.fetchFn, backgroundCap: 0 });
-    const featureCall = m.calls.find(u => u.includes('interval=5m') && Number(new URL(u).searchParams.get('endTime')) <= T_START + 3 * DAY && Number(new URL(u).searchParams.get('startTime')) <= T_START + 3 * DAY - 96 * HOUR);
+    const featureCall = m.calls.find(u => u.includes('interval=5m') && Number(new URL(u).searchParams.get('startTime')) <= T_START + 3 * DAY - 96 * HOUR);
     expect(featureCall).toBeDefined();
     clearMarketDataCache();
     const d6 = await collectDeepDigData(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: fakeMarket(planted, { quote: true }).fetchFn, backgroundCap: 0 });
     expect(d12.rows.every(r => r.v != null) && d6.rows.every(r => r.v != null)).toBe(true);
     expect(d12.rows[0].v).not.toBeCloseTo(d6.rows[0].v!, 10);
+  });
+
+  it('【用户要求】时间序列曲线：K 线往前多取 24 小时、往后到进场后 24 小时；每个有特征值的事件一条曲线，τ = 0 ≈ 特征值', async () => {
+    const m = fakeMarket(planted, { quote: true });
+    const { data, series } = await collectDeepDigRun(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m.fetchFn, backgroundCap: 0 });
+    const a = planted[0].anchorMs;
+    expect(m.calls.some(u => Number(new URL(u).searchParams.get('startTime')) <= a - 72 * HOUR)).toBe(true);
+    expect(series.finishedAt).toBe(data.finishedAt);
+    expect(series.offsets).toHaveLength(49);
+    expect(series.names).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V']);
+    expect(Object.keys(series.byEvent).sort()).toEqual(data.rows.filter(r => r.v != null).map(r => r.id).sort());
+    for (const r of data.rows) expect(valueAt(series, r.id, 'V')!).toBeCloseTo(r.v!, 6);
+    // 进场后的点也有值（描述进场后怎么走）
+    expect(Number.isFinite(valueAt(series, data.rows[0].id, 'V', 24 * HOUR)!)).toBe(true);
   });
 });
