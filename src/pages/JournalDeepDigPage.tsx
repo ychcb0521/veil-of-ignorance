@@ -20,7 +20,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/useDeepDigRun';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { applyExclusions, DEEP_DIG_GROUPS, exclusionKey, fmtValue, pText, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { DEEP_DIG_GROUPS, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
@@ -282,23 +282,6 @@ function FeaturePage({ def, userId, report, samples, signals, blockedReason, not
   );
 }
 
-function summaryOf(r: { data: DeepDigData | null; inference: DeepDigInference | null } | undefined, excluded: readonly string[]): string | null {
-  if (!r?.data) return null;
-  const data = applyExclusions(r.data, excluded);
-  const d = data.definition;
-  const g = Object.fromEntries(data.groups.map(s => [s.group, s]));
-  const parts = [`中位数 实验组 ${fmtValue(d, g.positive?.median)} · 对照组 ${fmtValue(d, g.control?.median)}${d.unit ? ` ${d.unit}` : ''}`];
-  const inf = r.inference;
-  // 推断统计只在对应这份数据与删减时才进摘要
-  if (inf && inf.dataFinishedAt === r.data.finishedAt && (inf.excludedKey ?? '') === exclusionKey(r.data, excluded)) {
-    const t = inf.blocks.find(b => b.kind === 'ttest');
-    const m = inf.blocks.find(b => b.kind === 'mannwhitney');
-    if (t?.kind === 'ttest') parts.push(`t 检验 p ${pText(t.result.p)}`);
-    if (m?.kind === 'mannwhitney') parts.push(`AUC ${Number.isFinite(m.auc) ? m.auc.toFixed(2) : '—'}`);
-  }
-  return parts.join(' · ');
-}
-
 export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, onAdd, onDelete, removed = [], onRestore }: {
   onDelete?: (def: DeepDigFeatureDef) => void;
   removed?: readonly DeepDigFeatureDef[];
@@ -366,7 +349,6 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
                   </span>
                 ))}
               </div>
-              <div className="font-mono text-[11px] tabular-nums text-muted-foreground">{summaryOf(results[f.id], excluded[f.id] ?? []) ?? <span className="font-sans">未运行</span>}</div>
             </div>
           </li>
         ))}

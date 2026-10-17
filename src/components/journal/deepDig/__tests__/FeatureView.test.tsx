@@ -52,15 +52,16 @@ function Harness(p: {
 }
 
 describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
-  it('目录：列出特征值、三个模块入口、摘要；底部有「新增特征值」', () => {
+  it('目录：保留特征值和模块入口，不显示统计摘要', () => {
     const onOpen = vi.fn();
     const onAdd = vi.fn();
     const custom = newFeatureTemplate(1);
     render(<DeepDigDirectory defs={[DRIFT_SPEED_DEF, custom]} results={{ [DRIFT_SPEED_DEF.id]: { data: DATA, inference: INF } }} notes={{}} onOpen={onOpen} onAdd={onAdd} />);
     const entries = screen.getAllByTestId('deep-dig-entry');
     expect(entries).toHaveLength(2);
-    expect(entries[0].textContent).toMatch(/买方推力的加速度 a.*实验组 -?\d+\.\d\d · 对照组 -?\d+\.\d\d 基点\/根 · t 检验 p/);
-    expect(entries[1]).toHaveTextContent('未运行');
+    expect(entries[0]).toHaveTextContent('买方推力的加速度 a');
+    expect(screen.queryByText(/中位数 实验组/)).not.toBeInTheDocument();
+    expect(screen.queryByText('未运行')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId(`deep-dig-open-${custom.id}-infer`));
     expect(onOpen).toHaveBeenCalledWith(custom.id, 'infer');
     fireEvent.click(screen.getByTestId('deep-dig-add'));
@@ -119,7 +120,9 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(screen.getByTestId('deep-dig-describe-groups-default')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
     expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ positive: 'Bₜ > 2 and b > 0.5', control: 'Bₜ < 0.5 or b < 0.5', formula: DRIFT_SPEED_DEF.formula }));
-    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent('Bₜ > 2 and b > 0.5');
+    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent('本次结果采用');
+    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent(DATA.definition.positive);
+    expect(screen.getByTestId('deep-dig-describe-groups')).not.toHaveTextContent('Bₜ > 2 and b > 0.5');
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ > 2 and b > 0.5');
     expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('分组标准改过了');
     // 定义区那一处也能改，Esc 取消不保存
@@ -128,6 +131,22 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.keyDown(screen.getByTestId('deep-dig-def-groups-control'), { key: 'Escape' });
     expect(onSaveDef).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ < 0.5 or b < 0.5');
+  });
+
+  it('重叠条件明确警告，修改后保留历史条件，阻止用旧分组运行推断', () => {
+    const onInfer = vi.fn();
+    render(<Harness onInfer={onInfer} />);
+    fireEvent.click(screen.getByTestId('deep-dig-def-groups-edit'));
+    fireEvent.change(screen.getByTestId('deep-dig-def-groups-positive'), { target: { value: '1 > b and b < 10' } });
+    fireEvent.change(screen.getByTestId('deep-dig-def-groups-control'), { target: { value: 'b < 1' } });
+    expect(screen.getByTestId('deep-dig-def-groups-warning')).toHaveTextContent('同时满足两组条件');
+    expect(screen.getByTestId('deep-dig-def-groups-warning')).toHaveTextContent('实验组没有可用样本');
+    fireEvent.click(screen.getByTestId('deep-dig-def-groups-save'));
+    expect(screen.getByTestId('deep-dig-def-groups-warning')).toHaveTextContent('同时满足两组条件');
+    expect(screen.getByTestId('deep-dig-describe-groups')).toHaveTextContent(DATA.definition.positive);
+    fireEvent.click(screen.getByTestId('deep-dig-tab-infer'));
+    expect(screen.getByTestId('deep-dig-infer-run-button')).toBeDisabled();
+    expect(onInfer).not.toHaveBeenCalled();
   });
 
   it('【用户要求】周期、半衰期可选：定义区点一下就保存，摘要换算成根数与观察窗；改了提示按旧定义算；默认值不写进定义', () => {
@@ -359,7 +378,8 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 's >= 4' } });
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
     expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ source: 'signals', positive: 's >= 4', control: 's < 3', groupVars: 2 }));
-    expect(screen.getByTestId('deep-dig-describe-groups-source')).toHaveTextContent('信号库');
+    expect(screen.getByTestId('deep-dig-def-groups-source')).toHaveTextContent('信号库');
+    expect(screen.getByTestId('deep-dig-describe-groups-source')).toHaveTextContent('交易战役');
   });
 
   it('描述统计与推断统计各有自己的运行按钮；推断统计没有描述数据时不能运行', () => {

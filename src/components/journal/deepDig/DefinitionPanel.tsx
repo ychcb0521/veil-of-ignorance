@@ -233,6 +233,7 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
           按这个标准，本机{unit.slice(1)}（去重前）：实验组 <B>{preview.positive}</B> · 对照组 <B>{preview.control}</B> · 冲突 <B>{preview.conflict}</B> · 其他 <B>{preview.other}</B>
         </div>
       ) : null}
+      {preview && <GroupWarnings preview={preview} testId={testId} />}
       <div className="text-muted-foreground">
         直接写字母，如 {value.source === 'signals' ? <><Code>s &gt;= 4</Code>、<Code>s &lt;= 2</Code></> : <><Code>c &gt; 10 and b &gt; 2</Code>、<Code>Bₜ &lt; 0.5</Code></>}；
         可写 <Code>and or not</Code>、括号、比较。同时满足两组 → 冲突；用到的读数缺失{value.source === 'signals' ? '（没评分）' : '、战役未结算或校正未拉齐'} → 归「其他」，都不进两组比较。
@@ -252,7 +253,8 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
  * 分组标准：平时显示样本来源与两个条件，点「改标准」就地改（不用打开整个定义表单），即时预览本机样本各组多少个。
  * 【用户要求】2026-10-16「我希望分组这里的标准也可以手动改动」：定义区与描述统计的「分组」两处都能改，改的是同一份定义。
  */
-export function GroupCriteria({ def, samples, onSave, testId }: {
+export function GroupCriteria({ def, samples, onSave, testId, resultDef }: {
+  resultDef?: Pick<DeepDigFeatureDef, 'positive' | 'control' | 'source'>;
   def: DeepDigFeatureDef;
   samples: Record<SampleSource, readonly SampleRow[] | null>;
   onSave: (def: DeepDigFeatureDef) => void;
@@ -262,16 +264,25 @@ export function GroupCriteria({ def, samples, onSave, testId }: {
   const [draft, setDraft] = useState<GroupValue | null>(null);
   const error = useMemo(() => (draft ? groupError(draft) : null), [draft]);
 
+  const shown = resultDef ?? def;
+  const preview = useMemo(() => {
+    const rows = samples[source];
+    if (!rows || resultDef) return null;
+    try { return previewGroups(rows, compileGroups(def.positive, def.control, source)); } catch { return null; }
+  }, [samples, source, def.positive, def.control, resultDef]);
+
   if (!draft) {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px]" data-testid={testId}>
-        <span className="rounded bg-muted px-1.5 py-px text-[10.5px] text-muted-foreground" data-testid={`${testId}-source`}>{SOURCE_LABEL[source]}</span>
-        <span><span className="text-[#0B9F66] dark:text-[#0ECB81]">实验组</span> <Code>{def.positive}</Code></span>
-        <span><span className={RED}>对照组</span> <Code>{def.control}</Code></span>
+        <span className="rounded bg-muted px-1.5 py-px text-[10.5px] text-muted-foreground" data-testid={`${testId}-source`}>{SOURCE_LABEL[shown.source ?? 'campaigns']}</span>
+        {resultDef && <span className="text-muted-foreground">本次结果采用</span>}
+        <span><span className="text-[#0B9F66] dark:text-[#0ECB81]">实验组</span> <Code>{shown.positive}</Code></span>
+        <span><span className={RED}>对照组</span> <Code>{shown.control}</Code></span>
         <button type="button" onClick={() => setDraft({ source, positive: def.positive, control: def.control })} data-testid={`${testId}-edit`}
           className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
           <Pencil className="h-3 w-3" />改标准
         </button>
+        {preview && <GroupWarnings preview={preview} testId={testId} />}
       </div>
     );
   }
@@ -497,4 +508,14 @@ function FormulaHelp() {
       </table>
     </div>
   );
+}
+
+function GroupWarnings({ preview, testId }: { preview: ReturnType<typeof previewGroups>; testId: string }) {
+  if (!preview.conflict && preview.positive && preview.control) return null;
+  return <div role="status" className="basis-full rounded bg-[#F0B90B]/10 px-2 py-1 text-[#8F6B00] dark:text-[#F0B90B]" data-testid={`${testId}-warning`}>
+    {preview.conflict > 0 && `有 ${preview.conflict} 个样本同时满足两组条件，会归入「其他」，不参与两组比较。`}
+    {!preview.positive && '实验组没有可用样本，请检查不等号方向和条件范围。'}
+    {!preview.control && '对照组没有可用样本，请检查条件范围。'}
+    {'范围示例：1 < b and b < 10 表示 1 到 10 之间；1 > b 表示 b 小于 1。'}
+  </div>;
 }

@@ -117,7 +117,7 @@ export function FeatureView(props: FeatureViewProps) {
   const effective = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
   const exKey = data ? exclusionKey(data, excluded) : '';
   const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
-  const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands;
+  const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands && (data == null || definitionKey(data.definition) === definitionKey(def));
   const defStale = data != null && definitionKey(data.definition) !== definitionKey(def);
   return (
     <div className="space-y-5 text-[12px]" data-testid="deep-dig-feature">
@@ -162,14 +162,14 @@ export function FeatureView(props: FeatureViewProps) {
           <RunStrip
             testId="deep-dig-infer-run" label="运行推断统计" hasResult={!!inference} finishedAt={inference?.finishedAt ?? null}
             status={props.inferStatus} error={props.inferError}
-            canRun={!!effective && dataSupportsInference(effective) && props.inferStatus !== 'running'}
-            blockedReason={!effective ? '先运行描述统计' : !dataSupportsInference(effective) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
+            canRun={!defStale && !!effective && dataSupportsInference(effective) && props.inferStatus !== 'running'}
+            blockedReason={defStale ? '分组或公式已修改，请先重新运行描述统计' : !effective ? '先运行描述统计' : !dataSupportsInference(effective) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
             onRun={() => { if (effective) props.onInfer(effective, exKey); }}
             hint="按上面的命令逐行算，用描述统计的数据（已去掉删除的行），不联网，几秒到十几秒"
           />
           {inference && !inferenceFresh && (
             <Notice testId="deep-dig-infer-stale">
-              {inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
+              {defStale ? '分组或公式改过了，请先重新运行描述统计' : inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
             </Notice>
           )}
           {inference && effective ? (
@@ -284,7 +284,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
           按 <span className="font-mono text-foreground">{X}</span> 统计{varName ? `（公式里的变量）· 原值 × ${def.scale}` : def.unit ? ` · 单位 ${def.unit}` : ''} · 跟着下面时间序列图选的变量
         </span>
       )}>
-        <GroupCriteria def={liveDef} samples={samples} onSave={onSaveDef} testId="deep-dig-describe-groups" />
+        <GroupCriteria def={liveDef} resultDef={def} samples={samples} onSave={onSaveDef} testId="deep-dig-describe-groups" />
         <table className="text-[11.5px]" data-testid="deep-dig-groups">
           <thead>
             <tr className="text-muted-foreground">
