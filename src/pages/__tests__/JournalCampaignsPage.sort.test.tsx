@@ -871,7 +871,7 @@ describe('JournalCampaignsPage sorting', () => {
       fireEvent.click(toggle);
       expect(toggle).toHaveAttribute('aria-expanded', 'true');
     }
-    expect(screen.getAllByTestId('campaign-card-metrics')[0]).toHaveClass('flex-nowrap', 'justify-start', 'overflow-x-auto');
+    expect(screen.getAllByTestId('campaign-card-metrics')[0]).toHaveClass('grid-flow-col', 'grid-rows-1', 'justify-start', 'overflow-x-auto');
     // 按算术期望排序后收起：排序行里它照常显示（看得到当前按什么排），封面格跟开关收起、列宽回到收起时
     fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
     fireEvent.click(toggle);
@@ -1073,7 +1073,7 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.getByTestId('campaign-sort-leverage-icon')).toBeEmptyDOMElement();
   }, 15_000);
 
-  it('【用户要求】封面两排靠左网格：切换排序（哪怕筛掉战役）列宽不变，换时间段格子类名与次序不变；数值字号一致、不按长度缩小', async () => {
+  it('【用户要求】封面单排靠左且各卡片列宽对齐：切换排序（哪怕筛掉战役）列宽不变，换时间段格子类名与次序不变；数值字号一致、不按长度缩小', async () => {
     render(
       <MemoryRouter initialEntries={['/journal/campaigns']}>
         <Routes>
@@ -1088,12 +1088,12 @@ describe('JournalCampaignsPage sorting', () => {
       cells: [...dl.children].map(cell => cell.getAttribute('data-testid')),
     }));
     const initial = layout()[0];
-    expect(initial.className).toBe('grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]');
+    expect(initial.className).toBe('grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:thin]');
     expect(initial.cells).toHaveLength(18);
     // 列宽模板挂在列表容器上；读数不带内联字号
     const gridStyle = () => screen.getByTestId('campaign-card-list').getAttribute('style');
     const initialStyle = gridStyle();
-    expect(initialStyle).toMatch(/--cm-cols-9:/);
+    expect(initialStyle).toMatch(/--cm-cols:/);
     for (const dl of screen.getAllByTestId('campaign-card-metrics')) {
       for (const node of dl.querySelectorAll('dt, dd span')) expect((node as HTMLElement).style.fontSize).toBe('');
     }

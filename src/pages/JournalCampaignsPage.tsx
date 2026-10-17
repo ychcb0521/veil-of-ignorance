@@ -470,7 +470,7 @@ const SORT_LONG_PRESS_MS = 450;
 // 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格，手机两列。
 // 【用户要求】「统一向左对齐，不必完全占满右边的空间，我喜欢留白；能够完整显示即可，不要有太大间隙」：
 // 每列只取这一列实际最宽的读数（列表容器上的 --cm-cols-6 / --cm-cols-9，见 cardMetricGridStyle），从左排起，右边留白
-const CARD_METRIC_STRIP = 'flex flex-nowrap items-start justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [scrollbar-width:thin] [&>div]:shrink-0';
+const CARD_METRIC_STRIP = 'grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:thin]';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -1731,7 +1731,7 @@ const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace
  * 数值：11px 等宽。格宽按列表里最宽的读数估算（只会偏宽），正常不会截断；省略号只是兜底，
  * 万一装不下也在本格内收住、不压到隔壁一格。行高给足 16px。
  */
-const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] font-medium leading-4 tabular-nums';
+const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-normal leading-4 tabular-nums';
 /**
  * 【用户要求】「镜像止盈的字号不和谐」：中文读数（已实现·盈利 / 未实现）不走等宽字体——等宽字体里的汉字回落到系统黑体，
  * 11px 加粗比旁边的数字大一圈。改用正文字体、与指标名同一个 10px、常规字重，视觉高度与 11px 等宽数字齐平。
@@ -2065,7 +2065,7 @@ const CampaignCard = memo(function CampaignCard({
         </div>
       </div>
 
-      {/* 封面指标：两排、靠左、每列按内容取宽的网格（CARD_METRIC_STRIP + cardMetricGridStyle），上标签、下数值；【用户要求】顺序与排序行一致，当前排序项高亮。 */}
+      {/* 封面指标：单排、靠左，各卡片共用按最长读数计算的列宽（CARD_METRIC_STRIP + cardMetricGridStyle），上标签、下数值；【用户要求】顺序与排序行一致，当前排序项高亮。 */}
       <div className={`relative border-t border-border/60 bg-muted/[0.12] dark:bg-muted/[0.16] ${CARD_METRIC_STRIP_INSET}`}>
         <dl
           data-testid="campaign-card-metrics"
@@ -2942,8 +2942,7 @@ export default function JournalCampaignsPage() {
     // 折起来的格子不占列：列宽按显示出来的那几格依次排
     const order = (Object.keys(CARD_METRIC_LABEL) as CardMetricMode[]).filter(mode => !hiddenMinorMetrics.has(mode));
     return {
-      '--cm-cols-6': cardMetricGridTemplate(order, widths, 6),
-      '--cm-cols-9': cardMetricGridTemplate(order, widths, 9),
+      '--cm-cols': cardMetricGridTemplate(order, Object.fromEntries(order.map(mode => [mode, Math.max(widths[mode], [...CARD_METRIC_LABEL[mode]].length * 11 + 20)])) as Record<CardMetricMode, number>, order.length),
     } as CSSProperties;
   }, [displayRows, hiddenMinorMetrics]);
   const sortStatsPopoverWidthRem = useMemo(() => {

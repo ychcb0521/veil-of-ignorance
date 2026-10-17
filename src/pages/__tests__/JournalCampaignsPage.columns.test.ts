@@ -86,7 +86,7 @@ describe('封面指标行左对齐、按读数定宽；排序行左对齐', () =
     for (const gone of ['fitMetricValue', 'cardMetricColumnWidths', 'cardMetricWidthStyle', '--cm-w-', 'CARD_METRIC_WIDTH_CLASS', 'CARD_METRIC_UNIFORM_WIDTH']) {
       expect(s, gone).not.toContain(gone);
     }
-    expect(s).toContain("const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] font-medium leading-4 tabular-nums';");
+    expect(s).toContain("const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-normal leading-4 tabular-nums';");
     expect(s).toContain('const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, \'\')}`;');
     expect(s).toContain('<div data-testid="campaign-card-list" style={cardMetricGridStyle}>');
     const labels = [...constBlock(s, 'CARD_METRIC_LABEL').matchAll(/(\w+): '([^']+)'/g)].map(match => match[1]);
