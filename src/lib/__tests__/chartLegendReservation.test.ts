@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { legendReservedRight, LEGEND_TOOLBAR_GAP } from '@/lib/chartLegendReservation';
+import { legendReservedRight, LEGEND_TOOLBAR_GAP, priceAxisToolbarInset } from '@/lib/chartLegendReservation';
 
 /** 实测自复现页：容器 900 宽、左内缩 34、工具栏 right-12。 */
 const MAIN_WIDTH = 824;
@@ -81,5 +81,18 @@ describe('指标工具栏躲开布局按钮组', () => {
   it('永远不小于默认内缩', () => {
     expect(toolbarInsetRight({ wrapper: WRAPPER, controls: { ...CONTROLS, left: 899 } }))
       .toBeGreaterThanOrEqual(TOOLBAR_DEFAULT_INSET);
+  });
+});
+
+
+describe('指标工具栏避让价格轴', () => {
+  it('价格轴宽度改变后，工具栏右边缘仍留在绘图区内', () => {
+    for (const axisWidth of [64, 96, 144]) {
+      const inset = priceAxisToolbarInset(1000, 20, 980 - axisWidth);
+      expect(1000 - inset).toBeLessThanOrEqual(1000 - axisWidth - 8);
+    }
+  });
+  it('图表尚未布局时使用安全回退', () => {
+    expect(priceAxisToolbarInset(0, 0, 0)).toBe(TOOLBAR_DEFAULT_INSET);
   });
 });

@@ -42,7 +42,7 @@ import {
   type InteractionController,
 } from "@/lib/klineChartInteraction";
 import { buildAnalysisOrderPriceBounds } from "@/lib/analysisAutoFitPriceRange";
-import { legendReservedRight, toolbarInsetRight, TOOLBAR_DEFAULT_INSET as TOOLBAR_FALLBACK_INSET } from "@/lib/chartLegendReservation";
+import { legendReservedRight, toolbarInsetRight, priceAxisToolbarInset, TOOLBAR_DEFAULT_INSET as TOOLBAR_FALLBACK_INSET } from "@/lib/chartLegendReservation";
 
 /** 画布图例字号：与右上角按钮的 text-[10px] 对齐（klinecharts 默认 12）。 */
 const LEGEND_FONT_SIZE = 10;
@@ -1125,7 +1125,7 @@ function CandlestickChartComponent({
   const legendToolbarRef = useRef<HTMLDivElement>(null);
   const chartWrapperRef = useRef<HTMLDivElement>(null);
   const [legendOffsetRight, setLegendOffsetRight] = useState(0);
-  const [toolbarRight, setToolbarRight] = useState(TOOLBAR_FALLBACK_INSET);
+  const [toolbarRight, setToolbarRight] = useState(analysisMode ? 88 : TOOLBAR_FALLBACK_INSET);
 
   useEffect(() => {
     const toolbar = legendToolbarRef.current;
@@ -1135,6 +1135,11 @@ function CandlestickChartComponent({
     const measure = () => {
       const chart = chartRef.current;
       if (!chart) return;
+
+      const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
+      const mainWidth = main?.width ?? 0;
+      if (!(mainWidth > 0)) return;
+      const containerRect = container.getBoundingClientRect();
 
       // ① 工具栏先躲开右上角的布局按钮组（父组件里的，子组件看不见，只能实测）
       const wrapperEl = chartWrapperRef.current;
@@ -1148,6 +1153,7 @@ function CandlestickChartComponent({
           wrapper: { top: wrapperRect.top, right: wrapperRect.right, bottom: wrapperRect.bottom },
           controls: c ? { top: c.top, left: c.left, bottom: c.bottom } : null,
         });
+        inset = Math.max(inset, priceAxisToolbarInset(wrapperRect.right, containerRect.left, mainWidth));
         setToolbarRight(prev => (Math.abs(prev - inset) < 1 ? prev : inset));
       }
 
@@ -1158,11 +1164,6 @@ function CandlestickChartComponent({
       // **移动前**那个更靠右的位置，图例据此少留一截，正好差出几像素的残余重叠。
       // 工具栏的宽度不受移动影响，所以移动后的左边缘可以直接算出来：确定性的算术，
       // 优于对渲染时序的假设（用 requestAnimationFrame 等一帧会引入闪烁与时序依赖）。
-      const main = chart.getSize("candle_pane", DomPosition.Main) ?? chart.getSize();
-      const mainWidth = main?.width ?? 0;
-      if (!(mainWidth > 0)) return;
-
-      const containerRect = container.getBoundingClientRect();
       const toolbarWidth = toolbar.getBoundingClientRect().width;
       const toolbarLeft = wrapperRect
         ? wrapperRect.right - inset - toolbarWidth - containerRect.left
@@ -1176,8 +1177,9 @@ function CandlestickChartComponent({
     const observer = new ResizeObserver(measure);
     observer.observe(toolbar);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [analysisMode, indicators.length, toolbarRight]);
+    const frame = requestAnimationFrame(measure);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [analysisMode, indicators.length, toolbarRight, symbol, data.length]);
 
   // ============================================================
   // Theme reactivity & Tooltip customization

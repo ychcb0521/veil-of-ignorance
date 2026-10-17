@@ -103,3 +103,9 @@ export function toolbarInsetRight({
 
   return Math.max(fallback, wrapper.right - controls.left + gap);
 }
+
+/** 工具栏的右边缘始终停在价格轴左侧，并保留 8px 间距。 */
+export function priceAxisToolbarInset(wrapperRight: number, containerLeft: number, mainWidth: number): number {
+  if (![wrapperRight, containerLeft, mainWidth].every(Number.isFinite) || mainWidth <= 0) return TOOLBAR_DEFAULT_INSET;
+  return Math.max(TOOLBAR_DEFAULT_INSET, wrapperRight - containerLeft - mainWidth + TOOLBAR_CONTROLS_GAP);
+}
