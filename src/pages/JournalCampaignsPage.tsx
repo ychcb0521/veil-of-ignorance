@@ -1902,7 +1902,7 @@ const CampaignCard = memo(function CampaignCard({
             />
           )}
           {/* 状态圆点用实色（与左侧色条同一套），淡底色的圆点在浅色主题里几乎看不见 */}
-          <span role="img" aria-label={statusLabel} title={statusLabel} data-testid="campaign-status-dot" className={`mt-[7px] inline-flex h-1.5 w-1.5 shrink-0 self-start rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
+          <span role="img" aria-label={statusLabel} aria-description={statusLabel} data-testid="campaign-status-dot" className={`mt-[7px] inline-flex h-1.5 w-1.5 shrink-0 self-start rounded-full opacity-80 ${STATUS_ACCENT_STYLES[campaign.status] || 'bg-muted-foreground'}`} />
           {/* overflow-hidden 配合「操作时间」的 -ml-px：它换到行首时那条分隔线正好落在容器外被裁掉，不会顶着一条孤线。 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 overflow-hidden">
             {/* 按「字母」排序时标题下面一道琥珀下划线：字母排序比的就是标题。 */}
@@ -1920,7 +1920,7 @@ const CampaignCard = memo(function CampaignCard({
             {cardLeverage > 0 && (
               <span
                 data-testid="campaign-leverage"
-                title={Number(campaign.initial_leverage) > 0
+                aria-description={Number(campaign.initial_leverage) > 0
                   ? '杠杆倍数：主力开仓那一刻记录的初始杠杆'
                   : '杠杆倍数：这场战役没记初始杠杆，取各腿里最大的一档'}
                 data-sort-highlight={litAttr('leverage')}
@@ -1934,7 +1934,7 @@ const CampaignCard = memo(function CampaignCard({
             {ruinousSizing && (
               <span
                 data-testid="campaign-ruinous-sizing"
-                title={`仓位击穿：本场下注比例 = ${riskFractionFormula} ≥ 100%，`
+                aria-description={`仓位击穿：本场下注比例 = ${riskFractionFormula} ≥ 100%，`
                   + '这一注押上了全部本金。它评判的是当时的仓位大小，不进几何期望公式，也与本场实际盈亏无关。'}
                 className={`${CARD_CHIP} bg-[#F6465D]/15 text-[10px] font-medium ${TONE_DOWN}`}
               >
@@ -1943,7 +1943,7 @@ const CampaignCard = memo(function CampaignCard({
             )}
             <span
               className={`${CARD_CHIP} border border-border/60 font-mono text-[9px] text-muted-foreground/70`}
-              title={`战役编号 ${campaignDisplayCode}`}
+              aria-description={`战役编号 ${campaignDisplayCode}`}
             >
               {campaignDisplayCode}
             </span>
@@ -1970,7 +1970,7 @@ const CampaignCard = memo(function CampaignCard({
             data-testid="campaign-details-toggle"
             aria-expanded={detailsExpanded}
             aria-label={detailsExpanded ? '收起战役详情' : '展开战役详情'}
-            title={detailsExpanded ? '收起战役详情' : '展开战役详情'}
+            aria-description={detailsExpanded ? '收起战役详情' : '展开战役详情'}
             onClick={(event) => onToggleDetails(event, campaign.id)}
             className="inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-muted-foreground/50 transition-colors hover:border-border/80 hover:bg-background/65 hover:text-foreground"
           >
@@ -2034,7 +2034,7 @@ const CampaignCard = memo(function CampaignCard({
               <button
                 type="button"
                 disabled={busy}
-                title="恢复：回到正常的战役列表"
+                aria-description="恢复：回到正常的战役列表"
                 data-testid="campaign-bin-restore"
                 onClick={(event) => onRestore?.(event, campaign)}
                 className="inline-flex h-7 items-center gap-1 rounded border border-border/80 bg-background/50 px-2 text-[10px] text-foreground/80 transition-colors hover:border-[#F0B90B]/50 hover:bg-[#F0B90B]/10 hover:text-[#8F6B00] disabled:opacity-50 dark:hover:text-[#F0B90B]"
@@ -2045,7 +2045,7 @@ const CampaignCard = memo(function CampaignCard({
               <button
                 type="button"
                 disabled={busy}
-                title="彻底删除：无法恢复"
+                aria-description="彻底删除：无法恢复"
                 aria-label={`彻底删除 ${campaign.title}`}
                 data-testid="campaign-bin-purge"
                 onClick={(event) => onPermanentDelete?.(event, campaign)}
@@ -2080,13 +2080,13 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div data-testid="campaign-effective-price-change" className={letteredCell('effectivePriceChangePct')} data-sort-highlight={litAttr('effectivePriceChangePct')}
-            title={`${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`}>
+            aria-description={`${EFFECTIVE_PRICE_CHANGE_FORMULA}。${EFFECTIVE_PRICE_CHANGE_RULE}`}>
             <dt className={metricName('effectivePriceChangePct')}>{CARD_METRIC_LABEL.effectivePriceChangePct}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} ${signTone(rowRelativePriceChange(row), 'text-foreground/80')}`}>{readings.effectivePriceChangePct}</span></dd>
           </div>
           <div
             data-testid="campaign-add-count"
-            title={`加仓次数：这场战役里真的成交过的加仓腿有 ${readings.addCount} 条（只挂了单、没成交的不算）`}
+            aria-description={`加仓次数：这场战役里真的成交过的加仓腿有 ${readings.addCount} 条（只挂了单、没成交的不算）`}
             className={letteredCell('addCount')}
             data-sort-highlight={litAttr('addCount')}
           >
@@ -2098,21 +2098,21 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div data-testid="campaign-position-geometric-multiple" className={letteredCell('positionGeometricMultiple')} data-sort-highlight={litAttr('positionGeometricMultiple')}
-            title={`几何仓位，即仓位几何累积倍数。几何仓位 = ${POSITION_GEOMETRIC_FORMULA}，初始主力与镜像币量为 1；αf 为首次实际减仓比例。几何仓位（理论）：${rowPositionGeometricMultipleTheoretical(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultipleTheoretical(row)!)}。${LEG_THEORETICAL_FACTOR_HINT}`}>
+            aria-description={`几何仓位，即仓位几何累积倍数。几何仓位 = ${POSITION_GEOMETRIC_FORMULA}，初始主力与镜像币量为 1；αf 为首次实际减仓比例。几何仓位（理论）：${rowPositionGeometricMultipleTheoretical(row) == null ? '—' : formatPositionAmplification(rowPositionGeometricMultipleTheoretical(row)!)}。${LEG_THEORETICAL_FACTOR_HINT}`}>
             <dt className={metricName('positionGeometricMultiple')}>{CARD_METRIC_LABEL.positionGeometricMultiple}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span className={`${CARD_METRIC_VALUE} text-foreground/85`}>{readings.positionGeometricMultiple}</span></dd>
           </div>
           <div data-testid="campaign-magic-b" className={letteredCell('magicB')} data-sort-highlight={litAttr('magicB')}
-            title={MAGIC_B_METHODS_DESCRIPTION}>
+            aria-description={MAGIC_B_METHODS_DESCRIPTION}>
             <dt className={metricName('magicB')}>{CARD_METRIC_LABEL.magicB}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-magic-b-value" className={`${CARD_METRIC_VALUE} ${payoffRatioTone}`}>{readings.magicB}</span></dd>
           </div>
-          <div data-testid="campaign-capture-rate" className={letteredCell('captureRate')} data-sort-highlight={litAttr('captureRate')} title={PAYOFF_RATIO_FORMULA}>
+          <div data-testid="campaign-capture-rate" className={letteredCell('captureRate')} data-sort-highlight={litAttr('captureRate')} aria-description={PAYOFF_RATIO_FORMULA}>
             <dt className={metricName('captureRate')}>{CARD_METRIC_LABEL.captureRate}</dt>
-            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" title={`${PAYOFF_RATIO_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损（L_磨损 ÷ L₀）${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
+            <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-capture-rate-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPayoffRatio(row), 'text-foreground/85')}`}>{payoffReading}{hedgeWear && <span data-testid="campaign-capture-rate-hedge-wear" className="ml-0.5 text-muted-foreground" aria-description={`${PAYOFF_RATIO_WEAR_FORMULA}；神奇的 b ${hedgeWear.b ?? '—'}，磨损（L_磨损 ÷ L₀）${hedgeWear.wear}`}>(<span className={hedgeWear.negative ? 'text-[#F6465D]' : 'text-[#0ECB81]'}>{hedgeWear.wear}</span>)</span>}</span></dd>
           </div>
           <div data-testid="campaign-execution-wear" className={letteredCell('executionWear')} data-sort-highlight={litAttr('executionWear')}
-            title={`${EXECUTION_WEAR_FORMULA}。读数写总的，括号里是中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。${EXECUTION_WEAR_RULE}`}>
+            aria-description={`${EXECUTION_WEAR_FORMULA}。读数写总的，括号里是中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。${EXECUTION_WEAR_RULE}`}>
             <dt className={metricName('executionWear')}>{CARD_METRIC_LABEL.executionWear}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-execution-wear-value" className={`${CARD_METRIC_VALUE} ${signTone(rowExecutionWearR(row) == null ? null : sortBinValue('executionWear', rowExecutionWearR(row)!), 'text-foreground/80')}`}>{readings.executionWear}</span></dd>
           </div>
@@ -2120,7 +2120,7 @@ const CampaignCard = memo(function CampaignCard({
           <div
             data-testid="campaign-geometric-expectancy"
             data-ruinous-sizing={ruinousSizing ? 'true' : undefined}
-            title={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`
+            aria-description={`${GEOMETRIC_GROWTH_METHOD_ONE}；${GEOMETRIC_GROWTH_METHOD_TWO}；${GEOMETRIC_GROWTH_METHOD_THREE}。${GEOMETRIC_GROWTH_RULE}${GEOMETRIC_GROWTH_MISSING_RULE}`
               + (ruinousSizing
                 ? `另：本场真实下注比例 = ${riskFractionFormula} ≥ 100%，`
                   + '这一注押上了全部本金（标题行的「仓位击穿」）。它评判的是当时的仓位大小，不进上面这个公式，也与本场实际盈亏无关。'
@@ -2136,7 +2136,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-position-amplification"
-            title={positionAmplification == null
+            aria-description={positionAmplification == null
               ? '仓位放大 = 主方向总名义仓位 ÷ 主力开仓名义仓位：这场读不出主力开仓名义仓位，不计算'
               : `仓位放大 =（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位 = ${readings.positionAmplification}（各项都是名义仓位，单位 USDT；分母保留最初主力与镜像总敞口）`}
             className={letteredCell('positionAmplification')}
@@ -2151,7 +2151,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-add-efficiency"
-            title={addEfficiency == null || mainPriceEfficiency == null
+            aria-description={addEfficiency == null || mainPriceEfficiency == null
               ? (campaignHasMainAdd(legs)
                 ? '加仓效用 = 盈亏比 ÷ |首仓涨跌幅倍数|：这场首仓涨跌幅倍数显示为 0.00 或算不出（或算不出盈亏比），不计算'
                 : '加仓效用：这场战役没有加仓，不计算')
@@ -2170,7 +2170,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-arithmetic-expectancy"
-            title={`Eᵢ = 50% × b − 50%（胜率统一取 50%）。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`}
+            aria-description={`Eᵢ = 50% × b − 50%（胜率统一取 50%）。方法一（括号外）b = 盈亏比；方法二（括号内）b = 神奇的 b（理论）${theoreticalB == null ? '—' : formatCampaignPayoffRatio(theoreticalB * 100)}`}
             className={letteredCell('arithmeticExpectancy')}
             data-sort-highlight={litAttr('arithmeticExpectancy')}
           >
@@ -2180,23 +2180,23 @@ const CampaignCard = memo(function CampaignCard({
             </dd>
           </div>
           <div data-testid="campaign-unit-rise" className={letteredCell('unitRise')} data-sort-highlight={litAttr('unitRise')}
-            title={`${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            aria-description={`${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`}>
             <dt className={metricName('unitRise')}>{CARD_METRIC_LABEL.unitRise}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-unit-rise-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitRise(row), 'text-foreground/80')}`}>{readings.unitRise}</span></dd>
           </div>
           <div data-testid="campaign-unit-profit" className={letteredCell('unitProfit')} data-sort-highlight={litAttr('unitProfit')}
-            title={`${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            aria-description={`${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
             <dt className={metricName('unitProfit')}>{CARD_METRIC_LABEL.unitProfit}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-unit-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowUnitProfit(row), 'text-foreground/80')}`}>{readings.unitProfit}</span></dd>
           </div>
           <div data-testid="campaign-position-profit" className={letteredCell('positionProfit')} data-sort-highlight={litAttr('positionProfit')}
-            title={`${POSITION_PROFIT_FORMULA}。${POSITION_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
+            aria-description={`${POSITION_PROFIT_FORMULA}。${POSITION_PROFIT_RULE}${UNIT_METRICS_MISSING_RULE}`}>
             <dt className={metricName('positionProfit')}>{CARD_METRIC_LABEL.positionProfit}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}><span data-testid="campaign-position-profit-value" className={`${CARD_METRIC_VALUE} ${signTone(rowPositionProfit(row), 'text-foreground/80')}`}>{readings.positionProfit}</span></dd>
           </div>
           <div
             data-testid="campaign-main-price-change"
-            title={mainPriceChangePct == null
+            aria-description={mainPriceChangePct == null
               ? '首仓涨跌幅：主力都还没平仓（没有平仓价），显示「—」'
               : '首仓涨跌幅：按主力方向计（空单价格跌了为正）。开仓价取主力最有利的一笔；主力平仓时有对冲锁住行情就按对冲的开仓价，否则按主力的平仓价。公式见排序栏「首仓涨跌幅」的说明'}
             className={letteredCell('mainPriceChange')}
@@ -2211,7 +2211,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-main-price-efficiency"
-            title={mainPriceEfficiency == null
+            aria-description={mainPriceEfficiency == null
               ? '首仓涨跌幅倍数 = 主力首仓涨跌幅 ÷ 预期回撤：主力未平仓或算不出预期回撤时不算'
               : `首仓涨跌幅倍数 = 主力首仓涨跌幅 ${formatLegPriceChangePct(mainPriceChangePct)} ÷ 预期回撤 ${initialExpectedMaxDrawdownPct.toFixed(2)}% = ${formatMainPriceEfficiency(mainPriceEfficiency)}：价格走出了几个「预期回撤」`}
             className={letteredCell('mainPriceEfficiency')}
@@ -2226,7 +2226,7 @@ const CampaignCard = memo(function CampaignCard({
           </div>
           <div
             data-testid="campaign-unrealized-price-change"
-            title={unrealizedPriceChangePct == null
+            aria-description={unrealizedPriceChangePct == null
               ? '涨幅未兑现会在主力首仓涨跌幅与峰值涨幅都可计算时显示'
               : `涨幅未兑现 = 峰值涨幅 − 首仓涨跌幅 = ${readings.unrealizedPriceChangePct}`}
             className={letteredCell('unrealizedPriceChangePct')}
@@ -2251,7 +2251,7 @@ const CampaignCard = memo(function CampaignCard({
           <button
             type="button"
             disabled={busy}
-            title="删除战役"
+            aria-description="删除战役"
             aria-label={`删除 ${campaign.title}`}
             data-testid="campaign-delete"
             onClick={(event) => onDelete(event, campaign)}
@@ -2298,7 +2298,7 @@ const CampaignCard = memo(function CampaignCard({
                 legs.map((leg: TradeJournal) => (
                   <span
                     key={leg.id}
-                    title={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
+                    aria-description={leg.leg_role ? LEG_ROLE_LABELS[leg.leg_role] : '未归类'}
                     className={`rounded px-1.5 py-0.5 text-[9px] ${leg.leg_role ? LEG_CHIP_CLASS[leg.leg_role] : 'bg-muted text-muted-foreground'}`}
                   >
                     {leg.leg_role ? LEG_ABBR[leg.leg_role] : '?'}
@@ -2726,7 +2726,7 @@ export default function JournalCampaignsPage() {
   }, [scopedRows]);
   /**
    * 【用户要求】统计概览的 L_磨损（与盈亏比同一单位 R）：当前列表里已结束战役的 L_磨损加总（总磨损），括号里两部分相加——
-   * 中途对冲的损益 + 最终对冲磨损；浮层另写场数与每场平均。
+   * 中途对冲的损益 + 最终对冲磨损；概览突出每场均值，浮层保留累计值与样本数。
    */
   const executionWearSummary = useMemo(() => {
     let count = 0, total = 0, hedge = 0, other = 0;
@@ -5423,7 +5423,7 @@ export default function JournalCampaignsPage() {
                 )}
               </PopoverContent>
             </Popover>
-            {/* 【用户要求】L_磨损放在盈亏比后面：总磨损（中途对冲 + 最终对冲磨损） */}
+            {/* 【用户要求】L_磨损放在盈亏比后面：每场平均为主读数，累计值放在说明中 */}
             <Popover
               open={formulaPopover === 'executionWearStat'}
               onOpenChange={open => handleFormulaPopoverChange('executionWearStat', open)}
@@ -5432,26 +5432,27 @@ export default function JournalCampaignsPage() {
                 <button
                   type="button"
                   data-testid="campaign-execution-wear-stat"
-                  aria-label={`L_磨损 ${executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatExecutionWearR) : '—'}，点击查看计算公式`}
+                  aria-label={`平均磨损 ${executionWearSummary ? formatExecutionWearR(executionWearSummary.mean) : '—'}，点击查看每场均值与累计磨损计算公式`}
                   onClick={event => toggleFormulaPopover(event, 'executionWearStat')}
                   className={`${STAT_TRIGGER} border-transparent`}
                 >
-                  <span className={STAT_LABEL}>L_磨损</span>{' '}
-                  <span className={`${STAT_VALUE} ${statSignTone(executionWearSummary == null ? null : sortBinValue('executionWear', executionWearSummary.total))}`}>
-                    {executionWearSummary ? formatExecutionWearParts(executionWearSummary.total, executionWearSummary.hedge, executionWearSummary.other, formatExecutionWearR) : '—'}
+                  <span className={STAT_LABEL}>平均磨损</span>{' '}
+                  <span className={`${STAT_VALUE} ${statSignTone(executionWearSummary == null ? null : sortBinValue('executionWear', executionWearSummary.mean))}`}>
+                    {executionWearSummary ? formatExecutionWearR(executionWearSummary.mean) : '—'}
                   </span>
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" collisionPadding={POPOVER_COLLISION_PADDING} className={`w-80 border-border bg-card p-3 text-[11px] ${POPOVER_VIEWPORT_MAX_W}`}>
-                <div className="font-medium text-foreground">L_磨损 · 总磨损</div>
+                <div className="font-medium text-foreground">平均磨损 · 每场战役</div>
+                <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">平均磨损 = Σ L_磨损ᵢ ÷ 有效战役场数 N</div>
                 <div className="mt-2 rounded bg-muted/60 px-2 py-1.5 font-mono text-foreground">Σ L_磨损ᵢ = Σ 中途对冲ᵢ ＋ Σ 最终对冲磨损ᵢ</div>
                 {executionWearSummary ? (
                   <div className="mt-2 space-y-1 text-muted-foreground" data-testid="campaign-execution-wear-stat-worked">
-                    <div className="font-mono text-foreground">
-                      {formatExecutionWearR(executionWearSummary.hedge)} {executionWearSummary.other < 0 ? '−' : '+'} {Math.abs(executionWearSummary.other).toFixed(2)} = {formatExecutionWearR(executionWearSummary.total)}（{executionWearSummary.count} 场）
+                    <div className="font-mono text-foreground">每场平均 {formatExecutionWearR(executionWearSummary.mean)}（{executionWearSummary.count} 场）</div>
+                    <div className="font-mono">
+                      累计磨损：{formatExecutionWearR(executionWearSummary.hedge)} {executionWearSummary.other < 0 ? '−' : '+'} {Math.abs(executionWearSummary.other).toFixed(2)} = {formatExecutionWearR(executionWearSummary.total)}（{executionWearSummary.count} 场）
                     </div>
-                    <div className="font-mono">每场平均 {formatExecutionWearR(executionWearSummary.mean)}</div>
-                    <div>读数写总的 L_磨损，括号里是两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。取样：当前列表里已结束、算得出 L_磨损的战役。</div>
+                    <div>概览读数为每场战役 L_磨损的算术均值；无磨损的有效战役按 0 参与，缺失值不参与。累计磨损由两部分相加：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。取样：当前列表里已结束、算得出 L_磨损的战役。</div>
                     <div>{EXECUTION_WEAR_RULE}</div>
                   </div>
                 ) : (
