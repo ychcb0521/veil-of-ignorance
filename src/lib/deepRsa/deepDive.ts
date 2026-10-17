@@ -129,7 +129,7 @@ export const FEATURES_STUDY: DeepDiveStudy = {
 /** 【用户要求】2026-10-16「你要把这个指标在 deep RSA 那里做统计检验」：动态谢林点（docs/deep-rsa/12-dsp-test.md，运行前写定）。 */
 export const DSP_FEATURES: readonly DeepDiveFeatureSpec[] = [
   {
-    key: 'dsp_v', name: '谢林点迁移速度 V', weighted: true,
+    key: 'dsp_v', name: '买方推力的加速度 a', weighted: true,
     definition: '动态谢林点指标在进场前最后一根 5m K 线上的 Vₜ：净资金力量 × 买方优势权重 × 价格变化，按半衰期 h 指数平滑。',
     formula: 'Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Fₜ·Gₜ·Rₜ，Fₜ = ln(1 + |Bₜ − Sₜ| ÷ EMA(Bₜ + Sₜ))，Gₜ = 1 + max(Aₜ, 0)，Rₜ = ln(Cₜ ÷ Cₜ₋₁)；B / S 为主动买 / 卖成交金额',
     reading: '正 = 共识价（谢林点）在往上移，越大移得越快（界面按基点 / 根显示）',
@@ -168,7 +168,7 @@ export const DSP_STUDY: DeepDiveStudy = {
 };
 
 /**
- * 【用户要求】2026-10-16 Deep dig：「目前我只关注多空博弈均衡点漂移速度这一个特征值」——只检验 V 一项，
+ * 【用户要求】2026-10-16 Deep dig：「目前我只关注买方推力的加速度这一个特征值」——只检验 V 一项，
  * 统计与第 7 步相同（t 检验、AUC、相关 + 样本外确认、五分位）；只有一项，不再与 A、偏离 DSP 一起做多重校正。
  * 交叉表沿用第 7 步的定义（界面不显示）。
  */
@@ -176,7 +176,7 @@ export const DRIFT_STUDY: DeepDiveStudy = {
   ...DSP_STUDY,
   id: 'drift',
   step: 'Deep dig',
-  definitionsTitle: '多空博弈均衡点漂移速度 V',
+  definitionsTitle: '买方推力的加速度 a',
   features: DSP_FEATURES.filter(f => f.key === 'dsp_v'),
 };
 

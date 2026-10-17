@@ -769,7 +769,7 @@ export function registerCustomIndicators() {
     },
   });
 
-  // ─── 动态谢林点 DSP（主图）+ 迁移速度 V、主动买方优势 A（两个副图）───
+  // ─── 动态谢林点 DSP（主图）+ 买方推力的加速度 a、主动买方优势 A（两个副图）───
   // 【用户要求】2026-10-15 按用户规格；计算在 dynamicSchellingPoint.ts。成交额来自 K 线的 turnover / takerBuyTurnover（USDT），缺失不拿币数凑。
   // 三个指标各算一遍同一个 computeDsp（同一份数据、同一个半衰期），结果一致。
   registerIndicator({
@@ -789,7 +789,7 @@ export function registerCustomIndicators() {
 
   registerIndicator({
     name: 'DSP_V_CUSTOM',
-    shortName: 'DSP·V',
+    shortName: 'DSP·a',
     calcParams: [DSP_DEFAULTS.halfLifeHours],
     precision: 3,
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
@@ -798,7 +798,7 @@ export function registerCustomIndicators() {
     draw: V_ZERO_LINE,
     figures: [
       {
-        key: 'v', title: 'V(基点/根): ', type: 'line',
+        key: 'v', title: 'a(基点/根): ', type: 'line',
         styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
       },
     ],

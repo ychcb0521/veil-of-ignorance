@@ -104,7 +104,7 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 /**
- * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开两个副图——迁移速度 V、主动买方优势 A。
+ * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开两个副图——买方推力的加速度 a、主动买方优势 A。
  * 附属副图用「主项#后缀」作 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除。
  */
 const DSP_COMPANIONS = [
@@ -117,7 +117,7 @@ const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = 
   DSP_VA: DSP_COMPANIONS,
 };
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·V/A" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */

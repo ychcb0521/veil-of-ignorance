@@ -59,7 +59,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     render(<DeepDigDirectory defs={[DRIFT_SPEED_DEF, custom]} results={{ [DRIFT_SPEED_DEF.id]: { data: DATA, inference: INF } }} notes={{}} onOpen={onOpen} onAdd={onAdd} />);
     const entries = screen.getAllByTestId('deep-dig-entry');
     expect(entries).toHaveLength(2);
-    expect(entries[0].textContent).toMatch(/多空博弈均衡点漂移速度 V.*实验组 -?\d+\.\d\d · 对照组 -?\d+\.\d\d 基点\/根 · t 检验 p/);
+    expect(entries[0].textContent).toMatch(/买方推力的加速度 a.*实验组 -?\d+\.\d\d · 对照组 -?\d+\.\d\d 基点\/根 · t 检验 p/);
     expect(entries[1]).toHaveTextContent('未运行');
     fireEvent.click(screen.getByTestId(`deep-dig-open-${custom.id}-infer`));
     expect(onOpen).toHaveBeenCalledWith(custom.id, 'infer');
@@ -78,7 +78,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(onDelete).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId(`deep-dig-delete-confirm-${custom.id}`));
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: custom.id }));
-    expect(screen.getByTestId('deep-dig-removed-features')).toHaveTextContent('多空博弈均衡点漂移速度 V');
+    expect(screen.getByTestId('deep-dig-removed-features')).toHaveTextContent('买方推力的加速度 a');
     fireEvent.click(screen.getByTestId(`deep-dig-restore-${DRIFT_SPEED_DEF.id}`));
     expect(onRestore).toHaveBeenCalledWith(DRIFT_SPEED_DEF.id);
   });

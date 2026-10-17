@@ -5,7 +5,7 @@
  * 就按照这里的公式提取因变量，按分组标准进行划分组别」。
  *   - 公式：在进场前观察窗内的已收盘 K 线（周期可选，默认 5m）上逐根算，取最后一根的值（见 formula.ts）。
  *   - 分组标准：实验组、对照组各一个条件，按每场战役的读数判断；同时满足 → 冲突，都不满足 → 其他战役。
- * 内置的「多空博弈均衡点漂移速度 V」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
+ * 内置的「买方推力的加速度 a」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
  */
 import type { ObservationWindow, ResearchBar } from '@/lib/deepRsa/window';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -163,7 +163,7 @@ export const EMA_DRIFT_SPEED_FORMULA = [
  * 默认公式：平时成交额 = 过去 avgh 小时（默认 24）的平均成交额。
  * 【用户要求】2026-10-17「如果想改成过去一段时间的平均值，时间的选取就选 24 小时」。想与主图 DSP 逐根一致，把 avg(Q, avgh) 换回 ema(Q, hl)。
  */
-export const DRIFT_SPEED_FORMULA = [
+const LEGACY_V_DRIFT_SPEED_FORMULA = [
   '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 半衰期，avgh = 平均时长（小时，都在下面选）',
   'N = abs(B - S)                 # 主动净资金',
   'F = ln(1 + N / avg(Q, avgh))   # 资金力量：净资金比过去 avgh 小时的平均成交额异常多少',
@@ -174,10 +174,12 @@ export const DRIFT_SPEED_FORMULA = [
   'V = ema(U, hl, 0)              # 漂移速度：按半衰期 hl 指数平滑',
 ].join('\n');
 
+export const DRIFT_SPEED_FORMULA = LEGACY_V_DRIFT_SPEED_FORMULA.replace('V = ema(U, hl, 0)', 'a = ema(U, hl, 0)');
+
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   id: 'drift-speed',
-  name: '多空博弈均衡点漂移速度 V',
-  short: 'V',
+  name: '买方推力的加速度 a',
+  short: 'a',
   definition: '进场前最后一根 K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期指数平滑（周期、半衰期见下）。',
   formula: DRIFT_SPEED_FORMULA,
   scale: 1e4,
@@ -214,7 +216,15 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
   const byId = new Map(saved.map(d => [d.id, upgradeFormula(upgradeGroupVars(d))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-  return [...builtins, ...custom];
+  // 历史内置名称随系统更新，用户自定义的名称保持原样。
+  const legacyNames = new Set([
+    ['多空博弈均衡点', '漂移速度'].join(''),
+    ['多空博弈均衡点', '漂移速度 V'].join(''),
+    ['谢林点', '迁移速度 V'].join(''),
+    ['买方推力的加速度', ' V'].join(''),
+  ]);
+  return [...builtins, ...custom].map(def => def.id === DRIFT_SPEED_DEF.id
+    ? { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short } : def);
 }
 
 /**
@@ -223,7 +233,7 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
  */
 function upgradeFormula<T extends { formula?: string; definition?: string }>(d: T): T {
   const f = d.formula?.trim();
-  if (f !== LEGACY_DRIFT_SPEED_FORMULA && f !== EMA_DRIFT_SPEED_FORMULA) return d;
+  if (f !== LEGACY_DRIFT_SPEED_FORMULA && f !== EMA_DRIFT_SPEED_FORMULA && f !== LEGACY_V_DRIFT_SPEED_FORMULA) return d;
   const definition = d.definition === '进场前最后一根 5m K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期 6 小时指数平滑。'
     ? DRIFT_SPEED_DEF.definition : d.definition;
   return { ...d, formula: DRIFT_SPEED_FORMULA, definition };
