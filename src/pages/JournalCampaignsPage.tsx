@@ -113,6 +113,8 @@ import {
   type CampaignMetricSeries,
 } from '@/lib/campaignMetricSeries';
 import { formatBeijingTime } from '@/lib/timeFormat';
+import { MINOR_METRIC_KEYS, MINOR_METRICS_NAMES, MINOR_TOGGLE_CLASS } from '@/lib/campaignMinorMetrics';
+import { useShowMinorMetrics } from '@/hooks/useShowMinorMetrics';
 import { cardMetricGridTemplate, cardMetricItemWidths } from '@/lib/campaignCardMetricWidths';
 import {
   formatGeometricGrowth, formatGeometricGrowthMethods, geometricGrowthBinValue, summarizeGeometricExpectancy, GEOMETRIC_GROWTH_FORMULA, GEOMETRIC_GROWTH_METHOD_ONE, GEOMETRIC_GROWTH_METHOD_THREE, GEOMETRIC_GROWTH_METHOD_TWO, GEOMETRIC_GROWTH_MISSING_RULE, GEOMETRIC_GROWTH_RULE,
@@ -1770,6 +1772,8 @@ type CampaignCardProps = {
    * 页面按排序链 memo 住这个数组，卡片的 memo 才不会白白失效。
    */
   sortHighlight: readonly CampaignSortMode[];
+  /** 折起来的不常用指标（见 campaignMinorMetrics）：这几格不显示。页面 memo 住，卡片的 memo 不会白白失效。 */
+  hiddenMetrics: ReadonlySet<string>;
   expanded: boolean;
   busy: boolean;
   isOwnCampaign: boolean;
@@ -1801,6 +1805,7 @@ let frozenImportanceMemory: FrozenImportance = { chainKey: '', map: new Map() };
 const CampaignCard = memo(function CampaignCard({
   row,
   sortHighlight,
+  hiddenMetrics,
   expanded,
   busy,
   isOwnCampaign,
@@ -1885,7 +1890,7 @@ const CampaignCard = memo(function CampaignCard({
   /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 排序链上的高亮。 */
   const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')}`;
   /** 格子 + 指标名前的字母（字母挂在左内边距里，见 CARD_METRIC_LETTER_CLASS）。 */
-  const letteredCell = (mode: CardMetricMode) => `${metricCell(mode)} ${CARD_METRIC_LETTER_BASE} ${CARD_METRIC_LETTER_CLASS[mode]}`;
+  const letteredCell = (mode: CardMetricMode) => `${metricCell(mode)} ${CARD_METRIC_LETTER_BASE} ${CARD_METRIC_LETTER_CLASS[mode]}${hiddenMetrics.has(mode) ? ' hidden' : ''}`;
   const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${byLevel(mode, `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`;
   /** data-sort-highlight：第一级 'true'，之后各级 'then'。 */
   const litAttr = (mode: CampaignSortMode) => byLevel(mode, 'true', 'then', '') || undefined;
@@ -2374,6 +2379,14 @@ export default function JournalCampaignsPage() {
   const primarySort = sortChain[0];
   /** 卡片按引用 memo：链不变，数组引用就不变。 */
   const sortHighlight = useMemo(() => sortChain.map(level => level.mode), [sortChain]);
+  // 【用户要求】不常用的指标折起来（campaignMinorMetrics）：排序行末尾很淡的「›」展开。
+  // 封面格只跟这个开关走（切换排序时封面列宽不变）；排序行里正在用的那一项照常显示，看得到当前按什么排
+  const [showMinorMetrics, toggleMinorMetrics] = useShowMinorMetrics();
+  const hiddenMinorMetrics = useMemo<ReadonlySet<string>>(() => new Set(showMinorMetrics ? [] : MINOR_METRIC_KEYS), [showMinorMetrics]);
+  const hiddenMinorSortModes = useMemo<ReadonlySet<string>>(
+    () => new Set([...hiddenMinorMetrics].filter(key => !sortHighlight.includes(key as CampaignSortMode))),
+    [hiddenMinorMetrics, sortHighlight],
+  );
   // 默认全选：进页面先看全部战役，要比较某一段日子再自己框。
   const [operationRange, setOperationRange] = useState<CampaignOperationRange>(
     () => parseCampaignRangeParams(location.search),
@@ -2921,6 +2934,7 @@ export default function JournalCampaignsPage() {
       key={row.campaign.id}
       row={row}
       sortHighlight={sortHighlight}
+      hiddenMetrics={hiddenMinorMetrics}
       expanded={expandedCampaignIds.has(row.campaign.id)}
       busy={busyCampaignId === row.campaign.id}
       isOwnCampaign={row.campaign.user_id === userId}
@@ -2950,12 +2964,13 @@ export default function JournalCampaignsPage() {
   // 封面两排指标的列宽：按当前时间段里全部战役的读数定（不随排序变），每列只取实际需要的宽度，从左排起
   const cardMetricGridStyle = useMemo(() => {
     const widths = cardMetricItemWidths(CARD_METRIC_LABEL, displayRows.map(cardMetricReadings));
-    const order = Object.keys(CARD_METRIC_LABEL) as CardMetricMode[];
+    // 折起来的格子不占列：列宽按显示出来的那几格依次排
+    const order = (Object.keys(CARD_METRIC_LABEL) as CardMetricMode[]).filter(mode => !hiddenMinorMetrics.has(mode));
     return {
       '--cm-cols-6': cardMetricGridTemplate(order, widths, 6),
       '--cm-cols-9': cardMetricGridTemplate(order, widths, 9),
     } as CSSProperties;
-  }, [displayRows]);
+  }, [displayRows, hiddenMinorMetrics]);
   const sortStatsPopoverWidthRem = useMemo(() => {
     const columns = sortCrossTabs.reduce((max, crossTab) => Math.max(max, crossTab?.columns.length ?? 0), 0);
     return Math.min(52, Math.max(30, 20 + columns * 3.4));
@@ -4719,7 +4734,7 @@ export default function JournalCampaignsPage() {
                  * 只有一级时这一层什么也不画，排序行与原来逐像素相同。
                  */
                 const wrapSortItem = (content: ReactElement) => (
-                  <span key={option.value} data-sort-item={option.value} className="group/sort relative inline-flex shrink-0">
+                  <span key={option.value} data-sort-item={option.value} className={`group/sort relative inline-flex shrink-0${hiddenMinorSortModes.has(option.value) ? ' hidden' : ''}`}>
                     {content}
                     {!inChain && (
                       <button
@@ -5045,6 +5060,19 @@ export default function JournalCampaignsPage() {
                 </Popover>,
               );
               }))}
+              {/* 【用户要求】不常用的指标折在这里：很小、很淡的「›」，点开排序行与封面多出这几项，「‹」收起 */}
+              <button
+                type="button"
+                data-testid="campaign-minor-metrics-toggle"
+                role="switch"
+                aria-checked={showMinorMetrics}
+                aria-label="显示不常用指标"
+                title={`${showMinorMetrics ? '收起' : '展开'}不常用指标：${MINOR_METRICS_NAMES}`}
+                onClick={toggleMinorMetrics}
+                className={`${MINOR_TOGGLE_CLASS} ml-0.5 h-7`}
+              >
+                {showMinorMetrics ? '‹' : '›'}
+              </button>
               {/* 次要操作默认折叠：只保留淡色更多符号，键盘仍可聚焦。 */}
               <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
                 <PopoverTrigger asChild>

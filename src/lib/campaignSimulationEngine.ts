@@ -769,7 +769,7 @@ export function buildCounterfactualRiskContext(
 
 /**
  * 真实战役此刻按页面的规则算不算「已了结」：结算套回战役行（reconcileCampaignWithSettlement）之后，
- * 状态是已结束、且已实现有数——与详情页、列表页的机会质量门槛同一条。
+ * 状态是已结束、且已实现有数——与详情页、列表页的「已了结」判定同一条。
  * 页面在「一键运行」时记到 params.actual_resolved 上。
  */
 export function resolveCounterfactualActualResolved(

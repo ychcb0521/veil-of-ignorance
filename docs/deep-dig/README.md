@@ -95,9 +95,9 @@ X 按显示倍数（× scale）；公式里的变量也可以直接写进命令�
 | η | 首仓涨跌幅倍数 | z | 涨幅未兑现 | T | 镜像止盈（0–5） |
 | L₀ | 最大预期亏损 | p | 已实现 P&L | h | 峰值涨幅 |
 | D | 动态最大回撤 | λ | 杠杆倍数 | i | 自评（1–5） |
-| q | 机会质量 | s | 信号评分（信号库，1–5） | | |
+| s | 信号评分（信号库，1–5） | | | | |
 
-拼写：η → eta，λ → lev，L₀ → L0，Bₜ → Bt，Mₜ → Mt，Wₜ → Wt。h、D、z 取交易战役列表算过并缓存的峰值涨幅 / 动态最大回撤。
+拼写：η → eta，λ → lev，L₀ → L0，Bₜ → Bt，Mₜ → Mt，Wₜ → Wt。机会质量（原 q）2026-10-17 用户要求删除。A、y、E、U、W、Wₜ 在指标表里折起来（「交易战役」一节右上角很淡的「›」展开），分组标准里照常能用、用到的照常显示。h、D、z 取交易战役列表算过并缓存的峰值涨幅 / 动态最大回撤。
 
 代码：`src/lib/deepDig/`（formula、features、analysis、commands）、`src/hooks/useDeepDigRun.ts`、`src/components/journal/deepDig/`（FeatureView、DefinitionPanel）、`src/pages/JournalDeepDigPage.tsx`。
 

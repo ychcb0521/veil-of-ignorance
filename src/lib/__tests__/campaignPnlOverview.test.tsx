@@ -382,9 +382,21 @@ describe('CampaignPnlOverviewPanel', () => {
     // 标题直接是卡片的第一个子节点（不套 flex 行），紧跟 13 项网格与脚注，没有别的行
     expect(container.firstElementChild?.firstElementChild).toHaveTextContent('盈亏概览');
     // 标题单行截断、悬停看全名：反事实分支名最长 20 字，并排的窄栏里折行会让面板比上方「盈亏概览」高一行
-    expect(container.firstElementChild?.firstElementChild?.className).toBe('truncate font-medium');
+    // 右边留出右上角「›」（不常用指标的展开符号）的位置
+    expect(container.firstElementChild?.firstElementChild?.className).toBe('truncate font-medium pr-5');
     expect(container.firstElementChild?.firstElementChild?.getAttribute('title')).toBe('盈亏概览');
-    expect(container.firstElementChild?.children).toHaveLength(2);
+    // 标题、右上角的「›」、网格
+    expect(container.firstElementChild?.children).toHaveLength(3);
+    // 【用户要求】不常用的指标（仓位放大、加仓效用、算术期望、单位利润、仓位利润）平时折起来：仍在页面里、只是不显示；「›」展开
+    const minorToggle = screen.getByRole('switch', { name: '显示不常用指标' });
+    expect(minorToggle).toHaveAttribute('aria-checked', 'false');
+    const minorRows = [...container.querySelectorAll('[data-minor="true"]')];
+    expect(minorRows.map(node => node.firstElementChild?.textContent)).toEqual(['仓位放大', '加仓效用', '算术期望', '单位利润 U', '仓位利润 W']);
+    for (const row of minorRows) expect(row).toHaveClass('hidden');
+    fireEvent.click(minorToggle);
+    expect(minorToggle).toHaveAttribute('aria-checked', 'true');
+    for (const row of container.querySelectorAll('[data-minor="true"]')) expect(row).not.toHaveClass('hidden');
+    fireEvent.click(minorToggle);
 
     fireEvent.click(screen.getByRole('button', { name: '算术期望说明' }));
     expect(screen.getByText('本场：50.00% × 2.00 − 50.00% = +0.50R')).toBeInTheDocument();

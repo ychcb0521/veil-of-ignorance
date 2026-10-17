@@ -8,7 +8,6 @@ import {
   ODDS_STRUCTURE_REVIEW_LABELS,
   parseOddsStructureReviewText,
 } from '@/lib/oddsStructure';
-import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
 import {
   CLOSE_REVIEW_AUDIT_QUESTIONS,
   CLOSE_REVIEW_SCHELLING_FLOOR_QUESTION,
@@ -183,18 +182,12 @@ function buildLegQuestionAnswers(
     leg.post_entry_payoff_basis_review,
     leg.post_entry_win_rate_estimate_grade,
     leg.post_entry_win_rate_basis_review,
-    leg.post_opportunity_quality_payoff_ratio,
-    leg.post_opportunity_quality_drawdown_pct,
     leg.post_path_mode,
     leg.post_trade_agency_score,
     leg.post_struggle_level,
   ].some(isAnswered);
   const hasCloseAuditAnswer = CLOSE_REVIEW_AUDIT_QUESTIONS
     .some(question => isAnswered(reflection.answers[question.key]));
-  const opportunityQuality = computeOpportunityQuality({
-    payoffRatio: leg.post_opportunity_quality_payoff_ratio,
-    drawdownPct: leg.post_opportunity_quality_drawdown_pct,
-  });
 
   addCurrent(
     answers,
@@ -289,13 +282,7 @@ function buildLegQuestionAnswers(
       ENTRY_WIN_RATE_ESTIMATE_LABELS,
     );
     addCurrent(answers, '建仓时胜率估计的复盘说明是什么？', leg.post_entry_win_rate_basis_review);
-    addCurrent(answers, '机会质量评估中的预期盈亏比 b 是多少？', leg.post_opportunity_quality_payoff_ratio);
-    addCurrent(answers, '机会质量评估中的预期回撤 d% 是多少？', leg.post_opportunity_quality_drawdown_pct);
-    addCurrent(
-      answers,
-      '机会质量评估结果 Q 是多少？',
-      opportunityQuality == null ? null : formatOpportunityQuality(opportunityQuality),
-    );
+    // 【用户要求】2026-10-17「机会质量删除」：平仓复盘不再填「机会质量评估」，导出也不再问
 
     addCurrent(answers, '这笔交易选择了哪一种路径？', leg.post_path_mode, PATH_MODE_LABELS);
     addCurrent(answers, '这笔交易的主动权评分是多少？', leg.post_trade_agency_score, TRADE_AGENCY_LABELS);

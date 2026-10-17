@@ -9,7 +9,6 @@ import {
   HEDGE_TYPE_LABELS,
 } from '@/lib/hedgeTypes';
 import { ODDS_STRUCTURE_LABELS } from '@/lib/oddsStructure';
-import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
 import {
   ENTRY_STAGE_LABELS,
   MARKET_REGIME_LABELS,
@@ -198,10 +197,6 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
   const answers: QuestionAnswer[] = [];
   const isHedge = leg.order_kind === 'hedge';
   const isNoEntry = leg.direction === 'no_entry';
-  const opportunityQuality = computeOpportunityQuality({
-    payoffRatio: leg.pre_opportunity_quality_payoff_ratio,
-    drawdownPct: leg.pre_opportunity_quality_drawdown_pct,
-  });
 
   addCurrent(answers, '交易方向是什么？', leg.direction, {
     long: '做多',
@@ -254,21 +249,9 @@ function buildLegQuestionAnswers(leg: TradeJournal): QuestionAnswer[] {
     );
     addCurrent(answers, '盈亏比目标是什么？', leg.pre_odds_structure, ODDS_STRUCTURE_LABELS);
     addCurrent(answers, '预期最大回撤价格是多少？', leg.pre_planned_stop_loss);
-    addCurrent(
-      answers,
-      '机会质量判断中的预期盈亏比 b 是多少？',
-      leg.pre_opportunity_quality_payoff_ratio,
-    );
-    addCurrent(
-      answers,
-      '机会质量判断中的预期最大回撤 d% 是多少？',
-      leg.pre_opportunity_quality_drawdown_pct,
-    );
-    addCurrent(
-      answers,
-      '机会质量判断结果 Q 是多少？',
-      opportunityQuality == null ? null : formatOpportunityQuality(opportunityQuality),
-    );
+    // 【用户要求】2026-10-17「机会质量删除」：不再问 Q；b、d 是开仓时的估计，照常导出
+    addCurrent(answers, '预期盈亏比 b 是多少？', leg.pre_opportunity_quality_payoff_ratio);
+    addCurrent(answers, '预期最大回撤 d% 是多少？', leg.pre_opportunity_quality_drawdown_pct);
     addCurrent(answers, '止损质量如何？', leg.pre_stop_quality, STOP_QUALITY_LABELS);
     addCurrent(answers, '盈亏比目标的事实依据是什么？', leg.pre_odds_structure_source);
     addCurrent(answers, '这个盈亏比目标最可能错在哪里？', leg.pre_odds_structure_premortem);

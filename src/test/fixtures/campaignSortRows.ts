@@ -132,7 +132,6 @@ export function makeSortRow(spec: SortRowSpec): CampaignSortRow {
     magicB: spec.magicB !== undefined ? spec.magicB : spec.pcr == null ? null : spec.pcr / 100,
     initialExpectedMaxLoss: 100,
     initialExpectedMaxDrawdownPct: spec.dd ?? 0,
-    opportunityQuality: null,
     mainPriceChangePct: spec.mpc ?? null,
     peakPriceChangePct: spec.peak !== undefined
       ? spec.peak

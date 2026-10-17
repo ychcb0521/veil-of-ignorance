@@ -62,7 +62,7 @@ function makeRetroactiveLeg(overrides: Partial<TradeJournal> = {}): TradeJournal
 }
 
 describe('campaignSnapshotTxtExport', () => {
-  it('主力快照逐题导出全部当前问题，空答案写为未填写并计算机会质量', () => {
+  it('主力快照逐题导出全部当前问题，空答案写为未填写；【用户要求】机会质量删除：只导出 b、d，不再问 Q', () => {
     const output = buildCampaignOpeningSnapshotsTxt(campaign, [
       makeLeg({
         pre_market_regime: 'trending',
@@ -82,7 +82,9 @@ describe('campaignSnapshotTxtExport', () => {
     expect(output).toContain('开仓快照数量：1');
     expect(output).toContain('问题：当前是什么市场？\n答案：单边趋势');
     expect(output).toContain('问题：不做更亏吗？是在浪费机会吗？\n答案：是 · 不做更亏');
-    expect(output).toContain('问题：机会质量判断结果 Q 是多少？\n答案：3.00');
+    expect(output).toContain('问题：预期盈亏比 b 是多少？\n答案：6');
+    expect(output).toContain('问题：预期最大回撤 d% 是多少？\n答案：2');
+    expect(output).not.toContain('机会质量');
     expect(output).toContain('问题：这笔为什么会对？\n答案：未填写');
     expect(output).toContain('问题：开仓清单的逐项检查结果是什么？\n答案：[已勾选][必填] 结构确认');
     expect(output).toMatch(/答案：做多\n\n问题：/);

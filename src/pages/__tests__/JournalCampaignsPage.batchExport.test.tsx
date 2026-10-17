@@ -75,7 +75,7 @@ function row(id: string, title: string, date: string, importance: number, ratio:
     : [leg];
   return { campaign, legs, tradeRecords: [], settlement: computeCampaignRealizedPnl(campaign, legs, []),
     profitCaptureRatio: ratio, initialExpectedMaxLoss: 100, initialExpectedMaxDrawdownPct: 10,
-    opportunityQuality: ratio == null ? null : Math.max(ratio / 100, 1) / 10, mainPriceChangePct };
+    mainPriceChangePct };
 }
 
 beforeEach(() => {

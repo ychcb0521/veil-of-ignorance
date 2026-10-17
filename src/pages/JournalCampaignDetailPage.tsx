@@ -2341,7 +2341,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       // 只运行、不落库：结果先摆成「反事实盈亏概览 · 未保存」，用户点「保存」才写库。
       // 风险锚上下文：战役页算 L / 预期回撤时读的反向委托、历史归类标记与初始对冲事件，副本按同一份锚。
       const riskContext = buildCounterfactualRiskContext(campaign, reverseHedgeOrders);
-      // 真实战役此刻算不算「已了结」（机会质量的门槛），与上方盈亏概览同一条规则。
+      // 真实战役此刻算不算「已了结」，与上方盈亏概览同一条规则。
       const actualResolved = resolveCounterfactualActualResolved(campaign, legs, tradeRecords, legExitPriceCorrections);
       const run = await runCustomCounterfactual(
         campaign.id,

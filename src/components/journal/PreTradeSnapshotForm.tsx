@@ -40,7 +40,6 @@ import {
   entryStageWarning,
 } from '@/lib/snapshotStructure';
 import { recoveryGainPct, recoveryAsymmetryRatio } from '@/lib/structureResult';
-import { computeOpportunityQuality, formatOpportunityQuality } from '@/lib/opportunityQuality';
 import {
   HEDGE_TYPES,
   HEDGE_DOWN_BRANCH_DEFAULTS,
@@ -548,10 +547,6 @@ export function PreTradeSnapshotForm({
     )
     : null;
   const rDrawdownPct = rDrawdownRawPct != null && rDrawdownRawPct > 0 ? rDrawdownRawPct : null;
-  const opportunityQuality = computeOpportunityQuality({
-    payoffRatio: oddsRatioEstimate,
-    drawdownPct: rDrawdownPct,
-  });
   const plannedDrawdownPriceValid = plannedDrawdownPriceFinite && rDrawdownPct != null;
   const plannedDrawdownPriceForPayload = plannedDrawdownPriceValid
     ? Number(plannedDrawdownPrice.toFixed(pricePrecision))
@@ -1739,76 +1734,8 @@ export function PreTradeSnapshotForm({
                   </div>
                   </div>
 
-                  {!isHedge && (
-                    <div className="rounded-xl border border-[#F0B90B]/35 bg-[#F0B90B]/[0.04] p-3">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-semibold text-foreground">机会质量判断{requiredStar}</div>
-                          <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
-                            机会质量 = 预期盈亏比 ÷ 预期回撤百分点。回撤 2% 时按 2 计算，不按 0.02 计算。
-                          </div>
-                        </div>
-                        <div className="shrink-0 text-right font-mono">
-                          <div className="text-[18px] font-semibold text-[#F0B90B]">
-                            {formatOpportunityQuality(opportunityQuality)}
-                          </div>
-                          <div className="text-[9px] text-muted-foreground">机会质量 Q</div>
-                        </div>
-                      </div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <label className="block">
-                          <div className="text-[10px] font-medium text-muted-foreground">预期盈亏比 b</div>
-                          <div className="relative mt-1.5">
-                            <Input
-                              type="number"
-                              min="0.01"
-                              step="0.01"
-                              value={oddsRatioEstimate}
-                              onChange={event => {
-                                const value = Number(event.target.value);
-                                if (!Number.isFinite(value) || value <= 0) return;
-                                setOddsRatioEstimate(Number(value.toFixed(2)));
-                              }}
-                              inputMode="decimal"
-                              className={`${inputCls} pr-9 font-mono`}
-                            />
-                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">:1</span>
-                          </div>
-                          {oddsRatioEstimate > ODDS_RATIO_MAX && (
-                            <div className="mt-1 text-[9px] text-muted-foreground">高于 5:1 的预期值以直接输入为准。</div>
-                          )}
-                        </label>
-                        <label className="block">
-                          <div className="text-[10px] font-medium text-muted-foreground">预期最大回撤 d</div>
-                          <div className="relative mt-1.5">
-                            <Input
-                              type="number"
-                              min={R_DRAWDOWN_MIN_PCT}
-                              max={R_DRAWDOWN_MAX_PCT}
-                              step={R_DRAWDOWN_STEP_PCT}
-                              value={rDrawdownPct == null ? '' : Number(rDrawdownPct.toFixed(2))}
-                              onChange={event => {
-                                const value = Number(event.target.value);
-                                if (Number.isFinite(value) && value > 0) updatePlannedDrawdownFromPct(value);
-                              }}
-                              inputMode="decimal"
-                              placeholder="例如 2"
-                              className={`${inputCls} pr-9 font-mono`}
-                            />
-                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
-                          </div>
-                        </label>
-                      </div>
-                      {opportunityQuality != null ? (
-                        <div className="mt-2 font-mono text-[10px] text-muted-foreground">
-                          Q = {oddsRatioEstimate.toFixed(2)} ÷ {rDrawdownPct?.toFixed(2)} = <span className="text-foreground">{formatOpportunityQuality(opportunityQuality)}</span>
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-[10px] text-[#F6465D]">请输入有效的预期盈亏比与预期最大回撤。</div>
-                      )}
-                    </div>
-                  )}
-
+                  {/* 【用户要求】2026-10-17「机会质量删除」：原来这里的「机会质量判断」（Q = b ÷ d）去掉；
+                      预期盈亏比 b 与预期最大回撤 d 仍由上面的滑块填写、照常保存（pre_opportunity_quality_* 两列就是它们的存处）。 */}
                   <div className="grid items-stretch gap-2 md:grid-cols-3">
                     {[
                       {

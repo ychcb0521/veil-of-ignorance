@@ -3,6 +3,8 @@ import { MetricLetterTag } from '@/components/journal/MetricLetterTable';
 import { LETTER_BY_OVERVIEW_KEY } from '@/lib/campaignMetricLetters';
 import { Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useShowMinorMetrics } from '@/hooks/useShowMinorMetrics';
+import { MINOR_METRIC_SET, MINOR_METRICS_NAMES, MINOR_TOGGLE_CLASS } from '@/lib/campaignMinorMetrics';
 
 /** 指标名 + ⓘ 弹层。aria-label 固定为「{label}说明」，页面测试靠它定位每一项。 */
 export function PnlMetricLabel({ label, letter, children }: { label: string; letter?: string; children: ReactNode }) {
@@ -90,15 +92,33 @@ export interface CampaignPnlOverviewPanelProps {
  * 放在它左边的「相对原始的变化情况」里（CounterfactualOverviewRow），两张面板的内部排布因此逐项相同。
  */
 export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOverviewPanelProps) {
+  // 【用户要求】不常用的指标（campaignMinorMetrics）折起来：标题行右角一个很小、很淡的「›」展开（与列表页同一个开关，跟账号走）
+  const [showMinor, toggleMinor] = useShowMinorMetrics();
   if (items.some(item => item.column != null)) {
+    const hasMinor = items.some(item => MINOR_METRIC_SET.has(item.key));
     return (
-      <div className="min-w-0 rounded border border-border bg-card p-4 text-[12px] [container-type:inline-size]" data-testid={testId}>
-        <div className="truncate font-medium" title={title}>{title}</div>
+      <div className="relative min-w-0 rounded border border-border bg-card p-4 text-[12px] [container-type:inline-size]" data-testid={testId}>
+        <div className={`truncate font-medium${hasMinor ? ' pr-5' : ''}`} title={title}>{title}</div>
+        {hasMinor && (
+          <button
+            type="button"
+            role="switch"
+            data-testid="pnl-overview-minor-toggle"
+            aria-checked={showMinor}
+            aria-label="显示不常用指标"
+            title={`${showMinor ? '收起' : '展开'}不常用指标：${MINOR_METRICS_NAMES}`}
+            onClick={toggleMinor}
+            className={`${MINOR_TOGGLE_CLASS} absolute right-2.5 top-2.5`}
+          >
+            {showMinor ? '‹' : '›'}
+          </button>
+        )}
         <div className="mt-4 grid grid-cols-1 gap-y-4 [@container(min-width:840px)]:grid-cols-3 [@container(min-width:840px)]:gap-x-6 [@container(min-width:840px)]:gap-y-0" data-testid="pnl-overview-three-columns">
           {[0, 1, 2].map(column => (
             <div key={column} data-overview-column={column} className={`min-w-0 space-y-2.5 ${column > 0 ? 'border-t border-border/60 pt-4 [@container(min-width:840px)]:border-l [@container(min-width:840px)]:border-t-0 [@container(min-width:840px)]:pl-6 [@container(min-width:840px)]:pt-0' : ''}`}>
               {items.filter(item => (item.column ?? 0) === column).map(item => (
-                <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} className="flex min-h-5 min-w-0 items-baseline justify-between gap-3">
+                <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} data-minor={MINOR_METRIC_SET.has(item.key) || undefined}
+                  className={`flex min-h-5 min-w-0 items-baseline justify-between gap-3${!showMinor && MINOR_METRIC_SET.has(item.key) ? ' hidden' : ''}`}>
                   <PnlMetricLabel label={item.label} letter={LETTER_BY_OVERVIEW_KEY.get(item.key)}>{item.help}</PnlMetricLabel>
                   <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
                 </div>

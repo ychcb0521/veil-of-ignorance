@@ -4,6 +4,8 @@
  */
 import { cn } from '@/lib/utils';
 import { CAMPAIGN_METRIC_LETTERS, type MetricSource } from '@/lib/campaignMetricLetters';
+import { MINOR_METRIC_LETTERS, MINOR_METRICS_NAMES, MINOR_TOGGLE_CLASS } from '@/lib/campaignMinorMetrics';
+import { useShowMinorMetrics } from '@/hooks/useShowMinorMetrics';
 
 const SECTION: Record<MetricSource, string> = { campaign: '交易战役（每场战役一个读数）', signal: '信号库（每条信号一个读数，时间点是这条信号的时间）' };
 
@@ -13,15 +15,35 @@ export function MetricLetterTable({ sources = ['campaign', 'signal'], highlight,
   highlight?: ReadonlySet<string>;
   className?: string;
 }) {
+  // 【用户要求】不常用的指标（单位利润、仓位利润、仓位利润（理论）、加仓效用、算术期望、仓位放大）折起来：
+  // 交易战役那一节右角一个很小、很淡的「›」展开（与列表、盈亏概览同一个开关）；分组标准里用到的照常显示
+  const [showMinor, toggleMinor] = useShowMinorMetrics();
+  const folded = (letter: string) => !showMinor && MINOR_METRIC_LETTERS.has(letter) && !highlight?.has(letter);
   return (
     <div className={cn('space-y-2 text-[11px]', className)} data-testid="metric-letter-table">
       {sources.map(source => (
         <div key={source} className="space-y-0.5">
-          <div className="text-[10.5px] font-medium text-muted-foreground">{SECTION[source]}</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10.5px] font-medium text-muted-foreground">{SECTION[source]}</div>
+            {source === 'campaign' && (
+              <button
+                type="button"
+                data-testid="metric-letter-minor-toggle"
+                role="switch"
+                aria-checked={showMinor}
+                aria-label="显示不常用指标"
+                title={`${showMinor ? '收起' : '展开'}不常用指标：${MINOR_METRICS_NAMES}`}
+                onClick={toggleMinor}
+                className={MINOR_TOGGLE_CLASS}
+              >
+                {showMinor ? '‹' : '›'}
+              </button>
+            )}
+          </div>
           <table className="w-full">
             <tbody>
               {CAMPAIGN_METRIC_LETTERS.filter(m => m.source === source).map(m => (
-                <tr key={m.letter} className={cn('border-t border-border/40 align-top', highlight?.has(m.letter) && 'bg-[#F0B90B]/[0.08]')} data-testid={`metric-letter-${m.aliases[0] ?? m.letter}`}>
+                <tr key={m.letter} className={cn('border-t border-border/40 align-top', highlight?.has(m.letter) && 'bg-[#F0B90B]/[0.08]', folded(m.letter) && 'hidden')} data-testid={`metric-letter-${m.aliases[0] ?? m.letter}`}>
                   <td className="w-[38px] whitespace-nowrap py-0.5 pr-2 font-mono text-[12px] font-medium text-foreground">{m.letter}</td>
                   <td className="whitespace-nowrap py-0.5 pr-2 text-foreground">{m.name}</td>
                   <td className="whitespace-nowrap py-0.5 pr-2 text-muted-foreground">{m.unit}</td>

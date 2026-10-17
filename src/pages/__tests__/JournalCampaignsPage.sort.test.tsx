@@ -829,6 +829,48 @@ describe('JournalCampaignsPage sorting', () => {
       .toEqual(['3x', '10x', '20x']);
   }, 15_000);
 
+  it('【用户要求】不常用指标折在角落：排序行与封面默认不显示（仍在页面里），排序行末尾很淡的「›」展开 / 收起；正在按它排序时排序行照常显示那一项，封面列宽不变', async () => {
+    render(
+      <MemoryRouter initialEntries={['/journal/campaigns']}>
+        <Routes>
+          <Route path="/journal/campaigns" element={<JournalCampaignsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(4));
+    const MINOR = ['positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitProfit', 'positionProfit'];
+    const sortItem = (mode: string) => document.querySelector(`[data-sort-item="${mode}"]`)!;
+    const cell = (testId: string) => screen.getAllByTestId(testId)[0];
+    const CELL_IDS = ['campaign-position-amplification', 'campaign-add-efficiency', 'campaign-arithmetic-expectancy', 'campaign-unit-profit', 'campaign-position-profit'];
+    const toggle = screen.getByTestId('campaign-minor-metrics-toggle');
+    expect(toggle).toHaveAttribute('role', 'switch');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(toggle).toHaveTextContent('›');
+    expect(toggle.className).toContain('text-muted-foreground/25');
+    for (const mode of MINOR) expect(sortItem(mode)).toHaveClass('hidden');
+    for (const id of CELL_IDS) expect(cell(id)).toHaveClass('hidden');
+    // 常用的照常显示
+    expect(sortItem('magicB')).not.toHaveClass('hidden');
+    expect(cell('campaign-magic-b')).not.toHaveClass('hidden');
+    const collapsedStyle = screen.getByTestId('campaign-card-list').getAttribute('style');
+    // 展开
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle).toHaveTextContent('‹');
+    for (const mode of MINOR) expect(sortItem(mode)).not.toHaveClass('hidden');
+    for (const id of CELL_IDS) expect(cell(id)).not.toHaveClass('hidden');
+    // 折起来的格子不占列：展开后列宽模板多出这几列
+    const expandedStyle = screen.getByTestId('campaign-card-list').getAttribute('style');
+    expect(expandedStyle).not.toBe(collapsedStyle);
+    // 按算术期望排序后收起：排序行里它照常显示（看得到当前按什么排），封面格跟开关收起、列宽回到收起时
+    fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
+    fireEvent.click(toggle);
+    expect(sortItem('arithmeticExpectancy')).not.toHaveClass('hidden');
+    expect(sortItem('addEfficiency')).toHaveClass('hidden');
+    expect(cell('campaign-arithmetic-expectancy')).toHaveClass('hidden');
+    expect(screen.getByTestId('campaign-card-list').getAttribute('style')).toBe(collapsedStyle);
+  }, 15_000);
+
   it('【用户要求】首仓涨跌幅 / 首仓涨跌幅倍数 / 加仓效用三档排序：读数亮在卡片上、按它排、算不出的战役不进入这一档', async () => {
     // 四场主力的平仓价拉开：+30% / +5% / −10% / +20%
     const exits: Record<string, number> = {
@@ -946,8 +988,10 @@ describe('JournalCampaignsPage sorting', () => {
     expect(screen.queryByTestId('campaign-export-xlsx')).not.toBeInTheDocument();
     expect(screen.queryByTestId('campaign-batch-select-toggle')).not.toBeInTheDocument();
     // 每个排序项外面包着一层（data-sort-item，放悬停才出现的「+」与多级时的级数角标，不占尺寸），分隔线仍是直接的子节点
-    const sequence = children.slice(1, -1).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
-    for (const item of children.slice(1, -1).filter(node => node.hasAttribute('data-sort-item'))) {
+    // 【用户要求】倒数第二个是不常用指标的展开符号（很小、很淡的「›」）
+    expect(children.at(-2)).toHaveAttribute('data-testid', 'campaign-minor-metrics-toggle');
+    const sequence = children.slice(1, -2).map(node => node.getAttribute('data-sort-item') ?? node.getAttribute('data-testid')!.replace('campaign-sort-', ''));
+    for (const item of children.slice(1, -2).filter(node => node.hasAttribute('data-sort-item'))) {
       expect(item.firstElementChild).toHaveAttribute('data-testid', `campaign-sort-${item.getAttribute('data-sort-item')}`);
     }
     // 【用户要求】操作时间、镜像止盈 ┆ 预期回撤 … 算术期望 ┆ 杠杆倍数 … 字母（「DSI 贡献」「USI 贡献」已删）

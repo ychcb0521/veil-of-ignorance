@@ -9,7 +9,6 @@ import {
   formatCampaignLeverage,
   formatGeometricExpectancy,
   resolveCampaignMainLeverage,
-  resolveCampaignOpportunityQuality,
 } from '../campaignMetrics';
 
 function campaign(overrides: Partial<TradeCampaign> = {}): TradeCampaign {
@@ -67,32 +66,6 @@ describe('campaign metrics shared by list and detail pages', () => {
     expect(formatCampaignLeverage(6)).toBe('6x');
     expect(formatCampaignLeverage(6.5)).toBe('6.5x');
     expect(formatCampaignLeverage(null)).toBe('—');
-  });
-
-  it('战役机会质量将小于 1 的几何 b 统一按 1 计算', () => {
-    const value = resolveCampaignOpportunityQuality(
-      campaign({ status: 'closed_loss', final_realized_pnl: -80 }),
-      -0.8,
-      4,
-    );
-
-    expect(value).toBeCloseTo(0.25, 8); // max（−0.8, 1） ÷ 4 = 0.25
-  });
-
-  it('机会质量直接使用无百分数缩放的几何 b，不再除以 100 或回退净结算', () => {
-    // 净结算 200 不参与：几何 b=4，回撤4%，结果=max(4,1)/4=1。
-    expect(resolveCampaignOpportunityQuality(campaign(), 4, 4)).toBe(1);
-    expect(resolveCampaignOpportunityQuality(campaign(), 1.5, 4)).toBe(0.375);
-    expect(resolveCampaignOpportunityQuality(campaign(), null, 4)).toBeNull();
-    expect(resolveCampaignOpportunityQuality(campaign(), Number.NaN, 4)).toBeNull();
-  });
-
-  it('does not calculate opportunity quality for an active campaign', () => {
-    expect(resolveCampaignOpportunityQuality(
-      campaign({ status: 'active', closed_at: null, final_realized_pnl: null }),
-      2,
-      10,
-    )).toBeNull();
   });
 
   it('【用户要求】Gᵢ = 1 + bᵢ·x，x 固定 0.1，bᵢ 用当场战役的 b', () => {

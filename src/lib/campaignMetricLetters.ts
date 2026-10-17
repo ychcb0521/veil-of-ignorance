@@ -4,7 +4,7 @@
  * 【用户要求】2026-10-16「给交易战役中的每个指标赋予一个字母，如果当下已经有字母，那就用现有的字母，如果没有，要赋予字母。
  * 并且在交易战役中、deep dig 中，都要有个表格，要统一」。字母方案经用户确认：
  *   已有沿用：d 预期回撤、G 单位涨幅、U 单位利润、W 仓位利润、E 算术期望、η 首仓涨跌幅倍数、L₀ 最大预期亏损、w L_磨损（÷ L₀）；
- *   冲突的处理：b = 盈亏比（沿用 bᵢ），神奇的 b = B（理论值 Bₜ）；首仓币数保留 Q（公式里用），机会质量用 q。
+ *   冲突的处理：b = 盈亏比（沿用 bᵢ），神奇的 b = B（理论值 Bₜ）；首仓币数保留 Q（公式里用）。【用户要求】2026-10-17 机会质量（原 q）删除。
  * 下标 ₜ = 理论值。希腊字母 / 下标另有拼写，便于在分组标准里输入：η → eta，λ → lev，L₀ → L0，Bₜ → Bt，Mₜ → Mt，Wₜ → Wt。
  * 信号库的「信号评分 s」不是战役指标：它属于每一条信号，时间点是那条信号自己的时间。
  */
@@ -71,7 +71,6 @@ export const CAMPAIGN_METRIC_LETTERS: readonly MetricLetter[] = [
   { letter: 'D', aliases: [], name: '动态最大回撤', unit: '%', help: '持仓期间的最大回撤（按 K 线算，交易战役列表算过才有）', source: 'campaign', overviewKey: 'dynamicMaxDrawdownPct', get: safe(r => r.dynamicMaxDrawdownPct) },
   { letter: 'λ', aliases: ['lev'], name: '杠杆倍数', unit: 'x', help: '主力开仓时的初始杠杆（老战役取各腿最大杠杆）', source: 'campaign', overviewKey: 'mainLeverage', get: safe(r => campaignLeverage(r.campaign, r.legs)) },
   { letter: 'i', aliases: [], name: '自评', unit: '级', help: '战役封面上的自评 1–5', source: 'campaign', get: safe(r => r.campaign.importance_weight) },
-  { letter: 'q', aliases: [], name: '机会质量', unit: '×', help: 'max(b, 1) ÷ 预期回撤%（只算已结束的战役）', source: 'campaign', get: safe(r => r.opportunityQuality) },
   { letter: 's', aliases: [], name: '信号评分', unit: '级', help: '信号库里这条信号的星级 1–5；没评分 = 空。属于信号本身，时间点是那条信号的时间', source: 'signal' },
 ];
 

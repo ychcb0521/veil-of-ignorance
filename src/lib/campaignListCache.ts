@@ -29,7 +29,6 @@ import {
 import { campaignMainLegPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { computeCampaignPositionAmplification } from '@/lib/campaignPositionAmplification';
 import { computeCampaignGeometricMetrics, type CampaignGeometricMetrics } from '@/lib/campaignGeometricMetrics';
-import { resolveCampaignOpportunityQuality } from '@/lib/campaignMetrics';
 import {
   fetchLegExitPriceCorrectionsResult,
   type LegExitPriceCorrections,
@@ -47,7 +46,6 @@ export type CampaignCardData = {
   profitCaptureRatio: number | null;
   initialExpectedMaxLoss: number;
   initialExpectedMaxDrawdownPct: number;
-  opportunityQuality: number | null;
   /** 战役的涨跌幅（%，按主力方向计：开仓价取主力最有利的一笔，主力平仓时有对冲锁住行情就按对冲开仓价）；主力都未平仓时为 null。「涨跌幅」排序与卡片读数用它。 */
   mainPriceChangePct: number | null;
   /** 列表页按需加载 K 线后写入；null 表示尚未加载或算不出。 */
@@ -127,7 +125,6 @@ export function buildCampaignCardData(
     initialExpectedMaxLoss,
     initialExpectedMaxDrawdownPct,
     profitCaptureRatio,
-    opportunityQuality: resolveCampaignOpportunityQuality(reconciledCampaign, profitCaptureRatio == null ? null : profitCaptureRatio / 100, initialExpectedMaxDrawdownPct),
     // 与详情页同一份挂单判定（本地从未成交的委托 id），挂着没成交的滚动对冲不算在手
     mainPriceChangePct: campaignMainLegPriceChangePct(campaign, legs, tradeRecords, corrections, { unfilledOrderIds: new Set(details.unfilledOrderIds ?? []) }),
     positionAmplification: positionAmplificationOf(details, corrections),

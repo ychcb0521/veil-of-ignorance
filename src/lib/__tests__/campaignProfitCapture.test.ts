@@ -13,7 +13,6 @@ import {
 } from '@/lib/campaignAnalysis';
 import {
   computeCampaignExpectancies,
-  resolveCampaignOpportunityQuality,
 } from '@/lib/campaignMetrics';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { CampaignReverseHedgeOrder, TradeRecord } from '@/types/trading';
@@ -841,8 +840,6 @@ describe('campaign profit capture ratio', () => {
       reverseOrders,
     );
     expect(profitCaptureRatio).toBeCloseTo(151.62, 2);
-    expect(resolveCampaignOpportunityQuality(campaign, profitCaptureRatio, expectedDrawdownPct))
-      .toBeCloseTo(0.07, 2);
 
     const risk = computeCampaignInitialRiskFraction(initialExpectedMaxLoss, legs);
     // 真实下注比例仍然算得出来（卡片上的「仓位」判断还在用），只是不再进几何期望

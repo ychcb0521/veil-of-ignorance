@@ -1,5 +1,4 @@
 import { computeGeometricGrowth, formatGeometricGrowth } from '@/lib/campaignUnitProfit';
-import { computeRealizedOpportunityQuality } from '@/lib/opportunityQuality';
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import { pickPrimaryMainLeg } from '@/lib/campaignPrimaryMainLeg';
@@ -48,45 +47,12 @@ export function formatCampaignLeverage(value: number | null): string {
 }
 
 /**
- * 机会质量的「已了结」门槛：状态是已结束、且已实现有数。调用方传的是**套过结算的**战役行
+ * 战役「已了结」：状态是已结束、且已实现有数。调用方传的是**套过结算的**战役行
  * （reconcileCampaignWithSettlement），与列表页、详情页同一口径；反事实分支运行时也按它记下真实战役的判定。
  */
 export function isCampaignResolved(campaign: Pick<TradeCampaign, 'status' | 'final_realized_pnl'>): boolean {
   return ['closed_profit', 'closed_loss', 'closed_breakeven'].includes(campaign.status)
     && Number.isFinite(campaign.final_realized_pnl);
-}
-
-export function resolveCampaignOpportunityQuality(
-  campaign: TradeCampaign,
-  magicB: number | null,
-  initialExpectedMaxDrawdownPct: number,
-): number | null {
-  return resolveResolvedOpportunityQuality(isCampaignResolved(campaign), magicB, initialExpectedMaxDrawdownPct);
-}
-
-/**
- * 机会质量只对**已了结**的战役计算。把「已了结」判定拆成入参，
- * 没有 TradeCampaign 行的反事实分支（每条手动腿都有平仓时刻即视为已了结）也走同一条门槛与同一个公式。
- */
-export function resolveResolvedOpportunityQuality(
-  resolved: boolean,
-  magicB: number | null,
-  initialExpectedMaxDrawdownPct: number,
-): number | null {
-  if (
-    !resolved
-    || magicB == null
-    || !Number.isFinite(magicB)
-    || !Number.isFinite(initialExpectedMaxDrawdownPct)
-    || initialExpectedMaxDrawdownPct <= 0
-  ) {
-    return null;
-  }
-
-  return computeRealizedOpportunityQuality({
-    payoffRatio: magicB,
-    drawdownPct: initialExpectedMaxDrawdownPct,
-  });
 }
 
 /**

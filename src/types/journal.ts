@@ -470,7 +470,7 @@ export interface CampaignCounterfactualParams {
   risk_context?: CampaignCounterfactualRiskContext;
   /**
    * 手动 Legs 分支：运行那一刻，真实战役按页面的规则算不算「已了结」（派生状态为已结束、且已实现有数）。
-   * false 时这条分支同样不算已了结（机会质量不计算），除非副本给实际还没平的腿另定了平仓时间。老行没有。
+   * false 时这条分支同样不算已了结，除非副本给实际还没平的腿另定了平仓时间。老行没有。
    */
   actual_resolved?: boolean;
 }
@@ -575,7 +575,7 @@ export interface CampaignCounterfactualManualLegActual {
   liquidated?: true;
   /**
    * 实际战役还在进行、这条腿也还没平：副本的平仓时间只是末根 K 线。平仓时间没改时，
-   * 这条分支与战役页一样不算「已了结」（机会质量不计算）。
+   * 这条分支与战役页一样不算「已了结」。
    */
   still_open?: boolean;
   /**
