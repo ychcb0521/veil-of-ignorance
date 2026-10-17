@@ -1,3 +1,4 @@
+import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArchiveRestore, ArrowLeft, ChevronDown, Download, Eye, EyeOff, FileText, Info, Layers, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
@@ -216,9 +217,9 @@ function campaignMultiplierSpanMs(window: CampaignKlineTimeWindow, multiplier: C
   return range.toTime - range.fromTime;
 }
 
-const INTERVALS = ['1m', '5m', '15m', '1h'] as const;
+const INTERVALS = CAMPAIGN_CHART_INTERVALS;
 type Interval = CampaignChartInterval;
-const INTERVAL_LABELS: Record<Interval, string> = { '1m': '1 分钟', '5m': '5 分钟', '15m': '15 分钟', '1h': '1 小时' };
+const INTERVAL_LABELS = CAMPAIGN_CHART_INTERVAL_LABELS;
 /** 盘面周期按钮的悬停提示：【用户要求】默认 5 分钟线；周期只管盘面，读数不跟着变。 */
 const DISPLAY_INTERVAL_HINT = '默认 5 分钟线，放不下时自动放宽。周期只改盘面显示，峰值浮盈、盈亏概览与反事实照旧按自动周期的 K 线计算';
 
@@ -2899,7 +2900,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           <div ref={campaignChartPanelRef} className="bg-card border border-border rounded p-2">
             {/* 窄屏上一排放不下时折行、工具栏跟着长高：倍数档换成 2.1x / 3.1x 之后 390 宽正好多出 2px，不折行就顶出页面、压在盘面底下 */}
             <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-              <div className="flex items-center gap-1" role="group" aria-label="盘面 K 线周期">
+              <div className="flex flex-wrap items-center gap-1" role="group" aria-label="盘面 K 线周期">
                 {INTERVALS.map(item => {
                   // 选中态 = 盘面实际显示的周期（自动放宽、预设放粗之后的那个）
                   const active = displayInterval === item;

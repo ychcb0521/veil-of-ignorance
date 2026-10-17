@@ -487,7 +487,7 @@ export function CampaignWhatIfEditor({
 
         <div className="order-2 min-h-9 px-2 py-1 flex flex-wrap items-center gap-2">
           {onIntervalChange && intervalOptions.length > 0 && (
-            <div className="flex items-center gap-1" role="group" aria-label="反事实盘面 K 线周期">
+            <div className="flex flex-wrap items-center gap-1" role="group" aria-label="反事实盘面 K 线周期">
               {intervalOptions.map(item => (
                 <button
                   key={item}

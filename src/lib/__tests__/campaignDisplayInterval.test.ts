@@ -14,6 +14,7 @@ import {
 } from '@/hooks/useCampaignKlines';
 import {
   CAMPAIGN_DEFAULT_DISPLAY_INTERVAL,
+  CAMPAIGN_CHART_INTERVALS,
   buildCampaignChartContentTimeSpan,
   explainCampaignDisplayIntervalWidening,
   pickCampaignComputeInterval,
@@ -146,7 +147,7 @@ describe('显示周期：默认 5 分钟线，放不下时自动放宽', () => {
   });
 
   it('手动选过就按手动：倍率视图原样照手动（与改版前同一条规则）', () => {
-    for (const manual of ['1m', '5m', '15m', '1h'] as const) {
+    for (const manual of CAMPAIGN_CHART_INTERVALS) {
       for (const id of ['tut-1h', 'tut-5h', 'tut-8d'] as const) {
         expect(displayIntervalOf(id, multiplier(2.1), manual)).toBe(manual);
       }

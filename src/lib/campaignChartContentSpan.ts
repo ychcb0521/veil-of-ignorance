@@ -7,7 +7,18 @@ export type CampaignChartContentTimeSpan = {
   endMs: number | null;
 };
 
-export type CampaignChartInterval = '1m' | '5m' | '15m' | '1h';
+export const CAMPAIGN_CHART_INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'] as const;
+export type CampaignChartInterval = typeof CAMPAIGN_CHART_INTERVALS[number];
+export const CAMPAIGN_CHART_INTERVAL_LABELS: Record<CampaignChartInterval, string> = {
+  '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟',
+  '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '8h': '8 小时', '12h': '12 小时',
+  '1d': '1 日', '3d': '3 日', '1w': '1 周', '1M': '1 月',
+};
+const DISPLAY_INTERVAL_MS: Record<CampaignChartInterval, number> = {
+  '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000,
+  '1h': 3600000, '2h': 7200000, '4h': 14400000, '6h': 21600000, '8h': 28800000, '12h': 43200000,
+  '1d': 86400000, '3d': 259200000, '1w': 604800000, '1M': 2678400000,
+};
 
 const OVERVIEW_INTERVALS: Array<{ interval: CampaignChartInterval; ms: number }> = [
   { interval: '1m', ms: 60_000 },
@@ -98,8 +109,8 @@ export function pickCoarserCampaignInterval(
   a: CampaignChartInterval,
   b: CampaignChartInterval,
 ): CampaignChartInterval {
-  const indexA = OVERVIEW_INTERVALS.findIndex(item => item.interval === a);
-  const indexB = OVERVIEW_INTERVALS.findIndex(item => item.interval === b);
+  const indexA = CAMPAIGN_CHART_INTERVALS.indexOf(a);
+  const indexB = CAMPAIGN_CHART_INTERVALS.indexOf(b);
   return indexA >= indexB ? a : b;
 }
 
@@ -165,7 +176,7 @@ export function trimCampaignDisplayFetchWindow(
   interval: CampaignChartInterval,
   budget: number = CAMPAIGN_FETCH_CANDLE_BUDGET,
 ): CampaignFetchWindow {
-  const intervalMs = OVERVIEW_INTERVALS.find(item => item.interval === interval)?.ms ?? 60_000;
+  const intervalMs = DISPLAY_INTERVAL_MS[interval];
   const span = budget * intervalMs;
   if (full.toTime - full.fromTime <= span) return full;
   const center = (visible.fromTime + visible.toTime) / 2;
