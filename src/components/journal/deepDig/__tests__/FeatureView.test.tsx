@@ -298,6 +298,33 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     localStorage.clear();
   });
 
+  it('【用户要求】分组表跟着时间序列图选的变量：选 F 就按 F 统计（n、均值、> 0 占比、点阵图、逐场数据），选回结果复原', () => {
+    localStorage.clear();
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
+    // F = −2 × 结果；部分行 F 缺失
+    const rows = DATA.rows.map((r, i) => ({ ...r, vars: { F: r.v == null || i % 10 === 0 ? null : -2 * r.v, V: r.v, VV: r.v } }));
+    const data = { ...DATA, definition: { ...DATA.definition, formula: def.formula }, rows };
+    const H = 3_600_000;
+    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets: [-H, 0, H], names: ['F', 'V', 'VV'], result: 'VV', byEvent: {} };
+    render(<Harness initialDef={def} data={data} series={series} />);
+    const table = () => screen.getByTestId('deep-dig-groups');
+    const posRow = () => within(table()).getAllByRole('row').find(r => r.textContent?.startsWith('实验组'))!;
+    const cells = () => within(posRow()).getAllByRole('cell').map(c => c.textContent);
+    expect(screen.getByTestId('deep-dig-groups-var')).toHaveTextContent('按 VV 统计 · 单位 基点/根');
+    const pos = DATA.groups.find(g => g.group === 'positive')!;
+    expect(cells()[1]).toBe(String(pos.n));
+    expect(cells()[2]).toBe((pos.mean! * 1e4).toFixed(2));
+    fireEvent.click(screen.getByTestId('deep-dig-series-var-F'));
+    expect(screen.getByTestId('deep-dig-groups-var')).toHaveTextContent('按 F 统计（公式里的变量）· 原值 × 10000');
+    const fPos = rows.filter(r => r.group === 'positive' && r.vars.F != null).map(r => r.vars.F!);
+    expect(cells()[1]).toBe(String(fPos.length));
+    expect(cells()[2]).toBe((fPos.reduce((a, b) => a + b, 0) / fPos.length * 1e4).toFixed(2));
+    expect(within(table()).getAllByRole('columnheader').at(-1)).toHaveTextContent('F > 0');
+    // 选回结果
+    fireEvent.click(screen.getByTestId('deep-dig-series-var-VV'));
+    expect(cells()[1]).toBe(String(pos.n));
+  });
+
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);

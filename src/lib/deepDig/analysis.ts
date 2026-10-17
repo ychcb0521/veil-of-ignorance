@@ -152,6 +152,20 @@ export function describeDeepDig(events: readonly RunEvent[], key = DEEP_DIG_KEY)
   };
 }
 
+/**
+ * 描述统计按公式里的某个变量看：每行的值换成这个变量，分组统计重算。
+ * 【用户要求】2026-10-17「时间序列图和分组的数据表有矛盾，分组中的数据，要随着时间序列图中选取的变量而动」。
+ * name 为 null（公式最后一句）或数据里没有这个变量（旧数据）→ 原样返回。
+ */
+export function viewForVariable(data: DeepDigData, name: string | null): DeepDigData {
+  if (name == null || !data.rows.some(r => r.vars && name in r.vars)) return data;
+  const rows = data.rows.map(r => {
+    const x = r.vars?.[name];
+    return { ...r, v: finite(x) ? x : null };
+  });
+  return { ...data, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
+}
+
 /** 旧数据没有波动率：推断统计的「控制波动」算不了，要先重跑描述统计。 */
 export const dataSupportsInference = (data: Pick<DeepDigData, 'rows'>) => data.rows.every(r => r.vol !== undefined);
 

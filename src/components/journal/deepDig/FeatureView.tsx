@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import {
-  applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
+  applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, viewForVariable, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
   type DeepDigData, type DeepDigInference, type DeepDigRowGroup, type DefinitionSnapshot,
 } from '@/lib/deepDig/analysis';
 import { avgHoursOf, definitionKey, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, RESULT_VAR, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
@@ -251,19 +251,24 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   }
 }
 
-function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
-  const def = result.definition;
+function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, raw, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
+  const def = effectiveData.definition;
   const [showDeleted, setShowDeleted] = useState(false);
-  /** 曲线的变量；null = 公式最后一句（核心变量）。 */
+  /** 看哪个变量（时间序列图里选）；null = 公式最后一句（核心变量）。分组表、点阵图、细节、逐场数据都跟着它。 */
   const [seriesVar, setSeriesVar] = useState<string | null>(null);
+  const result = useMemo(() => viewForVariable(effectiveData, seriesVar), [effectiveData, seriesVar]);
+  /** 选的是公式里别的变量（不是最后一句）时它的名字。 */
+  const varName = seriesVar != null && result !== effectiveData ? seriesVar : null;
   const removed = useMemo(() => {
     const drop = new Set(excluded);
-    return raw.rows.filter(r => drop.has(r.id)).sort((a, b) => b.anchorMs - a.anchorMs);
-  }, [raw.rows, excluded]);
+    return viewForVariable(raw, seriesVar).rows.filter(r => drop.has(r.id)).sort((a, b) => b.anchorMs - a.anchorMs);
+  }, [raw, excluded, seriesVar]);
   const remove = (id: string) => onExcludedChange([...excluded.filter(x => x !== id), id]);
   const restore = (id: string) => onExcludedChange(excluded.filter(x => x !== id));
   const bp = (v: number | null | undefined, d = 2) => fmtValue(def, v, d);
-  const X = def.short || '值';
+  // 表头用公式里的名字（最后一句没起名时用简称），免得「V」和公式里的变量 V 混淆
+  const resultName = formulaVariables(def.formula).result;
+  const X = varName ?? (resultName !== RESULT_VAR ? resultName : def.short || '值');
   const stats = result.groups;
   const byGroup = Object.fromEntries(stats.map(s => [s.group, s])) as Record<DeepDigRowGroup, (typeof stats)[number]>;
   const listed = useMemo(
@@ -274,7 +279,11 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: result, raw, seri
   const shown = expanded ? listed : listed.slice(0, ROWS_PREVIEW);
   return (
     <div className="space-y-6" data-testid="deep-dig-describe">
-      <Block title="分组" aside={def.unit ? <span className="text-[11px] text-muted-foreground">{X} 的单位：{def.unit}</span> : undefined}>
+      <Block title="分组" aside={(
+        <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-groups-var">
+          按 <span className="font-mono text-foreground">{X}</span> 统计{varName ? `（公式里的变量）· 原值 × ${def.scale}` : def.unit ? ` · 单位 ${def.unit}` : ''} · 跟着下面时间序列图选的变量
+        </span>
+      )}>
         <GroupCriteria def={liveDef} samples={samples} onSave={onSaveDef} testId="deep-dig-describe-groups" />
         <table className="text-[11.5px]" data-testid="deep-dig-groups">
           <thead>
