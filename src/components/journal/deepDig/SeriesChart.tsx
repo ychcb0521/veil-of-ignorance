@@ -2,7 +2,8 @@
  * Deep dig 描述统计 · 时间序列曲线：各组在进场前后每个时点的平均（实验组、对照组带 ±1 标准误阴影）。
  * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均），比如 V 的时间序列曲线，
  * 并且这个变量可以让我来选择（默认为当前的核心变量）」。
- * 变量从公式里选，默认公式最后一句；删掉的行不算；悬停看每组在那个时点的值，点图例隐藏 / 显示一组。
+ * 变量从公式里选，默认公式最后一句；删掉的行不算；悬停看每组在那个时点的值。
+ * 【用户要求】2026-10-17「时间序列图这里的组别可以选取和删减」：「组别」一行逐组勾选，选择记在本机（按特征值）。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
@@ -22,6 +23,19 @@ const LINE: Record<DeepDigRowGroup, string> = {
 };
 const BAND = new Set<DeepDigRowGroup>(['positive', 'control']);
 const finite = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
+const HIDDEN_KEY = (featureId: string) => `veil.deepDig.seriesHidden:${featureId}`;
+const ALL_GROUPS: readonly DeepDigRowGroup[] = ['positive', 'control', 'other', 'background'];
+function readHidden(featureId: string): ReadonlySet<DeepDigRowGroup> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY(featureId)) ?? '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((g): g is DeepDigRowGroup => ALL_GROUPS.includes(g)) : []);
+  } catch {
+    return new Set();
+  }
+}
+function writeHidden(featureId: string, hidden: ReadonlySet<DeepDigRowGroup>) {
+  try { localStorage.setItem(HIDDEN_KEY(featureId), JSON.stringify([...hidden])); } catch { /* 记不住只是下次要重选 */ }
+}
 
 function niceTicks(lo: number, hi: number, count = 4): number[] {
   const span = hi - lo || Math.abs(hi) || 1;
@@ -52,7 +66,9 @@ export function SeriesChart({ data, series, variable, onVariable }: {
   const boxRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
-  const [hidden, setHidden] = useState<ReadonlySet<DeepDigRowGroup>>(new Set());
+  const [hidden, setHiddenState] = useState<ReadonlySet<DeepDigRowGroup>>(() => readHidden(def.id));
+  const setHidden = (next: ReadonlySet<DeepDigRowGroup>) => { setHiddenState(next); writeHidden(def.id, next); };
+  const toggle = (g: DeepDigRowGroup) => { const n = new Set(hidden); if (n.has(g)) n.delete(g); else n.add(g); setHidden(n); };
   const [table, setTable] = useState(false);
   useEffect(() => {
     const el = boxRef.current;
@@ -72,6 +88,7 @@ export function SeriesChart({ data, series, variable, onVariable }: {
   const scale = def.scale;
   const unitText = `${scale !== 1 ? `× ${scale}` : ''}${isResult && def.unit ? `${scale !== 1 ? ' · ' : ''}${def.unit}` : ''}`;
   const shown = curves.filter(c => !hidden.has(c.group) && c.n > 0);
+  const visible = curves.filter(c => !hidden.has(c.group));
   const offsets = series.offsets;
   const P = offsets.length;
 
@@ -122,6 +139,12 @@ export function SeriesChart({ data, series, variable, onVariable }: {
     .filter((e): e is { g: DeepDigRowGroup; y: number } => !!e)
     .sort((a, b) => a.y - b.y);
   for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 12) ends[i].y = ends[i - 1].y + 12;
+  // 排到图底以下的往上收，不压横轴刻度
+  const bottom = PAD.top + innerH;
+  for (let i = ends.length - 1; i >= 0; i--) {
+    const limit = i === ends.length - 1 ? bottom : ends[i + 1].y - 12;
+    if (ends[i].y > limit) ends[i].y = limit;
+  }
 
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -158,29 +181,44 @@ export function SeriesChart({ data, series, variable, onVariable }: {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-[38px]" data-testid="deep-dig-series-legend">
-        {curves.map(c => (
-          <button
-            key={c.group}
-            type="button"
-            aria-pressed={!hidden.has(c.group)}
-            onClick={() => setHidden(h => { const n = new Set(h); if (n.has(c.group)) n.delete(c.group); else n.add(c.group); return n; })}
-            data-testid={`deep-dig-series-legend-${c.group}`}
-            className={cn('inline-flex items-center gap-1.5 text-[11px] text-foreground/85 hover:text-foreground', hidden.has(c.group) && 'opacity-40')}
-          >
-            <svg width="16" height="6" aria-hidden="true" className={LINE[c.group]}>
-              <line x1="0" y1="3" x2="16" y2="3" stroke="currentColor" strokeWidth="2" strokeDasharray={c.group === 'background' ? '3 2' : undefined} strokeLinecap="round" />
-            </svg>
-            {groupLabel(c.group, def.source)}<span className="font-mono tabular-nums text-muted-foreground">{c.n}</span>
+      <div className="flex gap-1.5" data-testid="deep-dig-series-legend">
+        <span className="w-[32px] shrink-0 pt-[5px] leading-none text-muted-foreground">组别</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" role="group" aria-label="曲线组别">
+          {curves.map(c => {
+            const on = !hidden.has(c.group);
+            return (
+              <button
+                key={c.group}
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                title={on ? '点一下从图里去掉' : '点一下加回图里'}
+                onClick={() => toggle(c.group)}
+                data-testid={`deep-dig-series-legend-${c.group}`}
+                className={cn('inline-flex h-6 items-center gap-1.5 rounded-full border px-2 transition-colors',
+                  on ? 'border-foreground/25 bg-card text-foreground' : 'border-dashed border-border/70 text-muted-foreground/70 hover:text-foreground')}
+              >
+                {on ? <Check className="h-3 w-3" /> : null}
+                <svg width="14" height="6" aria-hidden="true" className={cn(LINE[c.group], !on && 'opacity-40')}>
+                  <line x1="1" y1="3" x2="13" y2="3" stroke="currentColor" strokeWidth="2" strokeDasharray={c.group === 'background' ? '3 2' : undefined} strokeLinecap="round" />
+                </svg>
+                {groupLabel(c.group, def.source)}<span className="font-mono tabular-nums text-muted-foreground">{c.n}</span>
+              </button>
+            );
+          })}
+          {hidden.size > 0 && (
+            <button type="button" onClick={() => setHidden(new Set())} className="text-[11px] text-muted-foreground hover:text-foreground" data-testid="deep-dig-series-groups-all">全部显示</button>
+          )}
+          <button type="button" onClick={() => setTable(t => !t)} className="text-[11px] text-muted-foreground hover:text-foreground" data-testid="deep-dig-series-table-toggle">
+            {table ? '看曲线' : '看数字'}
           </button>
-        ))}
-        <button type="button" onClick={() => setTable(t => !t)} className="text-[11px] text-muted-foreground hover:text-foreground" data-testid="deep-dig-series-table-toggle">
-          {table ? '看曲线' : '看数字'}
-        </button>
+        </div>
       </div>
 
       <div ref={boxRef} className="relative w-full">
-        {table ? (
+        {visible.length === 0 ? (
+          <div className="py-6 text-[11.5px] text-muted-foreground" data-testid="deep-dig-series-none">没有选组：在上面「组别」里点一组加回来。</div>
+        ) : table ? (
           <div className="overflow-x-auto">
             <table className="text-[11px]" data-testid="deep-dig-series-table">
               <thead>
@@ -190,7 +228,7 @@ export function SeriesChart({ data, series, variable, onVariable }: {
                 </tr>
               </thead>
               <tbody className="font-mono tabular-nums">
-                {curves.map(c => (
+                {visible.map(c => (
                   <tr key={c.group} className="border-t border-border/40">
                     <td className={cn('whitespace-nowrap py-1 pr-3 font-sans', LINE[c.group])}>{groupLabel(c.group, def.source)}</td>
                     {tableKs.map(({ k }) => <td key={k} className="py-1 pr-3 text-right">{finite(c.mean[k]) ? (c.mean[k]! * scale).toFixed(2) : '—'}</td>)}
@@ -209,7 +247,7 @@ export function SeriesChart({ data, series, variable, onVariable }: {
                 </g>
               ))}
               {xTicks.map(({ o, k }) => (
-                <text key={o} x={x(k)} y={H - 6} textAnchor="middle" className={cn('font-mono text-[10px]', o === 0 ? 'fill-[#C27C0E] dark:fill-[#F59E0B]' : 'fill-muted-foreground')}>{fmtHours(o)}</text>
+                <text key={o} x={x(k)} y={H - 6} textAnchor={k === P - 1 ? 'end' : 'middle'} className={cn('font-mono text-[10px]', o === 0 ? 'fill-[#C27C0E] dark:fill-[#F59E0B]' : 'fill-muted-foreground')}>{fmtHours(o)}</text>
               ))}
               {zeroK >= 0 && <line x1={x(zeroK)} x2={x(zeroK)} y1={PAD.top} y2={PAD.top + innerH} strokeDasharray="3 3" className="stroke-[#F59E0B]" strokeWidth={1} />}
               {shown.filter(c => BAND.has(c.group)).map(c => <path key={`b-${c.group}`} d={band(c)} className={LINE[c.group]} fill="currentColor" fillOpacity={0.12} stroke="none" />)}

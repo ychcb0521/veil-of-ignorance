@@ -227,6 +227,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
       byEvent[r.id] = a;
     }
     const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets, names, result: 'V', byEvent };
+    localStorage.clear();
     const { unmount } = render(<Harness series={null} />);
     expect(screen.getByTestId('deep-dig-series-empty')).toHaveTextContent('重新运行描述统计后显示');
     unmount();
@@ -253,6 +254,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     // 隐藏一组
     fireEvent.click(screen.getByTestId('deep-dig-series-legend-other'));
     expect(screen.queryByTestId('deep-dig-series-line-other')).not.toBeInTheDocument();
+    expect(screen.getByTestId('deep-dig-series-legend-other')).toHaveAttribute('aria-checked', 'false');
     // 悬停
     const hit = screen.getByTestId('deep-dig-series-hit');
     hit.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
@@ -261,6 +263,39 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     // 删掉一行实验组（数据表默认显示实验组）：图例的 n 少 1
     fireEvent.click(screen.getAllByTestId('deep-dig-row-delete')[0]);
     expect(screen.getByTestId('deep-dig-series-legend-positive')).toHaveTextContent(`实验组${posN - 1}`);
+    localStorage.clear();
+  });
+
+  it('【用户要求】时间序列图的组别可以选取和删减：逐组勾选，表格跟着变，全部去掉有提示，「全部显示」恢复，选择记在本机', () => {
+    localStorage.clear();
+    const H = 3_600_000;
+    const offsets = Array.from({ length: 49 }, (_, i) => (i - 24) * H);
+    const byEvent: Record<string, Float32Array> = {};
+    for (const r of DATA.rows) if (r.v != null) byEvent[r.id] = new Float32Array(49).fill(r.v);
+    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets, names: ['V'], result: 'V', byEvent };
+    const { unmount } = render(<Harness series={series} />);
+    for (const g of ['positive', 'control', 'other', 'background']) expect(screen.getByTestId(`deep-dig-series-legend-${g}`)).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByTestId('deep-dig-series-groups-all')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-series-legend-other'));
+    fireEvent.click(screen.getByTestId('deep-dig-series-legend-background'));
+    expect(screen.getByTestId('deep-dig-series-line-positive')).toBeInTheDocument();
+    expect(screen.queryByTestId('deep-dig-series-line-background')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-series-table-toggle'));
+    expect(within(screen.getByTestId('deep-dig-series-table')).getAllByRole('row')).toHaveLength(3);
+    fireEvent.click(screen.getByTestId('deep-dig-series-table-toggle'));
+    // 换个页面再回来：选择还在
+    unmount();
+    render(<Harness series={series} />);
+    expect(screen.getByTestId('deep-dig-series-legend-other')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByTestId('deep-dig-series-line-other')).not.toBeInTheDocument();
+    // 全部去掉：提示
+    fireEvent.click(screen.getByTestId('deep-dig-series-legend-positive'));
+    fireEvent.click(screen.getByTestId('deep-dig-series-legend-control'));
+    expect(screen.getByTestId('deep-dig-series-none')).toHaveTextContent('没有选组');
+    // 全部显示
+    fireEvent.click(screen.getByTestId('deep-dig-series-groups-all'));
+    for (const g of ['positive', 'control', 'other', 'background']) expect(screen.getByTestId(`deep-dig-series-line-${g}`)).toBeInTheDocument();
+    localStorage.clear();
   });
 
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {
