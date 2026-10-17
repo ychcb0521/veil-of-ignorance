@@ -39,9 +39,10 @@ describe('【用户要求】交易战役指标字母表：每个指标一个字�
     localStorage.clear();
   });
 
-  it('封面卡片上写死的字母类名与字母表一致', () => {
+  it('封面不再绘制字母前缀，释义保留在指标表', () => {
     const page = readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
-    for (const [mode, letter] of LETTER_BY_CARD_MODE) expect(page, mode).toContain(`${mode}: "before:content-['${letter}']",`);
+    expect(page).not.toContain("before:content-");
+    expect(page).not.toContain("CARD_METRIC_LETTER_CLASS");
   });
 
   it('封面十八项、盈亏概览各项都有字母', () => {

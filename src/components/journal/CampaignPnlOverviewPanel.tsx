@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { MetricLetterTag } from '@/components/journal/MetricLetterTable';
-import { LETTER_BY_OVERVIEW_KEY } from '@/lib/campaignMetricLetters';
 import { Info } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useShowMinorMetrics } from '@/hooks/useShowMinorMetrics';
@@ -119,7 +118,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
               {items.filter(item => (item.column ?? 0) === column).map(item => (
                 <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} data-minor={MINOR_METRIC_SET.has(item.key) || undefined}
                   className={`flex min-h-5 min-w-0 items-baseline justify-between gap-3${!showMinor && MINOR_METRIC_SET.has(item.key) ? ' hidden' : ''}`}>
-                  <PnlMetricLabel label={item.label} letter={LETTER_BY_OVERVIEW_KEY.get(item.key)}>{item.help}</PnlMetricLabel>
+                  <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
                   <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
                 </div>
               ))}
@@ -162,7 +161,7 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
               data-column={item.rightColumn ? 'right' : 'left'}
               className={`flex min-w-0 items-baseline justify-between gap-6 ${item.rightColumn ? COL_START.right : COL_START.left} ${ROW_START[row] ?? ''} ${item.rightColumn && row === 0 ? SINGLE_COLUMN_GROUP_BREAK : ''}`}
             >
-              <PnlMetricLabel label={item.label} letter={LETTER_BY_OVERVIEW_KEY.get(item.key)}>{item.help}</PnlMetricLabel>
+              <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>
               {/* 【用户要求】「要对齐」：每项一行，数值不折行、右端对齐；名称过长时截断（悬停看全名），不把这一行撑高。 */}
               <span className={`shrink-0 whitespace-nowrap font-mono tabular-nums ${item.valueClassName ?? ''}`}>{item.value}{item.valueSuffix}</span>
             </div>

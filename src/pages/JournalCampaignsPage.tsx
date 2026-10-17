@@ -1595,7 +1595,7 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  */
 // 【用户要求】封面适当增高：上下内边距加大一档
 const CARD_METRIC_CELL = 'flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 sm:px-2 transition-[background-color,box-shadow] duration-150';
-/** 封面十八项的指标名，次序与排序行、卡片上的格子一致。名称前的字母见 CARD_METRIC_LETTER_CLASS。 */
+/** 封面十八项的指标名，次序与排序行、卡片上的格子一致。字母释义统一放在指标表中。 */
 const CARD_METRIC_LABEL = {
   expectedDrawdownPct: '预期回撤',
   effectivePriceChangePct: '相对涨幅',
@@ -1617,32 +1617,7 @@ const CARD_METRIC_LABEL = {
   mirrorTp: '镜像止盈',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
 type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
-/**
- * 【用户要求】封面指标名前标字母（与「指标表」campaignMetricLetters 同一份，单元测试核对）：用格子的 ::before 画出来，
- * 指标名本身的文字与宽度都不变。类名写死在这里，Tailwind 才会生成。
- */
-const CARD_METRIC_LETTER_CLASS: Record<CardMetricMode, string> = {
-  expectedDrawdownPct: "before:content-['d']",
-  effectivePriceChangePct: "before:content-['r']",
-  addCount: "before:content-['n']",
-  positionGeometricMultiple: "before:content-['M']",
-  magicB: "before:content-['B']",
-  captureRate: "before:content-['b']",
-  executionWear: "before:content-['w']",
-  geometricExpectancy: "before:content-['g']",
-  positionAmplification: "before:content-['A']",
-  addEfficiency: "before:content-['y']",
-  arithmeticExpectancy: "before:content-['E']",
-  unitRise: "before:content-['G']",
-  unitProfit: "before:content-['U']",
-  positionProfit: "before:content-['W']",
-  mainPriceChange: "before:content-['c']",
-  mainPriceEfficiency: "before:content-['η']",
-  unrealizedPriceChangePct: "before:content-['z']",
-  mirrorTp: "before:content-['T']",
-};
-/** 字母挂在格子的左内边距里（像页边的索引），不占指标名的宽度，名字不会因此被截断。 */
-const CARD_METRIC_LETTER_BASE = 'relative before:pointer-events-none before:absolute before:left-[1.5px] before:top-[8px] before:font-mono before:text-[9px] before:leading-[14px] before:text-muted-foreground/60';
+/** 字母释义统一保留在指标表中。 */
 type CardMetricReadings = Record<CardMetricMode, string>;
 
 
@@ -1726,7 +1701,7 @@ const SORT_HIGHLIGHT_TEXT = 'text-[#B7860B] dark:text-[#F0B90B]';
 const SORT_THEN_HIGHLIGHT_BOX = 'bg-[#F0B90B]/[0.035] ring-1 ring-inset ring-[#F0B90B]/20 dark:bg-[#F0B90B]/[0.045]';
 const SORT_THEN_HIGHLIGHT_TEXT = 'text-[#B7860B]/80 dark:text-[#F0B90B]/70';
 /** 指标名：10px 淡色，一格一行，放不下时省略。 */
-const CARD_METRIC_NAME = 'truncate text-[10px] leading-[14px]';
+const CARD_METRIC_NAME = 'truncate text-[11px] leading-[14px]';
 /** 数值一行：只放读数（「仓位击穿」徽标在标题行、杠杆标签之后）。 */
 const CARD_METRIC_VALUE_ROW = 'flex h-4 min-w-0 items-center';
 /** 展开详情里的名称（「名称：值」写在一行里）。 */
@@ -1756,7 +1731,7 @@ const BATCH_BAR_BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1 whitespace
  * 数值：11px 等宽。格宽按列表里最宽的读数估算（只会偏宽），正常不会截断；省略号只是兜底，
  * 万一装不下也在本格内收住、不压到隔壁一格。行高给足 16px。
  */
-const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] font-medium leading-4 tabular-nums';
+const CARD_METRIC_VALUE = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] font-medium leading-4 tabular-nums';
 /**
  * 【用户要求】「镜像止盈的字号不和谐」：中文读数（已实现·盈利 / 未实现）不走等宽字体——等宽字体里的汉字回落到系统黑体，
  * 11px 加粗比旁边的数字大一圈。改用正文字体、与指标名同一个 10px、常规字重，视觉高度与 11px 等宽数字齐平。
@@ -1889,9 +1864,9 @@ const CampaignCard = memo(function CampaignCard({
   };
   /** 指标项的类名：宽度（列表容器上的 CSS 变量）+ 排序链上的高亮。 */
   const metricCell = (mode: CardMetricMode) => `${CARD_METRIC_CELL} ${byLevel(mode, SORT_HIGHLIGHT_BOX, SORT_THEN_HIGHLIGHT_BOX, '')}`;
-  /** 格子 + 指标名前的字母（字母挂在左内边距里，见 CARD_METRIC_LETTER_CLASS）。 */
-  const letteredCell = (mode: CardMetricMode) => `${metricCell(mode)} ${CARD_METRIC_LETTER_BASE} ${CARD_METRIC_LETTER_CLASS[mode]}${hiddenMetrics.has(mode) ? ' hidden' : ''}`;
-  const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${byLevel(mode, `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-muted-foreground/80')}`;
+  /** 封面只显示指标名称；字母释义保留在指标表。 */
+  const letteredCell = (mode: CardMetricMode) => `${metricCell(mode)}${hiddenMetrics.has(mode) ? ' hidden' : ''}`;
+  const metricName = (mode: CardMetricMode) => `${CARD_METRIC_NAME} ${byLevel(mode, `${SORT_HIGHLIGHT_TEXT} font-medium`, SORT_THEN_HIGHLIGHT_TEXT, 'text-foreground/75')}`;
   /** data-sort-highlight：第一级 'true'，之后各级 'then'。 */
   const litAttr = (mode: CampaignSortMode) => byLevel(mode, 'true', 'then', '') || undefined;
   return (
