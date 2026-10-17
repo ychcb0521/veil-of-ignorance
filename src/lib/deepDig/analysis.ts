@@ -16,12 +16,14 @@ import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 import {
-  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValue, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
+  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
 /** 用户公式算出的值在事件特征里的键。 */
 export const DEEP_DIG_KEY = 'deep_dig_x';
+/** 公式里起了名的变量在事件特征里的键前缀（deep_dig_var:F）。 */
+const VAR_PREFIX = 'deep_dig_var:';
 
 export type DeepDigRowGroup = 'positive' | 'control' | 'other' | 'background';
 export const DEEP_DIG_GROUPS: readonly DeepDigRowGroup[] = ['positive', 'control', 'other', 'background'];
@@ -39,8 +41,10 @@ export interface DeepDigRow {
   group: DeepDigRowGroup;
   /** 这一簇里的战役 id（同币 48h 内的多场合为一簇）；随机时点为空。 */
   memberIds: string[];
-  /** 特征值原值；算不出来为 null。 */
+  /** 特征值原值（公式最后一句）；算不出来为 null。 */
   v: number | null;
+  /** 公式里每个起了名的变量在最后一根的原值（推断统计选因变量用）；旧数据没有。 */
+  vars?: Record<string, number | null>;
   /** 观察窗波动率（推断统计里「控制波动」用）；旧数据没有。 */
   vol?: number | null;
   endRet: number | null;
@@ -132,9 +136,11 @@ export function describeDeepDig(events: readonly RunEvent[], key = DEEP_DIG_KEY)
     const f = e.featuresByH[DEEP_DIVE_PRIMARY_H];
     const v = f?.[key];
     const vol = f?.vol_w;
+    const vars: Record<string, number | null> = {};
+    for (const [k, x] of Object.entries(f ?? {})) if (k.startsWith(VAR_PREFIX)) vars[k.slice(VAR_PREFIX.length)] = finite(x) ? x : null;
     return {
       id: e.id, symbol: e.symbol, anchorMs: e.anchorMs, group: groupOf(e), memberIds: e.memberIds ?? [],
-      v: finite(v) ? v : null, vol: finite(vol) ? vol : null,
+      v: finite(v) ? v : null, vol: finite(vol) ? vol : null, vars,
       endRet: e.endRet, maxUp: e.maxUp, maxDown: e.maxDown, period: periodOf.get(e.id) ?? 'discovery',
     };
   });
@@ -170,7 +176,10 @@ export async function collectDeepDigData(
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
     ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: featureWindowMs(def) } } : {}),
-    extraFeatures: window => ({ [DEEP_DIG_KEY]: computeFeatureValue(window, compiled, { interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) }) }),
+    extraFeatures: window => {
+      const { value, vars } = computeFeatureValues(window, compiled, { interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) });
+      return { [DEEP_DIG_KEY]: value, ...Object.fromEntries(Object.entries(vars).map(([k, x]) => [VAR_PREFIX + k, x])) };
+    },
   });
   const described = describeDeepDig(collected.events);
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
@@ -224,6 +233,8 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
   const lower = pos.median < ctl.median;
   lines.push(`实验组进场时 ${X} 的中位数 ${val(pos.median)}，对照组 ${val(ctl.median)}${def.unit ? `（${def.unit}）` : ''}：实验组${lower ? '更低' : '更高'}。`);
 
+  // 推断统计的因变量换成了公式里别的变量（X = F）时，推断那几句用它的名字
+  const XI = inference?.target ?? X;
   const isMain = (b: { a?: string; b?: string; x?: string; call: string }) => /^\w+\(\s*X\s*[,)]/.test(b.call);
   const tb = blocks.find(b => b.kind === 'ttest' && b.a === '实验组' && b.b === '对照组' && isMain(b));
   if (tb?.kind === 'ttest' && finite(tb.result.p)) {
@@ -233,7 +244,7 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
   const mb = blocks.find(b => b.kind === 'mannwhitney' && b.a === '实验组' && b.b === '对照组' && isMain(b));
   if (mb?.kind === 'mannwhitney' && finite(mb.auc)) {
     const sep = mb.auc < 0.5 ? 1 - mb.auc : mb.auc;
-    lines.push(`排名比较：AUC ${mb.auc.toFixed(2)}，${pEq(mb.p)}——随机挑一场实验组和一场对照组，实验组 ${X} ${mb.auc < 0.5 ? '更低' : '更高'}的概率约 ${pct(sep)}。`);
+    lines.push(`排名比较：AUC ${mb.auc.toFixed(2)}，${pEq(mb.p)}——随机挑一场实验组和一场对照组，实验组 ${XI} ${mb.auc < 0.5 ? '更低' : '更高'}的概率约 ${pct(sep)}。`);
   }
 
   const sb = blocks.find(b => b.kind === 'spearman' && b.x === 'X');
@@ -242,16 +253,16 @@ export function deepDigRules(data: DeepDigData, inference: DeepDigInference | nu
   if (end && finite(end.rho)) {
     const conf = end.confirmation;
     lines.push(conf?.verdict === '已验证'
-      ? `${X} 能预测之后 24h 的方向：发现集 ρ = ${end.rho.toFixed(2)}，确认集复现${conf.survivesControl === false ? '，但控制波动率后不成立' : conf.survivesControl ? '，控制波动率后仍成立' : ''}。`
-      : `${X} 不能预测之后 24h 的方向：与${TARGET_NAME.endRet} ρ = ${end.rho.toFixed(2)}（Holm ${pEq(end.pHolm)}）${end.pHolm < DEEP_DIVE_ALPHA ? '，确认集没有复现' : ''}。`);
+      ? `${XI} 能预测之后 24h 的方向：发现集 ρ = ${end.rho.toFixed(2)}，确认集复现${conf.survivesControl === false ? '，但控制波动率后不成立' : conf.survivesControl ? '，控制波动率后仍成立' : ''}。`
+      : `${XI} 不能预测之后 24h 的方向：与${TARGET_NAME.endRet} ρ = ${end.rho.toFixed(2)}（Holm ${pEq(end.pHolm)}）${end.pHolm < DEEP_DIVE_ALPHA ? '，确认集没有复现' : ''}。`);
   }
   if (up && down && finite(up.rho) && finite(down.rho) && up.pHolm < DEEP_DIVE_ALPHA && down.pHolm < DEEP_DIVE_ALPHA && Math.sign(up.rho) !== Math.sign(down.rho)) {
-    lines.push(`${X} 与 24h 最大涨幅（ρ = ${up.rho.toFixed(2)}）、最大跌幅（ρ = ${down.rho.toFixed(2)}）同时相关：${X} 大主要意味着之后波动大，不代表方向。`);
+    lines.push(`${XI} 与 24h 最大涨幅（ρ = ${up.rho.toFixed(2)}）、最大跌幅（ρ = ${down.rho.toFixed(2)}）同时相关：${XI} 大主要意味着之后波动大，不代表方向。`);
   }
   for (const b of blocks) {
     if (b.kind === 'regress') {
       const xt = b.terms.find(t => t.term === 'X');
-      if (xt && finite(xt.p)) lines.push(`${b.title}（${b.call}）：${X} 的系数 ${xt.beta.toFixed(3)}，${pEq(xt.p)}，R² = ${finite(b.r2) ? b.r2.toFixed(3) : '—'}${xt.p < DEEP_DIVE_ALPHA ? '' : '，不显著'}。`);
+      if (xt && finite(xt.p)) lines.push(`${b.title}（${b.call}）：${XI} 的系数 ${xt.beta.toFixed(3)}，${pEq(xt.p)}，R² = ${finite(b.r2) ? b.r2.toFixed(3) : '—'}${xt.p < DEEP_DIVE_ALPHA ? '' : '，不显著'}。`);
     } else if (b.kind === 'anova' && finite(b.p)) {
       lines.push(`方差分析（${b.groups.map(x => x.name).join(' / ')}）：F = ${b.f.toFixed(2)}，${pEq(b.p)}，η² = ${b.eta2.toFixed(3)}，${b.p < DEEP_DIVE_ALPHA ? '各组均值有差异' : '各组均值差异不显著'}。`);
     } else if (b.kind === 'rsa' && finite(b.r)) {

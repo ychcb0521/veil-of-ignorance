@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fUpperP, welchTTest } from '@/lib/deepRsa/deepDive';
-import { DEFAULT_COMMANDS, methodsIn, ols, parseCommands, runInference, toggleMethod, type InferenceBlock } from '@/lib/deepDig/commands';
+import { DEFAULT_COMMANDS, methodsIn, ols, parseCommands, runInference, setTarget, targetOf, toggleMethod, type InferenceBlock } from '@/lib/deepDig/commands';
 import type { DeepDigRow, DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import { driftEvents, makeData } from './fixtures';
@@ -108,5 +108,39 @@ describe('【用户要求】Deep dig 推断统计命令：可选方法 + 可自�
     const shuffled = spec.map((s, i) => ({ ...s, v: spec[(i * 37) % spec.length].v * 0 + rand() }));
     const none = runInference({ rows: rows(shuffled), definition: DEF, finishedAt: 1 }, 'ml(实验组 ~ X, cv=5, perm=49)');
     expect(block(none.blocks, 'ml').auc).toBeLessThan(0.7);
+  });
+
+  it('【用户要求】因变量从公式里选：X = 名字 一行；点选改这一行；结果写明 X 是谁；数据里没有不悄悄换', () => {
+    const base = rows(Array.from({ length: 60 }, (_, i) => ({ g: (i % 2 ? 'positive' : 'control') as DeepDigRowGroup, v: i % 2 ? 1 + (i % 7) : (i % 5), endRet: (i % 9) / 100 })));
+    // F 与 V 方向相反：选 F 时 t 检验的均值差符号相反
+    const withVars = base.map(r => ({ ...r, vars: { F: -(r.v ?? 0) * 2, V: r.v } }));
+    const data = { rows: withVars, definition: { ...DEF, formula: 'F = -2 * C\nV = C', scale: 10 }, finishedAt: 1 };
+    const deflt = runInference(data, 'ttest(X, 实验组, 对照组)');
+    const onF = runInference(data, setTarget('# 注释\nttest(X, 实验组, 对照组)', 'F'));
+    expect(deflt.target).toBeNull();
+    expect(onF.target).toBe('F');
+    const dV = block(deflt.blocks, 'ttest').result.diff;
+    const dF = block(onF.blocks, 'ttest').result.diff;
+    // X 按显示倍数（×10）：F = −2V → 均值差 = −2 × V 的均值差
+    expect(dF).toBeCloseTo(-2 * dV, 10);
+    expect(dV).toBeCloseTo(10 * (welchTTest(withVars.filter(r => r.group === 'positive').map(r => r.v!), withVars.filter(r => r.group === 'control').map(r => r.v!)).diff), 10);
+    // 点选：插在开头注释后面；再选最后一句 = 删掉这一行
+    const t = setTarget('# 注释\nttest(X, 实验组, 对照组)', 'F');
+    expect(t).toBe('# 注释\nX = F\nttest(X, 实验组, 对照组)');
+    expect(targetOf(t)).toBe('F');
+    expect(setTarget(setTarget(t, 'V'), null)).toBe('# 注释\nttest(X, 实验组, 对照组)');
+    expect(targetOf(setTarget(t, 'V'))).toBe('V');
+    // 公式里的变量可以直接写（原值）
+    const rg = block(runInference(data, 'regress(endRet ~ F)').blocks, 'regress');
+    expect(rg.terms.map(x => x.term)).toContain('F');
+    expect(rg.n).toBe(60);
+    // 写错：公式里没有；重复指定
+    const bad = parseCommands('X = Q\nttest(X)', { variables: ['F', 'V'] });
+    expect(bad.errors[0]).toMatchObject({ line: 1, message: expect.stringContaining('公式里没有「Q」') });
+    expect(parseCommands('X = F\nX = V', { variables: ['F', 'V'] }).errors[0].message).toContain('已在第 1 行指定过');
+    // 数据里没有（旧数据 / 公式改过）：整份不算，说清楚
+    const old = runInference({ ...data, rows: base }, 'X = F\nttest(X, 实验组, 对照组)');
+    expect(old.blocks).toHaveLength(1);
+    expect(old.blocks[0]).toMatchObject({ kind: 'error', message: expect.stringContaining('描述统计的数据里没有「F」') });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateProgram, lastValue, parseFormula } from '@/lib/deepDig/formula';
-import { compileFeatureFormula, computeFeatureValue, DRIFT_SPEED_FORMULA, EMA_DRIFT_SPEED_FORMULA } from '@/lib/deepDig/features';
+import { compileFeatureFormula, computeFeatureValue, computeFeatureValues, DRIFT_SPEED_FORMULA, EMA_DRIFT_SPEED_FORMULA, formulaVariables } from '@/lib/deepDig/features';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
 import { computeDsp } from '@/lib/dynamicSchellingPoint';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
@@ -133,6 +133,21 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
     // 中文写法
     const zh = compileFeatureFormula(DRIFT_SPEED_FORMULA.replace('avg(Q, avgh)', 'avg(Q, 平均时长)'));
     expect(computeFeatureValue(w, zh, { avgHours: 12 })).toBeCloseTo(ref(12, 6), 12);
+  });
+
+  it('【用户要求】公式里起了名的变量都带回最后一根的值（推断统计选因变量用）', () => {
+    const w = window(576, 6, 0);
+    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA + '\nVV = avg(V, 24)');
+    const { value, vars } = computeFeatureValues(w, compiled);
+    expect(Object.keys(vars)).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV']);
+    expect(vars.VV).toBe(value);
+    expect(vars.V).toBeCloseTo(computeFeatureValue(w, compileFeatureFormula(DRIFT_SPEED_FORMULA))!, 15);
+    expect(vars.VV).not.toBeCloseTo(vars.V!, 12);
+    // 观察窗不合格：每个变量都是 null
+    expect(computeFeatureValues(null, compiled).vars).toEqual(Object.fromEntries(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'].map(n => [n, null])));
+    expect(formulaVariables(DRIFT_SPEED_FORMULA + '\nVV = avg(V, 24)')).toEqual({ names: ['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'], result: 'VV' });
+    // 最后一句没起名：多一个「结果」
+    expect(formulaVariables('R = ln(C / prev(C))\nR * 100')).toEqual({ names: ['R', '结果'], result: '结果' });
   });
 
   it('用到成交额的公式：有金额的 K 线不到 95% 记缺失；不用成交额的公式照算', () => {

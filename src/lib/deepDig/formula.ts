@@ -375,14 +375,27 @@ function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number): Val
 
 /** 按顺序算完所有句子，返回最后一句的值。 */
 export function evaluateProgram(program: Program, inputs: Readonly<Record<string, Value>>, options: { barMinutes?: number } = {}): Value {
+  return evaluateProgramVars(program, inputs, options).last;
+}
+
+/** 同上，另外带回每个起了名的中间量（推断统计可以拿它们当因变量）。 */
+export function evaluateProgramVars(program: Program, inputs: Readonly<Record<string, Value>>, options: { barMinutes?: number } = {}): { last: Value; vars: Map<string, Value> } {
   const env = new Map<string, Value>(Object.entries(inputs));
+  const vars = new Map<string, Value>();
   const barMinutes = options.barMinutes ?? FORMULA_BAR_MINUTES;
   let last: Value = Number.NaN;
   for (const s of program.statements) {
     last = evaluateNode(s.expr, env, barMinutes);
-    if (s.name) env.set(s.name, last);
+    if (s.name) { env.set(s.name, last); vars.set(s.name, last); }
   }
-  return last;
+  return { last, vars };
+}
+
+/** 公式里起了名的变量（按出现顺序，不重复），以及最后一句的名字（没起名为 null）。 */
+export function programVariables(program: Program): { names: string[]; result: string | null } {
+  const names: string[] = [];
+  for (const st of program.statements) if (st.name && !names.includes(st.name)) names.push(st.name);
+  return { names, result: program.statements.at(-1)?.name ?? null };
 }
 
 /** 结果取「最后一根」：序列取末尾，一个数就是它本身；空 → null。 */

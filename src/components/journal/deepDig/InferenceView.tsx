@@ -10,7 +10,7 @@ import { useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DEEP_DIVE_ALPHA, type WelchResult } from '@/lib/deepRsa/deepDive';
-import { DEFAULT_COMMANDS, methodsIn, METHOD_PRESETS, parseCommands, ROW_VARIABLES, toggleMethod, type InferenceBlock } from '@/lib/deepDig/commands';
+import { DEFAULT_COMMANDS, methodsIn, METHOD_PRESETS, parseCommands, ROW_VARIABLES, setTarget, targetOf, toggleMethod, type InferenceBlock } from '@/lib/deepDig/commands';
 import { pText } from '@/lib/deepDig/analysis';
 
 const GREEN = 'text-[#0B9F66] dark:text-[#0ECB81]';
@@ -28,14 +28,64 @@ const VAR_NAME: Record<string, string> = { endRet: '24h 期末收益', maxUp: '2
 
 // ===================== 方法 + 命令 =====================
 
-export function CommandPanel({ commands, onChange }: { commands: string; onChange: (text: string) => void }) {
+/** 「X = VV × 10000 · 基点/根」：因变量是谁、按什么倍数，界面上写明。 */
+export function targetText(target: string | null, variables: { result: string }, scale: number, unit: string): string {
+  const name = target ?? variables.result;
+  const isResult = name === variables.result;
+  return `X = ${name}${isResult ? '（公式最后一句）' : ''}${scale !== 1 ? `${isResult ? '' : ' '}× ${scale}` : ''}${unit ? ` · ${unit}` : ''}`;
+}
+
+const PILL = (active: boolean) => cn('inline-flex h-6 items-center gap-1 rounded-full border px-2 transition-colors',
+  active ? 'border-foreground/25 bg-card font-medium text-foreground' : 'border-border/70 text-muted-foreground hover:text-foreground');
+
+export function CommandPanel({ commands, onChange, variables, available, scale, unit }: {
+  commands: string;
+  onChange: (text: string) => void;
+  /** 公式里可选作因变量的变量（formulaVariables）。 */
+  variables: { names: string[]; result: string };
+  /** 描述统计数据里已经有的变量（没有数据为 null）：选了数据里还没有的，提示先重跑描述统计。 */
+  available: readonly string[] | null;
+  scale: number;
+  unit: string;
+}) {
   const [help, setHelp] = useState(false);
-  const parsed = useMemo(() => parseCommands(commands), [commands]);
+  const parsed = useMemo(() => parseCommands(commands, { variables: variables.names }), [commands, variables.names]);
   const on = useMemo(() => methodsIn(commands), [commands]);
+  const target = targetOf(commands);
+  const current = target ?? variables.result;
+  const missing = !variables.names.includes(current) ? 'formula' : available && !available.includes(current) ? 'data' : null;
   return (
     <div className="max-w-[720px] space-y-2 text-[11.5px]" data-testid="deep-dig-commands">
+      <div className="flex gap-1.5">
+        <span className="w-[40px] shrink-0 pt-[5px] leading-none text-muted-foreground">因变量</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" role="radiogroup" aria-label="因变量">
+          {variables.names.map(name => {
+            const active = current === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                title={name === variables.result ? '公式最后一句（特征值）' : `公式里的 ${name}`}
+                data-testid={`deep-dig-target-${name}`}
+                onClick={() => onChange(setTarget(commands, name === variables.result ? null : name))}
+                className={cn(PILL(active), 'font-mono')}
+              >
+                {active && <Check className="h-3 w-3" />}{name}
+                {name === variables.result && <span className="font-sans text-[10.5px] font-normal text-muted-foreground">结果</span>}
+              </button>
+            );
+          })}
+          <span className={cn('text-[11px]', missing ? RED : 'text-muted-foreground')} data-testid="deep-dig-target-summary">
+            {targetText(target, variables, scale, unit)}
+            {missing === 'formula' && '：公式里没有这个变量'}
+            {missing === 'data' && '：描述统计的数据里还没有，先重新运行描述统计'}
+          </span>
+        </div>
+      </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="w-[32px] shrink-0 text-muted-foreground">方法</span>
+        <span className="w-[40px] shrink-0 text-muted-foreground">方法</span>
         {METHOD_PRESETS.map(m => {
           const active = on.has(m.key);
           return (
@@ -46,8 +96,7 @@ export function CommandPanel({ commands, onChange }: { commands: string; onChang
               title={m.help}
               data-testid={`deep-dig-method-${m.key}`}
               onClick={() => onChange(toggleMethod(commands, m.key, !active))}
-              className={cn('inline-flex h-6 items-center gap-1 rounded-full border px-2 transition-colors',
-                active ? 'border-foreground/25 bg-card font-medium text-foreground' : 'border-border/70 text-muted-foreground hover:text-foreground')}
+              className={PILL(active)}
             >
               {active && <Check className="h-3 w-3" />}{m.label}
             </button>
@@ -55,7 +104,7 @@ export function CommandPanel({ commands, onChange }: { commands: string; onChang
         })}
       </div>
       <div className="flex gap-1.5">
-        <span className="w-[32px] shrink-0 pt-1.5 text-muted-foreground">命令</span>
+        <span className="w-[40px] shrink-0 pt-1.5 text-muted-foreground">命令</span>
         <div className="min-w-0 flex-1 space-y-1">
           <textarea
             value={commands}
@@ -83,19 +132,21 @@ export function CommandPanel({ commands, onChange }: { commands: string; onChang
             )}
             <span>{parsed.commands.length} 个方法 · 命令跟账号走</span>
           </div>
-          {help && <CommandHelp />}
+          {help && <CommandHelp variables={variables} />}
         </div>
       </div>
     </div>
   );
 }
 
-function CommandHelp() {
+function CommandHelp({ variables }: { variables: { names: string[]; result: string } }) {
+  const direct = variables.names.filter(n => n !== '结果' && !ROW_VARIABLES.some(v => v.name === n));
   return (
     <div className="space-y-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2 text-[11px] leading-relaxed" data-testid="deep-dig-commands-help">
       <div>
         <span className="text-muted-foreground">变量（每个事件一个值）：</span>
         {ROW_VARIABLES.map((v, i) => <span key={v.name}>{i ? '；' : ''}<Code>{v.name}</Code> {v.label}</span>)}。
+        {direct.length > 0 && <>公式里的变量也能直接写（原值，不乘显示倍数）：{direct.map((n, i) => <span key={n}>{i ? ' ' : ''}<Code>{n}</Code></span>)}，如 <Code>regress(endRet ~ {direct[0]} + vol)</Code>。</>}
         可以写成式子，如 <Code>X^2</Code>、<Code>ln(abs(X))</Code>（写法同特征值公式）。
       </div>
       <div>
@@ -164,10 +215,11 @@ const welchRows = (t: WelchResult, a: string, b: string): [string, React.ReactNo
 const varLabel = (src: string) => VAR_NAME[src] ?? src;
 const unitOf = (src: string) => (PCT_VARS.has(src) ? '%' : '');
 
-export function InferenceResults({ blocks }: { blocks: readonly InferenceBlock[] }) {
+export function InferenceResults({ blocks, target }: { blocks: readonly InferenceBlock[]; target?: string }) {
   if (!blocks.length) return <div className="text-[11.5px] text-muted-foreground">命令里没有方法。</div>;
   return (
     <div className="space-y-6" data-testid="deep-dig-infer">
+      {target && <div className="text-[11.5px] text-muted-foreground" data-testid="deep-dig-infer-target">这次的因变量：<span className="font-mono text-foreground">{target}</span></div>}
       {blocks.map((b, i) => (
         <section key={`${b.line}-${i}`} className="space-y-2" data-testid={`deep-dig-block-${b.kind}`}>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">

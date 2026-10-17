@@ -13,7 +13,7 @@ import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { evaluateProgram, FormulaError, lastValue, parseFormula, type Program } from '@/lib/deepDig/formula';
+import { evaluateProgram, evaluateProgramVars, FormulaError, lastValue, parseFormula, programVariables, type Program } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef {
   /** 网址上的名字。 */
@@ -271,19 +271,29 @@ export function compileFeatureFormula(formula: string): CompiledFeature {
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
-export function computeFeatureValue(
+export function computeFeatureValue(window: ObservationWindow | null, compiled: CompiledFeature, params: ParamDef = {}): number | null {
+  return computeFeatureValues(window, compiled, params).value;
+}
+
+/**
+ * 同上，另外带回公式里每个起了名的变量在最后一根的值（推断统计选因变量用）。
+ * 【用户要求】2026-10-17「推断统计的时候，需要让我选择因变量…因变量要源自那个公式框中」。
+ */
+export function computeFeatureValues(
   window: ObservationWindow | null,
   compiled: CompiledFeature,
   params: ParamDef = {},
-): number | null {
-  if (!window) return null;
+): { value: number | null; vars: Record<string, number | null> } {
+  const { names } = programVariables(compiled.program);
+  const none = () => ({ value: null, vars: Object.fromEntries(names.map(n => [n, null])) });
+  if (!window) return none();
   const bars = window.bars;
-  if (!bars.length) return null;
+  if (!bars.length) return none();
   // 这个周期的观察窗缺太多 K 线：不算（5m 观察窗在流水线里已按同一标准筛过）
-  if (window.coverage < MIN_WINDOW_COVERAGE) return null;
+  if (window.coverage < MIN_WINDOW_COVERAGE) return none();
   if (compiled.usesAmounts) {
     const withAmounts = bars.filter(b => b.quoteVolume != null && b.takerBuyQuoteVolume != null).length;
-    if (withAmounts < MIN_AMOUNT_COVERAGE * bars.length) return null;
+    if (withAmounts < MIN_AMOUNT_COVERAGE * bars.length) return none();
   }
   const series = (f: (b: (typeof bars)[number]) => number | null | undefined) => Float64Array.from(bars, b => {
     const v = f(b);
@@ -292,15 +302,28 @@ export function computeFeatureValue(
   const q = series(b => b.quoteVolume);
   const buy = series(b => b.takerBuyQuoteVolume);
   try {
-    return lastValue(evaluateProgram(compiled.program, {
+    const out = evaluateProgramVars(compiled.program, {
       C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
       Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
       hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
-    }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 }));
+    }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
+    return { value: lastValue(out.last), vars: Object.fromEntries(names.map(n => [n, lastValue(out.vars.get(n) ?? Number.NaN)])) };
   } catch {
-    return null;
+    return none();
   }
 }
+
+/** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */
+export function formulaVariables(formula: string): { names: string[]; result: string } {
+  try {
+    const { names, result } = programVariables(compileFeatureFormula(formula).program);
+    return result ? { names, result } : { names: [...names, RESULT_VAR], result: RESULT_VAR };
+  } catch {
+    return { names: [RESULT_VAR], result: RESULT_VAR };
+  }
+}
+/** 最后一句没起名时，它在推断统计里的名字。 */
+export const RESULT_VAR = '结果';
 
 // ===================== 分组 =====================
 

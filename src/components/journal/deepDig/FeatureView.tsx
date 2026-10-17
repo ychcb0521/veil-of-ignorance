@@ -13,10 +13,11 @@ import {
   applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
   type DeepDigData, type DeepDigInference, type DeepDigRowGroup, type DefinitionSnapshot,
 } from '@/lib/deepDig/analysis';
-import { avgHoursOf, definitionKey, featureWindowMs, halfLifeOf, intervalOf, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
+import { avgHoursOf, definitionKey, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, RESULT_VAR, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
-import { CommandPanel, InferenceResults } from '@/components/journal/deepDig/InferenceView';
+import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
+import { dataVariables } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
 export const DEEP_DIG_TABS: { key: DeepDigTab; label: string }[] = [
@@ -108,6 +109,7 @@ export interface FeatureViewProps {
 
 export function FeatureView(props: FeatureViewProps) {
   const { def, data, inference, excluded, tab, onTabChange } = props;
+  const variables = useMemo(() => formulaVariables(def.formula), [def.formula]);
   const effective = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
   const exKey = data ? exclusionKey(data, excluded) : '';
   const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
@@ -149,7 +151,10 @@ export function FeatureView(props: FeatureViewProps) {
       )}
       {tab === 'infer' && (
         <div className="space-y-4">
-          <CommandPanel commands={props.commands} onChange={props.onCommandsChange} />
+          <CommandPanel
+            commands={props.commands} onChange={props.onCommandsChange} variables={variables} scale={def.scale} unit={def.unit}
+            available={effective ? [...dataVariables(effective.rows), RESULT_VAR] : null}
+          />
           <RunStrip
             testId="deep-dig-infer-run" label="运行推断统计" hasResult={!!inference} finishedAt={inference?.finishedAt ?? null}
             status={props.inferStatus} error={props.inferError}
@@ -163,7 +168,9 @@ export function FeatureView(props: FeatureViewProps) {
               {inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
             </Notice>
           )}
-          {inference && effective ? <InferenceResults blocks={inference.blocks} /> : <Empty>还没运行推断统计。</Empty>}
+          {inference && effective ? (
+            <InferenceResults blocks={inference.blocks} target={inference.target !== undefined ? targetText(inference.target, formulaVariables(effective.definition.formula), effective.definition.scale, effective.definition.unit) : undefined} />
+          ) : <Empty>还没运行推断统计。</Empty>}
         </div>
       )}
       {tab === 'rules' && <RulesTab {...props} data={effective} inference={inferenceFresh ? inference : null} />}

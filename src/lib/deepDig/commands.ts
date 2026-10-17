@@ -5,12 +5,16 @@
  * 方差分析、RSA、机器学习），并且新增可以人为设计方法的命令窗口」。
  *
  * 每个事件（描述统计数据里的一行）可用的变量：
- *   X        特征值（按定义的显示单位，如 基点/根）
+ *   X        因变量：默认是公式最后一句（特征值），一行 X = 名字 换成公式里别的变量；按定义的显示倍数（如 × 10000）
+ *   公式里起了名的变量（N、F、V…）  原值，可以直接写进命令
  *   vol      观察窗波动率（%）
  *   endRet / maxUp / maxDown   进场后 24h 期末收益 / 最大涨幅 / 最大跌幅（%）
  *   实验组 / 对照组 / 其他 / 随机   是否属于该组（1 / 0）
  * 变量可以写成式子（同特征值公式的写法），如 X^2、ln(abs(X))。组可以用 + 合并：实验组+对照组；全部 = 四组。
  * regress / ml 的「~」右边、rsa 的第一个参数里，顶层的 + 分隔多个变量；要相加请加括号 (a + b)。
+ *
+ * 【用户要求】2026-10-17「推断统计的时候，需要让我选择因变量…我不知道是不是选中了 VV 还是误选成了别的。因变量要源自那个公式框中」：
+ * 因变量写在命令里（X = VV），界面上点选也是改这一行；结果上方写明 X 是谁。
  */
 import { mulberry32 } from '@/lib/deepRsa/grouping';
 import {
@@ -20,6 +24,7 @@ import {
 import { holmAdjust, ranks, spearman } from '@/lib/deepRsa/rsa';
 import { evaluateProgram, FormulaError, parseFormula, type Program } from '@/lib/deepDig/formula';
 import type { DeepDigData, DeepDigRow, DeepDigRowGroup, DefinitionSnapshot } from '@/lib/deepDig/analysis';
+import { RESULT_VAR } from '@/lib/deepDig/features';
 
 // ===================== 方法清单与默认命令 =====================
 
@@ -43,7 +48,7 @@ export const DEFAULT_COMMANDS = [
 ].join('\n');
 
 export const ROW_VARIABLES: readonly { name: string; label: string }[] = [
-  { name: 'X', label: '特征值（显示单位）' },
+  { name: 'X', label: '因变量（上面选的；默认公式最后一句，按显示倍数）' },
   { name: 'vol', label: '观察窗波动率（%）' },
   { name: 'endRet', label: '24h 期末收益（%）' },
   { name: 'maxUp', label: '24h 最大涨幅（%）' },
@@ -61,6 +66,12 @@ const GROUP_ALIASES: Record<string, DeepDigRowGroup[]> = {
 const GROUP_NAME: Record<DeepDigRowGroup, string> = { positive: '实验组', control: '对照组', other: '其他', background: '随机' };
 const INDICATORS: Record<string, DeepDigRowGroup> = { 实验组: 'positive', 对照组: 'control', 其他: 'other', 随机: 'background', pos: 'positive', ctl: 'control', bg: 'background' };
 const KNOWN = new Set(['X', 'vol', 'endRet', 'maxUp', 'maxDown', ...Object.keys(INDICATORS)]);
+/** 这次解析认得的变量：固定的 + 公式里起了名的（与固定名重名的不收）。 */
+let known: ReadonlySet<string> = KNOWN;
+const formulaNames = (variables: readonly string[]) => variables.filter(v => v !== RESULT_VAR && !KNOWN.has(v));
+/** 一行「X = 名字」：指定因变量。 */
+const TARGET_LINE = /^X\s*=(?!=)\s*(\S+)$/u;
+const stripComment = (raw: string) => raw.replace(/(#|\/\/).*$/, '').trim();
 
 // ===================== 结果结构 =====================
 
@@ -92,6 +103,8 @@ export interface DeepDigInference {
   excludedKey?: string;
   /** 运行时的命令原文：命令改了也提示重跑。 */
   commands: string;
+  /** 因变量 X 是公式里的哪个变量；null = 公式最后一句。 */
+  target?: string | null;
   startedAt: number;
   finishedAt: number;
   blocks: InferenceBlock[];
@@ -108,7 +121,12 @@ interface Ctx {
 }
 
 interface Prepared { line: number; call: string; key: MethodKey; run: (ctx: Ctx) => InferenceBlock }
-export interface ParsedCommands { commands: Prepared[]; errors: { line: number; message: string }[] }
+export interface ParsedCommands {
+  commands: Prepared[];
+  errors: { line: number; message: string }[];
+  /** 「X = 名字」那一行；没有 = 公式最后一句。 */
+  target: { line: number; name: string } | null;
+}
 
 /** 顶层逗号 / 加号切分（括号里的不切）。 */
 function splitTop(src: string, sep: string): string[] {
@@ -130,7 +148,7 @@ class CmdError extends Error {}
 function expr(src: string, what = '变量'): { src: string; program: Program } {
   if (!src.trim()) throw new CmdError(`缺${what}`);
   try {
-    return { src: src.trim(), program: parseFormula(src, KNOWN) };
+    return { src: src.trim(), program: parseFormula(src, known) };
   } catch (e) {
     throw new CmdError(e instanceof FormulaError ? `「${src.trim()}」${e.message.replace(/^第 \d+ 行：/, '：')}` : String(e));
   }
@@ -411,13 +429,35 @@ const NAMED_ALLOWED: Record<string, string[]> = {
   ttest: [], mannwhitney: ['perm'], spearman: ['control', 'perm'], quintiles: [], regress: ['in'], anova: [], rsa: ['in', 'perm'], ml: ['model', 'cv', 'k', 'perm', 'in'],
 };
 
-export function parseCommands(text: string): ParsedCommands {
+/**
+ * 解析命令。variables = 公式里可选的变量（formulaVariables 的 names）：给了就检查「X = 名字」是不是其中之一，
+ * 并且命令里可以直接写这些变量；不给（旧调用）只认固定变量。
+ */
+export function parseCommands(text: string, options: { variables?: readonly string[] } = {}): ParsedCommands {
+  const prev = known;
+  if (options.variables) known = new Set([...KNOWN, ...formulaNames(options.variables)]);
+  try {
+    return parseCommandsWith(text, options.variables);
+  } finally {
+    known = prev;
+  }
+}
+
+function parseCommandsWith(text: string, variables: readonly string[] | undefined): ParsedCommands {
   const commands: Prepared[] = [];
   const errors: { line: number; message: string }[] = [];
+  let target: ParsedCommands['target'] = null;
   text.split('\n').forEach((raw, li) => {
     const line = li + 1;
-    const src = raw.replace(/(#|\/\/).*$/, '').trim();
+    const src = stripComment(raw);
     if (!src) return;
+    const t = TARGET_LINE.exec(src);
+    if (t) {
+      if (target) { errors.push({ line, message: `因变量已在第 ${target.line} 行指定过` }); return; }
+      if (variables && !variables.includes(t[1])) { errors.push({ line, message: `公式里没有「${t[1]}」：可选 ${variables.join(' / ')}` }); return; }
+      target = { line, name: t[1] };
+      return;
+    }
     const m = /^([A-Za-z_]+)\s*[(（](.*)[)）]$/.exec(src);
     if (!m) { errors.push({ line, message: '写成 方法名(参数, …)，如 ttest(X, 实验组, 对照组)' }); return; }
     const name = m[1];
@@ -444,7 +484,26 @@ export function parseCommands(text: string): ParsedCommands {
       errors.push({ line, message: e instanceof Error ? e.message : String(e) });
     }
   });
-  return { commands, errors };
+  return { commands, errors, target };
+}
+
+/** 命令里指定的因变量（没指定 = null，即公式最后一句）。 */
+export function targetOf(text: string): string | null {
+  for (const raw of text.split('\n')) {
+    const t = TARGET_LINE.exec(stripComment(raw));
+    if (t) return t[1];
+  }
+  return null;
+}
+
+/** 点选因变量：改「X = 名字」那一行；选公式最后一句（null）= 删掉这一行。插在开头的注释后面。 */
+export function setTarget(text: string, name: string | null): string {
+  const lines = text.split('\n').filter(raw => !TARGET_LINE.test(stripComment(raw)));
+  if (name == null) return lines.join('\n');
+  let at = 0;
+  while (at < lines.length && lines[at].trim().startsWith('#')) at++;
+  lines.splice(at, 0, `X = ${name}`);
+  return lines.join('\n');
 }
 
 /** 勾选框的状态：命令里有哪些方法（一元 / 多元回归按自变量个数区分）。 */
@@ -465,16 +524,25 @@ export function toggleMethod(text: string, key: MethodKey, on: boolean): string 
 
 // ===================== 运行 =====================
 
-export function rowInputs(rows: readonly DeepDigRow[], def: Pick<DefinitionSnapshot, 'scale'>): Record<string, Float64Array> {
+/** 描述统计数据里有哪些公式变量（每行 vars 的键）。 */
+export function dataVariables(rows: readonly DeepDigRow[]): string[] {
+  const names = new Set<string>();
+  for (const r of rows) for (const k of Object.keys(r.vars ?? {})) names.add(k);
+  return [...names];
+}
+
+export function rowInputs(rows: readonly DeepDigRow[], def: Pick<DefinitionSnapshot, 'scale'>, target: string | null = null): Record<string, Float64Array> {
   const f = (g: (r: DeepDigRow) => number | null | undefined) => Float64Array.from(rows, r => { const v = g(r); return v != null && Number.isFinite(v) ? v : Number.NaN; });
+  const y = (r: DeepDigRow) => (target == null || target === RESULT_VAR ? r.v : r.vars?.[target]);
   const out: Record<string, Float64Array> = {
-    X: f(r => (r.v == null ? null : r.v * def.scale)),
+    X: f(r => { const v = y(r); return v == null ? null : v * def.scale; }),
     vol: f(r => (r.vol == null ? null : r.vol * 100)),
     endRet: f(r => (r.endRet == null ? null : r.endRet * 100)),
     maxUp: f(r => (r.maxUp == null ? null : r.maxUp * 100)),
     maxDown: f(r => (r.maxDown == null ? null : r.maxDown * 100)),
   };
   for (const [name, g] of Object.entries(INDICATORS)) out[name] = f(r => (r.group === g ? 1 : 0));
+  for (const name of formulaNames(dataVariables(rows))) out[name] = f(r => r.vars?.[name]);
   return out;
 }
 
@@ -485,10 +553,21 @@ export function runInference(
   options: { excludedKey?: string; seed?: number } = {},
 ): DeepDigInference {
   const startedAt = Date.now();
-  const parsed = parseCommands(commands);
+  const variables = [...dataVariables(data.rows), RESULT_VAR];
+  // 指定的因变量数据里没有（公式改过、或数据是旧版）：不悄悄换成别的，整份不算
+  const wanted = targetOf(commands);
+  if (wanted != null && !variables.includes(wanted)) {
+    const line = commands.split('\n').findIndex(raw => TARGET_LINE.test(stripComment(raw))) + 1;
+    return {
+      dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', commands, target: wanted, startedAt, finishedAt: Date.now(),
+      blocks: [{ line, call: `X = ${wanted}`, title: '因变量', kind: 'error', message: `描述统计的数据里没有「${wanted}」（有：${variables.join(' / ')}）：公式改过或数据是旧版，先重新运行描述统计` }],
+    };
+  }
+  const parsed = parseCommands(commands, { variables });
+  const target = parsed.target?.name ?? null;
   const ctx: Ctx = {
     rows: data.rows,
-    inputs: rowInputs(data.rows, data.definition),
+    inputs: rowInputs(data.rows, data.definition, target),
     months: data.rows.map(r => new Date(r.anchorMs).toISOString().slice(0, 7)),
     symbols: data.rows.map(r => r.symbol),
     seed: options.seed ?? 20261016,
@@ -497,7 +576,7 @@ export function runInference(
     ...parsed.errors.map(e => ({ line: e.line, call: commands.split('\n')[e.line - 1]?.trim() ?? '', title: '命令写错了', kind: 'error' as const, message: e.message })),
     ...parsed.commands.map(c => c.run({ ...ctx, seed: ctx.seed + 104729 * c.line })),
   ].sort((a, b) => a.line - b.line);
-  return { dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', commands, startedAt, finishedAt: Date.now(), blocks };
+  return { dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', commands, target, startedAt, finishedAt: Date.now(), blocks };
 }
 
 // ===================== 统计小工具 =====================

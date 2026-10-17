@@ -214,6 +214,9 @@ describe('Deep dig：周期、半衰期可选', () => {
     expect(m15.calls.filter(u => u.includes('interval=15m'))).toHaveLength(2);
     expect(m15.calls.filter(u => u.includes('interval=5m')).length).toBeGreaterThanOrEqual(2);
     expect(d15.definition).toMatchObject({ interval: '15m', halfLifeHours: 6 });
+    // 公式里每个变量都存下来（推断统计选因变量用）；最后一句 V 就是特征值
+    expect(Object.keys(d15.rows[0].vars ?? {})).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V']);
+    expect(d15.rows.every(r => r.vars?.V === r.v)).toBe(true);
     clearMarketDataCache();
     const m5 = fakeMarket(planted, { quote: true });
     const d5 = await collectDeepDigData(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m5.fetchFn, backgroundCap: 0 });

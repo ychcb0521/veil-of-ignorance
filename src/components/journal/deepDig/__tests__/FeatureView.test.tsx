@@ -176,6 +176,44 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(screen.getByTestId('deep-dig-kline-avg-unused')).toHaveTextContent('公式里没用 avgh');
   });
 
+  it('【用户要求】推断统计选因变量：列出公式里的变量，默认最后一句；点选改命令里的 X = 一行；写明 X 是谁；数据里没有时提示重跑', () => {
+    const onInfer = vi.fn();
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
+    // 描述统计数据带公式变量（VV 是最后一句 = 特征值）
+    const data = { ...DATA, definition: { ...DATA.definition, formula: def.formula }, rows: DATA.rows.map(r => ({ ...r, vars: { N: 1, F: r.v == null ? null : -r.v, A: 0, G: 1, R: 0, U: 0, V: r.v, VV: r.v } })) };
+    render(<Harness initialTab="infer" initialDef={def} data={data} inference={null} onInfer={onInfer} />);
+    const chips = screen.getAllByRole('radio').map(b => b.getAttribute('data-testid'));
+    expect(chips).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'].map(n => `deep-dig-target-${n}`));
+    expect(screen.getByTestId('deep-dig-target-VV')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('deep-dig-target-VV')).toHaveTextContent('VV结果');
+    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('X = VV（公式最后一句）× 10000 · 基点/根');
+    fireEvent.click(screen.getByTestId('deep-dig-target-F'));
+    expect(screen.getByTestId('deep-dig-target-F')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('deep-dig-target-VV')).toHaveAttribute('aria-checked', 'false');
+    expect((screen.getByTestId('deep-dig-commands-input') as HTMLTextAreaElement).value.split('\n')[1]).toBe('X = F');
+    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('X = F × 10000');
+    // 直接在命令里改也行，按钮跟着变
+    fireEvent.change(screen.getByTestId('deep-dig-commands-input'), { target: { value: 'X = V\nttest(X, 实验组, 对照组)' } });
+    expect(screen.getByTestId('deep-dig-target-V')).toHaveAttribute('aria-checked', 'true');
+    // 公式里没有的：标红
+    fireEvent.change(screen.getByTestId('deep-dig-commands-input'), { target: { value: 'X = Q\nttest(X, 实验组, 对照组)' } });
+    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('公式里没有这个变量');
+    expect(screen.getByTestId('deep-dig-commands-errors')).toHaveTextContent('公式里没有「Q」');
+    // 选回最后一句：删掉 X = 那一行
+    fireEvent.click(screen.getByTestId('deep-dig-target-VV'));
+    expect((screen.getByTestId('deep-dig-commands-input') as HTMLTextAreaElement).value).toBe('ttest(X, 实验组, 对照组)');
+  });
+
+  it('选了描述统计数据里还没有的变量：提示先重跑描述统计；结果上方写明这次的因变量', () => {
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
+    const withF = { ...DATA, rows: DATA.rows.map(r => ({ ...r, vars: { F: r.v, V: r.v } })) };
+    const inf = runInference(withF, `X = F\n${DEFAULT_COMMANDS}`, { excludedKey: '' });
+    render(<Harness initialTab="infer" initialDef={def} data={DATA} inference={inf} />);
+    fireEvent.click(screen.getByTestId('deep-dig-target-F'));
+    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('描述统计的数据里还没有，先重新运行描述统计');
+    expect(screen.getByTestId('deep-dig-infer-target')).toHaveTextContent('这次的因变量：X = F × 10000');
+  });
+
   it('【用户要求】公式可以就地改：写错提示行号且不能保存，保存后提示按新公式重跑，内置项可填回默认', () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
