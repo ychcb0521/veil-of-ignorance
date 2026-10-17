@@ -174,7 +174,12 @@ const LEGACY_V_DRIFT_SPEED_FORMULA = [
   'V = ema(U, hl, 0)              # 漂移速度：按半衰期 hl 指数平滑',
 ].join('\n');
 
-export const DRIFT_SPEED_FORMULA = LEGACY_V_DRIFT_SPEED_FORMULA.replace('V = ema(U, hl, 0)', 'a = ema(U, hl, 0)');
+const LEGACY_A_DRIFT_SPEED_FORMULA = LEGACY_V_DRIFT_SPEED_FORMULA.replace('V = ema(U, hl, 0)', 'a = ema(U, hl, 0)');
+export const DRIFT_SPEED_FORMULA = LEGACY_A_DRIFT_SPEED_FORMULA
+  .replace('F = ln(', 'f = ln(')
+  .replace('U = nz(F * G * R)', 'F = nz(f * G * R)')
+  .replace('ema(U, hl, 0)', 'ema(F, hl, 0)')
+  .replace('单根推动力', '单根推力');
 
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   id: 'drift-speed',
@@ -233,7 +238,7 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
  */
 function upgradeFormula<T extends { formula?: string; definition?: string }>(d: T): T {
   const f = d.formula?.trim();
-  if (f !== LEGACY_DRIFT_SPEED_FORMULA && f !== EMA_DRIFT_SPEED_FORMULA && f !== LEGACY_V_DRIFT_SPEED_FORMULA) return d;
+  if (f !== LEGACY_DRIFT_SPEED_FORMULA && f !== EMA_DRIFT_SPEED_FORMULA && f !== LEGACY_V_DRIFT_SPEED_FORMULA && f !== LEGACY_A_DRIFT_SPEED_FORMULA) return d;
   const definition = d.definition === '进场前最后一根 5m K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期 6 小时指数平滑。'
     ? DRIFT_SPEED_DEF.definition : d.definition;
   return { ...d, formula: DRIFT_SPEED_FORMULA, definition };

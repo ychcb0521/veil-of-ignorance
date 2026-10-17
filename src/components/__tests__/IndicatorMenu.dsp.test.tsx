@@ -15,7 +15,7 @@ describe('【用户要求】动态谢林点：可以隐去主图的 DSP 线，�
     const defs = screen.getAllByText(/买方推力的加速度 a：共识价每根 K 线往上/);
     expect(defs).toHaveLength(2);
     for (const d of defs) {
-      expect(d.getAttribute('title')).toContain('⑥ 买方推力的加速度 aₜ = ρ·aₜ₋₁ + (1 − ρ)·Uₜ');
+      expect(d.getAttribute('title')).toContain('⑥ 买方推力的加速度 aₜ = ρ·aₜ₋₁ + (1 − ρ)·Fₜ');
       expect(d.getAttribute('title')).toContain('a = 2.24 基点 / 根');
     }
   });
