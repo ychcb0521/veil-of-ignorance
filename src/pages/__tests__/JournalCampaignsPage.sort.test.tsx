@@ -862,6 +862,16 @@ describe('JournalCampaignsPage sorting', () => {
     // 折起来的格子不占列：展开后列宽模板多出这几列
     const expandedStyle = screen.getByTestId('campaign-card-list').getAttribute('style');
     expect(expandedStyle).not.toBe(collapsedStyle);
+    // 多次切换后仍能收起，入口固定在角落，不随新增指标移动。
+    expect(toggle).toHaveClass('absolute', 'right-10');
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      for (const id of CELL_IDS) expect(cell(id)).toHaveClass('hidden');
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    }
+    expect(screen.getAllByTestId('campaign-card-metrics')[0]).toHaveClass('flex-nowrap', 'justify-start', 'overflow-x-auto');
     // 按算术期望排序后收起：排序行里它照常显示（看得到当前按什么排），封面格跟开关收起、列宽回到收起时
     fireEvent.click(screen.getByTestId('campaign-sort-arithmeticExpectancy'));
     fireEvent.click(toggle);

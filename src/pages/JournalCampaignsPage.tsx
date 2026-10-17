@@ -470,7 +470,7 @@ const SORT_LONG_PRESS_MS = 450;
 // 【用户要求】封面指标分成两排、字号一致：≥ 1280px 每排九格（十八项正好两排），640–1279px 每排六格，手机两列。
 // 【用户要求】「统一向左对齐，不必完全占满右边的空间，我喜欢留白；能够完整显示即可，不要有太大间隙」：
 // 每列只取这一列实际最宽的读数（列表容器上的 --cm-cols-6 / --cm-cols-9，见 cardMetricGridStyle），从左排起，右边留白
-const CARD_METRIC_STRIP = 'grid grid-cols-2 gap-1 sm:[grid-template-columns:var(--cm-cols-6,repeat(6,max-content))] sm:gap-x-1 sm:gap-y-1 sm:pr-6 xl:[grid-template-columns:var(--cm-cols-9,repeat(9,max-content))]';
+const CARD_METRIC_STRIP = 'flex flex-nowrap items-start justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [scrollbar-width:thin] [&>div]:shrink-0';
 /** 指标行外框的内边距：再加上每项自己的 10px，首项文字与卡片标题行（CAMPAIGN_COLUMNS_INSET）同一起点。 */
 const CARD_METRIC_STRIP_INSET = 'px-1.5 py-1 sm:px-2.5';
 /** 排序行补一条透明的 1px 边框、与卡片同样的内边距：行首与封面左缘对齐。 */
@@ -4632,7 +4632,7 @@ export default function JournalCampaignsPage() {
                 左右内边距与封面相同（CAMPAIGN_COLUMNS_FRAME / INSET），行首与封面左缘对齐。 */}
             <div
               data-testid="campaign-sort-controls"
-              className={`order-2 flex min-h-10 flex-wrap items-center gap-x-0.5 gap-y-0.5 border-t border-border/60 py-1.5 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
+              className={`relative !pr-20 order-2 flex min-h-10 flex-wrap items-center gap-x-0.5 gap-y-0.5 border-t border-border/60 py-1.5 text-[10px] text-muted-foreground ${CAMPAIGN_COLUMNS_FRAME} ${CAMPAIGN_COLUMNS_INSET}`}
             >
               {renderSortRow(SORT_OPTIONS.map(option => {
                 /** 这一项在排序链上的第几级（0 = 第一级，-1 = 不在链上）。 */
@@ -5066,10 +5066,11 @@ export default function JournalCampaignsPage() {
                 data-testid="campaign-minor-metrics-toggle"
                 role="switch"
                 aria-checked={showMinorMetrics}
-                aria-label="显示不常用指标"
+                aria-label={showMinorMetrics ? '收起不常用指标' : '展开不常用指标'}
+                aria-expanded={showMinorMetrics}
                 title={`${showMinorMetrics ? '收起' : '展开'}不常用指标：${MINOR_METRICS_NAMES}`}
                 onClick={toggleMinorMetrics}
-                className={`${MINOR_TOGGLE_CLASS} ml-0.5 h-7`}
+                className={`${MINOR_TOGGLE_CLASS} absolute right-10 top-1.5 z-10 h-7 w-6 bg-background`}
               >
                 {showMinorMetrics ? '‹' : '›'}
               </button>
