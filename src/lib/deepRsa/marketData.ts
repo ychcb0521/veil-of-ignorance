@@ -23,6 +23,11 @@ export class MarketDataError extends Error {
 
 const HOSTS = ['https://fapi.binance.com', 'https://www.binance.com'];
 const KLINE_LIMIT = 1500;
+/**
+ * 币安按请求里的 limit 计权重：≤ 1000 根 = 5，> 1000 根 = 10（每分钟总额有限，超了就限流退避）。
+ * 所以只要实际需要的根数；一段不超过 1000 根时权重减半。
+ */
+export const KLINE_LIGHT_LIMIT = 1000;
 const MAX_ATTEMPTS = 4;
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -93,7 +98,8 @@ export async function fetchResearchKlines(
   const out: ResearchBar[] = [];
   let cursor = from;
   while (cursor < toMs) {
-    const qs = new URLSearchParams({ symbol, interval, startTime: String(cursor), endTime: String(toMs - 1), limit: String(KLINE_LIMIT) });
+    const limit = Math.max(1, Math.min(KLINE_LIMIT, Math.ceil((toMs - cursor) / barMs)));
+    const qs = new URLSearchParams({ symbol, interval, startTime: String(cursor), endTime: String(toMs - 1), limit: String(limit) });
     const raw = await getJson(`/fapi/v1/klines?${qs}`, fetchFn, signal);
     if (!Array.isArray(raw)) throw new MarketDataError('K 线响应格式无效', 'invalid');
     if (raw.length === 0) break;
@@ -104,7 +110,7 @@ export async function fetchResearchKlines(
       const open = Array.isArray(row) ? Number(row[0]) : Number.NaN;
       if (Number.isFinite(open)) lastOpen = Math.max(lastOpen, open);
     }
-    if (raw.length < KLINE_LIMIT) break;
+    if (raw.length < limit) break;
     cursor = lastOpen + barMs;
   }
   klineCache.set(key, out);

@@ -150,7 +150,18 @@ export function useDeepDigRun(userId: string | undefined, def: DeepDigFeatureDef
     store.controller = mine;
     set(store, { describeStatus: 'running', describeProgress: { stage: 'events', done: 0, total: 0 }, describeError: null });
     try {
-      const { data, series } = await collectDeepDigRun(report, def, { signals, signal: mine.signal, onProgress: p => { if (store.controller === mine) set(store, { describeProgress: p }); } });
+      // 进度每秒最多刷 10 次（换阶段立刻刷）：每完成一个事件就重画整页会拖慢运行
+      let lastAt = 0;
+      let lastStage = '';
+      const onProgress = (p: RunProgress) => {
+        if (store.controller !== mine) return;
+        const now = Date.now();
+        if (p.stage === lastStage && now - lastAt < 100 && p.done < p.total) return;
+        lastAt = now;
+        lastStage = p.stage;
+        set(store, { describeProgress: p });
+      };
+      const { data, series } = await collectDeepDigRun(report, def, { signals, signal: mine.signal, onProgress });
       if (store.controller !== mine) return;
       write(dataKey(userId, def.id), data);
       void saveDeepDigSeries(userId, def.id, series);

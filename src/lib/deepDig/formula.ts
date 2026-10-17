@@ -252,11 +252,34 @@ function map1(a: Value, f: (x: number) => number): Value {
   for (let i = 0; i < a.length; i++) out[i] = f(a[i]);
   return out;
 }
-function mapN(vs: Value[], f: (...xs: number[]) => number): Value {
-  const n = lengthOf(...vs);
-  if (n < 0) return f(...vs.map(v => v as number));
+/** 两个参数逐根算（一个数自动铺开）。直接循环，不在每根上建数组——公式在几百个事件 × 上千根 K 线上跑，这里是热点。 */
+function map2(a: Value, b: Value, f: (x: number, y: number) => number): Value {
+  const sa = isSeries(a);
+  const sb = isSeries(b);
+  if (!sa && !sb) return f(a as number, b as number);
+  const n = lengthOf(a, b);
   const out = new Float64Array(n);
-  for (let i = 0; i < n; i++) out[i] = f(...vs.map(v => at(v, i)));
+  if (sa && sb) {
+    const A = a as Float64Array;
+    const B = b as Float64Array;
+    if (A.length === n && B.length === n) for (let i = 0; i < n; i++) out[i] = f(A[i], B[i]);
+    else for (let i = 0; i < n; i++) out[i] = f(at(A, i), at(B, i));
+  } else if (sa) {
+    const A = a as Float64Array;
+    const y = b as number;
+    for (let i = 0; i < n; i++) out[i] = f(A[i], y);
+  } else {
+    const x = a as number;
+    const B = b as Float64Array;
+    for (let i = 0; i < n; i++) out[i] = f(x, B[i]);
+  }
+  return out;
+}
+function map3(a: Value, b: Value, c: Value, f: (x: number, y: number, z: number) => number): Value {
+  const n = lengthOf(a, b, c);
+  if (n < 0) return f(a as number, b as number, c as number);
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = f(at(a, i), at(b, i), at(c, i));
   return out;
 }
 
@@ -269,19 +292,19 @@ const scalarArg = (v: Value, fn: string, what: string, line: number): number => 
 
 function binary(op: string, a: Value, b: Value): Value {
   switch (op) {
-    case '+': return mapN([a, b], (x, y) => clean(x + y));
-    case '-': return mapN([a, b], (x, y) => clean(x - y));
-    case '*': return mapN([a, b], (x, y) => clean(x * y));
-    case '/': return mapN([a, b], (x, y) => clean(x / y));
-    case '^': return mapN([a, b], (x, y) => clean(x ** y));
-    case '>': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x > y ? 1 : 0));
-    case '<': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x < y ? 1 : 0));
-    case '>=': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x >= y ? 1 : 0));
-    case '<=': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x <= y ? 1 : 0));
-    case '==': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x === y ? 1 : 0));
-    case '!=': return mapN([a, b], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x !== y ? 1 : 0));
-    case 'and': return mapN([a, b], (x, y) => (truthy(x) && truthy(y) ? 1 : 0));
-    case 'or': return mapN([a, b], (x, y) => (truthy(x) || truthy(y) ? 1 : 0));
+    case '+': return map2(a, b, (x, y) => clean(x + y));
+    case '-': return map2(a, b, (x, y) => clean(x - y));
+    case '*': return map2(a, b, (x, y) => clean(x * y));
+    case '/': return map2(a, b, (x, y) => clean(x / y));
+    case '^': return map2(a, b, (x, y) => clean(x ** y));
+    case '>': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x > y ? 1 : 0));
+    case '<': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x < y ? 1 : 0));
+    case '>=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x >= y ? 1 : 0));
+    case '<=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x <= y ? 1 : 0));
+    case '==': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x === y ? 1 : 0));
+    case '!=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x !== y ? 1 : 0));
+    case 'and': return map2(a, b, (x, y) => (truthy(x) && truthy(y) ? 1 : 0));
+    case 'or': return map2(a, b, (x, y) => (truthy(x) || truthy(y) ? 1 : 0));
     default: throw new Error(op);
   }
 }
@@ -294,11 +317,11 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
     case 'abs': return map1(x, Math.abs);
     case 'sqrt': return map1(x, v => clean(Math.sqrt(v)));
     case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)));
-    case 'max': return mapN([x, y], (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)));
-    case 'min': return mapN([x, y], (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.min(a, b)));
+    case 'max': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)));
+    case 'min': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.min(a, b)));
     case 'nz': { const v = y == null ? 0 : scalarArg(y, 'nz', '替换值', line); return map1(x, a => (Number.isFinite(a) ? a : v)); }
     case 'has': return map1(x, a => (Number.isFinite(a) ? 1 : 0));
-    case 'if': return mapN([x, y, z], (c, a, b) => (Number.isNaN(c) ? Number.NaN : truthy(c) ? a : b));
+    case 'if': return map3(x, y, z, (c, a, b) => (Number.isNaN(c) ? Number.NaN : truthy(c) ? a : b));
     case 'prev': {
       const k = y == null ? 1 : scalarArg(y, 'prev', '根数', line);
       if (!Number.isInteger(k) || k < 0) throw new FormulaError('prev 的根数要是 0 或正整数', line);

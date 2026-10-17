@@ -152,6 +152,17 @@ export interface FeatureOptions {
   fallbackPrice?: number | null;
 }
 
+/** 只算加权波动率 vol_w（与 computeFeatures 的 vol_w 同一算法）：Deep dig 只用这一项，不必把整套表征都算一遍。 */
+export function weightedVolatility(window: ObservationWindow, halfLifeHours: number): number | null {
+  const bars = window.bars;
+  if (bars.length === 0) return null;
+  const steps = adjacentSteps(bars, decayWeights(bars, window.anchorMs, halfLifeHours));
+  const ret = weightedMean(steps.map(s => [s.w, s.r]));
+  if (ret == null) return null;
+  const variance = weightedMean(steps.map(s => [s.w, (s.r - ret) ** 2]));
+  return variance != null ? Math.sqrt(variance) : null;
+}
+
 export function computeFeatures(window: ObservationWindow, options: FeatureOptions): FeatureVector {
   const bars = window.bars;
   const empty = Object.fromEntries(FEATURE_DEFINITIONS.map(d => [d.key, null])) as FeatureVector;

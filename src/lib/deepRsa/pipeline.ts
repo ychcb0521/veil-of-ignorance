@@ -16,9 +16,9 @@
  */
 import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
-import { computeFeatures, FEATURE_DEFINITIONS, type FeatureFamily, type FeatureKey } from '@/lib/deepRsa/features';
+import { computeFeatures, FEATURE_DEFINITIONS, weightedVolatility, type FeatureFamily, type FeatureKey } from '@/lib/deepRsa/features';
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
-import { fetchFundingHistory, fetchResearchKlines, intervalMs, mapLimit, MarketDataError, type FetchFn, type ResearchInterval } from '@/lib/deepRsa/marketData';
+import { fetchFundingHistory, fetchResearchKlines, intervalMs, KLINE_LIGHT_LIMIT, mapLimit, MarketDataError, type FetchFn, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { forwardOutcome, OUTCOME_HORIZON_MS } from '@/lib/deepRsa/outcome';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import {
@@ -253,6 +253,8 @@ export async function collectRunEvents(
      * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均）」。
      */
     seriesRange?: { beforeMs: number; afterMs: number };
+    /** Deep dig：只在这一个半衰期上算观察窗波动率（vol_w），不算 Deep RSA 的整套表征与 DSP（用不上，省一大半计算）。 */
+    volatilityOnlyAt?: number;
   } = {},
 ): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
@@ -264,76 +266,98 @@ export async function collectRunEvents(
   progress('events', 0, 1);
   const { items, campaigns, clusters } = buildRunItems(report, seed, options.backgroundCap, options.eventRows, options.cluster ?? true);
 
-  // ── 2. 行情 ──
+  // ── 2–3. 行情 + 特征：每个事件的 K 线一到就算它的特征（计算夹在网络等待之间，页面不会被一大段计算卡住）──
   const failed: DeepRsaRunResult['coverage']['failed'] = [];
   progress('fetch', 0, items.length);
   const fk = options.featureKlines;
   const range = options.seriesRange;
-  // 5m 这份也拿来画曲线（特征值不另取周期时）：往前多取一段
-  const before5m = range && !fk ? range.beforeMs : 0;
-  const fetched = await mapLimit(items, options.concurrency ?? 4, item => {
+  const fkBarMs = fk ? intervalMs(fk.interval) : BAR_MS;
+  // 曲线要往前多取一段历史，但整段不超过 1000 根（币安权重减半）：默认 5m 多取约 11 小时，曲线最早一点也有 35 小时历史
+  const padFor = (spanMs: number, barMs: number) => (range ? Math.max(0, Math.min(range.beforeMs, Math.floor((KLINE_LIGHT_LIMIT * barMs - spanMs) / barMs) * barMs)) : 0);
+  const before5m = range && !fk ? padFor(WINDOW_MS + Math.max(OUTCOME_HORIZON_MS, range.afterMs) + 2 * BAR_MS, BAR_MS) : 0;
+  const beforeFk = fk && range ? padFor(fk.windowMs + range.afterMs + 2 * fkBarMs, fkBarMs) : 0;
+  const volOnly = options.volatilityOnlyAt;
+  // K 线命中缓存时一连串事件会在同一轮里算完：每算 ~16ms 让出一次，界面照常响应
+  let lastYield = performance.now();
+  const breathe = async () => {
+    if (performance.now() - lastYield < 16) return;
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    lastYield = performance.now();
+  };
+  type Outcome = { kind: 'event'; event: RunEvent; missingTaker: boolean; outcomeMissing: boolean } | { kind: 'low' };
+  const computeItem = (item: RunItem, bars: ResearchBar[], featureBars: readonly ResearchBar[] | null): Outcome => {
+    const window = extractWindow(bars, item.anchorMs);
+    if (window.coverage < MIN_WINDOW_COVERAGE) return { kind: 'low' };
+    const featureWindow: ObservationWindow | null = fk ? (featureBars ? extractWindow(featureBars, item.anchorMs, fk.windowMs, fkBarMs) : null) : window;
+    const extra = options.extraFeatures?.(featureWindow, { id: item.id, anchorMs: item.anchorMs, bars: featureBars }) ?? {};
+    const featuresByH: Record<number, Row> = {};
+    if (volOnly != null) {
+      // Deep dig：只用得到观察窗波动率（推断统计的「控制波动」），不算整套表征
+      featuresByH[volOnly] = { vol_w: weightedVolatility(window, volOnly), ...extra };
+    } else {
+      // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
+      for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h), ...extra };
+    }
+    const outcome = forwardOutcome(bars, item.anchorMs);
+    const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;
+    const outcomeValue = outcomeOk ? outcome.maxUp : null;
+    return {
+      kind: 'event', missingTaker: window.missingTakerBars > 0, outcomeMissing: outcomeValue == null,
+      event: {
+        id: item.id, symbol: normalizeResearchSymbol(item.symbol), anchorMs: item.anchorMs, kind: item.kind,
+        featuresByH, label: item.label, outcome: outcomeValue,
+        block: new Date(item.anchorMs).toISOString().slice(0, 7),
+        momentum: momentumScorer(window),
+        maxUp: outcomeValue, maxDown: outcomeOk ? outcome.maxDown : null, endRet: outcomeOk ? outcome.endRet : null,
+        memberIds: item.memberIds,
+      },
+    };
+  };
+  const results = await mapLimit(items, options.concurrency ?? 4, async item => {
     checkAbort(signal);
+    const symbol = normalizeResearchSymbol(item.symbol);
     const entry = Math.ceil(item.anchorMs / BAR_MS) * BAR_MS;
     const end = Math.max(entry + OUTCOME_HORIZON_MS, range && !fk ? item.anchorMs + range.afterMs : 0);
-    return fetchResearchKlines(normalizeResearchSymbol(item.symbol), item.anchorMs - WINDOW_MS - before5m, end, fetchFn, signal);
-  }, done => progress('fetch', done, items.length * (fk ? 2 : 1)));
-  checkAbort(signal);
-  const fkBarMs = fk ? intervalMs(fk.interval) : BAR_MS;
-  const featureFetched = fk ? await mapLimit(items, options.concurrency ?? 4, item => {
-    checkAbort(signal);
-    return fetchResearchKlines(
-      normalizeResearchSymbol(item.symbol), item.anchorMs - fk.windowMs - (range?.beforeMs ?? 0), item.anchorMs + (range?.afterMs ?? 0), fetchFn, signal, fk.interval,
-    );
-  }, done => progress('fetch', items.length + done, items.length * 2)) : null;
+    const bars = await fetchResearchKlines(symbol, item.anchorMs - WINDOW_MS - before5m, end, fetchFn, signal);
+    let featureBars: readonly ResearchBar[] | null = bars;
+    if (fk) {
+      checkAbort(signal);
+      featureBars = await fetchResearchKlines(
+        symbol, item.anchorMs - fk.windowMs - beforeFk, item.anchorMs + (range?.afterMs ?? 0), fetchFn, signal, fk.interval,
+      ).catch(error => {
+        if (error instanceof MarketDataError && error.kind === 'aborted') throw error;
+        return null; // 这个周期取不到：特征值记缺失，24h 结果照算
+      });
+    }
+    const out = computeItem(item, bars, featureBars);
+    await breathe();
+    return out;
+  }, done => progress('fetch', done, items.length));
   checkAbort(signal);
 
-  // ── 3. 特征 ──
   progress('features', 0, items.length);
   const events: RunEvent[] = [];
   let lowCoverage = 0;
   let outcomeMissing = 0;
   let missingTakerEvents = 0;
-  items.forEach((item, i) => {
-    const res = fetched[i];
+  results.forEach((res, i) => {
     if (res.status === 'rejected') {
       if (res.reason instanceof MarketDataError && res.reason.kind === 'aborted') return;
-      failed.push({ id: item.id, symbol: item.symbol, reason: reasonOf(res.reason) });
+      failed.push({ id: items[i].id, symbol: items[i].symbol, reason: reasonOf(res.reason) });
       return;
     }
-    const bars: ResearchBar[] = res.value;
-    const window = extractWindow(bars, item.anchorMs);
-    if (window.coverage < MIN_WINDOW_COVERAGE) { lowCoverage++; return; }
-    if (window.missingTakerBars > 0) missingTakerEvents++;
-    const featuresByH: Record<number, Row> = {};
-    // 第 7 步的 DSP 读数并在同一份特征里（键不在 FEATURE_DEFINITIONS 里：第 3–5 步的表征与特征对比都不会用到它们）
-    let featureWindow: ObservationWindow | null = window;
-    let featureBars: readonly ResearchBar[] | null = bars;
-    if (fk && featureFetched) {
-      const fr = featureFetched[i];
-      featureBars = fr.status === 'fulfilled' ? fr.value : null;
-      featureWindow = featureBars ? extractWindow(featureBars, item.anchorMs, fk.windowMs, fkBarMs) : null;
-    }
-    const extra = options.extraFeatures?.(featureWindow, { id: item.id, anchorMs: item.anchorMs, bars: featureBars }) ?? {};
-    for (const h of H) featuresByH[h] = { ...computeFeatures(window, { halfLifeHours: h }), ...computeDspFeatures(window, h), ...extra };
-    const outcome = forwardOutcome(bars, item.anchorMs);
-    const outcomeOk = outcome != null && outcome.coverage >= MIN_WINDOW_COVERAGE;
-    const outcomeValue = outcomeOk ? outcome.maxUp : null;
-    if (outcomeValue == null) outcomeMissing++;
-    events.push({
-      id: item.id, symbol: normalizeResearchSymbol(item.symbol), anchorMs: item.anchorMs, kind: item.kind,
-      featuresByH, label: item.label, outcome: outcomeValue,
-      block: new Date(item.anchorMs).toISOString().slice(0, 7),
-      momentum: momentumScorer(window),
-      maxUp: outcomeValue, maxDown: outcomeOk ? outcome.maxDown : null, endRet: outcomeOk ? outcome.endRet : null,
-      memberIds: item.memberIds,
-    });
+    const r = res.value;
+    if (r.kind === 'low') { lowCoverage++; return; }
+    if (r.missingTaker) missingTakerEvents++;
+    if (r.outcomeMissing) outcomeMissing++;
+    events.push(r.event);
   });
   progress('features', items.length, items.length);
   checkAbort(signal);
 
   return {
     events, campaigns, clusters,
-    fetchedCount: fetched.filter(r => r.status === 'fulfilled').length,
+    fetchedCount: results.filter(r => r.status === 'fulfilled').length,
     failed, lowCoverage, outcomeMissing, missingTakerEvents,
   };
 }

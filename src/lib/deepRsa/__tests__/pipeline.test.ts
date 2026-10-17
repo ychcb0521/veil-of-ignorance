@@ -87,6 +87,16 @@ describe('行情：浏览器里直接取币安公开接口', () => {
     expect(calls.length).toBe(2);
   });
 
+  it('只要实际需要的根数（币安按 limit 计权重，≤ 1000 根权重减半）；超过 1500 根才分页', async () => {
+    const { fetchFn, calls } = fakeMarket([]);
+    const bars = await fetchResearchKlines('AAAUSDT', T_START, T_START + 72 * HOUR, fetchFn);
+    expect(bars).toHaveLength(864);
+    expect(calls.map(u => Number(new URL(u).searchParams.get('limit')))).toEqual([864]);
+    calls.length = 0;
+    await fetchResearchKlines('BBBUSDT', T_START, T_START + 6 * DAY, fetchFn);
+    expect(calls.map(u => Number(new URL(u).searchParams.get('limit')))).toEqual([1500, 228]);
+  });
+
   it('主域名失败换备用域名；无此合约直接报错不重试', async () => {
     const { fetchFn } = fakeMarket([]);
     const hosts: string[] = [];
@@ -241,11 +251,16 @@ describe('Deep dig：周期、半衰期可选', () => {
     expect(d12.rows[0].v).not.toBeCloseTo(d6.rows[0].v!, 10);
   });
 
-  it('【用户要求】时间序列曲线：K 线往前多取 24 小时、往后到进场后 24 小时；每个有特征值的事件一条曲线，τ = 0 ≈ 特征值', async () => {
+  it('【用户要求】时间序列曲线：K 线往前多取一段（整段不超过 1000 根，币安权重减半）、往后到进场后 24 小时；每个有特征值的事件一条曲线，τ = 0 ≈ 特征值', async () => {
     const m = fakeMarket(planted, { quote: true });
     const { data, series } = await collectDeepDigRun(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m.fetchFn, backgroundCap: 0 });
     const a = planted[0].anchorMs;
-    expect(m.calls.some(u => Number(new URL(u).searchParams.get('startTime')) <= a - 72 * HOUR)).toBe(true);
+    const klines = m.calls.filter(u => new URL(u).pathname.endsWith('/klines'));
+    // 每个事件一次请求，limit ≤ 1000；往前多取约 11 小时（曲线最早一点也有 35 小时历史）
+    expect(klines).toHaveLength(planted.length);
+    expect(klines.every(u => Number(new URL(u).searchParams.get('limit')) <= 1000)).toBe(true);
+    const first = Number(new URL(klines.find(u => u.includes('symbol=AAAUSDT'))!).searchParams.get('startTime'));
+    expect(a - first).toBeGreaterThanOrEqual(59 * HOUR);
     expect(series.finishedAt).toBe(data.finishedAt);
     expect(series.offsets).toHaveLength(49);
     expect(series.names).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V']);
