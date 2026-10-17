@@ -62,9 +62,9 @@ export type CampaignCardData = {
   positionGeometricMultiple?: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
-  /** G（单位涨幅）= F − Kₘ（U/币）。 */
+  /** ΔP（单位涨幅）= F − Kₘ（U/币）。 */
   unitRise?: number | null;
-  /** U（单位利润）= Q × G（U）。 */
+  /** U（单位利润）= Q × ΔP（U）。 */
   unitProfit?: number | null;
   /** W（仓位利润）= U × 几何仓位（U）。 */
   positionProfit?: number | null;

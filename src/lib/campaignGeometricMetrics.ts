@@ -11,7 +11,7 @@ import { computeCampaignExecutionWear, type CampaignExecutionWear } from '@/lib/
 
 export const POSITION_GEOMETRIC_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ)';
 export const POSITION_THEORETICAL_FORMULA = '(1 − αf) × ∏ₖ(1 + αₖ理论)';
-export const EFFECTIVE_PRICE_CHANGE_FORMULA = '相对涨幅 = (F − Kₘ) ÷ (E − K初)';
+export const EFFECTIVE_PRICE_CHANGE_FORMULA = '相对涨幅 G = (F − Kₘ) ÷ (E − K初)';
 export const EFFECTIVE_PRICE_CHANGE_RULE = '最后一截的有效涨幅价差相对于初始回撤价差的倍数 = 最后一截的有效涨幅价差 ÷ 初始回撤价差。E 为最初开仓时主力与镜像仓位合计的币数加权开仓价；K初 为该批开仓的初始止损线，沿用初始风险的委托依据，多条初始保护线取最大亏损边界，多笔初始主力按币数加权。E 与 K初 均固定，不随加仓或止损上移变化。F 与「首仓涨跌幅」的平仓价同源；Kₘ 为最后一次实际加仓时的新支撑线。';
 export const POSITION_GEOMETRIC_ALPHA_RULE = 'αₖ = 第 k 次实际加仓币数 ÷ 加仓前实际持币数。首次覆盖预算 = G + Q₁(K₁ − S₁)，实际止损 K₁ 不变。加仓后整体保本价 = S后 − G ÷ Q后；Q后为加仓后的总币数，不能使用加仓前 Q₁。落袋利润只计入一次。';
 export const MAGIC_B_FORMULA = '神奇的 b = 几何仓位 × 相对涨幅';
@@ -63,9 +63,9 @@ export interface CampaignGeometricMetrics {
   positionGeometricMultiple: number | null;
   positionGeometricMultipleTheoretical?: number | null;
   magicB?: number | null;
-  /** G（单位涨幅）= F − Kₘ：最终卖出价减末次加仓的成本线（价格差，U/币）；F、Kₘ 与相对涨幅同一份。 */
+  /** ΔP（单位涨幅）= F − Kₘ：最终卖出价减末次加仓的成本线（价格差，U/币）；F、Kₘ 与相对涨幅同一份。 */
   unitRise?: number | null;
-  /** U（单位利润）= Q × G：Q 为首仓币数（U）。 */
+  /** U（单位利润）= Q × ΔP：Q 为首仓币数（U）。 */
   unitProfit?: number | null;
   /** W（仓位利润）= U × 几何仓位（U）。 */
   positionProfit?: number | null;
@@ -146,14 +146,14 @@ export function computeMagicB(risePct: number | null | undefined, positionMultip
   return Number.isFinite(value) ? value : null;
 }
 
-/** G（单位涨幅）= F − Kₘ；任一价格缺失或非正时 null（与相对涨幅同一套有效性判断）。 */
+/** ΔP（单位涨幅）= F − Kₘ；任一价格缺失或非正时 null（与相对涨幅同一套有效性判断）。 */
 export function computeUnitRise(exitPrice: number | null | undefined, stopLine: number | null | undefined): number | null {
   if (exitPrice == null || stopLine == null || !Number.isFinite(exitPrice) || !Number.isFinite(stopLine) || exitPrice <= 0 || stopLine <= 0) return null;
   const value = exitPrice - stopLine;
   return Number.isFinite(value) ? value : null;
 }
 
-/** U（单位利润）= Q × G。 */
+/** U（单位利润）= Q × ΔP。 */
 export function computeUnitProfit(initialCoins: number | null | undefined, unitRise: number | null | undefined): number | null {
   if (initialCoins == null || unitRise == null || !Number.isFinite(initialCoins) || !Number.isFinite(unitRise) || initialCoins <= 0) return null;
   const value = initialCoins * unitRise;

@@ -1415,10 +1415,10 @@ type OverviewItem = {
  */
 export function overviewItemCells(items: OverviewItem[]): { cells: { item: OverviewItem; column: number; row: number }[]; rows: number } {
   if (items.some(item => item.column != null)) {
-    const counts = [0, 0, 0];
+    const counts = [0, 0];
     return {
       cells: items.map(item => {
-        const column = item.column ?? 0;
+        const column = Math.min(item.column ?? 0, 1);
         return { item, column, row: counts[column]++ };
       }),
       rows: Math.max(...counts),
@@ -1519,7 +1519,7 @@ function drawOverviewPanel(
   ctx.fillStyle = '#334155';
   ctx.fillText(title, x + 16, y + 25, width - 32);
 
-  const columns = items.some(item => item.column === 2) ? 3 : 2;
+  const columns = 2;
   const columnWidth = (width - 32) / columns;
   const { cells, rows: itemRows } = overviewItemCells(items);
   cells.forEach(({ item, column, row }) => {

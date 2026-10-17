@@ -262,11 +262,11 @@ export function rowEffectivePriceChangeMultiple(row: Pick<CampaignCardData, 'cam
     : computeEffectivePriceChangeMultiple(rowEffectivePriceChangePct(row), row.initialExpectedMaxDrawdownPct);
 }
 
-/** G（单位涨幅）= F − Kₘ；建卡时算好，没有这个字段的行（旧缓存）现算。 */
+/** ΔP（单位涨幅）= F − Kₘ；建卡时算好，没有这个字段的行（旧缓存）现算。 */
 export function rowUnitRise(row: Pick<CampaignCardData, 'campaign' | 'legs' | 'tradeRecords' | 'unitRise'>): number | null {
   return row.unitRise !== undefined ? row.unitRise : rowGeometricMetrics(row).unitRise ?? null;
 }
-/** U（单位利润）= Q × G。 */
+/** U（单位利润）= Q × ΔP。 */
 /**
  * L_磨损（R，与盈亏比同一单位：÷ L₀）及其两部分：中途对冲的损益 + 最终对冲磨损（多空平仓价差、对冲委托/成交差、对冲数量差）。
  * 建卡时算好的字段优先；旧缓存 / 测试夹具没有时按腿现算（与几何指标同一份）。

@@ -9,7 +9,7 @@ import { MINOR_METRIC_SET, MINOR_METRICS_NAMES, MINOR_TOGGLE_CLASS } from '@/lib
 export function PnlMetricLabel({ label, letter, children }: { label: string; letter?: string; children: ReactNode }) {
   return (
     <span className="group/metric inline-flex min-w-0 items-center gap-0.5 text-muted-foreground">
-      {/* 【用户要求】指标名前标字母（与交易战役「指标表」同一份）；名字里已带字母的（单位涨幅 G 等）不重复标 */}
+      {/* 【用户要求】指标名前标字母（与交易战役「指标表」同一份）；名字里已带字母的（单位涨幅 ΔP 等）不重复标 */}
       {letter && !label.endsWith(` ${letter}`) && <MetricLetterTag letter={letter} />}
       <span className="truncate" title={label}>{label}</span>
       <Popover>
@@ -112,10 +112,10 @@ export function CampaignPnlOverviewPanel({ title, items, testId }: CampaignPnlOv
             {showMinor ? '‹' : '›'}
           </button>
         )}
-        <div className="mt-4 grid grid-cols-1 gap-y-4 [@container(min-width:840px)]:grid-cols-3 [@container(min-width:840px)]:gap-x-6 [@container(min-width:840px)]:gap-y-0" data-testid="pnl-overview-three-columns">
-          {[0, 1, 2].map(column => (
-            <div key={column} data-overview-column={column} className={`min-w-0 space-y-2.5 ${column > 0 ? 'border-t border-border/60 pt-4 [@container(min-width:840px)]:border-l [@container(min-width:840px)]:border-t-0 [@container(min-width:840px)]:pl-6 [@container(min-width:840px)]:pt-0' : ''}`}>
-              {items.filter(item => (item.column ?? 0) === column).map(item => (
+        <div className="mt-4 grid grid-cols-1 gap-y-4 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:640px)]:gap-x-6 [@container(min-width:640px)]:gap-y-0" data-testid="pnl-overview-three-columns">
+          {[0, 1].map(column => (
+            <div key={column} data-overview-column={column} className={`min-w-0 space-y-2.5 ${column > 0 ? 'border-t border-border/60 pt-4 [@container(min-width:640px)]:border-l [@container(min-width:640px)]:border-t-0 [@container(min-width:640px)]:pl-6 [@container(min-width:640px)]:pt-0' : ''}`}>
+              {items.filter(item => Math.min(item.column ?? 0, 1) === column).map(item => (
                 <div key={item.key} data-testid={item.testId} data-column={['left', 'middle', 'right'][column]} data-minor={MINOR_METRIC_SET.has(item.key) || undefined}
                   className={`flex min-h-5 min-w-0 items-baseline justify-between gap-3${!showMinor && MINOR_METRIC_SET.has(item.key) ? ' hidden' : ''}`}>
                   <PnlMetricLabel label={item.label}>{item.help}</PnlMetricLabel>

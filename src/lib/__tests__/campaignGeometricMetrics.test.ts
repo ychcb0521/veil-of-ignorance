@@ -196,7 +196,7 @@ describe('campaign geometric metrics', () => {
     expect(result.magicB).toBeCloseTo(finalCoins * (220 - 140) / (10 * (100 - 90)));
     expect(result.geometricMetricBasis.initialEntryPrice).toBe(100);
   });
-  it('【用户要求】G = F − Kₘ、U = Q × G、W = U × 几何仓位（理论值同样乘几何仓位（理论））', () => {
+  it('【用户要求】G = F − Kₘ、U = Q × ΔP、W = U × 几何仓位（理论值同样乘几何仓位（理论））', () => {
     const data = scenario();
     const result = computeCampaignGeometricMetrics(data.campaign, data.legs, data.tradeRecords);
     expect(result.geometricMetricBasis.finalExitPrice).toBe(220);

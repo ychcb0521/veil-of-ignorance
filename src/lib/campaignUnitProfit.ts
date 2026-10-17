@@ -1,7 +1,7 @@
 /**
  * 交易战役的三个新指标（【用户要求】2026-10-15）：
- *   G（单位涨幅）= F − Kₘ
- *   U（单位利润）= Q × G
+ *   ΔP（单位涨幅）= F − Kₘ
+ *   U（单位利润）= Q × ΔP
  *   W（仓位利润）= U × 几何仓位
  * F、Kₘ 与相对涨幅同一份（F = 最终卖出价，含对冲锁价与平仓价校正；Kₘ = 末次加仓时的成本线 / 有效止损线），
  * Q = 首仓币数（初始主力与镜像同一批开仓的总币数，即几何仓位里的那个「1」）。
@@ -9,8 +9,8 @@
  */
 import { getPriceDecimals } from '@/lib/formatters';
 
-export const UNIT_RISE_FORMULA = 'G（单位涨幅）= F − Kₘ';
-export const UNIT_PROFIT_FORMULA = 'U（单位利润）= Q × G';
+export const UNIT_RISE_FORMULA = 'ΔP（单位涨幅）= F − Kₘ';
+export const UNIT_PROFIT_FORMULA = 'U（单位利润）= Q × ΔP';
 export const POSITION_PROFIT_FORMULA = 'W（仓位利润）= U × 几何仓位';
 
 export const UNIT_RISE_RULE = 'F 为最终卖出价、Kₘ 为末次加仓时的成本线，两者与「相对涨幅」同一份取值（F 含对冲锁价与平仓价校正）；单位是价格（U / 币）。';
@@ -19,7 +19,7 @@ export const UNIT_PROFIT_RULE = 'Q 为首仓币数：初始主力与镜像同一
 export const POSITION_PROFIT_METHOD_ONE = '方法一（读数括号外）：W = U × 几何仓位';
 export const POSITION_PROFIT_METHOD_TWO = '方法二（读数括号内）：W = U × 几何仓位（理论）';
 export const POSITION_PROFIT_RULE = '方法一（读数括号外）用几何仓位，方法二（读数括号内）用几何仓位（理论）；排序、分档与散点图按方法一。单位 USDT。';
-export const UNIT_METRICS_MISSING_RULE = '与相对涨幅同口径：只算主多、有实际加仓且主力已平仓的战役；缺少 F、Kₘ、Q 或几何仓位时显示「—」。G 是价格差，不同标的之间不可直接比较大小；U、W 是 USDT，可以跨标的比较。';
+export const UNIT_METRICS_MISSING_RULE = '与相对涨幅同口径：只算主多、有实际加仓且主力已平仓的战役；缺少 F、Kₘ、Q 或几何仓位时显示「—」。ΔP 是价格差，不同标的之间不可直接比较大小；U、W 是 USDT，可以跨标的比较。';
 
 function withThousands(text: string): string {
   const [int, frac] = text.split('.');
@@ -45,7 +45,7 @@ export function formatUnitUsd(value: number | null | undefined): string {
   return `${value < 0 && Number(text) !== 0 ? '-' : ''}${withThousands(text)}`;
 }
 
-// ── 封面上的紧凑读数【用户要求】2026-10-15：「数字太长了，可以后面加上 w（万）；单位涨幅 G 都不统一」 ──
+// ── 封面上的紧凑读数【用户要求】2026-10-15：「数字太长了，可以后面加上 w（万）；单位涨幅 ΔP 都不统一」 ──
 // 详情页盈亏概览、Excel 仍写完整精度；封面、排序分档（档界写法）用下面这一套，排序 / 分档按同一个取整读，
 // 封面读数相同的战役必在同一档。
 

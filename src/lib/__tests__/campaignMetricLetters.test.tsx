@@ -13,7 +13,7 @@ describe('【用户要求】交易战役指标字母表：每个指标一个字�
     expect(new Set(names).size).toBe(names.length);
     const by = Object.fromEntries(CAMPAIGN_METRIC_LETTERS.map(m => [m.letter, m.name]));
     expect(by).toMatchObject({
-      d: '预期回撤', G: '单位涨幅', U: '单位利润', W: '仓位利润', E: '算术期望', η: '首仓涨跌幅倍数', 'L₀': '最大预期亏损',
+      d: '预期回撤', G: '相对涨幅', 'ΔP': '单位涨幅', U: '单位利润', W: '仓位利润', E: '算术期望', η: '首仓涨跌幅倍数', 'L₀': '最大预期亏损',
       b: '盈亏比', B: '神奇的 b', 'Bₜ': '神奇的 b（理论）', c: '首仓涨跌幅', s: '信号评分',
     });
     expect(by.q).toBeUndefined();
@@ -59,7 +59,7 @@ describe('【用户要求】交易战役指标字母表：每个指标一个字�
     expect(screen.getByTestId('metric-letter-table')).toHaveTextContent('信号库');
     expect(screen.getByTestId('metric-letter-eta')).toHaveTextContent('η首仓涨跌幅倍数');
     expect(screen.getByTestId('metric-letter-eta')).toHaveTextContent('也可写 eta');
-    const { container } = render(<><PnlMetricLabel label="预期回撤" letter="d">x</PnlMetricLabel><PnlMetricLabel label="单位涨幅 G" letter="G">y</PnlMetricLabel></>);
+    const { container } = render(<><PnlMetricLabel label="预期回撤" letter="d">x</PnlMetricLabel><PnlMetricLabel label="单位涨幅 ΔP" letter="ΔP">y</PnlMetricLabel></>);
     const tags = container.querySelectorAll('[data-testid="metric-letter-tag"]');
     expect(tags).toHaveLength(1);
     expect(tags[0].getAttribute('data-letter')).toBe('d');

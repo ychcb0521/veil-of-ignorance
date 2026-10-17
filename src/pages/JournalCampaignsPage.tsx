@@ -27,6 +27,7 @@ import {
   Table2,
 } from 'lucide-react';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
+import { XmgReference } from '@/components/journal/XmgReference';
 import { toast } from '@/lib/notificationCenter';
 import { buildXlsx } from '@/lib/xlsxWorkbook';
 import { buildCampaignSummarySheets } from '@/lib/campaignSummaryExport';
@@ -375,7 +376,7 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'positionAmplification', label: '仓位放大' },
   { value: 'addEfficiency', label: '加仓效用' },
   { value: 'arithmeticExpectancy', label: '算术期望' },
-  // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面
+  // 【用户要求】单位涨幅 ΔP、单位利润 U、仓位利润 W 放在算术期望后面
   { value: 'unitRise', label: '单位涨幅' },
   { value: 'unitProfit', label: '单位利润' },
   { value: 'positionProfit', label: '仓位利润' },
@@ -646,7 +647,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       distribution: { unit: 'R', zeroLine: true, zeroLabel: '0 无磨损', zeroMeaning: '执行与模型一致', positiveShareLabel: '红利（> 0）' },
     }];
   }),
-  // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W：与神奇的 b 同一套时序 + 分布，颜色按原盈亏比正负
+  // 【用户要求】单位涨幅 ΔP、单位利润 U、仓位利润 W：与神奇的 b 同一套时序 + 分布，颜色按原盈亏比正负
   ...(['unitRise', 'unitProfit', 'positionProfit'] as const).flatMap((key): CampaignMetricChartConfig[] => {
     const label = key === 'unitRise' ? '单位涨幅' : key === 'unitProfit' ? '单位利润' : '仓位利润';
     const definition = key === 'unitRise' ? `${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}`
@@ -658,7 +659,7 @@ const CAMPAIGN_METRIC_CHART_CONFIGS: readonly CampaignMetricChartConfig[] = [
       key, label, chartLabel: `${label}图`, seriesLabel: `${label}时序`, viewLabel: '时序',
       viewTestId: `campaign-${key}-view-time`, missingValueLabel: label, colorMode: 'signed', formatValue,
       guide: { yAxis: definition, point: '每个点是一场战役，按客观操作时间排列；点位表示本指标，颜色按该战役原盈亏比的正负。缺少依据的战役不进图。', colors: PAYOFF_SIGN_COLORS,
-        referenceLines: [key === 'unitRise' ? 'G 是价格差，不同标的之间不可直接比较高低。' : 'U、W 的单位是 USDT，可以跨标的比较。'] },
+        referenceLines: [key === 'unitRise' ? 'ΔP 是价格差，不同标的之间不可直接比较高低。' : 'U、W 的单位是 USDT，可以跨标的比较。'] },
     }, {
       key: `${key}Distribution`, sourceKey: key,
       view: 'distribution', viewLabel: '分布', viewTestId: `campaign-${key}-view-distribution`,
@@ -5132,6 +5133,7 @@ export default function JournalCampaignsPage() {
                 <MetricLetterTable />
               </PopoverContent>
             </Popover>
+            <XmgReference />
             {/**
               * 操作时间段：放在概览最前，因为它决定了后面每一个数的取样范围。
               * 默认「全部」；一旦框了范围，卡片、散点图、导出也跟着一起收窄——

@@ -122,7 +122,7 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: 'L_磨损', width: 10, note: `与盈亏比同一单位（金额 ÷ 初始最大预期亏损 L₀）。${EXECUTION_WEAR_FORMULA}。${Object.values(EXECUTION_WEAR_COMPONENT_RULES).join('')}${EXECUTION_WEAR_RULE}`, value: row => finite(rowExecutionWear(row).total) },
     { header: 'L_磨损·中途对冲', width: 14, note: 'L_磨损括号里的第一部分（÷ L₀）：中途对冲空单（不含锁住行情的那几张）的已实现盈亏之和。', value: row => finite(rowExecutionWear(row).hedge) },
     { header: 'L_磨损·最终对冲', width: 14, note: 'L_磨损括号里的第二部分（÷ L₀）：多空平仓价差 + 对冲委托/成交差 + 对冲数量差。', value: row => finite(rowExecutionWear(row).total == null ? null : rowExecutionWear(row).other) },
-    { header: '单位涨幅 G', width: 12, note: `${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`, value: row => finite(rowUnitRise(row)) },
+    { header: '单位涨幅 ΔP', width: 12, note: `${UNIT_RISE_FORMULA}。${UNIT_RISE_RULE}${UNIT_METRICS_MISSING_RULE}`, value: row => finite(rowUnitRise(row)) },
     { header: '单位利润 U（USDT）', width: 14, note: `${UNIT_PROFIT_FORMULA}。${UNIT_PROFIT_RULE}`, value: row => finite(rowUnitProfit(row)) },
     { header: '仓位利润 W（USDT）', width: 14, note: `${POSITION_PROFIT_FORMULA}，几何仓位取实际值。单位 USDT。`, value: row => finite(rowPositionProfit(row)) },
     { header: '仓位利润 W（理论，USDT）', width: 16, note: 'W（理论）= U × 几何仓位（理论）。单位 USDT。', value: row => finite(rowPositionProfitTheoretical(row)) },

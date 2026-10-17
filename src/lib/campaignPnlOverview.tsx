@@ -136,7 +136,7 @@ export type CampaignPnlOverviewItem = CampaignBoardPnlItem & {
  * 三列各自从上往下的唯一顺序：初始风险与几何链、结算与期望、价格路径。
  * 页面、反事实与 PNG 导出都使用这份清单。
  * 【用户要求】几何期望放在盈亏比后面（原「几何增长」与「几何期望」合并，统一叫几何期望、按三种算法）；
- * 【用户要求】L_磨损放在盈亏比后面；单位涨幅 G、单位利润 U、仓位利润 W 放在算术期望后面。三列 8 / 8 / 5 项。
+ * 【用户要求】L_磨损放在盈亏比后面；单位涨幅 ΔP、单位利润 U、仓位利润 W 放在算术期望后面。三列 8 / 8 / 5 项。
  */
 export const PNL_OVERVIEW_LEFT_COLUMN: readonly CampaignPnlOverviewItemKey[] = [
   'expectedMaxDrawdownPct',
@@ -227,9 +227,9 @@ export interface CampaignPnlOverviewMetrics {
   positionGeometricMultipleTheoretical?: number | null;
   addCount?: number | null;
   magicB?: number | null;
-  /** G（单位涨幅）= F − Kₘ。 */
+  /** ΔP（单位涨幅）= F − Kₘ。 */
   unitRise?: number | null;
-  /** U（单位利润）= Q × G。 */
+  /** U（单位利润）= Q × ΔP。 */
   unitProfit?: number | null;
   /** W（仓位利润）= U × 几何仓位；理论 = U × 几何仓位（理论）。 */
   positionProfit?: number | null;
@@ -791,7 +791,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       worked != null && <div className="space-y-2 border-t border-border/60 pt-2 font-mono tabular-nums break-words" data-testid="magic-b-worked">
         <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
         <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />
-        <div>相对涨幅 = {number(metrics.effectivePriceChangePct! / 100)} 倍</div>
+        <div>相对涨幅 G = {number(metrics.effectivePriceChangePct! / 100)} 倍</div>
         <div>b = {number(metrics.positionGeometricMultiple!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
         <div className="font-semibold">≈ {worked.toFixed(8)}</div>
         <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
@@ -800,7 +800,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="text-[10px] font-medium text-muted-foreground">本场计算过程</div>
           <div>几何仓位（理论） = {number(metrics.positionGeometricMultipleTheoretical!)}</div>
           <EffectivePriceChangeWorked basis={metrics.geometricMetricBasis} />
-          <div>相对涨幅 = {number(metrics.effectivePriceChangePct! / 100)} 倍</div>
+          <div>相对涨幅 G = {number(metrics.effectivePriceChangePct! / 100)} 倍</div>
           <div>b（理论） = {number(metrics.positionGeometricMultipleTheoretical!)} × {number(metrics.effectivePriceChangePct! / 100)}</div>
           <div className="font-semibold">≈ {theoreticalWorked.toFixed(8)}</div>
           <div className="font-sans text-[10px] text-muted-foreground">按完整精度计算，代入值仅作四舍五入展示。</div>
@@ -811,7 +811,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     });
   }
   {
-    // 【用户要求】单位涨幅 G、单位利润 U、仓位利润 W：说明里给公式与本场代入
+    // 【用户要求】单位涨幅 ΔP、单位利润 U、仓位利润 W：说明里给公式与本场代入
     const basis = metrics.geometricMetricBasis;
     const F = basis?.finalExitPrice ?? null;
     const Km = basis?.lastSupport ?? null;
@@ -831,11 +831,11 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
       </div>
     );
     built.push({
-      key: 'unitRise', label: '单位涨幅 G', value: formatUnitRise(G),
+      key: 'unitRise', label: '单位涨幅 ΔP', value: formatUnitRise(G),
       color: pnlExportColor(G), valueClassName: pnlColor(G),
       help: <><p className="font-mono">{UNIT_RISE_FORMULA}</p><p>{UNIT_RISE_RULE}</p>
         {G != null && F != null && Km != null
-          ? worked(<div>G = {formatUnitRise(F)} − {formatUnitRise(Km)} ≈ {formatUnitRise(G)}</div>)
+          ? worked(<div>ΔP = {formatUnitRise(F)} − {formatUnitRise(Km)} ≈ {formatUnitRise(G)}</div>)
           : <p>本场：—</p>}
         <p>{UNIT_METRICS_MISSING_RULE}</p><p>{PRICE_CHANGE_EXIT_RULE_TEXT}</p></>,
     });

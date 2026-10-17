@@ -15,7 +15,7 @@ import {
  * 【用户要求】主力首仓涨跌幅 +20% → 首仓涨跌幅倍数 = 20 ÷ 10 = +2.00；加仓效用 = b 2.00 ÷ 2.00 = +1.00（只拿主力不加仓的基准）。
  */
 // 用户指定前五项在左列，独立结算 / 峰值 / 仓位等项在右列，保持 9 / 9 对齐。
-const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 G","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤"];
+const GOLDEN_LABELS = ["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 ΔP","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤"];
 
 const GOLDEN_KEYS = ["expectedMaxDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","payoffRatio","executionWear","geometricExpectancy","initialExpectedMaxLoss","realizedPnl","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","peakPriceChange","unrealizedPriceChangePct","dynamicMaxDrawdownPct"];
 
@@ -70,7 +70,7 @@ describe('buildCampaignPnlOverviewItems', () => {
         addRatios: [5], finalExitPrice: 220, lastSupport: 140 },
     }));
     const riseHelp = render(<>{items.find(item => item.key === 'effectivePriceChangePct')!.help}</>).container;
-    expect(riseHelp).toHaveTextContent('相对涨幅 = (F − Kₘ) ÷ (E − K初)');
+    expect(riseHelp).toHaveTextContent('相对涨幅 G = (F − Kₘ) ÷ (E − K初)');
     expect(riseHelp).toHaveTextContent('(F − Kₘ) ÷ (E − K初) = (220 − 140) ÷ (100 − 90) ≈ 8');
     expect(items.find(item => item.key === 'effectivePriceChangePct')?.value).toBe('8.00×');
     expect(items.find(item => item.key === 'positionGeometricMultiple')?.value).toBe('3.00x（2.50x）');
@@ -133,7 +133,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(magic.value).toBe('1.00');
     const help = render(<>{magic.help}</>).container;
     const worked = help.querySelector('[data-testid="magic-b-worked"]');
-    expect(worked).toHaveTextContent('相对涨幅 = 0.5 倍');
+    expect(worked).toHaveTextContent('相对涨幅 G = 0.5 倍');
     expect(worked).toHaveTextContent('b = 2 × 0.5');
     expect(worked).toHaveTextContent('≈ 1.00000000');
     expect(worked).not.toHaveTextContent('β');
@@ -208,7 +208,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(container.querySelector('[data-testid="position-geometric-result"]')).toHaveTextContent('1.00 倍');
   });
 
-  it('【用户要求】单位涨幅 G = F − Kₘ、单位利润 U = Q × G、仓位利润 W = U × 几何仓位：读数、颜色与本场代入', () => {
+  it('【用户要求】单位涨幅 ΔP = F − Kₘ、单位利润 U = Q × ΔP、仓位利润 W = U × 几何仓位：读数、颜色与本场代入', () => {
     const items = buildCampaignPnlOverviewItems(winnerMetrics({
       positionGeometricMultiple: 2, positionGeometricMultipleTheoretical: 2.5,
       unitRise: 50, unitProfit: 500, positionProfit: 1000, positionProfitTheoretical: 1250,
@@ -368,7 +368,7 @@ describe('CampaignPnlOverviewPanel', () => {
     const buttons = screen.getAllByRole('button').map(button => button.getAttribute('aria-label'));
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     expect(container.firstElementChild).toHaveClass('[container-type:inline-size]');
-    expect(container.querySelector('[data-testid="pnl-overview-three-columns"]')).toHaveClass('[@container(min-width:840px)]:grid-cols-3');
+    expect(container.querySelector('[data-testid="pnl-overview-three-columns"]')).toHaveClass('[@container(min-width:640px)]:grid-cols-2');
     for (const [index, name] of ['left', 'middle', 'right'].entries()) {
       const rows = [...container.querySelectorAll('[data-column="' + name + '"]')];
       // 【用户要求】三列 8 / 8 / 5：L_磨损、几何期望接在盈亏比后，单位涨幅 / 单位利润 / 仓位利润接在算术期望后

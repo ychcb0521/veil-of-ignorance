@@ -45,7 +45,7 @@ const safe = (f: (row: CampaignCardData) => number | null | undefined) => (row: 
 
 export const CAMPAIGN_METRIC_LETTERS: readonly MetricLetter[] = [
   { letter: 'd', aliases: [], name: '预期回撤', unit: '%', help: '首仓开仓价到初始止损价的回撤幅度', source: 'campaign', cardMode: 'expectedDrawdownPct', overviewKey: 'expectedMaxDrawdownPct', get: safe(r => (r.initialExpectedMaxDrawdownPct > 0 ? r.initialExpectedMaxDrawdownPct : null)) },
-  { letter: 'r', aliases: [], name: '相对涨幅', unit: '×', help: '(F − Kₘ) ÷ (E − K初)：离场价相对最后支撑的涨幅，以首仓风险距离为单位', source: 'campaign', cardMode: 'effectivePriceChangePct', overviewKey: 'effectivePriceChangePct', get: safe(rowRelativePriceChange) },
+  { letter: 'G', aliases: [], name: '相对涨幅', unit: '×', help: 'G = (F − Kₘ) ÷ (E − K初)：离场价相对最后支撑的涨幅，以首仓风险距离为单位', source: 'campaign', cardMode: 'effectivePriceChangePct', overviewKey: 'effectivePriceChangePct', get: safe(rowRelativePriceChange) },
   { letter: 'n', aliases: [], name: '加仓次数', unit: '次', help: '主力加仓的次数', source: 'campaign', cardMode: 'addCount', overviewKey: 'addCount', get: safe(rowAddCount) },
   { letter: 'M', aliases: [], name: '几何仓位', unit: 'x', help: '(1 − αf) × ∏(1 + αₖ)：加仓后相对首仓的几何仓位倍数（实际）', source: 'campaign', cardMode: 'positionGeometricMultiple', overviewKey: 'positionGeometricMultiple', get: safe(rowPositionGeometricMultiple) },
   { letter: 'Mₜ', aliases: ['Mt'], name: '几何仓位（理论）', unit: 'x', help: '按理论加仓系数算的几何仓位', source: 'campaign', get: safe(rowPositionGeometricMultipleTheoretical) },
@@ -57,8 +57,8 @@ export const CAMPAIGN_METRIC_LETTERS: readonly MetricLetter[] = [
   { letter: 'A', aliases: [], name: '仓位放大', unit: 'x', help: '(主方向总名义仓位 − 镜像止盈名义仓位) ÷ 主力开仓名义仓位', source: 'campaign', cardMode: 'positionAmplification', overviewKey: 'positionAmplification', get: safe(rowPositionAmplification) },
   { letter: 'y', aliases: [], name: '加仓效用', unit: '×', help: 'b ÷ |η|：每单位首仓涨跌幅换来多少盈亏比', source: 'campaign', cardMode: 'addEfficiency', overviewKey: 'addEfficiency', get: safe(rowAddEfficiency) },
   { letter: 'E', aliases: [], name: '算术期望', unit: 'R', help: 'Eᵢ = 50% × b − 50%', source: 'campaign', cardMode: 'arithmeticExpectancy', overviewKey: 'arithmeticExpectancy', get: safe(r => computeCampaignExpectanciesFromMagicB(rowPayoffRatio(r)).arithmeticExpectancy) },
-  { letter: 'G', aliases: [], name: '单位涨幅', unit: 'U/币', help: 'G = F − Kₘ：离场价减最后支撑', source: 'campaign', cardMode: 'unitRise', overviewKey: 'unitRise', get: safe(rowUnitRise) },
-  { letter: 'U', aliases: [], name: '单位利润', unit: 'USDT', help: 'U = Q × G（Q = 首仓币数）', source: 'campaign', cardMode: 'unitProfit', overviewKey: 'unitProfit', get: safe(rowUnitProfit) },
+  { letter: 'ΔP', aliases: ['deltaP'], name: '单位涨幅', unit: 'U/币', help: 'ΔP = F − Kₘ：离场价减最后支撑', source: 'campaign', cardMode: 'unitRise', overviewKey: 'unitRise', get: safe(rowUnitRise) },
+  { letter: 'U', aliases: [], name: '单位利润', unit: 'USDT', help: 'U = Q × ΔP（Q = 首仓币数）', source: 'campaign', cardMode: 'unitProfit', overviewKey: 'unitProfit', get: safe(rowUnitProfit) },
   { letter: 'W', aliases: [], name: '仓位利润', unit: 'USDT', help: 'W = U × 几何仓位（实际）', source: 'campaign', cardMode: 'positionProfit', overviewKey: 'positionProfit', get: safe(rowPositionProfit) },
   { letter: 'Wₜ', aliases: ['Wt'], name: '仓位利润（理论）', unit: 'USDT', help: 'U × 几何仓位（理论）', source: 'campaign', get: safe(rowPositionProfitTheoretical) },
   { letter: 'c', aliases: [], name: '首仓涨跌幅', unit: '%', help: '首仓从开仓到平仓的涨跌幅（按主力方向记正负）；主力未平时没有', source: 'campaign', cardMode: 'mainPriceChange', overviewKey: 'mainPriceChange', get: safe(r => r.mainPriceChangePct) },
