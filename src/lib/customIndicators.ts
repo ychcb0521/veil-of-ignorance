@@ -7,6 +7,7 @@ import { registerIndicator, type IndicatorCreateTooltipDataSourceParams, type In
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
+import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
@@ -179,6 +180,22 @@ export function cbaPoints(dataList: KLineData[], halfLifeHours: number | undefin
     takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
   }));
   return computeCba(bars, DSP_BASE_INTERVAL_MS / 60_000, { halfLifeHours: Number.isFinite(h) && h > 0 ? h : CBA_DEFAULTS.halfLifeHours });
+}
+
+/**
+ * klinecharts 数据 → CBI（副图）。【用户要求】2026-10-18 新增。参数 = 时间衰减半衰期 h（根）；N、m、ATR 都按根计（所有周期一样），
+ * 基线 24 小时按 5 分钟图计（288 根），与其他指标同一约定。成交额读 turnover、主动买入额读 takerBuyTurnover。
+ */
+export function cbiPoints(dataList: KLineData[], halfLifeBars: number | undefined) {
+  const h = Number(halfLifeBars);
+  const bars = dataList.map(d => ({
+    high: d.high,
+    low: d.low,
+    close: d.close,
+    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+  }));
+  return computeCbi(bars, DSP_BASE_INTERVAL_MS / 60_000, { h: Number.isFinite(h) && h > 0 ? h : CBI_DEFAULTS.h });
 }
 
 export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
@@ -1042,6 +1059,28 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => cbaPoints(dataList, indicator.calcParams[0]).map(p => (p.cba == null ? {} : { cba: p.cba })),
   });
 
+  // ─── CBI 买方优势指数（副图）───
+  // 【用户要求】2026-10-18：CBI = P × D，−1 ~ 1，> 0 买方占优。计算在 cbi.ts（与 Deep dig 同一份）。0 轴橘黄色虚线
+  registerIndicator({
+    name: 'CBI_CUSTOM',
+    shortName: 'CBI',
+    calcParams: [CBI_DEFAULTS.h],
+    precision: 3,
+    minValue: -1,
+    maxValue: 1,
+    draw: V_ZERO_LINE,
+    figures: [
+      {
+        key: 'cbi', title: 'CBI: ', type: 'line',
+        styles: (data) => {
+          const end = (data.next?.indicatorData as { cbi?: number } | undefined)?.cbi ?? (data.current.indicatorData as { cbi?: number } | undefined)?.cbi;
+          return { color: vColor(end), size: 1.5 };
+        },
+      },
+    ],
+    calc: (dataList, indicator) => cbiPoints(dataList, indicator.calcParams[0]).map(p => (p.cbi == null ? {} : { cbi: p.cbi })),
+  });
+
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
   registerIndicator({
     name: 'BSS_AVG_CUSTOM',
@@ -1111,6 +1150,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   DSP_VA: 'DSP_V_CUSTOM',
   BSS: 'BSS_CUSTOM',
   CBA: 'CBA_CUSTOM',
+  CBI: 'CBI_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

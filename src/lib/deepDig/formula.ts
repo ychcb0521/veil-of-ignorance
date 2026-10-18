@@ -43,6 +43,12 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'zscore', min: 2, max: 2, usage: 'zscore(x, h)', help: '滚动标准化：(当根 − 过去 h 小时的平均) ÷ 过去 h 小时的标准差（含当根，样本标准差）；空值跳过，开头不满 h 小时用已有的，少于 2 个或标准差为 0 记空' },
   { name: 'sd', min: 2, max: 2, usage: 'sd(x, h)', help: '过去 h 小时的标准差（含当根，样本标准差）：空值跳过，开头不满 h 小时用已有的，少于 2 个记空。例：R / sd(R, avgh) = 按自身波动标准化的涨跌（Z 分数，均值按 0）' },
   { name: 'retain', min: 4, max: 5, usage: 'retain(K, P, E0, h, W)', help: '保留加权和（CBA 用）：Σ wᵢ·Kᵢ·ln(Pₜ ÷ E0ᵢ) ÷ (t − i + 1)，i 取过去 W 小时（默认 48）里的每一根，wᵢ = 2^(−距今小时 ÷ h) 归一化（权重合计 1）；Kᵢ 或 E0ᵢ 为空的那根这一项记 0' },
+  { name: 'wsum', min: 3, max: 3, usage: 'wsum(x, h, n)', help: '时间衰减加权和：最近 n 根（含当根），第 i 根权重 2^(−(t − i) ÷ h)，h、n 都以根计；空值跳过，一个都没有记空' },
+  { name: 'rsum', min: 2, max: 2, usage: 'rsum(x, h)', help: '过去 h 小时的和（含当根）：空值跳过，一个都没有记空' },
+  { name: 'median', min: 2, max: 2, usage: 'median(x, h)', help: '过去 h 小时的中位数（含当根）：空值跳过，一个都没有记空' },
+  { name: 'mad', min: 2, max: 2, usage: 'mad(x, h)', help: '过去 h 小时的中位数绝对偏差 median(|x − 中位数|)（含当根）：空值跳过；稳健 z = (x − 中性点) ÷ (1.4826 × mad)' },
+  { name: 'rscale', min: 2, max: 2, usage: 'rscale(x, h)', help: '稳健尺度：过去 h 小时（含当根）的 1.4826 × MAD；一半以上的值相同、MAD = 0 时改用 1.2533 × 平均绝对偏差（离中位数）；稳健 z = (x − 中性点) ÷ rscale' },
+  { name: 'atr', min: 4, max: 4, usage: 'atr(H, L, C, n)', help: '平均真实波幅：真实波幅 = max(H − L, |H − 前收|, |L − 前收|)，Wilder 平滑 n 根（前 n 根的平均起算，不满 n 根记空）' },
   { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
@@ -383,6 +389,125 @@ export function retainSum(k: Float64Array, p: Float64Array, e0: Float64Array, rh
   return out;
 }
 
+/** 最近 n 根（含当根）里有值的数，按大小排好；每根调用 fn(排好的数组) 得这一根的结果，一个都没有记空。 */
+function rollingSorted(x: Float64Array, n: number, fn: (sorted: number[]) => number): Float64Array {
+  const out = new Float64Array(x.length);
+  const win: number[] = [];
+  const lowerBound = (v: number) => {
+    let lo = 0;
+    let hi = win.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (win[mid] < v) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+  for (let i = 0; i < x.length; i++) {
+    if (Number.isFinite(x[i])) win.splice(lowerBound(x[i]), 0, x[i]);
+    const drop = i - n;
+    if (drop >= 0 && Number.isFinite(x[drop])) win.splice(lowerBound(x[drop]), 1);
+    out[i] = win.length ? fn(win) : Number.NaN;
+  }
+  return out;
+}
+const medianOfSorted = (s: readonly number[]) => {
+  const h = s.length >> 1;
+  return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
+};
+/** 最近 n 根的中位数（含当根）：空值跳过。 */
+export const rollingMedian = (x: Float64Array, n: number) => rollingSorted(x, n, medianOfSorted);
+/** 最近 n 根的中位数绝对偏差 median(|x − 中位数|)（含当根）：空值跳过。排好的两半各自按偏差从小到大，合并取中间。 */
+function madOfSorted(s: readonly number[]): number {
+  const m = medianOfSorted(s);
+  const len = s.length;
+  // 第一个 ≥ 中位数的位置 p：左边偏差 a(i) = m − s[p − 1 − i]、右边 b(j) = s[p + j] − m，各自从小到大
+  let lo = 0;
+  let hi = len;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (s[mid] < m) lo = mid + 1; else hi = mid; }
+  const p = lo;
+  const aAt = (i: number) => m - s[p - 1 - i];
+  const bAt = (j: number) => s[p + j] - m;
+  // 两个有序数列合起来的第 k 小（从 0 数）：每次各扔掉一半，O(log n)
+  const kth = (k: number) => {
+    let aOff = 0;
+    let bOff = 0;
+    const aLen = p;
+    const bLen = len - p;
+    for (;;) {
+      if (aOff === aLen) return bAt(bOff + k);
+      if (bOff === bLen) return aAt(aOff + k);
+      if (k === 0) return Math.min(aAt(aOff), bAt(bOff));
+      const half = (k + 1) >> 1;
+      const ai = Math.min(aOff + half, aLen) - 1;
+      const bi = Math.min(bOff + half, bLen) - 1;
+      if (aAt(ai) <= bAt(bi)) { k -= ai - aOff + 1; aOff = ai + 1; } else { k -= bi - bOff + 1; bOff = bi + 1; }
+    }
+  };
+  const h = len >> 1;
+  return len % 2 ? kth(h) : (kth(h - 1) + kth(h)) / 2;
+}
+export const rollingMad = (x: Float64Array, n: number) => rollingSorted(x, n, madOfSorted);
+/**
+ * 稳健尺度（最近 n 根，含当根）：1.4826 × MAD；一半以上的值相同、MAD = 0 时改用 1.2533 × 平均绝对偏差（离中位数）——
+ * 稳健 z 的常用补充规则（CBI 的吸收分量 A 常常正好等于 ±1，单边行情里 MAD 会是 0）。全都相同 → 0（z 记空）。
+ */
+export const rollingRobustScale = (x: Float64Array, n: number) => rollingSorted(x, n, s => {
+  const madV = madOfSorted(s);
+  if (madV > 0) return 1.4826 * madV;
+  const m = medianOfSorted(s);
+  let sum = 0;
+  for (const v of s) sum += Math.abs(v - m);
+  return 1.2533 * (sum / s.length);
+});
+/** 最近 n 根的和（含当根）：空值跳过，一个都没有记空。 */
+export function rollingSum(x: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(x.length);
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (Number.isFinite(x[i])) { sum += x[i]; count++; }
+    const drop = i - n;
+    if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
+    out[i] = count > 0 ? clean(sum) : Number.NaN;
+  }
+  return out;
+}
+/** 时间衰减加权和：Σ_{k<n} 2^(−k ÷ h)·x_{t−k}（h、n 以根计）；空值跳过，一个都没有记空。 */
+export function wsumBars(x: Float64Array, h: number, n: number): Float64Array {
+  const out = new Float64Array(x.length);
+  const w = Float64Array.from({ length: n }, (_, k) => 2 ** (-k / h));
+  for (let t = 0; t < x.length; t++) {
+    let sum = 0;
+    let any = false;
+    for (let k = 0; k < n && k <= t; k++) {
+      const v = x[t - k];
+      if (Number.isFinite(v)) { sum += w[k] * v; any = true; }
+    }
+    out[t] = any ? clean(sum) : Number.NaN;
+  }
+  return out;
+}
+/** 平均真实波幅（Wilder）：前 n 个真实波幅的平均起算，之后 ATRₜ = (ATRₜ₋₁·(n − 1) + TRₜ) ÷ n；缺值那根沿用上一根。 */
+export function atrSeries(h: Float64Array, l: Float64Array, c: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(c.length).fill(Number.NaN);
+  let atr = Number.NaN;
+  let seedSum = 0;
+  let seedCount = 0;
+  for (let i = 0; i < c.length; i++) {
+    const pc = i > 0 ? c[i - 1] : Number.NaN;
+    const hl = h[i] - l[i];
+    const tr = Number.isFinite(pc) ? Math.max(hl, Math.abs(h[i] - pc), Math.abs(l[i] - pc)) : hl;
+    if (Number.isFinite(tr)) {
+      if (Number.isNaN(atr)) {
+        seedSum += tr;
+        seedCount++;
+        if (seedCount === n) atr = seedSum / n;
+      } else {
+        atr = (atr * (n - 1) + tr) / n;
+      }
+    }
+    out[i] = atr;
+  }
+  return out;
+}
+
 const truthy = (x: number) => Number.isFinite(x) && x !== 0;
 const clean = (x: number) => (Number.isFinite(x) ? x : Number.NaN);
 const scalarArg = (v: Value, fn: string, what: string, line: number): number => {
@@ -445,6 +570,29 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
         out[i] = s == null ? Number.NaN : s;
       }
       return out;
+    }
+    case 'median': case 'mad': case 'rsum': case 'rscale': {
+      const h = scalarArg(y, name, '时长', line);
+      if (!(h > 0)) throw new FormulaError(`${name} 的时长要大于 0（单位：小时）`, line);
+      const n = barsForHours(h, barMinutes);
+      if (!isSeries(x)) return name === 'median' ? x : name === 'mad' || name === 'rscale' ? 0 : x * n;
+      return name === 'median' ? rollingMedian(x, n) : name === 'mad' ? rollingMad(x, n) : name === 'rscale' ? rollingRobustScale(x, n) : rollingSum(x, n);
+    }
+    case 'wsum': {
+      const h = scalarArg(y, 'wsum', '半衰期', line);
+      const n = scalarArg(z, 'wsum', '根数', line);
+      if (!(h > 0)) throw new FormulaError('wsum 的半衰期要大于 0（单位：根）', line);
+      if (!Number.isInteger(n) || n < 1) throw new FormulaError('wsum 的根数要是正整数', line);
+      if (!isSeries(x)) { let t = 0; for (let j = 0; j < n; j++) t += 2 ** (-j / h); return x * t; }
+      return wsumBars(x, h, n);
+    }
+    case 'atr': {
+      const n = scalarArg(args[3], 'atr', '根数', line);
+      if (!Number.isInteger(n) || n < 1) throw new FormulaError('atr 的根数要是正整数', line);
+      const len = [x, y, z].find(isSeries)?.length;
+      if (len == null) return Number.NaN;
+      const asSeries = (v: Value) => (isSeries(v) ? v : new Float64Array(len).fill(v));
+      return atrSeries(asSeries(x), asSeries(y), asSeries(z), n);
     }
     case 'avg': case 'ago': case 'zscore': case 'sd': {
       const h = scalarArg(y, name, '时长', line);

@@ -319,7 +319,59 @@ export const CBA_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF];
+/**
+ * CBI 买方优势指数（Deep dig 第五个特征值；K 线图指标里同名副图用 src/lib/cbi.ts 的 computeCbi，单元测试核对逐根一致）。
+ * 【用户要求】2026-10-18「新增一个指标 CBI…放在指标中、以及 deep dig 的第五个特征值」。h、N、m、κ、k 写在公式里可改；
+ * avgh = 基线期（V̄、各分量的中位数 / MAD、λ₀ 都「截至上一根、过去 avgh 小时」）。
+ */
+export const CBI_FORMULA = [
+  '# CBI 买方优势指数（−1 ~ 1）= P × D；> 0 买方占优。D = 方向（四个分量加权），P = 参与度（可信度）',
+  '# V = 成交额 Q，Vᵇ / Vˢ = 主动买入 / 卖出成交额 B / S；avgh = 基线期（小时，下面选；原文 V̄ 是同时段 20 天中位数，拿不到，改用过去 avgh 小时）',
+  'h = 12                                          # 时间衰减半衰期（根）：w = 2^(−(t − i) ÷ h)',
+  'N = 48                                          # 求和窗口：最近 N 根',
+  'm = 12                                          # 均价斜率回看根数',
+  'kappa = 1                                       # κ：吸收斜率的收缩强度',
+  'k = 2                                           # 参与度敏感度',
+  'ATR = atr(H, L, C, 14)                          # 平均真实波幅（14 根）',
+  'Vbar = prev(median(Q, avgh))                    # 基线成交额：截至上一根、过去 avgh 小时的中位数',
+  'x = (B - S) / Vbar                              # 主动净流量',
+  'r = (C - prev(C)) / ATR                         # 单根收益（以 ATR 计）',
+  'F = wsum(B - S, h, N) / wsum(Q, h, N)           # F 主动性',
+  'lam0 = rsum(r * sign(x), avgh) / rsum(abs(x), avgh)   # λ₀：基线对称冲击',
+  'lp = (wsum(if(x > 0, r, 0), h, N) + kappa * lam0) / (wsum(if(x > 0, x, 0), h, N) + kappa)   # λ⁺：买一侧的价格冲击斜率',
+  'lm = (wsum(if(x < 0, r, 0), h, N) - kappa * lam0) / (wsum(if(x < 0, x, 0), h, N) - kappa)   # λ⁻：卖一侧的价格冲击斜率',
+  'A = (lp - lm) / (abs(lp) + abs(lm))             # A 吸收',
+  'CLV = if(H > L, (2 * C - H - L) / (H - L), 0)   # 收盘在 K 线区间里的位置（−1 ~ 1）',
+  'K = wsum(Q * CLV, h, N) / wsum(Q, h, N)         # K 收盘控制',
+  'M = wsum(Q * ((H + L + C) / 3), h, N) / wsum(Q, h, N)   # 窗口成交额加权均价（平均成本）',
+  'd = (C - M) / ATR                               # 价格相对均价的偏离',
+  'v = (M - prev(M, m)) / (m * ATR)                # 均价漂移速度（ATR / 根）',
+  'uF = tanh((F - prev(median(F, avgh))) / prev(rscale(F, avgh)) / 2)   # 稳健 z 压到 −1 ~ 1：z = (X − 中性点) ÷ rscale，rscale = 1.4826·MAD（MAD = 0 时 1.2533·平均绝对偏差）；F 的中性点 = 基线中位数',
+  'uA = tanh(A / prev(rscale(A, avgh)) / 2)',
+  'uK = tanh(K / prev(rscale(K, avgh)) / 2)',
+  'uS = (tanh(d / prev(rscale(d, avgh)) / 2) + tanh(v / prev(rscale(v, avgh)) / 2)) / 2   # S 结构',
+  'D = (0.30 * uF + 0.30 * uA + 0.15 * uK + 0.25 * uS) / (0.30 + 0.30 + 0.15 + 0.25)   # 方向',
+  'RV = wsum(Q, h, N) / wsum(Vbar, h, N)           # 相对成交量',
+  'P = RV ^ k / (1 + RV ^ k)                       # 参与度（可信度）',
+  'CBI = P * D',
+].join('\n');
+
+export const CBI_DEF: DeepDigFeatureDef = {
+  id: 'cbi',
+  name: '买方优势指数 CBI',
+  short: 'CBI',
+  definition: '进场前最后一根 K 线上的买方优势（−1 ~ 1）= 参与度 P × 方向 D：D 由主动性 F、吸收 A、收盘控制 K、结构 S 四个分量（稳健 z 压到 −1 ~ 1）按 0.30 / 0.30 / 0.15 / 0.25 加权；P = RV² ÷ (1 + RV²)。> 0 买方占优。',
+  formula: CBI_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

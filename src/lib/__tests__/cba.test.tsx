@@ -92,7 +92,7 @@ describe('【用户要求】CBA 买方定价优势指数', () => {
   });
 
   it('Deep dig 第三个特征值 CBA：公式与图表指标的 computeCba 逐根一致（5 分钟、15 分钟；含缺成交额）', () => {
-    expect(BUILTIN_FEATURES.map(d => d.id)).toEqual(['drift-speed', 'bss', CBA_DEF.id, 'drift-speed-z']);
+    expect(BUILTIN_FEATURES.map(d => d.id).slice(0, 4)).toEqual(['drift-speed', 'bss', CBA_DEF.id, 'drift-speed-z']);
     expect(formulaVariables(CBA_FORMULA)).toEqual({ names: ['eta', 'alpha', 'D', 'A', 'Vbar', 'F', 'G', 'P', 'sig', 'CBA'], result: 'CBA' });
     const compiled = compileFeatureFormula(CBA_FORMULA);
     for (const [barMs, missingEvery] of [[BAR_MS, 0], [BAR_MS, 37], [3 * BAR_MS, 0]] as const) {
