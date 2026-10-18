@@ -32,6 +32,27 @@ describe('【用户要求】Deep dig 时间序列曲线：各组在进场前后�
     expect(seriesOffsets(seriesRangeOf({ interval: '4h' }))).toHaveLength(25);
   });
 
+  it('【用户要求】时间段与平均时长一致：进场前后各 avgh 小时，点距 ≈ 范围 ÷ 24（取整根），进场一定是其中一点', () => {
+    const MIN = 60_000;
+    const cases: [number, number, number, number][] = [
+      // avgh, 范围, 点距, 点数（5 分钟线）
+      [24, 24 * HOUR, HOUR, 49],
+      [48, 48 * HOUR, 2 * HOUR, 49],
+      [72, 72 * HOUR, 3 * HOUR, 49],
+      [36, 36 * HOUR, 1.5 * HOUR, 49],
+      [12, 12 * HOUR, 30 * MIN, 49],
+      [4, 4 * HOUR, 10 * MIN, 49],
+      [1, HOUR, 5 * MIN, 25],
+    ];
+    for (const [avgHours, span, step, n] of cases) {
+      const r = seriesRangeOf({ avgHours });
+      expect(r).toEqual({ beforeMs: span, afterMs: span, stepMs: step });
+      const o = seriesOffsets(r);
+      expect(o).toHaveLength(n);
+      expect(o).toContain(0);
+    }
+  });
+
   it('每个点 = 那一刻之前最后一根已收盘 K 线上的值；τ = 0 与特征值一致；缺 K 线的点记缺失', () => {
     const all = bars(ANCHOR - 72 * HOUR, ANCHOR + 24 * HOUR, 3);
     const offsets = seriesOffsets(seriesRangeOf({}));

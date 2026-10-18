@@ -11,7 +11,7 @@
 import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { lastValue } from '@/lib/deepDig/formula';
-import { evaluateOnBars, featureWindowMs, intervalOf, RESULT_VAR, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { avgHoursOf, evaluateOnBars, featureWindowMs, intervalOf, RESULT_VAR, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { DEEP_DIG_GROUPS, describeGroup, viewForVariable, type DeepDigData, type DeepDigRow, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 
 const HOUR = 3_600_000;
@@ -36,11 +36,19 @@ export interface DeepDigSeries {
   byEvent: Record<string, Float32Array>;
 }
 
-/** 曲线范围与点距：进场前后各 max(24 小时, 12 根)，点距 max(1 小时, 1 根)。5m 默认 = −24h … +24h 每小时一点。 */
-export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval'>): { beforeMs: number; afterMs: number; stepMs: number } {
+/**
+ * 曲线范围与点距：进场前后各「平均时长 avgh」（至少 12 根），点距 ≈ 范围 ÷ 24（至少 1 根，取整根），约 49 个点。
+ * 5m 默认 avgh = 24 → −24h … +24h 每小时一点。
+ * 【用户要求】2026-10-18「平均时长要与这个时间序列图的时间段保持一致」：之前固定 24 小时，现在跟着平均时长走
+ * （平均时长变了定义就变了，重跑描述统计后曲线按新范围算）。
+ */
+export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval' | 'avgHours'>): { beforeMs: number; afterMs: number; stepMs: number } {
   const barMs = intervalMs(intervalOf(def));
-  const span = Math.max(24 * HOUR, 12 * barMs);
-  return { beforeMs: span, afterMs: span, stepMs: Math.max(HOUR, barMs) };
+  const want = Math.max(avgHoursOf(def) * HOUR, 12 * barMs);
+  const stepMs = barMs * Math.max(1, Math.round(want / 24 / barMs));
+  // 范围取点距的整数倍：进场（τ = 0）一定是其中一点
+  const span = stepMs * Math.max(1, Math.round(want / stepMs));
+  return { beforeMs: span, afterMs: span, stepMs };
 }
 
 export function seriesOffsets(range: { beforeMs: number; afterMs: number; stepMs: number }): number[] {

@@ -18,7 +18,7 @@ import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
-import { formatSeriesOffset, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
+import { formatSeriesOffset, seriesRangeOf, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables, targetOf } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
@@ -349,6 +349,8 @@ function RunStrip({ testId, label, hint, hasResult, finishedAt, status, progress
 
 // ===================== 描述统计 =====================
 
+/** 小时数 → 「24 小时」「1.5 小时」「30 分钟」。 */
+const formatHoursText = (h: number) => (h >= 1 ? `${Number.isInteger(h) ? h : h.toFixed(1)} 小时` : `${Math.round(h * 60)} 分钟`);
 const Code = ({ children }: { children: React.ReactNode }) => <code className="rounded bg-muted px-1 py-px font-mono text-[11px] text-foreground">{children}</code>;
 
 function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode {
@@ -445,7 +447,11 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
         />
       </Block>
 
-      <Block title="时间序列" aside={<span className="text-[11px] text-muted-foreground">各组平均 · 进场前后</span>} testId="deep-dig-series-block">
+      <Block title="时间序列" aside={(
+        <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-series-span">
+          各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= 平均时长）
+        </span>
+      )} testId="deep-dig-series-block">
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
       </Block>
 

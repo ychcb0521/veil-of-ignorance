@@ -180,7 +180,8 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt }
   const pillW = Math.max(30, selLabel.length * 7 + 14);
   const pillX = Math.max(PAD.left - pillW / 2, Math.min(PAD.left + innerW - pillW / 2, x(selK) - pillW / 2));
   const hk = hover;
-  const tableKs = offsets.map((o, k) => ({ o, k })).filter(({ o }) => o % (6 * HOUR) === 0 || o === offsets[0] || o === offsets[P - 1]);
+  // 「看数字」：按范围均分 9 列（进场前后各 4 段；范围跟着平均时长变）
+  const tableKs = [...new Set(Array.from({ length: 9 }, (_, j) => Math.round((j * (P - 1)) / 8)))].map(k => ({ o: offsets[k], k }));
 
   return (
     <div className="max-w-[720px] space-y-2 text-[11.5px]" data-testid="deep-dig-series">

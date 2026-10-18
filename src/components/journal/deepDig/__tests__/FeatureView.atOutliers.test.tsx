@@ -57,6 +57,8 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     sessionStorage.clear();
     localStorage.clear();
     render(<Harness />);
+    // 【用户要求】时间段与平均时长一致：标题写明范围
+    expect(screen.getByTestId('deep-dig-series-span')).toHaveTextContent('进场前后各 1 小时（= 平均时长）');
     const handle = screen.getByTestId('deep-dig-series-at-handle');
     expect(handle).toHaveAttribute('aria-valuetext', '进场');
     expect(screen.getByTestId('deep-dig-groups-at')).toHaveTextContent('进场时');
