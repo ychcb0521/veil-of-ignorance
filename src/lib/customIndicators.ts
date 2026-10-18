@@ -195,26 +195,31 @@ function zeroLine({ color, width, dash }: ZeroLineStyle) {
   };
 }
 /** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：醒目的橘黄色虚线（2026-10-16 由实线改为虚线）。 */
-const V_ZERO_LINE = zeroLine({ color: '#F59E0B', width: 1.5, dash: [5, 3] });
+export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 1.5, dash: [5, 3] };
+const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
 
-/** BSS 副图的参考线：0（灰虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）、±0.2（弱了，淡琥珀点线）。 */
+/**
+ * BSS 副图的参考线：0（灰虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）、−0.2（淡琥珀点线）。
+ * 【用户要求】2026-10-18 +0.2（从高位回落到这里 = 弱了、撤出）用与 DSP·a 的 0 轴同一条醒目的橘黄色虚线。
+ */
 function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
-  const levels: [number, string, number[]][] = [
-    [0, 'rgba(132,142,156,0.6)', [4, 3]],
-    [BSS_STRONG, 'rgba(14,203,129,0.55)', [2, 3]],
-    [-BSS_STRONG, 'rgba(246,70,93,0.55)', [2, 3]],
-    [BSS_WEAK, 'rgba(245,158,11,0.4)', [1, 3]],
-    [-BSS_WEAK, 'rgba(245,158,11,0.4)', [1, 3]],
+  const levels: [number, string, number, readonly number[]][] = [
+    [0, 'rgba(132,142,156,0.6)', 1, [4, 3]],
+    [BSS_STRONG, 'rgba(14,203,129,0.55)', 1, [2, 3]],
+    [-BSS_STRONG, 'rgba(246,70,93,0.55)', 1, [2, 3]],
+    [-BSS_WEAK, 'rgba(245,158,11,0.4)', 1, [1, 3]],
+    // 最后画：压在其他参考线上面
+    [BSS_WEAK, ORANGE_DASH_LINE.color, ORANGE_DASH_LINE.width, ORANGE_DASH_LINE.dash],
   ];
-  for (const [value, color, dash] of levels) {
-    const y = Math.round(yAxis.convertToPixel(value)) + 0.5;
+  for (const [value, color, width, dash] of levels) {
+    const y = Math.round(yAxis.convertToPixel(value)) + (width % 2 ? 0.5 : 0);
     if (y < 0 || y > bounding.height) continue;
     ctx.save();
     ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.setLineDash(dash);
+    ctx.lineWidth = width;
+    ctx.setLineDash([...dash]);
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(bounding.width, y);
