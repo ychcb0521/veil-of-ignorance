@@ -87,7 +87,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
   it('定义区：显示公式与分组标准；编辑时写错公式给出行号，分组标准即时预览本机战役各组多少场；保存后提示按旧定义算', () => {
     const onSaveDef = vi.fn();
     render(<Harness onSaveDef={onSaveDef} />);
-    expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('V = ema(U, hl, 0)');
+    expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('a = ema(F, hl, 0)');
     expect(screen.getByTestId('deep-dig-def-groups')).toHaveTextContent('Bₜ > 3 or b > 3');
     fireEvent.click(screen.getByTestId('deep-dig-def-edit'));
     expect(screen.getByTestId('deep-dig-def-preview')).toHaveTextContent('实验组 1 · 对照组 1 · 冲突 0 · 其他 1');
@@ -96,12 +96,12 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     fireEvent.click(screen.getByTestId('deep-dig-def-save'));
     expect(onSaveDef).not.toHaveBeenCalled();
     fireEvent.change(screen.getByTestId('deep-dig-def-formula-input'), { target: { value: 'ln(C / prev(C, 12))' } });
-    fireEvent.change(screen.getByTestId('deep-dig-def-positive'), { target: { value: 'r > 2' } });
+    fireEvent.change(screen.getByTestId('deep-dig-def-positive'), { target: { value: 'G > 2' } });
     expect(screen.getByTestId('deep-dig-def-preview')).toHaveTextContent('实验组 0');
     fireEvent.click(screen.getByTestId('deep-dig-def-help-toggle'));
     expect(screen.getByTestId('deep-dig-def-help')).toHaveTextContent('ema(x, h, 初值)');
     fireEvent.click(screen.getByTestId('deep-dig-def-save'));
-    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ formula: 'ln(C / prev(C, 12))', positive: 'r > 2' }));
+    expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ formula: 'ln(C / prev(C, 12))', positive: 'G > 2' }));
     expect(screen.getByTestId('deep-dig-def-formula')).toHaveTextContent('ln(C / prev(C, 12))');
     expect(screen.getByTestId('deep-dig-stale')).toHaveTextContent('公式、周期、半衰期或分组标准改过了');
   });
@@ -198,35 +198,35 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
 
   it('【用户要求】推断统计选因变量：列出公式里的变量，默认最后一句；点选改命令里的 X = 一行；写明 X 是谁；数据里没有时提示重跑', () => {
     const onInfer = vi.fn();
-    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
-    // 描述统计数据带公式变量（VV 是最后一句 = 特征值）
-    const data = { ...DATA, definition: { ...DATA.definition, formula: def.formula }, rows: DATA.rows.map(r => ({ ...r, vars: { N: 1, F: r.v == null ? null : -r.v, A: 0, G: 1, R: 0, U: 0, V: r.v, VV: r.v } })) };
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\naa = avg(a, 24)` };
+    // 描述统计数据带公式变量（aa 是最后一句 = 特征值）
+    const data = { ...DATA, definition: { ...DATA.definition, formula: def.formula }, rows: DATA.rows.map(r => ({ ...r, vars: { N: 1, f: 0, A: 0, G: 1, R: 0, F: r.v == null ? null : -r.v, a: r.v, aa: r.v } })) };
     render(<Harness initialTab="infer" initialDef={def} data={data} inference={null} onInfer={onInfer} />);
     const chips = screen.getAllByRole('radio').map(b => b.getAttribute('data-testid'));
-    expect(chips).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'].map(n => `deep-dig-target-${n}`));
-    expect(screen.getByTestId('deep-dig-target-VV')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('deep-dig-target-VV')).toHaveTextContent('VV结果');
-    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('X = VV（公式最后一句）× 10000 · 基点/根');
+    expect(chips).toEqual(['N', 'f', 'A', 'G', 'R', 'F', 'a', 'aa'].map(n => `deep-dig-target-${n}`));
+    expect(screen.getByTestId('deep-dig-target-aa')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('deep-dig-target-aa')).toHaveTextContent('aa结果');
+    expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('X = aa（公式最后一句）× 10000 · 基点/根');
     fireEvent.click(screen.getByTestId('deep-dig-target-F'));
     expect(screen.getByTestId('deep-dig-target-F')).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByTestId('deep-dig-target-VV')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('deep-dig-target-aa')).toHaveAttribute('aria-checked', 'false');
     expect((screen.getByTestId('deep-dig-commands-input') as HTMLTextAreaElement).value.split('\n')[1]).toBe('X = F');
     expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('X = F × 10000');
     // 直接在命令里改也行，按钮跟着变
-    fireEvent.change(screen.getByTestId('deep-dig-commands-input'), { target: { value: 'X = V\nttest(X, 实验组, 对照组)' } });
-    expect(screen.getByTestId('deep-dig-target-V')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.change(screen.getByTestId('deep-dig-commands-input'), { target: { value: 'X = a\nttest(X, 实验组, 对照组)' } });
+    expect(screen.getByTestId('deep-dig-target-a')).toHaveAttribute('aria-checked', 'true');
     // 公式里没有的：标红
     fireEvent.change(screen.getByTestId('deep-dig-commands-input'), { target: { value: 'X = Q\nttest(X, 实验组, 对照组)' } });
     expect(screen.getByTestId('deep-dig-target-summary')).toHaveTextContent('公式里没有这个变量');
     expect(screen.getByTestId('deep-dig-commands-errors')).toHaveTextContent('公式里没有「Q」');
     // 选回最后一句：删掉 X = 那一行
-    fireEvent.click(screen.getByTestId('deep-dig-target-VV'));
+    fireEvent.click(screen.getByTestId('deep-dig-target-aa'));
     expect((screen.getByTestId('deep-dig-commands-input') as HTMLTextAreaElement).value).toBe('ttest(X, 实验组, 对照组)');
   });
 
   it('选了描述统计数据里还没有的变量：提示先重跑描述统计；结果上方写明这次的因变量', () => {
-    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
-    const withF = { ...DATA, rows: DATA.rows.map(r => ({ ...r, vars: { F: r.v, V: r.v } })) };
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\naa = avg(a, 24)` };
+    const withF = { ...DATA, rows: DATA.rows.map(r => ({ ...r, vars: { F: r.v, a: r.v } })) };
     const inf = runInference(withF, `X = F\n${DEFAULT_COMMANDS}`, { excludedKey: '' });
     render(<Harness initialTab="infer" initialDef={def} data={DATA} inference={inf} />);
     fireEvent.click(screen.getByTestId('deep-dig-target-F'));
@@ -319,17 +319,17 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
 
   it('【用户要求】分组表跟着时间序列图选的变量：选 F 就按 F 统计（n、均值、> 0 占比、点阵图、逐场数据），选回结果复原', () => {
     localStorage.clear();
-    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\nVV = avg(V, 24)` };
+    const def = { ...DRIFT_SPEED_DEF, formula: `${DRIFT_SPEED_DEF.formula}\naa = avg(a, 24)` };
     // F = −2 × 结果；部分行 F 缺失
-    const rows = DATA.rows.map((r, i) => ({ ...r, vars: { F: r.v == null || i % 10 === 0 ? null : -2 * r.v, V: r.v, VV: r.v } }));
+    const rows = DATA.rows.map((r, i) => ({ ...r, vars: { F: r.v == null || i % 10 === 0 ? null : -2 * r.v, a: r.v, aa: r.v } }));
     const data = { ...DATA, definition: { ...DATA.definition, formula: def.formula }, rows };
     const H = 3_600_000;
-    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets: [-H, 0, H], names: ['F', 'V', 'VV'], result: 'VV', byEvent: {} };
+    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, offsets: [-H, 0, H], names: ['F', 'a', 'aa'], result: 'aa', byEvent: {} };
     render(<Harness initialDef={def} data={data} series={series} />);
     const table = () => screen.getByTestId('deep-dig-groups');
     const posRow = () => within(table()).getAllByRole('row').find(r => r.textContent?.startsWith('实验组'))!;
     const cells = () => within(posRow()).getAllByRole('cell').map(c => c.textContent);
-    expect(screen.getByTestId('deep-dig-groups-var')).toHaveTextContent('按 VV 统计 · 单位 基点/根');
+    expect(screen.getByTestId('deep-dig-groups-var')).toHaveTextContent('按 aa 统计 · 单位 基点/根');
     const pos = DATA.groups.find(g => g.group === 'positive')!;
     expect(cells()[1]).toBe(String(pos.n));
     expect(cells()[2]).toBe((pos.mean! * 1e4).toFixed(2));
@@ -340,7 +340,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(cells()[2]).toBe((fPos.reduce((a, b) => a + b, 0) / fPos.length * 1e4).toFixed(2));
     expect(within(table()).getAllByRole('columnheader').at(-1)).toHaveTextContent('F > 0');
     // 选回结果
-    fireEvent.click(screen.getByTestId('deep-dig-series-var-VV'));
+    fireEvent.click(screen.getByTestId('deep-dig-series-var-aa'));
     expect(cells()[1]).toBe(String(pos.n));
   });
 

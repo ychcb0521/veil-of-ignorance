@@ -5,6 +5,7 @@
 
 import { registerIndicator, type IndicatorSeries, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
+import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -145,6 +146,24 @@ export function dspPoints(dataList: KLineData[], halfLifeHours: number | undefin
   return computeDsp(bars, { halfLifeHours: dspHalfLifeForInterval(h5m, intervalMs) }, intervalMs);
 }
 
+/**
+ * klinecharts 数据 → BSS（副图）。【用户要求】2026-10-18 新增。成交额读 turnover、主动买入额读 takerBuyTurnover。
+ * 窗口与动态谢林点同一个约定：参数是「5 分钟图上的」近期窗口（小时），其他周期等比例缩放（每根 K 线的窗口根数相同）；
+ * 标准化窗口固定 24 小时（同样按 5 分钟图计）。
+ */
+export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
+  const h = Number(recentHours);
+  const bars = dataList.map(d => ({
+    close: d.close,
+    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+  }));
+  return computeBss(bars, DSP_BASE_INTERVAL_MS / 60_000, {
+    recentHours: Number.isFinite(h) && h > 0 ? h : BSS_DEFAULTS.recentHours,
+    normHours: BSS_DEFAULTS.normHours,
+  });
+}
+
 type SegmentData = { current: { indicatorData?: unknown }; next: { indicatorData?: unknown } };
 /** 折线这一段终点的 V：没有下一根（最后一根）时用这一根自己的。 */
 function segmentEndV(data: SegmentData): number | undefined {
@@ -179,6 +198,33 @@ function zeroLine({ color, width, dash }: ZeroLineStyle) {
 const V_ZERO_LINE = zeroLine({ color: '#F59E0B', width: 1.5, dash: [5, 3] });
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
+
+/** BSS 副图的参考线：0（灰虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）、±0.2（弱了，淡琥珀点线）。 */
+function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
+  const levels: [number, string, number[]][] = [
+    [0, 'rgba(132,142,156,0.6)', [4, 3]],
+    [BSS_STRONG, 'rgba(14,203,129,0.55)', [2, 3]],
+    [-BSS_STRONG, 'rgba(246,70,93,0.55)', [2, 3]],
+    [BSS_WEAK, 'rgba(245,158,11,0.4)', [1, 3]],
+    [-BSS_WEAK, 'rgba(245,158,11,0.4)', [1, 3]],
+  ];
+  for (const [value, color, dash] of levels) {
+    const y = Math.round(yAxis.convertToPixel(value)) + 0.5;
+    if (y < 0 || y > bounding.height) continue;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(bounding.width, y);
+    ctx.stroke();
+    ctx.restore();
+  }
+  return false;
+}
+/** BSS 着色：> 0.55 绿、< −0.55 红，中间按正负淡绿 / 淡红。 */
+const bssColor = (v: number | undefined) => (v == null ? '#F0B90B' : v >= BSS_STRONG ? '#0ECB81' : v <= -BSS_STRONG ? '#F6465D' : v >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)');
 
 let registered = false;
 
@@ -826,6 +872,26 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.a == null ? {} : { a: p.a })),
   });
 
+  // ─── BSS 买卖强度综合分（副图）───
+  // 【用户要求】2026-10-18：BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史，去掉。计算在 bss.ts（与 Deep dig 同一份）。
+  registerIndicator({
+    name: 'BSS_CUSTOM',
+    shortName: 'BSS',
+    calcParams: [BSS_DEFAULTS.recentHours],
+    precision: 2,
+    // 纵轴固定包含 −1 ~ 1（BSS 的取值范围），参考线始终画得出来
+    minValue: -1,
+    maxValue: 1,
+    draw: bssLevelLines,
+    figures: [
+      {
+        key: 'bss', title: 'BSS: ', type: 'line',
+        styles: (data) => ({ color: bssColor((data.next?.indicatorData as { bss?: number } | undefined)?.bss ?? (data.current.indicatorData as { bss?: number } | undefined)?.bss), size: 1.5 }),
+      },
+    ],
+    calc: (dataList, indicator) => bssPoints(dataList, indicator.calcParams[0]).map(p => (p.bss == null ? {} : { bss: p.bss })),
+  });
+
     registered = true;
   } catch (e) {
     console.error('Failed to register custom indicators:', e);
@@ -872,6 +938,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   HV: 'HV_CUSTOM',
   DSP: 'DSP_CUSTOM',
   DSP_VA: 'DSP_V_CUSTOM',
+  BSS: 'BSS_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

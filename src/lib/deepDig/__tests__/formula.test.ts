@@ -137,15 +137,15 @@ describe('【用户要求】Deep dig 公式：按用户写的公式提取特征�
 
   it('【用户要求】公式里起了名的变量都带回最后一根的值（推断统计选因变量用）', () => {
     const w = window(576, 6, 0);
-    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA + '\nVV = avg(V, 24)');
+    const compiled = compileFeatureFormula(DRIFT_SPEED_FORMULA + '\naa = avg(a, 24)');
     const { value, vars } = computeFeatureValues(w, compiled);
-    expect(Object.keys(vars)).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV']);
-    expect(vars.VV).toBe(value);
-    expect(vars.V).toBeCloseTo(computeFeatureValue(w, compileFeatureFormula(DRIFT_SPEED_FORMULA))!, 15);
-    expect(vars.VV).not.toBeCloseTo(vars.V!, 12);
+    expect(Object.keys(vars)).toEqual(['N', 'f', 'A', 'G', 'R', 'F', 'a', 'aa']);
+    expect(vars.aa).toBe(value);
+    expect(vars.a).toBeCloseTo(computeFeatureValue(w, compileFeatureFormula(DRIFT_SPEED_FORMULA))!, 15);
+    expect(vars.aa).not.toBeCloseTo(vars.a!, 12);
     // 观察窗不合格：每个变量都是 null
-    expect(computeFeatureValues(null, compiled).vars).toEqual(Object.fromEntries(['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'].map(n => [n, null])));
-    expect(formulaVariables(DRIFT_SPEED_FORMULA + '\nVV = avg(V, 24)')).toEqual({ names: ['N', 'F', 'A', 'G', 'R', 'U', 'V', 'VV'], result: 'VV' });
+    expect(computeFeatureValues(null, compiled).vars).toEqual(Object.fromEntries(['N', 'f', 'A', 'G', 'R', 'F', 'a', 'aa'].map(n => [n, null])));
+    expect(formulaVariables(DRIFT_SPEED_FORMULA + '\naa = avg(a, 24)')).toEqual({ names: ['N', 'f', 'A', 'G', 'R', 'F', 'a', 'aa'], result: 'aa' });
     // 最后一句没起名：多一个「结果」
     expect(formulaVariables('R = ln(C / prev(C))\nR * 100')).toEqual({ names: ['R', '结果'], result: '结果' });
   });

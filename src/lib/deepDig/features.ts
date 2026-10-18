@@ -196,7 +196,39 @@ export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF];
+/**
+ * BSS 买卖强度综合分（Deep dig 第二个特征值；K 线图指标里同名副图用 src/lib/bss.ts 的 computeBss，单元测试核对逐根一致）。
+ * 【用户要求】2026-10-18「新增一个指标 BSS…放在指标中、以及 deep dig 的第二个特征值」；订单簿 I 没有历史数据，去掉；
+ * 权重按用户给的 0.45 / 0.25 / 0.30。标准化 = tanh(滚动 z-score)，BSS 落在 −1 ~ 1；标准化窗口 = 平均时长 avgh（默认 24 小时）。
+ */
+export const BSS_FORMULA = [
+  '# BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉',
+  '# Q = 成交额，B / S = 主动买入 / 卖出成交额（USDT）；avgh = 标准化窗口（下面选，默认 24 小时）',
+  'n = 1                                   # 近期窗口（小时）',
+  'M = C / ago(C, n) - 1                   # 价格动量：近 n 小时涨跌幅',
+  'V = avg(Q, n) / avg(Q, avgh)            # 相对成交量：近 n 小时平均成交额 ÷ 近 avgh 小时平均',
+  'A = (avg(B, n) - avg(S, n)) / avg(Q, n) # 成交攻击性：(主动买 − 主动卖) ÷ 合计，−1 ~ 1',
+  'Mz = tanh(zscore(M, avgh))              # M 标准化：滚动 z-score 压到 −1 ~ 1',
+  'Vz = tanh(zscore(V, avgh))              # V 标准化',
+  'BSS = 0.45 * Mz + 0.25 * Vz + 0.30 * A',
+].join('\n');
+
+export const BSS_DEF: DeepDigFeatureDef = {
+  id: 'bss',
+  name: '买卖强度综合分 BSS',
+  short: 'BSS',
+  definition: '进场前最后一根 K 线上的买卖强度（−1 ~ 1）：0.45 × 价格动量 M 标准化 + 0.25 × 相对成交量 V 标准化 + 0.30 × 成交攻击性 A。> 0.55 且 M > 0 买方优势明确；从高位回落到 < 0.2 或 A 转负 = 弱了（阈值需自行验证）。订单簿没有历史，板不平衡 I 去掉。',
+  formula: BSS_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

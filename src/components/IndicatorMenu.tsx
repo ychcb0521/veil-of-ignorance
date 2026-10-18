@@ -8,6 +8,7 @@ import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 import { DSP_V_DEFINITION, DSP_V_STEPS } from '@/lib/dynamicSchellingPoint';
+import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -155,6 +156,8 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
   // 【用户要求】可以隐去主图的 DSP 线：只要 a / A 两个副图；与上一项二选一
   { id: 'DSP_VA', nameZh: '动态谢林点 a / A（只要副图）',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
+  // 【用户要求】2026-10-18 BSS 买卖强度综合分（副图）：参数 = 5 分钟图上的近期窗口 n（小时），其他周期等比例缩放（与 DSP 同一约定）
+  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'volume', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },

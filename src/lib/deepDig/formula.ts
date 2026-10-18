@@ -31,6 +31,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'ln', min: 1, max: 1, usage: 'ln(x)', help: '自然对数（也可写 log）' },
   { name: 'log', min: 1, max: 1, usage: 'log(x)', help: '同 ln' },
   { name: 'exp', min: 1, max: 1, usage: 'exp(x)', help: 'e 的 x 次方' },
+  { name: 'tanh', min: 1, max: 1, usage: 'tanh(x)', help: '双曲正切：把任意数平滑压到 −1 ~ 1（0 → 0，±1 → ±0.76，±2 → ±0.96）' },
   { name: 'abs', min: 1, max: 1, usage: 'abs(x)', help: '绝对值' },
   { name: 'sqrt', min: 1, max: 1, usage: 'sqrt(x)', help: '平方根' },
   { name: 'sign', min: 1, max: 1, usage: 'sign(x)', help: '正 1、负 −1、零 0' },
@@ -38,6 +39,8 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'min', min: 2, max: 2, usage: 'min(a, b)', help: '逐根取较小的' },
   { name: 'prev', min: 1, max: 2, usage: 'prev(x, k)', help: '前 k 根的值（k 默认 1）；开头没有前 k 根的记空' },
   { name: 'ema', min: 2, max: 3, usage: 'ema(x, h, 初值)', help: '指数平滑，半衰期 h 小时（h 可写 hl = 上面选的半衰期）：yₜ = ρ·yₜ₋₁ + (1 − ρ)·xₜ，ρ = 2^(−周期 ÷ h)，周期 = 上面选的 K 线周期；x 为空的那根跳过；不给初值时从第一个非空值起算' },
+  { name: 'ago', min: 2, max: 2, usage: 'ago(x, h)', help: 'h 小时以前那根的值（按 K 线周期换算成根数；开头不够 h 小时的记空）' },
+  { name: 'zscore', min: 2, max: 2, usage: 'zscore(x, h)', help: '滚动标准化：(当根 − 过去 h 小时的平均) ÷ 过去 h 小时的标准差（含当根，样本标准差）；空值跳过，开头不满 h 小时用已有的，少于 2 个或标准差为 0 记空' },
   { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
@@ -283,6 +286,53 @@ function map3(a: Value, b: Value, c: Value, f: (x: number, y: number, z: number)
   return out;
 }
 
+/** 过去 h 小时 = 多少根（含当根），至少 1 根。 */
+export const barsForHours = (h: number, barMinutes: number) => Math.max(1, Math.round((h * 60) / barMinutes));
+
+/** 最近 n 根（含当根）的平均：空值不计，开头不满 n 根用已有的；一个都没有记空。 */
+export function rollingMean(x: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(x.length);
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (Number.isFinite(x[i])) { sum += x[i]; count++; }
+    const drop = i - n;
+    if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
+    out[i] = count > 0 ? clean(sum / count) : Number.NaN;
+  }
+  return out;
+}
+
+/** 往前数 k 根的值；开头不够 k 根记空。 */
+export function shiftBars(x: Float64Array, k: number): Float64Array {
+  const out = new Float64Array(x.length);
+  for (let i = 0; i < x.length; i++) out[i] = i >= k ? x[i - k] : Number.NaN;
+  return out;
+}
+
+/**
+ * 滚动标准化：(当根 − 最近 n 根的平均) ÷ 最近 n 根的样本标准差（含当根）。空值不计，开头不满 n 根用已有的；
+ * 少于 2 个值、标准差为 0、当根为空 → 空。
+ */
+export function rollingZScore(x: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(x.length);
+  let sum = 0;
+  let sq = 0;
+  let count = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (Number.isFinite(x[i])) { sum += x[i]; sq += x[i] * x[i]; count++; }
+    const drop = i - n;
+    if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; sq -= x[drop] * x[drop]; count--; }
+    if (!Number.isFinite(x[i]) || count < 2) { out[i] = Number.NaN; continue; }
+    const mean = sum / count;
+    const variance = (sq - count * mean * mean) / (count - 1);
+    const sd = variance > 0 ? Math.sqrt(variance) : 0;
+    // 滑动求和的舍入误差：标准差小到相对均值可以忽略时当作 0
+    out[i] = sd > 1e-12 * Math.max(1, Math.abs(mean)) ? clean((x[i] - mean) / sd) : Number.NaN;
+  }
+  return out;
+}
+
 const truthy = (x: number) => Number.isFinite(x) && x !== 0;
 const clean = (x: number) => (Number.isFinite(x) ? x : Number.NaN);
 const scalarArg = (v: Value, fn: string, what: string, line: number): number => {
@@ -315,6 +365,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
     case 'ln': case 'log': return map1(x, v => clean(Math.log(v)));
     case 'exp': return map1(x, v => clean(Math.exp(v)));
     case 'abs': return map1(x, Math.abs);
+    case 'tanh': return map1(x, v => clean(Math.tanh(v)));
     case 'sqrt': return map1(x, v => clean(Math.sqrt(v)));
     case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)));
     case 'max': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)));
@@ -345,22 +396,12 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       }
       return out;
     }
-    case 'avg': {
-      const h = scalarArg(y, 'avg', '时长', line);
-      if (!(h > 0)) throw new FormulaError('avg 的时长要大于 0（单位：小时）', line);
-      if (!isSeries(x)) return x;
-      // 过去 h 小时 = n 根（含当根），滑动求和；空值不计
-      const n = Math.max(1, Math.round((h * 60) / barMinutes));
-      const out = new Float64Array(x.length);
-      let sum = 0;
-      let count = 0;
-      for (let i = 0; i < x.length; i++) {
-        if (Number.isFinite(x[i])) { sum += x[i]; count++; }
-        const drop = i - n;
-        if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
-        out[i] = count > 0 ? clean(sum / count) : Number.NaN;
-      }
-      return out;
+    case 'avg': case 'ago': case 'zscore': {
+      const h = scalarArg(y, name, '时长', line);
+      if (!(h > 0)) throw new FormulaError(`${name} 的时长要大于 0（单位：小时）`, line);
+      if (!isSeries(x)) return name === 'zscore' ? Number.NaN : x;
+      const n = barsForHours(h, barMinutes);
+      return name === 'avg' ? rollingMean(x, n) : name === 'ago' ? shiftBars(x, n) : rollingZScore(x, n);
     }
     case 'sma': case 'sum': {
       const n = scalarArg(y, name, '根数', line);

@@ -47,9 +47,9 @@ describe('【用户要求】Deep dig 时间序列曲线：各组在进场前后�
     const { names } = formulaVariables(DRIFT_SPEED_FORMULA);
     const full = computeEventSeries(all, ANCHOR, compiled, {}, names, offsets)!;
     const feature = computeFeatureValues(extractWindow(all, ANCHOR), compiled);
-    const series: DeepDigSeries = { finishedAt: 1, offsets, names, result: 'V', byEvent: { e: full } };
-    expect(valueAt(series, 'e', 'V')).toBeCloseTo(feature.value!, 6);
-    expect(Math.abs(valueAt(series, 'e', 'V')! - feature.value!)).toBeLessThan(0.01 * Math.abs(feature.value!) + 1e-12);
+    const series: DeepDigSeries = { finishedAt: 1, offsets, names, result: 'a', byEvent: { e: full } };
+    expect(valueAt(series, 'e', 'a')).toBeCloseTo(feature.value!, 6);
+    expect(Math.abs(valueAt(series, 'e', 'a')! - feature.value!)).toBeLessThan(0.01 * Math.abs(feature.value!) + 1e-12);
     expect(valueAt(series, 'e', 'F')).toBeCloseTo(feature.vars.F!, 6);
     // 进场后 3–5 小时没有 K 线：那几个点缺失，其余照常
     const gap = bars(ANCHOR - 72 * HOUR, ANCHOR + 24 * HOUR, 3, t => t >= ANCHOR + 2 * HOUR && t < ANCHOR + 5 * HOUR);
