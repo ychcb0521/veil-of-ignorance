@@ -10,15 +10,15 @@ import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
 import {
-  applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, viewForVariable, deepDigRules, exclusionKey, fmtValue, groupLabel, pText,
-  type DeepDigData, type DeepDigInference, type DeepDigRowGroup, type DefinitionSnapshot,
+  applyExclusions, dataSupportsInference, DEEP_DIG_GROUPS, viewForVariable, deepDigRules, exclusionKey, findOutliers, fmtValue, groupLabel, OUTLIER_IQR_K, pText,
+  type DeepDigData, type DeepDigInference, type DeepDigOutlier, type DeepDigRow, type DeepDigRowGroup, type DefinitionSnapshot,
 } from '@/lib/deepDig/analysis';
 import { avgHoursOf, definitionKey, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, RESULT_VAR, type DeepDigFeatureDef, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
-import type { DeepDigSeries } from '@/lib/deepDig/series';
+import { formatSeriesOffset, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
@@ -111,11 +111,38 @@ export interface FeatureViewProps {
   onSaveNote: (note: DeepDigNote | null) => void;
 }
 
+/**
+ * 【用户要求】2026-10-18 极端值「可暂时删除，暂时删除之后可以统计」：只记在这次浏览里（sessionStorage，按特征值、按这一次的描述统计数据），
+ * 进战役详情再返回还在，关掉页面就恢复；描述统计、时间序列、推断统计都按删掉之后的数据算。与「删掉这一行」（长期保存）分开。
+ */
+const TEMP_KEY = (featureId: string) => `veil.deepDig.tempExcluded:${featureId}`;
+const NO_IDS: readonly string[] = [];
+function readTemp(featureId: string, finishedAt: number | undefined): readonly string[] {
+  if (finishedAt == null) return NO_IDS;
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(TEMP_KEY(featureId)) ?? 'null');
+    return raw && raw.finishedAt === finishedAt && Array.isArray(raw.ids) ? raw.ids.filter((x: unknown): x is string => typeof x === 'string') : NO_IDS;
+  } catch {
+    return NO_IDS;
+  }
+}
+function writeTemp(featureId: string, finishedAt: number, ids: readonly string[]) {
+  try {
+    if (ids.length) sessionStorage.setItem(TEMP_KEY(featureId), JSON.stringify({ finishedAt, ids }));
+    else sessionStorage.removeItem(TEMP_KEY(featureId));
+  } catch { /* 记不住只是刷新后要重删 */ }
+}
+
 export function FeatureView(props: FeatureViewProps) {
   const { def, data, inference, excluded, tab, onTabChange } = props;
   const variables = useMemo(() => formulaVariables(def.formula), [def.formula]);
-  const effective = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
-  const exKey = data ? exclusionKey(data, excluded) : '';
+  const [tempVer, setTempVer] = useState(0);
+  const temp = useMemo(() => readTemp(def.id, data?.finishedAt), [def.id, data?.finishedAt, tempVer]);
+  const setTemp = (ids: readonly string[]) => { if (data) { writeTemp(def.id, data.finishedAt, ids); setTempVer(v => v + 1); } };
+  /** 只去掉长期删除的行（判极端值用：列表不因暂时删除而变动）。 */
+  const base = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
+  const effective = useMemo(() => (base ? applyExclusions(base, temp) : null), [base, temp]);
+  const exKey = data ? exclusionKey(data, [...excluded, ...temp]) : '';
   const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
   const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands && (data == null || definitionKey(data.definition) === definitionKey(def));
   const defStale = data != null && definitionKey(data.definition) !== definitionKey(def);
@@ -150,7 +177,7 @@ export function FeatureView(props: FeatureViewProps) {
             hint={`取币安公开 ${intervalOf(def)} K 线${intervalOf(def) === '5m' ? '' : '（24h 结果仍按 5m）'}、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）`}
           />
           {defStale && <Notice testId="deep-dig-stale">公式、周期、半衰期或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的定义重算。</Notice>}
-          {effective && data ? <DescribeTab {...props} data={effective} raw={data} /> : <Empty>还没运行描述统计。</Empty>}
+          {effective && data && base ? <DescribeTab {...props} data={effective} raw={data} base={base} temp={temp} onTempChange={setTemp} /> : <Empty>还没运行描述统计。</Empty>}
         </div>
       )}
       {tab === 'infer' && (
@@ -165,7 +192,7 @@ export function FeatureView(props: FeatureViewProps) {
             canRun={!defStale && !!effective && dataSupportsInference(effective) && props.inferStatus !== 'running'}
             blockedReason={defStale ? '分组或公式已修改，请先重新运行描述统计' : !effective ? '先运行描述统计' : !dataSupportsInference(effective) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
             onRun={() => { if (effective) props.onInfer(effective, exKey); }}
-            hint="按上面的命令逐行算，用描述统计的数据（已去掉删除的行），不联网，几秒到十几秒"
+            hint={`按上面的命令逐行算，用描述统计的数据（已去掉删除的行${temp.length ? `、暂时删除的 ${temp.length} 行` : ''}），不联网，几秒到十几秒`}
           />
           {inference && !inferenceFresh && (
             <Notice testId="deep-dig-infer-stale">
@@ -251,18 +278,36 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   }
 }
 
-function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, raw, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & { data: DeepDigData; raw: DeepDigData }) {
+function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, raw, base, temp, onTempChange, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & {
+  data: DeepDigData;
+  raw: DeepDigData;
+  /** 只去掉长期删除的行。 */
+  base: DeepDigData;
+  /** 暂时删除的行（事件 id）。 */
+  temp: readonly string[];
+  onTempChange: (ids: readonly string[]) => void;
+}) {
   const def = effectiveData.definition;
   const [showDeleted, setShowDeleted] = useState(false);
   /** 看哪个变量（时间序列图里选）；null = 公式最后一句（核心变量）。分组表、点阵图、细节、逐场数据都跟着它。 */
   const [seriesVar, setSeriesVar] = useState<string | null>(null);
-  const result = useMemo(() => viewForVariable(effectiveData, seriesVar), [effectiveData, seriesVar]);
+  const liveSeries = series && series.finishedAt === raw.finishedAt ? series : null;
+  /** 【用户要求】看哪个时刻（拖时间序列图里的竖线）：0 = 进场（特征值本身）。 */
+  const [atState, setAt] = useState(0);
+  const at = liveSeries && liveSeries.offsets.includes(atState) ? atState : 0;
+  const result = useMemo(() => viewAtOffset(effectiveData, liveSeries, seriesVar, at), [effectiveData, liveSeries, seriesVar, at]);
   /** 选的是公式里别的变量（不是最后一句）时它的名字。 */
-  const varName = seriesVar != null && result !== effectiveData ? seriesVar : null;
+  const varName = seriesVar != null && viewForVariable(effectiveData, seriesVar) !== effectiveData ? seriesVar : null;
   const removed = useMemo(() => {
     const drop = new Set(excluded);
-    return viewForVariable(raw, seriesVar).rows.filter(r => drop.has(r.id)).sort((a, b) => b.anchorMs - a.anchorMs);
-  }, [raw, excluded, seriesVar]);
+    return viewAtOffset(raw, liveSeries, seriesVar, at).rows.filter(r => drop.has(r.id)).sort((a, b) => b.anchorMs - a.anchorMs);
+  }, [raw, excluded, liveSeries, seriesVar, at]);
+  // 极端值：在只去掉长期删除的数据上判（暂时删掉的仍列着，可恢复），读数跟着选的变量与时刻
+  const baseView = useMemo(() => viewAtOffset(base, liveSeries, seriesVar, at), [base, liveSeries, seriesVar, at]);
+  const outliers = useMemo(() => findOutliers(baseView), [baseView]);
+  const outlierIds = useMemo(() => new Set(outliers.map(o => o.id)), [outliers]);
+  const tempSet = useMemo(() => new Set(temp), [temp]);
+  const atText = at === 0 ? '进场时' : `${formatSeriesOffset(at)}（进场${at < 0 ? '前' : '后'}）`;
   const remove = (id: string) => onExcludedChange([...excluded.filter(x => x !== id), id]);
   const restore = (id: string) => onExcludedChange(excluded.filter(x => x !== id));
   const bp = (v: number | null | undefined, d = 2) => fmtValue(def, v, d);
@@ -281,7 +326,8 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
     <div className="space-y-6" data-testid="deep-dig-describe">
       <Block title="分组" aside={(
         <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-groups-var">
-          按 <span className="font-mono text-foreground">{X}</span> 统计{varName ? `（公式里的变量）· 原值 × ${def.scale}` : def.unit ? ` · 单位 ${def.unit}` : ''} · 跟着下面时间序列图选的变量
+          按 <span className="font-mono text-foreground">{X}</span> 统计{varName ? `（公式里的变量）· 原值 × ${def.scale}` : def.unit ? ` · 单位 ${def.unit}` : ''} ·{' '}
+          <span className={at !== 0 ? 'text-[#C27C0E] dark:text-[#F59E0B]' : undefined} data-testid="deep-dig-groups-at">{atText}</span>的值 · 跟着下面时间序列图选的变量与时刻
         </span>
       )}>
         <GroupCriteria def={liveDef} resultDef={def} samples={samples} onSave={onSaveDef} testId="deep-dig-describe-groups" />
@@ -310,10 +356,15 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
           </tbody>
         </table>
         <StripPlot result={result} />
+        <OutlierList
+          def={def} outliers={outliers} rows={baseView.rows} temp={tempSet} X={X}
+          onTemp={(ids, on) => onTempChange(on ? [...temp.filter(id => !ids.includes(id)), ...ids] : temp.filter(id => !ids.includes(id)))}
+          onRestoreAll={() => onTempChange([])}
+        />
       </Block>
 
       <Block title="时间序列" aside={<span className="text-[11px] text-muted-foreground">各组平均 · 进场前后</span>} testId="deep-dig-series-block">
-        <SeriesChart data={result} series={series && series.finishedAt === raw.finishedAt ? series : null} variable={seriesVar} onVariable={setSeriesVar} />
+        <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
       </Block>
 
       <Block title="细节">
@@ -333,7 +384,9 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
             {X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
             {c.failed > 0 && <>，K 线没取到的 <N>{c.failed}</N> 个</>}。
           </li>
+          {at !== 0 && <li>现在看的是 <span className="text-[#C27C0E] dark:text-[#F59E0B]">{atText}</span> 那一刻的值：取那一刻之前最后一根已收盘 K 线上的读数（时间序列曲线上的点）{at > 0 ? '，用到了进场后的数据，只作描述' : ''}；推断统计仍用进场时的特征值。</li>}
           {removed.length > 0 && <li>手动删掉 <N>{removed.length}</N> 行（归类不准确等）：不进上面的分组统计、推断统计与规律提取。</li>}
+          {temp.length > 0 && <li>暂时删除 <N>{temp.length}</N> 行（极端值等）：这次浏览里不进分组统计、时间序列与推断统计，关掉页面恢复。</li>}
           <li>
             {X} &gt; 0 的占比：实验组 <N>{pct(byGroup.positive?.sharePositive, 0)}</N>、对照组 <N>{pct(byGroup.control?.sharePositive, 0)}</N>、
             随机时点 <N>{pct(byGroup.background?.sharePositive, 0)}</N>。
@@ -390,6 +443,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
                       <span className="inline-flex items-center gap-1">
                         {r.symbol.replace(/USDT$/, '')}
                         {r.memberIds.length > 1 && <span className="font-mono text-[10.5px] text-muted-foreground">×{r.memberIds.length}</span>}
+                        {outlierIds.has(r.id) && <span className="rounded bg-[#F59E0B]/15 px-1 text-[10px] leading-4 text-[#C27C0E] dark:text-[#F59E0B]" title="极端值：组内四分位距 1.5 倍以外" data-testid="deep-dig-row-outlier">极端</span>}
                         {target && <ArrowUpRight aria-hidden="true" className="h-2.5 w-2.5 text-muted-foreground opacity-0 group-hover:opacity-100" />}
                       </span>
                     </td>
@@ -451,6 +505,80 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
 }
 
 /** 四组的特征值点阵：每个点一个事件，竖线 = 中位数，浅色条 = 四分位区间，橘黄虚线 = 0。两端 1% 的极端值压在边上。 */
+/**
+ * 【用户要求】2026-10-18 极端值：各组四分位距 1.5 倍以外的行，逐个或一起「暂时删除」，删后上面的统计重算；随时恢复。
+ * 已暂时删除、但换了变量 / 时刻后不再是极端值的行也列在这里，好恢复。
+ */
+function OutlierList({ def, outliers, rows, temp, X, onTemp, onRestoreAll }: {
+  def: DefinitionSnapshot;
+  outliers: readonly DeepDigOutlier[];
+  rows: readonly DeepDigRow[];
+  temp: ReadonlySet<string>;
+  X: string;
+  onTemp: (ids: string[], on: boolean) => void;
+  onRestoreAll: () => void;
+}) {
+  const byId = new Map(rows.map(r => [r.id, r]));
+  const flagged = new Map(outliers.map(o => [o.id, o]));
+  const extra = [...temp].filter(id => !flagged.has(id) && byId.has(id));
+  const list = [...outliers.map(o => o.id), ...extra];
+  const counts = DEEP_DIG_GROUPS.map(g => ({ g, n: outliers.filter(o => o.group === g).length })).filter(c => c.n > 0);
+  const pending = outliers.filter(o => !temp.has(o.id)).map(o => o.id);
+  const linkBtn = 'text-[11px] text-muted-foreground hover:text-foreground';
+  return (
+    <div className="max-w-[720px] space-y-1 pt-1 text-[11.5px]" data-testid="deep-dig-outliers">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="font-medium">极端值</span>
+        <span className="text-[11px] text-muted-foreground">各组四分位距 {OUTLIER_IQR_K} 倍以外</span>
+        {counts.length === 0 ? <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-outliers-none">没有</span> : (
+          <span className="text-[11px]">
+            {counts.map((c, i) => (
+              <span key={c.g}>{i > 0 && <span className="text-muted-foreground"> · </span>}<span className={GROUP_TONE[c.g]}>{groupLabel(c.g, def.source)}</span> <N>{c.n}</N></span>
+            ))}
+          </span>
+        )}
+        {pending.length > 0 && <button type="button" className={linkBtn} onClick={() => onTemp(pending, true)} data-testid="deep-dig-outliers-remove-all">全部暂时删除</button>}
+        {temp.size > 0 && (
+          <span className="text-[11px] text-muted-foreground">
+            已暂时删除 <N>{temp.size}</N> 行 · <button type="button" className="hover:text-foreground" onClick={onRestoreAll} data-testid="deep-dig-outliers-restore-all">全部恢复</button>
+          </span>
+        )}
+      </div>
+      {list.length > 0 && (
+        <table className="text-[11.5px]" data-testid="deep-dig-outlier-rows">
+          <tbody>
+            {list.map(id => {
+              const r = byId.get(id);
+              if (!r) return null;
+              const o = flagged.get(id);
+              const off = temp.has(id);
+              return (
+                <tr key={id} className={cn('border-t border-border/40', off && 'text-muted-foreground')} data-testid="deep-dig-outlier-row">
+                  <td className={cn(TD, !off && GROUP_TONE[r.group])}>{groupLabel(r.group, def.source)}</td>
+                  <td className={cn(TD, 'font-mono tabular-nums text-muted-foreground')}>{formatBeijingTime(r.anchorMs).slice(5, 16)}</td>
+                  <td className={TD}>{r.symbol.replace(/USDT$/, '')}</td>
+                  <td className={cn(TD, 'font-mono tabular-nums', !off && signTone(r.v), off && 'line-through')} title={`${X} = ${fmtValue(def, r.v)}`}>{fmtValue(def, r.v)}</td>
+                  <td className={cn(TD, 'text-[11px] text-muted-foreground')}>{o ? (o.side === 'high' ? '偏高' : '偏低') : '已不算极端'}</td>
+                  <td className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => onTemp([id], !off)}
+                      className={cn('text-[11px]', off ? 'text-foreground hover:text-muted-foreground' : 'text-muted-foreground hover:text-[#F6465D]')}
+                      data-testid={off ? 'deep-dig-outlier-restore' : 'deep-dig-outlier-remove'}
+                    >
+                      {off ? '恢复' : '暂时删除'}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function StripPlot({ result }: { result: DeepDigData }) {
   const def = result.definition;
   const SCALE = def.scale;
@@ -487,9 +615,10 @@ function StripPlot({ result }: { result: DeepDigData }) {
         })}
         <span />
         <div className="relative h-3 font-mono text-[10px] tabular-nums text-muted-foreground">
-          <span className="absolute left-0">{lo.toFixed(1)}</span>
-          <span className="absolute -translate-x-1/2 text-[#C27C0E] dark:text-[#F59E0B]" style={{ left: x(0) }}>0</span>
-          <span className="absolute right-0">{hi.toFixed(1)}</span>
+          {/* 0 落在端点时只写 0，不与端点刻度叠在一起 */}
+          {lo !== 0 && <span className="absolute left-0">{lo.toFixed(1)}</span>}
+          <span className={cn('absolute text-[#C27C0E] dark:text-[#F59E0B]', lo === 0 ? 'left-0' : hi === 0 ? 'right-0' : '-translate-x-1/2')} style={lo === 0 || hi === 0 ? undefined : { left: x(0) }}>0</span>
+          {hi !== 0 && <span className="absolute right-0">{hi.toFixed(1)}</span>}
         </div>
       </div>
     </div>

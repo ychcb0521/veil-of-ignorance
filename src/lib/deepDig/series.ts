@@ -12,9 +12,17 @@ import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { lastValue } from '@/lib/deepDig/formula';
 import { evaluateOnBars, featureWindowMs, intervalOf, RESULT_VAR, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { DEEP_DIG_GROUPS, type DeepDigRow, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { DEEP_DIG_GROUPS, describeGroup, viewForVariable, type DeepDigData, type DeepDigRow, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 
 const HOUR = 3_600_000;
+
+/** 相对进场的时刻 → 「进场」「−6h」「+1.5h」。 */
+export function formatSeriesOffset(ms: number): string {
+  const h = ms / HOUR;
+  if (h === 0) return '进场';
+  const t = Number.isInteger(h) ? String(Math.abs(h)) : Math.abs(h).toFixed(1);
+  return `${h < 0 ? '−' : '+'}${t}h`;
+}
 
 export interface DeepDigSeries {
   /** 对应哪一次描述统计（DeepDigData.finishedAt）。 */
@@ -141,3 +149,16 @@ export const valueAt = (series: DeepDigSeries, eventId: string, name: string, of
   if (!s || k < 0 || vi < 0) return null;
   return lastValue(s[vi * series.offsets.length + k]);
 };
+
+/**
+ * 【用户要求】2026-10-18「手动滑动进场这条竖线，选取不同时刻的对应数据」：分组表、点阵图、逐场数据按选中时刻的值统计。
+ * offsetMs = 0（进场）→ 与原来一样用特征值本身；其他时刻 → 每行换成它的曲线在那一点的值
+ * （那一刻之前最后一根已收盘 K 线上的值；这一行没有曲线、或那一点缺 K 线 → 缺失）。name 为 null = 公式最后一句。
+ */
+export function viewAtOffset(data: DeepDigData, series: DeepDigSeries | null, name: string | null, offsetMs: number): DeepDigData {
+  if (offsetMs === 0 || !series || !series.offsets.includes(offsetMs)) return viewForVariable(data, name);
+  const varName = name != null && series.names.includes(name) ? name : series.result;
+  const rows = data.rows.map(r => ({ ...r, v: valueAt(series, r.id, varName, offsetMs) }));
+  const finiteV = (v: number | null): v is number => v != null && Number.isFinite(v);
+  return { ...data, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finiteV))) };
+}

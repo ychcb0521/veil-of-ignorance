@@ -335,6 +335,35 @@ export function applyExclusions(data: DeepDigData, excluded: readonly string[]):
   return { ...data, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finite))) };
 }
 
+/** 极端值的判定倍数：组内低于 Q1 − k·IQR 或高于 Q3 + k·IQR（箱线图的标准，k = 1.5）。 */
+export const OUTLIER_IQR_K = 1.5;
+export interface DeepDigOutlier {
+  id: string;
+  group: DeepDigRowGroup;
+  v: number;
+  side: 'high' | 'low';
+}
+/**
+ * 【用户要求】2026-10-18「描述分析中指出极端值是哪几个」：各组内按四分位距判（组内不足 4 个值不判），
+ * 用这份数据当前的读数（变量、时刻已换好）。按组、再按偏离程度从大到小排。
+ */
+export function findOutliers(data: Pick<DeepDigData, 'rows' | 'groups'>): DeepDigOutlier[] {
+  const out: (DeepDigOutlier & { dist: number })[] = [];
+  for (const s of data.groups) {
+    if (s.n < 4 || !finite(s.q25) || !finite(s.q75)) continue;
+    const iqr = s.q75 - s.q25;
+    const lo = s.q25 - OUTLIER_IQR_K * iqr;
+    const hi = s.q75 + OUTLIER_IQR_K * iqr;
+    for (const r of data.rows) {
+      if (r.group !== s.group || !finite(r.v)) continue;
+      if (r.v > hi) out.push({ id: r.id, group: s.group, v: r.v, side: 'high', dist: (r.v - hi) / (iqr || 1) });
+      else if (r.v < lo) out.push({ id: r.id, group: s.group, v: r.v, side: 'low', dist: (lo - r.v) / (iqr || 1) });
+    }
+  }
+  const order = new Map(DEEP_DIG_GROUPS.map((g, i) => [g, i]));
+  return out.sort((a, b) => order.get(a.group)! - order.get(b.group)! || b.dist - a.dist).map(o => ({ id: o.id, group: o.group, v: o.v, side: o.side }));
+}
+
 /** 推断统计用的是哪些删减：与现在不同 → 提示重跑。 */
 export const exclusionKey = (data: Pick<DeepDigData, 'rows'>, excluded: readonly string[]) => {
   const ids = new Set(data.rows.map(r => r.id));

@@ -4,15 +4,18 @@
  * 并且这个变量可以让我来选择（默认为当前的核心变量）」。
  * 变量从公式里选，默认公式最后一句；删掉的行不算；悬停看每组在那个时点的值。
  * 【用户要求】2026-10-17「时间序列图这里的组别可以选取和删减」：「组别」一行逐组勾选，选择记在本机（按特征值）。
+ * 【用户要求】2026-10-18「手动滑动进场这条竖线，选取不同时刻的对应数据」：一条可拖动的橘黄竖线（默认在进场），
+ * 在图里按下拖动、拖顶上的小标签，或聚焦后用 ← / → 一格一格移；上面的分组表、点阵图、逐场数据跟着按那一刻的值统计。
+ * 进场处的橘黄虚线留着作参照。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { groupLabel, type DeepDigData, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
-import { groupCurves, type DeepDigSeries, type GroupCurve } from '@/lib/deepDig/series';
+import { formatSeriesOffset, groupCurves, type DeepDigSeries, type GroupCurve } from '@/lib/deepDig/series';
 
 const H = 220;
-const PAD = { left: 44, right: 64, top: 10, bottom: 22 };
+const PAD = { left: 44, right: 64, top: 22, bottom: 22 };
 const HOUR = 3_600_000;
 /** 组的颜色与描述统计其他地方一致；随机时点用虚线，颜色之外再区分一层。 */
 const LINE: Record<DeepDigRowGroup, string> = {
@@ -47,20 +50,18 @@ function niceTicks(lo: number, hi: number, count = 4): number[] {
   return out;
 }
 const fmtTick = (v: number, step: number) => (step >= 1 ? v.toFixed(0) : v.toFixed(Math.min(4, Math.ceil(-Math.log10(step)))));
-const fmtHours = (ms: number) => {
-  const h = ms / HOUR;
-  if (h === 0) return '进场';
-  const t = Number.isInteger(h) ? String(Math.abs(h)) : Math.abs(h).toFixed(1);
-  return `${h < 0 ? '−' : '+'}${t}h`;
-};
+const fmtHours = formatSeriesOffset;
 
-export function SeriesChart({ data, series, variable, onVariable }: {
+export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt }: {
   /** 去掉删除行之后的数据。 */
   data: DeepDigData;
   series: DeepDigSeries | null;
   /** 选的变量；null = 公式最后一句。 */
   variable: string | null;
   onVariable: (name: string | null) => void;
+  /** 选中的时刻（相对进场，毫秒）；0 = 进场。 */
+  at?: number;
+  onAt?: (offsetMs: number) => void;
 }) {
   const def = data.definition;
   const boxRef = useRef<HTMLDivElement>(null);
@@ -70,6 +71,8 @@ export function SeriesChart({ data, series, variable, onVariable }: {
   const setHidden = (next: ReadonlySet<DeepDigRowGroup>) => { setHiddenState(next); writeHidden(def.id, next); };
   const toggle = (g: DeepDigRowGroup) => { const n = new Set(hidden); if (n.has(g)) n.delete(g); else n.add(g); setHidden(n); };
   const [table, setTable] = useState(false);
+  const hitRef = useRef<SVGRectElement>(null);
+  const dragging = useRef(false);
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -146,11 +149,36 @@ export function SeriesChart({ data, series, variable, onVariable }: {
     if (ends[i].y > limit) ends[i].y = limit;
   }
 
-  const onMove = (e: React.MouseEvent<SVGRectElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const px = ((e.clientX - rect.left) / rect.width) * innerW;
-    setHover(Math.max(0, Math.min(P - 1, Math.round((px / innerW) * (P - 1)))));
+  const kAt = (clientX: number) => {
+    if (!Number.isFinite(clientX)) return null;
+    const rect = hitRef.current?.getBoundingClientRect();
+    if (!rect || !(rect.width > 0)) return null;
+    const px = ((clientX - rect.left) / rect.width) * innerW;
+    return Math.max(0, Math.min(P - 1, Math.round((px / innerW) * (P - 1))));
   };
+  const onMove = (e: React.MouseEvent<SVGRectElement>) => setHover(kAt(e.clientX));
+  // 选中的时刻：拖动竖线（图里按下或拖顶上的标签）、← / → 一格一格移
+  const atK = offsets.indexOf(at);
+  const selK = atK >= 0 ? atK : zeroK;
+  const pick = (k: number | null) => { if (k != null && onAt && offsets[k] !== at) onAt(offsets[k]); };
+  const startDrag = (e: React.PointerEvent<SVGElement>) => {
+    if (!onAt || (e.button != null && e.button !== 0)) return; // 只认左键 / 触摸
+    dragging.current = true;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* 不支持捕获时拖出图外就停 */ }
+    pick(kAt(e.clientX));
+  };
+  const onDrag = (e: React.PointerEvent<SVGElement>) => { if (dragging.current) { const k = kAt(e.clientX); setHover(k); pick(k); } };
+  const endDrag = () => { dragging.current = false; };
+  const onKey = (e: React.KeyboardEvent) => {
+    const step = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (e.key === 'Home') { e.preventDefault(); pick(zeroK); return; }
+    if (!step) return;
+    e.preventDefault();
+    pick(Math.max(0, Math.min(P - 1, selK + step)));
+  };
+  const selLabel = fmtHours(offsets[selK] ?? 0);
+  const pillW = Math.max(30, selLabel.length * 7 + 14);
+  const pillX = Math.max(PAD.left - pillW / 2, Math.min(PAD.left + innerW - pillW / 2, x(selK) - pillW / 2));
   const hk = hover;
   const tableKs = offsets.map((o, k) => ({ o, k })).filter(({ o }) => o % (6 * HOUR) === 0 || o === offsets[0] || o === offsets[P - 1]);
 
@@ -212,6 +240,9 @@ export function SeriesChart({ data, series, variable, onVariable }: {
           <button type="button" onClick={() => setTable(t => !t)} className="text-[11px] text-muted-foreground hover:text-foreground" data-testid="deep-dig-series-table-toggle">
             {table ? '看曲线' : '看数字'}
           </button>
+          {onAt && at !== 0 && (
+            <button type="button" onClick={() => onAt(0)} className="text-[11px] text-[#C27C0E] hover:text-foreground dark:text-[#F59E0B]" data-testid="deep-dig-series-at-reset">回到进场</button>
+          )}
         </div>
       </div>
 
@@ -258,6 +289,31 @@ export function SeriesChart({ data, series, variable, onVariable }: {
               {ends.map(e => (
                 <text key={e.g} x={PAD.left + innerW + 6} y={e.y} dy="0.32em" className="fill-foreground/80 text-[10.5px]">{groupLabel(e.g, def.source)}</text>
               ))}
+              {onAt && selK >= 0 && (
+                <g data-testid="deep-dig-series-at">
+                  <line x1={x(selK)} x2={x(selK)} y1={PAD.top} y2={PAD.top + innerH} className="stroke-[#F59E0B]" strokeWidth={1.5} pointerEvents="none" />
+                  <g
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="选取时刻（拖动或按 ← →，Home 回到进场）"
+                    aria-valuemin={offsets[0] / HOUR}
+                    aria-valuemax={offsets[P - 1] / HOUR}
+                    aria-valuenow={(offsets[selK] ?? 0) / HOUR}
+                    aria-valuetext={selLabel}
+                    data-testid="deep-dig-series-at-handle"
+                    onKeyDown={onKey}
+                    onPointerDown={startDrag}
+                    onPointerMove={onDrag}
+                    onPointerUp={endDrag}
+                    onPointerCancel={endDrag}
+                    className="cursor-ew-resize outline-none [&:focus-visible>rect]:stroke-foreground"
+                    style={{ touchAction: 'none' }}
+                  >
+                    <rect x={pillX} y={3} width={pillW} height={16} rx={8} className="fill-[#F59E0B]" stroke="transparent" strokeWidth={1.5} />
+                    <text x={pillX + pillW / 2} y={11} dy="0.35em" textAnchor="middle" className="pointer-events-none select-none fill-white font-mono text-[10px] font-medium">{selLabel}</text>
+                  </g>
+                </g>
+              )}
               {hk != null && (
                 <g pointerEvents="none">
                   <line x1={x(hk)} x2={x(hk)} y1={PAD.top} y2={PAD.top + innerH} className="stroke-foreground/40" strokeWidth={1} />
@@ -266,7 +322,14 @@ export function SeriesChart({ data, series, variable, onVariable }: {
                   ))}
                 </g>
               )}
-              <rect x={PAD.left} y={PAD.top} width={innerW} height={innerH} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} data-testid="deep-dig-series-hit" />
+              <rect
+                ref={hitRef} x={PAD.left} y={PAD.top} width={innerW} height={innerH} fill="transparent"
+                onMouseMove={onMove} onMouseLeave={() => { if (!dragging.current) setHover(null); }}
+                onPointerDown={startDrag} onPointerMove={onDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                className={onAt ? 'cursor-ew-resize' : undefined}
+                style={onAt ? { touchAction: 'pan-y' } : undefined}
+                data-testid="deep-dig-series-hit"
+              />
             </svg>
             {hk != null && (
               <div
@@ -287,7 +350,7 @@ export function SeriesChart({ data, series, variable, onVariable }: {
         )}
       </div>
       <p className="text-[11px] text-muted-foreground">
-        每个时点取那一刻之前最后一根已收盘 K 线上的值，再按组平均；阴影 = 平均 ± 1 个标准误。进场后的部分只作描述，特征值与检验只用进场前的数据。
+        每个时点取那一刻之前最后一根已收盘 K 线上的值，再按组平均；阴影 = 平均 ± 1 个标准误。{onAt ? '拖动橘黄竖线（或点图里任一处）选时刻，上面的分组表跟着换成那一刻的值。' : ''}进场后的部分只作描述，特征值与检验只用进场前的数据。
       </p>
     </div>
   );
