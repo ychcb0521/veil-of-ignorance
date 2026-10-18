@@ -19,7 +19,7 @@ import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/Def
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
 import { formatSeriesOffset, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
-import { dataVariables } from '@/lib/deepDig/commands';
+import { dataVariables, targetOf } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
 export const DEEP_DIG_TABS: { key: DeepDigTab; label: string }[] = [
@@ -194,6 +194,12 @@ export function FeatureView(props: FeatureViewProps) {
             onRun={() => { if (effective) props.onInfer(effective, exKey); }}
             hint={`按上面的命令逐行算，用描述统计的数据（已去掉删除的行${temp.length ? `、暂时删除的 ${temp.length} 行` : ''}），不联网，几秒到十几秒`}
           />
+          {base && data && (
+            <InferOutliers
+              base={base} temp={temp} onTempChange={setTemp} commands={props.commands}
+              ran={inference && inference.dataFinishedAt === data.finishedAt ? inference : null}
+            />
+          )}
           {inference && !inferenceFresh && (
             <Notice testId="deep-dig-infer-stale">
               {defStale ? '分组或公式改过了，请先重新运行描述统计' : inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
@@ -205,6 +211,82 @@ export function FeatureView(props: FeatureViewProps) {
         </div>
       )}
       {tab === 'rules' && <RulesTab {...props} data={effective} inference={inferenceFresh ? inference : null} />}
+    </div>
+  );
+}
+
+/**
+ * 【用户要求】2026-10-18「我现在不知道推断统计时，是否包含的极端值」：推断统计页写明——
+ * 按因变量判出哪些极端值（各组四分位距 1.5 倍以外，进场时的值）、上一次结果含其中几个、现在的数据里还剩几个；
+ * 「全部暂时删除 / 全部恢复」就地点（与描述统计的暂时删除是同一份）。
+ */
+function InferOutliers({ base, temp, onTempChange, commands, ran }: {
+  base: DeepDigData;
+  temp: readonly string[];
+  onTempChange: (ids: readonly string[]) => void;
+  commands: string;
+  /** 这份描述统计数据上跑出的推断统计（没有 / 数据已重跑为 null）。 */
+  ran: DeepDigInference | null;
+}) {
+  const def = base.definition;
+  const nameOf = (target: string | null) => {
+    if (target != null && target !== RESULT_VAR) return target;
+    const r = formulaVariables(def.formula).result;
+    return r !== RESULT_VAR ? r : def.short || '结果';
+  };
+  const target = targetOf(commands);
+  const outliers = useMemo(() => findOutliers(viewForVariable(base, target)), [base, target]);
+  const tempSet = new Set(temp);
+  const removedNow = outliers.filter(o => tempSet.has(o.id)).length;
+  const pending = outliers.filter(o => !tempSet.has(o.id)).map(o => o.id);
+  // 上一次结果：按它当时的因变量判，看当时去掉的行里有没有它们
+  const ranTarget = ran ? (ran.target ?? null) : null;
+  const ranOutliers = useMemo(() => (ran ? findOutliers(viewForVariable(base, ranTarget)) : []), [base, ran, ranTarget]);
+  const ranExcluded = new Set((ran?.excludedKey ?? '').split(',').filter(Boolean));
+  const ranIncluded = ranOutliers.filter(o => !ranExcluded.has(o.id)).length;
+  const counts = DEEP_DIG_GROUPS.map(g => ({ g, n: outliers.filter(o => o.group === g).length })).filter(c => c.n > 0);
+  const AMBER = 'text-[#C27C0E] dark:text-[#F59E0B]';
+  const linkBtn = 'text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline';
+  return (
+    <div className="max-w-[720px] space-y-0.5 text-[11.5px]" data-testid="deep-dig-infer-outliers">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="font-medium">极端值</span>
+        <span className="text-[11px] text-muted-foreground">按因变量 <span className="font-mono text-foreground">X = {nameOf(target)}</span>（进场时的值）· 各组四分位距 {OUTLIER_IQR_K} 倍以外</span>
+        {outliers.length === 0 ? <span className="text-[11px] text-muted-foreground">没有</span> : (
+          <span className="text-[11px]">
+            {counts.map((c, i) => (
+              <span key={c.g}>{i > 0 && <span className="text-muted-foreground"> · </span>}<span className={GROUP_TONE[c.g]}>{groupLabel(c.g, def.source)}</span> <N>{c.n}</N></span>
+            ))}
+          </span>
+        )}
+      </div>
+      {(outliers.length > 0 || (ran && ranOutliers.length > 0)) && (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+          {ran && ranOutliers.length > 0 && (
+            <span data-testid="deep-dig-infer-outliers-ran">
+              上次结果：{ranIncluded > 0
+                ? <span className={AMBER}>含 <N className={AMBER}>{ranIncluded}</N> 个极端值{ranIncluded < ranOutliers.length ? `（去掉了 ${ranOutliers.length - ranIncluded} 个）` : ''}</span>
+                : <span className="text-foreground">不含极端值（{ranOutliers.length} 个都去掉了）</span>}
+              {ranTarget !== target && <span className="text-muted-foreground">（按当时的因变量 {nameOf(ranTarget)} 判）</span>}
+            </span>
+          )}
+          {outliers.length > 0 && (
+            <span className="text-muted-foreground" data-testid="deep-dig-infer-outliers-now">
+              {ran && ranOutliers.length > 0 && '· '}现在：{removedNow === 0
+                ? <span className="text-foreground">都在数据里，运行会包含</span>
+                : removedNow === outliers.length
+                  ? <span className="text-foreground">已全部暂时删除，运行不含</span>
+                  : <span className="text-foreground">暂时删除了 {removedNow} 个，还含 {outliers.length - removedNow} 个</span>}
+            </span>
+          )}
+          {pending.length > 0 && (
+            <button type="button" className={linkBtn} onClick={() => onTempChange([...temp, ...pending])} data-testid="deep-dig-infer-outliers-remove-all">全部暂时删除</button>
+          )}
+          {temp.length > 0 && (
+            <button type="button" className={linkBtn} onClick={() => onTempChange([])} data-testid="deep-dig-infer-outliers-restore-all">全部恢复</button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,8 +2,8 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/journal/deepDig/FeatureView';
-import { describeGroup, DEEP_DIG_GROUPS, type DeepDigData, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
-import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
+import { describeGroup, DEEP_DIG_GROUPS, exclusionKey, findOutliers, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
+import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
 import { DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
 import type { DeepDigSeries } from '@/lib/deepDig/series';
 import { makeData } from '@/lib/deepDig/__tests__/fixtures';
@@ -28,7 +28,7 @@ const SERIES: DeepDigSeries = {
   byEvent: Object.fromEntries(DATA.rows.filter(r => r.v != null).map(r => [r.id, Float32Array.from([r.v! / 2, r.v!, 3 * r.v!])])),
 };
 
-function Harness({ onInfer, tab: initialTab = 'describe' }: { onInfer?: (d: DeepDigData, k: string) => void; tab?: DeepDigTab }) {
+function Harness({ onInfer, tab: initialTab = 'describe', inference = null }: { onInfer?: (d: DeepDigData, k: string) => void; tab?: DeepDigTab; inference?: DeepDigInference | null }) {
   const [tab, setTab] = useState<DeepDigTab>(initialTab);
   const [group, setGroup] = useState<DeepDigRowGroup>('positive');
   const [note, setNote] = useState<DeepDigNote | null>(null);
@@ -38,7 +38,7 @@ function Harness({ onInfer, tab: initialTab = 'describe' }: { onInfer?: (d: Deep
   return (
     <FeatureView
       def={DRIFT_SPEED_DEF} editing={false} onEditingChange={() => {}} onSaveDef={() => {}}
-      samples={{ campaigns: [], signals: [] }} data={DATA} series={SERIES} inference={null}
+      samples={{ campaigns: [], signals: [] }} data={DATA} series={SERIES} inference={inference}
       describeStatus="idle" describeProgress={null} describeError={null} canDescribe blockedReason={null}
       onDescribe={vi.fn()} onCancel={vi.fn()} inferStatus="idle" inferError={null} onInfer={onInfer ?? vi.fn()} onDownload={vi.fn()}
       excluded={excluded} onExcludedChange={setExcluded} commands={commands} onCommandsChange={setCommands}
@@ -136,6 +136,31 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     expect(screen.getAllByTestId('deep-dig-outlier-restore')).toHaveLength(all);
     fireEvent.click(screen.getByTestId('deep-dig-outliers-restore-all'));
     expect(Number(posCell(1))).toBe(n0);
+    sessionStorage.clear();
+  });
+
+  it('【用户要求】推断统计页写明极端值：按因变量判几个、上次结果含不含、现在的数据里还在不在；就地全部暂时删除 / 恢复', () => {
+    sessionStorage.clear();
+    localStorage.clear();
+    const ids = findOutliers(DATA).map(o => o.id);
+    expect(ids).toContain(BIG_ID);
+    // 上次结果：没去掉任何行 → 含全部极端值
+    const withAll = runInference(DATA, DEFAULT_COMMANDS, { excludedKey: '' });
+    const { unmount } = render(<Harness tab="infer" inference={withAll} />);
+    const box = () => screen.getByTestId('deep-dig-infer-outliers');
+    expect(box()).toHaveTextContent('按因变量 X = a（进场时的值）· 各组四分位距 1.5 倍以外');
+    expect(screen.getByTestId('deep-dig-infer-outliers-ran')).toHaveTextContent(`上次结果：含 ${ids.length} 个极端值`);
+    expect(screen.getByTestId('deep-dig-infer-outliers-now')).toHaveTextContent('现在：都在数据里，运行会包含');
+    fireEvent.click(screen.getByTestId('deep-dig-infer-outliers-remove-all'));
+    expect(screen.getByTestId('deep-dig-infer-outliers-now')).toHaveTextContent('现在：已全部暂时删除，运行不含');
+    expect(screen.getByTestId('deep-dig-infer-stale')).toBeInTheDocument(); // 删减变了，提示重跑
+    unmount();
+    // 上次结果是去掉极端值之后跑的 → 不含
+    const without = runInference(DATA, DEFAULT_COMMANDS, { excludedKey: exclusionKey(DATA, ids) });
+    render(<Harness tab="infer" inference={without} />);
+    expect(screen.getByTestId('deep-dig-infer-outliers-ran')).toHaveTextContent(`上次结果：不含极端值（${ids.length} 个都去掉了）`);
+    fireEvent.click(screen.getByTestId('deep-dig-infer-outliers-restore-all'));
+    expect(screen.getByTestId('deep-dig-infer-outliers-now')).toHaveTextContent('现在：都在数据里，运行会包含');
     sessionStorage.clear();
   });
 });
