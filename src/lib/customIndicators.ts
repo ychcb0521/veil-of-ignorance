@@ -234,7 +234,7 @@ export function rollingAvgHours(values: readonly (number | null | undefined)[], 
 }
 
 /**
- * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开副图——买方推力的加速度 a、avg_a、主动买方优势 A；BSS 带出 avg_BSS。
+ * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开副图——买方推力漂移速度 DSP·a、avg_a、主动买方优势 A；BSS 带出 avg_BSS。
  * 附属副图用「主项#后缀」作 CandlestickChart 里 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除；按这里的顺序依次往下建。
  */
 const DSP_COMPANIONS = [
@@ -935,7 +935,7 @@ export function registerCustomIndicators() {
     },
   });
 
-  // ─── 动态谢林点 DSP（主图）+ 买方推力的加速度 a、主动买方优势 A（两个副图）───
+  // ─── 动态谢林点 DSP（主图）+ 买方推力漂移速度 DSP·a、主动买方优势 A（两个副图）───
   // 【用户要求】2026-10-15 按用户规格；计算在 dynamicSchellingPoint.ts。成交额来自 K 线的 turnover / takerBuyTurnover（USDT），缺失不拿币数凑。
   // 三个指标各算一遍同一个 computeDsp（同一份数据、同一个半衰期），结果一致。
   registerIndicator({

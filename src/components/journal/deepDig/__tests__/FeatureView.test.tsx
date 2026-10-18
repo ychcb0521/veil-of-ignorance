@@ -59,7 +59,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     render(<DeepDigDirectory defs={[DRIFT_SPEED_DEF, custom]} results={{ [DRIFT_SPEED_DEF.id]: { data: DATA, inference: INF } }} notes={{}} onOpen={onOpen} onAdd={onAdd} />);
     const entries = screen.getAllByTestId('deep-dig-entry');
     expect(entries).toHaveLength(2);
-    expect(entries[0]).toHaveTextContent('买方推力的加速度 a');
+    expect(entries[0]).toHaveTextContent('买方推力漂移速度 DSP·a');
     expect(screen.queryByText(/中位数 实验组/)).not.toBeInTheDocument();
     expect(screen.queryByText('未运行')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId(`deep-dig-open-${custom.id}-infer`));
@@ -79,7 +79,7 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(onDelete).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId(`deep-dig-delete-confirm-${custom.id}`));
     expect(onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: custom.id }));
-    expect(screen.getByTestId('deep-dig-removed-features')).toHaveTextContent('买方推力的加速度 a');
+    expect(screen.getByTestId('deep-dig-removed-features')).toHaveTextContent('买方推力漂移速度 DSP·a');
     fireEvent.click(screen.getByTestId(`deep-dig-restore-${DRIFT_SPEED_DEF.id}`));
     expect(onRestore).toHaveBeenCalledWith(DRIFT_SPEED_DEF.id);
   });

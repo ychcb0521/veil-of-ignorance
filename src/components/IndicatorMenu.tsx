@@ -159,7 +159,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   { id: 'CORR',   nameZh: '相关系数',                nameEn: 'Correlation Coefficient',     isOverlay: false, defaultPeriod: 20, color: '#67E8F9', category: 'volatility' },
 
   // --- Volume ---
-  // 【用户要求】动态谢林点：主图 DSP 线 + 副图 买方推力的加速度 a、主动买方优势 A；参数 = 5 分钟图上的时间半衰期（小时，其他周期等比例缩放），成交量一律用金额
+  // 【用户要求】动态谢林点：主图 DSP 线 + 副图 买方推力漂移速度 DSP·a、主动买方优势 A；参数 = 5 分钟图上的时间半衰期（小时，其他周期等比例缩放），成交量一律用金额
   { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
   // 【用户要求】可以隐去主图的 DSP 线：只要 a / A 两个副图；与上一项二选一
   { id: 'DSP_VA', nameZh: '动态谢林点 a / A（只要副图）',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },

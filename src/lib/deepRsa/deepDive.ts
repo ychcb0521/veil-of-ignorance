@@ -129,7 +129,7 @@ export const FEATURES_STUDY: DeepDiveStudy = {
 /** 【用户要求】2026-10-16「你要把这个指标在 deep RSA 那里做统计检验」：动态谢林点（docs/deep-rsa/12-dsp-test.md，运行前写定）。 */
 export const DSP_FEATURES: readonly DeepDiveFeatureSpec[] = [
   {
-    key: 'dsp_v', name: '买方推力的加速度 a', weighted: true,
+    key: 'dsp_v', name: '买方推力漂移速度 DSP·a', weighted: true,
     definition: '动态谢林点指标在进场前最后一根 5m K 线上的 Vₜ：净资金力量 × 买方优势权重 × 价格变化，按半衰期 h 指数平滑。',
     formula: 'Vₜ = ρ·Vₜ₋₁ + (1 − ρ)·Fₜ·Gₜ·Rₜ，Fₜ = ln(1 + |Bₜ − Sₜ| ÷ EMA(Bₜ + Sₜ))，Gₜ = 1 + max(Aₜ, 0)，Rₜ = ln(Cₜ ÷ Cₜ₋₁)；B / S 为主动买 / 卖成交金额',
     reading: '正 = 共识价（谢林点）在往上移，越大移得越快（界面按基点 / 根显示）',
@@ -176,7 +176,7 @@ export const DRIFT_STUDY: DeepDiveStudy = {
   ...DSP_STUDY,
   id: 'drift',
   step: 'Deep dig',
-  definitionsTitle: '买方推力的加速度 a',
+  definitionsTitle: '买方推力漂移速度 DSP·a',
   features: DSP_FEATURES.filter(f => f.key === 'dsp_v'),
 };
 

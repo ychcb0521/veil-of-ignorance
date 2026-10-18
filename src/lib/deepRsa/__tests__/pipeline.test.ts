@@ -226,8 +226,8 @@ describe('Deep dig：周期、半衰期可选', () => {
     expect(m15.calls.filter(u => u.includes('interval=5m')).length).toBeGreaterThanOrEqual(2);
     expect(d15.definition).toMatchObject({ interval: '15m', halfLifeHours: 6 });
     // 公式里每个变量都存下来（推断统计选因变量用）；最后一句 V 就是特征值
-    expect(Object.keys(d15.rows[0].vars ?? {})).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V']);
-    expect(d15.rows.every(r => r.vars?.V === r.v)).toBe(true);
+    expect(Object.keys(d15.rows[0].vars ?? {})).toEqual(['N', 'f', 'A', 'G', 'R', 'F', 'a']);
+    expect(d15.rows.every(r => r.vars?.a === r.v)).toBe(true);
     clearMarketDataCache();
     const m5 = fakeMarket(planted, { quote: true });
     const d5 = await collectDeepDigData(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m5.fetchFn, backgroundCap: 0 });
@@ -263,10 +263,10 @@ describe('Deep dig：周期、半衰期可选', () => {
     expect(a - first).toBeGreaterThanOrEqual(59 * HOUR);
     expect(series.finishedAt).toBe(data.finishedAt);
     expect(series.offsets).toHaveLength(49);
-    expect(series.names).toEqual(['N', 'F', 'A', 'G', 'R', 'U', 'V']);
+    expect(series.names).toEqual(['N', 'f', 'A', 'G', 'R', 'F', 'a']);
     expect(Object.keys(series.byEvent).sort()).toEqual(data.rows.filter(r => r.v != null).map(r => r.id).sort());
-    for (const r of data.rows) expect(valueAt(series, r.id, 'V')!).toBeCloseTo(r.v!, 6);
+    for (const r of data.rows) expect(valueAt(series, r.id, 'a')!).toBeCloseTo(r.v!, 6);
     // 进场后的点也有值（描述进场后怎么走）
-    expect(Number.isFinite(valueAt(series, data.rows[0].id, 'V', 24 * HOUR)!)).toBe(true);
+    expect(Number.isFinite(valueAt(series, data.rows[0].id, 'a', 24 * HOUR)!)).toBe(true);
   });
 });

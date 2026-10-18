@@ -5,7 +5,7 @@
  * 就按照这里的公式提取因变量，按分组标准进行划分组别」。
  *   - 公式：在进场前观察窗内的已收盘 K 线（周期可选，默认 5m）上逐根算，取最后一根的值（见 formula.ts）。
  *   - 分组标准：实验组、对照组各一个条件，按每场战役的读数判断；同时满足 → 冲突，都不满足 → 其他战役。
- * 内置的「买方推力的加速度 a」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
+ * 内置的「买方推力漂移速度 DSP·a」：默认公式用过去 avgh 小时（默认 24）的平均成交额；把 avg(Q, avgh) 换回 ema(Q, hl) 即与主图 DSP 的 V 逐根一致（单元测试核对）。默认分组标准与原 Deep RSA 分组一致。
  */
 import type { ObservationWindow, ResearchBar } from '@/lib/deepRsa/window';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -184,7 +184,7 @@ export const DRIFT_SPEED_FORMULA = LEGACY_A_DRIFT_SPEED_FORMULA
 
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   id: 'drift-speed',
-  name: '买方推力的加速度 a',
+  name: '买方推力漂移速度 DSP·a',
   short: 'a',
   definition: '进场前最后一根 K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期指数平滑（周期、半衰期见下）。',
   formula: DRIFT_SPEED_FORMULA,
@@ -251,7 +251,7 @@ export const BSS_DEF: DeepDigFeatureDef = {
 };
 
 /**
- * 买方推力的加速度 az（Z 分数版）：Deep dig 第三个内置特征值；K 线图「动态谢林点」打开「Z」开关时 a 副图画的就是它
+ * 买方推力漂移速度 DSP·az（Z 分数版）：Deep dig 第三个内置特征值；K 线图「动态谢林点」打开「Z」开关时 a 副图画的就是它
  * （主图用的「平时成交额」是 ema(Q, hl)，把下面 f 一行换成 ema(Q, hl) 就与主图逐根一致，单元测试核对）。
  * 【用户要求】2026-10-18「把 DSP 也做成可以基于 Z 分数的，具体哪一步需要标准化处理，你来定」：只把涨跌 R 除以它自己的标准差——
  * f 本来就是和自己的平均成交额比、A 本来就在 −1 ~ 1，只有 R 带着各个币自己的波动大小；不减均值（减掉会把趋势本身减掉）。
@@ -266,14 +266,14 @@ export const DRIFT_SPEED_Z_FORMULA = [
   'R = ln(C / prev(C))            # 价格变化',
   'Rz = R / sd(R, avgh)           # 价格变化的 Z 分数：除以过去 avgh 小时的标准差（均值按 0）',
   'F = nz(f * G * Rz)             # 单根推力（标准差单位；缺数据的那根记 0）',
-  'az = ema(F, hl, 0)             # 买方推力的加速度（Z 分数版）：按半衰期 hl 指数平滑',
+  'az = ema(F, hl, 0)             # 买方推力漂移速度（Z 分数版）：按半衰期 hl 指数平滑',
 ].join('\n');
 
 export const DRIFT_SPEED_Z_DEF: DeepDigFeatureDef = {
   id: 'drift-speed-z',
-  name: '买方推力的加速度 az（Z 分数）',
+  name: '买方推力漂移速度 DSP·az（Z 分数）',
   short: 'az',
-  definition: '与买方推力的加速度 a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。',
+  definition: '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。',
   formula: DRIFT_SPEED_Z_FORMULA,
   scale: 100,
   unit: '%σ/根',
@@ -402,9 +402,13 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
     ['多空博弈均衡点', '漂移速度 V'].join(''),
     ['谢林点', '迁移速度 V'].join(''),
     ['买方推力的加速度', ' V'].join(''),
+    ['买方推力的加速度', ' a'].join(''),
   ]);
+  // 【用户要求】2026-10-18「买方推力加速度…改成买方推力漂移速度 DSP·a」：Z 分数版的旧内置名也换
+  const legacyZNames = new Set([['买方推力的加速度', ' az（Z 分数）'].join('')]);
   return [...builtins, ...custom].map(def => def.id === DRIFT_SPEED_DEF.id
-    ? { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short } : def);
+    ? { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short }
+    : def.id === DRIFT_SPEED_Z_DEF.id && legacyZNames.has(def.name) ? { ...def, name: DRIFT_SPEED_Z_DEF.name } : def);
 }
 
 /**
@@ -429,7 +433,9 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
-  const formula = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
+  const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
+  // 注释不影响结果：只改了注释（例如 2026-10-18 改名「买方推力漂移速度」）的旧结果不提示重跑
+  const formula = raw.split('\n').map(l => l.replace(/#.*$/, '').trimEnd()).filter(Boolean).join('\n');
   const key: unknown[] = [formula, g.positive.trim(), g.control.trim(), d.source ?? 'campaigns'];
   // 默认周期 / 半衰期不进键：旧结果没有这两项
   if (intervalOf(d) !== DEFAULT_INTERVAL) key.push(intervalOf(d));
