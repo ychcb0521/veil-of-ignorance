@@ -19,6 +19,8 @@ import { queueSimStatePush } from './simStateSync';
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
+  /** 渔扫描的读数快照；普通信号不必提供。 */
+  fish?: import('./fishScanner').FishReading;
   /** 稳定 id，用于列表 key 与删除 */
   id: string;
   /** 归一化后的标的，如 BTCUSDT（大写、去空格与斜杠） */

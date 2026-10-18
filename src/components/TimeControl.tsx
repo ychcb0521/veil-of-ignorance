@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Play, Pause, Square, Clock, BookmarkX,
   Database, ChevronDown, Upload, Download, Plus, Trash2,
-  Loader2,
+  Loader2, Fish,
 } from 'lucide-react';
 import { toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -12,6 +12,8 @@ import {
   setSignalQuality, normalizeSignalQuality,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
+import { useFish } from '@/hooks/useFish';
+import { FishPanel } from '@/components/FishPanel';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
   preflightSignalJumpIssues,
@@ -76,6 +78,8 @@ export function TimeControl({
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
+  const [fishOpen, setFishOpen] = useState(false);
+  const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
   const [importOpen, setImportOpen] = useState(() => signals.length === 0);
@@ -268,14 +272,14 @@ export function TimeControl({
   // 战役数据在服务端，只在信号库展开时拉一次，避免每次渲染都打库。
   const [campaignDayIndex, setCampaignDayIndex] = useState<Set<string>>(() => new Set());
   useEffect(() => {
-    if (!signalLibOpen || !user?.id) return;
+    if ((!signalLibOpen && !fishOpen) || !user?.id) return;
     let cancelled = false;
     void listAllCampaigns(user.id)
       .then(list => { if (!cancelled) setCampaignDayIndex(buildCampaignDayIndex(list)); })
       // 拉取失败就不标注——这只是辅助信息，绝不能挡住信号库本身的使用
       .catch(() => { if (!cancelled) setCampaignDayIndex(new Set()); });
     return () => { cancelled = true; };
-  }, [signalLibOpen, user?.id]);
+  }, [signalLibOpen, fishOpen, user?.id]);
 
   const doImport = (text: string) => {
     const { signals: parsed, errors } = parseSignalText(text);
@@ -364,15 +368,41 @@ export function TimeControl({
         setSignalLibOpen(false);
         return;
       }
-      if (result.fatalIssue) {
+      const issue = 'fatalIssue' in result ? result.fatalIssue : undefined;
+      if (issue) {
         setSignals(prev => prev.map(item =>
-          item.id === sig.id ? { ...item, jumpIssue: result.fatalIssue } : item));
+          item.id === sig.id ? { ...item, jumpIssue: issue } : item));
       }
     } finally {
       jumpingSignalIdRef.current = null;
       setJumpingSignalId(null);
     }
   }, []);
+
+  const handleAddFish = useCallback((id?: string) => {
+    const incoming = id ? fish.signalsRef.current.filter(s => s.id === id) : fish.signalsRef.current;
+    setSignals(prev => mergeSignals(prev, incoming));
+    toast.success('已加入信号库（重复项自动跳过）');
+  }, [fish.signalsRef]);
+  const handleDeleteFish = useCallback((id: string) => fish.commit(fish.signalsRef.current.filter(s => s.id !== id)), [fish.commit, fish.signalsRef]);
+  const handleRateFish = useCallback((id: string, quality: number) => fish.commit(setSignalQuality(fish.signalsRef.current, id, quality)), [fish.commit, fish.signalsRef]);
+  const handleJumpFish = useCallback(async (id: string) => {
+    const sig = fish.signalsRef.current.find(s => s.id === id);
+    if (!sig || jumpingSignalIdRef.current) return;
+    const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
+    if (!jumpTo) { changeSymbol?.(sig.symbol); setFishOpen(false); return; }
+    jumpingSignalIdRef.current = id; setJumpingSignalId(id);
+    try {
+      const result = await jumpTo(sig.symbol, sig.timeMs);
+      if (result.ok) {
+        if (sig.jumpIssue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: undefined } : s));
+        setFishOpen(false);
+      } else {
+        const issue = 'fatalIssue' in result ? result.fatalIssue : undefined;
+        if (issue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
+      }
+    } finally { jumpingSignalIdRef.current = null; setJumpingSignalId(null); }
+  }, [fish.commit, fish.signalsRef]);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -439,7 +469,7 @@ export function TimeControl({
         </div>
 
         <button
-          onClick={() => setSignalLibOpen(o => !o)}
+          onClick={() => { setFishOpen(false); setSignalLibOpen(o => !o); }}
           title="信号库：上传「标的 + 时间 + 兜底区」，从下拉里点开标的即可直接跳转盘面"
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${
             signalLibOpen
@@ -453,6 +483,13 @@ export function TimeControl({
             <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{signals.length}</span>
           )}
           <ChevronDown className={`w-3 h-3 transition-transform ${signalLibOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); setFishOpen(o => !o); }}
+          className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
+          <Fish className="w-3 h-3" />渔
+          <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{fish.signals.length}</span>
+          <ChevronDown className={`w-3 h-3 transition-transform ${fishOpen ? 'rotate-180' : ''}`} />
         </button>
 
         {status === 'stopped' && (
@@ -514,6 +551,9 @@ export function TimeControl({
           </>
         )}
       </div>
+
+      {fishOpen && <FishPanel signals={fish.signals} progress={fish.progress} onStart={() => { void fish.start(); }} onCancel={fish.cancel} onAdd={handleAddFish}
+        onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (

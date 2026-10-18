@@ -1,0 +1,135 @@
+import { describe, it, expect, vi } from 'vitest';
+import { FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
+import { computeCbi2 } from '@/lib/cbi2';
+import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
+import type { ResearchBar } from '@/lib/deepRsa/window';
+import { mulberry32 } from '@/lib/deepRsa/grouping';
+import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
+
+function research(n: number): ResearchBar[] {
+  const rand = mulberry32(123); let price = 100, btc = 50000;
+  return Array.from({ length: n }, (_, i) => {
+    const open = price; price *= Math.exp((rand() - 0.48) * 0.01);
+    btc *= Math.exp((rand() - 0.5) * 0.004);
+    const q = 10000 * (0.2 + rand());
+    return { openTime: i * FISH_STEP, open, high: Math.max(open, price) * (1 + 0.002 * rand()), low: Math.min(open, price) * (1 - 0.002 * rand()), close: price, volume: q / price, quoteVolume: q, takerBuyQuoteVolume: q * (0.1 + 0.8 * rand()), takerBuyVolume: null, refClose: btc };
+  });
+}
+const cut = 10000 * FISH_STEP;
+const bar = (openTime: number): ResearchBar => ({ openTime, open: 100, high: 102, low: 98, close: 101, volume: 100, quoteVolume: 10000, takerBuyQuoteVolume: 6000, takerBuyVolume: null });
+const window = (cutoff = cut) => Array.from({ length: 2000 }, (_, i) => bar(cutoff - (2000 - i) * FISH_STEP));
+const values = (b: readonly ResearchBar[]) => ({ cbi2: Float64Array.from(b, () => 0.5), average: Float64Array.from(b, x => x.openTime + FISH_STEP >= cut - 20 * FISH_STEP ? 0.31 : 0.2) });
+const contract = (symbol: string, extra = {}) => ({ symbol, contractType: 'PERPETUAL', quoteAsset: 'USDT', status: 'TRADING', ...extra });
+function market(symbols = ['BTCUSDT','AAAUSDT','BBBUSDT']) {
+  let cutoff = cut;
+  const calls: URL[] = []; let active = 0, max = 0;
+  let missingBtc = false, missing = '', fail = '', banned = '', forming = false;
+  const fetcher = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+    const u = new URL(String(url)); calls.push(u);
+    if (options?.signal?.aborted) throw new DOMException('cancelled', 'AbortError');
+    const response = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
+    if (u.pathname.endsWith('/time')) return response({ serverTime: cutoff + 123456 });
+    if (u.pathname.endsWith('/exchangeInfo')) return response({ symbols: [...symbols.map(s => contract(s)), contract('IGNOREUSDC', { quoteAsset: 'USDC' }), contract('IGNORE_QUARTER', { contractType: 'CURRENT_QUARTER' }), contract('IGNORE_CLOSED', { status: 'SETTLING' })] });
+    const symbol = u.searchParams.get('symbol')!;
+    active++; max = Math.max(max, active);
+    await new Promise(resolve => setTimeout(resolve, 1)); active--;
+    if (symbol === banned) return response({}, 418);
+    if (symbol === fail) return response({}, 500);
+    const start = Number(u.searchParams.get('startTime')), end = Number(u.searchParams.get('endTime'));
+    const rows = [];
+    for (let t = start; t <= end; t += FISH_STEP) {
+      if ((symbol === 'BTCUSDT' && missingBtc || symbol === missing) && t === cut - 5 * FISH_STEP) continue;
+      rows.push([t,100,102,98,101,100,t + FISH_STEP - 1,10000,12,60,6000,0]);
+    }
+    if (forming && end + 1 === cutoff) rows.push([cutoff,100,102,98,101,100,cutoff+FISH_STEP-1,10000,12,60,6000,0]);
+    return response(rows);
+  });
+  return { fetcher: fetcher as unknown as typeof fetch, calls, max: () => max, next: (n = 1) => { cutoff += n * FISH_STEP; }, missingBtc: () => { missingBtc = true; }, missing: (s: string) => { missing = s; }, fail: (s: string) => { fail = s; }, ban: (s: string) => { banned = s; }, forming: () => { forming = true; } };
+}
+const options = (found: TradeSignal[] = [], signal = new AbortController().signal) => ({ signal, onProgress: (_: FishProgress) => {}, onSignal: (s: TradeSignal) => found.push(s) });
+
+describe('渔的CBI-2口径', { timeout: 60000 }, () => {
+  it('A与evaluateOnBars和computeCbi2逐位一致；1455与3000根最终读数差小于1e-9', () => {
+    const b = research(3000);
+    const actual = calculateFishReadings(b);
+    const expected = evaluateOnBars(b, compileFeatureFormula(`${CBI2_FORMULA}\nAfish = avg(CBI2, 24)`), { avgHours: 24, interval: '5m' }).last as Float64Array;
+    const native = computeCbi2(b).map(p => p.cbi2);
+    for (let i = FISH_FIRST_USABLE; i < b.length; i++) {
+      expect(actual.average[i]).toBe(expected[i]);
+      expect(actual.cbi2[i]).toBe(native[i]);
+      const mean = native.slice(i - 287, i + 1).reduce<number>((sum, v) => sum + v!, 0) / 288;
+      expect(Math.abs(actual.average[i] - mean)).toBeLessThan(1e-12);
+    }
+    const short = calculateFishReadings(b.slice(-1455));
+    expect(Math.abs(short.average[1454] - actual.average[2999])).toBeLessThan(1e-9);
+  });
+  it('严格上穿才入库；截止后移时间不变；恰好0.3不命中、持续高位起点不明', () => {
+    const b = window(); const r = values(b);
+    const first = classifyFishReadings('AAAUSDT', b, r.cbi2, r.average, cut);
+    expect(first.outcome).toBe('hit');
+    expect(first.signal!.timeMs).toBe(cut - 20 * FISH_STEP);
+    expect(first.signal!.id).toBe(`fish-AAAUSDT-${cut - 20 * FISH_STEP}`);
+    expect(first.signal!.timeLabel).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/);
+    const later = window(cut + 3 * FISH_STEP), r2 = values(later);
+    expect(classifyFishReadings('AAAUSDT', later, r2.cbi2, r2.average, cut + 3 * FISH_STEP).signal!.timeMs).toBe(first.signal!.timeMs);
+    r.average[1999] = 0.3;
+    expect(classifyFishReadings('AAAUSDT', b, r.cbi2, r.average, cut).outcome).toBe('below');
+    r.average.fill(0.31);
+    expect(classifyFishReadings('AAAUSDT', b, r.cbi2, r.average, cut).outcome).toBe('unknown');
+    r.average.fill(0.2); r.average.fill(0.31,1454);
+    expect(classifyFishReadings('AAAUSDT', b, r.cbi2, r.average, cut).outcome).toBe('unknown');
+    r.average[1500] = NaN;
+    expect(classifyFishReadings('AAAUSDT', b, r.cbi2, r.average, cut).outcome).toBe('readings');
+  });
+});
+
+describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () => {
+  it('范围一致、固定截止、BTC只取一次、排除未收盘根；再扫只补新增K线且不重复入库', async () => {
+    const m = market(); m.forming(); const found: TradeSignal[] = [];
+    const scanner = new FishScanner(m.fetcher, undefined, values);
+    expect((await scanner.scan(options(found))).status).toBe('complete');
+    let klines = m.calls.filter(u => u.pathname.endsWith('/klines'));
+    expect(klines).toHaveLength(6);
+    expect(klines.filter(u => u.searchParams.get('symbol') === 'BTCUSDT')).toHaveLength(2);
+    expect(klines.every(u => u.searchParams.get('limit') === '1000')).toBe(true);
+    expect(klines.every(u => Number(u.searchParams.get('endTime')) < cut)).toBe(true);
+    const n = m.calls.length;
+    await scanner.scan(options(found));
+    expect(m.calls.slice(n).filter(u => u.pathname.endsWith('/klines'))).toHaveLength(0);
+    m.next(); const before = m.calls.length;
+    await scanner.scan(options(found));
+    klines = m.calls.slice(before).filter(u => u.pathname.endsWith('/klines'));
+    expect(klines).toHaveLength(3);
+    expect(klines.every(u => Number(u.searchParams.get('startTime')) === cut && Number(u.searchParams.get('endTime')) === cut + FISH_STEP - 1)).toBe(true);
+    expect(mergeSignals([], found)).toHaveLength(3);
+  });
+  it('BTC缺一根整次中止，未开始其他币；普通币缺根和请求失败分别计数', async () => {
+    const m = market(); m.missingBtc();
+    const result = await new FishScanner(m.fetcher, undefined, values).scan(options());
+    expect(result.status).toBe('aborted'); expect(result.error).toContain('BTC');
+    expect(m.calls.filter(u => u.pathname.endsWith('/klines')).every(u => u.searchParams.get('symbol') === 'BTCUSDT')).toBe(true);
+    const ok = market(); ok.missing('AAAUSDT'); ok.fail('BBBUSDT');
+    const summary = await new FishScanner(ok.fetcher, undefined, values).scan(options());
+    expect(summary.counts.gap).toBe(1); expect(summary.counts.failed).toBe(1);
+    expect(summary.done).toBe(3);
+  });
+  it('并发不超过3；HTTP418中止；取消后不再发送下一批', async () => {
+    const m = market(['BTCUSDT', ...Array.from({ length: 8 }, (_, i) => `COIN${i}USDT`)]);
+    const result = await new FishScanner(m.fetcher, undefined, values).scan(options());
+    expect(result.done).toBe(9); expect(m.max()).toBeLessThanOrEqual(3);
+    const blocked = market(['BTCUSDT','AAAUSDT','BBBUSDT','CCCUSDT','DDDUSDT']); blocked.ban('AAAUSDT');
+    expect((await new FishScanner(blocked.fetcher, undefined, values).scan(options())).status).toBe('aborted');
+    const cancelled = market(); const controller = new AbortController();
+    const p = options([], controller.signal);
+    p.onProgress = (progress: FishProgress) => { if (progress.done >= 1) controller.abort(); };
+    expect((await new FishScanner(cancelled.fetcher, undefined, values).scan(p)).status).toBe('cancelled');
+  });
+  it('rolling每分钟权重≤1200，并在再次扫描之间保留预算', async () => {
+    let now = 0; const reservations: number[] = [];
+    const budget = new FishWeightBudget(() => now, async ms => { now += ms; });
+    const signal = new AbortController().signal;
+    for (let i = 0; i < 700; i++) { await budget.take(5,signal); reservations.push(now); }
+    for (const time of reservations) expect(reservations.filter(t => t <= time && t > time - 60000).length * 5).toBeLessThanOrEqual(1200);
+    expect(reservations[240]).toBe(60000);
+  });
+});

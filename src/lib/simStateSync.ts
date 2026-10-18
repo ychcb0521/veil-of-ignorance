@@ -54,6 +54,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
  * 不走 `sim_<uid>_` 前缀的存储 → 实际 localStorage 键的映射。
  * 这些同样是跟账号走的资产，不能因为键名格式不同就漏掉：
  *   signal_library_v1  用户粘贴的信号库（全局键）
+ *   fish_signals_v1    渔的手动捕捞结果（全局键）
  *   blind_spots_v1     认知盲区清单（veil:blindspots:<uid>）
  *   journal_mirror_v1  远程 schema 缺列时的字段兜底镜像（全局键，内部按 uid 分区）
  *   emotion_diary_v1   情绪日记本地镜像（<version>:<uid>）
@@ -61,6 +62,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
  */
 const ALT_KEY_STORAGE: Record<string, (userId: string) => string> = {
   signal_library_v1: () => 'veil.signalLibrary.v1',
+  fish_signals_v1: () => 'veil.fishSignals.v1',
   blind_spots_v1: (uid) => `veil:blindspots:${uid}`,
   journal_mirror_v1: () => 'journal_local_mirror_v1',
   emotion_diary_v1: (uid) => `decision_emotion_diaries_v1:${uid}`,

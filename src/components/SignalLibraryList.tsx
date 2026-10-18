@@ -185,6 +185,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  extraTitle?: string;
+  onAdd?: (id: string) => void;
   id: string;
   symbol: string;
   timeLabel: string;
@@ -215,7 +217,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -225,14 +227,15 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60"
+      className={`group flex ${onAdd ? 'flex-wrap' : ''} items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
+      title={extraTitle || undefined}
     >
       <button
         onClick={handleJump}
         disabled={disabled}
-        className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
-        title={jumpIssue?.reason ?? `跳转到 ${symbol} @ ${timeLabel}`}
+        className={`grid shrink-0 ${onAdd ? 'grid-cols-[minmax(108px,148px)_128px]' : 'grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)]'} items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
+        title={jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
         {/* 勾号占一条固定的 12px 列，没勾时留空位而不是让标的左移——
@@ -261,9 +264,9 @@ function SignalLibraryRowImpl({
           )}
         </span>
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
-        <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
+        {!onAdd && <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
           {fallbackZone ? `兜底 ${fallbackZone}` : ''}
-        </span>
+        </span>}
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
           整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
@@ -274,6 +277,7 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
+      {onAdd && <button type="button" onClick={() => onAdd(id)} className="shrink-0 text-[10px] text-primary hover:underline">加入信号库</button>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       <span className="min-w-0 flex-1" aria-hidden />
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
@@ -315,6 +319,8 @@ function SignalLibraryRowImpl({
 export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
 interface Props {
+  rowTitle?: (signal: TradeSignal) => string;
+  onAdd?: (id: string) => void;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
   tradedDayIndex: Set<string>;
@@ -348,7 +354,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate,
+  onJump, onDelete, onRate, rowTitle, onAdd,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -524,6 +530,8 @@ function SignalLibraryListImpl({
       <SignalLibraryRow
         key={sig.id}
         id={sig.id}
+        extraTitle={rowTitle?.(sig)}
+        onAdd={onAdd}
         symbol={sig.symbol}
         timeLabel={sig.timeLabel}
         fallbackZone={sig.fallbackZone}

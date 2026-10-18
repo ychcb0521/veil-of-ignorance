@@ -162,6 +162,12 @@ describe('hydrateSimState', () => {
       .toEqual([{ diary_date: '2026-08-16' }]);
   });
 
+  it('渔列表经ALT_KEY_STORAGE同步到veil.fishSignals.v1', async () => {
+    mocks.eq.mockImplementation(async () => ({ data: [{ key: 'fish_signals_v1', value: [{ id: 'fish-AAA-1', symbol: 'AAAUSDT', timeMs: 1, fish: { average: 0.4 } }], updated_at: '2026-08-17T00:00:00Z' }], error: null }));
+    await hydrateSimState(UID);
+    expect(JSON.parse(localStorage.getItem('veil.fishSignals.v1')!)[0]).toMatchObject({ id: 'fish-AAA-1', fish: { average: 0.4 } });
+  });
+
   it('信号库经全局键映射写回 veil.signalLibrary.v1', async () => {
     mocks.eq.mockImplementation(async () => ({
       data: [{ key: 'signal_library_v1', value: [{ id: 's1' }], updated_at: '2026-08-17T00:00:00Z' }],
