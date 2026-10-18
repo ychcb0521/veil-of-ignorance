@@ -18,7 +18,7 @@ import { CODE_VERSION } from '@/lib/deepRsa/campaignLabels';
 import { computeDspFeatures } from '@/lib/deepRsa/dspFeatures';
 import { computeFeatures, FEATURE_DEFINITIONS, weightedVolatility, type FeatureFamily, type FeatureKey } from '@/lib/deepRsa/features';
 import { clusterEvents, normalizeResearchSymbol, sampleBackgroundAnchors, WINDOW_MS, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
-import { fetchFundingHistory, fetchResearchKlines, intervalMs, KLINE_LIGHT_LIMIT, mapLimit, MarketDataError, type FetchFn, type ResearchInterval } from '@/lib/deepRsa/marketData';
+import { fetchFundingHistory, fetchResearchKlines, intervalMs, mapLimit, MarketDataError, type FetchFn, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { forwardOutcome, OUTCOME_HORIZON_MS } from '@/lib/deepRsa/outcome';
 import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import {
@@ -277,10 +277,12 @@ export async function collectRunEvents(
   const fk = options.featureKlines;
   const range = options.seriesRange;
   const fkBarMs = fk ? intervalMs(fk.interval) : BAR_MS;
-  // 曲线要往前多取一段历史，但整段不超过 1000 根（币安权重减半）：默认 5m 多取约 11 小时，曲线最早一点也有 35 小时历史
-  const padFor = (spanMs: number, barMs: number) => (range ? Math.max(0, Math.min(range.beforeMs, Math.floor((KLINE_LIGHT_LIMIT * barMs - spanMs) / barMs) * barMs)) : 0);
-  const before5m = range && !fk ? padFor(WINDOW_MS + Math.max(OUTCOME_HORIZON_MS, range.afterMs) + 2 * BAR_MS, BAR_MS) : 0;
-  const beforeFk = fk && range ? padFor(fk.windowMs + range.afterMs + 2 * fkBarMs, fkBarMs) : 0;
+  // 曲线最早一点（进场 − beforeMs）也要有完整的观察窗：K 线往前多取整段 beforeMs，不再为省权重截到 1000 根以内。
+  // 【用户要求】2026-10-18「CBA-2 的时间序列图…我需要的是连续和完整的…选取的时段内都有数据」：原来整段限 1000 根，
+  // CBA-2 的观察窗 73 小时 + 前后各 24 小时超了，前段一根没多取，进场前的点全缺；默认 5m 也只多取约 11 小时。
+  // 代价：每个事件那次请求的根数过 1000，币安权重 5 → 10（超过 1500 根才分页）。
+  const before5m = range && !fk ? range.beforeMs : 0;
+  const beforeFk = fk && range ? range.beforeMs : 0;
   const volOnly = options.volatilityOnlyAt;
   // K 线命中缓存时一连串事件会在同一轮里算完：每算 ~16ms 让出一次，界面照常响应
   let lastYield = performance.now();

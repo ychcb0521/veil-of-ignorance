@@ -188,7 +188,8 @@ export async function collectDeepDigRun(
   options: CollectOptions = {},
 ): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
-  const params = { interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
+  // 带上 id：CBA-2 的观察窗（48 + avgh + 1 小时）与周期按 id 特判，缺了 id 曲线会按普通 48 小时截取，进场前的点全缺
+  const params = { id: def.id, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
   const range = seriesRangeOf(def);
   const offsets = seriesOffsets(range);
   const { names, result } = formulaVariables(def.formula);

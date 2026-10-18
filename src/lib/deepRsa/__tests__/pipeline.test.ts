@@ -6,7 +6,7 @@ import type { DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { BAR_MS } from '@/lib/deepRsa/window';
 import { collectDeepDigData, collectDeepDigRun } from '@/lib/deepDig/analysis';
 import { valueAt } from '@/lib/deepDig/series';
-import { DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
+import { CBA2_DEF, DRIFT_SPEED_DEF, featureWindowMs } from '@/lib/deepDig/features';
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;
@@ -251,16 +251,16 @@ describe('Deep dig：周期、半衰期可选', () => {
     expect(d12.rows[0].v).not.toBeCloseTo(d6.rows[0].v!, 10);
   });
 
-  it('【用户要求】时间序列曲线：K 线往前多取一段（整段不超过 1000 根，币安权重减半）、往后到进场后 24 小时；每个有特征值的事件一条曲线，τ = 0 ≈ 特征值', async () => {
+  it('【用户要求】时间序列曲线：K 线往前多取整段曲线前段（最早一点也有完整 48 小时观察窗）、往后到进场后 24 小时；每个有特征值的事件一条曲线，τ = 0 ≈ 特征值', async () => {
     const m = fakeMarket(planted, { quote: true });
     const { data, series } = await collectDeepDigRun(reportOf(planted), DRIFT_SPEED_DEF, { fetchFn: m.fetchFn, backgroundCap: 0 });
     const a = planted[0].anchorMs;
     const klines = m.calls.filter(u => new URL(u).pathname.endsWith('/klines'));
-    // 每个事件一次请求，limit ≤ 1000；往前多取约 11 小时（曲线最早一点也有 35 小时历史）
+    // 每个事件一次请求（不到 1500 根不分页）；往前取 48 小时观察窗 + 24 小时曲线前段
     expect(klines).toHaveLength(planted.length);
-    expect(klines.every(u => Number(new URL(u).searchParams.get('limit')) <= 1000)).toBe(true);
+    expect(klines.every(u => Number(new URL(u).searchParams.get('limit')) <= 1500)).toBe(true);
     const first = Number(new URL(klines.find(u => u.includes('symbol=AAAUSDT'))!).searchParams.get('startTime'));
-    expect(a - first).toBeGreaterThanOrEqual(59 * HOUR);
+    expect(a - first).toBeGreaterThanOrEqual(72 * HOUR);
     expect(series.finishedAt).toBe(data.finishedAt);
     expect(series.offsets).toHaveLength(49);
     expect(series.names).toEqual(['N', 'f', 'A', 'G', 'R', 'F', 'a']);
@@ -268,5 +268,24 @@ describe('Deep dig：周期、半衰期可选', () => {
     for (const r of data.rows) expect(valueAt(series, r.id, 'a')!).toBeCloseTo(r.v!, 6);
     // 进场后的点也有值（描述进场后怎么走）
     expect(Number.isFinite(valueAt(series, data.rows[0].id, 'a', 24 * HOUR)!)).toBe(true);
+    // 曲线整段都有值：−24h … +24h 每一点
+    for (const r of data.rows) for (const tau of series.offsets) expect(Number.isFinite(valueAt(series, r.id, 'a', tau)!)).toBe(true);
+  });
+
+  it('【用户要求】2026-10-18 CBA-2 的时间序列连续完整：观察窗 73 小时也往前补足，进场前 24 小时到进场后 24 小时每一点都有值', async () => {
+    const m = fakeMarket(planted, { quote: true });
+    const { data, series } = await collectDeepDigRun(reportOf(planted), CBA2_DEF, { fetchFn: m.fetchFn, backgroundCap: 0 });
+    const a = planted[0].anchorMs;
+    const klines = m.calls.filter(u => new URL(u).pathname.endsWith('/klines') && u.includes('symbol=AAAUSDT'));
+    const first = Math.min(...klines.map(u => Number(new URL(u).searchParams.get('startTime'))));
+    expect(a - first).toBeGreaterThanOrEqual(featureWindowMs(CBA2_DEF) + 24 * HOUR - 5 * 60_000);
+    const withValue = data.rows.filter(r => r.v != null);
+    expect(withValue.length).toBeGreaterThan(0);
+    expect(series.offsets[0]).toBe(-24 * HOUR);
+    for (const r of withValue) {
+      for (const tau of series.offsets) expect(Number.isFinite(valueAt(series, r.id, series.result, tau)!), `${r.id} @ ${tau / HOUR}h`).toBe(true);
+      // τ = 0 与特征值只差在 r² 的 EWMA（半衰期 24 小时，从第一根起算）：曲线多带 24 小时历史，起点影响更小，读数接近但不逐位相同
+      expect(Math.abs(valueAt(series, r.id, series.result)! - r.v!)).toBeLessThan(0.1 * Math.abs(r.v!) + 0.5);
+    }
   });
 });

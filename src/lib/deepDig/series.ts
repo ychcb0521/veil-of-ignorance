@@ -5,7 +5,7 @@
  *
  * 口径：
  *   - 点的时刻 t = 进场 + τ，取 t 之前最后一根已收盘 K 线上的值（τ = 0 就是特征值本身）；
- *   - K 线往前多取一段（整段不超过 1000 根，币安权重减半；默认 5m 曲线最早一点也有 35 小时历史），曲线开头的平滑基本「热起来」了；
+ *   - K 线往前多取整段曲线前段：曲线上每一点都有与特征值本身相同长度的观察窗（featureWindowMs），进场前后整段都有数据；
  *   - 进场后的部分只是描述（看进场后怎么走），特征值、分组、推断统计都只用进场前的数据。
  */
 import { intervalMs } from '@/lib/deepRsa/marketData';
@@ -65,7 +65,7 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'>,
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | null {
