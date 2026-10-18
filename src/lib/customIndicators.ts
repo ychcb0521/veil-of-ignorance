@@ -1,3 +1,4 @@
+import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
 /**
  * Custom indicator registration for klinecharts using the `technicalindicators` NPM library.
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
@@ -186,6 +187,11 @@ export function cbaPoints(dataList: KLineData[], halfLifeHours: number | undefin
  * klinecharts 数据 → CBI（副图）。【用户要求】2026-10-18 新增。参数 = 时间衰减半衰期 h（根）；N、m、ATR 都按根计（所有周期一样），
  * 基线 24 小时按 5 分钟图计（288 根），与其他指标同一约定。成交额读 turnover、主动买入额读 takerBuyTurnover。
  */
+export function cba2Points(dataList: KLineData[], halfLifeHours: number | undefined) {
+  if (dataList.length > 1 && inferIntervalMs(dataList.map(d => ({ time: d.timestamp }))) !== 300000) return dataList.map(() => ({ cba2: null, dd: null, invalid: null }));
+  return computeCba2(dataList.map(d => ({ time: d.timestamp, closed: d.cba2Closed !== false, close: d.close, volume: d.volume, quoteVolume: d.turnover, takerBuyQuoteVolume: d.takerBuyTurnover as number | null })), { halfLifeHours: halfLifeHours ?? CBA2_DEFAULTS.halfLifeHours });
+}
+
 export function cbiPoints(dataList: KLineData[], halfLifeBars: number | undefined) {
   const h = Number(halfLifeBars);
   const bars = dataList.map(d => ({
@@ -1059,6 +1065,16 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => cbaPoints(dataList, indicator.calcParams[0]).map(p => (p.cba == null ? {} : { cba: p.cba })),
   });
 
+  registerIndicator({
+    name: 'CBA2_CUSTOM', shortName: 'CBA-2', calcParams: [6], precision: 2,
+    minValue: 0, maxValue: 0, draw: V_ZERO_LINE,
+    figures: [
+      { key: 'cba2', title: 'CBA-2: ', type: 'line', styles: data => ({ color: vColor((data.current.indicatorData as { cba2?: number } | undefined)?.cba2), size: 1.5 }) },
+      { key: 'invalid', title: '失效（1=是）: ', type: 'circle', styles: () => ({ color: '#F6465D', size: 3 }) },
+    ],
+    calc: (dataList, indicator) => cba2Points(dataList, indicator.calcParams[0]).map(p => ({ cba2: p.cba2 ?? undefined, invalid: p.invalid === true ? 1 : undefined })),
+  });
+
   // ─── CBI 买方优势指数（副图）───
   // 【用户要求】2026-10-18：CBI = P × D，−1 ~ 1，> 0 买方占优。计算在 cbi.ts（与 Deep dig 同一份）。0 轴橘黄色虚线
   registerIndicator({
@@ -1150,6 +1166,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   DSP_VA: 'DSP_V_CUSTOM',
   BSS: 'BSS_CUSTOM',
   CBA: 'CBA_CUSTOM',
+  'CBA-2': 'CBA2_CUSTOM',
   CBI: 'CBI_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',

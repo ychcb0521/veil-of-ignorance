@@ -43,6 +43,8 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'zscore', min: 2, max: 2, usage: 'zscore(x, h)', help: '滚动标准化：(当根 − 过去 h 小时的平均) ÷ 过去 h 小时的标准差（含当根，样本标准差）；空值跳过，开头不满 h 小时用已有的，少于 2 个或标准差为 0 记空' },
   { name: 'sd', min: 2, max: 2, usage: 'sd(x, h)', help: '过去 h 小时的标准差（含当根，样本标准差）：空值跳过，开头不满 h 小时用已有的，少于 2 个记空。例：R / sd(R, avgh) = 按自身波动标准化的涨跌（Z 分数，均值按 0）' },
   { name: 'retain', min: 4, max: 5, usage: 'retain(K, P, E0, h, W)', help: '保留加权和（CBA 用）：Σ wᵢ·Kᵢ·ln(Pₜ ÷ E0ᵢ) ÷ (t − i + 1)，i 取过去 W 小时（默认 48）里的每一根，wᵢ = 2^(−距今小时 ÷ h) 归一化（权重合计 1）；Kᵢ 或 E0ᵢ 为空的那根这一项记 0' },
+  { name: 'full', min: 2, max: 2, usage: 'full(x, n)', help: '最近 n 根全部存在且有效时返回当根 x，否则记空（不补零）' },
+  { name: 'peak', min: 2, max: 2, usage: 'peak(x, n)', help: '最近 n 根最大值，必须满 n 根且没有缺值' },
   { name: 'wsum', min: 3, max: 3, usage: 'wsum(x, h, n)', help: '时间衰减加权和：最近 n 根（含当根），第 i 根权重 2^(−(t − i) ÷ h)，h、n 都以根计；空值跳过，一个都没有记空' },
   { name: 'rsum', min: 2, max: 2, usage: 'rsum(x, h)', help: '过去 h 小时的和（含当根）：空值跳过，一个都没有记空' },
   { name: 'median', min: 2, max: 2, usage: 'median(x, h)', help: '过去 h 小时的中位数（含当根）：空值跳过，一个都没有记空' },
@@ -577,6 +579,23 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       const n = barsForHours(h, barMinutes);
       if (!isSeries(x)) return name === 'median' ? x : name === 'mad' || name === 'rscale' ? 0 : x * n;
       return name === 'median' ? rollingMedian(x, n) : name === 'mad' ? rollingMad(x, n) : name === 'rscale' ? rollingRobustScale(x, n) : rollingSum(x, n);
+    }
+    case 'full': case 'peak': {
+      const n = scalarArg(y, name, '根数', line);
+      if (!Number.isInteger(n) || n < 1) throw new FormulaError(`${name} 的根数要是正整数`, line);
+      if (!isSeries(x)) return x;
+      const out = new Float64Array(x.length).fill(Number.NaN);
+      let count = 0;
+      for (let i = 0; i < x.length; i++) {
+        if (Number.isFinite(x[i])) count++;
+        if (i >= n && Number.isFinite(x[i - n])) count--;
+        if (i >= n - 1 && count === n) {
+          let v = x[i];
+          if (name === 'peak') for (let j = i - n + 1; j < i; j++) v = Math.max(v, x[j]);
+          out[i] = v;
+        }
+      }
+      return out;
     }
     case 'wsum': {
       const h = scalarArg(y, 'wsum', '半衰期', line);

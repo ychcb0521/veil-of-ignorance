@@ -2,6 +2,8 @@ import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 
 export interface KlineData {
+  /** CBA-2只读取已收盘K线；回放成形根显式标记false。 */
+  cba2Closed?: boolean;
   time: number; // ms timestamp (open time)
   open: number;
   high: number;

@@ -1,3 +1,4 @@
+import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
 /**
  * IndicatorMenu — Searchable indicator panel with 80+ indicators.
  * Works with klinecharts native indicator system + custom registered indicators.
@@ -168,6 +169,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // 【用户要求】2026-10-18 CBA 买方定价优势指数（副图）：参数 = 5 分钟图上的时间权重半衰期 h（小时），其他周期等比例缩放（与 DSP 同一约定）
   { id: 'CBA',    nameZh: '买方定价优势指数 CBA',      nameEn: 'Buyer Pricing Advantage (CBA)', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '时间权重半衰期 h（小时，按 5 分钟图计）：48 小时窗口里越早的 K 线权重越小。η = 0.5、α = 1，常态成交额与波动率回看 24 小时（Deep dig 公式里可改）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: CBA_DEFINITION, detail: CBA_STEPS },
   // 【用户要求】2026-10-18 CBI 买方优势指数（副图）：参数 = 时间衰减半衰期 h（根），N = 48、m = 12、ATR 14 根，基线 24 小时按 5 分钟图计
+  { id: 'CBA-2', nameZh: '成交支持下的价格重心迁移 CBA-2', nameEn: 'Volume-supported Price Center Migration', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '仅5分钟已收盘K线；时间权重半衰期h（小时）。48小时完整窗口，历史基线24小时；α=1、ε=0.000001、m=12、失效阈值3均为研究默认值，Deep dig公式可改。其他周期留空。红点1表示独立失效，不清零主值。', periodUnit: 'h', description: CBA2_DEFINITION, detail: CBA2_STEPS },
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },

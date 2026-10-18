@@ -383,8 +383,8 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   );
 }
 
-type ParamValue = { interval: ResearchInterval; halfLifeHours: number; avgHours: number };
-const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d) });
+type ParamValue = { id?: string; interval: ResearchInterval; halfLifeHours: number; avgHours: number };
+const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ id: d.id, interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d) });
 /** 默认值不写进定义（旧定义没有这几项）。 */
 const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> => ({
   interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval,
@@ -460,7 +460,7 @@ export function KlineSettings({ value, onChange, uses, testId }: {
       <div className="flex items-start gap-x-2">
         <span className={PARAM_LABEL}>周期</span>
         <div className={SEGMENT} role="group" aria-label="K 线周期">
-          {FEATURE_INTERVALS.map(iv => (
+          {(value.id === 'cba-2' ? ['5m'] as const : FEATURE_INTERVALS).map(iv => (
             <button key={iv} type="button" aria-pressed={value.interval === iv} title={INTERVAL_LABEL[iv]} data-testid={`${testId}-interval-${iv}`}
               onClick={() => onChange({ ...value, interval: iv })} className={chip(value.interval === iv)}>{iv}</button>
           ))}

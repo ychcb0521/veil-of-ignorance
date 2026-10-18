@@ -136,7 +136,7 @@ describe('【用户要求】CBI 买方优势指数', () => {
   });
 
   it('Deep dig 第五个特征值 CBI：公式与图表指标的 computeCbi 逐根一致（5 分钟、15 分钟；含缺成交额）', () => {
-    expect(BUILTIN_FEATURES.map(d => d.id)).toEqual(['drift-speed', 'bss', 'cba', 'drift-speed-z', CBI_DEF.id]);
+    expect(BUILTIN_FEATURES.slice(0, 5).map(d => d.id)).toEqual(['drift-speed', 'bss', 'cba', 'drift-speed-z', CBI_DEF.id]);
     expect(formulaVariables(CBI_FORMULA).result).toBe('CBI');
     const compiled = compileFeatureFormula(CBI_FORMULA);
     for (const [barMs, missingEvery] of [[BAR_MS, 0], [BAR_MS, 37], [3 * BAR_MS, 0]] as const) {

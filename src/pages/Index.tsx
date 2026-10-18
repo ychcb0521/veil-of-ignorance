@@ -282,8 +282,14 @@ const Index = () => {
   }, [activeSymbol, displayCurrentPrice, priceMap]);
 
   const displayData = useMemo(
-    () => applyCurrentPriceToVisibleData(visibleData, displayCurrentPrice),
-    [visibleData, displayCurrentPrice],
+    () => applyCurrentPriceToVisibleData(visibleData, displayCurrentPrice).map((bar, i) => {
+      if (i !== visibleData.length - 1) return bar;
+      const closed = timeDirection === -1 && activeReverseCap != null
+        ? effectiveSimTime <= mirrorTime(activeReverseCap, bar.time)
+        : effectiveSimTime >= bar.time + iMs;
+      return { ...bar, cba2Closed: closed };
+    }),
+    [visibleData, displayCurrentPrice, effectiveSimTime, iMs, timeDirection, activeReverseCap],
   );
 
   // 倒放坐标轴换算：镜像时间 → 真实时间（对合函数，正反同式）。
@@ -877,6 +883,7 @@ const Index = () => {
             close: displayClose,
             volume: candle.volume * progress,
             ...chartAmountFields(candle, progress),
+            cba2Closed: progress >= 1,
           });
           // 闸门与撮合必须同源，而「同源」的口径是**这根收线时撮合会用的区间**，
           // 即整根 high/low：这根一旦收线，落定分支就拿 data[i] 的完整 high/low 去撮合。
@@ -998,6 +1005,7 @@ const Index = () => {
             close: displayClose,
             volume: partial.volume,
             ...chartAmountFields(partial),
+            cba2Closed: false,
           });
           // 与正放同源：倒放越过这根时撮合用的是整根 high/low，闸门必须看到同一个区间。
           // 倒放此前根本没有发布过区间，闸门读到的是上一次正放留下的、属于另一根的陈旧值。

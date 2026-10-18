@@ -1,3 +1,4 @@
+import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
 /**
  * Deep dig 的特征值定义：名称、定义、公式、显示单位、分组标准——都可以由用户改，运行时照这里算。
  *
@@ -66,10 +67,10 @@ export const AVG_HOURS_PRESETS = [1, 4, 12, 24, 48, 72] as const;
 export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
-export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'>): ResearchInterval => d.interval ?? DEFAULT_INTERVAL;
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => d.id === 'cba-2' ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'>;
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string };
 
 /**
  * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
@@ -78,7 +79,7 @@ type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours
  */
 export function featureWindowMs(d: ParamDef): number {
   const H = 3_600_000;
-  return Math.max(48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  return Math.max(d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
 export const barsPerHalfLife = (d: ParamDef) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));
@@ -93,6 +94,7 @@ const PARAM_NAMES = PARAM_VARIABLES.flatMap(p => [p.name, p.alias]);
 
 /** 公式里可用的序列：每根 K 线（上面选的周期）一个值。 */
 export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
+  { name: 'T', label: 'K线开盘时间（毫秒）' },
   { name: 'C', label: '收盘价' },
   { name: 'O', label: '开盘价' },
   { name: 'H', label: '最高价' },
@@ -371,7 +373,9 @@ export const CBI_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF];
+export const CBA2_DEF: DeepDigFeatureDef = { id: 'cba-2', name: '成交支持下的价格重心迁移指标 CBA-2', short: 'CBA-2', definition: CBA2_DEFINITION, formula: CBA2_FORMULA, scale: 1, unit: '', positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, source: 'campaigns', groupVars: 2, builtin: true };
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -508,7 +512,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   const q = series(b => b.quoteVolume);
   const buy = series(b => b.takerBuyQuoteVolume);
   return evaluateProgramVars(compiled.program, {
-    C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
+    T: series(b => b.openTime), C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
     Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
     // 成交均价：成交额 ÷ 成交量（币数）；缺一样或成交量为 0 记空
     E: series(b => (b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null)),

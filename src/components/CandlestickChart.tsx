@@ -296,6 +296,7 @@ interface Props {
 function toKLineData(d: KlineData): KLineData {
   return {
     timestamp: d.time,
+    cba2Closed: d.cba2Closed,
     open: d.open,
     high: d.high,
     low: d.low,
