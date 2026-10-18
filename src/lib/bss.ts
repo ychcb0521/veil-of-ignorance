@@ -37,6 +37,7 @@ export const BSS_STEPS = [
   'M、V 标准化 = tanh(24 小时滚动 z-score)，落在 −1 ~ 1',
   'BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1（订单簿 I 没有历史，去掉）',
   '> 0.55 且 M > 0：买方优势明确；回落到 < 0.2 或 A 转负：弱了',
+  '副图紫色细线 avg_BSS = avg(BSS, N)：过去 N 小时 BSS 的平均，N 默认 24、在「avg」框里改',
 ].join('\n');
 
 export interface BssBar {

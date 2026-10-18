@@ -27,7 +27,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, indicatorCalcParams } from "@/lib/customIndicators";
 import {
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
@@ -122,6 +122,9 @@ const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A" };
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
 const COMPANION_ONLY = new Set(["DSP_VA"]);
+/** 这个菜单项是否带副图均线参数（自己或附属副图之一用均线时长）。 */
+const hasAvgParam = (type: string) =>
+  [KLINE_INDICATOR_MAP[type], ...(INDICATOR_COMPANIONS[type] ?? []).map(c => c.kcName)].some(n => n != null && AVG_PARAM_INDICATORS.has(n));
 const COMPANION_KC_NAME: Record<string, string> = Object.fromEntries(
   Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName]),
 );
@@ -163,6 +166,8 @@ const OVERLAY_MAP: Record<string, string> = {
 export interface IndicatorConfig {
   type: string;
   period: number;
+  /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
+  avgHours?: number;
   color?: string;
   enabled: boolean;
 }
@@ -2112,7 +2117,7 @@ function CandlestickChartComponent({
       } else if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
           const paneId = chart.createIndicator(
-            { name: kcName, calcParams: [ind.period] },
+            { name: kcName, calcParams: indicatorCalcParams(kcName, ind) },
             isOverlay,
             isOverlay ? { id: "candle_pane" } : { height: 80 },
           );
@@ -2122,7 +2127,7 @@ function CandlestickChartComponent({
         }
       } else {
         try {
-          chart.overrideIndicator({ name: kcName, calcParams: [ind.period] });
+          chart.overrideIndicator({ name: kcName, calcParams: indicatorCalcParams(kcName, ind) });
         } catch {}
       }
 
@@ -2130,13 +2135,13 @@ function CandlestickChartComponent({
         currentActive.add(companion.key);
         if (!activeIndicatorPanes.current.has(companion.key)) {
           try {
-            const paneId = chart.createIndicator({ name: companion.kcName, calcParams: [ind.period] }, false, { height: 80 });
+            const paneId = chart.createIndicator({ name: companion.kcName, calcParams: indicatorCalcParams(companion.kcName, ind) }, false, { height: 80 });
             activeIndicatorPanes.current.set(companion.key, paneId);
           } catch (e) {
             console.warn(`Failed to create indicator ${companion.key}:`, e);
           }
         } else {
-          try { chart.overrideIndicator({ name: companion.kcName, calcParams: [ind.period] }); } catch {}
+          try { chart.overrideIndicator({ name: companion.kcName, calcParams: indicatorCalcParams(companion.kcName, ind) }); } catch {}
         }
       }
     }
@@ -2367,7 +2372,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}
+                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

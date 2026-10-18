@@ -6,7 +6,7 @@
 import { useState, useRef, useEffect, useMemo, forwardRef } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
-import { CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
+import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
 import { DSP_V_DEFINITION, DSP_V_STEPS } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { BUILD_STAMP } from '@/lib/buildStamp';
@@ -26,6 +26,9 @@ export interface IndicatorCatalogItem {
   /** 名称下面的一句说明；detail 是悬停时的完整说明（计算步骤）。 */
   description?: string;
   detail?: string;
+  /** 【用户要求】副图均线 avg(·, N)：有这一项就多一个均线时长框（小时），默认值在这里。 */
+  avgDefault?: number;
+  avgHint?: string;
 }
 
 // Determine support status dynamically: if we have a mapping, it's supported
@@ -153,11 +156,11 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
 
   // --- Volume ---
   // 【用户要求】动态谢林点：主图 DSP 线 + 副图 买方推力的加速度 a、主动买方优势 A；参数 = 5 分钟图上的时间半衰期（小时，其他周期等比例缩放），成交量一律用金额
-  { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
+  { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图里紫色细线，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
   // 【用户要求】可以隐去主图的 DSP 线：只要 a / A 两个副图；与上一项二选一
-  { id: 'DSP_VA', nameZh: '动态谢林点 a / A（只要副图）',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
+  { id: 'DSP_VA', nameZh: '动态谢林点 a / A（只要副图）',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图里紫色细线，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
   // 【用户要求】2026-10-18 BSS 买卖强度综合分（副图）：参数 = 5 分钟图上的近期窗口 n（小时），其他周期等比例缩放（与 DSP 同一约定）
-  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'volume', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS },
+  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'volume', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时（与均线时长 N 无关）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_BSS = avg(BSS, N)：BSS 副图里紫色细线，过去 N 小时 BSS 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },
@@ -236,15 +239,19 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       onIndicatorsChange(indicators.filter(i => i.type !== item.id));
       return;
     }
-    // 互斥的一组（DSP 与「只要副图」）：打开一项就关掉另一项，半衰期沿用原来的设置
+    // 互斥的一组（DSP 与「只要副图」）：打开一项就关掉另一项，半衰期与均线时长沿用原来的设置
     const rival = EXCLUSIVE_PAIRS[item.id];
     const replaced = rival ? indicators.find(i => i.type === rival) : undefined;
     const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
-    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? item.defaultPeriod, color: item.color, enabled: true }]);
+    const avgHours = item.avgDefault == null ? undefined : (replaced?.avgHours ?? item.avgDefault);
+    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? item.defaultPeriod, ...(avgHours == null ? {} : { avgHours }), color: item.color, enabled: true }]);
   };
 
   const updatePeriod = (id: string, period: number) => {
     onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, period } : i));
+  };
+  const updateAvgHours = (id: string, avgHours: number) => {
+    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, avgHours } : i));
   };
 
   if (!open) return null;
@@ -324,7 +331,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               主图叠加 · Overlays ({overlays.length})
             </div>
             {overlays.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} />
             ))}
           </>
         )}
@@ -335,7 +342,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               副图指标 · Sub-pane ({oscillators.length})
             </div>
             {oscillators.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} />
             ))}
           </>
         )}
@@ -358,7 +365,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   indicators: IndicatorConfig[];
   onToggle: (item: IndicatorCatalogItem) => void;
   onUpdatePeriod: (id: string, period: number) => void;
-}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod }, ref) {
+  onUpdateAvgHours: (id: string, avgHours: number) => void;
+}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
 
@@ -372,7 +380,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium text-foreground truncate">{item.nameZh}</span>
+            <span className="text-xs font-medium leading-4 text-foreground">{item.nameZh}</span>
             {!supported && (
               <span className="text-[8px] px-1 py-0 rounded bg-muted text-muted-foreground leading-tight">优化中</span>
             )}
@@ -388,15 +396,27 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
       <div className="flex items-center gap-1.5 shrink-0">
         {active ? (
           <>
-            <input
-              type="number"
+            <ParamInput
               value={active.period}
-              onChange={e => { e.stopPropagation(); onUpdatePeriod(item.id, parseInt(e.target.value) || item.defaultPeriod); }}
-              onClick={e => e.stopPropagation()}
+              parse={v => { const n = parseInt(v); return n > 0 ? n : null; }}
+              onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
-              className="w-12 px-1 py-0.5 rounded text-[10px] font-mono text-right bg-secondary border border-border text-foreground"
+              label={`${item.nameZh} 参数`}
             />
             {item.periodUnit && <span className="-ml-1 text-[10px] text-muted-foreground">{item.periodUnit}</span>}
+            {item.avgDefault != null && (
+              <>
+                <span className="ml-0.5 text-[10px] text-muted-foreground" title={item.avgHint}>avg</span>
+                <ParamInput
+                  value={active.avgHours ?? item.avgDefault}
+                  parse={v => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) && n > 0 ? n : null; }}
+                  onCommit={n => onUpdateAvgHours(item.id, n)}
+                  title={item.avgHint}
+                  label={`${item.nameZh} 均线时长 N（小时）`}
+                />
+                <span className="-ml-1 text-[10px] text-muted-foreground">h</span>
+              </>
+            )}
             <Check className="w-3.5 h-3.5 text-primary" />
           </>
         ) : (
@@ -408,3 +428,33 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
 });
 
 IndicatorRow.displayName = 'IndicatorRow';
+
+/**
+ * 参数框：输入过程中保留草稿（清空、打到一半不会被弹回默认值），是有效数字才生效；失焦时复原为当前生效的值。
+ */
+function ParamInput({ value, parse, onCommit, title, label }: {
+  value: number;
+  parse: (raw: string) => number | null;
+  onCommit: (n: number) => void;
+  title?: string;
+  label: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      aria-label={label}
+      value={draft ?? String(value)}
+      onChange={e => {
+        e.stopPropagation();
+        setDraft(e.target.value);
+        const n = parse(e.target.value);
+        if (n != null && n !== value) onCommit(n);
+      }}
+      onBlur={() => setDraft(null)}
+      onClick={e => e.stopPropagation()}
+      title={title}
+      className="w-12 px-1 py-0.5 rounded text-[10px] font-mono text-right bg-secondary border border-border text-foreground"
+    />
+  );
+}
