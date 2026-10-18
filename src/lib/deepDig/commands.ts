@@ -97,6 +97,8 @@ export type InferenceBlock = BlockBase & (
 );
 
 export interface DeepDigInference {
+  /** 推断实际使用的相对进场时点；旧结果未指定 = 0。 */
+  sampleOffsetMs?: number;
   /** 用的是哪一次描述统计（DeepDigData.finishedAt）：描述统计重跑后提示推断统计也要重跑。 */
   dataFinishedAt: number;
   /** 运行时删掉的行（exclusionKey）。 */
@@ -548,7 +550,7 @@ export function rowInputs(rows: readonly DeepDigRow[], def: Pick<DefinitionSnaps
 
 /** 推断统计（纯计算，不联网）：按命令逐行算。 */
 export function runInference(
-  data: Pick<DeepDigData, 'rows' | 'definition' | 'finishedAt'>,
+  data: Pick<DeepDigData, 'rows' | 'definition' | 'finishedAt' | 'sampleOffsetMs'>,
   commands: string,
   options: { excludedKey?: string; seed?: number } = {},
 ): DeepDigInference {
@@ -559,7 +561,7 @@ export function runInference(
   if (wanted != null && !variables.includes(wanted)) {
     const line = commands.split('\n').findIndex(raw => TARGET_LINE.test(stripComment(raw))) + 1;
     return {
-      dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', commands, target: wanted, startedAt, finishedAt: Date.now(),
+      dataFinishedAt: data.finishedAt, sampleOffsetMs: data.sampleOffsetMs ?? 0, excludedKey: options.excludedKey ?? '', commands, target: wanted, startedAt, finishedAt: Date.now(),
       blocks: [{ line, call: `X = ${wanted}`, title: '因变量', kind: 'error', message: `描述统计的数据里没有「${wanted}」（有：${variables.join(' / ')}）：公式改过或数据是旧版，先重新运行描述统计` }],
     };
   }
@@ -576,7 +578,7 @@ export function runInference(
     ...parsed.errors.map(e => ({ line: e.line, call: commands.split('\n')[e.line - 1]?.trim() ?? '', title: '命令写错了', kind: 'error' as const, message: e.message })),
     ...parsed.commands.map(c => c.run({ ...ctx, seed: ctx.seed + 104729 * c.line })),
   ].sort((a, b) => a.line - b.line);
-  return { dataFinishedAt: data.finishedAt, excludedKey: options.excludedKey ?? '', commands, target, startedAt, finishedAt: Date.now(), blocks };
+  return { dataFinishedAt: data.finishedAt, sampleOffsetMs: data.sampleOffsetMs ?? 0, excludedKey: options.excludedKey ?? '', commands, target, startedAt, finishedAt: Date.now(), blocks };
 }
 
 // ===================== 统计小工具 =====================

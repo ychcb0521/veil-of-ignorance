@@ -1,3 +1,4 @@
+import { makeData } from './fixtures';
 import { describe, expect, it } from 'vitest';
 import { compileFeatureFormula, computeFeatureValues, DRIFT_SPEED_FORMULA, formulaVariables } from '@/lib/deepDig/features';
 import { computeEventSeries, groupCurves, seriesOffsets, seriesRangeOf, valueAt, type DeepDigSeries } from '@/lib/deepDig/series';
@@ -98,5 +99,26 @@ describe('【用户要求】Deep dig 时间序列曲线：各组在进场前后�
     expect(pos.se[2]).toBeNull();
     // 没有曲线的行不算
     expect(curves.find(c => c.group === 'control')!).toMatchObject({ n: 0, mean: [null, null, null] });
+  });
+});
+
+
+describe('推断时点快照', () => {
+  it('全变量同步、缺失不能回填进场值，元数据记录实际时点，曲线不匹配时拒绝使用', async () => {
+    const { dataAtOffset } = await import('@/lib/deepDig/series');
+    const data = makeData();
+    const row = data.rows[0];
+    data.rows[0] = { ...row, vars: { F: 7, old: 99 } };
+    const series: DeepDigSeries = { finishedAt: data.finishedAt, offsets: [0, HOUR], names: ['F','a'], result: 'a', byEvent: { [row.id]: Float32Array.from([7, 42, row.v!, 3]) } };
+    const selected = dataAtOffset(data, series, HOUR)!;
+    expect(selected.sampleOffsetMs).toBe(HOUR);
+    expect(selected.rows[0]).toMatchObject({ v: 3, vars: { F: 42, a: 3, old: null } });
+    expect(selected.rows[1].v).toBeNull();
+    expect(selected.rows[1].vars!.F).toBeNull();
+    expect(dataAtOffset(data, null, HOUR)).toBeNull();
+    expect(dataAtOffset(data, { ...series, finishedAt: data.finishedAt + 1 }, HOUR)).toBeNull();
+    expect(dataAtOffset(data, series, 5 * HOUR)).toBeNull();
+    expect(dataAtOffset(data, null, 0)).toBe(data);
+    expect(data.rows[0].vars!.F).toBe(7);
   });
 });

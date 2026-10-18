@@ -170,3 +170,16 @@ export function viewAtOffset(data: DeepDigData, series: DeepDigSeries | null, na
   const finiteV = (v: number | null): v is number => v != null && Number.isFinite(v);
   return { ...data, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter(finiteV))) };
 }
+
+/** 推断输入：所有公式变量都移到同一选中时点，不能只替换默认因变量v。
+ * 缺曲线/缺变量留空；非零时点的曲线尚未加载时返回null，禁止偷偷回用进场值。
+ */
+export function dataAtOffset(data: DeepDigData, series: DeepDigSeries | null, offsetMs: number): DeepDigData | null {
+  if (offsetMs === 0) return data;
+  if (!series || series.finishedAt !== data.finishedAt || !series.offsets.includes(offsetMs)) return null;
+  const rows = data.rows.map(r => ({
+    ...r, v: valueAt(series, r.id, series.result, offsetMs),
+    vars: Object.fromEntries([...new Set([...Object.keys(r.vars ?? {}), ...series.names])].map(name => [name, valueAt(series, r.id, name, offsetMs)])),
+  }));
+  return { ...data, sampleOffsetMs: offsetMs, rows, groups: DEEP_DIG_GROUPS.map(g => describeGroup(g, rows.filter(r => r.group === g).map(r => r.v).filter((v): v is number => v != null && Number.isFinite(v)))) };
+}

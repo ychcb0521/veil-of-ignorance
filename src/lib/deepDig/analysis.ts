@@ -71,6 +71,8 @@ export interface DeepDigGroupStat {
  * 【用户要求】2026-10-16「描述统计和推断统计的运行要分开」：这一步要联网取 K 线（1–3 分钟）；推断统计只用这里的数据。
  */
 export interface DeepDigData {
+  /** 当前推断输入的相对进场取样时点；未指定 = 进场。 */
+  sampleOffsetMs?: number;
   definition: DefinitionSnapshot;
   codeVersion: string;
   startedAt: number;

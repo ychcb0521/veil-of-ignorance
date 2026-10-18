@@ -18,7 +18,7 @@ import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
-import { formatSeriesOffset, seriesRangeOf, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
+import { dataAtOffset, formatSeriesOffset, seriesRangeOf, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables, targetOf } from '@/lib/deepDig/commands';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
@@ -133,6 +133,14 @@ function writeTemp(featureId: string, finishedAt: number, ids: readonly string[]
   } catch { /* 记不住只是刷新后要重删 */ }
 }
 
+const AT_KEY = (id: string) => `veil.deepDig.sampleAt:${id}`;
+function readSampleAt(id: string, finishedAt: number | undefined): number {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(AT_KEY(id)) ?? 'null');
+    return value?.finishedAt === finishedAt && Number.isFinite(value?.offset) ? value.offset : 0;
+  } catch { return 0; }
+}
+
 export function FeatureView(props: FeatureViewProps) {
   const { def, data, inference, excluded, tab, onTabChange } = props;
   const variables = useMemo(() => formulaVariables(def.formula), [def.formula]);
@@ -142,8 +150,19 @@ export function FeatureView(props: FeatureViewProps) {
   /** 只去掉长期删除的行（判极端值用：列表不因暂时删除而变动）。 */
   const base = useMemo(() => (data ? applyExclusions(data, excluded) : null), [data, excluded]);
   const effective = useMemo(() => (base ? applyExclusions(base, temp) : null), [base, temp]);
+  // 时间选择放在模块分页外，切换推断/规律或进详情返回不会退回进场。
+  const [selection, setSelection] = useState<{ id: string; finishedAt: number; offset: number } | null>(null);
+  const setAt = (offset: number) => {
+    if (!data || (offset !== 0 && (!props.series || props.series.finishedAt !== data.finishedAt || !props.series.offsets.includes(offset)))) return;
+    try { sessionStorage.setItem(AT_KEY(def.id), JSON.stringify({ finishedAt: data.finishedAt, offset })); } catch { /* 下方内存状态仍保留选择 */ }
+    setSelection({ id: def.id, finishedAt: data.finishedAt, offset });
+  };
+  const sampleAt = selection?.id === def.id && selection.finishedAt === data?.finishedAt ? selection.offset : readSampleAt(def.id, data?.finishedAt);
+  const inferData = useMemo(() => effective ? dataAtOffset(effective, props.series, sampleAt) : null, [effective, props.series, sampleAt]);
+  const inferBase = useMemo(() => base ? dataAtOffset(base, props.series, sampleAt) : null, [base, props.series, sampleAt]);
+  const atText = sampleAt === 0 ? '进场时' : `${formatSeriesOffset(sampleAt)}（进场${sampleAt < 0 ? '前' : '后'}）`;
   const exKey = data ? exclusionKey(data, [...excluded, ...temp]) : '';
-  const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey);
+  const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey && (inference.sampleOffsetMs ?? 0) === sampleAt);
   const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands && (data == null || definitionKey(data.definition) === definitionKey(def));
   const defStale = data != null && definitionKey(data.definition) !== definitionKey(def);
   return (
@@ -177,40 +196,44 @@ export function FeatureView(props: FeatureViewProps) {
             hint={`取币安公开 ${intervalOf(def)} K 线${intervalOf(def) === '5m' ? '' : '（24h 结果仍按 5m）'}、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）`}
           />
           {defStale && <Notice testId="deep-dig-stale">公式、周期、半衰期或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的定义重算。</Notice>}
-          {effective && data && base ? <DescribeTab {...props} data={effective} raw={data} base={base} temp={temp} onTempChange={setTemp} /> : <Empty>还没运行描述统计。</Empty>}
+          {effective && data && base ? <DescribeTab {...props} data={effective} raw={data} base={base} temp={temp} onTempChange={setTemp} at={sampleAt} onAt={setAt} /> : <Empty>还没运行描述统计。</Empty>}
         </div>
       )}
       {tab === 'infer' && (
         <div className="space-y-4">
           <CommandPanel
             commands={props.commands} onChange={props.onCommandsChange} variables={variables} scale={def.scale} unit={def.unit}
-            available={effective ? [...dataVariables(effective.rows), RESULT_VAR] : null}
+            available={inferData ? [...dataVariables(inferData.rows), RESULT_VAR] : null}
           />
           <RunStrip
             testId="deep-dig-infer-run" label="运行推断统计" hasResult={!!inference} finishedAt={inference?.finishedAt ?? null}
             status={props.inferStatus} error={props.inferError}
-            canRun={!defStale && !!effective && dataSupportsInference(effective) && props.inferStatus !== 'running'}
-            blockedReason={defStale ? '分组或公式已修改，请先重新运行描述统计' : !effective ? '先运行描述统计' : !dataSupportsInference(effective) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
-            onRun={() => { if (effective) props.onInfer(effective, exKey); }}
-            hint={`按上面的命令逐行算，用描述统计的数据（已去掉删除的行${temp.length ? `、暂时删除的 ${temp.length} 行` : ''}），不联网，几秒到十几秒`}
+            canRun={!defStale && !!inferData && dataSupportsInference(inferData) && props.inferStatus !== 'running'}
+            blockedReason={defStale ? '分组或公式已修改，请先重新运行描述统计' : !effective ? '先运行描述统计' : !inferData ? '选中时点的时间序列尚未就绪，请等待加载或重新运行描述统计' : !dataSupportsInference(inferData) ? '这份描述统计数据是旧版生成的，先重新运行描述统计' : null}
+            onRun={() => { if (inferData) props.onInfer(inferData, exKey); }}
+            hint={`按上面的命令逐行算，用所选时点的数据（已去掉删除的行${temp.length ? `、暂时删除的 ${temp.length} 行` : ''}），不联网，几秒到十几秒`}
           />
-          {base && data && (
+          <div className="text-[11.5px] text-muted-foreground" data-testid="deep-dig-infer-at">取样时点：{atText}{sampleAt > 0 ? ' · 进场后数据用于事后分析' : ''}</div>
+          {inferBase && data && (
             <InferOutliers
-              base={base} temp={temp} onTempChange={setTemp} commands={props.commands}
-              ran={inference && inference.dataFinishedAt === data.finishedAt ? inference : null}
+              base={inferBase} temp={temp} onTempChange={setTemp} commands={props.commands}
+              ran={inference && inference.dataFinishedAt === data.finishedAt && (inference.sampleOffsetMs ?? 0) === sampleAt ? inference : null}
             />
           )}
           {inference && !inferenceFresh && (
             <Notice testId="deep-dig-infer-stale">
-              {defStale ? '分组或公式改过了，请先重新运行描述统计' : inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
+              {defStale ? '分组或公式改过了，请先重新运行描述统计' : inference && (inference.sampleOffsetMs ?? 0) !== sampleAt ? '取样时点改过了' : inferenceDataFresh ? '命令改过了' : '描述统计的数据或删减改过了'}：下面是上一次运行的结果，重新运行推断统计。
             </Notice>
           )}
           {inference && effective ? (
+            <div className="space-y-2">
+            <div className="text-[11px] text-muted-foreground" data-testid="deep-dig-infer-result-at">本次结果取样时点：{(inference.sampleOffsetMs ?? 0) === 0 ? '进场时' : formatSeriesOffset(inference.sampleOffsetMs!)}</div>
             <InferenceResults blocks={inference.blocks} target={inference.target !== undefined ? targetText(inference.target, formulaVariables(effective.definition.formula), effective.definition.scale, effective.definition.unit) : undefined} />
+            </div>
           ) : <Empty>还没运行推断统计。</Empty>}
         </div>
       )}
-      {tab === 'rules' && <RulesTab {...props} data={effective} inference={inferenceFresh ? inference : null} />}
+      {tab === 'rules' && <RulesTab {...props} data={inferData} inference={inferenceFresh ? inference : null} />}
     </div>
   );
 }
@@ -362,9 +385,11 @@ function groupNote(def: DefinitionSnapshot, g: DeepDigRowGroup): React.ReactNode
   }
 }
 
-function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, raw, base, temp, onTempChange, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & {
+function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, raw, base, temp, onTempChange, at, onAt: setAt, series, excluded, onExcludedChange, group, onGroupChange, onOpenCampaign, showAll: expanded, onShowAllChange: setExpanded }: FeatureViewProps & {
   data: DeepDigData;
   raw: DeepDigData;
+  at: number;
+  onAt: (offset: number) => void;
   /** 只去掉长期删除的行。 */
   base: DeepDigData;
   /** 暂时删除的行（事件 id）。 */
@@ -377,8 +402,6 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
   const [seriesVar, setSeriesVar] = useState<string | null>(null);
   const liveSeries = series && series.finishedAt === raw.finishedAt ? series : null;
   /** 【用户要求】看哪个时刻（拖时间序列图里的竖线）：0 = 进场（特征值本身）。 */
-  const [atState, setAt] = useState(0);
-  const at = liveSeries && liveSeries.offsets.includes(atState) ? atState : 0;
   const result = useMemo(() => viewAtOffset(effectiveData, liveSeries, seriesVar, at), [effectiveData, liveSeries, seriesVar, at]);
   /** 选的是公式里别的变量（不是最后一句）时它的名字。 */
   const varName = seriesVar != null && viewForVariable(effectiveData, seriesVar) !== effectiveData ? seriesVar : null;
@@ -472,7 +495,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
             {X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
             {c.failed > 0 && <>，K 线没取到的 <N>{c.failed}</N> 个</>}。
           </li>
-          {at !== 0 && <li>现在看的是 <span className="text-[#C27C0E] dark:text-[#F59E0B]">{atText}</span> 那一刻的值：取那一刻之前最后一根已收盘 K 线上的读数（时间序列曲线上的点）{at > 0 ? '，用到了进场后的数据，只作描述' : ''}；推断统计仍用进场时的特征值。</li>}
+          {at !== 0 && <li>现在看的是 <span className="text-[#C27C0E] dark:text-[#F59E0B]">{atText}</span> 那一刻的值：取那一刻之前最后一根已收盘 K 线上的读数（时间序列曲线上的点）{at > 0 ? '，用到了进场后的数据，用于事后分析' : ''}；后续推断统计也使用这个时点的数据。</li>}
           {removed.length > 0 && <li>手动删掉 <N>{removed.length}</N> 行（归类不准确等）：不进上面的分组统计、推断统计与规律提取。</li>}
           {temp.length > 0 && <li>暂时删除 <N>{temp.length}</N> 行（极端值等）：这次浏览里不进分组统计、时间序列与推断统计，关掉页面恢复。</li>}
           <li>

@@ -28,7 +28,7 @@ const SERIES: DeepDigSeries = {
   byEvent: Object.fromEntries(DATA.rows.filter(r => r.v != null).map(r => [r.id, Float32Array.from([r.v! / 2, r.v!, 3 * r.v!])])),
 };
 
-function Harness({ onInfer, tab: initialTab = 'describe', inference = null }: { onInfer?: (d: DeepDigData, k: string) => void; tab?: DeepDigTab; inference?: DeepDigInference | null }) {
+function Harness({ onInfer, tab: initialTab = 'describe', inference = null, series = SERIES }: { series?: DeepDigSeries | null; onInfer?: (d: DeepDigData, k: string) => void; tab?: DeepDigTab; inference?: DeepDigInference | null }) {
   const [tab, setTab] = useState<DeepDigTab>(initialTab);
   const [group, setGroup] = useState<DeepDigRowGroup>('positive');
   const [note, setNote] = useState<DeepDigNote | null>(null);
@@ -38,7 +38,7 @@ function Harness({ onInfer, tab: initialTab = 'describe', inference = null }: { 
   return (
     <FeatureView
       def={DRIFT_SPEED_DEF} editing={false} onEditingChange={() => {}} onSaveDef={() => {}}
-      samples={{ campaigns: [], signals: [] }} data={DATA} series={SERIES} inference={inference}
+      samples={{ campaigns: [], signals: [] }} data={DATA} series={series} inference={inference}
       describeStatus="idle" describeProgress={null} describeError={null} canDescribe blockedReason={null}
       onDescribe={vi.fn()} onCancel={vi.fn()} inferStatus="idle" inferError={null} onInfer={onInfer ?? vi.fn()} onDownload={vi.fn()}
       excluded={excluded} onExcludedChange={setExcluded} commands={commands} onCommandsChange={setCommands}
@@ -69,7 +69,7 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     expect(screen.getByTestId('deep-dig-groups-at')).toHaveTextContent('+1h（进场后）');
     expect(posCell(1)).toBe(n0);
     expect(Number(posCell(2))).toBeCloseTo(3 * mean0, 0);
-    expect(screen.getByTestId('deep-dig-details')).toHaveTextContent('用到了进场后的数据，只作描述');
+    expect(screen.getByTestId('deep-dig-details')).toHaveTextContent('用到了进场后的数据，用于事后分析');
     fireEvent.click(screen.getByTestId('deep-dig-series-at-reset'));
     expect(screen.getByTestId('deep-dig-groups-at')).toHaveTextContent('进场时');
     expect(screen.queryByTestId('deep-dig-series-at-reset')).not.toBeInTheDocument();
@@ -85,6 +85,48 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     expect(screen.getByTestId('deep-dig-groups-at')).toHaveTextContent('+1h（进场后）');
     fireEvent.keyDown(screen.getByTestId('deep-dig-series-at-handle'), { key: 'Home' });
     expect(screen.getByTestId('deep-dig-groups-at')).toHaveTextContent('进场时');
+  });
+
+  it('竖线时点传入推断、切分页和返回后保留，旧时点结果过期，回到进场复原', () => {
+    sessionStorage.clear(); localStorage.clear();
+    const onInfer = vi.fn();
+    const old = runInference(DATA, DEFAULT_COMMANDS);
+    const { unmount } = render(<Harness onInfer={onInfer} inference={old} />);
+    fireEvent.keyDown(screen.getByTestId('deep-dig-series-at-handle'), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByTestId('deep-dig-tab-infer'));
+    expect(screen.getByTestId('deep-dig-infer-at')).toHaveTextContent('+1h');
+    expect(screen.getByTestId('deep-dig-infer-stale')).toHaveTextContent('取样时点改过了');
+    fireEvent.click(screen.getByTestId('deep-dig-infer-run-button'));
+    const sent = onInfer.mock.calls[0][0] as DeepDigData;
+    expect(sent.sampleOffsetMs).toBe(H);
+    expect(sent.rows.find(r => r.id === BIG_ID)!.v).toBeCloseTo(0.15, 7);
+    expect(sent.rows.find(r => r.id === BIG_ID)!.vars!.a).toBeCloseTo(0.15, 7);
+    const inferred = runInference(sent, DEFAULT_COMMANDS);
+    expect(inferred.sampleOffsetMs).toBe(H);
+    fireEvent.click(screen.getByTestId('deep-dig-tab-describe'));
+    expect(screen.getByTestId('deep-dig-series-at-handle')).toHaveAttribute('aria-valuetext', '+1h');
+    unmount();
+    render(<Harness onInfer={onInfer} inference={inferred} />);
+    expect(screen.getByTestId('deep-dig-series-at-handle')).toHaveAttribute('aria-valuetext', '+1h');
+    fireEvent.click(screen.getByTestId('deep-dig-tab-infer'));
+    expect(screen.queryByTestId('deep-dig-infer-stale')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-tab-describe'));
+    fireEvent.click(screen.getByTestId('deep-dig-series-at-reset'));
+    fireEvent.click(screen.getByTestId('deep-dig-tab-infer'));
+    expect(screen.getByTestId('deep-dig-infer-stale')).toHaveTextContent('取样时点改过了');
+    fireEvent.click(screen.getByTestId('deep-dig-infer-run-button'));
+    expect(onInfer.mock.calls.at(-1)![0].rows.find((r: { id: string }) => r.id === BIG_ID).v).toBe(0.05);
+    sessionStorage.clear();
+  });
+
+  it('非零时点曲线未加载时禁用推断，不回用进场值', () => {
+    sessionStorage.clear(); localStorage.clear();
+    sessionStorage.setItem(`veil.deepDig.sampleAt:${DRIFT_SPEED_DEF.id}`, JSON.stringify({ finishedAt: DATA.finishedAt, offset: H }));
+    render(<Harness tab="infer" series={null} />);
+    expect(screen.getByTestId('deep-dig-infer-at')).toHaveTextContent('+1h');
+    expect(screen.getByTestId('deep-dig-infer-run-button')).toBeDisabled();
+    expect(screen.getByTestId('deep-dig-infer-run')).toHaveTextContent('时间序列尚未就绪');
+    sessionStorage.clear();
   });
 
   it('极端值列出来（数据表里也标「极端」）；暂时删除 → 统计重算、推断统计也去掉；恢复 / 全部暂时删除 / 全部恢复；换页回来还在', () => {
