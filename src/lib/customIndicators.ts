@@ -166,15 +166,14 @@ export function bssPoints(dataList: KLineData[], recentHours: number | undefined
 }
 
 /**
- * 【用户要求】2026-10-18 副图加均线：avg_BSS = avg(BSS, N)、avg_a = avg(a, N)，N 默认 24 小时、菜单里可调。
+ * 【用户要求】2026-10-18 均线副图：avg_BSS = avg(BSS, N)、avg_a = avg(a, N)，N 默认 24 小时、菜单里可调；
+ * 【用户要求】各自一个独立副图，紧挨在原指标副图的正下方，不与原指标叠在一起。
  * 与 Deep dig 公式的 avg(x, h) 同一份滚动实现：过去 N 小时（含当根）的算术平均，空值跳过，开头不满 N 小时用已有的；
  * 窗口与动态谢林点同一个约定——N 按 5 分钟图计，其他周期等比例缩放（每根 K 线的窗口根数相同）。
  */
 export const AVG_DEFAULT_HOURS = 24;
-/** 均线的颜色：紫色细线，与绿 / 红的指标线、橘黄参考线区分。 */
-export const AVG_LINE_COLOR = '#A78BFA';
-/** 带均线参数（第二个参数 = 均线时长 N）的副图。 */
-export const AVG_PARAM_INDICATORS = new Set(['DSP_V_CUSTOM', 'BSS_CUSTOM']);
+/** 均线副图（第二个参数 = 均线时长 N）。 */
+export const AVG_PARAM_INDICATORS = new Set(['DSP_V_AVG_CUSTOM', 'BSS_AVG_CUSTOM']);
 
 const validHours = (h: unknown, fallback: number) => {
   const n = Number(h);
@@ -188,6 +187,23 @@ export function rollingAvgHours(values: readonly (number | null | undefined)[], 
   return Array.from(avg, v => (Number.isFinite(v) ? v : null));
 }
 
+/**
+ * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开副图——买方推力的加速度 a、avg_a、主动买方优势 A；BSS 带出 avg_BSS。
+ * 附属副图用「主项#后缀」作 CandlestickChart 里 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除；按这里的顺序依次往下建。
+ */
+const DSP_COMPANIONS = [
+  { key: 'DSP#V', kcName: 'DSP_V_CUSTOM' },
+  // 【用户要求】avg_a 独立一个副图，紧挨在 a 副图下面（按这里的顺序依次往下建）
+  { key: 'DSP#VAVG', kcName: 'DSP_V_AVG_CUSTOM' },
+  { key: 'DSP#A', kcName: 'DSP_A_CUSTOM' },
+];
+export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = {
+  DSP: DSP_COMPANIONS,
+  // 【用户要求】可以隐去主图的 DSP 线：只开两个副图（与 DSP 共用同一组副图，菜单里两项二选一）
+  DSP_VA: DSP_COMPANIONS,
+  // 【用户要求】avg_BSS 独立一个副图，紧挨在 BSS 副图下面
+  BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }],
+};
 /** 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长。 */
 export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number }): number[] {
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
@@ -870,7 +886,7 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'DSP_V_CUSTOM',
     shortName: 'DSP·a',
-    calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS],
+    calcParams: [DSP_DEFAULTS.halfLifeHours],
     precision: 3,
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
@@ -881,14 +897,28 @@ export function registerCustomIndicators() {
         key: 'v', title: 'a(基点/根): ', type: 'line',
         styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
       },
-      // 【用户要求】avg_a = avg(a, N)：第二个参数 N（小时，默认 24）
-      { key: 'avg', title: 'avg_a: ', type: 'line', styles: () => ({ color: AVG_LINE_COLOR, size: 1 }) },
+    ],
+    calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? {} : { v: p.v * DSP_V_DISPLAY_SCALE })),
+  });
+
+  // 【用户要求】avg_a = avg(a, N)：独立副图，紧挨在 a 副图下面。参数 [半衰期 h, 均线时长 N]；0 轴与 a 副图同一条橘黄色虚线，线按正负着色
+  registerIndicator({
+    name: 'DSP_V_AVG_CUSTOM',
+    shortName: 'avg_a',
+    calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS],
+    precision: 3,
+    minValue: 0,
+    maxValue: 0,
+    draw: V_ZERO_LINE,
+    figures: [
+      {
+        key: 'v', title: 'avg_a(基点/根): ', type: 'line',
+        styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
+      },
     ],
     calc: (dataList, indicator) => {
-      const points = dspPoints(dataList, indicator.calcParams[0]);
-      const v = points.map(p => (p.v == null ? null : p.v * DSP_V_DISPLAY_SCALE));
-      const avg = rollingAvgHours(v, indicator.calcParams[1]);
-      return v.map((x, i) => ({ ...(x == null ? {} : { v: x }), ...(avg[i] == null ? {} : { avg: avg[i]! }) }));
+      const a = dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? null : p.v * DSP_V_DISPLAY_SCALE));
+      return rollingAvgHours(a, indicator.calcParams[1]).map(x => (x == null ? {} : { v: x }));
     },
   });
 
@@ -918,7 +948,7 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'BSS_CUSTOM',
     shortName: 'BSS',
-    calcParams: [BSS_DEFAULTS.recentHours, AVG_DEFAULT_HOURS],
+    calcParams: [BSS_DEFAULTS.recentHours],
     precision: 2,
     // 纵轴固定包含 −1 ~ 1（BSS 的取值范围），参考线始终画得出来
     minValue: -1,
@@ -929,13 +959,28 @@ export function registerCustomIndicators() {
         key: 'bss', title: 'BSS: ', type: 'line',
         styles: (data) => ({ color: bssColor((data.next?.indicatorData as { bss?: number } | undefined)?.bss ?? (data.current.indicatorData as { bss?: number } | undefined)?.bss), size: 1.5 }),
       },
-      // 【用户要求】avg_BSS = avg(BSS, N)：第二个参数 N（小时，默认 24）
-      { key: 'avg', title: 'avg_BSS: ', type: 'line', styles: () => ({ color: AVG_LINE_COLOR, size: 1 }) },
+    ],
+    calc: (dataList, indicator) => bssPoints(dataList, indicator.calcParams[0]).map(p => (p.bss == null ? {} : { bss: p.bss })),
+  });
+
+  // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
+  registerIndicator({
+    name: 'BSS_AVG_CUSTOM',
+    shortName: 'avg_BSS',
+    calcParams: [BSS_DEFAULTS.recentHours, AVG_DEFAULT_HOURS],
+    precision: 2,
+    minValue: -1,
+    maxValue: 1,
+    draw: bssLevelLines,
+    figures: [
+      {
+        key: 'bss', title: 'avg_BSS: ', type: 'line',
+        styles: (data) => ({ color: bssColor((data.next?.indicatorData as { bss?: number } | undefined)?.bss ?? (data.current.indicatorData as { bss?: number } | undefined)?.bss), size: 1.5 }),
+      },
     ],
     calc: (dataList, indicator) => {
       const bss = bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss);
-      const avg = rollingAvgHours(bss, indicator.calcParams[1]);
-      return bss.map((x, i) => ({ ...(x == null ? {} : { bss: x }), ...(avg[i] == null ? {} : { avg: avg[i]! }) }));
+      return rollingAvgHours(bss, indicator.calcParams[1]).map(x => (x == null ? {} : { bss: x }));
     },
   });
 

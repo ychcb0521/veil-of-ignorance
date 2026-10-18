@@ -27,7 +27,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, indicatorCalcParams } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, indicatorCalcParams } from "@/lib/customIndicators";
 import {
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
@@ -103,19 +103,6 @@ const OVERLAY_INDICATOR_IDS = new Set([
   "DSP",
 ]);
 
-/**
- * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开两个副图——买方推力的加速度 a、主动买方优势 A。
- * 附属副图用「主项#后缀」作 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除。
- */
-const DSP_COMPANIONS = [
-  { key: "DSP#V", kcName: "DSP_V_CUSTOM" },
-  { key: "DSP#A", kcName: "DSP_A_CUSTOM" },
-];
-const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = {
-  DSP: DSP_COMPANIONS,
-  // 【用户要求】可以隐去主图的 DSP 线：只开两个副图（与 DSP 共用同一组副图，菜单里两项二选一）
-  DSP_VA: DSP_COMPANIONS,
-};
 /** 右上角小标签上的名字（默认用指标 id）。 */
 const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
