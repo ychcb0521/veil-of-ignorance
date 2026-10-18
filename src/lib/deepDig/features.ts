@@ -100,8 +100,9 @@ export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
   { name: 'Q', label: '成交额（USDT）= B + S' },
   { name: 'B', label: '主动买入成交额（USDT）' },
   { name: 'S', label: '主动卖出成交额（USDT）= Q − B' },
+  { name: 'E', label: '成交均价 VWAP = 成交额 ÷ 成交量' },
 ];
-const AMOUNT_VARIABLES = new Set(['Q', 'B', 'S']);
+const AMOUNT_VARIABLES = new Set(['Q', 'B', 'S', 'E']);
 /** 用到成交额的公式：观察窗里有金额数据的 K 线不到这个比例，这一场记缺失（不拿币数凑）。 */
 export const MIN_AMOUNT_COVERAGE = 0.95;
 /** 观察窗的 K 线覆盖率至少这么多（与原研究同一标准）。 */
@@ -283,7 +284,42 @@ export const DRIFT_SPEED_Z_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, DRIFT_SPEED_Z_DEF];
+/**
+ * CBA 买方定价优势指数（Deep dig 第三个特征值；K 线图指标里同名副图用 src/lib/cba.ts 的 computeCba，单元测试核对逐根一致）。
+ * 【用户要求】2026-10-18「新增一个指标 CBA…放在指标中、以及 deep dig 的第三个特征值」。η、α 写在公式里可改；
+ * hl = 时间权重半衰期，avgh = 常态成交额 V̄ 与波动率 σ 的回看时长（都「截至上一根」）。
+ */
+export const CBA_FORMULA = [
+  '# CBA 买方定价优势指数（−100 ~ 100）= 100·tanh(Σ w·F·G·R)；正 = 向上的价格优势仍被保留，负 = 价格结果不支持买方优势；不是胜率',
+  '# B / S = 主动买入 / 卖出成交额，Q = B + S，E = 成交均价（VWAP）；hl = 时间权重半衰期，avgh = 常态成交额与波动率的回看时长（小时，都在下面选）',
+  'eta = 0.5                                     # η：双向活跃成交的保留权重（0 < η ≤ 1）',
+  'alpha = 1                                     # α：主动买入优势的额外加权系数（≥ 0）',
+  'D = B - S                                     # 主动成交净差额（不是市场净资金流入）',
+  'A = D / Q                                     # 主动买卖失衡，−1 ~ 1',
+  'Vbar = prev(avg(Q, avgh))                     # 截至上一根的常态成交额：过去 avgh 小时平均',
+  'F = ln(1 + (abs(D) + eta * (Q - abs(D))) / Vbar)  # 成交支持',
+  'G = 1 + alpha * max(A, 0)                     # 主动买入加权',
+  'P = min(E, C)                                 # 当前价：成交均价与收盘价取低',
+  'sig = prev(sd(ln(E / prev(E)), avgh))         # 截至上一根：成交均价对数收益率的波动率 σ',
+  'CBA = 100 * tanh(retain(F * G, P, prev(E), hl, 48) / sig)  # 48 小时窗口、时间权重 w、保留上移速度 R = ln(P ÷ Eᵢ₋₁) ÷ ((t − i + 1)·σ)',
+].join('\n');
+
+export const CBA_DEF: DeepDigFeatureDef = {
+  id: 'cba',
+  name: '买方定价优势指数 CBA',
+  short: 'CBA',
+  definition: '进场前最后一根 K 线上的买方定价优势（−100 ~ 100）：过去 48 小时每根 K 线的成交支持 × 主动买入加权 × 保留上移速度，按时间权重加总后 100·tanh 压缩。正值 = 向上的价格优势仍被保留；负值 = 价格结果不支持买方优势。不是胜率。',
+  formula: CBA_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -416,6 +452,8 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   return evaluateProgramVars(compiled.program, {
     C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
     Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
+    // 成交均价：成交额 ÷ 成交量（币数）；缺一样或成交量为 0 记空
+    E: series(b => (b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null)),
     hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
 }

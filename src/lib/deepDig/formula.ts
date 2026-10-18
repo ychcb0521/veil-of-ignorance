@@ -42,6 +42,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'ago', min: 2, max: 2, usage: 'ago(x, h)', help: 'h 小时以前那根的值（按 K 线周期换算成根数；开头不够 h 小时的记空）' },
   { name: 'zscore', min: 2, max: 2, usage: 'zscore(x, h)', help: '滚动标准化：(当根 − 过去 h 小时的平均) ÷ 过去 h 小时的标准差（含当根，样本标准差）；空值跳过，开头不满 h 小时用已有的，少于 2 个或标准差为 0 记空' },
   { name: 'sd', min: 2, max: 2, usage: 'sd(x, h)', help: '过去 h 小时的标准差（含当根，样本标准差）：空值跳过，开头不满 h 小时用已有的，少于 2 个记空。例：R / sd(R, avgh) = 按自身波动标准化的涨跌（Z 分数，均值按 0）' },
+  { name: 'retain', min: 4, max: 5, usage: 'retain(K, P, E0, h, W)', help: '保留加权和（CBA 用）：Σ wᵢ·Kᵢ·ln(Pₜ ÷ E0ᵢ) ÷ (t − i + 1)，i 取过去 W 小时（默认 48）里的每一根，wᵢ = 2^(−距今小时 ÷ h) 归一化（权重合计 1）；Kᵢ 或 E0ᵢ 为空的那根这一项记 0' },
   { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
@@ -352,6 +353,36 @@ export function rollingSd(x: Float64Array, n: number): Float64Array {
   return out;
 }
 
+/**
+ * 保留加权和（CBA 买方定价优势指数的核心，Deep dig 的 retain 与 K 线图的 computeCba 共用）：
+ *   outₜ = Σ_{k=0}^{n−1} w_k · K_{t−k} · ln(Pₜ ÷ E0_{t−k}) ÷ (k + 1)，w_k = ρ^k ÷ Σ_j ρ^j（窗口内、t − k ≥ 0 的根），
+ * ρ = 每根的时间衰减，n = 窗口根数。K、E0 为空（或 E0 ≤ 0）的那一根这一项记 0、权重照算；Pₜ 为空 → 空。
+ */
+export function retainSum(k: Float64Array, p: Float64Array, e0: Float64Array, rho: number, n: number): Float64Array {
+  const N = p.length;
+  const out = new Float64Array(N);
+  const lnE0 = Float64Array.from(e0, v => (v > 0 ? Math.log(v) : Number.NaN));
+  // c_k = ρ^k ÷ (k + 1)，预先算好
+  const c = new Float64Array(n);
+  for (let j = 0, r = 1; j < n; j++, r *= rho) c[j] = r / (j + 1);
+  for (let t = 0; t < N; t++) {
+    const pt = p[t];
+    if (!(pt > 0)) { out[t] = Number.NaN; continue; }
+    const lnP = Math.log(pt);
+    const m = Math.min(n, t + 1);
+    let sum = 0;
+    for (let j = 0; j < m; j++) {
+      const kk = k[t - j];
+      const le = lnE0[t - j];
+      if (Number.isFinite(kk) && Number.isFinite(le)) sum += c[j] * kk * (lnP - le);
+    }
+    // 归一化：Σ_{j<m} ρ^j
+    const z = rho === 1 ? m : (1 - rho ** m) / (1 - rho);
+    out[t] = clean(sum / z);
+  }
+  return out;
+}
+
 const truthy = (x: number) => Number.isFinite(x) && x !== 0;
 const clean = (x: number) => (Number.isFinite(x) ? x : Number.NaN);
 const scalarArg = (v: Value, fn: string, what: string, line: number): number => {
@@ -421,6 +452,17 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       if (!isSeries(x)) return name === 'zscore' || name === 'sd' ? Number.NaN : x;
       const n = barsForHours(h, barMinutes);
       return name === 'avg' ? rollingMean(x, n) : name === 'ago' ? shiftBars(x, n) : name === 'sd' ? rollingSd(x, n) : rollingZScore(x, n);
+    }
+    case 'retain': {
+      const [k, pr, e0, hArg, wArg] = args;
+      const h = scalarArg(hArg, 'retain', '半衰期', line);
+      if (!(h > 0)) throw new FormulaError('retain 的半衰期要大于 0（单位：小时）', line);
+      const wHours = wArg == null ? 48 : scalarArg(wArg, 'retain', '窗口时长', line);
+      if (!(wHours > 0)) throw new FormulaError('retain 的窗口时长要大于 0（单位：小时）', line);
+      const len = [k, pr, e0].find(isSeries)?.length ?? 1;
+      const asSeries = (v: Value) => (isSeries(v) ? v : new Float64Array(len).fill(v));
+      const out = retainSum(asSeries(k), asSeries(pr), asSeries(e0), 2 ** (-barMinutes / (h * 60)), barsForHours(wHours, barMinutes));
+      return [k, pr, e0].some(isSeries) ? out : out[0];
     }
     case 'sma': case 'sum': {
       const n = scalarArg(y, name, '根数', line);

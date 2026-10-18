@@ -6,6 +6,7 @@
 import { registerIndicator, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
+import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
@@ -164,6 +165,22 @@ export function dspAValues(dataList: KLineData[], halfLifeHours: number | undefi
  * 窗口与动态谢林点同一个约定：参数是「5 分钟图上的」近期窗口（小时），其他周期等比例缩放（每根 K 线的窗口根数相同）；
  * 标准化窗口固定 24 小时（同样按 5 分钟图计）。
  */
+/**
+ * klinecharts 数据 → CBA（副图）。【用户要求】2026-10-18 新增。成交额读 turnover、主动买入额读 takerBuyTurnover、成交量读 volume（算成交均价）。
+ * 与动态谢林点同一个约定：参数 h 是「5 分钟图上的」时间权重半衰期（小时），48 小时窗口、24 小时常态成交额 / 波动率同样按 5 分钟图计，
+ * 其他周期等比例缩放（每根 K 线的窗口根数相同）。
+ */
+export function cbaPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
+  const h = Number(halfLifeHours);
+  const bars = dataList.map(d => ({
+    close: d.close,
+    volume: typeof d.volume === 'number' ? d.volume : null,
+    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+  }));
+  return computeCba(bars, DSP_BASE_INTERVAL_MS / 60_000, { halfLifeHours: Number.isFinite(h) && h > 0 ? h : CBA_DEFAULTS.halfLifeHours });
+}
+
 export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
   const h = Number(recentHours);
   const bars = dataList.map(d => ({
@@ -1003,6 +1020,28 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => bssPoints(dataList, indicator.calcParams[0]).map(p => (p.bss == null ? {} : { bss: p.bss })),
   });
 
+  // ─── CBA 买方定价优势指数（副图）───
+  // 【用户要求】2026-10-18：CBA = 100·tanh(Σ w·F·G·R)，−100 ~ 100。计算在 cba.ts（与 Deep dig 同一份）。0 轴是分水岭：与 DSP·a 同一条橘黄色虚线
+  registerIndicator({
+    name: 'CBA_CUSTOM',
+    shortName: 'CBA',
+    calcParams: [CBA_DEFAULTS.halfLifeHours],
+    precision: 1,
+    minValue: 0,
+    maxValue: 0,
+    draw: V_ZERO_LINE,
+    figures: [
+      {
+        key: 'cba', title: 'CBA: ', type: 'line',
+        styles: (data) => {
+          const end = (data.next?.indicatorData as { cba?: number } | undefined)?.cba ?? (data.current.indicatorData as { cba?: number } | undefined)?.cba;
+          return { color: vColor(end), size: 1.5 };
+        },
+      },
+    ],
+    calc: (dataList, indicator) => cbaPoints(dataList, indicator.calcParams[0]).map(p => (p.cba == null ? {} : { cba: p.cba })),
+  });
+
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
   registerIndicator({
     name: 'BSS_AVG_CUSTOM',
@@ -1071,6 +1110,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   DSP: 'DSP_CUSTOM',
   DSP_VA: 'DSP_V_CUSTOM',
   BSS: 'BSS_CUSTOM',
+  CBA: 'CBA_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',
