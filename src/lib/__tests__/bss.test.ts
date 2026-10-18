@@ -65,15 +65,16 @@ describe('【用户要求】BSS 买卖强度综合分', () => {
     const m = (3 + 2 + 10) / 3;
     const sd = Math.sqrt(((2 - m) ** 2 + (3 - m) ** 2 + (10 - m) ** 2) / 2);
     expect(z[3]).toBeCloseTo((10 - m) / sd, 12);
-    // 标准化 = tanh(滚动 z-score)；BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A
+    // 标准化 = tanh(滚动 z-score)；【用户要求】V 随价格方向加减分：BSS = 0.45·M标准化 + 0.25·sign(M)·V标准化 + 0.30·A
     const mz = rollingZScore(Float64Array.from([Number.NaN, 0.1, -0.1]), 3)[2];
     expect(p[2].mz).toBeCloseTo(Math.tanh(mz), 12);
-    expect(p[2].bss).toBeCloseTo(0.45 * p[2].mz! + 0.25 * p[2].vz! + 0.3 * p[2].a!, 12);
+    expect(p[2].vd).toBeCloseTo(-p[2].vz!, 12); // M < 0：符号反过来
+    expect(p[2].bss).toBeCloseTo(0.45 * p[2].mz! - 0.25 * p[2].vz! + 0.3 * p[2].a!, 12);
   });
 
   it('Deep dig 的 BSS 公式与图表指标的 computeBss 逐根一致（5 分钟、15 分钟；含缺成交额的 K 线）', () => {
     expect(BUILTIN_FEATURES.map(d => d.id).slice(0, 2)).toEqual([DRIFT_SPEED_DEF.id, BSS_DEF.id]);
-    expect(formulaVariables(BSS_FORMULA)).toEqual({ names: ['n', 'M', 'V', 'A', 'Mz', 'Vz', 'BSS'], result: 'BSS' });
+    expect(formulaVariables(BSS_FORMULA)).toEqual({ names: ['n', 'M', 'V', 'A', 'Mz', 'Vz', 'Vd', 'BSS'], result: 'BSS' });
     const compiled = compileFeatureFormula(BSS_FORMULA);
     for (const [barMs, missingEvery] of [[BAR_MS, 0], [BAR_MS, 37], [3 * BAR_MS, 0]] as const) {
       const b = bars(576, 11, barMs, missingEvery);
@@ -99,5 +100,40 @@ describe('【用户要求】BSS 买卖强度综合分', () => {
     expect(Array.from(run('ago(x, 1)', 60))).toEqual([Number.NaN, 1, 2, 3, 4, 5]);
     expect(Array.from(run('zscore(x, 1)', 30)).map(v => (Number.isNaN(v) ? null : Number(v.toFixed(6))))).toEqual([null, 0.707107, 0.707107, 0.707107, 0.707107, 0.707107]);
     expect(() => run('zscore(x, 0)', 5)).toThrow('zscore 的时长要大于 0');
+  });
+
+  it('【用户要求】放量随价格方向加减分：涨时放量加分、缩量扣分；跌时放量扣分、缩量加分；没涨没跌这一项为 0', () => {
+    // 1 小时一根，窗口 3 根：前两根平量，第三根放量 / 缩量，分别配上涨 / 下跌 / 不动
+    const run = (q3: number, c3: number) => computeBss([
+      { close: 100, quoteVolume: 100, takerBuyQuoteVolume: 50 },
+      { close: 100, quoteVolume: 110, takerBuyQuoteVolume: 55 },
+      { close: c3, quoteVolume: q3, takerBuyQuoteVolume: q3 / 2 },
+    ], 60, { recentHours: 1, normHours: 3 })[2];
+    const upBig = run(400, 105);
+    const downBig = run(400, 95);
+    const upSmall = run(20, 105);
+    const flatBig = run(400, 100);
+    expect(upBig.vz!).toBeGreaterThan(0);
+    expect(upBig.vd!).toBeCloseTo(upBig.vz!, 12);
+    expect(downBig.vd!).toBeCloseTo(-downBig.vz!, 12);
+    expect(downBig.vd!).toBeLessThan(0);
+    expect(upSmall.vz!).toBeLessThan(0);
+    expect(upSmall.vd!).toBeLessThan(0); // 缩量上涨扣分
+    expect(flatBig.vd).toBe(0);
+  });
+
+  it('用户存过的 BSS 定义（自己加了行）：只换「V 那一项」两处，其余行原样；别的特征值不动', async () => {
+    const { mergeFeatureDefs, upgradeBssFormula } = await import('@/lib/deepDig/features');
+    const old = [
+      '# BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉',
+      ...BSS_FORMULA.split('\n').slice(1).filter(l => !l.startsWith('Vd =')).map(l => (l.startsWith('BSS =') ? 'BSS = 0.45 * Mz + 0.25 * Vz + 0.30 * A' : l)),
+      'avg_BSS = avg(BSS, 24)',
+    ].join('\n');
+    const merged = mergeFeatureDefs([{ ...BSS_DEF, builtin: undefined, formula: old }]).find(d => d.id === 'bss')!;
+    expect(merged.formula).toBe(`${BSS_FORMULA}\navg_BSS = avg(BSS, 24)`);
+    expect(formulaVariables(merged.formula).result).toBe('avg_BSS');
+    // 已是新写法、或不是 BSS：原样
+    expect(upgradeBssFormula({ id: 'bss', formula: BSS_FORMULA }).formula).toBe(BSS_FORMULA);
+    expect(upgradeBssFormula({ id: 'other', formula: old }).formula).toBe(old);
   });
 });

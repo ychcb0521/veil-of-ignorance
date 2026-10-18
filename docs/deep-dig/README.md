@@ -36,7 +36,7 @@
 
 ### 第二个特征值：BSS 买卖强度综合分（2026-10-18 用户要求）
 
-`BSS_DEF`（`src/lib/deepDig/features.ts`）：M = 近 n 小时涨跌幅（`ago(C, n)`），V = 近 n 小时平均成交额 ÷ 近 avgh 小时平均，A = (主动买 − 主动卖) ÷ 合计；M、V 标准化 = `tanh(zscore(·, avgh))`；**BSS = 0.45·Mz + 0.25·Vz + 0.30·A**，−1 ~ 1。
+`BSS_DEF`（`src/lib/deepDig/features.ts`）：M = 近 n 小时涨跌幅（`ago(C, n)`），V = 近 n 小时平均成交额 ÷ 近 avgh 小时平均，A = (主动买 − 主动卖) ÷ 合计；M、V 标准化 = `tanh(zscore(·, avgh))`；**BSS = 0.45·Mz + 0.25·Vd + 0.30·A**，−1 ~ 1；`Vd = sign(M) * Vz`——2026-10-18 用户要求「放量随价格方向加减分」：涨时放量加分、缩量扣分，跌时放量扣分、缩量加分，M = 0 时为 0（之前 Vz 不分方向，下跌放量也加分）。用户存过的 BSS 定义自动换掉这两处（`upgradeBssFormula`，自己加的行原样保留），定义键随之变化，界面提示重新运行描述统计。
 订单簿 I 没有历史数据，去掉（用户确认），权重按用户给的 0.45 / 0.25 / 0.30。标准化窗口 = 平均时长 avgh（默认 24 小时），近期窗口 n 写在公式第一句（默认 1 小时）。
 K 线图指标菜单里的同名副图用 `src/lib/bss.ts` 的 `computeBss`，与这条公式逐根一致（`src/lib/__tests__/bss.test.ts`）。为此公式新增函数 `ago(x, h)`（h 小时以前的值）、`zscore(x, h)`（滚动标准化）、`tanh(x)`。
 

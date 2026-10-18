@@ -202,7 +202,7 @@ export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
  * 权重按用户给的 0.45 / 0.25 / 0.30。标准化 = tanh(滚动 z-score)，BSS 落在 −1 ~ 1；标准化窗口 = 平均时长 avgh（默认 24 小时）。
  */
 export const BSS_FORMULA = [
-  '# BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉',
+  '# BSS = 0.45·M标准化 + 0.25·sign(M)·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉',
   '# Q = 成交额，B / S = 主动买入 / 卖出成交额（USDT）；avgh = 标准化窗口（下面选，默认 24 小时）',
   'n = 1                                   # 近期窗口（小时）',
   'M = C / ago(C, n) - 1                   # 价格动量：近 n 小时涨跌幅',
@@ -210,8 +210,23 @@ export const BSS_FORMULA = [
   'A = (avg(B, n) - avg(S, n)) / avg(Q, n) # 成交攻击性：(主动买 − 主动卖) ÷ 合计，−1 ~ 1',
   'Mz = tanh(zscore(M, avgh))              # M 标准化：滚动 z-score 压到 −1 ~ 1',
   'Vz = tanh(zscore(V, avgh))              # V 标准化',
-  'BSS = 0.45 * Mz + 0.25 * Vz + 0.30 * A',
+  'Vd = sign(M) * Vz                       # 放量随价格方向加减分：涨时放量加分、缩量扣分；跌时放量扣分、缩量加分',
+  'BSS = 0.45 * Mz + 0.25 * Vd + 0.30 * A',
 ].join('\n');
+
+/**
+ * 【用户要求】2026-10-18「放量随价格方向加减分」之前的 BSS 公式写法：用户存的 BSS 定义（含自己加的行）里只换这两处，
+ * 其余行原样保留；定义键随之改变，界面提示重新运行描述统计。
+ */
+const BSS_PRE_DIRECTION_LINES: readonly [string, string][] = [
+  ['# BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉', '# BSS = 0.45·M标准化 + 0.25·sign(M)·V标准化 + 0.30·A，−1 ~ 1；订单簿 I 没有历史数据，去掉'],
+  ['BSS = 0.45 * Mz + 0.25 * Vz + 0.30 * A', 'Vd = sign(M) * Vz                       # 放量随价格方向加减分：涨时放量加分、缩量扣分；跌时放量扣分、缩量加分\nBSS = 0.45 * Mz + 0.25 * Vd + 0.30 * A'],
+];
+export function upgradeBssFormula<T extends { id?: string; formula?: string }>(d: T): T {
+  if (d.id !== 'bss' || !d.formula || !d.formula.split('\n').some(l => l.trim() === BSS_PRE_DIRECTION_LINES[1][0])) return d;
+  const formula = d.formula.split('\n').map(l => BSS_PRE_DIRECTION_LINES.find(([old]) => l.trim() === old)?.[1] ?? l).join('\n');
+  return { ...d, formula };
+}
 
 export const BSS_DEF: DeepDigFeatureDef = {
   id: 'bss',
@@ -284,7 +299,7 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  const byId = new Map(saved.map(d => [d.id, upgradeFormula(upgradeGroupVars(d))]));
+  const byId = new Map(saved.map(d => [d.id, upgradeBssFormula(upgradeFormula(upgradeGroupVars(d)))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   // 历史内置名称随系统更新，用户自定义的名称保持原样。

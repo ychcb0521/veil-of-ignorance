@@ -35,7 +35,7 @@ describe('【用户要求】K 线图指标菜单：BSS 买卖强度综合分（�
     const onChange = vi.fn();
     render(<IndicatorMenu open indicators={[]} onIndicatorsChange={onChange} onClose={() => {}} />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'BSS' } });
-    expect(screen.getByText(/BSS 买卖强度综合分（−1 ~ 1）/)).toHaveAttribute('title', expect.stringContaining('BSS = 0.45·M标准化 + 0.25·V标准化 + 0.30·A'));
+    expect(screen.getByText(/BSS 买卖强度综合分（−1 ~ 1）/)).toHaveAttribute('title', expect.stringContaining('BSS = 0.45·M标准化 + 0.25·sign(M)·V标准化 + 0.30·A'));
     fireEvent.click(screen.getByText('买卖强度综合分 BSS'));
     expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'BSS', period: 1, enabled: true })]);
   });
