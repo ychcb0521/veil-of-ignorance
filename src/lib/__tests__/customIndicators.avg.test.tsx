@@ -38,7 +38,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     expect(registered.get('BSS_CUSTOM')!.figures.map(f => f.title)).toEqual(['BSS: ']);
     expect(registered.get('BSS_CUSTOM')!.calcParams).toEqual([1]);
     expect(registered.get('DSP_V_CUSTOM')!.figures.map(f => f.title)).toEqual(['a(基点/根): ']);
-    expect(registered.get('DSP_V_CUSTOM')!.calcParams).toEqual([6]);
+    expect(registered.get('DSP_V_CUSTOM')!.calcParams).toEqual([6, 0]);
     expect(registered.get('BSS_AVG_CUSTOM')!.figures.map(f => f.title)).toEqual(['avg_BSS: ']);
     expect(registered.get('DSP_V_AVG_CUSTOM')!.figures.map(f => f.title)).toEqual(['avg_a(基点/根): ']);
   });
@@ -64,7 +64,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
 
   it('avg_a 副图：单位与 a 相同（基点 / 根）；1 小时图上每根窗口根数与 5 分钟图相同', () => {
     const def = registered.get('DSP_V_AVG_CUSTOM')!;
-    expect(def.calcParams).toEqual([6, AVG_DEFAULT_HOURS]);
+    expect(def.calcParams).toEqual([6, AVG_DEFAULT_HOURS, 0]);
     const a = dspPoints(k, 6).map(p => (p.v == null ? null : p.v * DSP_V_DISPLAY_SCALE));
     const out = def.calc(k, { calcParams: [6, 24] });
     for (const i of [1, 300, 699]) expect(out[i].v).toBeCloseTo(manualAvg(a, i, 288)!, 12);
@@ -74,9 +74,9 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
 
   it('参数：两个均线副图多传一个 N（老设置没有 → 24），其他指标不变；空值跳过', () => {
     expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 2 })).toEqual([2, 24]);
-    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 48]);
+    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 48, 0]);
     expect(indicatorCalcParams('BSS_CUSTOM', { period: 2, avgHours: 48 })).toEqual([2]);
-    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6]);
+    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 0]);
     expect(indicatorCalcParams('DSP_A_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6]);
     expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 1, avgHours: 0 })).toEqual([1, 24]);
     expect(rollingAvgHours([1, null, 3, 5], 1 / 6)).toEqual([1, 1, 3, 4]);

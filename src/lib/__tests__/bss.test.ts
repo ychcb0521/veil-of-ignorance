@@ -72,7 +72,7 @@ describe('【用户要求】BSS 买卖强度综合分', () => {
   });
 
   it('Deep dig 的 BSS 公式与图表指标的 computeBss 逐根一致（5 分钟、15 分钟；含缺成交额的 K 线）', () => {
-    expect(BUILTIN_FEATURES.map(d => d.id)).toEqual([DRIFT_SPEED_DEF.id, BSS_DEF.id]);
+    expect(BUILTIN_FEATURES.map(d => d.id).slice(0, 2)).toEqual([DRIFT_SPEED_DEF.id, BSS_DEF.id]);
     expect(formulaVariables(BSS_FORMULA)).toEqual({ names: ['n', 'M', 'V', 'A', 'Mz', 'Vz', 'BSS'], result: 'BSS' });
     const compiled = compileFeatureFormula(BSS_FORMULA);
     for (const [barMs, missingEvery] of [[BAR_MS, 0], [BAR_MS, 37], [3 * BAR_MS, 0]] as const) {

@@ -3,8 +3,8 @@
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { registerIndicator, type IndicatorSeries, type KLineData } from 'klinecharts';
-import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
+import { registerIndicator, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
+import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
@@ -133,7 +133,7 @@ export function computeAnnualizedVolatility(
 }
 
 /** klinecharts 数据 → DSP：成交额读 turnover，主动买入额读 takerBuyTurnover（toKLineData 写入）；h 按 5 分钟图计，按实际周期等比例缩放。 */
-export function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined) {
+export function dspPoints(dataList: KLineData[], halfLifeHours: number | undefined, zscore = false) {
   const h = Number(halfLifeHours);
   const bars = dataList.map(d => ({
     time: d.timestamp,
@@ -144,7 +144,19 @@ export function dspPoints(dataList: KLineData[], halfLifeHours: number | undefin
   // 【用户要求】参数 h 是 5 分钟图上的半衰期；其他周期的记忆时间等比例缩放（每根 K 线的权重相同）
   const intervalMs = inferIntervalMs(bars) ?? DSP_BASE_INTERVAL_MS;
   const h5m = Number.isFinite(h) && h > 0 ? h : DSP_DEFAULTS.halfLifeHours;
-  return computeDsp(bars, { halfLifeHours: dspHalfLifeForInterval(h5m, intervalMs) }, intervalMs);
+  // 【用户要求】Z 分数版：σ 的窗口同样按 5 分钟图计（24 小时），其他周期等比例缩放
+  return computeDsp(bars, {
+    halfLifeHours: dspHalfLifeForInterval(h5m, intervalMs),
+    ...(zscore ? { zWindowHours: dspHalfLifeForInterval(DSP_Z_WINDOW_HOURS, intervalMs) } : {}),
+  }, intervalMs);
+}
+
+/** a / avg_a 副图里要画的值：Z 开关打开时用 Z 分数版（% 标准差 / 根），否则原始 a（基点 / 根）。 */
+export function dspAValues(dataList: KLineData[], halfLifeHours: number | undefined, zscore: boolean): (number | null)[] {
+  return dspPoints(dataList, halfLifeHours, zscore).map(p => {
+    const x = zscore ? p.vz : p.v;
+    return x == null ? null : x * (zscore ? DSP_VZ_DISPLAY_SCALE : DSP_V_DISPLAY_SCALE);
+  });
 }
 
 /**
@@ -204,8 +216,14 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   // 【用户要求】avg_BSS 独立一个副图，紧挨在 BSS 副图下面
   BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }],
 };
-/** 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长。 */
-export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number }): number[] {
+/**
+ * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
+ * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
+ */
+export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number; zscore?: boolean }): number[] {
+  const z = ind.zscore ? 1 : 0;
+  if (kcName === 'DSP_V_CUSTOM') return [ind.period, z];
+  if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
 }
 
@@ -275,6 +293,24 @@ function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D
 }
 /** BSS 着色：> 0.55 绿、< −0.55 红，中间按正负淡绿 / 淡红。 */
 const bssColor = (v: number | undefined) => (v == null ? '#F0B90B' : v >= BSS_STRONG ? '#0ECB81' : v <= -BSS_STRONG ? '#F6465D' : v >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)');
+
+/** a / avg_a 副图的图例：Z 开关打开时名字、单位换成 Z 分数版；括号里只写 h（和 N），不写开关那一位。 */
+function dspATooltip(kind: 'a' | 'avg') {
+  return ({ indicator, crosshair, defaultStyles }: IndicatorCreateTooltipDataSourceParams): IndicatorTooltipData => {
+    const p = indicator.calcParams as number[];
+    const z = (kind === 'a' ? p[1] : p[2]) === 1;
+    const v = (indicator.result[crosshair.dataIndex ?? -1] as { v?: number } | undefined)?.v;
+    const color = vColor(v);
+    const unit = z ? '(%σ/根): ' : '(基点/根): ';
+    const name = kind === 'a' ? (z ? 'DSP·az' : 'DSP·a') : (z ? 'avg_az' : 'avg_a');
+    return {
+      name,
+      calcParamsText: `(${kind === 'a' ? p[0] : `${p[0]},${p[1]}`})`,
+      icons: defaultStyles.tooltip.icons,
+      values: [{ title: { text: `${kind === 'a' ? (z ? 'az' : 'a') : name}${unit}`, color }, value: { text: v == null ? defaultStyles.tooltip.defaultValue : v.toFixed(indicator.precision), color } }],
+    };
+  };
+}
 
 let registered = false;
 
@@ -886,7 +922,9 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'DSP_V_CUSTOM',
     shortName: 'DSP·a',
-    calcParams: [DSP_DEFAULTS.halfLifeHours],
+    // [半衰期 h, Z 开关]
+    calcParams: [DSP_DEFAULTS.halfLifeHours, 0],
+    createTooltipDataSource: dspATooltip('a'),
     precision: 3,
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
@@ -898,14 +936,16 @@ export function registerCustomIndicators() {
         styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
       },
     ],
-    calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? {} : { v: p.v * DSP_V_DISPLAY_SCALE })),
+    calc: (dataList, indicator) => dspAValues(dataList, indicator.calcParams[0], indicator.calcParams[1] === 1).map(x => (x == null ? {} : { v: x })),
   });
 
   // 【用户要求】avg_a = avg(a, N)：独立副图，紧挨在 a 副图下面。参数 [半衰期 h, 均线时长 N]；0 轴与 a 副图同一条橘黄色虚线，线按正负着色
   registerIndicator({
     name: 'DSP_V_AVG_CUSTOM',
     shortName: 'avg_a',
-    calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS],
+    // [半衰期 h, 均线时长 N, Z 开关]
+    calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS, 0],
+    createTooltipDataSource: dspATooltip('avg'),
     precision: 3,
     minValue: 0,
     maxValue: 0,
@@ -917,7 +957,7 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const a = dspPoints(dataList, indicator.calcParams[0]).map(p => (p.v == null ? null : p.v * DSP_V_DISPLAY_SCALE));
+      const a = dspAValues(dataList, indicator.calcParams[0], indicator.calcParams[2] === 1);
       return rollingAvgHours(a, indicator.calcParams[1]).map(x => (x == null ? {} : { v: x }));
     },
   });

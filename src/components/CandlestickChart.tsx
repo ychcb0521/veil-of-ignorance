@@ -109,6 +109,8 @@ const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A" };
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
 const COMPANION_ONLY = new Set(["DSP_VA"]);
+/** 有 Z 分数开关的菜单项（动态谢林点两项）。 */
+const Z_TOGGLE_TYPES = new Set(["DSP", "DSP_VA"]);
 /** 这个菜单项是否带副图均线参数（自己或附属副图之一用均线时长）。 */
 const hasAvgParam = (type: string) =>
   [KLINE_INDICATOR_MAP[type], ...(INDICATOR_COMPANIONS[type] ?? []).map(c => c.kcName)].some(n => n != null && AVG_PARAM_INDICATORS.has(n));
@@ -155,6 +157,8 @@ export interface IndicatorConfig {
   period: number;
   /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
   avgHours?: number;
+  /** 【用户要求】动态谢林点的 a / avg_a 副图用 Z 分数版（涨跌先除以过去 24 小时的标准差）；没写 = 否。 */
+  zscore?: boolean;
   color?: string;
   enabled: boolean;
 }
@@ -2359,7 +2363,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}
+                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

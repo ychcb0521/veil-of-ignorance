@@ -41,6 +41,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'ema', min: 2, max: 3, usage: 'ema(x, h, 初值)', help: '指数平滑，半衰期 h 小时（h 可写 hl = 上面选的半衰期）：yₜ = ρ·yₜ₋₁ + (1 − ρ)·xₜ，ρ = 2^(−周期 ÷ h)，周期 = 上面选的 K 线周期；x 为空的那根跳过；不给初值时从第一个非空值起算' },
   { name: 'ago', min: 2, max: 2, usage: 'ago(x, h)', help: 'h 小时以前那根的值（按 K 线周期换算成根数；开头不够 h 小时的记空）' },
   { name: 'zscore', min: 2, max: 2, usage: 'zscore(x, h)', help: '滚动标准化：(当根 − 过去 h 小时的平均) ÷ 过去 h 小时的标准差（含当根，样本标准差）；空值跳过，开头不满 h 小时用已有的，少于 2 个或标准差为 0 记空' },
+  { name: 'sd', min: 2, max: 2, usage: 'sd(x, h)', help: '过去 h 小时的标准差（含当根，样本标准差）：空值跳过，开头不满 h 小时用已有的，少于 2 个记空。例：R / sd(R, avgh) = 按自身波动标准化的涨跌（Z 分数，均值按 0）' },
   { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
   { name: 'sum', min: 2, max: 2, usage: 'sum(x, n)', help: '最近 n 根的和（不满 n 根记空）' },
@@ -333,6 +334,24 @@ export function rollingZScore(x: Float64Array, n: number): Float64Array {
   return out;
 }
 
+/** 滚动样本标准差（最近 n 根，含当根）；空值跳过，少于 2 个记空。 */
+export function rollingSd(x: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(x.length);
+  let sum = 0;
+  let sq = 0;
+  let count = 0;
+  for (let i = 0; i < x.length; i++) {
+    if (Number.isFinite(x[i])) { sum += x[i]; sq += x[i] * x[i]; count++; }
+    const drop = i - n;
+    if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; sq -= x[drop] * x[drop]; count--; }
+    if (count < 2) { out[i] = Number.NaN; continue; }
+    const mean = sum / count;
+    const variance = (sq - count * mean * mean) / (count - 1);
+    out[i] = variance > 0 ? Math.sqrt(variance) : 0;
+  }
+  return out;
+}
+
 const truthy = (x: number) => Number.isFinite(x) && x !== 0;
 const clean = (x: number) => (Number.isFinite(x) ? x : Number.NaN);
 const scalarArg = (v: Value, fn: string, what: string, line: number): number => {
@@ -396,12 +415,12 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       }
       return out;
     }
-    case 'avg': case 'ago': case 'zscore': {
+    case 'avg': case 'ago': case 'zscore': case 'sd': {
       const h = scalarArg(y, name, '时长', line);
       if (!(h > 0)) throw new FormulaError(`${name} 的时长要大于 0（单位：小时）`, line);
-      if (!isSeries(x)) return name === 'zscore' ? Number.NaN : x;
+      if (!isSeries(x)) return name === 'zscore' || name === 'sd' ? Number.NaN : x;
       const n = barsForHours(h, barMinutes);
-      return name === 'avg' ? rollingMean(x, n) : name === 'ago' ? shiftBars(x, n) : rollingZScore(x, n);
+      return name === 'avg' ? rollingMean(x, n) : name === 'ago' ? shiftBars(x, n) : name === 'sd' ? rollingSd(x, n) : rollingZScore(x, n);
     }
     case 'sma': case 'sum': {
       const n = scalarArg(y, name, '根数', line);

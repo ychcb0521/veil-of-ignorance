@@ -228,7 +228,41 @@ export const BSS_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF];
+/**
+ * 买方推力的加速度 az（Z 分数版）：Deep dig 第三个内置特征值；K 线图「动态谢林点」打开「Z」开关时 a 副图画的就是它
+ * （主图用的「平时成交额」是 ema(Q, hl)，把下面 f 一行换成 ema(Q, hl) 就与主图逐根一致，单元测试核对）。
+ * 【用户要求】2026-10-18「把 DSP 也做成可以基于 Z 分数的，具体哪一步需要标准化处理，你来定」：只把涨跌 R 除以它自己的标准差——
+ * f 本来就是和自己的平均成交额比、A 本来就在 −1 ~ 1，只有 R 带着各个币自己的波动大小；不减均值（减掉会把趋势本身减掉）。
+ */
+export const DRIFT_SPEED_Z_FORMULA = [
+  '# Z 分数版：涨跌 R 先除以它过去 avgh 小时的标准差（几个 σ），不同币的波动大小不再左右结果；0 仍是多空平衡',
+  '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 半衰期，avgh = 平均时长（小时，都在下面选）',
+  'N = abs(B - S)                 # 主动净资金',
+  'f = ln(1 + N / avg(Q, avgh))   # 资金力量：净资金比过去 avgh 小时的平均成交额异常多少',
+  'A = (B - S) / Q                # 主动买方优势',
+  'G = 1 + max(A, 0)              # 买方优势权重',
+  'R = ln(C / prev(C))            # 价格变化',
+  'Rz = R / sd(R, avgh)           # 价格变化的 Z 分数：除以过去 avgh 小时的标准差（均值按 0）',
+  'F = nz(f * G * Rz)             # 单根推力（标准差单位；缺数据的那根记 0）',
+  'az = ema(F, hl, 0)             # 买方推力的加速度（Z 分数版）：按半衰期 hl 指数平滑',
+].join('\n');
+
+export const DRIFT_SPEED_Z_DEF: DeepDigFeatureDef = {
+  id: 'drift-speed-z',
+  name: '买方推力的加速度 az（Z 分数）',
+  short: 'az',
+  definition: '与买方推力的加速度 a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。',
+  formula: DRIFT_SPEED_Z_FORMULA,
+  scale: 100,
+  unit: '%σ/根',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, DRIFT_SPEED_Z_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
