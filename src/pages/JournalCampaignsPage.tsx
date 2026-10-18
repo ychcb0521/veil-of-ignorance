@@ -27,6 +27,7 @@ import {
   Table2,
 } from 'lucide-react';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
+import { CAMPAIGN_METRIC_LETTERS, campaignLetterValues, letterRanges } from '@/lib/campaignMetricLetters';
 import { XmgReference } from '@/components/journal/XmgReference';
 import { toast } from '@/lib/notificationCenter';
 import { buildXlsx } from '@/lib/xlsxWorkbook';
@@ -2788,6 +2789,14 @@ export default function JournalCampaignsPage() {
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
   }, [dynamicDrawdownByCampaign, peakPriceChangeByCampaign, scopedRows]);
+  // 【用户要求】指标表补每个字母的本机范围：所选时间段内的战役（含算过的峰值涨幅 / 动态最大回撤），回收站不算
+  const metricLetterRanges = useMemo(
+    () => letterRanges(
+      metricRows.filter(row => !row.campaign.deleted_at).map(campaignLetterValues),
+      CAMPAIGN_METRIC_LETTERS.filter(m => m.source === 'campaign').map(m => m.letter),
+    ),
+    [metricRows],
+  );
   const unrealizedReadableCount = useMemo(
     () => metricRows.filter(row => rowUnrealizedPriceChangePct(row) != null).length,
     [metricRows],
@@ -5130,7 +5139,7 @@ export default function JournalCampaignsPage() {
               </PopoverTrigger>
               <PopoverContent align="start" side="bottom" sideOffset={4} collisionPadding={POPOVER_COLLISION_PADDING} className={`w-[600px] ${POPOVER_VIEWPORT_MAX_W} max-h-[min(75vh,var(--radix-popover-content-available-height))] overflow-y-auto border-border bg-card p-3`}>
                 <div className="mb-2 text-[12px] font-medium text-foreground">指标字母表</div>
-                <MetricLetterTable />
+                <MetricLetterTable ranges={metricLetterRanges} />
               </PopoverContent>
             </Popover>
             <XmgReference />

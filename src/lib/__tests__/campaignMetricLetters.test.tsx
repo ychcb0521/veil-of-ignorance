@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CAMPAIGN_METRIC_LETTERS, LETTER_BY_CARD_MODE, LETTER_BY_OVERVIEW_KEY } from '@/lib/campaignMetricLetters';
+import { CAMPAIGN_METRIC_LETTERS, formatRangeValue, LETTER_BY_CARD_MODE, LETTER_BY_OVERVIEW_KEY, letterRanges } from '@/lib/campaignMetricLetters';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
 import { PnlMetricLabel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { parseFormula } from '@/lib/deepDig/formula';
@@ -65,5 +65,22 @@ describe('【用户要求】交易战役指标字母表：每个指标一个字�
     expect(tags[0].getAttribute('data-letter')).toBe('d');
     // 字母用 ::before 画，不进文字内容
     expect(container.textContent).not.toContain('d预期回撤');
+  });
+
+  it('【用户要求】每个指标可以输入的数值范围：按本机样本算最小 ~ 最大、中位数、有读数的个数；给了才多一列', () => {
+    const r = letterRanges([{ h: 3, c: 1 }, { h: 12.345, c: null }, { h: 0.5 }, { c: Number.NaN }], ['h', 'c', 'n']);
+    expect(r.h).toEqual({ min: 0.5, max: 12.345, median: 3, n: 3, total: 4 });
+    expect(r.c).toMatchObject({ min: 1, max: 1, n: 1, total: 4 });
+    expect(r.n.n).toBe(0);
+    expect([formatRangeValue(3), formatRangeValue(12.345), formatRangeValue(0.5), formatRangeValue(-0.0001), formatRangeValue(1234.5)]).toEqual(['3', '12.3', '0.500', '0.000', '1235']);
+    const { unmount } = render(<MetricLetterTable sources={['campaign']} />);
+    expect(screen.queryAllByTestId('metric-letter-range')).toHaveLength(0);
+    unmount();
+    render(<MetricLetterTable sources={['campaign']} ranges={r} />);
+    const cell = (key: string) => screen.getByTestId(`metric-letter-${key}`).querySelector('[data-testid="metric-letter-range"]');
+    expect(cell('h')!.textContent).toBe('0.500 ~ 12.3中位 3 · 3/4');
+    expect(cell('h')!.getAttribute('title')).toContain('本机 4 场里 3 场有读数');
+    expect(cell('n')!.textContent).toBe('没有读数');
+    expect(cell('d')).toBeNull(); // 这一节没给的字母：格子空着
   });
 });

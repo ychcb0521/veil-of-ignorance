@@ -14,6 +14,7 @@ import {
   type DeepDigFeatureDef, type SampleRow, type SampleSource,
 } from '@/lib/deepDig/features';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
+import { CAMPAIGN_METRIC_LETTERS, letterRanges } from '@/lib/campaignMetricLetters';
 import type { ResearchInterval } from '@/lib/deepRsa/marketData';
 
 const BTN = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
@@ -200,6 +201,12 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
     if (error) return new Set<string>();
     try { return compileGroups(value.positive, value.control, value.source).inputs; } catch { return new Set<string>(); }
   }, [error, value]);
+  // 【用户要求】指标表补每个字母的本机范围（不进研究的样本不算）；表展开时才算
+  const ranges = useMemo(() => {
+    if (!table || !rows) return undefined;
+    const kind = value.source === 'signals' ? 'signal' : 'campaign';
+    return letterRanges(rows.filter(r => !r.excluded).map(r => r.values), CAMPAIGN_METRIC_LETTERS.filter(m => m.source === kind).map(m => m.letter));
+  }, [table, rows, value.source]);
   const keys = (e: React.KeyboardEvent) => { if (e.key === 'Enter') onEnter?.(); if (e.key === 'Escape') onEscape?.(); };
   const unit = value.source === 'signals' ? '条信号' : '场战役';
   return (
@@ -243,7 +250,7 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
         {table ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}指标表（可用的字母）
       </button>
       {table && (
-        <MetricLetterTable sources={[value.source === 'signals' ? 'signal' : 'campaign']} highlight={used} className="rounded-md border border-border/70 bg-muted/20 px-2.5 py-2" />
+        <MetricLetterTable sources={[value.source === 'signals' ? 'signal' : 'campaign']} highlight={used} ranges={ranges} rangeNoun={value.source === 'signals' ? '条' : '场'} className="rounded-md border border-border/70 bg-muted/20 px-2.5 py-2" />
       )}
     </div>
   );

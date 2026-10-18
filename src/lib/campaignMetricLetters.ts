@@ -84,3 +84,43 @@ export function campaignLetterValues(row: CampaignCardData): Record<string, numb
   for (const m of CAMPAIGN_METRIC_LETTERS) if (m.get) out[m.letter] = m.get(row);
   return out;
 }
+
+/** 一个字母在一批样本里的读数范围（写分组条件时用同样的单位）。 */
+export interface LetterRange {
+  min: number;
+  max: number;
+  median: number;
+  /** 有读数的个数。 */
+  n: number;
+  /** 样本总数。 */
+  total: number;
+}
+
+/**
+ * 【用户要求】2026-10-18「我想知道每个指标可以输入的数值范围，请你在表格中补充」：
+ * 按本机样本算每个字母的最小 ~ 最大、中位数、有读数的个数（没有读数的字母 n = 0）。
+ */
+export function letterRanges(rows: readonly Readonly<Record<string, number | null | undefined>>[], letters: readonly string[]): Record<string, LetterRange> {
+  const out: Record<string, LetterRange> = {};
+  for (const letter of letters) {
+    const vals = rows.map(r => r[letter]).filter((v): v is number => v != null && Number.isFinite(v)).sort((a, b) => a - b);
+    const h = vals.length >> 1;
+    out[letter] = {
+      min: vals[0] ?? Number.NaN,
+      max: vals[vals.length - 1] ?? Number.NaN,
+      median: vals.length === 0 ? Number.NaN : vals.length % 2 ? vals[h] : (vals[h - 1] + vals[h]) / 2,
+      n: vals.length,
+      total: rows.length,
+    };
+  }
+  return out;
+}
+
+/** 范围里的数：整数照写，其余按大小留 0–3 位小数。 */
+export function formatRangeValue(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  if (Number.isInteger(v)) return String(v);
+  const a = Math.abs(v);
+  const text = v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3);
+  return Number(text) === 0 ? text.replace('-', '') : text;
+}

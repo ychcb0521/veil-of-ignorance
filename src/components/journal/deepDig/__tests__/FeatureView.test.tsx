@@ -371,10 +371,17 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(table).toHaveTextContent('首仓涨跌幅');
     expect(table).toHaveTextContent('盈亏比');
     expect(screen.getByTestId('metric-letter-Bt').className).toContain('bg-'); // 条件里用到的字母标亮
+    // 【用户要求】每个字母的本机范围：最小 ~ 最大（中位数），没有读数的写明
+    const range = (key: string) => within(screen.getByTestId(`metric-letter-${key}`)).getByTestId('metric-letter-range').textContent;
+    expect(screen.getByTestId('metric-letter-range-note')).toHaveTextContent('% 写 10 = 10%');
+    expect(range('c')).toBe('10 ~ 10中位 10');
+    expect(range('p')).toBe('-80 ~ 0中位 0');
+    expect(range('h')).toBe('没有读数');
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-source-signals'));
     expect((screen.getByTestId('deep-dig-describe-groups-positive') as HTMLInputElement).value).toBe('s >= 3');
     expect(screen.getByTestId('deep-dig-describe-groups-preview')).toHaveTextContent('本机信号（去重前）：实验组 2 · 对照组 2 · 冲突 0 · 其他 1');
     expect(screen.getByTestId('metric-letter-table')).toHaveTextContent('信号评分');
+    expect(range('s')).toBe('1 ~ 5中位 3 · 4/5');
     fireEvent.change(screen.getByTestId('deep-dig-describe-groups-positive'), { target: { value: 's >= 4' } });
     fireEvent.click(screen.getByTestId('deep-dig-describe-groups-save'));
     expect(onSaveDef).toHaveBeenCalledWith(expect.objectContaining({ source: 'signals', positive: 's >= 4', control: 's < 3', groupVars: 2 }));
