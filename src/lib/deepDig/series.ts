@@ -25,6 +25,8 @@ export function formatSeriesOffset(ms: number): string {
 }
 
 export interface DeepDigSeries {
+  /** 每个曲线时点向前准备的公式预热历史长度。旧缓存没有。 */
+  historyMs?: number;
   /** 对应哪一次描述统计（DeepDigData.finishedAt）。 */
   finishedAt: number;
   /** 各点相对进场的时间（毫秒）：负 = 进场前。 */
@@ -65,7 +67,7 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | null {

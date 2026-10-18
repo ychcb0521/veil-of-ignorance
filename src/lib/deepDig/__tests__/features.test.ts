@@ -161,3 +161,16 @@ describe('【用户要求】改名「买方推力漂移速度 DSP·a」', () => 
     expect(key({ ...Z, formula: Z.formula.replace('az = ema(F, hl, 0)', 'az = ema(F, hl, 1)') })).not.toBe(key(Z));
   });
 });
+
+
+describe('公式的历史依赖与预热', () => {
+  it('CBA-2原值无需改公式，叠加均线或自定义嵌套窗口时自动增加预热', async () => {
+    const { CBA2_DEF } = await import('@/lib/deepDig/features');
+    const H = 3600000;
+    expect(featureWindowMs(CBA2_DEF)).toBe(73 * H);
+    const withAvg = { ...CBA2_DEF, formula: `${CBA2_DEF.formula}\navg_CBA2 = avg(CBA2, 24)` };
+    expect(featureWindowMs(withAvg)).toBeGreaterThanOrEqual(96 * H);
+    expect(featureWindowMs({ ...withAvg, formula: `${withAvg.formula}\nmore = avg(avg_CBA2, avgh)` })).toBeGreaterThanOrEqual(120 * H);
+    expect(featureWindowMs({ ...withAvg, formula: `${CBA2_DEF.formula}\nn = 36\navg_CBA2 = avg(CBA2, n)` })).toBeGreaterThanOrEqual(108 * H);
+  });
+});

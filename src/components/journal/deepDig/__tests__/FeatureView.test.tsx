@@ -5,7 +5,7 @@ import { FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/jou
 import { DeepDigDirectory } from '@/pages/JournalDeepDigPage';
 import { deepDigRules, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
 import { DEFAULT_COMMANDS, runInference } from '@/lib/deepDig/commands';
-import { campaignSample, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { campaignSample, CBA2_DEF, featureWindowMs, DRIFT_SPEED_DEF, newFeatureTemplate, signalSample, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { DeepDigSeries } from '@/lib/deepDig/series';
 import { driftEvents, makeData } from '@/lib/deepDig/__tests__/fixtures';
@@ -66,6 +66,17 @@ describe('【用户要求】Deep dig 特征值页', { timeout: 60_000 }, () => {
     expect(onOpen).toHaveBeenCalledWith(custom.id, 'infer');
     fireEvent.click(screen.getByTestId('deep-dig-add'));
     expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it('旧版CBA-2曲线提示补齐历史，重新计算的曲线不再提示', () => {
+    const def = { ...CBA2_DEF, formula: `${CBA2_DEF.formula}\navg_CBA2 = avg(CBA2, 24)` };
+    const data = { ...DATA, definition: def };
+    const series: DeepDigSeries = { finishedAt: DATA.finishedAt, names: ['CBA2'], result: 'CBA2', offsets: [0], byEvent: {} };
+    const { unmount } = render(<Harness data={data} initialDef={def} series={series} />);
+    expect(screen.getByTestId('deep-dig-history-stale')).toHaveTextContent('重新运行描述统计');
+    unmount();
+    render(<Harness data={data} initialDef={def} series={{ ...series, historyMs: featureWindowMs(def) }} />);
+    expect(screen.queryByTestId('deep-dig-history-stale')).not.toBeInTheDocument();
   });
 
   it('【用户要求】删除特征值：平时隐形，点 × 还要确认；新增项直接删，内置项从目录删掉后底部可恢复', () => {

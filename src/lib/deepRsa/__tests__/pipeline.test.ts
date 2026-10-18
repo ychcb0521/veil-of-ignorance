@@ -272,6 +272,22 @@ describe('Deep dig：周期、半衰期可选', () => {
     for (const r of data.rows) for (const tau of series.offsets) expect(Number.isFinite(valueAt(series, r.id, 'a', tau)!)).toBe(true);
   });
 
+  it('CBA-2叠加24小时均线：按公式补足历史，原值与均线在−24h到+24h全段可用', async () => {
+    const def = { ...CBA2_DEF, formula: `${CBA2_DEF.formula}\navg_CBA2 = avg(CBA2, 24)` };
+    expect(featureWindowMs(def)).toBeGreaterThanOrEqual(96 * HOUR);
+    const m = fakeMarket(planted, { quote: true });
+    const { data, series } = await collectDeepDigRun(reportOf(planted), def, { fetchFn: m.fetchFn, backgroundCap: 0 });
+    expect(series.historyMs).toBe(featureWindowMs(def));
+    const klines = m.calls.filter(u => new URL(u).pathname.endsWith('/klines') && u.includes('symbol=AAAUSDT'));
+    const earliest = Math.min(...klines.map(u => Number(new URL(u).searchParams.get('startTime'))));
+    expect(planted[0].anchorMs - earliest).toBeGreaterThanOrEqual(featureWindowMs(def) + 24 * HOUR - BAR_MS);
+    const rows = data.rows.filter(r => r.v != null);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) for (const tau of series.offsets) for (const name of ['CBA2', 'avg_CBA2']) {
+      expect(Number.isFinite(valueAt(series, r.id, name, tau)!), `${name} ${r.id} @ ${tau / HOUR}h`).toBe(true);
+    }
+  });
+
   it('【用户要求】2026-10-18 CBA-2 的时间序列连续完整：观察窗 73 小时也往前补足，进场前 24 小时到进场后 24 小时每一点都有值', async () => {
     const m = fakeMarket(planted, { quote: true });
     const { data, series } = await collectDeepDigRun(reportOf(planted), CBA2_DEF, { fetchFn: m.fetchFn, backgroundCap: 0 });

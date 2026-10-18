@@ -164,6 +164,7 @@ export function FeatureView(props: FeatureViewProps) {
   const exKey = data ? exclusionKey(data, [...excluded, ...temp]) : '';
   const inferenceDataFresh = !!(data && inference && inference.dataFinishedAt === data.finishedAt && (inference.excludedKey ?? '') === exKey && (inference.sampleOffsetMs ?? 0) === sampleAt);
   const inferenceFresh = inferenceDataFresh && inference?.commands === props.commands && (data == null || definitionKey(data.definition) === definitionKey(def));
+  const historyStale = data?.definition.id === 'cba-2' && props.series?.finishedAt === data.finishedAt && (props.series.historyMs ?? 0) < featureWindowMs(data.definition);
   const defStale = data != null && definitionKey(data.definition) !== definitionKey(def);
   return (
     <div className="space-y-5 text-[12px]" data-testid="deep-dig-feature">
@@ -196,6 +197,7 @@ export function FeatureView(props: FeatureViewProps) {
             hint={`取币安公开 ${intervalOf(def)} K 线${intervalOf(def) === '5m' ? '' : '（24h 结果仍按 5m）'}、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）`}
           />
           {defStale && <Notice testId="deep-dig-stale">公式、周期、半衰期或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的定义重算。</Notice>}
+          {historyStale && <Notice testId="deep-dig-history-stale">这份 CBA-2 曲线使用旧版预热历史，可能缺少进场前的数据。请重新运行描述统计，补齐所选整段时间及均线需要的历史。</Notice>}
           {effective && data && base ? <DescribeTab {...props} data={effective} raw={data} base={base} temp={temp} onTempChange={setTemp} at={sampleAt} onAt={setAt} /> : <Empty>还没运行描述统计。</Empty>}
         </div>
       )}

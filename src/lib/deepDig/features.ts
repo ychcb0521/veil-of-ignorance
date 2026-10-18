@@ -14,7 +14,7 @@ import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { evaluateProgram, evaluateProgramVars, FormulaError, lastValue, parseFormula, programVariables, type Program } from '@/lib/deepDig/formula';
+import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef {
   /** 网址上的名字。 */
@@ -70,7 +70,7 @@ export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': 
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => d.id === 'cba-2' ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string; formula?: string };
 
 /**
  * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
@@ -79,7 +79,15 @@ type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours
  */
 export function featureWindowMs(d: ParamDef): number {
   const H = 3_600_000;
-  return Math.max(d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  let formulaHistory = 0;
+  if (d.formula) {
+    try {
+      const barMs = intervalMs(intervalOf(d));
+      const params = { hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d) };
+      formulaHistory = (programHistoryBars(compileFeatureFormula(d.formula).program, params, barMs / 60_000) + 2) * barMs;
+    } catch { /* 编辑中的不完整公式由公式校验提示 */ }
+  }
+  return Math.max(formulaHistory, d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
 export const barsPerHalfLife = (d: ParamDef) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));

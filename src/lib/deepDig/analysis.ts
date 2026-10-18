@@ -189,7 +189,7 @@ export async function collectDeepDigRun(
 ): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
   // 带上 id：CBA-2 的观察窗（48 + avgh + 1 小时）与周期按 id 特判，缺了 id 曲线会按普通 48 小时截取，进场前的点全缺
-  const params = { id: def.id, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
+  const params = { id: def.id, formula: def.formula, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
   const range = seriesRangeOf(def);
   const offsets = seriesOffsets(range);
   const { names, result } = formulaVariables(def.formula);
@@ -213,7 +213,7 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const { value, vars } = computeFeatureValues(window, compiled, params);
-      if (value != null && ctx.bars) {
+      if (ctx.bars) {
         const s = computeEventSeries(ctx.bars, ctx.anchorMs, compiled, params, names, offsets);
         if (s) byEvent[ctx.id] = s;
       }
@@ -240,7 +240,7 @@ export async function collectDeepDigRun(
     rows: described.rows,
     groups: described.groups,
   };
-  return { data, series: { finishedAt, offsets, names, result, byEvent } };
+  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================

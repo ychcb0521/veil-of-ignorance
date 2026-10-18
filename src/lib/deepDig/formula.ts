@@ -133,6 +133,47 @@ export interface Program {
   inputs: Set<string>;
 }
 
+/** 推导滚动函数的历史依赖深度。保留原公式，仅用于提前取足K线。
+ * EMA从首个有效值起算；额外热身仍由featureWindowMs的半衰期规则控制。
+ * 所有命名中间量都可被时间序列选择，因此取全部语句的最大依赖，而非只看最后一句。
+ */
+export function programHistoryBars(program: Program, params: Record<string, number>, barMinutes: number): number {
+  const constants = new Map(Object.entries(params));
+  const history = new Map<string, number>();
+  const scalar = (n: Node): number => {
+    try {
+      const value = evaluateNode(n, constants, barMinutes);
+      return typeof value === 'number' ? value : NaN;
+    } catch { return NaN; } // 序列外部变量不在常量环境中
+  };
+  const depth = (n: Node): number => {
+    if (Number.isFinite(scalar(n))) return 0;
+    if (n.k === 'num') return 0;
+    if (n.k === 'var') return history.get(n.name) ?? 0;
+    if (n.k === 'un') return depth(n.a);
+    if (n.k === 'bin') return Math.max(depth(n.a), depth(n.b));
+    const inherited = Math.max(0, ...n.args.map(depth));
+    const arg = (i: number, fallback = NaN) => n.args[i] ? scalar(n.args[i]) : fallback;
+    let extra = 0;
+    if (['avg','sd','median','mad','rscale','zscore','rsum'].includes(n.name)) extra = barsForHours(arg(1), barMinutes) - 1;
+    else if (['full','peak','sma','sum','highest','lowest','msum'].includes(n.name)) extra = arg(1) - 1;
+    else if (n.name === 'wsum') extra = arg(2) - 1;
+    else if (n.name === 'prev') extra = arg(1, 1);
+    else if (n.name === 'ago') extra = barsForHours(arg(1), barMinutes);
+    else if (n.name === 'beta') extra = barsForHours(arg(2), barMinutes) - 1;
+    else if (n.name === 'atr') extra = arg(3);
+    else if (n.name === 'retain') extra = barsForHours(arg(4, 48), barMinutes) - 1;
+    return inherited + (Number.isFinite(extra) ? Math.max(0, extra) : 0);
+  };
+  let max = 0;
+  for (const statement of program.statements) {
+    const d = depth(statement.expr);
+    max = Math.max(max, d);
+    if (statement.name) { history.set(statement.name, d); constants.set(statement.name, scalar(statement.expr)); }
+  }
+  return Math.ceil(max);
+}
+
 class Parser {
   private i = 0;
   constructor(private readonly toks: Tok[]) {}
