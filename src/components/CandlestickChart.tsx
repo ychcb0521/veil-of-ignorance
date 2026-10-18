@@ -28,6 +28,7 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, indicatorCalcParams } from "@/lib/customIndicators";
+import { subscribeBtcReference } from "@/lib/btcReference";
 import {
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
@@ -2153,6 +2154,18 @@ function CandlestickChartComponent({
       }
     }
   }, [indicators]);
+
+  // 【用户要求】CBI-2 的动量要剔除 BTC：BTC 对照 K 线取到后重算（参数第二位是数据版本号，变了 klinecharts 才会重算）
+  const indicatorsForBtcRef = useRef(indicators);
+  indicatorsForBtcRef.current = indicators;
+  useEffect(() => subscribeBtcReference(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const ind of indicatorsForBtcRef.current) {
+      if (!ind.enabled || ind.type !== "CBI2") continue;
+      try { chart.overrideIndicator({ name: "CBI2_CUSTOM", calcParams: indicatorCalcParams("CBI2_CUSTOM", ind) }); } catch {}
+    }
+  }), []);
 
   // ============================================================
   // Drawing tool activation — binds to klinecharts overlay API

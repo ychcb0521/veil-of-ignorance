@@ -204,6 +204,8 @@ export async function collectDeepDigRun(
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
     ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: featureWindowMs(def) } } : {}),
     seriesRange: range,
+    // 【用户要求】公式用到 CB（同时段 BTCUSDT 收盘价，CBI-2 剔除 BTC 的动量）时另取 BTC 的 K 线
+    ...(compiled.usesBtc ? { referenceSymbol: 'BTCUSDT' } : {}),
     // 只用得到波动率（推断统计的「控制波动」）：不算 Deep RSA 的整套表征
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {

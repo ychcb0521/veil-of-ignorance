@@ -29,6 +29,8 @@ export interface ResearchBar {
   /** 成交额（USDT，第 8 列）与主动买入成交额（USDT，第 11 列）：动态谢林点只用金额；缺失为 null / 不带。 */
   quoteVolume?: number | null;
   takerBuyQuoteVolume?: number | null;
+  /** 同一根 K 线（同开盘时间）的对照币收盘价（Deep dig 公式里的 CB = BTCUSDT）；用到时流水线才另取、合进来，取不到为 null。 */
+  refClose?: number | null;
 }
 
 function num(value: unknown): number {

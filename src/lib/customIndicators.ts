@@ -9,6 +9,8 @@ import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DS
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
+import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
+import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
@@ -204,6 +206,25 @@ export function cbiPoints(dataList: KLineData[], halfLifeBars: number | undefine
   return computeCbi(bars, DSP_BASE_INTERVAL_MS / 60_000, { h: Number.isFinite(h) && h > 0 ? h : CBI_DEFAULTS.h });
 }
 
+/**
+ * klinecharts 数据 → CBI-2（副图）。【用户要求】2026-10-18 新增。参数 = 基线回看小时（公式里的 avgh，按 5 分钟图计）；
+ * 动量要剔除 BTC：按图上的时间段与周期另取 BTCUSDT（取到后图表重算），没取到的那根不剔除。
+ */
+export function cbi2Points(dataList: KLineData[], baseHours: number | undefined, options: { fetchReference?: boolean } = {}) {
+  const h = Number(baseHours);
+  const times = dataList.map(d => d.timestamp);
+  const intervalMs = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
+  if (options.fetchReference !== false && times.length) requestBtcReference(times[0], times[times.length - 1] + intervalMs, intervalMs);
+  const ref = btcClosesAt(times, intervalMs);
+  return computeCbi2(dataList.map((d, i) => ({
+    open: d.open, high: d.high, low: d.low, close: d.close,
+    volume: typeof d.volume === 'number' ? d.volume : null,
+    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
+    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
+    refClose: ref[i],
+  })), { baseHours: Number.isFinite(h) && h > 0 ? h : CBI2_DEFAULTS.baseHours });
+}
+
 export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
   const h = Number(recentHours);
   const bars = dataList.map(d => ({
@@ -263,6 +284,8 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
 export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number; zscore?: boolean }): number[] {
   const z = ind.zscore ? 1 : 0;
   if (kcName === 'DSP_V_CUSTOM') return [ind.period, z];
+  // CBI-2：第二位是 BTC 对照数据的版本号（取到新的 BTC 就变，klinecharts 才会重算）；图例里不显示
+  if (kcName === 'CBI2_CUSTOM') return [ind.period, btcReferenceVersion()];
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
 }
@@ -1097,6 +1120,32 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => cbiPoints(dataList, indicator.calcParams[0]).map(p => (p.cbi == null ? {} : { cbi: p.cbi })),
   });
 
+  // ─── CBI-2 买方优势指数第 2 版（副图）───
+  // 【用户要求】2026-10-18：CBI-2 = 2p − 1，−1 ~ 1，0 = 五五开。直接算 Deep dig 的同一份公式（cbi2.ts）。参数 [基线回看小时, BTC 数据版本]
+  registerIndicator({
+    name: 'CBI2_CUSTOM',
+    shortName: 'CBI-2',
+    calcParams: [CBI2_DEFAULTS.baseHours, 0],
+    precision: 3,
+    minValue: -1,
+    maxValue: 1,
+    draw: V_ZERO_LINE,
+    // 括号里只写基线小时，不写 BTC 版本号；图例数值照默认
+    createTooltipDataSource: ({ indicator, defaultStyles }) => ({
+      name: 'CBI-2', calcParamsText: `(${(indicator.calcParams as number[])[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
+    }),
+    figures: [
+      {
+        key: 'cbi2', title: 'CBI-2: ', type: 'line',
+        styles: (data) => {
+          const end = (data.next?.indicatorData as { cbi2?: number } | undefined)?.cbi2 ?? (data.current.indicatorData as { cbi2?: number } | undefined)?.cbi2;
+          return { color: vColor(end), size: 1.5 };
+        },
+      },
+    ],
+    calc: (dataList, indicator) => cbi2Points(dataList, indicator.calcParams[0]).map(p => (p.cbi2 == null ? {} : { cbi2: p.cbi2 })),
+  });
+
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
   registerIndicator({
     name: 'BSS_AVG_CUSTOM',
@@ -1168,6 +1217,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   CBA: 'CBA_CUSTOM',
   'CBA-2': 'CBA2_CUSTOM',
   CBI: 'CBI_CUSTOM',
+  CBI2: 'CBI2_CUSTOM',
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

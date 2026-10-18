@@ -255,6 +255,11 @@ export async function collectRunEvents(
     seriesRange?: { beforeMs: number; afterMs: number };
     /** Deep dig：只在这一个半衰期上算观察窗波动率（vol_w），不算 Deep RSA 的整套表征与 DSP（用不上，省一大半计算）。 */
     volatilityOnlyAt?: number;
+    /**
+     * Deep dig 公式用到对照币收盘价（CB）时：另取同时段、同周期的这个币（BTCUSDT）的 K 线，按开盘时间合进特征值用的 K 线（refClose）。
+     * 【用户要求】2026-10-18 CBI-2 的动量要剔除 BTC。取不到就不合（公式里按缺失处理），不影响这个事件的其余部分。
+     */
+    referenceSymbol?: string;
   } = {},
 ): Promise<CollectedEvents> {
   const seed = options.seed ?? 20261015;
@@ -318,7 +323,7 @@ export async function collectRunEvents(
     const symbol = normalizeResearchSymbol(item.symbol);
     const entry = Math.ceil(item.anchorMs / BAR_MS) * BAR_MS;
     const end = Math.max(entry + OUTCOME_HORIZON_MS, range && !fk ? item.anchorMs + range.afterMs : 0);
-    const bars = await fetchResearchKlines(symbol, item.anchorMs - WINDOW_MS - before5m, end, fetchFn, signal);
+    let bars = await fetchResearchKlines(symbol, item.anchorMs - WINDOW_MS - before5m, end, fetchFn, signal);
     let featureBars: readonly ResearchBar[] | null = bars;
     if (fk) {
       checkAbort(signal);
@@ -328,6 +333,28 @@ export async function collectRunEvents(
         if (error instanceof MarketDataError && error.kind === 'aborted') throw error;
         return null; // 这个周期取不到：特征值记缺失，24h 结果照算
       });
+    }
+    const ref = options.referenceSymbol;
+    if (ref) {
+      // 同开盘时间的对照币收盘价合进来（复制一份，不改缓存里的 K 线）
+      const withRef = async (src: readonly ResearchBar[], interval: ResearchInterval): Promise<ResearchBar[]> => {
+        if (!src.length) return [...src];
+        const barMs = intervalMs(interval);
+        const refBars = symbol === ref ? src : await fetchResearchKlines(ref, src[0].openTime, src[src.length - 1].openTime + barMs, fetchFn, signal, interval).catch(error => {
+          if (error instanceof MarketDataError && error.kind === 'aborted') throw error;
+          return null;
+        });
+        if (!refBars) return [...src];
+        const closeAt = new Map<number, number>(refBars.map(b => [b.openTime, b.close] as [number, number]));
+        return src.map(b => ({ ...b, refClose: closeAt.get(b.openTime) ?? null }));
+      };
+      checkAbort(signal);
+      if (fk) {
+        if (featureBars) featureBars = await withRef(featureBars, fk.interval);
+      } else {
+        bars = await withRef(bars, '5m');
+        featureBars = bars;
+      }
     }
     const out = computeItem(item, bars, featureBars);
     await breathe();

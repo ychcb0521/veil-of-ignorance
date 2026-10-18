@@ -103,6 +103,7 @@ export const SERIES_VARIABLES: readonly { name: string; label: string }[] = [
   { name: 'B', label: '主动买入成交额（USDT）' },
   { name: 'S', label: '主动卖出成交额（USDT）= Q − B' },
   { name: 'E', label: '成交均价 VWAP = 成交额 ÷ 成交量' },
+  { name: 'CB', label: '同时段 BTCUSDT 收盘价（用到时另取；取不到为空）' },
 ];
 const AMOUNT_VARIABLES = new Set(['Q', 'B', 'S', 'E']);
 /** 用到成交额的公式：观察窗里有金额数据的 K 线不到这个比例，这一场记缺失（不拿币数凑）。 */
@@ -375,7 +376,84 @@ export const CBI_DEF: DeepDigFeatureDef = {
 
 export const CBA2_DEF: DeepDigFeatureDef = { id: 'cba-2', name: '成交支持下的价格重心迁移指标 CBA-2', short: 'CBA-2', definition: CBA2_DEFINITION, formula: CBA2_FORMULA, scale: 1, unit: '', positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, source: 'campaigns', groupVars: 2, builtin: true };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF];
+/**
+ * CBI-2 买方优势指数第 2 版（Deep dig 内置特征值；K 线图同名副图用 src/lib/cbi2.ts，直接算这同一份公式）。
+ * 【用户要求】2026-10-18「新增一个指标 CBI-2…放在指标中、以及 deep dig 的第七个特征值」。窗口、半衰期、系数按笔记的默认值写在公式里，可改；
+ * avgh = 基线期：原文 V̄ 取 20 天同时段中位数、MAD / λ₀ / s_e / ATR̄ 取 14 天、φ 取 1 天——拿不到这么长的 5 分钟 K 线，V̄ / MAD / λ₀ / s_e / ATR̄ 改用过去 avgh 小时，
+ * φ 用过去 24 小时（= 原文 1 天）。CB = 同时段 BTCUSDT 收盘价（流水线另取）；取不到时不剔除 BTC。
+ * 交易规则（进场 / 持有 / 减仓 / 离场 / 暂停）与 EV = p·W̄ − (1 − p) 要用到赢时平均收益 W̄ 与交易成本 c，不在特征值里。
+ */
+export const CBI2_FORMULA = [
+  '# CBI-2 买方优势指数第 2 版（−1 ~ 1）= 2p − 1；0 = 五五开，0.1 ≈ 55:45。p = (1 − Ψ)·σ(L₁) + Ψ·σ(L₂)，σ = logistic',
+  '# V = 成交额 Q，Vᵇ / Vˢ = B / S，CB = 同时段 BTCUSDT 收盘价；avgh = 基线期（小时，下面选；原文 20 天 / 14 天拿不到，改用过去 avgh 小时）',
+  'k = 2                                            # 参与度敏感度',
+  'kappa = 0.5                                      # κ：吸收斜率的收缩强度',
+  'm = 6                                            # 动量 / 均价斜率回看根数',
+  'ATR = atr(H, L, C, 14)                           # 平均真实波幅（14 根）',
+  'ATRb = prev(median(ATR, avgh))                   # ATR̄：基线期 ATR 中位数',
+  'Vbar = prev(median(Q, avgh))                     # V̄：基线成交额（中位数）',
+  'x = (B - S) / Vbar                               # 主动净流量（除以基线量）',
+  'r = (C - prev(C)) / ATRb                         # 单根收益（除以 ATR̄）',
+  'rho = ln(C / prev(C))                            # 对数收益 ρ',
+  'rb = ln(CB / prev(CB))                           # BTC 的对数收益',
+  'F = wsum(B - S, 3, 12) / wsum(Q, 3, 12)          # F 主动买卖失衡（12 根，半衰期 3）',
+  'dF = wsum(B - S, 2, 6) / wsum(Q, 2, 6) - wsum(B - S, 6, 24) / wsum(Q, 6, 24)   # ΔF = F₆ − F₂₄：买盘增减',
+  'lam0 = rsum(r * sign(x), avgh) / rsum(abs(x), avgh)   # λ₀：基线期的对称冲击',
+  'lp = (wsum(if(x > 0, r, 0), 6, 24) + kappa * lam0) / (wsum(if(x > 0, x, 0), 6, 24) + kappa)   # λ⁺（24 根，半衰期 6）',
+  'lm = (wsum(if(x < 0, r, 0), 6, 24) - kappa * lam0) / (wsum(if(x < 0, x, 0), 6, 24) - kappa)   # λ⁻',
+  'A = (lp - lm) / (abs(lp) + abs(lm))              # A 吸收',
+  'lpf = (wsum(if(x > 0, r, 0), 3, 12) + kappa * lam0) / (wsum(if(x > 0, x, 0), 3, 12) + kappa)  # 快速版 λ⁺（12 根，半衰期 3）',
+  'lmf = (wsum(if(x < 0, r, 0), 3, 12) - kappa * lam0) / (wsum(if(x < 0, x, 0), 3, 12) - kappa)  # 快速版 λ⁻',
+  'Af = (lpf - lmf) / (abs(lpf) + abs(lmf))         # A_f 吸收快速版',
+  'e = r - (lp * max(x, 0) + lm * min(x, 0))        # 成交解释不了的价格变化',
+  'U = e / prev(sd(e, avgh))                        # U 意外度：除以基线标准差 s_e',
+  'phi = prev(beta(rho, rb, 24))                    # φ：对 BTC 的回归斜率（过去 1 天）',
+  'Mo = msum(rho - nz(phi * rb), m) / (ATR / C * sqrt(m))   # Mo 剔除 BTC 后的短期动量（BTC 读数缺失时不剔除）',
+  'M = wsum(Q * ((H + L + C) / 3), 6, 24) / wsum(Q, 6, 24)  # 成交额加权均价（24 根，半衰期 6）',
+  'd = (C - M) / ATR                                # 价格相对均价的偏离',
+  'v = (M - prev(M, m)) / (m * ATR)                 # 均价漂移速度（ATR / 根）',
+  'Hh = highest(H, 12)                              # 最近 12 根最高价',
+  'Ll = lowest(L, 12)                               # 最近 12 根最低价',
+  'K = if(Hh > Ll, (2 * C - Hh - Ll) / (Hh - Ll), 0)   # K 最近 1 小时的收盘位置（−1 ~ 1）',
+  'S6 = msum(S, 6)                                  # 最近 6 根主动卖出之和',
+  'Ex = ln(highest(S6, 43) / S6)                    # Ex 卖盘衰竭度：48 根内任意连续 6 根的最大值 ÷ 最近 6 根',
+  'DD = (highest(C, 48) - C) / ATR                  # 距 48 根最高收盘的回撤（ATR）',
+  'RV = msum(Q, 12) / msum(Vbar, 12)                # 相对成交量（12 根）',
+  'RV24 = msum(Q, 24) / msum(Vbar, 24)              # 相对成交量（24 根）',
+  'g = 2 * RV ^ k / (1 + RV ^ k)                    # 参与度放大系数（量能正常 = 1）',
+  'Psi = 1 / (1 + exp(-4 * (ln(RV24) - ln(2.5)))) / (1 + exp(-2 * (DD - 3)))   # Ψ 恐慌度 = σ(4·(ln RV₂₄ − ln 2.5))·σ(2·(DD − 3))',
+  'zF = clip((F - prev(median(F, avgh))) / prev(rscale(F, avgh)), -3, 3)   # 稳健 z 截断到 ±3：(X − 中性点) ÷ (1.4826·MAD)；F 的中性点 = 基线中位数',
+  'zdF = clip(dF / prev(rscale(dF, avgh)), -3, 3)',
+  'zA = clip(A / prev(rscale(A, avgh)), -3, 3)',
+  'zMo = clip(Mo / prev(rscale(Mo, avgh)), -3, 3)',
+  'zd = clip(d / prev(rscale(d, avgh)), -3, 3)',
+  'zv = clip(v / prev(rscale(v, avgh)), -3, 3)',
+  'zK = clip(K / prev(rscale(K, avgh)), -3, 3)',
+  'zU = clip(U / prev(rscale(U, avgh)), -3, 3)',
+  'zAf = clip(Af / prev(rscale(Af, avgh)), -3, 3)',
+  'zEx = clip(Ex / prev(rscale(Ex, avgh)), -3, 3)',
+  'L1 = 0 + g * (0.07 * zF + 0.04 * zdF + 0.07 * zA + 0.07 * zMo + 0.04 * zd + 0.04 * zv + 0.02 * zK) + 0.2 * min(zU, 0)   # L₁ 顺势分支（对数几率）',
+  'L2 = -0.5 + 0.35 * zAf + 0.25 * zEx              # L₂ 吸收分支（对数几率）',
+  'p = (1 - Psi) / (1 + exp(-L1)) + Psi / (1 + exp(-L2))   # 上涨（交易成功）的概率',
+  'CBI2 = 2 * p - 1',
+].join('\n');
+
+export const CBI2_DEF: DeepDigFeatureDef = {
+  id: 'cbi2',
+  name: '买方优势指数 CBI-2',
+  short: 'CBI-2',
+  definition: '进场前最后一根 K 线上的买方优势第 2 版（−1 ~ 1）= 2p − 1：p 是上涨的概率，由顺势分支 L₁（主动性、买盘增减、吸收、剔除 BTC 的动量、均价偏离与漂移、收盘位置、意外度）与吸收分支 L₂（快速吸收、卖盘衰竭）按恐慌度 Ψ 混合。0 = 五五开，0.1 ≈ 55:45。',
+  formula: CBI2_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -453,6 +531,8 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
 export interface CompiledFeature {
   program: Program;
   usesAmounts: boolean;
+  /** 用到对照币 BTCUSDT 的收盘价（CB）：流水线另取同时段的 K 线。 */
+  usesBtc?: boolean;
 }
 
 /** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
@@ -467,7 +547,7 @@ export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
   const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES]));
-  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)) };
+  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB') };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
@@ -516,6 +596,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
     Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
     // 成交均价：成交额 ÷ 成交量（币数）；缺一样或成交量为 0 记空
     E: series(b => (b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null)),
+    CB: series(b => b.refClose),
     hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
 }

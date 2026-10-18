@@ -12,6 +12,7 @@ import { DSP_V_DEFINITION, DSP_V_STEPS, DSP_VZ_DEFINITION } from '@/lib/dynamicS
 import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
+import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -171,6 +172,8 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // 【用户要求】2026-10-18 CBI 买方优势指数（副图）：参数 = 时间衰减半衰期 h（根），N = 48、m = 12、ATR 14 根，基线 24 小时按 5 分钟图计
   { id: 'CBA-2', nameZh: '成交支持下的价格重心迁移 CBA-2', nameEn: 'Volume-supported Price Center Migration', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '仅5分钟已收盘K线；时间权重半衰期h（小时）。48小时完整窗口，历史基线24小时；α=1、ε=0.000001、m=12、失效阈值3均为研究默认值，Deep dig公式可改。其他周期留空。红点1表示独立失效，不清零主值。', periodUnit: 'h', description: CBA2_DEFINITION, detail: CBA2_STEPS },
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
+  // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
+  { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'volume', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },

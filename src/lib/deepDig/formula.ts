@@ -50,6 +50,11 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'median', min: 2, max: 2, usage: 'median(x, h)', help: '过去 h 小时的中位数（含当根）：空值跳过，一个都没有记空' },
   { name: 'mad', min: 2, max: 2, usage: 'mad(x, h)', help: '过去 h 小时的中位数绝对偏差 median(|x − 中位数|)（含当根）：空值跳过；稳健 z = (x − 中性点) ÷ (1.4826 × mad)' },
   { name: 'rscale', min: 2, max: 2, usage: 'rscale(x, h)', help: '稳健尺度：过去 h 小时（含当根）的 1.4826 × MAD；一半以上的值相同、MAD = 0 时改用 1.2533 × 平均绝对偏差（离中位数）；稳健 z = (x − 中性点) ÷ rscale' },
+  { name: 'highest', min: 2, max: 2, usage: 'highest(x, n)', help: '最近 n 根（含当根）的最大值：空值跳过' },
+  { name: 'lowest', min: 2, max: 2, usage: 'lowest(x, n)', help: '最近 n 根（含当根）的最小值：空值跳过' },
+  { name: 'msum', min: 2, max: 2, usage: 'msum(x, n)', help: '最近 n 根（含当根）的和：空值跳过，一个都没有记空（sum 要求 n 根都有值）' },
+  { name: 'beta', min: 3, max: 3, usage: 'beta(y, x, h)', help: '过去 h 小时（含当根）y 对 x 的回归斜率：两个都有值的根才算，少于 2 根记空' },
+  { name: 'clip', min: 3, max: 3, usage: 'clip(x, lo, hi)', help: '截断到 lo ~ hi' },
   { name: 'atr', min: 4, max: 4, usage: 'atr(H, L, C, n)', help: '平均真实波幅：真实波幅 = max(H − L, |H − 前收|, |L − 前收|)，Wilder 平滑 n 根（前 n 根的平均起算，不满 n 根记空）' },
   { name: 'avg', min: 2, max: 2, usage: 'avg(x, h)', help: '过去 h 小时的平均（含当根；h 可写 avgh = 上面选的平均时长）：按 K 线周期换算成根数，周期变了时长不变；x 为空的那根跳过；开头不满 h 小时的用已有的' },
   { name: 'sma', min: 2, max: 2, usage: 'sma(x, n)', help: '最近 n 根的平均（不满 n 根记空）' },
@@ -471,6 +476,33 @@ export function rollingSum(x: Float64Array, n: number): Float64Array {
   }
   return out;
 }
+/** 最近 n 根（含当根）的最大 / 最小值：空值跳过，一个都没有记空。 */
+export function rollingExtreme(x: Float64Array, n: number, max: boolean): Float64Array {
+  const out = new Float64Array(x.length);
+  for (let t = 0; t < x.length; t++) {
+    let best = Number.NaN;
+    for (let k = 0; k < n && k <= t; k++) {
+      const v = x[t - k];
+      if (Number.isFinite(v) && (Number.isNaN(best) || (max ? v > best : v < best))) best = v;
+    }
+    out[t] = best;
+  }
+  return out;
+}
+/** 最近 n 根（含当根）y 对 x 的最小二乘斜率：两个都有值的根才算，少于 2 根或 x 没有变化记空。 */
+export function rollingBeta(y: Float64Array, x: Float64Array, n: number): Float64Array {
+  const out = new Float64Array(y.length);
+  let sx = 0, sy = 0, sxy = 0, sxx = 0, c = 0;
+  const ok = (i: number) => Number.isFinite(x[i]) && Number.isFinite(y[i]);
+  for (let i = 0; i < y.length; i++) {
+    if (ok(i)) { sx += x[i]; sy += y[i]; sxy += x[i] * y[i]; sxx += x[i] * x[i]; c++; }
+    const drop = i - n;
+    if (drop >= 0 && ok(drop)) { sx -= x[drop]; sy -= y[drop]; sxy -= x[drop] * y[drop]; sxx -= x[drop] * x[drop]; c--; }
+    const den = c * sxx - sx * sx;
+    out[i] = c >= 2 && den > 1e-18 * Math.max(1, c * sxx) ? clean((c * sxy - sx * sy) / den) : Number.NaN;
+  }
+  return out;
+}
 /** 时间衰减加权和：Σ_{k<n} 2^(−k ÷ h)·x_{t−k}（h、n 以根计）；空值跳过，一个都没有记空。 */
 export function wsumBars(x: Float64Array, h: number, n: number): Float64Array {
   const out = new Float64Array(x.length);
@@ -596,6 +628,25 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
         }
       }
       return out;
+    }
+    case 'highest': case 'lowest': case 'msum': {
+      const n = scalarArg(y, name, '根数', line);
+      if (!Number.isInteger(n) || n < 1) throw new FormulaError(`${name} 的根数要是正整数`, line);
+      if (!isSeries(x)) return name === 'msum' ? x * n : x;
+      return name === 'msum' ? rollingSum(x, n) : rollingExtreme(x, n, name === 'highest');
+    }
+    case 'beta': {
+      const h = scalarArg(z, 'beta', '时长', line);
+      if (!(h > 0)) throw new FormulaError('beta 的时长要大于 0（单位：小时）', line);
+      const len = [x, y].find(isSeries)?.length;
+      if (len == null) return Number.NaN;
+      const asSeries = (v: Value) => (isSeries(v) ? v : new Float64Array(len).fill(v));
+      return rollingBeta(asSeries(x), asSeries(y), barsForHours(h, barMinutes));
+    }
+    case 'clip': {
+      const lo = scalarArg(y, 'clip', '下限', line);
+      const hi = scalarArg(z, 'clip', '上限', line);
+      return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.min(hi, Math.max(lo, v))));
     }
     case 'wsum': {
       const h = scalarArg(y, 'wsum', '半衰期', line);
