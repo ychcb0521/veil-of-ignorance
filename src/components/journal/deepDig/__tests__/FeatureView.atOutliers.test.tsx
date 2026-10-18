@@ -92,6 +92,16 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     const { unmount } = render(<Harness onInfer={onInfer} />);
     const list = screen.getByTestId('deep-dig-outliers');
     expect(list).toHaveTextContent('各组四分位距 1.5 倍以外');
+    // 【用户要求】表格可以折叠：默认收起，点「极端值」展开、再点收起
+    const toggle = screen.getByTestId('deep-dig-outliers-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('deep-dig-outlier-rows')).not.toBeInTheDocument();
+    expect(screen.getByTestId('deep-dig-outliers-remove-all')).toBeInTheDocument(); // 收起时「全部暂时删除」照常可用
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('deep-dig-outliers-toggle')).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByTestId('deep-dig-outliers-toggle'));
+    expect(screen.queryByTestId('deep-dig-outlier-rows')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('deep-dig-outliers-toggle'));
     const big = screen.getAllByTestId('deep-dig-outlier-row').find(r => r.textContent?.includes('500.00'))!;
     expect(big).toHaveTextContent('偏高');
     fireEvent.click(screen.getByTestId('deep-dig-rows-toggle'));
@@ -102,10 +112,11 @@ describe('【用户要求】Deep dig 描述统计：拖竖线选时刻、极端�
     expect(within(screen.getAllByTestId('deep-dig-outlier-row').find(r => r.textContent?.includes('500.00'))!).getByTestId('deep-dig-outlier-restore')).toBeInTheDocument();
     expect(screen.getByTestId('deep-dig-outliers')).toHaveTextContent('已暂时删除 1 行');
     expect(screen.getByTestId('deep-dig-details')).toHaveTextContent('暂时删除 1 行');
-    // 换个页面再回来：还在（这次浏览里）
+    // 换个页面再回来：暂时删除还在、表格仍展开（这次浏览里）
     unmount();
     render(<Harness onInfer={onInfer} />);
     expect(Number(posCell(1))).toBe(n0 - 1);
+    expect(screen.getByTestId('deep-dig-outliers-toggle')).toHaveAttribute('aria-expanded', 'true');
     // 推断统计用删掉之后的数据
     fireEvent.click(screen.getByTestId('deep-dig-tab-infer'));
     expect(screen.getByText(/暂时删除的 1 行/)).toBeInTheDocument();

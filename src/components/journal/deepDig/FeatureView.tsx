@@ -5,7 +5,7 @@
  * 左对齐紧凑、名字和数字挨着；分页与数据分组放在网址上，从战役返回能回到原处（由页面外壳负责）。
  */
 import { useMemo, useState } from 'react';
-import { ArrowUpRight, Download, Loader2, Pencil, Play, RotateCcw, Square, Undo2, X as XIcon } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Download, Loader2, Pencil, Play, RotateCcw, Square, Undo2, X as XIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatBeijingTime } from '@/lib/timeFormat';
 import type { RunProgress, RunStage } from '@/lib/deepRsa/pipeline';
@@ -508,7 +508,13 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
 /**
  * 【用户要求】2026-10-18 极端值：各组四分位距 1.5 倍以外的行，逐个或一起「暂时删除」，删后上面的统计重算；随时恢复。
  * 已暂时删除、但换了变量 / 时刻后不再是极端值的行也列在这里，好恢复。
+ * 【用户要求】2026-10-18「极端值下面的那个表格需要能够折叠起来」：默认收起，标题行照常显示各组个数与「全部暂时删除 / 全部恢复」；
+ * 展开 / 收起记在这次浏览里（sessionStorage），进战役再返回不变。
  */
+const OUTLIERS_OPEN_KEY = 'veil.deepDig.outliersOpen';
+function readOutliersOpen(): boolean {
+  try { return sessionStorage.getItem(OUTLIERS_OPEN_KEY) === '1'; } catch { return false; }
+}
 function OutlierList({ def, outliers, rows, temp, X, onTemp, onRestoreAll }: {
   def: DefinitionSnapshot;
   outliers: readonly DeepDigOutlier[];
@@ -525,10 +531,26 @@ function OutlierList({ def, outliers, rows, temp, X, onTemp, onRestoreAll }: {
   const counts = DEEP_DIG_GROUPS.map(g => ({ g, n: outliers.filter(o => o.group === g).length })).filter(c => c.n > 0);
   const pending = outliers.filter(o => !temp.has(o.id)).map(o => o.id);
   const linkBtn = 'text-[11px] text-muted-foreground hover:text-foreground';
+  const [open, setOpenState] = useState(readOutliersOpen);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    try { if (next) sessionStorage.setItem(OUTLIERS_OPEN_KEY, '1'); else sessionStorage.removeItem(OUTLIERS_OPEN_KEY); } catch { /* 记不住只是下次要再点 */ }
+  };
   return (
     <div className="max-w-[720px] space-y-1 pt-1 text-[11.5px]" data-testid="deep-dig-outliers">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-medium">极端值</span>
+        {list.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+            title={open ? '收起表格' : `展开表格（${list.length} 行）`}
+            className="inline-flex items-center gap-0.5 self-center font-medium hover:text-foreground/80"
+            data-testid="deep-dig-outliers-toggle"
+          >
+            <ChevronRight className={cn('h-3 w-3 text-muted-foreground transition-transform', open && 'rotate-90')} aria-hidden="true" />极端值
+          </button>
+        ) : <span className="font-medium">极端值</span>}
         <span className="text-[11px] text-muted-foreground">各组四分位距 {OUTLIER_IQR_K} 倍以外</span>
         {counts.length === 0 ? <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-outliers-none">没有</span> : (
           <span className="text-[11px]">
@@ -544,7 +566,7 @@ function OutlierList({ def, outliers, rows, temp, X, onTemp, onRestoreAll }: {
           </span>
         )}
       </div>
-      {list.length > 0 && (
+      {list.length > 0 && open && (
         <table className="text-[11.5px]" data-testid="deep-dig-outlier-rows">
           <tbody>
             {list.map(id => {
