@@ -6,15 +6,58 @@
 import { auth, defineMcp } from "npm:@lovable.dev/mcp-js@0.22.0";
 
 // src/lib/mcp/tools/list_recent_journals.ts
-import { createClient } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z } from "npm:zod@^4.4.3";
-function sb(ctx) {
-  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${ctx.getToken()}` } },
+
+// src/lib/mcp/supabase.ts
+import { createClient } from "npm:@supabase/supabase-js@2.110.7";
+function runtimeEnv(name) {
+  const runtime = globalThis;
+  return runtime.Deno?.env?.get?.(name) ?? runtime.process?.env?.[name];
+}
+function configuredEnv(names) {
+  for (const name of names) {
+    const value = runtimeEnv(name)?.trim();
+    if (value) return value;
+  }
+  return void 0;
+}
+function supabaseProjectUrl() {
+  const url = configuredEnv(["SUPABASE_URL", "VITE_SUPABASE_URL"]);
+  if (!url) throw new Error("Database URL is not configured");
+  return url;
+}
+function supabasePublishableKey() {
+  const direct = configuredEnv(["SUPABASE_PUBLISHABLE_KEY", "VITE_SUPABASE_PUBLISHABLE_KEY"]);
+  if (direct) return direct;
+  const keyset = runtimeEnv("SUPABASE_PUBLISHABLE_KEYS");
+  if (keyset) {
+    try {
+      const parsed = JSON.parse(keyset);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const keys = parsed;
+        const key = [keys.default, ...Object.values(keys)].find((v) => typeof v === "string" && v.trim().startsWith("sb_publishable_"))?.trim();
+        if (key) return key;
+      }
+    } catch {
+    }
+  }
+  const legacy = configuredEnv(["SUPABASE_ANON_KEY", "VITE_SUPABASE_ANON_KEY"]);
+  if (legacy) return legacy;
+  throw new Error("Database public key is not configured");
+}
+function supabaseForUser(ctx) {
+  const token = ctx.getToken();
+  if (!ctx.isAuthenticated() || !token || !ctx.getUserId()) {
+    throw new Error("A verified OAuth caller is required");
+  }
+  return createClient(supabaseProjectUrl(), supabasePublishableKey(), {
+    global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false }
   });
 }
+
+// src/lib/mcp/tools/list_recent_journals.ts
 var list_recent_journals_default = defineTool({
   name: "list_recent_journals",
   title: "List recent trade journals",
@@ -29,7 +72,7 @@ var list_recent_journals_default = defineTool({
     if (!ctx.isAuthenticated()) {
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
-    let q = sb(ctx).from("trade_journals").select("id, symbol, direction, post_outcome, pre_entry_reason, pre_simulated_time, post_review_summary").eq("user_id", ctx.getUserId()).order("pre_simulated_time", { ascending: false }).limit(limit);
+    let q = supabaseForUser(ctx).from("trade_journals").select("id, symbol, direction, post_outcome, pre_entry_reason, pre_simulated_time, post_review_summary").eq("user_id", ctx.getUserId()).order("pre_simulated_time", { ascending: false }).limit(limit);
     if (symbol) q = q.eq("symbol", symbol);
     if (outcome) q = q.eq("post_outcome", outcome);
     const { data, error } = await q;
@@ -42,15 +85,8 @@ var list_recent_journals_default = defineTool({
 });
 
 // src/lib/mcp/tools/get_journal.ts
-import { createClient as createClient2 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z2 } from "npm:zod@^4.4.3";
-function sb2(ctx) {
-  return createClient2(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${ctx.getToken()}` } },
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-}
 var get_journal_default = defineTool2({
   name: "get_journal",
   title: "Get trade journal by id",
@@ -63,7 +99,7 @@ var get_journal_default = defineTool2({
     if (!ctx.isAuthenticated()) {
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
-    const { data, error } = await sb2(ctx).from("trade_journals").select("*").eq("id", journal_id).eq("user_id", ctx.getUserId()).maybeSingle();
+    const { data, error } = await supabaseForUser(ctx).from("trade_journals").select("*").eq("id", journal_id).eq("user_id", ctx.getUserId()).maybeSingle();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     if (!data) return { content: [{ type: "text", text: "Journal not found" }], isError: true };
     return {
@@ -74,15 +110,8 @@ var get_journal_default = defineTool2({
 });
 
 // src/lib/mcp/tools/list_trading_rules.ts
-import { createClient as createClient3 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z3 } from "npm:zod@^4.4.3";
-function sb3(ctx) {
-  return createClient3(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${ctx.getToken()}` } },
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-}
 var list_trading_rules_default = defineTool3({
   name: "list_trading_rules",
   title: "List trading rules",
@@ -95,7 +124,7 @@ var list_trading_rules_default = defineTool3({
     if (!ctx.isAuthenticated()) {
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
-    let q = sb3(ctx).from("trading_rules").select("*").eq("user_id", ctx.getUserId()).order("created_at", { ascending: false });
+    let q = supabaseForUser(ctx).from("trading_rules").select("*").eq("user_id", ctx.getUserId()).order("created_at", { ascending: false });
     if (only_active) q = q.eq("is_active", true);
     const { data, error } = await q;
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
@@ -107,15 +136,8 @@ var list_trading_rules_default = defineTool3({
 });
 
 // src/lib/mcp/tools/list_error_patterns.ts
-import { createClient as createClient4 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.22.0";
 import { z as z4 } from "npm:zod@^4.4.3";
-function sb4(ctx) {
-  return createClient4(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${ctx.getToken()}` } },
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-}
 var list_error_patterns_default = defineTool4({
   name: "list_error_patterns",
   title: "List error tag patterns",
@@ -129,7 +151,7 @@ var list_error_patterns_default = defineTool4({
     if (!ctx.isAuthenticated()) {
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
-    let q = sb4(ctx).from("error_tag_patterns").select("id, category_id, pattern_name, operational_definition, occurrence_count, last_seen_at, is_archived").eq("user_id", ctx.getUserId()).order("occurrence_count", { ascending: false }).limit(limit);
+    let q = supabaseForUser(ctx).from("error_tag_patterns").select("id, category_id, pattern_name, operational_definition, occurrence_count, last_seen_at, is_archived").eq("user_id", ctx.getUserId()).order("occurrence_count", { ascending: false }).limit(limit);
     if (!include_archived) q = q.eq("is_archived", false);
     const { data, error } = await q;
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
@@ -141,14 +163,7 @@ var list_error_patterns_default = defineTool4({
 });
 
 // src/lib/mcp/tools/whoami.ts
-import { createClient as createClient5 } from "npm:@supabase/supabase-js@2.110.7";
 import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.22.0";
-function sb5(ctx) {
-  return createClient5(process.env.SUPABASE_URL, process.env.SUPABASE_PUBLISHABLE_KEY, {
-    global: { headers: { Authorization: `Bearer ${ctx.getToken()}` } },
-    auth: { persistSession: false, autoRefreshToken: false }
-  });
-}
 var whoami_default = defineTool5({
   name: "whoami",
   title: "Who am I",
@@ -159,7 +174,7 @@ var whoami_default = defineTool5({
     if (!ctx.isAuthenticated()) {
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
-    const { data, error } = await sb5(ctx).from("profiles").select("user_id, display_name, initial_capital, is_initialized").eq("user_id", ctx.getUserId()).maybeSingle();
+    const { data, error } = await supabaseForUser(ctx).from("profiles").select("user_id, display_name, initial_capital, is_initialized").eq("user_id", ctx.getUserId()).maybeSingle();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     const payload = {
       user_id: ctx.getUserId(),

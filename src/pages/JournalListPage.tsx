@@ -22,6 +22,8 @@ import { BlindSpotModule } from '@/components/journal/BlindSpotModule';
 import { UnreviewedJournalList } from '@/components/journal/UnreviewedJournalList';
 import type { TradeCampaign } from '@/types/journal';
 import { buildUnreviewedLongMainItems } from '@/lib/unreviewedLongMainTrades';
+import { useWebMCP } from 'use-webmcp-tool';
+import { runWebMCPTool } from '@/lib/webmcp-telemetry';
 
 type View = 'summary' | 'blindspots' | 'unreviewed';
 const VIEWS: readonly View[] = ['summary', 'blindspots', 'unreviewed'];
@@ -111,11 +113,43 @@ export default function JournalListPage() {
   );
 
   const setView = (v: string) => {
+    if (!VIEWS.includes(v as View)) throw new Error('未知的错题集视图');
     const next = new URLSearchParams(params);
     if (v === 'summary') next.delete('view');
     else next.set('view', v);
     setParams(next, { replace: true });
   };
+
+  useWebMCP({
+    name: 'read_journal_view',
+    description: 'Read a compact summary of the currently selected journal tab, without hidden records.',
+    enabled: !!user && !loading && !!data,
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    execute: () => runWebMCPTool('read_journal_view', () => {
+      if (!user || loading || !data) throw new Error('错题集尚未加载完成');
+      if (view === 'blindspots') return `当前视图：盲区；已显示 ${blindSpots.items.length} 条记录。`;
+      if (view === 'unreviewed') return `当前视图：待复盘；待复盘主力多单 ${unreviewedCount} 条。`;
+      return `当前视图：汇总；交易记录 ${navigableTradeJournals.length} 条。`;
+    }),
+  });
+
+  useWebMCP({
+    name: 'select_journal_view',
+    description: 'Switch the visible journal tab to summary, blindspots, or unreviewed.',
+    enabled: !!user && !loading && !!data,
+    inputSchema: {
+      type: 'object',
+      properties: { view: { type: 'string', enum: [...VIEWS], description: 'The journal tab to display.' } },
+      required: ['view'],
+      additionalProperties: false,
+    },
+    execute: ({ view: nextView }: { view: string }) => runWebMCPTool('select_journal_view', () => {
+      if (!user || loading || !data) throw new Error('错题集尚未加载完成');
+      if (typeof nextView !== 'string') throw new Error('未知的错题集视图');
+      setView(nextView);
+      return `已切换视图：${nextView}。`;
+    }),
+  });
 
   if (loading || !data) {
     return (
