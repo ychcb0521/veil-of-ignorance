@@ -12,8 +12,9 @@ import {
   setSignalQuality, normalizeSignalQuality,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
-import { useFish } from '@/hooks/useFish';
+import { useFish, withoutFresh } from '@/hooks/useFish';
 import { FishPanel } from '@/components/FishPanel';
+import { SpeedSelector } from '@/components/SpeedSelector';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
@@ -27,7 +28,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { listAllCampaigns } from '@/lib/journalApi';
 import { buildCampaignDayIndex, buildTradedDayIndex } from '@/lib/signalCampaignIndex';
 import { PreTradeSnapshotDialog } from '@/components/journal/PreTradeSnapshotDialog';
-import { SIMULATION_SPEED_OPTIONS } from '@/lib/simulationSpeeds';
 
 interface Props {
   status: TimeMachineStatus;
@@ -39,6 +39,7 @@ interface Props {
   onStop: () => void;
   onSetSpeed: (speed: number) => void;
   clockRef?: React.RefObject<HTMLSpanElement>;
+  /** 【用户要求】2026-10-19 主栏不再显示「独立时间轴」角标；仍收这个参数，调用方不用改。 */
   timeMode?: TimeMode;
   originTime?: number | null;
   onSymbolChange?: (symbol: string) => void;
@@ -51,7 +52,6 @@ interface Props {
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
-  timeMode = 'synced',
   originTime, onSymbolChange, activeSymbol, onJumpToSignal,
   signalJumpInterval = '1m', signalJumpIntervalMs = 60_000,
 }: Props) {
@@ -64,7 +64,6 @@ export function TimeControl({
   // 必须回灌，否则高亮停在旧档位，看起来像「我选的 3600x 被拒绝了」。
   const [visualSpeed, setVisualSpeed] = useState(speed);
   useEffect(() => { setVisualSpeed(speed); }, [speed]);
-  const speedPointerDownRef = useRef<number | null>(null);
   const noEntrySymbol = activeSymbol || 'BTCUSDT';
 
   const openNoEntry = () => {
@@ -381,8 +380,10 @@ export function TimeControl({
     }
   }, []);
 
-  const handleAddFish = useCallback((id?: string) => {
-    const incoming = id ? fish.signalsRef.current.filter(s => s.id === id) : fish.signalsRef.current;
+  /** 加入信号库：一条（id）或一批（ids，「全部加入」按所在列表）；新鱼标记不带进信号库。 */
+  const handleAddFish = useCallback((target?: string | readonly string[]) => {
+    const ids = target == null ? null : new Set(typeof target === 'string' ? [target] : target);
+    const incoming = (ids ? fish.signalsRef.current.filter(s => ids.has(s.id)) : fish.signalsRef.current).map(withoutFresh);
     setSignals(prev => mergeSignals(prev, incoming));
     toast.success('已加入信号库（重复项自动跳过）');
   }, [fish.signalsRef]);
@@ -412,47 +413,20 @@ export function TimeControl({
     onStart(ts);
   };
 
-  const SpeedButtons = () => (
-    <div className="flex items-center gap-1 flex-wrap">
-      {SIMULATION_SPEED_OPTIONS.map(s => (
-        <button
-          type="button"
-          key={s}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            speedPointerDownRef.current = s;
-            setVisualSpeed(s);
-            onSetSpeed(s);
-          }}
-          onClick={() => {
-            if (speedPointerDownRef.current === s) {
-              speedPointerDownRef.current = null;
-              return;
-            }
-            setVisualSpeed(s);
-            onSetSpeed(s);
-          }}
-          className={`px-2 py-1 rounded text-xs font-mono transition-all duration-100 ease-out active:scale-[0.95] ${
-            visualSpeed === s
-              ? 'bg-primary text-primary-foreground'
-              : 'bg-secondary text-secondary-foreground hover:bg-accent'
-          }`}
-        >
-          {s}x
-        </button>
-      ))}
-    </div>
-  );
+  // 元素而不是内部组件：TimeControl 每跳一格时钟就重渲染，内部组件会被卸载重建、下拉面板随之关掉
+  const speedButtons = <SpeedSelector speed={visualSpeed} onSelect={s => { setVisualSpeed(s); onSetSpeed(s); }} />;
 
   const TimeDisplay = ({ paused }: { paused?: boolean }) => (
-    <div className="ml-auto flex items-center gap-4">
+    <div className="ml-auto flex items-center gap-3 whitespace-nowrap">
       {originTime != null && (
-        <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+        // 【用户要求】2026-10-19 这一行要放得下：启始只写「月-日 时:分」，悬停看完整时间
+        // 窄屏（< 1280px）不显示，悬停当前时间可以看到
+        <span className="hidden xl:flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground" title={`启始 ${formatUTC8(originTime)}`}>
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted font-medium tracking-wide">启始</span>
-          {formatUTC8(originTime)}
+          {formatUTC8(originTime).slice(5, 16)}
         </span>
       )}
-      <span className={`font-mono text-sm font-medium ${paused ? 'text-yellow-400 animate-pulse' : 'text-primary'}`}>
+      <span className={`font-mono text-sm font-medium ${paused ? 'text-yellow-400 animate-pulse' : 'text-primary'}`} title={originTime != null ? `启始 ${formatUTC8(originTime)}` : undefined}>
         {paused && '⏸ '}
         <span ref={clockRef}>{formatUTC8(currentSimulatedTime)}</span>
       </span>
@@ -461,13 +435,10 @@ export function TimeControl({
 
   return (
     <div className="panel px-4 py-3 bg-card">
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-x-2.5 gap-y-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Clock className="w-4 h-4 text-primary" />
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Time Machine</span>
-          {timeMode === 'isolated' && status !== 'stopped' && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-accent text-accent-foreground font-medium">独立时间轴</span>
-          )}
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide whitespace-nowrap">Time Machine</span>
         </div>
 
         <button
@@ -512,10 +483,10 @@ export function TimeControl({
         {status === 'playing' && (
           <>
             <div className="flex items-center gap-2">
-              <button onClick={onPause} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
+              <button onClick={onPause} className="flex h-7 items-center gap-1 text-xs px-2 rounded bg-yellow-500/20 whitespace-nowrap text-yellow-400 hover:bg-yellow-500/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Pause className="w-3.5 h-3.5" /> 暂停
               </button>
-              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
+              <button onClick={onStop} className="flex h-7 items-center gap-1 text-xs px-2 rounded bg-destructive/20 whitespace-nowrap text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
               <button
@@ -526,7 +497,7 @@ export function TimeControl({
                 <BookmarkX className="w-3.5 h-3.5" />
               </button>
             </div>
-            <SpeedButtons />
+            {speedButtons}
             <TimeDisplay />
           </>
         )}
@@ -534,10 +505,10 @@ export function TimeControl({
         {status === 'paused' && (
           <>
             <div className="flex items-center gap-2">
-              <button onClick={onResume} className="btn-long flex items-center gap-1.5 text-xs active:scale-[0.97]">
+              <button onClick={onResume} className="btn-long flex h-7 items-center gap-1 !px-2 text-xs whitespace-nowrap active:scale-[0.97]">
                 <Play className="w-3.5 h-3.5" /> 继续
               </button>
-              <button onClick={onStop} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
+              <button onClick={onStop} className="flex h-7 items-center gap-1 text-xs px-2 rounded bg-destructive/20 whitespace-nowrap text-destructive hover:bg-destructive/30 transition-all duration-100 ease-out active:scale-[0.97] font-medium">
                 <Square className="w-3.5 h-3.5" /> 停止
               </button>
               <button
@@ -548,7 +519,7 @@ export function TimeControl({
                 <BookmarkX className="w-3.5 h-3.5" />
               </button>
             </div>
-            <SpeedButtons />
+            {speedButtons}
             <TimeDisplay paused />
           </>
         )}

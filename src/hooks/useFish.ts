@@ -4,6 +4,13 @@ import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSi
 import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
+/** 去掉「新鱼」标记（归入「鱼」、或加入信号库时用）。 */
+export function withoutFresh(signal: TradeSignal): TradeSignal {
+  if (!signal.freshCatch) return signal;
+  const { freshCatch: _drop, ...rest } = signal;
+  return rest;
+}
+
 // Shared across TimeControl instances and panel remounts in this browser page.
 let pageScanner: FishScanner | null = null;
 
@@ -27,6 +34,8 @@ export function useFish(userId: string | undefined) {
   }, [userId]);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
+    // 上一轮的新鱼归入「鱼」，这一轮捕到的（含以前捕到过、这轮又命中的）放进「新鱼」
+    if (signalsRef.current.some(s => s.freshCatch)) commit(signalsRef.current.map(withoutFresh));
     scanner.current ??= pageScanner ??= new FishScanner();
     const mine = new AbortController(); controller.current = mine;
     const owner = ownerRef.current;
@@ -36,11 +45,14 @@ export function useFish(userId: string | undefined) {
         onProgress: value => { if (valid()) setProgress(value); },
         onSignal: signal => {
           if (valid() && !mine.signal.aborted) {
-            const merged = mergeSignals(signalsRef.current, [signal]);
-            const previous = signalsRef.current.find(s => s.id === signal.id);
-            if (merged.length !== signalsRef.current.length) commit(merged);
-            else if (previous && JSON.stringify(previous.fish) !== JSON.stringify(signal.fish)) {
-              commit(merged.map(s => s.id === signal.id ? { ...s, fish: signal.fish } : s));
+            const fresh = { ...signal, freshCatch: true };
+            const merged = mergeSignals(signalsRef.current, [fresh]);
+            if (merged.length !== signalsRef.current.length) { commit(merged); return; }
+            // 已经在列表里（同一标的@时间）：标成新鱼、读数换成这一轮的，评分保留
+            const key = `${signal.symbol}@${signal.timeMs}`;
+            const previous = signalsRef.current.find(s => `${s.symbol}@${s.timeMs}` === key);
+            if (previous && (!previous.freshCatch || JSON.stringify(previous.fish) !== JSON.stringify(signal.fish))) {
+              commit(signalsRef.current.map(s => s === previous ? { ...s, fish: signal.fish, freshCatch: true } : s));
             }
           }
         },

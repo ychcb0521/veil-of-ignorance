@@ -115,11 +115,11 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([b, a]));
     render(control());
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
-    expect(screen.queryByTestId('fish-library-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fish-old-panel')).not.toBeInTheDocument();
     const button = screen.getByRole('button',{name:/^鱼/});
     expect(button).toHaveAttribute('aria-expanded','false');
     fireEvent.click(button);
-    const library = screen.getByTestId('fish-library-panel');
+    const library = screen.getByTestId('fish-old-panel');
     expect(screen.getByTestId('fish-panel')).toContainElement(library);
     expect(within(library).getByText('兜底区')).toBeInTheDocument();
     const first = () => within(library).getByTestId('signal-library-scroller').querySelector('.group')!;
@@ -138,9 +138,34 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.change(screen.getByLabelText('筛选鱼信号'),{target:{value:'AAA'}});
     expect(within(library).getByText('没有匹配的标的。')).toBeInTheDocument();
     fireEvent.click(button);
-    expect(screen.queryByTestId('fish-library-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('fish-old-panel')).not.toBeInTheDocument();
     expect(loadFishSignals()).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
 
+
+  it('【用户要求】2026-10-19 新鱼：开始捕捞时上一轮的新鱼归入「鱼」，这一轮捕到的放进「新鱼」；加入信号库不带新鱼标记', async () => {
+    const b = { ...SIGNAL, id: 'fish-BBB', symbol: 'BBBUSDT', timeMs: 456 };
+    mocks.scan.mockImplementation(async o => { o.onSignal(b); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
+    render(control());
+    fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    expect(screen.getByRole('button',{name:/^新鱼/})).toHaveTextContent('0');
+    fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    await waitFor(() => expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('BBBUSDT'));
+    expect(screen.getByRole('button',{name:/^鱼/})).toHaveTextContent('1');
+    expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['BBBUSDT']);
+    // 第二轮：命中 AAA（以前就有），BBB 归入鱼
+    mocks.scan.mockImplementation(async o => { o.onSignal(SIGNAL); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
+    fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    await waitFor(() => expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['AAAUSDT']));
+    expect(loadFishSignals()).toHaveLength(2);
+    expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('AAAUSDT');
+    expect(screen.getByTestId('fish-new-panel')).not.toHaveTextContent('BBBUSDT');
+    // 「全部加入信号库」只加这个列表里的
+    fireEvent.click(within(screen.getByTestId('fish-new-panel')).getByRole('button',{name:'全部加入信号库'}));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1));
+    const lib = JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!);
+    expect(lib[0].symbol).toBe('AAAUSDT');
+    expect(lib[0].freshCatch).toBeUndefined();
+  });
 });

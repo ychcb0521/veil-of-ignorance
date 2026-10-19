@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CircleHelp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -9,7 +9,7 @@ import { FishLibrary } from '@/components/FishLibrary';
 export interface FishPanelProps {
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
-  onStart: (settings: FishScanSettings) => void; onCancel: () => void; onAdd: (id?: string) => void;
+  onStart: (settings: FishScanSettings) => void; onCancel: () => void; onAdd: (target?: string | readonly string[]) => void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
@@ -20,6 +20,8 @@ export function FishPanel(p: FishPanelProps) {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const running = p.progress?.status === 'running';
+  const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
+  const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
   const x = p.progress;
   return <section className="mt-2 space-y-2 rounded border border-border/60 bg-background p-3" aria-label="渔" data-testid="fish-panel">
@@ -64,6 +66,10 @@ export function FishPanel(p: FishPanelProps) {
       <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {x.counts.hit}</span><span>未达标 {x.counts.below}</span><span>起点不明 {x.counts.unknown}</span><span>缺口 / 不足2000根 {x.counts.gap}</span><span>读数不全 {x.counts.readings}</span><span>请求失败 {x.counts.failed}</span></p>
       {x.error && <p className="text-destructive">{x.error}</p>}
     </div>}
-    <FishLibrary signals={p.signals} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} onAdd={p.onAdd} />
+    {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
+    <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={running ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼」。'}
+      tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} onAdd={p.onAdd} />
+    <FishLibrary title="鱼" testId="fish-old" signals={old} bare emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
+      tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} onAdd={p.onAdd} />
   </section>;
 }
