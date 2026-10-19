@@ -1,10 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 
 const oauth = vi.hoisted(() => ({ getAuthorizationDetails: vi.fn(), approveAuthorization: vi.fn(), denyAuthorization: vi.fn() }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { auth: { oauth } } }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'test-user', email: 'test@example.invalid' }, loading: false, signOut: vi.fn() }) }));
+vi.mock('@/contexts/AuthContext', () => {
+  const state = { user: { id: 'test-user', email: 'test@example.invalid' }, loading: false, signOut: vi.fn() };
+  return { useAuth: () => state };
+});
 import OAuthConsent from '../OAuthConsent';
 
 const mount = (path = '/.lovable/oauth/consent?authorization_id=test-request') => render(<MemoryRouter initialEntries={[path]}><OAuthConsent /></MemoryRouter>);
