@@ -327,6 +327,8 @@ export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 interface Props {
   rowTitle?: (signal: TradeSignal) => string;
   rowAlgorithm?: (signal: TradeSignal) => string;
+  /** 放在另一个可滚动区域里（如「渔」）：滚到列表头 / 尾后把滚动交给外层，不卡住。 */
+  nested?: boolean;
   onAdd?: (id: string) => void;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
@@ -361,7 +363,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm,
+  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -565,7 +567,7 @@ function SignalLibraryListImpl({
     <div
       ref={scrollerRef}
       data-testid="signal-library-scroller"
-      className="min-w-0 max-h-56 divide-y divide-border/30 overflow-x-hidden overflow-y-auto overscroll-contain [overflow-anchor:none]"
+      className={`min-w-0 max-h-56 divide-y divide-border/30 overflow-x-hidden overflow-y-auto ${nested ? 'overscroll-auto' : 'overscroll-contain'} [overflow-anchor:none]`}
       onBlur={handleBlur}
     >
       {/* 首行始终是第一个子节点：前面不放垫片，它才不会被 divide-y 平白加上一条上边线

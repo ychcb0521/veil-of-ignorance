@@ -169,8 +169,10 @@ export function FishPanel(p: FishPanelProps) {
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
   const x = p.progress;
 
-  return <section className="mt-2 min-w-0 space-y-3 rounded-lg border border-border/60 bg-background p-3 sm:p-4" aria-label="渔" data-testid="fish-panel">
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
+  // 【用户要求】2026-10-19「渔界面内的内容可以上下滑动，要切换自如」：页面整体不滚动（h-screen），面板自己限高、内部滚动；
+  // 顶上「时间 / 开始捕捞 / 取消」一行滚动时贴顶；鱼列表滚到头后把滚动交给面板（不卡在列表里）
+  return <section className="mt-2 max-h-[65vh] min-w-0 space-y-3 overflow-y-auto overscroll-y-contain rounded-lg border border-border/60 bg-background p-3 sm:p-4" aria-label="渔" data-testid="fish-panel">
+    <div className="sticky -top-3 z-10 -mx-3 -mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 bg-background px-3 pb-2 pt-3 text-[11px] sm:-top-4 sm:-mx-4 sm:-mt-4 sm:px-4 sm:pt-4" data-testid="fish-toolbar">
       <div className="flex items-center gap-1"><strong className="text-xs">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
         <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
         <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
