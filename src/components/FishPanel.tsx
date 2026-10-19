@@ -2,8 +2,7 @@ import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,parseFishConstraint,FISH_PRESETS,type FishConstraint} from '@/lib/fish/algorithm';
 import {readFishPreference,saveFishPreference,type FishPreference} from '@/lib/fish/preferences';
-import { fishCalcDef, fishDefinitionDrift, fishRuleText, readUseBuiltin, writeUseBuiltin } from '@/lib/fishRule';
-import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
+import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { CircleHelp, Search, SlidersHorizontal } from 'lucide-react';
@@ -52,13 +51,8 @@ export function FishPanel(p: FishPanelProps) {
   const [selected,setSelected]=useState('cbi2'),[pref,setPref]=useState<FishPreference>(()=>readFishPreference('cbi2'));
   const [constraintsOpen,setConstraintsOpen]=useState(false),[estimatedCount,setEstimatedCount]=useState<number|null>(null);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
-  // 「改用内置公式」：Deep dig 里改过的内置特征值，渔可以按内置定义算（按特征值记住）
-  const [useBuiltin,setUseBuiltinState]=useState<string[]>(()=>readUseBuiltin(getUserPrefix(),readPersistedStateRaw));
-  useEffect(()=>setUseBuiltinState(readUseBuiltin(owner,readPersistedStateRaw)),[owner]);
-  const setUseBuiltin=(id:string,on:boolean)=>{const next=on?[...useBuiltin.filter(x=>x!==id),id]:useBuiltin.filter(x=>x!==id);setUseBuiltinState(next);writeUseBuiltin(getUserPrefix(),next,writePersistedStateRaw);};
-  const drift=useMemo(()=>listedDef?fishDefinitionDrift(listedDef):null,[listedDef]);
-  const usingBuiltin=!!drift&&!!listedDef&&useBuiltin.includes(listedDef.id);
-  const def=useMemo(()=>usingBuiltin?fishCalcDef(listedDef,useBuiltin):listedDef,[usingBuiltin,listedDef,useBuiltin]);
+  // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
+  const def=listedDef;
   const [probe,setProbe]=useState<{symbol:string;exchange:FishExchange;busy:boolean;result:FishDiagnosis|null}>({symbol:'',exchange:'binance',busy:false,result:null});
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
@@ -112,12 +106,6 @@ export function FishPanel(p: FishPanelProps) {
       <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
     </div>}</div>
     <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:fishRuleText(def,pref.H,pref.direction,pref.threshold,active.length)}</p>
-    {drift&&listedDef&&<p className="text-[10.5px] text-[#C27C0E]/80 dark:text-[#F59E0B]/80" data-testid="fish-drift">
-      {usingBuiltin
-        ? <>已按内置 {listedDef.short} 公式捕捞（Deep dig 里的定义改过{drift.changed.join('、')}）· </>
-        : <>Deep dig 里的 {listedDef.short} 改过{drift.changed.join('、')}{drift.resultName!==drift.builtinResultName?`：被平均的是 ${drift.resultName}（内置是 ${drift.builtinResultName}）`:''}，渔按改过的定义算 · </>}
-      <button type="button" disabled={running} className="underline-offset-2 hover:underline disabled:opacity-50" onClick={()=>setUseBuiltin(listedDef.id,!usingBuiltin)} data-testid="fish-use-builtin">{usingBuiltin?'改回 Deep dig 定义':'改用内置公式'}</button>
-    </p>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />

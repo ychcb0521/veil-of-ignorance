@@ -7,7 +7,7 @@ vi.mock('klinecharts', () => ({
   registerIndicator: (def: { name: string }) => { registered.set(def.name, def as never); },
 }));
 
-import { AVG_DEFAULT_HOURS, bssPoints, INDICATOR_COMPANIONS, dspPoints, indicatorCalcParams, registerCustomIndicators, rollingAvgHours } from '@/lib/customIndicators';
+import { AVG_DEFAULT_HOURS, bssPoints, INDICATOR_COMPANIONS, dspPoints, indicatorCalcParams, registerCustomIndicators, rollingAvgHours, unifiedDspA } from '@/lib/customIndicators';
 import { DSP_V_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
 import { BSS_FORMULA, compileFeatureFormula, computeFeatureValues } from '@/lib/deepDig/features';
 import { BAR_MS, type ResearchBar } from '@/lib/deepRsa/window';
@@ -65,7 +65,8 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
   it('avg_a 副图：单位与 a 相同（基点 / 根）；1 小时图上每根窗口根数与 5 分钟图相同', () => {
     const def = registered.get('DSP_V_AVG_CUSTOM')!;
     expect(def.calcParams).toEqual([6, AVG_DEFAULT_HOURS, 0]);
-    const a = dspPoints(k, 6).map(p => (p.v == null ? null : p.v * DSP_V_DISPLAY_SCALE));
+    // 【用户要求】2026-10-19 公式统一：a 按 Deep dig 的公式（成交额基线 avg(Q, avgh)），不再是图上自己的 ema(Q, hl)
+    const a = unifiedDspA(k, 6, false);
     const out = def.calc(k, { calcParams: [6, 24] });
     for (const i of [1, 300, 699]) expect(out[i].v).toBeCloseTo(manualAvg(a, i, 288)!, 12);
     const out1h = def.calc(klines(700, 12 * BAR), { calcParams: [6, 24] });

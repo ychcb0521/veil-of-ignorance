@@ -10,6 +10,8 @@ import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
+import { chartFeatureSeries, accountFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
+import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
@@ -223,6 +225,24 @@ export function cbi2Points(dataList: KLineData[], baseHours: number | undefined,
     takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null,
     refClose: ref[i],
   })), { baseHours: Number.isFinite(h) && h > 0 ? h : CBI2_DEFAULTS.baseHours });
+}
+
+/**
+ * 【用户要求】2026-10-19「公式要统一，指标、捕鱼算法、dig 中的要保持一致」：图上的特征值副图与 Deep dig 读同一份定义。
+ * 定义与内置核心公式相同 → 沿用原来的实现（单元测试核对与公式逐位相同，CBA-2 还保留「只算已收盘」的处理）；
+ * 改过 → 直接算改过的公式。DSP 的 a / az 原先成交额基线用 ema(Q, hl)、Deep dig 用 avg(Q, avgh)，现在一律按 Deep dig 的公式。
+ */
+function unifiedCore(dataList: KLineData[], featureId: string, period: number | undefined, legacy: (() => (number | null | undefined)[]) | null, refClose?: (number | null)[]): (number | null)[] {
+  const def = accountFeatureDef(featureId);
+  if (legacy && (!def || sameCoreAsBuiltin(def, BUILTIN_FEATURES.find(b => b.id === featureId)))) return legacy().map(v => (v == null || !Number.isFinite(v) ? null : v));
+  return chartFeatureSeries(dataList, featureId, period, refClose)?.core ?? dataList.map(() => null);
+}
+/** DSP 的 a（Z 版为 az）：按 Deep dig 公式，乘它的显示倍数（a 为基点 × 10⁴，az 为 × 100）。 */
+export function unifiedDspA(dataList: KLineData[], halfLifeHours: number | undefined, zscore: boolean): (number | null)[] {
+  const id = zscore ? 'drift-speed-z' : 'drift-speed';
+  const out = chartFeatureSeries(dataList, id, halfLifeHours);
+  if (!out) return dspAValues(dataList, halfLifeHours, zscore);
+  return out.core.map(v => (v == null ? null : v * out.def.scale));
 }
 
 export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
@@ -999,7 +1019,7 @@ export function registerCustomIndicators() {
         styles: (data) => ({ color: vColor(segmentEndV(data)), size: 1.5 }),
       },
     ],
-    calc: (dataList, indicator) => dspAValues(dataList, indicator.calcParams[0], indicator.calcParams[1] === 1).map(x => (x == null ? {} : { v: x })),
+    calc: (dataList, indicator) => unifiedDspA(dataList, indicator.calcParams[0], indicator.calcParams[1] === 1).map(x => (x == null ? {} : { v: x })),
   });
 
   // 【用户要求】avg_a = avg(a, N)：独立副图，紧挨在 a 副图下面。参数 [半衰期 h, 均线时长 N]；0 轴与 a 副图同一条橘黄色虚线，线按正负着色
@@ -1020,7 +1040,7 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const a = dspAValues(dataList, indicator.calcParams[0], indicator.calcParams[2] === 1);
+      const a = unifiedDspA(dataList, indicator.calcParams[0], indicator.calcParams[2] === 1);
       return rollingAvgHours(a, indicator.calcParams[1]).map(x => (x == null ? {} : { v: x }));
     },
   });
@@ -1063,7 +1083,7 @@ export function registerCustomIndicators() {
         styles: (data) => ({ color: bssColor((data.next?.indicatorData as { bss?: number } | undefined)?.bss ?? (data.current.indicatorData as { bss?: number } | undefined)?.bss), size: 1.5 }),
       },
     ],
-    calc: (dataList, indicator) => bssPoints(dataList, indicator.calcParams[0]).map(p => (p.bss == null ? {} : { bss: p.bss })),
+    calc: (dataList, indicator) => unifiedCore(dataList, 'bss', indicator.calcParams[0], () => bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss)).map(x => (x == null ? {} : { bss: x })),
   });
 
   // ─── CBA 买方定价优势指数（副图）───
@@ -1085,7 +1105,7 @@ export function registerCustomIndicators() {
         },
       },
     ],
-    calc: (dataList, indicator) => cbaPoints(dataList, indicator.calcParams[0]).map(p => (p.cba == null ? {} : { cba: p.cba })),
+    calc: (dataList, indicator) => unifiedCore(dataList, 'cba', indicator.calcParams[0], () => cbaPoints(dataList, indicator.calcParams[0]).map(p => p.cba)).map(x => (x == null ? {} : { cba: x })),
   });
 
   registerIndicator({
@@ -1095,7 +1115,15 @@ export function registerCustomIndicators() {
       { key: 'cba2', title: 'CBA-2: ', type: 'line', styles: data => ({ color: vColor((data.current.indicatorData as { cba2?: number } | undefined)?.cba2), size: 1.5 }) },
       { key: 'invalid', title: '失效（1=是）: ', type: 'circle', styles: () => ({ color: '#F6465D', size: 3 }) },
     ],
-    calc: (dataList, indicator) => cba2Points(dataList, indicator.calcParams[0]).map(p => ({ cba2: p.cba2 ?? undefined, invalid: p.invalid === true ? 1 : undefined })),
+    calc: (dataList, indicator) => {
+      const def = accountFeatureDef('cba-2');
+      if (!def || sameCoreAsBuiltin(def, BUILTIN_FEATURES.find(b => b.id === 'cba-2'))) return cba2Points(dataList, indicator.calcParams[0]).map(p => ({ cba2: p.cba2 ?? undefined, invalid: p.invalid === true ? 1 : undefined }));
+      // 定义改过：按改过的公式（同样只认 5 分钟图）
+      if (dataList.length > 1 && inferIntervalMs(dataList.map(d => ({ time: d.timestamp }))) !== 300000) return dataList.map(() => ({}));
+      const out = chartFeatureSeries(dataList, 'cba-2', indicator.calcParams[0]);
+      const invalid = out?.vars.get('invalid');
+      return dataList.map((_, i) => ({ cba2: out?.core[i] ?? undefined, invalid: invalid?.[i] === 1 ? 1 : undefined }));
+    },
   });
 
   // ─── CBI 买方优势指数（副图）───
@@ -1117,7 +1145,7 @@ export function registerCustomIndicators() {
         },
       },
     ],
-    calc: (dataList, indicator) => cbiPoints(dataList, indicator.calcParams[0]).map(p => (p.cbi == null ? {} : { cbi: p.cbi })),
+    calc: (dataList, indicator) => unifiedCore(dataList, 'cbi', indicator.calcParams[0], () => cbiPoints(dataList, indicator.calcParams[0]).map(p => p.cbi)).map(x => (x == null ? {} : { cbi: x })),
   });
 
   // ─── CBI-2 买方优势指数第 2 版（副图）───
@@ -1143,7 +1171,13 @@ export function registerCustomIndicators() {
         },
       },
     ],
-    calc: (dataList, indicator) => cbi2Points(dataList, indicator.calcParams[0]).map(p => (p.cbi2 == null ? {} : { cbi2: p.cbi2 })),
+    calc: (dataList, indicator) => {
+      const legacy = cbi2Points(dataList, indicator.calcParams[0]).map(p => p.cbi2);
+      const def = accountFeatureDef('cbi2');
+      if (!def || sameCoreAsBuiltin(def, BUILTIN_FEATURES.find(b => b.id === 'cbi2'))) return legacy.map(x => (x == null ? {} : { cbi2: x }));
+      const times = dataList.map(d => d.timestamp), step = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
+      return (chartFeatureSeries(dataList, 'cbi2', indicator.calcParams[0], btcClosesAt(times, step))?.core ?? []).map(x => (x == null ? {} : { cbi2: x }));
+    },
   });
 
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
@@ -1162,7 +1196,7 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const bss = bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss);
+      const bss = unifiedCore(dataList, 'bss', indicator.calcParams[0], () => bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss));
       return rollingAvgHours(bss, indicator.calcParams[1]).map(x => (x == null ? {} : { bss: x }));
     },
   });

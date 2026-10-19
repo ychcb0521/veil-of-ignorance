@@ -10,7 +10,7 @@ const registered = vi.hoisted(() => new Map<string, {
 vi.mock('klinecharts', () => ({ registerIndicator: (def: { name: string }) => { registered.set(def.name, def as never); } }));
 
 import { computeDsp, DSP_VZ_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
-import { dspPoints, indicatorCalcParams, registerCustomIndicators } from '@/lib/customIndicators';
+import { dspPoints, indicatorCalcParams, registerCustomIndicators, unifiedDspA } from '@/lib/customIndicators';
 import { evaluateProgram, parseFormula, rollingSd } from '@/lib/deepDig/formula';
 import { BUILTIN_FEATURES, compileFeatureFormula, computeFeatureValue, DRIFT_SPEED_Z_DEF, DRIFT_SPEED_Z_FORMULA, formulaVariables } from '@/lib/deepDig/features';
 import { mulberry32 } from '@/lib/deepRsa/grouping';
@@ -91,10 +91,10 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
     expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 12, zscore: true })).toEqual([6, 12, 1]);
     expect(indicatorCalcParams('DSP_A_CUSTOM', { period: 6, zscore: true })).toEqual([6]);
     const a = registered.get('DSP_V_CUSTOM')!;
-    const vz = dspPoints(k, 6, true).map(p => p.vz);
+    // 【用户要求】2026-10-19 公式统一：a / az 副图按 Deep dig 的公式算（与 DSP·a / DSP·az 特征值同一份定义）
     const out = a.calc(k, { calcParams: [6, 1] });
-    expect(out[500].v).toBeCloseTo(vz[500]! * DSP_VZ_DISPLAY_SCALE, 10);
-    expect(a.calc(k, { calcParams: [6, 0] })[500].v).toBeCloseTo(dspPoints(k, 6)[500].v! * 1e4, 10);
+    expect(out[500].v).toBeCloseTo(unifiedDspA(k, 6, true)[500]!, 10);
+    expect(a.calc(k, { calcParams: [6, 0] })[500].v).toBeCloseTo(unifiedDspA(k, 6, false)[500]!, 10);
     const tip = (name: string, calcParams: number[], result: Record<string, number>[]) => registered.get(name)!.createTooltipDataSource!({
       indicator: { calcParams, result, precision: 3 }, crosshair: { dataIndex: 500 }, defaultStyles: { tooltip: { icons: [], defaultValue: 'n/a' } },
     });

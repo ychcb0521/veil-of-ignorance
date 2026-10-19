@@ -4,6 +4,7 @@ import { parseFormula, programHistoryBars, evaluateProgram, type Program, type V
 import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { coreProgram, featureCoreName } from '@/lib/featureSource';
 import { formatUTC8 } from '@/lib/timeFormat';
 export interface FishConstraint { id: string; text: string; enabled: boolean }
 export interface FishAlgorithmSettings { H: number; direction: '>' | '<'; threshold: number; constraints: FishConstraint[] }
@@ -26,7 +27,7 @@ export const fishAlgorithmKey = (id: string,H: number,direction: string,threshol
 type Node = Program['statements'][number]['expr'];
 const renameX = (n: Node,name: string): Node => n.k==='var'&&n.name==='X'?{...n,name}:n.k==='un'?{...n,a:renameX(n.a,name)}:n.k==='bin'?{...n,a:renameX(n.a,name),b:renameX(n.b,name)}:n.k==='call'?{...n,args:n.args.map(a=>renameX(a,name))}:n;
 export function parseFishConstraint(def: DeepDigFeatureDef,text: string): Program {
-  const base=compileFeatureFormula(def.formula);
+  const full=compileFeatureFormula(def.formula),base={...full,program:coreProgram(full.program)};
   const known=new Set([...SERIES_VARIABLES.map(v=>v.name),...PARAM_VARIABLES.flatMap(p=>[p.name,p.alias]),...base.program.statements.flatMap(s=>s.name?[s.name]:[]),'X']);
   if(/[\r\n]/.test(text))throw new Error('每条约束只能写一行布尔式');
   const p=parseFormula(text,known);
@@ -73,13 +74,15 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   if(!['>','<'].includes(settings.direction))throw new Error('方向只能选择 > 或 <');
   if(!(Number.isFinite(def.scale)&&def.scale>0))throw new Error('特征值显示倍率必须是有限正数');
   if(!Number.isFinite(settings.threshold/def.scale))throw new Error('换算后的阈值超出有效范围');
-  const frozen=structuredClone(def), config=structuredClone(settings), base=compileFeatureFormula(frozen.formula);
+  const frozen=structuredClone(def), config=structuredClone(settings), full=compileFeatureFormula(frozen.formula), base={...full,program:coreProgram(full.program)};
   const used=new Set([...base.program.inputs,...base.program.statements.flatMap(s=>s.name?[s.name]:[])]);
   const name=(hint:string)=>{let n=hint;while(used.has(n))n+='_' ;used.add(n);return n;};
   const resultName=name('__result'),displayName=name('__X'),averageName=name('__A'),mainName=name('__main');
   const statements=base.program.statements.map(s=>({...s}));
   const last=statements.at(-1);if(!last)throw new Error('特征值公式不能为空');
-  let result=last.name;
+  // 【用户要求】2026-10-19「不能重复 avg」：被平均的是核心值 X（公式末尾的纯均值行如 avg_CBI2 = avg(CBI2, 24) 不算），
+  // 与 K 线图、Deep dig 用同一条规则（featureSource.featureCoreName）
+  let result=featureCoreName(base.program);
   if(!result){last.name=resultName;result=resultName;}
   const known=new Set([...SERIES_VARIABLES.map(v=>v.name),...PARAM_VARIABLES.flatMap(p=>[p.name,p.alias]),...used]);
   const tail=parseFormula(`${displayName} = ${result} * ${def.scale}\n${averageName} = avg(${result}, ${settings.H})\n${mainName} = ${averageName} ${settings.direction} ${settings.threshold/def.scale}`,known);
