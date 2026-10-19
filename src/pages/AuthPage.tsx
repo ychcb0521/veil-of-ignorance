@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/notificationCenter';
+import { currentAuthReturnPath } from '@/lib/oauth-return-path';
 
 type AuthStep = 'form' | 'verify';
 
@@ -45,6 +46,8 @@ export default function AuthPage() {
           toast.error('登录失败', { description: error });
           setFormError(`登录失败：${describeAuthError(error)}`);
         }
+      } else if (new URLSearchParams(window.location.search).has('next')) {
+        window.location.assign(currentAuthReturnPath());
       }
     } else {
       const { error } = await signUp(email, password);
@@ -88,6 +91,7 @@ export default function AuthPage() {
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email,
+      options: { emailRedirectTo: new URL(currentAuthReturnPath(), window.location.origin).href },
     });
     setResending(false);
     if (error) {

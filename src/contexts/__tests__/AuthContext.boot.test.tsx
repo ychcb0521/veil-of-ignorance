@@ -45,9 +45,22 @@ beforeEach(() => {
   auth.onAuthStateChange.mockImplementation(() => ({ data: { subscription: { unsubscribe: vi.fn() } } }));
   reloadPage.mockReset();
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); window.history.replaceState({}, '', '/'); });
 
 describe('登录态恢复不再无限转圈', () => {
+  it('注册邮件保留完整的授权返回地址', async () => {
+    const path = '/.lovable/oauth/consent?authorization_id=signup-request#decision';
+    window.history.replaceState({}, '', path);
+    auth.getSession.mockResolvedValue({ data: { session: null }, error: null });
+    auth.signUp.mockResolvedValue({ error: null });
+    mount();
+    await flush();
+    await latest.signUp('test@example.invalid', 'synthetic-password');
+    expect(auth.signUp).toHaveBeenCalledWith({
+      email: 'test@example.invalid', password: 'synthetic-password',
+      options: { emailRedirectTo: new URL(path, window.location.origin).href },
+    });
+  });
   it('正常恢复：进入应用，没有任何提示', async () => {
     auth.getSession.mockResolvedValue({ data: { session }, error: null });
     const view = mount();
