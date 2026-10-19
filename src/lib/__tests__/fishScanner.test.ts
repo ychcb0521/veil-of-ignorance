@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
+import { parseFishSettings, FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
 import { computeCbi2 } from '@/lib/cbi2';
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -150,5 +150,78 @@ describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () =>
     for (let i = 0; i < 700; i++) { await budget.take(5,signal); reservations.push(now); }
     for (const time of reservations) expect(reservations.filter(t => t <= time && t > time - 60000).length * 5).toBeLessThanOrEqual(1200);
     expect(reservations[240]).toBe(60000);
+  });
+});
+
+
+describe('渔历史时间与可调标准', () => {
+  it('明确按UTC+8解析，检查真实日期、阈值和空输入', () => {
+    expect(parseFishSettings('2026-10-19 09:04:45', '0.2')).toEqual({ anchorMs: Date.UTC(2026,9,19,1,4,45), threshold: 0.2 });
+    expect(parseFishSettings('2026-10-19T09:04', '0')).toEqual({ anchorMs: Date.UTC(2026,9,19,1,4), threshold: 0 });
+    expect(parseFishSettings('', '0.3')).toEqual({ threshold: 0.3 });
+    for (const time of ['2026-02-30 12:00', '2026-10-19 25:00', 'tomorrow']) expect(() => parseFishSettings(time, '0.2')).toThrow();
+    for (const threshold of ['', 'NaN', 'Infinity', '1.01', '-1.01']) expect(() => parseFishSettings('', threshold)).toThrow();
+  });
+  it('采用所设阈值确定本轮起点，等于标准不命中', () => {
+    const b = window(), cbi2 = Float64Array.from(b, () => 0.5), a = Float64Array.from(b, (_, i) => i < 1900 ? 0.1 : i < 1950 ? 0.25 : 0.35);
+    const low = classifyFishReadings('AAAUSDT', b, cbi2, a, cut, 0.2).signal!;
+    const high = classifyFishReadings('AAAUSDT', b, cbi2, a, cut, 0.3).signal!;
+    expect(low.timeMs).toBe(b[1900].openTime + FISH_STEP);
+    expect(high.timeMs).toBe(b[1950].openTime + FISH_STEP);
+    expect(low.fish!.threshold).toBe(0.2);
+    a[1999] = 0.25;
+    expect(classifyFishReadings('AAAUSDT', b, cbi2, a, cut, 0.2).outcome).toBe('hit');
+    expect(classifyFishReadings('AAAUSDT', b, cbi2, a, cut, 0.3).outcome).toBe('below');
+    a[1999] = 0.2;
+    expect(classifyFishReadings('AAAUSDT', b, cbi2, a, cut, 0.2).outcome).toBe('below');
+  });
+  it('历史截点取整且无未来数据；向后移动缓存只补缺少根，改阈值不重取K线', async () => {
+    const m = market(['BTCUSDT','AAAUSDT']);
+    const inspected: ResearchBar[][] = [];
+    const scanner = new FishScanner(m.fetcher, undefined, b => { inspected.push([...b]); return values(b); });
+    await scanner.scan(options());
+    const before = m.calls.length;
+    const historical = cut - 3 * FISH_STEP;
+    const found: TradeSignal[] = [];
+    const p = { ...options(found), anchorMs: historical + 12345, threshold: 0.2 };
+    const result = await scanner.scan(p);
+    expect(result.status).toBe('complete');
+    expect(result.cutoffMs).toBe(historical);
+    expect(result.anchorMs).toBe(p.anchorMs);
+    expect(result.threshold).toBe(0.2);
+    expect(found.every(s => s.fish!.threshold === 0.2 && s.timeMs <= historical)).toBe(true);
+    const recent = inspected.slice(-2);
+    for (const bars of recent) {
+      expect(bars).toHaveLength(2000);
+      expect(bars[0].openTime).toBe(historical - 2000 * FISH_STEP);
+      expect(bars[1999].openTime + FISH_STEP).toBe(historical);
+      expect(bars.every(b => b.refClose === 101)).toBe(true);
+    }
+    const requests = m.calls.slice(before).filter(u => u.pathname.endsWith('/klines'));
+    expect(requests).toHaveLength(2);
+    expect(requests.every(u => Number(u.searchParams.get('endTime')) === cut - 2000 * FISH_STEP - 1)).toBe(true);
+    const same = m.calls.length;
+    await scanner.scan({ ...options(), anchorMs: p.anchorMs, threshold: 0.25 });
+    expect(m.calls.slice(same).filter(u => u.pathname.endsWith('/klines'))).toHaveLength(0);
+    const forward = m.calls.length;
+    await scanner.scan(options());
+    const added = m.calls.slice(forward).filter(u => u.pathname.endsWith('/klines'));
+    expect(added).toHaveLength(2);
+    expect(added.every(u => Number(u.searchParams.get('startTime')) === historical)).toBe(true);
+  });
+  it('本轮参数在任何回调之前锁定；拒绝未来时间和非法标准', async () => {
+    const m = market(['BTCUSDT']);
+    const scanner = new FishScanner(m.fetcher, undefined, values);
+    const p = { ...options(), anchorMs: cut - 12345, threshold: 0.2 };
+    p.onProgress = () => { p.anchorMs = cut + FISH_STEP; p.threshold = 0.8; };
+    const result = await scanner.scan(p);
+    expect(result.cutoffMs).toBe(cut - FISH_STEP);
+    expect(result.threshold).toBe(0.2);
+    const before = m.calls.length;
+    const invalid = await scanner.scan({ ...options(), anchorMs: cut + FISH_STEP });
+    expect(invalid.status).toBe('aborted');
+    expect(invalid.error).toContain('不能晚于');
+    expect(m.calls.slice(before).map(u => u.pathname)).toEqual(['/fapi/v1/time']);
+    expect((await scanner.scan({ ...options(), threshold: NaN })).status).toBe('aborted');
   });
 });

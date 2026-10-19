@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FishScanner, initialFishProgress, type FishProgress } from '@/lib/fishScanner';
+import { FishScanner, initialFishProgress, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSignals';
 import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
@@ -25,19 +25,23 @@ export function useFish(userId: string | undefined) {
     window.addEventListener('storage', storage);
     return () => { controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); window.removeEventListener('storage', storage); };
   }, [userId]);
-  const start = useCallback(async () => {
+  const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
     scanner.current ??= pageScanner ??= new FishScanner();
     const mine = new AbortController(); controller.current = mine;
     const owner = ownerRef.current;
     const valid = () => controller.current === mine && ownerRef.current === owner;
     try {
-      await scanner.current.scan({ signal: mine.signal,
+      await scanner.current.scan({ ...settings, signal: mine.signal,
         onProgress: value => { if (valid()) setProgress(value); },
         onSignal: signal => {
           if (valid() && !mine.signal.aborted) {
             const merged = mergeSignals(signalsRef.current, [signal]);
+            const previous = signalsRef.current.find(s => s.id === signal.id);
             if (merged.length !== signalsRef.current.length) commit(merged);
+            else if (previous && JSON.stringify(previous.fish) !== JSON.stringify(signal.fish)) {
+              commit(merged.map(s => s.id === signal.id ? { ...s, fish: signal.fish } : s));
+            }
           }
         },
       });

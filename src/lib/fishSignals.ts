@@ -1,6 +1,7 @@
 import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
+import { formatUTC8 } from '@/lib/timeFormat';
 export const FISH_STORAGE_KEY = 'veil.fishSignals.v1';
 export function loadFishSignals(): TradeSignal[] {
   try {
@@ -15,5 +16,5 @@ export function saveFishSignals(signals: TradeSignal[], userId: string | null): 
 export function fishSignalTitle(signal: TradeSignal): string {
   const r = signal.fish;
   const n = (v: number) => Number.isFinite(v) ? v.toFixed(8) : '—';
-  return r ? `avg(CBI-2,24h)=${n(r.average)}；CBI-2=${n(r.cbi2)}；起点均值=${n(r.startAverage)}；前根均值=${n(r.previousAverage)}；阈值>${r.threshold}` : '';
+  return r ? `avg(CBI-2,24h)=${n(r.average)}；CBI-2=${n(r.cbi2)}；起点均值=${n(r.startAverage)}；前根均值=${n(r.previousAverage)}；阈值>${r.threshold}；数据截止（UTC+8）=${formatUTC8(r.cutoffMs)}` : '';
 }

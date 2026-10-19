@@ -227,14 +227,14 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      className={`group flex ${onAdd ? 'flex-wrap' : ''} items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60`}
+      className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60"
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
       <button
         onClick={handleJump}
         disabled={disabled}
-        className={`grid shrink-0 ${onAdd ? 'grid-cols-[minmax(108px,148px)_128px]' : 'grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)]'} items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70`}
+        className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
         title={jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -264,9 +264,9 @@ function SignalLibraryRowImpl({
           )}
         </span>
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
-        {!onAdd && <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
+        <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
           {fallbackZone ? `兜底 ${fallbackZone}` : ''}
-        </span>}
+        </span>
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
           整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}

@@ -8,14 +8,28 @@ export const FISH_STEP = 300_000;
 export const FISH_BARS = 2000;
 export const FISH_FIRST_USABLE = 1454;
 export const FISH_THRESHOLD = 0.3;
+export interface FishScanSettings { anchorMs?: number; threshold?: number; }
+/** Explicit UTC+8 parsing; independent of the browser's local timezone. */
+export function parseFishSettings(time: string, value: string): FishScanSettings {
+  const threshold = value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(threshold) || threshold < -1 || threshold > 1) throw new Error('阈值请输入 -1 到 1 之间的数字');
+  const input = time.trim();
+  if (!input) return { threshold };
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?$/.exec(input);
+  if (!match) throw new Error('时间请输入 YYYY-MM-DD HH:mm:ss（UTC+8）');
+  const normalized = `${match[1]} ${match[2]}:${match[3] ?? '00'}`;
+  const anchorMs = Date.parse(`${normalized.replace(' ', 'T')}+08:00`);
+  if (!Number.isFinite(anchorMs) || anchorMs <= 0 || formatUTC8(anchorMs) !== normalized) throw new Error('捕捞时间无效，请检查日期和时间');
+  return { anchorMs, threshold };
+}
 const formula = compileFeatureFormula(`${CBI2_FORMULA}\nfishAvg = avg(CBI2, 24)`);
 export interface FishReading { average: number; cbi2: number; startAverage: number; previousAverage: number; cutoffMs: number; threshold: number; }
 export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'failed';
 export interface FishProgress {
-  cutoffMs: number | null; total: number; done: number; current: string;
+  cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
   counts: Record<FishOutcome, number>; status: 'running' | 'complete' | 'cancelled' | 'aborted'; error?: string;
 }
-export const initialFishProgress = (): FishProgress => ({ cutoffMs: null, total: 0, done: 0, current: '', counts: { hit: 0, below: 0, unknown: 0, gap: 0, readings: 0, failed: 0 }, status: 'running' });
+export const initialFishProgress = (): FishProgress => ({ cutoffMs: null, anchorMs: null, threshold: FISH_THRESHOLD, total: 0, done: 0, current: '', counts: { hit: 0, below: 0, unknown: 0, gap: 0, readings: 0, failed: 0 }, status: 'running' });
 export class FishError extends Error { constructor(message: string, readonly kind: 'gap' | 'readings' | 'failed' | 'banned') { super(message); } }
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 export function fishDelay(ms: number, signal: AbortSignal): Promise<void> {
@@ -54,19 +68,19 @@ export function calculateFishReadings(bars: readonly ResearchBar[]): { cbi2: Flo
   return { cbi2: result.vars.get('CBI2') as Float64Array, average: result.last as Float64Array };
 }
 /** Detect the start of the CURRENT uninterrupted > threshold episode, strictly after warm-up. */
-export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[], cbi2: ArrayLike<number>, average: ArrayLike<number>, cutoffMs: number): { outcome: FishOutcome; signal?: TradeSignal } {
+export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[], cbi2: ArrayLike<number>, average: ArrayLike<number>, cutoffMs: number, threshold = FISH_THRESHOLD): { outcome: FishOutcome; signal?: TradeSignal } {
   const last = bars.length - 1;
   if (last < FISH_FIRST_USABLE || average.length !== bars.length || cbi2.length !== bars.length) return { outcome: 'readings' };
   for (let i = FISH_FIRST_USABLE - 287; i <= last; i++) if (!Number.isFinite(cbi2[i])) return { outcome: 'readings' };
   for (let i = FISH_FIRST_USABLE; i <= last; i++) if (!Number.isFinite(average[i])) return { outcome: 'readings' };
-  if (!(average[last] > FISH_THRESHOLD)) return { outcome: 'below' };
+  if (!(average[last] > threshold)) return { outcome: 'below' };
   let k = last;
-  while (k > FISH_FIRST_USABLE && average[k - 1] > FISH_THRESHOLD) k--;
+  while (k > FISH_FIRST_USABLE && average[k - 1] > threshold) k--;
   if (k <= FISH_FIRST_USABLE) return { outcome: 'unknown' };
   const timeMs = bars[k].openTime + FISH_STEP;
   return { outcome: 'hit', signal: {
     id: `fish-${symbol}-${timeMs}`, symbol, timeMs, timeLabel: formatUTC8(timeMs), fallbackZone: '',
-    fish: { average: average[last], cbi2: cbi2[last], startAverage: average[k], previousAverage: average[k - 1], cutoffMs, threshold: FISH_THRESHOLD },
+    fish: { average: average[last], cbi2: cbi2[last], startAverage: average[k], previousAverage: average[k - 1], cutoffMs, threshold },
   } };
 }
 export function validateFishBars(bars: readonly ResearchBar[], cutoffMs: number): void {
@@ -93,21 +107,25 @@ export class FishScanner {
   private async candles(symbol: string, cutoffMs: number, signal: AbortSignal): Promise<ResearchBar[]> {
     const cached = this.cache.get(symbol);
     const from = cutoffMs - FISH_BARS * FISH_STEP;
-    const canAppend = cached && cached.cutoffMs <= cutoffMs && cached.cutoffMs >= from;
-    let cursor = canAppend ? cached.cutoffMs : from;
-    const collected = canAppend ? cached.bars.filter(b => b.openTime >= from) : [];
-    while (cursor < cutoffMs) {
-      const end = Math.min(cutoffMs, cursor + 1000 * FISH_STEP);
-      const query = new URLSearchParams({ symbol, interval: '5m', startTime: String(cursor), endTime: String(end - 1), limit: '1000' });
-      const raw = await this.json(`klines?${query}`, 5, signal);
-      if (!Array.isArray(raw)) throw new FishError('K线响应无效', 'failed');
-      for (const row of raw) {
-        const bar = parseBinanceKlineRow(row);
-        if (!bar) throw new FishError('K线关键读数无效', 'readings');
-        // Never use a forming candle, even if an endpoint erroneously includes one.
-        if (bar.openTime >= cursor && bar.openTime < end && bar.openTime + FISH_STEP <= cutoffMs) collected.push(bar);
+    // Reuse only the intersection, including when moving backwards in simulated time.
+    const collected = cached ? cached.bars.filter(b => b.openTime >= from && b.openTime < cutoffMs) : [];
+    const ranges = collected.length
+      ? [[from, collected[0].openTime], [collected[collected.length - 1].openTime + FISH_STEP, cutoffMs]]
+      : [[from, cutoffMs]];
+    for (const [start, stop] of ranges) {
+      let cursor = start;
+      while (cursor < stop) {
+        const end = Math.min(stop, cursor + 1000 * FISH_STEP);
+        const query = new URLSearchParams({ symbol, interval: '5m', startTime: String(cursor), endTime: String(end - 1), limit: '1000' });
+        const raw = await this.json(`klines?${query}`, 5, signal);
+        if (!Array.isArray(raw)) throw new FishError('K线响应无效', 'failed');
+        for (const row of raw) {
+          const bar = parseBinanceKlineRow(row);
+          if (!bar) throw new FishError('K线关键读数无效', 'readings');
+          if (bar.openTime >= cursor && bar.openTime < end && bar.openTime + FISH_STEP <= cutoffMs) collected.push(bar);
+        }
+        cursor = end;
       }
-      cursor = end;
     }
     check(signal);
     collected.sort((a,b) => a.openTime - b.openTime);
@@ -115,8 +133,9 @@ export class FishScanner {
     this.cache.set(symbol, { cutoffMs, bars: collected });
     return collected;
   }
-  async scan(options: { signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void }): Promise<FishProgress> {
+  async scan(options: FishScanSettings & { signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void }): Promise<FishProgress> {
     if (this.running) throw new Error('扫描正在进行');
+    const { anchorMs, threshold = FISH_THRESHOLD } = options;
     this.running = true;
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -127,10 +146,15 @@ export class FishScanner {
     const publish = () => options.onProgress({ ...progress, counts: { ...progress.counts } });
     let fatal: string | undefined;
     try {
+      progress.threshold = threshold;
+      if (!Number.isFinite(threshold) || threshold < -1 || threshold > 1) throw new Error('阈值请输入 -1 到 1 之间的数字');
+      if (anchorMs !== undefined && (!Number.isFinite(anchorMs) || anchorMs <= 0)) throw new Error('捕捞时间无效');
       publish();
       const clock = await this.json('time', 1, signal) as { serverTime?: number };
       if (!Number.isFinite(clock.serverTime) || clock.serverTime! <= 0) throw new Error('服务器时间无效');
-      const cutoffMs = Math.floor(clock.serverTime! / FISH_STEP) * FISH_STEP;
+      if (anchorMs !== undefined && anchorMs > clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
+      progress.anchorMs = anchorMs ?? clock.serverTime!;
+      const cutoffMs = Math.floor(progress.anchorMs / FISH_STEP) * FISH_STEP;
       progress.cutoffMs = cutoffMs; publish();
       const info = await this.json('exchangeInfo', 1, signal) as { symbols?: { symbol: string; contractType: string; quoteAsset: string; status: string }[] };
       if (!Array.isArray(info.symbols)) throw new Error('交易标的列表无效');
@@ -152,7 +176,7 @@ export class FishScanner {
             const bars = source.map(b => ({ ...b, refClose: btcClose.get(b.openTime)! }));
             if (bars.some(b => b.quoteVolume == null || b.takerBuyQuoteVolume == null)) throw new FishError('成交额读数不全', 'readings');
             const readings = this.calculate(bars);
-            const result = classifyFishReadings(symbol, bars, readings.cbi2, readings.average, cutoffMs);
+            const result = classifyFishReadings(symbol, bars, readings.cbi2, readings.average, cutoffMs, threshold);
             check(signal);
             progress.counts[result.outcome]++;
             if (result.signal) options.onSignal(result.signal);

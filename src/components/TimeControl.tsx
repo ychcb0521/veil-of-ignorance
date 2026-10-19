@@ -14,6 +14,7 @@ import {
 } from '@/lib/signalLibrary';
 import { useFish } from '@/hooks/useFish';
 import { FishPanel } from '@/components/FishPanel';
+import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 import {
   preflightSignalJumpIssues,
@@ -79,6 +80,7 @@ export function TimeControl({
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
+  const [fishInputs, setFishInputs] = useState({ time: '', threshold: '0.3' });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
@@ -552,7 +554,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel signals={fish.signals} progress={fish.progress} onStart={() => { void fish.start(); }} onCancel={fish.cancel} onAdd={handleAddFish}
+      {fishOpen && <FishPanel signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel} onAdd={handleAddFish}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}
@@ -664,18 +666,7 @@ export function TimeControl({
             ) : (
               <div className="overflow-hidden rounded border border-border/60">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <div className="grid grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)_74px_minmax(0,1fr)] items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1 pr-[56px] text-[9px] leading-3 font-medium text-muted-foreground">
-                  <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
-                    <span aria-hidden />
-                    <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => toggleSort('symbol')} />
-                  </span>
-                  <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => toggleSort('time')} />
-                  <span>兜底区</span>
-                  <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => toggleSort('quality')} />
-                  {/* 吸收剩余宽度的空列。放在评分**之后**——之前它在兜底区那一列，
-                      于是兜底区把所有余量吃掉、评分被顶到最右边去了。 */}
-                  <span aria-hidden />
-                </div>
+                <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 {/* 列表整块 memo 化 + 窗口化：它既不该跟着时钟重渲染，
                     也不该为了 791 条信号一次铺出两万多个节点。 */}
                 <SignalLibraryList
@@ -709,29 +700,5 @@ export function TimeControl({
         pricePrecision={2}
       />
     </div>
-  );
-}
-
-/**
- * 可点排序的表头。箭头只在当前排序列上出现——每列都挂一个箭头会让人以为
- * 三列各自独立排序，而这里同一时刻只有一个排序键。
- */
-function SortHeader({
-  label, active, dir, onClick,
-}: { label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={`signal-sort-${label}`}
-      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      title={`按${label}排序${active ? '（再点一次反向）' : ''}`}
-      className={`flex items-center gap-0.5 text-left transition-colors hover:text-foreground ${
-        active ? 'text-foreground' : ''
-      }`}
-    >
-      <span>{label}</span>
-      <span className="w-2 shrink-0 leading-none" aria-hidden>{active ? (dir === 'asc' ? '↑' : '↓') : ''}</span>
-    </button>
   );
 }
