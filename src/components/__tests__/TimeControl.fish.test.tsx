@@ -173,6 +173,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([foreign]));
     const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    // 【用户要求】2026-10-19 交易所勾选收在淡色图标后
+    expect(screen.queryByRole('checkbox',{name:'币安'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
     for(const name of ['币安','OKX','Bitget','Gate'])expect(screen.getByRole('checkbox',{name})).toBeChecked();
     for(const name of ['Bybit','KuCoin 合约','MEXC 合约'])expect(screen.queryByRole('checkbox',{name})).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox',{name:'含重复币'})).not.toBeChecked();
@@ -200,4 +203,19 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     const saved=loadFishSignals();expect(saved).toHaveLength(3);expect(saved[0]).toMatchObject({quality:1,fish:{average:.35}});expect(saved[1]).toMatchObject({quality:3,fish:{average:.35}});expect(saved[2]).toMatchObject({quality:5,fish:{average:.42}});
   });
 
+  it('【用户要求】2026-10-19 渔界面只显示命中与进度：明细收在淡色 › 后，有跳过 / 失败时亮小点，展开记在这次浏览里',async()=>{
+    sessionStorage.clear();
+    const venue=(status:any,extra={})=>({...initialFishProgress(),status,total:10,done:10,...extra});
+    mocks.scan.mockImplementation(async o=>{const p={...initialFishProgress(),status:'complete' as const,cutoffMs:123,total:10,done:10,counts:{...initialFishProgress().counts,hit:3},venues:{binance:venue('complete',{counts:{...initialFishProgress().counts,hit:3}}),okx:venue('skipped',{total:0,done:0,skippedReason:'历史成交只保留约 90 天'})}};o.onProgress(p);return p;});
+    render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    await waitFor(()=>expect(screen.getByTestId('fish-status')).toHaveTextContent('捕捞完成·命中 3·10 / 10'));
+    expect(screen.queryByText('历史成交只保留约 90 天')).not.toBeInTheDocument();
+    expect(screen.queryByText(/未达标/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('fish-detail-dot')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'捕捞明细'}));
+    expect(screen.getByTestId('fish-detail')).toHaveTextContent('历史成交只保留约 90 天');
+    expect(screen.getByTestId('fish-detail')).toHaveTextContent('截止（UTC+8）');
+    expect(JSON.parse(sessionStorage.getItem('veil.fish.open')!)).toMatchObject({detail:true});
+  });
 });
