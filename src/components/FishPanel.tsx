@@ -40,7 +40,7 @@ export function FishPanel(p: FishPanelProps) {
           <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
             <p className="font-medium text-foreground">捕捞说明</p>
             <p className="text-muted-foreground">时间按 UTC+8 输入，留空使用币安服务器当前时间作为所有交易所共同节点；历史时间向下取整至5分钟，仅使用此前2000根已收盘5m K线。标的范围为各交易所当前正在交易的 USDT 永续合约。仅币安、OKX、Bitget、Gate通过核实：OKX/Bitget/Gate按各自面值规则及逐笔成交价汇总主动金额，数据量较大，首次可能较慢。</p>
-            <p className="text-muted-foreground">沿用内置 CBI-2，avg(CBI2, 24h) 严格大于所设阈值才命中。第1455根起读数可用；只记录本轮上穿起点，起点不明不入库。每家使用自己的 BTC 永续参考价，缺根只中止该家。</p>
+            <p className="text-muted-foreground">沿用内置 CBI-2，avg(CBI2, 24h) 严格大于所设阈值才命中。第1455根起读数可用；只记录本轮上穿起点，起点不明不入库。每家使用自己的 BTC 永续参考价，缺根只中止该家。开始前检查历史保留期，超期整家跳过；Gate 5m K线仅最近10000根（约34.7天）。</p>
             <p className="text-muted-foreground">扫描开始后锁定时间和阈值，截止之后的数据不参与计算。默认按币安 → OKX → Bitget → Gate排除基础币重复；优先级取已接入交易所的完整标的表，不依赖本轮勾选。勾选「含重复币」可分别扫描。结果累计保存在下方「鱼」，可手动加入信号库。</p>
             {x?.anchorMs && <p className="font-mono text-muted-foreground">本轮节点：{formatUTC8(x.anchorMs)}</p>}
             {x?.cutoffMs && <p className="font-mono text-muted-foreground">本轮阈值 &gt; {x.threshold ?? 0.3}</p>}
@@ -73,8 +73,13 @@ export function FishPanel(p: FishPanelProps) {
       {(Object.keys(x.venues ?? {}).length ? Object.entries(x.venues!) : [['binance',x]]).map(([venue,value]) => {
         const v = value as FishProgress;
         return <div key={venue as string} className="space-y-1">
-          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[venue as FishExchange]}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
-          <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {v.counts.hit}</span><span>未达标 {v.counts.below}</span><span>起点不明 {v.counts.unknown}</span><span>缺口 / 不足2000根 {v.counts.gap}</span><span>读数不全 {v.counts.readings}</span><span>请求失败 {v.counts.failed}</span></p>
+          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[venue as FishExchange]}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : v.status === 'skipped' ? '已跳过' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
+          <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {v.counts.hit}</span><span>未达标 {v.counts.below}</span><span>起点不明 {v.counts.unknown}</span><span>缺口 {v.counts.gap}</span><span>当时未上市 / 历史不足 {v.history ?? 0}</span><span>读数不全 {v.counts.readings}</span><span>请求失败 {v.counts.failed}</span></p>
+          {v.skippedReason && <p className="text-muted-foreground">{v.skippedReason}</p>}
+          {(['failed','readings'] as const).map(kind => !!v.failures?.[kind].length && <details key={kind} className="text-muted-foreground">
+            <summary className="w-fit cursor-pointer text-[11px] hover:text-foreground">{kind === 'failed' ? '请求失败' : '读数不全'}原因（前 {v.failures![kind].length} 个币）</summary>
+            <ul className="mt-1 space-y-1 border-l border-border/60 pl-3">{v.failures![kind].map(row => <li key={row.symbol} className="break-words"><span className="mr-2 font-mono text-foreground">{row.symbol}</span>{row.reason}</li>)}</ul>
+          </details>)}
           {v.error && <p className="text-destructive">{v.error}</p>}
         </div>;
       })}

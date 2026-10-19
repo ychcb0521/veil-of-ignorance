@@ -1,7 +1,7 @@
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
 import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, validateFishBars } from './shared';
-import { AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
+import { EXCHANGE_NAMES, AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
 
 export type FishRequest = (path: string, weight: number, signal: AbortSignal) => Promise<unknown>;
 const finite = (x: unknown) => x !== null && x !== '' && Number.isFinite(Number(x));
@@ -56,7 +56,7 @@ function applySums(bars: readonly ResearchBar[], sums: Map<number,{buy:number;se
     const x = sums.get(b.openTime) ?? {buy:0,sell:0,buyBase:0,base:0};
     // Missing trades are NOT zero-filled: every candle must reconcile its quote and base turnover.
     const q = b.quoteVolume;
-    if (q == null || Math.abs(x.buy+x.sell-q)>Math.max(1e-6,Math.abs(q)*1e-8) || Math.abs(x.base-b.volume)>Math.max(1e-10,Math.abs(b.volume)*1e-8)) throw new FishError('主动买卖额与K线成交额不一致或缺根','readings');
+    if (q == null || Math.abs(x.buy+x.sell-q)>Math.max(1e-6,Math.abs(q)*1e-8) || Math.abs(x.base-b.volume)>Math.max(1e-10,Math.abs(b.volume)*1e-8)) throw new FishError(`主动买卖额与K线成交额不一致或缺根 @ ${b.openTime}：B+S=${x.buy+x.sell}，Q=${q}；逐笔币量=${x.base}，K线币量=${b.volume}（缺成交或对账超差）`,'readings');
     return {...b,takerBuyQuoteVolume:x.buy,takerBuyVolume:x.buyBase};
   });
 }
@@ -110,7 +110,7 @@ export class FishAdapter implements FishDataAdapter {
           const j:any=await this.request(path,1,signal);
           if(j.code!==(this.exchange==='okx'?'0':'00000')||!Array.isArray(j.data)) throw new FishError('K线响应无效','failed');
           const parsed=j.data.map((r:unknown)=>this.exchange==='okx'?parseOkxCandle(r,market.multiplier):parseBitgetCandle(r)).filter((b:ResearchBar|null):b is ResearchBar=>!!b&&b.openTime<cursor&&b.openTime+FISH_STEP<=cut);
-          if(!parsed.length) throw new FishError('K线不足2000根','gap');
+          if(!parsed.length) break;
           for(const b of parsed) if(b.openTime>=start) collected.push(b);
           const next=Math.min(...parsed.map((b:ResearchBar)=>b.openTime));
           if(next>=cursor) throw new FishError('K线翻页没有推进','gap'); cursor=next;
@@ -119,7 +119,7 @@ export class FishAdapter implements FishDataAdapter {
         let cursor=start;
         while(cursor<stop) {
           const end=Math.min(stop,cursor+(this.exchange==='binance'?1000:2000)*FISH_STEP);
-          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=5m&startTime=${cursor}&endTime=${end-1}&limit=1000`:`candlesticks?contract=${market.instrument}&interval=5m&from=${cursor/1000}&to=${end/1000}`;
+          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=5m&startTime=${cursor}&endTime=${end-1}&limit=1000`:`candlesticks?contract=${market.instrument}&interval=5m&from=${cursor/1000}&to=${(end-FISH_STEP)/1000}`;
           const j=await this.request(path,this.exchange==='binance'?5:1,signal);
           if(!Array.isArray(j)) throw new FishError('K线响应无效','failed');
           for(const r of j) { const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+FISH_STEP<=cut) collected.push(b); }
@@ -162,33 +162,46 @@ export class FishAdapter implements FishDataAdapter {
     const result=bars.map(b=>ready.get(b.openTime)??b);this.cache.set(market.instrument,result);return result;
   }
 }
-/** Each venue owns its own rolling budget; Gate's pool is conservatively shared across endpoints. */
+/** Each venue owns a rolling budget. A direct network failure can switch to its fixed read-only proxy once. */
 export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:FishWeightBudget,pool=new FishRequestPool()):FishRequest {
   if(!AUDITED_EXCHANGES.includes(exchange))throw new FishError('该交易所尚未通过数据核实','failed');
-  let useOkxProxy=false;
-  const proxyUrl=(path:string)=>`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fish-market-proxy?${new URLSearchParams({path})}`;
-  async function read(url:string,weight:number,signal:AbortSignal):Promise<unknown>{
-    for(;;){
-      const result=await pool.run(async()=>{
-        abort(signal);const wait=budget.tryTake(weight);if(wait)return {wait};
-        const response=await fetcher.call(globalThis,url,{signal});
-        if(response.status===418)throw new FishError('HTTP 418：访问受限，本交易所中止','banned');
-        if(response.status===429){const retry=Number(response.headers.get('Retry-After')??60);budget.pauseUntil(Date.now()+(Number.isFinite(retry)?Math.max(60000,retry*1000):60000));}
-        if(!response.ok)throw new FishError(`HTTP ${response.status}`,'failed');
-        return {data:await response.json()};
-      },signal);
-      if('data' in result)return result.data;
-      await budget.wait(result.wait,signal);
-    }
+  let useProxy=false;
+  const proxyUrl=(path:string)=>`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fish-market-proxy?${new URLSearchParams({exchange,path})}`;
+  const context=(path:string,message:string,status?:number)=>new FishError(`${EXCHANGE_NAMES[exchange]} · ${path} · ${message}`,status===418?'banned':'failed',{path,status});
+  const explain=(body:any)=>{
+    const text=String(body?.message??body?.msg??body?.error??'');
+    if(/10000/.test(text)&&/candlestick/i.test(text))return '历史K线超过最近10000根的保留范围';
+    if(/too (many|long)|exceed|maximum.*points/i.test(text))return '查询区间或数量超出接口限制';
+    if(/too old|history|90 days|3 months/i.test(text))return '查询时间超出可用历史范围';
+    if(/parameter|param/i.test(text))return '接口参数无效';
+    if(/[一-鿿]/.test(text))return text.slice(0,240);
+    return body?.label?`上游错误代码 ${body.label}`:body?.code?`上游业务代码 ${body.code}`:'上游请求未成功（可检查代理是否已随站点发布）';
+  };
+  async function read(url:string,path:string,weight:number,signal:AbortSignal):Promise<unknown>{
+    const result=await pool.run(async()=>{
+      abort(signal);const wait=budget.tryTake(weight);if(wait)return {wait};
+      const response=await fetcher.call(globalThis,url,{signal});
+      if(response.status===429){const retry=Number(response.headers.get('Retry-After')??60);budget.pauseUntil(Date.now()+(Number.isFinite(retry)?Math.max(60000,retry*1000):60000));}
+      let body:unknown;
+      try{body=await response.json();}catch{if(!response.ok)throw context(path,`HTTP ${response.status}：上游请求失败`,response.status);throw context(path,'HTTP 200：响应不是有效 JSON',response.status);}
+      if(!response.ok)throw context(path,`HTTP ${response.status}：${response.status===418?'访问受限，本交易所中止':response.status===429?'请求过于频繁，已暂停本交易所后续请求':explain(body)}`,response.status);
+      const j=body as any;
+      if((exchange==='okx'&&j?.code!==undefined&&j.code!=='0')||(exchange==='bitget'&&j?.code!==undefined&&j.code!=='00000')||(exchange==='gate'&&j?.label))throw context(path,`HTTP ${response.status}：${explain(j)}`,response.status);
+      return {data:body};
+    },signal);
+    if('data' in result)return result.data;
+    await budget.wait(result.wait,signal);return read(url,path,weight,signal);
   }
   return async(path,weight,signal)=>{
-    const viaProxy=useOkxProxy;
-    const url=exchange==='binance'?`https://fapi.binance.com/fapi/v1/${path}`:exchange==='bitget'?`https://api.bitget.com/api/v2/mix/market/${path}`:exchange==='gate'?`https://api.gateio.ws/api/v4/futures/usdt/${path}`:viaProxy?proxyUrl(path):`https://www.okx.com/api/v5/${path}`;
-    try{return await read(url,weight,signal);}
+    const wasProxy=useProxy;
+    const url=exchange==='binance'?`https://fapi.binance.com/fapi/v1/${path}`:wasProxy?proxyUrl(path):exchange==='bitget'?`https://api.bitget.com/api/v2/mix/market/${path}`:exchange==='gate'?`https://api.gateio.ws/api/v4/futures/usdt/${path}`:`https://www.okx.com/api/v5/${path}`;
+    try{return await read(url,path,weight,signal);}
     catch(error){
-      // CORS/network failure only. Never bypass an HTTP ban or rate limit by changing routes.
-      if(exchange!=='okx'||viaProxy||signal.aborted||!(error instanceof TypeError))throw error;
-      useOkxProxy=true;return read(proxyUrl(path),weight,signal);
+      if(signal.aborted||!(error instanceof TypeError))throw error;
+      if(exchange==='binance'||wasProxy)throw context(path,'浏览器拦截（网络 / 跨域）'+(wasProxy?'；只读代理也未能连接，请检查是否已发布':''));
+      useProxy=true;
+      try{return await read(proxyUrl(path),path,weight,signal);}
+      catch(proxyError){if(signal.aborted||!(proxyError instanceof TypeError))throw proxyError;throw context(path,'浏览器拦截（网络 / 跨域）；只读代理也未能连接，请检查是否已发布');}
     }
   };
 }

@@ -1,3 +1,4 @@
+import { fishRetentionReason } from '@/lib/fish/retention';
 /** Manual, closed-candle CBI-2 fishing. Built-in formula only. */
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -24,7 +25,7 @@ export interface FishReading { average: number; cbi2: number; startAverage: numb
 export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'failed';
 export interface FishProgress {
   venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
-  counts: Record<FishOutcome, number>; status: 'running' | 'complete' | 'cancelled' | 'aborted'; error?: string;
+  counts: Record<FishOutcome, number>; status: 'running' | 'complete' | 'cancelled' | 'aborted' | 'skipped'; error?: string; history?: number; skippedReason?: string; failures?: {failed: {symbol:string;reason:string}[];readings: {symbol:string;reason:string}[]};
 }
 export const initialFishProgress = (): FishProgress => ({ cutoffMs: null, anchorMs: null, threshold: FISH_THRESHOLD, total: 0, done: 0, current: '', counts: { hit: 0, below: 0, unknown: 0, gap: 0, readings: 0, failed: 0 }, status: 'running' });
 export function calculateFishReadings(bars: readonly ResearchBar[]): { cbi2: Float64Array; average: Float64Array } {
@@ -79,10 +80,11 @@ export class FishScanner {
     const publish = () => {
       const all = Object.values(venues);
       if(all.length) {
+        progress.history=all.reduce((n,p)=>n+(p.history??0),0);
         progress.total=all.reduce((n,p)=>n+p.total,0);progress.done=all.reduce((n,p)=>n+p.done,0);
         for(const key of Object.keys(progress.counts) as FishOutcome[]) progress.counts[key]=all.reduce((n,p)=>n+p.counts[key],0);
       }
-      const snapshots = Object.fromEntries(Object.entries(venues).map(([e,p])=>[e,{...p,counts:{...p.counts}}]));
+      const snapshots = Object.fromEntries(Object.entries(venues).map(([e,p])=>[e,{...p,counts:{...p.counts},failures:p.failures?{failed:[...p.failures.failed],readings:[...p.failures.readings]}:undefined}]));
       options.onProgress({...progress,counts:{...progress.counts},venues:snapshots});
     };
     try {
@@ -90,13 +92,14 @@ export class FishScanner {
       if(anchorMs!==undefined&&(!Number.isFinite(anchorMs)||anchorMs<=0)) throw new Error('捕捞时间无效');
       if(!requested.length||requested.some(e=>!AUDITED_EXCHANGES.includes(e))) throw new Error('请选择已通过核实的交易所');
       const selected=EXCHANGE_PRIORITY.filter(e=>requested.includes(e));
-      for(const e of selected) venues[e]={...initialFishProgress(),threshold};
+      for(const e of selected) venues[e]={...initialFishProgress(),threshold,history:0,failures:{failed:[],readings:[]}};
       publish();
       const clock=await this.requests.get('binance')!('time',1,controller.signal) as {serverTime?:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime!<=0) throw new Error('服务器时间无效');
       if(anchorMs!==undefined&&anchorMs>clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
       const node=anchorMs??clock.serverTime!,cut=Math.floor(node/FISH_STEP)*FISH_STEP;
       progress.anchorMs=node;progress.cutoffMs=cut;
+      for(const exchange of selected){const reason=fishRetentionReason(exchange,cut,clock.serverTime!);if(reason){venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=reason;}}
       for(const p of Object.values(venues)){p.anchorMs=node;p.cutoffMs=cut;}
       publish();
       const highest=Math.max(...selected.map(e=>EXCHANGE_PRIORITY.indexOf(e)));
@@ -110,6 +113,7 @@ export class FishScanner {
       const binanceByBase=new Map((universes.binance??[]).map(m=>[fishBase(m.base),m.symbol]));
       const runVenue=async(exchange:FishExchange)=>{
         const p=venues[exchange]!,adapter=this.adapters.get(exchange)!;
+        if(p.status==='skipped'){publish();return;}
         const local=new AbortController(); const stop=()=>local.abort(); controller.signal.addEventListener('abort',stop,{once:true}); if(controller.signal.aborted)stop();
         try {
           const missing=needed.find(e=>errors[e]&&(e===exchange||(!includeDuplicates&&EXCHANGE_PRIORITY.indexOf(e)<EXCHANGE_PRIORITY.indexOf(exchange))));
@@ -122,15 +126,21 @@ export class FishScanner {
           let next=0,fatal:string|undefined;
           const worker=async()=>{
             while(!local.signal.aborted){
-              const index=next++;if(index>=markets.length)return;const market=markets[index];p.current=market.symbol;progress.current=market.symbol;publish();
+              const index=next++;if(index>=markets.length)return;const market=markets[index];let stage='K线（candlesticks / history-candles）';p.current=market.symbol;progress.current=market.symbol;publish();
               try{
                 const raw=market.instrument===adapter.btc().instrument?btc:await adapter.candles(market,cut,local.signal);
+                stage='主动成交（trades / history-trades / fills-history）';
                 const source=await adapter.taker(market,raw,local.signal);
                 const bars=source.map(b=>({...b,refClose:btcClose.get(b.openTime)!}));
                 if(bars.some(b=>b.quoteVolume==null||b.takerBuyQuoteVolume==null||!(b.refClose!>0))) throw new FishError('成交额或BTC读数不全','readings');
+                stage='CBI-2计算';
                 const readings=this.calculate(bars),result=classifyFishReadings(market.symbol,bars,readings.cbi2,readings.average,cut,threshold);
                 if(local.signal.aborted)return;
                 p.counts[result.outcome]++;
+                if(result.outcome==='readings'&&p.failures!.readings.length<10){
+                  const bad=bars.findIndex((_,i)=>i>=FISH_FIRST_USABLE&&(!Number.isFinite(readings.cbi2[i])||!Number.isFinite(readings.average[i])));
+                  p.failures!.readings.push({symbol:market.symbol,reason:`CBI-2计算：有效区间内的CBI-2或24小时均值不是有限数${bad>=0?`，首个异常K线开盘 ${formatUTC8(bars[bad].openTime)}`:''}`});
+                }
                 if(result.signal){
                   const signal=result.signal;
                   if(exchange!=='binance'){signal.id=`fish-${exchange}-${market.symbol}-${signal.timeMs}`;signal.exchange=exchange;signal.binanceSymbol=binanceByBase.get(fishBase(market.base))??null;}
@@ -138,7 +148,17 @@ export class FishScanner {
                 }
               }catch(error){
                 if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
-                else if(!local.signal.aborted)p.counts[error instanceof FishError&&error.kind!=='banned'?error.kind:'failed']++;
+                else if(!local.signal.aborted){
+                  const kind=error instanceof FishError?error.kind:'failed';
+                  if(kind==='history')p.history=(p.history??0)+1;
+                  else if(kind!=='banned'){
+                    p.counts[kind]++;
+                    if((kind==='failed'||kind==='readings')&&p.failures![kind].length<10){
+                      const reason=error instanceof TypeError?'浏览器拦截（网络 / 跨域）':error instanceof Error?error.message:String(error);
+                      p.failures![kind].push({symbol:market.symbol,reason:`${stage}：${reason.replace(/Failed to fetch/gi,'浏览器拦截（网络 / 跨域）')}`});
+                    }
+                  }
+                }
               }
               if(local.signal.aborted)return;p.done++;publish();await fishDelay(0,local.signal);
             }
