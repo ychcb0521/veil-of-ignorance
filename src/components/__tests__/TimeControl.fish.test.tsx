@@ -95,7 +95,14 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     await waitFor(() => expect(mocks.scan).toHaveBeenCalledWith(expect.objectContaining({ anchorMs: Date.UTC(2026,9,18,4,34,56), threshold: 0.2 })));
     expect(loadFishSignals()).toHaveLength(1);
     expect(loadFishSignals()[0]).toMatchObject({ id: SIGNAL.id, quality: 4, fish: { threshold: 0.2, average: 0.25 } });
-    expect(screen.getByText(/本轮阈值 > 0.2/)).toBeInTheDocument();
+    expect(screen.queryByText(/本轮阈值 > 0.2/)).not.toBeInTheDocument();
+    const help = screen.getByRole('button',{name:'捕捞说明'});
+    fireEvent.mouseOver(help);
+    expect(screen.queryByRole('dialog',{name:'捕捞说明'})).not.toBeInTheDocument();
+    fireEvent.click(help);
+    expect(screen.getByRole('dialog',{name:'捕捞说明'})).toHaveTextContent('本轮阈值 > 0.2');
+    fireEvent.keyDown(screen.getByRole('dialog',{name:'捕捞说明'}),{key:'Escape'});
+    await waitFor(() => expect(screen.queryByRole('dialog',{name:'捕捞说明'})).not.toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('捕捞时间（UTC+8）'), { target: { value: '2026-02-30 12:00' } });
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     expect(screen.getByRole('alert')).toHaveTextContent('捕捞时间无效');
