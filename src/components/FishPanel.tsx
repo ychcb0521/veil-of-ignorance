@@ -20,7 +20,7 @@ import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSugges
 
 export interface FishPanelProps {
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
-  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; signal: AbortSignal }) => Promise<FishDiagnosis>;
+  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
   signals: TradeSignal[]; progress: FishProgress | null;
@@ -57,6 +57,11 @@ export function FishPanel(p: FishPanelProps) {
   const owner=getUserPrefix();
 
   const [extraCards,setExtraCards]=useState<FishCard[]>(()=>readCards().slice(1));
+  // 【用户要求】2026-10-19「多重选择除了交集，再增加一种并集（只要符合其中一个算法的，都留下）」：合并方式跟账号记在本机
+  const combinationKey=()=>`${getUserPrefix()}fish-combination.v1`;
+  const readCombination=():'and'|'or'=>{try{return readPersistedStateRaw(combinationKey())==='or'?'or':'and';}catch{return 'and';}};
+  const [combination,setCombinationState]=useState<'and'|'or'>(readCombination);
+  const setCombination=(v:'and'|'or')=>{setCombinationState(v);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
   const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
   const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??cleanPreference(readFishPreference('cbi2')));
   const cardsOwner=useRef(owner);
@@ -67,7 +72,7 @@ export function FishPanel(p: FishPanelProps) {
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
   const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
-  useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
+  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
@@ -90,7 +95,7 @@ export function FishPanel(p: FishPanelProps) {
     try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
     if(multiple.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[multiple.error||'算法设置有误']}}));return;}
     setProbe(v=>({...v,busy:true,result:null}));
-    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -158,7 +163,7 @@ export function FishPanel(p: FishPanelProps) {
   const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
-    p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
@@ -198,9 +203,9 @@ export function FishPanel(p: FishPanelProps) {
     <div className="flex flex-wrap items-center gap-2">
     <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
       <button type="button" aria-label="计算建议" title="重新计算建议：信号库全部信号在各自时刻的读数分位数，另配同币种随机对照（打开时已在后台自动算）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion('manual')}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
-
+      {extraCards.length>0&&<label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">多重算法<select aria-label="多重算法合并方式" className="rounded border border-border/60 bg-background px-1 py-1 text-foreground" disabled={running} value={combination} onChange={e=>setCombination(e.target.value as 'and'|'or')}><option value="and">交集：同时满足</option><option value="or">并集：满足任一</option></select></label>}
     </div>
-    <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 ')}</p>
+    <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ')}</p>
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />

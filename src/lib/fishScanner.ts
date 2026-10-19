@@ -1,4 +1,4 @@
-import { intersectFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput } from '@/lib/fish/intersection';
+import { combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
 import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf } from '@/lib/deepDig/features';
@@ -14,7 +14,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FISH_STEP, FISH_FIRST_USABLE, FISH_THRESHOLD, FishWeightBudget, FishError, FishRequestPool, fishDelay } from '@/lib/fish/shared';
 export { FISH_STEP, FISH_BARS, FISH_FIRST_USABLE, FISH_THRESHOLD, FishWeightBudget, FishError, fishDelay, validateFishBars } from '@/lib/fish/shared';
-export interface FishScanSettings { anchorMs?: number; threshold?: number; exchanges?: FishExchange[]; includeDuplicates?: boolean; includeUsStocks?: boolean; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; }
+export interface FishScanSettings { anchorMs?: number; threshold?: number; exchanges?: FishExchange[]; includeDuplicates?: boolean; includeUsStocks?: boolean; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; /** 多重算法：and 交集（缺省）/ or 并集 */ combination?: FishCombination; }
 /** Explicit UTC+8 parsing; independent of the browser's local timezone. */
 export function parseFishSettings(time: string, value: string): FishScanSettings {
   const threshold = value.trim() ? Number(value) : NaN;
@@ -137,7 +137,7 @@ export class FishScanner {
    * 查单个币：用与捕捞完全相同的取数与判定，说清楚它在当前设置下为什么命中 / 没命中。
    * 【用户要求】2026-10-19「原来能捕捉到，现在却捕捉不到，啥原因？请解决」——给每个币一个可核对的答案。
    */
-  async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; signal: AbortSignal }): Promise<FishDiagnosis> {
+  async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; combination?: FishCombination; signal: AbortSignal }): Promise<FishDiagnosis> {
     if(options.algorithms?.length){
       if(options.algorithms.length===1)return this.diagnose({...options,...options.algorithms[0],algorithms:undefined});
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
@@ -146,10 +146,17 @@ export class FishScanner {
       const shared=sharedFishAdapters(this.adapters,plans,anchorMs);
       const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,undefined,shared);
       const exchange=options.exchange??'binance';
+      const mode:FishCombination=options.combination??'and';
       const reasons=plans.map(p=>p.unavailable??fishRetentionReason(exchange,Math.floor(anchorMs/p.step)*p.step,clock.serverTime,p.N,p.step,p.usesTaker,intervalOf(p.def)));
-      if(reasons.some(Boolean))return {outcome:'skipped',lines:[...reasons.map((reason,i)=>`算法 ${i+1}：${reason??'预检通过；因其它算法不可用，该交易所本轮跳过'}`),`交集：${EXCHANGE_NAMES[exchange]}整家跳过，不入库`]};
-      const rows=await Promise.all(plans.map(p=>scanner.diagnose({...options,feature:p.def,algorithm:p.settings,anchorMs,algorithms:undefined})));
-      const result=intersectFishResults(rows.map(r=>r.member??{outcome:r.outcome}),plans);
+      if(mode==='and'&&reasons.some(Boolean))return {outcome:'skipped',lines:[...reasons.map((reason,i)=>`算法 ${i+1}：${reason??'预检通过；因其它算法不可用，该交易所本轮跳过'}`),`交集：${EXCHANGE_NAMES[exchange]}整家跳过，不入库`]};
+      if(mode==='or'&&reasons.every(Boolean))return {outcome:'skipped',lines:[...reasons.map((reason,i)=>`算法 ${i+1}：${reason}`),`并集：每个算法在${EXCHANGE_NAMES[exchange]}都不可用，整家跳过`]};
+      // 并集：在这家不可用的算法按没命中算，其余照常判定
+      const rows=await Promise.all(plans.map((p,i)=>reasons[i]?Promise.resolve({outcome:'skipped' as const,lines:[reasons[i]!],member:undefined}):scanner.diagnose({...options,feature:p.def,algorithm:p.settings,anchorMs,algorithms:undefined})));
+      const result=combineFishResults(rows.map(r=>r.member??{outcome:r.outcome}),plans,mode);
+      if(mode==='or'){
+        const hit=result.signal?.fish?.hitAlgorithms??[];
+        return {outcome:result.outcome as FishDiagnosis['outcome'],lines:[...rows.flatMap((r,i)=>r.lines.map(line=>`算法 ${i+1}：${line}`)),result.signal?`并集命中（算法 ${hit.join('、')}）· 起点 ${formatUTC8(result.signal.timeMs)}（命中算法里最早的起点）`:`并集：没有一个算法命中（${rows.map((r,i)=>`算法 ${i+1} ${r.outcome}`).join('；')}），不入库`]};
+      }
       return {outcome:result.outcome as FishDiagnosis['outcome'],lines:[...rows.flatMap((r,i)=>r.lines.map(line=>`算法 ${i+1}：${line}`)),result.signal?`交集命中 · 起点 ${formatUTC8(result.signal.timeMs)}`:`交集：${result.outcome==='unknown'?'起点不明，不入库':`不在交集（${rows.map((r,i)=>`算法 ${i+1} ${r.outcome}`).join('；')}）`}`]};
     }
     const t = (ms: number) => formatUTC8(ms).slice(5, 16);
@@ -222,6 +229,7 @@ export class FishScanner {
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');
       const anchorMs=options.anchorMs??clock.serverTime;
+      const mode:FishCombination=options.combination??'and';
       const skips:Partial<Record<FishExchange,string>>={};
       for(const exchange of options.exchanges??['binance']) {
         const reasons=plans.flatMap((p,i)=>{const reason=p.unavailable??fishRetentionReason(exchange,Math.floor(anchorMs/p.step)*p.step,clock.serverTime,p.N,p.step,p.usesTaker,intervalOf(p.def));return reason?[`算法 ${i+1}：${reason}`]:[];});
@@ -235,7 +243,7 @@ export class FishScanner {
       const adapters=sharedFishAdapters(this.adapters,plans,anchorMs);
       const publish=()=>{
         const base=states[0];if(!base)return;
-        Object.assign(progress,base,{anchorMs,rule:plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 '),algorithmHits:plans.map((_,i)=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
+        Object.assign(progress,base,{anchorMs,rule:plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:plans.map((_,i)=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
         progress.done=Math.min(...plans.map((_,i)=>states[i]?.done??0));
         progress.total=Math.max(...states.map(p=>p.total));
         options.onProgress({...progress,counts:{...progress.counts}});
@@ -243,15 +251,16 @@ export class FishScanner {
       await Promise.all(plans.map(async(plan,i)=>{
         const a={feature:plan.def,algorithm:plan.settings};
         const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,this.calculate,adapters);
-        states[i]=await scanner.scan({...options,...a,algorithms:undefined,anchorMs,skipReasons:skips,onSignal:()=>{},onProgress:p=>{states[i]=p;publish();},onResult:(key,r)=>{
+        states[i]=await scanner.scan({...options,...a,algorithms:undefined,anchorMs,skipReasons:mode==='or'?undefined:skips,onSignal:()=>{},onProgress:p=>{states[i]=p;publish();},onResult:(key,r)=>{
           const members=results.get(key)??new Map<number,FishMemberResult>();members.set(i,r);results.set(key,members);
 
         }});
       }));
       const intersectionCounts={...initialFishProgress().counts};
       if(!options.signal.aborted&&!states.some(p=>p.status==='aborted'))for(const [key,members] of results){
-        if(members.size!==plans.length)continue;
-        const result=intersectFishResults(plans.map((_,i)=>members.get(i)!),plans);
+        // 交集要每个算法都有结论；并集只要有一个算法有结论（缺的按没命中算）
+        if(mode==='and'&&members.size!==plans.length)continue;
+        const result=combineFishResults(plans.map((_,i)=>members.get(i)),plans,mode);
         if(result.outcome in intersectionCounts)intersectionCounts[result.outcome as FishOutcome]++;
         if(result.signal){emitted.add(key);options.onSignal(result.signal);}
       }

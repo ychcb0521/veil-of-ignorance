@@ -142,7 +142,7 @@ export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgr
   return {value,average,main,constraints,condition};
 }
 export interface FishSnapshot {
-  algorithms?: FishSnapshot[]; intersectionStart?: number; outcome?: string; boundaryMs?: number;
+  algorithms?: FishSnapshot[]; intersectionStart?: number; /** 多重算法的合并方式：and 交集（缺省）/ or 并集 */ combination?: 'and'|'or'; unionStart?: number; /** 并集里命中的算法序号（1 起） */ hitAlgorithms?: number[]; outcome?: string; boundaryMs?: number;
   average: number; cbi2: number; startAverage: number; previousAverage: number; cutoffMs: number; threshold: number;
   statistic?: string; featureId?: string; featureName?: string; featureShort?: string; definitionKey?: string; interval?: string; H?: number; direction?: '>'|'<'; thresholdRaw?: number; scale?: number; unit?: string;
   constraints?: string[]; constraintKey?: string; algorithmKey?: string; value?: number; startIndex?: number; cutoffIndex?: number; startConstraints?: number[]; cutoffConstraints?: number[];

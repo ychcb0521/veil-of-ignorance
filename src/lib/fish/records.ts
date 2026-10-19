@@ -24,4 +24,5 @@ export function mergeFishSignals(existing: readonly TradeSignal[],incoming: read
   }
   return [...map.values()];
 }
-export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(a=>a.featureShort??a.featureName).join(' ∩ '):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
+/** 算法简称：交集「A ∩ B」，并集「A ∪ B」（并集另记命中的是哪几个，见快照 hitAlgorithms）。 */
+export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(a=>a.featureShort??a.featureName).join(s.fish.combination==='or'?' ∪ ':' ∩ '):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;

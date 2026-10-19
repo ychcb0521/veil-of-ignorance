@@ -7,15 +7,38 @@ import type { FishExchange } from './exchanges';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export interface FishAlgorithmInput { feature: DeepDigFeatureDef; algorithm: FishAlgorithmSettings }
 export interface FishMemberResult { outcome: string; signal?: TradeSignal; snapshot?: FishSnapshot; boundaryMs?: number }
-export const fishCombinationKey=(plans: readonly Pick<FishProgram,'algorithmKey'>[])=>plans.map(p=>p.algorithmKey).sort().join('&');
+/** 多重算法怎么合：and = 交集（全部同时满足），or = 并集（满足任一即留下）。 */
+export type FishCombination = 'and' | 'or';
+/** 组合键：交集沿用原来的「键 & 键」；并集写成「any(键 & 键)」，两种口径的记录各自去重、互不覆盖。与卡片顺序无关。 */
+export const fishCombinationKey=(plans: readonly Pick<FishProgram,'algorithmKey'>[],mode:FishCombination='and')=>{const keys=plans.map(p=>p.algorithmKey).sort().join('&');return mode==='or'?`any(${keys})`:keys;};
+const identityOf=(s:TradeSignal)=>s.market==='us_stock'?`us-${s.exchange??'binance'}-${s.underlying??s.symbol}`:`${s.exchange&&s.exchange!=='binance'?s.exchange+'-':''}${s.symbol}`;
+/**
+ * 并集：各算法独立判定，只要有一个算法命中（与单独扫描它时一样：截止满足、起点已知）就留下。
+ * 【用户要求】2026-10-19「多重选择除了交集，再增加一种并集（即，只要符合其中一个算法的，都留下）」。
+ * 信号时间 = 命中的算法里最早的那个起点（它从那一刻起连续满足到截止）；起点不明的算法不算命中（与单算法规则一致），只记进快照。
+ * rows 里缺的位置（该算法这个币没有结果）按没命中算。
+ */
+export function unionFishResults(rows: readonly (FishMemberResult|undefined)[], plans: readonly FishProgram[]): FishMemberResult {
+  const present=rows.filter((r):r is FishMemberResult=>!!r);
+  if(plans.length===1)return present[0]??{outcome:'unknown'};
+  const hitIndex=rows.flatMap((r,i)=>r?.outcome==='hit'&&r.signal?[i]:[]);
+  if(!hitIndex.length){
+    // 都没命中：报一个最说明问题的结论（有起点不明的算报起点不明，否则取第一个算法的结论）
+    return {outcome:present.some(r=>r.outcome==='unknown')?'unknown':present[0]?.outcome??'unknown'};
+  }
+  const hits=hitIndex.map(i=>rows[i]!.signal!),start=Math.min(...hits.map(s=>s.timeMs));
+  const source=hits.find(s=>s.timeMs===start)!,key=fishCombinationKey(plans,'or');
+  return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),
+    fish:{...source.fish!,algorithmKey:key,combination:'or',unionStart:start,hitAlgorithms:hitIndex.map(i=>i+1),algorithms:rows.map((r,i)=>r?.signal?.fish??r?.snapshot??({featureId:plans[i].def.id,featureName:plans[i].def.name,featureShort:plans[i].def.short,algorithmKey:plans[i].algorithmKey,outcome:r?.outcome??'missing'} as FishSnapshot))}}};
+}
+export const combineFishResults=(rows: readonly (FishMemberResult|undefined)[],plans: readonly FishProgram[],mode:FishCombination)=>mode==='or'?unionFishResults(rows,plans):intersectFishResults(rows.map(r=>r??{outcome:'missing'}),plans);
 export function intersectFishResults(rows: readonly FishMemberResult[], plans: readonly FishProgram[]): FishMemberResult {
   if(rows.length===1)return rows[0];
   if(!rows.length||rows.some(r=>r.outcome!=='hit'&&r.outcome!=='unknown'))return {outcome:rows.find(r=>r.outcome!=='hit'&&r.outcome!=='unknown')?.outcome??'unknown'};
   const hits=rows.flatMap(r=>r.signal?[r.signal]:[]),start=Math.max(...hits.map(s=>s.timeMs));
   if(!hits.length||rows.some(r=>r.outcome==='unknown'&&!(start>(r.boundaryMs??Infinity))))return {outcome:'unknown'};
   const source=hits.find(s=>s.timeMs===start)!,key=fishCombinationKey(plans);
-  const identity=source.market==='us_stock'?`us-${source.exchange??'binance'}-${source.underlying??source.symbol}`:`${source.exchange&&source.exchange!=='binance'?source.exchange+'-':''}${source.symbol}`;
-  return {outcome:'hit',signal:{...source,id:`fish-${identity}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal?.fish??r.snapshot!)}}};
+  return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal?.fish??r.snapshot!)}}};
 }
 /** Request once per venue/instrument/period, then give each program exactly its own trailing N. */
 export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number): Partial<Record<FishExchange,FishDataAdapter>> {
