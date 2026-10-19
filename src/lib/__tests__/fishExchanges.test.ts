@@ -119,9 +119,10 @@ describe('交易所去重、优先级和独立BTC',()=>{
     const only:TradeSignal[]=[];await f.scanner.scan({...common,onSignal:s=>only.push(s),exchanges:['gate']});expect(only.map(s=>s.symbol)).toEqual(['THREEUSDT']);
     expect(f.request).toHaveBeenCalledTimes(3);
   });
-  it('引用BTC时某家参考缺根则整轮中止，不产生任何信号',async()=>{
+  // 【用户要求】2026-10-19「这是啥原因？请解决」：某家参考缺根只跳过那一家（写明原因），其余交易所照常扫
+  it('引用BTC时某家参考缺根：只跳过那一家并写明原因，其余照常扫，那一家不产生信号',async()=>{
     const f=fleet('okx'),signals:TradeSignal[]=[];const result=await f.scanner.scan({signal:abort,onProgress:()=>{},onSignal:s=>signals.push(s),exchanges:['binance','okx','gate']});
-    expect(result.venues!.okx!.status).toBe('aborted');expect(result.venues!.okx!.error).toContain('BTC');expect(result.venues!.binance!.status).toBe('aborted');expect(result.venues!.gate!.status).toBe('aborted');expect(result.status).toBe('aborted');expect(signals).toHaveLength(0);
+    expect(result.venues!.okx!.status).toBe('skipped');expect(result.venues!.okx!.skippedReason).toContain('BTC');expect(result.venues!.binance!.status).toBe('complete');expect(result.venues!.gate!.status).toBe('complete');expect(result.status).toBe('complete');expect(result.notice).toContain('OKX');expect(signals.some(s=>s.exchange==='okx')).toBe(false);
   });
   it('某家418只中止该家，取消则停止全部交易所',async()=>{
     const f=fleet(undefined,'okx');const result=await f.scanner.scan({signal:abort,onProgress:()=>{},onSignal:()=>{},exchanges:['binance','okx','gate'],includeDuplicates:true});

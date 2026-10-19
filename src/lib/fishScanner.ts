@@ -32,6 +32,8 @@ const formula = compileFeatureFormula(`${CBI2_FORMULA}\nfishAvg = avg(CBI2, 24)`
 export type FishReading = FishSnapshot;
 export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'failed';
 export interface FishProgress {
+  /** 本轮跳过了某家但扫描仍在继续时的说明（如 BTC 参考取不到），淡色显示。 */
+  notice?: string;
   algorithmHits?: number[];
   markets?: Partial<Record<'crypto'|'us_stock', FishProgress>>;
   venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
@@ -245,6 +247,7 @@ export class FishScanner {
         const base=states[0];if(!base)return;
         Object.assign(progress,base,{anchorMs,rule:plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:plans.map((_,i)=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
         progress.done=Math.min(...plans.map((_,i)=>states[i]?.done??0));
+        progress.notice=[...new Set(states.flatMap(p=>p?.notice?p.notice.split('；'):[]))].join('；')||undefined;
         progress.total=Math.max(...states.map(p=>p.total));
         options.onProgress({...progress,counts:{...progress.counts}});
       };
@@ -337,14 +340,23 @@ export class FishScanner {
         catch(error){errors[e]=error instanceof Error?error.message:String(error);}
       }));
       const binanceByBase=new Map((universes.binance??[]).filter(m=>m.market!=='us_stock').map(m=>[fishBase(m.base),m.symbol]));
-      // Preflight every required BTC interval before emitting any signal. A reference gap aborts the entire run.
+      // 产出信号前先把每家要用的 BTC 参考取齐。【用户要求】2026-10-19「这是啥原因？请解决」：
+      // 某一家取不到（如 Gate 直连被拦、代理未部署）只跳过那一家并写明原因，其余交易所照常扫——不再整次中止。
+      // 那一家不会拿不完整的参考去算，也就不会产出它的信号。
       const references=new Map<FishExchange,ResearchBar[]>();
       if(plan.compiled.usesBtc){
         await Promise.all(selected.filter(e=>venues[e]!.status!=='skipped').map(async exchange=>{
           const adapter=this.adapters.get(exchange)!;
           try {const btc=await adapter.candles(adapter.btc(),cut,controller.signal,query);validateFishBars(btc,cut,plan.N,plan.step);if(btc.some(b=>!(b.close>0)))throw new Error('BTC收盘价无效');references.set(exchange,btc);}
-          catch(error){throw new Error(`${EXCHANGE_NAMES[exchange]} BTC参考K线不完整或请求失败，整次扫描中止：${error instanceof Error?error.message:error}`);}
+          catch(error){
+            if(controller.signal.aborted)throw error;
+            if(error instanceof FishError&&error.kind==='banned')throw error;
+            venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=`BTC参考K线不完整或请求失败，本家跳过：${error instanceof Error?error.message:error}`;
+            progress.notice=[progress.notice,`${EXCHANGE_NAMES[exchange]}本轮跳过（BTC 参考价取不到）：${error instanceof Error?error.message:error}`].filter(Boolean).join('；');
+          }
         }));
+        publish();
+        if(selected.every(e=>venues[e]!.status==='skipped'))throw new Error(selected.map(e=>`${EXCHANGE_NAMES[e]}：${venues[e]!.skippedReason}`).join('；'));
       }
       const runVenue=async(exchange:FishExchange)=>{
         const p=venues[exchange]!,adapter=this.adapters.get(exchange)!;

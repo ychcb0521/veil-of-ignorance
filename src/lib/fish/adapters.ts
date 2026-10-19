@@ -4,6 +4,8 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
 import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, validateFishBars } from './shared';
+/** 只读代理（Supabase Edge Function fish-market-proxy）没部署时的说明。 */
+export const PROXY_MISSING='只读代理未部署（Supabase 上没有 fish-market-proxy 函数），需要在 Lovable 里部署这个 Edge Function';
 import { EXCHANGE_NAMES, AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
 
 /** [from, cut) 里按 step 对齐、缓存里没有的时间点，合并成连续区间 [start, stop)。 */
@@ -218,6 +220,8 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
   const context=(path:string,message:string,status?:number)=>new FishError(`${EXCHANGE_NAMES[exchange]} · ${path} · ${message}`,status===418?'banned':'failed',{path,status});
   const explain=(body:any)=>{
     const text=String(body?.message??body?.msg??body?.error??'');
+    // Supabase 网关找不到函数时的固定回复：只读代理没随站点部署
+    if(body?.code==='NOT_FOUND'&&/function was not found/i.test(text))return PROXY_MISSING;
     if(/10000/.test(text)&&/candlestick/i.test(text))return '历史K线超过最近10000根的保留范围';
     if(/too (many|long)|exceed|maximum.*points/i.test(text))return '查询区间或数量超出接口限制';
     if(/too old|history|90 days|3 months/i.test(text))return '查询时间超出可用历史范围';
@@ -240,16 +244,19 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
     if('data' in result)return result.data;
     await budget.wait(result.wait,signal);return read(url,path,weight,signal);
   }
+  // 只读代理没部署（404）就别一直走代理：后续请求恢复直连，并把原因说清楚
+  const proxyMissing=(error:unknown)=>error instanceof FishError&&error.message.includes(PROXY_MISSING);
   return async(path,weight,signal)=>{
     const wasProxy=useProxy;
     const url=exchange==='binance'?`https://fapi.binance.com/fapi/v1/${path}`:wasProxy?proxyUrl(path):exchange==='bitget'?`https://api.bitget.com/${path.startsWith('instruments?')?'api/v3/market/':'api/v2/mix/market/'}${path}`:exchange==='gate'?`https://api.gateio.ws/api/v4/futures/usdt/${path}`:`https://www.okx.com/api/v5/${path}`;
     try{return await read(url,path,weight,signal);}
     catch(error){
+      if(wasProxy&&proxyMissing(error))useProxy=false;
       if(signal.aborted||!(error instanceof TypeError))throw error;
       if(exchange==='binance'||wasProxy)throw context(path,'浏览器拦截（网络 / 跨域）'+(wasProxy?'；只读代理也未能连接，请检查是否已发布':''));
       useProxy=true;
       try{return await read(proxyUrl(path),path,weight,signal);}
-      catch(proxyError){if(signal.aborted||!(proxyError instanceof TypeError))throw proxyError;throw context(path,'浏览器拦截（网络 / 跨域）；只读代理也未能连接，请检查是否已发布');}
+      catch(proxyError){if(proxyMissing(proxyError)){useProxy=false;throw context(path,`浏览器直连被拦截（网络 / 跨域），${PROXY_MISSING}`,404);}if(signal.aborted||!(proxyError instanceof TypeError))throw proxyError;throw context(path,'浏览器拦截（网络 / 跨域）；只读代理也未能连接，请检查是否已发布');}
     }
   };
 }

@@ -176,7 +176,7 @@ export function FishPanel(p: FishPanelProps) {
       <div className="flex items-center gap-1"><strong className="text-xs">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
         <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
         <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
-        <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根则整轮中止。</p>
+        <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根只跳过那一家（写明原因），全部取不到才整轮中止。</p>
         <p>默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重；加入信号库仍按信号库自身规则合并。设置只保存在本机，捕捞开始后锁定。</p>
         {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
@@ -246,6 +246,7 @@ export function FishPanel(p: FishPanelProps) {
       </div>
       {/* 【用户要求】2026-10-19 进度旁的明细入口删掉（「没必要存在」）；整次扫描失败的报错仍直接写出来 */}
       {x.error && <p className="text-destructive">{x.error}</p>}
+      {x.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
     </div>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
     <div className="space-y-2 border-t border-border/50 pt-3">

@@ -15,8 +15,8 @@ it('不用BTC不取参考BTC；纯价格/成交额不拉逐笔；完整定义周
  const q=setup(),volume={...def,formula:'Q'};await q.scanner.scan({feature:volume,algorithm:{...algorithm,threshold:999},signal,onProgress:()=>{},onSignal:()=>{}});expect(q.taker).not.toHaveBeenCalled();
  const h=setup(),fifteen={...def,interval:'15m' as const};const p=await h.scanner.scan({feature:fifteen,algorithm,anchorMs:cut+123456,signal,onProgress:()=>{},onSignal:()=>{}});expect(p.cutoffMs).toBe(cut);expect(h.candles.mock.calls[0][3].interval).toBe('15m');
 });
-it('约束引用BTC才取；BTC缺根整次中止，在任何币信号产出之前结束',async()=>{
- const f=setup(true),onSignal=vi.fn();const result=await f.scanner.scan({feature:def,algorithm:{...algorithm,constraints:[{id:'cb',text:'CB > 0',enabled:true}]},signal,onProgress:()=>{},onSignal});expect(result.status).toBe('aborted');expect(result.error).toContain('整次扫描中止');expect(f.candles).toHaveBeenCalledTimes(1);expect(f.candles.mock.calls[0][0]).toBe(btc);expect(onSignal).not.toHaveBeenCalled();
+it('约束引用BTC才取；唯一勾选的交易所 BTC 缺根则整次中止，在任何币信号产出之前结束',async()=>{
+ const f=setup(true),onSignal=vi.fn();const result=await f.scanner.scan({feature:def,algorithm:{...algorithm,constraints:[{id:'cb',text:'CB > 0',enabled:true}]},signal,onProgress:()=>{},onSignal});expect(result.status).toBe('aborted');expect(result.error).toContain('BTC参考K线');expect(f.candles).toHaveBeenCalledTimes(1);expect(f.candles.mock.calls[0][0]).toBe(btc);expect(onSignal).not.toHaveBeenCalled();
 });
 it('截止主条件成立但约束不成立计挡下，并为每一条截止失败约束分别计数',async()=>{
  const f=setup();const result=await f.scanner.scan({feature:def,algorithm:{...algorithm,constraints:[{id:'b',text:'B > 50',enabled:true},{id:'v',text:'X > 0',enabled:true}]},signal,onProgress:()=>{},onSignal:()=>{throw Error('不应命中');}});expect(result.blocked).toBe(1);expect(result.venues!.binance!.constraintBlocked).toEqual([1,0]);expect(result.counts.below).toBe(0);expect(f.taker).toHaveBeenCalledTimes(1);
