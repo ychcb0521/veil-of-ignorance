@@ -18,6 +18,7 @@ import type { RunStatus } from '@/hooks/useDeepDigRun';
 import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/DefinitionPanel';
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
+import { PatternView } from '@/components/journal/deepDig/PatternView';
 import { dataAtOffset, formatSeriesOffset, seriesRangeOf, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables, targetOf } from '@/lib/deepDig/commands';
 
@@ -405,6 +406,8 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
   const liveSeries = series && series.finishedAt === raw.finishedAt ? series : null;
   /** 【用户要求】看哪个时刻（拖时间序列图里的竖线）：0 = 进场（特征值本身）。 */
   const result = useMemo(() => viewAtOffset(effectiveData, liveSeries, seriesVar, at), [effectiveData, liveSeries, seriesVar, at]);
+  /** 所选时刻的各变量读数（总体模式识别的条件用）；非进场时刻的曲线没就绪时为 null。 */
+  const atData = useMemo(() => dataAtOffset(effectiveData, liveSeries, at), [effectiveData, liveSeries, at]);
   /** 选的是公式里别的变量（不是最后一句）时它的名字。 */
   const varName = seriesVar != null && viewForVariable(effectiveData, seriesVar) !== effectiveData ? seriesVar : null;
   const removed = useMemo(() => {
@@ -478,6 +481,19 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
         </span>
       )} testId="deep-dig-series-block">
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
+      </Block>
+
+      <Block title="总体模式识别" aside={(
+        <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-pattern-aside">
+          不分组，把样本合成一个总体看整体特征；写条件筛出一部分再看 · 按 <span className="font-mono text-foreground">{X}</span>{' '}
+          <span className={at !== 0 ? 'text-[#C27C0E] dark:text-[#F59E0B]' : undefined}>{atText}</span>的值
+        </span>
+      )} testId="deep-dig-pattern-block">
+        <PatternView
+          result={result} atRows={(atData ?? effectiveData).rows} atFallback={at !== 0 && !atData}
+          series={liveSeries} variable={seriesVar} at={at} onAt={setAt} X={X}
+          varNames={formulaVariables(def.formula).names} resultName={resultName} atText={atText}
+        />
       </Block>
 
       <Block title="细节">

@@ -23,6 +23,7 @@ const EXEMPT: Record<string, string> = {
   'lib/signalLibrary.ts': '已在 saveSignals 里接入推送',
   'hooks/useCampaignPricePaths.ts': '每场战役的峰值涨幅 / 动态最大回撤是由历史 K 线算出来的可重算缓存（按用户分区）：换设备重算一遍即可，不属于交易状态，账户资产不由它推导。',
   'hooks/useDeepDigRun.ts': 'Deep dig 各特征值的最近一次研究结果：只读研究的展示缓存（按用户分区），可随时重跑重算；不进交易状态，账户资产与战役读数都不由它推导，不需要跨设备同步。特征值定义与手动修改的「规律提取」走 usePersistedState，跟账号同步。',
+  'components/journal/deepDig/PatternView.tsx': 'Deep dig「总体模式识别」里写的筛选条件：本机的浏览偏好，按特征值分区；只影响这块描述怎么切，不进交易状态，也不改描述统计、推断统计的数据，不需要跨设备同步。',
   'components/journal/deepDig/SeriesChart.tsx': 'Deep dig 时间序列图「组别」勾选（哪些组画出来）：本机的显示偏好，按特征值分区；不进交易状态，账户资产与研究结果都不由它推导，不需要跨设备同步。',
   'hooks/useUnrealizedChartSnapshot.ts': '涨幅未兑现散点图的展示快照：只用来在行情重算期间先画上次的读数，不进卡片、排序、统计与导出；可重算，按用户与回收站视图分区，不需要跨设备同步。',
 };
