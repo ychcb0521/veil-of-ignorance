@@ -17,7 +17,6 @@ import { FishLibrary } from '@/components/FishLibrary';
 export interface FishPanelProps {
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
   onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }) => Promise<FishDiagnosis>;
-  onEstimate?: (selection: {exchanges:FishExchange[];includeDuplicates:boolean;includeUsStocks?:boolean},signal:AbortSignal)=>Promise<number|null>;
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
@@ -49,7 +48,7 @@ export function FishPanel(p: FishPanelProps) {
   const owner=getUserPrefix();
   useEffect(()=>setPref(readFishPreference(selected)),[owner]);
   const [selected,setSelected]=useState('cbi2'),[pref,setPref]=useState<FishPreference>(()=>readFishPreference('cbi2'));
-  const [constraintsOpen,setConstraintsOpen]=useState(false),[estimatedCount,setEstimatedCount]=useState<number|null>(null);
+  const [constraintsOpen,setConstraintsOpen]=useState(false);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
@@ -57,7 +56,6 @@ export function FishPanel(p: FishPanelProps) {
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,running=p.progress?.status==='running';
-  useEffect(()=>{const c=new AbortController();setEstimatedCount(null);if(p.onEstimate)p.onEstimate(p.selection,c.signal).then(n=>{if(!c.signal.aborted)setEstimatedCount(n);}).catch(()=>{});return()=>c.abort();},[p.onEstimate,exchanges.join('|'),includeDuplicates,includeUsStocks]);
   const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{H:24,direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{H:pref.H.trim()?Number(pref.H):NaN,direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const runProbe=async()=>{
@@ -100,7 +98,6 @@ export function FishPanel(p: FishPanelProps) {
         <Search className="h-3 w-3" />
       </button>}
     </div>
-    {plan&&<p className="text-[10px] text-muted-foreground">每个币 {plan.N} 根 · {Math.ceil(plan.N/1000)} 次请求 · 预计约 {Math.max(.1,Math.ceil((estimatedCount??100)*Math.ceil(plan.N/1000)*5/1200*10)/10)} 分钟{estimatedCount===null?' / 100个标的（范围待确认）':`（${estimatedCount}个标的，K线权重估算）`}</p>}
     <div className="text-[11px]"><button type="button" className="text-muted-foreground hover:text-foreground" aria-expanded={constraintsOpen} onClick={()=>setConstraintsOpen(v=>!v)}>附加约束 {active.length} {constraintsOpen?'⌃':'⌄'}</button>{constraintsOpen&&<div className="mt-2 max-w-4xl space-y-2">
       {pref.constraints.map((c,i)=><div key={c.id}><div className="flex items-center gap-2"><input aria-label={`启用约束 ${i+1}`} type="checkbox" checked={c.enabled} disabled={running} onChange={e=>changeConstraint(i,{enabled:e.target.checked})}/><input aria-label={`约束 ${i+1}`} className={`min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${rowErrors[i]?'border-destructive/50':'border-border/60'} ${c.enabled?'':'opacity-50'}`} value={c.text} disabled={running} onChange={e=>changeConstraint(i,{text:e.target.value})}/><button type="button" className={btn} disabled={running} aria-label={`删除约束 ${i+1}`} onClick={()=>update({...pref,constraints:pref.constraints.filter((_,j)=>j!==i)})}>删除</button></div>{rowErrors[i]&&<p className="ml-5 mt-1 text-destructive">{rowErrors[i]}{c.enabled?'':'（已停用，本轮忽略）'}</p>}</div>)}
       <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
