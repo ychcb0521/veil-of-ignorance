@@ -28,7 +28,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const hadRows = useRef(p.signals.length > 0);
   useEffect(() => { if (p.defaultOpen && !hadRows.current && p.signals.length > 0) setOpen(true); hadRows.current = p.signals.length > 0; }, [p.defaultOpen, p.signals.length]);
   const [algorithm,setAlgorithm]=useState('');
-  const algorithms=useMemo(()=>[...new Map(p.signals.map(s=>{const r=migrateFishSignal(s).fish!;return [r.algorithmKey!,`${r.featureShort}${r.statistic&&r.statistic!=='结果'?` [${r.statistic}]`:''} · ${r.H}h ${r.direction} ${r.threshold}${r.constraints?.length?` · ${r.constraints.length}条约束`:''}`] as const;}))],[p.signals]);
+  const algorithms=useMemo(()=>[...new Map(p.signals.map(s=>{const r=migrateFishSignal(s).fish!;return [r.algorithmKey!,`${r.featureShort}${r.statistic&&r.statistic!=='结果'?` [${r.statistic}]`:''} · ${r.H!==undefined?`avg ${r.H}h `:''}${r.direction} ${r.threshold}${r.constraints?.length?` · ${r.constraints.length}条约束`:''}`] as const;}))],[p.signals]);
   useEffect(()=>{if(algorithm&&!algorithms.some(([key])=>key===algorithm))setAlgorithm('');},[algorithm,algorithms]);
   const [query, setQuery] = useState('');
   const [month, setMonth] = useState('');

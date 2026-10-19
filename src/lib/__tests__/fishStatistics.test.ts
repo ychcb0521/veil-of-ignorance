@@ -9,7 +9,7 @@ const settings={H:1/12,direction:'>' as const,threshold:100,constraints:[{id:'x'
 const bars=(n:number)=>Array.from({length:n},(_,i)=>({openTime:(i+1)*300000,open:.001,high:.002,low:.0001,close:.001,volume:1,quoteVolume:i<n-3?100:200,takerBuyQuoteVolume:50,takerBuyVolume:null}));
 beforeEach(()=>localStorage.clear());
 it('命名序列和行注释进入选项，直接常数、常数别名及常数函数不列',()=>{
- expect(fishStatistics(def)).toEqual([{name:'结果',label:'avg（结果）'},{name:'V',label:'V · 成交额（USDT）'},{name:'copy',label:'copy · 成交额的一半'}]);
+ expect(fishStatistics(def)).toEqual([{name:'结果',label:'结果'},{name:'V',label:'V · 成交额（USDT）'},{name:'copy',label:'copy · 成交额的一半'}]);
 });
 it('中间量逐根等于evaluateOnBars，平均按选中序列，X仍按结果显示单位；起点和快照使用新统计量',()=>{
  const plan=compileFishProgram(def,{...settings,statistic:'V'}),source=bars(plan.N),out=evaluateFishProgram(source,plan),native=evaluateOnBars(source,compileFeatureFormula(def.formula),def);
@@ -24,19 +24,22 @@ it('选中中间量后整个程序重算warm，约束和更长平均时长继续
 it('旧鱼按结果迁移，重复迁移不增项；不同统计量同一标的时刻各一条，选择按特征值记住',()=>{
  const old:TradeSignal={id:'a',symbol:'AAAUSDT',timeMs:1000,timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:2,startAverage:1,previousAverage:0,threshold:.3,cutoffMs:1000}};
  const migrated=migrateFishSignal(old);expect(migrated.fish?.statistic).toBe('结果');expect(migrateFishSignal(migrated)).toEqual(migrated);expect(mergeFishSignals([migrated],[old,{...old,fish:{...old.fish!,statistic:'V'}}])).toHaveLength(2);
- saveFishPreference('stat-test',{statistic:'V',H:'12',direction:'<',threshold:'2',constraints:[]});expect(readFishPreference('stat-test').statistic).toBe('V');expect(readFishPreference('cbi2').statistic).toBe('结果');
+ saveFishPreference('stat-test',{statistic:'V',direction:'<',threshold:'2',constraints:[]});expect(readFishPreference('stat-test').statistic).toBe('V');expect(readFishPreference('cbi2').statistic).toBe('结果');
 });
 
 it('规则保留远端的真实结果变量名；选择中间量时写出中间量和原值单位',async()=>{
- const {fishRuleText}=await import('@/lib/fishRule');expect(fishRuleText(CBI2_DEF,24,'>',.3)).toBe('avg(CBI2, 24h) > 0.3');expect(fishRuleText({...CBI2_DEF,unit:'基点'},24,'>',5,0,'V')).toBe('avg(V, 24h) > 5 原值');
+ const {fishRuleText}=await import('@/lib/fishRule');expect(fishRuleText(CBI2_DEF,'>',.3)).toBe('CBI2 > 0.3');expect(fishRuleText({...CBI2_DEF,unit:'基点'},'>',5,0,'V')).toBe('V > 5 原值');expect(fishRuleText({...CBI2_DEF,formula:`${CBI2_DEF.formula}\navg_CBI2 = avg(CBI2, 24)`},'>',.07)).toBe('avg_CBI2 > 0.07');
 });
 
 it('兼容最新单币诊断：所选中间量用原值显示，和捕捞同一主条件',async()=>{
  const {FishScanner}=await import('@/lib/fishScanner'),cut=Date.UTC(2026,5,20),market={symbol:'AAAUSDT',instrument:'AAAUSDT',base:'AAA',multiplier:1};
  const adapter={exchange:'binance' as const,list:async()=>[market],btc:()=>market,candles:async(_m,c,_s,q)=>bars(q.count).map((b,i)=>({...b,openTime:c-(q.count-i)*300000})),taker:async(_m,b)=>b};
- const scanner=new FishScanner(vi.fn(async()=>new Response(JSON.stringify({serverTime:cut+300000}))) as typeof fetch,undefined,undefined,{binance:adapter});const out=await scanner.diagnose({symbol:'AAA',feature:def,algorithm:{...settings,statistic:'V'},anchorMs:cut,signal:new AbortController().signal});expect(out.outcome).toBe('hit');expect(out.lines[1]).toContain('avg(V, 0.08333333333333333h) 截止时 = 200.0000');
+ const scanner=new FishScanner(vi.fn(async()=>new Response(JSON.stringify({serverTime:cut+300000}))) as typeof fetch,undefined,undefined,{binance:adapter});const out=await scanner.diagnose({symbol:'AAA',feature:def,algorithm:{...settings,statistic:'V'},anchorMs:cut,signal:new AbortController().signal});expect(out.outcome).toBe('hit');expect(out.lines[1]).toContain('V 截止时 = 200.0000');
 });
 
-it('共享核心默认只套一次avg；显式尾部中间量和引用尾部变量的约束仍按原公式求值',()=>{
- const d={...def,formula:'V = C\nmean = avg(V, 72)'},a=compileFishProgram({...d,formula:'V = C'},{...settings,constraints:[]}),core=compileFishProgram(d,{...settings,constraints:[]}),middle=compileFishProgram(d,{...settings,statistic:'mean',constraints:[{id:'q',enabled:true,text:'mean > 0'}]});expect(core.N).toBe(a.N);expect(core.resultName).toBe('V');const source=bars(middle.N);const expected=evaluateOnBars(source,compileFeatureFormula(d.formula),d).vars.get('mean');expect([...evaluateFishProgram(source,middle).value]).toEqual([...(expected as Float64Array)]);expect(middle.warm).toBeGreaterThan(core.warm);
+it('去掉外层avg：「结果」= 公式最后一句（尾部均值行本身），选核心值不拉长历史；X 仍是核心值',()=>{
+ const d={...def,formula:'V = C\nmean = avg(V, 72)'},a=compileFishProgram({...d,formula:'V = C'},{...settings,statistic:'V',constraints:[]}),v=compileFishProgram(d,{...settings,statistic:'V',constraints:[]}),result=compileFishProgram(d,{...settings,constraints:[]}),middle=compileFishProgram(d,{...settings,statistic:'mean',constraints:[{id:'q',enabled:true,text:'mean > 0'}]});
+ expect(v.N).toBe(a.N);expect(result.resultName).toBe('V');expect(result.statisticName).toBe('mean');expect(result.N).toBe(middle.N);expect(middle.warm).toBeGreaterThan(v.warm);
+ const source=bars(middle.N),expected=evaluateOnBars(source,compileFeatureFormula(d.formula),d).vars.get('mean') as Float64Array;
+ expect([...evaluateFishProgram(source,middle).average]).toEqual([...expected]);expect([...evaluateFishProgram(source,result).average]).toEqual([...expected]);
 });

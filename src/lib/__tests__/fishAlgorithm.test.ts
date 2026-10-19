@@ -41,7 +41,7 @@ it('完整程序的ago均值约束增加warm，所有定义参数都沿用Deep d
  const base=compileFishProgram(simple,config([],{H:1/12})),long=compileFishProgram(simple,config(['avg(X,600) > ago(avg(X,600),600)'],{H:1/12}));expect(long.warm).toBeGreaterThan(base.warm);expect(long.unavailable).toContain('5000');
  const withAgo=compileFishProgram({...simple,formula:'avg(C,48)'},config(['avg(X,3) > ago(avg(X,3),3)']));const plain=compileFishProgram({...simple,formula:'avg(C,48)'},config());expect(withAgo.warm).toBeGreaterThan(plain.warm);
  const def={...simple,interval:'15m' as const,halfLifeHours:3,avgHours:8,formula:'avg(C,avgh) + ema(C,hl)'};const plan=compileFishProgram(def,config()),bars=fishBars(plan.N);const own=evaluateFishProgram(bars,plan),native=evaluateOnBars(bars,compileFeatureFormula(def.formula),def).last as Float64Array;expect([...own.value]).toEqual([...native]);expect(plan.step).toBe(900000);
- expect(()=>compileFishProgram(simple,config([],{threshold:Infinity}))).toThrow();expect(()=>compileFishProgram(simple,config(['other_feature > 0']))).toThrow();expect(()=>compileFishProgram(simple,config([],{H:0}))).toThrow();expect(compileFishProgram(simple,config([],{threshold:1234})).settings.threshold).toBe(1234);
+ expect(()=>compileFishProgram(simple,config([],{threshold:Infinity}))).toThrow();expect(()=>compileFishProgram(simple,config(['other_feature > 0']))).toThrow();expect(compileFishProgram(simple,config([],{H:0})).algorithmKey).toBe(compileFishProgram(simple,config([],{H:24})).algorithmKey);expect(compileFishProgram(simple,config([],{threshold:1234})).settings.threshold).toBe(1234);
 });
 it('只有整个程序真正引用CB才需要BTC，约束可引入BTC，禁用的引用不取',()=>{
  expect(compileFishProgram(simple,config()).compiled.usesBtc).toBe(false);expect(compileFishProgram(simple,config(['CB > 0'])).compiled.usesBtc).toBe(true);expect(compileFishProgram(simple,{...config(),constraints:[{id:'x',text:'CB>0',enabled:false}]}).compiled.usesBtc).toBe(false);
@@ -50,11 +50,16 @@ it('启用ago约束后的整个程序也满足N和N+1000的平均读数及C序�
  const def={...simple,formula:'avg(C,48)'},plan=compileFishProgram(def,config(['avg(X,3)>ago(avg(X,3),3)'])),all=fishBars(plan.N+1000),short=evaluateFishProgram(all.slice(1000),plan),long=evaluateFishProgram(all,plan);
  for(let i=plan.warm-1;i<plan.N;i++){expect(Math.abs(short.average[i]-long.average[i+1000])).toBeLessThanOrEqual(1e-6*Math.max(1,Math.abs(long.average[i+1000])));expect(short.condition[i]).toBe(long.condition[i+1000]);}
 });
-it('默认CBI2与原2000根实现的截止均值一致（不改公式与24小时口径）',async()=>{
- const {calculateFishReadings}=await import('@/lib/fishScanner');const plan=compileFishProgram(CBI2_DEF,{H:24,direction:'>',threshold:.3,constraints:[]}),all=fishBars(4000),legacy=calculateFishReadings(all.slice(-2000)),now=evaluateFishProgram(all.slice(-plan.N),plan);expect(Math.abs(now.average.at(-1)!-legacy.average.at(-1)!)).toBeLessThan(1e-9);expect(now.main.at(-1)).toBe(legacy.average.at(-1)!>.3?1:0);
+// 【用户要求】2026-10-19「把渔这里的最外层的 avg 算法去除」：公式里写 avg_CBI2 = avg(CBI2, 24) 再选它，与原来「CBI2 外层 avg 24h」一致
+it('去掉外层avg：选公式里的 avg(CBI2,24) 与原2000根实现的24小时均值一致；选「结果」= 最后一句同一个量',async()=>{
+ const {calculateFishReadings}=await import('@/lib/fishScanner');const def={...CBI2_DEF,formula:`${CBI2_DEF.formula}\navg_CBI2 = avg(CBI2, 24)`};
+ const all=fishBars(4000),legacy=calculateFishReadings(all.slice(-2000));
+ for(const statistic of ['avg_CBI2','结果']){const plan=compileFishProgram(def,{statistic,direction:'>',threshold:.3,constraints:[]}),now=evaluateFishProgram(all.slice(-plan.N),plan);expect(Math.abs(now.average.at(-1)!-legacy.average.at(-1)!)).toBeLessThan(1e-9);expect(now.main.at(-1)).toBe(legacy.average.at(-1)!>.3?1:0);}
+ // 选 CBI2 本身：直接比较当根读数，不再取均值
+ const raw=compileFishProgram(def,{statistic:'CBI2',direction:'>',threshold:.3,constraints:[]}),r=evaluateFishProgram(all.slice(-raw.N),raw);expect(r.average.at(-1)).toBe(r.value.at(-1));expect(Math.abs(r.value.at(-1)!-legacy.cbi2.at(-1)!)).toBeLessThan(1e-9);
 });
-it('C只由主条件与启用约束组成：当前结果缺失但滚动均值仍有限时，不隐式添加当前值条件',()=>{
- const d={...simple,formula:'if(B > 0, C, 0/0)'},plan=compileFishProgram(d,config([],{H:1})),bars=fishBars(plan.N).map(b=>({...b,close:101,takerBuyQuoteVolume:1}));bars.at(-1)!.takerBuyQuoteVolume=0;
- const result=evaluateFishProgram(bars,plan);expect(Number.isNaN(result.value.at(-1)!)).toBe(true);expect(result.main.at(-1)).toBe(1);expect(result.condition.at(-1)).toBe(1);
+it('C只由主条件与启用约束组成：核心值缺失但公式里的滚动均值仍有限时，不隐式添加当前值条件',()=>{
+ const d={...simple,formula:'v = if(B > 0, C, 0/0)\nm = avg(v, 1)'},plan=compileFishProgram(d,config([],{H:1})),bars=fishBars(plan.N).map(b=>({...b,close:101,takerBuyQuoteVolume:1}));bars.at(-1)!.takerBuyQuoteVolume=0;
+ const result=evaluateFishProgram(bars,plan);expect(Number.isFinite(result.average.at(-1)!)).toBe(true);expect(result.main.at(-1)).toBe(1);expect(result.condition.at(-1)).toBe(1);
  const constrained=compileFishProgram(d,config(['X > 0'],{H:1}));expect(Number.isNaN(evaluateFishProgram(bars,constrained).condition.at(-1)!)).toBe(true);
 });

@@ -4,7 +4,7 @@ import { intervalOf } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars } from '@/lib/fish/shared';
-import { fishResultName, fishRuleText } from '@/lib/fishRule';
+import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
@@ -119,7 +119,7 @@ export class FishScanner {
   async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }): Promise<FishDiagnosis> {
     const t = (ms: number) => formatUTC8(ms).slice(5, 16);
     const exchange = options.exchange ?? 'binance';
-    const plan = compileFishProgram(options.feature ?? CBI2_DEF, options.algorithm ?? { H: 24, direction: '>', threshold: FISH_THRESHOLD, constraints: [] });
+    const plan = compileFishProgram(options.feature ?? CBI2_DEF, options.algorithm ?? { direction: '>', threshold: FISH_THRESHOLD, constraints: [] });
     if (plan.unavailable) return { outcome: 'failed', lines: [plan.unavailable] };
     const query = { interval: intervalOf(plan.def), count: plan.N }, adapter = this.adapters.get(exchange)!;
     const clock = await this.requests.get('binance')!('time', 1, options.signal) as { serverTime?: number };
@@ -153,7 +153,7 @@ export class FishScanner {
     bars = bars.map(b => plan.compiled.usesBtc ? { ...b, refClose: refs.get(b.openTime)! } : b);
     const r = evaluateFishProgram(bars, plan), result = classifyFishProgram(market.symbol, bars, r, cut, plan);
     const end = bars.length - 1, first = plan.warm - 1, scale = plan.scale;
-    const avgName = `avg(${plan.settings.statistic==='结果'?fishResultName(plan.def):plan.settings.statistic}, ${plan.settings.H}h)`;
+    const avgName = fishStatisticName(plan.def, plan.settings.statistic);
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
     const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
     const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
@@ -180,14 +180,14 @@ export class FishScanner {
     if (this.running) throw new Error('扫描正在进行');
     const { anchorMs, includeDuplicates = false, includeUsStocks = true } = options;
     let plan:FishProgram;
-    try {plan=compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{H:24,direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]});if(plan.unavailable)throw new Error(plan.unavailable);}
+    try {plan=compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]});if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
     const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N};
     const requested = [...(options.exchanges ?? ['binance'])];
     this.running = true;
     const controller = new AbortController(), cancel = () => controller.abort();
     options.signal.addEventListener('abort',cancel,{once:true}); if(options.signal.aborted) cancel();
-    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.H,plan.settings.direction,threshold,plan.texts.length,plan.settings.statistic);
+    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.direction,threshold,plan.texts.length,plan.settings.statistic);
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {

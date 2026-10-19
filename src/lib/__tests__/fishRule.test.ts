@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { KLineData } from 'klinecharts';
-import { BUILTIN_FEATURES, CBI2_DEF, compileFeatureFormula, FEATURES_KEY, DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
+import { BUILTIN_FEATURES, CBI2_DEF, compileFeatureFormula, evaluateOnBars, FEATURES_KEY, DRIFT_SPEED_DEF } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram } from '@/lib/fish/algorithm';
 import { fishResultName, fishRuleText } from '@/lib/fishRule';
 import { chartFeatureSeries, featureCoreName, sameCoreAsBuiltin } from '@/lib/featureSource';
@@ -27,16 +27,19 @@ describe('【用户要求】2026-10-19 公式统一：K 线图、渔、Deep dig 
     for (const d of BUILTIN_FEATURES) expect(core(d.formula)).toBe(compileFeatureFormula(d.formula).program.statements.at(-1)!.name);
   });
 
-  it('渔：定义末尾加了 avg 行，仍是 avg(CBI2, H)——不重复取均值；所需根数、读数与内置完全相同；规则文字写 CBI2', () => {
-    const a = compileFishProgram(CBI2_DEF, { H: 24, direction: '>', threshold: 0.07, constraints: [] });
-    const b = compileFishProgram(WITH_AVG, { H: 24, direction: '>', threshold: 0.07, constraints: [] });
-    expect(b.resultName).toBe('CBI2');
-    expect(b.N).toBe(a.N);
-    const bars: ResearchBar[] = klines(a.N).map(k => ({ openTime: k.timestamp, open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume!, takerBuyVolume: null, quoteVolume: k.turnover!, takerBuyQuoteVolume: k.takerBuyTurnover as number, refClose: 1 }));
-    const ra = evaluateFishProgram(bars, a), rb = evaluateFishProgram(bars, b);
-    expect(Array.from(rb.average)).toEqual(Array.from(ra.average));
-    expect(fishResultName(WITH_AVG)).toBe('CBI2');
-    expect(fishRuleText(WITH_AVG, 24, '>', 0.07)).toBe('avg(CBI2, 24h) > 0.07');
+  it('渔（2026-10-19 去掉外层 avg）：「结果」= 定义里写的 avg_CBI2，读数与公式逐位相同；选 CBI2 就是当根读数；X 仍是核心值 CBI2；规则写序列名', () => {
+    const result = compileFishProgram(WITH_AVG, { direction: '>', threshold: 0.07, constraints: [] });
+    const raw = compileFishProgram(WITH_AVG, { statistic: 'CBI2', direction: '>', threshold: 0.07, constraints: [] });
+    expect(result.resultName).toBe('CBI2');
+    expect(result.statisticName).toBe('avg_CBI2');
+    const bars: ResearchBar[] = klines(result.N).map(k => ({ openTime: k.timestamp, open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume!, takerBuyVolume: null, quoteVolume: k.turnover!, takerBuyQuoteVolume: k.takerBuyTurnover as number, refClose: 1 }));
+    const native = evaluateOnBars(bars, compileFeatureFormula(WITH_AVG.formula), WITH_AVG).vars;
+    expect(Array.from(evaluateFishProgram(bars, result).average)).toEqual(Array.from(native.get('avg_CBI2') as Float64Array));
+    const r = evaluateFishProgram(bars.slice(-raw.N), raw);
+    expect(Array.from(r.average)).toEqual(Array.from(r.value));
+    expect(fishResultName(WITH_AVG)).toBe('avg_CBI2');
+    expect(fishRuleText(WITH_AVG, '>', 0.07)).toBe('avg_CBI2 > 0.07');
+    expect(fishRuleText(WITH_AVG, '>', 0.07, 0, 'CBI2')).toBe('CBI2 > 0.07 原值');
   });
 
   it('核心公式相同的判定：只改注释、末尾加均值行都算相同；改了核心公式算不同', () => {

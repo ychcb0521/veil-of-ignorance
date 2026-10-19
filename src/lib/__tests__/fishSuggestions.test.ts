@@ -7,7 +7,7 @@ import {FishScanner} from '@/lib/fishScanner';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const anchor=Date.UTC(2026,5,20),step=300000,signal=new AbortController().signal;
 const def={...CBI2_DEF,id:'suggest-test',formula:'V = Q\nC',scale:10,unit:'点'};
-const plan=compileFishProgram(def,{H:1/12,direction:'>',threshold:0,constraints:[{id:'b',text:'B > 5',enabled:true}]});
+const plan=compileFishProgram(def,{direction:'>',threshold:0,constraints:[{id:'b',text:'B > 5',enabled:true}]});
 const row=(symbol:string,timeMs=anchor):TradeSignal=>({id:symbol+timeMs,symbol,timeMs,timeLabel:'',fallbackZone:''});
 const bars=(cut:number,p:FishProgram,c=2,buy=10)=>Array.from({length:p.N},(_,i)=>({openTime:cut-(p.N-i)*p.step,open:c,close:c,high:c+1,low:c-1,volume:1,quoteVolume:100,takerBuyQuoteVolume:buy,takerBuyVolume:null}));
 const run=(rows:TradeSignal[],load:FishSuggestionLoader,p=plan,onProgress:(p:FishSuggestionProgress)=>void=vi.fn())=>collectFishSuggestion({plan:p,signals:rows,signal,onProgress},load);
@@ -32,7 +32,7 @@ it('约束未知单独跳过；当前结果缺失但A有限时仍接受，与捕
 });
 it('算法键+定义+信号集缓存命中不重取，重排不失效；设置、定义、统计量或信号变化都会过期',async()=>{
  const rows=[row('AAAUSDT'),row('BBBUSDT')],loader=vi.fn(async(_s,c,p)=>bars(c,p));const first=await run(rows,loader);const calls=loader.mock.calls.length,second=await run([...rows].reverse(),loader);expect(second.cacheHit).toBe(true);expect(loader).toHaveBeenCalledTimes(calls);expect(fishSignalFingerprint(rows)).toBe(fishSignalFingerprint([...rows].reverse()));
- const changed=compileFishProgram(def,{...plan.settings,H:1});expect(readFishSuggestion(fishSuggestionKey(changed,rows))).toBeNull();expect(readFishSuggestion(fishSuggestionKey(plan,[...rows,row('CCCUSDT')]))).toBeNull();expect(fishSuggestionKey(compileFishProgram({...def,formula:'C+1'},plan.settings),rows)).not.toBe(first.key);expect(fishSuggestionKey(compileFishProgram(def,{...plan.settings,statistic:'V'}),rows)).not.toBe(first.key);
+ const changed=compileFishProgram(def,{...plan.settings,direction:'<'});expect(readFishSuggestion(fishSuggestionKey(changed,rows))).toBeNull();expect(readFishSuggestion(fishSuggestionKey(plan,[...rows,row('CCCUSDT')]))).toBeNull();expect(fishSuggestionKey(compileFishProgram({...def,formula:'C+1'},plan.settings),rows)).not.toBe(first.key);expect(fishSuggestionKey(compileFishProgram(def,{...plan.settings,statistic:'V'}),rows)).not.toBe(first.key);
 });
 it('固定种子、同一批币、每个有效信号一个±7天随机点；异步完成顺序不影响对照',async()=>{
  const rows=[row('AAAUSDT'),row('BBBUSDT'),row('CCCUSDT')];let phase='signals';const cuts:{symbol:string;cut:number}[]=[];const loader:FishSuggestionLoader=async(symbol,cut,p)=>{if(phase==='random')cuts.push({symbol,cut});return bars(cut,p,(cut/step)%100);};

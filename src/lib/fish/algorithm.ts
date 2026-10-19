@@ -7,7 +7,12 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { coreProgram, featureCoreName } from '@/lib/featureSource';
 import { formatUTC8 } from '@/lib/timeFormat';
 export interface FishConstraint { id: string; text: string; enabled: boolean }
-export interface FishAlgorithmSettings { statistic?: string; H: number; direction: '>' | '<'; threshold: number; constraints: FishConstraint[] }
+/**
+ * 一套捕捞算法：所选序列 statistic 直接与阈值比较（不再在外面套 avg）。
+ * 【用户要求】2026-10-19：「去除最外层的 avg」——要均值就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它，
+ * 与原来「选 CBI2、外层 avg 24h」逐位相同，且不会再出现「均值的均值」。H 只为读旧设置保留，不参与计算。
+ */
+export interface FishAlgorithmSettings { statistic?: string; /** @deprecated 旧版外层 avg 的小时数，已不参与计算 */ H?: number; direction: '>' | '<'; threshold: number; constraints: FishConstraint[] }
 export const FISH_PRESETS = [
   { name: '多周期为正', lines: [24,12,6,3,1].map(h=>`avg(X,${h}) > 0`) },
   { name: '短期强于长期', lines: ['avg(X,1)>=avg(X,3) and avg(X,3)>=avg(X,6) and avg(X,6)>=avg(X,12) and avg(X,12)>=avg(X,24)'] },
@@ -23,7 +28,8 @@ export function shortFishHash(text: string): string {
   return `${(a>>>0).toString(36)}${(b>>>0).toString(36)}`;
 }
 export const constraintFingerprint = (texts: readonly string[]) => shortFishHash(texts.map(normalizeConstraint).join(';'));
-export const fishAlgorithmKey = (id: string,H: number,direction: string,threshold: number,key: string,statistic = '结果') => `${id}|${statistic}|${H}|${direction}|${threshold}|${key}`;
+/** 旧记录（外层 avg H 小时）键里第三段是 H；现在没有外层 avg，第三段写「=」，两种口径的记录不会互相去重。 */
+export const fishAlgorithmKey = (id: string,H: number|undefined,direction: string,threshold: number,key: string,statistic = '结果') => `${id}|${statistic}|${H===undefined?'=':H}|${direction}|${threshold}|${key}`;
 export interface FishStatistic { name: string; label: string }
 /** The evaluator preserves scalar/series types, including aliases and scalar function calls. */
 export function fishStatistics(def: DeepDigFeatureDef): FishStatistic[] {
@@ -33,7 +39,8 @@ export function fishStatistics(def: DeepDigFeatureDef): FishStatistic[] {
     const comment=lines[st.line-1]?.split('#').slice(1).join('#').trim();
     named.set(st.name,comment?`${st.name} · ${comment}`:st.name);
   }
-  return [{name:'结果',label:'avg（结果）'},...Array.from(named,([name,label])=>({name,label}))];
+  const lastName=base.program.statements.at(-1)?.name;
+  return [{name:'结果',label:lastName&&lastName!=='结果'?`结果 · ${lastName}`:'结果'},...Array.from(named,([name,label])=>({name,label}))];
 }
 type Node = Program['statements'][number]['expr'];
 const renameX = (n: Node,name: string): Node => n.k==='var'&&n.name==='X'?{...n,name}:n.k==='un'?{...n,a:renameX(n.a,name)}:n.k==='bin'?{...n,a:renameX(n.a,name),b:renameX(n.b,name)}:n.k==='call'?{...n,args:n.args.map(a=>renameX(a,name))}:n;
@@ -80,31 +87,34 @@ export interface FishProgram {
   texts: string[]; constraintKey: string; algorithmKey: string; warm: number; N: number; step: number; unavailable?: string;
 }
 export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorithmSettings): FishProgram {
-  if(!(Number.isFinite(settings.H)&&settings.H>0))throw new Error('平均时长 H 必须是大于 0 的有限数字（小时）');
   if(!Number.isFinite(settings.threshold))throw new Error('请填写有限数字阈值');
   if(!['>','<'].includes(settings.direction))throw new Error('方向只能选择 > 或 <');
   if(!(Number.isFinite(def.scale)&&def.scale>0))throw new Error('特征值显示倍率必须是有限正数');
   const statistic=settings.statistic??'结果',scale=statistic==='结果'?def.scale:1,unit=statistic==='结果'?def.unit:'原值';
   if(!fishStatistics(def).some(v=>v.name===statistic))throw new Error('所选统计量已不存在或不是序列，请重新选择');
   if(!Number.isFinite(settings.threshold/scale))throw new Error('换算后的阈值超出有效范围');
-  const frozen=structuredClone(def), config={...structuredClone(settings),statistic}, full=compileFeatureFormula(frozen.formula);
+  const {H:_legacyH,...rest}=structuredClone(settings);
+  const frozen=structuredClone(def), config:FishAlgorithmSettings={...rest,statistic}, full=compileFeatureFormula(frozen.formula);
   // Preserve the shared core by default, while explicitly selected/named constraint series remain available.
   const needed=new Set([statistic,...config.constraints.filter(c=>c.enabled).flatMap(c=>[...parseFishConstraint(frozen,c.text).inputs].filter(n=>n!=='X'))]);
   let end=coreProgram(full.program).statements.length;
   full.program.statements.forEach((s,i)=>{if(s.name&&needed.has(s.name))end=Math.max(end,i+1);});
+  // 「结果」= 公式最后一句（与 Deep dig 的结果同一个量，末尾写了均值行就是那条均值）
+  if(statistic==='结果')end=full.program.statements.length;
   const base={...full,program:{...full.program,statements:full.program.statements.slice(0,end)}};
   const used=new Set([...base.program.inputs,...base.program.statements.flatMap(s=>s.name?[s.name]:[])]);
   const name=(hint:string)=>{let n=hint;while(used.has(n))n+='_' ;used.add(n);return n;};
   const resultName=name('__result'),displayName=name('__X'),averageName=name('__A'),mainName=name('__main');
   const statements=base.program.statements.map(s=>({...s}));
   const last=statements.at(-1);if(!last)throw new Error('特征值公式不能为空');
-  // 【用户要求】2026-10-19「不能重复 avg」：被平均的是核心值 X（公式末尾的纯均值行如 avg_CBI2 = avg(CBI2, 24) 不算），
-  // 与 K 线图、Deep dig 用同一条规则（featureSource.featureCoreName）
+  // 约束里的 X = 核心值的显示值（公式末尾的纯均值行如 avg_CBI2 = avg(CBI2, 24) 之前那个量），与 K 线图同一条规则
   let result=featureCoreName(full.program);
   if(!result){last.name=resultName;result=resultName;}
+  if(statistic==='结果'&&!last.name)last.name=resultName;
   const known=new Set([...SERIES_VARIABLES.map(v=>v.name),...PARAM_VARIABLES.flatMap(p=>[p.name,p.alias]),...used]);
-  const statisticName=statistic==='结果'?result:statistic;
-  const tail=parseFormula(`${displayName} = ${result} * ${def.scale}\n${averageName} = avg(${statisticName}, ${settings.H})\n${mainName} = ${averageName} ${settings.direction} ${settings.threshold/scale}`,known);
+  const statisticName=statistic==='结果'?last.name!:statistic;
+  // 主条件：所选序列本身与阈值比较；__A 只是它的别名（快照里的 average 字段沿用旧名）
+  const tail=parseFormula(`${displayName} = ${result} * ${def.scale}\n${averageName} = ${statisticName}\n${mainName} = ${averageName} ${settings.direction} ${settings.threshold/scale}`,known);
   const inputs=new Set([...base.program.inputs,...tail.inputs].filter(n=>!used.has(n)));
   const enabled=config.constraints.filter(c=>c.enabled),texts=enabled.map(c=>normalizeConstraint(c.text));
   const constraintNames=enabled.map(c=>{
@@ -119,9 +129,9 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   evaluateOnBars([],compiled,frozen);
   const step=intervalMs(intervalOf(frozen)), params={hl:halfLifeOf(frozen),半衰期:halfLifeOf(frozen),avgh:avgHoursOf(frozen),平均时长:avgHoursOf(frozen)};
   const windowDef=end<full.program.statements.length?{...frozen,formula:frozen.formula.split(/\r?\n/).slice(0,full.program.statements[end-1].line).join('\n')}:frozen;
-  const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step)+Math.ceil(settings.H*3600000/step),convergenceHistory(program,params,step/60000)+1);
+  const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step),convergenceHistory(program,params,step/60000)+1);
   const N=warm+546, constraintKey=constraintFingerprint(texts);
-  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,settings.H,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,unavailable:!Number.isFinite(N)||N>5000?`需要 ${N} 根历史（含平滑收敛预热），超过 5000 根上限，暂不可扫`:undefined};
+  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,unavailable:!Number.isFinite(N)||N>5000?`需要 ${N} 根历史（含平滑收敛预热），超过 5000 根上限，暂不可扫`:undefined};
 }
 export interface FishValues { value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
 export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgram): FishValues {
@@ -145,6 +155,6 @@ export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:
   while(k>first){const previous=r.condition[k-1];if(!Number.isFinite(previous))return {outcome:'unknown'};if(!previous)break;k--;}
   if(k===first)return {outcome:'unknown'};
   const {def,settings}=plan,timeMs=bars[k].openTime+plan.step;
-  const fish:FishSnapshot={statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),H:settings.H,direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
+  const fish:FishSnapshot={statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
   return {outcome:'hit',signal:{id:`fish-${symbol}-${timeMs}-${encodeURIComponent(plan.algorithmKey)}`,symbol,timeMs,timeLabel:formatUTC8(timeMs),fallbackZone:'',fish}};
 }

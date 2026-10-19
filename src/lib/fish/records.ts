@@ -6,7 +6,8 @@ import { constraintFingerprint, fishAlgorithmKey } from './algorithm';
 /** Migrate deterministically; never let normal signal-library dedup collapse different algorithms. */
 export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const r=s.fish;
-  const texts=r?.constraints??[],H=r?.H??24,direction=r?.direction??'>',threshold=r?.threshold??0.3,featureId=r?.featureId??'cbi2';
+  // 旧记录（外层 avg）有 H；最早的记录连算法键都没有，当时固定是 avg 24h。现在的记录没有 H。
+  const texts=r?.constraints??[],H=r?.H??(r?.algorithmKey?undefined:24),direction=r?.direction??'>',threshold=r?.threshold??0.3,featureId=r?.featureId??'cbi2';
   const statistic=r?.statistic??'结果',constraintKey=constraintFingerprint(texts),algorithmKey=fishAlgorithmKey(featureId,H,direction,threshold,constraintKey,statistic);
   const fish={...r,average:r?.average??NaN,cbi2:r?.cbi2??r?.value??NaN,startAverage:r?.startAverage??NaN,previousAverage:r?.previousAverage??NaN,cutoffMs:r?.cutoffMs??s.timeMs,
     statistic,featureId,featureName:r?.featureName??CBI2_DEF.name,featureShort:r?.featureShort??CBI2_DEF.short,definitionKey:r?.definitionKey??definitionKey(CBI2_DEF),interval:r?.interval??'5m',H,direction,threshold,thresholdRaw:r?.thresholdRaw??threshold/(r?.scale??1),scale:r?.scale??1,unit:r?.unit??CBI2_DEF.unit,constraints:texts,constraintKey,algorithmKey,value:r?.value??r?.cbi2??NaN,startConstraints:r?.startConstraints??[],cutoffConstraints:r?.cutoffConstraints??[]};

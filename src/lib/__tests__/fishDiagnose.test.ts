@@ -7,7 +7,7 @@ import type { ResearchBar } from '@/lib/deepRsa/window';
 
 const STEP = 300000, cut = Date.UTC(2026, 3, 9, 15), signal = new AbortController().signal;
 const def: DeepDigFeatureDef = { ...CBI2_DEF, id: 'simple', short: 'C', formula: 'P = C', scale: 1, unit: '' };
-const algorithm = { H: 1, direction: '>' as const, threshold: 1.5, constraints: [] };
+const algorithm = { direction: '>' as const, threshold: 1.5, constraints: [] };
 const plan = compileFishProgram(def, algorithm);
 const aaa = { symbol: 'RAVEUSDT', instrument: 'RAVEUSDT', base: 'RAVE', multiplier: 1 }, btc = { symbol: 'BTCUSDT', instrument: 'BTCUSDT', base: 'BTC', multiplier: 1 };
 
@@ -44,7 +44,7 @@ describe('【用户要求】2026-10-19「原来能捕到、现在捕不到」：
     const d = await s.diagnose({ symbol: 'rave', anchorMs: cut, feature: def, algorithm, signal });
     expect(d.outcome).toBe('hit');
     expect(d.lines[1]).toContain('会命中');
-    expect(d.lines[1]).toContain('avg(P, 1h) 截止时 = 2.0000');
+    expect(d.lines[1]).toContain('P 截止时 = 2.0000');
     expect(d.lines[0]).toContain(`需要 ${plan.N} 根`);
     const found: any[] = [];
     await s.scan({ feature: def, algorithm, anchorMs: cut, signal, onProgress: () => {}, onSignal: x => found.push(x) });
