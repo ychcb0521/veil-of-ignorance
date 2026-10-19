@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolContext } from '@lovable.dev/mcp-js';
-const createClient = vi.hoisted(() => vi.fn(() => ({ mocked: true })));
+const createClient = vi.hoisted(() => vi.fn((..._args: unknown[]) => ({ mocked: true })));
 vi.mock('@supabase/supabase-js', () => ({ createClient }));
 import { supabaseForUser } from './supabase';
 
