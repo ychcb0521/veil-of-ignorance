@@ -65,8 +65,8 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir(key === 'symbol' ? 'asc' : 'desc'); }
   };
-  return <div className={p.bare ? 'pt-1.5' : 'border-t border-border/50 pt-2'} data-testid={testId}>
-    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="flex items-center gap-1.5 rounded border border-border/60 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+  return <div className={'min-w-0'} data-testid={testId}>
+    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="grid h-8 w-32 grid-cols-[0.75rem_1fr_auto_0.75rem] items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
       {p.title === '新鱼' ? <Sparkles className="h-3 w-3" /> : <Database className="h-3 w-3" />}<span>{title}</span>
       <span className="rounded bg-primary/15 px-1.5 font-mono text-[10px] text-primary">{p.signals.length}</span>
       <ChevronDown className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -77,11 +77,11 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
           <option value="">全部月份（{p.signals.length}）</option>
           {months.map(([key, count]) => <option key={key} value={key}>{key}（{count}）</option>)}
         </select>
-        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法</option>{algorithms.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
-        <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[7rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
-        <button type="button" title="将当前筛选结果加入信号库" disabled={!rows.length} onClick={() => p.onAdd(rows.map(s => s.id))} className="rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40">全部加入信号库</button>
+        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-full sm:max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法</option>{algorithms.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+        <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[8rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
+
       </div>
-      {rows.length ? <div className="min-w-0 overflow-hidden rounded border border-border/60"><div className="min-w-0">
+      {rows.length ? <div className="min-w-0 overflow-x-auto rounded border border-border/60"><div className="min-w-[44rem]">
         <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
         <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowTitle={fishSignalTitle} rowAlgorithm={fishAlgorithmShort} />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}

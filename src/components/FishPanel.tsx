@@ -2,7 +2,7 @@ import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedState
 import {FishAlgorithmCard,type FishCard} from './FishAlgorithmCard';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
-import {compileFishProgram,parseFishConstraint,fishStatistics,FISH_PRESETS,type FishConstraint,type FishProgram} from '@/lib/fish/algorithm';
+import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {readFishPreference,saveFishPreference,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -36,7 +36,8 @@ export interface FishPanelProps {
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
 const cardsKey=()=>`${getUserPrefix()}fish-cards.v1`;
-function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6):[];}catch{return [];}}
+function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:{...c.pref,constraints:[]}})):[];}catch{return [];}}
+const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
 function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
   try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe }; } catch { return { scope: false, detail: false, probe: false }; }
@@ -57,7 +58,7 @@ export function FishPanel(p: FishPanelProps) {
 
   const [extraCards,setExtraCards]=useState<FishCard[]>(()=>readCards().slice(1));
   const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
-  const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??readFishPreference('cbi2'));
+  const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??cleanPreference(readFishPreference('cbi2')));
   const cardsOwner=useRef(owner);
   useEffect(()=>{if(cardsOwner.current!==owner)return;try{writePersistedStateRaw(cardsKey(),JSON.stringify([{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards]));}catch{/* Local storage may be full or disabled. */}},[selected,pref,firstEnabled,extraCards,owner]);
   const [suggestion,setSuggestion]=useState<FishSuggestion|null>(()=>latestFishSuggestion('cbi2'));
@@ -66,22 +67,20 @@ export function FishPanel(p: FishPanelProps) {
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
   const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
-  useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??readFishPreference('cbi2'));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
-  const [constraintsOpen,setConstraintsOpen]=useState(false);
+  useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
   const [probe,setProbe]=useState<{symbol:string;exchange:FishExchange;busy:boolean;result:FishDiagnosis|null}>({symbol:'',exchange:'binance',busy:false,result:null});
-  useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
+  useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(cleanPreference(readFishPreference(def.id)));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const [autoSuggesting,setAutoSuggesting]=useState(false);
   const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=p.progress?.status==='running'||suggesting;
-  const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
-  const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
+  const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:[]});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const multiple=useMemo(()=>{
     const plans=[];let error='';
     const cards=[{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards];
-    for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:c.pref.constraints});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
+    for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
@@ -94,13 +93,10 @@ export function FishPanel(p: FishPanelProps) {
     try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
-  const rowErrors=useMemo(()=>pref.constraints.map(c=>{try{if(def)parseFishConstraint(def,c.text);return '';}catch(e){return e instanceof Error?e.message:String(e);}}),[def,pref.constraints]);
-  const statistics=useMemo(()=>{try{return def?fishStatistics(def):[];}catch{return [];}},[def]);
-  const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:pref.constraints});}catch{return null;}},[def,pref]);
+  const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
   const library=p.librarySignals??[],suggestionKey=suggestionCompiled?fishSuggestionKey(suggestionCompiled,library):'';
   useEffect(()=>{const cached=readFishSuggestion(suggestionKey);setSuggestion(previous=>previous?.key===suggestionKey?previous:cached?{...cached,cacheHit:true}:previous?.featureId===def?.id?previous:def?latestFishSuggestion(def.id):null);},[suggestionKey,def?.id,owner]);
-  const active=pref.constraints.filter(c=>c.enabled),plan=compiled.plan??suggestionCompiled;
-  const statistic=pref.statistic??'结果',statisticUnit=statistic==='结果'?def?.unit??'':'原值';
+  const plan=compiled.plan??suggestionCompiled;
   const suggestionStale=!!suggestion&&suggestion.key!==suggestionKey;
   const prefRef=useRef(pref);prefRef.current=pref;
   /** 每张附加算法卡的建议：按该卡设置编译（阈值不影响分布），同设置的卡共用一份缓存。 */
@@ -108,7 +104,7 @@ export function FishPanel(p: FishPanelProps) {
   /** 这次打开算出但没进缓存的结果（有临时失败时不缓存），也照样显示。 */
   const memResults=useRef(new Map<string,FishSuggestion>());
   const extraSuggest=useMemo(()=>extraCards.map(c=>{
-    try{const d=defs.find(d=>d.id===c.featureId);if(!d||!c.enabled)return null;const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:0,constraints:c.pref.constraints});if(plan.unavailable)return null;const key=fishSuggestionKey(plan,library);return {id:c.id,plan,key,cached:readFishSuggestion(key)??memResults.current.get(key)??null,queued:!autoTried.current.has(key)};}catch{return null;}
+    try{const d=defs.find(d=>d.id===c.featureId);if(!d||!c.enabled)return null;const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:0,constraints:[]});if(plan.unavailable)return null;const key=fishSuggestionKey(plan,library);return {id:c.id,plan,key,cached:readFishSuggestion(key)??memResults.current.get(key)??null,queued:!autoTried.current.has(key)};}catch{return null;}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }),[extraCards,defs,library,suggestionVersion]);
   const calculateSuggestion=async(mode:'auto'|'manual'='manual',target:{id:string;plan:FishProgram}|null=null)=>{
@@ -163,18 +159,16 @@ export function FishPanel(p: FishPanelProps) {
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
-  const changeConstraint=(i:number,patch:Partial<FishConstraint>)=>update({...pref,constraints:pref.constraints.map((c,j)=>j===i?{...c,...patch}:c)});
-  const addConstraints=(lines:string[])=>{update({...pref,constraints:[...pref.constraints,...lines.map((text,i)=>({id:`${Date.now()}-${pref.constraints.length+i}`,text,enabled:true}))]});setConstraintsOpen(true);};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
   const x = p.progress;
 
-  return <section className="mt-2 space-y-2 rounded border border-border/60 bg-background p-3" aria-label="渔" data-testid="fish-panel">
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
+  return <section className="mt-2 min-w-0 space-y-3 rounded-lg border border-border/60 bg-background p-3 sm:p-4" aria-label="渔" data-testid="fish-panel">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
       <div className="flex items-center gap-1"><strong className="text-xs">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
-        <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值；约束里的 X 是核心值（末尾均值行之前那个量）的显示值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
-        <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是主条件和全部启用约束同时连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
+        <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
+        <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
         <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根则整轮中止。</p>
         <p>默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重；加入信号库仍按信号库自身规则合并。设置只保存在本机，捕捞开始后锁定。</p>
         {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
@@ -183,13 +177,7 @@ export function FishPanel(p: FishPanelProps) {
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
     </div>}
 </PopoverContent></Popover></div>
-      <select aria-label="捕捞算法" className="w-56 max-w-[19rem] rounded border border-border/60 bg-background px-1.5 py-1" disabled={running} value={def?.id??''} onChange={e=>{setSelected(e.target.value);setPref(readFishPreference(e.target.value));setError('');}}>{options.map(o=><option key={o.def.id} value={o.def.id} disabled={!!o.reason}>{o.def.short} · {o.def.name}{o.reason?`（${o.reason}）`:''}</option>)}</select>
-      <label className="flex items-center gap-1"><select aria-label="捕捞统计量" className="w-36 max-w-52 rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={statistic} onChange={e=>update({...pref,statistic:e.target.value,threshold:'',lastSuggestion:undefined})}>{statistics.map(v=><option key={v.name} value={v.name}>{v.label}</option>)}</select></label>
-      <label className="flex items-center gap-1">阈值<select aria-label="捕捞方向" className="rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={pref.direction} onChange={e=>changeDirection(e.target.value as '>'|'<')}><option value=">">&gt;</option><option value="<">&lt;</option></select><input aria-label="捕捞阈值" type="number" step="any" className="w-20 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono" value={pref.threshold} disabled={running} onChange={e=>{update({...pref,threshold:e.target.value,lastSuggestion:undefined});p.onInputsChange({...p.inputs,threshold:e.target.value});}}/><span>{statisticUnit}</span></label>
-      <button type="button" aria-label="计算建议" title="重新计算建议：信号库全部信号在各自时刻的读数分位数，另配同币种随机对照（打开时已在后台自动算）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion('manual')}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
-      {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
-      {!suggestion&&autoSuggesting&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
-      <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
+      <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 min-w-0 max-w-full rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
       <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
@@ -198,14 +186,21 @@ export function FishPanel(p: FishPanelProps) {
         <Search className="h-3 w-3" />
       </button>}
     </div>
-    <div className="text-[11px]"><button type="button" className="text-muted-foreground hover:text-foreground" aria-expanded={constraintsOpen} onClick={()=>setConstraintsOpen(v=>!v)}>附加约束 {active.length} {constraintsOpen?'⌃':'⌄'}</button>{constraintsOpen&&<div className="mt-2 max-w-4xl space-y-2">
-      {pref.constraints.map((c,i)=><div key={c.id}><div className="flex items-center gap-2"><input aria-label={`启用约束 ${i+1}`} type="checkbox" checked={c.enabled} disabled={running} onChange={e=>changeConstraint(i,{enabled:e.target.checked})}/><input aria-label={`约束 ${i+1}`} className={`min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${rowErrors[i]?'border-destructive/50':'border-border/60'} ${c.enabled?'':'opacity-50'}`} value={c.text} disabled={running} onChange={e=>changeConstraint(i,{text:e.target.value})}/><button type="button" className={btn} disabled={running} aria-label={`删除约束 ${i+1}`} onClick={()=>update({...pref,constraints:pref.constraints.filter((_,j)=>j!==i)})}>删除</button></div>{rowErrors[i]&&<p className="ml-5 mt-1 text-destructive">{rowErrors[i]}{c.enabled?'':'（已停用，本轮忽略）'}</p>}</div>)}
-      <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
-    </div>}</div>
-    <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><label><input type="checkbox" disabled={running} checked={firstEnabled} onChange={e=>setFirstEnabled(e.target.checked)}/> 启用算法 1</label>{extraCards.length>0&&<button disabled={running} onClick={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}>删除算法 1</button>}</div>
-    {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={autoSuggesting&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
+    <div className="max-w-4xl space-y-1.5" data-testid="fish-algorithms">
+      <FishAlgorithmCard card={{id:'first',featureId:selected,enabled:firstEnabled,pref}} defs={defs} index={1} locked={running} canDelete={extraCards.length>0} footer={<>
+      {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
+      {!suggestion&&autoSuggesting&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
+      </>}
+        onChange={next=>{setFirstEnabled(next.enabled);if(next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setPref(cleanPreference(next.pref));saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
+        onDelete={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}/>
+      {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={autoSuggesting&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
+    </div>
+    <div className="flex flex-wrap items-center gap-2">
     <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
-    <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,active.length,statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 ')}</p>
+      <button type="button" aria-label="计算建议" title="重新计算建议：信号库全部信号在各自时刻的读数分位数，另配同币种随机对照（打开时已在后台自动算）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion('manual')}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
+
+    </div>
+    <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 ')}</p>
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
@@ -246,9 +241,11 @@ export function FishPanel(p: FishPanelProps) {
       {x.error && <p className="text-destructive">{x.error}</p>}
     </div>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
+    <div className="space-y-2 border-t border-border/50 pt-3">
     <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={running ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼」。'}
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} onAdd={p.onAdd} />
-    <FishLibrary title="鱼" testId="fish-old" signals={old} bare emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
+    <FishLibrary title="鱼" testId="fish-old" signals={old} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} onAdd={p.onAdd} />
+    </div>
   </section>;
 }

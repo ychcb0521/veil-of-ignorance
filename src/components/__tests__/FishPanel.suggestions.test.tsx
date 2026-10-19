@@ -57,3 +57,10 @@ it('附加算法卡也有信号库建议：第 1 张算完接着算第 2 张，�
  fireEvent.change(screen.getByLabelText('算法 2 方向'),{target:{value:'<'}});expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(250);
  fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('算法 2 方向'),{target:{value:'>'}});expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(7);
 });
+
+it('建议尚未完成时新增同设置卡片：共用结果也填入第二张的空阈值',async()=>{
+ render(<Harness/>);select();fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
+ await waitFor(()=>expect(screen.getByLabelText('捕捞阈值')).toHaveValue(3),{timeout:3000});
+ await waitFor(()=>expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(3));
+ expect(suggest).toHaveBeenCalledTimes(1);
+});

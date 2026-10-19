@@ -18,8 +18,13 @@ describe('渔的通用算法设置',()=>{
  it('每个特征单独记方向、阈值（不再有外层 avg 的 H）；其它指标必须填写阈值；超出旧±1范围仍可扫',()=>{
   save([custom]);render(<Harness/>);fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:custom.id}});expect(screen.getByLabelText('捕捞阈值')).toHaveValue(null);expect(screen.getByRole('button',{name:'开始捕捞'})).toBeDisabled();fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'100'}});expect(screen.queryByLabelText('捕捞平均时长')).toBeNull();fireEvent.change(screen.getByLabelText('捕捞方向'),{target:{value:'<'}});fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start).toHaveBeenCalledWith(expect.objectContaining({feature:expect.objectContaining({id:custom.id}),algorithm:expect.objectContaining({direction:'<',threshold:100})}));expect(start.mock.calls[0][0].algorithm.H).toBeUndefined();expect(readFishPreference(custom.id)).toMatchObject({threshold:'100',direction:'<'});fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:'cbi2'}});expect(screen.getByLabelText('捕捞阈值')).toHaveValue(.3);fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:custom.id}});expect(screen.getByLabelText('捕捞阈值')).toHaveValue(100);
  });
- it('预设可编辑、逐条停用/删除；错误行中文提示且禁用开始，停用不参与判定',()=>{
-  render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:/附加约束/}));fireEvent.change(screen.getByLabelText('添加约束预设'),{target:{value:'0'}});expect(screen.getAllByRole('checkbox',{name:/启用约束/})).toHaveLength(5);expect(screen.getByTestId('fish-rule')).toHaveTextContent('且 5 条约束');fireEvent.change(screen.getByLabelText('约束 1',{exact:true}),{target:{value:'X >'}});expect(screen.getByRole('button',{name:'开始捕捞'})).toBeDisabled();expect(screen.getByRole('alert')).toHaveTextContent('行');fireEvent.click(screen.getByLabelText('启用约束 1'));expect(screen.getByRole('button',{name:'开始捕捞'})).toBeEnabled();fireEvent.click(screen.getByRole('button',{name:'删除约束 1'}));expect(screen.getAllByRole('checkbox',{name:/启用约束/})).toHaveLength(4);fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start.mock.calls[0][0].algorithm.constraints).toHaveLength(4);
+ it('移除约束入口，旧本机约束也不再进入任一算法的扫描设置',()=>{
+  saveFishPreference('cbi2',{...readFishPreference('cbi2'),constraints:[{id:'legacy',text:'X >',enabled:true}]});
+  localStorage.setItem(getUserPrefix()+'fish-cards.v1',JSON.stringify([{id:'a',featureId:'cbi2',enabled:true,pref:readFishPreference('cbi2')},{id:'b',featureId:'cbi2',enabled:true,pref:readFishPreference('cbi2')}]));
+  render(<Harness/>);expect(screen.queryByText(/附加约束/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+  expect(start.mock.calls[0][0].algorithms).toHaveLength(2);
+  for(const a of start.mock.calls[0][0].algorithms)expect(a.algorithm.constraints).toEqual([]);
  });
 });
 

@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
-  it('按钮紧邻信号库并互斥，评分/删除独立，行和工具栏去重加入信号库，悬停有读数', async () => {
+  it('按钮紧邻信号库并互斥，评分/删除独立，逐条去重加入信号库且无批量入口，悬停有读数', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
     expect(fishButton.previousElementSibling).toHaveTextContent('信号库');
@@ -43,7 +43,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(loadFishSignals()[0].quality).toBe(4);
     expect(mocks.push).toHaveBeenLastCalledWith('fish-owner','fish_signals_v1',expect.any(Array));
     fireEvent.click(within(panel).getByRole('button',{name:'加入信号库'}));
-    fireEvent.click(within(panel).getByRole('button',{name:'全部加入信号库'}));
+    expect(within(panel).queryByRole('button',{name:'全部加入信号库'})).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole('button',{name:'加入信号库'}));
     await waitFor(() => expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1));
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)[0].quality).toBe(4);
     fireEvent.click(screen.getByRole('button',{name:/^信号库/}));
@@ -165,8 +166,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(loadFishSignals()).toHaveLength(2);
     expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('AAAUSDT');
     expect(screen.getByTestId('fish-new-panel')).not.toHaveTextContent('BBBUSDT');
-    // 「全部加入信号库」只加这个列表里的
-    fireEvent.click(within(screen.getByTestId('fish-new-panel')).getByRole('button',{name:'全部加入信号库'}));
+    // 逐条加入当前新鱼，保持新鱼标记不进入信号库
+    fireEvent.click(within(screen.getByTestId('fish-new-panel')).getByRole('button',{name:'加入信号库'}));
     await waitFor(() => expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1));
     const lib = JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!);
     expect(lib[0].symbol).toBe('AAAUSDT');
