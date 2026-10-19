@@ -12,6 +12,8 @@ import {
   setSignalQuality, normalizeSignalQuality, signalChartSymbol,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
+import { useFishReconstruction } from '@/hooks/useFishReconstruction';
+import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish, withoutFresh } from '@/hooks/useFish';
 import { AUDITED_EXCHANGES, type FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel } from '@/components/FishPanel';
@@ -84,6 +86,8 @@ export function TimeControl({
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
+  const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
+  const signalMatches = useMemo(() => reconstructionMatches(reconstruction.result, reconstruction.mode, reconstruction.stale), [reconstruction.result, reconstruction.mode, reconstruction.stale]);
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
   const [importOpen, setImportOpen] = useState(() => signals.length === 0);
   const [importText, setImportText] = useState('');
@@ -527,7 +531,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel} onAdd={handleAddFish}
+      {fishOpen && <FishPanel reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel} onAdd={handleAddFish}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}
@@ -637,12 +641,18 @@ export function TimeControl({
                   : '没有匹配的标的。'}
               </div>
             ) : (
-              <div className="overflow-hidden rounded border border-border/60">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  <label className="inline-flex items-center gap-1">匹配<select aria-label="匹配门槛" className="rounded border border-border/50 bg-background px-1 py-0.5" value={reconstruction.mode} onChange={e=>reconstruction.setMode(e.target.value as 'best'|'current')}><option value="best">最佳门槛</option><option value="current">各卡当前阈值</option></select></label>
+                  {reconstruction.stale&&<span>已过期 · 请在「渔」重新复原</span>}
+                </div>
+                <div className="overflow-x-auto rounded border border-border/60"><div className="min-w-[900px]">
                 {/* 表头：与行共用同一套列宽，四列各有名分，不再靠位置猜 */}
-                <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SignalLibraryHeader showMatch sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 {/* 列表整块 memo 化 + 窗口化：它既不该跟着时钟重渲染，
                     也不该为了 791 条信号一次铺出两万多个节点。 */}
                 <SignalLibraryList
+                  matches={signalMatches}
                   rows={sortedFiltered}
                   tradedDayIndex={tradedDayIndex}
                   campaignDayIndex={campaignDayIndex}
@@ -652,7 +662,7 @@ export function TimeControl({
                   onDelete={handleDeleteSignal}
                   onRate={handleRateSignal}
                 />
-              </div>
+              </div></div></div>
             )}
           </div>
         </div>

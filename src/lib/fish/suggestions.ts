@@ -34,6 +34,8 @@ export type FishSuggestionLoader = (row:FishSampleRow,cut:number,plan:FishProgra
 export interface FishSuggestionOptions {
   plan: FishProgram; signals: readonly TradeSignal[]; signal: AbortSignal;
   onProgress: (p:FishSuggestionProgress)=>void;
+  /** 手动刷新重新取样；后台计算仍复用完整结果。 */
+  force?: boolean;
 }
 export const fishSignalFingerprint = (signals:readonly TradeSignal[]) => shortFishHash(JSON.stringify(signals.map(signalDedupKey).sort()));
 /** 分布只取决于定义、所选序列、启用约束（决定所需根数与通过率）和样本；与方向、阈值无关，改阈值不用重算。 */
@@ -74,7 +76,7 @@ export async function collectFishSuggestion(options:FishSuggestionOptions,load:F
   if(plan.unavailable){options.signal.removeEventListener('abort',cancel);throw new Error(plan.unavailable);}
   const key=fishSuggestionKey(plan,signals),cached=readFishSuggestion(key);
   if(signal.aborted){options.signal.removeEventListener('abort',cancel);check(signal);}
-  if(cached){onProgress({status:'complete',phase:'random',done:cached.samples.attempted+cached.random.attempted,total:cached.samples.attempted+cached.random.attempted,current:''});options.signal.removeEventListener('abort',cancel);return {...cached,cacheHit:true};}
+  if(cached&&!options.force){onProgress({status:'complete',phase:'random',done:cached.samples.attempted+cached.random.attempted,total:cached.samples.attempted+cached.random.attempted,current:''});options.signal.removeEventListener('abort',cancel);return {...cached,cacheHit:true};}
   const result:FishSuggestion={key,algorithmKey:plan.algorithmKey,definitionKey:definitionKey(plan.def),fingerprint:fishSignalFingerprint(signals),featureId:plan.def.id,statistic:plan.settings.statistic??'结果',scale:plan.scale,unit:plan.unit,createdAt:Date.now(),seed:SUGGESTION_SEED,samples:blank(),random:blank()};
   const eligible:TradeSignal[]=[];
   for(const s of signals){if(!Number.isFinite(s.timeMs)||s.timeMs<=0||!/^[A-Z0-9]{1,40}USDT$/.test(s.symbol))skipped(result.samples,'标的或时间无效');else eligible.push(s);}

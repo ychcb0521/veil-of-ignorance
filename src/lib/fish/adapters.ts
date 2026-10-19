@@ -76,7 +76,7 @@ function applySums(bars: readonly ResearchBar[], sums: Map<number,{buy:number;se
     return {...b,takerBuyQuoteVolume:x.buy,takerBuyVolume:x.buyBase};
   });
 }
-export interface FishBarQuery { allowPartial?: boolean; interval: ResearchInterval; count: number }
+export interface FishBarQuery { /** Reconstruction drops out-of-window upstream rows before parsing. */ beforeCutoff?: boolean; allowPartial?: boolean; interval: ResearchInterval; count: number }
 export interface FishDataAdapter {
   readonly exchange: FishExchange;
   list(signal: AbortSignal): Promise<FishMarket[]>;
@@ -128,7 +128,7 @@ export class FishAdapter implements FishDataAdapter {
     const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}`;
     const from=cut-query.count*step,native=nativeFishInterval(this.exchange,query.interval);
     if(native!==query.interval){
-      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio,allowPartial:query.allowPartial});
+      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio,allowPartial:query.allowPartial,beforeCutoff:query.beforeCutoff});
       const prior=new Map((this.cache.get(cacheKey)??[]).map(b=>[b.openTime,b]));
       const grouped:ResearchBar[]=[];
       const groups:ResearchBar[][]=[];
@@ -152,7 +152,10 @@ export class FishAdapter implements FishDataAdapter {
           const path=this.exchange==='okx'?`market/history-candles?instId=${market.instrument}&bar=${fishBarLabel(this.exchange,query.interval)}&after=${cursor}&limit=100`:`history-candles?symbol=${market.instrument}&productType=USDT-FUTURES&granularity=${fishBarLabel(this.exchange,query.interval)}&endTime=${cursor}&limit=200`;
           const j:any=await this.request(path,1,signal);
           if(j.code!==(this.exchange==='okx'?'0':'00000')||!Array.isArray(j.data)) throw new FishError('K线响应无效','failed');
-          const parsed=j.data.map((r:unknown)=>this.exchange==='okx'?parseOkxCandle(r,market.multiplier):parseBitgetCandle(r)).filter((b:ResearchBar|null):b is ResearchBar=>!!b&&b.openTime<cursor&&b.openTime+step<=cut);
+          // Historical-candle cursors are exclusive/aligned. Ignore unsolicited later rows before
+          // parsing: changing a malformed future price must not change a historical reconstruction.
+          const historical=query.beforeCutoff?j.data.filter((r:unknown)=>Array.isArray(r)&&Number(r[0])<cursor&&Number(r[0])+step<=cut):j.data;
+          const parsed=historical.map((r:unknown)=>this.exchange==='okx'?parseOkxCandle(r,market.multiplier):parseBitgetCandle(r)).filter((b:ResearchBar|null):b is ResearchBar=>!!b&&b.openTime<cursor&&b.openTime+step<=cut);
           if(!parsed.length) break;
 
           for(const b of parsed) if(b.openTime>=start) collected.push(b);
@@ -167,7 +170,7 @@ export class FishAdapter implements FishDataAdapter {
 
           const j=await this.request(path,this.exchange==='binance'?5:1,signal);
           if(!Array.isArray(j)) throw new FishError('K线响应无效','failed');
-          for(const r of j) { const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
+          for(const r of j) { if(query.beforeCutoff){const time=this.exchange==='binance'?Number(r?.[0]):Number(r?.t)*1000;if(time<cursor||time>=end||time+step>cut)continue;} const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
           cursor=end;
         }
       }
@@ -189,11 +192,13 @@ export class FishAdapter implements FishDataAdapter {
     let cursor=String(to), previousId:bigint|null=null, offset=0;
     for(;;) {
       abort(signal);
-      const path=this.exchange==='okx'?`market/history-trades?instId=${market.instrument}&type=${previousId===null?2:1}&after=${cursor}&limit=100`:this.exchange==='bitget'?`fills-history?symbol=${market.instrument}&productType=USDT-FUTURES&startTime=${from}&endTime=${to}&limit=1000${previousId===null?'':`&idLessThan=${cursor}`}`:`trades?contract=${market.instrument}&from=${from/1000}&to=${to/1000}&limit=1000&offset=${offset}`;
+      const path=this.exchange==='okx'?`market/history-trades?instId=${market.instrument}&type=${previousId===null?2:1}&after=${cursor}&limit=100`:this.exchange==='bitget'?`fills-history?symbol=${market.instrument}&productType=USDT-FUTURES&startTime=${from}&endTime=${query.beforeCutoff?to-1:to}&limit=1000${previousId===null?'':`&idLessThan=${cursor}`}`:`trades?contract=${market.instrument}&from=${from/1000}&to=${to/1000}&limit=1000&offset=${offset}`;
       const j:any=await this.request(path,1,signal), raw=this.exchange==='gate'?j:j.data;
       if((this.exchange!=='gate'&&j.code!==(this.exchange==='okx'?'0':'00000'))||!Array.isArray(raw)) throw new FishError('历史主动成交请求无效','failed');
       if(!raw.length) break;
-      const trades:TakerTrade[]=raw.map((r:any)=>this.exchange==='okx'?parseOkxTrade(r,market.multiplier):this.exchange==='bitget'?parseBitgetTrade(r):parseGateTrade(r,market.multiplier));
+      const historical=query.beforeCutoff?raw.filter((r:any)=>(this.exchange==='gate'?Number(r.create_time)*1000:Number(r.ts))<to):raw;
+      const trades:TakerTrade[]=historical.map((r:any)=>this.exchange==='okx'?parseOkxTrade(r,market.multiplier):this.exchange==='bitget'?parseBitgetTrade(r):parseGateTrade(r,market.multiplier));
+      if(!trades.length)break;
       const nextId=trades.reduce((min,t)=>BigInt(t.id)<min?BigInt(t.id):min,BigInt(trades[0].id));
       if(previousId!==null&&nextId>=previousId) throw new FishError('主动成交翻页没有推进','readings');
       const seen=new Set<string>();

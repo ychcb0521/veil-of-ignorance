@@ -1,5 +1,7 @@
 import { combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
 import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
+import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
+import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -126,6 +128,19 @@ export class FishScanner {
       if(btc.some(b=>!(b.close>0)))throw new FishError('BTC参考收盘价无效','readings');
       return bars.map(b=>({...b,refClose:closes.get(b.openTime)}));
     });}finally{this.running=false;}
+  }
+  /** Local historical reconstruction; no signal record is changed or saved by the scanner. */
+  async reconstruct(options: FishReconstructionOptions) {
+    if (this.running) throw new Error('捕捞、建议或复原计算正在进行');
+    this.running = true;
+    const load = createFishReconstructionLoader(this.adapters, async signal => {
+      const response = await this.requests.get('binance')!('time', 1, signal) as { serverTime?: number };
+      if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效', 'failed');
+      this.latestServerTime = Math.max(this.latestServerTime, response.serverTime!);
+      return response.serverTime!;
+    });
+    try { return await collectFishReconstruction(options, load); }
+    finally { this.running = false; }
   }
   async estimateMarkets(settings:FishScanSettings,signal:AbortSignal):Promise<number> {
     const selected=EXCHANGE_PRIORITY.filter(e=>(settings.exchanges??['binance']).includes(e));

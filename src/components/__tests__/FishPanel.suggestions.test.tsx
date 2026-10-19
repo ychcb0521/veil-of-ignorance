@@ -28,12 +28,12 @@ it('打开就在后台自动算，空阈值>自动填P25；换方向不重算，
  fireEvent.change(screen.getByLabelText('捕捞方向'),{target:{value:'<'}});expect(screen.getByLabelText('捕捞阈值')).toHaveValue(5);expect(screen.getByTestId('fish-suggestion')).not.toHaveTextContent('已过期');
  fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'99'}});fireEvent.change(screen.getByLabelText('捕捞方向'),{target:{value:'>'}});expect(screen.getByLabelText('捕捞阈值')).toHaveValue(99);expect(readFishPreference(def.id).lastSuggestion).toBeUndefined();
  await act(()=>new Promise(r=>setTimeout(r,1000)));expect(suggest).toHaveBeenCalledTimes(1);
-});
-it('同设置点击走缓存不重取；信号库变动后自动按新样本重算；明细共用淡色入口',async()=>{
- render(<Harness/>);select();await waitFor(()=>expect(screen.getByLabelText('捕捞阈值')).toHaveValue(3),{timeout:3000});const count=load.mock.calls.length;fireEvent.click(screen.getByRole('button',{name:'计算建议'}));await waitFor(()=>expect(screen.getByRole('button',{name:'计算建议'})).toBeEnabled());expect(load).toHaveBeenCalledTimes(count);
- fireEvent.click(screen.getByRole('button',{name:'增加信号'}));expect(screen.getByTestId('fish-suggestion')).toHaveTextContent(/已过期|更新中/);await waitFor(()=>expect(load.mock.calls.length).toBeGreaterThan(count),{timeout:3000});await waitFor(()=>expect(screen.getByTestId('fish-suggestion')).not.toHaveTextContent(/已过期|更新中/),{timeout:3000});
+},10000);
+it('手动刷新重新取样；无记录区间的信号库变动后自动重算；明细共用淡色入口',async()=>{
+ render(<Harness/>);select();await waitFor(()=>expect(screen.getByLabelText('捕捞阈值')).toHaveValue(3),{timeout:3000});const count=load.mock.calls.length;fireEvent.click(screen.getByRole('button',{name:'计算建议'}));await waitFor(()=>expect(screen.getByRole('button',{name:'计算建议'})).toBeEnabled(),{timeout:3000});expect(load.mock.calls.length).toBeGreaterThan(count);expect(suggest.mock.calls[suggest.mock.calls.length-1]?.[0].force).toBe(true);
+ const refreshedCount=load.mock.calls.length;fireEvent.click(screen.getByRole('button',{name:'增加信号'}));expect(screen.getByTestId('fish-suggestion')).toHaveTextContent(/已过期|更新中/);await waitFor(()=>expect(load.mock.calls.length).toBeGreaterThan(refreshedCount),{timeout:3000});await waitFor(()=>expect(screen.getByTestId('fish-suggestion')).not.toHaveTextContent(/已过期|更新中/),{timeout:3000});
  fireEvent.click(screen.getByRole('button',{name:'捕捞说明'}));expect(screen.getByTestId('fish-suggestion-detail')).toHaveTextContent('随机对照');
-});
+},10000);
 it('后台计算时点开始捕捞：先停掉建议再开始',async()=>{
  const delayed=vi.fn((o:FishSuggestionOptions)=>new Promise<any>((_resolve,reject)=>{o.onProgress({status:'running',phase:'signals',done:1,total:2,current:'AAAUSDT'});o.signal.addEventListener('abort',()=>reject(new DOMException('已取消','AbortError')),{once:true});}));
  render(<Harness onSuggest={delayed}/>);select();fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'2'}});await waitFor(()=>expect(delayed).toHaveBeenCalled(),{timeout:3000});expect(screen.getByTestId('fish-suggestion-auto')).toHaveTextContent('建议计算中 1 / 2');expect(screen.getByRole('button',{name:'开始捕捞'})).toBeEnabled();
@@ -64,3 +64,20 @@ it('建议尚未完成时新增同设置卡片：共用结果也填入第二张�
  await waitFor(()=>expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(3));
  expect(suggest).toHaveBeenCalledTimes(1);
 });
+
+
+it('已有记录区间的卡不自动排队或取数，淡色刷新只手动重算对应算法',async()=>{
+ render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
+ fireEvent.change(screen.getByLabelText('算法 2 特征值'),{target:{value:'cba'}});
+ await act(()=>new Promise(r=>setTimeout(r,1000)));
+ expect(suggest).not.toHaveBeenCalled();expect(load).not.toHaveBeenCalled();expect(screen.queryByText(/建议排队中/)).toBeNull();
+ expect(screen.getByTestId('fish-recorded-range-1')).toHaveTextContent('-0.0108802 ~ 0.0396005');
+ expect(screen.getByTestId('fish-recorded-range-2')).toHaveTextContent('2.05893 ~ 7.73665');
+ fireEvent.click(screen.getByRole('button',{name:'重新计算算法 2 的区间'}));
+ await waitFor(()=>expect(suggest).toHaveBeenCalledTimes(1));
+ expect(suggest.mock.calls[0][0]).toEqual(expect.objectContaining({force:true,plan:expect.objectContaining({def:expect.objectContaining({id:'cba'})})}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'重新计算算法 2 的区间'})).toBeEnabled(),{timeout:3000});
+ fireEvent.change(screen.getByLabelText('算法 2 特征值'),{target:{value:'drift-speed-z'}});
+ expect(screen.getByTestId('fish-recorded-range-2')).toHaveTextContent('2.0469 ~ 10.0813');
+ await act(()=>new Promise(r=>setTimeout(r,1000)));expect(suggest).toHaveBeenCalledTimes(1);
+},10000);

@@ -3,15 +3,16 @@ import type {DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {readFishPreference,type FishPreference} from '@/lib/fish/preferences';
 import {useMemo,useEffect,type ReactNode} from 'react';
 import {fishSuggestionTitle,mayFillFishThreshold,suggestedFishThreshold,type FishSuggestion} from '@/lib/fish/suggestions';
-import { X } from 'lucide-react';
+import { RotateCw, X } from 'lucide-react';
 // 用户于 2026-10-19 指定保留的截图区间；固定参考备注，不随新计算覆盖。
-const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:string;samples:number}>={
+export const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:string;samples:number}>={
  bss:{statistic:'avg_BSS',low:'-0.0227936',high:'0.0827297',samples:745},
  cba:{statistic:'avg_CBA',low:'2.05893',high:'7.73665',samples:733},
  cbi2:{statistic:'avg_CBI2',low:'-0.0108802',high:'0.0396005',samples:715},
+ 'drift-speed-z':{statistic:'avg_a',low:'2.0469',high:'10.0813',samples:707},
 };
 export interface FishCard {id:string;featureId:string;enabled:boolean;pref:FishPreference}
-export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode}) {
+export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canDelete=true,suggestion=null,computing='',queued=false,librarySize=0,footer,onRecalculate,recalculateDisabled=false,recalculating=false}:{card:FishCard;defs:DeepDigFeatureDef[];locked:boolean;index:number;onChange:(card:FishCard)=>void;onDelete:()=>void;canDelete?:boolean;suggestion?:FishSuggestion|null;computing?:string;queued?:boolean;librarySize?:number;footer?:ReactNode;onRecalculate?:()=>void;recalculateDisabled?:boolean;recalculating?:boolean}) {
  const def=defs.find(d=>d.id===card.featureId),p=card.pref,recorded=RECORDED_RANGES[card.featureId];
  const update=(patch:Partial<FishPreference>)=>onChange({...card,pref:{...p,...patch,constraints:[]}});
  // A card added before a shared suggestion finishes must also consume that cached result.
@@ -20,6 +21,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const cls='h-8 min-w-0 w-full rounded-md border border-border/60 bg-background px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
  const options=useMemo(()=>defs.map(d=>{try{const plan=compileFishProgram(d,{direction:'>',threshold:0,constraints:[]});return {def:d,reason:plan.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
  const label=(field:string)=>index===1?`捕捞${field==='特征值'?'算法':field}`:`算法 ${index} ${field}`;
+ const refresh=onRecalculate?<button type="button" aria-label={index===1?'计算建议':`重新计算算法 ${index} 的区间`} title="重新计算区间（点击后才取数）" disabled={recalculateDisabled} className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded align-middle text-muted-foreground/35 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-30" onClick={onRecalculate}><RotateCw className={`h-2.5 w-2.5 ${recalculating?'animate-spin':''}`}/></button>:null;
  return <fieldset disabled={locked} className={`min-w-0 rounded-md bg-muted/25 p-2 text-[11px] ${card.enabled?'':'opacity-50'}`} aria-label={`算法 ${index}`}>
  <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_3rem_5.5rem_2rem] items-center gap-2 sm:grid-cols-[4.5rem_minmax(0,1.7fr)_minmax(0,1fr)_3rem_5.5rem_2rem]">
  <label className="col-span-4 flex items-center gap-2 whitespace-nowrap text-muted-foreground sm:col-span-1"><input className="h-3.5 w-3.5 accent-primary" aria-label={`启用算法 ${index}`} type="checkbox" checked={card.enabled} onChange={e=>onChange({...card,enabled:e.target.checked})}/>算法 {index}</label>
@@ -29,7 +31,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  <div className="relative min-w-0"><input aria-label={label('阈值')} title={p.statistic&&p.statistic!=='结果'?'原值':def?.unit} className={`${cls} pr-7 font-mono tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/><span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground">{p.statistic&&p.statistic!=='结果'?'原值':def?.unit}</span></div>
  <button type="button" aria-label={`删除算法 ${index}`} title="删除算法" disabled={!canDelete} className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-background hover:text-foreground disabled:invisible" onClick={onDelete}><X className="h-3.5 w-3.5"/></button>
  </div>
- <div className="mt-1 text-[10px] leading-relaxed sm:pl-20"> {footer??<>{suggestion?<span className="text-[10px] text-muted-foreground" data-testid={`fish-suggestion-${index}`} title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {librarySize} 条）</span>:computing?<span className="text-[10px] text-muted-foreground/70" data-testid={`fish-suggestion-auto-${index}`}>信号库建议计算中 {computing}</span>:queued&&card.enabled&&librarySize>0?<span className="text-[10px] text-muted-foreground/50">信号库建议排队中</span>:null}</>}</div>
- {recorded&&<p className="mt-0.5 break-words text-[10px] leading-relaxed text-muted-foreground/70 sm:pl-20" title={`2026-10-19 截图记录 · ${recorded.statistic} · ${recorded.samples} / 793 条；固定参考区间，保留截图精度`} data-testid={`fish-recorded-range-${index}`}>记录区间 · {recorded.statistic}：<span className="font-mono tabular-nums">{recorded.low} ~ {recorded.high}</span></p>}
+ <div className="mt-1 text-[10px] leading-relaxed sm:pl-20"> {footer??<>{suggestion?<span className="text-[10px] text-muted-foreground" data-testid={`fish-suggestion-${index}`} title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {librarySize} 条）</span>:computing?<span className="text-[10px] text-muted-foreground/70" data-testid={`fish-suggestion-auto-${index}`}>信号库建议计算中 {computing}</span>:queued&&card.enabled&&librarySize>0?<span className="text-[10px] text-muted-foreground/50">信号库建议排队中</span>:null}</>}{!recorded&&refresh}</div>
+ {recorded&&<p className="mt-0.5 break-words text-[10px] leading-relaxed text-muted-foreground/70 sm:pl-20" title={`2026-10-19 截图记录 · ${recorded.statistic} · ${recorded.samples} / 793 条；固定参考区间，保留截图精度`} data-testid={`fish-recorded-range-${index}`}>记录区间 · {recorded.statistic}：<span className="font-mono tabular-nums">{recorded.low} ~ {recorded.high}</span>{refresh}</p>}
  {card.enabled&&error&&<p className="mt-1 break-words text-destructive" role="alert">{error}</p>}</fieldset>;
 }

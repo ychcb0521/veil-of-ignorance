@@ -29,7 +29,8 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { SIGNAL_LIBRARY_GRID } from '@/components/SignalLibraryHeader';
+import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
+import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID } from '@/components/SignalLibraryHeader';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
@@ -187,6 +188,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  match?: SignalReconstructionMatch;
+  showMatch?: boolean;
   market?: 'us_stock';
   exchange?: FishExchange;
   chartUnavailable?: boolean;
@@ -223,7 +226,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm, match, showMatch,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -233,7 +236,7 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      data-testid="signal-library-row" className={`group ${SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
+      data-testid="signal-library-row" className={`group ${showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
@@ -284,7 +287,7 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
-      {onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
+      {showMatch ? <SignalMatchCell match={match}/> : onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
           它说的就是「这个箭头点不动」，挨着它才读得出因果；
@@ -325,6 +328,7 @@ function SignalLibraryRowImpl({
 export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
 interface Props {
+  matches?: ReadonlyMap<string, SignalReconstructionMatch>;
   rowTitle?: (signal: TradeSignal) => string;
   rowAlgorithm?: (signal: TradeSignal) => string;
   /** 放在另一个可滚动区域里（如「渔」）：滚到列表头 / 尾后把滚动交给外层，不卡住。 */
@@ -363,7 +367,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false,
+  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false, matches,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -539,6 +543,8 @@ function SignalLibraryListImpl({
       <SignalLibraryRow
         key={sig.id}
         id={sig.id}
+        showMatch={matches !== undefined}
+        match={matches?.get(sig.id)}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}
         onAdd={onAdd}

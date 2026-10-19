@@ -2,11 +2,14 @@ import type { SignalSortKey } from '@/lib/signalLibrary';
 
 export const SIGNAL_LIBRARY_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(0,1fr)_20px_20px_20px] items-center gap-2';
 
+export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(200px,1fr)_20px_20px_20px] items-center gap-2';
+
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false }: {
+  showMatch?: boolean;
   sortKey: SignalSortKey; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
 }) {
-  return <div data-testid="signal-library-header" className={`${SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
+  return <div data-testid="signal-library-header" className={`${showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
     <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">
       <span aria-hidden />
       <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => onSort('symbol')} />
@@ -15,7 +18,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort }: {
     <span>兜底区</span>
     <span>市场</span>
     <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => onSort('quality')} />
-    <span aria-hidden /><span aria-hidden /><span aria-hidden /><span aria-hidden />
+    {showMatch ? <span>匹配</span> : <span aria-hidden />}<span aria-hidden /><span aria-hidden /><span aria-hidden />
   </div>;
 }
 
