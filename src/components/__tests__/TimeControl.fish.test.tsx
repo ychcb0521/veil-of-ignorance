@@ -6,6 +6,7 @@ import { SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
 import { initialFishProgress } from '@/lib/fishScanner';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
+import { saveFishPreference } from '@/lib/fish/preferences';
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
 vi.mock('@/lib/fishScanner', async original => ({ ...await original<typeof import('@/lib/fishScanner')>(), FishScanner: class { scan = mocks.scan; } }));
@@ -23,6 +24,8 @@ beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear();
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,'[]');
   localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([SIGNAL]));
+  // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已填过 0.3 测捕捞流程
+  saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {

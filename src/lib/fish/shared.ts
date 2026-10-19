@@ -3,7 +3,7 @@ export const FISH_STEP = 300_000;
 export const FISH_BARS = 2000;
 export const FISH_FIRST_USABLE = 1454;
 export const FISH_THRESHOLD = 0.3;
-export class FishError extends Error { constructor(message: string, readonly kind: 'gap' | 'readings' | 'failed' | 'banned' | 'history', readonly detail?: { path?: string; status?: number }) { super(message); } }
+export class FishError extends Error { constructor(message: string, readonly kind: 'gap' | 'readings' | 'failed' | 'banned' | 'history' | 'skipped', readonly detail?: { path?: string; status?: number }) { super(message); } }
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 export function fishDelay(ms: number, signal: AbortSignal): Promise<void> {
   check(signal);

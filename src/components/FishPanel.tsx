@@ -66,6 +66,9 @@ export function FishPanel(p: FishPanelProps) {
   const [suggestion,setSuggestion]=useState<FishSuggestion|null>(()=>latestFishSuggestion('cbi2'));
   const [suggestionProgress,setSuggestionProgress]=useState<FishSuggestionProgress|null>(null);
   const suggestionController=useRef<AbortController|null>(null);
+  /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
+  const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>}|null>(null);
+  const autoTried=useRef(new Set<string>());
   useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??readFishPreference('cbi2'));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const [constraintsOpen,setConstraintsOpen]=useState(false);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
@@ -74,7 +77,8 @@ export function FishPanel(p: FishPanelProps) {
   const [probe,setProbe]=useState<{symbol:string;exchange:FishExchange;busy:boolean;result:FishDiagnosis|null}>({symbol:'',exchange:'binance',busy:false,result:null});
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
-  const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,suggesting=suggestionProgress?.status==='running',running=p.progress?.status==='running'||suggesting;
+  const [autoSuggesting,setAutoSuggesting]=useState(false);
+  const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=p.progress?.status==='running'||suggesting;
   const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const multiple=useMemo(()=>{
@@ -106,26 +110,47 @@ export function FishPanel(p: FishPanelProps) {
   const active=pref.constraints.filter(c=>c.enabled),plan=compiled.plan??suggestionCompiled;
   const statistic=pref.statistic??'结果',statisticUnit=statistic==='结果'?def?.unit??'':'原值';
   const suggestionStale=!!suggestion&&suggestion.key!==suggestionKey;
-  const calculateSuggestion=async()=>{
+  const prefRef=useRef(pref);prefRef.current=pref;
+  const calculateSuggestion=async(mode:'auto'|'manual'='manual')=>{
     if(!suggestionCompiled||suggestionCompiled.unavailable||!p.onSuggest||running||probe.busy)return;
+    // 同一个取数器一次只算一份：手动点时先停掉后台那份、等它收尾
+    const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const mine=new AbortController();suggestionController.current=mine;
-    const samples=[...library],frozen=suggestionCompiled;setError('');setSuggestionProgress({status:'running',phase:'signals',done:0,total:0,current:''});
+    const samples=[...library],frozen=suggestionCompiled,key=fishSuggestionKey(frozen,samples);
+    if(mode==='manual')setError('');
+    setAutoSuggesting(mode==='auto');setSuggestionProgress({status:'running',phase:'signals',done:0,total:0,current:''});
     const valid=()=>suggestionController.current===mine&&!mine.signal.aborted;
-    try{
-      let result=await p.onSuggest({plan:frozen,signals:samples,signal:mine.signal,onProgress:value=>{if(suggestionController.current===mine)setSuggestionProgress(value);}});
+    const done=(async()=>{try{
+      const result=await p.onSuggest!({plan:frozen,signals:samples,signal:mine.signal,onProgress:value=>{if(suggestionController.current===mine)setSuggestionProgress(value);}});
       if(!valid())return;
-      const threshold=suggestedFishThreshold(result,pref.direction);
-      if(threshold!==null&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){
-        const value=String(threshold),next={...pref,threshold:value,lastSuggestion:value};update(next);p.onInputsChange({...p.inputs,threshold:value});
-        // Threshold changes neither A nor constraints. Bind the same measurements to the auto-filled plan.
-        const filled=compileFishProgram(frozen.def,{...frozen.settings,threshold});
-        result={...result,key:fishSuggestionKey(filled,samples),algorithmKey:filled.algorithmKey};saveFishSuggestion(result);
-      }
+      // 阈值为空、或仍是上次自动填的建议值时填入；手动改过的不覆盖
+      const current=prefRef.current,threshold=suggestedFishThreshold(result,current.direction);
+      if(threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...p.inputs,threshold:value});}
       setSuggestion(result);setSuggestionProgress(value=>value?{...value,status:'complete'}:null);
-    }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted)setError(e instanceof Error?e.message:String(e));}}
-    finally{if(suggestionController.current===mine)suggestionController.current=null;}
+    }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted&&mode==='manual')setError(e instanceof Error?e.message:String(e));}}
+    finally{if(suggestionController.current===mine)suggestionController.current=null;if(suggestionRun.current?.done===done){suggestionRun.current=null;setAutoSuggesting(false);}}})();
+    suggestionRun.current={mode,key,done};
   };
-  const start=()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+  // 【用户要求】2026-10-19「默认的建议区间…源于信号库中所有信号的统计」：当前设置还没有建议时，打开就在后台算；
+  // 设置一变（换特征值 / 序列 / 约束 / 公式 / 信号库）先停掉旧的再按新设置算；同一设置每次打开只自动算一次
+  const scanning=p.progress?.status==='running';
+  useEffect(()=>{
+    if(suggestionRun.current?.mode==='auto'&&suggestionRun.current.key!==suggestionKey)suggestionController.current?.abort();
+    if(!suggestionKey||!library.length||scanning||suggestionRun.current||autoTried.current.has(suggestionKey)||readFishSuggestion(suggestionKey))return;
+    const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(suggestionKey))return;autoTried.current.add(suggestionKey);void calculateSuggestion('auto');},800);
+    return()=>clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[suggestionKey,scanning,library.length,autoSuggesting]);
+  // 方向一换，阈值仍是上次自动填的建议时改填另一端（> 取 P25，< 取 P75）；分布与方向无关，不用重算
+  const changeDirection=(direction:'>'|'<')=>{
+    const fill=suggestion&&!suggestionStale?suggestedFishThreshold(suggestion,direction):null;
+    if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...p.inputs,threshold:value});}
+    else update({...pref,direction});
+  };
+  const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');
+    // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
+    const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
+    p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const changeConstraint=(i:number,patch:Partial<FishConstraint>)=>update({...pref,constraints:pref.constraints.map((c,j)=>j===i?{...c,...patch}:c)});
   const addConstraints=(lines:string[])=>{update({...pref,constraints:[...pref.constraints,...lines.map((text,i)=>({id:`${Date.now()}-${pref.constraints.length+i}`,text,enabled:true}))]});setConstraintsOpen(true);};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
@@ -148,11 +173,12 @@ export function FishPanel(p: FishPanelProps) {
 </PopoverContent></Popover></div>
       <select aria-label="捕捞算法" className="w-56 max-w-[19rem] rounded border border-border/60 bg-background px-1.5 py-1" disabled={running} value={def?.id??''} onChange={e=>{setSelected(e.target.value);setPref(readFishPreference(e.target.value));setError('');}}>{options.map(o=><option key={o.def.id} value={o.def.id} disabled={!!o.reason}>{o.def.short} · {o.def.name}{o.reason?`（${o.reason}）`:''}</option>)}</select>
       <label className="flex items-center gap-1"><select aria-label="捕捞统计量" className="w-36 max-w-52 rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={statistic} onChange={e=>update({...pref,statistic:e.target.value,threshold:'',lastSuggestion:undefined})}>{statistics.map(v=><option key={v.name} value={v.name}>{v.label}</option>)}</select></label>
-      <label className="flex items-center gap-1">阈值<select aria-label="捕捞方向" className="rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={pref.direction} onChange={e=>update({...pref,direction:e.target.value as '>'|'<'})}><option value=">">&gt;</option><option value="<">&lt;</option></select><input aria-label="捕捞阈值" type="number" step="any" className="w-20 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono" value={pref.threshold} disabled={running} onChange={e=>{update({...pref,threshold:e.target.value,lastSuggestion:undefined});p.onInputsChange({...p.inputs,threshold:e.target.value});}}/><span>{statisticUnit}</span></label>
-      <button type="button" aria-label="计算建议" title="计算建议：信号库里的币安信号与同币种随机对照（点击后才取数）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion()}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
-      {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'暂无有效建议':`建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（n = {suggestion.samples.n}）{suggestionStale?' · 已过期':suggestion.cacheHit?' · 缓存':''}</span>}
+      <label className="flex items-center gap-1">阈值<select aria-label="捕捞方向" className="rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={pref.direction} onChange={e=>changeDirection(e.target.value as '>'|'<')}><option value=">">&gt;</option><option value="<">&lt;</option></select><input aria-label="捕捞阈值" type="number" step="any" className="w-20 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono" value={pref.threshold} disabled={running} onChange={e=>{update({...pref,threshold:e.target.value,lastSuggestion:undefined});p.onInputsChange({...p.inputs,threshold:e.target.value});}}/><span>{statisticUnit}</span></label>
+      <button type="button" aria-label="计算建议" title="重新计算建议：信号库全部信号在各自时刻的读数分位数，另配同币种随机对照（打开时已在后台自动算）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion('manual')}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
+      {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'暂无有效建议':`建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（n = {suggestion.samples.n}）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
+      {!suggestion&&autoSuggesting&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">建议计算中 {suggestionProgress.done} / {suggestionProgress.total||'…'}</span>}
       <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
-      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={start}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
+      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
       </button>

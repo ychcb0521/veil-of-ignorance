@@ -81,26 +81,45 @@ export class FishScanner {
       this.requests.set(exchange, transport); this.adapters.set(exchange, provided[exchange] ?? new FishAdapter(exchange, transport));
     }
   }
-  /** Uses exactly the fishing adapter, page cache, request pool and Binance weight budget. */
+  /**
+   * 阈值建议的取数：与捕捞同一套适配器、K 线缓存、请求池与限速。
+   * 每条样本按它自己的交易所 / 市场取（币安加密币直接按名字取，下架的也能取到历史；其它家与美股按当前合约列表找到合约）；
+   * 超出该家保留期、或该家现在没有这个合约的，跳过并计数。
+   */
   async suggest(options:FishSuggestionOptions) {
     if(this.running)throw new Error('捕捞或建议计算正在进行');
     this.running=true;
     let clock:Promise<unknown>|undefined;
-    try{return await collectFishSuggestion(options,async(symbol,cut,plan,signal)=>{
-      if(cut>Math.floor(this.latestServerTime/plan.step)*plan.step){
+    const lists=new Map<FishExchange,Promise<FishMarket[]>>();
+    try{return await collectFishSuggestion(options,async(row,cut,plan,signal)=>{
+      if(cut>Math.floor(this.latestServerTime/plan.step)*plan.step||!this.latestServerTime){
         clock??=this.requests.get('binance')!('time',1,signal);
         const response=await clock as {serverTime?:number};
         if(!Number.isFinite(response.serverTime)||response.serverTime!<=0)throw new FishError('币安服务器时间无效','failed');
         this.latestServerTime=Math.max(this.latestServerTime,response.serverTime!);
         if(cut>Math.floor(this.latestServerTime/plan.step)*plan.step)throw new FishError('该时间点尚未全部收盘（晚于币安服务器时间）','readings');
       }
-      const adapter=this.adapters.get('binance')!,query={interval:intervalOf(plan.def),count:plan.N};
-      const market:FishMarket={symbol,instrument:symbol,base:symbol.replace(/USDT$/,''),multiplier:1};
+      const exchange:FishExchange=row.exchange??'binance',adapter=this.adapters.get(exchange);
+      if(!adapter)throw new FishError(`不支持的交易所 ${exchange}`,'skipped');
+      const query={interval:intervalOf(plan.def),count:plan.N};
+      const retention=fishRetentionReason(exchange,cut,this.latestServerTime,plan.N,plan.step,plan.usesTaker,query.interval);
+      if(retention)throw new FishError(`${EXCHANGE_NAMES[exchange]}：${retention}`,'skipped');
+      let market:FishMarket|undefined;
+      if(exchange==='binance'&&row.market!=='us_stock')market={symbol:row.symbol,instrument:row.symbol,base:row.symbol.replace(/USDT$/,''),multiplier:1};
+      else{
+        let list=lists.get(exchange);if(!list){list=adapter.list(signal);lists.set(exchange,list);list.catch(()=>lists.delete(exchange));}
+        const markets=await list,code=(row.underlying||row.symbol.replace(/USDT$/,'')).toUpperCase();
+        market=markets.find(m=>m.symbol===row.symbol&&(row.market==='us_stock')===(m.market==='us_stock'))
+          ??(row.market==='us_stock'?markets.find(m=>m.market==='us_stock'&&(m.underlying||m.base).toUpperCase()===code):undefined);
+        if(!market)throw new FishError(`${EXCHANGE_NAMES[exchange]}现在没有 ${row.symbol} 这个合约`,'skipped');
+      }
       const raw=await adapter.candles(market,cut,signal,query);validateFishBars(raw,cut,plan.N,plan.step);
       const bars=plan.usesTaker?await adapter.taker(market,raw,signal,query):raw;
       if(bars.some(b=>plan.compiled.usesAmounts&&(b.quoteVolume==null||(plan.usesTaker&&b.takerBuyQuoteVolume==null))))throw new FishError('成交额读数不全','readings');
       if(!plan.compiled.usesBtc)return bars;
-      const btc=await adapter.candles({symbol:'BTCUSDT',instrument:'BTCUSDT',base:'BTC',multiplier:1},cut,signal,query);
+      // 用到 CB 时取同一家的 BTC 永续（与捕捞相同）；币安直接按名字取，其它家合约列表上面已经拉过
+      const btcMarket:FishMarket=exchange==='binance'?{symbol:'BTCUSDT',instrument:'BTCUSDT',base:'BTC',multiplier:1}:adapter.btc();
+      const btc=await adapter.candles(btcMarket,cut,signal,query);
       validateFishBars(btc,cut,plan.N,plan.step);const closes=new Map(btc.map(b=>[b.openTime,b.close]));
       if(btc.some(b=>!(b.close>0)))throw new FishError('BTC参考收盘价无效','readings');
       return bars.map(b=>({...b,refClose:closes.get(b.openTime)}));

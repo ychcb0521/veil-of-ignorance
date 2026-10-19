@@ -1,4 +1,9 @@
-/** Manual, descriptive threshold suggestions. No prices after a sample's own cutoff enter its reading. */
+/**
+ * 阈值建议：信号库里每条信号在它自己的时刻读一次所选序列，取分位数；另配同币种随机时点作对照。
+ * 每条样本只用它截止前已收盘的 K 线。
+ * 【用户要求】2026-10-19「阈值这里给出一个默认的建议区间（并且可以手动输入），这个默认区间应该源于大的信号库中的所有信号的统计所得」：
+ * 打开「渔」就在后台算（不用点）；样本是信号库全部信号，各按自己的交易所 / 市场取数（不再只取币安加密币）。
+ */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -23,14 +28,18 @@ export interface FishSuggestion {
 export interface FishSuggestionProgress {
   status: 'running'|'complete'|'cancelled'|'aborted'; phase: 'signals'|'random'; done: number; total: number; current: string;
 }
-export type FishSuggestionLoader = (symbol:string,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>;
+/** 一个取样点：标的、时刻，以及它在哪家交易所、是不是美股（取数要按它自己的来源）。 */
+export interface FishSampleRow { symbol:string; timeMs:number; exchange?:TradeSignal['exchange']; market?:TradeSignal['market']; underlying?:string }
+export type FishSuggestionLoader = (row:FishSampleRow,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>;
 export interface FishSuggestionOptions {
   plan: FishProgram; signals: readonly TradeSignal[]; signal: AbortSignal;
   onProgress: (p:FishSuggestionProgress)=>void;
 }
 export const fishSignalFingerprint = (signals:readonly TradeSignal[]) => shortFishHash(JSON.stringify(signals.map(signalDedupKey).sort()));
-export const fishSuggestionKey = (plan:FishProgram,signals:readonly TradeSignal[]) => `${plan.algorithmKey}|${definitionKey(plan.def)}|${fishSignalFingerprint(signals)}`;
-const storageKey=()=>`${getUserPrefix()}fish-threshold-suggestions.v1`;
+/** 分布只取决于定义、所选序列、启用约束（决定所需根数与通过率）和样本；与方向、阈值无关，改阈值不用重算。 */
+export const fishSuggestionKey = (plan:FishProgram,signals:readonly TradeSignal[]) => `${plan.def.id}|${plan.settings.statistic??'结果'}|${plan.constraintKey}|${definitionKey(plan.def)}|${fishSignalFingerprint(signals)}`;
+// v2：去掉外层 avg、样本扩到全部交易所之后的口径，旧结果不再沿用
+const storageKey=()=>`${getUserPrefix()}fish-threshold-suggestions.v2`;
 function cachedSuggestions():FishSuggestion[] {
   try {const x=JSON.parse(readPersistedStateRaw(storageKey())??'[]');return Array.isArray(x)?x.filter(s=>s&&typeof s.key==='string'&&s.samples&&s.random):[];} catch {return [];}
 }
@@ -66,17 +75,17 @@ export async function collectFishSuggestion(options:FishSuggestionOptions,load:F
   if(cached){onProgress({status:'complete',phase:'random',done:cached.samples.attempted+cached.random.attempted,total:cached.samples.attempted+cached.random.attempted,current:''});options.signal.removeEventListener('abort',cancel);return {...cached,cacheHit:true};}
   const result:FishSuggestion={key,algorithmKey:plan.algorithmKey,definitionKey:definitionKey(plan.def),fingerprint:fishSignalFingerprint(signals),featureId:plan.def.id,statistic:plan.settings.statistic??'结果',scale:plan.scale,unit:plan.unit,createdAt:Date.now(),seed:SUGGESTION_SEED,samples:blank(),random:blank()};
   const eligible:TradeSignal[]=[];
-  for(const s of signals){if(s.market==='us_stock')skipped(result.samples,'美股');else if(s.exchange&&s.exchange!=='binance')skipped(result.samples,'外所');else if(!Number.isFinite(s.timeMs)||s.timeMs<=0||!/^[A-Z0-9]{1,40}USDT$/.test(s.symbol))skipped(result.samples,'标的或时间无效');else eligible.push(s);}
+  for(const s of signals){if(!Number.isFinite(s.timeMs)||s.timeMs<=0||!/^[A-Z0-9]{1,40}USDT$/.test(s.symbol))skipped(result.samples,'标的或时间无效');else eligible.push(s);}
   eligible.sort((a,b)=>signalDedupKey(a).localeCompare(signalDedupKey(b)));
   const progress:FishSuggestionProgress={status:'running',phase:'signals',done:0,total:eligible.length,current:''};
   const publish=()=>onProgress({...progress});publish();
   let fatal:unknown;
   const values:number[]=[],control:number[]=[],valid:TradeSignal[]=[];
   const readings=new Map<string,Promise<{average:number;passed:boolean}>>();
-  const read=(symbol:string,cut:number)=>{
-    const k=`${symbol}|${cut}`;let promise=readings.get(k);
+  const read=(row:FishSampleRow,cut:number)=>{
+    const k=`${row.exchange??'binance'}|${row.market??'crypto'}|${row.symbol}|${cut}`;let promise=readings.get(k);
     if(!promise){promise=(async()=>{
-      check(signal);const bars=await load(symbol,cut,plan,signal);check(signal);validateFishBars(bars,cut,plan.N,plan.step);
+      check(signal);const bars=await load(row,cut,plan,signal);check(signal);validateFishBars(bars,cut,plan.N,plan.step);
       const r=evaluateFishProgram(bars,plan),at=bars.length-1,a=r.average[at];
       if(at<plan.warm-1||!Number.isFinite(a)||r.constraints.some(c=>!Number.isFinite(c[at])))throw new FishError('截止处均值或附加约束不是有限数','readings');
       if(!Number.isFinite(a*plan.scale))throw new FishError('换算后的均值不是有限数','readings');
@@ -84,11 +93,11 @@ export async function collectFishSuggestion(options:FishSuggestionOptions,load:F
     })();readings.set(k,promise);}
     return promise;
   };
-  const run=async(rows:{symbol:string;timeMs:number}[],stats:FishSuggestionStats,output:number[],accept?:(index:number)=>void)=>{
+  const run=async(rows:FishSampleRow[],stats:FishSuggestionStats,output:number[],accept?:(index:number)=>void)=>{
     stats.attempted=rows.length;let next=0;
     const worker=async()=>{for(;;){check(signal);const index=next++;if(index>=rows.length)return;const row=rows[index],cut=Math.floor(row.timeMs/plan.step)*plan.step;progress.current=row.symbol;publish();
-      try {const v=await read(row.symbol,cut);check(signal);output.push(v.average);if(v.passed)stats.constraintsPassed++;accept?.(index);}
-      catch(error){check(signal);if(error instanceof FishError&&error.kind==='banned'){fatal=error;controller.abort();throw error;}if(!(error instanceof FishError)||error.kind==='failed'||error.message.includes('尚未全部收盘'))result.cacheable=false;const reason=error instanceof FishError?(error.kind==='gap'?'缺口':error.kind==='history'?'历史不足':error.kind==='readings'?'读数不全':'请求失败'):'请求失败';skipped(stats,reason);if(stats.failures.length<10)stats.failures.push({symbol:row.symbol,timeMs:row.timeMs,reason:error instanceof Error?error.message:String(error)});}
+      try {const v=await read(row,cut);check(signal);output.push(v.average);if(v.passed)stats.constraintsPassed++;accept?.(index);}
+      catch(error){check(signal);if(error instanceof FishError&&error.kind==='banned'){fatal=error;controller.abort();throw error;}if(!(error instanceof FishError)||error.kind==='failed'||error.message.includes('尚未全部收盘'))result.cacheable=false;const reason=error instanceof FishError?(error.kind==='gap'?'缺口':error.kind==='history'?'历史不足':error.kind==='readings'?'读数不全':error.kind==='skipped'?'超出保留期 / 已下架':'请求失败'):'请求失败';skipped(stats,reason);if(stats.failures.length<10)stats.failures.push({symbol:row.symbol,timeMs:row.timeMs,reason:error instanceof Error?error.message:String(error)});}
       progress.done++;publish();await fishDelay(0,signal);
     }};
     const pending=await Promise.allSettled(Array.from({length:Math.min(3,rows.length)},worker));const failed=pending.find((x):x is PromiseRejectedResult=>x.status==='rejected');if(failed)throw fatal??failed.reason;
@@ -97,7 +106,7 @@ export async function collectFishSuggestion(options:FishSuggestionOptions,load:F
     await run(eligible,result.samples,values,i=>valid.push(eligible[i]));finish(result.samples,values);
     // One draw per usable signal, from the same coin and its own +/-7 day interval.
     valid.sort((a,b)=>signalDedupKey(a).localeCompare(signalDedupKey(b)));const rand=mulberry32(SUGGESTION_SEED),week=7*86400000;
-    const random=valid.map(s=>({symbol:s.symbol,timeMs:s.timeMs-week+Math.floor(rand()*(2*week+1))}));
+    const random=valid.map(s=>({symbol:s.symbol,exchange:s.exchange,market:s.market,underlying:s.underlying,timeMs:s.timeMs-week+Math.floor(rand()*(2*week+1))}));
     progress.phase='random';progress.total=eligible.length+random.length;publish();
     await run(random,result.random,control);finish(result.random,control);check(signal);
     progress.status='complete';progress.current='';publish();saveFishSuggestion(result);return result;

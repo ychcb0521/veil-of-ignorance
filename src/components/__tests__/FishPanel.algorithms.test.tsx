@@ -5,11 +5,12 @@ import {FishPanel,type FishPanelProps} from '@/components/FishPanel';
 import {FEATURES_KEY,CBI2_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import {notifyPersistedStateHydrated} from '@/lib/persistedStateStorage';
-import {readFishPreference} from '@/lib/fish/preferences';
+import {readFishPreference,saveFishPreference} from '@/lib/fish/preferences';
 const start=vi.fn(),custom:DeepDigFeatureDef={...CBI2_DEF,id:'custom-fish',short:'Z',name:'新增特征',formula:'z = C',scale:2,unit:'点',builtin:false};
 function Harness(){const [inputs,onInputsChange]=useState({time:'',threshold:'.3'}),[selection,onSelectionChange]=useState<FishPanelProps['selection']>({exchanges:['binance'],includeDuplicates:false});return <FishPanel signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onAdd={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;}
 const save=(defs:DeepDigFeatureDef[])=>{const key=getUserPrefix()+FEATURES_KEY;localStorage.setItem(key,JSON.stringify(defs));act(()=>notifyPersistedStateHydrated(key));};
-beforeEach(()=>{localStorage.clear();start.mockReset();});
+// 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已给 CBI-2 填过 0.3 测其余流程
+beforeEach(()=>{localStorage.clear();start.mockReset();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
 describe('渔的通用算法设置',()=>{
  it('共享目录：新增项出现，removed消失，错误公式和超5000根置灰并显示原因；默认CBI2缺失选第一项',()=>{
   render(<Harness/>);expect(screen.getByLabelText('捕捞算法')).toHaveValue('cbi2');save([custom,{...custom,id:'bad',name:'错误公式',formula:'missing_name'},{...custom,id:'huge',name:'过长历史',formula:'avg(C,10000)'}]);expect(screen.getByRole('option',{name:/Z · 新增特征/})).toBeEnabled();expect(screen.getByRole('option',{name:/错误公式/})).toBeDisabled();expect(screen.getByRole('option',{name:/过长历史/})).toHaveTextContent('5000');save([{...CBI2_DEF,removed:true},{...custom,removed:true}]);expect(screen.queryByRole('option',{name:/新增特征/})).not.toBeInTheDocument();expect(screen.getByLabelText('捕捞算法')).toHaveValue('drift-speed');
