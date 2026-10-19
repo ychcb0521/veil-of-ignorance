@@ -209,6 +209,7 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
   }, [table, rows, value.source]);
   const keys = (e: React.KeyboardEvent) => { if (e.key === 'Enter') onEnter?.(); if (e.key === 'Escape') onEscape?.(); };
   const unit = value.source === 'signals' ? '条信号' : '场战役';
+  const unsupportedStocks=rows?.filter(r=>r.unsupportedReason).length??0;
   return (
     <div className="min-w-0 flex-1 space-y-1.5">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -237,7 +238,7 @@ function GroupFields({ value, onChange, samples, testId, onEnter, onEscape, auto
       </label>
       {error ? <div className={RED} data-testid={`${testId}-error`}>{error}</div> : preview ? (
         <div className="text-muted-foreground" data-testid={`${testId}-preview`}>
-          按这个标准，本机{unit.slice(1)}（去重前）：实验组 <B>{preview.positive}</B> · 对照组 <B>{preview.control}</B> · 冲突 <B>{preview.conflict}</B> · 其他 <B>{preview.other}</B>
+          按这个标准，本机{unit.slice(1)}（去重前）：实验组 <B>{preview.positive}</B> · 对照组 <B>{preview.control}</B> · 冲突 <B>{preview.conflict}</B> · 其他 <B>{preview.other}</B>{unsupportedStocks>0&&<span> · 美股：暂不支持取行情 {unsupportedStocks} 条</span>}
         </div>
       ) : null}
       {preview && <GroupWarnings preview={preview} testId={testId} />}

@@ -12,10 +12,10 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 
 export interface FishPanelProps {
-  onEstimate?: (selection: {exchanges:FishExchange[];includeDuplicates:boolean},signal:AbortSignal)=>Promise<number|null>;
+  onEstimate?: (selection: {exchanges:FishExchange[];includeDuplicates:boolean;includeUsStocks?:boolean},signal:AbortSignal)=>Promise<number|null>;
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
-  selection: { exchanges: FishExchange[]; includeDuplicates: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean }) => void;
+  selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void; onAdd: (target?: string | readonly string[]) => void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
@@ -48,13 +48,13 @@ export function FishPanel(p: FishPanelProps) {
   const def=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
-  const {exchanges,includeDuplicates}=p.selection,running=p.progress?.status==='running';
-  useEffect(()=>{const c=new AbortController();setEstimatedCount(null);if(p.onEstimate)p.onEstimate(p.selection,c.signal).then(n=>{if(!c.signal.aborted)setEstimatedCount(n);}).catch(()=>{});return()=>c.abort();},[p.onEstimate,exchanges.join('|'),includeDuplicates]);
+  const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,running=p.progress?.status==='running';
+  useEffect(()=>{const c=new AbortController();setEstimatedCount(null);if(p.onEstimate)p.onEstimate(p.selection,c.signal).then(n=>{if(!c.signal.aborted)setEstimatedCount(n);}).catch(()=>{});return()=>c.abort();},[p.onEstimate,exchanges.join('|'),includeDuplicates,includeUsStocks]);
   const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{H:24,direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{H:pref.H.trim()?Number(pref.H):NaN,direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const rowErrors=useMemo(()=>pref.constraints.map(c=>{try{if(def)parseFishConstraint(def,c.text);return '';}catch(e){return e instanceof Error?e.message:String(e);}}),[def,pref.constraints]);
   const active=pref.constraints.filter(c=>c.enabled),plan=compiled.plan;
-  const start=()=>{try{const settings=parseFishSettings(p.inputs.time,pref.threshold);if(!exchanges.length)throw new Error('请至少选择一家交易所');if(!plan||compiled.error)throw new Error(compiled.error);setError('');p.onStart({...settings,feature:plan.def,algorithm:plan.settings,exchanges:[...exchanges],includeDuplicates});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+  const start=()=>{try{const settings=parseFishSettings(p.inputs.time,pref.threshold);if(!exchanges.length)throw new Error('请至少选择一家交易所');if(!plan||compiled.error)throw new Error(compiled.error);setError('');p.onStart({...settings,feature:plan.def,algorithm:plan.settings,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const changeConstraint=(i:number,patch:Partial<FishConstraint>)=>update({...pref,constraints:pref.constraints.map((c,j)=>j===i?{...c,...patch}:c)});
   const addConstraints=(lines:string[])=>{update({...pref,constraints:[...pref.constraints,...lines.map((text,i)=>({id:`${Date.now()}-${pref.constraints.length+i}`,text,enabled:true}))]});setConstraintsOpen(true);};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
@@ -93,6 +93,7 @@ export function FishPanel(p: FishPanelProps) {
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
         {EXCHANGE_NAMES[exchange]}
       </label>)}
+      <label className="flex items-center gap-1.5"><input type="checkbox" className="h-3 w-3 accent-primary" checked={includeUsStocks} disabled={running} onChange={e=>p.onSelectionChange({...p.selection,includeUsStocks:e.target.checked})}/>美股</label>
       <label className="ml-1 flex items-center gap-1.5 border-l border-border/60 pl-4"><input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={includeDuplicates} onChange={e => p.onSelectionChange({ ...p.selection, includeDuplicates: e.target.checked })} />含重复币</label>
     </div>}
     {(error||compiled.error) && <p role="alert" className="text-[11px] text-destructive">{error||compiled.error}</p>}
@@ -117,10 +118,10 @@ export function FishPanel(p: FishPanelProps) {
       {x.error && !Object.keys(x.venues ?? {}).length && <p className="text-destructive">{x.error}</p>}
       {open.detail && <div className="space-y-2 border-l border-border/60 pl-3" data-testid="fish-detail">
       {x.cutoffMs && <p className="font-mono text-muted-foreground">截止（UTC+8） {formatUTC8(x.cutoffMs)}</p>}
-      {(Object.keys(x.venues ?? {}).length ? Object.entries(x.venues!) : [['binance',x]]).map(([venue,value]) => {
+      {(Object.keys(x.venues ?? {}).length ? Object.entries(x.venues!).flatMap(([e,v])=>v?.markets?Object.entries(v.markets).map(([market,value])=>[`${e}:${market}`,value] as const):[[e,v] as const]) : [['binance',x]]).map(([venue,value]) => {
         const v = value as FishProgress;
         return <div key={venue as string} className="space-y-1">
-          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[venue as FishExchange]}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : v.status === 'skipped' ? '已跳过' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
+          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[String(venue).split(':')[0] as FishExchange]}{String(venue).includes(':')?` · ${String(venue).endsWith(':us_stock')?'美股':'加密'}`:''}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : v.status === 'skipped' ? '已跳过' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
           <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {v.counts.hit}</span><span>未达标 {v.counts.below}</span><span>起点不明 {v.counts.unknown}</span><span>缺口 {v.counts.gap}</span><span>当时未上市 / 历史不足 {v.history ?? 0}</span><span>读数不全 {v.counts.readings}</span><span>请求失败 {v.counts.failed}</span><span>被约束挡下 {v.blocked??0}</span></p>
           {!!(x?.constraintTexts??active.map(c=>c.text)).length&&!!v.blocked&&<details className="text-muted-foreground"><summary className="w-fit cursor-pointer">约束挡下详情</summary>{(x?.constraintTexts??active.map(c=>c.text)).map((text,i)=><p key={i} className="mt-1 font-mono">{text} · {v.constraintBlocked?.[i]??0}</p>)}</details>}
           {v.skippedReason && <p className="text-muted-foreground">{v.skippedReason}</p>}

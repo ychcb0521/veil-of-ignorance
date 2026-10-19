@@ -1,4 +1,5 @@
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { stockCode } from '@/lib/signalMarket';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import { CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
 import { constraintFingerprint, fishAlgorithmKey } from './algorithm';
@@ -10,7 +11,7 @@ export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const fish={...r,average:r?.average??NaN,cbi2:r?.cbi2??r?.value??NaN,startAverage:r?.startAverage??NaN,previousAverage:r?.previousAverage??NaN,cutoffMs:r?.cutoffMs??s.timeMs,
     featureId,featureName:r?.featureName??CBI2_DEF.name,featureShort:r?.featureShort??CBI2_DEF.short,definitionKey:r?.definitionKey??definitionKey(CBI2_DEF),interval:r?.interval??'5m',H,direction,threshold,thresholdRaw:r?.thresholdRaw??threshold/(r?.scale??1),scale:r?.scale??1,unit:r?.unit??CBI2_DEF.unit,constraints:texts,constraintKey,algorithmKey,value:r?.value??r?.cbi2??NaN,startConstraints:r?.startConstraints??[],cutoffConstraints:r?.cutoffConstraints??[]};
   const venue=s.exchange&&s.exchange!=='binance'?`${s.exchange}-`:'';
-  return {...s,id:`fish-${venue}${s.symbol}-${s.timeMs}-${encodeURIComponent(algorithmKey)}`,fish};
+  return {...s,...(s.market==='us_stock'?{underlying:stockCode(s),exchange:s.exchange??'binance'}:{}),id:`fish-${s.market==='us_stock'?`us-${s.exchange??'binance'}-${stockCode(s)}`:`${venue}${s.symbol}`}-${s.timeMs}-${encodeURIComponent(algorithmKey)}`,fish};
 }
 export const fishDedupKey=(s:TradeSignal)=>`${signalDedupKey(s)}|${migrateFishSignal(s).fish!.algorithmKey}`;
 export function mergeFishSignals(existing: readonly TradeSignal[],incoming: readonly TradeSignal[]): TradeSignal[] {

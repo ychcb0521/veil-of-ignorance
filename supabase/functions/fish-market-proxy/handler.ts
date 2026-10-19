@@ -8,14 +8,14 @@ const integer=(s:string|null,max=Number.MAX_SAFE_INTEGER,min=0)=>s!==null&&/^\d+
 const routes:Record<Venue,Record<string,readonly string[]>>={
   okx:{'public/instruments':['instType'],'market/history-candles':['instId','bar','after','limit'],'market/history-trades':['instId','type','after','limit']},
   gate:{contracts:[],candlesticks:['contract','interval','from','to'],trades:['contract','from','to','limit','offset']},
-  bitget:{contracts:['productType'],'history-candles':['symbol','productType','granularity','endTime','limit'],'fills-history':['symbol','productType','startTime','endTime','limit','idLessThan']},
+  bitget:{instruments:['category'],contracts:['productType'],'history-candles':['symbol','productType','granularity','endTime','limit'],'fills-history':['symbol','productType','startTime','endTime','limit','idLessThan']},
 };
 export function publicMarketUrl(exchange:string,path:string):URL {
   if(!Object.prototype.hasOwnProperty.call(routes,exchange))fail('交易所不在白名单中');
   if(!/^[a-z-]+(?:\/[a-z-]+)?(?:\?[^#]*)?$/.test(path))fail('公开接口路径无效');
   const venue=exchange as Venue,base=venue==='okx'?'https://www.okx.com/api/v5/':venue==='gate'?'https://api.gateio.ws/api/v4/futures/usdt/':'https://api.bitget.com/api/v2/mix/market/';
   const route=path.split('?')[0],allowed=routes[venue][route];if(!allowed)fail('接口不在白名单中');
-  const url=new URL(path,base),q=url.searchParams;
+  const url=new URL(path,venue==='bitget'&&route==='instruments'?'https://api.bitget.com/api/v3/market/':base),q=url.searchParams;
   for(const key of q.keys())if(!allowed.includes(key)||q.getAll(key).length!==1)fail('不允许的参数或重复参数');
   const required=(key:string,value?:string)=>{if(!q.has(key)||(value!==undefined&&q.get(key)!==value))fail(`缺少或无效的 ${key} 参数`);};
   const limit=(max:number)=>{if(q.has('limit')&&!integer(q.get('limit'),max,1))fail('每次数量超出上限');};
@@ -38,8 +38,8 @@ export function publicMarketUrl(exchange:string,path:string):URL {
       }else {limit(1000);if(to-from>7*86400)fail('成交查询区间超过7天');if(q.has('offset')&&!integer(q.get('offset'),10000000))fail('分页偏移无效');}
     }
   }else {
-    required('productType','USDT-FUTURES');
-    if(route!=='contracts'){
+    if(route==='instruments')required('category','USDT-FUTURES'); else required('productType','USDT-FUTURES');
+    if(route!=='contracts'&&route!=='instruments'){
       if(!/^[A-Z0-9]{1,40}USDT$/.test(q.get('symbol')??''))fail('只允许 USDT 永续');
       if(!integer(q.get('endTime'),8640000000000000,1))fail('截止时间无效');
       if(route==='history-candles'){const label=q.get('granularity')??'',step=labelSeconds[label];if(!step||label==='2H')fail('Bitget原生周期不在白名单内');limit(200);if(Number(q.get('endTime'))%(step*1000))fail('K线游标须对齐周期边界');}

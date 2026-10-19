@@ -1,3 +1,4 @@
+import { US_STOCK_UNSUPPORTED } from '@/lib/signalMarket';
 /**
  * Deep dig 推断统计的「命令」：一行一个方法，运行前就能看到、能改，也能自己写。
  *
@@ -555,7 +556,8 @@ export function runInference(
   options: { excludedKey?: string; seed?: number } = {},
 ): DeepDigInference {
   const startedAt = Date.now();
-  const variables = [...dataVariables(data.rows), RESULT_VAR];
+  const rows=data.rows.filter(r=>r.reason!==US_STOCK_UNSUPPORTED);
+  const variables = [...dataVariables(rows), RESULT_VAR];
   // 指定的因变量数据里没有（公式改过、或数据是旧版）：不悄悄换成别的，整份不算
   const wanted = targetOf(commands);
   if (wanted != null && !variables.includes(wanted)) {
@@ -568,10 +570,10 @@ export function runInference(
   const parsed = parseCommands(commands, { variables });
   const target = parsed.target?.name ?? null;
   const ctx: Ctx = {
-    rows: data.rows,
-    inputs: rowInputs(data.rows, data.definition, target),
-    months: data.rows.map(r => new Date(r.anchorMs).toISOString().slice(0, 7)),
-    symbols: data.rows.map(r => r.symbol),
+    rows,
+    inputs: rowInputs(rows, data.definition, target),
+    months: rows.map(r => new Date(r.anchorMs).toISOString().slice(0, 7)),
+    symbols: rows.map(r => r.symbol),
     seed: options.seed ?? 20261016,
   };
   const blocks: InferenceBlock[] = [

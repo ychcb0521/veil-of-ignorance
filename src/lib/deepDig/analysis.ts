@@ -35,6 +35,7 @@ export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals')
 export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours'>;
 
 export interface DeepDigRow {
+  reason?: string;
   id: string;
   symbol: string;
   anchorMs: number;
@@ -78,6 +79,7 @@ export interface DeepDigData {
   startedAt: number;
   finishedAt: number;
   coverage: {
+    unsupportedStocks?: number;
     campaigns: number;
     clusters: number;
     failed: number;
@@ -221,6 +223,9 @@ export async function collectDeepDigRun(
     },
   });
   const described = describeDeepDig(collected.events);
+  // Kept in Other for visibility/counts, but never enter the price-fetching event rows or inference.
+  const unsupported=samples.filter(s=>s.unsupportedReason);
+  described.rows.push(...unsupported.map(s=>({id:s.id,symbol:s.symbol,anchorMs:s.anchorMs??0,group:'other' as const,memberIds:[s.id],v:null,vol:null,vars:{},endRet:null,maxUp:null,maxDown:null,period:'discovery' as const,reason:s.unsupportedReason})));
   options.onProgress?.({ stage: 'done', done: 1, total: 1 });
   const finishedAt = Date.now();
   const data: DeepDigData = {
@@ -229,6 +234,7 @@ export async function collectDeepDigRun(
     startedAt,
     finishedAt,
     coverage: {
+      ...(unsupported.length ? {unsupportedStocks: unsupported.length} : {}),
       campaigns: collected.campaigns,
       clusters: collected.clusters,
       failed: collected.failed.length,

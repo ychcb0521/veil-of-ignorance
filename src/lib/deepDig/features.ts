@@ -13,6 +13,7 @@ import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { CampaignGroupRow } from '@/lib/deepRsa/report';
 import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
+import { US_STOCK_UNSUPPORTED } from '@/lib/signalMarket';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program } from '@/lib/deepDig/formula';
 
@@ -626,13 +627,14 @@ export const RESULT_VAR = '结果';
 // ===================== 分组 =====================
 
 export type DeepDigGroup = 'positive' | 'control' | 'conflict' | 'other';
-export type DeepDigOtherReason = 'unreliable' | 'missing' | 'conflict' | 'neither';
+export type DeepDigOtherReason = 'unreliable' | 'missing' | 'conflict' | 'neither' | 'us_stock';
 
 /**
  * 分组用的一个样本：一场交易战役，或信号库里的一条信号（时间点 = 那条信号的时间）。
  * values / missing 的键同时有字母与它的拼写（Bₜ 与 Bt 都能写）。
  */
 export interface SampleRow {
+  unsupportedReason?: string;
   id: string;
   symbol: string;
   anchorMs: number | null;
@@ -702,6 +704,7 @@ export function campaignSample(row: CampaignGroupRow): SampleRow {
 
 /** 信号 → 样本：时间点 = 信号自己的时间，读数 s = 星级（没评分 = 缺失）。不进研究的规则与原信号分组相同。 */
 export function signalSample(signal: TradeSignal): SampleRow {
+  if(signal.market==='us_stock')return {id:signal.id,symbol:signal.symbol,anchorMs:Number.isFinite(signal.timeMs)?signal.timeMs:null,excluded:true,unreliable:false,values:{s:Number.isFinite(signal.quality)?signal.quality!:NaN},missing:new Set(signal.quality==null?['s']:[]),unsupportedReason:US_STOCK_UNSUPPORTED};
   const g = groupSignal({ signalId: signal.id, symbol: signal.symbol, anchorMs: signal.timeMs, quality: signal.quality, fallbackZone: signal.fallbackZone, jumpIssue: signal.jumpIssue });
   const values: Record<string, number> = { s: g.stars ?? Number.NaN };
   const missing = new Set<string>(g.stars == null ? ['s'] : []);
@@ -717,6 +720,7 @@ const holds = (p: Program, values: Record<string, number>) => {
 };
 
 export function classifySample(row: SampleRow, groups: CompiledGroups): { group: DeepDigGroup; reason: DeepDigOtherReason | null } {
+  if (row.unsupportedReason) return {group:'other',reason:'us_stock'};
   if (row.unreliable) return { group: 'other', reason: 'unreliable' };
   if ([...groups.inputs].some(k => row.missing.has(k))) return { group: 'other', reason: 'missing' };
   const pos = holds(groups.positive, row.values);
@@ -745,6 +749,7 @@ export function sampleEventRows(samples: readonly SampleRow[], groups: CompiledG
 export function previewGroups(samples: readonly SampleRow[], groups: CompiledGroups): Record<DeepDigGroup, number> {
   const out: Record<DeepDigGroup, number> = { positive: 0, control: 0, conflict: 0, other: 0 };
   for (const row of samples) {
+    if(row.unsupportedReason){out.other++;continue;}
     if (row.excluded || row.anchorMs == null) continue;
     out[classifySample(row, groups).group]++;
   }

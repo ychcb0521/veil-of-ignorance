@@ -136,3 +136,29 @@ Content-Type: application/json
 - Gate没有3m、2h、6h、12h原生周期，分别从1m、1h、1h、4h的完整连续K线聚合；Bitget的2h从1h聚合。聚合OHLC取首开/最高/最低/末收，币量和USDT成交额相加，缺根不补。Gate10000点保留期按实际较细原生周期检查，不能靠聚合越过上游范围。
 - 只有程序引用B/S时才取逐笔；Q/E直接用K线报价成交额与基础币量。逐笔时间窗口分成≤7天的相邻半开段，每段内保留分页进度与末秒小数成交，统一按逻辑周期汇总。主条件与约束采用同一输入和截止，没有使用截止之后的数据。
 - 只读代理现在白名单明确列出的原生周期，不接受任意周期字符串。仍拒绝私有路径、外域、重复/未知参数、倒置区间、超量请求；Gate闭区间根数按所选原生周期验证。前述5m探测、HTTP/CORS及成交误差证据未变。
+
+## 美股（2026-10-19 核实）
+
+本次只纳入 **币安、Bitget 的 USDT 股票永续**。现货 NYSE/NASDAQ 不接入：本任务没有可覆盖所需区间的免费公开真实主动买卖额来源，不用 tick rule、涨跌方向或其它估计值代替 B/S。美股身份只来自合约元数据；代码像 AAPL/COIN 并不决定市场。用户手工导入的 `[美股]` 是显式市场声明。
+
+| 来源 | 交易中 USDT 合约及美股元数据 | 2000 根已收盘 5m / Q | 同区间真实 B/S 与误差 | 浏览器 / 结论 |
+|---|---|---|---|---|
+| 币安 | `/fapi/v1/exchangeInfo`：`status=TRADING`、`quoteAsset=USDT`、`contractType=TRADIFI_PERPETUAL`（亦兼容明确 EQUITY 的 PERPETUAL）、`underlyingType=EQUITY`。排除 CN/HK/KR_EQUITY、PREMARKET、商品、指数；`baseAsset` 保存为 underlying。本次该股票类在交易中 183 项 | TSLAUSDT 实测 2000 根，连续、无未收盘根；K线第8项 quoteAssetVolume 为真实 USDT Q | 第11项 takerBuyQuoteAssetVolume 为 B，S=Q−B，与原生 Q 同口径，误差 0（金额未用收盘价换算） | 生产 Origin 返回 HTTP200、ACAO `*`。**接入** |
+| Bitget | v2 `/api/v2/mix/market/contracts` 筛 `symbolStatus=normal`、`quoteCoin=USDT`、`symbolType=perpetual`；与 v3 `/api/v3/market/instruments?category=USDT-FUTURES` 按 symbol 精确连接，**`instrumentType=stock` 且 `marketRegion=US`** 才是美股；underlying 取元数据 baseCoin。本次匹配 233 项；不拿 `symbolType` 或 `isRwa=YES` 单独判定美股 | NVSUSDT 实测连续 2000 根 history-candles，Q 为第7项报价成交额 | fills-history 的真实 side，按 `size（基础资产数量）×price` 分别累加；1534 笔、2页；最大逐根报价误差 `1.82e-12 USDT`，基础数量误差 `3.91e-14`，小于原对账容差 | v3 生产 Origin HTTP200、ACAO `*`；原K线/逐笔接口沿用已核实直连及代理回退。**接入** |
+| OKX | `instCategory=3` 仅表示 Stocks；当前 SWAP 元数据没有明确美国上市地区字段。不通过严格美股识别门槛，不按 instId 名字补判；只将 `instCategory=1`（兼容旧缺字段）作为原加密范围 | 该接口机制含确认收盘标记、报价 Q；因身份门槛失败，本次不另宣称已对股票完成2000根验证 | 仍可按原历史逐笔换算，但身份不明，不进行股票准入对账 | 直连/白名单代理可用；**美股不接入**，不把股票混入加密币 |
+| Gate | `contract_type=stocks` 仅表示股票，无明确美股地区字段；其它 TradFi 分类也不混入加密币 | 原 candlesticks 有 OHLC、sum（报价额），有历史限制；身份门槛失败，本次不另作股票2000根通过声明 | 原逐笔正负 size 可换算，但没有通过美股身份门槛 | 原直连/代理沿用；**美股不接入** |
+| Bybit | linear 元数据 `symbolType=stock`、`marketRegion=US`、`underlyingTicker` 可明确识别，USDT LinearPerpetual、Trading 可列举 | kline 含成交额 turnover，可分页 | recent-trade 为近期有限条数，未核实有公开历史主动成交接口可覆盖同区间2000根；taker 比例不能替代真实逐根金额 | 无论是否可代理，B/S 历史未通过；**不接入** |
+| KuCoin 合约 | active 元数据 `assetClass=STOCK`、`subMarketType=US.STOCK`（marketType=NASDAQ）可识别 | kline 可取价格与成交额，需遵守分页 | 公开历史成交列表只有有限近期记录，未能提供2000根5m同区间真实 B/S；不拿其它量替代 | B/S 门槛未通过；**不接入** |
+| MEXC 合约 | detail 有 conceptPlate/typeLabel 等标签，但未确认可严格区分美国上市股票的合约地区字段 | kline 有价格及 amount，张数须按面值换算 | deals 为有限近期成交，未确认支持所需2000根同区间历史 B/S | 身份与 B/S 历史均未通过；**不接入** |
+
+### 实测证据与取数口径
+
+共同样本截止为 `2026-10-19 14:05:00 UTC+8`，区间 `[tCut−2000×5分钟,tCut)`。币安 TSLAUSDT：Q=1231787746.509502，B=592638585.7287016，S=639149160.780801 USDT（汇总浮点末位可能不同，逐根 S 直接由 Q−B 得到）。Bitget NVSUSDT：Q=73827.31690000003，B=40162.427000000025，S=33664.889900000024 USDT。逐笔方向统一按 API 的 buy/sell 字段忽略大小写读取。零成交K线只有在原生Q和数量均为零且逐笔对账一致时成立；缺失K线不补。
+
+准入样本仍是2000根5m；实际扫描沿用所选 Deep dig 特征值的周期、warm/N 与全部约束，不改公式。美股与加密币共用同一家适配器、请求预算及 BTC 永续参考（CB），**CB不是股票指数**。停盘造成中间缺根按缺口跳过，不填补、不增加交易时段规则。
+
+美股只按元数据代码在美股内部依交易所优先级排重；不使用加密币的1000前缀归并规则，不与同名币相互屏蔽。美股信号身份是 `us:exchange:underlying@time`，鱼另含算法键；加密币旧键不变。元数据代码作为正式代码原样保留，不根据名字删掉 STOCK 后缀或猜证券别名。地区/分类缺失或 v3 请求失败时不能猜股票类别。
+
+Bitget代理仅增加 **`instruments?category=USDT-FUTURES` → 固定 `/api/v3/market/instruments`**，不允许SPOT、额外参数、重复参数或任意主机。其它行情路径、超时、只读GET与限速逻辑沿用。推送Git后需在Lovable点 **Publish → Update**；本次edge function也须随发布部署。
+
+主要依据：[币安公开合约元数据](https://fapi.binance.com/fapi/v1/exchangeInfo)、[币安行情API](https://developers.binance.info/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data)、[Bitget v3交易产品元数据](https://www.bitget.com/zh-CN/docs/catalog/market/market-data)、[Bitget合约行情文档](https://www.bitget.com/docs/catalog/classic-contract-market/classic-contract-market)、[OKX元数据文档](https://www.okx.com/docs-v5/en/)、[Gate合约文档](https://www.gate.com/docs/developers/apiv4/en/futures/)、[Bybit合约元数据](https://bybit-exchange.github.io/docs/v5/market/instrument)、[KuCoin合约API](https://www.kucoin.com/docs-new/rest/futures-trading/market-data/get-all-symbols)、[MEXC合约API](https://mexcdevelop.github.io/apidocs/contract_v1_en/)。

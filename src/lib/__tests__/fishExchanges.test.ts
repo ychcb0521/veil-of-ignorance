@@ -29,6 +29,7 @@ function adapterFixture(exchange:'okx'|'gate'|'bitget', omitTrade=false) {
   const request=vi.fn(async(path:string)=>{
     calls.push(path);const u=new URL(path,'https://example.test/');
     if(path.startsWith('public/instruments'))return {code:'0',data:[{instId:'BTC-USDT-SWAP',ctType:'linear',settleCcy:'USDT',state:'live',ctVal:'0.125',ctValCcy:'BTC',ctMult:'1'}]};
+    if(path.startsWith('instruments?category='))return {code:'00000',data:[]};
     if(path.startsWith('contracts?productType='))return {code:'00000',data:[{symbol:'BTCUSDT',baseCoin:'BTC',quoteCoin:'USDT',symbolStatus:'normal',symbolType:'perpetual'}]};
     if(path==='contracts')return [{name:'BTC_USDT',type:'direct',status:'trading',in_delisting:false,quanto_multiplier:'0.125'}];
     if(path.startsWith('market/history-candles')){

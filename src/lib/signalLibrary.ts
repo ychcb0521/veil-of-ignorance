@@ -14,11 +14,17 @@
  * 时间语义与 TimeControl 里的手动输入完全一致——按 UTC+8 墙钟解释。
  */
 
+import { stockCode } from './signalMarket';
+import { EXCHANGE_PRIORITY } from './fish/exchanges';
 import { DEFAULT_SIGNAL_LIBRARY_TEXT } from './defaultSignalLibrary';
 import { queueSimStatePush } from './simStateSync';
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
+  /** Missing market keeps the existing crypto identity. */
+  market?: 'us_stock';
+  /** Exchange metadata's underlying/security code; never used to infer market. */
+  underlying?: string;
   /** Missing exchange remains Binance for backwards-compatible keys. */
   exchange?: import('./fish/exchanges').FishExchange;
   /** Binance chart alias; null means the coin has no supported chart. */
@@ -170,11 +176,13 @@ function pushSignal(
   timeMs: number,
   timeLabel: string,
   fallbackZone: string,
+  marketInfo: Pick<TradeSignal, 'market' | 'underlying' | 'exchange'> = {},
 ): void {
-  const key = `${symbol}@${timeMs}`;
+  if (marketInfo.market === 'us_stock') marketInfo = { ...marketInfo, exchange: marketInfo.exchange ?? 'binance', underlying: marketInfo.underlying || stockCode({symbol}) };
+  const key = signalDedupKey({symbol,timeMs,...marketInfo});
   if (seen.has(key)) return;
   seen.add(key);
-  out.push({ id: makeId(), symbol, timeMs, timeLabel, fallbackZone });
+  out.push({ id: makeId(), symbol, timeMs, timeLabel, fallbackZone, ...marketInfo });
 }
 
 /**
@@ -195,7 +203,19 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
 
   const lines = text.split(/\r?\n/);
   for (let idx = 0; idx < lines.length; idx++) {
-    const line = lines[idx].trim();
+    let line = lines[idx].trim();
+    const marketInfo: Pick<TradeSignal, 'market' | 'underlying' | 'exchange'> = {};
+    if (/\s*\[美股\]$/.test(line)) {
+      marketInfo.market = 'us_stock'; line = line.replace(/\s*\[美股\]$/, '').trimEnd();
+      // Optional export metadata is stripped only for explicitly marked US-stock rows.
+      let tag: RegExpExecArray | null;
+      while ((tag = /\s+\[(交易所|代码):([^\]\r\n]+)\]$/.exec(line))) {
+        if (tag[1] === '交易所' && EXCHANGE_PRIORITY.includes(tag[2] as any)) marketInfo.exchange = tag[2] as TradeSignal['exchange'];
+        else if (tag[1] === '代码' && /^[A-Za-z0-9._-]+$/.test(tag[2])) marketInfo.underlying = tag[2].toUpperCase();
+        else break;
+        line = line.slice(0, tag.index).trimEnd();
+      }
+    }
     if (!line || line.startsWith('#') || line.startsWith('//')) continue;
 
     // 1) 日期表头：行首即完整日期时间（允许尾随「无 / （更新） / 空白」等注记）。
@@ -216,7 +236,7 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
       const tOld = parseSignalTime(parts[1]);
       if (tOld != null) {
         const sym = normalizeSymbol(parts[0]);
-        if (sym) pushSignal(out, seen, sym, tOld, parts[1].trim(), parts.slice(2).join(' ').trim());
+        if (sym) pushSignal(out, seen, sym, tOld, parts[1].trim(), parts.slice(2).join(' ').trim(), marketInfo);
         else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
         continue;
       }
@@ -228,7 +248,7 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
       const tInline = parseSignalTime(inline[2]);
       if (tInline != null) {
         const sym = normalizeSymbol(inline[1]);
-        if (sym) pushSignal(out, seen, sym, tInline, inline[2].trim(), inline[3].trim());
+        if (sym) pushSignal(out, seen, sym, tInline, inline[2].trim(), inline[3].trim(), marketInfo);
         else errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
         continue;
       }
@@ -244,17 +264,19 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
       errors.push(`第 ${idx + 1} 行缺少标的：${line}`);
       continue;
     }
-    pushSignal(out, seen, symbol, curTimeMs, curTimeLabel, zone);
+    pushSignal(out, seen, symbol, curTimeMs, curTimeLabel, zone, marketInfo);
   }
 
   return { signals: out, errors };
 }
 
 /** Binance keeps its legacy key; other venues have independent keys. */
-export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'timeMs'>): string {
+export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'timeMs' | 'market' | 'underlying'>): string {
+  if (s.market === 'us_stock') return `us:${s.exchange ?? 'binance'}:${stockCode(s)}@${s.timeMs}`;
   return `${s.exchange && s.exchange !== 'binance' ? `${s.exchange}:` : ''}${s.symbol}@${s.timeMs}`;
 }
 export function signalChartSymbol(s: TradeSignal): string | null {
+  if (s.market === 'us_stock') return null;
   return !s.exchange || s.exchange === 'binance' ? s.symbol : s.binanceSymbol ?? null;
 }
 export function mergeSignals(existing: TradeSignal[], incoming: TradeSignal[]): TradeSignal[] {
@@ -435,7 +457,8 @@ export function serializeSignals(signals: TradeSignal[]): string {
     const group = [...(byTime.get(t) ?? [])].sort((a, b) => a.symbol.localeCompare(b.symbol));
     const lines = [formatSignalHeader(t)];
     for (const s of group) {
-      lines.push(s.fallbackZone ? `${s.symbol} ${s.fallbackZone}` : s.symbol);
+      const row = s.fallbackZone ? `${s.symbol} ${s.fallbackZone}` : s.symbol;
+      lines.push(s.market === 'us_stock' ? `${row} [交易所:${s.exchange ?? 'binance'}] [代码:${stockCode(s)}] [美股]` : row);
     }
     return lines.join('\n');
   });

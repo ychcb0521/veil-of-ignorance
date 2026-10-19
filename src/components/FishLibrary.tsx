@@ -81,7 +81,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
         <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[7rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
         <button type="button" title="将当前筛选结果加入信号库" disabled={!rows.length} onClick={() => p.onAdd(rows.map(s => s.id))} className="rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40">全部加入信号库</button>
       </div>
-      {rows.length ? <div className="overflow-x-auto rounded border border-border/60"><div className="min-w-[680px]">
+      {rows.length ? <div className="min-w-0 overflow-hidden rounded border border-border/60"><div className="min-w-0">
         <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
         <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowTitle={fishSignalTitle} rowAlgorithm={fishAlgorithmShort} />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}

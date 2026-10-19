@@ -50,8 +50,9 @@ export function buildCampaignDayIndex(campaigns: TradeCampaign[]): Set<string> {
 /** 该信号所在自然日、该标的是否有战役。 */
 export function hasCampaignOnSignalDay(
   index: Set<string>,
-  signal: { symbol: string; timeMs: number },
+  signal: { symbol: string; timeMs: number; market?: 'us_stock' },
 ): boolean {
+  if (signal.market === 'us_stock') return false;
   const dateKey = utc8DateKey(signal.timeMs);
   if (!dateKey) return false;
   return index.has(indexKey(signal.symbol, dateKey));
@@ -99,8 +100,9 @@ export function buildTradedDayIndex(
 /** 该信号所在自然日、该标的是否动过手（开过仓）。 */
 export function hasTradeOnSignalDay(
   index: Set<string>,
-  signal: { symbol: string; timeMs: number },
+  signal: { symbol: string; timeMs: number; market?: 'us_stock' },
 ): boolean {
+  if (signal.market === 'us_stock') return false;
   const dateKey = utc8DateKey(signal.timeMs);
   if (!dateKey) return false;
   return index.has(indexKey(signal.symbol, dateKey));

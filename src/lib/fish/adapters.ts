@@ -1,3 +1,4 @@
+import {binanceStockMarket,bitgetStockMarket} from './stockMetadata';
 import {nativeFishInterval,fishBarLabel} from './periods';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -85,26 +86,29 @@ export class FishAdapter implements FishDataAdapter {
     if (this.exchange==='binance') {
       const j:any=await this.request('exchangeInfo',1,signal);
       if (!Array.isArray(j.symbols)) throw new FishError('交易标的列表无效','failed');
-      markets=j.symbols.filter((s:any)=>s.contractType==='PERPETUAL'&&s.quoteAsset==='USDT'&&s.status==='TRADING').map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseAsset??s.symbol.replace(/USDT$/,''),multiplier:1}));
+      markets=j.symbols.filter((s:any)=>binanceStockMarket(s)!==null&&s.quoteAsset==='USDT'&&s.status==='TRADING').map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseAsset??s.symbol.replace(/USDT$/,''),multiplier:1,...(binanceStockMarket(s)==='us_stock'?{market:'us_stock' as const,underlying:s.baseAsset}:{})}));
     } else if (this.exchange==='okx') {
       const j:any=await this.request('public/instruments?instType=SWAP',1,signal);
       if(j.code!=='0'||!Array.isArray(j.data)) throw new FishError('OKX合约列表无效','failed');
-      markets=j.data.filter((s:any)=>s.settleCcy==='USDT'&&s.ctType==='linear'&&s.state==='live'&&s.instId.endsWith('-USDT-SWAP')&&s.ctValCcy===s.instId.split('-')[0]).map((s:any)=>({symbol:s.instId.replace('-USDT-SWAP','USDT'),instrument:s.instId,base:s.instId.split('-')[0],multiplier:num(s.ctVal)*num(s.ctMult||1)}));
+      markets=j.data.filter((s:any)=>(!s.instCategory||s.instCategory==='1')&&s.settleCcy==='USDT'&&s.ctType==='linear'&&s.state==='live'&&s.instId.endsWith('-USDT-SWAP')&&s.ctValCcy===s.instId.split('-')[0]).map((s:any)=>({symbol:s.instId.replace('-USDT-SWAP','USDT'),instrument:s.instId,base:s.instId.split('-')[0],multiplier:num(s.ctVal)*num(s.ctMult||1)}));
     } else if (this.exchange==='bitget') {
       const j:any=await this.request('contracts?productType=USDT-FUTURES',1,signal);
       if(j.code!=='00000'||!Array.isArray(j.data))throw new FishError('Bitget合约列表无效','failed');
-      markets=j.data.filter((s:any)=>s.quoteCoin==='USDT'&&s.symbolStatus==='normal'&&s.symbolType==='perpetual').map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseCoin,multiplier:1}));
+      const v:any=await this.request('instruments?category=USDT-FUTURES',1,signal);
+      if(v.code!=='00000'||!Array.isArray(v.data))throw new FishError('Bitget资产分类元数据无效，无法确认美股范围','failed');
+      const metadata=new Map<string,any>(v.data.map((m:any)=>[m.symbol,m]));
+      markets=j.data.filter((s:any)=>s.quoteCoin==='USDT'&&s.symbolStatus==='normal'&&s.symbolType==='perpetual'&&bitgetStockMarket(s,metadata.get(s.symbol))!==null).map((s:any)=>({symbol:s.symbol,instrument:s.symbol,base:s.baseCoin,multiplier:1,...(bitgetStockMarket(s,metadata.get(s.symbol))==='us_stock'?{market:'us_stock' as const,underlying:metadata.get(s.symbol).baseCoin??s.baseCoin}:{})}));
     } else if (this.exchange==='gate') {
       const j:any=await this.request('contracts',1,signal);
       if(!Array.isArray(j)) throw new FishError('Gate合约列表无效','failed');
-      markets=j.filter((s:any)=>s.name?.endsWith('_USDT')&&s.type==='direct'&&s.in_delisting===false&&s.status==='trading').map((s:any)=>({symbol:s.name.replace('_',''),instrument:s.name,base:s.name.replace(/_USDT$/,''),multiplier:num(s.quanto_multiplier)}));
+      markets=j.filter((s:any)=>(!s.contract_type)&&s.name?.endsWith('_USDT')&&s.type==='direct'&&s.in_delisting===false&&s.status==='trading').map((s:any)=>({symbol:s.name.replace('_',''),instrument:s.name,base:s.name.replace(/_USDT$/,''),multiplier:num(s.quanto_multiplier)}));
     } else throw new FishError('该交易所尚未通过数据核实','failed');
-    if(markets.some(m=>!m.symbol||!m.base||!(m.multiplier>0))) throw new FishError('合约面值无效','readings');
+    if(markets.some(m=>!m.symbol||!m.base||!(m.multiplier>0)||(m.market==='us_stock'&&!m.underlying))) throw new FishError('合约面值无效','readings');
     this.markets=[...new Map(markets.map(m=>[m.instrument,m])).values()].sort((a,b)=>a.symbol.localeCompare(b.symbol));
     return this.markets;
   }
   btc(): FishMarket {
-    const m=this.markets.find(m=>m.instrument===({binance:'BTCUSDT',okx:'BTC-USDT-SWAP',bitget:'BTCUSDT',gate:'BTC_USDT'} as Partial<Record<FishExchange,string>>)[this.exchange]);
+    const m=this.markets.find(m=>m.market!=='us_stock'&&m.instrument===({binance:'BTCUSDT',okx:'BTC-USDT-SWAP',bitget:'BTCUSDT',gate:'BTC_USDT'} as Partial<Record<FishExchange,string>>)[this.exchange]);
     if(!m) throw new FishError('BTC永续合约不存在','gap'); return m;
   }
   async candles(market: FishMarket, cut: number, signal: AbortSignal, query: FishBarQuery = {interval:'5m',count:FISH_BARS}): Promise<ResearchBar[]> {
@@ -220,7 +224,7 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
   }
   return async(path,weight,signal)=>{
     const wasProxy=useProxy;
-    const url=exchange==='binance'?`https://fapi.binance.com/fapi/v1/${path}`:wasProxy?proxyUrl(path):exchange==='bitget'?`https://api.bitget.com/api/v2/mix/market/${path}`:exchange==='gate'?`https://api.gateio.ws/api/v4/futures/usdt/${path}`:`https://www.okx.com/api/v5/${path}`;
+    const url=exchange==='binance'?`https://fapi.binance.com/fapi/v1/${path}`:wasProxy?proxyUrl(path):exchange==='bitget'?`https://api.bitget.com/${path.startsWith('instruments?')?'api/v3/market/':'api/v2/mix/market/'}${path}`:exchange==='gate'?`https://api.gateio.ws/api/v4/futures/usdt/${path}`:`https://www.okx.com/api/v5/${path}`;
     try{return await read(url,path,weight,signal);}
     catch(error){
       if(signal.aborted||!(error instanceof TypeError))throw error;

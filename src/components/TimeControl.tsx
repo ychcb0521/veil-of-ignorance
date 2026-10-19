@@ -81,7 +81,7 @@ export function TimeControl({
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
   const [fishInputs, setFishInputs] = useState({ time: '', threshold: '0.3' });
-  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
+  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
@@ -141,7 +141,7 @@ export function TimeControl({
   const signalAuditKey = useMemo(() => {
     let hash = 2166136261;
     for (const signal of signals) {
-      const value = `${signal.id}|${signal.symbol}|${signal.timeMs}`;
+      const value = `${signal.id}|${signal.market??'crypto'}|${signal.symbol}|${signal.timeMs}`;
       for (let index = 0; index < value.length; index += 1) {
         hash ^= value.charCodeAt(index);
         hash = Math.imul(hash, 16777619);

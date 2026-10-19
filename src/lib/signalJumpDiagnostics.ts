@@ -22,6 +22,7 @@ export type SignalJumpDiagnostic =
   | { status: "retryable"; reason: string };
 
 export interface SignalJumpAuditCandidate {
+  market?: 'us_stock';
   id: string;
   symbol: string;
   timeMs: number;
@@ -243,6 +244,7 @@ export async function preflightSignalJumpIssues(
   const grouped = new Map<string, SignalJumpAuditCandidate[]>();
 
   for (const candidate of candidates) {
+    if (candidate.market === 'us_stock') continue;
     const symbol = candidate.symbol.toUpperCase().replace(/[\s/]+/g, "");
     if (!candidate.id || !symbol || !Number.isFinite(candidate.timeMs)) continue;
     const group = grouped.get(symbol) ?? [];

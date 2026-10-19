@@ -496,6 +496,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
         />
       </Block>
 
+      {effectiveData.coverage.unsupportedStocks ? <p className="text-[11px] text-muted-foreground" data-testid="deep-dig-us-stock-excluded">其他信号 · 美股：暂不支持取行情 · {effectiveData.coverage.unsupportedStocks} 条（不取行情、不进推断统计）</p> : null}
       <Block title="细节">
         <ul className="list-disc space-y-1 pl-4 text-[11.5px] text-foreground/85" data-testid="deep-dig-details">
           <li>

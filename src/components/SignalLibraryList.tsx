@@ -29,6 +29,7 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
+import { SIGNAL_LIBRARY_GRID } from '@/components/SignalLibraryHeader';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
@@ -186,6 +187,7 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  market?: 'us_stock';
   exchange?: FishExchange;
   chartUnavailable?: boolean;
   extraTitle?: string;
@@ -219,7 +221,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable,
+  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm,
 }: RowProps) {
@@ -231,14 +233,14 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      className="group flex items-stretch gap-1.5 px-2 py-0.5 transition-colors hover:bg-accent/60"
+      data-testid="signal-library-row" className={`group ${SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
-        className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
+        className="col-span-4 grid h-5 min-w-0 leading-4 [grid-template-columns:subgrid] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
         title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
@@ -254,8 +256,8 @@ function SignalLibraryRowImpl({
           {algorithm ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 text-[8px] font-normal text-muted-foreground">{algorithm}</span>{exchange&&exchange!=='binance'&&<span className="shrink-0 rounded bg-muted px-1 text-[8px]">{EXCHANGE_NAMES[exchange]}</span>}</span> : exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
         </span>
         {/* 时间：定宽等宽字体，纵向严格成列 */}
-        <span className="flex items-center gap-1">
-          <span className="font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{timeLabel}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate font-mono text-[10px] leading-4 tabular-nums text-muted-foreground">{timeLabel}</span>
           {hasDayCampaign && (
             // 低调标注：当日该标的已有战役。小圆点而非文字/勾号，
             // 扫视时不抢注意力，需要时 hover 才给出说明。
@@ -271,6 +273,7 @@ function SignalLibraryRowImpl({
         <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
           {fallbackZone ? `兜底 ${fallbackZone}` : ''}
         </span>
+        <span className="min-w-0">{market==='us_stock'&&<span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">美股</span>}</span>
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
           整行本身是 <button>，嵌套按钮既是非法 HTML，点星星也会把盘面跳走。 */}
@@ -281,15 +284,14 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
-      {onAdd && <button type="button" onClick={() => onAdd(id)} className="shrink-0 text-[10px] text-primary hover:underline">加入信号库</button>}
+      {onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
-      <span className="min-w-0 flex-1" aria-hidden />
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
           它说的就是「这个箭头点不动」，挨着它才读得出因果；
           夹在兜底区与评分之间只会把两列的对齐撑开。
           用深灰而非红色：它只在少数行出现，红色会在扫视时抢走注意力，
           而这不是一个需要立刻处置的错误，只是「这条跳不过去」。 */}
-      {jumpIssue && (
+      {jumpIssue ? (
         <span
           data-testid="signal-jump-issue"
           className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground"
@@ -298,7 +300,7 @@ function SignalLibraryRowImpl({
         >
           <AlertCircle className="h-3.5 w-3.5" />
         </span>
-      )}
+      ) : <span aria-hidden/>}
       <button
         onClick={handleJump}
         disabled={disabled || chartUnavailable}
@@ -540,6 +542,7 @@ function SignalLibraryListImpl({
         onAdd={onAdd}
         symbol={sig.symbol}
         exchange={sig.exchange}
+        market={sig.market}
         chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         fallbackZone={sig.fallbackZone}
@@ -562,7 +565,7 @@ function SignalLibraryListImpl({
     <div
       ref={scrollerRef}
       data-testid="signal-library-scroller"
-      className="max-h-56 divide-y divide-border/30 overflow-y-auto overscroll-contain [overflow-anchor:none]"
+      className="min-w-0 max-h-56 divide-y divide-border/30 overflow-x-hidden overflow-y-auto overscroll-contain [overflow-anchor:none]"
       onBlur={handleBlur}
     >
       {/* 首行始终是第一个子节点：前面不放垫片，它才不会被 divide-y 平白加上一条上边线
