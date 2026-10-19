@@ -80,7 +80,8 @@ export class FishScanner {
   constructor(private request: typeof fetch = fetch, budget = new FishWeightBudget(), private calculate = calculateFishReadings) { this.budget = budget; }
   private async json(path: string, weight: number, signal: AbortSignal): Promise<unknown> {
     await this.budget.take(weight, signal); check(signal);
-    const response = await this.request(`https://fapi.binance.com/fapi/v1/${path}`, { signal });
+    // Native browser fetch requires Window/Worker as receiver, never the scanner instance.
+    const response = await this.request.call(globalThis, `https://fapi.binance.com/fapi/v1/${path}`, { signal });
     if (response.status === 418) throw new FishError('HTTP 418：币安已限制访问，整次扫描中止', 'banned');
     if (response.status === 429) {
       const retry = Number(response.headers.get('Retry-After') ?? 0);

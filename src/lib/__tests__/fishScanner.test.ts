@@ -84,6 +84,25 @@ describe('渔的CBI-2口径', { timeout: 60000 }, () => {
 });
 
 describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () => {
+  it('原生fetch的接收者保持为全局对象，默认与注入的fetch都不会Illegal invocation', async () => {
+    const m = market(['BTCUSDT']);
+    const receivers: unknown[] = [];
+    const browserFetch = function(this: unknown, ...args: Parameters<typeof fetch>) {
+      receivers.push(this);
+      if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      return m.fetcher(...args);
+    };
+    vi.stubGlobal('fetch', browserFetch);
+    try {
+      for (const request of [undefined, browserFetch]) {
+        const result = await new FishScanner(request, undefined, values).scan(options());
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe('complete');
+      }
+      expect(receivers.length).toBeGreaterThan(0);
+      expect(receivers.every(receiver => receiver === globalThis)).toBe(true);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('范围一致、固定截止、BTC只取一次、排除未收盘根；再扫只补新增K线且不重复入库', async () => {
     const m = market(); m.forming(); const found: TradeSignal[] = [];
     const scanner = new FishScanner(m.fetcher, undefined, values);
