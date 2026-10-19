@@ -168,4 +168,36 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(lib[0].symbol).toBe('AAAUSDT');
     expect(lib[0].freshCatch).toBeUndefined();
   });
+  it('只列通过核实的交易所，重复币默认关闭；无币安盘面的外所信号仍可入库、评分但不能跳转',async()=>{
+    const foreign={...SIGNAL,id:'fish-gate-NEWUSDT-123',symbol:'NEWUSDT',exchange:'gate',binanceSymbol:null};
+    localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([foreign]));
+    const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));
+    fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    for(const name of ['币安','OKX','Bitget','Gate'])expect(screen.getByRole('checkbox',{name})).toBeChecked();
+    for(const name of ['Bybit','KuCoin 合约','MEXC 合约'])expect(screen.queryByRole('checkbox',{name})).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox',{name:'含重复币'})).not.toBeChecked();
+    fireEvent.click(screen.getByRole('checkbox',{name:'含重复币'}));
+    fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    await waitFor(()=>expect(mocks.scan).toHaveBeenCalledWith(expect.objectContaining({exchanges:['binance','okx','bitget','gate'],includeDuplicates:true})));
+    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
+    const library=screen.getByTestId('fish-old-panel');
+    expect(within(library).getByText('Gate')).toBeInTheDocument();
+    const buttons=within(library).getAllByTitle('盘面只支持币安行情');
+    expect(buttons).toHaveLength(2);for(const b of buttons)expect(b).toBeDisabled();
+    fireEvent.click(buttons[0]);expect(jump).not.toHaveBeenCalled();
+    const row=within(library).getByText('NEWUSDT').closest('.group')!;
+    fireEvent.click(within(row as HTMLElement).getByRole('radio',{name:'4 星'}));
+    fireEvent.click(within(row as HTMLElement).getByRole('button',{name:'加入信号库'}));
+    await waitFor(()=>expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)[0]).toMatchObject({exchange:'gate',symbol:'NEWUSDT',quality:4}));
+  });
+
+  it('新鱼重复命中按交易所定位，只更新本家读数并保留本家评分',async()=>{
+    const records:TradeSignal[]=[{...SIGNAL,quality:1},{...SIGNAL,id:'fish-okx-AAAUSDT-123',exchange:'okx',binanceSymbol:'AAAUSDT',quality:3},{...SIGNAL,id:'fish-gate-AAAUSDT-123',exchange:'gate',binanceSymbol:'AAAUSDT',quality:5}];
+    localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify(records));
+    mocks.scan.mockImplementation(async o=>{o.onSignal({...records[2],quality:undefined,fish:{...SIGNAL.fish!,average:.42}});const p={...initialFishProgress(),status:'complete' as const};o.onProgress(p);return p;});
+    render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
+    await waitFor(()=>expect(loadFishSignals().filter(s=>s.freshCatch).map(s=>s.exchange)).toEqual(['gate']));
+    const saved=loadFishSignals();expect(saved).toHaveLength(3);expect(saved[0]).toMatchObject({quality:1,fish:{average:.35}});expect(saved[1]).toMatchObject({quality:3,fish:{average:.35}});expect(saved[2]).toMatchObject({quality:5,fish:{average:.42}});
+  });
+
 });

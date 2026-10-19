@@ -9,10 +9,11 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
   loadSignals, saveSignals, parseSignalText, serializeSignals, mergeSignals, sortSignalsAlpha, sortSignalsByTime, signalMonthKey,
-  setSignalQuality, normalizeSignalQuality,
+  setSignalQuality, normalizeSignalQuality, signalChartSymbol,
   sortSignalsBy,
 } from '@/lib/signalLibrary';
 import { useFish, withoutFresh } from '@/hooks/useFish';
+import { AUDITED_EXCHANGES, type FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel } from '@/components/FishPanel';
 import { SpeedSelector } from '@/components/SpeedSelector';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
@@ -80,6 +81,7 @@ export function TimeControl({
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
   const [fishInputs, setFishInputs] = useState({ time: '', threshold: '0.3' });
+  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
@@ -149,7 +151,7 @@ export function TimeControl({
   }, [signalJumpInterval, signalJumpIntervalMs, signals]);
 
   useEffect(() => {
-    const auditSignals = signalsRef.current;
+    const auditSignals = signalsRef.current.filter(s => signalChartSymbol(s));
     if (auditSignals.length === 0) {
       setSignalAuditProgress(null);
       return;
@@ -157,7 +159,7 @@ export function TimeControl({
     if (completedSignalAuditKeyRef.current === signalAuditKey) return;
 
     const controller = new AbortController();
-    const candidates = auditSignals.map(({ id, symbol, timeMs }) => ({ id, symbol, timeMs }));
+    const candidates = auditSignals.map(s => ({ id: s.id, symbol: signalChartSymbol(s)!, timeMs: s.timeMs }));
     const totalSymbols = new Set(candidates.map(item => item.symbol)).size;
     setSignalAuditProgress({ checked: 0, total: totalSymbols });
 
@@ -348,10 +350,10 @@ export function TimeControl({
   // 只吃一个 id：整条信号由 ref 里的最新 signals 取，回调才能恒定。
   const handleJumpSignal = useCallback(async (id: string) => {
     const sig = signalsRef.current.find(item => item.id === id);
-    if (!sig) return;
+    if (!sig || !signalChartSymbol(sig)) return;
     const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
     if (!jumpTo) {
-      changeSymbol?.(sig.symbol);
+      changeSymbol?.(signalChartSymbol(sig)!);
       // 选定标的即进入下一阶段，信号库没有继续停留的必要——与跳转成功后一致收起
       setSignalLibOpen(false);
       return;
@@ -360,7 +362,7 @@ export function TimeControl({
     jumpingSignalIdRef.current = sig.id;
     setJumpingSignalId(sig.id);
     try {
-      const result = await jumpTo(sig.symbol, sig.timeMs);
+      const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
       if (result.ok) {
         if (sig.jumpIssue) {
           setSignals(prev => prev.map(item =>
@@ -391,12 +393,12 @@ export function TimeControl({
   const handleRateFish = useCallback((id: string, quality: number) => fish.commit(setSignalQuality(fish.signalsRef.current, id, quality)), [fish.commit, fish.signalsRef]);
   const handleJumpFish = useCallback(async (id: string) => {
     const sig = fish.signalsRef.current.find(s => s.id === id);
-    if (!sig || jumpingSignalIdRef.current) return;
+    if (!sig || !signalChartSymbol(sig) || jumpingSignalIdRef.current) return;
     const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
-    if (!jumpTo) { changeSymbol?.(sig.symbol); setFishOpen(false); return; }
+    if (!jumpTo) { changeSymbol?.(signalChartSymbol(sig)!); setFishOpen(false); return; }
     jumpingSignalIdRef.current = id; setJumpingSignalId(id);
     try {
-      const result = await jumpTo(sig.symbol, sig.timeMs);
+      const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
       if (result.ok) {
         if (sig.jumpIssue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: undefined } : s));
         setFishOpen(false);
@@ -525,7 +527,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel} onAdd={handleAddFish}
+      {fishOpen && <FishPanel signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel} onAdd={handleAddFish}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

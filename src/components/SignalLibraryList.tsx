@@ -29,7 +29,8 @@ import {
 import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { normalizeSignalQuality } from '@/lib/signalLibrary';
+import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
+import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
 import { signalJumpIssueLabel, type SignalJumpIssue } from '@/lib/signalJumpDiagnostics';
 import { hasCampaignOnSignalDay, hasTradeOnSignalDay } from '@/lib/signalCampaignIndex';
@@ -185,6 +186,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  exchange?: FishExchange;
+  chartUnavailable?: boolean;
   extraTitle?: string;
   onAdd?: (id: string) => void;
   id: string;
@@ -215,7 +218,7 @@ interface RowProps {
  * 这样回调本身可以恒定，不必每行每次渲染各造一个闭包。
  */
 function SignalLibraryRowImpl({
-  id, symbol, timeLabel, fallbackZone, quality, jumpIssue,
+  id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable,
   traded, hasDayCampaign, jumping, disabled,
   onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd,
 }: RowProps) {
@@ -233,9 +236,9 @@ function SignalLibraryRowImpl({
     >
       <button
         onClick={handleJump}
-        disabled={disabled}
+        disabled={disabled || chartUnavailable}
         className="grid shrink-0 grid-cols-[minmax(108px,148px)_128px_minmax(0,160px)] items-center gap-2 overflow-hidden text-left disabled:cursor-wait disabled:opacity-70"
-        title={jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
+        title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? `${extraTitle ? `${extraTitle}｜` : ''}跳转到 ${symbol} @ ${timeLabel}`}
       >
         {/* 标的：勾号在前，名称可截断但列宽足够放下常见长度 */}
         {/* 勾号占一条固定的 12px 列，没勾时留空位而不是让标的左移——
@@ -247,7 +250,7 @@ function SignalLibraryRowImpl({
           {traded
             ? <CheckCircle2 className="h-3 w-3 text-[#0ecb81]" aria-label="信号当日已交易" />
             : <span aria-hidden />}
-          <span className="truncate">{symbol}</span>
+          {exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
         </span>
         {/* 时间：定宽等宽字体，纵向严格成列 */}
         <span className="flex items-center gap-1">
@@ -297,9 +300,9 @@ function SignalLibraryRowImpl({
       )}
       <button
         onClick={handleJump}
-        disabled={disabled}
+        disabled={disabled || chartUnavailable}
         className="flex h-5 w-5 shrink-0 items-center justify-center text-primary transition-colors hover:text-primary/70 disabled:cursor-wait disabled:opacity-60"
-        title={jumpIssue?.reason ?? '跳转盘面'}
+        title={chartUnavailable ? '盘面只支持币安行情' : jumpIssue?.reason ?? '跳转盘面'}
       >
         {jumping
           ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -533,6 +536,8 @@ function SignalLibraryListImpl({
         extraTitle={rowTitle?.(sig)}
         onAdd={onAdd}
         symbol={sig.symbol}
+        exchange={sig.exchange}
+        chartUnavailable={!signalChartSymbol(sig)}
         timeLabel={sig.timeLabel}
         fallbackZone={sig.fallbackZone}
         quality={normalizeSignalQuality(sig.quality)}

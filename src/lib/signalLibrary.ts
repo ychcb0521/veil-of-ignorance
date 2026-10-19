@@ -19,6 +19,10 @@ import { queueSimStatePush } from './simStateSync';
 import type { SignalJumpIssue } from './signalJumpDiagnostics';
 
 export interface TradeSignal {
+  /** Missing exchange remains Binance for backwards-compatible keys. */
+  exchange?: import('./fish/exchanges').FishExchange;
+  /** Binance chart alias; null means the coin has no supported chart. */
+  binanceSymbol?: string | null;
   /** 渔扫描的读数快照；普通信号不必提供。 */
   fish?: import('./fishScanner').FishReading;
   /**
@@ -246,12 +250,18 @@ export function parseSignalText(text: string): { signals: TradeSignal[]; errors:
   return { signals: out, errors };
 }
 
-/** 合并：在已存在的信号上追加新信号，按 标的@时间 去重（保留已存在的那条）。 */
+/** Binance keeps its legacy key; other venues have independent keys. */
+export function signalDedupKey(s: Pick<TradeSignal, 'exchange' | 'symbol' | 'timeMs'>): string {
+  return `${s.exchange && s.exchange !== 'binance' ? `${s.exchange}:` : ''}${s.symbol}@${s.timeMs}`;
+}
+export function signalChartSymbol(s: TradeSignal): string | null {
+  return !s.exchange || s.exchange === 'binance' ? s.symbol : s.binanceSymbol ?? null;
+}
 export function mergeSignals(existing: TradeSignal[], incoming: TradeSignal[]): TradeSignal[] {
-  const seen = new Set(existing.map(s => `${s.symbol}@${s.timeMs}`));
+  const seen = new Set(existing.map(signalDedupKey));
   const merged = [...existing];
   for (const sig of incoming) {
-    const key = `${sig.symbol}@${sig.timeMs}`;
+    const key = signalDedupKey(sig);
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(sig);

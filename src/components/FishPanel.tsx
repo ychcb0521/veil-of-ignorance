@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { CircleHelp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -9,14 +10,16 @@ import { FishLibrary } from '@/components/FishLibrary';
 export interface FishPanelProps {
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
+  selection: { exchanges: FishExchange[]; includeDuplicates: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void; onAdd: (target?: string | readonly string[]) => void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
 export function FishPanel(p: FishPanelProps) {
   const [error, setError] = useState('');
+  const { exchanges, includeDuplicates } = p.selection;
   const start = () => {
-    try { const settings = parseFishSettings(p.inputs.time, p.inputs.threshold); setError(''); p.onStart(settings); }
+    try { const settings = parseFishSettings(p.inputs.time, p.inputs.threshold); if (!exchanges.length) throw new Error('请至少选择一家交易所'); setError(''); p.onStart({ ...settings, exchanges: [...exchanges], includeDuplicates }); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const running = p.progress?.status === 'running';
@@ -36,9 +39,9 @@ export function FishPanel(p: FishPanelProps) {
           </PopoverTrigger>
           <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
             <p className="font-medium text-foreground">捕捞说明</p>
-            <p className="text-muted-foreground">时间按 UTC+8 输入，留空使用币安当前时间；历史时间向下取整至5分钟，仅使用此前2000根已收盘5m K线。历史扫描的标的范围仍以当前正在交易的 USDT 永续合约为准。</p>
-            <p className="text-muted-foreground">沿用内置 CBI-2，avg(CBI2, 24h) 严格大于所设阈值才命中。第1455根起读数可用；只记录本轮上穿起点，起点不明不入库。BTC 同区间必须完整。</p>
-            <p className="text-muted-foreground">扫描开始后锁定时间和阈值，截止之后的数据不参与计算。结果累计保存在下方「鱼」，可手动加入信号库。</p>
+            <p className="text-muted-foreground">时间按 UTC+8 输入，留空使用币安服务器当前时间作为所有交易所共同节点；历史时间向下取整至5分钟，仅使用此前2000根已收盘5m K线。标的范围为各交易所当前正在交易的 USDT 永续合约。仅币安、OKX、Bitget、Gate通过核实：OKX/Bitget/Gate按各自面值规则及逐笔成交价汇总主动金额，数据量较大，首次可能较慢。</p>
+            <p className="text-muted-foreground">沿用内置 CBI-2，avg(CBI2, 24h) 严格大于所设阈值才命中。第1455根起读数可用；只记录本轮上穿起点，起点不明不入库。每家使用自己的 BTC 永续参考价，缺根只中止该家。</p>
+            <p className="text-muted-foreground">扫描开始后锁定时间和阈值，截止之后的数据不参与计算。默认按币安 → OKX → Bitget → Gate排除基础币重复；优先级取已接入交易所的完整标的表，不依赖本轮勾选。勾选「含重复币」可分别扫描。结果累计保存在下方「鱼」，可手动加入信号库。</p>
             {x?.anchorMs && <p className="font-mono text-muted-foreground">本轮节点：{formatUTC8(x.anchorMs)}</p>}
             {x?.cutoffMs && <p className="font-mono text-muted-foreground">本轮阈值 &gt; {x.threshold ?? 0.3}</p>}
           </PopoverContent>
@@ -57,14 +60,25 @@ export function FishPanel(p: FishPanelProps) {
         <input className="w-20 rounded border border-border/60 bg-transparent px-2 py-1 font-mono text-foreground" aria-label="捕捞阈值" type="number" min="-1" max="1" step="0.01" value={p.inputs.threshold} disabled={running} onChange={e => { setError(''); p.onInputsChange({ ...p.inputs, threshold: e.target.value }); }} />
       </label>
     </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
+      {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
+        <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
+        {EXCHANGE_NAMES[exchange]}
+      </label>)}
+      <label className="ml-1 flex items-center gap-1.5 border-l border-border/60 pl-4"><input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={includeDuplicates} onChange={e => p.onSelectionChange({ ...p.selection, includeDuplicates: e.target.checked })} />含重复币</label>
+    </div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
-    {x && <div className="space-y-1 text-[11px]" role="status" aria-live="polite">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <p>{x.status === 'running' ? '捕捞中' : x.status === 'complete' ? '捕捞完成' : x.status === 'cancelled' ? '已取消' : '已中止'} · {x.done} / {x.total}{x.current ? ` · ${x.current}` : ''}</p>
-        {x.cutoffMs && <p className="font-mono text-muted-foreground">截止（UTC+8） {formatUTC8(x.cutoffMs)}</p>}
-      </div>
-      <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {x.counts.hit}</span><span>未达标 {x.counts.below}</span><span>起点不明 {x.counts.unknown}</span><span>缺口 / 不足2000根 {x.counts.gap}</span><span>读数不全 {x.counts.readings}</span><span>请求失败 {x.counts.failed}</span></p>
-      {x.error && <p className="text-destructive">{x.error}</p>}
+    {x && <div className="space-y-2 text-[11px]" role="status" aria-live="polite">
+      {x.cutoffMs && <p className="font-mono text-muted-foreground">截止（UTC+8） {formatUTC8(x.cutoffMs)}</p>}
+      {(Object.keys(x.venues ?? {}).length ? Object.entries(x.venues!) : [['binance',x]]).map(([venue,value]) => {
+        const v = value as FishProgress;
+        return <div key={venue as string} className="space-y-1">
+          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[venue as FishExchange]}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
+          <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {v.counts.hit}</span><span>未达标 {v.counts.below}</span><span>起点不明 {v.counts.unknown}</span><span>缺口 / 不足2000根 {v.counts.gap}</span><span>读数不全 {v.counts.readings}</span><span>请求失败 {v.counts.failed}</span></p>
+          {v.error && <p className="text-destructive">{v.error}</p>}
+        </div>;
+      })}
+      {x.error && Object.keys(x.venues ?? {}).length > 0 && <p className="text-destructive">{x.error}</p>}
     </div>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
     <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={running ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼」。'}

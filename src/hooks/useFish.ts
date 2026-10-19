@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSignals';
-import { mergeSignals, type TradeSignal } from '@/lib/signalLibrary';
+import { mergeSignals, signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
 /** 去掉「新鱼」标记（归入「鱼」、或加入信号库时用）。 */
@@ -49,10 +49,10 @@ export function useFish(userId: string | undefined) {
             const merged = mergeSignals(signalsRef.current, [fresh]);
             if (merged.length !== signalsRef.current.length) { commit(merged); return; }
             // 已经在列表里（同一标的@时间）：标成新鱼、读数换成这一轮的，评分保留
-            const key = `${signal.symbol}@${signal.timeMs}`;
-            const previous = signalsRef.current.find(s => `${s.symbol}@${s.timeMs}` === key);
-            if (previous && (!previous.freshCatch || JSON.stringify(previous.fish) !== JSON.stringify(signal.fish))) {
-              commit(signalsRef.current.map(s => s === previous ? { ...s, fish: signal.fish, freshCatch: true } : s));
+            const key = signalDedupKey(signal);
+            const previous = signalsRef.current.find(s => signalDedupKey(s) === key);
+            if (previous && (!previous.freshCatch || JSON.stringify(previous.fish) !== JSON.stringify(signal.fish) || previous.binanceSymbol !== signal.binanceSymbol)) {
+              commit(signalsRef.current.map(s => s === previous ? { ...s, fish: signal.fish, binanceSymbol: signal.binanceSymbol, freshCatch: true } : s));
             }
           }
         },

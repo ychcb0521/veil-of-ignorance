@@ -1,1 +1,3 @@
 project_id = "pyvndfzpbsgzinqxairn"
+[functions.fish-market-proxy]
+verify_jwt = false
