@@ -1,3 +1,4 @@
+import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -65,6 +66,7 @@ type ScanOptions = FishScanSettings & { signal: AbortSignal; onProgress: (progre
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   private running = false;
+  private latestServerTime = 0;
   private pool = new FishRequestPool();
   readonly budget: FishWeightBudget;
   private adapters = new Map<FishExchange, FishDataAdapter>();
@@ -76,6 +78,31 @@ export class FishScanner {
       const transport = fishTransport(exchange, request, pool, this.pool);
       this.requests.set(exchange, transport); this.adapters.set(exchange, provided[exchange] ?? new FishAdapter(exchange, transport));
     }
+  }
+  /** Uses exactly the fishing adapter, page cache, request pool and Binance weight budget. */
+  async suggest(options:FishSuggestionOptions) {
+    if(this.running)throw new Error('捕捞或建议计算正在进行');
+    this.running=true;
+    let clock:Promise<unknown>|undefined;
+    try{return await collectFishSuggestion(options,async(symbol,cut,plan,signal)=>{
+      if(cut>Math.floor(this.latestServerTime/plan.step)*plan.step){
+        clock??=this.requests.get('binance')!('time',1,signal);
+        const response=await clock as {serverTime?:number};
+        if(!Number.isFinite(response.serverTime)||response.serverTime!<=0)throw new FishError('币安服务器时间无效','failed');
+        this.latestServerTime=Math.max(this.latestServerTime,response.serverTime!);
+        if(cut>Math.floor(this.latestServerTime/plan.step)*plan.step)throw new FishError('该时间点尚未全部收盘（晚于币安服务器时间）','readings');
+      }
+      const adapter=this.adapters.get('binance')!,query={interval:intervalOf(plan.def),count:plan.N};
+      const market:FishMarket={symbol,instrument:symbol,base:symbol.replace(/USDT$/,''),multiplier:1};
+      const raw=await adapter.candles(market,cut,signal,query);validateFishBars(raw,cut,plan.N,plan.step);
+      const bars=plan.usesTaker?await adapter.taker(market,raw,signal,query):raw;
+      if(bars.some(b=>plan.compiled.usesAmounts&&(b.quoteVolume==null||(plan.usesTaker&&b.takerBuyQuoteVolume==null))))throw new FishError('成交额读数不全','readings');
+      if(!plan.compiled.usesBtc)return bars;
+      const btc=await adapter.candles({symbol:'BTCUSDT',instrument:'BTCUSDT',base:'BTC',multiplier:1},cut,signal,query);
+      validateFishBars(btc,cut,plan.N,plan.step);const closes=new Map(btc.map(b=>[b.openTime,b.close]));
+      if(btc.some(b=>!(b.close>0)))throw new FishError('BTC参考收盘价无效','readings');
+      return bars.map(b=>({...b,refClose:closes.get(b.openTime)}));
+    });}finally{this.running=false;}
   }
   async estimateMarkets(settings:FishScanSettings,signal:AbortSignal):Promise<number> {
     const selected=EXCHANGE_PRIORITY.filter(e=>(settings.exchanges??['binance']).includes(e));
@@ -125,8 +152,8 @@ export class FishScanner {
     }
     bars = bars.map(b => plan.compiled.usesBtc ? { ...b, refClose: refs.get(b.openTime)! } : b);
     const r = evaluateFishProgram(bars, plan), result = classifyFishProgram(market.symbol, bars, r, cut, plan);
-    const end = bars.length - 1, first = plan.warm - 1, scale = plan.def.scale;
-    const avgName = `avg(${fishResultName(plan.def)}, ${plan.settings.H}h)`;
+    const end = bars.length - 1, first = plan.warm - 1, scale = plan.scale;
+    const avgName = `avg(${plan.settings.statistic==='结果'?fishResultName(plan.def):plan.settings.statistic}, ${plan.settings.H}h)`;
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
     const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
     const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
@@ -160,7 +187,7 @@ export class FishScanner {
     this.running = true;
     const controller = new AbortController(), cancel = () => controller.abort();
     options.signal.addEventListener('abort',cancel,{once:true}); if(options.signal.aborted) cancel();
-    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.H,plan.settings.direction,threshold,plan.texts.length);
+    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.H,plan.settings.direction,threshold,plan.texts.length,plan.settings.statistic);
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {
@@ -193,6 +220,7 @@ export class FishScanner {
       publish();
       const clock=await this.requests.get('binance')!('time',1,controller.signal) as {serverTime?:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime!<=0) throw new Error('服务器时间无效');
+      this.latestServerTime=Math.max(this.latestServerTime,clock.serverTime!);
       if(anchorMs!==undefined&&anchorMs>clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
       const node=anchorMs??clock.serverTime!,cut=Math.floor(node/plan.step)*plan.step;
       progress.anchorMs=node;progress.cutoffMs=cut;
@@ -241,7 +269,7 @@ export class FishScanner {
                 stage=`${plan.def.short}计算`;
                 let readings=evaluateFishProgram(bars,plan);
                 // Optional numerical fixture injection used by transport tests; production always evaluates the composed program.
-                if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.def.scale:a<threshold/plan.def.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
+                if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.scale:a<threshold/plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
                 const result=classifyFishProgram(market.symbol,bars,readings,cut,plan);
                 if(local.signal.aborted)return;
                 if(result.outcome==='blocked'){p.blocked=(p.blocked??0)+1;result.blockedBy?.forEach((v,i)=>p.constraintBlocked![i]+=v);}else p.counts[result.outcome]++;

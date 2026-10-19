@@ -15,10 +15,11 @@ export function fishResultName(def: Pick<DeepDigFeatureDef, 'formula' | 'short'>
   } catch { return def.short || RESULT_VAR; }
 }
 
-/** 规则文字：avg(<核心值名>, Hh) > 阈值 单位 [且 n 条约束]。 */
-export function fishRuleText(def: Pick<DeepDigFeatureDef, 'formula' | 'short' | 'unit'> | undefined, H: string | number, direction: string, threshold: string | number, constraints = 0): string {
-  const name = def ? fishResultName(def) : RESULT_VAR;
+/** 规则文字：avg(<真实变量名>, Hh) > 阈值 单位 [且 n 条约束]。 */
+export function fishRuleText(def: Pick<DeepDigFeatureDef, 'formula' | 'short' | 'unit'> | undefined, H: string | number, direction: string, threshold: string | number, constraints = 0, statistic = '结果'): string {
+  const name = statistic === RESULT_VAR ? (def ? fishResultName(def) : RESULT_VAR) : statistic;
+  const unit = statistic === RESULT_VAR ? def?.unit : '原值';
   const h = String(H).trim() || '—';
   const t = String(threshold).trim() || '—';
-  return `avg(${name}, ${h}h) ${direction} ${t}${def?.unit ? ` ${def.unit}` : ''}${constraints ? ` 且 ${constraints} 条约束` : ''}`;
+  return `avg(${name}, ${h}h) ${direction} ${t}${unit ? ` ${unit}` : ''}${constraints ? ` 且 ${constraints} 条约束` : ''}`;
 }
