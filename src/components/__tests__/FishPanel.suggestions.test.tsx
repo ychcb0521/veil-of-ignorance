@@ -47,3 +47,13 @@ it('计算期间锁定设置与捕捞，可取消；进度收在明细入口',as
 it('共享定义只平均一次，所有命名序列仍可显式选中，保存的公式不被修改',()=>{
  const edited={...CBI2_DEF,formula:CBI2_DEF.formula+'\navg_CBI2 = avg(CBI2,24)'};localStorage.setItem(getUserPrefix()+FEATURES_KEY,JSON.stringify([edited]));render(<Harness/>);expect(screen.getByTestId('fish-rule')).toHaveTextContent('avg_CBI2 > —');expect(screen.queryByTestId('fish-use-builtin')).toBeNull();fireEvent.change(screen.getByLabelText('捕捞统计量'),{target:{value:'F'}});expect(screen.getByTestId('fish-rule')).toHaveTextContent('F > ');fireEvent.change(screen.getByLabelText('捕捞统计量'),{target:{value:'avg_CBI2'}});expect(screen.getByTestId('fish-rule')).toHaveTextContent('avg_CBI2 > ');expect(screen.getByTestId('fish-rule')).not.toHaveTextContent('avg(');expect(JSON.parse(localStorage.getItem(getUserPrefix()+FEATURES_KEY)!)[0].formula).toBe(edited.formula);
 });
+
+// 【用户要求】2026-10-19「CBI 这里为何没有」：每一张算法卡都有自己的信号库建议，按卡片顺序在后台逐张算，空阈值自动填
+it('附加算法卡也有信号库建议：第 1 张算完接着算第 2 张，空阈值自动填 P25；同设置的卡共用一份不重算',async()=>{
+ render(<Harness/>);select();await waitFor(()=>expect(screen.getByLabelText('捕捞阈值')).toHaveValue(3),{timeout:3000});const first=suggest.mock.calls.length;
+ fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));await act(()=>new Promise(r=>setTimeout(r,1000)));expect(suggest).toHaveBeenCalledTimes(first);
+ fireEvent.change(screen.getByLabelText('算法 2 统计量'),{target:{value:'V'}});expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(null);
+ await waitFor(()=>expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(150),{timeout:3000});expect(screen.getByTestId('fish-suggestion-2')).toHaveTextContent('信号库建议 150 ~ 250（2 / 2 条）');
+ fireEvent.change(screen.getByLabelText('算法 2 方向'),{target:{value:'<'}});expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(250);
+ fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'7'}});fireEvent.change(screen.getByLabelText('算法 2 方向'),{target:{value:'>'}});expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(7);
+});

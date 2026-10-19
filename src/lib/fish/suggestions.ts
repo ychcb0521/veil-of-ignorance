@@ -55,8 +55,10 @@ export function fishQuantile(values:readonly number[],q:number):number|null {
   const a=values.filter(Number.isFinite).sort((a,b)=>a-b);if(!a.length)return null;
   const at=(a.length-1)*q,lo=Math.floor(at),hi=Math.ceil(at);return lo===hi?a[lo]:a[lo]*(1-(at-lo))+a[hi]*(at-lo);
 }
+/** 自动填的阈值：> 取 P25，< 取 P75；保留 6 位有效数字，与界面上写的建议区间一致。 */
 export function suggestedFishThreshold(result:FishSuggestion,direction:'>'|'<'):number|null {
-  return direction==='>'?result.samples.p25:result.samples.p75;
+  const v=direction==='>'?result.samples.p25:result.samples.p75;
+  return v===null?null:Number(v.toPrecision(6));
 }
 export function mayFillFishThreshold(current:string,lastSuggestion?:string):boolean {
   return !current.trim()||(lastSuggestion!==undefined&&current===lastSuggestion);

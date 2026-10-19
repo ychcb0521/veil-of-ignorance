@@ -1,11 +1,8 @@
 import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedStateStorage';
-import {nativeFishInterval} from '@/lib/fish/periods';
-import {intervalMs} from '@/lib/deepRsa/marketData';
-import {intervalOf} from '@/lib/deepDig/features';
 import {FishAlgorithmCard,type FishCard} from './FishAlgorithmCard';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
-import {compileFishProgram,parseFishConstraint,fishStatistics,FISH_PRESETS,type FishConstraint} from '@/lib/fish/algorithm';
+import {compileFishProgram,parseFishConstraint,fishStatistics,FISH_PRESETS,type FishConstraint,type FishProgram} from '@/lib/fish/algorithm';
 import {readFishPreference,saveFishPreference,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -67,7 +64,7 @@ export function FishPanel(p: FishPanelProps) {
   const [suggestionProgress,setSuggestionProgress]=useState<FishSuggestionProgress|null>(null);
   const suggestionController=useRef<AbortController|null>(null);
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
-  const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>}|null>(null);
+  const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
   useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??readFishPreference('cbi2'));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const [constraintsOpen,setConstraintsOpen]=useState(false);
@@ -87,11 +84,6 @@ export function FishPanel(p: FishPanelProps) {
     for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:c.pref.constraints});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
-  const requestSummary=useMemo(()=>exchanges.map(exchange=>{
-    const counts=new Map<string,number>();for(const p of multiple.plans){const interval=intervalOf(p.def);counts.set(interval,Math.max(counts.get(interval)??0,p.N));}
-    const pages=[...counts].reduce((n,[interval,count])=>n+Math.ceil(count*intervalMs(interval as Parameters<typeof intervalMs>[0])/intervalMs(nativeFishInterval(exchange,interval as Parameters<typeof intervalMs>[0]))/(exchange==='okx'?100:exchange==='bitget'?200:1000)),0);
-    return `${EXCHANGE_NAMES[exchange]} ${pages}`;
-  }).join(' / '),[exchanges,multiple]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
@@ -111,36 +103,56 @@ export function FishPanel(p: FishPanelProps) {
   const statistic=pref.statistic??'结果',statisticUnit=statistic==='结果'?def?.unit??'':'原值';
   const suggestionStale=!!suggestion&&suggestion.key!==suggestionKey;
   const prefRef=useRef(pref);prefRef.current=pref;
-  const calculateSuggestion=async(mode:'auto'|'manual'='manual')=>{
-    if(!suggestionCompiled||suggestionCompiled.unavailable||!p.onSuggest||running||probe.busy)return;
+  /** 每张附加算法卡的建议：按该卡设置编译（阈值不影响分布），同设置的卡共用一份缓存。 */
+  const [suggestionVersion,setSuggestionVersion]=useState(0);
+  /** 这次打开算出但没进缓存的结果（有临时失败时不缓存），也照样显示。 */
+  const memResults=useRef(new Map<string,FishSuggestion>());
+  const extraSuggest=useMemo(()=>extraCards.map(c=>{
+    try{const d=defs.find(d=>d.id===c.featureId);if(!d||!c.enabled)return null;const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:0,constraints:c.pref.constraints});if(plan.unavailable)return null;const key=fishSuggestionKey(plan,library);return {id:c.id,plan,key,cached:readFishSuggestion(key)??memResults.current.get(key)??null,queued:!autoTried.current.has(key)};}catch{return null;}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }),[extraCards,defs,library,suggestionVersion]);
+  const calculateSuggestion=async(mode:'auto'|'manual'='manual',target:{id:string;plan:FishProgram}|null=null)=>{
+    const targetPlan=target?.plan??suggestionCompiled;
+    if(!targetPlan||targetPlan.unavailable||!p.onSuggest||running||probe.busy)return;
     // 同一个取数器一次只算一份：手动点时先停掉后台那份、等它收尾
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const mine=new AbortController();suggestionController.current=mine;
-    const samples=[...library],frozen=suggestionCompiled,key=fishSuggestionKey(frozen,samples);
+    const samples=[...library],frozen=targetPlan,key=fishSuggestionKey(frozen,samples);
     if(mode==='manual')setError('');
     setAutoSuggesting(mode==='auto');setSuggestionProgress({status:'running',phase:'signals',done:0,total:0,current:''});
     const valid=()=>suggestionController.current===mine&&!mine.signal.aborted;
     const done=(async()=>{try{
       const result=await p.onSuggest!({plan:frozen,signals:samples,signal:mine.signal,onProgress:value=>{if(suggestionController.current===mine)setSuggestionProgress(value);}});
       if(!valid())return;
+      memResults.current.set(key,result);setSuggestionVersion(v=>v+1);
       // 阈值为空、或仍是上次自动填的建议值时填入；手动改过的不覆盖
+      if(target){
+        setExtraCards(cs=>cs.map(c=>{if(c.id!==target.id)return c;const t=suggestedFishThreshold(result,c.pref.direction);if(t===null||!mayFillFishThreshold(c.pref.threshold,c.pref.lastSuggestion))return c;return {...c,pref:{...c.pref,threshold:String(t),lastSuggestion:String(t)}};}));
+        setSuggestionProgress(null);return;
+      }
       const current=prefRef.current,threshold=suggestedFishThreshold(result,current.direction);
       if(threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...p.inputs,threshold:value});}
       setSuggestion(result);setSuggestionProgress(value=>value?{...value,status:'complete'}:null);
     }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted&&mode==='manual')setError(e instanceof Error?e.message:String(e));}}
     finally{if(suggestionController.current===mine)suggestionController.current=null;if(suggestionRun.current?.done===done){suggestionRun.current=null;setAutoSuggesting(false);}}})();
-    suggestionRun.current={mode,key,done};
+    suggestionRun.current={mode,key,done,target:target?.id??'first'};
   };
   // 【用户要求】2026-10-19「默认的建议区间…源于信号库中所有信号的统计」：当前设置还没有建议时，打开就在后台算；
   // 设置一变（换特征值 / 序列 / 约束 / 公式 / 信号库）先停掉旧的再按新设置算；同一设置每次打开只自动算一次
   const scanning=p.progress?.status==='running';
+  // 【用户要求】2026-10-19「CBI 这里为何没有」：每一张算法卡都要有建议——第 1 张先算，其余按卡片顺序逐张排队（同设置共用一份）
+  const queueKeys=[suggestionKey,...extraSuggest.map(x=>x?.key??'')].filter(Boolean).join('\n');
   useEffect(()=>{
-    if(suggestionRun.current?.mode==='auto'&&suggestionRun.current.key!==suggestionKey)suggestionController.current?.abort();
-    if(!suggestionKey||!library.length||scanning||suggestionRun.current||autoTried.current.has(suggestionKey)||readFishSuggestion(suggestionKey))return;
-    const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(suggestionKey))return;autoTried.current.add(suggestionKey);void calculateSuggestion('auto');},800);
+    const queue:{key:string;target:{id:string;plan:FishProgram}|null}[]=[...(suggestionKey&&firstEnabled?[{key:suggestionKey,target:null}]:[]),...extraSuggest.flatMap(x=>x?[{key:x.key,target:{id:x.id,plan:x.plan}}]:[])];
+    const run=suggestionRun.current;
+    if(run?.mode==='auto'&&!queue.some(q=>q.key===run.key))suggestionController.current?.abort();
+    if(!library.length||scanning||suggestionRun.current)return;
+    const next=queue.find(q=>!autoTried.current.has(q.key)&&!readFishSuggestion(q.key));
+    if(!next)return;
+    const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
     return()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[suggestionKey,scanning,library.length,autoSuggesting]);
+  },[queueKeys,firstEnabled,scanning,library.length,autoSuggesting]);
   // 方向一换，阈值仍是上次自动填的建议时改填另一端（> 取 P25，< 取 P75）；分布与方向无关，不用重算
   const changeDirection=(direction:'>'|'<')=>{
     const fill=suggestion&&!suggestionStale?suggestedFishThreshold(suggestion,direction):null;
@@ -176,7 +188,7 @@ export function FishPanel(p: FishPanelProps) {
       <label className="flex items-center gap-1">阈值<select aria-label="捕捞方向" className="rounded border border-border/60 bg-background px-1 py-1" disabled={running} value={pref.direction} onChange={e=>changeDirection(e.target.value as '>'|'<')}><option value=">">&gt;</option><option value="<">&lt;</option></select><input aria-label="捕捞阈值" type="number" step="any" className="w-20 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono" value={pref.threshold} disabled={running} onChange={e=>{update({...pref,threshold:e.target.value,lastSuggestion:undefined});p.onInputsChange({...p.inputs,threshold:e.target.value});}}/><span>{statisticUnit}</span></label>
       <button type="button" aria-label="计算建议" title="重新计算建议：信号库全部信号在各自时刻的读数分位数，另配同币种随机对照（打开时已在后台自动算）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion('manual')}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
       {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
-      {!suggestion&&autoSuggesting&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
+      {!suggestion&&autoSuggesting&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
       <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
       <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
@@ -191,10 +203,9 @@ export function FishPanel(p: FishPanelProps) {
       <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
     </div>}</div>
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><label><input type="checkbox" disabled={running} checked={firstEnabled} onChange={e=>setFirstEnabled(e.target.checked)}/> 启用算法 1</label>{extraCards.length>0&&<button disabled={running} onClick={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}>删除算法 1</button>}</div>
-    {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
+    {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={autoSuggesting&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
     <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
     <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,active.length,statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 ')}</p>
-    {multiple.plans.length>0&&<p className="text-[10px] text-muted-foreground">每个币最多 {Math.max(...multiple.plans.map(p=>p.N))} 根 · K线请求 {requestSummary} 次/币（无缓存估算；BTC 参考共享，逐笔分页另计）</p>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
