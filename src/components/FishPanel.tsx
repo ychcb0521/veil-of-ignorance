@@ -2,9 +2,11 @@ import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,parseFishConstraint,FISH_PRESETS,type FishConstraint} from '@/lib/fish/algorithm';
 import {readFishPreference,saveFishPreference,type FishPreference} from '@/lib/fish/preferences';
+import { fishCalcDef, fishDefinitionDrift, fishRuleText, readUseBuiltin, writeUseBuiltin } from '@/lib/fishRule';
+import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { useEffect, useMemo, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { ChevronRight, CircleHelp, SlidersHorizontal } from 'lucide-react';
+import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { parseFishSettings, type FishScanSettings, type FishProgress } from '@/lib/fishScanner';
@@ -22,8 +24,8 @@ export interface FishPanelProps {
 }
 /**
  * 【用户要求】2026-10-19「渔这里，界面要简单一点，只用显示命中以及加载进度，其他的都折叠收起来，用非常隐形的符号做入口」：
- * 平时只有一行设置 + 一行「状态 · 命中 · 进度」；交易所勾选收在 ⚙ 型的淡色图标后，各家明细（截止时间、计数、跳过与失败原因）收在 › 后。
- * 有交易所被跳过 / 中止 / 有失败时，› 旁一个小琥珀点提示可以点开看；展开状态记在这次浏览里。
+ * 平时只有一行设置 + 一行「状态 · 命中 · 进度」；交易所勾选收在淡色滑杆图标后（展开状态记在这次浏览里）。
+ * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
 const OPEN_KEY = 'veil.fish.open';
 function readOpen(): { scope: boolean; detail: boolean } {
@@ -45,7 +47,14 @@ export function FishPanel(p: FishPanelProps) {
   useEffect(()=>setPref(readFishPreference(selected)),[owner]);
   const [selected,setSelected]=useState('cbi2'),[pref,setPref]=useState<FishPreference>(()=>readFishPreference('cbi2'));
   const [constraintsOpen,setConstraintsOpen]=useState(false),[estimatedCount,setEstimatedCount]=useState<number|null>(null);
-  const def=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
+  const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
+  // 「改用内置公式」：Deep dig 里改过的内置特征值，渔可以按内置定义算（按特征值记住）
+  const [useBuiltin,setUseBuiltinState]=useState<string[]>(()=>readUseBuiltin(getUserPrefix(),readPersistedStateRaw));
+  useEffect(()=>setUseBuiltinState(readUseBuiltin(owner,readPersistedStateRaw)),[owner]);
+  const setUseBuiltin=(id:string,on:boolean)=>{const next=on?[...useBuiltin.filter(x=>x!==id),id]:useBuiltin.filter(x=>x!==id);setUseBuiltinState(next);writeUseBuiltin(getUserPrefix(),next,writePersistedStateRaw);};
+  const drift=useMemo(()=>listedDef?fishDefinitionDrift(listedDef):null,[listedDef]);
+  const usingBuiltin=!!drift&&!!listedDef&&useBuiltin.includes(listedDef.id);
+  const def=useMemo(()=>usingBuiltin?fishCalcDef(listedDef,useBuiltin):listedDef,[usingBuiltin,listedDef,useBuiltin]);
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,running=p.progress?.status==='running';
@@ -61,8 +70,6 @@ export function FishPanel(p: FishPanelProps) {
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
   const x = p.progress;
-  // 有交易所被跳过 / 中止、或有失败与读数不全时，明细入口旁亮一个小点
-  const attention = !!x && (!!x.error || Object.values(x.venues ?? {}).some(v => v && (v.status === 'skipped' || v.status === 'aborted' || !!v.error || v.counts.failed > 0 || v.counts.readings > 0)));
 
   return <section className="mt-2 space-y-2 rounded border border-border/60 bg-background p-3" aria-label="渔" data-testid="fish-panel">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
@@ -87,7 +94,13 @@ export function FishPanel(p: FishPanelProps) {
       {pref.constraints.map((c,i)=><div key={c.id}><div className="flex items-center gap-2"><input aria-label={`启用约束 ${i+1}`} type="checkbox" checked={c.enabled} disabled={running} onChange={e=>changeConstraint(i,{enabled:e.target.checked})}/><input aria-label={`约束 ${i+1}`} className={`min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${rowErrors[i]?'border-destructive/50':'border-border/60'} ${c.enabled?'':'opacity-50'}`} value={c.text} disabled={running} onChange={e=>changeConstraint(i,{text:e.target.value})}/><button type="button" className={btn} disabled={running} aria-label={`删除约束 ${i+1}`} onClick={()=>update({...pref,constraints:pref.constraints.filter((_,j)=>j!==i)})}>删除</button></div>{rowErrors[i]&&<p className="ml-5 mt-1 text-destructive">{rowErrors[i]}{c.enabled?'':'（已停用，本轮忽略）'}</p>}</div>)}
       <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
     </div>}</div>
-    <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:`avg(${def?.short??'结果'},${pref.H||'—'}h) ${pref.direction} ${pref.threshold||'—'} ${def?.unit??''}${active.length?` 且 ${active.length} 条约束`:''}`}</p>
+    <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:fishRuleText(def,pref.H,pref.direction,pref.threshold,active.length)}</p>
+    {drift&&listedDef&&<p className="text-[10.5px] text-[#C27C0E]/80 dark:text-[#F59E0B]/80" data-testid="fish-drift">
+      {usingBuiltin
+        ? <>已按内置 {listedDef.short} 公式捕捞（Deep dig 里的定义改过{drift.changed.join('、')}）· </>
+        : <>Deep dig 里的 {listedDef.short} 改过{drift.changed.join('、')}{drift.resultName!==drift.builtinResultName?`：被平均的是 ${drift.resultName}（内置是 ${drift.builtinResultName}）`:''}，渔按改过的定义算 · </>}
+      <button type="button" disabled={running} className="underline-offset-2 hover:underline disabled:opacity-50" onClick={()=>setUseBuiltin(listedDef.id,!usingBuiltin)} data-testid="fish-use-builtin">{usingBuiltin?'改回 Deep dig 定义':'改用内置公式'}</button>
+    </p>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
@@ -109,31 +122,9 @@ export function FishPanel(p: FishPanelProps) {
         {running && x.total > 0 && <span className="h-[3px] w-28 overflow-hidden rounded-full bg-muted" aria-hidden>
           <span className="block h-full rounded-full bg-primary/70 transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />
         </span>}
-        <button type="button" aria-label="捕捞明细" aria-expanded={open.detail} title="明细：截止时间、各交易所计数、跳过与失败原因" onClick={() => setOpen({ detail: !open.detail })} className={`${faint} relative`} data-testid="fish-detail-toggle">
-          <ChevronRight className={`h-3 w-3 transition-transform ${open.detail ? 'rotate-90' : ''}`} />
-          {attention && !open.detail && <span className="absolute right-0 top-0.5 h-1 w-1 rounded-full bg-[#F59E0B]" aria-hidden data-testid="fish-detail-dot" />}
-        </button>
       </div>
-      {/* 整次扫描在开始前就失败（没有各家明细）：直接写出来，不藏 */}
-      {x.error && !Object.keys(x.venues ?? {}).length && <p className="text-destructive">{x.error}</p>}
-      {open.detail && <div className="space-y-2 border-l border-border/60 pl-3" data-testid="fish-detail">
-      {x.cutoffMs && <p className="font-mono text-muted-foreground">截止（UTC+8） {formatUTC8(x.cutoffMs)}</p>}
-      {(Object.keys(x.venues ?? {}).length ? Object.entries(x.venues!).flatMap(([e,v])=>v?.markets?Object.entries(v.markets).map(([market,value])=>[`${e}:${market}`,value] as const):[[e,v] as const]) : [['binance',x]]).map(([venue,value]) => {
-        const v = value as FishProgress;
-        return <div key={venue as string} className="space-y-1">
-          <p><span className="mr-2 font-medium">{EXCHANGE_NAMES[String(venue).split(':')[0] as FishExchange]}{String(venue).includes(':')?` · ${String(venue).endsWith(':us_stock')?'美股':'加密'}`:''}</span>{v.status === 'running' ? '捕捞中' : v.status === 'complete' ? '捕捞完成' : v.status === 'cancelled' ? '已取消' : v.status === 'skipped' ? '已跳过' : '已中止'} · {v.done} / {v.total}{v.current ? ` · ${v.current}` : ''}</p>
-          <p className="flex flex-wrap gap-x-3 text-muted-foreground"><span>命中 {v.counts.hit}</span><span>未达标 {v.counts.below}</span><span>起点不明 {v.counts.unknown}</span><span>缺口 {v.counts.gap}</span><span>当时未上市 / 历史不足 {v.history ?? 0}</span><span>读数不全 {v.counts.readings}</span><span>请求失败 {v.counts.failed}</span><span>被约束挡下 {v.blocked??0}</span></p>
-          {!!(x?.constraintTexts??active.map(c=>c.text)).length&&!!v.blocked&&<details className="text-muted-foreground"><summary className="w-fit cursor-pointer">约束挡下详情</summary>{(x?.constraintTexts??active.map(c=>c.text)).map((text,i)=><p key={i} className="mt-1 font-mono">{text} · {v.constraintBlocked?.[i]??0}</p>)}</details>}
-          {v.skippedReason && <p className="text-muted-foreground">{v.skippedReason}</p>}
-          {(['failed','readings'] as const).map(kind => !!v.failures?.[kind].length && <details key={kind} className="text-muted-foreground">
-            <summary className="w-fit cursor-pointer text-[11px] hover:text-foreground">{kind === 'failed' ? '请求失败' : '读数不全'}原因（前 {v.failures![kind].length} 个币）</summary>
-            <ul className="mt-1 space-y-1 border-l border-border/60 pl-3">{v.failures![kind].map(row => <li key={row.symbol} className="break-words"><span className="mr-2 font-mono text-foreground">{row.symbol}</span>{row.reason}</li>)}</ul>
-          </details>)}
-          {v.error && <p className="text-destructive">{v.error}</p>}
-        </div>;
-      })}
-      {x.error && Object.keys(x.venues ?? {}).length > 0 && <p className="text-destructive">{x.error}</p>}
-      </div>}
+      {/* 【用户要求】2026-10-19 进度旁的明细入口删掉（「没必要存在」）；整次扫描失败的报错仍直接写出来 */}
+      {x.error && <p className="text-destructive">{x.error}</p>}
     </div>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
     <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={running ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼」。'}

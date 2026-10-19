@@ -3,6 +3,7 @@ import { intervalOf } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars } from '@/lib/fish/shared';
+import { fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
@@ -94,7 +95,7 @@ export class FishScanner {
     this.running = true;
     const controller = new AbortController(), cancel = () => controller.abort();
     options.signal.addEventListener('abort',cancel,{once:true}); if(options.signal.aborted) cancel();
-    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=`avg(${plan.def.short},${plan.settings.H}h) ${plan.settings.direction} ${threshold} ${plan.def.unit}${plan.texts.length?` 且 ${plan.texts.length} 条约束`:''}`;
+    const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.H,plan.settings.direction,threshold,plan.texts.length);
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
       for(const venue of Object.values(venues)) {
