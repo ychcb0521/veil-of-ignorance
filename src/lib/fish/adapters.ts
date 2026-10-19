@@ -6,6 +6,17 @@ import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
 import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, validateFishBars } from './shared';
 import { EXCHANGE_NAMES, AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
 
+/** [from, cut) 里按 step 对齐、缓存里没有的时间点，合并成连续区间 [start, stop)。 */
+export function fishMissingRanges(have: readonly number[], from: number, cut: number, step: number): [number, number][] {
+  const set = new Set(have), out: [number, number][] = [];
+  let start: number | null = null;
+  for (let t = from; t < cut; t += step) {
+    if (!set.has(t)) { if (start === null) start = t; }
+    else if (start !== null) { out.push([start, t]); start = null; }
+  }
+  if (start !== null) out.push([start, cut]);
+  return out;
+}
 export type FishRequest = (path: string, weight: number, signal: AbortSignal) => Promise<unknown>;
 const finite = (x: unknown) => x !== null && x !== '' && Number.isFinite(Number(x));
 const num = (x: unknown) => finite(x) ? Number(x) : NaN;
@@ -124,7 +135,9 @@ export class FishAdapter implements FishDataAdapter {
       validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return grouped;
     }
     const collected=(this.cache.get(cacheKey)??[]).filter(b=>b.openTime>=from&&b.openTime<cut);
-    const ranges=collected.length?[[from,collected[0].openTime],[collected[collected.length-1].openTime+step,cut]]:[[from,cut]];
+    // 补齐窗口里所有缺的时间段，不只是头尾：缓存是多次扫描（不同截止时刻）拼起来的，
+    // 两段之间会留洞。之前只补头尾，洞没补 → 整个币被当成「缺口」跳过（2026-10-19 用户反馈原来捕到的现在捕不到）。
+    const ranges=fishMissingRanges(collected.map(b=>b.openTime),from,cut,step);
     for(const [start,stop] of ranges) {
       if(this.exchange==='okx'||this.exchange==='bitget') {
         let cursor=stop;

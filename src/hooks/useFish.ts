@@ -67,5 +67,10 @@ export function useFish(userId: string | undefined) {
     return typeof scanner.current.estimateMarkets==='function'?scanner.current.estimateMarkets(settings,signal):null;
   },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate };
+  /** 查单个币（不入库）：与捕捞同一套取数与判定。 */
+  const diagnose = useCallback((options: Parameters<FishScanner['diagnose']>[0]) => {
+    scanner.current ??= pageScanner ??= new FishScanner();
+    return scanner.current.diagnose(options);
+  }, []);
+  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose };
 }

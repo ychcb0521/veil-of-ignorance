@@ -3,7 +3,7 @@ import { intervalOf } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars } from '@/lib/fish/shared';
-import { fishRuleText } from '@/lib/fishRule';
+import { fishResultName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
@@ -60,6 +60,7 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
+export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[] }
 type ScanOptions = FishScanSettings & { signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
@@ -84,6 +85,70 @@ export class FishScanner {
     await Promise.all(needed.map(async e=>{universes[e]=await this.adapters.get(e)!.list(signal);}));
     return selected.reduce((n,e)=>n+selectFishMarkets(e,universes,!!settings.includeDuplicates).filter(m=>settings.includeUsStocks!==false||m.market!=='us_stock').length,0);
   }
+  /**
+   * 查单个币：用与捕捞完全相同的取数与判定，说清楚它在当前设置下为什么命中 / 没命中。
+   * 【用户要求】2026-10-19「原来能捕捉到，现在却捕捉不到，啥原因？请解决」——给每个币一个可核对的答案。
+   */
+  async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }): Promise<FishDiagnosis> {
+    const t = (ms: number) => formatUTC8(ms).slice(5, 16);
+    const exchange = options.exchange ?? 'binance';
+    const plan = compileFishProgram(options.feature ?? CBI2_DEF, options.algorithm ?? { H: 24, direction: '>', threshold: FISH_THRESHOLD, constraints: [] });
+    if (plan.unavailable) return { outcome: 'failed', lines: [plan.unavailable] };
+    const query = { interval: intervalOf(plan.def), count: plan.N }, adapter = this.adapters.get(exchange)!;
+    const clock = await this.requests.get('binance')!('time', 1, options.signal) as { serverTime?: number };
+    if (!Number.isFinite(clock.serverTime)) return { outcome: 'failed', lines: ['币安服务器时间无效'] };
+    if (options.anchorMs !== undefined && options.anchorMs > clock.serverTime!) return { outcome: 'failed', lines: ['捕捞时间不能晚于币安服务器当前时间'] };
+    const cut = Math.floor((options.anchorMs ?? clock.serverTime!) / plan.step) * plan.step;
+    const head = `截止 ${t(cut)} · 需要 ${plan.N} 根（从 ${t(cut - plan.N * plan.step)} 起），第 ${plan.warm} 根起读数可用（${t(cut - (plan.N - plan.warm + 1) * plan.step)} 起）`;
+    const retention = fishRetentionReason(exchange, cut, clock.serverTime!, plan.N, plan.step, plan.usesTaker, query.interval);
+    if (retention) return { outcome: 'skipped', cutoffMs: cut, lines: [head, `${EXCHANGE_NAMES[exchange]}：${retention}`] };
+    const wanted = options.symbol.trim().toUpperCase().replace(/[\s/_-]+/g, '');
+    const markets = await adapter.list(options.signal);
+    const market = markets.find(m => m.symbol.toUpperCase() === wanted) ?? markets.find(m => m.symbol.toUpperCase() === `${wanted}USDT`) ?? markets.find(m => (m.underlying ?? m.base).toUpperCase() === wanted);
+    if (!market) return { outcome: 'not_found', cutoffMs: cut, lines: [head, `${EXCHANGE_NAMES[exchange]}现在没有在交易的「${options.symbol.trim()}」USDT 永续合约`] };
+    const name = market.market === 'us_stock' ? `${market.symbol}（美股）` : market.symbol;
+    let refs = new Map<number, number>();
+    if (plan.compiled.usesBtc) {
+      try { const btc = await adapter.candles(adapter.btc(), cut, options.signal, query); validateFishBars(btc, cut, plan.N, plan.step); refs = new Map(btc.map(b => [b.openTime, b.close])); }
+      catch (error) { return { outcome: 'failed', cutoffMs: cut, lines: [head, `BTC 参考 K 线不完整或请求失败：${error instanceof Error ? error.message : error}`] }; }
+    }
+    let raw: ResearchBar[];
+    try { raw = await adapter.candles(market, cut, options.signal, query); validateFishBars(raw, cut, plan.N, plan.step); }
+    catch (error) {
+      const kind = error instanceof FishError ? error.kind : 'failed';
+      return { outcome: kind === 'history' ? 'history' : kind === 'gap' ? 'gap' : 'failed', cutoffMs: cut, lines: [head, `${name}：${error instanceof Error ? error.message : error}`] };
+    }
+    let bars = raw;
+    if (plan.usesTaker) {
+      try { bars = await adapter.taker(market, raw, options.signal, query); }
+      catch (error) { return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：主动成交读数不全：${error instanceof Error ? error.message : error}`] }; }
+    }
+    bars = bars.map(b => plan.compiled.usesBtc ? { ...b, refClose: refs.get(b.openTime)! } : b);
+    const r = evaluateFishProgram(bars, plan), result = classifyFishProgram(market.symbol, bars, r, cut, plan);
+    const end = bars.length - 1, first = plan.warm - 1, scale = plan.def.scale;
+    const avgName = `avg(${fishResultName(plan.def)}, ${plan.settings.H}h)`;
+    const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
+    const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
+    const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
+    if (result.outcome === 'hit') {
+      const k = result.signal!.fish!.startIndex!;
+      return { outcome: 'hit', cutoffMs: cut, lines: [head, `${name}：会命中。${atCut}；这一轮从 ${t(bars[k].openTime + plan.step)} 开始（起点 ${fmt(r.average[k])}，前一根 ${fmt(r.average[k - 1])}）`] };
+    }
+    if (result.outcome === 'below') {
+      let last = -1;
+      for (let i = end; i >= first; i--) if (r.main[i] === 1) { last = i; break; }
+      let peak = -Infinity, peakAt = -1;
+      for (let i = first; i <= end; i++) if (Number.isFinite(r.average[i]) && (plan.settings.direction === '>' ? r.average[i] > peak : -r.average[i] > peak)) { peak = plan.settings.direction === '>' ? r.average[i] : -r.average[i]; peakAt = i; }
+      return { outcome: 'below', cutoffMs: cut, lines: [head, `${name}：未达标。${atCut}`, last >= 0 ? `最近一次满足是在 ${t(bars[last].openTime + plan.step)}（之后回落；命中只认截止那一刻仍满足的）` : `可用区间里一次都没满足；区间内${plan.settings.direction === '>' ? '最高' : '最低'} ${fmt(r.average[peakAt])}（${peakAt >= 0 ? t(bars[peakAt].openTime + plan.step) : '—'}）`] };
+    }
+    if (result.outcome === 'blocked') {
+      const failed = plan.texts.filter((_, i) => result.blockedBy?.[i]);
+      return { outcome: 'blocked', cutoffMs: cut, lines: [head, `${name}：主条件满足（${atCut}），但被附加约束挡下：${failed.join('；')}`] };
+    }
+    if (result.outcome === 'unknown') return { outcome: 'unknown', cutoffMs: cut, lines: [head, `${name}：起点不明。${atCut}，但从可用区间开头（${t(bars[first].openTime + plan.step)}）起就一直满足，找不到这一轮的开始，按规则不入库`] };
+    return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：截止处读数不是有限数（${atCut}）`] };
+  }
+
   async scan(options: ScanOptions): Promise<FishProgress> {
     if (this.running) throw new Error('扫描正在进行');
     const { anchorMs, includeDuplicates = false, includeUsStocks = true } = options;

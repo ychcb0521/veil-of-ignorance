@@ -6,14 +6,18 @@ import { fishCalcDef, fishDefinitionDrift, fishRuleText, readUseBuiltin, writeUs
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { useEffect, useMemo, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { CircleHelp, SlidersHorizontal } from 'lucide-react';
+import { CircleHelp, Search, SlidersHorizontal } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { parseFishSettings, type FishScanSettings, type FishProgress } from '@/lib/fishScanner';
+import { parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
+import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
 
 export interface FishPanelProps {
+  /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
+  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }) => Promise<FishDiagnosis>;
   onEstimate?: (selection: {exchanges:FishExchange[];includeDuplicates:boolean;includeUsStocks?:boolean},signal:AbortSignal)=>Promise<number|null>;
   signals: TradeSignal[]; progress: FishProgress | null;
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
@@ -28,8 +32,8 @@ export interface FishPanelProps {
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
 const OPEN_KEY = 'veil.fish.open';
-function readOpen(): { scope: boolean; detail: boolean } {
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail }; } catch { return { scope: false, detail: false }; }
+function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe }; } catch { return { scope: false, detail: false, probe: false }; }
 }
 const faint = 'rounded p-1 text-muted-foreground/40 transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
@@ -37,7 +41,7 @@ const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', c
 export function FishPanel(p: FishPanelProps) {
   const [error,setError]=useState(''),defs=useFishFeatures();
   const [open, setOpenState] = useState(readOpen);
-  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean }>) => setOpenState(o => {
+  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean; probe: boolean }>) => setOpenState(o => {
     const next = { ...o, ...patch };
     try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* 记不住只是下次要再点 */ }
     return next;
@@ -55,12 +59,22 @@ export function FishPanel(p: FishPanelProps) {
   const drift=useMemo(()=>listedDef?fishDefinitionDrift(listedDef):null,[listedDef]);
   const usingBuiltin=!!drift&&!!listedDef&&useBuiltin.includes(listedDef.id);
   const def=useMemo(()=>usingBuiltin?fishCalcDef(listedDef,useBuiltin):listedDef,[usingBuiltin,listedDef,useBuiltin]);
+  const [probe,setProbe]=useState<{symbol:string;exchange:FishExchange;busy:boolean;result:FishDiagnosis|null}>({symbol:'',exchange:'binance',busy:false,result:null});
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(readFishPreference(def.id));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,running=p.progress?.status==='running';
   useEffect(()=>{const c=new AbortController();setEstimatedCount(null);if(p.onEstimate)p.onEstimate(p.selection,c.signal).then(n=>{if(!c.signal.aborted)setEstimatedCount(n);}).catch(()=>{});return()=>c.abort();},[p.onEstimate,exchanges.join('|'),includeDuplicates,includeUsStocks]);
   const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{H:24,direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{H:pref.H.trim()?Number(pref.H):NaN,direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
+  const runProbe=async()=>{
+    if(!p.onDiagnose||!probe.symbol.trim())return;
+    let anchorMs:number|undefined;
+    try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
+    if(!compiled.plan||compiled.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[compiled.error||'算法设置有误']}}));return;}
+    setProbe(v=>({...v,busy:true,result:null}));
+    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,feature:compiled.plan.def,algorithm:compiled.plan.settings,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
+  };
   const rowErrors=useMemo(()=>pref.constraints.map(c=>{try{if(def)parseFishConstraint(def,c.text);return '';}catch(e){return e instanceof Error?e.message:String(e);}}),[def,pref.constraints]);
   const active=pref.constraints.filter(c=>c.enabled),plan=compiled.plan;
   const start=()=>{try{const settings=parseFishSettings(p.inputs.time,pref.threshold);if(!exchanges.length)throw new Error('请至少选择一家交易所');if(!plan||compiled.error)throw new Error(compiled.error);setError('');p.onStart({...settings,feature:plan.def,algorithm:plan.settings,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
@@ -88,6 +102,9 @@ export function FishPanel(p: FishPanelProps) {
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
       </button>
+      {p.onDiagnose&&<button type="button" aria-label="查单个币" aria-expanded={open.probe} title="查单个币：按当前设置与时间，看它为什么命中 / 没命中" onClick={() => setOpen({ probe: !open.probe })} className={`${faint} ${open.probe ? 'text-muted-foreground' : ''}`} data-testid="fish-probe-toggle">
+        <Search className="h-3 w-3" />
+      </button>}
     </div>
     {plan&&<p className="text-[10px] text-muted-foreground">每个币 {plan.N} 根 · {Math.ceil(plan.N/1000)} 次请求 · 预计约 {Math.max(.1,Math.ceil((estimatedCount??100)*Math.ceil(plan.N/1000)*5/1200*10)/10)} 分钟{estimatedCount===null?' / 100个标的（范围待确认）':`（${estimatedCount}个标的，K线权重估算）`}</p>}
     <div className="text-[11px]"><button type="button" className="text-muted-foreground hover:text-foreground" aria-expanded={constraintsOpen} onClick={()=>setConstraintsOpen(v=>!v)}>附加约束 {active.length} {constraintsOpen?'⌃':'⌄'}</button>{constraintsOpen&&<div className="mt-2 max-w-4xl space-y-2">
@@ -108,6 +125,20 @@ export function FishPanel(p: FishPanelProps) {
       </label>)}
       <label className="flex items-center gap-1.5"><input type="checkbox" className="h-3 w-3 accent-primary" checked={includeUsStocks} disabled={running} onChange={e=>p.onSelectionChange({...p.selection,includeUsStocks:e.target.checked})}/>美股</label>
       <label className="ml-1 flex items-center gap-1.5 border-l border-border/60 pl-4"><input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={includeDuplicates} onChange={e => p.onSelectionChange({ ...p.selection, includeDuplicates: e.target.checked })} />含重复币</label>
+    </div>}
+    {open.probe&&p.onDiagnose&&<div className="space-y-1 text-[11px]" data-testid="fish-probe">
+      <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+        <span>查单个币</span>
+        <input aria-label="查单个币的标的" placeholder="如 RAVE 或 RAVEUSDT" value={probe.symbol} onChange={e=>setProbe({...probe,symbol:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')void runProbe();}} className="w-40 rounded border border-border/60 bg-transparent px-2 py-1 font-mono text-foreground" />
+        <select aria-label="查单个币的交易所" value={probe.exchange} onChange={e=>setProbe({...probe,exchange:e.target.value as FishExchange})} className="rounded border border-border/60 bg-background px-1.5 py-1">
+          {AUDITED_EXCHANGES.map(e=><option key={e} value={e}>{EXCHANGE_NAMES[e]}</option>)}
+        </select>
+        <button type="button" className={btn} disabled={probe.busy||!probe.symbol.trim()} onClick={()=>void runProbe()}>{probe.busy?'查询中…':'查'}</button>
+        <span className="text-[10.5px]">按上面的算法、阈值与时间，用与捕捞相同的取数和判定；不入库</span>
+      </div>
+      {probe.result&&<div className={`space-y-0.5 border-l pl-2 ${probe.result.outcome==='hit'?'border-primary/60':'border-border/60'}`} data-testid="fish-probe-result">
+        {probe.result.lines.map((line,i)=><p key={i} className={i===0?'font-mono text-[10.5px] text-muted-foreground':'text-foreground/90'}>{line}</p>)}
+      </div>}
     </div>}
     {(error||compiled.error) && <p role="alert" className="text-[11px] text-destructive">{error||compiled.error}</p>}
     {x && <div className="space-y-2 text-[11px]">
