@@ -25,7 +25,7 @@ import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
 import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
-import { BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { FEATURES_KEY, BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
 const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
@@ -33,8 +33,6 @@ const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
 const EMPTY_REPORT: CampaignGroupReport = buildCampaignGroupReport([], true);
 /** 手动修改过的「规律提取」：特征值 id → 内容（跟账号走）。 */
 const NOTES_KEY = 'deep_dig_notes_v1';
-/** 改过的内置特征值与新增的特征值（跟账号走）。 */
-const FEATURES_KEY = 'deep_dig_features_v1';
 /** 描述统计里手动删掉的行：特征值 id → 事件 id（跟账号走）。 */
 const EXCLUDED_KEY = 'deep_dig_excluded_v1';
 /** 推断统计的命令：特征值 id → 命令原文（跟账号走）。 */

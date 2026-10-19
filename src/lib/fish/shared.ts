@@ -36,13 +36,14 @@ export class FishWeightBudget {
     this.tail=run;return run;
   }
 }
-export function validateFishBars(bars: readonly ResearchBar[], cutoffMs: number): void {
-  const from=cutoffMs-FISH_BARS*FISH_STEP;
-  if(!bars.length)throw new FishError('当时没有K线，或可取历史不足2000根','history');
+export function validateFishBars(bars: readonly ResearchBar[], cutoffMs: number, count = FISH_BARS, step = FISH_STEP): void {
+  const from=cutoffMs-count*step;
+  if(!bars.length)throw new FishError(`当时没有K线，或可取历史不足${count}根`,'history');
   // Missing only the beginning is different from holes inside an existing price history.
   const first=bars[0].openTime;
-  if(first>from&&bars.every((b,i)=>b.openTime===first+i*FISH_STEP)&&bars.at(-1)!.openTime===cutoffMs-FISH_STEP)throw new FishError('最早K线晚于所需起点：当时未上市 / 历史不足2000根','history');
-  if(bars.length!==FISH_BARS||bars.some((b,i)=>b.openTime!==from+i*FISH_STEP))throw new FishError('K线中间缺根、末尾缺根或时间点重复','gap');
+  if(first>from&&bars.every((b,i)=>b.openTime===first+i*step)&&bars.at(-1)!.openTime===cutoffMs-step)throw new FishError(`最早K线晚于所需起点：当时未上市 / 历史不足${count}根`,'history');
+  if(bars.length!==count||bars.some((b,i)=>b.openTime!==from+i*step))throw new FishError('K线中间缺根、末尾缺根或时间点重复','gap');
+
 }
 
 /** Shared network cap, without sharing any exchange's request-weight counter. */

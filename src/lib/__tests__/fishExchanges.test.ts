@@ -96,9 +96,9 @@ describe('交易所去重、优先级和独立BTC',()=>{
     const adapters:Partial<Record<FishExchange,FishDataAdapter>>={};
     for(const [index,e] of (['binance','okx','gate'] as const).entries()){
       const markets=[market(e),market(e,'AAA'),market(e,e==='binance'?'ONE':e==='okx'?'TWO':'THREE')];
-      adapters[e]={exchange:e,list:async()=>markets,btc:()=>markets[0],candles:async(m)=>{
+      adapters[e]={exchange:e,list:async()=>markets,btc:()=>markets[0],candles:async(m,_cut,_signal,query)=>{
         if(e===broken&&m.base==='BTC')throw new FishError('BTC缺根','gap');
-        return fixture().bars.slice(0,2000).map(b=>({...b,close:(index+1)*100,open:(index+1)*100}));
+        const n=query?.count??2000,base=fixture().bars[0];return Array.from({length:n},(_,i)=>({...base,openTime:cut-(n-i)*FISH_STEP,close:(index+1)*100,open:(index+1)*100}));
       },taker:async(_m,b)=>{if(e===banned)throw new FishError('HTTP 418','banned');seen.push({exchange:e,refs:b.map(x=>x.refClose??0)});return b;}};
     }
     adapters.bitget={exchange:'bitget',list:async()=>[],btc:()=>market('bitget'),candles:async()=>[],taker:async(_m,b)=>b};
@@ -118,9 +118,9 @@ describe('交易所去重、优先级和独立BTC',()=>{
     const only:TradeSignal[]=[];await f.scanner.scan({...common,onSignal:s=>only.push(s),exchanges:['gate']});expect(only.map(s=>s.symbol)).toEqual(['THREEUSDT']);
     expect(f.request).toHaveBeenCalledTimes(3);
   });
-  it('某家BTC缺根只中止该家；其它家继续',async()=>{
+  it('引用BTC时某家参考缺根则整轮中止，不产生任何信号',async()=>{
     const f=fleet('okx'),signals:TradeSignal[]=[];const result=await f.scanner.scan({signal:abort,onProgress:()=>{},onSignal:s=>signals.push(s),exchanges:['binance','okx','gate']});
-    expect(result.venues!.okx!.status).toBe('aborted');expect(result.venues!.okx!.error).toContain('BTC');expect(result.venues!.binance!.status).toBe('complete');expect(result.venues!.gate!.status).toBe('complete');expect(result.status).toBe('complete');
+    expect(result.venues!.okx!.status).toBe('aborted');expect(result.venues!.okx!.error).toContain('BTC');expect(result.venues!.binance!.status).toBe('aborted');expect(result.venues!.gate!.status).toBe('aborted');expect(result.status).toBe('aborted');expect(signals).toHaveLength(0);
   });
   it('某家418只中止该家，取消则停止全部交易所',async()=>{
     const f=fleet(undefined,'okx');const result=await f.scanner.scan({signal:abort,onProgress:()=>{},onSignal:()=>{},exchanges:['binance','okx','gate'],includeDuplicates:true});
@@ -131,8 +131,8 @@ describe('交易所去重、优先级和独立BTC',()=>{
 });
 
 describe('OKX只读代理白名单',()=>{
-  it('仅固定公开路径、USDT SWAP和5m，不能访问账户、外域、任意查询或写入',async()=>{
-    for(const path of ['https://evil.test/','../trade/order','market/history-candles?instId=BTC-USD-SWAP&bar=5m','market/history-candles?instId=BTC-USDT-SWAP&bar=1m','public/instruments?instType=SWAP&url=https://evil.test','public/instruments?instType=SWAP&instType=SPOT'])expect(()=>okxPublicUrl(path)).toThrow();
+  it('仅固定公开路径、USDT SWAP和已支持周期，不能访问账户、外域、任意查询或写入',async()=>{
+    for(const path of ['https://evil.test/','../trade/order','market/history-candles?instId=BTC-USD-SWAP&bar=5m','market/history-candles?instId=BTC-USDT-SWAP&bar=7m','public/instruments?instType=SWAP&url=https://evil.test','public/instruments?instType=SWAP&instType=SPOT'])expect(()=>okxPublicUrl(path)).toThrow();
     const fetcher=vi.fn(async()=>new Response('{"code":"0","data":[]}'));
     const url='https://test/functions/v1/fish-market-proxy?'+new URLSearchParams({path:'market/history-trades?instId=BTC-USDT-SWAP&type=2&after=1000&limit=100'});
     expect((await handleFishProxy(new Request(url,{method:'POST'}),fetcher)).status).toBe(405);expect(fetcher).not.toHaveBeenCalled();

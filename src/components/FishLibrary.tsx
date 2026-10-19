@@ -1,3 +1,4 @@
+import {fishAlgorithmShort,migrateFishSignal} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChevronDown, Database, Sparkles } from 'lucide-react';
 import { normalizeSignalQuality, signalMonthKey, sortSignalsBy, type SignalSortKey } from '@/lib/signalLibrary';
@@ -26,11 +27,14 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   // 新一轮捕到鱼时自动展开（只在从无到有时，之后用户收起就不再抢）
   const hadRows = useRef(p.signals.length > 0);
   useEffect(() => { if (p.defaultOpen && !hadRows.current && p.signals.length > 0) setOpen(true); hadRows.current = p.signals.length > 0; }, [p.defaultOpen, p.signals.length]);
+  const [algorithm,setAlgorithm]=useState('');
+  const algorithms=useMemo(()=>[...new Map(p.signals.map(s=>{const r=migrateFishSignal(s).fish!;return [r.algorithmKey!,`${r.featureShort} · ${r.H}h ${r.direction} ${r.threshold}${r.constraints?.length?` · ${r.constraints.length}条约束`:''}`] as const;}))],[p.signals]);
+  useEffect(()=>{if(algorithm&&!algorithms.some(([key])=>key===algorithm))setAlgorithm('');},[algorithm,algorithms]);
   const [query, setQuery] = useState('');
   const [month, setMonth] = useState('');
   const [sortKey, setSortKey] = useState<SignalSortKey>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const resetKey = `${sortKey}|${sortDir}|${month}|${query.trim().toUpperCase()}`;
+  const resetKey = `${sortKey}|${sortDir}|${month}|${algorithm}|${query.trim().toUpperCase()}`;
   // As in 信号库, editing stars keeps the row still until the next explicit sort/filter.
   const [frozen, setFrozen] = useState<{ key: string; values: Map<string, number | null> }>({ key: '', values: new Map() });
   const latest = useRef({ signals: p.signals, resetKey, onRate: p.onRate });
@@ -55,8 +59,8 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     const actual = new Map(p.signals.map(s => [s.id, s]));
     const basis = frozen.key === resetKey ? p.signals.map(s => frozen.values.has(s.id) ? { ...s, quality: frozen.values.get(s.id) ?? undefined } : s) : p.signals;
     const q = query.trim().toUpperCase();
-    return sortSignalsBy(basis, sortKey, sortDir).map(s => actual.get(s.id)!).filter(s => (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
-  }, [p.signals, frozen, resetKey, query, month, sortKey, sortDir]);
+    return sortSignalsBy(basis, sortKey, sortDir).map(s => actual.get(s.id)!).filter(s => (!algorithm||migrateFishSignal(s).fish!.algorithmKey===algorithm) && (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
+  }, [p.signals, frozen, resetKey, query, month, sortKey, sortDir, algorithm]);
   const toggleSort = (key: SignalSortKey) => {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir(key === 'symbol' ? 'asc' : 'desc'); }
@@ -73,12 +77,13 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
           <option value="">全部月份（{p.signals.length}）</option>
           {months.map(([key, count]) => <option key={key} value={key}>{key}（{count}）</option>)}
         </select>
+        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法</option>{algorithms.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
         <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[7rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
-        <button type="button" disabled={!p.signals.length} onClick={() => p.onAdd(p.signals.map(s => s.id))} className="rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40">全部加入信号库</button>
+        <button type="button" title="将当前筛选结果加入信号库" disabled={!rows.length} onClick={() => p.onAdd(rows.map(s => s.id))} className="rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40">全部加入信号库</button>
       </div>
       {rows.length ? <div className="overflow-x-auto rounded border border-border/60"><div className="min-w-[680px]">
         <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowTitle={fishSignalTitle} />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowTitle={fishSignalTitle} rowAlgorithm={fishAlgorithmShort} />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;

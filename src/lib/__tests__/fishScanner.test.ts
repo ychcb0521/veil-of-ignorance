@@ -1,3 +1,6 @@
+import {compileFishProgram} from '@/lib/fish/algorithm';
+import {CBI2_DEF} from '@/lib/deepDig/features';
+const DEFAULT_N=compileFishProgram(CBI2_DEF,{H:24,direction:'>',threshold:.3,constraints:[]}).N;
 import { describe, it, expect, vi } from 'vitest';
 import { parseFishSettings, FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
 import { computeCbi2 } from '@/lib/cbi2';
@@ -108,8 +111,8 @@ describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () =>
     const scanner = new FishScanner(m.fetcher, undefined, values);
     expect((await scanner.scan(options(found))).status).toBe('complete');
     let klines = m.calls.filter(u => u.pathname.endsWith('/klines'));
-    expect(klines).toHaveLength(6);
-    expect(klines.filter(u => u.searchParams.get('symbol') === 'BTCUSDT')).toHaveLength(2);
+    expect(klines).toHaveLength(3*Math.ceil(DEFAULT_N/1000));
+    expect(klines.filter(u => u.searchParams.get('symbol') === 'BTCUSDT')).toHaveLength(Math.ceil(DEFAULT_N/1000));
     expect(klines.every(u => u.searchParams.get('limit') === '1000')).toBe(true);
     expect(klines.every(u => Number(u.searchParams.get('endTime')) < cut)).toBe(true);
     const n = m.calls.length;
@@ -160,7 +163,7 @@ describe('渔历史时间与可调标准', () => {
     expect(parseFishSettings('2026-10-19T09:04', '0')).toEqual({ anchorMs: Date.UTC(2026,9,19,1,4), threshold: 0 });
     expect(parseFishSettings('', '0.3')).toEqual({ threshold: 0.3 });
     for (const time of ['2026-02-30 12:00', '2026-10-19 25:00', 'tomorrow']) expect(() => parseFishSettings(time, '0.2')).toThrow();
-    for (const threshold of ['', 'NaN', 'Infinity', '1.01', '-1.01']) expect(() => parseFishSettings('', threshold)).toThrow();
+    for (const threshold of ['', 'NaN', 'Infinity']) expect(() => parseFishSettings('', threshold)).toThrow();
   });
   it('采用所设阈值确定本轮起点，等于标准不命中', () => {
     const b = window(), cbi2 = Float64Array.from(b, () => 0.5), a = Float64Array.from(b, (_, i) => i < 1900 ? 0.1 : i < 1950 ? 0.25 : 0.35);
@@ -192,22 +195,21 @@ describe('渔历史时间与可调标准', () => {
     expect(found.every(s => s.fish!.threshold === 0.2 && s.timeMs <= historical)).toBe(true);
     const recent = inspected.slice(-2);
     for (const bars of recent) {
-      expect(bars).toHaveLength(2000);
-      expect(bars[0].openTime).toBe(historical - 2000 * FISH_STEP);
-      expect(bars[1999].openTime + FISH_STEP).toBe(historical);
+      expect(bars).toHaveLength(DEFAULT_N);
+      expect(bars[0].openTime).toBe(historical - DEFAULT_N * FISH_STEP);
+      expect(bars.at(-1)!.openTime + FISH_STEP).toBe(historical);
       expect(bars.every(b => b.refClose === 101)).toBe(true);
     }
     const requests = m.calls.slice(before).filter(u => u.pathname.endsWith('/klines'));
     expect(requests).toHaveLength(2);
-    expect(requests.every(u => Number(u.searchParams.get('endTime')) === cut - 2000 * FISH_STEP - 1)).toBe(true);
+    expect(requests.every(u => Number(u.searchParams.get('endTime')) === cut - DEFAULT_N * FISH_STEP - 1)).toBe(true);
     const same = m.calls.length;
     await scanner.scan({ ...options(), anchorMs: p.anchorMs, threshold: 0.25 });
     expect(m.calls.slice(same).filter(u => u.pathname.endsWith('/klines'))).toHaveLength(0);
     const forward = m.calls.length;
     await scanner.scan(options());
     const added = m.calls.slice(forward).filter(u => u.pathname.endsWith('/klines'));
-    expect(added).toHaveLength(2);
-    expect(added.every(u => Number(u.searchParams.get('startTime')) === historical)).toBe(true);
+    expect(added).toHaveLength(0); // 同周期缓存保留已经取过的更晚K线，但历史计算不使用它们
   });
   it('本轮参数在任何回调之前锁定；拒绝未来时间和非法标准', async () => {
     const m = market(['BTCUSDT']);

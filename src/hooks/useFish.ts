@@ -1,7 +1,8 @@
+import { mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSignals';
-import { mergeSignals, signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
+import { type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
 /** 去掉「新鱼」标记（归入「鱼」、或加入信号库时用）。 */
@@ -46,11 +47,11 @@ export function useFish(userId: string | undefined) {
         onSignal: signal => {
           if (valid() && !mine.signal.aborted) {
             const fresh = { ...signal, freshCatch: true };
-            const merged = mergeSignals(signalsRef.current, [fresh]);
+            const merged = mergeFishSignals(signalsRef.current, [fresh]);
             if (merged.length !== signalsRef.current.length) { commit(merged); return; }
             // 已经在列表里（同一标的@时间）：标成新鱼、读数换成这一轮的，评分保留
-            const key = signalDedupKey(signal);
-            const previous = signalsRef.current.find(s => signalDedupKey(s) === key);
+            const key = fishDedupKey(signal);
+            const previous = signalsRef.current.find(s => fishDedupKey(s) === key);
             if (previous && (!previous.freshCatch || JSON.stringify(previous.fish) !== JSON.stringify(signal.fish) || previous.binanceSymbol !== signal.binanceSymbol)) {
               commit(signalsRef.current.map(s => s === previous ? { ...s, fish: signal.fish, binanceSymbol: signal.binanceSymbol, freshCatch: true } : s));
             }
@@ -61,6 +62,10 @@ export function useFish(userId: string | undefined) {
       if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
     } finally { if (controller.current === mine) controller.current = null; }
   }, [commit]);
+  const estimate=useCallback(async(settings:FishScanSettings,signal:AbortSignal)=>{
+    scanner.current??=pageScanner??=new FishScanner();
+    return typeof scanner.current.estimateMarkets==='function'?scanner.current.estimateMarkets(settings,signal):null;
+  },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
-  return { signals, signalsRef, commit, progress, start, cancel };
+  return { signals, signalsRef, commit, progress, start, cancel, estimate };
 }

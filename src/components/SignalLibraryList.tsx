@@ -189,6 +189,7 @@ interface RowProps {
   exchange?: FishExchange;
   chartUnavailable?: boolean;
   extraTitle?: string;
+  algorithm?: string;
   onAdd?: (id: string) => void;
   id: string;
   symbol: string;
@@ -220,7 +221,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -250,7 +251,7 @@ function SignalLibraryRowImpl({
           {traded
             ? <CheckCircle2 className="h-3 w-3 text-[#0ecb81]" aria-label="信号当日已交易" />
             : <span aria-hidden />}
-          {exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
+          {algorithm ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 text-[8px] font-normal text-muted-foreground">{algorithm}</span>{exchange&&exchange!=='binance'&&<span className="shrink-0 rounded bg-muted px-1 text-[8px]">{EXCHANGE_NAMES[exchange]}</span>}</span> : exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
         </span>
         {/* 时间：定宽等宽字体，纵向严格成列 */}
         <span className="flex items-center gap-1">
@@ -323,6 +324,7 @@ export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
 interface Props {
   rowTitle?: (signal: TradeSignal) => string;
+  rowAlgorithm?: (signal: TradeSignal) => string;
   onAdd?: (id: string) => void;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
@@ -357,7 +359,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, onAdd,
+  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -534,6 +536,7 @@ function SignalLibraryListImpl({
         key={sig.id}
         id={sig.id}
         extraTitle={rowTitle?.(sig)}
+        algorithm={rowAlgorithm?.(sig)}
         onAdd={onAdd}
         symbol={sig.symbol}
         exchange={sig.exchange}

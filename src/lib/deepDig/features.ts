@@ -56,6 +56,8 @@ export interface DeepDigFeatureDef {
   createdAt?: number;
 }
 
+/** Deep dig 目录与渔共用的账号定义键。 */
+export const FEATURES_KEY = 'deep_dig_features_v1';
 export const DEFAULT_INTERVAL: ResearchInterval = '5m';
 export const DEFAULT_HALF_LIFE_HOURS = 6;
 /** 半衰期的快捷选项（小时）；也可以手填。 */

@@ -1,3 +1,5 @@
+import {nativeFishInterval,fishBarLabel} from './periods';
+import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
 import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, validateFishBars } from './shared';
@@ -60,15 +62,22 @@ function applySums(bars: readonly ResearchBar[], sums: Map<number,{buy:number;se
     return {...b,takerBuyQuoteVolume:x.buy,takerBuyVolume:x.buyBase};
   });
 }
+export interface FishBarQuery { interval: ResearchInterval; count: number }
 export interface FishDataAdapter {
   readonly exchange: FishExchange;
   list(signal: AbortSignal): Promise<FishMarket[]>;
   btc(): FishMarket;
-  candles(market: FishMarket, cut: number, signal: AbortSignal): Promise<ResearchBar[]>;
-  taker(market: FishMarket, bars: ResearchBar[], signal: AbortSignal): Promise<ResearchBar[]>;
+  candles(market: FishMarket, cut: number, signal: AbortSignal, query?: FishBarQuery): Promise<ResearchBar[]>;
+  taker(market: FishMarket, bars: ResearchBar[], signal: AbortSignal, query?: FishBarQuery): Promise<ResearchBar[]>;
 }
 export class FishAdapter implements FishDataAdapter {
   private cache = new Map<string,ResearchBar[]>();
+  private remember(key:string,bars:ResearchBar[]):void {
+    const byTime=new Map((this.cache.get(key)??[]).map(b=>[b.openTime,b]));for(const b of bars)byTime.set(b.openTime,b);
+    let rows=[...byTime.values()];const cap=Math.max(5000,bars.length,this.cache.get(key)?.length??0),cut=bars.at(-1)?.openTime??0;
+    if(rows.length>cap)rows.sort((a,b)=>Math.abs(a.openTime-cut)-Math.abs(b.openTime-cut)).splice(cap);
+    rows.sort((a,b)=>a.openTime-b.openTime);this.cache.set(key,rows);
+  }
   private markets: FishMarket[] = [];
   constructor(readonly exchange: FishExchange, readonly request: FishRequest) {}
   async list(signal: AbortSignal): Promise<FishMarket[]> {
@@ -98,19 +107,30 @@ export class FishAdapter implements FishDataAdapter {
     const m=this.markets.find(m=>m.instrument===({binance:'BTCUSDT',okx:'BTC-USDT-SWAP',bitget:'BTCUSDT',gate:'BTC_USDT'} as Partial<Record<FishExchange,string>>)[this.exchange]);
     if(!m) throw new FishError('BTC永续合约不存在','gap'); return m;
   }
-  async candles(market: FishMarket, cut: number, signal: AbortSignal): Promise<ResearchBar[]> {
-    const from=cut-FISH_BARS*FISH_STEP;
-    const collected=(this.cache.get(market.instrument)??[]).filter(b=>b.openTime>=from&&b.openTime<cut);
-    const ranges=collected.length?[[from,collected[0].openTime],[collected[collected.length-1].openTime+FISH_STEP,cut]]:[[from,cut]];
+  async candles(market: FishMarket, cut: number, signal: AbortSignal, query: FishBarQuery = {interval:'5m',count:FISH_BARS}): Promise<ResearchBar[]> {
+    const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}`;
+    const from=cut-query.count*step,native=nativeFishInterval(this.exchange,query.interval);
+    if(native!==query.interval){
+      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio});
+      const prior=new Map((this.cache.get(cacheKey)??[]).map(b=>[b.openTime,b]));
+      const grouped:ResearchBar[]=[];
+      for(let i=0;i<raw.length;i+=ratio){const group=raw.slice(i,i+ratio),first=group[0],last=group.at(-1)!;const previous=prior.get(first.openTime);
+        grouped.push(previous??{openTime:first.openTime,open:first.open,close:last.close,high:Math.max(...group.map(b=>b.high)),low:Math.min(...group.map(b=>b.low)),volume:group.reduce((v,b)=>v+b.volume,0),quoteVolume:group.reduce((v,b)=>v+(b.quoteVolume??NaN),0),takerBuyVolume:null});
+      }
+      validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return grouped;
+    }
+    const collected=(this.cache.get(cacheKey)??[]).filter(b=>b.openTime>=from&&b.openTime<cut);
+    const ranges=collected.length?[[from,collected[0].openTime],[collected[collected.length-1].openTime+step,cut]]:[[from,cut]];
     for(const [start,stop] of ranges) {
       if(this.exchange==='okx'||this.exchange==='bitget') {
         let cursor=stop;
         while(cursor>start) {
-          const path=this.exchange==='okx'?`market/history-candles?instId=${market.instrument}&bar=5m&after=${cursor}&limit=100`:`history-candles?symbol=${market.instrument}&productType=USDT-FUTURES&granularity=5m&endTime=${cursor}&limit=200`;
+          const path=this.exchange==='okx'?`market/history-candles?instId=${market.instrument}&bar=${fishBarLabel(this.exchange,query.interval)}&after=${cursor}&limit=100`:`history-candles?symbol=${market.instrument}&productType=USDT-FUTURES&granularity=${fishBarLabel(this.exchange,query.interval)}&endTime=${cursor}&limit=200`;
           const j:any=await this.request(path,1,signal);
           if(j.code!==(this.exchange==='okx'?'0':'00000')||!Array.isArray(j.data)) throw new FishError('K线响应无效','failed');
-          const parsed=j.data.map((r:unknown)=>this.exchange==='okx'?parseOkxCandle(r,market.multiplier):parseBitgetCandle(r)).filter((b:ResearchBar|null):b is ResearchBar=>!!b&&b.openTime<cursor&&b.openTime+FISH_STEP<=cut);
+          const parsed=j.data.map((r:unknown)=>this.exchange==='okx'?parseOkxCandle(r,market.multiplier):parseBitgetCandle(r)).filter((b:ResearchBar|null):b is ResearchBar=>!!b&&b.openTime<cursor&&b.openTime+step<=cut);
           if(!parsed.length) break;
+
           for(const b of parsed) if(b.openTime>=start) collected.push(b);
           const next=Math.min(...parsed.map((b:ResearchBar)=>b.openTime));
           if(next>=cursor) throw new FishError('K线翻页没有推进','gap'); cursor=next;
@@ -118,25 +138,30 @@ export class FishAdapter implements FishDataAdapter {
       } else {
         let cursor=start;
         while(cursor<stop) {
-          const end=Math.min(stop,cursor+(this.exchange==='binance'?1000:2000)*FISH_STEP);
-          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=5m&startTime=${cursor}&endTime=${end-1}&limit=1000`:`candlesticks?contract=${market.instrument}&interval=5m&from=${cursor/1000}&to=${(end-FISH_STEP)/1000}`;
+          const end=Math.min(stop,cursor+(1000)*step);
+          const path=this.exchange==='binance'?`klines?symbol=${market.instrument}&interval=${query.interval}&startTime=${cursor}&endTime=${end-1}&limit=1000`:`candlesticks?contract=${market.instrument}&interval=${query.interval}&from=${cursor/1000}&to=${(end-step)/1000}`;
+
           const j=await this.request(path,this.exchange==='binance'?5:1,signal);
           if(!Array.isArray(j)) throw new FishError('K线响应无效','failed');
-          for(const r of j) { const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+FISH_STEP<=cut) collected.push(b); }
+          for(const r of j) { const b=this.exchange==='binance'?parseBinanceKlineRow(r):parseGateCandle(r,market.multiplier); if(!b) throw new FishError('K线读数无效','readings'); if(b.openTime>=cursor&&b.openTime<end&&b.openTime+step<=cut) collected.push(b); }
           cursor=end;
         }
       }
     }
     abort(signal); collected.sort((a,b)=>a.openTime-b.openTime);
     const unique=[...new Map(collected.map(b=>[b.openTime,b])).values()];
-    validateFishBars(unique,cut); this.cache.set(market.instrument,unique); return unique;
+    validateFishBars(unique,cut,query.count,step); this.remember(cacheKey,unique); return unique;
   }
-  async taker(market:FishMarket,bars:ResearchBar[],signal:AbortSignal):Promise<ResearchBar[]> {
+  async taker(market:FishMarket,bars:ResearchBar[],signal:AbortSignal,query: FishBarQuery = {interval:'5m',count:FISH_BARS}):Promise<ResearchBar[]> {
+    const step=intervalMs(query.interval);
     if(this.exchange==='binance') return bars;
     const missing=bars.filter(b=>b.takerBuyQuoteVolume==null);
     if(!missing.length) return bars;
-    const from=missing[0].openTime, to=missing[missing.length-1].openTime+FISH_STEP;
+    const begin=missing[0].openTime, end=missing[missing.length-1].openTime+step;
     const sums=new Map<number,{buy:number;sell:number;buyBase:number;base:number}>();
+    // Public time queries are bounded; preserve the final fractional second within each chunk.
+    for(let from=begin;from<end;from+=7*86400000){
+    const to=Math.min(end,from+7*86400000);
     let cursor=String(to), previousId:bigint|null=null, offset=0;
     for(;;) {
       abort(signal);
@@ -151,15 +176,16 @@ export class FishAdapter implements FishDataAdapter {
       for(const t of trades) {
         if(seen.has(t.id)||(previousId!==null&&BigInt(t.id)>=previousId)) continue; seen.add(t.id);
         if(t.timeMs<from||t.timeMs>=to) continue;
-        const time=Math.floor(t.timeMs/FISH_STEP)*FISH_STEP, x=sums.get(time)??{buy:0,sell:0,buyBase:0,base:0};
+        const time=Math.floor(t.timeMs/step)*step, x=sums.get(time)??{buy:0,sell:0,buyBase:0,base:0};
         if(t.buy){x.buy+=t.quote;x.buyBase+=t.volume;}else x.sell+=t.quote;
         x.base+=t.volume;sums.set(time,x);
       }
       previousId=nextId;cursor=String(nextId);offset+=raw.length;
       if(this.exchange==='okx'?trades.some(t=>t.timeMs<from):raw.length<1000) break;
     }
+    }
     const filled=applySums(missing,sums), ready=new Map(filled.map(b=>[b.openTime,b]));
-    const result=bars.map(b=>ready.get(b.openTime)??b);this.cache.set(market.instrument,result);return result;
+    const result=bars.map(b=>ready.get(b.openTime)??b);this.remember(`${market.instrument}|${query.interval}`,result);return result;
   }
 }
 /** Each venue owns a rolling budget. A direct network failure can switch to its fixed read-only proxy once. */

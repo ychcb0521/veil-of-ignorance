@@ -1,3 +1,5 @@
+> 本表2000根5m为最初准入与现场复现的核实样本。当前「渔」已改为Deep dig可选特征值：实际周期取intervalOf，历史长度N按完整程序与收敛预热决定（≤5000），不再固定2000/1454；下方原始现场证据保留。
+
 # 「渔」交易所核实表
 
 核实日期：2026-10-19。结论：保留币安，新增 **OKX、Bitget、Gate**；**Bybit、KuCoin 合约、MEXC 合约不接入**。未通过的交易所不显示可选入口。没有使用持仓比、涨跌方向、收盘价乘张数等替代主动买卖成交额。
@@ -48,7 +50,7 @@
 | Bitget | fills-history 10 次 / 秒、history-candles / contracts 20 次 / 秒；实现合并预算 10 次 / 秒 |
 | Gate | 公共接口文档每接口 200 次 / 10 秒；实现所有端点共用 200 次 / 10 秒，更保守 |
 
-各交易所独立预算，跨交易所合计最多 3 个并行请求。429 计请求失败并按 Retry-After（至少 60 秒）暂停该家后续请求；418 中止该家。取消中断请求、分页、排队和限速等待。某家 BTC 缺根只中止该家。
+各交易所独立预算，跨交易所合计最多 3 个并行请求。429 计请求失败并按 Retry-After（至少 60 秒）暂停该家后续请求；418 中止该家。取消中断请求、分页、排队和限速等待。当前通用算法仅在引用BTC时取参考，任一所需BTC缺根会在产出信号前中止整轮。
 
 默认依 Binance > OKX > Bybit > Bitget > Gate > KuCoin > MEXC 优先级，只扫描所有较高优先级、已接入交易所都未上线的基础币；取消某家勾选不会把它的重复币转交给低优先级。未通过核实的交易所不参与过滤。不知道较高优先级标的表时，无法保证排重，受影响的低优先级家停止并解释原因；「含重复币」开关可明确选择各家都扫。1000PEPE / PEPE、XBT / BTC 等统一基础币，保留 1INCH 的真实数字名称。
 
@@ -70,7 +72,7 @@
 
 早期探测未返回跨域头，后续携带生产域 Origin 重测三个端点均返回匹配的 Access-Control-Allow-Origin。浏览器也成功直连；因此优先直连，仅网络/CORS 失败后切换到只读代理，HTTP 418/429 不会换路绕过。
 
-`fish-market-proxy` 仅允许 OKX 的 instruments / history-candles / history-trades、Gate USDT futures 的 contracts / candlesticks / trades、Bitget mix market 的 contracts / history-candles / fills-history 公开 GET。请求参数带 `exchange`（旧 OKX URL 不带时仍默认 OKX），不接受调用者指定主机。逐项校验 USDT 永续、5m、时间单位与上下界、分页游标、limit 上限；Gate K线含右端，校验 `(to-from)/300+1 ≤ 2000`；Bitget逐笔区间≤7天。拒绝外域、私有路径、重复/未知参数、负数、倒置区间及POST，不转发调用者 Authorization、Cookie。15秒超时、4MB响应上限；错误响应也有 CORS，保留真实HTTP状态及Retry-After。
+`fish-market-proxy` 仅允许 OKX 的 instruments / history-candles / history-trades、Gate USDT futures 的 contracts / candlesticks / trades、Bitget mix market 的 contracts / history-candles / fills-history 公开 GET。请求参数带 `exchange`（旧 OKX URL 不带时仍默认 OKX），不接受调用者指定主机。逐项校验 USDT 永续、已支持周期、时间单位与上下界、分页游标、limit 上限；Gate K线含右端，校验 `(to-from)/周期秒数+1 ≤ 2000`；Bitget逐笔区间≤7天。拒绝外域、私有路径、重复/未知参数、负数、倒置区间及POST，不转发调用者 Authorization、Cookie。15秒超时、4MB响应上限；错误响应也有 CORS，保留真实HTTP状态及Retry-After。
 
 OKX、Gate、Bitget只在直连抛TypeError（网络/CORS）时尝试一次代理，之后在当前页面沿用该家代理。不因HTTP错误切换路线；418中止该家，429计请求失败并按Retry-After暂停该家，不能借代理绕过。代理仍不可达时用中文显示「交易所 · 接口路径 · 浏览器拦截（网络 / 跨域）」；代理返回HTTP错误时显示真实状态与中文原因。代理代码需要随Lovable部署；仅推Git不能保证edge function已经生效。
 
@@ -125,3 +127,12 @@ Content-Type: application/json
 - 「读数不全」：展开查看前10个币，显示主动成交接口阶段、失败时间点、B+S与Q及基础币量校验值；不会把历史超期塞进此项。
 - 「请求失败」：展开查看前10个币，显示交易所、接口路径与HTTP状态（包括代理返回的400/404/500）；网络/CORS两条路都失败时写「浏览器拦截（网络 / 跨域）」，不直接显示英文Failed to fetch。
 - 首先检查截止时间是否在支持范围；然后看可展开原因中的接口/HTTP状态；代理404或无法连接时检查edge function是否已部署。**到Lovable点 Publish → Update，edge function需要随发布才生效。**
+
+## 通用算法取数补充
+
+- 共享定义键为 `FEATURES_KEY`（lib/deepDig/features.ts），只读Deep dig的合并定义。捕捞用evaluateOnBars一次求合成程序；没有改特征值公式或Deep dig的计算。
+- 缓存按适配器内的 `(instrument, interval)` 分区并保留同周期较长历史，小窗口不会清空较长窗口。每个币算完让出主线程。
+- 币安K线每次≤1000，Gate也分成≤1000根，to为该段末根开盘秒；OKX遵守100根、Bitget遵守200根的原生上限。时间按特征值周期对齐。OKX/Bitget小时使用1H等标签，日线使用1Dutc；6/12小时使用UTC对齐标签。
+- Gate没有3m、2h、6h、12h原生周期，分别从1m、1h、1h、4h的完整连续K线聚合；Bitget的2h从1h聚合。聚合OHLC取首开/最高/最低/末收，币量和USDT成交额相加，缺根不补。Gate10000点保留期按实际较细原生周期检查，不能靠聚合越过上游范围。
+- 只有程序引用B/S时才取逐笔；Q/E直接用K线报价成交额与基础币量。逐笔时间窗口分成≤7天的相邻半开段，每段内保留分页进度与末秒小数成交，统一按逻辑周期汇总。主条件与约束采用同一输入和截止，没有使用截止之后的数据。
+- 只读代理现在白名单明确列出的原生周期，不接受任意周期字符串。仍拒绝私有路径、外域、重复/未知参数、倒置区间、超量请求；Gate闭区间根数按所选原生周期验证。前述5m探测、HTTP/CORS及成交误差证据未变。
