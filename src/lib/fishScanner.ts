@@ -1,3 +1,4 @@
+import { intersectFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput } from '@/lib/fish/intersection';
 import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf } from '@/lib/deepDig/features';
@@ -13,7 +14,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FISH_STEP, FISH_FIRST_USABLE, FISH_THRESHOLD, FishWeightBudget, FishError, FishRequestPool, fishDelay } from '@/lib/fish/shared';
 export { FISH_STEP, FISH_BARS, FISH_FIRST_USABLE, FISH_THRESHOLD, FishWeightBudget, FishError, fishDelay, validateFishBars } from '@/lib/fish/shared';
-export interface FishScanSettings { anchorMs?: number; threshold?: number; exchanges?: FishExchange[]; includeDuplicates?: boolean; includeUsStocks?: boolean; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; }
+export interface FishScanSettings { anchorMs?: number; threshold?: number; exchanges?: FishExchange[]; includeDuplicates?: boolean; includeUsStocks?: boolean; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; }
 /** Explicit UTC+8 parsing; independent of the browser's local timezone. */
 export function parseFishSettings(time: string, value: string): FishScanSettings {
   const threshold = value.trim() ? Number(value) : NaN;
@@ -31,6 +32,7 @@ const formula = compileFeatureFormula(`${CBI2_FORMULA}\nfishAvg = avg(CBI2, 24)`
 export type FishReading = FishSnapshot;
 export type FishOutcome = 'hit' | 'below' | 'unknown' | 'gap' | 'readings' | 'failed';
 export interface FishProgress {
+  algorithmHits?: number[];
   markets?: Partial<Record<'crypto'|'us_stock', FishProgress>>;
   venues?: Partial<Record<FishExchange, FishProgress>>; cutoffMs: number | null; anchorMs?: number | null; threshold?: number; total: number; done: number; current: string;
   counts: Record<FishOutcome, number>; status: 'running' | 'complete' | 'cancelled' | 'aborted' | 'skipped'; error?: string; history?: number; skippedReason?: string; failures?: {failed: {symbol:string;reason:string}[];readings: {symbol:string;reason:string}[]}; blocked?: number; constraintBlocked?: number[]; rule?: string; bars?: number; constraintTexts?: string[];
@@ -61,8 +63,8 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
-export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[] }
-type ScanOptions = FishScanSettings & { signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
+export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[]; member?: FishMemberResult }
+type ScanOptions = FishScanSettings & { onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   private running = false;
@@ -116,7 +118,21 @@ export class FishScanner {
    * 查单个币：用与捕捞完全相同的取数与判定，说清楚它在当前设置下为什么命中 / 没命中。
    * 【用户要求】2026-10-19「原来能捕捉到，现在却捕捉不到，啥原因？请解决」——给每个币一个可核对的答案。
    */
-  async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }): Promise<FishDiagnosis> {
+  async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; signal: AbortSignal }): Promise<FishDiagnosis> {
+    if(options.algorithms?.length){
+      if(options.algorithms.length===1)return this.diagnose({...options,...options.algorithms[0],algorithms:undefined});
+      const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
+      const anchorMs=options.anchorMs??clock.serverTime;
+      const plans=options.algorithms.map(a=>compileFishProgram(a.feature,a.algorithm));
+      const shared=sharedFishAdapters(this.adapters,plans,anchorMs);
+      const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,undefined,shared);
+      const exchange=options.exchange??'binance';
+      const reasons=plans.map(p=>p.unavailable??fishRetentionReason(exchange,Math.floor(anchorMs/p.step)*p.step,clock.serverTime,p.N,p.step,p.usesTaker,intervalOf(p.def)));
+      if(reasons.some(Boolean))return {outcome:'skipped',lines:[...reasons.map((reason,i)=>`算法 ${i+1}：${reason??'预检通过；因其它算法不可用，该交易所本轮跳过'}`),`交集：${EXCHANGE_NAMES[exchange]}整家跳过，不入库`]};
+      const rows=await Promise.all(plans.map(p=>scanner.diagnose({...options,feature:p.def,algorithm:p.settings,anchorMs,algorithms:undefined})));
+      const result=intersectFishResults(rows.map(r=>r.member??{outcome:r.outcome}),plans);
+      return {outcome:result.outcome as FishDiagnosis['outcome'],lines:[...rows.flatMap((r,i)=>r.lines.map(line=>`算法 ${i+1}：${line}`)),result.signal?`交集命中 · 起点 ${formatUTC8(result.signal.timeMs)}`:`交集：${result.outcome==='unknown'?'起点不明，不入库':`不在交集（${rows.map((r,i)=>`算法 ${i+1} ${r.outcome}`).join('；')}）`}`]};
+    }
     const t = (ms: number) => formatUTC8(ms).slice(5, 16);
     const exchange = options.exchange ?? 'binance';
     const plan = compileFishProgram(options.feature ?? CBI2_DEF, options.algorithm ?? { direction: '>', threshold: FISH_THRESHOLD, constraints: [] });
@@ -159,7 +175,7 @@ export class FishScanner {
     const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
     if (result.outcome === 'hit') {
       const k = result.signal!.fish!.startIndex!;
-      return { outcome: 'hit', cutoffMs: cut, lines: [head, `${name}：会命中。${atCut}；这一轮从 ${t(bars[k].openTime + plan.step)} 开始（起点 ${fmt(r.average[k])}，前一根 ${fmt(r.average[k - 1])}）`] };
+      return { outcome: 'hit', member: result, cutoffMs: cut, lines: [head, `${name}：会命中。${atCut}；这一轮从 ${t(bars[k].openTime + plan.step)} 开始（起点 ${fmt(r.average[k])}，前一根 ${fmt(r.average[k - 1])}）`] };
     }
     if (result.outcome === 'below') {
       let last = -1;
@@ -172,11 +188,68 @@ export class FishScanner {
       const failed = plan.texts.filter((_, i) => result.blockedBy?.[i]);
       return { outcome: 'blocked', cutoffMs: cut, lines: [head, `${name}：主条件满足（${atCut}），但被附加约束挡下：${failed.join('；')}`] };
     }
-    if (result.outcome === 'unknown') return { outcome: 'unknown', cutoffMs: cut, lines: [head, `${name}：起点不明。${atCut}，但从可用区间开头（${t(bars[first].openTime + plan.step)}）起就一直满足，找不到这一轮的开始，按规则不入库`] };
+    if (result.outcome === 'unknown') return { outcome: 'unknown', member: result, cutoffMs: cut, lines: [head, `${name}：起点不明。${atCut}，但从可用区间开头（${t(bars[first].openTime + plan.step)}）起就一直满足，找不到这一轮的开始，按规则不入库`] };
     return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：截止处读数不是有限数（${atCut}）`] };
   }
 
+  private async scanIntersection(options: ScanOptions): Promise<FishProgress> {
+    if(this.running)throw new Error('扫描正在进行');
+    this.running=true;
+    const progress=initialFishProgress(), states:FishProgress[]=[], results=new Map<string,Map<number,FishMemberResult>>();
+    const emitted=new Set<string>();
+    try {
+      if(options.algorithms!.length>6)throw new Error('最多 6 个算法');
+      const plans=options.algorithms!.map(a=>compileFishProgram(a.feature,a.algorithm));
+      const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
+      if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');
+      const anchorMs=options.anchorMs??clock.serverTime;
+      const skips:Partial<Record<FishExchange,string>>={};
+      for(const exchange of options.exchanges??['binance']) {
+        const reasons=plans.flatMap((p,i)=>{const reason=p.unavailable??fishRetentionReason(exchange,Math.floor(anchorMs/p.step)*p.step,clock.serverTime,p.N,p.step,p.usesTaker,intervalOf(p.def));return reason?[`算法 ${i+1}：${reason}`]:[];});
+        if(reasons.length)skips[exchange]=reasons.join('；');
+      }
+      if(plans.some(p=>p.unavailable)){
+        progress.status='complete';progress.anchorMs=anchorMs;progress.algorithmHits=plans.map(()=>0);
+        progress.venues=Object.fromEntries(Object.entries(skips).map(([exchange,reason])=>[exchange,{...initialFishProgress(),status:'skipped',skippedReason:reason}]));
+        return progress;
+      }
+      const adapters=sharedFishAdapters(this.adapters,plans,anchorMs);
+      const publish=()=>{
+        const base=states[0];if(!base)return;
+        Object.assign(progress,base,{anchorMs,rule:plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 '),algorithmHits:plans.map((_,i)=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
+        progress.done=Math.min(...plans.map((_,i)=>states[i]?.done??0));
+        progress.total=Math.max(...states.map(p=>p.total));
+        options.onProgress({...progress,counts:{...progress.counts}});
+      };
+      await Promise.all(plans.map(async(plan,i)=>{
+        const a={feature:plan.def,algorithm:plan.settings};
+        const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,this.calculate,adapters);
+        states[i]=await scanner.scan({...options,...a,algorithms:undefined,anchorMs,skipReasons:skips,onSignal:()=>{},onProgress:p=>{states[i]=p;publish();},onResult:(key,r)=>{
+          const members=results.get(key)??new Map<number,FishMemberResult>();members.set(i,r);results.set(key,members);
+
+        }});
+      }));
+      const intersectionCounts={...initialFishProgress().counts};
+      if(!options.signal.aborted&&!states.some(p=>p.status==='aborted'))for(const [key,members] of results){
+        if(members.size!==plans.length)continue;
+        const result=intersectFishResults(plans.map((_,i)=>members.get(i)!),plans);
+        if(result.outcome in intersectionCounts)intersectionCounts[result.outcome as FishOutcome]++;
+        if(result.signal){emitted.add(key);options.onSignal(result.signal);}
+      }
+      publish();
+      progress.counts={...progress.counts,hit:emitted.size,unknown:intersectionCounts.unknown};
+      progress.status=options.signal.aborted?'cancelled':states.some(p=>p.status==='aborted')?'aborted':'complete';
+      progress.error=states.map(p=>p.error).filter(Boolean).join('；')||undefined;
+    }catch(error){progress.status=options.signal.aborted?'cancelled':'aborted';progress.error=error instanceof Error?error.message:String(error);}
+    finally{this.running=false;options.onProgress({...progress,counts:{...progress.counts}});}
+    return progress;
+  }
+
   async scan(options: ScanOptions): Promise<FishProgress> {
+    if(options.algorithms?.length){
+      if(options.algorithms.length===1)return this.scan({...options,...options.algorithms[0],algorithms:undefined});
+      return this.scanIntersection(options);
+    }
     if (this.running) throw new Error('扫描正在进行');
     const { anchorMs, includeDuplicates = false, includeUsStocks = true } = options;
     let plan:FishProgram;
@@ -224,7 +297,7 @@ export class FishScanner {
       if(anchorMs!==undefined&&anchorMs>clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
       const node=anchorMs??clock.serverTime!,cut=Math.floor(node/plan.step)*plan.step;
       progress.anchorMs=node;progress.cutoffMs=cut;
-      for(const exchange of selected){const reason=fishRetentionReason(exchange,cut,clock.serverTime!,plan.N,plan.step,plan.usesTaker,query.interval);if(reason){venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=reason;}}
+      for(const exchange of selected){const reason=options.skipReasons?.[exchange]??fishRetentionReason(exchange,cut,clock.serverTime!,plan.N,plan.step,plan.usesTaker,query.interval);if(reason){venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=reason;}}
       for(const p of Object.values(venues)){p.anchorMs=node;p.cutoffMs=cut;}
       publish();
       const highest=Math.max(...selected.map(e=>EXCHANGE_PRIORITY.indexOf(e)));
@@ -281,6 +354,7 @@ export class FishScanner {
                   else if(exchange!=='binance'){signal.id=`fish-${exchange}-${market.symbol}-${signal.timeMs}-${encodeURIComponent(plan.algorithmKey)}`;signal.exchange=exchange;signal.binanceSymbol=binanceByBase.get(fishBase(market.base))??null;}
                   options.onSignal(signal);
                 }
+                options.onResult?.(`${exchange}|${market.market??'crypto'}|${market.symbol}`,result);
               }catch(error){
                 if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
                 else if(!local.signal.aborted){

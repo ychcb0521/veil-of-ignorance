@@ -74,7 +74,7 @@ function applySums(bars: readonly ResearchBar[], sums: Map<number,{buy:number;se
     return {...b,takerBuyQuoteVolume:x.buy,takerBuyVolume:x.buyBase};
   });
 }
-export interface FishBarQuery { interval: ResearchInterval; count: number }
+export interface FishBarQuery { allowPartial?: boolean; interval: ResearchInterval; count: number }
 export interface FishDataAdapter {
   readonly exchange: FishExchange;
   list(signal: AbortSignal): Promise<FishMarket[]>;
@@ -126,13 +126,18 @@ export class FishAdapter implements FishDataAdapter {
     const step=intervalMs(query.interval), cacheKey=`${market.instrument}|${query.interval}`;
     const from=cut-query.count*step,native=nativeFishInterval(this.exchange,query.interval);
     if(native!==query.interval){
-      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio});
+      const ratio=step/intervalMs(native),raw=await this.candles(market,cut,signal,{interval:native,count:query.count*ratio,allowPartial:query.allowPartial});
       const prior=new Map((this.cache.get(cacheKey)??[]).map(b=>[b.openTime,b]));
       const grouped:ResearchBar[]=[];
-      for(let i=0;i<raw.length;i+=ratio){const group=raw.slice(i,i+ratio),first=group[0],last=group.at(-1)!;const previous=prior.get(first.openTime);
+      const groups:ResearchBar[][]=[];
+      if(query.allowPartial){
+        const byTime=new Map(raw.map(b=>[b.openTime,b]));
+        for(let t=from;t<cut;t+=step){const group=Array.from({length:ratio},(_,i)=>byTime.get(t+i*intervalMs(native)));if(group.every((b):b is ResearchBar=>!!b))groups.push(group);}
+      }else for(let i=0;i<raw.length;i+=ratio)groups.push(raw.slice(i,i+ratio));
+      for(const group of groups){const first=group[0],last=group.at(-1)!;const previous=prior.get(first.openTime);
         grouped.push(previous??{openTime:first.openTime,open:first.open,close:last.close,high:Math.max(...group.map(b=>b.high)),low:Math.min(...group.map(b=>b.low)),volume:group.reduce((v,b)=>v+b.volume,0),quoteVolume:group.reduce((v,b)=>v+(b.quoteVolume??NaN),0),takerBuyVolume:null});
       }
-      validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return grouped;
+      if(!query.allowPartial)validateFishBars(grouped,cut,query.count,step);this.remember(cacheKey,grouped);return grouped;
     }
     const collected=(this.cache.get(cacheKey)??[]).filter(b=>b.openTime>=from&&b.openTime<cut);
     // 补齐窗口里所有缺的时间段，不只是头尾：缓存是多次扫描（不同截止时刻）拼起来的，
@@ -167,7 +172,7 @@ export class FishAdapter implements FishDataAdapter {
     }
     abort(signal); collected.sort((a,b)=>a.openTime-b.openTime);
     const unique=[...new Map(collected.map(b=>[b.openTime,b])).values()];
-    validateFishBars(unique,cut,query.count,step); this.remember(cacheKey,unique); return unique;
+    if(!query.allowPartial)validateFishBars(unique,cut,query.count,step); this.remember(cacheKey,unique); return unique;
   }
   async taker(market:FishMarket,bars:ResearchBar[],signal:AbortSignal,query: FishBarQuery = {interval:'5m',count:FISH_BARS}):Promise<ResearchBar[]> {
     const step=intervalMs(query.interval);

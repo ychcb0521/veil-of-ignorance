@@ -1,3 +1,8 @@
+import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedStateStorage';
+import {nativeFishInterval} from '@/lib/fish/periods';
+import {intervalMs} from '@/lib/deepRsa/marketData';
+import {intervalOf} from '@/lib/deepDig/features';
+import {FishAlgorithmCard,type FishCard} from './FishAlgorithmCard';
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,parseFishConstraint,fishStatistics,FISH_PRESETS,type FishConstraint} from '@/lib/fish/algorithm';
@@ -18,7 +23,7 @@ import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSugges
 
 export interface FishPanelProps {
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
-  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; signal: AbortSignal }) => Promise<FishDiagnosis>;
+  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
   signals: TradeSignal[]; progress: FishProgress | null;
@@ -33,6 +38,8 @@ export interface FishPanelProps {
  * 平时只有一行设置 + 一行「状态 · 命中 · 进度」；交易所勾选收在淡色滑杆图标后（展开状态记在这次浏览里）。
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
+const cardsKey=()=>`${getUserPrefix()}fish-cards.v1`;
+function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6):[];}catch{return [];}}
 const OPEN_KEY = 'veil.fish.open';
 function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
   try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe }; } catch { return { scope: false, detail: false, probe: false }; }
@@ -51,11 +58,15 @@ export function FishPanel(p: FishPanelProps) {
 
   const owner=getUserPrefix();
 
-  const [selected,setSelected]=useState('cbi2'),[pref,setPref]=useState<FishPreference>(()=>readFishPreference('cbi2'));
+  const [extraCards,setExtraCards]=useState<FishCard[]>(()=>readCards().slice(1));
+  const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
+  const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??readFishPreference('cbi2'));
+  const cardsOwner=useRef(owner);
+  useEffect(()=>{if(cardsOwner.current!==owner)return;try{writePersistedStateRaw(cardsKey(),JSON.stringify([{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards]));}catch{/* Local storage may be full or disabled. */}},[selected,pref,firstEnabled,extraCards,owner]);
   const [suggestion,setSuggestion]=useState<FishSuggestion|null>(()=>latestFishSuggestion('cbi2'));
   const [suggestionProgress,setSuggestionProgress]=useState<FishSuggestionProgress|null>(null);
   const suggestionController=useRef<AbortController|null>(null);
-  useEffect(()=>{setPref(readFishPreference(selected));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
+  useEffect(()=>{cardsOwner.current=owner;const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??readFishPreference('cbi2'));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const [constraintsOpen,setConstraintsOpen]=useState(false);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
@@ -66,13 +77,25 @@ export function FishPanel(p: FishPanelProps) {
   const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,suggesting=suggestionProgress?.status==='running',running=p.progress?.status==='running'||suggesting;
   const options=useMemo(()=>defs.map(d=>{try{const x=compileFishProgram(d,{direction:'>',threshold:d.id==='cbi2'?.3:0,constraints:[]});return {def:d,reason:x.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:pref.constraints});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
+  const multiple=useMemo(()=>{
+    const plans=[];let error='';
+    const cards=[{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards];
+    for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:c.pref.constraints});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
+    return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
+  },[selected,firstEnabled,pref,extraCards,defs,compiled]);
+  const requestSummary=useMemo(()=>exchanges.map(exchange=>{
+    const counts=new Map<string,number>();for(const p of multiple.plans){const interval=intervalOf(p.def);counts.set(interval,Math.max(counts.get(interval)??0,p.N));}
+    const pages=[...counts].reduce((n,[interval,count])=>n+Math.ceil(count*intervalMs(interval as Parameters<typeof intervalMs>[0])/intervalMs(nativeFishInterval(exchange,interval as Parameters<typeof intervalMs>[0]))/(exchange==='okx'?100:exchange==='bitget'?200:1000)),0);
+    return `${EXCHANGE_NAMES[exchange]} ${pages}`;
+  }).join(' / '),[exchanges,multiple]);
+  const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
     let anchorMs:number|undefined;
     try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
-    if(!compiled.plan||compiled.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[compiled.error||'算法设置有误']}}));return;}
+    if(multiple.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[multiple.error||'算法设置有误']}}));return;}
     setProbe(v=>({...v,busy:true,result:null}));
-    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,feature:compiled.plan.def,algorithm:compiled.plan.settings,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
   const rowErrors=useMemo(()=>pref.constraints.map(c=>{try{if(def)parseFishConstraint(def,c.text);return '';}catch(e){return e instanceof Error?e.message:String(e);}}),[def,pref.constraints]);
@@ -102,7 +125,7 @@ export function FishPanel(p: FishPanelProps) {
     }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted)setError(e instanceof Error?e.message:String(e));}}
     finally{if(suggestionController.current===mine)suggestionController.current=null;}
   };
-  const start=()=>{try{const settings=parseFishSettings(p.inputs.time,pref.threshold);if(!exchanges.length)throw new Error('请至少选择一家交易所');if(!plan||compiled.error)throw new Error(compiled.error);setError('');p.onStart({...settings,feature:plan.def,algorithm:plan.settings,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+  const start=()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const changeConstraint=(i:number,patch:Partial<FishConstraint>)=>update({...pref,constraints:pref.constraints.map((c,j)=>j===i?{...c,...patch}:c)});
   const addConstraints=(lines:string[])=>{update({...pref,constraints:[...pref.constraints,...lines.map((text,i)=>({id:`${Date.now()}-${pref.constraints.length+i}`,text,enabled:true}))]});setConstraintsOpen(true);};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
@@ -113,8 +136,8 @@ export function FishPanel(p: FishPanelProps) {
   return <section className="mt-2 space-y-2 rounded border border-border/60 bg-background p-3" aria-label="渔" data-testid="fish-panel">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px]">
       <div className="flex items-center gap-1"><strong className="text-xs">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
-        <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值；约束里的 X 是核心值（末尾均值行之前那个量）的显示值。只扫本轮选定的一种算法。</p>
-        <p>时间按 UTC+8，留空用币安服务器当前时间。共同截止向下取整至特征值周期，仅用已收盘K线。起点是主条件和全部启用约束同时连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
+        <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值；约束里的 X 是核心值（末尾均值行之前那个量）的显示值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
+        <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是主条件和全部启用约束同时连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
         <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根则整轮中止。</p>
         <p>默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重；加入信号库仍按信号库自身规则合并。设置只保存在本机，捕捞开始后锁定。</p>
         {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
@@ -129,7 +152,7 @@ export function FishPanel(p: FishPanelProps) {
       <button type="button" aria-label="计算建议" title="计算建议：信号库里的币安信号与同币种随机对照（点击后才取数）" className={faint} disabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} onClick={()=>void calculateSuggestion()}>{suggesting?<Loader2 className="h-3 w-3 animate-spin"/>:<Calculator className="h-3 w-3"/>}</button>
       {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'暂无有效建议':`建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（n = {suggestion.samples.n}）{suggestionStale?' · 已过期':suggestion.cacheHit?' · 缓存':''}</span>}
       <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
-      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!compiled.error} onClick={start}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
+      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={start}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
       </button>
@@ -141,7 +164,11 @@ export function FishPanel(p: FishPanelProps) {
       {pref.constraints.map((c,i)=><div key={c.id}><div className="flex items-center gap-2"><input aria-label={`启用约束 ${i+1}`} type="checkbox" checked={c.enabled} disabled={running} onChange={e=>changeConstraint(i,{enabled:e.target.checked})}/><input aria-label={`约束 ${i+1}`} className={`min-w-0 flex-1 rounded border bg-transparent px-2 py-1 font-mono ${rowErrors[i]?'border-destructive/50':'border-border/60'} ${c.enabled?'':'opacity-50'}`} value={c.text} disabled={running} onChange={e=>changeConstraint(i,{text:e.target.value})}/><button type="button" className={btn} disabled={running} aria-label={`删除约束 ${i+1}`} onClick={()=>update({...pref,constraints:pref.constraints.filter((_,j)=>j!==i)})}>删除</button></div>{rowErrors[i]&&<p className="ml-5 mt-1 text-destructive">{rowErrors[i]}{c.enabled?'':'（已停用，本轮忽略）'}</p>}</div>)}
       <div className="flex gap-2"><select aria-label="添加约束预设" className="rounded border border-border/60 bg-background px-2 py-1" disabled={running} value="" onChange={e=>{if(e.target.value!=='')addConstraints(FISH_PRESETS[Number(e.target.value)].lines);}}><option value="">+ 预设 ▾</option>{FISH_PRESETS.map((v,i)=><option key={v.name} value={i}>{v.name}</option>)}</select><button type="button" className={btn} disabled={running} onClick={()=>addConstraints([''])}>+ 自定义</button></div>
     </div>}</div>
-    <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:fishRuleText(def,pref.direction,pref.threshold,active.length,statistic)}</p>
+    <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><label><input type="checkbox" disabled={running} checked={firstEnabled} onChange={e=>setFirstEnabled(e.target.checked)}/> 启用算法 1</label>{extraCards.length>0&&<button disabled={running} onClick={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}>删除算法 1</button>}</div>
+    {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
+    <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
+    <p className="text-[11px] text-muted-foreground" data-testid="fish-rule">{running&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,active.length,statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(' 且 ')}</p>
+    {multiple.plans.length>0&&<p className="text-[10px] text-muted-foreground">每个币最多 {Math.max(...multiple.plans.map(p=>p.N))} 根 · K线请求 {requestSummary} 次/币（无缓存估算；BTC 参考共享，逐笔分页另计）</p>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
@@ -164,10 +191,10 @@ export function FishPanel(p: FishPanelProps) {
         {probe.result.lines.map((line,i)=><p key={i} className={i===0?'font-mono text-[10.5px] text-muted-foreground':'text-foreground/90'}>{line}</p>)}
       </div>}
     </div>}
-    {(error||compiled.error) && <p role="alert" className="text-[11px] text-destructive">{error||compiled.error}</p>}
+    {(error||multiple.error) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
     {x && <div className="space-y-2 text-[11px]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <p role="status" aria-live="polite" className="flex items-center gap-2" data-testid="fish-status">
+        <p role="status" aria-live="polite" className="flex items-center gap-2" data-testid="fish-status" title={x.algorithmHits?.map((n,i)=>`算法 ${i+1} 命中 ${n}`).join('；')}>
           <span>{STATUS[x.status]}</span>
           <span className="text-muted-foreground">·</span>
           <span>命中 <span className="font-mono tabular-nums font-medium text-primary">{x.counts.hit}</span></span>

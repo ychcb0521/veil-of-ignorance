@@ -142,19 +142,22 @@ export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgr
   return {value,average,main,constraints,condition};
 }
 export interface FishSnapshot {
+  algorithms?: FishSnapshot[]; intersectionStart?: number; outcome?: string; boundaryMs?: number;
   average: number; cbi2: number; startAverage: number; previousAverage: number; cutoffMs: number; threshold: number;
   statistic?: string; featureId?: string; featureName?: string; featureShort?: string; definitionKey?: string; interval?: string; H?: number; direction?: '>'|'<'; thresholdRaw?: number; scale?: number; unit?: string;
   constraints?: string[]; constraintKey?: string; algorithmKey?: string; value?: number; startIndex?: number; cutoffIndex?: number; startConstraints?: number[]; cutoffConstraints?: number[];
 }
-export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:FishValues,cutoffMs:number,plan:FishProgram): {outcome:'hit'|'below'|'blocked'|'unknown'|'readings';signal?:TradeSignal;blockedBy?:number[]} {
+export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:FishValues,cutoffMs:number,plan:FishProgram): {outcome:'hit'|'below'|'blocked'|'unknown'|'readings';signal?:TradeSignal;snapshot?:FishSnapshot;boundaryMs?:number;blockedBy?:number[]} {
   const end=bars.length-1,first=plan.warm-1;
   if(end<first||r.condition.length!==bars.length||!Number.isFinite(r.condition[end]))return {outcome:'readings'};
   if(!r.main[end])return {outcome:'below'};
   if(!r.condition[end])return {outcome:'blocked',blockedBy:r.constraints.map(c=>c[end]===0?1:0)};
   let k=end;
-  while(k>first){const previous=r.condition[k-1];if(!Number.isFinite(previous))return {outcome:'unknown'};if(!previous)break;k--;}
-  if(k===first)return {outcome:'unknown'};
+  let unknown=false;
+  while(k>first){const previous=r.condition[k-1];if(!Number.isFinite(previous)){unknown=true;break;}if(!previous)break;k--;}
+  unknown ||= k===first;
   const {def,settings}=plan,timeMs=bars[k].openTime+plan.step;
   const fish:FishSnapshot={statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
+  if(unknown)return {outcome:'unknown',boundaryMs:timeMs,snapshot:{...fish,outcome:'unknown',boundaryMs:timeMs,startIndex:undefined,startAverage:NaN,previousAverage:NaN}};
   return {outcome:'hit',signal:{id:`fish-${symbol}-${timeMs}-${encodeURIComponent(plan.algorithmKey)}`,symbol,timeMs,timeLabel:formatUTC8(timeMs),fallbackZone:'',fish}};
 }

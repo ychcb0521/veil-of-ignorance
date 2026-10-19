@@ -6,6 +6,7 @@ import { constraintFingerprint, fishAlgorithmKey } from './algorithm';
 /** Migrate deterministically; never let normal signal-library dedup collapse different algorithms. */
 export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const r=s.fish;
+  if(r?.algorithms?.length)return s;
   // 旧记录（外层 avg）有 H；最早的记录连算法键都没有，当时固定是 avg 24h。现在的记录没有 H。
   const texts=r?.constraints??[],H=r?.H??(r?.algorithmKey?undefined:24),direction=r?.direction??'>',threshold=r?.threshold??0.3,featureId=r?.featureId??'cbi2';
   const statistic=r?.statistic??'结果',constraintKey=constraintFingerprint(texts),algorithmKey=fishAlgorithmKey(featureId,H,direction,threshold,constraintKey,statistic);
@@ -23,4 +24,4 @@ export function mergeFishSignals(existing: readonly TradeSignal[],incoming: read
   }
   return [...map.values()];
 }
-export const fishAlgorithmShort=(s:TradeSignal)=>`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
+export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(a=>a.featureShort??a.featureName).join(' ∩ '):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
