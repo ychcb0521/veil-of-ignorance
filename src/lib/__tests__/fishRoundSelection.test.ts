@@ -24,11 +24,10 @@ it('定义变化不能冒用旧结果；重复卡按出现次数匹配',()=>{
  expect(selectFishRound(round,[fishSelectionKey(changed)])).toBeNull();
  expect(selectFishRound(round,[fishSelectionKey(plans[0]),fishSelectionKey(plans[0])])).toBeNull();
 });
-it('子集仍执行 unknown 边界；来源不同不能交叉配对',()=>{
+it('子集里起点不明的算法不算命中；来源不同不能交叉配对',()=>{
  const unknown={...round,results:new Map([['binance|crypto|XUSDT',new Map<number,FishMemberResult>([[0,{outcome:'unknown',boundaryMs:30}],[1,hit(1,40)]])]])};
- expect(combineFishRound(selectFishRound(unknown,plans.slice(0,2).map(fishSelectionKey))!,'and').signals[0].timeMs).toBe(40);
- unknown.results.get('binance|crypto|XUSDT')!.set(0,{outcome:'unknown',boundaryMs:40});
  expect(combineFishRound(selectFishRound(unknown,plans.slice(0,2).map(fishSelectionKey))!,'and').signals).toEqual([]);
+ expect(combineFishRound(selectFishRound(unknown,plans.slice(0,2).map(fishSelectionKey))!,'and').counts.unknown).toBe(1);
  const separate={...round,results:new Map([['binance|crypto|XUSDT',new Map<number,FishMemberResult>([[0,hit(0,20)]])],['okx|crypto|XUSDT',new Map([[1,hit(1,40)]])]])};
  expect(combineFishRound(selectFishRound(separate,plans.slice(0,2).map(fishSelectionKey))!,'and').signals).toEqual([]);
 });

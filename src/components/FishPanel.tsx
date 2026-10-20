@@ -236,6 +236,7 @@ export function FishPanel(p: FishPanelProps) {
           <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
           <span className="text-muted-foreground/40">·</span>
           <span className="text-muted-foreground">命中 <span className="font-mono text-[12px] font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
+          {(x.algorithmHits?.length??0)>1&&<span className="text-[10.5px] text-muted-foreground/70" data-testid="fish-algorithm-hits" title="各算法单独扫的命中数；交集一定不多于其中任何一个，并集一定不少于其中任何一个">（{x.algorithmHits!.map((n,i)=>`算法${enabledCardNumbers[i]??i+1}：${n}`).join(' · ')}）</span>}
           <span className="text-muted-foreground/40">·</span>
           <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
           {x.cutoffMs!=null&&<><span className="text-muted-foreground/40">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}

@@ -32,6 +32,8 @@ it('交集 = 两个单独扫描按交集规则逐币合并（真实 BSS / CBI-2 
   const both=A.hits.filter(h=>B.hits.some(x=>x.symbol===h.symbol)).map(h=>h.symbol);
   expect(pb.N).not.toBe(pa.N);
   expect([...got].sort()).toEqual([...expected].sort());
+  // 交集里的每个币，单独扫每个算法都捕到了
+  for(const sym of got.keys()){expect(A.hits.some((h:any)=>h.symbol===sym)).toBe(true);expect(B.hits.some((h:any)=>h.symbol===sym)).toBe(true);}
   expect(got.has(YOUNG)).toBe(false);expect(both.length).toBeGreaterThan(0);for(const s of both)expect(got.has(s)).toBe(true);
  }
 },600000);

@@ -34,13 +34,19 @@ export function unionFishResults(rows: readonly (FishMemberResult|undefined)[], 
     fish:{...source.fish!,algorithmKey:key,combination:'or',unionStart:start,hitAlgorithms:hitIndex.map(i=>i+1),algorithms:rows.map((r,i)=>r?.signal?.fish??r?.snapshot??({featureId:plans[i].def.id,featureName:plans[i].def.name,featureShort:plans[i].def.short,algorithmKey:plans[i].algorithmKey,outcome:r?.outcome??'missing'} as FishSnapshot))}}};
 }
 export const combineFishResults=(rows: readonly (FishMemberResult|undefined)[],plans: readonly FishProgram[],mode:FishCombination)=>mode==='or'?unionFishResults(rows,plans):intersectFishResults(rows.map(r=>r??{outcome:'missing'}),plans);
+/**
+ * 交集 = 每个算法单独扫都捕到的币（全部是 hit），起点取各算法起点里最晚的那个。
+ * 【用户要求】2026-10-22「交集算法之下能被捕捉到的标的，应该意味着在每个算法之下都能被捕捉到」：
+ * 以前某个算法「起点不明」（从可用历史开头就一直满足）时，只要另一算法的起点更晚也算进交集——单扫那个算法却不出这条鱼。
+ * 现在起点不明的算法不算命中（与单算法规则一致），交集严格是各算法命中的交集。
+ */
 export function intersectFishResults(rows: readonly FishMemberResult[], plans: readonly FishProgram[]): FishMemberResult {
   if(rows.length===1)return rows[0];
-  if(!rows.length||rows.some(r=>r.outcome!=='hit'&&r.outcome!=='unknown'))return {outcome:rows.find(r=>r.outcome!=='hit'&&r.outcome!=='unknown')?.outcome??'unknown'};
-  const hits=rows.flatMap(r=>r.signal?[r.signal]:[]),start=Math.max(...hits.map(s=>s.timeMs));
-  if(!hits.length||rows.some(r=>r.outcome==='unknown'&&!(start>(r.boundaryMs??Infinity))))return {outcome:'unknown'};
+  const miss=rows.find(r=>r.outcome!=='hit'||!r.signal);
+  if(!rows.length||miss)return {outcome:rows.find(r=>r.outcome!=='hit'&&r.outcome!=='unknown')?.outcome??'unknown'};
+  const hits=rows.map(r=>r.signal!),start=Math.max(...hits.map(s=>s.timeMs));
   const source=hits.find(s=>s.timeMs===start)!,key=fishCombinationKey(plans);
-  return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal?.fish??r.snapshot!)}}};
+  return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal!.fish!)}}};
 }
 /** Request once per venue/instrument/period, then give each program exactly its own trailing N. */
 export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number, eligible?: (exchange:FishExchange,p:FishProgram)=>boolean): Partial<Record<FishExchange,FishDataAdapter>> {
