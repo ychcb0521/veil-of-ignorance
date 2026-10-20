@@ -5,7 +5,7 @@ import {FishAlgorithmCard,RECORDED_RANGES,type FishCard} from './FishAlgorithmCa
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
-import {readFishPreference,saveFishPreference,type FishPreference} from '@/lib/fish/preferences';
+import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
@@ -42,7 +42,7 @@ export interface FishPanelProps {
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
 const cardsKey=()=>`${getUserPrefix()}fish-cards.v1`;
-function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:{...c.pref,constraints:[]}})):[];}catch{return [];}}
+function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:withFishDefaultThreshold(c.featureId,{...c.pref,constraints:[]})})):[];}catch{return [];}}
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
 function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
