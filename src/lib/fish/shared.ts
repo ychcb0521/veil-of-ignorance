@@ -66,14 +66,33 @@ export class FishRequestPool {
 }
 
 /**
- * 「鱼」的最低成交额：截止前 24 小时的 USDT 成交额不得低于 1000 万。不够的币直接跳过、不判定，成不了鱼。
- * 【用户要求】2026-10-20「渔部分，鱼的最低交易量标准是 24h 内不得低于 1000w USDT」。
+ * 「鱼」的最低成交额：截止前 1 小时的 USDT 成交额不得低于 100 万，且截止前 12 小时不得低于 800 万；两条都满足才判定，否则直接跳过、成不了鱼。
+ * 【用户要求】2026-10-20「渔部分，鱼的最低交易量标准是 1h 内不得低于 100w USDT，且 12h 内不得低于 800w USDT」（取代此前的「24h 不低于 1000 万」）。
  */
-export const FISH_MIN_TURNOVER = 10_000_000;
-/** 截止前 24 小时的 USDT 成交额（所给 K 线里 openTime ∈ [截止 − 24h, 截止) 的成交额之和）；有一根缺成交额就返回 null。 */
-export function fishTurnover24h(bars: readonly ResearchBar[], cutoffMs: number): number | null {
+export interface FishTurnoverFloor { hours: number; min: number }
+export const FISH_TURNOVER_FLOORS: readonly FishTurnoverFloor[] = [{ hours: 1, min: 1_000_000 }, { hours: 12, min: 8_000_000 }];
+/**
+ * 截止前 hours 小时的 USDT 成交额：K 线落在 [截止 − hours, 截止) 里的成交额之和。
+ * K 线周期不超过 1 小时时窗口正好落在 K 线边界上，是精确值；周期更长（如 4h 的算法看 1 小时）时，跨窗口那根按时间比例折算。
+ * 有一根缺成交额就返回 null。
+ */
+export function fishTurnoverWithin(bars: readonly ResearchBar[], cutoffMs: number, hours: number, step: number): number | null {
+  const from = cutoffMs - hours * 3_600_000;
   let sum = 0;
-  for (const b of bars) if (b.openTime >= cutoffMs - 86_400_000 && b.openTime < cutoffMs) { if (b.quoteVolume == null || !Number.isFinite(b.quoteVolume)) return null; sum += b.quoteVolume; }
+  for (const b of bars) {
+    const overlap = Math.min(b.openTime + step, cutoffMs) - Math.max(b.openTime, from);
+    if (overlap <= 0) continue;
+    if (b.quoteVolume == null || !Number.isFinite(b.quoteVolume)) return null;
+    sum += overlap >= step ? b.quoteVolume : b.quoteVolume * overlap / step;
+  }
   return sum;
 }
+/** 逐条检查成交额门槛；读数不全返回 null，否则返回各条的读数与是否达标。 */
+export function fishTurnoverCheck(bars: readonly ResearchBar[], cutoffMs: number, step: number, floors: readonly FishTurnoverFloor[]): { hours: number; min: number; value: number; ok: boolean }[] | null {
+  const out = [];
+  for (const f of floors) { const value = fishTurnoverWithin(bars, cutoffMs, f.hours, step); if (value === null) return null; out.push({ ...f, value, ok: value >= f.min }); }
+  return out;
+}
 export const formatTurnoverWan = (v: number) => `${Number((v / 1e4).toPrecision(4))} 万`;
+/** 没达标的那几条，写成「1h 成交额 58 万 < 100 万」。 */
+export const describeTurnoverMiss = (checks: readonly { hours: number; min: number; value: number; ok: boolean }[]) => checks.filter(c => !c.ok).map(c => `${c.hours}h 成交额 ${formatTurnoverWan(c.value)} < ${formatTurnoverWan(c.min)}`).join('，');
