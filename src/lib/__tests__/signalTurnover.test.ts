@@ -1,6 +1,6 @@
 // 【用户要求】2026-10-20「检查历史信号库中所有信号在当时信号出现时的成交量，汇总看区间范围，用 USDT」（口径：信号前 24 小时成交额）
 import {it,expect,vi,beforeEach} from 'vitest';
-import {collectSignalTurnover,turnoverFromBars,summarizeTurnover,bucketTurnover,formatUsdtCn,signalTurnoverCsv,readSignalTurnover,TURNOVER_STEP,TURNOVER_WINDOW_MS} from '@/lib/signalTurnover';
+import {collectSignalTurnover,turnoverFromBars,summarizeTurnover,bucketTurnover,formatUsdtCn,signalTurnoverCsv,readSignalTurnover,TURNOVER_STEP,TURNOVER_WINDOW_MS,rateTurnoverRows,turnoverRatingSummary} from '@/lib/signalTurnover';
 import {FishScanner} from '@/lib/fishScanner';
 import {FishError} from '@/lib/fish/shared';
 import type {FishDataAdapter} from '@/lib/fish/adapters';
@@ -37,7 +37,7 @@ it('逐个取数：失败只记原因不影响其他；结果存本机、明细 
  expect(r.rows.find(x=>x.symbol==='BADUSDT')?.reason).toContain('没有 BADUSDT');expect(r.rows.find(x=>x.symbol==='bad')?.reason).toBe('标的或时间无效');
  expect(progress.at(-1)).toMatchObject({status:'complete',done:4,total:4});
  expect(readSignalTurnover()?.fingerprint).toBe(r.fingerprint);
- const csv=signalTurnoverCsv(r).split('\n');expect(csv[0]).toBe('﻿标的,交易所,信号时间(UTC+8),24h成交额(USDT),覆盖小时,说明');expect(csv).toHaveLength(5);expect(csv.some(l=>l.startsWith('AAAUSDT,binance,')&&l.includes(',288000.00,24,'))).toBe(true);
+ const csv=signalTurnoverCsv(r).split('\n');expect(csv[0]).toBe('﻿标的,交易所,信号时间(UTC+8),24h成交额(USDT),覆盖小时,说明,评分');expect(csv).toHaveLength(5);expect(csv.some(l=>l.startsWith('AAAUSDT,binance,')&&l.includes(',288000.00,24,'))).toBe(true);
 });
 it('取消：只统计已取到的，标记未完成',async()=>{
  const t=Date.UTC(2026,3,9,15,47),cut=Math.floor(t/TURNOVER_STEP)*TURNOVER_STEP,c=new AbortController();let n=0;
@@ -53,4 +53,23 @@ it('扫描器：按信号的交易所取 5m × 288 根（允许上市不足）�
  expect((binance.candles as any).mock.calls[0][1]).toBe(cut);expect((binance.candles as any).mock.calls[0][3]).toEqual({interval:'5m',count:288,allowPartial:true});
  expect((binance.candles as any).mock.calls[0][0].instrument).toBe('AAAUSDT');expect((okx.candles as any).mock.calls[0][0].instrument).toBe('XXX-USDT-SWAP');expect(okx.list).toHaveBeenCalledTimes(1);
  expect(r.rows.map(x=>[x.symbol,x.turnover]).sort()).toEqual([['AAAUSDT',28800],['XXXUSDT',2016]]);
+});
+
+it('评分从当前信号库关联：兼容旧缓存、区分交易所和市场、撤销评分不复活旧值',()=>{
+ const t=1000;
+ const signals=[sig('AAAUSDT',t,{quality:2}),sig('AAAUSDT',t,{exchange:'okx',quality:5}),sig('AAAUSDT',t,{market:'us_stock',underlying:'AAA',quality:4})];
+ const rows=[{symbol:'AAAUSDT',timeMs:t,turnover:0,hours:24,quality:1},{symbol:'AAAUSDT',exchange:'okx',timeMs:t,turnover:20,hours:24},{symbol:'AAAUSDT',market:'us_stock',timeMs:t,turnover:40,hours:24}];
+ expect(rateTurnoverRows(rows,signals).map(r=>r.quality)).toEqual([2,5,4]);
+ expect(rateTurnoverRows(rows,[...signals,sig('AAAUSDT',t,{market:'us_stock',underlying:'OTHER',quality:1})])[2].quality).toBeUndefined();
+ expect(rateTurnoverRows([{...rows[2],underlying:'OTHER'}],[...signals,sig('AAAUSDT',t,{market:'us_stock',underlying:'OTHER',quality:1})])[0].quality).toBe(1);
+ expect(rateTurnoverRows(rows,signals.map(s=>({...s,quality:undefined}))).map(r=>r.quality)).toEqual([undefined,undefined,undefined]);
+ expect(rateTurnoverRows(rows,[]).map(r=>r.quality)).toEqual([undefined,undefined,undefined]);
+ const result={version:1 as const,fingerprint:'',createdAt:0,total:3,rows,stats:null,partial:0,complete:true};
+ expect(signalTurnoverCsv(result,signals).split('\n').slice(1).map(l=>l.split(',').at(-1))).toEqual(['2','5','4']);
+ expect(signalTurnoverCsv(result,[]).split('\n').slice(1).every(l=>l.endsWith(','))).toBe(true);
+});
+it('各评分档只计有效成交额，保留零值，中位数按档计算，未评分不混入',()=>{
+ const row=(turnover:number|null,quality?:number)=>({symbol:'AAAUSDT',timeMs:1,turnover,quality,hours:24});
+ const groups=turnoverRatingSummary([row(0,1),row(10,1),row(100,2),row(null,2),row(NaN,2),row(-1,2),row(500)]);
+ expect(groups).toEqual([{quality:1,count:2,median:5},{quality:2,count:1,median:100},{quality:3,count:0,median:null},{quality:4,count:0,median:null},{quality:5,count:0,median:null}]);
 });

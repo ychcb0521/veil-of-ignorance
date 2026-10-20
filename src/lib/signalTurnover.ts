@@ -10,7 +10,7 @@
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
+import { normalizeSignalQuality, signalDedupKey, type TradeSignal } from '@/lib/signalLibrary';
 import { FishError, fishDelay } from '@/lib/fish/shared';
 import { fishSignalFingerprint, type FishSampleRow } from '@/lib/fish/suggestions';
 
@@ -19,7 +19,9 @@ export const TURNOVER_BARS = 288;
 export const TURNOVER_WINDOW_MS = TURNOVER_BARS * TURNOVER_STEP;
 
 export interface SignalTurnoverRow {
-  symbol: string; exchange?: string; market?: string; timeMs: number;
+  symbol: string; exchange?: string; market?: string; underlying?: string; timeMs: number;
+  /** 统计时的评分快照；界面与导出会优先关联信号库的当前评分。 */
+  quality?: number;
   /** 24 小时成交额（USDT）；取不到为 null，原因写在 reason。 */
   turnover: number | null;
   /** 实际覆盖的小时数（上市不足 24 小时时小于 24）。 */
@@ -94,7 +96,7 @@ export async function collectSignalTurnover(options: SignalTurnoverOptions, load
     for (;;) {
       if (signal.aborted) return;
       const index = next++; if (index >= list.length) return;
-      const s = list[index], base = { symbol: s.symbol, exchange: s.exchange, market: s.market, timeMs: s.timeMs };
+      const s = list[index], base = { symbol: s.symbol, exchange: s.exchange, market: s.market, underlying: s.underlying, timeMs: s.timeMs, quality: normalizeSignalQuality(s.quality) };
       progress.current = s.symbol; publish();
       if (!Number.isFinite(s.timeMs) || s.timeMs <= 0 || !/^[A-Z0-9]{1,40}USDT$/.test(s.symbol)) rows[index] = { ...base, turnover: null, hours: 0, reason: '标的或时间无效' };
       else {
@@ -121,10 +123,35 @@ export async function collectSignalTurnover(options: SignalTurnoverOptions, load
   finally { options.signal.removeEventListener('abort', cancel); }
 }
 
+/** 旧成交额缓存也能读取当前评分；取消评分后不能回退到缓存里的旧评分。 */
+export function rateTurnoverRows(rows: readonly SignalTurnoverRow[], signals?: readonly TradeSignal[]): SignalTurnoverRow[] {
+  if (!signals) return rows.map(r => ({ ...r, quality: normalizeSignalQuality(r.quality) }));
+  const key = (r: Pick<SignalTurnoverRow, 'exchange' | 'market' | 'symbol' | 'timeMs'>) => JSON.stringify([r.exchange ?? 'binance', r.market ?? 'crypto', r.symbol, r.timeMs]);
+  const current = new Map(signals.map(s => [signalDedupKey(s), s]));
+  const legacy = new Map<string, TradeSignal[]>();
+  for (const s of signals) { const k = key(s); legacy.set(k, [...(legacy.get(k) ?? []), s]); }
+  return rows.map(r => {
+    const exact = current.get(signalDedupKey(r as Pick<TradeSignal, 'exchange' | 'symbol' | 'timeMs' | 'market' | 'underlying'>));
+    const candidates = legacy.get(key(r));
+    // 老版美股缓存没有 underlying；同名出现多个身份时不能猜评分归属。
+    const match = r.market === 'us_stock' && !r.underlying
+      ? candidates?.length === 1 ? candidates[0] : undefined
+      : exact ?? (!r.underlying && candidates?.length === 1 ? candidates[0] : undefined);
+    return { ...r, quality: normalizeSignalQuality(match?.quality) };
+  });
+}
+
+export function turnoverRatingSummary(rows: readonly SignalTurnoverRow[]) {
+  return [1, 2, 3, 4, 5].map(quality => {
+    const values = rows.filter(r => r.quality === quality && r.turnover !== null && Number.isFinite(r.turnover) && r.turnover >= 0).map(r => r.turnover!);
+    return { quality, count: values.length, median: summarizeTurnover(values)?.p50 ?? null };
+  });
+}
+
 /** 明细 CSV（UTF-8 带 BOM，Excel 直接打开不乱码）。 */
-export function signalTurnoverCsv(result: SignalTurnoverResult): string {
+export function signalTurnoverCsv(result: SignalTurnoverResult, signals?: readonly TradeSignal[]): string {
   const esc = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-  const lines = ['标的,交易所,信号时间(UTC+8),24h成交额(USDT),覆盖小时,说明', ...[...result.rows].sort((a, b) => a.timeMs - b.timeMs).map(r => [r.symbol, r.exchange ?? 'binance', formatUTC8(r.timeMs), r.turnover === null ? '' : r.turnover.toFixed(2), r.turnover === null ? '' : String(Number(r.hours.toFixed(2))), r.reason ?? (r.hours < 24 && r.turnover !== null ? '上市不足24小时，按上市以来计' : '')].map(esc).join(','))];
+  const lines = ['标的,交易所,信号时间(UTC+8),24h成交额(USDT),覆盖小时,说明,评分', ...rateTurnoverRows(result.rows, signals).sort((a, b) => a.timeMs - b.timeMs).map(r => [r.symbol, r.exchange ?? 'binance', formatUTC8(r.timeMs), r.turnover === null ? '' : r.turnover.toFixed(2), r.turnover === null ? '' : String(Number(r.hours.toFixed(2))), r.reason ?? (r.hours < 24 && r.turnover !== null ? '上市不足24小时，按上市以来计' : ''), r.quality === undefined ? '' : String(r.quality)].map(esc).join(','))];
   return '﻿' + lines.join('\n');
 }
 

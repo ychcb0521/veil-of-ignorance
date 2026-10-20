@@ -6,9 +6,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Download, RotateCw } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SignalTurnoverRatingChart } from '@/components/SignalTurnoverRatingChart';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishSignalFingerprint } from '@/lib/fish/suggestions';
-import { TURNOVER_BUCKETS, bucketTurnover, formatUsdtCn, readSignalTurnover, signalTurnoverCsv, type SignalTurnoverOptions, type SignalTurnoverProgress, type SignalTurnoverResult } from '@/lib/signalTurnover';
+import { TURNOVER_BUCKETS, bucketTurnover, formatUsdtCn, readSignalTurnover, signalTurnoverCsv, rateTurnoverRows, type SignalTurnoverOptions, type SignalTurnoverProgress, type SignalTurnoverResult } from '@/lib/signalTurnover';
 
 export function SignalTurnoverButton({ signals, run, busyReason }: { signals: readonly TradeSignal[]; run?: (options: SignalTurnoverOptions) => Promise<SignalTurnoverResult>; busyReason?: string }) {
   const [open, setOpen] = useState(false);
@@ -29,7 +30,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
   };
   const download = () => {
     if (!result) return;
-    const url = URL.createObjectURL(new Blob([signalTurnoverCsv(result)], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(new Blob([signalTurnoverCsv(result, signals)], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = `信号成交额-${new Date(result.createdAt).toISOString().slice(0, 10)}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -40,6 +41,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
     for (const r of result?.rows ?? []) if (r.turnover === null) { const k = (r.reason ?? '未知原因').replace(/ [A-Z0-9]+USDT /, ' … '); m.set(k, (m.get(k) ?? 0) + 1); }
     return [...m].sort((a, b) => b[1] - a[1]);
   }, [result]);
+  const ratedRows = useMemo(() => rateTurnoverRows(result?.rows ?? [], signals), [result, signals]);
   const s = result?.stats;
   const pct = (n: number) => values.length ? Math.round((n / values.length) * 1000) / 10 : 0;
   const peak = Math.max(1, ...buckets);
@@ -53,7 +55,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
       <BarChart3 className="h-3 w-3" />{running && progress ? <span className="font-mono tabular-nums">{progress.done}/{progress.total}</span> : null}
     </button>
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto p-5" data-testid="signal-turnover-dialog">
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto p-5" data-testid="signal-turnover-dialog">
         <DialogHeader className="space-y-1 text-left">
           <DialogTitle className="text-sm font-semibold">信号成交额</DialogTitle>
           <DialogDescription className="text-[11px] leading-relaxed">每个信号前 24 小时的 USDT 成交额（截至信号所在那根 5 分钟 K 线之前，即当时盘口的「24h 成交额」）· 共 {signals.length} 个信号</DialogDescription>
@@ -91,6 +93,7 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
               <span className="font-mono tabular-nums">{buckets[i]}<span className="ml-1 text-muted-foreground">{pct(buckets[i])}%</span></span>
             </div>)}
           </div>
+          <SignalTurnoverRatingChart rows={ratedRows} />
           <div className="space-y-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
             <p>统计了 <span className="font-mono tabular-nums text-foreground">{s.n}</span> / {result.total} 个信号{result.complete ? '' : '（中途取消，只算到已取到的）'}；{result.partial > 0 && <>其中 {result.partial} 个上市不足 24 小时，按上市以来的成交额计；</>}算于 {new Date(result.createdAt).toLocaleString('zh-CN', { hour12: false })}。</p>
             {failures.length > 0 && <details><summary className="w-fit cursor-pointer">取不到的 {result.rows.filter(r => r.turnover === null).length} 个</summary>{failures.slice(0, 8).map(([reason, n]) => <p key={reason} className="break-words">{n} 个 · {reason}</p>)}</details>}
