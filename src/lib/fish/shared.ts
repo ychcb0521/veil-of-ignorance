@@ -66,18 +66,19 @@ export class FishRequestPool {
 }
 
 /**
- * 「鱼」的最低成交额：截止前 1 小时的 USDT 成交额不得低于 100 万，且截止前 12 小时不得低于 800 万；两条都满足才判定，否则直接跳过、成不了鱼。
- * 【用户要求】2026-10-20「渔部分，鱼的最低交易量标准是 1h 内不得低于 100w USDT，且 12h 内不得低于 800w USDT」（取代此前的「24h 不低于 1000 万」）。
+ * 「鱼」的最低成交额：截止前 1 小时的 USDT 成交额不得低于 100 万、12 小时不得低于 800 万、24 小时不得低于 1000 万；三条都满足才判定，否则直接跳过、成不了鱼。
+ * 【用户要求】2026-10-20「鱼的最低交易量标准是 24h 内不得低于 1000w USDT」→「1h 内不得低于 100w，且 12h 内不得低于 800w」→「要同时 24 小时内不低于 1000 万」。
  */
 export interface FishTurnoverFloor { hours: number; min: number }
-export const FISH_TURNOVER_FLOORS: readonly FishTurnoverFloor[] = [{ hours: 1, min: 1_000_000 }, { hours: 12, min: 8_000_000 }];
+export const FISH_TURNOVER_FLOORS: readonly FishTurnoverFloor[] = [{ hours: 1, min: 1_000_000 }, { hours: 12, min: 8_000_000 }, { hours: 24, min: 10_000_000 }];
 /**
  * 截止前 hours 小时的 USDT 成交额：K 线落在 [截止 − hours, 截止) 里的成交额之和。
  * K 线周期不超过 1 小时时窗口正好落在 K 线边界上，是精确值；周期更长（如 4h 的算法看 1 小时）时，跨窗口那根按时间比例折算。
- * 有一根缺成交额就返回 null。
+ * 有一根缺成交额、或所给 K 线不够覆盖这段时长（如 1 分钟周期的算法只取了不到 24 小时），返回 null——不拿少算的成交额去误判。
  */
 export function fishTurnoverWithin(bars: readonly ResearchBar[], cutoffMs: number, hours: number, step: number): number | null {
   const from = cutoffMs - hours * 3_600_000;
+  if (!bars.length || bars[0].openTime > from) return null;
   let sum = 0;
   for (const b of bars) {
     const overlap = Math.min(b.openTime + step, cutoffMs) - Math.max(b.openTime, from);
@@ -87,7 +88,7 @@ export function fishTurnoverWithin(bars: readonly ResearchBar[], cutoffMs: numbe
   }
   return sum;
 }
-/** 逐条检查成交额门槛；读数不全返回 null，否则返回各条的读数与是否达标。 */
+/** 逐条检查成交额门槛；读数不全或 K 线不够覆盖返回 null，否则返回各条的读数与是否达标。 */
 export function fishTurnoverCheck(bars: readonly ResearchBar[], cutoffMs: number, step: number, floors: readonly FishTurnoverFloor[]): { hours: number; min: number; value: number; ok: boolean }[] | null {
   const out = [];
   for (const f of floors) { const value = fishTurnoverWithin(bars, cutoffMs, f.hours, step); if (value === null) return null; out.push({ ...f, value, ok: value >= f.min }); }

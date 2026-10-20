@@ -327,7 +327,7 @@ export class FishScanner {
     bars = bars.map(b => plan.compiled.usesBtc ? { ...b, refClose: refs.get(b.openTime)! } : b);
     if (options.turnoverFloors?.length) {
       const checks = fishTurnoverCheck(bars, cut, plan.step, options.turnoverFloors);
-      if (checks === null) return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：成交额读数不全，无法判断成交额门槛`] };
+      if (checks === null) return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：成交额读数不全或 K 线不够覆盖 24 小时，无法判断成交额门槛`] };
       if (checks.some(c => !c.ok)) return { outcome: 'skipped', cutoffMs: cut, lines: [head, `${name}：截止前${describeTurnoverMiss(checks)} USDT，没达到成交额门槛，不判定（成不了鱼）`] };
     }
     const r = evaluateFishProgram(bars, plan), result = classifyFishProgram(market.symbol, bars, r, cut, plan);
@@ -540,10 +540,10 @@ export class FishScanner {
                 const source=plan.usesTaker?await adapter.taker(market,raw,local.signal,query):raw;
                 const bars=source.map(b=>plan.compiled.usesBtc?({...b,refClose:btcClose.get(b.openTime)!}):b);
                 if(bars.length!==plan.N||bars.some(b=>(plan.compiled.usesAmounts&&(b.quoteVolume==null||(plan.usesTaker&&b.takerBuyQuoteVolume==null)))||(plan.compiled.usesBtc&&!(b.refClose!>0))))throw new FishError('成交额或BTC读数不全','readings');
-                // 成交额门槛：截止前 1h / 12h 等 USDT 成交额任一条不够的币跳过、不判定（成不了鱼）
+                // 成交额门槛：截止前 1h / 12h / 24h USDT 成交额任一条不够的币跳过、不判定（成不了鱼）
                 if(options.turnoverFloors?.length){
                   const checks=fishTurnoverCheck(bars,cut,plan.step,options.turnoverFloors);
-                  if(checks===null)throw new FishError('成交额读数不全，无法判断成交额门槛','readings');
+                  if(checks===null)throw new FishError('成交额读数不全或 K 线不够覆盖 24 小时，无法判断成交额门槛','readings');
                   if(checks.some(c=>!c.ok)){
                     if(local.signal.aborted)return;
                     p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:'thin'});
