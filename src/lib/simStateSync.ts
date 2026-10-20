@@ -17,6 +17,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
+import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
 import {
   clearPersistedStateMemoryForTests,
   getUnpersistedStateMetadata,
@@ -48,13 +49,23 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
   // 并集之后再修剪：本机修掉的老节点不能借远端的副本一次次长回来。
   [REPLAY_TIMELINES_STORAGE_KEY]: (local, remote) =>
     pruneReplayTimelineRegistry(mergeReplayTimelineRegistries(local, remote), { now: Date.now() }),
+  // 「鱼」只要没删就一直留着：两份取并集，再按（两边合并后的）删除记号去掉用户删过的。
+  // 【用户要求】2026-10-20「渔部分的鱼只要没删除，就一直保留。我发现有的鱼突然就没了」——
+  // 以前整键后推者胜，另一个浏览器里的 30 条会把这里的 162 条整份盖掉。
+  fish_signals_v1: (local, remote) => {
+    let tombstones = {};
+    try { tombstones = normalizeFishTombstones(JSON.parse(readPersistedStateRaw('veil.fishDeleted.v1') ?? '{}')); } catch { /* 记号坏了按没有处理 */ }
+    return mergeFishLists(local, remote, tombstones);
+  },
+  fish_deleted_v1: (local, remote) => mergeFishTombstones(local, remote),
 };
 
 /**
  * 不走 `sim_<uid>_` 前缀的存储 → 实际 localStorage 键的映射。
  * 这些同样是跟账号走的资产，不能因为键名格式不同就漏掉：
  *   signal_library_v1  用户粘贴的信号库（全局键）
- *   fish_signals_v1    渔的手动捕捞结果（全局键）
+ *   fish_signals_v1    渔的手动捕捞结果（全局键；水化时按内容并集合并）
+ *   fish_deleted_v1    渔里用户手动删掉的鱼的删除记号（全局键；水化时并集合并）
  *   blind_spots_v1     认知盲区清单（veil:blindspots:<uid>）
  *   journal_mirror_v1  远程 schema 缺列时的字段兜底镜像（全局键，内部按 uid 分区）
  *   emotion_diary_v1   情绪日记本地镜像（<version>:<uid>）
@@ -63,6 +74,7 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
 const ALT_KEY_STORAGE: Record<string, (userId: string) => string> = {
   signal_library_v1: () => 'veil.signalLibrary.v1',
   fish_signals_v1: () => 'veil.fishSignals.v1',
+  fish_deleted_v1: () => 'veil.fishDeleted.v1',
   blind_spots_v1: (uid) => `veil:blindspots:${uid}`,
   journal_mirror_v1: () => 'journal_local_mirror_v1',
   emotion_diary_v1: (uid) => `decision_emotion_diaries_v1:${uid}`,

@@ -29,6 +29,8 @@ export interface FishPanelProps {
   onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[], plans?: readonly FishProgram[]) => boolean;
   /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
   roundPlans?: readonly FishProgram[] | null;
+  /** 给了就每次打开都排成这几个算法（按顺序、全部勾选，各卡沿用该算法上次的设置）；不给就恢复上次保存的卡片。 */
+  defaultAlgorithms?: readonly string[];
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
   onDiagnose?: (options: { turnoverFloors?: readonly import('@/lib/fish/shared').FishTurnoverFloor[]; symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
@@ -46,6 +48,17 @@ export interface FishPanelProps {
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
 const cardsKey=()=>`${getUserPrefix()}fish-cards.v1`;
+/**
+ * 默认的四个算法与顺序：CBI-2 → DSP·a → CBA → BSS。
+ * 【用户要求】2026-10-20「我希望渔默认为这四个算法，每次点开始都默认为这四个算法和顺序」：
+ * 每次打开「渔」都排成这四张卡、按这个顺序、全部勾选；各卡沿用这个算法上次的阈值 / 统计量 / 方向（没有就用默认门槛）。
+ * 会话中临时增删、停用的卡，下次打开恢复成这四个。Deep dig 里删掉了的算法跳过。
+ */
+export const FISH_DEFAULT_ALGORITHMS:readonly string[]=['cbi2','drift-speed-z','cba','bss'];
+function defaultCards(ids:readonly string[],available:readonly string[]):FishCard[]{
+  const saved=readCards();
+  return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
+}
 function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:withFishDefaultThreshold(c.featureId,{...c.pref,constraints:[]})})):[];}catch{return [];}}
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
@@ -65,14 +78,16 @@ export function FishPanel(p: FishPanelProps) {
 
   const owner=getUserPrefix();
 
-  const [extraCards,setExtraCards]=useState<FishCard[]>(()=>readCards().slice(1));
+  const loadCards=()=>{const cards=p.defaultAlgorithms?defaultCards(p.defaultAlgorithms,defs.map(d=>d.id)):[];return cards.length?cards:readCards();};
+  const [initialCards]=useState(loadCards);
+  const [extraCards,setExtraCards]=useState<FishCard[]>(()=>initialCards.slice(1));
   // 【用户要求】2026-10-19「多重选择除了交集，再增加一种并集（只要符合其中一个算法的，都留下）」：合并方式跟账号记在本机
   const combinationKey=()=>`${getUserPrefix()}fish-combination.v1`;
   const readCombination=():'and'|'or'=>{try{return readPersistedStateRaw(combinationKey())==='or'?'or':'and';}catch{return 'and';}};
   const [combination,setCombinationState]=useState<'and'|'or'>(readCombination);
   const setCombination=(v:'and'|'or')=>{setCombinationState(v);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
-  const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
-  const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??cleanPreference(readFishPreference('cbi2')));
+  const [firstEnabled,setFirstEnabled]=useState(()=>initialCards[0]?.enabled??true);
+  const [selected,setSelected]=useState(()=>initialCards[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>initialCards[0]?.pref??cleanPreference(readFishPreference('cbi2')));
   const cardsOwner=useRef(owner);
   useEffect(()=>{p.reconstruction?.onCardsChange([{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards]);},[selected,firstEnabled,pref,extraCards,p.reconstruction?.onCardsChange]);
   useEffect(()=>{if(cardsOwner.current!==owner)return;try{writePersistedStateRaw(cardsKey(),JSON.stringify([{id:'first',featureId:selected,enabled:firstEnabled,pref},...extraCards]));}catch{/* Local storage may be full or disabled. */}},[selected,pref,firstEnabled,extraCards,owner]);
@@ -82,7 +97,7 @@ export function FishPanel(p: FishPanelProps) {
   /** 正在算的这一次：auto = 打开时后台自动算（不锁设置，开始捕捞时让路）；manual = 点计算图标（锁定，可取消）。 */
   const suggestionRun=useRef<{mode:'auto'|'manual';key:string;done:Promise<void>;target?:string}|null>(null);
   const autoTried=useRef(new Set<string>());
-  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=readCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
+  useEffect(()=>{cardsOwner.current=owner;setCombinationState(readCombination());const cards=loadCards();setExtraCards(cards.slice(1));setFirstEnabled(cards[0]?.enabled??true);setSelected(cards[0]?.featureId??'cbi2');setPref(cards[0]?.pref??cleanPreference(readFishPreference('cbi2')));setSuggestion(latestFishSuggestion(selected));setSuggestionProgress(null);return()=>{suggestionController.current?.abort();suggestionController.current=null;};},[owner]);
   const listedDef=defs.find(d=>d.id===selected)??defs.find(d=>d.id==='cbi2')??defs[0];
   // 【用户要求】2026-10-19「保证内在统一」：渔与 K 线图、Deep dig 读同一份定义，没有「内置 / Deep dig」之分
   const def=listedDef;
@@ -101,7 +116,10 @@ export function FishPanel(p: FishPanelProps) {
   const pool=useMemo(()=>[{featureId:selected,pref},...extraCards].flatMap(c=>{try{const d=defs.find(d=>d.id===c.featureId);if(!d)return [];const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});return plan.unavailable?[]:[plan];}catch{return [];}}),[selected,pref,extraCards,defs]);
   const selectionKeys=multiple.plans.map(fishSelectionKey),selectionSignature=JSON.stringify(selectionKeys);
   const [staleRound,setStaleRound]=useState(false);
-  useEffect(()=>{if(!p.hasRound||running)return;if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys,multiple.plans));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
+  // 只有用户自己改了勾选 / 合并方式 / 阈值才重新合并本轮结果；刚出现一轮（扫完或刷新后恢复）时不动它——
+  // 【用户要求】2026-10-20「鱼只要没删除，就一直保留」：每次打开都排成默认四张卡，若一打开就按默认卡重合并，上一轮按别的组合捕到的新鱼会突然不见
+  const recombineArmed=useRef(false);
+  useEffect(()=>{if(!p.hasRound||running){recombineArmed.current=false;return;}if(!recombineArmed.current){recombineArmed.current=true;setStaleRound(false);return;}if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys,multiple.plans));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
   // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）
   const enabledCardNumbers=[firstEnabled,...extraCards.map(c=>c.enabled)].flatMap((on,i)=>on?[i+1]:[]);
   // 对不上本轮时说清楚原因：只是阈值放宽了，就告诉本轮按多少扫的、往哪边调能即时过滤

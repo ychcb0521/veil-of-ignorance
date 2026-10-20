@@ -17,7 +17,7 @@ import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
 import type { FishExchange } from '@/lib/fish/exchanges';
-import { FishPanel } from '@/components/FishPanel';
+import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
 import { SpeedSelector } from '@/components/SpeedSelector';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
@@ -390,7 +390,8 @@ export function TimeControl({
     }
   }, []);
 
-  const handleDeleteFish = useCallback((id: string) => fish.commit(fish.signalsRef.current.filter(s => s.id !== id)), [fish.commit, fish.signalsRef]);
+  // 手动删除走 fish.remove：记删除记号，别的设备 / 窗口的旧副本合并时不会把它带回来
+  const handleDeleteFish = useCallback((id: string) => fish.remove(id), [fish.remove]);
   const handleRateFish = useCallback((id: string, quality: number) => fish.commit(setSignalQuality(fish.signalsRef.current, id, quality)), [fish.commit, fish.signalsRef]);
   const handleJumpFish = useCallback(async (id: string) => {
     const sig = fish.signalsRef.current.find(s => s.id === id);
@@ -528,7 +529,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
+      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

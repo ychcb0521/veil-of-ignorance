@@ -1,17 +1,31 @@
-import { mergeFishSignals } from '@/lib/fish/records';
+import { mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
+import { applyFishTombstones, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 export const FISH_STORAGE_KEY = 'veil.fishSignals.v1';
+/** 用户手动删除的鱼（键 → 删除时刻），跨设备合并，防止别处的旧副本把删掉的鱼带回来。 */
+export const FISH_DELETED_KEY = 'veil.fishDeleted.v1';
+export function loadFishTombstones(): FishTombstones {
+  try { return normalizeFishTombstones(JSON.parse(readPersistedStateRaw(FISH_DELETED_KEY) ?? '{}')); } catch { return {}; }
+}
+/** 记下这几条鱼被用户删除了（只有手动删除才记；切换交集 / 并集、调严阈值撤掉的不算删除）。 */
+export function recordFishDeletion(signals: readonly TradeSignal[], userId: string | null, now = Date.now()): void {
+  if (!signals.length) return;
+  const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.map(s => [fishDedupKey(s), Math.max(now, (s.caughtAt ?? 0) + 1)])));
+  writePersistedStateRaw(FISH_DELETED_KEY, JSON.stringify(next));
+  if (userId) queueSimStatePush(userId, 'fish_deleted_v1', next);
+}
 export function loadFishSignals(): TradeSignal[] {
   try {
     const raw = JSON.parse(readPersistedStateRaw(FISH_STORAGE_KEY) ?? '[]');
     if(!Array.isArray(raw))return [];
     const valid=raw.filter((s):s is TradeSignal=>s&&typeof s.id==='string'&&typeof s.symbol==='string'&&Number.isFinite(s.timeMs)&&typeof s.timeLabel==='string'&&typeof s.fallbackZone==='string');
-    const migrated=mergeFishSignals([],valid),serialized=JSON.stringify(migrated);
+    const migrated=applyFishTombstones(mergeFishSignals([],valid),loadFishTombstones()),serialized=JSON.stringify(migrated);
     // Keep malformed original rows available for recovery; only migrate a wholly valid library in place.
+    // 被删除记号压住的鱼（别的设备删的、或合并时带回来的旧副本）也在这里去掉。
     if(valid.length===raw.length&&serialized!==JSON.stringify(raw))writePersistedStateRaw(FISH_STORAGE_KEY,serialized);
     return migrated;
   } catch { return []; }

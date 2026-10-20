@@ -36,6 +36,8 @@ export interface TradeSignal {
    * 【用户要求】2026-10-19「点击了开始捕捞，原来的新鱼就放在鱼中，新捕捞到的放在新鱼中」：每次开始捕捞先全部清掉，本次命中的再标上。
    */
   freshCatch?: boolean;
+  /** 「鱼」最近一次被捕到的时刻（ms）：删除记号只压住在它之前捕到的那条（见 fish/tombstones.ts）。 */
+  caughtAt?: number;
   /** 稳定 id，用于列表 key 与删除 */
   id: string;
   /** 归一化后的标的，如 BTCUSDT（大写、去空格与斜杠） */

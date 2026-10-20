@@ -94,3 +94,14 @@ it('扫完把阈值调严：新鱼当场过滤（不取数）；调回原阈值�
  act(()=>{ok=result.current.recombine('and',[at(100).algorithmKey],[at(100)]);});expect(ok).toBe(true);expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);
  expect(candleRequests).toBe(fetched);
 });
+
+// 【用户要求】2026-10-20「渔部分的鱼只要没删除，就一直保留」
+it('手动删除记删除记号；其他写入不记',async()=>{
+ const {result}=renderHook(()=>useFish(undefined));
+ const {loadFishTombstones}=await import('@/lib/fishSignals');
+ act(()=>{result.current.commit(result.current.signals.map(s=>({...s,quality:2})));});
+ expect(Object.keys(loadFishTombstones())).toEqual([]);
+ const id=result.current.signals.find(s=>s.symbol==='OLDUSDT')!.id;
+ act(()=>{result.current.remove(id);});
+ expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')).toBeUndefined();expect(Object.keys(loadFishTombstones())).toHaveLength(1);
+});

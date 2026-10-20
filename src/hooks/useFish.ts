@@ -5,7 +5,7 @@ import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, de
 import type { FishProgram } from '@/lib/fish/algorithm';
 import { fishRuleText } from '@/lib/fishRule';
 import type { FishCombination } from '@/lib/fish/intersection';
-import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSignals';
+import { loadFishSignals, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
@@ -22,13 +22,15 @@ const emptyWrites = (): RoundWrites => ({ added: new Set(), refreshed: new Map()
 /** 把一条捕到的鱼记进列表（标「新鱼」）；没有变化返回 null。同时记下这一轮的改动。 */
 function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrites): TradeSignal[] | null {
   const key = fishDedupKey(signal);
-  const merged = mergeFishSignals(list, [{ ...signal, freshCatch: true }]);
+  // 记下捕到的时刻：之前的删除记号压不住这次新捕到的（见 fish/tombstones.ts）
+  const caughtAt = Date.now();
+  const merged = mergeFishSignals(list, [{ ...signal, freshCatch: true, caughtAt }]);
   if (merged.length !== list.length) { writes.added.add(key); return merged; }
   // 已经在列表里（同一标的@时间）：标成新鱼、读数换成这一轮的，评分保留
   const previous = list.find(s => fishDedupKey(s) === key);
   if (!previous || (previous.freshCatch && JSON.stringify(previous.fish) === JSON.stringify(signal.fish) && previous.binanceSymbol === signal.binanceSymbol)) return null;
   if (!writes.added.has(key) && !writes.refreshed.has(key)) writes.refreshed.set(key, previous);
-  return list.map(s => s === previous ? { ...s, fish: signal.fish, binanceSymbol: signal.binanceSymbol, freshCatch: true } : s);
+  return list.map(s => s === previous ? { ...s, fish: signal.fish, binanceSymbol: signal.binanceSymbol, freshCatch: true, caughtAt } : s);
 }
 
 // Shared across TimeControl instances and panel remounts in this browser page.
@@ -67,10 +69,10 @@ export function useFish(userId: string | undefined) {
     refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
     const version=++generation.current;
     void loadFishSession(userId).then(saved=>{if(!saved||version!==generation.current)return;roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
-    const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, refresh);
-    const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === null) refresh(); };
+    const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, refresh), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, refresh);
+    const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) refresh(); };
     window.addEventListener('storage', storage);
-    return () => { ++generation.current; controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); window.removeEventListener('storage', storage); };
+    return () => { ++generation.current; controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
   }, [userId]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
@@ -139,10 +141,20 @@ export function useFish(userId: string | undefined) {
     persist();return true;
   }, [persist]);
   recombineRef.current=recombine;
+  /**
+   * 用户手动删除一条鱼：记删除记号（跨设备同步，别处的旧副本带不回来），再从列表里去掉。
+   * 【用户要求】2026-10-20「渔部分的鱼只要没删除，就一直保留」——只有这里算删除。
+   */
+  const remove = useCallback((id: string) => {
+    const gone = signalsRef.current.filter(s => s.id === id);
+    if (!gone.length) return;
+    recordFishDeletion(gone, ownerRef.current ?? null);
+    commit(signalsRef.current.filter(s => s.id !== id));
+  }, [commit]);
   /** 查单个币（不入库）：与捕捞同一套取数与判定。 */
   const diagnose = useCallback((options: Parameters<FishScanner['diagnose']>[0]) => {
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover };
+  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove };
 }
