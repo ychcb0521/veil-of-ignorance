@@ -21,7 +21,7 @@ function control(jump = vi.fn(async () => ({ ok: true as const }))) {
   return <TimeControl status="paused" currentSimulatedTime={123} speed={1} onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}} onJumpToSignal={jump} />;
 }
 beforeEach(() => {
-  vi.clearAllMocks(); localStorage.clear();
+  vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,'[]');
   localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([SIGNAL]));
   // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已填过 0.3 测捕捞流程

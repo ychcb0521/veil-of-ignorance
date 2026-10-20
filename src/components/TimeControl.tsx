@@ -52,6 +52,7 @@ interface Props {
   signalJumpIntervalMs?: number;
 }
 
+const FISH_TIME_KEY = 'veil.fish.time';
 export function TimeControl({
   status, currentSimulatedTime, speed,
   onStart, onPause, onResume, onStop, onSetSpeed, clockRef,
@@ -82,7 +83,9 @@ export function TimeControl({
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
-  const [fishInputs, setFishInputs] = useState({ time: '', threshold: '0.3' });
+  // 渔的捕捞时间记在这个标签页里（刷新不丢）：以前每次刷新都变回空 = 「现在」，换了截止时刻自己却看不出来
+  const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
+  const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
@@ -524,7 +527,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
+      {fishOpen && <FishPanel onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

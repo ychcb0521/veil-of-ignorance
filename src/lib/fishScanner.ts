@@ -69,7 +69,35 @@ import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/ada
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
 export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[]; member?: FishMemberResult }
-type ScanOptions = FishScanSettings & { onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
+/**
+ * 多重算法一轮的逐币结论：扫完后交给页面保存，切换「交集 / 并集」时直接用它重新合并，不用重扫。
+ * 【用户要求】2026-10-20「并集这里捕捉完之后，我希望当我点击交集的时候，可以灵活切换到交集的结果」。
+ */
+export interface FishCombinationRound { plans: FishProgram[]; results: Map<string, Map<number, FishMemberResult>>; anchorMs: number; complete: boolean; memberHits: number[] }
+/** 按某种合并方式，把一轮的逐币结论合成鱼。并集里有算法没结论的币只在这一轮完整扫完时才合并。 */
+export function combineFishRound(round: FishCombinationRound, mode: FishCombination): { signals: TradeSignal[]; counts: Record<string, number> } {
+  const signals: TradeSignal[] = [], counts: Record<string, number> = {};
+  for (const members of round.results.values()) {
+    if (mode === 'and' && members.size !== round.plans.length) continue;
+    if (mode === 'or' && members.size !== round.plans.length && !round.complete) continue;
+    const r = combineFishResults(round.plans.map((_, i) => members.get(i)), round.plans, mode);
+    counts[r.outcome] = (counts[r.outcome] ?? 0) + 1;
+    if (r.signal) signals.push(r.signal);
+  }
+  return { signals, counts };
+}
+/** 「捕捞过程」的组合摘要（多重算法）：参与判定的币数、组合命中数、各算法单独命中数。 */
+export function saveFishCombinationRound(round: FishCombinationRound, mode: FishCombination): void {
+  const { plans, results, anchorMs } = round;
+  const rows: FishRoundRow[] = [...results].map(([key, members]) => {
+    const [exchange, market, symbol] = key.split('|');
+    const r = combineFishResults(plans.map((_, i) => members.get(i)), plans, mode);
+    return { symbol, exchange, market: market === 'crypto' ? undefined : market, reading: NaN, outcome: mode === 'and' && members.size !== plans.length ? 'readings' : r.outcome };
+  });
+  const summary = summarizeFishRound(rows, { algorithmKey: fishCombinationKey(plans, mode), cutoffMs: Math.floor(anchorMs / plans[0].step) * plans[0].step, anchorMs, direction: '>', threshold: NaN, scale: 1, unit: '', partial: !round.complete });
+  saveFishRound({ ...summary, combination: mode, cutoffs: plans.map(p => Math.floor(anchorMs / p.step) * p.step), members: plans.map((p, i) => ({ algorithmKey: p.algorithmKey, hits: round.memberHits[i] ?? 0 })) });
+}
+type ScanOptions = FishScanSettings & { onRound?: (round: FishCombinationRound) => void; onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   private running = false;
@@ -262,35 +290,48 @@ export class FishScanner {
       const publish=()=>{
         const base=states[0];if(!base)return;
         Object.assign(progress,base,{anchorMs,rule:plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:plans.map((_,i)=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
-        progress.done=Math.min(...plans.map((_,i)=>states[i]?.done??0));
+        // 各算法的币数可能不同（某家在某个算法里整家跳过）：扫完的算法按「已完成」计，进度才能走到头
+        const total=Math.max(0,...states.map(p=>p?.total??0));
+        progress.done=Math.min(...plans.map((_,i)=>{const st=states[i];return !st?0:st.status==='running'?st.done:total;}));
         progress.notice=[...new Set(states.flatMap(p=>p?.notice?p.notice.split('；'):[]))].join('；')||undefined;
-        progress.total=Math.max(...states.map(p=>p.total));
+        progress.total=total;
         options.onProgress({...progress,counts:{...progress.counts}});
+      };
+      // 【用户要求】2026-10-20「交集这里还是有问题…合并到一起却捕捉不到」：一个币的各算法结论到齐就当场合并、当场出信号，
+      // 不再等全部扫完——中途取消或某个算法扫失败，已经到齐的币照样保留（与单算法边扫边出一致）
+      const decided=new Set<string>();
+      const settle=(key:string,members:Map<number,FishMemberResult>)=>{
+        decided.add(key);
+        const result=combineFishResults(plans.map((_,i)=>members.get(i)),plans,mode);
+        if(result.signal&&!emitted.has(key)){emitted.add(key);options.onSignal(result.signal);}
+        return result;
       };
       await Promise.all(plans.map(async(plan,i)=>{
         const a={feature:plan.def,algorithm:plan.settings};
         const scanner=new FishScanner(async()=>new Response(JSON.stringify(clock)),undefined,this.calculate,adapters);
         states[i]=await scanner.scan({...options,...a,algorithms:undefined,anchorMs,skipReasons:mode==='or'?undefined:skips,onSignal:()=>{},onProgress:p=>{states[i]=p;publish();},onResult:(key,r)=>{
           const members=results.get(key)??new Map<number,FishMemberResult>();members.set(i,r);results.set(key,members);
-
+          if(members.size===plans.length&&!decided.has(key)&&!options.signal.aborted){settle(key,members);publish();}
         }});
       }));
       const intersectionCounts={...initialFishProgress().counts};
-      if(!options.signal.aborted&&!states.some(p=>p.status==='aborted'))for(const [key,members] of results){
-        // 交集要每个算法都有结论；并集只要有一个算法有结论（缺的按没命中算）
-        if(mode==='and'&&members.size!==plans.length)continue;
+      for(const [key,members] of results){
+        // 交集要每个算法都有结论（缺了就是那个算法这个币没取到数，不进交集）；
+        // 并集里有算法没结论的币，只在正常扫完时按「缺的算没命中」合并——取消时它可能还没扫到，不下结论
+        if(!decided.has(key)){
+          if(mode==='and'&&members.size!==plans.length)continue;
+          if(mode==='or'&&options.signal.aborted)continue;
+          settle(key,members);
+        }
         const result=combineFishResults(plans.map((_,i)=>members.get(i)),plans,mode);
         if(result.outcome in intersectionCounts)intersectionCounts[result.outcome as FishOutcome]++;
-        if(result.signal){emitted.add(key);options.onSignal(result.signal);}
       }
       publish();
       progress.counts={...progress.counts,hit:emitted.size,unknown:intersectionCounts.unknown};
-      // 捕捞过程（多重算法）：组合层面的摘要——参与判定的币数、组合命中数、各算法各自命中数
-      if(!options.signal.aborted){
-        const comboRows:FishRoundRow[]=[...results].map(([key,members])=>{const [exchange,market,symbol]=key.split('|');const r=combineFishResults(plans.map((_,i)=>members.get(i)),plans,mode);return {symbol,exchange,market:market==='crypto'?undefined:market,reading:NaN,outcome:mode==='and'&&members.size!==plans.length?'readings':r.outcome};});
-        const summary=summarizeFishRound(comboRows,{algorithmKey:fishCombinationKey(plans,mode),cutoffMs:Math.floor(anchorMs/plans[0].step)*plans[0].step,anchorMs,direction:'>',threshold:NaN,scale:1,unit:'',partial:states.some(p=>p.status!=='complete')});
-        saveFishRound({...summary,combination:mode,cutoffs:plans.map(p=>Math.floor(anchorMs/p.step)*p.step),members:plans.map((p,i)=>({algorithmKey:p.algorithmKey,hits:states[i]?.counts.hit??0}))});
-      }
+      // 捕捞过程（多重算法）：组合摘要；逐币结论交给页面，切换交集 / 并集时直接重算
+      const round:FishCombinationRound={plans,results,anchorMs,complete:!options.signal.aborted&&!states.some(p=>p.status!=='complete'),memberHits:plans.map((_,i)=>states[i]?.counts.hit??0)};
+      if(!options.signal.aborted)saveFishCombinationRound(round,mode);
+      options.onRound?.(round);
       progress.status=options.signal.aborted?'cancelled':states.some(p=>p.status==='aborted')?'aborted':'complete';
       progress.error=states.map(p=>p.error).filter(Boolean).join('；')||undefined;
     }catch(error){progress.status=options.signal.aborted?'cancelled':'aborted';progress.error=error instanceof Error?error.message:String(error);}

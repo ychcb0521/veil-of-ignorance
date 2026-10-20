@@ -22,6 +22,8 @@ import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSugges
 
 export interface FishPanelProps {
   reconstruction?: FishReconstructionState;
+  /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
+  onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[]) => boolean;
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
   onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
@@ -64,7 +66,8 @@ export function FishPanel(p: FishPanelProps) {
   const combinationKey=()=>`${getUserPrefix()}fish-combination.v1`;
   const readCombination=():'and'|'or'=>{try{return readPersistedStateRaw(combinationKey())==='or'?'or':'and';}catch{return 'and';}};
   const [combination,setCombinationState]=useState<'and'|'or'>(readCombination);
-  const setCombination=(v:'and'|'or')=>{setCombinationState(v);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
+  const multipleRef=useRef<string[]>([]);
+  const setCombination=(v:'and'|'or')=>{setCombinationState(v);p.onRecombine?.(v,multipleRef.current);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
   const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
   const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??cleanPreference(readFishPreference('cbi2')));
   const cardsOwner=useRef(owner);
@@ -92,6 +95,7 @@ export function FishPanel(p: FishPanelProps) {
     for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
+  multipleRef.current=multiple.plans.map(x=>x.algorithmKey);
   // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）
   const enabledCardNumbers=[firstEnabled,...extraCards.map(c=>c.enabled)].flatMap((on,i)=>on?[i+1]:[]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
@@ -110,6 +114,8 @@ export function FishPanel(p: FishPanelProps) {
   const plan=compiled.plan??suggestionCompiled;
   const suggestionStale=!!suggestion&&suggestion.key!==suggestionKey;
   const prefRef=useRef(pref);prefRef.current=pref;
+  // 异步算完再写回输入时用最新的那份：用闭包里的旧值会把之后才填的「时间」冲回去（2026-10-20 交集「捕不到」的根因之一）
+  const inputsRef=useRef(p.inputs);inputsRef.current=p.inputs;
   /** 每张附加算法卡的建议：按该卡设置编译（阈值不影响分布），同设置的卡共用一份缓存。 */
   const [suggestionVersion,setSuggestionVersion]=useState(0);
   /** 这次打开算出但没进缓存的结果（有临时失败时不缓存），也照样显示。 */
@@ -138,7 +144,7 @@ export function FishPanel(p: FishPanelProps) {
         setSuggestionProgress(null);return;
       }
       const current=prefRef.current,threshold=suggestedFishThreshold(result,current.direction);
-      if(threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...p.inputs,threshold:value});}
+      if(threshold!==null&&mayFillFishThreshold(current.threshold,current.lastSuggestion)){const value=String(threshold);update({...current,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
       setSuggestion(result);setSuggestionProgress(value=>value?{...value,status:'complete'}:null);
     }catch(e){if(suggestionController.current===mine){setSuggestionProgress(value=>value?{...value,status:mine.signal.aborted?'cancelled':'aborted'}:null);if(!mine.signal.aborted&&mode==='manual')setError(e instanceof Error?e.message:String(e));}}
     finally{if(suggestionController.current===mine)suggestionController.current=null;if(suggestionRun.current?.done===done){suggestionRun.current=null;setAutoSuggesting(false);}}})();
@@ -159,11 +165,11 @@ export function FishPanel(p: FishPanelProps) {
     const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
     return()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[queueKeys,firstEnabled,scanning,library.length,autoSuggesting,p.reconstruction?.running]);
+  },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,p.reconstruction?.running]);
   // 方向一换，阈值仍是上次自动填的建议时改填另一端（> 取 P25，< 取 P75）；分布与方向无关，不用重算
   const changeDirection=(direction:'>'|'<')=>{
     const fill=suggestion&&!suggestionStale?suggestedFishThreshold(suggestion,direction):null;
-    if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...p.inputs,threshold:value});}
+    if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
     else update({...pref,direction});
   };
   const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');
@@ -190,7 +196,7 @@ export function FishPanel(p: FishPanelProps) {
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
     </div>}
 </PopoverContent></Popover></div>
-      <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="YYYY-MM-DD HH:mm:ss" className="w-44 min-w-0 max-w-full rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
+      <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="留空 = 现在" title="格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间" className="w-44 min-w-0 max-w-full rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
       <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
@@ -245,6 +251,7 @@ export function FishPanel(p: FishPanelProps) {
           <span>命中 <span className="font-mono tabular-nums font-medium text-primary">{x.counts.hit}</span></span>
           <span className="text-muted-foreground">·</span>
           <span className="font-mono tabular-nums text-muted-foreground">{x.done} / {x.total}</span>
+          {x.cutoffMs!=null&&<><span className="text-muted-foreground">·</span><span className="font-mono tabular-nums text-muted-foreground" data-testid="fish-cutoff" title="本轮实际使用的截止时刻（时间留空 = 币安服务器当前时间）">截止 {formatUTC8(x.cutoffMs).slice(0,16)}</span></>}
         </p>
         {scanning && x.total > 0 && <span className="h-[3px] w-28 overflow-hidden rounded-full bg-muted" aria-hidden>
           <span className="block h-full rounded-full bg-primary/70 transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />
