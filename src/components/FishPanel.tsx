@@ -92,6 +92,8 @@ export function FishPanel(p: FishPanelProps) {
     for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
+  // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）
+  const enabledCardNumbers=[firstEnabled,...extraCards.map(c=>c.enabled)].flatMap((on,i)=>on?[i+1]:[]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
@@ -237,7 +239,7 @@ export function FishPanel(p: FishPanelProps) {
     {(error||multiple.error) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
     {x && <div className="space-y-2 text-[11px]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <p role="status" aria-live="polite" className="flex items-center gap-2" data-testid="fish-status" title={x.algorithmHits?.map((n,i)=>`算法 ${i+1} 命中 ${n}`).join('；')}>
+        <p role="status" aria-live="polite" className="flex items-center gap-2" data-testid="fish-status" title={x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`).join('；')}>
           <span>{STATUS[x.status]}</span>
           <span className="text-muted-foreground">·</span>
           <span>命中 <span className="font-mono tabular-nums font-medium text-primary">{x.counts.hit}</span></span>
