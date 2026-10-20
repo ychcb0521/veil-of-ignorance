@@ -142,7 +142,15 @@ export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgr
   return {value,average,main,constraints,condition};
 }
 export interface FishSnapshot {
-  algorithms?: FishSnapshot[]; intersectionStart?: number; /** 多重算法的合并方式：and 交集（缺省）/ or 并集 */ combination?: 'and'|'or'; unionStart?: number; /** 并集里命中的算法序号（1 起） */ hitAlgorithms?: number[]; outcome?: string; boundaryMs?: number;
+  algorithms?: FishSnapshot[]; intersectionStart?: number; /** 多重算法的合并方式：and 交集（缺省）/ or 并集 */ combination?: 'and'|'or'; unionStart?: number; /** 并集里命中的算法序号（1 起） */ hitAlgorithms?: number[];
+  /** 捕捞过程：起点前后到截止的读数轨迹（原值；t = t0 + i × dt，最后一点是截止那根）。 */
+  trace?: { t0: number; dt: number; values: number[] };
+  /** 起点到截止这一轮里的最低（> 方向）/ 最高（< 方向）读数，原值。 */
+  runExtreme?: number;
+  /** 可用区间里条件由假变真的次数（含这一次）。 */
+  crossings?: number;
+  /** 起点到截止连续满足的根数。 */
+  aboveBars?: number; outcome?: string; boundaryMs?: number;
   average: number; cbi2: number; startAverage: number; previousAverage: number; cutoffMs: number; threshold: number;
   statistic?: string; featureId?: string; featureName?: string; featureShort?: string; definitionKey?: string; interval?: string; H?: number; direction?: '>'|'<'; thresholdRaw?: number; scale?: number; unit?: string;
   constraints?: string[]; constraintKey?: string; algorithmKey?: string; value?: number; startIndex?: number; cutoffIndex?: number; startConstraints?: number[]; cutoffConstraints?: number[];
@@ -157,7 +165,16 @@ export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:
   while(k>first){const previous=r.condition[k-1];if(!Number.isFinite(previous)){unknown=true;break;}if(!previous)break;k--;}
   unknown ||= k===first;
   const {def,settings}=plan,timeMs=bars[k].openTime+plan.step;
+  // 捕捞过程：起点前 36 根到截止的轨迹（最多约 60 个点，必含截止那根），这一轮的极值、越线次数
+  const traceFrom=Math.max(first,k-36),every=Math.max(1,Math.ceil((end-traceFrom+1)/60)),idx:number[]=[];
+  for(let i=end;i>=traceFrom;i-=every)idx.unshift(i);
+  const round5=(v:number)=>Number.isFinite(v)?Number(v.toPrecision(5)):NaN;
+  const trace={t0:bars[idx[0]].openTime+plan.step,dt:every*plan.step,values:idx.map(i=>round5(r.average[i]))};
+  let runExtreme=r.average[end],crossings=0;
+  for(let i=k;i<=end;i++)runExtreme=settings.direction==='<'?Math.max(runExtreme,r.average[i]):Math.min(runExtreme,r.average[i]);
+  for(let i=first+1;i<=end;i++)if(r.condition[i-1]===0&&r.condition[i]===1)crossings++;
+  const process={trace,runExtreme:round5(runExtreme),crossings,aboveBars:end-k+1};
   const fish:FishSnapshot={statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
-  if(unknown)return {outcome:'unknown',boundaryMs:timeMs,snapshot:{...fish,outcome:'unknown',boundaryMs:timeMs,startIndex:undefined,startAverage:NaN,previousAverage:NaN}};
-  return {outcome:'hit',signal:{id:`fish-${symbol}-${timeMs}-${encodeURIComponent(plan.algorithmKey)}`,symbol,timeMs,timeLabel:formatUTC8(timeMs),fallbackZone:'',fish}};
+  if(unknown)return {outcome:'unknown',boundaryMs:timeMs,snapshot:{...fish,outcome:'unknown',boundaryMs:timeMs,startIndex:undefined,startAverage:NaN,previousAverage:NaN,trace:process.trace,crossings}};
+  return {outcome:'hit',signal:{id:`fish-${symbol}-${timeMs}-${encodeURIComponent(plan.algorithmKey)}`,symbol,timeMs,timeLabel:formatUTC8(timeMs),fallbackZone:'',fish:{...fish,...process}}};
 }

@@ -1,4 +1,5 @@
-import { combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
+import { saveFishRound, summarizeFishRound, type FishRoundRow } from '@/lib/fish/roundSummary';
+import { fishCombinationKey, combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
 import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
@@ -284,6 +285,12 @@ export class FishScanner {
       }
       publish();
       progress.counts={...progress.counts,hit:emitted.size,unknown:intersectionCounts.unknown};
+      // 捕捞过程（多重算法）：组合层面的摘要——参与判定的币数、组合命中数、各算法各自命中数
+      if(!options.signal.aborted){
+        const comboRows:FishRoundRow[]=[...results].map(([key,members])=>{const [exchange,market,symbol]=key.split('|');const r=combineFishResults(plans.map((_,i)=>members.get(i)),plans,mode);return {symbol,exchange,market:market==='crypto'?undefined:market,reading:NaN,outcome:mode==='and'&&members.size!==plans.length?'readings':r.outcome};});
+        const summary=summarizeFishRound(comboRows,{algorithmKey:fishCombinationKey(plans,mode),cutoffMs:Math.floor(anchorMs/plans[0].step)*plans[0].step,anchorMs,direction:'>',threshold:NaN,scale:1,unit:'',partial:states.some(p=>p.status!=='complete')});
+        saveFishRound({...summary,combination:mode,cutoffs:plans.map(p=>Math.floor(anchorMs/p.step)*p.step),members:plans.map((p,i)=>({algorithmKey:p.algorithmKey,hits:states[i]?.counts.hit??0}))});
+      }
       progress.status=options.signal.aborted?'cancelled':states.some(p=>p.status==='aborted')?'aborted':'complete';
       progress.error=states.map(p=>p.error).filter(Boolean).join('；')||undefined;
     }catch(error){progress.status=options.signal.aborted?'cancelled':'aborted';progress.error=error instanceof Error?error.message:String(error);}
@@ -306,6 +313,8 @@ export class FishScanner {
     this.running = true;
     const controller = new AbortController(), cancel = () => controller.abort();
     options.signal.addEventListener('abort',cancel,{once:true}); if(options.signal.aborted) cancel();
+    // 捕捞过程：逐币记下截止读数与结论，扫完存成本轮摘要（只存本机）
+    const roundRows:FishRoundRow[]=[];let roundCut:number|undefined,roundAnchor=0;
     const progress = initialFishProgress(); progress.threshold = threshold; progress.bars=plan.N;progress.constraintTexts=plan.texts; progress.rule=fishRuleText(plan.def,plan.settings.direction,threshold,plan.texts.length,plan.settings.statistic);
     const venues: Partial<Record<FishExchange,FishProgress>> = {};
     const publish = () => {
@@ -342,7 +351,7 @@ export class FishScanner {
       this.latestServerTime=Math.max(this.latestServerTime,clock.serverTime!);
       if(anchorMs!==undefined&&anchorMs>clock.serverTime!) throw new Error('捕捞时间不能晚于币安服务器当前时间');
       const node=anchorMs??clock.serverTime!,cut=Math.floor(node/plan.step)*plan.step;
-      progress.anchorMs=node;progress.cutoffMs=cut;
+      progress.anchorMs=node;progress.cutoffMs=cut;roundCut=cut;roundAnchor=node;
       for(const exchange of selected){const reason=options.skipReasons?.[exchange]??fishRetentionReason(exchange,cut,clock.serverTime!,plan.N,plan.step,plan.usesTaker,query.interval);if(reason){venues[exchange]!.status='skipped';venues[exchange]!.skippedReason=reason;}}
       for(const p of Object.values(venues)){p.anchorMs=node;p.cutoffMs=cut;}
       publish();
@@ -400,6 +409,7 @@ export class FishScanner {
                 if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.scale:a<threshold/plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
                 const result=classifyFishProgram(market.symbol,bars,readings,cut,plan);
                 if(local.signal.aborted)return;
+                roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:readings.average[bars.length-1],outcome:result.outcome});
                 if(result.outcome==='blocked'){p.blocked=(p.blocked??0)+1;result.blockedBy?.forEach((v,i)=>p.constraintBlocked![i]+=v);}else p.counts[result.outcome]++;
                 if(result.outcome==='readings'&&p.failures!.readings.length<10)p.failures!.readings.push({symbol:market.symbol,reason:`${plan.def.short}计算：截止处结果、均值或约束不是有限数`});
 
@@ -414,6 +424,7 @@ export class FishScanner {
                 if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
                 else if(!local.signal.aborted){
                   const kind=error instanceof FishError?error.kind:'failed';
+                  roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:kind});
                   if(kind==='history')p.history=(p.history??0)+1;
                   else if(kind!=='banned'){
                     p.counts[kind]++;
@@ -441,6 +452,7 @@ export class FishScanner {
     finally{
       options.signal.removeEventListener('abort',cancel);this.running=false;progress.current='';
       for(const p of Object.values(venues))if(p.status==='running'){p.status=progress.status==='cancelled'?'cancelled':'aborted';p.error??=progress.error;}
+      if(roundCut!==undefined&&roundRows.length&&progress.status!=='aborted')saveFishRound(summarizeFishRound(roundRows,{algorithmKey:plan.algorithmKey,cutoffMs:roundCut,anchorMs:roundAnchor,direction:plan.settings.direction,threshold:plan.settings.threshold,scale:plan.scale,unit:plan.unit,partial:progress.status!=='complete'}));
       publish();
     }
     return {...progress,counts:{...progress.counts},venues};

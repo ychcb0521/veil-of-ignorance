@@ -30,6 +30,7 @@ import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-
 
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
+import { FishProcessButton } from '@/components/FishProcess';
 import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID } from '@/components/SignalLibraryHeader';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
@@ -188,6 +189,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  /** 「渔」的鱼：这一列先放「捕捞过程」入口（点开看凭什么击中、为什么避开噪音）。 */
+  processSignal?: TradeSignal;
   match?: SignalReconstructionMatch;
   showMatch?: boolean;
   market?: 'us_stock';
@@ -226,7 +229,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm, match, showMatch,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm, match, showMatch, processSignal,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -287,7 +290,7 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
-      {showMatch ? <SignalMatchCell match={match}/> : onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
+      {showMatch ? <SignalMatchCell match={match}/> : processSignal ? <span className="flex min-w-0 items-center gap-3"><FishProcessButton signal={processSignal}/>{onAdd && <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button>}</span> : onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
           它说的就是「这个箭头点不动」，挨着它才读得出因果；
@@ -333,6 +336,8 @@ interface Props {
   rowAlgorithm?: (signal: TradeSignal) => string;
   /** 放在另一个可滚动区域里（如「渔」）：滚到列表头 / 尾后把滚动交给外层，不卡住。 */
   nested?: boolean;
+  /** 「渔」的鱼：每行加「捕捞过程」入口。 */
+  showProcess?: boolean;
   onAdd?: (id: string) => void;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
@@ -367,7 +372,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false, matches,
+  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false, matches, showProcess = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -545,6 +550,7 @@ function SignalLibraryListImpl({
         id={sig.id}
         showMatch={matches !== undefined}
         match={matches?.get(sig.id)}
+        processSignal={showProcess ? sig : undefined}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}
         onAdd={onAdd}
