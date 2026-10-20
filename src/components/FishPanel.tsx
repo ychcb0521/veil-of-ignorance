@@ -209,7 +209,7 @@ export function FishPanel(p: FishPanelProps) {
         <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
         <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
         <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根只跳过那一家（写明原因），全部取不到才整轮中止。</p>
-        <p>默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重。设置只保存在本机，捕捞开始后锁定。</p>
+        <p>稳定币（USDT、USDC、FDUSD、USDe、DAI 等，价格几乎不动、没有短线交易价值）始终排除，不取数也不计入总数。默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重。设置只保存在本机，捕捞开始后锁定。</p>
         {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
       {suggestionProgress&&<p role="status">建议{suggestionProgress.status==='running'?'计算中':suggestionProgress.status==='cancelled'?'已取消':suggestionProgress.status==='aborted'?'已中止':'已完成'} · {suggestionProgress.phase==='signals'?'信号样本':'随机对照'} · {suggestionProgress.done} / {suggestionProgress.total} {suggestionProgress.current}</p>}

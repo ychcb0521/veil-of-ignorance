@@ -68,7 +68,7 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 }
 
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
-import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
+import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, isFishStablecoin, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
 export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[]; member?: FishMemberResult }
 /**
@@ -267,6 +267,9 @@ export class FishScanner {
    * 【用户要求】2026-10-19「原来能捕捉到，现在却捕捉不到，啥原因？请解决」——给每个币一个可核对的答案。
    */
   async diagnose(options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: FishAlgorithmInput[]; combination?: FishCombination; signal: AbortSignal }): Promise<FishDiagnosis> {
+    // 稳定币捕捞时整体排除（selectFishMarkets），查单个币也直接说明，不再取数
+    const stableBase=options.symbol.trim().toUpperCase().replace(/[-_/]?USDT$/,'');
+    if(stableBase&&isFishStablecoin(stableBase))return {outcome:'skipped',lines:[`${stableBase} 是稳定币，价格几乎不动、没有短线交易价值，捕捞时整体排除，不参与判定`]};
     if(options.algorithms?.length){
       if(options.algorithms.length===1)return this.diagnose({...options,...options.algorithms[0],algorithms:undefined});
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
