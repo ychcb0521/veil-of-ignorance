@@ -5,6 +5,7 @@ import {FishAlgorithmCard,RECORDED_RANGES,type FishCard} from './FishAlgorithmCa
 import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
+import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -24,7 +25,9 @@ export interface FishPanelProps {
   reconstruction?: FishReconstructionState;
   hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
-  onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[]) => boolean;
+  onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[], plans?: readonly FishProgram[]) => boolean;
+  /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
+  roundPlans?: readonly FishProgram[] | null;
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
   onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
@@ -98,9 +101,20 @@ export function FishPanel(p: FishPanelProps) {
   const pool=useMemo(()=>[{featureId:selected,pref},...extraCards].flatMap(c=>{try{const d=defs.find(d=>d.id===c.featureId);if(!d)return [];const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});return plan.unavailable?[]:[plan];}catch{return [];}}),[selected,pref,extraCards,defs]);
   const selectionKeys=multiple.plans.map(fishSelectionKey),selectionSignature=JSON.stringify(selectionKeys);
   const [staleRound,setStaleRound]=useState(false);
-  useEffect(()=>{if(!p.hasRound||running)return;if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
+  useEffect(()=>{if(!p.hasRound||running)return;if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys,multiple.plans));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
   // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）
   const enabledCardNumbers=[firstEnabled,...extraCards.map(c=>c.enabled)].flatMap((on,i)=>on?[i+1]:[]);
+  // 对不上本轮时说清楚原因：只是阈值放宽了，就告诉本轮按多少扫的、往哪边调能即时过滤
+  const staleText=useMemo(()=>{
+    for(const [j,plan] of multiple.plans.entries()){
+      const bases=(p.roundPlans??[]).filter(b=>sameFamily(b,plan));
+      if(!bases.length||bases.some(b=>fishTightenable(b,plan)))continue;
+      const d=plan.settings.direction,edge=d==='>'?Math.min(...bases.map(b=>b.settings.threshold)):Math.max(...bases.map(b=>b.settings.threshold));
+      return `算法 ${enabledCardNumbers[j]??j+1} 本轮按 ${d} ${edge} 扫过：阈值${d==='>'?'调大':'调小'}（${d==='>'?'≥':'≤'} ${edge}）可即时过滤，${d==='>'?'调小':'调大'}要重新捕捞。下面仍是上一轮的结果。`;
+    }
+    return '刚改的设置上一轮没算过，下面仍是上一轮的结果；点「开始捕捞」按新设置重算。';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[selectionSignature,p.roundPlans]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
@@ -217,7 +231,7 @@ export function FishPanel(p: FishPanelProps) {
       </>}
         onChange={next=>{setFirstEnabled(next.enabled);if(next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setPref(cleanPreference(next.pref));saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
         onDelete={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}/>
-      {staleRound&&!running&&<p className="text-[10px] text-muted-foreground" data-testid="fish-stale-round">刚改的设置上一轮没算过，下面仍是上一轮的结果；点「开始捕捞」按新设置重算。</p>}
+      {staleRound&&!running&&<p className="text-[10px] text-muted-foreground" data-testid="fish-stale-round">{staleText}</p>}
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||probe.busy||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
     </div>
     <div className="flex flex-wrap items-center gap-2">

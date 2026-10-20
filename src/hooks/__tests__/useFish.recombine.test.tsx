@@ -78,3 +78,19 @@ it('刷新恢复完整结果池，账号隔离；下轮开始替换结果池',as
  expect(restored.result.current.progress?.counts.hit).toBe(0);expect(restored.result.current.recombine('and',[keys[0]])).toBe(false);
  act(()=>{expect(restored.result.current.recombine('and',[keys[1]])).toBe(true);});expect(restored.result.current.progress?.counts.hit).toBe(1);
 });
+
+// 【用户要求】2026-10-20「捕捉运行完成之后，将区间值调大之后能更细致过滤，而不用再重新运行」
+it('扫完把阈值调严：新鱼当场过滤（不取数）；调回原阈值复原；放宽做不到、保留当前结果',async()=>{
+ const {result}=renderHook(()=>useFish(undefined));
+ await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
+ const fresh=()=>result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort();
+ expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.roundPlans?.[0].settings.threshold).toBe(100);
+ const fetched=candleRequests,at=(threshold:number)=>compileFishProgram(def,{...a,threshold});
+ let ok=false;act(()=>{ok=result.current.recombine('and',[at(100.6).algorithmKey],[at(100.6)]);});
+ expect(ok).toBe(true);expect(fresh()).toEqual(['AAAUSDT']);expect(result.current.progress?.counts.hit).toBe(1);expect(result.current.progress?.rule).toContain('100.6');
+ expect(result.current.signals.find(s=>s.freshCatch)?.fish?.threshold).toBe(100.6);
+ act(()=>{ok=result.current.recombine('and',[at(102).algorithmKey],[at(102)]);});expect(ok).toBe(true);expect(fresh()).toEqual([]);
+ act(()=>{ok=result.current.recombine('and',[at(99).algorithmKey],[at(99)]);});expect(ok).toBe(false);expect(fresh()).toEqual([]);
+ act(()=>{ok=result.current.recombine('and',[at(100).algorithmKey],[at(100)]);});expect(ok).toBe(true);expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);
+ expect(candleRequests).toBe(fetched);
+});

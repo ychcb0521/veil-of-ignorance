@@ -6,7 +6,9 @@ import type { FishDataAdapter } from './adapters';
 import type { FishExchange } from './exchanges';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export interface FishAlgorithmInput { feature: DeepDigFeatureDef; algorithm: FishAlgorithmSettings }
-export interface FishMemberResult { outcome: string; signal?: TradeSignal; snapshot?: FishSnapshot; boundaryMs?: number }
+import type { FishTail } from './refilter';
+/** reading = 截止那根的读数；tail = 命中 / 起点不明的币可用区间的读数（阈值往严里调时据此重判，见 refilter.ts）。 */
+export interface FishMemberResult { outcome: string; signal?: TradeSignal; snapshot?: FishSnapshot; boundaryMs?: number; reading?: number; tail?: FishTail }
 /** 多重算法怎么合：and = 交集（全部同时满足），or = 并集（满足任一即留下）。 */
 export type FishCombination = 'and' | 'or';
 /** 组合键：交集沿用原来的「键 & 键」；并集写成「any(键 & 键)」，两种口径的记录各自去重、互不覆盖。与卡片顺序无关。 */

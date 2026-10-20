@@ -1,7 +1,8 @@
 import {loadFishSession,saveFishSession} from '@/lib/fish/session';
 import { mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
+import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
+import type { FishProgram } from '@/lib/fish/algorithm';
 import { fishRuleText } from '@/lib/fishRule';
 import type { FishCombination } from '@/lib/fish/intersection';
 import { loadFishSignals, saveFishSignals, FISH_STORAGE_KEY } from '@/lib/fishSignals';
@@ -43,6 +44,8 @@ export function useFish(userId: string | undefined) {
   const writesRef = useRef<RoundWrites>(emptyWrites());
   const roundRef = useRef<{ data: FishCombinationRound; mode: FishCombination; keys:string[] } | null>(null);
   const [hasRound,setHasRound]=useState(false);
+  /** 本轮实际扫过的算法（含当时的阈值）：面板据此说明哪些改动能当场重判、哪些要重新捕捞。 */
+  const [roundPlans,setRoundPlans]=useState<FishProgram[]|null>(null);
   const generation=useRef(0);
   const edits=useRef(new Map<string,{signal?:TradeSignal;deleted?:boolean}>());
   const progressRef=useRef(progress);progressRef.current=progress;
@@ -61,18 +64,18 @@ export function useFish(userId: string | undefined) {
   }, [persist]);
   useEffect(() => {
     const refresh = () => { const next = loadFishSignals(); signalsRef.current = next; setSignals(next); };
-    refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);
+    refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
     const version=++generation.current;
-    void loadFishSession(userId).then(saved=>{if(!saved||version!==generation.current)return;roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);}).catch(()=>{});
+    void loadFishSession(userId).then(saved=>{if(!saved||version!==generation.current)return;roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
     const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, refresh);
     const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === null) refresh(); };
     window.addEventListener('storage', storage);
     return () => { ++generation.current; controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); window.removeEventListener('storage', storage); };
   }, [userId]);
-  const recombineRef=useRef<((mode:FishCombination,keys:readonly string[])=>boolean)|null>(null);
+  const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
-    ++generation.current;roundRef.current=null;setHasRound(false);edits.current.clear();void saveFishSession(ownerRef.current,null).catch(()=>{});
+    ++generation.current;roundRef.current=null;setHasRound(false);setRoundPlans(null);edits.current.clear();void saveFishSession(ownerRef.current,null).catch(()=>{});
     // 上一轮的新鱼归入「鱼」，这一轮捕到的（含以前捕到过、这轮又命中的）放进「新鱼」
     if (signalsRef.current.some(s => s.freshCatch)) commit(signalsRef.current.map(withoutFresh));
     writesRef.current = emptyWrites(); roundRef.current = null;
@@ -86,7 +89,7 @@ export function useFish(userId: string | undefined) {
         onSignal: signal => {
           if (valid() && !mine.signal.aborted) { const next = applyCatch(signalsRef.current, signal, writesRef.current); if (next) commit(next); }
         },
-        onRound: round => { if (valid()) {roundRef.current = { data: round, mode: settings.combination ?? 'and',keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);} },
+        onRound: round => { if (valid()) {roundRef.current = { data: round, mode: settings.combination ?? 'and',keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },
       });
     } catch (error) {
       if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
@@ -107,13 +110,14 @@ export function useFish(userId: string | undefined) {
   const cancel = useCallback(() => controller.current?.abort(), []);
   /**
    * 任选本轮算法子集与交集 / 并集：用保存的逐币结论直接重新合并，「新鱼」换成另一种结果，不用重扫。
-   * 先撤掉这一轮写进列表的改动（新加的删掉、被改成新鱼的恢复原样），再按新方式写入。算法设置变了（键对不上）就不切换。
+   * 先撤掉这一轮写进列表的改动（新加的删掉、被改成新鱼的恢复原样），再按新方式写入。
+   * 传了 plans（当前卡片编译好的算法）时，阈值只往严里调了的卡用本轮留下的读数当场重判（deriveFishRound）；其余设置变了就不切换。
    * 【用户要求】2026-10-20「并集这里捕捉完之后，我希望当我点击交集的时候，可以灵活切换到交集的结果」。
    */
-  const recombine = useCallback((mode: FishCombination, algorithmKeys: readonly string[]): boolean => {
+  const recombine = useCallback((mode: FishCombination, algorithmKeys: readonly string[], plans?: readonly FishProgram[]): boolean => {
     const round = roundRef.current;
     if (!round || controller.current) return false;
-    const selected=selectFishRound(round.data,algorithmKeys);if(!selected)return false;
+    const selected=selectFishRound(round.data,algorithmKeys)??(plans?deriveFishRound(round.data,plans):null);if(!selected)return false;
     const same=(a:readonly string[],b:readonly string[])=>JSON.stringify([...a].sort())===JSON.stringify([...b].sort());
     if(round.mode===mode&&same(round.keys,algorithmKeys))return true;
     const undo = writesRef.current;
@@ -123,6 +127,7 @@ export function useFish(userId: string | undefined) {
     writesRef.current = writes; roundRef.current = { ...round, mode,keys:[...algorithmKeys] };
     signalsRef.current=list;setSignals(list);saveFishSignals(list,ownerRef.current??null);
     saveFishCombinationRound(selected, mode);
+    selected.plans.forEach((p,j)=>{if(!round.data.plans.includes(p))saveFishMemberRound(selected,j);});
     const rule = selected.plans.map(p => fishRuleText(p.def, p.settings.direction, p.settings.threshold, p.texts.length, p.settings.statistic)).join(mode === 'or' ? ' 或 ' : ' 且 ');
     const previous=progressRef.current;
     if(previous){const next={...previous,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0}};progressRef.current=next;setProgress(next);}
@@ -134,5 +139,5 @@ export function useFish(userId: string | undefined) {
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound };
+  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans };
 }

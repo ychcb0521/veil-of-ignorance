@@ -8,6 +8,7 @@ import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars } from '@/lib/fish/shared';
+import { fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
@@ -80,6 +81,51 @@ export function selectFishRound(round: FishCombinationRound, keys: readonly stri
   const available = round.plans.map((_,i)=>i), indices:number[]=[];
   for(const key of keys){const at=available.findIndex(i=>fishSelectionKey(round.plans[i])===key||round.plans[i].algorithmKey===key);if(at<0)return null;indices.push(available.splice(at,1)[0]);}
   return {...round,plans:indices.map(i=>round.plans[i]),memberHits:indices.map(i=>round.memberHits[i]),results:new Map([...round.results].map(([key,members])=>[key,new Map(indices.flatMap((i,j)=>members.has(i)?[[j,members.get(i)!] as const]:[]))]))};
+}
+/**
+ * 按当前卡片的算法取本轮结果：设置没变的直接用；只把阈值往严里调了的，用留下的读数当场重判（refilter.ts）。
+ * 有一张卡既对不上、也不能由本轮算出（换了特征值 / 统计量 / 方向，或阈值放宽了），返回 null。
+ * 【用户要求】2026-10-20「捕捉运行完成之后，将区间值调大之后能更细致过滤，而不用再重新运行」。
+ */
+export function deriveFishRound(round: FishCombinationRound, targets: readonly FishProgram[]): FishCombinationRound | null {
+  const used = new Set<number>(), picks: { index: number; plan: FishProgram; exact: boolean }[] = [];
+  for (const target of targets) {
+    const key = fishSelectionKey(target);
+    let index = round.plans.findIndex((p, i) => !used.has(i) && fishSelectionKey(p) === key);
+    const exact = index >= 0;
+    if (!exact) index = round.plans.findIndex((p, i) => !used.has(i) && fishTightenable(p, target));
+    if (index < 0) return null;
+    used.add(index); picks.push({ index, plan: exact ? round.plans[index] : target, exact });
+  }
+  const results = new Map<string, Map<number, FishMemberResult>>(), hits = picks.map(() => 0);
+  for (const [key, members] of round.results) {
+    const next = new Map<number, FishMemberResult>();
+    for (const [j, pick] of picks.entries()) {
+      const r = members.get(pick.index);
+      if (!r) continue;
+      const derived = pick.exact ? r : tightenFishResult(r, pick.plan);
+      if (!derived) return null;
+      if (derived.outcome === 'hit') hits[j]++;
+      next.set(j, derived);
+    }
+    results.set(key, next);
+  }
+  return { ...round, plans: picks.map(p => p.plan), results, memberHits: picks.map((p, j) => p.exact ? round.memberHits[p.index] ?? hits[j] : hits[j]) };
+}
+/** 「捕捞过程」里单个算法这一轮的摘要（重判出来的阈值没扫过，按重判后的逐币结论补一份）。 */
+export function saveFishMemberRound(round: FishCombinationRound, j: number): void {
+  const plan = round.plans[j];
+  if (!plan) return;
+  const rows: FishRoundRow[] = [];
+  for (const [key, members] of round.results) {
+    const r = members.get(j);
+    if (!r) continue;
+    const [exchange, market, symbol] = key.split('|');
+    rows.push({ symbol, exchange, market: market === 'crypto' ? undefined : market, reading: r.reading ?? NaN, outcome: r.outcome });
+  }
+  if (!rows.length) return;
+  const cutoffMs = Math.floor(round.anchorMs / plan.step) * plan.step;
+  saveFishRound(summarizeFishRound(rows, { algorithmKey: plan.algorithmKey, cutoffMs, anchorMs: round.anchorMs, direction: plan.settings.direction, threshold: plan.settings.threshold, scale: plan.scale, unit: plan.unit, partial: !round.complete }));
 }
 /** 按某种合并方式，把一轮的逐币结论合成鱼。并集里有算法没结论的币只在这一轮完整扫完时才合并。 */
 export function combineFishRound(round: FishCombinationRound, mode: FishCombination): { signals: TradeSignal[]; counts: Record<string, number> } {
@@ -467,15 +513,14 @@ export class FishScanner {
                 if(result.outcome==='blocked'){p.blocked=(p.blocked??0)+1;result.blockedBy?.forEach((v,i)=>p.constraintBlocked![i]+=v);}else p.counts[result.outcome]++;
                 if(result.outcome==='readings'&&p.failures!.readings.length<10)p.failures!.readings.push({symbol:market.symbol,reason:`${plan.def.short}计算：截止处结果、均值或约束不是有限数`});
 
-                if(result.signal){
-                  const signal=result.signal;
-                  if(market.market==='us_stock'){signal.market='us_stock';signal.underlying=market.underlying??market.base;signal.exchange=exchange;signal.binanceSymbol=null;signal.id=`fish-us-${exchange}-${signal.underlying}-${signal.timeMs}-${encodeURIComponent(plan.algorithmKey)}`;}
-                  else if(exchange!=='binance'){signal.id=`fish-${exchange}-${market.symbol}-${signal.timeMs}-${encodeURIComponent(plan.algorithmKey)}`;signal.exchange=exchange;signal.binanceSymbol=binanceByBase.get(fishBase(market.base))??null;}
-                  options.onSignal(signal);
-                }
+                const place:FishPlace={symbol:market.symbol,exchange,...(market.market==='us_stock'?{market:'us_stock',underlying:market.underlying??market.base}:{}),...(exchange!=='binance'&&market.market!=='us_stock'?{binanceSymbol:binanceByBase.get(fishBase(market.base))??null}:{})};
+                if(result.signal)options.onSignal(placeFishSignal(result.signal,place,plan.algorithmKey));
+                // 留下截止读数；命中 / 起点不明的币再留可用区间的读数，扫完把阈值往严里调时当场重判（refilter.ts）
+                const member:FishMemberResult={...result,reading:readings.average[bars.length-1]};
+                if(result.outcome==='hit'||result.outcome==='unknown'){const tail=fishTail(bars,readings,plan,cut,place);if(tail)member.tail=tail;}
                 const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;
-                memberResults.set(memberKey,new Map([[0,result]]));
-                options.onResult?.(memberKey,result);
+                memberResults.set(memberKey,new Map([[0,member]]));
+                options.onResult?.(memberKey,member);
               }catch(error){
                 if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
                 else if(!local.signal.aborted){
