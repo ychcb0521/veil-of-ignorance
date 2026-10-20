@@ -12,7 +12,7 @@ import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish
 import { CircleHelp, Search, SlidersHorizontal } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
+import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -22,6 +22,7 @@ import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSugges
 
 export interface FishPanelProps {
   reconstruction?: FishReconstructionState;
+  hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
   onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[]) => boolean;
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
@@ -66,8 +67,7 @@ export function FishPanel(p: FishPanelProps) {
   const combinationKey=()=>`${getUserPrefix()}fish-combination.v1`;
   const readCombination=():'and'|'or'=>{try{return readPersistedStateRaw(combinationKey())==='or'?'or':'and';}catch{return 'and';}};
   const [combination,setCombinationState]=useState<'and'|'or'>(readCombination);
-  const multipleRef=useRef<string[]>([]);
-  const setCombination=(v:'and'|'or')=>{setCombinationState(v);p.onRecombine?.(v,multipleRef.current);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
+  const setCombination=(v:'and'|'or')=>{setCombinationState(v);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
   const [firstEnabled,setFirstEnabled]=useState(()=>readCards()[0]?.enabled??true);
   const [selected,setSelected]=useState(()=>readCards()[0]?.featureId??'cbi2'),[pref,setPref]=useState<FishPreference>(()=>readCards()[0]?.pref??cleanPreference(readFishPreference('cbi2')));
   const cardsOwner=useRef(owner);
@@ -95,7 +95,10 @@ export function FishPanel(p: FishPanelProps) {
     for(const [i,c] of cards.entries())if(c.enabled)try{if(i===0){if(!compiled.plan||compiled.error)throw Error(compiled.error);plans.push(compiled.plan);continue;}const d=defs.find(d=>d.id===c.featureId);if(!d)throw Error('特征值已不存在');const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});if(plan.unavailable)throw Error(plan.unavailable);plans.push(plan);}catch(e){error=`算法 ${i+1}：${e instanceof Error?e.message:String(e)}`;}
     return {plans,error:error||(!plans.length?'请启用至少一个算法':'')};
   },[selected,firstEnabled,pref,extraCards,defs,compiled]);
-  multipleRef.current=multiple.plans.map(x=>x.algorithmKey);
+  const pool=useMemo(()=>[{featureId:selected,pref},...extraCards].flatMap(c=>{try{const d=defs.find(d=>d.id===c.featureId);if(!d)return [];const plan=compileFishProgram(d,{statistic:c.pref.statistic,direction:c.pref.direction,threshold:c.pref.threshold.trim()?Number(c.pref.threshold):NaN,constraints:[]});return plan.unavailable?[]:[plan];}catch{return [];}}),[selected,pref,extraCards,defs]);
+  const selectionKeys=multiple.plans.map(fishSelectionKey),selectionSignature=JSON.stringify(selectionKeys);
+  const [staleRound,setStaleRound]=useState(false);
+  useEffect(()=>{if(!p.hasRound||running)return;if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
   // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）
   const enabledCardNumbers=[firstEnabled,...extraCards.map(c=>c.enabled)].flatMap((on,i)=>on?[i+1]:[]);
   const algorithmInputs=()=>multiple.plans.map(p=>({feature:p.def,algorithm:p.settings}));
@@ -159,23 +162,24 @@ export function FishPanel(p: FishPanelProps) {
     const queue:{key:string;target:{id:string;plan:FishProgram}|null}[]=[...(suggestionKey&&firstEnabled&&!RECORDED_RANGES[selected]?[{key:suggestionKey,target:null}]:[]),...extraSuggest.flatMap(x=>x&&!RECORDED_RANGES[x.plan.def.id]?[{key:x.key,target:{id:x.id,plan:x.plan}}]:[])];
     const run=suggestionRun.current;
     if(run?.mode==='auto'&&!queue.some(q=>q.key===run.key))suggestionController.current?.abort();
-    if(!library.length||scanning||p.reconstruction?.running||suggestionRun.current)return;
+    if(p.hasRound||!library.length||scanning||p.reconstruction?.running||suggestionRun.current)return;
     const next=queue.find(q=>!autoTried.current.has(q.key)&&!readFishSuggestion(q.key));
     if(!next)return;
     const timer=setTimeout(()=>{if(suggestionRun.current||autoTried.current.has(next.key))return;autoTried.current.add(next.key);void calculateSuggestion('auto',next.target);},800);
     return()=>clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,p.reconstruction?.running]);
+  },[queueKeys,selected,firstEnabled,scanning,library.length,autoSuggesting,p.reconstruction?.running,p.hasRound]);
   // 方向一换，阈值仍是上次自动填的建议时改填另一端（> 取 P25，< 取 P75）；分布与方向无关，不用重算
   const changeDirection=(direction:'>'|'<')=>{
     const fill=suggestion&&!suggestionStale?suggestedFishThreshold(suggestion,direction):null;
     if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
     else update({...pref,direction});
   };
-  const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error)throw new Error(multiple.error);setError('');
+  const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
-    p.onStart({...settings,feature:multiple.plans[0].def,algorithm:multiple.plans[0].settings,algorithms:algorithmInputs(),combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    const plans=p.onRecombine?pool:multiple.plans;
+    p.onStart({...settings,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const btn = 'rounded border border-border/60 px-2 py-1 text-[11px] hover:bg-accent disabled:opacity-40';
@@ -197,7 +201,7 @@ export function FishPanel(p: FishPanelProps) {
     </div>}
 </PopoverContent></Popover></div>
       <label className="flex items-center gap-1 text-muted-foreground">时间（UTC+8）<input aria-label="捕捞时间（UTC+8）" placeholder="留空 = 现在" title="格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间" className="w-44 min-w-0 max-w-full rounded border border-border/60 bg-transparent px-1.5 py-1 font-mono text-foreground" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/></label>
-      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
+      <div className="flex gap-1"><button type="button" className={btn} disabled={running||probe.busy||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}>开始捕捞</button><button type="button" className={btn} disabled={!running} onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}>取消</button></div>
       <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${faint} ${open.scope ? 'text-muted-foreground' : ''}`}>
         <SlidersHorizontal className="h-3 w-3" />
       </button>
@@ -213,13 +217,14 @@ export function FishPanel(p: FishPanelProps) {
       </>}
         onChange={next=>{setFirstEnabled(next.enabled);if(next.featureId===selected&&next.pref.direction!==pref.direction){changeDirection(next.pref.direction);return;}setSelected(next.featureId);setPref(cleanPreference(next.pref));saveFishPreference(next.featureId,cleanPreference(next.pref));setError('');p.onInputsChange({...p.inputs,threshold:next.pref.threshold});}}
         onDelete={()=>{const [next,...rest]=extraCards;setSelected(next.featureId);setPref(next.pref);setFirstEnabled(next.enabled);setExtraCards(rest);}}/>
+      {staleRound&&<p className="text-[10px] text-muted-foreground">此设定尚未计算，下次捕捞生效；保留本轮结果。</p>}
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||probe.busy||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
     </div>
     <div className="flex flex-wrap items-center gap-2">
     <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
       {extraCards.length>0&&<label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><select aria-label="多重算法合并方式" className="rounded border border-border/60 bg-background px-1 py-1 text-foreground" disabled={running} value={combination} onChange={e=>setCombination(e.target.value as 'and'|'or')}><option value="and">交集</option><option value="or">并集</option></select></label>}
     </div>
-    <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{scanning&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ')}</p>
+    <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{(scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ')}</p>
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <input type="checkbox" className="h-3 w-3 accent-primary" disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />
@@ -242,7 +247,7 @@ export function FishPanel(p: FishPanelProps) {
         {probe.result.lines.map((line,i)=><p key={i} className={i===0?'font-mono text-[10.5px] text-muted-foreground':'text-foreground/90'}>{line}</p>)}
       </div>}
     </div>}
-    {(error||multiple.error) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
+    {(error||multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
     {x && <div className="space-y-2 text-[11px]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <p role="status" aria-live="polite" className="flex items-center gap-2" data-testid="fish-status" title={x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`).join('；')}>

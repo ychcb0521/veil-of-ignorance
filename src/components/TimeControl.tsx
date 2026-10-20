@@ -527,7 +527,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
+      {fishOpen && <FishPanel hasRound={fish.hasRound} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

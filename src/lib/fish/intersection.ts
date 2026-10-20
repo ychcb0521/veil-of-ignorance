@@ -41,10 +41,10 @@ export function intersectFishResults(rows: readonly FishMemberResult[], plans: r
   return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal?.fish??r.snapshot!)}}};
 }
 /** Request once per venue/instrument/period, then give each program exactly its own trailing N. */
-export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number): Partial<Record<FishExchange,FishDataAdapter>> {
+export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number, eligible?: (exchange:FishExchange,p:FishProgram)=>boolean): Partial<Record<FishExchange,FishDataAdapter>> {
   return Object.fromEntries([...adapters].map(([exchange,adapter])=>{
     const candles=new Map<string,Promise<ResearchBar[]>>(),takers=new Map<string,Promise<ResearchBar[]>>();let universe:ReturnType<FishDataAdapter['list']>|undefined;
-    const countFor=(interval:string)=>Math.max(...plans.filter(p=>intervalOf(p.def)===interval).map(p=>p.N));
+    const countFor=(interval:string)=>Math.max(...plans.filter(p=>intervalOf(p.def)===interval&&(!eligible||eligible(exchange,p))).map(p=>p.N));
     return [exchange,{exchange,btc:()=>adapter.btc(),list:(signal:AbortSignal)=>universe??=adapter.list(signal),
       candles:(market,cut,signal,query)=>{
         const count=countFor(query.interval),key=`${market.instrument}|${query.interval}|${cut}`;
