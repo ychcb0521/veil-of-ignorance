@@ -1,6 +1,7 @@
 /**
- * 信号库工具条上的「成交额」：每个信号前 24 小时的 USDT 成交额，汇总成区间、分位数和分布。
- * 【用户要求】2026-10-20「检查历史信号库中所有信号在当时信号出现时的成交量，汇总看区间范围，用 USDT」。
+ * 信号库工具条上的「成交额」：每个信号前 24 / 12 / 6 / 4 / 2 / 1 小时的 USDT 成交额，汇总成区间、分位数和分布。
+ * 【用户要求】2026-10-20「检查历史信号库中所有信号在当时信号出现时的成交量，汇总看区间范围，用 USDT」；
+ * 同日「除了信号前 24 小时成交额，还需要 12、6、4、2、1 小时的，直接在信号成交额部分增加」：上面一排切换时长看详情，下面一张表横向对比各时长。
  * 在浏览器里逐个取 K 线（与「渔」的建议区间同一套取数），结果存在本机；关掉对话框不会中断，信号库变了会提示过期。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -9,13 +10,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { SignalTurnoverRatingChart } from '@/components/SignalTurnoverRatingChart';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishSignalFingerprint } from '@/lib/fish/suggestions';
-import { TURNOVER_BUCKETS, bucketTurnover, formatUsdtCn, readSignalTurnover, signalTurnoverCsv, rateTurnoverRows, type SignalTurnoverOptions, type SignalTurnoverProgress, type SignalTurnoverResult } from '@/lib/signalTurnover';
+import { TURNOVER_BUCKETS, TURNOVER_WINDOWS, bucketTurnover, formatUsdtCn, readSignalTurnover, signalTurnoverCsv, turnoverValues, rateTurnoverRows, type SignalTurnoverOptions, type SignalTurnoverProgress, type SignalTurnoverResult, type TurnoverWindow } from '@/lib/signalTurnover';
 
 export function SignalTurnoverButton({ signals, run, busyReason }: { signals: readonly TradeSignal[]; run?: (options: SignalTurnoverOptions) => Promise<SignalTurnoverResult>; busyReason?: string }) {
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<SignalTurnoverResult | null>(readSignalTurnover);
   const [progress, setProgress] = useState<SignalTurnoverProgress | null>(null);
   const [error, setError] = useState('');
+  const [win, setWin] = useState<TurnoverWindow>(24);
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   const fingerprint = useMemo(() => fishSignalFingerprint(signals), [signals]);
@@ -34,15 +36,15 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
     const a = document.createElement('a'); a.href = url; a.download = `信号成交额-${new Date(result.createdAt).toISOString().slice(0, 10)}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  const values = useMemo(() => result?.rows.flatMap(r => r.turnover === null ? [] : [r.turnover]) ?? [], [result]);
+  const values = useMemo(() => result ? turnoverValues(result.rows, win) : [], [result, win]);
   const buckets = useMemo(() => bucketTurnover(values), [values]);
   const failures = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of result?.rows ?? []) if (r.turnover === null) { const k = (r.reason ?? '未知原因').replace(/ [A-Z0-9]+USDT /, ' … '); m.set(k, (m.get(k) ?? 0) + 1); }
+    for (const r of result?.rows ?? []) if (!r.windows) { const k = (r.reason ?? '未知原因').replace(/ [A-Z0-9]+USDT /, ' … '); m.set(k, (m.get(k) ?? 0) + 1); }
     return [...m].sort((a, b) => b[1] - a[1]);
   }, [result]);
   const ratedRows = useMemo(() => rateTurnoverRows(result?.rows ?? [], signals), [result, signals]);
-  const s = result?.stats;
+  const s = result?.stats[win];
   const pct = (n: number) => values.length ? Math.round((n / values.length) * 1000) / 10 : 0;
   const peak = Math.max(1, ...buckets);
   // 分布只画实际覆盖到的档（两头空档不画），中间的空档保留，才看得出断层
@@ -55,10 +57,10 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
       <BarChart3 className="h-3 w-3" />{running && progress ? <span className="font-mono tabular-nums">{progress.done}/{progress.total}</span> : null}
     </button>
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto p-5" data-testid="signal-turnover-dialog">
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto p-5 [&>*]:min-w-0" data-testid="signal-turnover-dialog">
         <DialogHeader className="space-y-1 text-left">
           <DialogTitle className="text-sm font-semibold">信号成交额</DialogTitle>
-          <DialogDescription className="text-[11px] leading-relaxed">每个信号前 24 小时的 USDT 成交额（截至信号所在那根 5 分钟 K 线之前，即当时盘口的「24h 成交额」）· 共 {signals.length} 个信号</DialogDescription>
+          <DialogDescription className="text-[11px] leading-relaxed">每个信号前 24 / 12 / 6 / 4 / 2 / 1 小时的 USDT 成交额（截至信号所在那根 5 分钟 K 线之前；24 小时即当时盘口的「24h 成交额」）· 共 {signals.length} 个信号</DialogDescription>
         </DialogHeader>
 
         {running && progress && <div className="space-y-1.5" role="status">
@@ -68,17 +70,20 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
         </div>}
 
         {!running && !result && <div className="space-y-3 text-[11px] leading-relaxed text-muted-foreground">
-          <p>在你的浏览器里逐个向交易所取信号前 24 小时的 5 分钟 K 线（每个信号一次请求，约几分钟），算完存在本机，下次打开直接看。</p>
+          <p>在你的浏览器里逐个向交易所取信号前 24 小时的 5 分钟 K 线（每个信号一次请求，约几分钟），六个时长一起算出，存在本机，下次打开直接看。</p>
           <button type="button" disabled={!run || !!busyReason || !signals.length} onClick={() => void start()} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">开始统计</button>
           {busyReason && <p className="text-[10.5px]">{busyReason}</p>}
         </div>}
 
         {error && <p className="text-[11px] text-destructive">{error}</p>}
 
+        {result && result.stats[24] && <div role="tablist" aria-label="成交额时长" className="inline-flex h-7 w-fit max-w-full items-center justify-self-start overflow-x-auto rounded-md bg-muted/70 p-0.5 text-[11px]">
+          {TURNOVER_WINDOWS.map(h => <button key={h} type="button" role="tab" aria-selected={win === h} onClick={() => setWin(h)} className={`h-6 rounded px-2.5 font-mono tabular-nums transition-colors ${win === h ? 'bg-background font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{h}h</button>)}
+        </div>}
         {result && s && <div className="space-y-4" data-testid="signal-turnover-result">
           {stale && <p className="rounded-md bg-muted/50 px-2.5 py-1.5 text-[10.5px] text-muted-foreground">信号库有改动，这份结果是按改动前的 {result.total} 个信号算的。</p>}
           <div>
-            <div className="text-[10.5px] text-muted-foreground">区间（最小 ~ 最大）</div>
+            <div className="text-[10.5px] text-muted-foreground">信号前 {win} 小时成交额 · 区间（最小 ~ 最大）</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 font-mono tabular-nums"><span className="text-lg font-semibold">{formatUsdtCn(s.min)} ~ {formatUsdtCn(s.max)}</span><span className="text-[11px] text-muted-foreground">USDT</span></div>
             <div className="mt-1 text-[11px] text-muted-foreground">中间 80% 的信号在 <span className="font-mono tabular-nums text-foreground">{formatUsdtCn(s.p10)} ~ {formatUsdtCn(s.p90)}</span>，中间一半在 <span className="font-mono tabular-nums text-foreground">{formatUsdtCn(s.p25)} ~ {formatUsdtCn(s.p75)}</span></div>
           </div>
@@ -87,16 +92,28 @@ export function SignalTurnoverButton({ signals, run, busyReason }: { signals: re
           </div>
           <div className="space-y-1" aria-label="成交额分布">
             <div className="text-[10.5px] text-muted-foreground">分布</div>
-            {shown.map(({ b, i }) => <div key={b.label} className="grid grid-cols-[6.5rem_1fr_4.5rem] items-center gap-2 text-[11px]">
+            {shown.map(({ b, i }) => <div key={b.label} className="grid grid-cols-[6rem_1fr_auto] items-center gap-2 text-[11px] sm:grid-cols-[6.5rem_1fr_5rem]">
               <span className="text-muted-foreground">{b.label}</span>
               <span className="h-2 overflow-hidden rounded-full bg-muted/60"><span className="block h-full rounded-full bg-primary/80" style={{ width: `${(buckets[i] / peak) * 100}%` }} /></span>
-              <span className="font-mono tabular-nums">{buckets[i]}<span className="ml-1 text-muted-foreground">{pct(buckets[i])}%</span></span>
+              <span className="whitespace-nowrap font-mono tabular-nums">{buckets[i]}<span className="ml-1 text-muted-foreground">{pct(buckets[i])}%</span></span>
             </div>)}
           </div>
-          <SignalTurnoverRatingChart rows={ratedRows} />
+          <div className="space-y-1">
+            <div className="text-[10.5px] text-muted-foreground">各时长对比</div>
+            <div className="overflow-x-auto rounded-lg border border-border/60">
+              <table className="w-full min-w-[24rem] text-[11px]" aria-label="各时长成交额对比">
+                <thead><tr className="bg-muted/30 text-[10px] text-muted-foreground">{['时长', '最小', 'P10', '中位数', 'P90', '最大'].map((h, i) => <th key={h} className={`px-2.5 py-1.5 font-normal ${i ? 'text-right' : 'text-left'}`}>{h}</th>)}</tr></thead>
+                <tbody>{TURNOVER_WINDOWS.map(h => { const x = result.stats[h]; return <tr key={h} onClick={() => setWin(h)} className={`cursor-pointer border-t border-border/50 transition-colors ${win === h ? 'bg-primary/10' : 'hover:bg-muted/40'}`}>
+                  <td className={`px-2.5 py-1.5 font-mono tabular-nums ${win === h ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{h}h</td>
+                  {x ? [x.min, x.p10, x.p50, x.p90, x.max].map((v, i) => <td key={i} className={`px-2.5 py-1.5 text-right font-mono tabular-nums ${i === 2 ? 'font-medium' : ''}`}>{formatUsdtCn(v)}</td>) : <td colSpan={5} className="px-2.5 py-1.5 text-right text-muted-foreground">—</td>}
+                </tr>; })}</tbody>
+              </table>
+            </div>
+          </div>
+          <SignalTurnoverRatingChart rows={ratedRows} hours={win} />
           <div className="space-y-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
-            <p>统计了 <span className="font-mono tabular-nums text-foreground">{s.n}</span> / {result.total} 个信号{result.complete ? '' : '（中途取消，只算到已取到的）'}；{result.partial > 0 && <>其中 {result.partial} 个上市不足 24 小时，按上市以来的成交额计；</>}算于 {new Date(result.createdAt).toLocaleString('zh-CN', { hour12: false })}。</p>
-            {failures.length > 0 && <details><summary className="w-fit cursor-pointer">取不到的 {result.rows.filter(r => r.turnover === null).length} 个</summary>{failures.slice(0, 8).map(([reason, n]) => <p key={reason} className="break-words">{n} 个 · {reason}</p>)}</details>}
+            <p>统计了 <span className="font-mono tabular-nums text-foreground">{s.n}</span> / {result.total} 个信号{result.complete ? '' : '（中途取消，只算到已取到的）'}；{result.partial[win] > 0 && <>其中 {result.partial[win]} 个上市不足 {win} 小时，按上市以来的成交额计；</>}算于 {new Date(result.createdAt).toLocaleString('zh-CN', { hour12: false })}。</p>
+            {failures.length > 0 && <details><summary className="w-fit cursor-pointer">取不到的 {result.rows.filter(r => !r.windows).length} 个</summary>{failures.slice(0, 8).map(([reason, n]) => <p key={reason} className="break-words">{n} 个 · {reason}</p>)}</details>}
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={download} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 px-3 text-[11px] font-medium hover:bg-muted"><Download className="h-3 w-3" />下载明细 CSV</button>
