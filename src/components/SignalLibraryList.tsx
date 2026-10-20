@@ -189,6 +189,8 @@ export function measureSignalRowMetrics(el: HTMLElement): SignalRowMetrics | nul
 }
 
 interface RowProps {
+  /** 「渔」的鱼：兜底区这一列换成「算法类型」（捕到它的算法）。 */
+  algorithmTypes?: string[];
   /** 「渔」的鱼：这一列先放「捕捞过程」入口（点开看凭什么击中、为什么避开噪音）。 */
   processSignal?: TradeSignal;
   match?: SignalReconstructionMatch;
@@ -228,7 +230,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -258,7 +260,7 @@ function SignalLibraryRowImpl({
           {traded
             ? <CheckCircle2 className="h-3 w-3 text-[#0ecb81]" aria-label="信号当日已交易" />
             : <span aria-hidden />}
-          {algorithm ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 text-[8px] font-normal text-muted-foreground">{algorithm}</span>{exchange&&exchange!=='binance'&&<span className="shrink-0 rounded bg-muted px-1 text-[8px]">{EXCHANGE_NAMES[exchange]}</span>}</span> : exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
+          {algorithm ? <span className="flex min-w-0 items-center gap-1"><span className="shrink-0">{symbol}</span><span className="min-w-0 truncate text-[8px] font-normal text-muted-foreground" title={algorithm}>{algorithm}</span>{exchange&&exchange!=='binance'&&<span className="shrink-0 rounded bg-muted px-1 text-[8px]">{EXCHANGE_NAMES[exchange]}</span>}</span> : exchange && exchange !== 'binance' ? <span className="flex min-w-0 items-center gap-1"><span className="truncate">{symbol}</span><span className="shrink-0 rounded bg-muted px-1 text-[8px] font-normal text-muted-foreground">{EXCHANGE_NAMES[exchange]}</span></span> : <span className="truncate">{symbol}</span>}
         </span>
         {/* 时间：定宽等宽字体，纵向严格成列 */}
         <span className="flex min-w-0 items-center gap-1">
@@ -275,9 +277,11 @@ function SignalLibraryRowImpl({
           )}
         </span>
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
-        <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
-          {fallbackZone ? `兜底 ${fallbackZone}` : ''}
-        </span>
+        {algorithmTypes
+          ? <span className="truncate font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type" title={algorithmTypes.join(' · ')}>{algorithmTypes.join(' · ')}</span>
+          : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
+              {fallbackZone ? `兜底 ${fallbackZone}` : ''}
+            </span>}
         <span className="min-w-0">{market==='us_stock'&&<span className="rounded bg-primary/10 px-1 py-px text-[9px] text-primary">美股</span>}</span>
       </button>
       {/* 评分列：与表头的 74px 对齐。必须在跳转按钮之外——
@@ -337,6 +341,8 @@ interface Props {
   nested?: boolean;
   /** 「渔」的鱼：每行加「捕捞过程」入口。 */
   showProcess?: boolean;
+  /** 「渔」的鱼：兜底区这一列换成「算法类型」。 */
+  rowAlgorithmTypes?: (signal: TradeSignal) => string[];
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
   tradedDayIndex: Set<string>;
@@ -370,7 +376,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false,
+  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -549,6 +555,7 @@ function SignalLibraryListImpl({
         showMatch={matches !== undefined}
         match={matches?.get(sig.id)}
         processSignal={showProcess ? sig : undefined}
+        algorithmTypes={rowAlgorithmTypes?.(sig)}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}
         symbol={sig.symbol}

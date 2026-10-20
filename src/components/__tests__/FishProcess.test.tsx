@@ -25,6 +25,6 @@ it('没有本轮记录 / 旧记录：说明清楚，不编数字',()=>{
 });
 it('鱼列表每行有「捕捞过程」，点开显示详情',()=>{
  render(<FishLibrary title="新鱼" testId="fish-new" signals={[signal]} defaultOpen tradedDayIndex={new Set()} campaignDayIndex={new Set()} jumpingSignalId={null} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}}/>);
- const panel=screen.getByTestId('fish-new-panel');expect(within(panel).getByText('捕捞过程',{selector:'span'})).toBeVisible();
- fireEvent.click(within(panel).getByTestId('fish-process-open'));expect(screen.getByTestId('fish-process-detail')).toHaveTextContent('RAVEUSDT');
+ const panel=screen.getByTestId('fish-new-panel');expect(within(panel).getByText('捕捞过程',{selector:'span'})).toBeVisible();expect(within(panel).getByText('算法类型')).toBeVisible();expect(within(panel).getByTestId('fish-algorithm-type')).toHaveTextContent('CBI-2');expect(within(panel).queryByText('兜底区')).toBeNull();
+ fireEvent.click(within(panel).getByTestId('fish-process-open'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('RAVEUSDT');expect(within(dialog).getByTestId('fish-process-detail')).toHaveTextContent('凭什么击中');
 });

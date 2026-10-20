@@ -123,7 +123,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(button);
     const library = screen.getByTestId('fish-old-panel');
     expect(screen.getByTestId('fish-panel')).toContainElement(library);
-    expect(within(library).getByText('兜底区')).toBeInTheDocument();
+    // 鱼的第三列是「算法类型」（2026-10-20 替换兜底区）
+    expect(within(library).getByText('算法类型')).toBeInTheDocument();expect(within(library).queryByText('兜底区')).toBeNull();
     const first = () => within(library).getByTestId('signal-library-scroller').querySelector('.group')!;
     expect(first()).toHaveTextContent('AAAUSDT');
     fireEvent.click(within(library).getByTestId('signal-sort-标的'));

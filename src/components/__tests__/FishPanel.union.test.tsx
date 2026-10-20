@@ -16,3 +16,12 @@ it('两个及以上算法时可选交集 / 并集：默认交集；选并集后�
  fireEvent.click(screen.getByRole('button',{name:'查单个币'}));fireEvent.change(screen.getByLabelText('查单个币的标的'),{target:{value:'AAA'}});fireEvent.click(screen.getByRole('button',{name:'查'}));await vi.waitFor(()=>expect(diagnose).toHaveBeenCalled());expect(diagnose.mock.calls[0][0]).toMatchObject({combination:'or'});
  cleanup();render(panel());expect(screen.getByLabelText('多重算法合并方式')).toHaveValue('or');
 });
+
+// 【用户要求】2026-10-20「渔中的这个 x 也放在 … 中」
+it('删除算法收在每张卡的「…」里：卡片上不再有单独的 ×，点「…」再点「删除这个算法」才删除',async()=>{
+ render(panel());fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
+ expect(screen.queryByRole('button',{name:'删除算法 2'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'算法 2 的更多操作'}));
+ fireEvent.click(await screen.findByRole('button',{name:'删除算法 2'}));
+ expect(screen.queryByRole('group',{name:'算法 2'})).toBeNull();
+});

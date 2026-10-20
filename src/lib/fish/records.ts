@@ -26,3 +26,18 @@ export function mergeFishSignals(existing: readonly TradeSignal[],incoming: read
 }
 /** 算法简称：交集「A ∩ B」，并集「A ∪ B」（并集另记命中的是哪几个，见快照 hitAlgorithms）。 */
 export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(a=>a.featureShort??a.featureName).join(s.fish.combination==='or'?' ∪ ':' ∩ '):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
+
+/**
+ * 「算法类型」：这条鱼实际是哪个（些）算法捕到的。单算法 = 它自己；交集 = 每个算法；并集 = 命中的那几个。
+ * 【用户要求】2026-10-20「把具体是哪个算法捕捞到的（如果是多个，就把多个都写上去），专门开设一列（命名为：算法类型）」。
+ */
+export function fishCaughtBy(s: TradeSignal): string[] {
+  const r = s.fish;
+  if (!r) return ['CBI-2'];
+  const name = (a: { featureShort?: string; featureName?: string } | undefined) => a?.featureShort || a?.featureName || '—';
+  if (r.algorithms?.length) {
+    const picked = r.combination === 'or' ? (r.hitAlgorithms ?? []).map(i => r.algorithms![i - 1]) : r.algorithms;
+    return [...new Set(picked.filter(Boolean).map(name))];
+  }
+  return [r.featureShort ?? 'CBI-2'];
+}

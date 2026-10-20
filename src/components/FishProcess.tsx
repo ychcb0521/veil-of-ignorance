@@ -5,7 +5,7 @@
  * 避开噪音来自本轮摘要（只存本机）：其余币分别卡在哪一步、本币读数在本轮排第几、本币此前越线过几次。
  */
 import { useState } from 'react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishRoundIdentity, readFishRound, type FishRoundSummary } from '@/lib/fish/roundSummary';
@@ -29,13 +29,13 @@ function Trace({ fish }: { fish: FishSnapshot }) {
   const values = tr.values.map(v => v * scale), thr = raw * scale;
   const finite = [...values.filter(Number.isFinite), thr];
   const lo = Math.min(...finite), hi = Math.max(...finite), span = hi - lo || 1;
-  const W = 300, H = 64, x = (i: number) => (i / (values.length - 1)) * W, y = (v: number) => H - 4 - ((v - lo) / span) * (H - 8);
+  const W = 520, H = 72, x = (i: number) => (i / (values.length - 1)) * W, y = (v: number) => H - 4 - ((v - lo) / span) * (H - 8);
   const path = values.map((v, i) => Number.isFinite(v) ? `${x(i).toFixed(1)},${y(v).toFixed(1)}` : null).filter(Boolean).join(' ');
   // 第 j 个点对应截止往前 (len − 1 − j) × every 根；起点往前 (截止 − 起点) 根
   const every = Math.max(1, Math.round(tr.dt / stepOf(fish)));
   const startI = fish.startIndex != null && fish.cutoffIndex != null ? Math.round(values.length - 1 - (fish.cutoffIndex - fish.startIndex) / every) : -1;
   return <figure className="space-y-0.5">
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-16 w-full overflow-visible" role="img" aria-label="读数轨迹">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-[72px] w-full overflow-visible" role="img" aria-label="读数轨迹">
       <line x1={0} x2={W} y1={y(thr)} y2={y(thr)} className="stroke-muted-foreground/60" strokeDasharray="3 3" strokeWidth={1} />
       {startI >= 0 && startI < values.length && <line x1={x(startI)} x2={x(startI)} y1={0} y2={H} className="stroke-primary/50" strokeWidth={1} />}
       <polyline points={path} fill="none" className="stroke-primary" strokeWidth={1.5} />
@@ -83,7 +83,7 @@ function NoiseEvidence({ fish, round, identity, label }: { fish: FishSnapshot; r
   </div>;
 }
 
-export function FishProcessDetail({ signal }: { signal: TradeSignal }) {
+export function FishProcessDetail({ signal, hideTitle = false }: { signal: TradeSignal; hideTitle?: boolean }) {
   const fish = signal.fish;
   if (!fish) return <p>旧记录，没有读数快照。</p>;
   const identity = fishRoundIdentity({ exchange: signal.exchange, market: signal.market, symbol: signal.symbol });
@@ -92,23 +92,23 @@ export function FishProcessDetail({ signal }: { signal: TradeSignal }) {
   const round = readFishRound(fish.algorithmKey, fish.cutoffMs);
   const old = !multi && !fish.trace;
   return <div className="space-y-3 text-[11px] leading-relaxed" data-testid="fish-process-detail">
-    <p className="font-medium">{signal.symbol} · 信号时间 {formatUTC8(signal.timeMs)}</p>
+    {!hideTitle && <p className="font-medium">{signal.symbol} · 信号时间 {formatUTC8(signal.timeMs)}</p>}
     {old && <p className="text-muted-foreground">这条是较早捕到的，当时没有记下过程数据；下面只列快照里有的读数。重新捕捞后会有完整过程。</p>}
     {!multi ? <>
-      <section className="space-y-1"><h4 className="font-medium">凭什么击中</h4>
+      <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中</h4>
         <p className="text-muted-foreground">规则：{fish.featureShort ?? 'CBI-2'} 的「{fish.statistic && fish.statistic !== '结果' ? fish.statistic : '结果'}」{fish.direction ?? '>'} {fish.threshold}{fish.unit ? ` ${fish.unit}` : ''}；截止时满足，并且是在可用区间里刚越线、一直保持到截止的这一轮。</p>
         <HitEvidence fish={fish} signalTime={signal.timeMs} />
       </section>
-      <section className="space-y-1"><h4 className="font-medium">为什么避开了其他噪音</h4><NoiseEvidence fish={fish} round={round} identity={identity} /></section>
+      <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">为什么避开了其他噪音</h4><NoiseEvidence fish={fish} round={round} identity={identity} /></section>
     </> : <>
-      <section className="space-y-1"><h4 className="font-medium">凭什么击中（{fish.combination === 'or' ? '并集：满足任一' : '交集：同时满足'}）</h4>
+      <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中（{fish.combination === 'or' ? '并集：满足任一' : '交集：同时满足'}）</h4>
         <p className="text-muted-foreground">{fish.combination === 'or' ? `命中的是算法 ${(fish.hitAlgorithms ?? []).join('、')}；信号时间取命中算法里最早的起点。` : '每个算法都在截止时满足；信号时间取各算法起点里最晚的那个（从那一刻起全部同时成立）。'}</p>
         {members.map((m, i) => <div key={i} className="space-y-1 border-l border-border/60 pl-2">
           <p className="font-medium">算法 {i + 1} · {m.featureShort ?? m.featureName ?? ''} {m.direction ?? '>'} {num(m.threshold)}{fish.combination === 'or' && !(fish.hitAlgorithms ?? []).includes(i + 1) ? <span className="ml-1 font-normal text-muted-foreground">（这一算法没命中：{OUTCOME[(m as { outcome?: string }).outcome ?? ''] ?? '—'}）</span> : null}</p>
           {(fish.combination !== 'or' || (fish.hitAlgorithms ?? []).includes(i + 1)) && <HitEvidence fish={m} />}
         </div>)}
       </section>
-      <section className="space-y-1"><h4 className="font-medium">为什么避开了其他噪音</h4>
+      <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">为什么避开了其他噪音</h4>
         {round ? <p>本轮组合判定 <b>{round.total}</b> 个币，命中 <b>{round.counts.hit ?? 0}</b> 个；各算法单独命中：{(round.members ?? []).map((x, i) => `算法 ${i + 1} ${x.hits} 个`).join('、')}。{fish.combination === 'or' ? '并集只是把各算法单独命中的币合在一起，每个币留一条。' : '交集要求每个算法都命中，所以比任何一个算法单独命中的都少。'}</p> : <p className="text-muted-foreground">没有找到这一轮的组合记录（本机只保存最近 40 轮）。</p>}
         {members.map((m, i) => <details key={i}><summary className="cursor-pointer text-muted-foreground">算法 {i + 1} 本轮的筛选</summary><NoiseEvidence fish={m} round={readFishRound(m.algorithmKey, m.cutoffMs)} identity={identity} label={`算法 ${i + 1} 本轮`} /></details>)}
       </section>
@@ -117,10 +117,22 @@ export function FishProcessDetail({ signal }: { signal: TradeSignal }) {
 }
 
 /** 列表里的「捕捞过程」入口：点开才读本轮记录。 */
+/**
+ * 列表里的「捕捞过程」入口：点开是屏幕正中的对话框（不贴着按钮弹出），点开才读本轮记录。
+ * 【用户要求】2026-10-20「捕捞过程点开之后的卡片，位置有问题、不美观、不和谐。要保证美观、居中对齐」。
+ */
 export function FishProcessButton({ signal }: { signal: TradeSignal }) {
   const [open, setOpen] = useState(false);
-  return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger asChild><button type="button" className="min-w-0 truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline" data-testid="fish-process-open">捕捞过程</button></PopoverTrigger>
-    <PopoverContent align="start" className="max-h-[70vh] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-3">{open && <FishProcessDetail signal={signal} />}</PopoverContent>
-  </Popover>;
+  return <>
+    <button type="button" className="min-w-0 truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline" data-testid="fish-process-open" onClick={() => setOpen(true)}>捕捞过程</button>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl flex-col gap-3 overflow-hidden p-0" data-testid="fish-process-dialog">
+        <DialogHeader className="border-b border-border/60 px-5 pb-3 pt-5 text-left">
+          <DialogTitle className="font-mono text-sm">{signal.symbol}<span className="ml-2 font-sans text-xs font-normal text-muted-foreground">捕捞过程</span></DialogTitle>
+          <DialogDescription className="text-[11px]">信号时间 {formatUTC8(signal.timeMs)}</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto px-5 pb-5">{open && <FishProcessDetail signal={signal} hideTitle />}</div>
+      </DialogContent>
+    </Dialog>
+  </>;
 }

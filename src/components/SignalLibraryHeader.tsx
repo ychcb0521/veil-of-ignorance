@@ -5,7 +5,9 @@ export const SIGNAL_LIBRARY_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128
 export const SIGNAL_LIBRARY_MATCH_GRID = 'grid grid-cols-[minmax(0,148px)_minmax(0,128px)_minmax(0,160px)_36px_74px_minmax(200px,1fr)_20px_20px_20px] items-center gap-2';
 
 /** Shared column widths and sort controls for the main library and 鱼. */
-export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false }: {
+export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = false, showProcess = false, algorithmSort }: {
+  /** 「渔」的鱼：兜底区换成可排序的「算法类型」。 */
+  algorithmSort?: { active: boolean; onClick: () => void };
   showMatch?: boolean;
   /** 「渔」的鱼：这一列标「捕捞过程」。 */
   showProcess?: boolean;
@@ -17,7 +19,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
       <SortHeader label="标的" active={sortKey === 'symbol'} dir={sortDir} onClick={() => onSort('symbol')} />
     </span>
     <SortHeader label="信号时间" active={sortKey === 'time'} dir={sortDir} onClick={() => onSort('time')} />
-    <span>兜底区</span>
+    {algorithmSort ? <SortHeader label="算法类型" active={algorithmSort.active} dir={sortDir} onClick={algorithmSort.onClick} /> : <span>兜底区</span>}
     <span>市场</span>
     <SortHeader label="评分" active={sortKey === 'quality'} dir={sortDir} onClick={() => onSort('quality')} />
     {showMatch ? <span>匹配</span> : showProcess ? <span>捕捞过程</span> : <span aria-hidden />}<span aria-hidden /><span aria-hidden /><span aria-hidden />

@@ -1,4 +1,4 @@
-import {fishAlgorithmShort,migrateFishSignal} from '@/lib/fish/records';
+import {fishCaughtBy} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChevronDown, Database, Sparkles } from 'lucide-react';
 import { normalizeSignalQuality, signalMonthKey, sortSignalsBy, type SignalSortKey } from '@/lib/signalLibrary';
@@ -25,11 +25,12 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const hadRows = useRef(p.signals.length > 0);
   useEffect(() => { if (p.defaultOpen && !hadRows.current && p.signals.length > 0) setOpen(true); hadRows.current = p.signals.length > 0; }, [p.defaultOpen, p.signals.length]);
   const [algorithm,setAlgorithm]=useState('');
-  const algorithms=useMemo(()=>[...new Map(p.signals.map(s=>{const m=migrateFishSignal(s),r=m.fish!;if(r.algorithms?.length)return [r.algorithmKey!,fishAlgorithmShort(m)] as const;return [r.algorithmKey!,`${r.featureShort}${r.statistic&&r.statistic!=='结果'?` [${r.statistic}]`:''} · ${r.H!==undefined?`avg ${r.H}h `:''}${r.direction} ${r.threshold}${r.constraints?.length?` · ${r.constraints.length}条约束`:''}`] as const;}))],[p.signals]);
-  useEffect(()=>{if(algorithm&&!algorithms.some(([key])=>key===algorithm))setAlgorithm('');},[algorithm,algorithms]);
+  // 「算法类型」筛选：列出捕到过鱼的每个算法，选一个只看它捕到的（多算法的鱼只要含它就算）
+  const algorithms=useMemo(()=>[...new Set(p.signals.flatMap(fishCaughtBy))].sort((a,b)=>a.localeCompare(b)),[p.signals]);
+  useEffect(()=>{if(algorithm&&!algorithms.includes(algorithm))setAlgorithm('');},[algorithm,algorithms]);
   const [query, setQuery] = useState('');
   const [month, setMonth] = useState('');
-  const [sortKey, setSortKey] = useState<SignalSortKey>('symbol');
+  const [sortKey, setSortKey] = useState<SignalSortKey | 'algorithm'>('symbol');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const resetKey = `${sortKey}|${sortDir}|${month}|${algorithm}|${query.trim().toUpperCase()}`;
   // As in 信号库, editing stars keeps the row still until the next explicit sort/filter.
@@ -56,11 +57,15 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     const actual = new Map(p.signals.map(s => [s.id, s]));
     const basis = frozen.key === resetKey ? p.signals.map(s => frozen.values.has(s.id) ? { ...s, quality: frozen.values.get(s.id) ?? undefined } : s) : p.signals;
     const q = query.trim().toUpperCase();
-    return sortSignalsBy(basis, sortKey, sortDir).map(s => actual.get(s.id)!).filter(s => (!algorithm||migrateFishSignal(s).fish!.algorithmKey===algorithm) && (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
+    // 「算法类型」排序：按捕到它的算法名排，同名再按时间
+    const sorted = sortKey === 'algorithm'
+      ? [...basis].sort((a, b) => (fishCaughtBy(a).join(' · ').localeCompare(fishCaughtBy(b).join(' · ')) || a.timeMs - b.timeMs) * (sortDir === 'asc' ? 1 : -1))
+      : sortSignalsBy(basis, sortKey, sortDir);
+    return sorted.map(s => actual.get(s.id)!).filter(s => (!algorithm || fishCaughtBy(s).includes(algorithm)) && (!month || signalMonthKey(s.timeMs) === month) && (!q || s.symbol.toUpperCase().includes(q)));
   }, [p.signals, frozen, resetKey, query, month, sortKey, sortDir, algorithm]);
-  const toggleSort = (key: SignalSortKey) => {
+  const toggleSort = (key: SignalSortKey | 'algorithm') => {
     if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir(key === 'symbol' ? 'asc' : 'desc'); }
+    else { setSortKey(key); setSortDir(key === 'symbol' || key === 'algorithm' ? 'asc' : 'desc'); }
   };
   return <div className={'min-w-0'} data-testid={testId}>
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="grid h-8 w-32 grid-cols-[0.75rem_1fr_auto_0.75rem] items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
@@ -74,13 +79,13 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
           <option value="">全部月份（{p.signals.length}）</option>
           {months.map(([key, count]) => <option key={key} value={key}>{key}（{count}）</option>)}
         </select>
-        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-full sm:max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法</option>{algorithms.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>
+        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-full sm:max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法类型</option>{algorithms.map(name=><option key={name} value={name}>{name}</option>)}</select>
         <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[8rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
 
       </div>
       {rows.length ? <div className="min-w-0 overflow-x-auto rounded border border-border/60"><div className="min-w-[44rem]">
-        <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} showProcess />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithm={fishAlgorithmShort} nested showProcess />
+        <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? 'symbol' : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;
