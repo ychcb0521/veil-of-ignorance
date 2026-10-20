@@ -19,7 +19,7 @@ it('自由组合：未勾选卡仍计算，扫后勾选和交并集触发本地�
  expect(start.mock.calls[0][0]).toMatchObject({retainMembers:true});expect(start.mock.calls[0][0].algorithms).toHaveLength(2);expect(start.mock.calls[0][0].displayAlgorithmKeys).toHaveLength(1);
  view.rerender(<FishPanel {...props} hasRound progress={{...initialFishProgress(),status:'complete'}}/>);
  fireEvent.click(screen.getByLabelText('启用算法 2',{selector:'input'}));expect(recombine.mock.calls.at(-1)?.[1]).toHaveLength(2);
- fireEvent.change(screen.getByLabelText('多重算法合并方式'),{target:{value:'or'}});expect(recombine.mock.calls.at(-1)?.[0]).toBe('or');
+ fireEvent.click(screen.getByRole('radio',{name:'并集'}));expect(recombine.mock.calls.at(-1)?.[0]).toBe('or');
  fireEvent.click(screen.getByLabelText('启用算法 1',{selector:'input'}));fireEvent.click(screen.getByLabelText('启用算法 2',{selector:'input'}));expect(recombine.mock.calls.at(-1)?.[1]).toEqual([]);expect(screen.queryByRole('alert')).not.toBeInTheDocument();
  fireEvent.click(screen.getByLabelText('启用算法 1',{selector:'input'}));recombine.mockReturnValue(false);fireEvent.change(screen.getByLabelText('捕捞阈值'),{target:{value:'.9'}});expect(screen.getByText(/上一轮没算过/)).toBeInTheDocument();
  view.rerender(<FishPanel {...props} hasRound progress={{...initialFishProgress(),status:'running'}}/>);expect(screen.queryByTestId('fish-stale-round')).not.toBeInTheDocument();

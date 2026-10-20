@@ -1,6 +1,8 @@
 import {fishCaughtBy} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
-import { ChevronDown, Database, Sparkles } from 'lucide-react';
+import { ChevronDown, Database, Search, Sparkles } from 'lucide-react';
+// 筛选行与「渔」的输入同一套：浅底无框、圆角、统一 28px 高
+const filterCls = 'h-7 w-full appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60';
 import { normalizeSignalQuality, signalMonthKey, sortSignalsBy, type SignalSortKey } from '@/lib/signalLibrary';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
@@ -68,25 +70,25 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     else { setSortKey(key); setSortDir(key === 'symbol' || key === 'algorithm' ? 'asc' : 'desc'); }
   };
   return <div className={'min-w-0'} data-testid={testId}>
-    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="grid h-8 w-32 grid-cols-[0.75rem_1fr_auto_0.75rem] items-center gap-2 rounded-md px-2 text-left text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-      {p.title === '新鱼' ? <Sparkles className="h-3 w-3" /> : <Database className="h-3 w-3" />}<span>{title}</span>
-      <span className="rounded bg-primary/15 px-1.5 font-mono text-[10px] text-primary">{p.signals.length}</span>
-      <ChevronDown className={`h-3 w-3 transition-transform ${open ? 'rotate-180' : ''}`} />
+    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground">
+      {p.title === '新鱼' ? <Sparkles className="h-3 w-3 text-primary/80" /> : <Database className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
+      <span className={`min-w-[1.25rem] rounded px-1 text-center font-mono text-[10px] tabular-nums ${p.signals.length?'bg-primary/15 text-primary':'bg-muted text-muted-foreground'}`}>{p.signals.length}</span>
+      <ChevronDown className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
     {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
-      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <select aria-label={`${title}的月份`} title="按月份定位信号（选中某个月会自动按时间旧→新排列）" className="input-dark h-[22px] shrink-0 px-1.5 py-0.5 font-mono text-[11px]" value={month} onChange={e => { setMonth(e.target.value); if (e.target.value) { setSortKey('time'); setSortDir('asc'); } }}>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span className="relative shrink-0"><select aria-label={`${title}的月份`} title="按月份定位信号（选中某个月会自动按时间旧→新排列）" className={`${filterCls} font-mono`} value={month} onChange={e => { setMonth(e.target.value); if (e.target.value) { setSortKey('time'); setSortDir('asc'); } }}>
           <option value="">全部月份（{p.signals.length}）</option>
           {months.map(([key, count]) => <option key={key} value={key}>{key}（{count}）</option>)}
-        </select>
-        <select aria-label={`${title}的算法`} className="input-dark h-[22px] max-w-full sm:max-w-60 px-1.5 py-0.5 text-[11px] leading-4" value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法类型</option>{algorithms.map(name=><option key={name} value={name}>{name}</option>)}</select>
-        <input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="input-dark min-w-[8rem] flex-1 px-1.5 py-0.5 text-[11px] leading-4" />
+        </select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" /></span>
+        <span className="relative max-w-full shrink-0 sm:max-w-60"><select aria-label={`${title}的算法`} className={filterCls} value={algorithm} onChange={e=>setAlgorithm(e.target.value)}><option value="">全部算法类型</option>{algorithms.map(name=><option key={name} value={name}>{name}</option>)}</select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60" /></span>
+        <label className="relative flex min-w-[8rem] flex-1 items-center"><Search aria-hidden className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground/60" /><input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="h-7 w-full rounded-md border border-transparent bg-muted/50 pl-6 pr-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:bg-muted focus-visible:border-ring/60 focus-visible:bg-background" /></label>
 
       </div>
-      {rows.length ? <div className="min-w-0 overflow-x-auto rounded border border-border/60"><div className="min-w-[44rem]">
+      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div className="min-w-[44rem]">
         <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? 'symbol' : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
         <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess />
-      </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
+      </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;
 });
