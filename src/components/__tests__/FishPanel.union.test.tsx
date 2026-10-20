@@ -6,7 +6,7 @@ import {CBI2_DEF} from '@/lib/deepDig/features';
 import {saveFishPreference} from '@/lib/fish/preferences';
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>[CBI2_DEF]}));
 const start=vi.fn(),diagnose=vi.fn(async(_o:any)=>({outcome:'hit' as const,lines:['ok']}));
-const panel=()=><FishPanel onDiagnose={diagnose} signals={[]} progress={null} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onAdd={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;
+const panel=()=><FishPanel onDiagnose={diagnose} signals={[]} progress={null} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();start.mockClear();saveFishPreference('cbi2',{statistic:'结果',direction:'>',threshold:'0.3',constraints:[]});});
 it('两个及以上算法时可选交集 / 并集：默认交集；选并集后规则写「或」、开始捕捞与查单个币都带上；跟账号记住',async()=>{
  render(panel());expect(screen.queryByLabelText('多重算法合并方式')).toBeNull();

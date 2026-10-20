@@ -14,7 +14,7 @@ const suggest=vi.fn((options:FishSuggestionOptions)=>collectFishSuggestion(optio
 const start=vi.fn();
 function Harness({onSuggest=suggest}:{onSuggest?:FishPanelProps['onSuggest']}){
  const [inputs,onInputsChange]=useState({time:'',threshold:''}),[selection,onSelectionChange]=useState<FishPanelProps['selection']>({exchanges:['binance'],includeDuplicates:false}),[library,setLibrary]=useState(signals);
- return <><button onClick={()=>setLibrary([...signals,{...signals[0],id:'extra',timeMs:signals[0].timeMs+300000}])}>增加信号</button><FishPanel librarySignals={library} onSuggest={onSuggest} signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onAdd={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/></>;
+ return <><button onClick={()=>setLibrary([...signals,{...signals[0],id:'extra',timeMs:signals[0].timeMs+300000}])}>增加信号</button><FishPanel librarySignals={library} onSuggest={onSuggest} signals={[]} progress={null} inputs={inputs} onInputsChange={onInputsChange} selection={selection} onSelectionChange={onSelectionChange} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/></>;
 }
 function select(){fireEvent.change(screen.getByLabelText('捕捞算法'),{target:{value:def.id}});expect(screen.queryByLabelText('捕捞平均时长')).toBeNull();}
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();localStorage.setItem(getUserPrefix()+FEATURES_KEY,JSON.stringify([def]));suggest.mockClear();load.mockClear();start.mockClear();});

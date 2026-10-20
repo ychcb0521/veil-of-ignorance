@@ -8,8 +8,6 @@ import { SignalLibraryList } from '@/components/SignalLibraryList';
 type SignalLibraryListProps = ComponentProps<typeof SignalLibraryList>;
 interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaignDayIndex' | 'jumpingSignalId' | 'onJump' | 'onDelete' | 'onRate'> {
   signals: SignalLibraryListProps['rows'];
-  /** 一条（id）或一批（ids）加入信号库。 */
-  onAdd: (target?: string | readonly string[]) => void;
   /** 列表名：「新鱼」或「鱼」。 */
   title?: string;
   testId?: string;
@@ -82,7 +80,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       </div>
       {rows.length ? <div className="min-w-0 overflow-x-auto rounded border border-border/60"><div className="min-w-[44rem]">
         <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} showProcess />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowAlgorithm={fishAlgorithmShort} nested showProcess />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithm={fishAlgorithmShort} nested showProcess />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;

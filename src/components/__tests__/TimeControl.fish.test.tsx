@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
-  it('按钮紧邻信号库并互斥，评分/删除独立，逐条去重加入信号库且无批量入口，不显示快照悬停框', async () => {
+  it('按钮紧邻信号库并互斥，评分/删除独立，无加入信号库入口，不显示快照悬停框', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
     expect(fishButton.previousElementSibling).toHaveTextContent('信号库');
@@ -42,11 +42,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(within(panel).getByRole('radio',{name:'4 星'}));
     expect(loadFishSignals()[0].quality).toBe(4);
     expect(mocks.push).toHaveBeenLastCalledWith('fish-owner','fish_signals_v1',expect.any(Array));
-    fireEvent.click(within(panel).getByRole('button',{name:'加入信号库'}));
-    expect(within(panel).queryByRole('button',{name:'全部加入信号库'})).not.toBeInTheDocument();
-    fireEvent.click(within(panel).getByRole('button',{name:'加入信号库'}));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1));
-    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)[0].quality).toBe(4);
+    expect(within(panel).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
     fireEvent.click(screen.getByRole('button',{name:/^信号库/}));
     expect(screen.queryByTestId('fish-panel')).not.toBeInTheDocument();
     fireEvent.click(fishButton);
@@ -54,7 +51,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByTitle('删除该信号'));
     expect(loadFishSignals()).toHaveLength(0);
-    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
   it('沿用信号跳转，成功后收起渔；云端延迟恢复可刷新徽标和列表', async () => {
     const jump = vi.fn(async () => ({ ok: true as const })); render(control(jump));
@@ -149,7 +146,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
   });
 
 
-  it('【用户要求】2026-10-19 新鱼：开始捕捞时上一轮的新鱼归入「鱼」，这一轮捕到的放进「新鱼」；加入信号库不带新鱼标记', async () => {
+  it('【用户要求】2026-10-19 新鱼：开始捕捞时上一轮的新鱼归入「鱼」，这一轮捕到的放进「新鱼」；不提供加入信号库入口', async () => {
     const b = { ...SIGNAL, id: 'fish-BBB', symbol: 'BBBUSDT', timeMs: 456 };
     mocks.scan.mockImplementation(async o => { o.onSignal(b); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
     render(control());
@@ -166,14 +163,12 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(loadFishSignals()).toHaveLength(2);
     expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('AAAUSDT');
     expect(screen.getByTestId('fish-new-panel')).not.toHaveTextContent('BBBUSDT');
-    // 逐条加入当前新鱼，保持新鱼标记不进入信号库
-    fireEvent.click(within(screen.getByTestId('fish-new-panel')).getByRole('button',{name:'加入信号库'}));
-    await waitFor(() => expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(1));
-    const lib = JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!);
-    expect(lib[0].symbol).toBe('AAAUSDT');
-    expect(lib[0].freshCatch).toBeUndefined();
+    expect(within(screen.getByTestId('fish-new-panel')).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
+    expect(within(screen.getByTestId('fish-old-panel')).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
-  it('只列通过核实的交易所，重复币默认关闭；无币安盘面的外所信号仍可入库、评分但不能跳转',async()=>{
+  it('只列通过核实的交易所，重复币默认关闭；无币安盘面的外所信号仍可评分但不能跳转',async()=>{
     const foreign={...SIGNAL,id:'fish-gate-NEWUSDT-123',symbol:'NEWUSDT',exchange:'gate',binanceSymbol:null};
     localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([foreign]));
     const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));
@@ -195,8 +190,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(buttons[0]);expect(jump).not.toHaveBeenCalled();
     const row=within(library).getByText('NEWUSDT').closest('.group')!;
     fireEvent.click(within(row as HTMLElement).getByRole('radio',{name:'4 星'}));
-    fireEvent.click(within(row as HTMLElement).getByRole('button',{name:'加入信号库'}));
-    await waitFor(()=>expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)[0]).toMatchObject({exchange:'gate',symbol:'NEWUSDT',quality:4}));
+    expect(within(row as HTMLElement).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
+    expect(loadFishSignals()[0]).toMatchObject({exchange:'gate',symbol:'NEWUSDT',quality:4});
+    expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
 
   it('新鱼重复命中按交易所定位，只更新本家读数并保留本家评分',async()=>{

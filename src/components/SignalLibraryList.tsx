@@ -198,7 +198,6 @@ interface RowProps {
   chartUnavailable?: boolean;
   extraTitle?: string;
   algorithm?: string;
-  onAdd?: (id: string) => void;
   id: string;
   symbol: string;
   timeLabel: string;
@@ -229,7 +228,7 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, onAdd, algorithm, match, showMatch, processSignal,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
   const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
@@ -290,7 +289,7 @@ function SignalLibraryRowImpl({
           onChange={handleRate}
         />
       </span>
-      {showMatch ? <SignalMatchCell match={match}/> : processSignal ? <span className="flex min-w-0 items-center gap-3"><FishProcessButton signal={processSignal}/>{onAdd && <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button>}</span> : onAdd ? <button type="button" onClick={() => onAdd(id)} className="min-w-0 truncate text-left text-[10px] text-primary hover:underline">加入信号库</button> : <span aria-hidden/>}
+      {showMatch ? <SignalMatchCell match={match}/> : processSignal ? <FishProcessButton signal={processSignal}/> : <span aria-hidden/>}
       {/* 余量放在评分之后，评分才会紧贴兜底区 */}
       {/* 不可跳转：一枚图标，原因进 tooltip。放在最右、紧贴跳转箭头——
           它说的就是「这个箭头点不动」，挨着它才读得出因果；
@@ -338,7 +337,6 @@ interface Props {
   nested?: boolean;
   /** 「渔」的鱼：每行加「捕捞过程」入口。 */
   showProcess?: boolean;
-  onAdd?: (id: string) => void;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
   tradedDayIndex: Set<string>;
@@ -372,7 +370,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, onAdd, rowAlgorithm, nested = false, matches, showProcess = false,
+  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -553,7 +551,6 @@ function SignalLibraryListImpl({
         processSignal={showProcess ? sig : undefined}
         extraTitle={rowTitle?.(sig)}
         algorithm={rowAlgorithm?.(sig)}
-        onAdd={onAdd}
         symbol={sig.symbol}
         exchange={sig.exchange}
         market={sig.market}
