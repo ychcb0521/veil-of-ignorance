@@ -71,7 +71,11 @@ it('已有记录区间的卡不自动排队或取数，淡色刷新只手动重�
  fireEvent.change(screen.getByLabelText('算法 2 特征值'),{target:{value:'cba'}});
  await act(()=>new Promise(r=>setTimeout(r,1000)));
  expect(suggest).not.toHaveBeenCalled();expect(load).not.toHaveBeenCalled();expect(screen.queryByText(/建议排队中/)).toBeNull();
+ expect(screen.queryByTestId('fish-recorded-range-1')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'算法 1 的记录区间'}));
  expect(screen.getByTestId('fish-recorded-range-1')).toHaveTextContent('-0.0108802 ~ 0.0396005');
+ fireEvent.click(screen.getByRole('button',{name:'算法 1 的记录区间'}));
+ fireEvent.click(screen.getByRole('button',{name:'算法 2 的记录区间'}));
  expect(screen.getByTestId('fish-recorded-range-2')).toHaveTextContent('2.05893 ~ 7.73665');
  fireEvent.click(screen.getByRole('button',{name:'重新计算算法 2 的区间'}));
  await waitFor(()=>expect(suggest).toHaveBeenCalledTimes(1));

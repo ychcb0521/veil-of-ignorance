@@ -200,7 +200,7 @@ export function FishPanel(p: FishPanelProps) {
       </button>}
       {p.reconstruction&&<button type="button" className={`${faint} text-[10px]`} title={p.reconstruction.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'} disabled={running||probe.busy||!p.reconstruction.available} onClick={async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();}}>复原</button>}
     </div>
-    <div className="max-w-4xl space-y-1" data-testid="fish-algorithms">
+    <div className="max-w-2xl space-y-1" data-testid="fish-algorithms">
       <FishAlgorithmCard card={{id:'first',featureId:selected,enabled:firstEnabled,pref}} defs={defs} index={1} locked={running} canDelete={extraCards.length>0} onRecalculate={()=>void calculateSuggestion('manual')} recalculateDisabled={running||probe.busy||!p.onSuggest||!suggestionCompiled||!!suggestionCompiled.unavailable} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target==='first'} footer={<>
       {suggestion&&<span className="text-[10px] text-muted-foreground" data-testid="fish-suggestion" title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {suggestionStale?suggestion.samples.attempted:library.length} 条）{suggestionStale?(autoSuggesting?' · 更新中':' · 已过期'):''}</span>}
       {!suggestion&&suggestionProgress?.status==='running'&&suggestionRun.current?.target==='first'&&suggestionProgress&&<span className="text-[10px] text-muted-foreground/70" data-testid="fish-suggestion-auto">信号库建议计算中 {suggestionProgress.done} / {suggestionProgress.total||library.length}</span>}
@@ -211,7 +211,7 @@ export function FishPanel(p: FishPanelProps) {
     </div>
     <div className="flex flex-wrap items-center gap-2">
     <button type="button" className={btn} disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}>+ 算法</button>
-      {extraCards.length>0&&<label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">多重算法<select aria-label="多重算法合并方式" className="rounded border border-border/60 bg-background px-1 py-1 text-foreground" disabled={running} value={combination} onChange={e=>setCombination(e.target.value as 'and'|'or')}><option value="and">交集：同时满足</option><option value="or">并集：满足任一</option></select></label>}
+      {extraCards.length>0&&<label className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><select aria-label="多重算法合并方式" className="rounded border border-border/60 bg-background px-1 py-1 text-foreground" disabled={running} value={combination} onChange={e=>setCombination(e.target.value as 'and'|'or')}><option value="and">交集</option><option value="or">并集</option></select></label>}
     </div>
     <p className="break-words text-[11px] leading-relaxed text-muted-foreground" data-testid="fish-rule">{scanning&&x?.rule?x.rule:extraCards.length===0?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ')}</p>
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
