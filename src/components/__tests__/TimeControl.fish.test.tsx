@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.scan.mockImplementation(async o => { const p = { ...initialFishProgress(), cutoffMs: 123, total: 1, done: 1, status: 'complete' as const }; o.onSignal(SIGNAL); o.onProgress(p); return p; });
 });
 describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () => {
-  it('按钮紧邻信号库并互斥，评分/删除独立，逐条去重加入信号库且无批量入口，悬停有读数', async () => {
+  it('按钮紧邻信号库并互斥，评分/删除独立，逐条去重加入信号库且无批量入口，不显示快照悬停框', async () => {
     render(control());
     const fishButton = screen.getByRole('button',{name:/^渔/});
     expect(fishButton.previousElementSibling).toHaveTextContent('信号库');
@@ -37,8 +37,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(fishButton);
     fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     const panel = screen.getByTestId('fish-panel');
-    expect(within(panel).getByText('AAAUSDT').closest('.group')).toHaveAttribute('title',expect.stringContaining('0.35000000'));
-    expect(within(panel).getByText('AAAUSDT').closest('button')).toHaveAttribute('title',expect.stringContaining('0.35000000'));
+    expect(within(panel).getByText('AAAUSDT').closest('.group')).not.toHaveAttribute('title');
+    expect(within(panel).getByText('AAAUSDT').closest('button')).not.toHaveAttribute('title',expect.stringContaining('0.35000000'));
     fireEvent.click(within(panel).getByRole('radio',{name:'4 星'}));
     expect(loadFishSignals()[0].quality).toBe(4);
     expect(mocks.push).toHaveBeenLastCalledWith('fish-owner','fish_signals_v1',expect.any(Array));

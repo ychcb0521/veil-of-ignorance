@@ -2,7 +2,6 @@ import {fishAlgorithmShort,migrateFishSignal} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChevronDown, Database, Sparkles } from 'lucide-react';
 import { normalizeSignalQuality, signalMonthKey, sortSignalsBy, type SignalSortKey } from '@/lib/signalLibrary';
-import { fishSignalTitle } from '@/lib/fishSignals';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
 import { SignalLibraryList } from '@/components/SignalLibraryList';
 
@@ -83,7 +82,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       </div>
       {rows.length ? <div className="min-w-0 overflow-x-auto rounded border border-border/60"><div className="min-w-[44rem]">
         <SignalLibraryHeader sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowTitle={fishSignalTitle} rowAlgorithm={fishAlgorithmShort} nested />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} onAdd={p.onAdd} rowAlgorithm={fishAlgorithmShort} nested />
       </div></div> : <div className="rounded border border-dashed border-border/60 px-3 py-4 text-center text-[10px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;
