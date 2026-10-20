@@ -6,7 +6,7 @@ import { readPersistedStateRaw, subscribePersistedStateHydration } from '@/lib/p
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishReconstructionOptions, FishReconstructionProgress, FishReconstructionResult } from '@/lib/fish/reconstruction';
-import { readReconstructionCache, saveReconstructionCache, reconstructionCacheKey, type ReconstructionCard, type ReconstructionCache } from '@/lib/fish/reconstructionCache';
+import { readReconstructionCache, saveReconstructionCache, loadReconstructionCacheDb, saveReconstructionCacheDb, reconstructionCacheKey, type ReconstructionCard, type ReconstructionCache } from '@/lib/fish/reconstructionCache';
 
 const readCards = (): ReconstructionCard[] => {
   try {
@@ -20,6 +20,7 @@ export function useFishReconstruction(account: string | undefined, signals: read
   const defs = useFishFeatures();
   const [cards, setCards] = useState(readCards);
   const [saved, setSaved] = useState<{ account: string | undefined; cache: ReconstructionCache | null }>(() => ({ account, cache: readReconstructionCache(account) }));
+  const savedRef = useRef(saved); savedRef.current = saved;
   const [progress, setProgress] = useState<FishReconstructionProgress | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
@@ -55,6 +56,14 @@ export function useFishReconstruction(account: string | undefined, signals: read
     run.current?.abort(); run.current = null; setRunning(false); setProgress(null); setError(''); setWarning('');
     const cache = readReconstructionCache(account, key);
     setSaved(previous => ({ account, cache: cache ?? (previous.account === account ? previous.cache : readReconstructionCache(account)) }));
+    // IndexedDB 里的结果（大结果存在那里）异步补上：同一套设置的优先，其次最新一份（显示为已过期）
+    let alive = true;
+    void (async () => {
+      const exact = await loadReconstructionCacheDb(account, key), latest = exact ?? await loadReconstructionCacheDb(account);
+      if (!alive || !latest) return;
+      setSaved(previous => previous.account !== account ? previous : previous.cache?.key === key && !exact ? previous : !exact && previous.cache && previous.cache.result.createdAt >= latest.result.createdAt ? previous : { account, cache: latest });
+    })();
+    return () => { alive = false; };
   }, [account, key]);
   useEffect(() => () => { run.current?.abort(); }, []);
   const cancel = useCallback(() => { run.current?.abort(); setProgress(p => ({ status: 'cancelled', phase: p?.phase ?? 'loading', done: p?.done ?? 0, total: p?.total ?? 0, current: '' })); }, []);
@@ -62,7 +71,8 @@ export function useFishReconstruction(account: string | undefined, signals: read
     if (run.current || !execute) return;
     setError(''); setWarning('');
     if (config.error || !signals.length) { setError(config.error || '信号库为空'); return; }
-    const cached = readReconstructionCache(account, key);
+    // 打开时已从 IndexedDB 补读过；这里同步判断，不在开始前等数据库（避免重复点开始时并发两次）
+    const cached = readReconstructionCache(account, key) ?? (savedRef.current.account === account && savedRef.current.cache?.key === key ? savedRef.current.cache : null);
     if (cached) { setSaved({ account, cache: cached }); return; }
     const controller = new AbortController(); run.current = controller; setRunning(true); setProgress(null);
     const valid = () => run.current === controller && !controller.signal.aborted && current.current.account === account && current.current.key === key;
@@ -70,7 +80,7 @@ export function useFishReconstruction(account: string | undefined, signals: read
       const result = await execute({ plans: config.plans, signals: [...signals], signal: controller.signal, onProgress: p => { if (valid()) setProgress(p); } });
       if (!valid()) return;
       setSaved({ account, cache: { version: 1, key, result } });
-      if (!saveReconstructionCache(account, key, result)) setWarning('本机存储空间不足；本次结果可查看，刷新后需重新评估。');
+      if (!(await saveReconstructionCacheDb(account, key, result)) && !saveReconstructionCache(account, key, result)) setWarning('本机存储空间不足；本次结果可查看，刷新后需重新评估。');
     } catch (e) {
       if (run.current === controller) {
         if (controller.signal.aborted) setProgress(p => p ? { ...p, status: 'cancelled' } : null);
