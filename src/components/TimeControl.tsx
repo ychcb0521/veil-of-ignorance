@@ -15,7 +15,7 @@ import {
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
-import { AUDITED_EXCHANGES, type FishExchange } from '@/lib/fish/exchanges';
+import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel } from '@/components/FishPanel';
 import { SpeedSelector } from '@/components/SpeedSelector';
 import { SignalLibraryHeader } from '@/components/SignalLibraryHeader';
@@ -86,7 +86,7 @@ export function TimeControl({
   // 渔的捕捞时间记在这个标签页里（刷新不丢）：以前每次刷新都变回空 = 「现在」，换了截止时刻自己却看不出来
   const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
-  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: [...AUDITED_EXCHANGES], includeDuplicates: false });
+  const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);

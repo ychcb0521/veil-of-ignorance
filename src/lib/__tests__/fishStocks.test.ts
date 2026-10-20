@@ -65,11 +65,11 @@ describe('美股取数边界和安全',()=>{
  });
  function setup(gap=false){const crypto=market(),us=market(true),btc={...crypto,symbol:'BTCUSDT',instrument:'BTCUSDT',base:'BTC'};const candles=vi.fn(async(m,end,_sig,q)=>Array.from({length:q.count},(_,i)=>({openTime:end-(q.count-i)*FISH_STEP,open:99,close:i<q.count-5?99:101,high:102,low:98,volume:10,quoteVolume:1000,takerBuyQuoteVolume:500,takerBuyVolume:5})).filter((_,i)=>!gap||m.market!=='us_stock'||i!==q.count-10));const adapter:FishDataAdapter={exchange:'binance',list:async()=>[crypto,us],btc:()=>btc,candles,taker:async(_m,b)=>b};return {candles,scanner:new FishScanner(vi.fn(async()=>new Response(JSON.stringify({serverTime:cut+FISH_STEP}))) as typeof fetch,undefined,undefined,{binance:adapter})};}
  const settings={feature:{...CBI2_DEF,id:'close',formula:'C'},algorithm:{H:1/12,direction:'>' as const,threshold:100,constraints:[]},signal,onProgress:()=>{}};
- it('复用同一算法，币与股票分开统计；默认扫美股，关闭后不取美股',async()=>{
-  const f=setup(),found:TradeSignal[]=[];const run=await f.scanner.scan({...settings,onSignal:s=>found.push(s)});expect(run.counts.hit).toBe(2);expect(run.venues!.binance!.markets!.crypto!.counts.hit).toBe(1);expect(run.venues!.binance!.markets!.us_stock!.counts.hit).toBe(1);expect(found.find(s=>s.market)).toMatchObject({market:'us_stock',underlying:'COIN',exchange:'binance',binanceSymbol:null});expect(mergeFishSignals([],found)).toHaveLength(2);
-  f.candles.mockClear();const second=await f.scanner.scan({...settings,includeUsStocks:false,onSignal:()=>{}});expect(second.counts.hit).toBe(1);expect(f.candles.mock.calls.some(c=>c[0].market==='us_stock')).toBe(false);
+ it('复用同一算法，币与股票分开统计；勾选才扫美股，默认和关闭后都不取美股',async()=>{
+  const f=setup(),found:TradeSignal[]=[];const run=await f.scanner.scan({...settings,includeUsStocks:true,onSignal:s=>found.push(s)});expect(run.counts.hit).toBe(2);expect(run.venues!.binance!.markets!.crypto!.counts.hit).toBe(1);expect(run.venues!.binance!.markets!.us_stock!.counts.hit).toBe(1);expect(found.find(s=>s.market)).toMatchObject({market:'us_stock',underlying:'COIN',exchange:'binance',binanceSymbol:null});expect(mergeFishSignals([],found)).toHaveLength(2);
+  for(const includeUsStocks of [undefined,false]){f.candles.mockClear();const second=await f.scanner.scan({...settings,includeUsStocks,onSignal:()=>{}});expect(second.counts.hit).toBe(1);expect(f.candles.mock.calls.some(c=>c[0].market==='us_stock')).toBe(false);expect(second.venues?.binance?.markets?.us_stock).toBeUndefined();}
  });
  it('美股停盘导致中间缺根计缺口，整币跳过，不补数；同轮加密币照常',async()=>{
-  const f=setup(true),found:TradeSignal[]=[];const run=await f.scanner.scan({...settings,onSignal:s=>found.push(s)});expect(run.counts.gap).toBe(1);expect(run.venues!.binance!.markets!.us_stock!.counts.gap).toBe(1);expect(found).toHaveLength(1);expect(found[0].market).toBeUndefined();
+  const f=setup(true),found:TradeSignal[]=[];const run=await f.scanner.scan({...settings,includeUsStocks:true,onSignal:s=>found.push(s)});expect(run.counts.gap).toBe(1);expect(run.venues!.binance!.markets!.us_stock!.counts.gap).toBe(1);expect(found).toHaveLength(1);expect(found[0].market).toBeUndefined();
  });
 });

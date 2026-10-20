@@ -89,7 +89,7 @@ export function FishPanel(p: FishPanelProps) {
   useEffect(()=>{if(def&&selected!==def.id){setSelected(def.id);setPref(cleanPreference(readFishPreference(def.id)));}},[def?.id,selected]);
   const update=(next:FishPreference)=>{if(!def)return;setPref(next);saveFishPreference(def.id,next);setError('');};
   const [autoSuggesting,setAutoSuggesting]=useState(false);
-  const {exchanges,includeDuplicates,includeUsStocks=true}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=p.progress?.status==='running'||suggesting||!!p.reconstruction?.running;
+  const {exchanges,includeDuplicates,includeUsStocks=false}=p.selection,suggesting=suggestionProgress?.status==='running'&&!autoSuggesting,running=p.progress?.status==='running'||suggesting||!!p.reconstruction?.running;
   const compiled=useMemo(()=>{try{if(!def)throw new Error('Deep dig 里没有可用特征值');const plan=compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):NaN,constraints:[]});return {plan,error:plan.unavailable??''};}catch(e){return {plan:null,error:e instanceof Error?e.message:String(e)};}},[def,pref]);
   const multiple=useMemo(()=>{
     const plans=[];let error='';

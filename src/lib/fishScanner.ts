@@ -232,7 +232,7 @@ export class FishScanner {
     const needed=AUDITED_EXCHANGES.filter(e=>selected.includes(e)||(!settings.includeDuplicates&&EXCHANGE_PRIORITY.indexOf(e)<highest));
     const universes:Partial<Record<FishExchange,FishMarket[]>>={};
     await Promise.all(needed.map(async e=>{universes[e]=await this.adapters.get(e)!.list(signal);}));
-    return selected.reduce((n,e)=>n+selectFishMarkets(e,universes,!!settings.includeDuplicates).filter(m=>settings.includeUsStocks!==false||m.market!=='us_stock').length,0);
+    return selected.reduce((n,e)=>n+selectFishMarkets(e,universes,!!settings.includeDuplicates).filter(m=>settings.includeUsStocks===true||m.market!=='us_stock').length,0);
   }
   /**
    * 查单个币：用与捕捞完全相同的取数与判定，说清楚它在当前设置下为什么命中 / 没命中。
@@ -403,7 +403,7 @@ export class FishScanner {
       return this.scanIntersection(options);
     }
     if (this.running) throw new Error('扫描正在进行');
-    const { anchorMs, includeDuplicates = false, includeUsStocks = true } = options;
+    const { anchorMs, includeDuplicates = false, includeUsStocks = false } = options;
     let plan:FishProgram;
     try {plan=compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]});if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
