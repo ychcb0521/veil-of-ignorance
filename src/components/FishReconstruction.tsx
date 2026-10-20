@@ -1,4 +1,5 @@
-import { Fragment, useMemo } from 'react';
+import { Fragment, useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import type { FishReconstructionState } from '@/hooks/useFishReconstruction';
 import type { FishReconstructionResult } from '@/lib/fish/reconstruction';
 import { formatUTC8 } from '@/lib/timeFormat';
@@ -12,13 +13,18 @@ function MetricCells({ m }: { m: Metrics }) {
   return <><td>{rate(m.strictRate)}</td><td>{rate(m.looseRate)}</td><td>{number(m.noiseRate)}</td><td>{rate(m.precision)}</td><td>{rate(m.f1)}</td><td>{m.valid} / {m.total}</td></>;
 }
 function skipText(m: Metrics) { return Object.entries(m.skipped).filter(([, n]) => n).map(([k, n]) => `${reconstructionSkipLabels[k] ?? k} ${n}`).join(' · ') || '无'; }
+const OPEN_KEY = 'veil.fish.reconstruction.open';
 export function FishReconstructionResults({ state }: { state: FishReconstructionState }) {
   const { result, stale, progress, running, error, warning } = state;
   const ranked = useMemo(() => [...(result?.algorithms ?? [])].sort((a, b) => (b.test.f1 ?? -1) - (a.test.f1 ?? -1) || (a.test.noiseRate ?? Infinity) - (b.test.noiseRate ?? Infinity)), [result]);
+  // 【用户要求】2026-10-20「复原的这个表格的结果折得起来，在复原后面加个隐形的符号，放在里头」：
+  // 表格默认收起，「复原」后面一个很淡的箭头；点开 / 收起，这次浏览里记住。进度、报错照常显示在外面。
+  const [open, setOpenState] = useState(() => { try { return sessionStorage.getItem(OPEN_KEY) === '1'; } catch { return false; } });
+  const setOpen = (next: boolean) => { setOpenState(next); try { sessionStorage.setItem(OPEN_KEY, next ? '1' : '0'); } catch { /* 记不住只是下次要再点 */ } };
   if (!result && !running && !progress && !error && !warning) return null;
   return <section aria-label="复原结果" data-testid="fish-reconstruction-results" className="min-w-0 space-y-2 rounded-md border border-border/50 p-2.5 text-[11px]">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="font-medium">复原 {stale && <span className="text-muted-foreground" data-testid="fish-reconstruction-stale">· 已过期，需重新评估</span>}</span>
+      <span className="inline-flex items-center gap-1"><button type="button" aria-expanded={open} aria-controls="fish-reconstruction-table" aria-label={open ? '收起复原结果' : '展开复原结果'} title={open ? '收起' : '展开复原结果'} onClick={() => setOpen(!open)} className="group -mx-1 inline-flex items-center gap-1 rounded px-1 font-medium transition-colors hover:bg-muted/60">复原<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/30 transition-[transform,color] group-hover:text-muted-foreground ${open ? 'rotate-180' : ''}`} /></button>{stale && <span className="ml-0.5 text-muted-foreground" data-testid="fish-reconstruction-stale">· 已过期，需重新评估</span>}</span>
       <span className="text-[10px] text-muted-foreground">仅信号库 · 全部卡片 · 结果序列 · &gt; · 后 30% 验证</span>
       {result && <span className="text-[10px] text-muted-foreground/60" title="仅保存在本机，不改写信号">{formatUTC8(result.createdAt)} · 本机</span>}
     </div>
@@ -28,7 +34,7 @@ export function FishReconstructionResults({ state }: { state: FishReconstruction
     </div>}
     {!running && progress?.status === 'cancelled' && <p className="text-muted-foreground">复原已取消；未完成的结果不保存。</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}{warning && <p className="text-muted-foreground">{warning}</p>}
-    {result && <><div className={`overflow-x-auto ${stale ? 'opacity-50' : ''}`}>
+    {result && open && <div id="fish-reconstruction-table" className="space-y-2"><div className={`overflow-x-auto ${stale ? 'opacity-50' : ''}`}>
       <table className="w-full min-w-[740px] border-collapse text-left text-[10px] [&_td]:px-2 [&_td]:py-2 [&_th]:px-2 [&_th]:py-1.5">
         <thead className="border-b border-border/50 text-muted-foreground"><tr>{columns.map(c => <th className="whitespace-nowrap font-normal" key={c}>{c}</th>)}</tr></thead>
         <tbody>{ranked.map((a, i) => <Fragment key={`${a.key}:${i}`}>
@@ -46,7 +52,7 @@ export function FishReconstructionResults({ state }: { state: FishReconstruction
           </details></td></tr>
         </Fragment>)}</tbody>
       </table>
-    </div><p className="text-[10px] text-muted-foreground/70">门槛只在前 70% 选择；表中指标只用后 30%。每条信号仅使用其时刻前已收盘的 K 线。</p></>}
+    </div><p className="text-[10px] text-muted-foreground/70">门槛只在前 70% 选择；表中指标只用后 30%。每条信号仅使用其时刻前已收盘的 K 线。</p></div>}
   </section>;
 }
 export interface SignalReconstructionMatch { parts: { label: string; loose: boolean }[]; title: string; stale: boolean }

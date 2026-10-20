@@ -1,5 +1,5 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FishReconstructionResults, reconstructionMatches, SignalMatchCell } from '@/components/FishReconstruction';
 import type { FishReconstructionState } from '@/hooks/useFishReconstruction';
 import type { FishReconstructionResult } from '@/lib/fish/reconstruction';
@@ -23,6 +23,7 @@ function state(result: FishReconstructionResult | null = fixture(), patch: Parti
 }
 afterEach(cleanup);
 
+beforeEach(() => sessionStorage.clear());
 describe('reconstruction report and signal matching', () => {
   it('strict and loose matches use distinct tones and expose readings plus close-time starts', () => {
     const matches = reconstructionMatches(fixture(), 'best', false);
@@ -55,8 +56,23 @@ describe('reconstruction report and signal matching', () => {
     expect(screen.getByTestId('signal-reconstruction-match')).toHaveAttribute('title', expect.stringContaining('需重新评估'));
   });
 
+  // 【用户要求】2026-10-20「复原的这个表格的结果折得起来，在复原后面加个隐形的符号」
+  it('table is folded by default behind a faint toggle after 复原; opening is remembered for the session', () => {
+    const view = render(<FishReconstructionResults state={state()}/>);
+    expect(screen.queryAllByTestId('fish-reconstruction-row')).toHaveLength(0);
+    const toggle = screen.getByRole('button', { name: '展开复原结果' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false'); expect(toggle).toHaveTextContent('复原');
+    fireEvent.click(toggle);
+    expect(screen.getAllByTestId('fish-reconstruction-row').length).toBeGreaterThan(0);
+    view.unmount(); render(<FishReconstructionResults state={state()}/>);
+    expect(screen.getAllByTestId('fish-reconstruction-row').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: '收起复原结果' }));
+    expect(screen.queryAllByTestId('fish-reconstruction-row')).toHaveLength(0);
+  });
+
   it('ranking and headline metrics use held-out F1 rather than training F1', () => {
     render(<FishReconstructionResults state={state()}/>);
+    fireEvent.click(screen.getByRole('button', { name: '展开复原结果' }));
     const rows = screen.getAllByTestId('fish-reconstruction-row');
     expect(within(rows[0]).getByText('CBA')).toBeVisible(); expect(within(rows[0]).getByText('最可能')).toBeVisible();
     expect(within(rows[0]).getByText('80.0%')).toBeVisible(); expect(within(rows[0]).getByText('3 / 4')).toBeVisible();
