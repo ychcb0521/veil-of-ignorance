@@ -65,3 +65,19 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(within(main).queryByText('OLDUSDT')).toBeNull(); expect(within(main).queryByText('NEWUSDT')).toBeNull();
   expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toEqual(library);
 }, 30000);
+
+// 【用户要求】2026-10-19「匹配之后为何还是这样」：「匹配」下拉只选门槛口径、不计算；信号库里直接给出复原入口与进度
+it('信号库没复原过：写「尚未复原」并给出「复原」按钮，点了就算，算完匹配列有内容', async () => {
+  render(<TimeControl status="paused" currentSimulatedTime={time} speed={1} onStart={() => {}} onPause={() => {}} onResume={() => {}} onStop={() => {}} onSetSpeed={() => {}} onJumpToSignal={vi.fn(async () => ({ ok: true as const }))}/>);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^信号库/ })); });
+  const main = screen.getByTestId('signal-library-panel');
+  expect(within(main).getByText('尚未复原')).toBeVisible();
+  fireEvent.change(within(main).getByLabelText('匹配门槛'), { target: { value: 'current' } });
+  expect(mocks.reconstruct).not.toHaveBeenCalled();
+  fireEvent.click(within(main).getByTestId('library-reconstruction-start'));
+  await waitFor(() => expect(mocks.reconstruct).toHaveBeenCalledTimes(1));
+  expect((mocks.reconstruct.mock.calls[0][0] as FishReconstructionOptions).signals).toEqual(library);
+  fireEvent.change(within(main).getByLabelText('匹配门槛'), { target: { value: 'best' } });
+  await waitFor(() => expect(within(main).getAllByTestId('signal-reconstruction-match')[0]).toHaveTextContent('LIBRARY > 0.023'));
+  expect(within(main).queryByText('尚未复原')).toBeNull();
+}, 30000);
