@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { SignalTurnoverButton } from './SignalTurnover';
 import {
   Play, Pause, Square, Clock, BookmarkX,
   Database, ChevronDown, Upload, Download, Plus, Trash2,
@@ -575,6 +576,9 @@ export function TimeControl({
                 >
                   <Download className="h-3 w-3" />
                 </button>
+              )}
+              {signals.length > 0 && (
+                <SignalTurnoverButton signals={signals} run={fish.turnover} busyReason={fish.progress?.status === 'running' || reconstruction.running ? '捕捞或复原进行中，结束后再统计' : undefined} />
               )}
               {signalAuditProgress && (
                 <span

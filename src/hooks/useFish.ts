@@ -103,6 +103,11 @@ export function useFish(userId: string | undefined) {
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.suggest(options);
   },[]);
+  /** 信号库成交额统计（不入库）：与建议区间同一个取数器，捕捞时不能同时跑。 */
+  const turnover=useCallback(async(options:import('@/lib/signalTurnover').SignalTurnoverOptions)=>{
+    scanner.current??=pageScanner??=new FishScanner();
+    return scanner.current.turnover(options);
+  },[]);
   const reconstruct=useCallback(async(options:import('@/lib/fish/reconstruction').FishReconstructionOptions)=>{
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.reconstruct(options);
@@ -139,5 +144,5 @@ export function useFish(userId: string | undefined) {
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans };
+  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover };
 }

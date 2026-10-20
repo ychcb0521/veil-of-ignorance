@@ -1,6 +1,7 @@
 import { saveFishRound, summarizeFishRound, type FishRoundRow } from '@/lib/fish/roundSummary';
 import { fishCombinationKey, combineFishResults, sharedFishAdapters, type FishMemberResult, type FishAlgorithmInput, type FishCombination } from '@/lib/fish/intersection';
-import {collectFishSuggestion,type FishSuggestionOptions} from '@/lib/fish/suggestions';
+import {collectFishSuggestion,type FishSuggestionOptions,type FishSampleRow} from '@/lib/fish/suggestions';
+import {collectSignalTurnover,TURNOVER_BARS,TURNOVER_STEP,type SignalTurnoverOptions} from '@/lib/signalTurnover';
 import {collectFishReconstruction,type FishReconstructionOptions} from '@/lib/fish/reconstruction';
 import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import { fishRetentionReason } from '@/lib/fish/retention';
@@ -74,6 +75,16 @@ export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown
  * 多重算法一轮的逐币结论：扫完后交给页面保存，切换「交集 / 并集」时直接用它重新合并，不用重扫。
  * 【用户要求】2026-10-20「并集这里捕捉完之后，我希望当我点击交集的时候，可以灵活切换到交集的结果」。
  */
+/** 信号库里的一条（标的 + 交易所 + 是否美股）对应到那家的合约；币安按名字直接取，其它家查合约列表（每家只拉一次）。 */
+async function sampleMarket(row:FishSampleRow,exchange:FishExchange,adapter:FishDataAdapter,lists:Map<FishExchange,Promise<FishMarket[]>>,signal:AbortSignal):Promise<FishMarket>{
+  if(exchange==='binance'&&row.market!=='us_stock')return {symbol:row.symbol,instrument:row.symbol,base:row.symbol.replace(/USDT$/,''),multiplier:1};
+  let list=lists.get(exchange);if(!list){list=adapter.list(signal);lists.set(exchange,list);list.catch(()=>lists.delete(exchange));}
+  const markets=await list,code=(row.underlying||row.symbol.replace(/USDT$/,'')).toUpperCase();
+  const market=markets.find(m=>m.symbol===row.symbol&&(row.market==='us_stock')===(m.market==='us_stock'))
+    ??(row.market==='us_stock'?markets.find(m=>m.market==='us_stock'&&(m.underlying||m.base).toUpperCase()===code):undefined);
+  if(!market)throw new FishError(`${EXCHANGE_NAMES[exchange]}现在没有 ${row.symbol} 这个合约`,'skipped');
+  return market;
+}
 export interface FishCombinationRound { plans: FishProgram[]; results: Map<string, Map<number, FishMemberResult>>; anchorMs: number; complete: boolean; memberHits: number[] }
 /** Definition changes must not reuse readings from an older formula. */
 export const fishSelectionKey = (p: FishProgram): string => JSON.stringify([p.algorithmKey,definitionKey(p.def),p.scale,p.unit]);
@@ -192,15 +203,7 @@ export class FishScanner {
       const query={interval:intervalOf(plan.def),count:plan.N};
       const retention=fishRetentionReason(exchange,cut,this.latestServerTime,plan.N,plan.step,plan.usesTaker,query.interval);
       if(retention)throw new FishError(`${EXCHANGE_NAMES[exchange]}：${retention}`,'skipped');
-      let market:FishMarket|undefined;
-      if(exchange==='binance'&&row.market!=='us_stock')market={symbol:row.symbol,instrument:row.symbol,base:row.symbol.replace(/USDT$/,''),multiplier:1};
-      else{
-        let list=lists.get(exchange);if(!list){list=adapter.list(signal);lists.set(exchange,list);list.catch(()=>lists.delete(exchange));}
-        const markets=await list,code=(row.underlying||row.symbol.replace(/USDT$/,'')).toUpperCase();
-        market=markets.find(m=>m.symbol===row.symbol&&(row.market==='us_stock')===(m.market==='us_stock'))
-          ??(row.market==='us_stock'?markets.find(m=>m.market==='us_stock'&&(m.underlying||m.base).toUpperCase()===code):undefined);
-        if(!market)throw new FishError(`${EXCHANGE_NAMES[exchange]}现在没有 ${row.symbol} 这个合约`,'skipped');
-      }
+      const market=await sampleMarket(row,exchange,adapter,lists,signal);
       const raw=await adapter.candles(market,cut,signal,query);validateFishBars(raw,cut,plan.N,plan.step);
       const bars=plan.usesTaker?await adapter.taker(market,raw,signal,query):raw;
       if(bars.some(b=>plan.compiled.usesAmounts&&(b.quoteVolume==null||(plan.usesTaker&&b.takerBuyQuoteVolume==null))))throw new FishError('成交额读数不全','readings');
@@ -211,6 +214,31 @@ export class FishScanner {
       validateFishBars(btc,cut,plan.N,plan.step);const closes=new Map(btc.map(b=>[b.openTime,b.close]));
       if(btc.some(b=>!(b.close>0)))throw new FishError('BTC参考收盘价无效','readings');
       return bars.map(b=>({...b,refClose:closes.get(b.openTime)}));
+    });}finally{this.running=false;}
+  }
+  /**
+   * 信号库每个信号前 24 小时的成交额（USDT），与「建议区间」同一套按交易所取数（signalTurnover.ts）。
+   * 【用户要求】2026-10-20「检查历史信号库中所有信号在当时信号出现时的成交量，汇总看区间范围，用 USDT」。
+   */
+  async turnover(options:SignalTurnoverOptions) {
+    if(this.running)throw new Error('捕捞或建议计算正在进行');
+    this.running=true;
+    let clock:Promise<unknown>|undefined;
+    const lists=new Map<FishExchange,Promise<FishMarket[]>>();
+    try{return await collectSignalTurnover(options,async(row,cut,signal)=>{
+      if(!this.latestServerTime||cut>this.latestServerTime){
+        clock??=this.requests.get('binance')!('time',1,signal);
+        const response=await clock as {serverTime?:number};
+        if(!Number.isFinite(response.serverTime)||response.serverTime!<=0)throw new FishError('币安服务器时间无效','failed');
+        this.latestServerTime=Math.max(this.latestServerTime,response.serverTime!);
+        if(cut>this.latestServerTime)throw new FishError('信号时间晚于币安服务器时间','readings');
+      }
+      const exchange:FishExchange=row.exchange??'binance',adapter=this.adapters.get(exchange);
+      if(!adapter)throw new FishError(`不支持的交易所 ${exchange}`,'skipped');
+      const retention=fishRetentionReason(exchange,cut,this.latestServerTime,TURNOVER_BARS,TURNOVER_STEP,false,'5m');
+      if(retention)throw new FishError(`${EXCHANGE_NAMES[exchange]}：${retention}`,'skipped');
+      const market=await sampleMarket(row,exchange,adapter,lists,signal);
+      return adapter.candles(market,cut,signal,{interval:'5m',count:TURNOVER_BARS,allowPartial:true});
     });}finally{this.running=false;}
   }
   /** Local historical reconstruction; no signal record is changed or saved by the scanner. */

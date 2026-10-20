@@ -12,6 +12,7 @@ const SRC = join(process.cwd(), 'src');
 
 /** 已知不需要同步的写入点，附豁免理由。 */
 const EXEMPT: Record<string, string> = {
+  'lib/signalTurnover.ts': '用户要求统计信号库每个信号前 24 小时的 USDT 成交额：结果是可重算的统计，只存浏览器本机（按账号分区、只留最新一份），不改信号库、不上传云端；使用独立 veil:signal-turnover 键，不进入交易状态同步',
   'lib/fish/roundSummary.ts': '用户要求「捕捞过程」：每轮捕捞的逐币结论摘要只在浏览器本机保存（按账号分区、只留最近 40 轮），是可重算的说明，不改鱼的记录、不上传云端；使用独立 veil:fish-rounds 键，不进入交易状态同步。',
   'lib/fish/reconstructionCache.ts': '用户要求复原结果仅在浏览器本机保存：按账号、算法定义和信号集隔离的可重算分析缓存，不改信号记录、不上传云端；使用独立 veil:fish-reconstruction 键，不进入交易状态同步。',
   'lib/notificationCenter.ts': '历史消息与「弹出提示」开关：本机的界面日志与显示偏好，封顶 300 条，按用户前缀分区；不属于交易状态，账户资产不由它推导，不需要跨设备同步。',
