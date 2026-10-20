@@ -64,3 +64,16 @@ export class FishRequestPool {
     try{return await task();}finally{this.active--;this.waiters.shift()?.();}
   }
 }
+
+/**
+ * 「鱼」的最低成交额：截止前 24 小时的 USDT 成交额不得低于 1000 万。不够的币直接跳过、不判定，成不了鱼。
+ * 【用户要求】2026-10-20「渔部分，鱼的最低交易量标准是 24h 内不得低于 1000w USDT」。
+ */
+export const FISH_MIN_TURNOVER = 10_000_000;
+/** 截止前 24 小时的 USDT 成交额（所给 K 线里 openTime ∈ [截止 − 24h, 截止) 的成交额之和）；有一根缺成交额就返回 null。 */
+export function fishTurnover24h(bars: readonly ResearchBar[], cutoffMs: number): number | null {
+  let sum = 0;
+  for (const b of bars) if (b.openTime >= cutoffMs - 86_400_000 && b.openTime < cutoffMs) { if (b.quoteVolume == null || !Number.isFinite(b.quoteVolume)) return null; sum += b.quoteVolume; }
+  return sum;
+}
+export const formatTurnoverWan = (v: number) => `${Number((v / 1e4).toPrecision(4))} 万`;

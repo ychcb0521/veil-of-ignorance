@@ -6,6 +6,7 @@ import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
+import {FISH_MIN_TURNOVER} from '@/lib/fish/shared';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -29,7 +30,7 @@ export interface FishPanelProps {
   /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
   roundPlans?: readonly FishProgram[] | null;
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
-  onDiagnose?: (options: { symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
+  onDiagnose?: (options: { minTurnover?: number; symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
   signals: TradeSignal[]; progress: FishProgress | null;
@@ -121,7 +122,7 @@ export function FishPanel(p: FishPanelProps) {
     try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
     if(multiple.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[multiple.error||'算法设置有误']}}));return;}
     setProbe(v=>({...v,busy:true,result:null}));
-    try{const result=await p.onDiagnose({symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    try{const result=await p.onDiagnose({minTurnover:FISH_MIN_TURNOVER,symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -192,7 +193,7 @@ export function FishPanel(p: FishPanelProps) {
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
-    p.onStart({...settings,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    p.onStart({...settings,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,minTurnover:FISH_MIN_TURNOVER});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const x = p.progress;
@@ -209,7 +210,7 @@ export function FishPanel(p: FishPanelProps) {
         <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
         <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
         <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根只跳过那一家（写明原因），全部取不到才整轮中止。</p>
-        <p>稳定币（USDT、USDC、FDUSD、USDe、DAI 等，价格几乎不动、没有短线交易价值）始终排除，不取数也不计入总数。默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重。设置只保存在本机，捕捞开始后锁定。</p>
+        <p>稳定币（USDT、USDC、FDUSD、USDe、DAI 等，价格几乎不动、没有短线交易价值）始终排除，不取数也不计入总数。截止前 24 小时 USDT 成交额低于 1000 万的币跳过、不判定，成不了鱼。默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重。设置只保存在本机，捕捞开始后锁定。</p>
         {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
       {suggestionProgress&&<p role="status">建议{suggestionProgress.status==='running'?'计算中':suggestionProgress.status==='cancelled'?'已取消':suggestionProgress.status==='aborted'?'已中止':'已完成'} · {suggestionProgress.phase==='signals'?'信号样本':'随机对照'} · {suggestionProgress.done} / {suggestionProgress.total} {suggestionProgress.current}</p>}
@@ -232,7 +233,7 @@ export function FishPanel(p: FishPanelProps) {
         </div>
       </div>
       {x && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2.5 text-[11px]">
-        <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`).join('；')}>
+        <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={[...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.thin?[`24h 成交额不足 1000 万、跳过 ${x.thin} 个`]:[])].join('；')||undefined}>
           <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
           <span className="text-muted-foreground/40">·</span>
           <span className="text-muted-foreground">命中 <span className="font-mono text-[12px] font-semibold tabular-nums text-primary">{x.counts.hit}</span></span>
