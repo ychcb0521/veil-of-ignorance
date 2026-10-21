@@ -32,6 +32,8 @@ export interface FishPanelProps {
   hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
   onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[], plans?: readonly FishProgram[]) => boolean;
+  /** 捕捞中切换交集 / 并集（2026-10-21「捕捞运行的过程中，我也可以灵活切换到并集」）。 */
+  onLiveCombination?: (mode: 'and' | 'or') => boolean;
   /** 新鱼邮件提醒（收件邮箱可添加多个）；不给就不显示邮件入口。 */
   notify?: FishNotify;
   /** 定时自动捕捞（手动 / 自动 + 间隔）；不给就只有手动。 */
@@ -231,7 +233,7 @@ export function FishPanel(p: FishPanelProps) {
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
             <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
-            <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼」；不手动删除就一直保留。捕完调严阈值、切换交集 / 并集当场重算，不用重扫。</li>
+            <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（新鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
           </ol></section>
         {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${plan?.settings.direction??'>'} ${x.threshold??.3}`:''}</p>}
@@ -328,7 +330,7 @@ export function FishPanel(p: FishPanelProps) {
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/50 bg-muted/20 px-2 py-1.5">
         <button type="button" aria-label="+ 算法" title="添加一个算法（最多 6 个）" className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
         {extraCards.length>0&&<div role="radiogroup" aria-label="多重算法合并方式" className="inline-flex h-6 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[10.5px]">
-          {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running} onClick={()=>setCombination(value)} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}
+          {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running&&!(scanning&&p.onLiveCombination)} onClick={()=>{if(value===combination)return;setCombination(value);if(scanning)p.onLiveCombination?.(value);}} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}
         </div>}
         <p className="min-w-0 flex-1 truncate pl-1 text-[10.5px] tabular-nums text-muted-foreground" data-testid="fish-rule" title={ruleText}>{ruleText}</p>
       </div>

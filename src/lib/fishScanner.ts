@@ -163,7 +163,12 @@ export function saveFishCombinationRound(round: FishCombinationRound, mode: Fish
   const summary = summarizeFishRound(rows, { algorithmKey: fishCombinationKey(plans, mode), cutoffMs: Math.floor(anchorMs / plans[0].step) * plans[0].step, anchorMs, direction: '>', threshold: NaN, scale: 1, unit: '', partial: !round.complete });
   saveFishRound({ ...summary, combination: mode, cutoffs: plans.map(p => Math.floor(anchorMs / p.step) * p.step), members: plans.map((p, i) => ({ algorithmKey: p.algorithmKey, hits: round.memberHits[i] ?? 0 })) });
 }
-type ScanOptions = FishScanSettings & { onRound?: (round: FishCombinationRound) => void; onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
+type ScanOptions = FishScanSettings & {
+  /** 捕捞中可改的交集 / 并集（2026-10-21「捕捞运行的过程中，我也可以灵活切换到并集」）：每判完一个币读一次当前值。 */
+  combinationRef?: { current: FishCombination };
+  /** 多重算法开扫时交出本轮逐币结论（Map 随扫描逐步填满），捕捞中切换组合时据此当场重排。 */
+  onLiveRound?: (round: FishCombinationRound) => void;
+  onRound?: (round: FishCombinationRound) => void; onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   private running = false;
@@ -373,7 +378,8 @@ export class FishScanner {
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');
       const anchorMs=options.anchorMs??clock.serverTime;
-      const mode:FishCombination=options.combination??'and';
+      const startMode:FishCombination=options.combination??'and',currentMode=()=>options.combinationRef?.current??startMode;
+      let mode:FishCombination=currentMode();
       const selected=options.retainMembers?selectFishRound({plans,results,anchorMs,complete:false,memberHits:[]},options.displayAlgorithmKeys??plans.map(fishSelectionKey))!:null;
       const displayPlans=selected?.plans??plans;
       const displayIndices=displayPlans.map(p=>plans.indexOf(p));
@@ -389,6 +395,7 @@ export class FishScanner {
       }
       const adapters=sharedFishAdapters(this.adapters,plans,anchorMs,options.retainMembers?(exchange,p)=>!p.unavailable&&!fishRetentionReason(exchange,Math.floor(anchorMs/p.step)*p.step,clock.serverTime,p.N,p.step,p.usesTaker,intervalOf(p.def)):undefined);
       const publish=()=>{
+        syncMode();
         const base=states[0];if(!base)return;
         Object.assign(progress,base,{anchorMs,rule:displayPlans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(mode==='or'?' 或 ':' 且 '),algorithmHits:displayIndices.map(i=>states[i]?.counts.hit??0),counts:{...base.counts,hit:emitted.size},status:'running'});
         // 各算法的币数可能不同（某家在某个算法里整家跳过）：扫完的算法按「已完成」计，进度才能走到头
@@ -401,7 +408,11 @@ export class FishScanner {
       // 【用户要求】2026-10-20「交集这里还是有问题…合并到一起却捕捉不到」：一个币的各算法结论到齐就当场合并、当场出信号，
       // 不再等全部扫完——中途取消或某个算法扫失败，已经到齐的币照样保留（与单算法边扫边出一致）
       const decided=new Set<string>();
+      // 捕捞中改了交集 / 并集：已判完的币按新组合重算「已出信号」的集合（命中数随之更新），之后的币直接按新组合出
+      const syncMode=()=>{const m=currentMode();if(m===mode)return;mode=m;emitted.clear();for(const key of decided){const r=combineFishResults(displayIndices.map(i=>results.get(key)?.get(i)),displayPlans,mode);if(r.signal)emitted.add(key);}};
+      options.onLiveRound?.({plans,results,anchorMs,complete:false,memberHits:[]});
       const settle=(key:string,members:Map<number,FishMemberResult>)=>{
+        syncMode();
         decided.add(key);
         const result=combineFishResults(displayIndices.map(i=>members.get(i)),displayPlans,mode);
         if(displayPlans.length&&result.signal&&!emitted.has(key)){emitted.add(key);options.onSignal(result.signal);}
@@ -415,6 +426,7 @@ export class FishScanner {
           if(members.size===plans.length&&!decided.has(key)&&!options.signal.aborted){settle(key,members);publish();}
         }});
       }));
+      syncMode();
       const intersectionCounts={...initialFishProgress().counts};
       for(const [key,members] of results){
         // 交集要每个算法都有结论（缺了就是那个算法这个币没取到数，不进交集）；

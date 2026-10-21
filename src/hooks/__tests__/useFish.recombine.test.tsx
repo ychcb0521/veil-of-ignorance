@@ -134,3 +134,21 @@ it('面板选交集时新鱼只有交集结果，邮件那张表仍是本轮并�
  expect(onCaught.mock.calls[0][1].every((s:any)=>s.fish.combination==='or')).toBe(true);
  expect(result.current.unionFish().map(s=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
 });
+// 【用户要求】2026-10-21「我希望捕捞运行的过程中，我也可以灵活切换到并集」
+it('捕捞中切换交集 / 并集：已判完的当场重排，之后的按新组合出，扫完以最后选的为准；切下来的鱼留在「鱼」里',async()=>{
+ let release!:()=>void;gate=new Promise<void>(r=>{release=r;});
+ const {result}=renderHook(()=>useFish(undefined));let run!:Promise<void>;
+ const keysNow=keys;
+ act(()=>{run=result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'and',anchorMs:cut,includeDuplicates:true,retainMembers:true,displayAlgorithmKeys:keysNow});});
+ const fresh=()=>result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort();
+ await waitFor(()=>expect(fresh()).toEqual(['AAAUSDT']));expect(result.current.progress?.status).toBe('running');
+ let ok=false;act(()=>{ok=result.current.switchLive('or');});expect(ok).toBe(true);
+ expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.progress?.rule).toContain(' 或 ');expect(result.current.progress?.counts.hit).toBe(2);
+ act(()=>{result.current.switchLive('and');});expect(fresh()).toEqual(['AAAUSDT']);
+ expect(result.current.signals.some(s=>s.symbol==='EEEUSDT'&&!s.freshCatch)).toBe(true);
+ act(()=>{result.current.switchLive('or');});
+ await act(async()=>{release();await run;});
+ expect(result.current.progress?.status).toBe('complete');expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.progress?.rule).toContain(' 或 ');
+ // 没在捕捞时不处理（交给 recombine）
+ expect(result.current.switchLive('and')).toBe(false);
+});

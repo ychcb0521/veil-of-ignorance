@@ -53,6 +53,9 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const [roundPlans,setRoundPlans]=useState<FishProgram[]|null>(null);
   const generation=useRef(0);
   const edits=useRef(new Map<string,{signal?:TradeSignal;deleted?:boolean}>());
+  // 捕捞中可改的交集 / 并集，以及本轮逐币结论（扫描时逐步填满）
+  const combinationRef=useRef<FishCombination>('and');
+  const liveRef=useRef<{round:FishCombinationRound;keys?:readonly string[]}|null>(null);
   const progressRef=useRef(progress);progressRef.current=progress;
   const persist=useCallback(()=>{const r=roundRef.current,owner=ownerRef.current,version=generation.current;if(r)void saveFishSession(owner,{...r,added:[...writesRef.current.added],refreshed:[...writesRef.current.refreshed],edits:[...edits.current],progress:progressRef.current}).catch(()=>{if(owner===ownerRef.current&&version===generation.current)setProgress(p=>p?{...p,notice:'本机结果保存失败，刷新后需要重新捕捞'}:p);});},[]);
   const commit = useCallback((input: TradeSignal[]) => {
@@ -87,20 +90,22 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     if (signalsRef.current.some(s => s.freshCatch)) commit(signalsRef.current.map(withoutFresh));
     writesRef.current = emptyWrites(); roundRef.current = null;
     scanner.current ??= pageScanner ??= new FishScanner();
+    combinationRef.current = settings.combination ?? 'and'; liveRef.current = null;
     const mine = new AbortController(); controller.current = mine;
     const owner = ownerRef.current;
     const valid = () => controller.current === mine && ownerRef.current === owner;
     try {
-      await scanner.current.scan({ ...settings, signal: mine.signal,
+      await scanner.current.scan({ ...settings, signal: mine.signal, combinationRef,
+        onLiveRound: round => { if (valid()) liveRef.current = { round, keys: settings.displayAlgorithmKeys }; },
         onProgress: value => { if (valid()) {progressRef.current=value;setProgress(value);} },
         onSignal: signal => {
           if (valid() && !mine.signal.aborted) { const next = applyCatch(signalsRef.current, signal, writesRef.current); if (next) commit(next); }
         },
-        onRound: round => { if (valid()) {roundRef.current = { data: round, mode: settings.combination ?? 'and',keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },
+        onRound: round => { if (valid()) {roundRef.current = { data: round, mode: combinationRef.current,keys:settings.retainMembers?['pending']:round.plans.map(fishSelectionKey) };setHasRound(true);setRoundPlans(round.plans);} },
       });
     } catch (error) {
       if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
-    } finally { if (controller.current === mine) {controller.current = null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(settings.combination??'and',settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
+    } finally { if (controller.current === mine) {controller.current = null;liveRef.current=null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(combinationRef.current,settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
       // 每轮结束把新鱼列表交给邮件提醒（有没有变化由提醒那边比对上一封）；切换交集 / 并集、调严阈值不会走到这里
       if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s))),mail=unionRef.current();if(caught.length||mail.length)onCaughtRef.current?.(caught,mail);}
     } }
@@ -155,6 +160,29 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   }, [persist]);
   recombineRef.current=recombine;
   /**
+   * 捕捞中切换交集 / 并集：之后判完的币按新组合出；已判完的当场按新组合重排「新鱼」（本轮刚进来、新组合不要的移进「鱼」，不丢）。
+   * 【用户要求】2026-10-21「我希望捕捞运行的过程中，我也可以灵活切换到并集」。没在捕捞时返回 false（由 recombine 处理）。
+   */
+  const switchLive = useCallback((mode: FishCombination): boolean => {
+    if (!controller.current) return false;
+    combinationRef.current = mode;
+    const live = liveRef.current;
+    if (!live) return true;
+    const picked = (live.keys && selectFishRound(live.round, live.keys)) || live.round;
+    const undo = writesRef.current;
+    let list = signalsRef.current.map(s => {const k=fishDedupKey(s);if(undo.added.has(k))return withoutFresh(s);const old=undo.refreshed.get(k);return old?{...old,quality:s.quality}:s;});
+    const writes = emptyWrites();
+    const combined = combineFishRound(picked, mode).signals;
+    for (const raw of combined) { if (edits.current.get(fishDedupKey(raw))?.deleted) continue; const next = applyCatch(list, raw, writes); if (next) list = next; }
+    writesRef.current = writes;
+    list = collapseVisibleFish(list);
+    signalsRef.current = list; setSignals(list); saveFishSignals(list, ownerRef.current ?? null);
+    // 规则文字与命中数当场换过来（扫描下一次报进度时也会按新组合算）
+    const prev = progressRef.current;
+    if (prev) { const next = { ...prev, rule: prev.rule?.split(mode === 'or' ? ' 且 ' : ' 或 ').join(mode === 'or' ? ' 或 ' : ' 且 '), counts: { ...prev.counts, hit: combined.length } }; progressRef.current = next; setProgress(next); }
+    return true;
+  }, []);
+  /**
    * 邮件用的鱼：本轮所选算法的并集（任一算法命中就算），不管面板上选的是交集还是并集；没有本轮结果时用「新鱼」列表。
    * 【用户要求】2026-10-21「我希望发邮件时，默认为并集里的鱼」。用户删过的不发；整行显示相同的只留一条。
    */
@@ -181,5 +209,5 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
 }

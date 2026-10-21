@@ -4,6 +4,7 @@ import {fireEvent,render,screen,cleanup,within} from '@testing-library/react';
 import {FishPanel} from '@/components/FishPanel';
 import {CBI2_DEF} from '@/lib/deepDig/features';
 import {saveFishPreference} from '@/lib/fish/preferences';
+import {initialFishProgress} from '@/lib/fishScanner';
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>[CBI2_DEF]}));
 const start=vi.fn(),diagnose=vi.fn(async(_o:any)=>({outcome:'hit' as const,lines:['ok']}));
 const panel=()=><FishPanel onDiagnose={diagnose} signals={[]} progress={null} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>;
@@ -24,4 +25,15 @@ it('删除算法收在每张卡的「…」里：卡片上不再有单独的 ×�
  fireEvent.click(screen.getByRole('button',{name:'算法 2 的更多操作'}));
  fireEvent.click(await screen.findByRole('button',{name:'删除算法 2'}));
  expect(screen.queryByRole('group',{name:'算法 2'})).toBeNull();
+});
+// 【用户要求】2026-10-21「我希望捕捞运行的过程中，我也可以灵活切换到并集」
+it('捕捞中交集 / 并集仍可点，点了就切过去（并记住）；建议计算等别的任务进行时仍锁住',()=>{
+ const live=vi.fn(()=>true);
+ const running={...initialFishProgress(),status:'running' as const};
+ const view=render(<FishPanel onLiveCombination={live} onDiagnose={diagnose} signals={[]} progress={null} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
+ view.rerender(<FishPanel onLiveCombination={live} onDiagnose={diagnose} signals={[]} progress={running} inputs={{time:'',threshold:'.3'}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
+ const union=screen.getByRole('radio',{name:'并集'});expect(union).not.toBeDisabled();
+ fireEvent.click(union);expect(live).toHaveBeenCalledWith('or');expect(union).toHaveAttribute('aria-checked','true');
+ fireEvent.click(union);expect(live).toHaveBeenCalledTimes(1);
 });
