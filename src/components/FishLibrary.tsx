@@ -32,8 +32,9 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   useEffect(()=>{if(algorithm&&!algorithms.includes(algorithm))setAlgorithm('');},[algorithm,algorithms]);
   const [query, setQuery] = useState('');
   const [month, setMonth] = useState('');
-  const [sortKey, setSortKey] = useState<SignalSortKey | 'algorithm'>('symbol');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  // 【用户要求】2026-10-21「信号时间默认为时间越近越排在上面」
+  const [sortKey, setSortKey] = useState<SignalSortKey | 'algorithm'>('time');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const resetKey = `${sortKey}|${sortDir}|${month}|${algorithm}|${query.trim().toUpperCase()}`;
   // As in 信号库, editing stars keeps the row still until the next explicit sort/filter.
   const [frozen, setFrozen] = useState<{ key: string; values: Map<string, number | null> }>({ key: '', values: new Map() });

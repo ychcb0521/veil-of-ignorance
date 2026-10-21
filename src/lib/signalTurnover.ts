@@ -44,7 +44,7 @@ export interface SignalTurnoverResult {
 }
 export interface SignalTurnoverProgress { status: 'running' | 'complete' | 'cancelled' | 'aborted'; done: number; total: number; current: string }
 export type SignalTurnoverLoader = (row: FishSampleRow, cut: number, signal: AbortSignal) => Promise<readonly ResearchBar[]>;
-export interface SignalTurnoverOptions { signals: readonly TradeSignal[]; signal: AbortSignal; onProgress: (p: SignalTurnoverProgress) => void }
+export interface SignalTurnoverOptions { signals: readonly TradeSignal[]; signal: AbortSignal; onProgress: (p: SignalTurnoverProgress) => void; /** false = 不存成信号库的成交额统计（复核鱼时用）。 */ save?: boolean }
 
 function quantile(sorted: readonly number[], q: number): number {
   const at = (sorted.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
@@ -124,7 +124,7 @@ export async function collectSignalTurnover(options: SignalTurnoverOptions, load
     const done = rows.filter(Boolean), per = <T,>(f: (h: TurnoverWindow) => T) => Object.fromEntries(TURNOVER_WINDOWS.map(h => [h, f(h)])) as TurnoverByWindow<T>;
     const result: SignalTurnoverResult = { version: 2, fingerprint: fishSignalFingerprint(options.signals), createdAt: Date.now(), total: list.length, rows: done, stats: per(h => summarizeTurnover(turnoverValues(done, h))), partial: per(h => done.filter(r => r.windows && r.hours < h - 1e-9).length), complete: !options.signal.aborted && done.length === list.length };
     progress.status = result.complete ? 'complete' : 'cancelled'; progress.current = ''; publish();
-    if (done.length) saveSignalTurnover(result);
+    if (done.length && options.save !== false) saveSignalTurnover(result);
     return result;
   } catch (error) { progress.status = options.signal.aborted ? 'cancelled' : 'aborted'; progress.current = ''; publish(); throw error; }
   finally { options.signal.removeEventListener('abort', cancel); }

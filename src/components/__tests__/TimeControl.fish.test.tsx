@@ -126,10 +126,11 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     // 鱼的第三列是「算法类型」（2026-10-20 替换兜底区）
     expect(within(library).getByText('算法类型')).toBeInTheDocument();expect(within(library).queryByText('兜底区')).toBeNull();
     const first = () => within(library).getByTestId('signal-library-scroller').querySelector('.group')!;
+    // 【用户要求】2026-10-21 默认按信号时间、最近的在上面
     expect(first()).toHaveTextContent('AAAUSDT');
-    fireEvent.click(within(library).getByTestId('signal-sort-标的'));
-    expect(first()).toHaveTextContent('BBBUSDT');
     fireEvent.click(within(library).getByTestId('signal-sort-信号时间'));
+    expect(first()).toHaveTextContent('BBBUSDT');
+    fireEvent.click(within(library).getByTestId('signal-sort-标的'));
     expect(first()).toHaveTextContent('AAAUSDT');
     fireEvent.click(within(library).getByTestId('signal-sort-评分'));
     expect(first()).toHaveTextContent('BBBUSDT');

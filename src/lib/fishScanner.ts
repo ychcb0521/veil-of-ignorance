@@ -9,7 +9,7 @@ import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, type FishTurnoverFloor } from '@/lib/fish/shared';
-import { fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
+import { fishSignalTurnoverOk, fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
 /** Legacy CBI-2 helpers remain for saved-record and transport compatibility. */
@@ -339,7 +339,12 @@ export class FishScanner {
     const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
     const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
     if (result.outcome === 'hit') {
-      const k = result.signal!.fish!.startIndex!;
+      const k = result.signal!.fish!.startIndex!, signalMs = result.signal!.timeMs;
+      if (options.turnoverFloors?.length) {
+        const checks = fishTurnoverCheck(bars, signalMs, plan.step, options.turnoverFloors);
+        if (checks === null) return { outcome: 'readings', cutoffMs: cut, lines: [head, `${name}：K 线不够覆盖信号（${t(signalMs)}）前 24 小时，无法判断成交额门槛`] };
+        if (checks.some(c => !c.ok)) return { outcome: 'skipped', cutoffMs: cut, lines: [head, `${name}：${atCut}，这一轮从 ${t(signalMs)} 开始；但信号前${describeTurnoverMiss(checks)} USDT（起点之后才放量），没达到成交额门槛，成不了鱼`] };
+      }
       return { outcome: 'hit', member: result, cutoffMs: cut, lines: [head, `${name}：会命中。${atCut}；这一轮从 ${t(bars[k].openTime + plan.step)} 开始（起点 ${fmt(r.average[k])}，前一根 ${fmt(r.average[k - 1])}）`] };
     }
     if (result.outcome === 'below') {
@@ -559,6 +564,19 @@ export class FishScanner {
                 if(this.calculate){const r=this.calculate(bars);const main=Float64Array.from(r.average,a=>!Number.isFinite(a)?NaN:(plan.settings.direction==='>'?a>threshold/plan.scale:a<threshold/plan.scale)?1:0);readings={...readings,value:r.cbi2,average:r.average,main,condition:main};}
                 const result=classifyFishProgram(market.symbol,bars,readings,cut,plan);
                 if(local.signal.aborted)return;
+                // 命中的币再查「信号前」成交额（截止前达标、起点前没达标 = 起点之后才放量，成不了鱼）；读数仍留着，调严阈值时起点后移可能达标
+                if(result.outcome==='hit'){
+                  const ok=fishSignalTurnoverOk(bars,result.signal!.timeMs,plan.step,options.turnoverFloors);
+                  if(ok===null)throw new FishError('K 线不够覆盖信号前 24 小时，无法判断成交额门槛','readings');
+                  if(!ok){
+                    const reading=readings.average[bars.length-1];
+                    p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading,outcome:'thin'});
+                    const place:FishPlace={symbol:market.symbol,exchange,...(market.market==='us_stock'?{market:'us_stock',underlying:market.underlying??market.base}:{}),...(exchange!=='binance'&&market.market!=='us_stock'?{binanceSymbol:binanceByBase.get(fishBase(market.base))??null}:{})};
+                    const member:FishMemberResult={outcome:'thin',reading},tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;
+                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;memberResults.set(memberKey,new Map([[0,member]]));options.onResult?.(memberKey,member);
+                    p.done++;publish();await fishDelay(0,local.signal);continue;
+                  }
+                }
                 roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:readings.average[bars.length-1],outcome:result.outcome});
                 if(result.outcome==='blocked'){p.blocked=(p.blocked??0)+1;result.blockedBy?.forEach((v,i)=>p.constraintBlocked![i]+=v);}else p.counts[result.outcome]++;
                 if(result.outcome==='readings'&&p.failures!.readings.length<10)p.failures!.readings.push({symbol:market.symbol,reason:`${plan.def.short}计算：截止处结果、均值或约束不是有限数`});
@@ -567,7 +585,7 @@ export class FishScanner {
                 if(result.signal)options.onSignal(placeFishSignal(result.signal,place,plan.algorithmKey));
                 // 留下截止读数；命中 / 起点不明的币再留可用区间的读数，扫完把阈值往严里调时当场重判（refilter.ts）
                 const member:FishMemberResult={...result,reading:readings.average[bars.length-1]};
-                if(result.outcome==='hit'||result.outcome==='unknown'){const tail=fishTail(bars,readings,plan,cut,place);if(tail)member.tail=tail;}
+                if(result.outcome==='hit'||result.outcome==='unknown'){const tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;}
                 const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;
                 memberResults.set(memberKey,new Map([[0,member]]));
                 options.onResult?.(memberKey,member);
