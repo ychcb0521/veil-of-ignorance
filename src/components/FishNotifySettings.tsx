@@ -42,7 +42,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
         </div>
         <ol className="list-decimal space-y-0.5 pl-4 text-[10.5px] leading-relaxed text-muted-foreground">
           <li>打开 <a href="https://dashboard.emailjs.com/sign-up" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">emailjs.com</a> 免费注册（每月 200 封），「Email Services」里连上你的邮箱（Gmail / QQ / 163 / Outlook 都行），得到 <b>Service ID</b>。</li>
-          <li>「Email Templates」新建模板：<b>To Email</b> 填 <code>{'{{to_email}}'}</code>，<b>Subject</b> 填 <code>{'{{subject}}'}</code>，正文填 <code>{'{{{message_html}}}'}</code>（三层大括号，显示表格）或 <code>{'{{message}}'}</code>（纯文字），保存得到 <b>Template ID</b>。</li>
+          <li>「Email Templates」→「Create New Template」→ 选「Contact Us」→ 右下角「Create Template」→ 右上角「Save」。<b>内容不用改</b>也能发（鱼的列表填进它自带的 {'{{message}}'}）；想一次发给这里填的全部邮箱，把 <b>To Email</b> 改成 <code>{'{{to_email}}'}</code>，不改就只发到 EmailJS 账号的邮箱。<b>Template ID</b> 在模板列表里每个模板名下面，或模板里的「Settings」页（形如 template_abc123）。</li>
           <li>「Account」页复制 <b>Public Key</b>。三个都填好后点「发测试邮件」，收到就成了。</li>
         </ol>
       </div>

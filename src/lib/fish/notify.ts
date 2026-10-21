@@ -73,13 +73,19 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   return { subject, message, message_html, count: rows.length };
 }
 
+/**
+ * EmailJS 自带「Contact Us」模板的变量（{{name}} {{title}} {{time}} {{email}}）也一并填上：
+ * 不改模板内容直接保存也能用——主题「Contact Us: 【渔】新鱼…」，正文 {{message}} 就是鱼的列表。
+ * 【用户要求】2026-10-21「还是找不到编辑的」「还有别的办法拿 Template ID 吗」
+ */
+const contactUsParams = (config: FishNotifyConfig, subject: string) => ({ name: '渔', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: config.emails[0] ?? '' });
 /** 调 EmailJS 发一封（收件人用逗号隔开，EmailJS 的「To Email」填 {{to_email}} 就能一次发给全部）。失败抛出可读的原因。 */
 export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch): Promise<void> {
   const missing = fishNotifyMissing(config);
   if (missing) throw new Error(missing);
   const response = await request(EMAILJS_ENDPOINT, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service_id: config.serviceId, template_id: config.templateId, user_id: config.publicKey, template_params: { to_email: config.emails.join(','), ...content, count: String(content.count) } }),
+    body: JSON.stringify({ service_id: config.serviceId, template_id: config.templateId, user_id: config.publicKey, template_params: { to_email: config.emails.join(','), ...content, count: String(content.count), ...contactUsParams(config, content.subject) } }),
   });
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 200);
