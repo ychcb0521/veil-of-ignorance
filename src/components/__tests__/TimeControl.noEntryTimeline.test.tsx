@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { saveFishAuto } from '@/lib/fish/autoScan';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -48,6 +49,7 @@ const lastDialogProps = () => dialogProps.mock.calls[dialogProps.mock.calls.leng
 const openNoEntry = () => fireEvent.click(screen.getAllByTitle(/未下单但全程观察/)[0]);
 
 beforeEach(() => {
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
   dialogProps.mockClear();
   getTimelineId.mockClear();
 });

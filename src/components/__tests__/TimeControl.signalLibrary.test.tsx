@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { saveFishAuto } from '@/lib/fish/autoScan';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -51,6 +52,7 @@ const libraryRoot = () => screen.getByTestId('signal-library-panel');
 
 beforeEach(() => {
   localStorage.clear();
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(SIGNALS));
 });
 

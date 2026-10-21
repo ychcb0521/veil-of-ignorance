@@ -10,6 +10,7 @@
  *   ④ 筛选 / 月份的结果与直接调 sortSignalsBy + filter 一字不差；
  *   ⑤ 键盘打分让这一行被重排到窗口之外时，焦点仍留在那颗星上（与改造前一致）。
  */
+import { saveFishAuto } from '@/lib/fish/autoScan';
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -149,6 +150,7 @@ beforeEach(() => {
   preflightMode.pending = false;
   listProps.calls.length = 0;
   localStorage.clear();
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(SIGNALS));
 });
 

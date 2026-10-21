@@ -1,3 +1,4 @@
+import { saveFishAuto } from '@/lib/fish/autoScan';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TimeControl } from '@/components/TimeControl';
@@ -25,6 +26,7 @@ function resultFor(options: FishReconstructionOptions): FishReconstructionResult
 }
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify(library));
   localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify(catches));
   saveFishPreference('cbi2', { statistic: '结果', direction: '>', threshold: '.3', constraints: [] });

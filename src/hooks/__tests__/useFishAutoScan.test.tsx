@@ -6,7 +6,8 @@ const avg=(d:any,n:string)=>({...d,formula:`${d.formula}\navg_${n} = avg(${n}, 2
 const DEFS=[avg(CBI2_DEF,'CBI2'),DRIFT_SPEED_Z_DEF,avg(CBA_DEF,'CBA'),avg(BSS_DEF,'BSS')];
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>DEFS}));
 import {useFishAutoScan} from '@/hooks/useFishAutoScan';
-import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
+import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS,fishAutoKey} from '@/lib/fish/autoScan';
+import {writePersistedStateRaw} from '@/lib/persistedStateStorage';
 import {buildFishScanSettings} from '@/lib/fish/scanPlan';
 import {readFishCards} from '@/lib/fish/cards';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
@@ -17,12 +18,27 @@ beforeEach(()=>{localStorage.clear();sessionStorage.clear();online=true;vi.spyOn
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 const hook=(start=vi.fn(async(_s:unknown)=>{}),busy=()=>false)=>({start,view:renderHook(()=>useFishAutoScan({account:'a',selection,start,busy}))});
 const flush=async(ms=0)=>{await act(async()=>{await vi.advanceTimersByTimeAsync(ms);});};
-it('间隔只有 0.5 / 1 / 2 / 4 / 8 / 16 / 32 / 64 小时；默认手动，手动模式从不自动捕',async()=>{
+it('默认自动、每 1 小时：立即捕第一次，未到下一次时间不重复',async()=>{
  expect([...FISH_AUTO_INTERVALS]).toEqual([0.5,1,2,4,8,16,32,64]);
+ const {start,view}=hook();await flush();
+ expect(view.result.current.mode).toBe('auto');expect(view.result.current.hours).toBe(1);expect(start).toHaveBeenCalledTimes(1);
+ await flush(HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
+ await flush(90_000);expect(start).toHaveBeenCalledTimes(2);
+});
+it('手动选择仍然保存，刷新后手动模式不自动捕',async()=>{
+ saveFishAuto({mode:'manual',hours:2,lastRunAt:null});
  const {start,view}=hook();await flush(10*HOUR);
- expect(view.result.current.mode).toBe('manual');expect(start).not.toHaveBeenCalled();
+ expect(view.result.current.mode).toBe('manual');expect(view.result.current.hours).toBe(2);expect(start).not.toHaveBeenCalled();
+});
+it('旧版手动设置升级到自动一次，保留间隔和上次时间；之后再选手动不会重置',()=>{
+ const old={mode:'manual',hours:4,lastRunAt:Date.now()-HOUR};
+ writePersistedStateRaw(fishAutoKey(),JSON.stringify(old));
+ expect(readFishAuto()).toEqual({...old,mode:'auto'});
+ saveFishAuto({...old,mode:'manual'});
+ expect(readFishAuto()).toEqual(old);
 });
 it('切到自动立刻捕第一次（时间 = 现在，四个算法），之后每隔所选时长一次，没到点不捕',async()=>{
+ saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
  const {start,view}=hook();
  act(()=>{view.result.current.setHours(2);});act(()=>{view.result.current.setMode('auto');});await flush();
  expect(start).toHaveBeenCalledTimes(1);

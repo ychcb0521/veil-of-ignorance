@@ -6,6 +6,7 @@ import { SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
 import { initialFishProgress } from '@/lib/fishScanner';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
+import { saveFishAuto } from '@/lib/fish/autoScan';
 import { saveFishPreference } from '@/lib/fish/preferences';
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
@@ -22,6 +23,8 @@ function control(jump = vi.fn(async () => ({ ok: true as const }))) {
 }
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear();
+  // 这些用例验证手动捕捞流程；自动默认值和调度另由 useFishAutoScan 测试覆盖。
+  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
   localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY,'[]');
   localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([SIGNAL]));
   // 阈值默认留空（等信号库的建议填，或手动输入）；这里按用户已填过 0.3 测捕捞流程
