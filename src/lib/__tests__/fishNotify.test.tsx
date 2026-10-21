@@ -3,7 +3,7 @@ import {beforeEach,expect,it,vi} from 'vitest';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
 import {FISH_EMAIL_MAX_ROWS,composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
 import {useFishNotify} from '@/hooks/useFishNotify';
-import {fishDedupKey} from '@/lib/fish/records';
+import {fishVisibleKey} from '@/lib/fish/records';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const fish=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:symbol,symbol,timeMs:Date.UTC(2026,9,21,h),timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureShort:'CBI-2'},...extra});
@@ -29,7 +29,7 @@ it('邮件内容照「新鱼」列表画：标的 / 信号时间 / 算法类型 
  for(const h of ['新鱼','标的','信号时间','算法类型','市场'])expect(m.message_html).toContain(h);
  expect(m.message_html.indexOf('&lt;B&gt;USDT')).toBeLessThan(m.message_html.indexOf('AAAUSDT'));expect(m.message_html).not.toContain('<B>USDT');
  // 整张新鱼表里只有 AAAUSDT 是本轮新增
- const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'',new Set([fishDedupKey(fish('AAAUSDT',1))]));
+ const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'',new Set([fishVisibleKey(fish('AAAUSDT',1))]));
  expect(n.subject).toBe('【渔】新鱼 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
  expect(n.message_html).toContain('本轮新增 1');expect(n.message_html.match(/>新</g)).toHaveLength(1);
 });

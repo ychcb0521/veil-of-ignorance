@@ -37,7 +37,9 @@ it('并集扫完点「交集」：新鱼直接换成交集结果（不重扫）�
  // 子集与空集都能切换；无法识别的设置保留当前结果。
  act(()=>{ok=result.current.recombine('and',[keys[0]]);});expect(ok).toBe(true);expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);
  expect(result.current.signals.find(s=>s.freshCatch)?.fish?.algorithmKey).toBe(keys[0]);
- act(()=>{result.current.recombine('or',[]);});expect(fresh()).toEqual([]);expect(result.current.progress?.counts.hit).toBe(0);expect(union()).toHaveLength(2);
+ act(()=>{result.current.recombine('or',[]);});expect(fresh()).toEqual([]);expect(result.current.progress?.counts.hit).toBe(0);
+ // 切空了也不丢：AAA、EEE 都还在「鱼」里（显示完全相同的副本合并成一条，2026-10-21）
+ for(const sym of ['AAAUSDT','EEEUSDT'])expect(result.current.signals.some(s=>s.symbol===sym&&!s.freshCatch)).toBe(true);
  act(()=>{result.current.recombine('and',keys);});expect(fresh()).toEqual(['AAAUSDT']);
  act(()=>{ok=result.current.recombine('and',['missing']);});expect(ok).toBe(false);expect(fresh()).toEqual(['AAAUSDT']);
 });
@@ -105,7 +107,7 @@ it('手动删除记删除记号；其他写入不记',async()=>{
  expect(Object.keys(loadFishTombstones())).toEqual([]);
  const id=result.current.signals.find(s=>s.symbol==='OLDUSDT')!.id;
  act(()=>{result.current.remove(id);});
- expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')).toBeUndefined();expect(Object.keys(loadFishTombstones())).toHaveLength(1);
+ expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')).toBeUndefined();expect(Object.keys(loadFishTombstones())).toHaveLength(2); // 算法键 + 整行显示内容（v|）各一笔
 });
 
 // 【用户要求】2026-10-21「新鱼只要有更新，都发一次邮件，无论是手动还是自动模式」：每轮结束都交出新鱼列表（变没变由邮件那边比对上一封）；切换组合不交
@@ -121,4 +123,14 @@ it('每轮捕捞结束交出这一轮新进列表的鱼和整张新鱼列表；�
  // 第三轮：没有新进列表的，但新鱼列表照样交出（列表和上一封一样时邮件那边不发）
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
  expect(onCaught).toHaveBeenCalledTimes(3);expect(onCaught.mock.calls[2][0]).toEqual([]);expect(onCaught.mock.calls[2][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+});
+// 【用户要求】2026-10-21「我希望发邮件时，默认为并集里的鱼」
+it('面板选交集时新鱼只有交集结果，邮件那张表仍是本轮并集',async()=>{
+ const onCaught=vi.fn();
+ const {result}=renderHook(()=>useFish(undefined,{onCaught}));
+ await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'and',anchorMs:cut,includeDuplicates:true});});
+ expect(result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol)).toEqual(['AAAUSDT']);
+ expect(onCaught).toHaveBeenCalledTimes(1);expect(onCaught.mock.calls[0][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ expect(onCaught.mock.calls[0][1].every((s:any)=>s.fish.combination==='or')).toBe(true);
+ expect(result.current.unionFish().map(s=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
 });

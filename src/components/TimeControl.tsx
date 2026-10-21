@@ -91,11 +91,12 @@ export function TimeControl({
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
-  const freshFishRef = useRef<TradeSignal[]>([]);
-  const getFreshFish = useCallback(() => freshFishRef.current, []);
-  const fishNotify = useFishNotify(user?.id, undefined, getFreshFish);
+  // 测试邮件发的和正式邮件一样：本轮所选算法的并集（没有本轮结果时用新鱼列表）
+  const mailFishRef = useRef<() => TradeSignal[]>(() => []);
+  const getMailFish = useCallback(() => mailFishRef.current(), []);
+  const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
-  freshFishRef.current = fish.signals.filter(s => s.freshCatch);
+  mailFishRef.current = fish.unionFish;
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕

@@ -25,7 +25,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
   return <div className="space-y-2 rounded-lg bg-muted/30 px-3 py-2.5 text-[11px]" data-testid="fish-notify" aria-label="邮件提醒设置">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label="新鱼发到邮箱" checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />新鱼发到邮箱</label>
-      <span className="text-[10.5px] text-muted-foreground">每轮捕捞结束（手动或自动），新鱼列表有变化就发一封：整张新鱼表，比上一封多出来的标「新」；没变化不发</span>
+      <span className="text-[10.5px] text-muted-foreground">每轮捕捞结束（手动或自动）发本轮并集的鱼（任一算法命中即算，不管面板选交集还是并集）；和上一封比有变化才发，多出来的标「新」</span>
     </div>
     <div className="flex flex-wrap items-center gap-1.5">
       {config.emails.map(e => <span key={e} className="inline-flex h-6 items-center gap-1 rounded-md bg-background pl-2 pr-1 font-mono text-[10.5px]">{e}<button type="button" aria-label={`删除 ${e}`} className="rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground" onClick={() => notify.update({ ...config, emails: config.emails.filter(x => x !== e) })}><X className="h-3 w-3" /></button></span>)}

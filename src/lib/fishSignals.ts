@@ -1,4 +1,4 @@
-import { mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
+import { collapseVisibleFish, mergeFishSignals, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
 import { applyFishTombstones, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -14,7 +14,7 @@ export function loadFishTombstones(): FishTombstones {
 /** 记下这几条鱼被用户删除了（只有手动删除才记；切换交集 / 并集、调严阈值撤掉的不算删除）。 */
 export function recordFishDeletion(signals: readonly TradeSignal[], userId: string | null, now = Date.now()): void {
   if (!signals.length) return;
-  const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.map(s => [fishDedupKey(s), Math.max(now, (s.caughtAt ?? 0) + 1)])));
+  const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.flatMap(s => { const t = Math.max(now, (s.caughtAt ?? 0) + 1); return [[fishDedupKey(s), t], [`v|${fishVisibleKey(s)}`, t]]; })));
   writePersistedStateRaw(FISH_DELETED_KEY, JSON.stringify(next));
   if (userId) queueSimStatePush(userId, 'fish_deleted_v1', next);
 }
@@ -23,7 +23,7 @@ export function loadFishSignals(): TradeSignal[] {
     const raw = JSON.parse(readPersistedStateRaw(FISH_STORAGE_KEY) ?? '[]');
     if(!Array.isArray(raw))return [];
     const valid=raw.filter((s):s is TradeSignal=>s&&typeof s.id==='string'&&typeof s.symbol==='string'&&Number.isFinite(s.timeMs)&&typeof s.timeLabel==='string'&&typeof s.fallbackZone==='string');
-    const migrated=applyFishTombstones(mergeFishSignals([],valid),loadFishTombstones()),serialized=JSON.stringify(migrated);
+    const migrated=collapseVisibleFish(applyFishTombstones(mergeFishSignals([],valid),loadFishTombstones())),serialized=JSON.stringify(migrated);
     // Keep malformed original rows available for recovery; only migrate a wholly valid library in place.
     // 被删除记号压住的鱼（别的设备删的、或合并时带回来的旧副本）也在这里去掉。
     if(valid.length===raw.length&&serialized!==JSON.stringify(raw))writePersistedStateRaw(FISH_STORAGE_KEY,serialized);

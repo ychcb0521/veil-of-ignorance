@@ -1,11 +1,12 @@
 import {loadFishSession,saveFishSession} from '@/lib/fish/session';
-import { mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
+import { collapseVisibleFish, mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import type { FishProgram } from '@/lib/fish/algorithm';
 import { fishRuleText } from '@/lib/fishRule';
 import type { FishCombination } from '@/lib/fish/intersection';
-import { loadFishSignals, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
+import { loadFishSignals, loadFishTombstones, saveFishSignals, recordFishDeletion, FISH_STORAGE_KEY, FISH_DELETED_KEY } from '@/lib/fishSignals';
+import { applyFishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
@@ -36,8 +37,8 @@ function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrite
 // Shared across TimeControl instances and panel remounts in this browser page.
 let pageScanner: FishScanner | null = null;
 
-/** onCaught：每轮捕捞结束（手动或自动）时，这一轮第一次捕到的鱼，以及整张「新鱼」列表（用于邮件提醒，列表有变化就发）。 */
-export function useFish(userId: string | undefined, options: { onCaught?: (fish: TradeSignal[], fresh: TradeSignal[]) => void } = {}) {
+/** onCaught：每轮捕捞结束（手动或自动）时，这一轮第一次捕到的鱼，以及邮件要发的那张表（本轮所选算法的并集，见 unionFish）。 */
+export function useFish(userId: string | undefined, options: { onCaught?: (fish: TradeSignal[], mail: TradeSignal[]) => void } = {}) {
   const onCaughtRef = useRef(options.onCaught); onCaughtRef.current = options.onCaught;
   const [signals, setSignals] = useState(loadFishSignals);
   const signalsRef = useRef(signals); signalsRef.current = signals;
@@ -54,7 +55,9 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const edits=useRef(new Map<string,{signal?:TradeSignal;deleted?:boolean}>());
   const progressRef=useRef(progress);progressRef.current=progress;
   const persist=useCallback(()=>{const r=roundRef.current,owner=ownerRef.current,version=generation.current;if(r)void saveFishSession(owner,{...r,added:[...writesRef.current.added],refreshed:[...writesRef.current.refreshed],edits:[...edits.current],progress:progressRef.current}).catch(()=>{if(owner===ownerRef.current&&version===generation.current)setProgress(p=>p?{...p,notice:'本机结果保存失败，刷新后需要重新捕捞'}:p);});},[]);
-  const commit = useCallback((next: TradeSignal[]) => {
+  const commit = useCallback((input: TradeSignal[]) => {
+    // 整行显示相同的（同一信号、不同算法键）只留一条
+    const next = collapseVisibleFish(input);
     if(roundRef.current&&!controller.current){
       const before=new Map(signalsRef.current.map(s=>[fishDedupKey(s),s]));
       const after=new Map(next.map(s=>[fishDedupKey(s),s]));
@@ -99,7 +102,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
       if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
     } finally { if (controller.current === mine) {controller.current = null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(settings.combination??'and',settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
       // 每轮结束把新鱼列表交给邮件提醒（有没有变化由提醒那边比对上一封）；切换交集 / 并集、调严阈值不会走到这里
-      if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s))),fresh=signalsRef.current.filter(s=>s.freshCatch);if(caught.length||fresh.length)onCaughtRef.current?.(caught,fresh);}
+      if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s))),mail=unionRef.current();if(caught.length||mail.length)onCaughtRef.current?.(caught,mail);}
     } }
   }, [commit,persist]);
   const estimate=useCallback(async(settings:FishScanSettings,signal:AbortSignal)=>{
@@ -141,6 +144,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const writes = emptyWrites(), { signals: combined, counts } = combineFishRound(selected, mode);
     for (const raw of combined) { const edit=edits.current.get(fishDedupKey(raw));if(edit?.deleted)continue;const signal=edit?.signal?{...raw,quality:edit.signal.quality}:raw; const next = applyCatch(list, signal, writes); if (next) list = next; }
     writesRef.current = writes; roundRef.current = { ...round, mode,keys:[...algorithmKeys] };
+    list=collapseVisibleFish(list);
     signalsRef.current=list;setSignals(list);saveFishSignals(list,ownerRef.current??null);
     saveFishCombinationRound(selected, mode);
     selected.plans.forEach((p,j)=>{if(!round.data.plans.includes(p))saveFishMemberRound(selected,j);});
@@ -150,6 +154,18 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     persist();return true;
   }, [persist]);
   recombineRef.current=recombine;
+  /**
+   * 邮件用的鱼：本轮所选算法的并集（任一算法命中就算），不管面板上选的是交集还是并集；没有本轮结果时用「新鱼」列表。
+   * 【用户要求】2026-10-21「我希望发邮件时，默认为并集里的鱼」。用户删过的不发；整行显示相同的只留一条。
+   */
+  const unionFish = useCallback((): TradeSignal[] => {
+    const r = roundRef.current;
+    if (!r) return signalsRef.current.filter(s => s.freshCatch);
+    const picked = (r.keys[0] !== 'pending' && selectFishRound(r.data, r.keys)) || r.data;
+    const list = combineFishRound(picked, 'or').signals.filter(s => !edits.current.get(fishDedupKey(s))?.deleted);
+    return collapseVisibleFish(applyFishTombstones(list, loadFishTombstones()));
+  }, []);
+  const unionRef = useRef(unionFish); unionRef.current = unionFish;
   /**
    * 用户手动删除一条鱼：记删除记号（跨设备同步，别处的旧副本带不回来），再从列表里去掉。
    * 【用户要求】2026-10-20「渔部分的鱼只要没删除，就一直保留」——只有这里算删除。
@@ -165,5 +181,5 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
+  return { unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
 }

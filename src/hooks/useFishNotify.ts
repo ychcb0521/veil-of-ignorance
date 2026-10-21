@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { fishDedupKey } from '@/lib/fish/records';
+import { fishVisibleKey } from '@/lib/fish/records';
 import { composeFishEmail, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 
 /** unchanged = 这一轮结束时新鱼和上一封一样，没发。 */
@@ -14,7 +14,7 @@ export interface FishNotifyStatus { at: number; ok: boolean; count: number; test
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
   update: (next: FishNotifyConfig) => void;
-  /** 每轮结束调用：fish = 这一轮第一次捕到的；fresh = 整张「新鱼」列表。新鱼表和上一封不一样就发整张表，多出来的标「新」。 */
+  /** 每轮结束调用：fish = 这一轮第一次捕到的；fresh = 邮件那张表（默认本轮并集）。和上一封不一样就发整张表，多出来的标「新」。 */
   send: (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => Promise<void>; test: () => Promise<void>;
 }
 /** getFresh：当前「新鱼」列表，测试邮件照它发一份（没有新鱼时发示例）。 */
@@ -42,7 +42,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   // 发的是整张新鱼表；和上一封一样就不发；发送失败不记，下一轮再比
   const send = useCallback(async (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => {
     if (!configRef.current.enabled) return;
-    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishDedupKey(f) === fishDedupKey(s)))];
+    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishVisibleKey(f) === fishVisibleKey(s)))];
     const change = fishTableChange(table);
     if (!change.changed) { if (table.length) setStatus({ at: Date.now(), ok: true, count: table.length, unchanged: true }); return; }
     await deliver(table, false, change.added, () => saveLastFishTable(change.keys));

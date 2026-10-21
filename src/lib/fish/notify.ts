@@ -12,7 +12,7 @@ import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedSt
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
-import { fishCaughtBy, fishDedupKey } from './records';
+import { fishCaughtBy, fishVisibleKey } from './records';
 
 export interface FishNotifyConfig { enabled: boolean; emails: string[]; serviceId: string; templateId: string; publicKey: string }
 export const DEFAULT_FISH_NOTIFY: FishNotifyConfig = { enabled: false, emails: [], serviceId: '', templateId: '', publicKey: '' };
@@ -68,7 +68,7 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
     market: [s.market === 'us_stock' ? '美股' : '', s.exchange && s.exchange !== 'binance' ? EXCHANGE_NAMES[s.exchange] ?? s.exchange : ''].filter(Boolean).join(' · '),
     time: formatUTC8(s.timeMs).slice(0, 19),
     algorithms: fishCaughtBy(s).join(' · '),
-    isNew: !!newKeys?.has(fishDedupKey(s)),
+    isNew: !!newKeys?.has(fishVisibleKey(s)),
   }));
   const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
   const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
@@ -134,7 +134,8 @@ export function saveLastFishTable(keys: readonly string[]): void {
 }
 /** 这张新鱼表和上一封比：changed = 有变化（要发），added = 上一封里没有的。 */
 export function fishTableChange(table: readonly TradeSignal[]): { changed: boolean; added: Set<string>; keys: string[] } {
-  const keys = [...new Set(table.map(fishDedupKey))], last = new Set(readLastFishTable());
+  // 按整行显示的内容比（同一信号换了算法键不算变化）
+  const keys = [...new Set(table.map(fishVisibleKey))], last = new Set(readLastFishTable());
   const added = new Set(keys.filter(k => !last.has(k)));
   return { changed: keys.length > 0 && (added.size > 0 || keys.length !== last.size), added, keys };
 }

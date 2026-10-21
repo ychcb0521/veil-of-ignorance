@@ -86,7 +86,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     await waitFor(() => expect(aborted).toBe(true));
     expect(screen.getByRole('status')).toHaveTextContent('已取消');
   });
-  it('输入历史时间与阈值，收起重开仍保留；校验输入并为不同阈值保留独立记录与原评分', async () => {
+  it('输入历史时间与阈值，收起重开仍保留；校验输入；同一信号换阈值再捕到合并成一条并保留原评分', async () => {
     render(control());
     const toggle = screen.getByRole('button',{name:/^渔/});
     fireEvent.click(toggle);
@@ -100,9 +100,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     mocks.scan.mockImplementation(async o => { o.onSignal({ ...SIGNAL, fish: { ...SIGNAL.fish, threshold: o.threshold, cutoffMs: o.anchorMs, average: 0.25 } }); const p = { ...initialFishProgress(), anchorMs: o.anchorMs, cutoffMs: o.anchorMs, threshold: o.threshold, status: 'complete' }; o.onProgress(p); return p; });
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(mocks.scan).toHaveBeenCalledWith(expect.objectContaining({ anchorMs: Date.UTC(2026,9,18,4,34,56), threshold: 0.2 })));
-    expect(loadFishSignals()).toHaveLength(2);
-    expect(loadFishSignals().find(s=>s.fish?.threshold===.3)).toMatchObject({quality:4});
-    expect(loadFishSignals().find(s=>s.fish?.threshold===.2)).toMatchObject({fish:{threshold:.2,average:.25}});
+    // 【用户要求】2026-10-21「整行完全重复时，只留一个」：同一信号只换了阈值，列表里显示一样——合并成一条，读数用这一轮的，评分沿用
+    expect(loadFishSignals()).toHaveLength(1);
+    expect(loadFishSignals()[0]).toMatchObject({quality:4,freshCatch:true,fish:{threshold:.2,average:.25}});
     expect(screen.queryByText(/本轮阈值 > 0.2/)).not.toBeInTheDocument();
     const help = screen.getByRole('button',{name:'捕捞说明'});
     fireEvent.mouseOver(help);

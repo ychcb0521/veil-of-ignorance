@@ -41,3 +41,24 @@ export function fishCaughtBy(s: TradeSignal): string[] {
   }
   return [r.featureShort ?? 'CBI-2'];
 }
+
+/**
+ * 整行显示的内容：标的（含交易所 / 美股）、信号时间、算法类型。这几样都一样的鱼在列表里看起来完全重复。
+ * 【用户要求】2026-10-21「鱼中，多个信号的信息整行完全重复时，只留一个就行，不要重复」——
+ * 同一条信号换过阈值或交集 / 并集后会以不同的算法键各存一份（键不同、显示相同），按这个键再合并一次。
+ */
+export const fishVisibleKey = (s: TradeSignal) => `${signalDedupKey(s)}|${fishCaughtBy(s).join(' · ')}`;
+/** 显示相同的只留一条：新鱼优先，其次捕到得更晚的；评分沿用已有的。没有重复时原样返回。 */
+export function collapseVisibleFish(list: readonly TradeSignal[]): TradeSignal[] {
+  const kept = new Map<string, TradeSignal>();
+  let duplicate = false;
+  for (const s of list) {
+    const k = fishVisibleKey(s), prev = kept.get(k);
+    if (!prev) { kept.set(k, s); continue; }
+    duplicate = true;
+    const takeNew = !!s.freshCatch !== !!prev.freshCatch ? !!s.freshCatch : (s.caughtAt ?? 0) > (prev.caughtAt ?? 0);
+    const [win, lose] = takeNew ? [s, prev] : [prev, s];
+    kept.set(k, { ...win, quality: win.quality ?? lose.quality });
+  }
+  return duplicate ? [...kept.values()] : list as TradeSignal[];
+}

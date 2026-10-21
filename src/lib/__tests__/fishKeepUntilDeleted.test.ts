@@ -6,7 +6,7 @@ vi.mock('@/integrations/supabase/client',()=>({supabase:{from:mocks.from}}));
 import {__resetSimStateSyncForTests,hydrateSimState} from '@/lib/simStateSync';
 import {loadFishSignals,saveFishSignals,recordFishDeletion,loadFishTombstones,FISH_STORAGE_KEY,FISH_DELETED_KEY} from '@/lib/fishSignals';
 import {mergeFishLists,mergeFishTombstones,applyFishTombstones} from '@/lib/fish/tombstones';
-import {fishDedupKey} from '@/lib/fish/records';
+import {fishDedupKey,fishVisibleKey} from '@/lib/fish/records';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const UID='u-1';
 const fish=(i:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:`f${i}`,symbol:`C${i}USDT`,timeMs:1_700_000_000_000+i*60000,timeLabel:'x',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:.04,featureId:'cbi2',statistic:'结果',direction:'>',algorithmKey:'k'},...extra});
@@ -30,7 +30,8 @@ it('删除记号：压住删除前捕到的那条，之后重新捕到的照常�
 it('手动删除记下记号；本地读取时被记号压住的鱼不再出现（包括别处的旧副本）',()=>{
  saveFishSignals([fish(1),fish(2)],null);
  recordFishDeletion([fish(1)],UID,1000);
- expect(Object.keys(loadFishTombstones())).toEqual([fishDedupKey(fish(1))]);
+ // 同时按整行显示的内容记一笔（v| 开头），键不同、显示相同的副本也压住（2026-10-21）
+ expect(Object.keys(loadFishTombstones()).sort()).toEqual([fishDedupKey(fish(1)),`v|${fishVisibleKey(fish(1))}`].sort());
  localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([fish(1),fish(2)]));
  expect(symbols(loadFishSignals())).toEqual(['C2USDT']);
 });
