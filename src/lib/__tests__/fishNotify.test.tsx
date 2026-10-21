@@ -52,6 +52,7 @@ it('设置面板：添加多个邮箱（回车或逗号分隔）、格式不对�
  expect(screen.getByText('a@qq.com')).toBeInTheDocument();expect(screen.getByRole('button',{name:'发测试邮件'})).toBeDisabled();
  fireEvent.change(screen.getByLabelText('添加收件邮箱'),{target:{value:'nope'}});fireEvent.click(screen.getByRole('button',{name:'添加'}));
  expect(screen.getByRole('alert')).toHaveTextContent('邮箱格式不对：nope');
+ expect(screen.getByRole('link',{name:'emailjs.com'})).toHaveAttribute('href','https://dashboard.emailjs.com/sign-up');
  fireEvent.click(screen.getByRole('button',{name:'删除 a@qq.com'}));expect(notify.update).toHaveBeenLastCalledWith(expect.objectContaining({emails:['b@163.com']}));
 });
 it('同一条鱼只提醒一次：发过的不再发；发送失败不记，下次再试',async()=>{

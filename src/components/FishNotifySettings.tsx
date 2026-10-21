@@ -41,7 +41,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
             <label key={k} className="flex items-center gap-1 text-muted-foreground"><span className="w-20 shrink-0 sm:w-auto">{label}</span><input key={`${k}:${config[k]}`} aria-label={`EmailJS ${label}`} placeholder={ph} defaultValue={config[k]} onBlur={e => { if (e.target.value.trim() !== config[k]) notify.update({ ...config, [k]: e.target.value }); }} className={`${field} w-36 font-mono`} /></label>)}
         </div>
         <ol className="list-decimal space-y-0.5 pl-4 text-[10.5px] leading-relaxed text-muted-foreground">
-          <li>在 emailjs.com 免费注册（每月 200 封），「Email Services」里连上你的邮箱（Gmail / QQ / 163 / Outlook 都行），得到 <b>Service ID</b>。</li>
+          <li>打开 <a href="https://dashboard.emailjs.com/sign-up" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">emailjs.com</a> 免费注册（每月 200 封），「Email Services」里连上你的邮箱（Gmail / QQ / 163 / Outlook 都行），得到 <b>Service ID</b>。</li>
           <li>「Email Templates」新建模板：<b>To Email</b> 填 <code>{'{{to_email}}'}</code>，<b>Subject</b> 填 <code>{'{{subject}}'}</code>，正文填 <code>{'{{{message_html}}}'}</code>（三层大括号，显示表格）或 <code>{'{{message}}'}</code>（纯文字），保存得到 <b>Template ID</b>。</li>
           <li>「Account」页复制 <b>Public Key</b>。三个都填好后点「发测试邮件」，收到就成了。</li>
         </ol>
