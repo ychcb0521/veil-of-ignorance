@@ -10,11 +10,13 @@ import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCa
 import {FISH_TURNOVER_FLOORS} from '@/lib/fish/shared';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
+import type {FishNotify} from '@/hooks/useFishNotify';
+import {FishNotifySettings} from './FishNotifySettings';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { ChevronDown, CircleHelp, Clock3, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react';
+import { ChevronDown, CircleHelp, Clock3, Mail, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
@@ -30,6 +32,8 @@ export interface FishPanelProps {
   hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
   onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[], plans?: readonly FishProgram[]) => boolean;
+  /** 新鱼邮件提醒（收件邮箱可添加多个）；不给就不显示邮件入口。 */
+  notify?: FishNotify;
   /** 定时自动捕捞（手动 / 自动 + 间隔）；不给就只有手动。 */
   auto?: FishAutoScan;
   /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
@@ -56,15 +60,15 @@ export interface FishPanelProps {
 export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
-function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe }; } catch { return { scope: false, detail: false, probe: false }; }
+function readOpen(): { scope: boolean; detail: boolean; probe: boolean; notify: boolean } {
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe, notify: !!v.notify }; } catch { return { scope: false, detail: false, probe: false, notify: false }; }
 }
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
 export function FishPanel(p: FishPanelProps) {
   const [error,setError]=useState(''),defs=useFishFeatures();
   const [open, setOpenState] = useState(readOpen);
-  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean; probe: boolean }>) => setOpenState(o => {
+  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean; probe: boolean; notify: boolean }>) => setOpenState(o => {
     const next = { ...o, ...patch };
     try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* 记不住只是下次要再点 */ }
     return next;
@@ -241,6 +245,7 @@ export function FishPanel(p: FishPanelProps) {
         <div className="flex items-center gap-0.5">
           <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${iconBtn} ${open.scope ? 'bg-muted text-foreground' : ''}`}><SlidersHorizontal className="h-3.5 w-3.5" /></button>
           {p.onDiagnose&&<button type="button" aria-label="查单个币" aria-expanded={open.probe} title="查单个币：按当前设置与时间，看它为什么命中 / 没命中" onClick={() => setOpen({ probe: !open.probe })} className={`${iconBtn} ${open.probe ? 'bg-muted text-foreground' : ''}`} data-testid="fish-probe-toggle"><Search className="h-3.5 w-3.5" /></button>}
+          {p.notify&&<button type="button" aria-label="邮件提醒" aria-expanded={open.notify} title={p.notify.config.enabled?`新鱼邮件提醒：已开启（${p.notify.config.emails.length} 个邮箱）`:'新鱼邮件提醒：每轮捕到新鱼时发到你的邮箱'} onClick={() => setOpen({ notify: !open.notify })} className={`${iconBtn} ${open.notify ? 'bg-muted text-foreground' : ''} ${p.notify.config.enabled ? 'text-primary/80' : ''}`} data-testid="fish-notify-toggle"><Mail className="h-3.5 w-3.5" /></button>}
           {p.reconstruction&&<button type="button" className={`${iconBtn} w-auto px-1.5 text-[10.5px]`} title={p.reconstruction.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'} disabled={running||probe.busy||!p.reconstruction.available} onClick={async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();}}>复原</button>}
         </div>
         {p.auto&&<>
@@ -269,6 +274,7 @@ export function FishPanel(p: FishPanelProps) {
       <div className="relative h-px bg-border/60" aria-hidden>{scanning && x && x.total > 0 && <span className="absolute bottom-0 left-0 h-[2px] rounded-r-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, (x.done / x.total) * 100)}%` }} />}</div>
     </header>
     <div className="min-w-0 space-y-4 px-4 pb-4 pt-3">
+    {open.notify&&p.notify&&<FishNotifySettings notify={p.notify}/>}
     {open.scope && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground" aria-label="捕捞交易所">
       {AUDITED_EXCHANGES.map(exchange => <label key={exchange} className="flex items-center gap-1.5">
         <FishCheck disabled={running} checked={exchanges.includes(exchange)} onChange={e => p.onSelectionChange({ ...p.selection, exchanges: AUDITED_EXCHANGES.filter(x => x === exchange ? e.target.checked : exchanges.includes(x)) })} />

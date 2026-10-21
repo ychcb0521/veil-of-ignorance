@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
@@ -89,7 +90,9 @@ export function TimeControl({
   const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
-  const fish = useFish(user?.id);
+  // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
+  const fishNotify = useFishNotify(user?.id);
+  const fish = useFish(user?.id, { onCaught: fishNotify.send });
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
@@ -533,7 +536,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} onCancel={fish.cancel}
+      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

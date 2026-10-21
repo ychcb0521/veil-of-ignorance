@@ -105,3 +105,18 @@ it('手动删除记删除记号；其他写入不记',async()=>{
  act(()=>{result.current.remove(id);});
  expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')).toBeUndefined();expect(Object.keys(loadFishTombstones())).toHaveLength(1);
 });
+
+// 【用户要求】2026-10-21「捕捉到的新鱼能够及时发送到我的邮箱」：每轮结束只交出第一次捕到的鱼；切换组合不发
+it('每轮捕捞结束交出这一轮新进列表的鱼；还在列表里的再捕到不交；切换交集 / 并集不交',async()=>{
+ const onCaught=vi.fn();
+ const {result}=renderHook(()=>useFish(undefined,{onCaught}));
+ await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
+ expect(onCaught).toHaveBeenCalledTimes(1);expect(onCaught.mock.calls[0][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ act(()=>{result.current.recombine('and',keys);});expect(onCaught).toHaveBeenCalledTimes(1);
+ // 第二轮：切到交集后列表里只剩交集口径的 AAA；这轮并集口径的 AAA、EEE 都是重新进列表（交出去，由邮件那边按「发过没」去重，不会重发）
+ await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
+ expect(onCaught).toHaveBeenCalledTimes(2);expect(onCaught.mock.calls[1][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ // 第三轮什么都没变：都还在列表里，不交
+ await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
+ expect(onCaught).toHaveBeenCalledTimes(2);
+});
