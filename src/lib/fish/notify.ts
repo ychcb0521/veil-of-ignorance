@@ -54,22 +54,39 @@ export function fishNotifyMissing(c: FishNotifyConfig): string {
   return fishNotifyFieldProblem(c) || (!c.serviceId || !c.templateId || !c.publicKey ? '先填好 EmailJS 的 Service ID、Template ID 和 Public Key' : '');
 }
 
-/** 邮件内容：主题、纯文本、HTML 表格（模板里用 {{message}} 或 {{{message_html}}} 都行）。 */
-export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), site = typeof location !== 'undefined' ? location.origin : '') {
+/**
+ * 邮件内容：主题、纯文本、HTML 表格。
+ * 【用户要求】2026-10-21「我希望邮件的内容是这个新鱼的截图」：HTML 版照「新鱼」列表的样子画——
+ * 标题「✦ 新鱼 N」，列为 标的 / 信号时间 / 算法类型 / 市场，信号时间最近的在上；传了 newKeys 时本轮新增的那几条标「新」。
+ * 模板正文写 {{{message_html}}}（三层大括号）显示表格；写 {{message}} 是纯文字版。
+ */
+export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), site = typeof location !== 'undefined' ? location.origin : '', newKeys?: ReadonlySet<string>) {
   const rows = [...fish].sort((a, b) => b.timeMs - a.timeMs).map(s => ({
-    symbol: s.symbol + (s.market === 'us_stock' ? '（美股）' : ''),
-    exchange: EXCHANGE_NAMES[s.exchange ?? 'binance'] ?? s.exchange ?? '币安',
-    time: formatUTC8(s.timeMs).slice(0, 16),
+    symbol: s.symbol,
+    market: [s.market === 'us_stock' ? '美股' : '', s.exchange && s.exchange !== 'binance' ? EXCHANGE_NAMES[s.exchange] ?? s.exchange : ''].filter(Boolean).join(' · '),
+    time: formatUTC8(s.timeMs).slice(0, 19),
     algorithms: fishCaughtBy(s).join(' · '),
+    isNew: !!newKeys?.has(fishDedupKey(s)),
   }));
-  const subject = `【渔】新鱼 ${rows.length} 条 · ${formatUTC8(now).slice(0, 16)}`;
-  const message = [`这一轮捕到 ${rows.length} 条新鱼（时间为 UTC+8）：`, '', ...rows.map(r => `${r.symbol}　${r.exchange}　信号 ${r.time}　${r.algorithms}`), '', site ? `打开无知之幕：${site}` : ''].join('\n').trim();
+  const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
+  const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
+  const subject = `【渔】新鱼 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
+  const message = [`新鱼 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`), '', site ? `打开无知之幕：${site}` : ''].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-  const cell = 'padding:6px 10px;border-bottom:1px solid #eee;text-align:left';
-  const message_html = `<p style="font:14px sans-serif">这一轮捕到 <b>${rows.length}</b> 条新鱼（时间为 UTC+8）：</p>`
-    + `<table style="border-collapse:collapse;font:13px sans-serif"><tr>${['标的', '交易所', '信号时间', '算法类型'].map(h => `<th style="${cell};color:#888;font-weight:normal">${h}</th>`).join('')}</tr>`
-    + rows.map(r => `<tr><td style="${cell};font-family:monospace">${esc(r.symbol)}</td><td style="${cell}">${esc(r.exchange)}</td><td style="${cell};font-family:monospace">${esc(r.time)}</td><td style="${cell}">${esc(r.algorithms)}</td></tr>`).join('')
-    + `</table>${site ? `<p style="font:13px sans-serif"><a href="${esc(site)}">打开无知之幕</a></p>` : ''}`;
+  const mono = "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
+  const font = "font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif";
+  const th = `padding:9px 12px;text-align:left;font-weight:500;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap`;
+  // 手机上信号时间（日期 / 时刻之间）、算法类型（算法之间）、市场可以换行，标的不折行
+  const td = `padding:9px 12px;text-align:left;font-size:13px;border-bottom:1px solid #f0f1f3;white-space:nowrap`, wrap = 'white-space:normal';
+  const badge = (text: string) => `<span style="display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;background:#fdf1d6;color:#b7791f;font-size:10px;line-height:16px;${font};vertical-align:1px">${text}</span>`;
+  const message_html = `<div style="${font};color:#111827;max-width:720px">`
+    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600"><span style="color:#d4a017">✦</span> 新鱼<span style="display:inline-block;margin-left:8px;padding:0 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font-size:12px;line-height:20px;${mono}">${rows.length}</span>`
+    + `${tail ? `<span style="margin-left:8px;font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
+    + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;width:100%">`
+    + `<tr style="background:#f8fafc">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="${th}">${h}</th>`).join('')}</tr>`
+    + rows.map(r => `<tr${r.isNew && newKeys ? ' style="background:#fffbeb"' : ''}><td style="${td};${mono};color:#111827">${esc(r.symbol)}${r.isNew && newKeys ? badge('新') : ''}</td><td style="${td};${wrap};${mono};color:#4b5563">${r.time.split(' ').map(x => `<span style="white-space:nowrap">${esc(x)}</span>`).join(' ')}</td><td style="${td};${wrap};${mono};color:#374151">${r.algorithms.split(' · ').map((x, i) => `<span style="white-space:nowrap">${i ? '· ' : ''}${esc(x)}</span>`).join(' ')}</td><td style="${td};${wrap};color:#6b7280">${esc(r.market)}</td></tr>`).join('')
+    + `</table>`
+    + `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">信号时间为 UTC+8${site ? ` · <a href="${esc(site)}" style="color:#b7791f">打开无知之幕</a>` : ''}</p></div>`;
   return { subject, message, message_html, count: rows.length };
 }
 
@@ -93,17 +110,25 @@ export async function sendFishEmail(config: FishNotifyConfig, content: { subject
   }
 }
 
-/** 发过邮件的鱼（键 → 发送时刻）：同一条鱼只提醒一次，哪怕切换组合后被撤下、下一轮又捕到。跟账号同步，换电脑也不重复发。 */
-const SENT_KEY = 'fish_notified_v1', SENT_LIMIT = 5000;
-const sentStorageKey = () => `${getUserPrefix()}${SENT_KEY}`;
-export function readNotifiedFish(): Record<string, number> {
-  try { const x = JSON.parse(readPersistedStateRaw(sentStorageKey()) ?? '{}'); return x && typeof x === 'object' && !Array.isArray(x) ? x : {}; } catch { return {}; }
+/**
+ * 上一封邮件里的新鱼列表（鱼的键）。
+ * 【用户要求】2026-10-21「新鱼只要有更新，都发一次邮件，无论是手动还是自动模式，都要发」：
+ * 每轮结束拿当前新鱼列表和它比，不一样就发整张表（比上一封多出来的标「新」），一样就不发。跟账号同步。
+ */
+const LAST_KEY = 'fish_notified_last_v1';
+const lastStorageKey = () => `${getUserPrefix()}${LAST_KEY}`;
+export function readLastFishTable(): string[] {
+  try { const x = JSON.parse(readPersistedStateRaw(lastStorageKey()) ?? '[]'); return Array.isArray(x) ? x.filter((k): k is string => typeof k === 'string') : []; } catch { return []; }
 }
-/** 还没提醒过的那几条。 */
-export const unnotifiedFish = (fish: readonly TradeSignal[]) => { const sent = readNotifiedFish(); return fish.filter(s => sent[fishDedupKey(s)] === undefined); };
-export function markFishNotified(fish: readonly TradeSignal[], now = Date.now()): void {
-  const next = Object.fromEntries(Object.entries({ ...readNotifiedFish(), ...Object.fromEntries(fish.map(s => [fishDedupKey(s), now])) }).sort((a, b) => b[1] - a[1]).slice(0, SENT_LIMIT));
-  writePersistedStateRaw(sentStorageKey(), JSON.stringify(next));
+export function saveLastFishTable(keys: readonly string[]): void {
+  const value = [...new Set(keys)];
+  writePersistedStateRaw(lastStorageKey(), JSON.stringify(value));
   const uid = getUserId();
-  if (uid) queueSimStatePush(uid, SENT_KEY, next);
+  if (uid) queueSimStatePush(uid, LAST_KEY, value);
+}
+/** 这张新鱼表和上一封比：changed = 有变化（要发），added = 上一封里没有的。 */
+export function fishTableChange(table: readonly TradeSignal[]): { changed: boolean; added: Set<string>; keys: string[] } {
+  const keys = [...new Set(table.map(fishDedupKey))], last = new Set(readLastFishTable());
+  const added = new Set(keys.filter(k => !last.has(k)));
+  return { changed: keys.length > 0 && (added.size > 0 || keys.length !== last.size), added, keys };
 }

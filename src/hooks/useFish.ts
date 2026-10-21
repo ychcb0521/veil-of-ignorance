@@ -36,8 +36,8 @@ function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrite
 // Shared across TimeControl instances and panel remounts in this browser page.
 let pageScanner: FishScanner | null = null;
 
-/** onCaught：每轮捕捞结束时，这一轮第一次捕到的鱼（用于邮件提醒）。 */
-export function useFish(userId: string | undefined, options: { onCaught?: (fish: TradeSignal[]) => void } = {}) {
+/** onCaught：每轮捕捞结束（手动或自动）时，这一轮第一次捕到的鱼，以及整张「新鱼」列表（用于邮件提醒，列表有变化就发）。 */
+export function useFish(userId: string | undefined, options: { onCaught?: (fish: TradeSignal[], fresh: TradeSignal[]) => void } = {}) {
   const onCaughtRef = useRef(options.onCaught); onCaughtRef.current = options.onCaught;
   const [signals, setSignals] = useState(loadFishSignals);
   const signalsRef = useRef(signals); signalsRef.current = signals;
@@ -98,8 +98,8 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     } catch (error) {
       if (valid()) setProgress({ ...initialFishProgress(), status: 'aborted', error: error instanceof Error ? error.message : String(error) });
     } finally { if (controller.current === mine) {controller.current = null;const r=roundRef.current;if(r&&settings.retainMembers)recombineRef.current?.(settings.combination??'and',settings.displayAlgorithmKeys??r.data.plans.map(fishSelectionKey));persist();
-      // 这一轮第一次进列表的鱼（以前就在列表里、这轮又捕到的不算）交给邮件提醒；切换交集 / 并集、调严阈值不会走到这里
-      if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s)));if(caught.length)onCaughtRef.current?.(caught);}
+      // 每轮结束把新鱼列表交给邮件提醒（有没有变化由提醒那边比对上一封）；切换交集 / 并集、调严阈值不会走到这里
+      if(ownerRef.current===owner){const added=writesRef.current.added,caught=signalsRef.current.filter(s=>added.has(fishDedupKey(s))),fresh=signalsRef.current.filter(s=>s.freshCatch);if(caught.length||fresh.length)onCaughtRef.current?.(caught,fresh);}
     } }
   }, [commit,persist]);
   const estimate=useCallback(async(settings:FishScanSettings,signal:AbortSignal)=>{

@@ -6,14 +6,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { composeFishEmail, markFishNotified, readFishNotify, saveFishNotify, sendFishEmail, unnotifiedFish, type FishNotifyConfig } from '@/lib/fish/notify';
+import { fishDedupKey } from '@/lib/fish/records';
+import { composeFishEmail, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 
 export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string }
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
-  update: (next: FishNotifyConfig) => void; send: (fish: readonly TradeSignal[]) => Promise<void>; test: () => Promise<void>;
+  update: (next: FishNotifyConfig) => void;
+  /** 每轮结束调用：fish = 这一轮第一次捕到的；fresh = 整张「新鱼」列表。新鱼表和上一封不一样就发整张表，多出来的标「新」。 */
+  send: (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => Promise<void>; test: () => Promise<void>;
 }
-export function useFishNotify(account: string | undefined, request?: typeof fetch): FishNotify {
+/** getFresh：当前「新鱼」列表，测试邮件照它发一份（没有新鱼时发示例）。 */
+export function useFishNotify(account: string | undefined, request?: typeof fetch, getFresh?: () => readonly TradeSignal[]): FishNotify {
   const [config, setConfig] = useState<FishNotifyConfig>(readFishNotify);
   const [status, setStatus] = useState<FishNotifyStatus | null>(null);
   const [sending, setSending] = useState(false);
@@ -24,16 +28,24 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     return subscribePersistedStateHydration(`${getUserPrefix()}fish_notify_v1`, refresh);
   }, [account]);
   const update = useCallback((next: FishNotifyConfig) => { saveFishNotify(next); const saved = readFishNotify(); configRef.current = saved; setConfig(saved); }, []);
-  const deliver = useCallback(async (fish: readonly TradeSignal[], test: boolean) => {
-    const c = configRef.current, content = composeFishEmail(fish);
+  const deliver = useCallback(async (fish: readonly TradeSignal[], test: boolean, newKeys?: ReadonlySet<string>, onSent?: () => void) => {
+    const c = configRef.current, content = composeFishEmail(fish, Date.now(), undefined, newKeys);
     if (test) { content.subject = `【渔】测试邮件 · ${content.subject.replace('【渔】', '')}`; }
     setSending(true);
-    try { await sendFishEmail(c, content, request); if (!test) markFishNotified(fish); setStatus({ at: Date.now(), ok: true, count: fish.length, test }); }
+    try { await sendFishEmail(c, content, request); onSent?.(); setStatus({ at: Date.now(), ok: true, count: fish.length, test }); }
     catch (e) { setStatus({ at: Date.now(), ok: false, count: fish.length, test, error: e instanceof TypeError ? '网络不通或被浏览器拦截' : e instanceof Error ? e.message : String(e) }); }
     finally { setSending(false); }
   }, [request]);
   // 只发没提醒过的；发送失败不记，下次捕到再试
-  const send = useCallback(async (fish: readonly TradeSignal[]) => { if (!configRef.current.enabled) return; const pending = unnotifiedFish(fish); if (pending.length) await deliver(pending, false); }, [deliver]);
-  const test = useCallback(() => deliver([{ id: 'test', symbol: 'TESTUSDT', timeMs: Date.now(), timeLabel: '', fallbackZone: '', fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: Date.now(), threshold: 0, featureShort: '示例' } }], true), [deliver]);
+  // 【用户要求】2026-10-21「我希望邮件的内容是这个新鱼的截图」「新鱼只要有更新，都发一次邮件，无论是手动还是自动模式」
+  // 发的是整张新鱼表；和上一封一样就不发；发送失败不记，下一轮再比
+  const send = useCallback(async (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => {
+    if (!configRef.current.enabled) return;
+    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishDedupKey(f) === fishDedupKey(s)))];
+    const change = fishTableChange(table);
+    if (!change.changed) return;
+    await deliver(table, false, change.added, () => saveLastFishTable(change.keys));
+  }, [deliver]);
+  const test = useCallback(() => { const fresh = getFresh?.() ?? []; return fresh.length ? deliver(fresh, true) : deliver([{ id: 'test', symbol: 'TESTUSDT', timeMs: Date.now(), timeLabel: '', fallbackZone: '', fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: Date.now(), threshold: 0, featureShort: '示例' } }], true); }, [deliver, getFresh]);
   return { config, status, sending, update, send, test };
 }

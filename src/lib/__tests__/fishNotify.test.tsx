@@ -3,6 +3,7 @@ import {beforeEach,expect,it,vi} from 'vitest';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
 import {composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
 import {useFishNotify} from '@/hooks/useFishNotify';
+import {fishDedupKey} from '@/lib/fish/records';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const fish=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:symbol,symbol,timeMs:Date.UTC(2026,9,21,h),timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureShort:'CBI-2'},...extra});
@@ -20,11 +21,17 @@ it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存
  expect(fishNotifyMissing({...ready,publicKey:'{{x}}'})).toContain('Public Key 不对');
  expect(fishNotifyMissing({...ready,serviceId:'ychpsychology@163.com',templateId:'{{to_email}}',publicKey:''})).toContain('Service ID 填的是邮箱');
 });
-it('邮件内容：主题写条数，正文逐条列出标的 / 交易所 / 信号时间 / 算法类型，HTML 转义',()=>{
- const m=composeFishEmail([fish('AAAUSDT',1),fish('<B>USDT',2,{exchange:'okx',fish:{...fish('x',0).fish!,combination:'and',algorithms:[{...fish('x',0).fish!,featureShort:'CBI-2'},{...fish('x',0).fish!,featureShort:'BSS'}]}})],Date.UTC(2026,9,21,3),'https://site');
+it('邮件内容照「新鱼」列表画：标的 / 信号时间 / 算法类型 / 市场，最近的在上；本轮新增的标「新」；HTML 转义',()=>{
+ const okx=fish('<B>USDT',2,{exchange:'okx',fish:{...fish('x',0).fish!,combination:'and',algorithms:[{...fish('x',0).fish!,featureShort:'CBI-2'},{...fish('x',0).fish!,featureShort:'BSS'}]}});
+ const m=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'https://site');
  expect(m.subject).toBe('【渔】新鱼 2 条 · 2026-10-21 11:00');expect(m.count).toBe(2);
- expect(m.message).toContain('AAAUSDT　币安　信号 2026-10-21 09:00　CBI-2');expect(m.message).toContain('OKX');expect(m.message).toContain('CBI-2 · BSS');expect(m.message).toContain('https://site');
- expect(m.message_html).toContain('&lt;B&gt;USDT');expect(m.message_html).not.toContain('<B>USDT');
+ expect(m.message.split('\n')[2]).toBe('<B>USDT　2026-10-21 10:00:00　CBI-2 · BSS　OKX');expect(m.message.split('\n')[3]).toBe('AAAUSDT　2026-10-21 09:00:00　CBI-2');expect(m.message).toContain('https://site');
+ for(const h of ['新鱼','标的','信号时间','算法类型','市场'])expect(m.message_html).toContain(h);
+ expect(m.message_html.indexOf('&lt;B&gt;USDT')).toBeLessThan(m.message_html.indexOf('AAAUSDT'));expect(m.message_html).not.toContain('<B>USDT');
+ // 整张新鱼表里只有 AAAUSDT 是本轮新增
+ const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'',new Set([fishDedupKey(fish('AAAUSDT',1))]));
+ expect(n.subject).toBe('【渔】新鱼 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
+ expect(n.message_html).toContain('本轮新增 1');expect(n.message_html.match(/>新</g)).toHaveLength(1);
 });
 it('发送：一次请求发给全部邮箱（逗号隔开）；被拒时报出状态码与原因；缺设置不发',async()=>{
  const request=vi.fn(async()=>new Response('OK',{status:200}));
@@ -57,12 +64,28 @@ it('设置面板：添加多个邮箱（回车或逗号分隔）、格式不对�
  expect(screen.getByRole('link',{name:'emailjs.com'})).toHaveAttribute('href','https://dashboard.emailjs.com/sign-up');
  fireEvent.click(screen.getByRole('button',{name:'删除 a@qq.com'}));expect(notify.update).toHaveBeenLastCalledWith(expect.objectContaining({emails:['b@163.com']}));
 });
-it('同一条鱼只提醒一次：发过的不再发；发送失败不记，下次再试',async()=>{
+it('新鱼列表有变化就发一封整张表（手动、自动都走这里）：和上一封一样不发；多出来的标「新」；失败不记，下一轮再试',async()=>{
  saveFishNotify(ready);let ok=false;const request=vi.fn(async()=>ok?new Response('OK'):new Response('down',{status:500}));
  const {result}=renderHook(()=>useFishNotify('u',request as any));
- await act(async()=>{await result.current.send([fish('AAAUSDT',1)]);});expect(result.current.status).toMatchObject({ok:false});
- ok=true;await act(async()=>{await result.current.send([fish('AAAUSDT',1)]);});expect(request).toHaveBeenCalledTimes(2);
- await act(async()=>{await result.current.send([fish('AAAUSDT',1),fish('BBBUSDT',2)]);});expect(request).toHaveBeenCalledTimes(3);
- expect(JSON.parse((request.mock.calls[2] as any)[1].body).template_params.subject).toContain('新鱼 1 条');
- await act(async()=>{await result.current.send([fish('AAAUSDT',1),fish('BBBUSDT',2)]);});expect(request).toHaveBeenCalledTimes(3);
+ const A=fish('AAAUSDT',1),B=fish('BBBUSDT',2);
+ const sent=(i:number)=>JSON.parse((request.mock.calls[i] as any)[1].body).template_params;
+ await act(async()=>{await result.current.send([A],[A]);});expect(result.current.status).toMatchObject({ok:false});
+ ok=true;await act(async()=>{await result.current.send([A],[A]);});expect(request).toHaveBeenCalledTimes(2);expect(sent(1).subject).toContain('新鱼 1 条');
+ // 这一轮新鱼还是那几条（哪怕重新捕到）：不发
+ await act(async()=>{await result.current.send([],[A]);});expect(request).toHaveBeenCalledTimes(2);
+ // 多了一条：发整张表，新增的标「新」
+ await act(async()=>{await result.current.send([B],[A,B]);});expect(request).toHaveBeenCalledTimes(3);
+ expect(sent(2).subject).toContain('新鱼 2 条（新增 1）');expect(sent(2).message).toContain('【新】BBBUSDT');expect(sent(2).message).not.toContain('【新】AAAUSDT');
+ await act(async()=>{await result.current.send([],[A,B]);});expect(request).toHaveBeenCalledTimes(3);
+ // 少了一条也是更新：发
+ await act(async()=>{await result.current.send([],[B]);});expect(request).toHaveBeenCalledTimes(4);expect(sent(3).subject).toContain('新鱼 1 条');
+ // 新鱼空了：不发
+ await act(async()=>{await result.current.send([],[]);});expect(request).toHaveBeenCalledTimes(4);
+});
+it('测试邮件照当前新鱼列表发；没有新鱼时发示例',async()=>{
+ saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));let fresh:TradeSignal[]=[fish('AAAUSDT',1),fish('BBBUSDT',2)];
+ const {result}=renderHook(()=>useFishNotify('u',request as any,()=>fresh));
+ await act(async()=>{await result.current.test();});let p=JSON.parse((request.mock.calls[0] as any)[1].body).template_params;
+ expect(p.subject).toContain('【渔】测试邮件 · 新鱼 2 条');expect(p.message.indexOf('BBBUSDT')).toBeLessThan(p.message.indexOf('AAAUSDT'));
+ fresh=[];await act(async()=>{await result.current.test();});p=JSON.parse((request.mock.calls[1] as any)[1].body).template_params;expect(p.message).toContain('TESTUSDT');
 });

@@ -24,7 +24,6 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { FishLibrary } from '@/components/FishLibrary';
-import { FishTurnoverAudit } from '@/components/FishTurnoverAudit';
 
 import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSuggestion,suggestedFishThreshold,mayFillFishThreshold,fishSuggestionTitle,type FishSuggestion,type FishSuggestionOptions,type FishSuggestionProgress} from '@/lib/fish/suggestions';
 
@@ -50,8 +49,6 @@ export interface FishPanelProps {
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
-  /** 复核库里的鱼信号前成交额（与信号库成交额统计同一个取数器）。 */
-  onTurnover?: (options: import('@/lib/signalTurnover').SignalTurnoverOptions) => Promise<import('@/lib/signalTurnover').SignalTurnoverResult>;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
 /**
@@ -328,7 +325,6 @@ export function FishPanel(p: FishPanelProps) {
     {p.reconstruction&&<FishReconstructionResults state={p.reconstruction}/>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}
     <div className="space-y-1 border-t border-border/50 pt-3">
-    {p.onTurnover&&<FishTurnoverAudit fish={p.signals} onTurnover={p.onTurnover} onDelete={p.onDelete} onJump={p.onJump} disabled={running}/>}
     <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼」。'}
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     <FishLibrary title="鱼" testId="fish-old" signals={old} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"

@@ -25,7 +25,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
   return <div className="space-y-2 rounded-lg bg-muted/30 px-3 py-2.5 text-[11px]" data-testid="fish-notify" aria-label="邮件提醒设置">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label="新鱼发到邮箱" checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />新鱼发到邮箱</label>
-      <span className="text-[10.5px] text-muted-foreground">每轮捕捞结束（手动或自动），把这一轮第一次捕到的鱼发一封邮件；以前就在列表里的不重复发</span>
+      <span className="text-[10.5px] text-muted-foreground">每轮捕捞结束（手动或自动），新鱼列表有变化就发一封：整张新鱼表，比上一封多出来的标「新」；没变化不发</span>
     </div>
     <div className="flex flex-wrap items-center gap-1.5">
       {config.emails.map(e => <span key={e} className="inline-flex h-6 items-center gap-1 rounded-md bg-background pl-2 pr-1 font-mono text-[10.5px]">{e}<button type="button" aria-label={`删除 ${e}`} className="rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground" onClick={() => notify.update({ ...config, emails: config.emails.filter(x => x !== e) })}><X className="h-3 w-3" /></button></span>)}
@@ -42,7 +42,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
         </div>
         <ol className="list-decimal space-y-0.5 pl-4 text-[10.5px] leading-relaxed text-muted-foreground">
           <li>打开 <a href="https://dashboard.emailjs.com/sign-up" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">emailjs.com</a> 免费注册（每月 200 封），「Email Services」里连上你的邮箱（Gmail / QQ / 163 / Outlook 都行），得到 <b>Service ID</b>。</li>
-          <li>「Email Templates」→「Create New Template」→ 选「Contact Us」→ 右下角「Create Template」→ 右上角「Save」。<b>内容不用改</b>也能发（鱼的列表填进它自带的 {'{{message}}'}）；想一次发给这里填的全部邮箱，把 <b>To Email</b> 改成 <code>{'{{to_email}}'}</code>，不改就只发到 EmailJS 账号的邮箱。<b>Template ID</b> 在模板列表里每个模板名下面，或模板里的「Settings」页（形如 template_abc123）。</li>
+          <li>「Email Templates」→「Create New Template」→ 选「Contact Us」→ 右下角「Create Template」→ 右上角「Save」。正文里的 {'{{message}}'} 是纯文字列表；改成 <code>{'{{{message_html}}}'}</code>（三层大括号）就是和「新鱼」一样的表格；想一次发给这里填的全部邮箱，把 <b>To Email</b> 改成 <code>{'{{to_email}}'}</code>，不改就只发到 EmailJS 账号的邮箱。<b>Template ID</b> 在模板列表里每个模板名下面，或模板里的「Settings」页（形如 template_abc123）。</li>
           <li>「Account」页复制 <b>Public Key</b>。三个都填好后点「发测试邮件」，收到就成了。</li>
         </ol>
       </div>
