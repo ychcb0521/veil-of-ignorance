@@ -3,10 +3,13 @@ import App from "./App.tsx";
 import "./index.css";
 import { installLovableBadgeSuppression } from "./lib/lovableBadgeSuppression";
 import { logBuildStamp } from "./lib/buildStamp";
+import { installNoNativeTooltips } from "./lib/noNativeTooltips";
 import { ensureCriticalStorageHeadroom, ensureStorageReserve, installAuthTokenWriteGuard } from "./lib/persistedStateStorage";
 import { storageUsageBreakdown } from "./lib/authBootRecovery";
 
 installLovableBadgeSuppression();
+// 用户要求：浏览器自带的黑框悬停提示一律不要
+installNoNativeTooltips();
 logBuildStamp();
 // 登录库此刻刚发起恢复、还没等到网络回应：赶在它落盘新令牌之前把位置腾好。
 // 写入守卫管令牌真的写不进去的那一刻（含每小时一次的刷新）；另两步让缓存先让出余量。
