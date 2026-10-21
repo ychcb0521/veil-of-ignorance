@@ -40,7 +40,7 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   expect(screen.getByRole('button', { name: /^信号库/ })).toHaveTextContent('2');
   fireEvent.click(screen.getByRole('button', { name: /^渔/ }));
   expect(mocks.reconstruct).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '复原' }));
+  fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button', { name: '复原' }));
   await waitFor(() => expect(mocks.reconstruct).toHaveBeenCalledTimes(1));
   const options = mocks.reconstruct.mock.calls[0][0] as FishReconstructionOptions;
   expect(options.signals).toEqual(library);

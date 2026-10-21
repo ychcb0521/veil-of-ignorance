@@ -1,7 +1,7 @@
 // 【用户要求】2026-10-21「我希望捕捉到的新鱼能够及时发送到我的邮箱，并且邮箱地址数量可以添加」
 import {beforeEach,expect,it,vi} from 'vitest';
 import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
-import {composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
+import {FISH_EMAIL_MAX_ROWS,composeFishEmail,isEmail,normalizeFishNotify,readFishNotify,saveFishNotify,sendFishEmail,fishNotifyMissing,EMAILJS_ENDPOINT,FISH_NOTIFY_MAX_EMAILS} from '@/lib/fish/notify';
 import {useFishNotify} from '@/hooks/useFishNotify';
 import {fishDedupKey} from '@/lib/fish/records';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
@@ -73,6 +73,7 @@ it('新鱼列表有变化就发一封整张表（手动、自动都走这里）�
  ok=true;await act(async()=>{await result.current.send([A],[A]);});expect(request).toHaveBeenCalledTimes(2);expect(sent(1).subject).toContain('新鱼 1 条');
  // 这一轮新鱼还是那几条（哪怕重新捕到）：不发
  await act(async()=>{await result.current.send([],[A]);});expect(request).toHaveBeenCalledTimes(2);
+ expect(result.current.status).toMatchObject({unchanged:true,count:1});
  // 多了一条：发整张表，新增的标「新」
  await act(async()=>{await result.current.send([B],[A,B]);});expect(request).toHaveBeenCalledTimes(3);
  expect(sent(2).subject).toContain('新鱼 2 条（新增 1）');expect(sent(2).message).toContain('【新】BBBUSDT');expect(sent(2).message).not.toContain('【新】AAAUSDT');
@@ -88,4 +89,11 @@ it('测试邮件照当前新鱼列表发；没有新鱼时发示例',async()=>{
  await act(async()=>{await result.current.test();});let p=JSON.parse((request.mock.calls[0] as any)[1].body).template_params;
  expect(p.subject).toContain('【渔】测试邮件 · 新鱼 2 条');expect(p.message.indexOf('BBBUSDT')).toBeLessThan(p.message.indexOf('AAAUSDT'));
  fresh=[];await act(async()=>{await result.current.test();});p=JSON.parse((request.mock.calls[1] as any)[1].body).template_params;expect(p.message).toContain('TESTUSDT');
+});
+
+it('新鱼很多时表格最多列 60 行（写明还有几条），整封不超过 EmailJS 免费版约 50KB 的上限',()=>{
+ const many=Array.from({length:100},(_,i)=>fish(`S${i}USDT`,i%24,{id:`s${i}`,timeMs:Date.UTC(2026,9,21)+i*3e5,exchange:i%3?'binance':'okx'} as any));
+ const m=composeFishEmail(many,Date.UTC(2026,9,21),'https://site',new Set());
+ expect(FISH_EMAIL_MAX_ROWS).toBe(60);expect(m.message_html).toContain('还有 40 条');expect((m.message_html.match(/<tr/g)||[]).length).toBe(61);
+ expect(new TextEncoder().encode(JSON.stringify(m)).length).toBeLessThan(45_000);
 });

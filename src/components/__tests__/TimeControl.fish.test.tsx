@@ -183,7 +183,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     // 【用户要求】2026-10-19 交易所勾选收在淡色图标后
     expect(screen.queryByRole('checkbox',{name:'币安'})).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
+    // 【用户要求】2026-10-21 捕捞范围 / 查单个币 / 邮件提醒 / 复原收进「⋯」：顶栏不再直接显示
+    for(const name of ['捕捞范围','查单个币','邮件提醒','复原'])expect(screen.queryByRole('button',{name})).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
     expect(screen.getByRole('checkbox',{name:'币安'})).toBeChecked();
     for(const name of ['OKX','Bitget','Gate']){expect(screen.getByRole('checkbox',{name})).not.toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name}));}
     for(const name of ['Bybit','KuCoin 合约','MEXC 合约'])expect(screen.queryByRole('checkbox',{name})).not.toBeInTheDocument();
@@ -229,7 +231,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
 });
 
 it('默认只币安、不选美股；其他交易所与美股仅明确勾选后传入扫描',async()=>{
- render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
+ render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));
  expect(screen.getByRole('checkbox',{name:'币安'})).toBeChecked();
  for(const name of ['OKX','Bitget','Gate','美股'])expect(screen.getByRole('checkbox',{name})).not.toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(1));

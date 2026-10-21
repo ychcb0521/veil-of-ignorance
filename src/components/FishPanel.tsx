@@ -16,7 +16,7 @@ import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type Fish
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
-import { ChevronDown, CircleHelp, Clock3, Mail, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react';
+import { ChevronDown, CircleHelp, Clock3, History, Mail, MoreHorizontal, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
@@ -214,6 +214,7 @@ export function FishPanel(p: FishPanelProps) {
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const x = p.progress;
   const ruleText = (scanning||staleRound)&&x?.rule?x.rule:extraCards.length===0?(firstEnabled?fishRuleText(def,pref.direction,pref.threshold,0,pref.statistic):''):multiple.plans.map(p=>fishRuleText(p.def,p.settings.direction,p.settings.threshold,p.texts.length,p.settings.statistic)).join(combination==='or'?' 或 ':' 且 ');
+  const [menuOpen,setMenuOpen]=useState(false);
   const iconBtn = 'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
   // 【用户要求】2026-10-19「渔界面内的内容可以上下滑动，要切换自如」：面板自己限高、内部滚动；顶栏（时间 / 捕捞 / 状态）滚动时贴顶。
@@ -222,12 +223,18 @@ export function FishPanel(p: FishPanelProps) {
   return <section className="mt-2 max-h-[65vh] min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background" aria-label="渔" data-testid="fish-panel">
     <header className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85" data-testid="fish-toolbar">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-2.5 pt-3 text-[11px]">
-        <div className="flex items-center gap-0.5 pr-1.5"><strong className="text-[13px] font-semibold tracking-wide">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2 p-3 text-[11px] leading-relaxed" aria-label="捕捞说明">
-        <p>算法与 Deep dig 共用定义，包含修改后的内置项和自定义项。所选序列直接与阈值比较，外面不再套 avg：要看均值，就在 Deep dig 公式里写一行（如 avg_CBI2 = avg(CBI2, 24)）再选它。「结果」= 公式最后一句，与 Deep dig 的结果相同；可选公式中的命名序列，常数不列。结果的阈值用显示单位，中间量阈值用原值。可添加最多 6 个算法，各自独立判定，只展示交集。</p>
-        <p>时间按 UTC+8，留空用币安服务器当前时间。同一锚点分别向下取整至各算法周期，仅用已收盘K线。起点是所选条件连续成立的第一根收盘时刻；此前须有一根已知为假。截止未知计读数不全，回溯遇未知计起点不明。</p>
-        <p>各家原生K线分页上限不同。历史超出保留期整家跳过。只有用到BTC才取参考价，参考缺根只跳过那一家（写明原因），全部取不到才整轮中止。</p>
-        <p>稳定币（USDT、USDC、FDUSD、USDe、DAI 等，价格几乎不动、没有短线交易价值）始终排除，不取数也不计入总数。成交额门槛：1 小时 USDT 成交额低于 100 万、12 小时低于 800 万或 24 小时低于 1000 万的币成不了鱼——截止前查一次，命中后在信号起点前再查一次（起点之后才放量的不算）。默认排除较高优先级交易所已上线的基础币。鱼与新鱼按算法分别去重。设置只保存在本机，捕捞开始后锁定。</p>
-        {x?.anchorMs&&<p>本轮节点：{formatUTC8(x.anchorMs)}</p>}{x?.cutoffMs&&<p>本轮阈值 {plan?.settings.direction??'>'} {x.threshold??.3}</p>}
+        <div className="flex items-center gap-0.5 pr-1.5"><strong className="text-[13px] font-semibold tracking-wide">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">
+        {/* 【用户要求】2026-10-21「渔的使用说明点开之后，内容要改成目的、流程（以及伴随的功能介绍）。要精简、只呈现核心要义」 */}
+        <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">目的</h4>
+          <p className="text-muted-foreground">在全市场永续合约里，按你设定的算法找出刚出现信号的标的（鱼），供复盘与交易参考。</p></section>
+        <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">流程</h4>
+          <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
+            <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
+            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
+            <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼」；不手动删除就一直保留。捕完调严阈值、切换交集 / 并集当场重算，不用重扫。</li>
+            <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（新鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
+          </ol></section>
+        {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${plan?.settings.direction??'>'} ${x.threshold??.3}`:''}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
       {suggestionProgress&&<p role="status">建议{suggestionProgress.status==='running'?'计算中':suggestionProgress.status==='cancelled'?'已取消':suggestionProgress.status==='aborted'?'已中止':'已完成'} · {suggestionProgress.phase==='signals'?'信号样本':'随机对照'} · {suggestionProgress.done} / {suggestionProgress.total} {suggestionProgress.current}</p>}
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
@@ -241,16 +248,26 @@ export function FishPanel(p: FishPanelProps) {
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||probe.busy||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
-        <span aria-hidden className="mx-1 h-4 w-px bg-border/70"/>
-        <div className="flex items-center gap-0.5">
-          <button type="button" aria-label="捕捞范围" aria-expanded={open.scope} title={`捕捞范围：${exchanges.map(e => EXCHANGE_NAMES[e]).join('、') || '未选交易所'}${includeDuplicates ? '（含重复币）' : ''}`} onClick={() => setOpen({ scope: !open.scope })} className={`${iconBtn} ${open.scope ? 'bg-muted text-foreground' : ''}`}><SlidersHorizontal className="h-3.5 w-3.5" /></button>
-          {p.onDiagnose&&<button type="button" aria-label="查单个币" aria-expanded={open.probe} title="查单个币：按当前设置与时间，看它为什么命中 / 没命中" onClick={() => setOpen({ probe: !open.probe })} className={`${iconBtn} ${open.probe ? 'bg-muted text-foreground' : ''}`} data-testid="fish-probe-toggle"><Search className="h-3.5 w-3.5" /></button>}
-          {p.notify&&<button type="button" aria-label="邮件提醒" aria-expanded={open.notify} title={p.notify.config.enabled?`新鱼邮件提醒：已开启（${p.notify.config.emails.length} 个邮箱）`:'新鱼邮件提醒：每轮捕到新鱼时发到你的邮箱'} onClick={() => setOpen({ notify: !open.notify })} className={`${iconBtn} ${open.notify ? 'bg-muted text-foreground' : ''} ${p.notify.config.enabled ? 'text-primary/80' : ''}`} data-testid="fish-notify-toggle"><Mail className="h-3.5 w-3.5" /></button>}
-          {p.reconstruction&&<button type="button" className={`${iconBtn} w-auto px-1.5 text-[10.5px]`} title={p.reconstruction.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'} disabled={running||probe.busy||!p.reconstruction.available} onClick={async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();}}>复原</button>}
-        </div>
+        {/* 【用户要求】2026-10-21「这几个符号可以放在同一个隐形的菜单中。界面显示要简洁、不要视觉冗余」：
+            捕捞范围 / 查单个币 / 邮件提醒 / 复原收进一个淡色「⋯」 */}
+        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+          <PopoverTrigger asChild><button type="button" aria-label="更多" title="捕捞范围 · 查单个币 · 邮件提醒 · 复原" className={`${iconBtn} ${menuOpen||open.scope||open.probe||open.notify?'bg-muted text-foreground':''}`} data-testid="fish-more"><MoreHorizontal className="h-4 w-4"/></button></PopoverTrigger>
+          <PopoverContent align="start" sideOffset={4} className="w-56 p-1 text-[11.5px]" data-testid="fish-more-menu">
+            {([
+              {key:'scope',icon:SlidersHorizontal,label:'捕捞范围',hint:exchanges.map(e=>EXCHANGE_NAMES[e]).join('、')||'未选交易所',active:open.scope,onClick:()=>setOpen({scope:!open.scope}),show:true},
+              {key:'probe',icon:Search,label:'查单个币',hint:'',active:open.probe,onClick:()=>setOpen({probe:!open.probe}),show:!!p.onDiagnose,testId:'fish-probe-toggle'},
+              {key:'notify',icon:Mail,label:'邮件提醒',hint:p.notify?.config.enabled?`已开启 · ${p.notify.config.emails.length} 个邮箱`:'未开启',active:open.notify,onClick:()=>setOpen({notify:!open.notify}),show:!!p.notify,testId:'fish-notify-toggle'},
+              {key:'recon',icon:History,label:'复原',hint:'',active:false,onClick:async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();},show:!!p.reconstruction,disabled:running||probe.busy||!p.reconstruction?.available,title:p.reconstruction?.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'},
+            ] as const).filter(i=>i.show).map(i=>{const Icon=i.icon;return <button key={i.key} type="button" aria-label={i.label} aria-expanded={i.key==='recon'?undefined:i.active} title={'title' in i?i.title:undefined} disabled={'disabled' in i?i.disabled:false} data-testid={'testId' in i?i.testId:undefined}
+              onClick={()=>{setMenuOpen(false);void i.onClick();}}
+              className={`flex h-8 w-full items-center gap-2 rounded px-2 text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 ${i.active?'bg-muted/70 text-foreground':'text-foreground/85'}`}>
+              <Icon aria-hidden className={`h-3.5 w-3.5 shrink-0 ${i.key==='notify'&&p.notify?.config.enabled?'text-primary/80':'text-muted-foreground'}`}/><span className="shrink-0">{i.label}</span>
+              {i.hint&&<span className="ml-auto min-w-0 truncate pl-2 text-[10.5px] text-muted-foreground/70">{i.hint}</span>}
+            </button>;})}
+          </PopoverContent>
+        </Popover>
         {p.auto&&<>
           {/* 【用户要求】2026-10-21「渔这里增设一个定时自动（& 手动）捕捉的功能」：手动 = 与原来一样；自动 = 每隔所选时长自动捕一次（时间 = 现在） */}
-          <span aria-hidden className="mx-1 h-4 w-px bg-border/70"/>
           <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[11px]">
             {(['manual','auto'] as const).map(m=><button key={m} type="button" role="radio" aria-checked={p.auto!.mode===m} title={m==='manual'?'手动：点「开始捕捞」才捕':'自动：网站开着就每隔所选时长自动捕一次（按当前时间）'} onClick={()=>p.auto!.setMode(m)} className={`h-6 rounded px-2.5 transition-colors ${p.auto!.mode===m?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{m==='manual'?'手动':'自动'}</button>)}
           </div>

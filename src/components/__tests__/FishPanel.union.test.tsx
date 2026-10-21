@@ -13,7 +13,7 @@ it('两个及以上算法时可选交集 / 并集：默认交集；选并集后�
  fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));const mode=screen.getByRole('radiogroup',{name:'多重算法合并方式'});expect(within(mode).getAllByRole('radio').map(o=>o.textContent)).toEqual(['交集','并集']);expect(screen.queryByText('多重算法',{exact:true})).toBeNull();expect(within(mode).getByRole('radio',{name:'交集'})).toHaveAttribute('aria-checked','true');expect(screen.getByTestId('fish-rule')).toHaveTextContent(' 且 ');
  fireEvent.click(within(mode).getByRole('radio',{name:'并集'}));expect(screen.getByTestId('fish-rule')).toHaveTextContent(' 或 ');expect(screen.getByTestId('fish-rule')).not.toHaveTextContent(' 且 ');
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await vi.waitFor(()=>expect(start).toHaveBeenCalled());expect(start.mock.calls[0][0]).toMatchObject({combination:'or'});expect(start.mock.calls[0][0].algorithms).toHaveLength(2);
- fireEvent.click(screen.getByRole('button',{name:'查单个币'}));fireEvent.change(screen.getByLabelText('查单个币的标的'),{target:{value:'AAA'}});fireEvent.click(screen.getByRole('button',{name:'查'}));await vi.waitFor(()=>expect(diagnose).toHaveBeenCalled());expect(diagnose.mock.calls[0][0]).toMatchObject({combination:'or'});
+ fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'查单个币'}));fireEvent.change(screen.getByLabelText('查单个币的标的'),{target:{value:'AAA'}});fireEvent.click(screen.getByRole('button',{name:'查'}));await vi.waitFor(()=>expect(diagnose).toHaveBeenCalled());expect(diagnose.mock.calls[0][0]).toMatchObject({combination:'or'});
  cleanup();render(panel());expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
 });
 

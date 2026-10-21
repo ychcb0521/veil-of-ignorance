@@ -9,7 +9,8 @@ import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { fishDedupKey } from '@/lib/fish/records';
 import { composeFishEmail, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 
-export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string }
+/** unchanged = 这一轮结束时新鱼和上一封一样，没发。 */
+export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean }
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
   update: (next: FishNotifyConfig) => void;
@@ -43,7 +44,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
     if (!configRef.current.enabled) return;
     const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishDedupKey(f) === fishDedupKey(s)))];
     const change = fishTableChange(table);
-    if (!change.changed) return;
+    if (!change.changed) { if (table.length) setStatus({ at: Date.now(), ok: true, count: table.length, unchanged: true }); return; }
     await deliver(table, false, change.added, () => saveLastFishTable(change.keys));
   }, [deliver]);
   const test = useCallback(() => { const fresh = getFresh?.() ?? []; return fresh.length ? deliver(fresh, true) : deliver([{ id: 'test', symbol: 'TESTUSDT', timeMs: Date.now(), timeLabel: '', fallbackZone: '', fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: Date.now(), threshold: 0, featureShort: '示例' } }], true); }, [deliver, getFresh]);

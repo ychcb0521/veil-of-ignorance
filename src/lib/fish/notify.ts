@@ -60,6 +60,8 @@ export function fishNotifyMissing(c: FishNotifyConfig): string {
  * 标题「✦ 新鱼 N」，列为 标的 / 信号时间 / 算法类型 / 市场，信号时间最近的在上；传了 newKeys 时本轮新增的那几条标「新」。
  * 模板正文写 {{{message_html}}}（三层大括号）显示表格；写 {{message}} 是纯文字版。
  */
+/** 邮件表格最多列这么多行（其余写「还有 N 条」），保证不超过 EmailJS 免费版的大小上限。 */
+export const FISH_EMAIL_MAX_ROWS = 60;
 export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), site = typeof location !== 'undefined' ? location.origin : '', newKeys?: ReadonlySet<string>) {
   const rows = [...fish].sort((a, b) => b.timeMs - a.timeMs).map(s => ({
     symbol: s.symbol,
@@ -73,20 +75,24 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   const subject = `【渔】新鱼 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
   const message = [`新鱼 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`), '', site ? `打开无知之幕：${site}` : ''].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-  const mono = "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
-  const font = "font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif";
-  const th = `padding:9px 12px;text-align:left;font-weight:500;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap`;
-  // 手机上信号时间（日期 / 时刻之间）、算法类型（算法之间）、市场可以换行，标的不折行
-  const td = `padding:9px 12px;text-align:left;font-size:13px;border-bottom:1px solid #f0f1f3;white-space:nowrap`, wrap = 'white-space:normal';
-  const badge = (text: string) => `<span style="display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;background:#fdf1d6;color:#b7791f;font-size:10px;line-height:16px;${font};vertical-align:1px">${text}</span>`;
-  const message_html = `<div style="${font};color:#111827;max-width:720px">`
-    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600"><span style="color:#d4a017">✦</span> 新鱼<span style="display:inline-block;margin-left:8px;padding:0 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font-size:12px;line-height:20px;${mono}">${rows.length}</span>`
-    + `${tail ? `<span style="margin-left:8px;font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
-    + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;width:100%">`
-    + `<tr style="background:#f8fafc">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="${th}">${h}</th>`).join('')}</tr>`
-    + rows.map(r => `<tr${r.isNew && newKeys ? ' style="background:#fffbeb"' : ''}><td style="${td};${mono};color:#111827">${esc(r.symbol)}${r.isNew && newKeys ? badge('新') : ''}</td><td style="${td};${wrap};${mono};color:#4b5563">${r.time.split(' ').map(x => `<span style="white-space:nowrap">${esc(x)}</span>`).join(' ')}</td><td style="${td};${wrap};${mono};color:#374151">${r.algorithms.split(' · ').map((x, i) => `<span style="white-space:nowrap">${i ? '· ' : ''}${esc(x)}</span>`).join(' ')}</td><td style="${td};${wrap};color:#6b7280">${esc(r.market)}</td></tr>`).join('')
+  // EmailJS 免费版模板变量合计约 50KB：样式尽量放在 table 上继承，每行只留必需的内联样式；最多列 60 行
+  const shown = rows.slice(0, FISH_EMAIL_MAX_ROWS), more = rows.length - shown.length;
+  const sans = "-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif", mono = 'ui-monospace,Menlo,Consolas,monospace';
+  const cell = 'padding:8px 12px;border-top:1px solid #f0f1f3';
+  const message_html = `<div style="font:14px ${sans};color:#111827;max-width:720px">`
+    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600"><span style="color:#d4a017">✦</span> 新鱼 <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
+    + `${tail ? ` <span style="font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
+    + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;width:100%;font:13px ${mono};color:#374151">`
+    + `<tr style="background:#f8fafc;font:12px ${sans};color:#6b7280;text-align:left">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="padding:9px 12px;font-weight:500">${h}</th>`).join('')}</tr>`
+    + shown.map(r => {
+      const mark = r.isNew && newKeys;
+      const [date, clock] = r.time.split(' ');
+      return `<tr${mark ? ' style="background:#fffbeb"' : ''}><td style="${cell};color:#111827;white-space:nowrap">${esc(r.symbol)}${mark ? ` <span style="padding:0 4px;border-radius:4px;background:#fdf1d6;color:#b7791f;font:10px ${sans}">新</span>` : ''}</td>`
+        + `<td style="${cell};color:#4b5563"><span style="white-space:nowrap">${date}</span> ${clock}</td>`
+        + `<td style="${cell}">${r.algorithms.split(' · ').map(esc).join(' ·&nbsp;')}</td><td style="${cell};color:#6b7280;font-family:${sans}">${esc(r.market)}</td></tr>`;
+    }).join('')
     + `</table>`
-    + `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">信号时间为 UTC+8${site ? ` · <a href="${esc(site)}" style="color:#b7791f">打开无知之幕</a>` : ''}</p></div>`;
+    + `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">${more ? `还有 ${more} 条，打开网站查看 · ` : ''}信号时间为 UTC+8${site ? ` · <a href="${esc(site)}" style="color:#b7791f">打开无知之幕</a>` : ''}</p></div>`;
   return { subject, message, message_html, count: rows.length };
 }
 
