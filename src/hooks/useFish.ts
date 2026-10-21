@@ -135,7 +135,9 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const same=(a:readonly string[],b:readonly string[])=>JSON.stringify([...a].sort())===JSON.stringify([...b].sort());
     if(round.mode===mode&&same(round.keys,algorithmKeys))return true;
     const undo = writesRef.current;
-    let list = signalsRef.current.filter(s => !undo.added.has(fishDedupKey(s))).map(s => {const old=undo.refreshed.get(fishDedupKey(s));return old?{...old,quality:s.quality}:s;});
+    // 【用户要求】2026-10-21「鱼那里的数据只要没删除，就一直要保存，不能轻易删除」：换口径时这一轮捕到、新口径不要的鱼不再丢掉，
+    // 移进「鱼」留着（以前是直接从列表拿掉）；只有用户手动删除才会删
+    let list = signalsRef.current.map(s => {const k=fishDedupKey(s);if(undo.added.has(k))return withoutFresh(s);const old=undo.refreshed.get(k);return old?{...old,quality:s.quality}:s;});
     const writes = emptyWrites(), { signals: combined, counts } = combineFishRound(selected, mode);
     for (const raw of combined) { const edit=edits.current.get(fishDedupKey(raw));if(edit?.deleted)continue;const signal=edit?.signal?{...raw,quality:edit.signal.quality}:raw; const next = applyCatch(list, signal, writes); if (next) list = next; }
     writesRef.current = writes; roundRef.current = { ...round, mode,keys:[...algorithmKeys] };

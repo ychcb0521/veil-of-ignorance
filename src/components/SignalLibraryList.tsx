@@ -220,6 +220,8 @@ interface RowProps {
   onRate: (id: string, next: number) => void;
   /** 行内任一控件拿到焦点时报上自己的 id，列表据此把这一行钉在 DOM 里。 */
   onFocusRow: (id: string) => void;
+  /** 删除要点两下：第一下变成「确认删除」，3 秒内再点才删（「鱼」用）。 */
+  confirmDelete?: boolean;
 }
 
 /**
@@ -230,10 +232,13 @@ interface RowProps {
 function SignalLibraryRowImpl({
   id, symbol, timeLabel, fallbackZone, quality, jumpIssue, exchange, chartUnavailable, market,
   traded, hasDayCampaign, jumping, disabled,
-  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes,
+  onJump, onDelete, onRate, onFocusRow, extraTitle, algorithm, match, showMatch, processSignal, algorithmTypes, confirmDelete = false,
 }: RowProps) {
   const handleJump = useCallback(() => onJump(id), [onJump, id]);
-  const handleDelete = useCallback(() => onDelete(id), [onDelete, id]);
+  // 【用户要求】2026-10-21「鱼那里的数据…不能轻易删除」：× 紧挨着跳转箭头，容易点错——鱼要再点一次「确认删除」
+  const [armed, setArmed] = useState(false);
+  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 3000); return () => clearTimeout(t); }, [armed]);
+  const handleDelete = useCallback(() => { if (confirmDelete && !armed) { setArmed(true); return; } setArmed(false); onDelete(id); }, [onDelete, id, confirmDelete, armed]);
   const handleRate = useCallback((next: number) => onRate(id, next), [onRate, id]);
   // React 的 onFocus 走 focusin，会冒泡：行内哪个按钮拿到焦点都算这一行。
   const handleFocus = useCallback(() => onFocusRow(id), [onFocusRow, id]);
@@ -320,13 +325,16 @@ function SignalLibraryRowImpl({
           ? <Loader2 className="h-4 w-4 animate-spin" />
           : <ArrowRightCircle className="h-4 w-4" />}
       </button>
-      <button
-        onClick={handleDelete}
-        className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-        title="删除该信号"
-      >
-        <X className="w-3.5 h-3.5" />
-      </button>
+      {armed
+        // 最后一列只有 × 那么宽：确认按钮从 × 的位置向左浮出，盖住跳转箭头（第二下不会误点成跳转）
+        ? <span className="relative h-5 w-5 shrink-0"><button onClick={handleDelete} onBlur={() => setArmed(false)} autoFocus className="absolute right-0 top-0 z-10 h-5 whitespace-nowrap rounded bg-destructive px-1.5 text-[10.5px] font-medium text-destructive-foreground shadow-sm hover:bg-destructive/90" aria-label={`确认删除 ${symbol}`}>确认删除</button></span>
+        : <button
+          onClick={handleDelete}
+          className="flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+          title="删除该信号"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>}
     </div>
   );
 }
@@ -343,6 +351,8 @@ interface Props {
   showProcess?: boolean;
   /** 「渔」的鱼：兜底区这一列换成「算法类型」。 */
   rowAlgorithmTypes?: (signal: TradeSignal) => string[];
+  /** 删除要点两下确认（「鱼」用）。 */
+  confirmDelete?: boolean;
   /** 已排好序、筛好的行。 */
   rows: TradeSignal[];
   tradedDayIndex: Set<string>;
@@ -376,7 +386,7 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes,
+  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const countRef = useRef(rows.length);
@@ -574,6 +584,7 @@ function SignalLibraryListImpl({
         onDelete={onDelete}
         onRate={onRate}
         onFocusRow={handleRowFocus}
+        confirmDelete={confirmDelete}
       />,
     );
     previous = index;

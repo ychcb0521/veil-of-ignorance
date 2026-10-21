@@ -52,7 +52,10 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(fishButton);
     expect(screen.queryByText('上传 / 粘贴信号')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
+    // 【用户要求】2026-10-21「不能轻易删除」：点 × 先变成「确认删除」，再点一次才删
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByTitle('删除该信号'));
+    expect(loadFishSignals()).toHaveLength(1);
+    fireEvent.click(within(screen.getByTestId('fish-panel')).getByRole('button',{name:/^确认删除/}));
     expect(loadFishSignals()).toHaveLength(0);
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });

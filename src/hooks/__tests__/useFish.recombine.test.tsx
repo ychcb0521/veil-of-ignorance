@@ -22,20 +22,22 @@ const a={statistic:'结果',direction:'>' as const,threshold:100,constraints:[]}
 const keys=[compileFishProgram(def,a).algorithmKey,compileFishProgram(def,b).algorithmKey];
 const old={id:'old',symbol:'OLDUSDT',timeMs:1,timeLabel:'',fallbackZone:'',quality:3,fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,threshold:1,cutoffMs:1,algorithmKey:'old-key'}};
 beforeEach(()=>{sessions.clear();candleRequests=0;localStorage.clear();localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([old]));gate=null;});
-it('并集扫完点「交集」：新鱼直接换成交集结果（不重扫），再切回并集也一样；原有的鱼不受影响',async()=>{
+it('并集扫完点「交集」：新鱼直接换成交集结果（不重扫），再切回并集也一样；原有的鱼不受影响；切换下来的鱼留在「鱼」里不丢',async()=>{
  const {result}=renderHook(()=>useFish(undefined));
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
  const fresh=()=>result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort();
  expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.progress?.counts.hit).toBe(2);
  let ok=false;act(()=>{ok=result.current.recombine('and',keys);});expect(ok).toBe(true);
  expect(fresh()).toEqual(['AAAUSDT']);expect(result.current.progress?.counts.hit).toBe(1);expect(result.current.progress?.rule).toContain(' 且 ');
- expect(result.current.signals.filter(s=>s.fish?.combination==='or')).toHaveLength(0);
+ // 【用户要求】2026-10-21「鱼那里的数据只要没删除，就一直要保存」：并集口径的两条移进「鱼」，不再从列表拿掉
+ const union=()=>result.current.signals.filter(s=>s.fish?.combination==='or');
+ expect(union().map(s=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);expect(union().every(s=>!s.freshCatch)).toBe(true);
  act(()=>{result.current.recombine('or',keys);});expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.progress?.rule).toContain(' 或 ');
  expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')).toMatchObject({quality:3});expect(result.current.signals.find(s=>s.symbol==='OLDUSDT')?.freshCatch).toBeUndefined();
  // 子集与空集都能切换；无法识别的设置保留当前结果。
  act(()=>{ok=result.current.recombine('and',[keys[0]]);});expect(ok).toBe(true);expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);
  expect(result.current.signals.find(s=>s.freshCatch)?.fish?.algorithmKey).toBe(keys[0]);
- act(()=>{result.current.recombine('or',[]);});expect(fresh()).toEqual([]);expect(result.current.progress?.counts.hit).toBe(0);
+ act(()=>{result.current.recombine('or',[]);});expect(fresh()).toEqual([]);expect(result.current.progress?.counts.hit).toBe(0);expect(union()).toHaveLength(2);
  act(()=>{result.current.recombine('and',keys);});expect(fresh()).toEqual(['AAAUSDT']);
  act(()=>{ok=result.current.recombine('and',['missing']);});expect(ok).toBe(false);expect(fresh()).toEqual(['AAAUSDT']);
 });
@@ -113,9 +115,9 @@ it('每轮捕捞结束交出这一轮新进列表的鱼和整张新鱼列表；�
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
  expect(onCaught).toHaveBeenCalledTimes(1);expect(onCaught.mock.calls[0][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);expect(onCaught.mock.calls[0][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
  act(()=>{result.current.recombine('and',keys);});expect(onCaught).toHaveBeenCalledTimes(1);
- // 第二轮：切到交集后列表里只剩交集口径的 AAA；这轮并集口径的 AAA、EEE 都是重新进列表（交出去，由邮件那边按「发过没」去重，不会重发）
+ // 第二轮：切到交集时并集口径的 AAA、EEE 留在「鱼」里，这轮再捕到不算新进列表；新鱼列表照样交出
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
- expect(onCaught).toHaveBeenCalledTimes(2);expect(onCaught.mock.calls[1][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ expect(onCaught).toHaveBeenCalledTimes(2);expect(onCaught.mock.calls[1][0]).toEqual([]);expect(onCaught.mock.calls[1][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
  // 第三轮：没有新进列表的，但新鱼列表照样交出（列表和上一封一样时邮件那边不发）
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
  expect(onCaught).toHaveBeenCalledTimes(3);expect(onCaught.mock.calls[2][0]).toEqual([]);expect(onCaught.mock.calls[2][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
