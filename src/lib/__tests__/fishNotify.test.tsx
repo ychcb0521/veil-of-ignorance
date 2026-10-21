@@ -14,6 +14,11 @@ it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存
  expect(c.emails[0]).toBe('a@qq.com');expect(c.emails).toHaveLength(FISH_NOTIFY_MAX_EMAILS);expect(c.serviceId).toBe('s');
  saveFishNotify(ready);expect(readFishNotify()).toEqual(ready);
  expect(fishNotifyMissing({...ready,emails:[]})).toContain('收件邮箱');expect(fishNotifyMissing({...ready,publicKey:''})).toContain('Public Key');expect(fishNotifyMissing(ready)).toBe('');
+ // 截图里的填法：Service ID 填邮箱、Template ID 填 {{to_email}} —— 直接指出该填什么
+ expect(fishNotifyMissing({...ready,serviceId:'ychpsychology@163.com'})).toContain('Service ID 填的是邮箱');
+ expect(fishNotifyMissing({...ready,templateId:'{{to_email}}'})).toContain('填在 EmailJS 网站的模板里');
+ expect(fishNotifyMissing({...ready,publicKey:'{{x}}'})).toContain('Public Key 不对');
+ expect(fishNotifyMissing({...ready,serviceId:'ychpsychology@163.com',templateId:'{{to_email}}',publicKey:''})).toContain('Service ID 填的是邮箱');
 });
 it('邮件内容：主题写条数，正文逐条列出标的 / 交易所 / 信号时间 / 算法类型，HTML 转义',()=>{
  const m=composeFishEmail([fish('AAAUSDT',1),fish('<B>USDT',2,{exchange:'okx',fish:{...fish('x',0).fish!,combination:'and',algorithms:[{...fish('x',0).fish!,featureShort:'CBI-2'},{...fish('x',0).fish!,featureShort:'BSS'}]}})],Date.UTC(2026,9,21,3),'https://site');

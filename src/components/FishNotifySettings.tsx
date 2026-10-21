@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import type { FishNotify } from '@/hooks/useFishNotify';
-import { FISH_NOTIFY_MAX_EMAILS, fishNotifyMissing, isEmail } from '@/lib/fish/notify';
+import { FISH_NOTIFY_MAX_EMAILS, fishNotifyFieldProblem, fishNotifyMissing, isEmail } from '@/lib/fish/notify';
 import { FishCheck } from './FishAlgorithmCard';
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-background px-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 focus-visible:border-ring/60';
@@ -49,7 +49,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
     </details>
     <div className="flex flex-wrap items-center gap-2">
       <button type="button" onClick={() => void notify.test()} disabled={!!missing || sending} className="h-7 rounded-md border border-border/70 bg-background px-2.5 hover:bg-muted disabled:opacity-40">{sending ? '发送中…' : '发测试邮件'}</button>
-      {missing ? <span className="text-[10.5px] text-muted-foreground">{missing}</span>
+      {missing ? <span className={`text-[10.5px] ${fishNotifyFieldProblem(config) ? 'text-destructive/80' : 'text-muted-foreground'}`} data-testid="fish-notify-missing">{missing}</span>
         : status ? <span className={`text-[10.5px] ${status.ok ? 'text-muted-foreground' : 'text-destructive/80'}`} data-testid="fish-notify-status">{new Date(status.at).toLocaleTimeString('zh-CN', { hour12: false })} {status.test ? '测试邮件' : `新鱼 ${status.count} 条`}{status.ok ? ` 已发到 ${config.emails.length} 个邮箱` : ` 发送失败：${status.error}`}</span>
         : !config.enabled && <span className="text-[10.5px] text-muted-foreground">勾选「新鱼发到邮箱」后开始提醒</span>}
     </div>

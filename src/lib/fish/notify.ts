@@ -38,11 +38,20 @@ export function saveFishNotify(config: FishNotifyConfig): void {
   const uid = getUserId();
   if (uid) queueSimStatePush(uid, LOGICAL_KEY, value);
 }
+/**
+ * 三个编号填错位置的常见情况（2026-10-21 用户截图：Service ID 填了邮箱、Template ID 填了 {{to_email}}）：直接指出该填什么。
+ */
+export function fishNotifyFieldProblem(c: Pick<FishNotifyConfig, 'serviceId' | 'templateId' | 'publicKey'>): string {
+  if (c.serviceId.includes('@')) return 'Service ID 填的是邮箱：这里要填 EmailJS「Email Services」里那一串编号（形如 service_abc123）';
+  if (/[{}]/.test(c.templateId)) return 'Template ID 填成了模板内容：{{to_email}} 是填在 EmailJS 网站的模板里的；这里要填模板编号（形如 template_abc123）';
+  if (/[{}@\s]/.test(c.publicKey)) return 'Public Key 不对：到 EmailJS「Account」页复制 Public Key（一串字母数字）';
+  return '';
+}
 /** 还缺什么才能发（空 = 可以发）。 */
 export function fishNotifyMissing(c: FishNotifyConfig): string {
   if (!c.emails.length) return '先添加至少一个收件邮箱';
-  if (!c.serviceId || !c.templateId || !c.publicKey) return '先填好 EmailJS 的 Service ID、Template ID 和 Public Key';
-  return '';
+  // 填错位置的先指出来（哪怕另外几个还空着），再提示没填的
+  return fishNotifyFieldProblem(c) || (!c.serviceId || !c.templateId || !c.publicKey ? '先填好 EmailJS 的 Service ID、Template ID 和 Public Key' : '');
 }
 
 /** 邮件内容：主题、纯文本、HTML 表格（模板里用 {{message}} 或 {{{message_html}}} 都行）。 */
