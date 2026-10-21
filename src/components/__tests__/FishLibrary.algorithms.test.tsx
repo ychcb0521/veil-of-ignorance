@@ -18,5 +18,8 @@ it.each(['新鱼','鱼'])('%s：标的列只放完整标的名；「算法类型
  fireEvent.change(select,{target:{value:'CBI-2'}});expect(types()).toEqual(['CBI-2 · BSS','CBI-2']);
  fireEvent.change(select,{target:{value:''}});fireEvent.click(screen.getByTestId('signal-sort-算法类型'));expect(types()).toEqual(['CBA','CBI-2','CBI-2 · BSS','Z']);
  fireEvent.click(screen.getByTestId('signal-sort-算法类型'));expect(types()).toEqual(['Z','CBI-2 · BSS','CBI-2','CBA']);
- expect(screen.getByText('AAAUSDT').closest('.group')).not.toHaveAttribute('title');expect(document.querySelector('[title*="完整快照"]')).toBeNull();expect(screen.queryByRole('button',{name:'加入信号库'})).not.toBeInTheDocument();
+ expect(screen.getByText('AAAUSDT').closest('.group')).not.toHaveAttribute('title');
+ // 2026-10-21「我不喜欢这个黑框」：算法类型格不再弹系统提示；列表开关不画焦点框
+ for(const c of screen.getAllByTestId('fish-algorithm-type'))expect(c).not.toHaveAttribute('title');
+ expect(screen.getByRole('button',{name:new RegExp(`^${title}`)}).className).toContain('outline-none');expect(document.querySelector('[title*="完整快照"]')).toBeNull();expect(screen.queryByRole('button',{name:'加入信号库'})).not.toBeInTheDocument();
 });

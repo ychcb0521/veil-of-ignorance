@@ -283,7 +283,7 @@ function SignalLibraryRowImpl({
         </span>
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
         {algorithmTypes
-          ? <span className="truncate font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type" title={algorithmTypes.join(' · ')}>{algorithmTypes.join(' · ')}</span>
+          ? <span className="truncate font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
           : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
               {fallbackZone ? `兜底 ${fallbackZone}` : ''}
             </span>}
