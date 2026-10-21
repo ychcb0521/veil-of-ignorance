@@ -6,7 +6,10 @@ import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
+import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards} from '@/lib/fish/cards';
 import {FISH_TURNOVER_FLOORS} from '@/lib/fish/shared';
+import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
+import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import {readFishPreference,saveFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import { fishRuleText } from '@/lib/fishRule';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,6 +30,8 @@ export interface FishPanelProps {
   hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
   onRecombine?: (mode: 'and' | 'or', algorithmKeys: readonly string[], plans?: readonly FishProgram[]) => boolean;
+  /** 定时自动捕捞（手动 / 自动 + 间隔）；不给就只有手动。 */
+  auto?: FishAutoScan;
   /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
   roundPlans?: readonly FishProgram[] | null;
   /** 给了就每次打开都排成这几个算法（按顺序、全部勾选，各卡沿用该算法上次的设置）；不给就恢复上次保存的卡片。 */
@@ -47,19 +52,8 @@ export interface FishPanelProps {
  * 平时只有一行设置 + 一行「状态 · 命中 · 进度」；交易所勾选收在淡色滑杆图标后（展开状态记在这次浏览里）。
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
-const cardsKey=()=>`${getUserPrefix()}fish-cards.v1`;
-/**
- * 默认的四个算法与顺序：CBI-2 → DSP·a → CBA → BSS。
- * 【用户要求】2026-10-20「我希望渔默认为这四个算法，每次点开始都默认为这四个算法和顺序」：
- * 每次打开「渔」都排成这四张卡、按这个顺序、全部勾选；各卡沿用这个算法上次的阈值 / 统计量 / 方向（没有就用默认门槛）。
- * 会话中临时增删、停用的卡，下次打开恢复成这四个。Deep dig 里删掉了的算法跳过。
- */
-export const FISH_DEFAULT_ALGORITHMS:readonly string[]=['cbi2','drift-speed-z','cba','bss'];
-function defaultCards(ids:readonly string[],available:readonly string[]):FishCard[]{
-  const saved=readCards();
-  return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
-}
-function readCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(cardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:withFishDefaultThreshold(c.featureId,{...c.pref,constraints:[]})})):[];}catch{return [];}}
+// 卡片的读写与默认四个算法放在 lib/fish/cards.ts：定时自动捕捞（面板没打开时）也要读同一份
+export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
 function readOpen(): { scope: boolean; detail: boolean; probe: boolean } {
@@ -235,7 +229,7 @@ export function FishPanel(p: FishPanelProps) {
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
     </div>}
 </PopoverContent></Popover></div>
-        <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title="格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间">
+        <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title={p.auto?.mode==='auto'?'自动捕捞始终按当前时间；这里的时间只用于手动点「开始捕捞」':'格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间'}>
           <Clock3 aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60"/>
           <input aria-label="捕捞时间（UTC+8）" placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
@@ -249,6 +243,17 @@ export function FishPanel(p: FishPanelProps) {
           {p.onDiagnose&&<button type="button" aria-label="查单个币" aria-expanded={open.probe} title="查单个币：按当前设置与时间，看它为什么命中 / 没命中" onClick={() => setOpen({ probe: !open.probe })} className={`${iconBtn} ${open.probe ? 'bg-muted text-foreground' : ''}`} data-testid="fish-probe-toggle"><Search className="h-3.5 w-3.5" /></button>}
           {p.reconstruction&&<button type="button" className={`${iconBtn} w-auto px-1.5 text-[10.5px]`} title={p.reconstruction.settingsError||'复原：用信号发生前的数据评估各算法，仅保存在本机'} disabled={running||probe.busy||!p.reconstruction.available} onClick={async()=>{const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}await p.reconstruction!.start();}}>复原</button>}
         </div>
+        {p.auto&&<>
+          {/* 【用户要求】2026-10-21「渔这里增设一个定时自动（& 手动）捕捉的功能」：手动 = 与原来一样；自动 = 每隔所选时长自动捕一次（时间 = 现在） */}
+          <span aria-hidden className="mx-1 h-4 w-px bg-border/70"/>
+          <div role="radiogroup" aria-label="捕捞模式" className="inline-flex h-7 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[11px]">
+            {(['manual','auto'] as const).map(m=><button key={m} type="button" role="radio" aria-checked={p.auto!.mode===m} title={m==='manual'?'手动：点「开始捕捞」才捕':'自动：网站开着就每隔所选时长自动捕一次（按当前时间）'} onClick={()=>p.auto!.setMode(m)} className={`h-6 rounded px-2.5 transition-colors ${p.auto!.mode===m?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{m==='manual'?'手动':'自动'}</button>)}
+          </div>
+          {p.auto.mode==='auto'&&<>
+            <span className="relative shrink-0"><select aria-label="自动捕捞间隔" value={p.auto.hours} onChange={e=>p.auto!.setHours(Number(e.target.value))} className="h-7 appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] tabular-nums text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60">{FISH_AUTO_INTERVALS.map(h=><option key={h} value={h}>每 {h}h</option>)}</select><ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/></span>
+            <span className="text-[10.5px] text-muted-foreground" data-testid="fish-auto-next" title={p.auto.lastRunAt?`上次自动 / 手动捕捞：${formatUTC8(p.auto.lastRunAt).slice(0,16)}`:undefined}>{!p.auto.online?'等待联网':p.auto.waiting?'到点了，等当前任务结束':p.auto.nextAt!==null&&p.auto.nextAt>Date.now()?`下次 ${formatUTC8(p.auto.nextAt).slice(5,16)}`:'即将开始'}</span>
+          </>}
+        </>}
       </div>
       {x && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2.5 text-[11px]">
         <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={[...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.thin?[`成交额不够（1h < 100 万、12h < 800 万或 24h < 1000 万）、跳过 ${x.thin} 个`]:[])].join('；')||undefined}>
@@ -309,6 +314,7 @@ export function FishPanel(p: FishPanelProps) {
     </div>
     {(error||multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')) && <p role="alert" className="text-[11px] text-destructive">{error||multiple.error}</p>}
     {x?.error && <p className="text-[11px] text-destructive">{x.error}</p>}
+    {p.auto?.error && <p className="text-[11px] text-destructive/80" data-testid="fish-auto-error">{p.auto.error}</p>}
     {x?.notice && <p className="break-words text-[10.5px] text-muted-foreground" data-testid="fish-notice">{x.notice}</p>}
     {p.reconstruction&&<FishReconstructionResults state={p.reconstruction}/>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼」 */}

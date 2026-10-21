@@ -115,6 +115,8 @@ export function useFish(userId: string | undefined) {
     return scanner.current.reconstruct(options);
   },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
+  /** 是否有捕捞 / 建议 / 复原等在用取数器（定时自动捕捞据此等待）。 */
+  const busy = useCallback(() => !!controller.current || !!(scanner.current ?? pageScanner)?.isBusy(), []);
   /**
    * 任选本轮算法子集与交集 / 并集：用保存的逐币结论直接重新合并，「新鱼」换成另一种结果，不用重扫。
    * 先撤掉这一轮写进列表的改动（新加的删掉、被改成新鱼的恢复原样），再按新方式写入。
@@ -156,5 +158,5 @@ export function useFish(userId: string | undefined) {
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove };
+  return { signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
 }

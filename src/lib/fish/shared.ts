@@ -7,6 +7,15 @@ export class FishError extends Error { constructor(message: string, readonly kin
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 export function fishDelay(ms: number, signal: AbortSignal): Promise<void> {
   check(signal);
+  // 后台标签页里浏览器会把 setTimeout 拖到最多一分钟一次，逐币让出一次（ms = 0）就会让定时自动捕捞慢上几十倍；
+  // 这时改用 MessageChannel 让出（不受计时器节流），真正需要等的（ms > 0，如请求配额）照旧用计时器。
+  if (ms <= 0 && typeof document !== 'undefined' && document.hidden && typeof MessageChannel !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => { channel.port1.close(); if (signal.aborted) reject(new DOMException('已取消', 'AbortError')); else resolve(); };
+      channel.port2.postMessage(null);
+    });
+  }
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(new DOMException('已取消', 'AbortError')); };
     const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);

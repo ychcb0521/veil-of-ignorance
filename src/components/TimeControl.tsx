@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
   Play, Pause, Square, Clock, BookmarkX,
@@ -91,6 +92,9 @@ export function TimeControl({
   const fish = useFish(user?.id);
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
+  // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
+  const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;
+  const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
   const signalMatches = useMemo(() => reconstructionMatches(reconstruction.result, reconstruction.mode, reconstruction.stale), [reconstruction.result, reconstruction.mode, reconstruction.stale]);
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
   const [importOpen, setImportOpen] = useState(() => signals.length === 0);
@@ -529,7 +533,7 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { void fish.start(settings); }} onCancel={fish.cancel}
+      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
 
       {/* 信号库折叠面板 */}

@@ -167,6 +167,8 @@ type ScanOptions = FishScanSettings & { onRound?: (round: FishCombinationRound) 
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
   private running = false;
+  /** 捕捞、建议、复原、成交额统计都共用这一个取数器；正在跑时自动捕捞要等它结束。 */
+  isBusy(): boolean { return this.running; }
   private latestServerTime = 0;
   private pool = new FishRequestPool();
   readonly budget: FishWeightBudget;
