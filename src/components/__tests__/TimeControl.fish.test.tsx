@@ -245,3 +245,19 @@ it('默认只币安、不选美股；其他交易所与美股仅明确勾选后�
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(3));
  expect(mocks.scan.mock.calls[2][0]).toMatchObject({exchanges:['bitget'],includeUsStocks:false});
 },30000);
+// 【用户要求】2026-10-21「自动捕捉模式时，时间默认为现在（除非是手动输入了）」
+it('自动模式下打开时间框是「现在」（不恢复以前输过的）；切到自动清空；自动模式里自己输的照用',async()=>{
+ sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
+ saveFishAuto({mode:'auto',hours:1,lastRunAt:Date.now()});
+ render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+ const time=()=>screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement;
+ expect(time().value).toBe('');expect(time()).toHaveAttribute('autocomplete','off');
+ fireEvent.change(time(),{target:{value:'2026-10-18 12:34:56'}});expect(time().value).toBe('2026-10-18 12:34:56');
+ fireEvent.click(screen.getByRole('radio',{name:'手动'}));expect(time().value).toBe('2026-10-18 12:34:56');
+ fireEvent.click(screen.getByRole('radio',{name:'自动'}));await waitFor(()=>expect(time().value).toBe(''));
+});
+it('手动模式下打开照常恢复本次会话输过的时间',()=>{
+ sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
+ render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+ expect((screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement).value).toBe('2025-04-23 01:26:00');
+});

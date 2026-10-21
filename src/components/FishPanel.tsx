@@ -242,7 +242,7 @@ export function FishPanel(p: FishPanelProps) {
 </PopoverContent></Popover></div>
         <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title={p.auto?.mode==='auto'?'自动捕捞始终按当前时间；这里的时间只用于手动点「开始捕捞」':'格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间'}>
           <Clock3 aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60"/>
-          <input aria-label="捕捞时间（UTC+8）" placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
+          <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
         </label>
         {running

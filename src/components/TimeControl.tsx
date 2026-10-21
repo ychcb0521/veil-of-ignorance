@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
+import { readFishAuto } from '@/lib/fish/autoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
   Play, Pause, Square, Clock, BookmarkX,
@@ -87,7 +88,8 @@ export function TimeControl({
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
   // 渔的捕捞时间记在这个标签页里（刷新不丢）：以前每次刷新都变回空 = 「现在」，换了截止时刻自己却看不出来
-  const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
+  // 【用户要求】2026-10-21「自动捕捉模式时，时间默认为现在（除非是手动输入了）」：自动模式下打开不恢复以前输过的时间
+  const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { if (readFishAuto().mode !== 'auto') time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
   const setFishInputs = useCallback((value: { time: string; threshold: string }) => { setFishInputsState(value); try { sessionStorage.setItem(FISH_TIME_KEY, value.time); } catch { /* 记不住只是刷新后要重填 */ } }, []);
   const [fishSelection, setFishSelection] = useState<{ exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }>({ exchanges: ['binance'], includeDuplicates: false, includeUsStocks: false });
   // 新鱼邮件提醒：每轮捕捞结束把第一次捕到的鱼发到所填邮箱
@@ -102,6 +104,10 @@ export function TimeControl({
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;
   const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
+  // 切到自动模式时时间回到「现在」；之后在自动模式里自己输的照用（只用于手动点「开始捕捞」）
+  const fishInputsRef = useRef(fishInputs); fishInputsRef.current = fishInputs;
+  const lastFishMode = useRef(fishAuto.mode);
+  useEffect(() => { if (fishAuto.mode === 'auto' && lastFishMode.current !== 'auto' && fishInputsRef.current.time) setFishInputs({ ...fishInputsRef.current, time: '' }); lastFishMode.current = fishAuto.mode; }, [fishAuto.mode, setFishInputs]);
   const signalMatches = useMemo(() => reconstructionMatches(reconstruction.result, reconstruction.mode, reconstruction.stale), [reconstruction.result, reconstruction.mode, reconstruction.stale]);
   // 「上传 / 粘贴信号」窗口默认折叠成一个极小的隐形入口；仅当信号库为空时默认展开，方便首次导入。
   const [importOpen, setImportOpen] = useState(() => signals.length === 0);
