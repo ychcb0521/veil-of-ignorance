@@ -535,7 +535,77 @@ export const CDI2_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, CDI2_DEF];
+/**
+ * 多空状态 S（0–1）：0 = 卖方完全占优，0.5 = 均衡，1 = 买方完全占优。
+ * 【用户要求】2026-10-22「在 Deep dig 里新加一个状态 0–1 特征值」（承接 1–7 状态的分析：要对称、有界、0.5 = 平衡、滞后小）。
+ * 三部分都改成买卖对称再相加，最后 logistic 压到 0–1：
+ *   1. CBI-2 的买方分数 p 与同一套算法的卖方分数 ps（与 CDI2 逐根一致），取对数几率之差的一半，按 sh 小时半衰期平滑；
+ *   2. 推力 az：同 DSP·az，但买方优势权重改成买卖双方都加权（1 + |A|）；
+ *   3. 定价保留：同 CBA，买方用较低价、卖方用较高价各算一次再平均（原 CBA 只衡量买方）。
+ * 不平均 2p − 1 而平均对数几率：平均有界值会把极端往中间压。
+ */
+export const STATE_FORMULA = [
+  '# 多空状态 S（0 ~ 1）：0 = 卖方完全占优，0.5 = 均衡，1 = 买方完全占优；三部分都买卖对称，相加后 logistic 压到 0 ~ 1',
+  '# B / S = 主动买入 / 卖出成交额，Q = B + S，E = 成交均价，CB = 同时段 BTC 收盘价；hl = 半衰期，avgh = 基线时长（小时，下面选）',
+  'wc = 3                                           # CBI-2 买卖对称分的权重（它本身读数偏小，0.04 ≈ 52:48）',
+  'wa = 0.4                                         # 推力 az 的权重',
+  'wb = 1                                           # 定价保留的权重',
+  'sh = 4                                           # CBI-2 部分的平滑半衰期（小时）',
+  'ka = 10                                          # az 每 0.1 记 1 个对数几率单位',
+  '# —— 1. CBI-2：买方分数 p（与 CBI-2 公式相同）',
+  ...CBI2_FORMULA.split('\n').slice(2),
+  '# —— 卖方分数 ps（与 CDI2 相同：方向项取反，吸收分支改看买盘衰竭与上冲）',
+  'dir = 0.07 * zF + 0.04 * zdF + 0.07 * zA + 0.07 * zMo + 0.04 * zd + 0.04 * zv + 0.02 * zK   # CBI-2 的方向合计',
+  'B6 = msum(B, 6)                                  # 最近 6 根主动买入之和',
+  'ExS = ln(highest(B6, 43) / B6)                   # 买盘衰竭度',
+  'DU = (C - lowest(C, 48)) / ATR                   # 距 48 根最低收盘的上冲（ATR）',
+  'PsiS = 1 / (1 + exp(-4 * (ln(RV24) - ln(2.5)))) / (1 + exp(-2 * (DU - 3)))   # 亢奋度',
+  'zExS = clip(ExS / prev(rscale(ExS, avgh)), -3, 3)',
+  'L1s = -g * dir + 0.2 * min(-zU, 0)               # 卖方顺势分支',
+  'L2s = -0.5 - 0.35 * zAf + 0.25 * zExS            # 卖方吸收分支',
+  'ps = (1 - PsiS) / (1 + exp(-L1s)) + PsiS / (1 + exp(-L2s))   # 卖方分数',
+  'Lc = (ln(p / (1 - p)) - ln(ps / (1 - ps))) / 2   # 买卖对称分（对数几率）：买方占优 > 0，卖方占优 < 0',
+  'Lcs = ema(nz(Lc), sh, 0)                         # 平滑（不平均有界的 2p − 1，免得极端被压向中间）',
+  '# —— 2. 推力 az（买卖双方都加权）',
+  'uN = abs(B - S)                                  # 主动净资金',
+  'uf = ln(1 + uN / avg(Q, avgh))                   # 资金力量',
+  'uA = (B - S) / Q                                 # 主动买卖失衡，−1 ~ 1',
+  'uG = 1 + abs(uA)                                 # 失衡权重：哪边主动都加权（原 DSP 只加权买方）',
+  'uR = ln(C / prev(C))                             # 价格变化',
+  'uRz = uR / sd(uR, avgh)                          # 几个标准差',
+  'uF = nz(uf * uG * uRz)                           # 单根推力',
+  'az = ema(uF, hl, 0)                              # 推力漂移速度（Z 分数）',
+  'La = clip(ka * az, -3, 3)                        # 换成对数几率单位',
+  '# —— 3. 定价保留（CBA 的买卖对称版）',
+  'cD = B - S                                       # 主动成交净差额',
+  'cA = cD / Q                                      # 主动买卖失衡',
+  'cVbar = prev(avg(Q, avgh))                       # 截至上一根的常态成交额',
+  'cF = ln(1 + (abs(cD) + 0.5 * (Q - abs(cD))) / cVbar)   # 成交支持',
+  'sig = prev(sd(ln(E / prev(E)), avgh))            # 成交均价对数收益率的波动率',
+  'Sb = retain(cF * (1 + max(cA, 0)), min(E, C), prev(E), hl, 48) / sig   # 买方：向上的价格优势是否被保留（取较低价）',
+  'Ss = retain(cF * (1 + max(-cA, 0)), max(E, C), prev(E), hl, 48) / sig  # 卖方：向下的价格优势是否被保留（取较高价）',
+  'Lb = clip((Sb + Ss) / 2, -3, 3)                  # 对称定价保留',
+  '# —— 合成',
+  'Lt = wc * Lcs + wa * La + wb * Lb                # 合计对数几率',
+  'state = 1 / (1 + exp(-Lt))',
+].join('\n');
+
+export const STATE_DEF: DeepDigFeatureDef = {
+  id: 'state',
+  name: '多空状态 S（0–1）',
+  short: '状态',
+  definition: '当前多空状态（0 ~ 1）：0 = 卖方完全占优，0.5 = 均衡，1 = 买方完全占优。由三部分合成，都做成买卖对称：CBI-2 的买方分数与同一套算法的卖方分数之差（对数几率，4 小时半衰期平滑）、买卖双方都加权的推力 az、买卖双方各算一次的定价保留（CBA 对称版）。数值是模型分数，不是胜率。',
+  formula: STATE_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
