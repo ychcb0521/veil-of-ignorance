@@ -663,7 +663,38 @@ export const DSS_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF, DSS_DEF];
+/** CBA 的卖方镜像：主动卖出加权、当前价取高、保留下移为正；保留原参数和时间窗口。 */
+export const CDA_FORMULA = [
+  '# CDA 买方阻力（−100 ~ 100）：成交支持 × 主动卖出权重 × 保留下移速度，按时间加权后 100·tanh 压缩',
+  '# B / S = 主动买入 / 卖出成交额，Q = B + S，E = 成交均价；hl、avgh 均以小时计，沿用 CBA',
+  'eta = 0.5                                     # 双向活跃成交的保留权重',
+  'alpha = 1                                     # 主动卖出优势的额外加权系数',
+  'D = S - B                                     # 主动卖出净差额',
+  'A = D / Q                                     # 主动卖方失衡',
+  'Vbar = prev(avg(Q, avgh))                     # 截至上一根的常态成交额',
+  'F = ln(1 + (abs(D) + eta * (Q - abs(D))) / Vbar)  # 成交支持',
+  'G = 1 + alpha * max(A, 0)                     # 主动卖出加权',
+  'P = max(E, C)                                 # 当前价取成交均价与收盘价的较高者，保守衡量向下成果',
+  'sig = prev(sd(ln(E / prev(E)), avgh))         # 截至上一根的成交均价对数收益率波动率',
+  'CDA = 100 * tanh(-retain(F * G, P, prev(E), hl, 48) / sig)  # 保留下移速度 = ln(Eᵢ₋₁ ÷ P) ÷ ((t − i + 1)·σ)，48 小时窗口',
+].join('\n');
+
+export const CDA_DEF: DeepDigFeatureDef = {
+  id: 'cda',
+  name: '买方阻力',
+  short: 'CDA',
+  definition: '买方阻力（−100 ~ 100）：过去 48 小时每根 K 线的成交支持 × 主动卖出权重 × 当前仍保留的向下价格位移速度，按时间加权后 100·tanh 压缩。当前价取成交均价与收盘价的较高者，保守衡量卖方成果；正值表示向下的价格优势仍被保留，数值越高表示买方面临的卖方阻力越强。沿用 CBA 的窗口、权重和波动率标准化；这是状态评分，不是订单簿阻力价位或下跌概率。',
+  formula: CDA_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF, DSS_DEF, CDA_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

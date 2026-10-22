@@ -20,7 +20,7 @@ const z = (xs: number[]) => { const m = mean(xs); return (xs.at(-1)! - m) / Math
 
 describe('DSS 买方状态恶化', () => {
   it('追加到目录，沿用 BSS 的参数与观察窗；可独立编辑、隐藏，不升级或改写原 BSS', () => {
-    expect(BUILTIN_FEATURES.at(-1)).toBe(DSS_DEF);
+    expect(BUILTIN_FEATURES.find(d => d.id === 'dss')).toBe(DSS_DEF);
     expect(DSS_DEF).toMatchObject({ id: 'dss', name: '买方状态恶化', short: 'DSS', scale: 1, unit: '' });
     expect(checkDefinition(DSS_DEF)).toEqual({ formula: null, groups: null, scale: null });
     for (const params of [{}, { interval: '15m' as const, avgHours: 48 }]) expect(featureWindowMs({ ...DSS_DEF, ...params })).toBe(featureWindowMs({ ...BSS_DEF, ...params }));
