@@ -1289,20 +1289,22 @@ export function registerCustomIndicators() {
   for (const item of RESEARCH_INDICATORS) {
     for (const level of [0, 1, 2]) {
       const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
+      // 均值线可单独设橘色线（多空状态 S：原始 0.67、均值 0.6——平均会把读数往 0.5 压）
+      const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
         calcParams: [item.period, 0, 0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
         // Only raw scores retain their reference bounds. Averages use the visible
         // values, without forcing zero / ±1 into the range or rounding tiny spans.
         ...(level === 0 ? { minValue: item.min, maxValue: item.max } : {}),
-        draw: zeroLine(ORANGE_DASH_LINE, item.neutral),
+        draw: zeroLine(ORANGE_DASH_LINE, line),
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
           name: label + (accountFeatureDef(item.featureId)?.unit ? `(${accountFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
         }),
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;
-          const color = value == null || value === item.neutral ? '#F0B90B'
-            : (value > item.neutral) !== item.seller ? '#0ECB81' : '#F6465D';
+          const color = value == null || value === line ? '#F0B90B'
+            : (value > line) !== item.seller ? '#0ECB81' : '#F6465D';
           return { color, size: 1.5 };
         } }],
         calc: (dataList, indicator) => {
