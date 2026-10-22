@@ -33,3 +33,24 @@ describe('副图橘色线 = 行动阈值', () => {
     expect(orange('BSS_CUSTOM')).toEqual([0.2]);
   });
 });
+
+// 【用户要求】2026-10-22「为啥没有横线？要加上横线」：读数离线很远时纵轴也要包含橘色线
+describe('纵轴总是包含橘色线', () => {
+  const k = Array.from({ length: 400 }, (_, i) => { const close = 100 + i / 50 + 2 * Math.sin(i / 9), q = 10000 + 3000 * Math.cos(i / 7); return { timestamp: i * 300000, open: close - .1, high: close + 1, low: close - 1, close, volume: q / close, turnover: q, takerBuyTurnover: q * (.5 + .3 * Math.sin(i / 13)) }; });
+  const bounds = (name: string, calcParams: unknown[]) => { const reg: any = registered.get(name); const ind: any = { calcParams }; reg.calc(k, ind); return [ind.minValue, ind.maxValue]; };
+  it('avg_a / avg_a_2：Z 开时包含 15，Z 关时包含 0；Z 版别名总包含 15', () => {
+    registerCustomIndicators();
+    expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 1])).toEqual([15, 15]);expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 0])).toEqual([0, 0]);
+    expect(bounds('DSP_V_AVG2_CUSTOM', [6, 1, 0])).toEqual([15, 15]);
+    expect(bounds('DSP_Z_V_AVG_CUSTOM', [6, 24, 1])).toEqual([15, 15]);
+    // 原始 a 副图保留「总包含 0」，Z 开时再加 15
+    expect(bounds('DSP_V_CUSTOM', [6, 1])).toEqual([0, 15]);
+  });
+  it('CBI-2 均值包含 0.04、CBA 均值包含 8、avg_BSS 包含 0.08；原始 CBI-2 仍是 −1 ~ 1', () => {
+    registerCustomIndicators();
+    expect(bounds('CBI2_AVG_CUSTOM', [24, 0, 0])).toEqual([0.04, 0.04]);
+    expect(bounds('CBA_AVG2_CUSTOM', [6, 0, 0])).toEqual([8, 8]);
+    expect(bounds('BSS_AVG_CUSTOM', [1, 24])).toEqual([0.08, 0.08]);
+    expect(bounds('CBI2_CUSTOM', [24, 0])).toEqual([-1, 1]);
+  });
+});

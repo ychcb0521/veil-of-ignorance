@@ -4,7 +4,7 @@ import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { registerIndicator, type IndicatorTemplate, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
+import { registerIndicator as registerKcIndicator, type IndicatorTemplate, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
@@ -396,6 +396,42 @@ const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
 /** a / avg_a 副图：Z 开关（calcParams 第 zAt 位）打开时线在 15 %σ/根，关着时仍是 0 轴。 */
 const dspActionLine = (zAt: number) => (args: LineArgs): boolean => zeroLine(ORANGE_DASH_LINE, args.indicator?.calcParams?.[zAt] === 1 ? ACTION_LEVELS.az : 0)(args);
 /** avg_BSS 副图：灰色 0 轴 + 0.08 橘色线；24 小时平均碰不到 ±0.55，那两条去掉。 */
+/**
+ * 橘色线必须看得见：纵轴至少包含这条线（读数离线很远时线也在图里，不再落到图外）。
+ * 【用户要求】2026-10-22「为啥没有横线？要加上横线」——avg_a 读数只到 7.7，纵轴到不了 15，线在图外。
+ * DSP 的线随 Z 开关：开 15 %σ/根，关 0。返回 null = 这个副图没有橘色线。
+ */
+export function axisLineLevel(name: string, p: readonly unknown[] | undefined): number | null {
+  const z = (i: number) => p?.[i] === 1;
+  switch (name) {
+    case 'DSP_V_CUSTOM': case 'DSP_V_AVG2_CUSTOM': return z(1) ? ACTION_LEVELS.az : 0;
+    case 'DSP_V_AVG_CUSTOM': return z(2) ? ACTION_LEVELS.az : 0;
+    case 'DSP_Z_V_CUSTOM': case 'DSP_Z_V_AVG_CUSTOM': case 'DSP_Z_V_AVG2_CUSTOM': return ACTION_LEVELS.az;
+    case 'CBI2_CUSTOM': case 'CBI2_AVG_CUSTOM': case 'CBI2_AVG2_CUSTOM': return ACTION_LEVELS.cbi2;
+    case 'CBA_CUSTOM': case 'CBA_AVG_CUSTOM': case 'CBA_AVG2_CUSTOM': return ACTION_LEVELS.cba;
+    case 'BSS_CUSTOM': return BSS_WEAK;
+    case 'BSS_AVG_CUSTOM': case 'BSS_AVG2_CUSTOM': return ACTION_LEVELS.avgBss;
+  }
+  for (const item of RESEARCH_INDICATORS) for (const level of [0, 1, 2]) {
+    if (researchKcName(item.id, level) === name) return level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
+  }
+  return null;
+}
+/** 所有副图都走这里注册：每次计算时把纵轴范围扩到包含橘色线（保留原来固定的上下限）。 */
+function registerIndicator(template: IndicatorTemplate): void {
+  const calc = template.calc;
+  if (!calc || axisLineLevel(template.name, template.calcParams) == null) { registerKcIndicator(template); return; }
+  const baseMin = template.minValue, baseMax = template.maxValue;
+  registerKcIndicator({ ...template, calc: (data, indicator) => {
+    const level = axisLineLevel(template.name, indicator.calcParams);
+    if (level != null) {
+      const ind = indicator as { minValue?: number | null; maxValue?: number | null };
+      ind.minValue = Math.min(typeof baseMin === 'number' ? baseMin : level, level);
+      ind.maxValue = Math.max(typeof baseMax === 'number' ? baseMax : level, level);
+    }
+    return calc(data, indicator);
+  } });
+}
 const avgBssLines = (args: LineArgs): boolean => {
   zeroLine({ color: 'rgba(132,142,156,0.6)', width: 1, dash: [4, 3] })(args);
   zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.avgBss)(args);
