@@ -373,6 +373,22 @@ export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 1.5, d
 const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
+/**
+ * 橘色线 = 「渔」里用的行动阈值（达到这里才算数），不再是 0。
+ * 【用户要求】2026-10-22「按这个改」：CBI-2 0.04、DSP·az 15 %σ/根（只在 Z 开关打开时；原始 a 的单位是基点/根，仍画 0）、CBA 8、avg_BSS 0.08；原始 BSS 保留 0.2。
+ */
+export const ACTION_LEVELS = { cbi2: 0.04, az: 15, cba: 8, avgBss: 0.08 } as const;
+type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
+const CBI2_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cbi2);
+const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
+/** a / avg_a 副图：Z 开关（calcParams 第 zAt 位）打开时线在 15 %σ/根，关着时仍是 0 轴。 */
+const dspActionLine = (zAt: number) => (args: LineArgs): boolean => zeroLine(ORANGE_DASH_LINE, args.indicator?.calcParams?.[zAt] === 1 ? ACTION_LEVELS.az : 0)(args);
+/** avg_BSS 副图：灰色 0 轴 + 0.08 橘色线；24 小时平均碰不到 ±0.55，那两条去掉。 */
+const avgBssLines = (args: LineArgs): boolean => {
+  zeroLine({ color: 'rgba(132,142,156,0.6)', width: 1, dash: [4, 3] })(args);
+  zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.avgBss)(args);
+  return false;
+};
 
 /**
  * BSS 副图的参考线：0（灰虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）、−0.2（淡琥珀点线）。
@@ -1040,7 +1056,7 @@ export function registerCustomIndicators() {
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
     maxValue: 0,
-    draw: V_ZERO_LINE,
+    draw: dspActionLine(1),
     figures: [
       {
         key: 'v', title: 'a(基点/根): ', type: 'line',
@@ -1058,7 +1074,7 @@ export function registerCustomIndicators() {
     calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS, 0],
     createTooltipDataSource: dspATooltip('avg'),
     precision: 8,
-    draw: V_ZERO_LINE,
+    draw: dspActionLine(2),
     figures: [
       {
         key: 'v', title: 'avg_a(基点/根): ', type: 'line',
@@ -1120,8 +1136,8 @@ export function registerCustomIndicators() {
     calcParams: [CBA_DEFAULTS.halfLifeHours],
     precision: 1,
     minValue: 0,
-    maxValue: 0,
-    draw: V_ZERO_LINE,
+    maxValue: ACTION_LEVELS.cba, // 纵轴总是包含 0 与橘色线
+    draw: CBA_ACTION_LINE,
     figures: [
       {
         key: 'cba', title: 'CBA: ', type: 'line',
@@ -1183,7 +1199,7 @@ export function registerCustomIndicators() {
     precision: 3,
     minValue: -1,
     maxValue: 1,
-    draw: V_ZERO_LINE,
+    draw: CBI2_ACTION_LINE,
     // 括号里只写基线小时，不写 BTC 版本号；图例数值照默认
     createTooltipDataSource: ({ indicator, defaultStyles }) => ({
       name: 'CBI-2', calcParamsText: `(${(indicator.calcParams as number[])[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
@@ -1212,7 +1228,7 @@ export function registerCustomIndicators() {
     shortName: 'avg_BSS',
     calcParams: [BSS_DEFAULTS.recentHours, AVG_DEFAULT_HOURS],
     precision: 8,
-    draw: bssLevelLines,
+    draw: avgBssLines,
     figures: [
       {
         key: 'bss', title: 'avg_BSS: ', type: 'line',
