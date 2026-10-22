@@ -74,6 +74,7 @@ export const accountFeatureDef = (id: string) => accountFeatureDefs().find(d => 
  */
 const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string }> = {
   'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
+  state: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'drift-speed-down-z': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
   cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
 
@@ -106,9 +107,10 @@ const seriesCache = new WeakMap<KLineData[], Map<string, ChartFeatureSeries>>();
  * 在图上的 K 线上算账号里那份定义：refClose 由调用方给（用到 CB 时）；T 用真实开盘时间，其余窗口按 5 分钟图计。
  * 同一批 K 线、同一参数只算一次（DSP 的 a / avg_a / A 三个副图共用）。
  */
-export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[]): ChartFeatureSeries | null {
+export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string } = {}): ChartFeatureSeries | null {
   const def = accountFeatureDef(featureId);
   if (!def) return null;
+  const formula = options.formula ?? def.formula;
   const binding = CHART_PARAM[featureId];
   const p = Number(period);
   const has = Number.isFinite(p) && p > 0;
@@ -120,12 +122,12 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
-  const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${def.formula}`;
+  const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}`;
   let perList = seriesCache.get(dataList);
   const cached = perList?.get(key);
   if (cached) return cached;
   let compiled: ReturnType<typeof compileFor>;
-  try { compiled = compileFor(def.formula, constant, constant && has ? p : null); } catch { return null; }
+  try { compiled = compileFor(formula, constant, constant && has ? p : null); } catch { return null; }
   const bars: ResearchBar[] = dataList.map((d, i) => ({
     openTime: d.timestamp, open: d.open, high: d.high, low: d.low, close: d.close,
     volume: typeof d.volume === 'number' ? d.volume : Number.NaN,

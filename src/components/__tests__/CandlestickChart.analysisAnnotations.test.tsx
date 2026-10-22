@@ -1,4 +1,4 @@
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CandlestickChart,
@@ -17,6 +17,8 @@ import {
   createAnalysisBandLabelFigures,
 } from '@/lib/analysisBandLabelOverlay';
 import { ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR } from '@/lib/analysisAutoFitBoundsIndicator';
+import { RESEARCH_INDICATORS, researchKcName } from '@/lib/researchIndicators';
+import { ingestBtcBars, resetBtcReference } from '@/lib/btcReference';
 
 const mocks = vi.hoisted(() => {
   type ChartCandle = {
@@ -180,6 +182,31 @@ describe('CandlestickChart analysis annotations', () => {
 
   afterAll(() => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
+  it('五项研究指标各创建三个副图；参数与 BTC 更新传播到三条线，关闭时全部移除', () => {
+    const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
+    localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, color: '#F6465D' }))));
+    resetBtcReference();
+    const overrideIndicator = vi.fn();
+    Object.assign(mocks.chart, { overrideIndicator });
+    const view = render(<TooltipProvider><CandlestickChart data={[candle(300000), candle(600000)]} symbol="TESTUSDT" /></TooltipProvider>);
+    try {
+      const names = RESEARCH_INDICATORS.flatMap(item => [0, 1, 2].map(level => researchKcName(item.id, level)));
+      expect((mocks.chart.createIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
+      fireEvent.click(screen.getByRole('button', { name: '指标' }));
+      fireEvent.change(screen.getByLabelText(RESEARCH_INDICATORS[0].name + ' 参数'), { target: { value: '12.5' } });
+      for (const name of names.slice(0, 3)) expect(overrideIndicator).toHaveBeenCalledWith(expect.objectContaining({ name, calcParams: expect.arrayContaining([12.5]) }));
+      overrideIndicator.mockClear();
+      act(() => ingestBtcBars(300000, [{ openTime: 300000, close: 60000 }]));
+      expect((overrideIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
+      for (const item of RESEARCH_INDICATORS) fireEvent.click(screen.getByText(item.name));
+      expect((mocks.chart.removeIndicator.mock.calls as unknown as [string, string][]).map(([, name]) => name)).toEqual(names);
+    } finally {
+      view.unmount(); resetBtcReference();
+      delete (mocks.chart as unknown as Record<string, unknown>).overrideIndicator;
+      if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key, previous);
+    }
   });
 
   it('图表在静止鼠标下异步挂载时会预激活原生指针交互', () => {

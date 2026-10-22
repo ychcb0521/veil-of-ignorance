@@ -4,7 +4,7 @@ import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
  * Works with klinecharts native indicator system + custom registered indicators.
  */
 
-import { useState, useRef, useEffect, useMemo, forwardRef } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
@@ -13,6 +13,7 @@ import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
 import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
+import { RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -174,6 +175,12 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
   { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'volume', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
+  ...RESEARCH_INDICATORS.map(item => ({
+    id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
+    isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'volume' as const,
+    periodHint: `${item.parameter}（小时，按5分钟图计，其他周期等比例缩放）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'h',
+    description: '原值、均值、近端加权均值，各一个副图。',
+  })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
   { id: 'PVT',    nameZh: '价量趋势指标',            nameEn: 'Price Volume Trend',          isOverlay: false, defaultPeriod: 1,  color: '#5EEAD4', category: 'volume' },
@@ -232,6 +239,26 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     };
   }, [open, onClose]);
 
+  // The menu is anchored to the chart toolbar, which sits left of the price axis.
+  // A viewport-wide max width can therefore still clip the menu behind the chart edge.
+  useLayoutEffect(() => {
+    if (!open || !panelRef.current) return;
+    const panel = panelRef.current;
+    const host = panel.closest<HTMLElement>('[data-chart-indicator-host]');
+    if (!host) return;
+    const fit = () => {
+      const boundary = host.querySelector<HTMLElement>('[data-chart-indicator-boundary]') ?? host;
+      const left = Math.max(8, boundary.getBoundingClientRect().left + 8);
+      panel.style.maxWidth = `${Math.max(0, Math.min(384, panel.getBoundingClientRect().right - left))}px`;
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(host);
+    if (panel.parentElement) observer.observe(panel.parentElement);
+    window.addEventListener('resize', fit);
+    return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
+  }, [open]);
+
   const filtered = useMemo(() => {
     let items = INDICATOR_CATALOG;
     if (categoryFilter) {
@@ -258,7 +285,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
     const avgHours = item.avgDefault == null ? undefined : (replaced?.avgHours ?? item.avgDefault);
     const zscore = item.zHint != null && replaced?.zscore ? true : undefined;
-    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? item.defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
+    const research = RESEARCH_INDICATORS.find(r => r.id === item.id);
+    const defaultPeriod = research ? researchDefaultPeriod(research) : item.defaultPeriod;
+    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
   };
 
   const updatePeriod = (id: string, period: number) => {
@@ -416,7 +445,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = parseInt(v); return n > 0 ? n : null; }}
+              parse={v => { const n = RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}

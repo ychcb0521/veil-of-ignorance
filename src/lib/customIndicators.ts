@@ -11,6 +11,7 @@ import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { chartFeatureSeries, accountFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
+import { RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
@@ -296,12 +297,18 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   DSP_VA: DSP_COMPANIONS,
   // 【用户要求】avg_BSS 独立一个副图，紧挨在 BSS 副图下面
   BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }],
+  ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
+    { key: `${item.id}#AVG`, kcName: researchKcName(item.id, 1) },
+    { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
+  ]])),
 };
 /**
  * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
  */
 export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number; zscore?: boolean }): number[] {
+  const research = researchIndicatorForKc(kcName);
+  if (research) return [ind.period, btcReferenceVersion(), researchDefinitionVersion(research)];
   const z = ind.zscore ? 1 : 0;
   if (kcName === 'DSP_V_CUSTOM') return [ind.period, z];
   // CBI-2：第二位是 BTC 对照数据的版本号（取到新的 BTC 就变，klinecharts 才会重算）；图例里不显示
@@ -323,9 +330,9 @@ type ZeroLineStyle = { color: string; width: number; dash: number[] };
  * 副图的 0 轴（多空平衡线）：直接画一条线，不当成数据系列（否则纵轴上会多一个 0 的标签）。
  * 先于 V / A 本身画，所以数据线压在它上面。
  */
-function zeroLine({ color, width, dash }: ZeroLineStyle) {
+function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0) {
   return ({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean => {
-    const y = Math.round(yAxis.convertToPixel(0)) + (width % 2 ? 0.5 : 0);
+    const y = Math.round(yAxis.convertToPixel(level)) + (width % 2 ? 0.5 : 0);
     if (y >= 0 && y <= bounding.height) {
       ctx.save();
       ctx.strokeStyle = color;
@@ -1201,6 +1208,32 @@ export function registerCustomIndicators() {
     },
   });
 
+  // One source of truth: the account's Deep dig formula, including both named averages.
+  for (const item of RESEARCH_INDICATORS) {
+    for (const level of [0, 1, 2]) {
+      const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
+      registerIndicator({
+        name: researchKcName(item.id, level), shortName: label,
+        calcParams: [item.period, 0, 0], precision: item.id === 'CDA' ? 2 : 3,
+        minValue: item.min, maxValue: item.max,
+        draw: zeroLine(ORANGE_DASH_LINE, item.neutral),
+        createTooltipDataSource: ({ indicator, defaultStyles }) => ({
+          name: label + (accountFeatureDef(item.featureId)?.unit ? `(${accountFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
+        }),
+        figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
+          const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;
+          const color = value == null || value === item.neutral ? '#F0B90B'
+            : (value > item.neutral) !== item.seller ? '#0ECB81' : '#F6465D';
+          return { color, size: 1.5 };
+        } }],
+        calc: (dataList, indicator) => {
+          const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
+          return (level === 0 ? values.core : level === 1 ? values.avg : values.avg2).map(value => value == null ? {} : { value });
+        },
+      });
+    }
+  }
+
     registered = true;
   } catch (e) {
     console.error('Failed to register custom indicators:', e);
@@ -1252,6 +1285,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   'CBA-2': 'CBA2_CUSTOM',
   CBI: 'CBI_CUSTOM',
   CBI2: 'CBI2_CUSTOM',
+  ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, researchKcName(item.id)])),
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',
   BOP: 'BOP_CUSTOM',

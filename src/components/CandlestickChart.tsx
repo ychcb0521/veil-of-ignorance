@@ -28,6 +28,7 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, indicatorCalcParams } from "@/lib/customIndicators";
+import { researchIndicatorForKc } from "@/lib/researchIndicators";
 import { subscribeBtcReference } from "@/lib/btcReference";
 import {
   type AnalysisFloatingLabelCandidate,
@@ -105,7 +106,7 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A", STATE: "状态 S", DSP_B: "DSP·b" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
@@ -2162,8 +2163,12 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
     for (const ind of indicatorsForBtcRef.current) {
-      if (!ind.enabled || ind.type !== "CBI2") continue;
-      try { chart.overrideIndicator({ name: "CBI2_CUSTOM", calcParams: indicatorCalcParams("CBI2_CUSTOM", ind) }); } catch {}
+      if (!ind.enabled) continue;
+      const names = [KLINE_INDICATOR_MAP[ind.type], ...(INDICATOR_COMPANIONS[ind.type] ?? []).map(c => c.kcName)];
+      for (const name of names) {
+        if (name !== "CBI2_CUSTOM" && !researchIndicatorForKc(name)) continue;
+        try { chart.overrideIndicator({ name, calcParams: indicatorCalcParams(name, ind) }); } catch {}
+      }
     }
   }), []);
 
@@ -2291,9 +2296,10 @@ function CandlestickChartComponent({
       )}
 
       {/* Chart area with toolbar */}
-      <div ref={chartWrapperRef} className="flex-1 min-h-0 relative overflow-hidden">
+      <div ref={chartWrapperRef} data-chart-indicator-host className="flex-1 min-h-0 relative overflow-hidden">
         <div
           ref={containerRef}
+          data-chart-indicator-boundary
           className="absolute inset-0"
           style={{
             left: analysisMode ? 0 : 34,
