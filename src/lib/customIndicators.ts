@@ -1325,7 +1325,7 @@ export function registerCustomIndicators() {
   for (const item of RESEARCH_INDICATORS) {
     for (const level of [0, 1, 2]) {
       const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
-      // 均值线可单独设橘色线（多空状态 S：原始 0.67、均值 0.6——平均会把读数往 0.5 压）
+      // 均值线可单独设橘色线（avgNeutral）；没设就与原始值相同
       const line = level > 0 && 'avgNeutral' in item ? item.avgNeutral : item.neutral;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
