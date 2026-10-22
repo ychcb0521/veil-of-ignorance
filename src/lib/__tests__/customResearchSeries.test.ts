@@ -36,7 +36,9 @@ describe('自制区十项的原值、avg_x、avg_x_2', () => {
       const actual = reg.calc(k, { calcParams: params }).map((v: any) => v[reg.figures[0].key] ?? null);
       expect(actual).toEqual(values(expected.vars.get(variable), k.length, def.scale * 2));
       expect(actual.some((v: unknown) => v != null)).toBe(true);
-      if (level > 0) { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
+      // 2026-10-22 用户要求：有固定范围的（状态 S、CDI2、DSS、CDA）均值副图纵轴固定，其余仍自动范围
+      const fixed = ({ STATE: [0, 1], CDI2: [-1, 1], DSS: [-1, 1], CDA: [-100, 100] } as Record<string, [number, number]>)[item.id];
+      if (level > 0) { expect(reg.minValue).toBe(fixed?.[0]); expect(reg.maxValue).toBe(fixed?.[1]); }
     }
     const prefix = researchChartSeries(k.slice(0, 620), item, item.period, { fetchReference: false });
     const full = researchChartSeries(k, item, item.period, { fetchReference: false });

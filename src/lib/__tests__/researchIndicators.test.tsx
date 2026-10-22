@@ -48,7 +48,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     }
   });
 
-  it('所有均值都使用可见区间自动范围，不继承原值的 ±1 / 0–1 / 零点边界，并保留小幅变化', () => {
+  it('均值默认用可见区间自动范围；有固定范围的（状态 S 0–1、CDI2 / DSS ±1、CDA ±100）纵轴固定（2026-10-22 用户要求）', () => {
     for (const name of ['BSS_AVG_CUSTOM', 'DSP_V_AVG_CUSTOM', 'DSP_Z_V_AVG_CUSTOM']) {
       const reg = mock.registered.get(name);
       expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined();
@@ -57,7 +57,8 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
-        expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined();
+        const fixed = ({ STATE: [0, 1], CDI2: [-1, 1], DSS: [-1, 1], CDA: [-100, 100] } as Record<string, [number, number]>)[item.id];
+        expect(reg.minValue).toBe(fixed?.[0]); expect(reg.maxValue).toBe(fixed?.[1]);
         expect(reg.precision).toBeGreaterThanOrEqual(8);
       }
     }

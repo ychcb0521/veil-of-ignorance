@@ -1332,7 +1332,8 @@ export function registerCustomIndicators() {
         calcParams: [item.period, 0, 0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
         // Only raw scores retain their reference bounds. Averages use the visible
         // values, without forcing zero / ±1 into the range or rounding tiny spans.
-        ...(level === 0 ? { minValue: item.min, maxValue: item.max } : {}),
+        // 均值副图：有固定范围的（状态 S、CDI2、DSS、CDA）纵轴固定，免得自动缩放把小波动放大成「异常灵敏」
+        ...(level === 0 ? { minValue: item.min, maxValue: item.max } : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: zeroLine(ORANGE_DASH_LINE, line),
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
           name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
