@@ -145,7 +145,7 @@ describe('【用户要求】CBI-2 买方优势指数第 2 版', () => {
   });
 
   it('Deep dig 内置特征值 CBI-2：公式结果与 K 线图一致；流水线另取同时段 BTCUSDT 合进来，别的特征值不取', async () => {
-    expect(BUILTIN_FEATURES.at(-1)!.id).toBe(CBI2_DEF.id);
+    expect(BUILTIN_FEATURES.find(d => d.id === CBI2_DEF.id)).toBe(CBI2_DEF);
     const b = bars(700, 4);
     expect(computeFeatureValues(windowOf(b), compileFeatureFormula(CBI2_FORMULA), { avgHours: 24 }).value!).toBeCloseTo(computeCbi2(toCbi2(b)).at(-1)!.cbi2!, 9);
     // 模拟币安：两个币 + BTC，K 线带成交额
