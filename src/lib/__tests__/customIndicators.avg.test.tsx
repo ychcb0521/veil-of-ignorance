@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { KLineData } from 'klinecharts';
 
@@ -9,11 +9,12 @@ vi.mock('klinecharts', () => ({
 
 import { AVG_DEFAULT_HOURS, bssPoints, INDICATOR_COMPANIONS, dspPoints, indicatorCalcParams, registerCustomIndicators, rollingAvgHours, unifiedDspA } from '@/lib/customIndicators';
 import { DSP_V_DISPLAY_SCALE } from '@/lib/dynamicSchellingPoint';
-import { BSS_FORMULA, compileFeatureFormula, computeFeatureValues } from '@/lib/deepDig/features';
+import { BSS_DEF, FEATURES_KEY, BSS_FORMULA, compileFeatureFormula, computeFeatureValues } from '@/lib/deepDig/features';
 import { BAR_MS, type ResearchBar } from '@/lib/deepRsa/window';
 import { IndicatorMenu } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 
+beforeEach(() => localStorage.clear());
 const BAR = 5 * 60_000;
 function klines(n: number, barMs = BAR): KLineData[] {
   let close = 100;
@@ -43,7 +44,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     expect(registered.get('DSP_V_AVG_CUSTOM')!.figures.map(f => f.title)).toEqual(['avg_a(基点/根): ']);
   });
 
-  it('avg_BSS 副图：逐根 = 过去 N 小时 BSS 的平均（5 分钟图 24 小时 = 288 根）；N 改成 6 跟着变', () => {
+  it('avg_BSS 副图：逐根 = 过去 N 小时 BSS 的平均（5 分钟图 24 小时 = 288 根）；在 Deep dig 改成 6 跟着变', () => {
     const def = registered.get('BSS_AVG_CUSTOM')!;
     expect(def.calcParams).toEqual([1, AVG_DEFAULT_HOURS]);
     const bss = bssPoints(k, 1).map(p => p.bss);
@@ -52,7 +53,9 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     expect(bss[0]).toBeNull();
     expect(out[0]).toEqual({});
     for (const i of [20, 287, 288, 500, 699]) expect(out[i].bss).toBeCloseTo(manualAvg(bss, i, 288)!, 12);
-    const out6 = def.calc(k, { calcParams: [1, 6] });
+    localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([{ ...BSS_DEF, formula: BSS_FORMULA + '\navg_BSS = avg(BSS, 6)' }]));
+    const out6 = def.calc(k, { calcParams: [1, 24] });
+    localStorage.clear();
     expect(out6[699].bss).toBeCloseTo(manualAvg(bss, 699, 72)!, 12);
     expect(out6[699].bss).not.toBeCloseTo(out[699].bss, 6);
     // 与 Deep dig 公式 avg(BSS, avgh) 同一份实现
@@ -74,43 +77,41 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
   });
 
   it('参数：两个均线副图多传一个 N（老设置没有 → 24），其他指标不变；空值跳过', () => {
-    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 2 })).toEqual([2, 24]);
-    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 48, 0]);
-    expect(indicatorCalcParams('BSS_CUSTOM', { period: 2, avgHours: 48 })).toEqual([2]);
-    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 0]);
+    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 2 })).toEqual([2, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 48, 0, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('BSS_CUSTOM', { period: 2, avgHours: 48 })).toEqual([2, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 0, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_A_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6]);
-    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 1, avgHours: 0 })).toEqual([1, 24]);
+    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 1, avgHours: 0 })).toEqual([1, expect.any(Number), expect.any(Number)]);
     expect(rollingAvgHours([1, null, 3, 5], 1 / 6)).toEqual([1, 1, 3, 4]);
   });
 
-  it('菜单：BSS / DSP 开着时多一个「avg」框（默认 24，可改）；清空、打到一半不弹回默认值', () => {
+  it('菜单：自制 BSS 均值跟随 Deep dig；保留主图 DSP 的均线时长框', () => {
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'BSS', period: 1, enabled: true }, { type: 'DSP', period: 6, avgHours: 12, enabled: true }];
     render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
-    const bssAvg = screen.getByLabelText('买卖强度综合分 BSS 均线时长 N（小时）') as HTMLInputElement;
-    expect(bssAvg.value).toBe('24');
-    expect((screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 均线时长 N（小时）') as HTMLInputElement).value).toBe('12');
-    fireEvent.change(bssAvg, { target: { value: '' } });
-    expect(bssAvg.value).toBe('');
+    expect(screen.queryByLabelText('买卖强度综合分 BSS 均线时长 N（小时）')).not.toBeInTheDocument();
+    const avg = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 均线时长 N（小时）') as HTMLInputElement;
+    expect(avg.value).toBe('12');
+    fireEvent.change(avg, { target: { value: '' } }); expect(avg.value).toBe('');
     expect(onChange).not.toHaveBeenCalled();
-    fireEvent.change(bssAvg, { target: { value: '48' } });
-    expect(onChange).toHaveBeenLastCalledWith([{ type: 'BSS', period: 1, avgHours: 48, enabled: true }, indicators[1]]);
-    // 其他指标没有这个框
-    expect(screen.queryAllByLabelText(/均线时长/)).toHaveLength(2);
+    fireEvent.change(avg, { target: { value: '48' } });
+    expect(onChange).toHaveBeenLastCalledWith([indicators[0], { ...indicators[1], avgHours: 48 }]);
+    expect(screen.queryAllByLabelText(/均线时长/)).toHaveLength(1);
   });
 
-  it('新开 BSS：带上默认均线时长 24', () => {
+  it('新开 BSS：均值由 Deep dig 定义，盘面不覆盖均线时长', () => {
     const onChange = vi.fn();
     render(<IndicatorMenu open indicators={[]} onIndicatorsChange={onChange} onClose={() => {}} />);
     fireEvent.click(screen.getByText('买卖强度综合分 BSS'));
-    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'BSS', period: 1, avgHours: 24 })]);
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'BSS', period: 1 })]);
   });
 });
 
 describe('【用户要求】均线副图紧挨在原指标正下方（附属副图按顺序依次往下建）', () => {
   it('DSP：a → avg_a → A；BSS：主副图之后是 avg_BSS', () => {
-    expect(INDICATOR_COMPANIONS.DSP.map(c => c.kcName)).toEqual(['DSP_V_CUSTOM', 'DSP_V_AVG_CUSTOM', 'DSP_A_CUSTOM']);
-    expect(INDICATOR_COMPANIONS.DSP_VA).toBe(INDICATOR_COMPANIONS.DSP);
-    expect(INDICATOR_COMPANIONS.BSS.map(c => c.kcName)).toEqual(['BSS_AVG_CUSTOM']);
+    expect(INDICATOR_COMPANIONS.DSP.map(c => c.kcName)).toEqual(['DSP_V_CUSTOM', 'DSP_OVERLAY_AVG_CUSTOM', 'DSP_A_CUSTOM']);
+    expect(INDICATOR_COMPANIONS.DSP_VA.map(c => c.kcName)).toEqual(['DSP_V_CUSTOM', 'DSP_V_AVG_CUSTOM', 'DSP_V_AVG2_CUSTOM']);
+    expect(INDICATOR_COMPANIONS.BSS.map(c => c.kcName)).toEqual(['BSS_AVG_CUSTOM', 'BSS_AVG2_CUSTOM']);
   });
 });

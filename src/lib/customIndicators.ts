@@ -11,7 +11,7 @@ import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { chartFeatureSeries, accountFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
-import { RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion } from '@/lib/researchIndicators';
+import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
@@ -240,10 +240,12 @@ function unifiedCore(dataList: KLineData[], featureId: string, period: number | 
 }
 /** DSP 的 a（Z 版为 az）：按 Deep dig 公式，乘它的显示倍数（a 为基点 × 10⁴，az 为 × 100）。 */
 export function unifiedDspA(dataList: KLineData[], halfLifeHours: number | undefined, zscore: boolean): (number | null)[] {
-  const id = zscore ? 'drift-speed-z' : 'drift-speed';
-  const out = chartFeatureSeries(dataList, id, halfLifeHours);
-  if (!out) return dspAValues(dataList, halfLifeHours, zscore);
-  return out.core.map(v => (v == null ? null : v * out.def.scale));
+  return buyerSeries(dataList, zscore ? 'DSP_Z' : 'DSP_VA', halfLifeHours).core;
+}
+
+function buyerSeries(data: KLineData[], id: string, period: number | undefined) {
+  const item = BUYER_RESEARCH_INDICATORS.find(item => item.id === id)!;
+  return researchChartSeries(data, item, period ?? item.period);
 }
 
 export function bssPoints(dataList: KLineData[], recentHours: number | undefined) {
@@ -267,7 +269,7 @@ export function bssPoints(dataList: KLineData[], recentHours: number | undefined
  */
 export const AVG_DEFAULT_HOURS = 24;
 /** 均线副图（第二个参数 = 均线时长 N）。 */
-export const AVG_PARAM_INDICATORS = new Set(['DSP_V_AVG_CUSTOM', 'DSP_Z_V_AVG_CUSTOM', 'BSS_AVG_CUSTOM']);
+export const AVG_PARAM_INDICATORS = new Set(['DSP_OVERLAY_AVG_CUSTOM']);
 
 const validHours = (h: unknown, fallback: number) => {
   const n = Number(h);
@@ -282,26 +284,32 @@ export function rollingAvgHours(values: readonly (number | null | undefined)[], 
 }
 
 /**
- * 一个菜单项带出的附属副图：动态谢林点（主图 DSP 线）同时开副图——买方推力漂移速度 DSP·a、avg_a、主动买方优势 A；BSS 带出 avg_BSS。
+ * 自制区每项依次打开原值、avg_x、avg_x_2；主图 DSP 保留 a、可调均值、A。
  * 附属副图用「主项#后缀」作 CandlestickChart 里 activeIndicatorPanes 的键，随主项一起建、一起改参数、一起移除；按这里的顺序依次往下建。
  */
 const DSP_COMPANIONS = [
   { key: 'DSP#V', kcName: 'DSP_V_CUSTOM' },
   // 【用户要求】avg_a 独立一个副图，紧挨在 a 副图下面（按这里的顺序依次往下建）
-  { key: 'DSP#VAVG', kcName: 'DSP_V_AVG_CUSTOM' },
+  { key: 'DSP#OVERLAYAVG', kcName: 'DSP_OVERLAY_AVG_CUSTOM' },
   { key: 'DSP#A', kcName: 'DSP_A_CUSTOM' },
 ];
 export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string }[]> = {
   DSP: DSP_COMPANIONS,
-  // 【用户要求】可以隐去主图的 DSP 线：只开两个副图（与 DSP 共用同一组副图，菜单里两项二选一）
-  DSP_VA: DSP_COMPANIONS,
+  // 普通版与 Z 版各有三条序列；保留旧原值 / avg 的 pane key。
+  DSP_VA: [
+    { key: 'DSP#V', kcName: 'DSP_V_CUSTOM' },
+    { key: 'DSP#VAVG', kcName: 'DSP_V_AVG_CUSTOM' },
+    { key: 'DSP_VA#AVG2', kcName: 'DSP_V_AVG2_CUSTOM' },
+  ],
   DSP_Z: [
     { key: 'DSP_Z#V', kcName: 'DSP_Z_V_CUSTOM' },
     { key: 'DSP_Z#VAVG', kcName: 'DSP_Z_V_AVG_CUSTOM' },
-    { key: 'DSP_Z#A', kcName: 'DSP_Z_A_CUSTOM' },
+    { key: 'DSP_Z#AVG2', kcName: 'DSP_Z_V_AVG2_CUSTOM' },
   ],
   // 【用户要求】avg_BSS 独立一个副图，紧挨在 BSS 副图下面
-  BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }],
+  BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }, { key: 'BSS#AVG2', kcName: 'BSS_AVG2_CUSTOM' }],
+  CBA: [{ key: 'CBA#AVG', kcName: 'CBA_AVG_CUSTOM' }, { key: 'CBA#AVG2', kcName: 'CBA_AVG2_CUSTOM' }],
+  CBI2: [{ key: 'CBI2#AVG', kcName: 'CBI2_AVG_CUSTOM' }, { key: 'CBI2#AVG2', kcName: 'CBI2_AVG2_CUSTOM' }],
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
     { key: `${item.id}#AVG`, kcName: researchKcName(item.id, 1) },
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
@@ -311,27 +319,31 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
  * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
  */
-export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number; zscore?: boolean }): number[] {
+export function indicatorCalcParams(kcName: string, ind: { type?: string; period: number; avgHours?: number; zscore?: boolean }): number[] {
   const base = DSP_Z_BASE_NAMES[kcName];
   if (base) return indicatorCalcParams(base, { ...ind, zscore: true });
   const research = researchIndicatorForKc(kcName);
+  const z = ind.zscore && ind.type !== 'DSP_VA' ? 1 : 0;
+  const dsp = BUYER_RESEARCH_INDICATORS.find(item => item.id === (z ? 'DSP_Z' : 'DSP_VA'))!;
+  if (kcName === 'DSP_V_CUSTOM') return [ind.period, z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_OVERLAY_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
   if (research) return [ind.period, btcReferenceVersion(), researchDefinitionVersion(research)];
-  const z = ind.zscore ? 1 : 0;
-  if (kcName === 'DSP_V_CUSTOM') return [ind.period, z];
-  // CBI-2：第二位是 BTC 对照数据的版本号（取到新的 BTC 就变，klinecharts 才会重算）；图例里不显示
-  if (kcName === 'CBI2_CUSTOM') return [ind.period, btcReferenceVersion()];
-  if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
 }
 
 const DSP_Z_BASE_NAMES: Record<string, string> = {
-  DSP_Z_V_CUSTOM: 'DSP_V_CUSTOM', DSP_Z_V_AVG_CUSTOM: 'DSP_V_AVG_CUSTOM', DSP_Z_A_CUSTOM: 'DSP_A_CUSTOM',
+  DSP_Z_V_CUSTOM: 'DSP_V_CUSTOM', DSP_Z_V_AVG_CUSTOM: 'DSP_V_AVG_CUSTOM', DSP_Z_V_AVG2_CUSTOM: 'DSP_V_AVG2_CUSTOM', DSP_Z_A_CUSTOM: 'DSP_A_CUSTOM',
 };
 function registerDspVariant(template: IndicatorTemplate) {
   registerIndicator(template);
+  if (template.name === 'DSP_V_AVG_CUSTOM') registerIndicator({ ...template, name: 'DSP_OVERLAY_AVG_CUSTOM', createTooltipDataSource: dspATooltip('avg', true),
+    calc: (data, indicator) => rollingAvgHours(unifiedDspA(data, indicator.calcParams[0], indicator.calcParams[2] === 1), indicator.calcParams[1]).map(v => v == null ? {} : { v }),
+  });
   const alias = Object.keys(DSP_Z_BASE_NAMES).find(name => DSP_Z_BASE_NAMES[name] === template.name);
   if (!alias) return;
-  const flag = template.name === 'DSP_V_CUSTOM' ? 1 : template.name === 'DSP_V_AVG_CUSTOM' ? 2 : null;
+  const flag = template.name === 'DSP_V_CUSTOM' || template.name === 'DSP_V_AVG2_CUSTOM' ? 1 : template.name === 'DSP_V_AVG_CUSTOM' ? 2 : null;
   const params = (values: number[]) => { const out = [...values]; if (flag != null) out[flag] = 1; return out; };
   registerIndicator({ ...template, name: alias, calcParams: params(template.calcParams ?? []),
     calc: (data, indicator) => template.calc(data, { ...indicator, calcParams: params(indicator.calcParams) }),
@@ -422,19 +434,22 @@ function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D
 const bssColor = (v: number | undefined) => (v == null ? '#F0B90B' : v >= BSS_STRONG ? '#0ECB81' : v <= -BSS_STRONG ? '#F6465D' : v >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)');
 
 /** a / avg_a 副图的图例：Z 开关打开时名字、单位换成 Z 分数版；括号里只写 h（和 N），不写开关那一位。 */
-function dspATooltip(kind: 'a' | 'avg') {
+function dspATooltip(kind: 'a' | 'avg', adjustableAverage = false) {
   return ({ indicator, crosshair, defaultStyles }: IndicatorCreateTooltipDataSourceParams): IndicatorTooltipData => {
     const p = indicator.calcParams as number[];
     const z = (kind === 'a' ? p[1] : p[2]) === 1;
     const v = (indicator.result[crosshair.dataIndex ?? -1] as { v?: number } | undefined)?.v;
     const color = vColor(v);
-    const unit = z ? '(%σ/根): ' : '(基点/根): ';
-    const name = kind === 'a' ? (z ? 'DSP·az' : 'DSP·a') : (z ? 'avg_az' : 'avg_a');
+    const item = BUYER_RESEARCH_INDICATORS.find(i => i.id === (z ? 'DSP_Z' : 'DSP_VA'))!;
+    const def = accountFeatureDef(item.featureId);
+    const names = def ? researchSeriesNames(item, def.formula) : { core: item.core, avg: `avg_${item.core}` };
+    const unit = `(${def?.unit ?? (z ? '%σ/根' : '基点/根')}): `;
+    const name = kind === 'a' ? (z ? 'DSP·az' : 'DSP·a') : names.avg;
     return {
       name,
-      calcParamsText: `(${kind === 'a' ? p[0] : `${p[0]},${p[1]}`})`,
+      calcParamsText: `(${kind === 'avg' && adjustableAverage ? `${p[0]},${p[1]}` : p[0]})`,
       icons: defaultStyles.tooltip.icons,
-      values: [{ title: { text: `${kind === 'a' ? (z ? 'az' : 'a') : name}${unit}`, color }, value: { text: v == null ? defaultStyles.tooltip.defaultValue : v.toFixed(indicator.precision), color } }],
+      values: [{ title: { text: `${kind === 'a' ? names.core : name}${unit}`, color }, value: { text: v == null ? defaultStyles.tooltip.defaultValue : v.toFixed(indicator.precision), color } }],
     };
   };
 }
@@ -1082,8 +1097,8 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const a = unifiedDspA(dataList, indicator.calcParams[0], indicator.calcParams[2] === 1);
-      return rollingAvgHours(a, indicator.calcParams[1]).map(x => (x == null ? {} : { v: x }));
+      const values = buyerSeries(dataList, indicator.calcParams[2] === 1 ? 'DSP_Z' : 'DSP_VA', indicator.calcParams[0]);
+      return values.avg.map(x => (x == null ? {} : { v: x }));
     },
   });
 
@@ -1113,6 +1128,7 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'BSS_CUSTOM',
     shortName: 'BSS',
+    createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'BSS', calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
     calcParams: [BSS_DEFAULTS.recentHours],
     precision: 2,
     // 纵轴固定包含 −1 ~ 1（BSS 的取值范围），参考线始终画得出来
@@ -1125,7 +1141,7 @@ export function registerCustomIndicators() {
         styles: (data) => ({ color: bssColor((data.next?.indicatorData as { bss?: number } | undefined)?.bss ?? (data.current.indicatorData as { bss?: number } | undefined)?.bss), size: 1.5 }),
       },
     ],
-    calc: (dataList, indicator) => unifiedCore(dataList, 'bss', indicator.calcParams[0], () => bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss)).map(x => (x == null ? {} : { bss: x })),
+    calc: (dataList, indicator) => buyerSeries(dataList, 'BSS', indicator.calcParams[0]).core.map(x => (x == null ? {} : { bss: x })),
   });
 
   // ─── CBA 买方定价优势指数（副图）───
@@ -1133,6 +1149,7 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'CBA_CUSTOM',
     shortName: 'CBA',
+    createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'CBA', calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
     calcParams: [CBA_DEFAULTS.halfLifeHours],
     precision: 1,
     minValue: 0,
@@ -1147,7 +1164,7 @@ export function registerCustomIndicators() {
         },
       },
     ],
-    calc: (dataList, indicator) => unifiedCore(dataList, 'cba', indicator.calcParams[0], () => cbaPoints(dataList, indicator.calcParams[0]).map(p => p.cba)).map(x => (x == null ? {} : { cba: x })),
+    calc: (dataList, indicator) => buyerSeries(dataList, 'CBA', indicator.calcParams[0]).core.map(x => (x == null ? {} : { cba: x })),
   });
 
   registerIndicator({
@@ -1214,11 +1231,7 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const legacy = cbi2Points(dataList, indicator.calcParams[0]).map(p => p.cbi2);
-      const def = accountFeatureDef('cbi2');
-      if (!def || sameCoreAsBuiltin(def, BUILTIN_FEATURES.find(b => b.id === 'cbi2'))) return legacy.map(x => (x == null ? {} : { cbi2: x }));
-      const times = dataList.map(d => d.timestamp), step = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
-      return (chartFeatureSeries(dataList, 'cbi2', indicator.calcParams[0], btcClosesAt(times, step))?.core ?? []).map(x => (x == null ? {} : { cbi2: x }));
+      return buyerSeries(dataList, 'CBI2', indicator.calcParams[0]).core.map(x => (x == null ? {} : { cbi2: x }));
     },
   });
 
@@ -1226,6 +1239,7 @@ export function registerCustomIndicators() {
   registerIndicator({
     name: 'BSS_AVG_CUSTOM',
     shortName: 'avg_BSS',
+    createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'avg_BSS', calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
     calcParams: [BSS_DEFAULTS.recentHours, AVG_DEFAULT_HOURS],
     precision: 8,
     draw: avgBssLines,
@@ -1236,10 +1250,40 @@ export function registerCustomIndicators() {
       },
     ],
     calc: (dataList, indicator) => {
-      const bss = unifiedCore(dataList, 'bss', indicator.calcParams[0], () => bssPoints(dataList, indicator.calcParams[0]).map(p => p.bss));
-      return rollingAvgHours(bss, indicator.calcParams[1]).map(x => (x == null ? {} : { bss: x }));
+      return buyerSeries(dataList, 'BSS', indicator.calcParams[0]).avg.map(x => (x == null ? {} : { bss: x }));
     },
   });
+
+  // Complete the original five entries with named Deep dig averages. Keep native
+  // series keys for existing panes; never average the formula's last expression.
+  for (const item of BUYER_RESEARCH_INDICATORS) {
+    for (const level of [1, 2]) {
+      if (level === 1 && ['DSP_VA', 'DSP_Z', 'BSS'].includes(item.id)) continue;
+      if (item.id === 'DSP_Z') continue; // Registered as the independent Z alias below.
+      const key = item.id === 'DSP_VA' ? 'v' : item.id === 'BSS' ? 'bss' : item.id === 'CBI2' ? 'cbi2' : 'cba';
+      const label = `avg_${item.core}${level === 2 ? '_2' : ''}`;
+      const template: IndicatorTemplate = {
+        name: researchKcName(item.id, level), shortName: label, calcParams: [item.period, 0, 0], precision: 8,
+        draw: item.id === 'BSS' ? avgBssLines : item.id === 'CBA' ? CBA_ACTION_LINE : item.id === 'CBI2' ? CBI2_ACTION_LINE : dspActionLine(1),
+        createTooltipDataSource: ({ indicator, defaultStyles }) => {
+          const selected = item.id === 'DSP_VA' && indicator.calcParams[1] === 1 ? BUYER_RESEARCH_INDICATORS.find(i => i.id === 'DSP_Z')! : item;
+          const def = accountFeatureDef(selected.featureId);
+          const names = def ? researchSeriesNames(selected, def.formula) : null;
+          return { name: (level === 1 ? names?.avg : names?.avg2) ?? label, calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
+        },
+        figures: [{ key, title: `${label}: `, type: 'line', styles: data => {
+          const value = (data.next?.indicatorData as Record<string, number> | undefined)?.[key] ?? (data.current.indicatorData as Record<string, number> | undefined)?.[key];
+          return { color: item.id === 'BSS' ? bssColor(value) : vColor(value), size: 1.5 };
+        } }],
+        calc: (data, indicator) => {
+          const selected = item.id === 'DSP_VA' && indicator.calcParams[1] === 1 ? 'DSP_Z' : item.id;
+          const values = buyerSeries(data, selected, indicator.calcParams[0]);
+          return (level === 1 ? values.avg : values.avg2).map(value => value == null ? {} : { [key]: value });
+        },
+      };
+      if (item.id === 'DSP_VA') registerDspVariant(template); else registerIndicator(template);
+    }
+  }
 
   // One source of truth: the account's Deep dig formula, including both named averages.
   for (const item of RESEARCH_INDICATORS) {

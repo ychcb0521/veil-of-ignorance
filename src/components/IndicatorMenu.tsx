@@ -13,7 +13,7 @@ import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
 import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
-import { RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
+import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -164,16 +164,16 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // --- Volume ---
   // 【用户要求】动态谢林点：主图 DSP 线 + 副图 买方推力漂移速度 DSP·a、主动买方优势 A；参数 = 5 分钟图上的时间半衰期（小时，其他周期等比例缩放），成交量一律用金额
   { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
-  // 【用户要求】可以隐去主图的 DSP 线：只要 a / A 两个副图；与上一项二选一
-  { id: 'DSP_VA', nameZh: '买方推力漂移速度 DSP·a',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
+  // 自制普通 DSP·a：原值、同名均值、同名分段加权均值。
+  { id: 'DSP_VA', nameZh: '买方推力漂移速度 DSP·a',   nameEn: 'DSP · a · avg_a · avg_a_2',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS },
   // 【用户要求】2026-10-18 BSS 买卖强度综合分（副图）：参数 = 5 分钟图上的近期窗口 n（小时），其他周期等比例缩放（与 DSP 同一约定）
-  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'custom', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时（与均线时长 N 无关）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_BSS = avg(BSS, N)：BSS 副图正下方单独一个副图，过去 N 小时 BSS 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
+  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'custom', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口取 Deep dig 的 avgh（默认 24 小时）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS },
   // 【用户要求】2026-10-18 CBA 买方定价优势指数（副图）：参数 = 5 分钟图上的时间权重半衰期 h（小时），其他周期等比例缩放（与 DSP 同一约定）
   { id: 'CBA',    nameZh: '买方定价优势指数 CBA',      nameEn: 'Buyer Pricing Advantage (CBA)', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'custom', periodHint: '时间权重半衰期 h（小时，按 5 分钟图计）：48 小时窗口里越早的 K 线权重越小。η = 0.5、α = 1，常态成交额与波动率回看 24 小时（Deep dig 公式里可改）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: CBA_DEFINITION, detail: CBA_STEPS },
   // 【用户要求】2026-10-18 CBI 买方优势指数（副图）：参数 = 时间衰减半衰期 h（根），N = 48、m = 12、ATR 14 根，基线 24 小时按 5 分钟图计
   { id: 'CBA-2', nameZh: '成交支持下的价格重心迁移 CBA-2', nameEn: 'Volume-supported Price Center Migration', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '仅5分钟已收盘K线；时间权重半衰期h（小时）。48小时完整窗口，历史基线24小时；α=1、ε=0.000001、m=12、失效阈值3均为研究默认值，Deep dig公式可改。其他周期留空。红点1表示独立失效，不清零主值。', periodUnit: 'h', description: CBA2_DEFINITION, detail: CBA2_STEPS },
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
-  { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·a（Z 分数）', nameEn: 'DSP · az · Z score', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_az：Z 分数推力的过去 N 小时均值' },
+  { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·a（Z 分数）', nameEn: 'DSP · az · Z score', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION },
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
   { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'custom', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
   ...RESEARCH_INDICATORS.map(item => ({
@@ -289,7 +289,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
     const avgHours = item.avgDefault == null ? undefined : (replaced?.avgHours ?? item.avgDefault);
     const zscore = item.id === 'DSP_Z' || (item.zHint != null && replaced?.zscore) ? true : undefined;
-    const research = RESEARCH_INDICATORS.find(r => r.id === item.id);
+    const research = CUSTOM_RESEARCH_INDICATORS.find(r => r.id === item.id);
     const defaultPeriod = research ? researchDefaultPeriod(research) : item.defaultPeriod;
     onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
   };

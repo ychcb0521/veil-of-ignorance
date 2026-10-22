@@ -1,4 +1,4 @@
-/** Five Deep dig features exposed on the chart, each with its two named averages. */
+/** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
 import { accountFeatureDef, chartFeatureSeries } from '@/lib/featureSource';
 import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/features';
@@ -12,10 +12,33 @@ export const RESEARCH_INDICATORS = [
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, min: -1, max: 1, seller: true },
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
 ] as const;
-export type ResearchIndicator = typeof RESEARCH_INDICATORS[number];
-export const researchKcName = (id: string, level = 0) => `${id}${level === 1 ? '_AVG' : level === 2 ? '_AVG2' : ''}_CUSTOM`;
+export const BUYER_RESEARCH_INDICATORS = [
+  { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
+  { id: 'BSS', featureId: 'bss', core: 'BSS', short: 'BSS', name: '买卖强度综合分 BSS', period: 1, parameter: '近期窗口', neutral: 0, min: -1, max: 1, seller: false },
+  { id: 'CBA', featureId: 'cba', core: 'CBA', short: 'CBA', name: '买方定价优势指数 CBA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
+  { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', short: 'DSP·az', name: '买方推力漂移速度 DSP·a（Z 分数）', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
+  { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', short: 'CBI-2', name: '买方优势指数 CBI-2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, seller: false },
+] as const;
+export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];
+export type ResearchIndicator = typeof CUSTOM_RESEARCH_INDICATORS[number];
+export const researchKcName = (id: string, level = 0) => {
+  const stem = id === 'DSP_VA' ? 'DSP_V' : id === 'DSP_Z' ? 'DSP_Z_V' : id;
+  return `${stem}${level === 1 ? '_AVG' : level === 2 ? '_AVG2' : ''}_CUSTOM`;
+};
 export function researchIndicatorForKc(name: string): ResearchIndicator | undefined {
-  return RESEARCH_INDICATORS.find(item => [0, 1, 2].some(level => researchKcName(item.id, level) === name));
+  return CUSTOM_RESEARCH_INDICATORS.find(item => [0, 1, 2].some(level => researchKcName(item.id, level) === name));
+}
+
+/** Some saved Z definitions call their output a, rather than the built-in az. */
+export function researchSeriesNames(item: ResearchIndicator, formula: string) {
+  let core: string = item.core;
+  if (item.id === 'DSP_Z') {
+    try {
+      const names = new Set(compileFeatureFormula(formula).program.statements.map(s => s.name));
+      if (!names.has('az') && names.has('a')) core = 'a';
+    } catch { /* Invalid definitions leave chart series blank, including tooltips. */ }
+  }
+  return { core, avg: `avg_${core}`, avg2: `avg_${core}_2` };
 }
 
 const chartDataCache = new WeakMap<KLineData[], { rows: unknown[][]; revision: number }>();
@@ -32,12 +55,13 @@ function dataRevision(data: KLineData[]): number {
 /** Supply defaults only for missing series. Existing account expressions always win. */
 export function researchChartFormula(item: ResearchIndicator, formula: string): string {
   const names = new Set(compileFeatureFormula(formula).program.statements.map(s => s.name));
+  const series = researchSeriesNames(item, formula);
   const extra: string[] = [];
-  if (!names.has(`avg_${item.core}`)) extra.push(`avg_${item.core} = avg(${item.core}, 24)`);
-  if (!names.has(`avg_${item.core}_2`)) {
+  if (!names.has(series.avg)) extra.push(`${series.avg} = avg(${series.core}, 24)`);
+  if (!names.has(series.avg2)) {
     let helper = '_chart_m6';
     while (names.has(helper)) helper += '_';
-    extra.push(`${helper} = avg(${item.core}, 6)`, `avg_${item.core}_2 = (4 * ${helper} + 3 * ago(${helper}, 6) + 2 * ago(${helper}, 12) + ago(${helper}, 18)) / 10`);
+    extra.push(`${helper} = avg(${series.core}, 6)`, `${series.avg2} = (4 * ${helper} + 3 * ago(${helper}, 6) + 2 * ago(${helper}, 12) + ago(${helper}, 18)) / 10`);
   }
   return [formula, ...extra].join('\n');
 }
@@ -45,8 +69,8 @@ export function researchChartFormula(item: ResearchIndicator, formula: string): 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
-  if (item.id === 'STATE' || item.id === 'CDI2') return avgHoursOf(def);
-  if (item.id !== 'DSS') return halfLifeOf(def);
+  if (item.id === 'STATE' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
+  if (item.id !== 'DSS' && item.id !== 'BSS') return halfLifeOf(def);
   try {
     const st = compileFeatureFormula(def.formula).program.statements.find(s => s.name === 'n');
     if (st?.expr.k === 'num' && st.expr.v > 0) return st.expr.v;
@@ -92,5 +116,6 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, revision: `${dataRevision(data)}:${usesBtc ? btcReferenceVersion() : 0}` });
   const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale);
   // Do not use out.core: the last account expression may itself be the weighted average.
-  return { core: scaled(item.core), avg: scaled(`avg_${item.core}`), avg2: scaled(`avg_${item.core}_2`) };
+  const names = researchSeriesNames(item, formula);
+  return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };
 }

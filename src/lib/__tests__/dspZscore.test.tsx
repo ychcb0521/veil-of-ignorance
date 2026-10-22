@@ -87,8 +87,8 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
   const k: KLineData[] = bars(600, 5, 0.006).map(b => ({ timestamp: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume, turnover: b.quoteVolume!, takerBuyTurnover: b.takerBuyQuoteVolume } as KLineData));
 
   it('开关在参数最后一位：a / avg_a 副图换成 az（× 100，% 标准差 / 根）；图例名字跟着换，括号里不写开关', () => {
-    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, zscore: true })).toEqual([6, 1]);
-    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 12, zscore: true })).toEqual([6, 12, 1]);
+    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, zscore: true })).toEqual([6, 1, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 12, zscore: true })).toEqual([6, 12, 1, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_A_CUSTOM', { period: 6, zscore: true })).toEqual([6]);
     const a = registered.get('DSP_V_CUSTOM')!;
     // 【用户要求】2026-10-19 公式统一：a / az 副图按 Deep dig 的公式算（与 DSP·a / DSP·az 特征值同一份定义）
@@ -103,10 +103,10 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
     expect(tip('DSP_V_CUSTOM', [6, 0], out).name).toBe('DSP·a');
     const avg = registered.get('DSP_V_AVG_CUSTOM')!;
     const t2 = tip('DSP_V_AVG_CUSTOM', [6, 24, 1], avg.calc(k, { calcParams: [6, 24, 1] }));
-    expect([t2.name, t2.calcParamsText, t2.values[0].title.text]).toEqual(['avg_az', '(6,24)', 'avg_az(%σ/根): ']);
+    expect([t2.name, t2.calcParamsText, t2.values[0].title.text]).toEqual(['avg_az', '(6)', 'avg_az(%σ/根): ']);
   });
 
-  it('菜单：DSP 开着时有「Z」开关，点一下切换；与「只要副图」互换时沿用', () => {
+  it('菜单：DSP 开着时有「Z」开关，点一下切换；自制普通版独立读取普通公式', () => {
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'DSP', period: 6, avgHours: 24, enabled: true }];
     const { rerender } = render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
@@ -118,7 +118,7 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
     rerender(<IndicatorMenu open indicators={[{ type: 'DSP', period: 6, avgHours: 24, zscore: true, enabled: true }]} onIndicatorsChange={onChange} onClose={() => {}} />);
     expect(screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用 Z 分数版')).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByText('买方推力漂移速度 DSP·a'));
-    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'DSP_VA', zscore: true })]);
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'DSP_VA', period: 6 })]);
     // BSS 没有这个开关
     expect(screen.queryByLabelText(/买卖强度综合分 BSS 用 Z 分数版/)).not.toBeInTheDocument();
   });

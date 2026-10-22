@@ -198,7 +198,7 @@ describe('【用户要求】K 线图指标菜单：CBI-2（副图）', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     const withBtc = cbi2Points(k, 24, { fetchReference: false });
     expect(withBtc.at(-1)!.cbi2!).toBeCloseTo(computeCbi2(toCbi2(b)).at(-1)!.cbi2!, 12);
-    expect(indicatorCalcParams('CBI2_CUSTOM', { period: 24 })).toEqual([24, btcReferenceVersion()]);
+    expect(indicatorCalcParams('CBI2_CUSTOM', { period: 24 })).toEqual([24, btcReferenceVersion(), expect.any(Number)]);
     // 按图上的时间段取 BTCUSDT：同一段只取一次
     const fetchFn = vi.fn<FetchFn>(async () => ({ ok: true, status: 200, json: async () => [] }));
     requestBtcReference(0, 10 * BAR_MS, BAR_MS, fetchFn);

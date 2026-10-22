@@ -55,7 +55,7 @@ describe('自制区的十个特征值', () => {
       const actual = registered.get(z[i].kcName).calc(data, { calcParams: params });
       expect(actual).toEqual(registered.get(base[i].kcName).calc(data, { calcParams: expectedParams }));
     }
-    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 12 })).toEqual([12, 0]);
-    expect(indicatorCalcParams('DSP_Z_V_CUSTOM', { period: 6 })).toEqual([6, 1]);
+    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 12 })).toEqual([12, 0, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('DSP_Z_V_CUSTOM', { period: 6 })).toEqual([6, 1, expect.any(Number), expect.any(Number)]);
   });
 });
