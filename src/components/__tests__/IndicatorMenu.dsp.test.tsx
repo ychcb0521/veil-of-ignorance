@@ -26,15 +26,15 @@ describe('【用户要求】动态谢林点：可以隐去主图的 DSP 线，�
     expect(screen.getByTestId('indicator-menu-build').textContent).toBe(BUILD_STAMP.replace('veil-build:', '版本 '));
   });
 
-  it('菜单里有「只要副图」一项', () => {
+  it('菜单里保留独立 DSP·a 副图与含主图 DSP 两个入口', () => {
     open([]);
-    expect(screen.getByText('动态谢林点 a / A（只要副图）')).toBeInTheDocument();
+    expect(screen.getByText('买方推力漂移速度 DSP·a')).toBeInTheDocument();
     expect(screen.getByText('动态谢林点 DSP（含 a / A 副图）')).toBeInTheDocument();
   });
 
   it('二选一：开着 DSP 时点「只要副图」→ 换成只要副图，半衰期与均线时长沿用', () => {
     const onChange = open([{ type: 'DSP', period: 2, avgHours: 48, color: '#F0B90B', enabled: true }, { type: 'MA', period: 7, enabled: true }]);
-    fireEvent.click(screen.getByText('动态谢林点 a / A（只要副图）'));
+    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·a'));
     expect(onChange).toHaveBeenCalledWith([
       { type: 'MA', period: 7, enabled: true },
       { type: 'DSP_VA', period: 2, avgHours: 48, color: '#F0B90B', enabled: true },

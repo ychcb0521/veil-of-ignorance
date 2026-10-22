@@ -107,11 +107,11 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A", STATE: "状态 S", DSP_B: "DSP·b" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a/A", DSP_Z: "DSP·az/A", STATE: "状态 S", DSP_B: "DSP·b" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
-const COMPANION_ONLY = new Set(["DSP_VA"]);
+const COMPANION_ONLY = new Set(["DSP_VA", "DSP_Z"]);
 /** 有 Z 分数开关的菜单项（动态谢林点两项）。 */
 const Z_TOGGLE_TYPES = new Set(["DSP", "DSP_VA"]);
 /** 这个菜单项是否带副图均线参数（自己或附属副图之一用均线时长）。 */

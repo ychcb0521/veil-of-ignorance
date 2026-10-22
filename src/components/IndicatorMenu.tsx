@@ -24,7 +24,7 @@ export interface IndicatorCatalogItem {
   defaultPeriod: number;
   color: string;
   /** Category for grouping */
-  category: 'trend' | 'momentum' | 'volatility' | 'volume' | 'oscillator' | 'other';
+  category: 'trend' | 'momentum' | 'volatility' | 'volume' | 'oscillator' | 'other' | 'custom';
   /** 参数框的含义（悬停提示）与单位（框后小字）；不写就是普通的「周期」。 */
   periodHint?: string;
   periodUnit?: string;
@@ -165,19 +165,20 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // 【用户要求】动态谢林点：主图 DSP 线 + 副图 买方推力漂移速度 DSP·a、主动买方优势 A；参数 = 5 分钟图上的时间半衰期（小时，其他周期等比例缩放），成交量一律用金额
   { id: 'DSP',    nameZh: '动态谢林点 DSP（含 a / A 副图）', nameEn: 'Dynamic Schelling Point',    isOverlay: true,  defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
   // 【用户要求】可以隐去主图的 DSP 线：只要 a / A 两个副图；与上一项二选一
-  { id: 'DSP_VA', nameZh: '动态谢林点 a / A（只要副图）',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'volume', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
+  { id: 'DSP_VA', nameZh: '买方推力漂移速度 DSP·a',   nameEn: 'DSP · a / A only',          isOverlay: false, defaultPeriod: 6,  color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）：越早的 K 线权重越小。其他周期的记忆时间等比例放大 / 缩小——15 分钟图 ×3、1 小时图 ×12、1 分钟图 ÷5，每根 K 线的权重都一样', periodUnit: 'h', description: DSP_V_DEFINITION, detail: DSP_V_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_a = avg(a, N)：a 副图正下方单独一个副图，过去 N 小时 a 的平均（N 按 5 分钟图计，其他周期等比例缩放）', zHint: DSP_VZ_DEFINITION },
   // 【用户要求】2026-10-18 BSS 买卖强度综合分（副图）：参数 = 5 分钟图上的近期窗口 n（小时），其他周期等比例缩放（与 DSP 同一约定）
-  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'volume', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时（与均线时长 N 无关）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_BSS = avg(BSS, N)：BSS 副图正下方单独一个副图，过去 N 小时 BSS 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
+  { id: 'BSS',    nameZh: '买卖强度综合分 BSS',        nameEn: 'Buy/Sell Strength (BSS)',   isOverlay: false, defaultPeriod: 1,  color: '#0ECB81', category: 'custom', periodHint: '近期窗口 n（小时，按 5 分钟图计）：M 涨跌幅、V 相对成交量、A 成交攻击性都取最近 n。标准化窗口固定 24 小时（与均线时长 N 无关）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: BSS_DEFINITION, detail: BSS_STEPS, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_BSS = avg(BSS, N)：BSS 副图正下方单独一个副图，过去 N 小时 BSS 的平均（N 按 5 分钟图计，其他周期等比例缩放）' },
   // 【用户要求】2026-10-18 CBA 买方定价优势指数（副图）：参数 = 5 分钟图上的时间权重半衰期 h（小时），其他周期等比例缩放（与 DSP 同一约定）
-  { id: 'CBA',    nameZh: '买方定价优势指数 CBA',      nameEn: 'Buyer Pricing Advantage (CBA)', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '时间权重半衰期 h（小时，按 5 分钟图计）：48 小时窗口里越早的 K 线权重越小。η = 0.5、α = 1，常态成交额与波动率回看 24 小时（Deep dig 公式里可改）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: CBA_DEFINITION, detail: CBA_STEPS },
+  { id: 'CBA',    nameZh: '买方定价优势指数 CBA',      nameEn: 'Buyer Pricing Advantage (CBA)', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'custom', periodHint: '时间权重半衰期 h（小时，按 5 分钟图计）：48 小时窗口里越早的 K 线权重越小。η = 0.5、α = 1，常态成交额与波动率回看 24 小时（Deep dig 公式里可改）。其他周期等比例放大 / 缩小，每根 K 线的窗口根数一样', periodUnit: 'h', description: CBA_DEFINITION, detail: CBA_STEPS },
   // 【用户要求】2026-10-18 CBI 买方优势指数（副图）：参数 = 时间衰减半衰期 h（根），N = 48、m = 12、ATR 14 根，基线 24 小时按 5 分钟图计
   { id: 'CBA-2', nameZh: '成交支持下的价格重心迁移 CBA-2', nameEn: 'Volume-supported Price Center Migration', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '仅5分钟已收盘K线；时间权重半衰期h（小时）。48小时完整窗口，历史基线24小时；α=1、ε=0.000001、m=12、失效阈值3均为研究默认值，Deep dig公式可改。其他周期留空。红点1表示独立失效，不清零主值。', periodUnit: 'h', description: CBA2_DEFINITION, detail: CBA2_STEPS },
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
+  { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·a（Z 分数）', nameEn: 'DSP · az · Z score', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION, avgDefault: AVG_DEFAULT_HOURS, avgHint: 'avg_az：Z 分数推力的过去 N 小时均值' },
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
-  { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'volume', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
+  { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'custom', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
-    isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'volume' as const,
+    isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
     periodHint: `${item.parameter}（小时，按5分钟图计，其他周期等比例缩放）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'h',
     description: '原值、均值、近端加权均值，各一个副图。',
   })),
@@ -207,6 +208,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   volume: '成交量 · Volume',
   oscillator: '摆动指标 · Oscillator',
   other: '其他 · Other',
+  custom: '自制区',
 };
 
 interface Props {
@@ -249,7 +251,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const fit = () => {
       const boundary = host.querySelector<HTMLElement>('[data-chart-indicator-boundary]') ?? host;
       const left = Math.max(8, boundary.getBoundingClientRect().left + 8);
-      panel.style.maxWidth = `${Math.max(0, Math.min(384, panel.getBoundingClientRect().right - left))}px`;
+      const rect = panel.getBoundingClientRect();
+      panel.style.maxWidth = `${Math.max(0, Math.min(384, rect.right - left))}px`;
+      panel.style.maxHeight = `${Math.max(0, boundary.getBoundingClientRect().bottom - rect.top - 8)}px`;
     };
     fit();
     const observer = new ResizeObserver(fit);
@@ -284,7 +288,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const replaced = rival ? indicators.find(i => i.type === rival) : undefined;
     const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
     const avgHours = item.avgDefault == null ? undefined : (replaced?.avgHours ?? item.avgDefault);
-    const zscore = item.zHint != null && replaced?.zscore ? true : undefined;
+    const zscore = item.id === 'DSP_Z' || (item.zHint != null && replaced?.zscore) ? true : undefined;
     const research = RESEARCH_INDICATORS.find(r => r.id === item.id);
     const defaultPeriod = research ? researchDefaultPeriod(research) : item.defaultPeriod;
     onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
@@ -304,17 +308,17 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
-  const categories = ['trend', 'momentum', 'volatility', 'volume', 'other'];
+  const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
   const supportedCount = INDICATOR_CATALOG.filter(i => isSupported(i.id)).length;
 
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-10 z-[120] w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 ease-out origin-top"
+      className="absolute right-0 top-10 z-[120] flex flex-col w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 ease-out origin-top"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border bg-card">
+      <div className="flex shrink-0 items-center justify-between px-3 py-2.5 border-b border-border bg-card">
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">{supportedCount}/{INDICATOR_CATALOG.length} 已支持</span>
@@ -324,7 +328,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         </div>
       </div>
 
-      <div className="px-3 py-2 border-b border-border bg-card">
+      <div className="shrink-0 px-3 py-2 border-b border-border bg-card">
         <div className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-secondary/50 border border-border">
           <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <input
@@ -342,7 +346,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         </div>
       </div>
 
-      <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto bg-card">
+      <div className="flex shrink-0 items-center gap-1 px-3 py-1.5 border-b border-border overflow-x-auto bg-card">
         <button
           type="button"
           onClick={() => setCategoryFilter(null)}
@@ -366,14 +370,14 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         ))}
       </div>
 
-      <div className="max-h-[60vh] overflow-y-auto bg-card">
+      <div className="max-h-[60vh] min-h-0 flex-auto overflow-y-auto bg-card">
         {(!INDICATOR_CATALOG?.length || filtered.length === 0) && (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">未找到匹配的指标</div>
         )}
 
         {INDICATOR_CATALOG?.length > 0 && overlays.length > 0 && (
           <>
-            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary/30 border-b border-border sticky top-0 z-10">
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary border-b border-border sticky top-0 z-10">
               主图叠加 · Overlays ({overlays.length})
             </div>
             {overlays.map(item => (
@@ -384,7 +388,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
         {INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
           <>
-            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary/30 border-b border-border sticky top-0 z-10">
+            <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary border-b border-border sticky top-0 z-10">
               副图指标 · Sub-pane ({oscillators.length})
             </div>
             {oscillators.map(item => (
@@ -394,7 +398,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         )}
       </div>
 
-      <div className="px-3 py-2 border-t border-border flex items-center justify-between bg-card">
+      <div className="shrink-0 px-3 py-2 border-t border-border flex items-center justify-between bg-card">
         <span className="text-[10px] text-muted-foreground">
           已启用 {indicators.length} 个指标
           {/* 线上跑的是哪一版：对照提交说明里的版本戳，就知道 Lovable 发布了没有 */}
@@ -420,10 +424,10 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   return (
     <div
       ref={ref}
-      className="flex items-center justify-between px-3 py-2 hover:bg-accent/30 transition-colors duration-100 ease-out cursor-pointer group"
+      className="flex flex-wrap items-center justify-between gap-y-1 px-3 py-2 hover:bg-accent/30 transition-colors duration-100 ease-out cursor-pointer group"
       onClick={() => onToggle(item)}
     >
-      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+      <div className="flex items-center gap-2.5 flex-1 basis-48 min-w-0">
         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: item.color }} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -440,7 +444,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5 shrink-0 max-w-full">
         {active ? (
           <>
             <ParamInput

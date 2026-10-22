@@ -49,6 +49,11 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
   });
 
   it('所有均值都使用可见区间自动范围，不继承原值的 ±1 / 0–1 / 零点边界，并保留小幅变化', () => {
+    for (const name of ['BSS_AVG_CUSTOM', 'DSP_V_AVG_CUSTOM', 'DSP_Z_V_AVG_CUSTOM']) {
+      const reg = mock.registered.get(name);
+      expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined();
+      expect(reg.precision).toBeGreaterThanOrEqual(8);
+    }
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));

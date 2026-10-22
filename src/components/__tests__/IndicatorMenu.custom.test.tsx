@@ -1,0 +1,61 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { IndicatorMenu, INDICATOR_CATALOG } from '@/components/IndicatorMenu';
+import type { IndicatorConfig } from '@/components/CandlestickChart';
+import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators } from '@/lib/customIndicators';
+
+const registered = vi.hoisted(() => new Map<string, any>());
+vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
+registerCustomIndicators();
+beforeEach(() => localStorage.clear());
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'STATE', 'CDI2', 'DSP_B', 'DSS', 'CDA'];
+const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)!.nameZh;
+
+describe('自制区的十个特征值', () => {
+  it('按 Deep dig 图示的顺序集中列出十项，均可添加；成交量分类不再混入这些特征值', () => {
+    expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(ids);
+    const changed = vi.fn();
+    render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '自制区' }));
+    for (const id of ids) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
+    expect(screen.queryByText('成交量加权平均价')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '成交量' }));
+    for (const id of ids) expect(screen.queryByText(name(id))).not.toBeInTheDocument();
+    expect(changed).not.toHaveBeenCalled(); // 分类不改已有选择或参数。
+  });
+
+  it('普通 DSP·a 与 Z 分数版可同时添加，各自调参和关闭', () => {
+    const changed = vi.fn();
+    function Menu() {
+      const [items, setItems] = useState<IndicatorConfig[]>([]);
+      return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => { setItems(next); changed(next); }} />;
+    }
+    render(<Menu />);
+    fireEvent.click(screen.getByRole('button', { name: '自制区' }));
+    fireEvent.click(screen.getByText(name('DSP_VA'))); fireEvent.click(screen.getByText(name('DSP_Z')));
+    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.type)).toEqual(['DSP_VA', 'DSP_Z']);
+    expect(changed.mock.lastCall![0][1].zscore).toBe(true);
+    fireEvent.change(screen.getByLabelText(name('DSP_VA') + ' 参数'), { target: { value: '12' } });
+    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.period)).toEqual([12, 6]);
+    fireEvent.click(screen.getByText(name('DSP_VA')));
+    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.type)).toEqual(['DSP_Z']);
+    fireEvent.click(screen.getByText(name('DSP_Z'))); expect(changed.mock.lastCall![0]).toEqual([]);
+  });
+
+  it('Z 版使用独立的原生副图名称，复用现有 Z 公式和均值，参数不串到普通版', () => {
+    const data = Array.from({ length: 700 }, (_, i) => ({ timestamp: i * 300000, open: 100, high: 102, low: 98,
+      close: 100 + Math.sin(i / 7), volume: 1000, turnover: 100000 + 1000 * Math.cos(i / 11), takerBuyTurnover: 50000 + 20000 * Math.sin(i / 13) }));
+    const base = INDICATOR_COMPANIONS.DSP_VA, z = INDICATOR_COMPANIONS.DSP_Z;
+    expect(new Set([...base, ...z].map(item => item.kcName)).size).toBe(6);
+    for (let i = 0; i < z.length; i++) {
+      const params = indicatorCalcParams(z[i].kcName, { period: 6, avgHours: 12 });
+      const expectedParams = indicatorCalcParams(base[i].kcName, { period: 6, avgHours: 12, zscore: true });
+      expect(params).toEqual(expectedParams);
+      const actual = registered.get(z[i].kcName).calc(data, { calcParams: params });
+      expect(actual).toEqual(registered.get(base[i].kcName).calc(data, { calcParams: expectedParams }));
+    }
+    expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 12 })).toEqual([12, 0]);
+    expect(indicatorCalcParams('DSP_Z_V_CUSTOM', { period: 6 })).toEqual([6, 1]);
+  });
+});

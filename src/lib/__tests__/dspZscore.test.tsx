@@ -117,7 +117,7 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
     expect(onChange).toHaveBeenLastCalledWith([{ type: 'DSP', period: 6, avgHours: 24, zscore: true, enabled: true }]);
     rerender(<IndicatorMenu open indicators={[{ type: 'DSP', period: 6, avgHours: 24, zscore: true, enabled: true }]} onIndicatorsChange={onChange} onClose={() => {}} />);
     expect(screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用 Z 分数版')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByText('动态谢林点 a / A（只要副图）'));
+    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·a'));
     expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'DSP_VA', zscore: true })]);
     // BSS 没有这个开关
     expect(screen.queryByLabelText(/买卖强度综合分 BSS 用 Z 分数版/)).not.toBeInTheDocument();

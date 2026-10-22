@@ -4,7 +4,7 @@ import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { registerIndicator, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
+import { registerIndicator, type IndicatorTemplate, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
@@ -267,7 +267,7 @@ export function bssPoints(dataList: KLineData[], recentHours: number | undefined
  */
 export const AVG_DEFAULT_HOURS = 24;
 /** 均线副图（第二个参数 = 均线时长 N）。 */
-export const AVG_PARAM_INDICATORS = new Set(['DSP_V_AVG_CUSTOM', 'BSS_AVG_CUSTOM']);
+export const AVG_PARAM_INDICATORS = new Set(['DSP_V_AVG_CUSTOM', 'DSP_Z_V_AVG_CUSTOM', 'BSS_AVG_CUSTOM']);
 
 const validHours = (h: unknown, fallback: number) => {
   const n = Number(h);
@@ -295,6 +295,11 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   DSP: DSP_COMPANIONS,
   // 【用户要求】可以隐去主图的 DSP 线：只开两个副图（与 DSP 共用同一组副图，菜单里两项二选一）
   DSP_VA: DSP_COMPANIONS,
+  DSP_Z: [
+    { key: 'DSP_Z#V', kcName: 'DSP_Z_V_CUSTOM' },
+    { key: 'DSP_Z#VAVG', kcName: 'DSP_Z_V_AVG_CUSTOM' },
+    { key: 'DSP_Z#A', kcName: 'DSP_Z_A_CUSTOM' },
+  ],
   // 【用户要求】avg_BSS 独立一个副图，紧挨在 BSS 副图下面
   BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }],
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
@@ -307,6 +312,8 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
  */
 export function indicatorCalcParams(kcName: string, ind: { period: number; avgHours?: number; zscore?: boolean }): number[] {
+  const base = DSP_Z_BASE_NAMES[kcName];
+  if (base) return indicatorCalcParams(base, { ...ind, zscore: true });
   const research = researchIndicatorForKc(kcName);
   if (research) return [ind.period, btcReferenceVersion(), researchDefinitionVersion(research)];
   const z = ind.zscore ? 1 : 0;
@@ -315,6 +322,20 @@ export function indicatorCalcParams(kcName: string, ind: { period: number; avgHo
   if (kcName === 'CBI2_CUSTOM') return [ind.period, btcReferenceVersion()];
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
+}
+
+const DSP_Z_BASE_NAMES: Record<string, string> = {
+  DSP_Z_V_CUSTOM: 'DSP_V_CUSTOM', DSP_Z_V_AVG_CUSTOM: 'DSP_V_AVG_CUSTOM', DSP_Z_A_CUSTOM: 'DSP_A_CUSTOM',
+};
+function registerDspVariant(template: IndicatorTemplate) {
+  registerIndicator(template);
+  const alias = Object.keys(DSP_Z_BASE_NAMES).find(name => DSP_Z_BASE_NAMES[name] === template.name);
+  if (!alias) return;
+  const flag = template.name === 'DSP_V_CUSTOM' ? 1 : template.name === 'DSP_V_AVG_CUSTOM' ? 2 : null;
+  const params = (values: number[]) => { const out = [...values]; if (flag != null) out[flag] = 1; return out; };
+  registerIndicator({ ...template, name: alias, calcParams: params(template.calcParams ?? []),
+    calc: (data, indicator) => template.calc(data, { ...indicator, calcParams: params(indicator.calcParams) }),
+  });
 }
 
 type SegmentData = { current: { indicatorData?: unknown }; next: { indicatorData?: unknown } };
@@ -1009,7 +1030,7 @@ export function registerCustomIndicators() {
     calc: (dataList, indicator) => dspPoints(dataList, indicator.calcParams[0]).map(p => (p.dsp == null ? {} : { dsp: p.dsp, v: p.v ?? undefined })),
   });
 
-  registerIndicator({
+  registerDspVariant({
     name: 'DSP_V_CUSTOM',
     shortName: 'DSP·a',
     // [半衰期 h, Z 开关]
@@ -1030,15 +1051,13 @@ export function registerCustomIndicators() {
   });
 
   // 【用户要求】avg_a = avg(a, N)：独立副图，紧挨在 a 副图下面。参数 [半衰期 h, 均线时长 N]；0 轴与 a 副图同一条橘黄色虚线，线按正负着色
-  registerIndicator({
+  registerDspVariant({
     name: 'DSP_V_AVG_CUSTOM',
     shortName: 'avg_a',
     // [半衰期 h, 均线时长 N, Z 开关]
     calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS, 0],
     createTooltipDataSource: dspATooltip('avg'),
-    precision: 3,
-    minValue: 0,
-    maxValue: 0,
+    precision: 8,
     draw: V_ZERO_LINE,
     figures: [
       {
@@ -1052,7 +1071,7 @@ export function registerCustomIndicators() {
     },
   });
 
-  registerIndicator({
+  registerDspVariant({
     name: 'DSP_A_CUSTOM',
     shortName: 'DSP·A',
     calcParams: [DSP_DEFAULTS.halfLifeHours],
@@ -1192,9 +1211,7 @@ export function registerCustomIndicators() {
     name: 'BSS_AVG_CUSTOM',
     shortName: 'avg_BSS',
     calcParams: [BSS_DEFAULTS.recentHours, AVG_DEFAULT_HOURS],
-    precision: 2,
-    minValue: -1,
-    maxValue: 1,
+    precision: 8,
     draw: bssLevelLines,
     figures: [
       {
@@ -1282,6 +1299,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   HV: 'HV_CUSTOM',
   DSP: 'DSP_CUSTOM',
   DSP_VA: 'DSP_V_CUSTOM',
+  DSP_Z: 'DSP_Z_V_CUSTOM',
   BSS: 'BSS_CUSTOM',
   CBA: 'CBA_CUSTOM',
   'CBA-2': 'CBA2_CUSTOM',
