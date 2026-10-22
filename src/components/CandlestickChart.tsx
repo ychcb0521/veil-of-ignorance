@@ -29,6 +29,7 @@ import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc } from "@/lib/researchIndicators";
+import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeBtcReference } from "@/lib/btcReference";
 import {
   type AnalysisFloatingLabelCandidate,
@@ -2115,6 +2116,7 @@ function CandlestickChartComponent({
             isOverlay,
             isOverlay ? { id: "candle_pane" } : { height: 80 },
           );
+          configureResearchPaneAxis(chart, paneId, kcName);
           activeIndicatorPanes.current.set(ind.type, paneId);
         } catch (e) {
           console.warn(`Failed to create indicator ${ind.type}:`, e);
@@ -2130,6 +2132,7 @@ function CandlestickChartComponent({
         if (!activeIndicatorPanes.current.has(companion.key)) {
           try {
             const paneId = chart.createIndicator({ name: companion.kcName, calcParams: indicatorCalcParams(companion.kcName, ind) }, false, { height: 80 });
+            configureResearchPaneAxis(chart, paneId, companion.kcName);
             activeIndicatorPanes.current.set(companion.key, paneId);
           } catch (e) {
             console.warn(`Failed to create indicator ${companion.key}:`, e);

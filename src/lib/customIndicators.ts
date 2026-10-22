@@ -1214,8 +1214,10 @@ export function registerCustomIndicators() {
       const label = level === 0 ? item.short : `avg_${item.core}${level === 2 ? '_2' : ''}`;
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
-        calcParams: [item.period, 0, 0], precision: item.id === 'CDA' ? 2 : 3,
-        minValue: item.min, maxValue: item.max,
+        calcParams: [item.period, 0, 0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
+        // Only raw scores retain their reference bounds. Averages use the visible
+        // values, without forcing zero / ±1 into the range or rounding tiny spans.
+        ...(level === 0 ? { minValue: item.min, maxValue: item.max } : {}),
         draw: zeroLine(ORANGE_DASH_LINE, item.neutral),
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
           name: label + (accountFeatureDef(item.featureId)?.unit ? `(${accountFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,

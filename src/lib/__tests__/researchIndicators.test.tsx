@@ -48,6 +48,16 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     }
   });
 
+  it('所有均值都使用可见区间自动范围，不继承原值的 ±1 / 0–1 / 零点边界，并保留小幅变化', () => {
+    for (const item of RESEARCH_INDICATORS) {
+      for (const level of [1, 2]) {
+        const reg = mock.registered.get(researchKcName(item.id, level));
+        expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined();
+        expect(reg.precision).toBeGreaterThanOrEqual(8);
+      }
+    }
+  });
+
   it('没有保存均值定义时，默认第一条为 24h 均值，第二条为近到远 4:3:2:1 分段均值，不做均值再平均', () => {
     const item = RESEARCH_INDICATORS.find(d => d.id === 'DSS')!, k = klines();
     // Transparent ramp: raw = 1,2,3,...; hand calculate complete non-overlapping 6h blocks.
