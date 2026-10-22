@@ -25,7 +25,7 @@ export function FishReconstructionResults({ state }: { state: FishReconstruction
   return <section aria-label="复原结果" data-testid="fish-reconstruction-results" className="min-w-0 space-y-2 rounded-md border border-border/50 p-2.5 text-[11px]">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <span className="inline-flex items-center gap-1"><button type="button" aria-expanded={open} aria-controls="fish-reconstruction-table" aria-label={open ? '收起复原结果' : '展开复原结果'} title={open ? '收起' : '展开复原结果'} onClick={() => setOpen(!open)} className="group -mx-1 inline-flex items-center gap-1 rounded px-1 font-medium transition-colors hover:bg-muted/60">复原<ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/30 transition-[transform,color] group-hover:text-muted-foreground ${open ? 'rotate-180' : ''}`} /></button>{stale && <span className="ml-0.5 text-muted-foreground" data-testid="fish-reconstruction-stale">· 已过期，需重新评估</span>}</span>
-      <span className="text-[10px] text-muted-foreground">仅信号库 · 全部卡片 · 结果序列 · &gt; · 后 30% 验证</span>
+      <span className="text-[10px] text-muted-foreground">仅信号库 · 全部卡片 · 结果序列 · 买方 &gt; / 卖方 &lt; · 后 30% 验证</span>
       {result && <span className="text-[10px] text-muted-foreground/60" title="仅保存在本机，不改写信号">{formatUTC8(result.createdAt)} · 本机</span>}
     </div>
     {running && <div role="status" className="flex flex-wrap items-center gap-2 text-muted-foreground">
@@ -65,8 +65,8 @@ export function reconstructionMatches(result: FishReconstructionResult | null, m
     const evaluation = mode === 'best' ? row.best : row.current;
     const start = evaluation?.start == null ? evaluation?.unknown ? '起点不明' : '—' : formatUTC8(evaluation.start);
     const outcome = row.skip ? `跳过：${reconstructionSkipLabels[row.skip] ?? row.skip}（${row.reason ?? ''}）` : !evaluation ? '无可用门槛' : evaluation.strict ? '严格匹配' : evaluation.loose ? '仅宽松匹配' : evaluation.unknown ? '起点不明' : '未匹配';
-    match.title += `${a.label} > ${threshold ?? '—'} · t 时读数 ${row.reading ?? '—'} · 起点 ${start} · ${outcome}\n`;
-    if (evaluation && (evaluation.strict || evaluation.loose)) match.parts.push({ label: `${a.label} > ${number(threshold)}`, loose: !evaluation.strict });
+    match.title += `${a.label} ${a.direction??'>'} ${threshold ?? '—'} · t 时读数 ${row.reading ?? '—'} · 起点 ${start} · ${outcome}\n`;
+    if (evaluation && (evaluation.strict || evaluation.loose)) match.parts.push({ label: `${a.label} ${a.direction??'>'} ${number(threshold)}`, loose: !evaluation.strict });
   }
   return matches;
 }

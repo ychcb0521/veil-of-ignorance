@@ -67,13 +67,13 @@ describe('CDI2 买方失控程度', () => {
       expect(read('L1')).toBeCloseTo(l1, 12);
       expect(read('L2')).toBeCloseTo(l2, 12);
       const expected = 2 * ((1 - psi) * sigmoid(l1) + psi * sigmoid(l2)) - 1;
-      expect(read('CDI2')).toBeCloseTo(expected, 12);
+      expect(read('CDI2')).toBeCloseTo(-expected, 12);
       expect(read('CDI2')).toBeGreaterThanOrEqual(-1);
       expect(read('CDI2')).toBeLessThanOrEqual(1);
       difference = Math.max(difference, Math.abs(read('CDI2') + at(b, 'CBI2', i)));
     }
     expect(difference).toBeGreaterThan(0.001);
-    expect(at(s, 'CDI2', 759)).toBeGreaterThan(at(b, 'CBI2', 759));
+    expect(-at(s, 'CDI2', 759)).toBeGreaterThan(at(b, 'CBI2', 759));
   });
 
   it('计算不依赖未来；缺 BTC 时沿用 CBI2 的降级处理，24h 平均可直接选用', () => {

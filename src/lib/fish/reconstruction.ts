@@ -1,7 +1,7 @@
 /** Browser-only reconstruction. No signal mutation or persistence takes place in this module. */
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
-import { definitionKey } from '@/lib/deepDig/features';
+import { definitionKey, isSellerFeature } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, shortFishHash, type FishProgram } from './algorithm';
 import { FishError, fishDelay, validateFishBars } from './shared';
 
@@ -25,7 +25,7 @@ export interface FishReconstructionScan {
   threshold:number; train:FishReconstructionMetrics; test:FishReconstructionMetrics;
 }
 export interface FishReconstructionAlgorithm {
-  key:string; algorithmKey:string; featureId:string; label:string; statistic:string; unit:string; step:number;
+  key:string; algorithmKey:string; featureId:string; label:string; statistic:string; unit:string; step:number; direction?:'>'|'<';
   currentThreshold:number; bestThreshold:number|null; train:FishReconstructionMetrics; test:FishReconstructionMetrics;
   scan:FishReconstructionScan[]; perSignal:FishReconstructionSignal[];
 }
@@ -42,7 +42,8 @@ export interface FishReconstructionOptions {
 export type FishReconstructionLoader = (row:TradeSignal,from:number,cut:number,plan:FishProgram,signal:AbortSignal)=>Promise<readonly ResearchBar[]>;
 const coinKey = (row:TradeSignal) => `${row.exchange??'binance'}|${row.market??'crypto'}|${row.symbol}`;
 export const reconstructionSignalKey = (row:TradeSignal) => `${coinKey(row)}@${row.timeMs}`;
-export const reconstructionAlgorithmKey = (plan:FishProgram) => shortFishHash(JSON.stringify([plan.def.id,definitionKey(plan.def),plan.def.scale,plan.def.unit,'结果','>',plan.settings.threshold]));
+export const reconstructionDirection = (id:string):'>'|'<' => isSellerFeature(id)?'<':'>';
+export const reconstructionAlgorithmKey = (plan:FishProgram) => shortFishHash(JSON.stringify([plan.def.id,definitionKey(plan.def),plan.def.scale,plan.def.unit,'结果',reconstructionDirection(plan.def.id),plan.settings.threshold]));
 const check = (signal:AbortSignal) => { if(signal.aborted)throw new DOMException('已取消','AbortError'); };
 const skipReason = (error:unknown):FishReconstructionSkip => error instanceof FishError ? error.kind==='skipped'?'retention':['gap','history','readings'].includes(error.kind)?error.kind as FishReconstructionSkip:'failed':'failed';
 type Interval = [number,number];
@@ -69,17 +70,18 @@ function quantile(values:readonly number[],q:number):number {
   const a=[...values].sort((x,y)=>x-y),at=(a.length-1)*q,lo=Math.floor(at),weight=at-lo;
   return weight===0?a[lo]:a[lo]*(1-weight)+a[lo+1]*weight;
 }
-function crossingTimes(raw:Float64Array,times:readonly number[],threshold:number):number[] {
+function crossingTimes(raw:Float64Array,times:readonly number[],threshold:number,direction:'>'|'<'):number[] {
   const result:number[]=[];
-  for(let i=1;i<raw.length;i++)if(Number.isFinite(raw[i-1])&&Number.isFinite(raw[i])&&raw[i-1]<=threshold&&raw[i]>threshold)result.push(times[i]);
+  for(let i=1;i<raw.length;i++)if(Number.isFinite(raw[i-1])&&Number.isFinite(raw[i])&&(direction==='<'?raw[i-1]>=threshold&&raw[i]<threshold:raw[i-1]<=threshold&&raw[i]>threshold))result.push(times[i]);
   return result;
 }
 function match(sample:Sample,threshold:number,plan:FishProgram):FishReconstructionMatch|null {
   if(sample.skip||!sample.currentRaw?.length)return null;
   const raw=sample.currentRaw,times=sample.currentTimes!,last=raw.length-1,limit=threshold/plan.scale;
-  const active=raw[last]>limit;let start:number|null=null;
-  if(active){let i=last;while(i>0&&Number.isFinite(raw[i-1])&&raw[i-1]>limit)i--;
-    if(i>0&&Number.isFinite(raw[i-1])&&raw[i-1]<=limit)start=times[i];}
+  const hit=(v:number)=>plan.settings.direction==='<'?v<limit:v>limit;
+  const active=hit(raw[last]);let start:number|null=null;
+  if(active){let i=last;while(i>0&&Number.isFinite(raw[i-1])&&hit(raw[i-1]))i--;
+    if(i>0&&Number.isFinite(raw[i-1])&&!hit(raw[i-1]))start=times[i];}
   return {reading:sample.reading!,start,active,unknown:active&&start===null,
     strict:start!==null&&start>=sample.row.timeMs-plan.step&&start<=sample.row.timeMs,
     loose:start!==null&&start>=sample.row.timeMs-HOUR&&start<=sample.row.timeMs};
@@ -93,7 +95,7 @@ function metrics(samples:readonly Sample[],threshold:number,plan:FishProgram,lab
     const m=match(sample,threshold,plan)!;if(m.strict)out.strictHits++;if(m.loose)out.looseHits++;
     const windows=exposure.get(sample.coin)??[];windows.push([sample.cut-LOOKBACK,sample.cut]);exposure.set(sample.coin,windows);
     const points=starts.get(sample.coin)??new Set<number>();
-    for(const time of crossingTimes(sample.raw!,sample.times!,threshold/plan.scale))if(time>sample.cut-LOOKBACK&&time<=sample.cut)points.add(time);
+    for(const time of crossingTimes(sample.raw!,sample.times!,threshold/plan.scale,plan.settings.direction))if(time>sample.cut-LOOKBACK&&time<=sample.cut)points.add(time);
     starts.set(sample.coin,points);
   }
   for(const windows of exposure.values())out.coinDays+=union(windows).reduce((n,[a,b])=>n+b-a,0)/DAY;
@@ -108,7 +110,7 @@ function metrics(samples:readonly Sample[],threshold:number,plan:FishProgram,lab
 /** Chronological requests never prefetch a later signal's tail. Every evaluated input is clipped again at that signal's cutoff. */
 export async function collectFishReconstruction(options:FishReconstructionOptions,load:FishReconstructionLoader):Promise<FishReconstructionResult> {
   const {signal,onProgress}=options;
-  const plans=options.plans.map(p=>compileFishProgram(p.def,{statistic:'结果',direction:'>',threshold:p.settings.threshold,constraints:[]}));
+  const plans=options.plans.map(p=>compileFishProgram(p.def,{statistic:'结果',direction:reconstructionDirection(p.def.id),threshold:p.settings.threshold,constraints:[]}));
   const ordered=options.signals.map((row,index)=>({row,index})).sort((a,b)=>a.row.timeMs-b.row.timeMs||reconstructionSignalKey(a.row).localeCompare(reconstructionSignalKey(b.row))||a.index-b.index);
   const boundary=ordered.length?Math.max(1,Math.floor(ordered.length*.7)):0;
   const trainingLabels=ordered.slice(0,boundary).map(x=>x.row),allLabels=ordered.map(x=>x.row);
@@ -165,21 +167,23 @@ export async function collectFishReconstruction(options:FishReconstructionOption
       }
     }
     const candidates=plans.map((plan,pi)=>{
-      const values=samples[pi].filter(s=>s.split==='train'&&!s.skip).map(s=>s.reading!);
-      return [...new Set([plan.settings.threshold,...(values.length?Array.from({length:19},(_,i)=>quantile(values,(i+1)*.05)):[])])].filter(Number.isFinite).sort((a,b)=>a-b);
+      // Preserve the exact old candidate magnitudes, including floating-point ties.
+      const sign=plan.settings.direction==='<'?-1:1;
+      const values=samples[pi].filter(s=>s.split==='train'&&!s.skip).map(s=>sign*s.reading!);
+      return [...new Set([plan.settings.threshold,...(values.length?Array.from({length:19},(_,i)=>sign*quantile(values,(i+1)*.05)):[])])].filter(Number.isFinite).sort((a,b)=>a-b);
     });
     progress.phase='thresholds';progress.done=0;progress.total=candidates.reduce((n,c)=>n+c.length,0);publish();
     const algorithms:FishReconstructionAlgorithm[]=[];
     for(let pi=0;pi<plans.length;pi++){
       const plan=plans[pi],rows=samples[pi],trainRows=rows.filter(s=>s.split==='train'),testRows=rows.filter(s=>s.split==='test'),scan:FishReconstructionScan[]=[];
-      for(const threshold of candidates[pi]){check(signal);progress.current=`${plan.def.short||plan.def.name} > ${threshold}`;
+      for(const threshold of candidates[pi]){check(signal);progress.current=`${plan.def.short||plan.def.name} ${plan.settings.direction} ${threshold}`;
         scan.push({threshold,train:metrics(trainRows,threshold,plan,trainingLabels),test:metrics(testRows,threshold,plan,allLabels)});
         progress.done++;publish();await fishDelay(0,signal);
       }
-      const best=[...scan].filter(s=>s.train.valid>0).sort((a,b)=>(b.train.f1??-1)-(a.train.f1??-1)||(a.train.noiseRate??Infinity)-(b.train.noiseRate??Infinity)||a.threshold-b.threshold)[0];
+      const best=[...scan].filter(s=>s.train.valid>0).sort((a,b)=>(b.train.f1??-1)-(a.train.f1??-1)||(a.train.noiseRate??Infinity)-(b.train.noiseRate??Infinity)||(plan.settings.direction==='<'?b.threshold-a.threshold:a.threshold-b.threshold))[0];
       const fallback=scan.find(s=>s.threshold===plan.settings.threshold)!;
       const unavailable=(m:FishReconstructionMetrics):FishReconstructionMetrics=>({...m,strictHits:0,looseHits:0,strictRate:null,looseRate:null,noiseStarts:0,matchedStarts:0,totalStarts:0,noiseRate:null,precision:null,f1:null});
-      algorithms.push({key:reconstructionAlgorithmKey(plan),algorithmKey:plan.algorithmKey,featureId:plan.def.id,label:plan.def.short||plan.def.name,statistic:'结果',unit:plan.unit,step:plan.step,currentThreshold:plan.settings.threshold,bestThreshold:best?.threshold??null,train:best?.train??unavailable(fallback.train),test:best?.test??unavailable(fallback.test),scan,
+      algorithms.push({key:reconstructionAlgorithmKey(plan),algorithmKey:plan.algorithmKey,featureId:plan.def.id,direction:plan.settings.direction,label:plan.def.short||plan.def.name,statistic:'结果',unit:plan.unit,step:plan.step,currentThreshold:plan.settings.threshold,bestThreshold:best?.threshold??null,train:best?.train??unavailable(fallback.train),test:best?.test??unavailable(fallback.test),scan,
         perSignal:rows.map(s=>({id:s.row.id,key:reconstructionSignalKey(s.row),symbol:s.row.symbol,timeMs:s.row.timeMs,split:s.split,skip:s.skip,reason:s.reason,reading:s.reading??null,best:best?match(s,best.threshold,plan):null,current:match(s,plan.settings.threshold,plan)}))});
     }
     check(signal);progress.status='complete';progress.current='';publish();

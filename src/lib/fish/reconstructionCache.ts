@@ -3,7 +3,7 @@
  * 【用户要求】2026-10-20「复原扫描的这个结果能保存吗？」——结果约 1 MB，localStorage（整站共用约 5 MB）满了就存不下，刷新即丢。
  * 现在先存浏览器的 IndexedDB（容量大得多，与渔的本轮结果同一种存法），存不进再退回 localStorage；读取两边都看，旧结果照常可读。
  */
-import { definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { definitionKey, isSellerFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { shortFishHash } from './algorithm';
 import type { FishReconstructionResult } from './reconstruction';
@@ -16,7 +16,7 @@ export function reconstructionCacheKey(account: string | undefined, cards: reado
   const algorithms = cards.map(c => {
     const d = defs.find(d => d.id === c.featureId);
     return [c.featureId, c.enabled, c.pref.statistic ?? '结果', c.pref.direction, c.pref.threshold,
-      d ? definitionKey(d) : null, d?.scale, d?.unit, '结果', '>'];
+      d ? definitionKey(d) : null, d?.scale, d?.unit, '结果', isSellerFeature(c.featureId)?'<':'>'];
   });
   // Include identity/source fields used by adapters, not ratings or UI-only notes.
   const samples = signals.map(s => [s.id, s.exchange ?? 'binance', s.market ?? 'crypto', s.symbol, s.underlying ?? '', s.timeMs])

@@ -51,6 +51,8 @@ export interface DeepDigFeatureDef {
    * 不给 = 24 小时。
    */
   avgHours?: number;
+  /** 卖方输出统一为负值的口径版本；旧账号定义读入时等价升级一次。 */
+  sellerSignVersion?: 1;
   builtin?: boolean;
   /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
   removed?: boolean;
@@ -59,6 +61,35 @@ export interface DeepDigFeatureDef {
 
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
+export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'drift-speed-down-z': 'b', cda: 'CDA' };
+export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
+const SELLER_SIGN_MARK = '# seller-negative-v1';
+
+/** Flip the completed output arrays, never inputs or intermediate physics. */
+export function sellerNegativeFormula(formula: string, core: string): string {
+  if (formula.includes(SELLER_SIGN_MARK)) return formula;
+  const program = compileFeatureFormula(formula).program;
+  const last = program.statements.at(-1)!;
+  const names = new Set(program.statements.flatMap(s => s.name && (s.name === core || new RegExp(`^avg_${core}(?:_\\d+)?$`).test(s.name)) ? [s.name] : []));
+  let capture = '';
+  let result = last.name;
+  if (!result) {
+    result = '_seller_result';
+    while (program.statements.some(s => s.name === result) || program.inputs.has(result)) result += '_';
+    const render = (n: Program['statements'][number]['expr']): string => n.k === 'num' ? String(n.v) : n.k === 'var' ? n.name
+      : n.k === 'un' ? `(${n.op} ${render(n.a)})` : n.k === 'bin' ? `(${render(n.a)} ${n.op} ${render(n.b)})` : `${n.name}(${n.args.map(render).join(', ')})`;
+    capture = `\n${result} = ${render(last.expr)}`;
+  }
+  names.delete(result);
+  names.add(result); // Preserve the previous result, including an arbitrary named / anonymous tail.
+  return `${formula}${capture}\n${SELLER_SIGN_MARK}\n# 卖方输出取负：中间量保持原样；原值和已定义的均值一并转换。\n${[...names].map(name => `${name} = -${name}`).join('\n')}`;
+}
+
+export function upgradeSellerSign<T extends { id: string; formula: string; sellerSignVersion?: 1 }>(def: T): T {
+  if (!isSellerFeature(def.id) || def.sellerSignVersion === 1) return def;
+  try { return { ...def, formula: sellerNegativeFormula(def.formula, SELLER_FEATURE_CORES[def.id]), sellerSignVersion: 1 }; }
+  catch { return def; } // Keep invalid user formulas editable; do not replace them with a default.
+}
 export const DEFAULT_INTERVAL: ResearchInterval = '5m';
 export const DEFAULT_HALF_LIFE_HOURS = 6;
 /** 半衰期的快捷选项（小时）；也可以手填。 */
@@ -465,8 +496,8 @@ export const CBI2_DEF: DeepDigFeatureDef = {
 };
 
 /** CBI-2 的卖方镜像：买卖互换、方向反转、恐慌回撤改为亢奋上冲；保留原窗口与系数。 */
-export const CDI2_FORMULA = [
-  '# CDI2 买方失控程度（−1 ~ 1）：越高表示卖方优势越强、买方控制越弱；p 为模型映射分数，未经胜率校准',
+export const CDI2_FORMULA = sellerNegativeFormula([
+  '# CDI2 买方失控程度（−1 ~ 1）：越低（越负）表示卖方优势越强、买方控制越弱；p 为模型映射分数，未经胜率校准',
   '# B / S = 主动买入 / 卖出成交额，CB = 同时段 BTC 收盘价；窗口、系数与 CBI-2 相同，方向对称转换',
   'k = 2                                            # 参与度敏感度',
   'kappa = 0.5                                      # κ：吸收斜率的收缩强度',
@@ -518,13 +549,14 @@ export const CDI2_FORMULA = [
   'L2 = -0.5 + 0.35 * zAf + 0.25 * zEx              # L₂ 卖方吸收分支（对数几率）',
   'p = (1 - Psi) / (1 + exp(-L1)) + Psi / (1 + exp(-L2))   # 卖方优势的模型映射分数（非实测胜率）',
   'CDI2 = 2 * p - 1',
-].join('\n');
+].join('\n'), 'CDI2');
 
 export const CDI2_DEF: DeepDigFeatureDef = {
   id: 'cdi2',
   name: '买方失控程度',
   short: 'CDI2',
-  definition: '买方失控程度（−1 ~ 1）：越高表示优势越向卖方转移、卖方优势越强、买方控制越弱。沿用 CBI-2 的窗口与权重，改看主动卖盘、卖盘增减、卖方吸收、剔除 BTC 后的向下动量、均价下移与低位收盘；放量上冲时侧重买盘衰竭与快速卖方吸收。p 是模型映射分数，未经真实下跌概率或胜率校准。',
+  definition: '买方失控程度（−1 ~ 1）：越低（越负）表示优势越向卖方转移、卖方优势越强、买方控制越弱。沿用 CBI-2 的窗口与权重，改看主动卖盘、卖盘增减、卖方吸收、剔除 BTC 后的向下动量、均价下移与低位收盘；放量上冲时侧重买盘衰竭与快速卖方吸收。p 是模型映射分数，未经真实下跌概率或胜率校准。',
+  sellerSignVersion: 1,
   formula: CDI2_FORMULA,
   scale: 1,
   unit: '',
@@ -606,9 +638,9 @@ export const STATE_DEF: DeepDigFeatureDef = {
 };
 
 /** DSP·a 标准化版的卖方镜像：卖方主动性加权，向下位移为正；窗口、尺度、EMA 与缺值处理保持一致。 */
-export const DOWNWARD_DRIFT_FORMULA = [
+export const DOWNWARD_DRIFT_FORMULA = sellerNegativeFormula([
   '# DSP·b 向下推动力量：成交失衡强度 × 卖方权重 × 向下标准化涨跌，再按 hl 小时半衰期平滑',
-  '# B / S = 主动买入 / 卖出成交额，Q = B + S；avgh 为基线时长（小时）；正值表示向下推动，负值表示向上推动',
+  '# B / S = 主动买入 / 卖出成交额，Q = B + S；avgh 为基线时长（小时）；最终 b 取负：负值表示向下推动，正值表示向上推动',
   'N = abs(S - B)                 # 主动成交失衡金额',
   'f = ln(1 + N / avg(Q, avgh))   # 失衡金额相对常态成交额的强度',
   'A = (S - B) / Q                # 主动卖方优势',
@@ -617,13 +649,14 @@ export const DOWNWARD_DRIFT_FORMULA = [
   'Rz = R / sd(R, avgh)           # 相对于本币常态波动的向下位移（均值按 0）',
   'F = nz(f * G * Rz)             # 单根向下推力；无法计算时沿用原算法记 0',
   'b = ema(F, hl, 0)              # 按 hl 小时半衰期指数平滑，从 0 起算',
-].join('\n');
+].join('\n'), 'b');
 
 export const DOWNWARD_DRIFT_DEF: DeepDigFeatureDef = {
   id: 'drift-speed-down-z',
   name: '向下推动力量',
   short: 'DSP·b',
-  definition: '成交活动伴随的实际向下价格位移，相对于本币常态波动有多大：主动成交失衡强度 × 卖方优势权重 × 向下涨跌的波动率标准化值，再按半衰期指数平滑。正值表示向下推动、负值表示向上推动，数值越高表示向下推动越强；沿用 DSP·a 标准化版的窗口、平滑、显示倍数与缺值处理。',
+  definition: '成交活动伴随的实际向下价格位移，相对于本币常态波动有多大：主动成交失衡强度 × 卖方优势权重 × 向下涨跌的波动率标准化值，再按半衰期指数平滑。负值表示向下推动、正值表示向上推动，数值越低表示向下推动越强；沿用 DSP·a 标准化版的窗口、平滑、显示倍数与缺值处理。',
+  sellerSignVersion: 1,
   formula: DOWNWARD_DRIFT_FORMULA,
   scale: 100,
   unit: '%σ/根',
@@ -635,7 +668,7 @@ export const DOWNWARD_DRIFT_DEF: DeepDigFeatureDef = {
 };
 
 /** BSS 的卖方镜像：下跌动量、主动卖出占优取正，成交量方向规则同样转换。 */
-export const DSS_FORMULA = [
+export const DSS_FORMULA = sellerNegativeFormula([
   '# DSS 买方状态恶化（−1 ~ 1）= 0.45·向下动量标准化 + 0.25·卖方成交量方向分 + 0.30·主动卖方失衡',
   '# Q = 成交额，B / S = 主动买入 / 卖出成交额；avgh = 标准化窗口（小时，默认 24）；窗口与权重沿用 BSS',
   'n = 1                                   # 近期窗口（小时）',
@@ -646,13 +679,14 @@ export const DSS_FORMULA = [
   'Vz = tanh(zscore(V, avgh))              # 相对成交量标准化',
   'Vd = if(M > 0, Vz, if(M < 0, min(-Vz, 0), 0))   # 跌时放量加分、缩量扣分；涨时放量扣分、缩量不加分',
   'DSS = 0.45 * Mz + 0.25 * Vd + 0.30 * A',
-].join('\n');
+].join('\n'), 'DSS');
 
 export const DSS_DEF: DeepDigFeatureDef = {
   id: 'dss',
   name: '买方状态恶化',
   short: 'DSS',
-  definition: '买方状态恶化（−1 ~ 1）：0.45 × 向下动量标准化 + 0.25 × 卖方成交量方向分 + 0.30 × 主动卖方失衡。下跌时放量加分、缩量扣分；上涨时放量扣分、缩量不加分。沿用 BSS 的 1 小时近期窗口、标准化窗口和权重；数值越高表示综合状态越偏向卖方。读数是相对常态的状态评分，不是恶化速度或下跌概率。',
+  definition: '买方状态恶化（−1 ~ 1）：0.45 × 向下动量标准化 + 0.25 × 卖方成交量方向分 + 0.30 × 主动卖方失衡。下跌时放量加分、缩量扣分；上涨时放量扣分、缩量不加分。沿用 BSS 的 1 小时近期窗口、标准化窗口和权重；数值越低（越负）表示综合状态越偏向卖方。读数是相对常态的状态评分，不是恶化速度或下跌概率。',
+  sellerSignVersion: 1,
   formula: DSS_FORMULA,
   scale: 1,
   unit: '',
@@ -664,7 +698,7 @@ export const DSS_DEF: DeepDigFeatureDef = {
 };
 
 /** CBA 的卖方镜像：主动卖出加权、当前价取高、保留下移为正；保留原参数和时间窗口。 */
-export const CDA_FORMULA = [
+export const CDA_FORMULA = sellerNegativeFormula([
   '# CDA 买方阻力（−100 ~ 100）：成交支持 × 主动卖出权重 × 保留下移速度，按时间加权后 100·tanh 压缩',
   '# B / S = 主动买入 / 卖出成交额，Q = B + S，E = 成交均价；hl、avgh 均以小时计，沿用 CBA',
   'eta = 0.5                                     # 双向活跃成交的保留权重',
@@ -677,13 +711,14 @@ export const CDA_FORMULA = [
   'P = max(E, C)                                 # 当前价取成交均价与收盘价的较高者，保守衡量向下成果',
   'sig = prev(sd(ln(E / prev(E)), avgh))         # 截至上一根的成交均价对数收益率波动率',
   'CDA = 100 * tanh(-retain(F * G, P, prev(E), hl, 48) / sig)  # 保留下移速度 = ln(Eᵢ₋₁ ÷ P) ÷ ((t − i + 1)·σ)，48 小时窗口',
-].join('\n');
+].join('\n'), 'CDA');
 
 export const CDA_DEF: DeepDigFeatureDef = {
   id: 'cda',
   name: '买方阻力',
   short: 'CDA',
-  definition: '买方阻力（−100 ~ 100）：过去 48 小时每根 K 线的成交支持 × 主动卖出权重 × 当前仍保留的向下价格位移速度，按时间加权后 100·tanh 压缩。当前价取成交均价与收盘价的较高者，保守衡量卖方成果；正值表示向下的价格优势仍被保留，数值越高表示买方面临的卖方阻力越强。沿用 CBA 的窗口、权重和波动率标准化；这是状态评分，不是订单簿阻力价位或下跌概率。',
+  definition: '买方阻力（−100 ~ 100）：过去 48 小时每根 K 线的成交支持 × 主动卖出权重 × 当前仍保留的向下价格位移速度，按时间加权后 100·tanh 压缩。当前价取成交均价与收盘价的较高者，保守衡量卖方成果；负值表示向下的价格优势仍被保留，数值越低表示买方面临的卖方阻力越强。沿用 CBA 的窗口、权重和波动率标准化；这是状态评分，不是订单簿阻力价位或下跌概率。',
+  sellerSignVersion: 1,
   formula: CDA_FORMULA,
   scale: 1,
   unit: '',
@@ -716,7 +751,7 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  const byId = new Map(saved.map(d => [d.id, upgradeBssFormula(upgradeFormula(upgradeGroupVars(d)))]));
+  const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d))))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   // 历史内置名称随系统更新，用户自定义的名称保持原样。

@@ -186,7 +186,7 @@ describe('CandlestickChart analysis annotations', () => {
 
   it('五项研究指标各创建三个副图；参数与 BTC 更新传播到三条线，关闭时全部移除', () => {
     const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
-    localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, color: '#F6465D' }))));
+    localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, showAverage: true, color: '#F6465D' }))));
     resetBtcReference();
     const overrideIndicator = vi.fn();
     Object.assign(mocks.chart, { overrideIndicator });

@@ -27,7 +27,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, indicatorCalcParams } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeBtcReference } from "@/lib/btcReference";
@@ -160,6 +160,8 @@ export interface IndicatorConfig {
   period: number;
   /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
   avgHours?: number;
+  /** 自制区普通均值副图的可见性，默认隐藏；avg_x_2 始终保留。 */
+  showAverage?: boolean;
   /** 【用户要求】动态谢林点的 a / avg_a 副图用 Z 分数版（涨跌先除以过去 24 小时的标准差）；没写 = 否。 */
   zscore?: boolean;
   color?: string;
@@ -2127,7 +2129,7 @@ function CandlestickChartComponent({
         } catch {}
       }
 
-      for (const companion of INDICATOR_COMPANIONS[ind.type] ?? []) {
+      for (const companion of visibleIndicatorCompanions(ind)) {
         currentActive.add(companion.key);
         if (!activeIndicatorPanes.current.has(companion.key)) {
           try {

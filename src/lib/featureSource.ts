@@ -30,6 +30,13 @@ export function featureCoreName(program: Program): string | null {
   let end = st.length - 1;
   for (;;) {
     if (end < 0) return null;
+    // A final sign conversion does not change which earlier variable is the core.
+    const current = st[end];
+    if (current.name && current.expr.k === 'un' && current.expr.op === '-' && current.expr.a.k === 'var' && current.expr.a.name === current.name) {
+      let previous = end - 1;
+      while (previous >= 0 && st[previous].name !== current.name) previous--;
+      if (previous >= 0) { end = previous; continue; }
+    }
     const earlier = new Set(st.slice(0, end).flatMap(s => (s.name ? [s.name] : [])));
     const inner = pureAverageOf(st[end], earlier);
     if (!inner) return st[end].name;

@@ -140,7 +140,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const state of [true, false]) {
       const reg = mock.registered.get(researchKcName(state ? 'STATE' : 'CDI2'));
       reg.draw({ ctx, bounding: { width: 400, height: 80 }, yAxis: { convertToPixel: pixel } });
-      expect(pixel).toHaveBeenLastCalledWith(state ? 0.6 : 0);
+      expect(pixel).toHaveBeenLastCalledWith(state ? 0.6 : -0.04);
     }
   });
 });

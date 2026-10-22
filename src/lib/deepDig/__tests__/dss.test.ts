@@ -41,7 +41,7 @@ describe('DSS 买方状态恶化', () => {
       const vd = m[i] > 0 ? vz : m[i] < 0 ? Math.min(-vz, 0) : 0;
       expect(at(r, 'M', i)).toBeCloseTo(m[i], 12);
       expect(at(r, 'A', i)).toBeCloseTo(a, 12);
-      expect(at(r, 'DSS', i)).toBeCloseTo(0.45 * mz + 0.25 * vd + 0.30 * a, 9);
+      expect(at(r, 'DSS', i)).toBeCloseTo(-(0.45 * mz + 0.25 * vd + 0.30 * a), 9);
       expect(Math.abs(at(r, 'DSS', i))).toBeLessThanOrEqual(1);
     }
   });

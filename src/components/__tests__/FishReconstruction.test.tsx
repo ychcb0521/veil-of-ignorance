@@ -37,6 +37,14 @@ describe('reconstruction report and signal matching', () => {
     expect(cell).toHaveAttribute('title', expect.stringContaining('仅宽松匹配'));
   });
 
+  it('seller matches display the negative threshold and < direction', () => {
+    const result=fixture();
+    result.algorithms[0]={...result.algorithms[0],label:'DSS',direction:'<',bestThreshold:-.08,perSignal:result.algorithms[0].perSignal.map(row=>({...row,reading:row.reading==null?null:-row.reading}))};
+    render(<SignalMatchCell match={reconstructionMatches(result,'best',false).get('one')}/>);
+    expect(screen.getByText('DSS < -0.08')).toHaveClass('text-foreground/90');
+    expect(screen.getByTestId('signal-reconstruction-match')).toHaveAttribute('title',expect.stringContaining('t 时读数 -0.2'));
+  });
+
   it('current-threshold mode reads current evaluations and no longer lists best-only matches', () => {
     const matches = reconstructionMatches(fixture(), 'current', false);
     render(<SignalMatchCell match={matches.get('one')}/>);
@@ -77,7 +85,7 @@ describe('reconstruction report and signal matching', () => {
     expect(within(rows[0]).getByText('CBA')).toBeVisible(); expect(within(rows[0]).getByText('最可能')).toBeVisible();
     expect(within(rows[0]).getByText('80.0%')).toBeVisible(); expect(within(rows[0]).getByText('3 / 4')).toBeVisible();
     expect(within(rows[1]).getByText('BSS')).toBeVisible(); expect(within(rows[1]).queryByText('最可能')).toBeNull();
-    expect(screen.getByText('仅信号库 · 全部卡片 · 结果序列 · > · 后 30% 验证')).toBeVisible();
+    expect(screen.getByText('仅信号库 · 全部卡片 · 结果序列 · 买方 > / 卖方 < · 后 30% 验证')).toBeVisible();
   });
 
   it('expired results retain their explicit stale status and cancellation is explained', () => {

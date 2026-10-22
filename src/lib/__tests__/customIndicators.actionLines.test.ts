@@ -53,4 +53,14 @@ describe('纵轴总是包含橘色线', () => {
     expect(bounds('BSS_AVG_CUSTOM', [1, 24])).toEqual([0.08, 0.08]);
     expect(bounds('CBI2_CUSTOM', [24, 0])).toEqual([-1, 1]);
   });
+  it('四项卖方的原值和均值均包含负门槛，DSS 原值与均值分别为 −0.20 / −0.08', () => {
+    registerCustomIndicators();
+    for(const [id,raw,avg] of [['CDI2',-.04,-.04],['DSP_B',-15,-15],['DSS',-.2,-.08],['CDA',-8,-8]] as const){
+      for(const [suffix,line] of [['',raw],['_AVG',avg],['_AVG2',avg]] as const){
+        const name=`${id}${suffix}_CUSTOM`,reg:any=registered.get(name),ind:any={calcParams:[6,0,0]};
+        reg.calc([],ind);expect(ind.minValue).toBeLessThanOrEqual(line);expect(ind.maxValue).toBeGreaterThanOrEqual(line);
+        expect(orange(name)).toEqual([line]);
+      }
+    }
+  });
 });

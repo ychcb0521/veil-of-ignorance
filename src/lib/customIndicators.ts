@@ -11,7 +11,7 @@ import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
-import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
+import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
@@ -315,6 +315,12 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
   ]])),
 };
+/** Visibility is separate from computation: retain the complete companion catalog. */
+export function visibleIndicatorCompanions(ind: { type: string; showAverage?: boolean }) {
+  const companions = INDICATOR_COMPANIONS[ind.type] ?? [];
+  if (ind.showAverage || !CUSTOM_RESEARCH_INDICATORS.some(item => item.id === ind.type)) return companions;
+  return companions.filter(c => c.kcName !== researchKcName(ind.type, 1));
+}
 /**
  * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
@@ -405,7 +411,7 @@ export function axisLineLevel(name: string, p: readonly unknown[] | undefined): 
   const z = (i: number) => p?.[i] === 1;
   switch (name) {
     case 'DSP_V_CUSTOM': case 'DSP_V_AVG2_CUSTOM': return z(1) ? ACTION_LEVELS.az : 0;
-    case 'DSP_V_AVG_CUSTOM': return z(2) ? ACTION_LEVELS.az : 0;
+    case 'DSP_V_AVG_CUSTOM': case 'DSP_OVERLAY_AVG_CUSTOM': return z(2) ? ACTION_LEVELS.az : 0;
     case 'DSP_Z_V_CUSTOM': case 'DSP_Z_V_AVG_CUSTOM': case 'DSP_Z_V_AVG2_CUSTOM': return ACTION_LEVELS.az;
     case 'CBI2_CUSTOM': case 'CBI2_AVG_CUSTOM': case 'CBI2_AVG2_CUSTOM': return ACTION_LEVELS.cbi2;
     case 'CBA_CUSTOM': case 'CBA_AVG_CUSTOM': case 'CBA_AVG2_CUSTOM': return ACTION_LEVELS.cba;
@@ -1330,18 +1336,20 @@ export function registerCustomIndicators() {
       registerIndicator({
         name: researchKcName(item.id, level), shortName: label,
         calcParams: [item.period, 0, 0], precision: level === 0 ? (item.id === 'CDA' ? 2 : 3) : 8,
-        // Only raw scores retain their reference bounds. Averages use the visible
-        // values, without forcing zero / ±1 into the range or rounding tiny spans.
-        // 均值副图：有固定范围的（状态 S、CDI2、DSS、CDA）纵轴固定，免得自动缩放把小波动放大成「异常灵敏」
+        // Fixed-range averages retain their reference bounds; other averages use visible values.
         ...(level === 0 ? { minValue: item.min, maxValue: item.max } : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
-        draw: zeroLine(ORANGE_DASH_LINE, line),
+        draw: args => {
+          if (item.seller) A_ZERO_LINE(args);
+          return zeroLine(ORANGE_DASH_LINE, line)(args);
+        },
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
           name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
         }),
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;
-          const color = value == null || value === line ? '#F0B90B'
-            : (value > line) !== item.seller ? '#0ECB81' : '#F6465D';
+          const colorLine = item.seller ? 0 : line;
+          const color = value == null || value === colorLine ? '#F0B90B'
+            : value > colorLine ? '#0ECB81' : '#F6465D';
           return { color, size: 1.5 };
         } }],
         calc: (dataList, indicator) => {

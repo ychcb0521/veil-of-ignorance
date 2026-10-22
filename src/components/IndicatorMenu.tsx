@@ -304,6 +304,10 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, zscore: !i.zscore } : i));
   };
 
+  const toggleAverage = (id: string) => {
+    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, showAverage: !i.showAverage } : i));
+  };
+
   if (!open) return null;
 
   const overlays = filtered.filter(i => i.isOverlay);
@@ -381,7 +385,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               主图叠加 · Overlays ({overlays.length})
             </div>
             {overlays.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />
             ))}
           </>
         )}
@@ -392,7 +396,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               副图指标 · Sub-pane ({oscillators.length})
             </div>
             {oscillators.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />
             ))}
           </>
         )}
@@ -417,7 +421,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   onUpdatePeriod: (id: string, period: number) => void;
   onUpdateAvgHours: (id: string, avgHours: number) => void;
   onToggleZ: (id: string) => void;
-}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ }, ref) {
+  onToggleAverage: (id: string) => void;
+}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onToggleAverage }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
 
@@ -449,7 +454,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 ? n : null; }}
+              parse={v => { const n = CUSTOM_RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}
@@ -480,6 +485,12 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
                 Z
               </button>
             )}
+            {item.category === 'custom' && <button
+              type="button" aria-pressed={!!active.showAverage} aria-label={`${item.nameZh} 显示 avg_x`}
+              title="显示 / 隐藏普通均值 avg_x；原值和 avg_x_2 保留"
+              onClick={e => { e.stopPropagation(); onToggleAverage(item.id); }}
+              className={`h-[18px] rounded border px-1.5 font-mono text-[10px] leading-none transition-colors ${active.showAverage ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+            >avg</button>}
             <Check className="w-3.5 h-3.5 text-primary" />
           </>
         ) : (

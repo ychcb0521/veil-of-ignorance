@@ -2,22 +2,33 @@
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw,writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { FishConstraint } from './algorithm';
+import { isSellerFeature, SELLER_FEATURE_CORES, compileFeatureFormula } from '@/lib/deepDig/features';
+import { accountFeatureDef } from '@/lib/featureSource';
 /** 旧设置里的 H（外层 avg 小时数）读到也不再用：渔已去掉外层 avg。 */
-export interface FishPreference { thresholdDefaultsVersion?:number; statistic?:string; lastSuggestion?:string; direction:'>'|'<';threshold:string;constraints:FishConstraint[] }
+export interface FishPreference { sellerSignVersion?:1; thresholdDefaultsVersion?:number; statistic?:string; lastSuggestion?:string; direction:'>'|'<';threshold:string;constraints:FishConstraint[] }
 export const fishPreferenceKey=(id:string)=>`${getUserPrefix()}fish-algorithm-settings.v1:${id}`;
 /** 用户截图指定的「结果 · avg_X」默认门槛，按显示单位填写。 */
 export const FISH_DEFAULTS_VERSION=1;
-export const FISH_DEFAULT_THRESHOLDS:Readonly<Record<string,string>>={cbi2:'0.04',cba:'8',bss:'0.08','drift-speed-z':'15'};
+export const FISH_DEFAULT_THRESHOLDS:Readonly<Record<string,string>>={cbi2:'0.04',cba:'8',bss:'0.08','drift-speed-z':'15',cdi2:'-0.04',dss:'-0.2','drift-speed-down-z':'-15',cda:'-8'};
 // 只升级 DSP·a 的默认值，其他卡已保存的手动设定不重置。
 export const fishDefaultThresholdVersion=(id:string)=>id==='drift-speed-z'?2:FISH_DEFAULTS_VERSION;
 export function withFishDefaultThreshold(id:string,p:FishPreference):FishPreference {
+  if(isSellerFeature(id)&&p.sellerSignVersion!==1){
+    const statistic=p.statistic??'结果',core=SELLER_FEATURE_CORES[id];
+    let flipped=statistic==='结果'||statistic===core||new RegExp(`^avg_${core}(?:_\\d+)?$`).test(statistic);
+    if(!flipped)try{const def=accountFeatureDef(id);flipped=!!def&&compileFeatureFormula(def.formula).program.statements.at(-1)?.name===statistic;}catch{/* Invalid definitions remain editable. */}
+    const finite=p.threshold.trim()!==''&&Number.isFinite(Number(p.threshold));
+    p={...p,sellerSignVersion:1,...(flipped?{direction:p.direction==='>'?'<':'>',threshold:finite?String(-Number(p.threshold)):p.threshold,lastSuggestion:p.lastSuggestion!==undefined&&Number.isFinite(Number(p.lastSuggestion))?String(-Number(p.lastSuggestion)):undefined}:{}),...(finite?{thresholdDefaultsVersion:fishDefaultThresholdVersion(id)}:{})};
+  }
+  // A sign-only upgrade must preserve adopted suggestions as well as manual values.
+  if(isSellerFeature(id)&&p.threshold.trim()&&Number.isFinite(Number(p.threshold)))return p;
   const value=FISH_DEFAULT_THRESHOLDS[id],version=fishDefaultThresholdVersion(id);
   if(value&&(p.statistic??'结果')==='结果'&&((p.thresholdDefaultsVersion??0)<version||!p.threshold?.trim()||p.threshold===p.lastSuggestion))return {...p,threshold:value,lastSuggestion:undefined,thresholdDefaultsVersion:version};
   return p;
 }
 /** 无版本标记的旧设置统一恢复指定默认值一次；此后保存的手动值不再重置。 */
 export function readFishPreference(id:string):FishPreference {
-  const fallback=withFishDefaultThreshold(id,{statistic:'结果',direction:'>',threshold:'',constraints:[]});
-  try{const x=JSON.parse(readPersistedStateRaw(fishPreferenceKey(id))??'null');if(!x)return fallback;return withFishDefaultThreshold(id,{thresholdDefaultsVersion:typeof x.thresholdDefaultsVersion==='number'?x.thresholdDefaultsVersion:undefined,statistic:typeof x.statistic==='string'?x.statistic:'结果',lastSuggestion:typeof x.lastSuggestion==='string'?x.lastSuggestion:undefined,direction:x.direction==='<'?'<':'>',threshold:typeof x.threshold==='string'?x.threshold:'',constraints:Array.isArray(x.constraints)?x.constraints.filter((c:any)=>c&&typeof c.id==='string'&&typeof c.text==='string'&&typeof c.enabled==='boolean'):[]});}catch{return fallback;}
+  const fallback=withFishDefaultThreshold(id,{statistic:'结果',direction:isSellerFeature(id)?'<':'>',threshold:'',constraints:[],...(isSellerFeature(id)?{sellerSignVersion:1 as const}:{})});
+  try{const x=JSON.parse(readPersistedStateRaw(fishPreferenceKey(id))??'null');if(!x)return fallback;return withFishDefaultThreshold(id,{sellerSignVersion:x.sellerSignVersion===1?1:undefined,thresholdDefaultsVersion:typeof x.thresholdDefaultsVersion==='number'?x.thresholdDefaultsVersion:undefined,statistic:typeof x.statistic==='string'?x.statistic:'结果',lastSuggestion:typeof x.lastSuggestion==='string'?x.lastSuggestion:undefined,direction:x.direction==='<'?'<':'>',threshold:typeof x.threshold==='string'?x.threshold:'',constraints:Array.isArray(x.constraints)?x.constraints.filter((c:any)=>c&&typeof c.id==='string'&&typeof c.text==='string'&&typeof c.enabled==='boolean'):[]});}catch{return fallback;}
 }
-export const saveFishPreference=(id:string,p:FishPreference)=>writePersistedStateRaw(fishPreferenceKey(id),JSON.stringify({...p,...(FISH_DEFAULT_THRESHOLDS[id]&&(p.statistic??'结果')==='结果'?{thresholdDefaultsVersion:fishDefaultThresholdVersion(id)}:{})}));
+export const saveFishPreference=(id:string,p:FishPreference)=>writePersistedStateRaw(fishPreferenceKey(id),JSON.stringify({...p,...(isSellerFeature(id)?{sellerSignVersion:1}:{}),...(FISH_DEFAULT_THRESHOLDS[id]&&(p.statistic??'结果')==='结果'?{thresholdDefaultsVersion:fishDefaultThresholdVersion(id)}:{})}));

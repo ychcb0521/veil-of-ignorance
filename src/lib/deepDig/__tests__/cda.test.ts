@@ -48,7 +48,7 @@ describe('CDA 买方阻力', () => {
     const data = bars().map((b, i) => ({ ...b, openTime: i * minutes * 60000 }));
     data[450] = { ...data[450], takerBuyQuoteVolume: null };
     const r = run(data, CDA_FORMULA, { interval: minutes === 5 ? '5m' : '15m' });
-    for (const t of [310, 575, 619, 819]) expect(at(r, 'CDA', t)).toBeCloseTo(manual(data, t, minutes), 8);
+    for (const t of [310, 575, 619, 819]) expect(at(r, 'CDA', t)).toBeCloseTo(-manual(data, t, minutes), 8);
   });
   it('卖方失衡加权、当前价取高；尺度与成交支持一致，不能直接取负 CBA', () => {
     const data = bars(0.2), s = run(data), b = run(data, CBA_FORMULA);
@@ -60,7 +60,7 @@ describe('CDA 买方阻力', () => {
       expect(at(s, 'P', i)).toBe(Math.max(data[i].quoteVolume! / data[i].volume!, data[i].close));
       expect(Math.abs(at(s, 'CDA', i))).toBeLessThanOrEqual(100);
     }
-    expect(at(s, 'CDA', 819)).toBeGreaterThan(0);
+    expect(at(s, 'CDA', 819)).toBeLessThan(0);
     expect(Math.abs(at(s, 'CDA', 819) + at(b, 'CBA', 819))).toBeGreaterThan(0.01);
   });
   it('当前成交均价缺失沿用 CBA 的空值处理；原值和 24h 平均只用当时及之前的数据', () => {

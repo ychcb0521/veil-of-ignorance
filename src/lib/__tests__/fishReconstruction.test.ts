@@ -109,3 +109,21 @@ describe('local fishing reconstruction',()=>{
    expect(progress.at(-1)?.status).toBe('cancelled');
  });
 });
+
+describe('卖方负值复原',()=>{
+ it('负值 < 门槛与旧正值 > 门槛的捕获、起点、噪音及最佳门槛等价',async()=>{
+  const seller=compileFishProgram({...plan.def,id:'cdi2',short:'CDI2',formula:'CDI2 = -C',sellerSignVersion:1},{statistic:'结果',direction:'<',threshold:-1.5,constraints:[]});
+  const rows=Array.from({length:10},(_,i)=>row(`SIGN${i}USDT`,anchor+i*DAY));
+  const loader:FishReconstructionLoader=async(r,a,b,p)=>bars(a,b,p,t=>t>=r.timeMs-(r.symbol==='SIGN8USDT'?6*STEP:0)||t===r.timeMs-2*3_600_000?2:1).map(v=>({...v,close:v.close+Number(r.symbol.replace('SIGN','').replace('USDT',''))*.0193}));
+  const positive=(await run(rows,loader,[plan])).algorithms[0],negative=(await run(rows,loader,[seller])).algorithms[0];
+  expect(negative.direction).toBe('<');expect(negative.currentThreshold).toBe(-positive.currentThreshold);
+  expect(negative.bestThreshold).toBe(-positive.bestThreshold!);
+  expect(negative.train).toEqual(positive.train);expect(negative.test).toEqual(positive.test);
+  expect(negative.scan.map(s=>s.threshold)).toEqual(positive.scan.map(s=>-s.threshold).reverse());
+  for(const s of positive.scan){const n=negative.scan.find(n=>n.threshold===-s.threshold)!;expect(n.train).toEqual(s.train);expect(n.test).toEqual(s.test);}
+  for(let i=0;i<rows.length;i++){
+   const a=positive.perSignal[i],b=negative.perSignal[i];expect(b.reading).toBe(-a.reading!);
+   for(const mode of ['current','best'] as const)expect(b[mode]).toEqual(a[mode]?{...a[mode]!,reading:-a[mode]!.reading}:null);
+  }
+ });
+});

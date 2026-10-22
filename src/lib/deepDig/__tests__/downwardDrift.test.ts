@@ -49,11 +49,11 @@ describe('DSP·b 向下推动力量', () => {
       const force = rs.length >= 2 && sd > 0 ? f * g * returns[i] / sd : 0;
       ema = rho * ema + (1 - rho) * force;
       expect(get(r, 'F', i)).toBeCloseTo(force, 10);
-      expect(get(r, 'b', i)).toBeCloseTo(ema, 10);
+      expect(get(r, 'b', i)).toBeCloseTo(-ema, 10);
     }
   });
 
-  it('卖方占优时增强向下推力；上涨取负、下跌取正，不能直接用负的原 DSP·a', () => {
+  it('卖方占优时增强向下推力；最终输出上涨取正、下跌取负，不能直接用负的原 DSP·a', () => {
     const data = bars(0.2), seller = run(data), buyerDominant = run(bars(0.8));
     const original = run(data, DRIFT_SPEED_Z_FORMULA);
     for (let i = 10; i < data.length; i++) {
@@ -64,7 +64,7 @@ describe('DSP·b 向下推动力量', () => {
     }
     const swapped = data.map(b => ({ ...b, takerBuyQuoteVolume: b.quoteVolume! - b.takerBuyQuoteVolume! }));
     const mirrored = run(swapped, DRIFT_SPEED_Z_FORMULA);
-    for (let i = 10; i < data.length; i++) expect(get(seller, 'b', i)).toBeCloseTo(-get(mirrored, 'az', i), 10);
+    for (let i = 10; i < data.length; i++) expect(get(seller, 'b', i)).toBeCloseTo(get(mirrored, 'az', i), 10);
   });
 
   it('缺成交读数沿用原算法记零推力；不补出额外成交，EMA 继续衰减', () => {

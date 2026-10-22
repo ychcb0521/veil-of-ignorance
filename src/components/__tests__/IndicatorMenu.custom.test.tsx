@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
-import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators } from '@/lib/customIndicators';
+import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
@@ -41,6 +41,26 @@ describe('自制区的十个特征值', () => {
     fireEvent.click(screen.getByText(name('DSP_VA')));
     expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.type)).toEqual(['DSP_Z']);
     fireEvent.click(screen.getByText(name('DSP_Z'))); expect(changed.mock.lastCall![0]).toEqual([]);
+  });
+
+  it('十项默认隐藏普通均值，avg 按钮只切换可见性，保留参数、原值和加权均值', () => {
+    const initial = ids.map(type => ({ type, period: 6, enabled: true }));
+    const changed = vi.fn();
+    function Menu() { const [items,setItems] = useState<IndicatorConfig[]>(initial); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
+    render(<Menu />); fireEvent.click(screen.getByRole('button',{name:'自制区'}));
+    for(const id of ids){
+      const ind=initial.find(i=>i.type===id)!;
+      expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG_CUSTOM'))).toBe(false);
+      expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG2_CUSTOM'))).toBe(true);
+      const button=screen.getByRole('button',{name:name(id)+' 显示 avg_x'});
+      expect(button).toHaveAttribute('aria-pressed','false');fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-pressed','true');
+      const next=changed.mock.lastCall![0].find((i:IndicatorConfig)=>i.type===id);
+      expect(next).toEqual({...ind,showAverage:true});
+      expect(visibleIndicatorCompanions(next).length).toBe(visibleIndicatorCompanions(ind).length+1);
+      fireEvent.click(button);expect(button).toHaveAttribute('aria-pressed','false');
+      expect(changed.mock.lastCall![0].find((i:IndicatorConfig)=>i.type===id)).toEqual({...ind,showAverage:false});
+    }
   });
 
   it('Z 版使用独立的原生副图名称，复用现有 Z 公式和均值，参数不串到普通版', () => {
