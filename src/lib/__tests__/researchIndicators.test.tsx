@@ -116,7 +116,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     expect(mock.request).toHaveBeenLastCalledWith(0, 900 * 900000, 900000);
   });
 
-  it('菜单可搜索、添加、修改参数和移除五项；每项各有两个独立的均值副图，状态以 0.5 为中线', () => {
+  it('菜单可搜索、添加、修改参数和移除五项；每项各有两个独立的均值副图，状态的橘色线在 0.67（2026-10-22 用户要求）', () => {
     const changed = vi.fn();
     const { rerender } = render(<IndicatorMenu open onClose={() => {}} indicators={[]} onIndicatorsChange={changed} />);
     for (const item of RESEARCH_INDICATORS) {
@@ -139,7 +139,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const state of [true, false]) {
       const reg = mock.registered.get(researchKcName(state ? 'STATE' : 'CDI2'));
       reg.draw({ ctx, bounding: { width: 400, height: 80 }, yAxis: { convertToPixel: pixel } });
-      expect(pixel).toHaveBeenLastCalledWith(state ? 0.5 : 0);
+      expect(pixel).toHaveBeenLastCalledWith(state ? 0.67 : 0);
     }
   });
 });
