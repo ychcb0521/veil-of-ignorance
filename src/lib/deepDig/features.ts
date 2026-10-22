@@ -634,7 +634,36 @@ export const DOWNWARD_DRIFT_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF];
+/** BSS 的卖方镜像：下跌动量、主动卖出占优取正，成交量方向规则同样转换。 */
+export const DSS_FORMULA = [
+  '# DSS 买方状态恶化（−1 ~ 1）= 0.45·向下动量标准化 + 0.25·卖方成交量方向分 + 0.30·主动卖方失衡',
+  '# Q = 成交额，B / S = 主动买入 / 卖出成交额；avgh = 标准化窗口（小时，默认 24）；窗口与权重沿用 BSS',
+  'n = 1                                   # 近期窗口（小时）',
+  'M = 1 - C / ago(C, n)                   # 向下价格动量：相对 n 小时前的跌幅，下跌为正',
+  'V = avg(Q, n) / avg(Q, avgh)            # 相对成交量：近期平均成交额 ÷ 基线平均',
+  'A = (avg(S, n) - avg(B, n)) / avg(Q, n) # 主动卖方失衡：(主动卖 − 主动买) ÷ 合计',
+  'Mz = tanh(zscore(M, avgh))              # 向下动量标准化，保留 BSS 的滚动口径',
+  'Vz = tanh(zscore(V, avgh))              # 相对成交量标准化',
+  'Vd = if(M > 0, Vz, if(M < 0, min(-Vz, 0), 0))   # 跌时放量加分、缩量扣分；涨时放量扣分、缩量不加分',
+  'DSS = 0.45 * Mz + 0.25 * Vd + 0.30 * A',
+].join('\n');
+
+export const DSS_DEF: DeepDigFeatureDef = {
+  id: 'dss',
+  name: '买方状态恶化',
+  short: 'DSS',
+  definition: '买方状态恶化（−1 ~ 1）：0.45 × 向下动量标准化 + 0.25 × 卖方成交量方向分 + 0.30 × 主动卖方失衡。下跌时放量加分、缩量扣分；上涨时放量扣分、缩量不加分。沿用 BSS 的 1 小时近期窗口、标准化窗口和权重；数值越高表示综合状态越偏向卖方。读数是相对常态的状态评分，不是恶化速度或下跌概率。',
+  formula: DSS_FORMULA,
+  scale: 1,
+  unit: '',
+  positive: DEFAULT_POSITIVE,
+  control: DEFAULT_CONTROL,
+  source: 'campaigns',
+  groupVars: 2,
+  builtin: true,
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF, DSS_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

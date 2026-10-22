@@ -20,7 +20,7 @@ const get = (r: ReturnType<typeof run>, name: string, i: number) => {
 
 describe('DSP·b 向下推动力量', () => {
   it('追加为下一项内置特征值；参数、观察窗、显示倍数和分组沿用 DSP·a 标准化版', () => {
-    expect(BUILTIN_FEATURES.at(-1)).toBe(DOWNWARD_DRIFT_DEF);
+    expect(BUILTIN_FEATURES.find(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(DOWNWARD_DRIFT_DEF);
     expect(DOWNWARD_DRIFT_DEF).toMatchObject({ name: '向下推动力量', short: 'DSP·b', scale: 100, unit: '%σ/根' });
     expect(checkDefinition(DOWNWARD_DRIFT_DEF)).toEqual({ formula: null, groups: null, scale: null });
     for (const params of [{}, { interval: '15m' as const, halfLifeHours: 12, avgHours: 48 }]) {
@@ -28,7 +28,7 @@ describe('DSP·b 向下推动力量', () => {
     }
     expect(mergeFeatureDefs([]).find(d => d.id === DRIFT_SPEED_Z_DEF.id)?.formula).toBe(DRIFT_SPEED_Z_FORMULA);
     const edited = { ...DOWNWARD_DRIFT_DEF, formula: DOWNWARD_DRIFT_FORMULA + '\navg_b = avg(b, 24)' };
-    expect(mergeFeatureDefs([edited]).at(-1)?.formula).toBe(edited.formula);
+    expect(mergeFeatureDefs([edited]).find(d => d.id === DOWNWARD_DRIFT_DEF.id)?.formula).toBe(edited.formula);
     expect(mergeFeatureDefs([{ ...DOWNWARD_DRIFT_DEF, removed: true }]).some(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(false);
   });
 
