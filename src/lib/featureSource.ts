@@ -8,7 +8,7 @@
  * 不会出现「均值的均值」。Deep dig 自己的结果仍按公式写的算（写了 avg 行就是 avg(X, h)，与渔 H = h 时同一个量）。
  */
 import type { KLineData } from 'klinecharts';
-import { compileFeatureFormula, evaluateOnBars, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { Program } from '@/lib/deepDig/formula';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -65,6 +65,11 @@ export function accountFeatureDefs(): DeepDigFeatureDef[] {
   return defs;
 }
 export const accountFeatureDef = (id: string) => accountFeatureDefs().find(d => d.id === id);
+/**
+ * K 线图用的定义：账号里有就用账号的；在 Deep dig 里删掉（隐藏）了的内置项退回内置公式，副图照常画。
+ * 【用户反馈】2026-10-22「为啥不显示指标的线」：DSP·a 的原版在 Deep dig 里被删了，图上 a / avg_a / avg_a_2 全是 n/a。
+ */
+export const chartFeatureDef = (id: string): DeepDigFeatureDef | undefined => accountFeatureDef(id) ?? BUILTIN_FEATURES.find(b => b.id === id);
 
 // ===================== K 线图：直接算这份定义 =====================
 
@@ -108,7 +113,7 @@ const seriesCache = new WeakMap<KLineData[], Map<string, ChartFeatureSeries>>();
  * 同一批 K 线、同一参数只算一次（DSP 的 a / avg_a / A 三个副图共用）。
  */
 export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string } = {}): ChartFeatureSeries | null {
-  const def = accountFeatureDef(featureId);
+  const def = chartFeatureDef(featureId);
   if (!def) return null;
   const formula = options.formula ?? def.formula;
   const binding = CHART_PARAM[featureId];

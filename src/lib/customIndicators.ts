@@ -10,7 +10,7 @@ import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
-import { chartFeatureSeries, accountFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
+import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
@@ -441,7 +441,7 @@ function dspATooltip(kind: 'a' | 'avg', adjustableAverage = false) {
     const v = (indicator.result[crosshair.dataIndex ?? -1] as { v?: number } | undefined)?.v;
     const color = vColor(v);
     const item = BUYER_RESEARCH_INDICATORS.find(i => i.id === (z ? 'DSP_Z' : 'DSP_VA'))!;
-    const def = accountFeatureDef(item.featureId);
+    const def = chartFeatureDef(item.featureId);
     const names = def ? researchSeriesNames(item, def.formula) : { core: item.core, avg: `avg_${item.core}` };
     const unit = `(${def?.unit ?? (z ? '%σ/根' : '基点/根')}): `;
     const name = kind === 'a' ? (z ? 'DSP·az' : 'DSP·a') : names.avg;
@@ -1267,7 +1267,7 @@ export function registerCustomIndicators() {
         draw: item.id === 'BSS' ? avgBssLines : item.id === 'CBA' ? CBA_ACTION_LINE : item.id === 'CBI2' ? CBI2_ACTION_LINE : dspActionLine(1),
         createTooltipDataSource: ({ indicator, defaultStyles }) => {
           const selected = item.id === 'DSP_VA' && indicator.calcParams[1] === 1 ? BUYER_RESEARCH_INDICATORS.find(i => i.id === 'DSP_Z')! : item;
-          const def = accountFeatureDef(selected.featureId);
+          const def = chartFeatureDef(selected.featureId);
           const names = def ? researchSeriesNames(selected, def.formula) : null;
           return { name: (level === 1 ? names?.avg : names?.avg2) ?? label, calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
         },
@@ -1299,7 +1299,7 @@ export function registerCustomIndicators() {
         ...(level === 0 ? { minValue: item.min, maxValue: item.max } : {}),
         draw: zeroLine(ORANGE_DASH_LINE, line),
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
-          name: label + (accountFeatureDef(item.featureId)?.unit ? `(${accountFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
+          name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
         }),
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;

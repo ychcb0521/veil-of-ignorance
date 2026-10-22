@@ -1,6 +1,6 @@
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
-import { accountFeatureDef, chartFeatureSeries } from '@/lib/featureSource';
+import { chartFeatureDef as accountFeatureDef, chartFeatureSeries } from '@/lib/featureSource';
 import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/features';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
