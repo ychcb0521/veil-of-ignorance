@@ -54,7 +54,7 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
   // 24h stats derived from last ~24h of candles (works regardless of interval)
   const stats = useMemo(() => {
     if (visibleData.length === 0 || currentPrice <= 0) {
-      return { high: 0, low: 0, volume: 0, change: 0, changePct: 0, openPrice: 0 };
+      return { high: 0, low: 0, volume: 0, baseVolume: 0, change: 0, changePct: 0, openPrice: 0 };
     }
     const lastTime = visibleData[visibleData.length - 1].time;
     const cutoff = lastTime - 24 * 60 * 60 * 1000;
@@ -63,16 +63,17 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
 
     let high = -Infinity;
     let low = Infinity;
-    let volume = 0;
+    let volume = 0, baseVolume = 0;
     for (const c of slice) {
       if (c.high > high) high = c.high;
       if (c.low < low) low = c.low;
       volume += c.volume * c.close;
+      baseVolume += c.volume;
     }
     const openPrice = slice[0].open;
     const change = currentPrice - openPrice;
     const changePct = openPrice > 0 ? (change / openPrice) * 100 : 0;
-    return { high, low, volume, change, changePct, openPrice };
+    return { high, low, volume, baseVolume, change, changePct, openPrice };
   }, [visibleData, currentPrice]);
 
   // Funding countdown — ticks every second, but anchored on the simulated time
@@ -146,10 +147,11 @@ export function TickerBar({ symbol, currentPrice, visibleData, pricePrecision, e
         sub={`${isUp ? '+' : ''}${stats.changePct.toFixed(2)}%`}
         subClass={isUp ? upColor : downColor}
       />
+      {/* 【用户要求】2026-10-22 成交量 / 成交额更重要，放在最高 / 最低前面——窄屏时右侧被遮住的是最高 / 最低 */}
+      <Stat label={`24h 成交量(${baseCoin})`} value={formatVolume(stats.baseVolume)} />
+      <Stat label={`24h 成交额(${quoteUnitLabel})`} value={formatVolume(stats.volume)} />
       <Stat label="24h 最高" value={formatNum(stats.high, pricePrecision)} />
       <Stat label="24h 最低" value={formatNum(stats.low, pricePrecision)} />
-      <Stat label={`24h 成交量(${baseCoin})`} value={formatVolume(stats.volume / Math.max(currentPrice, 1))} />
-      <Stat label={`24h 成交额(${quoteUnitLabel})`} value={formatVolume(stats.volume)} />
     </div>
   );
 }
