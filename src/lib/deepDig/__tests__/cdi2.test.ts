@@ -22,7 +22,7 @@ const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
 describe('CDI2 买方失控程度', () => {
   it('作为下一项内置特征值，支持独立编辑、隐藏、恢复；原 CBI-2 定义不变', () => {
-    expect(BUILTIN_FEATURES.at(-1)).toBe(CDI2_DEF);
+    expect(BUILTIN_FEATURES.find(d => d.id === 'cdi2')).toBe(CDI2_DEF);
     expect(CDI2_DEF).toMatchObject({ id: 'cdi2', name: '买方失控程度', short: 'CDI2', scale: 1 });
     expect(checkDefinition(CDI2_DEF)).toEqual({ formula: null, groups: null, scale: null });
     expect(compileFeatureFormula(CDI2_FORMULA).program.inputs.has('CB')).toBe(true);
