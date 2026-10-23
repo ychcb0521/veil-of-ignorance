@@ -1338,9 +1338,10 @@ function CandlestickChartComponent({
       lastSig === prevLastSigRef.current &&
       sameTimeAxis;
 
-    if (unchangedSnapshot) return;
+    const nativeEmpty = chart.getDataList().length === 0;
+    if (unchangedSnapshot && !nativeEmpty) return;
 
-    const needsFit = prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate);
+    const needsFit = nativeEmpty || prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate);
     if (analysisMode) {
       const lifecycle = analysisLifecycleRef.current;
       lifecycle.requestedAxisSignature = timeAxisSig;
@@ -1350,7 +1351,11 @@ function CandlestickChartComponent({
       pointerInteractionRef.current?.invalidate();
     }
 
-    if (wasPrepend) {
+    if (nativeEmpty) {
+      invalidateResearchChartData(chart.getDataList());
+      if (chartApiRef && !analysisMode) enableChartComputation(klineData);
+      chart.applyNewData(klineData, true);
+    } else if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
@@ -1383,7 +1388,7 @@ function CandlestickChartComponent({
     prevLastSigRef.current = lastSig;
     prevTimeAxisSigRef.current = timeAxisSig;
     if (analysisMode) analysisCommitFinalizerRef.current();
-  }, [analysisMode, data, propTimeAxisSignature]);
+  }, [analysisMode, data, propTimeAxisSignature, viewportRevision]);
 
   // A range-only update can reuse the same active slice near dataset edges.
   // Request a viewport pass explicitly in that case; when the active slice does

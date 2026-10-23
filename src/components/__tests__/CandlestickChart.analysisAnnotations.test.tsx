@@ -185,6 +185,18 @@ describe('CandlestickChart analysis annotations', () => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
   });
 
+  it('refills an empty native chart even when the restored candle snapshot is unchanged', () => {
+    const data = [candle(300000), candle(600000)];
+    const chartApiRef = { current: null as ChartImperativeApi | null };
+    const view = render(<TooltipProvider><CandlestickChart data={data} symbol="ORDIUSDT" viewportRevision="embedded:1x1" chartApiRef={chartApiRef} /></TooltipProvider>);
+    expect(mocks.dataList).toHaveLength(2);
+    mocks.dataList.length = 0;
+    mocks.chart.applyNewData.mockClear();
+    view.rerender(<TooltipProvider><CandlestickChart data={[...data]} symbol="ORDIUSDT" viewportRevision="fullscreen:1x1" chartApiRef={chartApiRef} /></TooltipProvider>);
+    expect(mocks.chart.applyNewData).toHaveBeenCalledOnce();
+    expect(mocks.dataList.map(b => b.timestamp)).toEqual([300000,600000]);
+  });
+
   it('五项研究指标各创建三个副图；参数与 BTC 更新传播到三条线，关闭时全部移除', () => {
     const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
     localStorage.setItem(key, JSON.stringify(RESEARCH_INDICATORS.map(item => ({ type: item.id, period: item.period, enabled: true, showAverage: true, color: '#F6465D' }))));

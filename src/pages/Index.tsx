@@ -4,7 +4,7 @@ import { useTradingContext, type PlaceOrderParams, type CoinTimelineState } from
 import { useAuth } from "@/contexts/AuthContext";
 import { SUPERSEDED_INIT_LOAD, useBinanceData, intervalToMs, chartAmountFields, type KlineData } from "@/hooks/useBinanceData";
 import { useBackgroundPrices } from "@/hooks/useBackgroundPrices";
-import { loadPersistedSimState } from "@/hooks/usePersistedState";
+import { useReplayChartRestore } from "@/hooks/useReplayChartRestore";
 import { usePersistedState, clearSimState } from "@/hooks/usePersistedState";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { TimeControl } from "@/components/TimeControl";
@@ -211,27 +211,6 @@ const Index = () => {
   const [marketDataTab, setMarketDataTab] = useState<MarketDataTab>("orderBook");
 
   const coolingOff = useCoolingOff();
-  const hasRestoredRef = useRef(false);
-  const persistedSim = useMemo(() => loadPersistedSimState(), []);
-  const restoredActive = persistedSim?.status === "playing" || persistedSim?.status === "paused";
-
-  /**
-   * 刷新后把上次会话的 K 线取回来。这里只负责取数：取回来的窗口属于哪一刻、能不能拿来成交，
-   * 由撮合那一侧按时间戳判（planForwardReplayStep 在数据集换代时从撮合时钟播种，canExecuteReplayOrder 与
-   * 强平的风险起点各自把关）——本机存的会话若比云端恢复的旧（4 月的窗口配 6 月的时钟），这批旧 K 线一根都不会执行。
-   */
-  useEffect(() => {
-    if (!restoredActive || hasRestoredRef.current || !persistedSim) return;
-    hasRestoredRef.current = true;
-
-    (async () => {
-      const targetTime = persistedSim.currentSimulatedTime || persistedSim.historicalAnchorTime!;
-      const data = await initLoad(persistedSim.symbol, persistedSim.interval, targetTime, { reverse: persistedSim.direction === -1 });
-      if (data.length > 0) {
-        toast.info("已恢复模拟会话");
-      }
-    })();
-  }, []);
 
   const iMs = useMemo(() => intervalToMs(interval), [interval]);
 
@@ -256,6 +235,14 @@ const Index = () => {
     const ct = coinTimelines[activeSymbol];
     return ct?.time ?? 0;
   }, [timeMode, sim.currentSimulatedTime, coinTimelines, activeSymbol]);
+
+  useReplayChartRestore({
+    status: activeCoinState.status, symbol: activeSymbol, interval,
+    clockReady: effectiveSimTime > 0,
+    reverse: timeDirection === -1, getTime: getLiveSimTime,
+    dataRef: allDataRef, contextRef: dataContextRef, initLoad,
+    onRestored: () => toast.info("已恢复模拟会话"),
+  });
 
   // 倒放镜面：本次倒放的起点（对齐 K 线开盘）。同步模式用全局值，隔离模式各币种自带。
   const activeReverseCap = useMemo(() => {
@@ -476,7 +463,9 @@ const Index = () => {
     if (activeCoinState.status === "stopped" || loading) return;
     const mismatched = () => {
       const context = dataContextRef.current;
-      return !context || context.symbol !== activeSymbol || context.interval !== interval;
+      const bars = allDataRef.current, clock = getLiveSimTime(activeSymbol);
+      return !context || context.symbol !== activeSymbol || context.interval !== interval
+        || !bars.length || (clock > 0 && clock < bars[0].time);
     };
     if (!mismatched()) {
       datasetRehomeRef.current = { key: "", attempts: 0 };
@@ -2456,6 +2445,12 @@ const Index = () => {
                           ) : (
                             <MultiChartLayout
                               mainData={displayData}
+                              mainDataLoading={loading}
+                              mainDataError={error}
+                              onReloadMainData={() => {
+                                const clock = getLiveSimTime(activeSymbol);
+                                if (clock > 0) void initLoad(activeSymbol, interval, clock, { reverse: timeDirection === -1 });
+                              }}
                               mainSymbol={activeSymbol.replace("USDT", "/USDT")}
                               rawSymbol={activeSymbol}
                               onLoadOlder={timeDirection === -1 ? loadNewerVoid : loadOlder}

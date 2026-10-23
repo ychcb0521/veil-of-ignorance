@@ -31,6 +31,22 @@ describe("MultiChartLayout fullscreen timeframe selector", () => {
     window.sessionStorage.clear();
   });
 
+  it("keeps recovery and retry visible inside restored fullscreen until candles arrive", () => {
+    window.sessionStorage.setItem("veil.mainChart.fullscreen", "1");
+    const retry = vi.fn();
+    const props = { mainData: [], mainSymbol: "ORDI/USDT", rawSymbol: "ORDIUSDT", onLoadOlder: vi.fn(), loadingOlder: false, tradeHistory: [], isRunning: true, currentSimulatedTime: 600000, mainInterval: "5m", onReloadMainData: retry };
+    const view = render(<MultiChartLayout {...props} mainDataLoading />);
+    expect(screen.getByRole("status")).toHaveTextContent("正在加载历史 K 线");
+    expect(screen.queryByText("重新载入行情")).not.toBeInTheDocument();
+    view.rerender(<MultiChartLayout {...props} mainDataLoading={false} mainDataError="API 429" />);
+    expect(screen.getByRole("alert")).toHaveTextContent("API 429");
+    fireEvent.click(screen.getByText("重新载入行情"));
+    expect(retry).toHaveBeenCalledOnce();
+    view.rerender(<MultiChartLayout {...props} mainData={[{time:600000,open:1,high:2,low:1,close:1,volume:1}]} />);
+    expect(screen.queryByTestId("chart-data-recovery")).not.toBeInTheDocument();
+    expect(screen.getByTitle("退出全屏 (Esc)")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("shows synchronized timeframe and speed controls in fullscreen", () => {
     const onMainIntervalChange = vi.fn();
     const onSetSpeed = vi.fn();

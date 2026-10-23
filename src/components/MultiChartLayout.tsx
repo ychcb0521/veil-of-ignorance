@@ -36,6 +36,9 @@ const writeFullscreenSession = (active: boolean) => {
 
 interface Props {
   mainData: KlineData[];
+  mainDataLoading?: boolean;
+  mainDataError?: string | null;
+  onReloadMainData?: () => void;
   mainSymbol: string;
   rawSymbol: string;
   onLoadOlder: () => void;
@@ -67,6 +70,9 @@ interface SubChart {
 
 export function MultiChartLayout({
   mainData,
+  mainDataLoading = false,
+  mainDataError,
+  onReloadMainData,
   mainSymbol,
   rawSymbol,
   onLoadOlder,
@@ -279,6 +285,15 @@ export function MultiChartLayout({
         </div>
       </div>
 
+      {isRunning && mainData.length === 0 && (
+        <div className="absolute inset-x-0 bottom-0 top-12 z-20 flex items-center justify-center bg-background/95" data-testid="chart-data-recovery">
+          <div className="space-y-3 text-center text-sm text-muted-foreground" role={mainDataError ? "alert" : "status"}>
+            <p>{mainDataError ? "历史行情加载失败" : mainDataLoading ? "正在加载历史 K 线…" : "正在恢复当前时间轴的 K 线…"}</p>
+            {mainDataError && <p className="max-w-md px-4 text-xs">{mainDataError}</p>}
+            {onReloadMainData && !mainDataLoading && <button type="button" onClick={onReloadMainData} className="rounded border border-border px-3 py-1.5 text-foreground hover:bg-accent">重新载入行情</button>}
+          </div>
+        </div>
+      )}
       {layout === "1x1" ? (
         <div className="flex-1 min-h-0">
           <CandlestickChart

@@ -59,10 +59,13 @@ describe('回放时间线的分叉 / 结束调用点', () => {
   });
 
   it('刷新恢复会话沿用登记表里的指针，不分叉', () => {
-    const at = index.indexOf('hasRestoredRef.current = true;');
-    expect(at).toBeGreaterThan(-1);
-    const restore = index.slice(at, index.indexOf('}, []);', at));
+    expect(index).toContain('useReplayChartRestore({');
+    const restore = read('hooks/useReplayChartRestore.ts');
     expect(restore).not.toContain('forkReplayTimeline(');
+    expect(restore).not.toContain('endReplayTimeline(');
+    expect(restore).not.toContain('startSimulation(');
+    expect(restore).not.toContain('setCoinTimelines(');
+    expect(restore).toContain('const time = getTime(symbol);');
   });
 
   it('停止：两种模式都在收尾的平仓 / 撤单之后、停钟之前结束时间线', () => {
