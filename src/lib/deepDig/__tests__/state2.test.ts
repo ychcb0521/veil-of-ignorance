@@ -18,9 +18,9 @@ it('registers independent S2 beside S, with independently editable and removable
  expect(mergeFeatureDefs([{...STATE2_DEF,removed:true}]).some(d=>d.id==='state2')).toBe(false);
  expect(definitionKey(STATE_DEF)).not.toBe(definitionKey(STATE2_DEF));
 });
-it('first two components, their weights and smoothing remain exactly equal to S; pricing weight is 2',()=>{
+it('first two components, their weights and smoothing remain exactly equal to S; pricing weight is 3',()=>{
  for(const name of ['Lcs','La','wc','wa','sh','ka'])expect(values(s2,name)).toEqual(values(s,name));
- expect(values(s2,'wb')[0]).toBe(2);expect(values(s,'wb')[0]).toBe(1);
+ expect(values(s2,'wb')[0]).toBe(3);expect(values(s,'wb')[0]).toBe(1);
  expect(s2.vars.has('Sb')).toBe(false);expect(s2.vars.has('state')).toBe(false);
 });
 it('third component matches standalone CDA before tanh, keeping the original sign, clip and sum',()=>{
@@ -28,7 +28,7 @@ it('third component matches standalone CDA before tanh, keeping the original sig
  for(let i=1000;i<bars.length;i++){
   expect(100*Math.tanh(raw[i])).toBeCloseTo(CDA[i],9);
   expect(third[i]).toBe(Math.max(-3,Math.min(3,raw[i])));
-  expect(out[i]).toBeCloseTo(1/(1+Math.exp(-(3*Lc[i]+.4*La[i]+2*third[i]))),12);
+  expect(out[i]).toBeCloseTo(1/(1+Math.exp(-(3*Lc[i]+.4*La[i]+3*third[i]))),12);
   expect(out[i]).toBeGreaterThanOrEqual(0);expect(out[i]).toBeLessThanOrEqual(1);checked++;
   if(Math.abs(out[i]-original[i])>1e-8)different++;
  }

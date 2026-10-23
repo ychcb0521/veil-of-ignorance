@@ -642,19 +642,20 @@ export const STATE_DEF: DeepDigFeatureDef = {
 /** S2 changes the pricing component: Ss is CDA's signed retention before 100*tanh.
  * Keep S's component scale and clipping; using the displayed [-100,100] CDA directly would change its effective weight.
  * 【用户要求】2026-10-23「权重…现在是 3，0.4，2」「你去改一下，要生效」：S2 的定价保留权重 wb 由 1 改为 2，S 保持 1。
+ * 【用户要求】2026-10-23「状态 S2 的权重改成 3 / 0.4 / 3」：wb 再改为 3。
  */
 export const STATE2_FORMULA = STATE_FORMULA.split('\n')
   .filter(line => !line.startsWith('Sb = '))
   .map(line => line.startsWith('# 多空状态 S（')
-    ? '# 多空状态 S2（0 ~ 1）：沿用状态 S，第三部分改为 CDA 定价保留、权重 2；越高越偏买方'
-    : line.startsWith('wb = ') ? 'wb = 2                                           # CDA 定价保留的权重（状态 S 为 1）'
+    ? '# 多空状态 S2（0 ~ 1）：沿用状态 S，第三部分改为 CDA 定价保留、权重 3；越高越偏买方'
+    : line.startsWith('wb = ') ? 'wb = 3                                           # CDA 定价保留的权重（状态 S 为 1）'
     : line.startsWith('# —— 3.') ? '# —— 3. CDA 定价保留（沿用状态 S 的尺度、方向与截断）'
     : line.startsWith('Lb = ') ? 'Lb = clip(Ss, -3, 3)                             # CDA 的有符号定价保留，负值偏卖方；保持原合成尺度'
     : line.startsWith('state = ') ? line.replace('state = ', 'state2 = ')
     : line).join('\n');
 export const STATE2_DEF: DeepDigFeatureDef = {
   ...STATE_DEF, id: 'state2', name: '多空状态 S2（0–1）', short: '状态 S2',
-  definition: '状态 S 的独立变体（0 ~ 1）：将第三部分由 CBA 买卖对称定价保留改为 CDA 对应的有符号定价保留，越负表示卖方越强；沿用原分量尺度与 ±3 截断。权重为 3 / 0.4 / 2（定价保留权重由状态 S 的 1 提高到 2）；CBI-2 买卖对称分、对称推力 az、4 小时平滑与最终 logistic 均不变。越高越偏买方，0.5 为模型中性点；不是胜率。',
+  definition: '状态 S 的独立变体（0 ~ 1）：将第三部分由 CBA 买卖对称定价保留改为 CDA 对应的有符号定价保留，越负表示卖方越强；沿用原分量尺度与 ±3 截断。权重为 3 / 0.4 / 3（定价保留权重由状态 S 的 1 提高到 3）；CBI-2 买卖对称分、对称推力 az、4 小时平滑与最终 logistic 均不变。越高越偏买方，0.5 为模型中性点；不是胜率。',
   formula: STATE2_FORMULA,
 };
 
