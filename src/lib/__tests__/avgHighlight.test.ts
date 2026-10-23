@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AVG_HIGHLIGHT_SPECS, AVG_HIGHLIGHT_COLORS, avgCoreKey, avgResultKey, calibratedAverageLimits, averageHighlightColor, displayAverage } from '../avgHighlight';
+import { AVG_HIGHLIGHT_SPECS, AVG_HIGHLIGHT_COLORS, avgCoreKey, avgResultKey, avgReferenceKey, calibratedAverageLimits, averageHighlightColor, displayAverage } from '../avgHighlight';
 import { compileFeatureFormula, evaluateOnBars } from '../deepDig/features';
 
 describe('avg highlighter: symmetric pooled quantiles, unchanged averaging mathematics', () => {
@@ -46,5 +46,14 @@ describe('avg highlighter: symmetric pooled quantiles, unchanged averaging mathe
     expect(avgCoreKey(['AAA', 'BBB'], def, 48)).not.toBe(key);
     expect(avgResultKey(key, 6, 'avg')).not.toBe(avgResultKey(key, 24, 'avg'));
     expect(avgResultKey(key, 24, 'avg')).not.toBe(avgResultKey(key, 24, 'avg2'));
+  });
+  it('reference identity ignores comments and account presentation, but separates all calculation settings', () => {
+    const def={id:'state',formula:'# note\nstate = C',scale:1};
+    const key=avgReferenceKey(def,24,24,'avg2');
+    expect(avgReferenceKey({...def,formula:'state = C # new note'},24,24,'avg2')).toBe(key);
+    for(const patch of [{formula:'state = O'},{scale:100},{halfLifeHours:12},{avgHours:48}])expect(avgReferenceKey({...def,...patch},24,24,'avg2')).not.toBe(key);
+    expect(avgReferenceKey(def,48,24,'avg2')).not.toBe(key);
+    expect(avgReferenceKey(def,24,48,'avg2')).not.toBe(key);
+    expect(avgReferenceKey(def,24,24,'avg')).not.toBe(key);
   });
 });

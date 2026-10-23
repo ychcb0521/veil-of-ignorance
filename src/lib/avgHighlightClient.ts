@@ -2,15 +2,16 @@ import { CUSTOM_RESEARCH_INDICATORS, researchSeriesNames } from './researchIndic
 import { chartFeatureDef } from '@/lib/featureSource';
 import { loadSignals, sortSignalsBy, SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
 import { readAvgCache, writeAvgCache } from './avgHighlightStorage';
-import { AVG_HIGHLIGHT_SPECS, avgCoreKey, avgResultKey, type AverageKind, type AverageLimits } from './avgHighlight';
+import { AVG_HIGHLIGHT_SPECS, avgCoreKey, avgResultKey, avgReferenceKey, type AverageKind, type AverageLimits } from './avgHighlight';
 import bootstrap from '@/data/avgHighlightBootstrap.json';
 
 // Public assets contain only aggregate limits and SHA-256 fingerprints, never account formulas or the selected symbols.
 const results = new Map<string, AverageLimits>();
-async function bootstrapLimits(key: string): Promise<AverageLimits | undefined> {
+async function bootstrapLimits(key: string, reference = false): Promise<AverageLimits | undefined> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
   const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-  return (bootstrap.entries as { key: string; limits: AverageLimits }[]).find(entry => entry.key === hash)?.limits;
+  const entries = reference ? bootstrap.referenceEntries : bootstrap.entries;
+  return (entries as { key: string; limits: AverageLimits }[]).find(entry => entry.key === hash)?.limits;
 }
 const states = new Map<string, string>();
 const listeners = new Set<() => void>();
@@ -28,14 +29,20 @@ function calibrationPopulation() {
   return population = { raw, selected, symbols: selected.map(s => s.symbol).sort() };
 }
 export function avgCalibrationContext(featureId: string, period: number, hours: number, kind: AverageKind) {
-  const { selected, symbols } = calibrationPopulation();
-  if (selected.some(s => s.market === 'us_stock' || (s.exchange != null && s.exchange !== 'binance'))) return { limits: undefined, status: '样本含非币安合约，需先核对行情来源' };
   const spec = AVG_HIGHLIGHT_SPECS.find(s => s.featureId === featureId), def = chartFeatureDef(featureId);
-  if (!spec || !def || symbols.length !== 30) return { limits: undefined, status: '需要30个已评分标的才能校准' };
+  if (!spec || !def) return { limits: undefined, status: '指标定义缺失，无法校准' };
+  const { selected, symbols } = calibrationPopulation();
+  const populationError = selected.some(s => s.market === 'us_stock' || (s.exchange != null && s.exchange !== 'binance'))
+    ? '样本含非币安合约，需先核对行情来源' : symbols.length !== 30 ? '需要30个已评分标的才能校准' : undefined;
   const coreKey = avgCoreKey(symbols, def, period), key = avgResultKey(coreKey, hours, kind);
   if (!results.has(key) && !states.has(key)) {
     states.set(key, '校准中');
-    void readAvgCache<AverageLimits>(key).catch(() => undefined).then(hit => hit ?? bootstrapLimits(key).catch(() => undefined)).then(hit => {
+    // Shipped aggregate limits must work on a fresh profile, even if IndexedDB or Binance is unavailable.
+    void bootstrapLimits(avgReferenceKey(def, period, hours, kind), true).catch(() => undefined).then(async reference => {
+      if (reference) { results.set(key, reference); states.set(key, '标准样本已校准'); notify(); return; }
+      if (populationError) { states.set(key, populationError); notify(); return; }
+      const hit = await readAvgCache<AverageLimits>(key).catch(() => undefined)
+        ?? await bootstrapLimits(key).catch(() => undefined);
       if (hit) { results.set(key, hit); states.set(key, '已缓存'); notify(); return; }
       try {
         if (!worker) {

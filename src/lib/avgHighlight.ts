@@ -8,6 +8,12 @@ export function avgCoreKey(symbols: readonly string[], def: { id: string; formul
   return JSON.stringify([1, AVG_CALIBRATION_CUTOFF, [...symbols].sort(), def.id, def.formula, def.scale, def.halfLifeHours ?? 6, def.avgHours ?? 24, period]);
 }
 export const avgResultKey = (coreKey: string, hours: number, kind: AverageKind) => JSON.stringify([coreKey, hours, kind]);
+/** Published reference limits use the frozen 30-symbol corpus, independently of login or local signal edits.
+ * Exact formula/parameter matching prevents applying a built-in limit to a different account formula. */
+export function avgReferenceKey(def: { id: string; formula: string; scale: number; halfLifeHours?: number; avgHours?: number }, period: number, hours: number, kind: AverageKind): string {
+  const formula = def.formula.split('\n').map(line => line.replace(/#.*$/, '').trim()).filter(Boolean).join('\n');
+  return JSON.stringify(['reference-v1', AVG_CALIBRATION_CUTOFF, def.id, formula, def.scale, def.halfLifeHours ?? 6, def.avgHours ?? 24, period, hours, kind]);
+}
 export const AVG_HIGHLIGHT_SPECS = [
   { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', center: 0, range: [-1, 1] },
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', center: 0, range: [-1, 1] },
