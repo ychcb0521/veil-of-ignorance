@@ -35,6 +35,7 @@ import { subscribeBtcReference } from "@/lib/btcReference";
 import { cacheChartDateFormatter } from "@/lib/chartDateCache";
 import { enableChartComputation, subscribeChartComputation } from "@/lib/chartComputeClient";
 import { subscribeAvgCalibration } from "@/lib/avgHighlightClient";
+import { liveChartCoversSnapshot } from "@/lib/chartReplaySnapshot";
 import {
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
@@ -1343,7 +1344,14 @@ function CandlestickChartComponent({
     const nativeEmpty = chart.getDataList().length === 0;
     if (unchangedSnapshot && !nativeEmpty) return;
 
-    const needsFit = nativeEmpty || prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate);
+    // At 900x / 1m, four candles can arrive between React flushes. They are
+    // already streamed by the imperative loop; replacing the native array
+    // restarts the worker channels and repeatedly clears all indicator curves.
+    const streamedSnapshot = !!chartApiRef && !analysisMode
+      && prevDataLenRef.current > 0 && data.length > prevDataLenRef.current
+      && currentOldest === prevOldestRef.current && lastCandle.timestamp >= prevNewestRef.current
+      && liveChartCoversSnapshot(klineData, chart.getDataList(), liveUpdateQueueRef.current);
+    const needsFit = nativeEmpty || prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate && !streamedSnapshot);
     if (analysisMode) {
       const lifecycle = analysisLifecycleRef.current;
       lifecycle.requestedAxisSignature = timeAxisSig;
@@ -1357,6 +1365,8 @@ function CandlestickChartComponent({
       invalidateResearchChartData(chart.getDataList());
       if (chartApiRef && !analysisMode) enableChartComputation(klineData);
       chart.applyNewData(klineData, true);
+    } else if (streamedSnapshot) {
+      // Keep the native candles, viewport and completed indicator calculations.
     } else if (wasPrepend) {
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
