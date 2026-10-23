@@ -62,6 +62,33 @@ describe('自制区的十个特征值', () => {
     }
   });
 
+  it('标题栏拖动卡片并限制在视口内，关闭按钮不启动拖动', () => {
+    const close = vi.fn();
+    render(<IndicatorMenu open indicators={[]} onClose={close} onIndicatorsChange={() => {}} />);
+    const header = screen.getByTitle('拖动标题栏移动卡片');
+    const panel = header.parentElement!;
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 100, width: 384, height: 400, right: 484, bottom: 500, x: 100, y: 100, toJSON() {} });
+    header.setPointerCapture = vi.fn();
+    header.hasPointerCapture = () => false;
+    const pointer = (type: string, x: number, y: number, target = header) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { pointerId: 1, button: 0, clientX: x, clientY: y });
+      fireEvent(target, event);
+    };
+    pointer('pointerdown', 120, 120);
+    pointer('pointermove', 220, 170);
+    expect(panel.style.transform).toBe('translate(100px, 50px)');
+    pointer('pointermove', -1000, -1000);
+    expect(panel.style.transform).toBe('translate(-92px, -92px)');
+    pointer('pointerup', -1000, -1000);
+    pointer('pointermove', 500, 500);
+    expect(panel.style.transform).toBe('translate(-92px, -92px)');
+    pointer('pointerdown', 120, 120, header.querySelector('button')!);
+    expect(header.setPointerCapture).toHaveBeenCalledTimes(1);
+    fireEvent.click(header.querySelector('button')!);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it('Z 版使用独立的原生副图名称，复用现有 Z 公式和均值，参数不串到普通版', () => {
     const data = Array.from({ length: 700 }, (_, i) => ({ timestamp: i * 300000, open: 100, high: 102, low: 98,
       close: 100 + Math.sin(i / 7), volume: 1000, turnover: 100000 + 1000 * Math.cos(i / 11), takerBuyTurnover: 50000 + 20000 * Math.sin(i / 13) }));

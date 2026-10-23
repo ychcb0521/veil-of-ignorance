@@ -4,7 +4,7 @@ import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
  * Works with klinecharts native indicator system + custom registered indicators.
  */
 
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
@@ -222,6 +222,32 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const positionRef = useRef({ x: 0, y: 0 });
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
+  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = panel.getBoundingClientRect();
+    dragRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, left: rect.left, top: rect.top, width: rect.width, height: rect.height, offsetX: positionRef.current.x, offsetY: positionRef.current.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.currentTarget.style.cursor = 'grabbing';
+  };
+  const moveDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId || !panelRef.current) return;
+    const left = Math.max(8, Math.min(window.innerWidth - drag.width - 8, drag.left + e.clientX - drag.x));
+    const top = Math.max(8, Math.min(window.innerHeight - drag.height - 8, drag.top + e.clientY - drag.y));
+    positionRef.current = { x: drag.offsetX + left - drag.left, y: drag.offsetY + top - drag.top };
+    panelRef.current.style.transform = `translate(${positionRef.current.x}px, ${positionRef.current.y}px)`;
+  };
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    e.currentTarget.style.cursor = '';
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -249,15 +275,22 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const host = panel.closest<HTMLElement>('[data-chart-indicator-host]');
     if (!host) return;
     const fit = () => {
+      panel.style.transform = 'none';
       const boundary = host.querySelector<HTMLElement>('[data-chart-indicator-boundary]') ?? host;
-      const left = Math.max(8, boundary.getBoundingClientRect().left + 8);
+      const boundaryLeft = Math.max(8, boundary.getBoundingClientRect().left + 8);
       const rect = panel.getBoundingClientRect();
-      panel.style.maxWidth = `${Math.max(0, Math.min(384, rect.right - left))}px`;
-      panel.style.maxHeight = `${Math.max(0, boundary.getBoundingClientRect().bottom - rect.top - 8)}px`;
+      panel.style.maxWidth = `${Math.max(0, Math.min(384, rect.right - boundaryLeft))}px`;
+      panel.style.maxHeight = `${Math.max(0, Math.min(window.innerHeight - 16, boundary.getBoundingClientRect().bottom - rect.top - 8))}px`;
+      const fitted = panel.getBoundingClientRect();
+      const left = Math.max(8, Math.min(window.innerWidth - fitted.width - 8, fitted.left + positionRef.current.x));
+      const top = Math.max(8, Math.min(window.innerHeight - fitted.height - 8, fitted.top + positionRef.current.y));
+      positionRef.current = { x: left - fitted.left, y: top - fitted.top };
+      panel.style.transform = `translate(${positionRef.current.x}px, ${positionRef.current.y}px)`;
     };
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(host);
+    observer.observe(panel);
     if (panel.parentElement) observer.observe(panel.parentElement);
     window.addEventListener('resize', fit);
     return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
@@ -319,11 +352,15 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
   return (
     <div
       ref={panelRef}
-      className="absolute right-0 top-10 z-[120] flex flex-col w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden transition-all duration-150 ease-out origin-top"
+      className="absolute right-0 top-10 z-[120] flex flex-col w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-border bg-card shadow-2xl overflow-hidden origin-top"
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="flex shrink-0 items-center justify-between px-3 py-2.5 border-b border-border bg-card">
+      <div className="flex shrink-0 items-center justify-between px-3 py-2.5 border-b border-border bg-card cursor-grab select-none touch-none"
+        title="拖动标题栏移动卡片"
+        onPointerDown={startDrag} onPointerMove={moveDrag}
+        onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}
+      >
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-muted-foreground">{supportedCount}/{availableCatalog.length} 已支持</span>
