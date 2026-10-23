@@ -6,7 +6,7 @@ import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
  */
 
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { Search, X, Plus, Check } from 'lucide-react';
+import { CircleHelp, Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
 import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP, type CustomPaneVisibility } from '@/lib/customIndicators';
 import { DSP_V_DEFINITION, DSP_V_STEPS, DSP_VZ_DEFINITION } from '@/lib/dynamicSchellingPoint';
@@ -507,9 +507,10 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
                 aria-label={`${item.nameZh} 说明`}
                 aria-expanded={descriptionOpen}
                 onClick={e => { e.stopPropagation(); setDescriptionOpen(open => !open); }}
-                className="ml-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground"
+                title={descriptionOpen ? '收起说明' : '查看说明'}
+                className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/35 transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
               >
-                {descriptionOpen ? '收起说明 ▴' : '说明 ▾'}
+                <CircleHelp aria-hidden className="h-3 w-3" strokeWidth={1.5}/>
               </button>
             )}
             {!supported && (
