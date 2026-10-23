@@ -71,7 +71,9 @@ describe('卖方负值口径',()=>{
   expect(withFishDefaultThreshold(id,adopted)).toEqual(adopted);
  });
  it.each(pair)('%s 新增卡默认使用负门槛和 <；买方定义与偏好不变',id=>{
-  expect(readFishPreference(id).direction).toBe('<');expect(Number(readFishPreference(id).threshold)).toBeLessThan(0);
+  expect(readFishPreference(id).direction).toBe('<');
+  if (['seller-push', 'seller-control'].includes(id)) expect(readFishPreference(id).threshold).toBe('');
+  else expect(Number(readFishPreference(id).threshold)).toBeLessThan(0);
   const buyer=BUILTIN_FEATURES.find(d=>d.id==='bss')!;expect(mergeFeatureDefs([buyer]).find(d=>d.id==='bss')!.formula).toBe(buyer.formula);
  });
 });

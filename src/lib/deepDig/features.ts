@@ -61,7 +61,7 @@ export interface DeepDigFeatureDef {
 
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
-export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'drift-speed-down-z': 'b', cda: 'CDA' };
+export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'drift-speed-down-z': 'b', 'seller-push': 'bp', 'seller-control': 'bc', cda: 'CDA' };
 export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
 const SELLER_SIGN_MARK = '# seller-negative-v1';
 
@@ -667,6 +667,50 @@ export const DOWNWARD_DRIFT_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
+/** Seller-initiated pressure only: aggressive selling accompanied by a price decline. */
+export const SELLER_PUSH_FORMULA = sellerNegativeFormula([
+  '# 卖方主动推动：仅计主动卖出且价格下跌；RMS 按零中心尺度归一化，不是标准 Z 分数',
+  'N = abs(B - S)',
+  'f = ln(1 + N / avg(Q, avgh))',
+  'A = (B - S) / Q',
+  'Sa = max(-A, 0)',
+  'R = ln(C / prev(C))',
+  'Rz = R / sqrt(avg(R * R, avgh))',
+  'Dn = max(-Rz, 0)',
+  'F = nz(f * Sa * Dn)',
+  'bp = ema(F, hl, 0)',
+].join('\n'), 'bp');
+export const SELLER_PUSH_DEF: DeepDigFeatureDef = {
+  id: 'seller-push', name: '卖方主动推动', short: '卖推',
+  definition: '只衡量主动卖出伴随下跌的推动：失衡强度 f × 主动卖方份额 Sa × RMS 归一化下跌，再按 hl 半衰期平滑并取负。主动买方主导的下跌不计入主动推动；结果不大于 0，越负表示卖方主动推动越强。',
+  formula: SELLER_PUSH_FORMULA, sellerSignVersion: 1,
+  scale: 100, unit: '%σ/根', positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL,
+  source: 'campaigns', groupVars: 2, builtin: true,
+};
+
+/** Symmetric outcome control: active or passive selling succeeds only when price declines. */
+export const SELLER_CONTROL_FORMULA = sellerNegativeFormula([
+  '# 卖方控制力：涨跌共用对称权重 1 + abs(A)，不因哪方主动而系统性偏向卖方',
+  '# RMS = sqrt(avg(R * R, avgh))，保留漂移；不是减均值的标准差或最终指标的 Z 分数',
+  'N = abs(B - S)',
+  'f = ln(1 + N / avg(Q, avgh))',
+  'A = (B - S) / Q',
+  'W = 1 + abs(A)',
+  'R = ln(C / prev(C))',
+  'Rz = R / sqrt(avg(R * R, avgh))',
+  'Dn = max(-Rz, 0)',
+  'Up = max(Rz, 0)',
+  'F = nz(f * W * (Dn - Up))',
+  'bc = ema(F, hl, 0)',
+].join('\n'), 'bc');
+export const SELLER_CONTROL_DEF: DeepDigFeatureDef = {
+  id: 'seller-control', name: '卖方控制力', short: '卖控',
+  definition: '衡量卖方是否控制价格结果：主动卖压低价格、或被动卖盘压住主动买，都计为卖方占优；上涨（含卖压失败）计为买方占优。涨跌共用 1 + abs(A) 对称权重和收益 RMS 归一化。按 hl 半衰期平滑并取负后，负值表示卖方占优，正值表示买方占优，均衡约为 0。',
+  formula: SELLER_CONTROL_FORMULA, sellerSignVersion: 1,
+  scale: 100, unit: '%σ/根', positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL,
+  source: 'campaigns', groupVars: 2, builtin: true,
+};
+
 /** BSS 的卖方镜像：下跌动量、主动卖出占优取正，成交量方向规则同样转换。 */
 export const DSS_FORMULA = sellerNegativeFormula([
   '# DSS 买方状态恶化（−1 ~ 1）= 0.45·向下动量标准化 + 0.25·卖方成交量方向分 + 0.30·主动卖方失衡',
@@ -729,7 +773,7 @@ export const CDA_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF, DSS_DEF, CDA_DEF];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, DOWNWARD_DRIFT_DEF, SELLER_PUSH_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
