@@ -101,7 +101,6 @@ vi.mock('klinecharts', () => ({
   DomPosition: { Root: 'root', Main: 'main', YAxis: 'yAxis' },
   ActionType: {
     OnDataReady: 'onDataReady',
-    OnTooltipIconClick: 'onTooltipIconClick',
     OnScroll: 'onScroll',
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
@@ -226,12 +225,13 @@ describe('CandlestickChart analysis annotations', () => {
   it('副图叉号只关闭对应序列，刷新保留隐藏状态，菜单可逐一恢复', () => {
     const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
     localStorage.setItem(key, JSON.stringify([{type:'STATE',period:24,avgHours:12,enabled:true,showAverage:true}]));
+    const root = document.createElement('div'); document.body.appendChild(root);
+    Object.assign(mocks.chart, { getDom: () => root });
     let view = render(<TooltipProvider><CandlestickChart data={[candle(300000)]} symbol="TESTUSDT" /></TooltipProvider>);
     try {
-      for (const [name, field] of [['STATE_AVG2_CUSTOM','showAverage2'],['STATE_CUSTOM','showRaw'],['STATE_AVG_CUSTOM','showAverage']] as const) {
-        const callback = mocks.chart.subscribeAction.mock.calls.filter(([action]) => action === 'onTooltipIconClick').at(-1)![1];
+      for (const [name, field, label] of [['STATE_AVG2_CUSTOM','showAverage2','avg₂'],['STATE_CUSTOM','showRaw','原值'],['STATE_AVG_CUSTOM','showAverage','avg']] as const) {
         mocks.chart.removeIndicator.mockClear();
-        act(() => callback({iconId:'close-custom-pane',indicatorName:name}));
+        fireEvent.click(screen.getByRole('button',{name:'关闭 状态 S · '+label+' 副图'}));
         expect(mocks.chart.removeIndicator).toHaveBeenCalledExactlyOnceWith('candle_pane',name);
         expect(JSON.parse(localStorage.getItem(key)!)[0][field]).toBe(false);
       }
@@ -246,7 +246,7 @@ describe('CandlestickChart analysis annotations', () => {
         expect(mocks.chart.createIndicator).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({name}),false,{height:80});
       }
     } finally {
-      view.unmount();
+      view.unmount(); root.remove(); delete (mocks.chart as any).getDom;
       if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key,previous);
     }
   });

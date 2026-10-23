@@ -27,7 +27,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, CUSTOM_PANE_CLOSE_ICON, indicatorCalcParams } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
@@ -2140,13 +2140,6 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
-    const closePane = (event: { iconId?: string; indicatorName?: string }) => {
-      if (event.iconId !== CUSTOM_PANE_CLOSE_ICON || !event.indicatorName) return;
-      const pane = customIndicatorPane(event.indicatorName);
-      if (!pane) return;
-      setIndicators(previous => migrateResearchIndicators(previous).map(ind => ind.type === pane.type ? { ...ind, [pane.visibility]: false } : ind));
-    };
-    chart.subscribeAction(ActionType.OnTooltipIconClick, closePane);
     const currentActive = new Set<string>();
 
     for (const ind of indicators) {
@@ -2211,7 +2204,31 @@ function CandlestickChartComponent({
         activeIndicatorPanes.current.delete(type);
       }
     }
-    return () => { chart.unsubscribeAction(ActionType.OnTooltipIconClick, closePane); };
+    // Use DOM buttons above the native canvas so replay redraws cannot move or
+    // invalidate the close hit area. Pane roots move with native resize/layout.
+    const closeButtons: HTMLButtonElement[] = [];
+    for (const [key, paneId] of activeIndicatorPanes.current) {
+      const name = COMPANION_KC_NAME[key] ?? KLINE_INDICATOR_MAP[key];
+      const pane = customIndicatorPane(name);
+      const root = paneId ? chart.getDom?.(paneId, DomPosition.Main) : null;
+      if (!pane || !root) continue;
+      const label = `${INDICATOR_CHIP_LABEL[pane.type] ?? pane.type} · ${pane.visibility === 'showRaw' ? '原值' : pane.visibility === 'showAverage' ? 'avg' : 'avg₂'}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = '×';
+      button.title = `关闭 ${label} 副图，可从指标菜单恢复`;
+      button.setAttribute('aria-label', `关闭 ${label} 副图`);
+      button.className = 'absolute right-2 top-1 z-20 flex h-5 w-5 items-center justify-center rounded text-sm text-muted-foreground hover:bg-accent hover:text-destructive';
+      button.addEventListener('pointerdown', event => event.stopPropagation());
+      button.addEventListener('mousedown', event => event.stopPropagation());
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        setIndicators(previous => migrateResearchIndicators(previous).map(ind => ind.type === pane.type ? { ...ind, [pane.visibility]: false } : ind));
+      });
+      root.appendChild(button);
+      closeButtons.push(button);
+    }
+    return () => { closeButtons.forEach(button => button.remove()); };
   }, [indicators, setIndicators]);
 
   // 【用户要求】CBI-2 的动量要剔除 BTC：BTC 对照 K 线取到后重算（参数第二位是数据版本号，变了 klinecharts 才会重算）

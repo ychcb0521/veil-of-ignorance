@@ -4,7 +4,7 @@ import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
  * Bridges indicators not built into klinecharts by registering them via registerIndicator().
  */
 
-import { registerIndicator as registerKcIndicator, type TooltipIconStyle, type IndicatorTemplate, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
+import { registerIndicator as registerKcIndicator, type IndicatorTemplate, type IndicatorCreateTooltipDataSourceParams, type IndicatorSeries, type IndicatorTooltipData, type KLineData } from 'klinecharts';
 import { computeDsp, DSP_BASE_INTERVAL_MS, DSP_DEFAULTS, DSP_V_DISPLAY_SCALE, DSP_VZ_DISPLAY_SCALE, DSP_Z_WINDOW_HOURS, dspHalfLifeForInterval, inferIntervalMs } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
@@ -319,7 +319,6 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
   ]])),
 };
-export const CUSTOM_PANE_CLOSE_ICON = 'close-custom-pane';
 export type CustomPaneVisibility = 'showRaw' | 'showAverage' | 'showAverage2';
 export function customIndicatorPane(name: string) {
   const item = researchIndicatorForKc(name);
@@ -335,23 +334,6 @@ export function visibleIndicatorCompanions(ind: { type: string; showRaw?: boolea
   });
 }
 
-/** Native pane icons follow the chart's layout and remain clickable after resizing. */
-function registerPaneIndicator(template: IndicatorTemplate): void {
-  if (!customIndicatorPane(template.name)) { registerKcIndicator(template); return; }
-  const tooltip = template.createTooltipDataSource;
-  registerKcIndicator({ ...template, createTooltipDataSource: args => {
-    const data = tooltip?.(args);
-    const closeIcon: TooltipIconStyle = {
-      id: CUSTOM_PANE_CLOSE_ICON, position: 'right' as TooltipIconStyle['position'], icon: '×',
-      size: 14, fontFamily: 'sans-serif', color: args.defaultStyles.tooltip.text.color,
-      activeColor: '#F6465D', backgroundColor: 'transparent', activeBackgroundColor: 'transparent',
-      marginLeft: 8, marginRight: 4, marginTop: 0, marginBottom: 0,
-      paddingLeft: 4, paddingRight: 4, paddingTop: 2, paddingBottom: 2,
-    };
-    return { name: template.shortName ?? template.name, calcParamsText: `(${args.indicator.calcParams[0]}h)`,
-      values: undefined as never, ...data, icons: [...(data?.icons ?? args.defaultStyles.tooltip.icons), closeIcon] };
-  } });
-}
 /**
  * 菜单里的一项 → 某个 klinecharts 指标的 calcParams：带均线的副图多一个均线时长；
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
@@ -519,7 +501,7 @@ function registerIndicator(template: IndicatorTemplate): void {
         return indicatorRows(indicator, values, key, { lower: limits?.lower ?? NaN, upper: limits?.upper ?? NaN });
       },
     };
-    registerPaneIndicator(definition);
+    registerKcIndicator(definition);
     return;
   }
   const rawLimits = rawIndicatorReferenceLimits(template.name);
@@ -539,9 +521,9 @@ function registerIndicator(template: IndicatorTemplate): void {
     };
   }
   const calc = template.calc;
-  if (!calc || axisLineLevel(template.name, template.calcParams) == null) { registerPaneIndicator(template); return; }
+  if (!calc || axisLineLevel(template.name, template.calcParams) == null) { registerKcIndicator(template); return; }
   const baseMin = template.minValue, baseMax = template.maxValue;
-  registerPaneIndicator({ ...template, calc: (data, indicator) => {
+  registerKcIndicator({ ...template, calc: (data, indicator) => {
     const level = axisLineLevel(template.name, indicator.calcParams);
     if (level != null) {
       const ind = indicator as { minValue?: number | null; maxValue?: number | null };

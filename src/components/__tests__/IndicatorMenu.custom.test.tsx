@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
-import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions, CUSTOM_PANE_CLOSE_ICON } from '@/lib/customIndicators';
+import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
 import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
@@ -74,16 +74,6 @@ describe('自制区的十个特征值', () => {
       expect(visibleIndicatorCompanions(next).length).toBe(visibleIndicatorCompanions(ind).length+1);
       fireEvent.click(button);expect(button).toHaveAttribute('aria-pressed','false');
       expect(changed.mock.lastCall![0].find((i:IndicatorConfig)=>i.type===id)).toEqual({...ind,showAverage:false});
-    }
-  });
-
-  it('各自制副图的原生标题都有独立关闭图标，保留现有图例', () => {
-    for (const item of CUSTOM_RESEARCH_INDICATORS) for (const name of [CUSTOM_INDICATOR_MAP[item.id], ...INDICATOR_COMPANIONS[item.id].map(c=>c.kcName)].filter(Boolean)) {
-      const template = registered.get(name);
-      if (!template?.createTooltipDataSource) continue;
-      const data = template.createTooltipDataSource({indicator:{calcParams:[6,24],result:[]},crosshair:{dataIndex:0},defaultStyles:{tooltip:{text:{color:'#aaa'},icons:[]}}});
-      expect(data.name).toBeTruthy();
-      expect(data.icons).toContainEqual(expect.objectContaining({id:CUSTOM_PANE_CLOSE_ICON,icon:'×'}));
     }
   });
 
