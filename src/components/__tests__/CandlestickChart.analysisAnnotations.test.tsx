@@ -89,6 +89,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('klinecharts', () => ({
+  utils: { formatDate: (_formatter: unknown, timestamp: number) => String(timestamp) },
   init: mocks.init,
   dispose: mocks.dispose,
   registerIndicator: mocks.registerIndicator,
@@ -370,6 +371,7 @@ describe('CandlestickChart analysis annotations', () => {
     );
     expect(mocks.chart.updateData).toHaveBeenCalledTimes(1);
 
+    act(() => chartApiRef.current?.refreshIndicators?.());
     act(() => callbacks.shift()?.());
     expect(mocks.chart.updateData).toHaveBeenCalledTimes(2);
     expect(mocks.chart.updateData.mock.calls[1][0].close).toBe(1.3);

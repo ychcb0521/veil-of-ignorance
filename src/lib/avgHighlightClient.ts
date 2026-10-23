@@ -1,6 +1,6 @@
 import { CUSTOM_RESEARCH_INDICATORS, researchSeriesNames } from './researchIndicators';
 import { chartFeatureDef } from '@/lib/featureSource';
-import { loadSignals, sortSignalsBy } from '@/lib/signalLibrary';
+import { loadSignals, sortSignalsBy, SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';
 import { readAvgCache, writeAvgCache } from './avgHighlightStorage';
 import { AVG_HIGHLIGHT_SPECS, avgCoreKey, avgResultKey, type AverageKind, type AverageLimits } from './avgHighlight';
 import bootstrap from '@/data/avgHighlightBootstrap.json';
@@ -18,11 +18,17 @@ let worker: Worker | undefined, version = 0;
 export const avgCalibrationVersion = () => version;
 export function subscribeAvgCalibration(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 function notify() { version++; for (const fn of listeners) fn(); }
-export function avgCalibrationContext(featureId: string, period: number, hours: number, kind: AverageKind) {
+let population: { raw: string | null; selected: ReturnType<typeof loadSignals>; symbols: string[] } | undefined;
+function calibrationPopulation() {
+  const raw = localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY);
+  if (population?.raw === raw) return population;
   const seen = new Set<string>();
   const selected = sortSignalsBy(loadSignals().filter(s => s.quality != null && s.quality >= 1 && s.quality <= 5), 'quality', 'desc')
     .filter(s => { if (seen.has(s.symbol)) return false; seen.add(s.symbol); return true; }).slice(0, 30);
-  const symbols = selected.map(s => s.symbol).sort();
+  return population = { raw, selected, symbols: selected.map(s => s.symbol).sort() };
+}
+export function avgCalibrationContext(featureId: string, period: number, hours: number, kind: AverageKind) {
+  const { selected, symbols } = calibrationPopulation();
   if (selected.some(s => s.market === 'us_stock' || (s.exchange != null && s.exchange !== 'binance'))) return { limits: undefined, status: '样本含非币安合约，需先核对行情来源' };
   const spec = AVG_HIGHLIGHT_SPECS.find(s => s.featureId === featureId), def = chartFeatureDef(featureId);
   if (!spec || !def || symbols.length !== 30) return { limits: undefined, status: '需要30个已评分标的才能校准' };

@@ -15,11 +15,20 @@ function lines(name: string, calcParams?: unknown[]) {
 const orange = (name: string, calcParams?: unknown[]) => lines(name, calcParams).filter(l => l.color === ORANGE_DASH_LINE.color).map(l => Math.round(l.v * 100) / 100);
 
 describe('副图橘色线按指标区分方向参考与经验门槛', () => {
+  it('非avg保留既有界限，az和卖控采用用户指定±15，均保留中线', () => {
+    registerCustomIndicators();
+    for (const name of ['DSP_Z_V_CUSTOM', 'SELLER_CONTROL_CUSTOM']) {
+      expect(lines(name)).toEqual(expect.arrayContaining([{v:15,color:'#0ECB81'}, {v:-15,color:'#F6465D'}]));
+      expect(orange(name)).toEqual([0]);
+    }
+    expect(lines('CBI2_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'#0ECB81'}, {v:-1,color:'#F6465D'}]));
+    expect(lines('STATE_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'#0ECB81'}, {v:0,color:'#F6465D'}]));
+  });
   it('图表参考线独立为 0，不借用捕捞门槛', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0, cba: 0, avgBss: 0 }); });
   it('CBI-2 与 CBA 的黄线为 0', () => {
     registerCustomIndicators();
     expect(orange('CBI2_CUSTOM')).toEqual([0]);
-    expect(orange('CBA_CUSTOM')).toEqual([0]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(0);
+    expect(orange('CBA_CUSTOM')).toEqual([0]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(100);
   });
   it('a / avg_a：普通版和归一化版的方向参考线均为 0', () => {
     registerCustomIndicators();

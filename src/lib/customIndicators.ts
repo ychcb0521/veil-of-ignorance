@@ -18,6 +18,7 @@ import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btc
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import { AVG_HIGHLIGHT_SPECS, averageHighlightColor, AVG_HIGHLIGHT_COLORS, type AverageKind } from '@/lib/avgHighlight';
 import { avgCalibrationContext, avgCalibrationVersion } from '@/lib/avgHighlightClient';
+import { drawChartLine } from './drawChartLine';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -436,12 +437,31 @@ export function calibratedAverageForName(name: string) {
   }
   return undefined;
 }
+const indicatorRowCache = new WeakMap<object, Record<string, number>[]>();
+function indicatorRows(indicator: object, values: (number | null)[], key: string, limits?: { lower: number; upper: number }) {
+  let rows = indicatorRowCache.get(indicator);
+  if (!rows) { rows = []; indicatorRowCache.set(indicator, rows); }
+  rows.length = values.length;
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i], old = rows[i];
+    if (old && Object.is(old[key], value ?? undefined)
+      && (!limits || (Object.is(old._avgLower, limits.lower) && Object.is(old._avgUpper, limits.upper)))) continue;
+    rows[i] = { ...(value == null ? {} : { [key]: value }), ...(limits ? { _avgLower: limits.lower, _avgUpper: limits.upper } : {}) };
+  }
+  return rows;
+}
+export function rawIndicatorReferenceLimits(name: string): readonly [number, number] | undefined {
+  const spec = AVG_HIGHLIGHT_SPECS.find(s => researchKcName(s.id) === name);
+  if (!spec) return undefined;
+  if (spec.id === 'BSS') return [-BSS_STRONG, BSS_STRONG];
+  return spec.range ?? [-15, 15];
+}
 function registerIndicator(template: IndicatorTemplate): void {
   const averaged = calibratedAverageForName(template.name);
   if (averaged) {
     const { item, spec, kind } = averaged;
     const key = template.figures?.[0]?.key ?? 'value';
-    registerKcIndicator({ ...template, minValue: undefined, maxValue: undefined,
+    const definition: IndicatorTemplate = { ...template, minValue: undefined, maxValue: undefined,
       calcParams: [item.period, AVG_DEFAULT_HOURS, 0, 0, 0],
       createTooltipDataSource: ({ indicator, defaultStyles }) => {
         const context = avgCalibrationContext(item.featureId, indicator.calcParams[0], indicator.calcParams[1], kind);
@@ -456,7 +476,7 @@ function registerIndicator(template: IndicatorTemplate): void {
           zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.buyer }, last._avgUpper)(args);
           zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.seller }, last._avgLower)(args);
         }
-        return false;
+        return drawChartLine(args, definition.figures![0]);
       },
       figures: [{ key, title: template.figures?.[0]?.title ?? '', type: 'line', styles: data => {
         const point = (data.next?.indicatorData ?? data.current.indicatorData) as Record<string, number> | undefined;
@@ -469,10 +489,27 @@ function registerIndicator(template: IndicatorTemplate): void {
         const limits = context.limits;
         indicator.minValue = limits?.lower ?? spec.center; indicator.maxValue = limits?.upper ?? spec.center;
         const values = researchChartSeries(data, item, indicator.calcParams[0], { averageHours: hours })[kind];
-        return values.map(value => ({ ...(value == null ? {} : { [key]: value }), _avgLower: limits?.lower ?? NaN, _avgUpper: limits?.upper ?? NaN }));
+        return indicatorRows(indicator, values, key, { lower: limits?.lower ?? NaN, upper: limits?.upper ?? NaN });
       },
-    });
+    };
+    registerKcIndicator(definition);
     return;
+  }
+  const rawLimits = rawIndicatorReferenceLimits(template.name);
+  if (rawLimits) {
+    const originalDraw = template.draw;
+    template = { ...template,
+      minValue: Math.min(template.minValue ?? rawLimits[0], rawLimits[0]),
+      maxValue: Math.max(template.maxValue ?? rawLimits[1], rawLimits[1]),
+      draw: args => {
+        if (template.name !== 'BSS_CUSTOM') {
+          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.buyer }, rawLimits[1])(args);
+          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.seller }, rawLimits[0])(args);
+        }
+        originalDraw?.(args);
+        return template.figures?.length === 1 ? drawChartLine(args, template.figures[0]) : false;
+      },
+    };
   }
   const calc = template.calc;
   if (!calc || axisLineLevel(template.name, template.calcParams) == null) { registerKcIndicator(template); return; }
@@ -1397,7 +1434,7 @@ export function registerCustomIndicators() {
         } }],
         calc: (dataList, indicator) => {
           const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
-          return (level === 0 ? values.core : level === 1 ? values.avg : values.avg2).map(value => value == null ? {} : { value });
+          return indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
         },
       });
     }

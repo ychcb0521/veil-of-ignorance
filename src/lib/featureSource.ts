@@ -7,9 +7,10 @@
  * 它只是在 X 上再取均值，X 取被平均的那个变量。均值统一由使用方套一次：K 线图的 avg 副图、渔的 avg(X, H)；
  * 不会出现「均值的均值」。Deep dig 自己的结果仍按公式写的算（写了 avg 行就是 avg(X, h)，与渔 H = h 时同一个量）。
  */
+import { isChartComputationEnabled, requestChartComputation } from './chartComputeClient';
 import type { KLineData } from 'klinecharts';
 import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, halfLifeOf, avgHoursOf, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { programHistoryBars, type Program } from '@/lib/deepDig/formula';
+import { programHistoryBars, createFormulaEvaluationCache, type FormulaEvaluationCache, type Program } from '@/lib/deepDig/formula';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
@@ -107,6 +108,7 @@ function compileFor(formula: string, constant: string | null, value: number | nu
   return hit;
 }
 
+const historyBarsCache = new Map<string, number>();
 /** Include every nested rolling window plus a conservative EMA convergence buffer. */
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string): number {
   const def = chartFeatureDef(featureId);
@@ -116,7 +118,13 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const program = compileFor(formula, constant, constant ? period : null).compiled.program;
   const hl = binding && 'param' in binding && binding.param === 'hl' ? period : halfLifeOf(def);
   const avgh = binding && 'param' in binding && binding.param === 'avgh' ? period : avgHoursOf(def);
-  return programHistoryBars(program, { hl, avgh, 半衰期: hl, 平均时长: avgh }, 5) + Math.ceil(32 * hl * 12) + 2;
+  const key = `${featureId}|${period}|${hl}|${avgh}|${formula}`;
+  const cached = historyBarsCache.get(key);
+  if (cached != null) return cached;
+  const bars = programHistoryBars(program, { hl, avgh, 半衰期: hl, 平均时长: avgh }, 5) + Math.ceil(32 * hl * 12) + 2;
+  if (historyBarsCache.size >= 128) historyBarsCache.clear();
+  historyBarsCache.set(key, bars);
+  return bars;
 }
 
 export interface ChartFeatureSeries {
@@ -126,12 +134,14 @@ export interface ChartFeatureSeries {
   vars: Map<string, (number | null)[]>;
 }
 
-const seriesCache = new WeakMap<KLineData[], Map<string, ChartFeatureSeries>>();
+const chartBarBuffers = new WeakMap<FormulaEvaluationCache, ResearchBar[]>();
+const evaluationCaches = new WeakMap<KLineData[], Map<string, FormulaEvaluationCache>>();
+const seriesCache = new WeakMap<KLineData[], Map<string, { key: string; result: ChartFeatureSeries }>>();
 /**
  * 在图上的 K 线上算账号里那份定义：refClose 由调用方给（用到 CB 时）；T 用真实开盘时间，其余窗口按 5 分钟图计。
  * 同一批 K 线、同一参数只算一次（DSP 的 a / avg_a / A 三个副图共用）。
  */
-export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string } = {}): ChartFeatureSeries | null {
+export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string; variables?: string[]; delta?: { revision:number; changes:readonly [number,number][]; referenceVersion:number } } = {}): ChartFeatureSeries | null {
   const def = chartFeatureDef(featureId);
   if (!def) return null;
   const formula = options.formula ?? def.formula;
@@ -147,33 +157,53 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}`;
+  const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}`;
+  if (options.variables && isChartComputationEnabled(dataList)) {
+    try {
+      const plan = compileFor(formula, constant, constant && has ? p : null);
+      return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,
+        variables:[...new Set([...options.variables, ...(plan.core ? [plan.core] : [])])], core:plan.core, def });
+    } catch { return null; }
+  }
   let perList = seriesCache.get(dataList);
-  const cached = perList?.get(key);
-  if (cached) return cached;
+  const cached = perList?.get(context);
+  if (cached?.key === key) return cached.result;
   let compiled: ReturnType<typeof compileFor>;
   try { compiled = compileFor(formula, constant, constant && has ? p : null); } catch { return null; }
-  const bars: ResearchBar[] = dataList.map((d, i) => ({
-    openTime: d.timestamp, open: d.open, high: d.high, low: d.low, close: d.close,
-    volume: typeof d.volume === 'number' ? d.volume : Number.NaN,
-    takerBuyVolume: null,
-    quoteVolume: typeof d.turnover === 'number' ? d.turnover : null,
-    takerBuyQuoteVolume: typeof d.takerBuyTurnover === 'number' ? (d.takerBuyTurnover as number) : null,
-    refClose: refClose?.[i] ?? null,
-  }));
   let out: ReturnType<typeof evaluateOnBars>;
-  try { out = evaluateOnBars(bars, compiled.compiled, params); } catch { return null; }
+  let bars: ResearchBar[];
+  try {
+    let caches = evaluationCaches.get(dataList);
+    if (!caches) { caches = new Map(); evaluationCaches.set(dataList, caches); }
+    const contextKey = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${formula}`;
+    let cache = caches.get(contextKey);
+    if (!cache) { cache = createFormulaEvaluationCache(); if (caches.size >= 16) caches.clear(); caches.set(contextKey, cache); }
+    bars = chartBarBuffers.get(cache) ?? [];
+    bars.length = dataList.length;
+    for (let i = 0; i < dataList.length; i++) {
+      const d = dataList[i];
+      const b = bars[i] ?? (bars[i] = {} as ResearchBar);
+      b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low; b.close = d.close;
+      b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
+      b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
+      b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
+      b.refClose = refClose?.[i] ?? null;
+    }
+    chartBarBuffers.set(cache, bars);
+    out = evaluateOnBars(bars, compiled.compiled, params, cache);
+  } catch { return null; }
   const toArr = (v: unknown): (number | null)[] => {
     if (typeof v === 'number') return bars.map(() => (Number.isFinite(v) ? v : null));
     const a = v as Float64Array | undefined;
     return bars.map((_, i) => (a && Number.isFinite(a[i]) ? a[i] : null));
   };
   const vars = new Map<string, (number | null)[]>();
-  for (const [name, v] of out.vars) vars.set(name, toArr(v));
+  for (const [name, v] of out.vars) if (!options.variables || options.variables.includes(name) || name === compiled.core) vars.set(name, toArr(v));
   const core = compiled.core ? (vars.get(compiled.core) ?? toArr(out.last)) : toArr(out.last);
   const result: ChartFeatureSeries = { def, core, vars };
   if (!perList) { perList = new Map(); seriesCache.set(dataList, perList); }
   if (perList.size > 16) perList.clear();
-  perList.set(key, result);
+  perList.set(context, { key, result });
   return result;
 }
 

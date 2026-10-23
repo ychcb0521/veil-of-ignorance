@@ -2473,7 +2473,7 @@ const Index = () => {
                               pendingOrders={activeSymbolOrders}
                               onCancelOrder={(orderId) => handleCancelOrder(activeSymbol, orderId)}
                               chartApiRef={chartApiRef}
-                              onCrosshairPriceChange={handleCrosshairPriceChange}
+                              onCrosshairPriceChange={pickMode ? handleCrosshairPriceChange : undefined}
                               pickMode={pickMode}
                               onPricePicked={handlePricePicked}
                             />

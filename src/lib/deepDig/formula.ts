@@ -305,40 +305,40 @@ function lengthOf(...vs: Value[]): number {
 }
 const at = (v: Value, i: number) => (isSeries(v) ? (i < v.length ? v[i] : Number.NaN) : v);
 
-function map1(a: Value, f: (x: number) => number): Value {
+function map1(a: Value, f: (x: number) => number, resume?: SeriesResume): Value {
   if (!isSeries(a)) return f(a);
-  const out = new Float64Array(a.length);
-  for (let i = 0; i < a.length; i++) out[i] = f(a[i]);
+  const out = resumedOutput(a.length, resume);
+  for (let i = resume?.from ?? 0; i < a.length; i++) out[i] = f(a[i]);
   return out;
 }
 /** 两个参数逐根算（一个数自动铺开）。直接循环，不在每根上建数组——公式在几百个事件 × 上千根 K 线上跑，这里是热点。 */
-function map2(a: Value, b: Value, f: (x: number, y: number) => number): Value {
+function map2(a: Value, b: Value, f: (x: number, y: number) => number, resume?: SeriesResume): Value {
   const sa = isSeries(a);
   const sb = isSeries(b);
   if (!sa && !sb) return f(a as number, b as number);
   const n = lengthOf(a, b);
-  const out = new Float64Array(n);
+  const out = resumedOutput(n, resume);
   if (sa && sb) {
     const A = a as Float64Array;
     const B = b as Float64Array;
-    if (A.length === n && B.length === n) for (let i = 0; i < n; i++) out[i] = f(A[i], B[i]);
-    else for (let i = 0; i < n; i++) out[i] = f(at(A, i), at(B, i));
+    if (A.length === n && B.length === n) for (let i = resume?.from ?? 0; i < n; i++) out[i] = f(A[i], B[i]);
+    else for (let i = resume?.from ?? 0; i < n; i++) out[i] = f(at(A, i), at(B, i));
   } else if (sa) {
     const A = a as Float64Array;
     const y = b as number;
-    for (let i = 0; i < n; i++) out[i] = f(A[i], y);
+    for (let i = resume?.from ?? 0; i < n; i++) out[i] = f(A[i], y);
   } else {
     const x = a as number;
     const B = b as Float64Array;
-    for (let i = 0; i < n; i++) out[i] = f(x, B[i]);
+    for (let i = resume?.from ?? 0; i < n; i++) out[i] = f(x, B[i]);
   }
   return out;
 }
-function map3(a: Value, b: Value, c: Value, f: (x: number, y: number, z: number) => number): Value {
+function map3(a: Value, b: Value, c: Value, f: (x: number, y: number, z: number) => number, resume?: SeriesResume): Value {
   const n = lengthOf(a, b, c);
   if (n < 0) return f(a as number, b as number, c as number);
-  const out = new Float64Array(n);
-  for (let i = 0; i < n; i++) out[i] = f(at(a, i), at(b, i), at(c, i));
+  const out = resumedOutput(n, resume);
+  for (let i = resume?.from ?? 0; i < n; i++) out[i] = f(at(a, i), at(b, i), at(c, i));
   return out;
 }
 
@@ -346,23 +346,25 @@ function map3(a: Value, b: Value, c: Value, f: (x: number, y: number, z: number)
 export const barsForHours = (h: number, barMinutes: number) => Math.max(1, Math.round((h * 60) / barMinutes));
 
 /** 最近 n 根（含当根）的平均：空值不计，开头不满 n 根用已有的；一个都没有记空。 */
-export function rollingMean(x: Float64Array, n: number): Float64Array {
-  const out = new Float64Array(x.length);
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < x.length; i++) {
+export function rollingMean(x: Float64Array, n: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  const sums = checkpoint(resume, "sum", x.length), counts = checkpoint(resume, "count", x.length);
+  let sum = resume?.from ? sums![resume.from - 1] : 0;
+  let count = resume?.from ? counts![resume.from - 1] : 0;
+  for (let i = resume?.from ?? 0; i < x.length; i++) {
     if (Number.isFinite(x[i])) { sum += x[i]; count++; }
     const drop = i - n;
     if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
+    if (sums && counts) { sums[i] = sum; counts[i] = count; }
     out[i] = count > 0 ? clean(sum / count) : Number.NaN;
   }
   return out;
 }
 
 /** 往前数 k 根的值；开头不够 k 根记空。 */
-export function shiftBars(x: Float64Array, k: number): Float64Array {
-  const out = new Float64Array(x.length);
-  for (let i = 0; i < x.length; i++) out[i] = i >= k ? x[i - k] : Number.NaN;
+export function shiftBars(x: Float64Array, k: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  for (let i = resume?.from ?? 0; i < x.length; i++) out[i] = i >= k ? x[i - k] : Number.NaN;
   return out;
 }
 
@@ -370,15 +372,18 @@ export function shiftBars(x: Float64Array, k: number): Float64Array {
  * 滚动标准化：(当根 − 最近 n 根的平均) ÷ 最近 n 根的样本标准差（含当根）。空值不计，开头不满 n 根用已有的；
  * 少于 2 个值、标准差为 0、当根为空 → 空。
  */
-export function rollingZScore(x: Float64Array, n: number): Float64Array {
-  const out = new Float64Array(x.length);
-  let sum = 0;
-  let sq = 0;
-  let count = 0;
-  for (let i = 0; i < x.length; i++) {
+export function rollingZScore(x: Float64Array, n: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  const sums = checkpoint(resume, "sum", x.length), counts = checkpoint(resume, "count", x.length);
+  let sum = resume?.from ? sums![resume.from - 1] : 0;
+  const squares = checkpoint(resume, "sq", x.length);
+  let sq = resume?.from ? squares![resume.from - 1] : 0;
+  let count = resume?.from ? counts![resume.from - 1] : 0;
+  for (let i = resume?.from ?? 0; i < x.length; i++) {
     if (Number.isFinite(x[i])) { sum += x[i]; sq += x[i] * x[i]; count++; }
     const drop = i - n;
     if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; sq -= x[drop] * x[drop]; count--; }
+    if (sums && counts) { sums[i] = sum; counts[i] = count; squares![i] = sq; }
     if (!Number.isFinite(x[i]) || count < 2) { out[i] = Number.NaN; continue; }
     const mean = sum / count;
     const variance = (sq - count * mean * mean) / (count - 1);
@@ -390,15 +395,18 @@ export function rollingZScore(x: Float64Array, n: number): Float64Array {
 }
 
 /** 滚动样本标准差（最近 n 根，含当根）；空值跳过，少于 2 个记空。 */
-export function rollingSd(x: Float64Array, n: number): Float64Array {
-  const out = new Float64Array(x.length);
-  let sum = 0;
-  let sq = 0;
-  let count = 0;
-  for (let i = 0; i < x.length; i++) {
+export function rollingSd(x: Float64Array, n: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  const sums = checkpoint(resume, "sum", x.length), counts = checkpoint(resume, "count", x.length);
+  let sum = resume?.from ? sums![resume.from - 1] : 0;
+  const squares = checkpoint(resume, "sq", x.length);
+  let sq = resume?.from ? squares![resume.from - 1] : 0;
+  let count = resume?.from ? counts![resume.from - 1] : 0;
+  for (let i = resume?.from ?? 0; i < x.length; i++) {
     if (Number.isFinite(x[i])) { sum += x[i]; sq += x[i] * x[i]; count++; }
     const drop = i - n;
     if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; sq -= x[drop] * x[drop]; count--; }
+    if (sums && counts) { sums[i] = sum; counts[i] = count; squares![i] = sq; }
     if (count < 2) { out[i] = Number.NaN; continue; }
     const mean = sum / count;
     const variance = (sq - count * mean * mean) / (count - 1);
@@ -412,14 +420,39 @@ export function rollingSd(x: Float64Array, n: number): Float64Array {
  *   outₜ = Σ_{k=0}^{n−1} w_k · K_{t−k} · ln(Pₜ ÷ E0_{t−k}) ÷ (k + 1)，w_k = ρ^k ÷ Σ_j ρ^j（窗口内、t − k ≥ 0 的根），
  * ρ = 每根的时间衰减，n = 窗口根数。K、E0 为空（或 E0 ≤ 0）的那一根这一项记 0、权重照算；Pₜ 为空 → 空。
  */
-export function retainSum(k: Float64Array, p: Float64Array, e0: Float64Array, rho: number, n: number): Float64Array {
+/** Resume only unchanged historical prefixes; calculations keep their original arithmetic order. */
+interface SeriesResume { from: number; previous: Float64Array; states?: Map<string, Float64Array> }
+function checkpoint(resume: SeriesResume | undefined, key: string, length: number) {
+  if (!resume?.states) return undefined;
+  const old = resume.states.get(key);
+  if (old?.length === length) return old;
+  if (old && old.byteOffset + length * 8 <= old.buffer.byteLength) {
+    const next = new Float64Array(old.buffer, old.byteOffset, length); resume.states.set(key, next); return next;
+  }
+  const capacity = length > 0 ? 2 ** Math.ceil(Math.log2(length)) : 0;
+  const next = new Float64Array(capacity).subarray(0, length);
+  if (old) next.set(old.subarray(0, Math.min(old.length, length)));
+  resume.states.set(key, next);
+  return next;
+}
+const resumedOutput = (length: number, resume?: SeriesResume) => {
+  if (resume?.previous.length === length) return resume.previous;
+  if (resume && resume.previous.byteOffset + length * 8 <= resume.previous.buffer.byteLength)
+    return new Float64Array(resume.previous.buffer, resume.previous.byteOffset, length);
+  const capacity = resume && length > 0 ? 2 ** Math.ceil(Math.log2(length)) : length;
+  const out = new Float64Array(capacity).subarray(0, length);
+  if (resume) out.set(resume.previous.subarray(0, resume.from));
+  return out;
+};
+export function retainSum(k: Float64Array, p: Float64Array, e0: Float64Array, rho: number, n: number, resume?: SeriesResume): Float64Array {
   const N = p.length;
-  const out = new Float64Array(N);
-  const lnE0 = Float64Array.from(e0, v => (v > 0 ? Math.log(v) : Number.NaN));
+  const out = resumedOutput(N, resume);
+  const lnE0 = checkpoint(resume, 'logE0', N) ?? new Float64Array(N);
+  for (let i = resume?.from ?? 0; i < N; i++) lnE0[i] = e0[i] > 0 ? Math.log(e0[i]) : NaN;
   // c_k = ρ^k ÷ (k + 1)，预先算好
   const c = new Float64Array(n);
   for (let j = 0, r = 1; j < n; j++, r *= rho) c[j] = r / (j + 1);
-  for (let t = 0; t < N; t++) {
+  for (let t = resume?.from ?? 0; t < N; t++) {
     const pt = p[t];
     if (!(pt > 0)) { out[t] = Number.NaN; continue; }
     const lnP = Math.log(pt);
@@ -438,8 +471,8 @@ export function retainSum(k: Float64Array, p: Float64Array, e0: Float64Array, rh
 }
 
 /** 最近 n 根（含当根）里有值的数，按大小排好；每根调用 fn(排好的数组) 得这一根的结果，一个都没有记空。 */
-function rollingSorted(x: Float64Array, n: number, fn: (sorted: number[]) => number): Float64Array {
-  const out = new Float64Array(x.length);
+function rollingSorted(x: Float64Array, n: number, fn: (sorted: number[]) => number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
   const win: number[] = [];
   const lowerBound = (v: number) => {
     let lo = 0;
@@ -447,11 +480,12 @@ function rollingSorted(x: Float64Array, n: number, fn: (sorted: number[]) => num
     while (lo < hi) { const mid = (lo + hi) >> 1; if (win[mid] < v) lo = mid + 1; else hi = mid; }
     return lo;
   };
-  for (let i = 0; i < x.length; i++) {
+  const start = Math.max(0, (resume?.from ?? 0) - n + 1);
+  for (let i = start; i < x.length; i++) {
     if (Number.isFinite(x[i])) win.splice(lowerBound(x[i]), 0, x[i]);
     const drop = i - n;
-    if (drop >= 0 && Number.isFinite(x[drop])) win.splice(lowerBound(x[drop]), 1);
-    out[i] = win.length ? fn(win) : Number.NaN;
+    if (drop >= start && Number.isFinite(x[drop])) win.splice(lowerBound(x[drop]), 1);
+    if (i >= (resume?.from ?? 0)) out[i] = win.length ? fn(win) : Number.NaN;
   }
   return out;
 }
@@ -460,7 +494,7 @@ const medianOfSorted = (s: readonly number[]) => {
   return s.length % 2 ? s[h] : (s[h - 1] + s[h]) / 2;
 };
 /** 最近 n 根的中位数（含当根）：空值跳过。 */
-export const rollingMedian = (x: Float64Array, n: number) => rollingSorted(x, n, medianOfSorted);
+export const rollingMedian = (x: Float64Array, n: number, resume?: SeriesResume) => rollingSorted(x, n, medianOfSorted, resume);
 /** 最近 n 根的中位数绝对偏差 median(|x − 中位数|)（含当根）：空值跳过。排好的两半各自按偏差从小到大，合并取中间。 */
 function madOfSorted(s: readonly number[]): number {
   const m = medianOfSorted(s);
@@ -491,36 +525,38 @@ function madOfSorted(s: readonly number[]): number {
   const h = len >> 1;
   return len % 2 ? kth(h) : (kth(h - 1) + kth(h)) / 2;
 }
-export const rollingMad = (x: Float64Array, n: number) => rollingSorted(x, n, madOfSorted);
+export const rollingMad = (x: Float64Array, n: number, resume?: SeriesResume) => rollingSorted(x, n, madOfSorted, resume);
 /**
  * 稳健尺度（最近 n 根，含当根）：1.4826 × MAD；一半以上的值相同、MAD = 0 时改用 1.2533 × 平均绝对偏差（离中位数）——
  * 稳健 z 的常用补充规则（CBI 的吸收分量 A 常常正好等于 ±1，单边行情里 MAD 会是 0）。全都相同 → 0（z 记空）。
  */
-export const rollingRobustScale = (x: Float64Array, n: number) => rollingSorted(x, n, s => {
+export const rollingRobustScale = (x: Float64Array, n: number, resume?: SeriesResume) => rollingSorted(x, n, s => {
   const madV = madOfSorted(s);
   if (madV > 0) return 1.4826 * madV;
   const m = medianOfSorted(s);
   let sum = 0;
   for (const v of s) sum += Math.abs(v - m);
   return 1.2533 * (sum / s.length);
-});
+}, resume);
 /** 最近 n 根的和（含当根）：空值跳过，一个都没有记空。 */
-export function rollingSum(x: Float64Array, n: number): Float64Array {
-  const out = new Float64Array(x.length);
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < x.length; i++) {
+export function rollingSum(x: Float64Array, n: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  const sums = checkpoint(resume, "sum", x.length), counts = checkpoint(resume, "count", x.length);
+  let sum = resume?.from ? sums![resume.from - 1] : 0;
+  let count = resume?.from ? counts![resume.from - 1] : 0;
+  for (let i = resume?.from ?? 0; i < x.length; i++) {
     if (Number.isFinite(x[i])) { sum += x[i]; count++; }
     const drop = i - n;
     if (drop >= 0 && Number.isFinite(x[drop])) { sum -= x[drop]; count--; }
+    if (sums && counts) { sums[i] = sum; counts[i] = count; }
     out[i] = count > 0 ? clean(sum) : Number.NaN;
   }
   return out;
 }
 /** 最近 n 根（含当根）的最大 / 最小值：空值跳过，一个都没有记空。 */
-export function rollingExtreme(x: Float64Array, n: number, max: boolean): Float64Array {
-  const out = new Float64Array(x.length);
-  for (let t = 0; t < x.length; t++) {
+export function rollingExtreme(x: Float64Array, n: number, max: boolean, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
+  for (let t = resume?.from ?? 0; t < x.length; t++) {
     let best = Number.NaN;
     for (let k = 0; k < n && k <= t; k++) {
       const v = x[t - k];
@@ -545,10 +581,10 @@ export function rollingBeta(y: Float64Array, x: Float64Array, n: number): Float6
   return out;
 }
 /** 时间衰减加权和：Σ_{k<n} 2^(−k ÷ h)·x_{t−k}（h、n 以根计）；空值跳过，一个都没有记空。 */
-export function wsumBars(x: Float64Array, h: number, n: number): Float64Array {
-  const out = new Float64Array(x.length);
+export function wsumBars(x: Float64Array, h: number, n: number, resume?: SeriesResume): Float64Array {
+  const out = resumedOutput(x.length, resume);
   const w = Float64Array.from({ length: n }, (_, k) => 2 ** (-k / h));
-  for (let t = 0; t < x.length; t++) {
+  for (let t = resume?.from ?? 0; t < x.length; t++) {
     let sum = 0;
     let any = false;
     for (let k = 0; k < n && k <= t; k++) {
@@ -590,45 +626,45 @@ const scalarArg = (v: Value, fn: string, what: string, line: number): number => 
   return v;
 };
 
-function binary(op: string, a: Value, b: Value): Value {
+function binary(op: string, a: Value, b: Value, resume?: SeriesResume): Value {
   switch (op) {
-    case '+': return map2(a, b, (x, y) => clean(x + y));
-    case '-': return map2(a, b, (x, y) => clean(x - y));
-    case '*': return map2(a, b, (x, y) => clean(x * y));
-    case '/': return map2(a, b, (x, y) => clean(x / y));
-    case '^': return map2(a, b, (x, y) => clean(x ** y));
-    case '>': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x > y ? 1 : 0));
-    case '<': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x < y ? 1 : 0));
-    case '>=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x >= y ? 1 : 0));
-    case '<=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x <= y ? 1 : 0));
-    case '==': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x === y ? 1 : 0));
-    case '!=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x !== y ? 1 : 0));
-    case 'and': return map2(a, b, (x, y) => (truthy(x) && truthy(y) ? 1 : 0));
-    case 'or': return map2(a, b, (x, y) => (truthy(x) || truthy(y) ? 1 : 0));
+    case '+': return map2(a, b, (x, y) => clean(x + y), resume);
+    case '-': return map2(a, b, (x, y) => clean(x - y), resume);
+    case '*': return map2(a, b, (x, y) => clean(x * y), resume);
+    case '/': return map2(a, b, (x, y) => clean(x / y), resume);
+    case '^': return map2(a, b, (x, y) => clean(x ** y), resume);
+    case '>': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x > y ? 1 : 0), resume);
+    case '<': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x < y ? 1 : 0), resume);
+    case '>=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x >= y ? 1 : 0), resume);
+    case '<=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x <= y ? 1 : 0), resume);
+    case '==': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x === y ? 1 : 0), resume);
+    case '!=': return map2(a, b, (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? Number.NaN : x !== y ? 1 : 0), resume);
+    case 'and': return map2(a, b, (x, y) => (truthy(x) && truthy(y) ? 1 : 0), resume);
+    case 'or': return map2(a, b, (x, y) => (truthy(x) || truthy(y) ? 1 : 0), resume);
     default: throw new Error(op);
   }
 }
 
-function call(name: string, args: Value[], line: number, barMinutes: number): Value {
+function call(name: string, args: Value[], line: number, barMinutes: number, resume?: SeriesResume): Value {
   const [x, y, z] = args;
   switch (name) {
-    case 'ln': case 'log': return map1(x, v => clean(Math.log(v)));
-    case 'exp': return map1(x, v => clean(Math.exp(v)));
-    case 'abs': return map1(x, Math.abs);
-    case 'tanh': return map1(x, v => clean(Math.tanh(v)));
-    case 'sqrt': return map1(x, v => clean(Math.sqrt(v)));
-    case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)));
-    case 'max': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)));
-    case 'min': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.min(a, b)));
-    case 'nz': { const v = y == null ? 0 : scalarArg(y, 'nz', '替换值', line); return map1(x, a => (Number.isFinite(a) ? a : v)); }
-    case 'has': return map1(x, a => (Number.isFinite(a) ? 1 : 0));
-    case 'if': return map3(x, y, z, (c, a, b) => (Number.isNaN(c) ? Number.NaN : truthy(c) ? a : b));
+    case 'ln': case 'log': return map1(x, v => clean(Math.log(v)), resume);
+    case 'exp': return map1(x, v => clean(Math.exp(v)), resume);
+    case 'abs': return map1(x, Math.abs, resume);
+    case 'tanh': return map1(x, v => clean(Math.tanh(v)), resume);
+    case 'sqrt': return map1(x, v => clean(Math.sqrt(v)), resume);
+    case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)), resume);
+    case 'max': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)), resume);
+    case 'min': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.min(a, b)), resume);
+    case 'nz': { const v = y == null ? 0 : scalarArg(y, 'nz', '替换值', line); return map1(x, a => (Number.isFinite(a) ? a : v), resume); }
+    case 'has': return map1(x, a => (Number.isFinite(a) ? 1 : 0), resume);
+    case 'if': return map3(x, y, z, (c, a, b) => (Number.isNaN(c) ? Number.NaN : truthy(c) ? a : b), resume);
     case 'prev': {
       const k = y == null ? 1 : scalarArg(y, 'prev', '根数', line);
       if (!Number.isInteger(k) || k < 0) throw new FormulaError('prev 的根数要是 0 或正整数', line);
       if (!isSeries(x)) return x;
-      const out = new Float64Array(x.length);
-      for (let i = 0; i < x.length; i++) out[i] = i >= k ? x[i - k] : Number.NaN;
+      const out = resumedOutput(x.length, resume);
+      for (let i = resume?.from ?? 0; i < x.length; i++) out[i] = i >= k ? x[i - k] : Number.NaN;
       return out;
     }
     case 'ema': {
@@ -637,9 +673,9 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       const init = z == null ? null : scalarArg(z, 'ema', '初值', line);
       const rho = 2 ** (-barMinutes / (h * 60));
       if (!isSeries(x)) return x;
-      const out = new Float64Array(x.length);
-      let s: number | null = init;
-      for (let i = 0; i < x.length; i++) {
+      const out = resumedOutput(x.length, resume);
+      let s: number | null = resume && Number.isFinite(resume.previous[resume.from - 1]) ? resume.previous[resume.from - 1] : init;
+      for (let i = resume?.from ?? 0; i < x.length; i++) {
         const v = x[i];
         if (Number.isFinite(v)) s = s == null ? v : rho * s + (1 - rho) * v;
         out[i] = s == null ? Number.NaN : s;
@@ -651,7 +687,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       if (!(h > 0)) throw new FormulaError(`${name} 的时长要大于 0（单位：小时）`, line);
       const n = barsForHours(h, barMinutes);
       if (!isSeries(x)) return name === 'median' ? x : name === 'mad' || name === 'rscale' ? 0 : x * n;
-      return name === 'median' ? rollingMedian(x, n) : name === 'mad' ? rollingMad(x, n) : name === 'rscale' ? rollingRobustScale(x, n) : rollingSum(x, n);
+      return name === 'median' ? rollingMedian(x, n, resume) : name === 'mad' ? rollingMad(x, n, resume) : name === 'rscale' ? rollingRobustScale(x, n, resume) : rollingSum(x, n, resume);
     }
     case 'full': case 'peak': {
       const n = scalarArg(y, name, '根数', line);
@@ -674,7 +710,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       const n = scalarArg(y, name, '根数', line);
       if (!Number.isInteger(n) || n < 1) throw new FormulaError(`${name} 的根数要是正整数`, line);
       if (!isSeries(x)) return name === 'msum' ? x * n : x;
-      return name === 'msum' ? rollingSum(x, n) : rollingExtreme(x, n, name === 'highest');
+      return name === 'msum' ? rollingSum(x, n) : rollingExtreme(x, n, name === 'highest', resume);
     }
     case 'beta': {
       const h = scalarArg(z, 'beta', '时长', line);
@@ -687,7 +723,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
     case 'clip': {
       const lo = scalarArg(y, 'clip', '下限', line);
       const hi = scalarArg(z, 'clip', '上限', line);
-      return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.min(hi, Math.max(lo, v))));
+      return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.min(hi, Math.max(lo, v))), resume);
     }
     case 'wsum': {
       const h = scalarArg(y, 'wsum', '半衰期', line);
@@ -695,7 +731,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       if (!(h > 0)) throw new FormulaError('wsum 的半衰期要大于 0（单位：根）', line);
       if (!Number.isInteger(n) || n < 1) throw new FormulaError('wsum 的根数要是正整数', line);
       if (!isSeries(x)) { let t = 0; for (let j = 0; j < n; j++) t += 2 ** (-j / h); return x * t; }
-      return wsumBars(x, h, n);
+      return wsumBars(x, h, n, resume);
     }
     case 'atr': {
       const n = scalarArg(args[3], 'atr', '根数', line);
@@ -710,7 +746,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       if (!(h > 0)) throw new FormulaError(`${name} 的时长要大于 0（单位：小时）`, line);
       if (!isSeries(x)) return name === 'zscore' || name === 'sd' ? Number.NaN : x;
       const n = barsForHours(h, barMinutes);
-      return name === 'avg' ? rollingMean(x, n) : name === 'ago' ? shiftBars(x, n) : name === 'sd' ? rollingSd(x, n) : rollingZScore(x, n);
+      return name === 'avg' ? rollingMean(x, n, resume) : name === 'ago' ? shiftBars(x, n, resume) : name === 'sd' ? rollingSd(x, n, resume) : rollingZScore(x, n, resume);
     }
     case 'retain': {
       const [k, pr, e0, hArg, wArg] = args;
@@ -720,7 +756,7 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
       if (!(wHours > 0)) throw new FormulaError('retain 的窗口时长要大于 0（单位：小时）', line);
       const len = [k, pr, e0].find(isSeries)?.length ?? 1;
       const asSeries = (v: Value) => (isSeries(v) ? v : new Float64Array(len).fill(v));
-      const out = retainSum(asSeries(k), asSeries(pr), asSeries(e0), 2 ** (-barMinutes / (h * 60)), barsForHours(wHours, barMinutes));
+      const out = retainSum(asSeries(k), asSeries(pr), asSeries(e0), 2 ** (-barMinutes / (h * 60)), barsForHours(wHours, barMinutes), resume);
       return [k, pr, e0].some(isSeries) ? out : out[0];
     }
     case 'sma': case 'sum': {
@@ -740,7 +776,18 @@ function call(name: string, args: Value[], line: number, barMinutes: number): Va
   }
 }
 
-function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number): Value {
+export interface FormulaEvaluationCache {
+  inputs?: Record<string, Value>;
+  buffers?: Record<string, Float64Array>;
+  nodes: WeakMap<Node, Float64Array>;
+  states: WeakMap<Node, Map<string, Float64Array>>;
+}
+export const createFormulaEvaluationCache = (): FormulaEvaluationCache => ({ nodes: new WeakMap(), states: new WeakMap() });
+const resumableCalls = new Set(['median', 'mad', 'rscale', 'wsum', 'retain', 'highest', 'lowest', 'ln', 'log', 'exp', 'abs', 'tanh', 'sqrt', 'sign', 'max', 'min', 'nz', 'has', 'if', 'clip', 'ema', 'avg', 'sd', 'zscore', 'rsum', 'prev', 'ago']);
+function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number, reuse?: { from: number; cache: FormulaEvaluationCache }): Value {
+  const previous = reuse?.cache.nodes.get(n);
+  const resume = reuse && reuse.from > 0 && previous ? { from: reuse.from, previous } : undefined;
+  const remember = (out: Value) => { if (reuse && isSeries(out)) reuse.cache.nodes.set(n, out); return out; };
   switch (n.k) {
     case 'num': return n.v;
     case 'var': {
@@ -749,11 +796,23 @@ function evaluateNode(n: Node, env: Map<string, Value>, barMinutes: number): Val
       return v;
     }
     case 'un': {
-      const a = evaluateNode(n.a, env, barMinutes);
-      return n.op === '-' ? map1(a, x => -x) : map1(a, x => (Number.isNaN(x) ? Number.NaN : truthy(x) ? 0 : 1));
+      const a = evaluateNode(n.a, env, barMinutes, reuse);
+      return remember(n.op === '-' ? map1(a, x => -x, resume) : map1(a, x => (Number.isNaN(x) ? Number.NaN : truthy(x) ? 0 : 1), resume));
     }
-    case 'bin': return binary(n.op, evaluateNode(n.a, env, barMinutes), evaluateNode(n.b, env, barMinutes));
-    case 'call': return call(n.name, n.args.map(a => evaluateNode(a, env, barMinutes)), n.line, barMinutes);
+    case 'bin': return remember(binary(n.op, evaluateNode(n.a, env, barMinutes, reuse), evaluateNode(n.b, env, barMinutes, reuse), resume));
+    case 'call': {
+      const args = n.args.map(a => evaluateNode(a, env, barMinutes, reuse));
+      const priorCall = reuse?.cache.nodes.get(n);
+      let callResume: SeriesResume | undefined;
+      if (reuse && resumableCalls.has(n.name)) {
+        let states = reuse.cache.states.get(n);
+        if (!states) { states = new Map(); reuse.cache.states.set(n, states); }
+        callResume = { from: priorCall ? reuse.from : 0, previous: priorCall ?? new Float64Array(Math.max(0, lengthOf(...args))), states };
+      }
+      const out = call(n.name, args, n.line, barMinutes, callResume);
+      if (reuse && isSeries(out) && resumableCalls.has(n.name)) reuse.cache.nodes.set(n, out);
+      return out;
+    }
   }
 }
 
@@ -763,13 +822,40 @@ export function evaluateProgram(program: Program, inputs: Readonly<Record<string
 }
 
 /** 同上，另外带回每个起了名的中间量（推断统计可以拿它们当因变量）。 */
-export function evaluateProgramVars(program: Program, inputs: Readonly<Record<string, Value>>, options: { barMinutes?: number } = {}): { last: Value; vars: Map<string, Value> } {
+export function evaluateProgramVars(program: Program, inputs: Readonly<Record<string, Value>>, options: { barMinutes?: number; cache?: FormulaEvaluationCache } = {}): { last: Value; vars: Map<string, Value> } {
+  let reuse: { from: number; cache: FormulaEvaluationCache } | undefined;
+  if (options.cache) {
+    const cache = options.cache, old = cache.inputs;
+    let from = old ? Infinity : 0;
+    if (old) for (const [key, value] of Object.entries(inputs)) {
+      const prior = old[key];
+      if (isSeries(value)) {
+        if (prior === undefined || !isSeries(prior) || value.length < prior.length) { from = 0; break; }
+        from = Math.min(from, prior.length);
+        for (let i = 0; i < from; i++) if (!Object.is(prior[i], value[i])) { from = i; break; }
+      } else if (!Object.is(prior, value)) { from = 0; break; }
+    }
+    if (!Number.isFinite(from)) from = 0;
+    if (!from) { cache.nodes = new WeakMap(); cache.states = new WeakMap(); }
+    const copies: Record<string, Value> = {};
+    for (const [key, value] of Object.entries(inputs)) {
+      if (!isSeries(value)) { copies[key] = value; continue; }
+      const previous = old?.[key];
+      const copy = previous instanceof Float64Array
+        ? resumedOutput(value.length, { from: Math.min(from, previous.length), previous })
+        : new Float64Array(value.length);
+      copy.set(value.subarray(from), from);
+      copies[key] = copy;
+    }
+    cache.inputs = copies;
+    reuse = { from, cache };
+  }
   const env = new Map<string, Value>(Object.entries(inputs));
   const vars = new Map<string, Value>();
   const barMinutes = options.barMinutes ?? FORMULA_BAR_MINUTES;
   let last: Value = Number.NaN;
   for (const s of program.statements) {
-    last = evaluateNode(s.expr, env, barMinutes);
+    last = evaluateNode(s.expr, env, barMinutes, reuse);
     if (s.name) { env.set(s.name, last); vars.set(s.name, last); }
   }
   return { last, vars };

@@ -9,7 +9,7 @@ const lineAt = (name: string) => { let y = 0; const ys: number[] = []; const ctx
 describe('多空状态 S 的橘色线', () => {
   it('原始状态 S 保留0.6；两条均值改用模型中心0.5；四项卖方方向不变', () => {
     registerCustomIndicators();
-    expect(lineAt(researchKcName('STATE', 0))).toEqual([0.6]);
+    expect(lineAt(researchKcName('STATE', 0))).toEqual([1, 0, 0.6]);
     expect(lineAt(researchKcName('STATE', 1))).toEqual([0.5]);
     expect(lineAt(researchKcName('STATE', 2))).toEqual([0.5]);
     expect(Object.fromEntries(RESEARCH_INDICATORS.filter(i => i.seller).map(i => [i.id, i.neutral]))).toEqual({ CDI2: 0, SELLER_CONTROL: 0, DSS: 0, CDA: 0 });

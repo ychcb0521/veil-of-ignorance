@@ -5,6 +5,7 @@ import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/fea
 import { chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
+import { enableChartComputation, isChartComputationEnabled, chartComputationVersion } from './chartComputeClient';
 import { displayAverage } from '@/lib/avgHighlight';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
@@ -57,14 +58,40 @@ export function researchSeriesNames(item: ResearchIndicator, formula: string) {
   return { core, avg: `avg_${core}`, avg2: `avg_${core}_2` };
 }
 
-const chartDataCache = new WeakMap<KLineData[], { rows: unknown[][]; revision: number }>();
+const chartDataGenerations = new WeakMap<KLineData[], number>();
+const chartDataChanges = new WeakMap<KLineData[], [number, number][]>();
+/** The native chart calls this before every data mutation, so companion panes share one scan. */
+export function invalidateResearchChartData(data: KLineData[], from = 0) {
+  const revision = (chartDataGenerations.get(data) ?? 0) + 1;
+  chartDataGenerations.set(data, revision);
+  const changes = chartDataChanges.get(data) ?? [];
+  changes.push([revision, Math.max(0, from)]);
+  if (changes.length > 128) changes.shift();
+  chartDataChanges.set(data, changes);
+}
+const chartDataCache = new WeakMap<KLineData[], { values: Float64Array; revision: number; generation?: number }>();
 const DATA_FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'takerBuyTurnover'] as const;
-/** klinecharts updates the live candle in place; array identity alone is not a cache key. */
+/** Compare mutable candles without allocating thousands of row arrays each frame. */
 function dataRevision(data: KLineData[]): number {
-  const cached = chartDataCache.get(data);
-  if (cached && cached.rows.length === data.length && data.every((bar, i) => DATA_FIELDS.every((field, j) => Object.is(bar[field], cached.rows[i][j])))) return cached.revision;
-  const revision = (cached?.revision ?? 0) + 1;
-  chartDataCache.set(data, { rows: data.map(bar => DATA_FIELDS.map(field => bar[field])), revision });
+  const generation = chartDataGenerations.get(data), cached = chartDataCache.get(data);
+  if (generation != null && cached?.generation === generation) return cached.revision;
+  // Interactive charts explicitly invalidate every mutation. Their generation
+  // is sufficient; rescanning the entire history here blocks every replay tick.
+  if (generation != null) {
+    const revision = (cached?.revision ?? 0) + 1;
+    chartDataCache.set(data, { values: cached?.values ?? new Float64Array(0), revision, generation });
+    return revision;
+  }
+  const size = data.length * DATA_FIELDS.length;
+  const values = cached?.values.length === size ? cached.values : new Float64Array(size);
+  let changed = !cached || values !== cached.values;
+  for (let i = 0; i < data.length; i++) for (let j = 0; j < DATA_FIELDS.length; j++) {
+    const v = data[i][DATA_FIELDS[j]] ?? NaN, at = i * DATA_FIELDS.length + j;
+    if (!Object.is(values[at], v)) changed = true;
+    values[at] = v;
+  }
+  const revision = (cached?.revision ?? 0) + (changed ? 1 : 0);
+  chartDataCache.set(data, { values, revision, generation });
   return revision;
 }
 
@@ -91,7 +118,17 @@ export function researchDefaultPeriod(item: ResearchIndicator): number {
   return halfLifeOf(def);
 }
 
-const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; data: KLineData[] }>();
+function chartInterval(data: KLineData[]) {
+  const gaps: number[] = [];
+  for (let i = 1; i < data.length && gaps.length < 64; i++) {
+    const gap = data[i].timestamp - data[i-1].timestamp;
+    if (gap > 0) gaps.push(gap);
+  }
+  gaps.sort((a,b)=>a-b);
+  return gaps[Math.floor(gaps.length/2)] ?? DSP_BASE_INTERVAL_MS;
+}
+const displaySeriesCache = new WeakMap<object, Map<string, { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[] }>>();
+const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; generation?: number; data: KLineData[] }>();
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
 function formulaPlan(item: ResearchIndicator, source: string) {
   const key = `${item.core}\n${source}`;
@@ -113,14 +150,34 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   return hash >>> 0;
 }
 
-export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: { fetchReference?: boolean; averageHours?: number } = {}) {
+type ChartSeriesOptions = { fetchReference?: boolean; averageHours?: number };
+const liveSeriesCache = new WeakMap<KLineData[], Map<string, { generation: number; result: ReturnType<typeof calculateChartSeries> }>>();
+export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}) {
+  const generation = chartDataGenerations.get(data);
+  if (generation == null) return calculateChartSeries(data, item, period, options);
+  const def = accountFeatureDef(item.featureId);
+  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}`;
+  let cache = liveSeriesCache.get(data);
+  // Raw and 24h companion panes read the same immutable display result during
+  // one native update. Background completion must also invalidate this result.
+  const computeVersion = chartComputationVersion();
+  const versionKey = `${key}|${computeVersion}`;
+  const current = cache?.get(versionKey);
+  if (current?.generation === generation) return current.result;
+  const result = calculateChartSeries(data, item, period, options);
+  if (!cache) { cache = new Map(); liveSeriesCache.set(data, cache); }
+  if (cache.size >= 32) cache.clear();
+  cache.set(versionKey, { generation, result });
+  return result;
+}
+function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}) {
   const empty = () => ({ core: data.map(() => null as number | null), avg: data.map(() => null as number | null), avg2: data.map(() => null as number | null) });
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
   let formula: string, usesBtc: boolean;
   try {
     ({ formula, usesBtc } = formulaPlan(item, def.formula));
-    if (options.averageHours != null) {
+    if (options.averageHours != null && options.averageHours > 24) {
       const core = researchSeriesNames(item, formula).core;
       let helper = '_display_average_history';
       while (formula.includes(helper)) helper += '_';
@@ -128,35 +185,56 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
       formula += `\n${helper} = avg(${core}, ${options.averageHours})`;
     }
   } catch { return empty(); }
-  const visibleLength = data.length;
+  const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length && options.fetchReference !== false) {
-    const step = inferIntervalMs(data.map(d => ({ time: d.timestamp }))) ?? DSP_BASE_INTERVAL_MS;
+    const step = chartInterval(data);
     const history = chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula), step);
     if (history.length) {
       const revision = dataRevision(data), cached = extendedData.get(data);
       if (cached?.history === history && cached.revision === revision) data = cached.data;
       else {
-        const combined = [...history, ...data];
-        extendedData.set(data, { history, revision, data: combined });
+        const sameHistory = cached?.history === history;
+        const combined = sameHistory ? cached.data : [...history];
+        let changedFrom = 0;
+        const changes = chartDataChanges.get(data), generation = chartDataGenerations.get(data);
+        if (sameHistory && cached.generation != null && changes?.length && changes[0][0] <= cached.generation + 1) {
+          changedFrom = Math.min(combined.length - 1, ...changes.filter(([v]) => v > cached.generation!).map(([, from]) => history.length + from));
+        }
+        combined.length = history.length + data.length;
+        for (let i = 0; i < data.length; i++) combined[history.length + i] = data[i];
+        invalidateResearchChartData(combined, changedFrom);
+        extendedData.set(data, { history, revision, generation, data: combined });
         data = combined;
       }
     }
   }
+  if (background) enableChartComputation(data, false);
+  const visibleOffset = data.length - visibleLength;
   let ref: (number | null)[] | undefined;
   if (usesBtc && data.length) {
-    const times = data.map(d => d.timestamp), interval = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
+    const times = data.map(d => d.timestamp), interval = chartInterval(data);
     if (options.fetchReference !== false) requestBtcReference(times[0], times[times.length - 1] + interval, interval);
     ref = btcClosesAt(times, interval);
   }
-  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}` });
-  const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale).slice(-visibleLength);
-  // Do not use out.core: the last account expression may itself be the weighted average.
   const names = researchSeriesNames(item, formula);
+  const generation = chartDataGenerations.get(data);
+  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, variables: [names.core, names.avg, names.avg2], revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}`,
+    delta: generation == null ? undefined : { revision:generation, changes:chartDataChanges.get(data) ?? [], referenceVersion:usesBtc ? btcReferenceVersion() : 0 } });
+  const displayKey = `${visibleLength}|${options.averageHours ?? 24}|${def.scale}|${names.core}`;
+  let displays = out ? displaySeriesCache.get(out) : undefined;
+  const existing = displays?.get(displayKey);
+  if (existing) return existing;
+  const save = (result: { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[] }) => {
+    if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
+    return result;
+  };
+  const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale).slice(visibleOffset, visibleOffset + visibleLength);
+  // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
-    if (options.averageHours === 24) return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };
+    if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });
     const core = out?.vars.get(names.core) ?? data.map(() => null);
-    const average = (kind: 'avg' | 'avg2') => Array.from(displayAverage(core, options.averageHours!, kind), v => Number.isFinite(v) ? v * def.scale : null).slice(-visibleLength);
-    return { core: scaled(names.core), avg: average('avg'), avg2: average('avg2') };
+    const average = (kind: 'avg' | 'avg2') => Array.from(displayAverage(core, options.averageHours!, kind), v => Number.isFinite(v) ? v * def.scale : null).slice(visibleOffset, visibleOffset + visibleLength);
+    return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2') });
   }
-  return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };
+  return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });
 }

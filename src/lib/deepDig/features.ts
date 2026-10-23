@@ -15,7 +15,7 @@ import { groupSignal, type DeepRsaGroup } from '@/lib/deepRsa/grouping';
 import { CAMPAIGN_METRIC_LETTERS, type MetricLetter } from '@/lib/campaignMetricLetters';
 import { US_STOCK_UNSUPPORTED } from '@/lib/signalMarket';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program } from '@/lib/deepDig/formula';
+import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program, type FormulaEvaluationCache } from '@/lib/deepDig/formula';
 
 export interface DeepDigFeatureDef {
   /** 网址上的名字。 */
@@ -863,21 +863,28 @@ export function computeFeatureValues(
 }
 
 /** 在一串 K 线上逐根算公式：带回最后一句与每个起了名的变量的整条序列（会抛 FormulaError）。 */
-export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef = {}) {
-  const series = (f: (b: ResearchBar) => number | null | undefined) => Float64Array.from(bars, b => {
-    const v = f(b);
-    return v != null && Number.isFinite(v) ? v : Number.NaN;
-  });
-  const q = series(b => b.quoteVolume);
-  const buy = series(b => b.takerBuyQuoteVolume);
+export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef = {}, cache?: FormulaEvaluationCache) {
+  const keys = ['T','C','O','H','L','Q','B','S','E','CB'] as const;
+  const input = (cache?.buffers ?? {}) as Record<typeof keys[number], Float64Array>;
+  for (const key of keys) {
+    const old = input[key];
+    if (old?.length === bars.length) continue;
+    if (old && old.byteOffset + bars.length * 8 <= old.buffer.byteLength) input[key] = new Float64Array(old.buffer, old.byteOffset, bars.length);
+    else { const capacity = cache && bars.length ? 2 ** Math.ceil(Math.log2(bars.length)) : bars.length; input[key] = new Float64Array(capacity).subarray(0, bars.length); }
+  }
+  if (cache) cache.buffers = input;
+  const finite = (v: number | null | undefined) => v != null && Number.isFinite(v) ? v : NaN;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i], q = finite(b.quoteVolume), buy = finite(b.takerBuyQuoteVolume);
+    input.T[i] = finite(b.openTime); input.C[i] = finite(b.close); input.O[i] = finite(b.open);
+    input.H[i] = finite(b.high); input.L[i] = finite(b.low); input.Q[i] = q; input.B[i] = buy; input.S[i] = q - buy;
+    input.E[i] = finite(b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null);
+    input.CB[i] = finite(b.refClose);
+  }
   return evaluateProgramVars(compiled.program, {
-    T: series(b => b.openTime), C: series(b => b.close), O: series(b => b.open), H: series(b => b.high), L: series(b => b.low),
-    Q: q, B: buy, S: q.map((v, i) => v - buy[i]),
-    // 成交均价：成交额 ÷ 成交量（币数）；缺一样或成交量为 0 记空
-    E: series(b => (b.quoteVolume != null && b.volume != null && b.volume > 0 ? b.quoteVolume / b.volume : null)),
-    CB: series(b => b.refClose),
+    ...input,
     hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
-  }, { barMinutes: intervalMs(intervalOf(params)) / 60_000 });
+  }, { barMinutes: intervalMs(intervalOf(params)) / 60_000, cache });
 }
 
 /** 公式里可选作因变量的变量：起了名的每一个；最后一句没起名时再加一个「结果」。写错时为空。 */

@@ -28,10 +28,12 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, indicatorCalcParams } from "@/lib/customIndicators";
-import { researchIndicatorForKc, migrateResearchIndicators } from "@/lib/researchIndicators";
+import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
 import { subscribeBtcReference } from "@/lib/btcReference";
+import { cacheChartDateFormatter } from "@/lib/chartDateCache";
+import { enableChartComputation, subscribeChartComputation } from "@/lib/chartComputeClient";
 import { subscribeAvgCalibration } from "@/lib/avgHighlightClient";
 import {
   type AnalysisFloatingLabelCandidate,
@@ -173,6 +175,7 @@ export interface IndicatorConfig {
 /** Imperative API exposed to parent for direct chart manipulation (bypasses React). */
 export interface ChartImperativeApi {
   updateData: (candle: KLineData) => void;
+  refreshIndicators?: () => void;
 }
 
 export interface AnalysisChartMarker {
@@ -542,6 +545,7 @@ function CandlestickChartComponent({
   const prevSymbolRef = useRef<string>(symbol);
   const liveUpdateQueueRef = useRef<KLineData[]>([]);
   const liveUpdateInFlightRef = useRef(false);
+  const computationRefreshTimerRef = useRef<number | null>(null);
   const liveUpdateGenerationRef = useRef(0);
   const analysisOverlayIdsRef = useRef<string[]>([]);
   const dragOverlayIdsRef = useRef<string[]>([]);
@@ -892,6 +896,7 @@ function CandlestickChartComponent({
     if (!chart) return;
 
     if (prevSymbolRef.current !== symbol) {
+      if (computationRefreshTimerRef.current != null) { window.clearTimeout(computationRefreshTimerRef.current); computationRefreshTimerRef.current = null; }
       liveUpdateGenerationRef.current += 1;
       liveUpdateQueueRef.current = [];
       liveUpdateInFlightRef.current = false;
@@ -925,6 +930,7 @@ function CandlestickChartComponent({
     registerAnalysisBandLabelOverlay();
     registerAnalysisAutoFitBoundsIndicator();
 
+    const formatChartDate = cacheChartDateFormatter(klinechartsUtils.formatDate);
     const chart = init(containerRef.current, {
       styles: chartStylesForMode(theme, showLastPriceLine),
       timezone,
@@ -934,7 +940,7 @@ function CandlestickChartComponent({
         // init 只执行一次，经 ref 读取当前换算函数；正序时为 null，原样直通。
         formatDate: (dateTimeFormat, timestamp, format) => {
           const transform = displayTimestampTransformRef.current;
-          return klinechartsUtils.formatDate(dateTimeFormat, transform ? transform(timestamp) : timestamp, format);
+          return formatChartDate(dateTimeFormat, transform ? transform(timestamp) : timestamp, format);
         },
       },
     });
@@ -970,13 +976,22 @@ function CandlestickChartComponent({
     // and leave the right-axis last-price mark on an older candle. Serialize
     // different timestamps and coalesce repeated updates of the active candle.
     if (chartApiRef) {
+      let refreshRequested = false, lastLiveUpdateAt = -Infinity;
       const drainLiveUpdates = () => {
         if (chartRef.current !== chart || liveUpdateInFlightRef.current) return;
-        const nextCandle = liveUpdateQueueRef.current.shift();
+        let nextCandle = liveUpdateQueueRef.current.shift();
+        const refreshOnly = !nextCandle;
+        if (nextCandle) {
+          refreshRequested = false;
+          if (computationRefreshTimerRef.current != null) { window.clearTimeout(computationRefreshTimerRef.current); computationRefreshTimerRef.current = null; }
+        }
+        if (!nextCandle && refreshRequested) { refreshRequested = false; nextCandle = chart.getDataList().at(-1); }
         if (!nextCandle) return;
 
         liveUpdateInFlightRef.current = true;
         const generation = liveUpdateGenerationRef.current;
+        if (!refreshOnly) invalidateResearchChartData(chart.getDataList(), Math.max(0, chart.getDataList().length - 1));
+        if (!analysisMode) enableChartComputation(chart.getDataList());
         chart.updateData(nextCandle, () => {
           if (
             chartRef.current !== chart
@@ -988,7 +1003,19 @@ function CandlestickChartComponent({
       };
 
       chartApiRef.current = {
+        refreshIndicators: () => {
+          refreshRequested = true;
+          const wait = 100 - (performance.now() - lastLiveUpdateAt);
+          // The next replay tick already reads completed worker results. Avoid a second viewport layout.
+          if (wait > 0) {
+            if (computationRefreshTimerRef.current == null) computationRefreshTimerRef.current = window.setTimeout(() => {
+              computationRefreshTimerRef.current = null;
+              if (refreshRequested) drainLiveUpdates();
+            }, wait);
+          } else drainLiveUpdates();
+        },
         updateData: (candle: KLineData) => {
+          lastLiveUpdateAt = performance.now();
           const queue = liveUpdateQueueRef.current;
           const lastPending = queue[queue.length - 1];
           if (lastPending?.timestamp === candle.timestamp) {
@@ -1091,6 +1118,7 @@ function CandlestickChartComponent({
       ro.disconnect();
       layoutHost.removeEventListener("pointerenter", healStaleLayout);
       layoutHost.removeEventListener("pointerdown", healStaleLayout, true);
+      if (computationRefreshTimerRef.current != null) { window.clearTimeout(computationRefreshTimerRef.current); computationRefreshTimerRef.current = null; }
       liveUpdateGenerationRef.current += 1;
       liveUpdateQueueRef.current = [];
       liveUpdateInFlightRef.current = false;
@@ -1326,20 +1354,26 @@ function CandlestickChartComponent({
       // Older data prepended — feed older portion via applyMoreData
       const newCount = data.length - prevDataLenRef.current;
       const olderData = klineData.slice(0, newCount);
+      invalidateResearchChartData(chart.getDataList());
+      if (chartApiRef && !analysisMode) enableChartComputation(olderData);
       chart.applyMoreData(olderData, true);
     } else if (prevDataLenRef.current === 0) {
       // Initial load
+      invalidateResearchChartData(chart.getDataList());
+      if (chartApiRef && !analysisMode) enableChartComputation(klineData);
       chart.applyNewData(klineData, true);
     } else if (isSmallAppend) {
       // The main replay chart is already updated by its imperative loop. A
       // second prop-driven update would race the async indicator calculation
       // and can restore a stale right-axis price.
-      if (!chartApiRef) chart.updateData(lastCandle);
+      if (!chartApiRef) { invalidateResearchChartData(chart.getDataList()); chart.updateData(lastCandle); }
     } else if (isSameBarUpdate) {
       // Same bar evolving: only update last candle to keep crosshair/interaction state stable
-      if (!chartApiRef) chart.updateData(lastCandle);
+      if (!chartApiRef) { invalidateResearchChartData(chart.getDataList()); chart.updateData(lastCandle); }
     } else {
       // Data replaced (symbol/interval/window replacement)
+      invalidateResearchChartData(chart.getDataList());
+      if (chartApiRef && !analysisMode) enableChartComputation(klineData);
       chart.applyNewData(klineData, true);
     }
 
@@ -2183,7 +2217,8 @@ function CandlestickChartComponent({
     const btc = subscribeBtcReference(refresh);
     const history = subscribeResearchHistory(refresh);
     const calibration = subscribeAvgCalibration(refresh);
-    return () => { btc(); history(); calibration(); };
+    const computation = chartApiRef && !analysisMode ? subscribeChartComputation(() => chartApiRef.current?.refreshIndicators?.()) : () => {};
+    return () => { btc(); history(); calibration(); computation(); };
   }, []);
 
   // ============================================================
