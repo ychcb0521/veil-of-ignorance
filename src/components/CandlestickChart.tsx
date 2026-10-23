@@ -385,7 +385,7 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#474D57", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.18)" },
+  separator: { size: 1, color: "#303A46", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.14)" },
 };
 
 // Light theme styles
@@ -454,7 +454,7 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#B7BDC6", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.12)" },
+  separator: { size: 1, color: "#E3E9F1", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.10)" },
 };
 
 function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolean) {
@@ -2230,6 +2230,25 @@ function CandlestickChartComponent({
     }
     return () => { closeButtons.forEach(button => button.remove()); };
   }, [indicators, setIndicators]);
+
+  // Soft two-color vertical washes blend through the center; alternate cool and
+  // warm-neutral palettes without using the indicators' red/green direction colors.
+  // Read DOM order because restoring a hidden pane appends it in the native chart.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const surfaces = theme === 'light'
+      ? ['linear-gradient(180deg, #EDF4FC 0%, #F6EFFA 100%)', 'linear-gradient(180deg, #F8F3EB 0%, #EDF5F9 100%)']
+      : ['linear-gradient(180deg, #1C2936 0%, #292637 100%)', 'linear-gradient(180deg, #2B2925 0%, #202D35 100%)'];
+    const roots = [...new Set([...activeIndicatorPanes.current.values()])]
+      .filter((id): id is string => !!id && id !== 'candle_pane')
+      .map(id => chart.getDom?.(id, DomPosition.Root))
+      .filter((root): root is HTMLElement => !!root)
+      .sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+    const previous = roots.map(root => root.style.backgroundImage);
+    roots.forEach((root, index) => { root.style.backgroundImage = surfaces[index % surfaces.length]; });
+    return () => { roots.forEach((root, index) => { root.style.backgroundImage = previous[index]; }); };
+  }, [indicators, theme]);
 
   // 【用户要求】CBI-2 的动量要剔除 BTC：BTC 对照 K 线取到后重算（参数第二位是数据版本号，变了 klinecharts 才会重算）
   const indicatorsForBtcRef = useRef(indicators);
