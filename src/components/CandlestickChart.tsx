@@ -385,7 +385,7 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#3D4755", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.14)" },
+  separator: { size: 4, color: "#0B0E11", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.20)" },
 };
 
 // Light theme styles
@@ -454,7 +454,7 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#C6CFDA", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.10)" },
+  separator: { size: 4, color: "#EBEBEB", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.16)" },
 };
 
 function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolean) {
@@ -2231,15 +2231,15 @@ function CandlestickChartComponent({
     return () => { closeButtons.forEach(button => button.remove()); };
   }, [indicators, setIndicators]);
 
-  // Clearly alternating neutral bands follow the Binance charcoal / gray palette.
-  // Each band has a restrained internal gradient; neighboring bands stay distinct.
+  // Pane colors sampled from the supplied Binance light/dark references.
+  // Neutral surfaces and clear gutters carry the hierarchy; charts keep their colors.
   // Read DOM order because restoring a hidden pane appends it in the native chart.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     const surfaces = theme === 'light'
-      ? ['linear-gradient(180deg, #DEE4EB 0%, #E7ECF2 100%)', 'linear-gradient(180deg, #FFFFFF 0%, #FCFDFE 100%)']
-      : ['linear-gradient(180deg, #11161C 0%, #181E26 100%)', 'linear-gradient(180deg, #2C3541 0%, #343E4B 100%)'];
+      ? ['linear-gradient(180deg, #FFFFFF 0%, #FAFDFF 100%)', 'linear-gradient(180deg, #F5FAFE 0%, #F5FAFE 100%)']
+      : ['linear-gradient(180deg, #181A1F 0%, #181D25 100%)', 'linear-gradient(180deg, #19202A 0%, #19202A 100%)'];
     const roots = [...new Set([...activeIndicatorPanes.current.values()])]
       .filter((id): id is string => !!id && id !== 'candle_pane')
       .map(id => chart.getDom?.(id, DomPosition.Root))
@@ -2404,7 +2404,7 @@ function CandlestickChartComponent({
           className="absolute inset-0"
           style={{
             left: analysisMode ? 0 : 34,
-            backgroundColor: theme === "light" ? "#FFFFFF" : "#1E2329",
+            backgroundColor: theme === "light" ? "#FFFFFF" : "#181A1F",
             cursor: activeDrawingTool || pickMode ? "crosshair" : "default",
           }}
         />
