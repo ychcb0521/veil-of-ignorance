@@ -14,6 +14,7 @@ export const AVG_HIGHLIGHT_SPECS = [
   { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', center: 0, range: null },
   { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', center: 0, range: null },
   { id: 'STATE', featureId: 'state', core: 'state', center: 0.5, range: [0, 1] },
+  { id: 'STATE2', featureId: 'state2', core: 'state2', center: 0.5, range: [0, 1] },
   { id: 'BSS', featureId: 'bss', core: 'BSS', center: 0, range: [-1, 1] },
   { id: 'DSS', featureId: 'dss', core: 'DSS', center: 0, range: [-1, 1] },
   { id: 'CBA', featureId: 'cba', core: 'CBA', center: 0, range: [-100, 100] },

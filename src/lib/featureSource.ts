@@ -87,7 +87,7 @@ export const chartFeatureDef = (id: string): DeepDigFeatureDef | undefined => ac
  */
 const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string }> = {
   'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
-  state: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
+  state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
   cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
 

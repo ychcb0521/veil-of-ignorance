@@ -639,6 +639,23 @@ export const STATE_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
+/** S2 changes only the pricing component: Ss is CDA's signed retention before 100*tanh.
+ * Keep S's component scale and clipping; using the displayed [-100,100] CDA directly would change its effective weight.
+ */
+export const STATE2_FORMULA = STATE_FORMULA.split('\n')
+  .filter(line => !line.startsWith('Sb = '))
+  .map(line => line.startsWith('# 多空状态 S（')
+    ? '# 多空状态 S2（0 ~ 1）：沿用状态 S，只将第三部分改为 CDA 定价保留；越高越偏买方'
+    : line.startsWith('# —— 3.') ? '# —— 3. CDA 定价保留（沿用状态 S 的尺度、方向与截断）'
+    : line.startsWith('Lb = ') ? 'Lb = clip(Ss, -3, 3)                             # CDA 的有符号定价保留，负值偏卖方；保持原合成尺度'
+    : line.startsWith('state = ') ? line.replace('state = ', 'state2 = ')
+    : line).join('\n');
+export const STATE2_DEF: DeepDigFeatureDef = {
+  ...STATE_DEF, id: 'state2', name: '多空状态 S2（0–1）', short: '状态 S2',
+  definition: '状态 S 的独立变体（0 ~ 1）：仅将第三部分由 CBA 买卖对称定价保留改为 CDA 对应的有符号定价保留，越负表示卖方越强；沿用原分量尺度与 ±3 截断。CBI-2 买卖对称分、对称推力 az、权重 3 / 0.4 / 1、4 小时平滑与最终 logistic 均不变。越高越偏买方，0.5 为模型中性点；不是胜率。',
+  formula: STATE2_FORMULA,
+};
+
 /** Symmetric outcome control: active or passive selling succeeds only when price declines. */
 export const SELLER_CONTROL_FORMULA = sellerNegativeFormula([
   '# 卖方控制力：涨跌共用对称权重 1 + abs(A)，不因哪方主动而系统性偏向卖方',
@@ -724,7 +741,7 @@ export const CDA_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {

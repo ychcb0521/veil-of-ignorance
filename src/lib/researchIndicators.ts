@@ -11,6 +11,7 @@ import { displayAverage } from '@/lib/avgHighlight';
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
   { id: 'STATE', featureId: 'state', core: 'state', short: '状态 S', name: '多空状态 S（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false }, // 【用户要求】2026-10-22 橘色线（线上绿、线下红）：原始值与两条均值线都在 0.6
+  { id: 'STATE2', featureId: 'state2', core: 'state2', short: '状态 S2', name: '多空状态 S2（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false },
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', short: 'CDI2', name: '买方失控程度 CDI2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', short: 'DSP·bc', name: '卖方控制力 DSP·bc', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
@@ -114,7 +115,7 @@ export function researchDefaultPeriod(item: ResearchIndicator): number {
   if (item.id === 'BSS' || item.id === 'DSS') return 12;
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
-  if (item.id === 'STATE' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
+  if (item.id === 'STATE' || item.id === 'STATE2' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
   return halfLifeOf(def);
 }
 

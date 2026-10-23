@@ -49,7 +49,7 @@ export function avgCalibrationContext(featureId: string, period: number, hours: 
         }
         const definitions = AVG_HIGHLIGHT_SPECS.map(item => {
           const definition = chartFeatureDef(item.featureId)!;
-          const defaultPeriod = ['state', 'cbi2', 'cdi2'].includes(item.featureId) ? definition.avgHours ?? 24 : ['bss', 'dss'].includes(item.featureId) ? 12 : definition.halfLifeHours ?? 6;
+          const defaultPeriod = ['state', 'state2', 'cbi2', 'cdi2'].includes(item.featureId) ? definition.avgHours ?? 24 : ['bss', 'dss'].includes(item.featureId) ? 12 : definition.halfLifeHours ?? 6;
           const indicator = CUSTOM_RESEARCH_INDICATORS.find(i => i.featureId === item.featureId)!;
           return { spec: item, def: definition, names: researchSeriesNames(indicator, definition.formula), period: item.featureId === featureId ? period : defaultPeriod };
         });

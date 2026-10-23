@@ -62,7 +62,7 @@ async function run(job: Job) {
         const compiled = compileFeatureFormula(formula);
         // Same chart parameter bindings; the account's formula text remains unchanged.
         if (['bss', 'dss'].includes(def.id)) compiled.program = { ...compiled.program, statements: compiled.program.statements.map(s => s.name === 'n' && s.expr.k === 'num' ? { ...s, expr: { ...s.expr, v: period } } : s) };
-        const output = evaluateOnBars(bars, compiled, { interval: '5m', halfLifeHours: ['state', 'cbi2', 'cdi2', 'bss', 'dss'].includes(def.id) ? halfLifeOf(def) : period, avgHours: ['state', 'cbi2', 'cdi2'].includes(def.id) ? period : avgHoursOf(def) });
+        const output = evaluateOnBars(bars, compiled, { interval: '5m', halfLifeHours: ['state', 'state2', 'cbi2', 'cdi2', 'bss', 'dss'].includes(def.id) ? halfLifeOf(def) : period, avgHours: ['state', 'state2', 'cbi2', 'cdi2'].includes(def.id) ? period : avgHoursOf(def) });
         const name = spec.id === 'DSP_Z' && !output.vars.has('az') ? 'a' : spec.core;
         const series = output.vars.get(name);
         if (!(series instanceof Float64Array)) throw Error(`${def.id} 缺少 ${name} 字段`);

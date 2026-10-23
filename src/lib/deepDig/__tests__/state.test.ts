@@ -22,7 +22,7 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 describe('多空状态 S（0–1）', () => {
   it('内置特征值，排在 CDI2 前面；公式无错；结果是最后一句 state；可编辑、隐藏', () => {
     const i = BUILTIN_FEATURES.indexOf(STATE_DEF);
-    expect(i).toBeGreaterThan(-1);expect(BUILTIN_FEATURES.find(d => d.id === 'cdi2')).toBe(CDI2_DEF);expect(BUILTIN_FEATURES[i + 1]).toBe(CDI2_DEF);
+    expect(i).toBeGreaterThan(-1);expect(BUILTIN_FEATURES.find(d => d.id === 'cdi2')).toBe(CDI2_DEF);expect(BUILTIN_FEATURES[i + 1].id).toBe('state2');expect(BUILTIN_FEATURES[i + 2]).toBe(CDI2_DEF);
     expect(STATE_DEF).toMatchObject({ id: 'state', short: '状态', scale: 1 });
     expect(checkDefinition(STATE_DEF)).toEqual({ formula: null, groups: null, scale: null });
     expect(STATE_FORMULA.trim().split('\n').at(-1)).toMatch(/^state = /);

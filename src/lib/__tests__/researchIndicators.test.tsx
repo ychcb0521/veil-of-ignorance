@@ -96,7 +96,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
 
   it('添加时沿用基线和半衰期的小数小时，DSS 按用户要求默认 12h', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 3.5, 12, 3.5]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 12, 3.5]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {
@@ -123,15 +123,15 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
       expect(CUSTOM_INDICATOR_MAP[item.id]).toBe(researchKcName(item.id));
       expect(INDICATOR_COMPANIONS[item.id].map(c => c.kcName)).toEqual([researchKcName(item.id, 1), researchKcName(item.id, 2)]);
       fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: item.id } });
-      fireEvent.click(screen.getByText(item.name));
+      fireEvent.click(screen.getByText(item.short));
       expect(changed.mock.lastCall![0].at(-1)).toMatchObject({ type: item.id, period: researchDefaultPeriod(item), enabled: true });
     }
     const item = RESEARCH_INDICATORS[0], active = [{ type: item.id, period: 24, enabled: true }];
     rerender(<IndicatorMenu open onClose={() => {}} indicators={active} onIndicatorsChange={changed} />);
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: 'STATE' } });
-    fireEvent.change(screen.getByLabelText(item.name + ' 参数'), { target: { value: '12' } });
+    fireEvent.change(screen.getByLabelText(item.short + ' 参数'), { target: { value: '12' } });
     expect(changed.mock.lastCall![0][0].period).toBe(12);
-    fireEvent.click(screen.getByText(item.name)); expect(changed.mock.lastCall![0]).toEqual([]);
+    fireEvent.click(screen.getByText(item.short)); expect(changed.mock.lastCall![0]).toEqual([]);
     expect(mock.registered.get(researchKcName('STATE')).minValue).toBe(0);
     expect(mock.registered.get(researchKcName('STATE')).maxValue).toBe(1);
     const pixel = vi.fn(() => 40);
