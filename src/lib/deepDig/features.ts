@@ -655,7 +655,7 @@ export const SELLER_CONTROL_FORMULA = sellerNegativeFormula([
   'bc = ema(F, hl, 0)',
 ].join('\n'), 'bc');
 export const SELLER_CONTROL_DEF: DeepDigFeatureDef = {
-  id: 'seller-control', name: '卖方控制力', short: '卖控',
+  id: 'seller-control', name: '卖方控制力', short: 'DSP·bc',
   definition: '衡量卖方是否控制价格结果：主动卖压低价格、或被动卖盘压住主动买，都计为卖方占优；上涨（含卖压失败）计为买方占优。涨跌共用 1 + abs(A) 对称权重和收益 RMS 归一化。按 hl 半衰期平滑并取负后，负值表示卖方占优，正值表示买方占优，均衡约为 0。',
   formula: SELLER_CONTROL_FORMULA, sellerSignVersion: 1,
   scale: 100, unit: '%σ/根', positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL,
@@ -762,6 +762,7 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
   const legacyZNames = new Set(['买方推力漂移速度 DSP·az（Z 分数）', ['买方推力的加速度', ' az（Z 分数）'].join('')]);
   const legacyZDefinition = '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。';
   return [...builtins, ...custom].map(def => {
+    if (def.id === SELLER_CONTROL_DEF.id) return { ...def, short: SELLER_CONTROL_DEF.short };
     if (def.id === DRIFT_SPEED_DEF.id) return { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short };
     if (def.id === DRIFT_SPEED_Z_DEF.id) return { ...def,
       name: legacyZNames.has(def.name) ? DRIFT_SPEED_Z_DEF.name : def.name,
