@@ -31,7 +31,7 @@ import { X, ArrowRightCircle, CheckCircle2, AlertCircle, Loader2 } from 'lucide-
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { SignalMatchCell, type SignalReconstructionMatch } from '@/components/FishReconstruction';
 import { FishProcessButton } from '@/components/FishProcess';
-import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID } from '@/components/SignalLibraryHeader';
+import { SIGNAL_LIBRARY_GRID, SIGNAL_LIBRARY_MATCH_GRID, SIGNAL_LIBRARY_FISH_GRID } from '@/components/SignalLibraryHeader';
 import { normalizeSignalQuality, signalChartSymbol } from '@/lib/signalLibrary';
 import { EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { SignalQualityStars } from '@/components/SignalQualityStars';
@@ -245,7 +245,7 @@ function SignalLibraryRowImpl({
 
   return (
     <div
-      data-testid="signal-library-row" className={`group ${showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
+      data-testid="signal-library-row" className={`group ${algorithmTypes ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} min-w-0 px-2 py-0.5 leading-4 transition-colors hover:bg-accent/60`}
       onFocus={handleFocus}
       title={extraTitle || undefined}
     >
@@ -283,7 +283,7 @@ function SignalLibraryRowImpl({
         </span>
         {/* 兜底区：占据剩余宽度，长文本截断而不挤压他列 */}
         {algorithmTypes
-          ? <span className="truncate font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
+          ? <span className="whitespace-nowrap font-mono text-[10px] leading-4 text-foreground/80" data-testid="fish-algorithm-type">{algorithmTypes.join(' · ')}</span>
           : <span className="truncate text-[10px] leading-4 text-[#F0B90B]/90">
               {fallbackZone ? `兜底 ${fallbackZone}` : ''}
             </span>}

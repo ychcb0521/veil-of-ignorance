@@ -1,5 +1,5 @@
 import {fishCaughtBy} from '@/lib/fish/records';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import { ChevronDown, Database, Search, Sparkles } from 'lucide-react';
 // 筛选行与「渔」的输入同一套：浅底无框、圆角、统一 28px 高
 const filterCls = 'h-7 w-full appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60';
@@ -29,6 +29,19 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   const [algorithm,setAlgorithm]=useState('');
   // 「算法类型」筛选：列出捕到过鱼的每个算法，选一个只看它捕到的（多算法的鱼只要含它就算）
   const algorithms=useMemo(()=>[...new Set(p.signals.flatMap(fishCaughtBy))].sort((a,b)=>a.localeCompare(b)),[p.signals]);
+  // Measure all combinations, not just the virtualized viewport. Filtering keeps columns still.
+  const algorithmLabels = useMemo(() => [...new Set(p.signals.map(s => fishCaughtBy(s).join(' · ')))], [p.signals]);
+  const algorithmSizer = useRef<HTMLDivElement>(null);
+  const [algorithmWidth, setAlgorithmWidth] = useState(160);
+  useLayoutEffect(() => {
+    const el = algorithmSizer.current;
+    if (!el) return;
+    const measure = () => setAlgorithmWidth(Math.max(160, ...Array.from(el.children, child => Math.ceil(child.getBoundingClientRect().width) + 16)));
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => observer?.disconnect();
+  }, [algorithmLabels, open]);
   useEffect(()=>{if(algorithm&&!algorithms.includes(algorithm))setAlgorithm('');},[algorithm,algorithms]);
   const [query, setQuery] = useState('');
   const [month, setMonth] = useState('');
@@ -86,7 +99,10 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
         <label className="relative flex min-w-[8rem] flex-1 items-center"><Search aria-hidden className="pointer-events-none absolute left-2 h-3 w-3 text-muted-foreground/60" /><input aria-label={`筛选${title}信号`} placeholder="筛选标的…" value={query} onChange={e => setQuery(e.target.value)} className="h-7 w-full rounded-md border border-transparent bg-muted/50 pl-6 pr-2 text-[11px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/50 hover:bg-muted focus-visible:border-ring/60 focus-visible:bg-background" /></label>
 
       </div>
-      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div className="min-w-[44rem]">
+      <div ref={algorithmSizer} aria-hidden className="pointer-events-none invisible absolute h-0 overflow-hidden font-mono text-[10px] leading-4">
+        {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
+      </div>
+      {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(638px + var(--fish-algorithm-width))` } as CSSProperties}>
         <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? 'symbol' : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
         <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete />
       </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
