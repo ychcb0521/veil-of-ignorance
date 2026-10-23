@@ -18,14 +18,14 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     fireEvent.click(screen.getByRole('button', { name: '自制区' }));
-    for (const id of ids) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
+    for (const id of ids.filter(id => id !== 'DSP_VA')) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
     expect(screen.queryByText('成交量加权平均价')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '成交量' }));
     for (const id of ids) expect(screen.queryByText(name(id))).not.toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled(); // 分类不改已有选择或参数。
   });
 
-  it('普通 DSP·a 与 Z 分数版可同时添加，各自调参和关闭', () => {
+  it('隐藏普通 DSP·a，保留 Z 分数版的添加、调参和关闭', () => {
     const changed = vi.fn();
     function Menu() {
       const [items, setItems] = useState<IndicatorConfig[]>([]);
@@ -33,14 +33,13 @@ describe('自制区的十个特征值', () => {
     }
     render(<Menu />);
     fireEvent.click(screen.getByRole('button', { name: '自制区' }));
-    fireEvent.click(screen.getByText(name('DSP_VA'))); fireEvent.click(screen.getByText(name('DSP_Z')));
-    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.type)).toEqual(['DSP_VA', 'DSP_Z']);
-    expect(changed.mock.lastCall![0][1].zscore).toBe(true);
-    fireEvent.change(screen.getByLabelText(name('DSP_VA') + ' 参数'), { target: { value: '12' } });
-    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.period)).toEqual([12, 6]);
-    fireEvent.click(screen.getByText(name('DSP_VA')));
-    expect(changed.mock.lastCall![0].map((i: IndicatorConfig) => i.type)).toEqual(['DSP_Z']);
-    fireEvent.click(screen.getByText(name('DSP_Z'))); expect(changed.mock.lastCall![0]).toEqual([]);
+    expect(screen.queryByText(name('DSP_VA'))).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(name('DSP_Z')));
+    expect(changed.mock.lastCall![0][0]).toMatchObject({ type: 'DSP_Z', zscore: true });
+    fireEvent.change(screen.getByLabelText(name('DSP_Z') + ' 参数'), { target: { value: '12' } });
+    expect(changed.mock.lastCall![0][0].period).toBe(12);
+    fireEvent.click(screen.getByText(name('DSP_Z')));
+    expect(changed.mock.lastCall![0]).toEqual([]);
   });
 
   it('十项默认隐藏普通均值，avg 按钮只切换可见性，保留参数、原值和加权均值', () => {
@@ -48,7 +47,7 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     function Menu() { const [items,setItems] = useState<IndicatorConfig[]>(initial); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
     render(<Menu />); fireEvent.click(screen.getByRole('button',{name:'自制区'}));
-    for(const id of ids){
+    for(const id of ids.filter(id => id !== 'DSP_VA')){
       const ind=initial.find(i=>i.type===id)!;
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG_CUSTOM'))).toBe(false);
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG2_CUSTOM'))).toBe(true);

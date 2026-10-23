@@ -263,8 +263,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
   }, [open]);
 
+  const availableCatalog = useMemo(() => INDICATOR_CATALOG.filter(item => item.id !== 'DSP_VA'), []);
   const filtered = useMemo(() => {
-    let items = INDICATOR_CATALOG;
+    let items = availableCatalog;
     if (categoryFilter) {
       items = items.filter(i => i.category === categoryFilter);
     }
@@ -275,7 +276,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       );
     }
     return items;
-  }, [search, categoryFilter]);
+  }, [search, categoryFilter, availableCatalog]);
 
   const toggleIndicator = (item: IndicatorCatalogItem) => {
     const existing = indicators.find(i => i.type === item.id);
@@ -313,7 +314,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
   const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
-  const supportedCount = INDICATOR_CATALOG.filter(i => isSupported(i.id)).length;
+  const supportedCount = availableCatalog.filter(i => isSupported(i.id)).length;
 
   return (
     <div
@@ -325,7 +326,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
       <div className="flex shrink-0 items-center justify-between px-3 py-2.5 border-b border-border bg-card">
         <span className="text-sm font-semibold text-foreground">技术指标</span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground">{supportedCount}/{INDICATOR_CATALOG.length} 已支持</span>
+          <span className="text-[10px] text-muted-foreground">{supportedCount}/{availableCatalog.length} 已支持</span>
           <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors duration-100 ease-out active:scale-[0.9]">
             <X className="w-4 h-4" />
           </button>
@@ -408,7 +409,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           {/* 线上跑的是哪一版：对照提交说明里的版本戳，就知道 Lovable 发布了没有 */}
           <span className="ml-2 font-mono text-muted-foreground/70" data-testid="indicator-menu-build" title="当前页面的版本戳">{BUILD_STAMP.replace('veil-build:', '版本 ')}</span>
         </span>
-        <span className="text-[10px] text-muted-foreground">显示 {filtered.length} / {INDICATOR_CATALOG.length}</span>
+        <span className="text-[10px] text-muted-foreground">显示 {filtered.length} / {availableCatalog.length}</span>
       </div>
     </div>
   );
