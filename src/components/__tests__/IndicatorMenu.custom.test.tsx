@@ -9,7 +9,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'STATE', 'CDI2', 'DSP_B', 'DSS', 'CDA'];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'STATE', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA'];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)!.nameZh;
 
 describe('自制区的十个特征值', () => {

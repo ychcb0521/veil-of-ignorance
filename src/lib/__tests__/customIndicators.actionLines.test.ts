@@ -62,7 +62,7 @@ describe('纵轴总是包含橘色线', () => {
   });
   it('四项卖方原值及均值均包含零方向线', () => {
     registerCustomIndicators();
-    for(const [id,raw,avg] of [['CDI2',0,0],['DSP_B',0,0],['DSS',0,0],['CDA',0,0]] as const){
+    for(const [id,raw,avg] of [['CDI2',0,0],['SELLER_CONTROL',0,0],['DSS',0,0],['CDA',0,0]] as const){
       for(const [suffix,line] of [['',raw],['_AVG',avg],['_AVG2',avg]] as const){
         const name=`${id}${suffix}_CUSTOM`,reg:any=registered.get(name),ind:any={calcParams:[6,0,0]};
         reg.calc([],ind);expect(ind.minValue).toBeLessThanOrEqual(line);expect(ind.maxValue).toBeGreaterThanOrEqual(line);

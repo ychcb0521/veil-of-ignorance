@@ -51,6 +51,10 @@ export default function JournalDeepDigPage() {
   const { feature: slug } = useParams<{ feature?: string }>();
   const nav = useNavigate();
   const location = useLocation();
+  useEffect(() => {
+    if (slug === 'drift-speed-down-z') nav(`/journal/deep-dig/seller-control${location.search}`, { replace: true });
+    else if (slug === 'seller-push') nav('/journal/deep-dig', { replace: true });
+  }, [slug, location.search, nav]);
   const { user } = useAuth();
   const { tradeHistory, ordersMap, filledOrders, positionsMap } = useTradingContext();
   const { rows, complete, loaded, total } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap });

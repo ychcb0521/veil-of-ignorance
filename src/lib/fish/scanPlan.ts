@@ -2,7 +2,7 @@
  * 由卡片、合并方式、交易所范围拼出一次捕捞的设置。「开始捕捞」按钮与定时自动捕捞用同一个函数，两边拿到的设置逐项一致。
  */
 import type { FishCard } from '@/components/FishAlgorithmCard';
-import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { isRetiredFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishExchange } from './exchanges';
 import { compileFishProgram, type FishProgram } from './algorithm';
 import { FISH_TURNOVER_FLOORS } from './shared';
@@ -14,7 +14,7 @@ const compile = (def: DeepDigFeatureDef, c: FishCard) => compileFishProgram(def,
 /** 勾选的卡（参与显示的组合）与全部能用的卡（都扫，扫完可任意切换组合）。 */
 export function fishCardPlans(cards: readonly FishCard[], defs: readonly DeepDigFeatureDef[]): { plans: FishProgram[]; pool: FishProgram[]; error: string } {
   const plans: FishProgram[] = []; let error = '';
-  const defOf = (c: FishCard, i: number) => defs.find(d => d.id === c.featureId) ?? (i === 0 ? defs.find(d => d.id === 'cbi2') ?? defs[0] : undefined);
+  const defOf = (c: FishCard, i: number) => isRetiredFeature(c.featureId) ? undefined : defs.find(d => d.id === c.featureId) ?? (i === 0 ? defs.find(d => d.id === 'cbi2') ?? defs[0] : undefined);
   for (const [i, c] of cards.entries()) if (c.enabled) try {
     const d = defOf(c, i); if (!d) throw Error(i === 0 ? 'Deep dig 里没有可用特征值' : '特征值已不存在');
     const plan = compile(d, c); if (plan.unavailable) throw Error(plan.unavailable); plans.push(plan);

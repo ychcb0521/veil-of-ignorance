@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_FEATURES, DOWNWARD_DRIFT_DEF, SELLER_PUSH_DEF, SELLER_CONTROL_DEF, checkDefinition, compileFeatureFormula, evaluateOnBars, isSellerFeature, mergeFeatureDefs } from '../features';
+import { BUILTIN_FEATURES, SELLER_CONTROL_DEF, checkDefinition, compileFeatureFormula, evaluateOnBars, isSellerFeature, mergeFeatureDefs } from '../features';
 import { compileFishProgram, evaluateFishProgram } from '@/lib/fish/algorithm';
 import { readFishPreference } from '@/lib/fish/preferences';
 import { reconstructionDirection } from '@/lib/fish/reconstruction';
+import { DOWNWARD_DRIFT_DEF, SELLER_PUSH_DEF } from './fixtures/retiredSellerFeatures';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 
 // Same symmetric micro-volatility in every scenario; fixed drift starts after 400 neutral bars.
@@ -58,10 +59,12 @@ describe('DSP b 修正版：卖方主动推动与卖方控制力', () => {
     }
   });
   it('内置顺序、定义、卖方符号版本和捕捞/复原方向正确，不凭空设置经验阈值', () => {
-    const ids = BUILTIN_FEATURES.map(d => d.id), i = ids.indexOf(DOWNWARD_DRIFT_DEF.id);
-    expect(ids.slice(i, i + 4)).toEqual(['drift-speed-down-z', 'seller-push', 'seller-control', 'dss']);
+    const ids = BUILTIN_FEATURES.map(d => d.id), i = ids.indexOf(SELLER_CONTROL_DEF.id);
+    expect(ids.slice(i - 1, i + 2)).toEqual(['cdi2', 'seller-control', 'dss']);
+    expect(ids).not.toContain('seller-push');
+    expect(ids).not.toContain('drift-speed-down-z');
     expect(ids.at(-1)).toBe('cda');
-    for (const [def, core] of [[SELLER_PUSH_DEF, 'bp'], [SELLER_CONTROL_DEF, 'bc']] as const) {
+    for (const [def, core] of [[SELLER_CONTROL_DEF, 'bc']] as const) {
       expect(checkDefinition(def)).toEqual({ formula: null, groups: null, scale: null });
       expect(def).toMatchObject({ sellerSignVersion: 1, builtin: true, scale: 100, unit: '%σ/根' });
       expect(isSellerFeature(def.id)).toBe(true); expect(reconstructionDirection(def.id)).toBe('<');

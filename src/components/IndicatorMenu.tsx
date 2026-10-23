@@ -14,6 +14,7 @@ import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
 import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
 import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
+import { SELLER_CONTROL_DEF } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -180,7 +181,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
     periodHint: `${item.parameter}（小时，按5分钟图计，其他周期等比例缩放）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'h',
-    description: '原值、均值、近端加权均值，各一个副图。',
+    description: item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
   { id: 'NV',     nameZh: '净成交量',                nameEn: 'Net Volume',                  isOverlay: false, defaultPeriod: 1,  color: '#2DD4BF', category: 'volume' },
@@ -212,7 +213,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export const CUSTOM_INDICATOR_GROUPS = [
-  { title: '当下的多空平衡', ids: ['CBI2', 'CDI2', 'DSP_Z', 'DSP_B', 'STATE'], note: '0：模型多空方向分界；状态 S 使用 0–1 刻度。' },
+  { title: '当下的多空平衡', ids: ['CBI2', 'CDI2', 'DSP_Z', 'SELLER_CONTROL', 'STATE'], note: '0：模型多空方向分界；状态 S 使用 0–1 刻度。' },
   { title: '与过去24 小时相比', ids: ['BSS', 'DSS'], note: '0：相对历史与主动性的综合中性点。', detail: '动量与相对量分量以过去 24 小时为基线标准化，并叠加主动买卖分量；0 不等于各分量都与过去完全相同。' },
   { title: '是否保住单边优势', ids: ['CBA', 'CDA'], note: '0：净保留的单边优势为零。' },
 ] as const;

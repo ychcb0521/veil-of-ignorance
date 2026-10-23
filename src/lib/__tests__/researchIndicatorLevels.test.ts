@@ -12,6 +12,6 @@ describe('多空状态 S 的橘色线', () => {
     expect(lineAt(researchKcName('STATE', 0))).toEqual([0.6]);
     expect(lineAt(researchKcName('STATE', 1))).toEqual([0.6]);
     expect(lineAt(researchKcName('STATE', 2))).toEqual([0.6]);
-    expect(Object.fromEntries(RESEARCH_INDICATORS.filter(i => i.seller).map(i => [i.id, i.neutral]))).toEqual({ CDI2: 0, DSP_B: 0, DSS: 0, CDA: 0 });
+    expect(Object.fromEntries(RESEARCH_INDICATORS.filter(i => i.seller).map(i => [i.id, i.neutral]))).toEqual({ CDI2: 0, SELLER_CONTROL: 0, DSS: 0, CDA: 0 });
   });
 });

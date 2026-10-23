@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_FEATURES, DOWNWARD_DRIFT_DEF, DOWNWARD_DRIFT_FORMULA, DRIFT_SPEED_Z_DEF, DRIFT_SPEED_Z_FORMULA, checkDefinition, compileFeatureFormula, evaluateOnBars, featureWindowMs, mergeFeatureDefs } from '../features';
+import { BUILTIN_FEATURES, DRIFT_SPEED_Z_DEF, DRIFT_SPEED_Z_FORMULA, checkDefinition, compileFeatureFormula, evaluateOnBars, featureWindowMs, mergeFeatureDefs } from '../features';
+import { DOWNWARD_DRIFT_DEF, DOWNWARD_DRIFT_FORMULA } from './fixtures/retiredSellerFeatures';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 
 function bars(buyShare?: number): ResearchBar[] {
@@ -19,8 +20,8 @@ const get = (r: ReturnType<typeof run>, name: string, i: number) => {
 };
 
 describe('DSP·b 向下推动力量', () => {
-  it('追加为下一项内置特征值；参数、观察窗、显示倍数和分组沿用 DSP·a 标准化版', () => {
-    expect(BUILTIN_FEATURES.find(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(DOWNWARD_DRIFT_DEF);
+  it('旧 DSP·b 仅保留在历史回归样本，不再注册或从账号配置复活', () => {
+    expect(BUILTIN_FEATURES.some(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(false);
     expect(DOWNWARD_DRIFT_DEF).toMatchObject({ name: '向下推动力量', short: 'DSP·b', scale: 100, unit: '%σ/根' });
     expect(checkDefinition(DOWNWARD_DRIFT_DEF)).toEqual({ formula: null, groups: null, scale: null });
     for (const params of [{}, { interval: '15m' as const, halfLifeHours: 12, avgHours: 48 }]) {
@@ -28,7 +29,7 @@ describe('DSP·b 向下推动力量', () => {
     }
     expect(mergeFeatureDefs([]).find(d => d.id === DRIFT_SPEED_Z_DEF.id)?.formula).toBe(DRIFT_SPEED_Z_FORMULA);
     const edited = { ...DOWNWARD_DRIFT_DEF, formula: DOWNWARD_DRIFT_FORMULA + '\navg_b = avg(b, 24)' };
-    expect(mergeFeatureDefs([edited]).find(d => d.id === DOWNWARD_DRIFT_DEF.id)?.formula).toBe(edited.formula);
+    expect(mergeFeatureDefs([edited]).some(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(false);
     expect(mergeFeatureDefs([{ ...DOWNWARD_DRIFT_DEF, removed: true }]).some(d => d.id === DOWNWARD_DRIFT_DEF.id)).toBe(false);
   });
 

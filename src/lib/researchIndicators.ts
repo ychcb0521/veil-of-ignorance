@@ -10,7 +10,7 @@ import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoi
 export const RESEARCH_INDICATORS = [
   { id: 'STATE', featureId: 'state', core: 'state', short: '状态 S', name: '多空状态 S（0–1）', period: 24, parameter: '基线时长', neutral: 0.6, avgNeutral: 0.6, min: 0, max: 1, avgRange: [0, 1], seller: false }, // 【用户要求】2026-10-22 橘色线（线上绿、线下红）：原始值与两条均值线都在 0.6
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', short: 'CDI2', name: '买方失控程度 CDI2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
-  { id: 'DSP_B', featureId: 'drift-speed-down-z', core: 'b', short: 'DSP·b', name: '向下推动力量 DSP·b', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
+  { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', short: '卖控', name: '卖方控制力 卖控', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
 ] as const;
@@ -23,6 +23,19 @@ export const BUYER_RESEARCH_INDICATORS = [
 ] as const;
 export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];
 export type ResearchIndicator = typeof CUSTOM_RESEARCH_INDICATORS[number];
+
+/** Replace saved DSP·b chart selections; a separately configured seller-control selection wins. */
+export function migrateResearchIndicators<T extends { type: string }>(saved: readonly T[]): T[] {
+  const hasControl = saved.some(item => item.type === 'SELLER_CONTROL');
+  let replaced = hasControl;
+  return saved.flatMap(item => {
+    if (item.type !== 'DSP_B') return [item];
+    if (replaced) return [];
+    replaced = true;
+    return [{ ...item, type: 'SELLER_CONTROL' }];
+  });
+}
+
 export const researchKcName = (id: string, level = 0) => {
   const stem = id === 'DSP_VA' ? 'DSP_V' : id === 'DSP_Z' ? 'DSP_Z_V' : id;
   return `${stem}${level === 1 ? '_AVG' : level === 2 ? '_AVG2' : ''}_CUSTOM`;

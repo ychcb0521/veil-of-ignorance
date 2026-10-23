@@ -28,7 +28,7 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, indicatorCalcParams } from "@/lib/customIndicators";
-import { researchIndicatorForKc } from "@/lib/researchIndicators";
+import { researchIndicatorForKc, migrateResearchIndicators } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
 import { subscribeBtcReference } from "@/lib/btcReference";
@@ -108,7 +108,7 @@ const OVERLAY_INDICATOR_IDS = new Set([
 ]);
 
 /** 右上角小标签上的名字（默认用指标 id）。 */
-const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", DSP_B: "DSP·b" };
+const INDICATOR_CHIP_LABEL: Record<string, string> = { DSP_VA: "DSP·a", DSP_Z: "DSP·az", STATE: "状态 S", SELLER_CONTROL: "卖控" };
 /** 小标签的悬停说明：动态谢林点写出 V 的定义与计算步骤。 */
 const INDICATOR_CHIP_TITLE: Record<string, string> = { DSP: DSP_V_STEPS, DSP_VA: DSP_V_STEPS };
 /** 只有附属副图、没有主指标的菜单项。 */
@@ -573,7 +573,8 @@ function CandlestickChartComponent({
     primeFrame: null as number | null,
   });
 
-  const [indicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
+  const [savedIndicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
+  const indicators = useMemo(() => migrateResearchIndicators(savedIndicators), [savedIndicators]);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [showOrderLines, setShowOrderLines] = usePersistedState("show_order_lines", true);
   const [showTradeMarkers, setShowTradeMarkers] = usePersistedState("show_trade_markers", false);

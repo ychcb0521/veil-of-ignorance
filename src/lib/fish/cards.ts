@@ -19,9 +19,23 @@ export function fishDefaultCards(ids:readonly string[],available:readonly string
   const saved=readFishCards();
   return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
 }
-export function readFishCards():FishCard[]{try{const x=JSON.parse(readPersistedStateRaw(fishCardsKey())??'[]');return Array.isArray(x)?x.filter(c=>c&&typeof c.id==='string'&&typeof c.featureId==='string'&&typeof c.enabled==='boolean'&&c.pref&&Array.isArray(c.pref.constraints)).slice(0,6).map(c=>({...c,pref:withFishDefaultThreshold(c.featureId,{...c.pref,constraints:[]})})):[];}catch{return [];}}
+export function readFishCards(): FishCard[] {
+  try {
+    const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
+    if (!Array.isArray(x)) return [];
+    return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, 6).map(c => {
+      // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.
+      if (c.featureId === 'drift-speed-down-z') return { ...c, featureId: 'seller-control', pref: { statistic: '结果', direction: '<', threshold: '', constraints: [], sellerSignVersion: 1 } };
+      return { ...c, pref: withFishDefaultThreshold(c.featureId, { ...c.pref, constraints: [] }) };
+    });
+  } catch { return []; }
+}
 /** 定时自动捕捞要用的卡片：本机保存的那份；从没保存过就按默认四个算法。 */
 export function loadFishCardsForScan(available: readonly string[]): FishCard[] {
   const saved = readFishCards();
-  return saved.length ? saved : fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available);
+  // An explicitly saved set containing only a retired seller-push must not start another algorithm.
+  const raw = readPersistedStateRaw(fishCardsKey());
+  if (saved.length) return saved;
+  try { if (JSON.parse(raw ?? '[]')?.some((c: FishCard) => c?.featureId === 'seller-push')) return []; } catch { /* use normal defaults for malformed storage */ }
+  return fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available);
 }

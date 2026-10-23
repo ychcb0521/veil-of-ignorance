@@ -77,8 +77,8 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
   });
 
   it('自定义两个均值按原式显示；改参数、公式或显示倍数即时失效缓存，实时原地更新和前缀计算正确', () => {
-    const item = RESEARCH_INDICATORS.find(d => d.id === 'DSP_B')!, k = klines();
-    const def = { ...BUILTIN_FEATURES.find(d => d.id === item.featureId)!, formula: 'b = C\navg_b = avg(b, 2)\navg_b_2 = avg(b, 1) * 3', scale: 2 };
+    const item = RESEARCH_INDICATORS.find(d => d.id === 'SELLER_CONTROL')!, k = klines();
+    const def = { ...BUILTIN_FEATURES.find(d => d.id === item.featureId)!, formula: 'bc = C\navg_bc = avg(bc, 2)\navg_bc_2 = avg(bc, 1) * 3', scale: 2 };
     saved([def]);
     const p1 = indicatorCalcParams(researchKcName(item.id), { period: 6 });
     let out = researchChartSeries(k, item, 6, { fetchReference: false });
@@ -91,7 +91,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     const prefix = researchChartSeries(k.slice(0, 700), item, 6, { fetchReference: false });
     const all = researchChartSeries(k, item, 6, { fetchReference: false });
     expect(prefix.avg2).toEqual(all.avg2.slice(0, 700));
-    saved([{ ...def, formula: 'b = hl\navg_b = hl + 1\navg_b_2 = hl + 2' }]);
+    saved([{ ...def, formula: 'bc = hl\navg_bc = hl + 1\navg_bc_2 = hl + 2' }]);
     expect(researchChartSeries(k, item, 12, { fetchReference: false }).avg2.at(-1)).toBe(28);
   });
 
