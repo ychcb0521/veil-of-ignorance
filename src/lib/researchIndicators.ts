@@ -150,12 +150,47 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   return hash >>> 0;
 }
 
+type DisplaySeries = { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[]; pending?: boolean };
+interface DisplaySnapshot { times: Map<number, number>; result: DisplaySeries }
+interface DisplayHistory { snapshots: Map<string, DisplaySnapshot> }
+const displayHistories = new WeakMap<KLineData[], DisplayHistory>();
+const historyAnchors = new WeakMap<KLineData, DisplayHistory>();
+/** Native prepend uses concat: share continuity only through actual candle objects,
+ * never through a symbol/time guess that could mix charts or replay timelines. */
+function displayHistory(data: KLineData[]): DisplayHistory {
+  let history = displayHistories.get(data);
+  if (!history) {
+    for (const bar of data) { history = historyAnchors.get(bar); if (history) break; }
+    history ??= { snapshots: new Map() };
+    displayHistories.set(data, history);
+    if (data[0]) historyAnchors.set(data[0], history);
+  }
+  return history;
+}
+function continueDisplay(data: KLineData[], key: string, result: DisplaySeries): DisplaySeries {
+  const history = displayHistory(data), previous = history.snapshots.get(key);
+  if (result.pending && previous) {
+    const indices = data.map(bar => previous.times.get(bar.timestamp));
+    const aligned = (name: 'core' | 'avg' | 'avg2') => indices.map(i => i == null ? null : previous.result[name][i] ?? null);
+    return { core: aligned('core'), avg: aligned('avg'), avg2: aligned('avg2'), pending: true };
+  }
+  if (!result.pending) {
+    if (history.snapshots.size >= 32 && !history.snapshots.has(key)) history.snapshots.delete(history.snapshots.keys().next().value!);
+    history.snapshots.set(key, { times: new Map(data.map((bar, i) => [bar.timestamp, i])), result });
+  }
+  return result;
+}
 type ChartSeriesOptions = { fetchReference?: boolean; averageHours?: number };
 const liveSeriesCache = new WeakMap<KLineData[], Map<string, { generation: number; result: ReturnType<typeof calculateChartSeries> }>>();
 export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}) {
   const generation = chartDataGenerations.get(data);
-  if (generation == null) return calculateChartSeries(data, item, period, options);
   const def = accountFeatureDef(item.featureId);
+  const continuityKey = `${item.id}|${period}|${options.averageHours ?? 24}|${researchDefinitionVersion(item)}`;
+  const continuous = isChartComputationEnabled(data);
+  const finish = (result: DisplaySeries) => continuous ? continueDisplay(data, continuityKey, result) : result;
+  // Establish lineage even while the first worker request is still pending.
+  if (continuous) displayHistory(data);
+  if (generation == null) return finish(calculateChartSeries(data, item, period, options));
   const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
@@ -164,13 +199,13 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   const versionKey = `${key}|${computeVersion}`;
   const current = cache?.get(versionKey);
   if (current?.generation === generation) return current.result;
-  const result = calculateChartSeries(data, item, period, options);
+  const result = finish(calculateChartSeries(data, item, period, options));
   if (!cache) { cache = new Map(); liveSeriesCache.set(data, cache); }
   if (cache.size >= 32) cache.clear();
   cache.set(versionKey, { generation, result });
   return result;
 }
-function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}) {
+function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: ChartSeriesOptions = {}): DisplaySeries {
   const empty = () => ({ core: data.map(() => null as number | null), avg: data.map(() => null as number | null), avg2: data.map(() => null as number | null) });
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
@@ -224,16 +259,20 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   let displays = out ? displaySeriesCache.get(out) : undefined;
   const existing = displays?.get(displayKey);
   if (existing) return existing;
-  const save = (result: { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[] }) => {
+  if (!out && background) {
+    const blank = () => Array<number | null>(visibleLength).fill(null);
+    return { core: blank(), avg: blank(), avg2: blank(), pending: true };
+  }
+  const save = (result: DisplaySeries) => {
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale).slice(visibleOffset, visibleOffset + visibleLength);
+  const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => { const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale; });
   // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
     if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });
     const core = out?.vars.get(names.core) ?? data.map(() => null);
-    const average = (kind: 'avg' | 'avg2') => Array.from(displayAverage(core, options.averageHours!, kind), v => Number.isFinite(v) ? v * def.scale : null).slice(visibleOffset, visibleOffset + visibleLength);
+    const average = (kind: 'avg' | 'avg2') => { const values = displayAverage(core, options.averageHours!, kind); return Array.from({ length: visibleLength }, (_, i) => { const v = values[visibleOffset + i]; return Number.isFinite(v) ? v * def.scale : null; }); };
     return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2') });
   }
   return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });

@@ -1,7 +1,8 @@
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { compileFeatureFormula } from '../deepDig/features';
 const fake=vi.hoisted(()=>({worker:undefined as any,messages:[] as any[],frames:[] as FrameRequestCallback[]}));
-beforeEach(()=>{vi.resetModules();fake.messages=[];fake.frames=[];vi.stubGlobal('requestAnimationFrame',(fn:FrameRequestCallback)=>{fake.frames.push(fn);return fake.frames.length});vi.stubGlobal('Worker',class{onmessage:any;onerror:any;terminate=vi.fn();constructor(){fake.worker=this}postMessage(data:any){fake.messages.push(data)}})});
+afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals()});
+beforeEach(()=>{vi.useFakeTimers();vi.resetModules();fake.messages=[];fake.frames=[];vi.stubGlobal('requestAnimationFrame',(fn:FrameRequestCallback)=>{fake.frames.push(fn);return fake.frames.length});vi.stubGlobal('Worker',class{onmessage:any;onerror:any;terminate=vi.fn();constructor(){fake.worker=this}postMessage(data:any){fake.messages.push(data)}})});
 const data=()=>[{timestamp:1000,open:1,high:2,low:1,close:1,volume:10,turnover:10,takerBuyTurnover:5},{timestamp:2000,open:1,high:3,low:1,close:2,volume:10,turnover:20,takerBuyTurnover:10}];
 const request=(bars:ReturnType<typeof data>,signature:string)=>({data:bars,signature,compiled:compileFeatureFormula('X=C'),params:{interval:'5m' as const},variables:['X'],core:'X',def:{id:'test',formula:'X=C',scale:1} as any});
 const reply=(job:any,first:number,last:number,values:number[])=>fake.worker.onmessage({data:{id:job.id,first,last,vars:{X:Float64Array.from(values)},packet:job.packet}});
@@ -26,4 +27,16 @@ it('sends exact suffixes only for explicit mutations and resets for history or r
  bars[1].close=2.5;changes.push([2,1]);c.requestChartComputation('X',r(2));expect(fake.messages[1].from).toBe(1);expect(new Float64Array(fake.messages[1].packet)[4]).toBe(2.5);reply(fake.messages[1],1000,2000,[1,2.5]);
  bars[0].close=1.5;changes.push([3,0]);c.requestChartComputation('X',r(3));expect(fake.messages[2].from).toBe(0);reply(fake.messages[2],1000,2000,[1.5,2.5]);
  c.requestChartComputation('X',r(3,1));expect(fake.messages[3].from).toBe(0);vi.unstubAllGlobals();
+});
+
+it('recovers from a worker that never returns instead of freezing the display forever', async()=>{
+ const c=await import('../chartComputeClient'),bars=data(),listener=vi.fn();const unsubscribe=c.subscribeChartComputation(listener);c.enableChartComputation(bars);
+ c.requestChartComputation('X',request(bars,'a'));vi.advanceTimersByTime(14999);expect(c.isChartComputationEnabled(bars)).toBe(true);
+ vi.advanceTimersByTime(1);expect(c.isChartComputationEnabled(bars)).toBe(false);expect(fake.worker.terminate).toHaveBeenCalledOnce();
+ fake.frames.at(-1)!(0);expect(listener).toHaveBeenCalledOnce();unsubscribe();
+});
+it('cancels the watchdog on completion and when the chart unsubscribes', async()=>{
+ const c=await import('../chartComputeClient'),bars=data();const unsubscribe=c.subscribeChartComputation(vi.fn());c.enableChartComputation(bars);
+ c.requestChartComputation('X',request(bars,'a'));reply(fake.messages[0],1000,2000,[1,2]);vi.advanceTimersByTime(20000);expect(c.isChartComputationEnabled(bars)).toBe(true);
+ c.requestChartComputation('X',request(bars,'b'));unsubscribe();expect(vi.getTimerCount()).toBe(0);
 });

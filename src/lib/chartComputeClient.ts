@@ -12,7 +12,7 @@ export function subscribeChartComputation(fn: () => void) { listeners.add(fn); r
     listeners.delete(fn);
     if (!listeners.size) {
       if (worker) { worker.onmessage = null; worker.onerror = null; worker.terminate(); }
-      worker = undefined; active = undefined; queued.clear(); channels.clear(); packet = undefined;
+      clearWatchdog(); worker = undefined; active = undefined; queued.clear(); channels.clear(); packet = undefined;
     }
   }; }
 function notify() {
@@ -28,10 +28,13 @@ interface Request {
 interface Channel { id: number; request: Request; requested: string; initialized: boolean; result: ChartFeatureSeries | null; first: number; last: number; sent?: {revision:number; referenceVersion:number; first:number; length:number} }
 const perData = new WeakMap<KLineData[], Map<string, Channel>>(), channels = new Map<number, Channel>(), queued = new Set<Channel>();
 let worker: Worker | undefined, active: Channel | undefined, packet: ArrayBuffer | undefined;
+let watchdog: ReturnType<typeof setTimeout> | undefined;
+function clearWatchdog() { if (watchdog != null) clearTimeout(watchdog); watchdog = undefined; }
 function startWorker() {
   if (worker) return;
   worker = new Worker(new URL('./chartCompute.worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = ({ data }) => {
+    clearWatchdog();
     packet = data.packet;
     const channel = channels.get(data.id);
     if (channel && !data.error) {
@@ -52,7 +55,7 @@ function startWorker() {
   worker.onerror = fallback;
 }
 function fallback() {
-  failed = true; worker?.terminate(); worker = undefined; active = undefined; queued.clear(); channels.clear(); notify();
+  clearWatchdog(); failed = true; worker?.terminate(); worker = undefined; active = undefined; queued.clear(); channels.clear(); notify();
 }
 function pump() {
   if (active || failed || !queued.size) return;
@@ -77,6 +80,7 @@ function pump() {
     startWorker(); active = channel;
     const job: ChartComputeJob = { id: channel.id, length:n, from, packet, params:r.params, variables:r.variables, compiled:r.compiled };
     worker!.postMessage(job, [packet]); packet = undefined; channel.initialized = true;
+    watchdog = setTimeout(fallback, 15_000);
     channel.sent = r.delta ? {revision:r.delta.revision,referenceVersion:r.delta.referenceVersion,first:r.data[0]?.timestamp,length:n} : undefined;
   } catch { fallback(); }
 }
