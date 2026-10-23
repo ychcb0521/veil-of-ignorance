@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
-import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
+import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions, CUSTOM_PANE_CLOSE_ICON } from '@/lib/customIndicators';
 import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
@@ -75,6 +75,34 @@ describe('自制区的十个特征值', () => {
       fireEvent.click(button);expect(button).toHaveAttribute('aria-pressed','false');
       expect(changed.mock.lastCall![0].find((i:IndicatorConfig)=>i.type===id)).toEqual({...ind,showAverage:false});
     }
+  });
+
+  it('各自制副图的原生标题都有独立关闭图标，保留现有图例', () => {
+    for (const item of CUSTOM_RESEARCH_INDICATORS) for (const name of [CUSTOM_INDICATOR_MAP[item.id], ...INDICATOR_COMPANIONS[item.id].map(c=>c.kcName)].filter(Boolean)) {
+      const template = registered.get(name);
+      if (!template?.createTooltipDataSource) continue;
+      const data = template.createTooltipDataSource({indicator:{calcParams:[6,24],result:[]},crosshair:{dataIndex:0},defaultStyles:{tooltip:{text:{color:'#aaa'},icons:[]}}});
+      expect(data.name).toBeTruthy();
+      expect(data.icons).toContainEqual(expect.objectContaining({id:CUSTOM_PANE_CLOSE_ICON,icon:'×'}));
+    }
+  });
+
+  it('原值、avg、avg₂ 可分别隐藏和恢复，调参不清除独立可见性', () => {
+    const initial = { type: 'STATE', period: 24, avgHours: 12, enabled: true, showRaw: false, showAverage: true, showAverage2: false };
+    const changed = vi.fn();
+    function Menu() { const [items,setItems] = useState<IndicatorConfig[]>([initial]); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
+    render(<Menu />);
+    for (const [label, field] of [['原值','showRaw'], ['avg_x','showAverage'], ['avg_x_2','showAverage2']] as const) {
+      const button = screen.getByRole('button', {name: name('STATE') + ' 显示 ' + label});
+      expect(button).toHaveAttribute('aria-pressed', String(initial[field]));
+      fireEvent.click(button);
+      expect(changed.mock.lastCall![0][0]).toEqual({...initial, [field]: !initial[field]});
+      fireEvent.click(button);
+    }
+    fireEvent.change(screen.getByLabelText(name('STATE') + ' 均线时长 N（小时）'), {target: {value:'48'}});
+    expect(changed.mock.lastCall![0][0]).toEqual({...initial, avgHours:48});
+    expect(visibleIndicatorCompanions(initial).map(c=>c.kcName)).toEqual(['STATE_AVG_CUSTOM']);
+    expect(visibleIndicatorCompanions({type:'DSP_Z',showRaw:false,showAverage:true,showAverage2:false}).map(c=>c.kcName)).toEqual(['DSP_Z_V_AVG_CUSTOM']);
   });
 
   it('标题栏拖动卡片并限制在视口内，关闭按钮不启动拖动', () => {

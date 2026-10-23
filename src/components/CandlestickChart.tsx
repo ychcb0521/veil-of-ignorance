@@ -27,7 +27,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
-import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, indicatorCalcParams } from "@/lib/customIndicators";
+import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, CUSTOM_PANE_CLOSE_ICON, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
@@ -164,8 +164,10 @@ export interface IndicatorConfig {
   period: number;
   /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
   avgHours?: number;
-  /** 自制区普通均值副图的可见性，默认隐藏；avg_x_2 始终保留。 */
+  /** 自制区副图独立可见性：原值与 avg2 默认显示，普通 avg 默认隐藏。 */
+  showRaw?: boolean;
   showAverage?: boolean;
+  showAverage2?: boolean;
   /** 【用户要求】动态谢林点的 a / avg_a 副图用 Z 分数版（涨跌先除以过去 24 小时的标准差）；没写 = 否。 */
   zscore?: boolean;
   color?: string;
@@ -2138,11 +2140,19 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
+    const closePane = (event: { iconId?: string; indicatorName?: string }) => {
+      if (event.iconId !== CUSTOM_PANE_CLOSE_ICON || !event.indicatorName) return;
+      const pane = customIndicatorPane(event.indicatorName);
+      if (!pane) return;
+      setIndicators(previous => migrateResearchIndicators(previous).map(ind => ind.type === pane.type ? { ...ind, [pane.visibility]: false } : ind));
+    };
+    chart.subscribeAction(ActionType.OnTooltipIconClick, closePane);
     const currentActive = new Set<string>();
 
     for (const ind of indicators) {
       if (!ind.enabled) continue;
-      currentActive.add(ind.type);
+      const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
+      if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
 
       const isOverlay = OVERLAY_INDICATOR_IDS.has(ind.type);
       // Determine the klinecharts indicator name: mapped, or fallback
@@ -2151,7 +2161,7 @@ function CandlestickChartComponent({
         kcName = isOverlay ? "FALLBACK_OVERLAY" : "FALLBACK_OSCILLATOR";
       }
 
-      if (COMPANION_ONLY.has(ind.type)) {
+      if (COMPANION_ONLY.has(ind.type) || !rawVisible) {
         // 不建主指标，只建下面的附属副图
       } else if (!activeIndicatorPanes.current.has(ind.type)) {
         try {
@@ -2201,7 +2211,8 @@ function CandlestickChartComponent({
         activeIndicatorPanes.current.delete(type);
       }
     }
-  }, [indicators]);
+    return () => { chart.unsubscribeAction(ActionType.OnTooltipIconClick, closePane); };
+  }, [indicators, setIndicators]);
 
   // 【用户要求】CBI-2 的动量要剔除 BTC：BTC 对照 K 线取到后重算（参数第二位是数据版本号，变了 klinecharts 才会重算）
   const indicatorsForBtcRef = useRef(indicators);
@@ -2212,7 +2223,7 @@ function CandlestickChartComponent({
       if (!chart) return;
       for (const ind of indicatorsForBtcRef.current) {
         if (!ind.enabled) continue;
-        const names = [KLINE_INDICATOR_MAP[ind.type], ...(INDICATOR_COMPANIONS[ind.type] ?? []).map(c => c.kcName)];
+        const names = [...(ind.showRaw === false || COMPANION_ONLY.has(ind.type) ? [] : [KLINE_INDICATOR_MAP[ind.type]]), ...visibleIndicatorCompanions(ind).map(c => c.kcName)];
         for (const name of names) {
           if (name !== "CBI2_CUSTOM" && !researchIndicatorForKc(name)) continue;
           try { chart.overrideIndicator({ name, calcParams: indicatorCalcParams(name, ind) }); } catch {}

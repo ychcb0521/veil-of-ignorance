@@ -101,6 +101,7 @@ vi.mock('klinecharts', () => ({
   DomPosition: { Root: 'root', Main: 'main', YAxis: 'yAxis' },
   ActionType: {
     OnDataReady: 'onDataReady',
+    OnTooltipIconClick: 'onTooltipIconClick',
     OnScroll: 'onScroll',
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
@@ -219,6 +220,34 @@ describe('CandlestickChart analysis annotations', () => {
       view.unmount(); resetBtcReference();
       delete (mocks.chart as unknown as Record<string, unknown>).overrideIndicator;
       if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key, previous);
+    }
+  });
+
+  it('副图叉号只关闭对应序列，刷新保留隐藏状态，菜单可逐一恢复', () => {
+    const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
+    localStorage.setItem(key, JSON.stringify([{type:'STATE',period:24,avgHours:12,enabled:true,showAverage:true}]));
+    let view = render(<TooltipProvider><CandlestickChart data={[candle(300000)]} symbol="TESTUSDT" /></TooltipProvider>);
+    try {
+      for (const [name, field] of [['STATE_AVG2_CUSTOM','showAverage2'],['STATE_CUSTOM','showRaw'],['STATE_AVG_CUSTOM','showAverage']] as const) {
+        const callback = mocks.chart.subscribeAction.mock.calls.filter(([action]) => action === 'onTooltipIconClick').at(-1)![1];
+        mocks.chart.removeIndicator.mockClear();
+        act(() => callback({iconId:'close-custom-pane',indicatorName:name}));
+        expect(mocks.chart.removeIndicator).toHaveBeenCalledExactlyOnceWith('candle_pane',name);
+        expect(JSON.parse(localStorage.getItem(key)!)[0][field]).toBe(false);
+      }
+      expect(JSON.parse(localStorage.getItem(key)!)[0]).toMatchObject({type:'STATE',period:24,avgHours:12});
+      view.unmount(); mocks.chart.createIndicator.mockClear();
+      view = render(<TooltipProvider><CandlestickChart data={[candle(300000)]} symbol="TESTUSDT" /></TooltipProvider>);
+      expect(mocks.chart.createIndicator).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button',{name:'指标'}));
+      for (const [label, name] of [['avg_x_2','STATE_AVG2_CUSTOM'],['原值','STATE_CUSTOM'],['avg_x','STATE_AVG_CUSTOM']]) {
+        mocks.chart.createIndicator.mockClear();
+        fireEvent.click(screen.getByRole('button',{name:RESEARCH_INDICATORS.find(item=>item.id==='STATE')!.name+' 显示 '+label}));
+        expect(mocks.chart.createIndicator).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({name}),false,{height:80});
+      }
+    } finally {
+      view.unmount();
+      if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key,previous);
     }
   });
 

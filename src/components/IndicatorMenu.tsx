@@ -7,7 +7,7 @@ import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { Search, X, Plus, Check } from 'lucide-react';
 import type { IndicatorConfig } from './CandlestickChart';
-import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP } from '@/lib/customIndicators';
+import { AVG_DEFAULT_HOURS, CUSTOM_INDICATOR_MAP, type CustomPaneVisibility } from '@/lib/customIndicators';
 import { DSP_V_DEFINITION, DSP_V_STEPS, DSP_VZ_DEFINITION } from '@/lib/dynamicSchellingPoint';
 import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
@@ -346,8 +346,8 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, zscore: !i.zscore } : i));
   };
 
-  const toggleAverage = (id: string) => {
-    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, showAverage: !i.showAverage } : i));
+  const togglePane = (id: string, visibility: CustomPaneVisibility) => {
+    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, [visibility]: visibility === 'showAverage' ? !i.showAverage : i[visibility] === false } : i));
   };
 
   if (!open) return null;
@@ -432,7 +432,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               主图叠加 · Overlays ({overlays.length})
             </div>
             {overlays.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />
             ))}
           </>
         )}
@@ -443,7 +443,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               <div className="text-[11px] font-semibold text-foreground">{group.title} <span className="text-muted-foreground">({group.items.length})</span></div>
               <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground" title={'detail' in group ? group.detail : group.note}>{group.note}</p>
             </div>
-            {group.items.map(item => <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />)}
+            {group.items.map(item => <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />)}
           </section>
         ))}
         {!customGroups && INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
@@ -452,7 +452,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
               副图指标 · Sub-pane ({oscillators.length})
             </div>
             {oscillators.map(item => (
-              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />
+              <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onTogglePane={togglePane} />
             ))}
           </>
         )}
@@ -477,8 +477,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
   onUpdatePeriod: (id: string, period: number) => void;
   onUpdateAvgHours: (id: string, avgHours: number) => void;
   onToggleZ: (id: string) => void;
-  onToggleAverage: (id: string) => void;
-}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onToggleAverage }, ref) {
+  onTogglePane: (id: string, visibility: CustomPaneVisibility) => void;
+}>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onTogglePane }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
   const custom = item.category === 'custom';
@@ -553,12 +553,17 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
                 Z
               </button>
             )}
-            {item.category === 'custom' && <button
-              type="button" aria-pressed={!!active.showAverage} aria-label={`${item.nameZh} 显示 avg_x`}
-              title="显示 / 隐藏普通均值 avg_x；原值和 avg_x_2 保留"
-              onClick={e => { e.stopPropagation(); onToggleAverage(item.id); }}
-              className={`h-[18px] rounded border px-1.5 font-mono text-[10px] leading-none transition-colors ${active.showAverage ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
-            >avg</button>}
+            {item.category === 'custom' && ([
+              ['showRaw', '原值', '原值'], ['showAverage', 'avg', 'avg_x'], ['showAverage2', 'avg₂', 'avg_x_2'],
+            ] as const).map(([visibility, label, accessibleLabel]) => {
+              const visible = visibility === 'showAverage' ? !!active.showAverage : active[visibility] !== false;
+              return <button key={visibility}
+                type="button" aria-pressed={visible} aria-label={`${item.nameZh} 显示 ${accessibleLabel}`}
+                title={`${visible ? '隐藏' : '恢复'}${label}副图`}
+                onClick={e => { e.stopPropagation(); onTogglePane(item.id, visibility); }}
+                className={`h-[18px] rounded border px-1.5 font-mono text-[10px] leading-none transition-colors ${visible ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >{label}</button>;
+            })}
             <Check className="w-3.5 h-3.5 text-primary" />
           </>
         ) : (
