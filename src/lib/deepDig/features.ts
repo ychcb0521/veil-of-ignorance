@@ -302,26 +302,26 @@ export const BSS_DEF: DeepDigFeatureDef = {
  * f 本来就是和自己的平均成交额比、A 本来就在 −1 ~ 1，只有 R 带着各个币自己的波动大小；不减均值（减掉会把趋势本身减掉）。
  */
 export const DRIFT_SPEED_Z_FORMULA = [
-  '# Z 分数版：涨跌 R 先除以它过去 avgh 小时的标准差（几个 σ），不同币的波动大小不再左右结果；0 仍是多空平衡',
+  '# 波动率归一化：R / sd(R)，未减均值；再加权和平滑后的 az 不是标准 Z 分数，0 为净推力方向分界',
   '# B / S = 主动买入 / 卖出成交金额（USDT），Q = B + S；hl = 半衰期，avgh = 平均时长（小时，都在下面选）',
   'N = abs(B - S)                 # 主动净资金',
   'f = ln(1 + N / avg(Q, avgh))   # 资金力量：净资金比过去 avgh 小时的平均成交额异常多少',
   'A = (B - S) / Q                # 主动买方优势',
   'G = 1 + max(A, 0)              # 买方优势权重',
   'R = ln(C / prev(C))            # 价格变化',
-  'Rz = R / sd(R, avgh)           # 价格变化的 Z 分数：除以过去 avgh 小时的标准差（均值按 0）',
+  'Rz = R / sd(R, avgh)           # 波动率缩放的价格变化：未减均值，不是标准 Z 分数',
   'F = nz(f * G * Rz)             # 单根推力（标准差单位；缺数据的那根记 0）',
-  'az = ema(F, hl, 0)             # 买方推力漂移速度（Z 分数版）：按半衰期 hl 指数平滑',
+  'az = ema(F, hl, 0)             # 波动率归一化推力：按半衰期 hl 指数平滑',
 ].join('\n');
 
 export const DRIFT_SPEED_Z_DEF: DeepDigFeatureDef = {
   id: 'drift-speed-z',
-  name: '买方推力漂移速度 DSP·az（Z 分数）',
+  name: '买方推力漂移速度 DSP·az（波动率归一化）',
   short: 'az',
-  definition: '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。',
+  definition: '原始 az = EMA(f × G × R / sd(R))，图上读数为 100 × az。仅按波动率缩放涨跌，不减均值；最终指标未标准化、方差不保证为 1。0 是净推力方向分界，15 仅对应未乘显示倍数前的 0.15，不是理论强弱门槛或 15 个标准差。',
   formula: DRIFT_SPEED_Z_FORMULA,
   scale: 100,
-  unit: '%σ/根',
+  unit: '归一化×100',
   positive: DEFAULT_POSITIVE,
   control: DEFAULT_CONTROL,
   source: 'campaigns',
@@ -763,10 +763,17 @@ export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFe
     ['买方推力的加速度', ' a'].join(''),
   ]);
   // 【用户要求】2026-10-18「买方推力加速度…改成买方推力漂移速度 DSP·a」：Z 分数版的旧内置名也换
-  const legacyZNames = new Set([['买方推力的加速度', ' az（Z 分数）'].join('')]);
-  return [...builtins, ...custom].map(def => def.id === DRIFT_SPEED_DEF.id
-    ? { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short }
-    : def.id === DRIFT_SPEED_Z_DEF.id && legacyZNames.has(def.name) ? { ...def, name: DRIFT_SPEED_Z_DEF.name } : def);
+  const legacyZNames = new Set(['买方推力漂移速度 DSP·az（Z 分数）', ['买方推力的加速度', ' az（Z 分数）'].join('')]);
+  const legacyZDefinition = '与买方推力漂移速度 DSP·a 相同，只是每根的涨跌先换成「几个标准差」（除以它过去 avgh 小时的标准差）：波动大的币不再天然读数大，不同币可以横向比较、少受极端值左右；0 仍是多空平衡。';
+  return [...builtins, ...custom].map(def => {
+    if (def.id === DRIFT_SPEED_DEF.id) return { ...def, name: legacyNames.has(def.name) ? DRIFT_SPEED_DEF.name : def.name, short: DRIFT_SPEED_DEF.short };
+    if (def.id === DRIFT_SPEED_Z_DEF.id) return { ...def,
+      name: legacyZNames.has(def.name) ? DRIFT_SPEED_Z_DEF.name : def.name,
+      definition: def.definition === legacyZDefinition ? DRIFT_SPEED_Z_DEF.definition : def.definition,
+      unit: def.unit === '%σ/根' && def.scale === 100 ? DRIFT_SPEED_Z_DEF.unit : def.unit,
+    };
+    return def;
+  });
 }
 
 /**

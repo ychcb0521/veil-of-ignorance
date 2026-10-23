@@ -392,28 +392,26 @@ export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 1.5, d
 const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
-/**
- * 橘色线 = 「渔」里用的行动阈值（达到这里才算数），不再是 0。
- * 【用户要求】2026-10-22「按这个改」：CBI-2 0.04、DSP·az 15 %σ/根（只在 Z 开关打开时；原始 a 的单位是基点/根，仍画 0）、CBA 8、avg_BSS 0.08；原始 BSS 保留 0.2。
- */
-export const ACTION_LEVELS = { cbi2: 0.04, az: 15, cba: 8, avgBss: 0.08 } as const;
+/** Empirical action levels for the other indicators. DSP az uses the mathematical zero reference. */
+export const ACTION_LEVELS = { cbi2: 0.04, cba: 8, avgBss: 0.08 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
 const CBI2_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cbi2);
 const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
-/** a / avg_a 副图：Z 开关（calcParams 第 zAt 位）打开时线在 15 %σ/根，关着时仍是 0 轴。 */
-const dspActionLine = (zAt: number) => (args: LineArgs): boolean => zeroLine(ORANGE_DASH_LINE, args.indicator?.calcParams?.[zAt] === 1 ? ACTION_LEVELS.az : 0)(args);
+/** DSP a / az and their averages use zero as the net-force direction boundary.
+ * Displayed az = 100 * EMA(f * G * R / sd(R)): neither az nor its averages have unit variance.
+ * A fixed +15 or standard-score ±1/±2 cutoff cannot be derived from this formula.
+ */
 /** avg_BSS 副图：灰色 0 轴 + 0.08 橘色线；24 小时平均碰不到 ±0.55，那两条去掉。 */
 /**
  * 橘色线必须看得见：纵轴至少包含这条线（读数离线很远时线也在图里，不再落到图外）。
  * 【用户要求】2026-10-22「为啥没有横线？要加上横线」——avg_a 读数只到 7.7，纵轴到不了 15，线在图外。
- * DSP 的线随 Z 开关：开 15 %σ/根，关 0。返回 null = 这个副图没有橘色线。
+ * DSP 的普通版和波动率归一化版都画 0 方向参考线。返回 null = 这个副图没有橘色线。
  */
-export function axisLineLevel(name: string, p: readonly unknown[] | undefined): number | null {
-  const z = (i: number) => p?.[i] === 1;
+export function axisLineLevel(name: string, _p: readonly unknown[] | undefined): number | null {
   switch (name) {
-    case 'DSP_V_CUSTOM': case 'DSP_V_AVG2_CUSTOM': return z(1) ? ACTION_LEVELS.az : 0;
-    case 'DSP_V_AVG_CUSTOM': case 'DSP_OVERLAY_AVG_CUSTOM': return z(2) ? ACTION_LEVELS.az : 0;
-    case 'DSP_Z_V_CUSTOM': case 'DSP_Z_V_AVG_CUSTOM': case 'DSP_Z_V_AVG2_CUSTOM': return ACTION_LEVELS.az;
+    case 'DSP_V_CUSTOM': case 'DSP_V_AVG2_CUSTOM': return 0;
+    case 'DSP_V_AVG_CUSTOM': case 'DSP_OVERLAY_AVG_CUSTOM': return 0;
+    case 'DSP_Z_V_CUSTOM': case 'DSP_Z_V_AVG_CUSTOM': case 'DSP_Z_V_AVG2_CUSTOM': return 0;
     case 'CBI2_CUSTOM': case 'CBI2_AVG_CUSTOM': case 'CBI2_AVG2_CUSTOM': return ACTION_LEVELS.cbi2;
     case 'CBA_CUSTOM': case 'CBA_AVG_CUSTOM': case 'CBA_AVG2_CUSTOM': return ACTION_LEVELS.cba;
     case 'BSS_CUSTOM': return BSS_WEAK;
@@ -486,7 +484,7 @@ function dspATooltip(kind: 'a' | 'avg', adjustableAverage = false) {
     const item = BUYER_RESEARCH_INDICATORS.find(i => i.id === (z ? 'DSP_Z' : 'DSP_VA'))!;
     const def = chartFeatureDef(item.featureId);
     const names = def ? researchSeriesNames(item, def.formula) : { core: item.core, avg: `avg_${item.core}` };
-    const unit = `(${def?.unit ?? (z ? '%σ/根' : '基点/根')}): `;
+    const unit = `(${def?.unit ?? (z ? '归一化×100' : '基点/根')}): `;
     const name = kind === 'a' ? (z ? 'DSP·az' : 'DSP·a') : names.avg;
     return {
       name,
@@ -1114,7 +1112,7 @@ export function registerCustomIndicators() {
     // 纵轴总是包含 0（多空平衡线）：klinecharts 取 min(minValue, 数据最小)、max(maxValue, 数据最大)
     minValue: 0,
     maxValue: 0,
-    draw: dspActionLine(1),
+    draw: V_ZERO_LINE,
     figures: [
       {
         key: 'v', title: 'a(基点/根): ', type: 'line',
@@ -1132,7 +1130,7 @@ export function registerCustomIndicators() {
     calcParams: [DSP_DEFAULTS.halfLifeHours, AVG_DEFAULT_HOURS, 0],
     createTooltipDataSource: dspATooltip('avg'),
     precision: 8,
-    draw: dspActionLine(2),
+    draw: V_ZERO_LINE,
     figures: [
       {
         key: 'v', title: 'avg_a(基点/根): ', type: 'line',
@@ -1307,7 +1305,7 @@ export function registerCustomIndicators() {
       const label = `avg_${item.core}${level === 2 ? '_2' : ''}`;
       const template: IndicatorTemplate = {
         name: researchKcName(item.id, level), shortName: label, calcParams: [item.period, 0, 0], precision: 8,
-        draw: item.id === 'BSS' ? avgBssLines : item.id === 'CBA' ? CBA_ACTION_LINE : item.id === 'CBI2' ? CBI2_ACTION_LINE : dspActionLine(1),
+        draw: item.id === 'BSS' ? avgBssLines : item.id === 'CBA' ? CBA_ACTION_LINE : item.id === 'CBI2' ? CBI2_ACTION_LINE : V_ZERO_LINE,
         createTooltipDataSource: ({ indicator, defaultStyles }) => {
           const selected = item.id === 'DSP_VA' && indicator.calcParams[1] === 1 ? BUYER_RESEARCH_INDICATORS.find(i => i.id === 'DSP_Z')! : item;
           const def = chartFeatureDef(selected.featureId);

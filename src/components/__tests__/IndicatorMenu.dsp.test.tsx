@@ -29,14 +29,14 @@ describe('【用户要求】动态谢林点：可以隐去主图的 DSP 线，�
   it('隐藏普通 DSP·a，保留 Z 分数版和含主图 DSP 入口', () => {
     open([]);
     expect(screen.queryByText('买方推力漂移速度 DSP·a')).not.toBeInTheDocument();
-    expect(screen.getByText('买方推力漂移速度 DSP·a（Z 分数）')).toBeInTheDocument();
+    expect(screen.getByText('买方推力漂移速度 DSP·az（波动率归一化）')).toBeInTheDocument();
     expect(screen.getByText('动态谢林点 DSP（含 a / A 副图）')).toBeInTheDocument();
   });
 
   it('保留的 Z 分数版可独立添加，不影响已有主图和其他指标', () => {
     const initial: IndicatorConfig[] = [{ type: 'DSP', period: 2, avgHours: 48, color: '#F0B90B', enabled: true }, { type: 'MA', period: 7, enabled: true }];
     const onChange = open(initial);
-    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·a（Z 分数）'));
+    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·az（波动率归一化）'));
     expect(onChange).toHaveBeenCalledWith([
       ...initial,
       { type: 'DSP_Z', period: 6, zscore: true, color: '#F0B90B', enabled: true },

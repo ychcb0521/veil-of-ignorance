@@ -1,4 +1,4 @@
-// 【用户要求】2026-10-22「按这个改」：橘色线 = 「渔」里的行动阈值——CBI-2 0.04、DSP·az 15（Z 开关打开时）、CBA 8、avg_BSS 0.08；原始 BSS 保留 0.2
+// 【用户要求】2026-10-22「按这个改」：橘色线 = 「渔」里的行动阈值——CBI-2 0.04、DSP·az 0（净推力方向分界）、CBA 8、avg_BSS 0.08；原始 BSS 保留 0.2
 import { describe, expect, it, vi } from 'vitest';
 const registered = vi.hoisted(() => new Map<string, { draw?: (args: unknown) => boolean; maxValue?: number }>());
 vi.mock('klinecharts', () => ({ registerIndicator: (def: { name: string }) => { registered.set(def.name, def as never); } }));
@@ -14,17 +14,24 @@ function lines(name: string, calcParams?: unknown[]) {
 }
 const orange = (name: string, calcParams?: unknown[]) => lines(name, calcParams).filter(l => l.color === ORANGE_DASH_LINE.color).map(l => Math.round(l.v * 100) / 100);
 
-describe('副图橘色线 = 行动阈值', () => {
-  it('数值与「渔」阈值一致', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0.04, az: 15, cba: 8, avgBss: 0.08 }); });
+describe('副图橘色线按指标区分方向参考与经验门槛', () => {
+  it('数值与「渔」阈值一致', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0.04, cba: 8, avgBss: 0.08 }); });
   it('CBI-2 在 0.04、CBA 在 8（纵轴总是包含 8）', () => {
     registerCustomIndicators();
     expect(orange('CBI2_CUSTOM')).toEqual([0.04]);
     expect(orange('CBA_CUSTOM')).toEqual([8]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(8);
   });
-  it('a / avg_a：Z 开关打开在 15 %σ/根，关着仍是 0（基点/根）', () => {
+  it('a / avg_a：普通版和归一化版的方向参考线均为 0', () => {
     registerCustomIndicators();
-    expect(orange('DSP_V_CUSTOM', [6, 1])).toEqual([15]);expect(orange('DSP_V_CUSTOM', [6, 0])).toEqual([0]);
-    expect(orange('DSP_V_AVG_CUSTOM', [6, 24, 1])).toEqual([15]);expect(orange('DSP_V_AVG_CUSTOM', [6, 24, 0])).toEqual([0]);
+    expect(orange('DSP_V_CUSTOM', [6, 1])).toEqual([0]);expect(orange('DSP_V_CUSTOM', [6, 0])).toEqual([0]);
+    expect(orange('DSP_V_AVG_CUSTOM', [6, 24, 1])).toEqual([0]);expect(orange('DSP_V_AVG_CUSTOM', [6, 24, 0])).toEqual([0]);
+  });
+  it('DSP az 的独立入口、原值和两种均值均为 0 方向线，不借用原始 a 的经验门槛', () => {
+    registerCustomIndicators();
+    for (const name of ['DSP_Z_V_CUSTOM', 'DSP_Z_V_AVG_CUSTOM', 'DSP_Z_V_AVG2_CUSTOM']) {
+      expect(orange(name, [6, 1, 0, 0])).toEqual([0]);
+    }
+    expect(orange('DSP_V_AVG2_CUSTOM', [6, 1])).toEqual([0]);
   });
   it('avg_BSS：灰色 0 轴 + 0.08 橘色线，不再有 ±0.55；原始 BSS 仍在 0.2', () => {
     registerCustomIndicators();
@@ -38,13 +45,13 @@ describe('副图橘色线 = 行动阈值', () => {
 describe('纵轴总是包含橘色线', () => {
   const k = Array.from({ length: 400 }, (_, i) => { const close = 100 + i / 50 + 2 * Math.sin(i / 9), q = 10000 + 3000 * Math.cos(i / 7); return { timestamp: i * 300000, open: close - .1, high: close + 1, low: close - 1, close, volume: q / close, turnover: q, takerBuyTurnover: q * (.5 + .3 * Math.sin(i / 13)) }; });
   const bounds = (name: string, calcParams: unknown[]) => { const reg: any = registered.get(name); const ind: any = { calcParams }; reg.calc(k, ind); return [ind.minValue, ind.maxValue]; };
-  it('avg_a / avg_a_2：Z 开时包含 15，Z 关时包含 0；Z 版别名总包含 15', () => {
+  it('avg_a / avg_a_2：普通版及归一化版均包含 0，不再强行包含 15', () => {
     registerCustomIndicators();
-    expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 1])).toEqual([15, 15]);expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 0])).toEqual([0, 0]);
-    expect(bounds('DSP_V_AVG2_CUSTOM', [6, 1, 0])).toEqual([15, 15]);
-    expect(bounds('DSP_Z_V_AVG_CUSTOM', [6, 24, 1])).toEqual([15, 15]);
-    // 原始 a 副图保留「总包含 0」，Z 开时再加 15
-    expect(bounds('DSP_V_CUSTOM', [6, 1])).toEqual([0, 15]);
+    expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 1])).toEqual([0, 0]);expect(bounds('DSP_V_AVG_CUSTOM', [6, 24, 0])).toEqual([0, 0]);
+    expect(bounds('DSP_V_AVG2_CUSTOM', [6, 1, 0])).toEqual([0, 0]);
+    expect(bounds('DSP_Z_V_AVG_CUSTOM', [6, 24, 1])).toEqual([0, 0]);
+    // 原始 a 副图保留「总包含 0」，归一化版也只保留 0
+    expect(bounds('DSP_V_CUSTOM', [6, 1])).toEqual([0, 0]);
   });
   it('CBI-2 均值包含 0.04、CBA 均值包含 8、avg_BSS 包含 0.08；原始 CBI-2 仍是 −1 ~ 1', () => {
     registerCustomIndicators();

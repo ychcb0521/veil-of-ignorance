@@ -173,7 +173,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // 【用户要求】2026-10-18 CBI 买方优势指数（副图）：参数 = 时间衰减半衰期 h（根），N = 48、m = 12、ATR 14 根，基线 24 小时按 5 分钟图计
   { id: 'CBA-2', nameZh: '成交支持下的价格重心迁移 CBA-2', nameEn: 'Volume-supported Price Center Migration', isOverlay: false, defaultPeriod: 6, color: '#0ECB81', category: 'volume', periodHint: '仅5分钟已收盘K线；时间权重半衰期h（小时）。48小时完整窗口，历史基线24小时；α=1、ε=0.000001、m=12、失效阈值3均为研究默认值，Deep dig公式可改。其他周期留空。红点1表示独立失效，不清零主值。', periodUnit: 'h', description: CBA2_DEFINITION, detail: CBA2_STEPS },
   { id: 'CBI',    nameZh: '买方优势指数 CBI',          nameEn: 'Buyer Advantage Index (CBI)', isOverlay: false, defaultPeriod: 12, color: '#0ECB81', category: 'volume', periodHint: '时间衰减半衰期 h（根）：w = 2^(−(t − i) ÷ h)，求和在最近 48 根内；均价斜率回看 12 根、ATR 14 根、κ = 1、k = 2（Deep dig 公式里可改）。基线（中位数、MAD）= 截至上一根过去 24 小时，按 5 分钟图计', periodUnit: '根', description: CBI_DEFINITION, detail: CBI_STEPS },
-  { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·a（Z 分数）', nameEn: 'DSP · az · Z score', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION },
+  { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·az（波动率归一化）', nameEn: 'DSP · az · volatility normalized', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION },
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
   { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'custom', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
   ...RESEARCH_INDICATORS.map(item => ({
@@ -527,7 +527,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
               <button
                 type="button"
                 aria-pressed={!!active.zscore}
-                aria-label={`${item.nameZh} 用 Z 分数版`}
+                aria-label={`${item.nameZh} 用波动率归一化版`}
                 title={item.zHint}
                 onClick={e => { e.stopPropagation(); onToggleZ(item.id); }}
                 className={`h-[18px] rounded px-1.5 font-mono text-[10px] leading-none border transition-colors ${active.zscore ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}

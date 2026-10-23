@@ -99,27 +99,27 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
       indicator: { calcParams, result, precision: 3 }, crosshair: { dataIndex: 500 }, defaultStyles: { tooltip: { icons: [], defaultValue: 'n/a' } },
     });
     const t = tip('DSP_V_CUSTOM', [6, 1], out);
-    expect([t.name, t.calcParamsText, t.values[0].title.text, t.values[0].value.text]).toEqual(['DSP·az', '(6)', 'az(%σ/根): ', out[500].v.toFixed(3)]);
+    expect([t.name, t.calcParamsText, t.values[0].title.text, t.values[0].value.text]).toEqual(['DSP·az', '(6)', 'az(归一化×100): ', out[500].v.toFixed(3)]);
     expect(tip('DSP_V_CUSTOM', [6, 0], out).name).toBe('DSP·a');
     const avg = registered.get('DSP_V_AVG_CUSTOM')!;
     const t2 = tip('DSP_V_AVG_CUSTOM', [6, 24, 1], avg.calc(k, { calcParams: [6, 24, 1] }));
-    expect([t2.name, t2.calcParamsText, t2.values[0].title.text]).toEqual(['avg_az', '(6)', 'avg_az(%σ/根): ']);
+    expect([t2.name, t2.calcParamsText, t2.values[0].title.text]).toEqual(['avg_az', '(6)', 'avg_az(归一化×100): ']);
   });
 
   it('菜单：DSP 开着时有「Z」开关，点一下切换；自制普通版独立读取普通公式', () => {
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'DSP', period: 6, avgHours: 24, enabled: true }];
     const { rerender } = render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
-    const z = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用 Z 分数版');
+    const z = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用波动率归一化版');
     expect(z).toHaveAttribute('aria-pressed', 'false');
-    expect(z.getAttribute('title')).toContain('除以它过去 24 小时的标准差');
+    expect(z.getAttribute('title')).toContain('R / sd(R)');
     fireEvent.click(z);
     expect(onChange).toHaveBeenLastCalledWith([{ type: 'DSP', period: 6, avgHours: 24, zscore: true, enabled: true }]);
     rerender(<IndicatorMenu open indicators={[{ type: 'DSP', period: 6, avgHours: 24, zscore: true, enabled: true }]} onIndicatorsChange={onChange} onClose={() => {}} />);
-    expect(screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用 Z 分数版')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·a'));
-    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'DSP_VA', period: 6 })]);
+    expect(screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用波动率归一化版')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByText('买方推力漂移速度 DSP·az（波动率归一化）'));
+    expect(onChange).toHaveBeenLastCalledWith([expect.objectContaining({ type: 'DSP', period: 6, zscore: true }), expect.objectContaining({ type: 'DSP_Z', period: 6 })]);
     // BSS 没有这个开关
-    expect(screen.queryByLabelText(/买卖强度综合分 BSS 用 Z 分数版/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/买卖强度综合分 BSS 用波动率归一化版/)).not.toBeInTheDocument();
   });
 });

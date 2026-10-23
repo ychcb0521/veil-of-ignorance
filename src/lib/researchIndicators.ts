@@ -18,7 +18,7 @@ export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
   { id: 'BSS', featureId: 'bss', core: 'BSS', short: 'BSS', name: '买卖强度综合分 BSS', period: 1, parameter: '近期窗口', neutral: 0, min: -1, max: 1, seller: false },
   { id: 'CBA', featureId: 'cba', core: 'CBA', short: 'CBA', name: '买方定价优势指数 CBA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
-  { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', short: 'DSP·az', name: '买方推力漂移速度 DSP·a（Z 分数）', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
+  { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', short: 'DSP·az', name: '买方推力漂移速度 DSP·az（波动率归一化）', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
   { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', short: 'CBI-2', name: '买方优势指数 CBI-2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, seller: false },
 ] as const;
 export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];

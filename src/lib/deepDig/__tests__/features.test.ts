@@ -151,13 +151,18 @@ describe('【用户要求】改名「买方推力漂移速度 DSP·a」', () => 
   it('存过的旧名字（a / az）换成新名字；只改注释不算定义变了', async () => {
     const { DRIFT_SPEED_DEF: A, DRIFT_SPEED_Z_DEF: Z, mergeFeatureDefs: merge, definitionKey: key } = await import('@/lib/deepDig/features');
     expect(A.name).toBe('买方推力漂移速度 DSP·a');
-    expect(Z.name).toBe('买方推力漂移速度 DSP·az（Z 分数）');
+    expect(Z.name).toBe('买方推力漂移速度 DSP·az（波动率归一化）');
     const merged = merge([{ ...A, builtin: undefined, name: '买方推力的加速度 a' }, { ...Z, builtin: undefined, name: '买方推力的加速度 az（Z 分数）' }]);
     expect(merged.find(d => d.id === A.id)!.name).toBe(A.name);
     expect(merged.find(d => d.id === Z.id)!.name).toBe(Z.name);
+    const migrated = merge([{ ...Z, name: '买方推力漂移速度 DSP·az（Z 分数）', unit: '%σ/根' }]).find(d => d.id === Z.id)!;
+    expect(migrated.unit).toBe('归一化×100');
+    expect(migrated.scale).toBe(100);
+    expect(migrated.formula).toBe(Z.formula);
+    expect(merge([{ ...Z, name: '我的 az', unit: '自定义单位' }]).find(d => d.id === Z.id)!.unit).toBe('自定义单位');
     // 自己起的名字不动
     expect(merge([{ ...A, builtin: undefined, name: '我的 a' }]).find(d => d.id === A.id)!.name).toBe('我的 a');
-    expect(key({ ...Z, formula: Z.formula.replace('# 买方推力漂移速度（Z 分数版）', '# 买方推力的加速度（Z 分数版）') })).toBe(key(Z));
+    expect(key({ ...Z, formula: Z.formula.replace('# 波动率归一化推力', '# 仅修改文字注释') })).toBe(key(Z));
     expect(key({ ...Z, formula: Z.formula.replace('az = ema(F, hl, 0)', 'az = ema(F, hl, 1)') })).not.toBe(key(Z));
   });
 });
