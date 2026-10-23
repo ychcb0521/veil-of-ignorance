@@ -385,7 +385,7 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#303A46", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.14)" },
+  separator: { size: 1, color: "#3D4755", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.14)" },
 };
 
 // Light theme styles
@@ -454,7 +454,7 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { size: 1, color: "#E3E9F1", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.10)" },
+  separator: { size: 1, color: "#C6CFDA", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.10)" },
 };
 
 function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolean) {
@@ -2231,15 +2231,15 @@ function CandlestickChartComponent({
     return () => { closeButtons.forEach(button => button.remove()); };
   }, [indicators, setIndicators]);
 
-  // Subtle neutral gradients follow the Binance charcoal / cool-gray palette.
-  // Neighboring panes differ in tone; gold and red/green remain foreground accents.
+  // Clearly alternating neutral bands follow the Binance charcoal / gray palette.
+  // Each band has a restrained internal gradient; neighboring bands stay distinct.
   // Read DOM order because restoring a hidden pane appends it in the native chart.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     const surfaces = theme === 'light'
-      ? ['linear-gradient(180deg, #F1F3F6 0%, #FAFBFC 100%)', 'linear-gradient(180deg, #FDFEFE 0%, #F5F6F8 100%)']
-      : ['linear-gradient(180deg, #1A1F26 0%, #242B34 100%)', 'linear-gradient(180deg, #272E38 0%, #20262E 100%)'];
+      ? ['linear-gradient(180deg, #DEE4EB 0%, #E7ECF2 100%)', 'linear-gradient(180deg, #FFFFFF 0%, #FCFDFE 100%)']
+      : ['linear-gradient(180deg, #11161C 0%, #181E26 100%)', 'linear-gradient(180deg, #2C3541 0%, #343E4B 100%)'];
     const roots = [...new Set([...activeIndicatorPanes.current.values()])]
       .filter((id): id is string => !!id && id !== 'candle_pane')
       .map(id => chart.getDom?.(id, DomPosition.Root))
