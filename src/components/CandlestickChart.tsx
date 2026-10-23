@@ -385,7 +385,7 @@ const DARK_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { color: "#1B1F26" },
+  separator: { size: 1, color: "#474D57", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.18)" },
 };
 
 // Light theme styles
@@ -454,7 +454,7 @@ const LIGHT_STYLES = {
       showType: TooltipShowType.Standard,
     },
   },
-  separator: { color: "#EAECEF" },
+  separator: { size: 1, color: "#B7BDC6", fill: true, activeBackgroundColor: "rgba(132, 142, 156, 0.12)" },
 };
 
 function chartStylesForMode(theme: string | undefined, showLastPriceLine: boolean) {
