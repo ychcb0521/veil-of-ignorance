@@ -463,6 +463,20 @@ describe('CandlestickChart analysis annotations', () => {
     expect(mocks.chart.applyNewData).toHaveBeenCalledOnce();expect(mocks.dataList.map(b=>b.timestamp)).toEqual(source.slice(0,4).map(b=>b.time));view.unmount();
   });
 
+  it('high-speed snapshots discard obsolete partial candles when a full repair supersedes a pending callback', () => {
+    const source=Array.from({length:9},(_,i)=>candle((i+1)*60000,100+i));
+    const chartApiRef={current:null as ChartImperativeApi|null};
+    const view=render(<TooltipProvider><CandlestickChart data={source.slice(0,2)} symbol="TESTUSDT" chartApiRef={chartApiRef}/></TooltipProvider>);
+    const callbacks:Array<()=>void>=[];
+    mocks.chart.updateData.mockImplementation((b:any,done?:()=>void)=>{mocks.dataList.push(b);if(done)callbacks.push(done)});
+    act(()=>source.slice(5,8).forEach(b=>chartApiRef.current!.updateData({timestamp:b.time,open:b.open,high:b.high,low:b.low,close:b.close,volume:b.volume})));
+    view.rerender(<TooltipProvider><CandlestickChart data={source.slice(0,8)} symbol="TESTUSDT" chartApiRef={chartApiRef}/></TooltipProvider>);
+    act(()=>callbacks.shift()!());
+    expect(mocks.dataList.map(b=>b.timestamp)).toEqual(source.slice(0,8).map(b=>b.time));
+    const b=source[8];act(()=>chartApiRef.current!.updateData({timestamp:b.time,open:b.open,high:b.high,low:b.low,close:b.close,volume:b.volume}));
+    expect(mocks.dataList.at(-1)!.timestamp).toBe(b.time);view.unmount();
+  });
+
   // Faithful mini-model of KlineCharts v9's lazy pointer subscription: the
   // mousemove listener that paints the crosshair only lives between mouseenter
   // and mouseleave, and is re-subscribed on every enter.

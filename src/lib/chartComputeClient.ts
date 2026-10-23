@@ -28,6 +28,14 @@ interface Request {
 interface Channel { id: number; request: Request; requested: string; initialized: boolean; result: ChartFeatureSeries | null; first: number; last: number; sent?: {revision:number; referenceVersion:number; first:number; length:number} }
 const perData = new WeakMap<KLineData[], Map<string, Channel>>(), channels = new Map<number, Channel>(), queued = new Set<Channel>();
 let worker: Worker | undefined, active: Channel | undefined, packet: ArrayBuffer | undefined;
+let activeTimes: number[] = [];
+/** A same-chart forward repair may insert missing timestamps. Keep the worker's
+ * incremental program cache; replies are aligned by their captured timestamps. */
+export function resetChartComputationAlignment(data: KLineData[]) {
+  for (const channel of perData.get(data)?.values() ?? []) {
+    channel.result = null; channel.requested = ''; channel.sent = undefined;
+  }
+}
 let watchdog: ReturnType<typeof setTimeout> | undefined;
 function clearWatchdog() { if (watchdog != null) clearTimeout(watchdog); watchdog = undefined; }
 function startWorker() {
@@ -42,7 +50,11 @@ function startWorker() {
       // Rewinds/replacements must never paint a result from the future or another history window.
       if (data.first === latest[0]?.timestamp && data.last <= (latest.at(-1)?.timestamp ?? -Infinity)) {
         const vars = new Map<string, (number | null)[]>();
-        for (const [name, values] of Object.entries(data.vars as Record<string, Float64Array>)) vars.set(name, Array.from(values, v => Number.isFinite(v) ? v : null));
+        const indices = new Map(activeTimes.map((time, i) => [time, i]));
+        for (const [name, values] of Object.entries(data.vars as Record<string, Float64Array>)) vars.set(name, latest.map(bar => {
+          const index = indices.get(bar.timestamp), value = index == null ? NaN : values[index];
+          return Number.isFinite(value) ? value : null;
+        }));
         channel.result = { def: channel.request.def, vars, core: vars.get(channel.request.core ?? '') ?? [] };
         channel.first = data.first; channel.last = data.last;
         notify();
@@ -77,7 +89,7 @@ function pump() {
     values[at+5] = number(b.volume); values[at+6] = number(b.turnover); values[at+7] = number(b.takerBuyTurnover); values[at+8] = number(r.refs?.[i]);
   }
   try {
-    startWorker(); active = channel;
+    startWorker(); active = channel; activeTimes = r.data.map(bar => bar.timestamp);
     const job: ChartComputeJob = { id: channel.id, length:n, from, packet, params:r.params, variables:r.variables, compiled:r.compiled };
     worker!.postMessage(job, [packet]); packet = undefined; channel.initialized = true;
     watchdog = setTimeout(fallback, 15_000);

@@ -32,3 +32,15 @@ it('never reuses a different chart, symbol, formula, or future candle for contin
  expect(c.researchChartSeries(data,c.spec,12).core).toEqual([null,null]);
  const rewind=[...bars([600000]),data[0]];c.enableChartComputation(rewind);fake.history=bars([0,300000]);expect(c.researchChartSeries(rewind,c.spec,24).core).toEqual([null,.4]);
 });
+it('keeps curves and the worker program across a forward repair, aligning in-flight values by timestamp',async()=>{
+ const c=await setup();fake.history=[];const data=bars([900000,1200000,1800000]);c.enableChartComputation(data);
+ c.researchChartSeries(data,c.spec,24);reply(fake.messages[0],900000,1800000,[.4,.5,.7]);expect(c.researchChartSeries(data,c.spec,24).core).toEqual([.4,.5,.7]);
+ data[2].close=2;c.invalidateResearchChartData(data);c.researchChartSeries(data,c.spec,24);const old=fake.messages.at(-1);
+ const repaired=bars([900000,1200000,1500000,1800000,2100000]);c.inheritForwardResearchChartData(data,repaired);c.enableChartComputation(repaired);
+ expect(c.researchChartSeries(repaired,c.spec,24).core).toEqual([.4,.5,null,.7,null]);
+ reply(old,900000,1800000,[.41,.51,.71]);
+ expect(c.researchChartSeries(repaired,c.spec,24).core).toEqual([.41,.51,null,.71,null]);
+ const job=fake.messages.at(-1);expect(job.id).toBe(old.id);expect(job.from).toBe(0);expect(job.length).toBe(5);
+ reply(job,900000,2100000,[.44,.55,.66,.77,.88]);fake.frames.splice(0).forEach(fn=>fn(0));
+ expect(c.researchChartSeries(repaired,c.spec,24).core).toEqual([.44,.55,.66,.77,.88]);
+});

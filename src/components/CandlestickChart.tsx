@@ -28,7 +28,7 @@ import { BarChart3, X, ListOrdered, Eye, EyeOff } from "lucide-react";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, customIndicatorPane, indicatorCalcParams } from "@/lib/customIndicators";
-import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData } from "@/lib/researchIndicators";
+import { researchIndicatorForKc, migrateResearchIndicators, invalidateResearchChartData, inheritForwardResearchChartData } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
 import { subscribeBtcReference } from "@/lib/btcReference";
@@ -1347,10 +1347,10 @@ function CandlestickChartComponent({
     // At 900x / 1m, four candles can arrive between React flushes. They are
     // already streamed by the imperative loop; replacing the native array
     // restarts the worker channels and repeatedly clears all indicator curves.
-    const streamedSnapshot = !!chartApiRef && !analysisMode
+    const forwardSnapshot = !!chartApiRef && !analysisMode
       && prevDataLenRef.current > 0 && data.length > prevDataLenRef.current
-      && currentOldest === prevOldestRef.current && lastCandle.timestamp >= prevNewestRef.current
-      && liveChartCoversSnapshot(klineData, chart.getDataList(), liveUpdateQueueRef.current);
+      && currentOldest === prevOldestRef.current && lastCandle.timestamp >= prevNewestRef.current;
+    const streamedSnapshot = forwardSnapshot && liveChartCoversSnapshot(klineData, chart.getDataList(), liveUpdateQueueRef.current);
     const needsFit = nativeEmpty || prevDataLenRef.current === 0 || (!wasPrepend && !isSmallAppend && !isSameBarUpdate && !streamedSnapshot);
     if (analysisMode) {
       const lifecycle = analysisLifecycleRef.current;
@@ -1389,6 +1389,13 @@ function CandlestickChartComponent({
       if (!chartApiRef) { invalidateResearchChartData(chart.getDataList()); chart.updateData(lastCandle); }
     } else {
       // Data replaced (symbol/interval/window replacement)
+      if (forwardSnapshot) inheritForwardResearchChartData(chart.getDataList(), klineData);
+      // A full repair supersedes the queued partial candles. Old callbacks
+      // must not drain an obsolete queue back into the repaired timeline.
+      liveUpdateGenerationRef.current += 1;
+      liveUpdateQueueRef.current = [];
+      liveUpdateInFlightRef.current = false;
+      if (computationRefreshTimerRef.current != null) { window.clearTimeout(computationRefreshTimerRef.current); computationRefreshTimerRef.current = null; }
       invalidateResearchChartData(chart.getDataList());
       if (chartApiRef && !analysisMode) enableChartComputation(klineData);
       chart.applyNewData(klineData, true);

@@ -5,7 +5,7 @@ import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/fea
 import { chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
-import { enableChartComputation, isChartComputationEnabled, chartComputationVersion } from './chartComputeClient';
+import { enableChartComputation, isChartComputationEnabled, chartComputationVersion, resetChartComputationAlignment } from './chartComputeClient';
 import { displayAverage } from '@/lib/avgHighlight';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
@@ -130,6 +130,7 @@ function chartInterval(data: KLineData[]) {
 }
 const displaySeriesCache = new WeakMap<object, Map<string, { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[] }>>();
 const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; generation?: number; data: KLineData[] }>();
+const EMPTY_HISTORY: KLineData[] = [];
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
 function formulaPlan(item: ResearchIndicator, source: string) {
   const key = `${item.core}\n${source}`;
@@ -167,6 +168,18 @@ function displayHistory(data: KLineData[]): DisplayHistory {
     if (data[0]) historyAnchors.set(data[0], history);
   }
   return history;
+}
+/** Only the chart's verified forward-snapshot path calls this. Known values
+ * remain timestamp-aligned while missing candles are repaired; a new symbol,
+ * interval or rewind deliberately starts with its own history. */
+export function inheritForwardResearchChartData(previous: KLineData[], next: KLineData[]) {
+  const history = displayHistories.get(previous);
+  if (history) displayHistories.set(next, history);
+  const cached = extendedData.get(previous);
+  if (cached) {
+    resetChartComputationAlignment(cached.data);
+    extendedData.set(next, { ...cached, revision: -1, generation: undefined });
+  }
 }
 function continueDisplay(data: KLineData[], key: string, result: DisplaySeries): DisplaySeries {
   const history = displayHistory(data), previous = history.snapshots.get(key);
@@ -222,10 +235,11 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     }
   } catch { return empty(); }
   const visibleLength = data.length, background = isChartComputationEnabled(data);
-  if (data.length && options.fetchReference !== false) {
+  if (data.length) {
     const step = chartInterval(data);
-    const history = chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula), step);
-    if (history.length) {
+    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula), step) : EMPTY_HISTORY;
+    const history = fetched.length ? fetched : EMPTY_HISTORY;
+    if (history.length || background) {
       const revision = dataRevision(data), cached = extendedData.get(data);
       if (cached?.history === history && cached.revision === revision) data = cached.data;
       else {
