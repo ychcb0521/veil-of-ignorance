@@ -392,8 +392,8 @@ export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 1.5, d
 const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
 const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
-/** Empirical action levels for the other indicators. DSP az uses the mathematical zero reference. */
-export const ACTION_LEVELS = { cbi2: 0.04, cba: 8, avgBss: 0.08 } as const;
+/** Chart reference levels are zero; fishing thresholds are configured separately. */
+export const ACTION_LEVELS = { cbi2: 0, cba: 0, avgBss: 0 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
 const CBI2_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cbi2);
 const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
@@ -401,7 +401,7 @@ const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
  * Displayed az = 100 * EMA(f * G * R / sd(R)): neither az nor its averages have unit variance.
  * A fixed +15 or standard-score ±1/±2 cutoff cannot be derived from this formula.
  */
-/** avg_BSS 副图：灰色 0 轴 + 0.08 橘色线；24 小时平均碰不到 ±0.55，那两条去掉。 */
+/** avg_BSS 副图只保留橘色 0 参考线。 */
 /**
  * 橘色线必须看得见：纵轴至少包含这条线（读数离线很远时线也在图里，不再落到图外）。
  * 【用户要求】2026-10-22「为啥没有横线？要加上横线」——avg_a 读数只到 7.7，纵轴到不了 15，线在图外。
@@ -414,7 +414,7 @@ export function axisLineLevel(name: string, _p: readonly unknown[] | undefined):
     case 'DSP_Z_V_CUSTOM': case 'DSP_Z_V_AVG_CUSTOM': case 'DSP_Z_V_AVG2_CUSTOM': return 0;
     case 'CBI2_CUSTOM': case 'CBI2_AVG_CUSTOM': case 'CBI2_AVG2_CUSTOM': return ACTION_LEVELS.cbi2;
     case 'CBA_CUSTOM': case 'CBA_AVG_CUSTOM': case 'CBA_AVG2_CUSTOM': return ACTION_LEVELS.cba;
-    case 'BSS_CUSTOM': return BSS_WEAK;
+    case 'BSS_CUSTOM': return 0;
     case 'BSS_AVG_CUSTOM': case 'BSS_AVG2_CUSTOM': return ACTION_LEVELS.avgBss;
   }
   for (const item of RESEARCH_INDICATORS) for (const level of [0, 1, 2]) {
@@ -437,24 +437,18 @@ function registerIndicator(template: IndicatorTemplate): void {
     return calc(data, indicator);
   } });
 }
-const avgBssLines = (args: LineArgs): boolean => {
-  zeroLine({ color: 'rgba(132,142,156,0.6)', width: 1, dash: [4, 3] })(args);
-  zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.avgBss)(args);
-  return false;
-};
+const avgBssLines = V_ZERO_LINE;
 
 /**
- * BSS 副图的参考线：0（灰虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）、−0.2（淡琥珀点线）。
- * 【用户要求】2026-10-18 +0.2（从高位回落到这里 = 弱了、撤出）用与 DSP·a 的 0 轴同一条醒目的橘黄色虚线。
+ * BSS 副图的参考线：0（橘色虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）。
+ * 【用户要求】2026-10-23 黄线统一为 0，取代原来的 +0.2 / −0.2 观察线。
  */
 function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
   const levels: [number, string, number, readonly number[]][] = [
-    [0, 'rgba(132,142,156,0.6)', 1, [4, 3]],
     [BSS_STRONG, 'rgba(14,203,129,0.55)', 1, [2, 3]],
     [-BSS_STRONG, 'rgba(246,70,93,0.55)', 1, [2, 3]],
-    [-BSS_WEAK, 'rgba(245,158,11,0.4)', 1, [1, 3]],
     // 最后画：压在其他参考线上面
-    [BSS_WEAK, ORANGE_DASH_LINE.color, ORANGE_DASH_LINE.width, ORANGE_DASH_LINE.dash],
+    [0, ORANGE_DASH_LINE.color, ORANGE_DASH_LINE.width, ORANGE_DASH_LINE.dash],
   ];
   for (const [value, color, width, dash] of levels) {
     const y = Math.round(yAxis.convertToPixel(value)) + (width % 2 ? 0.5 : 0);

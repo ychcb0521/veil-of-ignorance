@@ -15,11 +15,11 @@ function lines(name: string, calcParams?: unknown[]) {
 const orange = (name: string, calcParams?: unknown[]) => lines(name, calcParams).filter(l => l.color === ORANGE_DASH_LINE.color).map(l => Math.round(l.v * 100) / 100);
 
 describe('副图橘色线按指标区分方向参考与经验门槛', () => {
-  it('数值与「渔」阈值一致', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0.04, cba: 8, avgBss: 0.08 }); });
-  it('CBI-2 在 0.04、CBA 在 8（纵轴总是包含 8）', () => {
+  it('图表参考线独立为 0，不借用捕捞门槛', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0, cba: 0, avgBss: 0 }); });
+  it('CBI-2 与 CBA 的黄线为 0', () => {
     registerCustomIndicators();
-    expect(orange('CBI2_CUSTOM')).toEqual([0.04]);
-    expect(orange('CBA_CUSTOM')).toEqual([8]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(8);
+    expect(orange('CBI2_CUSTOM')).toEqual([0]);
+    expect(orange('CBA_CUSTOM')).toEqual([0]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(0);
   });
   it('a / avg_a：普通版和归一化版的方向参考线均为 0', () => {
     registerCustomIndicators();
@@ -33,11 +33,11 @@ describe('副图橘色线按指标区分方向参考与经验门槛', () => {
     }
     expect(orange('DSP_V_AVG2_CUSTOM', [6, 1])).toEqual([0]);
   });
-  it('avg_BSS：灰色 0 轴 + 0.08 橘色线，不再有 ±0.55；原始 BSS 仍在 0.2', () => {
+  it('BSS 原值及均值黄线均为 0，均值不重复画灰色 0 线', () => {
     registerCustomIndicators();
     const avg = lines('BSS_AVG_CUSTOM');
-    expect(avg.map(l => Math.round(l.v * 100) / 100)).toEqual([0, 0.08]);expect(orange('BSS_AVG_CUSTOM')).toEqual([0.08]);
-    expect(orange('BSS_CUSTOM')).toEqual([0.2]);
+    expect(avg.map(l => Math.round(l.v * 100) / 100)).toEqual([0]);expect(orange('BSS_AVG_CUSTOM')).toEqual([0]);
+    expect(orange('BSS_CUSTOM')).toEqual([0]);
   });
 });
 
@@ -53,16 +53,16 @@ describe('纵轴总是包含橘色线', () => {
     // 原始 a 副图保留「总包含 0」，归一化版也只保留 0
     expect(bounds('DSP_V_CUSTOM', [6, 1])).toEqual([0, 0]);
   });
-  it('CBI-2 均值包含 0.04、CBA 均值包含 8、avg_BSS 包含 0.08；原始 CBI-2 仍是 −1 ~ 1', () => {
+  it('CBI-2 / CBA / BSS 均值包含零线；原始 CBI-2 仍是 −1 ~ 1', () => {
     registerCustomIndicators();
-    expect(bounds('CBI2_AVG_CUSTOM', [24, 0, 0])).toEqual([0.04, 0.04]);
-    expect(bounds('CBA_AVG2_CUSTOM', [6, 0, 0])).toEqual([8, 8]);
-    expect(bounds('BSS_AVG_CUSTOM', [1, 24])).toEqual([0.08, 0.08]);
+    expect(bounds('CBI2_AVG_CUSTOM', [24, 0, 0])).toEqual([0, 0]);
+    expect(bounds('CBA_AVG2_CUSTOM', [6, 0, 0])).toEqual([0, 0]);
+    expect(bounds('BSS_AVG_CUSTOM', [1, 24])).toEqual([0, 0]);
     expect(bounds('CBI2_CUSTOM', [24, 0])).toEqual([-1, 1]);
   });
-  it('四项卖方的原值和均值均包含负门槛，DSS 原值与均值分别为 −0.20 / −0.08', () => {
+  it('四项卖方原值及均值均包含零方向线', () => {
     registerCustomIndicators();
-    for(const [id,raw,avg] of [['CDI2',-.04,-.04],['DSP_B',-15,-15],['DSS',-.2,-.08],['CDA',-8,-8]] as const){
+    for(const [id,raw,avg] of [['CDI2',0,0],['DSP_B',0,0],['DSS',0,0],['CDA',0,0]] as const){
       for(const [suffix,line] of [['',raw],['_AVG',avg],['_AVG2',avg]] as const){
         const name=`${id}${suffix}_CUSTOM`,reg:any=registered.get(name),ind:any={calcParams:[6,0,0]};
         reg.calc([],ind);expect(ind.minValue).toBeLessThanOrEqual(line);expect(ind.maxValue).toBeGreaterThanOrEqual(line);

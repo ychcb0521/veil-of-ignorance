@@ -211,6 +211,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   custom: '自制区',
 };
 
+export const CUSTOM_INDICATOR_GROUPS = [
+  { title: '当下的多空平衡', ids: ['CBI2', 'CDI2', 'DSP_Z', 'DSP_B', 'STATE'], note: '0：模型多空方向分界；状态 S 使用 0–1 刻度。' },
+  { title: '与过去24 小时相比', ids: ['BSS', 'DSS'], note: '0：相对历史与主动性的综合中性点。', detail: '动量与相对量分量以过去 24 小时为基线标准化，并叠加主动买卖分量；0 不等于各分量都与过去完全相同。' },
+  { title: '是否保住单边优势', ids: ['CBA', 'CDA'], note: '0：净保留的单边优势为零。' },
+] as const;
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -346,6 +352,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
+  const customGroups = categoryFilter === 'custom' ? CUSTOM_INDICATOR_GROUPS.map(group => ({ ...group, items: group.ids.flatMap(id => oscillators.filter(item => item.id === id)) })).filter(group => group.items.length > 0) : null;
   const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
   const supportedCount = availableCatalog.filter(i => isSupported(i.id)).length;
 
@@ -428,7 +435,16 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           </>
         )}
 
-        {INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
+        {customGroups?.map(group => (
+          <section key={group.title} aria-label={group.title}>
+            <div className="sticky top-0 z-10 border-y border-border bg-secondary px-3 py-2">
+              <div className="text-[11px] font-semibold text-foreground">{group.title} <span className="text-muted-foreground">({group.items.length})</span></div>
+              <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground" title={'detail' in group ? group.detail : group.note}>{group.note}</p>
+            </div>
+            {group.items.map(item => <IndicatorRow key={item.id} item={item} indicators={indicators} onToggle={toggleIndicator} onUpdatePeriod={updatePeriod} onUpdateAvgHours={updateAvgHours} onToggleZ={toggleZ} onToggleAverage={toggleAverage} />)}
+          </section>
+        ))}
+        {!customGroups && INDICATOR_CATALOG?.length > 0 && oscillators.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wider bg-secondary border-b border-border sticky top-0 z-10">
               副图指标 · Sub-pane ({oscillators.length})

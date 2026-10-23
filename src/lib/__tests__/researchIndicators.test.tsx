@@ -95,9 +95,9 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     expect(researchChartSeries(k, item, 12, { fetchReference: false }).avg2.at(-1)).toBe(28);
   });
 
-  it('添加时沿用 Deep dig 的基线、半衰期或近期窗口，支持小数小时', () => {
+  it('添加时沿用基线和半衰期的小数小时，DSS 按用户要求默认 12h', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 3.5, 2.5, 3.5]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 3.5, 12, 3.5]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {
@@ -125,7 +125,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
       expect(INDICATOR_COMPANIONS[item.id].map(c => c.kcName)).toEqual([researchKcName(item.id, 1), researchKcName(item.id, 2)]);
       fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: item.id } });
       fireEvent.click(screen.getByText(item.name));
-      expect(changed.mock.lastCall![0].at(-1)).toMatchObject({ type: item.id, period: item.period, enabled: true });
+      expect(changed.mock.lastCall![0].at(-1)).toMatchObject({ type: item.id, period: researchDefaultPeriod(item), enabled: true });
     }
     const item = RESEARCH_INDICATORS[0], active = [{ type: item.id, period: 24, enabled: true }];
     rerender(<IndicatorMenu open onClose={() => {}} indicators={active} onIndicatorsChange={changed} />);
@@ -140,7 +140,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const state of [true, false]) {
       const reg = mock.registered.get(researchKcName(state ? 'STATE' : 'CDI2'));
       reg.draw({ ctx, bounding: { width: 400, height: 80 }, yAxis: { convertToPixel: pixel } });
-      expect(pixel).toHaveBeenLastCalledWith(state ? 0.6 : -0.04);
+      expect(pixel).toHaveBeenLastCalledWith(state ? 0.6 : 0);
     }
   });
 });

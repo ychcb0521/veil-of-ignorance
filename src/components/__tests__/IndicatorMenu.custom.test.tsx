@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { IndicatorMenu, INDICATOR_CATALOG } from '@/components/IndicatorMenu';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
 
@@ -23,6 +23,20 @@ describe('自制区的十个特征值', () => {
     fireEvent.click(screen.getByRole('button', { name: '成交量' }));
     for (const id of ids) expect(screen.queryByText(name(id))).not.toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled(); // 分类不改已有选择或参数。
+  });
+
+  it('自制区按三个模块分组；搜索后只保留命中的模块，选择状态不变', () => {
+    const changed = vi.fn();
+    render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
+    fireEvent.click(screen.getByRole('button', { name: '自制区' }));
+    for (const group of CUSTOM_INDICATOR_GROUPS) {
+      const section = screen.getByRole('region', { name: group.title });
+      for (const id of group.ids) expect(within(section).getByText(name(id))).toBeInTheDocument();
+    }
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: 'DSS' } });
+    expect(screen.getAllByRole('region')).toHaveLength(1);
+    expect(screen.getByRole('region', { name: '与过去24 小时相比' })).toBeInTheDocument();
+    expect(changed).not.toHaveBeenCalled();
   });
 
   it('隐藏普通 DSP·a，保留 Z 分数版的添加、调参和关闭', () => {
