@@ -68,6 +68,8 @@ export function researchChartFormula(item: ResearchIndicator, formula: string): 
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
+  // 指标表的 BSS 默认近期窗口为 12 小时，图表计算仍允许手动覆盖。
+  if (item.id === 'BSS') return 12;
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
   if (item.id === 'STATE' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
