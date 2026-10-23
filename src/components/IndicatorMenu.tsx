@@ -1,3 +1,4 @@
+import { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
 /**
  * IndicatorMenu — Searchable indicator panel with 80+ indicators.
@@ -21,6 +22,8 @@ import { BUILD_STAMP } from '@/lib/buildStamp';
 export interface IndicatorCatalogItem {
   id: string;
   nameZh: string;
+  /** Full Chinese name, shown only in the custom item explanation. */
+  fullName?: string;
   nameEn: string;
   isOverlay: boolean;
   defaultPeriod: number;
@@ -48,7 +51,14 @@ function isSupported(id: string): boolean {
 /** 二选一的菜单项：动态谢林点「主图线 + 副图」与「只要副图」。 */
 const EXCLUSIVE_PAIRS: Record<string, string> = { DSP: 'DSP_VA', DSP_VA: 'DSP' };
 
-export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
+function shortCustomNames(items: IndicatorCatalogItem[]): IndicatorCatalogItem[] {
+  return items.map(item => item.category === 'custom' ? {
+    ...item, fullName:item.nameZh,
+    nameZh:CUSTOM_RESEARCH_INDICATORS.find(def => def.id === item.id)?.short ?? item.nameZh,
+  } : item);
+}
+
+export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   // ═══════════════════════════════════════════
   // OVERLAYS (主图叠加)
   // ═══════════════════════════════════════════
@@ -200,7 +210,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = [
   // --- Other ---
   { id: 'SPREAD', nameZh: 'Spread',                 nameEn: 'Spread',                      isOverlay: false, defaultPeriod: 1,  color: '#E5E7EB', category: 'other' },
   { id: 'RATIO',  nameZh: 'Ratio',                  nameEn: 'Ratio',                       isOverlay: false, defaultPeriod: 1,  color: '#D1D5DB', category: 'other' },
-];
+]);
 
 // Category labels
 const CATEGORY_LABELS: Record<string, string> = {
@@ -213,11 +223,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   custom: '自制区',
 };
 
-export const CUSTOM_INDICATOR_GROUPS = [
-  { title: '当下的多空平衡', ids: ['CBI2', 'CDI2', 'DSP_Z', 'SELLER_CONTROL', 'STATE'], note: '0：模型多空方向分界；状态 S 使用 0–1 刻度。' },
-  { title: '与过去24 小时相比', ids: ['BSS', 'DSS'], note: '0：相对历史与主动性的综合中性点。', detail: '动量与相对量分量以过去 24 小时为基线标准化，并叠加主动买卖分量；0 不等于各分量都与过去完全相同。' },
-  { title: '是否保住单边优势', ids: ['CBA', 'CDA'], note: '0：净保留的单边优势为零。' },
-] as const;
+export { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 
 interface Props {
   open: boolean;
@@ -313,7 +319,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(
-        item => item.nameZh.toLowerCase().includes(q) || item.nameEn.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
+        item => (item.fullName?.toLowerCase().includes(q) ?? false) || item.nameZh.toLowerCase().includes(q) || item.nameEn.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
       );
     }
     return items;
@@ -495,21 +501,22 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium leading-4 text-foreground">{item.nameZh}</span>
+            {custom && (
+              <button
+                type="button"
+                aria-label={`${item.nameZh} 说明`}
+                aria-expanded={descriptionOpen}
+                onClick={e => { e.stopPropagation(); setDescriptionOpen(open => !open); }}
+                className="ml-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground"
+              >
+                {descriptionOpen ? '收起说明 ▴' : '说明 ▾'}
+              </button>
+            )}
             {!supported && (
               <span className="text-[8px] px-1 py-0 rounded bg-muted text-muted-foreground leading-tight">优化中</span>
             )}
           </div>
-          {custom ? (
-            <button
-              type="button"
-              aria-label={`${item.nameZh} 说明`}
-              aria-expanded={descriptionOpen}
-              onClick={e => { e.stopPropagation(); setDescriptionOpen(open => !open); }}
-              className="mt-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground"
-            >
-              {descriptionOpen ? '收起说明 ▴' : '说明 ▾'}
-            </button>
-          ) : <span className="text-[10px] text-muted-foreground">{item.nameEn}</span>}
+          {!custom && <span className="text-[10px] text-muted-foreground">{item.nameEn}</span>}
           {!custom && item.description && (
             // 【用户要求】在旁边注明定义；悬停给出完整计算步骤
             <span className="mt-0.5 block whitespace-normal text-[10px] leading-4 text-muted-foreground/90" title={item.detail}>{item.description}</span>
@@ -575,7 +582,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           className="basis-full pl-[18px] pr-1 pt-1 text-[10px] leading-4 text-muted-foreground cursor-text"
           onClick={e => e.stopPropagation()}
         >
-          <p className="font-medium">{item.nameEn}</p>
+          <p className="font-medium text-foreground/85">{item.fullName ?? item.nameZh}</p>
+          <p className="mt-0.5">{item.nameEn}</p>
           {item.description && <p className="mt-1 whitespace-normal" title={item.detail}>{item.description}</p>}
         </div>
       )}

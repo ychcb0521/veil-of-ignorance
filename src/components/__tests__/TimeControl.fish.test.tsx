@@ -10,7 +10,7 @@ import { saveFishAuto } from '@/lib/fish/autoScan';
 import { saveFishPreference } from '@/lib/fish/preferences';
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
-vi.mock('@/lib/fishScanner', async original => ({ ...await original<typeof import('@/lib/fishScanner')>(), FishScanner: class { scan = mocks.scan; } }));
+vi.mock('@/lib/fishScanner', async original => ({ ...await original<typeof import('@/lib/fishScanner')>(), FishScanner: class { scan = mocks.scan; isBusy = () => false; } }));
 vi.mock('@/lib/simStateSync', () => ({ queueSimStatePush: mocks.push }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'fish-owner' } }) }));
 vi.mock('@/contexts/TradingContext', () => ({ useTradingContext: () => ({ tradeHistory: [], positionsMap: {}, priceMap: {}, getEffectiveTime: () => 0, getTimelineId: () => null }) }));

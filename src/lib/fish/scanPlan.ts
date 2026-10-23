@@ -1,3 +1,4 @@
+import { readFishDownwardWick } from './downwardWick';
 /**
  * 由卡片、合并方式、交易所范围拼出一次捕捞的设置。「开始捕捞」按钮与定时自动捕捞用同一个函数，两边拿到的设置逐项一致。
  */
@@ -31,6 +32,6 @@ export function buildFishScanSettings(o: { cards: readonly FishCard[]; defs: rea
     if (!o.selection.exchanges.length) throw new Error('请至少选择一家交易所');
     if (error && error !== '请启用至少一个算法') throw new Error(error);
     if (!pool.length) throw new Error('没有有效算法');
-    return { settings: { ...parsed, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, turnoverFloors: FISH_TURNOVER_FLOORS } };
+    return { settings: { ...parsed, feature: pool[0].def, algorithm: pool[0].settings, algorithms: pool.map(p => ({ feature: p.def, algorithm: p.settings })), retainMembers: true, displayAlgorithmKeys: plans.map(fishSelectionKey), combination: o.combination, exchanges: [...o.selection.exchanges], includeDuplicates: o.selection.includeDuplicates, includeUsStocks: o.selection.includeUsStocks ?? false, downwardWick: readFishDownwardWick(), turnoverFloors: FISH_TURNOVER_FLOORS } };
   } catch (e) { return { error: e instanceof Error ? e.message : String(e) }; }
 }

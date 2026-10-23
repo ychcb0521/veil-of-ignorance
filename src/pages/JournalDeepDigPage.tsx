@@ -1,3 +1,4 @@
+import { groupDeepDigFeatures } from '@/lib/customIndicatorGroups';
 /**
  * /journal/deep-dig — Deep dig：按特征值深挖（复盘中心里「规则」正下方）。
  *
@@ -296,13 +297,20 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
   onAdd: () => void;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
+  const groups = groupDeepDigFeatures(defs);
+  let ordinal = 0;
   return (
     <section className="space-y-2 text-[12px]" data-testid="deep-dig-directory">
       <h2 className="text-[12.5px] font-medium">目录<span className="ml-2 text-[11px] font-normal text-muted-foreground">特征值 {defs.length}</span></h2>
-      <ol className="divide-y divide-border/60 border-y border-border/60">
-        {defs.map((f, i) => (
+      <div className="space-y-5 pt-1">
+        {groups.map(group => <section key={group.key} aria-label={group.title} data-testid={`deep-dig-group-${group.key}`}>
+          <h3 className="flex items-center gap-2 rounded-md border border-border/50 bg-muted/50 px-3 py-2 text-[11.5px] font-medium text-foreground/85">
+            {group.title}<span className="font-mono text-[10px] font-normal tabular-nums text-muted-foreground">{group.items.length}</span>
+          </h3>
+          <ol className="mt-1 divide-y divide-border/50 px-3" start={ordinal+1}>
+        {group.items.map(f => (
           <li key={f.id} className="group/entry grid grid-cols-[22px_1fr] gap-x-1 py-2.5" data-testid="deep-dig-entry" onMouseLeave={() => setConfirming(c => (c === f.id ? null : c))}>
-            <span className="pt-px font-mono tabular-nums text-muted-foreground">{String(i + 1).padStart(2, '0')}</span>
+            <span className="pt-px font-mono tabular-nums text-muted-foreground">{String(++ordinal).padStart(2, '0')}</span>
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-2">
                 <button
@@ -354,7 +362,9 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
             </div>
           </li>
         ))}
-      </ol>
+          </ol>
+        </section>)}
+      </div>
       <button
         type="button"
         onClick={onAdd}

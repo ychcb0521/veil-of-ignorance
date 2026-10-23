@@ -49,18 +49,18 @@ export function intersectFishResults(rows: readonly FishMemberResult[], plans: r
   return {outcome:'hit',signal:{...source,id:`fish-${identityOf(source)}-${start}-${encodeURIComponent(key)}`,timeMs:start,timeLabel:formatUTC8(start),fish:{...source.fish!,algorithmKey:key,intersectionStart:start,algorithms:rows.map(r=>r.signal!.fish!)}}};
 }
 /** Request once per venue/instrument/period, then give each program exactly its own trailing N. */
-export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number, eligible?: (exchange:FishExchange,p:FishProgram)=>boolean): Partial<Record<FishExchange,FishDataAdapter>> {
+export function sharedFishAdapters(adapters: Map<FishExchange,FishDataAdapter>, plans: readonly FishProgram[], anchorMs:number, eligible?: (exchange:FishExchange,p:FishProgram)=>boolean, fiveMinuteMinimum = 0): Partial<Record<FishExchange,FishDataAdapter>> {
   return Object.fromEntries([...adapters].map(([exchange,adapter])=>{
     const candles=new Map<string,Promise<ResearchBar[]>>(),takers=new Map<string,Promise<ResearchBar[]>>();let universe:ReturnType<FishDataAdapter['list']>|undefined;
-    const countFor=(interval:string)=>Math.max(...plans.filter(p=>intervalOf(p.def)===interval&&(!eligible||eligible(exchange,p))).map(p=>p.N));
+    const countFor=(interval:string,minimum:number)=>Math.max(minimum,interval==='5m'?fiveMinuteMinimum:0,...plans.filter(p=>intervalOf(p.def)===interval&&(!eligible||eligible(exchange,p))).map(p=>p.N));
     return [exchange,{exchange,btc:()=>adapter.btc(),list:(signal:AbortSignal)=>universe??=adapter.list(signal),
       candles:(market,cut,signal,query)=>{
-        const count=countFor(query.interval),key=`${market.instrument}|${query.interval}|${cut}`;
+        const count=countFor(query.interval,query.count),key=`${market.instrument}|${query.interval}|${cut}`;
         if(!candles.has(key))candles.set(key,adapter.candles(market,cut,signal,{...query,count,allowPartial:true}));
         return candles.get(key)!.then(b=>b.slice(-query.count));
       },
       taker:async(market,bars,signal,query)=>{
-        const count=countFor(query.interval),step=plans.find(p=>intervalOf(p.def)===query.interval)!.step,cut=Math.floor(anchorMs/step)*step,key=`${market.instrument}|${query.interval}|${cut}`;
+        const count=countFor(query.interval,query.count),step=plans.find(p=>intervalOf(p.def)===query.interval)!.step,cut=Math.floor(anchorMs/step)*step,key=`${market.instrument}|${query.interval}|${cut}`;
         if(!takers.has(key))takers.set(key,(async()=>{const raw=await candles.get(key)!;return adapter.taker(market,raw,signal,{...query,count});})());
         return (await takers.get(key)!).slice(-query.count);
       }} satisfies FishDataAdapter];

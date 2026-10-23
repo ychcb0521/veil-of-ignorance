@@ -37,6 +37,11 @@ describe('自制区的十个特征值', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: 'DSS' } });
     expect(screen.getAllByRole('region')).toHaveLength(1);
     expect(screen.getByRole('region', { name: '与过去24 小时相比' })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('搜索指标 (MACD / RSI / BOLL ...)'), { target: { value: '买方状态恶化' } });
+    expect(screen.getByText('DSS')).toBeInTheDocument();
+    expect(screen.queryByText(INDICATOR_CATALOG.find(item => item.id === 'DSS')!.fullName!)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'DSS 说明' }));
+    expect(screen.getByText(INDICATOR_CATALOG.find(item => item.id === 'DSS')!.fullName!)).toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled();
   });
 

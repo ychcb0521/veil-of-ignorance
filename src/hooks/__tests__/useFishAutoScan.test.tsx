@@ -42,7 +42,7 @@ it('切到自动立刻捕第一次（时间 = 现在，四个算法），之后�
  const {start,view}=hook();
  act(()=>{view.result.current.setHours(2);});act(()=>{view.result.current.setMode('auto');});await flush();
  expect(start).toHaveBeenCalledTimes(1);
- const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','drift-speed-z','cba','bss']);expect(s.turnoverFloors).toHaveLength(3);
+ const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','drift-speed-z','cba','bss']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:24,atrMultiple:3});
  expect(readFishAuto()).toMatchObject({mode:'auto',hours:2,lastRunAt:Date.now()});
  await flush(2*HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
  await flush(90_000);expect(start).toHaveBeenCalledTimes(2);
