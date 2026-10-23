@@ -68,17 +68,12 @@ export function researchChartFormula(item: ResearchIndicator, formula: string): 
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
-  // 指标表的 BSS 默认近期窗口为 12 小时，图表计算仍允许手动覆盖。
-  if (item.id === 'BSS') return 12;
+  // 指标表的 BSS / DSS 默认近期窗口为 12 小时，图表计算仍允许手动覆盖。
+  if (item.id === 'BSS' || item.id === 'DSS') return 12;
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
   if (item.id === 'STATE' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
-  if (item.id !== 'DSS' && item.id !== 'BSS') return halfLifeOf(def);
-  try {
-    const st = compileFeatureFormula(def.formula).program.statements.find(s => s.name === 'n');
-    if (st?.expr.k === 'num' && st.expr.v > 0) return st.expr.v;
-  } catch { /* Invalid account definitions produce blank chart series. */ }
-  return item.period;
+  return halfLifeOf(def);
 }
 
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
