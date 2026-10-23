@@ -392,10 +392,10 @@ function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0) {
   };
 }
 /** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：醒目的橘黄色虚线（2026-10-16 由实线改为虚线）。 */
-export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 1.5, dash: [5, 3] };
+export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 0.75, dash: [5, 3] };
 const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
 /** A 的 0 轴保持灰色虚线，与 V 区分。 */
-const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 1, dash: [3, 3] });
+const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 0.75, dash: [3, 3] });
 /** Chart reference levels are zero; fishing thresholds are configured separately. */
 export const ACTION_LEVELS = { cbi2: 0, cba: 0, avgBss: 0 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
@@ -495,8 +495,8 @@ const avgBssLines = V_ZERO_LINE;
  */
 function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
   const levels: [number, string, number, readonly number[]][] = [
-    [BSS_STRONG, 'rgba(14,203,129,0.55)', 1, [2, 3]],
-    [-BSS_STRONG, 'rgba(246,70,93,0.55)', 1, [2, 3]],
+    [BSS_STRONG, 'rgba(14,203,129,0.55)', 0.75, [2, 3]],
+    [-BSS_STRONG, 'rgba(246,70,93,0.55)', 0.75, [2, 3]],
     // 最后画：压在其他参考线上面
     [0, ORANGE_DASH_LINE.color, ORANGE_DASH_LINE.width, ORANGE_DASH_LINE.dash],
   ];
