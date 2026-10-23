@@ -13,6 +13,7 @@ import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
+import { researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import {
@@ -331,11 +332,11 @@ export function indicatorCalcParams(kcName: string, ind: { type?: string; period
   const research = researchIndicatorForKc(kcName);
   const z = ind.zscore && ind.type !== 'DSP_VA' ? 1 : 0;
   const dsp = BUYER_RESEARCH_INDICATORS.find(item => item.id === (z ? 'DSP_Z' : 'DSP_VA'))!;
-  if (kcName === 'DSP_V_CUSTOM') return [ind.period, z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
-  if (kcName === 'DSP_OVERLAY_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
-  if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
-  if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion(), researchDefinitionVersion(dsp)];
-  if (research) return [ind.period, btcReferenceVersion(), researchDefinitionVersion(research)];
+  if (kcName === 'DSP_V_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_OVERLAY_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
+  if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
+  if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research)];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
 }
 

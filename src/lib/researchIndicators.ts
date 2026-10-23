@@ -1,7 +1,8 @@
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
-import { chartFeatureDef as accountFeatureDef, chartFeatureSeries } from '@/lib/featureSource';
+import { chartFeatureDef as accountFeatureDef, chartFeatureSeries, chartFeatureHistoryBars } from '@/lib/featureSource';
 import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/features';
+import { chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
 
@@ -76,6 +77,7 @@ export function researchDefaultPeriod(item: ResearchIndicator): number {
   return halfLifeOf(def);
 }
 
+const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; data: KLineData[] }>();
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
 function formulaPlan(item: ResearchIndicator, source: string) {
   const key = `${item.core}\n${source}`;
@@ -105,14 +107,28 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   try {
     ({ formula, usesBtc } = formulaPlan(item, def.formula));
   } catch { return empty(); }
+  const visibleLength = data.length;
+  if (data.length && options.fetchReference !== false) {
+    const step = inferIntervalMs(data.map(d => ({ time: d.timestamp }))) ?? DSP_BASE_INTERVAL_MS;
+    const history = chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula), step);
+    if (history.length) {
+      const revision = dataRevision(data), cached = extendedData.get(data);
+      if (cached?.history === history && cached.revision === revision) data = cached.data;
+      else {
+        const combined = [...history, ...data];
+        extendedData.set(data, { history, revision, data: combined });
+        data = combined;
+      }
+    }
+  }
   let ref: (number | null)[] | undefined;
   if (usesBtc && data.length) {
     const times = data.map(d => d.timestamp), interval = inferIntervalMs(times.map(time => ({ time }))) ?? DSP_BASE_INTERVAL_MS;
     if (options.fetchReference !== false) requestBtcReference(times[0], times[times.length - 1] + interval, interval);
     ref = btcClosesAt(times, interval);
   }
-  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, revision: `${dataRevision(data)}:${usesBtc ? btcReferenceVersion() : 0}` });
-  const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale);
+  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}` });
+  const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale).slice(-visibleLength);
   // Do not use out.core: the last account expression may itself be the weighted average.
   const names = researchSeriesNames(item, formula);
   return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };

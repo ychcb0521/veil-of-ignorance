@@ -30,6 +30,7 @@ import type { TradeRecord } from "@/types/trading";
 import { registerCustomIndicators, CUSTOM_INDICATOR_MAP, AVG_DEFAULT_HOURS, AVG_PARAM_INDICATORS, INDICATOR_COMPANIONS, visibleIndicatorCompanions, indicatorCalcParams } from "@/lib/customIndicators";
 import { researchIndicatorForKc } from "@/lib/researchIndicators";
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
+import { subscribeResearchHistory } from "@/lib/researchChartHistory";
 import { subscribeBtcReference } from "@/lib/btcReference";
 import {
   type AnalysisFloatingLabelCandidate,
@@ -1275,7 +1276,7 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart || data.length === 0) return;
 
-    const klineData = data.map(toKLineData);
+    const klineData = data.map(d => ({ ...toKLineData(d), ...(!displayTimestampTransform ? { researchSymbol: rawSymbol ?? symbol } : {}) }));
     const currentOldest = data[0].time;
     const lastCandle = klineData[klineData.length - 1];
     const lastSig = `${lastCandle.timestamp}|${lastCandle.open}|${lastCandle.high}|${lastCandle.low}|${lastCandle.close}|${lastCandle.volume}`;
@@ -2164,18 +2165,23 @@ function CandlestickChartComponent({
   // 【用户要求】CBI-2 的动量要剔除 BTC：BTC 对照 K 线取到后重算（参数第二位是数据版本号，变了 klinecharts 才会重算）
   const indicatorsForBtcRef = useRef(indicators);
   indicatorsForBtcRef.current = indicators;
-  useEffect(() => subscribeBtcReference(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
-    for (const ind of indicatorsForBtcRef.current) {
-      if (!ind.enabled) continue;
-      const names = [KLINE_INDICATOR_MAP[ind.type], ...(INDICATOR_COMPANIONS[ind.type] ?? []).map(c => c.kcName)];
-      for (const name of names) {
-        if (name !== "CBI2_CUSTOM" && !researchIndicatorForKc(name)) continue;
-        try { chart.overrideIndicator({ name, calcParams: indicatorCalcParams(name, ind) }); } catch {}
+  useEffect(() => {
+    const refresh = () => {
+      const chart = chartRef.current;
+      if (!chart) return;
+      for (const ind of indicatorsForBtcRef.current) {
+        if (!ind.enabled) continue;
+        const names = [KLINE_INDICATOR_MAP[ind.type], ...(INDICATOR_COMPANIONS[ind.type] ?? []).map(c => c.kcName)];
+        for (const name of names) {
+          if (name !== "CBI2_CUSTOM" && !researchIndicatorForKc(name)) continue;
+          try { chart.overrideIndicator({ name, calcParams: indicatorCalcParams(name, ind) }); } catch {}
+        }
       }
-    }
-  }), []);
+    };
+    const btc = subscribeBtcReference(refresh);
+    const history = subscribeResearchHistory(refresh);
+    return () => { btc(); history(); };
+  }, []);
 
   // ============================================================
   // Drawing tool activation — binds to klinecharts overlay API

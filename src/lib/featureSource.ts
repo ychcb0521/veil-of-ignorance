@@ -8,8 +8,8 @@
  * 不会出现「均值的均值」。Deep dig 自己的结果仍按公式写的算（写了 avg 行就是 avg(X, h)，与渔 H = h 时同一个量）。
  */
 import type { KLineData } from 'klinecharts';
-import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import type { Program } from '@/lib/deepDig/formula';
+import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, halfLifeOf, avgHoursOf, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { programHistoryBars, type Program } from '@/lib/deepDig/formula';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
@@ -105,6 +105,18 @@ function compileFor(formula: string, constant: string | null, value: number | nu
     compiledCache.set(key, hit);
   }
   return hit;
+}
+
+/** Include every nested rolling window plus a conservative EMA convergence buffer. */
+export function chartFeatureHistoryBars(featureId: string, period: number, formula: string): number {
+  const def = chartFeatureDef(featureId);
+  if (!def) return 0;
+  const binding = CHART_PARAM[featureId];
+  const constant = binding && 'constant' in binding ? binding.constant : null;
+  const program = compileFor(formula, constant, constant ? period : null).compiled.program;
+  const hl = binding && 'param' in binding && binding.param === 'hl' ? period : halfLifeOf(def);
+  const avgh = binding && 'param' in binding && binding.param === 'avgh' ? period : avgHoursOf(def);
+  return programHistoryBars(program, { hl, avgh, 半衰期: hl, 平均时长: avgh }, 5) + Math.ceil(32 * hl * 12) + 2;
 }
 
 export interface ChartFeatureSeries {
