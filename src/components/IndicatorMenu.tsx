@@ -425,6 +425,8 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
 }>(function IndicatorRow({ item, indicators, onToggle, onUpdatePeriod, onUpdateAvgHours, onToggleZ, onToggleAverage }, ref) {
   const active = indicators.find(i => i.type === item.id);
   const supported = isSupported(item.id);
+  const custom = item.category === 'custom';
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
 
   return (
     <div
@@ -441,8 +443,18 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
               <span className="text-[8px] px-1 py-0 rounded bg-muted text-muted-foreground leading-tight">优化中</span>
             )}
           </div>
-          <span className="text-[10px] text-muted-foreground">{item.nameEn}</span>
-          {item.description && (
+          {custom ? (
+            <button
+              type="button"
+              aria-label={`${item.nameZh} 说明`}
+              aria-expanded={descriptionOpen}
+              onClick={e => { e.stopPropagation(); setDescriptionOpen(open => !open); }}
+              className="mt-1 text-[10px] leading-4 text-muted-foreground hover:text-foreground"
+            >
+              {descriptionOpen ? '收起说明 ▴' : '说明 ▾'}
+            </button>
+          ) : <span className="text-[10px] text-muted-foreground">{item.nameEn}</span>}
+          {!custom && item.description && (
             // 【用户要求】在旁边注明定义；悬停给出完整计算步骤
             <span className="mt-0.5 block whitespace-normal text-[10px] leading-4 text-muted-foreground/90" title={item.detail}>{item.description}</span>
           )}
@@ -497,6 +509,15 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <Plus className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         )}
       </div>
+      {custom && descriptionOpen && (
+        <div
+          className="basis-full pl-[18px] pr-1 pt-1 text-[10px] leading-4 text-muted-foreground cursor-text"
+          onClick={e => e.stopPropagation()}
+        >
+          <p className="font-medium">{item.nameEn}</p>
+          {item.description && <p className="mt-1 whitespace-normal" title={item.detail}>{item.description}</p>}
+        </div>
+      )}
     </div>
   );
 });
