@@ -2231,15 +2231,15 @@ function CandlestickChartComponent({
     return () => { closeButtons.forEach(button => button.remove()); };
   }, [indicators, setIndicators]);
 
-  // Soft two-color vertical washes blend through the center; alternate cool and
-  // warm-neutral palettes without using the indicators' red/green direction colors.
+  // Subtle neutral gradients follow the Binance charcoal / cool-gray palette.
+  // Neighboring panes differ in tone; gold and red/green remain foreground accents.
   // Read DOM order because restoring a hidden pane appends it in the native chart.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
     const surfaces = theme === 'light'
-      ? ['linear-gradient(180deg, #EDF4FC 0%, #F6EFFA 100%)', 'linear-gradient(180deg, #F8F3EB 0%, #EDF5F9 100%)']
-      : ['linear-gradient(180deg, #1C2936 0%, #292637 100%)', 'linear-gradient(180deg, #2B2925 0%, #202D35 100%)'];
+      ? ['linear-gradient(180deg, #F1F3F6 0%, #FAFBFC 100%)', 'linear-gradient(180deg, #FDFEFE 0%, #F5F6F8 100%)']
+      : ['linear-gradient(180deg, #1A1F26 0%, #242B34 100%)', 'linear-gradient(180deg, #272E38 0%, #20262E 100%)'];
     const roots = [...new Set([...activeIndicatorPanes.current.values()])]
       .filter((id): id is string => !!id && id !== 'candle_pane')
       .map(id => chart.getDom?.(id, DomPosition.Root))
