@@ -16,6 +16,8 @@ import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
+import { AVG_HIGHLIGHT_SPECS, averageHighlightColor, AVG_HIGHLIGHT_COLORS, type AverageKind } from '@/lib/avgHighlight';
+import { avgCalibrationContext, avgCalibrationVersion } from '@/lib/avgHighlightClient';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -270,7 +272,7 @@ export function bssPoints(dataList: KLineData[], recentHours: number | undefined
  */
 export const AVG_DEFAULT_HOURS = 24;
 /** 均线副图（第二个参数 = 均线时长 N）。 */
-export const AVG_PARAM_INDICATORS = new Set(['DSP_OVERLAY_AVG_CUSTOM']);
+export const AVG_PARAM_INDICATORS = new Set(['DSP_OVERLAY_AVG_CUSTOM', ...AVG_HIGHLIGHT_SPECS.flatMap(spec => [researchKcName(spec.id, 1), researchKcName(spec.id, 2)])]);
 
 const validHours = (h: unknown, fallback: number) => {
   const n = Number(h);
@@ -327,6 +329,8 @@ export function visibleIndicatorCompanions(ind: { type: string; showAverage?: bo
  * 【用户要求】DSP 的 a / avg_a 副图最后多一个 Z 开关（1 = Z 分数版，0 = 原始），图例里不显示这一位。
  */
 export function indicatorCalcParams(kcName: string, ind: { type?: string; period: number; avgHours?: number; zscore?: boolean }): number[] {
+  const averaged = calibratedAverageForName(kcName);
+  if (averaged) return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(averaged.item), avgCalibrationVersion()];
   const base = DSP_Z_BASE_NAMES[kcName];
   if (base) return indicatorCalcParams(base, { ...ind, zscore: true });
   const research = researchIndicatorForKc(kcName);
@@ -408,6 +412,8 @@ const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
  * DSP 的普通版和波动率归一化版都画 0 方向参考线。返回 null = 这个副图没有橘色线。
  */
 export function axisLineLevel(name: string, _p: readonly unknown[] | undefined): number | null {
+  const averaged = calibratedAverageForName(name);
+  if (averaged) return averaged.spec.center;
   switch (name) {
     case 'DSP_V_CUSTOM': case 'DSP_V_AVG2_CUSTOM': return 0;
     case 'DSP_V_AVG_CUSTOM': case 'DSP_OVERLAY_AVG_CUSTOM': return 0;
@@ -423,7 +429,51 @@ export function axisLineLevel(name: string, _p: readonly unknown[] | undefined):
   return null;
 }
 /** 所有副图都走这里注册：每次计算时把纵轴范围扩到包含橘色线（保留原来固定的上下限）。 */
+export function calibratedAverageForName(name: string) {
+  for (const spec of AVG_HIGHLIGHT_SPECS) {
+    const item = CUSTOM_RESEARCH_INDICATORS.find(item => item.id === spec.id)!;
+    for (const level of [1, 2]) if (researchKcName(item.id, level) === name) return { spec, item, kind: (level === 1 ? 'avg' : 'avg2') as AverageKind };
+  }
+  return undefined;
+}
 function registerIndicator(template: IndicatorTemplate): void {
+  const averaged = calibratedAverageForName(template.name);
+  if (averaged) {
+    const { item, spec, kind } = averaged;
+    const key = template.figures?.[0]?.key ?? 'value';
+    registerKcIndicator({ ...template, minValue: undefined, maxValue: undefined,
+      calcParams: [item.period, AVG_DEFAULT_HOURS, 0, 0, 0],
+      createTooltipDataSource: ({ indicator, defaultStyles }) => {
+        const context = avgCalibrationContext(item.featureId, indicator.calcParams[0], indicator.calcParams[1], kind);
+        const def = chartFeatureDef(item.featureId), names = def ? researchSeriesNames(item, def.formula) : null;
+        const label = (kind === 'avg' ? names?.avg : names?.avg2) ?? template.shortName;
+        return { name: `${label}${def?.unit ? `(${def.unit})` : ''}${context.limits ? '' : ` · ${context.status}`}`, calcParamsText: `(${indicator.calcParams[1]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
+      },
+      draw: args => {
+        zeroLine(ORANGE_DASH_LINE, spec.center)(args);
+        const last = args.indicator?.result?.at(-1) as Record<string, number> | undefined;
+        if (last && Number.isFinite(last._avgLower)) {
+          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.buyer }, last._avgUpper)(args);
+          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.seller }, last._avgLower)(args);
+        }
+        return false;
+      },
+      figures: [{ key, title: template.figures?.[0]?.title ?? '', type: 'line', styles: data => {
+        const point = (data.next?.indicatorData ?? data.current.indicatorData) as Record<string, number> | undefined;
+        const limits = point && Number.isFinite(point._avgLower) ? { lower: point._avgLower, upper: point._avgUpper } : undefined;
+        return { color: averageHighlightColor(point?.[key], limits), size: limits && (point![key] > limits.upper || point![key] < limits.lower) ? 2.2 : 1.5 };
+      } }],
+      calc: (data, indicator) => {
+        const hours = validHours(indicator.calcParams[1], AVG_DEFAULT_HOURS);
+        const context = avgCalibrationContext(item.featureId, indicator.calcParams[0], hours, kind);
+        const limits = context.limits;
+        indicator.minValue = limits?.lower ?? spec.center; indicator.maxValue = limits?.upper ?? spec.center;
+        const values = researchChartSeries(data, item, indicator.calcParams[0], { averageHours: hours })[kind];
+        return values.map(value => ({ ...(value == null ? {} : { [key]: value }), _avgLower: limits?.lower ?? NaN, _avgUpper: limits?.upper ?? NaN }));
+      },
+    });
+    return;
+  }
   const calc = template.calc;
   if (!calc || axisLineLevel(template.name, template.calcParams) == null) { registerKcIndicator(template); return; }
   const baseMin = template.minValue, baseMax = template.maxValue;

@@ -14,6 +14,7 @@ import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
 import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
 import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
+import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
 import { SELLER_CONTROL_DEF } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
@@ -527,14 +528,14 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
               label={`${item.nameZh} 参数`}
             />
             {item.periodUnit && <span className="-ml-1 text-[10px] text-muted-foreground">{item.periodUnit}</span>}
-            {item.avgDefault != null && (
+            {(item.avgDefault != null || AVG_HIGHLIGHT_SPECS.some(spec => spec.id === item.id)) && (
               <>
                 <span className="ml-0.5 text-[10px] text-muted-foreground" title={item.avgHint}>avg</span>
                 <ParamInput
-                  value={active.avgHours ?? item.avgDefault}
+                  value={active.avgHours ?? item.avgDefault ?? 24}
                   parse={v => { const n = Number(v); return v.trim() !== '' && Number.isFinite(n) && n > 0 ? n : null; }}
                   onCommit={n => onUpdateAvgHours(item.id, n)}
-                  title={item.avgHint}
+                  title={item.avgHint ?? '普通 avg 与分段加权 avg2 的总窗口 N；高亮界限按评分前30标的全历史分别校准并缓存'}
                   label={`${item.nameZh} 均线时长 N（小时）`}
                 />
                 <span className="-ml-1 text-[10px] text-muted-foreground">h</span>

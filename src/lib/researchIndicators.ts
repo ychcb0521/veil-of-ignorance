@@ -5,6 +5,7 @@ import { compileFeatureFormula, avgHoursOf, halfLifeOf } from '@/lib/deepDig/fea
 import { chartPrehistory, researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btcReference';
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
+import { displayAverage } from '@/lib/avgHighlight';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
@@ -112,13 +113,20 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   return hash >>> 0;
 }
 
-export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: { fetchReference?: boolean } = {}) {
+export function researchChartSeries(data: KLineData[], item: ResearchIndicator, period: number, options: { fetchReference?: boolean; averageHours?: number } = {}) {
   const empty = () => ({ core: data.map(() => null as number | null), avg: data.map(() => null as number | null), avg2: data.map(() => null as number | null) });
   const def = accountFeatureDef(item.featureId);
   if (!def) return empty();
   let formula: string, usesBtc: boolean;
   try {
     ({ formula, usesBtc } = formulaPlan(item, def.formula));
+    if (options.averageHours != null) {
+      const core = researchSeriesNames(item, formula).core;
+      let helper = '_display_average_history';
+      while (formula.includes(helper)) helper += '_';
+      // Only requests sufficient hidden history; no account expression is replaced.
+      formula += `\n${helper} = avg(${core}, ${options.averageHours})`;
+    }
   } catch { return empty(); }
   const visibleLength = data.length;
   if (data.length && options.fetchReference !== false) {
@@ -144,5 +152,11 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   const scaled = (name: string) => (out?.vars.get(name) ?? data.map(() => null)).map(v => v == null ? null : v * def.scale).slice(-visibleLength);
   // Do not use out.core: the last account expression may itself be the weighted average.
   const names = researchSeriesNames(item, formula);
+  if (options.averageHours != null) {
+    if (options.averageHours === 24) return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };
+    const core = out?.vars.get(names.core) ?? data.map(() => null);
+    const average = (kind: 'avg' | 'avg2') => Array.from(displayAverage(core, options.averageHours!, kind), v => Number.isFinite(v) ? v * def.scale : null).slice(-visibleLength);
+    return { core: scaled(names.core), avg: average('avg'), avg2: average('avg2') };
+  }
   return { core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) };
 }

@@ -4,6 +4,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { IndicatorMenu, INDICATOR_CATALOG, CUSTOM_INDICATOR_GROUPS } from '@/components/IndicatorMenu';
 import type { IndicatorConfig } from '@/components/CandlestickChart';
 import { CUSTOM_INDICATOR_MAP, INDICATOR_COMPANIONS, indicatorCalcParams, registerCustomIndicators, visibleIndicatorCompanions } from '@/lib/customIndicators';
+import { CUSTOM_RESEARCH_INDICATORS, researchChartSeries } from '@/lib/researchIndicators';
 
 const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
@@ -111,9 +112,16 @@ describe('自制区的十个特征值', () => {
     for (let i = 0; i < z.length; i++) {
       const params = indicatorCalcParams(z[i].kcName, { period: 6, avgHours: 12 });
       const expectedParams = indicatorCalcParams(base[i].kcName, { period: 6, avgHours: 12, zscore: true });
-      expect(params).toEqual(expectedParams);
       const actual = registered.get(z[i].kcName).calc(data, { calcParams: params });
-      expect(actual).toEqual(registered.get(base[i].kcName).calc(data, { calcParams: expectedParams }));
+      if (i === 0) {
+        expect(params).toEqual(expectedParams);
+        expect(actual).toEqual(registered.get(base[i].kcName).calc(data, { calcParams: expectedParams }));
+      } else {
+        expect(params.slice(0, 2)).toEqual([6, 12]);
+        const spec = CUSTOM_RESEARCH_INDICATORS.find(item => item.id === 'DSP_Z')!;
+        const expected = researchChartSeries(data, spec, 6, { averageHours: 12 })[i === 1 ? 'avg' : 'avg2'];
+        expect(actual.map((row: {v?: number}) => row.v ?? null)).toEqual(expected);
+      }
     }
     expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 12 })).toEqual([12, 0, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_Z_V_CUSTOM', { period: 6 })).toEqual([6, 1, expect.any(Number), expect.any(Number)]);

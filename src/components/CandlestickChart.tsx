@@ -32,6 +32,7 @@ import { researchIndicatorForKc, migrateResearchIndicators } from "@/lib/researc
 import { configureResearchPaneAxis } from "@/lib/researchIndicatorAxes";
 import { subscribeResearchHistory } from "@/lib/researchChartHistory";
 import { subscribeBtcReference } from "@/lib/btcReference";
+import { subscribeAvgCalibration } from "@/lib/avgHighlightClient";
 import {
   type AnalysisFloatingLabelCandidate,
 } from "@/lib/analysisFloatingLabels";
@@ -2181,7 +2182,8 @@ function CandlestickChartComponent({
     };
     const btc = subscribeBtcReference(refresh);
     const history = subscribeResearchHistory(refresh);
-    return () => { btc(); history(); };
+    const calibration = subscribeAvgCalibration(refresh);
+    return () => { btc(); history(); calibration(); };
   }, []);
 
   // ============================================================

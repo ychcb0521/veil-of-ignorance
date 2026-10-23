@@ -46,12 +46,12 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
 
   it('avg_BSS 副图：逐根 = 过去 N 小时 BSS 的平均（5 分钟图 24 小时 = 288 根）；在 Deep dig 改成 6 跟着变', () => {
     const def = registered.get('BSS_AVG_CUSTOM')!;
-    expect(def.calcParams).toEqual([1, AVG_DEFAULT_HOURS]);
+    expect(def.calcParams).toEqual([1, AVG_DEFAULT_HOURS, 0, 0, 0]);
     const bss = bssPoints(k, 1).map(p => p.bss);
     const out = def.calc(k, { calcParams: [1, 24] });
     // 开头还没有 BSS 的几根：空着
     expect(bss[0]).toBeNull();
-    expect(out[0]).toEqual({});
+    expect(out[0].bss).toBeUndefined();
     for (const i of [20, 287, 288, 500, 699]) expect(out[i].bss).toBeCloseTo(manualAvg(bss, i, 288)!, 12);
     localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([{ ...BSS_DEF, formula: BSS_FORMULA + '\navg_BSS = avg(BSS, 6)' }]));
     const out6 = def.calc(k, { calcParams: [1, 24] });
@@ -77,12 +77,12 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
   });
 
   it('参数：两个均线副图多传一个 N（老设置没有 → 24），其他指标不变；空值跳过', () => {
-    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 2 })).toEqual([2, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 2 })).toEqual([2, 24, expect.any(Number), expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_V_AVG_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 48, 0, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('BSS_CUSTOM', { period: 2, avgHours: 48 })).toEqual([2, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_V_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6, 0, expect.any(Number), expect.any(Number)]);
     expect(indicatorCalcParams('DSP_A_CUSTOM', { period: 6, avgHours: 48 })).toEqual([6]);
-    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 1, avgHours: 0 })).toEqual([1, expect.any(Number), expect.any(Number)]);
+    expect(indicatorCalcParams('BSS_AVG_CUSTOM', { period: 1, avgHours: 0 })).toEqual([1, 24, expect.any(Number), expect.any(Number), expect.any(Number)]);
     expect(rollingAvgHours([1, null, 3, 5], 1 / 6)).toEqual([1, 1, 3, 4]);
   });
 
@@ -90,14 +90,14 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'BSS', period: 1, enabled: true }, { type: 'DSP', period: 6, avgHours: 12, enabled: true }];
     render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
-    expect(screen.queryByLabelText('买卖强度综合分 BSS 均线时长 N（小时）')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('买卖强度综合分 BSS 均线时长 N（小时）')).toHaveValue(24);
     const avg = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 均线时长 N（小时）') as HTMLInputElement;
     expect(avg.value).toBe('12');
     fireEvent.change(avg, { target: { value: '' } }); expect(avg.value).toBe('');
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(avg, { target: { value: '48' } });
     expect(onChange).toHaveBeenLastCalledWith([indicators[0], { ...indicators[1], avgHours: 48 }]);
-    expect(screen.queryAllByLabelText(/均线时长/)).toHaveLength(1);
+    expect(screen.queryAllByLabelText(/均线时长/)).toHaveLength(2);
   });
 
   it('新开 BSS：均值由 Deep dig 定义，盘面不覆盖均线时长', () => {
