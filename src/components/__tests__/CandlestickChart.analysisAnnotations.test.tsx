@@ -101,6 +101,7 @@ vi.mock('klinecharts', () => ({
   DomPosition: { Root: 'root', Main: 'main', YAxis: 'yAxis' },
   ActionType: {
     OnDataReady: 'onDataReady',
+    OnPaneDrag: 'onPaneDrag',
     OnScroll: 'onScroll',
     OnZoom: 'onZoom',
     OnVisibleRangeChange: 'onVisibleRangeChange',
@@ -218,6 +219,39 @@ describe('CandlestickChart analysis annotations', () => {
     } finally {
       view.unmount(); resetBtcReference();
       delete (mocks.chart as unknown as Record<string, unknown>).overrideIndicator;
+      if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key, previous);
+    }
+  });
+
+  it('四个副图在普通盘面压缩高度，全屏后恢复，再还原时仍为 K 线保留空间', async () => {
+    const key = 'sim_anon_indicators', previous = localStorage.getItem(key);
+    localStorage.setItem(key, JSON.stringify(['STATE', 'CDA'].map(type => ({ type, period: 24, enabled: true, showAverage: false, showAverage2: true }))));
+    viewportBounds = { width: 850, height: 360 };
+    const sizes = new Map<string, number>();
+    const setPaneOptions = vi.fn(({ id, height }: { id: string; height?: number }) => { if (height) sizes.set(id, height); });
+    Object.assign(mocks.chart, { setPaneOptions, getStyles: () => ({ separator: { size: 4 } }), overrideIndicator: vi.fn() });
+    mocks.chart.getSize.mockImplementation((id?: string) => ({ width: 850, height: id === 'x_axis_pane' ? 24 : 520 }));
+    // Creation and allocation are separate native operations.
+    let nextId = 0;
+    mocks.chart.createIndicator.mockImplementation(() => `subpane_${nextId++}`);
+    const data = [candle(300000), candle(600000)];
+    const view = render(<TooltipProvider><CandlestickChart data={data} symbol="TESTUSDT" viewportRevision="embedded" /></TooltipProvider>);
+    try {
+      await waitFor(() => expect(mocks.chart.resize.mock.calls.length).toBeGreaterThanOrEqual(3));
+      expect([...sizes.values()]).toEqual([35, 35, 35, 35]);
+      viewportBounds = { width: 1440, height: 850 };
+      view.rerender(<TooltipProvider><CandlestickChart data={data} symbol="TESTUSDT" viewportRevision="fullscreen" /></TooltipProvider>);
+      await waitFor(() => expect([...sizes.values()]).toEqual([80, 80, 80, 80]));
+      viewportBounds = { width: 850, height: 360 };
+      view.rerender(<TooltipProvider><CandlestickChart data={data} symbol="TESTUSDT" viewportRevision="embedded" /></TooltipProvider>);
+      await waitFor(() => expect([...sizes.values()]).toEqual([35, 35, 35, 35]));
+      expect(mocks.chart.createIndicator).toHaveBeenCalledTimes(4);
+      expect(mocks.dataList.map(bar => bar.timestamp)).toEqual([300000, 600000]);
+    } finally {
+      view.unmount();
+      mocks.chart.createIndicator.mockImplementation(() => 'candle_pane');
+      mocks.chart.getSize.mockImplementation(() => ({ width: 1000, height: 520 }));
+      for (const field of ['setPaneOptions', 'getStyles', 'overrideIndicator']) delete (mocks.chart as unknown as Record<string, unknown>)[field];
       if (previous == null) localStorage.removeItem(key); else localStorage.setItem(key, previous);
     }
   });

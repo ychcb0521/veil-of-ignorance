@@ -45,6 +45,7 @@ import {
   type AnalysisBandLabelOverlayData,
 } from "@/lib/analysisBandLabelOverlay";
 import { klineChartLayoutIsStale } from "@/lib/klineChartLayoutHeal";
+import { createChartPaneLayout, synchronizeChartPaneCanvases } from "@/lib/chartPaneLayout";
 import {
   installKlineChartPointerInteraction,
   type InteractionController,
@@ -602,6 +603,7 @@ function CandlestickChartComponent({
   pricePrecisionRef.current = pricePrecision;
 
   const activeIndicatorPanes = useRef<Map<string, string | null>>(new Map());
+  const paneLayoutRef = useRef(createChartPaneLayout());
 
   const scheduleViewportReflow = useCallback((force = false) => {
     viewportReflowForceRef.current = viewportReflowForceRef.current || force;
@@ -664,6 +666,7 @@ function CandlestickChartComponent({
       if (!shouldResize) return;
       lastViewportSizeRef.current = { width, height };
 
+      paneLayoutRef.current.apply(chart, height, activeIndicatorPanes.current.values());
       chart.resize();
       pointerInteractionRef.current?.invalidate();
 
@@ -701,6 +704,7 @@ function CandlestickChartComponent({
         viewportPrimeFrameRef.current = window.requestAnimationFrame(() => {
           viewportPrimeFrameRef.current = null;
           if (chartRef.current !== chart) return;
+          synchronizeChartPaneCanvases(chart);
           pointerInteractionRef.current?.prime();
         });
       });
@@ -1093,9 +1097,22 @@ function CandlestickChartComponent({
     chart.subscribeAction("onCrosshairChange" as any, crosshairCb);
     const dataReadyCb = () => analysisCommitFinalizerRef.current();
     chart.subscribeAction(ActionType.OnDataReady, dataReadyCb);
+    let paneDragFrame: number | null = null;
+    const paneDragCb = () => {
+      paneLayoutRef.current.remember(chart, activeIndicatorPanes.current.values());
+      if (paneDragFrame != null) window.cancelAnimationFrame(paneDragFrame);
+      paneDragFrame = window.requestAnimationFrame(() => {
+        paneDragFrame = window.requestAnimationFrame(() => {
+          paneDragFrame = null;
+          if (chartRef.current === chart) synchronizeChartPaneCanvases(chart);
+        });
+      });
+    };
+    chart.subscribeAction(ActionType.OnPaneDrag, paneDragCb);
     const analysisLifecycle = analysisLifecycleRef.current;
 
     return () => {
+      if (paneDragFrame != null) window.cancelAnimationFrame(paneDragFrame);
       window.cancelAnimationFrame(interactionFrame);
       if (viewportReflowFrameRef.current != null) {
         window.cancelAnimationFrame(viewportReflowFrameRef.current);
@@ -1130,6 +1147,7 @@ function CandlestickChartComponent({
         chart.unsubscribeAction("onCrosshairChange" as any, crosshairCb);
       } catch {}
       try {
+        chart.unsubscribeAction(ActionType.OnPaneDrag, paneDragCb);
         chart.unsubscribeAction(ActionType.OnDataReady, dataReadyCb);
       } catch {
         // The chart may already have disposed its action store.
@@ -2157,6 +2175,8 @@ function CandlestickChartComponent({
     const chart = chartRef.current;
     if (!chart) return;
 
+    const subpaneIds = () => new Set([...activeIndicatorPanes.current.values()].filter(id => !!id && id !== 'candle_pane'));
+    const previousPaneIds = subpaneIds();
     const currentActive = new Set<string>();
 
     for (const ind of indicators) {
@@ -2221,6 +2241,12 @@ function CandlestickChartComponent({
         activeIndicatorPanes.current.delete(type);
       }
     }
+    const nextPaneIds = subpaneIds();
+    if (nextPaneIds.size !== previousPaneIds.size || [...nextPaneIds].some(id => !previousPaneIds.has(id))) {
+      const host = containerRef.current;
+      if (host) paneLayoutRef.current.apply(chart, host.getBoundingClientRect().height || host.clientHeight, nextPaneIds);
+      scheduleViewportReflow(true);
+    }
     // Use DOM buttons above the native canvas so replay redraws cannot move or
     // invalidate the close hit area. Pane roots move with native resize/layout.
     const closeButtons: HTMLButtonElement[] = [];
@@ -2246,7 +2272,7 @@ function CandlestickChartComponent({
       closeButtons.push(button);
     }
     return () => { closeButtons.forEach(button => button.remove()); };
-  }, [indicators, setIndicators]);
+  }, [indicators, setIndicators, scheduleViewportReflow]);
 
   // Pane colors sampled from the supplied Binance light/dark references.
   // Neutral surfaces and clear gutters carry the hierarchy; charts keep their colors.
