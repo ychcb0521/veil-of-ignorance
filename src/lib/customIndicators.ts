@@ -461,7 +461,8 @@ function indicatorRows(indicator: object, values: (number | null)[], key: string
 }
 export function rawIndicatorReferenceLimits(name: string): readonly [number, number] | undefined {
   const spec = AVG_HIGHLIGHT_SPECS.find(s => researchKcName(s.id) === name);
-  if (!spec) return undefined;
+  // The original a has no fixed raw cutoff; its averages use empirical calibration.
+  if (!spec || spec.id === 'DSP_VA') return undefined;
   if (spec.id === 'BSS') return [-BSS_STRONG, BSS_STRONG];
   return spec.range ?? [-15, 15];
 }

@@ -52,6 +52,45 @@ it('never applies built-in limits to an edited core, named average, scale or per
   client.avgCalibrationContext('state',48,24,'avg2');
   await vi.waitFor(() => expect(mocks.messages).toHaveLength(4));
 });
+it('ships limits for the current 3 / 0.4 / 3 State formula, including its saved named averages', async () => {
+  mocks.signalCount = 0;
+  mocks.read.mockRejectedValue(Error('IndexedDB unavailable'));
+  const { STATE_DEF } = await import('../deepDig/features');
+  const client = await import('../avgHighlightClient');
+  const weighted = STATE_DEF.formula.replace(/^wb = 1/m, 'wb = 3');
+  const named = weighted + '\navg_state = avg(state, 24)\nm6 = avg(state, 6)\navg_state_3 = (m6 + 2 * ago(m6, 6) + 3 * ago(m6, 12) + 4 * ago(m6, 18)) / 10\navg_state_2 = (4 * m6 + 3 * ago(m6, 6) + 2 * ago(m6, 12) + ago(m6, 18)) / 10';
+  for (const formula of [weighted, named]) {
+    localStorage.setItem('sim_anon_deep_dig_features_v1', JSON.stringify([{ ...STATE_DEF, formula }]));
+    const contexts = () => [6, 24, 48].flatMap(hours => (['avg', 'avg2'] as const).map(kind => client.avgCalibrationContext('state', 24, hours, kind)));
+    contexts();
+    await vi.waitFor(() => expect(contexts().every(c => c.limits && c.status === '标准样本已校准')).toBe(true));
+    for (const c of contexts()) {
+      expect(c.limits!.count).toBeGreaterThan(7_000_000);
+      expect(c.limits!.lower).toBeLessThan(.5);
+      expect(c.limits!.upper).toBeGreaterThan(.5);
+    }
+  }
+  expect(mocks.messages).toHaveLength(0);
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+it('keeps the saved S2 formula with named averages separate from the current built-in S2 weights', async () => {
+  mocks.signalCount = 0;
+  const { STATE2_DEF } = await import('../deepDig/features');
+  const formula = STATE2_DEF.formula.replace(/^wb = 3/m, 'wb = 1')
+    + '\navg_state2 = avg(state2, 24)\nm6 = avg(state2, 6)\navg_state2_3 = (m6 + 2 * ago(m6, 6) + 3 * ago(m6, 12) + 4 * ago(m6, 18)) / 10\navg_state2_2 = (4 * m6 + 3 * ago(m6, 6) + 2 * ago(m6, 12) + ago(m6, 18)) / 10';
+  localStorage.setItem('sim_anon_deep_dig_features_v1', JSON.stringify([{ ...STATE2_DEF, formula }]));
+  const client = await import('../avgHighlightClient');
+  const contexts = () => [6, 24, 48].flatMap(hours => (['avg', 'avg2'] as const).map(kind => client.avgCalibrationContext('state2', 24, hours, kind)));
+  contexts();
+  await vi.waitFor(() => expect(contexts().every(c => c.limits && c.status === '标准样本已校准')).toBe(true));
+  expect(client.avgCalibrationContext('state2', 24, 24, 'avg2').limits!.upper).toBeCloseTo(.5615612241413761, 12);
+  localStorage.removeItem('sim_anon_deep_dig_features_v1');
+  const builtIn = () => client.avgCalibrationContext('state2', 24, 24, 'avg2');
+  builtIn();
+  await vi.waitFor(() => expect(builtIn().limits).toBeDefined());
+  expect(builtIn().limits!.upper).toBeCloseTo(.5703257568838939, 12);
+  expect(mocks.messages).toHaveLength(0);
+});
 it('requires an explicit sample for unknown custom formulas rather than inventing bounds', async () => {
   mocks.signalCount=0;
   const { STATE_DEF } = await import('../deepDig/features');

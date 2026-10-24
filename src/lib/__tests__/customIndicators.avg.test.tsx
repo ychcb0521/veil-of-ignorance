@@ -67,7 +67,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
 
   it('avg_a 副图：单位与 a 相同（基点 / 根）；1 小时图上每根窗口根数与 5 分钟图相同', () => {
     const def = registered.get('DSP_V_AVG_CUSTOM')!;
-    expect(def.calcParams).toEqual([6, AVG_DEFAULT_HOURS, 0]);
+    expect(def.calcParams).toEqual([6, AVG_DEFAULT_HOURS, 0, 0, 0]);
     // 【用户要求】2026-10-19 公式统一：a 按 Deep dig 的公式（成交额基线 avg(Q, avgh)），不再是图上自己的 ema(Q, hl)
     const a = unifiedDspA(k, 6, false);
     const out = def.calc(k, { calcParams: [6, 24] });
@@ -90,7 +90,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'BSS', period: 1, enabled: true }, { type: 'DSP', period: 6, avgHours: 12, enabled: true }];
     render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
-    expect(screen.getByLabelText('买卖强度综合分 BSS 均线时长 N（小时）')).toHaveValue(24);
+    expect(screen.getByLabelText('BSS 均线时长 N（小时）')).toHaveValue(24);
     const avg = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 均线时长 N（小时）') as HTMLInputElement;
     expect(avg.value).toBe('12');
     fireEvent.change(avg, { target: { value: '' } }); expect(avg.value).toBe('');
@@ -100,11 +100,11 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     expect(screen.queryAllByLabelText(/均线时长/)).toHaveLength(2);
   });
 
-  it('新开 BSS：均值由 Deep dig 定义，盘面不覆盖均线时长', () => {
+  it('新开 BSS：默认近期窗口为 12 小时', () => {
     const onChange = vi.fn();
     render(<IndicatorMenu open indicators={[]} onIndicatorsChange={onChange} onClose={() => {}} />);
-    fireEvent.click(screen.getByText('买卖强度综合分 BSS'));
-    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'BSS', period: 1 })]);
+    fireEvent.click(screen.getByText('BSS', { exact: true }));
+    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'BSS', period: 12 })]);
   });
 });
 

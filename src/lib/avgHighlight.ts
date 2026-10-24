@@ -15,6 +15,7 @@ export function avgReferenceKey(def: { id: string; formula: string; scale: numbe
   return JSON.stringify(['reference-v1', AVG_CALIBRATION_CUTOFF, def.id, formula, def.scale, def.halfLifeHours ?? 6, def.avgHours ?? 24, period, hours, kind]);
 }
 export const AVG_HIGHLIGHT_SPECS = [
+  { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', center: 0, range: null },
   { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', center: 0, range: [-1, 1] },
   { id: 'CDI2', featureId: 'cdi2', core: 'CDI2', center: 0, range: [-1, 1] },
   { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', center: 0, range: null },
