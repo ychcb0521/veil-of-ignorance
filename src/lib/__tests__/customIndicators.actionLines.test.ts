@@ -1,34 +1,34 @@
-// 【用户要求】2026-10-22「按这个改」：橘色线 = 「渔」里的行动阈值——CBI-2 0.04、DSP·az 0（净推力方向分界）、CBA 8、avg_BSS 0.08；原始 BSS 保留 0.2
 import { describe, expect, it, vi } from 'vitest';
 const registered = vi.hoisted(() => new Map<string, { draw?: (args: unknown) => boolean; maxValue?: number }>());
 vi.mock('klinecharts', () => ({ registerIndicator: (def: { name: string }) => { registered.set(def.name, def as never); } }));
+import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
+import { researchKcName } from '@/lib/researchIndicators';
 import { ACTION_LEVELS, ORANGE_DASH_LINE, registerCustomIndicators } from '@/lib/customIndicators';
 
 /** 假画布：纵轴 v → (100000 − 1000·v) 像素（细到 0.001），记录每条横线对应的数值与颜色。 */
 function lines(name: string, calcParams?: unknown[]) {
   const out: { v: number; color: string }[] = [];
   let color = '', y = 0;
-  const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() {}, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(c: string) { color = c; }, moveTo(_x: number, py: number) { y = py; }, stroke() { out.push({ v: (100000 - Math.floor(y)) / 1000, color }); } };
+  const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() { throw new Error('Raw indicators must not draw boundary bands'); }, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(c: string) { color = c; }, moveTo(_x: number, py: number) { y = py; }, stroke() { out.push({ v: (100000 - Math.floor(y)) / 1000, color }); } };
   registered.get(name)!.draw!({ ctx, bounding: { width: 300, height: 200000 }, yAxis: { convertToPixel: (v: number) => 100000 - 1000 * v }, indicator: { calcParams } });
   return out;
 }
 const orange = (name: string, calcParams?: unknown[]) => lines(name, calcParams).filter(l => l.color === ORANGE_DASH_LINE.color).map(l => Math.round(l.v * 100) / 100);
 
 describe('副图橘色线按指标区分方向参考与经验门槛', () => {
-  it('非avg保留既有界限，az和卖控采用用户指定±15，均保留中线', () => {
+  it('全部十一项原值只画一条淡实线，无上下界短刻度、色带或重复零线', () => {
     registerCustomIndicators();
-    for (const name of ['DSP_Z_V_CUSTOM', 'SELLER_CONTROL_CUSTOM']) {
-      expect(lines(name)).toEqual(expect.arrayContaining([{v:15,color:'rgba(14,203,129,0.5)'}, {v:-15,color:'rgba(246,70,93,0.5)'}]));
-      expect(orange(name)).toEqual([0]);
+    for (const spec of AVG_HIGHLIGHT_SPECS) {
+      const threshold = ['STATE', 'STATE2'].includes(spec.id) ? 0.6 : 0;
+      expect(lines(researchKcName(spec.id))).toEqual([{ v: threshold, color: ORANGE_DASH_LINE.color }]);
     }
-    expect(lines('CBI2_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'rgba(14,203,129,0.5)'}, {v:-1,color:'rgba(246,70,93,0.5)'}]));
-    expect(lines('STATE_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'rgba(14,203,129,0.5)'}, {v:0,color:'rgba(246,70,93,0.5)'}]));
+    expect(ORANGE_DASH_LINE.dash).toEqual([]);
   });
   it('图表参考线独立为 0，不借用捕捞门槛', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0, cba: 0, avgBss: 0 }); });
   it('CBI-2 与 CBA 的黄线为 0', () => {
     registerCustomIndicators();
     expect(orange('CBI2_CUSTOM')).toEqual([0]);
-    expect(orange('CBA_CUSTOM')).toEqual([0]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(100);
+    expect(orange('CBA_CUSTOM')).toEqual([0]);expect(registered.get('CBA_CUSTOM')!.maxValue).toBe(0);
   });
   it('a / avg_a：普通版和归一化版的方向参考线均为 0', () => {
     registerCustomIndicators();
@@ -62,12 +62,15 @@ describe('纵轴总是包含橘色线', () => {
     // 原始 a 副图保留「总包含 0」，归一化版也只保留 0
     expect(bounds('DSP_V_CUSTOM', [6, 1])).toEqual([0, 0]);
   });
-  it('CBI-2 / CBA / BSS 均值包含零线；原始 CBI-2 仍是 −1 ~ 1', () => {
+  it('CBI-2 / CBA / BSS 均值包含零线；原值不强制扩展到上下限', () => {
     registerCustomIndicators();
     expect(bounds('CBI2_AVG_CUSTOM', [24, 0, 0])).toEqual([0, 0]);
     expect(bounds('CBA_AVG2_CUSTOM', [6, 0, 0])).toEqual([0, 0]);
     expect(bounds('BSS_AVG_CUSTOM', [1, 24])).toEqual([0, 0]);
-    expect(bounds('CBI2_CUSTOM', [24, 0])).toEqual([-1, 1]);
+    for (const spec of AVG_HIGHLIGHT_SPECS) {
+      const threshold = ['STATE', 'STATE2'].includes(spec.id) ? 0.6 : 0;
+      expect(bounds(researchKcName(spec.id), [24, 0])).toEqual([threshold, threshold]);
+    }
   });
   it('四项卖方原值及均值均包含零方向线', () => {
     registerCustomIndicators();

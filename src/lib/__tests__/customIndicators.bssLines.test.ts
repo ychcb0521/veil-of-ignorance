@@ -13,7 +13,7 @@ function strokesOf(name: string): Stroke[] {
   const out: Stroke[] = [];
   const state = { color: '', width: 0, dash: [] as number[], y: 0 };
   const ctx = {
-    save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() {},
+    save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() { throw new Error('Unexpected boundary band'); },
     set strokeStyle(c: string) { state.color = c; },
     set lineWidth(w: number) { state.width = w; },
     setLineDash(d: number[]) { state.dash = d; },
@@ -25,15 +25,10 @@ function strokesOf(name: string): Stroke[] {
 }
 
 describe('BSS 与 DSP·a 使用统一的淡实线中轴', () => {
-  it('BSS 中轴保持 0，±0.55 使用右侧短刻度', () => {
+  it('BSS 与 DSP·a 均只保留零门槛线', () => {
     registerCustomIndicators();
-    const dspA = strokesOf('DSP_V_CUSTOM');
-    expect(dspA).toEqual([{ y: 100.5, ...ORANGE_DASH_LINE }]);
-    const bss = strokesOf('BSS_CUSTOM');
-    const at = (v: number) => bss.filter(s => Math.floor(s.y) === Math.round(100 - 100 * v));
-    expect(at(0)).toEqual([{ y: 100.5, color: dspA[0].color, width: dspA[0].width, dash: [] }]);
-    expect(bss.at(-1)!.y).toBe(100.5);
-    expect(at(-0.55)).toEqual([{ y: 155.5, color: 'rgba(246,70,93,0.5)', width: 1, dash: [] }]);
-    expect(bss).toHaveLength(3);
+    const expected = [{ y: 100.5, ...ORANGE_DASH_LINE }];
+    expect(strokesOf('DSP_V_CUSTOM')).toEqual(expected);
+    expect(strokesOf('BSS_CUSTOM')).toEqual(expected);
   });
 });

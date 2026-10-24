@@ -414,21 +414,17 @@ const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.3)', width: 0.6, dash:
 /** Chart reference levels are zero; fishing thresholds are configured separately. */
 export const ACTION_LEVELS = { cbi2: 0, cba: 0, avgBss: 0 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
-/** Shade the values outside the bounds; only short edge marks identify the exact cutoffs. */
-function referenceZones({ ctx, bounding, yAxis }: LineArgs, lower: number, upper: number, shade = true): void {
+/** Average bounds use short edge marks without adding background bands. */
+function averageReferenceMarks({ ctx, bounding, yAxis }: LineArgs, lower: number, upper: number): void {
   if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) return;
   const upperY = yAxis.convertToPixel(upper), lowerY = yAxis.convertToPixel(lower);
   if (!Number.isFinite(upperY) || !Number.isFinite(lowerY)) return;
-  const highAtTop = upperY <= lowerY;
   ctx.save();
   ctx.setLineDash([]);
-  for (const [y, atTop, fill, stroke] of [
-    [upperY, highAtTop, 'rgba(14,203,129,0.055)', 'rgba(14,203,129,0.5)'],
-    [lowerY, !highAtTop, 'rgba(246,70,93,0.045)', 'rgba(246,70,93,0.5)'],
+  for (const [y, stroke] of [
+    [upperY, 'rgba(14,203,129,0.5)'],
+    [lowerY, 'rgba(246,70,93,0.5)'],
   ] as const) {
-    const edge = Math.max(0, Math.min(bounding.height, y));
-    ctx.fillStyle = fill;
-    if (shade) ctx.fillRect(0, atTop ? 0 : edge, bounding.width, atTop ? edge : bounding.height - edge);
     if (y < 0 || y > bounding.height) continue;
     const markerY = Math.round(y) + 0.5;
     ctx.strokeStyle = stroke;
@@ -469,7 +465,7 @@ export function axisLineLevel(name: string, _p: readonly unknown[] | undefined):
   }
   return null;
 }
-/** 所有副图都走这里注册：每次计算时把纵轴范围扩到包含橘色线（保留原来固定的上下限）。 */
+/** Resolve calibrated averages independently of raw indicator display ranges. */
 export function calibratedAverageForName(name: string) {
   for (const spec of AVG_HIGHLIGHT_SPECS) {
     const item = CUSTOM_RESEARCH_INDICATORS.find(item => item.id === spec.id)!;
@@ -490,13 +486,6 @@ function indicatorRows(indicator: object, values: (number | null)[], key: string
   }
   return rows;
 }
-export function rawIndicatorReferenceLimits(name: string): readonly [number, number] | undefined {
-  const spec = AVG_HIGHLIGHT_SPECS.find(s => researchKcName(s.id) === name);
-  // The original a has no fixed raw cutoff; its averages use empirical calibration.
-  if (!spec || spec.id === 'DSP_VA') return undefined;
-  if (spec.id === 'BSS') return [-BSS_STRONG, BSS_STRONG];
-  return spec.range ?? [-15, 15];
-}
 function registerIndicator(template: IndicatorTemplate): void {
   const averaged = calibratedAverageForName(template.name);
   if (averaged) {
@@ -513,7 +502,7 @@ function registerIndicator(template: IndicatorTemplate): void {
       draw: args => {
         const last = args.indicator?.result?.at(-1) as Record<string, number> | undefined;
         if (last && Number.isFinite(last._avgLower)) {
-          referenceZones(args, last._avgLower, last._avgUpper, false);
+          averageReferenceMarks(args, last._avgLower, last._avgUpper);
         }
         zeroLine(ORANGE_DASH_LINE, spec.center)(args);
         return drawAverageArea(args, key, { center: spec.center, lower: last?._avgLower, upper: last?._avgUpper, range: spec.range })
@@ -536,17 +525,15 @@ function registerIndicator(template: IndicatorTemplate): void {
     registerKcIndicator(definition);
     return;
   }
-  const rawLimits = rawIndicatorReferenceLimits(template.name);
-  if (rawLimits) {
-    const originalDraw = template.draw;
+  const raw = AVG_HIGHLIGHT_SPECS.some(spec => researchKcName(spec.id) === template.name);
+  if (raw) {
+    const threshold = axisLineLevel(template.name, template.calcParams)!;
     template = { ...template,
-      minValue: Math.min(template.minValue ?? rawLimits[0], rawLimits[0]),
-      maxValue: Math.max(template.maxValue ?? rawLimits[1], rawLimits[1]),
+      // Auto-fit actual values while always keeping the single threshold visible.
+      minValue: threshold,
+      maxValue: threshold,
       draw: args => {
-        if (template.name !== 'BSS_CUSTOM') {
-          referenceZones(args, rawLimits[0], rawLimits[1]);
-        }
-        originalDraw?.(args);
+        zeroLine(ORANGE_DASH_LINE, threshold)(args);
         return template.figures?.length === 1 ? drawChartLine(args, template.figures[0]) : false;
       },
     };
@@ -566,14 +553,6 @@ function registerIndicator(template: IndicatorTemplate): void {
 }
 const avgBssLines = V_ZERO_LINE;
 
-/**
- * BSS uses the same quiet reference treatment: solid center at 0 and shaded tails beyond ±0.55.
- * 【用户要求】2026-10-23 黄线统一为 0，取代原来的 +0.2 / −0.2 观察线。
- */
-function bssLevelLines(args: LineArgs): boolean {
-  referenceZones(args, -BSS_STRONG, BSS_STRONG);
-  return V_ZERO_LINE(args);
-}
 /** BSS 着色：> 0.55 绿、< −0.55 红，中间按正负淡绿 / 淡红。 */
 const bssColor = (v: number | undefined) => (v == null ? '#F0B90B' : v >= BSS_STRONG ? '#0ECB81' : v <= -BSS_STRONG ? '#F6465D' : v >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)');
 
@@ -1278,7 +1257,7 @@ export function registerCustomIndicators() {
     // 纵轴固定包含 −1 ~ 1（BSS 的取值范围），参考线始终画得出来
     minValue: -1,
     maxValue: 1,
-    draw: bssLevelLines,
+    draw: V_ZERO_LINE,
     figures: [
       {
         key: 'bss', title: 'BSS: ', type: 'line',
