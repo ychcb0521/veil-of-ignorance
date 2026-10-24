@@ -19,6 +19,7 @@ import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
 import { AVG_HIGHLIGHT_SPECS, averageHighlightColor, AVG_HIGHLIGHT_COLORS, type AverageKind } from '@/lib/avgHighlight';
 import { avgCalibrationContext, avgCalibrationVersion } from '@/lib/avgHighlightClient';
 import { drawChartLine } from './drawChartLine';
+import { drawAverageArea } from './drawAverageArea';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -360,6 +361,10 @@ const DSP_Z_BASE_NAMES: Record<string, string> = {
 function registerDspVariant(template: IndicatorTemplate) {
   registerIndicator(template);
   if (template.name === 'DSP_V_AVG_CUSTOM') registerIndicator({ ...template, name: 'DSP_OVERLAY_AVG_CUSTOM', createTooltipDataSource: dspATooltip('avg', true),
+    draw: args => {
+      V_ZERO_LINE(args);
+      return drawAverageArea(args, 'v', { center: 0 }) || drawChartLine(args, template.figures![0]);
+    },
     calc: (data, indicator) => rollingAvgHours(unifiedDspA(data, indicator.calcParams[0], indicator.calcParams[2] === 1), indicator.calcParams[1]).map(v => v == null ? {} : { v }),
   });
   const alias = Object.keys(DSP_Z_BASE_NAMES).find(name => DSP_Z_BASE_NAMES[name] === template.name);
@@ -410,7 +415,7 @@ const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.3)', width: 0.6, dash:
 export const ACTION_LEVELS = { cbi2: 0, cba: 0, avgBss: 0 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
 /** Shade the values outside the bounds; only short edge marks identify the exact cutoffs. */
-function referenceZones({ ctx, bounding, yAxis }: LineArgs, lower: number, upper: number): void {
+function referenceZones({ ctx, bounding, yAxis }: LineArgs, lower: number, upper: number, shade = true): void {
   if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) return;
   const upperY = yAxis.convertToPixel(upper), lowerY = yAxis.convertToPixel(lower);
   if (!Number.isFinite(upperY) || !Number.isFinite(lowerY)) return;
@@ -423,7 +428,7 @@ function referenceZones({ ctx, bounding, yAxis }: LineArgs, lower: number, upper
   ] as const) {
     const edge = Math.max(0, Math.min(bounding.height, y));
     ctx.fillStyle = fill;
-    ctx.fillRect(0, atTop ? 0 : edge, bounding.width, atTop ? edge : bounding.height - edge);
+    if (shade) ctx.fillRect(0, atTop ? 0 : edge, bounding.width, atTop ? edge : bounding.height - edge);
     if (y < 0 || y > bounding.height) continue;
     const markerY = Math.round(y) + 0.5;
     ctx.strokeStyle = stroke;
@@ -508,10 +513,11 @@ function registerIndicator(template: IndicatorTemplate): void {
       draw: args => {
         const last = args.indicator?.result?.at(-1) as Record<string, number> | undefined;
         if (last && Number.isFinite(last._avgLower)) {
-          referenceZones(args, last._avgLower, last._avgUpper);
+          referenceZones(args, last._avgLower, last._avgUpper, false);
         }
         zeroLine(ORANGE_DASH_LINE, spec.center)(args);
-        return drawChartLine(args, definition.figures![0]);
+        return drawAverageArea(args, key, { center: spec.center, lower: last?._avgLower, upper: last?._avgUpper, range: spec.range })
+          || drawChartLine(args, definition.figures![0]);
       },
       figures: [{ key, title: template.figures?.[0]?.title ?? '', type: 'line', styles: data => {
         const point = (data.next?.indicatorData ?? data.current.indicatorData) as Record<string, number> | undefined;
