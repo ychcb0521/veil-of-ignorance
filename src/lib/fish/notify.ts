@@ -62,7 +62,7 @@ export function fishNotifyMissing(c: FishNotifyConfig): string {
  */
 /** 邮件表格最多列这么多行（其余写「还有 N 条」），保证不超过 EmailJS 免费版的大小上限。 */
 export const FISH_EMAIL_MAX_ROWS = 60;
-export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), site = typeof location !== 'undefined' ? location.origin : '', newKeys?: ReadonlySet<string>) {
+export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(), newKeys?: ReadonlySet<string>) {
   const rows = [...fish].sort((a, b) => b.timeMs - a.timeMs).map(s => ({
     symbol: s.symbol,
     market: [s.market === 'us_stock' ? '美股' : '', s.exchange && s.exchange !== 'binance' ? EXCHANGE_NAMES[s.exchange] ?? s.exchange : ''].filter(Boolean).join(' · '),
@@ -73,7 +73,7 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
   const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
   const subject = `【渔】新鱼 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
-  const message = [`新鱼 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`), '', site ? `打开无知之幕：${site}` : ''].join('\n').trim();
+  const message = [`新鱼 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   // EmailJS 免费版模板变量合计约 50KB：样式尽量放在 table 上继承，每行只留必需的内联样式；最多列 60 行
   const shown = rows.slice(0, FISH_EMAIL_MAX_ROWS), more = rows.length - shown.length;
@@ -92,7 +92,7 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
         + `<td style="${cell}">${r.algorithms.split(' · ').map(esc).join(' ·&nbsp;')}</td><td style="${cell};color:#6b7280;font-family:${sans}">${esc(r.market)}</td></tr>`;
     }).join('')
     + `</table>`
-    + `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">${more ? `还有 ${more} 条，打开网站查看 · ` : ''}信号时间为 UTC+8${site ? ` · <a href="${esc(site)}" style="color:#b7791f">打开无知之幕</a>` : ''}</p></div>`;
+    + `<p style="margin:10px 0 0;font-size:12px;color:#9ca3af">${more ? `还有 ${more} 条 · ` : ''}信号时间为 UTC+8</p></div>`;
   return { subject, message, message_html, count: rows.length };
 }
 

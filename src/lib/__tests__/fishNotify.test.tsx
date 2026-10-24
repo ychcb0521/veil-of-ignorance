@@ -23,13 +23,13 @@ it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存
 });
 it('邮件内容照「新鱼」列表画：标的 / 信号时间 / 算法类型 / 市场，最近的在上；本轮新增的标「新」；HTML 转义',()=>{
  const okx=fish('<B>USDT',2,{exchange:'okx',fish:{...fish('x',0).fish!,combination:'and',algorithms:[{...fish('x',0).fish!,featureShort:'CBI-2'},{...fish('x',0).fish!,featureShort:'BSS'}]}});
- const m=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'https://site');
+ const m=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3));
  expect(m.subject).toBe('【渔】新鱼 2 条 · 2026-10-21 11:00');expect(m.count).toBe(2);
- expect(m.message.split('\n')[2]).toBe('<B>USDT　2026-10-21 10:00:00　CBI-2 · BSS　OKX');expect(m.message.split('\n')[3]).toBe('AAAUSDT　2026-10-21 09:00:00　CBI-2');expect(m.message).toContain('https://site');
+ expect(m.message.split('\n')[2]).toBe('<B>USDT　2026-10-21 10:00:00　CBI-2 · BSS　OKX');expect(m.message.split('\n')[3]).toBe('AAAUSDT　2026-10-21 09:00:00　CBI-2');for (const body of [m.message, m.message_html]) { expect(body).not.toMatch(/https?:|href=|打开无知之幕|打开网站查看/); expect(body).not.toContain(location.origin); }
  for(const h of ['新鱼','标的','信号时间','算法类型','市场'])expect(m.message_html).toContain(h);
  expect(m.message_html.indexOf('&lt;B&gt;USDT')).toBeLessThan(m.message_html.indexOf('AAAUSDT'));expect(m.message_html).not.toContain('<B>USDT');
  // 整张新鱼表里只有 AAAUSDT 是本轮新增
- const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),'',new Set([fishVisibleKey(fish('AAAUSDT',1))]));
+ const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),new Set([fishVisibleKey(fish('AAAUSDT',1))]));
  expect(n.subject).toBe('【渔】新鱼 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
  expect(n.message_html).toContain('本轮新增 1');expect(n.message_html.match(/>新</g)).toHaveLength(1);
 });
@@ -40,6 +40,7 @@ it('发送：一次请求发给全部邮箱（逗号隔开）；被拒时报出�
  const body=JSON.parse(init.body);expect(body).toMatchObject({service_id:'service_1',template_id:'template_1',user_id:'pk'});expect(body.template_params.to_email).toBe('a@qq.com,b@163.com');expect(body.template_params.subject).toContain('新鱼 1 条');
  // 不改 EmailJS 自带的 Contact Us 模板也能用：它的 {{name}} {{title}} {{time}} {{email}} {{message}} 都有值
  expect(body.template_params).toMatchObject({name:'渔',title:body.template_params.subject,email:'a@qq.com'});expect(body.template_params.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);expect(body.template_params.message).toContain('AAAUSDT');
+ for (const content of [body.template_params.message, body.template_params.message_html]) expect(content).not.toMatch(/https?:|href=|打开无知之幕/);
  await expect(sendFishEmail(ready,composeFishEmail([fish('A',1)]),(async()=>new Response('The public key is invalid',{status:400})) as any)).rejects.toThrow('EmailJS 拒绝发送（400）：The public key is invalid');
  await expect(sendFishEmail({...ready,emails:[]},composeFishEmail([fish('A',1)]),request as any)).rejects.toThrow('收件邮箱');expect(request).toHaveBeenCalledTimes(1);
 });
@@ -87,13 +88,14 @@ it('测试邮件照当前新鱼列表发；没有新鱼时发示例',async()=>{
  saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));let fresh:TradeSignal[]=[fish('AAAUSDT',1),fish('BBBUSDT',2)];
  const {result}=renderHook(()=>useFishNotify('u',request as any,()=>fresh));
  await act(async()=>{await result.current.test();});let p=JSON.parse((request.mock.calls[0] as any)[1].body).template_params;
+ for (const content of [p.message, p.message_html]) expect(content).not.toMatch(/https?:|href=|打开无知之幕/);
  expect(p.subject).toContain('【渔】测试邮件 · 新鱼 2 条');expect(p.message.indexOf('BBBUSDT')).toBeLessThan(p.message.indexOf('AAAUSDT'));
  fresh=[];await act(async()=>{await result.current.test();});p=JSON.parse((request.mock.calls[1] as any)[1].body).template_params;expect(p.message).toContain('TESTUSDT');
 });
 
 it('新鱼很多时表格最多列 60 行（写明还有几条），整封不超过 EmailJS 免费版约 50KB 的上限',()=>{
  const many=Array.from({length:100},(_,i)=>fish(`S${i}USDT`,i%24,{id:`s${i}`,timeMs:Date.UTC(2026,9,21)+i*3e5,exchange:i%3?'binance':'okx'} as any));
- const m=composeFishEmail(many,Date.UTC(2026,9,21),'https://site',new Set());
- expect(FISH_EMAIL_MAX_ROWS).toBe(60);expect(m.message_html).toContain('还有 40 条');expect((m.message_html.match(/<tr/g)||[]).length).toBe(61);
+ const m=composeFishEmail(many,Date.UTC(2026,9,21),new Set());
+ expect(FISH_EMAIL_MAX_ROWS).toBe(60);expect(m.message_html).toContain('还有 40 条');expect(m.message_html).not.toMatch(/https?:|href=|打开网站查看/);expect((m.message_html.match(/<tr/g)||[]).length).toBe(61);
  expect(new TextEncoder().encode(JSON.stringify(m)).length).toBeLessThan(45_000);
 });

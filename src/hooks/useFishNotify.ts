@@ -30,7 +30,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   }, [account]);
   const update = useCallback((next: FishNotifyConfig) => { saveFishNotify(next); const saved = readFishNotify(); configRef.current = saved; setConfig(saved); }, []);
   const deliver = useCallback(async (fish: readonly TradeSignal[], test: boolean, newKeys?: ReadonlySet<string>, onSent?: () => void) => {
-    const c = configRef.current, content = composeFishEmail(fish, Date.now(), undefined, newKeys);
+    const c = configRef.current, content = composeFishEmail(fish, Date.now(), newKeys);
     if (test) { content.subject = `【渔】测试邮件 · ${content.subject.replace('【渔】', '')}`; }
     setSending(true);
     try { await sendFishEmail(c, content, request); onSent?.(); setStatus({ at: Date.now(), ok: true, count: fish.length, test }); }
