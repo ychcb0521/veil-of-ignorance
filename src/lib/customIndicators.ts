@@ -1429,7 +1429,9 @@ export function registerCustomIndicators() {
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;
           const colorLine = item.seller ? 0 : line;
-          const color = value == null || value === colorLine ? '#F0B90B'
+          const stateWarning = level === 0 && (item.id === 'STATE' || item.id === 'STATE2')
+            && value != null && value >= 0.5 && value <= 0.6;
+          const color = value == null || stateWarning || value === colorLine ? '#F0B90B'
             : value > colorLine ? '#0ECB81' : '#F6465D';
           return { color, size: 1.5 };
         } }],
