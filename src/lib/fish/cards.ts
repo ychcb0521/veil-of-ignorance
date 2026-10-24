@@ -1,21 +1,54 @@
 /**
- * 「渔」的算法卡片：本机保存的卡片、默认四个算法。面板与定时自动捕捞共用（面板没打开时自动捕捞也要读到同一份）。
+ * 「渔」的算法卡片：面板与定时自动捕捞共用同一份默认配置。
  */
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
+import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { readFishPreference, withFishDefaultThreshold, type FishPreference } from './preferences';
 
 export const fishCardsKey = () => `${getUserPrefix()}fish-cards.v1`;
 const cleanPreference = (p: FishPreference): FishPreference => ({ ...p, constraints: [] });
-/**
- * 默认的四个算法与顺序：CBI-2 → DSP·a → CBA → BSS。
- * 【用户要求】2026-10-20「我希望渔默认为这四个算法，每次点开始都默认为这四个算法和顺序」：
- * 每次打开「渔」都排成这四张卡、按这个顺序、全部勾选；各卡沿用这个算法上次的阈值 / 统计量 / 方向（没有就用默认门槛）。
- * 会话中临时增删、停用的卡，下次打开恢复成这四个。Deep dig 里删掉了的算法跳过。
- */
-export const FISH_DEFAULT_ALGORITHMS:readonly string[]=['cbi2','drift-speed-z','cba','bss'];
+// 2026-10-24 用户截图：六条规则、全部启用、并集。结果读取账号公式
+// 最后一条 avg₂；两张 S 卡显式选择不同序列，不能按 featureId 合并。
+export const FISH_DEFAULT_RULES = [
+  { id: 'first', featureId: 'cbi2', statistic: '结果', threshold: '0.04' },
+  { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
+  { id: 'default-cda', featureId: 'cda', statistic: '结果', threshold: '8' },
+  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.8' },
+  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.6' },
+  { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
+] as const;
+export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
+export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v2`;
+export const fishCombinationKey = () => `${getUserPrefix()}fish-combination.v1`;
+export const readFishCombination = (): 'and' | 'or' => readPersistedStateRaw(fishCombinationKey()) === 'or' ? 'or' : 'and';
+
+/** Upgrade the old preset once; later user edits and saved combinations survive. */
+function initializeFishDefaults(available: readonly string[]): void {
+  if (readPersistedStateRaw(fishDefaultsKey()) === '1') return;
+  const cards: FishCard[] = FISH_DEFAULT_RULES.filter(rule=>available.includes(rule.featureId)).map(rule=>({
+    id: rule.id, featureId: rule.featureId, enabled: true,
+    pref: { ...cleanPreference(readFishPreference(rule.featureId)), statistic: rule.statistic,
+      direction: '>', threshold: rule.threshold, lastSuggestion: undefined },
+  }));
+  writePersistedStateRaw(fishCardsKey(), JSON.stringify(cards));
+  writePersistedStateRaw(fishCombinationKey(), 'or');
+  writePersistedStateRaw(fishDefaultsKey(), '1');
+}
+
 export function fishDefaultCards(ids:readonly string[],available:readonly string[]):FishCard[]{
+  if (ids.length === FISH_DEFAULT_ALGORITHMS.length && ids.every((id,i)=>id===FISH_DEFAULT_ALGORITHMS[i])) {
+    initializeFishDefaults(available);
+    const saved = readFishCards();
+    return FISH_DEFAULT_RULES.filter(rule=>available.includes(rule.featureId)).map(rule=>{
+      const previous = saved.find(card=>card.id===rule.id&&card.featureId===rule.featureId)
+        ?? saved.find(card=>card.featureId===rule.featureId&&card.pref.statistic===rule.statistic);
+      return { id: rule.id, featureId: rule.featureId, enabled: true, pref: previous?.pref ?? {
+        ...cleanPreference(readFishPreference(rule.featureId)), statistic: rule.statistic,
+        direction: '>', threshold: rule.threshold, lastSuggestion: undefined,
+      } };
+    });
+  }
   const saved=readFishCards();
   return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
 }
@@ -30,12 +63,12 @@ export function readFishCards(): FishCard[] {
     });
   } catch { return []; }
 }
-/** 定时自动捕捞要用的卡片：本机保存的那份；从没保存过就按默认四个算法。 */
+/** 定时自动捕捞沿用编辑后的卡片；首次升级与打开面板使用相同默认值。 */
 export function loadFishCardsForScan(available: readonly string[]): FishCard[] {
   const saved = readFishCards();
   // An explicitly saved set containing only a retired seller-push must not start another algorithm.
   const raw = readPersistedStateRaw(fishCardsKey());
-  if (saved.length) return saved;
-  try { if (JSON.parse(raw ?? '[]')?.some((c: FishCard) => c?.featureId === 'seller-push')) return []; } catch { /* use normal defaults for malformed storage */ }
+  try { if (!saved.length && JSON.parse(raw ?? '[]')?.some((c: FishCard) => c?.featureId === 'seller-push')) return []; } catch { /* use normal defaults for malformed storage */ }
+  if (saved.length && readPersistedStateRaw(fishDefaultsKey()) === '1') return saved;
   return fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available);
 }

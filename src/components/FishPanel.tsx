@@ -7,7 +7,7 @@ import {getUserPrefix} from '@/lib/userStoragePrefix';
 import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
-import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards} from '@/lib/fish/cards';
+import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards,fishCombinationKey as combinationKey,readFishCombination as readCombination} from '@/lib/fish/cards';
 import {FISH_TURNOVER_FLOORS} from '@/lib/fish/shared';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
@@ -41,7 +41,7 @@ export interface FishPanelProps {
   auto?: FishAutoScan;
   /** 本轮实际扫过的算法（含当时阈值），用来说明改动为什么要重新捕捞。 */
   roundPlans?: readonly FishProgram[] | null;
-  /** 给了就每次打开都排成这几个算法（按顺序、全部勾选，各卡沿用该算法上次的设置）；不给就恢复上次保存的卡片。 */
+  /** 每次打开恢复指定算法的顺序与勾选；相同算法的不同序列分别保存。 */
   defaultAlgorithms?: readonly string[];
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
   onDiagnose?: (options: { downwardWick?: FishDownwardWick; turnoverFloors?: readonly import('@/lib/fish/shared').FishTurnoverFloor[]; symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
@@ -59,7 +59,7 @@ export interface FishPanelProps {
  * 平时只有一行设置 + 一行「状态 · 命中 · 进度」；交易所勾选收在淡色滑杆图标后（展开状态记在这次浏览里）。
  * 2026-10-19 用户又要求删掉进度旁的「›」明细入口：各家计数与跳过原因不再显示，只在整次扫描失败时写出报错。
  */
-// 卡片的读写与默认四个算法放在 lib/fish/cards.ts：定时自动捕捞（面板没打开时）也要读同一份
+// 卡片的读写与默认算法放在 lib/fish/cards.ts：定时自动捕捞也读同一份
 export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
@@ -88,8 +88,6 @@ export function FishPanel(p: FishPanelProps) {
   const [initialCards]=useState(loadCards);
   const [extraCards,setExtraCards]=useState<FishCard[]>(()=>initialCards.slice(1));
   // 【用户要求】2026-10-19「多重选择除了交集，再增加一种并集（只要符合其中一个算法的，都留下）」：合并方式跟账号记在本机
-  const combinationKey=()=>`${getUserPrefix()}fish-combination.v1`;
-  const readCombination=():'and'|'or'=>{try{return readPersistedStateRaw(combinationKey())==='or'?'or':'and';}catch{return 'and';}};
   const [combination,setCombinationState]=useState<'and'|'or'>(readCombination);
   const setCombination=(v:'and'|'or')=>{setCombinationState(v);try{writePersistedStateRaw(combinationKey(),v);}catch{/* 记不住只是下次要再选 */}};
   const [firstEnabled,setFirstEnabled]=useState(()=>initialCards[0]?.enabled??true);
@@ -123,7 +121,7 @@ export function FishPanel(p: FishPanelProps) {
   const selectionKeys=multiple.plans.map(fishSelectionKey),selectionSignature=JSON.stringify(selectionKeys);
   const [staleRound,setStaleRound]=useState(false);
   // 只有用户自己改了勾选 / 合并方式 / 阈值才重新合并本轮结果；刚出现一轮（扫完或刷新后恢复）时不动它——
-  // 【用户要求】2026-10-20「鱼只要没删除，就一直保留」：每次打开都排成默认四张卡，若一打开就按默认卡重合并，上一轮按别的组合捕到的新鱼会突然不见
+  // 默认卡升级或重新打开时不重新合并上一轮，保留已有新鱼。
   const recombineArmed=useRef(false);
   useEffect(()=>{if(!p.hasRound||running){recombineArmed.current=false;return;}if(!recombineArmed.current){recombineArmed.current=true;setStaleRound(false);return;}if(multiple.error&&multiple.error!=='请启用至少一个算法'){setStaleRound(true);return;}setStaleRound(!p.onRecombine?.(combination,selectionKeys,multiple.plans));},[selectionSignature,multiple.error,combination,p.hasRound,running,p.onRecombine]);
   // 进度悬停里的「算法 n」用卡片上的编号（停用的卡不参与，编号不顺延）

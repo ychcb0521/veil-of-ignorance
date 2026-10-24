@@ -1,9 +1,9 @@
 // 【用户要求】2026-10-21「渔这里增设一个定时自动（&手动）捕捉的功能……只要电脑联着网，就进行自动捕捉。手动捕捉模式下，与现在的保持一致。」
 import {act,renderHook,render,screen,fireEvent,waitFor} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {BSS_DEF,CBA_DEF,CBI2_DEF,DRIFT_SPEED_Z_DEF} from '@/lib/deepDig/features';
-const avg=(d:any,n:string)=>({...d,formula:`${d.formula}\navg_${n} = avg(${n}, 24)`});
-const DEFS=[avg(CBI2_DEF,'CBI2'),DRIFT_SPEED_Z_DEF,avg(CBA_DEF,'CBA'),avg(BSS_DEF,'BSS')];
+import {BSS_DEF,CDA_DEF,CBI2_DEF,DRIFT_SPEED_Z_DEF,STATE_DEF} from '@/lib/deepDig/features';
+import {fishFeatureDefinitions} from '@/lib/fish/features';
+const DEFS=fishFeatureDefinitions([CBI2_DEF,DRIFT_SPEED_Z_DEF,CDA_DEF,BSS_DEF,STATE_DEF]);
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>DEFS}));
 import {useFishAutoScan} from '@/hooks/useFishAutoScan';
 import {readFishAuto,saveFishAuto,FISH_AUTO_INTERVALS,fishAutoKey} from '@/lib/fish/autoScan';
@@ -37,12 +37,12 @@ it('旧版手动设置升级到自动一次，保留间隔和上次时间；之�
  saveFishAuto({...old,mode:'manual'});
  expect(readFishAuto()).toEqual(old);
 });
-it('切到自动立刻捕第一次（时间 = 现在，四个算法），之后每隔所选时长一次，没到点不捕',async()=>{
+it('切到自动立刻捕第一次（时间 = 现在，六条规则），之后每隔所选时长一次，没到点不捕',async()=>{
  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
  const {start,view}=hook();
  act(()=>{view.result.current.setHours(2);});act(()=>{view.result.current.setMode('auto');});await flush();
  expect(start).toHaveBeenCalledTimes(1);
- const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','drift-speed-z','cba','bss']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:24,atrMultiple:3});
+ const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','drift-speed-z','cda','bss','state','state']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:24,atrMultiple:3});
  expect(readFishAuto()).toMatchObject({mode:'auto',hours:2,lastRunAt:Date.now()});
  await flush(2*HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
  await flush(90_000);expect(start).toHaveBeenCalledTimes(2);
@@ -78,7 +78,7 @@ it('自动捕捞与「开始捕捞」按钮拼出的设置逐项相同',async()=
  render(<FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} onRecombine={()=>true} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={selection} onSelectionChange={()=>{}} onStart={onStart} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
  fireEvent.click(screen.getByLabelText('启用算法 3',{selector:'input'}));
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(onStart).toHaveBeenCalled());
- const built=buildFishScanSettings({cards:readFishCards(),defs:DEFS,combination:'and',selection,time:''});
+ const built=buildFishScanSettings({cards:readFishCards(),defs:DEFS,combination:'or',selection,time:''});
  expect(built.settings).toEqual(onStart.mock.calls[0][0]);
 });
 it('后台标签页里逐币让出不走计时器（不受浏览器节流），前台照旧',async()=>{

@@ -9,11 +9,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFishFeatures } from './useFishFeatures';
-import { loadFishCardsForScan } from '@/lib/fish/cards';
+import { loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { fishAutoNextAt, readFishAuto, releaseFishAutoLease, saveFishAuto, takeFishAutoLease, type FishAutoMode, type FishAutoState } from '@/lib/fish/autoScan';
-import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { FishScanSettings } from '@/lib/fishScanner';
 
 const TICK_MS = 30_000, RETRY_MS = 5 * 60_000;
@@ -48,8 +46,8 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
     // 另一个标签页刚捕过（租约交接期间）：以本机保存的最新时刻为准
     const fresh = readFishAuto();
     if (fresh.mode !== 'auto' || (fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
-    const combination = readPersistedStateRaw(`${getUserPrefix()}fish-combination.v1`) === 'or' ? 'or' : 'and';
-    const built = buildFishScanSettings({ cards: loadFishCardsForScan(defsRef.current.map(d => d.id)), defs: defsRef.current, combination, selection: latest.current.selection, time: '' });
+    const cards = loadFishCardsForScan(defsRef.current.map(d => d.id));
+    const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '' });
     if (built.error !== undefined) { setError(`自动捕捞没开始：${built.error}`); retryAt.current = now + RETRY_MS; releaseFishAutoLease(owner.current); return; }
     setError(''); setWaiting(false); runningRef.current = true;
     setState({ ...fresh, lastRunAt: now });
