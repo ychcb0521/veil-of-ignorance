@@ -24,23 +24,23 @@ it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存
 it('邮件内容照「新鱼」列表画：标的 / 信号时间 / 算法类型 / 市场，最近的在上；本轮新增的标「新」；HTML 转义',()=>{
  const okx=fish('<B>USDT',2,{exchange:'okx',fish:{...fish('x',0).fish!,combination:'and',algorithms:[{...fish('x',0).fish!,featureShort:'CBI-2'},{...fish('x',0).fish!,featureShort:'BSS'}]}});
  const m=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3));
- expect(m.subject).toBe('【渔】新鱼 2 条 · 2026-10-21 11:00');expect(m.count).toBe(2);
- expect(m.message.split('\n')[2]).toBe('<B>USDT　2026-10-21 10:00:00　CBI-2 · BSS　OKX');expect(m.message.split('\n')[3]).toBe('AAAUSDT　2026-10-21 09:00:00　CBI-2');for (const body of [m.message, m.message_html]) { expect(body).not.toMatch(/https?:|href=|打开无知之幕|打开网站查看/); expect(body).not.toContain(location.origin); }
- for(const h of ['新鱼','标的','信号时间','算法类型','市场'])expect(m.message_html).toContain(h);
+ expect(m.subject).toBe('信号通知 2 条 · 2026-10-21 11:00');expect(m.count).toBe(2);
+ expect(m.message.split('\n')[2]).toBe('<B>USDT　2026-10-21 10:00:00　CBI-2 · BSS　OKX');expect(m.message.split('\n')[3]).toBe('AAAUSDT　2026-10-21 09:00:00　CBI-2');for (const body of [m.subject, m.message, m.message_html]) { expect(body).not.toMatch(/https?:|href=|渔|新鱼|无知之幕|veil-of-ignorance|打开网站查看/i); expect(body).not.toContain(location.origin); }
+ for(const h of ['信号','标的','信号时间','算法类型','市场'])expect(m.message_html).toContain(h);
  expect(m.message_html.indexOf('&lt;B&gt;USDT')).toBeLessThan(m.message_html.indexOf('AAAUSDT'));expect(m.message_html).not.toContain('<B>USDT');
  // 整张新鱼表里只有 AAAUSDT 是本轮新增
  const n=composeFishEmail([fish('AAAUSDT',1),okx],Date.UTC(2026,9,21,3),new Set([fishVisibleKey(fish('AAAUSDT',1))]));
- expect(n.subject).toBe('【渔】新鱼 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
+ expect(n.subject).toBe('信号通知 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
  expect(n.message_html).toContain('本轮新增 1');expect(n.message_html.match(/>新</g)).toHaveLength(1);
 });
 it('发送：一次请求发给全部邮箱（逗号隔开）；被拒时报出状态码与原因；缺设置不发',async()=>{
  const request=vi.fn(async()=>new Response('OK',{status:200}));
  await sendFishEmail(ready,composeFishEmail([fish('AAAUSDT',1)]),request as any);
  const [url,init]=request.mock.calls[0] as any;expect(url).toBe(EMAILJS_ENDPOINT);
- const body=JSON.parse(init.body);expect(body).toMatchObject({service_id:'service_1',template_id:'template_1',user_id:'pk'});expect(body.template_params.to_email).toBe('a@qq.com,b@163.com');expect(body.template_params.subject).toContain('新鱼 1 条');
+ const body=JSON.parse(init.body);expect(body).toMatchObject({service_id:'service_1',template_id:'template_1',user_id:'pk'});expect(body.template_params.to_email).toBe('a@qq.com,b@163.com');expect(body.template_params.subject).toContain('信号通知 1 条');
  // 不改 EmailJS 自带的 Contact Us 模板也能用：它的 {{name}} {{title}} {{time}} {{email}} {{message}} 都有值
- expect(body.template_params).toMatchObject({name:'渔',title:body.template_params.subject,email:'a@qq.com'});expect(body.template_params.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);expect(body.template_params.message).toContain('AAAUSDT');
- for (const content of [body.template_params.message, body.template_params.message_html]) expect(content).not.toMatch(/https?:|href=|打开无知之幕/);
+ expect(body.template_params).toMatchObject({name:'信号通知',title:body.template_params.subject,email:'a@qq.com'});expect(body.template_params.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);expect(body.template_params.message).toContain('AAAUSDT');
+ for (const content of [body.template_params.subject, body.template_params.name, body.template_params.title, body.template_params.message, body.template_params.message_html]) expect(content).not.toMatch(/https?:|href=|渔|新鱼|无知之幕|veil-of-ignorance/i);
  await expect(sendFishEmail(ready,composeFishEmail([fish('A',1)]),(async()=>new Response('The public key is invalid',{status:400})) as any)).rejects.toThrow('EmailJS 拒绝发送（400）：The public key is invalid');
  await expect(sendFishEmail({...ready,emails:[]},composeFishEmail([fish('A',1)]),request as any)).rejects.toThrow('收件邮箱');expect(request).toHaveBeenCalledTimes(1);
 });
@@ -71,16 +71,16 @@ it('新鱼列表有变化就发一封整张表（手动、自动都走这里）�
  const A=fish('AAAUSDT',1),B=fish('BBBUSDT',2);
  const sent=(i:number)=>JSON.parse((request.mock.calls[i] as any)[1].body).template_params;
  await act(async()=>{await result.current.send([A],[A]);});expect(result.current.status).toMatchObject({ok:false});
- ok=true;await act(async()=>{await result.current.send([A],[A]);});expect(request).toHaveBeenCalledTimes(2);expect(sent(1).subject).toContain('新鱼 1 条');
+ ok=true;await act(async()=>{await result.current.send([A],[A]);});expect(request).toHaveBeenCalledTimes(2);expect(sent(1).subject).toContain('信号通知 1 条');
  // 这一轮新鱼还是那几条（哪怕重新捕到）：不发
  await act(async()=>{await result.current.send([],[A]);});expect(request).toHaveBeenCalledTimes(2);
  expect(result.current.status).toMatchObject({unchanged:true,count:1});
  // 多了一条：发整张表，新增的标「新」
  await act(async()=>{await result.current.send([B],[A,B]);});expect(request).toHaveBeenCalledTimes(3);
- expect(sent(2).subject).toContain('新鱼 2 条（新增 1）');expect(sent(2).message).toContain('【新】BBBUSDT');expect(sent(2).message).not.toContain('【新】AAAUSDT');
+ expect(sent(2).subject).toContain('信号通知 2 条（新增 1）');expect(sent(2).message).toContain('【新】BBBUSDT');expect(sent(2).message).not.toContain('【新】AAAUSDT');
  await act(async()=>{await result.current.send([],[A,B]);});expect(request).toHaveBeenCalledTimes(3);
  // 少了一条也是更新：发
- await act(async()=>{await result.current.send([],[B]);});expect(request).toHaveBeenCalledTimes(4);expect(sent(3).subject).toContain('新鱼 1 条');
+ await act(async()=>{await result.current.send([],[B]);});expect(request).toHaveBeenCalledTimes(4);expect(sent(3).subject).toContain('信号通知 1 条');
  // 新鱼空了：不发
  await act(async()=>{await result.current.send([],[]);});expect(request).toHaveBeenCalledTimes(4);
 });
@@ -88,8 +88,8 @@ it('测试邮件照当前新鱼列表发；没有新鱼时发示例',async()=>{
  saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));let fresh:TradeSignal[]=[fish('AAAUSDT',1),fish('BBBUSDT',2)];
  const {result}=renderHook(()=>useFishNotify('u',request as any,()=>fresh));
  await act(async()=>{await result.current.test();});let p=JSON.parse((request.mock.calls[0] as any)[1].body).template_params;
- for (const content of [p.message, p.message_html]) expect(content).not.toMatch(/https?:|href=|打开无知之幕/);
- expect(p.subject).toContain('【渔】测试邮件 · 新鱼 2 条');expect(p.message.indexOf('BBBUSDT')).toBeLessThan(p.message.indexOf('AAAUSDT'));
+ for (const content of [p.subject, p.name, p.title, p.message, p.message_html]) expect(content).not.toMatch(/https?:|href=|渔|新鱼|无知之幕|veil-of-ignorance/i);
+ expect(p.subject).toContain('测试邮件 · 信号通知 2 条');expect(p.message.indexOf('BBBUSDT')).toBeLessThan(p.message.indexOf('AAAUSDT'));
  fresh=[];await act(async()=>{await result.current.test();});p=JSON.parse((request.mock.calls[1] as any)[1].body).template_params;expect(p.message).toContain('TESTUSDT');
 });
 

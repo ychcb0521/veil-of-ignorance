@@ -31,7 +31,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   const update = useCallback((next: FishNotifyConfig) => { saveFishNotify(next); const saved = readFishNotify(); configRef.current = saved; setConfig(saved); }, []);
   const deliver = useCallback(async (fish: readonly TradeSignal[], test: boolean, newKeys?: ReadonlySet<string>, onSent?: () => void) => {
     const c = configRef.current, content = composeFishEmail(fish, Date.now(), newKeys);
-    if (test) { content.subject = `【渔】测试邮件 · ${content.subject.replace('【渔】', '')}`; }
+    if (test) { content.subject = `测试邮件 · ${content.subject}`; }
     setSending(true);
     try { await sendFishEmail(c, content, request); onSent?.(); setStatus({ at: Date.now(), ok: true, count: fish.length, test }); }
     catch (e) { setStatus({ at: Date.now(), ok: false, count: fish.length, test, error: e instanceof TypeError ? '网络不通或被浏览器拦截' : e instanceof Error ? e.message : String(e) }); }

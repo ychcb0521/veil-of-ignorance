@@ -57,7 +57,7 @@ export function fishNotifyMissing(c: FishNotifyConfig): string {
 /**
  * 邮件内容：主题、纯文本、HTML 表格。
  * 【用户要求】2026-10-21「我希望邮件的内容是这个新鱼的截图」：HTML 版照「新鱼」列表的样子画——
- * 标题「✦ 新鱼 N」，列为 标的 / 信号时间 / 算法类型 / 市场，信号时间最近的在上；传了 newKeys 时本轮新增的那几条标「新」。
+ * 对外只显示中性的信号信息，列为 标的 / 信号时间 / 算法类型 / 市场，信号时间最近的在上；传了 newKeys 时本轮新增的那几条标「新」。
  * 模板正文写 {{{message_html}}}（三层大括号）显示表格；写 {{message}} 是纯文字版。
  */
 /** 邮件表格最多列这么多行（其余写「还有 N 条」），保证不超过 EmailJS 免费版的大小上限。 */
@@ -72,15 +72,15 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   }));
   const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
   const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
-  const subject = `【渔】新鱼 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
-  const message = [`新鱼 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
+  const subject = `信号通知 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
+  const message = [`信号 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   // EmailJS 免费版模板变量合计约 50KB：样式尽量放在 table 上继承，每行只留必需的内联样式；最多列 60 行
   const shown = rows.slice(0, FISH_EMAIL_MAX_ROWS), more = rows.length - shown.length;
   const sans = "-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif", mono = 'ui-monospace,Menlo,Consolas,monospace';
   const cell = 'padding:8px 12px;border-top:1px solid #f0f1f3';
   const message_html = `<div style="font:14px ${sans};color:#111827;max-width:720px">`
-    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600"><span style="color:#d4a017">✦</span> 新鱼 <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
+    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600">信号 <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
     + `${tail ? ` <span style="font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
     + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;width:100%;font:13px ${mono};color:#374151">`
     + `<tr style="background:#f8fafc;font:12px ${sans};color:#6b7280;text-align:left">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="padding:9px 12px;font-weight:500">${h}</th>`).join('')}</tr>`
@@ -98,10 +98,10 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
 
 /**
  * EmailJS 自带「Contact Us」模板的变量（{{name}} {{title}} {{time}} {{email}}）也一并填上：
- * 不改模板内容直接保存也能用——主题「Contact Us: 【渔】新鱼…」，正文 {{message}} 就是鱼的列表。
+ * 使用中性的名称和主题，正文 {{message}} 就是信号列表。
  * 【用户要求】2026-10-21「还是找不到编辑的」「还有别的办法拿 Template ID 吗」
  */
-const contactUsParams = (config: FishNotifyConfig, subject: string) => ({ name: '渔', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: config.emails[0] ?? '' });
+const contactUsParams = (config: FishNotifyConfig, subject: string) => ({ name: '信号通知', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: config.emails[0] ?? '' });
 /** 调 EmailJS 发一封（收件人用逗号隔开，EmailJS 的「To Email」填 {{to_email}} 就能一次发给全部）。失败抛出可读的原因。 */
 export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch): Promise<void> {
   const missing = fishNotifyMissing(config);
