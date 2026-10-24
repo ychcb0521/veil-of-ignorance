@@ -323,9 +323,9 @@ function toKLineData(d: KlineData): KLineData {
 // Dark theme styles
 const DARK_STYLES = {
   grid: {
-    show: true,
-    horizontal: { color: "#2B3139" },
-    vertical: { color: "#2B3139" },
+    show: false,
+    horizontal: { show: false, color: "#2B3139" },
+    vertical: { show: false, color: "#2B3139" },
   },
   candle: {
     type: CandleType.CandleSolid,
@@ -392,9 +392,9 @@ const DARK_STYLES = {
 // Light theme styles
 const LIGHT_STYLES = {
   grid: {
-    show: true,
-    horizontal: { color: "#EAECEF" },
-    vertical: { color: "#EAECEF" },
+    show: false,
+    horizontal: { show: false, color: "#EAECEF" },
+    vertical: { show: false, color: "#EAECEF" },
   },
   candle: {
     type: CandleType.CandleSolid,

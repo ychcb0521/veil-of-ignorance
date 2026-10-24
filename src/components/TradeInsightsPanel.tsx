@@ -145,7 +145,7 @@ async function fetchKlines(symbol: string, interval: string, startTime: number, 
 
 /* ===== Chart theme ===== */
 const DARK_CHART_STYLES = {
-  grid: { show: true, horizontal: { color: "#2B3139" }, vertical: { color: "#2B3139" } },
+  grid: { show: false, horizontal: { show: false, color: "#2B3139" }, vertical: { show: false, color: "#2B3139" } },
   candle: {
     type: CandleType.CandleSolid,
     bar: {
@@ -178,7 +178,7 @@ const DARK_CHART_STYLES = {
 };
 
 const LIGHT_CHART_STYLES = {
-  grid: { show: true, horizontal: { color: "#EAECEF" }, vertical: { color: "#EAECEF" } },
+  grid: { show: false, horizontal: { show: false, color: "#EAECEF" }, vertical: { show: false, color: "#EAECEF" } },
   candle: {
     type: CandleType.CandleSolid,
     bar: {
