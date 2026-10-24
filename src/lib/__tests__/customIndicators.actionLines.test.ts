@@ -8,7 +8,7 @@ import { ACTION_LEVELS, ORANGE_DASH_LINE, registerCustomIndicators } from '@/lib
 function lines(name: string, calcParams?: unknown[]) {
   const out: { v: number; color: string }[] = [];
   let color = '', y = 0;
-  const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(c: string) { color = c; }, moveTo(_x: number, py: number) { y = py; }, stroke() { out.push({ v: (100000 - Math.floor(y)) / 1000, color }); } };
+  const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() {}, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(c: string) { color = c; }, moveTo(_x: number, py: number) { y = py; }, stroke() { out.push({ v: (100000 - Math.floor(y)) / 1000, color }); } };
   registered.get(name)!.draw!({ ctx, bounding: { width: 300, height: 200000 }, yAxis: { convertToPixel: (v: number) => 100000 - 1000 * v }, indicator: { calcParams } });
   return out;
 }
@@ -18,11 +18,11 @@ describe('副图橘色线按指标区分方向参考与经验门槛', () => {
   it('非avg保留既有界限，az和卖控采用用户指定±15，均保留中线', () => {
     registerCustomIndicators();
     for (const name of ['DSP_Z_V_CUSTOM', 'SELLER_CONTROL_CUSTOM']) {
-      expect(lines(name)).toEqual(expect.arrayContaining([{v:15,color:'#0ECB81'}, {v:-15,color:'#F6465D'}]));
+      expect(lines(name)).toEqual(expect.arrayContaining([{v:15,color:'rgba(14,203,129,0.5)'}, {v:-15,color:'rgba(246,70,93,0.5)'}]));
       expect(orange(name)).toEqual([0]);
     }
-    expect(lines('CBI2_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'#0ECB81'}, {v:-1,color:'#F6465D'}]));
-    expect(lines('STATE_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'#0ECB81'}, {v:0,color:'#F6465D'}]));
+    expect(lines('CBI2_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'rgba(14,203,129,0.5)'}, {v:-1,color:'rgba(246,70,93,0.5)'}]));
+    expect(lines('STATE_CUSTOM')).toEqual(expect.arrayContaining([{v:1,color:'rgba(14,203,129,0.5)'}, {v:0,color:'rgba(246,70,93,0.5)'}]));
   });
   it('图表参考线独立为 0，不借用捕捞门槛', () => { expect(ACTION_LEVELS).toEqual({ cbi2: 0, cba: 0, avgBss: 0 }); });
   it('CBI-2 与 CBA 的黄线为 0', () => {

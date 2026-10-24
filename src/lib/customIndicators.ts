@@ -401,14 +401,40 @@ function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0) {
     return false;
   };
 }
-/** 【用户要求】V 的 0 是分水岭（谢林点上移 / 下移）：醒目的橘黄色虚线（2026-10-16 由实线改为虚线）。 */
-export const ORANGE_DASH_LINE: ZeroLineStyle = { color: '#F59E0B', width: 0.75, dash: [5, 3] };
+/** Keep the legacy export name; reference centers now use a quiet, solid amber hairline. */
+export const ORANGE_DASH_LINE: ZeroLineStyle = { color: 'rgba(181,140,65,0.38)', width: 0.6, dash: [] };
 const V_ZERO_LINE = zeroLine(ORANGE_DASH_LINE);
-/** A 的 0 轴保持灰色虚线，与 V 区分。 */
-const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.55)', width: 0.75, dash: [3, 3] });
+/** A uses the same unobtrusive solid reference treatment, in gray. */
+const A_ZERO_LINE = zeroLine({ color: 'rgba(132,142,156,0.3)', width: 0.6, dash: [] });
 /** Chart reference levels are zero; fishing thresholds are configured separately. */
 export const ACTION_LEVELS = { cbi2: 0, cba: 0, avgBss: 0 } as const;
 type LineArgs = { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number }; indicator?: { calcParams?: unknown[] } };
+/** Shade the values outside the bounds; only short edge marks identify the exact cutoffs. */
+function referenceZones({ ctx, bounding, yAxis }: LineArgs, lower: number, upper: number): void {
+  if (!Number.isFinite(lower) || !Number.isFinite(upper) || lower > upper) return;
+  const upperY = yAxis.convertToPixel(upper), lowerY = yAxis.convertToPixel(lower);
+  if (!Number.isFinite(upperY) || !Number.isFinite(lowerY)) return;
+  const highAtTop = upperY <= lowerY;
+  ctx.save();
+  ctx.setLineDash([]);
+  for (const [y, atTop, fill, stroke] of [
+    [upperY, highAtTop, 'rgba(14,203,129,0.055)', 'rgba(14,203,129,0.5)'],
+    [lowerY, !highAtTop, 'rgba(246,70,93,0.045)', 'rgba(246,70,93,0.5)'],
+  ] as const) {
+    const edge = Math.max(0, Math.min(bounding.height, y));
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, atTop ? 0 : edge, bounding.width, atTop ? edge : bounding.height - edge);
+    if (y < 0 || y > bounding.height) continue;
+    const markerY = Math.round(y) + 0.5;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.max(0, bounding.width - 14), markerY);
+    ctx.lineTo(bounding.width, markerY);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 const CBI2_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cbi2);
 const CBA_ACTION_LINE = zeroLine(ORANGE_DASH_LINE, ACTION_LEVELS.cba);
 /** DSP a / az and their averages use zero as the net-force direction boundary.
@@ -480,12 +506,11 @@ function registerIndicator(template: IndicatorTemplate): void {
         return { name: `${label}${def?.unit ? `(${def.unit})` : ''}${context.limits ? '' : ` · ${context.status}`}`, calcParamsText: `(${indicator.calcParams[1]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
       },
       draw: args => {
-        zeroLine(ORANGE_DASH_LINE, spec.center)(args);
         const last = args.indicator?.result?.at(-1) as Record<string, number> | undefined;
         if (last && Number.isFinite(last._avgLower)) {
-          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.buyer }, last._avgUpper)(args);
-          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.seller }, last._avgLower)(args);
+          referenceZones(args, last._avgLower, last._avgUpper);
         }
+        zeroLine(ORANGE_DASH_LINE, spec.center)(args);
         return drawChartLine(args, definition.figures![0]);
       },
       figures: [{ key, title: template.figures?.[0]?.title ?? '', type: 'line', styles: data => {
@@ -513,8 +538,7 @@ function registerIndicator(template: IndicatorTemplate): void {
       maxValue: Math.max(template.maxValue ?? rawLimits[1], rawLimits[1]),
       draw: args => {
         if (template.name !== 'BSS_CUSTOM') {
-          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.buyer }, rawLimits[1])(args);
-          zeroLine({ ...ORANGE_DASH_LINE, color: AVG_HIGHLIGHT_COLORS.seller }, rawLimits[0])(args);
+          referenceZones(args, rawLimits[0], rawLimits[1]);
         }
         originalDraw?.(args);
         return template.figures?.length === 1 ? drawChartLine(args, template.figures[0]) : false;
@@ -537,30 +561,12 @@ function registerIndicator(template: IndicatorTemplate): void {
 const avgBssLines = V_ZERO_LINE;
 
 /**
- * BSS 副图的参考线：0（橘色虚线）、±0.55（买方 / 卖方优势明确，绿 / 红点线）。
+ * BSS uses the same quiet reference treatment: solid center at 0 and shaded tails beyond ±0.55.
  * 【用户要求】2026-10-23 黄线统一为 0，取代原来的 +0.2 / −0.2 观察线。
  */
-function bssLevelLines({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean {
-  const levels: [number, string, number, readonly number[]][] = [
-    [BSS_STRONG, 'rgba(14,203,129,0.55)', 0.75, [2, 3]],
-    [-BSS_STRONG, 'rgba(246,70,93,0.55)', 0.75, [2, 3]],
-    // 最后画：压在其他参考线上面
-    [0, ORANGE_DASH_LINE.color, ORANGE_DASH_LINE.width, ORANGE_DASH_LINE.dash],
-  ];
-  for (const [value, color, width, dash] of levels) {
-    const y = Math.round(yAxis.convertToPixel(value)) + (width % 2 ? 0.5 : 0);
-    if (y < 0 || y > bounding.height) continue;
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.setLineDash([...dash]);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(bounding.width, y);
-    ctx.stroke();
-    ctx.restore();
-  }
-  return false;
+function bssLevelLines(args: LineArgs): boolean {
+  referenceZones(args, -BSS_STRONG, BSS_STRONG);
+  return V_ZERO_LINE(args);
 }
 /** BSS 着色：> 0.55 绿、< −0.55 红，中间按正负淡绿 / 淡红。 */
 const bssColor = (v: number | undefined) => (v == null ? '#F0B90B' : v >= BSS_STRONG ? '#0ECB81' : v <= -BSS_STRONG ? '#F6465D' : v >= 0 ? 'rgba(14,203,129,0.7)' : 'rgba(246,70,93,0.7)');

@@ -135,7 +135,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     expect(mock.registered.get(researchKcName('STATE')).minValue).toBe(0);
     expect(mock.registered.get(researchKcName('STATE')).maxValue).toBe(1);
     const pixel = vi.fn(() => 40);
-    const ctx = Object.fromEntries(['save', 'restore', 'setLineDash', 'beginPath', 'moveTo', 'lineTo', 'stroke'].map(k => [k, vi.fn()]));
+    const ctx = Object.fromEntries(['save', 'restore', 'setLineDash', 'beginPath', 'moveTo', 'lineTo', 'stroke', 'fillRect'].map(k => [k, vi.fn()]));
     for (const state of [true, false]) {
       const reg = mock.registered.get(researchKcName(state ? 'STATE' : 'CDI2'));
       reg.draw({ ctx, bounding: { width: 400, height: 80 }, yAxis: { convertToPixel: pixel } });

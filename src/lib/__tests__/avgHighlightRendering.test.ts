@@ -5,7 +5,7 @@ vi.mock('@/lib/avgHighlightClient', () => ({ avgCalibrationContext: (featureId: 
   const center = ['state', 'state2'].includes(featureId) ? .5 : 0;
   return { status: '已缓存', limits: { lower: center - .1, upper: center + .1, d: .1, count: 100, above: .2, below: .2 } };
 }, avgCalibrationVersion: () => 0 }));
-import { registerCustomIndicators, calibratedAverageForName, indicatorCalcParams } from '../customIndicators';
+import { registerCustomIndicators, calibratedAverageForName, indicatorCalcParams, ORANGE_DASH_LINE } from '../customIndicators';
 import { AVG_HIGHLIGHT_SPECS, AVG_HIGHLIGHT_COLORS } from '../avgHighlight';
 import { CUSTOM_RESEARCH_INDICATORS, researchKcName } from '../researchIndicators';
 
@@ -34,11 +34,11 @@ describe('all custom averages share calibrated highlight behavior', () => {
       expect(indicator.maxValue).toBe(spec.center + .1);
       const lines: { value: number; color: string }[] = [];
       let color = '';
-      const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, stroke() {}, setLineDash() {}, set lineWidth(_width: number) {}, set strokeStyle(value: string) { color = value; }, moveTo(_x: number, y: number) { lines.push({ value: (1000 - Math.floor(y)) / 100, color }); } };
+      const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() {}, stroke() {}, setLineDash() {}, set lineWidth(_width: number) {}, set strokeStyle(value: string) { color = value; }, moveTo(_x: number, y: number) { lines.push({ value: (1000 - Math.floor(y)) / 100, color }); } };
       template.draw({ ctx, bounding: { width: 300, height: 2000 }, yAxis: { convertToPixel: (v: number) => 1000 - 100 * v }, indicator: { ...indicator, result: [{ _avgLower: indicator.minValue, _avgUpper: indicator.maxValue }] } });
-      expect(lines.map(line => line.color)).toEqual(['#F59E0B', AVG_HIGHLIGHT_COLORS.buyer, AVG_HIGHLIGHT_COLORS.seller]);
-      expect(lines[1].value).toBeCloseTo(spec.center + .1);
-      expect(lines[2].value).toBeCloseTo(spec.center - .1);
+      expect(lines.map(line => line.color)).toEqual(['rgba(14,203,129,0.5)', 'rgba(246,70,93,0.5)', ORANGE_DASH_LINE.color]);
+      expect(lines[0].value).toBeCloseTo(spec.center + .1);
+      expect(lines[1].value).toBeCloseTo(spec.center - .1);
     }
     expect(indicatorCalcParams(raw, { period: 6, avgHours: 6 })).toEqual(indicatorCalcParams(raw, { period: 6, avgHours: 48 }));
   });

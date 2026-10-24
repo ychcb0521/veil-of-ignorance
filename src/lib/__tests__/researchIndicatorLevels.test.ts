@@ -4,7 +4,7 @@ const registered = vi.hoisted(() => new Map<string, { draw?: (args: unknown) => 
 vi.mock('klinecharts', () => ({ registerIndicator: (def: { name: string }) => { registered.set(def.name, def as never); } }));
 import { RESEARCH_INDICATORS, researchKcName } from '@/lib/researchIndicators';
 import { registerCustomIndicators } from '@/lib/customIndicators';
-const lineAt = (name: string) => { let y = 0; const ys: number[] = []; const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(_c: string) {}, moveTo(_x: number, py: number) { y = py; }, stroke() { ys.push((100000 - Math.floor(y)) / 100000); } };
+const lineAt = (name: string) => { let y = 0; const ys: number[] = []; const ctx = { save() {}, restore() {}, beginPath() {}, lineTo() {}, fillRect() {}, setLineDash() {}, set lineWidth(_w: number) {}, set strokeStyle(_c: string) {}, moveTo(_x: number, py: number) { y = py; }, stroke() { ys.push((100000 - Math.floor(y)) / 100000); } };
   registered.get(name)!.draw!({ ctx, bounding: { width: 300, height: 200000 }, yAxis: { convertToPixel: (v: number) => 100000 - 100000 * v } }); return ys; };
 describe('多空状态 S 的橘色线', () => {
   it('原始状态 S 保留0.6；两条均值改用模型中心0.5；四项卖方方向不变', () => {
