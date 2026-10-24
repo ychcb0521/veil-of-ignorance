@@ -6,13 +6,14 @@ const DEFAULT_INDICATOR_HEIGHT = 80;
 /**
  * KLineCharts 9.8.12 can drop its pixel-resize callback when another paint is
  * already queued. CSS then stretches an old bitmap after a pane height change.
- * Run after native paints settle and retry its own pixel-ratio handler only
- * for canvases whose bitmap still disagrees with their displayed dimensions.
+ * For a mismatched bitmap, replace a pending plain paint with the library's
+ * pixel-ratio reset + paint. Otherwise replay can keep dropping the reset.
  */
 export function synchronizeChartPaneCanvases(chart: Chart): void {
   type NativeCanvas = {
     _element?: HTMLCanvasElement;
     _mediaQueryListener?: () => void;
+    _requestAnimationId?: number;
   };
   type NativeWidget = { _mainCanvas?: NativeCanvas; _overlayCanvas?: NativeCanvas };
   const panes = (chart as unknown as { _drawPanes?: Array<{ _mainWidget?: NativeWidget; _yAxisWidget?: NativeWidget }> })._drawPanes;
@@ -20,11 +21,16 @@ export function synchronizeChartPaneCanvases(chart: Chart): void {
     for (const widget of [pane._mainWidget, pane._yAxisWidget]) {
       for (const canvas of [widget?._mainCanvas, widget?._overlayCanvas]) {
         const element = canvas?._element;
-        if (!element || !element.clientWidth || !element.clientHeight) continue;
+        if (!element || !element.clientWidth || !element.clientHeight || !canvas?._mediaQueryListener) continue;
         const ratio = element.ownerDocument.defaultView?.devicePixelRatio ?? 1;
         if (Math.abs(element.width - Math.round(element.clientWidth * ratio)) > 1
           || Math.abs(element.height - Math.round(element.clientHeight * ratio)) > 1) {
-          canvas?._mediaQueryListener?.();
+          if (typeof canvas._requestAnimationId === 'number' && canvas._requestAnimationId !== -1) {
+            element.ownerDocument.defaultView?.cancelAnimationFrame(canvas._requestAnimationId);
+            // DEFAULT_REQUEST_ID in the pinned 9.8.12 Canvas implementation.
+            canvas._requestAnimationId = -1;
+          }
+          canvas._mediaQueryListener();
         }
       }
     }

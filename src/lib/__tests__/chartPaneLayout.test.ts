@@ -96,4 +96,18 @@ describe('native canvas pixels after pane resizing', () => {
     expect(hidden._mediaQueryListener).not.toHaveBeenCalled();
     expect(() => synchronizeChartPaneCanvases({} as Chart)).not.toThrow();
   });
+
+  it('replaces a queued replay paint so the native reset cannot be dropped', () => {
+    const stale = { ...canvas(76, 35), _requestAnimationId: 123 };
+    stale._mediaQueryListener.mockImplementation(() => {
+      // Native Canvas ignores a reset while a plain paint remains queued.
+      if (stale._requestAnimationId === -1) stale._element.height = 35 * window.devicePixelRatio;
+    });
+    const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
+    try {
+      synchronizeChartPaneCanvases({ _drawPanes: [{ _mainWidget: { _mainCanvas: stale } }] } as unknown as Chart);
+      expect(cancel).toHaveBeenCalledWith(123);
+      expect(stale._element.height).toBe(35 * window.devicePixelRatio);
+    } finally { cancel.mockRestore(); }
+  });
 });
