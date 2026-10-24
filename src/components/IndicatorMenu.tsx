@@ -234,7 +234,7 @@ interface Props {
 
 export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }: Props) {
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string | null>('custom');
   const panelRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef({ x: 0, y: 0 });
   const dragRef = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
@@ -263,6 +263,12 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setCategoryFilter('custom');
+    setSearch('');
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -407,6 +413,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
         <button
           type="button"
           onClick={() => setCategoryFilter(null)}
+          aria-pressed={!categoryFilter}
           className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
             !categoryFilter ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
           }`}
@@ -417,7 +424,8 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
           <button
             type="button"
             key={cat}
-            onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+            onClick={() => setCategoryFilter(cat)}
+            aria-pressed={categoryFilter === cat}
             className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all duration-100 ease-out active:scale-[0.95] whitespace-nowrap ${
               categoryFilter === cat ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}

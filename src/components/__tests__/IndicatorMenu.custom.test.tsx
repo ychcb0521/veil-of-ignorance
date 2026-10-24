@@ -18,7 +18,7 @@ describe('自制区的十个特征值', () => {
     expect(INDICATOR_CATALOG.filter(item => item.category === 'custom').map(item => item.id)).toEqual(ids);
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
-    fireEvent.click(screen.getByRole('button', { name: '自制区' }));
+    expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');
     for (const id of ids.filter(id => id !== 'DSP_VA')) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
     expect(screen.queryByText('成交量加权平均价')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '成交量' }));

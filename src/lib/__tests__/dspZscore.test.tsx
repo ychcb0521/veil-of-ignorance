@@ -110,6 +110,7 @@ describe('【用户要求】K 线图：动态谢林点的「Z」开关', () => {
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'DSP', period: 6, avgHours: 24, enabled: true }];
     const { rerender } = render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: '全部' }));
     const z = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 用波动率归一化版');
     expect(z).toHaveAttribute('aria-pressed', 'false');
     expect(z.getAttribute('title')).toContain('R / sd(R)');

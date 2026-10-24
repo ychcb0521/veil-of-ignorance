@@ -84,6 +84,7 @@ describe('CBA-2 图片公式与接入', () => {
   it('指标菜单可启用CBA-2，显示固定5分钟口径和参数', () => {
     const onChange = vi.fn();
     render(<IndicatorMenu open indicators={[]} onIndicatorsChange={onChange} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: '全部' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'CBA-2' } });
     fireEvent.click(screen.getByText('成交支持下的价格重心迁移 CBA-2'));
     expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ type: 'CBA-2', period: CBA2_DEFAULTS.halfLifeHours, enabled: true })]);

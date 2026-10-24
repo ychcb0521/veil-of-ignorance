@@ -165,6 +165,7 @@ describe('【用户要求】K 线图指标菜单：CBI（副图）', () => {
   it('菜单里有 CBI：名称下面写定义，悬停给出计算步骤；参数默认半衰期 12 根', () => {
     const onChange = vi.fn();
     render(<IndicatorMenu open indicators={[]} onIndicatorsChange={onChange} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: '全部' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'CBI' } });
     expect(screen.getByText(/CBI 买方优势指数（−1 ~ 1）= 参与度 P × 方向 D/)).toHaveAttribute('title', expect.stringContaining('A 吸收 = (λ⁺ − λ⁻) ÷ (|λ⁺| + |λ⁻|)'));
     fireEvent.click(screen.getByText('买方优势指数 CBI'));

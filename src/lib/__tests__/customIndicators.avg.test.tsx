@@ -90,6 +90,7 @@ describe('【用户要求】均线副图 avg_BSS = avg(BSS, N)、avg_a = avg(a, 
     const onChange = vi.fn();
     const indicators: IndicatorConfig[] = [{ type: 'BSS', period: 1, enabled: true }, { type: 'DSP', period: 6, avgHours: 12, enabled: true }];
     render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onChange} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: '全部' }));
     expect(screen.getByLabelText('BSS 均线时长 N（小时）')).toHaveValue(24);
     const avg = screen.getByLabelText('动态谢林点 DSP（含 a / A 副图） 均线时长 N（小时）') as HTMLInputElement;
     expect(avg.value).toBe('12');

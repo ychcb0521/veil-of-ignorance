@@ -6,6 +6,7 @@ import type { IndicatorConfig } from '@/components/CandlestickChart';
 function open(indicators: IndicatorConfig[]) {
   const onIndicatorsChange = vi.fn();
   render(<IndicatorMenu open indicators={indicators} onIndicatorsChange={onIndicatorsChange} onClose={() => {}} />);
+  fireEvent.click(screen.getByRole('button', { name: '全部' }));
   return onIndicatorsChange;
 }
 
