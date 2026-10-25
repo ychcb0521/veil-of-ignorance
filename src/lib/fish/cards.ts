@@ -8,28 +8,34 @@ import { readFishPreference, withFishDefaultThreshold, type FishPreference } fro
 
 export const fishCardsKey = () => `${getUserPrefix()}fish-cards.v1`;
 const cleanPreference = (p: FishPreference): FishPreference => ({ ...p, constraints: [] });
-// 2026-10-24 用户截图：六条规则、全部启用、并集。结果读取账号公式
-// 最后一条 avg₂；两张 S 卡显式选择不同序列，不能按 featureId 合并。
+// 2026-10-24 用户截图：六条规则、全部启用、并集。结果读取账号公式最后一条 avg₂。
+// 【用户要求】2026-10-25「渔的默认捕捞算法中，就按照这个设置」：按鱼舱重叠分析只留五类——
+// CBI-2（概率）、avg_S（持续性确认）、CBA（定价保留）、az（推力）、BSS（1 小时短线）；
+// CDA（CBA 的镜像）、卖控DSP.bc 与 DSP·a（推力类重复）、S 原值（被前几类分开覆盖）不再默认。
 export const FISH_DEFAULT_RULES = [
+  // 【用户要求】2026-10-25「最该看重的是 CBI-2、avg_S，因此应该排在前两个」
   { id: 'first', featureId: 'cbi2', statistic: '结果', threshold: '0.04' },
-  { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
-  { id: 'default-cda', featureId: 'cda', statistic: '结果', threshold: '8' },
-  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.08' },
-  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.7' },
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
+  { id: 'default-cba', featureId: 'cba', statistic: '结果', threshold: '8' },
+  { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
+  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.08' },
 ] as const;
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
-export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v2`;
+// v3：换成五条规则时，已有账号也重新套一次默认组合（保留留下来的那几条上调过的阈值）。
+export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v3`;
 export const fishCombinationKey = () => `${getUserPrefix()}fish-combination.v1`;
 export const readFishCombination = (): 'and' | 'or' => readPersistedStateRaw(fishCombinationKey()) === 'or' ? 'or' : 'and';
 
 /** Upgrade the old preset once; later user edits and saved combinations survive. */
 function initializeFishDefaults(available: readonly string[]): void {
   if (readPersistedStateRaw(fishDefaultsKey()) === '1') return;
+  // 上一版默认组合里同一条规则（同 id、同特征值、同序列）的设置沿用；只在上一版已初始化过时沿用，更早的旧卡一律换成默认值。
+  const previous = readPersistedStateRaw(`${getUserPrefix()}fish-default-preset.v2`) === '1' ? readFishCards() : [];
   const cards: FishCard[] = FISH_DEFAULT_RULES.filter(rule=>available.includes(rule.featureId)).map(rule=>({
     id: rule.id, featureId: rule.featureId, enabled: true,
-    pref: { ...cleanPreference(readFishPreference(rule.featureId)), statistic: rule.statistic,
-      direction: '>', threshold: rule.threshold, lastSuggestion: undefined },
+    pref: previous.find(card=>card.id===rule.id&&card.featureId===rule.featureId&&card.pref.statistic===rule.statistic)?.pref
+      ?? { ...cleanPreference(readFishPreference(rule.featureId)), statistic: rule.statistic,
+        direction: '>', threshold: rule.threshold, lastSuggestion: undefined },
   }));
   writePersistedStateRaw(fishCardsKey(), JSON.stringify(cards));
   writePersistedStateRaw(fishCombinationKey(), 'or');
