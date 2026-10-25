@@ -1,9 +1,9 @@
 import {compileFishProgram,fishStatistics,fishStateHold,FISH_STATE_HOLD_TEXT} from '@/lib/fish/algorithm';
 import type {DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {readFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
-import {useMemo,useEffect,type InputHTMLAttributes,type ReactNode} from 'react';
+import {Children,Fragment,isValidElement,useMemo,useEffect,type InputHTMLAttributes,type ReactNode} from 'react';
 import {fishSuggestionTitle,mayFillFishThreshold,suggestedFishThreshold,type FishSuggestion} from '@/lib/fish/suggestions';
-import { Check, ChevronDown, Ellipsis, RotateCw, X } from 'lucide-react';
+import { Check, ChevronDown, CircleHelp, Ellipsis, RotateCw, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 // 用户于 2026-10-19 指定保留的截图区间；固定参考备注，不随新计算覆盖。
 export const RECORDED_RANGES:Record<string,{statistic:string;low:string;high:string;samples:number}>={
@@ -24,7 +24,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  useEffect(()=>{if(locked||!card.enabled||!suggestion||!mayFillFishThreshold(p.threshold,p.lastSuggestion))return;const value=suggestedFishThreshold(suggestion,p.direction);if(value!==null&&String(value)!==p.threshold)update({threshold:String(value),lastSuggestion:String(value)});},[suggestion,p.threshold,p.lastSuggestion,p.direction,locked,card.enabled,onChange]);
  let stats:ReturnType<typeof fishStatistics>=[],error='';try{if(!def)throw Error('特征值已不存在');stats=fishStatistics(def);if(card.enabled){const plan=compileFishProgram(def,{statistic:p.statistic,direction:p.direction,threshold:p.threshold.trim()?Number(p.threshold):NaN,constraints:[]});error=plan.unavailable??'';}}catch(e){error=e instanceof Error?e.message:String(e);}
  // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
- // 每张卡是算法表里的一行——浅底无框的输入、统一高度、各列定宽，几张卡上下对齐；建议区间跟在阈值后面，「…」收在行尾
+ // 每行只保留操作字段；条件、单位、区间和计算状态统一收进淡色说明入口。
  const field='h-7 min-w-0 w-full rounded-md border border-transparent bg-muted/50 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60 focus-visible:bg-background';
  const cls=`${field} appearance-none pl-2 pr-6`;
  const options=useMemo(()=>defs.map(d=>{try{const plan=compileFishProgram(d,{direction:'>',threshold:0,constraints:[]});return {def:d,reason:plan.unavailable};}catch(e){return {def:d,reason:e instanceof Error?e.message:String(e)};}}),[defs]);
@@ -34,25 +34,29 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const chevron=<ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/>;
  const unit=p.statistic&&p.statistic!=='结果'?'原值':def?.unit;
  const stateHold=fishStateHold(card.featureId,p.statistic,p.direction);
+ const footerHasContent=isValidElement<{children?:ReactNode}>(footer)&&footer.type===Fragment?Children.toArray(footer.props.children).length>0:!!footer;
+ const hasReference=recorded||footerHasContent||suggestion||computing||(queued&&card.enabled&&librarySize>0)||(onRecalculate&&!recalculateDisabled);
  const dim=`transition-opacity ${card.enabled?'':'opacity-40'}`;
- return <fieldset disabled={locked} className="relative min-w-0 py-1.5 pl-2 pr-8 text-[11px] transition-colors hover:bg-muted/20" aria-label={`算法 ${index}`}>
+ return <fieldset disabled={locked} className="relative min-w-0 py-1 pl-2 pr-8 text-[11px] transition-colors hover:bg-muted/20" aria-label={`算法 ${index}`}>
  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
  <label className="flex w-8 shrink-0 items-center gap-1.5 pl-0.5" title={`算法 ${index}`}><FishCheck aria-label={`启用算法 ${index}`} checked={card.enabled} onChange={e=>onChange({...card,enabled:e.target.checked})}/><span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">{index}</span></label>
  <span className={`relative w-24 shrink-0 ${dim}`}><select aria-label={label('特征值')} title={def?.name} className={`${cls} font-medium`} value={card.featureId} onChange={e=>onChange({...card,featureId:e.target.value,pref:{...readFishPreference(e.target.value),constraints:[]}})}>{options.map(({def:d,reason})=><option key={d.id} value={d.id} label={`${d.short || d.name}${reason?' · 不可用':''}`} aria-label={`${d.short} · ${d.name}${reason?`（${reason}）`:''}`} disabled={!!reason}>{d.short} · {d.name}{reason?`（${reason}）`:''}</option>)}</select>{chevron}</span>
  <span className={`relative w-32 shrink-0 ${dim}`}><select aria-label={label('统计量')} title={stats.find(s=>s.name===(p.statistic??'结果'))?.label} className={cls} value={p.statistic??'结果'} onChange={e=>{const next=withFishDefaultThreshold(card.featureId,{...p,statistic:e.target.value,threshold:'',lastSuggestion:undefined});update({statistic:next.statistic,threshold:next.threshold,lastSuggestion:undefined});}}>{stats.map(s=><option key={s.name} value={s.name} label={s.name==='结果'?s.label:s.name} aria-label={s.label}>{s.label}</option>)}</select>{chevron}</span>
  <span className={`relative w-11 shrink-0 ${dim}`}><select aria-label={label('方向')} className={`${cls} pl-2.5 pr-5 font-medium`} value={p.direction} onChange={e=>{const direction=e.target.value as '>'|'<',fill=suggestion?suggestedFishThreshold(suggestion,direction):null;if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});else update({direction});}}><option value=">">&gt;</option><option value="<">&lt;</option></select>{chevron}</span>
- <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} pl-2 pt-0.5 ${unit?'pr-8':'pr-2'} font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/>{unit&&<span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground/60">{unit}</span>}</span>
- <div className="flex min-w-0 flex-1 items-center gap-x-1 pl-1 text-[10px] leading-5 empty:hidden">
- {stateHold&&<span className={`shrink-0 text-primary/90 ${dim}`} title="按已收盘读数计时，中途回到 0.55 或以下重新计时；当前还须超过左侧门槛。">{FISH_STATE_HOLD_TEXT}</span>}
- {/* 【用户要求】2026-10-20「渔中的这个 x 也放在 … 中」：每张卡都有「…」——记录区间（有的话）与「删除这个算法」都收在里面 */}
- {recorded||stateHold?null:<>{suggestionText}{refresh}</>}
- </div>
- {(recorded||canDelete)&&<Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 的更多操作`} title={recorded?'记录区间 · 删除':'删除'} className="absolute right-1 top-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Ellipsis className="h-3.5 w-3.5"/></button></PopoverTrigger><PopoverContent align="end" className="w-auto max-w-[calc(100vw-2rem)] space-y-1 p-2 text-[10px] leading-5">
- {recorded&&<>
- <div className="flex flex-wrap items-center text-muted-foreground" title={`2026-10-19 截图记录 · ${recorded.samples} / 793 条；固定参考区间`} data-testid={`fish-recorded-range-${index}`}>{recorded.statistic}：<span className="font-mono tabular-nums">{recorded.low} ~ {recorded.high}</span>{refresh}</div>
+ <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} px-2 pt-0.5 font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/></span>
+ <Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 说明`} title="算法说明" className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/30 transition-colors hover:bg-muted/50 hover:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" sideOffset={6} aria-label={`算法 ${index} 说明`} className="max-h-[60vh] w-80 max-w-[calc(100vw-2rem)] space-y-2.5 overflow-y-auto p-3 text-[11px] leading-relaxed">
+ <p className="font-medium text-foreground">{def?.short||def?.name||`算法 ${index}`} · 说明</p>
+ <div className="space-y-1 text-muted-foreground"><p>所选序列：{stats.find(s=>s.name===(p.statistic??'结果'))?.label??p.statistic??'结果'}</p><p>当前门槛：<span className="font-mono text-foreground/80">{p.direction} {p.threshold||'—'}</span>{unit?`（${unit}）`:''}，以已收盘读数判定。</p></div>
+ {stateHold&&<div className="space-y-1 border-t border-border/50 pt-2 text-muted-foreground"><p className="font-medium text-foreground/80">{FISH_STATE_HOLD_TEXT}</p><p>从首次高于 0.55 的收盘时刻计满 6 小时；期间回到 0.55 或以下就重新计时。当前还须超过左侧门槛，不要求这 6 小时一直超过当前门槛。</p></div>}
+ {def?.definition&&<p className="border-t border-border/50 pt-2 text-muted-foreground">{def.definition}</p>}
+ {hasReference&&<div className="space-y-1 border-t border-border/50 pt-2 text-muted-foreground">
+ <div className="flex items-center justify-between gap-2"><span className="font-medium text-foreground/80">{recorded?'区间参考':'信号库建议'}</span>{refresh}</div>
+ {recorded&&<p title={`2026-10-19 截图记录 · ${recorded.samples} / 793 条；固定参考区间`} data-testid={`fish-recorded-range-${index}`}>{recorded.statistic}：<span className="font-mono tabular-nums">{recorded.low} ~ {recorded.high}</span></p>}
  <div className="empty:hidden">{suggestionText}</div>
- </>}
- {canDelete&&<button type="button" aria-label={`删除算法 ${index}`} className={`flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-muted-foreground hover:bg-accent hover:text-destructive ${recorded?'mt-1 border-t border-border/50 pt-1.5':''}`} onClick={onDelete}><X className="h-3 w-3"/>删除这个算法</button>}
+ </div>}
+ </PopoverContent></Popover>
+ {canDelete&&<Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 的更多操作`} title="更多操作" className="absolute right-1 top-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/30 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Ellipsis className="h-3.5 w-3.5"/></button></PopoverTrigger><PopoverContent align="end" className="w-auto max-w-[calc(100vw-2rem)] p-2 text-[10px] leading-5">
+ <button type="button" aria-label={`删除算法 ${index}`} className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-muted-foreground hover:bg-accent hover:text-destructive" onClick={onDelete}><X className="h-3 w-3"/>删除这个算法</button>
  </PopoverContent></Popover>}
  </div>
  {card.enabled&&error&&<p className="mt-1 break-words pl-[2.375rem] text-destructive" role="alert">{error}</p>}</fieldset>;

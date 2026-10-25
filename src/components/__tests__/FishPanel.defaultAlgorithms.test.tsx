@@ -19,7 +19,12 @@ it('默认六条规则全部勾选，开始捕捞使用截图中的阈值、序�
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByLabelText('算法 5 统计量')).toHaveValue('state');
  expect(screen.getByLabelText('算法 6 统计量')).toHaveValue('avg_state_2');
- expect(screen.getByText('S > 0.55 连续至少 6 小时')).toBeVisible();
+ expect(screen.queryByText('S > 0.55 连续至少 6 小时')).toBeNull();
+ expect(screen.queryByTestId('fish-rule')).toBeNull();
+ for(const i of [1,2,3,4,5,6])expect(screen.getByRole('button',{name:`算法 ${i} 说明`})).toBeVisible();
+ fireEvent.click(screen.getByRole('button',{name:'算法 5 说明'}));
+ expect(screen.getByRole('dialog',{name:'算法 5 说明'})).toHaveTextContent('S > 0.55 连续至少 6 小时');
+ fireEvent.click(screen.getByRole('button',{name:'算法 5 说明'}));
  expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
  await vi.waitFor(()=>expect(start).toHaveBeenCalled());
