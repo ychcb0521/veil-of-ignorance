@@ -18,7 +18,7 @@ export const FISH_DEFAULT_RULES = [
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
   { id: 'default-cba', featureId: 'cba', statistic: '结果', threshold: '8' },
   { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
-  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.08' },
+  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.12' },
 ] as const;
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
 // v3：换成五条规则时，已有账号也重新套一次默认组合（保留留下来的那几条上调过的阈值）。
@@ -62,14 +62,14 @@ export function readFishCards(): FishCard[] {
   try {
     const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
     if (!Array.isArray(x)) return [];
-    // Correct the saved preset once, so existing panels and automatic scans use 0.08 too.
+    // Update the saved preset once, so existing panels and automatic scans use 0.12 too.
     // Custom cards/settings and later manual edits remain user-owned.
-    const bssDefaultKey = `${getUserPrefix()}fish-bss-default.v1`;
+    const bssDefaultKey = `${getUserPrefix()}fish-bss-default.v2`;
     if (readPersistedStateRaw(bssDefaultKey) !== '1') {
       const oldDefault = x.find(c => c?.id === 'default-bss' && c.featureId === 'bss'
-        && c.pref?.statistic === '结果' && c.pref.direction === '>' && Number(c.pref.threshold) === 0.8);
+        && c.pref?.statistic === '结果' && c.pref.direction === '>' && [0.8, 0.08].includes(Number(c.pref.threshold)));
       if (oldDefault) {
-        oldDefault.pref = { ...oldDefault.pref, threshold: '0.08', lastSuggestion: undefined };
+        oldDefault.pref = { ...oldDefault.pref, threshold: '0.12', lastSuggestion: undefined };
         writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
       }
       writePersistedStateRaw(bssDefaultKey, '1');

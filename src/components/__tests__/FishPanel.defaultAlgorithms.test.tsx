@@ -17,7 +17,7 @@ it('默认五条规则全部勾选，开始捕捞使用默认阈值、序列和�
  expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
  for(const i of [1,2,3,4,5])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
  expect(screen.queryByLabelText('启用算法 6',{selector:'input'})).toBeNull();
- expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','0.6','8','15','0.08']);
+ expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','0.6','8','15','0.12']);
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_state_2');
  expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('avg_S');
@@ -39,7 +39,7 @@ it('会话里增删、停用、换顺序都行；重新打开恢复五条规则�
  cleanup();render(panel());
  expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
  for(const i of [1,2,3,4,5])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
- expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(20);expect(screen.getByLabelText('算法 5 阈值')).toHaveValue(.08);
+ expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(20);expect(screen.getByLabelText('算法 5 阈值')).toHaveValue(.12);
 });
 it('Deep dig 里删掉的算法跳过；不传 defaultAlgorithms 时仍恢复上次保存的卡片',()=>{
  defs.list=defs.list.filter(d=>d.id!=='cba');render(panel());expect(features()).toEqual(['cbi2','state','drift-speed-z','bss']);

@@ -9,7 +9,7 @@ export interface FishPreference { sellerSignVersion?:1; thresholdDefaultsVersion
 export const fishPreferenceKey=(id:string)=>`${getUserPrefix()}fish-algorithm-settings.v1:${id}`;
 /** 用户截图指定的「结果 · avg_X」默认门槛，按显示单位填写。 */
 export const FISH_DEFAULTS_VERSION=1;
-export const FISH_DEFAULT_THRESHOLDS:Readonly<Record<string,string>>={cbi2:'0.04',cba:'8',bss:'0.08','drift-speed-z':'15',cdi2:'-0.04',dss:'-0.2',cda:'-8'};
+export const FISH_DEFAULT_THRESHOLDS:Readonly<Record<string,string>>={cbi2:'0.04',cba:'8',bss:'0.12','drift-speed-z':'15',cdi2:'-0.04',dss:'-0.2',cda:'-8'};
 // 只升级 DSP·a 的默认值，其他卡已保存的手动设定不重置。
 export const fishDefaultThresholdVersion=(id:string)=>id==='drift-speed-z'?2:FISH_DEFAULTS_VERSION;
 export function withFishDefaultThreshold(id:string,p:FishPreference):FishPreference {
