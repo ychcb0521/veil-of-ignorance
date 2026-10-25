@@ -341,7 +341,10 @@ function SignalLibraryRowImpl({
 
 export const SignalLibraryRow = memo(SignalLibraryRowImpl);
 
+export interface SignalScrollPosition { top: number; anchorId?: string; index?: number; offset?: number }
 interface Props {
+  restoreScroll?: SignalScrollPosition;
+  onScrollPositionChange?: (position: SignalScrollPosition) => void;
   matches?: ReadonlyMap<string, SignalReconstructionMatch>;
   rowTitle?: (signal: TradeSignal) => string;
   rowAlgorithm?: (signal: TradeSignal) => string;
@@ -386,9 +389,13 @@ const sameView = (a: ListView, b: ListView) => (
 
 function SignalLibraryListImpl({
   rows, tradedDayIndex, campaignDayIndex, jumpingSignalId, resetKey,
-  onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, confirmDelete = false,
+  restoreScroll, onScrollPositionChange, onJump, onDelete, onRate, rowTitle, rowAlgorithm, nested = false, matches, showProcess = false, rowAlgorithmTypes, confirmDelete = false,
 }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const rowsRef = useRef(rows); rowsRef.current = rows;
+  const positionCallback = useRef(onScrollPositionChange); positionCallback.current = onScrollPositionChange;
+  const initialPosition = useRef(restoreScroll);
+  const firstReset = useRef(true);
   const countRef = useRef(rows.length);
   countRef.current = rows.length;
 
@@ -460,6 +467,9 @@ function SignalLibraryListImpl({
     let frame = 0;
     const run = () => { pending = false; measure(); };
     const onScroll = () => {
+      const metrics = viewRef.current;
+      const index = computeSignalRowWindow(el.scrollTop, el.clientHeight, rowsRef.current.length, 0, metrics).start;
+      positionCallback.current?.({ top: el.scrollTop, anchorId: rowsRef.current[index]?.id, index, offset: el.scrollTop - signalRowOffset(index, metrics) });
       if (!canFrame) { measure(); return; }
       if (pending) return;
       pending = true;
@@ -485,7 +495,14 @@ function SignalLibraryListImpl({
   // 换排序 / 筛选 / 月份：回到顶部。窗口在渲染时已经按顶部算好（见下方），这里只校准一次尺寸。
   useLayoutEffect(() => {
     const el = scrollerRef.current;
-    if (el) el.scrollTop = 0;
+    if (el) {
+      const position = firstReset.current ? initialPosition.current : undefined;
+      const metrics = measureSignalRowMetrics(el) ?? viewRef.current;
+      const index = position?.anchorId ? rows.findIndex(s => s.id === position.anchorId) : -1;
+      el.scrollTop = position ? Math.max(0, index >= 0 ? position.index !== undefined ? position.top + (index - position.index) * metrics.pitch : signalRowOffset(index, metrics) + (position.offset ?? 0) : position.top) : 0;
+      if (!firstReset.current) positionCallback.current?.({ top: 0, anchorId: rows[0]?.id, index: 0, offset: 0 });
+    }
+    firstReset.current = false;
     measure();
   }, [resetKey, measure]);
 

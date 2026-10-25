@@ -72,7 +72,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('捕捞完成'));
-    expect(loadFishSignals()).toHaveLength(1);
+    expect(loadFishSignals()).toHaveLength(2);
     let aborted = false;
     mocks.scan.mockImplementation(async o => { o.onProgress(initialFishProgress()); await new Promise<void>(resolve => o.signal.addEventListener('abort',() => { aborted = true; resolve(); },{once:true})); const result = { ...initialFishProgress(), status:'cancelled' as const }; o.onProgress(result); return result; });
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
@@ -97,8 +97,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(mocks.scan).toHaveBeenCalledWith(expect.objectContaining({ anchorMs: Date.UTC(2026,9,18,4,34,56), threshold: 0.2 })));
     // 【用户要求】2026-10-21「整行完全重复时，只留一个」：同一信号只换了阈值，列表里显示一样——合并成一条，读数用这一轮的，评分沿用
-    expect(loadFishSignals()).toHaveLength(1);
-    expect(loadFishSignals()[0]).toMatchObject({quality:4,freshCatch:true,fish:{threshold:.2,average:.25}});
+    expect(loadFishSignals()).toHaveLength(2);
+    expect(loadFishSignals().find(s=>s.freshCatch)).toMatchObject({quality:4,freshCatch:true,fish:{threshold:.2,average:.25}});
+    expect(loadFishSignals().filter(s=>s.fishArchive)).toHaveLength(1);
     expect(screen.queryByText(/本轮阈值 > 0.2/)).not.toBeInTheDocument();
     const help = screen.getByRole('button',{name:'捕捞说明'});
     fireEvent.mouseOver(help);
@@ -146,7 +147,10 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.queryByTestId('fish-old-panel')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
-    expect(screen.getByTestId('fish-old-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('fish-old-panel')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:/^鱼舱/}));
+    expect(screen.getByLabelText('鱼舱的月份')).toHaveValue('2026-09');
+    expect(screen.getByLabelText('筛选鱼舱信号')).toHaveValue('AAA');
     expect(loadFishSignals()).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
@@ -166,7 +170,8 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     mocks.scan.mockImplementation(async o => { o.onSignal(SIGNAL); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['AAAUSDT']));
-    expect(loadFishSignals()).toHaveLength(2);
+    expect(loadFishSignals()).toHaveLength(3);
+    expect(loadFishSignals().filter(s=>s.fishArchive)).toHaveLength(2);
     expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('AAAUSDT');
     expect(screen.getByTestId('fish-new-panel')).not.toHaveTextContent('BBBUSDT');
     expect(within(screen.getByTestId('fish-new-panel')).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
@@ -208,7 +213,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     mocks.scan.mockImplementation(async o=>{o.onSignal({...records[2],quality:undefined,fish:{...SIGNAL.fish!,average:.42}});const p={...initialFishProgress(),status:'complete' as const};o.onProgress(p);return p;});
     render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(()=>expect(loadFishSignals().filter(s=>s.freshCatch).map(s=>s.exchange)).toEqual(['gate']));
-    const saved=loadFishSignals();expect(saved).toHaveLength(3);expect(saved[0]).toMatchObject({quality:1,fish:{average:.35}});expect(saved[1]).toMatchObject({quality:3,fish:{average:.35}});expect(saved[2]).toMatchObject({quality:5,fish:{average:.42}});
+    const saved=loadFishSignals();expect(saved).toHaveLength(4);expect(saved[0]).toMatchObject({quality:1,fish:{average:.35}});expect(saved[1]).toMatchObject({quality:3,fish:{average:.35}});expect(saved[2]).toMatchObject({quality:5,fish:{average:.35}});expect(saved.find(s=>s.freshCatch)).toMatchObject({quality:5,fish:{average:.42}});
   });
 
   it('【用户要求】2026-10-19 渔界面只显示命中与进度：进度旁不再有明细入口；整次扫描失败时仍写出报错',async()=>{
@@ -256,4 +261,25 @@ it('手动模式下打开照常恢复本次会话输过的时间',()=>{
  sessionStorage.setItem('veil.fish.time','2025-04-23 01:26:00');
  render(control());fireEvent.click(screen.getByRole('button',{name:/^渔/}));
  expect((screen.getByLabelText('捕捞时间（UTC+8）') as HTMLInputElement).value).toBe('2025-04-23 01:26:00');
+});
+
+it.each(['新鱼','鱼舱'])('从 %s 跳转到币种后返回，恢复外层位置、列表滚动与原排序',async(title)=>{
+ const rows=Array.from({length:80},(_,i)=>({...SIGNAL,id:`nav-${i}`,symbol:`C${String(i).padStart(3,'0')}USDT`,timeMs:i+1,freshCatch:title==='新鱼'}));
+ localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify(rows));
+ const jump=vi.fn(async()=>({ok:true as const}));render(control(jump));
+ const toggle=screen.getByRole('button',{name:/^渔/});fireEvent.click(toggle);
+ const section=screen.getByTestId(title==='新鱼'?'fish-new-panel':'fish-old-panel');
+ fireEvent.click(within(section).getByTestId('signal-sort-标的'));
+ fireEvent.click(within(section).getByTestId('signal-sort-标的'));
+ const list=within(section).getByTestId('signal-library-scroller');list.scrollTop=505;fireEvent.scroll(list);
+ const panel=screen.getByTestId('fish-panel');panel.scrollTop=320;
+ await waitFor(()=>expect(within(list).getByText('C059USDT')).toBeInTheDocument());
+ const visible=within(list).getByText('C059USDT');fireEvent.click(visible);
+ await waitFor(()=>expect(screen.queryByTestId('fish-panel')).toBeNull());
+ expect(jump).toHaveBeenCalledWith('C059USDT',60);
+ fireEvent.click(toggle);
+ const restored=screen.getByTestId(title==='新鱼'?'fish-new-panel':'fish-old-panel');
+ expect(within(restored).getByTestId('signal-sort-标的')).toHaveAttribute('aria-sort','descending');
+ expect(within(restored).getByTestId('signal-library-scroller').scrollTop).toBe(505);
+ expect(screen.getByTestId('fish-panel').scrollTop).toBe(320);
 });

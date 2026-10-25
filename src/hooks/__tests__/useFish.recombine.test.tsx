@@ -5,6 +5,7 @@ import {CBI2_DEF} from '@/lib/deepDig/features';
 import {compileFishProgram} from '@/lib/fish/algorithm';
 import {intervalMs} from '@/lib/deepRsa/marketData';
 import type {FishDataAdapter} from '@/lib/fish/adapters';
+vi.mock('@/lib/simStateSync',()=>({queueSimStatePush:vi.fn()}));
 const sessions=vi.hoisted(()=>new Map());
 vi.mock('@/lib/fish/session',()=>({saveFishSession:vi.fn(async(owner,value)=>{if(value)sessions.set(owner,value);else sessions.delete(owner);}),loadFishSession:vi.fn(async(owner)=>sessions.get(owner)??null)}));
 let candleRequests=0;
@@ -130,10 +131,10 @@ it('每轮捕捞结束交出这一轮新进列表的鱼和整张新鱼列表；�
  act(()=>{result.current.recombine('and',keys);});expect(onCaught).toHaveBeenCalledTimes(1);
  // 第二轮：切到交集时并集口径的 AAA、EEE 留在「鱼」里，这轮再捕到不算新进列表；新鱼列表照样交出
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
- expect(onCaught).toHaveBeenCalledTimes(2);expect(onCaught.mock.calls[1][0]).toEqual([]);expect(onCaught.mock.calls[1][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ expect(onCaught).toHaveBeenCalledTimes(2);expect(onCaught.mock.calls[1][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);expect(onCaught.mock.calls[1][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
  // 第三轮：没有新进列表的，但新鱼列表照样交出（列表和上一封一样时邮件那边不发）
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});
- expect(onCaught).toHaveBeenCalledTimes(3);expect(onCaught.mock.calls[2][0]).toEqual([]);expect(onCaught.mock.calls[2][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ expect(onCaught).toHaveBeenCalledTimes(3);expect(onCaught.mock.calls[2][0].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);expect(onCaught.mock.calls[2][1].map((s:any)=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
 });
 // 【用户要求】2026-10-21「我希望发邮件时，默认为并集里的鱼」
 it('面板选交集时新鱼只有交集结果，邮件那张表仍是本轮并集',async()=>{
@@ -162,4 +163,59 @@ it('捕捞中切换交集 / 并集：已判完的当场重排，之后的按新�
  expect(result.current.progress?.status).toBe('complete');expect(fresh()).toEqual(['AAAUSDT','EEEUSDT']);expect(result.current.progress?.rule).toContain(' 或 ');
  // 没在捕捞时不处理（交给 recombine）
  expect(result.current.switchLive('and')).toBe(false);
+});
+
+it('每轮开始先把全部新鱼入舱；再次命中同一信号也不能移走前两轮快照，刷新后仍保留',async()=>{
+ const {loadFishSignals}=await import('@/lib/fishSignals');
+ const view=renderHook(()=>useFish(undefined));
+ const opts={feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true};
+ await act(async()=>{await view.result.current.start(opts);});
+ const first=view.result.current.signals.filter(s=>s.freshCatch);
+ expect(first.map(s=>s.symbol).sort()).toEqual(['AAAUSDT','EEEUSDT']);
+ act(()=>{view.result.current.commit(view.result.current.signals.map(s=>s.symbol==='AAAUSDT'?{...s,quality:5}:s));});
+ await act(async()=>{await view.result.current.start(opts);});
+ for(const symbol of ['AAAUSDT','EEEUSDT']){
+   expect(view.result.current.signals.filter(s=>s.symbol===symbol)).toHaveLength(2);
+   expect(view.result.current.signals.filter(s=>s.symbol===symbol&&!s.freshCatch)).toHaveLength(1);
+ }
+ await act(async()=>{await view.result.current.start(opts);});
+ for(const symbol of ['AAAUSDT','EEEUSDT']){
+   const rows=view.result.current.signals.filter(s=>s.symbol===symbol);
+   expect(rows).toHaveLength(3);expect(rows.filter(s=>s.fishArchive)).toHaveLength(2);
+   expect(new Set(rows.map(s=>s.id)).size).toBe(3);
+   expect(rows.every(s=>s.fish?.average===first.find(f=>f.symbol===symbol)?.fish?.average)).toBe(true);
+ }
+ expect(view.result.current.signals.filter(s=>s.symbol==='AAAUSDT').every(s=>s.quality===5)).toBe(true);
+ const saved=loadFishSignals();expect(saved).toHaveLength(view.result.current.signals.length);
+ view.unmount();const restored=renderHook(()=>useFish(undefined));
+ await waitFor(()=>expect(restored.result.current.hasRound).toBe(true));
+ expect(restored.result.current.signals).toHaveLength(saved.length);
+ expect(restored.result.current.signals.filter(s=>s.fishArchive)).toHaveLength(5);
+});
+it('新一轮失败或取消时，上一轮的新鱼已经在取数前入舱并持久化',async()=>{
+ const {loadFishSignals}=await import('@/lib/fishSignals');
+ const {result}=renderHook(()=>useFish(undefined));
+ await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
+ const previous=result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort();
+ let release!:()=>void;gate=new Promise<void>(r=>{release=r;});
+ let run!:Promise<void>;
+ act(()=>{run=result.current.start({feature:def,algorithm:{...a,threshold:1000},anchorMs:cut,includeDuplicates:true});});
+ await waitFor(()=>expect(result.current.progress?.status).toBe('running'));
+ expect(loadFishSignals().filter(s=>s.fishArchive&&previous.includes(s.symbol)).map(s=>s.symbol).sort()).toEqual(previous);
+ act(()=>result.current.cancel());await act(async()=>{release();await run;});
+ expect(result.current.signals.filter(s=>s.freshCatch)).toHaveLength(0);
+ expect(loadFishSignals().filter(s=>previous.includes(s.symbol)).map(s=>s.symbol).sort()).toEqual(previous);
+ await act(async()=>{await result.current.start({feature:def,algorithm:{...a,threshold:NaN},anchorMs:cut});});
+ expect(loadFishSignals().filter(s=>previous.includes(s.symbol))).toHaveLength(previous.length);
+});
+it('入舱保存失败时保留原新鱼和上一轮结果，不开始新的市场扫描',async()=>{
+ const storage=await import('@/lib/fishSignals');
+ const {result}=renderHook(()=>useFish(undefined));
+ await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
+ const previous=result.current.signals,requests=candleRequests;
+ const save=vi.spyOn(storage,'saveFishSignals').mockReturnValueOnce(false);
+ await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut});});
+ expect(candleRequests).toBe(requests);expect(result.current.signals).toBe(previous);
+ expect(result.current.progress?.error).toContain('已停止新一轮捕捞');
+ save.mockRestore();
 });

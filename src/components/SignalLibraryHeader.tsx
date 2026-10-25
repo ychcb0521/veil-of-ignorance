@@ -14,7 +14,7 @@ export function SignalLibraryHeader({ sortKey, sortDir, onSort, showMatch = fals
   showMatch?: boolean;
   /** 「渔」的鱼：这一列标「捕捞过程」。 */
   showProcess?: boolean;
-  sortKey: SignalSortKey; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
+  sortKey: SignalSortKey | undefined; sortDir: 'asc' | 'desc'; onSort: (key: SignalSortKey) => void;
 }) {
   return <div data-testid="signal-library-header" className={`${algorithmSort ? SIGNAL_LIBRARY_FISH_GRID : showMatch ? SIGNAL_LIBRARY_MATCH_GRID : SIGNAL_LIBRARY_GRID} border-b border-border/60 bg-muted/40 px-2 py-1 text-[9px] leading-3 font-medium text-muted-foreground`}>
     <span className="grid grid-cols-[12px_minmax(0,1fr)] items-center gap-1">

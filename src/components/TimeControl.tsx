@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
 import { readFishAuto } from '@/lib/fish/autoScan';
@@ -87,6 +87,20 @@ export function TimeControl({
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   const [fishOpen, setFishOpen] = useState(false);
+  const fishHostRef = useRef<HTMLDivElement>(null);
+  const fishReturnPosition = useRef<{panelTop:number;ancestors:{node:HTMLElement;top:number;left:number}[]}|null>(null);
+  const rememberFishPosition = useCallback(()=>{
+    const panel=fishHostRef.current?.querySelector<HTMLElement>('[data-testid="fish-panel"]');
+    if(!panel)return;
+    const ancestors:{node:HTMLElement;top:number;left:number}[]=[];
+    for(let node=fishHostRef.current?.parentElement;node;node=node.parentElement)ancestors.push({node,top:node.scrollTop,left:node.scrollLeft});
+    fishReturnPosition.current={panelTop:panel.scrollTop,ancestors};
+  },[]);
+  useLayoutEffect(()=>{
+    if(!fishOpen||!fishReturnPosition.current)return;
+    const restore=()=>{const saved=fishReturnPosition.current,panel=fishHostRef.current?.querySelector<HTMLElement>('[data-testid="fish-panel"]');if(!saved||!panel)return;panel.scrollTop=saved.panelTop;for(const {node,top,left} of saved.ancestors)if(node.isConnected){node.scrollTop=top;node.scrollLeft=left;}};
+    restore();const frame=requestAnimationFrame(restore);return()=>cancelAnimationFrame(frame);
+  },[fishOpen]);
   // 渔的捕捞时间记在这个标签页里（刷新不丢）：以前每次刷新都变回空 = 「现在」，换了截止时刻自己却看不出来
   // 【用户要求】2026-10-21「自动捕捉模式时，时间默认为现在（除非是手动输入了）」：自动模式下打开不恢复以前输过的时间
   const [fishInputs, setFishInputsState] = useState(() => { let time = ''; try { if (readFishAuto().mode !== 'auto') time = sessionStorage.getItem(FISH_TIME_KEY) ?? ''; } catch { /* 读不到就从空开始 */ } return { time, threshold: '0.3' }; });
@@ -413,6 +427,7 @@ export function TimeControl({
   const handleJumpFish = useCallback(async (id: string) => {
     const sig = fish.signalsRef.current.find(s => s.id === id);
     if (!sig || !signalChartSymbol(sig) || jumpingSignalIdRef.current) return;
+    rememberFishPosition();
     const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
     if (!jumpTo) { changeSymbol?.(signalChartSymbol(sig)!); setFishOpen(false); return; }
     jumpingSignalIdRef.current = id; setJumpingSignalId(id);
@@ -426,7 +441,7 @@ export function TimeControl({
         if (issue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
       }
     } finally { jumpingSignalIdRef.current = null; setJumpingSignalId(null); }
-  }, [fish.commit, fish.signalsRef]);
+  }, [fish.commit, fish.signalsRef, rememberFishPosition]);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -546,8 +561,8 @@ export function TimeControl({
         )}
       </div>
 
-      {fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
-        onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}
+      <div ref={fishHostRef}>{fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+        onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (

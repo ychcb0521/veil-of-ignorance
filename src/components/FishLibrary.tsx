@@ -1,3 +1,4 @@
+import type {SignalScrollPosition} from './SignalLibraryList';
 import {fishCaughtBy} from '@/lib/fish/records';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
 import { ChevronDown, Database, Search, Sparkles } from 'lucide-react';
@@ -10,6 +11,7 @@ import { SignalLibraryList } from '@/components/SignalLibraryList';
 type SignalLibraryListProps = ComponentProps<typeof SignalLibraryList>;
 interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaignDayIndex' | 'jumpingSignalId' | 'onJump' | 'onDelete' | 'onRate'> {
   signals: SignalLibraryListProps['rows'];
+  rememberViewKey?: string;
   /** 列表名：「新鱼」或「鱼舱」。 */
   title?: string;
   testId?: string;
@@ -18,15 +20,29 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   /** 紧跟在上一个列表下面：不再画分隔线。 */
   bare?: boolean;
 }
+interface FishView { open?: boolean; algorithm?: string; query?: string; month?: string; sortKey?: SignalSortKey|'algorithm'; sortDir?: 'asc'|'desc'; scroll?: SignalScrollPosition; frozen?: {key:string;values:[string,number|null][]} }
+const viewKey=(key:string)=>`veil.fish.view.v1:${key}`;
+function readView(key?:string):FishView {
+  try {
+    const v=key?JSON.parse(sessionStorage.getItem(viewKey(key))??'{}'):{};
+    if(!v||typeof v!=='object'||Array.isArray(v))return {};
+    return {open:typeof v.open==='boolean'?v.open:undefined,algorithm:typeof v.algorithm==='string'?v.algorithm:'',query:typeof v.query==='string'?v.query:'',month:typeof v.month==='string'?v.month:'',
+      sortKey:['time','symbol','quality','algorithm'].includes(v.sortKey)?v.sortKey:undefined,sortDir:['asc','desc'].includes(v.sortDir)?v.sortDir:undefined,
+      scroll:v.scroll&&Number.isFinite(v.scroll.top)&&v.scroll.top>=0?{top:v.scroll.top,anchorId:typeof v.scroll.anchorId==='string'?v.scroll.anchorId:undefined,index:Number.isInteger(v.scroll.index)&&v.scroll.index>=0?v.scroll.index:undefined,offset:Number.isFinite(v.scroll.offset)?v.scroll.offset:0}:undefined,
+      frozen:v.frozen&&typeof v.frozen.key==='string'&&Array.isArray(v.frozen.values)?{key:v.frozen.key,values:v.frozen.values.filter((x:unknown)=>Array.isArray(x)&&typeof x[0]==='string'&&(x[1]===null||Number.isFinite(x[1])))}:undefined};
+  }catch{return {};}
+}
 /** The catch stays inside 渔. Use the same table, columns, sorting and rating behavior as 信号库. */
 export const FishLibrary = memo(function FishLibrary(p: Props) {
   const title = p.title ?? '鱼舱';
   const testId = p.testId ?? 'fish-library';
-  const [open, setOpen] = useState(!!p.defaultOpen);
+  const [saved] = useState(()=>readView(p.rememberViewKey));
+  const scroll = useRef<SignalScrollPosition>(saved.scroll??{top:0});
+  const [open, setOpen] = useState(saved.open??!!p.defaultOpen);
   // 新一轮捕到鱼时自动展开（只在从无到有时，之后用户收起就不再抢）
   const hadRows = useRef(p.signals.length > 0);
   useEffect(() => { if (p.defaultOpen && !hadRows.current && p.signals.length > 0) setOpen(true); hadRows.current = p.signals.length > 0; }, [p.defaultOpen, p.signals.length]);
-  const [algorithm,setAlgorithm]=useState('');
+  const [algorithm,setAlgorithm]=useState(saved.algorithm??'');
   // 「算法类型」筛选：列出捕到过鱼的每个算法，选一个只看它捕到的（多算法的鱼只要含它就算）
   const algorithms=useMemo(()=>[...new Set(p.signals.flatMap(fishCaughtBy))].sort((a,b)=>a.localeCompare(b)),[p.signals]);
   // Measure all combinations, not just the virtualized viewport. Filtering keeps columns still.
@@ -43,14 +59,20 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
     return () => observer?.disconnect();
   }, [algorithmLabels, open]);
   useEffect(()=>{if(algorithm&&!algorithms.includes(algorithm))setAlgorithm('');},[algorithm,algorithms]);
-  const [query, setQuery] = useState('');
-  const [month, setMonth] = useState('');
+  const [query, setQuery] = useState(saved.query??'');
+  const [month, setMonth] = useState(saved.month??'');
   // 【用户要求】2026-10-21「信号时间默认为时间越近越排在上面」
-  const [sortKey, setSortKey] = useState<SignalSortKey | 'algorithm'>('time');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [sortKey, setSortKey] = useState<SignalSortKey | 'algorithm'>(saved.sortKey??'time');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(saved.sortDir??'desc');
   const resetKey = `${sortKey}|${sortDir}|${month}|${algorithm}|${query.trim().toUpperCase()}`;
   // As in 信号库, editing stars keeps the row still until the next explicit sort/filter.
-  const [frozen, setFrozen] = useState<{ key: string; values: Map<string, number | null> }>({ key: '', values: new Map() });
+  const [frozen, setFrozen] = useState<{ key: string; values: Map<string, number | null> }>({ key: saved.frozen?.key??'', values: new Map(saved.frozen?.values??[]) });
+  const currentView = useRef<FishView>({});
+  currentView.current = {open,algorithm,query,month,sortKey,sortDir,frozen:{key:frozen.key,values:[...frozen.values]}};
+  const saveView=useCallback(()=>{if(p.rememberViewKey)try{sessionStorage.setItem(viewKey(p.rememberViewKey),JSON.stringify({...currentView.current,scroll:scroll.current}));}catch{/* View restoration never blocks navigation. */}},[p.rememberViewKey]);
+  useEffect(()=>{saveView();return saveView;},[saveView,open,algorithm,query,month,sortKey,sortDir,frozen]);
+  const onScrollPositionChange=useCallback((position:SignalScrollPosition)=>{scroll.current=position;saveView();},[saveView]);
+  const onJump=useCallback((id:string)=>{saveView();p.onJump(id);},[p.onJump,saveView]);
   const latest = useRef({ signals: p.signals, resetKey, onRate: p.onRate });
   latest.current = { signals: p.signals, resetKey, onRate: p.onRate };
   useEffect(() => { if (frozen.key !== resetKey && frozen.values.size) setFrozen({ key: resetKey, values: new Map() }); }, [frozen, resetKey]);
@@ -103,8 +125,8 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
         {algorithmLabels.map(label => <span key={label} className="block w-max whitespace-nowrap">{label}</span>)}
       </div>
       {rows.length ? <div className="min-w-0 overflow-x-auto rounded-lg border border-border/60"><div data-testid="fish-library-table" style={{ '--fish-algorithm-width': `${algorithmWidth}px`, minWidth: `calc(638px + var(--fish-algorithm-width))` } as CSSProperties}>
-        <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? 'symbol' : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
-        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete />
+        <SignalLibraryHeader sortKey={sortKey === 'algorithm' ? undefined : sortKey} sortDir={sortDir} onSort={toggleSort} showProcess algorithmSort={{ active: sortKey === 'algorithm', onClick: () => toggleSort('algorithm') }} />
+        <SignalLibraryList rows={rows} resetKey={`fish:${resetKey}`} tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={onJump} restoreScroll={scroll.current} onScrollPositionChange={onScrollPositionChange} onDelete={p.onDelete} onRate={onRate} rowAlgorithmTypes={fishCaughtBy} nested showProcess confirmDelete />
       </div></div> : <div className="rounded-lg border border-dashed border-border/60 px-3 py-5 text-center text-[10.5px] text-muted-foreground">{p.signals.length ? '没有匹配的标的。' : p.emptyText ?? '暂无信号。'}</div>}
     </div>}
   </div>;

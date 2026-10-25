@@ -30,9 +30,10 @@ export function loadFishSignals(): TradeSignal[] {
     return migrated;
   } catch { return []; }
 }
-export function saveFishSignals(signals: TradeSignal[], userId: string | null): void {
-  writePersistedStateRaw(FISH_STORAGE_KEY, JSON.stringify(signals));
+export function saveFishSignals(signals: TradeSignal[], userId: string | null): boolean {
+  const saved = writePersistedStateRaw(FISH_STORAGE_KEY, JSON.stringify(signals));
   if (userId) queueSimStatePush(userId, 'fish_signals_v1', signals);
+  return saved;
 }
 export function fishSignalTitle(signal: TradeSignal): string {
   const r = signal.fish;

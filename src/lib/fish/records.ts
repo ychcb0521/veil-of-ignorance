@@ -3,6 +3,7 @@ import { stockCode } from '@/lib/signalMarket';
 import { signalDedupKey } from '@/lib/signalLibrary';
 import { CBI2_DEF, compileFeatureFormula, definitionKey } from '@/lib/deepDig/features';
 import { constraintFingerprint, fishAlgorithmKey, type FishSnapshot } from './algorithm';
+const archiveSuffix = (s: TradeSignal) => s.fishArchive ? `|archive:${s.fishArchive.id}` : '';
 /** Migrate deterministically; never let normal signal-library dedup collapse different algorithms. */
 export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const r=s.fish;
@@ -13,12 +14,32 @@ export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const fish={...r,average:r?.average??NaN,cbi2:r?.cbi2??r?.value??NaN,startAverage:r?.startAverage??NaN,previousAverage:r?.previousAverage??NaN,cutoffMs:r?.cutoffMs??s.timeMs,
     statistic,featureId,featureName:r?.featureName??CBI2_DEF.name,featureShort:r?.featureShort??CBI2_DEF.short,definitionKey:r?.definitionKey??definitionKey(CBI2_DEF),interval:r?.interval??'5m',H,direction,threshold,thresholdRaw:r?.thresholdRaw??threshold/(r?.scale??1),scale:r?.scale??1,unit:r?.unit??CBI2_DEF.unit,constraints:texts,constraintKey,algorithmKey,value:r?.value??r?.cbi2??NaN,startConstraints:r?.startConstraints??[],cutoffConstraints:r?.cutoffConstraints??[]};
   const venue=s.exchange&&s.exchange!=='binance'?`${s.exchange}-`:'';
-  return {...s,...(s.market==='us_stock'?{underlying:stockCode(s),exchange:s.exchange??'binance'}:{}),id:`fish-${s.market==='us_stock'?`us-${s.exchange??'binance'}-${stockCode(s)}`:`${venue}${s.symbol}`}-${s.timeMs}-${encodeURIComponent(algorithmKey)}`,fish};
+  return {...s,...(s.market==='us_stock'?{underlying:stockCode(s),exchange:s.exchange??'binance'}:{}),id:`fish-${s.market==='us_stock'?`us-${s.exchange??'binance'}-${stockCode(s)}`:`${venue}${s.symbol}`}-${s.timeMs}-${encodeURIComponent(algorithmKey)}${archiveSuffix(s)}`,fish};
 }
-export const fishDedupKey=(s:TradeSignal)=>`${signalDedupKey(s)}|${migrateFishSignal(s).fish!.algorithmKey}`;
+export const fishCatchKey=(s:TradeSignal)=>`${signalDedupKey(s)}|${migrateFishSignal(s).fish!.algorithmKey}`;
+export const fishDedupKey=(s:TradeSignal)=>fishCatchKey(s)+archiveSuffix(s);
+/** Archive before the next scan: re-catching the same signal must not consume an earlier round’s copy. */
+export function archiveFishForNextRound(list: TradeSignal[], at = Date.now()): TradeSignal[] {
+  if (!list.some(s => !s.fishArchive)) return list;
+  const id = crypto.randomUUID();
+  return list.map(s => {
+    if (s.fishArchive) return s;
+    const { freshCatch: _fresh, ...saved } = s;
+    return { ...saved, id: `${s.id}|archive:${id}`, fishArchive: { id, at } };
+  });
+}
+/** Ignore only the exact old fresh occurrence already present as an archive, never a later capture. */
+export function withoutArchivedFreshCopies(list: readonly TradeSignal[]): TradeSignal[] {
+  const versions = new Map<string, Set<number>>();
+  for (const s of list) if (s.fishArchive) {
+    const key = fishCatchKey(s), set = versions.get(key) ?? new Set<number>();
+    set.add(s.caughtAt ?? 0); versions.set(key, set);
+  }
+  return list.filter(s => s.fishArchive || !s.freshCatch || !versions.get(fishCatchKey(s))?.has(s.caughtAt ?? 0));
+}
 export function mergeFishSignals(existing: readonly TradeSignal[],incoming: readonly TradeSignal[]): TradeSignal[] {
   const map=new Map<string,TradeSignal>();
-  for(const raw of [...existing,...incoming]){
+  for(const raw of withoutArchivedFreshCopies([...existing,...incoming])){
     const s=migrateFishSignal(raw),key=fishDedupKey(s),previous=map.get(key);
     map.set(key,previous?{...previous,...s,quality:previous.quality??s.quality,freshCatch:previous.freshCatch||s.freshCatch||undefined}:s);
   }
@@ -64,7 +85,8 @@ export function fishCaughtBy(s: TradeSignal): string[] {
  * 【用户要求】2026-10-21「鱼中，多个信号的信息整行完全重复时，只留一个就行，不要重复」——
  * 同一条信号换过阈值或交集 / 并集后会以不同的算法键各存一份（键不同、显示相同），按这个键再合并一次。
  */
-export const fishVisibleKey = (s: TradeSignal) => `${signalDedupKey(s)}|${fishCaughtBy(s).join(' · ')}`;
+export const fishVisibleCatchKey = (s: TradeSignal) => `${signalDedupKey(s)}|${fishCaughtBy(s).join(' · ')}`;
+export const fishVisibleKey = (s: TradeSignal) => fishVisibleCatchKey(s)+archiveSuffix(s);
 /** 显示相同的只留一条：新鱼优先，其次捕到得更晚的；评分沿用已有的。没有重复时原样返回。 */
 export function collapseVisibleFish(list: readonly TradeSignal[]): TradeSignal[] {
   const kept = new Map<string, TradeSignal>();

@@ -10,7 +10,7 @@
  *   - 记号只压住删除时刻之前捕到的那条（caughtAt ≤ 删除时刻）；之后重新捕到同一条，照常留下。
  */
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { collapseVisibleFish, fishDedupKey, fishVisibleKey, mergeFishSignals, migrateFishSignal } from './records';
+import { collapseVisibleFish, fishDedupKey, fishVisibleKey, mergeFishSignals, migrateFishSignal, withoutArchivedFreshCopies } from './records';
 
 /** 鱼的键 → 删除时刻（ms）。 */
 export type FishTombstones = Record<string, number>;
@@ -37,7 +37,9 @@ export function applyFishTombstones(list: readonly TradeSignal[], tombstones: Fi
 const asList = (v: unknown): TradeSignal[] => Array.isArray(v) ? v.filter((s): s is TradeSignal => !!s && typeof s.id === 'string' && typeof s.symbol === 'string' && Number.isFinite(s.timeMs) && typeof s.timeLabel === 'string' && typeof s.fallbackZone === 'string') : [];
 /** 两份鱼列表取并集（本地在前：同一条鱼的评分以本地为准，读数取较新的那次捕获），再按删除记号去掉删过的。 */
 export function mergeFishLists(local: unknown, remote: unknown, tombstones: FishTombstones = {}): TradeSignal[] {
-  const l = asList(local).map(migrateFishSignal), r = asList(remote).map(migrateFishSignal);
+  let l = asList(local).map(migrateFishSignal), r = asList(remote).map(migrateFishSignal);
+  const retained = new Set(withoutArchivedFreshCopies([...l, ...r]));
+  l = l.filter(s => retained.has(s)); r = r.filter(s => retained.has(s));
   const newer = new Map<string, TradeSignal>();
   for (const s of [...l, ...r]) { const k = fishDedupKey(s), prev = newer.get(k); if (!prev || (s.caughtAt ?? 0) > (prev.caughtAt ?? 0)) newer.set(k, s); }
   const merged = mergeFishSignals(l, r).map(s => {

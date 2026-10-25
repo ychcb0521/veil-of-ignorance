@@ -33,11 +33,13 @@ export interface TradeSignal {
   fish?: import('./fishScanner').FishReading;
   /**
    * 渔：最近一次捕捞捕到的（显示在「新鱼」）。
-   * 【用户要求】2026-10-19「点击了开始捕捞，原来的新鱼就放在鱼中，新捕捞到的放在新鱼中」：每次开始捕捞先全部清掉，本次命中的再标上。
+   * 【用户要求】2026-10-19「点击了开始捕捞，原来的新鱼就放在鱼中，新捕捞到的放在新鱼中」：每次开始捕捞先将上一轮完整入舱，本次命中另存新鱼。
    */
   freshCatch?: boolean;
   /** 「鱼」最近一次被捕到的时刻（ms）：删除记号只压住在它之前捕到的那条（见 fish/tombstones.ts）。 */
   caughtAt?: number;
+  /** Immutable fishing-round snapshot retained in 鱼舱; separate from the next round’s fresh catch. */
+  fishArchive?: { id: string; at: number };
   /** 稳定 id，用于列表 key 与删除 */
   id: string;
   /** 归一化后的标的，如 BTCUSDT（大写、去空格与斜杠） */

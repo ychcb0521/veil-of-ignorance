@@ -1,5 +1,5 @@
 import {loadFishSession,saveFishSession} from '@/lib/fish/session';
-import { collapseVisibleFish, mergeFishSignals, fishDedupKey } from '@/lib/fish/records';
+import { archiveFishForNextRound, collapseVisibleFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleCatchKey } from '@/lib/fish/records';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FishScanner, initialFishProgress, combineFishRound, selectFishRound, deriveFishRound, saveFishMemberRound, fishSelectionKey, saveFishCombinationRound, type FishCombinationRound, type FishProgress, type FishScanSettings } from '@/lib/fishScanner';
 import type { FishProgram } from '@/lib/fish/algorithm';
@@ -10,7 +10,7 @@ import { applyFishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 
-/** 去掉「新鱼」标记（归入「鱼」）。 */
+/** 去掉「新鱼」标记（归入「鱼舱」）。 */
 export function withoutFresh(signal: TradeSignal): TradeSignal {
   if (!signal.freshCatch) return signal;
   const { freshCatch: _drop, ...rest } = signal;
@@ -24,8 +24,11 @@ const emptyWrites = (): RoundWrites => ({ added: new Set(), refreshed: new Map()
 function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrites): TradeSignal[] | null {
   const key = fishDedupKey(signal);
   // 记下捕到的时刻：之前的删除记号压不住这次新捕到的（见 fish/tombstones.ts）
-  const caughtAt = Date.now();
-  const merged = mergeFishSignals(list, [{ ...signal, freshCatch: true, caughtAt }]);
+  const past = list.filter(s => fishCatchKey(s) === fishCatchKey(signal));
+  const archivedAt = Math.max(0, ...past.map(s => s.fishArchive?.at ?? 0));
+  const caughtAt = Math.max(Date.now(), archivedAt + 1);
+  const rated = list.filter(s=>fishVisibleCatchKey(s)===fishVisibleCatchKey(signal)).sort((a,b)=>(b.caughtAt??0)-(a.caughtAt??0)).find(s=>s.quality!==undefined);
+  const merged = mergeFishSignals(list, [{ ...signal, quality: signal.quality ?? rated?.quality, freshCatch: true, caughtAt }]);
   if (merged.length !== list.length) { writes.added.add(key); return merged; }
   // 已经在列表里（同一标的@时间）：标成新鱼、读数换成这一轮的，评分保留
   const previous = list.find(s => fishDedupKey(s) === key);
@@ -85,9 +88,16 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
+    // Save every previous-round snapshot before clearing its session or making a market request.
+    const archived = archiveFishForNextRound(signalsRef.current);
+    if (archived !== signalsRef.current) {
+      if (!saveFishSignals(archived, ownerRef.current ?? null)) {
+        setProgress({ ...initialFishProgress(), status: 'aborted', error: '上一轮的鱼暂未保存到鱼舱，已停止新一轮捕捞。请释放浏览器存储空间后重试。' });
+        return;
+      }
+      signalsRef.current = archived; setSignals(archived);
+    }
     ++generation.current;roundRef.current=null;setHasRound(false);setRoundPlans(null);edits.current.clear();void saveFishSession(ownerRef.current,null).catch(()=>{});
-    // 上一轮的新鱼归入「鱼」，这一轮捕到的（含以前捕到过、这轮又命中的）放进「新鱼」
-    if (signalsRef.current.some(s => s.freshCatch)) commit(signalsRef.current.map(withoutFresh));
     writesRef.current = emptyWrites(); roundRef.current = null;
     scanner.current ??= pageScanner ??= new FishScanner();
     combinationRef.current = settings.combination ?? 'and'; liveRef.current = null;

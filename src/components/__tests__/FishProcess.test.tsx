@@ -46,3 +46,7 @@ it('组合过程区分 S 原值与 avg_S，并显示新 3 小时路径的实际�
  expect(d).toHaveTextContent('算法 2 · avg_S');
  expect(d).toHaveTextContent('S 连续高于 0.66 已覆盖 3 小时');
 });
+it('入舱详情标明该轮入舱时间，并继续显示原来的读数快照',()=>{
+ render(<FishProcessDetail signal={{...signal,fishArchive:{id:'round-1',at:cut}}}/>);
+ const d=screen.getByTestId('fish-process-detail');expect(d).toHaveTextContent('入舱时间');expect(d).toHaveTextContent('保留该轮捕获快照');expect(d).toHaveTextContent('读数 0.081');
+});

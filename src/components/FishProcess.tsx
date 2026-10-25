@@ -95,6 +95,7 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
   const old = !multi && !fish.trace;
   return <div className="space-y-3 text-[11px] leading-relaxed" data-testid="fish-process-detail">
     {!hideTitle && <p className="font-medium">{signal.symbol} · 信号时间 {formatUTC8(signal.timeMs)}</p>}
+    {signal.fishArchive && <p className="text-muted-foreground">入舱时间 {formatUTC8(signal.fishArchive.at)} · 保留该轮捕获快照；以后重新命中也不会覆盖。</p>}
     {old && <p className="text-muted-foreground">这条是较早捕到的，当时没有记下过程数据；下面只列快照里有的读数。重新捕捞后会有完整过程。</p>}
     {!multi ? <>
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中</h4>
