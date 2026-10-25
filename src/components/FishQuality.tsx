@@ -73,7 +73,7 @@ export function FishQuality({ state }: { state: FishQualityState }) {
       <span className="text-[11px] text-muted-foreground">模拟多单 · 每条每组 100 USDT · 1 倍</span>
     </div>
     {open && <div className="mt-3 space-y-3">
-      <p className="text-xs leading-relaxed text-muted-foreground">鱼舱和新鱼自动复制到这里，之后新捕获的鱼自动加入。历史从捕捞截止时点入场，实时新鱼从实际发现时点入场；以随后首根 1 分钟 K 线开盘价近似买入。副本独立保存在本机当前账号下。</p>
+      <p className="text-xs leading-relaxed text-muted-foreground">鱼舱和新鱼自动复制到这里，之后新捕获的鱼自动加入。历史鱼按原始信号时间入场，实时新鱼按实际发现时点入场；以随后首根 1 分钟 K 线开盘价近似买入。已有历史样本按此口径重新评估，卖出规则保留。副本独立保存在本机当前账号下。</p>
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={study.tracking} disabled={!ready} onChange={e => state.setTracking(e.target.checked)}/>自动跟踪新鱼及更新收益</label>
         <label className="inline-flex items-center gap-1.5">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时（0 = 持续至卖出）</label>

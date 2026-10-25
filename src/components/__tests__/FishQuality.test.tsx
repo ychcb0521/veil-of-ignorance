@@ -12,6 +12,7 @@ function state(): FishQualityState {
 afterEach(cleanup);
 it('shows the third collapsible module, simple group statistics and an unset exit until the user applies an editable suggestion', () => {
   const s = state(); render(<FishQuality state={s}/>);
+  expect(screen.getByText(/历史鱼按原始信号时间入场/)).toHaveTextContent('实时新鱼按实际发现时点入场');
   expect(screen.getByText('平均收益率')).toBeVisible(); expect(screen.getByText(/尚未选择/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: /缓冲 50%/ }));
   expect(screen.getByLabelText('卖出门槛')).toHaveValue(.06); expect(s.setRule).not.toHaveBeenCalled();

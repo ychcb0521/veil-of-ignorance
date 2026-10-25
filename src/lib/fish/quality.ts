@@ -31,7 +31,22 @@ export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
 }
-export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
+export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'signal', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
+/** User's historical-entry choice applies to existing copies too. Keep live detections and chosen exit rules. */
+export function migrateQualitySignalEntries(study: FishQualityStudy): FishQualityStudy {
+  let changed = study.entryMode !== 'signal';
+  const reset = new Set<string>();
+  const samples = study.samples.map(sample => {
+    if (sample.basis === 'detected') return sample;
+    const enteredAt = Number.isFinite(sample.source.timeMs) && sample.source.timeMs > 0 ? sample.source.timeMs : null;
+    const basis = enteredAt == null ? 'missing' : 'signal';
+    if (sample.enteredAt === enteredAt && sample.basis === basis) return sample;
+    changed = true;
+    if (sample.enteredAt !== enteredAt) reset.add(sample.id);
+    return { ...sample, enteredAt, basis } as QualitySample;
+  });
+  return changed ? { ...study, entryMode: 'signal', samples, results: study.results.filter(r => !reset.has(r.sampleId)) } : study;
+}
 export function qualityMembers(s: TradeSignal): FishSnapshot[] {
   const f = s.fish;
   if (!f) return [];
@@ -99,9 +114,9 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
     if (samples.has(id)) continue;
     const cutoff = source.fish?.cutoffMs;
     const live = source.freshCatch && (source.caughtAt ?? 0) >= study.startedAt && cutoff != null && Math.abs((source.caughtAt ?? 0) - cutoff) < 3_600_000;
-    const enteredAt = study.entryMode === 'signal' ? source.timeMs : live ? source.caughtAt : cutoff;
+    const enteredAt = live ? source.caughtAt : study.entryMode === 'signal' ? source.timeMs : cutoff;
     samples.set(id, { id, source: structuredClone(source), groups: ids, enteredAt: Number.isFinite(enteredAt) && enteredAt! > 0 ? enteredAt! : null,
-      basis: study.entryMode === 'signal' ? 'signal' : live ? 'detected' : enteredAt ? 'capture' : 'missing', importedAt: now });
+      basis: !Number.isFinite(enteredAt) || enteredAt! <= 0 ? 'missing' : live ? 'detected' : study.entryMode === 'signal' ? 'signal' : 'capture', importedAt: now });
     members.forEach(f => { const key = qualityGroupId(f); if (!groups.has(key)) groups.set(key, { id: key, label: fishSourceLabel(f), metric: fishMetricLabel(f), snapshot: structuredClone(f) }); });
     members.forEach(f => seen.add(memberKey(source, f)));
     changed = true;
@@ -123,7 +138,7 @@ const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMExcept
 /** A rule is observed only at completed algorithm bars; fill at the next minute's open, never a past signal price. */
 export async function evaluateQualitySample(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
-  if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少捕捞截止时间，不能可靠还原买入时点' };
+  if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
   const entry = Math.ceil(sample.enteredAt / QUALITY_MINUTE) * QUALITY_MINUTE;
   const limit = observeHours === 0 ? Infinity : entry + Math.ceil(observeHours * 60) * QUALITY_MINUTE;

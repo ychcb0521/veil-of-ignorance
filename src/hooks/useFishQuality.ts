@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, newQualityStudy, qualityResultKey, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, newQualityStudy, migrateQualitySignalEntries, qualityResultKey, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -24,7 +24,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      current.current = value.study; setStudy(value.study); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
+      const restored = migrateQualitySignalEntries(value.study);
+      current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
     window.addEventListener('pagehide', flush);
