@@ -122,7 +122,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     render(control());
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     expect(screen.getByTestId('fish-old-panel')).toBeInTheDocument();
-    const button = screen.getByRole('button',{name:/^鱼/});
+    const button = screen.getByRole('button',{name:/^鱼舱/});
     expect(button).toHaveAttribute('aria-expanded','true');
     const library = screen.getByTestId('fish-old-panel');
     expect(screen.getByTestId('fish-panel')).toContainElement(library);
@@ -165,7 +165,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.getByRole('button',{name:/^新鱼/})).toHaveTextContent('0');
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(() => expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('BBBUSDT'));
-    expect(screen.getByRole('button',{name:/^鱼/})).toHaveTextContent('1');
+    expect(screen.getByRole('button',{name:/^鱼舱/})).toHaveTextContent('1');
     expect(loadFishSignals().filter(s => s.freshCatch).map(s => s.symbol)).toEqual(['BBBUSDT']);
     // 第二轮：命中 AAA（以前就有），BBB 归入鱼
     mocks.scan.mockImplementation(async o => { o.onSignal(SIGNAL); const p = { ...initialFishProgress(), status: 'complete' as const }; o.onProgress(p); return p; });

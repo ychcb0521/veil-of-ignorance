@@ -147,6 +147,10 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     scanner.current??=pageScanner??=new FishScanner();
     return scanner.current.reconstruct(options);
   },[]);
+  const quality=useCallback(async(options:import('@/lib/fish/quality').QualityRunOptions)=>{
+    scanner.current??=pageScanner??=new FishScanner();
+    return scanner.current.quality(options);
+  },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
   /** 是否有捕捞 / 建议 / 复原等在用取数器（定时自动捕捞据此等待）。 */
   const busy = useCallback(() => !!controller.current || !!(scanner.current ?? pageScanner)?.isBusy(), []);
@@ -229,5 +233,5 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, recombine, hasRound, roundPlans, turnover, remove, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, busy };
 }

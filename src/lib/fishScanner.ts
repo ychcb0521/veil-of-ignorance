@@ -69,6 +69,7 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 }
 
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
+import { collectFishQuality, type QualityRunOptions } from '@/lib/fish/quality';
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, isFishStablecoin, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
 export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[]; member?: FishMemberResult }
@@ -175,6 +176,14 @@ export class FishScanner {
   private running = false;
   /** 捕捞、建议、复原、成交额统计都共用这一个取数器；正在跑时自动捕捞要等它结束。 */
   isBusy(): boolean { return this.running; }
+  /** Paper quality studies share the public-data cache and request pool, without stopping live catches. */
+  async quality(options: QualityRunOptions): Promise<void> {
+    const response = await this.requests.get('binance')!('time', 1, options.signal) as { serverTime?: number };
+    if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效', 'failed');
+    const now = response.serverTime!;
+    const load = createFishReconstructionLoader(this.adapters, async () => now);
+    await collectFishQuality(options, load, now);
+  }
   private latestServerTime = 0;
   private pool = new FishRequestPool();
   readonly budget: FishWeightBudget;

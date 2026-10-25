@@ -19,6 +19,7 @@ import {
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
+import { useFishQuality } from '@/hooks/useFishQuality';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
 import { SpeedSelector } from '@/components/SpeedSelector';
@@ -112,6 +113,7 @@ export function TimeControl({
   const getMailFish = useCallback(() => mailFishRef.current(), []);
   const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
+  const fishQuality = useFishQuality(user?.id, fish.signals, fish.quality);
   mailFishRef.current = fish.unionFish;
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
@@ -561,7 +563,7 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef}>{fishOpen && <FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+      <div ref={fishHostRef}>{fishOpen && <FishPanel quality={fishQuality} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}</div>
 
       {/* 信号库折叠面板 */}
