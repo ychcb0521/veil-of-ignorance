@@ -4,6 +4,7 @@ import {fireEvent,render,screen,within} from '@testing-library/react';
 import {FishLibrary} from '@/components/FishLibrary';
 import {FishProcessDetail} from '@/components/FishProcess';
 import {saveFishRound,summarizeFishRound} from '@/lib/fish/roundSummary';
+import {CBI2_DEF,definitionKey} from '@/lib/deepDig/features';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const cut=Date.UTC(2026,3,9,15),step=300000,start=Date.UTC(2026,3,9,4,55);
 const fish={average:0.081,cbi2:0.081,value:0.081,startAverage:0.0712,previousAverage:0.0695,cutoffMs:cut,threshold:0.07,thresholdRaw:0.07,scale:1,unit:'',direction:'>' as const,interval:'5m',featureShort:'CBI-2',statistic:'avg_CBI2',algorithmKey:'cbi2|avg_CBI2|=|>|0.07|x',startIndex:1000,cutoffIndex:1121,aboveBars:122,runExtreme:0.0705,crossings:1,trace:{t0:start-36*step,dt:3*step,values:Array.from({length:53},(_,i)=>0.06+i*0.0004)}};
@@ -43,10 +44,32 @@ it('组合过程区分 S 原值与 avg_S，并显示新 3 小时路径的实际�
  render(<FishProcessDetail signal={{...signal,fish:{...raw,combination:'or',hitAlgorithms:[1,2],algorithms:[raw,avg]}}}/>);
  const d=screen.getByTestId('fish-process-detail');
  expect(d).toHaveTextContent('算法 1 · S 原值');
- expect(d).toHaveTextContent('算法 2 · avg_S');
+ expect(d).toHaveTextContent('算法 2 · avg_S · avg_state_2');
  expect(d).toHaveTextContent('S 连续高于 0.66 已覆盖 3 小时');
 });
 it('入舱详情标明该轮入舱时间，并继续显示原来的读数快照',()=>{
  render(<FishProcessDetail signal={{...signal,fishArchive:{id:'round-1',at:cut}}}/>);
  const d=screen.getByTestId('fish-process-detail');expect(d).toHaveTextContent('入舱时间');expect(d).toHaveTextContent('保留该轮捕获快照');expect(d).toHaveTextContent('读数 0.081');
+});
+
+it('组合详情与筛选摘要显示各算法实际指标，结果展开为保存公式中的 avg_2，未命中算法也标明',()=>{
+ const def={...CBI2_DEF,id:'cba',short:'CBA',formula:'CBA = C\navg_CBA = avg(CBA,24)\navg_CBA_2 = avg(avg_CBA,24)'};
+ const base={...fish,featureId:'cba',featureShort:'CBA',definitionKey:definitionKey(def)};
+ const members=[{...base,statistic:'CBA'},{...base,statistic:'avg_CBA'},{...base,statistic:'结果'},{featureId:'cba',featureShort:'CBA',statistic:'avg_CBA_2',outcome:'below',threshold:8} as typeof base];
+ const stored={...signal,fish:{...base,combination:'or' as const,hitAlgorithms:[1,2,3],algorithms:members}};
+ const before=JSON.stringify(stored);render(<FishProcessDetail signal={stored}/>);
+ const d=screen.getByTestId('fish-process-detail');
+ expect(d).toHaveTextContent('算法 1 · CBA · CBA（原始值）');
+ expect(d).toHaveTextContent('算法 2 · CBA · avg_CBA');
+ expect(d).toHaveTextContent('算法 3 · CBA · avg_CBA_2');
+ expect(d).toHaveTextContent('算法 4 · CBA · avg_CBA_2 > 8（这一算法没命中');
+ expect(within(d).getByText('算法 3 · avg_CBA_2 本轮的筛选')).toBeInTheDocument();
+ expect(JSON.stringify(stored)).toBe(before);
+});
+it('单算法的结果也展开为捕获时的指标；旧记录缺少公式时明确说明',()=>{
+ const def={...CBI2_DEF,formula:'CBI2 = C\navg_CBI2_2 = avg(CBI2,24)'};
+ const view=render(<FishProcessDetail signal={{...signal,fish:{...fish,statistic:'结果',definitionKey:definitionKey(def)}}}/>);
+ expect(screen.getByTestId('fish-process-detail')).toHaveTextContent('的「avg_CBI2_2」');
+ view.rerender(<FishProcessDetail signal={{...signal,fish:{...fish,statistic:'结果',definitionKey:undefined}}}/>);
+ expect(screen.getByTestId('fish-process-detail')).toHaveTextContent('结果（指标未记录）');
 });

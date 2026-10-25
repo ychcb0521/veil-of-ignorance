@@ -63,6 +63,28 @@ export function fishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
   if (statistic && /^avg_state(?:_\d+)?$/.test(statistic)) return 'avg_S';
   return statistic && statistic !== '结果' ? `S [${statistic}]` : 'S（序列不详）';
 }
+/** 捕捞过程显示捕获时实际比较的序列；「结果」只从保存的公式解析，不读当前账号定义。 */
+export function fishMetricLabel(a: Partial<FishSnapshot>): string {
+  const key = a.algorithmKey?.split('|');
+  const parts = key?.length === 6 ? key : undefined;
+  let metric = a.statistic ?? parts?.[1];
+  if (!metric || metric === '结果') {
+    metric = undefined;
+    try {
+      const saved = JSON.parse(a.definitionKey ?? 'null');
+      if (Array.isArray(saved) && typeof saved[0] === 'string') {
+        const last = compileFeatureFormula(saved[0]).program.statements.at(-1);
+        if (last) metric = last.name ?? (last.expr.k === 'var' ? last.expr.name : saved[0].split('\n')[last.line - 1]?.split('//')[0].split(';').at(-1)?.trim());
+      }
+    } catch { /* Missing or invalid historical evidence must not be inferred from today's formula. */ }
+  }
+  const H = a.H ?? (parts && parts[2] !== '=' ? Number(parts[2]) : undefined);
+  if (H != null && Number.isFinite(H) && H > 0) return `avg(${metric ?? '结果（指标未记录）'}, ${H}h)（旧版外层均值）`;
+  if (!metric) return '结果（指标未记录）';
+  const normalize = (name: string) => name.replace(/[-_\s]/g, '').toLowerCase();
+  const raw = [a.featureId ?? parts?.[0], a.featureShort].some(name => name && normalize(name) === normalize(metric!));
+  return raw ? `${metric}（原始值）` : metric;
+}
 /** 算法简称：交集「A ∩ B」，并集「A ∪ B」。 */
 export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(fishSourceLabel).join(s.fish.combination==='or'?' ∪ ':' ∩ '):s.fish?.featureId==='state'||s.fish?.featureShort==='S'?fishSourceLabel(s.fish):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
 

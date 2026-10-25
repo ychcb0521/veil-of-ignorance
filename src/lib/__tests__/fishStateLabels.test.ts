@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fishSourceLabel, fishCaughtBy, fishAlgorithmShort, collapseVisibleFish } from '@/lib/fish/records';
+import { fishMetricLabel, fishSourceLabel, fishCaughtBy, fishAlgorithmShort, collapseVisibleFish } from '@/lib/fish/records';
 import { composeFishEmail } from '@/lib/fish/notify';
 import { definitionKey, STATE_DEF } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -33,4 +33,16 @@ it('identifies legacy S only from its saved series, formula or external average'
   expect(fishSourceLabel({featureId:'state',statistic:'momentum'})).toBe('S [momentum]');
   expect(fishSourceLabel({featureId:'state2',featureShort:'S2',statistic:'state'})).toBe('S2');
   expect(fishSourceLabel({featureId:'custom',featureShort:'S',statistic:'state'})).toBe('S');
+});
+
+it('process metrics preserve exact series names, saved result formulas and legacy external averaging',()=>{
+ const def={...STATE_DEF,formula:'state = C\navg_state = avg(state,24)\navg_state_2 = avg(avg_state,24)'};
+ const saved=definitionKey(def);
+ expect(fishMetricLabel({featureId:'state',statistic:'state'})).toBe('state（原始值）');
+ for(const statistic of ['avg_state','avg_state_2'])expect(fishMetricLabel({statistic,definitionKey:saved})).toBe(statistic);
+ expect(fishMetricLabel({statistic:'结果',definitionKey:saved})).toBe('avg_state_2');
+ expect(fishMetricLabel({algorithmKey:'cba|avg_CBA_2|=|>|8|x'})).toBe('avg_CBA_2');
+ expect(fishMetricLabel({statistic:'state',H:24})).toBe('avg(state, 24h)（旧版外层均值）');
+ expect(fishMetricLabel({statistic:'结果',definitionKey:'broken'})).toBe('结果（指标未记录）');
+ expect(fishMetricLabel({statistic:'结果',definitionKey:definitionKey({...def,formula:'state = C\nstate'})})).toBe('state');
 });
