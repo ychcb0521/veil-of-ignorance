@@ -17,6 +17,8 @@ export interface QualityGroup { id: string; label: string; metric: string; snaps
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
+  /** Derived per-row capture readings; never replaces any saved source snapshot. */
+  readings?: Record<string, FishSnapshot>;
 }
 export interface QualityResult {
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
@@ -30,6 +32,8 @@ export interface QualityResult {
 export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
+  /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
+  sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[];
 }
 export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'signal', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
 /** User's historical-entry choice applies to existing copies too. Keep live detections and chosen exit rules. */
@@ -123,7 +127,21 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
   }
   return changed ? { ...study, groups: [...groups.values()], samples: [...samples.values()] } : study;
 }
-export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.id, s.enteredAt, g.id, g.rule ?? null, hours]));
+export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
+/** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
+export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] {
+  const rows = new Map<string, QualitySample>();
+  for (const sample of study.samples) {
+    const identity = `${signalDedupKey(sample.source)}|${sample.enteredAt}`;
+    const prior = rows.get(identity);
+    const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
+    rows.set(identity, prior ? { ...prior, groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }
+      : { ...sample, id: `row-${shortFishHash(identity)}`, groups: [...sample.groups], readings });
+  }
+  return [...rows.values()];
+}
+export const qualityRunSamples = (study: FishQualityStudy) => study.sellPlans ? qualityComparisonRows(study).filter(s => !study.cohortIds || study.cohortIds.includes(s.id)) : study.samples;
+export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ?? study.groups;
 export function qualityExitSuggestions(group: QualityGroup): { label: string; rule: QualityExitRule }[] {
   const t = group.snapshot.threshold, direction: '<' | '>' = group.snapshot.direction === '<' ? '>' : '<';
   return [
@@ -218,7 +236,9 @@ export interface QualityProgress { done: number; total: number; current: string 
 export interface QualityRunOptions { study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map(study.results.map(r => [r.key, r]));
-  const tasks = study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
+  const tasks = study.sellPlans
+    ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
+    : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
   let done = 0;
   for (const { s, g } of tasks) {
     abort(signal);

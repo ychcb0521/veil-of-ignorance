@@ -1,35 +1,50 @@
-import { fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
-import { importQualityFish, newQualityStudy } from '@/lib/fish/quality';
+import { importQualityFish, newQualityStudy, qualityComparisonRows, qualityResultKey } from '@/lib/fish/quality';
+import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 const T = Date.UTC(2026, 9, 20);
 function state(): FishQualityState {
-  const study = importQualityFish(newQualityStudy(), [{ id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey({ ...BSS_DEF, formula: 'BSS = C\navg_BSS = avg(BSS, 1)\navg_BSS_2 = avg_BSS' }), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } }]);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn() };
+  const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
+  const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn() };
 }
 afterEach(cleanup);
-it('shows the third collapsible module, simple group statistics and an unset exit until the user applies an editable suggestion', () => {
+it('matches the cabin row layout, with exactly two sells and three detector columns, and one merged fish row', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByText(/历史鱼按原始信号时间入场/)).toHaveTextContent('实时新鱼按实际发现时点入场');
-  expect(screen.getByText('平均收益率')).toBeVisible(); expect(screen.getByText(/尚未选择/)).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: /缓冲 50%/ }));
-  expect(screen.getByLabelText('卖出门槛')).toHaveValue(.06); expect(s.setRule).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('卖出指标'), { target: { value: 'BSS' } });
-  fireEvent.change(screen.getByLabelText('卖出门槛'), { target: { value: '.04' } });
-  fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
-  expect(s.setRule).toHaveBeenCalledWith(s.study.groups[0].id, { metric: 'BSS', direction: '<', threshold: .04 });
-  fireEvent.click(screen.getByRole('button', { name: /^鱼质量/ })); expect(screen.queryByLabelText('卖出指标')).toBeNull();
-  expect(s.study.samples).toHaveLength(1);
+  expect(screen.getByTestId('fish-quality').parentElement).not.toHaveAttribute('data-testid', 'fish-cabin');
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(2); expect(screen.getAllByTestId('quality-detector-column')).toHaveLength(3);
+  ['标的', '信号时间', '算法类型', '市场', '评分', '捕捞过程'].forEach(name => expect(screen.getByRole('columnheader', { name: new RegExp(name) })).toBeVisible());
+  expect(screen.queryByTestId('quality-distribution')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /^鱼质量/, expanded: true })); expect(screen.queryByTestId('quality-fish-table')).toBeNull();
+  expect(s.study.samples).toHaveLength(3);
 });
-it('validates the observation horizon and exposes manual update, automatic tracking and incomplete-data semantics', () => {
+it('edits raw S and CDA sell thresholds from their headers, applies explicitly, and does not configure detectors as exits', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '-1' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时'));
-  expect(s.setObserveHours).not.toHaveBeenCalled(); expect(screen.getByRole('alert')).toHaveTextContent('8784');
-  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '72' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时'));
-  expect(s.setObserveHours).toHaveBeenCalledWith(72);
-  fireEvent.click(screen.getByRole('button', { name: '更新收益' })); expect(s.start).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '设置状态 S 原始值卖出算法' }));
+  fireEvent.click(screen.getByRole('button', { name: '0.45' }));
+  expect(s.setRule).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
+  expect(s.setRule).toHaveBeenCalledWith('sell-state-raw', { metric: 'state', direction: '<', threshold: .45 });
+  fireEvent.change(screen.getByLabelText('状态 S 原始值卖出门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('有限数字');
+});
+it('compares the common sample and lets the user fix one sell plan for detector comparisons', () => {
+  const s = state(), row = qualityComparisonRows(s.study)[0];
+  s.study.sellPlans!.forEach((p, i) => { p.rule = { metric: p.metric, direction: '<', threshold: i ? -8 : .5 }; s.study.results.push({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: i ? -5 : 10 }); });
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('tab', { name: /比较卖出/ })); expect(screen.getByTestId('quality-distribution')).toHaveTextContent('1 / 1 条共同已卖出');
+  fireEvent.click(within(screen.getByTestId('quality-distribution')).getByRole('button', { name: /状态 S 原始值/ }));
+  expect(s.selectSell).toHaveBeenCalledWith('sell-state-raw'); expect(screen.getByRole('tab', { name: /比较探测/ })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('button', { name: '固定当前批次' })); expect(s.setCohort).toHaveBeenCalledWith([row.id]);
+  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } }); expect(screen.queryByTestId('quality-fish-row')).toBeNull();
+});
+it('keeps tracking/horizon controls compact and shows the paired trade metrics on demand', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '鱼质量跟踪设置' }));
+  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '-1' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '72' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).toHaveBeenCalledWith(72);
   fireEvent.click(screen.getByLabelText('自动跟踪新鱼及更新收益')); expect(s.setTracking).toHaveBeenCalledWith(false);
-  expect(screen.getByText(/选择卖出规则后评估收益/)).toHaveTextContent('不合计为账户收益');
 });

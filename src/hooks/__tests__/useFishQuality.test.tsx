@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishQuality } from '@/hooks/useFishQuality';
-import { newQualityStudy, importQualityFish, qualityResultKey, type QualityRunOptions } from '@/lib/fish/quality';
+import { newQualityStudy, importQualityFish, qualityResultKey, qualityComparisonRows, type QualityRunOptions } from '@/lib/fish/quality';
 import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -72,4 +72,22 @@ it('restores existing copies at original signal time before reevaluating and sav
   expect(run.mock.calls[0][0].study.samples[0].enteredAt).toBe(T);
   expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ entryMode: 'signal', groups: legacy.groups, results: [] }));
   expect(legacy.samples[0].enteredAt).toBe(T + 3600_000);
+});
+it('persists a selected common sell plan and a fixed batch, invalidates changed thresholds, and accepts only the matching matrix result', async () => {
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); }));
+  await flush(); await flush(1100);
+  const plan = h.result.current.study.sellPlans![0];
+  act(() => h.result.current.setRule(plan.id, { metric: 'state', direction: '<', threshold: .45 }));
+  await flush(1100);
+  const latest = tasks.at(-1)!, row = qualityComparisonRows(latest.study)[0], applied = latest.study.sellPlans![0];
+  act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 12 }));
+  expect(h.result.current.study.results).toHaveLength(1);
+  act(() => h.result.current.selectSell(plan.id)); act(() => h.result.current.setCohort([row.id]));
+  await flush(500);
+  expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ selectedSellId: plan.id, cohortIds: [row.id] }));
+  act(() => h.result.current.setRule(plan.id, { metric: 'state', direction: '<', threshold: .4 }));
+  expect(h.result.current.study.selectedSellId).toBeUndefined();
+  act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
+  expect(h.result.current.study.results[0].returnPct).toBe(12);
 });

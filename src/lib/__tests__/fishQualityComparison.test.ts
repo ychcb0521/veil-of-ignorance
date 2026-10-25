@@ -1,0 +1,81 @@
+import { expect, it, vi } from 'vitest';
+import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
+import { collectFishQuality, importQualityFish, newQualityStudy, qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
+import { enableQualityComparison, qualityComparisonStats, qualityDistribution, qualityPairedRows } from '@/lib/fish/qualityComparison';
+import { buildQualitySheets } from '@/lib/fish/qualityExport';
+import type { TradeSignal } from '@/lib/signalLibrary';
+import type { FishSnapshot } from '@/lib/fish/algorithm';
+const T = Date.UTC(2026, 9, 20), M = 60_000;
+const snapshot = (threshold: number): FishSnapshot => ({ featureId: 'bss', featureShort: 'BSS', statistic: 'BSS', definitionKey: definitionKey({ ...BSS_DEF, formula: 'BSS = C' }), interval: '5m', scale: 1, threshold, direction: '>', average: 123, previousAverage: 0, startAverage: 1, cbi2: 1, cutoffMs: T });
+const fish = (symbol: string, threshold: number): TradeSignal => ({ id: `${symbol}-${threshold}`, symbol, timeMs: T, timeLabel: '', fallbackZone: '', fish: snapshot(threshold) });
+function study() { return enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1), fish('AAAUSDT', 2), fish('BBBUSDT', 1), fish('CCCUSDT', 2)])); }
+function seed(study: FishQualityStudy) {
+  const rows = qualityComparisonRows(study), plans = study.sellPlans!;
+  plans.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: -1 }; });
+  const result = (i: number, j: number, pct: number, extra: Partial<QualityResult> = {}): QualityResult => ({ key: qualityResultKey(rows[i], plans[j], 0), sampleId: rows[i].id, groupId: plans[j].id, evaluatedAt: T + 10 * M, status: 'closed', returnPct: pct, pnl: pct, ...extra });
+  study.results = [result(0, 0, 10), result(0, 1, -5), result(1, 0, -20), result(1, 1, 3), result(2, 0, 999)];
+  return { rows, plans, result };
+}
+it('keeps original captures/rules/results, freezes exactly two raw sell formulas and collapses duplicate fish across detecting rules', () => {
+  const original = importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1), fish('AAAUSDT', 2)]);
+  original.groups[0].rule = { metric: 'capture', direction: '<', threshold: 5 };
+  const before = structuredClone(original), enabled = enableQualityComparison(original), rows = qualityComparisonRows(enabled);
+  expect(enabled.sellPlans!.map(p => [p.snapshot.featureId, p.snapshot.statistic, p.rule])).toEqual([['state', 'state', undefined], ['cda', 'CDA', undefined]]);
+  expect(enabled.sellPlans![0].snapshot.definitionKey).toContain('state ='); expect(enabled.sellPlans![1].snapshot.definitionKey).toContain('CDA =');
+  expect(enabled.groups).toBe(original.groups); expect(original).toEqual(before); expect(enableQualityComparison(enabled)).toBe(enabled);
+  expect(rows).toHaveLength(1); expect(rows[0].groups).toHaveLength(2); expect(Object.keys(rows[0].readings!)).toHaveLength(2);
+  expect(enabled.samples).toHaveLength(2); expect(rows[0].enteredAt).toBe(T);
+});
+it('runs both independent sell algorithms on every fish with identical entries, regardless of which detector caught it', async () => {
+  const s = study(), rows = qualityComparisonRows(s), results: QualityResult[] = [];
+  const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, load, T + 10 * M);
+  expect(results).toHaveLength(rows.length * 2);
+  for (const row of rows) expect(results.filter(r => r.sampleId === row.id).map(r => [r.entryTime, r.entryPrice])).toEqual([[T, 100], [T, 100]]);
+  const locked: QualityResult[] = [];
+  await collectFishQuality({ study: { ...s, cohortIds: [rows[1].id] }, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => locked.push(r) }, load, T + 10 * M);
+  expect(locked).toHaveLength(2); expect(locked.every(r => r.sampleId === rows[1].id)).toBe(true);
+});
+it('uses paired common valid samples instead of separate denominators and excludes stale/missing/unclosed results', () => {
+  const s = study(), { rows, plans, result } = seed(s);
+  const stats = qualityComparisonStats(s, rows, true);
+  expect(stats.paired).toHaveLength(2); expect(stats.sells.map(v => [v.n, v.mean, v.worst])).toEqual([[2, -5, -20], [2, -1, -5]]);
+  s.results[1] = result(0, 1, -5, { status: 'error' }); expect(qualityPairedRows(s, rows, true)).toEqual([rows[1]]);
+  s.results[1] = result(0, 1, -5, { status: 'open' }); expect(qualityPairedRows(s, rows, true)).toEqual([rows[1]]);
+  expect(qualityPairedRows(s, rows, false)).toHaveLength(2);
+  s.results.push(result(2, 1, 7, { status: 'open', evaluatedAt: T + 11 * M }));
+  expect(qualityPairedRows(s, rows, false)).not.toContain(rows[0]); // old floating valuation is not compared with a newer one
+  plans[0].rule!.threshold = 5; expect(qualityPairedRows(s, rows, true)).toHaveLength(0);
+});
+it('compares detectors only through the selected shared sell rule, preserves overlapping membership and reports coverage', () => {
+  const s = study(), { rows, plans } = seed(s);
+  expect(qualityComparisonStats(s, rows, true).detectors.every(v => v.n === 0)).toBe(true);
+  s.selectedSellId = plans[1].id;
+  const selected = qualityComparisonStats(s, rows, true);
+  expect(selected.detectors.map(v => [v.total, v.n, v.mean])).toEqual([[2, 2, -1], [2, 1, -5]]);
+  s.selectedSellId = plans[0].id;
+  expect(qualityComparisonStats(s, rows, true).detectors.map(v => v.mean)).toEqual([-5, 504.5]);
+  expect(qualityComparisonStats(s, rows.slice(0, 1), true).detectors.map(v => v.n)).toEqual([1, 1]);
+});
+it('computes disjoint return bins, interpolated quantiles and no-sample values without inventing zeros', () => {
+  const values = [-11, -10, -5, -.1, 0, 5, 10];
+  const d = qualityDistribution(values.map(returnPct => ({ status: 'closed', returnPct } as QualityResult)));
+  expect(d.bins).toEqual([1, 1, 2, 1, 1, 1]); expect(d.median).toBe(-.1); expect(d.p10).toBeCloseTo(-10.4); expect(d.winRate).toBeCloseTo(2 / 7 * 100);
+  expect(qualityDistribution([])).toMatchObject({ n: 0, mean: null, worst: null, p10: null, winRate: null });
+});
+it('exports the same one-row fish matrix with two numeric sell returns and one column per detector', () => {
+  const s = study(), { rows } = seed(s), sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
+  expect(sheet.rows).toHaveLength(1); expect(sheet.columns).toHaveLength(5 + 2 + 2);
+  expect(sheet.rows[0].slice(5)).toEqual([10, -5, '命中', '命中']);
+  expect(sheet.columns.slice(5).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
+});
+it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
+  const s = enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1)]));
+  s.sellPlans!.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: p.metric === 'state' ? 2 : 101 }; });
+  const results: QualityResult[] = [];
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, async (_row, from, cut, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => { const time = from + i * plan.step, x = (time - T) / (5 * M), price = plan.step === M ? 100 : 100 + Math.sin(x / 7) + x * .001, q = 10000 * (1 + .1 * Math.cos(x / 5)); return { openTime: time, open: price, high: price + 1, low: price - 1, close: price, volume: q / price, quoteVolume: q, takerBuyQuoteVolume: q * (.55 + .1 * Math.sin(x / 9)), takerBuyVolume: q * .55 / price, refClose: 200 + Math.cos(x / 13) + x * .002 }; }), T + 10 * M);
+  expect(results).toHaveLength(2);
+  expect(results.map(r => r.reason)).not.toEqual(expect.arrayContaining([expect.stringContaining("缺失")]));
+  expect(results.map(r => [r.status, r.entryTime, r.endTime, r.returnPct])).toEqual([['closed', T, T + 5 * M, 0], ['closed', T, T + 5 * M, 0]]);
+  expect(results.every(r => Number.isFinite(r.exitReading))).toBe(true);
+});

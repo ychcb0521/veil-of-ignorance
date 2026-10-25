@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, newQualityStudy, migrateQualitySignalEntries, qualityResultKey, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, newQualityStudy, migrateQualitySignalEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -24,7 +25,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const restored = migrateQualitySignalEntries(value.study);
+      const restored = enableQualityComparison(migrateQualitySignalEntries(value.study));
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
@@ -53,7 +54,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         onResult: result => {
           if (epoch !== generation.current || aborter.signal.aborted) return;
           change(s => {
-            const sample = s.samples.find(v => v.id === result.sampleId), group = s.groups.find(v => v.id === result.groupId);
+            const sample = qualityRunSamples(s).find(v => v.id === result.sampleId), group = qualityRunGroups(s).find(v => v.id === result.groupId);
             if (!sample || !group || qualityResultKey(sample, group, s.observeHours) !== result.key) return s;
             return { ...s, results: [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] };
           });
@@ -75,11 +76,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return () => clearInterval(timer);
   }, [ready, warning, owner]);
   const setRule = useCallback((id: string, rule?: QualityExitRule) => {
-    cancel(); change(s => ({ ...s, groups: s.groups.map(g => g.id === id ? { ...g, rule } : g) }));
+    cancel(); change(s => ({ ...s, groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
     const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(); }, 500);
   }, [change, cancel, start]);
   const setObserveHours = useCallback((hours: number) => { cancel(); change(s => ({ ...s, observeHours: hours })); const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(); }, 500); }, [change, cancel, start]);
   const setTracking = useCallback((tracking: boolean) => { if (!tracking) cancel(); change(s => ({ ...s, tracking })); }, [change, cancel]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking };
+  const selectSell = useCallback((id: string) => change(s => s.sellPlans?.some(p => p.id === id && p.rule) ? { ...s, selectedSellId: id } : s), [change]);
+  const setCohort = useCallback((ids?: string[]) => {
+    cancel(); change(s => ({ ...s, cohortIds: ids ? qualityComparisonRows(s).filter(r => ids.includes(r.id)).map(r => r.id) : undefined }));
+    const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(); }, 500);
+  }, [change, cancel, start]);
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

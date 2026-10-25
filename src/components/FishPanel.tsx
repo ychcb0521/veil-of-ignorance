@@ -380,6 +380,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <FishQuality state={p.quality}/>}
+    {p.quality && <FishQuality state={p.quality} onJump={source => p.onJump(source.id)} canJump={source => p.signals.some(s => s.id === source.id)}/>}
   </section>;
 }
