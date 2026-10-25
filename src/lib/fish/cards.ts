@@ -14,7 +14,7 @@ export const FISH_DEFAULT_RULES = [
   { id: 'first', featureId: 'cbi2', statistic: '结果', threshold: '0.04' },
   { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
   { id: 'default-cda', featureId: 'cda', statistic: '结果', threshold: '8' },
-  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.8' },
+  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.08' },
   { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.7' },
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
 ] as const;
@@ -56,6 +56,18 @@ export function readFishCards(): FishCard[] {
   try {
     const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
     if (!Array.isArray(x)) return [];
+    // Correct the saved preset once, so existing panels and automatic scans use 0.08 too.
+    // Custom cards/settings and later manual edits remain user-owned.
+    const bssDefaultKey = `${getUserPrefix()}fish-bss-default.v1`;
+    if (readPersistedStateRaw(bssDefaultKey) !== '1') {
+      const oldDefault = x.find(c => c?.id === 'default-bss' && c.featureId === 'bss'
+        && c.pref?.statistic === '结果' && c.pref.direction === '>' && Number(c.pref.threshold) === 0.8);
+      if (oldDefault) {
+        oldDefault.pref = { ...oldDefault.pref, threshold: '0.08', lastSuggestion: undefined };
+        writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
+      }
+      writePersistedStateRaw(bssDefaultKey, '1');
+    }
     // Only upgrade the old raw-S default once, for both the panel and automatic scans.
     // Preserve averages, custom cards, directions, and subsequent manual edits to 0.6.
     const stateDefaultKey = `${getUserPrefix()}fish-state-raw-default.v1`;
