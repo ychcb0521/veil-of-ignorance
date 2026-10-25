@@ -3,7 +3,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { mergeFishLists, mergeFishTombstones, type FishTombstones } from './tombstones';
 import { fishDedupKey } from './records';
 
-export interface FishLibraryBackup { signals: TradeSignal[]; tombstones: FishTombstones }
+export interface FishLibraryBackup { signals: TradeSignal[]; tombstones: FishTombstones; updatedAt?: number }
 const pending = new Map<string, FishLibraryBackup>();
 const running = new Map<string, Promise<boolean>>();
 let retry: ReturnType<typeof setTimeout> | undefined;
@@ -14,11 +14,14 @@ export const mergeFishLibraryBackups = (latest: FishLibraryBackup, previous?: Fi
   const current = new Map(latest.signals.map(s => [fishDedupKey(s), s]));
   const signals = mergeFishLists(latest.signals, previous?.signals, tombstones).map(s => {
     const now = current.get(fishDedupKey(s));
-    // Clearing the fresh flag (e.g. changing combinations) is a real local change too.
-    return now && (now.caughtAt ?? 0) === (s.caughtAt ?? 0) ? { ...s, freshCatch: now.freshCatch } : s;
+    // Clearing the fresh flag or cancelling a rating is a real local change too.
+    return now && (now.caughtAt ?? 0) === (s.caughtAt ?? 0) ? { ...s, freshCatch: now.freshCatch, quality: now.quality } : s;
   });
-  return { signals, tombstones };
+  return { signals, tombstones, updatedAt: latest.updatedAt ?? previous?.updatedAt };
 };
+const mergeByRecency = (latest: FishLibraryBackup, previous?: FishLibraryBackup) =>
+  (previous?.updatedAt ?? 0) > (latest.updatedAt ?? 0)
+    ? mergeFishLibraryBackups(previous!, latest) : mergeFishLibraryBackups(latest, previous);
 
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -51,7 +54,7 @@ function flush(key: string): Promise<boolean> {
             const tx = database.transaction('libraries', 'readwrite'), store = tx.objectStore('libraries');
             const request = store.get(key);
             request.onsuccess = () => {
-              try { store.put(mergeFishLibraryBackups(snapshot, request.result), key); }
+              try { store.put(mergeByRecency(snapshot, request.result), key); }
               catch { tx.abort(); }
             };
             tx.oncomplete = () => resolve();
@@ -74,7 +77,7 @@ function flush(key: string): Promise<boolean> {
 export function saveFishLibraryBackup(owner: string | null | undefined, value: FishLibraryBackup): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(false);
   const key = ownerKey(owner);
-  pending.set(key, mergeFishLibraryBackups(value, pending.get(key)));
+  pending.set(key, mergeByRecency(value, pending.get(key)));
   if (!listening && typeof window !== 'undefined') {
     listening = true;
     const resume = () => { for (const owner of pending.keys()) void flush(owner); };
@@ -97,7 +100,7 @@ export async function loadFishLibraryBackup(owner: string | null | undefined): P
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
-      return stored || pending.has(key) ? mergeFishLibraryBackups(pending.get(key) ?? { signals: [], tombstones: {} }, stored) : null;
+      return stored || pending.has(key) ? mergeByRecency(pending.get(key) ?? { signals: [], tombstones: {} }, stored) : null;
     } finally { database.close(); }
   } catch { return pending.get(key) ?? null; }
 }

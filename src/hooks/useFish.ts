@@ -80,7 +80,9 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   useEffect(() => {
     let cancelled = false;
     recoveryArchiveBefore.current = undefined;
-    const refresh = () => { const next = loadFishSignals(); signalsRef.current = next; setSignals(next); backupFishSignals(next, userId ?? null); };
+    const refresh = () => { const next = loadFishSignals(); signalsRef.current = next; setSignals(next); };
+    const hydrated = () => { refresh(); backupFishSignals(signalsRef.current, userId ?? null); };
+    // Read the durable library before mirroring a possibly stale localStorage cache into it.
     refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
     const version=++generation.current;
     void loadFishLibraryBackup(userId).then(backup => {
@@ -89,8 +91,8 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
       signalsRef.current = next; setSignals(next);
       return loadFishSession(userId);
     }).then(saved=>{if(!saved||cancelled||version!==generation.current)return;if(saved.needsRescan){setProgress({...(saved.progress??initialFishProgress()),status:'complete',notice:saved.needsRescan});return;}roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
-    const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, refresh), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, refresh);
-    const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) refresh(); };
+    const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, hydrated), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, hydrated);
+    const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) hydrated(); };
     window.addEventListener('storage', storage);
     return () => { cancelled = true; ++generation.current; controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
   }, [userId]);

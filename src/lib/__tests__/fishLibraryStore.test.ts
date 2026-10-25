@@ -87,6 +87,8 @@ it('clearing the fresh flag is not undone by an older durable copy', async () =>
   await store.saveFishLibraryBackup('alice', { signals: [fish()], tombstones: {} });
   await store.saveFishLibraryBackup('alice', { signals: [{ ...fish(), freshCatch: undefined, quality: 5 }], tombstones: {} });
   expect((await store.loadFishLibraryBackup('alice'))?.signals[0]).toMatchObject({ freshCatch: undefined, quality: 5 });
+  await store.saveFishLibraryBackup('alice', { signals: [{ ...fish(), freshCatch: undefined, quality: undefined }], tombstones: {} });
+  expect((await store.loadFishLibraryBackup('alice'))?.signals[0]).toMatchObject({ freshCatch: undefined, quality: undefined });
 });
 
 it('temporary IndexedDB failure retains pending history and retries independently', async () => {
@@ -98,4 +100,46 @@ it('temporary IndexedDB failure retains pending history and retries independentl
   await vi.advanceTimersByTimeAsync(5_000);
   expect(disk.has('user:alice')).toBe(true);
   expect((await store.loadFishLibraryBackup('alice'))?.signals[0].fishArchive?.at).toBe(200);
+});
+
+it('a newer durable copy wins over stale localStorage after quota failure, including cancelled ratings and fresh flags', async () => {
+  const cache = await import('@/lib/fishSignals');
+  const store = await import('@/lib/fish/libraryStore');
+  cache.saveFishSignals([fish()], 'alice'); await store.loadFishLibraryBackup('alice');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError'); });
+  vi.setSystemTime(Date.now() + 1000);
+  cache.saveFishSignals([{ ...fish(), freshCatch: undefined, quality: undefined }], 'alice');
+  await store.loadFishLibraryBackup('alice');
+  (await import('@/lib/persistedStateStorage')).clearPersistedStateMemoryForTests(); vi.resetModules();
+  const reloaded = await import('@/lib/fishSignals');
+  const diskStore = await import('@/lib/fish/libraryStore');
+  const stale = reloaded.loadFishSignals(); expect(stale[0]).toMatchObject({ freshCatch: true, quality: 4 });
+  const restored = reloaded.restoreFishSignals(await diskStore.loadFishLibraryBackup('alice'), stale, 'alice');
+  expect(restored[0]).toMatchObject({ freshCatch: undefined, quality: undefined });
+  await diskStore.loadFishLibraryBackup('alice');
+});
+
+it('a newer localStorage copy wins if the IndexedDB update had failed', async () => {
+  const cache = await import('@/lib/fishSignals');
+  const store = await import('@/lib/fish/libraryStore');
+  cache.saveFishSignals([fish()], 'alice'); await store.loadFishLibraryBackup('alice');
+  failWrites = true; vi.setSystemTime(Date.now() + 1000);
+  cache.saveFishSignals([{ ...fish(), freshCatch: undefined, quality: undefined }], 'alice');
+  await store.loadFishLibraryBackup('alice');
+  (await import('@/lib/persistedStateStorage')).clearPersistedStateMemoryForTests(); vi.resetModules();
+  const reloaded = await import('@/lib/fishSignals');
+  const diskStore = await import('@/lib/fish/libraryStore');
+  const restored = reloaded.restoreFishSignals(await diskStore.loadFishLibraryBackup('alice'), reloaded.loadFishSignals(), 'alice');
+  expect(restored[0]).toMatchObject({ freshCatch: undefined, quality: undefined });
+  failWrites = false; await diskStore.loadFishLibraryBackup('alice');
+});
+
+it('a delayed older writer keeps its unique history without reverting the latest rating', async () => {
+  const store = await import('@/lib/fish/libraryStore');
+  await store.saveFishLibraryBackup('alice', { signals: [{ ...fish(), quality: undefined }], tombstones: {}, updatedAt: 200 });
+  await store.saveFishLibraryBackup('alice', { signals: [fish(), fish(1)], tombstones: {}, updatedAt: 100 });
+  const restored = (await store.loadFishLibraryBackup('alice'))!;
+  expect(restored.signals).toHaveLength(2);
+  expect(restored.signals.find(s => s.symbol === fish().symbol)?.quality).toBeUndefined();
+  expect(restored.updatedAt).toBe(200);
 });
