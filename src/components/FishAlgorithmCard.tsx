@@ -37,7 +37,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const stateHold=fishStateHold(card.featureId,p.statistic,p.direction);
  const footerHasContent=isValidElement<{children?:ReactNode}>(footer)&&footer.type===Fragment?Children.toArray(footer.props.children).length>0:!!footer;
  const hasReference=recorded||footerHasContent||suggestion||computing||(queued&&card.enabled&&librarySize>0)||(onRecalculate&&!recalculateDisabled);
- const selectedName=def?.id==='state'?fishSourceLabel({featureId:def.id,featureShort:def.short,statistic:p.statistic??'结果',definitionKey:JSON.stringify([def.formula])}):def?.short||def?.name;
+ const selectedName=def?fishSourceLabel({featureId:def.id,featureShort:def.short,statistic:p.statistic??'结果',definitionKey:JSON.stringify([def.formula])}):undefined;
  const dim=`transition-opacity ${card.enabled?'':'opacity-40'}`;
  return <fieldset disabled={locked} className="relative min-w-0 py-1 pl-2 pr-8 text-[11px] transition-colors hover:bg-muted/20" aria-label={`算法 ${index}`}>
  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">

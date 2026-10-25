@@ -9,14 +9,14 @@ beforeEach(()=>{sessionStorage.clear();localStorage.clear();jump.mockClear();});
 it.each(['新鱼','鱼舱'])('%s 返回时保留月份、搜索、算法筛选、降序排序和滚动位置',async title=>{
  const view=render(library(title,title));
  fireEvent.change(screen.getByLabelText(`${title}的月份`),{target:{value:'2026-10'}});
- fireEvent.change(screen.getByLabelText(`${title}的算法`),{target:{value:'avg_S'}});
+ fireEvent.change(screen.getByLabelText(`${title}的算法`),{target:{value:'S·avg₂'}});
  fireEvent.change(screen.getByLabelText(`筛选${title}信号`),{target:{value:'C'}});
  fireEvent.click(screen.getByTestId('signal-sort-标的'));fireEvent.click(screen.getByTestId('signal-sort-标的'));
  const list=screen.getByTestId('signal-library-scroller');list.scrollTop=505;fireEvent.scroll(list);
  await waitFor(()=>expect(screen.getByText('C058USDT')).toBeInTheDocument());fireEvent.click(screen.getByText('C058USDT'));
  expect(jump).toHaveBeenCalledWith('row-58');view.unmount();
  render(library(title,title));
- expect(screen.getByLabelText(`${title}的月份`)).toHaveValue('2026-10');expect(screen.getByLabelText(`${title}的算法`)).toHaveValue('avg_S');expect(screen.getByLabelText(`筛选${title}信号`)).toHaveValue('C');
+ expect(screen.getByLabelText(`${title}的月份`)).toHaveValue('2026-10');expect(screen.getByLabelText(`${title}的算法`)).toHaveValue('S·avg₂');expect(screen.getByLabelText(`筛选${title}信号`)).toHaveValue('C');
  expect(screen.getByTestId('signal-sort-标的')).toHaveAttribute('aria-sort','descending');
  expect(screen.getByTestId('signal-library-scroller').scrollTop).toBe(505);expect(screen.getByText('C058USDT')).toBeInTheDocument();
 });

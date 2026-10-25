@@ -5,6 +5,7 @@ import type { FishCard } from '@/components/FishAlgorithmCard';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { readFishPreference, withFishDefaultThreshold, type FishPreference } from './preferences';
+import { FISH_MAX_ALGORITHMS } from './shared';
 
 export const fishCardsKey = () => `${getUserPrefix()}fish-cards.v1`;
 const cleanPreference = (p: FishPreference): FishPreference => ({ ...p, constraints: [] });
@@ -46,14 +47,23 @@ export function fishDefaultCards(ids:readonly string[],available:readonly string
   if (ids.length === FISH_DEFAULT_ALGORITHMS.length && ids.every((id,i)=>id===FISH_DEFAULT_ALGORITHMS[i])) {
     initializeFishDefaults(available);
     const saved = readFishCards();
-    return FISH_DEFAULT_RULES.filter(rule=>available.includes(rule.featureId)).map(rule=>{
+    const defaultIds = new Set<string>(FISH_DEFAULT_RULES.map(rule=>rule.id));
+    const used = new Set<string>();
+    const existingDefaults = new Set<string>();
+    const defaults = FISH_DEFAULT_RULES.filter(rule=>available.includes(rule.featureId)).map(rule=>{
       const previous = saved.find(card=>card.id===rule.id&&card.featureId===rule.featureId)
         ?? saved.find(card=>card.featureId===rule.featureId&&card.pref.statistic===rule.statistic);
+      if (previous) { used.add(previous.id); existingDefaults.add(rule.id); }
       return { id: rule.id, featureId: rule.featureId, enabled: true, pref: previous?.pref ?? {
         ...cleanPreference(readFishPreference(rule.featureId)), statistic: rule.statistic,
         direction: '>', threshold: rule.threshold, lastSuggestion: undefined,
       } };
     });
+    // Keep added rules when reopening; the five presets still lead in their usual order.
+    const extras = saved.filter(card=>!defaultIds.has(card.id)&&!used.has(card.id)&&available.includes(card.featureId));
+    // Restoring a removed preset must not displace a configured rule at the 50-card limit.
+    let freeSlots = FISH_MAX_ALGORITHMS - extras.length - existingDefaults.size;
+    return [...defaults.filter(card=>existingDefaults.has(card.id)||freeSlots-- > 0), ...extras].slice(0, FISH_MAX_ALGORITHMS);
   }
   const saved=readFishCards();
   return ids.filter(id=>available.includes(id)).map((id,i)=>{const prev=saved.find(c=>c.featureId===id);return {id:i===0?'first':`default-${id}`,featureId:id,enabled:true,pref:prev?prev.pref:cleanPreference(readFishPreference(id))};});
@@ -96,7 +106,7 @@ export function readFishCards(): FishCard[] {
       }
       writePersistedStateRaw(stateDefaultKeyV2, '1');
     }
-    return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, 6).map(c => {
+    return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, FISH_MAX_ALGORITHMS).map(c => {
       // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.
       if (c.featureId === 'drift-speed-down-z') return { ...c, featureId: 'seller-control', pref: { statistic: '结果', direction: '<', threshold: '', constraints: [], sellerSignVersion: 1 } };
       return { ...c, pref: withFishDefaultThreshold(c.featureId, { ...c.pref, constraints: [] }) };

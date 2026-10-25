@@ -24,7 +24,7 @@ it('只要一个算法命中就留下：另一个未达标时交集为空、并�
  const or=await scan(inputs,'or'),alone=await single(a);
  expect(or.hits).toHaveLength(1);expect(or.hits[0].timeMs).toBe(alone[0].timeMs);expect(or.hits[0].fish).toMatchObject({combination:'or',hitAlgorithms:[1],unionStart:alone[0].timeMs});
  expect(or.progress.counts.hit).toBe(1);expect(or.progress.algorithmHits).toEqual([1,0]);expect(or.progress.rule).toContain(' 或 ');
- expect(or.hits[0].fish.algorithms[1]).toMatchObject({featureShort:'C',statistic:'结果',definitionKey:expect.any(String),direction:'>',threshold:1000});expect(fishAlgorithmShort(or.hits[0])).toBe('C ∪ C');
+ expect(or.hits[0].fish.algorithms[1]).toMatchObject({featureShort:'C',statistic:'结果',definitionKey:expect.any(String),direction:'>',threshold:1000});expect(fishAlgorithmShort(or.hits[0])).toBe('C 原值 ∪ C 原值');
 });
 it('都命中时只留一条，起点取命中算法里最早的那个；与分别单扫一致',async()=>{
  const x=await single(a),y=await single(b),or=await scan([{feature:def,algorithm:a},{feature:def,algorithm:b}],'or');

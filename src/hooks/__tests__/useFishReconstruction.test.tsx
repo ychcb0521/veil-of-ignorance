@@ -25,6 +25,17 @@ beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.mocked(useFi
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('local-only reconstruction lifecycle', () => {
+  it('restores and evaluates all 50 saved rules instead of truncating to six', async () => {
+    const many = Array.from({ length: 50 }, (_, i) => ({ ...cards[0], id: `rule-${i}`,
+      pref: { ...cards[0].pref, threshold: String(i + 2) } }));
+    localStorage.setItem('sim_account-a_fish-cards.v1', JSON.stringify(many));
+    const execute = vi.fn(async (_options: FishReconstructionOptions) => report());
+    const hook = renderHook(() => useFishReconstruction('account-a', signals, execute));
+    await act(async () => { await hook.result.current.start(); });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0][0].plans).toHaveLength(50);
+    expect(execute.mock.calls[0][0].plans[49].settings.threshold).toBe(51);
+  });
   it('mount and settings changes never start evaluation; explicit start saves locally without mutating signals', async () => {
     const execute = vi.fn(async (_options: FishReconstructionOptions) => report());
     const originalSignals = JSON.stringify(signals);

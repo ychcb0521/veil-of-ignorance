@@ -9,7 +9,7 @@ import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { compileFishProgram, evaluateFishProgram, classifyFishProgram, FISH_STATE_HOLD_TEXT, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
-import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, type FishTurnoverFloor } from '@/lib/fish/shared';
+import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, FISH_MAX_ALGORITHMS, type FishTurnoverFloor } from '@/lib/fish/shared';
 import { fishSignalTurnoverOk, fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
 
@@ -382,7 +382,7 @@ export class FishScanner {
     const progress=initialFishProgress(), states:FishProgress[]=[], results=new Map<string,Map<number,FishMemberResult>>();
     const emitted=new Set<string>();
     try {
-      if(options.algorithms!.length>6)throw new Error('最多 6 个算法');
+      if(options.algorithms!.length>FISH_MAX_ALGORITHMS)throw new Error(`最多 ${FISH_MAX_ALGORITHMS} 个算法`);
       const plans=options.algorithms!.map(a=>compileFishProgram(a.feature,a.algorithm));
       const clock=await this.requests.get('binance')!('time',1,options.signal) as {serverTime:number};
       if(!Number.isFinite(clock.serverTime)||clock.serverTime<=0)throw new Error('服务器时间无效');

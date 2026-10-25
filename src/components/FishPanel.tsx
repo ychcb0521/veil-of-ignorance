@@ -10,7 +10,7 @@ import { useFishFeatures } from '@/hooks/useFishFeatures';
 import {compileFishProgram,type FishProgram} from '@/lib/fish/algorithm';
 import {fishTightenable,sameFamily} from '@/lib/fish/refilter';
 import {FISH_DEFAULT_ALGORITHMS,fishCardsKey as cardsKey,readFishCards as readCards,fishDefaultCards as defaultCards,fishCombinationKey as combinationKey,readFishCombination as readCombination} from '@/lib/fish/cards';
-import {FISH_TURNOVER_FLOORS} from '@/lib/fish/shared';
+import {FISH_TURNOVER_FLOORS,FISH_MAX_ALGORITHMS} from '@/lib/fish/shared';
 import {FISH_AUTO_INTERVALS} from '@/lib/fish/autoScan';
 import type {FishAutoScan} from '@/hooks/useFishAutoScan';
 import type {FishNotify} from '@/hooks/useFishNotify';
@@ -350,7 +350,7 @@ export function FishPanel(p: FishPanelProps) {
       {extraCards.map((card,i)=><FishAlgorithmCard key={card.id} card={card} defs={defs} index={i+2} locked={running} onRecalculate={()=>{const target=extraSuggest[i];if(target)void calculateSuggestion('manual',{id:target.id,plan:target.plan});}} recalculateDisabled={running||probe.busy||!p.onSuggest||!extraSuggest[i]} recalculating={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id} suggestion={extraSuggest[i]?.cached??null} queued={!!extraSuggest[i]?.queued} librarySize={library.length} computing={suggestionProgress?.status==='running'&&suggestionRun.current?.target===card.id&&suggestionProgress?`${suggestionProgress.done} / ${suggestionProgress.total||library.length}`:''} onChange={next=>setExtraCards(cs=>cs.map(c=>c.id===next.id?next:c))} onDelete={()=>setExtraCards(cs=>cs.filter(c=>c.id!==card.id))}/>)}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/50 bg-muted/20 px-2 py-1.5">
-        <button type="button" aria-label="+ 算法" title="添加一个算法（最多 6 个）" className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=5} onClick={()=>setExtraCards(cs=>[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
+        <button type="button" aria-label="+ 算法" title={`添加一个算法（最多 ${FISH_MAX_ALGORITHMS} 个）`} className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={running||extraCards.length>=FISH_MAX_ALGORITHMS-1} onClick={()=>setExtraCards(cs=>cs.length>=FISH_MAX_ALGORITHMS-1?cs:[...cs,{id:crypto.randomUUID(),featureId:def?.id??'cbi2',enabled:true,pref:structuredClone(pref)}])}><Plus aria-hidden className="h-3 w-3"/>算法</button>
         {extraCards.length>0&&<div role="radiogroup" aria-label="多重算法合并方式" className="inline-flex h-6 shrink-0 items-center rounded-md bg-muted/70 p-0.5 text-[10.5px]">
           {([['and','交集','每个算法都命中才留下'],['or','并集','任一算法命中即留下']] as const).map(([value,text,hint])=><button key={value} type="button" role="radio" aria-checked={combination===value} title={hint} disabled={running&&!(scanning&&p.onLiveCombination)} onClick={()=>{if(value===combination)return;setCombination(value);if(scanning)p.onLiveCombination?.(value);}} className={`h-5 rounded px-2 transition-colors disabled:opacity-50 ${combination===value?'bg-background font-medium text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`}>{text}</button>)}
         </div>}

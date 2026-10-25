@@ -38,13 +38,13 @@ it('鱼列表每行有「捕捞过程」，点开显示详情',()=>{
  fireEvent.click(within(panel).getByTestId('fish-process-open'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('RAVEUSDT');expect(within(dialog).getByTestId('fish-process-detail')).toHaveTextContent('凭什么击中');
 });
 
-it('组合过程区分 S 原值与 avg_S，并显示新 3 小时路径的实际核验',()=>{
+it('组合过程区分 S 原值与 S·avg₂，并显示新 3 小时路径的实际核验',()=>{
  const raw={...fish,featureId:'state',featureShort:'S',statistic:'state',stateHold:{threshold:.66,requiredHours:3,verifiedHours:3,fromMs:cut-3*3600000,minimum:.68}};
  const avg={...fish,featureId:'state',featureShort:'S',statistic:'avg_state_2'};
  render(<FishProcessDetail signal={{...signal,fish:{...raw,combination:'or',hitAlgorithms:[1,2],algorithms:[raw,avg]}}}/>);
  const d=screen.getByTestId('fish-process-detail');
  expect(d).toHaveTextContent('算法 1 · S 原值');
- expect(d).toHaveTextContent('算法 2 · avg_S · avg_state_2');
+ expect(d).toHaveTextContent('算法 2 · S·avg₂ · avg_state_2');
  expect(d).toHaveTextContent('S 连续高于 0.66 已覆盖 3 小时');
 });
 it('入舱详情标明该轮入舱时间，并继续显示原来的读数快照',()=>{
@@ -59,10 +59,10 @@ it('组合详情与筛选摘要显示各算法实际指标，结果展开为保�
  const stored={...signal,fish:{...base,combination:'or' as const,hitAlgorithms:[1,2,3],algorithms:members}};
  const before=JSON.stringify(stored);render(<FishProcessDetail signal={stored}/>);
  const d=screen.getByTestId('fish-process-detail');
- expect(d).toHaveTextContent('算法 1 · CBA · CBA（原始值）');
- expect(d).toHaveTextContent('算法 2 · CBA · avg_CBA');
- expect(d).toHaveTextContent('算法 3 · CBA · avg_CBA_2');
- expect(d).toHaveTextContent('算法 4 · CBA · avg_CBA_2 > 8（这一算法没命中');
+ expect(d).toHaveTextContent('算法 1 · CBA 原值 · CBA（原始值）');
+ expect(d).toHaveTextContent('算法 2 · CBA·avg · avg_CBA');
+ expect(d).toHaveTextContent('算法 3 · CBA·avg₂ · avg_CBA_2');
+ expect(d).toHaveTextContent('算法 4 · CBA·avg₂ · avg_CBA_2 > 8（这一算法没命中');
  expect(within(d).getByText('算法 3 · avg_CBA_2 本轮的筛选')).toBeInTheDocument();
  expect(JSON.stringify(stored)).toBe(before);
 });

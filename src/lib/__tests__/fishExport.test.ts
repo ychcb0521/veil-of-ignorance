@@ -13,13 +13,13 @@ it('exports one simple cabin table with the list columns followed by saved metri
  const sheets=buildFishCabinSheets([s]);
  expect(sheets).toHaveLength(1);expect(sheets[0].name).toBe('鱼舱');
  expect(sheets[0].columns.map(c=>c.header)).toEqual(['标的','信号时间','算法类型','市场','评分','具体指标','捕获阈值']);
- expect(sheets[0].rows[0]).toEqual(['bothUSDT','2026-10-25 15:00:00','S 原值 · avg_S','',3,'S 原值：state（原始值）；avg_S：avg_state_2','S 原值：> 0.7；avg_S：> 0.6']);
+ expect(sheets[0].rows[0]).toEqual(['bothUSDT','2026-10-25 15:00:00','S 原值 · S·avg₂','',3,'S 原值：state（原始值）；S·avg₂：avg_state_2','S 原值：> 0.7；S·avg₂：> 0.6']);
 });
 it('exports only the hit members of unions and all intersection members, keeping a single fish on one row',()=>{
  const single=signal('one',[base,avg],[2]),all=signal('all');all.fish!.combination='and';
  const rows=buildFishCabinSheets([single,all])[0].rows;
- expect(rows[0].slice(2)).toEqual(['avg_S','',null,'avg_state_2','> 0.6']);
- expect(rows[1][2]).toBe('S 原值 · avg_S');
+ expect(rows[0].slice(2)).toEqual(['S·avg₂','',null,'avg_state_2','> 0.6']);
+ expect(rows[1][2]).toBe('S 原值 · S·avg₂');
 });
 it('resolves the captured formula result, preserves older averages and restores only saved thresholds',()=>{
  const formula=JSON.stringify(['state=C;avg_state=avg(state,12);avg_state_2=avg(avg_state,12)','','','']);

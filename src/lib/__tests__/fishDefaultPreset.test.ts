@@ -1,14 +1,36 @@
 import { beforeEach, expect, it } from 'vitest';
 import { BUILTIN_FEATURES, STATE_DEF, FEATURES_KEY } from '@/lib/deepDig/features';
-import { FISH_DEFAULT_ALGORITHMS, fishCardsKey, fishDefaultCards, fishDefaultsKey, fishCombinationKey, loadFishCardsForScan, readFishCombination } from '@/lib/fish/cards';
+import { FISH_DEFAULT_ALGORITHMS, fishCardsKey, fishDefaultCards, fishDefaultsKey, fishCombinationKey, loadFishCardsForScan, readFishCards, readFishCombination } from '@/lib/fish/cards';
 import { fishFeatureDefinitions } from '@/lib/fish/features';
 import { fishDefaultThresholdVersion } from '@/lib/fish/preferences';
 import { fishCardPlans } from '@/lib/fish/scanPlan';
+import { buildFishScanSettings } from '@/lib/fish/scanPlan';
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 
 const available = BUILTIN_FEATURES.map(def => def.id);
 beforeEach(() => localStorage.clear());
+
+it('keeps five presets plus 45 added rules across reopening and automatic scan settings, capping saved overflow at 50', () => {
+  const defaults = loadFishCardsForScan(available);
+  const extras = Array.from({ length: 45 }, (_, i) => ({ ...defaults[0], id: `extra-${i}`,
+    enabled: i !== 0, pref: { ...defaults[0].pref, threshold: (0.04 + (i + 1) / 1000).toFixed(3) } }));
+  const cards = [...defaults, ...extras];
+  localStorage.setItem(fishCardsKey(), JSON.stringify([...cards, { ...extras[0], id: 'overflow' }]));
+  expect(readFishCards()).toEqual(cards);
+  expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available)).toEqual(cards);
+  const scanCards = loadFishCardsForScan(available);
+  expect(scanCards).toEqual(cards);
+  const built = buildFishScanSettings({ cards: scanCards, defs: fishFeatureDefinitions(BUILTIN_FEATURES),
+    combination: 'or', selection: { exchanges: ['binance'], includeDuplicates: false }, time: '' });
+  expect(built.error).toBeUndefined();
+  expect(built.settings?.algorithms).toHaveLength(50);
+  expect(built.settings?.displayAlgorithmKeys).toHaveLength(49);
+  // A full custom set takes priority over re-adding a removed default slot.
+  const customized = [...cards.filter(card=>card.id!=='default-bss'), { ...extras[0], id: 'replacement' }];
+  localStorage.setItem(fishCardsKey(), JSON.stringify(customized));
+  expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available)).toEqual(customized);
+});
 
 // 【用户要求】2026-10-25「渔的默认捕捞算法中，就按照这个设置」：CBI-2、avg_S、CBA、az、BSS 五条（最看重的两条在前），并集。
 const LEGACY_RAW_S = { id: 'default-state-raw', featureId: 'state', enabled: true, pref: { statistic: 'state', direction: '>' as const, threshold: '0.7', constraints: [] } };

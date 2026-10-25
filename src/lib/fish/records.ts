@@ -45,8 +45,30 @@ export function mergeFishSignals(existing: readonly TradeSignal[],incoming: read
   }
   return [...map.values()];
 }
-/** Display the saved S series, without rewriting snapshots or inferring from current definitions. */
-export function fishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
+const savedResultMetrics = new Map<string, { name?: string; metric?: string }>();
+/** Resolve only the captured formula; cache repeated labels without reading today's definitions. */
+function savedResultMetric(key: string): { name?: string; metric?: string } {
+  const cached = savedResultMetrics.get(key);
+  if (cached) return cached;
+  let result: { name?: string; metric?: string } = {};
+  try {
+    const saved = JSON.parse(key);
+    if (Array.isArray(saved) && typeof saved[0] === 'string') {
+      const last = compileFeatureFormula(saved[0]).program.statements.at(-1);
+      if (last) result = { name: last.name ?? undefined, metric: last.name ?? (last.expr.k === 'var' ? last.expr.name : saved[0].split('\n')[last.line - 1]?.split('//')[0].split(';').at(-1)?.trim()) };
+    }
+  } catch { /* Missing historical evidence must stay unknown. */ }
+  if (savedResultMetrics.size >= 128) savedResultMetrics.clear();
+  savedResultMetrics.set(key, result);
+  return result;
+}
+function savedFishMetric(a: Partial<FishSnapshot>): string | undefined {
+  const key = a.algorithmKey?.split('|');
+  const selected = a.statistic ?? (key?.length === 6 ? key[1] : undefined);
+  return selected && selected !== '结果' ? selected : savedResultMetric(a.definitionKey ?? 'null').metric;
+}
+/** Pre-subtype labels are retained only to recognize previously saved deletion markers. */
+function legacyFishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
   const short = a?.featureShort || a?.featureName || '—';
   const key = a?.algorithmKey?.split('|');
   if ((a?.featureId ?? key?.[0]) !== 'state' && !(a?.featureId == null && a?.featureShort === 'S')) return short;
@@ -54,30 +76,35 @@ export function fishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
   // Earliest records applied an external average; later “结果” records retain the exact formula.
   if (a?.H != null && a.H > 0) return 'avg_S';
   if (statistic === '结果' && a?.definitionKey) {
-    try {
-      const saved = JSON.parse(a.definitionKey);
-      if (Array.isArray(saved) && typeof saved[0] === 'string') statistic = compileFeatureFormula(saved[0]).program.statements.at(-1)?.name ?? undefined;
-    } catch { /* Incomplete legacy evidence stays explicitly unidentified. */ }
+    statistic = savedResultMetric(a.definitionKey).name;
   }
   if (statistic === 'state') return 'S 原值';
   if (statistic && /^avg_state(?:_\d+)?$/.test(statistic)) return 'avg_S';
   return statistic && statistic !== '结果' ? `S [${statistic}]` : 'S（序列不详）';
 }
+/** One label per captured subtype: original, avg, avg₂, avg₃, or an exact custom series. */
+export function fishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
+  if (!a) return '—';
+  const key = a.algorithmKey?.split('|'), parts = key?.length === 6 ? key : undefined;
+  const id = a.featureId ?? parts?.[0];
+  const state = id === 'state' || (id == null && a.featureShort === 'S');
+  const short = state ? 'S' : a.featureShort || a.featureName || id || '—';
+  const H = a.H ?? (parts && parts[2] !== '=' ? Number(parts[2]) : undefined);
+  const metric = savedFishMetric(a);
+  const average = metric ? /^avg_(.+?)(?:_(\d+))?$/.exec(metric) : null;
+  const normalize = (name: string) => name.replace(/[-_\s]/g, '').toLowerCase();
+  const aliases = state ? ['state'] : id === 'drift-speed-z' ? ['az', 'a'] : id === 'drift-speed' ? ['a'] : id === 'seller-control' ? ['bc'] : [];
+  const raw = !!metric && [id, short, ...aliases].some(name=>name && normalize(name)===normalize(metric));
+  const label = average ? `${short}·avg${average[2]?.replace(/\d/g, d => '₀₁₂₃₄₅₆₇₈₉'[Number(d)]) ?? ''}`
+    : raw ? `${short} 原值` : metric ? `${short} [${metric}]` : state ? 'S（序列不详）' : short;
+  if (H != null && Number.isFinite(H) && H > 0) return `${raw || !metric ? short : label}·avg(${H}h)`;
+  return label;
+}
 /** 捕捞过程显示捕获时实际比较的序列；「结果」只从保存的公式解析，不读当前账号定义。 */
 export function fishMetricLabel(a: Partial<FishSnapshot>): string {
   const key = a.algorithmKey?.split('|');
   const parts = key?.length === 6 ? key : undefined;
-  let metric = a.statistic ?? parts?.[1];
-  if (!metric || metric === '结果') {
-    metric = undefined;
-    try {
-      const saved = JSON.parse(a.definitionKey ?? 'null');
-      if (Array.isArray(saved) && typeof saved[0] === 'string') {
-        const last = compileFeatureFormula(saved[0]).program.statements.at(-1);
-        if (last) metric = last.name ?? (last.expr.k === 'var' ? last.expr.name : saved[0].split('\n')[last.line - 1]?.split('//')[0].split(';').at(-1)?.trim());
-      }
-    } catch { /* Missing or invalid historical evidence must not be inferred from today's formula. */ }
-  }
+  const metric = savedFishMetric(a);
   const H = a.H ?? (parts && parts[2] !== '=' ? Number(parts[2]) : undefined);
   if (H != null && Number.isFinite(H) && H > 0) return `avg(${metric ?? '结果（指标未记录）'}, ${H}h)（旧版外层均值）`;
   if (!metric) return '结果（指标未记录）';
@@ -86,21 +113,23 @@ export function fishMetricLabel(a: Partial<FishSnapshot>): string {
   return raw ? `${metric}（原始值）` : metric;
 }
 /** 算法简称：交集「A ∩ B」，并集「A ∪ B」。 */
-export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(fishSourceLabel).join(s.fish.combination==='or'?' ∪ ':' ∩ '):s.fish?.featureId==='state'||s.fish?.featureShort==='S'?fishSourceLabel(s.fish):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
+export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(fishSourceLabel).join(s.fish.combination==='or'?' ∪ ':' ∩ '):fishSourceLabel({...s.fish,featureShort:s.fish?.featureShort??'CBI-2'});
 
 /**
  * 「算法类型」：这条鱼实际是哪个（些）算法捕到的。单算法 = 它自己；交集 = 每个算法；并集 = 命中的那几个。
  * 【用户要求】2026-10-20「把具体是哪个算法捕捞到的（如果是多个，就把多个都写上去），专门开设一列（命名为：算法类型）」。
  */
-export function fishCaughtBy(s: TradeSignal): string[] {
+function caughtBy(s: TradeSignal, label: typeof fishSourceLabel): string[] {
   const r = s.fish;
   if (!r) return ['CBI-2'];
   if (r.algorithms?.length) {
     const picked = r.combination === 'or' ? (r.hitAlgorithms ?? []).map(i => r.algorithms![i - 1]) : r.algorithms;
-    return [...new Set(picked.filter(Boolean).map(fishSourceLabel))];
+    return [...new Set(picked.filter(Boolean).map(label))];
   }
-  return [fishSourceLabel({ ...r, featureShort: r.featureShort ?? 'CBI-2' })];
+  return [label({ ...r, featureShort: r.featureShort ?? 'CBI-2' })];
 }
+export const fishCaughtBy = (s: TradeSignal): string[] => caughtBy(s, fishSourceLabel);
+export const legacyFishVisibleCatchKey = (s: TradeSignal) => `${signalDedupKey(s)}|${caughtBy(s, legacyFishSourceLabel).join(' · ')}`;
 
 /**
  * 整行显示的内容：标的（含交易所 / 美股）、信号时间、算法类型。这几样都一样的鱼在列表里看起来完全重复。

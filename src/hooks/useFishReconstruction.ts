@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFishFeatures } from './useFishFeatures';
 import { compileFishProgram } from '@/lib/fish/algorithm';
 import { readFishPreference } from '@/lib/fish/preferences';
+import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 import { readPersistedStateRaw, subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -12,7 +13,7 @@ import { readReconstructionCache, saveReconstructionCache, loadReconstructionCac
 const readCards = (): ReconstructionCard[] => {
   try {
     const cards = JSON.parse(readPersistedStateRaw(`${getUserPrefix()}fish-cards.v1`) ?? '[]');
-    if (Array.isArray(cards) && cards.length) return cards.filter(c => c?.featureId && c.pref).slice(0, 6);
+    if (Array.isArray(cards) && cards.length) return cards.filter(c => c?.featureId && c.pref).slice(0, FISH_MAX_ALGORITHMS);
   } catch { /* use the first card's normal preference */ }
   return [{ id: 'first', featureId: 'cbi2', enabled: true, pref: readFishPreference('cbi2') }];
 };

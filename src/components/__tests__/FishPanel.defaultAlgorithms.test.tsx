@@ -20,7 +20,7 @@ it('默认五条规则全部勾选，开始捕捞使用默认阈值、序列和�
  expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','0.6','8','15','0.12']);
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_state_2');
- expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('avg_S');
+ expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('S·avg₂');
  expect(screen.queryByTestId('fish-rule')).toBeNull();
  for(const i of [1,2,3,4,5])expect(screen.getByRole('button',{name:`算法 ${i} 说明`})).toBeVisible();
  expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
@@ -29,7 +29,7 @@ it('默认五条规则全部勾选，开始捕捞使用默认阈值、序列和�
  expect(start.mock.calls[0][0].combination).toBe('or');
  expect(start.mock.calls[0][0].algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
 });
-it('会话里增删、停用、换顺序都行；重新打开恢复五条规则与顺序，阈值沿用上次的',()=>{
+it('重新打开恢复五条默认规则与顺序，保留新增规则和上次阈值',()=>{
  render(panel());
  fireEvent.change(screen.getByLabelText('算法 4 阈值'),{target:{value:'20'}});
  fireEvent.click(screen.getByLabelText('启用算法 3',{selector:'input'}));
@@ -37,8 +37,8 @@ it('会话里增删、停用、换顺序都行；重新打开恢复五条规则�
  fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
  expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','cbi2']);
  cleanup();render(panel());
- expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
- for(const i of [1,2,3,4,5])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
+ expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss','cbi2']);
+ for(const i of [1,2,3,4,5,6])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
  expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(20);expect(screen.getByLabelText('算法 5 阈值')).toHaveValue(.12);
 });
 it('Deep dig 里删掉的算法跳过；不传 defaultAlgorithms 时仍恢复上次保存的卡片',()=>{

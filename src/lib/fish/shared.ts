@@ -1,5 +1,6 @@
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export const FISH_STEP = 300_000;
+export const FISH_MAX_ALGORITHMS = 50;
 export const FISH_BARS = 2000;
 export const FISH_FIRST_USABLE = 1454;
 export const FISH_THRESHOLD = 0.3;

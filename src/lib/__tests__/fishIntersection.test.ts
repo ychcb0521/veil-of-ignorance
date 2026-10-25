@@ -15,6 +15,19 @@ const plan=compileFishProgram(def,a),planB=compileFishProgram(def,b);
 const market={symbol:'AAAUSDT',instrument:'AAAUSDT',base:'AAA',multiplier:1};
 function setup(){const candles=vi.fn(async(m,c,_s,q)=>Array.from({length:q.count},(_,i)=>{const step=intervalMs(q.interval),t=c-(q.count-i)*step;const close=t<cut-5*300000?99:101;return {openTime:t,open:close,close,high:close+1,low:close-1,volume:10,quoteVolume:1000,takerBuyQuoteVolume:600,takerBuyVolume:null};}));const adapter:FishDataAdapter={exchange:'binance',list:vi.fn(async()=>[market]),btc:()=>({...market,symbol:'BTCUSDT',instrument:'BTCUSDT',base:'BTC'}),candles,taker:vi.fn(async(_m,b)=>b)};const scanner=new FishScanner(vi.fn(async()=>new Response(JSON.stringify({serverTime:cut+600000}))) as typeof fetch,undefined,undefined,{binance:adapter,bitget:adapter});return {scanner,candles,adapter};}
 async function scan(f:ReturnType<typeof setup>,algorithms?:any[],algorithm=a,feature=def){const hits:any[]=[];const progress=await f.scanner.scan({feature,algorithm,algorithms,anchorMs:cut+123456,signal,onProgress:()=>{},onSignal:s=>hits.push(s)});return {hits,progress};}
+it('executes all 50 rules with shared history and rejects 51 before fetching', async () => {
+ const algorithms=Array.from({length:50},(_,i)=>({feature:def,algorithm:{...a,threshold:100+i/100}}));
+ const f=setup(),result=await scan(f,algorithms);
+ expect(result.progress.status).toBe('complete');
+ expect(result.progress.algorithmHits).toEqual(Array(50).fill(1));
+ expect(result.hits).toHaveLength(1);
+ expect(result.hits[0].fish.algorithms).toHaveLength(50);
+ expect(result.hits[0].fish.algorithms[49].threshold).toBe(100.49);
+ expect(f.candles).toHaveBeenCalledTimes(1);
+ const overflow=setup(),rejected=await scan(overflow,[...algorithms,algorithms[0]]);
+ expect(rejected.progress).toMatchObject({status:'aborted',error:'最多 50 个算法'});
+ expect(overflow.candles).not.toHaveBeenCalled();
+});
 it('单算法入口逐位保留结果、id、快照和去重键',async()=>{const one=await scan(setup()),list=await scan(setup(),[{feature:def,algorithm:a}]);expect(list).toEqual(one);expect(fishDedupKey(list.hits[0])).toBe(fishDedupKey(one.hits[0]));});
 it('双算法与分别扫描逐位一致；同周期最大N只取一次，每个快照使用各自N',async()=>{const x=await scan(setup()),y=await scan(setup(),undefined,b),f=setup(),both=await scan(f,[{feature:def,algorithm:a},{feature:def,algorithm:b}]);expect(both.progress.counts.hit).toBe(1);expect(both.progress.algorithmHits).toEqual([1,1]);expect(both.hits[0].timeMs).toBe(Math.max(x.hits[0].timeMs,y.hits[0].timeMs));expect(both.hits[0].fish.algorithms).toEqual([x.hits[0].fish,y.hits[0].fish]);expect(f.candles).toHaveBeenCalledTimes(1);expect(planB.N).toBeGreaterThan(plan.N);expect(both.hits[0].timeMs).toBeGreaterThan(x.hits[0].timeMs);expect(f.candles.mock.calls[0][3].count).toBe(Math.max(plan.N,planB.N));});
 it('5m + 15m 在共同锚点各自截止取整且独立N',async()=>{const f=setup(),fifteen={...def,interval:'15m' as const};const anchorMs=cut+7*60000;await f.scanner.scan({algorithms:[{feature:def,algorithm:a},{feature:fifteen,algorithm:b}],anchorMs,signal,onProgress:()=>{},onSignal:()=>{}});expect(f.candles).toHaveBeenCalledTimes(2);for(const call of f.candles.mock.calls){const step=intervalMs(call[3].interval);expect(call[1]).toBe(Math.floor(anchorMs/step)*step);expect(call[3].count).toBe(compileFishProgram(call[3].interval==='15m'?fifteen:def,call[3].interval==='15m'?b:a).N);}});
