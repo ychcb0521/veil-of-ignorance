@@ -101,19 +101,45 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
  * 使用中性的名称和主题，正文 {{message}} 就是信号列表。
  * 【用户要求】2026-10-21「还是找不到编辑的」「还有别的办法拿 Template ID 吗」
  */
-const contactUsParams = (config: FishNotifyConfig, subject: string) => ({ name: '信号通知', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: config.emails[0] ?? '' });
-/** 调 EmailJS 发一封（收件人用逗号隔开，EmailJS 的「To Email」填 {{to_email}} 就能一次发给全部）。失败抛出可读的原因。 */
-export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch): Promise<void> {
-  const missing = fishNotifyMissing(config);
-  if (missing) throw new Error(missing);
-  const response = await request(EMAILJS_ENDPOINT, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ service_id: config.serviceId, template_id: config.templateId, user_id: config.publicKey, template_params: { to_email: config.emails.join(','), ...content, count: String(content.count), ...contactUsParams(config, content.subject) } }),
+const contactUsParams = (recipient: string, subject: string) => ({ name: '信号通知', title: subject, time: formatUTC8(Date.now()).slice(0, 16), email: recipient });
+/** EmailJS permits one request per second. Serialize sends, including manual tests and automatic sends. */
+export const FISH_EMAIL_SEND_INTERVAL_MS = 1100;
+let deliveryQueue: Promise<void> = Promise.resolve();
+let nextDeliveryAt = 0;
+async function privateDelivery(task: () => Promise<void>): Promise<void> {
+  const run = deliveryQueue.then(async () => {
+    const delay = nextDeliveryAt - Date.now();
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+    nextDeliveryAt = Date.now() + FISH_EMAIL_SEND_INTERVAL_MS;
+    await task();
   });
-  if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 200);
-    throw new Error(`EmailJS 拒绝发送（${response.status}）${detail ? `：${detail}` : ''}`);
+  deliveryQueue = run.catch(() => {});
+  return run;
+}
+/** Each request contains one recipient; the private template parameter also blocks legacy group-send pages. */
+export async function sendFishEmail(config: FishNotifyConfig, content: { subject: string; message: string; message_html: string; count: number }, request: typeof fetch = fetch): Promise<void> {
+  // Normalize again at the network boundary: a manually altered saved string cannot inject a recipient list.
+  const normalized = normalizeFishNotify(config), missing = fishNotifyMissing(normalized);
+  if (missing) throw new Error(missing);
+  const failures: string[] = [];
+  for (const [index, recipient] of normalized.emails.entries()) {
+    try {
+      await privateDelivery(async () => {
+        const response = await request(EMAILJS_ENDPOINT, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ service_id: normalized.serviceId, template_id: normalized.templateId, user_id: normalized.publicKey,
+            template_params: { ...content, count: String(content.count), ...contactUsParams(recipient, content.subject), to_email: recipient, private_to_email: recipient } }),
+        });
+        if (!response.ok) {
+          const detail = (await response.text().catch(() => '')).slice(0, 200);
+          throw new Error(`EmailJS 拒绝发送（${response.status}）${detail ? `：${detail}` : ''}`);
+        }
+      });
+    } catch (error) {
+      failures.push(`第 ${index + 1} 个邮箱：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
+  if (failures.length) throw new Error(`发送失败 ${failures.length} / ${normalized.emails.length}：${failures.join('；')}`);
 }
 
 /**

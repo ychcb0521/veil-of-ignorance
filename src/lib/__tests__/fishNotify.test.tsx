@@ -7,7 +7,7 @@ import {fishVisibleKey} from '@/lib/fish/records';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const fish=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:symbol,symbol,timeMs:Date.UTC(2026,9,21,h),timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureShort:'CBI-2'},...extra});
-const ready={enabled:true,emails:['a@qq.com','b@163.com'],serviceId:'service_1',templateId:'template_1',publicKey:'pk'};
+const ready={enabled:true,emails:['a@qq.com'],serviceId:'service_1',templateId:'template_1',publicKey:'pk'};
 beforeEach(()=>{localStorage.clear();});
 it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存能读',()=>{
  expect(['me@qq.com','A.B@gmail.com'].every(isEmail)).toBe(true);expect(['me','me@','@qq.com','a b@qq.com','a@qq'].some(isEmail)).toBe(false);
@@ -33,16 +33,19 @@ it('邮件内容照「新鱼」列表画：标的 / 信号时间 / 算法类型 
  expect(n.subject).toBe('信号通知 2 条（新增 1） · 2026-10-21 11:00');expect(n.message).toContain('【新】AAAUSDT');expect(n.message).not.toContain('【新】<B>');
  expect(n.message_html).toContain('本轮新增 1');expect(n.message_html.match(/>新</g)).toHaveLength(1);
 });
-it('发送：一次请求发给全部邮箱（逗号隔开）；被拒时报出状态码与原因；缺设置不发',async()=>{
+it('逐个私密发送：每封只含一位收件人，兼容回复地址也不能泄露其他邮箱；被拒或缺设置会报错',async()=>{
  const request=vi.fn(async()=>new Response('OK',{status:200}));
- await sendFishEmail(ready,composeFishEmail([fish('AAAUSDT',1)]),request as any);
+ await sendFishEmail({...ready,emails:['a@qq.com','b@163.com']},composeFishEmail([fish('AAAUSDT',1)]),request as any);
  const [url,init]=request.mock.calls[0] as any;expect(url).toBe(EMAILJS_ENDPOINT);
- const body=JSON.parse(init.body);expect(body).toMatchObject({service_id:'service_1',template_id:'template_1',user_id:'pk'});expect(body.template_params.to_email).toBe('a@qq.com,b@163.com');expect(body.template_params.subject).toContain('信号通知 1 条');
+ const body=JSON.parse(init.body);expect(body).toMatchObject({service_id:'service_1',template_id:'template_1',user_id:'pk'});expect(body.template_params).toMatchObject({to_email:'a@qq.com',private_to_email:'a@qq.com'});
+ expect(request).toHaveBeenCalledTimes(2);
+ const second=JSON.parse((request.mock.calls[1] as any)[1].body);expect(second.template_params).toMatchObject({to_email:'b@163.com',private_to_email:'b@163.com',email:'b@163.com'});
+ expect(JSON.stringify(body)).not.toContain('b@163.com');expect(JSON.stringify(second)).not.toContain('a@qq.com');expect(body.template_params.subject).toContain('信号通知 1 条');
  // 不改 EmailJS 自带的 Contact Us 模板也能用：它的 {{name}} {{title}} {{time}} {{email}} {{message}} 都有值
  expect(body.template_params).toMatchObject({name:'信号通知',title:body.template_params.subject,email:'a@qq.com'});expect(body.template_params.time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);expect(body.template_params.message).toContain('AAAUSDT');
  for (const content of [body.template_params.subject, body.template_params.name, body.template_params.title, body.template_params.message, body.template_params.message_html]) expect(content).not.toMatch(/https?:|href=|渔|新鱼|无知之幕|veil-of-ignorance/i);
  await expect(sendFishEmail(ready,composeFishEmail([fish('A',1)]),(async()=>new Response('The public key is invalid',{status:400})) as any)).rejects.toThrow('EmailJS 拒绝发送（400）：The public key is invalid');
- await expect(sendFishEmail({...ready,emails:[]},composeFishEmail([fish('A',1)]),request as any)).rejects.toThrow('收件邮箱');expect(request).toHaveBeenCalledTimes(1);
+ await expect(sendFishEmail({...ready,emails:[]},composeFishEmail([fish('A',1)]),request as any)).rejects.toThrow('收件邮箱');expect(request).toHaveBeenCalledTimes(2);
 });
 it('没勾选不发；勾选后发并记下结果；测试邮件照常可发',async()=>{
  const request=vi.fn(async()=>new Response('OK'));
@@ -98,4 +101,23 @@ it('新鱼很多时表格最多列 60 行（写明还有几条），整封不超
  const m=composeFishEmail(many,Date.UTC(2026,9,21),new Set());
  expect(FISH_EMAIL_MAX_ROWS).toBe(60);expect(m.message_html).toContain('还有 40 条');expect(m.message_html).not.toMatch(/https?:|href=|打开网站查看/);expect((m.message_html.match(/<tr/g)||[]).length).toBe(61);
  expect(new TextEncoder().encode(JSON.stringify(m)).length).toBeLessThan(45_000);
+});
+
+it('个别邮箱失败时继续向其他人单发，不能把部分成功记成全部成功',async()=>{
+ const request=vi.fn(async(_url,init)=>JSON.parse(init!.body as string).template_params.to_email==='a@qq.com'?new Response('bad',{status:400}):new Response('OK'));
+ await expect(sendFishEmail({...ready,emails:['a@qq.com','b@163.com']},composeFishEmail([fish('A',1)]),request as any)).rejects.toThrow('发送失败 1 / 2');
+ expect(request).toHaveBeenCalledTimes(2);
+ expect(JSON.parse(request.mock.calls[1][1]!.body as string).template_params.to_email).toBe('b@163.com');
+});
+it('网络边界再次去重并拒绝逗号收件人注入',async()=>{
+ const request=vi.fn(async()=>new Response('OK'));
+ await sendFishEmail({...ready,emails:['a@qq.com','A@qq.com','a@qq.com,b@163.com']},composeFishEmail([fish('A',1)]),request as any);
+ expect(request).toHaveBeenCalledOnce();
+ expect(JSON.parse((request.mock.calls[0] as any)[1].body).template_params.to_email).toBe('a@qq.com');
+});
+it('并发发送仍至少间隔一秒，不会因隐私拆分撞上 EmailJS 限速',async()=>{
+ const times:number[]=[],request=vi.fn(async()=>{times.push(Date.now());return new Response('OK');});
+ const content=composeFishEmail([fish('A',1)]);
+ await Promise.all([sendFishEmail(ready,content,request as any),sendFishEmail({...ready,emails:['b@163.com']},content,request as any)]);
+ expect(times).toHaveLength(2);expect(times[1]-times[0]).toBeGreaterThanOrEqual(1000);
 });
