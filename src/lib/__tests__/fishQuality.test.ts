@@ -16,9 +16,39 @@ function fixture(snapshot = snap()) {
 }
 const bar = (time: number, open = 100, close = open, high = Math.max(open, close), low = Math.min(open, close)): ResearchBar => ({ openTime: time, open, close, high, low, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 });
 const loader = (change: (time: number, step: number) => ResearchBar = (time) => bar(time)): FishReconstructionLoader => async (_row, from, cut, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => change(from + i * plan.step, plan.step));
-const evaluate = (s: QualitySample, g: QualityGroup, load = loader(), now = T + 15 * M, hours = 1) => evaluateQualitySample(s, g, hours, now, load, new AbortController().signal);
+const evaluate = (s: QualitySample, g: QualityGroup, load = loader(), now = T + 15 * M, hours = 1) => { g.rule ??= { metric: 'capture', direction: '<', threshold: -1 }; return evaluateQualitySample(s, g, hours, now, load, new AbortController().signal); };
 
 describe('fish quality paper experiments', () => {
+  it('defaults to continuous observation and registers the buy without preselecting an exit or downloading an unbounded price history', async () => {
+    const { s, g } = fixture(), load = vi.fn(loader());
+    expect(newQualityStudy().observeHours).toBe(0);
+    const result = await evaluateQualitySample(s, g, 0, T + 365 * 86400_000, load, new AbortController().signal);
+    expect(result).toMatchObject({ status: 'waiting', entryPrice: 100, entryTime: T });
+    expect(result.returnPct).toBeUndefined(); expect(result.reason).toContain('待选择卖出规则');
+    expect(load.mock.calls[0].slice(1, 3)).toEqual([T, T + M]);
+  });
+  it('continues beyond one week until the chosen rule exits and resumes holding metrics without downloading earlier prices again', async () => {
+    const { s, g } = fixture(); g.rule = { metric: 'raw', direction: '<', threshold: -1 };
+    const path = loader((t, step) => step === M ? bar(t, 100 + ((t - T) / M % 20), 105, Math.max(125, 100 + ((t - T) / M % 20)), 80) : bar(t));
+    const first = await evaluateQualitySample(s, g, 0, T + 6 * M, path, new AbortController().signal);
+    const nextLoad = vi.fn(path);
+    const resumed = await evaluateQualitySample(s, g, 0, T + 20 * M, nextLoad, new AbortController().signal, first);
+    const whole = await evaluateQualitySample(s, g, 0, T + 20 * M, path, new AbortController().signal);
+    expect(resumed).toEqual(whole);
+    expect(nextLoad.mock.calls.filter(c => c[3].step === M)[0][1]).toBe(T + 6 * M);
+    const later = await evaluateQualitySample(s, g, 0, T + 8 * 86400_000, loader(), new AbortController().signal, whole);
+    expect(later.status).toBe('open'); expect(later.complete).toBe(false); expect(later.heldHours).toBe(8 * 24);
+  });
+  it('carries a last-minute exit confirmation into the next update without using the exit candle extremes', async () => {
+    const { s, g } = fixture(snap({ definitionKey: definitionKey({ ...def, formula: 'raw = C' }) }));
+    g.rule = { metric: 'capture', direction: '<', threshold: 950 };
+    const path = loader((t, step) => step === 5 * M ? bar(t, 100, t + step >= T + 5 * M ? 90 : 100) : t === T + 5 * M ? bar(t, 92, 1000, 2000, 1) : bar(t, 100));
+    const first = await evaluateQualitySample(s, g, 0, T + 5 * M, path, new AbortController().signal);
+    expect(first.pendingExit?.at).toBe(T + 5 * M);
+    const resumed = await evaluateQualitySample(s, g, 0, T + 6 * M, path, new AbortController().signal, first);
+    const whole = await evaluateQualitySample(s, g, 0, T + 6 * M, path, new AbortController().signal);
+    expect(resumed).toEqual(whole); expect(resumed.status).toBe('closed'); expect(resumed.peakPct).toBe(0);
+  });
   it('copies each signal once, survives archival, freezes source data and uses capture time rather than hindsight signal onset', () => {
     const source = fish(), before = structuredClone(source), study = importQualityFish(newQualityStudy(T + 2 * M), [source]);
     expect(study.samples[0]).toMatchObject({ enteredAt: T, basis: 'capture' });

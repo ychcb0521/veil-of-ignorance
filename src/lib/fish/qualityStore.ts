@@ -16,7 +16,7 @@ function open(): Promise<IDBDatabase> {
 function valid(value: unknown): value is FishQualityStudy {
   const v = value as FishQualityStudy;
   return v?.version === 1 && Number.isFinite(v.startedAt) && ['capture', 'signal'].includes(v.entryMode)
-    && Number.isFinite(v.observeHours) && v.observeHours > 0 && v.observeHours <= 8784 && typeof v.tracking === 'boolean'
+    && Number.isFinite(v.observeHours) && v.observeHours >= 0 && v.observeHours <= 8784 && typeof v.tracking === 'boolean'
     && Array.isArray(v.samples) && Array.isArray(v.groups) && Array.isArray(v.results);
 }
 export async function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {

@@ -20,7 +20,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, []);
   useEffect(() => {
     let active = true, loaded = false; const epoch = ++generation.current;
-    readyRef.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
+    readyRef.current = false; rerun.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
@@ -30,7 +30,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     window.addEventListener('pagehide', flush);
     return () => { active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner]);
-  useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
+  useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, study.tracking, change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;

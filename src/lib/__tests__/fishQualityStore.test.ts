@@ -20,8 +20,8 @@ it('persists independently of full localStorage, restores rules/results after re
   expect(await store.saveQualityStudy('a', study)).toBe(true);
   vi.resetModules(); const reloaded = await import('@/lib/fish/qualityStore');
   expect((await reloaded.loadQualityStudy('a')).study).toEqual(study);
-  expect((await reloaded.loadQualityStudy('b')).study.observeHours).toBe(168);
-  expect((await reloaded.loadQualityStudy()).study.observeHours).toBe(168);
+  expect((await reloaded.loadQualityStudy('b')).study.observeHours).toBe(0);
+  expect((await reloaded.loadQualityStudy()).study.observeHours).toBe(0);
 });
 it('serializes rapid account writes, falls back on database failure and reports loss of both storage options', async () => {
   const store = await import('@/lib/fish/qualityStore');

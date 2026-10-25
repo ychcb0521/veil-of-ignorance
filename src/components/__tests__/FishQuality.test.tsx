@@ -30,5 +30,5 @@ it('validates the observation horizon and exposes manual update, automatic track
   expect(s.setObserveHours).toHaveBeenCalledWith(72);
   fireEvent.click(screen.getByRole('button', { name: '更新收益' })); expect(s.start).toHaveBeenCalled();
   fireEvent.click(screen.getByLabelText('自动跟踪新鱼及更新收益')); expect(s.setTracking).toHaveBeenCalledWith(false);
-  expect(screen.getByText(/收益为毛收益/)).toHaveTextContent('不合计为账户收益');
+  expect(screen.getByText(/选择卖出规则后评估收益/)).toHaveTextContent('不合计为账户收益');
 });

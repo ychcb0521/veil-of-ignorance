@@ -25,12 +25,13 @@ export interface QualityResult {
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
   exitReading?: number;
+  pendingExit?: { at: number; reading: number };
 }
 export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
 }
-export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 168, tracking: true, groups: [], samples: [], results: [] });
+export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
 export function qualityMembers(s: TradeSignal): FishSnapshot[] {
   const f = s.fish;
   if (!f) return [];
@@ -120,21 +121,31 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
 const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格', name: '价格', definition: '', formula: 'C', scale: 1, unit: '', positive: '1', control: '0', interval: '1m' }, { statistic: '结果', direction: '>', threshold: 0, constraints: [] });
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 /** A rule is observed only at completed algorithm bars; fill at the next minute's open, never a past signal price. */
-export async function evaluateQualitySample(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal): Promise<QualityResult> {
+export async function evaluateQualitySample(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少捕捞截止时间，不能可靠还原买入时点' };
-  if (!(observeHours > 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间' };
+  if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
   const entry = Math.ceil(sample.enteredAt / QUALITY_MINUTE) * QUALITY_MINUTE;
-  const end = Math.min(Math.floor(now / QUALITY_MINUTE) * QUALITY_MINUTE, entry + Math.ceil(observeHours * 60) * QUALITY_MINUTE);
+  const limit = observeHours === 0 ? Infinity : entry + Math.ceil(observeHours * 60) * QUALITY_MINUTE;
+  const end = Math.min(Math.floor(now / QUALITY_MINUTE) * QUALITY_MINUTE, limit);
   if (end <= entry) return { ...base, status: 'waiting', reason: '等待入场后的首根 1 分钟 K 线' };
   try {
     const row = { ...sample.source, timeMs: now }, pp = pricePlan();
-    let trigger: { at: number; reading: number } | undefined;
+    if (!group.rule) {
+      // Enter now, but wait for a chosen exit experiment before loading the whole holding history.
+      const bars = await load(row, entry, entry + QUALITY_MINUTE, pp, signal);
+      validateFishBars(bars, entry + QUALITY_MINUTE, 1, QUALITY_MINUTE);
+      return { ...base, status: 'waiting', entryTime: entry, entryPrice: bars[0].open, reason: '已登记买入，待选择卖出规则后评估收益' };
+    }
+    const prior = previous?.key === key && previous.status === 'open' && previous.entryPrice! > 0 && previous.endTime! >= entry && previous.endTime! <= end ? previous : undefined;
+    const since = prior?.endTime ?? entry;
+    if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
+    let trigger: { at: number; reading: number } | undefined = prior?.pendingExit;
     if (group.rule) {
       const rule = group.rule;
       if (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction)) throw new Error('卖出规则无效');
       const { plan, scale } = qualityMetricPlan(group.snapshot, rule.metric);
-      let cursor = Math.floor(entry / plan.step) * plan.step;
+      let cursor = Math.floor(since / plan.step) * plan.step;
       const stop = Math.floor(end / plan.step) * plan.step;
       while (cursor < stop && !trigger) {
         abort(signal);
@@ -156,29 +167,33 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     }
     // Need the execution minute's open, but never its future high/low. A last-minute trigger waits for that price.
     const priceEnd = trigger && trigger.at < end ? trigger.at + QUALITY_MINUTE : end;
-    const prices = await load(row, entry, priceEnd, pp, signal);
-    validateFishBars(prices, priceEnd, (priceEnd - entry) / QUALITY_MINUTE, QUALITY_MINUTE);
-    const first = prices[0];
+    if (priceEnd <= since && prior) return { ...prior, evaluatedAt: now };
+    const prices = await load(row, since, priceEnd, pp, signal);
+    validateFishBars(prices, priceEnd, (priceEnd - since) / QUALITY_MINUTE, QUALITY_MINUTE);
+    const entryPrice = prior?.entryPrice ?? prices[0].open;
     const exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
     const closed = !!exitBar, finalTime = closed ? exitBar!.openTime : end;
     const finalPrice = closed ? exitBar!.open : prices.at(-1)!.close;
     const held = prices.filter(b => b.openTime < finalTime);
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
-    const args = { klines, startMs: entry, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
-    const returnPct = (finalPrice / first.open - 1) * 100;
-    let peakPct = Math.max(0, returnPct);
-    for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice: first.open }) ?? 0);
+    const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
+    const returnPct = (finalPrice / entryPrice - 1) * 100;
+    let peakPct = Math.max(prior?.peakPct ?? 0, returnPct);
+    for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
     // The exit open itself is observable and belongs to the holding path; the rest of the exit candle does not.
-    let peak = first.open, exitDrawdown = 0;
+    const previousPeak = entryPrice * (1 + (prior?.peakPct ?? 0) / 100);
+    let peak = previousPeak, exitDrawdown = 0;
     for (const b of held) peak = Math.max(peak, b.high);
     exitDrawdown = Math.max(0, (peak - finalPrice) / peak * 100);
-    const low = held.reduce((minimum, b) => Math.min(minimum, b.low), Math.min(first.open, finalPrice));
-    return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice: first.open, endTime: finalTime, endPrice: finalPrice,
-      returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / first.open - 1) * 100,
-      drawdownPct: Math.max(exitDrawdown, computeHoldingDynamicMaxDrawdownPct(args) ?? 0), uncapturedPct: peakPct - returnPct,
-      heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= entry + Math.ceil(observeHours * 60) * QUALITY_MINUTE,
+    const low = held.reduce((minimum, b) => Math.min(minimum, b.low), Math.min(entryPrice * (1 + (prior?.adversePct ?? 0) / 100), finalPrice));
+    const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
+    return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+      returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / entryPrice - 1) * 100,
+      drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
+      heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit,
       exitReading: closed ? trigger!.reading : undefined,
-      reason: closed ? '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘价' : !group.rule ? '尚未选择卖出规则，仍持有，记录期末浮盈' : end < entry + observeHours * 3_600_000 ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      pendingExit: !closed ? trigger : undefined,
+      reason: closed ? '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘价' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };
@@ -194,7 +209,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
-    if (!cached?.complete) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal));
+    if (!cached?.complete && !(!g.rule && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));
   }
@@ -206,7 +221,7 @@ export function qualityGroupSummary(study: FishQualityStudy, group: QualityGroup
   const results = study.results.filter(r => keys.has(r.key));
   const valid = results.filter(r => r.status === 'open' || r.status === 'closed'), closed = valid.filter(r => r.status === 'closed');
   const mean = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-  return { total: samples.length, valid: valid.length, closed: closed.length, open: valid.length - closed.length,
+  return { total: samples.length, valid: valid.length, closed: closed.length, open: valid.length - closed.length + results.filter(r => r.status === 'waiting' && r.entryPrice! > 0).length,
     failed: results.filter(r => r.status === 'error').length, pending: samples.length - results.length + results.filter(r => r.status === 'waiting').length,
     averageReturn: mean(valid.map(r => r.returnPct!)), averagePeak: mean(valid.map(r => r.peakPct!)),
     pnl: valid.reduce((a, r) => a + r.pnl!, 0), closedWinRate: closed.length ? closed.filter(r => r.pnl! > 0).length / closed.length * 100 : null };

@@ -27,7 +27,7 @@ it('applies edited group rules, hides old-rule results, rejects late callbacks a
   const old = tasks[0], s = old.study.samples[0], g = old.study.groups[0];
   act(() => h.result.current.setTracking(false));
   act(() => h.result.current.setRule(g.id, { metric: 'capture', direction: '<', threshold: .06 }));
-  act(() => old.onResult({ key: qualityResultKey(s, g, 168), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
+  act(() => old.onResult({ key: qualityResultKey(s, g, old.study.observeHours), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
   expect(h.result.current.study.results).toHaveLength(0);
   await flush(); await flush(1100); expect(run.mock.calls.at(-1)![0].study.groups[0].rule?.threshold).toBe(.06);
 });
@@ -38,7 +38,7 @@ it('cancels pending work on account changes and ignores late results from the pr
   const old = tasks[0], s = old.study.samples[0], g = old.study.groups[0];
   h.rerender({ owner: 'b', rows: [] }); await flush();
   expect(old.signal.aborted).toBe(true); expect(h.result.current.study.samples).toHaveLength(0);
-  act(() => old.onResult({ key: qualityResultKey(s, g, 168), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed' }));
+  act(() => old.onResult({ key: qualityResultKey(s, g, old.study.observeHours), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed' }));
   expect(h.result.current.study.results).toHaveLength(0); await flush(500);
   expect(storage.save.mock.calls.filter(([owner]) => owner === 'b').every(([, study]) => study.samples.length === 0)).toBe(true);
 });
@@ -49,4 +49,12 @@ it('retains samples when saving fails and retries without stopping new catches',
   h.rerender({ rows: [signal, { ...signal, id: 'b', symbol: 'BBBUSDT' }] }); await flush(500);
   expect(h.result.current.study.samples).toHaveLength(2);
   storage.save.mockResolvedValue(true); await flush(16_000); expect(h.result.current.warning).toBe('');
+});
+it('imports catches received while paused as soon as automatic tracking resumes', async () => {
+  const h = renderHook(({ rows }) => useFishQuality('a', rows, vi.fn(async () => {})), { initialProps: { rows: [signal] } });
+  await flush(); act(() => h.result.current.setTracking(false));
+  h.rerender({ rows: [signal, { ...signal, id: 'b', symbol: 'BBBUSDT' }] }); await flush();
+  expect(h.result.current.study.samples).toHaveLength(1);
+  act(() => h.result.current.setTracking(true)); await flush();
+  expect(h.result.current.study.samples).toHaveLength(2);
 });
