@@ -1,3 +1,5 @@
+import { downloadFishCabin } from '@/lib/fish/export';
+import { toast } from 'sonner';
 import { readFishDownwardWick, saveFishDownwardWick, FISH_WICK_HOURS, FISH_WICK_ATR_MULTIPLES, type FishDownwardWick } from '@/lib/fish/downwardWick';
 import {readPersistedStateRaw,writePersistedStateRaw} from '@/lib/persistedStateStorage';
 import { FishReconstructionResults } from './FishReconstruction';
@@ -372,7 +374,7 @@ export function FishPanel(p: FishPanelProps) {
       </div>
     </section>
     <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="鱼舱模块" data-testid="fish-cabin">
-    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
+    <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
   </section>;

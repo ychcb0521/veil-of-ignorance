@@ -55,7 +55,7 @@ it('入舱详情标明该轮入舱时间，并继续显示原来的读数快照'
 it('组合详情与筛选摘要显示各算法实际指标，结果展开为保存公式中的 avg_2，未命中算法也标明',()=>{
  const def={...CBI2_DEF,id:'cba',short:'CBA',formula:'CBA = C\navg_CBA = avg(CBA,24)\navg_CBA_2 = avg(avg_CBA,24)'};
  const base={...fish,featureId:'cba',featureShort:'CBA',definitionKey:definitionKey(def)};
- const members=[{...base,statistic:'CBA'},{...base,statistic:'avg_CBA'},{...base,statistic:'结果'},{featureId:'cba',featureShort:'CBA',statistic:'avg_CBA_2',outcome:'below',threshold:8} as typeof base];
+ const members=[{...base,statistic:'CBA'},{...base,statistic:'avg_CBA'},{...base,statistic:'结果'},{...base,statistic:'avg_CBA_2',outcome:'below',threshold:8}];
  const stored={...signal,fish:{...base,combination:'or' as const,hitAlgorithms:[1,2,3],algorithms:members}};
  const before=JSON.stringify(stored);render(<FishProcessDetail signal={stored}/>);
  const d=screen.getByTestId('fish-process-detail');
