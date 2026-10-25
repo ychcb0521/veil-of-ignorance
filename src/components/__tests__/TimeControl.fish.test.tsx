@@ -113,7 +113,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(mocks.scan).toHaveBeenCalledTimes(1);
   });
 
-  it('鱼舱位于渔场内部，默认展开；复用信号库列头，按时间/标的/评分排序并按月筛选', async () => {
+  it('鱼舱位于渔内部，默认展开；复用信号库列头，按时间/标的/评分排序并按月筛选', async () => {
     const b = { ...SIGNAL, id: 'fish-BBB', symbol: 'BBBUSDT', quality: 5, timeMs: Date.UTC(2026,8,15), timeLabel: '2026-09-15 08:00:00' };
     const a = { ...SIGNAL, quality: 2, timeMs: Date.UTC(2026,9,19), timeLabel: '2026-10-19 08:00:00' };
     localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([b, a]));
