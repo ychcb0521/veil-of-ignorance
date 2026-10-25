@@ -5,6 +5,8 @@ import type { FishCombinationRound, FishProgress } from '../fishScanner';
 import type { FishCombination, FishMemberResult } from './intersection';
 import type { TradeSignal } from '../signalLibrary';
 export interface FishSession {
+  /** Restored conclusions must never be relabeled as having passed a newer admission rule. */
+  needsRescan?: string;
   data: FishCombinationRound;
   mode: FishCombination;
   keys: string[];
@@ -16,7 +18,7 @@ export interface FishSession {
 interface StoredSession extends Omit<FishSession, 'data'> {
   version: 1;
   data: Omit<FishCombinationRound, 'plans' | 'results'> & {
-    plans: {def: DeepDigFeatureDef; settings: FishAlgorithmSettings}[];
+    plans: {def: DeepDigFeatureDef; settings: FishAlgorithmSettings; algorithmKey?: string}[];
     results: [string, [number, FishMemberResult][]][];
   };
 }
@@ -41,7 +43,7 @@ export function saveFishSession(owner: string | undefined, session: FishSession 
         if(session){
           if(savedRounds.get(key)!==session.data){
             const payload:StoredSession={...session,version:1,data:{...session.data,
-              plans:session.data.plans.map(p=>({def:p.def,settings:p.settings})),
+              plans:session.data.plans.map(p=>({def:p.def,settings:p.settings,algorithmKey:p.algorithmKey})),
               results:[...session.data.results].map(([id,members])=>[id,[...members]]),
             }};
             store.put(payload,key);
@@ -70,7 +72,12 @@ export async function loadFishSession(owner: string | undefined): Promise<FishSe
       plans:value.data.plans.map(p=>compileFishProgram(p.def,p.settings)),
       results:new Map(value.data.results.map(([id,members])=>[id,new Map(members)])),
     };
+    const changed=data.plans.some((plan,i)=>{
+      const previous=value.data.plans[i].algorithmKey;
+      return previous!==undefined?previous!==plan.algorithmKey:!!plan.stateHold;
+    });
+    const needsRescan=changed?'捕捞规则已更新，上一轮未按当前规则核验。请重新捕捞，已有鱼记录保留。':undefined;
     savedRounds.set(key,data);
-    return {...value,...view as Omit<FishSession,'data'>,data};
+    return {...value,...view as Omit<FishSession,'data'>,data,needsRescan};
   } finally { database.close(); }
 }

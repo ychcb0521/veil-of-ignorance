@@ -76,7 +76,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const refresh = () => { const next = loadFishSignals(); signalsRef.current = next; setSignals(next); };
     refresh(); setProgress(null);roundRef.current=null;writesRef.current=emptyWrites();edits.current.clear();setHasRound(false);setRoundPlans(null);
     const version=++generation.current;
-    void loadFishSession(userId).then(saved=>{if(!saved||version!==generation.current)return;roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
+    void loadFishSession(userId).then(saved=>{if(!saved||version!==generation.current)return;if(saved.needsRescan){setProgress({...(saved.progress??initialFishProgress()),status:'complete',notice:saved.needsRescan});return;}roundRef.current={data:saved.data,mode:saved.mode,keys:['pending']};writesRef.current={added:new Set(saved.added),refreshed:new Map(saved.refreshed)};edits.current=new Map(saved.edits);progressRef.current=saved.progress;setProgress(saved.progress);recombineRef.current?.(saved.mode,saved.keys);setHasRound(true);setRoundPlans(saved.data.plans);}).catch(()=>{});
     const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, refresh), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, refresh);
     const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) refresh(); };
     window.addEventListener('storage', storage);

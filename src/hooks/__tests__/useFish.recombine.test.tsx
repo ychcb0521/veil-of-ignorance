@@ -22,6 +22,17 @@ const a={statistic:'结果',direction:'>' as const,threshold:100,constraints:[]}
 const keys=[compileFishProgram(def,a).algorithmKey,compileFishProgram(def,b).algorithmKey];
 const old={id:'old',symbol:'OLDUSDT',timeMs:1,timeLabel:'',fallbackZone:'',quality:3,fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,threshold:1,cutoffMs:1,algorithmKey:'old-key'}};
 beforeEach(()=>{sessions.clear();candleRequests=0;localStorage.clear();localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify([old]));gate=null;});
+it('恢复旧规则的结果时提示重捕，保留已有鱼，也不允许用旧结果重排新规则',async()=>{
+ sessions.set(undefined,{needsRescan:'捕捞规则已更新，请重新捕捞',progress:null});
+ const {result}=renderHook(()=>useFish(undefined));
+ await waitFor(()=>expect(result.current.progress?.notice).toContain('请重新捕捞'));
+ expect(result.current.hasRound).toBe(false);
+ expect(result.current.progress?.status).toBe('complete');
+ expect(result.current.signals).toHaveLength(1);
+ expect(result.current.signals[0]).toMatchObject({symbol:'OLDUSDT',timeMs:1,quality:3,fish:{threshold:1,average:1}});
+ let reused=true;act(()=>{reused=result.current.recombine('and',keys);});
+ expect(reused).toBe(false);expect(candleRequests).toBe(0);
+});
 it('并集扫完点「交集」：新鱼直接换成交集结果（不重扫），再切回并集也一样；原有的鱼不受影响；切换下来的鱼留在「鱼」里不丢',async()=>{
  const {result}=renderHook(()=>useFish(undefined));
  await act(async()=>{await result.current.start({algorithms:[{feature:def,algorithm:a},{feature:def,algorithm:b}],combination:'or',anchorMs:cut,includeDuplicates:true});});

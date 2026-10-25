@@ -351,7 +351,7 @@ export class FishScanner {
     const avgName = fishStatisticName(plan.def, plan.settings.statistic);
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
     const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
-    const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}）`;
+    const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}${plan.stateHold?'，且 S > 0.55 连续至少 6 小时':''}）`;
     if (result.outcome === 'hit') {
       const k = result.signal!.fish!.startIndex!, signalMs = result.signal!.timeMs;
       if (options.turnoverFloors?.length) {

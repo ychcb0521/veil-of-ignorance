@@ -15,7 +15,7 @@ export const FISH_DEFAULT_RULES = [
   { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
   { id: 'default-cda', featureId: 'cda', statistic: '结果', threshold: '8' },
   { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.8' },
-  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.67' },
+  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.7' },
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
 ] as const;
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
@@ -67,6 +67,16 @@ export function readFishCards(): FishCard[] {
         writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
       }
       writePersistedStateRaw(stateDefaultKey, '1');
+    }
+    const stateDefaultKeyV2 = `${getUserPrefix()}fish-state-raw-default.v2`;
+    if (readPersistedStateRaw(stateDefaultKeyV2) !== '1') {
+      const oldDefault = x.find(c => c?.id === 'default-state-raw' && c.featureId === 'state'
+        && c.pref?.statistic === 'state' && c.pref.direction === '>' && Number(c.pref.threshold) === 0.67);
+      if (oldDefault) {
+        oldDefault.pref = { ...oldDefault.pref, threshold: '0.7' };
+        writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
+      }
+      writePersistedStateRaw(stateDefaultKeyV2, '1');
     }
     return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, 6).map(c => {
       // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.

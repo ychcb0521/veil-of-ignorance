@@ -9,6 +9,14 @@ const cut=Date.UTC(2026,3,9,15),step=300000,start=Date.UTC(2026,3,9,4,55);
 const fish={average:0.081,cbi2:0.081,value:0.081,startAverage:0.0712,previousAverage:0.0695,cutoffMs:cut,threshold:0.07,thresholdRaw:0.07,scale:1,unit:'',direction:'>' as const,interval:'5m',featureShort:'CBI-2',statistic:'avg_CBI2',algorithmKey:'cbi2|avg_CBI2|=|>|0.07|x',startIndex:1000,cutoffIndex:1121,aboveBars:122,runExtreme:0.0705,crossings:1,trace:{t0:start-36*step,dt:3*step,values:Array.from({length:53},(_,i)=>0.06+i*0.0004)}};
 const signal:TradeSignal={id:'fish-RAVEUSDT',symbol:'RAVEUSDT',timeMs:start,timeLabel:'2026-04-09 12:55:00',fallbackZone:'',fish,freshCatch:true};
 beforeEach(()=>localStorage.clear());
+it('S 的持续时间成熟才命中：不会把此前已高于 0.7 误写成未过当前门槛',()=>{
+ render(<FishProcessDetail signal={{...signal,fish:{...fish,featureId:'state',featureShort:'S',statistic:'state',threshold:.7,previousAverage:.75,startAverage:.75,average:.75,stateHold:{threshold:.55,requiredHours:6,verifiedHours:6,fromMs:cut-6*3600000,minimum:.58},constraints:['S > 0.55 连续至少 6 小时']}}}/>);
+ const d=screen.getByTestId('fish-process-detail');
+ expect(d).toHaveTextContent('尚未同时满足当前门槛与持续时间条件');
+ expect(d).toHaveTextContent('S 连续高于 0.55 已覆盖 6 小时');
+ expect(d).toHaveTextContent('期间最低 0.58');
+ expect(d).not.toHaveTextContent('还不到门槛');
+});
 it('详情：越线、保持、截止三步命中依据；本轮其余币卡在哪一步、本币排名与越线次数',()=>{
  const rows=[{symbol:'RAVEUSDT',reading:0.081,outcome:'hit'},{symbol:'X1USDT',reading:0.09,outcome:'unknown'},...Array.from({length:30},(_,i)=>({symbol:`B${i}USDT`,reading:0.001*i,outcome:'below'})),{symbol:'GUSDT',reading:NaN,outcome:'gap'}];
  saveFishRound(summarizeFishRound(rows,{algorithmKey:fish.algorithmKey,cutoffMs:cut,anchorMs:cut,direction:'>',threshold:0.07,scale:1,unit:'',partial:false}));

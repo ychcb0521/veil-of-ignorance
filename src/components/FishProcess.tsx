@@ -55,9 +55,10 @@ function HitEvidence({ fish, signalTime }: { fish: FishSnapshot; signalTime?: nu
   if ((fish as { outcome?: string }).outcome === 'unknown') return <p className="text-muted-foreground">这一算法在截止时满足（{dir} {num(thr)}），但从可用区间开头起就一直满足，找不到这一轮的起点。</p>;
   return <div className="space-y-1">
     <ol className="list-decimal space-y-0.5 pl-4">
-      <li>越线：{start != null ? <>前一根（{t(start - step)}）读数 <b>{num(fish.previousAverage * scale)}</b>，还{dir === '>' ? '不到' : '不低于'}门槛；{t(start)} 这一根读数 <b>{num(fish.startAverage * scale)}</b>，越过门槛 {dir} {num(thr)}。</> : '—'}</li>
+      <li>越线：{start != null ? <>前一根（{t(start - step)}）读数 <b>{num(fish.previousAverage * scale)}</b>，{fish.stateHold?'尚未同时满足当前门槛与持续时间条件':`还${dir === '>' ? '不到' : '不低于'}门槛`}；{t(start)} 这一根读数 <b>{num(fish.startAverage * scale)}</b>，{fish.stateHold?'开始同时满足两项条件':<>越过门槛 {dir} {num(thr)}</>}。</> : '—'}</li>
       <li>保持：{bars != null ? <>此后连续 {bars} 根（约 {((bars * step) / 3600000).toFixed(1)} 小时）一直满足，这一轮里{dir === '>' ? '最低' : '最高'} {num((fish.runExtreme ?? NaN) * scale)}，没有回落到门槛另一侧。</> : '—'}</li>
       <li>截止：{t(fish.cutoffMs)} 读数 <b>{num(fish.average * scale)}</b>{Number.isFinite(margin) && <>，比门槛{dir === '>' ? '高' : '低'} {num(margin)}</>}。</li>
+      {fish.stateHold&&<li>持续核验：{t(fish.stateHold.fromMs)} 至截止，S 连续高于 <b>{num(fish.stateHold.threshold)}</b> 已覆盖 <b>{num(fish.stateHold.verifiedHours)} 小时</b>，期间最低 <b>{num(fish.stateHold.minimum)}</b>；要求至少 {num(fish.stateHold.requiredHours)} 小时。</li>}
       {!!fish.constraints?.length && <li>附加约束：{fish.constraints.map((c, i) => `${c}（起点 ${fish.startConstraints?.[i] ? '满足' : '—'} / 截止 ${fish.cutoffConstraints?.[i] ? '满足' : '—'}）`).join('；')}</li>}
     </ol>
     <Trace fish={fish} />

@@ -1,4 +1,4 @@
-import {compileFishProgram,fishStatistics} from '@/lib/fish/algorithm';
+import {compileFishProgram,fishStatistics,fishStateHold,FISH_STATE_HOLD_TEXT} from '@/lib/fish/algorithm';
 import type {DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {readFishPreference,withFishDefaultThreshold,type FishPreference} from '@/lib/fish/preferences';
 import {useMemo,useEffect,type InputHTMLAttributes,type ReactNode} from 'react';
@@ -33,6 +33,7 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  const suggestionText=footer??<>{suggestion?<span className="text-[10px] text-muted-foreground" data-testid={`fish-suggestion-${index}`} title={fishSuggestionTitle(suggestion)}>{suggestion.samples.p25===null?'信号库暂无有效建议':`信号库建议 ${Number(suggestion.samples.p25.toPrecision(6))} ~ ${Number(suggestion.samples.p75!.toPrecision(6))}`}（{suggestion.samples.n} / {librarySize} 条）</span>:computing?<span className="text-[10px] text-muted-foreground/70" data-testid={`fish-suggestion-auto-${index}`}>信号库建议计算中 {computing}</span>:queued&&card.enabled&&librarySize>0?<span className="text-[10px] text-muted-foreground/50">信号库建议排队中</span>:null}</>;
  const chevron=<ChevronDown aria-hidden className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/60"/>;
  const unit=p.statistic&&p.statistic!=='结果'?'原值':def?.unit;
+ const stateHold=fishStateHold(card.featureId,p.statistic,p.direction);
  const dim=`transition-opacity ${card.enabled?'':'opacity-40'}`;
  return <fieldset disabled={locked} className="relative min-w-0 py-1.5 pl-2 pr-8 text-[11px] transition-colors hover:bg-muted/20" aria-label={`算法 ${index}`}>
  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -42,8 +43,9 @@ export function FishAlgorithmCard({card,defs,locked,index,onChange,onDelete,canD
  <span className={`relative w-11 shrink-0 ${dim}`}><select aria-label={label('方向')} className={`${cls} pl-2.5 pr-5 font-medium`} value={p.direction} onChange={e=>{const direction=e.target.value as '>'|'<',fill=suggestion?suggestedFishThreshold(suggestion,direction):null;if(fill!==null&&p.lastSuggestion!==undefined&&mayFillFishThreshold(p.threshold,p.lastSuggestion))update({direction,threshold:String(fill),lastSuggestion:String(fill)});else update({direction});}}><option value=">">&gt;</option><option value="<">&lt;</option></select>{chevron}</span>
  <span className={`relative w-24 shrink-0 ${dim}`}><input aria-label={label('阈值')} title={unit} className={`${field} pl-2 pt-0.5 ${unit?'pr-8':'pr-2'} font-mono font-medium tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none`} type="number" step="any" value={p.threshold} onChange={e=>update({threshold:e.target.value,lastSuggestion:undefined})}/>{unit&&<span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-muted-foreground/60">{unit}</span>}</span>
  <div className="flex min-w-0 flex-1 items-center gap-x-1 pl-1 text-[10px] leading-5 empty:hidden">
+ {stateHold&&<span className={`shrink-0 text-primary/90 ${dim}`} title="按已收盘读数计时，中途回到 0.55 或以下重新计时；当前还须超过左侧门槛。">{FISH_STATE_HOLD_TEXT}</span>}
  {/* 【用户要求】2026-10-20「渔中的这个 x 也放在 … 中」：每张卡都有「…」——记录区间（有的话）与「删除这个算法」都收在里面 */}
- {recorded?null:<>{suggestionText}{refresh}</>}
+ {recorded||stateHold?null:<>{suggestionText}{refresh}</>}
  </div>
  {(recorded||canDelete)&&<Popover><PopoverTrigger asChild><button type="button" aria-label={`算法 ${index} 的更多操作`} title={recorded?'记录区间 · 删除':'删除'} className="absolute right-1 top-2 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><Ellipsis className="h-3.5 w-3.5"/></button></PopoverTrigger><PopoverContent align="end" className="w-auto max-w-[calc(100vw-2rem)] space-y-1 p-2 text-[10px] leading-5">
  {recorded&&<>
