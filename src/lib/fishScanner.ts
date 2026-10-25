@@ -8,7 +8,7 @@ import {createFishReconstructionLoader} from '@/lib/fish/reconstructionLoader';
 import { fishRetentionReason } from '@/lib/fish/retention';
 import { intervalOf, definitionKey } from '@/lib/deepDig/features';
 import { CBI2_DEF, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { compileFishProgram, evaluateFishProgram, classifyFishProgram, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
+import { compileFishProgram, evaluateFishProgram, classifyFishProgram, FISH_STATE_HOLD_TEXT, type FishAlgorithmSettings, type FishSnapshot, type FishProgram } from '@/lib/fish/algorithm';
 import { validateFishBars, fishTurnoverCheck, describeTurnoverMiss, type FishTurnoverFloor } from '@/lib/fish/shared';
 import { fishSignalTurnoverOk, fishTail, fishTightenable, placeFishSignal, tightenFishResult, type FishPlace } from '@/lib/fish/refilter';
 import { fishStatisticName, fishRuleText } from '@/lib/fishRule';
@@ -351,7 +351,7 @@ export class FishScanner {
     const avgName = fishStatisticName(plan.def, plan.settings.statistic);
     const fmt = (v: number) => Number.isFinite(v) ? (v * scale).toFixed(4) : '—';
     const rule = `${plan.settings.direction} ${plan.settings.threshold}`;
-    const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}${plan.stateHold?'，且 S > 0.55 连续至少 6 小时':''}）`;
+    const atCut = `${avgName} 截止时 = ${fmt(r.average[end])}（要求 ${rule}${plan.stateHold?`，且（${FISH_STATE_HOLD_TEXT}）`:''}）`;
     if (result.outcome === 'hit') {
       const k = result.signal!.fish!.startIndex!, signalMs = result.signal!.timeMs;
       if (options.turnoverFloors?.length) {

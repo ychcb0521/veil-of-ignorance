@@ -23,3 +23,17 @@ it.each(['新鱼','鱼舱'])('%s：标的列只放完整标的名；「算法类
  for(const c of screen.getAllByTestId('fish-algorithm-type'))expect(c).not.toHaveAttribute('title');
  expect(screen.getByRole('button',{name:new RegExp(`^${title}`)}).className).toContain('outline-none');expect(document.querySelector('[title*="完整快照"]')).toBeNull();expect(screen.queryByRole('button',{name:'加入信号库'})).not.toBeInTheDocument();
 });
+
+it('新鱼中的原值 S、avg_S 及同时命中都明确区分，并可分别筛选',()=>{
+ localStorage.clear();
+ const row=(statistic:string,id:string):TradeSignal=>({id,symbol:`${id}USDT`,timeMs:1,timeLabel:'',fallbackZone:'',fish:{featureId:'state',featureShort:'S',statistic,average:.71,cbi2:.71,startAverage:.71,previousAverage:.69,cutoffMs:1,threshold:.7}});
+ const raw=row('state','RAW'),avg=row('avg_state_2','AVG');
+ const both={...raw,id:'both',symbol:'BOTHUSDT',fish:{...raw.fish!,algorithms:[raw.fish!,avg.fish!],combination:'or' as const,hitAlgorithms:[1,2]}};
+ render(<FishLibrary title="新鱼" signals={[raw,avg,both]} defaultOpen onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
+ const types=()=>screen.getAllByTestId('fish-algorithm-type').map(e=>e.textContent);
+ expect(types().sort()).toEqual(['S 原值','avg_S','S 原值 · avg_S'].sort());
+ fireEvent.change(screen.getByLabelText('新鱼的算法'),{target:{value:'avg_S'}});
+ expect(types().sort()).toEqual(['avg_S','S 原值 · avg_S'].sort());
+ fireEvent.change(screen.getByLabelText('新鱼的算法'),{target:{value:'S 原值'}});
+ expect(types().sort()).toEqual(['S 原值','S 原值 · avg_S'].sort());
+});

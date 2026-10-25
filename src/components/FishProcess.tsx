@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import { fishRoundIdentity, readFishRound, type FishRoundSummary } from '@/lib/fish/roundSummary';
+import { fishSourceLabel } from '@/lib/fish/records';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { intervalMs } from '@/lib/deepRsa/marketData';
 
@@ -97,7 +98,7 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
     {old && <p className="text-muted-foreground">这条是较早捕到的，当时没有记下过程数据；下面只列快照里有的读数。重新捕捞后会有完整过程。</p>}
     {!multi ? <>
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中</h4>
-        <p className="text-muted-foreground">规则：{fish.featureShort ?? 'CBI-2'} 的「{fish.statistic && fish.statistic !== '结果' ? fish.statistic : '结果'}」{fish.direction ?? '>'} {fish.threshold}{fish.unit ? ` ${fish.unit}` : ''}；截止时满足，并且是在可用区间里刚越线、一直保持到截止的这一轮。</p>
+        <p className="text-muted-foreground">规则：{fishSourceLabel({ ...fish, featureShort: fish.featureShort ?? 'CBI-2' })} 的「{fish.statistic && fish.statistic !== '结果' ? fish.statistic : '结果'}」{fish.direction ?? '>'} {fish.threshold}{fish.unit ? ` ${fish.unit}` : ''}；截止时满足，并且是在可用区间里刚越线、一直保持到截止的这一轮。</p>
         <HitEvidence fish={fish} signalTime={signal.timeMs} />
       </section>
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">为什么避开了其他噪音</h4><NoiseEvidence fish={fish} round={round} identity={identity} /></section>
@@ -105,7 +106,7 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
       <section className="space-y-1.5 border-t border-border/50 pt-3 first:border-t-0 first:pt-0"><h4 className="text-xs font-medium">凭什么击中（{fish.combination === 'or' ? '并集：满足任一' : '交集：同时满足'}）</h4>
         <p className="text-muted-foreground">{fish.combination === 'or' ? `命中的是算法 ${(fish.hitAlgorithms ?? []).join('、')}；信号时间取命中算法里最早的起点。` : '每个算法都在截止时满足；信号时间取各算法起点里最晚的那个（从那一刻起全部同时成立）。'}</p>
         {members.map((m, i) => <div key={i} className="space-y-1 border-l border-border/60 pl-2">
-          <p className="font-medium">算法 {i + 1} · {m.featureShort ?? m.featureName ?? ''} {m.direction ?? '>'} {num(m.threshold)}{fish.combination === 'or' && !(fish.hitAlgorithms ?? []).includes(i + 1) ? <span className="ml-1 font-normal text-muted-foreground">（这一算法没命中：{OUTCOME[(m as { outcome?: string }).outcome ?? ''] ?? '—'}）</span> : null}</p>
+          <p className="font-medium">算法 {i + 1} · {fishSourceLabel(m)} {m.direction ?? '>'} {num(m.threshold)}{fish.combination === 'or' && !(fish.hitAlgorithms ?? []).includes(i + 1) ? <span className="ml-1 font-normal text-muted-foreground">（这一算法没命中：{OUTCOME[(m as { outcome?: string }).outcome ?? ''] ?? '—'}）</span> : null}</p>
           {(fish.combination !== 'or' || (fish.hitAlgorithms ?? []).includes(i + 1)) && <HitEvidence fish={m} />}
         </div>)}
       </section>

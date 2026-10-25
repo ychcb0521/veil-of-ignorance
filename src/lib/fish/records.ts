@@ -1,8 +1,8 @@
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { stockCode } from '@/lib/signalMarket';
 import { signalDedupKey } from '@/lib/signalLibrary';
-import { CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
-import { constraintFingerprint, fishAlgorithmKey } from './algorithm';
+import { CBI2_DEF, compileFeatureFormula, definitionKey } from '@/lib/deepDig/features';
+import { constraintFingerprint, fishAlgorithmKey, type FishSnapshot } from './algorithm';
 /** Migrate deterministically; never let normal signal-library dedup collapse different algorithms. */
 export function migrateFishSignal(s: TradeSignal): TradeSignal {
   const r=s.fish;
@@ -24,8 +24,26 @@ export function mergeFishSignals(existing: readonly TradeSignal[],incoming: read
   }
   return [...map.values()];
 }
-/** 算法简称：交集「A ∩ B」，并集「A ∪ B」（并集另记命中的是哪几个，见快照 hitAlgorithms）。 */
-export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(a=>a.featureShort??a.featureName).join(s.fish.combination==='or'?' ∪ ':' ∩ '):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
+/** Display the saved S series, without rewriting snapshots or inferring from current definitions. */
+export function fishSourceLabel(a: Partial<FishSnapshot> | undefined): string {
+  const short = a?.featureShort || a?.featureName || '—';
+  const key = a?.algorithmKey?.split('|');
+  if ((a?.featureId ?? key?.[0]) !== 'state' && !(a?.featureId == null && a?.featureShort === 'S')) return short;
+  let statistic = a?.statistic ?? (key?.[0] === 'state' ? key[1] : undefined);
+  // Earliest records applied an external average; later “结果” records retain the exact formula.
+  if (a?.H != null && a.H > 0) return 'avg_S';
+  if (statistic === '结果' && a?.definitionKey) {
+    try {
+      const saved = JSON.parse(a.definitionKey);
+      if (Array.isArray(saved) && typeof saved[0] === 'string') statistic = compileFeatureFormula(saved[0]).program.statements.at(-1)?.name ?? undefined;
+    } catch { /* Incomplete legacy evidence stays explicitly unidentified. */ }
+  }
+  if (statistic === 'state') return 'S 原值';
+  if (statistic && /^avg_state(?:_\d+)?$/.test(statistic)) return 'avg_S';
+  return statistic && statistic !== '结果' ? `S [${statistic}]` : 'S（序列不详）';
+}
+/** 算法简称：交集「A ∩ B」，并集「A ∪ B」。 */
+export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fish.algorithms.map(fishSourceLabel).join(s.fish.combination==='or'?' ∪ ':' ∩ '):s.fish?.featureId==='state'||s.fish?.featureShort==='S'?fishSourceLabel(s.fish):`${s.fish?.featureShort??'CBI-2'}${s.fish?.statistic&&s.fish.statistic!=='结果'?` [${s.fish.statistic}]`:''}`;
 
 /**
  * 「算法类型」：这条鱼实际是哪个（些）算法捕到的。单算法 = 它自己；交集 = 每个算法；并集 = 命中的那几个。
@@ -34,12 +52,11 @@ export const fishAlgorithmShort=(s:TradeSignal)=>s.fish?.algorithms?.length?s.fi
 export function fishCaughtBy(s: TradeSignal): string[] {
   const r = s.fish;
   if (!r) return ['CBI-2'];
-  const name = (a: { featureShort?: string; featureName?: string } | undefined) => a?.featureShort || a?.featureName || '—';
   if (r.algorithms?.length) {
     const picked = r.combination === 'or' ? (r.hitAlgorithms ?? []).map(i => r.algorithms![i - 1]) : r.algorithms;
-    return [...new Set(picked.filter(Boolean).map(name))];
+    return [...new Set(picked.filter(Boolean).map(fishSourceLabel))];
   }
-  return [r.featureShort ?? 'CBI-2'];
+  return [fishSourceLabel({ ...r, featureShort: r.featureShort ?? 'CBI-2' })];
 }
 
 /**

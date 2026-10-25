@@ -24,6 +24,7 @@ it('uses six distinct cards with the screenshot thresholds and union before the 
   expect(compiled.plans[1].scale).toBe(100);
   expect(compiled.plans[2].settings.threshold).toBe(8);
   expect(compiled.plans[4].stateHold).toEqual({ threshold: 0.55, hours: 6, samples: 73 });
+  expect(compiled.plans[4].stateHoldAlternatives).toEqual([{threshold:0.55,hours:6,samples:73},{threshold:0.66,hours:3,samples:37}]);
   expect(compiled.plans[5].stateHold).toBeUndefined();
 });
 

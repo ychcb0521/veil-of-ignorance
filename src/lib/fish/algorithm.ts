@@ -8,7 +8,8 @@ import { coreProgram, featureCoreName } from '@/lib/featureSource';
 import { formatUTC8 } from '@/lib/timeFormat';
 export interface FishConstraint { id: string; text: string; enabled: boolean }
 export const FISH_STATE_HOLD = { threshold: 0.55, hours: 6 } as const;
-export const FISH_STATE_HOLD_TEXT = 'S > 0.55 连续至少 6 小时';
+export const FISH_STATE_HOLD_ROUTES = [FISH_STATE_HOLD, { threshold: 0.66, hours: 3 }] as const;
+export const FISH_STATE_HOLD_TEXT = 'S > 0.55 连续至少 6 小时，或 S > 0.66 连续至少 3 小时';
 /** Only the original S series has this admission rule; averages and S2 keep their own rules. */
 export const fishStateHold = (featureId: string, statistic: string | undefined, direction: string) =>
   featureId === 'state' && statistic === 'state' && direction === '>' ? FISH_STATE_HOLD : undefined;
@@ -91,6 +92,7 @@ export interface FishProgram {
   resultName: string; statisticName: string; scale: number; unit: string; averageName: string; mainName: string; constraintNames: string[];
   texts: string[]; constraintKey: string; algorithmKey: string; warm: number; N: number; step: number; unavailable?: string;
   stateHold?: { threshold: number; hours: number; samples: number };
+  stateHoldAlternatives?: { threshold: number; hours: number; samples: number }[];
 }
 export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorithmSettings): FishProgram {
   if(!Number.isFinite(settings.threshold))throw new Error('请填写有限数字阈值');
@@ -132,9 +134,17 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   // Measure elapsed time between closed readings, not just the count of candles.
   // On 5m bars, 73 consecutive readings span a full 6h; 72 span only 5h55m.
   const stateHold=hold?{...hold,samples:Math.ceil(hold.hours*3600000/step)+1}:undefined;
+  const stateHoldAlternatives=hold?FISH_STATE_HOLD_ROUTES.map(route=>({...route,samples:Math.ceil(route.hours*3600000/step)+1})):undefined;
   if(stateHold){
-    const n=name('__stateHold'), count=stateHold.samples;
-    const p=parseFormula(`sum(${averageName} > ${stateHold.threshold}, ${count}) >= ${count}`,known);
+    const routeNames=stateHoldAlternatives!.map(route=>{
+      const n=name('__stateHoldRoute');
+      const p=parseFormula(`sum(${averageName} > ${route.threshold}, ${route.samples}) >= ${route.samples}`,known);
+      tail.statements.push({name:n,expr:p.statements[0].expr,line:1});known.add(n);return n;
+    });
+    const n=name('__stateHold');
+    // One proven route suffices even if the other route has unavailable readings.
+    const any=routeNames.map(r=>`nz(${r},0)`).join(' or '),allKnown=routeNames.map(r=>`has(${r})`).join(' and ');
+    const p=parseFormula(`if(${any},1,if(${allKnown},0,1/0))`,known);
     tail.statements.push({name:n,expr:p.statements[0].expr,line:1});
     constraintNames.push(n);texts.push(FISH_STATE_HOLD_TEXT);
   }
@@ -147,14 +157,14 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const windowDef=end<full.program.statements.length?{...frozen,formula:frozen.formula.split(/\r?\n/).slice(0,full.program.statements[end-1].line).join('\n')}:frozen;
   const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step),convergenceHistory(program,params,step/60000)+1);
   const N=warm+546, constraintKey=constraintFingerprint(texts);
-  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,unavailable:!Number.isFinite(N)||N>5000?`需要 ${N} 根历史（含平滑收敛预热），超过 5000 根上限，暂不可扫`:undefined};
+  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>5000?`需要 ${N} 根历史（含平滑收敛预热），超过 5000 根上限，暂不可扫`:undefined};
 }
 export interface FishValues { value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
 export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgram): FishValues {
   const out=evaluateOnBars(bars,plan.compiled,plan.def),n=bars.length;
   const series=(name:string)=>{const x=out.vars.get(name)??NaN;return typeof x==='number'?new Float64Array(n).fill(x):x;};
   const value=series(plan.statisticName),average=series(plan.averageName),main=series(plan.mainName),constraints=plan.constraintNames.map(series);
-  const condition=Float64Array.from(main,(m,i)=>!Number.isFinite(m)||!Number.isFinite(average[i])||constraints.some(c=>!Number.isFinite(c[i]))?NaN:m!==0&&constraints.every(c=>c[i]!==0)?1:0);
+  const condition=Float64Array.from(main,(m,i)=>plan.stateHold&&m===0&&Number.isFinite(average[i])?0:!Number.isFinite(m)||!Number.isFinite(average[i])||constraints.some(c=>!Number.isFinite(c[i]))?NaN:m!==0&&constraints.every(c=>c[i]!==0)?1:0);
   return {value,average,main,constraints,condition};
 }
 export interface FishSnapshot {
@@ -193,8 +203,10 @@ export function classifyFishProgram(symbol:string,bars:readonly ResearchBar[],r:
   const process={trace,runExtreme:round5(runExtreme),crossings,aboveBars:end-k+1};
   const fish:FishSnapshot={statistic:settings.statistic??'结果',featureId:def.id,featureName:def.name,featureShort:def.short,definitionKey:definitionKey(def),interval:intervalOf(def),direction:settings.direction,threshold:settings.threshold,thresholdRaw:settings.threshold/plan.scale,scale:plan.scale,unit:plan.unit,constraints:plan.texts,constraintKey:plan.constraintKey,algorithmKey:plan.algorithmKey,average:r.average[end],value:r.value[end],cbi2:r.value[end],startAverage:r.average[k],previousAverage:r.average[k-1],cutoffMs,startIndex:k,cutoffIndex:end,startConstraints:r.constraints.map(c=>c[k]?1:0),cutoffConstraints:r.constraints.map(c=>c[end]?1:0)};
   if(plan.stateHold){
-    const {threshold,hours,samples}=plan.stateHold,from=end-samples+1;
-    fish.stateHold={threshold,requiredHours:hours,fromMs:bars[from].openTime+plan.step,verifiedHours:(samples-1)*plan.step/3600000,minimum:Math.min(...r.average.subarray(from,end+1))};
+    const route=(plan.stateHoldAlternatives??[plan.stateHold]).find(route=>end>=route.samples-1&&r.average.subarray(end-route.samples+1,end+1).every(v=>Number.isFinite(v)&&v>route.threshold));
+    if(route){const {threshold,hours,samples}=route,from=end-samples+1;
+      fish.stateHold={threshold,requiredHours:hours,fromMs:bars[from].openTime+plan.step,verifiedHours:(samples-1)*plan.step/3600000,minimum:Math.min(...r.average.subarray(from,end+1))};
+    }
   }
   if(unknown)return {outcome:'unknown',boundaryMs:timeMs,snapshot:{...fish,outcome:'unknown',boundaryMs:timeMs,startIndex:undefined,startAverage:NaN,previousAverage:NaN,trace:process.trace,crossings}};
   return {outcome:'hit',signal:{id:`fish-${symbol}-${timeMs}-${encodeURIComponent(plan.algorithmKey)}`,symbol,timeMs,timeLabel:formatUTC8(timeMs),fallbackZone:'',fish:{...fish,...process}}};

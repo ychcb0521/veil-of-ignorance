@@ -36,3 +36,13 @@ it('鱼列表每行有「捕捞过程」，点开显示详情',()=>{
  const panel=screen.getByTestId('fish-new-panel');expect(within(panel).getByText('捕捞过程',{selector:'span'})).toBeVisible();expect(within(panel).getByText('算法类型')).toBeVisible();expect(within(panel).getByTestId('fish-algorithm-type')).toHaveTextContent('CBI-2');expect(within(panel).queryByText('兜底区')).toBeNull();
  fireEvent.click(within(panel).getByTestId('fish-process-open'));const dialog=screen.getByRole('dialog');expect(dialog).toHaveTextContent('RAVEUSDT');expect(within(dialog).getByTestId('fish-process-detail')).toHaveTextContent('凭什么击中');
 });
+
+it('组合过程区分 S 原值与 avg_S，并显示新 3 小时路径的实际核验',()=>{
+ const raw={...fish,featureId:'state',featureShort:'S',statistic:'state',stateHold:{threshold:.66,requiredHours:3,verifiedHours:3,fromMs:cut-3*3600000,minimum:.68}};
+ const avg={...fish,featureId:'state',featureShort:'S',statistic:'avg_state_2'};
+ render(<FishProcessDetail signal={{...signal,fish:{...raw,combination:'or',hitAlgorithms:[1,2],algorithms:[raw,avg]}}}/>);
+ const d=screen.getByTestId('fish-process-detail');
+ expect(d).toHaveTextContent('算法 1 · S 原值');
+ expect(d).toHaveTextContent('算法 2 · avg_S');
+ expect(d).toHaveTextContent('S 连续高于 0.66 已覆盖 3 小时');
+});

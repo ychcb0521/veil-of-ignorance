@@ -46,11 +46,12 @@ it('does not require S > 0.7 for all 6 hours; later dips below 0.7 do not reset 
   expect(classify(p, bars(p, p.N, 100, 0.69)).outcome).toBe('below');
 });
 
-it('starts the signal only when the duration condition matures, even if S was already over 0.7', () => {
+it('starts once at the earliest passing route, even if both routes pass at cutoff', () => {
   const p = compile(), sample = bars(p, p.N, 73, 0.75, 0.75);
   const result = classify(p, sample);
   expect(result.outcome).toBe('hit');
-  expect(result.signal?.timeMs).toBe(cut);
+  expect(result.signal?.timeMs).toBe(cut - 3 * 3600000);
+  expect(result.signal?.fish?.crossings).toBe(1);
   expect(result.signal?.fish?.previousAverage).toBe(0.75);
   expect(result.signal?.fish?.startConstraints).toEqual([1]);
 });
@@ -88,9 +89,11 @@ it('tightening a completed scan preserves the duration gate and matches a fresh 
 it('single, intersection, union and single-coin diagnosis use the same S duration rule; gaps are rejected', async () => {
   const p = compile(), coin = (base: string) => ({ base, symbol: `${base}USDT`, instrument: `${base}USDT`, multiplier: 1 });
   const adapter: FishDataAdapter = {
-    exchange: 'binance', list: async () => ['GOOD', 'SHORT', 'DIP', 'LOW', 'GAP'].map(coin), btc: () => coin('BTC'), taker: async (_, b) => b,
+    exchange: 'binance', list: async () => ['GOOD', 'SHORT', 'DIP', 'LOW', 'GAP', 'HOT', 'HOTSHORT', 'HOTDIP'].map(coin), btc: () => coin('BTC'), taker: async (_, b) => b,
     candles: vi.fn(async (market, _, _signal, q) => {
-      const sample = bars(p, q.count, market.base === 'SHORT' ? 72 : 100, market.base === 'LOW' ? 0.69 : 0.71);
+      const hot = market.base.startsWith('HOT');
+      const sample = bars(p, q.count, hot ? (market.base === 'HOTSHORT' ? 36 : 37) : market.base === 'SHORT' ? 72 : 100, market.base === 'LOW' ? 0.69 : 0.71, hot ? 0.68 : 0.6);
+      if (market.base === 'HOTDIP') sample.at(-20)!.close = 0.66;
       if (market.base === 'DIP') sample.at(-20)!.close = 0.55;
       if (market.base === 'GAP') sample.splice(sample.length - 20, 1);
       return sample;
@@ -101,10 +104,44 @@ it('single, intersection, union and single-coin diagnosis use the same S duratio
     const hits: string[] = [];
     const options = { feature: def, algorithm: settings, anchorMs: cut, includeDuplicates: true, signal, onProgress: () => {}, onSignal: (s: { symbol: string }) => hits.push(s.symbol) };
     await scanner().scan({ ...options, ...(combination ? { algorithms: [{ feature: def, algorithm: settings }, { feature: def, algorithm: settings }], combination } : {}) });
-    expect(hits).toEqual(['GOODUSDT']);
+    expect(hits.sort()).toEqual(['GOODUSDT', 'HOTUSDT']);
   }
   const diagnose = (symbol: string) => scanner().diagnose({ symbol, feature: def, algorithm: settings, anchorMs: cut, signal });
   expect((await diagnose('GOOD')).outcome).toBe('hit');
+  expect((await diagnose('HOT')).outcome).toBe('hit');
   expect((await diagnose('SHORT')).lines.join(' ')).toContain(FISH_STATE_HOLD_TEXT);
   expect((await diagnose('DIP')).outcome).toBe('blocked');
+});
+
+it('admits the 0.66 route at exactly 3 elapsed hours; 2h55m does not pass', () => {
+  const p = compile();
+  expect(classify(p, bars(p, p.N, 36, 0.71, 0.68)).outcome).toBe('blocked');
+  const result = classify(p, bars(p, p.N, 37, 0.71, 0.68));
+  expect(result.outcome).toBe('hit');
+  expect(result.signal?.timeMs).toBe(cut);
+  expect(result.signal?.fish?.stateHold).toEqual({ threshold: 0.66, requiredHours: 3, fromMs: cut - 3 * 3600000, verifiedHours: 3, minimum: 0.68 });
+});
+
+it.each([0.66, 0.65])('a dip to %s restarts only the short-route clock', value => {
+  const p = compile(), short = bars(p, p.N, 37, 0.71, 0.68);
+  short.at(-20)!.close = value;
+  expect(classify(p, short).outcome).toBe('blocked');
+  const long = bars(p, p.N, 100, 0.71, 0.68);
+  long.at(-20)!.close = value;
+  const result = classify(p, long);
+  expect(result.outcome).toBe('hit');
+  expect(result.signal?.fish?.stateHold?.threshold).toBe(0.55);
+});
+
+it('a proven 3h route passes even when an earlier missing reading makes the 6h route unknown', () => {
+  const p = compile({ ...def, formula: 'state = if(C > 0, C, 1 / 0)' });
+  const sample = bars(p, p.N, 100, 0.71, 0.68);
+  sample.at(-50)!.close = 0;
+  const result = classify(p, sample);
+  expect(result.outcome).toBe('hit');
+  expect(result.signal?.fish?.stateHold?.requiredHours).toBe(3);
+  expect(classify(p, bars(p, p.N, 37, 0.7, 0.68)).outcome).toBe('below');
+  const readings = evaluateFishProgram(sample, p), tail = fishTail(sample, readings, p, cut, {symbol:'SUSDT',exchange:'binance'});
+  const target = compile(p.def, 0.705);
+  expect(tightenFishResult({...result,tail},target)?.signal).toEqual(classify(target,sample).signal);
 });
