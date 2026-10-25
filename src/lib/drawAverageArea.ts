@@ -7,35 +7,63 @@ export interface AverageAreaScale {
   range?: readonly [number, number] | null;
 }
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
-
-/** Continuous display colors, measured against reference values rather than zoom. */
-export function averageAreaColor(value: number, scale: AverageAreaScale, alpha?: number): string {
-  const delta = value - scale.center;
-  const candidate = delta >= 0 ? scale.upper : scale.lower;
-  const reference = candidate != null && Number.isFinite(candidate) ? candidate : delta >= 0 ? scale.range?.[1] : scale.range?.[0];
+function referenceRadius(scale: AverageAreaScale, positive: boolean): number {
+  const candidate = positive ? scale.upper : scale.lower;
+  const reference = candidate != null && Number.isFinite(candidate) ? candidate : positive ? scale.range?.[1] : scale.range?.[0];
   const radius = reference == null ? 1 : Math.abs(reference - scale.center);
-  const distance = Math.abs(delta) / (radius > 0 ? radius : 1);
-  const amount = clamp(distance);
-  const neutral = [132, 142, 156];
-  const hue = delta >= 0 ? [14, 203, 129] : [246, 70, 93];
+  return radius > 0 ? radius : 1;
+}
+const distanceFromCenter = (value: number, scale: AverageAreaScale) => Math.abs(value - scale.center) / referenceRadius(scale, value >= scale.center);
+function sideColor(positive: boolean, distance: number, alpha?: number): string {
+  const hue = positive ? [14, 203, 129] : [246, 70, 93];
   const excess = Math.max(0, distance - 1);
   const depth = 1 - 0.23 * excess / (1 + excess);
-  const rgb = neutral.map((channel, index) => Math.round((channel + (hue[index] - channel) * amount) * depth));
-  return `rgba(${rgb.join(',')},${alpha ?? 0.6 + 0.4 * amount})`;
+  return `rgba(${hue.map(channel => Math.round(channel * depth)).join(',')},${alpha ?? 0.94 + 0.06 * clamp(distance)})`;
+}
+/** Hue shows the side of the threshold; strength follows the saved data scale, independently of zoom. */
+export function averageAreaColor(value: number, scale: AverageAreaScale, alpha?: number): string {
+  if (!Number.isFinite(value)) return 'rgba(132,142,156,0.6)';
+  if (value === scale.center) return `rgba(132,142,156,${alpha ?? 0.6})`;
+  return sideColor(value > scale.center, distanceFromCenter(value, scale), alpha);
 }
 
-type Surface = { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; width: number; height: number; ratio: number };
-const surfaces = new WeakMap<object, Surface>();
-type Point = { x: number; y: number; value: number };
+type Point = { x: number; y: number };
+/** Vertical value colors keep the fill green above the threshold and red below it, including crossings. */
+function valueGradient(args: IndicatorDrawParams, scale: AverageAreaScale, fill: boolean): CanvasGradient {
+  const { ctx, yAxis, bounding: { height } } = args;
+  const gradient = ctx.createLinearGradient(0, 0, 0, height);
+  const centerY = yAxis.convertToPixel(scale.center);
+  const positions = new Set([0, height]);
+  // Reference-scale samples preserve the same shade at the same value after resizing or zooming.
+  for (let i = 1; i < 32; i++) positions.add(height * i / 32);
+  for (const positive of [true, false]) for (const distance of [.125, .25, .5, 1, 2, 4]) {
+    const y = yAxis.convertToPixel(scale.center + (positive ? 1 : -1) * referenceRadius(scale, positive) * distance);
+    if (Number.isFinite(y) && y > 0 && y < height) positions.add(y);
+  }
+  if (centerY >= 0 && centerY <= height) positions.add(centerY);
+  for (const y of [...positions].sort((a, b) => a - b)) {
+    const at = y / height;
+    if (y === centerY) {
+      // Two stops at the same location switch hue exactly at the threshold, without a gray band.
+      gradient.addColorStop(at, sideColor(true, 0, fill ? 0.035 : 0.94));
+      gradient.addColorStop(at, sideColor(false, 0, fill ? 0.035 : 0.94));
+    } else {
+      const value = yAxis.convertFromPixel(y);
+      const alpha = fill ? 0.035 + 0.245 * clamp(distanceFromCenter(value, scale)) : undefined;
+      gradient.addColorStop(at, averageAreaColor(value, scale, alpha));
+    }
+  }
+  return gradient;
+}
 
-/** One reusable masked surface per pane: no gradient allocation per candle. */
+/** Fill only between the curve and its threshold, with missing readings left disconnected. */
 export function drawAverageArea(args: IndicatorDrawParams, key: string, scale: AverageAreaScale): boolean {
   const { ctx, indicator, visibleRange, xAxis, yAxis, bounding } = args;
-  if (!xAxis || !visibleRange || !bounding?.width || !bounding.height || !ctx.createLinearGradient || !ctx.drawImage) return false;
-  const { width, height } = bounding;
+  if (!xAxis || !visibleRange || !bounding?.width || !bounding.height || !ctx.createLinearGradient || !yAxis.convertFromPixel) return false;
+  const { width, height } = bounding, centerY = yAxis.convertToPixel(scale.center);
+  if (!Number.isFinite(centerY)) return false;
   const runs: Point[][] = [];
   let run: Point[] = [];
-  const points: Point[] = [];
   // Include neighbors beyond the viewport so scrolling never cuts a segment short.
   const from = Math.max(0, visibleRange.from - 1), to = Math.min(indicator.result.length, visibleRange.to + 1);
   for (let i = from; i < to; i++) {
@@ -46,69 +74,23 @@ export function drawAverageArea(args: IndicatorDrawParams, key: string, scale: A
       run = [];
       continue;
     }
-    const point = { x, y, value };
-    run.push(point); points.push(point);
+    run.push({ x, y });
   }
   if (run.length) runs.push(run);
-  if (!points.length) return true;
-
-  // A single horizontal ramp ties the stroke and fill to the same actual values.
-  // Sample long smooth stretches but always retain peaks and direction changes.
-  const colors = ctx.createLinearGradient(0, 0, width, 0);
-  const stride = Math.max(1, Math.ceil(points.length / 256));
-  for (let i = 0; i < points.length; i++) {
-    const previous = points[i - 1]?.value, current = points[i].value, next = points[i + 1]?.value;
-    const turning = (current > previous && current >= next) || (current < previous && current <= next);
-    const crossing = (current - scale.center) * (previous - scale.center) < 0;
-    if (crossing) {
-      const fraction = (scale.center - previous) / (current - previous);
-      const x = points[i - 1].x + fraction * (points[i].x - points[i - 1].x);
-      colors.addColorStop(clamp(x / width), averageAreaColor(scale.center, scale));
-    }
-    if (i % stride === 0 || turning || crossing) colors.addColorStop(clamp(points[i].x / width), averageAreaColor(current, scale));
-  }
-  const last = points.at(-1)!;
-  colors.addColorStop(clamp(last.x / width), averageAreaColor(last.value, scale));
-
-  const doc = ctx.canvas?.ownerDocument;
-  const ratio = doc?.defaultView?.devicePixelRatio ?? 1;
-  let surface = surfaces.get(indicator);
-  if (!surface && doc) {
-    const canvas = doc.createElement('canvas'), buffer = canvas.getContext('2d');
-    if (buffer) { surface = { canvas, ctx: buffer, width: 0, height: 0, ratio: 0 }; surfaces.set(indicator, surface); }
-  }
-  if (surface) {
-    const { canvas, ctx: buffer } = surface;
-    if (surface.width !== width || surface.height !== height || surface.ratio !== ratio) {
-      canvas.width = Math.ceil(width * ratio); canvas.height = Math.ceil(height * ratio);
-      buffer.setTransform(ratio, 0, 0, ratio, 0, 0);
-      surface.width = width; surface.height = height; surface.ratio = ratio;
-    }
-    buffer.clearRect(0, 0, width, height);
-    buffer.globalCompositeOperation = 'source-over';
-    buffer.fillStyle = colors;
-    buffer.beginPath();
-    for (const segment of runs) {
-      if (segment.length < 2) continue;
-      buffer.moveTo(segment[0].x, height);
-      for (const point of segment) buffer.lineTo(point.x, point.y);
-      buffer.lineTo(segment.at(-1)!.x, height); buffer.closePath();
-    }
-    buffer.fill();
-    // Mask only the private area surface, keeping reference marks and other panes intact.
-    const fade = buffer.createLinearGradient(0, 0, 0, height);
-    fade.addColorStop(0, 'rgba(255,255,255,0.32)');
-    fade.addColorStop(0.55, 'rgba(255,255,255,0.18)');
-    fade.addColorStop(1, 'rgba(255,255,255,0)');
-    buffer.globalCompositeOperation = 'destination-in';
-    buffer.fillStyle = fade; buffer.fillRect(0, 0, width, height);
-    buffer.globalCompositeOperation = 'source-over';
-    ctx.drawImage(canvas, 0, 0, width, height);
-  }
+  if (!runs.length) return true;
 
   ctx.save();
   ctx.beginPath(); ctx.rect(0, 0, width, height); ctx.clip();
-  ctx.setLineDash([]); ctx.strokeStyle = colors;
+  ctx.fillStyle = valueGradient(args, scale, true);
+  ctx.beginPath();
+  for (const segment of runs) {
+    if (segment.length < 2) continue;
+    ctx.moveTo(segment[0].x, centerY);
+    for (const point of segment) ctx.lineTo(point.x, point.y);
+    ctx.lineTo(segment.at(-1)!.x, centerY); ctx.closePath();
+  }
+  ctx.fill();
+  ctx.setLineDash([]); ctx.strokeStyle = valueGradient(args, scale, false);
   ctx.lineWidth = height < 55 ? 1.8 : height < 110 ? 2.1 : 2.6;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();

@@ -6,7 +6,8 @@ vi.mock('@/lib/avgHighlightClient', () => ({ avgCalibrationContext: (featureId: 
   return { status: '已缓存', limits: { lower: center - .1, upper: center + .1, d: .1, count: 100, above: .2, below: .2 } };
 }, avgCalibrationVersion: () => 0 }));
 import { registerCustomIndicators, calibratedAverageForName, indicatorCalcParams, ORANGE_DASH_LINE } from '../customIndicators';
-import { AVG_HIGHLIGHT_SPECS, AVG_HIGHLIGHT_COLORS } from '../avgHighlight';
+import { AVG_HIGHLIGHT_SPECS } from '../avgHighlight';
+import { averageAreaColor } from '../drawAverageArea';
 import { CUSTOM_RESEARCH_INDICATORS, researchKcName } from '../researchIndicators';
 
 registerCustomIndicators();
@@ -24,9 +25,9 @@ describe('all custom averages share calibrated highlight behavior', () => {
       expect(calibratedAverageForName(name)?.kind).toBe(level === 1 ? 'avg' : 'avg2');
       const figure = template.figures[0];
       const style = (value: number) => figure.styles({ current: { indicatorData: { [figure.key]: value, _avgLower: spec.center - .1, _avgUpper: spec.center + .1 } } });
-      expect(style(spec.center).color).toBe(AVG_HIGHLIGHT_COLORS.neutral);
-      expect(style(spec.center + .2).color).toBe(AVG_HIGHLIGHT_COLORS.buyer);
-      expect(style(spec.center - .2).color).toBe(AVG_HIGHLIGHT_COLORS.seller);
+      expect(style(spec.center).color).toBe(averageAreaColor(spec.center,{center:spec.center}));
+      expect(style(spec.center + .05).color).toBe(averageAreaColor(spec.center+.05,{center:spec.center,lower:spec.center-.1,upper:spec.center+.1}));
+      expect(style(spec.center - .05).color).toBe(averageAreaColor(spec.center-.05,{center:spec.center,lower:spec.center-.1,upper:spec.center+.1}));
       expect(indicatorCalcParams(name, { period: 6, avgHours: 48 }).slice(0, 2)).toEqual([6, 48]);
       const indicator = { calcParams: [6, 24], minValue: undefined as number | undefined, maxValue: undefined as number | undefined };
       template.calc([], indicator);

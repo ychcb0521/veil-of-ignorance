@@ -16,10 +16,10 @@ import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { researchHistoryVersion } from '@/lib/researchChartHistory';
 import { btcClosesAt, btcReferenceVersion, requestBtcReference } from '@/lib/btcReference';
 import { barsForHours, rollingMean } from '@/lib/deepDig/formula';
-import { AVG_HIGHLIGHT_SPECS, averageHighlightColor, AVG_HIGHLIGHT_COLORS, type AverageKind } from '@/lib/avgHighlight';
+import { AVG_HIGHLIGHT_SPECS, AVG_HIGHLIGHT_COLORS, type AverageKind } from '@/lib/avgHighlight';
 import { avgCalibrationContext, avgCalibrationVersion } from '@/lib/avgHighlightClient';
 import { drawChartLine } from './drawChartLine';
-import { drawAverageArea } from './drawAverageArea';
+import { averageAreaColor, drawAverageArea } from './drawAverageArea';
 import {
   ADX, VWAP, BollingerBands, Stochastic, IchimokuCloud,
   StochasticRSI, ADL, ForceIndex, AwesomeOscillator, CCI as CCI_TI,
@@ -511,7 +511,7 @@ function registerIndicator(template: IndicatorTemplate): void {
       figures: [{ key, title: template.figures?.[0]?.title ?? '', type: 'line', styles: data => {
         const point = (data.next?.indicatorData ?? data.current.indicatorData) as Record<string, number> | undefined;
         const limits = point && Number.isFinite(point._avgLower) ? { lower: point._avgLower, upper: point._avgUpper } : undefined;
-        return { color: averageHighlightColor(point?.[key], limits), size: limits && (point![key] > limits.upper || point![key] < limits.lower) ? 2.2 : 1.5 };
+        return { color: averageAreaColor(point?.[key] ?? NaN, { center: spec.center, ...limits, range: spec.range }), size: 2.1 };
       } }],
       calc: (data, indicator) => {
         const hours = validHours(indicator.calcParams[1], AVG_DEFAULT_HOURS);
