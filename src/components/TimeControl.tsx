@@ -113,9 +113,10 @@ export function TimeControl({
   const getMailFish = useCallback(() => mailFishRef.current(), []);
   const fishNotify = useFishNotify(user?.id, undefined, getMailFish);
   const fish = useFish(user?.id, { onCaught: fishNotify.send });
-  const fishQuality = useFishQuality(user?.id, fish.signals, fish.quality);
   mailFishRef.current = fish.unionFish;
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
+  // 信号库的信号也进鱼质量，只参加卖出比较（与鱼舱的鱼分开）
+  const fishQuality = useFishQuality(user?.id, fish.signals, fish.quality, signals);
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;

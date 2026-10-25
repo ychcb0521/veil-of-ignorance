@@ -93,3 +93,11 @@ it('persists a selected common sell plan and a fixed batch, invalidates changed 
   act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
   expect(h.result.current.study.results[0].returnPct).toBe(12);
 });
+
+it('imports signal-library signals as library rows, separately from fish, and keeps them after removal from the library', async () => {
+  const lib = { id: 'lib', symbol: 'ZZZUSDT', timeMs: T, timeLabel: '', fallbackZone: '' };
+  const h = renderHook(({ library }) => useFishQuality('a', [signal], vi.fn(async () => {}), library), { initialProps: { library: [lib] } }); await flush();
+  expect(h.result.current.study.samples.map(s => [s.source.symbol, s.origin ?? 'fish'])).toEqual([['AAAUSDT', 'fish'], ['ZZZUSDT', 'library']]);
+  h.rerender({ library: [] }); await flush();
+  expect(h.result.current.study.samples).toHaveLength(2);
+});

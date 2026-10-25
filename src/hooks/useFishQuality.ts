@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
-export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner) {
+const NO_SIGNALS: readonly TradeSignal[] = [];
+export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS) {
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
@@ -33,6 +34,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return () => { active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, study.tracking, change]);
+  useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, study.tracking, change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;

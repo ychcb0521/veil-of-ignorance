@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
-import { importQualityFish, newQualityStudy, qualityComparisonRows, qualityResultKey } from '@/lib/fish/quality';
+import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityResultKey } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -47,4 +47,20 @@ it('keeps tracking/horizon controls compact and shows the paired trade metrics o
   fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '-1' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '72' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).toHaveBeenCalledWith(72);
   fireEvent.click(screen.getByLabelText('自动跟踪新鱼及更新收益')); expect(s.setTracking).toHaveBeenCalledWith(false);
+});
+
+// 【用户要求】2026-10-26 信号库的信号纳入卖出比较，并与鱼舱的鱼区分
+it('marks signal-library rows, filters by source and keeps them out of detector columns', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, [{ id: 'lib', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }, { id: 'lib2', symbol: 'ZZZUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }]);
+  render(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  const libraryRows = screen.getAllByTestId('quality-fish-row').filter(r => within(r).queryByText('信号库'));
+  expect(libraryRows).toHaveLength(2);
+  for (const r of libraryRows) { expect(within(r).queryByText('命中')).toBeNull(); expect(within(r).queryByTestId('fish-process-open')).toBeNull(); }
+  const source = screen.getByLabelText('鱼质量的来源');
+  expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
+  fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
+  fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+  expect(within(screen.getByTestId('quality-fish-row')).queryByText('信号库')).toBeNull();
 });

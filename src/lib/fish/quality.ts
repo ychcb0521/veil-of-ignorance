@@ -17,6 +17,8 @@ export interface QualityGroup { id: string; label: string; metric: string; snaps
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
+  /** 'library' = 信号库的信号：只参加卖出比较，不属于任何探测算法，也不与鱼舱的鱼合并。缺省 = 鱼。 */
+  origin?: 'library';
   /** Derived per-row capture readings; never replaces any saved source snapshot. */
   readings?: Record<string, FishSnapshot>;
 }
@@ -45,7 +47,7 @@ export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQuali
   let changed = study.entryMode !== 'capture';
   const reset = new Set<string>();
   const samples = study.samples.map(sample => {
-    if (sample.basis === 'detected') return sample;
+    if (sample.basis === 'detected' || sample.origin === 'library') return sample;
     const cutoff = sample.source.fish?.cutoffMs;
     const enteredAt = cutoff != null && Number.isFinite(cutoff) && cutoff > 0 ? cutoff : null;
     const basis = enteredAt == null ? 'missing' : 'capture';
@@ -132,12 +134,31 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
   }
   return changed ? { ...study, groups: [...groups.values()], samples: [...samples.values()] } : study;
 }
+/**
+ * 【用户要求】2026-10-26「在检查卖出算法时，需要将信号库中的信号也纳入进来（注意要与鱼舱里的鱼做区分）」
+ * 信号库的信号复制一份进来，按信号时间买入；没有探测算法（groups 为空），只参加第一步卖出比较。
+ * 删掉信号库里的信号不删副本；同一信号只复制一次。
+ */
+export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
+export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
+  if (!study.tracking) return study;
+  const ids = new Set(study.samples.map(s => s.id)), added: QualitySample[] = [];
+  for (const source of signals) {
+    const id = qualityLibrarySampleId(source);
+    if (ids.has(id)) continue;
+    ids.add(id);
+    const enteredAt = Number.isFinite(source.timeMs) && source.timeMs > 0 ? source.timeMs : null;
+    added.push({ id, source: structuredClone(source), groups: [], enteredAt, basis: enteredAt == null ? 'missing' : 'signal', importedAt: now, origin: 'library' });
+  }
+  return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
+}
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
 export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] {
   const rows = new Map<string, QualitySample>();
   for (const sample of study.samples) {
-    const identity = `${signalDedupKey(sample.source)}|${sample.enteredAt}`;
+    // 信号库的信号单独成行，即使与某条鱼同币同时也不合并。
+    const identity = `${sample.origin === 'library' ? 'lib|' : ''}${signalDedupKey(sample.source)}|${sample.enteredAt}`;
     const prior = rows.get(identity);
     const readings = Object.fromEntries(qualityMembers(sample.source).filter(f => sample.groups.includes(qualityGroupId(f))).map(f => [qualityGroupId(f), f]));
     rows.set(identity, prior ? { ...prior, groups: [...new Set([...prior.groups, ...sample.groups])], readings: { ...prior.readings, ...readings } }

@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
-import { collectFishQuality, importQualityFish, newQualityStudy, qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
+import { collectFishQuality, importQualityFish, importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
 import { enableQualityComparison, qualityComparisonStats, qualityDistribution, qualityPairedRows } from '@/lib/fish/qualityComparison';
 import { buildQualitySheets } from '@/lib/fish/qualityExport';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -65,9 +65,10 @@ it('computes disjoint return bins, interpolated quantiles and no-sample values w
 });
 it('exports the same one-row fish matrix with two numeric sell returns and one column per detector', () => {
   const s = study(), { rows } = seed(s), sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
-  expect(sheet.rows).toHaveLength(1); expect(sheet.columns).toHaveLength(5 + 2 + 2);
-  expect(sheet.rows[0].slice(5)).toEqual([10, -5, '命中', '命中']);
-  expect(sheet.columns.slice(5).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
+  expect(sheet.rows).toHaveLength(1); expect(sheet.columns).toHaveLength(6 + 2 + 2);
+  expect(sheet.rows[0][1]).toBe('鱼');
+  expect(sheet.rows[0].slice(6)).toEqual([10, -5, '命中', '命中']);
+  expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
   const s = enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1)]));
@@ -78,4 +79,36 @@ it('compiles and evaluates the real S and CDA raw series as sells independently 
   expect(results.map(r => r.reason)).not.toEqual(expect.arrayContaining([expect.stringContaining("缺失")]));
   expect(results.map(r => [r.status, r.entryTime, r.endTime, r.returnPct])).toEqual([['closed', T, T + 5 * M, 0], ['closed', T, T + 5 * M, 0]]);
   expect(results.every(r => Number.isFinite(r.exitReading))).toBe(true);
+});
+
+// 【用户要求】2026-10-26「在检查卖出算法时，需要将信号库中的信号也纳入进来（注意要与鱼舱里的鱼做区分）」
+const libSignal = (symbol: string, patch: Partial<TradeSignal> = {}): TradeSignal => ({ id: `lib-${symbol}`, symbol, timeMs: T - 30 * M, timeLabel: '', fallbackZone: '', ...patch });
+it('copies signal-library signals once at their signal time, keeps them apart from same-coin fish and leaves them out of capture-time migration', () => {
+  const base = study(), withLib = importQualityLibrary(base, [libSignal('AAAUSDT', { timeMs: T }), libSignal('ZZZUSDT')], T + 2 * M);
+  expect(importQualityLibrary(withLib, [libSignal('AAAUSDT', { timeMs: T }), libSignal('ZZZUSDT')])).toBe(withLib);
+  const lib = withLib.samples.filter(v => v.origin === 'library');
+  expect(lib.map(v => [v.source.symbol, v.enteredAt, v.basis, v.groups])).toEqual([['AAAUSDT', T, 'signal', []], ['ZZZUSDT', T - 30 * M, 'signal', []]]);
+  // 与 AAAUSDT 那条鱼同币同时，仍各占一行
+  const rows = qualityComparisonRows(withLib);
+  expect(rows.filter(r => r.source.symbol === 'AAAUSDT').map(r => r.origin ?? 'fish').sort()).toEqual(['fish', 'library']);
+  expect(qualityComparisonRows(base).map(r => r.id)).toEqual(rows.filter(r => r.origin !== 'library').map(r => r.id));
+  expect(migrateQualityCaptureEntries(withLib).samples.filter(v => v.origin === 'library')).toEqual(lib);
+  expect(importQualityLibrary({ ...base, tracking: false }, [libSignal('ZZZUSDT')]).samples).toHaveLength(base.samples.length);
+  const missing = importQualityLibrary(base, [libSignal('YYYUSDT', { timeMs: NaN })]).samples.at(-1)!;
+  expect(missing).toMatchObject({ enteredAt: null, basis: 'missing', origin: 'library' });
+});
+it('runs the shared sells on library signals, counts them in the sell comparison and never in a detector', async () => {
+  const s = importQualityLibrary(study(), [libSignal('ZZZUSDT')], T + 2 * M), rows = qualityComparisonRows(s), lib = rows.find(r => r.origin === 'library')!;
+  const results: QualityResult[] = [];
+  const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, load, T + 10 * M);
+  expect(results.filter(r => r.sampleId === lib.id).map(r => [r.groupId, r.entryTime])).toEqual(s.sellPlans!.map(p => [p.id, T - 30 * M]));
+  const plans = s.sellPlans!; plans.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: -1 }; });
+  s.results = rows.flatMap(row => plans.map(p => ({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, returnPct: row === lib ? 50 : 1, pnl: 1 })));
+  s.selectedSellId = plans[0].id;
+  const stats = qualityComparisonStats(s, rows, true);
+  expect(stats.paired).toContain(lib); expect(stats.sells[0].n).toBe(rows.length);
+  expect(stats.detectors.every(d => d.total === rows.filter(r => r.groups.includes(d.group.id)).length && d.mean === 1)).toBe(true);
+  const sheet = buildQualitySheets(s, [lib])[0];
+  expect(sheet.rows[0].slice(0, 2)).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][3]).toBe('');
 });
