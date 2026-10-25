@@ -38,7 +38,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(fishButton.previousElementSibling).toHaveTextContent('信号库');
     expect(fishButton).toHaveTextContent('1');
     fireEvent.click(fishButton);
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     const panel = screen.getByTestId('fish-panel');
     expect(within(panel).getByText('AAAUSDT').closest('.group')).not.toHaveAttribute('title');
     expect(within(panel).getByText('AAAUSDT').closest('button')).not.toHaveAttribute('title',expect.stringContaining('0.35000000'));
@@ -51,7 +50,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.queryByTestId('fish-panel')).not.toBeInTheDocument();
     fireEvent.click(fishButton);
     expect(screen.queryByText('上传 / 粘贴信号')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     // 【用户要求】2026-10-21「不能轻易删除」：点 × 先变成「确认删除」，再点一次才删
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByTitle('删除该信号'));
     expect(loadFishSignals()).toHaveLength(1);
@@ -62,7 +60,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
   it('沿用信号跳转，成功后收起渔；云端延迟恢复可刷新徽标和列表', async () => {
     const jump = vi.fn(async () => ({ ok: true as const })); render(control(jump));
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     fireEvent.click(within(screen.getByTestId('fish-panel')).getByText('AAAUSDT'));
     await waitFor(() => expect(jump).toHaveBeenCalledWith('AAAUSDT',123));
     expect(screen.queryByTestId('fish-panel')).not.toBeInTheDocument();
@@ -95,7 +92,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(toggle); fireEvent.click(toggle);
     expect(screen.getByLabelText('捕捞时间（UTC+8）')).toHaveValue('2026-10-18 12:34:56');
     expect(screen.getByLabelText('捕捞阈值')).toHaveValue(0.2);
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     fireEvent.click(screen.getByRole('radio',{name:'4 星'}));
     mocks.scan.mockImplementation(async o => { o.onSignal({ ...SIGNAL, fish: { ...SIGNAL.fish, threshold: o.threshold, cutoffMs: o.anchorMs, average: 0.25 } }); const p = { ...initialFishProgress(), anchorMs: o.anchorMs, cutoffMs: o.anchorMs, threshold: o.threshold, status: 'complete' }; o.onProgress(p); return p; });
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
@@ -117,16 +113,15 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(mocks.scan).toHaveBeenCalledTimes(1);
   });
 
-  it('鱼位于渔内部，默认收起；复用信号库列头，按时间/标的/评分排序并按月筛选', async () => {
+  it('鱼位于渔内部，默认展开；复用信号库列头，按时间/标的/评分排序并按月筛选', async () => {
     const b = { ...SIGNAL, id: 'fish-BBB', symbol: 'BBBUSDT', quality: 5, timeMs: Date.UTC(2026,8,15), timeLabel: '2026-09-15 08:00:00' };
     const a = { ...SIGNAL, quality: 2, timeMs: Date.UTC(2026,9,19), timeLabel: '2026-10-19 08:00:00' };
     localStorage.setItem(FISH_STORAGE_KEY, JSON.stringify([b, a]));
     render(control());
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
-    expect(screen.queryByTestId('fish-old-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('fish-old-panel')).toBeInTheDocument();
     const button = screen.getByRole('button',{name:/^鱼/});
-    expect(button).toHaveAttribute('aria-expanded','false');
-    fireEvent.click(button);
+    expect(button).toHaveAttribute('aria-expanded','true');
     const library = screen.getByTestId('fish-old-panel');
     expect(screen.getByTestId('fish-panel')).toContainElement(library);
     // 鱼的第三列是「算法类型」（2026-10-20 替换兜底区）
@@ -149,6 +144,9 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(within(library).getByText('没有匹配的标的。')).toBeInTheDocument();
     fireEvent.click(button);
     expect(screen.queryByTestId('fish-old-panel')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+    expect(screen.getByTestId('fish-old-panel')).toBeInTheDocument();
     expect(loadFishSignals()).toHaveLength(2);
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
@@ -172,7 +170,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.getByTestId('fish-new-panel')).toHaveTextContent('AAAUSDT');
     expect(screen.getByTestId('fish-new-panel')).not.toHaveTextContent('BBBUSDT');
     expect(within(screen.getByTestId('fish-new-panel')).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     expect(within(screen.getByTestId('fish-old-panel')).queryByRole('button',{name:/加入信号库/})).not.toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem(SIGNAL_LIBRARY_STORAGE_KEY)!)).toHaveLength(0);
   });
@@ -193,7 +190,6 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     fireEvent.click(screen.getByRole('checkbox',{name:'含重复币'}));
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
     await waitFor(()=>expect(mocks.scan).toHaveBeenCalledWith(expect.objectContaining({exchanges:['binance','okx','bitget','gate'],includeDuplicates:true})));
-    fireEvent.click(screen.getByRole('button',{name:/^鱼/}));
     const library=screen.getByTestId('fish-old-panel');
     expect(within(library).getByText('Gate')).toBeInTheDocument();
     const buttons=within(library).getAllByTitle('盘面只支持币安行情');
