@@ -15,7 +15,7 @@ export const FISH_DEFAULT_RULES = [
   { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
   { id: 'default-cda', featureId: 'cda', statistic: '结果', threshold: '8' },
   { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.8' },
-  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.6' },
+  { id: 'default-state-raw', featureId: 'state', statistic: 'state', threshold: '0.67' },
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
 ] as const;
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
@@ -56,6 +56,18 @@ export function readFishCards(): FishCard[] {
   try {
     const x = JSON.parse(readPersistedStateRaw(fishCardsKey()) ?? '[]');
     if (!Array.isArray(x)) return [];
+    // Only upgrade the old raw-S default once, for both the panel and automatic scans.
+    // Preserve averages, custom cards, directions, and subsequent manual edits to 0.6.
+    const stateDefaultKey = `${getUserPrefix()}fish-state-raw-default.v1`;
+    if (readPersistedStateRaw(stateDefaultKey) !== '1') {
+      const oldDefault = x.find(c => c?.id === 'default-state-raw' && c.featureId === 'state'
+        && c.pref?.statistic === 'state' && c.pref.direction === '>' && Number(c.pref.threshold) === 0.6);
+      if (oldDefault) {
+        oldDefault.pref = { ...oldDefault.pref, threshold: '0.67' };
+        writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
+      }
+      writePersistedStateRaw(stateDefaultKey, '1');
+    }
     return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, 6).map(c => {
       // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.
       if (c.featureId === 'drift-speed-down-z') return { ...c, featureId: 'seller-control', pref: { statistic: '结果', direction: '<', threshold: '', constraints: [], sellerSignVersion: 1 } };

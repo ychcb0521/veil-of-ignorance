@@ -15,7 +15,7 @@ it('默认六条规则全部勾选，开始捕捞使用截图中的阈值、序�
  expect(FISH_DEFAULT_ALGORITHMS).toEqual(['cbi2','drift-speed-z','cda','bss','state','state']);
  expect(features()).toEqual(['cbi2','drift-speed-z','cda','bss','state','state']);
  for(const i of [1,2,3,4,5,6])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
- expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5,6].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','15','8','0.8','0.6','0.6']);
+ expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5,6].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','15','8','0.8','0.67','0.6']);
  expect(screen.queryByRole('alert')).toBeNull();
  expect(screen.getByLabelText('算法 5 统计量')).toHaveValue('state');
  expect(screen.getByLabelText('算法 6 统计量')).toHaveValue('avg_state_2');

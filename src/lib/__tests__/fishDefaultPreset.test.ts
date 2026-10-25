@@ -13,7 +13,7 @@ it('uses six distinct cards with the screenshot thresholds and union before the 
   expect(cards.map(card => [card.featureId, card.pref.statistic, card.pref.direction, card.pref.threshold])).toEqual([
     ['cbi2', '结果', '>', '0.04'], ['drift-speed-z', '结果', '>', '15'],
     ['cda', '结果', '>', '8'], ['bss', '结果', '>', '0.8'],
-    ['state', 'state', '>', '0.6'], ['state', 'avg_state_2', '>', '0.6'],
+    ['state', 'state', '>', '0.67'], ['state', 'avg_state_2', '>', '0.6'],
   ]);
   expect(new Set(cards.map(card => card.id)).size).toBe(6);
   expect(cards.every(card => card.enabled)).toBe(true);
@@ -48,8 +48,44 @@ it('removing one S variant does not copy the other variant into its default slot
   cards[5].pref.threshold = '0.72';
   localStorage.setItem(fishCardsKey(), JSON.stringify(cards.filter(card => card.pref.statistic !== 'state')));
   const reopened = fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available);
-  expect(reopened[4].pref).toMatchObject({ statistic: 'state', threshold: '0.6' });
+  expect(reopened[4].pref).toMatchObject({ statistic: 'state', threshold: '0.67' });
   expect(reopened[5].pref).toMatchObject({ statistic: 'avg_state_2', threshold: '0.72' });
+});
+
+it('upgrades the saved raw-S default before an automatic scan, leaving averages and other settings intact', () => {
+  const cards = loadFishCardsForScan(available);
+  cards[4].pref.threshold = '0.6';
+  cards[4].enabled = false;
+  cards[2].pref.threshold = '12';
+  localStorage.setItem(fishCardsKey(), JSON.stringify(cards));
+  localStorage.setItem(fishCombinationKey(), 'and');
+  localStorage.removeItem(getUserPrefix() + 'fish-state-raw-default.v1');
+
+  const upgraded = loadFishCardsForScan(available);
+  expect(upgraded[4]).toEqual({ ...cards[4], pref: { ...cards[4].pref, threshold: '0.67' } });
+  expect(upgraded.filter((_, i) => i !== 4)).toEqual(cards.filter((_, i) => i !== 4));
+  expect(readFishCombination()).toBe('and');
+  expect(fishCardPlans(upgraded.map(card => ({ ...card, enabled: true })), fishFeatureDefinitions(BUILTIN_FEATURES)).plans[4].settings.threshold).toBe(0.67);
+  expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available)[4].pref.threshold).toBe('0.67');
+
+  // An intentional edit back to 0.6 after the upgrade must survive reopening and scanning.
+  upgraded[4].pref.threshold = '0.6';
+  localStorage.setItem(fishCardsKey(), JSON.stringify(upgraded));
+  expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available)[4].pref.threshold).toBe('0.6');
+  expect(loadFishCardsForScan(available)[4].pref.threshold).toBe('0.6');
+});
+
+it.each([
+  ['default-state-raw', '>', '0.7'],
+  ['default-state-raw', '>', '0.67'],
+  ['default-state-raw', '<', '0.6'],
+  ['custom-state-card', '>', '0.6'],
+] as const)('preserves an existing custom raw-S setting: %s %s %s', (id, direction, threshold) => {
+  const cards = loadFishCardsForScan(available);
+  cards[4] = { ...cards[4], id, pref: { ...cards[4].pref, direction, threshold } };
+  localStorage.setItem(fishCardsKey(), JSON.stringify(cards));
+  localStorage.removeItem(getUserPrefix() + 'fish-state-raw-default.v1');
+  expect(loadFishCardsForScan(available)).toEqual(cards);
 });
 
 it('keeps the preset migration scoped to each account and leaves signal / research storage intact', () => {
