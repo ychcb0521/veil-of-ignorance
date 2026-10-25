@@ -165,7 +165,7 @@ it('捕捞中切换交集 / 并集：已判完的当场重排，之后的按新�
  expect(result.current.switchLive('and')).toBe(false);
 });
 
-it('每轮开始先把全部新鱼入舱；再次命中同一信号也不能移走前两轮快照，刷新后仍保留',async()=>{
+it('每轮开始先把全部新鱼入舱；鱼舱相同行跨轮只留最近一次，刷新后仍保留',async()=>{
  const {loadFishSignals}=await import('@/lib/fishSignals');
  const view=renderHook(()=>useFish(undefined));
  const opts={feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true};
@@ -181,8 +181,8 @@ it('每轮开始先把全部新鱼入舱；再次命中同一信号也不能移�
  await act(async()=>{await view.result.current.start(opts);});
  for(const symbol of ['AAAUSDT','EEEUSDT']){
    const rows=view.result.current.signals.filter(s=>s.symbol===symbol);
-   expect(rows).toHaveLength(3);expect(rows.filter(s=>s.fishArchive)).toHaveLength(2);
-   expect(new Set(rows.map(s=>s.id)).size).toBe(3);
+   expect(rows).toHaveLength(2);expect(rows.filter(s=>s.fishArchive)).toHaveLength(1);
+   expect(new Set(rows.map(s=>s.id)).size).toBe(2);
    expect(rows.every(s=>s.fish?.average===first.find(f=>f.symbol===symbol)?.fish?.average)).toBe(true);
  }
  expect(view.result.current.signals.filter(s=>s.symbol==='AAAUSDT').every(s=>s.quality===5)).toBe(true);
@@ -190,7 +190,7 @@ it('每轮开始先把全部新鱼入舱；再次命中同一信号也不能移�
  view.unmount();const restored=renderHook(()=>useFish(undefined));
  await waitFor(()=>expect(restored.result.current.hasRound).toBe(true));
  expect(restored.result.current.signals).toHaveLength(saved.length);
- expect(restored.result.current.signals.filter(s=>s.fishArchive)).toHaveLength(5);
+ expect(restored.result.current.signals.filter(s=>s.fishArchive)).toHaveLength(3);
 });
 it('新一轮失败或取消时，上一轮的新鱼已经在取数前入舱并持久化',async()=>{
  const {loadFishSignals}=await import('@/lib/fishSignals');

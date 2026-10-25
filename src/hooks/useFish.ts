@@ -102,7 +102,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     // Move the previous round immediately. Background persistence must never gate market scanning.
     const at = Date.now();
     recoveryArchiveBefore.current ??= at;
-    const archived = archiveFishForNextRound(signalsRef.current, at);
+    const archived = collapseVisibleFish(archiveFishForNextRound(signalsRef.current, at));
     if (archived !== signalsRef.current) {
       signalsRef.current = archived; setSignals(archived);
       saveFishSignals(archived, ownerRef.current ?? null);

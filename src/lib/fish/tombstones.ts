@@ -10,7 +10,7 @@
  *   - 记号只压住删除时刻之前捕到的那条（caughtAt ≤ 删除时刻）；之后重新捕到同一条，照常留下。
  */
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { collapseVisibleFish, fishDedupKey, fishVisibleKey, mergeFishSignals, migrateFishSignal, withoutArchivedFreshCopies } from './records';
+import { collapseVisibleFish, fishDedupKey, fishVisibleCatchKey, fishVisibleKey, mergeFishSignals, migrateFishSignal, withoutArchivedFreshCopies } from './records';
 
 /** 鱼的键 → 删除时刻（ms）。 */
 export type FishTombstones = Record<string, number>;
@@ -32,7 +32,7 @@ export function mergeFishTombstones(a: unknown, b: unknown): FishTombstones {
 export function applyFishTombstones(list: readonly TradeSignal[], tombstones: FishTombstones): TradeSignal[] {
   if (!Object.keys(tombstones).length) return [...list];
   // 也按「整行显示的内容」记（v| 开头）：删掉一条后，别处键不同、显示相同的旧副本也带不回来
-  return list.filter(s => { const t = Math.max(tombstones[fishDedupKey(s)] ?? 0, tombstones[`v|${fishVisibleKey(s)}`] ?? 0); return !t || t < (s.caughtAt ?? 0); });
+  return list.filter(s => { const t = Math.max(tombstones[fishDedupKey(s)] ?? 0, tombstones[`v|${fishVisibleKey(s)}`] ?? 0, tombstones[`v|${fishVisibleCatchKey(s)}${s.fishArchive ? `|archive:${s.fishArchive.id}` : ''}`] ?? 0); return !t || t < (s.caughtAt ?? 0); });
 }
 const asList = (v: unknown): TradeSignal[] => Array.isArray(v) ? v.filter((s): s is TradeSignal => !!s && typeof s.id === 'string' && typeof s.symbol === 'string' && Number.isFinite(s.timeMs) && typeof s.timeLabel === 'string' && typeof s.fallbackZone === 'string') : [];
 /** 两份鱼列表取并集（本地在前：同一条鱼的评分以本地为准，读数取较新的那次捕获），再按删除记号去掉删过的。 */

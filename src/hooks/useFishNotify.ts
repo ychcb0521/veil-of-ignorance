@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
-import { fishVisibleKey } from '@/lib/fish/records';
+import { fishVisibleCatchKey } from '@/lib/fish/records';
 import { composeFishEmail, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 
 /** unchanged = 这一轮结束时新鱼和上一封一样，没发。 */
@@ -42,7 +42,7 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   // 发的是整张新鱼表；和上一封一样就不发；发送失败不记，下一轮再比
   const send = useCallback(async (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => {
     if (!configRef.current.enabled) return;
-    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishVisibleKey(f) === fishVisibleKey(s)))];
+    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishVisibleCatchKey(f) === fishVisibleCatchKey(s)))];
     const change = fishTableChange(table);
     if (!change.changed) { if (table.length) setStatus({ at: Date.now(), ok: true, count: table.length, unchanged: true }); return; }
     await deliver(table, false, change.added, () => saveLastFishTable(change.keys));

@@ -21,7 +21,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllTimers(); vi.useRealTimers(); });
 const fish = (i = 0, caughtAt = 100): TradeSignal => ({ id: `fish-${i}`, symbol: `COIN${i}USDT`, timeMs: i + 1, timeLabel: '2026-10-25 08:00:00', fallbackZone: '', freshCatch: true, caughtAt, quality: 4, fish: { featureId: 'state', featureShort: 'S', statistic: 'state', average: .71, cbi2: .71, startAverage: .71, previousAverage: .69, threshold: .7, cutoffMs: 2 } });
 
-it('localStorage quota does not discard 609 full snapshots; a module reload restores every round from IndexedDB', async () => {
+it('localStorage quota preserves distinct signals and ratings; IndexedDB reload collapses duplicate cabin rounds', async () => {
   const cache = await import('@/lib/fishSignals');
   const store = await import('@/lib/fish/libraryStore');
   const storage = await import('@/lib/persistedStateStorage');
@@ -29,16 +29,16 @@ it('localStorage quota does not discard 609 full snapshots; a module reload rest
   const round = Array.from({ length: 203 }, (_, i) => fish(i));
   const rows = [...archiveFishForNextRound(round, 200), ...archiveFishForNextRound(round.map(s => ({ ...s, caughtAt: 250 })), 300), ...round.map(s => ({ ...s, caughtAt: 301 }))];
   expect(cache.saveFishSignals(rows, 'alice')).toBe(false);
-  expect((await store.loadFishLibraryBackup('alice'))?.signals).toHaveLength(609);
+  expect((await store.loadFishLibraryBackup('alice'))?.signals).toHaveLength(406);
   storage.clearPersistedStateMemoryForTests(); vi.resetModules();
   const reloadedStore = await import('@/lib/fish/libraryStore');
   const reloadedCache = await import('@/lib/fishSignals');
   const restored = reloadedCache.restoreFishSignals(await reloadedStore.loadFishLibraryBackup('alice'), [], 'alice');
-  expect(restored).toHaveLength(609);
+  expect(restored).toHaveLength(406);
   expect(restored.filter(s => s.freshCatch)).toHaveLength(203);
-  expect(restored.filter(s => s.fishArchive)).toHaveLength(406);
+  expect(restored.filter(s => s.fishArchive)).toHaveLength(203);
   expect(restored.every(s => s.quality === 4 && s.fish?.average === .71)).toBe(true);
-  expect(new Set(restored.map(fishDedupKey)).size).toBe(609);
+  expect(new Set(restored.map(fishDedupKey)).size).toBe(406);
   await reloadedStore.loadFishLibraryBackup('alice');
 });
 

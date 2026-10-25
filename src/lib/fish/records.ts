@@ -86,8 +86,9 @@ export function fishCaughtBy(s: TradeSignal): string[] {
  * 同一条信号换过阈值或交集 / 并集后会以不同的算法键各存一份（键不同、显示相同），按这个键再合并一次。
  */
 export const fishVisibleCatchKey = (s: TradeSignal) => `${signalDedupKey(s)}|${fishCaughtBy(s).join(' · ')}`;
-export const fishVisibleKey = (s: TradeSignal) => fishVisibleCatchKey(s)+archiveSuffix(s);
-/** 显示相同的只留一条：新鱼优先，其次捕到得更晚的；评分沿用已有的。没有重复时原样返回。 */
+/** 鱼舱跨轮按表格内容去重；本轮新鱼仍与已入舱的记录分开。 */
+export const fishVisibleKey = (s: TradeSignal) => fishVisibleCatchKey(s)+(s.freshCatch ? '' : '|archive');
+/** 同一列表显示相同的只留最近捕到的一条，评分沿用；不因入舱编号不同而重复。 */
 export function collapseVisibleFish(list: readonly TradeSignal[]): TradeSignal[] {
   const kept = new Map<string, TradeSignal>();
   let duplicate = false;
@@ -95,7 +96,7 @@ export function collapseVisibleFish(list: readonly TradeSignal[]): TradeSignal[]
     const k = fishVisibleKey(s), prev = kept.get(k);
     if (!prev) { kept.set(k, s); continue; }
     duplicate = true;
-    const takeNew = !!s.freshCatch !== !!prev.freshCatch ? !!s.freshCatch : (s.caughtAt ?? 0) > (prev.caughtAt ?? 0);
+    const takeNew = (s.caughtAt ?? s.fishArchive?.at ?? 0) > (prev.caughtAt ?? prev.fishArchive?.at ?? 0);
     const [win, lose] = takeNew ? [s, prev] : [prev, s];
     kept.set(k, { ...win, quality: win.quality ?? lose.quality });
   }

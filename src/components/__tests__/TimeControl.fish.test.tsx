@@ -7,6 +7,7 @@ import { initialFishProgress } from '@/lib/fishScanner';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { notifyPersistedStateHydrated } from '@/lib/persistedStateStorage';
 import { saveFishAuto } from '@/lib/fish/autoScan';
+import { archiveFishForNextRound } from '@/lib/fish/records';
 import { saveFishPreference } from '@/lib/fish/preferences';
 
 const mocks = vi.hoisted(() => ({ scan: vi.fn(), push: vi.fn() }));
@@ -283,3 +284,25 @@ it.each(['新鱼','鱼舱'])('从 %s 跳转到币种后返回，恢复外层位�
  expect(within(restored).getByTestId('signal-library-scroller').scrollTop).toBe(505);
  expect(screen.getByTestId('fish-panel').scrollTop).toBe(320);
 });
+
+it('鱼舱把截图中的三轮相同行合成一条，徽标/月计数一致，评分后刷新和删除都只操作这一条',async()=>{
+ const rows=[100,200,300].map((caughtAt,i)=>archiveFishForNextRound([{...SIGNAL,caughtAt,quality:i===0?4:undefined}],caughtAt+10)[0]);
+ localStorage.setItem(FISH_STORAGE_KEY,JSON.stringify(rows));
+ const view=render(control());
+ fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+ const cabin=screen.getByTestId('fish-old');
+ expect(within(cabin).getAllByText('AAAUSDT')).toHaveLength(1);
+ expect(within(cabin).getByRole('button',{name:/^鱼舱/})).toHaveTextContent('1');
+ expect(within(cabin).getByLabelText('鱼舱的月份')).toHaveDisplayValue('全部月份（1）');
+ expect(screen.getByRole('button',{name:/^渔/})).toHaveTextContent('1');
+ fireEvent.click(within(cabin).getByRole('radio',{name:'5 星'}));
+ expect(loadFishSignals()).toHaveLength(1);expect(loadFishSignals()[0].quality).toBe(5);
+ view.unmount();render(control());
+ fireEvent.click(screen.getByRole('button',{name:/^渔/}));
+ const restored=screen.getByTestId('fish-old');
+ expect(within(restored).getAllByText('AAAUSDT')).toHaveLength(1);
+ expect(within(restored).getByRole('radio',{name:'5 星'})).toBeChecked();
+ fireEvent.click(within(restored).getByTitle('删除该信号'));
+ fireEvent.click(within(restored).getByRole('button',{name:/^确认删除/}));
+ expect(loadFishSignals()).toHaveLength(0);
+},30000);
