@@ -1,5 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { checkFishDownwardWick, DEFAULT_FISH_DOWNWARD_WICK as rule, findFishDownwardWick, fishWickCount, readFishDownwardWick, saveFishDownwardWick } from '@/lib/fish/downwardWick';
+import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { FishScanner, deriveFishRound } from '@/lib/fishScanner';
 import { CBI2_DEF } from '@/lib/deepDig/features';
 import { compileFishProgram } from '@/lib/fish/algorithm';
@@ -20,20 +21,35 @@ it('ordinary bars, small long-tailed dojis and upper wicks pass; a large lower w
  const b=bars();expect(findFishDownwardWick(b,cut,rule)).toBeNull();
  b[b.length-2]={...b.at(-2)!,open:100,close:100,high:100,low:99};expect(findFishDownwardWick(b,cut,rule)).toBeNull();
  b[b.length-2]={...b.at(-2)!,open:100,close:101,high:108,low:99};expect(findFishDownwardWick(b,cut,rule)).toBeNull();
- b[b.length-2]=wick(b.at(-2)!);expect(findFishDownwardWick(b,cut,rule)).toMatchObject({openTime:cut-2*STEP,lower:8,body:1,range:10,atr:2});
+ b[b.length-2]=wick(b.at(-2)!);expect(findFishDownwardWick(b,cut,rule)).toMatchObject({openTime:cut-2*STEP,drop:8,atr:2});
 });
-it('requires all three conditions; a large body or a mostly upper wick does not fail',()=>{
- const b=bars();b[b.length-1]={...b.at(-1)!,open:100,close:110,high:110,low:94};expect(findFishDownwardWick(b,cut,rule)).toBeNull();
- b[b.length-1]={...wick(b.at(-1)!),high:110};expect(findFishDownwardWick(b,cut,rule)).toBeNull();
+it('rejects a large red body and a deep excursion even when the old lower-wick ratios fail',()=>{
+ const b=bars();
+ b[b.length-1]={...b.at(-1)!,open:100,close:92,high:101,low:91};
+ expect(findFishDownwardWick(b,cut,rule)).toMatchObject({drop:9,atr:2});
+ b[b.length-1]={...wick(b.at(-1)!),high:110};
+ expect(findFishDownwardWick(b,cut,rule)).toMatchObject({drop:8,atr:2});
 });
-it('ATR excludes current candle and thresholds are inclusive',()=>{
- const b=bars();b[b.length-1]={...b.at(-1)!,open:100,close:102,high:104,low:96};
- expect(findFishDownwardWick(b,cut,{...rule,atrMultiple:2})).toMatchObject({lower:4,body:2,range:8,atr:2});
- expect(findFishDownwardWick(b,cut,{...rule,atrMultiple:3})).toBeNull();
+it('uses strictly greater than 3 ATR, excluding the current candle from ATR',()=>{
+ const b=bars();b[b.length-1]={...b.at(-1)!,open:100,close:94,high:101,low:94};
+ expect(findFishDownwardWick(b,cut,rule)).toBeNull();
+ b[b.length-1].low=93.999;
+ expect(findFishDownwardWick(b,cut,rule)).toMatchObject({atr:2});
+ b[b.length-1].low=50;
+ expect(findFishDownwardWick(b,cut,rule)).toMatchObject({drop:50,atr:2});
+});
+it('compares each candle with its own preceding ATR, never with the latest ATR',()=>{
+ const b=bars(),index=b.length-20;b[index]=wick(b[index]);
+ for(let i=index+1;i<b.length;i++)b[i]={...b[i],high:110,low:99};
+ expect(findFishDownwardWick(b,cut,rule)).toMatchObject({openTime:b[index].openTime,drop:8,atr:2});
+ const volatile=bars();
+ for(let i=volatile.length-15;i<volatile.length-1;i++)volatile[i]={...volatile[i],high:105,low:95};
+ volatile[volatile.length-1]=wick(volatile.at(-1)!);
+ expect(findFishDownwardWick(volatile,cut,rule)).toBeNull();
 });
 it('window includes its first closed bar, excludes earlier, current and future bars',()=>{
  const b=bars();b[14]=wick(b[14]);expect(findFishDownwardWick(b,cut,rule)).toBeNull();
- b[15]=wick(b[15]);expect(findFishDownwardWick(b,cut,rule)?.openTime).toBe(cut-24*3600000);
+ b[15]=wick(b[15]);expect(findFishDownwardWick(b,cut,rule)?.openTime).toBe(cut-48*3600000);
  const plain=bars();expect(findFishDownwardWick([...plain,wick({...plain[0],openTime:cut}),wick({...plain[0],openTime:cut+STEP})],cut,rule)).toBeNull();
 });
 it('missing/duplicate bars and invalid prices stop the check instead of passing the coin',()=>{
@@ -45,10 +61,10 @@ it('missing/duplicate bars and invalid prices stop the check instead of passing 
 const coin=(base:string)=>({symbol:`${base}USDT`,instrument:`${base}USDT`,base,multiplier:1});
 const feature={...CBI2_DEF,id:'wick-test',formula:'C',scale:1,unit:''};
 const algorithm={direction:'>' as const,threshold:100,constraints:[]};
-function fixture(missing=false){
+function fixture(missing=false,crashHours=0){
  const adapter:FishDataAdapter={exchange:'binance',list:vi.fn(async()=>[coin('OK'),coin('WICK')]),btc:()=>coin('BTC'),taker:vi.fn(async(_m,b)=>b),candles:vi.fn(async(m,end,_s,q)=>{
   const step=intervalMs(q!.interval);const data:ResearchBar[]=Array.from({length:q!.count},(_,i)=>{const openTime=end-(q!.count-i)*step,close=openTime<cut-5*step?99:101;return {openTime,open:close,close,high:close+1,low:close-1,volume:10,quoteVolume:1e6,takerBuyVolume:null};});
-  if(m.base==='WICK'&&q!.interval==='5m'){const at=data.findIndex(b=>b.openTime===cut-2*STEP);if(at>=0)data[at]=wick(data[at]);}
+  if(m.base==='WICK'&&q!.interval==='5m'){const at=data.findIndex(b=>b.openTime===cut-(crashHours?crashHours*3600000:2*STEP));if(at>=0)data[at]={...data[at],open:100,close:92,high:101,low:91};}
   return missing&&q!.interval==='5m'?data.slice(1):data;
  })};
  const scanner=new FishScanner(async()=>new Response(JSON.stringify({serverTime:cut+STEP})),undefined,undefined,{binance:adapter});
@@ -94,4 +110,35 @@ it('relaxed default keeps medium wicks that the original 2 ATR proposal would ex
  const b=bars();b[b.length-1]={...b.at(-1)!,open:100,close:101,high:102,low:95};
  expect(rule.atrMultiple).toBe(3);expect(findFishDownwardWick(b,cut,rule)).toBeNull();
  expect(findFishDownwardWick(b,cut,{...rule,atrMultiple:2})).not.toBeNull();
+});
+
+it('single, AND and OR reject a body-only crash 30h before cutoff',async()=>{
+ for(const combination of [undefined,'and','or'] as const){
+  const {scanner}=fixture(false,30),hits:string[]=[];
+  const settings={feature,algorithm,anchorMs:cut,includeDuplicates:true,downwardWick:readFishDownwardWick(),signal,onProgress:()=>{},onSignal:(s:any)=>hits.push(s.symbol)};
+  const p=await scanner.scan({...settings,...(combination?{algorithms:[{feature,algorithm},{feature,algorithm}],combination}:{})});
+  expect(p.wickSkipped).toBe(1);expect(hits).toEqual(['OKUSDT']);
+ }
+});
+it('upgrades the old 24h default once and retains later manual choices and account isolation',()=>{
+ const prefix=getUserPrefix();
+ localStorage.setItem(prefix+'fish-downward-wick.v1',JSON.stringify({enabled:true,hours:24,atrMultiple:3}));
+ expect(readFishDownwardWick()).toEqual({enabled:true,hours:48,atrMultiple:3});
+ saveFishDownwardWick({enabled:true,hours:24,atrMultiple:3});
+ expect(readFishDownwardWick().hours).toBe(24);
+ localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'second'}}));
+ expect(readFishDownwardWick().hours).toBe(48);
+ expect(JSON.parse(localStorage.getItem(prefix+'fish-downward-wick.v1')!).hours).toBe(24);
+});
+it.each([
+ {enabled:false,hours:24,atrMultiple:3},
+ {enabled:true,hours:72,atrMultiple:3},
+ {enabled:true,hours:24,atrMultiple:1.5},
+])('retains customized legacy filter settings %j',(setting)=>{
+ localStorage.setItem(getUserPrefix()+'fish-downward-wick.v1',JSON.stringify(setting));
+ expect(readFishDownwardWick()).toEqual(setting);
+});
+it('malformed settings fall back to the 48h / 3 ATR default',()=>{
+ localStorage.setItem(getUserPrefix()+'fish-downward-wick.v2','malformed');
+ expect(readFishDownwardWick()).toEqual({enabled:true,hours:48,atrMultiple:3});
 });

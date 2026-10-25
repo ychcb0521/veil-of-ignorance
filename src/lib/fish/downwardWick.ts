@@ -9,21 +9,28 @@ import { formatUTC8 } from '@/lib/timeFormat';
 export interface FishDownwardWick { enabled: boolean; hours: number; atrMultiple: number }
 export const FISH_WICK_HOURS = [6, 12, 24, 48, 72] as const;
 export const FISH_WICK_ATR_MULTIPLES = [1, 1.5, 2, 3] as const;
-export const DEFAULT_FISH_DOWNWARD_WICK: Readonly<FishDownwardWick> = { enabled: true, hours: 24, atrMultiple: 3 };
-const key = () => `${getUserPrefix()}fish-downward-wick.v1`;
+export const DEFAULT_FISH_DOWNWARD_WICK: Readonly<FishDownwardWick> = { enabled: true, hours: 48, atrMultiple: 3 };
+const key = () => `${getUserPrefix()}fish-downward-wick.v2`;
 export function readFishDownwardWick(): FishDownwardWick {
   try {
-    const x = JSON.parse(readPersistedStateRaw(key()) ?? 'null');
-    if (x && typeof x.enabled === 'boolean' && FISH_WICK_HOURS.includes(x.hours) && FISH_WICK_ATR_MULTIPLES.includes(x.atrMultiple)) return { enabled: x.enabled, hours: x.hours, atrMultiple: x.atrMultiple };
+    const current = readPersistedStateRaw(key());
+    const x = JSON.parse(current ?? readPersistedStateRaw(`${getUserPrefix()}fish-downward-wick.v1`) ?? 'null');
+    if (x && typeof x.enabled === 'boolean' && FISH_WICK_HOURS.includes(x.hours) && FISH_WICK_ATR_MULTIPLES.includes(x.atrMultiple)) {
+      // Upgrade the former 24h / 3 ATR default once; retain deliberately customized settings.
+      const value = { enabled: x.enabled, hours: current === null && x.enabled && x.hours === 24 && x.atrMultiple === 3 ? 48 : x.hours, atrMultiple: x.atrMultiple };
+      if (current === null) saveFishDownwardWick(value);
+      return value;
+    }
   } catch { /* Missing or malformed storage uses the visible defaults. */ }
   return { ...DEFAULT_FISH_DOWNWARD_WICK };
 }
 export function saveFishDownwardWick(value: FishDownwardWick): void {
   writePersistedStateRaw(key(), JSON.stringify(value));
 }
-export interface FishWickHit { openTime: number; lower: number; body: number; range: number; atr: number }
+export interface FishWickHit { openTime: number; drop: number; atr: number }
 export const fishWickCount = (rule: FishDownwardWick) => rule.hours * 12 + 15;
-/** Fixed 5m bars for every algorithm. ATR is the mean TR of the preceding 14 bars, excluding the candidate wick. */
+/** Fixed closed 5m bars. Downward excursion includes the body: open - low.
+ * ATR is the mean TR of the preceding 14 bars, excluding the candidate and all later bars. */
 export function findFishDownwardWick(bars: readonly ResearchBar[], cutoffMs: number, rule: FishDownwardWick): FishWickHit | null {
   if (!FISH_WICK_HOURS.includes(rule.hours as typeof FISH_WICK_HOURS[number]) || !FISH_WICK_ATR_MULTIPLES.includes(rule.atrMultiple as typeof FISH_WICK_ATR_MULTIPLES[number])) throw new FishError('向下大插针过滤设置无效', 'readings');
   const count = fishWickCount(rule), sample = bars.filter(b => b.openTime >= cutoffMs - count * FISH_STEP && b.openTime < cutoffMs);
@@ -35,14 +42,14 @@ export function findFishDownwardWick(bars: readonly ResearchBar[], cutoffMs: num
     if (i) tr[i] = Math.max(b.high-b.low, Math.abs(b.high-sample[i-1].close), Math.abs(b.low-sample[i-1].close));
   }
   for (let i = 15; i < count; i++) {
-    const b = sample[i], lower = Math.min(b.open,b.close)-b.low, body = Math.abs(b.close-b.open), range = b.high-b.low;
+    const b = sample[i], drop = b.open-b.low;
     const atr = tr.subarray(i-14,i).reduce((sum,x)=>sum+x,0)/14;
-    if (lower > 0 && lower >= body*2 && lower >= range*.5 && lower >= atr*rule.atrMultiple) return { openTime:b.openTime, lower, body, range, atr };
+    if (drop > atr*rule.atrMultiple) return { openTime:b.openTime, drop, atr };
   }
   return null;
 }
 export function describeFishWick(hit: FishWickHit, rule: FishDownwardWick): string {
-  return `近 ${rule.hours}h 出现向下大插针（5m · ${formatUTC8(hit.openTime)}）：下影 ≥ 实体 2 倍、占振幅 ≥ 50%、≥ 此前 ATR(14) × ${rule.atrMultiple}，已过滤，不入库`;
+  return `近 ${rule.hours}h 出现向下大插针（5m · ${formatUTC8(hit.openTime)}）：开盘至最低价跌幅 ${hit.drop.toPrecision(6)} > 此前 ATR(14) ${hit.atr.toPrecision(6)} × ${rule.atrMultiple}，已过滤，不入库`;
 }
 /** Use already fetched 5m history when sufficient; otherwise load only this price gate's fixed window. */
 export async function checkFishDownwardWick(adapter: FishDataAdapter, market: FishMarket, anchorMs: number, rule: FishDownwardWick | undefined, signal: AbortSignal, existing?: { bars: readonly ResearchBar[]; step: number }): Promise<FishWickHit | null> {

@@ -14,6 +14,8 @@ beforeEach(()=>{localStorage.clear();sessionStorage.clear();vi.clearAllMocks();s
 async function scope(){fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(await screen.findByRole('button',{name:'捕捞范围'}));}
 it('scope defaults on, settings persist and manual/auto/single-coin receive identical rules',async()=>{
  const view=render(<FishPanel {...props}/>);await scope();expect(screen.getByLabelText('过滤向下大插针')).toBeChecked();
+ expect(screen.getByLabelText('插针回看时长')).toHaveValue('48');expect(screen.getByLabelText('插针 ATR 倍数')).toHaveValue('3');
+ expect(screen.getByText(/以开盘价减最低价计跌幅/)).toBeInTheDocument();
  fireEvent.change(screen.getByLabelText('插针回看时长'),{target:{value:'48'}});fireEvent.change(screen.getByLabelText('插针 ATR 倍数'),{target:{value:'1.5'}});
  expect(readFishDownwardWick()).toEqual({enabled:true,hours:48,atrMultiple:1.5});expect(screen.getByText(/过滤设置将在下次捕捞生效/)).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await vi.waitFor(()=>expect(start).toHaveBeenCalled());

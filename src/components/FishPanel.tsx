@@ -312,9 +312,9 @@ export function FishPanel(p: FishPanelProps) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <label className="flex items-center gap-1.5"><FishCheck aria-label="过滤向下大插针" checked={downwardWick.enabled} disabled={running||probe.busy} onChange={e=>updateWick({enabled:e.target.checked})}/>过滤向下大插针</label>
         <label className="flex items-center gap-1.5">回看<select aria-label="插针回看时长" className="h-6 rounded border border-border/60 bg-background px-1.5 text-foreground disabled:opacity-40" value={downwardWick.hours} disabled={running||probe.busy||!downwardWick.enabled} onChange={e=>updateWick({hours:Number(e.target.value)})}>{FISH_WICK_HOURS.map(h=><option key={h} value={h}>{h}h</option>)}</select></label>
-        <label className="flex items-center gap-1.5">下影 ≥ ATR(14) ×<select aria-label="插针 ATR 倍数" className="h-6 rounded border border-border/60 bg-background px-1.5 text-foreground disabled:opacity-40" value={downwardWick.atrMultiple} disabled={running||probe.busy||!downwardWick.enabled} onChange={e=>updateWick({atrMultiple:Number(e.target.value)})}>{FISH_WICK_ATR_MULTIPLES.map(n=><option key={n} value={n}>{n}</option>)}</select></label>
+        <label className="flex items-center gap-1.5">开盘至最低价跌幅 &gt; ATR(14) ×<select aria-label="插针 ATR 倍数" className="h-6 rounded border border-border/60 bg-background px-1.5 text-foreground disabled:opacity-40" value={downwardWick.atrMultiple} disabled={running||probe.busy||!downwardWick.enabled} onChange={e=>updateWick({atrMultiple:Number(e.target.value)})}>{FISH_WICK_ATR_MULTIPLES.map(n=><option key={n} value={n}>{n}</option>)}</select></label>
       </div>
-      <p className="text-[10px] leading-relaxed text-muted-foreground/80">只看已收盘 5m K 线；下影还须 ≥ 实体 2 倍、占整根振幅 ≥ 50%。ATR(14) 取该根之前 14 根真实波幅的均值，任一根符合即过滤。手动、自动及单币查询共用。</p>
+      <p className="text-[10px] leading-relaxed text-muted-foreground/80">只看已收盘 5m K 线，以开盘价减最低价计跌幅，包含大阴线和下影线；严格大于所选 ATR 倍数即过滤，不限制实体或下影占比。ATR(14) 取该根之前 14 根真实波幅的均值，不含该根和之后的数据。手动、自动及单币查询共用。</p>
       {wickChanged&&<p className="text-[10px] text-primary">过滤设置将在下次捕捞生效，下面仍是已保存的结果。</p>}
     </div>}
     {open.probe&&p.onDiagnose&&<div className="space-y-1.5 rounded-lg bg-muted/30 px-3 py-2 text-[11px]" data-testid="fish-probe">
