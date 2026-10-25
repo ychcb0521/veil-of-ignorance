@@ -28,4 +28,4 @@ describe('渔的通用算法设置',()=>{
  });
 });
 
-it('美股范围默认勾选，用户可关闭并传入冻结的本轮设置',()=>{render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));expect(screen.getByRole('checkbox',{name:'美股'})).toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start).toHaveBeenCalledWith(expect.objectContaining({includeUsStocks:false}));});
+it('美股范围默认不勾选，用户可开启并传入冻结的本轮设置',()=>{render(<Harness/>);fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(screen.getByRole('button',{name:'捕捞范围'}));expect(screen.getByRole('checkbox',{name:'美股'})).not.toBeChecked();fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(start).toHaveBeenCalledWith(expect.objectContaining({includeUsStocks:true}));});

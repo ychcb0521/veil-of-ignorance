@@ -63,15 +63,15 @@ export interface FishPanelProps {
 export {FISH_DEFAULT_ALGORITHMS};
 const cleanPreference=(p:FishPreference):FishPreference=>({...p,constraints:[]});
 const OPEN_KEY = 'veil.fish.open';
-function readOpen(): { scope: boolean; detail: boolean; probe: boolean; notify: boolean } {
-  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe, notify: !!v.notify }; } catch { return { scope: false, detail: false, probe: false, notify: false }; }
+function readOpen(): { scope: boolean; detail: boolean; probe: boolean; notify: boolean; catching: boolean } {
+  try { const v = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? '{}'); return { scope: !!v.scope, detail: !!v.detail, probe: !!v.probe, notify: !!v.notify, catching: v.catching !== false }; } catch { return { scope: false, detail: false, probe: false, notify: false, catching: true }; }
 }
 const STATUS: Record<FishProgress['status'], string> = { running: '捕捞中', complete: '捕捞完成', cancelled: '已取消', aborted: '已中止', skipped: '已跳过' };
 
 export function FishPanel(p: FishPanelProps) {
   const [error,setError]=useState(''),defs=useFishFeatures();
   const [open, setOpenState] = useState(readOpen);
-  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean; probe: boolean; notify: boolean }>) => setOpenState(o => {
+  const setOpen = (patch: Partial<{ scope: boolean; detail: boolean; probe: boolean; notify: boolean; catching: boolean }>) => setOpenState(o => {
     const next = { ...o, ...patch };
     try { sessionStorage.setItem(OPEN_KEY, JSON.stringify(next)); } catch { /* 记不住只是下次要再点 */ }
     return next;
@@ -228,9 +228,9 @@ export function FishPanel(p: FishPanelProps) {
   // 【用户要求】2026-10-20「渔的界面要完全按照最高级别的审美标准来设计，既简洁又美观又具备功能性」：
   // 顶栏一行操作（时间 · 主按钮 · 淡色工具），下面一行状态，底边一根细线兼作进度条；算法是一张对齐的表，合并方式用分段按钮。
   return <section className="mt-2 max-h-[65vh] min-w-0 overflow-y-auto overscroll-y-contain rounded-xl border border-border/60 bg-background" aria-label="渔" data-testid="fish-panel">
-    <header className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85" data-testid="fish-toolbar">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-2.5 pt-3 text-[11px]">
-        <div className="flex items-center gap-0.5 pr-1.5"><strong className="text-[13px] font-semibold tracking-wide">渔</strong><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">
+    <section aria-labelledby="fish-catching-title" data-testid="fish-catching">
+      <div className="flex items-center px-4 pb-1 pt-3">
+        <div className="flex items-center gap-0.5 pr-1.5"><button id="fish-catching-title" type="button" aria-expanded={open.catching} aria-controls="fish-catching-content" onClick={()=>setOpen({catching:!open.catching})} className="-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted"><Play aria-hidden className="h-3 w-3 text-muted-foreground"/><span>捕捞</span><ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open.catching?'rotate-180':''}`}/></button><Popover><PopoverTrigger asChild><button type="button" aria-label="捕捞说明" className="p-1 text-muted-foreground/40 hover:text-muted-foreground"><CircleHelp className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" className="max-h-[75vh] w-96 max-w-[calc(100vw-2rem)] overflow-y-auto space-y-2.5 p-3.5 text-[11px] leading-relaxed" aria-label="捕捞说明">
         {/* 【用户要求】2026-10-21「渔的使用说明点开之后，内容要改成目的、流程（以及伴随的功能介绍）。要精简、只呈现核心要义」 */}
         <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">目的</h4>
           <p className="text-muted-foreground">在全市场永续合约里，按你设定的算法找出刚出现信号的标的（鱼），供复盘与交易参考。</p></section>
@@ -247,6 +247,11 @@ export function FishPanel(p: FishPanelProps) {
       {suggestion&&<><p className="whitespace-pre-wrap break-words">{fishSuggestionTitle(suggestion)}</p>{([['信号',suggestion.samples],['随机',suggestion.random]] as const).map(([label,stats])=>stats.failures.length>0&&<details key={label}><summary className="w-fit cursor-pointer">{label}跳过原因（前{stats.failures.length}项）</summary>{stats.failures.map((row,i)=><p key={i} className="break-words">{row.symbol} · {formatUTC8(row.timeMs)} · {row.reason}</p>)}</details>)}</>}
     </div>}
 </PopoverContent></Popover></div>
+      </div>
+      <div id="fish-catching-content" hidden={!open.catching}>
+    <header className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85" data-testid="fish-toolbar">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 px-4 pb-2.5 pt-1 text-[11px]">
+
         <label className="flex h-7 min-w-0 items-center gap-1.5 rounded-md border border-transparent bg-muted/50 px-2 transition-colors focus-within:border-ring/60 focus-within:bg-background hover:bg-muted" title={p.auto?.mode==='auto'?'自动捕捞始终按当前时间；这里的时间只用于手动点「开始捕捞」':'格式 YYYY-MM-DD HH:mm:ss（UTC+8）；留空 = 币安服务器当前时间'}>
           <Clock3 aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground/60"/>
           <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
@@ -361,9 +366,14 @@ export function FishPanel(p: FishPanelProps) {
     <div className="space-y-1 border-t border-border/50 pt-3">
     <FishLibrary key={owner+'new'} rememberViewKey={owner+'new'} title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼舱」。'}
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
+
+    </div>
+    </div>
+      </div>
+    </section>
+    <section className="min-w-0 border-t border-border/50 px-4 py-3" aria-label="鱼舱模块" data-testid="fish-cabin">
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
-    </div>
-    </div>
+    </section>
   </section>;
 }
