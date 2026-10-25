@@ -1431,9 +1431,9 @@ export function registerCustomIndicators() {
           const colorLine = item.seller ? 0 : line;
           const stateWarning = level === 0 && (item.id === 'STATE' || item.id === 'STATE2')
             && value != null && value >= 0.5 && value <= 0.6;
-          const color = value == null || stateWarning || value === colorLine ? '#F0B90B'
+          const color = stateWarning ? '#FFD600' : value == null || value === colorLine ? '#F0B90B'
             : value > colorLine ? '#0ECB81' : '#F6465D';
-          return { color, size: 1.5 };
+          return { color, size: stateWarning ? 2.2 : 1.5 };
         } }],
         calc: (dataList, indicator) => {
           const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
