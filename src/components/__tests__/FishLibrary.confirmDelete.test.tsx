@@ -8,7 +8,7 @@ it('点 × 先变成「确认删除」，再点才删；3 秒不点、或点别�
  vi.useFakeTimers();
  try{
   const onDelete=vi.fn();
-  render(<FishLibrary title="鱼" signals={[s]} defaultOpen onJump={()=>{}} onDelete={onDelete} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
+  render(<FishLibrary title="鱼舱" signals={[s]} defaultOpen onJump={()=>{}} onDelete={onDelete} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
   fireEvent.click(screen.getByTitle('删除该信号'));expect(onDelete).not.toHaveBeenCalled();
   expect(screen.getByRole('button',{name:'确认删除 AAAUSDT'})).toBeInTheDocument();
   act(()=>{vi.advanceTimersByTime(3100);});expect(screen.queryByRole('button',{name:/^确认删除/})).toBeNull();

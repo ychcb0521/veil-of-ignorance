@@ -24,7 +24,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
   };
   return <div className="space-y-2 rounded-lg bg-muted/30 px-3 py-2.5 text-[11px]" data-testid="fish-notify" aria-label="邮件提醒设置">
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label="新鱼发到邮箱" checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />新鱼发到邮箱</label>
+      <label className="flex items-center gap-1.5 font-medium"><FishCheck aria-label="鲜鱼发到邮箱" checked={config.enabled} onChange={e => notify.update({ ...config, enabled: e.target.checked })} />鲜鱼发到邮箱</label>
       <span className="text-[10.5px] text-muted-foreground">每轮捕捞结束（手动或自动）发本轮并集的鱼（任一算法命中即算，不管面板选交集还是并集）；和上一封比有变化才发，多出来的标「新」</span>
     </div>
     <div className="flex flex-wrap items-center gap-1.5">
@@ -42,7 +42,7 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
         </div>
         <ol className="list-decimal space-y-0.5 pl-4 text-[10.5px] leading-relaxed text-muted-foreground">
           <li>打开 <a href="https://dashboard.emailjs.com/sign-up" target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">emailjs.com</a> 免费注册（每月 200 封），「Email Services」里连上你的邮箱（Gmail / QQ / 163 / Outlook 都行），得到 <b>Service ID</b>。</li>
-          <li>「Email Templates」→「Create New Template」→ 选「Contact Us」→ 右下角「Create Template」→ 右上角「Save」。正文里的 {'{{message}}'} 是纯文字列表；改成 <code>{'{{{message_html}}}'}</code>（三层大括号）就是和「新鱼」一样的表格；想一次发给这里填的全部邮箱，把 <b>To Email</b> 改成 <code>{'{{to_email}}'}</code>，不改就只发到 EmailJS 账号的邮箱。<b>Template ID</b> 在模板列表里每个模板名下面，或模板里的「Settings」页（形如 template_abc123）。</li>
+          <li>「Email Templates」→「Create New Template」→ 选「Contact Us」→ 右下角「Create Template」→ 右上角「Save」。正文里的 {'{{message}}'} 是纯文字列表；改成 <code>{'{{{message_html}}}'}</code>（三层大括号）就是和「鲜鱼」一样的表格；想一次发给这里填的全部邮箱，把 <b>To Email</b> 改成 <code>{'{{to_email}}'}</code>，不改就只发到 EmailJS 账号的邮箱。<b>Template ID</b> 在模板列表里每个模板名下面，或模板里的「Settings」页（形如 template_abc123）。</li>
           <li>「Account」页复制 <b>Public Key</b>。三个都填好后点「发测试邮件」，收到就成了。</li>
         </ol>
       </div>
@@ -50,8 +50,8 @@ export function FishNotifySettings({ notify }: { notify: FishNotify }) {
     <div className="flex flex-wrap items-center gap-2">
       <button type="button" onClick={() => void notify.test()} disabled={!!missing || sending} className="h-7 rounded-md border border-border/70 bg-background px-2.5 hover:bg-muted disabled:opacity-40">{sending ? '发送中…' : '发测试邮件'}</button>
       {missing ? <span className={`text-[10.5px] ${fishNotifyFieldProblem(config) ? 'text-destructive/80' : 'text-muted-foreground'}`} data-testid="fish-notify-missing">{missing}</span>
-        : status ? <span className={`text-[10.5px] ${status.ok ? 'text-muted-foreground' : 'text-destructive/80'}`} data-testid="fish-notify-status">{new Date(status.at).toLocaleTimeString('zh-CN', { hour12: false })} {status.unchanged ? `本轮新鱼 ${status.count} 条，和上一封一样，未重复发` : <>{status.test ? '测试邮件' : `新鱼 ${status.count} 条`}{status.ok ? ` 已发到 ${config.emails.length} 个邮箱` : ` 发送失败：${status.error}`}</>}</span>
-        : !config.enabled && <span className="text-[10.5px] text-muted-foreground">勾选「新鱼发到邮箱」后开始提醒</span>}
+        : status ? <span className={`text-[10.5px] ${status.ok ? 'text-muted-foreground' : 'text-destructive/80'}`} data-testid="fish-notify-status">{new Date(status.at).toLocaleTimeString('zh-CN', { hour12: false })} {status.unchanged ? `本轮鲜鱼 ${status.count} 条，和上一封一样，未重复发` : <>{status.test ? '测试邮件' : `鲜鱼 ${status.count} 条`}{status.ok ? ` 已发到 ${config.emails.length} 个邮箱` : ` 发送失败：${status.error}`}</>}</span>
+        : !config.enabled && <span className="text-[10.5px] text-muted-foreground">勾选「鲜鱼发到邮箱」后开始提醒</span>}
     </div>
   </div>;
 }

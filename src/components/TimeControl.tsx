@@ -481,7 +481,7 @@ export function TimeControl({
 
         <button type="button" aria-expanded={fishOpen} onClick={() => { setSignalLibOpen(false); setFishOpen(o => !o); }}
           className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-medium transition-colors ${fishOpen ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
-          <Fish className="w-3 h-3" />渔
+          <Fish className="w-3 h-3" />渔场
           <span className="ml-0.5 rounded-full bg-primary/20 px-1.5 font-mono text-[9px] text-primary">{fish.signals.length}</span>
           <ChevronDown className={`w-3 h-3 transition-transform ${fishOpen ? 'rotate-180' : ''}`} />
         </button>
@@ -663,13 +663,13 @@ export function TimeControl({
                 <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                   <label className="inline-flex items-center gap-1">匹配<select aria-label="匹配门槛" className="rounded border border-border/50 bg-background px-1 py-0.5" value={reconstruction.mode} onChange={e=>reconstruction.setMode(e.target.value as 'best'|'current')}><option value="best">最佳门槛</option><option value="current">各卡当前阈值</option></select></label>
                   {/* 【用户要求】2026-10-19「匹配之后为何还是这样」：「匹配」下拉只选显示哪种门槛，不会计算；
-                      复原入口原先只在「渔」里，这里直接给出——没跑过 / 已过期时点「复原」，进度与不能运行的原因写在同一行 */}
+                      复原入口原先只在「渔场」里，这里直接给出——没跑过 / 已过期时点「复原」，进度与不能运行的原因写在同一行 */}
                   {reconstruction.running
                     ? <span role="status" data-testid="library-reconstruction-progress">复原中 · {reconstruction.progress?.phase==='thresholds'?'门槛评估':'历史取数'} {reconstruction.progress?.done??0} / {reconstruction.progress?.total??0}<button type="button" className="ml-1.5 hover:text-foreground" onClick={reconstruction.cancel}>取消</button></span>
                     : (!reconstruction.result||reconstruction.stale)&&<>
                       <span>{reconstruction.stale?'已过期':'尚未复原'}</span>
-                      <button type="button" data-testid="library-reconstruction-start" className="rounded border border-border/50 px-1.5 py-0.5 text-foreground/80 hover:bg-accent disabled:opacity-40" disabled={!reconstruction.available||!!reconstruction.settingsError||fish.progress?.status==='running'} title={reconstruction.settingsError||'用每条信号发生前的数据，评估「渔」里各算法卡的捕获率、噪音与最佳门槛；只保存在本机'} onClick={()=>void reconstruction.start()}>复原</button>
-                      {reconstruction.settingsError&&<span className="text-destructive/80">{reconstruction.settingsError}（在「渔」里改）</span>}
+                      <button type="button" data-testid="library-reconstruction-start" className="rounded border border-border/50 px-1.5 py-0.5 text-foreground/80 hover:bg-accent disabled:opacity-40" disabled={!reconstruction.available||!!reconstruction.settingsError||fish.progress?.status==='running'} title={reconstruction.settingsError||'用每条信号发生前的数据，评估「渔场」里各算法卡的捕获率、噪音与最佳门槛；只保存在本机'} onClick={()=>void reconstruction.start()}>复原</button>
+                      {reconstruction.settingsError&&<span className="text-destructive/80">{reconstruction.settingsError}（在「渔场」里改）</span>}
                     </>}
                   {reconstruction.error&&!reconstruction.running&&<span className="text-destructive/80">{reconstruction.error}</span>}
                 </div>
