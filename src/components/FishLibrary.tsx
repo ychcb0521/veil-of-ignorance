@@ -85,7 +85,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   };
   return <div className={'min-w-0'} data-testid={testId}>
     <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted">
-      {p.title === '鲜鱼' ? <Sparkles className="h-3 w-3 text-primary/80" /> : <Database className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
+      {p.title === '新鱼' ? <Sparkles className="h-3 w-3 text-primary/80" /> : <Database className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
       <span className={`min-w-[1.25rem] rounded px-1 text-center font-mono text-[10px] tabular-nums ${p.signals.length?'bg-primary/15 text-primary':'bg-muted text-muted-foreground'}`}>{p.signals.length}</span>
       <ChevronDown className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>

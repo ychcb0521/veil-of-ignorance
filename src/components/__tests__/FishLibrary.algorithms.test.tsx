@@ -3,7 +3,7 @@ import {fireEvent,render,screen} from '@testing-library/react';
 import {FishLibrary} from '@/components/FishLibrary';
 import type {TradeSignal} from '@/lib/signalLibrary';
 // 【用户要求】2026-10-20「标的的名称不能缩略…把具体是哪个算法捕捞到的专门开设一列（算法类型），替换掉兜底区」「算法类型那一列要能够实现选择和排序功能」
-it.each(['鲜鱼','鱼舱'])('%s：标的列只放完整标的名；「算法类型」列写捕到它的算法，可按算法类型筛选与排序；不显示完整快照悬停框',(title)=>{
+it.each(['新鱼','鱼舱'])('%s：标的列只放完整标的名；「算法类型」列写捕到它的算法，可按算法类型筛选与排序；不显示完整快照悬停框',(title)=>{
  const base:TradeSignal={id:'a',symbol:'AAAUSDT',timeMs:123,timeLabel:'2026-10-19 08:00:00',fallbackZone:'',fish:{average:.4,cbi2:.5,startAverage:.35,previousAverage:.25,cutoffMs:123,threshold:.3}};
  const union:TradeSignal={...base,id:'u',symbol:'UUUUSDT',timeMs:200,fish:{...base.fish!,combination:'or',hitAlgorithms:[2],algorithmKey:'any(x)',algorithms:[{...base.fish!,featureShort:'CBI-2'},{...base.fish!,featureShort:'CBA'}]}};
  const both:TradeSignal={...base,id:'n',symbol:'NNNUSDT',timeMs:300,fish:{...base.fish!,combination:'and',algorithmKey:'x&y',algorithms:[{...base.fish!,featureShort:'CBI-2'},{...base.fish!,featureShort:'BSS'}]}};

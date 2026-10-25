@@ -238,8 +238,8 @@ export function FishPanel(p: FishPanelProps) {
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
             <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
-            <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「鲜鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
-            <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（鲜鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
+            <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
+            <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（新鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
           </ol></section>
         {(x?.anchorMs||x?.cutoffMs)&&<p className="border-t border-border/50 pt-2 text-[10.5px] text-muted-foreground/80">{x?.anchorMs?`本轮节点 ${formatUTC8(x.anchorMs)}`:''}{x?.anchorMs&&x?.cutoffMs?' · ':''}{x?.cutoffMs?`本轮阈值 ${plan?.settings.direction??'>'} ${x.threshold??.3}`:''}</p>}
           {(suggestion||suggestionProgress)&&<div className="space-y-1 border-l border-border/60 pl-3 text-[10px] text-muted-foreground" data-testid="fish-suggestion-detail">
@@ -359,9 +359,9 @@ export function FishPanel(p: FishPanelProps) {
     {p.reconstruction&&<FishReconstructionResults state={p.reconstruction}/>}
     {/* 【用户要求】2026-10-19 新鱼 = 最近一次捕捞捕到的；点开始捕捞时上一轮的新鱼归入「鱼舱」 */}
     <div className="space-y-1 border-t border-border/50 pt-3">
-    <FishLibrary title="鲜鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有鲜鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼舱」。'}
+    <FishLibrary title="新鱼" testId="fish-new" signals={fresh} defaultOpen={fresh.length > 0} emptyText={scanning ? '捕捞中，捕到的会出现在这里。' : '还没有新鱼：点「开始捕捞」后，这一轮捕到的放在这里，上一轮的归入「鱼舱」。'}
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
-    <FishLibrary title="鱼舱" testId="fish-old" signals={old} defaultOpen emptyText="暂无信号：每次开始捕捞时，上一轮的鲜鱼会归入这里。"
+    <FishLibrary title="鱼舱" testId="fish-old" signals={old} defaultOpen emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </div>
     </div>
