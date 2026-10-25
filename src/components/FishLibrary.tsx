@@ -114,7 +114,7 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
       <span className={`min-w-[1.25rem] rounded px-1 text-center font-mono text-[10px] tabular-nums ${p.signals.length?'bg-primary/15 text-primary':'bg-muted text-muted-foreground'}`}>{p.signals.length}</span>
       <ChevronDown className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
-    {p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel，不受当前筛选影响；含算法判定、汇总与两两重叠" disabled={!p.signals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
+    {p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!p.signals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
     </div>
     {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
