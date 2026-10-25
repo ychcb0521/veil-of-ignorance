@@ -58,20 +58,22 @@ it('imports catches received while paused as soon as automatic tracking resumes'
   act(() => h.result.current.setTracking(true)); await flush();
   expect(h.result.current.study.samples).toHaveLength(2);
 });
-it('restores existing copies at original signal time before reevaluating and saves the migrated study without dropping chosen exits', async () => {
-  const legacy = importQualityFish({ ...newQualityStudy(T + 1), entryMode: 'capture' }, [{ ...signal, fish: { ...signal.fish!, cutoffMs: T + 3600_000 } }]);
+// 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」
+it('restores existing signal-time copies at capture time before reevaluating and saves the migrated study without dropping chosen exits', async () => {
+  const imported = importQualityFish(newQualityStudy(T + 1), [{ ...signal, fish: { ...signal.fish!, cutoffMs: T + 3600_000 } }]);
+  const legacy = { ...imported, entryMode: 'signal' as const, samples: [{ ...imported.samples[0], enteredAt: T, basis: 'signal' as const }] };
   const sample = legacy.samples[0], group = legacy.groups[0];
   group.rule = { metric: 'capture', direction: '<', threshold: .06 };
   legacy.results.push({ key: qualityResultKey(sample, group, 0), sampleId: sample.id, groupId: group.id, evaluatedAt: T, status: 'closed', returnPct: 99 });
   storage.load.mockResolvedValue({ study: legacy });
   const run = vi.fn(async (_options: QualityRunOptions) => {}), h = renderHook(() => useFishQuality('a', [], run));
   await flush();
-  expect(h.result.current.study.samples[0]).toMatchObject({ enteredAt: T, basis: 'signal' });
+  expect(h.result.current.study.samples[0]).toMatchObject({ enteredAt: T + 3600_000, basis: 'capture' });
   expect(h.result.current.study.groups[0].rule).toEqual(group.rule); expect(h.result.current.study.results).toHaveLength(0);
   await flush(1100);
-  expect(run.mock.calls[0][0].study.samples[0].enteredAt).toBe(T);
-  expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ entryMode: 'signal', groups: legacy.groups, results: [] }));
-  expect(legacy.samples[0].enteredAt).toBe(T + 3600_000);
+  expect(run.mock.calls[0][0].study.samples[0].enteredAt).toBe(T + 3600_000);
+  expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ entryMode: 'capture', groups: legacy.groups, results: [] }));
+  expect(legacy.samples[0].enteredAt).toBe(T);
 });
 it('persists a selected common sell plan and a fixed batch, invalidates changed thresholds, and accepts only the matching matrix result', async () => {
   const tasks: QualityRunOptions[] = [];

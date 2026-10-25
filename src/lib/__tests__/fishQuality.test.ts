@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
-import { collectFishQuality, evaluateQualitySample, migrateQualitySignalEntries, importQualityFish, newQualityStudy, qualityDefinition, qualityGroupId, qualityGroupSummary, qualityMetricPlan, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
+import { collectFishQuality, evaluateQualitySample, migrateQualityCaptureEntries, importQualityFish, newQualityStudy, qualityDefinition, qualityGroupId, qualityGroupSummary, qualityMetricPlan, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import type { FishReconstructionLoader } from '@/lib/fish/reconstruction';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -19,19 +19,22 @@ const loader = (change: (time: number, step: number) => ResearchBar = (time) => 
 const evaluate = (s: QualitySample, g: QualityGroup, load = loader(), now = T + 15 * M, hours = 1) => { g.rule ??= { metric: 'capture', direction: '<', threshold: -1 }; return evaluateQualitySample(s, g, hours, now, load, new AbortController().signal); };
 
 describe('fish quality paper experiments', () => {
-  it('buys historical fish at the original row signal time by default, not the later capture cutoff', async () => {
+  // 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」
+  it('buys historical fish at the capture time by default, never at the hindsight signal onset', async () => {
     const source = fish(), study = importQualityFish(newQualityStudy(T + 2 * M), [source]);
-    expect(study.entryMode).toBe('signal');
+    expect(study.entryMode).toBe('capture');
     const sample = study.samples[0], g = study.groups[0];
-    expect(sample).toMatchObject({ enteredAt: source.timeMs, basis: 'signal' });
+    expect(source.timeMs).toBe(T - 3600_000); expect(source.fish!.cutoffMs).toBe(T);
+    expect(sample).toMatchObject({ enteredAt: T, basis: 'capture' });
     const load = vi.fn(loader());
     const result = await evaluateQualitySample(sample, g, 0, T + 15 * M, load, new AbortController().signal);
-    expect(result.entryTime).toBe(source.timeMs);
-    expect(load.mock.calls[0].slice(1, 3)).toEqual([source.timeMs, source.timeMs + M]);
-    expect(source.fish!.cutoffMs).toBe(T);
+    expect(result.entryTime).toBe(T);
+    expect(load.mock.calls[0].slice(1, 3)).toEqual([T, T + M]);
   });
-  it('migrates existing historical entries and invalidates their previous returns while preserving live trades, copies and exit rules', () => {
-    const { study, s, g } = fixture();
+  it('migrates existing signal-time entries to capture time and invalidates their previous returns while preserving live trades, copies and exit rules', () => {
+    const { study: captured, s: c, g } = fixture();
+    const s: QualitySample = { ...c, enteredAt: c.source.timeMs, basis: 'signal' };
+    const study = { ...captured, entryMode: 'signal' as const, samples: [s] };
     g.rule = { metric: 'capture', direction: '<', threshold: 500 };
     const live: QualitySample = { ...s, id: 'live', basis: 'detected', enteredAt: T + M, source: { ...s.source, id: 'live', symbol: 'BBBUSDT' } };
     study.samples.push(live);
@@ -39,22 +42,21 @@ describe('fish quality paper experiments', () => {
       { key: qualityResultKey(s, g, 0), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'open', returnPct: 25, pendingExit: { at: T, reading: 1 } },
       { key: qualityResultKey(live, g, 0), sampleId: live.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 10 },
     );
-    const original = structuredClone(study), upgraded = migrateQualitySignalEntries(study);
-    expect(upgraded.entryMode).toBe('signal');
-    expect(upgraded.samples[0]).toMatchObject({ id: s.id, enteredAt: s.source.timeMs, basis: 'signal' });
+    const original = structuredClone(study), upgraded = migrateQualityCaptureEntries(study);
+    expect(upgraded.entryMode).toBe('capture');
+    expect(upgraded.samples[0]).toMatchObject({ id: s.id, enteredAt: T, basis: 'capture' });
     expect(upgraded.samples[0].source).toBe(s.source); expect(upgraded.groups).toBe(study.groups);
     expect(upgraded.groups[0].rule).toEqual(g.rule); expect(upgraded.samples[1]).toBe(live);
     expect(upgraded.results).toEqual([study.results[1]]);
-    expect(migrateQualitySignalEntries(upgraded)).toBe(upgraded);
+    expect(migrateQualityCaptureEntries(upgraded)).toBe(upgraded);
     expect(study).toEqual(original);
     expect(qualityResultKey(upgraded.samples[0], g, 0)).not.toBe(study.results[0].key);
   });
-  it('keeps equal-time results and marks missing original signal times instead of substituting a capture cutoff', () => {
+  it('keeps equal-time results and marks missing capture times instead of substituting the signal onset', () => {
     const { study, s, g } = fixture();
-    s.enteredAt = s.source.timeMs;
     study.results.push({ key: qualityResultKey(s, g, 0), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 10 });
-    expect(migrateQualitySignalEntries(study).results).toEqual(study.results);
-    const missing = migrateQualitySignalEntries({ ...study, samples: [{ ...s, source: { ...s.source, timeMs: NaN } }] });
+    expect(migrateQualityCaptureEntries(study)).toBe(study);
+    const missing = migrateQualityCaptureEntries({ ...study, samples: [{ ...s, source: { ...s.source, fish: { ...s.source.fish!, cutoffMs: NaN } } }] });
     expect(missing.samples[0]).toMatchObject({ enteredAt: null, basis: 'missing' }); expect(missing.results).toHaveLength(0);
   });
   it('defaults to continuous observation and registers the buy without preselecting an exit or downloading an unbounded price history', async () => {
@@ -94,12 +96,12 @@ describe('fish quality paper experiments', () => {
     source.fish!.threshold = 999;
     expect(study.groups[0].snapshot.threshold).toBe(1000); expect(study.samples[0].source).toEqual(before);
   });
-  it('uses actual detection time for a live arrival and the original signal time for historical imports', () => {
+  it('uses actual detection time for a live arrival and the capture time for historical imports', () => {
     const active = newQualityStudy(T);
     const live = importQualityFish(active, [{ ...fish(), freshCatch: true }]);
     expect(live.samples[0]).toMatchObject({ enteredAt: T + M, basis: 'detected' });
     const historical = importQualityFish(active, [{ ...fish(snap({ cutoffMs: T - 86400_000 })), freshCatch: true }]);
-    expect(historical.samples[0]).toMatchObject({ enteredAt: T - 3600_000, basis: 'signal' });
+    expect(historical.samples[0]).toMatchObject({ enteredAt: T - 86400_000, basis: 'capture' });
   });
   it('attributes only OR hits, keeps different subtypes/thresholds/formula versions separate, and does not mutate the cabin', () => {
     const a = snap(), b = snap({ statistic: 'raw', scale: 1 }), c = snap({ threshold: 900 });

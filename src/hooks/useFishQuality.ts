@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, newQualityStudy, migrateQualitySignalEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 
@@ -25,7 +25,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const restored = enableQualityComparison(migrateQualitySignalEntries(value.study));
+      const restored = enableQualityComparison(migrateQualityCaptureEntries(value.study));
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };

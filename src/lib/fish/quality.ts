@@ -35,21 +35,26 @@ export interface FishQualityStudy {
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
   sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[];
 }
-export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'signal', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
-/** User's historical-entry choice applies to existing copies too. Keep live detections and chosen exit rules. */
-export function migrateQualitySignalEntries(study: FishQualityStudy): FishQualityStudy {
-  let changed = study.entryMode !== 'signal';
+export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
+/**
+ * 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」：信号时间是「一直持续到扫描时刻」那段行情的起点，
+ * 在起点买入等于事先知道信号会撑到扫描时刻，并白拿起点到扫描之间的涨幅；捕捞时刻才是当时真能下单的时点。
+ * 已有历史样本改按捕捞时刻重新评估（旧收益作废）；实时发现的鱼和已选的卖出规则保留。
+ */
+export function migrateQualityCaptureEntries(study: FishQualityStudy): FishQualityStudy {
+  let changed = study.entryMode !== 'capture';
   const reset = new Set<string>();
   const samples = study.samples.map(sample => {
     if (sample.basis === 'detected') return sample;
-    const enteredAt = Number.isFinite(sample.source.timeMs) && sample.source.timeMs > 0 ? sample.source.timeMs : null;
-    const basis = enteredAt == null ? 'missing' : 'signal';
+    const cutoff = sample.source.fish?.cutoffMs;
+    const enteredAt = cutoff != null && Number.isFinite(cutoff) && cutoff > 0 ? cutoff : null;
+    const basis = enteredAt == null ? 'missing' : 'capture';
     if (sample.enteredAt === enteredAt && sample.basis === basis) return sample;
     changed = true;
     if (sample.enteredAt !== enteredAt) reset.add(sample.id);
     return { ...sample, enteredAt, basis } as QualitySample;
   });
-  return changed ? { ...study, entryMode: 'signal', samples, results: study.results.filter(r => !reset.has(r.sampleId)) } : study;
+  return changed ? { ...study, entryMode: 'capture', samples, results: study.results.filter(r => !reset.has(r.sampleId)) } : study;
 }
 export function qualityMembers(s: TradeSignal): FishSnapshot[] {
   const f = s.fish;
