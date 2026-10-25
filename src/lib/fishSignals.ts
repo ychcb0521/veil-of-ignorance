@@ -1,10 +1,11 @@
-import { collapseVisibleFish, mergeFishSignals, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
+import { archiveFishForNextRound, collapseVisibleFish, mergeFishSignals, fishCatchKey, fishDedupKey, fishVisibleKey } from '@/lib/fish/records';
 import { applyFishTombstones, mergeFishTombstones, normalizeFishTombstones, type FishTombstones } from '@/lib/fish/tombstones';
 import { type TradeSignal } from '@/lib/signalLibrary';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { saveFishLibraryBackup, mergeFishLibraryBackups, type FishLibraryBackup } from '@/lib/fish/libraryStore';
 export const FISH_STORAGE_KEY = 'veil.fishSignals.v1';
 /** 用户手动删除的鱼（键 → 删除时刻），跨设备合并，防止别处的旧副本把删掉的鱼带回来。 */
 export const FISH_DELETED_KEY = 'veil.fishDeleted.v1';
@@ -16,6 +17,7 @@ export function recordFishDeletion(signals: readonly TradeSignal[], userId: stri
   if (!signals.length) return;
   const next = mergeFishTombstones(loadFishTombstones(), Object.fromEntries(signals.flatMap(s => { const t = Math.max(now, (s.caughtAt ?? 0) + 1); return [[fishDedupKey(s), t], [`v|${fishVisibleKey(s)}`, t]]; })));
   writePersistedStateRaw(FISH_DELETED_KEY, JSON.stringify(next));
+  void saveFishLibraryBackup(userId, { signals: loadFishSignals(), tombstones: next });
   if (userId) queueSimStatePush(userId, 'fish_deleted_v1', next);
 }
 export function loadFishSignals(): TradeSignal[] {
@@ -32,8 +34,36 @@ export function loadFishSignals(): TradeSignal[] {
 }
 export function saveFishSignals(signals: TradeSignal[], userId: string | null): boolean {
   const saved = writePersistedStateRaw(FISH_STORAGE_KEY, JSON.stringify(signals));
+  backupFishSignals(signals, userId);
   if (userId) queueSimStatePush(userId, 'fish_signals_v1', signals);
   return saved;
+}
+/** Also mirror cloud hydration and existing local libraries, without causing a cloud push loop. */
+export function backupFishSignals(signals: TradeSignal[], userId: string | null): void {
+  void saveFishLibraryBackup(userId, { signals, tombstones: loadFishTombstones() });
+}
+/** Merge a delayed disk recovery with live catches; an early start must archive the recovered old round too. */
+export function restoreFishSignals(backup: FishLibraryBackup | null, current: TradeSignal[], userId: string | null, archiveBefore?: number): TradeSignal[] {
+  if (!backup) { backupFishSignals(current, userId); return current; }
+  const tombstones = loadFishTombstones();
+  // Apply deletion to the original key before creating any new archive key.
+  let recovered = applyFishTombstones(backup.signals, mergeFishTombstones(tombstones, backup.tombstones));
+  if (archiveBefore !== undefined) {
+    const occurrence = (s: TradeSignal) => `${fishCatchKey(s)}|${s.caughtAt ?? 0}`;
+    const archived = new Set(current.filter(s => s.fishArchive).map(occurrence));
+    recovered = recovered.filter(s => s.fishArchive || !archived.has(occurrence(s)));
+    const old = recovered.filter(s => !s.fishArchive && (s.caughtAt ?? 0) <= archiveBefore);
+    const oldSet = new Set(old);
+    recovered = [...recovered.filter(s => !oldSet.has(s)), ...archiveFishForNextRound(old, archiveBefore)];
+  }
+  const value = mergeFishLibraryBackups({ signals: current, tombstones }, { ...backup, signals: recovered });
+  if (JSON.stringify(value.tombstones) !== JSON.stringify(tombstones)) {
+    writePersistedStateRaw(FISH_DELETED_KEY, JSON.stringify(value.tombstones));
+    if (userId) queueSimStatePush(userId, 'fish_deleted_v1', value.tombstones);
+  }
+  if (JSON.stringify(value.signals) !== JSON.stringify(current)) saveFishSignals(value.signals, userId);
+  else backupFishSignals(value.signals, userId);
+  return value.signals;
 }
 export function fishSignalTitle(signal: TradeSignal): string {
   const r = signal.fish;

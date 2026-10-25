@@ -208,14 +208,54 @@ it('新一轮失败或取消时，上一轮的新鱼已经在取数前入舱并�
  await act(async()=>{await result.current.start({feature:def,algorithm:{...a,threshold:NaN},anchorMs:cut});});
  expect(loadFishSignals().filter(s=>previous.includes(s.symbol))).toHaveLength(previous.length);
 });
-it('入舱保存失败时保留原新鱼和上一轮结果，不开始新的市场扫描',async()=>{
+it('localStorage 写满时立即入舱，仍然发起并完成新一轮捕捞',async()=>{
  const storage=await import('@/lib/fishSignals');
+ const persisted=await import('@/lib/persistedStateStorage');
  const {result}=renderHook(()=>useFish(undefined));
  await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
- const previous=result.current.signals,requests=candleRequests;
- const save=vi.spyOn(storage,'saveFishSignals').mockReturnValueOnce(false);
- await act(async()=>{await result.current.start({feature:def,algorithm:a,anchorMs:cut});});
- expect(candleRequests).toBe(requests);expect(result.current.signals).toBe(previous);
- expect(result.current.progress?.error).toContain('已停止新一轮捕捞');
- save.mockRestore();
+ const previous=result.current.signals.filter(s=>s.freshCatch),requests=candleRequests;
+ const write=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('full','QuotaExceededError');});
+ let release!:()=>void;gate=new Promise<void>(r=>{release=r;});let run!:Promise<void>;
+ try {
+  act(()=>{run=result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
+  // Before any market response, every previous fresh catch is already in the cabin.
+  for(const fish of previous)expect(result.current.signals.some(s=>s.fishArchive&&s.symbol===fish.symbol&&!s.freshCatch)).toBe(true);
+  await waitFor(()=>expect(candleRequests).toBeGreaterThan(requests));
+  expect(result.current.progress?.status).toBe('running');expect(result.current.progress?.error).toBeFalsy();
+  await act(async()=>{release();await run;});
+  expect(result.current.progress?.status).toBe('complete');
+  expect(result.current.signals.filter(s=>s.freshCatch)).toHaveLength(previous.length);
+  for(const fish of previous)expect(result.current.signals.some(s=>s.fishArchive&&s.symbol===fish.symbol)).toBe(true);
+  expect(storage.loadFishSignals()).toEqual(result.current.signals);
+ } finally {write.mockRestore();persisted.clearPersistedStateMemoryForTests();}
+});
+it('启动不等待旧鱼舱恢复；迟到的旧鱼入舱，正在捕捞的新鱼仍留在本轮',async()=>{
+ const store=await import('@/lib/fish/libraryStore');
+ let recover!:(value:import('@/lib/fish/libraryStore').FishLibraryBackup)=>void;
+ const load=vi.spyOn(store,'loadFishLibraryBackup').mockImplementationOnce(()=>new Promise(r=>{recover=r;}));
+ let release!:()=>void;gate=new Promise<void>(r=>{release=r;});
+ const {result}=renderHook(()=>useFish('alice'));let run!:Promise<void>;
+ try {
+  act(()=>{run=result.current.start({feature:def,algorithm:a,anchorMs:cut,includeDuplicates:true});});
+  await waitFor(()=>expect(result.current.signals.some(s=>s.freshCatch)).toBe(true));
+  const fresh=result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort();
+  await act(async()=>recover({signals:[{...old,freshCatch:true},{...old,id:'late',symbol:'LATEUSDT',freshCatch:true,caughtAt:100}],tombstones:{}}));
+  expect(result.current.progress?.status).toBe('running');
+  expect(result.current.signals.filter(s=>s.freshCatch).map(s=>s.symbol).sort()).toEqual(fresh);
+  expect(result.current.signals.filter(s=>s.symbol==='OLDUSDT')).toHaveLength(1);
+  expect(result.current.signals.find(s=>s.symbol==='LATEUSDT')).toMatchObject({fishArchive:{at:expect.any(Number)}});
+  await act(async()=>{release();await run;});expect(result.current.progress?.status).toBe('complete');
+ } finally {load.mockRestore();}
+});
+it('切换账号后忽略上个账号迟到的鱼舱恢复',async()=>{
+ const store=await import('@/lib/fish/libraryStore');
+ let recover!:(value:import('@/lib/fish/libraryStore').FishLibraryBackup)=>void;
+ const load=vi.spyOn(store,'loadFishLibraryBackup').mockImplementationOnce(()=>new Promise(r=>{recover=r;}));
+ const view=renderHook(({owner})=>useFish(owner),{initialProps:{owner:'alice'}});
+ try {
+  view.rerender({owner:'bob'});await act(async()=>{});
+  await act(async()=>recover({signals:[{...old,id:'alice-only',symbol:'ALICEUSDT'}],tombstones:{}}));
+  expect(view.result.current.signals.some(s=>s.symbol==='ALICEUSDT')).toBe(false);
+  expect(JSON.parse(localStorage.getItem(FISH_STORAGE_KEY)??'[]').some((s:any)=>s.symbol==='ALICEUSDT')).toBe(false);
+ } finally {load.mockRestore();}
 });
