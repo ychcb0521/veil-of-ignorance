@@ -43,6 +43,12 @@ export interface QualityResult {
   pendingExit?: QualityTrigger;
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number } };
 }
+/** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
+export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'static' | 'dynamic'): number | null {
+  if (!result || !['open','closed'].includes(result.status)) return null;
+  const value = kind === 'static' ? result.adversePct : result.drawdownPct;
+  return value != null && Number.isFinite(value) ? Math.max(0,kind === 'static' ? -value : value) : null;
+}
 /**
  * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
  * 买入过滤：全部启用的条件都满足才买入；读数取买入时刻之前最后一根已收盘的 K 线（不看买入之后）。

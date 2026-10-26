@@ -245,3 +245,26 @@ it('links only sold or held trades to their campaign; a registered buy waiting f
   expect(within(first).getByText('已卖出').closest('a')).not.toBeNull();
   expect(within(first).getByText('待设门槛').closest('a')).toBeNull();
 });
+it('shows and independently sorts both drawdown columns next to each sell return, preserving zero and missing values',()=>{
+ const s=state();s.study=importQualityLibrary(s.study,['HIGH','LOW','MISSING'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));
+ const [sp,cp]=s.study.sellPlans!;sp.rule={metric:sp.metric,direction:'<',threshold:.5};cp.rule={metric:cp.metric,direction:'<',threshold:-8};
+ for(const row of qualityComparisonRows(s.study).filter(r=>['HIGH','LOW'].includes(r.source.symbol))) for(const p of [sp,cp]){
+  const high=row.source.symbol==='HIGH',state=p===sp;
+  s.study.results.push({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T,status:'closed',returnPct:high?10:-5,adversePct:state?(high?-25:0):(high?-2:-40),drawdownPct:state?(high?35:8):(high?6:50)});
+ }
+ render(<FishQuality state={s}/>);
+ const high=()=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('HIGH'))!;
+ const low=()=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('LOW'))!;
+ const missing=()=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('MISSING'))!;
+ expect(within(high()).getAllByTestId('quality-static-drawdown').map(x=>x.textContent)).toEqual(['25.00%','2.00%']);
+ expect(within(high()).getAllByTestId('quality-dynamic-drawdown').map(x=>x.textContent)).toEqual(['35.00%','6.00%']);
+ expect(within(low()).getAllByTestId('quality-static-drawdown')[0]).toHaveTextContent('0.00%');
+ expect(within(missing()).getAllByTestId('quality-static-drawdown').every(x=>x.textContent==='—')).toBe(true);
+ for(const type of ['静态','动态']){
+  fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}最大回撤排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('HIGH');
+  fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}最大回撤排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
+  expect(screen.getAllByTestId('quality-fish-row').at(-1)).toHaveTextContent('MISSING');
+  fireEvent.click(screen.getByRole('button',{name:`按CDA 原始值${type}最大回撤排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
+ }
+ fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));expect(screen.queryByTestId('quality-static-drawdown')).toBeNull();expect(screen.queryByTestId('quality-dynamic-drawdown')).toBeNull();
+});

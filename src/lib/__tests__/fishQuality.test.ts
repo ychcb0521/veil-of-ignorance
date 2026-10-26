@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { definitionKey } from '@/lib/deepDig/features';
-import { collectFishQuality, evaluateQualitySample, migrateQualityCaptureEntries, importQualityFish, newQualityStudy, qualityDefinition, qualityGroupId, qualityGroupSummary, qualityMetricPlan, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
+import { collectFishQuality, qualityDrawdownPct, evaluateQualitySample, migrateQualityCaptureEntries, importQualityFish, newQualityStudy, qualityDefinition, qualityGroupId, qualityGroupSummary, qualityMetricPlan, qualityResultKey, type QualityGroup, type QualitySample } from '@/lib/fish/quality';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
 import type { FishReconstructionLoader } from '@/lib/fish/reconstruction';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -133,7 +133,7 @@ describe('fish quality paper experiments', () => {
     const r = await evaluate(s, g, loader(t => prices.find(b => b.openTime === t) ?? bar(t)), T + 3 * M, .05);
     expect(r).toMatchObject({ status: 'open', entryPrice: 100, endPrice: 105, complete: true });
     expect(r.returnPct).toBeCloseTo(5); expect(r.pnl).toBeCloseTo(5); expect(r.peakPct).toBeCloseTo(20);
-    expect(r.drawdownPct).toBeCloseTo(25); expect(r.adversePct).toBeCloseTo(-10); expect(r.uncapturedPct).toBeCloseTo(15);
+    expect(r.drawdownPct).toBeCloseTo(25); expect(r.adversePct).toBeCloseTo(-10); expect(qualityDrawdownPct(r,'static')).toBeCloseTo(10); expect(qualityDrawdownPct(r,'dynamic')).toBeCloseTo(25); expect(r.uncapturedPct).toBeCloseTo(15);
     expect(r.reason).toContain('仍持有'); expect(r.heldHours).toBeCloseTo(.05);
   });
   it('sells only after a completed algorithm reading, at the next minute open; excludes the exit candle high/low', async () => {

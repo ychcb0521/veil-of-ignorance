@@ -66,11 +66,12 @@ it('computes disjoint return bins, interpolated quantiles and no-sample values w
   expect(qualityDistribution([])).toMatchObject({ n: 0, mean: null, worst: null, p10: null, winRate: null });
 });
 it('exports one row per detector with a single detector column and shared sell returns', () => {
-  const s = study(), { rows } = seed(s), sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
-  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(9);
+  const s = study(), { rows } = seed(s); s.results[0] = {...s.results[0],adversePct:-4,drawdownPct:7}; s.results[1] = {...s.results[1],adversePct:-9,drawdownPct:15};
+  const sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
+  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(13);
   expect(sheet.rows[0][1]).toBe('鱼');
-  expect(sheet.rows.map(r=>r.slice(5,7))).toEqual([[10,-5],[10,-5]]);
-  expect(sheet.rows[0][7]).not.toEqual(sheet.rows[1][7]);
+  expect(sheet.rows.map(r=>r.slice(5,11))).toEqual([[10,4,7,-5,9,15],[10,4,7,-5,9,15]]);
+  expect(sheet.rows[0][11]).not.toEqual(sheet.rows[1][11]);
   expect(sheet.columns.slice(5).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
