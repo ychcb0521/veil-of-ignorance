@@ -3,7 +3,7 @@ import { Link, useInRouterContext } from 'react-router-dom';
 import { FishQualityDistribution } from '@/components/FishQualityDistribution';
 import { qualityDistributionSeries, type QualityDistributionMetric } from '@/lib/fish/qualityDistribution';
 import { qualityCampaignPath } from '@/lib/campaignSections';
-import { hasQualityEntry } from '@/lib/fish/qualityCampaignArchive';
+import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
 import { ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Filter, Gauge, Plus, RefreshCw, Settings2, Star, X } from 'lucide-react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { FishProcessButton } from '@/components/FishProcess';
@@ -91,7 +91,7 @@ const FILTER_TEXT: Record<QualityFilterStatus['state'], string> = { none: '', pa
 function ResultCell({ result, onClick, section }: { result?: QualityResult; onClick: () => void; section: 'sell' | 'detect' }) {
   const router = useInRouterContext(), className = 'flex w-full items-center justify-between gap-2 text-left hover:underline';
   const content = <><span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{resultText(result)}</span></>;
-  if (result && hasQualityEntry(result)) {
+  if (result && hasQualityCampaign(result)) {
     const href = qualityCampaignPath(result.key, section);
     return router ? <Link to={href} className={className} title="打开该标的的交易战役">{content}</Link> : <a href={href} className={className} title="打开该标的的交易战役">{content}</a>;
   }

@@ -221,3 +221,13 @@ it('sorts sell returns among bought signals only; not-bought and pending rows st
   fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' }));
   expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('DDDUSDT');
 });
+it('links only sold or held trades to their campaign; a registered buy waiting for a threshold is not a link', () => {
+  const s = state(), row = qualityComparisonRows(s.study)[0], [sPlan, cPlan] = s.study.sellPlans!;
+  sPlan.rule = { metric: sPlan.metric, direction: '<', threshold: .5 };
+  s.study.results.push({ key: qualityResultKey(row, sPlan, 0), sampleId: row.id, groupId: sPlan.id, evaluatedAt: T, status: 'closed', entryTime: T, entryPrice: 10, endTime: T + 60_000, endPrice: 11, pnl: 10, returnPct: 10 },
+    { key: qualityResultKey(row, cPlan, 0), sampleId: row.id, groupId: cPlan.id, evaluatedAt: T, status: 'waiting', entryTime: T, entryPrice: 10 });
+  render(<FishQuality state={s}/>);
+  const first = screen.getAllByTestId('quality-fish-row')[0];
+  expect(within(first).getByText('已卖出').closest('a')).not.toBeNull();
+  expect(within(first).getByText('待设门槛').closest('a')).toBeNull();
+});

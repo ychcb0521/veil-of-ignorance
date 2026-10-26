@@ -15,3 +15,9 @@ it('does no comparison loading for the personal board and isolates board/account
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'a' } })); }); expect(load).toHaveBeenCalledTimes(n);
   act(() => { window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'b' } })); }); await waitFor(() => expect(load).toHaveBeenCalledTimes(n + 1));
 });
+it('passes the sell board buy-filter label through and clears it on other boards', async () => {
+  const load = vi.mocked(listQualityCampaignData);
+  load.mockResolvedValueOnce({ rows: [], warning: undefined, selectedSellKey: undefined, buyFilterLabel: '状态 S 原始值 > 0.7' } as never);
+  const h = renderHook(() => useQualityCampaignList('a', 'sell'));
+  await waitFor(() => expect(h.result.current.buyFilterLabel).toBe('状态 S 原始值 > 0.7'));
+});

@@ -3,8 +3,8 @@ import type { TradeRecord } from '@/types/trading';
 import type { getCampaignFullData } from '@/lib/journalApi';
 import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { loadQualityStudy } from './qualityStore';
-import { archiveQualityStudy, hasQualityEntry, qualityRuleLabel, qualitySellKey, type QualityCampaignRun } from './qualityCampaignArchive';
-import { QUALITY_NOTIONAL, type FishQualityStudy } from './quality';
+import { archiveQualityStudy, hasQualityCampaign, qualityRuleLabel, qualitySellKey, type QualityCampaignRun } from './qualityCampaignArchive';
+import { QUALITY_NOTIONAL, activeBuyFilters, qualityFilterStatus, type FishQualityStudy } from './quality';
 
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
 const iso = (time: number) => new Date(time).toISOString();
@@ -52,13 +52,17 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
 }
 export function qualityCampaignDataFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect'): QualityCampaignData[] {
-  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => hasQualityEntry(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0))
+  // 卖出比较跟随当前的买入过滤：只列满足条件的交易，和鱼质量里的卖出对照一致
+  const filtersOn = section === 'sell' && activeBuyFilters(study).length > 0, readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => run.plan.rule && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
+    && (!filtersOn || qualityFilterStatus(study, run.sample, readings).state === 'pass'))
     .map(run => buildQualityCampaignData(owner, run, section));
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect') {
   const loaded = await loadQualityStudy(owner);
   const selected = loaded.study.sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && plan.rule);
-  return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning,
+  const buyFilterLabel = section === 'sell' ? activeBuyFilters(loaded.study).map(f => `${f.label} ${f.direction} ${f.threshold}`).join('；') : '';
+  return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning, buyFilterLabel,
     selectedSellKey: selected ? JSON.stringify([qualitySellKey(selected), loaded.study.observeHours]) : undefined };
 }
 export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {

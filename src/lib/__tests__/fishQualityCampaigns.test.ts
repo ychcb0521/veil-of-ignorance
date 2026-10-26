@@ -72,3 +72,29 @@ describe('fish-quality campaigns', () => {
     for (const [name, value] of [['状态', '已卖出'], ['收益率 %', 20], ['盈亏 USDT', 20], ['最大涨幅 %', 30], ['最大回撤 %', 12], ['买入价', 10], ['卖出 / 估值价', 12]] as const) expect(row[columns.indexOf(name)]).toBe(value);
   });
 });
+
+// 复查 Codex 的比较战役：没设门槛的方案不成战役；卖出比较跟随买入过滤
+import { qualityFilterReadingKey } from '@/lib/fish/quality';
+import { makeQualityBuyFilter } from '@/lib/fish/qualityFilters';
+describe('comparison campaign review fixes', () => {
+  it('never archives a sell plan without a threshold, and prunes such runs saved earlier', () => {
+    const { study, row } = seed(), plan = study.sellPlans![1];
+    plan.rule = undefined;
+    const waiting: QualityResult = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T + 1, status: 'waiting', entryTime: T, entryPrice: 10 };
+    const archived = archiveQualityResult({ ...study, results: [...study.results, waiting] }, waiting);
+    expect(archived.campaignRuns?.some(r => r.plan.id === plan.id)).toBeFalsy();
+    const legacy = { ...archiveQualityStudy(study), results: [...study.results, waiting] };
+    legacy.campaignRuns = [...legacy.campaignRuns!, { ...legacy.campaignRuns![0], plan: { ...plan }, result: waiting }];
+    const cleaned = archiveQualityStudy(legacy);
+    expect(cleaned.campaignRuns).toHaveLength(1); expect(cleaned.campaignRuns![0].result.status).toBe('closed');
+    expect(qualityCampaignDataFromStudy('owner', legacy, 'sell')).toHaveLength(1);
+  });
+  it('lists only bought trades on the sell board while a buy filter is on', () => {
+    const { study, row } = seed(), archived = archiveQualityStudy(study), f = makeQualityBuyFilter('state:state', '>', .7);
+    expect(qualityCampaignDataFromStudy('owner', archived, 'sell')).toHaveLength(1);
+    const failing = { ...archived, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
+    expect(qualityCampaignDataFromStudy('owner', failing, 'sell')).toHaveLength(0);
+    expect(qualityCampaignDataFromStudy('owner', { ...failing, filterReadings: [] }, 'sell')).toHaveLength(0); // 待判断也不列
+    expect(qualityCampaignDataFromStudy('owner', { ...failing, filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .9 }] }, 'sell')).toHaveLength(1);
+  });
+});
