@@ -68,3 +68,34 @@ it('keeps the same mining checkpoint after interruption and clears it after comp
   expect(await interrupted(456)).not.toBe(second);
   vi.useRealTimers();
 });
+
+
+it('aborts an old mining owner on unmount so a remounted control never waits behind an orphan scan', async () => {
+  vi.useFakeTimers();
+  const first = renderHook(() => useFish(undefined));
+  let pending!: Promise<unknown>;
+  act(() => { pending = first.result.current.mine({ anchorMs: 123 }).catch(e => e); });
+  const checkpoint = calls.at(-1)!.checkpoint;
+  first.unmount();
+  expect(await pending).toMatchObject({ name: 'AbortError' });
+  expect(calls.at(-1)!.aborted()).toBe(true);
+  const next = renderHook(() => useFish(undefined));
+  let found: unknown;
+  await act(async () => { const run = next.result.current.mine({ anchorMs: 123 }); await vi.advanceTimersByTimeAsync(10_000); found = await run; });
+  expect(found).toEqual([expect.objectContaining({ symbol: 'XUSDT' })]);
+  expect(calls.at(-1)!.checkpoint).toBe(checkpoint);
+  vi.useRealTimers();
+});
+
+it('never reuses mining decisions after switching accounts', async () => {
+  vi.useFakeTimers();
+  const h = renderHook(({ owner }) => useFish(owner), { initialProps: { owner: 'account-a' } });
+  let pending!: Promise<unknown>;
+  act(() => { pending = h.result.current.mine({ anchorMs: 123 }).catch(e => e); });
+  const previous = calls.at(-1)!.checkpoint;
+  act(() => { h.rerender({ owner: 'account-b' }); });
+  expect(await pending).toMatchObject({ name: 'AbortError' });
+  await act(async () => { const next = h.result.current.mine({ anchorMs: 123 }).catch(e => e); h.result.current.stopMining(); await next; });
+  expect(calls.at(-1)!.checkpoint).not.toBe(previous);
+  vi.useRealTimers();
+});

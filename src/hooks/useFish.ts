@@ -40,6 +40,8 @@ function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrite
 
 // Shared across TimeControl instances and panel remounts in this browser page.
 let pageScanner: FishScanner | null = null;
+/** Survive control remounts; keys include the account, anchor and frozen rules. */
+const pageMiningCheckpoint: { current: { key: string; results: import('@/lib/fishScanner').FishScanCheckpoint } | null } = { current: null };
 /** Independent of TimeControl's lifetime so a quality batch can finish on other routes. */
 export async function runPageFishQuality(options: import('@/lib/fish/quality').QualityRunOptions): Promise<void> {
   pageScanner ??= new FishScanner();
@@ -99,7 +101,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const unsubscribe = subscribePersistedStateHydration(FISH_STORAGE_KEY, hydrated), unsubscribeDeleted = subscribePersistedStateHydration(FISH_DELETED_KEY, hydrated);
     const storage = (e: StorageEvent) => { if (e.key === FISH_STORAGE_KEY || e.key === FISH_DELETED_KEY || e.key === null) hydrated(); };
     window.addEventListener('storage', storage);
-    return () => { cancelled = true; ++generation.current; controller.current?.abort(); controller.current = null; scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
+    return () => { cancelled = true; ++generation.current; controller.current?.abort(); controller.current = null; mineController.current?.abort(); scanner.current = null; unsubscribe(); unsubscribeDeleted(); window.removeEventListener('storage', storage); };
   }, [userId]);
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
@@ -166,7 +168,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
    * 取数器正被别的任务占着时抛错；被捕捞打断时抛 AbortError。
    */
   const mineController = useRef<AbortController | null>(null), minePromise = useRef<Promise<unknown> | null>(null);
-  const miningCheckpoint = useRef<{ key: string; results: import('@/lib/fishScanner').FishScanCheckpoint } | null>(null);
+  const miningCheckpoint = pageMiningCheckpoint;
   const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void): Promise<TradeSignal[]> => {
     const sc = (scanner.current ??= pageScanner ??= new FishScanner());
     if (controller.current || mineController.current || sc.isBusy()) throw new Error('取数器正忙');
