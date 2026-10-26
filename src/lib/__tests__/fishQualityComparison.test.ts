@@ -103,7 +103,7 @@ it('copies signal-library signals once at their signal time, keeps them apart fr
   expect(rows.filter(r => r.source.symbol === 'AAAUSDT').map(r => r.origin ?? 'fish').sort()).toEqual(['fish', 'library']);
   expect(qualityComparisonRows(base).map(r => r.id)).toEqual(rows.filter(r => r.origin !== 'library').map(r => r.id));
   expect(migrateQualityCaptureEntries(withLib).samples.filter(v => v.origin === 'library')).toEqual(lib);
-  expect(importQualityLibrary({ ...base, tracking: false }, [libSignal('ZZZUSDT')]).samples).toHaveLength(base.samples.length);
+  expect(importQualityLibrary({ ...base, tracking: false }, [libSignal('ZZZUSDT')]).samples).toHaveLength(base.samples.length + 1);
   const missing = importQualityLibrary(base, [libSignal('YYYUSDT', { timeMs: NaN })]).samples.at(-1)!;
   expect(missing).toMatchObject({ enteredAt: null, basis: 'missing', origin: 'library' });
 });

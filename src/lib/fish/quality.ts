@@ -71,7 +71,9 @@ export interface QualityBuyFilter { id: string; label: string; metric: string; d
 export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
-  tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
+  /** Legacy saved field; automatic periodic evaluation has been removed. */
+  tracking: boolean;
+  groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
   sellPlans?: QualityGroup[]; selectedSellId?: string; selectedRowIds?: string[];
   /** Legacy saved field; no longer restricts display or execution. */
@@ -83,7 +85,7 @@ export interface FishQualityStudy {
   /** 已自动勾选过的挖掘信号（之后用户取消勾选就不再勾回来）。 */
   minedAutoSelected?: string[];
 }
-export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });
+export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: false, groups: [], samples: [], results: [], selectedRowIds: [] });
 /**
  * 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」：信号时间是「一直持续到扫描时刻」那段行情的起点，
  * 在起点买入等于事先知道信号会撑到扫描时刻，并白拿起点到扫描之间的涨幅；捕捞时刻才是当时真能下单的时点。
@@ -158,7 +160,6 @@ export function qualityMetricPlan(f: FishSnapshot, metric = 'capture'): { plan: 
   return { plan, scale: metric === 'capture' ? f.scale ?? 1 : 1 };
 }
 export function importQualityFish(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
-  if (!study.tracking) return study;
   const groups = new Map(study.groups.map(g => [g.id, g])), samples = new Map(study.samples.map(s => [s.id, s]));
   const seen = new Set(study.samples.flatMap(s => qualityMembers(s.source).filter(f => s.groups.includes(qualityGroupId(f))).map(f => memberKey(s.source, f))));
   let changed = false;
@@ -187,7 +188,6 @@ export function importQualityFish(study: FishQualityStudy, signals: readonly Tra
  */
 export const qualityLibrarySampleId = (source: TradeSignal) => `lib-${shortFishHash(signalDedupKey(source))}`;
 export function importQualityLibrary(study: FishQualityStudy, signals: readonly TradeSignal[], now = Date.now()): FishQualityStudy {
-  if (!study.tracking) return study;
   const ids = new Set(study.samples.map(s => s.id)), added: QualitySample[] = [];
   for (const source of signals) {
     const id = qualityLibrarySampleId(source);

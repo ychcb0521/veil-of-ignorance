@@ -37,12 +37,11 @@ it('automatically imports cabin and fresh fish while panel is absent, preserves 
   h.rerender({ rows: [] }); await flush(); chooseAndStart(h); await flush(1100); expect(h.result.current.study.samples).toHaveLength(1); expect(run).toHaveBeenCalledTimes(1);
   h.unmount(); expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ samples: expect.arrayContaining([expect.objectContaining({ source: signal })]) }));
 });
-it('applies edited group rules, hides old-rule results, rejects late callbacks and recalculates even if auto tracking is paused', async () => {
+it('applies edited group rules, hides old-rule results, rejects late callbacks and recalculates after manual edits', async () => {
   const tasks: QualityRunOptions[] = [];
   const run = vi.fn(async (o: QualityRunOptions) => { tasks.push(o); });
   const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush(1100);
   const old = tasks[0], s = old.study.samples[0], g = old.study.groups[0];
-  act(() => h.result.current.setTracking(false));
   act(() => h.result.current.setRule(g.id, { metric: 'capture', direction: '<', threshold: .06 }));
   act(() => old.onResult({ key: qualityResultKey(s, g, old.study.observeHours), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
   expect(h.result.current.study.results).toHaveLength(0);
@@ -67,13 +66,15 @@ it('retains samples when saving fails and retries without stopping new catches',
   expect(h.result.current.study.samples).toHaveLength(2);
   storage.save.mockResolvedValue(true); await flush(16_000); expect(h.result.current.warning).toBe('');
 });
-it('imports catches received while paused as soon as automatic tracking resumes', async () => {
-  const h = renderHook(({ rows }) => useFishQuality('a', rows, vi.fn(async () => {})), { initialProps: { rows: [signal] } });
-  await flush(); act(() => h.result.current.setTracking(false));
-  h.rerender({ rows: [signal, { ...signal, id: 'b', symbol: 'BBBUSDT' }] }); await flush();
-  expect(h.result.current.study.samples).toHaveLength(1);
-  act(() => h.result.current.setTracking(true)); await flush();
-  expect(h.result.current.study.samples).toHaveLength(2);
+it.each([true,false])('keeps source imports available but never periodically restarts returns with legacy tracking %s', async tracking => {
+  storage.load.mockResolvedValue({study:{...newQualityStudy(),tracking}});
+  const run=vi.fn(async()=>{});
+  const h=renderHook(({rows})=>useFishQuality('a',rows,run),{initialProps:{rows:[signal]}});
+  await flush(61_000);expect(run).not.toHaveBeenCalled();
+  chooseAndStart(h);await flush();expect(run).toHaveBeenCalledTimes(1);
+  await flush(180_000);expect(run).toHaveBeenCalledTimes(1);
+  h.rerender({rows:[signal,{...signal,id:'b',symbol:'BBBUSDT'}]});await flush(1000);
+  expect(h.result.current.study.samples).toHaveLength(2);expect(run).toHaveBeenCalledTimes(1);
 });
 // 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」
 it('restores existing signal-time copies at capture time before reevaluating and saves the migrated study without dropping chosen exits', async () => {
@@ -227,14 +228,13 @@ it('filters fully cached trades without calling the runner, including after rest
   expect(restored.result.current.study.results).toEqual(saved.results);
 });
 
-it('finishes the frozen selection after rows and tracking change, preserving results of deselected rows', async () => {
+it('finishes the frozen selection after rows change, preserving results of deselected rows', async () => {
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const other = { ...signal, id: 'b', symbol: 'BBBUSDT' };
   const h = renderHook(() => useFishQuality('a', [signal, other], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush(); chooseAndStart(h); await flush();
   const task = tasks[0], rows = qualityRunSamples(task.study), plan = task.study.sellPlans![0];
   act(() => h.result.current.setSelectedRows([]));
-  act(() => h.result.current.setTracking(false));
   await flush(61_000);
   expect(task.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
   for (const row of rows) act(() => task.onResult({ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open', entryTime: T, entryPrice: 100, returnPct: 1 }));

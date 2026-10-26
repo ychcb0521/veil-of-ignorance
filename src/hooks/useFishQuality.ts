@@ -46,8 +46,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     window.addEventListener('pagehide', flush);
     return () => { active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner]);
-  useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, study.tracking, change]);
-  useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, study.tracking, change]);
+  useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
+  useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, change]);
   useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
@@ -123,12 +123,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
   const priorityRef = useRef<readonly string[]>([]);
   const setPriority = useCallback((ids: readonly string[]) => { priorityRef.current = ids; }, []);
-  // Importing remains automatic; periodic evaluation requires an explicitly started selection.
-  useEffect(() => {
-    if (!ready || !study.tracking) return;
-    const interval = setInterval(() => void start(true), 60_000);
-    return () => clearInterval(interval);
-  }, [ready, study.tracking, start]);
   useEffect(() => {
     if (!ready || !warning) return;
     const timer = setInterval(() => { void saveQualityStudy(owner, current.current).then(ok => { if (ok && account.current === owner) setWarning(''); }); }, 15_000);
@@ -142,7 +136,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => ({ ...s, observeHours: hours }));
     defer(() => { if (controller.current) rerun.current = 'refresh'; else void start(true); });
   }, [change, start, defer]);
-  const setTracking = useCallback((tracking: boolean) => { change(s => ({ ...s, tracking })); }, [change]);
   const selectSell = useCallback((id: string) => change(s => markQualityDetection(s, id)), [change]);
   const setSelectedRows = useCallback((ids: string[]) => {
     selectionApproved.current = false; rerun.current = false;
@@ -161,6 +154,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     // 否决条件变了，正在跑的旧批次结果已没用：立刻按新设置重新开始，不排在整批之后
     defer(() => { if (sellChanged && controller.current) void restart(); else void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); });
   }, [change, start, restart, defer]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, restart, cancel, setRule, setObserveHours, setTracking, selectSell, setSelectedRows, setPriority, setFilters };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, restart, cancel, setRule, setObserveHours, selectSell, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

@@ -66,7 +66,7 @@ it('avg_S 卡修改阈值后刷新仍保留，序列不变',()=>{
 it('捕捞、鱼舱、鱼质量是三个同级模块，独立折叠', async () => {
  const {newQualityStudy}=await import('@/lib/fish/quality');
  const {enableQualityComparison}=await import('@/lib/fish/qualityComparison');
- const q={study:enableQualityComparison(newQualityStudy()),ready:true,running:false,progress:null,warning:'',error:'',start:vi.fn(),cancel:vi.fn(),setRule:vi.fn(),setTracking:vi.fn(),setObserveHours:vi.fn(),selectSell:vi.fn(),setSelectedRows:vi.fn()};
+ const q={study:enableQualityComparison(newQualityStudy()),ready:true,running:false,progress:null,warning:'',error:'',start:vi.fn(),cancel:vi.fn(),setRule:vi.fn(),setObserveHours:vi.fn(),selectSell:vi.fn(),setSelectedRows:vi.fn()};
  render(panel({quality:q}));
  const host=screen.getByTestId('fish-panel');
  for(const id of ['fish-catching','fish-cabin','fish-quality'])expect(screen.getByTestId(id).parentElement).toBe(host);

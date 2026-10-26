@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
@@ -115,10 +115,10 @@ it('lets the user fix one sell plan for detector comparisons from its header (no
 });
 it('keeps tracking/horizon controls compact and shows the paired trade metrics on demand', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '鱼质量跟踪设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '鱼质量观察设置' }));
   fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '-1' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '72' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).toHaveBeenCalledWith(72);
-  fireEvent.click(screen.getByLabelText('自动跟踪新鱼及更新收益')); expect(s.setTracking).toHaveBeenCalledWith(false);
+  expect(screen.queryByLabelText('自动跟踪新鱼及更新收益')).toBeNull();
 });
 
 // 【用户要求】2026-10-26 信号库的信号纳入卖出比较，并与鱼舱的鱼区分
@@ -147,7 +147,7 @@ it('allows selecting only a filtered source across the scroll window, shows chec
   const view = render(<FishQuality state={s}/>);
   expect(screen.getByRole('button', {name:'更新收益'})).toBeDisabled();
   fireEvent.change(screen.getByLabelText('鱼质量的来源'), {target:{value:'library'}});
-  fireEvent.click(screen.getByRole('button', {name:'全部选中'}));
+  fireEvent.click(screen.getByLabelText('全选当前筛选信号'));
   const ids = (s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string[];
   expect(ids).toHaveLength(61); expect(ids).not.toContain(qualityComparisonRows(s.study).find(r => r.origin !== 'library')!.id);
   s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
@@ -158,7 +158,7 @@ it('allows selecting only a filtered source across the scroll window, shows chec
   expect(screen.getByText('COIN0USDT')).toBeInTheDocument();
   expect(screen.getAllByRole('checkbox').every(el => (el as HTMLInputElement).checked)).toBe(true);
   fireEvent.click(screen.getAllByRole('checkbox')[1]); expect((s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toHaveLength(60);
-  fireEvent.click(screen.getByRole('button', {name:'清空选择'})); expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
+  fireEvent.click(screen.getByLabelText('全选当前筛选信号')); expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
 });
 
 it('sorts the single detector column in both directions and filters to one exact detector/threshold row', () => {
