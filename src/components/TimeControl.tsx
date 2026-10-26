@@ -22,6 +22,7 @@ import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
 import { useFishQuality } from '@/hooks/useFishQuality';
+import { armQualityReturn } from '@/lib/fish/qualityReturn';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
 import { SpeedSelector } from '@/components/SpeedSelector';
@@ -89,7 +90,8 @@ export function TimeControl({
   // ===== 信号库（Time Machine 旁的折叠接口）=====
   const fileRef = useRef<HTMLInputElement>(null);
   const [signalLibOpen, setSignalLibOpen] = useState(false);
-  const [fishOpen, setFishOpen] = useState(false);
+  // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
+  const [fishOpen, setFishOpen] = useState(() => armQualityReturn());
   const fishHostRef = useRef<HTMLDivElement>(null);
   const fishReturnPosition = useRef<{panelTop:number;ancestors:{node:HTMLElement;top:number;left:number}[]}|null>(null);
   const rememberFishPosition = useCallback(()=>{

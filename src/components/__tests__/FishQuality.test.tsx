@@ -295,3 +295,18 @@ it('shift-click selects (or clears) the whole run of rows between the last click
   expect(boxes().map(b => (b as HTMLInputElement).checked)).toEqual(shown.map((_, i) => i >= 1 && i <= 2));
   expect(boxes()[0]).toHaveAttribute('title', '按住 Shift 点另一行可连续选择');
 });
+// 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
+it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
+  const { saveQualityReturn, armQualityReturn, finishQualityReturn } = await import('@/lib/fish/qualityReturn');
+  window.history.replaceState({ key: 'fish-entry', idx: 1 }, '');
+  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', showStats: false, closedOnly: false, sort: 'symbol', ascending: true, distributionMetric: 'returnPct', statSort: null, tableTop: 0 }, scroll: [] });
+  expect(armQualityReturn()).toBe(true);
+  render(<FishQuality state={state()}/>);
+  expect(screen.getByRole('tab', {name: /比较探测/})).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
+  expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
+  finishQualityReturn();
+  cleanup();
+  render(<FishQuality state={state()}/>);
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
+});

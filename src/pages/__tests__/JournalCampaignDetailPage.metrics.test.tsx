@@ -534,6 +534,30 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(screen.queryByText('战役列表')).not.toBeInTheDocument();
   });
 
+  // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量（交易页）原来的位置
+  it('从鱼质量跳进来的，返回按钮写「返回鱼质量」并退回交易页那条浏览记录', async () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          '/?from=fish',
+          { pathname: '/journal/campaigns/winner', state: { fromFishQuality: true } },
+        ]}
+        initialIndex={1}
+      >
+        <Routes>
+          <Route path="/" element={<ListLocationProbe />} />
+          <Route path="/journal/campaigns" element={<div>战役列表</div>} />
+          <Route path="/journal/campaigns/:id" element={<JournalCampaignDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText('winner campaign')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '返回鱼质量' }));
+    expect(screen.getByTestId('list-location-probe')).toHaveTextContent('/?from=fish');
+    expect(screen.queryByText('战役列表')).not.toBeInTheDocument();
+  });
+
   it('一键隐藏会同时移除反事实 marker、水平线和竖线', async () => {
     const branch = {
       id: 'counterfactual-1',
