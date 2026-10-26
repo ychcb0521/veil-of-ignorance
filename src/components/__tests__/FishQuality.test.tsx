@@ -62,6 +62,8 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   const source = screen.getByLabelText('鱼质量的来源');
   expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
   fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
+  // 已按信号库筛选，每行不再重复标记
+  for (const r of screen.getAllByTestId('quality-fish-row')) expect(within(r).queryByText('信号库')).toBeNull();
   fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
 });
