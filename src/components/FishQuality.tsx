@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Gauge, RefreshCw, Settings2, Star } from 'lucide-react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { FishProcessButton } from '@/components/FishProcess';
@@ -118,6 +118,9 @@ export function FishQuality({ state, onJump, canJump }: { state: FishQualityStat
   const first = Math.max(0, Math.min(rows.length - 1, Math.floor(scrollTop / rowPx) - OVERSCAN));
   const last = Math.min(rows.length, Math.max(first + 1, Math.ceil((scrollTop + viewPx) / rowPx) + OVERSCAN));
   const visible = rows.slice(first, last), padTop = first * rowPx, padBottom = (rows.length - last) * rowPx;
+  // 评估先算屏幕上看得见的行，再按表格顺序往下
+  const { setPriority } = state;
+  useEffect(() => { setPriority?.([...visible.map(r => r.signalId ?? r.id), ...rows.map(r => r.signalId ?? r.id)]); }, [setPriority, rows, first, last]); // eslint-disable-line react-hooks/exhaustive-deps
   const changeSort = (key: 'time' | 'symbol' | 'detector') => { if (sort === key) setAscending(!ascending); else { setSort(key); setAscending(key !== 'time'); } resetScroll(); };
   const applyHours = () => { const n = Number(hours ?? study.observeHours); if (!Number.isFinite(n) || n < 0 || n > 8784) { setError('观察时长须在 0～8784 小时之间'); return; } setError(''); setHours(null); if (n !== study.observeHours) state.setObserveHours(n); };
   const exportRows = () => { try { downloadQualityComparison(study, rows); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); } };

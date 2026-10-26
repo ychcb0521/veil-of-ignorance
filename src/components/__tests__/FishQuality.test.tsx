@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn() };
 }
 afterEach(cleanup);
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
@@ -113,4 +113,15 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'fish' } });
   expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 3 行 · 1 条信号（筛选自 303 行）');
   expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
+});
+it('hands the evaluator the on-screen rows first and updates that order after scrolling', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, Array.from({ length: 200 }, (_, i) => ({ id: `l${i}`, symbol: `S${String(i).padStart(3, '0')}USDT`, timeMs: T - (i + 1) * 3600_000, timeLabel: '', fallbackZone: '' })));
+  render(<FishQuality state={s}/>);
+  const rows = qualityComparisonRows(s.study), byId = new Map(rows.map(r => [r.id, r.source.symbol]));
+  const firstCall = vi.mocked(s.setPriority).mock.calls.at(-1)![0];
+  expect(byId.get(firstCall[0])).toBe('AAAUSDT'); expect(new Set(firstCall).size).toBe(rows.length);
+  const box = screen.getByTestId('quality-fish-table'); box.scrollTop = 200 * 33; fireEvent.scroll(box);
+  const afterScroll = vi.mocked(s.setPriority).mock.calls.at(-1)![0];
+  expect(byId.get(afterScroll[0])).not.toBe('AAAUSDT'); expect(screen.getByText(byId.get(afterScroll[0])!)).toBeInTheDocument();
 });

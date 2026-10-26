@@ -156,7 +156,16 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 }
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
+// 样本数组不变时复用合并结果：评估中每出一个结果 study 都会换，但 samples 不变，不必整表重算。
+const comparisonCache = new WeakMap<readonly QualitySample[], QualitySample[]>();
 export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] {
+  const cached = comparisonCache.get(study.samples);
+  if (cached) return cached;
+  const built = buildComparisonRows(study);
+  comparisonCache.set(study.samples, built);
+  return built;
+}
+function buildComparisonRows(study: FishQualityStudy): QualitySample[] {
   const rows = new Map<string, QualitySample>();
   for (const sample of study.samples) {
     // 信号库的信号单独成行，即使与某条鱼同币同时也不合并。
@@ -272,14 +281,27 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
   }
 }
 export interface QualityProgress { done: number; total: number; current: string }
-export interface QualityRunOptions { study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void }
+export interface QualityRunOptions {
+  study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
+  /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
+  priority?: () => readonly string[];
+}
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map(study.results.map(r => [r.key, r]));
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
+  // 【用户要求】2026-10-26「运行完的币种，结果要立即显示出来」：按界面顺序挑下一行，同一行的几条卖出规则连着算完
+  const pending = new Map<string, { s: QualitySample; g: QualityGroup }[]>();
+  for (const task of tasks) { const list = pending.get(task.s.id); if (list) list.push(task); else pending.set(task.s.id, [task]); }
+  const next = () => {
+    for (const id of options.priority?.() ?? []) { const list = pending.get(id); if (list) { pending.delete(id); return list; } }
+    const first = pending.entries().next();
+    if (first.done) return undefined;
+    pending.delete(first.value[0]); return first.value[1];
+  };
   let done = 0;
-  for (const { s, g } of tasks) {
+  for (let batch = next(); batch; batch = next()) for (const { s, g } of batch) {
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));

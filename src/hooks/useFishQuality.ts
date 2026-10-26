@@ -58,7 +58,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
     setRunning(true); setError('');
     try {
-      await latestRun.current({ study: frozen, signal: aborter.signal,
+      await latestRun.current({ study: frozen, signal: aborter.signal, priority: () => priorityRef.current,
         onProgress: p => { if (epoch === generation.current && !aborter.signal.aborted) setProgress(p); },
         onResult: result => {
           if (epoch !== generation.current || aborter.signal.aborted) return;
@@ -76,6 +76,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }
   }, [change]);
   const cancel = useCallback(() => { controller.current?.abort(); }, []);
+  // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
+  const priorityRef = useRef<readonly string[]>([]);
+  const setPriority = useCallback((ids: readonly string[]) => { priorityRef.current = ids; }, []);
   // Importing remains automatic; periodic evaluation requires an explicitly started selection.
   useEffect(() => {
     if (!ready || !study.tracking) return;
@@ -103,6 +106,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change, cancel]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;
