@@ -69,7 +69,7 @@ describe('fish-quality campaigns', () => {
     const { study } = seed(); const sheets = buildQualitySheets(study, qualityDisplayRows(study));
     expect(sheets.map(sheet => sheet.name)).toEqual(['鱼质量', '运行结果']); expect(sheets[0].rows).toHaveLength(4); expect(sheets[1].rows).toHaveLength(1);
     const columns = sheets[1].columns.map(column => column.header), row = sheets[1].rows[0];
-    for (const [name, value] of [['状态', '已卖出'], ['收益率 %', 20], ['盈亏 USDT', 20], ['最大涨幅 %', 30], ['最大回撤 %', 12], ['买入价', 10], ['卖出 / 估值价', 12]] as const) expect(row[columns.indexOf(name)]).toBe(value);
+    for (const [name, value] of [['状态', '已卖出'], ['收益率 %', 20], ['盈亏 USDT', 20], ['最大涨幅 %', 30], ['动态最大回撤 %', 12], ['静态最大回撤 %', 5], ['买入价', 10], ['卖出 / 估值价', 12]] as const) expect(row[columns.indexOf(name)]).toBe(value);
   });
 });
 
