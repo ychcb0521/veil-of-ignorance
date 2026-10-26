@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, materializePlanBuyFilters, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
-import type { QualityHoldingVeto } from '@/lib/fish/qualityVeto';
+import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -17,7 +17,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [definitionNotice, setDefinitionNotice] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
   const readyRef = useRef(false), latestRun = useRef(run); latestRun.current = run;
-  const rerun = useRef(false);
+  const rerun = useRef<false | 'refresh' | NonNullable<QualityRunOptions['mode']>>(false);
   const selectionApproved = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
@@ -76,22 +76,22 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (epoch === generation.current) setWarning(ok ? '' : '鱼质量未能保存到本机；请保留此页面，系统会继续重试。');
     }); }, 400);
   }, [study, ready, owner]);
-  const start = useCallback(async (automatic = false) => {
+  const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
     if (current.current.campaignRepair?.state === 'running') { if (!automatic) setError('已有战役正在纠错，请先完成或暂停纠错。'); return; }
-    if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current) return;
+    if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current && !mode) return;
     if (!automatic) selectionApproved.current = true;
-    if (controller.current) { if (controller.current.signal.aborted) rerun.current = true; return; }
+    if (controller.current) { if (controller.current.signal.aborted) rerun.current = mode ?? 'refresh'; return; }
+    if (mode && !qualityFilterNeedsData(current.current, mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
-    change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
-    setDefinitionNotice('');
+    if (!mode) { change(s => syncQualitySellDefinitions(archiveQualityStudy(s))); setDefinitionNotice(''); }
     const epoch = generation.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = structuredClone(current.current);
     const releaseNotifications = beginHistoryOnlyNotifications();
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
     setRunning(true); setError('');
     try {
-      await latestRun.current({ study: frozen, signal: aborter.signal, priority: () => priorityRef.current,
+      await latestRun.current({ study: frozen, signal: aborter.signal, mode, priority: () => priorityRef.current,
         onProgress: p => { if (epoch === generation.current && !aborter.signal.aborted) setProgress(p); },
         onFilterReading: reading => {
           if (epoch !== generation.current || aborter.signal.aborted) return;
@@ -109,7 +109,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     } catch (e) { if (epoch === generation.current && !aborter.signal.aborted) setError(e instanceof Error ? e.message : '评估失败'); }
     finally {
       aborter.signal.removeEventListener('abort', releaseNotifications); releaseNotifications();
-      if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { rerun.current = false; setTimeout(() => void start(true), 0); } } }
+      if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; setTimeout(() => void start(true, queued === 'refresh' ? undefined : queued), 0); } } }
     }
   }, [change]);
   const cancel = useCallback(() => { controller.current?.abort(); }, []);
@@ -120,7 +120,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => { const next = selectMinedRows(s); picked = next !== s; return next; });
     if (!picked) return;
     selectionApproved.current = true;
-    if (controller.current) { rerun.current = true; return; }
+    if (controller.current) { rerun.current = 'refresh'; return; }
     const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);
   }, [study.samples, ready, change, start]);
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
@@ -153,12 +153,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change, cancel]);
-  // 买入过滤与持仓一票否决：每套卖出方案各自一套（【用户要求】2026-10-26 过滤门槛与卖出算法绑定）。
-  // 改完重算；读数按「行 + 指标」缓存，改门槛不重新取数。旧版本的全局过滤先落到每套方案上，再只改这一套。
-  const setFilters=useCallback((planId:string,filters:QualityBuyFilter[],vetoes:QualityHoldingVeto[])=>{
-    cancel();change(s=>{const archived=materializePlanBuyFilters(archiveQualityStudy(s));return {...archived,sellPlans:archived.sellPlans?.map(p=>p.id===planId?{...p,buyFilters:structuredClone(filters),holdingVetoes:structuredClone(vetoes)}:p)};});
-    const epoch=generation.current;setTimeout(()=>{if(epoch===generation.current)void start();},500);
-  },[cancel,change,start]);
+  // 各方案独立过滤，买入条件只筛选已有结果；持仓否决变化才重新评估卖出。
+  const setFilters = useCallback((planId: string, filters: QualityBuyFilter[], vetoes: QualityHoldingVeto[]) => {
+    const plan = current.current.sellPlans?.find(p => p.id === planId);
+    if (!plan) return;
+    const sellChanged = JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) !== JSON.stringify(holdingVetoIdentity(vetoes));
+    cancel();
+    change(s => {
+      const saved = materializePlanBuyFilters(sellChanged ? archiveQualityStudy(s) : s);
+      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, buyFilters: structuredClone(filters), holdingVetoes: structuredClone(vetoes) } : p) };
+    });
+    const epoch = generation.current;
+    setTimeout(() => { if (epoch === generation.current) void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); }, 500);
+  }, [cancel, change, start]);
   return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, definitionNotice, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

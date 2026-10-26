@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
-import { activeHoldingVetoes } from '@/lib/fish/qualityVeto';
+import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { FishQualityDistribution } from '@/components/FishQualityDistribution';
 import { qualityDistributionSeries, type QualityDistributionMetric } from '@/lib/fish/qualityDistribution';
 import { qualityCampaignPath } from '@/lib/campaignSections';
@@ -80,6 +80,9 @@ function BuyFilterEditor({ state, plan, done }: { state: FishQualityState; plan:
   const [draft, setDraft] = useState<FilterDraft[]>(() => planBuyFilters(state.study, plan).map(f => ({ choice: qualityFilterChoiceKey(f), direction: f.direction, threshold: String(f.threshold), enabled: f.enabled })));
   const [error, setError] = useState('');
   const [vetoDraft,setVetoDraft]=useState(()=>holdingVetoDraft(plan.holdingVetoes));
+  let vetoChanged = false;
+  try { vetoChanged = JSON.stringify(holdingVetoIdentity(parseHoldingVetoDraft(vetoDraft))) !== JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)); }
+  catch { vetoChanged = true; }
   const patch = (i: number, p: Partial<FilterDraft>) => setDraft(draft.map((d, j) => j === i ? { ...d, ...p } : d));
   const add = () => setDraft([...draft, { choice: choices.find(c => c.key === 'state:state')?.key ?? choices[0]?.key ?? '', direction: '>', threshold: '0.7', enabled: true }]);
   const apply = () => {
@@ -88,7 +91,7 @@ function BuyFilterEditor({ state, plan, done }: { state: FishQualityState; plan:
     catch (e) { setError(e instanceof Error ? e.message : '条件无效'); }
   };
   return <div className="space-y-3" data-testid="quality-buy-filter-editor">
-    <div className="space-y-0.5"><p className="text-xs font-medium">买入过滤 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">只作用于这套卖出方案的「比较卖出」，其他方案各有各的条件。读数取买入时刻之前最后一根已收盘的 5 分钟 K 线，全部启用的条件都满足才买入。</p></div>
+    <div className="space-y-0.5"><p className="text-xs font-medium">买入过滤 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">只作用于这套卖出方案的「比较卖出」，其他方案各有各的条件，运行前后设置效果相同。读数取买入时刻之前最后一根已收盘的 5 分钟 K 线，全部启用的条件都满足才买入。</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">修改买入条件会复用已有结果，只重新筛选；新增指标时补取买入读数，放宽条件后仅补算尚无结果的标的。修改持仓否决条件需要重新评估卖出。</p></div>
     {draft.length ? <div className="space-y-1.5">{draft.map((d, i) => <div key={i} className="flex items-center gap-1.5">
       <input type="checkbox" aria-label={`启用买入条件 ${i + 1}`} checked={d.enabled} onChange={e => patch(i, { enabled: e.target.checked })} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/>
       <select aria-label={`买入条件 ${i + 1} 指标`} className={`${field} min-w-0 flex-1`} value={d.choice} onChange={e => patch(i, { choice: e.target.value })}>{groups.map(g => <optgroup key={g} label={g}>{choices.filter(c => c.group === g).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</optgroup>)}</select>
@@ -98,7 +101,7 @@ function BuyFilterEditor({ state, plan, done }: { state: FishQualityState; plan:
     </div>)}</div> : <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[10.5px] text-muted-foreground">未设置条件：全部信号都买入</p>}
     <div><button type="button" className={button} onClick={add}><Plus className="h-3 w-3"/>添加条件</button></div>
     <FishQualityHoldingVetoEditor draft={vetoDraft} setDraft={setVetoDraft}/>
-    <div className="flex justify-end"><button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用到「{plan.label}」并重算</button>
+    <div className="flex justify-end"><button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用到「{plan.label}」{vetoChanged ? '并重算' : '筛选'}</button>
     </div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;

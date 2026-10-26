@@ -168,3 +168,61 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  act(()=>old.onResult({...result,returnPct:999}));expect(h.result.current.study.results[0].returnPct).toBe(10);
  await flush(500);expect(storage.save).toHaveBeenLastCalledWith('a',expect.objectContaining({sellPlans:expect.arrayContaining([expect.objectContaining({holdingVetoes:[veto]})])}));
 });
+
+it('applies buy edits in filter mode, preserves sell snapshots and only recalculates when effective holding vetoes change', async () => {
+  const { makeQualityBuyFilter, makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); }));
+  await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '>', .7)], []));
+  await flush(600);
+  expect(tasks.at(-1)!.mode).toBe('filter-only');
+  await flush(60_000); expect(tasks).toHaveLength(1); // filtering before Run does not authorize evaluation
+  act(() => { void h.result.current.start(); }); await flush();
+  const original = tasks.at(-1)!.study.sellPlans;
+  const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
+  localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
+  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '<', .5)], [])); await flush(600);
+  expect(tasks.at(-1)!.mode).toBe('filter');
+  expect(tasks.at(-1)!.study.sellPlans!.map(p => p.snapshot)).toEqual(original!.map(p => p.snapshot));
+  const disabled = { ...makeQualityHoldingVeto('static-drawdown', '>=', 10), enabled: false };
+  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [disabled])); await flush(600);
+  expect(tasks.at(-1)!.mode).toBe('filter');
+  expect(h.result.current.study.sellPlans![0].holdingVetoes).toEqual([disabled]);
+  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [{ ...disabled, enabled: true }])); await flush(600);
+  expect(tasks.at(-1)!.mode).toBeUndefined();
+});
+
+it('retains filter mode when an aborted runner finishes after the queued filter edit', async () => {
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush(); chooseAndStart(h); await flush();
+  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [])); await flush(600);
+  expect(tasks[0].signal.aborted).toBe(true); expect(tasks).toHaveLength(1);
+  releases.shift()!(); await flush();
+  expect(tasks).toHaveLength(2); expect(tasks[1].mode).toBe('filter');
+  releases.shift()!(); await flush();
+});
+
+it('filters fully cached trades without calling the runner, including after restoring saved results', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const f = makeQualityBuyFilter('state:state', '>', .7);
+  const run = vi.fn(async (o: QualityRunOptions) => {
+    for (const row of qualityRunSamples(o.study)) {
+      o.onFilterReading?.({ key: qualityFilterReadingKey(row, f), value: .75 });
+      for (const plan of o.study.sellPlans!) o.onResult({ key: qualityResultKey(row, plan, o.study.observeHours), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open', entryTime: T, entryPrice: 100, returnPct: 1 });
+    }
+  });
+  const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush();
+  const planId = h.result.current.study.sellPlans![0].id;
+  act(() => h.result.current.setFilters(planId, [f], [])); await flush(600);
+  expect(run).toHaveBeenCalledTimes(1);
+  const saved = h.result.current.study; h.unmount();
+  storage.load.mockResolvedValue({ study: saved });
+  const restored = renderHook(() => useFishQuality('a', [], run)); await flush();
+  act(() => restored.result.current.setFilters(planId, [{ ...f, threshold: .8 }], [])); await flush(600);
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(restored.result.current.study.results).toEqual(saved.results);
+});

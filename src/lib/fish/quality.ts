@@ -407,10 +407,23 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
 export interface QualityProgress { done: number; total: number; current: string }
 export interface QualityRunOptions {
   study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
+  /** Filter edits reuse every saved trade, including open positions. Before an explicit run, only read entry indicators. */
+  mode?: 'filter' | 'filter-only';
   /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
   priority?: () => readonly string[];
   /** 买入过滤的读数（每行每个条件算一次）。 */
   onFilterReading?: (r: QualityFilterReading) => void;
+}
+/** A threshold/direction/toggle edit with cached readings and trades needs no runner or market requests. */
+export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' | 'filter-only'): boolean {
+  const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const results = new Set(study.results.map(r => r.key));
+  for (const row of qualityRunSamples(study)) for (const plan of study.sellPlans ?? []) {
+    if (activeBuyFilters(study, plan).some(f => !readings.has(qualityFilterReadingKey(row, f)))) return true;
+    const state = qualityFilterStatus(study, row, plan, readings).state;
+    if (mode === 'filter' && (state === 'none' || state === 'pass' || plan.id === study.selectedSellId) && !results.has(qualityResultKey(row, plan, study.observeHours))) return true;
+  }
+  return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map(study.results.map(r => [r.key, r]));
@@ -442,13 +455,14 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   for (let batch = next(); batch; batch = next()) {
     // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
     const kept: typeof batch = [];
-    for (const task of batch) if (task.g.id === study.selectedSellId || await passes(task.s, task.g)) kept.push(task);
+    for (const task of batch) { const bought = await passes(task.s, task.g); if (task.g.id === study.selectedSellId || bought) kept.push(task); }
     if (kept.length < batch.length) { done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' }); }
     batch = kept; if (!batch.length) continue;
     for (const { s, g } of batch) {
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
+    if (options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
     if (!cached?.complete && !(!g.rule && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));

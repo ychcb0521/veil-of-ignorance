@@ -97,3 +97,41 @@ it('materializes the legacy shared filter onto every plan before one plan is edi
   expect(done.sellPlans![0].buyFilters).not.toBe(done.sellPlans![1].buyFilters);
   expect(materializePlanBuyFilters(base)).toBe(base);
 });
+
+it('gives the same sell comparison before and after a run and only filters saved open trades on later edits', async () => {
+  const base = importQualityLibrary(enableQualityComparison(newQualityStudy(T)), [lib('LOWUSDT', T + 7 * M), lib('HIGHUSDT', T + 40 * M)]);
+  const rows = qualityComparisonRows(base);
+  const study = { ...base, selectedRowIds: rows.map(r => r.id), sellPlans: [{ ...base.sellPlans![0], snapshot: filter(0).snapshot, metric: 'raw', execution: undefined, rule: { metric: 'raw', direction: '<' as const, threshold: -1 } }] };
+  const f = filter(T / M % 1000 + 10);
+  const run = async (s: typeof study, mode?: 'filter' | 'filter-only', now = T + 90 * M) => {
+    const results = [...s.results], readings = [...(s.filterReadings ?? [])], load = vi.fn(loader());
+    await collectFishQuality({ study: s, mode, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => { results.push(r); }, onFilterReading: r => { readings.push(r); } }, load, now);
+    return { study: { ...s, results, filterReadings: readings }, load };
+  };
+  const before = await run({ ...study, buyFilters: [f] });
+  const all = await run(study);
+  expect(all.study.results.every(r => r.status === 'open' && !r.complete)).toBe(true);
+  const after = await run({ ...all.study, buyFilters: [f] }, 'filter');
+  expect(after.study.results).toEqual(all.study.results); // no sell callbacks, even for incomplete/open results
+  expect(after.load.mock.calls.every(c => c[3].step === STEP)).toBe(true); // entry readings only
+  const stats = (s: typeof study) => qualityComparisonStats(s, rows, false);
+  expect(stats(after.study).sells[0].sample.map(r => r.id)).toEqual(stats(before.study).sells[0].sample.map(r => r.id));
+  expect(stats(after.study).sells).toEqual(stats(before.study).sells);
+  for (const filters of [[filter(-1)], [filter(9999)], [{ ...f, direction: '<' as const }], [{ ...f, enabled: false }], []]) {
+    const edited = await run({ ...after.study, buyFilters: filters }, 'filter', T + 180 * M);
+    expect(edited.load).not.toHaveBeenCalled();
+    expect(edited.study.results).toEqual(all.study.results);
+  }
+  const refreshed = await run(all.study, undefined, T + 180 * M);
+  expect(refreshed.load).toHaveBeenCalled(); // explicit refresh still advances open trades
+  const widened = await run({ ...before.study, buyFilters: [] }, 'filter');
+  expect(widened.load.mock.calls.every(c => c[0].symbol === 'LOWUSDT')).toBe(true);
+  expect(widened.study.results).toHaveLength(2); // only the previously excluded signal is evaluated
+  const changedMetric = await run({ ...after.study, buyFilters: [{ ...f, metric: '结果' }] }, 'filter');
+  expect(changedMetric.load).toHaveBeenCalled();
+  expect(changedMetric.load.mock.calls.every(c => c[3].step === STEP)).toBe(true);
+  expect(changedMetric.study.results).toEqual(all.study.results);
+  const notStarted = await run({ ...study, buyFilters: [f] }, 'filter-only');
+  expect(notStarted.study.filterReadings).toHaveLength(2);
+  expect(notStarted.study.results).toHaveLength(0);
+});

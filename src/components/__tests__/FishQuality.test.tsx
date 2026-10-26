@@ -187,9 +187,9 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」并重算$/ }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」并重算$/ }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
   expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id, [expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })],[]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
@@ -361,6 +361,6 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   expect(await screen.findByRole('tab', { name: 'CDA 原始值' })).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
-  fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」并重算$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」筛选$/ }));
   expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })], expect.any(Array));
 });
