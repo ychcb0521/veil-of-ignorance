@@ -166,9 +166,9 @@ describe('排序链：依次比较', () => {
 
 describe('每个排序项的独立比较器', () => {
   it('新增概览排序复用读数：升降序都把缺值留在末尾，零盈亏与零回撤保留为有效值', () => {
-    const a = { ...makeSortRow({ id: 'a', pnl: 10, dd: 5 }), initialExpectedMaxLoss: 100, peakPriceChangePct: 10, dynamicMaxDrawdownPct: 0 };
-    const b = { ...makeSortRow({ id: 'b', pnl: -5, dd: 5 }), initialExpectedMaxLoss: 50, peakPriceChangePct: 20, dynamicMaxDrawdownPct: 10 };
-    const missing = { ...makeSortRow({ id: 'missing', pnl: null, dd: 0 }), initialExpectedMaxLoss: 0, peakPriceChangePct: null, dynamicMaxDrawdownPct: null };
+    const a = { ...makeSortRow({ id: 'a', pnl: 10, dd: 5 }), initialExpectedMaxLoss: 100, peakPriceChangePct: 10, dynamicMaxDrawdownPct: 0, staticMaxDrawdownPct: 0 };
+    const b = { ...makeSortRow({ id: 'b', pnl: -5, dd: 5 }), initialExpectedMaxLoss: 50, peakPriceChangePct: 20, dynamicMaxDrawdownPct: 10, staticMaxDrawdownPct: 7 };
+    const missing = { ...makeSortRow({ id: 'missing', pnl: null, dd: 0 }), initialExpectedMaxLoss: 0, peakPriceChangePct: null, dynamicMaxDrawdownPct: null, staticMaxDrawdownPct: null };
     for (const mode of OVERVIEW_EXTRA_SORT_MODES) {
       const descending = sortCampaignRows([missing, a, b], [{ mode, direction: 'desc' }]);
       const ascending = sortCampaignRows([missing, a, b], [{ mode, direction: 'asc' }]);
@@ -178,6 +178,8 @@ describe('每个排序项的独立比较器', () => {
       expect(parseCampaignSortChain(new URLSearchParams(`sort=${mode}&direction=asc`))[0]).toEqual({ mode, direction: 'asc' });
     }
     expect(rowOverviewSortMetric(a, 'dynamicMaxDrawdownPct')).toBe(0);
+    expect(rowOverviewSortMetric(a, 'staticMaxDrawdownPct')).toBe(0); // 从没跌破买入价：0 是有效读数
+    expect(rowOverviewSortMetric(b, 'staticMaxDrawdownPct')).toBe(7);
     expect(rowOverviewSortMetric(makeSortRow({ id: 'flat', pnl: 0 }), 'realizedPnl')).toBe(0);
   });
   const keys = buildCampaignSortKeys<CampaignSortRow>();
@@ -786,7 +788,8 @@ describe('【用户要求】仓位放大：排序项（放在加仓次数的后�
     // 【用户要求】L_磨损、几何期望紧跟盈亏比；单位涨幅、单位利润、仓位利润接在算术期望之后
     expect(CAMPAIGN_SORT_MODES.slice(0, 9)).toEqual(['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy']);
     expect(CAMPAIGN_SORT_MODES.slice(13, 17)).toEqual(['arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit']);
-    expect(CAMPAIGN_SORT_MODES.slice(21, 23)).toEqual(['dynamicMaxDrawdownPct', 'mirrorTp']);
+    // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
+    expect(CAMPAIGN_SORT_MODES.slice(21, 24)).toEqual(['dynamicMaxDrawdownPct', 'staticMaxDrawdownPct', 'mirrorTp']);
     expect(CAMPAIGN_SORT_MODES).not.toContain('geometricGrowth');
     expect(DEFAULT_CAMPAIGN_SORT_CHAIN).toEqual([{ mode: 'time', direction: 'desc' }]);
     expect(rows.map(rowPositionAmplification)).toEqual([1, 1, 2.004, 7.66, 7.66, null]);

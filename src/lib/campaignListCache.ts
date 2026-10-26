@@ -52,6 +52,8 @@ export type CampaignCardData = {
   peakPriceChangePct?: number | null;
   /** 列表页与 Excel 导出按需加载 K 线后写入。 */
   dynamicMaxDrawdownPct?: number | null;
+  /** 静态最大回撤：持仓期间最不利价格离买入价的百分比（与动态最大回撤同一批 K 线算出）。 */
+  staticMaxDrawdownPct?: number | null;
   /**
    * 仓位放大（倍，= 主方向总名义仓位 ÷ 主力开仓名义仓位）：建卡时按详情页盈亏概览同一份输入算好，算不出为 null。
    * 没有这个字段的行（旧缓存）由 rowPositionAmplification 按腿现算。

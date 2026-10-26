@@ -390,6 +390,8 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
   { value: 'peakPriceChange', label: '峰值涨幅' },
   { value: 'unrealizedPriceChangePct', label: '涨幅未兑现' },
   { value: 'dynamicMaxDrawdownPct', label: '动态最大回撤' },
+  // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
+  { value: 'staticMaxDrawdownPct', label: '静态最大回撤' },
   { value: 'mirrorTp', label: '镜像止盈' },
   { value: 'leverage', label: '杠杆倍数' },
   { value: 'importance', label: '自评' },
@@ -397,12 +399,13 @@ const ALL_SORT_OPTIONS: { value: CampaignSortMode; label: string }[] = [
 ];
 /**
  * 【用户要求】排序行只放交易战役封面上有的指标（指标格十四项，加标题行的操作时间、杠杆倍数，再加「自评」「字母」），次序沿用上面这张表；
- * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅、动态最大回撤不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
+ * 封面指标格的先后与这里一致。最大预期亏损、已实现 P&L、峰值涨幅不在封面上，从排序行拿掉；它们的排序能力仍在（统计概览等入口照常可用），标签取 ALL_SORT_OPTIONS。
+ * 【用户要求】2026-10-26 动态最大回撤、静态最大回撤放进排序行与封面（涨幅未兑现之后）。
  */
 const SORT_ROW_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
   'time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy',
   'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
-  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha',
+  'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct', 'mirrorTp', 'leverage', 'importance', 'alpha',
 ]);
 const SORT_OPTIONS = ALL_SORT_OPTIONS.filter(option => SORT_ROW_MODES.has(option.value));
 
@@ -412,6 +415,8 @@ const SORT_OPTIONS = ALL_SORT_OPTIONS.filter(option => SORT_ROW_MODES.has(option
  *   操作时间 · 镜像止盈 ┆ 预期回撤 · 首仓涨跌幅 · 首仓涨跌幅倍数 · 神奇的 b · 加仓效用 · 加仓次数 · 几何期望 · 算术期望 ┆ 杠杆倍数 · 自评 · 字母
  */
 const SORT_DIVIDERS_BEFORE: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>(['expectedDrawdownPct', 'mainPriceChange', 'mirrorTp']);
+/** 读数来自按需加载的持仓 K 线（排序或开图时才算）：图表按钮在 0 个点时也能点，按钮上写已处理 / 总数。 */
+const PRICE_PATH_MODES: ReadonlySet<string> = new Set(['unrealizedPriceChangePct', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct']);
 const SORT_LABEL_BY_MODE = Object.fromEntries(ALL_SORT_OPTIONS.map(option => [option.value, option.label])) as Record<CampaignSortMode, string>;
 
 const OVERVIEW_SORT_DETAILS: Record<OverviewExtraSortMode, { label: string; unit: string; formula: string }> = {
@@ -419,6 +424,7 @@ const OVERVIEW_SORT_DETAILS: Record<OverviewExtraSortMode, { label: string; unit
   realizedPnl: { label: '已实现 P&L', unit: 'USDT', formula: '沿用本场已实现净盈亏，包含现有平仓价校正及结算口径。' },
   peakPriceChange: { label: '峰值涨幅', unit: '%', formula: '主力有效持仓期间，按主力方向计算的最大有利价格涨幅。' },
   dynamicMaxDrawdownPct: { label: '动态最大回撤', unit: '%', formula: '主力有效持仓期间，从此前峰值到后续谷值的最大价格回撤。' },
+  staticMaxDrawdownPct: { label: '静态最大回撤', unit: '%', formula: '主力有效持仓期间，最不利价格离买入价的跌幅占买入价的百分比：主多 = (买入价 − 最低价) ÷ 买入价，主空看最高价；从未跌破买入价记 0%。' },
 };
 
 /**
@@ -1417,7 +1423,8 @@ function formatSortBinValue(mode: CampaignSortMode, value: number): string {
     case 'initialExpectedMaxLoss':
     case 'realizedPnl': return `${value.toFixed(2)} USDT`;
     case 'peakPriceChange': return formatLegPriceChangePct(value);
-    case 'dynamicMaxDrawdownPct': return `${value.toFixed(2)}%`;
+    case 'dynamicMaxDrawdownPct':
+    case 'staticMaxDrawdownPct': return `${value.toFixed(2)}%`;
     case 'captureRate': return formatCampaignPayoffRatio(value);
     case 'expectedDrawdownPct': return `${value.toFixed(2)}%`;
     case 'mainPriceChange': return formatLegPriceChangePct(value);
@@ -1570,6 +1577,16 @@ function signedTone(value: number): LegPriceChangeDirection {
   return rounded > 0 ? 'up' : rounded < 0 ? 'down' : 'flat';
 }
 
+/** 最大回撤（动态 / 静态）是否已算出来；行情未加载时为 null。 */
+function drawdownKnown(value: number | null | undefined): value is number {
+  return value != null && Number.isFinite(value);
+}
+
+/** 回撤越大越不利：大于 0 记跌色，0.00 不上色，未算出时淡灰。 */
+function drawdownTone(value: number | null | undefined): string {
+  return drawdownKnown(value) ? MAIN_PRICE_CHANGE_TONE[signedTone(-value)] : 'text-muted-foreground/70';
+}
+
 /** 仓位放大的读数：两位小数加「x」（1.00x = 没有加仓），与盈亏概览同名项同一个写法。 */
 function formatPositionAmplification(value: number): string {
   return `${value.toFixed(2)}x`;
@@ -1601,7 +1618,7 @@ const fixedFractionLabel = `${(FIXED_DRAWDOWN_FRACTION * 100).toFixed(0)}%`;
  */
 // 【用户要求】封面适当增高：上下内边距加大一档
 const CARD_METRIC_CELL = 'flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-2 sm:px-2 transition-[background-color,box-shadow] duration-150';
-/** 封面十八项的指标名，次序与排序行、卡片上的格子一致。字母释义统一放在指标表中。 */
+/** 封面二十项的指标名，次序与排序行、卡片上的格子一致。字母释义统一放在指标表中。 */
 const CARD_METRIC_LABEL = {
   expectedDrawdownPct: '预期回撤',
   effectivePriceChangePct: '相对涨幅',
@@ -1620,6 +1637,8 @@ const CARD_METRIC_LABEL = {
   mainPriceChange: '首仓涨跌幅',
   mainPriceEfficiency: '首仓涨跌幅倍数',
   unrealizedPriceChangePct: '涨幅未兑现',
+  dynamicMaxDrawdownPct: '动态最大回撤',
+  staticMaxDrawdownPct: '静态最大回撤',
   mirrorTp: '镜像止盈',
 } as const satisfies Partial<Record<CampaignSortMode, string>>;
 type CardMetricMode = keyof typeof CARD_METRIC_LABEL;
@@ -1686,6 +1705,8 @@ function cardMetricReadings(row: CampaignDisplayData): CardMetricReadings {
     // 与几何仓位、神奇的 b 同一写法：括号外实际，括号里理论（U × 几何仓位（理论））
     positionProfit: formatActualTheoreticalMetric(rowPositionProfit(row), rowPositionProfitTheoretical(row), formatCompactUsd),
     unrealizedPriceChangePct: unrealizedPriceChangePct == null ? '—' : `${unrealizedPriceChangePct.toFixed(2)}%`,
+    dynamicMaxDrawdownPct: row.dynamicMaxDrawdownPct == null || !Number.isFinite(row.dynamicMaxDrawdownPct) ? '—' : `${row.dynamicMaxDrawdownPct.toFixed(2)}%`,
+    staticMaxDrawdownPct: row.staticMaxDrawdownPct == null || !Number.isFinite(row.staticMaxDrawdownPct) ? '—' : `${row.staticMaxDrawdownPct.toFixed(2)}%`,
     effectivePriceChangePct: rowRelativePriceChange(row) == null ? '—' : `${rowRelativePriceChange(row)!.toFixed(2)}×`,
     arithmeticExpectancy: formatActualTheoreticalMetric(row.arithmeticExpectancy,
       computeCampaignExpectanciesFromMagicB(rowTheoreticalMagicB(row)).arithmeticExpectancy, value => formatArithmeticExpectancy(value)),
@@ -2246,6 +2267,32 @@ const CampaignCard = memo(function CampaignCard({
               </span>
             </dd>
           </div>
+          <div
+            data-testid="campaign-dynamic-max-drawdown"
+            aria-description={!drawdownKnown(row.dynamicMaxDrawdownPct)
+              ? `${CARD_METRIC_LABEL.dynamicMaxDrawdownPct}要等交易战役列表按需加载持仓期间的 K 线后显示（按它排序时自动加载）`
+              : `动态最大回撤 = 持仓期间此前峰值到此后谷值的最大跌幅 = ${readings.dynamicMaxDrawdownPct}`}
+            className={letteredCell('dynamicMaxDrawdownPct')}
+            data-sort-highlight={litAttr('dynamicMaxDrawdownPct')}
+          >
+            <dt className={metricName('dynamicMaxDrawdownPct')}>{CARD_METRIC_LABEL.dynamicMaxDrawdownPct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${drawdownTone(row.dynamicMaxDrawdownPct)}`}>{readings.dynamicMaxDrawdownPct}</span>
+            </dd>
+          </div>
+          <div
+            data-testid="campaign-static-max-drawdown"
+            aria-description={!drawdownKnown(row.staticMaxDrawdownPct)
+              ? `${CARD_METRIC_LABEL.staticMaxDrawdownPct}要等交易战役列表按需加载持仓期间的 K 线后显示（按它排序时自动加载）`
+              : `静态最大回撤 = 持仓期间最不利价格离买入价的跌幅 ÷ 买入价 = ${readings.staticMaxDrawdownPct}`}
+            className={letteredCell('staticMaxDrawdownPct')}
+            data-sort-highlight={litAttr('staticMaxDrawdownPct')}
+          >
+            <dt className={metricName('staticMaxDrawdownPct')}>{CARD_METRIC_LABEL.staticMaxDrawdownPct}</dt>
+            <dd className={CARD_METRIC_VALUE_ROW}>
+              <span className={`${CARD_METRIC_VALUE} ${drawdownTone(row.staticMaxDrawdownPct)}`}>{readings.staticMaxDrawdownPct}</span>
+            </dd>
+          </div>
           <div className={letteredCell('mirrorTp')} data-testid="campaign-mirror-tp-status" data-sort-highlight={litAttr('mirrorTp')}>
             <dt className={metricName('mirrorTp')}>{CARD_METRIC_LABEL.mirrorTp}</dt>
             <dd className={CARD_METRIC_VALUE_ROW}>
@@ -2630,12 +2677,13 @@ export default function JournalCampaignsPage() {
     scopedRowsRef.current = next;
     return next;
   }, [rows, operationRange]);
-  const unrealizedMetricNeeded = sortChain.some(level => ['unrealizedPriceChangePct', 'peakPriceChange', 'dynamicMaxDrawdownPct'].includes(level.mode))
+  const unrealizedMetricNeeded = sortChain.some(level => ['unrealizedPriceChangePct', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct'].includes(level.mode))
     || summaryExportPending
-    || (metricChartOpen && ['unrealizedPriceChangePct', 'unrealizedPriceChangePctDistribution', 'peakPriceChange', 'dynamicMaxDrawdownPct'].includes(metricChartKey));
+    || (metricChartOpen && ['unrealizedPriceChangePct', 'unrealizedPriceChangePctDistribution', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct'].includes(metricChartKey));
   const pricePaths = useCampaignPricePaths(scopedRows, userId ?? '', unrealizedMetricNeeded && campaignRowsComplete, campaignRowsComplete);
   const peakPriceChangeByCampaign = pricePaths.peaks;
   const dynamicDrawdownByCampaign = pricePaths.drawdowns;
+  const staticDrawdownByCampaign = pricePaths.staticDrawdowns;
   const unrealizedMetricLoading = pricePaths.loading;
   const unrealizedMetricProgress = pricePaths;
   useEffect(() => {
@@ -2793,6 +2841,7 @@ export default function JournalCampaignsPage() {
         ...row,
         peakPriceChangePct: peakPriceChangeByCampaign.get(row.campaign.id) ?? null,
         dynamicMaxDrawdownPct: dynamicDrawdownByCampaign.get(row.campaign.id) ?? null,
+        staticMaxDrawdownPct: staticDrawdownByCampaign.get(row.campaign.id) ?? null,
         // 单场算术期望的胜率统一取 50%（与详情页同一个函数），不随账户实时胜率变动
         ...computeCampaignExpectanciesFromMagicB(rowPayoffRatio(row)),
       };
@@ -2802,6 +2851,7 @@ export default function JournalCampaignsPage() {
         && Object.is(before.geometricExpectancy, next.geometricExpectancy)
         && Object.is(before.peakPriceChangePct, next.peakPriceChangePct)
         && Object.is(before.dynamicMaxDrawdownPct, next.dynamicMaxDrawdownPct)
+        && Object.is(before.staticMaxDrawdownPct, next.staticMaxDrawdownPct)
         ? before
         : next;
       byRow.set(row, kept);
@@ -2810,7 +2860,7 @@ export default function JournalCampaignsPage() {
     const unchanged = rows.length === previous.rows.length && rows.every((row, index) => row === previous.rows[index]);
     metricRowsRef.current = { byRow, rows: unchanged ? previous.rows : rows };
     return metricRowsRef.current.rows;
-  }, [dynamicDrawdownByCampaign, peakPriceChangeByCampaign, scopedRows]);
+  }, [dynamicDrawdownByCampaign, staticDrawdownByCampaign, peakPriceChangeByCampaign, scopedRows]);
   // 【用户要求】指标表补每个字母的本机范围：所选时间段内的战役（含算过的峰值涨幅 / 动态最大回撤），回收站不算
   const metricLetterRanges = useMemo(
     () => letterRanges(
@@ -3224,9 +3274,9 @@ export default function JournalCampaignsPage() {
     ? `沿用上次读数 ${unrealizedChart.cachedCount} 场 · ${pricePaths.offline ? '离线，联网后继续' : unrealizedQueueStalled ? '等待自动重试' : '后台更新中'}`
     : null;
   /** 一个点都还画不出来、而行情正在算（第一次用、或这个时间段的战役都没算过）：给等高的进度占位，不写「暂无…」。 */
-  const unrealizedChartComputing = openSourceKey === 'unrealizedPriceChangePct'
+  const unrealizedChartComputing = PRICE_PATH_MODES.has(openSourceKey)
     && unrealizedMetricLoading
-    && unrealizedChartPending
+    && (openSourceKey !== 'unrealizedPriceChangePct' || unrealizedChartPending)
     && selectedMetricSeries.points.length === 0;
   /**
    * 【用户要求】散点图要在一屏里看全：绘图盒的高度上限 = 视口高 − 面板顶边的位置 − 面板里绘图盒以外的部分
@@ -3290,7 +3340,7 @@ export default function JournalCampaignsPage() {
   }, [updateChartParam]);
 
   const handleMetricChartToggle = (key: CampaignMetricChartKey) => {
-    if (metricSeriesByKey[key].points.length === 0 && key !== 'unrealizedPriceChangePct') return;
+    if (metricSeriesByKey[key].points.length === 0 && !PRICE_PATH_MODES.has(key)) return;
     if (metricChartOpen && openSourceKey === key) {
       setMetricChartOpen(false);
       updateChartParam(null);
@@ -3385,7 +3435,7 @@ export default function JournalCampaignsPage() {
     const nextSort = selectSortMode(sortChain, mode);
     const sortChartKey = SORT_CHART_BY_MODE[mode] ?? null;
     const nextChartKey = metricChartOpen && sortChartKey != null
-      && (mode === 'unrealizedPriceChangePct' || metricSeriesByKey[sortChartKey].points.length > 0)
+      && (PRICE_PATH_MODES.has(mode) || metricSeriesByKey[sortChartKey].points.length > 0)
       ? DEFAULT_CHART_VIEW_BY_SOURCE[sortChartKey] ?? sortChartKey
       : undefined;
     setSortChain(nextSort);
@@ -4665,7 +4715,7 @@ export default function JournalCampaignsPage() {
                   ? 0
                   : metricSeriesByKey[sortChartKey].points.length;
                 // 「查看散点图」后面的数是图上画得出的点数（涨幅未兑现沿用旧读数时也算在内，与图一致）；计算进度在 aria-label 的「已处理」与图下那一行
-                const sortChartCountLabel = option.value === 'unrealizedPriceChangePct'
+                const sortChartCountLabel = PRICE_PATH_MODES.has(option.value)
                   ? `${sortChartPointCount} / ${unrealizedMetricProgress.total}`
                   : String(sortChartPointCount);
                 const sortChartActive = sortChartKey != null
@@ -5049,11 +5099,11 @@ export default function JournalCampaignsPage() {
                           data-testid={sortChartTestId}
                           aria-expanded={sortChartActive}
                           aria-controls="campaign-odds-scatter-panel"
-                          aria-label={option.value === 'unrealizedPriceChangePct'
+                          aria-label={PRICE_PATH_MODES.has(option.value)
                             ? `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，已处理 ${unrealizedMetricProgress.processed} / ${unrealizedMetricProgress.total} 场，可绘制 ${sortChartPointCount} 场`
                             : `${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图，共 ${sortChartPointCount} 场`}
                           title={`${sortChartActive ? '收起' : '查看'}${sortChartConfig.label}散点图`}
-                          disabled={sortChartPointCount === 0 && option.value !== 'unrealizedPriceChangePct'}
+                          disabled={sortChartPointCount === 0 && !PRICE_PATH_MODES.has(option.value)}
                           onClick={(event) => {
                             event.stopPropagation();
                             handleMetricChartToggle(sortChartKey);
@@ -5835,7 +5885,7 @@ export default function JournalCampaignsPage() {
                 ) : unrealizedChartComputing ? (
                   <ChartPreparingPlaceholder
                     testId="campaign-unrealized-chart-computing"
-                    title="正在计算涨幅未兑现…"
+                    title={`正在计算${selectedMetricConfig.label.replace(/(图|分布|时序)$/, '')}…`}
                     loaded={pricePaths.processed}
                     total={pricePaths.total}
                     emptyLabel="正在读取历史行情"

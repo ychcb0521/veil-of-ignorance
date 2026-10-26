@@ -20,7 +20,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     // 【用户要求】排序行只放封面上有的指标，再加操作时间与自评、字母，次序沿用原表
     expect(labels).toEqual([
       '操作时间', '预期回撤', '相对涨幅', '加仓次数', '几何仓位', '神奇的 b', '盈亏比', 'L_磨损', '几何期望', '仓位放大', '加仓效用', '算术期望', '单位涨幅', '单位利润', '仓位利润',
-      '首仓涨跌幅', '首仓涨跌幅倍数', '涨幅未兑现', '镜像止盈', '杠杆倍数', '自评', '字母',
+      '首仓涨跌幅', '首仓涨跌幅倍数', '涨幅未兑现', '动态最大回撤', '静态最大回撤', '镜像止盈', '杠杆倍数', '自评', '字母',
     ]);
     expect(guide).toContain('排序行原有的「DSI 贡献」「USI 贡献」两项已删掉——它们与盈亏比几乎同序，单场的 DSI/USI 贡献仍在详情页「盈亏概览」里，整表的 DSI / USI 仍在统计概览的「不对称风险」里');
     expect(guide).not.toContain('<SubTitle>DSI 贡献率与 USI 贡献率</SubTitle>');
@@ -149,7 +149,7 @@ describe('指南：战役列表的排序次序、封面统计格与新增散点�
     expect(guide).toContain('主力已平仓的战役历史行情确实取不到时记为「资料不完整」，十分钟内不再重复请求，点「重试缺失项」或刷新页面才重新读取；主力还在持仓的战役窗口一直在变，每次重新计算都会再读一次');
     // 页面上的文案与默认视图
     expect(page).toContain("`沿用上次读数 ${unrealizedChart.cachedCount} 场 · ${pricePaths.offline ? '离线，联网后继续' : unrealizedQueueStalled ? '等待自动重试' : '后台更新中'}`");
-    expect(page).toContain('title="正在计算涨幅未兑现…"');
+    expect(page).toContain("title={`正在计算${selectedMetricConfig.label.replace(/(图|分布|时序)$/, '')}…`}");
     expect(page).toContain("unrealizedPriceChangePct: 'unrealizedPriceChangePctDistribution'");
     expect(page).toContain('重试缺失项');
     // 「十分钟」与实现一致

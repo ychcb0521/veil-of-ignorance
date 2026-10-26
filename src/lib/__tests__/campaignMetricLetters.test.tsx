@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CAMPAIGN_METRIC_LETTERS, formatRangeValue, LETTER_BY_CARD_MODE, LETTER_BY_OVERVIEW_KEY, letterRanges } from '@/lib/campaignMetricLetters';
+import { CAMPAIGN_METRIC_LETTERS, formatRangeValue, LETTER_BY_CARD_MODE, LETTER_BY_OVERVIEW_KEY, METRIC_BY_LETTER, letterRanges } from '@/lib/campaignMetricLetters';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
 import { PnlMetricLabel } from '@/components/journal/CampaignPnlOverviewPanel';
 import { parseFormula } from '@/lib/deepDig/formula';
@@ -45,12 +45,14 @@ describe('【用户要求】交易战役指标字母表：每个指标一个字�
     expect(page).not.toContain("CARD_METRIC_LETTER_CLASS");
   });
 
-  it('封面十八项、盈亏概览各项都有字母', () => {
+  it('封面二十项、盈亏概览各项都有字母', () => {
     expect([...LETTER_BY_CARD_MODE.keys()].sort()).toEqual([
       'addCount', 'addEfficiency', 'arithmeticExpectancy', 'captureRate', 'effectivePriceChangePct', 'executionWear', 'expectedDrawdownPct', 'geometricExpectancy',
       'magicB', 'mainPriceChange', 'mainPriceEfficiency', 'mirrorTp', 'positionAmplification', 'positionGeometricMultiple', 'positionProfit', 'unitProfit', 'unitRise', 'unrealizedPriceChangePct',
+      'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct',
     ].sort());
-    for (const k of ['payoffRatio', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'initialExpectedMaxLoss', 'mainLeverage']) expect(LETTER_BY_OVERVIEW_KEY.has(k)).toBe(true);
+    expect(METRIC_BY_LETTER.get('Dₛ')).toMatchObject({ name: '静态最大回撤', aliases: ['Ds'], unit: '%' });
+    for (const k of ['payoffRatio', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct', 'initialExpectedMaxLoss', 'mainLeverage']) expect(LETTER_BY_OVERVIEW_KEY.has(k)).toBe(true);
   });
 
   it('表格：交易战役与信号库两段；名称前的小字母不和名字里已有的重复', () => {

@@ -101,6 +101,7 @@ export type CampaignPnlOverviewItemKey =
   | 'peakPriceChange'
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
+  | 'staticMaxDrawdownPct'
   | 'executionWear'
   | 'positionAmplification'
   | 'positionGeometricMultiple'
@@ -170,6 +171,8 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
+  // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
+  'staticMaxDrawdownPct',
 ];
 
 /**
@@ -199,6 +202,8 @@ export interface CampaignPnlOverviewMetrics {
   peakPriceChangePct?: number | null;
   /** 持仓期间此前峰值到此后谷值的最大标准化回撤率。 */
   dynamicMaxDrawdownPct?: number | null;
+  /** 持仓期间最不利价格离买入价的跌幅 ÷ 买入价（主多看最低价、主空看最高价）。 */
+  staticMaxDrawdownPct?: number | null;
   initialExpectedMaxLoss: number;
   /**
    * 【用户要求】主方向那一侧（主多战役是多单）所有已成交腿的名义仓位合计：主力、镜像、加仓都算，挂单中的不算；
@@ -327,6 +332,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
     initialMainExposureNotional,
     peakPriceChangePct = null,
     dynamicMaxDrawdownPct = null,
+    staticMaxDrawdownPct = null,
     initialExpectedMaxLoss,
     mainSideNotional,
     expectedMaxDrawdownPct: expectedDrawdownPct,
@@ -540,6 +546,22 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
           <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">动态最大回撤 = maxₜ［（此前峰值 − 此后谷值）÷ 此前峰值］× 100%</div>
           <p>通常计算到主力平仓；若最后一次滚动对冲与主力在同一次操作中平仓，则该对冲触发后风险已被锁住，计算窗口提前结束于这张对冲的开仓时刻。</p>
           <p>高点必须早于低点；按当前计算周期 K 线估计，同一根 K 线内 high 与 low 的先后未知，因此不把同根 K 线强行解释成一次完整峰谷。</p>
+        </>
+      ),
+    },
+    {
+      // 【用户要求】2026-10-26「静态最大回撤：持仓期间的价格最低点距离买入价的价差，占买入价的百分比」
+      key: 'staticMaxDrawdownPct',
+      label: '静态最大回撤',
+      value: staticMaxDrawdownPct == null ? '—' : `${staticMaxDrawdownPct.toFixed(2)}%`,
+      color: staticMaxDrawdownPct == null ? '#848E9C' : '#181A20',
+      valueClassName: staticMaxDrawdownPct == null ? 'text-muted-foreground' : 'text-foreground',
+      help: (
+        <>
+          <p>主力有效持仓期间，最不利的价格离买入价有多远：只和买入价比，不看中途的高点。它回答「拿着这单，最多浮亏过多少」。</p>
+          <div className="rounded bg-muted/60 px-2 py-1 font-mono text-foreground">静态最大回撤 = （买入价 − 持仓期间最低价）÷ 买入价 × 100%</div>
+          <p>主空看持仓期间最高价：（最高价 − 买入价）÷ 买入价。价格从没跌破（主空：从没涨过）买入价记 0%。</p>
+          <p>与动态最大回撤同一个持仓窗口、同一批 K 线；买入价取首仓开仓价（与首仓涨跌幅同一个口径）。</p>
         </>
       ),
     },

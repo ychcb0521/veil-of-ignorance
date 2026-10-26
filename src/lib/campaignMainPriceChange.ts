@@ -155,6 +155,33 @@ export function computeHoldingDynamicMaxDrawdownPct(args: {
 }
 
 /**
+ * 主力持仓窗口内的静态最大回撤：持仓期间最不利的价格离买入价有多远，占买入价的百分比。
+ * 主多 = (买入价 − 最低价) ÷ 买入价 × 100%，主空 = (最高价 − 买入价) ÷ 买入价 × 100%；从没跌破买入价记 0%。
+ * 【用户要求】2026-10-26「新增一个静态最大回撤，也就是持仓期间的价格最低点距离买入价的价差，占买入价的百分比」。
+ * 与动态最大回撤同一个持仓窗口、同一批 K 线（按「与窗口相交」纳入）。
+ */
+export function computeHoldingStaticMaxDrawdownPct(args: {
+  side: PriceChangeSide | null;
+  entryPrice: number | null;
+  klines: readonly KlineData[];
+  startMs: number;
+  endMs: number;
+  barMs: number;
+}): number | null {
+  const { side, entryPrice, klines, startMs, endMs, barMs } = args;
+  if (side == null || entryPrice == null || !Number.isFinite(entryPrice) || entryPrice <= 0
+    || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs || !(barMs > 0)) return null;
+  const bars = klines.filter(bar => bar.time <= endMs && bar.time + barMs > startMs);
+  if (bars.length === 0) return null;
+  const adverse = side === 'long'
+    ? Math.min(...bars.map(bar => bar.low).filter(v => Number.isFinite(v) && v > 0))
+    : Math.max(...bars.map(bar => bar.high).filter(v => Number.isFinite(v) && v > 0));
+  if (!Number.isFinite(adverse)) return null;
+  const pct = side === 'long' ? ((entryPrice - adverse) / entryPrice) * 100 : ((adverse - entryPrice) / entryPrice) * 100;
+  return Math.max(0, pct);
+}
+
+/**
  * 「动态最大回撤」的有效持仓终点：通常是主力平仓时刻；但若最后一次成交的滚动对冲
  * 与主力属于同一次平仓操作，则从这张对冲开仓起主力风险已经被锁住，窗口在其开仓时刻结束。
  *

@@ -57,6 +57,7 @@ export type CampaignSortMode =
   | 'realizedPnl'
   | 'peakPriceChange'
   | 'dynamicMaxDrawdownPct'
+  | 'staticMaxDrawdownPct'
   | 'alpha';
 export type CampaignSortDirection = 'asc' | 'desc';
 
@@ -95,6 +96,8 @@ export const CAMPAIGN_SORT_MODES: readonly CampaignSortMode[] = [
   'peakPriceChange',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
+  // 【用户要求】2026-10-26 静态最大回撤放在动态最大回撤后面
+  'staticMaxDrawdownPct',
   'mirrorTp',
   'leverage',
   'importance',
@@ -110,7 +113,7 @@ export function isCampaignSortMode(value: unknown): value is CampaignSortMode {
  * 镜像止盈 / 重要性 / 杠杆倍数 / 字母本来就是分档的；操作时间按【用户已定】的清单不在其列。
  */
 export const CONTINUOUS_SORT_MODES: ReadonlySet<CampaignSortMode> = new Set<CampaignSortMode>([
-  'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct',
+  'initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct',
   'expectedDrawdownPct',
   'mainPriceChange',
   'mainPriceEfficiency',
@@ -395,15 +398,16 @@ function finite(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value);
 }
 
-export type OverviewExtraSortMode = 'initialExpectedMaxLoss' | 'realizedPnl' | 'peakPriceChange' | 'dynamicMaxDrawdownPct';
-export const OVERVIEW_EXTRA_SORT_MODES: readonly OverviewExtraSortMode[] = ['initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct'];
+export type OverviewExtraSortMode = 'initialExpectedMaxLoss' | 'realizedPnl' | 'peakPriceChange' | 'dynamicMaxDrawdownPct' | 'staticMaxDrawdownPct';
+export const OVERVIEW_EXTRA_SORT_MODES: readonly OverviewExtraSortMode[] = ['initialExpectedMaxLoss', 'realizedPnl', 'peakPriceChange', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct'];
 
 /** 新增概览排序项直接复用已有概览/行情读数，不另算一套口径。 */
 export function rowOverviewSortMetric(row: CampaignSortRow, mode: OverviewExtraSortMode): number | null {
   const value = mode === 'initialExpectedMaxLoss' ? (row.initialExpectedMaxLoss > 0 ? row.initialExpectedMaxLoss : null)
     : mode === 'realizedPnl' ? row.campaign.final_realized_pnl
     : mode === 'peakPriceChange' ? row.peakPriceChangePct
-    : row.dynamicMaxDrawdownPct;
+    : mode === 'dynamicMaxDrawdownPct' ? row.dynamicMaxDrawdownPct
+    : row.staticMaxDrawdownPct;
   return finite(value) ? value : null;
 }
 
@@ -468,6 +472,7 @@ export function buildCampaignSortKeys<T extends CampaignSortRow>(): Record<Campa
     realizedPnl: overviewMetric('realizedPnl'),
     peakPriceChange: overviewMetric('peakPriceChange'),
     dynamicMaxDrawdownPct: overviewMetric('dynamicMaxDrawdownPct'),
+    staticMaxDrawdownPct: overviewMetric('staticMaxDrawdownPct'),
     time: {
       include: always,
       missing: row => operationTime(row) == null,
@@ -653,6 +658,9 @@ export function sortBinValue(mode: CampaignSortMode, value: number): number {
     case 'effectivePriceChangePct':
     case 'effectivePriceChangeMultiple':
     case 'magicB':
+    // 两种最大回撤按封面的两位小数分档
+    case 'dynamicMaxDrawdownPct':
+    case 'staticMaxDrawdownPct':
     case 'positionAmplification': return Number(value.toFixed(2));
     case 'unitRise': return unitRiseBinValue(value);
     case 'unitProfit':

@@ -210,7 +210,7 @@ describe('useCampaignPricePathTasks', () => {
   it('hydrates the first render when tasks arrive after mount without fetching while disabled', async () => {
     const cached = task('cached');
     localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${cached.id}`, JSON.stringify({
-      fingerprint: cached.fingerprint, peak: 20, drawdown: 25, savedAt: Date.now(),
+      fingerprint: cached.fingerprint, peak: 20, drawdown: 25, staticDrawdown: 12, savedAt: Date.now(),
     }));
     const tasks = [cached, task('missing')];
     const view = renderTaskFrames([], OWNER, false);
@@ -227,6 +227,22 @@ describe('useCampaignPricePathTasks', () => {
     expect(view.result.current).toMatchObject({ total: 2, processed: 2, loaded: 2, loading: false });
     expect(fetchRange).toHaveBeenCalledTimes(1);
     expect(fetchRange.mock.calls[0][0]).toBe('missing');
+  });
+
+  // 【用户要求】2026-10-26 静态最大回撤：旧缓存没有这一项，不能当完整结果复用，按需重算一次
+  it('does not reuse a cache saved before static max drawdown existed, and recomputes it once', async () => {
+    const old = task('old');
+    localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${old.id}`, JSON.stringify({
+      fingerprint: old.fingerprint, peak: 20, drawdown: 25, savedAt: Date.now(),
+    }));
+    const view = renderTaskFrames([old], OWNER, false);
+    expect(view.result.current).toMatchObject({ total: 1, processed: 0 });
+    view.rerender({ tasks: [old], owner: OWNER, enabled: true });
+    await advance();
+    expect(fetchRange).toHaveBeenCalledTimes(1);
+    expect(view.result.current).toMatchObject({ processed: 1, loaded: 1 });
+    expect(Number.isFinite(view.result.current.staticDrawdowns.get('old'))).toBe(true);
+    expect(JSON.parse(localStorage.getItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${old.id}`)!).staticDrawdown).toEqual(view.result.current.staticDrawdowns.get('old'));
   });
 
   it.each([false, true])('hydrates subset-to-all on the first render (storage unavailable: %s)', async storageUnavailable => {
@@ -494,7 +510,7 @@ describe('useCampaignPricePathTasks', () => {
     const complete = task('complete');
     const partial = task('partial');
     localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${complete.id}`, JSON.stringify({
-      fingerprint: complete.fingerprint, peak: 0, drawdown: 0, savedAt: Date.now(),
+      fingerprint: complete.fingerprint, peak: 0, drawdown: 0, staticDrawdown: 0, savedAt: Date.now(),
     }));
     localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${partial.id}`, JSON.stringify({
       fingerprint: partial.fingerprint, peak: 20, drawdown: null, savedAt: Date.now(),
@@ -515,7 +531,7 @@ describe('useCampaignPricePathTasks', () => {
     const tasks = Array.from({ length: 1_025 }, (_, index) => task(`cached-${index}`));
     const persist = (items: CampaignPricePathTask[]) => items.forEach(item => {
       localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:${item.id}`, JSON.stringify({
-        fingerprint: item.fingerprint, peak: 20, drawdown: 25, savedAt: Date.now(),
+        fingerprint: item.fingerprint, peak: 20, drawdown: 25, staticDrawdown: 12, savedAt: Date.now(),
       }));
     });
     persist(tasks.slice(0, 1_024));
@@ -576,7 +592,7 @@ describe('useCampaignPricePathTasks', () => {
     { reason: 'an ongoing campaign without a cache timestamp', owner: OWNER, fingerprint: 'cached:original', historical: false, age: null },
   ])('does not show cached values for $reason on the first render', async ({ owner, fingerprint, historical, age }) => {
     localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:cached`, JSON.stringify({
-      fingerprint: 'cached:original', peak: 20, drawdown: 25,
+      fingerprint: 'cached:original', peak: 20, drawdown: 25, staticDrawdown: 12,
       ...(age == null ? {} : { savedAt: Date.now() - age }),
     }));
     const pending = deferred<KlineData[]>();
@@ -600,7 +616,7 @@ describe('useCampaignPricePathTasks', () => {
   it('restores an ongoing campaign cache within its one-minute lifetime on the first render', () => {
     const tasks = [task('ongoing', { historical: false })];
     localStorage.setItem(`${CAMPAIGN_PRICE_PATH_CACHE_PREFIX}${OWNER}:ongoing`, JSON.stringify({
-      fingerprint: tasks[0].fingerprint, peak: 20, drawdown: 25, savedAt: Date.now() - 60_000,
+      fingerprint: tasks[0].fingerprint, peak: 20, drawdown: 25, staticDrawdown: 12, savedAt: Date.now() - 60_000,
     }));
     const frames: ReturnType<typeof useCampaignPricePathTasks>[] = [];
     renderHook(() => {

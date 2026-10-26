@@ -110,7 +110,8 @@ describe('战役列表：多级排序', () => {
     expect(screen.queryByTestId('sort-chain-add-mirrorTp')).not.toBeInTheDocument();
     const adds = [...document.querySelectorAll('[data-testid^="sort-chain-add-"]')];
     // 加上单位涨幅、单位利润、仓位利润三项（几何增长与几何期望已合并为一项），再加 L_磨损
-    expect(adds).toHaveLength(21);
+    // 再加动态 / 静态最大回撤两项
+    expect(adds).toHaveLength(23);
     expect(screen.getByTestId('sort-chain-add-positionGeometricMultiple')).toBeInTheDocument();
     expect(screen.getByTestId('sort-chain-add-effectivePriceChangePct')).toBeInTheDocument();
     expect(screen.queryByTestId('sort-chain-add-effectivePriceChangeMultiple')).not.toBeInTheDocument();
