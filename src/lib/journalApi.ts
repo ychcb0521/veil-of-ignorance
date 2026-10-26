@@ -4,6 +4,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { isQualityCampaignId } from '@/lib/campaignSections';
+import { loadQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import type { KlineData } from '@/hooks/useBinanceData';
 import {
   buildActualSimulationParams,
@@ -1217,6 +1219,13 @@ async function getAuthenticatedUserId(label: string): Promise<string> {
   const userId = auth.user?.id;
   if (!userId) throw new Error(`${label}失败：用户未登录`);
   return userId;
+}
+
+async function readQualityCampaign(campaignId: string) {
+  // Local paper results are keyed by the currently signed-in account, never by a URL-supplied owner.
+  const { data } = await supabase.auth.getSession();
+  if (!data.session?.user.id) throw new Error('加载比较战役失败：用户未登录');
+  return loadQualityCampaignData(data.session.user.id, campaignId);
 }
 
 function buildLocalCampaignFromCreateInput(
@@ -2603,6 +2612,7 @@ export function createUserLocalSnapshotReader(userId: string): UserLocalSnapshot
 export async function getCampaignWithLegs(
   campaignId: string,
 ): Promise<{ campaign: TradeCampaign; legs: TradeJournal[] }> {
+  if (isQualityCampaignId(campaignId)) return readQualityCampaign(campaignId);
   const { data: campaign, error: cErr } = await supabase
     .from('trade_campaigns' as never)
     .select('*')
@@ -3127,6 +3137,7 @@ export async function getCampaignFullData(
   /** 本地增量核对的真实时刻界，见函数体内的说明；null = 无界。 */
   replayEndRealAt?: number | null;
 }> {
+  if (isQualityCampaignId(campaignId)) return readQualityCampaign(campaignId);
   if (options.source && options.source.campaign.id !== campaignId) {
     throw new Error('加载战役失败：预加载数据的战役 ID 不匹配');
   }
@@ -4870,6 +4881,7 @@ export async function createCounterfactual(
 }
 
 export async function listCounterfactuals(campaignId: string): Promise<CampaignCounterfactual[]> {
+  if (isQualityCampaignId(campaignId)) return [];
   const userId = await getAuthenticatedUserId('加载反事实战役分支');
   const local = readLocalCounterfactuals(userId, campaignId);
   const { data, error } = await supabase

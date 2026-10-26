@@ -649,7 +649,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 没有加仓时，名义仓位放大与加仓因子空乘积都为 1 倍。
     for (const label of ['仓位放大', '几何仓位']) {
       const row = screen.getAllByText(label).map(node => node.closest('[data-column]')).find(node => node != null);
-      expect(row?.lastElementChild?.textContent).toBe('1.00x');
+      expect(row?.lastElementChild?.textContent).toBe(label === '几何仓位' ? '1.00x（1.00x）' : '1.00x');
     }
     // 【用户要求】「今日账户总资产」不在盈亏概览里显示
     expect(screen.queryByText('10000.00 USDT')).not.toBeInTheDocument();
@@ -689,12 +689,11 @@ describe('JournalCampaignDetailPage metrics', () => {
     expect(exportInput.accountName).toBe('主账户');
     // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
     expect(exportInput.chartInterval).toBe('5m');
-    // 导出图与页面同一份两栏次序：先左栏的递进链、再右栏的结果与仓位
-    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["加仓次数","几何仓位","相对涨幅","神奇的 b","几何期望","算术期望","预期回撤","首仓涨跌幅","首仓涨跌幅倍数","已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","几何增长 W（b）","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
+    // 导出图与当前页面使用相同的三栏指标次序。
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 ΔP","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤"]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
-    expect(exportInput.pnlOverview.items.filter(item => item.rightColumn).map(item => item.label))
-      .toEqual(["已实现 P&L","盈亏比","最大预期亏损","峰值涨幅","峰值涨幅倍数","涨幅未兑现","动态最大回撤","仓位放大","加仓效用"]);
+    expect(new Set(exportInput.pnlOverview.items.map(item => item.column))).toEqual(new Set([0, 1, 2]));
     expect(exportInput.metadataMetrics.map((item: { label: string }) => item.label)).toEqual(['杠杆倍数', 'DSI/USI 贡献']);
 
     fireEvent.click(screen.getByRole('button', { name: '评价 TXT' }));

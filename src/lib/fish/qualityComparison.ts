@@ -23,8 +23,8 @@ export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {
 const usable = (r: QualityResult | undefined, closedOnly: boolean): r is QualityResult => !!r && Number.isFinite(r.returnPct) && (r.status === 'closed' || !closedOnly && r.status === 'open');
 /** Identical rows and identical current valuation for unfinished positions, never independent missing-data denominators. */
 export function qualityPairedRows(study: FishQualityStudy, rows: QualitySample[], closedOnly: boolean): QualitySample[] {
-  const plans = study.sellPlans ?? [], results = qualityResultMap(study);
-  if (plans.length < 2 || plans.some(p => !p.rule)) return [];
+  const plans = (study.sellPlans ?? []).filter(p => p.rule), results = qualityResultMap(study);
+  if (!plans.length) return [];
   const latest = study.results.reduce((time, r) => plans.some(p => p.id === r.groupId) ? Math.max(time, r.evaluatedAt) : time, 0);
   const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
   return signals.filter(row => plans.every(plan => {

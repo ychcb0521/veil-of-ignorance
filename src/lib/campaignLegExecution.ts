@@ -1,3 +1,4 @@
+import { isQualityCampaignId } from './campaignSections';
 import {
   fetchCanonicalTimePriceAt,
   type CanonicalTimePrice,
@@ -192,6 +193,8 @@ export async function fetchLegExitPriceCorrectionsResult(
   tradeRecords: TradeRecord[],
   fetchPriceAt: CanonicalTimePriceFetcher = fetchCanonicalTimePriceAt,
 ): Promise<LegExitPriceCorrectionsResult> {
+  // Comparison fills are the evaluator's recorded minute-open executions, already frozen.
+  if (legs.length > 0 && legs.every(leg => isQualityCampaignId(leg.campaign_id ?? undefined))) return { corrections: {}, complete: true, fetchFailed: false };
   /**
    * 只有本来就不挂成交 id 的腿（纯复盘快照）可以在没有记录时算作完整。
    * 挂着成交 id 而本地查不到那条记录（换了浏览器、云端水化没跑完、清过历史成交），

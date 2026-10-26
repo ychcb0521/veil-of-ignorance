@@ -1,4 +1,5 @@
-/** Independent paper experiments. Never writes orders, balances, fish or campaign records. */
+/** Independent paper experiments; orders and account balances are never modified. */
+import type { QualityCampaignRun } from './qualityCampaignArchive';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { compileFeatureFormula, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -38,6 +39,8 @@ export interface FishQualityStudy {
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
   sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[]; selectedRowIds?: string[];
+  /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
+  campaignRuns?: QualityCampaignRun[];
 }
 export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });
 /**

@@ -308,7 +308,7 @@ describe('JournalCampaignsPage · writes wait for the background heal', () => {
     let release!: () => void;
     vi.mocked(waitForCampaignListHeal).mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    fireEvent.click(screen.getAllByTitle('删除战役')[0]);
+    fireEvent.click(screen.getAllByTestId('campaign-delete')[0]);
     // 乐观更新照旧即时
     await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(2));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });

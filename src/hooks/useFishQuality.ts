@@ -3,6 +3,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
+import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -28,7 +29,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const migrated = enableQualityComparison(migrateQualityCaptureEntries(value.study));
+      const migrated = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -65,7 +66,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
           change(s => {
             const sample = qualityRunSamples(s).find(v => v.id === result.sampleId), group = qualityRunGroups(s).find(v => v.id === result.groupId);
             if (!sample || !group || qualityResultKey(sample, group, s.observeHours) !== result.key) return s;
-            return { ...s, results: [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] };
+            return archiveQualityResult({ ...s, results: [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] }, result);
           });
         },
       });
@@ -93,7 +94,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change, cancel, start]);
   const setObserveHours = useCallback((hours: number) => { cancel(); change(s => ({ ...s, observeHours: hours })); const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500); }, [change, cancel, start]);
   const setTracking = useCallback((tracking: boolean) => { if (!tracking) cancel(); change(s => ({ ...s, tracking })); }, [change, cancel]);
-  const selectSell = useCallback((id: string) => change(s => s.sellPlans?.some(p => p.id === id && p.rule) ? { ...s, selectedSellId: id } : s), [change]);
+  const selectSell = useCallback((id: string) => change(s => markQualityDetection(s, id)), [change]);
   const setCohort = useCallback((ids?: string[]) => {
     cancel(); change(s => ({ ...s, cohortIds: ids ? qualityComparisonRows(s).filter(r => ids.includes(r.id)).map(r => r.id) : undefined }));
     const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);

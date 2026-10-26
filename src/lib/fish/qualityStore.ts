@@ -20,6 +20,8 @@ function valid(value: unknown): value is FishQualityStudy {
     && Array.isArray(v.samples) && Array.isArray(v.groups) && Array.isArray(v.results);
 }
 export async function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
+  // A detail link can open immediately after the evaluator unmounts and flushes.
+  await writes.get(keyOf(owner));
   let fallback: unknown;
   try { fallback = JSON.parse(localStorage.getItem(keyOf(owner)) ?? 'null'); } catch { /* durable copy still works */ }
   try {
@@ -58,6 +60,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
     }
   });
   writes.set(key, task);
+  void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
   return task;
 }

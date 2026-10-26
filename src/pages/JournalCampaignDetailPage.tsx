@@ -1,3 +1,5 @@
+import { isQualityCampaignId } from '@/lib/campaignSections';
+import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -763,14 +765,17 @@ async function loadAccountCampaignPerformance(
   ownerUserId: string,
   viewerUserId: string,
   snapshot?: CampaignBatchExportSnapshot,
+  comparison?: TradeCampaign['comparison'],
 ): Promise<AccountCampaignMetrics> {
-  const campaigns = ownerUserId === viewerUserId
+  const paper = comparison ? (await listQualityCampaignData(ownerUserId, comparison.section)).rows.filter(row => row.campaign.comparison?.sellKey === comparison.sellKey) : null;
+  const paperById = new Map(paper?.map(row => [row.campaign.id, row]));
+  const campaigns = paper ? paper.map(row => row.campaign) : ownerUserId === viewerUserId
     ? await listAllCampaigns(ownerUserId)
     : (await listVisibleCampaigns(viewerUserId)).filter(item => item.user_id === ownerUserId);
   const loadSample = async (item: TradeCampaign) => {
     // 账户级样本只是读：这里自己算校正后的口径，不需要（也不该）让每一场都走一遍回写。
     // 此前默认 heal 让打开一个详情页对全部 ~147 场各写一次库，还与本场的回写抢同一行。
-    const details = snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false });
+    const details = paperById.get(item.id) ?? (snapshot ? await loadBatchCampaignData(item.id, snapshot) : await getCampaignFullData(item.id, { heal: false }));
     const exitPriceCorrections = await fetchLegExitPriceCorrections(
       details.campaign.symbol,
       details.legs,
@@ -909,6 +914,7 @@ function CampaignBatchBoardRenderer({
 export default function JournalCampaignDetailPage({ batchExport }: { batchExport?: CampaignBatchExportWorkerProps } = {}) {
   const { id: routeId } = useParams<{ id: string }>();
   const id = batchExport?.campaignId ?? routeId;
+  const paperCampaign = isQualityCampaignId(id);
   // 计算用 K 线（峰值浮盈、决策准确度、反事实）：详情页始终要；批量导出只在图里画盈亏概览时要。
   const computeKlinesNeeded = !batchExport || batchExport.options.sections.overview !== false;
   // 显示用 K 线（盘面）：详情页始终要；批量导出只在图里画 K 线盘面时要。
@@ -1107,7 +1113,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
           ? await loadBatchExitCorrections(full.campaign.symbol, full.legs, full.tradeRecords)
           : full.legExitPriceCorrections ?? {};
         if (cancelled) return;
-        setIsOwner(ownCampaign);
+        setIsOwner(ownCampaign && !paperCampaign);
         setCampaign(full.campaign);
         setLegs(full.legs);
         setTradeRecords(full.tradeRecords);
@@ -1152,7 +1158,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       }
     })();
     return () => { cancelled = true; };
-  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds, batchExport, reportBatchError]);
+  }, [id, viewerUserId, nav, location.search, adoptUnfilledOrderIds, batchExport, reportBatchError, paperCampaign]);
 
   const campaignOwnerId = campaign?.user_id ?? null;
 
@@ -1212,10 +1218,10 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     setCampaignAsymmetricRisk(null);
     setCampaignPerformanceError(null);
     setCampaignPerformanceLoading(true);
-    const cacheKey = `${viewerUserId}:${campaignOwnerId}`;
+    const cacheKey = `${viewerUserId}:${campaignOwnerId}:${campaign?.comparison?.section ?? 'personal'}:${campaign?.comparison?.sellKey ?? ''}`;
     let shared = batchExport?.snapshot.accountMetrics.get(cacheKey);
     if (!shared) {
-      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot);
+      shared = loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport?.snapshot, campaign?.comparison);
       batchExport?.snapshot.accountMetrics.set(cacheKey, shared);
       // 失败的那份不留在缓存里：重试时重新读，而不是反复拿到同一个被拒的 Promise。
       if (batchExport) void shared.catch(() => batchExport.snapshot.accountMetrics.delete(cacheKey));
@@ -1225,7 +1231,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 这时只为本场重新读一次样本（不进缓存，其余场次仍共用原来那一份、各自注明缺场）。
     const request = batchExport
       ? shared.then(result => (result.missingSampleIds?.includes(batchExport.campaignId)
-        ? loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport.snapshot)
+        ? loadAccountCampaignPerformance(campaignOwnerId, viewerUserId, batchExport.snapshot, campaign?.comparison)
         : result))
       : shared;
     request
@@ -1250,11 +1256,12 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     return () => {
       cancelled = true;
     };
-  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision]);
+  }, [campaignOwnerId, viewerUserId, batchExport, reportBatchError, localRecoveryRevision, campaign?.comparison]);
 
   const effectiveClosedAt = useMemo(() => {
     if (!campaign) return null;
     if (campaign.closed_at) return campaign.closed_at;
+    if (campaign.comparison) return new Date(campaign.comparison.valuedAt).toISOString();
     if (batchExport) {
       // 复盘模式下的「当前时刻」不是墙上时钟：每个标的在一批里只取一次，
       // 进行中的战役不会因为导出途中回放在走而前后几张图的截止时间不一致。
@@ -2134,8 +2141,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     [chart.verticalLines, counterfactualChart.verticalLines, selectedLegVerticalLines, showSelectedCounterfactual],
   );
   const canSuggestEnd = useMemo(
-    () => (campaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
-    [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime],
+    () => (campaign && !paperCampaign ? shouldSuggestCampaignEnd(campaign, legs, tradeRecords, pendingOrders, getEffectiveTime(campaign.symbol)) : false),
+    [campaign, legs, tradeRecords, pendingOrders, getEffectiveTime, paperCampaign],
   );
   // 偏离代价（手动调整 vs 原始）：取当前选中「手动运行」分支的 manual_legs，与原始基线 legs 逐腿对比。
   // 合计 = 手动调整总盈亏 − 原始实盘总盈亏 = 原始错误的总代价。
@@ -2715,7 +2722,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 >
                   {campaignDisplayCode}
                 </span>
-                <span>{campaign.symbol}</span>
+                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">{campaign.comparison.section === 'sell' ? '卖出比较' : '探测比较'} · {campaign.comparison.sellLabel}</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>
@@ -2731,9 +2738,9 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             </div>
           </div>
           <CampaignDetailSelfRating key={campaign.id} campaignId={campaign.id}
-            value={campaign.importance_weight} editable={campaign.user_id === viewerUserId}
+            value={campaign.importance_weight} editable={campaign.user_id === viewerUserId && !paperCampaign}
             onChange={value => setCampaign(current => current?.id === campaign.id ? { ...current, importance_weight: value } : current)} />
-          {displayStatus === 'active' && (
+          {displayStatus === 'active' && !paperCampaign && (
             // 结束对话框会把峰值浮盈（accuracy）写库：计算用 K 线没到之前那是兜底值，先停用
             // 停用的 Button 带 pointer-events-none，悬停落不到它身上：提示挂在外层 span 上才看得见
             <span
@@ -3247,7 +3254,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
               ));
             }}
             onHideReverseHedgeOrder={(order) => hideReverseHedgeOrder(order.id)}
-            onDetach={setDetachTarget}
+            onDetach={paperCampaign ? undefined : setDetachTarget}
           />
         </section>
 
@@ -3321,7 +3328,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                       className="h-8 w-56 max-w-full text-[12px]"
                     />
                     <div className="flex items-center gap-2">
-                      <Button type="button" data-testid="counterfactual-save" className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]" disabled={counterfactualDraftSaving} onClick={handleSaveCounterfactualDraft}>
+                      <Button type="button" data-testid="counterfactual-save" className="h-8 bg-[#F0B90B] text-black hover:bg-[#F0B90B]/90 text-[12px]" disabled={counterfactualDraftSaving || paperCampaign} title={paperCampaign ? '比较战役保留原试验，副本可试算' : undefined} onClick={handleSaveCounterfactualDraft}>
                         {counterfactualDraftSaving ? '保存中…' : '保存'}
                       </Button>
                       <Button type="button" data-testid="counterfactual-discard" variant="outline" className="h-8 text-[12px]" disabled={counterfactualDraftSaving} onClick={handleDiscardCounterfactualDraft}>

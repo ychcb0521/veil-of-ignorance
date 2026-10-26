@@ -46,6 +46,8 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
+import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
+import { CAMPAIGN_SECTIONS, campaignSection } from '@/lib/campaignSections';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
 import { chartBoxHeightToFitViewport } from '@/lib/chartViewportFit';
@@ -2320,7 +2322,8 @@ export default function JournalCampaignsPage() {
   const location = useLocation();
   const initialSortChain = useMemo(() => parseCampaignSortChain(location.search), [location.search]);
   /** 回收站视图（?bin=1）：同一个页面、同一套一切，只是列表缓存换成回收站那一份（见 useCampaignList 的作用域）。 */
-  const binView = useMemo(() => parseCampaignBinParam(location.search), [location.search]);
+  const section = campaignSection(location.search), comparing = section !== 'personal';
+  const binView = useMemo(() => parseCampaignBinParam(location.search) && campaignSection(location.search) === 'personal', [location.search]);
   const { user, profile } = useAuth();
   // 只认 id：auth 每次刷新 token 都会换一个 user 对象，不能让它牵动取数与回调。
   const userId = user?.id;
@@ -2337,10 +2340,23 @@ export default function JournalCampaignsPage() {
     () => computeCurrentAccountEquity(balance, positionsMap, priceMap),
     [balance, positionsMap, priceMap],
   );
+  const personalList = useCampaignList(comparing ? undefined : userId, { tradeHistory, ordersMap, filledOrders, positionsMap }, binView ? 'deleted' : 'active');
+  const comparisonList = useQualityCampaignList(userId, section);
   const {
-    rows, setRows, complete: campaignRowsComplete, refreshing, loaded, total, cached: campaignRowsCached,
+    rows: sourceRows, setRows, complete: campaignRowsComplete, refreshing, loaded, total, cached: campaignRowsCached,
     error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
-  } = useCampaignList(user?.id, { tradeHistory, ordersMap, filledOrders, positionsMap }, binView ? 'deleted' : 'active');
+  } = comparing ? comparisonList : personalList;
+  const comparisonParams = new URLSearchParams(location.search), sellFilter = comparisonParams.has('sell') ? comparisonParams.get('sell') ?? '' : section === 'detect' ? comparisonList.selectedSellKey ?? '' : '', detectorFilter = comparisonParams.get('detector') ?? '';
+  const rows = useMemo(() => !comparing ? sourceRows : sourceRows.filter(row => (!sellFilter || row.campaign.comparison?.sellKey === sellFilter) && (!detectorFilter || row.campaign.comparison?.detectors.some(d => d.id === detectorFilter))), [sourceRows, comparing, sellFilter, detectorFilter]);
+  const comparisonReturns = useMemo(() => {
+    const closed = rows.filter(row => isResolvedCampaign(row.campaign)), values = closed.map(row => row.campaign.final_realized_pnl!);
+    return { closed: closed.length, total: rows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
+      mean: values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null, worst: values.length ? Math.min(...values) : null };
+  }, [rows]);
+  const comparisonPlans = useMemo(() => [...new Map(sourceRows.filter(row => row.campaign.comparison).map(row => [row.campaign.comparison!.sellKey, row.campaign.comparison!.sellLabel])).entries()], [sourceRows]);
+  const comparisonDetectors = useMemo(() => [...new Map(sourceRows.flatMap(row => row.campaign.comparison?.detectors.map(d => [d.id, d.label] as const) ?? [])).entries()], [sourceRows]);
+  const changeComparisonFilter = (key: string, value: string) => { const params = new URLSearchParams(location.search); params.set(key, value); nav({ pathname: location.pathname, search: params.toString() }); };
+
   const loading = !campaignRowsComplete && !campaignLoadError && rows.length === 0;
   const campaignLoadProgress = { loaded, total };
   const [busyCampaignId, setBusyCampaignIdState] = useState<string | null>(null);
@@ -2538,7 +2554,7 @@ export default function JournalCampaignsPage() {
 
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || comparing) return;
     let cancelled = false;
     listDeletedCampaigns(userId)
       .then(campaigns => {
@@ -2548,7 +2564,7 @@ export default function JournalCampaignsPage() {
         if (!cancelled) setDeletedCampaigns([]);
       });
     return () => { cancelled = true; };
-  }, [userId]);
+  }, [userId, comparing]);
 
   const listScrollRestoreCancelled = useRef(false);
   useLayoutEffect(() => {
@@ -2922,7 +2938,7 @@ export default function JournalCampaignsPage() {
       hiddenMetrics={hiddenMinorMetrics}
       expanded={expandedCampaignIds.has(row.campaign.id)}
       busy={busyCampaignId === row.campaign.id}
-      isOwnCampaign={row.campaign.user_id === userId}
+      isOwnCampaign={row.campaign.user_id === userId && !row.campaign.comparison}
       campaignAccountName={campaignAccountName}
       selectionMode={selectionMode}
       selected={selectedCampaignIds.has(row.campaign.id)}
@@ -4379,11 +4395,11 @@ export default function JournalCampaignsPage() {
                 </span>
               )}
             </h1>
-            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : '复盘的高层单位'}</p>
+            <p className="text-[11px] text-muted-foreground">{binView ? '只显示回收站里的战役' : comparing ? '鱼质量 · 100 USDT · 1 倍模拟多单' : '复盘的高层单位'}</p>
           </div>
           <div className="flex-1" />
           {/* 回收站视图下没有「归类历史交易」（新战役不会归类进回收站），换成「返回战役」 */}
-          {binView ? (
+          {!comparing && (binView ? (
             <button
               type="button"
               onClick={leaveBin}
@@ -4403,8 +4419,9 @@ export default function JournalCampaignsPage() {
               <FolderPlus className="w-3.5 h-3.5" />
               归类历史交易
             </button>
-          )}
+          ))}
           {/* 回收站图标照旧打开「已删除战役」弹窗；回收站视图下点亮（琥珀）表示当前就在回收站 */}
+          {!comparing && (
           <button
             type="button"
             onClick={() => void handleDeletedOpenChange(true)}
@@ -4421,12 +4438,18 @@ export default function JournalCampaignsPage() {
             <ArchiveRestore className="h-3.5 w-3.5" />
             {deletedCampaigns.length > 0 && <span>{deletedCampaigns.length}</span>}
           </button>
+          )}
         </div>
       </header>
 
       {/* 选择模式下底部留出浮条（bottom-4 + h-10）的高度：翻到列表最末，最后一张卡片的指标行不被浮条压住 */}
       <main className={`mx-auto max-w-[1600px] px-4 py-5 sm:px-6${selectionMode ? ' pb-20' : ''}`}>
-        {activeCount > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="campaign-section-controls">
+          <nav className="inline-flex rounded-md bg-muted/60 p-0.5 text-[12px]" aria-label="交易战役板块">{CAMPAIGN_SECTIONS.map(item => <button type="button" key={item.id} aria-current={section === item.id ? 'page' : undefined} className={`rounded px-3 py-1.5 ${section === item.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => { const params = new URLSearchParams(location.search); params.delete('sell'); params.delete('detector'); params.delete('bin'); if (item.id === 'personal') params.delete('section'); else params.set('section', item.id); nav({ pathname: '/journal/campaigns', search: params.toString() }); }}>{item.label}</button>)}</nav>
+          {comparing && <><select aria-label="战役卖出方案" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={sellFilter} onChange={e => changeComparisonFilter('sell', e.target.value)}><option value="">全部卖出方案</option>{comparisonPlans.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{section === 'detect' && <select aria-label="战役探测算法" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={detectorFilter} onChange={e => changeComparisonFilter('detector', e.target.value)}><option value="">全部探测算法</option>{comparisonDetectors.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>}<span className="text-[10.5px] text-muted-foreground">{section === 'detect' ? '同一交易命中多个探测算法时，整表只计一次；可筛选算法比较。' : '每个信号、每套卖出规则独立比较；可筛选同一卖出方案。'} 结果保存在当前账号的本机副本中。</span></>}
+        </div>
+        {comparing && <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span><span className="font-sans text-[10px] text-muted-foreground">未设价格保护线或未加仓的风险指标，沿用原战役口径显示「—」。</span></div>}
+        {!comparing && activeCount > 0 && (
           <button
             type="button"
             data-testid="active-campaigns-banner"
@@ -5907,7 +5930,7 @@ export default function JournalCampaignsPage() {
             ) : (
               <>
                 <div className="text-[13px] font-medium">尚无战役</div>
-                <div className="text-[12px] text-muted-foreground">你下次开主力单时会自动创建第一个战役</div>
+                <div className="text-[12px] text-muted-foreground">{comparing ? section === 'detect' ? '在鱼质量中固定卖出方案后，已运行的鱼会出现在这里' : '在鱼质量中勾选信号并运行，交易会出现在这里' : '你下次开主力单时会自动创建第一个战役'}</div>
               </>
             )}
           </div>

@@ -114,3 +114,39 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 3 行 · 1 条信号（筛选自 303 行）');
   expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
 });
+
+it('sorts each sell header by numeric return in both directions, keeps missing results last, and links sold trades to campaigns', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, ['LOSS', 'GAIN', 'MISSING'].map((symbol, i) => ({ id: `lib-${i}`, symbol, timeMs: T, timeLabel: '', fallbackZone: '' })));
+  s.study.sellPlans!.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: .5 }; });
+  const rows = qualityComparisonRows(s.study);
+  s.study.results = rows.filter(r => r.source.symbol !== 'MISSING').flatMap(row => s.study.sellPlans!.map(p => {
+    const value = row.source.symbol === 'GAIN' ? 30 : row.source.symbol === 'LOSS' ? -20 : 10;
+    return { key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T + 600000, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 600000, endPrice: 100 + value, returnPct: value, pnl: value, peakPct: 40 };
+  }));
+  render(<FishQuality state={s}/>);
+  const symbols = () => screen.getAllByTestId('quality-fish-row').map(r => r.textContent);
+  for (const label of ['状态 S 原始值', 'CDA 原始值']) {
+    fireEvent.click(screen.getByRole('button', { name: `按${label}收益率排序` }));
+    expect(symbols()[0]).toContain('GAIN'); expect(symbols().at(-1)).toContain('MISSING');
+    fireEvent.click(screen.getByRole('button', { name: `按${label}收益率排序` }));
+    expect(symbols()[0]).toContain('LOSS'); expect(symbols().at(-1)).toContain('MISSING');
+  }
+  const link = screen.getAllByRole('link', { name: /已卖出/ })[0];
+  expect(link.getAttribute('href')).toMatch(/^\/journal\/campaigns\/fish-sell-.*\?section=sell$/);
+  expect(screen.getAllByTestId('quality-sell-column')[1]).toHaveAttribute('aria-sort', 'ascending');
+});
+
+it('automatically opens the actual distribution after a run, supports one configured sell and maximum-rise distributions', () => {
+  const s = state(), row = qualityComparisonRows(s.study)[0], p = s.study.sellPlans![0];
+  p.rule = { metric: p.metric, direction: '<', threshold: .5 };
+  const view = render(<FishQuality state={{ ...s, running: true }}/>);
+  expect(screen.queryByTestId('quality-distribution-chart')).toBeNull();
+  s.study = { ...s.study, results: [{ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: -12, peakPct: 24 }] };
+  view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByTestId('quality-distribution-chart')).toHaveTextContent('收益率分布');
+  expect(screen.getAllByTestId('quality-histogram')).toHaveLength(1);
+  expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 -12%');
+  fireEvent.change(screen.getByLabelText('分布图指标'), { target: { value: 'peakPct' } });
+  expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 +24%');
+});

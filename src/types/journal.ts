@@ -385,6 +385,11 @@ export interface CampaignDeviationNote {
 }
 
 export interface TradeCampaign {
+  /** Local paper-comparison metadata; never written to personal campaign tables. */
+  comparison?: {
+    section: 'sell' | 'detect'; runKey: string; sellKey: string; sellLabel: string;
+    detectors: { id: string; label: string }[]; valuedAt: number;
+  };
   id: string;
   user_id: string;
   /** Globally unique human-facing campaign code. Database-generated when available. */
