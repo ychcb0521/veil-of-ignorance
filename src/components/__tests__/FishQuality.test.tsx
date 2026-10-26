@@ -49,11 +49,11 @@ it('merges multiple entries and sources at the same signal time, displays result
  render(<FishQuality state={s}/>);
  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号');
  expect(screen.getByText('-5.00%～+10.00%')).toBeInTheDocument();
- expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('信号库');
+ expect(screen.getByTestId('quality-fish-row')).not.toHaveTextContent('信号库');
  fireEvent.click(screen.getByText('-5.00%～+10.00%'));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
  for(const label of ['+10.00%','-5.00%','+1.00%'])expect(screen.getByText(label)).toBeInTheDocument();
 });
-it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
+it('keeps source filters working without source badges in detector comparison rows', () => {
   const s=state();
   s.study.samples=s.study.samples.map(row=>({...row,source:{...row.source,mined:{anchorMs:T}}}));
   const plain={...s.study.samples[0].source,id:'manual',symbol:'BBBUSDT',mined:undefined};
@@ -63,15 +63,15 @@ it('labels automatically mined fish beside the existing library source label in 
   fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
   fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   const rows=screen.getAllByTestId('quality-fish-row');
-  const mined=rows.filter(row=>within(row).queryByText('默认值挖掘'));
-  expect(mined).toHaveLength(3);
-  expect(rows.filter(row=>within(row).queryByText('信号库'))).toHaveLength(1);
-  expect(within(rows.find(row=>row.textContent?.includes('BBBUSDT'))!).queryByText('默认值挖掘')).toBeNull();
+  for(const row of rows) {
+    expect(within(row).queryByText('默认值挖掘')).toBeNull();
+    expect(within(row).queryByText('信号库')).toBeNull();
+  }
   const source = screen.getByLabelText('鱼质量的来源');
   for (const label of ['全部来源（3）', '鱼（1）', '信号库（1）', '默认值（1）']) expect(within(source).getByRole('option', { name: label })).toBeInTheDocument();
   fireEvent.change(source, { target: { value: 'mined' } });
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
-  expect(screen.getAllByTestId('quality-fish-row').every(row => within(row).queryByText('默认值挖掘'))).toBe(true);
+  for(const row of screen.getAllByTestId('quality-fish-row')) { expect(row).toHaveTextContent('AAAUSDT'); expect(within(row).queryByText('默认值挖掘')).toBeNull(); }
   fireEvent.change(source, { target: { value: 'fish' } });
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('BBBUSDT');
@@ -122,19 +122,17 @@ it('keeps tracking/horizon controls compact and shows the paired trade metrics o
 });
 
 // 【用户要求】2026-10-26 信号库的信号纳入卖出比较，并与鱼舱的鱼区分
-it('marks signal-library rows, filters by source and keeps them out of detector columns', () => {
+it('filters library rows by source without symbol badges and keeps them out of detector columns', () => {
   const s = state();
   s.study = importQualityLibrary(s.study, [{ id: 'lib', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }, { id: 'lib2', symbol: 'ZZZUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }]);
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(5);
-  const libraryRows = screen.getAllByTestId('quality-fish-row').filter(r => within(r).queryByText('信号库'));
-  expect(libraryRows).toHaveLength(2);
-  for (const r of libraryRows) { expect(within(r).queryByText('命中')).toBeNull(); expect(within(r).queryByTestId('fish-process-open')).toBeNull(); }
+  for(const row of screen.getAllByTestId('quality-fish-row')) expect(within(row).queryByText('信号库')).toBeNull();
   const source = screen.getByLabelText('鱼质量的来源');
   expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
   fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
-  // 已按信号库筛选，每行不再重复标记
+  for (const row of screen.getAllByTestId('quality-fish-row')) { expect(within(row).getByTestId('quality-detector-cell')).toHaveTextContent('—'); expect(within(row).queryByTestId('fish-process-open')).toBeNull(); }
   for (const r of screen.getAllByTestId('quality-fish-row')) expect(within(r).queryByText('信号库')).toBeNull();
   fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
