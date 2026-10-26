@@ -313,3 +313,18 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
  expect(s.setFilters).toHaveBeenCalledWith([],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
 });
+// 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
+it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
+  const { saveQualityReturn, armQualityReturn, finishQualityReturn } = await import('@/lib/fish/qualityReturn');
+  window.history.replaceState({ key: 'fish-entry', idx: 1 }, '');
+  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', showStats: false, closedOnly: false, sort: 'symbol', ascending: true, distributionMetric: 'returnPct', statSort: null, tableTop: 0 }, scroll: [] });
+  expect(armQualityReturn()).toBe(true);
+  render(<FishQuality state={state()}/>);
+  expect(screen.getByRole('tab', {name: /比较探测/})).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
+  expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
+  finishQualityReturn();
+  cleanup();
+  render(<FishQuality state={state()}/>);
+  expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
+});

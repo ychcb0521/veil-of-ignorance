@@ -285,6 +285,8 @@ type CampaignDetailNavigationState = {
   fromCampaignList?: boolean;
   /** 【用户要求】从规则页跳进来的：返回时回到规则页（原排序、原位置）。 */
   fromRules?: boolean;
+  /** 【用户要求】从「鱼质量」点进来的：返回时回到交易页的鱼质量（原分页、原筛选、原滚动位置，见 lib/fish/qualityReturn）。 */
+  fromFishQuality?: boolean;
 };
 
 // 战役详情页统一用浏览器本地时区显示 K 线/模拟时间——与下方 Legs 列表（本地 getHours）
@@ -2634,8 +2636,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
   const handleBackToCampaigns = () => {
     const navigationState = location.state as CampaignDetailNavigationState | null;
-    // 从战役列表或规则页进来的，退回上一条 history 记录：回到原来那一页的原样（排序、筛选、滚动位置）
-    if (navigationState?.fromCampaignList || navigationState?.fromRules) {
+    // 从战役列表、规则页或鱼质量进来的，退回上一条 history 记录：回到原来那一页的原样（排序、筛选、滚动位置）
+    if (navigationState?.fromCampaignList || navigationState?.fromRules || navigationState?.fromFishQuality) {
       nav(-1);
       return;
     }
@@ -2721,8 +2723,8 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             <button
               type="button"
               onClick={handleBackToCampaigns}
-              aria-label={(location.state as CampaignDetailNavigationState | null)?.fromRules ? '返回规则' : '返回进入前的交易战役列表'}
-              title="返回进入前的列表状态"
+              aria-label={(location.state as CampaignDetailNavigationState | null)?.fromRules ? '返回规则' : (location.state as CampaignDetailNavigationState | null)?.fromFishQuality ? '返回鱼质量' : '返回进入前的交易战役列表'}
+              title={(location.state as CampaignDetailNavigationState | null)?.fromFishQuality ? '返回鱼质量（原来的位置）' : '返回进入前的列表状态'}
               className="h-8 w-8 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card"
             >
               <ArrowLeft className="w-4 h-4" />
