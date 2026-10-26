@@ -161,8 +161,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       const saved = materializePlanBuyFilters(sellChanged ? archiveQualityStudy(s) : s);
       return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, buyFilters: structuredClone(filters), holdingVetoes: structuredClone(vetoes) } : p) };
     });
-    defer(() => void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'));
-  }, [change, start, defer]);
+    // 否决条件变了，正在跑的旧批次结果已没用：立刻按新设置重新开始，不排在整批之后
+    defer(() => { if (sellChanged && controller.current) void restart(); else void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); });
+  }, [change, start, restart, defer]);
   return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, restart, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

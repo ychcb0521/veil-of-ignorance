@@ -319,3 +319,19 @@ it('pause invalidates a pending settings run instead of restarting after the del
   act(() => h.result.current.cancel()); await flush(61_000);
   expect(tasks).toHaveLength(0);
 });
+// 【用户要求】2026-10-26「动态最大回撤这里改了数值之后为啥不起作用」：后台正在跑时改否决条件，立刻按新阈值重新开始
+it('restarts at once with the new holding vetoes when they change during a running batch', async () => {
+  const { makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  const id = h.result.current.study.sellPlans![0].id;
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
+  expect(tasks).toHaveLength(1);
+  act(() => h.result.current.setFilters(id, [], [makeQualityHoldingVeto('dynamic-drawdown', '>=', 10)])); await flush(600);
+  expect(tasks[0].signal.aborted).toBe(true);
+  expect(tasks).toHaveLength(2);
+  expect(tasks[1].study.sellPlans!.find(p => p.id === id)!.holdingVetoes?.[0]).toMatchObject({ kind: 'dynamic-drawdown', threshold: 10 });
+  act(() => h.result.current.cancel()); releases.forEach(r => r()); await flush();
+});
