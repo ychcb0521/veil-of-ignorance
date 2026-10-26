@@ -135,3 +135,18 @@ it('expands detector rows without multiplying trades, counts a signal once for s
   s.selectedSellId = plans[0].id;
   expect(qualityComparisonStats(s,displays.slice(0,1),true).detectors.map(v=>v.n)).toEqual([1,0]);
 });
+// 【用户要求】2026-10-26「运行完的币种，结果要立即显示出来」：按界面顺序评估，看得见的先出结果
+it('evaluates rows in the on-screen order, re-reads that order after every row and finishes all sells of a row together', async () => {
+  const s = importQualityLibrary(study(), [libSignal('XXXUSDT'), libSignal('ZZZUSDT')], T + 2 * M), rows = qualityComparisonRows(s);
+  s.selectedRowIds = rows.map(r => r.id);
+  expect(qualityComparisonRows(s)).toBe(rows); // 样本不变时复用
+  const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  const order: string[] = [], last = rows.at(-1)!.id, second = rows.at(-2)!.id;
+  let priority: string[] = [last];
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), priority: () => priority,
+    onResult: r => { order.push(r.sampleId); if (order.length === 2) priority = [second, last]; } }, load, T + 10 * M);
+  const rowsInOrder = order.filter((id, i) => order[i - 1] !== id);
+  expect(rowsInOrder.slice(0, 2)).toEqual([last, second]);
+  expect(order.slice(0, 4)).toEqual([last, last, second, second]);
+  expect(new Set(order).size).toBe(rows.length); expect(order).toHaveLength(rows.length * 2);
+});

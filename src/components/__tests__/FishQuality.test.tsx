@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn() };
 }
 afterEach(cleanup);
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
@@ -62,6 +62,8 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   const source = screen.getByLabelText('鱼质量的来源');
   expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
   fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
+  // 已按信号库筛选，每行不再重复标记
+  for (const r of screen.getAllByTestId('quality-fish-row')) expect(within(r).queryByText('信号库')).toBeNull();
   fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
 });
@@ -149,4 +151,15 @@ it('automatically opens the actual distribution after a run, supports one config
   expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 -12%');
   fireEvent.change(screen.getByLabelText('分布图指标'), { target: { value: 'peakPct' } });
   expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 +24%');
+});
+it('hands the evaluator the on-screen rows first and updates that order after scrolling', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, Array.from({ length: 200 }, (_, i) => ({ id: `l${i}`, symbol: `S${String(i).padStart(3, '0')}USDT`, timeMs: T - (i + 1) * 3600_000, timeLabel: '', fallbackZone: '' })));
+  render(<FishQuality state={s}/>);
+  const rows = qualityComparisonRows(s.study), byId = new Map(rows.map(r => [r.id, r.source.symbol]));
+  const firstCall = vi.mocked(s.setPriority).mock.calls.at(-1)![0];
+  expect(byId.get(firstCall[0])).toBe('AAAUSDT'); expect(new Set(firstCall).size).toBe(rows.length);
+  const box = screen.getByTestId('quality-fish-table'); box.scrollTop = 200 * 33; fireEvent.scroll(box);
+  const afterScroll = vi.mocked(s.setPriority).mock.calls.at(-1)![0];
+  expect(byId.get(afterScroll[0])).not.toBe('AAAUSDT'); expect(screen.getByText(byId.get(afterScroll[0])!)).toBeInTheDocument();
 });
