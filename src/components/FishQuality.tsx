@@ -19,7 +19,7 @@ import { holdingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityF
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
 import { rangeSelect } from '@/lib/listRangeSelect';
-import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn } from '@/lib/fish/qualityReturn';
+import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-muted/50 px-2 text-[11px] outline-none hover:bg-muted focus-visible:border-ring/60';
 const button = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
@@ -31,6 +31,7 @@ const signed = (v?: number | null) => v == null ? '' : v > 0 ? 'text-emerald-600
 const date = (v?: number | null) => v ? formatUTC8(v) : '—';
 const ruleText = (plan: QualityGroup) => plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '设置门槛';
 const isLibrary = (row: QualitySample) => row.origin === 'library';
+const sourceOf = (row: QualitySample) => isLibrary(row) ? 'library' : row.source.mined ? 'mined' : 'fish';
 // 来源筛选已选「信号库」时不显示（【用户要求】2026-10-26「表头已经选择了信号库之后，每行的标的后面就没必要显示信号库了」）
 const LibraryBadge = () => <span className="rounded border border-sky-500/30 bg-sky-500/10 px-1 font-sans text-[9px] text-sky-700 dark:text-sky-300">信号库</span>;
 const MiningBadge = () => <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1 font-sans text-[9px] text-violet-700 dark:text-violet-300">默认值挖掘</span>;
@@ -135,7 +136,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const { study, ready, running, progress } = state;
   // 从交易战役返回：按离开时记下的状态打开（见 lib/fish/qualityReturn）
   const [back] = useState(() => pendingQualityReturn()), ui = back?.ui;
-  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithm, setAlgorithm] = useState(ui?.algorithm ?? ''), [origin, setOrigin] = useState<'' | 'fish' | 'library'>(ui?.origin ?? '');
+  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithm, setAlgorithm] = useState(ui?.algorithm ?? ''), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   const [phase, setPhase] = useState<'sell' | 'detect'>(ui?.phase ?? 'sell');
   const [filterOpen, setFilterOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>((ui?.sort as SortKey | undefined) ?? 'time'), [ascending, setAscending] = useState(ui?.ascending ?? false), [scrollTop, setScrollTop] = useState(ui?.tableTop ?? 0);
@@ -150,7 +151,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
   const batch = useMemo(() => allRows.filter(r => !study.cohortIds || study.cohortIds.includes(r.signalId!)), [allRows, study.cohortIds]);
   // 月份条数跟随来源、探测算法、标的筛选；同一信号的多个探测行只计一次。
-  const narrowed = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!algorithm || r.detectorId === algorithm) && (!origin || (origin === 'library') === isLibrary(r))), [batch, query, algorithm, origin]);
+  const narrowed = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!algorithm || r.detectorId === algorithm) && (!origin || sourceOf(r) === origin)), [batch, query, algorithm, origin]);
   const resultMap = useMemo(() => qualityResultMap(study), [study]);
   // 买入过滤按卖出方案各自一套：planId → 信号 → 这套方案下买没买
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
@@ -292,7 +293,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
       </div>
       {running && <p className="text-[10.5px] text-muted-foreground" data-testid="quality-background-note">后台更新中：按开始时的勾选和参数运行，切换选项或页面不会中断；参数改动需要的计算会在本批完成后进行。</p>}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="relative shrink-0"><select aria-label="鱼质量的来源" className={`${field} appearance-none pr-6`} value={origin} onChange={e => { setOrigin(e.target.value as '' | 'fish' | 'library'); resetScroll(); }}><option value="">全部来源（{countSignals(batch)}）</option><option value="fish">鱼（{countSignals(batch.filter(r => !isLibrary(r)))}）</option><option value="library">信号库（{countSignals(batch.filter(isLibrary))}）</option></select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
+        <span className="relative shrink-0"><select aria-label="鱼质量的来源" className={`${field} appearance-none pr-6`} value={origin} onChange={e => { setOrigin(e.target.value as QualityReturnUi['origin']); resetScroll(); }}><option value="">全部来源（{countSignals(batch)}）</option><option value="fish">鱼（{countSignals(batch.filter(r => sourceOf(r) === 'fish'))}）</option><option value="library">信号库（{countSignals(batch.filter(isLibrary))}）</option><option value="mined">默认值（{countSignals(batch.filter(r => sourceOf(r) === 'mined'))}）</option></select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <span className="relative max-w-60 shrink-0"><select aria-label="鱼质量的探测算法" className={`${field} w-full appearance-none pr-6`} value={algorithm} onChange={e => { setAlgorithm(e.target.value); resetScroll(); }}><option value="">全部探测算法</option>{groups.map(g => <option key={g.id} value={g.id}>{g.label} {g.snapshot.direction ?? '>'} {g.snapshot.threshold}</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>

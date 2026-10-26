@@ -26,6 +26,17 @@ it('labels automatically mined fish beside the existing library source label in 
   expect(mined).toHaveLength(3);
   expect(rows.filter(row=>within(row).queryByText('信号库'))).toHaveLength(1);
   expect(within(rows.find(row=>row.textContent?.includes('BBBUSDT'))!).queryByText('默认值挖掘')).toBeNull();
+  const source = screen.getByLabelText('鱼质量的来源');
+  for (const label of ['全部来源（3）', '鱼（1）', '信号库（1）', '默认值（1）']) expect(within(source).getByRole('option', { name: label })).toBeInTheDocument();
+  fireEvent.change(source, { target: { value: 'mined' } });
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  expect(screen.getAllByTestId('quality-fish-row').every(row => within(row).queryByText('默认值挖掘'))).toBe(true);
+  fireEvent.change(source, { target: { value: 'fish' } });
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+  expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('BBBUSDT');
+  fireEvent.change(source, { target: { value: 'library' } });
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+  expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('CCCUSDT');
 });
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
   const s = state(); render(<FishQuality state={s}/>);

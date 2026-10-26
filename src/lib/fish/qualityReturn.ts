@@ -7,7 +7,7 @@
  * 交易页据此自动展开「渔」，鱼质量按记下的状态打开并滚回原处。从别处另开一次交易页（新的浏览记录）不受影响。
  */
 export interface QualityReturnUi {
-  open: boolean; query: string; month: string; algorithm: string; origin: '' | 'fish' | 'library';
+  open: boolean; query: string; month: string; algorithm: string; origin: '' | 'fish' | 'library' | 'mined';
   phase: 'sell' | 'detect';
   sort: string; ascending: boolean;
   tableTop: number;
