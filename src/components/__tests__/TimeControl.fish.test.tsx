@@ -307,3 +307,22 @@ it('鱼舱把截图中的三轮相同行合成一条，徽标/月计数一致，
  fireEvent.click(within(restored).getByRole('button',{name:/^确认删除/}));
  expect(loadFishSignals()).toHaveLength(0);
 },30000);
+
+it.each([true, false])('鱼质量的信号库标的可点击定位盘面；跳转成功=%s 时按结果收起渔并阻止重复跳转', async success => {
+  const library = { id: 'quality-lib', symbol: 'LIBUSDT', timeMs: 123, timeLabel: '', fallbackZone: '' };
+  localStorage.setItem(SIGNAL_LIBRARY_STORAGE_KEY, JSON.stringify([library]));
+  let finish!: (result: { ok: true } | { ok: false; reason: string }) => void;
+  const jump = vi.fn(() => new Promise<{ ok: true } | { ok: false; reason: string }>(resolve => { finish = resolve; }));
+  render(control(jump as any));
+  fireEvent.click(screen.getByRole('button', { name: /^渔/ }));
+  const quality = () => within(screen.getByTestId('fish-quality'));
+  const target = await quality().findByRole('button', { name: '查看 LIBUSDT 盘面' });
+  await waitFor(() => expect(target).toBeEnabled());
+  fireEvent.click(target);
+  expect(jump).toHaveBeenCalledWith('LIBUSDT', 123);
+  expect(target).toBeDisabled();
+  fireEvent.click(target); expect(jump).toHaveBeenCalledTimes(1);
+  await act(async () => { finish(success ? { ok: true } : { ok: false, reason: '暂时不可用' }); });
+  if (success) expect(screen.queryByTestId('fish-panel')).toBeNull();
+  else expect(quality().getByRole('button', { name: '查看 LIBUSDT 盘面' })).toBeEnabled();
+}, 30000);

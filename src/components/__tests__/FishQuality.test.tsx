@@ -488,3 +488,19 @@ it('places independent filter results immediately after capture, runs without se
   s.study = { ...s.study, sellPlans: s.study.sellPlans.map(p => ({ ...p, buyFilters: [{ ...f, threshold: .4 }] })) };
   view.rerender(<FishQuality state={s}/>); expect(reading('LOWUSDT')).toHaveTextContent('0.5满足'); expect(s.start).toHaveBeenCalledTimes(1);
 });
+
+it('jumps from the symbol without toggling selection, including merged rows and library rows, and respects unavailable charts', () => {
+  const s = state(), jump = vi.fn();
+  s.study = importQualityLibrary(s.study, [{ id: 'lib', symbol: 'LIBUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }]);
+  const view = render(<FishQuality state={s} onJump={jump} canJump={() => true}/>);
+  for (const symbol of ['AAAUSDT', 'LIBUSDT']) {
+    fireEvent.click(screen.getByRole('button', { name: `查看 ${symbol} 盘面` }));
+    expect(jump.mock.calls.at(-1)![0]).toMatchObject({ symbol, timeMs: T });
+  }
+  expect(s.setSelectedRows).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
+  expect(screen.getAllByRole('button', { name: '查看 AAAUSDT 盘面' })).toHaveLength(3);
+  view.rerender(<FishQuality state={s} onJump={jump} canJump={source => source.symbol !== 'LIBUSDT'}/>);
+  const unavailable = screen.getByRole('button', { name: '查看 LIBUSDT 盘面' });
+  expect(unavailable).toBeDisabled(); fireEvent.click(unavailable); expect(jump).toHaveBeenCalledTimes(2);
+});

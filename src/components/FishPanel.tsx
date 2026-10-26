@@ -21,7 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AUDITED_EXCHANGES, EXCHANGE_NAMES, type FishExchange } from '@/lib/fish/exchanges';
 import { ChevronDown, CircleHelp, Clock3, History, Mail, MoreHorizontal, Play, Plus, Search, SlidersHorizontal, Square } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { TradeSignal } from '@/lib/signalLibrary';
+import { signalChartSymbol, type TradeSignal } from '@/lib/signalLibrary';
 import { fishSelectionKey, parseFishSettings, type FishScanSettings, type FishProgress, type FishDiagnosis } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import type { FishAlgorithmSettings } from '@/lib/fish/algorithm';
@@ -58,6 +58,7 @@ export interface FishPanelProps {
   inputs: { time: string; threshold: string }; onInputsChange: (value: { time: string; threshold: string }) => void;
   selection: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }; onSelectionChange: (value: { exchanges: FishExchange[]; includeDuplicates: boolean; includeUsStocks?: boolean }) => void;
   onStart: (settings: FishScanSettings) => void; onCancel: () => void;
+  onJumpQuality?: (source: TradeSignal) => void;
   onJump: (id: string) => void; onDelete: (id: string) => void; onRate: (id: string, value: number) => void;
   jumpingSignalId: string | null; tradedDayIndex: Set<string>; campaignDayIndex: Set<string>;
 }
@@ -382,6 +383,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <FishQuality state={p.quality} mining={p.mining} onJump={source => p.onJump(source.id)} canJump={source => p.signals.some(s => s.id === source.id)}/>}
+    {p.quality && <FishQuality state={p.quality} mining={p.mining} onJump={source => p.onJumpQuality ? p.onJumpQuality(source) : p.onJump(source.id)} canJump={source => !p.jumpingSignalId && !!signalChartSymbol(source) && (!!p.onJumpQuality || p.signals.some(s => s.id === source.id))}/>}
   </section>;
 }

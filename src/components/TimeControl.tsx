@@ -436,24 +436,29 @@ export function TimeControl({
   // 手动删除走 fish.remove：记删除记号，别的设备 / 窗口的旧副本合并时不会把它带回来
   const handleDeleteFish = useCallback((id: string) => fish.remove(id), [fish.remove]);
   const handleRateFish = useCallback((id: string, quality: number) => fish.commit(setSignalQuality(fish.signalsRef.current, id, quality)), [fish.commit, fish.signalsRef]);
-  const handleJumpFish = useCallback(async (id: string) => {
-    const sig = fish.signalsRef.current.find(s => s.id === id);
+  const handleJumpFish = useCallback(async (id: string, qualitySource?: TradeSignal) => {
+    const fishSignal = fish.signalsRef.current.find(s => s.id === id);
+    const sig = fishSignal ?? qualitySource;
     if (!sig || !signalChartSymbol(sig) || jumpingSignalIdRef.current) return;
     rememberFishPosition();
     const { onJumpToSignal: jumpTo, onSymbolChange: changeSymbol } = jumpPropsRef.current;
     if (!jumpTo) { changeSymbol?.(signalChartSymbol(sig)!); setFishOpen(false); return; }
     jumpingSignalIdRef.current = id; setJumpingSignalId(id);
+    const updateIssue = (issue: TradeSignal['jumpIssue']) => {
+      if (fishSignal) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
+      else setSignals(previous => previous.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
+    };
     try {
       const result = await jumpTo(signalChartSymbol(sig)!, sig.timeMs);
       if (result.ok) {
-        if (sig.jumpIssue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: undefined } : s));
+        if (sig.jumpIssue) updateIssue(undefined);
         setFishOpen(false);
       } else {
         const issue = 'fatalIssue' in result ? result.fatalIssue : undefined;
-        if (issue) fish.commit(fish.signalsRef.current.map(s => s.id === id ? { ...s, jumpIssue: issue } : s));
+        if (issue) updateIssue(issue);
       }
     } finally { jumpingSignalIdRef.current = null; setJumpingSignalId(null); }
-  }, [fish.commit, fish.signalsRef, rememberFishPosition]);
+  }, [fish.commit, fish.signalsRef, rememberFishPosition, setSignals]);
 
   const handleStart = () => {
     const ts = new Date(dateInput.replace(' ', 'T') + 'Z').getTime() - 8 * 3600_000;
@@ -574,7 +579,7 @@ export function TimeControl({
       </div>
 
       <div ref={fishHostRef}>{fishOpen && <FishPanel quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
-        onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}</div>
+        onJump={handleJumpFish} onJumpQuality={source => void handleJumpFish(source.id, source)} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}</div>
 
       {/* 信号库折叠面板 */}
       {signalLibOpen && (
