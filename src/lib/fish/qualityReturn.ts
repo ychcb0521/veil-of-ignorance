@@ -9,6 +9,7 @@
 export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithm: string; origin: '' | 'fish' | 'library' | 'mined';
   phase: 'sell' | 'detect';
+  detectorExpanded?: boolean;
   sort: string; ascending: boolean;
   tableTop: number;
 }

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
-import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey } from '@/lib/fish/quality';
+import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -13,6 +13,36 @@ function state(): FishQualityState {
   return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
+it('defaults to one row per symbol/time, toggles detector details from the header and preserves partial and bulk selection',()=>{
+ const s=state(), ids=s.study.selectedRowIds!;
+ s.study.selectedRowIds=[ids[0]];
+ const view=render(<FishQuality state={s}/>);
+ const toggle=screen.getByRole('button',{name:'展开探测算法明细'});
+ expect(toggle).toHaveAttribute('aria-expanded','false');expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+ const checkbox=()=>within(screen.getAllByTestId('quality-fish-row')[0]).getByRole('checkbox') as HTMLInputElement;
+ expect(checkbox().indeterminate).toBe(true);expect(checkbox()).not.toBeChecked();
+ fireEvent.click(checkbox());expect(s.setSelectedRows).toHaveBeenLastCalledWith(expect.arrayContaining(ids));
+ s.study={...s.study,selectedRowIds:vi.mocked(s.setSelectedRows).mock.calls.at(-1)![0]};view.rerender(<FishQuality state={s}/>);
+ expect(qualityRunSamples(s.study)).toHaveLength(1);expect(checkbox()).toBeChecked();
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);expect(s.setSelectedRows).toHaveBeenCalledTimes(1);
+ for(const row of screen.getAllByTestId('quality-fish-row'))expect(within(row).getByRole('checkbox')).toBeChecked();
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
+ fireEvent.click(checkbox());expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
+});
+it('merges multiple entries and sources at the same signal time, displays result ranges, and expands to their original outcomes',()=>{
+ const s=state(), first=s.study.samples[0];
+ s.study.samples=[first,{...first,id:'later',enteredAt:first.enteredAt!+60000,groups:[s.study.groups[1].id],source:{...first.source,fish:s.study.samples[1].source.fish}}];
+ s.study=importQualityLibrary(s.study,[{...first.source,id:'library',fish:undefined}]);
+ const samples=qualityComparisonRows(s.study),plan=s.study.sellPlans![0];plan.rule={metric:plan.metric,direction:'<',threshold:.5};
+ s.study.results=samples.map((r,i)=>({key:qualityResultKey(r,plan,0),sampleId:r.id,groupId:plan.id,evaluatedAt:T,status:'closed',returnPct:[10,-5,1][i],adversePct:-i,drawdownPct:i*2,heldHours:i+1}));
+ s.study.selectedRowIds=qualityDisplayRows(s.study).map(r=>r.id);
+ render(<FishQuality state={s}/>);
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号');
+ expect(screen.getByText('-5.00%～+10.00%')).toBeInTheDocument();
+ expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('信号库');
+ fireEvent.click(screen.getByText('-5.00%～+10.00%'));expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+ for(const label of ['+10.00%','-5.00%','+1.00%'])expect(screen.getByText(label)).toBeInTheDocument();
+});
 it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
   const s=state();
   s.study.samples=s.study.samples.map(row=>({...row,source:{...row.source,mined:{anchorMs:T}}}));
@@ -21,6 +51,7 @@ it('labels automatically mined fish beside the existing library source label in 
   s.study=importQualityLibrary(s.study,[{id:'library',symbol:'CCCUSDT',timeMs:T,timeLabel:'',fallbackZone:''}]);
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
+  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   const rows=screen.getAllByTestId('quality-fish-row');
   const mined=rows.filter(row=>within(row).queryByText('默认值挖掘'));
   expect(mined).toHaveLength(3);
@@ -40,6 +71,7 @@ it('labels automatically mined fish beside the existing library source label in 
 });
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
   const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   expect(screen.getByTestId('fish-quality').parentElement).not.toHaveAttribute('data-testid', 'fish-cabin');
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(2); expect(screen.getAllByTestId('quality-detector-column')).toHaveLength(1);
   ['标的', '信号时间', '探测算法', '市场', '评分', '捕捞过程'].forEach(name => expect(screen.getByRole('columnheader', { name: new RegExp(name) })).toBeVisible());
@@ -82,6 +114,7 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   const s = state();
   s.study = importQualityLibrary(s.study, [{ id: 'lib', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }, { id: 'lib2', symbol: 'ZZZUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }]);
   render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(5);
   const libraryRows = screen.getAllByTestId('quality-fish-row').filter(r => within(r).queryByText('信号库'));
   expect(libraryRows).toHaveLength(2);
@@ -118,6 +151,7 @@ it('allows selecting only a filtered source across the scroll window, shows chec
 
 it('sorts the single detector column in both directions and filters to one exact detector/threshold row', () => {
   const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'}));
   const first = () => screen.getAllByTestId('quality-detector-cell')[0];
   expect(first()).toHaveTextContent('> 1');
@@ -132,7 +166,7 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   const lib = Array.from({ length: 300 }, (_, i) => ({ id: `l${i}`, symbol: `S${String(i).padStart(3, '0')}USDT`, timeMs: T - i * 3600_000, timeLabel: '', fallbackZone: '' }));
   s.study = importQualityLibrary(s.study, lib);
   render(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 303 行 · 301 条信号');
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 301 行 · 301 条信号');
   expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
   const shown = screen.getAllByTestId('quality-fish-row').length;
   expect(shown).toBeGreaterThan(10); expect(shown).toBeLessThan(60);
@@ -140,7 +174,7 @@ it('keeps every row reachable in one scroll box, renders only the visible window
   box.scrollTop = 300 * 33; fireEvent.scroll(box);
   expect(screen.getByText('S299USDT')).toBeInTheDocument(); expect(screen.queryByText('S000USDT')).toBeNull();
   fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'fish' } });
-  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 3 行 · 1 条信号（筛选自 303 行）');
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 行 · 1 条信号 · 已合并探测明细（筛选自 301 条信号）');
   expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
 });
 
@@ -338,12 +372,13 @@ it('shows the effective decimal threshold for duplicate static vetoes without si
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
   const { saveQualityReturn, armQualityReturn, finishQualityReturn } = await import('@/lib/fish/qualityReturn');
   window.history.replaceState({ key: 'fish-entry', idx: 1 }, '');
-  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
+  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', detectorExpanded: true, sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
   expect(armQualityReturn()).toBe(true);
   render(<FishQuality state={state()}/>);
   expect(screen.getByRole('tab', {name: /比较探测/})).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
   expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
+  expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
   finishQualityReturn();
   cleanup();
   render(<FishQuality state={state()}/>);
