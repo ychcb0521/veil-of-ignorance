@@ -64,3 +64,21 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   expect(within(screen.getByTestId('quality-fish-row')).queryByText('信号库')).toBeNull();
 });
+
+// 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：不再分页，所有行在同一个滚动框里
+it('keeps every row reachable in one scroll box, renders only the visible window and counts months within the source filter', () => {
+  const s = state();
+  const lib = Array.from({ length: 300 }, (_, i) => ({ id: `l${i}`, symbol: `S${String(i).padStart(3, '0')}USDT`, timeMs: T - i * 3600_000, timeLabel: '', fallbackZone: '' }));
+  s.study = importQualityLibrary(s.study, lib);
+  render(<FishQuality state={s}/>);
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 301 条');
+  expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
+  const shown = screen.getAllByTestId('quality-fish-row').length;
+  expect(shown).toBeGreaterThan(10); expect(shown).toBeLessThan(60);
+  const box = screen.getByTestId('quality-fish-table');
+  box.scrollTop = 300 * 33; fireEvent.scroll(box);
+  expect(screen.getByText('S299USDT')).toBeInTheDocument(); expect(screen.queryByText('S000USDT')).toBeNull();
+  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'fish' } });
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 1 条（筛选自 301 条）');
+  expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
+});
