@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
-import { collectFishQuality, importQualityFish, importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
-import { enableQualityComparison, qualityComparisonStats, qualityDistribution, qualityPairedRows } from '@/lib/fish/qualityComparison';
+import { collectFishQuality, importQualityFish, importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
+import { enableQualityComparison, qualityComparisonStats, qualityDistribution, qualityPairedRows, qualityBatchRows } from '@/lib/fish/qualityComparison';
 import { buildQualitySheets } from '@/lib/fish/qualityExport';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
@@ -33,10 +33,13 @@ it('runs both independent sell algorithms on every fish with identical entries, 
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, load, T + 10 * M);
   expect(results).toHaveLength(rows.length * 2);
   for (const row of rows) expect(results.filter(r => r.sampleId === row.id).map(r => [r.entryTime, r.entryPrice])).toEqual([[T, 100], [T, 100]]);
-  const locked: QualityResult[] = [];
-  s.selectedRowIds = qualityComparisonRows(s).map(r => r.id);
-  await collectFishQuality({ study: { ...s, cohortIds: [rows[1].id] }, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => locked.push(r) }, load, T + 10 * M);
-  expect(locked).toHaveLength(2); expect(locked.every(r => r.sampleId === rows[1].id)).toBe(true);
+  for (const cohortIds of [[], [rows[1].id]]) {
+    const legacy = { ...s, cohortIds }, unrestricted: QualityResult[] = [];
+    expect(qualityBatchRows(legacy)).toEqual(rows); expect(qualityRunSamples(legacy)).toEqual(rows);
+    await collectFishQuality({ study: legacy, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => unrestricted.push(r) }, load, T + 10 * M);
+    expect(unrestricted).toHaveLength(rows.length * 2);
+  }
+  expect(qualityRunSamples({ ...s, cohortIds: [], selectedRowIds: [rows[1].id] })).toEqual([rows[1]]);
 });
 it('uses paired common valid samples instead of separate denominators and excludes stale/missing/unclosed results', () => {
   const s = study(), { rows, plans, result } = seed(s);

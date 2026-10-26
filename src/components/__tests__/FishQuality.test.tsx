@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
@@ -101,6 +101,7 @@ it('edits raw S and CDA sell thresholds from their headers, applies explicitly, 
 });
 it('lets the user fix one sell plan for detector comparisons from its header (no profit-distribution panel)', () => {
   const s = state(), row = qualityComparisonRows(s.study)[0];
+  s.study.cohortIds = []; // Old saved batches must not hide the list after removing this feature.
   s.study.sellPlans!.forEach((p, i) => { p.rule = { metric: p.metric, direction: '<', threshold: i ? -8 : .5 }; s.study.results.push({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: i ? -5 : 10 }); });
   render(<FishQuality state={s}/>);
   // 【用户要求】2026-10-26 盈亏分布模块删掉
@@ -108,7 +109,8 @@ it('lets the user fix one sell plan for detector comparisons from its header (no
   fireEvent.click(screen.getByRole('button', { name: '设置状态 S 原始值卖出算法' }));
   fireEvent.click(screen.getByRole('button', { name: '固定此方案，比较探测算法' }));
   expect(s.selectSell).toHaveBeenCalledWith('sell-state-raw');
-  fireEvent.click(screen.getByRole('button', { name: '固定当前批次' })); expect(s.setCohort).toHaveBeenCalledWith([row.id]);
+  expect(screen.queryByRole('button', { name: /固定当前批次|换用全部/ })).toBeNull();
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } }); expect(screen.queryByTestId('quality-fish-row')).toBeNull();
 });
 it('keeps tracking/horizon controls compact and shows the paired trade metrics on demand', () => {

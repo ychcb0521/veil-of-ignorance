@@ -144,9 +144,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change, start, defer]);
   const setTracking = useCallback((tracking: boolean) => { change(s => ({ ...s, tracking })); }, [change]);
   const selectSell = useCallback((id: string) => change(s => markQualityDetection(s, id)), [change]);
-  const setCohort = useCallback((ids?: string[]) => {
-    change(s => ({ ...s, cohortIds: ids ? qualityComparisonRows(s).filter(r => ids.includes(r.id)).map(r => r.id) : undefined }));
-  }, [change]);
   const setSelectedRows = useCallback((ids: string[]) => {
     selectionApproved.current = false; rerun.current = false;
     const selected = new Set(ids);
@@ -164,6 +161,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     // 否决条件变了，正在跑的旧批次结果已没用：立刻按新设置重新开始，不排在整批之后
     defer(() => { if (sellChanged && controller.current) void restart(); else void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); });
   }, [change, start, restart, defer]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, restart, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, restart, cancel, setRule, setObserveHours, setTracking, selectSell, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

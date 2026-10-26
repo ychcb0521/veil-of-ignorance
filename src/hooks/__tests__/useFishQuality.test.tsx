@@ -92,7 +92,7 @@ it('restores existing signal-time copies at capture time before reevaluating and
   expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ entryMode: 'capture', groups: legacy.groups, results: [] }));
   expect(legacy.samples[0].enteredAt).toBe(T);
 });
-it('persists a selected common sell plan and a fixed batch, invalidates changed thresholds, and accepts only the matching matrix result', async () => {
+it('persists a selected common sell plan, invalidates changed thresholds, and accepts only the matching matrix result', async () => {
   const tasks: QualityRunOptions[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); }));
   await flush(); chooseAndStart(h); await flush(1100);
@@ -102,9 +102,9 @@ it('persists a selected common sell plan and a fixed batch, invalidates changed 
   const latest = tasks.at(-1)!, row = qualityComparisonRows(latest.study)[0], applied = latest.study.sellPlans![0];
   act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 12 }));
   expect(h.result.current.study.results).toHaveLength(1);
-  act(() => h.result.current.selectSell(plan.id)); act(() => h.result.current.setCohort([row.id]));
+  act(() => h.result.current.selectSell(plan.id));
   await flush(500);
-  expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ selectedSellId: plan.id, cohortIds: [row.id] }));
+  expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ selectedSellId: plan.id }));
   act(() => h.result.current.setRule(plan.id, { metric: 'state', direction: '<', threshold: .4 }));
   expect(h.result.current.study.selectedSellId).toBeUndefined();
   act(() => latest.onResult({ key: qualityResultKey(row, applied, 0), sampleId: row.id, groupId: applied.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
@@ -227,14 +227,13 @@ it('filters fully cached trades without calling the runner, including after rest
   expect(restored.result.current.study.results).toEqual(saved.results);
 });
 
-it('finishes the frozen selection after rows, cohort and tracking change, preserving results of deselected rows', async () => {
+it('finishes the frozen selection after rows and tracking change, preserving results of deselected rows', async () => {
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const other = { ...signal, id: 'b', symbol: 'BBBUSDT' };
   const h = renderHook(() => useFishQuality('a', [signal, other], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush(); chooseAndStart(h); await flush();
   const task = tasks[0], rows = qualityRunSamples(task.study), plan = task.study.sellPlans![0];
   act(() => h.result.current.setSelectedRows([]));
-  act(() => h.result.current.setCohort([]));
   act(() => h.result.current.setTracking(false));
   await flush(61_000);
   expect(task.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);

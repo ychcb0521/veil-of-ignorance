@@ -41,7 +41,7 @@ export const qualitySellSuggestions = (plan: QualityGroup) => plan.snapshot.feat
 export function qualityResultMap(study: FishQualityStudy) { return new Map(study.results.map(r => [r.key, r])); }
 export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours));
 export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {
-  return qualityComparisonRows(study).filter(row => !study.cohortIds || study.cohortIds.includes(row.id));
+  return qualityComparisonRows(study);
 }
 const usable = (r: QualityResult | undefined, closedOnly: boolean): r is QualityResult => !!r && Number.isFinite(r.returnPct) && (r.status === 'closed' || !closedOnly && r.status === 'open');
 /** Identical rows and identical current valuation for unfinished positions, never independent missing-data denominators. */

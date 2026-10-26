@@ -73,7 +73,9 @@ export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
-  sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[]; selectedRowIds?: string[];
+  sellPlans?: QualityGroup[]; selectedSellId?: string; selectedRowIds?: string[];
+  /** Legacy saved field; no longer restricts display or execution. */
+  cohortIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
   campaignRuns?: QualityCampaignRun[];
   campaignRepair?: QualityRepairBatch;
@@ -235,7 +237,7 @@ export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
   if (!study.sellPlans) return study.samples;
   const signals = qualityComparisonRows(study), selected = new Set(study.selectedRowIds ?? []);
   const selectedSignals = new Set(expandQualityRows(signals).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.signalId));
-  return signals.filter(s => selectedSignals.has(s.id) && (!study.cohortIds || study.cohortIds.includes(s.id)));
+  return signals.filter(s => selectedSignals.has(s.id));
 }
 /**
  * 挖掘到的鱼导入后自动勾选它的全部探测行，交给固定的卖出方案评估（比较探测）。
