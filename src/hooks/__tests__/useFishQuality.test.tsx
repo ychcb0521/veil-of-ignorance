@@ -151,3 +151,19 @@ it('waits for an explicit selection and manual run, preserves it in storage, and
   act(() => h.result.current.setSelectedRows([])); const calls = run.mock.calls.length;
   await flush(61_000); act(() => { void h.result.current.start(); }); await flush(); expect(run).toHaveBeenCalledTimes(calls);
 });
+it('freezes old trials before applying holding vetoes, reruns selected rows and rejects old callbacks',async()=>{
+ const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
+ const tasks:QualityRunOptions[]=[];const h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
+ await flush();chooseAndStart(h);await flush();
+ const id=h.result.current.study.sellPlans![0].id;act(()=>h.result.current.setRule(id,{metric:'state',direction:'<',threshold:.5}));await flush(600);
+ const old=tasks.at(-1)!,row=qualityComparisonRows(old.study)[0],plan=old.study.sellPlans![0];
+ const result={key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,pnl:10};
+ act(()=>old.onResult(result));expect(h.result.current.study.campaignRuns).toHaveLength(1);
+ const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
+ act(()=>h.result.current.setFilters([], [veto]));await flush(600);
+ expect(tasks.at(-1)!.study.sellPlans!.every(p=>p.holdingVetoes?.[0].threshold===10)).toBe(true);
+ expect(h.result.current.study.campaignRuns![0].plan.holdingVetoes).toBeUndefined();
+ const latestPlan=tasks.at(-1)!.study.sellPlans![0];expect(qualityResultKey(row,latestPlan,0)).not.toBe(result.key);
+ act(()=>old.onResult({...result,returnPct:999}));expect(h.result.current.study.results[0].returnPct).toBe(10);
+ await flush(500);expect(storage.save).toHaveBeenLastCalledWith('a',expect.objectContaining({sellPlans:expect.arrayContaining([expect.objectContaining({holdingVetoes:[veto]})])}));
+});

@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setBuyFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setBuyFilters: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
@@ -183,19 +183,19 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '买入过滤' }));
+  fireEvent.click(screen.getByRole('button', { name: '过滤与持仓否决' }));
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
   fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
-  expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setBuyFilters).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
-  expect(s.setBuyFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
+  expect(s.setFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })],[]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
   render(<FishQuality state={s}/>);
-  expect(screen.getByRole('button', { name: '买入过滤' })).toHaveTextContent('1');
+  expect(screen.getByRole('button', { name: '过滤与持仓否决' })).toHaveTextContent('1');
   expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('未买入');
   expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入').length).toBeGreaterThanOrEqual(3);
@@ -294,4 +294,22 @@ it('shift-click selects (or clears) the whole run of rows between the last click
   s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
   expect(boxes().map(b => (b as HTMLInputElement).checked)).toEqual(shown.map((_, i) => i >= 1 && i <= 2));
   expect(boxes()[0]).toHaveAttribute('title', '按住 Shift 点另一行可连续选择');
+});
+it('provides two unconfigured drawdown vetoes, validates the user threshold, and can add an account indicator veto', () => {
+ const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'过滤与持仓否决'}));
+ const editor=screen.getByTestId('quality-holding-veto-editor');
+ expect(within(editor).getByLabelText('持仓否决 1 指标')).toHaveValue('static-drawdown');
+ expect(within(editor).getByLabelText('持仓否决 2 指标')).toHaveValue('dynamic-drawdown');
+ expect(within(editor).getByLabelText('持仓否决 1 阈值')).toHaveValue(null);expect(within(editor).getByLabelText('启用持仓否决 1')).not.toBeChecked();
+ fireEvent.click(within(editor).getByLabelText('启用持仓否决 1'));fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
+ expect(screen.getByRole('alert')).toHaveTextContent('填写有限数字');expect(s.setFilters).not.toHaveBeenCalled();
+ fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'-10'}});fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
+ expect(screen.getByRole('alert')).toHaveTextContent('大于 0');
+ fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'12'}});
+ fireEvent.click(within(editor).getByRole('button',{name:'添加否决条件'}));
+ fireEvent.change(within(editor).getByLabelText('持仓否决 3 指标'),{target:{value:'state:state'}});
+ fireEvent.change(within(editor).getByLabelText('持仓否决 3 方向'),{target:{value:'<='}});
+ fireEvent.change(within(editor).getByLabelText('持仓否决 3 阈值'),{target:{value:'.4'}});fireEvent.click(within(editor).getByLabelText('启用持仓否决 3'));
+ fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
+ expect(s.setFilters).toHaveBeenCalledWith([],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
 });

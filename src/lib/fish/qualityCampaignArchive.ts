@@ -1,4 +1,5 @@
 import { qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+import { activeHoldingVetoes, holdingVetoIdentity } from './qualityVeto';
 import { shortFishHash } from './algorithm';
 
 export interface QualityCampaignRun {
@@ -16,8 +17,8 @@ export interface QualityCampaignRun {
   priorResults?: { at: number; plan: QualityGroup; result: QualityResult }[];
 }
 export const isCurrentQualityRun = (run: QualityCampaignRun) => !run.supersededBy && (!run.repair || run.repair.status === 'verified');
-export const qualitySellKey = (plan: QualityGroup) => JSON.stringify([plan.id, plan.rule ?? null, plan.snapshot.definitionKey, plan.snapshot.interval, plan.snapshot.scale,...(plan.execution === 'intrabar-1m' ? ['intrabar-1m-v1'] : [])]);
-export const qualityRuleLabel = (plan: QualityGroup) => `${plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '待设门槛'}`;
+export const qualitySellKey = (plan: QualityGroup) => JSON.stringify([plan.id, plan.rule ?? null, plan.snapshot.definitionKey, plan.snapshot.interval, plan.snapshot.scale,...(plan.execution === 'intrabar-1m' ? ['intrabar-1m-v1'] : []),...(holdingVetoIdentity(plan.holdingVetoes).length ? [['holding-veto-v1',holdingVetoIdentity(plan.holdingVetoes)]] : [])]);
+export const qualityRuleLabel = (plan: QualityGroup) => `${plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '待设门槛'}${activeHoldingVetoes(plan.holdingVetoes).length ? ` · 否决：${activeHoldingVetoes(plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`).join(' 或 ')}` : ''}`;
 export const qualityFormulaVersion = (plan: QualityGroup) => shortFishHash(JSON.stringify([plan.snapshot.definitionKey, plan.snapshot.interval, plan.rule?.metric ?? plan.metric]));
 export const qualityVersionedRuleLabel = (plan: QualityGroup) => `${qualityRuleLabel(plan)} · ${plan.execution === 'intrabar-1m' ? '盘中达标 · 1m复原' : '收盘确认'} · ${plan.definitionSource === 'account' ? '账号公式' : '历史公式'} ${qualityFormulaVersion(plan)}`;
 const rowIndexes = new WeakMap<QualitySample[], Map<string, QualitySample>>();

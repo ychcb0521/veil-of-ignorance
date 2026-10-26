@@ -12,6 +12,7 @@ import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
 import { findQualityIntrabarExit, type QualityTrigger } from './qualityIntrabar';
+import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
@@ -22,6 +23,7 @@ export interface QualityGroup {
   execution?: 'intrabar-1m';
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
+  holdingVetoes?: QualityHoldingVeto[];
 }
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
@@ -41,7 +43,7 @@ export interface QualityResult {
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
   exitReading?: number;
   pendingExit?: QualityTrigger;
-  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number } };
+  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause };
 }
 /** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
 export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'static' | 'dynamic'): number | null {
@@ -186,6 +188,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
+  const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push(['holding-veto-v1',vetoes]);
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -308,8 +311,18 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       const rule = group.rule;
       if (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction)) throw new Error('卖出规则无效');
       const { plan, scale } = qualityMetricPlan(group.snapshot, rule.metric);
-      if (group.execution === 'intrabar-1m') {
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal });
+      const vetoes=activeHoldingVetoes(group.holdingVetoes);
+      vetoes.forEach(validateHoldingVeto);
+      if (group.execution === 'intrabar-1m' || vetoes.length) {
+        let holding;
+        if(vetoes.some(v=>v.kind!=='indicator')) {
+          const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
+          if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
+          const entryPrice=prior?.entryPrice??initial![0].open;
+          holding={entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
+        }
+        const conditions=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding });
         trigger = replay.trigger; replayedPrices = replay.prices;
       } else {
         let cursor = Math.floor(since / plan.step) * plan.step;
@@ -355,15 +368,21 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     for (const b of held) peak = Math.max(peak, b.high);
     exitDrawdown = Math.max(0, (peak - finalPrice) / peak * 100);
     const low = held.reduce((minimum, b) => Math.min(minimum, b.low), Math.min(entryPrice * (1 + (prior?.adversePct ?? 0) / 100), finalPrice));
+    let vetoDynamic=0;
+    if(activeHoldingVetoes(group.holdingVetoes).length) {
+      let path={entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
+      for(const b of held)path=advanceQualityHolding(path,b);
+      vetoDynamic=Math.max(path.dynamic,0,(Math.max(path.peak,finalPrice)-finalPrice)/Math.max(path.peak,finalPrice)*100);
+    }
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / entryPrice - 1) * 100,
-      drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
+      drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
-      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous} : undefined,
-      reason: closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause} : undefined,
+      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；按下一分钟开盘价卖出` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };

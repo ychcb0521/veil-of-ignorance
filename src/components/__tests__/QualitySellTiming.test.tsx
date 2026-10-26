@@ -34,3 +34,7 @@ it('shows the observed intrabar sample and distinguishes a confirmed trigger fro
  expect(screen.getByTestId('quality-sell-timing')).toHaveTextContent('2026-04-02 17:34:00 起的 1 分钟 K 线开盘价成交');
  expect(screen.getByTestId('quality-sell-timing')).not.toHaveTextContent('尚未记为成交');
 });
+it('identifies a drawdown veto using its own threshold, rather than the unrelated primary indicator threshold',()=>{
+ render(<QualitySellTiming evidence={{...evidence,execution:'intrabar-1m',reading:12,triggerCause:{id:'v',kind:'static-drawdown',label:'持仓过程静态最大回撤',direction:'>=',threshold:10}}}/>);
+ const text=screen.getByTestId('quality-sell-timing');expect(text).toHaveTextContent('一票否决 · 持仓过程静态最大回撤');expect(text).toHaveTextContent('12.0000000 >= 10%');expect(text).not.toHaveTextContent('12.0000000 < 0.5');
+});

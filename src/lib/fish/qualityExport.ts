@@ -1,3 +1,4 @@
+import { activeHoldingVetoes } from './qualityVeto';
 import { buildXlsx, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
@@ -30,7 +31,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
     ['最大涨幅 %', 16], ['最大不利涨跌 %', 18], ['动态最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
     ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['阈值确认时间', 24], ['实际卖出公式', 60],
-    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],
+    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const definition = qualityDefinition(run.plan.snapshot);
@@ -45,7 +46,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
       r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula,
       run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
-      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static')];
+      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null];
   }) });
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));

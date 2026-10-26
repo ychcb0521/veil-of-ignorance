@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
+import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
+import { activeHoldingVetoes } from '@/lib/fish/qualityVeto';
 import { FishQualityDistribution } from '@/components/FishQualityDistribution';
 import { qualityDistributionSeries, type QualityDistributionMetric } from '@/lib/fish/qualityDistribution';
 import { qualityCampaignPath } from '@/lib/campaignSections';
@@ -15,7 +17,7 @@ import { normalizeSignalQuality, signalMonthKey, type TradeSignal } from '@/lib/
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { activeBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
-import { makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices } from '@/lib/fish/qualityFilters';
+import { holdingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { QUALITY_BINS, qualityComparisonStats, qualityResultMap, qualityRowResult, qualitySellSuggestions, type qualityDistribution } from '@/lib/fish/qualityComparison';
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
 import { rangeSelect } from '@/lib/listRangeSelect';
@@ -66,14 +68,15 @@ function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualitySta
 type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean };
 /** 【用户要求】2026-10-26 比较卖出时的买入过滤，条件由用户自己设。 */
 function BuyFilterEditor({ state, done }: { state: FishQualityState; done: () => void }) {
-  const choices = qualityFilterChoices(), groups = [...new Set(choices.map(c => c.group))];
+  const choices = useMemo(() => qualityFilterChoices(), []), groups = [...new Set(choices.map(c => c.group))];
   const [draft, setDraft] = useState<FilterDraft[]>(() => (state.study.buyFilters ?? []).map(f => ({ choice: qualityFilterChoiceKey(f), direction: f.direction, threshold: String(f.threshold), enabled: f.enabled })));
   const [error, setError] = useState('');
+  const [vetoDraft,setVetoDraft]=useState(()=>holdingVetoDraft(state.study.sellPlans?.[0]?.holdingVetoes));
   const patch = (i: number, p: Partial<FilterDraft>) => setDraft(draft.map((d, j) => j === i ? { ...d, ...p } : d));
   const add = () => setDraft([...draft, { choice: choices.find(c => c.key === 'state:state')?.key ?? choices[0]?.key ?? '', direction: '>', threshold: '0.7', enabled: true }]);
   const apply = () => {
     if (draft.some(d => !d.threshold.trim() || !Number.isFinite(Number(d.threshold)))) { setError('每条条件都要填有限数字门槛'); return; }
-    try { state.setBuyFilters(draft.map(d => makeQualityBuyFilter(d.choice, d.direction, Number(d.threshold), d.enabled))); setError(''); done(); }
+    try { state.setFilters(draft.map(d => makeQualityBuyFilter(d.choice, d.direction, Number(d.threshold), d.enabled)),parseHoldingVetoDraft(vetoDraft)); setError(''); done(); }
     catch (e) { setError(e instanceof Error ? e.message : '条件无效'); }
   };
   return <div className="space-y-3" data-testid="quality-buy-filter-editor">
@@ -85,9 +88,9 @@ function BuyFilterEditor({ state, done }: { state: FishQualityState; done: () =>
       <input aria-label={`买入条件 ${i + 1} 门槛`} type="number" step="any" className={`${field} w-20`} value={d.threshold} onChange={e => patch(i, { threshold: e.target.value })}/>
       <button type="button" aria-label={`删除买入条件 ${i + 1}`} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground" onClick={() => setDraft(draft.filter((_, j) => j !== i))}><X className="h-3 w-3"/></button>
     </div>)}</div> : <p className="rounded-md border border-dashed border-border/60 px-3 py-3 text-center text-[10.5px] text-muted-foreground">未设置条件：全部信号都买入</p>}
-    <div className="flex items-center justify-between gap-2">
-      <button type="button" className={button} onClick={add}><Plus className="h-3 w-3"/>添加条件</button>
-      <button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用并重算</button>
+    <div><button type="button" className={button} onClick={add}><Plus className="h-3 w-3"/>添加条件</button></div>
+    <FishQualityHoldingVetoEditor draft={vetoDraft} setDraft={setVetoDraft}/>
+    <div className="flex justify-end"><button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用并重算</button>
     </div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
@@ -234,7 +237,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
           <div className="inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-[10.5px]" role="tablist" aria-label="鱼质量比较阶段">{(['sell', 'detect'] as const).map((v, i) => <button type="button" role="tab" aria-selected={phase === v} key={v} className={`h-6 rounded px-2.5 ${phase === v ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => { setPhase(v); setShowStats(true); }}>{i + 1} · {v === 'sell' ? '比较卖出' : '比较探测'}</button>)}</div>
           {phase === 'detect' && <select aria-label="固定卖出方案" value={study.selectedSellId ?? ''} className={`${field} max-w-64`} onChange={e => state.selectSell(e.target.value)}><option value="">选择一套卖出规则</option>{plans.filter(p => p.rule).map(p => <option key={p.id} value={p.id}>{p.label} {ruleText(p)}</option>)}</select>}
           <button type="button" className={button} aria-expanded={showStats} onClick={() => setShowStats(!showStats)}>盈亏分布<ChevronDown className={`h-3 w-3 transition-transform ${showStats ? 'rotate-180' : ''}`}/></button>
-          {phase === 'sell' && <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤" title={filtersOn ? activeBuyFilters(study).map(f => `${f.label} ${f.direction} ${f.threshold}`).join('；') : '设置买入条件'}><Filter className="h-3 w-3"/>买入过滤{filtersOn && <span className="rounded bg-primary/15 px-1 font-mono text-[10px] tabular-nums text-primary">{activeBuyFilters(study).length}</span>}</button></PopoverTrigger><PopoverContent align="start" className="w-[26rem]"><BuyFilterEditor key={JSON.stringify(study.buyFilters ?? [])} state={state} done={() => setFilterOpen(false)}/></PopoverContent></Popover>}
+          {phase === 'sell' && <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="过滤与持仓否决" title={filtersOn ? activeBuyFilters(study).map(f => `${f.label} ${f.direction} ${f.threshold}`).join('；') : '设置买入条件和持仓一票否决条件'}><Filter className="h-3 w-3"/>过滤{activeHoldingVetoes(study.sellPlans?.[0]?.holdingVetoes).length > 0 && <span className="text-primary">· 否决 {activeHoldingVetoes(study.sellPlans?.[0]?.holdingVetoes).length}</span>}{filtersOn && <span className="rounded bg-primary/15 px-1 font-mono text-[10px] tabular-nums text-primary">{activeBuyFilters(study).length}</span>}</button></PopoverTrigger><PopoverContent align="start" className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[85vh] overflow-y-auto"><BuyFilterEditor key={JSON.stringify([study.buyFilters ?? [],study.sellPlans?.[0]?.holdingVetoes ?? []])} state={state} done={() => setFilterOpen(false)}/></PopoverContent></Popover>}
           <button type="button" className={button} disabled={!ready || !study.cohortIds && !selectedRows.length} onClick={() => state.setCohort(study.cohortIds ? undefined : [...new Set(selectedRows.map(r => r.signalId!))])}>{study.cohortIds ? `已固定 ${new Set(batch.map(r => r.signalId)).size} 条信号 · 换用全部` : '固定当前批次'}</button>
         </div>
         <div className="flex items-center gap-1">

@@ -7,6 +7,7 @@ import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQual
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, activeBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { activeHoldingVetoes } from './qualityVeto';
 import { syncQualitySellDefinitions } from './qualityComparison';
 
 /**
@@ -51,6 +52,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
         execution: plan.execution,barOpenAt:r.exitSnapshot?.barOpenTime,
         executedAt:closed ? r.endTime : undefined,
         previousAt:r.exitSnapshot?.previous?.at,previousReading:r.exitSnapshot?.previous?.reading,
+        triggerCause:r.exitSnapshot?.cause??r.pendingExit?.cause,holdingVetoes:activeHoldingVetoes(plan.holdingVetoes).map(v=>({id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,formula:v.snapshot?qualityDefinition(v.snapshot).formula:undefined})),
       },
       repair: run.repair,
     },
@@ -70,7 +72,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   const tradeRecords: TradeRecord[] = closed ? [{ id: recordId, symbol: sample.source.symbol, side: 'LONG', type: 'MARKET', action: 'CLOSE',
     entryPrice: price, exitPrice: r.endPrice!, quantity: QUALITY_NOTIONAL / price, leverage: 1, settlementMode: 'usdt', settlementAsset: 'USDT',
     pnl: pnl!, fee: 0, openFeeUsd: 0, openFeeRate: 0, closeFeeRate: 0, slippage: 0, openTime: entry, closeTime: end,
-    openedRealAt: run.firstEvaluatedAt, closedRealAt: r.evaluatedAt, exit_reason_text: label,
+    openedRealAt: run.firstEvaluatedAt, closedRealAt: r.evaluatedAt, exit_reason_text: r.exitSnapshot?.cause ? r.reason : label,
   }] : [];
   return { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };

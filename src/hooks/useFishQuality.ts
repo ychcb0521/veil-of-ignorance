@@ -4,6 +4,7 @@ import { importQualityFish, selectMinedRows, importQualityLibrary, newQualityStu
 import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
+import type { QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -157,6 +158,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     cancel(); change(s => ({ ...s, buyFilters: filters }));
     const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);
   }, [change, cancel, start]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, definitionNotice, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setBuyFilters };
+  const setFilters=useCallback((filters:QualityBuyFilter[],vetoes:QualityHoldingVeto[])=>{
+    cancel();change(s=>{const archived=archiveQualityStudy(s);return {...archived,buyFilters:filters,sellPlans:archived.sellPlans?.map(p=>({...p,holdingVetoes:structuredClone(vetoes)}))};});
+    const epoch=generation.current;setTimeout(()=>{if(epoch===generation.current)void start();},500);
+  },[cancel,change,start]);
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, definitionNotice, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setBuyFilters, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;
