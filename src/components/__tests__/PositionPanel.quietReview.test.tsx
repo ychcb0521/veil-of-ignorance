@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PositionPanel } from '@/components/PositionPanel';
-import { __resetNotificationCenterForTests, beginHistoryOnlyNotifications, getNotificationSnapshot, setNotificationPopupsEnabled } from '@/lib/notificationCenter';
+import { __resetNotificationCenterForTests, beginCloseReviewQuiet, beginHistoryOnlyNotifications, getNotificationSnapshot, setNotificationPopupsEnabled } from '@/lib/notificationCenter';
 import type { TradeRecord } from '@/types/trading';
 import type { TradeJournal } from '@/types/journal';
 const state = vi.hoisted(() => ({ mode: 'direct', user: { id: 'user-1' }, lookup: vi.fn(), backfill: vi.fn() }));
@@ -40,4 +40,14 @@ it('does not pop an automatic full review when an earlier journal lookup resolve
   await act(async () => { const end = beginHistoryOnlyNotifications(); end(); });
   await act(async () => { resolve({ id: 'journal-1' } as TradeJournal); });
   expect(screen.queryByTestId('review-sheet')).toBeNull(); expect(getNotificationSnapshot().entries).toHaveLength(1);
+});
+// 【用户要求】2026-10-26 打开「渔」时不要平仓评价弹窗，只记进消息列表
+it('keeps the close-review dialog quiet while the fish panel is open, then pops again once it is closed', async () => {
+  const old = trade('old'), h = render(panel([old])); let end!: () => void;
+  await act(async () => { end = beginCloseReviewQuiet(); });
+  h.rerender(panel([old, trade('a')]));
+  await waitFor(() => expect(getNotificationSnapshot().entries).toHaveLength(1));
+  expect(screen.queryByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeNull();
+  await act(async () => { end(); });
+  h.rerender(panel([old, trade('a'), trade('b')])); expect(await screen.findByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeVisible();
 });

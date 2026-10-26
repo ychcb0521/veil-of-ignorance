@@ -8,8 +8,8 @@
  */
 export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithm: string; origin: '' | 'fish' | 'library';
-  phase: 'sell' | 'detect'; showStats: boolean; closedOnly: boolean;
-  sort: string; ascending: boolean; distributionMetric: string; statSort: { key: string; asc: boolean } | null;
+  phase: 'sell' | 'detect';
+  sort: string; ascending: boolean;
   tableTop: number;
 }
 export interface QualityReturnSnapshot {

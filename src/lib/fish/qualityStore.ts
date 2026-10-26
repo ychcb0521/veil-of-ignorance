@@ -1,5 +1,5 @@
 import { newQualityStudy, type FishQualityStudy } from './quality';
-import { preserveQualityRepairs } from './qualityRepair';
+import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -20,7 +20,12 @@ function valid(value: unknown): value is FishQualityStudy {
     && Number.isFinite(v.observeHours) && v.observeHours >= 0 && v.observeHours <= 8784 && typeof v.tracking === 'boolean'
     && Array.isArray(v.samples) && Array.isArray(v.groups) && Array.isArray(v.results);
 }
+/** 纠错已停用：读出来的记录一律先结束纠错（已核验的保留，其余恢复原样），见 stopQualityRepair。 */
 export async function loadQualityStudy(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
+  const loaded = await loadQualityStudyRaw(owner);
+  return { ...loaded, study: stopQualityRepair(loaded.study, Date.now()) };
+}
+async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
   // A detail link can open immediately after the evaluator unmounts and flushes.
   await writes.get(keyOf(owner));
   let fallback: unknown;

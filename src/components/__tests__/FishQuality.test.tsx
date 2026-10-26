@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
@@ -46,13 +46,15 @@ it('edits raw S and CDA sell thresholds from their headers, applies explicitly, 
   fireEvent.change(screen.getByLabelText('状态 S 原始值卖出门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字');
 });
-it('compares the common sample and lets the user fix one sell plan for detector comparisons', () => {
+it('lets the user fix one sell plan for detector comparisons from its header (no profit-distribution panel)', () => {
   const s = state(), row = qualityComparisonRows(s.study)[0];
   s.study.sellPlans!.forEach((p, i) => { p.rule = { metric: p.metric, direction: '<', threshold: i ? -8 : .5 }; s.study.results.push({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: i ? -5 : 10 }); });
   render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('tab', { name: /比较卖出/ })); expect(screen.getByTestId('quality-distribution')).toHaveTextContent('1 / 1 条共同已卖出');
-  fireEvent.click(within(screen.getByTestId('quality-distribution')).getByRole('button', { name: /状态 S 原始值/ }));
-  expect(s.selectSell).toHaveBeenCalledWith('sell-state-raw'); expect(screen.getByRole('tab', { name: /比较探测/ })).toHaveAttribute('aria-selected', 'true');
+  // 【用户要求】2026-10-26 盈亏分布模块删掉
+  expect(screen.queryByRole('button', { name: /盈亏分布/ })).toBeNull(); expect(screen.queryByTestId('quality-distribution')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '设置状态 S 原始值卖出算法' }));
+  fireEvent.click(screen.getByRole('button', { name: '固定此方案，比较探测算法' }));
+  expect(s.selectSell).toHaveBeenCalledWith('sell-state-raw');
   fireEvent.click(screen.getByRole('button', { name: '固定当前批次' })); expect(s.setCohort).toHaveBeenCalledWith([row.id]);
   fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } }); expect(screen.queryByTestId('quality-fish-row')).toBeNull();
 });
@@ -153,18 +155,15 @@ it('sorts each sell header by numeric return in both directions, keeps missing r
   expect(screen.getAllByTestId('quality-sell-column')[1]).toHaveAttribute('aria-sort', 'ascending');
 });
 
-it('automatically opens the actual distribution after a run, supports one configured sell and maximum-rise distributions', () => {
+// 【用户要求】2026-10-26 盈亏分布模块与卖出方案同步提示都删掉，盘面保持干净
+it('shows no profit-distribution panel or definition-sync notice, even after a run finishes', () => {
   const s = state(), row = qualityComparisonRows(s.study)[0], p = s.study.sellPlans![0];
   p.rule = { metric: p.metric, direction: '<', threshold: .5 };
   const view = render(<FishQuality state={{ ...s, running: true }}/>);
-  expect(screen.queryByTestId('quality-distribution-chart')).toBeNull();
   s.study = { ...s.study, results: [{ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed', returnPct: -12, peakPct: 24 }] };
   view.rerender(<FishQuality state={s}/>);
-  expect(screen.getByTestId('quality-distribution-chart')).toHaveTextContent('收益率分布');
-  expect(screen.getAllByTestId('quality-histogram')).toHaveLength(1);
-  expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 -12%');
-  fireEvent.change(screen.getByLabelText('分布图指标'), { target: { value: 'peakPct' } });
-  expect(screen.getByTestId('quality-histogram')).toHaveTextContent('1 条 · 均值 +24%');
+  expect(screen.queryByTestId('quality-distribution')).toBeNull();
+  expect(screen.queryByText(/卖出方案已同步/)).toBeNull(); expect(screen.queryByText(/正在纠错/)).toBeNull();
 });
 it('hands the evaluator the on-screen rows first and updates that order after scrolling', () => {
   const s = state();
@@ -219,8 +218,6 @@ it('sorts by every header, keeping empty values last in both directions', () => 
   fireEvent.click(screen.getByRole('button', { name: '按捕捞过程排序' })); expect(symbols()[0]).toBe('AAAUSDT');
   fireEvent.click(screen.getByRole('button', { name: '按标的排序' })); expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
   expect(screen.getByRole('columnheader', { name: /标的/ })).toHaveAttribute('aria-sort', 'ascending');
-  fireEvent.click(screen.getByRole('button', { name: /盈亏分布/ }));
-  expect(within(screen.getByTestId('quality-distribution')).getByRole('button', { name: '按平均收益排序' })).toBeInTheDocument();
 });
 it('sorts sell returns among bought signals only; not-bought and pending rows stay last', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
@@ -318,7 +315,7 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
   const { saveQualityReturn, armQualityReturn, finishQualityReturn } = await import('@/lib/fish/qualityReturn');
   window.history.replaceState({ key: 'fish-entry', idx: 1 }, '');
-  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', showStats: false, closedOnly: false, sort: 'symbol', ascending: true, distributionMetric: 'returnPct', statSort: null, tableTop: 0 }, scroll: [] });
+  saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
   expect(armQualityReturn()).toBe(true);
   render(<FishQuality state={state()}/>);
   expect(screen.getByRole('tab', {name: /比较探测/})).toHaveAttribute('aria-selected', 'true');

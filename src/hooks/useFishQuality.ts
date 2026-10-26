@@ -14,7 +14,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
-  const [definitionNotice, setDefinitionNotice] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
   const readyRef = useRef(false), latestRun = useRef(run); latestRun.current = run;
   const rerun = useRef<false | 'refresh' | NonNullable<QualityRunOptions['mode']>>(false);
@@ -28,14 +27,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => {
     let active = true, loaded = false; const epoch = ++generation.current;
     readyRef.current = false; rerun.current = false; selectionApproved.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
-    current.current = newQualityStudy(); setStudy(current.current); setDefinitionNotice('');
+    current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
       const archived = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
+      // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
       const migrated = syncQualitySellDefinitions(archived);
-      if (migrated.sellPlans?.some((plan, i) => plan.snapshot.definitionKey !== archived.sellPlans?.[i].snapshot.definitionKey || plan.execution !== archived.sellPlans?.[i].execution)) {
-        setDefinitionNotice('卖出方案已同步当前账号公式与盘中达标规则（1 分钟复原）。已有战役可在交易战役页一键纠错；原结果保留追溯。');
-      }
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -47,27 +44,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, study.tracking, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, study.tracking, change]);
   useEffect(() => {
-    if (!owner) return;
-    const epoch = generation.current;
-    const refreshed = async (changedOwner?: string) => {
-      if (changedOwner !== owner || !readyRef.current) return;
-      const value = await loadQualityStudy(owner);
-      if (epoch !== generation.current || !readyRef.current) return;
-      const next = value.study.campaignRepair, prior = current.current.campaignRepair;
-      if (!next || next.id === prior?.id && next.revision <= prior.revision) return;
-      // Checkpoints remain durable without rerendering the full comparison matrix
-      // for every trade. Refresh on the initial checkpoint, pause and completion.
-      if (next.state === 'running' && prior?.id === next.id && prior.state === 'running') return;
-      controller.current?.abort(); selectionApproved.current = false;
-      change(() => syncQualitySellDefinitions(value.study));
-    };
-    const saved = (event: Event) => { void refreshed((event as CustomEvent).detail?.owner); };
-    const channel = typeof window.BroadcastChannel === 'function' ? new window.BroadcastChannel('veil-quality-repair') : undefined;
-    if (channel) channel.onmessage = event => { void refreshed(event.data?.owner); };
-    window.addEventListener('fish-quality-repaired',saved);
-    return () => { window.removeEventListener('fish-quality-repaired',saved); channel?.close(); };
-  },[owner,change]);
-  useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
     const epoch = generation.current;
@@ -77,14 +53,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }); }, 400);
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
-    if (current.current.campaignRepair?.state === 'running') { if (!automatic) setError('已有战役正在纠错，请先完成或暂停纠错。'); return; }
     if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current && !mode) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) { if (controller.current.signal.aborted) rerun.current = mode ?? 'refresh'; return; }
     if (mode && !qualityFilterNeedsData(current.current, mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
-    if (!mode) { change(s => syncQualitySellDefinitions(archiveQualityStudy(s))); setDefinitionNotice(''); }
+    if (!mode) change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const epoch = generation.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = structuredClone(current.current);
     const releaseNotifications = beginHistoryOnlyNotifications();
@@ -166,6 +141,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const epoch = generation.current;
     setTimeout(() => { if (epoch === generation.current) void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); }, 500);
   }, [cancel, change, start]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, definitionNotice, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

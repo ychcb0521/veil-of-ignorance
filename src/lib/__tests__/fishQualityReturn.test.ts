@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { ancestorScrolls, applyAncestorScrolls, armQualityReturn, finishQualityReturn, pendingQualityReturn, saveQualityReturn, QUALITY_RETURN_KEY, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
-const ui: QualityReturnUi = { open: true, query: 'BTC', month: '2026-10', algorithm: '', origin: 'library', phase: 'detect', showStats: true, closedOnly: false, sort: 'symbol', ascending: true, distributionMetric: 'returnPct', statSort: null, tableTop: 330 };
+const ui: QualityReturnUi = { open: true, query: 'BTC', month: '2026-10', algorithm: '', origin: 'library', phase: 'detect', sort: 'symbol', ascending: true, tableTop: 330 };
 beforeEach(() => { sessionStorage.clear(); finishQualityReturn(); window.history.replaceState({ key: 'entry-a', idx: 3 }, ''); });
 afterEach(() => finishQualityReturn());
 

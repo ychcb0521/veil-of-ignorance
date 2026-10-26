@@ -116,6 +116,21 @@ export function finishQualityRepair(study: FishQualityStudy, batchId: string, pa
   if (study.campaignRepair?.id !== batchId) return study;
   return { ...study, campaignRepair: { ...study.campaignRepair, state: paused ? 'paused' : 'complete', updatedAt: now, revision: study.campaignRepair.revision + 1 } };
 }
+/**
+ * 停止纠错（【用户要求】2026-10-26「停止纠错，把已经纠错过的保留，还未纠错的就不用纠错了，继续保持原样」）。
+ * 已核验的战役保留新结果；还在「待纠错」或纠错没通过的，去掉纠错标记、原结果放回比较表，照旧显示；批次记为结束，不再续跑。
+ * 已经停过（没有待处理的战役、批次已结束）就原样返回同一个对象。
+ */
+export function stopQualityRepair(study: FishQualityStudy, now: number): FishQualityStudy {
+  const batch = study.campaignRepair, runs = study.campaignRuns ?? [];
+  const untouched = runs.filter(run => run.repair && run.repair.status !== 'verified' && !run.supersededBy);
+  if (!untouched.length && (!batch || batch.state === 'complete')) return study;
+  const keys = new Set(untouched.map(run => run.result.key)), present = new Set(study.results.map(r => r.key));
+  const campaignRuns = runs.map(run => { if (!keys.has(run.result.key) || run.supersededBy) return run; const { repair: _repair, ...rest } = run; return rest; });
+  const restored = untouched.filter(run => !present.has(run.result.key)).map(run => run.result);
+  return { ...study, campaignRuns, results: [...study.results, ...restored],
+    campaignRepair: batch && { ...batch, state: 'complete', updatedAt: now, revision: batch.revision + 1, failures: {} } };
+}
 /** A stale tab saving its full study cannot resurrect superseded comparisons or erase the correction log. */
 export function preserveQualityRepairs(saved: FishQualityStudy | undefined, incoming: FishQualityStudy): FishQualityStudy {
   const a = saved?.campaignRepair, b = incoming.campaignRepair;

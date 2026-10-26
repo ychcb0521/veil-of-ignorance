@@ -185,6 +185,21 @@ export function beginHistoryOnlyNotifications(): () => void {
     if (historyOnlyScopes.delete(token) && historyOnlyScopes.size === 0) emit();
   };
 }
+/**
+ * 只压住「刚平了一笔 — 要现在做平仓评价吗？」这类平仓评价弹窗（记进消息列表），其他提示照常。
+ * 【用户要求】2026-10-26 打开「渔」时不要这个弹窗，影响视觉注意力。
+ */
+const closeReviewQuietScopes = new Set<symbol>();
+export const isCloseReviewQuiet = () => closeReviewQuietScopes.size > 0;
+export function beginCloseReviewQuiet(): () => void {
+  const token = Symbol('close-review-quiet');
+  if (closeReviewQuietScopes.size === 0) quietEpoch++;
+  closeReviewQuietScopes.add(token); emit();
+  return () => { if (closeReviewQuietScopes.delete(token)) emit(); };
+}
+export function useCloseReviewQuiet(): boolean {
+  return useSyncExternalStore(subscribeNotifications, isCloseReviewQuiet, isCloseReviewQuiet);
+}
 export function useNotificationHistoryOnly(): boolean {
   return useSyncExternalStore(subscribeNotifications, isNotificationHistoryOnly, isNotificationHistoryOnly);
 }

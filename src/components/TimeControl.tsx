@@ -10,7 +10,7 @@ import {
   Database, ChevronDown, Upload, Download, Plus, Trash2,
   Loader2, Fish,
 } from 'lucide-react';
-import { toast } from '@/lib/notificationCenter';
+import { beginCloseReviewQuiet, toast } from '@/lib/notificationCenter';
 import { formatUTC8 } from '@/lib/timeFormat';
 import {
   type TradeSignal,
@@ -92,6 +92,8 @@ export function TimeControl({
   const [signalLibOpen, setSignalLibOpen] = useState(false);
   // 【用户要求】从鱼质量点进交易战役再返回：自动展开「渔」，鱼质量回到原来的位置（见 lib/fish/qualityReturn）
   const [fishOpen, setFishOpen] = useState(() => armQualityReturn());
+  // 【用户要求】2026-10-26 打开「渔」时不弹「刚平了一笔 — 要现在做平仓评价吗？」，只记进消息列表
+  useEffect(() => fishOpen ? beginCloseReviewQuiet() : undefined, [fishOpen]);
   const fishHostRef = useRef<HTMLDivElement>(null);
   const fishReturnPosition = useRef<{panelTop:number;ancestors:{node:HTMLElement;top:number;left:number}[]}|null>(null);
   const rememberFishPosition = useCallback(()=>{

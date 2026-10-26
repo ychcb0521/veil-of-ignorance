@@ -5,7 +5,7 @@ import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/
 import { archiveQualityStudy } from '@/lib/fish/qualityCampaignArchive';
 import { qualityCampaignDataFromStudy } from '@/lib/fish/qualityCampaigns';
 import { buildQualitySheets } from '@/lib/fish/qualityExport';
-import { applyQualityRepair, collectQualityRepair, finishQualityRepair, prepareQualityRepair, preserveQualityRepairs } from '@/lib/fish/qualityRepair';
+import { applyQualityRepair, collectQualityRepair, finishQualityRepair, prepareQualityRepair, preserveQualityRepairs, stopQualityRepair } from '@/lib/fish/qualityRepair';
 const T=Date.UTC(2026,3,2,9,10), M=60000;
 const oldDef={...STATE_DEF,formula:'state = C / 100'}, currentDef={...STATE_DEF,formula:'state = C / 200'};
 function seed() {
@@ -107,4 +107,24 @@ it('replaces a same-formula close-confirmed campaign with the new timing identit
  const sheets=buildQualitySheets(next,[row]);
  expect(sheets[1].columns[32].header).toBe('卖出时机');expect(sheets[1].rows[0][32]).toBe('盘中达标 · 1分钟复原');
  expect(sheets[2].rows.some(r=>r[12]==='原周期收盘确认'&&r[13]==='盘中达标 · 1分钟复原')).toBe(true);
+});
+
+// 【用户要求】2026-10-26「停止纠错，把已经纠错过的保留，还未纠错的就不用纠错了，继续保持原样」
+it('stops repairs: unfinished trades go back to their original results, verified ones keep the correction, and it is idempotent',()=>{
+  const {study,result}=seed();
+  const prepared=prepareQualityRepair(syncQualitySellDefinitions(study,[currentDef]),[currentDef],T+200*M);
+  expect(qualityCampaignDataFromStudy('owner',prepared.study,'sell')).toHaveLength(0); // 待纠错时从板块上消失
+  const stopped=stopQualityRepair(prepared.study,T+300*M);
+  expect(stopped.campaignRepair).toMatchObject({state:'complete',revision:prepared.study.campaignRepair!.revision+1});
+  expect(stopped.campaignRuns!.every(run=>!run.repair)).toBe(true);
+  expect(stopped.results.map(r=>r.key)).toContain(result.key);
+  const board=qualityCampaignDataFromStudy('owner',stopped,'sell');
+  expect(board).toHaveLength(1); expect(board[0].campaign.final_realized_pnl).toBe(-60); // 原样
+  expect(stopQualityRepair(stopped,T+400*M)).toBe(stopped);
+  // 已纠错的保留
+  const task=prepared.tasks[0], repaired=applyQualityRepair(prepared.study,prepared.batch.id,task,resultFor(task),T+201*M);
+  const kept=stopQualityRepair(repaired,T+300*M);
+  expect(qualityCampaignDataFromStudy('owner',kept,'sell').map(d=>d.campaign.final_realized_pnl)).toEqual([-5]);
+  expect(kept.campaignRuns!.find(run=>run.result.key===task.key)!.repair?.status).toBe('verified');
+  const fresh=seed().study; expect(stopQualityRepair(fresh,T)).toBe(fresh); // 没纠错过：原样
 });

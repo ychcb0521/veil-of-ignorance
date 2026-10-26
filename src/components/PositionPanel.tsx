@@ -5,7 +5,9 @@ import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ArrowLeftRight, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { toast, recordNotificationHistory, isNotificationHistoryOnly, getNotificationQuietEpoch, useNotificationHistoryOnly } from '@/lib/notificationCenter';
+import { toast, recordNotificationHistory, isNotificationHistoryOnly as isHistoryOnly, isCloseReviewQuiet, getNotificationQuietEpoch, useNotificationHistoryOnly, useCloseReviewQuiet } from '@/lib/notificationCenter';
+/** 平仓评价提醒只记入消息列表的时候：鱼质量评估中，或打开着「渔」。 */
+const isNotificationHistoryOnly = () => isHistoryOnly() || isCloseReviewQuiet();
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
 import { ClosePositionModal } from '@/components/ClosePositionModal';
@@ -314,7 +316,8 @@ export function PositionPanel({
   const [reviewOpen, setReviewOpen] = useState(false);
   /** Direct 模式平仓提醒；鱼质量评估期间只记入消息列表。 */
   const [directReviewPrompt, setDirectReviewPrompt] = useState<TradeRecord | null>(null);
-  const historyOnlyNotifications = useNotificationHistoryOnly();
+  const historyOnlyEverywhere = useNotificationHistoryOnly(), closeReviewQuiet = useCloseReviewQuiet();
+  const historyOnlyNotifications = historyOnlyEverywhere || closeReviewQuiet;
   const [directReviewLoading, setDirectReviewLoading] = useState(false);
   const [historyReviewLoadingId, setHistoryReviewLoadingId] = useState<string | null>(null);
   const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
