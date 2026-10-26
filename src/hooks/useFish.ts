@@ -99,6 +99,8 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
   const recombineRef=useRef<((mode:FishCombination,keys:readonly string[],plans?:readonly FishProgram[])=>boolean)|null>(null);
   const start = useCallback(async (settings: FishScanSettings = {}) => {
     if (controller.current) return;
+    // 持续挖掘让路：先打断这一档，等取数器空出来（这一档之后原地重扫）
+    if (mineController.current) { mineController.current.abort(); await minePromise.current?.catch(() => undefined); if (controller.current) return; }
     // Move the previous round immediately. Background persistence must never gate market scanning.
     const at = Date.now();
     recoveryArchiveBefore.current ??= at;
@@ -152,8 +154,24 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     return scanner.current.quality(options);
   },[]);
   const cancel = useCallback(() => controller.current?.abort(), []);
-  /** 是否有捕捞 / 建议 / 复原等在用取数器（定时自动捕捞据此等待）。 */
-  const busy = useCallback(() => !!controller.current || !!(scanner.current ?? pageScanner)?.isBusy(), []);
+  /** 是否有捕捞 / 建议 / 复原等在用取数器（定时自动捕捞据此等待）。持续挖掘不算：捕捞一开始就会打断它。 */
+  const busy = useCallback(() => !!controller.current || (!mineController.current && !!(scanner.current ?? pageScanner)?.isBusy()), []);
+  /**
+   * 持续挖掘扫一档：不动「新鱼」、不发邮件、不留本轮摘要，只把命中的鱼交回去（由挖掘决定怎么入舱）。
+   * 取数器正被别的任务占着时抛错；被捕捞打断时抛 AbortError。
+   */
+  const mineController = useRef<AbortController | null>(null), minePromise = useRef<Promise<unknown> | null>(null);
+  const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void): Promise<TradeSignal[]> => {
+    const sc = (scanner.current ??= pageScanner ??= new FishScanner());
+    if (controller.current || mineController.current || sc.isBusy()) throw new Error('取数器正忙');
+    const mine = new AbortController(); mineController.current = mine;
+    const found: TradeSignal[] = [];
+    const run = sc.scan({ ...settings, signal: mine.signal, onProgress: p => onProgress?.(p), onSignal: s => { found.push(s); } });
+    minePromise.current = run;
+    try { const result = await run; if (mine.signal.aborted) throw new DOMException('已让路给捕捞', 'AbortError'); if (result.status === 'aborted') throw new Error(result.error || '这一档没扫完'); return found; }
+    finally { if (mineController.current === mine) { mineController.current = null; minePromise.current = null; } }
+  }, []);
+  const stopMining = useCallback(() => mineController.current?.abort(), []);
   /**
    * 任选本轮算法子集与交集 / 并集：用保存的逐币结论直接重新合并，「新鱼」换成另一种结果，不用重扫。
    * 先撤掉这一轮写进列表的改动（新加的删掉、被改成新鱼的恢复原样），再按新方式写入。
@@ -233,5 +251,5 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     scanner.current ??= pageScanner ??= new FishScanner();
     return scanner.current.diagnose(options);
   }, []);
-  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, estimate, diagnose, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, busy };
+  return { switchLive, unionFish, signals, signalsRef, commit, progress, start, cancel, mine, stopMining, estimate, diagnose, suggest, reconstruct, quality, recombine, hasRound, roundPlans, turnover, remove, busy };
 }

@@ -48,6 +48,7 @@ import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
 import { QualityCampaignRepairControl } from '@/components/journal/QualityCampaignRepairControl';
+import { DetectCategoryStats } from '@/components/DetectCategoryStats';
 import { CAMPAIGN_SECTIONS, campaignSection } from '@/lib/campaignSections';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
@@ -1921,6 +1922,7 @@ const CampaignCard = memo(function CampaignCard({
               {campaign.direction === 'main_short' ? '主空' : '主多'}
             </span>
             <span className={`${CARD_CHIP} bg-muted text-[10px] font-medium text-muted-foreground`}>{campaign.symbol}</span>
+            {campaign.comparison?.section === 'detect' && campaign.comparison.category && <span data-testid="campaign-detect-category" title="探测信号类别：这条信号命中的探测算法组合" className={`${CARD_CHIP} border border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-700 dark:text-sky-300`}>{campaign.comparison.category}</span>}
             {/* 杠杆紧跟标的，与交易所的写法一致；取值与「杠杆倍数」排序同一个口径。 */}
             {cardLeverage > 0 && (
               <span
@@ -2347,8 +2349,11 @@ export default function JournalCampaignsPage() {
     rows: sourceRows, setRows, complete: campaignRowsComplete, refreshing, loaded, total, cached: campaignRowsCached,
     error: campaignLoadError, failedCount, retry: retryCampaignLoad, beginMutation,
   } = comparing ? comparisonList : personalList;
-  const comparisonParams = new URLSearchParams(location.search), sellFilter = comparisonParams.has('sell') ? comparisonParams.get('sell') ?? '' : section === 'detect' ? comparisonList.selectedSellKey ?? '' : '', detectorFilter = comparisonParams.get('detector') ?? '';
-  const rows = useMemo(() => !comparing ? sourceRows : sourceRows.filter(row => (!sellFilter || row.campaign.comparison?.sellKey === sellFilter) && (!detectorFilter || row.campaign.comparison?.detectors.some(d => d.id === detectorFilter))), [sourceRows, comparing, sellFilter, detectorFilter]);
+  const comparisonParams = new URLSearchParams(location.search), sellFilter = comparisonParams.has('sell') ? comparisonParams.get('sell') ?? '' : section === 'detect' ? comparisonList.selectedSellKey ?? '' : '', detectorFilter = comparisonParams.get('detector') ?? '', categoryFilter = section === 'detect' ? comparisonParams.get('category') ?? '' : '';
+  const baseRows = useMemo(() => !comparing ? sourceRows : sourceRows.filter(row => (!sellFilter || row.campaign.comparison?.sellKey === sellFilter) && (!detectorFilter || row.campaign.comparison?.detectors.some(d => d.id === detectorFilter))), [sourceRows, comparing, sellFilter, detectorFilter]);
+  // 探测信号类别：统计表看全部类别，卡片列表按选中的类别再筛
+  const rows = useMemo(() => !categoryFilter ? baseRows : baseRows.filter(row => (row.campaign.comparison?.category ?? '未分类') === categoryFilter), [baseRows, categoryFilter]);
+  const comparisonCategories = useMemo(() => [...new Set(baseRows.map(row => row.campaign.comparison?.category ?? '未分类'))].sort(), [baseRows]);
   const comparisonReturns = useMemo(() => {
     const closed = rows.filter(row => isResolvedCampaign(row.campaign)), values = closed.map(row => row.campaign.final_realized_pnl!);
     return { closed: closed.length, total: rows.length, wins: values.filter(v => v > 0).length, losses: values.filter(v => v < 0).length,
@@ -4446,11 +4451,12 @@ export default function JournalCampaignsPage() {
       {/* 选择模式下底部留出浮条（bottom-4 + h-10）的高度：翻到列表最末，最后一张卡片的指标行不被浮条压住 */}
       <main className={`mx-auto max-w-[1600px] px-4 py-5 sm:px-6${selectionMode ? ' pb-20' : ''}`}>
         <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="campaign-section-controls">
-          <nav className="inline-flex rounded-md bg-muted/60 p-0.5 text-[12px]" aria-label="交易战役板块">{CAMPAIGN_SECTIONS.map(item => <button type="button" key={item.id} aria-current={section === item.id ? 'page' : undefined} className={`rounded px-3 py-1.5 ${section === item.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => { const params = new URLSearchParams(location.search); params.delete('sell'); params.delete('detector'); params.delete('bin'); if (item.id === 'personal') params.delete('section'); else params.set('section', item.id); nav({ pathname: '/journal/campaigns', search: params.toString() }); }}>{item.label}</button>)}</nav>
-          {comparing && <><select aria-label="战役卖出方案" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={sellFilter} onChange={e => changeComparisonFilter('sell', e.target.value)}><option value="">全部卖出方案</option>{comparisonPlans.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{section === 'detect' && <select aria-label="战役探测算法" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={detectorFilter} onChange={e => changeComparisonFilter('detector', e.target.value)}><option value="">全部探测算法</option>{comparisonDetectors.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>}<span className="text-[10.5px] text-muted-foreground">{section === 'detect' ? '同一交易命中多个探测算法时，整表只计一次；可筛选算法比较。' : '每个信号、每套卖出规则独立比较；可筛选同一卖出方案。'} 结果保存在当前账号的本机副本中。</span></>}
+          <nav className="inline-flex rounded-md bg-muted/60 p-0.5 text-[12px]" aria-label="交易战役板块">{CAMPAIGN_SECTIONS.map(item => <button type="button" key={item.id} aria-current={section === item.id ? 'page' : undefined} className={`rounded px-3 py-1.5 ${section === item.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => { const params = new URLSearchParams(location.search); params.delete('sell'); params.delete('detector'); params.delete('category'); params.delete('bin'); if (item.id === 'personal') params.delete('section'); else params.set('section', item.id); nav({ pathname: '/journal/campaigns', search: params.toString() }); }}>{item.label}</button>)}</nav>
+          {comparing && <><select aria-label="战役卖出方案" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={sellFilter} onChange={e => changeComparisonFilter('sell', e.target.value)}><option value="">全部卖出方案</option>{comparisonPlans.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{section === 'detect' && <select aria-label="战役探测算法" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={detectorFilter} onChange={e => changeComparisonFilter('detector', e.target.value)}><option value="">全部探测算法</option>{comparisonDetectors.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>}{section === 'detect' && <select aria-label="战役探测信号类别" className="h-8 max-w-80 rounded border border-border bg-card px-2 text-[11px]" value={categoryFilter} onChange={e => changeComparisonFilter('category', e.target.value)}><option value="">全部探测信号类别</option>{comparisonCategories.map(c => <option key={c} value={c}>{c}</option>)}</select>}<span className="text-[10.5px] text-muted-foreground">{section === 'detect' ? '同一交易命中多个探测算法时，整表只计一次；可筛选算法比较。' : '每个信号、每套卖出规则独立比较；可筛选同一卖出方案。'} 结果保存在当前账号的本机副本中。</span></>}
         </div>
         {comparing && <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span>{section === 'sell' && comparisonList.buyFilterLabel && <span className="font-sans text-[10.5px]" data-testid="comparison-buy-filter">买入过滤：{comparisonList.buyFilterLabel}</span>}<span className="font-sans text-[10px] text-muted-foreground">未设价格保护线或未加仓的风险指标，沿用原战役口径显示「—」。</span></div>}
         {comparing && <QualityCampaignRepairControl owner={userId} />}
+        {section === 'detect' && <DetectCategoryStats rows={baseRows} active={categoryFilter} onSelect={c => changeComparisonFilter('category', c)}/>}
         {!comparing && activeCount > 0 && (
           <button
             type="button"
