@@ -15,6 +15,7 @@ import { deleteCampaign, fetchCampaignSourceRows, getCampaignFullData, updateCam
 import type { TradeCampaign, TradeJournal } from '@/types/journal';
 import type { TradeRecord } from '@/types/trading';
 import JournalCampaignsPage from '../JournalCampaignsPage';
+import * as qualityCampaignApi from '@/lib/fish/qualityCampaigns';
 
 const counters = vi.hoisted(() => ({ page: 0, scatter: 0, card: 0 }));
 
@@ -397,3 +398,35 @@ describe('JournalCampaignsPage · 自评（五点评分）', () => {
     target.importance_weight = 0;
   }, 15_000);
 });
+
+
+it('defaults comparison explanations and category statistics to closed, without hiding the campaign list or category filters', async () => {
+  const details = await getCampaignFullData('newest');
+  const load = vi.spyOn(qualityCampaignApi, 'listQualityCampaignData').mockResolvedValue({
+    rows: [{ ...details, campaign: { ...details.campaign, id: 'fish-sell-layout', comparison: { section: 'sell', runKey: 'layout', sellKey: 's', sellLabel: '测试卖出', detectors: [{ id: 'd', label: '测试探测' }], category: '测试类别', valuedAt: 1 } } }],
+    warning: undefined, repair: undefined, selectedSellKey: undefined, buyFilterLabel: '测试过滤 > 0.7',
+  });
+  try {
+    renderPage('/journal/campaigns?section=quality');
+    await waitFor(() => expect(screen.getAllByTestId('campaign-card')).toHaveLength(1));
+    expect(screen.getByLabelText('战役探测信号类别')).toBeVisible();
+    expect(screen.queryByText(/每个信号、每套卖出规则/)).toBeNull();
+    expect(screen.queryByTestId('comparison-buy-filter')).toBeNull();
+    expect(screen.queryByTestId('comparison-campaign-results')).toBeNull();
+    expect(screen.queryByTestId('detect-category-stats')).toBeNull();
+    expect(screen.getByRole('button', { name: '展开比较统计' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '卖出与探测说明' }));
+    const explanation = screen.getByRole('dialog', { name: '卖出与探测说明' });
+    expect(explanation).toHaveTextContent('未设价格保护线');
+    expect(explanation).toHaveTextContent('测试过滤 > 0.7');
+    fireEvent.keyDown(explanation, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '展开比较统计' }));
+    expect(screen.getByTestId('comparison-campaign-results')).toHaveTextContent('已卖出 1 / 1');
+    const statistics = screen.getByTestId('detect-category-stats');
+    fireEvent.click(within(statistics).getByRole('button', { name: '测试类别' }));
+    expect(screen.getByLabelText('战役探测信号类别')).toHaveValue('测试类别');
+    fireEvent.click(screen.getByRole('button', { name: '收起比较统计' }));
+    expect(screen.queryByTestId('detect-category-stats')).toBeNull();
+    expect(screen.getAllByTestId('campaign-card')).toHaveLength(1);
+  } finally { load.mockRestore(); }
+}, 15000);
