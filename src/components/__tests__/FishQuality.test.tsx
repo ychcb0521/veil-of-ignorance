@@ -66,7 +66,7 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
 });
 
-it('allows selecting only a filtered source across pages, shows checked rows, and clears selection before a new run', () => {
+it('allows selecting only a filtered source across the scroll window, shows checked rows, and clears selection before a new run', () => {
   const s = state();
   s.study = importQualityLibrary(s.study, Array.from({length: 61}, (_,i) => ({id:`lib-${i}`,symbol:`COIN${i}USDT`,timeMs:T+i*60000,timeLabel:'',fallbackZone:''})));
   s.study.selectedRowIds = [];
@@ -79,7 +79,9 @@ it('allows selecting only a filtered source across pages, shows checked rows, an
   s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
   expect(screen.getByRole('button', {name:'更新收益'})).toBeEnabled();
   expect(screen.getByLabelText('全选当前筛选信号')).toBeChecked();
-  fireEvent.click(screen.getByRole('button', {name:'下一页'}));
+  const box = screen.getByTestId('quality-fish-table');
+  box.scrollTop = 61 * 33; fireEvent.scroll(box);
+  expect(screen.getByText('COIN0USDT')).toBeInTheDocument();
   expect(screen.getAllByRole('checkbox').every(el => (el as HTMLInputElement).checked)).toBe(true);
   fireEvent.click(screen.getAllByRole('checkbox')[1]); expect((s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toHaveLength(60);
   fireEvent.click(screen.getByRole('button', {name:'清空选择'})); expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
@@ -93,4 +95,22 @@ it('sorts the single detector column in both directions and filters to one exact
   fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'})); expect(first()).toHaveTextContent('> 3');
   fireEvent.change(screen.getByLabelText('鱼质量的探测算法'), {target:{value:s.study.groups.find(g=>g.snapshot.threshold===2)!.id}});
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(first()).toHaveTextContent('> 2');
+});
+
+// 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：不再分页，所有行在同一个滚动框里
+it('keeps every row reachable in one scroll box, renders only the visible window and counts months within the source filter', () => {
+  const s = state();
+  const lib = Array.from({ length: 300 }, (_, i) => ({ id: `l${i}`, symbol: `S${String(i).padStart(3, '0')}USDT`, timeMs: T - i * 3600_000, timeLabel: '', fallbackZone: '' }));
+  s.study = importQualityLibrary(s.study, lib);
+  render(<FishQuality state={s}/>);
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 303 行 · 301 条信号');
+  expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
+  const shown = screen.getAllByTestId('quality-fish-row').length;
+  expect(shown).toBeGreaterThan(10); expect(shown).toBeLessThan(60);
+  const box = screen.getByTestId('quality-fish-table');
+  box.scrollTop = 300 * 33; fireEvent.scroll(box);
+  expect(screen.getByText('S299USDT')).toBeInTheDocument(); expect(screen.queryByText('S000USDT')).toBeNull();
+  fireEvent.change(screen.getByLabelText('鱼质量的来源'), { target: { value: 'fish' } });
+  expect(screen.getByTestId('quality-row-count')).toHaveTextContent('共 3 行 · 1 条信号（筛选自 303 行）');
+  expect(within(screen.getByLabelText('鱼质量的月份')).getByRole('option', { name: '全部月份（1）' })).toBeInTheDocument();
 });

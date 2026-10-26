@@ -3,9 +3,9 @@
 import {beforeEach,it,expect,vi} from 'vitest';
 import {fireEvent,render,screen,cleanup} from '@testing-library/react';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
-import {BSS_DEF,CBA_DEF,CDA_DEF,CBI2_DEF,CBI_DEF,DRIFT_SPEED_Z_DEF,STATE_DEF} from '@/lib/deepDig/features';
+import {BSS_DEF,CBA_DEF,CDA_DEF,CBI2_DEF,CBI_DEF,DRIFT_SPEED_Z_DEF,STATE_DEF,type DeepDigFeatureDef} from '@/lib/deepDig/features';
 import {fishFeatureDefinitions} from '@/lib/fish/features';
-const defs=vi.hoisted(()=>({list:[] as any[]}));
+const defs=vi.hoisted(()=>({list:[] as DeepDigFeatureDef[]}));
 vi.mock('@/hooks/useFishFeatures',()=>({useFishFeatures:()=>defs.list}));
 const start=vi.fn();
 const panel=(extra:object={})=><FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()} {...extra}/>;
@@ -27,7 +27,7 @@ it('默认五条规则全部勾选，开始捕捞使用默认阈值、序列和�
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
  await vi.waitFor(()=>expect(start).toHaveBeenCalled());
  expect(start.mock.calls[0][0].combination).toBe('or');
- expect(start.mock.calls[0][0].algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
+ expect(start.mock.calls[0][0].algorithms.map((a:{feature:DeepDigFeatureDef})=>a.feature.id)).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
 });
 it('重新打开恢复五条默认规则与顺序，保留新增规则和上次阈值',()=>{
  render(panel());
