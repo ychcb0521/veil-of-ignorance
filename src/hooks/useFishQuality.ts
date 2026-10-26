@@ -32,8 +32,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!active || epoch !== generation.current) return;
       const archived = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
       const migrated = syncQualitySellDefinitions(archived);
-      if (migrated.sellPlans?.some((plan, i) => plan.snapshot.definitionKey !== archived.sellPlans?.[i].snapshot.definitionKey)) {
-        setDefinitionNotice('卖出公式已同步当前账号定义。旧公式结果保留为历史版本；请运行所选信号，生成当前公式结果。');
+      if (migrated.sellPlans?.some((plan, i) => plan.snapshot.definitionKey !== archived.sellPlans?.[i].snapshot.definitionKey || plan.execution !== archived.sellPlans?.[i].execution)) {
+        setDefinitionNotice('卖出方案已同步当前账号公式与盘中达标规则（1 分钟复原）。已有战役可在交易战役页一键纠错；原结果保留追溯。');
       }
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };

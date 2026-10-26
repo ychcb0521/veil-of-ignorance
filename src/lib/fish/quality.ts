@@ -11,12 +11,15 @@ import { signalDedupKey } from '@/lib/signalLibrary';
 import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
+import { findQualityIntrabarExit, type QualityTrigger } from './qualityIntrabar';
 
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
 export interface QualityGroup {
   id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule;
+  /** Absent on historical close-confirmation experiments. */
+  execution?: 'intrabar-1m';
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
 }
@@ -37,7 +40,8 @@ export interface QualityResult {
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
   exitReading?: number;
-  pendingExit?: { at: number; reading: number };
+  pendingExit?: QualityTrigger;
+  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number } };
 }
 /**
  * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
@@ -173,7 +177,11 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
-export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
+export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
+  const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
+  if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
+  return shortFishHash(JSON.stringify(identity));
+};
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
 // 样本数组不变时复用合并结果：评估中每出一个结果 study 都会换，但 samples 不变，不必整表重算。
 const comparisonCache = new WeakMap<readonly QualitySample[], QualitySample[]>();
@@ -268,7 +276,7 @@ export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFil
 
 const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格', name: '价格', definition: '', formula: 'C', scale: 1, unit: '', positive: '1', control: '0', interval: '1m' }, { statistic: '结果', direction: '>', threshold: 0, constraints: [] });
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
-/** A rule is observed only at completed algorithm bars; fill at the next minute's open, never a past signal price. */
+/** Observe the saved timing policy causally; only the execution minute open contributes to a fill. */
 export async function evaluateQualitySample(sample: QualitySample, group: QualityGroup, observeHours: number, now: number, load: FishReconstructionLoader, signal: AbortSignal, previous?: QualityResult): Promise<QualityResult> {
   const key = qualityResultKey(sample, group, observeHours), base = { key, sampleId: sample.id, groupId: group.id, evaluatedAt: now };
   if (!sample.enteredAt) return { ...base, status: 'error', reason: '缺少有效买入时间，不能可靠还原买入时点' };
@@ -288,35 +296,42 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const prior = previous?.key === key && previous.status === 'open' && previous.entryPrice! > 0 && previous.endTime! >= entry && previous.endTime! <= end ? previous : undefined;
     const since = prior?.endTime ?? entry;
     if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
-    let trigger: { at: number; reading: number } | undefined = prior?.pendingExit;
-    if (group.rule) {
+    let trigger: QualityTrigger | undefined = prior?.pendingExit;
+    let replayedPrices: ResearchBar[] | undefined;
+    if (group.rule && !trigger) {
       const rule = group.rule;
       if (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction)) throw new Error('卖出规则无效');
       const { plan, scale } = qualityMetricPlan(group.snapshot, rule.metric);
-      let cursor = Math.floor(since / plan.step) * plan.step;
-      const stop = Math.floor(end / plan.step) * plan.step;
-      while (cursor < stop && !trigger) {
-        abort(signal);
-        const cut = Math.min(stop, cursor + 500 * plan.step), from = cursor - plan.warm * plan.step;
-        if (from < 0) throw new Error('公式预热所需历史不足');
-        const bars = await load(row, from, cut, plan, signal);
-        validateFishBars(bars, cut, (cut - from) / plan.step, plan.step);
-        const readings = evaluateFishProgram(bars, plan).average;
-        for (let i = 0; i < bars.length; i++) {
-          const at = bars[i].openTime + plan.step;
-          if (at <= entry || at <= cursor || at > end) continue;
-          const reading = readings[i] * scale;
-          if (!Number.isFinite(reading)) throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交');
-          if (rule.direction === '<' ? reading < rule.threshold : reading > rule.threshold) { trigger = { at, reading }; break; }
+      if (group.execution === 'intrabar-1m') {
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal });
+        trigger = replay.trigger; replayedPrices = replay.prices;
+      } else {
+        let cursor = Math.floor(since / plan.step) * plan.step;
+        const stop = Math.floor(end / plan.step) * plan.step;
+        while (cursor < stop && !trigger) {
+          abort(signal);
+          const cut = Math.min(stop, cursor + 500 * plan.step), from = cursor - plan.warm * plan.step;
+          if (from < 0) throw new Error('公式预热所需历史不足');
+          const bars = await load(row, from, cut, plan, signal);
+          validateFishBars(bars, cut, (cut - from) / plan.step, plan.step);
+          const readings = evaluateFishProgram(bars, plan).average;
+          for (let i = 0; i < bars.length; i++) {
+            const at = bars[i].openTime + plan.step;
+            if (at <= entry || at <= cursor || at > end) continue;
+            const reading = readings[i] * scale;
+            if (!Number.isFinite(reading)) throw new Error('卖出指标存在缺失读数，不能越过缺口判断成交');
+            if (rule.direction === '<' ? reading < rule.threshold : reading > rule.threshold) { trigger = { at, reading }; break; }
+          }
+          cursor = cut;
+          await new Promise(resolve => setTimeout(resolve, 0));
         }
-        cursor = cut;
-        await new Promise(resolve => setTimeout(resolve, 0));
       }
     }
     // Need the execution minute's open, but never its future high/low. A last-minute trigger waits for that price.
     const priceEnd = trigger && trigger.at < end ? trigger.at + QUALITY_MINUTE : end;
     if (priceEnd <= since && prior) return { ...prior, evaluatedAt: now };
-    const prices = await load(row, since, priceEnd, pp, signal);
+    let prices: readonly ResearchBar[] | undefined = replayedPrices?.filter(b => b.openTime >= since && b.openTime < priceEnd);
+    if (!prices || prices.length !== (priceEnd - since) / QUALITY_MINUTE) prices = await load(row, since, priceEnd, pp, signal);
     validateFishBars(prices, priceEnd, (priceEnd - since) / QUALITY_MINUTE, QUALITY_MINUTE);
     const entryPrice = prior?.entryPrice ?? prices[0].open;
     const exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
@@ -341,7 +356,8 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
-      reason: closed ? '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘价' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous} : undefined,
+      reason: closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };

@@ -10,7 +10,7 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
     { def: CDA_DEF, metric: 'CDA', label: 'CDA 原始值', threshold: -8 },
   ].map(({ def: builtin, metric, label, threshold }) => {
     const def = definitions.find(d => d.id === builtin.id) ?? builtin;
-    return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const,
+    return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const, execution: 'intrabar-1m' as const,
     snapshot: { featureId: def.id, featureShort: def.short, featureName: def.name, definitionKey: definitionKey({ ...def, interval: '5m' }),
       statistic: metric, interval: '5m', scale: 1, unit: '', threshold, direction: '<',
       cutoffMs: 0, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 },
@@ -26,9 +26,9 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     // Same fallback as charts: a hidden built-in still has its built-in definition.
     const def = definitions.find(d => d.id === builtin.id) ?? builtin;
     const key = definitionKey({ ...def, interval: '5m' });
-    if (plan.snapshot.definitionKey === key && plan.snapshot.interval === '5m' && plan.definitionSource === 'account') return plan;
+    if (plan.snapshot.definitionKey === key && plan.snapshot.interval === '5m' && plan.definitionSource === 'account' && plan.execution === 'intrabar-1m') return plan;
     changed = true;
-    return { ...plan, definitionSource: 'account' as const, snapshot: { ...plan.snapshot,
+    return { ...plan, definitionSource: 'account' as const, execution:'intrabar-1m' as const, snapshot: { ...plan.snapshot,
       definitionKey: key, interval: '5m' as const, scale: 1, statistic: plan.metric, H: undefined,
       featureName: def.name, featureShort: def.short,
     } };

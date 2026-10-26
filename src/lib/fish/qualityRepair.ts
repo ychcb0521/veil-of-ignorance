@@ -5,7 +5,7 @@ import { evaluateQualitySample, qualityResultKey, type FishQualityStudy, type Qu
 import { hasQualityCampaign, type QualityCampaignRun } from './qualityCampaignArchive';
 import type { FishReconstructionLoader } from './reconstruction';
 
-const REPAIR_VERSION = 1;
+const REPAIR_VERSION = 2;
 export interface QualityRepairBatch {
   id: string; startedAt: number; updatedAt: number; revision: number; targetVersion: string;
   state: 'running' | 'paused' | 'complete'; targetKeys: string[]; completedKeys: string[];
@@ -23,7 +23,7 @@ function targetPlan(run: QualityCampaignRun, definitions: readonly DeepDigFeatur
   // Preserve the experiment's own interval, selected raw variable, threshold and horizon.
   const interval = run.plan.snapshot.interval ?? '5m';
   if (!['1m','3m','5m','15m','30m','1h','2h','4h','6h','12h','1d'].includes(interval)) throw new Error('原战役的指标周期无效，不能改用其他周期代替');
-  return { ...run.plan, definitionSource: 'account', snapshot: { ...run.plan.snapshot,
+  return { ...run.plan, definitionSource: 'account', execution:'intrabar-1m', snapshot: { ...run.plan.snapshot,
     definitionKey: definitionKey({ ...def, interval: interval as DeepDigFeatureDef['interval'] }), featureName: def.name, featureShort: def.short,
   } };
 }
@@ -83,7 +83,7 @@ export function applyQualityRepair(study: FishQualityStudy, batchId: string, tas
     return { ...study, campaignRepair: nextBatch, campaignRuns: runs.map(run => sourceKeys.has(run.result.key)
       ? { ...run, repair: { batchId, status: 'failed', checkedAt: now, error } } : run) };
   }
-  const changed = task.originals.some(run => run.plan.snapshot.definitionKey !== task.plan.snapshot.definitionKey || outcomeChanged(run.result,result));
+  const changed = task.originals.some(run => run.plan.execution !== task.plan.execution || run.plan.snapshot.definitionKey !== task.plan.snapshot.definitionKey || outcomeChanged(run.result,result));
   const first = task.originals.find(run => run.result.key === task.key) ?? task.originals[0];
   const existing = runs.find(run => run.result.key === task.key) ?? first;
   const previousDifferent = task.originals.find(run => outcomeChanged(run.result,result));

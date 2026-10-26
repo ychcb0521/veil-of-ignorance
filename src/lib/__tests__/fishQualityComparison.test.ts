@@ -81,7 +81,7 @@ it('compiles and evaluates the real S and CDA raw series as sells independently 
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, async (_row, from, cut, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => { const time = from + i * plan.step, x = (time - T) / (5 * M), price = plan.step === M ? 100 : 100 + Math.sin(x / 7) + x * .001, q = 10000 * (1 + .1 * Math.cos(x / 5)); return { openTime: time, open: price, high: price + 1, low: price - 1, close: price, volume: q / price, quoteVolume: q, takerBuyQuoteVolume: q * (.55 + .1 * Math.sin(x / 9)), takerBuyVolume: q * .55 / price, refClose: 200 + Math.cos(x / 13) + x * .002 }; }), T + 10 * M);
   expect(results).toHaveLength(2);
   expect(results.map(r => r.reason)).not.toEqual(expect.arrayContaining([expect.stringContaining("缺失")]));
-  expect(results.map(r => [r.status, r.entryTime, r.endTime, r.returnPct])).toEqual([['closed', T, T + 5 * M, 0], ['closed', T, T + 5 * M, 0]]);
+  expect(results.map(r => [r.status, r.entryTime, r.endTime, r.returnPct])).toEqual([['closed', T, T, 0], ['closed', T, T, 0]]);
   expect(results.every(r => Number.isFinite(r.exitReading))).toBe(true);
 });
 

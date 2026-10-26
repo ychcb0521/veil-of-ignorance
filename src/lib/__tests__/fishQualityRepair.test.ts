@@ -89,6 +89,22 @@ it('chronologically reevaluates fresh market bars and never accepts an old compl
   const {study}=seed(), prepared=prepareQualityRepair(study,[currentDef],T+200*M), outcomes:QualityResult[]=[];
   const load=vi.fn(async(_row,from,cut,p)=>Array.from({length:(cut-from)/p.step},(_,i)=>{const t=from+i*p.step,close=p.step===M?100:80;return {openTime:t,open:p.step===M&&t===T+5*M?95:100,close,high:100,low:80,volume:1,quoteVolume:100,takerBuyQuoteVolume:50,takerBuyVolume:.5};}));
   await collectQualityRepair({tasks:prepared.tasks,signal:new AbortController().signal,onResult:async(_task,result)=>{outcomes.push(result);}},load,T+20*M);
-  expect(load).toHaveBeenCalled(); expect(outcomes[0]).toMatchObject({status:'closed',endTime:T+5*M,endPrice:95,exitReading:.4}); expect(outcomes[0].returnPct).toBeCloseTo(-5);
+  expect(load).toHaveBeenCalled(); expect(outcomes[0]).toMatchObject({status:'closed',endTime:T,endPrice:100,exitReading:.4}); expect(outcomes[0].returnPct).toBe(0);
   expect(definitionKey(currentDef)).not.toBe(definitionKey(oldDef));
+});
+it('replaces a same-formula close-confirmed campaign with the new timing identity and retains the prior alias chain',()=>{
+ const seeded=seed(),plan={...seeded.plan,execution:undefined},row=seeded.row;
+ const closed={...seeded.study.campaignRuns![0],plan,result:{...seeded.result,key:qualityResultKey(row,plan,0)}};
+ const ancestor={...closed,result:{...closed.result,key:'original-wb1'},supersededBy:closed.result.key};
+ const study={...seeded.study,sellPlans:[plan],campaignRuns:[ancestor,closed],results:[closed.result]};
+ const prepared=prepareQualityRepair(syncQualitySellDefinitions(study,[oldDef]),[oldDef],T+200*M),task=prepared.tasks[0];
+ expect(task.plan.execution).toBe('intrabar-1m');expect(task.key).not.toBe(closed.result.key);
+ const next=applyQualityRepair(prepared.study,prepared.batch.id,task,{...closed.result,key:task.key},T+201*M);
+ expect(next.campaignRepair!.changedKeys).toEqual([task.key]);
+ const a=next.campaignRuns!.find(r=>r.result.key==='original-wb1')!,b=next.campaignRuns!.find(r=>r.result.key===a.supersededBy)!;
+ expect(b.supersededBy).toBe(task.key);expect(next.campaignRuns!.find(r=>r.result.key===task.key)!.supersededBy).toBeUndefined();
+ expect(qualityCampaignDataFromStudy('owner',next,'sell')).toHaveLength(1);
+ const sheets=buildQualitySheets(next,[row]);
+ expect(sheets[1].columns[32].header).toBe('卖出时机');expect(sheets[1].rows[0][32]).toBe('盘中达标 · 1分钟复原');
+ expect(sheets[2].rows.some(r=>r[12]==='原周期收盘确认'&&r[13]==='盘中达标 · 1分钟复原')).toBe(true);
 });

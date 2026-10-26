@@ -28,7 +28,8 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['标的', 24], ['来源', 10], ['信号时间', 24], ['探测算法 / 捕获阈值', 50], ['卖出算法', 24], ['具体指标', 18], ['卖出方向', 10], ['卖出门槛', 12],
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
     ['最大涨幅 %', 16], ['最大不利涨跌 %', 18], ['最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
-    ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['收盘确认时间', 24], ['实际卖出公式', 60],
+    ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['阈值确认时间', 24], ['实际卖出公式', 60],
+    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const definition = qualityDefinition(run.plan.snapshot);
@@ -41,18 +42,20 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       r.heldHours ?? null, run.observeHours, 100, 1, `${r.key} · ${qualityRuleLabel(run.plan)}`,
       qualityFormulaVersion(run.plan), run.plan.definitionSource === 'account' ? '运行时账号公式' : '历史公式快照',
       run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
-      r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula];
+      r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula,
+      run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
+      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null];
   }) });
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));
-    sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式'].map(header => ({header,width:header.includes('公式')?60:25})),
+    sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式','原卖出时机','纠正后卖出时机'].map(header => ({header,width:header.includes('公式')?60:25})),
       rows:allRuns.flatMap(run => {
         const target = run.supersededBy ? byKey.get(run.supersededBy) : run;
         const history = run.priorResults?.length ? run.priorResults.map(p => ({plan:p.plan,result:p.result,at:p.at})) : [{plan:run.plan,result:run.result,at:run.repair?.checkedAt}];
         return history.map(old => [run.sample.source.symbol,old.result.key,run.supersededBy?'已替换':run.repair?.status === 'verified'?'已核验':run.repair?.status === 'failed'?'未通过':'待核验',
           target?.result.key ?? null,old.at?formatUTC8(old.at):null,old.result.endTime?formatUTC8(old.result.endTime):null,old.result.returnPct??null,
           target?.repair?.status === 'verified' && target.result.endTime?formatUTC8(target.result.endTime):null,target?.repair?.status === 'verified'?target.result.returnPct??null:null,
-          run.repair?.error??null,qualityDefinition(old.plan.snapshot).formula,target?qualityDefinition(target.plan.snapshot).formula:null]);
+          run.repair?.error??null,qualityDefinition(old.plan.snapshot).formula,target?qualityDefinition(target.plan.snapshot).formula:null,old.plan.execution==='intrabar-1m'?'盘中达标 · 1分钟复原':'原周期收盘确认',target?.plan.execution==='intrabar-1m'?'盘中达标 · 1分钟复原':target?'原周期收盘确认':null]);
       })});
   }
   return sheets;
