@@ -283,7 +283,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
   if (!(observeHours >= 0 && observeHours <= 24 * 366) || !Number.isFinite(observeHours)) return { ...base, status: 'error', reason: '观察时长须在 0～8784 小时之间；0 为持续至卖出' };
   const entry = Math.ceil(sample.enteredAt / QUALITY_MINUTE) * QUALITY_MINUTE;
   const limit = observeHours === 0 ? Infinity : entry + Math.ceil(observeHours * 60) * QUALITY_MINUTE;
-  const end = Math.min(Math.floor(now / QUALITY_MINUTE) * QUALITY_MINUTE, limit);
+  const availableEnd = Math.floor(now / QUALITY_MINUTE) * QUALITY_MINUTE, end = Math.min(availableEnd, limit);
   if (end <= entry) return { ...base, status: 'waiting', reason: '等待入场后的首根 1 分钟 K 线' };
   try {
     const row = { ...sample.source, timeMs: now }, pp = pricePlan();
@@ -328,7 +328,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       }
     }
     // Need the execution minute's open, but never its future high/low. A last-minute trigger waits for that price.
-    const priceEnd = trigger && trigger.at < end ? trigger.at + QUALITY_MINUTE : end;
+    const priceEnd = trigger && trigger.at < availableEnd ? trigger.at + QUALITY_MINUTE : end;
     if (priceEnd <= since && prior) return { ...prior, evaluatedAt: now };
     let prices: readonly ResearchBar[] | undefined = replayedPrices?.filter(b => b.openTime >= since && b.openTime < priceEnd);
     if (!prices || prices.length !== (priceEnd - since) / QUALITY_MINUTE) prices = await load(row, since, priceEnd, pp, signal);
@@ -353,7 +353,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
       returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
-      heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit,
+      heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
       exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous} : undefined,

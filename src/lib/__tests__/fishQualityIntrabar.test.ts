@@ -85,3 +85,15 @@ describe('causal intrabar sell replay',()=>{
     expect(qualityResultKey(sample,old,0)).toBe(qualityResultKey(sample,{...old},0));
   });
 });
+it('retains the previous observation when the very first resumed minute triggers',async()=>{
+ const g=group(),path=loader(t=>bar(t,t===T+2*M?90:100));
+ const prior=await run(g,path,T+2*M),resumed=await run(g,path,T+4*M,sample,prior),whole=await run(g,path,T+4*M);
+ expect(resumed).toEqual(whole);expect(resumed.exitSnapshot!.previous).toEqual({at:T+2*M,reading:100});
+});
+it('fills a trigger exactly at the observation horizon instead of freezing it as permanently pending',async()=>{
+ const g=group(),path=loader(t=>bar(t,t===T+2*M?90:100,t===T+3*M?92:100)),hours=3/60;
+ const evaluate=(now:number,prior?:Awaited<ReturnType<typeof evaluateQualitySample>>)=>evaluateQualitySample(sample,g,hours,now,path,signal(),prior);
+ const pending=await evaluate(T+3*M);expect(pending.status).toBe('open');expect(pending.pendingExit!.at).toBe(T+3*M);expect(pending.complete).toBe(false);
+ const full=await evaluate(T+4*M),resumed=await evaluate(T+4*M,pending);
+ expect(resumed).toEqual(full);expect(full).toMatchObject({status:'closed',endTime:T+3*M,endPrice:92,complete:true});
+});

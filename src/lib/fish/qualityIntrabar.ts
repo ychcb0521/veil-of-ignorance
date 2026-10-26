@@ -50,17 +50,17 @@ export async function findQualityIntrabarExit(o: {
   const prices:ResearchBar[]=[];
   const checkFrom=o.resumed?o.since+MINUTE:o.entry;
   const check=(at:number,barOpenTime:number):QualityTrigger|undefined=>{
-    if (at<checkFrom) return;
+    if (at<(o.resumed?o.since:o.entry)) return;
     const bars=partial?[...history,partial]:history;
     const out=evaluateOnBars(bars,plan.compiled,plan.def,cache).vars.get(plan.averageName);
     const reading=(typeof out==='number'?out:out?.[bars.length-1] ?? NaN)*o.scale;
     if (!Number.isFinite(reading)) throw new Error('盘中指标存在缺失读数，不能越过缺口判断成交');
-    if (o.rule.direction==='<'?reading<o.rule.threshold:reading>o.rule.threshold) return {at,reading,barOpenTime,previous};
+    if (at>=checkFrom && (o.rule.direction==='<'?reading<o.rule.threshold:reading>o.rule.threshold)) return {at,reading,barOpenTime,previous};
     previous={at,reading};
   };
   // If the condition already holds when buying, its first observable trigger is
   // the entry minute itself; an arbitrary extra holding period is not imposed.
-  if (start===o.entry && !o.resumed) {
+  if (start===(o.resumed?o.since:o.entry)) {
     const trigger=check(start,history.at(-1)!.openTime);
     if (trigger) return {trigger,prices};
   }
