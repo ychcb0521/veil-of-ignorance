@@ -14,6 +14,19 @@ const group=():QualityGroup=>({id:'g',label:'主规则',metric:'raw',execution:'
 const bar=(t:number,open=100,high=open,low=open,close=open):ResearchBar=>({openTime:t,open,high,low,close,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50});
 const loader=(f:(t:number)=>ResearchBar):FishReconstructionLoader=>async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===M?f(a+i*M):bar(a+i*p.step));
 const run=(g:QualityGroup,l:FishReconstructionLoader,now=T+8*M,prior?:Awaited<ReturnType<typeof evaluateQualitySample>>)=>evaluateQualitySample(sample,g,0,now,l,signal(),prior);
+it('applies the screenshot static thresholds 7.7 and 30 independently of dynamic drawdown, and stops at the tighter decimal threshold',async()=>{
+ const g={...group(),vetoFill:'stop' as const,holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',7.7),makeQualityHoldingVeto('static-drawdown','>=',30)]};
+ // 100 涨至 600 再跌回 100：动态回撤 83.33%，静态回撤仍为 0%，两条静态条件均不应触发。
+ const path=loader(t=>t===T?bar(t,100,600,100,600):t===T+M?bar(t,600,600,100,100):t===T+2*M?bar(t,100,100,90,95):bar(t,95));
+ const prior=await run(g,path,T+2*M);
+ expect(prior).toMatchObject({status:'open',adversePct:0,drawdownPct:expect.closeTo(83.333333)});
+ const result=await run(g,path,T+4*M,prior);
+ expect(result).toMatchObject({status:'closed',endTime:T+2*M,endPrice:expect.closeTo(92.3),adversePct:expect.closeTo(-7.7),exitSnapshot:{cause:{kind:'static-drawdown',threshold:7.7}}});
+ expect(result).toEqual(await run({...g,holdingVetoes:[...g.holdingVetoes].reverse()},path,T+4*M));
+ // 若第二条实际选择动态 30%，则先在峰值 600 回落至 420 时卖出，仍高于买入价。
+ const dynamic=await run({...g,holdingVetoes:[g.holdingVetoes[0],makeQualityHoldingVeto('dynamic-drawdown','>=',30)]},path,T+4*M);
+ expect(dynamic).toMatchObject({endTime:T+M,endPrice:420,adversePct:0,drawdownPct:expect.closeTo(30),exitSnapshot:{cause:{kind:'dynamic-drawdown',threshold:30}}});
+});
 // 【用户要求】2026-10-26 设了静态回撤 ≥ 5% 卖出，卖出列的静态回撤却超过 5%：改为止损单式，盘中触及按止损价成交
 it('stops on a static intraminute wick at the stop price itself, so the recorded drawdown equals the threshold, and records proof',async()=>{
  const g={...group(),holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',10)]};

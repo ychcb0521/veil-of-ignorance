@@ -322,6 +322,18 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
  expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id,[],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
 });
+it('shows the effective decimal threshold for duplicate static vetoes without silently enabling a dynamic veto',async()=>{
+ const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
+ const s=state();s.study.sellPlans![0].holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',7.7),makeQualityHoldingVeto('static-drawdown','>=',30)];
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'过滤与持仓否决'}));
+ const summary=screen.getByTestId('quality-veto-risk-summary');
+ expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%（同类条件中较小阈值先触发）；动态回撤否决未启用');
+ expect(s.setFilters).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'dynamic-drawdown'}});
+ expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%；动态回撤 ≥ 30%');
+ fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
+ expect(s.setFilters).toHaveBeenCalledWith('sell-state-raw',[],[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})]);
+});
 // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
   const { saveQualityReturn, armQualityReturn, finishQualityReturn } = await import('@/lib/fish/qualityReturn');
