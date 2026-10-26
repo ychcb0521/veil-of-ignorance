@@ -21,6 +21,8 @@ export interface QualitySample {
   origin?: 'library';
   /** Derived per-row capture readings; never replaces any saved source snapshot. */
   readings?: Record<string, FishSnapshot>;
+  /** Derived display rows share one signalId / paper trade; detectorId selects their attribution. */
+  signalId?: string; detectorId?: string;
 }
 export interface QualityResult {
   key: string; sampleId: string; groupId: string; evaluatedAt: number;
@@ -35,9 +37,9 @@ export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
-  sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[];
+  sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[]; selectedRowIds?: string[];
 }
-export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [] });
+export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });
 /**
  * 【用户要求】2026-10-26「历史鱼按捕捞时刻买入」：信号时间是「一直持续到扫描时刻」那段行情的起点，
  * 在起点买入等于事先知道信号会撑到扫描时刻，并白拿起点到扫描之间的涨幅；捕捞时刻才是当时真能下单的时点。
@@ -152,7 +154,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
   }
   return added.length ? { ...study, samples: [...study.samples, ...added] } : study;
 }
-export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
+export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => shortFishHash(JSON.stringify([s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H]));
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
 export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] {
   const rows = new Map<string, QualitySample>();
@@ -166,7 +168,18 @@ export function qualityComparisonRows(study: FishQualityStudy): QualitySample[] 
   }
   return [...rows.values()];
 }
-export const qualityRunSamples = (study: FishQualityStudy) => study.sellPlans ? qualityComparisonRows(study).filter(s => !study.cohortIds || study.cohortIds.includes(s.id)) : study.samples;
+export function expandQualityRows(rows: readonly QualitySample[]): QualitySample[] {
+  return rows.flatMap(row => row.signalId ? [row] : (row.groups.length ? row.groups : [undefined]).map(detectorId => ({
+    ...row, signalId: row.id, detectorId, id: `${row.id}/detector/${detectorId ?? 'none'}`, groups: detectorId ? [detectorId] : [],
+  })));
+}
+export const qualityDisplayRows = (study: FishQualityStudy) => expandQualityRows(qualityComparisonRows(study));
+export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
+  if (!study.sellPlans) return study.samples;
+  const signals = qualityComparisonRows(study), selected = new Set(study.selectedRowIds ?? []);
+  const selectedSignals = new Set(expandQualityRows(signals).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.signalId));
+  return signals.filter(s => selectedSignals.has(s.id) && (!study.cohortIds || study.cohortIds.includes(s.id)));
+}
 export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ?? study.groups;
 export function qualityExitSuggestions(group: QualityGroup): { label: string; rule: QualityExitRule }[] {
   const t = group.snapshot.threshold, direction: '<' | '>' = group.snapshot.direction === '<' ? '>' : '<';

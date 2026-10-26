@@ -26,7 +26,8 @@ export function qualityPairedRows(study: FishQualityStudy, rows: QualitySample[]
   const plans = study.sellPlans ?? [], results = qualityResultMap(study);
   if (plans.length < 2 || plans.some(p => !p.rule)) return [];
   const latest = study.results.reduce((time, r) => plans.some(p => p.id === r.groupId) ? Math.max(time, r.evaluatedAt) : time, 0);
-  return rows.filter(row => plans.every(plan => {
+  const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
+  return signals.filter(row => plans.every(plan => {
     const r = qualityRowResult(study, row, plan, results);
     return usable(r, closedOnly) && (closedOnly || r.status === 'closed' || r.complete || r.evaluatedAt === latest);
   }));

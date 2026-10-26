@@ -12,6 +12,9 @@ vi.mock('sonner', () => ({ toast: sonnerMock }));
 
 import {
   NOTIFICATION_HISTORY_LIMIT,
+  beginHistoryOnlyNotifications,
+  isNotificationHistoryOnly,
+  recordNotificationHistory,
   __resetNotificationCenterForTests,
   clearNotificationHistory,
   getNotificationSnapshot,
@@ -133,4 +136,24 @@ describe('notificationCenter', () => {
     await Promise.resolve();
     expect(listener).toHaveBeenCalledTimes(1);   // 连发两条合成一次
   });
+  it('鱼质量任务期间强制只记消息，嵌套任务结束后恢复原开关且不补弹', () => {
+    setNotificationPopupsEnabled(true);
+    const first = beginHistoryOnlyNotifications(), second = beginHistoryOnlyNotifications();
+    expect(isNotificationHistoryOnly()).toBe(true);
+    toast.info('鱼质量计算中'); toast.error('缺少行情'); toast('平仓提醒');
+    expect(sonnerMock.info).not.toHaveBeenCalled(); expect(sonnerMock.error).not.toHaveBeenCalled(); expect(sonnerMock).not.toHaveBeenCalled();
+    expect(getNotificationSnapshot()).toMatchObject({ popupsEnabled: true, unreadCount: 3, unreadErrorCount: 1 });
+    first(); first(); expect(isNotificationHistoryOnly()).toBe(true);
+    second(); expect(isNotificationHistoryOnly()).toBe(false);
+    expect(sonnerMock.info).not.toHaveBeenCalled(); // never replay queued messages
+    toast.info('任务完成后的新消息'); expect(sonnerMock.info).toHaveBeenCalledTimes(1);
+  });
+  it('指定只写历史的评价待办始终不弹出，并在刷新后保留', () => {
+    setNotificationPopupsEnabled(true);
+    recordNotificationHistory('info', '平仓待评价 · ERAUSDT', { description: '-299071.89 USDT' });
+    expect(sonnerMock.info).not.toHaveBeenCalled();
+    __resetNotificationCenterForTests(); subscribeNotifications(() => {})();
+    expect(getNotificationSnapshot().entries[0]).toMatchObject({ title: '平仓待评价 · ERAUSDT', description: '-299071.89 USDT' });
+  });
+
 });

@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
-import { collectFishQuality, importQualityFish, importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
+import { collectFishQuality, importQualityFish, importQualityLibrary, migrateQualityCaptureEntries, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
 import { enableQualityComparison, qualityComparisonStats, qualityDistribution, qualityPairedRows } from '@/lib/fish/qualityComparison';
 import { buildQualitySheets } from '@/lib/fish/qualityExport';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -29,10 +29,12 @@ it('keeps original captures/rules/results, freezes exactly two raw sell formulas
 it('runs both independent sell algorithms on every fish with identical entries, regardless of which detector caught it', async () => {
   const s = study(), rows = qualityComparisonRows(s), results: QualityResult[] = [];
   const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  s.selectedRowIds = qualityComparisonRows(s).map(r => r.id);
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, load, T + 10 * M);
   expect(results).toHaveLength(rows.length * 2);
   for (const row of rows) expect(results.filter(r => r.sampleId === row.id).map(r => [r.entryTime, r.entryPrice])).toEqual([[T, 100], [T, 100]]);
   const locked: QualityResult[] = [];
+  s.selectedRowIds = qualityComparisonRows(s).map(r => r.id);
   await collectFishQuality({ study: { ...s, cohortIds: [rows[1].id] }, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => locked.push(r) }, load, T + 10 * M);
   expect(locked).toHaveLength(2); expect(locked.every(r => r.sampleId === rows[1].id)).toBe(true);
 });
@@ -63,17 +65,19 @@ it('computes disjoint return bins, interpolated quantiles and no-sample values w
   expect(d.bins).toEqual([1, 1, 2, 1, 1, 1]); expect(d.median).toBe(-.1); expect(d.p10).toBeCloseTo(-10.4); expect(d.winRate).toBeCloseTo(2 / 7 * 100);
   expect(qualityDistribution([])).toMatchObject({ n: 0, mean: null, worst: null, p10: null, winRate: null });
 });
-it('exports the same one-row fish matrix with two numeric sell returns and one column per detector', () => {
+it('exports one row per detector with a single detector column and shared sell returns', () => {
   const s = study(), { rows } = seed(s), sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
-  expect(sheet.rows).toHaveLength(1); expect(sheet.columns).toHaveLength(6 + 2 + 2);
+  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(9);
   expect(sheet.rows[0][1]).toBe('鱼');
-  expect(sheet.rows[0].slice(6)).toEqual([10, -5, '命中', '命中']);
-  expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
+  expect(sheet.rows.map(r=>r.slice(5,7))).toEqual([[10,-5],[10,-5]]);
+  expect(sheet.rows[0][7]).not.toEqual(sheet.rows[1][7]);
+  expect(sheet.columns.slice(5).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
   const s = enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1)]));
   s.sellPlans!.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: p.metric === 'state' ? 2 : 101 }; });
   const results: QualityResult[] = [];
+  s.selectedRowIds = qualityComparisonRows(s).map(r => r.id);
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, async (_row, from, cut, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => { const time = from + i * plan.step, x = (time - T) / (5 * M), price = plan.step === M ? 100 : 100 + Math.sin(x / 7) + x * .001, q = 10000 * (1 + .1 * Math.cos(x / 5)); return { openTime: time, open: price, high: price + 1, low: price - 1, close: price, volume: q / price, quoteVolume: q, takerBuyQuoteVolume: q * (.55 + .1 * Math.sin(x / 9)), takerBuyVolume: q * .55 / price, refClose: 200 + Math.cos(x / 13) + x * .002 }; }), T + 10 * M);
   expect(results).toHaveLength(2);
   expect(results.map(r => r.reason)).not.toEqual(expect.arrayContaining([expect.stringContaining("缺失")]));
@@ -101,6 +105,7 @@ it('runs the shared sells on library signals, counts them in the sell comparison
   const s = importQualityLibrary(study(), [libSignal('ZZZUSDT')], T + 2 * M), rows = qualityComparisonRows(s), lib = rows.find(r => r.origin === 'library')!;
   const results: QualityResult[] = [];
   const load = vi.fn(async (_r, from: number, cut: number, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 100, high: 101, low: 99, close: 100, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  s.selectedRowIds = qualityComparisonRows(s).map(r => r.id);
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r) }, load, T + 10 * M);
   expect(results.filter(r => r.sampleId === lib.id).map(r => [r.groupId, r.entryTime])).toEqual(s.sellPlans!.map(p => [p.id, T - 30 * M]));
   const plans = s.sellPlans!; plans.forEach(p => { p.rule = { metric: p.metric, direction: '<', threshold: -1 }; });
@@ -111,4 +116,22 @@ it('runs the shared sells on library signals, counts them in the sell comparison
   expect(stats.detectors.every(d => d.total === rows.filter(r => r.groups.includes(d.group.id)).length && d.mean === 1)).toBe(true);
   const sheet = buildQualitySheets(s, [lib])[0];
   expect(sheet.rows[0].slice(0, 2)).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][3]).toBe('');
+});
+it('does no market work without a choice and evaluates only the selected signal with both sell plans', async () => {
+  const s = study(), rows = qualityComparisonRows(s), load = vi.fn(async (_row, from, cut, p) => Array.from({length:(cut-from)/p.step}, (_,i) => ({openTime:from+i*p.step,open:100,high:101,low:99,close:100,volume:1,takerBuyVolume:.5})));
+  const onResult = vi.fn(), options = {study:s,signal:new AbortController().signal,onProgress:vi.fn(),onResult};
+  await collectFishQuality(options,load,T+10*M); expect(load).not.toHaveBeenCalled(); expect(onResult).not.toHaveBeenCalled();
+  s.selectedRowIds = [rows[1].id]; await collectFishQuality(options,load,T+10*M);
+  expect(onResult).toHaveBeenCalledTimes(2); expect(onResult.mock.calls.every(([r])=>r.sampleId===rows[1].id)).toBe(true);
+});
+
+it('expands detector rows without multiplying trades, counts a signal once for sells, and attributes only the selected detector rows', async () => {
+  const s = study(), {rows, plans} = seed(s), displays = qualityDisplayRows(s).filter(r => r.signalId === rows[0].id);
+  expect(displays).toHaveLength(2); s.selectedRowIds = displays.map(r=>r.id);
+  const values: QualityResult[] = [];
+  await collectFishQuality({study:{...s,results:[],sellPlans:plans.map(p=>({...p,rule:undefined}))},signal:new AbortController().signal,onProgress:vi.fn(),onResult:r=>values.push(r)},async(_r,from,cut,p)=>Array.from({length:(cut-from)/p.step},(_,i)=>({openTime:from+i*p.step,open:100,high:100,low:100,close:100,volume:1,takerBuyVolume:.5})),T+10*M);
+  expect(values).toHaveLength(2); expect(new Set(values.map(r=>r.sampleId))).toEqual(new Set([rows[0].id]));
+  const all = qualityComparisonStats(s, displays, true); expect(all.sells.map(v=>v.n)).toEqual([1,1]);
+  s.selectedSellId = plans[0].id;
+  expect(qualityComparisonStats(s,displays.slice(0,1),true).detectors.map(v=>v.n)).toEqual([1,0]);
 });

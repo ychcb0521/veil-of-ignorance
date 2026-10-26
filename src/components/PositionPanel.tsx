@@ -5,7 +5,7 @@ import { calcUnrealizedPnl, calcLiquidationPrice } from '@/types/trading';
 import type { PositionsMap, OrdersMap, PriceMap } from '@/contexts/TradingContext';
 import { X, Trash2, ArrowUpDown, ArrowUp, ArrowDown, ArrowLeftRight, Plus, MoreVertical, ChevronDown, ChevronRight, GripVertical, Check, Loader2, Pencil } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { toast } from '@/lib/notificationCenter';
+import { toast, recordNotificationHistory, isNotificationHistoryOnly, getNotificationQuietEpoch, useNotificationHistoryOnly } from '@/lib/notificationCenter';
 import { LeverageModal } from '@/components/LeverageModal';
 import { TpSlModal } from '@/components/TpSlModal';
 import { ClosePositionModal } from '@/components/ClosePositionModal';
@@ -98,6 +98,12 @@ type TradeRecordRepairForm = {
   openTime: string;
   closeTime: string;
 };
+
+function recordDeferredCloseReview(record: TradeRecord) {
+  recordNotificationHistory('info', `平仓待评价 · ${record.symbol}`, {
+    description: `${formatSignedUSDT(record.pnl ?? 0)} USDT。可在「仓位历史记录」中补做平仓评价。`,
+  });
+}
 
 function formatDateTimeLocal(ms?: number | null): string {
   if (!ms || !Number.isFinite(ms)) return '';
@@ -306,8 +312,9 @@ export function PositionPanel({
   const [reviewJournal, setReviewJournal] = useState<TradeJournal | null>(null);
   const [reviewTradeRecord, setReviewTradeRecord] = useState<TradeRecord | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  /** Direct 模式下，平仓后弹的"是否前往评价"的轻量确认。每次都弹，不记忆。 */
+  /** Direct 模式平仓提醒；鱼质量评估期间只记入消息列表。 */
   const [directReviewPrompt, setDirectReviewPrompt] = useState<TradeRecord | null>(null);
+  const historyOnlyNotifications = useNotificationHistoryOnly();
   const [directReviewLoading, setDirectReviewLoading] = useState(false);
   const [historyReviewLoadingId, setHistoryReviewLoadingId] = useState<string | null>(null);
   const [journalsByTradeId, setJournalsByTradeId] = useState<Record<string, TradeJournal>>({});
@@ -322,6 +329,13 @@ export function PositionPanel({
   const lastCloseIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef(false);
 
+  useEffect(() => {
+    if (historyOnlyNotifications && directReviewPrompt) {
+      recordDeferredCloseReview(directReviewPrompt);
+      setDirectReviewPrompt(null);
+    }
+  }, [historyOnlyNotifications, directReviewPrompt]);
+
   // Detect new CLOSE records and try to match an unreviewed pre-snapshot
   useEffect(() => {
     if (!user) return;
@@ -334,7 +348,15 @@ export function PositionPanel({
       return;
     }
     if (lastCloseIdRef.current === latest.id) return;
+    const previousIndex = closes.findIndex(record => record.id === lastCloseIdRef.current);
+    const arrivals = previousIndex < 0 ? [latest] : closes.slice(previousIndex + 1);
     lastCloseIdRef.current = latest.id;
+    if (isNotificationHistoryOnly()) {
+      for (const record of arrivals) {
+        if (tradingMode !== 'direct' || record.side === 'LONG') recordDeferredCloseReview(record);
+      }
+      return;
+    }
     // Direct-trading mode: 只评价多单。空单默认跳过，不生成最小化复盘记录。
     // 选评价时，现场用 backfillJournalFromRecord 反向回填一个 journal，
     // 走的是和决策记录模式同一条 PostTradeReviewSheet 流程，统计上等价。
@@ -345,8 +367,13 @@ export function PositionPanel({
       return;
     }
     const direction = latest.side === 'LONG' ? 'long' : 'short';
+    const reminderEpoch = getNotificationQuietEpoch();
     findUnreviewedJournalForClose(user.id, latest.symbol, direction, latest.entryPrice)
       .then(j => {
+        if (isNotificationHistoryOnly() || getNotificationQuietEpoch() !== reminderEpoch) {
+          recordDeferredCloseReview(latest);
+          return;
+        }
         if (j) {
           setReviewJournal(j);
           setReviewTradeRecord(latest);
@@ -355,7 +382,11 @@ export function PositionPanel({
           toast.info('该笔平仓未找到对应的开仓快照（历史遗留持仓）');
         }
       })
-      .catch(e => toast.error(e instanceof Error ? e.message : String(e)));
+      .catch(e => {
+        const message = e instanceof Error ? e.message : String(e);
+        if (isNotificationHistoryOnly() || getNotificationQuietEpoch() !== reminderEpoch) recordNotificationHistory('error', message);
+        else toast.error(message);
+      });
   }, [tradeHistory, user, tradingMode]);
 
   /** Direct 模式确认评价：找已有 journal 或现场 backfill，然后开 PostTradeReviewSheet。 */
@@ -2292,7 +2323,7 @@ export function PositionPanel({
       </AlertDialog>
 
       {/* Direct 模式：平仓后的"是否前往评价"轻提示 */}
-      <Dialog open={!!directReviewPrompt} onOpenChange={open => { if (!open) setDirectReviewPrompt(null); }}>
+      <Dialog open={!!directReviewPrompt && !historyOnlyNotifications} onOpenChange={open => { if (!open) setDirectReviewPrompt(null); }}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle className="text-[14px]">刚平了一笔 — 要现在做平仓评价吗？</DialogTitle>

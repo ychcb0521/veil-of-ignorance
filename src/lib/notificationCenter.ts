@@ -65,6 +65,9 @@ let loadedPrefix: string | null = null;
 let snapshot: NotificationSnapshot = computeSnapshot([], 0, false);
 const listeners = new Set<() => void>();
 let emitQueued = false;
+// Temporary task scopes do not change the user's saved popup preference.
+const historyOnlyScopes = new Set<symbol>();
+let quietEpoch = 0;
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -158,15 +161,33 @@ type ToastFn = (message: ReactNode, data?: ExternalToast) => string | number;
 function makeLevel(level: Exclude<NotificationLevel, 'message'> | 'message'): ToastFn {
   return (message, data) => {
     const id = record(level, message, data);
-    if (!snapshot.popupsEnabled) return id;
+    if (!snapshot.popupsEnabled || isNotificationHistoryOnly()) return id;
     return sonnerToast[level](message, data);
   };
 }
 
 const baseToast: ToastFn = (message, data) => {
   const id = record('message', message, data);
-  return snapshot.popupsEnabled ? sonnerToast(message, data) : id;
+  return snapshot.popupsEnabled && !isNotificationHistoryOnly() ? sonnerToast(message, data) : id;
 };
+
+/** An automatic reminder can be recorded without opening a toast or a dialog. */
+export const recordNotificationHistory = record;
+export const isNotificationHistoryOnly = () => historyOnlyScopes.size > 0;
+/** Lets an asynchronous reminder remember that a quiet task ran while it was pending. */
+export const getNotificationQuietEpoch = () => quietEpoch;
+export function beginHistoryOnlyNotifications(): () => void {
+  const token = Symbol('history-only');
+  const first = historyOnlyScopes.size === 0;
+  historyOnlyScopes.add(token);
+  if (first) { quietEpoch++; sonnerToast.dismiss(); emit(); }
+  return () => {
+    if (historyOnlyScopes.delete(token) && historyOnlyScopes.size === 0) emit();
+  };
+}
+export function useNotificationHistoryOnly(): boolean {
+  return useSyncExternalStore(subscribeNotifications, isNotificationHistoryOnly, isNotificationHistoryOnly);
+}
 
 /** 与 sonner 的 toast 同签名：调用点只需把 import 从 'sonner' 改到这里。 */
 export const toast = Object.assign(baseToast, {
@@ -231,4 +252,6 @@ export function __resetNotificationCenterForTests(): void {
   snapshot = computeSnapshot([], 0, false);
   listeners.clear();
   emitQueued = false;
+  historyOnlyScopes.clear();
+  quietEpoch = 0;
 }

@@ -1,40 +1,45 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishQuality } from '@/hooks/useFishQuality';
-import { newQualityStudy, importQualityFish, qualityResultKey, qualityComparisonRows, type QualityRunOptions } from '@/lib/fish/quality';
+import { newQualityStudy, importQualityFish, qualityResultKey, qualityComparisonRows, qualityDisplayRows, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
 import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
+import { __resetNotificationCenterForTests, isNotificationHistoryOnly } from '@/lib/notificationCenter';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
 const storage = vi.hoisted(() => ({ load: vi.fn(), save: vi.fn() }));
 vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, saveQualityStudy: storage.save }));
 const T = Date.UTC(2026, 9, 20);
 const signal: TradeSignal = { id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } };
-beforeEach(() => { vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });
+beforeEach(() => { __resetNotificationCenterForTests(); vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });
 afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
+const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality> } }) => {
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  act(() => { void h.result.current.start(); });
+};
 
 it('automatically imports cabin and fresh fish while panel is absent, preserves copies after source deletion, and persists on unmount', async () => {
   const run = vi.fn(async () => {});
   const h = renderHook(({ rows }) => useFishQuality('a', rows, run), { initialProps: { rows: [signal] } }); await flush();
   expect(h.result.current.study.samples).toHaveLength(1); expect(h.result.current.study.groups[0].rule).toBeUndefined();
-  h.rerender({ rows: [] }); await flush(); await flush(1100); expect(h.result.current.study.samples).toHaveLength(1); expect(run).toHaveBeenCalledTimes(1);
+  h.rerender({ rows: [] }); await flush(); chooseAndStart(h); await flush(1100); expect(h.result.current.study.samples).toHaveLength(1); expect(run).toHaveBeenCalledTimes(1);
   h.unmount(); expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ samples: expect.arrayContaining([expect.objectContaining({ source: signal })]) }));
 });
 it('applies edited group rules, hides old-rule results, rejects late callbacks and recalculates even if auto tracking is paused', async () => {
   const tasks: QualityRunOptions[] = [];
   const run = vi.fn(async (o: QualityRunOptions) => { tasks.push(o); });
-  const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); await flush(1100);
+  const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush(1100);
   const old = tasks[0], s = old.study.samples[0], g = old.study.groups[0];
   act(() => h.result.current.setTracking(false));
   act(() => h.result.current.setRule(g.id, { metric: 'capture', direction: '<', threshold: .06 }));
   act(() => old.onResult({ key: qualityResultKey(s, g, old.study.observeHours), sampleId: s.id, groupId: g.id, evaluatedAt: T, status: 'closed', returnPct: 999 }));
   expect(h.result.current.study.results).toHaveLength(0);
-  await flush(); await flush(1100); expect(run.mock.calls.at(-1)![0].study.groups[0].rule?.threshold).toBe(.06);
+  await flush(); chooseAndStart(h); await flush(1100); expect(run.mock.calls.at(-1)![0].study.groups[0].rule?.threshold).toBe(.06);
 });
 it('cancels pending work on account changes and ignores late results from the previous account', async () => {
   const tasks: QualityRunOptions[] = [];
   const run = vi.fn((o: QualityRunOptions) => new Promise<void>(resolve => { tasks.push(o); o.signal.addEventListener('abort', () => resolve()); }));
-  const h = renderHook(({ owner, rows }) => useFishQuality(owner, rows, run), { initialProps: { owner: 'a', rows: [signal] } }); await flush(); await flush(1100);
+  const h = renderHook(({ owner, rows }) => useFishQuality(owner, rows, run), { initialProps: { owner: 'a', rows: [signal] } }); await flush(); chooseAndStart(h); await flush(1100);
   const old = tasks[0], s = old.study.samples[0], g = old.study.groups[0];
   h.rerender({ owner: 'b', rows: [] }); await flush();
   expect(old.signal.aborted).toBe(true); expect(h.result.current.study.samples).toHaveLength(0);
@@ -70,7 +75,7 @@ it('restores existing signal-time copies at capture time before reevaluating and
   await flush();
   expect(h.result.current.study.samples[0]).toMatchObject({ enteredAt: T + 3600_000, basis: 'capture' });
   expect(h.result.current.study.groups[0].rule).toEqual(group.rule); expect(h.result.current.study.results).toHaveLength(0);
-  await flush(1100);
+  chooseAndStart(h); await flush(1100);
   expect(run.mock.calls[0][0].study.samples[0].enteredAt).toBe(T + 3600_000);
   expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ entryMode: 'capture', groups: legacy.groups, results: [] }));
   expect(legacy.samples[0].enteredAt).toBe(T);
@@ -78,7 +83,7 @@ it('restores existing signal-time copies at capture time before reevaluating and
 it('persists a selected common sell plan and a fixed batch, invalidates changed thresholds, and accepts only the matching matrix result', async () => {
   const tasks: QualityRunOptions[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); }));
-  await flush(); await flush(1100);
+  await flush(); chooseAndStart(h); await flush(1100);
   const plan = h.result.current.study.sellPlans![0];
   act(() => h.result.current.setRule(plan.id, { metric: 'state', direction: '<', threshold: .45 }));
   await flush(1100);
@@ -100,4 +105,37 @@ it('imports signal-library signals as library rows, separately from fish, and ke
   expect(h.result.current.study.samples.map(s => [s.source.symbol, s.origin ?? 'fish'])).toEqual([['AAAUSDT', 'fish'], ['ZZZUSDT', 'library']]);
   h.rerender({ library: [] }); await flush();
   expect(h.result.current.study.samples).toHaveLength(2);
+});
+
+it('holds a history-only notification scope during a run and releases it immediately on cancel/unmount even if the runner is still pending', async () => {
+  const resolvers: (() => void)[] = [];
+  const run = vi.fn(() => { expect(isNotificationHistoryOnly()).toBe(true); return new Promise<void>(resolve => resolvers.push(resolve)); });
+  const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush(1100);
+  expect(isNotificationHistoryOnly()).toBe(true);
+  act(() => h.result.current.cancel()); expect(isNotificationHistoryOnly()).toBe(false);
+  resolvers.shift()!(); await flush();
+  act(() => { void h.result.current.start(); }); expect(isNotificationHistoryOnly()).toBe(true);
+  h.unmount(); expect(isNotificationHistoryOnly()).toBe(false);
+  resolvers.shift()!(); await flush(); expect(isNotificationHistoryOnly()).toBe(false);
+});
+it('restores notification delivery after a failed quality run', async () => {
+  const h = renderHook(() => useFishQuality('a', [signal], async () => { expect(isNotificationHistoryOnly()).toBe(true); throw new Error('test failure'); }));
+  await flush(); chooseAndStart(h); await flush(1100);
+  expect(h.result.current.error).toBe('test failure'); expect(isNotificationHistoryOnly()).toBe(false);
+});
+
+it('waits for an explicit selection and manual run, preserves it in storage, and never includes unselected/new rows', async () => {
+  const options: QualityRunOptions[] = [], run = vi.fn(async (o: QualityRunOptions) => { options.push(o); });
+  const other = { ...signal, id: 'b', symbol: 'BBBUSDT' };
+  const h = renderHook(({ rows }) => useFishQuality('a', rows, run), { initialProps: { rows: [signal, other] } });
+  await flush(); await flush(61_000); expect(run).not.toHaveBeenCalled();
+  const chosen = qualityDisplayRows(h.result.current.study)[0], id = chosen.id;
+  act(() => h.result.current.setSelectedRows([id])); await flush(61_000); expect(run).not.toHaveBeenCalled();
+  act(() => { void h.result.current.start(); }); await flush(500);
+  expect(run).toHaveBeenCalledTimes(1); expect(qualityRunSamples(options[0].study).map(r => r.id)).toEqual([chosen.signalId]);
+  expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ selectedRowIds: [id] }));
+  h.rerender({ rows: [signal, other, { ...signal, id: 'c', symbol: 'CCCUSDT' }] }); await flush(61_000);
+  expect(options.every(o => qualityRunSamples(o.study).map(r => r.id).join() === chosen.signalId)).toBe(true);
+  act(() => h.result.current.setSelectedRows([])); const calls = run.mock.calls.length;
+  await flush(61_000); act(() => { void h.result.current.start(); }); await flush(); expect(run).toHaveBeenCalledTimes(calls);
 });

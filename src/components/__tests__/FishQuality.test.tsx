@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
-import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityResultKey } from '@/lib/fish/quality';
+import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -9,14 +9,15 @@ const T = Date.UTC(2026, 9, 20);
 function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn() };
+  study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn() };
 }
 afterEach(cleanup);
-it('matches the cabin row layout, with exactly two sells and three detector columns, and one merged fish row', () => {
+it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.getByTestId('fish-quality').parentElement).not.toHaveAttribute('data-testid', 'fish-cabin');
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(2); expect(screen.getAllByTestId('quality-detector-column')).toHaveLength(3);
-  ['标的', '信号时间', '算法类型', '市场', '评分', '捕捞过程'].forEach(name => expect(screen.getByRole('columnheader', { name: new RegExp(name) })).toBeVisible());
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3); expect(screen.getAllByTestId('quality-sell-column')).toHaveLength(2); expect(screen.getAllByTestId('quality-detector-column')).toHaveLength(1);
+  ['标的', '信号时间', '探测算法', '市场', '评分', '捕捞过程'].forEach(name => expect(screen.getByRole('columnheader', { name: new RegExp(name) })).toBeVisible());
   expect(screen.queryByTestId('quality-distribution')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /^鱼质量/, expanded: true })); expect(screen.queryByTestId('quality-fish-table')).toBeNull();
   expect(s.study.samples).toHaveLength(3);
@@ -54,13 +55,42 @@ it('marks signal-library rows, filters by source and keeps them out of detector 
   const s = state();
   s.study = importQualityLibrary(s.study, [{ id: 'lib', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }, { id: 'lib2', symbol: 'ZZZUSDT', timeMs: T, timeLabel: '', fallbackZone: '' }]);
   render(<FishQuality state={s}/>);
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(5);
   const libraryRows = screen.getAllByTestId('quality-fish-row').filter(r => within(r).queryByText('信号库'));
   expect(libraryRows).toHaveLength(2);
   for (const r of libraryRows) { expect(within(r).queryByText('命中')).toBeNull(); expect(within(r).queryByTestId('fish-process-open')).toBeNull(); }
   const source = screen.getByLabelText('鱼质量的来源');
   expect(within(source).getByRole('option', { name: '信号库（2）' })).toBeInTheDocument();
   fireEvent.change(source, { target: { value: 'library' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(2);
-  fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
-  expect(within(screen.getByTestId('quality-fish-row')).queryByText('信号库')).toBeNull();
+  fireEvent.change(source, { target: { value: 'fish' } }); expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('信号库')).toBeNull();
+});
+
+it('allows selecting only a filtered source across pages, shows checked rows, and clears selection before a new run', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, Array.from({length: 61}, (_,i) => ({id:`lib-${i}`,symbol:`COIN${i}USDT`,timeMs:T+i*60000,timeLabel:'',fallbackZone:''})));
+  s.study.selectedRowIds = [];
+  const view = render(<FishQuality state={s}/>);
+  expect(screen.getByRole('button', {name:'更新收益'})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('鱼质量的来源'), {target:{value:'library'}});
+  fireEvent.click(screen.getByRole('button', {name:'全部选中'}));
+  const ids = (s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string[];
+  expect(ids).toHaveLength(61); expect(ids).not.toContain(qualityComparisonRows(s.study).find(r => r.origin !== 'library')!.id);
+  s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByRole('button', {name:'更新收益'})).toBeEnabled();
+  expect(screen.getByLabelText('全选当前筛选信号')).toBeChecked();
+  fireEvent.click(screen.getByRole('button', {name:'下一页'}));
+  expect(screen.getAllByRole('checkbox').every(el => (el as HTMLInputElement).checked)).toBe(true);
+  fireEvent.click(screen.getAllByRole('checkbox')[1]); expect((s.setSelectedRows as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toHaveLength(60);
+  fireEvent.click(screen.getByRole('button', {name:'清空选择'})); expect(s.setSelectedRows).toHaveBeenLastCalledWith([]);
+});
+
+it('sorts the single detector column in both directions and filters to one exact detector/threshold row', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'}));
+  const first = () => screen.getAllByTestId('quality-detector-cell')[0];
+  expect(first()).toHaveTextContent('> 1');
+  fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'})); expect(first()).toHaveTextContent('> 3');
+  fireEvent.change(screen.getByLabelText('鱼质量的探测算法'), {target:{value:s.study.groups.find(g=>g.snapshot.threshold===2)!.id}});
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(first()).toHaveTextContent('> 2');
 });
