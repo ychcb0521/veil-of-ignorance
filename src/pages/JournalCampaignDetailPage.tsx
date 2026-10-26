@@ -2738,7 +2738,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                 >
                   {campaignDisplayCode}
                 </span>
-                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">{campaign.comparison.section === 'sell' ? '卖出比较' : '探测比较'} · {campaign.comparison.sellLabel}</span>}
+                <span>{campaign.symbol}</span>{campaign.comparison && <span className="rounded border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[10px] text-primary" data-testid="comparison-campaign-badge">卖出与探测 · {campaign.comparison.sellLabel}</span>}
                 <span className={`px-2 py-0.5 rounded ${campaign.direction === 'main_long' ? 'bg-[#0ECB81]/10 text-[#0ECB81]' : 'bg-[#F6465D]/10 text-[#F6465D]'}`}>
                   {campaign.direction === 'main_long' ? '主多' : '主空'}
                 </span>

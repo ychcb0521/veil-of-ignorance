@@ -15,7 +15,7 @@ it('explains the plan, starts mining and edits the target', () => {
   fireEvent.click(screen.getByRole('button', { name: '开始挖掘' })); expect(m.start).toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('挖掘目标条数'), { target: { value: '2000' } }); fireEvent.blur(screen.getByLabelText('挖掘目标条数'));
   expect(m.setTarget).toHaveBeenCalledWith(2000);
-  expect(screen.getByRole('link', { name: /在交易战役查看探测比较/ })).toHaveAttribute('href', '/journal/campaigns?section=detect');
+  expect(screen.getByRole('link', { name: /在交易战役查看/ })).toHaveAttribute('href', '/journal/campaigns?section=detect');
 });
 it('shows the running anchor, reached target, caught-up and error states', () => {
   const rules = currentDefaultRules();

@@ -14,7 +14,7 @@ export function useQualityCampaignList(owner: string | undefined, section: Campa
     const load = async () => {
       const epoch = ++generation;
       try {
-        const data = await listQualityCampaignData(owner, section);
+        const data = await listQualityCampaignData(owner, 'quality');
         if (active && epoch === generation) observedRepair = data.repair;
         if (active && epoch === generation) setSnapshot({ owner, section, rows: data.rows.map(row => ({ ...buildCampaignCardData(row), peakPriceChangePct: row.campaign.peak_unrealized_pnl })), complete: true, error: data.warning ?? null, selectedSellKey: data.selectedSellKey, buyFilterLabel: data.buyFilterLabel });
       } catch (error) { if (active && epoch === generation) setSnapshot({ owner, section, rows: [], complete: true, error: error instanceof Error ? error.message : String(error), selectedSellKey: undefined, buyFilterLabel: '' }); }

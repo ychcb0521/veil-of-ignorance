@@ -73,7 +73,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     render(control()); expect(mocks.scan).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button',{name:/^渔/}));
     fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('捕捞完成'));
+    await waitFor(() => expect(within(screen.getByTestId('fish-catching')).getByRole('status')).toHaveTextContent('捕捞完成'));
     expect(loadFishSignals()).toHaveLength(2);
     let aborted = false;
     mocks.scan.mockImplementation(async o => { o.onProgress(initialFishProgress()); await new Promise<void>(resolve => o.signal.addEventListener('abort',() => { aborted = true; resolve(); },{once:true})); const result = { ...initialFishProgress(), status:'cancelled' as const }; o.onProgress(result); return result; });
@@ -83,7 +83,7 @@ describe('TimeControl 渔入口与独立信号列表', { timeout: 30000 }, () =>
     expect(screen.getByLabelText('捕捞阈值')).toBeDisabled();
     fireEvent.click(screen.getByRole('button',{name:'取消'}));
     await waitFor(() => expect(aborted).toBe(true));
-    expect(screen.getByRole('status')).toHaveTextContent('已取消');
+    expect(within(screen.getByTestId('fish-catching')).getByRole('status')).toHaveTextContent('已取消');
   });
   it('输入历史时间与阈值，收起重开仍保留；校验输入；同一信号换阈值再捕到合并成一条并保留原评分', async () => {
     render(control());
@@ -239,11 +239,11 @@ it('默认只币安、不选美股；其他交易所与美股仅明确勾选后�
  for(const name of ['OKX','Bitget','Gate','美股'])expect(screen.getByRole('checkbox',{name})).not.toBeChecked();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(1));
  expect(mocks.scan.mock.calls[0][0]).toMatchObject({exchanges:['binance'],includeUsStocks:false});
- await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('捕捞完成'));
+ await waitFor(()=>expect(within(screen.getByTestId('fish-catching')).getByRole('status')).toHaveTextContent('捕捞完成'));
  fireEvent.click(screen.getByRole('checkbox',{name:'Bitget'}));fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));expect(mocks.scan).toHaveBeenCalledTimes(1);
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(2));
  expect(mocks.scan.mock.calls[1][0]).toMatchObject({exchanges:['binance','bitget'],includeUsStocks:true});
- await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('捕捞完成'));
+ await waitFor(()=>expect(within(screen.getByTestId('fish-catching')).getByRole('status')).toHaveTextContent('捕捞完成'));
  fireEvent.click(screen.getByRole('checkbox',{name:'币安'}));fireEvent.click(screen.getByRole('checkbox',{name:'美股'}));
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(mocks.scan).toHaveBeenCalledTimes(3));
  expect(mocks.scan.mock.calls[2][0]).toMatchObject({exchanges:['bitget'],includeUsStocks:false});

@@ -20,7 +20,7 @@ it('allows a veto-only sell plan to run and be fixed for detector comparison wit
  const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveTextContent('仅一票否决');
  fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
  expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
- fireEvent.click(editor);fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
+ fireEvent.click(editor);
  expect(within(screen.getByLabelText('固定卖出方案')).getByRole('option',{name:'状态 S 原始值 仅一票否决'})).toBeInTheDocument();
 });
 it('defaults to one row per symbol/time, toggles detector details from the header and preserves partial and bulk selection',()=>{
@@ -60,7 +60,6 @@ it('keeps source filters working without source badges in detector comparison ro
   s.study=importQualityFish(s.study,[plain]);
   s.study=importQualityLibrary(s.study,[{id:'library',symbol:'CCCUSDT',timeMs:T,timeLabel:'',fallbackZone:''}]);
   render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
   fireEvent.click(screen.getByRole('button',{name:'展开探测算法明细'}));
   const rows=screen.getAllByTestId('quality-fish-row');
   for(const row of rows) {
@@ -207,7 +206,7 @@ it('sorts each sell header by numeric return in both directions, keeps missing r
     expect(symbols()[0]).toContain('LOSS'); expect(symbols().at(-1)).toContain('MISSING');
   }
   const link = screen.getAllByRole('link', { name: /已卖出/ })[0];
-  expect(link.getAttribute('href')).toMatch(/^\/journal\/campaigns\/fish-sell-.*\?section=sell$/);
+  expect(link.getAttribute('href')).toMatch(/^\/journal\/campaigns\/fish-sell-.*\?section=quality$/);
   expect(screen.getAllByTestId('quality-sell-column')[1]).toHaveAttribute('aria-sort', 'ascending');
 });
 
@@ -255,7 +254,8 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   const notBought = within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入');
   expect(notBought.length).toBeGreaterThanOrEqual(2);
   expect(notBought[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
-  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('未买入')).toBeNull();
+  // 【用户要求】2026-10-26 比较卖出与比较探测合并为一个视图：没有分页
+  expect(screen.queryByRole('tab', { name: /比较探测/ })).toBeNull();
 });
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」
 it('sorts by every header, keeping empty values last in both directions', () => {
@@ -320,7 +320,7 @@ it('shows and independently sorts both drawdown columns next to each sell return
   expect(screen.getAllByTestId('quality-fish-row').at(-1)).toHaveTextContent('MISSING');
   fireEvent.click(screen.getByRole('button',{name:`按CDA 原始值${type}最大回撤排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOW');
  }
- fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));expect(screen.queryByTestId('quality-static-drawdown')).toBeNull();expect(screen.queryByTestId('quality-dynamic-drawdown')).toBeNull();
+ expect(screen.queryByRole('tab',{name:/比较探测/})).toBeNull();
 });
 // 【用户要求】2026-10-26「卖出比较的列表，我希望可以批量选中，比如按住 shift 就可以进行连续选择」
 it('shift-click selects (or clears) the whole run of rows between the last clicked row and this one, in on-screen order', () => {
@@ -386,7 +386,7 @@ it('opens with the remembered tab, filters and sort when coming back from a camp
   saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', detectorExpanded: true, sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
   expect(armQualityReturn()).toBe(true);
   render(<FishQuality state={state()}/>);
-  expect(screen.getByRole('tab', {name: /比较探测/})).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByTestId('quality-mode')).toHaveTextContent('卖出与探测控制变量法');
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
   expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
   expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
@@ -437,15 +437,12 @@ it('offers restart during a sell run, uses a separate action and requires a sele
   const restart = screen.getByRole('button', { name: '重新开始' });
   expect(restart).toBeEnabled();
   fireEvent.click(restart); expect(s.restart).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(screen.queryByRole('button', { name: '重新开始' })).toBeNull();
-  fireEvent.click(screen.getByRole('tab', { name: /比较卖出/ }));
   s.study = { ...s.study, selectedRowIds: [] }; view.rerender(<FishQuality state={s}/>);
   expect(screen.getByRole('button', { name: '重新开始' })).toBeDisabled();
 });
 // 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
 it('picks one or several detectors straight from the detector header, keeps the toolbar in sync and clears with 全部', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ }));
   fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
@@ -503,4 +500,15 @@ it('jumps from the symbol without toggling selection, including merged rows and 
   view.rerender(<FishQuality state={s} onJump={jump} canJump={source => source.symbol !== 'LIBUSDT'}/>);
   const unavailable = screen.getByRole('button', { name: '查看 LIBUSDT 盘面' });
   expect(unavailable).toBeDisabled(); fireEvent.click(unavailable); expect(jump).toHaveBeenCalledTimes(2);
+});
+// 【用户要求】2026-10-26「我找不到鱼质量中的自动挖掘入口了」：合并后自动挖掘面板常驻显示，不用切分页
+it('shows the continuous-mining panel right away in the merged 卖出与探测 view', async () => {
+  const { newMiningState, currentDefaultRules } = await import('@/lib/fish/mining');
+  const mining = { state: { ...newMiningState(), rules: currentDefaultRules() }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn() };
+  render(<FishQuality state={state()} mining={mining as never}/>);
+  expect(screen.queryByRole('tab')).toBeNull();
+  expect(screen.getByTestId('quality-mode')).toHaveTextContent('卖出与探测');
+  expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
+  expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
+  expect(screen.getByLabelText('固定卖出方案')).toBeInTheDocument();
 });

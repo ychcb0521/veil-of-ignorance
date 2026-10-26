@@ -111,3 +111,24 @@ describe('comparison campaign review fixes', () => {
     expect(qualityBuyFilterSummary(archived)).toBe('');
   });
 });
+// 【用户要求】2026-10-26「比较卖出和比较探测没必要分开，合并到一起（包括交易战役那里），统一叫做卖出与探测（控制变量法）」
+describe('merged 卖出与探测 board', () => {
+  it('maps old section links to the merged board and keeps both campaign id prefixes openable', async () => {
+    const { campaignSection, CAMPAIGN_SECTIONS, qualityCampaignPath } = await import('@/lib/campaignSections');
+    expect(CAMPAIGN_SECTIONS.map(s => s.label)).toEqual(['亲自交易', '卖出与探测（控制变量法）']);
+    for (const v of ['?section=sell', '?section=detect', '?section=quality']) expect(campaignSection(v)).toBe('quality');
+    expect(campaignSection('')).toBe('personal');
+    expect(qualityCampaignPath('k')).toBe('/journal/campaigns/fish-sell-k?section=quality');
+  });
+  it('lists bought sell trades and fixed-plan detection trades together, each trade once', () => {
+    const { study, row } = seed(), archived = archiveQualityStudy(study), f = makeQualityBuyFilter('state:state', '>', .7);
+    const runPlan = archived.campaignRuns![0].plan.id;
+    expect(qualityCampaignDataFromStudy('owner', archived, 'quality')).toHaveLength(1);
+    // 卖出方案的买入过滤没通过，但它是固定方案的探测交易：仍然在合并板块里
+    const filtered = { ...archived, filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }], sellPlans: archived.sellPlans!.map(p => ({ ...p, buyFilters: p.id === runPlan ? [f] : [] })) };
+    expect(qualityCampaignDataFromStudy('owner', filtered, 'quality')).toHaveLength(0);
+    const detected = { ...filtered, campaignRuns: filtered.campaignRuns!.map(run => ({ ...run, detectionAt: T, detectors: run.detectors.length ? run.detectors : [{ id: 'd', label: 'CBI-2', snapshot: { threshold: .04, direction: '>' } } as never] })) };
+    const rows = qualityCampaignDataFromStudy('owner', detected, 'quality');
+    expect(rows).toHaveLength(1); expect(rows[0].campaign.id).toMatch(/^fish-detect-/); expect(rows[0].campaign.comparison?.category).toBeTruthy();
+  });
+});

@@ -10,7 +10,8 @@ export interface QualityReturnUi {
   open: boolean; query: string; month: string; algorithms?: string[];
   /** 旧版本记下的单选探测算法。 */
   algorithm?: string; origin: '' | 'fish' | 'library' | 'mined';
-  phase: 'sell' | 'detect';
+  /** 旧版本的分页（已合并为一个视图）。 */
+  phase?: 'sell' | 'detect';
   detectorExpanded?: boolean;
   sort: string; ascending: boolean;
   tableTop: number;
