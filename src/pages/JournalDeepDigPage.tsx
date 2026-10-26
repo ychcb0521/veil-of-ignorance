@@ -62,7 +62,7 @@ export default function JournalDeepDigPage() {
   // 峰值涨幅 / 动态最大回撤（字母 h、D、z）取交易战役列表算过的缓存，不另拉 K 线
   const enrichedRows = useMemo(() => (user?.id ? rows.map(r => {
     const cached = readCachedCampaignPricePath(r, user.id);
-    return cached ? { ...r, peakPriceChangePct: cached.peak, dynamicMaxDrawdownPct: cached.drawdown } : r;
+    return cached ? { ...r, peakPriceChangePct: cached.peak, dynamicMaxDrawdownPct: cached.drawdown, staticMaxDrawdownPct: cached.staticDrawdown } : r;
   }) : rows), [rows, user?.id]);
   const report = useMemo(() => (enrichedRows.length ? buildCampaignGroupReport(enrichedRows, true) : null), [enrichedRows]);
   // 【用户要求】信号库的信号也可以作样本：时间点 = 那条信号的时间，读数 s = 星级

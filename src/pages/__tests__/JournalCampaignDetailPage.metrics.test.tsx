@@ -667,6 +667,7 @@ describe('JournalCampaignDetailPage metrics', () => {
       '已实现 P&L',
       '杠杆倍数',
       '动态最大回撤',
+      '静态最大回撤',
       '涨幅未兑现',
       '最大预期亏损',
       '仓位放大',
@@ -690,7 +691,7 @@ describe('JournalCampaignDetailPage metrics', () => {
     // 【用户要求】原始盘面默认 5 分钟线：导出图里写的是盘面实际显示的周期
     expect(exportInput.chartInterval).toBe('5m');
     // 导出图与当前页面使用相同的三栏指标次序。
-    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 ΔP","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤"]);
+    expect(exportInput.pnlOverview.items.map(item => item.label)).toEqual(["预期回撤","相对涨幅","加仓次数","几何仓位","神奇的 b","盈亏比","L_磨损","几何期望","最大预期亏损","已实现 P&L","仓位放大","加仓效用","算术期望","单位涨幅 ΔP","单位利润 U","仓位利润 W","首仓涨跌幅","首仓涨跌幅倍数","峰值涨幅","涨幅未兑现","动态最大回撤","静态最大回撤"]);
     // 【用户要求】脚注删掉：导出图也不再带；两栏次序随 rightColumn 带进导出图
     expect(exportInput.pnlOverview.note).toBeUndefined();
     expect(new Set(exportInput.pnlOverview.items.map(item => item.column))).toEqual(new Set([0, 1, 2]));

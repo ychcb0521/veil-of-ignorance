@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CampaignCardData } from '@/lib/campaignListCache';
-import { computeCampaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct, resolveHoldingDynamicDrawdownEndMs } from '@/lib/campaignMainPriceChange';
+import { computeCampaignPriceChange, campaignPriceChangeLegInputs, computeHoldingDynamicMaxDrawdownPct, computeHoldingStaticMaxDrawdownPct, computePeakPriceChangePct, resolveHoldingDynamicDrawdownEndMs } from '@/lib/campaignMainPriceChange';
 import { buildCampaignKlineTimeWindow } from '@/hooks/useCampaignKlines';
 import { pickCampaignComputeInterval } from '@/lib/campaignChartContentSpan';
 import { intervalToMs } from '@/hooks/useBinanceData';
@@ -29,7 +29,8 @@ export type CampaignPricePathTask = {
   historical: boolean;
   unavailableReason?: string;
 };
-type Result = { fingerprint: string; peak: number | null; drawdown: number | null; reason?: string; savedAt?: number };
+/** staticDrawdown：静态最大回撤（2026-10-26 新增；旧缓存没有它，按需重算一次）。 */
+type Result = { fingerprint: string; peak: number | null; drawdown: number | null; staticDrawdown?: number | null; reason?: string; savedAt?: number };
 type Snapshot = {
   owner: string; taskKey: string; results: ReadonlyMap<string, Result>; retrying: ReadonlySet<string>; retryAt: number | null;
   /** The queue is parked because the browser reports no connection. */
@@ -75,7 +76,7 @@ export function buildCampaignPricePathTask(row: CampaignCardData): CampaignPrice
 
 function isReusableResult(task: CampaignPricePathTask, result: Result | undefined | null): result is Result {
   return Boolean(result && result.fingerprint === task.fingerprint && !result.reason
-    && Number.isFinite(result.peak) && Number.isFinite(result.drawdown)
+    && Number.isFinite(result.peak) && Number.isFinite(result.drawdown) && Number.isFinite(result.staticDrawdown)
     && (task.historical || (typeof result.savedAt === 'number' && Number.isFinite(result.savedAt) && Date.now() - result.savedAt <= 60_000)));
 }
 
@@ -100,7 +101,7 @@ function readTerminal(owner: string, task: CampaignPricePathTask): Result | null
   const entry = terminalMemory.get(cacheKey(owner, task.id));
   if (!entry || !task.historical || entry.fingerprint !== task.fingerprint) return null;
   if (Date.now() - entry.savedAt > TERMINAL_MEMORY_TTL_MS) return null;
-  return { fingerprint: task.fingerprint, peak: null, drawdown: null, reason: entry.reason };
+  return { fingerprint: task.fingerprint, peak: null, drawdown: null, staticDrawdown: null, reason: entry.reason };
 }
 
 function readCache(owner: string, task: CampaignPricePathTask): Result | null {
@@ -115,7 +116,7 @@ function readCache(owner: string, task: CampaignPricePathTask): Result | null {
     if (!raw) return null;
     const cached = JSON.parse(raw);
     if (!isReusableResult(task, cached)) return null;
-    const result: Result = { fingerprint: task.fingerprint, peak: cached.peak, drawdown: cached.drawdown, savedAt: cached.savedAt };
+    const result: Result = { fingerprint: task.fingerprint, peak: cached.peak, drawdown: cached.drawdown, staticDrawdown: cached.staticDrawdown, savedAt: cached.savedAt };
     rememberResult(owner, task, result);
     return result;
   } catch { return null; } // Storage permissions/quota must never interrupt the calculation queue.
@@ -137,7 +138,7 @@ function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], 
     // not drop and refetch it.
     const kept = before && before.fingerprint === task.fingerprint && !before.reason ? before : readCache(owner, task);
     if (kept) results.set(task.id, kept);
-    else if (task.unavailableReason) results.set(task.id, { fingerprint: task.fingerprint, peak: null, drawdown: null, reason: task.unavailableReason });
+    else if (task.unavailableReason) results.set(task.id, { fingerprint: task.fingerprint, peak: null, drawdown: null, staticDrawdown: null, reason: task.unavailableReason });
     else {
       const terminal = readTerminal(owner, task);
       if (terminal) results.set(task.id, terminal);
@@ -150,12 +151,12 @@ function restoreResults(owner: string, tasks: readonly CampaignPricePathTask[], 
  * 只读已算好的峰值涨幅 / 动态最大回撤（交易战役列表算过并缓存的那份），不发请求；没有缓存返回 null。
  * Deep dig 的分组标准（字母 h、D、z）用它，避免为分组单独再拉一遍 K 线。
  */
-export function readCachedCampaignPricePath(row: CampaignCardData, owner: string): { peak: number | null; drawdown: number | null } | null {
+export function readCachedCampaignPricePath(row: CampaignCardData, owner: string): { peak: number | null; drawdown: number | null; staticDrawdown: number | null } | null {
   try {
     const task = buildCampaignPricePathTask(row);
     if (task.unavailableReason) return null;
     const cached = readCache(owner, task);
-    return cached && !cached.reason ? { peak: cached.peak, drawdown: cached.drawdown } : null;
+    return cached && !cached.reason ? { peak: cached.peak, drawdown: cached.drawdown, staticDrawdown: cached.staticDrawdown ?? null } : null;
   } catch {
     return null;
   }
@@ -252,9 +253,10 @@ export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[
           const complete = !task.historical || (coversStart && coversEnd);
           const peak = complete ? computePeakPriceChangePct({ side: task.side, entryPrice: task.entryPrice, klines, startMs: task.startMs, endMs: task.endMs, barMs: task.barMs }) : null;
           const drawdown = complete ? computeHoldingDynamicMaxDrawdownPct({ klines, startMs: task.drawdownStartMs, endMs: task.drawdownEndMs, barMs: task.barMs }) : null;
+          const staticDrawdown = complete ? computeHoldingStaticMaxDrawdownPct({ side: task.side, entryPrice: task.entryPrice, klines, startMs: task.drawdownStartMs, endMs: task.drawdownEndMs, barMs: task.barMs }) : null;
           // An empty/incomplete historical response is checked again, never persisted as a successful value.
-          if ((peak == null || drawdown == null) && ++item.emptyResponses < 3) throw new Error('历史 K 线暂不完整');
-          const result: Result = { fingerprint: task.fingerprint, peak, drawdown, savedAt: Date.now(), ...(peak == null || drawdown == null ? { reason: '持仓期间缺少历史 K 线' } : {}) };
+          if ((peak == null || drawdown == null || staticDrawdown == null) && ++item.emptyResponses < 3) throw new Error('历史 K 线暂不完整');
+          const result: Result = { fingerprint: task.fingerprint, peak, drawdown, staticDrawdown, savedAt: Date.now(), ...(peak == null || drawdown == null || staticDrawdown == null ? { reason: '持仓期间缺少历史 K 线' } : {}) };
           results.set(task.id, result);
           retrying.delete(task.id);
           saveCache(owner, task, result);
@@ -266,7 +268,7 @@ export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[
           const status = failure?.status ?? Number(failure?.message?.match(/^API (\d+)/)?.[1]);
           if (failure?.retryable === false || status === 400 || status === 404) {
             const reason = '历史行情不可用，请检查标的与持仓时间';
-            results.set(task.id, { fingerprint: task.fingerprint, peak: null, drawdown: null, reason });
+            results.set(task.id, { fingerprint: task.fingerprint, peak: null, drawdown: null, staticDrawdown: null, reason });
             retrying.delete(task.id);
             rememberTerminal(owner, task, reason);
           } else {
@@ -303,6 +305,7 @@ export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[
   return useMemo(() => {
     const peaks = new Map<string, number | null>();
     const drawdowns = new Map<string, number | null>();
+    const staticDrawdowns = new Map<string, number | null>();
     const unavailable = new Map<string, string>();
     let retrying = 0;
     for (const task of tasks) {
@@ -310,13 +313,14 @@ export function useCampaignPricePathTasks(tasks: readonly CampaignPricePathTask[
       if (result?.fingerprint === task.fingerprint) {
         peaks.set(task.id, result.peak);
         drawdowns.set(task.id, result.drawdown);
+        staticDrawdowns.set(task.id, result.staticDrawdown ?? null);
         if (result.reason) unavailable.set(task.id, result.reason);
       } else if (visibleSnapshot.retrying.has(task.id)) retrying += 1;
     }
     const remaining = tasks.length - peaks.size;
     const offline = enabled && remaining > 0 && visibleSnapshot.offline;
     return {
-      peaks, drawdowns, unavailable, retry, retrying,
+      peaks, drawdowns, staticDrawdowns, unavailable, retry, retrying,
       processed: peaks.size, total: tasks.length, loaded: peaks.size - unavailable.size,
       loading: enabled && peaks.size < tasks.length,
       retryAt: visibleSnapshot.retryAt,

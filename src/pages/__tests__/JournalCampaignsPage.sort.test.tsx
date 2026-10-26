@@ -454,7 +454,7 @@ describe('JournalCampaignsPage sorting', () => {
     // 【用户要求】排序行只放封面上有的指标（再加操作时间、杠杆倍数与自评、字母），次序沿用原表
     const expected = ['time', 'expectedDrawdownPct', 'effectivePriceChangePct', 'addCount', 'positionGeometricMultiple', 'magicB', 'captureRate', 'executionWear', 'geometricExpectancy',
       'positionAmplification', 'addEfficiency', 'arithmeticExpectancy', 'unitRise', 'unitProfit', 'positionProfit',
-      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'mirrorTp', 'leverage', 'importance', 'alpha'];
+      'mainPriceChange', 'mainPriceEfficiency', 'unrealizedPriceChangePct', 'dynamicMaxDrawdownPct', 'staticMaxDrawdownPct', 'mirrorTp', 'leverage', 'importance', 'alpha'];
     const controls = screen.getByTestId('campaign-sort-controls');
     expect([...controls.querySelectorAll('[data-sort-item]')].map(node => node.getAttribute('data-sort-item'))).toEqual(expected);
     expect(screen.queryByTestId('campaign-sort-realizedPnl')).not.toBeInTheDocument();
@@ -1089,7 +1089,7 @@ describe('JournalCampaignsPage sorting', () => {
     }));
     const initial = layout()[0];
     expect(initial.className).toBe('grid grid-flow-col grid-rows-1 justify-start gap-0.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [grid-template-columns:var(--cm-cols)] [scrollbar-width:thin]');
-    expect(initial.cells).toHaveLength(18);
+    expect(initial.cells).toHaveLength(20);
     // 列宽模板挂在列表容器上；读数不带内联字号
     const gridStyle = () => screen.getByTestId('campaign-card-list').getAttribute('style');
     const initialStyle = gridStyle();

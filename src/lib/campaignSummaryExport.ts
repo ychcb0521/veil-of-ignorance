@@ -112,6 +112,8 @@ export function campaignSummaryColumns(options: CampaignSummaryExportOptions): C
     { header: '几何期望（理论）', width: 14, note: GEOMETRIC_GROWTH_METHOD_THREE, value: row => finite(rowGeometricGrowthTheoretical(row)) },
     { header: '涨幅未兑现（%）', width: 12, note: '峰值涨幅 − 最终首仓涨跌幅。', value: row => rowUnrealizedPriceChangePct(row) },
     { header: '动态最大回撤（%）', width: 13, note: '有效持仓期间此前峰值到此后谷值的最大回撤；最后一次滚动对冲与主力同平时，窗口结束于该对冲开仓。', value: row => finite(row.dynamicMaxDrawdownPct) },
+    // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
+    { header: '静态最大回撤（%）', width: 13, note: '有效持仓期间最不利价格离买入价的跌幅 ÷ 买入价：主多 = (买入价 − 最低价) ÷ 买入价，主空看最高价；从未跌破买入价为 0。与动态最大回撤同一窗口。', value: row => finite(row.staticMaxDrawdownPct) },
     { header: '仓位放大（倍）', width: 11, note: '（主方向总名义仓位 − 镜像止盈名义仓位）÷ 初始开仓名义仓位；分母保留最初主力与镜像合计敞口，各项都是名义仓位（开仓价 × 币量），单位 USDT。', value: row => finite(rowPositionAmplification(row)) },
     { header: '几何仓位（倍）', width: 25, note: `几何仓位，即仓位几何累积倍数。(1−αf) × ∏(1 + αₖ)；αf 为首次减仓比例，初始主力与镜像币数之和为 1。${POSITION_GEOMETRIC_ALPHA_RULE}`, value: row => finite(rowPositionGeometricMultiple(row)) },
     { header: '几何仓位（理论）', width: 24, note: '几何仓位（理论），即理论仓位几何累积倍数。(1−αf) × ∏(1+α理论)；首次计入落袋预算，后续按实际加仓前成本线推算，不扣 G。', value: row => finite(rowPositionGeometricMultipleTheoretical(row)) },

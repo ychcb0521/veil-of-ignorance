@@ -122,7 +122,7 @@ describe('buildCounterfactualOverviewMetrics', () => {
 
     const metrics = buildCounterfactualOverviewMetrics({ params: branchParams, result }, shared);
     const { items, byKey } = itemsByKey(metrics);
-    expect(items).toHaveLength(21);
+    expect(items).toHaveLength(22);
     // 反事实没有 Kₘ：单位涨幅、单位利润、仓位利润同神奇的 b 显示「—」并附说明
     for (const key of ['unitRise', 'unitProfit', 'positionProfit'] as const) {
       expect(byKey[key].value).toBe('—');

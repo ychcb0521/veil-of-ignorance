@@ -6,7 +6,7 @@ import {
 import { resolveCampaignInitialRiskFraction } from '@/lib/campaignAnalysis';
 import {
   PRICE_CHANGE_EXIT_RULE_TEXT,
-  computeHoldingDynamicMaxDrawdownPct,
+  computeHoldingDynamicMaxDrawdownPct, computeHoldingStaticMaxDrawdownPct,
   computePeakPriceChangePct,
   counterfactualHasMainAdd,
   counterfactualPriceChange,
@@ -313,6 +313,16 @@ export function buildCounterfactualOverviewMetrics(
       barMs: shared.barMs as number,
     })
     : null;
+  const staticMaxDrawdownPct = hasPricePath
+    ? computeHoldingStaticMaxDrawdownPct({
+      side: priceChange?.side ?? null,
+      entryPrice: priceChange?.entryPrice ?? null,
+      klines: shared.klines ?? [],
+      startMs: pathStartMs,
+      endMs: pathEndMs,
+      barMs: shared.barMs as number,
+    })
+    : null;
   const expectedMaxDrawdownPct = hasStopLine && anchors.expectedMaxDrawdownPct > 0 ? anchors.expectedMaxDrawdownPct : 0;
   // 分支快照没有保存逐次加仓的有效保护线；不能拿净结算 R 或初始止损线替代这个几何指标。
   const b: number | null = null;
@@ -426,6 +436,7 @@ export function buildCounterfactualOverviewMetrics(
     peakUnrealizedPnl: finiteOrNull(branch.result.peak_unrealized_pnl) ?? 0,
     peakPriceChangePct,
     dynamicMaxDrawdownPct,
+    staticMaxDrawdownPct,
     initialExpectedMaxLoss,
     mainSideNotional: {
       side: shared.mainSide ?? 'long',

@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 const src = () => readFileSync(join(process.cwd(), 'src/pages/JournalCampaignsPage.tsx'), 'utf8');
 
 /** 【用户要求】封面十八项的次序（2026-10-15）：几何增长紧跟盈亏比；单位涨幅 / 单位利润 / 仓位利润接在算术期望后；几何期望接在涨幅未兑现后。 */
-const CARD_MODES = ["expectedDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","captureRate","executionWear","geometricExpectancy","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","unrealizedPriceChangePct","mirrorTp"];
+const CARD_MODES = ["expectedDrawdownPct","effectivePriceChangePct","addCount","positionGeometricMultiple","magicB","captureRate","executionWear","geometricExpectancy","positionAmplification","addEfficiency","arithmeticExpectancy","unitRise","unitProfit","positionProfit","mainPriceChange","mainPriceEfficiency","unrealizedPriceChangePct","dynamicMaxDrawdownPct","staticMaxDrawdownPct","mirrorTp"];
 const METRIC_MODES = ["addCount","positionGeometricMultiple","effectivePriceChangeMultiple","magicB","geometricExpectancy","mirrorTp","expectedDrawdownPct","mainPriceChange","mainPriceEfficiency","effectivePriceChangePct","addEfficiency","positionAmplification","unrealizedPriceChangePct","arithmeticExpectancy"];
 
 function constBlock(s: string, name: string): string {
