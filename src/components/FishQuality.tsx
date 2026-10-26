@@ -34,6 +34,7 @@ const ROW_PX = 33, TABLE_PX = 448, OVERSCAN = 12;
 const resultText = (r?: QualityResult) => r?.status === 'closed' ? '已卖出' : r?.status === 'open' ? '持有' : r?.status === 'error' ? '缺数据' : r?.status === 'waiting' && r.entryPrice ? '待设门槛' : '待评估';
 
 function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualityState }) {
+  const definition = qualityDefinition(plan.snapshot);
   const [threshold, setThreshold] = useState(String(plan.rule?.threshold ?? plan.snapshot.threshold));
   const [direction, setDirection] = useState<'<' | '>'>(plan.rule?.direction ?? '<'), [error, setError] = useState('');
   const save = () => {
@@ -50,7 +51,7 @@ function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualitySta
     </div>
     <p className="text-[10.5px] leading-relaxed text-muted-foreground">以上数值供比较，未预选为最优。首次满足条件的收盘后，按下一分钟开盘价卖出。</p>
     {plan.rule && <div className="flex flex-wrap gap-2 text-[11px]"><button type="button" className="text-primary hover:underline" onClick={() => state.selectSell(plan.id)}>固定此方案，比较探测算法</button><button type="button" className="text-muted-foreground hover:underline" onClick={() => state.setRule(plan.id, undefined)}>清除门槛</button></div>}
-    <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">公式与参数</summary><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">{qualityDefinition(plan.snapshot).formula}</pre><p className="mt-1">hl 6 小时 · avgh 24 小时 · 原值倍率 1</p></details>
+    <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">公式与参数</summary><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">{definition.formula}</pre><p className="mt-1">{plan.snapshot.interval} 收盘 · hl {definition.halfLifeHours} 小时 · avgh {definition.avgHours} 小时 · 原值倍率 1</p><p className="mt-1">每次运行前读取当前账号定义，运行结果保存当次公式快照。</p></details>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
 }
@@ -189,6 +190,7 @@ export function FishQuality({ state, onJump, canJump }: { state: FishQualityStat
       </div>
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
       {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}
+      {state.definitionNotice && <p role="status" className="text-[11px] text-amber-700 dark:text-amber-400">{state.definitionNotice}</p>}
       {rows.length ? <div ref={tableRef} onScroll={e => setScrollTop(e.currentTarget.scrollTop)} className="max-h-[28rem] overflow-auto overscroll-contain rounded-lg border border-border/60 [overflow-anchor:none]" data-testid="quality-fish-table"><table className="w-full border-separate border-spacing-0 whitespace-nowrap text-left text-[10px]">
         <thead className="sticky top-0 z-20 bg-background text-[9px] font-medium text-muted-foreground"><tr className="bg-muted/40">
           <th className={`${cell} sticky left-0 z-30 min-w-[160px] bg-muted font-medium`}><span className="flex items-center gap-2"><input type="checkbox" aria-label="全选当前筛选信号" title="全选当前筛选下的所有行" checked={allSelected} ref={el => { if (el) el.indeterminate = selectedRows.length > 0 && !allSelected; }} disabled={!ready} onChange={e => selectVisible(e.target.checked)} className="h-3 w-3 accent-[hsl(var(--primary))]"/><button type="button" onClick={() => changeSort('symbol')}>标的{sort === 'symbol' ? ascending ? ' ↑' : ' ↓' : ''}</button></span></th>

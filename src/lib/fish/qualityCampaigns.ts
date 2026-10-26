@@ -3,8 +3,8 @@ import type { TradeRecord } from '@/types/trading';
 import type { getCampaignFullData } from '@/lib/journalApi';
 import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { loadQualityStudy } from './qualityStore';
-import { archiveQualityStudy, hasQualityEntry, qualityRuleLabel, qualitySellKey, type QualityCampaignRun } from './qualityCampaignArchive';
-import { QUALITY_NOTIONAL, type FishQualityStudy } from './quality';
+import { archiveQualityStudy, hasQualityEntry, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
+import { QUALITY_NOTIONAL, qualityDefinition, type FishQualityStudy } from './quality';
 
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
 const iso = (time: number) => new Date(time).toISOString();
@@ -14,6 +14,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
+  const definition = qualityDefinition(plan.snapshot);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
     trade_record_id: closed ? recordId : null, pending_order_id: null, price, size_usdt: QUALITY_NOTIONAL,
@@ -29,7 +30,14 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     importance_weight: 0, notes: `${sample.origin === 'library' ? '信号库' : '鱼舱'} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
     actual_evolution: [opening, ...(closed ? [{ ...opening, id: `${id}-exit`, timestamp: iso(end), event_type: 'main_fully_closed' as const, price: r.endPrice!, realized_pnl: pnl, close_time: iso(end), exit_price: r.endPrice!, recorded_at: iso(r.evaluatedAt) }] : [])],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
-    comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: label + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end },
+    comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end,
+      sellEvidence: { formula: definition.formula, definitionKey: plan.snapshot.definitionKey!, featureId: plan.snapshot.featureId!,
+        metric: plan.rule?.metric ?? plan.metric, version: qualityFormulaVersion(plan), interval: plan.snapshot.interval ?? '5m',
+        halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: plan.definitionSource === 'account' ? 'account' : 'historical',
+        direction: plan.rule?.direction, threshold: plan.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
+        confirmedAt: closed ? r.endTime : r.pendingExit?.at,
+      },
+    },
   };
   const leg: TradeJournal = {
     id: legId, user_id: owner, trade_record_id: closed ? recordId : null, campaign_id: id, leg_role: 'main_open', leg_sequence: 1,

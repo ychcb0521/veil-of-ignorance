@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
-import { enableQualityComparison } from '@/lib/fish/qualityComparison';
+import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
@@ -13,6 +13,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [warning, setWarning] = useState(''), [error, setError] = useState('');
+  const [definitionNotice, setDefinitionNotice] = useState('');
   const current = useRef(study), account = useRef(owner), generation = useRef(0), controller = useRef<AbortController | null>(null);
   const readyRef = useRef(false), latestRun = useRef(run); latestRun.current = run;
   const rerun = useRef(false);
@@ -26,10 +27,14 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => {
     let active = true, loaded = false; const epoch = ++generation.current;
     readyRef.current = false; rerun.current = false; selectionApproved.current = false; setReady(false); setRunning(false); setProgress(null); setError(''); setWarning('');
-    current.current = newQualityStudy(); setStudy(current.current);
+    current.current = newQualityStudy(); setStudy(current.current); setDefinitionNotice('');
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const migrated = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
+      const archived = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
+      const migrated = syncQualitySellDefinitions(archived);
+      if (migrated.sellPlans?.some((plan, i) => plan.snapshot.definitionKey !== archived.sellPlans?.[i].snapshot.definitionKey)) {
+        setDefinitionNotice('卖出公式已同步当前账号定义。旧公式结果保留为历史版本；请运行所选信号，生成当前公式结果。');
+      }
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -53,6 +58,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) { if (controller.current.signal.aborted) rerun.current = true; return; }
+    // Deep dig edits must affect the next run, including a previously complete cached trade.
+    // Archive first so refreshing the active formula never rewrites an older trial's provenance.
+    change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
+    setDefinitionNotice('');
     const epoch = generation.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = structuredClone(current.current);
     const releaseNotifications = beginHistoryOnlyNotifications();
@@ -107,6 +116,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change, cancel]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, definitionNotice, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

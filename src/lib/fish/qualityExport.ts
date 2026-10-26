@@ -3,7 +3,8 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
 import { expandQualityRows, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityRowResult, qualityResultMap } from './qualityComparison';
-import { archiveQualityStudy, qualityRuleLabel } from './qualityCampaignArchive';
+import { archiveQualityStudy, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
+import { qualityDefinition } from './quality';
 
 /** Match the displayed detector rows; repeated sell values belong to the same signal and entry. */
 export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[]): XlsxSheet[] {
@@ -26,15 +27,20 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['标的', 24], ['来源', 10], ['信号时间', 24], ['探测算法 / 捕获阈值', 50], ['卖出算法', 24], ['具体指标', 18], ['卖出方向', 10], ['卖出门槛', 12],
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
     ['最大涨幅 %', 16], ['最大不利涨跌 %', 18], ['最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
+    ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['收盘确认时间', 24], ['实际卖出公式', 60],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
+    const definition = qualityDefinition(run.plan.snapshot);
     return [run.sample.source.symbol, run.sample.origin === 'library' ? '信号库' : '鱼', formatUTC8(run.sample.source.timeMs),
       run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
       run.plan.label, run.plan.rule?.metric ?? run.plan.metric, run.plan.rule?.direction ?? '', run.plan.rule?.threshold ?? null,
       r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设门槛',
       r.entryTime ? formatUTC8(r.entryTime) : null, r.entryPrice ?? null, r.endTime ? formatUTC8(r.endTime) : null, r.endPrice ?? null,
       r.returnPct ?? null, r.pnl ?? null, r.peakPct ?? null, r.adversePct ?? null, r.drawdownPct ?? null, r.uncapturedPct ?? null,
-      r.heldHours ?? null, run.observeHours, 100, 1, `${r.key} · ${qualityRuleLabel(run.plan)}`];
+      r.heldHours ?? null, run.observeHours, 100, 1, `${r.key} · ${qualityRuleLabel(run.plan)}`,
+      qualityFormulaVersion(run.plan), run.plan.definitionSource === 'account' ? '运行时账号公式' : '历史公式快照',
+      run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
+      r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula];
   }) });
   return sheets;
 }

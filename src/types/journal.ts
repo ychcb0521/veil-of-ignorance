@@ -389,6 +389,11 @@ export interface TradeCampaign {
   comparison?: {
     section: 'sell' | 'detect'; runKey: string; sellKey: string; sellLabel: string;
     detectors: { id: string; label: string }[]; valuedAt: number;
+    sellEvidence?: {
+      formula: string; definitionKey: string; featureId: string; metric: string; version: string;
+      interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';
+      direction?: '<' | '>'; threshold?: number; reading?: number; confirmedAt?: number;
+    };
   };
   id: string;
   user_id: string;

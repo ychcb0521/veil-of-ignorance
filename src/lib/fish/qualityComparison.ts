@@ -1,18 +1,39 @@
 /** Two-stage comparisons use one entry per fish and a common set of sell experiments. */
-import { STATE_DEF, CDA_DEF, definitionKey } from '@/lib/deepDig/features';
+import { STATE_DEF, CDA_DEF, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { accountFeatureDefs } from '@/lib/featureSource';
 import { qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
 
-export function enableQualityComparison(study: FishQualityStudy): FishQualityStudy {
+export function enableQualityComparison(study: FishQualityStudy, definitions = accountFeatureDefs()): FishQualityStudy {
   if (study.sellPlans) return study;
   const sellPlans: QualityGroup[] = [
     { def: STATE_DEF, metric: 'state', label: '状态 S 原始值', threshold: .5 },
     { def: CDA_DEF, metric: 'CDA', label: 'CDA 原始值', threshold: -8 },
-  ].map(({ def, metric, label, threshold }) => ({ id: `sell-${def.id}-raw`, label, metric,
+  ].map(({ def: builtin, metric, label, threshold }) => {
+    const def = definitions.find(d => d.id === builtin.id) ?? builtin;
+    return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const,
     snapshot: { featureId: def.id, featureShort: def.short, featureName: def.name, definitionKey: definitionKey({ ...def, interval: '5m' }),
       statistic: metric, interval: '5m', scale: 1, unit: '', threshold, direction: '<',
       cutoffMs: 0, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 },
-  }));
+  }; });
   return { ...study, sellPlans };
+}
+/** Refresh only the active experiments. Callers archive existing results BEFORE changing definitions. */
+export function syncQualitySellDefinitions(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): FishQualityStudy {
+  let changed = false;
+  const sellPlans = study.sellPlans?.map(plan => {
+    const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.snapshot.featureId);
+    if (!builtin) return plan;
+    // Same fallback as charts: a hidden built-in still has its built-in definition.
+    const def = definitions.find(d => d.id === builtin.id) ?? builtin;
+    const key = definitionKey({ ...def, interval: '5m' });
+    if (plan.snapshot.definitionKey === key && plan.snapshot.interval === '5m' && plan.definitionSource === 'account') return plan;
+    changed = true;
+    return { ...plan, definitionSource: 'account' as const, snapshot: { ...plan.snapshot,
+      definitionKey: key, interval: '5m' as const, scale: 1, statistic: plan.metric, H: undefined,
+      featureName: def.name, featureShort: def.short,
+    } };
+  });
+  return changed ? { ...study, sellPlans } : study;
 }
 export const qualitySellSuggestions = (plan: QualityGroup) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
 export function qualityResultMap(study: FishQualityStudy) { return new Map(study.results.map(r => [r.key, r])); }

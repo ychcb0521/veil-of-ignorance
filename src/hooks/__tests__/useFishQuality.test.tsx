@@ -2,7 +2,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useFishQuality } from '@/hooks/useFishQuality';
 import { newQualityStudy, importQualityFish, qualityResultKey, qualityComparisonRows, qualityDisplayRows, qualityRunSamples, type QualityRunOptions } from '@/lib/fish/quality';
-import { definitionKey, BSS_DEF } from '@/lib/deepDig/features';
+import { definitionKey, BSS_DEF, STATE_DEF, FEATURES_KEY } from '@/lib/deepDig/features';
 import { __resetNotificationCenterForTests, isNotificationHistoryOnly } from '@/lib/notificationCenter';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -11,12 +11,24 @@ vi.mock('@/lib/fish/qualityStore', () => ({ loadQualityStudy: storage.load, save
 const T = Date.UTC(2026, 9, 20);
 const signal: TradeSignal = { id: 'a', symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: '结果', cutoffMs: T, threshold: .12, average: .2, cbi2: .2, startAverage: .2, previousAverage: .1, direction: '>', scale: 1 } };
 beforeEach(() => { __resetNotificationCenterForTests(); vi.useFakeTimers(); storage.load.mockReset().mockImplementation(async () => ({ study: newQualityStudy() })); storage.save.mockReset().mockResolvedValue(true); });
-afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); localStorage.clear(); });
 const flush = async (ms = 0) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 const chooseAndStart = (h: { result: { current: ReturnType<typeof useFishQuality> } }) => {
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
   act(() => { void h.result.current.start(); });
 };
+it('reads a Deep dig formula edit before the next run instead of reusing the mounted sell snapshot', async () => {
+  const tasks: QualityRunOptions[] = [];
+  const h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
+  await flush(); chooseAndStart(h); await flush();
+  const first=tasks[0].study.sellPlans![0].snapshot.definitionKey;
+  const def={...STATE_DEF,formula:STATE_DEF.formula.replace('wb = 1 ','wb = 3 ')};
+  localStorage.setItem('sim_anon_'+FEATURES_KEY,JSON.stringify([def]));
+  act(()=>{void h.result.current.start();}); await flush();
+  expect(tasks[1].study.sellPlans![0].snapshot.definitionKey).toBe(definitionKey({...def,interval:'5m'}));
+  expect(tasks[1].study.sellPlans![0].snapshot.definitionKey).not.toBe(first);
+  expect(tasks[0].study.sellPlans![0].snapshot.definitionKey).toBe(first);
+});
 
 it('automatically imports cabin and fresh fish while panel is absent, preserves copies after source deletion, and persists on unmount', async () => {
   const run = vi.fn(async () => {});

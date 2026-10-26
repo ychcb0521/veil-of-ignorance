@@ -14,7 +14,11 @@ import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
-export interface QualityGroup { id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule }
+export interface QualityGroup {
+  id: string; label: string; metric: string; snapshot: FishSnapshot; rule?: QualityExitRule;
+  /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
+  definitionSource?: 'account';
+}
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;

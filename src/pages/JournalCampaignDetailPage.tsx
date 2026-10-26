@@ -29,6 +29,7 @@ import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
+import { QualitySellEvidence } from '@/components/journal/QualitySellEvidence';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
 import { CampaignDetailSelfRating } from '@/components/journal/CampaignDetailSelfRating';
@@ -2761,6 +2762,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
+        {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (
           <div
