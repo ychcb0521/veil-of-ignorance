@@ -7,11 +7,13 @@ import { compileFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, qualityConditionMet, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
+import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
   at: number; reading: number; cause?: QualityExitCause; atOpen?:boolean;
+  /** 回撤止损在这一分钟盘中触及：按止损价成交（不是下一分钟开盘价）；fillPeak 是算止损价用的峰值。 */
+  fillPrice?: number; fillPeak?: number;
   /** Indicator candle being observed; its eventual close is never read. */
   barOpenTime?: number;
   previous?: { at: number; reading: number };
@@ -106,6 +108,14 @@ export async function findQualityIntrabarExit(o: {
         const opening=advanceQualityHolding(holding,{...minute,high:minute.open,low:minute.open,close:minute.open});
         const trigger=checkRisk(minute.openTime,opening);
         if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices};}
+        // 开盘没越线：盘中碰到回撤止损价就按止损价卖出，不等这一分钟收完
+        const stop=qualityIntrabarStop(holding,minute,risk);
+        if(stop) {
+          prices.push(minute);
+          const v=stop.veto;
+          return {trigger:{at:minute.openTime,reading:stop.reading,barOpenTime:minute.openTime,previous:riskPrevious.get(v.id),fillPrice:stop.price,fillPeak:stop.peak,
+            cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}},prices};
+        }
       }
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding)holding=advanceQualityHolding(holding,minute);}

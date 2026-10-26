@@ -27,3 +27,31 @@ export function advanceQualityHolding(path: QualityHoldingPath, b: ResearchBar):
   return { entry:path.entry,peak,minimum:Math.min(path.minimum,b.low),dynamic:Math.max(path.dynamic,0,(beforeLow-b.low)/beforeLow*100,(peak-b.close)/peak*100) };
 }
 export const holdingVetoReading = (path: QualityHoldingPath, kind: 'static-drawdown'|'dynamic-drawdown') => kind === 'static-drawdown' ? Math.max(0,(path.entry-path.minimum)/path.entry*100) : path.dynamic;
+/**
+ * 回撤止损在这一分钟内的成交（止损单式）：止损价在分钟开始前就已确定，盘中最低价碰到即按止损价卖出，不等这一分钟收完。
+ * 【用户要求】2026-10-26「已经设置了静态回撤 ≥ 5% 卖出，为什么卖出列的静态回撤还有大于 5% 的」——
+ * 以前要等这一分钟收完才检查、再按下一分钟开盘价卖，一分钟里砸穿的部分全算进了回撤。
+ * 开盘就跳空越线的由调用方先按开盘价处理。分钟内高低点先后不明：
+ *   第一段 开盘→最低：静态止损价 = 买入价 ×（1 − 阈值）；动态止损价 = max(此前峰值, 开盘) ×（1 − 阈值）。价格自上而下先碰到较高的那条。
+ *   第二段 最高→收盘（先后确定）：只可能是动态止损被新高抬升后，收盘跌破 新高 ×（1 − 阈值）。
+ * 两段都按较差的一侧成交，不借用这一分钟里还没发生的价格。
+ */
+export interface QualityStopFill { veto: QualityHoldingVeto; price: number; peak: number; reading: number }
+export function qualityIntrabarStop(path: QualityHoldingPath, b: ResearchBar, risk: readonly QualityHoldingVeto[]): QualityStopFill | undefined {
+  const touched = (price: number, level: number) => price <= level * (1 + 1e-12);
+  const beforeLow = Math.max(path.peak, b.open);
+  let best: QualityStopFill | undefined;
+  for (const v of risk) {
+    if (v.kind === 'indicator') continue;
+    const anchor = v.kind === 'static-drawdown' ? path.entry : beforeLow, level = anchor * (1 - v.threshold / 100);
+    if (touched(b.low, level) && (!best || level > best.price)) best = { veto: v, price: level, peak: beforeLow, reading: v.threshold };
+  }
+  if (best) return best;
+  const peak = Math.max(beforeLow, b.high);
+  for (const v of risk) {
+    if (v.kind !== 'dynamic-drawdown') continue;
+    const level = peak * (1 - v.threshold / 100);
+    if (touched(b.close, level) && (!best || level > best.price)) best = { veto: v, price: level, peak, reading: v.threshold };
+  }
+  return best;
+}

@@ -24,6 +24,8 @@ export interface QualityGroup {
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
   holdingVetoes?: QualityHoldingVeto[];
+  /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
+  vetoFill?: 'stop';
   /**
    * 这套卖出方案自己的买入过滤（只作用于「比较卖出」）。缺省时沿用旧版本全局的 study.buyFilters。
    * 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定：每个卖出算法有特定的过滤标准，而不是公用一个过滤标准」
@@ -51,6 +53,8 @@ export interface QualityResult {
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean };
 }
 /** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
+/** 持仓否决试验的版本号：同步过的方案为 v3（止损价成交），旧试验保持 v2。 */
+export const qualityVetoVersion = (g: Pick<QualityGroup, 'vetoFill'>) => g.vetoFill === 'stop' ? 'holding-veto-v3' : 'holding-veto-v2';
 export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'static' | 'dynamic'): number | null {
   if (!result || !['open','closed'].includes(result.status)) return null;
   const value = kind === 'static' ? result.adversePct : result.drawdownPct;
@@ -193,7 +197,8 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
-  const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push(['holding-veto-v2',vetoes]);
+  // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
+  const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -371,7 +376,9 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const entryPrice = prior?.entryPrice ?? prices[0].open;
     const exitBar = trigger ? prices.find(b => b.openTime === trigger.at) : undefined;
     const closed = !!exitBar, finalTime = closed ? exitBar!.openTime : end;
-    const finalPrice = closed ? exitBar!.open : prices.at(-1)!.close;
+    // 回撤止损盘中触及：按止损价成交；其余按卖出分钟的开盘价
+    const stopFill = closed && trigger?.fillPrice != null ? trigger.fillPrice : undefined;
+    const finalPrice = closed ? stopFill ?? exitBar!.open : prices.at(-1)!.close;
     const held = prices.filter(b => b.openTime < finalTime);
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
@@ -380,15 +387,20 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
     // The exit open itself is observable and belongs to the holding path; the rest of the exit candle does not.
     const previousPeak = entryPrice * (1 + (prior?.peakPct ?? 0) / 100);
+    // 止损在卖出分钟盘中成交时，算止损价用到的峰值（这一分钟的开盘或新高）排在持仓路径最后
+    const fillPeak = stopFill != null ? trigger!.fillPeak ?? exitBar!.open : 0;
+    if (fillPeak) peakPct = Math.max(peakPct, (fillPeak / entryPrice - 1) * 100);
     let peak = previousPeak, exitDrawdown = 0;
     for (const b of held) peak = Math.max(peak, b.high);
+    peak = Math.max(peak, fillPeak);
     exitDrawdown = Math.max(0, (peak - finalPrice) / peak * 100);
     const low = held.reduce((minimum, b) => Math.min(minimum, b.low), Math.min(entryPrice * (1 + (prior?.adversePct ?? 0) / 100), finalPrice));
     let vetoDynamic=0;
     if(activeHoldingVetoes(group.holdingVetoes).length) {
       let path={entry:entryPrice,peak:previousPeak,minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
       for(const b of held)path=advanceQualityHolding(path,b);
-      vetoDynamic=Math.max(path.dynamic,0,(Math.max(path.peak,finalPrice)-finalPrice)/Math.max(path.peak,finalPrice)*100);
+      const top=Math.max(path.peak,finalPrice,fillPeak);
+      vetoDynamic=Math.max(path.dynamic,0,(top-finalPrice)/top*100);
     }
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
@@ -398,7 +410,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
       exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen} : undefined,
-      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };

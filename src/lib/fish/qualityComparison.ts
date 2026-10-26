@@ -10,7 +10,7 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
     { def: CDA_DEF, metric: 'CDA', label: 'CDA 原始值', threshold: -8 },
   ].map(({ def: builtin, metric, label, threshold }) => {
     const def = definitions.find(d => d.id === builtin.id) ?? builtin;
-    return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const, execution: 'intrabar-1m' as const,
+    return { id: `sell-${def.id}-raw`, label, metric, definitionSource: 'account' as const, execution: 'intrabar-1m' as const, vetoFill: 'stop' as const,
     snapshot: { featureId: def.id, featureShort: def.short, featureName: def.name, definitionKey: definitionKey({ ...def, interval: '5m' }),
       statistic: metric, interval: '5m', scale: 1, unit: '', threshold, direction: '<',
       cutoffMs: 0, average: 0, cbi2: 0, startAverage: 0, previousAverage: 0 },
@@ -21,6 +21,8 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
 export function syncQualitySellDefinitions(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): FishQualityStudy {
   let changed = false;
   const sellPlans = study.sellPlans?.map(plan => {
+    // 回撤否决改为止损价成交（2026-10-26）：同步时给方案打上新版本，旧试验已在调用方先归档
+    if (plan.vetoFill !== 'stop') { changed = true; plan = { ...plan, vetoFill: 'stop' as const }; }
     const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.snapshot.featureId);
     if (!builtin) return plan;
     // Same fallback as charts: a hidden built-in still has its built-in definition.
