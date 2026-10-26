@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
@@ -371,4 +371,16 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」筛选$/ }));
   expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })], expect.any(Array));
+});
+
+it('offers restart during a sell run, uses a separate action and requires a selected row', () => {
+  const s = state(); s.running = true; s.progress = { done: 3, total: 6, current: 'AAAUSDT' };
+  const view = render(<FishQuality state={s}/>);
+  const restart = screen.getByRole('button', { name: '重新开始' });
+  expect(restart).toBeEnabled();
+  fireEvent.click(restart); expect(s.restart).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(screen.queryByRole('button', { name: '重新开始' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: /比较卖出/ }));
+  s.study = { ...s.study, selectedRowIds: [] }; view.rerender(<FishQuality state={s}/>);
+  expect(screen.getByRole('button', { name: '重新开始' })).toBeDisabled();
 });

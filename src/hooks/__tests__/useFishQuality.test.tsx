@@ -266,3 +266,56 @@ it('archives an in-flight old rule after edits, then evaluates the new rule with
   act(() => h.result.current.cancel()); releases.shift()!(); await flush(61_000);
   expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
 });
+
+it('restarts immediately with the latest selection and settings, rejects late old callbacks and drops pending follow-ups', async () => {
+  const { makeQualityBuyFilter, makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const fish = [signal, { ...signal, id: 'b', symbol: 'BBBUSDT' }];
+  const h = renderHook(() => useFishQuality('a', fish, async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  const id = h.result.current.study.sellPlans![0].id;
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
+  const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans![0];
+  const prior = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: id, evaluatedAt: T, status: 'closed' as const, complete: true, entryTime: T, entryPrice: 100, endTime: T + 60000, endPrice: 110, returnPct: 10, pnl: 10 };
+  act(() => { old.onResult(prior); old.onProgress({ done: 1, total: 4, current: 'AAAUSDT' }); });
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .4 }));
+  act(() => h.result.current.setObserveHours(12));
+  const f = makeQualityBuyFilter('state:state', '>', .8), veto = makeQualityHoldingVeto('static-drawdown', '>=', 5);
+  act(() => h.result.current.setFilters(id, [f], [veto]));
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).filter(r => r.source.symbol === 'BBBUSDT').map(r => r.id)));
+  const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
+  localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
+  act(() => { void h.result.current.restart(); });
+  expect(tasks).toHaveLength(2); expect(old.signal.aborted).toBe(true);
+  const next = tasks[1];
+  expect(next.mode).toBe('restart');
+  expect(qualityRunSamples(next.study).map(r => r.source.symbol)).toEqual(['BBBUSDT']);
+  expect(next.study.observeHours).toBe(12);
+  expect(next.study.sellPlans![0]).toMatchObject({ rule: { threshold: .4 }, buyFilters: [f], holdingVetoes: [veto] });
+  expect(next.study.sellPlans![0].snapshot.definitionKey).toBe(definitionKey({ ...def, interval: '5m' }));
+  expect(h.result.current.progress).toEqual({ done: 0, total: 2, current: '' });
+  expect(h.result.current.study.campaignRuns![0].result).toEqual(prior);
+  act(() => { old.onResult({ ...prior, returnPct: 999 }); old.onProgress({ done: 999, total: 999, current: 'old' }); old.onFilterReading?.({ key: 'late', value: 999 }); });
+  releases.shift()!(); await flush();
+  expect(h.result.current.running).toBe(true); expect(h.result.current.progress?.done).toBe(0);
+  expect(h.result.current.study.campaignRuns![0].result).toEqual(prior);
+  expect(h.result.current.study.filterReadings?.some(r => r.key === 'late')).not.toBe(true);
+  releases.shift()!(); await flush(1000);
+  expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
+  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(3);
+  expect(tasks[2].mode).toBe('restart');
+  const nextRow = qualityRunSamples(next.study)[0], nextPlan = next.study.sellPlans![0];
+  act(() => next.onResult({ ...prior, key: qualityResultKey(nextRow, nextPlan, 12), sampleId: nextRow.id, returnPct: 999 }));
+  expect(h.result.current.study.results.some(r => r.returnPct === 999)).toBe(false);
+  act(() => h.result.current.cancel()); releases.shift()!(); await flush();
+});
+
+it('pause invalidates a pending settings run instead of restarting after the delay', async () => {
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); })); await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  act(() => h.result.current.setRule(h.result.current.study.sellPlans![0].id, { metric: 'state', direction: '<', threshold: .5 }));
+  act(() => h.result.current.cancel()); await flush(61_000);
+  expect(tasks).toHaveLength(0);
+});

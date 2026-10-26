@@ -103,7 +103,7 @@ it('gives the same sell comparison before and after a run and only filters saved
   const rows = qualityComparisonRows(base);
   const study = { ...base, selectedRowIds: rows.map(r => r.id), sellPlans: [{ ...base.sellPlans![0], snapshot: filter(0).snapshot, metric: 'raw', execution: undefined, rule: { metric: 'raw', direction: '<' as const, threshold: -1 } }] };
   const f = filter(T / M % 1000 + 10);
-  const run = async (s: typeof study, mode?: 'filter' | 'filter-only', now = T + 90 * M) => {
+  const run = async (s: typeof study, mode?: 'filter' | 'filter-only' | 'restart', now = T + 90 * M) => {
     const results = [...s.results], readings = [...(s.filterReadings ?? [])], load = vi.fn(loader());
     await collectFishQuality({ study: s, mode, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => { results.push(r); }, onFilterReading: r => { readings.push(r); } }, load, now);
     return { study: { ...s, results, filterReadings: readings }, load };
@@ -122,6 +122,16 @@ it('gives the same sell comparison before and after a run and only filters saved
     expect(edited.load).not.toHaveBeenCalled();
     expect(edited.study.results).toEqual(all.study.results);
   }
+  const completed = { ...all.study, results: all.study.results.map(r => ({ ...r, status: 'closed' as const, complete: true, returnPct: 999 })) };
+  expect((await run(completed)).load).not.toHaveBeenCalled();
+  const restarted = await run(completed, 'restart', T + 180 * M);
+  expect(restarted.load).toHaveBeenCalled();
+  expect(restarted.study.results.slice(completed.results.length)).toHaveLength(2);
+  expect(restarted.study.results.slice(completed.results.length).every(r => r.evaluatedAt === T + 180 * M && r.returnPct !== 999)).toBe(true);
+  const replayed = await run(all.study, 'restart', T + 180 * M);
+  expect(replayed.load.mock.calls.some(c => c[3].step === M && c[1] === rows[0].enteredAt)).toBe(true);
+  const recovered = await run({ ...after.study, filterReadings: after.study.filterReadings.map((r, i) => i ? r : { key: r.key, error: '网络失败' }) }, 'restart');
+  expect(recovered.study.filterReadings).toHaveLength(after.study.filterReadings.length + 1);
   const refreshed = await run(all.study, undefined, T + 180 * M);
   expect(refreshed.load).toHaveBeenCalled(); // explicit refresh still advances open trades
   const widened = await run({ ...before.study, buyFilters: [] }, 'filter');

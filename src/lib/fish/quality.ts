@@ -419,8 +419,8 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
 export interface QualityProgress { done: number; total: number; current: string }
 export interface QualityRunOptions {
   study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
-  /** Filter edits reuse every saved trade, including open positions. Before an explicit run, only read entry indicators. */
-  mode?: 'filter' | 'filter-only';
+  /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
+  mode?: 'filter' | 'filter-only' | 'restart';
   /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
   priority?: () => readonly string[];
   /** 买入过滤的读数（每行每个条件算一次）。 */
@@ -438,7 +438,7 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
-  const { study, signal } = options, previous = new Map(study.results.map(r => [r.key, r]));
+  const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
@@ -452,7 +452,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     pending.delete(first.value[0]); return first.value[1];
   };
   // 买入过滤（每套卖出方案各自一套）：先读买入时刻的指标，这套方案下不满足（或缺数据）的行不再按它评估卖出；之后放宽门槛会补算
-  const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const readings = new Map((study.filterReadings ?? []).filter(r => options.mode !== 'restart' || !r.error && Number.isFinite(r.value)).map(r => [r.key, r]));
   const passes = async (row: QualitySample, plan: QualityGroup) => {
     const filters = study.sellPlans ? activeBuyFilters(study, plan) : [];
     if (!filters.length) return true;

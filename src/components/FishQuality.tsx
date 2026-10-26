@@ -4,7 +4,7 @@ import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVet
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
 import { qualityCampaignPath } from '@/lib/campaignSections';
 import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
-import { ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Filter, Gauge, Plus, RefreshCw, Settings2, Star, X } from 'lucide-react';
+import { ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Filter, Gauge, Plus, RefreshCw, RotateCcw, Settings2, Star, X } from 'lucide-react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
@@ -281,6 +281,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
         <div className="flex items-center gap-1">
           <span className="text-[10px] text-muted-foreground">100 USDT · 1 倍</span>
           <button type="button" className={button} disabled={!ready || running || !selectedCount} title="按开始时已勾选的信号持续运行，切换选项或页面不会中断" onClick={() => void state.start()}><RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`}/>{running ? `${progress?.done ?? 0}/${progress?.total ?? 0}` : '更新收益'}</button>
+          {phase === 'sell' && <button type="button" className={button} disabled={!ready || !selectedCount} title="停止当前批次，按最新勾选、买入过滤、卖出条件和观察时长从头计算" onClick={() => void state.restart()}><RotateCcw className="h-3 w-3"/>重新开始</button>}
           {running && <button type="button" className={button} onClick={state.cancel}>暂停</button>}
           <Popover><PopoverTrigger asChild><button type="button" className={button} aria-label="鱼质量跟踪设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" checked={study.tracking} disabled={!ready} onChange={e => state.setTracking(e.target.checked)}/>自动跟踪新鱼及更新收益</label><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；手动运行后每分钟更新已选信号；重新打开或更改勾选后，先点「更新收益」。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
         </div>
