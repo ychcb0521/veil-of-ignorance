@@ -147,7 +147,7 @@ describe('fish quality paper experiments', () => {
     expect(waiting.status).toBe('open'); expect(waiting.reason).toContain('等待下一分钟');
   });
   it('uses strict thresholds and the FIRST confirmed hit even if later readings recover, without waiting for another crossing', async () => {
-    const {s,g}=fixture(snap({definitionKey:definitionKey({...def,formula:'raw = C',scale:1}),scale:1}));
+    const {s,g}=fixture(snap({definitionKey:definitionKey({...def,formula:'raw = C'}),scale:1}));
     g.rule={metric:'raw',direction:'<',threshold:100};
     const path=loader((t,step)=>step===5*M ? bar(t,100,t+step===T+5*M?100:t+step===T+10*M?99:150) : bar(t,t===T+10*M?98:100));
     const r=await evaluateQualitySample(s,g,0,T+30*M,path,new AbortController().signal);
@@ -158,7 +158,7 @@ describe('fish quality paper experiments', () => {
     expect(up.endTime).toBe(T+15*M);
   });
   it('does not treat an intrabar breach as a close breach, and cannot skip the first hit at a scan-chunk boundary', async () => {
-    const {s,g}=fixture(snap({definitionKey:definitionKey({...def,formula:'raw = C',scale:1}),scale:1}));
+    const {s,g}=fixture(snap({definitionKey:definitionKey({...def,formula:'raw = C'}),scale:1}));
     g.rule={metric:'raw',direction:'<',threshold:100};
     const hit=T+501*5*M;
     const path=loader((t,step)=>step===5*M ? bar(t,100,t+step===hit?99:100,101,1) : bar(t,t===hit?97:100));
