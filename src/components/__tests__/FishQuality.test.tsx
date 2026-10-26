@@ -466,3 +466,25 @@ it('picks one or several detectors straight from the detector header, keeps the 
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
   expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('全部探测算法');
 });
+
+it('places independent filter results immediately after capture, runs without sell rules and sorts readings with missing values last', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const s = state(), f = makeQualityBuyFilter('state:state', '>', .7);
+  s.study = importQualityLibrary(s.study, ['LOWUSDT', 'HIGHUSDT', 'PENDINGUSDT'].map((symbol, i) => ({ id: symbol, symbol, timeMs: T + i * 60000, timeLabel: '', fallbackZone: '' })));
+  s.study.sellPlans = s.study.sellPlans!.map(p => ({ ...p, buyFilters: [f] }));
+  s.study.selectedRowIds = qualityDisplayRows(s.study).map(r => r.id);
+  s.study.filterReadings = qualityComparisonRows(s.study).filter(r => r.source.symbol !== 'PENDINGUSDT').map(r => ({ key: qualityFilterReadingKey(r, f), value: r.source.symbol === 'LOWUSDT' ? .5 : .9, at: T }));
+  const view = render(<FishQuality state={s}/>);
+  const headers = screen.getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
+  expect(headers[4]).toHaveTextContent('捕捞过程'); expect(headers[5]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
+  expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
+  const run = screen.getByRole('button', { name: '运行过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.start).toHaveBeenCalledTimes(1);
+  const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');
+  expect(reading('LOWUSDT')).toHaveTextContent('0.5不满足'); expect(reading('HIGHUSDT')).toHaveTextContent('0.9满足'); expect(reading('PENDINGUSDT')).toHaveTextContent('—待计算');
+  const sorter = within(filterColumn).getByRole('button'); fireEvent.click(sorter);
+  expect(filterColumn).toHaveAttribute('aria-sort', 'descending'); expect(screen.getAllByTestId('quality-fish-row').at(-1)).toHaveTextContent('PENDINGUSDT');
+  fireEvent.click(sorter); expect(filterColumn).toHaveAttribute('aria-sort', 'ascending'); expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOWUSDT');
+  s.study = { ...s.study, sellPlans: s.study.sellPlans.map(p => ({ ...p, buyFilters: [{ ...f, threshold: .4 }] })) };
+  view.rerender(<FishQuality state={s}/>); expect(reading('LOWUSDT')).toHaveTextContent('0.5满足'); expect(s.start).toHaveBeenCalledTimes(1);
+});

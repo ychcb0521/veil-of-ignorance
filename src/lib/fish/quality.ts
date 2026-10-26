@@ -268,6 +268,8 @@ export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | und
 export const activeBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined) => planBuyFilters(study, plan).filter(f => f.enabled && Number.isFinite(f.threshold));
 /** 任何一套卖出方案开着买入过滤。 */
 export const anyBuyFilters = (study: FishQualityStudy) => (study.sellPlans ?? []).some(plan => activeBuyFilters(study, plan).length > 0);
+/** Filters can run independently; no entry-price or sell simulation is needed without an exit. */
+export const onlyQualityFilters = (study: FishQualityStudy) => anyBuyFilters(study) && !(study.sellPlans ?? []).some(hasQualityExit);
 /** 把旧版本的全局过滤落到每套方案上（之后各改各的），并去掉全局那份。 */
 export function materializePlanBuyFilters(study: FishQualityStudy): FishQualityStudy {
   if (!study.buyFilters) return study;
@@ -432,17 +434,19 @@ export interface QualityRunOptions {
 }
 /** A threshold/direction/toggle edit with cached readings and trades needs no runner or market requests. */
 export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' | 'filter-only'): boolean {
+  const filtersOnly = onlyQualityFilters(study);
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Set(study.results.map(r => r.key));
   for (const row of qualityRunSamples(study)) for (const plan of study.sellPlans ?? []) {
     if (activeBuyFilters(study, plan).some(f => !readings.has(qualityFilterReadingKey(row, f)))) return true;
     const state = qualityFilterStatus(study, row, plan, readings).state;
-    if (mode === 'filter' && (state === 'none' || state === 'pass' || plan.id === study.selectedSellId) && !results.has(qualityResultKey(row, plan, study.observeHours))) return true;
+    if (mode === 'filter' && !filtersOnly && (state === 'none' || state === 'pass' || plan.id === study.selectedSellId) && !results.has(qualityResultKey(row, plan, study.observeHours))) return true;
   }
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
+  const filtersOnly = onlyQualityFilters(study);
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
@@ -478,7 +482,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
-    if (options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
+    if (filtersOnly || options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
     if (!cached?.complete && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));

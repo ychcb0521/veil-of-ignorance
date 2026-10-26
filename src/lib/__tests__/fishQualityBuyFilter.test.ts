@@ -34,7 +34,7 @@ it('skips the sells of signals that fail, caches readings, and reports missing d
   const base = importQualityLibrary(enableQualityComparison(newQualityStudy(T)), [lib('LOWUSDT', T + 7 * M), lib('HIGHUSDT', T + 40 * M)]);
   const rows = qualityComparisonRows(base), low = rows[0], high = rows[1];
   const threshold = (T / M) % 1000 + 10; // LOW 读到 T 那根（不满足），HIGH 读到 T+35m 那根（满足）
-  const s = { ...base, selectedRowIds: rows.map(r => r.id), buyFilters: [filter(threshold)] };
+  const s = { ...base, selectedRowIds: rows.map(r => r.id), buyFilters: [filter(threshold)], sellPlans: base.sellPlans!.map(p => ({ ...p, snapshot: filter(0).snapshot, metric: 'raw', rule: { metric: 'raw', direction: '<' as const, threshold: -1 } })) };
   const readings: QualityFilterReading[] = [], results: QualityResult[] = [], load = loader();
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r), onFilterReading: r => readings.push(r) }, load, T + 90 * M);
   expect(readings).toHaveLength(2);
@@ -71,7 +71,7 @@ it('binds buy filters to each sell plan: one plan filters, the other buys everyt
   const base = importQualityLibrary(enableQualityComparison(newQualityStudy(T)), [lib('LOWUSDT', T + 7 * M), lib('HIGHUSDT', T + 40 * M)]);
   const rows = qualityComparisonRows(base), [low, high] = rows;
   const threshold = (T / M) % 1000 + 10, [sPlan, cPlan] = base.sellPlans!;
-  const s = { ...base, selectedRowIds: rows.map(r => r.id), sellPlans: [{ ...sPlan, buyFilters: [filter(threshold)] }, { ...cPlan, buyFilters: [] }] };
+  const s = { ...base, selectedRowIds: rows.map(r => r.id), sellPlans: [{ ...sPlan, buyFilters: [filter(threshold)] }, { ...cPlan, buyFilters: [] }].map(p => ({ ...p, snapshot: filter(0).snapshot, metric: 'raw', rule: { metric: 'raw', direction: '<' as const, threshold: -1 } })) };
   const readings: QualityFilterReading[] = [], results: QualityResult[] = [];
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r), onFilterReading: r => readings.push(r) }, loader(), T + 90 * M);
   // 状态 S 方案只评估满足条件的 HIGH；CDA 方案没设过滤，两条都评估
