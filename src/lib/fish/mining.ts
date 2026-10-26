@@ -3,49 +3,48 @@
  * 挖到的鱼直接入「鱼舱」并进「鱼质量」。先挖到目标条数（默认 1000）为止；追上现在之后，每过半天自动再扫一档。
  * 【用户要求】2026-10-26「先用当前默认算法和对应阈值挖掘信号（先挖掘1000个）……设置成能够动态持续挖掘的流程。
  * 时间就从2026年4月1号0点开始，半天挖掘一次。挖掘出的信号同时归入鱼舱和鱼质量中。」
- * 状态只存本机（按账号分区）。
+ * 状态按账号存本机，并推一份到云端（进度只进不退：两边合并取挖得更远的那份，见 mergeMiningStates）。
+ * 【用户要求】2026-10-26「自动挖掘可以记住上次挖掘到那个时间点了。下次点开时，能够按照时间顺序接上」——
+ * 以前只存本机，登录时云端补推的旧快照会在下次打开时把本机进度盖回去；现在每次保存都推云，
+ * 并且鱼舱里已挖到的鱼（带 mined.anchorMs）也能反推进度，状态丢了也从最后挖到的那一档往后接。
  */
 import type { FishCard } from '@/components/FishAlgorithmCard';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { getUserPrefix } from '@/lib/userStoragePrefix';
+import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
+import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { FISH_DEFAULT_RULES } from './cards';
 import { fishCatchKey } from './records';
+import { MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, normalizeMiningState, newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
+export * from './miningState';
 
-export const MINING_START_MS = Date.parse('2026-04-01T00:00:00+08:00');
-export const MINING_STEP_MS = 12 * 3_600_000;
-export const MINING_DEFAULT_TARGET = 1000;
-export interface FishMiningRule { id: string; featureId: string; statistic: string; threshold: string }
-export interface FishMiningState {
-  version: 1; enabled: boolean; startMs: number; stepMs: number;
-  /** 下一档要扫的锚点（扫完才前进；被打断或出错就原地重试）。 */
-  cursorMs: number;
-  target: number; mined: number; anchorsDone: number;
-  /** 挖过的信号（同一段持续的信号只记第一次能发现的那档）；删掉的鱼不会被后面的档位再挖回来。 */
-  minedKeys: string[];
-  /** 开始挖掘时冻结的默认算法与阈值；之后改默认不影响这一轮实验。 */
-  rules: FishMiningRule[];
-  /** 开始时冻结的捕捞范围（交易所等）；没冻结过就用当前的。 */
-  selection?: { exchanges: string[]; includeDuplicates: boolean; includeUsStocks?: boolean };
-  lastAnchorMs: number | null; lastRunAt: number | null; lastError: string;
-}
-export const miningKey = () => `${getUserPrefix()}fish-mining.v1`;
-const leaseKey = () => `${getUserPrefix()}fish-mining-lease.v1`;
+export const miningKey = () => `${getUserPrefix()}${MINING_LOGICAL_KEY}`;
+const leaseKey = () => `${getUserPrefix()}${MINING_LEASE_LOGICAL_KEY}`;
 export const currentDefaultRules = (): FishMiningRule[] => FISH_DEFAULT_RULES.map(r => ({ id: r.id, featureId: r.featureId, statistic: r.statistic, threshold: r.threshold }));
-export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
-  target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], lastAnchorMs: null, lastRunAt: null, lastError: '' });
 
 export function readMiningState(): FishMiningState {
-  try {
-    const x = JSON.parse(readPersistedStateRaw(miningKey()) ?? 'null');
-    if (!x || x.version !== 1 || !Number.isFinite(x.cursorMs) || !Array.isArray(x.minedKeys)) return newMiningState();
-    const base = newMiningState();
-    return { ...base, ...x, enabled: !!x.enabled, target: Number.isInteger(x.target) && x.target > 0 ? x.target : base.target,
-      rules: Array.isArray(x.rules) ? x.rules : [], lastError: typeof x.lastError === 'string' ? x.lastError : '' };
-  } catch { return newMiningState(); }
+  try { return normalizeMiningState(JSON.parse(readPersistedStateRaw(miningKey()) ?? 'null')) ?? newMiningState(); } catch { return newMiningState(); }
 }
-export function saveMiningState(state: FishMiningState): void {
-  try { writePersistedStateRaw(miningKey(), JSON.stringify(state)); } catch { /* 记不住只是下次从上次保存处接着挖 */ }
+export function saveMiningState(state: FishMiningState, now = Date.now()): void {
+  const value = { ...state, savedAt: now };
+  try { writePersistedStateRaw(miningKey(), JSON.stringify(value)); } catch { /* 本机写不进时云端那份仍会更新 */ }
+  try { const uid = getUserId(); if (uid) queueSimStatePush(uid, MINING_LOGICAL_KEY, value); } catch { /* 同步失败只是换设备时接不上，本机照常 */ }
+}
+/**
+ * 用鱼舱里已挖到的鱼校正进度：状态丢了、或被旧快照盖回去时，从最后挖到鱼的那一档往后接（按时间顺序，不重挖前面的档）。
+ * 没有更远的鱼就原样返回同一个对象。
+ */
+export function reconcileMiningWithFish(state: FishMiningState, signals: readonly TradeSignal[]): FishMiningState {
+  const mined = signals.filter(s => s.mined && Number.isFinite(s.mined.anchorMs));
+  if (!mined.length) return state;
+  const lastAnchor = Math.max(...mined.map(s => s.mined!.anchorMs));
+  const seen = new Set(state.minedKeys), fresh = mined.map(fishCatchKey).filter(k => !seen.has(k) && (seen.add(k), true));
+  if (lastAnchor + state.stepMs <= state.cursorMs && !fresh.length) return state;
+  const cursorMs = Math.max(state.cursorMs, lastAnchor + state.stepMs);
+  const minedKeys = [...state.minedKeys, ...fresh];
+  return { ...state, cursorMs, minedKeys, mined: Math.max(state.mined, minedKeys.length),
+    anchorsDone: Math.max(state.anchorsDone, Math.round((cursorMs - state.startMs) / state.stepMs)),
+    lastAnchorMs: Math.max(state.lastAnchorMs ?? -Infinity, lastAnchor) };
 }
 /** 现在该扫的锚点：开着、没到目标、锚点已经过去；否则 null。 */
 export function miningDueAnchor(s: FishMiningState, now: number): number | null {

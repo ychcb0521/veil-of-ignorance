@@ -3,6 +3,7 @@
  * - 取数器空闲才挖；手动 / 定时捕捞一开始就打断这一档（之后原地重扫），挖掘永远让路；
  * - 补历史时一档接一档连着挖；追上现在后，每到下一个半天整点再挖一档；
  * - 出错原地重试（间隔 2 分钟）；多个标签页只有拿到租约的那个挖。
+ * - 每次读进度都用鱼舱里已挖到的鱼校正一遍：进度被旧快照盖回去或丢了，也从最后挖到的那一档往后接。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -10,7 +11,7 @@ import type { FishProgress, FishScanSettings } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { mergeFishSignals } from '@/lib/fish/records';
-import { acceptMinedAnchor, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, releaseMiningLease, saveMiningState, takeMiningLease, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000, RETRY_MS = 2 * 60_000;
 export interface FishMiningApi {
@@ -24,18 +25,24 @@ export function useFishMining(o: {
   /** 每档入舱后通知（鱼质量据此把挖到的鱼加进评估）。 */
   onMined?: (added: TradeSignal[]) => void;
 }): FishMiningApi {
-  const [state, setStateRaw] = useState<FishMiningState>(readMiningState);
+  /** 读本机进度，并用鱼舱里挖到的鱼校正（校正过就存回去、推云）。 */
+  const load = (signals: readonly TradeSignal[]): FishMiningState => {
+    const s = readMiningState(), fixed = reconcileMiningWithFish(s, signals);
+    if (fixed !== s) saveMiningState(fixed);
+    return fixed;
+  };
+  const [state, setStateRaw] = useState<FishMiningState>(() => load(o.signalsRef.current));
   const [running, setRunning] = useState(false), [anchorMs, setAnchorMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null), [waiting, setWaiting] = useState('');
   const stateRef = useRef(state), latest = useRef(o); latest.current = o;
   const runningRef = useRef(false), retryAt = useRef(0), account = useRef(o.account);
   const owner = useRef(`tab-${Math.random().toString(36).slice(2)}-${Date.now()}`);
   const setState = useCallback((next: FishMiningState) => { stateRef.current = next; setStateRaw(next); saveMiningState(next); }, []);
-  useEffect(() => { account.current = o.account; const s = readMiningState(); stateRef.current = s; setStateRaw(s); retryAt.current = 0; setWaiting(''); }, [o.account]);
+  useEffect(() => { account.current = o.account; const s = load(latest.current.signalsRef.current); stateRef.current = s; setStateRaw(s); retryAt.current = 0; setWaiting(''); }, [o.account]);
 
   const tick = useCallback(async (): Promise<void> => {
     if (runningRef.current) return;
-    const now = Date.now(), s = readMiningState();
+    const now = Date.now(), s = load(latest.current.signalsRef.current);
     stateRef.current = s; setStateRaw(s);
     const anchor = miningDueAnchor(s, now);
     if (anchor == null) { setWaiting(''); return; }
@@ -78,7 +85,7 @@ export function useFishMining(o: {
   }, [o.account]);
 
   const start = useCallback(() => {
-    const s = readMiningState();
+    const s = load(latest.current.signalsRef.current);
     // 第一次开始时冻结当前默认算法与阈值
     setState({ ...s, enabled: true, rules: s.rules.length ? s.rules : currentDefaultRules(), selection: s.selection ?? { ...latest.current.selection, exchanges: [...latest.current.selection.exchanges] }, lastError: '' });
     retryAt.current = 0; setTimeout(() => void tickRef.current(), 0);

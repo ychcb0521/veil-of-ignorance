@@ -1,6 +1,6 @@
 // 【用户要求】2026-10-26 比较探测：默认算法从 2026-04-01 00:00 起每半天挖一档，先挖 1000 条，持续挖掘；入鱼舱与鱼质量
 import { beforeEach, expect, it } from 'vitest';
-import { acceptMinedAnchor, currentDefaultRules, miningCards, miningDueAnchor, newMiningState, readMiningState, saveMiningState, MINING_START_MS, MINING_STEP_MS } from '@/lib/fish/mining';
+import { acceptMinedAnchor, currentDefaultRules, mergeMiningStates, miningCards, miningDueAnchor, newMiningState, readMiningState, reconcileMiningWithFish, saveMiningState, MINING_START_MS, MINING_STEP_MS, type FishMiningState } from '@/lib/fish/mining';
 import { fishCatchKey } from '@/lib/fish/records';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -46,4 +46,36 @@ it('persists per account and falls back to a fresh state on corrupt data', () =>
   saveMiningState(s); expect(readMiningState()).toMatchObject({ enabled: true, target: 1500 });
   localStorage.setItem(Object.keys(localStorage).find(k => k.includes('fish-mining.v1'))!, '{bad');
   expect(readMiningState()).toMatchObject({ enabled: false, target: 1000 });
+});
+
+// 【用户要求】2026-10-26「自动挖掘可以记住上次挖掘到那个时间点了。下次点开时，能够按照时间顺序接上」
+it('merging two copies never moves progress backwards: farther cursor wins, mined keys union, settings from the newer save', () => {
+  const A = MINING_START_MS, step = MINING_STEP_MS;
+  const stale: FishMiningState = { ...newMiningState(), enabled: true, cursorMs: A + step, anchorsDone: 1, mined: 1, minedKeys: ['k1'], lastAnchorMs: A, savedAt: 100, target: 1000 };
+  const ahead: FishMiningState = { ...newMiningState(), enabled: false, cursorMs: A + 9 * step, anchorsDone: 9, mined: 3, minedKeys: ['k1', 'k2', 'k3'], lastAnchorMs: A + 8 * step, savedAt: 50, target: 1000 };
+  const merged = mergeMiningStates(ahead, stale) as FishMiningState;
+  expect(merged).toMatchObject({ cursorMs: A + 9 * step, anchorsDone: 9, lastAnchorMs: A + 8 * step, mined: 3, enabled: true, savedAt: 100 });
+  expect(merged.minedKeys).toEqual(['k1', 'k2', 'k3']);
+  expect((mergeMiningStates(stale, ahead) as FishMiningState).cursorMs).toBe(A + 9 * step);
+  // 坏的一边不影响另一边
+  expect(mergeMiningStates('{bad', ahead)).toMatchObject({ cursorMs: A + 9 * step });
+});
+it('reconciles a lost or rolled-back state from the mined fish in the cabin: resumes right after the last mined anchor', () => {
+  const A = MINING_START_MS, step = MINING_STEP_MS;
+  const first = acceptMinedAnchor({ ...newMiningState(), enabled: true }, [fish('AAAUSDT', A - 1000)], A, A + 1);
+  const later = acceptMinedAnchor({ ...first.state, cursorMs: A + 5 * step }, [fish('BBBUSDT', A + 5 * step - 1000)], A + 5 * step, A + 5 * step + 1);
+  const cabin = [...first.added, ...later.added, fish('MANUALUSDT', A)];
+  const lost = { ...newMiningState(), enabled: true };
+  const fixed = reconcileMiningWithFish(lost, cabin);
+  expect(fixed).toMatchObject({ cursorMs: A + 6 * step, anchorsDone: 6, mined: 2, lastAnchorMs: A + 5 * step, enabled: true });
+  expect(fixed.minedKeys).toEqual([...first.added, ...later.added].map(fishCatchKey));
+  // 已经接上了就原样返回（不重复存、不倒退）
+  expect(reconcileMiningWithFish(fixed, cabin)).toBe(fixed);
+  const ahead = { ...fixed, cursorMs: A + 20 * step };
+  expect(reconcileMiningWithFish(ahead, cabin)).toBe(ahead);
+  expect(reconcileMiningWithFish(lost, [fish('MANUALUSDT', A)])).toBe(lost);
+});
+it('saving stamps savedAt so a later save wins the settings on merge', () => {
+  saveMiningState({ ...newMiningState(), enabled: true }, 1234);
+  expect(readMiningState().savedAt).toBe(1234);
 });
