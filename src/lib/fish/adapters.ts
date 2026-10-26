@@ -3,7 +3,7 @@ import {nativeFishInterval,fishBarLabel} from './periods';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { parseBinanceKlineRow } from '@/lib/deepRsa/window';
-import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, validateFishBars } from './shared';
+import { FISH_STEP, FISH_BARS, FishError, FishWeightBudget, FishRequestPool, withFishRequestDeadline, validateFishBars } from './shared';
 /** 只读代理（Supabase Edge Function fish-market-proxy）没部署时的说明。 */
 export const PROXY_MISSING='只读代理未部署（Supabase 上没有 fish-market-proxy 函数），需要在 Lovable 里部署这个 Edge Function';
 import { EXCHANGE_NAMES, AUDITED_EXCHANGES, type FishExchange, type FishMarket } from './exchanges';
@@ -237,7 +237,8 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
   async function read(url:string,path:string,weight:number,signal:AbortSignal):Promise<unknown>{
     const result=await pool.run(async()=>{
       abort(signal);const wait=budget.tryTake(weight);if(wait)return {wait};
-      const response=await fetcher.call(globalThis,url,{signal});
+      return withFishRequestDeadline(async requestSignal => {
+      const response=await fetcher.call(globalThis,url,{signal:requestSignal});
       if(response.status===429){const retry=Number(response.headers.get('Retry-After')??60);budget.pauseUntil(Date.now()+(Number.isFinite(retry)?Math.max(60000,retry*1000):60000));}
       let body:unknown;
       try{body=await response.json();}catch{if(!response.ok)throw context(path,`HTTP ${response.status}：上游请求失败`,response.status);throw context(path,'HTTP 200：响应不是有效 JSON',response.status);}
@@ -245,6 +246,7 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
       const j=body as any;
       if((exchange==='okx'&&j?.code!==undefined&&j.code!=='0')||(exchange==='bitget'&&j?.code!==undefined&&j.code!=='00000')||(exchange==='gate'&&j?.label))throw context(path,`HTTP ${response.status}：${explain(j)}`,response.status);
       return {data:body};
+      }, signal);
     },signal);
     if('data' in result)return result.data;
     await budget.wait(result.wait,signal);return read(url,path,weight,signal);

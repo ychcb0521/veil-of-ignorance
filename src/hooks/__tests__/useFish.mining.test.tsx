@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('@/lib/simStateSync', () => ({ queueSimStatePush: vi.fn() }));
 vi.mock('@/lib/fish/session', () => ({ saveFishSession: vi.fn(async () => {}), loadFishSession: vi.fn(async () => null) }));
-const calls = vi.hoisted(() => [] as { anchorMs?: number; aborted: () => boolean }[]);
+const calls = vi.hoisted(() => [] as { anchorMs?: number; aborted: () => boolean; checkpoint?: unknown }[]);
 vi.mock('@/lib/fishScanner', async original => {
   const real = await original<typeof import('@/lib/fishScanner')>();
   class FakeScanner {
@@ -11,7 +11,7 @@ vi.mock('@/lib/fishScanner', async original => {
     isBusy() { return this.running; }
     async scan(o: any) {
       if (this.running) throw new Error('扫描正在进行');
-      this.running = true; calls.push({ anchorMs: o.anchorMs, aborted: () => o.signal.aborted });
+      this.running = true; calls.push({ anchorMs: o.anchorMs, aborted: () => o.signal.aborted, checkpoint: o.checkpoint });
       try {
         await new Promise<void>(resolve => { const t = setTimeout(resolve, o.anchorMs ? 10_000 : 10); o.signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }); });
         if (!o.signal.aborted) o.onSignal({ id: 'x', symbol: 'XUSDT', timeMs: 1, timeLabel: '', fallbackZone: '', fish: { cutoffMs: 2, threshold: 1, average: 1, cbi2: 1, startAverage: 1, previousAverage: 0 } });
@@ -47,4 +47,24 @@ it('returns the anchor hits without touching the fish list, and refuses to start
   act(() => { capture = result.current.start({}); });
   await expect(result.current.mine({ anchorMs: 789 })).rejects.toThrow('取数器正忙');
   await act(async () => { await vi.advanceTimersByTimeAsync(20); await capture; });
+});
+
+
+it('keeps the same mining checkpoint after interruption and clears it after completion or changed settings', async () => {
+  vi.useFakeTimers();
+  const { result } = renderHook(() => useFish(undefined));
+  const interrupted = async (anchorMs: number) => {
+    let pending!: Promise<unknown>;
+    await act(async () => { pending = result.current.mine({ anchorMs }).catch(e => e); result.current.stopMining(); await pending; });
+    return calls.at(-1)!.checkpoint;
+  };
+  const checkpoint = await interrupted(123);
+  expect(checkpoint).toBeInstanceOf(Map);
+  expect(await interrupted(123)).toBe(checkpoint);
+  expect(await interrupted(456)).not.toBe(checkpoint);
+  const second = calls.at(-1)!.checkpoint;
+  await act(async () => { const pending = result.current.mine({ anchorMs: 456 }); await vi.advanceTimersByTimeAsync(10_000); await pending; });
+  expect(calls.at(-1)!.checkpoint).toBe(second);
+  expect(await interrupted(456)).not.toBe(second);
+  vi.useRealTimers();
 });

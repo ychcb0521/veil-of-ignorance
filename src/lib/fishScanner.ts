@@ -166,7 +166,10 @@ export function saveFishCombinationRound(round: FishCombinationRound, mode: Fish
   const summary = summarizeFishRound(rows, { algorithmKey: fishCombinationKey(plans, mode), cutoffMs: Math.floor(anchorMs / plans[0].step) * plans[0].step, anchorMs, direction: '>', threshold: NaN, scale: 1, unit: '', partial: !round.complete });
   saveFishRound({ ...summary, combination: mode, cutoffs: plans.map(p => Math.floor(anchorMs / p.step) * p.step), members: plans.map((p, i) => ({ algorithmKey: p.algorithmKey, hits: round.memberHits[i] ?? 0 })) });
 }
+/** Completed per-market decisions for one background mining attempt; transient failures are retried. */
+export type FishScanCheckpoint = Map<string, Map<string, FishMemberResult>>;
 type ScanOptions = FishScanSettings & {
+  checkpoint?: FishScanCheckpoint;
   /** 捕捞中可改的交集 / 并集（2026-10-21「捕捞运行的过程中，我也可以灵活切换到并集」）：每判完一个币读一次当前值。 */
   combinationRef?: { current: FishCombination };
   /** 多重算法开扫时交出本轮逐币结论（Map 随扫描逐步填满），捕捞中切换组合时据此当场重排。 */
@@ -489,6 +492,13 @@ export class FishScanner {
     try {plan=compileFishProgram(options.feature??CBI2_DEF,options.algorithm??{direction:'>',threshold:options.threshold??FISH_THRESHOLD,constraints:[]});if(plan.unavailable)throw new Error(plan.unavailable);}
     catch(error){const p={...initialFishProgress(),status:'aborted' as const,error:error instanceof Error?error.message:String(error)};options.onProgress(p);return p;}
     const threshold=plan.settings.threshold, query={interval: intervalOf(plan.def),count:plan.N};
+    const cacheKey = JSON.stringify([anchorMs, definitionKey(plan.def), plan.algorithmKey, options.exchanges, options.includeDuplicates, options.includeUsStocks, options.downwardWick, options.turnoverFloors]);
+    const completed = options.checkpoint?.get(cacheKey) ?? new Map<string, FishMemberResult>();
+    options.checkpoint?.set(cacheKey, completed);
+    const reportResult = (key: string, member: FishMemberResult) => {
+      if (options.checkpoint && ['hit', 'below', 'unknown', 'blocked', 'wick', 'thin', 'history'].includes(member.outcome)) completed.set(key, member);
+      options.onResult?.(key, member);
+    };
     const requested = [...(options.exchanges ?? ['binance'])];
     this.running = true;
     const controller = new AbortController(), cancel = () => controller.abort();
@@ -580,6 +590,18 @@ export class FishScanner {
             while(!local.signal.aborted){
               const index=next++;if(index>=markets.length)return;const market=markets[index],p=venues[exchange]!.markets![market.market??'crypto']!;let stage='K线（candlesticks / history-candles）';p.current=market.symbol;progress.current=market.symbol;publish();
               try{
+                const cachedKey = `${exchange}|${market.market??'crypto'}|${market.symbol}`, cached = completed.get(cachedKey);
+                if (cached) {
+                  if (cached.outcome === 'history') p.history = (p.history ?? 0) + 1;
+                  else if (cached.outcome === 'wick') p.wickSkipped = (p.wickSkipped ?? 0) + 1;
+                  else if (cached.outcome === 'thin') p.thin = (p.thin ?? 0) + 1;
+                  else if (cached.outcome === 'blocked') { p.blocked = (p.blocked ?? 0) + 1; cached.blockedBy?.forEach((v, i) => p.constraintBlocked![i] += v); }
+                  else p.counts[cached.outcome]++;
+                  roundRows.push({ symbol: market.symbol, exchange, market: market.market, reading: cached.reading ?? NaN, outcome: cached.outcome });
+                  memberResults.set(cachedKey, new Map([[0, cached]])); reportResult(cachedKey, cached);
+                  if (cached.signal) options.onSignal(placeFishSignal(cached.signal, { symbol: market.symbol, exchange, ...(market.market === 'us_stock' ? { market: 'us_stock', underlying: market.underlying ?? market.base } : {}), ...(exchange !== 'binance' && market.market !== 'us_stock' ? { binanceSymbol: binanceByBase.get(fishBase(market.base)) ?? null } : {}) }, plan.algorithmKey));
+                  p.done++; publish(); await fishDelay(0, local.signal); continue;
+                }
                 const raw=btc&&market.instrument===adapter.btc().instrument?btc:await adapter.candles(market,cut,local.signal,query);
                 validateFishBars(raw,cut,plan.N,plan.step);
                 stage='向下大插针检查';
@@ -589,7 +611,7 @@ export class FishScanner {
                   p.wickSkipped=(p.wickSkipped??0)+1;
                   roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:'wick'});
                   const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'wick'};
-                  memberResults.set(memberKey,new Map([[0,member]]));options.onResult?.(memberKey,member);
+                  memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                   p.done++;publish();await fishDelay(0,local.signal);continue;
                 }
                 stage='主动成交（trades / history-trades / fills-history）';
@@ -603,7 +625,7 @@ export class FishScanner {
                   if(checks.some(c=>!c.ok)){
                     if(local.signal.aborted)return;
                     p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:'thin'});
-                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'thin'};memberResults.set(memberKey,new Map([[0,member]]));options.onResult?.(memberKey,member);
+                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,member:FishMemberResult={outcome:'thin'};memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                     p.done++;publish();await fishDelay(0,local.signal);continue;
                   }
                 }
@@ -622,7 +644,7 @@ export class FishScanner {
                     p.thin=(p.thin??0)+1;roundRows.push({symbol:market.symbol,exchange,market:market.market,reading,outcome:'thin'});
                     const place:FishPlace={symbol:market.symbol,exchange,...(market.market==='us_stock'?{market:'us_stock',underlying:market.underlying??market.base}:{}),...(exchange!=='binance'&&market.market!=='us_stock'?{binanceSymbol:binanceByBase.get(fishBase(market.base))??null}:{})};
                     const member:FishMemberResult={outcome:'thin',reading},tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;
-                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;memberResults.set(memberKey,new Map([[0,member]]));options.onResult?.(memberKey,member);
+                    const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;memberResults.set(memberKey,new Map([[0,member]]));reportResult(memberKey,member);
                     p.done++;publish();await fishDelay(0,local.signal);continue;
                   }
                 }
@@ -637,13 +659,13 @@ export class FishScanner {
                 if(result.outcome==='hit'||result.outcome==='unknown'){const tail=fishTail(bars,readings,plan,cut,place,options.turnoverFloors);if(tail)member.tail=tail;}
                 const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`;
                 memberResults.set(memberKey,new Map([[0,member]]));
-                options.onResult?.(memberKey,member);
+                reportResult(memberKey,member);
               }catch(error){
                 if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
                 else if(!local.signal.aborted){
                   const kind=error instanceof FishError?error.kind:'failed';
                   roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:kind});
-                  const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,result={outcome:kind};memberResults.set(memberKey,new Map([[0,result]]));options.onResult?.(memberKey,result);
+                  const memberKey=`${exchange}|${market.market??'crypto'}|${market.symbol}`,result={outcome:kind};memberResults.set(memberKey,new Map([[0,result]]));reportResult(memberKey,result);
                   if(kind==='history')p.history=(p.history??0)+1;
                   else if(kind!=='banned'){
                     p.counts[kind]++;

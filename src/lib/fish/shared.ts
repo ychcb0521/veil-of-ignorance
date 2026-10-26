@@ -6,6 +6,24 @@ export const FISH_FIRST_USABLE = 1454;
 export const FISH_THRESHOLD = 0.3;
 export class FishError extends Error { constructor(message: string, readonly kind: 'gap' | 'readings' | 'failed' | 'banned' | 'history' | 'skipped', readonly detail?: { path?: string; status?: number }) { super(message); } }
 const check = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
+export const FISH_REQUEST_TIMEOUT_MS = 30_000;
+/** Bound both fetch and response-body reads, and release the shared slot even if a request ignores abort. */
+export function withFishRequestDeadline<T>(task: (signal: AbortSignal) => Promise<T>, signal: AbortSignal, timeoutMs = FISH_REQUEST_TIMEOUT_MS): Promise<T> {
+  check(signal);
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController(); let settled = false;
+    const finish = (success: boolean, value: unknown) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); signal.removeEventListener('abort', cancel);
+      if (success) resolve(value as T); else reject(value);
+    };
+    const cancel = () => { finish(false, new DOMException('已取消', 'AbortError')); controller.abort(); };
+    const timer = setTimeout(() => { finish(false, new FishError(`行情请求超过 ${timeoutMs / 1000} 秒未返回，请重试`, 'failed')); controller.abort(); }, timeoutMs);
+    signal.addEventListener('abort', cancel, { once: true });
+    if (signal.aborted) { cancel(); return; }
+    Promise.resolve().then(() => { check(controller.signal); return task(controller.signal); }).then(value => finish(true, value), error => finish(false, error));
+  });
+}
 export function fishDelay(ms: number, signal: AbortSignal): Promise<void> {
   check(signal);
   // 后台标签页里浏览器会把 setTimeout 拖到最多一分钟一次，逐币让出一次（ms = 0）就会让定时自动捕捞慢上几十倍；

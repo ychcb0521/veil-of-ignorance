@@ -166,14 +166,18 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
    * 取数器正被别的任务占着时抛错；被捕捞打断时抛 AbortError。
    */
   const mineController = useRef<AbortController | null>(null), minePromise = useRef<Promise<unknown> | null>(null);
+  const miningCheckpoint = useRef<{ key: string; results: import('@/lib/fishScanner').FishScanCheckpoint } | null>(null);
   const mine = useCallback(async (settings: FishScanSettings, onProgress?: (p: FishProgress) => void): Promise<TradeSignal[]> => {
     const sc = (scanner.current ??= pageScanner ??= new FishScanner());
     if (controller.current || mineController.current || sc.isBusy()) throw new Error('取数器正忙');
     const mine = new AbortController(); mineController.current = mine;
+    const checkpointKey = JSON.stringify([ownerRef.current, settings]);
+    if (miningCheckpoint.current?.key !== checkpointKey) miningCheckpoint.current = { key: checkpointKey, results: new Map() };
+    const checkpoint = miningCheckpoint.current;
     const found: TradeSignal[] = [];
-    const run = sc.scan({ ...settings, signal: mine.signal, onProgress: p => onProgress?.(p), onSignal: s => { found.push(s); } });
+    const run = sc.scan({ ...settings, checkpoint: checkpoint.results, signal: mine.signal, onProgress: p => onProgress?.(p), onSignal: s => { found.push(s); } });
     minePromise.current = run;
-    try { const result = await run; if (mine.signal.aborted) throw new DOMException('已让路给捕捞', 'AbortError'); if (result.status === 'aborted') throw new Error(result.error || '这一档没扫完'); return found; }
+    try { const result = await run; if (mine.signal.aborted) throw new DOMException('已让路给捕捞', 'AbortError'); if (result.status === 'aborted') throw new Error(result.error || '这一档没扫完'); if (miningCheckpoint.current === checkpoint) miningCheckpoint.current = null; return found; }
     finally { if (mineController.current === mine) { mineController.current = null; minePromise.current = null; } }
   }, []);
   const stopMining = useCallback(() => mineController.current?.abort(), []);

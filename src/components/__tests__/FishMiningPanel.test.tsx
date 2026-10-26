@@ -26,7 +26,8 @@ it('explains the plan, starts mining and edits the target', () => {
 it('shows the running anchor, reached target, caught-up and error states', () => {
   const rules = currentDefaultRules();
   const { rerender } = render(<FishMiningPanel mining={api({ running: true, anchorMs: MINING_START_MS, progress: { done: 12, total: 300 } }, { enabled: true, rules }) as never} sellFixed campaignHref="#"/>);
-  expect(screen.getByRole('status')).toHaveTextContent('挖掘中');
+  expect(screen.getByRole('status')).toHaveTextContent('挖掘中12/300');
+  expect(screen.getByLabelText('本档已扫 12 / 300 个标的')).toBeVisible();
   expect(screen.getByRole('status')).toHaveAccessibleName('正在挖 2026-04-01 00:00 这一档（12 / 300 个标的）');
   expect(screen.getByRole('button', { name: '暂停' })).toBeVisible(); expect(screen.queryByText(/还没固定卖出方案/)).toBeNull();
   rerender(<FishMiningPanel mining={api({}, { enabled: true, rules, mined: 1001 }) as never} sellFixed campaignHref="#"/>);
