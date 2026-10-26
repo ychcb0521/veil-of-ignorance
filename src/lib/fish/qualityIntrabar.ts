@@ -43,14 +43,14 @@ export interface QualityIntrabarCondition {
   plan: FishProgram; scale: number; rule: {direction:QualityOperator;threshold:number}; cause?:QualityExitCause;
 }
 export async function findQualityIntrabarExit(o: {
-  row: TradeSignal; plan: FishProgram; scale: number; rule: { direction:'<'|'>';threshold:number };
+  row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[] }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
-  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),{plan:o.plan,scale:o.scale,rule:o.rule}];
+  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule}]:[])];
   const streams=[];
   for(const c of inputs) {
     if (!(c.plan.step>=MINUTE) || c.plan.step%MINUTE!==0) throw new Error('盘中复原要求指标周期为整数分钟');
@@ -76,19 +76,19 @@ export async function findQualityIntrabarExit(o: {
   const check=(at:number):QualityTrigger|undefined=>{
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
-    let matched:QualityTrigger|undefined,error:string|undefined;
+    let error:string|undefined;
     for(const s of streams) {
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
       if(!Number.isFinite(reading)) {error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
-      if(at>=checkFrom&&qualityConditionMet(reading,s.rule.direction,s.rule.threshold))matched??={at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause};
+      // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
+      if(at>=checkFrom&&qualityConditionMet(reading,s.rule.direction,s.rule.threshold))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause};
       s.previous={at,reading};
     }
-    if(matched)return matched;
     if(error)throw new Error(error);
   };
-  const start=Math.min(...streams.map(s=>s.start)),prices:ResearchBar[]=[];
+  const start=streams.length?Math.min(...streams.map(s=>s.start)):o.since,prices:ResearchBar[]=[];
   if(start===(o.resumed?o.since:o.entry)) {
     const trigger=check(start);if(trigger)return {trigger,prices};
   }

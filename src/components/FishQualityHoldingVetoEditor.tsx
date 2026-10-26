@@ -15,7 +15,7 @@ export function FishQualityHoldingVetoEditor({draft,setDraft}:{draft:HoldingVeto
   }).join('；');
   return <section className="border-t border-border pt-3 space-y-2" data-testid="quality-holding-veto-editor">
     <p className="text-xs font-medium">持仓一票否决卖出</p>
-    <p className="text-[10.5px] leading-relaxed text-muted-foreground">任一启用条件达标即卖出，无需等待原卖出条件，以最先触发者为准。否决规则只作用于当前这套卖出方案（固定它做探测比较时同样生效），其他方案各有各的。阈值由你填写，未启用不生效。</p>
+    <p className="text-[10.5px] leading-relaxed text-muted-foreground">任一启用条件首次达标，立即按最早可确认时点卖出；无需其他条件同时满足，也无需设置或等待普通卖出门槛。回撤盘中触价即模拟成交；指标逐分钟复原，不等原周期 K 线收盘。否决规则只作用于当前这套卖出方案（固定它做探测比较时同样生效），其他方案各有各的。阈值由你填写，未启用不生效。</p>
     <div className="space-y-2">{draft.map((d,i)=>{const risk=d.choice==='static-drawdown'||d.choice==='dynamic-drawdown';return <div key={i} className="flex items-center gap-1">
       <input type="checkbox" className="h-3 w-3 shrink-0" aria-label={`启用持仓否决 ${i+1}`} checked={d.enabled} onChange={e=>patch(i,{enabled:e.target.checked})}/>
       <select aria-label={`持仓否决 ${i+1} 指标`} className={`${field} flex-1`} value={d.choice} onChange={e=>patch(i,{choice:e.target.value,direction:e.target.value.endsWith('-drawdown')?'>=':d.direction})}>

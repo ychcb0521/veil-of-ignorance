@@ -1,7 +1,7 @@
 /** Rebuild derived comparison trades only. Original versions stay in the same account's archive. */
 import { BUILTIN_FEATURES, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { shortFishHash } from './algorithm';
-import { evaluateQualitySample, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult } from './quality';
+import { hasQualityExit, evaluateQualitySample, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult } from './quality';
 import { hasQualityCampaign, type QualityCampaignRun } from './qualityCampaignArchive';
 import type { FishReconstructionLoader } from './reconstruction';
 
@@ -30,7 +30,7 @@ function targetPlan(run: QualityCampaignRun, definitions: readonly DeepDigFeatur
 export function qualityRepairTasks(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[]): QualityRepairTask[] {
   const tasks = new Map<string, QualityRepairTask>();
   for (const run of study.campaignRuns ?? []) {
-    if (run.supersededBy || !run.plan.rule) continue;
+    if (run.supersededBy || !hasQualityExit(run.plan)) continue;
     let plan = run.plan, error: string | undefined;
     try { plan = targetPlan(run, definitions); } catch (e) { error = (e as Error).message; }
     const enteredAt = finiteTime(run.sample.enteredAt) ? run.sample.enteredAt : finiteTime(run.result.entryTime) ? run.result.entryTime : null;

@@ -1,4 +1,4 @@
-import { qualityComparisonRows, qualityResultKey, qualityVetoVersion, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+import { hasQualityExit, qualityComparisonRows, qualityResultKey, qualityVetoVersion, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity } from './qualityVeto';
 import { shortFishHash } from './algorithm';
 
@@ -18,7 +18,7 @@ export interface QualityCampaignRun {
 }
 export const isCurrentQualityRun = (run: QualityCampaignRun) => !run.supersededBy && (!run.repair || run.repair.status === 'verified');
 export const qualitySellKey = (plan: QualityGroup) => JSON.stringify([plan.id, plan.rule ?? null, plan.snapshot.definitionKey, plan.snapshot.interval, plan.snapshot.scale,...(plan.execution === 'intrabar-1m' ? ['intrabar-1m-v1'] : []),...(holdingVetoIdentity(plan.holdingVetoes).length ? [[qualityVetoVersion(plan),holdingVetoIdentity(plan.holdingVetoes)]] : [])]);
-export const qualityRuleLabel = (plan: QualityGroup) => `${plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '待设门槛'}${activeHoldingVetoes(plan.holdingVetoes).length ? ` · 否决：${activeHoldingVetoes(plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`).join(' 或 ')}` : ''}`;
+export const qualityRuleLabel = (plan: QualityGroup) => `${plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : hasQualityExit(plan) ? '仅一票否决' : '待设门槛'}${activeHoldingVetoes(plan.holdingVetoes).length ? ` · 否决：${activeHoldingVetoes(plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}`).join(' 或 ')}` : ''}`;
 export const qualityFormulaVersion = (plan: QualityGroup) => shortFishHash(JSON.stringify([plan.snapshot.definitionKey, plan.snapshot.interval, plan.rule?.metric ?? plan.metric]));
 export const qualityVersionedRuleLabel = (plan: QualityGroup) => `${qualityRuleLabel(plan)}${activeHoldingVetoes(plan.holdingVetoes).some(v => v.kind !== 'indicator') ? plan.vetoFill === 'stop' ? ' · 止损价成交' : ' · 否决次分钟开盘成交' : ''} · ${plan.execution === 'intrabar-1m' ? '盘中达标 · 1m复原' : '收盘确认'} · ${plan.definitionSource === 'account' ? '账号公式' : '历史公式'} ${qualityFormulaVersion(plan)}`;
 const rowIndexes = new WeakMap<QualitySample[], Map<string, QualitySample>>();
@@ -41,8 +41,8 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   if (!index) { index = new Map(qualityComparisonRows(study).map(row => [row.id, row])); rowIndexes.set(study.samples, index); }
   const sample = index.get(result.sampleId);
   const plan = (study.sellPlans ?? study.groups).find(group => group.id === result.groupId);
-  // 没设门槛的卖出方案只是登记了买入，不是一场试验，不存成战役
-  if (!sample || !plan?.rule || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return study;
+  // 未设置普通门槛、也没有启用否决的方案只是登记买入，不存成战役
+  if (!sample || !plan || !hasQualityExit(plan) || !hasQualityCampaign(result) || qualityResultKey(sample, plan, study.observeHours) !== result.key) return study;
   const prior = study.campaignRuns?.find(run => run.result.key === result.key);
   const selected = new Set(study.selectedRowIds ?? []);
   const selectedDetectors = legacy ? sample.groups : sample.groups.filter(id => selected.has(sample.id) || selected.has(`${sample.id}/detector/${id}`));
@@ -61,8 +61,8 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
 }
 /** Adopt pre-existing evaluated results without rerunning market data. */
 export function archiveQualityStudy(study: FishQualityStudy): FishQualityStudy {
-  // 清掉早先存进来的「待设门槛」记录（没有卖出规则，只登记了买入）
-  const kept = study.campaignRuns?.filter(run => run.repair || run.plan.rule && hasQualityCampaign(run.result));
+  // 清掉只登记买入的旧记录；仅启用否决也属于有效卖出试验
+  const kept = study.campaignRuns?.filter(run => run.repair || hasQualityExit(run.plan) && hasQualityCampaign(run.result));
   if (kept && kept.length !== study.campaignRuns!.length) study = { ...study, campaignRuns: kept };
   const keys = new Set(study.campaignRuns?.map(run => run.result.key));
   let next = study;
@@ -70,7 +70,7 @@ export function archiveQualityStudy(study: FishQualityStudy): FishQualityStudy {
   return next;
 }
 export function markQualityDetection(study: FishQualityStudy, planId: string): FishQualityStudy {
-  const next = archiveQualityStudy(study), plan = next.sellPlans?.find(p => p.id === planId && p.rule);
+  const next = archiveQualityStudy(study), plan = next.sellPlans?.find(p => p.id === planId && hasQualityExit(p));
   if (!plan) return study;
   return { ...next, selectedSellId: planId, campaignRuns: next.campaignRuns?.map(run =>
     run.detectors.length && qualitySellKey(run.plan) === qualitySellKey(plan) && run.observeHours === next.observeHours

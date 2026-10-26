@@ -1,7 +1,7 @@
 /** Two-stage comparisons use one entry per fish and a common set of sell experiments. */
 import { STATE_DEF, CDA_DEF, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
-import { activeBuyFilters, anyBuyFilters, qualityComparisonRows, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+import { activeBuyFilters, anyBuyFilters, hasQualityExit, qualityComparisonRows, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
 
 export function enableQualityComparison(study: FishQualityStudy, definitions = accountFeatureDefs()): FishQualityStudy {
   if (study.sellPlans) return study;
@@ -46,7 +46,7 @@ export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {
 const usable = (r: QualityResult | undefined, closedOnly: boolean): r is QualityResult => !!r && Number.isFinite(r.returnPct) && (r.status === 'closed' || !closedOnly && r.status === 'open');
 /** Identical rows and identical current valuation for unfinished positions, never independent missing-data denominators. */
 export function qualityPairedRows(study: FishQualityStudy, rows: QualitySample[], closedOnly: boolean): QualitySample[] {
-  const plans = (study.sellPlans ?? []).filter(p => p.rule), results = qualityResultMap(study);
+  const plans = (study.sellPlans ?? []).filter(hasQualityExit), results = qualityResultMap(study);
   if (!plans.length) return [];
   const latest = study.results.reduce((time, r) => plans.some(p => p.id === r.groupId) ? Math.max(time, r.evaluatedAt) : time, 0);
   const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
@@ -59,7 +59,7 @@ export function qualityPairedRows(study: FishQualityStudy, rows: QualitySample[]
  * 一套卖出方案自己的有效样本（各方案买入过滤不同时用）：这套方案下有收益的信号；未完成的持仓只取最近一次一起估值的那批。
  */
 export function qualityPlanRows(study: FishQualityStudy, rows: QualitySample[], plan: QualityGroup, closedOnly: boolean): QualitySample[] {
-  if (!plan.rule) return [];
+  if (!hasQualityExit(plan)) return [];
   const results = qualityResultMap(study);
   const latest = study.results.reduce((time, r) => r.groupId === plan.id ? Math.max(time, r.evaluatedAt) : time, 0);
   const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
@@ -97,7 +97,7 @@ export function qualityComparisonStats(study: FishQualityStudy, rows: QualitySam
   const filter = { on: filterOn, plans: planFilters.map(({ bought: _bought, ...rest }) => rest) };
   // 没有方案开过滤：各方案用同一批共同有效样本（同批对照）；开了：各方案只在自己买入的信号里统计
   const paired = filterOn ? [] : qualityPairedRows(study, rows, closedOnly);
-  const selected = plans.find(p => p.id === study.selectedSellId && p.rule);
+  const selected = plans.find(p => p.id === study.selectedSellId && hasQualityExit(p));
   const sells = plans.map((plan, i) => { const sample = filterOn ? qualityPlanRows(study, planFilters[i].bought, plan, closedOnly) : paired;
     return { plan, sample, ...qualityDistribution(sample.map(row => qualityRowResult(study, row, plan, results)!)) }; });
   const detectors = study.groups.map(group => {

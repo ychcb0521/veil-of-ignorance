@@ -32,6 +32,8 @@ export interface QualityGroup {
    */
   buyFilters?: QualityBuyFilter[];
 }
+/** Holding vetoes are independent exits, even without an ordinary sell threshold. */
+export const hasQualityExit = (group: QualityGroup) => !!group.rule || activeHoldingVetoes(group.holdingVetoes).length > 0;
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -317,7 +319,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
   if (end <= entry) return { ...base, status: 'waiting', reason: '等待入场后的首根 1 分钟 K 线' };
   try {
     const row = { ...sample.source, timeMs: now }, pp = pricePlan();
-    if (!group.rule) {
+    if (!hasQualityExit(group)) {
       // Enter now, but wait for a chosen exit experiment before loading the whole holding history.
       const bars = await load(row, entry, entry + QUALITY_MINUTE, pp, signal);
       validateFishBars(bars, entry + QUALITY_MINUTE, 1, QUALITY_MINUTE);
@@ -328,10 +330,10 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
     let trigger: QualityTrigger | undefined = prior?.pendingExit;
     let replayedPrices: ResearchBar[] | undefined;
-    if (group.rule && !trigger) {
+    if (!trigger) {
       const rule = group.rule;
-      if (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction)) throw new Error('卖出规则无效');
-      const { plan, scale } = qualityMetricPlan(group.snapshot, rule.metric);
+      if (rule && (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction))) throw new Error('卖出规则无效');
+      const { plan, scale } = rule ? qualityMetricPlan(group.snapshot, rule.metric) : { plan: pp, scale: 1 };
       const vetoes=activeHoldingVetoes(group.holdingVetoes);
       vetoes.forEach(validateHoldingVeto);
       if (group.execution === 'intrabar-1m' || vetoes.length) {
@@ -345,7 +347,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
         const conditions=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
         const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding });
         trigger = replay.trigger; replayedPrices = replay.prices;
-      } else {
+      } else if (rule) {
         let cursor = Math.floor(since / plan.step) * plan.step;
         const stop = Math.floor(end / plan.step) * plan.step;
         while (cursor < stop && !trigger) {
@@ -475,7 +477,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
     if (options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
-    if (!cached?.complete && !(!g.rule && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
+    if (!cached?.complete && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));
     }

@@ -13,6 +13,16 @@ function state(): FishQualityState {
   return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
+it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
+ const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
+ const s=state(),plan=s.study.sellPlans![0];plan.holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',5)];
+ render(<FishQuality state={s}/>);
+ const editor=screen.getByRole('button',{name:'设置状态 S 原始值卖出算法'});expect(editor).toHaveTextContent('仅一票否决');
+ fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
+ expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
+ fireEvent.click(editor);fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
+ expect(within(screen.getByLabelText('固定卖出方案')).getByRole('option',{name:'状态 S 原始值 仅一票否决'})).toBeInTheDocument();
+});
 it('defaults to one row per symbol/time, toggles detector details from the header and preserves partial and bulk selection',()=>{
  const s=state(), ids=s.study.selectedRowIds!;
  s.study.selectedRowIds=[ids[0]];

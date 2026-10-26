@@ -2,7 +2,7 @@ import { activeHoldingVetoes } from './qualityVeto';
 import { buildXlsx, type XlsxSheet } from '@/lib/xlsxWorkbook';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
-import { activeBuyFilters, expandQualityRows, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualitySample } from './quality';
+import { hasQualityExit, activeBuyFilters, expandQualityRows, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityRowResult, qualityResultMap } from './qualityComparison';
 import { archiveQualityStudy, isCurrentQualityRun, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
 import { qualityDefinition } from './quality';
@@ -13,7 +13,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   const plans = study.sellPlans ?? [], groups = new Map(study.groups.map(g => [g.id, g])), results = qualityResultMap(study), readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const sheets: XlsxSheet[] = [{ name: '鱼质量', columns: [
     { header: '标的', width: 25 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 },
-    ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${p.rule ? `${p.rule.direction} ${p.rule.threshold}` : '未设置'}）收益率 %`, width: 34 },
+    ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${p.rule ? `${p.rule.direction} ${p.rule.threshold}` : hasQualityExit(p) ? '仅一票否决' : '未设置'}）收益率 %`, width: 34 },
       {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 动态最大回撤 %`,width:30},{header:`${p.label} · 持仓小时`,width:22}]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [

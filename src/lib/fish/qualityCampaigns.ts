@@ -6,7 +6,7 @@ import { loadQualityStudy } from './qualityStore';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
-import { QUALITY_NOTIONAL, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { QUALITY_NOTIONAL, hasQualityExit, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { syncQualitySellDefinitions } from './qualityComparison';
 
@@ -91,13 +91,13 @@ export function qualityCampaignDataFromStudy(owner: string, study: FishQualitySt
     const plan = study.sellPlans?.find(p => p.id === run.plan.id);
     return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass';
   };
-  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && run.plan.rule && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
+  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
     && bought(run))
     .map(run => buildQualityCampaignData(owner, run, section));
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect') {
   const loaded = await loadQualityStudy(owner);
-  const selected = syncQualitySellDefinitions(loaded.study).sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && plan.rule);
+  const selected = syncQualitySellDefinitions(loaded.study).sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && hasQualityExit(plan));
   const buyFilterLabel = section === 'sell' ? qualityBuyFilterSummary(loaded.study) : '';
   return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning, buyFilterLabel, repair: loaded.study.campaignRepair,
     selectedSellKey: selected ? JSON.stringify([qualitySellKey(selected), loaded.study.observeHours]) : undefined };

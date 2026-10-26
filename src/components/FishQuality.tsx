@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { normalizeSignalQuality, signalMonthKey, type TradeSignal } from '@/lib/signalLibrary';
 import { EXCHANGE_NAMES } from '@/lib/fish/exchanges';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeBuyFilters, anyBuyFilters, planBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
+import { hasQualityExit, activeBuyFilters, anyBuyFilters, planBuyFilters, qualityDrawdownPct, qualityDisplayRows, qualityDefinition, qualityFilterReadingKey, qualityFilterStatus, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample } from '@/lib/fish/quality';
 import { holdingVetoDraft, parseHoldingVetoDraft, makeQualityBuyFilter, qualityFilterChoiceKey, qualityFilterChoices } from '@/lib/fish/qualityFilters';
 import { qualityResultMap, qualityRowResult, qualitySellSuggestions } from '@/lib/fish/qualityComparison';
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
@@ -30,7 +30,7 @@ const countSignals = (rows: readonly QualitySample[]) => new Set(rows.map(qualit
 const pct = (v?: number | null) => v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
 const signed = (v?: number | null) => v == null ? '' : v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-destructive' : '';
 const date = (v?: number | null) => v ? formatUTC8(v) : '—';
-const ruleText = (plan: QualityGroup) => plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '设置门槛';
+const ruleText = (plan: QualityGroup) => plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : hasQualityExit(plan) ? '仅一票否决' : '设置门槛';
 const isLibrary = (row: QualitySample) => row.origin === 'library';
 const sourceOf = (row: QualitySample) => isLibrary(row) ? 'library' : row.source.mined ? 'mined' : 'fish';
 // 来源筛选已选「信号库」时不显示（【用户要求】2026-10-26「表头已经选择了信号库之后，每行的标的后面就没必要显示信号库了」）
@@ -68,7 +68,7 @@ function SellEditor({ plan, state }: { plan: QualityGroup; state: FishQualitySta
       <button type="button" disabled={!state.ready} onClick={save} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用并重算</button>
     </div>
     <p className="text-[10.5px] leading-relaxed text-muted-foreground">以上数值供比较，未预选为最优。{plan.execution === 'intrabar-1m' ? '逐分钟复原原周期指标，首次达标后按紧接的分钟开盘价卖出；历史精度为 1 分钟。' : '首次满足条件的收盘后，按下一分钟开盘价卖出。'}</p>
-    {plan.rule && <div className="flex flex-wrap gap-2 text-[11px]"><button type="button" className="text-primary hover:underline" onClick={() => state.selectSell(plan.id)}>固定此方案，比较探测算法</button><button type="button" className="text-muted-foreground hover:underline" onClick={() => state.setRule(plan.id, undefined)}>清除门槛</button></div>}
+    {hasQualityExit(plan) && <div className="flex flex-wrap gap-2 text-[11px]"><button type="button" className="text-primary hover:underline" onClick={() => state.selectSell(plan.id)}>固定此方案，比较探测算法</button>{plan.rule && <button type="button" className="text-muted-foreground hover:underline" onClick={() => state.setRule(plan.id, undefined)}>清除门槛</button>}</div>}
     <details className="text-[10px] text-muted-foreground"><summary className="cursor-pointer">公式与参数</summary><pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">{definition.formula}</pre><p className="mt-1">{plan.snapshot.interval} 原周期 · hl {definition.halfLifeHours} 小时 · avgh {definition.avgHours} 小时 · 原值倍率 1</p><p className="mt-1">每次运行前读取当前账号定义，运行结果保存当次公式快照。</p></details>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
@@ -293,7 +293,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
       <div className="flex flex-wrap items-center justify-between gap-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-[10.5px]" role="tablist" aria-label="鱼质量比较阶段">{(['sell', 'detect'] as const).map((v, i) => <button type="button" role="tab" aria-selected={phase === v} key={v} className={`h-6 rounded px-2.5 ${phase === v ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} onClick={() => setPhase(v)}>{i + 1} · {v === 'sell' ? '比较卖出' : '比较探测'}</button>)}</div>
-          {phase === 'detect' && <select aria-label="固定卖出方案" value={study.selectedSellId ?? ''} className={`${field} max-w-64`} onChange={e => state.selectSell(e.target.value)}><option value="">选择一套卖出规则</option>{plans.filter(p => p.rule).map(p => <option key={p.id} value={p.id}>{p.label} {ruleText(p)}</option>)}</select>}
+          {phase === 'detect' && <select aria-label="固定卖出方案" value={study.selectedSellId ?? ''} className={`${field} max-w-64`} onChange={e => state.selectSell(e.target.value)}><option value="">选择一套卖出规则</option>{plans.filter(hasQualityExit).map(p => <option key={p.id} value={p.id}>{p.label} {ruleText(p)}</option>)}</select>}
           {phase === 'sell' && <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="过滤与持仓否决" title={filtersOn ? plans.map(p => `${p.label}：${activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') || '不过滤'}`).join('\n') : '给每套卖出方案分别设置买入条件和持仓一票否决条件'}><Filter className="h-3 w-3"/>过滤{vetoCount > 0 && <span className="text-primary">· 否决 {vetoCount}</span>}{filterCount > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[10px] tabular-nums text-primary">{filterCount}</span>}</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             {plans.length > 1 && <div role="tablist" aria-label="选择要设置过滤的卖出方案" className="mb-3 inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-[10.5px]">{plans.map(p => { const n = activeBuyFilters(study, p).length + activeHoldingVetoes(p.holdingVetoes).length; return <button type="button" role="tab" key={p.id} aria-selected={filterPlan?.id === p.id} onClick={() => setFilterPlanId(p.id)} className={`inline-flex h-6 items-center gap-1 rounded px-2.5 ${filterPlan?.id === p.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{p.label}{n > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[9.5px] tabular-nums text-primary">{n}</span>}</button>; })}</div>}
             {filterPlan && <BuyFilterEditor key={JSON.stringify([filterPlan.id, planBuyFilters(study, filterPlan), filterPlan.holdingVetoes ?? []])} state={state} plan={filterPlan} done={() => setFilterOpen(false)}/>}
@@ -308,7 +308,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
           <Popover><PopoverTrigger asChild><button type="button" className={button} aria-label="鱼质量跟踪设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" checked={study.tracking} disabled={!ready} onChange={e => state.setTracking(e.target.checked)}/>自动跟踪新鱼及更新收益</label><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；手动运行后每分钟更新已选信号；重新打开或更改勾选后，先点「更新收益」。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
         </div>
       </div>
-      {phase === 'detect' && mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && p.rule)} campaignHref="/journal/campaigns?section=detect"/>}
+      {phase === 'detect' && mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=detect"/>}
       <div className="flex flex-wrap items-center gap-1 text-[10.5px]">
         <button type="button" className={button} disabled={!ready || !rows.length} title={`全选当前筛选下的 ${rows.length} 行，包含未滚动到的行`} onClick={() => selectVisible(true)}>全部选中</button>
         <button type="button" className={button} disabled={!ready || !selectedIds.size} onClick={() => state.setSelectedRows([])}>清空选择</button>

@@ -14,6 +14,34 @@ const group=():QualityGroup=>({id:'g',label:'主规则',metric:'raw',execution:'
 const bar=(t:number,open=100,high=open,low=open,close=open):ResearchBar=>({openTime:t,open,high,low,close,volume:1,quoteVolume:100,takerBuyVolume:.5,takerBuyQuoteVolume:50});
 const loader=(f:(t:number)=>ResearchBar):FishReconstructionLoader=>async(_r,a,b,p)=>Array.from({length:(b-a)/p.step},(_,i)=>p.step===M?f(a+i*M):bar(a+i*p.step));
 const run=(g:QualityGroup,l:FishReconstructionLoader,now=T+8*M,prior?:Awaited<ReturnType<typeof evaluateQualitySample>>)=>evaluateQualitySample(sample,g,0,now,l,signal(),prior);
+it('lets any veto sell independently when no ordinary sell threshold is configured',async()=>{
+ const base={...group(),rule:undefined,vetoFill:'stop' as const};
+ const staticVeto=makeQualityHoldingVeto('static-drawdown','>=',5),dynamicVeto=makeQualityHoldingVeto('dynamic-drawdown','>=',30);
+ const staticResult=await run({...base,holdingVetoes:[staticVeto,dynamicVeto]},loader(t=>t===T?bar(t,100,100,94,100):bar(t)));
+ expect(staticResult).toMatchObject({status:'closed',endTime:T,endPrice:95,exitSnapshot:{cause:{kind:'static-drawdown'}}});
+ const dynamicResult=await run({...base,holdingVetoes:[staticVeto,dynamicVeto]},loader(t=>t===T?bar(t,100,150,100,150):bar(t,150,150,100,110)));
+ expect(dynamicResult).toMatchObject({status:'closed',endTime:T+M,endPrice:105,exitSnapshot:{cause:{kind:'dynamic-drawdown'}}});
+ const indicatorResult=await run({...base,holdingVetoes:[makeQualityHoldingVeto('custom:raw','<=',95,true,[def]),dynamicVeto]},loader(t=>t===T?bar(t,100,100,95,95):bar(t,99)));
+ expect(indicatorResult).toMatchObject({status:'closed',endTime:T+M,endPrice:99,exitSnapshot:{cause:{kind:'indicator'}}});
+});
+it('does not let a cached waiting entry suppress a veto-only run or omit its campaign and detector comparison',async()=>{
+ const {collectFishQuality,importQualityLibrary,newQualityStudy,qualityComparisonRows}=await import('@/lib/fish/quality');
+ const {archiveQualityStudy,markQualityDetection}=await import('@/lib/fish/qualityCampaignArchive');
+ const {qualityComparisonStats}=await import('@/lib/fish/qualityComparison');
+ const {qualityCampaignDataFromStudy}=await import('@/lib/fish/qualityCampaigns');
+ const plan={...group(),rule:undefined,vetoFill:'stop' as const,holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',5)]};
+ const study={...importQualityLibrary(newQualityStudy(T),[sample.source]),sellPlans:[plan]};
+ const row=qualityComparisonRows(study)[0];study.selectedRowIds=[row.id];
+ study.results=[{key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'waiting',entryTime:T,entryPrice:100}];
+ const results:Awaited<ReturnType<typeof evaluateQualitySample>>[]=[];await collectFishQuality({study,signal:signal(),onProgress:()=>{},onResult:r=>results.push(r)},loader(t=>bar(t,100,100,94,100)),T+4*M);
+ expect(results).toHaveLength(1);expect(results[0]).toMatchObject({status:'closed',endTime:T,endPrice:95});
+ study.results=results;
+ const saved=archiveQualityStudy(study);expect(saved.campaignRuns).toHaveLength(1);
+ expect(archiveQualityStudy(saved).campaignRuns).toHaveLength(1);
+ expect(qualityCampaignDataFromStudy('u',saved,'sell')).toHaveLength(1);
+ expect(qualityComparisonStats(saved,[row],true).sells[0].n).toBe(1);
+ expect(markQualityDetection(saved,plan.id).selectedSellId).toBe(plan.id);
+});
 it('applies the screenshot static thresholds 7.7 and 30 independently of dynamic drawdown, and stops at the tighter decimal threshold',async()=>{
  const g={...group(),vetoFill:'stop' as const,holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',7.7),makeQualityHoldingVeto('static-drawdown','>=',30)]};
  // 100 涨至 600 再跌回 100：动态回撤 83.33%，静态回撤仍为 0%，两条静态条件均不应触发。
