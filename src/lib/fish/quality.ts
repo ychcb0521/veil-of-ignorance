@@ -43,7 +43,7 @@ export interface QualityResult {
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
   exitReading?: number;
   pendingExit?: QualityTrigger;
-  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause };
+  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean };
 }
 /** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
 export function qualityDrawdownPct(result: QualityResult | undefined, kind: 'static' | 'dynamic'): number | null {
@@ -188,7 +188,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
-  const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push(['holding-veto-v1',vetoes]);
+  const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push(['holding-veto-v2',vetoes]);
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -381,8 +381,8 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
-      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause} : undefined,
-      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；按下一分钟开盘价卖出` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen} : undefined,
+      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };

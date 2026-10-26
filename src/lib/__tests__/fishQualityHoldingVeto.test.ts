@@ -80,3 +80,13 @@ it('offers account-defined variables and freezes the account formula rather than
  expect(makeQualityBuyFilter('state:state','>',.7,true,[changed]).snapshot.definitionKey).toContain('state = C * 2');
  expect(makeQualityHoldingVeto('custom:raw','>=',99,true,[def]).snapshot?.definitionKey).toContain('raw = C');
 });
+it('executes an opening gap immediately without waiting for the minute close or using its future extremes',async()=>{
+ const g={...group(),holdingVetoes:[makeQualityHoldingVeto('static-drawdown','>=',10)]};
+ const path=loader(t=>t===T?bar(t):t===T+M?bar(t,80,200,1,150):bar(t,100));
+ const whole=await run(g,path,T+3*M);
+ expect(whole).toMatchObject({endTime:T+M,endPrice:80,exitReading:20,peakPct:0,adversePct:expect.closeTo(-20),exitSnapshot:{atOpen:true}});
+ expect(whole.reason).toContain('按当分钟开盘价卖出');
+ const prior=await run(g,path,T+M);expect(prior.status).toBe('open');
+ expect(await run(g,path,T+3*M,prior)).toEqual(whole);
+ expect(await run(g,loader(t=>t===T?bar(t):bar(t,80,1000000,.001,999)),T+3*M)).toEqual(whole);
+});

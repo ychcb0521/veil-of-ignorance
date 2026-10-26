@@ -19,7 +19,7 @@ export function FishQualityHoldingVetoEditor({draft,setDraft}:{draft:HoldingVeto
       <input aria-label={`持仓否决 ${i+1} 阈值`} type="number" step="any" placeholder="自行设置" className={`${field} w-20`} value={d.threshold} onChange={e=>patch(i,{threshold:e.target.value})}/>{risk&&<span className="text-[10px]">%</span>}
       <button type="button" aria-label={`删除持仓否决 ${i+1}`} className="p-1 text-muted-foreground" onClick={()=>setDraft(draft.filter((_,j)=>i!==j))}><X className="h-3 w-3"/></button>
     </div>;})}</div>
-    <p className="text-[10px] leading-relaxed text-muted-foreground">静态：相对买入价的最大下跌。动态：先前高点至后续低点的最大跌幅。历史每完成 1 分钟即检查，达标后取下一分钟开盘价；同一分钟高低点先后不明时，不假定高点先发生。成交回撤可能因跳空超过阈值。</p>
+    <p className="text-[10px] leading-relaxed text-muted-foreground">静态：相对买入价的最大下跌。动态：先前高点至后续低点的最大跌幅。历史每完成 1 分钟即检查，达标后取下一分钟开盘价；若开盘跳空已越线，立即按该开盘价触发。同一分钟高低点先后不明时，不假定高点先发生。成交回撤可能因跳空超过阈值。</p>
     <p className="text-[10px] text-muted-foreground">指标选项来自当前账号公式，含自定义指标及公式变量；新增指标可在 Deep dig 定义。</p>
     <div><button type="button" className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" onClick={()=>setDraft([...draft,{choice:'static-drawdown',direction:'>=',threshold:'',enabled:false}])}><Plus className="h-3 w-3"/>添加否决条件</button></div>
   </section>;

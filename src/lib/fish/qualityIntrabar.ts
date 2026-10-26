@@ -11,7 +11,7 @@ import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, quality
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
-  at: number; reading: number; cause?: QualityExitCause;
+  at: number; reading: number; cause?: QualityExitCause; atOpen?:boolean;
   /** Indicator candle being observed; its eventual close is never read. */
   barOpenTime?: number;
   previous?: { at: number; reading: number };
@@ -63,13 +63,17 @@ export async function findQualityIntrabarExit(o: {
   if(risk.length&&!holding) throw new Error('持仓一票否决缺少买入价和回撤路径');
   const riskPrevious=new Map(risk.map(v=>[v.id,{at:o.since,reading:holdingVetoReading(holding!,v.kind as 'static-drawdown'|'dynamic-drawdown')}]));
   const checkFrom=o.resumed?o.since+MINUTE:o.entry;
-  const check=(at:number):QualityTrigger|undefined=>{
-    if(at<(o.resumed?o.since:o.entry))return;
-    if(at>=checkFrom)for(const v of risk) {
-      const reading=holdingVetoReading(holding!,v.kind as 'static-drawdown'|'dynamic-drawdown');
+  const checkRisk=(at:number,path:QualityHoldingPath|undefined):QualityTrigger|undefined=>{
+    for(const v of risk) {
+      const reading=holdingVetoReading(path!,v.kind as 'static-drawdown'|'dynamic-drawdown');
+      // Inclusive percentage thresholds tolerate only floating-point roundoff.
       if(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,Math.abs(reading),Math.abs(v.threshold)))return {at,reading,barOpenTime:at-MINUTE,previous:riskPrevious.get(v.id),cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}};
       riskPrevious.set(v.id,{at,reading});
     }
+  };
+  const check=(at:number):QualityTrigger|undefined=>{
+    if(at<(o.resumed?o.since:o.entry))return;
+    if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
     let matched:QualityTrigger|undefined,error:string|undefined;
     for(const s of streams) {
       const bars=s.partial?[...s.history,s.partial]:s.history;
@@ -96,6 +100,13 @@ export async function findQualityIntrabarExit(o: {
     for(let i=0;i<minutes.length;i++) {
       if(signal.aborted)throw new DOMException('已暂停','AbortError');
       const minute=minutes[i];
+      if(holding&&minute.openTime>=o.since) {
+        // The open is already observable. A gap through a price veto must not
+        // wait another minute, and none of this candle's future H/L/C is read.
+        const opening=advanceQualityHolding(holding,{...minute,high:minute.open,low:minute.open,close:minute.open});
+        const trigger=checkRisk(minute.openTime,opening);
+        if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices};}
+      }
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding)holding=advanceQualityHolding(holding,minute);}
       const at=minute.openTime+MINUTE,trigger=check(at);
