@@ -1,6 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { useFishNotify } from '@/hooks/useFishNotify';
 import { useFishAutoScan } from '@/hooks/useFishAutoScan';
+import { useFishMining } from '@/hooks/useFishMining';
+import { useFishFeatures } from '@/hooks/useFishFeatures';
 import { readFishAuto } from '@/lib/fish/autoScan';
 import { SignalTurnoverButton } from './SignalTurnover';
 import {
@@ -121,6 +123,9 @@ export function TimeControl({
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;
   const fishAuto = useFishAutoScan({ account: user?.id, selection: fishSelection, start: fish.start, busy: () => fish.busy() || reconstructionRunning.current });
+  // 比较探测的持续挖掘：取数器空闲才挖，捕捞一开始就让路
+  const fishDefs = useFishFeatures();
+  const fishMining = useFishMining({ account: user?.id, selection: fishSelection, defs: fishDefs, mine: fish.mine, stop: fish.stopMining, busy: () => fish.busy() || reconstructionRunning.current, signalsRef: fish.signalsRef, commit: fish.commit });
   // 切到自动模式时时间回到「现在」；之后在自动模式里自己输的照用（只用于手动点「开始捕捞」）
   const fishInputsRef = useRef(fishInputs); fishInputsRef.current = fishInputs;
   const lastFishMode = useRef(fishAuto.mode);
@@ -564,7 +569,7 @@ export function TimeControl({
         )}
       </div>
 
-      <div ref={fishHostRef}>{fishOpen && <FishPanel quality={fishQuality} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
+      <div ref={fishHostRef}>{fishOpen && <FishPanel quality={fishQuality} mining={fishMining} defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} hasRound={fish.hasRound} roundPlans={fish.roundPlans} onRecombine={fish.recombine} onLiveCombination={fish.switchLive} reconstruction={reconstruction} librarySignals={signals} onSuggest={fish.suggest} onDiagnose={fish.diagnose} signals={fish.signals} progress={fish.progress} inputs={fishInputs} onInputsChange={setFishInputs} selection={fishSelection} onSelectionChange={setFishSelection} onStart={settings => { fishAuto.noteManualRun(); void fish.start(settings); }} auto={fishAuto} notify={fishNotify} onCancel={fish.cancel}
         onJump={handleJumpFish} onDelete={handleDeleteFish} onRate={handleRateFish} jumpingSignalId={jumpingSignalId} tradedDayIndex={tradedDayIndex} campaignDayIndex={campaignDayIndex} />}</div>
 
       {/* 信号库折叠面板 */}

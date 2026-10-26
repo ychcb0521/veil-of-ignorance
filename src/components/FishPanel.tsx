@@ -34,6 +34,8 @@ import {fishSuggestionKey,readFishSuggestion,latestFishSuggestion,saveFishSugges
 
 export interface FishPanelProps {
   quality?: FishQualityState;
+  /** 比较探测的持续挖掘（TimeControl 里调度）。 */
+  mining?: import('@/hooks/useFishMining').FishMiningApi;
   reconstruction?: FishReconstructionState;
   hasRound?: boolean;
   /** 扫完后切换交集 / 并集：用上一轮的逐币结论直接重新合并（算法设置没变时）。 */
@@ -380,6 +382,6 @@ export function FishPanel(p: FishPanelProps) {
     <FishLibrary key={owner+'old'} rememberViewKey={owner+'old'} title="鱼舱" testId="fish-old" signals={old} defaultOpen onExport={()=>{try{downloadFishCabin(old);toast.success(`已导出 ${old.length} 条鱼舱记录`);}catch(error){toast.error(error instanceof Error?error.message:'导出失败');}}} emptyText="暂无信号：每次开始捕捞时，上一轮的新鱼会归入这里。"
       tradedDayIndex={p.tradedDayIndex} campaignDayIndex={p.campaignDayIndex} jumpingSignalId={p.jumpingSignalId} onJump={p.onJump} onDelete={p.onDelete} onRate={p.onRate} />
     </section>
-    {p.quality && <FishQuality state={p.quality} onJump={source => p.onJump(source.id)} canJump={source => p.signals.some(s => s.id === source.id)}/>}
+    {p.quality && <FishQuality state={p.quality} mining={p.mining} onJump={source => p.onJump(source.id)} canJump={source => p.signals.some(s => s.id === source.id)}/>}
   </section>;
 }

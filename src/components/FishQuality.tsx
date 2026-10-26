@@ -6,6 +6,8 @@ import { qualityCampaignPath } from '@/lib/campaignSections';
 import { hasQualityCampaign } from '@/lib/fish/qualityCampaignArchive';
 import { ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, Filter, Gauge, Plus, RefreshCw, Settings2, Star, X } from 'lucide-react';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import type { FishMiningApi } from '@/hooks/useFishMining';
+import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { FishProcessButton } from '@/components/FishProcess';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -119,7 +121,7 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
   </DialogContent></Dialog>;
 }
 
-export function FishQuality({ state, onJump, canJump }: { state: FishQualityState; onJump?: (source: TradeSignal) => void; canJump?: (source: TradeSignal) => boolean }) {
+export function FishQuality({ state, mining, onJump, canJump }: { state: FishQualityState; mining?: FishMiningApi; onJump?: (source: TradeSignal) => void; canJump?: (source: TradeSignal) => boolean }) {
   const { study, ready, running, progress } = state;
   const [open, setOpen] = useState(true), [query, setQuery] = useState(''), [month, setMonth] = useState(''), [algorithm, setAlgorithm] = useState(''), [origin, setOrigin] = useState<'' | 'fish' | 'library'>('');
   const [phase, setPhase] = useState<'sell' | 'detect'>('sell'), [showStats, setShowStats] = useState(false), [closedOnly, setClosedOnly] = useState(true);
@@ -232,6 +234,7 @@ export function FishQuality({ state, onJump, canJump }: { state: FishQualityStat
           <Popover><PopoverTrigger asChild><button type="button" className={button} aria-label="鱼质量跟踪设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2"><input type="checkbox" checked={study.tracking} disabled={!ready} onChange={e => state.setTracking(e.target.checked)}/>自动跟踪新鱼及更新收益</label><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；手动运行后每分钟更新已选信号；重新打开或更改勾选后，先点「更新收益」。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
         </div>
       </div>
+      {phase === 'detect' && mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && p.rule)} campaignHref="/journal/campaigns?section=detect"/>}
       <div className="flex flex-wrap items-center gap-1 text-[10.5px]">
         <button type="button" className={button} disabled={!ready || !rows.length} title={`全选当前筛选下的 ${rows.length} 行，包含未滚动到的行`} onClick={() => selectVisible(true)}>全部选中</button>
         <button type="button" className={button} disabled={!ready || !selectedIds.size} onClick={() => state.setSelectedRows([])}>清空选择</button>

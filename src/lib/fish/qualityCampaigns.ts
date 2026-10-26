@@ -4,9 +4,20 @@ import type { getCampaignFullData } from '@/lib/journalApi';
 import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { loadQualityStudy } from './qualityStore';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
+import { FISH_DEFAULT_ALGORITHMS } from './cards';
+import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, activeBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { syncQualitySellDefinitions } from './qualityComparison';
 
+/**
+ * 【用户要求】2026-10-26「探测比较模块中要增加一个指标"探测信号类别"，用于后续的观察和统计」
+ * 类别 = 这条信号命中的探测算法组合（按默认算法顺序排列，不含阈值），如「CBI-2·avg₂ + CBA·avg₂」。
+ */
+export function qualityDetectorCategory(detectors: readonly QualityGroup[]): string {
+  const rank = (d: QualityGroup) => { const i = FISH_DEFAULT_ALGORITHMS.indexOf(d.snapshot.featureId ?? ''); return i < 0 ? FISH_DEFAULT_ALGORITHMS.length : i; };
+  const labels = [...new Map([...detectors].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label)).map(d => [d.label, d.label])).values()];
+  return labels.length ? labels.join(' + ') : '无探测算法';
+}
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
 const iso = (time: number) => new Date(time).toISOString();
 /** Adapt the frozen paper trade into the exact inputs of existing campaign charts/metrics/exports. */
@@ -31,7 +42,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     importance_weight: 0, notes: `${sample.origin === 'library' ? '信号库' : '鱼舱'} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
     actual_evolution: [opening, ...(closed ? [{ ...opening, id: `${id}-exit`, timestamp: iso(end), event_type: 'main_fully_closed' as const, price: r.endPrice!, realized_pnl: pnl, close_time: iso(end), exit_price: r.endPrice!, recorded_at: iso(r.evaluatedAt) }] : [])],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
-    comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end,
+    comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       sellEvidence: { formula: definition.formula, definitionKey: plan.snapshot.definitionKey!, featureId: plan.snapshot.featureId!,
         metric: plan.rule?.metric ?? plan.metric, version: qualityFormulaVersion(plan), interval: plan.snapshot.interval ?? '5m',
         halfLifeHours: definition.halfLifeHours!, avgHours: definition.avgHours!, source: plan.definitionSource === 'account' ? 'account' : 'historical',

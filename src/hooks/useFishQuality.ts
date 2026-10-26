@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
@@ -112,6 +112,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }
   }, [change]);
   const cancel = useCallback(() => { controller.current?.abort(); }, []);
+  // 挖掘到的鱼：导入后自动勾选并评估（挖掘是用户主动开始的，算作已确认运行）
+  useEffect(() => {
+    if (!ready || !readyRef.current) return;
+    let picked = false;
+    change(s => { const next = selectMinedRows(s); picked = next !== s; return next; });
+    if (!picked) return;
+    selectionApproved.current = true;
+    if (controller.current) { rerun.current = true; return; }
+    const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);
+  }, [study.samples, ready, change, start]);
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
   const priorityRef = useRef<readonly string[]>([]);
   const setPriority = useCallback((ids: readonly string[]) => { priorityRef.current = ids; }, []);

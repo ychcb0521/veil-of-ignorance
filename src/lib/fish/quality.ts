@@ -55,6 +55,8 @@ export interface FishQualityStudy {
   campaignRuns?: QualityCampaignRun[];
   campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
+  /** 已自动勾选过的挖掘信号（之后用户取消勾选就不再勾回来）。 */
+  minedAutoSelected?: string[];
 }
 export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });
 /**
@@ -205,6 +207,18 @@ export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
   const signals = qualityComparisonRows(study), selected = new Set(study.selectedRowIds ?? []);
   const selectedSignals = new Set(expandQualityRows(signals).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.signalId));
   return signals.filter(s => selectedSignals.has(s.id) && (!study.cohortIds || study.cohortIds.includes(s.id)));
+}
+/**
+ * 挖掘到的鱼导入后自动勾选它的全部探测行，交给固定的卖出方案评估（比较探测）。
+ * 每条信号只自动勾一次；用户之后取消勾选就保持取消。没有新的返回原对象。
+ */
+export function selectMinedRows(study: FishQualityStudy): FishQualityStudy {
+  if (!study.sellPlans) return study;
+  const done = new Set(study.minedAutoSelected ?? []), fresh = qualityDisplayRows(study).filter(r => r.source.mined && !done.has(r.signalId!));
+  if (!fresh.length) return study;
+  const selected = new Set(study.selectedRowIds ?? []);
+  fresh.forEach(r => selected.add(r.id));
+  return { ...study, selectedRowIds: [...selected], minedAutoSelected: [...done, ...new Set(fresh.map(r => r.signalId!))] };
 }
 export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ?? study.groups;
 export function qualityExitSuggestions(group: QualityGroup): { label: string; rule: QualityExitRule }[] {
@@ -368,7 +382,12 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   };
   let done = 0;
   for (let batch = next(); batch; batch = next()) {
-    if (filters.length && !(await passes(batch[0].s))) { done += batch.length; options.onProgress({ done, total: tasks.length, current: '' }); continue; }
+    // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
+    if (filters.length && !(await passes(batch[0].s))) {
+      const kept = batch.filter(t => t.g.id === study.selectedSellId);
+      done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' });
+      batch = kept; if (!batch.length) continue;
+    }
     for (const { s, g } of batch) {
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });

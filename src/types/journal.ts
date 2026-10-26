@@ -390,6 +390,8 @@ export interface TradeCampaign {
     section: 'sell' | 'detect'; runKey: string; sellKey: string; sellLabel: string;
     detectors: { id: string; label: string }[]; valuedAt: number;
     repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
+    /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
+    category?: string;
     sellEvidence?: {
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';

@@ -40,6 +40,8 @@ export interface TradeSignal {
   caughtAt?: number;
   /** Immutable fishing-round snapshot retained in 鱼舱; separate from the next round’s fresh catch. */
   fishArchive?: { id: string; at: number };
+  /** 「比较探测」持续挖掘得到的鱼：扫描锚点（半天一档）。 */
+  mined?: { anchorMs: number };
   /** 稳定 id，用于列表 key 与删除 */
   id: string;
   /** 归一化后的标的，如 BTCUSDT（大写、去空格与斜杠） */
