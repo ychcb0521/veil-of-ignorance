@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
 import { FishQualityHoldingVetoEditor } from '@/components/FishQualityHoldingVetoEditor';
 import { activeHoldingVetoes, holdingVetoIdentity } from '@/lib/fish/qualityVeto';
@@ -145,11 +145,26 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
   </DialogContent></Dialog>;
 }
 
+const detectorText = (g: QualityGroup) => `${g.label} ${g.snapshot.direction ?? '>'} ${g.snapshot.threshold}`;
+/**
+ * 选探测算法：可以选一个，也可以选多个；不选 = 全部。表头和筛选栏共用。
+ * 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
+ */
+function DetectorPicker({ groups, counts, selected, onChange, children }: { groups: QualityGroup[]; counts: ReadonlyMap<string, number>; selected: readonly string[]; onChange: (ids: string[]) => void; children: ReactNode }) {
+  return <Popover><PopoverTrigger asChild>{children}</PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-80 max-h-[min(70vh,var(--radix-popover-content-available-height))] overflow-y-auto p-0 text-[11px]" data-testid="quality-detector-picker">
+    <div className="sticky top-0 flex items-center justify-between border-b border-border/50 bg-popover px-3 py-2"><span className="font-medium">探测算法<span className="ml-1.5 font-normal text-muted-foreground">{selected.length ? `已选 ${selected.length} / ${groups.length}` : `全部 ${groups.length} 个`}</span></span><button type="button" className="text-primary hover:underline disabled:text-muted-foreground/50 disabled:no-underline" disabled={!selected.length} onClick={() => onChange([])}>全部</button></div>
+    <ul role="group" aria-label="选择探测算法" className="py-1">{groups.map(g => { const on = selected.includes(g.id); return <li key={g.id} className="group/item flex items-center gap-2 px-3 py-1.5 hover:bg-muted/60">
+      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"><input type="checkbox" aria-label={`探测算法 ${detectorText(g)}`} checked={on} onChange={() => onChange(on ? selected.filter(id => id !== g.id) : [...selected, g.id])} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/><span className="min-w-0 flex-1 truncate">{g.label}</span><span className="shrink-0 font-mono text-muted-foreground/80">{g.snapshot.direction ?? '>'} {g.snapshot.threshold}</span></label>
+      <button type="button" className="shrink-0 text-primary opacity-0 hover:underline focus-visible:opacity-100 group-hover/item:opacity-100" aria-label={`只看 ${detectorText(g)}`} onClick={() => onChange([g.id])}>仅此</button>
+      <span className="w-8 shrink-0 text-right font-mono tabular-nums text-muted-foreground/60" title="条信号">{counts.get(g.id) ?? 0}</span>
+    </li>; })}</ul>
+  </PopoverContent></Popover>;
+}
 export function FishQuality({ state, mining, onJump, canJump }: { state: FishQualityState; mining?: FishMiningApi; onJump?: (source: TradeSignal) => void; canJump?: (source: TradeSignal) => boolean }) {
   const { study, ready, running, progress } = state;
   // 从交易战役返回：按离开时记下的状态打开（见 lib/fish/qualityReturn）
   const [back] = useState(() => pendingQualityReturn()), ui = back?.ui;
-  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithm, setAlgorithm] = useState(ui?.algorithm ?? ''), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
+  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithms, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   const [phase, setPhase] = useState<'sell' | 'detect'>(ui?.phase ?? 'sell');
   const [detectorExpanded, setDetectorExpanded] = useState(ui?.detectorExpanded ?? false);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -157,7 +172,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const rootRef = useRef<HTMLElement>(null);
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
   const rememberReturn = () => saveQualityReturn({
-    ui: { open, query, month, algorithm, origin, phase, detectorExpanded, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
+    ui: { open, query, month, algorithms, origin, phase, detectorExpanded, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
     scroll: ancestorScrolls(rootRef.current),
   });
   const [hours, setHours] = useState<string | null>(null), [error, setError] = useState(''), [detailId, setDetailId] = useState('');
@@ -165,7 +180,13 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
   const batch = allRows;
   // 月份条数跟随来源、探测算法、标的筛选；同一信号的多个探测行只计一次。
-  const narrowed = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!algorithm || r.detectorId === algorithm) && (!origin || sourceOf(r) === origin)), [batch, query, algorithm, origin]);
+  // 选中的探测算法里已不在当前批次的不算（否则整表会空掉）
+  const batchDetectors = useMemo(() => new Set(batch.map(r => r.detectorId).filter((id): id is string => !!id)), [batch]);
+  const activeAlgorithms = useMemo(() => algorithms.filter(id => batchDetectors.has(id)), [algorithms, batchDetectors]);
+  const searched = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!origin || sourceOf(r) === origin)), [batch, query, origin]);
+  const narrowed = useMemo(() => activeAlgorithms.length ? searched.filter(r => activeAlgorithms.includes(r.detectorId ?? '')) : searched, [searched, activeAlgorithms]);
+  /** 各探测算法在当前来源 / 标的筛选下的信号条数（同一信号只计一次）。 */
+  const detectorCounts = useMemo(() => { const ids = new Map<string, Set<string>>(); for (const r of searched) if (r.detectorId) { if (!ids.has(r.detectorId)) ids.set(r.detectorId, new Set()); ids.get(r.detectorId)!.add(r.signalId ?? r.id); } return new Map([...ids].map(([id, set]) => [id, set.size])); }, [searched]);
   const resultMap = useMemo(() => qualityResultMap(study), [study]);
   // 买入过滤按卖出方案各自一套：planId → 信号 → 这套方案下买没买
   const filtersOn = anyBuyFilters(study), filterReadings = study.filterReadings;
@@ -241,6 +262,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   };
   const tableRef = useRef<HTMLDivElement>(null), [rowPx, setRowPx] = useState(ROW_PX), [viewPx, setViewPx] = useState(TABLE_PX);
   const resetScroll = () => { setScrollTop(0); if (tableRef.current) tableRef.current.scrollTop = 0; };
+  const setAlgorithms = (ids: string[]) => { setAlgorithmsState(ids); resetScroll(); };
   const expandDetectors = (expanded: boolean) => { setDetectorExpanded(expanded); selectAnchor.current = null; resetScroll(); };
   // 返回时把表格与外面各层滚回原处：数据是陆续载入的，逐帧重试到位置稳住（最多 8 秒）；用户一动滚轮 / 触屏 / 按键就停手
   const readyRef = useRef(ready); readyRef.current = ready;
@@ -316,7 +338,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="relative shrink-0"><select aria-label="鱼质量的来源" className={`${field} appearance-none pr-6`} value={origin} onChange={e => { setOrigin(e.target.value as QualityReturnUi['origin']); resetScroll(); }}><option value="">全部来源（{countSignals(batch)}）</option><option value="fish">鱼（{countSignals(batch.filter(r => sourceOf(r) === 'fish'))}）</option><option value="library">信号库（{countSignals(batch.filter(isLibrary))}）</option><option value="mined">默认值（{countSignals(batch.filter(r => sourceOf(r) === 'mined'))}）</option></select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
-        <span className="relative max-w-60 shrink-0"><select aria-label="鱼质量的探测算法" className={`${field} w-full appearance-none pr-6`} value={algorithm} onChange={e => { setAlgorithm(e.target.value); resetScroll(); }}><option value="">全部探测算法</option>{groups.map(g => <option key={g.id} value={g.id}>{g.label} {g.snapshot.direction ?? '>'} {g.snapshot.threshold}</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
+        <DetectorPicker groups={groups} counts={detectorCounts} selected={activeAlgorithms} onChange={setAlgorithms}><button type="button" aria-label="鱼质量的探测算法" className={`${field} relative max-w-60 shrink-0 truncate pr-6 text-left ${activeAlgorithms.length ? 'text-foreground' : ''}`}>{!activeAlgorithms.length ? '全部探测算法' : activeAlgorithms.length === 1 ? detectorText(detectorMap.get(activeAlgorithms[0])!) : `探测算法 · 已选 ${activeAlgorithms.length} 个`}<ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></button></DetectorPicker>
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
       </div>
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
@@ -328,7 +350,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
           <th className={`${cell} min-w-[140px] font-medium`} aria-sort={ariaSort('time')}>{sortButton('time', '信号时间')}</th>
           <th className={`${cell} font-medium`} aria-sort={ariaSort('market')}>{sortButton('market', '市场')}</th><th className={`${cell} font-medium`} aria-sort={ariaSort('quality')}>{sortButton('quality', '评分')}</th><th className={`${cell} min-w-[80px] font-medium`} aria-sort={ariaSort('process')} title="按捕捞时刻排序；信号库在最后">{sortButton('process', '捕捞过程')}</th>
           {plans.map(p => <Fragment key={p.id}><th className={`${cell} min-w-[155px] border-l border-border/40 font-medium`} data-testid="quality-sell-column" aria-sort={sort === `sell:${p.id}` ? ascending ? 'ascending' : 'descending' : 'none'}><button type="button" className="block text-left hover:text-foreground" aria-label={`按${p.label}收益率排序`} onClick={() => changeSort(`sell:${p.id}`)}>卖出 · {p.label}{sort === `sell:${p.id}` ? ascending ? ' ↑' : ' ↓' : ''}</button><Popover><PopoverTrigger asChild><button type="button" className="mt-0.5 flex items-center gap-1 font-mono text-primary hover:underline" aria-label={`设置${p.label}卖出算法`}>{ruleText(p)}<ChevronDown className="h-2.5 w-2.5"/>{study.selectedSellId === p.id && <Check className="h-2.5 w-2.5"/>}</button></PopoverTrigger><PopoverContent align="start" className="w-80"><SellEditor key={`${p.id}:${JSON.stringify(p.rule)}`} plan={p} state={state}/></PopoverContent></Popover>{phase === 'sell' && (() => { const n = activeBuyFilters(study, p).length; return <button type="button" className={`mt-0.5 block text-left text-[9px] hover:underline ${n ? 'text-primary' : 'text-muted-foreground/60'}`} aria-label={`设置${p.label}的买入过滤`} title={n ? activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '这套方案买入全部信号'} onClick={() => openFilterFor(p.id)}>{n ? `买入过滤 ${n} 条` : '不过滤'}</button>; })()}</th>{phase === 'sell' && (['static','dynamic'] as const).map(kind => <th key={kind} className={`${cell} min-w-[110px] font-medium`} aria-sort={ariaSort(`${kind}:${p.id}`)} title={kind === 'static' ? '以买入价为基准，到持仓最低价的最大跌幅，至少为 0%。' : '持仓期间此前峰值到随后谷值的最大跌幅；不假定同一分钟内最高价、最低价的先后顺序。'}><button type="button" className="hover:text-foreground" aria-label={`按${p.label}${kind === 'static' ? '静态' : '动态'}最大回撤排序`} onClick={() => changeSort(`${kind}:${p.id}`)}>{kind === 'static' ? '静态' : '动态'}最大回撤{arrow(`${kind}:${p.id}`)}</button></th>)}{phase === 'sell' && <th className={`${cell} min-w-[84px] font-medium`} aria-sort={ariaSort(`held:${p.id}`)} title="买入到卖出的时长；还在持有的算到最近一次估值。"><button type="button" className="hover:text-foreground" aria-label={`按${p.label}持仓时间排序`} onClick={() => changeSort(`held:${p.id}`)}>持仓时间{arrow(`held:${p.id}`)}</button></th>}</Fragment>)}
-          <th className={`${cell} min-w-[240px] border-l border-border/40 font-medium`} data-testid="quality-detector-column" aria-sort={ariaSort('detector')}><span className="inline-flex items-center gap-2">{sortButton('detector', '探测算法')}<button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label="展开探测算法明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)}>{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th><th className={`${cell} font-medium`} aria-label="跳转"/>
+          <th className={`${cell} min-w-[240px] border-l border-border/40 font-medium`} data-testid="quality-detector-column" aria-sort={ariaSort('detector')}><span className="inline-flex items-center gap-2">{sortButton('detector', '探测算法')}{groups.length > 0 && <DetectorPicker groups={groups} counts={detectorCounts} selected={activeAlgorithms} onChange={setAlgorithms}><button type="button" aria-label="在表头选择探测算法" title={activeAlgorithms.length ? activeAlgorithms.map(id => detectorText(detectorMap.get(id)!)).join('、') : '选择一个或多个探测算法'} className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 ${activeAlgorithms.length ? 'bg-primary/15 text-primary' : 'text-muted-foreground/70 hover:bg-muted hover:text-foreground'}`}><Filter className="h-3 w-3"/>{activeAlgorithms.length > 0 && <span className="font-mono text-[10px] tabular-nums">{activeAlgorithms.length}</span>}</button></DetectorPicker>}<button type="button" className="inline-flex items-center gap-1 text-primary hover:underline" aria-label="展开探测算法明细" aria-expanded={detectorExpanded} onClick={() => expandDetectors(!detectorExpanded)}>{detectorExpanded ? '收起' : '展开'}<ChevronDown className={`h-3 w-3 ${detectorExpanded ? 'rotate-180' : ''}`}/></button></span></th><th className={`${cell} font-medium`} aria-label="跳转"/>
         </tr></thead><tbody>{padTop > 0 && <tr aria-hidden style={{ height: padTop }}/>}{visible.map(row => <tr key={row.id} className="group hover:bg-accent/30" data-testid="quality-fish-row">
           <td className={`${cell} sticky left-0 z-10 border-t border-border/40 bg-background font-mono group-hover:bg-accent`} title={EXCHANGE_NAMES[row.source.exchange ?? 'binance']}><span className="inline-flex items-center gap-2"><input type="checkbox" aria-label={`选择 ${row.source.symbol} ${date(row.source.timeMs)}${row.detectorId ? ` ${detectorMap.get(row.detectorId)?.label} ${detectorMap.get(row.detectorId)?.snapshot.threshold}` : detectorExpanded ? ' 信号库' : ' 合并信号'}`} title="按住 Shift 点另一行可连续选择" checked={rowSelected(row)} ref={el => { if (el) el.indeterminate = !rowSelected(row) && qualityTableMembers(row).some(member => selectedIds.has(member.id)); }} disabled={!ready} onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }} onChange={e => toggleRow(row.id, e.target.checked, (e.nativeEvent as MouseEvent).shiftKey === true)} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/>{row.source.symbol}</span>{row.source.exchange && row.source.exchange !== 'binance' && <span className="ml-1 font-sans text-[9px] text-muted-foreground">{EXCHANGE_NAMES[row.source.exchange]}</span>}{qualityTableMembers(row).some(isLibrary) && origin !== 'library' && <span className="ml-1"><LibraryBadge/></span>}{qualityTableMembers(row).some(member => !isLibrary(member) && member.source.mined) && <span className="ml-1"><MiningBadge/></span>}</td>
           <td className={`${cell} border-t border-border/40 font-mono text-muted-foreground`} title={`模拟买入：${date(row.enteredAt)}（${row.basis === 'detected' ? '实际发现' : row.basis === 'capture' ? '捕捞时刻' : row.basis === 'missing' ? '时间缺失' : isLibrary(row) ? '信号库信号时间' : '原始信号'}）`}>{date(row.source.timeMs)}</td>

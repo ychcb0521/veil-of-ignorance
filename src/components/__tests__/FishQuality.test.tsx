@@ -168,7 +168,8 @@ it('sorts the single detector column in both directions and filters to one exact
   const first = () => screen.getAllByTestId('quality-detector-cell')[0];
   expect(first()).toHaveTextContent('> 1');
   fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'})); expect(first()).toHaveTextContent('> 3');
-  fireEvent.change(screen.getByLabelText('鱼质量的探测算法'), {target:{value:s.study.groups.find(g=>g.snapshot.threshold===2)!.id}});
+  fireEvent.click(screen.getByRole('button', {name:'鱼质量的探测算法'}));
+  fireEvent.click(within(screen.getByTestId('quality-detector-picker')).getByRole('button', {name:/^只看 .* > 2$/}));
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(first()).toHaveTextContent('> 2');
 });
 
@@ -442,4 +443,28 @@ it('offers restart during a sell run, uses a separate action and requires a sele
   fireEvent.click(screen.getByRole('tab', { name: /比较卖出/ }));
   s.study = { ...s.study, selectedRowIds: [] }; view.rerender(<FishQuality state={s}/>);
   expect(screen.getByRole('button', { name: '重新开始' })).toBeDisabled();
+});
+// 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
+it('picks one or several detectors straight from the detector header, keeps the toolbar in sync and clears with 全部', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ }));
+  fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
+  const picker = screen.getByTestId('quality-detector-picker');
+  expect(within(picker).getAllByRole('checkbox')).toHaveLength(3);
+  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 1$/ }));
+  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 3$/ }));
+  const thresholds = () => screen.getAllByTestId('quality-detector-cell').map(c => c.textContent!.match(/> (\d)/)![1]).sort();
+  expect(thresholds()).toEqual(['1', '3']);
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个');
+  expect(screen.getByRole('button', { name: '在表头选择探测算法' })).toHaveTextContent('2');
+  expect(within(picker).getByText('已选 2 / 3')).toBeInTheDocument();
+  // 再点一次取消其中一个
+  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 1$/ }));
+  expect(thresholds()).toEqual(['3']);
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent(/> 3$/);
+  fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('全部探测算法');
 });
