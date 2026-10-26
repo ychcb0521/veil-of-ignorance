@@ -1,6 +1,7 @@
+import { renderFishQuality as render } from '@/test/renderFishQuality';
 // @vitest-environment jsdom
 import { saveFishAuto } from '@/lib/fish/autoScan';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeControl } from '../TimeControl';

@@ -1,5 +1,6 @@
+import { renderFishQuality as render } from '@/test/renderFishQuality';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { TimeControl } from '@/components/TimeControl';
 import { FISH_STORAGE_KEY, loadFishSignals } from '@/lib/fishSignals';
 import { SIGNAL_LIBRARY_STORAGE_KEY } from '@/lib/signalLibrary';

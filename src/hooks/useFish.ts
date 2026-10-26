@@ -40,6 +40,11 @@ function applyCatch(list: TradeSignal[], signal: TradeSignal, writes: RoundWrite
 
 // Shared across TimeControl instances and panel remounts in this browser page.
 let pageScanner: FishScanner | null = null;
+/** Independent of TimeControl's lifetime so a quality batch can finish on other routes. */
+export async function runPageFishQuality(options: import('@/lib/fish/quality').QualityRunOptions): Promise<void> {
+  pageScanner ??= new FishScanner();
+  await pageScanner.quality(options);
+}
 
 /** onCaught：每轮捕捞结束（手动或自动）时，这一轮第一次捕到的鱼，以及邮件要发的那张表（本轮所选算法的并集，见 unionFish）。 */
 export function useFish(userId: string | undefined, options: { onCaught?: (fish: TradeSignal[], mail: TradeSignal[]) => void } = {}) {

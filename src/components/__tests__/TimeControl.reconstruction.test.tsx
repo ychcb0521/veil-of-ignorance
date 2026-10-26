@@ -1,6 +1,7 @@
+import { renderFishQuality as render } from '@/test/renderFishQuality';
 import { saveFishAuto } from '@/lib/fish/autoScan';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { TimeControl } from '@/components/TimeControl';
 import { FISH_STORAGE_KEY } from '@/lib/fishSignals';
 import { SIGNAL_LIBRARY_STORAGE_KEY, type TradeSignal } from '@/lib/signalLibrary';
@@ -49,7 +50,8 @@ it('复原的评估与噪音标签只接收 Time Machine 旁的信号库，匹�
   await waitFor(() => expect(screen.getByTestId('fish-reconstruction-results')).toBeVisible());
   expect(mocks.scan).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByRole('button', { name: /^鱼/ }));
+  const cabinToggle = screen.getByRole('button', { name: /^鱼舱/ });
+  if (cabinToggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(cabinToggle);
   for (const id of ['fish-new-panel', 'fish-old-panel']) {
     const panel = screen.getByTestId(id);
     expect(within(panel).queryByText('匹配')).toBeNull();

@@ -21,7 +21,7 @@ import {
 import { useFishReconstruction } from '@/hooks/useFishReconstruction';
 import { reconstructionMatches } from '@/components/FishReconstruction';
 import { useFish } from '@/hooks/useFish';
-import { useFishQuality } from '@/hooks/useFishQuality';
+import { usePageFishQuality } from '@/contexts/FishQualityContext';
 import { armQualityReturn } from '@/lib/fish/qualityReturn';
 import type { FishExchange } from '@/lib/fish/exchanges';
 import { FishPanel, FISH_DEFAULT_ALGORITHMS } from '@/components/FishPanel';
@@ -122,7 +122,7 @@ export function TimeControl({
   mailFishRef.current = fish.unionFish;
   const [signals, setSignals] = useState<TradeSignal[]>(() => loadSignals());
   // 信号库的信号也进鱼质量，只参加卖出比较（与鱼舱的鱼分开）
-  const fishQuality = useFishQuality(user?.id, fish.signals, fish.quality, signals);
+  const fishQuality = usePageFishQuality(fish.signals, signals);
   const reconstruction = useFishReconstruction(user?.id, signals, fish.reconstruct);
   // 定时自动捕捞：放在这里而不是面板里，面板收起时也照常按时捕
   const reconstructionRunning = useRef(false); reconstructionRunning.current = reconstruction.running;

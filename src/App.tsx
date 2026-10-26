@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TradingProvider } from "@/contexts/TradingContext";
+import { FishQualityProvider } from "@/contexts/FishQualityContext";
 import { RouteLoadBoundary } from './components/RouteLoadBoundary';
 const Index = lazy(() => import('./pages/Index.tsx'));
 const AuthPage = lazy(() => import('./pages/AuthPage.tsx'));
@@ -98,6 +99,7 @@ function AppRoutes() {
   // Fully initialized → main app
   return (
     <TradingProvider>
+      <FishQualityProvider key={user.id} owner={user.id}>
       <MandatoryRuleQueueRoot />
       <RouteLoadBoundary key={location.pathname}><Routes>
         <Route path="/" element={<Index />} />
@@ -119,6 +121,7 @@ function AppRoutes() {
         <Route path="/guide" element={<GuidePage />} />
         <Route path="*" element={<NotFound />} />
       </Routes></RouteLoadBoundary>
+      </FishQualityProvider>
     </TradingProvider>
   );
 }

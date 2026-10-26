@@ -194,12 +194,12 @@ it('applies buy edits in filter mode, preserves sell snapshots and only recalcul
   expect(tasks.at(-1)!.mode).toBeUndefined();
 });
 
-it('retains filter mode when an aborted runner finishes after the queued filter edit', async () => {
+it('finishes the active batch before applying a queued filter edit', async () => {
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush(); chooseAndStart(h); await flush();
   act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [])); await flush(600);
-  expect(tasks[0].signal.aborted).toBe(true); expect(tasks).toHaveLength(1);
+  expect(tasks[0].signal.aborted).toBe(false); expect(tasks).toHaveLength(1);
   releases.shift()!(); await flush();
   expect(tasks).toHaveLength(2); expect(tasks[1].mode).toBe('filter');
   releases.shift()!(); await flush();
@@ -225,4 +225,44 @@ it('filters fully cached trades without calling the runner, including after rest
   act(() => restored.result.current.setFilters(planId, [{ ...f, threshold: .8 }], [])); await flush(600);
   expect(run).toHaveBeenCalledTimes(1);
   expect(restored.result.current.study.results).toEqual(saved.results);
+});
+
+it('finishes the frozen selection after rows, cohort and tracking change, preserving results of deselected rows', async () => {
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const other = { ...signal, id: 'b', symbol: 'BBBUSDT' };
+  const h = renderHook(() => useFishQuality('a', [signal, other], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush(); chooseAndStart(h); await flush();
+  const task = tasks[0], rows = qualityRunSamples(task.study), plan = task.study.sellPlans![0];
+  act(() => h.result.current.setSelectedRows([]));
+  act(() => h.result.current.setCohort([]));
+  act(() => h.result.current.setTracking(false));
+  await flush(61_000);
+  expect(task.signal.aborted).toBe(false); expect(h.result.current.running).toBe(true);
+  for (const row of rows) act(() => task.onResult({ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open', entryTime: T, entryPrice: 100, returnPct: 1 }));
+  expect(h.result.current.study.results).toHaveLength(2);
+  await flush(500);
+  expect(storage.save).toHaveBeenLastCalledWith('a', expect.objectContaining({ results: expect.arrayContaining([expect.objectContaining({ sampleId: rows[1].id })]) }));
+  releases.shift()!(); await flush();
+  expect(h.result.current.running).toBe(false); expect(tasks).toHaveLength(1);
+});
+
+it('archives an in-flight old rule after edits, then evaluates the new rule without interrupting the old batch', async () => {
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  const id = h.result.current.study.sellPlans![0].id;
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
+  const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans![0];
+  act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .4 })); await flush(600);
+  expect(old.signal.aborted).toBe(false); expect(tasks).toHaveLength(1);
+  const result = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: id, evaluatedAt: T, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 60000, endPrice: 110, returnPct: 10, pnl: 10 };
+  act(() => old.onResult(result));
+  expect(h.result.current.study.results).toHaveLength(0);
+  expect(h.result.current.study.campaignRuns![0].plan.rule?.threshold).toBe(.5);
+  releases.shift()!(); await flush();
+  expect(tasks).toHaveLength(2); expect(tasks[1].study.sellPlans![0].rule?.threshold).toBe(.4);
+  expect(h.result.current.study.campaignRuns![0].result).toEqual(result);
+  act(() => h.result.current.cancel()); releases.shift()!(); await flush(61_000);
+  expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
 });

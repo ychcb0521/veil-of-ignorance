@@ -55,13 +55,19 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
     if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current && !mode) return;
     if (!automatic) selectionApproved.current = true;
-    if (controller.current) { if (controller.current.signal.aborted) rerun.current = mode ?? 'refresh'; return; }
+    if (controller.current) {
+      // Settings can queue a follow-up; periodic ticks never prolong an active batch.
+      if (!automatic || mode || controller.current.signal.aborted) rerun.current = rerun.current === 'refresh' ? 'refresh' : mode ?? 'refresh';
+      return;
+    }
     if (mode && !qualityFilterNeedsData(current.current, mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
     if (!mode) change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const epoch = generation.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = structuredClone(current.current);
+    const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
+    const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
     const releaseNotifications = beginHistoryOnlyNotifications();
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
     setRunning(true); setError('');
@@ -75,9 +81,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         onResult: result => {
           if (epoch !== generation.current || aborter.signal.aborted) return;
           change(s => {
-            const sample = qualityRunSamples(s).find(v => v.id === result.sampleId), group = qualityRunGroups(s).find(v => v.id === result.groupId);
-            if (!sample || !group || qualityResultKey(sample, group, s.observeHours) !== result.key) return s;
-            return archiveQualityResult({ ...s, results: [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] }, result);
+            const sample = frozenSamples.get(result.sampleId), group = frozenGroups.get(result.groupId);
+            if (!sample || !group || qualityResultKey(sample, group, frozen.observeHours) !== result.key) return s;
+            const liveSample = qualityComparisonRows(s).find(v => v.id === result.sampleId), liveGroup = qualityRunGroups(s).find(v => v.id === result.groupId);
+            const matches = liveSample && liveGroup && qualityResultKey(liveSample, liveGroup, s.observeHours) === result.key;
+            if (!matches && controller.current !== aborter) return s;
+            const archived = archiveQualityResult({ ...frozen, campaignRuns: s.campaignRuns }, result);
+            return { ...s, campaignRuns: archived.campaignRuns, results: matches ? [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] : s.results };
           });
         },
       });
@@ -87,7 +97,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; setTimeout(() => void start(true, queued === 'refresh' ? undefined : queued), 0); } } }
     }
   }, [change]);
-  const cancel = useCallback(() => { controller.current?.abort(); }, []);
+  const cancel = useCallback(() => { rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
   // 挖掘到的鱼：导入后自动勾选并评估（挖掘是用户主动开始的，算作已确认运行）
   useEffect(() => {
     if (!ready || !readyRef.current) return;
@@ -113,34 +123,36 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     return () => clearInterval(timer);
   }, [ready, warning, owner]);
   const setRule = useCallback((id: string, rule?: QualityExitRule) => {
-    cancel(); change(s => ({ ...s, groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
+    change(s => ({ ...s, groups: s.groups.map(g => g.id === id ? { ...g, rule } : g), sellPlans: s.sellPlans?.map(g => g.id === id ? { ...g, rule } : g), selectedSellId: s.selectedSellId === id ? undefined : s.selectedSellId }));
     const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(); }, 500);
-  }, [change, cancel, start]);
-  const setObserveHours = useCallback((hours: number) => { cancel(); change(s => ({ ...s, observeHours: hours })); const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500); }, [change, cancel, start]);
-  const setTracking = useCallback((tracking: boolean) => { if (!tracking) cancel(); change(s => ({ ...s, tracking })); }, [change, cancel]);
+  }, [change, start]);
+  const setObserveHours = useCallback((hours: number) => {
+    change(s => ({ ...s, observeHours: hours }));
+    const epoch = generation.current;
+    setTimeout(() => { if (epoch !== generation.current) return; if (controller.current) rerun.current = 'refresh'; else void start(true); }, 500);
+  }, [change, start]);
+  const setTracking = useCallback((tracking: boolean) => { change(s => ({ ...s, tracking })); }, [change]);
   const selectSell = useCallback((id: string) => change(s => markQualityDetection(s, id)), [change]);
   const setCohort = useCallback((ids?: string[]) => {
-    cancel(); change(s => ({ ...s, cohortIds: ids ? qualityComparisonRows(s).filter(r => ids.includes(r.id)).map(r => r.id) : undefined }));
-    const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);
-  }, [change, cancel, start]);
+    change(s => ({ ...s, cohortIds: ids ? qualityComparisonRows(s).filter(r => ids.includes(r.id)).map(r => r.id) : undefined }));
+  }, [change]);
   const setSelectedRows = useCallback((ids: string[]) => {
-    selectionApproved.current = false; rerun.current = false; cancel();
+    selectionApproved.current = false; rerun.current = false;
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
-  }, [change, cancel]);
+  }, [change]);
   // 各方案独立过滤，买入条件只筛选已有结果；持仓否决变化才重新评估卖出。
   const setFilters = useCallback((planId: string, filters: QualityBuyFilter[], vetoes: QualityHoldingVeto[]) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
     if (!plan) return;
     const sellChanged = JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) !== JSON.stringify(holdingVetoIdentity(vetoes));
-    cancel();
     change(s => {
       const saved = materializePlanBuyFilters(sellChanged ? archiveQualityStudy(s) : s);
       return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, buyFilters: structuredClone(filters), holdingVetoes: structuredClone(vetoes) } : p) };
     });
     const epoch = generation.current;
     setTimeout(() => { if (epoch === generation.current) void start(!sellChanged, sellChanged ? undefined : selectionApproved.current ? 'filter' : 'filter-only'); }, 500);
-  }, [cancel, change, start]);
+  }, [change, start]);
   return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

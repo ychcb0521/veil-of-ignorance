@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { renderFishQuality as render } from '@/test/renderFishQuality';
 /**
  * 信号库在**真实体量**（791 条）下的行为与代价。
  *
@@ -12,7 +13,7 @@
  */
 import { saveFishAuto } from '@/lib/fish/autoScan';
 import { createElement, type ComponentType, type ReactElement } from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TimeControl } from '../TimeControl';
