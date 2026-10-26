@@ -54,6 +54,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (epoch !== generation.current || !readyRef.current) return;
       const next = value.study.campaignRepair, prior = current.current.campaignRepair;
       if (!next || next.id === prior?.id && next.revision <= prior.revision) return;
+      // Checkpoints remain durable without rerendering the full comparison matrix
+      // for every trade. Refresh on the initial checkpoint, pause and completion.
+      if (next.state === 'running' && prior?.id === next.id && prior.state === 'running') return;
       controller.current?.abort(); selectionApproved.current = false;
       change(() => syncQualitySellDefinitions(value.study));
     };

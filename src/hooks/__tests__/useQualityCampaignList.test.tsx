@@ -21,3 +21,19 @@ it('passes the sell board buy-filter label through and clears it on other boards
   const h = renderHook(() => useQualityCampaignList('a', 'sell'));
   await waitFor(() => expect(h.result.current.buyFilterLabel).toBe('状态 S 原始值 > 0.7'));
 });
+it('clears the list on the first repair checkpoint and rebuilds on completion rather than every saved trade', async () => {
+  const load = vi.mocked(listQualityCampaignData);
+  const h = renderHook(() => useQualityCampaignList('a', 'sell'));
+  await waitFor(() => expect(h.result.current.complete).toBe(true));
+  const initial = load.mock.calls.length;
+  load.mockResolvedValueOnce({ rows: [], repair: { id: 'batch-a', state: 'running' } } as never);
+  const saved = (state: string) => window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner: 'a', repair: { id: 'batch-a', state } } }));
+  await act(async () => { saved('running'); });
+  expect(load).toHaveBeenCalledTimes(initial + 1);
+  await act(async () => { for (let i = 0; i < 100; i++) saved('running'); });
+  expect(load).toHaveBeenCalledTimes(initial + 1);
+  await act(async () => { saved('paused'); });
+  expect(load).toHaveBeenCalledTimes(initial + 2);
+  await act(async () => { saved('complete'); });
+  expect(load).toHaveBeenCalledTimes(initial + 3);
+});

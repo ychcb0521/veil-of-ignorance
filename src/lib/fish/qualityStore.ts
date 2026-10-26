@@ -67,7 +67,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
     }
   });
   writes.set(key, task);
-  void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner } })); });
+  void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner, repair: copy.campaignRepair && { id: copy.campaignRepair.id, state: copy.campaignRepair.state } } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
   return task;
 }
