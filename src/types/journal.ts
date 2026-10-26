@@ -389,6 +389,7 @@ export interface TradeCampaign {
   comparison?: {
     section: 'sell' | 'detect'; runKey: string; sellKey: string; sellLabel: string;
     detectors: { id: string; label: string }[]; valuedAt: number;
+    repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
     sellEvidence?: {
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';

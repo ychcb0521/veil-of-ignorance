@@ -70,6 +70,7 @@ export function classifyFishReadings(symbol: string, bars: readonly ResearchBar[
 
 import { FishAdapter, fishTransport, type FishDataAdapter } from '@/lib/fish/adapters';
 import { collectFishQuality, type QualityRunOptions } from '@/lib/fish/quality';
+import { collectQualityRepair } from '@/lib/fish/qualityRepair';
 import { AUDITED_EXCHANGES, US_STOCK_EXCHANGES, EXCHANGE_PRIORITY, EXCHANGE_NAMES, fishBase, isFishStablecoin, selectFishMarkets, type FishExchange, type FishMarket } from '@/lib/fish/exchanges';
 
 export interface FishDiagnosis { outcome: 'hit' | 'below' | 'blocked' | 'unknown' | 'readings' | 'history' | 'gap' | 'failed' | 'skipped' | 'not_found'; cutoffMs?: number; lines: string[]; member?: FishMemberResult }
@@ -173,6 +174,12 @@ type ScanOptions = FishScanSettings & {
   onRound?: (round: FishCombinationRound) => void; onResult?: (key:string,result:FishMemberResult)=>void; skipReasons?: Partial<Record<FishExchange,string>>; signal: AbortSignal; onProgress: (progress: FishProgress) => void; onSignal: (signal: TradeSignal) => void };
 /** One frozen cutoff, a separate adapter/cache/rate budget for each venue, one shared classifier. */
 export class FishScanner {
+  async repairQuality(options: Parameters<typeof collectQualityRepair>[0]): Promise<void> {
+    const response = await this.requests.get('binance')!('time',1,options.signal) as { serverTime?: number };
+    if (!Number.isFinite(response.serverTime) || response.serverTime! <= 0) throw new FishError('币安服务器时间无效','failed');
+    const now = response.serverTime!;
+    await collectQualityRepair(options,createFishReconstructionLoader(this.adapters,async () => now),now);
+  }
   private running = false;
   /** 捕捞、建议、复原、成交额统计都共用这一个取数器；正在跑时自动捕捞要等它结束。 */
   isBusy(): boolean { return this.running; }

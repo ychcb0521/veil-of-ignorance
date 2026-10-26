@@ -1,4 +1,5 @@
 import { newQualityStudy, type FishQualityStudy } from './quality';
+import { preserveQualityRepairs } from './qualityRepair';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -32,7 +33,7 @@ export async function loadQualityStudy(owner?: string): Promise<{ study: FishQua
         req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
       });
       // A fallback can be newer if a previous durable write failed.
-      if (valid(fallback)) return { study: fallback };
+      if (valid(fallback)) return { study: preserveQualityRepairs(valid(stored) ? stored : undefined,fallback) };
       if (stored != null && !valid(stored)) throw new Error('invalid saved study');
       return { study: valid(stored) ? stored : newQualityStudy() };
     } finally { db.close(); }
@@ -42,21 +43,27 @@ export async function loadQualityStudy(owner?: string): Promise<{ study: FishQua
 }
 // Serialize writes per account. A slow earlier write must never overwrite a later result/rule edit.
 const writes = new Map<string, Promise<boolean>>();
-export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy): Promise<boolean> {
+export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly: boolean }): Promise<boolean> {
   const key = keyOf(owner), copy = structuredClone(study);
+  const merge = (previous: unknown) => options?.repairOnly && valid(previous) ? preserveQualityRepairs(copy,previous) : preserveQualityRepairs(valid(previous) ? previous : undefined,copy);
   const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
+    let durablePrevious: FishQualityStudy | undefined;
     try {
       const db = await open();
       try {
         await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).put(copy, key);
+          const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), read = store.get(key);
+          read.onsuccess = () => { durablePrevious = valid(read.result) ? read.result : undefined; store.put(merge(read.result), key); };
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
       } finally { db.close(); }
       try { localStorage.removeItem(key); } catch { /* optional cache cleanup */ }
       return true;
     } catch {
-      try { localStorage.setItem(key, JSON.stringify(copy)); return true; } catch { return false; }
+      try {
+        const saved = JSON.parse(localStorage.getItem(key) ?? 'null');
+        localStorage.setItem(key, JSON.stringify(merge(valid(saved) ? preserveQualityRepairs(durablePrevious,saved) : durablePrevious))); return true;
+      } catch { return false; }
     }
   });
   writes.set(key, task);

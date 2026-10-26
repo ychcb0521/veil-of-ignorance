@@ -2762,7 +2762,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       </header>
 
       <main className="max-w-[1600px] mx-auto px-6 py-4 space-y-4">
-        {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} />}
+        {campaign.comparison && <QualitySellEvidence evidence={campaign.comparison.sellEvidence} repair={campaign.comparison.repair} />}
         {/* 回收站里的战役：克制的一条提示配「恢复」，其余内容照常可读（数据本来就不过滤已删除的行） */}
         {campaign.deleted_at && (
           <div

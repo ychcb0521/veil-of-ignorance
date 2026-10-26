@@ -46,6 +46,24 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, study.tracking, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, study.tracking, change]);
   useEffect(() => {
+    if (!owner) return;
+    const epoch = generation.current;
+    const refreshed = async (changedOwner?: string) => {
+      if (changedOwner !== owner || !readyRef.current) return;
+      const value = await loadQualityStudy(owner);
+      if (epoch !== generation.current || !readyRef.current) return;
+      const next = value.study.campaignRepair, prior = current.current.campaignRepair;
+      if (!next || next.id === prior?.id && next.revision <= prior.revision) return;
+      controller.current?.abort(); selectionApproved.current = false;
+      change(() => syncQualitySellDefinitions(value.study));
+    };
+    const saved = (event: Event) => { void refreshed((event as CustomEvent).detail?.owner); };
+    const channel = typeof window.BroadcastChannel === 'function' ? new window.BroadcastChannel('veil-quality-repair') : undefined;
+    if (channel) channel.onmessage = event => { void refreshed(event.data?.owner); };
+    window.addEventListener('fish-quality-repaired',saved);
+    return () => { window.removeEventListener('fish-quality-repaired',saved); channel?.close(); };
+  },[owner,change]);
+  useEffect(() => {
     if (!ready || !readyRef.current) return;
     if (saveTimer.current) return;
     const epoch = generation.current;
@@ -55,6 +73,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }); }, 400);
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false) => {
+    if (current.current.campaignRepair?.state === 'running') { if (!automatic) setError('已有战役正在纠错，请先完成或暂停纠错。'); return; }
     if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) { if (controller.current.signal.aborted) rerun.current = true; return; }

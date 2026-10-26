@@ -47,6 +47,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTradingContext } from '@/contexts/TradingContext';
 import { useCampaignList } from '@/hooks/useCampaignList';
 import { useQualityCampaignList } from '@/hooks/useQualityCampaignList';
+import { QualityCampaignRepairControl } from '@/components/journal/QualityCampaignRepairControl';
 import { CAMPAIGN_SECTIONS, campaignSection } from '@/lib/campaignSections';
 import { useCampaignPricePaths } from '@/hooks/useCampaignPricePaths';
 import { useUnrealizedChartSnapshot } from '@/hooks/useUnrealizedChartSnapshot';
@@ -4449,6 +4450,7 @@ export default function JournalCampaignsPage() {
           {comparing && <><select aria-label="战役卖出方案" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={sellFilter} onChange={e => changeComparisonFilter('sell', e.target.value)}><option value="">全部卖出方案</option>{comparisonPlans.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>{section === 'detect' && <select aria-label="战役探测算法" className="h-8 max-w-72 rounded border border-border bg-card px-2 text-[11px]" value={detectorFilter} onChange={e => changeComparisonFilter('detector', e.target.value)}><option value="">全部探测算法</option>{comparisonDetectors.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>}<span className="text-[10.5px] text-muted-foreground">{section === 'detect' ? '同一交易命中多个探测算法时，整表只计一次；可筛选算法比较。' : '每个信号、每套卖出规则独立比较；可筛选同一卖出方案。'} 结果保存在当前账号的本机副本中。</span></>}
         </div>
         {comparing && <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-card px-3 py-2 font-mono text-[11px]" data-testid="comparison-campaign-results"><span>已卖出 {comparisonReturns.closed} / {comparisonReturns.total}</span><span>盈利 {comparisonReturns.wins} · 亏损 {comparisonReturns.losses}</span><span>平均收益 {comparisonReturns.mean == null ? '—' : `${comparisonReturns.mean > 0 ? '+' : ''}${comparisonReturns.mean.toFixed(2)}%`}</span><span>最差收益 {comparisonReturns.worst == null ? '—' : `${comparisonReturns.worst > 0 ? '+' : ''}${comparisonReturns.worst.toFixed(2)}%`}</span>{section === 'sell' && comparisonList.buyFilterLabel && <span className="font-sans text-[10.5px]" data-testid="comparison-buy-filter">买入过滤：{comparisonList.buyFilterLabel}</span>}<span className="font-sans text-[10px] text-muted-foreground">未设价格保护线或未加仓的风险指标，沿用原战役口径显示「—」。</span></div>}
+        {comparing && <QualityCampaignRepairControl owner={userId} />}
         {!comparing && activeCount > 0 && (
           <button
             type="button"

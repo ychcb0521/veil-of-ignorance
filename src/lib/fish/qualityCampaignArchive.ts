@@ -10,7 +10,12 @@ export interface QualityCampaignRun {
   firstEvaluatedAt: number;
   /** Set only when the user fixes this sell plan for detector comparisons. */
   detectionAt?: number;
+  /** Replaced rows remain available as an audit trail; normal lists resolve to the replacement. */
+  supersededBy?: string;
+  repair?: { batchId: string; status: 'pending' | 'verified' | 'failed'; checkedAt?: number; error?: string; beforeReturnPct?: number; beforeEndTime?: number };
+  priorResults?: { at: number; plan: QualityGroup; result: QualityResult }[];
 }
+export const isCurrentQualityRun = (run: QualityCampaignRun) => !run.supersededBy && (!run.repair || run.repair.status === 'verified');
 export const qualitySellKey = (plan: QualityGroup) => JSON.stringify([plan.id, plan.rule ?? null, plan.snapshot.definitionKey, plan.snapshot.interval, plan.snapshot.scale]);
 export const qualityRuleLabel = (plan: QualityGroup) => `${plan.label} ${plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '待设门槛'}`;
 export const qualityFormulaVersion = (plan: QualityGroup) => shortFishHash(JSON.stringify([plan.snapshot.definitionKey, plan.snapshot.interval, plan.rule?.metric ?? plan.metric]));
@@ -46,6 +51,7 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
   const { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market } = sample.source;
   const frozenSample = prior?.sample ?? { ...sample, groups: [...sample.groups], readings: undefined, source: { id, symbol, timeMs, timeLabel, fallbackZone, quality, exchange, market } };
   const run: QualityCampaignRun = {
+    ...prior,
     sample: frozenSample, plan: freezePlan(plan), detectors: detectors.map(freezePlan), result: structuredClone(result),
     observeHours: study.observeHours, firstEvaluatedAt: prior?.firstEvaluatedAt ?? result.evaluatedAt,
     detectionAt: prior?.detectionAt ?? (study.selectedSellId === plan.id && detectors.length ? result.evaluatedAt : undefined),
@@ -55,7 +61,7 @@ export function archiveQualityResult(study: FishQualityStudy, result: QualityRes
 /** Adopt pre-existing evaluated results without rerunning market data. */
 export function archiveQualityStudy(study: FishQualityStudy): FishQualityStudy {
   // 清掉早先存进来的「待设门槛」记录（没有卖出规则，只登记了买入）
-  const kept = study.campaignRuns?.filter(run => run.plan.rule && hasQualityCampaign(run.result));
+  const kept = study.campaignRuns?.filter(run => run.repair || run.plan.rule && hasQualityCampaign(run.result));
   if (kept && kept.length !== study.campaignRuns!.length) study = { ...study, campaignRuns: kept };
   const keys = new Set(study.campaignRuns?.map(run => run.result.key));
   let next = study;

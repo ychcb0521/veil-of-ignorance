@@ -33,3 +33,21 @@ it('serializes rapid account writes, falls back on database failure and reports 
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
   expect(await store.saveQualityStudy('a', newQualityStudy())).toBe(false);
 });
+it('preserves the durable correction log even if a stale tab hits IDB quota and falls back to localStorage',async()=>{
+  const store=await import('@/lib/fish/qualityStore'), old=newQualityStudy(100);
+  const fixed={...old,campaignRepair:{id:'r',startedAt:200,updatedAt:201,revision:2,targetVersion:'v',state:'complete' as const,targetKeys:[],completedKeys:[],changedKeys:[],failures:{}}};
+  expect(await store.saveQualityStudy('a',fixed)).toBe(true);
+  fail=true;
+  expect(await store.saveQualityStudy('a',{...old,tracking:false})).toBe(true);
+  const loaded=(await store.loadQualityStudy('a')).study;
+  expect(loaded.campaignRepair?.revision).toBe(2); expect(loaded.tracking).toBe(false);
+});
+it('writes only repair fields so a long correction cannot overwrite new samples, filters or selections',async()=>{
+  const store=await import('@/lib/fish/qualityStore'), old=newQualityStudy(100);
+  const latest={...old,tracking:false,selectedRowIds:['new-selection']};
+  await store.saveQualityStudy('a',latest);
+  const progress={...old,campaignRepair:{id:'r',startedAt:200,updatedAt:201,revision:1,targetVersion:'v',state:'running' as const,targetKeys:[],completedKeys:[],changedKeys:[],failures:{}}};
+  expect(await store.saveQualityStudy('a',progress,{repairOnly:true})).toBe(true);
+  const loaded=(await store.loadQualityStudy('a')).study;
+  expect(loaded.tracking).toBe(false); expect(loaded.selectedRowIds).toEqual(['new-selection']); expect(loaded.campaignRepair?.id).toBe('r');
+});

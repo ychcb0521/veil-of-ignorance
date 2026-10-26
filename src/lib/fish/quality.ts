@@ -1,5 +1,6 @@
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
+import type { QualityRepairBatch } from './qualityRepair';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { compileFeatureFormula, type DeepDigFeatureDef } from '@/lib/deepDig/features';
@@ -52,6 +53,7 @@ export interface FishQualityStudy {
   sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[]; selectedRowIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
   campaignRuns?: QualityCampaignRun[];
+  campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
 }
 export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });

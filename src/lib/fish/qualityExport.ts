@@ -3,7 +3,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
 import { expandQualityRows, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityRowResult, qualityResultMap } from './qualityComparison';
-import { archiveQualityStudy, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
+import { archiveQualityStudy, isCurrentQualityRun, qualityRuleLabel, qualityFormulaVersion } from './qualityCampaignArchive';
 import { qualityDefinition } from './quality';
 
 /** Match the displayed detector rows; repeated sell values belong to the same signal and entry. */
@@ -22,7 +22,8 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${groups.get(row.detectorId)!.snapshot.direction ?? '>'} ${groups.get(row.detectorId)!.snapshot.threshold}` : '—', row.enteredAt ? formatUTC8(row.enteredAt) : null,
   ]) }];
   const signals = new Set(rows.map(row => row.signalId ?? row.id));
-  const runs = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => signals.has(run.sample.id));
+  const allRuns = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => signals.has(run.sample.id));
+  const runs = allRuns.filter(isCurrentQualityRun);
   sheets.push({ name: '运行结果', columns: [
     ['标的', 24], ['来源', 10], ['信号时间', 24], ['探测算法 / 捕获阈值', 50], ['卖出算法', 24], ['具体指标', 18], ['卖出方向', 10], ['卖出门槛', 12],
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
@@ -42,6 +43,18 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
       r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula];
   }) });
+  if (study.campaignRepair) {
+    const byKey = new Map(allRuns.map(run => [run.result.key,run]));
+    sheets.push({name:'纠错记录',columns:['标的','原试验编号','状态','纠正后试验编号','核验时间','原卖出时间','原收益率 %','纠正后卖出时间','纠正后收益率 %','未通过原因','原实际公式','纠正后实际公式'].map(header => ({header,width:header.includes('公式')?60:25})),
+      rows:allRuns.flatMap(run => {
+        const target = run.supersededBy ? byKey.get(run.supersededBy) : run;
+        const history = run.priorResults?.length ? run.priorResults.map(p => ({plan:p.plan,result:p.result,at:p.at})) : [{plan:run.plan,result:run.result,at:run.repair?.checkedAt}];
+        return history.map(old => [run.sample.source.symbol,old.result.key,run.supersededBy?'已替换':run.repair?.status === 'verified'?'已核验':run.repair?.status === 'failed'?'未通过':'待核验',
+          target?.result.key ?? null,old.at?formatUTC8(old.at):null,old.result.endTime?formatUTC8(old.result.endTime):null,old.result.returnPct??null,
+          target?.repair?.status === 'verified' && target.result.endTime?formatUTC8(target.result.endTime):null,target?.repair?.status === 'verified'?target.result.returnPct??null:null,
+          run.repair?.error??null,qualityDefinition(old.plan.snapshot).formula,target?qualityDefinition(target.plan.snapshot).formula:null]);
+      })});
+  }
   return sheets;
 }
 export function downloadQualityComparison(study: FishQualityStudy, rows: QualitySample[], at = Date.now()) {

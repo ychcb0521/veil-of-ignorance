@@ -3,8 +3,9 @@ import type { TradeRecord } from '@/types/trading';
 import type { getCampaignFullData } from '@/lib/journalApi';
 import { isQualityCampaignId, qualityCampaignId } from '@/lib/campaignSections';
 import { loadQualityStudy } from './qualityStore';
-import { archiveQualityStudy, hasQualityCampaign, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
+import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { QUALITY_NOTIONAL, activeBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { syncQualitySellDefinitions } from './qualityComparison';
 
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
 const iso = (time: number) => new Date(time).toISOString();
@@ -37,6 +38,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
         direction: plan.rule?.direction, threshold: plan.rule?.threshold, reading: r.exitReading ?? r.pendingExit?.reading,
         confirmedAt: closed ? r.endTime : r.pendingExit?.at,
       },
+      repair: run.repair,
     },
   };
   const leg: TradeJournal = {
@@ -62,21 +64,28 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
 export function qualityCampaignDataFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect'): QualityCampaignData[] {
   // 卖出比较跟随当前的买入过滤：只列满足条件的交易，和鱼质量里的卖出对照一致
   const filtersOn = section === 'sell' && activeBuyFilters(study).length > 0, readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
-  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => run.plan.rule && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
+  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && run.plan.rule && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
     && (!filtersOn || qualityFilterStatus(study, run.sample, readings).state === 'pass'))
     .map(run => buildQualityCampaignData(owner, run, section));
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect') {
   const loaded = await loadQualityStudy(owner);
-  const selected = loaded.study.sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && plan.rule);
+  const selected = syncQualitySellDefinitions(loaded.study).sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && plan.rule);
   const buyFilterLabel = section === 'sell' ? activeBuyFilters(loaded.study).map(f => `${f.label} ${f.direction} ${f.threshold}`).join('；') : '';
-  return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning, buyFilterLabel,
+  return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning, buyFilterLabel, repair: loaded.study.campaignRepair,
     selectedSellKey: selected ? JSON.stringify([qualitySellKey(selected), loaded.study.observeHours]) : undefined };
 }
 export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {
   if (!isQualityCampaignId(id)) throw new Error('比较战役链接无效');
   const section = id.startsWith('fish-detect-') ? 'detect' : 'sell';
-  const { rows } = await listQualityCampaignData(owner, section), found = rows.find(row => row.campaign.id === id);
-  if (!found) throw new Error('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
-  return found;
+  const loaded = await loadQualityStudy(owner), runs = archiveQualityStudy(loaded.study).campaignRuns ?? [];
+  let run = runs.find(row => qualityCampaignId(row.result.key,section) === id);
+  const visited = new Set<string>();
+  while (run?.supersededBy) {
+    if (visited.has(run.result.key)) throw new Error('纠错版本引用循环，请重新运行纠错');
+    visited.add(run.result.key); run = runs.find(row => row.result.key === run!.supersededBy);
+  }
+  if (!run) throw new Error('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
+  if (!hasQualityEntry(run.result)) throw new Error(`此战役纠错未通过：${run.repair?.error ?? '缺少可靠成交数据'}。原记录仍保留，可在比较列表重试纠错。`);
+  return buildQualityCampaignData(owner,run,section);
 }
