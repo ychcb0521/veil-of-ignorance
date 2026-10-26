@@ -39,15 +39,15 @@ it('skips the sells of signals that fail, caches readings, and reports missing d
   await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r), onFilterReading: r => readings.push(r) }, load, T + 90 * M);
   expect(readings).toHaveLength(2);
   expect(new Set(results.map(r => r.sampleId))).toEqual(new Set([high.id]));
-  const withReadings = { ...s, filterReadings: readings };
-  expect(qualityFilterStatus(withReadings, low).state).toBe('fail'); expect(qualityFilterStatus(withReadings, high).state).toBe('pass');
-  expect(qualityFilterStatus(s, low).state).toBe('pending');
-  expect(qualityFilterStatus({ ...withReadings, buyFilters: [{ ...filter(threshold), enabled: false }] }, low).state).toBe('none');
+  const withReadings = { ...s, filterReadings: readings }, plan = s.sellPlans![0];
+  expect(qualityFilterStatus(withReadings, low, plan).state).toBe('fail'); expect(qualityFilterStatus(withReadings, high, plan).state).toBe('pass');
+  expect(qualityFilterStatus(s, low, plan).state).toBe('pending');
+  expect(qualityFilterStatus({ ...withReadings, buyFilters: [{ ...filter(threshold), enabled: false }] }, low, plan).state).toBe('none');
   const again = vi.fn();
   await collectFishQuality({ study: withReadings, signal: new AbortController().signal, onProgress: vi.fn(), onResult: vi.fn(), onFilterReading: again }, load, T + 90 * M);
   expect(again).not.toHaveBeenCalled(); // 改门槛不需要重新取数
   const broken = { ...s, filterReadings: [{ key: readings[0].key, error: '缺 K 线' }, readings[1]] };
-  expect(qualityFilterStatus(broken, low)).toMatchObject({ state: 'error' });
+  expect(qualityFilterStatus(broken, low, plan)).toMatchObject({ state: 'error' });
 });
 it('counts only bought signals in the sell comparison and reports how many were filtered', () => {
   const base = importQualityLibrary(enableQualityComparison(newQualityStudy(T)), [lib('AUSDT', T + 7 * M), lib('BUSDT', T + 40 * M), lib('CUSDT', T + 80 * M)]);
@@ -56,11 +56,44 @@ it('counts only bought signals in the sell comparison and reports how many were 
   const results = rows.flatMap((row, i) => plans.map(p => ({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, returnPct: [10, -4, 2][i], pnl: 1 })));
   const study = { ...base, sellPlans: plans, results, buyFilters: [f], filterReadings: [] as QualityFilterReading[] };
   // A 满足、B 不满足、C 没有读数
-  expect(rows.every(r => qualityFilterStatus(study, r).detail.includes('待读数'))).toBe(true);
+  expect(rows.every(r => qualityFilterStatus(study, r, plans[0]).detail.includes('待读数'))).toBe(true);
   study.filterReadings = [rows[0], rows[1]].map((r, i) => ({ key: qualityFilterReadingKey(r, f), value: i ? 1 : 9 }));
   const stats = qualityComparisonStats(study, rows, true);
-  expect(stats.filter).toEqual({ on: true, passed: 1, failed: 1, pending: 1, error: 0 });
-  expect(stats.paired.map(r => r.source.symbol)).toEqual(['AUSDT']); expect(stats.sells[0].mean).toBe(10);
+  // 旧版本的全局过滤对两套方案都生效
+  expect(stats.filter.plans.map(({ plan: _plan, ...v }) => v)).toEqual([{ on: true, passed: 1, failed: 1, pending: 1, error: 0 }, { on: true, passed: 1, failed: 1, pending: 1, error: 0 }]);
+  expect(stats.sells.map(v => v.sample.map(r => r.source.symbol))).toEqual([['AUSDT'], ['AUSDT']]); expect(stats.sells[0].mean).toBe(10);
   const off = qualityComparisonStats({ ...study, buyFilters: [] }, rows, true);
   expect(off.filter.on).toBe(false); expect(off.paired).toHaveLength(3);
+});
+
+// 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定：每个卖出算法有特定的过滤标准，而不是公用一个过滤标准」
+it('binds buy filters to each sell plan: one plan filters, the other buys everything, in evaluation, stats and status', async () => {
+  const base = importQualityLibrary(enableQualityComparison(newQualityStudy(T)), [lib('LOWUSDT', T + 7 * M), lib('HIGHUSDT', T + 40 * M)]);
+  const rows = qualityComparisonRows(base), [low, high] = rows;
+  const threshold = (T / M) % 1000 + 10, [sPlan, cPlan] = base.sellPlans!;
+  const s = { ...base, selectedRowIds: rows.map(r => r.id), sellPlans: [{ ...sPlan, buyFilters: [filter(threshold)] }, { ...cPlan, buyFilters: [] }] };
+  const readings: QualityFilterReading[] = [], results: QualityResult[] = [];
+  await collectFishQuality({ study: s, signal: new AbortController().signal, onProgress: vi.fn(), onResult: r => results.push(r), onFilterReading: r => readings.push(r) }, loader(), T + 90 * M);
+  // 状态 S 方案只评估满足条件的 HIGH；CDA 方案没设过滤，两条都评估
+  expect(results.filter(r => r.groupId === sPlan.id).map(r => r.sampleId)).toEqual([high.id]);
+  expect(new Set(results.filter(r => r.groupId === cPlan.id).map(r => r.sampleId))).toEqual(new Set([low.id, high.id]));
+  const done = { ...s, filterReadings: readings };
+  expect(qualityFilterStatus(done, low, done.sellPlans[0]).state).toBe('fail');
+  expect(qualityFilterStatus(done, low, done.sellPlans[1]).state).toBe('none');
+  // 统计：各方案只算自己买入的
+  const ruled = { ...done, sellPlans: done.sellPlans.map(p => ({ ...p, rule: { metric: p.metric, direction: '<' as const, threshold: -1 } })) };
+  ruled.results = rows.flatMap((row, i) => ruled.sellPlans.map(p => ({ key: qualityResultKey(row, p, 0), sampleId: row.id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, returnPct: [3, 7][i], pnl: 1 })));
+  const stats = qualityComparisonStats(ruled, rows, true);
+  expect(stats.filter.on).toBe(true);
+  expect(stats.filter.plans.map(v => [v.on, v.passed, v.failed])).toEqual([[true, 1, 1], [false, 0, 0]]);
+  expect(stats.sells.map(v => [v.n, v.mean])).toEqual([[1, 7], [2, 5]]);
+});
+it('materializes the legacy shared filter onto every plan before one plan is edited', async () => {
+  const { materializePlanBuyFilters } = await import('@/lib/fish/quality');
+  const base = enableQualityComparison(newQualityStudy(T)), f = filter(1);
+  const legacy = { ...base, buyFilters: [f] }, done = materializePlanBuyFilters(legacy);
+  expect(done.buyFilters).toBeUndefined();
+  expect(done.sellPlans!.map(p => p.buyFilters)).toEqual([[f], [f]]);
+  expect(done.sellPlans![0].buyFilters).not.toBe(done.sellPlans![1].buyFilters);
+  expect(materializePlanBuyFilters(base)).toBe(base);
 });

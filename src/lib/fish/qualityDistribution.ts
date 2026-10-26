@@ -1,5 +1,5 @@
-import { qualityPairedRows, qualityResultMap, qualityRowResult } from './qualityComparison';
-import type { FishQualityStudy, QualitySample } from './quality';
+import { qualityPairedRows, qualityPlanBought, qualityPlanRows, qualityResultMap, qualityRowResult } from './qualityComparison';
+import { anyBuyFilters, type FishQualityStudy, type QualitySample } from './quality';
 
 export type QualityDistributionMetric = 'returnPct' | 'peakPct';
 export interface QualityDistributionSeries { id: string; label: string; values: number[] }
@@ -12,6 +12,8 @@ export function qualityDistributionSeries(study: FishQualityStudy, rows: Quality
   };
   const label = (plan: typeof plans[number]) => `${plan.label} ${plan.rule!.direction} ${plan.rule!.threshold}`;
   if (phase === 'sell') {
+    // 各方案买入过滤不同：每套方案只画它自己买入的信号
+    if (anyBuyFilters(study)) return plans.map(plan => ({ id: plan.id, label: label(plan), values: qualityPlanRows(study, qualityPlanBought(study, signals, plan), plan, closedOnly).filter(row => usable(row, plan)).map(row => qualityRowResult(study, row, plan, results)![metric]!) }));
     const paired = (plans.length > 1 ? qualityPairedRows(study, signals, closedOnly) : signals).filter(row => plans.every(plan => usable(row, plan)));
     return plans.map(plan => ({ id: plan.id, label: label(plan), values: paired.map(row => qualityRowResult(study, row, plan, results)![metric]!) }));
   }

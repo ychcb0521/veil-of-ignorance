@@ -160,8 +160,9 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  const result={key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,pnl:10};
  act(()=>old.onResult(result));expect(h.result.current.study.campaignRuns).toHaveLength(1);
  const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
- act(()=>h.result.current.setFilters([], [veto]));await flush(600);
- expect(tasks.at(-1)!.study.sellPlans!.every(p=>p.holdingVetoes?.[0].threshold===10)).toBe(true);
+ act(()=>h.result.current.setFilters(id,[], [veto]));await flush(600);
+ // 【用户要求】2026-10-26 过滤与卖出算法绑定：只改这一套方案
+ expect(tasks.at(-1)!.study.sellPlans!.map(p=>p.holdingVetoes?.[0]?.threshold)).toEqual([10,undefined]);
  expect(h.result.current.study.campaignRuns![0].plan.holdingVetoes).toBeUndefined();
  const latestPlan=tasks.at(-1)!.study.sellPlans![0];expect(qualityResultKey(row,latestPlan,0)).not.toBe(result.key);
  act(()=>old.onResult({...result,returnPct:999}));expect(h.result.current.study.results[0].returnPct).toBe(10);

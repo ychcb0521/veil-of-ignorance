@@ -24,6 +24,11 @@ export interface QualityGroup {
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
   holdingVetoes?: QualityHoldingVeto[];
+  /**
+   * 这套卖出方案自己的买入过滤（只作用于「比较卖出」）。缺省时沿用旧版本全局的 study.buyFilters。
+   * 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定：每个卖出算法有特定的过滤标准，而不是公用一个过滤标准」
+   */
+  buyFilters?: QualityBuyFilter[];
 }
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
@@ -248,11 +253,22 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
 }
 
 export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval]));
-export const activeBuyFilters = (study: FishQualityStudy) => (study.buyFilters ?? []).filter(f => f.enabled && Number.isFinite(f.threshold));
+/** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
+export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
+/** 某套卖出方案启用中的买入过滤。 */
+export const activeBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined) => planBuyFilters(study, plan).filter(f => f.enabled && Number.isFinite(f.threshold));
+/** 任何一套卖出方案开着买入过滤。 */
+export const anyBuyFilters = (study: FishQualityStudy) => (study.sellPlans ?? []).some(plan => activeBuyFilters(study, plan).length > 0);
+/** 把旧版本的全局过滤落到每套方案上（之后各改各的），并去掉全局那份。 */
+export function materializePlanBuyFilters(study: FishQualityStudy): FishQualityStudy {
+  if (!study.buyFilters) return study;
+  const { buyFilters, ...rest } = study;
+  return { ...rest, sellPlans: study.sellPlans?.map(plan => plan.buyFilters ? plan : { ...plan, buyFilters: structuredClone(buyFilters) }) };
+}
 export type QualityFilterStatus = { state: 'none' | 'pass' | 'fail' | 'pending' | 'error'; detail: string };
-/** 一行是否买入：没有启用的条件 = none；任一条件缺数据 = error；任一不满足 = fail；还没读数 = pending。 */
-export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
-  const filters = activeBuyFilters(study);
+/** 一行在某套卖出方案下是否买入：没有启用的条件 = none；任一条件缺数据 = error；任一不满足 = fail；还没读数 = pending。 */
+export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, plan: QualityGroup | undefined, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
+  const filters = activeBuyFilters(study, plan);
   if (!filters.length) return { state: 'none', detail: '' };
   const parts: string[] = []; let pending = false, error = false, fail = false;
   for (const f of filters) {
@@ -410,25 +426,25 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     if (first.done) return undefined;
     pending.delete(first.value[0]); return first.value[1];
   };
-  // 买入过滤：先读买入时刻的指标，不满足（或缺数据）的行不再评估卖出；之后放宽门槛会补算
-  const filters = study.sellPlans ? activeBuyFilters(study) : [];
+  // 买入过滤（每套卖出方案各自一套）：先读买入时刻的指标，这套方案下不满足（或缺数据）的行不再按它评估卖出；之后放宽门槛会补算
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
-  const passes = async (row: QualitySample) => {
+  const passes = async (row: QualitySample, plan: QualityGroup) => {
+    const filters = study.sellPlans ? activeBuyFilters(study, plan) : [];
+    if (!filters.length) return true;
     for (const f of filters) {
       const key = qualityFilterReadingKey(row, f);
       if (!readings.has(key)) { abort(signal); const r = await evaluateQualityFilter(row, f, now, load, signal); readings.set(key, r); options.onFilterReading?.(r); }
     }
-    const state = qualityFilterStatus(study, row, readings).state;
+    const state = qualityFilterStatus(study, row, plan, readings).state;
     return state === 'none' || state === 'pass';
   };
   let done = 0;
   for (let batch = next(); batch; batch = next()) {
     // 买入过滤只作用于比较卖出：没买入的行仍按「比较探测」固定的那套卖出方案评估
-    if (filters.length && !(await passes(batch[0].s))) {
-      const kept = batch.filter(t => t.g.id === study.selectedSellId);
-      done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' });
-      batch = kept; if (!batch.length) continue;
-    }
+    const kept: typeof batch = [];
+    for (const task of batch) if (task.g.id === study.selectedSellId || await passes(task.s, task.g)) kept.push(task);
+    if (kept.length < batch.length) { done += batch.length - kept.length; options.onProgress({ done, total: tasks.length, current: '' }); }
+    batch = kept; if (!batch.length) continue;
     for (const { s, g } of batch) {
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });

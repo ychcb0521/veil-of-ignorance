@@ -6,7 +6,7 @@ import { loadQualityStudy } from './qualityStore';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
-import { QUALITY_NOTIONAL, activeBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { QUALITY_NOTIONAL, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { syncQualitySellDefinitions } from './qualityComparison';
 
@@ -77,17 +77,28 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
   return { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
 }
+/** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
+export function qualityBuyFilterSummary(study: FishQualityStudy): string {
+  if (!anyBuyFilters(study)) return '';
+  return (study.sellPlans ?? []).map(plan => { const filters = activeBuyFilters(study, plan);
+    return `${plan.label}：${filters.length ? filters.map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '不过滤'}`; }).join('；');
+}
 export function qualityCampaignDataFromStudy(owner: string, study: FishQualityStudy, section: 'sell' | 'detect'): QualityCampaignData[] {
-  // 卖出比较跟随当前的买入过滤：只列满足条件的交易，和鱼质量里的卖出对照一致
-  const filtersOn = section === 'sell' && activeBuyFilters(study).length > 0, readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  // 卖出比较跟随各卖出方案自己的买入过滤：只列满足那套方案条件的交易，和鱼质量里的卖出对照一致
+  const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const bought = (run: QualityCampaignRun) => {
+    if (section !== 'sell') return true;
+    const plan = study.sellPlans?.find(p => p.id === run.plan.id);
+    return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass';
+  };
   return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && run.plan.rule && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
-    && (!filtersOn || qualityFilterStatus(study, run.sample, readings).state === 'pass'))
+    && bought(run))
     .map(run => buildQualityCampaignData(owner, run, section));
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect') {
   const loaded = await loadQualityStudy(owner);
   const selected = syncQualitySellDefinitions(loaded.study).sellPlans?.find(plan => plan.id === loaded.study.selectedSellId && plan.rule);
-  const buyFilterLabel = section === 'sell' ? activeBuyFilters(loaded.study).map(f => `${f.label} ${f.direction} ${f.threshold}`).join('；') : '';
+  const buyFilterLabel = section === 'sell' ? qualityBuyFilterSummary(loaded.study) : '';
   return { rows: qualityCampaignDataFromStudy(owner, loaded.study, section), warning: loaded.warning, buyFilterLabel, repair: loaded.study.campaignRepair,
     selectedSellKey: selected ? JSON.stringify([qualitySellKey(selected), loaded.study.observeHours]) : undefined };
 }

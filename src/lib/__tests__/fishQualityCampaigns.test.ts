@@ -97,4 +97,17 @@ describe('comparison campaign review fixes', () => {
     expect(qualityCampaignDataFromStudy('owner', { ...failing, filterReadings: [] }, 'sell')).toHaveLength(0); // 待判断也不列
     expect(qualityCampaignDataFromStudy('owner', { ...failing, filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .9 }] }, 'sell')).toHaveLength(1);
   });
+  // 【用户要求】2026-10-26 过滤门槛与卖出算法绑定：卖出比较板块按每场所属方案自己的过滤
+  it('filters each sell-board trade by the buy filter of its own sell plan only', async () => {
+    const { qualityBuyFilterSummary } = await import('@/lib/fish/qualityCampaigns');
+    const { study, row } = seed(), archived = archiveQualityStudy(study), f = makeQualityBuyFilter('state:state', '>', .7);
+    const runPlan = archived.campaignRuns![0].plan.id, readings = [{ key: qualityFilterReadingKey(row, f), value: .5 }];
+    const on = (planId: string) => ({ ...archived, filterReadings: readings, sellPlans: archived.sellPlans!.map(p => ({ ...p, buyFilters: p.id === planId ? [f] : [] })) });
+    expect(qualityCampaignDataFromStudy('owner', on(runPlan), 'sell')).toHaveLength(0);
+    const other = archived.sellPlans!.find(p => p.id !== runPlan)!.id;
+    expect(qualityCampaignDataFromStudy('owner', on(other), 'sell')).toHaveLength(1);
+    expect(qualityBuyFilterSummary(on(other))).toMatch(/：不过滤；|：状态 S 原始值 > 0\.7/);
+    expect(qualityBuyFilterSummary(on(other)).split('；')).toHaveLength(2);
+    expect(qualityBuyFilterSummary(archived)).toBe('');
+  });
 });

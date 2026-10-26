@@ -1,12 +1,12 @@
 import { qualityHistogram, type QualityDistributionMetric, type QualityDistributionSeries } from '@/lib/fish/qualityDistribution';
 
 const fmt = (n: number | null) => n == null ? '—' : `${n > 0 ? '+' : ''}${Number(n.toFixed(2))}%`;
-export function FishQualityDistribution({ series, metric, onMetricChange }: { series: QualityDistributionSeries[]; metric: QualityDistributionMetric; onMetricChange: (metric: QualityDistributionMetric) => void }) {
+export function FishQualityDistribution({ series, metric, onMetricChange, perPlan = false }: { series: QualityDistributionSeries[]; metric: QualityDistributionMetric; onMetricChange: (metric: QualityDistributionMetric) => void; /** 各卖出方案按自己的买入过滤取样本（不再是同一批）。 */ perPlan?: boolean }) {
   const data = qualityHistogram(series);
   const left = 35, top = 15, width = 430, height = 135, bottom = top + height;
   return <div data-testid="quality-distribution-chart" className="space-y-2 border-b border-border/40 pb-2">
     <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px]"><span className="font-medium">{metric === 'returnPct' ? '收益率分布' : '最大涨幅分布'}</span><select aria-label="分布图指标" className="h-6 rounded bg-muted/60 px-1.5 text-muted-foreground" value={metric} onChange={e => onMetricChange(e.target.value as QualityDistributionMetric)}><option value="returnPct">收益率</option><option value="peakPct">最大涨幅</option></select></div>
-    {!data ? <p className="py-3 text-center text-[10px] text-muted-foreground">暂无共同有效结果。已设置的卖出方案使用同一批样本；缺数据和待评估不计为 0。</p> : <div className="grid gap-2 md:grid-cols-2">{data.plots.map(plot => {
+    {!data ? <p className="py-3 text-center text-[10px] text-muted-foreground">{perPlan ? '暂无有效结果。各卖出方案只统计自己买入的信号；缺数据和待评估不计为 0。' : '暂无共同有效结果。已设置的卖出方案使用同一批样本；缺数据和待评估不计为 0。'}</p> : <div className="grid gap-2 md:grid-cols-2">{data.plots.map(plot => {
       const x = (v: number) => left + (v - data.min) / (data.max - data.min) * width;
       const y = (n: number) => bottom - (plot.n ? n / plot.n / data.top : 0) * height;
       const points = plot.bins.map((n, i) => [x(data.min + (i + .5) * data.step), y(n)]);

@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setBuyFilters: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
@@ -187,19 +187,20 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」并重算$/ }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
-  expect(s.setFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })],[]);
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」并重算$/ }));
+  expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id, [expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })],[]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
   render(<FishQuality state={s}/>);
-  expect(screen.getByRole('button', { name: '过滤与持仓否决' })).toHaveTextContent('1');
-  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('未买入');
-  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
-  expect(within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入').length).toBeGreaterThanOrEqual(3);
-  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(screen.queryByTestId('quality-filter-cell')).toBeNull();
+  // 旧版本的全局过滤沿用到每套方案
+  expect(screen.getByRole('button', { name: '过滤与持仓否决' })).toHaveTextContent('2');
+  const notBought = within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入');
+  expect(notBought.length).toBeGreaterThanOrEqual(2);
+  expect(notBought[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
+  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('未买入')).toBeNull();
 });
 // 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」
 it('sorts by every header, keeping empty values last in both directions', () => {
@@ -301,17 +302,17 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  expect(within(editor).getByLabelText('持仓否决 1 指标')).toHaveValue('static-drawdown');
  expect(within(editor).getByLabelText('持仓否决 2 指标')).toHaveValue('dynamic-drawdown');
  expect(within(editor).getByLabelText('持仓否决 1 阈值')).toHaveValue(null);expect(within(editor).getByLabelText('启用持仓否决 1')).not.toBeChecked();
- fireEvent.click(within(editor).getByLabelText('启用持仓否决 1'));fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
+ fireEvent.click(within(editor).getByLabelText('启用持仓否决 1'));fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
  expect(screen.getByRole('alert')).toHaveTextContent('填写有限数字');expect(s.setFilters).not.toHaveBeenCalled();
- fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'-10'}});fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
+ fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'-10'}});fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
  expect(screen.getByRole('alert')).toHaveTextContent('大于 0');
  fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'12'}});
  fireEvent.click(within(editor).getByRole('button',{name:'添加否决条件'}));
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 指标'),{target:{value:'state:state'}});
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 方向'),{target:{value:'<='}});
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 阈值'),{target:{value:'.4'}});fireEvent.click(within(editor).getByLabelText('启用持仓否决 3'));
- fireEvent.click(screen.getByRole('button',{name:'应用并重算'}));
- expect(s.setFilters).toHaveBeenCalledWith([],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
+ fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
+ expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id,[],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
 });
 // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
@@ -327,4 +328,39 @@ it('opens with the remembered tab, filters and sort when coming back from a camp
   cleanup();
   render(<FishQuality state={state()}/>);
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
+});
+// 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定」「在每个卖出算法的动态最大回撤的后面，再增加一个持仓时间」
+it('edits buy filters per sell plan, marks not-bought only under the plan that filters, and shows a sortable holding time after each dynamic drawdown', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const s = state();
+  s.study = importQualityLibrary(s.study, [{ id: 'l1', symbol: 'BBBUSDT', timeMs: T - 3600_000, timeLabel: '', fallbackZone: '' }, { id: 'l2', symbol: 'CCCUSDT', timeMs: T - 7200_000, timeLabel: '', fallbackZone: '' }]);
+  const [sPlan, cPlan] = s.study.sellPlans!, f = makeQualityBuyFilter('state:state', '>', .7);
+  for (const p of [sPlan, cPlan]) p.rule = { metric: p.metric, direction: '<', threshold: .5 };
+  sPlan.buyFilters = [f]; cPlan.buyFilters = [];
+  const rows = qualityComparisonRows(s.study), by = (sym: string) => rows.find(r => r.source.symbol === sym)!;
+  s.study.filterReadings = [{ key: qualityFilterReadingKey(by('BBBUSDT'), f), value: .1 }, { key: qualityFilterReadingKey(by('CCCUSDT'), f), value: .9 }];
+  s.study.results = ['BBBUSDT', 'CCCUSDT'].flatMap((sym, i) => [sPlan, cPlan].map(p => ({ key: qualityResultKey(by(sym), p, 0), sampleId: by(sym).id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 1, endPrice: 101, returnPct: 1, pnl: 1, heldHours: i ? 30 : .5 })));
+  render(<FishQuality state={s}/>);
+  const row = (sym: string) => screen.getAllByTestId('quality-fish-row').find(r => r.textContent!.includes(sym))!;
+  // BBB 在状态 S 方案下没买入（不满足 > 0.7），在 CDA 方案（不过滤）下照常有结果
+  const held = (sym: string) => within(row(sym)).getAllByTestId('quality-held-time').map(c => c.textContent);
+  expect(held('BBBUSDT')).toEqual(['—', '30 分钟']);
+  expect(held('CCCUSDT')).toEqual(['30.0 小时', '30.0 小时']);
+  expect(within(row('BBBUSDT')).getAllByText('未买入')).toHaveLength(1);
+  // 持仓时间列紧跟动态最大回撤，并且能排序
+  const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
+  const dyn = headers.findIndex(h => h.startsWith('动态最大回撤'));
+  expect(headers[dyn + 1]).toMatch(/^持仓时间/);
+  fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
+  const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
+  expect(order().slice(0, 2)).toEqual(['CCCUSDT', 'BBBUSDT']);
+  // 表头的「不过滤」直接打开这套方案的过滤设置
+  expect(screen.getByRole('button', { name: '设置状态 S 原始值的买入过滤' })).toHaveTextContent('买入过滤 1 条');
+  fireEvent.click(screen.getByRole('button', { name: '设置CDA 原始值的买入过滤' }));
+  expect(await screen.findByRole('tab', { name: 'CDA 原始值' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
+  fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」并重算$/ }));
+  expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })], expect.any(Array));
 });
