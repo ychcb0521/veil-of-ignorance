@@ -18,6 +18,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
+import { mergeMiningStates } from '@/lib/fish/miningState';
 import {
   clearPersistedStateMemoryForTests,
   getUnpersistedStateMetadata,
@@ -32,8 +33,9 @@ import {
  *   price_map                行情缓存，可重建，没有同步价值，白耗带宽；
  *   symbol_settlement_mode   下单面板的结算方式只活在当前会话——每次打开都回到币本位，
  *                            旧版本落过盘的本地 / 云端条目一律不推、不水化、不回填。
+ *   fish-*-lease.v1          渔的自动捕捞 / 持续挖掘只在本机多个标签页之间抢的租约，同步到别的设备只会误挡几分钟。
  */
-const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode']);
+const EXCLUDED_KEYS = new Set(['price_map', 'symbol_settlement_mode', 'fish-mining-lease.v1', 'fish-auto-lease.v1']);
 
 /**
  * 水化时**按内容合并**、不按「谁更新谁覆盖」的键。
@@ -58,6 +60,8 @@ const UNION_MERGE_KEYS: Record<string, (local: unknown, remote: unknown) => unkn
     return mergeFishLists(local, remote, tombstones);
   },
   fish_deleted_v1: (local, remote) => mergeFishTombstones(local, remote),
+  // 持续挖掘的进度只进不退：取挖得更远的那份（以前登录时补推的旧快照会把本机进度盖回去）。
+  'fish-mining.v1': (local, remote) => mergeMiningStates(local, remote),
 };
 
 /**

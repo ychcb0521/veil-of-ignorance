@@ -69,3 +69,21 @@ it('pause stops the running anchor and keeps the cursor', async () => {
   release([sig('LATEUSDT', MINING_START_MS)]); await flush(10);
   expect(readMiningState()).toMatchObject({ enabled: false, cursorMs: MINING_START_MS, mined: 0 }); // 暂停后不收这一档
 });
+// 【用户要求】2026-10-26 下次点开时按时间顺序接上：进度丢了（或被旧快照盖回去）也从鱼舱里最后挖到的那一档往后挖
+it('resumes after the last mined anchor found in the cabin even when the saved progress was lost', async () => {
+  const first = setup();
+  act(() => first.h.result.current.start()); await flush(10);
+  expect(first.mine).toHaveBeenCalledTimes(3);
+  const cabin = first.list.current;
+  first.h.unmount();
+  // 模拟进度被盖回最初的快照：开着，但游标回到起点
+  const key = Object.keys(localStorage).find(k => k.endsWith('fish-mining.v1'))!;
+  localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key)!), cursorMs: MINING_START_MS, anchorsDone: 0, mined: 0, minedKeys: [], lastAnchorMs: null }));
+  vi.setSystemTime(MINING_START_MS + 3 * MINING_STEP_MS);
+  const list = { current: cabin }, mine = vi.fn(async (s: any) => [sig(`B${s.anchorMs}USDT`, s.anchorMs)]);
+  const h = renderHook(() => useFishMining({ account: 'a', selection, defs, mine, busy: () => false, stop: vi.fn(), signalsRef: list, commit: (next: TradeSignal[]) => { list.current = next; } }));
+  expect(h.result.current.state).toMatchObject({ cursorMs: MINING_START_MS + 3 * MINING_STEP_MS, anchorsDone: 3, mined: 3 });
+  await flush(10);
+  expect(mine.mock.calls.map(c => c[0].anchorMs)).toEqual([MINING_START_MS + 3 * MINING_STEP_MS]);
+  expect(readMiningState()).toMatchObject({ cursorMs: MINING_START_MS + 4 * MINING_STEP_MS, anchorsDone: 4, mined: 4 });
+});

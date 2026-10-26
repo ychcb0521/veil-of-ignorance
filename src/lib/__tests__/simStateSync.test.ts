@@ -177,12 +177,36 @@ describe('hydrateSimState', () => {
     expect(JSON.parse(localStorage.getItem('veil.signalLibrary.v1')!)).toEqual([{ id: 's1' }]);
   });
 
+  // 【用户要求】2026-10-26 持续挖掘要记住挖到哪：登录时云端的旧快照不能把本机更远的进度盖回去
+  it('持续挖掘进度 fish-mining.v1 水化时取挖得更远的那份，并把本机更远的进度推回云端', async () => {
+    const base = { version: 1, enabled: true, startMs: 0, stepMs: 10, target: 1000, rules: [], lastRunAt: null, lastError: '' };
+    const local = { ...base, cursorMs: 90, anchorsDone: 9, mined: 2, minedKeys: ['a', 'b'], lastAnchorMs: 80, savedAt: 5 };
+    const remote = { ...base, cursorMs: 10, anchorsDone: 1, mined: 1, minedKeys: ['a'], lastAnchorMs: 0, savedAt: 9 };
+    localStorage.setItem(`sim_${UID}_fish-mining.v1`, JSON.stringify(local));
+    localStorage.setItem(`sim_${UID}_fish-mining.v1__syncts`, String(Date.parse('2026-08-17T00:00:00Z')));
+    mocks.eq.mockImplementation(async () => ({ data: [{ key: 'fish-mining.v1', value: remote, updated_at: '2026-08-17T00:00:00Z' }], error: null }));
+    await hydrateSimState(UID);
+    expect(JSON.parse(localStorage.getItem(`sim_${UID}_fish-mining.v1`)!)).toMatchObject({ cursorMs: 90, anchorsDone: 9, minedKeys: ['a', 'b'] });
+    await vi.advanceTimersByTimeAsync(1_600);
+    const pushed = (mocks.upsert.mock.calls as unknown as unknown[][]).map(call => call[0] as { key: string; value: { cursorMs: number } }).find(p => p.key === 'fish-mining.v1');
+    expect(pushed?.value.cursorMs).toBe(90);
+  });
+
+  it('渔的租约（只在本机标签页之间抢）不回填到云端', async () => {
+    localStorage.setItem(`sim_${UID}_fish-mining-lease.v1`, JSON.stringify({ owner: 't', until: 1 }));
+    localStorage.setItem(`sim_${UID}_fish-auto-lease.v1`, JSON.stringify({ owner: 't', until: 1 }));
+    await hydrateSimState(UID);
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect((mocks.upsert.mock.calls as unknown as unknown[][]).map(call => (call[0] as { key: string }).key)).not.toContain('fish-mining-lease.v1');
+    expect((mocks.upsert.mock.calls as unknown as unknown[][]).map(call => (call[0] as { key: string }).key)).not.toContain('fish-auto-lease.v1');
+  });
+
   it('存量回填：本地有、云端没有的键会补推一次', async () => {
     localStorage.setItem(`sim_${UID}_trade_history`, JSON.stringify([{ id: 't1' }]));
     mocks.eq.mockImplementation(async () => ({ data: [], error: null }));
     await hydrateSimState(UID);
     await vi.advanceTimersByTimeAsync(1_600);
-    const pushed = mocks.upsert.mock.calls.map(call => (call[0] as { key: string }).key);
+    const pushed = (mocks.upsert.mock.calls as unknown as unknown[][]).map(call => (call[0] as { key: string }).key);
     expect(pushed).toContain('trade_history');
   });
 

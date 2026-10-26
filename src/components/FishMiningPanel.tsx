@@ -18,7 +18,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref }: { mining: F
   const caughtUp = !reached && s.cursorMs > now, share = Math.min(1, s.mined / s.target);
   const applyTarget = () => { const n = Number(target); if (Number.isInteger(n) && n > 0) mining.setTarget(n); setTarget(null); };
   const status = running && anchorMs != null ? `正在挖 ${short(anchorMs)} 这一档${progress?.total ? `（${progress.done} / ${progress.total} 个标的）` : ''}`
-    : !s.enabled ? (s.anchorsDone ? '已暂停' : '还没开始')
+    : !s.enabled ? (s.anchorsDone ? `已暂停 · 继续后从 ${short(s.cursorMs)} 这一档接着挖` : '还没开始')
     : reached ? '已达目标：调高目标可继续往后挖'
     : caughtUp ? `已追上现在，下一档 ${short(s.cursorMs)} 到点自动挖`
     : s.lastError ? `出错：${s.lastError}（2 分钟后原地重试）`

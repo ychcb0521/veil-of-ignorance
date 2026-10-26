@@ -245,3 +245,30 @@ it('links only sold or held trades to their campaign; a registered buy waiting f
   expect(within(first).getByText('已卖出').closest('a')).not.toBeNull();
   expect(within(first).getByText('待设门槛').closest('a')).toBeNull();
 });
+// 【用户要求】2026-10-26「卖出比较的列表，我希望可以批量选中，比如按住 shift 就可以进行连续选择」
+it('shift-click selects (or clears) the whole run of rows between the last clicked row and this one, in on-screen order', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, Array.from({length: 8}, (_,i) => ({id:`lib-${i}`,symbol:`COIN${i}USDT`,timeMs:T+i*60000,timeLabel:'',fallbackZone:''})));
+  s.study.selectedRowIds = [];
+  const view = render(<FishQuality state={s}/>);
+  fireEvent.change(screen.getByLabelText('鱼质量的来源'), {target:{value:'library'}});
+  const set = s.setSelectedRows as ReturnType<typeof vi.fn>;
+  const boxes = () => screen.getAllByTestId('quality-fish-row').map(row => within(row).getByRole('checkbox'));
+  const symbols = () => screen.getAllByTestId('quality-fish-row').map(row => row.textContent!.match(/COIN\d+USDT/)![0]);
+  const shown = symbols();
+  fireEvent.click(boxes()[1]);
+  let ids = set.mock.calls.at(-1)![0] as string[];
+  expect(ids).toHaveLength(1);
+  s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
+  fireEvent.click(boxes()[5], {shiftKey: true});
+  ids = set.mock.calls.at(-1)![0] as string[];
+  expect(ids).toHaveLength(5);
+  s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
+  expect(boxes().map(b => (b as HTMLInputElement).checked)).toEqual(shown.map((_, i) => i >= 1 && i <= 5));
+  // 再按住 Shift 往回点一行已选的：从上次点的那行到这一行一起取消
+  fireEvent.click(boxes()[3], {shiftKey: true});
+  ids = set.mock.calls.at(-1)![0] as string[];
+  s.study = {...s.study, selectedRowIds: ids}; view.rerender(<FishQuality state={s}/>);
+  expect(boxes().map(b => (b as HTMLInputElement).checked)).toEqual(shown.map((_, i) => i >= 1 && i <= 2));
+  expect(boxes()[0]).toHaveAttribute('title', '按住 Shift 点另一行可连续选择');
+});
