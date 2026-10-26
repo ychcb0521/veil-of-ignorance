@@ -3,6 +3,23 @@ import { chartFeatureDef } from '@/lib/featureSource';
 import { definitionKey } from '@/lib/deepDig/features';
 import { formatUTC8 } from '@/lib/timeFormat';
 
+type SellEvidence = NonNullable<TradeCampaign['comparison']>['sellEvidence'];
+export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
+  if (!evidence || evidence.confirmedAt == null || !Number.isFinite(evidence.confirmedAt) || evidence.reading == null || !Number.isFinite(evidence.reading)) return null;
+  const period = /^([1-9]\d*)(m|h|d)$/.exec(evidence.interval);
+  if (!period) return null;
+  const step = Number(period[1]) * (period[2] === 'm' ? 60_000 : period[2] === 'h' ? 3_600_000 : 86_400_000);
+  const open = evidence.confirmedAt - step;
+  return <aside className="mx-2 mb-2 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] space-y-1" data-testid="quality-sell-timing">
+    <div className="flex flex-wrap gap-x-4 gap-y-1">
+      <b className="font-medium">卖出方式：{evidence.interval} 收盘确认</b>
+      <span>触发 K 线：{formatUTC8(open)} → {formatUTC8(evidence.confirmedAt)}</span>
+      <span className="font-mono">收盘读数 {evidence.reading.toPrecision(9)} {evidence.direction} {evidence.threshold}</span>
+    </div>
+    <p className="text-muted-foreground">图上指标点画在该根 K 线的开盘位置，最终读数到收盘才确定；指标连线不表示盘中首次达标。确认后按 {formatUTC8(evidence.confirmedAt)} 起的 1 分钟 K 线开盘价成交。</p>
+  </aside>;
+}
+
 export function QualitySellEvidence({ evidence, repair }: { evidence: NonNullable<TradeCampaign['comparison']>['sellEvidence']; repair?: NonNullable<TradeCampaign['comparison']>['repair'] }) {
   if (!evidence) return null;
   const current = chartFeatureDef(evidence.featureId);
@@ -17,7 +34,7 @@ export function QualitySellEvidence({ evidence, repair }: { evidence: NonNullabl
       {evidence.reading != null && <span className="font-mono">触发读数 {evidence.reading.toPrecision(9)}</span>}
       {evidence.confirmedAt != null && <span>确认 / 成交时刻 {formatUTC8(evidence.confirmedAt)}</span>}
     </div>
-    <p className="text-muted-foreground">首次满足条件的已收盘指标触发，按紧接该收盘时刻的 1 分钟 K 线开盘价卖出；不使用未收盘读数。</p>
+    <p className="text-muted-foreground">按 {evidence.interval} K 线收盘确认卖出，成交价取确认时刻起的 1 分钟 K 线开盘价。图上指标点按 K 线开盘位置绘制，最终读数到收盘才确定。</p>
     {repair?.status === 'verified' && repair.beforeReturnPct != null && <p className="text-muted-foreground">纠错前收益 {repair.beforeReturnPct.toFixed(2)}%{repair.beforeEndTime ? ` · 原卖出 / 估值时间 ${formatUTC8(repair.beforeEndTime)}` : ''}。原值已保留在纠错记录中。</p>}
     {repair && repair.status !== 'verified' && <p role="alert" className="text-destructive">{repair.status === 'pending' ? '此战役正在等待纠错，原结果暂不计入比较统计。' : `此战役纠错未通过：${repair.error}。原记录保留，暂不计入比较统计。`}</p>}
     {differs && <p role="status" className="text-amber-700 dark:text-amber-400">本战役公式与当前账号公式不同。下方通用指标图使用当前账号设置，不能用其读数核对这份历史结果；请回鱼质量重新运行，生成当前公式的比较结果。</p>}

@@ -29,7 +29,7 @@ import { ImeSafeInput } from '@/components/ui/ime-safe-text-field';
 import { Skeleton } from '@/components/ui/skeleton';
 import { type ChartMarker, type TimeBoundPriceLine, type VerticalLine } from '@/components/journal/ReplayCandleChart';
 import { ReplayKlineChart } from '@/components/journal/ReplayKlineChart';
-import { QualitySellEvidence } from '@/components/journal/QualitySellEvidence';
+import { QualitySellEvidence, QualitySellTiming } from '@/components/journal/QualitySellEvidence';
 import { CampaignLegsList } from '@/components/journal/CampaignLegsList';
 import { CampaignReviewSummary } from '@/components/journal/CampaignReviewSummary';
 import { CampaignDetailSelfRating } from '@/components/journal/CampaignDetailSelfRating';
@@ -2907,6 +2907,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
 
         <section className="space-y-3">
           <div ref={campaignChartPanelRef} className="bg-card border border-border rounded p-2">
+            {campaign.comparison && <QualitySellTiming evidence={campaign.comparison.sellEvidence} />}
             {/* 窄屏上一排放不下时折行、工具栏跟着长高：倍数档换成 2.1x / 3.1x 之后 390 宽正好多出 2px，不折行就顶出页面、压在盘面底下 */}
             <div className="min-h-9 px-2 py-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <div className="flex flex-wrap items-center gap-1" role="group" aria-label="盘面 K 线周期">
