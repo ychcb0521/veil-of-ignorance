@@ -34,6 +34,13 @@ export interface QualityResult {
   exitReading?: number;
   pendingExit?: { at: number; reading: number };
 }
+/**
+ * 【用户要求】2026-10-26「在比较卖出的时候，再增加一些买入的过滤机制，比如只有符合状态S大于0.7才买入（选择权给我）」
+ * 买入过滤：全部启用的条件都满足才买入；读数取买入时刻之前最后一根已收盘的 K 线（不看买入之后）。
+ */
+export interface QualityBuyFilter { id: string; label: string; metric: string; direction: '<' | '>'; threshold: number; enabled: boolean; snapshot: FishSnapshot }
+/** 买入时刻的读数缓存：与门槛无关，改门槛不必重新取数。 */
+export interface QualityFilterReading { key: string; value?: number; at?: number; error?: string }
 export interface FishQualityStudy {
   version: 1; startedAt: number; entryMode: QualityEntryMode; observeHours: number;
   tracking: boolean; groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
@@ -41,6 +48,7 @@ export interface FishQualityStudy {
   sellPlans?: QualityGroup[]; selectedSellId?: string; cohortIds?: string[]; selectedRowIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
   campaignRuns?: QualityCampaignRun[];
+  buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
 }
 export const newQualityStudy = (now = Date.now()): FishQualityStudy => ({ version: 1, startedAt: now, entryMode: 'capture', observeHours: 0, tracking: true, groups: [], samples: [], results: [], selectedRowIds: [] });
 /**
@@ -202,6 +210,42 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
   ].map(v => ({ ...v, label: `${v.label}（${v.rule.direction} ${v.rule.threshold}）` }));
 }
 
+export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval]));
+export const activeBuyFilters = (study: FishQualityStudy) => (study.buyFilters ?? []).filter(f => f.enabled && Number.isFinite(f.threshold));
+export type QualityFilterStatus = { state: 'none' | 'pass' | 'fail' | 'pending' | 'error'; detail: string };
+/** 一行是否买入：没有启用的条件 = none；任一条件缺数据 = error；任一不满足 = fail；还没读数 = pending。 */
+export function qualityFilterStatus(study: FishQualityStudy, row: QualitySample, readings: ReadonlyMap<string, QualityFilterReading> = new Map((study.filterReadings ?? []).map(r => [r.key, r]))): QualityFilterStatus {
+  const filters = activeBuyFilters(study);
+  if (!filters.length) return { state: 'none', detail: '' };
+  const parts: string[] = []; let pending = false, error = false, fail = false;
+  for (const f of filters) {
+    const r = readings.get(qualityFilterReadingKey(row, f));
+    if (!r) { pending = true; parts.push(`${f.label} 待读数`); continue; }
+    if (r.error || !Number.isFinite(r.value)) { error = true; parts.push(`${f.label} 缺数据：${r.error ?? '读数无效'}`); continue; }
+    const ok = f.direction === '>' ? r.value! > f.threshold : r.value! < f.threshold;
+    if (!ok) fail = true;
+    parts.push(`${f.label} ${+r.value!.toPrecision(4)} ${ok ? '满足' : '不满足'} ${f.direction} ${f.threshold}`);
+  }
+  return { state: error ? 'error' : fail ? 'fail' : pending ? 'pending' : 'pass', detail: parts.join('；') };
+}
+/** 买入时刻之前最后一根已收盘 K 线上的读数（原值，倍率 1）。 */
+export async function evaluateQualityFilter(row: QualitySample, f: QualityBuyFilter, now: number, load: FishReconstructionLoader, signal: AbortSignal): Promise<QualityFilterReading> {
+  const key = qualityFilterReadingKey(row, f);
+  if (!row.enteredAt) return { key, error: '缺少有效买入时间' };
+  try {
+    const { plan, scale } = qualityMetricPlan(f.snapshot, f.metric);
+    const cut = Math.floor(row.enteredAt / plan.step) * plan.step, from = cut - (plan.warm + 1) * plan.step;
+    if (from < 0) return { key, error: '公式预热所需历史不足' };
+    const bars = await load({ ...row.source, timeMs: now }, from, cut, plan, signal);
+    validateFishBars(bars, cut, (cut - from) / plan.step, plan.step);
+    const value = evaluateFishProgram(bars, plan).average.at(-1)! * scale;
+    return Number.isFinite(value) ? { key, value, at: cut } : { key, error: '买入时刻读数缺失' };
+  } catch (error) {
+    abort(signal);
+    return { key, error: error instanceof Error ? error.message : '行情读取失败' };
+  }
+}
+
 const pricePlan = () => compileFishProgram({ id: 'quality-price', short: '价格', name: '价格', definition: '', formula: 'C', scale: 1, unit: '', positive: '1', control: '0', interval: '1m' }, { statistic: '结果', direction: '>', threshold: 0, constraints: [] });
 const abort = (signal: AbortSignal) => { if (signal.aborted) throw new DOMException('已取消', 'AbortError'); };
 /** A rule is observed only at completed algorithm bars; fill at the next minute's open, never a past signal price. */
@@ -288,6 +332,8 @@ export interface QualityRunOptions {
   study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
   /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
   priority?: () => readonly string[];
+  /** 买入过滤的读数（每行每个条件算一次）。 */
+  onFilterReading?: (r: QualityFilterReading) => void;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map(study.results.map(r => [r.key, r]));
@@ -303,14 +349,28 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     if (first.done) return undefined;
     pending.delete(first.value[0]); return first.value[1];
   };
+  // 买入过滤：先读买入时刻的指标，不满足（或缺数据）的行不再评估卖出；之后放宽门槛会补算
+  const filters = study.sellPlans ? activeBuyFilters(study) : [];
+  const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const passes = async (row: QualitySample) => {
+    for (const f of filters) {
+      const key = qualityFilterReadingKey(row, f);
+      if (!readings.has(key)) { abort(signal); const r = await evaluateQualityFilter(row, f, now, load, signal); readings.set(key, r); options.onFilterReading?.(r); }
+    }
+    const state = qualityFilterStatus(study, row, readings).state;
+    return state === 'none' || state === 'pass';
+  };
   let done = 0;
-  for (let batch = next(); batch; batch = next()) for (const { s, g } of batch) {
+  for (let batch = next(); batch; batch = next()) {
+    if (filters.length && !(await passes(batch[0].s))) { done += batch.length; options.onProgress({ done, total: tasks.length, current: '' }); continue; }
+    for (const { s, g } of batch) {
     abort(signal);
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
     if (!cached?.complete && !(!g.rule && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));
+    }
   }
   options.onProgress({ done, total: tasks.length, current: '' });
 }

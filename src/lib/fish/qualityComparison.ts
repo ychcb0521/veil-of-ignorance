@@ -1,6 +1,6 @@
 /** Two-stage comparisons use one entry per fish and a common set of sell experiments. */
 import { STATE_DEF, CDA_DEF, definitionKey } from '@/lib/deepDig/features';
-import { qualityComparisonRows, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+import { activeBuyFilters, qualityComparisonRows, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
 
 export function enableQualityComparison(study: FishQualityStudy): FishQualityStudy {
   if (study.sellPlans) return study;
@@ -47,7 +47,15 @@ export function qualityDistribution(results: readonly QualityResult[]) {
   };
 }
 export function qualityComparisonStats(study: FishQualityStudy, rows: QualitySample[], closedOnly: boolean) {
-  const plans = study.sellPlans ?? [], results = qualityResultMap(study), paired = qualityPairedRows(study, rows, closedOnly);
+  const plans = study.sellPlans ?? [], results = qualityResultMap(study);
+  // 买入过滤只作用于比较卖出：不满足、缺数据、还没读数的信号都不进卖出对照
+  const filterOn = activeBuyFilters(study).length > 0, readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
+  const states = filterOn ? signals.map(row => qualityFilterStatus(study, row, readings).state) : [];
+  const count = (state: string) => states.filter(v => v === state).length;
+  const filter = { on: filterOn, passed: count('pass'), failed: count('fail'), pending: count('pending'), error: count('error') };
+  const bought = filterOn ? signals.filter((_, i) => states[i] === 'pass') : rows;
+  const paired = qualityPairedRows(study, bought, closedOnly);
   const selected = plans.find(p => p.id === study.selectedSellId && p.rule);
   const sells = plans.map(plan => ({ plan, ...qualityDistribution(paired.map(row => qualityRowResult(study, row, plan, results)!)) }));
   const detectors = study.groups.map(group => {
@@ -55,5 +63,5 @@ export function qualityComparisonStats(study: FishQualityStudy, rows: QualitySam
     const valid = selected ? caught.map(row => qualityRowResult(study, row, selected, results)).filter(r => usable(r, closedOnly)) : [];
     return { group, total: caught.length, ...qualityDistribution(valid) };
   });
-  return { paired, sells, detectors, selected };
+  return { paired, sells, detectors, selected, filter };
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { importQualityFish, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
@@ -61,6 +61,10 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     try {
       await latestRun.current({ study: frozen, signal: aborter.signal, priority: () => priorityRef.current,
         onProgress: p => { if (epoch === generation.current && !aborter.signal.aborted) setProgress(p); },
+        onFilterReading: reading => {
+          if (epoch !== generation.current || aborter.signal.aborted) return;
+          change(s => ({ ...s, filterReadings: [...(s.filterReadings ?? []).filter(r => r.key !== reading.key), reading] }));
+        },
         onResult: result => {
           if (epoch !== generation.current || aborter.signal.aborted) return;
           change(s => {
@@ -107,6 +111,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change, cancel]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority };
+  // 买入过滤：改条件后重算；读数按「行 + 指标」缓存，改门槛不重新取数
+  const setBuyFilters = useCallback((filters: QualityBuyFilter[]) => {
+    cancel(); change(s => ({ ...s, buyFilters: filters }));
+    const epoch = generation.current; setTimeout(() => { if (epoch === generation.current) void start(true); }, 500);
+  }, [change, cancel, start]);
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, warning, error, start, cancel, setRule, setObserveHours, setTracking, selectSell, setCohort, setSelectedRows, setPriority, setBuyFilters };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

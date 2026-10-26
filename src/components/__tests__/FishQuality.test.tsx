@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn() };
+  return { study, ready: true, running: false, progress: null, warning: '', error: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setBuyFilters: vi.fn() };
 }
 afterEach(cleanup);
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
@@ -162,4 +162,62 @@ it('hands the evaluator the on-screen rows first and updates that order after sc
   const box = screen.getByTestId('quality-fish-table'); box.scrollTop = 200 * 33; fireEvent.scroll(box);
   const afterScroll = vi.mocked(s.setPriority).mock.calls.at(-1)![0];
   expect(byId.get(afterScroll[0])).not.toBe('AAAUSDT'); expect(screen.getByText(byId.get(afterScroll[0])!)).toBeInTheDocument();
+});
+
+// 【用户要求】2026-10-26 比较卖出时的买入过滤（条件由用户设）
+it('lets the user add, edit and apply buy conditions, then marks rows that were not bought', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const s = state(); render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '买入过滤' }));
+  expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
+  expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
+  expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setBuyFilters).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '应用并重算' }));
+  expect(s.setBuyFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
+  cleanup();
+  const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
+  s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
+  render(<FishQuality state={s}/>);
+  expect(screen.getByRole('button', { name: '买入过滤' })).toHaveTextContent('1');
+  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveTextContent('未买入');
+  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
+  expect(within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入').length).toBeGreaterThanOrEqual(3);
+  fireEvent.click(screen.getByRole('tab', { name: /比较探测/ })); expect(screen.queryByTestId('quality-filter-cell')).toBeNull();
+});
+// 【用户要求】2026-10-26「鱼质量中的所有表头都要能够排序」
+it('sorts by every header, keeping empty values last in both directions', () => {
+  const s = state();
+  s.study = importQualityLibrary(s.study, [{ id: 'l1', symbol: 'BBBUSDT', timeMs: T - 3600_000, timeLabel: '', fallbackZone: '', quality: 5 }, { id: 'l2', symbol: 'CCCUSDT', timeMs: T - 7200_000, timeLabel: '', fallbackZone: '', quality: 2 }]);
+  const plan = s.study.sellPlans![0]; plan.rule = { metric: plan.metric, direction: '<', threshold: .5 };
+  const rows = qualityComparisonRows(s.study), lib1 = rows.find(r => r.source.symbol === 'BBBUSDT')!, lib2 = rows.find(r => r.source.symbol === 'CCCUSDT')!;
+  s.study.results.push({ key: qualityResultKey(lib1, plan, 0), sampleId: lib1.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: -3 }, { key: qualityResultKey(lib2, plan, 0), sampleId: lib2.id, groupId: plan.id, evaluatedAt: T, status: 'closed', returnPct: 8 });
+  render(<FishQuality state={s}/>);
+  const symbols = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
+  for (const label of ['标的', '信号时间', '市场', '评分', '捕捞过程', '探测算法']) expect(screen.getByRole('button', { name: `按${label}排序` })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '按评分排序' })); expect(symbols()).toEqual(['BBBUSDT', 'CCCUSDT', 'AAAUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '按评分排序' })); expect(symbols()).toEqual(['CCCUSDT', 'BBBUSDT', 'AAAUSDT']); // 无评分仍在最后
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' })); expect(symbols()).toEqual(['CCCUSDT', 'BBBUSDT', 'AAAUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' })); expect(symbols()).toEqual(['BBBUSDT', 'CCCUSDT', 'AAAUSDT']);
+  fireEvent.click(screen.getByRole('button', { name: '按捕捞过程排序' })); expect(symbols()[0]).toBe('AAAUSDT');
+  fireEvent.click(screen.getByRole('button', { name: '按标的排序' })); expect(symbols()).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
+  expect(screen.getByRole('columnheader', { name: /标的/ })).toHaveAttribute('aria-sort', 'ascending');
+  fireEvent.click(screen.getByRole('button', { name: /盈亏分布/ }));
+  expect(within(screen.getByTestId('quality-distribution')).getByRole('button', { name: '按平均收益排序' })).toBeInTheDocument();
+});
+it('sorts sell returns among bought signals only; not-bought and pending rows stay last', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const s = state();
+  s.study = importQualityLibrary(s.study, ['BBB', 'CCC', 'DDD'].map((b, i) => ({ id: b, symbol: `${b}USDT`, timeMs: T - (i + 1) * 3600_000, timeLabel: '', fallbackZone: '' })));
+  const plan = s.study.sellPlans![0], f = makeQualityBuyFilter('state:state', '>', .7); plan.rule = { metric: plan.metric, direction: '<', threshold: .5 };
+  const rows = qualityComparisonRows(s.study), by = (sym: string) => rows.find(r => r.source.symbol === sym)!;
+  // BBB 收益最高但没买入，CCC 待判断，DDD 买入
+  s.study.results.push(...[['BBBUSDT', 50], ['CCCUSDT', 40], ['DDDUSDT', 1]].map(([sym, v]) => ({ key: qualityResultKey(by(sym as string), plan, 0), sampleId: by(sym as string).id, groupId: plan.id, evaluatedAt: T, status: 'closed' as const, returnPct: v as number })));
+  s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(by('BBBUSDT'), f), value: .1 }, { key: qualityFilterReadingKey(by('DDDUSDT'), f), value: .9 }] };
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '按状态 S 原始值收益率排序' }));
+  expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('DDDUSDT');
 });
