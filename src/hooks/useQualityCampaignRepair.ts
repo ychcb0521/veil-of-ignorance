@@ -35,12 +35,15 @@ export function useQualityCampaignRepair(owner?: string) {
       const definitions = accountFeatureDefs();
       const prepared = prepareQualityRepair(syncQualitySellDefinitions(archiveQualityStudy(loaded.study),definitions),definitions,Date.now());
       let current: FishQualityStudy = prepared.study;
-      const publish = () => { if (epoch === generation.current) setBatch(current.campaignRepair); };
       const persist = async () => {
-        if (!await saveQualityStudy(owner,current,{repairOnly:true})) throw new Error('纠错结果未能保存到本机，已停止。原记录保留，请恢复存储后继续纠错。');
+        // Another worker may advance `current` while this save is pending. Report
+        // only this exact durable checkpoint, including the final complete state.
+        const checkpoint = current;
+        if (!await saveQualityStudy(owner,checkpoint,{repairOnly:true})) throw new Error('纠错结果未能保存到本机，已停止。原记录保留，请恢复存储后继续纠错。');
+        if (epoch === generation.current) setBatch(checkpoint.campaignRepair);
         announceRepair(owner);
       };
-      publish(); await persist();
+      await persist();
       const release = beginHistoryOnlyNotifications();
       let paused = false;
       try {
@@ -50,14 +53,13 @@ export function useQualityCampaignRepair(owner?: string) {
             if (aborter.signal.aborted) throw new DOMException('已暂停','AbortError');
             current = applyQualityRepair(current,prepared.batch.id,task,result,Date.now());
             if (epoch === generation.current) setSymbol(task.sample.source.symbol);
-            publish();
             try { await persist(); } catch (e) { aborter.abort(); throw e; }
           }});
         }
       } catch (e) { paused = true; if (!aborter.signal.aborted) { aborter.abort(); throw e; } }
       finally {
         release(); current = finishQualityRepair(current,prepared.batch.id,paused || aborter.signal.aborted,Date.now());
-        publish(); await persist();
+        await persist();
       }
     };
     try {

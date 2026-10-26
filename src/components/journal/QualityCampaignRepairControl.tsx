@@ -12,6 +12,7 @@ export function QualityCampaignRepairControl({ owner }: { owner?: string }) {
       {batch && <span role="status">{repair.running ? '核验中' : batch.state !== 'complete' ? '未完成，可继续' : '核验完成'} {verified + failed} / {batch.targetKeys.length} · 已纠正 {batch.changedKeys.length} · 核验未变 {verified - batch.changedKeys.length} · 未通过 {failed}{repair.symbol ? ` · ${repair.symbol}` : ''}</span>}
     </div>
     <p className="text-muted-foreground">按当前账号公式重算全部已有比较战役，保留各自买入时点、卖出门槛和观察时长。旧值保留追溯，旧链接转到纠正结果；待核验和未通过项暂不计入统计。离开页面会暂停，可继续。</p>
+    {repair.running && <p className="text-muted-foreground">进度仅计入已保存结果；比较列表在暂停或整批完成后统一刷新。</p>}
     {repair.error && <p role="alert" className="text-destructive">{repair.error}</p>}
     {!!failed && <details><summary className="cursor-pointer text-destructive">查看未通过原因</summary><ul className="mt-1 space-y-1">{Object.entries(batch!.failures).map(([key,message]) => <li key={key}>{key}：{message}</li>)}</ul></details>}
   </section>;

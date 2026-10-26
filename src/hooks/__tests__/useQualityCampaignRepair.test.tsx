@@ -43,3 +43,35 @@ it('pauses on an account change and cannot write the old repair into the new acc
   await waitFor(()=>expect(state.studies.get('a')?.campaignRepair?.state).toBe('paused'));
   expect(state.save.mock.calls.every(([owner])=>owner==='a')).toBe(true);expect(h.result.current.batch).toBeUndefined();
 });
+it('reports each concurrent checkpoint only after that exact checkpoint has been saved',async()=>{
+  const study=state.studies.get('a')!,first=study.campaignRuns![0],sample={...first.sample,id:'second'};
+  study.campaignRuns!.push({...first,sample,result:{...first.result,key:qualityResultKey(sample,first.plan,first.observeHours),sampleId:sample.id}});
+  const runOne=state.run.getMockImplementation()!;
+  state.run.mockImplementation(async options=>{await Promise.all(options.tasks.map((task:unknown)=>runOne({...options,tasks:[task]})));});
+  const pending:Array<()=>void>=[];
+  state.save.mockImplementation((owner:string,value:FishQualityStudy)=>{
+    const copy=structuredClone(value);
+    if(copy.campaignRepair?.state==='running' && copy.campaignRepair.completedKeys.length) return new Promise<boolean>(resolve=>pending.push(()=>{state.studies.set(owner,copy);resolve(true);}));
+    state.studies.set(owner,copy);return Promise.resolve(true);
+  });
+  const h=renderHook(()=>useQualityCampaignRepair('a'));
+  let finished:Promise<void>=Promise.resolve();
+  act(()=>{finished=h.result.current.start();});
+  await waitFor(()=>expect(pending).toHaveLength(2));
+  expect(h.result.current.batch?.completedKeys).toHaveLength(0);
+  await act(async()=>{pending[0]();});
+  expect(h.result.current.batch?.completedKeys).toHaveLength(1);
+  await act(async()=>{pending[1]();await finished;});
+  expect(h.result.current.batch?.completedKeys).toHaveLength(2);
+  expect(h.result.current.batch?.state).toBe('complete');
+});
+it('does not announce complete when saving the final batch state fails',async()=>{
+  const save=state.save.getMockImplementation()!;
+  state.save.mockImplementation((owner,value)=>value.campaignRepair?.state==='complete'?Promise.resolve(false):save(owner,value));
+  const h=renderHook(()=>useQualityCampaignRepair('a'));
+  await act(async()=>{await h.result.current.start();});
+  expect(h.result.current.batch?.completedKeys).toHaveLength(1);
+  expect(h.result.current.batch?.state).not.toBe('complete');
+  expect(h.result.current.error).toContain('未能保存');
+  expect(state.studies.get('a')!.campaignRepair?.state).not.toBe('complete');
+});
