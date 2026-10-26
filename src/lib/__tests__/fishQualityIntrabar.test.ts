@@ -77,7 +77,7 @@ describe('causal intrabar sell replay',()=>{
     const g=group(),base=loader(t=>bar(t));
     const missing:FishReconstructionLoader=async(...args)=>(await base(...args)).filter(b=>args[3].step!==M||b.openTime!==T+M);
     expect(await run(g,missing)).toMatchObject({status:'error',reason:expect.stringContaining('缺根')});
-    expect(await run(g,loader(t=>bar(t,t===T+M?NaN:100)))).toMatchObject({status:'error',reason:expect.stringContaining('缺失读数')});
+    expect(await run(g,loader(t=>bar(t,t===T+M?NaN:100)))).toMatchObject({status:'error',reason:expect.stringMatching(/缺失读数：AAAUSDT，入场 .*，观测 .*；不能越过缺口/)});
     const controller=new AbortController();controller.abort();await expect(evaluateQualitySample(sample,g,0,T+10*M,base,controller.signal)).rejects.toMatchObject({name:'AbortError'});
   });
   it('versions timing policy independently so old cached results can never satisfy intrabar evaluation',()=>{

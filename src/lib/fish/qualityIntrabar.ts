@@ -6,6 +6,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { compileFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
+import { formatUTC8 } from '@/lib/timeFormat';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
@@ -54,7 +55,7 @@ export async function findQualityIntrabarExit(o: {
     const bars=partial?[...history,partial]:history;
     const out=evaluateOnBars(bars,plan.compiled,plan.def,cache).vars.get(plan.averageName);
     const reading=(typeof out==='number'?out:out?.[bars.length-1] ?? NaN)*o.scale;
-    if (!Number.isFinite(reading)) throw new Error('盘中指标存在缺失读数，不能越过缺口判断成交');
+    if (!Number.isFinite(reading)) throw new Error(`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`);
     if (at>=checkFrom && (o.rule.direction==='<'?reading<o.rule.threshold:reading>o.rule.threshold)) return {at,reading,barOpenTime,previous};
     previous={at,reading};
   };
