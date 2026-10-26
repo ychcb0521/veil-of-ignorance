@@ -13,6 +13,20 @@ function state(): FishQualityState {
   return { study, ready: true, running: false, progress: null, warning: '', error: '', definitionNotice: '', start: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), setTracking: vi.fn(), selectSell: vi.fn(), setCohort: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setBuyFilters: vi.fn() };
 }
 afterEach(cleanup);
+it('labels automatically mined fish beside the existing library source label in detector comparison rows', () => {
+  const s=state();
+  s.study.samples=s.study.samples.map(row=>({...row,source:{...row.source,mined:{anchorMs:T}}}));
+  const plain={...s.study.samples[0].source,id:'manual',symbol:'BBBUSDT',mined:undefined};
+  s.study=importQualityFish(s.study,[plain]);
+  s.study=importQualityLibrary(s.study,[{id:'library',symbol:'CCCUSDT',timeMs:T,timeLabel:'',fallbackZone:''}]);
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('tab',{name:/比较探测/}));
+  const rows=screen.getAllByTestId('quality-fish-row');
+  const mined=rows.filter(row=>within(row).queryByText('默认值挖掘'));
+  expect(mined).toHaveLength(3);
+  expect(rows.filter(row=>within(row).queryByText('信号库'))).toHaveLength(1);
+  expect(within(rows.find(row=>row.textContent?.includes('BBBUSDT'))!).queryByText('默认值挖掘')).toBeNull();
+});
 it('matches the cabin row layout, with two sells, one detector column, and three detector rows for one signal', () => {
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.getByTestId('fish-quality').parentElement).not.toHaveAttribute('data-testid', 'fish-cabin');
