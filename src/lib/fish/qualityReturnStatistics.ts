@@ -43,8 +43,8 @@ export function qualityReturnTrades(study: FishQualityStudy, rows: readonly Qual
         level: combination([...groups.map(g => ({ id: g.id, label: `${g.label} ${qualityLevelText(g)}${g.snapshot.constraints?.length ? ` · 约束 ${g.snapshot.constraints.length} 条` : ''}` })), ...unknown], missing),
       };
       // Combination membership is conjunctive, while detector attribution means simultaneous hits.
-      detector.variable.label = detector.variable.label.replaceAll(' 且 ', ' ＋ ');
-      detector.level.label = detector.level.label.replaceAll(' 且 ', ' ＋ ');
+      detector.variable.label = detector.variable.label.split(' 且 ').join(' ＋ ');
+      detector.level.label = detector.level.label.split(' 且 ').join(' ＋ ');
       result.push({ ...trade, trialId: `${plan.id}|${trade.id}`, seller: { variable: { id: series.variableId, label: series.variable }, level: { id: plan.id, label: `${series.variable} ${series.level}` } }, filter, detector });
     }
   }
