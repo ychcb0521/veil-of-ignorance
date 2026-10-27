@@ -7,6 +7,9 @@ import {fishVisibleCatchKey} from '@/lib/fish/records';
 import {FishNotifySettings} from '@/components/FishNotifySettings';
 import type {TradeSignal} from '@/lib/signalLibrary';
 const fish=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>({id:symbol,symbol,timeMs:Date.UTC(2026,9,21,h),timeLabel:'',fallbackZone:'',fish:{average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureShort:'CBI-2'},...extra});
+// 共振：命中的算法里同时有 CBI-2·avg₂ 与 CBA·avg₂（【用户要求】2026-10-27 邮件只发共振信号）
+const snap=(featureId:string,statistic:string,featureShort:string)=>({average:1,cbi2:1,startAverage:1,previousAverage:0,cutoffMs:1,threshold:1,featureId,statistic,featureShort});
+const res=(symbol:string,h:number,extra:Partial<TradeSignal>={}):TradeSignal=>fish(symbol,h,{fish:{...snap('cbi2','avg_CBI2_2','CBI-2'),combination:'or',hitAlgorithms:[1,2],algorithms:[snap('cbi2','avg_CBI2_2','CBI-2'),snap('cba','avg_CBA_2','CBA'),snap('cbi2','avg_CBI2','CBI-2')]},...extra});
 const ready={enabled:true,emails:['a@qq.com'],serviceId:'service_1',templateId:'template_1',publicKey:'pk'};
 beforeEach(()=>{localStorage.clear();});
 it('邮箱：格式检查、去重、统一小写、最多 20 个；设置能存能读',()=>{
@@ -51,10 +54,10 @@ it('没勾选不发；勾选后发并记下结果；测试邮件照常可发',as
  const request=vi.fn(async()=>new Response('OK'));
  saveFishNotify({...ready,enabled:false});
  const {result}=renderHook(()=>useFishNotify('u',request as any));
- await act(async()=>{await result.current.send([fish('AAAUSDT',1)]);});expect(request).not.toHaveBeenCalled();
+ await act(async()=>{await result.current.send([res('AAAUSDT',1)]);});expect(request).not.toHaveBeenCalled();
  await act(async()=>{await result.current.test();});expect(request).toHaveBeenCalledTimes(1);expect(result.current.status).toMatchObject({ok:true,test:true});
  act(()=>{result.current.update({...result.current.config,enabled:true});});
- await act(async()=>{await result.current.send([fish('AAAUSDT',1),fish('BBBUSDT',2)]);});expect(request).toHaveBeenCalledTimes(2);expect(result.current.status).toMatchObject({ok:true,count:2});
+ await act(async()=>{await result.current.send([res('AAAUSDT',1),res('BBBUSDT',2)]);});expect(request).toHaveBeenCalledTimes(2);expect(result.current.status).toMatchObject({ok:true,count:2});
 });
 it('设置面板：添加多个邮箱（回车或逗号分隔）、格式不对提示、删除；没填好 EmailJS 时测试按钮不可点',()=>{
  const notify:any={config:{enabled:false,emails:[],serviceId:'',templateId:'',publicKey:''},status:null,sending:false,update:vi.fn((c:any)=>{notify.config=c;}),send:vi.fn(),test:vi.fn()};
@@ -71,7 +74,7 @@ it('设置面板：添加多个邮箱（回车或逗号分隔）、格式不对�
 it('新鱼列表有变化就发一封整张表（手动、自动都走这里）：和上一封一样不发；多出来的标「新」；失败不记，下一轮再试',async()=>{
  saveFishNotify(ready);let ok=false;const request=vi.fn(async()=>ok?new Response('OK'):new Response('down',{status:500}));
  const {result}=renderHook(()=>useFishNotify('u',request as any));
- const A=fish('AAAUSDT',1),B=fish('BBBUSDT',2);
+ const A=res('AAAUSDT',1),B=res('BBBUSDT',2);
  const sent=(i:number)=>JSON.parse((request.mock.calls[i] as any)[1].body).template_params;
  await act(async()=>{await result.current.send([A],[A]);});expect(result.current.status).toMatchObject({ok:false});
  ok=true;await act(async()=>{await result.current.send([A],[A]);});expect(request).toHaveBeenCalledTimes(2);expect(sent(1).subject).toContain('信号通知 1 条');
@@ -88,7 +91,7 @@ it('新鱼列表有变化就发一封整张表（手动、自动都走这里）�
  await act(async()=>{await result.current.send([],[]);});expect(request).toHaveBeenCalledTimes(4);
 });
 it('测试邮件照当前新鱼列表发；没有新鱼时发示例',async()=>{
- saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));let fresh:TradeSignal[]=[fish('AAAUSDT',1),fish('BBBUSDT',2)];
+ saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));let fresh:TradeSignal[]=[res('AAAUSDT',1),res('BBBUSDT',2)];
  const {result}=renderHook(()=>useFishNotify('u',request as any,()=>fresh));
  await act(async()=>{await result.current.test();});let p=JSON.parse((request.mock.calls[0] as any)[1].body).template_params;
  for (const content of [p.subject, p.name, p.title, p.message, p.message_html]) expect(content).not.toMatch(/https?:|href=|渔|新鱼|无知之幕|veil-of-ignorance/i);
@@ -120,4 +123,20 @@ it('并发发送仍至少间隔一秒，不会因隐私拆分撞上 EmailJS 限�
  const content=composeFishEmail([fish('A',1)]);
  await Promise.all([sendFishEmail(ready,content,request as any),sendFishEmail({...ready,emails:['b@163.com']},content,request as any)]);
  expect(times).toHaveLength(2);expect(times[1]-times[0]).toBeGreaterThanOrEqual(1000);
+});
+it('只发 CBI-2·avg₂ 与 CBA·avg₂ 共振的鱼：只命中一个、或只命中 avg 版的不发；一条共振都没有就不发也不记',async()=>{
+ const {fishEmailResonates}=await import('@/lib/fish/notify');
+ saveFishNotify(ready);const request=vi.fn(async()=>new Response('OK'));
+ const onlyCbi=fish('CBIUSDT',3,{fish:{...snap('cbi2','avg_CBI2_2','CBI-2'),combination:'or',hitAlgorithms:[1],algorithms:[snap('cbi2','avg_CBI2_2','CBI-2'),snap('cba','avg_CBA_2','CBA')]}});
+ const avgOnly=fish('AVGUSDT',4,{fish:{...snap('cbi2','avg_CBI2','CBI-2'),combination:'and',algorithms:[snap('cbi2','avg_CBI2','CBI-2'),snap('cba','avg_CBA','CBA')]}});
+ const both=res('BOTHUSDT',5);
+ expect([onlyCbi,avgOnly,both].map(fishEmailResonates)).toEqual([false,false,true]);
+ const {result}=renderHook(()=>useFishNotify('u',request as any));
+ await act(async()=>{await result.current.send([onlyCbi,avgOnly]);});
+ expect(request).not.toHaveBeenCalled();expect(result.current.status).toMatchObject({ok:true,count:2,skipped:true});
+ await act(async()=>{await result.current.send([onlyCbi,avgOnly,both]);});
+ expect(request).toHaveBeenCalledTimes(1);expect(result.current.status).toMatchObject({ok:true,count:1});
+ const body=JSON.parse((request.mock.calls[0] as unknown as [string,{body:string}])[1].body).template_params;
+ expect(body.message).toContain('BOTHUSDT');expect(body.message).not.toContain('CBIUSDT');expect(body.message).not.toContain('AVGUSDT');
+ expect(body.message_html).toContain('CBI-2·avg₂ 与 CBA·avg₂ 共振');
 });

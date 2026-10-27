@@ -7,10 +7,10 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { subscribePersistedStateHydration } from '@/lib/persistedStateStorage';
 import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { fishVisibleCatchKey } from '@/lib/fish/records';
-import { composeFishEmail, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
+import { composeFishEmail, fishEmailResonates, fishTableChange, readFishNotify, saveFishNotify, saveLastFishTable, sendFishEmail, type FishNotifyConfig } from '@/lib/fish/notify';
 
-/** unchanged = 这一轮结束时新鱼和上一封一样，没发。 */
-export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean }
+/** unchanged = 这一轮结束时新鱼和上一封一样，没发；skipped = 本轮有新鱼但没有一条共振，没发（count 为新鱼条数）。 */
+export interface FishNotifyStatus { at: number; ok: boolean; count: number; test?: boolean; error?: string; unchanged?: boolean; skipped?: boolean }
 export interface FishNotify {
   config: FishNotifyConfig; status: FishNotifyStatus | null; sending: boolean;
   update: (next: FishNotifyConfig) => void;
@@ -42,11 +42,14 @@ export function useFishNotify(account: string | undefined, request?: typeof fetc
   // 发的是整张新鱼表；和上一封一样就不发；发送失败不记，下一轮再比
   const send = useCallback(async (fish: readonly TradeSignal[], fresh?: readonly TradeSignal[]) => {
     if (!configRef.current.enabled) return;
-    const list = fresh ?? [], table = [...list, ...fish.filter(s => !list.some(f => fishVisibleCatchKey(f) === fishVisibleCatchKey(s)))];
+    const list = fresh ?? [], all = [...list, ...fish.filter(s => !list.some(f => fishVisibleCatchKey(f) === fishVisibleCatchKey(s)))];
+    // 【用户要求】2026-10-27 只发 CBI-2·avg₂ 与 CBA·avg₂ 共振的鱼；一条都没有就不发（上一封的记录不动）
+    const table = all.filter(fishEmailResonates);
+    if (!table.length) { if (all.length) setStatus({ at: Date.now(), ok: true, count: all.length, skipped: true }); return; }
     const change = fishTableChange(table);
     if (!change.changed) { if (table.length) setStatus({ at: Date.now(), ok: true, count: table.length, unchanged: true }); return; }
     await deliver(table, false, change.added, () => saveLastFishTable(change.keys));
   }, [deliver]);
-  const test = useCallback(() => { const fresh = getFresh?.() ?? []; return fresh.length ? deliver(fresh, true) : deliver([{ id: 'test', symbol: 'TESTUSDT', timeMs: Date.now(), timeLabel: '', fallbackZone: '', fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: Date.now(), threshold: 0, featureShort: '示例' } }], true); }, [deliver, getFresh]);
+  const test = useCallback(() => { const fresh = (getFresh?.() ?? []).filter(fishEmailResonates); return fresh.length ? deliver(fresh, true) : deliver([{ id: 'test', symbol: 'TESTUSDT', timeMs: Date.now(), timeLabel: '', fallbackZone: '', fish: { average: 0, cbi2: 0, startAverage: 0, previousAverage: 0, cutoffMs: Date.now(), threshold: 0, featureShort: '示例' } }], true); }, [deliver, getFresh]);
   return { config, status, sending, update, send, test };
 }

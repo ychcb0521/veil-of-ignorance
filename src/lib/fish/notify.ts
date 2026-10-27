@@ -13,6 +13,19 @@ import { queueSimStatePush } from '@/lib/simStateSync';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { EXCHANGE_NAMES } from './exchanges';
 import { fishCaughtBy, fishVisibleCatchKey } from './records';
+import { qualityMembers } from './quality';
+import { focusDetector, FOCUS_DETECTORS } from './qualityFocusSignals';
+
+/**
+ * 【用户要求】2026-10-27「推送的邮件内容只包括 avg_CBI2_2、avg_CBA_2 共振的信号，也就是两者捕捉到的信号的交集」。
+ * 共振 = 这条鱼命中的算法里同时有 CBI-2·avg₂ 和 CBA·avg₂（与鱼质量「重点信号」同一口径，见 focusDetector：
+ * 按算法选的序列认，统计量写「结果」的按公式最后一行认）。只看真正命中的那几条（并集看 hitAlgorithms）。
+ */
+export const FISH_EMAIL_RESONANCE_LABEL = 'CBI-2·avg₂ 与 CBA·avg₂ 共振';
+export function fishEmailResonates(s: TradeSignal): boolean {
+  const hit = new Set(qualityMembers(s).map(focusDetector).filter(Boolean));
+  return FOCUS_DETECTORS.every(name => hit.has(name));
+}
 
 export interface FishNotifyConfig { enabled: boolean; emails: string[]; serviceId: string; templateId: string; publicKey: string }
 export const DEFAULT_FISH_NOTIFY: FishNotifyConfig = { enabled: false, emails: [], serviceId: '', templateId: '', publicKey: '' };
@@ -73,14 +86,14 @@ export function composeFishEmail(fish: readonly TradeSignal[], now = Date.now(),
   const added = newKeys ? rows.filter(r => r.isNew).length : rows.length;
   const tail = newKeys && added < rows.length ? `（新增 ${added}）` : '';
   const subject = `信号通知 ${rows.length} 条${tail} · ${formatUTC8(now).slice(0, 16)}`;
-  const message = [`信号 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
+  const message = [`${FISH_EMAIL_RESONANCE_LABEL}的信号 ${rows.length} 条${tail}（信号时间为 UTC+8，最近的在上）：`, '', ...rows.map(r => `${r.isNew && newKeys ? '【新】' : ''}${r.symbol}　${r.time}　${r.algorithms}${r.market ? `　${r.market}` : ''}`)].join('\n').trim();
   const esc = (v: string) => v.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   // EmailJS 免费版模板变量合计约 50KB：样式尽量放在 table 上继承，每行只留必需的内联样式；最多列 60 行
   const shown = rows.slice(0, FISH_EMAIL_MAX_ROWS), more = rows.length - shown.length;
   const sans = "-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif", mono = 'ui-monospace,Menlo,Consolas,monospace';
   const cell = 'padding:8px 12px;border-top:1px solid #f0f1f3';
   const message_html = `<div style="font:14px ${sans};color:#111827;max-width:720px">`
-    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600">信号 <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
+    + `<div style="margin:0 0 10px;font-size:15px;font-weight:600">${FISH_EMAIL_RESONANCE_LABEL} <span style="padding:1px 7px;border-radius:5px;background:#fdf1d6;color:#b7791f;font:12px ${mono}">${rows.length}</span>`
     + `${tail ? ` <span style="font-size:12px;font-weight:400;color:#6b7280">本轮新增 ${added}</span>` : ''}</div>`
     + `<table cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;border:1px solid #e5e7eb;border-radius:10px;width:100%;font:13px ${mono};color:#374151">`
     + `<tr style="background:#f8fafc;font:12px ${sans};color:#6b7280;text-align:left">${['标的', '信号时间 ↓', '算法类型', '市场'].map(h => `<th style="padding:9px 12px;font-weight:500">${h}</th>`).join('')}</tr>`
