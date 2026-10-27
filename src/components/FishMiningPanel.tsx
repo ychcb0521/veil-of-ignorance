@@ -6,13 +6,15 @@ import { useState } from 'react';
 import { ArrowUpRight, Pause, Pickaxe, Play } from 'lucide-react';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from '@/components/FishQualityModule';
 import type { FishMiningApi } from '@/hooks/useFishMining';
+import { FishMiningLibrary } from '@/components/FishMiningLibrary';
+import type { TradeSignal } from '@/lib/signalLibrary';
 import { currentDefaultRules, type FishMiningRule } from '@/lib/fish/mining';
 import { formatUTC8 } from '@/lib/timeFormat';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂')}`} > ${r.threshold}`;
-export function FishMiningPanel({ mining, sellFixed, campaignHref }: { mining: FishMiningApi; sellFixed: boolean; campaignHref: string }) {
+export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump }: { mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
   const [target, setTarget] = useState<string | null>(null);
   const rules = s.rules.length ? s.rules : currentDefaultRules(), reached = s.mined >= s.target, now = Date.now();
@@ -42,5 +44,6 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref }: { mining: F
           ? <button type="button" onClick={mining.pause} className={qualityPauseAction}><Pause className="h-3 w-3"/>暂停</button>
           : <button type="button" onClick={mining.start} className={qualityPrimaryAction}><Play className="h-3 w-3"/>{s.anchorsDone ? '继续挖掘' : '开始挖掘'}</button>}
         <label className="inline-flex h-7 items-center gap-1.5 px-2 text-[10.5px] text-muted-foreground">目标<input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target ?? s.target} onChange={e => setTarget(e.target.value)} onBlur={applyTarget} onKeyDown={e => { if (e.key === 'Enter') applyTarget(); }} className="h-7 w-16 rounded-md border border-transparent bg-muted/50 px-1.5 font-mono text-[11px] tabular-nums outline-none hover:bg-muted focus-visible:border-ring/60"/>条</label>
+        <FishMiningLibrary account={mining.account} holdKeys={mining.holdKeys} onJump={onJump} canJump={canJump}/>
   </FishQualityModule>;
 }

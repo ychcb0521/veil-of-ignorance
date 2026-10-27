@@ -6,6 +6,7 @@ import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
+import { beginQualityFilterRound, finishQualityFilterRound, recoverQualityFilterRounds } from '@/lib/fish/qualityFilterLibrary';
 import { adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds } from '@/lib/fish/qualityMonitorLibrary';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
@@ -46,7 +47,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const archived = recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)))));
+      const archived = recoverQualityFilterRounds(recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study))))));
       // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
       const migrated = syncQualitySellDefinitions(archived);
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
@@ -140,20 +141,36 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const frozen = structuredClone(current.current), total = qualityRunSamples(frozen).length * (frozen.sellPlans?.length ?? 0);
     frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
     setFilterError('');
-    if (!qualityFilterNeedsData(frozen, 'filter-only')) { setFilterProgress({ done: total, total, current: '' }); return; }
-    const epoch = generation.current, aborter = new AbortController(); filterController.current = aborter;
+    // 【用户要求】2026-10-27 过滤有自己的库：每一轮冻结当时的条件与判断（只改门槛、读数可复用的也算一轮）
+    const epoch = generation.current, savedOwner = account.current;
+    const begun = beginQualityFilterRound(current.current, frozen, Date.now());
+    if (begun) change(() => begun.study);
+    let finished = false;
+    const finishRound = (state: 'complete' | 'paused' | 'failed', reason?: string) => {
+      if (!begun || finished) return; finished = true;
+      if (epoch !== generation.current || account.current !== savedOwner) return;
+      change(s => finishQualityFilterRound(s, begun.capture, state, Date.now(), reason));
+    };
+    if (!qualityFilterNeedsData(frozen, 'filter-only')) { finishRound('complete'); setFilterProgress({ done: total, total, current: '' }); return; }
+    const aborter = new AbortController(); filterController.current = aborter;
+    aborter.signal.addEventListener('abort', () => finishRound('paused'), { once: true });
     const active = () => epoch === generation.current && revision === filterRevision.current && filterController.current === aborter && !aborter.signal.aborted;
     setFilterRunning(true); setFilterProgress({ done: 0, total, current: '' });
     try {
       await latestRun.current({ study: frozen, signal: aborter.signal, task: 'filter', mode: 'filter-only', priority: () => priorityRef.current,
         onProgress: p => { if (active()) setFilterProgress(p); },
-        onFilterReading: reading => { if (active()) acceptReading(reading); },
+        onFilterReading: reading => {
+          if (!active()) return;
+          // 有效读数覆盖；缺数据只在这一轮还没有读数时记下（不拿失败盖掉成功）
+          if (begun && !finished && (!reading.error && Number.isFinite(reading.value) || !begun.capture.readings.has(reading.key))) begun.capture.readings.set(reading.key, structuredClone(reading));
+          acceptReading(reading);
+        },
         onResult: () => {},
       });
-      if (active()) setFilterProgress({ done: total, total, current: '' });
-    } catch (e) { if (active()) setFilterError(e instanceof Error ? e.message : '过滤失败'); }
+      if (active()) { finishRound('complete'); setFilterProgress({ done: total, total, current: '' }); }
+    } catch (e) { if (active()) { setFilterError(e instanceof Error ? e.message : '过滤失败'); finishRound('failed', e instanceof Error ? e.message : '过滤失败'); } }
     finally { if (filterController.current === aborter) { filterController.current = null; if (epoch === generation.current) setFilterRunning(false); } }
-  }, [acceptReading]);
+  }, [acceptReading, change]);
   const cancelFilter = useCallback(() => { filterRevision.current++; filterController.current?.abort(); filterController.current = null; setFilterRunning(false); }, []);
   const cancel = useCallback(() => { intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
   const restart = useCallback(async () => {

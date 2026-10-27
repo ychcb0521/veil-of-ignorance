@@ -9,6 +9,7 @@ import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
 import { FishMonitorLibrary } from '@/components/FishMonitorLibrary';
+import { FishFilterLibrary } from '@/components/FishFilterLibrary';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySplitPauseAction, qualitySplitPrimaryAction, qualitySplitMenuAction } from '@/components/FishQualityModule';
 import { FishProcessButton } from '@/components/FishProcess';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -337,7 +338,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
     </div>
     {open && <div id="fish-quality-content" className="mt-2 space-y-2">
       <div className="ml-1.5 min-w-0 border-l border-border/60 pl-3 sm:pl-4" aria-label="鱼质量工作模块" data-testid="quality-modules">
-        {mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
+        {mining && <FishMiningPanel mining={mining} onJump={onJump} canJump={canJump} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
         <FishQualityModule title="买前过滤" icon={Filter} testId="quality-filter-controls" summary={<FishQualityInfo label="买前过滤说明"><p>{filterCount ? `${filterCount} 条买入条件` : '未设买入条件'}</p><p className="text-muted-foreground">对已勾选信号独立判断买入条件；读数取买入时刻前最后一根已收盘 K 线。修改门槛复用已有读数。</p></FishQualityInfo>} status={state.filterProgress && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${state.filterRunning ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>{state.filterRunning ? '过滤中' : state.filterError ? '过滤失败' : state.filterProgress.done === state.filterProgress.total ? '过滤完成' : '已暂停'}</span><span className="font-mono tabular-nums">{state.filterProgress.done} / {state.filterProgress.total}</span></p>}>
           {state.filterRunning
             ? <button type="button" className={qualityPauseAction} onClick={state.cancelFilter}><Pause aria-hidden className="h-3 w-3"/>暂停过滤</button>
@@ -347,6 +348,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
             <PlanTabs plans={plans} active={filterPlan?.id} count={p => activeBuyFilters(study, p).length} label="选择要设置过滤的卖出方案" onSelect={setFilterPlanId}/>
             {filterPlan && <BuyFilterEditor key={JSON.stringify([filterPlan.id, planBuyFilters(study, filterPlan)])} state={state} plan={filterPlan} done={() => setFilterOpen(false)}/>}
           </PopoverContent></Popover>
+          <FishFilterLibrary study={study}/>
         </FishQualityModule>
         <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>100 USDT · 1 倍</p>{vetoCount > 0 && <p>{vetoCount} 条持仓否决</p>}<p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；已算完且条件没变的结果直接沿用；要全部重算，点「开始监测」右侧的 ▾。各轮不同算法和门槛下的结果都保留，同币种、同时间、同算法同门槛的合并为一条。</p></FishQualityInfo>} status={running && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"/>监测中</span><span className="font-mono tabular-nums">{progress?.done ?? 0} / {progress?.total ?? 0}</span></p>}>
           {/* 【用户要求】2026-10-27 把「重新开始」做进「开始监测」：主按钮照常开始 / 暂停，右侧 ▾ 里「从头重新计算」 */}

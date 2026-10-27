@@ -10,13 +10,17 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishProgress, FishScanSettings } from '@/lib/fishScanner';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
-import { mergeFishSignals } from '@/lib/fish/records';
+import { fishCatchKey, mergeFishSignals } from '@/lib/fish/records';
+import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
+import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
 import { acceptMinedAnchor, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000, RETRY_MS = 2 * 60_000;
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
+  /** 挖掘库按账号存；holdKeys = 鱼舱里现有挖掘鱼的键（不在其中的，挖掘库里标「已从鱼舱删除」）。 */
+  account?: string; holdKeys?: () => ReadonlySet<string>;
 }
 export function useFishMining(o: {
   account?: string; selection: FishScanSelection; defs: readonly DeepDigFeatureDef[];
@@ -38,7 +42,11 @@ export function useFishMining(o: {
   const runningRef = useRef(false), retryAt = useRef(0), account = useRef(o.account);
   const owner = useRef(`tab-${Math.random().toString(36).slice(2)}-${Date.now()}`);
   const setState = useCallback((next: FishMiningState) => { stateRef.current = next; setStateRaw(next); saveMiningState(next); }, []);
-  useEffect(() => { account.current = o.account; const s = load(latest.current.signalsRef.current); stateRef.current = s; setStateRaw(s); retryAt.current = 0; setWaiting(''); }, [o.account]);
+  useEffect(() => {
+    account.current = o.account; const s = load(latest.current.signalsRef.current); stateRef.current = s; setStateRaw(s); retryAt.current = 0; setWaiting('');
+    // 挖掘库上线前挖到的鱼：从鱼舱补进挖掘库（只补一次）
+    void updateMiningLibrary(o.account, library => adoptMinedFish(library, s, latest.current.signalsRef.current, Date.now()));
+  }, [o.account]);
 
   const tick = useCallback(async (): Promise<void> => {
     if (runningRef.current) return;
@@ -63,11 +71,16 @@ export function useFishMining(o: {
       const { state: next, added } = acceptMinedAnchor(fresh, found, anchor, Date.now());
       if (added.length) latest.current.commit(mergeFishSignals(latest.current.signalsRef.current, added));
       setState(next); advanced = true;
+      // 挖掘库：记下这一档扫到几条、新增哪些（独立于鱼舱，删了鱼也还在）
+      const scanned = found.length, at = Date.now();
+      void updateMiningLibrary(who, library => recordMinedAnchor(library, next, anchor, scanned, added, at));
       if (added.length) latest.current.onMined?.(added);
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') return; // 让路给捕捞，空闲后原地重扫
       if (e instanceof Error && e.message === '取数器正忙') return;
-      setState({ ...readMiningState(), lastError: e instanceof Error ? e.message : String(e) }); retryAt.current = Date.now() + RETRY_MS;
+      const failed = { ...readMiningState(), lastError: e instanceof Error ? e.message : String(e) }, at = Date.now();
+      setState(failed); retryAt.current = at + RETRY_MS;
+      void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at));
     } finally {
       clearInterval(renew); releaseMiningLease(owner.current);
       runningRef.current = false; setRunning(false); setAnchorMs(null); setProgress(null);
@@ -95,5 +108,6 @@ export function useFishMining(o: {
     if (!Number.isInteger(target) || target <= 0) return;
     setState({ ...readMiningState(), target }); retryAt.current = 0; setTimeout(() => void tickRef.current(), 0);
   }, [setState]);
-  return { state, running, anchorMs, progress, waiting, start, pause, setTarget };
+  const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).map(fishCatchKey)), []);
+  return { state, running, anchorMs, progress, waiting, start, pause, setTarget, account: o.account, holdKeys };
 }

@@ -1,11 +1,14 @@
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
 import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
+import { preserveQualityFilterLibrary } from './qualityFilterLibrary';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
-const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityMonitorLibrary(saved, preserveQualityRepairs(saved, incoming));
+// 监测库、过滤库只增不减：旧标签页或只写修复的保存不能把它们抹掉。
+const preserveLibraries = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityFilterLibrary(saved, preserveQualityMonitorLibrary(saved, incoming));
+const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveLibraries(saved, preserveQualityRepairs(saved, incoming));
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return; }
@@ -112,7 +115,7 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
           if (study && valid(study)) {
             const read = store.get(key);
-            read.onsuccess = () => store.put(preserveQualityMonitorLibrary(valid(read.result) ? read.result : undefined, study), key);
+            read.onsuccess = () => store.put(preserveLibraries(valid(read.result) ? read.result : undefined, study), key);
           } else store.delete(key);
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
@@ -124,5 +127,5 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
     return task.then(() => undefined);
   },
-  weight: study => study ? study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) : 0,
+  weight: study => study ? study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) + (study.filterLibrary?.records.length ?? 0) + (study.filterLibrary?.rounds.length ?? 0) : 0,
 };
