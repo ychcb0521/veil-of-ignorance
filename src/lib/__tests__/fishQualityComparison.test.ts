@@ -71,13 +71,14 @@ it('computes disjoint return bins, interpolated quantiles and no-sample values w
 it('exports one row per detector with a single detector column and shared sell returns', () => {
   const s = study(), { rows } = seed(s); s.results[0] = {...s.results[0],adversePct:-4,drawdownPct:7}; s.results[1] = {...s.results[1],adversePct:-9,drawdownPct:15};
   const sheet = buildQualitySheets(s, rows.slice(0, 1))[0];
-  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(15);
-  expect(sheet.rows[0][1]).toBe('鱼');
+  expect(sheet.rows).toHaveLength(2); expect(sheet.columns).toHaveLength(16);
+  expect(sheet.columns[1].header).toBe('运行状态（过滤 / 监测）');
+  expect(sheet.rows[0][2]).toBe('鱼');
   // 每套方案：收益率、静态、动态最大回撤、持仓小时（【用户要求】2026-10-26 动态最大回撤后加持仓时间）
-  expect(sheet.rows.map(r=>[...r.slice(5,8),...r.slice(9,12)])).toEqual([[10,4,7,-5,9,15],[10,4,7,-5,9,15]]);
+  expect(sheet.rows.map(r=>[...r.slice(6,9),...r.slice(10,13)])).toEqual([[10,4,7,-5,9,15],[10,4,7,-5,9,15]]);
   expect(sheet.columns.map(c => c.header).filter(h => h.endsWith('持仓小时'))).toHaveLength(2);
-  expect(sheet.rows[0][13]).not.toEqual(sheet.rows[1][13]);
-  expect(sheet.columns.slice(5).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
+  expect(sheet.rows[0][14]).not.toEqual(sheet.rows[1][14]);
+  expect(sheet.columns.slice(6).map(c => c.header)).toEqual(expect.arrayContaining([expect.stringContaining('状态 S 原始值'), expect.stringContaining('CDA 原始值')]));
 });
 it('compiles and evaluates the real S and CDA raw series as sells independently of any capture formula', async () => {
   const s = enableQualityComparison(importQualityFish(newQualityStudy(T + M), [fish('AAAUSDT', 1)]));
@@ -121,7 +122,7 @@ it('runs the shared sells on library signals, counts them in the sell comparison
   expect(stats.paired).toContain(lib); expect(stats.sells[0].n).toBe(rows.length);
   expect(stats.detectors.every(d => d.total === rows.filter(r => r.groups.includes(d.group.id)).length && d.mean === 1)).toBe(true);
   const sheet = buildQualitySheets(s, [lib])[0];
-  expect(sheet.rows[0].slice(0, 2)).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][3]).toBe('');
+  expect([sheet.rows[0][0],sheet.rows[0][2]]).toEqual(['ZZZUSDT', '信号库']); expect(sheet.rows[0][4]).toBe('');
 });
 it('does no market work without a choice and evaluates only the selected signal with both sell plans', async () => {
   const s = study(), rows = qualityComparisonRows(s), load = vi.fn(async (_row, from, cut, p) => Array.from({length:(cut-from)/p.step}, (_,i) => ({openTime:from+i*p.step,open:100,high:101,low:99,close:100,volume:1,takerBuyVolume:.5})));

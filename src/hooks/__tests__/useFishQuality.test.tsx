@@ -215,6 +215,10 @@ it('filters fully cached trades without calling the runner, including after rest
       for (const plan of o.study.sellPlans!) o.onResult({ key: qualityResultKey(row, plan, o.study.observeHours), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open', entryTime: T, entryPrice: 100, returnPct: 1 });
     }
   });
+  const {enableQualityComparison} = await import('@/lib/fish/qualityComparison');
+  const initial = enableQualityComparison(importQualityFish(newQualityStudy(T),[signal]));
+  initial.sellPlans![0].buyFilters = [f];
+  storage.load.mockResolvedValue({study:initial});
   const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush();
   const planId = h.result.current.study.sellPlans![0].id;
   act(() => h.result.current.setFilters(planId, [f], [])); await flush(600);
@@ -474,4 +478,35 @@ it('runs monitoring and filtering only on checked rows inside the current view, 
   act(() => h.result.current.setScope(rows.map(r => r.id)));
   act(() => { void h.result.current.start(); }); await flush();
   expect(qualityRunSamples(tasks.at(-1)!.study).map(s => s.source.symbol).sort()).toEqual(['AAAUSDT', 'BBBUSDT']);
+});
+
+it('freezes the selected entries for both tasks and rejects readings/results for unselected entries', async () => {
+  const {makeQualityBuyFilter} = await import('@/lib/fish/qualityFilters');
+  const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
+  const {enableQualityComparison} = await import('@/lib/fish/qualityComparison');
+  const saved = enableQualityComparison(importQualityFish(newQualityStudy(T),[signal,{...signal,id:'b',symbol:'BBBUSDT'}]));
+  const f = makeQualityBuyFilter('state:state','>',.7);
+  saved.sellPlans = saved.sellPlans!.map(p=>({...p,buyFilters:[f],rule:{metric:p.metric,direction:'<',threshold:.5}}));
+  storage.load.mockResolvedValue({study:saved});
+  const tasks: QualityRunOptions[] = [], releases: (()=>void)[] = [];
+  const h = renderHook(()=>useFishQuality('a',[],async o=>{tasks.push(o); await new Promise<void>(resolve=>releases.push(resolve));}));
+  await flush();
+  const displays=qualityDisplayRows(h.result.current.study), selected=displays.find(r=>r.source.symbol==='BBBUSDT')!;
+  act(()=>{h.result.current.setSelectedRows([selected.id]);void h.result.current.startFilter();void h.result.current.start();});
+  await flush();expect(tasks).toHaveLength(2);
+  for(const t of tasks) expect(qualityRunSamples(t.study).map(r=>r.source.symbol)).toEqual(['BBBUSDT']);
+  const monitor=tasks.find(t=>t.task==='monitor')!, filtering=tasks.find(t=>t.task==='filter')!;
+  const all=qualityComparisonRows(monitor.study), a=all.find(r=>r.source.symbol==='AAAUSDT')!, b=all.find(r=>r.source.symbol==='BBBUSDT')!, plan=monitor.study.sellPlans![0];
+  act(()=>{
+    for(const task of tasks) task.onFilterReading?.({key:qualityFilterReadingKey(a,f),value:999});
+    monitor.onResult({key:qualityResultKey(a,plan,0),sampleId:a.id,groupId:plan.id,status:'closed',evaluatedAt:T,returnPct:999});
+    filtering.onFilterReading?.({key:qualityFilterReadingKey(b,f),value:.9});
+    monitor.onResult({key:qualityResultKey(b,plan,0),sampleId:b.id,groupId:plan.id,status:'closed',evaluatedAt:T,returnPct:2});
+  });
+  expect(h.result.current.study.filterReadings?.map(r=>r.key)).toEqual([qualityFilterReadingKey(b,f)]);
+  expect(h.result.current.study.results.map(r=>r.sampleId)).toEqual([b.id]);
+  expect(h.result.current.study.monitorLibrary?.records.every(r=>r.source.symbol==='BBBUSDT')).toBe(true);
+  expect(h.result.current.study.filterLibrary?.records.every(r=>r.source.symbol==='BBBUSDT')).toBe(true);
+  act(()=>{h.result.current.cancel();h.result.current.cancelFilter();});releases.forEach(r=>r());await flush();
+  act(()=>{h.result.current.setSelectedRows([]);void h.result.current.startFilter();void h.result.current.start();});await flush();expect(tasks).toHaveLength(2);
 });

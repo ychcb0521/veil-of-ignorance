@@ -509,7 +509,7 @@ it('places independent filter results immediately after capture, runs without se
   const view = render(<FishQuality state={s}/>);
   const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
   const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
-  expect(headers[4]).toHaveTextContent('捕捞过程'); expect(headers[5]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
+  expect(headers[5]).toHaveTextContent('捕捞过程'); expect(headers[6]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
   expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
   const run = screen.getByRole('button', { name: '开始过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.startFilter).toHaveBeenCalledTimes(1);
   const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');
@@ -642,16 +642,16 @@ it('offers six high-return cohorts and five composition pies, across all sellers
   render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button',{name:'统计分析 · 全部卖出算法'}));
   const dialog = screen.getByTestId('quality-statistics-dialog');
-  fireEvent.click(within(dialog).getByRole('button',{name:'按收益门槛',exact:true}));
+  fireEvent.click(within(dialog).getByRole('button',{name:'按收益门槛'}));
   expect(within(dialog).queryByLabelText('统计算法水平')).toBeNull();
   expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('1 次达标试验');
-  for (const value of [100,50,40,30,20,10]) expect(within(dialog).getByRole('button',{name:`收益率至少${value}%`,exact:true})).toBeInTheDocument();
-  for (const name of ['静态最大回撤区间占比','卖出算法占比','过滤算法组合占比','探测算法命中组合占比','卖出类型占比']) expect(within(dialog).getByRole('figure',{name,exact:true})).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('button',{name:'收益率至少50%',exact:true}));
+  for (const value of [100,50,40,30,20,10]) expect(within(dialog).getByRole('button',{name:`收益率至少${value}%`})).toBeInTheDocument();
+  for (const name of ['静态最大回撤区间占比','卖出算法占比','过滤算法组合占比','探测算法命中组合占比','卖出类型占比']) expect(within(dialog).getByRole('figure',{name})).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button',{name:'收益率至少50%'}));
   expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('2 次达标试验');
-  fireEvent.click(within(dialog).getByRole('button',{name:'阈值水平',exact:true}));
-  expect(within(dialog).getByRole('figure',{name:'卖出阈值水平占比',exact:true})).toBeInTheDocument();
-  fireEvent.click(within(dialog).getByRole('button',{name:'按静态回撤',exact:true}));
+  fireEvent.click(within(dialog).getByRole('button',{name:'阈值水平'}));
+  expect(within(dialog).getByRole('figure',{name:'卖出阈值水平占比'})).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button',{name:'按静态回撤'}));
   expect(within(dialog).getByLabelText('统计算法水平')).toBeInTheDocument();
   expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
 });
@@ -665,4 +665,33 @@ it('tells the hook which rows are in view and shows how many checked signals thi
   expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理 0 条 · 筛选外另有 1 条已勾选');
   expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
   expect(screen.getByRole('button', { name: '开始监测' })).toHaveAttribute('title', '当前筛选下没有已勾选的信号');
+});
+
+
+it('places run state second and bulk-selects only pending entries under the current filters, replacing prior checks', async () => {
+  const {makeQualityBuyFilter} = await import('@/lib/fish/qualityFilters');
+  const {qualityFilterReadingKey} = await import('@/lib/fish/quality');
+  const s = state(), f = makeQualityBuyFilter('state:state','>',.7);
+  s.study = importQualityLibrary(s.study,[{id:'other',symbol:'BBBUSDT',timeMs:T+60000,timeLabel:'',fallbackZone:''}]);
+  s.study.sellPlans = s.study.sellPlans!.map(p=>({...p,buyFilters:[f],rule:{metric:p.metric,direction:'<',threshold:.5}}));
+  const base = qualityComparisonRows(s.study), a = base.find(r=>r.source.symbol==='AAAUSDT')!;
+  s.study.filterReadings = [{key:qualityFilterReadingKey(a,f),value:.9}];
+  s.study.selectedRowIds = qualityDisplayRows(s.study).map(r=>r.id);
+  const view = render(<FishQuality state={s}/>);
+  const header = screen.getByTestId('quality-run-state-column');
+  expect(header.parentElement!.children[1]).toBe(header);
+  const aCell = within(screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('AAAUSDT'))!).getByTestId('quality-run-state-cell');
+  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent('已经运行'); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent('尚未运行');
+  fireEvent.click(screen.getByRole('button',{name:'运行状态筛选与批量选取'}));
+  const picker = screen.getByTestId('quality-run-state-picker');
+  fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
+  fireEvent.click(within(picker).getByRole('button',{name:'仅选尚未运行'}));
+  const ids = vi.mocked(s.setSelectedRows).mock.calls.at(-1)![0];
+  expect(ids).toEqual(qualityDisplayRows(s.study).filter(r=>r.source.symbol==='BBBUSDT').map(r=>r.id));
+  s.study={...s.study,selectedRowIds:ids}; view.rerender(<FishQuality state={s}/>);
+  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('BBBUSDT');
+  expect(screen.getByTestId('quality-selection-scope')).toHaveTextContent('已勾选 1 次入场');
+  fireEvent.keyDown(document.activeElement!,{key:'Escape'});
+  fireEvent.click(screen.getByRole('button',{name:'开始过滤'})); expect(s.startFilter).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'开始监测'})); expect(s.start).toHaveBeenCalledTimes(1);
 });

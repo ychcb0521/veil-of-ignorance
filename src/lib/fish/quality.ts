@@ -490,7 +490,8 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
     options.onProgress({ done, total: tasks.length, current: `${s.source.symbol} · ${g.label}` });
     const cached = previous.get(qualityResultKey(s, g, study.observeHours));
     if (filtersOnly || options.mode === 'filter-only' || options.mode === 'filter' && cached) { done++; continue; }
-    if (!cached?.complete && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
+    const finished = cached?.complete || cached?.status === 'closed' && Number.isFinite(cached.returnPct);
+    if (!finished && !(!hasQualityExit(g) && cached?.status === 'waiting' && cached.entryPrice! > 0)) options.onResult(await evaluateQualitySample(s, g, study.observeHours, now, load, signal, cached));
     done++;
     await new Promise(resolve => setTimeout(resolve, 0));
     }

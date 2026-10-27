@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
@@ -83,7 +83,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!automatic || mode || controller.current.signal.aborted) rerun.current = rerun.current === 'refresh' ? 'refresh' : mode ?? 'refresh';
       return;
     }
-    if (mode && mode !== 'restart' && !qualityFilterNeedsData(current.current, mode)) { setProgress(null); setError(''); return; }
+    if (mode && mode !== 'restart' && !qualityFilterNeedsData(scoped(current.current), mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
     if (!mode || mode === 'restart') change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
@@ -91,6 +91,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const frozen = structuredClone(scoped(current.current));
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
+    const readingKeys = new Set([...frozenSamples.values()].flatMap(row => [...frozenGroups.values()].flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
     const begun = beginQualityMonitorRound(current.current, frozen, Date.now(), mode === 'restart'), capture = begun.capture;
     change(() => begun.study);
     const savedOwner = account.current; let finalized = false;
@@ -114,7 +115,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       await latestRun.current({ study: frozen, signal: aborter.signal, mode, task: 'monitor', priority: () => priorityRef.current,
         onProgress: p => { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setProgress(p); },
         onFilterReading: reading => {
-          if (epoch !== generation.current || revision !== intentRevision.current || aborter.signal.aborted) return;
+          if (epoch !== generation.current || revision !== intentRevision.current || aborter.signal.aborted || !readingKeys.has(reading.key)) return;
           if (!finalized) capture.readings.set(reading.key, structuredClone(reading));
           acceptReading(reading);
         },
@@ -145,6 +146,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
     const revision = ++filterRevision.current;
     const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length * (frozen.sellPlans?.length ?? 0);
+    const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => (frozen.sellPlans ?? []).flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
     frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
     setFilterError('');
     // 【用户要求】2026-10-27 过滤有自己的库：每一轮冻结当时的条件与判断（只改门槛、读数可复用的也算一轮）
@@ -166,7 +168,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       await latestRun.current({ study: frozen, signal: aborter.signal, task: 'filter', mode: 'filter-only', priority: () => priorityRef.current,
         onProgress: p => { if (active()) setFilterProgress(p); },
         onFilterReading: reading => {
-          if (!active()) return;
+          if (!active() || !readingKeys.has(reading.key)) return;
           // 有效读数覆盖；缺数据只在这一轮还没有读数时记下（不拿失败盖掉成功）
           if (begun && !finished && (!reading.error && Number.isFinite(reading.value) || !begun.capture.readings.has(reading.key))) begun.capture.readings.set(reading.key, structuredClone(reading));
           acceptReading(reading);
