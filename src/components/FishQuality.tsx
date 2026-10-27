@@ -8,7 +8,7 @@ import { Activity, ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, F
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
-import { FishQualityModule } from '@/components/FishQualityModule';
+import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from '@/components/FishQualityModule';
 import { FishProcessButton } from '@/components/FishProcess';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -175,7 +175,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
     ui: { open, query, month, algorithms, origin, detectorExpanded, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
     scroll: ancestorScrolls(rootRef.current),
   });
-  const [hours, setHours] = useState<string | null>(null), [error, setError] = useState(''), [detailId, setDetailId] = useState('');
+  const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
   const allRows = useMemo(() => qualityDisplayRows(study), [study]);
   const detectorMap = useMemo(() => new Map(study.groups.map(g => [g.id, g])), [study.groups]);
   const batch = allRows;
@@ -304,7 +304,6 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const arrow = (key: SortKey) => sort === key ? ascending ? ' ↑' : ' ↓' : '';
   const ariaSort = (key: SortKey) => sort === key ? ascending ? 'ascending' as const : 'descending' as const : 'none' as const;
   const sortButton = (k: SortKey, label: string) => <button type="button" className="hover:text-foreground" onClick={() => changeSort(k)} aria-label={`按${label}排序`}>{label}{arrow(k)}</button>;
-  const applyHours = () => { const n = Number(hours ?? study.observeHours); if (!Number.isFinite(n) || n < 0 || n > 8784) { setError('观察时长须在 0～8784 小时之间'); return; } setError(''); setHours(null); if (n !== study.observeHours) state.setObserveHours(n); };
   const exportRows = () => { try { downloadQualityComparison(study, rows.flatMap(qualityTableMembers)); setError(''); } catch (e) { setError(e instanceof Error ? e.message : '导出失败'); } };
   return <section ref={rootRef} className="min-w-0 border-t border-border/50 px-4 py-3" aria-labelledby="fish-quality-title" data-testid="fish-quality">
     <div className="flex items-center justify-between gap-2">
@@ -316,22 +315,21 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
     {open && <div id="fish-quality-content" className="mt-2 space-y-2">
       <div className="min-w-0" data-testid="quality-modules">
         {mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
-        <FishQualityModule title="买前过滤" icon={Filter} testId="quality-filter-controls" summary={<span>{filterCount ? `${filterCount} 条买入条件` : '未设买入条件'}{vetoCount > 0 && ` · ${vetoCount} 条否决`}</span>} status={state.filterProgress && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${state.filterRunning ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>{state.filterRunning ? '过滤中' : state.filterError ? '过滤失败' : state.filterProgress.done === state.filterProgress.total ? '过滤完成' : '已暂停'}</span><span className="font-mono tabular-nums">{state.filterProgress.done} / {state.filterProgress.total}</span></p>}>
+        <FishQualityModule title="买前过滤" icon={Filter} testId="quality-filter-controls" summary={<FishQualityInfo label="买前过滤说明"><p>{filterCount ? `${filterCount} 条买入条件` : '未设买入条件'}{vetoCount > 0 && ` · ${vetoCount} 条否决`}</p><p className="text-muted-foreground">对已勾选信号独立判断买入条件；读数取买入时刻前最后一根已收盘 K 线。修改门槛复用已有读数。</p></FishQualityInfo>} status={state.filterProgress && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${state.filterRunning ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>{state.filterRunning ? '过滤中' : state.filterError ? '过滤失败' : state.filterProgress.done === state.filterProgress.total ? '过滤完成' : '已暂停'}</span><span className="font-mono tabular-nums">{state.filterProgress.done} / {state.filterProgress.total}</span></p>}>
           {state.filterRunning
-            ? <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 px-3 text-[11px] text-foreground transition-colors hover:bg-muted" onClick={state.cancelFilter}><Pause aria-hidden className="h-3 w-3"/>暂停过滤</button>
-            : <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={!ready || !selectedCount || !filtersOn} title={filtersOn ? '独立计算已勾选信号的过滤条件，不运行卖出监测' : '先设置并启用买入过滤条件'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>开始过滤</button>}
+            ? <button type="button" className={qualityPauseAction} onClick={state.cancelFilter}><Pause aria-hidden className="h-3 w-3"/>暂停过滤</button>
+            : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount || !filtersOn} title={filtersOn ? '独立计算已勾选信号的过滤条件，不运行卖出监测' : '先设置并启用买入过滤条件'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>开始过滤</button>}
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="过滤与持仓否决" title={filtersOn ? plans.map(p => `${p.label}：${activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') || '不过滤'}`).join('\n') : '给每套卖出方案分别设置买入条件和持仓一票否决条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             {plans.length > 1 && <div role="tablist" aria-label="选择要设置过滤的卖出方案" className="mb-3 inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-[10.5px]">{plans.map(p => { const n = activeBuyFilters(study, p).length + activeHoldingVetoes(p.holdingVetoes).length; return <button type="button" role="tab" key={p.id} aria-selected={filterPlan?.id === p.id} onClick={() => setFilterPlanId(p.id)} className={`inline-flex h-6 items-center gap-1 rounded px-2.5 ${filterPlan?.id === p.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{p.label}{n > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[9.5px] tabular-nums text-primary">{n}</span>}</button>; })}</div>}
             {filterPlan && <BuyFilterEditor key={JSON.stringify([filterPlan.id, planBuyFilters(study, filterPlan), filterPlan.holdingVetoes ?? []])} state={state} plan={filterPlan} done={() => setFilterOpen(false)}/>}
           </PopoverContent></Popover>
         </FishQualityModule>
-        <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" titleTestId="quality-mode" summary={<span className="whitespace-nowrap">100 USDT · 1 倍</span>} status={running && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"/>监测中</span><span className="font-mono tabular-nums">{progress?.done ?? 0} / {progress?.total ?? 0}</span></p>}>
+        <FishQualityModule title="持仓监测" icon={Activity} testId="quality-run-controls" titleTestId="quality-mode" summary={<FishQualityInfo label="持仓监测说明"><p>100 USDT · 1 倍</p><p className="text-muted-foreground">按已勾选信号和当前卖出规则独立监测，支持后台运行；重新开始会按最新设置重算。</p></FishQualityInfo>} status={running && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"/>监测中</span><span className="font-mono tabular-nums">{progress?.done ?? 0} / {progress?.total ?? 0}</span></p>}>
           {running
-            ? <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 px-3 text-[11px] text-foreground transition-colors hover:bg-muted" onClick={state.cancel}><Pause aria-hidden className="h-3 w-3"/>暂停监测</button>
-            : <button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 text-[11px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={!ready || !selectedCount} title="按当前勾选和参数在后台运行，切换选项或收起模块不会中断" onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
+            ? <button type="button" className={qualityPauseAction} onClick={state.cancel}><Pause aria-hidden className="h-3 w-3"/>暂停监测</button>
+            : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount} title="按当前勾选和参数在后台运行，切换选项或收起模块不会中断" onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
           <button type="button" className={button} disabled={!ready || !selectedCount} title="停止当前批次，按最新勾选、买入过滤、卖出条件和观察时长从头计算" onClick={() => void state.restart()}><RotateCcw className="h-3 w-3"/>重新开始</button>
-          <Popover><PopoverTrigger asChild><button type="button" className={button} aria-label="鱼质量观察设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；点「开始监测」计算已勾选信号。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
         </FishQualityModule>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

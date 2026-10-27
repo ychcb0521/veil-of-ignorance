@@ -112,11 +112,14 @@ it('lets the user fix one sell plan for detector comparisons from its header (no
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);
   fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } }); expect(screen.queryByTestId('quality-fish-row')).toBeNull();
 });
-it('keeps tracking/horizon controls compact and shows the paired trade metrics on demand', () => {
+it('keeps monitoring details behind help and removes the observation settings control', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '鱼质量观察设置' }));
-  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '-1' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('鱼质量观察小时'), { target: { value: '72' } }); fireEvent.blur(screen.getByLabelText('鱼质量观察小时')); expect(s.setObserveHours).toHaveBeenCalledWith(72);
+  expect(screen.queryByRole('button', { name: '鱼质量观察设置' })).toBeNull();
+  expect(screen.queryByLabelText('鱼质量观察小时')).toBeNull();
+  expect(screen.queryByText('100 USDT · 1 倍')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '持仓监测说明' }));
+  expect(screen.getByText('100 USDT · 1 倍')).toBeVisible();
+  expect(s.setObserveHours).not.toHaveBeenCalled();
   expect(screen.queryByLabelText('自动跟踪新鱼及更新收益')).toBeNull();
 });
 
@@ -250,7 +253,10 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
   render(<FishQuality state={s}/>);
   // 旧版本的全局过滤沿用到每套方案
-  expect(screen.getByRole('region', { name: '买前过滤模块' })).toHaveTextContent('2 条买入条件');
+  expect(screen.queryByText('2 条买入条件')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
+  expect(screen.getByText('2 条买入条件')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
   const notBought = within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入');
   expect(notBought.length).toBeGreaterThanOrEqual(2);
   expect(notBought[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
@@ -527,7 +533,7 @@ it('keeps filtering and monitoring in workflow order with controls on the left',
   render(<FishQuality state={s}/>);
   const group = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('持仓监测');
-  for (const name of ['重新开始', '暂停监测', '鱼质量观察设置']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
+  for (const name of ['重新开始', '暂停监测']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
   expect(within(group).getByRole('status')).toHaveTextContent('监测中2333 / 2360');
   expect(within(group).queryByRole('button', { name: '开始监测' })).toBeNull();
   expect(within(group).queryByRole('button', { name: '过滤与持仓否决' })).toBeNull();
