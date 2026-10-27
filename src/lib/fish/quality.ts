@@ -1,5 +1,6 @@
 /** Independent paper experiments; orders and account balances are never modified. */
 import type { QualityCampaignRun } from './qualityCampaignArchive';
+import type { QualityMonitorLibrary } from './qualityMonitorLibrary';
 import type { QualityRepairBatch } from './qualityRepair';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -80,6 +81,7 @@ export interface FishQualityStudy {
   cohortIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
   campaignRuns?: QualityCampaignRun[];
+  monitorLibrary?: QualityMonitorLibrary;
   campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
   /** 已自动勾选过的挖掘信号（之后用户取消勾选就不再勾回来）。 */

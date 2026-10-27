@@ -398,3 +398,48 @@ it('imports mined rows without implicitly starting monitoring', async () => {
   await flush(); h.rerender({ rows: [{ ...signal, mined: { anchorMs: T } }] }); await flush(1000);
   expect(h.result.current.study.selectedRowIds?.length).toBeGreaterThan(0); expect(run).not.toHaveBeenCalled();
 });
+
+it('saves every completed monitoring round immediately, reuses identical records and separates new settings', async () => {
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush(); chooseAndStart(h); await flush();
+  const task = tasks[0], row = qualityRunSamples(task.study)[0], plan = task.study.sellPlans![0];
+  const value = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open' as const, entryTime: T, entryPrice: 100, returnPct: 1 };
+  act(() => task.onResult(value)); releases.shift()!(); await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds).toHaveLength(1);
+  expect(h.result.current.study.monitorLibrary!.rounds[0].state).toBe('complete');
+  expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ monitorLibrary: expect.objectContaining({ rounds: [expect.objectContaining({ state: 'complete' })] }) }));
+  const count = h.result.current.study.monitorLibrary!.records.length;
+  act(() => { void h.result.current.start(); }); releases.shift()!(); await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds).toHaveLength(2); expect(h.result.current.study.monitorLibrary!.records).toHaveLength(count);
+  act(() => h.result.current.setRule(plan.id, { metric: plan.metric, direction: '<', threshold: .42 })); await flush(600);
+  releases.shift()!(); await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds).toHaveLength(3);
+  expect(h.result.current.study.monitorLibrary!.records.length).toBeGreaterThan(count);
+  expect(h.result.current.study.monitorLibrary!.records.some(r => r.result?.returnPct === 1)).toBe(true);
+});
+it('immediately archives partial work on pause and restart even if the old runner never settles', async () => {
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush(); chooseAndStart(h); await flush();
+  const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans![0];
+  const value = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'open' as const, entryTime: T, entryPrice: 100, returnPct: 1 };
+  act(() => old.onResult(value)); act(() => { void h.result.current.restart(); }); await flush();
+  expect(old.signal.aborted).toBe(true); expect(h.result.current.study.monitorLibrary!.rounds.map(r => r.state)).toEqual(['paused', 'running']);
+  act(() => old.onResult({ ...value, returnPct: 999 }));
+  expect(h.result.current.study.monitorLibrary!.records.some(r => r.result?.returnPct === 999)).toBe(false);
+  act(() => h.result.current.cancel()); await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds.every(r => r.state === 'paused')).toBe(true);
+  expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ monitorLibrary: expect.objectContaining({ rounds: expect.arrayContaining([expect.objectContaining({ state: 'paused' })]) }) }));
+  releases.forEach(resolve => resolve()); await flush();
+});
+
+it('keeps a completed round in memory and reports a failed durable save instead of silently losing it', async () => {
+  storage.save.mockResolvedValue(false);
+  const h = renderHook(() => useFishQuality('a', [signal], async () => {}));
+  await flush(); chooseAndStart(h); await flush();
+  expect(h.result.current.study.monitorLibrary!.rounds[0].state).toBe('complete');
+  expect(h.result.current.warning).toContain('监测库未能保存');
+  storage.save.mockResolvedValue(true); await flush(16000);
+  expect(h.result.current.warning).toBe(''); expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ monitorLibrary: expect.objectContaining({ rounds: [expect.objectContaining({ state: 'complete' })] }) }));
+});

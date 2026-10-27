@@ -51,3 +51,22 @@ it('writes only repair fields so a long correction cannot overwrite new samples,
   const loaded=(await store.loadQualityStudy('a')).study;
   expect(loaded.tracking).toBe(false); expect(loaded.selectedRowIds).toEqual(['new-selection']); expect(loaded.campaignRepair?.id).toBe('r');
 });
+
+it('persists monitor history across reloads, account sync writes and stale or repair-only saves', async () => {
+  const { beginQualityMonitorRound, finishQualityMonitorRound } = await import('@/lib/fish/qualityMonitorLibrary');
+  const store = await import('@/lib/fish/qualityStore');
+  const base = newQualityStudy(100), begun = beginQualityMonitorRound(base, base, 200);
+  const completed = finishQualityMonitorRound(begun.study, begun.capture, 'complete', 201);
+  expect(await store.saveQualityStudy('monitor-owner', completed)).toBe(true);
+  expect(await store.saveQualityStudy('monitor-owner', base)).toBe(true);
+  expect((await store.loadQualityStudy('monitor-owner')).study.monitorLibrary?.rounds[0].state).toBe('complete');
+  expect(await store.saveQualityStudy('monitor-owner', base, { repairOnly: true })).toBe(true);
+  await store.qualityAccountBlob.write('monitor-owner', base);
+  const restored = (await store.loadQualityStudy('monitor-owner')).study;
+  expect(restored.monitorLibrary?.rounds).toHaveLength(1);
+  expect(store.qualityAccountBlob.weight(restored)).toBe(1);
+  expect((await store.loadQualityStudy('other-owner')).study.monitorLibrary).toBeUndefined();
+  fail = true;
+  expect(await store.saveQualityStudy('monitor-owner', base)).toBe(true);
+  expect((await store.loadQualityStudy('monitor-owner')).study.monitorLibrary?.rounds).toHaveLength(1);
+});

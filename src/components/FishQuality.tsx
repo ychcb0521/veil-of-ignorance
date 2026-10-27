@@ -8,6 +8,7 @@ import { Activity, ArrowRightCircle, Check, ChevronDown, CircleHelp, Download, F
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { FishMiningPanel } from '@/components/FishMiningPanel';
+import { FishMonitorLibrary } from '@/components/FishMonitorLibrary';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction, qualitySplitPauseAction, qualitySplitPrimaryAction } from '@/components/FishQualityModule';
 import { FishProcessButton } from '@/components/FishProcess';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -360,6 +361,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
             <PlanTabs plans={plans} active={monitorPlan?.id} count={p => activeHoldingVetoes(p.holdingVetoes).length} label="选择要设置持仓监测的卖出方案" onSelect={setMonitorPlanId}/>
             {monitorPlan && <HoldingMonitorEditor key={JSON.stringify([monitorPlan.id, monitorPlan.holdingVetoes ?? []])} state={state} plan={monitorPlan} done={() => setMonitorOpen(false)}/>}
           </PopoverContent></Popover>
+          <FishMonitorLibrary study={study} onJump={onJump} canJump={canJump}/>
         </FishQualityModule>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

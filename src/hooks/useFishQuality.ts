@@ -6,6 +6,7 @@ import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
 import { holdingVetoIdentity, type QualityHoldingVeto } from '@/lib/fish/qualityVeto';
 import { beginHistoryOnlyNotifications } from '@/lib/notificationCenter';
+import { adoptQualityMonitorHistory, beginQualityMonitorRound, captureQualityMonitorResult, finishQualityMonitorRound, recoverQualityMonitorRounds } from '@/lib/fish/qualityMonitorLibrary';
 
 export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
@@ -23,8 +24,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const intentRevision = useRef(0);
   const filterController = useRef<AbortController | null>(null), filterRevision = useRef(0);
   const priorityRef = useRef<readonly string[]>([]);
+  const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
-  if (account.current !== owner) { account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
+  if (account.current !== owner) { void monitorFinalizer.current?.('paused', false); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
   const change = useCallback((apply: (s: FishQualityStudy) => FishQualityStudy) => {
     const next = apply(current.current); if (next !== current.current) { current.current = next; setStudy(next); }
   }, []);
@@ -44,7 +46,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     current.current = newQualityStudy(); setStudy(current.current);
     void loadQualityStudy(owner).then(value => {
       if (!active || epoch !== generation.current) return;
-      const archived = archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)));
+      const archived = recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study)))));
       // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
       const migrated = syncQualitySellDefinitions(archived);
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
@@ -53,7 +55,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
     const flush = () => { if (loaded) void saveQualityStudy(owner, current.current); };
     window.addEventListener('pagehide', flush);
-    return () => { active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
+    return () => { void monitorFinalizer.current?.('paused', false); active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, change]);
@@ -82,6 +84,21 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const frozen = structuredClone(current.current);
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
+    const begun = beginQualityMonitorRound(current.current, frozen, Date.now(), mode === 'restart'), capture = begun.capture;
+    change(() => begun.study);
+    const savedOwner = account.current; let finalized = false;
+    const finish = async (state: 'complete' | 'paused' | 'failed', render = true, reason?: string) => {
+      if (finalized) return; finalized = true;
+      if (monitorFinalizer.current === finish) monitorFinalizer.current = null;
+      if (epoch !== generation.current || account.current !== savedOwner) return;
+      const next = finishQualityMonitorRound(current.current, capture, state, Date.now(), reason);
+      current.current = next; if (render && readyRef.current) setStudy(next);
+      let ok = false; try { ok = await saveQualityStudy(savedOwner, next); } catch { /* retain in memory and retry with the existing save loop */ }
+      if (!ok && epoch === generation.current && readyRef.current) setWarning('监测库未能保存到本机；请保留此页面，系统会继续重试。');
+    };
+    monitorFinalizer.current = finish;
+    const savePartial = () => { void finish('paused'); };
+    aborter.signal.addEventListener('abort', savePartial, { once: true });
     const releaseNotifications = beginHistoryOnlyNotifications();
     aborter.signal.addEventListener('abort', releaseNotifications, { once: true });
     setRunning(true); setError('');
@@ -91,6 +108,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         onProgress: p => { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setProgress(p); },
         onFilterReading: reading => {
           if (epoch !== generation.current || revision !== intentRevision.current || aborter.signal.aborted) return;
+          if (!finalized) capture.readings.set(reading.key, structuredClone(reading));
           acceptReading(reading);
         },
         onResult: result => {
@@ -102,12 +120,15 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
             const matches = liveSample && liveGroup && qualityResultKey(liveSample, liveGroup, s.observeHours) === result.key;
             if (!matches && controller.current !== aborter) return s;
             const archived = archiveQualityResult({ ...frozen, campaignRuns: s.campaignRuns }, result);
-            return { ...s, campaignRuns: archived.campaignRuns, results: matches ? [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] : s.results };
+            const next = { ...s, campaignRuns: archived.campaignRuns, results: matches ? [...s.results.filter(r => r.sampleId !== result.sampleId || r.groupId !== result.groupId), result] : s.results };
+            return finalized ? next : captureQualityMonitorResult(next, capture, result, Date.now());
           });
         },
       });
-    } catch (e) { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setError(e instanceof Error ? e.message : '评估失败'); }
+      await finish('complete');
+    } catch (e) { if (epoch === generation.current && revision === intentRevision.current && !aborter.signal.aborted) setError(e instanceof Error ? e.message : '评估失败'); await finish(aborter.signal.aborted ? 'paused' : 'failed', true, e instanceof Error ? e.message : '评估失败'); }
     finally {
+      aborter.signal.removeEventListener('abort', savePartial);
       aborter.signal.removeEventListener('abort', releaseNotifications); releaseNotifications();
       if (controller.current === aborter) { controller.current = null; if (epoch === generation.current) { setRunning(false); if (rerun.current) { const queued = rerun.current; rerun.current = false; defer(() => void start(true, queued === 'refresh' ? undefined : queued), 0); } } }
     }

@@ -1,9 +1,11 @@
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
+import { preserveQualityMonitorLibrary } from './qualityMonitorLibrary';
 import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
+const preserveStudy = (saved: FishQualityStudy | undefined, incoming: FishQualityStudy) => preserveQualityMonitorLibrary(saved, preserveQualityRepairs(saved, incoming));
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB unavailable')); return; }
@@ -41,7 +43,7 @@ async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQuality
         req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
       });
       // A fallback can be newer if a previous durable write failed.
-      if (valid(fallback)) return { study: preserveQualityRepairs(valid(stored) ? stored : undefined,fallback) };
+      if (valid(fallback)) return { study: preserveStudy(valid(stored) ? stored : undefined,fallback) };
       if (stored != null && !valid(stored)) throw new Error('invalid saved study');
       return { study: valid(stored) ? stored : newQualityStudy() };
     } finally { db.close(); }
@@ -53,7 +55,7 @@ async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQuality
 const writes = new Map<string, Promise<boolean>>();
 export function saveQualityStudy(owner: string | undefined, study: FishQualityStudy, options?: { repairOnly: boolean }): Promise<boolean> {
   const key = keyOf(owner), copy = structuredClone(study);
-  const merge = (previous: unknown) => options?.repairOnly && valid(previous) ? preserveQualityRepairs(copy,previous) : preserveQualityRepairs(valid(previous) ? previous : undefined,copy);
+  const merge = (previous: unknown) => options?.repairOnly && valid(previous) ? preserveStudy(copy,previous) : preserveStudy(valid(previous) ? previous : undefined,copy);
   const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
     let durablePrevious: FishQualityStudy | undefined;
     try {
@@ -70,7 +72,7 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
     } catch {
       try {
         const saved = JSON.parse(localStorage.getItem(key) ?? 'null');
-        localStorage.setItem(key, JSON.stringify(merge(valid(saved) ? preserveQualityRepairs(durablePrevious,saved) : durablePrevious))); return true;
+        localStorage.setItem(key, JSON.stringify(merge(valid(saved) ? preserveStudy(durablePrevious,saved) : durablePrevious))); return true;
       } catch { return false; }
     }
   });
@@ -96,7 +98,7 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
           const req = db.transaction(STORE).objectStore(STORE).get(key);
           req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
         });
-        if (valid(fallback)) return preserveQualityRepairs(valid(stored) ? stored : undefined, fallback);
+        if (valid(fallback)) return preserveStudy(valid(stored) ? stored : undefined, fallback);
         return valid(stored) ? stored : undefined;
       } finally { db.close(); }
     } catch { return valid(fallback) ? fallback : undefined; }
@@ -108,7 +110,10 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
       try {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
-          if (study && valid(study)) store.put(study, key); else store.delete(key);
+          if (study && valid(study)) {
+            const read = store.get(key);
+            read.onsuccess = () => store.put(preserveQualityMonitorLibrary(valid(read.result) ? read.result : undefined, study), key);
+          } else store.delete(key);
           tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
         });
       } finally { db.close(); }
@@ -119,5 +124,5 @@ export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
     void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
     return task.then(() => undefined);
   },
-  weight: study => study ? study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) : 0,
+  weight: study => study ? study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) + (study.monitorLibrary?.records.length ?? 0) + (study.monitorLibrary?.rounds.length ?? 0) : 0,
 };
