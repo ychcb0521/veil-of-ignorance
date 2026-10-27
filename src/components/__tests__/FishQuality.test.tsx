@@ -633,3 +633,25 @@ it('statistics counts one actual entry across detector display rows and invalida
   expect(within(dialog).getByText(/尚未运行当前范围/)).toBeInTheDocument();
   expect(s.setFilters).not.toHaveBeenCalled(); expect(s.setHoldingVetoes).not.toHaveBeenCalled();
 });
+
+it('offers six high-return cohorts and five composition pies, across all sellers, with a separate variable/level view', () => {
+  const s = state();
+  s.study.sellPlans = s.study.sellPlans!.map(p => ({...p,rule:{metric:p.metric,direction:'<',threshold:p.snapshot.threshold}}));
+  const row = qualityComparisonRows(s.study)[0];
+  s.study.results = s.study.sellPlans.map((p,i) => ({key:qualityResultKey(row,p,0),sampleId:row.id,groupId:p.id,evaluatedAt:T,status:'closed',returnPct:i===0?100:50,adversePct:-5}));
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button',{name:'统计分析 · 全部卖出算法'}));
+  const dialog = screen.getByTestId('quality-statistics-dialog');
+  fireEvent.click(within(dialog).getByRole('button',{name:'按收益门槛',exact:true}));
+  expect(within(dialog).queryByLabelText('统计算法水平')).toBeNull();
+  expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('1 次达标试验');
+  for (const value of [100,50,40,30,20,10]) expect(within(dialog).getByRole('button',{name:`收益率至少${value}%`,exact:true})).toBeInTheDocument();
+  for (const name of ['静态最大回撤区间占比','卖出算法占比','过滤算法组合占比','探测算法命中组合占比','卖出类型占比']) expect(within(dialog).getByRole('figure',{name,exact:true})).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button',{name:'收益率至少50%',exact:true}));
+  expect(within(dialog).getByTestId('quality-return-trial-count')).toHaveTextContent('2 次达标试验');
+  fireEvent.click(within(dialog).getByRole('button',{name:'阈值水平',exact:true}));
+  expect(within(dialog).getByRole('figure',{name:'卖出阈值水平占比',exact:true})).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button',{name:'按静态回撤',exact:true}));
+  expect(within(dialog).getByLabelText('统计算法水平')).toBeInTheDocument();
+  expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
+});

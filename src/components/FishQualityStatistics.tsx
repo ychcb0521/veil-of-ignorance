@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChartNoAxesCombined } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { FishQualityStudy, QualitySample } from '@/lib/fish/quality';
+import { QUALITY_RETURN_CUTS, qualityReturnSummary, qualityReturnTrades, type QualityReturnClassification, type QualityReturnTrade } from '@/lib/fish/qualityReturnStatistics';
 import { QUALITY_STATIC_CUTS, qualityCohortSummary, qualityStatisticsDefaultSell, qualityStatisticsEstimate, qualityStatisticsInference, qualityStatisticsSeries, type QualityInferenceMetric, type QualityInferenceRow, type QualityStatisticsCategory, type QualityStatisticSeries } from '@/lib/fish/qualityStatistics';
 
 export interface QualityStatisticsRequest { category: QualityStatisticsCategory; variableId?: string; levelId?: string }
@@ -10,22 +11,23 @@ const input = 'h-8 min-w-0 rounded-md border border-border/60 bg-background px-2
 const number = (v: number | null | undefined, suffix = '', signed = false) => v == null || !Number.isFinite(v) ? '—' : `${signed && v > 0 ? '+' : ''}${v.toFixed(2)}${suffix}`;
 const duration = (v: number | null) => v == null ? '—' : v < 1 ? `${(v * 60).toFixed(1)} 分钟` : v < 48 ? `${v.toFixed(1)} 小时` : `${(v / 24).toFixed(1)} 天`;
 const pText = (v: number | null) => v == null ? '—' : v < .001 ? '<0.001' : v.toFixed(3);
-const palette = ['var(--chart-profit)', 'var(--chart-info)', 'var(--chart-importance)', '#8B78C6', 'var(--chart-loss)', 'var(--chart-neutral)'];
+const palette = ['var(--chart-profit)', 'var(--chart-info)', 'var(--chart-importance)', '#8B78C6', 'var(--chart-loss)', 'var(--chart-neutral)', '#22A7A0', '#BB70A8'];
+const pieColor = (i: number) => palette[i] ?? `hsl(${(i * 137.508) % 360} 50% 52%)`;
 
 /** Quiet at rest, visible on hover and keyboard focus; its hit target remains usable. */
 export function QualityStatisticsButton({ label, onClick }: { label: string; onClick: () => void }) {
   return <button type="button" aria-label={`统计分析 · ${label}`} title="统计分析" onClick={onClick} className="absolute right-1 top-0.5 flex h-5 w-5 items-center justify-center rounded text-muted-foreground/30 outline-none transition-colors hover:bg-background/80 hover:text-foreground focus-visible:text-foreground focus-visible:ring-1 focus-visible:ring-ring"><ChartNoAxesCombined aria-hidden className="h-3 w-3"/></button>;
 }
 
-function Pie({ title, bins, empty }: { title: string; bins: { label: string; n: number }[]; empty: string }) {
+function Pie({ title, bins, empty, unit = '笔' }: { title: string; bins: { label: string; n: number }[]; empty: string; unit?: '笔' | '次' }) {
   const total = bins.reduce((n, b) => n + b.n, 0);
   let offset = 0;
-  const slices = bins.map((b, i) => { const start = offset; offset += total ? b.n / total * 100 : 0; return `${palette[i % palette.length]} ${start}% ${offset}%`; });
+  const slices = bins.map((b, i) => { const start = offset; offset += total ? b.n / total * 100 : 0; return `${pieColor(i)} ${start}% ${offset}%`; });
   return <figure aria-label={title} className="min-w-0">
-    <figcaption className="mb-3 text-[11px] font-medium">{title}<span className="ml-1.5 font-normal text-muted-foreground">{total} 笔</span></figcaption>
+    <figcaption className="mb-3 text-[11px] font-medium">{title}<span className="ml-1.5 font-normal text-muted-foreground">{total} {unit}</span></figcaption>
     {!total ? <div className="flex h-28 items-center justify-center rounded-lg border border-dashed border-border/60 text-[11px] text-muted-foreground">{empty}</div> : <div className="flex items-center gap-4">
-      <div role="img" aria-label={`${title}：${bins.filter(b => b.n).map(b => `${b.label} ${b.n}笔，占${(b.n / total * 100).toFixed(1)}%`).join('；')}`} className="relative h-24 w-24 shrink-0 rounded-full" style={{ background: `conic-gradient(${slices.join(',')})` }}><div className="absolute inset-[22%] flex flex-col items-center justify-center rounded-full bg-background"><span className="font-mono text-base tabular-nums">{total}</span><span className="text-[9px] text-muted-foreground">笔数占比</span></div></div>
-      <ul className="min-w-0 flex-1 space-y-1 text-[10px]">{bins.map((b, i) => <li key={b.label} className={`flex items-center gap-1.5 ${b.n ? '' : 'opacity-45'}`}><span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: palette[i % palette.length] }}/><span className="min-w-0 flex-1 break-words">{b.label}</span><span className="font-mono tabular-nums">{b.n}</span><span className="w-10 text-right font-mono tabular-nums text-muted-foreground">{(b.n / total * 100).toFixed(1)}%</span></li>)}</ul>
+      <div role="img" aria-label={`${title}：${bins.filter(b => b.n).map(b => `${b.label} ${b.n}${unit}，占${(b.n / total * 100).toFixed(1)}%`).join('；')}`} className="relative h-24 w-24 shrink-0 rounded-full" style={{ background: `conic-gradient(${slices.join(',')})` }}><div className="absolute inset-[22%] flex flex-col items-center justify-center rounded-full bg-background"><span className="font-mono text-base tabular-nums">{total}</span><span className="text-[9px] text-muted-foreground">{unit === '次' ? '次数占比' : '笔数占比'}</span></div></div>
+      <ul className="max-h-40 min-w-0 flex-1 space-y-1 overflow-y-auto text-[10px]">{bins.map((b, i) => <li key={`${b.label}:${i}`} className={`flex items-center gap-1.5 ${b.n ? '' : 'opacity-45'}`}><span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: pieColor(i) }}/><span className="min-w-0 flex-1 break-words">{b.label}</span><span className="font-mono tabular-nums">{b.n}</span><span className="w-10 shrink-0 text-right font-mono tabular-nums text-muted-foreground">{(b.n / total * 100).toFixed(1)}%</span></li>)}</ul>
     </div>}
   </figure>;
 }
@@ -50,6 +52,25 @@ function Description({ series }: { series: QualityStatisticSeries }) {
 }
 function Metric({ label, value }: { label: string; value: string }) { return <div><p className="text-[10px] text-muted-foreground">{label}</p><p className="mt-1 font-mono text-base tabular-nums">{value}</p></div>; }
 
+function ReturnDescription({ trades }: { trades: QualityReturnTrade[] }) {
+  const [cut, setCut] = useState<number>(100), [classification, setClassification] = useState<QualityReturnClassification>('variable');
+  const stats = useMemo(() => qualityReturnSummary(trades, cut, classification), [trades, cut, classification]);
+  const charts = [
+    ['静态最大回撤区间占比', stats.drawdown],
+    [classification === 'variable' ? '卖出算法占比' : '卖出阈值水平占比', stats.seller],
+    [classification === 'variable' ? '过滤算法组合占比' : '过滤阈值水平组合占比', stats.filter],
+    [classification === 'variable' ? '探测算法命中组合占比' : '探测阈值水平命中组合占比', stats.detector],
+    ['卖出类型占比', stats.sellType],
+  ] as const;
+  return <section aria-label="高收益构成分析" className="space-y-4">
+    <p className="text-[11px] leading-relaxed text-muted-foreground">当前表格筛选范围 · 覆盖全部当前卖出方案。以下按“卖出方案 × 入场记录”的有效已卖出试验计数，同一次入场在不同方案下可各计一次；不混入历史参数快照。</p>
+    <div role="group" aria-label="收益率门槛" className="flex flex-wrap gap-2">{QUALITY_RETURN_CUTS.map(v => { const n = qualityReturnSummary(trades, v).n; return <button key={v} type="button" aria-label={`收益率至少${v}%`} aria-pressed={cut === v} onClick={() => setCut(v)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] transition-colors ${cut === v ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border/60 text-muted-foreground hover:bg-muted/50'}`}><span>≥ {v}%</span><span className="font-mono tabular-nums opacity-70">{n}</span></button>; })}</div>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted/35 p-4"><div><h3 className="text-xs font-medium">收益率 ≥ {cut}%</h3><p className="mt-1 text-[11px] text-muted-foreground"><span data-testid="quality-return-trial-count">{stats.n} 次达标试验</span> · {stats.entries} 次不同入场 · {stats.sellers} 套卖出方案</p></div><div role="group" aria-label="构成分析分类层级" className="inline-flex rounded-md border border-border/60 p-0.5">{([['variable', '算法变量'], ['level', '阈值水平']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={classification === key} onClick={() => setClassification(key)} className={`rounded px-2.5 py-1.5 text-[11px] ${classification === key ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>)}</div></div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{charts.map(([title, bins]) => <div key={title} className="rounded-xl border border-border/60 bg-card p-4"><Pie title={title} bins={bins} unit="次" empty={`暂无收益率 ≥${cut}% 的有效已卖出试验`}/></div>)}</div>
+    <div className="space-y-2 text-[11px] leading-relaxed text-muted-foreground"><p>每张饼图的分母均为本门槛的 {stats.n} 次达标试验，按次数计算构成比例，不按盈利金额加权。门槛包含边界，六组相互嵌套，不可相加。</p><p>卖出按算法变量归类，切到“阈值水平”可看各方案门槛。过滤按整套已启用条件的组合归类，未设置条件单列；探测按同一次入场的完整命中组合归类，同一变量的多个阈值在变量视图中合并。信号库的无探测归属单列。</p><p>静态回撤使用互不重叠的左闭右开区间，0% 计入第一档，缺失回撤单列；卖出触发证据缺失也单列。构成占比反映已选试验的数量，不等于各算法的胜率或优劣。</p></div>
+  </section>;
+}
+
 function Inference({ series, focused, category, results, estimate, onRun, busy, metric, setMetric }: {
   series: QualityStatisticSeries[]; focused: QualityStatisticSeries; category: QualityStatisticsCategory;
   results: QualityInferenceRow[] | null; estimate: ReturnType<typeof qualityStatisticsEstimate> | null; onRun: () => void; busy: boolean;
@@ -66,6 +87,9 @@ function Inference({ series, focused, category, results, estimate, onRun, busy, 
 
 export function FishQualityStatistics({ study, rows, request, onClose }: { study: FishQualityStudy; rows: readonly QualitySample[]; request: QualityStatisticsRequest; onClose: () => void }) {
   const [tab, setTab] = useState<'description' | 'inference' | 'results'>('description');
+  const [descriptionMode, setDescriptionMode] = useState<'drawdown' | 'return'>('drawdown');
+  const returnMode = tab === 'description' && descriptionMode === 'return';
+  const returnTrades = useMemo(() => returnMode ? qualityReturnTrades(study, rows) : [], [study, rows, returnMode]);
   const [fixedSell, setFixedSell] = useState(() => qualityStatisticsDefaultSell(study, request.category, request.levelId));
   const [variable, setVariable] = useState(request.variableId ?? '');
   const [level, setLevel] = useState(request.levelId ?? '');
@@ -105,11 +129,12 @@ export function FishQualityStatistics({ study, rows, request, onClose }: { study
     <DialogHeader className="shrink-0 border-b border-border/60 px-5 pb-4 pt-5 text-left"><DialogTitle className="pr-8 text-base">{names[request.category]} · 统计分析</DialogTitle><DialogDescription className="text-[11px] leading-relaxed">当前表格筛选范围内的全部入场记录 · 不受滚动位置、合并显示或行勾选影响 · 同一次入场在每个水平内只计一次</DialogDescription></DialogHeader>
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
       <div className="sticky top-0 z-10 space-y-3 border-b border-border/50 bg-background pb-3 pt-4">
-        <div className="flex flex-wrap items-center gap-3 text-[11px]">{request.category !== 'sell' && <label className="flex items-center gap-2">固定卖出<select className={`${input} max-w-56`} aria-label="统计固定卖出方案" value={fixedSell} onChange={e => setFixedSell(e.target.value)}>{(study.sellPlans ?? []).map(p => <option key={p.id} value={p.id}>{p.label} · {p.rule ? `${p.rule.direction} ${p.rule.threshold}` : '仅否决/未设'}</option>)}</select></label>}<label className="flex items-center gap-2">变量<select className={`${input} max-w-56`} aria-label="统计算法变量" value={variable} onChange={e => { setVariable(e.target.value); setLevel(''); }}><option value="">全部变量</option>{variables.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label className="flex items-center gap-2">{tab === 'description' ? '查看水平' : '参照水平'}<select className={`${input} max-w-72`} aria-label="统计算法水平" value={focused?.id ?? ''} onChange={e => setLevel(e.target.value)}>{variableSeries.map(s => <option key={s.id} value={s.id}>{variable ? '' : `${s.variable} · `}{s.level}</option>)}</select></label></div>
+        {!returnMode && <div className="flex flex-wrap items-center gap-3 text-[11px]">{request.category !== 'sell' && <label className="flex items-center gap-2">固定卖出<select className={`${input} max-w-56`} aria-label="统计固定卖出方案" value={fixedSell} onChange={e => setFixedSell(e.target.value)}>{(study.sellPlans ?? []).map(p => <option key={p.id} value={p.id}>{p.label} · {p.rule ? `${p.rule.direction} ${p.rule.threshold}` : '仅否决/未设'}</option>)}</select></label>}<label className="flex items-center gap-2">变量<select className={`${input} max-w-56`} aria-label="统计算法变量" value={variable} onChange={e => { setVariable(e.target.value); setLevel(''); }}><option value="">全部变量</option>{variables.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label><label className="flex items-center gap-2">{tab === 'description' ? '查看水平' : '参照水平'}<select className={`${input} max-w-72`} aria-label="统计算法水平" value={focused?.id ?? ''} onChange={e => setLevel(e.target.value)}>{variableSeries.map(s => <option key={s.id} value={s.id}>{variable ? '' : `${s.variable} · `}{s.level}</option>)}</select></label></div>}
         <div role="tablist" aria-label="统计分析内容" className="flex gap-5">{([['description', '描述统计'], ['inference', '推断统计'], ['results', '统计结果']] as const).map(([key, label]) => <button type="button" role="tab" aria-controls="quality-statistics-panel" id={`quality-statistics-tab-${key}`} aria-selected={tab === key} key={key} onClick={() => setTab(key)} className={`border-b-2 pb-2 text-xs transition-colors ${tab === key ? 'border-primary font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>{label}</button>)}</div>
       </div>
       <div role="tabpanel" id="quality-statistics-panel" aria-labelledby={`quality-statistics-tab-${tab}`} className="pt-4">
-        {!focused ? <p className="py-12 text-center text-xs text-muted-foreground">暂无算法水平。请先配置相应算法。</p> : <><p className="mb-4 text-[11px] leading-relaxed text-muted-foreground">{focused.variable} · {focused.level} · {focused.context}</p>
+        {tab === 'description' && <div role="group" aria-label="描述统计视角" className="mb-4 inline-flex gap-1 rounded-lg bg-muted/50 p-1">{([['drawdown', '按静态回撤'], ['return', '按收益门槛']] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={descriptionMode === key} onClick={() => setDescriptionMode(key)} className={`rounded-md px-3 py-1.5 text-[11px] ${descriptionMode === key ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>)}</div>}
+        {returnMode ? <ReturnDescription trades={returnTrades}/> : !focused ? <p className="py-12 text-center text-xs text-muted-foreground">暂无算法水平。请先配置相应算法。</p> : <><p className="mb-4 text-[11px] leading-relaxed text-muted-foreground">{focused.variable} · {focused.level} · {focused.context}</p>
           {tab === 'description' && <Description series={focused}/>}
           {tab === 'inference' && <>{inferenceError && <p role="alert" className="mb-3 text-xs text-destructive">{inferenceError}</p>}<Inference series={variableSeries} focused={focused} category={request.category} results={results} estimate={estimate} onRun={run} busy={busy} metric={metric} setMetric={setMetric}/></>}
           {tab === 'results' && summary && <div className="space-y-4 text-xs leading-relaxed"><div className="rounded-xl border border-border/60 p-4"><h3 className="mb-2 font-medium">当前样本的描述结果</h3><p>{summary.n ? `有效已卖出 ${summary.n} 笔，胜率 ${number(summary.winRate, '%')}，平均收益 ${number(summary.mean, '%', true)}，中位数 ${number(summary.median, '%', true)}；盈利 ${summary.profit.n}、亏损 ${summary.loss.n}、持平 ${summary.flat} 笔。` : '当前范围尚无有效已卖出样本，无法判断胜率或收益表现。'}</p><p className="mt-2 text-muted-foreground">{QUALITY_STATIC_CUTS.map(c => { const s = qualityCohortSummary(focused.trades, c); return `静态回撤 ≤${c}%：${s.n} 笔，胜率 ${number(s.winRate, '%')}`; }).join('；')}。</p></div><div className="rounded-xl border border-border/60 p-4"><h3 className="mb-2 font-medium">推断结果</h3>{!results ? <p className="text-muted-foreground">尚未运行当前范围的推断统计。切到“推断统计”确认方法后运行。</p> : results.length ? <ul className="space-y-3">{results.map(r => <li key={r.id}><p>{r.label} 相对参照：{r.difference == null ? '数据不足。' : `平均${metric === 'return' ? '收益' : '持仓时间'}差 ${number(r.difference, metric === 'return' ? ' 个百分点' : ' 小时', true)}。`}{r.pHolm != null ? r.pHolm < .05 ? ` Holm p = ${pText(r.pHolm)}，在本次比较族中观察到统计差异；差异方向以均值差为准。` : ` Holm p = ${pText(r.pHolm)}，证据不足以确认差异，不代表两者等效。` : r.ci ? `95% 区间${r.ci[0] <= 0 && r.ci[1] >= 0 ? '包含 0，方向尚不明确' : '未包含 0，提示探索性差异'}；未作多重区间校正，不据此判定最优。` : r.note}</p></li>)}</ul> : <p className="text-muted-foreground">仅一个水平，已给出参照水平的区间估计，无组间比较。</p>}</div><p className="text-[11px] text-muted-foreground">以上结论只针对当前历史样本。算法水平可能同时改变附加约束、买入条件或持仓否决，差异不能自动归因于阈值；事后选择回撤较小的交易也不能证明事前可筛出这些交易。请使用独立时段或样本外数据复核。</p></div>}
