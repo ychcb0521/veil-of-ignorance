@@ -79,3 +79,18 @@ it('saving stamps savedAt so a later save wins the settings on merge', () => {
   saveMiningState({ ...newMiningState(), enabled: true }, 1234);
   expect(readMiningState().savedAt).toBe(1234);
 });
+
+it('resolves the documented old DSP a/az naming mismatch without changing formulas, periods or thresholds',async()=>{
+ const {DRIFT_SPEED_Z_DEF}=await import('@/lib/deepDig/features');
+ const {fishFeatureDefinitions}=await import('@/lib/fish/features');
+ const {resolveMiningRuleAliases}=await import('@/lib/fish/mining');
+ const old={...DRIFT_SPEED_Z_DEF,formula:DRIFT_SPEED_Z_DEF.formula.replace('az = ema','a = ema')};
+ const prepared=fishFeatureDefinitions([old]),before=JSON.stringify(prepared),rules=currentDefaultRules();
+ const fixed=resolveMiningRuleAliases(rules,prepared);
+ expect(fixed.rules[3]).toMatchObject({featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'});
+ expect(fixed.repairs).toEqual([expect.stringContaining('算法 4')]);
+ expect(rules[3].statistic).toBe('avg_az');expect(JSON.stringify(prepared)).toBe(before);
+ const custom=fishFeatureDefinitions([{...old,formula:old.formula+'\navg_az = avg(a, 48)'}]);
+ expect(resolveMiningRuleAliases(rules,custom).repairs).toEqual([]);
+ expect(resolveMiningRuleAliases(rules,fishFeatureDefinitions([DRIFT_SPEED_Z_DEF])).repairs).toEqual([]);
+});

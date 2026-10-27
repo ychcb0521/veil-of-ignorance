@@ -66,3 +66,11 @@ it('shows the cause, retry time and actions directly, and exposes configuration 
  expect(screen.getByRole('link',{name:'检查算法定义'})).toHaveAttribute('href','/journal/deep-dig');
  fireEvent.click(screen.getByRole('button',{name:'更新为当前捕捞范围'}));expect(scope).toHaveBeenCalledOnce();expect(screen.getByRole('button',{name:'重新检查'})).toBeVisible();
 });
+
+it('lets an invalid saved statistic be repaired locally and explicitly resumed without clearing progress',()=>{
+ const configure=vi.fn(),m=api({configure,ruleChoices:[{featureId:'drift-speed-z',label:'az',statistics:[{name:'结果',label:'结果 · avg_a_2'},{name:'avg_a',label:'avg_a'}]}]},{mined:220,anchorsDone:93,rules:[{id:'az',featureId:'drift-speed-z',statistic:'avg_az',threshold:'0.15'}],lastError:'统计量已不存在',errorKind:'configuration'});
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));
+ expect(screen.getByRole('option',{name:'avg_az（已失效）'})).toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('挖掘算法 1 统计量'),{target:{value:'avg_a'}});fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
+ expect(configure).toHaveBeenCalledWith([{id:'az',featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'}]);expect(m.state.mined).toBe(220);
+});

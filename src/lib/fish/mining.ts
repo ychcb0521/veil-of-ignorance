@@ -9,6 +9,9 @@
  * 并且鱼舱里已挖到的鱼（带 mined.anchorMs）也能反推进度，状态丢了也从最后挖到的那一档往后接。
  */
 import type { FishCard } from '@/components/FishAlgorithmCard';
+import { fishStatistics } from './algorithm';
+import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { CUSTOM_RESEARCH_INDICATORS, researchSeriesNames } from '@/lib/researchIndicators';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { queueSimStatePush } from '@/lib/simStateSync';
@@ -81,4 +84,23 @@ export function takeMiningLease(owner: string, now: number, ttlMs = 180_000): bo
 }
 export function releaseMiningLease(owner: string): void {
   try { const current = JSON.parse(readPersistedStateRaw(leaseKey()) ?? 'null') as { owner?: string } | null; if (current?.owner === owner) writePersistedStateRaw(leaseKey(), JSON.stringify({ owner, until: 0 })); } catch { /* 到期自然失效 */ }
+}
+
+/** Charts already treat old DSP·a names as the same account series. Resolve only that documented rename. */
+export function resolveMiningRuleAliases(rules: readonly FishMiningRule[], defs: readonly DeepDigFeatureDef[]): {rules: FishMiningRule[]; repairs:string[]} {
+  const repairs:string[]=[];
+  const next=rules.map((rule,i)=>{
+    if(rule.featureId!=='drift-speed-z')return rule;
+    const def=defs.find(d=>d.id===rule.featureId),indicator=CUSTOM_RESEARCH_INDICATORS.find(d=>d.featureId===rule.featureId);
+    if(!def||!indicator)return rule;
+    try{
+      const names=new Set(fishStatistics(def).map(s=>s.name));
+      if(names.has(rule.statistic)||researchSeriesNames(indicator,def.formula).core!=='a')return rule;
+      const alias=({az:'a',avg_az:'avg_a',avg_az_2:'avg_a_2'} as Record<string,string>)[rule.statistic];
+      if(!alias||!names.has(alias))return rule;
+      repairs.push(`算法 ${i+1} 已兼容旧定义：${rule.statistic} → ${alias}，门槛 ${rule.threshold} 保持不变`);
+      return {...rule,statistic:alias};
+    }catch{return rule;}
+  });
+  return {rules:next,repairs};
 }

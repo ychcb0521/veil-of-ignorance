@@ -23,6 +23,7 @@ export interface FishMiningState {
   /** Persist recovery state so refresh cannot bypass a retry delay or hide its cause. */
   retryAt?: number | null; retryCount?: number; lastErrorAt?: number | null;
   errorKind?: 'configuration' | 'transient';
+  ruleRepairs?: string[];
 }
 /** 云端同步用的逻辑键（实际存储键是 sim_<uid>_fish-mining.v1）。 */
 export const MINING_LOGICAL_KEY = 'fish-mining.v1';

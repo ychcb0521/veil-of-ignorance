@@ -141,3 +141,14 @@ it('treats an unsupported frozen venue as a configuration problem and repairs on
  const {h,mine}=setup();await flush(10);expect(mine).not.toHaveBeenCalled();expect(readMiningState().errorKind).toBe('configuration');
  act(()=>h.result.current.useCurrentScope!());await flush(10);expect(mine).toHaveBeenCalled();expect(readMiningState().selection?.exchanges).toEqual(['binance']);
 });
+
+it('automatically recovers the actual fourth-rule avg_az error on legacy a formulas, retaining the existing cursor',async()=>{
+ const {DRIFT_SPEED_Z_DEF}=await import('@/lib/deepDig/features');
+ const {currentDefaultRules}=await import('@/lib/fish/mining');
+ const available=defs.map(def=>def.id==='drift-speed-z'?fishFeatureDefinitions([{...DRIFT_SPEED_Z_DEF,formula:DRIFT_SPEED_Z_DEF.formula.replace('az = ema','a = ema')}])[0]:def);
+ saveMiningState({...newMiningState(),enabled:true,cursorMs:MINING_START_MS+MINING_STEP_MS,anchorsDone:1,mined:220,rules:currentDefaultRules(),lastError:'算法 4：所选统计量已不存在或不是序列，请重新选择',errorKind:'configuration'});
+ const {h,mine}=setup({definitions:available});await flush(10);
+ expect(mine).toHaveBeenCalled();expect(mine.mock.calls[0][0].anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);
+ expect(mine.mock.calls[0][0].algorithms[3].algorithm).toMatchObject({statistic:'avg_a',threshold:.15});
+ expect(h.result.current.state.ruleRepairs?.at(-1)).toContain('avg_az → avg_a');expect(readMiningState().mined).toBeGreaterThanOrEqual(220);
+});

@@ -5,22 +5,25 @@
  * - 出错原地重试（间隔 2 分钟）；多个标签页只有拿到租约的那个挖。
  * - 每次读进度都用鱼舱里已挖到的鱼校正一遍：进度被旧快照盖回去或丢了，也从最后挖到的那一档往后接。
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishProgress, FishScanSettings } from '@/lib/fishScanner';
+import { fishStatistics } from '@/lib/fish/algorithm';
 import { AUDITED_EXCHANGES } from '@/lib/fish/exchanges';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { fishCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
-import { acceptMinedAnchor, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
+import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
 
 const TICK_MS = 30_000;
 export interface FishMiningApi {
   state: FishMiningState; running: boolean; anchorMs: number | null; progress: { done: number; total: number } | null; waiting: string;
   start: () => void; pause: () => void; setTarget: (target: number) => void;
   /** 挖掘库按账号存；holdKeys = 鱼舱里现有挖掘鱼的键（不在其中的，挖掘库里标「已从鱼舱删除」）。 */
+  ruleChoices?: {featureId:string;label:string;statistics:{name:string;label:string}[]}[];
+  configure?: (rules:FishMiningState['rules'])=>void;
   retry?: () => void; useCurrentScope?: () => void; resetConfiguration?: () => void;
   account?: string; holdKeys?: () => ReadonlySet<string>;
 }
@@ -56,7 +59,9 @@ export function useFishMining(o: {
 
   const tick = useCallback(async (): Promise<void> => {
     if (runningRef.current) return;
-    const now = Date.now(), s = load(latest.current.signalsRef.current);
+    const now = Date.now();let s = load(latest.current.signalsRef.current);
+    const resolved=resolveMiningRuleAliases(s.rules,latest.current.defs);
+    if(resolved.repairs.length){s={...s,rules:resolved.rules,ruleRepairs:[...(s.ruleRepairs??[]),...resolved.repairs],lastError:'',retryAt:null,errorKind:undefined};setState(s);}
     stateRef.current = s; setStateRaw(s);
     const anchor = miningDueAnchor(s, now);
     if (anchor == null) { setWaiting(''); return; }
@@ -146,6 +151,12 @@ export function useFishMining(o: {
     setState({...s,rules,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
+  const configure=useCallback((rules:FishMiningState['rules'])=>{
+    if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
+    setState({...s,rules:structuredClone(rules),enabled:true,retryAt:null,errorKind:undefined});
+    setTimeout(()=>void tickRef.current(),0);
+  },[setState]);
+  const ruleChoices=useMemo(()=>o.defs.map(def=>{try{return {featureId:def.id,label:def.short,statistics:fishStatistics(def)};}catch{return {featureId:def.id,label:def.short,statistics:[]};}}),[o.defs]);
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).map(fishCatchKey)), []);
-  return { state, running, anchorMs, progress, waiting, start, pause, retry, useCurrentScope, resetConfiguration, setTarget, account: o.account, holdKeys };
+  return { state, running, anchorMs, progress, waiting, start, pause, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };
 }
