@@ -386,7 +386,7 @@ it('opens with the remembered tab, filters and sort when coming back from a camp
   saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', detectorExpanded: true, sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
   expect(armQualityReturn()).toBe(true);
   render(<FishQuality state={state()}/>);
-  expect(screen.getByTestId('quality-mode')).toHaveTextContent('卖出与探测控制变量法');
+  expect(screen.queryByTestId('quality-mode')).toBeNull();
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
   expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
   expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
@@ -507,7 +507,7 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   const mining = { state: { ...newMiningState(), rules: currentDefaultRules() }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn() };
   render(<FishQuality state={state()} mining={mining as never}/>);
   expect(screen.queryByRole('tab')).toBeNull();
-  expect(screen.getByTestId('quality-mode')).toHaveTextContent('卖出与探测');
+  expect(screen.queryByTestId('quality-mode')).toBeNull();
   expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
   expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
