@@ -13,7 +13,7 @@ import { formatUTC8 } from '@/lib/timeFormat';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed-z': 'az', bss: 'BSS' };
-const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂')}`} > ${r.threshold}`;
+const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`;
 export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJump }: { mining: FishMiningApi; sellFixed: boolean; campaignHref: string; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const { state: s, running, anchorMs, progress, waiting } = mining;
   const [target, setTarget] = useState<string | null>(null);

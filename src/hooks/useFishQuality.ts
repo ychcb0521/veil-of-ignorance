@@ -25,6 +25,12 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const intentRevision = useRef(0);
   const filterController = useRef<AbortController | null>(null), filterRevision = useRef(0);
   const priorityRef = useRef<readonly string[]>([]);
+  /**
+   * 【用户要求】2026-10-27「买前过滤、持仓监测都只针对被选中的数据」：运行范围 = 已勾选 ∩ 当前筛选下可见的行
+   * （来源、月份、探测算法、标的搜索）。界面经 setScope 告知可见行；null = 不限（尚未告知时按勾选）。
+   */
+  const scopeRef = useRef<ReadonlySet<string> | null>(null);
+  const scoped = (s: FishQualityStudy): FishQualityStudy => scopeRef.current ? { ...s, selectedRowIds: (s.selectedRowIds ?? []).filter(id => scopeRef.current!.has(id)) } : s;
   const monitorFinalizer = useRef<((state: 'complete' | 'paused' | 'failed', render?: boolean, reason?: string) => Promise<void>) | null>(null);
   // Updates to an old account must never appear in or save into the newly selected one.
   if (account.current !== owner) { void monitorFinalizer.current?.('paused', false); account.current = owner; readyRef.current = false; generation.current++; controller.current?.abort(); filterController.current?.abort(); }
@@ -70,7 +76,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     }); }, 400);
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
-    if (!readyRef.current || !qualityRunSamples(current.current).length || automatic && !selectionApproved.current && !mode) return;
+    if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) {
       // Settings can queue a follow-up; periodic ticks never prolong an active batch.
@@ -82,7 +88,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
     if (!mode || mode === 'restart') change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const epoch = generation.current, revision = intentRevision.current, aborter = new AbortController(); controller.current = aborter;
-    const frozen = structuredClone(current.current);
+    const frozen = structuredClone(scoped(current.current));
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
     const frozenGroups = new Map(qualityRunGroups(frozen).map(g => [g.id, g]));
     const begun = beginQualityMonitorRound(current.current, frozen, Date.now(), mode === 'restart'), capture = begun.capture;
@@ -136,9 +142,9 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [change, defer, acceptReading]);
   /** Separate lifetime and cancellation: filtering never submits sell outcomes or controls monitoring. */
   const startFilter = useCallback(async () => {
-    if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(current.current).length) return;
+    if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
     const revision = ++filterRevision.current;
-    const frozen = structuredClone(current.current), total = qualityRunSamples(frozen).length * (frozen.sellPlans?.length ?? 0);
+    const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length * (frozen.sellPlans?.length ?? 0);
     frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
     setFilterError('');
     // 【用户要求】2026-10-27 过滤有自己的库：每一轮冻结当时的条件与判断（只改门槛、读数可复用的也算一轮）
@@ -174,7 +180,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const cancelFilter = useCallback(() => { filterRevision.current++; filterController.current?.abort(); filterController.current = null; setFilterRunning(false); }, []);
   const cancel = useCallback(() => { intentRevision.current++; rerun.current = false; selectionApproved.current = false; controller.current?.abort(); }, []);
   const restart = useCallback(async () => {
-    if (!readyRef.current || !qualityRunSamples(current.current).length) return;
+    if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length) return;
     intentRevision.current++; rerun.current = false;
     controller.current?.abort(); controller.current = null;
     await start(false, 'restart');
@@ -191,6 +197,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [study.samples, ready, change, start, defer]);
   // 界面告诉评估先算哪些行（看得见的在前）；只存引用，不触发重渲染
   const setPriority = useCallback((ids: readonly string[]) => { priorityRef.current = ids; }, []);
+  /** 当前筛选下可见的行（显示行编号）；只存引用，下一次开始过滤 / 监测时生效，不打断正在跑的批次。 */
+  const setScope = useCallback((ids: readonly string[] | null) => { scopeRef.current = ids ? new Set(ids) : null; }, []);
   useEffect(() => {
     if (!ready || !warning) return;
     const timer = setInterval(() => { void saveQualityStudy(owner, current.current).then(ok => { if (ok && account.current === owner) setWarning(''); }); }, 15_000);
@@ -236,6 +244,6 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
     defer(() => { if (controller.current) void restart(); else void start(); });
   }, [change, start, restart, defer]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setObserveHours, selectSell, setSelectedRows, setPriority, setFilters, setHoldingVetoes };
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

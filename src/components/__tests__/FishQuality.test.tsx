@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn() };
+  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn() };
 }
 afterEach(cleanup);
 it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
@@ -654,4 +654,15 @@ it('offers six high-return cohorts and five composition pies, across all sellers
   fireEvent.click(within(dialog).getByRole('button',{name:'按静态回撤',exact:true}));
   expect(within(dialog).getByLabelText('统计算法水平')).toBeInTheDocument();
   expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
+});
+// 【用户要求】2026-10-27「买前过滤、持仓监测都只针对被选中的数据」：提示本轮范围，筛选外勾着的不算
+it('tells the hook which rows are in view and shows how many checked signals this run will process', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理已勾选 1 条');
+  expect(vi.mocked(s.setScope).mock.calls.at(-1)![0]).toHaveLength(qualityDisplayRows(s.study).length);
+  fireEvent.change(screen.getByLabelText('筛选鱼质量信号'), { target: { value: 'ZZZ' } });
+  expect(vi.mocked(s.setScope).mock.calls.at(-1)![0]).toEqual([]);
+  expect(screen.getByTestId('quality-run-scope')).toHaveTextContent('本轮处理 0 条 · 筛选外另有 1 条已勾选');
+  expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '开始监测' })).toHaveAttribute('title', '当前筛选下没有已勾选的信号');
 });

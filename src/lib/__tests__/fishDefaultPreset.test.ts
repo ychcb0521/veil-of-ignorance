@@ -39,18 +39,20 @@ const withRawS = (threshold: string) => [...loadFishCardsForScan(available), { .
 it('uses the five distinct default cards and union before the panel opens', () => {
   const cards = loadFishCardsForScan(available);
   expect(cards.map(card => [card.featureId, card.pref.statistic, card.pref.direction, card.pref.threshold])).toEqual([
-    ['cbi2', '结果', '>', '0.04'], ['state', 'avg_state_2', '>', '0.6'], ['cba', '结果', '>', '8'],
-    ['drift-speed-z', '结果', '>', '15'], ['bss', '结果', '>', '0.12'],
+    ['cbi2', 'avg_CBI2', '>', '0.04'], ['state', 'avg_state', '>', '0.6'], ['cba', 'avg_CBA', '>', '8'],
+    ['drift-speed-z', 'avg_az', '>', '0.15'], ['bss', 'avg_BSS', '>', '0.12'],
   ]);
   expect(new Set(cards.map(card => card.id)).size).toBe(5);
   expect(cards.every(card => card.enabled)).toBe(true);
   expect(readFishCombination()).toBe('or');
   const compiled = fishCardPlans(cards, fishFeatureDefinitions(BUILTIN_FEATURES));
   expect(compiled.error).toBe('');
-  expect(compiled.plans.map(plan => plan.statisticName)).toEqual(['avg_CBI2_2', 'avg_state_2', 'avg_CBA_2', 'avg_az_2', 'avg_BSS_2']);
+  expect(compiled.plans.map(plan => plan.statisticName)).toEqual(['avg_CBI2', 'avg_state', 'avg_CBA', 'avg_az', 'avg_BSS']);
   expect(compiled.plans[1].stateHold).toBeUndefined();
   expect(compiled.plans[2].settings.threshold).toBe(8);
-  expect(compiled.plans[3].scale).toBe(100);
+  // avg_az 读原值（倍率 1）：0.15 与旧版「结果 ×100 > 15」同一条线
+  expect(compiled.plans[3].scale).toBe(1);
+  expect(compiled.plans[3].settings.threshold).toBe(0.15);
   expect(compiled.plans[4].settings.threshold).toBe(0.12);
 });
 
@@ -69,8 +71,8 @@ it('switches an account on the previous six-card preset once, keeping its thresh
   localStorage.setItem(fishCombinationKey(), 'and');
   const cards = loadFishCardsForScan(available);
   expect(cards.map(card => [card.featureId, card.pref.statistic, card.pref.threshold, card.enabled])).toEqual([
-    ['cbi2', '结果', '0.06', true], ['state', 'avg_state_2', '0.65', true], ['cba', '结果', '8', true],
-    ['drift-speed-z', '结果', '20', true], ['bss', '结果', '0.12', true],
+    ['cbi2', 'avg_CBI2', '0.06', true], ['state', 'avg_state', '0.65', true], ['cba', 'avg_CBA', '8', true],
+    ['drift-speed-z', 'avg_az', '0.2', true], ['bss', 'avg_BSS', '0.12', true],
   ]);
   expect(readFishCombination()).toBe('or');
   // 之后的手动修改（含加回 CDA）照常保留
@@ -86,6 +88,8 @@ it('switches an account on the previous six-card preset once, keeping its thresh
 
 it.each(['0.8', '0.08'])('updates the old BSS preset %s once before scanning, preserving other settings and later manual edits', (oldThreshold) => {
   const cards = loadFishCardsForScan(available);
+  // 老账号：BSS 卡还停在旧默认（结果 = avg₂）与旧门槛上
+  cards[4].pref.statistic = '结果';
   cards[4].pref.threshold = oldThreshold;
   cards[4].enabled = false;
   cards[0].pref.threshold = '0.12';
@@ -93,9 +97,10 @@ it.each(['0.8', '0.08'])('updates the old BSS preset %s once before scanning, pr
   localStorage.setItem(fishCombinationKey(), 'and');
   localStorage.setItem(getUserPrefix() + 'fish-bss-default.v1', '1');
   localStorage.removeItem(getUserPrefix() + 'fish-bss-default.v2');
+  localStorage.removeItem(getUserPrefix() + 'fish-default-avg.v1');
 
   const upgraded = loadFishCardsForScan(available);
-  expect(upgraded[4]).toEqual({ ...cards[4], pref: { ...cards[4].pref, threshold: '0.12', lastSuggestion: undefined } });
+  expect(upgraded[4]).toEqual({ ...cards[4], pref: { ...cards[4].pref, statistic: 'avg_BSS', threshold: '0.12', lastSuggestion: undefined } });
   expect(upgraded.filter((_, i) => i !== 4)).toEqual(cards.filter((_, i) => i !== 4));
   expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available)[4].pref.threshold).toBe('0.12');
   expect(readFishCombination()).toBe('and');
@@ -130,7 +135,7 @@ it('upgrades old cards and combination once, then keeps manual thresholds', () =
   localStorage.setItem(fishCardsKey(), JSON.stringify(cards));
   localStorage.setItem(fishCombinationKey(), 'and');
   const reopened = fishDefaultCards(FISH_DEFAULT_ALGORITHMS, available);
-  expect(reopened[1].pref).toMatchObject({ statistic: 'avg_state_2', threshold: '0.65' });
+  expect(reopened[1].pref).toMatchObject({ statistic: 'avg_state', threshold: '0.65' });
   expect(reopened[4].pref.threshold).toBe('0.9');
   expect(reopened[1].enabled).toBe(true);
   expect(loadFishCardsForScan(available)[1].enabled).toBe(false);
@@ -203,4 +208,28 @@ it('upgrades the saved 0.67 default once without resetting other cards or later 
   expect(loadFishCardsForScan(available)[5].pref.threshold).toBe('0.7');
   localStorage.setItem(fishCardsKey(), JSON.stringify(cards));
   expect(loadFishCardsForScan(available)[5].pref.threshold).toBe('0.67');
+});
+
+// 【用户要求】2026-10-27「把捕捞这里的默认值均改成 avg」：老账号的五张默认卡只换一次统计量，门槛、开关、自加的卡不动
+it('switches saved default cards from avg₂ to avg once, keeping thresholds, toggles and custom cards', () => {
+  const p = getUserPrefix();
+  const saved = [
+    { id: 'first', featureId: 'cbi2', enabled: true, pref: { statistic: '结果', direction: '>', threshold: '0.05', constraints: [] } },
+    { id: 'default-state-avg2', featureId: 'state', enabled: false, pref: { statistic: 'avg_state_2', direction: '>', threshold: '0.62', constraints: [] } },
+    { id: 'default-cba', featureId: 'cba', enabled: true, pref: { statistic: 'avg_CBA', direction: '>', threshold: '9', constraints: [] } },
+    { id: 'default-drift-speed-z', featureId: 'drift-speed-z', enabled: true, pref: { statistic: '结果', direction: '>', threshold: '15', constraints: [] } },
+    { id: 'default-bss', featureId: 'bss', enabled: true, pref: { statistic: '结果', direction: '>', threshold: '0.8', constraints: [] } },
+    { id: 'custom', featureId: 'cbi2', enabled: true, pref: { statistic: '结果', direction: '>', threshold: '0.07', constraints: [], thresholdDefaultsVersion: fishDefaultThresholdVersion('cbi2') } },
+  ];
+  localStorage.setItem(fishCardsKey(), JSON.stringify(saved));
+  localStorage.setItem(p + 'fish-default-preset.v3', '1');
+  localStorage.setItem(p + 'fish-bss-default.v2', '1');
+  const cards = readFishCards();
+  expect(cards.map(c => [c.id, c.pref.statistic, c.pref.threshold, c.enabled])).toEqual([
+    ['first', 'avg_CBI2', '0.05', true], ['default-state-avg2', 'avg_state', '0.62', false], ['default-cba', 'avg_CBA', '9', true],
+    ['default-drift-speed-z', 'avg_az', '0.15', true], ['default-bss', 'avg_BSS', '0.8', true], ['custom', '结果', '0.07', true],
+  ]);
+  // 之后手动改回 avg₂ 不再被覆盖
+  localStorage.setItem(fishCardsKey(), JSON.stringify(saved));
+  expect(readFishCards()[0].pref.statistic).toBe('结果');
 });

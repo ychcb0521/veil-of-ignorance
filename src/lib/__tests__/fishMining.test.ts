@@ -24,7 +24,7 @@ it('freezes the current default rules as enabled union cards', () => {
   expect(rules.map(r => r.featureId)).toEqual(['cbi2', 'state', 'cba', 'drift-speed-z', 'bss']);
   const cards = miningCards(rules);
   expect(cards.every(c => c.enabled && c.pref.direction === '>')).toBe(true);
-  expect(cards[1].pref).toMatchObject({ statistic: 'avg_state_2', threshold: '0.6' });
+  expect(cards[1].pref).toMatchObject({ statistic: 'avg_state', threshold: '0.6' });
 });
 it('stores each anchor as cabin records (not fresh), keeps only the first anchor of a continuing signal, and advances the cursor', () => {
   const s = { ...newMiningState(), enabled: true }, A = MINING_START_MS, B = A + MINING_STEP_MS;

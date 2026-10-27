@@ -443,3 +443,35 @@ it('keeps a completed round in memory and reports a failed durable save instead 
   storage.save.mockResolvedValue(true); await flush(16000);
   expect(h.result.current.warning).toBe(''); expect(storage.save).toHaveBeenCalledWith('a', expect.objectContaining({ monitorLibrary: expect.objectContaining({ rounds: [expect.objectContaining({ state: 'complete' })] }) }));
 });
+
+// 【用户要求】2026-10-27「买前过滤、持仓监测都只针对被选中的数据」：范围 = 已勾选 ∩ 当前筛选下可见
+it('runs monitoring and filtering only on checked rows inside the current view, and widens again when the view resets', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const other: TradeSignal = { ...signal, id: 'b', symbol: 'BBBUSDT', timeMs: T - 3_600_000, fish: { ...signal.fish!, cutoffMs: T - 3_600_000 } };
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal, other], async o => { tasks.push(o); }));
+  await flush();
+  const rows = qualityDisplayRows(h.result.current.study);
+  expect(rows).toHaveLength(2);
+  act(() => h.result.current.setSelectedRows(rows.map(r => r.id)));
+  // 视图只剩 BBB（例如按标的筛选）：两条都勾着，只处理 BBB
+  act(() => h.result.current.setScope([rows.find(r => r.source.symbol === 'BBBUSDT')!.id]));
+  act(() => { void h.result.current.start(); }); await flush();
+  expect(qualityRunSamples(tasks[0].study).map(s => s.source.symbol)).toEqual(['BBBUSDT']);
+  // 勾选本身不变
+  expect(h.result.current.study.selectedRowIds).toHaveLength(2);
+  // 买前过滤同样只处理范围内的
+  const plan = h.result.current.study.sellPlans![0];
+  act(() => h.result.current.setFilters(plan.id, [makeQualityBuyFilter('state:state', '>', .7)])); await flush(600);
+  const filterTask = tasks.find(t => t.task === 'filter')!;
+  expect(qualityRunSamples(filterTask.study).map(s => s.source.symbol)).toEqual(['BBBUSDT']);
+  // 筛选范围内一条都没勾：不启动
+  const count = tasks.length;
+  act(() => h.result.current.setScope([]));
+  act(() => { void h.result.current.start(); }); await flush();
+  expect(tasks).toHaveLength(count);
+  // 视图恢复全部：两条都处理
+  act(() => h.result.current.setScope(rows.map(r => r.id)));
+  act(() => { void h.result.current.start(); }); await flush();
+  expect(qualityRunSamples(tasks.at(-1)!.study).map(s => s.source.symbol).sort()).toEqual(['AAAUSDT', 'BBBUSDT']);
+});

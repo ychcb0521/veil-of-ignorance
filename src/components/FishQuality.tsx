@@ -273,8 +273,11 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const plans = sellVariables.flatMap(v => v.levels), groups = study.groups.filter(g => batch.some(r => r.detectorId === g.id));
   const selectedIds = new Set(study.selectedRowIds ?? []);
   const selectedRows = rows.filter(r => qualityTableMembers(r).some(member => selectedIds.has(member.id)));
-  const selectedBatch = batch.filter(r => selectedIds.has(r.id));
-  const selectedCount = detectorExpanded ? selectedBatch.length : collapseQualityTableRows(selectedBatch).length;
+  // 【用户要求】2026-10-27 买前过滤、持仓监测只处理「当前筛选下可见、且已勾选」的行；筛选外勾着的不动
+  const selectedBatch = batch.filter(r => selectedIds.has(r.id)), scopedSelected = sortedRows.filter(r => selectedIds.has(r.id));
+  const selectedCount = countSignals(scopedSelected), selectedTotal = countSignals(selectedBatch);
+  const { setScope } = state;
+  useEffect(() => { setScope?.(sortedRows.map(r => r.id)); }, [setScope, sortedRows]);
   const rowSelected = (row: QualityTableRow) => qualityTableMembers(row).every(member => selectedIds.has(member.id));
   const allSelected = rows.length > 0 && rows.every(rowSelected);
   // Shift 连选的起点：最后一次单击（或连选）的那一行
@@ -346,7 +349,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
         <FishQualityModule title="买前过滤" icon={Filter} testId="quality-filter-controls" summary={<FishQualityInfo label="买前过滤说明"><p>{filterCount ? `${filterCount} 条买入条件` : '未设买入条件'}</p><p className="text-muted-foreground">对已勾选信号独立判断买入条件；读数取买入时刻前最后一根已收盘 K 线。修改门槛复用已有读数。</p></FishQualityInfo>} status={state.filterProgress && <p role="status" aria-live="polite" className="inline-flex flex-wrap items-center gap-2"><span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${state.filterRunning ? 'animate-pulse bg-primary' : 'bg-muted-foreground/50'}`}/>{state.filterRunning ? '过滤中' : state.filterError ? '过滤失败' : state.filterProgress.done === state.filterProgress.total ? '过滤完成' : '已暂停'}</span><span className="font-mono tabular-nums">{state.filterProgress.done} / {state.filterProgress.total}</span></p>}>
           {state.filterRunning
             ? <button type="button" className={qualityPauseAction} onClick={state.cancelFilter}><Pause aria-hidden className="h-3 w-3"/>暂停过滤</button>
-            : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount || !filtersOn} title={filtersOn ? '独立计算已勾选信号的过滤条件，不运行卖出监测' : '先设置并启用买入过滤条件'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>开始过滤</button>}
+            : <button type="button" className={qualityPrimaryAction} disabled={!ready || !selectedCount || !filtersOn} title={!filtersOn ? '先设置并启用买入过滤条件' : selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号计算买入条件，不运行卖出监测` : '当前筛选下没有已勾选的信号'} onClick={() => void state.startFilter()}><Filter aria-hidden className="h-3 w-3"/>开始过滤</button>}
           {state.filterError && <p role="alert" className="text-[11px] text-destructive">{state.filterError}</p>}
           <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="买入过滤条件" title={filtersOn ? plans.map(p => `${p.label}：${activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') || '不过滤'}`).join('\n') : '给每套卖出方案分别设置买入条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             <PlanTabs plans={plans} active={filterPlan?.id} count={p => activeBuyFilters(study, p).length} label="选择要设置过滤的卖出方案" onSelect={setFilterPlanId}/>
@@ -359,7 +362,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">
             {running
               ? <button type="button" className={qualitySplitPauseAction} onClick={state.cancel}><Pause aria-hidden className="h-3 w-3"/>暂停监测</button>
-              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !selectedCount} title="按当前勾选和条件在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用" onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
+              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !selectedCount} title={selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用` : '当前筛选下没有已勾选的信号'} onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
             <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !selectedCount} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">这一轮不沿用已算好的结果，按最新勾选、买入过滤和卖出条件全部重算{running ? '；先停止当前批次' : ''}。各轮不同算法和门槛下的结果都保留，同币种、同时间、同算法同门槛的合并为一条</span></button></PopoverContent></Popover>
           </div>
@@ -375,6 +378,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
         <span className="relative shrink-0"><select aria-label="鱼质量的月份" className={`${field} appearance-none pr-6 font-mono`} value={month} onChange={e => { setMonth(e.target.value); resetScroll(); }}><option value="">全部月份（{countSignals(narrowed)}）</option>{months.map(m => <option key={m} value={m}>{m}（{monthCounts.get(m) ?? 0}）</option>)}</select><ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></span>
         <DetectorPicker groups={groups} counts={detectorCounts} selected={activeAlgorithms} onChange={setAlgorithms}><button type="button" aria-label="鱼质量的探测算法" className={`${field} relative max-w-60 shrink-0 truncate pr-6 text-left ${activeAlgorithms.length ? 'text-foreground' : ''}`}>{!activeAlgorithms.length ? '全部探测算法' : activeAlgorithms.length === 1 ? detectorText(detectorMap.get(activeAlgorithms[0])!) : `探测算法 · 已选 ${activeAlgorithms.length} 个水平`}<ChevronDown className="pointer-events-none absolute right-1.5 top-2 h-3 w-3 text-muted-foreground/60"/></button></DetectorPicker>
         <input aria-label="筛选鱼质量信号" placeholder="筛选标的…" value={query} onChange={e => { setQuery(e.target.value); resetScroll(); }} className={`${field} min-w-32 flex-1 placeholder:text-muted-foreground/50`}/>
+        <span className="ml-auto shrink-0 text-[10.5px] tabular-nums text-muted-foreground" data-testid="quality-run-scope" title="开始过滤、开始监测只处理当前筛选（来源、月份、探测算法、标的）下已勾选的信号；筛选外勾着的这一轮不处理">{selectedCount === selectedTotal ? `本轮处理已勾选 ${selectedCount} 条` : <>本轮处理 <span className="text-foreground">{selectedCount}</span> 条 · 筛选外另有 {selectedTotal - selectedCount} 条已勾选</>}</span>
       </div>
       {!ready && <p role="status" className="text-[10.5px] text-muted-foreground">恢复本机记录…</p>}
       {(error || state.warning || state.error) && <p role="alert" className="text-[11px] text-destructive">{error || state.error || state.warning}</p>}

@@ -15,12 +15,19 @@ const cleanPreference = (p: FishPreference): FishPreference => ({ ...p, constrai
 // CDA（CBA 的镜像）、卖控DSP.bc 与 DSP·a（推力类重复）、S 原值（被前几类分开覆盖）不再默认。
 export const FISH_DEFAULT_RULES = [
   // 【用户要求】2026-10-25「最该看重的是 CBI-2、avg_S，因此应该排在前两个」
-  { id: 'first', featureId: 'cbi2', statistic: '结果', threshold: '0.04' },
-  { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state_2', threshold: '0.6' },
-  { id: 'default-cba', featureId: 'cba', statistic: '结果', threshold: '8' },
-  { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: '结果', threshold: '15' },
-  { id: 'default-bss', featureId: 'bss', statistic: '结果', threshold: '0.12' },
+  // 【用户要求】2026-10-27「既然同一指标 avg 比 avg₂ 好，那么把捕捞这里的默认值均改成 avg」（监测库：CBI-2 / BSS 的 avg 去掉最高两笔后仍为正，avg₂ 为负）。
+  // 卡片编号不变（default-state-avg2 只是历史编号），门槛沿用；az 的「结果」按 ×100 显示，avg_az 读原值，门槛 15 → 0.15（含义不变）。
+  { id: 'first', featureId: 'cbi2', statistic: 'avg_CBI2', threshold: '0.04' },
+  { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state', threshold: '0.6' },
+  { id: 'default-cba', featureId: 'cba', statistic: 'avg_CBA', threshold: '8' },
+  { id: 'default-drift-speed-z', featureId: 'drift-speed-z', statistic: 'avg_az', threshold: '0.15' },
+  { id: 'default-bss', featureId: 'bss', statistic: 'avg_BSS', threshold: '0.12' },
 ] as const;
+/** 换成 avg 之前五张默认卡的统计量（结果 = 公式最后一行 avg₂）。 */
+const FISH_DEFAULT_AVG2_STATISTICS: Record<string, string> = { first: '结果', 'default-state-avg2': 'avg_state_2', 'default-cba': '结果', 'default-drift-speed-z': '结果', 'default-bss': '结果' };
+/** 「结果」按特征值的显示倍率读数，公式变量（avg_…）读原值：从「结果」换过去时门槛要除以倍率，含义才不变。 */
+const FISH_DEFAULT_RESULT_SCALE: Record<string, number> = { 'default-drift-speed-z': 100 };
+const rescaleThreshold = (threshold: string, divisor: number) => { const n = Number(threshold); return divisor === 1 || !threshold.trim() || !Number.isFinite(n) ? threshold : String(+(n / divisor).toPrecision(12)); };
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
 // v3：换成五条规则时，已有账号也重新套一次默认组合（保留留下来的那几条上调过的阈值）。
 export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v3`;
@@ -105,6 +112,20 @@ export function readFishCards(): FishCard[] {
         writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
       }
       writePersistedStateRaw(stateDefaultKeyV2, '1');
+    }
+    // 默认卡由 avg₂ 换成 avg（只换一次）：只改还停在旧默认统计量上的那几张，门槛、开关、方向与自加的卡都不动；之后手动改回 avg₂ 也不再覆盖。
+    const avgDefaultKey = `${getUserPrefix()}fish-default-avg.v1`;
+    if (readPersistedStateRaw(avgDefaultKey) !== '1') {
+      let changed = false;
+      for (const c of x) {
+        const rule = FISH_DEFAULT_RULES.find(r => r.id === c?.id && r.featureId === c?.featureId);
+        if (rule && c.pref?.statistic === FISH_DEFAULT_AVG2_STATISTICS[rule.id]) {
+          const divisor = c.pref.statistic === '结果' ? FISH_DEFAULT_RESULT_SCALE[rule.id] ?? 1 : 1;
+          c.pref = { ...c.pref, statistic: rule.statistic, threshold: rescaleThreshold(String(c.pref.threshold ?? ''), divisor), lastSuggestion: undefined }; changed = true;
+        }
+      }
+      if (changed) writePersistedStateRaw(fishCardsKey(), JSON.stringify(x));
+      writePersistedStateRaw(avgDefaultKey, '1');
     }
     return x.filter(c => c && typeof c.id === 'string' && typeof c.featureId === 'string' && typeof c.enabled === 'boolean' && c.pref && Array.isArray(c.pref.constraints) && c.featureId !== 'seller-push').slice(0, FISH_MAX_ALGORITHMS).map(c => {
       // A different formula requires a newly calibrated threshold. Never carry DSP·b's −15 into bc.
