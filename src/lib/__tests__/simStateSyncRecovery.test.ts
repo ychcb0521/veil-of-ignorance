@@ -8,7 +8,7 @@ interface PushResult { error: { message: string } | null }
 const mocks = vi.hoisted(() => {
   const upsert = vi.fn(async (_row: PushRow): Promise<PushResult> => ({ error: null }));
   const eq = vi.fn(async (): Promise<{ data: RemoteRow[]; error: null }> => ({ data: [], error: null }));
-  const select = vi.fn(() => ({ eq }));
+  const select = vi.fn(() => ({ eq, not: () => ({ eq }) }));
   const from = vi.fn(() => ({ upsert, select }));
   return { upsert, eq, select, from };
 });

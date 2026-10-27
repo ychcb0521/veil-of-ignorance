@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => {
     data: [] as Array<{ key: string; value: unknown; updated_at: string }>,
     error: null as { message: string } | null,
   }));
-  const select = vi.fn(() => ({ eq }));
+  const select = vi.fn(() => ({ eq, not: () => ({ eq }) }));
   const from = vi.fn(() => ({ upsert, select }));
   return { upsert, eq, select, from };
 });

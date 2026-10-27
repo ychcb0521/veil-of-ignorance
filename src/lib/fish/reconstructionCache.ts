@@ -8,6 +8,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { shortFishHash } from './algorithm';
 import type { FishReconstructionResult } from './reconstruction';
 import type { FishPreference } from './preferences';
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 export interface ReconstructionCard { id: string; featureId: string; enabled: boolean; pref: FishPreference }
 export interface ReconstructionCache { version: 1; key: string; result: FishReconstructionResult }
@@ -36,9 +37,9 @@ export function saveReconstructionCache(account: string | undefined, key: string
   // Keep the latest result plus one previous setting for an explicit, useful stale state.
   const previous = readReconstructionCache(account);
   const entries = previous && previous.key !== key ? [entry, previous] : [entry];
-  try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify(entries)); return true; }
+  try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify(entries)); noteAccountBlobSaved(reconstructionAccountBlob, account); return true; }
   catch {
-    try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify([entry])); return true; }
+    try { localStorage.setItem(reconstructionStorageKey(account), JSON.stringify([entry])); noteAccountBlobSaved(reconstructionAccountBlob, account); return true; }
     catch { return false; }
   }
 }
@@ -70,6 +71,8 @@ async function readDbEntries(account: string | undefined): Promise<Reconstructio
 }
 /** 从 IndexedDB 读（给了 key 只认同一套设置的那份）；读不了返回 null。 */
 export async function loadReconstructionCacheDb(account: string | undefined, key?: string): Promise<ReconstructionCache | null> {
+  // 【用户要求】2026-10-27 复原扫描结果跟账号走：先和云端对一次账，再读本机。
+  await syncAccountBlobOnLoad(reconstructionAccountBlob, account);
   try { return (await readDbEntries(account)).find(v => validEntry(v, key)) ?? null; } catch { return null; }
 }
 /** 存进 IndexedDB（最新一份 + 上一套设置的一份）；成功后删掉 localStorage 里的旧副本，腾出整站共用的空间。 */
@@ -88,6 +91,37 @@ export async function saveReconstructionCacheDb(account: string | undefined, key
       });
     } finally { db.close(); }
     try { localStorage.removeItem(reconstructionStorageKey(account)); } catch { /* 删不掉只是多占点空间 */ }
+    noteAccountBlobSaved(reconstructionAccountBlob, account);
     return true;
   } catch { return false; }
 }
+
+/** 账号云端存档：本机 IndexedDB 那份（读不到退回 localStorage 旧副本）；取回时写进 IndexedDB 并删掉旧副本。 */
+export const reconstructionAccountBlob: AccountBlobAdapter<ReconstructionCache[]> = {
+  name: 'fish-reconstruction',
+  async read(account) {
+    let entries: ReconstructionCache[] = [];
+    try { entries = await readDbEntries(account); } catch { /* 退回 localStorage */ }
+    if (!entries.length) {
+      try {
+        const raw: unknown = JSON.parse(localStorage.getItem(reconstructionStorageKey(account)) ?? '[]');
+        if (Array.isArray(raw)) entries = raw.filter(v => validEntry(v));
+      } catch { /* 没有旧副本 */ }
+    }
+    return entries.length ? entries : undefined;
+  },
+  async write(account, entries) {
+    const db = await openReconstructionDb();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+        const valid = (entries ?? []).filter(v => validEntry(v));
+        if (valid.length) store.put(valid, reconstructionStorageKey(account)); else store.delete(reconstructionStorageKey(account));
+        tx.oncomplete = () => resolve();
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+    try { localStorage.removeItem(reconstructionStorageKey(account)); } catch { /* 删不掉只是多占点空间 */ }
+  },
+  weight: entries => entries?.length ?? 0,
+};

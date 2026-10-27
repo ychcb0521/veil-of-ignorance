@@ -19,6 +19,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { mergeReplayTimelineRegistries, pruneReplayTimelineRegistry, REPLAY_TIMELINES_STORAGE_KEY } from '@/lib/replayTimeline';
 import { mergeFishLists, mergeFishTombstones, normalizeFishTombstones } from '@/lib/fish/tombstones';
 import { mergeMiningStates } from '@/lib/fish/miningState';
+import { ACCOUNT_BLOB_PREFIX } from '@/lib/accountBlobSync';
 import {
   clearPersistedStateMemoryForTests,
   getUnpersistedStateMetadata,
@@ -361,6 +362,8 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
     const { data, error } = await supabase
       .from('user_sim_state' as never)
       .select('key, value, updated_at')
+      // 大块本机数据（鱼质量、扫描结果……）由 accountBlobSync 单独对账：不下载、不写进 localStorage。
+      .not('key', 'like', `${ACCOUNT_BLOB_PREFIX}%`)
       .eq('user_id', userId);
     if (error) {
       if (isMissingSimStateTableError(error)) {
@@ -373,7 +376,7 @@ export async function hydrateSimState(userId: string): Promise<HydrateResult> {
     const rows = (data ?? []) as unknown as Array<{ key: string; value: unknown; updated_at: string }>;
     let applied = 0;
     for (const row of rows) {
-      if (EXCLUDED_KEYS.has(row.key)) continue;
+      if (EXCLUDED_KEYS.has(row.key) || row.key.startsWith(ACCOUNT_BLOB_PREFIX)) continue;
       const fullKey = storageKeyFor(row.key, userId);
       const remoteTs = new Date(row.updated_at).getTime();
       const memoryMetadata = getUnpersistedStateMetadata(fullKey);

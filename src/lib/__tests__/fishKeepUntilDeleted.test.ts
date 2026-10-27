@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 【用户要求】2026-10-20「渔部分的鱼只要没删除，就一直保留。我发现有的鱼突然就没了」
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
-const mocks=vi.hoisted(()=>{const upsert=vi.fn(async()=>({error:null}));const eq=vi.fn(async()=>({data:[] as any[],error:null}));const select=vi.fn(()=>({eq}));const from=vi.fn(()=>({upsert,select}));return {upsert,eq,select,from};});
+const mocks=vi.hoisted(()=>{const upsert=vi.fn(async()=>({error:null}));const eq=vi.fn(async()=>({data:[] as any[],error:null}));const select=vi.fn(()=>({eq,not:()=>({eq})}));const from=vi.fn(()=>({upsert,select}));return {upsert,eq,select,from};});
 vi.mock('@/integrations/supabase/client',()=>({supabase:{from:mocks.from}}));
 import {__resetSimStateSyncForTests,hydrateSimState} from '@/lib/simStateSync';
 import {loadFishSignals,saveFishSignals,recordFishDeletion,loadFishTombstones,FISH_STORAGE_KEY,FISH_DELETED_KEY} from '@/lib/fishSignals';

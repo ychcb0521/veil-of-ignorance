@@ -1,5 +1,6 @@
 import { newQualityStudy, type FishQualityStudy } from './quality';
 import { preserveQualityRepairs, stopQualityRepair } from './qualityRepair';
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 
 const DATABASE = 'veil-fish-quality-v1', STORE = 'studies';
 const keyOf = (owner?: string) => `fish-quality:${owner ?? 'anonymous'}`;
@@ -26,6 +27,8 @@ export async function loadQualityStudy(owner?: string): Promise<{ study: FishQua
   return { ...loaded, study: stopQualityRepair(loaded.study, Date.now()) };
 }
 async function loadQualityStudyRaw(owner?: string): Promise<{ study: FishQualityStudy; warning?: string }> {
+  // 【用户要求】2026-10-27 鱼质量研究跟账号走：先和云端对一次账（换电脑登录也能看到），再读本机。
+  await syncAccountBlobOnLoad(qualityAccountBlob, owner);
   // A detail link can open immediately after the evaluator unmounts and flushes.
   await writes.get(keyOf(owner));
   let fallback: unknown;
@@ -72,7 +75,49 @@ export function saveQualityStudy(owner: string | undefined, study: FishQualitySt
     }
   });
   writes.set(key, task);
+  void task.then(ok => { if (ok) noteAccountBlobSaved(qualityAccountBlob, owner); });
   void task.then(ok => { if (ok && typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('fish-quality-saved', { detail: { owner, repair: copy.campaignRepair && { id: copy.campaignRepair.id, state: copy.campaignRepair.state } } })); });
   void task.finally(() => { if (writes.get(key) === task) writes.delete(key); });
   return task;
 }
+
+/** 账号云端存档：本机那份原样上传；取回云端时排进同一条写队列，绝不和页面的保存交错。 */
+export const qualityAccountBlob: AccountBlobAdapter<FishQualityStudy> = {
+  name: 'fish-quality',
+  async read(owner) {
+    const key = keyOf(owner);
+    await writes.get(key);
+    let fallback: unknown;
+    try { fallback = JSON.parse(localStorage.getItem(key) ?? 'null'); } catch { /* 只看 IndexedDB */ }
+    try {
+      const db = await open();
+      try {
+        const stored = await new Promise<unknown>((resolve, reject) => {
+          const req = db.transaction(STORE).objectStore(STORE).get(key);
+          req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+        });
+        if (valid(fallback)) return preserveQualityRepairs(valid(stored) ? stored : undefined, fallback);
+        return valid(stored) ? stored : undefined;
+      } finally { db.close(); }
+    } catch { return valid(fallback) ? fallback : undefined; }
+  },
+  write(owner, study) {
+    const key = keyOf(owner);
+    const task = (writes.get(key) ?? Promise.resolve(true)).then(async () => {
+      const db = await open();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+          if (study && valid(study)) store.put(study, key); else store.delete(key);
+          tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+      } finally { db.close(); }
+      try { localStorage.removeItem(key); } catch { /* optional cache cleanup */ }
+      return true;
+    });
+    writes.set(key, task);
+    void task.finally(() => { if (writes.get(key) === task) writes.delete(key); }).catch(() => {});
+    return task.then(() => undefined);
+  },
+  weight: study => study ? study.samples.length + study.results.length + (study.campaignRuns?.length ?? 0) : 0,
+};

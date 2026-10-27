@@ -1,4 +1,8 @@
-/** Raw scan conclusions stay on this browser; never use the cloud state store. */
+/**
+ * Raw scan conclusions never go through the generic cloud state store (it mirrors into the ~5 MB localStorage).
+ * 【用户要求】2026-10-27 扫描结果也跟账号走：经 accountBlobSync 压缩后存到账号（不进 localStorage），换电脑登录也能看到。
+ */
+import { noteAccountBlobSaved, syncAccountBlobOnLoad, type AccountBlobAdapter } from '@/lib/accountBlobSync';
 import { compileFishProgram, type FishAlgorithmSettings } from './algorithm';
 import type { DeepDigFeatureDef } from '../deepDig/features';
 import type { FishCombinationRound, FishProgress } from '../fishScanner';
@@ -57,9 +61,11 @@ export function saveFishSession(owner: string | undefined, session: FishSession 
   };
   const task = queue.then(write, write);
   queue = task.catch(() => {});
+  void task.then(() => noteAccountBlobSaved(fishSessionAccountBlob, owner), () => {});
   return task;
 }
 export async function loadFishSession(owner: string | undefined): Promise<FishSession | null> {
+  await syncAccountBlobOnLoad(fishSessionAccountBlob, owner);
   await queue;
   const database = await db();
   try {
@@ -81,3 +87,38 @@ export async function loadFishSession(owner: string | undefined): Promise<FishSe
     return {...value,...view as Omit<FishSession,'data'>,data,needsRescan};
   } finally { database.close(); }
 }
+
+interface StoredSessionPair { payload: StoredSession; view: unknown }
+const readPair = (request: IDBRequest) => new Promise<unknown>((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
+/** 账号云端存档：存的是本机库里的原始两条（结果 + 视图），取回时排进同一条写队列。 */
+export const fishSessionAccountBlob: AccountBlobAdapter<StoredSessionPair> = {
+  name: 'fish-session',
+  async read(owner) {
+    await queue;
+    const database = await db();
+    try {
+      const store = database.transaction('rounds').objectStore('rounds');
+      const [payload, view] = await Promise.all([readPair(store.get(owner)), readPair(store.get([owner, 'view']))]);
+      const value = payload as StoredSession | undefined;
+      return value && value.version === 1 ? { payload: value, view } : undefined;
+    } finally { database.close(); }
+  },
+  write(owner, pair) {
+    const write = async () => {
+      const database = await db();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tx = database.transaction('rounds', 'readwrite'), store = tx.objectStore('rounds');
+          if (pair?.payload?.version === 1) { store.put(pair.payload, owner); store.put(pair.view ?? null, [owner, 'view']); }
+          else { store.delete(owner); store.delete([owner, 'view']); }
+          tx.oncomplete = () => { savedRounds.delete(owner); resolve(); };
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+      } finally { database.close(); }
+    };
+    const task = queue.then(write, write);
+    queue = task.catch(() => {});
+    return task;
+  },
+  weight: pair => pair?.payload ? Math.max(1, pair.payload.data.results.length) : 0,
+};
