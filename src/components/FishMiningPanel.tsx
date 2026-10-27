@@ -38,7 +38,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref }: { mining: F
           <div className="space-y-2.5">
             <div className="space-y-1"><p className="font-medium">当前进度</p><p className="font-mono tabular-nums text-muted-foreground">已挖 {s.mined} / {s.target} 条 · 已扫 {s.anchorsDone} 档{s.lastAnchorMs != null ? ` · 扫到 ${short(s.lastAnchorMs)}` : ''}</p><p className={hasError ? 'text-destructive' : 'text-muted-foreground'}>{status}</p></div>
             <div className="space-y-1 border-t border-border/50 pt-2.5"><p className="font-medium">默认算法 · 并集</p><p className="text-muted-foreground">{rules.map(ruleText).join(' · ')}</p><p className="text-muted-foreground">从 {short(s.startMs)} 起每 12 小时一档</p></div>
-            <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：挖到的鱼会入舱并加入评估，在上方「固定卖出方案」里选一套后，才会按它比较各探测算法。</p>}<p>挖到的鱼直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选，按固定的卖出方案评估。</p><p>同一段持续的信号只记第一次能发现的那一档，按那一档的捕捞时刻买入。捕捞时挖掘自动让路，空闲后接着挖。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
+            <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：挖到的鱼会入舱并加入评估，在卖出列的设置中固定一套方案后，才会按它比较各探测算法。</p>}<p>挖到的鱼直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选，按固定的卖出方案评估。</p><p>同一段持续的信号只记第一次能发现的那一档，按那一档的捕捞时刻买入。捕捞时挖掘自动让路，空闲后接着挖。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
           </div>
         </PopoverContent></Popover>
       </div>

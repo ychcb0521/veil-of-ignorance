@@ -21,7 +21,7 @@ it('allows a veto-only sell plan to run and be fixed for detector comparison wit
  fireEvent.click(editor);fireEvent.click(screen.getByRole('button',{name:'固定此方案，比较探测算法'}));
  expect(s.selectSell).toHaveBeenCalledWith(plan.id);expect(screen.queryByRole('button',{name:'清除门槛'})).toBeNull();
  fireEvent.click(editor);
- expect(within(screen.getByLabelText('固定卖出方案')).getByRole('option',{name:'状态 S 原始值 仅一票否决'})).toBeInTheDocument();
+ expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
 it('defaults to one row per symbol/time, toggles detector details from the header and preserves partial and bulk selection',()=>{
  const s=state(), ids=s.study.selectedRowIds!;
@@ -510,5 +510,5 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   expect(screen.getByTestId('quality-mode')).toHaveTextContent('卖出与探测');
   expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
   expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
-  expect(screen.getByLabelText('固定卖出方案')).toBeInTheDocument();
+  expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
