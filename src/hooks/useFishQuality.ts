@@ -173,9 +173,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change]);
   // 各方案独立过滤，买入条件只筛选已有结果；持仓否决变化才重新评估卖出。
-  const setFilters = useCallback((planId: string, filters: QualityBuyFilter[], vetoes: QualityHoldingVeto[]) => {
+  // 【用户要求】2026-10-27 持仓否决归「持仓监测」的条件设置：买前过滤只改买入条件（vetoes 不传 = 保持原样）。
+  const setFilters = useCallback((planId: string, filters: QualityBuyFilter[], nextVetoes?: QualityHoldingVeto[]) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
     if (!plan) return;
+    const vetoes = nextVetoes ?? plan.holdingVetoes ?? [];
     const sellChanged = JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) !== JSON.stringify(holdingVetoIdentity(vetoes));
     change(s => {
       const saved = materializePlanBuyFilters(sellChanged ? archiveQualityStudy(s) : s);
@@ -186,6 +188,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const epoch = generation.current, revision = filterRevision.current;
     setTimeout(() => { if (readyRef.current && epoch === generation.current && revision === filterRevision.current) { cancelFilter(); void startFilter(); } }, 500);
   }, [change, start, restart, defer, cancelFilter, startFilter]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setObserveHours, selectSell, setSelectedRows, setPriority, setFilters };
+  /** 只改某套卖出方案的持仓一票否决：买入条件和过滤读数不动；变了就立刻按新设置重算卖出（正在跑的旧批次直接作废）。 */
+  const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[]) => {
+    const plan = current.current.sellPlans?.find(p => p.id === planId);
+    if (!plan || JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) === JSON.stringify(holdingVetoIdentity(vetoes))) return;
+    change(s => {
+      const saved = materializePlanBuyFilters(archiveQualityStudy(s));
+      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes) } : p) };
+    });
+    defer(() => { if (controller.current) void restart(); else void start(); });
+  }, [change, start, restart, defer]);
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setObserveHours, selectSell, setSelectedRows, setPriority, setFilters, setHoldingVetoes };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

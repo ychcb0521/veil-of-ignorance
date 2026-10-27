@@ -10,7 +10,7 @@ function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
-  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn() };
+  return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn() };
 }
 afterEach(cleanup);
 it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
@@ -120,6 +120,8 @@ it('keeps monitoring details behind help and removes the observation settings co
   fireEvent.click(screen.getByRole('button', { name: '持仓监测说明' }));
   expect(screen.getByText('100 USDT · 1 倍')).toBeVisible();
   expect(s.setObserveHours).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '持仓监测条件' }));
+  expect(screen.getByTestId('quality-monitor-editor')).toBeVisible(); expect(screen.queryByLabelText('鱼质量观察小时')).toBeNull();
   expect(screen.queryByLabelText('自动跟踪新鱼及更新收益')).toBeNull();
 });
 
@@ -240,14 +242,15 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state(); render(<FishQuality state={s}/>);
-  fireEvent.click(screen.getByRole('button', { name: '过滤与持仓否决' }));
+  fireEvent.click(screen.getByRole('button', { name: '买入过滤条件' }));
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
+  expect(screen.queryByTestId('quality-holding-veto-editor')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
   fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
-  expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id, [expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })],[]);
+  expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id, [expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
@@ -356,13 +359,13 @@ it('shift-click selects (or clears) the whole run of rows between the last click
   expect(boxes()[0]).toHaveAttribute('title', '按住 Shift 点另一行可连续选择');
 });
 it('provides two unconfigured drawdown vetoes, validates the user threshold, and can add an account indicator veto', () => {
- const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'过滤与持仓否决'}));
+ const s=state();render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'持仓监测条件'}));
  const editor=screen.getByTestId('quality-holding-veto-editor');
  expect(within(editor).getByLabelText('持仓否决 1 指标')).toHaveValue('static-drawdown');
  expect(within(editor).getByLabelText('持仓否决 2 指标')).toHaveValue('dynamic-drawdown');
  expect(within(editor).getByLabelText('持仓否决 1 阈值')).toHaveValue(null);expect(within(editor).getByLabelText('启用持仓否决 1')).not.toBeChecked();
  fireEvent.click(within(editor).getByLabelText('启用持仓否决 1'));fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
- expect(screen.getByRole('alert')).toHaveTextContent('填写有限数字');expect(s.setFilters).not.toHaveBeenCalled();
+ expect(screen.getByRole('alert')).toHaveTextContent('填写有限数字');expect(s.setHoldingVetoes).not.toHaveBeenCalled();
  fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'-10'}});fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
  expect(screen.getByRole('alert')).toHaveTextContent('大于 0');
  fireEvent.change(within(editor).getByLabelText('持仓否决 1 阈值'),{target:{value:'12'}});
@@ -371,19 +374,20 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 方向'),{target:{value:'<='}});
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 阈值'),{target:{value:'.4'}});fireEvent.click(within(editor).getByLabelText('启用持仓否决 3'));
  fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
- expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id,[],[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
+ expect(s.setFilters).not.toHaveBeenCalled();expect(s.setObserveHours).not.toHaveBeenCalled();
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith(s.study.sellPlans![0].id,[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
 });
 it('shows the effective decimal threshold for duplicate static vetoes without silently enabling a dynamic veto',async()=>{
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
  const s=state();s.study.sellPlans![0].holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',7.7),makeQualityHoldingVeto('static-drawdown','>=',30)];
- render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'过滤与持仓否决'}));
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'持仓监测条件'}));
  const summary=screen.getByTestId('quality-veto-risk-summary');
  expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%（同类条件中较小阈值先触发）；动态回撤否决未启用');
- expect(s.setFilters).not.toHaveBeenCalled();
+ expect(s.setHoldingVetoes).not.toHaveBeenCalled();
  fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'dynamic-drawdown'}});
  expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%；动态回撤 ≥ 30%');
  fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
- expect(s.setFilters).toHaveBeenCalledWith('sell-state-raw',[],[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})]);
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})]);
 });
 // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
@@ -434,17 +438,41 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」筛选$/ }));
-  expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })], expect.any(Array));
+  expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })]);
 });
 
-it('offers restart during a sell run, uses a separate action and requires a selected row', () => {
+// 【用户要求】2026-10-27 把「重新开始」做进「开始监测」：主按钮开始 / 暂停，▾ 里「从头重新计算」
+it('folds restart into the start button menu, during a run too, and requires a selected row', () => {
   const s = state(); s.running = true; s.progress = { done: 3, total: 6, current: 'AAAUSDT' };
   const view = render(<FishQuality state={s}/>);
-  const restart = screen.getByRole('button', { name: '重新开始' });
-  expect(restart).toBeEnabled();
-  fireEvent.click(restart); expect(s.restart).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '重新开始' })).toBeNull();
+  const more = screen.getByRole('button', { name: '开始监测的其他方式' });
+  expect(more).toBeEnabled();
+  fireEvent.click(more);
+  expect(screen.getByText(/先停止当前批次/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '从头重新计算' })); expect(s.restart).toHaveBeenCalledOnce(); expect(s.start).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: '从头重新计算' })).toBeNull();
+  s.running = false; view.rerender(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button', { name: '开始监测' })); expect(s.start).toHaveBeenCalledOnce(); expect(s.restart).toHaveBeenCalledOnce();
   s.study = { ...s.study, selectedRowIds: [] }; view.rerender(<FishQuality state={s}/>);
-  expect(screen.getByRole('button', { name: '重新开始' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '开始监测的其他方式' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '开始监测' })).toBeDisabled();
+});
+// 【用户要求】2026-10-27「持仓一票否决卖出其实是隶属于持仓监测模块」
+it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
+  const { makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
+  const s = state(); s.study.sellPlans![1].holdingVetoes = [makeQualityHoldingVeto('dynamic-drawdown', '>=', 20)];
+  render(<FishQuality state={s}/>);
+  const monitor = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
+  fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.getByText('1 条持仓否决')).toBeVisible();
+  fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测说明' })); expect(screen.queryByText('1 条持仓否决')).toBeNull();
+  fireEvent.click(within(filter).getByRole('button', { name: '买前过滤说明' })); expect(screen.getByRole('dialog', { name: '买前过滤说明' })).not.toHaveTextContent('否决');
+  fireEvent.click(within(filter).getByRole('button', { name: '买前过滤说明' }));
+  fireEvent.click(within(monitor).getByRole('button', { name: '持仓监测条件' }));
+  const tab = screen.getByRole('tab', { name: `${s.study.sellPlans![1].label} 1` });
+  fireEvent.click(tab);
+  expect(screen.getByTestId('quality-monitor-editor')).toHaveTextContent(`持仓监测 · ${s.study.sellPlans![1].label}`);
+  expect(screen.getByLabelText('持仓否决 1 阈值')).toHaveValue(20);
 });
 // 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
 it('picks one or several detectors straight from the detector header, keeps the toolbar in sync and clears with 全部', () => {
@@ -533,11 +561,12 @@ it('keeps filtering and monitoring in workflow order with controls on the left',
   render(<FishQuality state={s}/>);
   const group = screen.getByRole('region', { name: '持仓监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('持仓监测');
-  for (const name of ['重新开始', '暂停监测']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
+  for (const name of ['暂停监测', '开始监测的其他方式', '持仓监测条件']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
   expect(within(group).getByRole('status')).toHaveTextContent('监测中2333 / 2360');
   expect(within(group).queryByRole('button', { name: '开始监测' })).toBeNull();
-  expect(within(group).queryByRole('button', { name: '过滤与持仓否决' })).toBeNull();
-  expect(within(filter).getByRole('button', { name: '过滤与持仓否决' })).toBeInTheDocument();
+  expect(within(group).queryByRole('button', { name: '买入过滤条件' })).toBeNull();
+  expect(within(filter).getByRole('button', { name: '买入过滤条件' })).toBeInTheDocument();
+  expect(within(filter).queryByRole('button', { name: '持仓监测条件' })).toBeNull();
   expect(filter.nextElementSibling).toBe(group);
   expect(group.parentElement).not.toHaveClass('justify-between');
 });
