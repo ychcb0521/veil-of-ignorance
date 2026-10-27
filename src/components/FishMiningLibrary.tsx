@@ -10,7 +10,7 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 const date = (t: number | null | undefined) => t == null ? '—' : formatUTC8(t);
 const short = (t: number) => formatUTC8(t).slice(0, 16);
 const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed-z': 'az', bss: 'BSS' };
-const runText = (run: FishMiningRun) => run.rules.map(r => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`).join(' ∪ ');
+const runText = (run: FishMiningRun) => run.rules.map(r => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`).join(run.combination === 'and' ? ' ∩ ' : ' ∪ ');
 const reading = (s: TradeSignal) => s.fish && Number.isFinite(s.fish.average) ? String(+s.fish.average.toPrecision(4)) : '—';
 
 export function FishMiningLibrary({ account, holdKeys, onJump, canJump }: { account?: string; holdKeys?: () => ReadonlySet<string>; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {

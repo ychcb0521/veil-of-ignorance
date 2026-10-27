@@ -6,17 +6,13 @@ import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import { readFishPreference, withFishDefaultThreshold, type FishPreference } from './preferences';
 import { FISH_MAX_ALGORITHMS } from './shared';
+import { FISH_DEFAULT_RULES } from './defaultRules';
+export { FISH_DEFAULT_RULES } from './defaultRules';
 
 export const fishCardsKey = () => `${getUserPrefix()}fish-cards.v1`;
 const cleanPreference = (p: FishPreference): FishPreference => ({ ...p, constraints: [] });
 // 2026-10-27 最新截图：四条规则全部启用，交集；avg₂ 与 avg 是独立的卡片。
-export const FISH_DEFAULT_RULES = [
-  { id: 'first', featureId: 'cbi2', statistic: '结果', threshold: '0.04' },
-  { id: 'default-cba', featureId: 'cba', statistic: '结果', threshold: '8' },
-  { id: 'default-cbi2-avg', featureId: 'cbi2', statistic: 'avg_CBI2', threshold: '0.04' },
-  { id: 'default-cba-avg', featureId: 'cba', statistic: 'avg_CBA', threshold: '8' },
-] as const;
-/** 历史五项配置：仅供旧卡迁移和独立的批量挖掘默认条件使用。 */
+/** 历史五项配置：仅供旧卡迁移使用，不再用于捕捞或批量挖掘默认条件。 */
 export const LEGACY_FISH_DEFAULT_RULES = [
   { id: 'first', featureId: 'cbi2', statistic: 'avg_CBI2', threshold: '0.04' },
   { id: 'default-state-avg2', featureId: 'state', statistic: 'avg_state', threshold: '0.6' },
@@ -30,8 +26,8 @@ const FISH_DEFAULT_AVG2_STATISTICS: Record<string, string> = { first: '结果', 
 const FISH_DEFAULT_RESULT_SCALE: Record<string, number> = { 'default-drift-speed-z': 100 };
 const rescaleThreshold = (threshold: string, divisor: number) => { const n = Number(threshold); return divisor === 1 || !threshold.trim() || !Number.isFinite(n) ? threshold : String(+(n / divisor).toPrecision(12)); };
 export const FISH_DEFAULT_ALGORITHMS:readonly string[]=FISH_DEFAULT_RULES.map(rule=>rule.featureId);
-// v4：首次加载套用截图中的四项；随后手动编辑、增删与开关照常保存。
-export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v4`;
+// v5：与挖掘共用明确命名的四项序列；首次替换旧设置，随后手动编辑照常保存。
+export const fishDefaultsKey = () => `${getUserPrefix()}fish-default-preset.v5`;
 export const fishCombinationKey = () => `${getUserPrefix()}fish-combination.v1`;
 export const readFishCombination = (): 'and' | 'or' => readPersistedStateRaw(fishCombinationKey()) === 'or' ? 'or' : 'and';
 

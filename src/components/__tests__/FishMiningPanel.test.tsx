@@ -18,7 +18,7 @@ it('explains the plan, starts mining and edits the target', () => {
   fireEvent.click(screen.getByRole('button', { name: '挖掘说明与进度' }));
   expect(screen.getByRole('dialog', { name: '挖掘说明与进度' })).toBeVisible();
   expect(screen.getByText('从 2026-04-01 00:00 起每 12 小时一档')).toBeVisible();
-  expect(screen.getByText(/CBI-2 avg > 0.04 · S avg > 0.6 · CBA avg > 8 · az avg > 0.15 · BSS avg > 0.12/)).toBeVisible();
+  expect(screen.getByText(/CBI-2 avg₂ > 0.04 · CBA avg₂ > 8 · CBI-2 avg > 0.04 · CBA avg > 8/)).toBeVisible();
   expect(screen.getByText('已挖 0 / 1000 条 · 已扫 0 档')).toBeVisible();
   expect(screen.getByText(/还没固定卖出方案/)).toBeVisible();
   expect(screen.getByRole('link', { name: /在交易战役查看/ })).toHaveAttribute('href', '/journal/campaigns?section=detect');

@@ -15,6 +15,8 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 
 export interface FishMiningRun {
   id: string; signature: string; rules: FishMiningRule[]; selection?: FishMiningState['selection'];
+  /** 旧记录未填写时仍按原来的并集解释。 */
+  combination?: 'and' | 'or';
   startMs: number; stepMs: number; firstAt: number; updatedAt: number;
 }
 export interface FishMiningAnchor {
@@ -44,13 +46,14 @@ const runSignature = (s: Pick<FishMiningState, 'rules' | 'selection' | 'startMs'
   [...s.rules].map(r => [r.featureId, r.statistic, r.threshold]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
   s.selection ? [[...s.selection.exchanges].sort(), !!s.selection.includeDuplicates, !!s.selection.includeUsStocks] : null, s.startMs, s.stepMs,
 ]);
-function withRun(library: FishMiningLibrary, state: FishMiningState, at: number): { library: FishMiningLibrary; run: FishMiningRun } {
-  const signature = runSignature(state), existing = library.runs.find(r => r.signature === signature);
+function withRun(library: FishMiningLibrary, state: FishMiningState, at: number, combination: 'and'|'or' = 'and'): { library: FishMiningLibrary; run: FishMiningRun } {
+  // Keep legacy union signatures stable and never merge an intersection into a union run.
+  const signature = runSignature(state) + (combination === 'and' ? '|and' : ''), existing = library.runs.find(r => r.signature === signature);
   if (existing) {
     const run = { ...existing, updatedAt: Math.max(existing.updatedAt, at) };
     return { run, library: { ...library, runs: library.runs.map(r => r.id === run.id ? run : r) } };
   }
-  const run: FishMiningRun = { id: `mine-run-${shortFishHash(signature)}`, signature, rules: structuredClone(state.rules), ...(state.selection ? { selection: structuredClone(state.selection) } : {}),
+  const run: FishMiningRun = { id: `mine-run-${shortFishHash(signature)}`, signature, combination, rules: structuredClone(state.rules), ...(state.selection ? { selection: structuredClone(state.selection) } : {}),
     startMs: state.startMs, stepMs: state.stepMs, firstAt: at, updatedAt: at };
   return { run, library: { ...library, runs: [...library.runs, run] } };
 }
@@ -58,8 +61,8 @@ const recordId = (runId: string, catchKey: string) => `${runId}|${catchKey}`;
 const anchorId = (runId: string, anchorMs: number) => `${runId}|${anchorMs}`;
 
 /** 一档扫完：记下扫描结果和新挖到的信号。found = 这一档扫到的全部信号数，added = 真正入舱的那些。 */
-export function recordMinedAnchor(input: FishMiningLibrary, state: FishMiningState, anchorMs: number, found: number, added: readonly TradeSignal[], at: number): FishMiningLibrary {
-  const { library, run } = withRun(input, state, at);
+export function recordMinedAnchor(input: FishMiningLibrary, state: FishMiningState, anchorMs: number, found: number, added: readonly TradeSignal[], at: number, combination:'and'|'or' = 'and'): FishMiningLibrary {
+  const { library, run } = withRun(input, state, at, combination);
   const records = added.map(signal => {
     const catchKey = fishCatchKey(signal);
     return { id: recordId(run.id, catchKey), runId: run.id, anchorMs, catchKey, signal: compactMinedSignal(signal), firstSavedAt: at, updatedAt: at } satisfies FishMiningRecord;
@@ -86,13 +89,20 @@ export function adoptMinedFish(library: FishMiningLibrary, state: FishMiningStat
   const mined = signals.filter(s => s.mined && Number.isFinite(s.mined.anchorMs));
   let next: FishMiningLibrary = { ...library, adoptedHold: true };
   if (!mined.length) return next;
-  const byAnchor = new Map<number, TradeSignal[]>();
-  for (const s of mined) { const list = byAnchor.get(s.mined!.anchorMs) ?? []; list.push(s); byAnchor.set(s.mined!.anchorMs, list); }
-  for (const [anchorMs, list] of [...byAnchor].sort((a, b) => a[0] - b[0])) {
+  const byAnchor = new Map<string, {anchorMs:number;rules:FishMiningRule[];combination:'and'|'or';list:TradeSignal[]}>();
+  for (const s of mined) {
+    const snapshots=s.fish?.algorithms?.length?s.fish.algorithms:s.fish?[s.fish]:[];
+    // Backfill using each historical signal's snapshot, never relabel old fish with today's preset.
+    const rules=snapshots.length?snapshots.map((r,i)=>({id:`historical-${i}`,featureId:r.featureId??'cbi2',statistic:r.statistic??'结果',threshold:String(r.threshold)})):state.rules;
+    const combination=s.fish?.combination??(s.fish?.algorithms?.length?'and':'or'),anchorMs=s.mined!.anchorMs,key=JSON.stringify([anchorMs,rules,combination]);
+    const group=byAnchor.get(key)??{anchorMs,rules,combination,list:[]};group.list.push(s);byAnchor.set(key,group);
+  }
+  for (const {anchorMs,rules,combination,list} of [...byAnchor.values()].sort((a,b)=>a.anchorMs-b.anchorMs)) {
     const when = list.reduce((t, s) => Math.max(t, s.caughtAt ?? 0), 0) || at;
-    const { library: withAnchor, run } = withRun(next, state, when);
+    const historical={...state,rules};
+    const { library: withAnchor, run } = withRun(next, historical, when, combination);
     if (withAnchor.anchors.some(a => a.id === anchorId(run.id, anchorMs))) { next = withAnchor; continue; }
-    next = recordMinedAnchor(withAnchor, state, anchorMs, list.length, list, when);
+    next = recordMinedAnchor(withAnchor, historical, anchorMs, list.length, list, when, combination);
   }
   return next;
 }

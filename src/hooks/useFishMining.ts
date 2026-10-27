@@ -73,7 +73,7 @@ export function useFishMining(o: {
     const scope=(s.selection as FishScanSelection|undefined)??latest.current.selection;
     const unsupported=scope.exchanges.find(exchange=>!AUDITED_EXCHANGES.includes(exchange));
     const missing=s.rules.find(rule=>!latest.current.defs.some(def=>def.id===rule.featureId));
-    const built = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: 'or', selection: scope, time: '' });
+    const built = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: 'and', selection: scope, time: '' });
     if (built.error !== undefined) {
       const failed=miningFailureState(s,built.error,now,'configuration');setState(failed);setWaiting('配置需修正，修正后点「重新检查」');
       void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now));
@@ -147,7 +147,7 @@ export function useFishMining(o: {
   },[setState]);
   const resetConfiguration=useCallback(()=>{
     if(runningRef.current)return;const s=load(latest.current.signalsRef.current);
-    const rules=currentDefaultRules().filter(rule=>latest.current.defs.some(def=>def.id===rule.featureId));
+    const rules=currentDefaultRules();
     setState({...s,rules,selection:structuredClone(latest.current.selection),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);

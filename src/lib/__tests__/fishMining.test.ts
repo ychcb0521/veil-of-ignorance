@@ -1,6 +1,8 @@
 // 【用户要求】2026-10-26 比较探测：默认算法从 2026-04-01 00:00 起每半天挖一档，先挖 1000 条，持续挖掘；入鱼舱与鱼质量
 import { beforeEach, expect, it } from 'vitest';
 import { acceptMinedAnchor, currentDefaultRules, mergeMiningStates, miningCards, miningDueAnchor, newMiningState, readMiningState, reconcileMiningWithFish, saveMiningState, MINING_START_MS, MINING_STEP_MS, type FishMiningState } from '@/lib/fish/mining';
+import { LEGACY_FISH_DEFAULT_RULES } from '@/lib/fish/cards';
+import { normalizeMiningState } from '@/lib/fish/miningState';
 import { fishCatchKey } from '@/lib/fish/records';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -19,12 +21,12 @@ it('starts at 2026-04-01 00:00 UTC+8, steps half a day and targets 1000 signals 
   expect(miningDueAnchor(on, MINING_START_MS)).toBe(MINING_START_MS);
   expect(miningDueAnchor({ ...on, mined: 1000 }, Date.now())).toBeNull(); // 到目标就停
 });
-it('freezes the current default rules as enabled union cards', () => {
+it('uses the four shared explicit series as enabled cards', () => {
   const rules = currentDefaultRules();
-  expect(rules.map(r => r.featureId)).toEqual(['cbi2', 'state', 'cba', 'drift-speed-z', 'bss']);
+  expect(rules.map(r => r.featureId)).toEqual(['cbi2', 'cba', 'cbi2', 'cba']);
   const cards = miningCards(rules);
   expect(cards.every(c => c.enabled && c.pref.direction === '>')).toBe(true);
-  expect(cards[1].pref).toMatchObject({ statistic: 'avg_state', threshold: '0.6' });
+  expect(cards.map(c=>[c.pref.statistic,c.pref.threshold])).toEqual([['avg_CBI2_2','0.04'],['avg_CBA_2','8'],['avg_CBI2','0.04'],['avg_CBA','8']]);
 });
 it('stores each anchor as cabin records (not fresh), keeps only the first anchor of a continuing signal, and advances the cursor', () => {
   const s = { ...newMiningState(), enabled: true }, A = MINING_START_MS, B = A + MINING_STEP_MS;
@@ -85,7 +87,7 @@ it('resolves the documented old DSP a/az naming mismatch without changing formul
  const {fishFeatureDefinitions}=await import('@/lib/fish/features');
  const {resolveMiningRuleAliases}=await import('@/lib/fish/mining');
  const old={...DRIFT_SPEED_Z_DEF,formula:DRIFT_SPEED_Z_DEF.formula.replace('az = ema','a = ema')};
- const prepared=fishFeatureDefinitions([old]),before=JSON.stringify(prepared),rules=currentDefaultRules();
+ const prepared=fishFeatureDefinitions([old]),before=JSON.stringify(prepared),rules=LEGACY_FISH_DEFAULT_RULES.map(r=>({...r}));
  const fixed=resolveMiningRuleAliases(rules,prepared);
  expect(fixed.rules[3]).toMatchObject({featureId:'drift-speed-z',statistic:'avg_a',threshold:'0.15'});
  expect(fixed.repairs).toEqual([expect.stringContaining('算法 4')]);
@@ -93,4 +95,22 @@ it('resolves the documented old DSP a/az naming mismatch without changing formul
  const custom=fishFeatureDefinitions([{...old,formula:old.formula+'\navg_az = avg(a, 48)'}]);
  expect(resolveMiningRuleAliases(rules,custom).repairs).toEqual([]);
  expect(resolveMiningRuleAliases(rules,fishFeatureDefinitions([DRIFT_SPEED_Z_DEF])).repairs).toEqual([]);
+});
+
+
+it('retires all saved old mining requirements once, preserving progress, pause, scope and archived keys',()=>{
+ const old={...newMiningState(),presetRevision:undefined,enabled:false,cursorMs:MINING_START_MS+93*MINING_STEP_MS,anchorsDone:93,mined:220,minedKeys:['historical'],target:500,
+  rules:LEGACY_FISH_DEFAULT_RULES.map(r=>({...r})),selection:{exchanges:['binance'],includeDuplicates:false},errorKind:'configuration' as const,lastError:'算法 4 统计量已不存在',retryCount:4};
+ const upgraded=normalizeMiningState(old)!;
+ expect(upgraded.rules).toEqual(currentDefaultRules());
+ expect(upgraded).toMatchObject({enabled:false,cursorMs:old.cursorMs,anchorsDone:93,mined:220,minedKeys:['historical'],target:500,selection:old.selection,lastError:'',retryCount:0});
+ saveMiningState(old);expect(readMiningState().rules).toEqual(currentDefaultRules());
+ const edited={...readMiningState(),rules:[{...currentDefaultRules()[0],threshold:'0.06'}]};saveMiningState(edited);
+ expect(readMiningState().rules).toEqual(edited.rules);
+ const staleCloud={...old,savedAt:Date.now()+1000};
+ expect((mergeMiningStates(edited,staleCloud) as FishMiningState).rules).toEqual(currentDefaultRules());
+});
+it('does not drop a network cooldown while upgrading old requirements',()=>{
+ const state=normalizeMiningState({...newMiningState(),presetRevision:undefined,errorKind:'transient',lastError:'网络中断',retryAt:12345,retryCount:3})!;
+ expect(state.rules).toEqual(currentDefaultRules());expect(state).toMatchObject({lastError:'网络中断',retryAt:12345,retryCount:3});
 });

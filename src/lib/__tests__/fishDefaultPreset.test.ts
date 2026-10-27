@@ -14,7 +14,7 @@ beforeEach(() => localStorage.clear());
 it('uses four enabled cards, intersection and the exact chart series before the panel opens', () => {
   const cards = loadFishCardsForScan(available);
   expect(cards.map(c=>[c.featureId,c.pref.statistic,c.pref.direction,c.pref.threshold])).toEqual([
-    ['cbi2','结果','>','0.04'], ['cba','结果','>','8'],
+    ['cbi2','avg_CBI2_2','>','0.04'], ['cba','avg_CBA_2','>','8'],
     ['cbi2','avg_CBI2','>','0.04'], ['cba','avg_CBA','>','8'],
   ]);
   expect(new Set(cards.map(c=>c.id)).size).toBe(4);
@@ -27,7 +27,7 @@ it('uses four enabled cards, intersection and the exact chart series before the 
   expect(new Set(compiled.plans.map(p=>p.algorithmKey)).size).toBe(4);
 });
 
-it.each(['v2','v3'])('upgrades an existing %s preset once, backs it up, and keeps subsequent manual changes', version => {
+it.each(['v2','v3','v4'])('upgrades an existing %s preset once, backs it up, and keeps subsequent manual changes', version => {
   const old = [{ id:'first',featureId:'state',enabled:false,pref:{statistic:'avg_state',direction:'<',threshold:'0.65',constraints:[]} }];
   const raw = JSON.stringify(old);
   localStorage.setItem(fishCardsKey(),raw);
@@ -44,7 +44,7 @@ it.each(['v2','v3'])('upgrades an existing %s preset once, backs it up, and keep
   expect(fishDefaultCards(FISH_DEFAULT_ALGORITHMS,available)).toEqual(edited);
   expect(loadFishCardsForScan(available)).toEqual(edited);
   expect(readFishCombination()).toBe('or');
-  expect(readFishCards()[0].pref.statistic).toBe('结果'); // old avg migration must not undo avg₂
+  expect(readFishCards()[0].pref.statistic).toBe('avg_CBI2_2'); // old avg migration must not undo avg₂
   expect(JSON.parse(localStorage.getItem(fishDefaultsKey()+'.previous')!).cards).toBe(raw);
 });
 
@@ -68,7 +68,7 @@ it('keeps four defaults plus 46 additions at the limit, without restoring delete
 
 it('skips unavailable features for both repeated slots without substituting another algorithm', () => {
   const onlyCBI2 = available.filter(id=>id!=='cba');
-  expect(loadFishCardsForScan(onlyCBI2).map(c=>[c.featureId,c.pref.statistic])).toEqual([['cbi2','结果'],['cbi2','avg_CBI2']]);
+  expect(loadFishCardsForScan(onlyCBI2).map(c=>[c.featureId,c.pref.statistic])).toEqual([['cbi2','avg_CBI2_2'],['cbi2','avg_CBI2']]);
 });
 
 it('does not turn an explicitly empty or retired capture set into a live scan', () => {
@@ -100,7 +100,7 @@ it('keeps chart preparation for nondefault manual algorithms and preserves accou
   const before=JSON.stringify(BUILTIN_FEATURES);
   const defs=fishFeatureDefinitions(BUILTIN_FEATURES);
   expect(JSON.stringify(BUILTIN_FEATURES)).toBe(before);
-  const pref=loadFishCardsForScan(available)[0].pref;
+  const pref={...loadFishCardsForScan(available)[0].pref,statistic:'结果'};
   const manual:FishCard[]= ['state','bss','drift-speed-z','cda'].map(featureId=>({id:featureId,featureId,enabled:true,pref}));
   expect(fishCardPlans(manual,defs).plans.map(p=>p.statisticName)).toEqual(['avg_state_2','avg_BSS_2','avg_az_2','avg_CDA_2']);
 });

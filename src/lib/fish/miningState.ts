@@ -2,6 +2,7 @@
  * 持续挖掘的状态类型、默认值与合并规则。单独成文件、不引任何重模块：
  * 云端同步层（simStateSync）水化时要用 mergeMiningStates，不能因此把捕捞 / 特征计算整串拉进启动路径。
  */
+import { FISH_DEFAULT_RULES, MINING_PRESET_REVISION } from './defaultRules';
 export const MINING_START_MS = Date.parse('2026-04-01T00:00:00+08:00');
 export const MINING_STEP_MS = 12 * 3_600_000;
 export const MINING_DEFAULT_TARGET = 1000;
@@ -24,24 +25,31 @@ export interface FishMiningState {
   retryAt?: number | null; retryCount?: number; lastErrorAt?: number | null;
   errorKind?: 'configuration' | 'transient';
   ruleRepairs?: string[];
+  /** 用户明确废除旧五项条件：升级一次，此后保留本版中的手动编辑。 */
+  presetRevision?: number;
 }
 /** 云端同步用的逻辑键（实际存储键是 sim_<uid>_fish-mining.v1）。 */
 export const MINING_LOGICAL_KEY = 'fish-mining.v1';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
-  target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });
+  target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], presetRevision: MINING_PRESET_REVISION, lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });
 /** 读进来的值不可信（旧版本、云端、坏数据）：不像挖掘状态就返回 null。 */
 export function normalizeMiningState(x: unknown): FishMiningState | null {
   const v = x as Partial<FishMiningState> | null;
   if (!v || typeof v !== 'object' || v.version !== 1 || !Number.isFinite(v.cursorMs) || !Array.isArray(v.minedKeys)) return null;
   const base = newMiningState();
-  return { ...base, ...v, version: 1, enabled: !!v.enabled, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
+  const upgrade = (v.presetRevision ?? 0) < MINING_PRESET_REVISION;
+  const normalized = { ...base, ...v, version: 1, enabled: !!v.enabled, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
     minedKeys: v.minedKeys.filter((k): k is string => typeof k === 'string'),
     rules: Array.isArray(v.rules) ? v.rules : [], lastError: typeof v.lastError === 'string' ? v.lastError : '',
     retryAt: Number.isFinite(v.retryAt) && v.retryAt! > 0 ? v.retryAt : null,
     retryCount: Number.isInteger(v.retryCount) && v.retryCount! > 0 ? Math.min(v.retryCount!,100) : 0,
     lastErrorAt: Number.isFinite(v.lastErrorAt) && v.lastErrorAt! > 0 ? v.lastErrorAt : null,
     errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
+  if (!upgrade) return normalized;
+  return { ...normalized, presetRevision: MINING_PRESET_REVISION, rules: FISH_DEFAULT_RULES.map(rule=>({...rule})),
+    ruleRepairs: ['已替换为四项共振条件（交集），旧挖掘要求已废除；已有进度和历史结果保留'],
+    ...(normalized.errorKind === 'configuration' ? { lastError:'', errorKind:undefined, retryAt:null, retryCount:0, lastErrorAt:null } : {}) };
 }
 /**
  * 两份挖掘状态合并（本机与云端、两台设备）：进度只进不退。

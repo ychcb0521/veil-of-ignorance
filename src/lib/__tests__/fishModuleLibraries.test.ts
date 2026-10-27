@@ -111,6 +111,17 @@ it('mining library: adopts fish mined before the library existed exactly once, a
   expect(adoptMinedFish(emptyMiningLibrary(), newMiningState(), hold, B).records).toHaveLength(0);
   const other = recordMinedAnchor(emptyMiningLibrary(), state, B + 12 * 3_600_000, 1, [mined(5, B + 12 * 3_600_000)], B + 50);
   const merged = mergeMiningLibraries(adopted, other);
-  expect(merged.records).toHaveLength(4); expect(merged.anchors).toHaveLength(3); expect(merged.runs).toHaveLength(1);
+  expect(merged.records).toHaveLength(4); expect(merged.anchors).toHaveLength(3); expect(merged.runs).toHaveLength(2);
   expect(compactMinedSignal(mined(1, A)).freshCatch).toBeUndefined();
+});
+
+
+it('mining library: keeps old union snapshots separate from the replacement four-rule intersection',async()=>{
+ const {currentDefaultRules}=await import('@/lib/fish/mining');
+ const updated={...newMiningState(),rules:currentDefaultRules()};
+ const old=mined(1,T),adopted=adoptMinedFish(emptyMiningLibrary(),updated,[old],T+1);
+ expect(adopted.runs[0]).toMatchObject({combination:'or',rules:[{featureId:'bss',statistic:'BSS',threshold:'1'}]});
+ const lib=recordMinedAnchor(adopted,updated,T+1,0,[],T+2);
+ expect(lib.runs).toHaveLength(2);expect(lib.runs[1].combination).toBe('and');expect(lib.runs[1].rules).toEqual(currentDefaultRules());
+ expect(lib.records[0].signal.fish!.featureId).toBe('bss');
 });

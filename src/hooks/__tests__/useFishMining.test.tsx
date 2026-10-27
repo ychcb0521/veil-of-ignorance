@@ -20,13 +20,13 @@ function setup(o: { mine?: (s: any) => Promise<TradeSignal[]>; busy?: () => bool
   return { h, mine, commit, list, onMined, stop };
 }
 
-it('does nothing until started, then backfills anchor after anchor with the frozen default algorithms (union)', async () => {
+it('does nothing until started, then backfills anchor after anchor with the four default algorithms (intersection)', async () => {
   const { h, mine, list, onMined } = setup();
   await flush(); expect(mine).not.toHaveBeenCalled();
   act(() => h.result.current.start()); await flush(10);
   expect(mine.mock.calls.map(c => c[0].anchorMs)).toEqual([MINING_START_MS, MINING_START_MS + MINING_STEP_MS, MINING_START_MS + 2 * MINING_STEP_MS]);
-  expect(mine.mock.calls[0][0]).toMatchObject({ combination: 'or' });
-  expect(mine.mock.calls[0][0].algorithms.map((a: any) => a.feature.id)).toEqual(['cbi2', 'state', 'cba', 'drift-speed-z', 'bss']);
+  expect(mine.mock.calls[0][0]).toMatchObject({ combination: 'and' });
+  expect(mine.mock.calls[0][0].algorithms.map((a: any) => a.feature.id)).toEqual(['cbi2', 'cba', 'cbi2', 'cba']);
   expect(list.current).toHaveLength(3); expect(list.current.every(s => s.mined && !s.freshCatch)).toBe(true);
   expect(onMined).toHaveBeenCalledTimes(3);
   expect(readMiningState()).toMatchObject({ mined: 3, anchorsDone: 3, cursorMs: MINING_START_MS + 3 * MINING_STEP_MS });
@@ -144,11 +144,24 @@ it('treats an unsupported frozen venue as a configuration problem and repairs on
 
 it('automatically recovers the actual fourth-rule avg_az error on legacy a formulas, retaining the existing cursor',async()=>{
  const {DRIFT_SPEED_Z_DEF}=await import('@/lib/deepDig/features');
- const {currentDefaultRules}=await import('@/lib/fish/mining');
+ const {LEGACY_FISH_DEFAULT_RULES}=await import('@/lib/fish/cards');
  const available=defs.map(def=>def.id==='drift-speed-z'?fishFeatureDefinitions([{...DRIFT_SPEED_Z_DEF,formula:DRIFT_SPEED_Z_DEF.formula.replace('az = ema','a = ema')}])[0]:def);
- saveMiningState({...newMiningState(),enabled:true,cursorMs:MINING_START_MS+MINING_STEP_MS,anchorsDone:1,mined:220,rules:currentDefaultRules(),lastError:'算法 4：所选统计量已不存在或不是序列，请重新选择',errorKind:'configuration'});
+ saveMiningState({...newMiningState(),enabled:true,cursorMs:MINING_START_MS+MINING_STEP_MS,anchorsDone:1,mined:220,rules:LEGACY_FISH_DEFAULT_RULES.map(r=>({...r})),lastError:'算法 4：所选统计量已不存在或不是序列，请重新选择',errorKind:'configuration'});
  const {h,mine}=setup({definitions:available});await flush(10);
  expect(mine).toHaveBeenCalled();expect(mine.mock.calls[0][0].anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);
  expect(mine.mock.calls[0][0].algorithms[3].algorithm).toMatchObject({statistic:'avg_a',threshold:.15});
  expect(h.result.current.state.ruleRepairs?.at(-1)).toContain('avg_az → avg_a');expect(readMiningState().mined).toBeGreaterThanOrEqual(220);
+});
+
+
+it('replaces persisted old requirements before the first scan and sends exactly four intersecting algorithms',async()=>{
+ const {LEGACY_FISH_DEFAULT_RULES}=await import('@/lib/fish/cards');
+ saveMiningState({...newMiningState(),presetRevision:undefined,enabled:true,cursorMs:MINING_START_MS+MINING_STEP_MS,anchorsDone:1,mined:220,
+   rules:LEGACY_FISH_DEFAULT_RULES.map(r=>({...r})),lastError:'算法 4 统计量已不存在',errorKind:'configuration'});
+ const {mine}=setup();await flush(10);
+ expect(mine).toHaveBeenCalled();const sent=mine.mock.calls[0][0];
+ expect(sent.anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);expect(sent.combination).toBe('and');
+ expect(sent.algorithms.map((a:any)=>[a.feature.id,a.algorithm.statistic,a.algorithm.direction,a.algorithm.threshold])).toEqual([
+   ['cbi2','avg_CBI2_2','>',.04],['cba','avg_CBA_2','>',8],['cbi2','avg_CBI2','>',.04],['cba','avg_CBA','>',8],
+ ]);expect(readMiningState().mined).toBeGreaterThanOrEqual(220);
 });
