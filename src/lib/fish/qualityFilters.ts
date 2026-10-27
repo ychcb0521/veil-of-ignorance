@@ -5,7 +5,7 @@ import { CUSTOM_RESEARCH_INDICATORS, researchChartFormula } from '@/lib/research
 import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
-import { validateHoldingVeto } from './qualityVeto';
+import { validateHoldingVeto, isHoldingPriceChoice, holdingPriceLabels } from './qualityVeto';
 export interface QualityFilterChoice { key: string; featureId: string; metric: string; label: string; group: string }
 function build(definitions: readonly DeepDigFeatureDef[]) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
@@ -34,9 +34,9 @@ export function makeQualityBuyFilter(choiceKey: string, direction: '<' | '>', th
 }
 export const qualityFilterChoiceKey = (f: QualityBuyFilter) => `${f.snapshot.featureId}:${f.metric}`;
 export function makeQualityHoldingVeto(choiceKey:string,direction:QualityOperator,threshold:number,enabled=true,definitions:readonly DeepDigFeatureDef[]=accountFeatureDefs()):QualityHoldingVeto {
-  const risk=choiceKey==='static-drawdown'||choiceKey==='dynamic-drawdown';
+  const risk=isHoldingPriceChoice(choiceKey);
   const filter=risk?undefined:makeQualityBuyFilter(choiceKey,direction==='<'||direction==='<='?'<':'>',threshold,enabled,definitions);
-  const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,direction,threshold]))}`,label:risk?choiceKey==='static-drawdown'?'持仓过程静态最大回撤':'持仓过程动态最大回撤':filter!.label,
+  const v:QualityHoldingVeto={id:`veto-${shortFishHash(JSON.stringify([choiceKey,direction,threshold]))}`,label:risk?holdingPriceLabels[choiceKey]:filter!.label,
     kind:risk?choiceKey:'indicator',direction,threshold,enabled,metric:filter?.metric,snapshot:filter?.snapshot};
   validateHoldingVeto(v);return v;
 }

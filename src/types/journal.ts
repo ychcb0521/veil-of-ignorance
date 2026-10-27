@@ -399,8 +399,8 @@ export interface TradeCampaign {
       execution?: 'intrabar-1m'; barOpenAt?: number; previousAt?: number; previousReading?: number;
       executedAt?: number;
       triggerAtOpen?:boolean;
-      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number };
-      holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];
+      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number };
+      holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];
     };
   };
   id: string;

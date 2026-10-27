@@ -586,3 +586,14 @@ it('starts and pauses filtering and monitoring independently while bulk mining i
   fireEvent.click(within(filter()).getByRole('button', { name: '暂停过滤' })); expect(s.cancelFilter).toHaveBeenCalledOnce(); expect(s.cancel).not.toHaveBeenCalled(); expect(mining.pause).not.toHaveBeenCalled();
   fireEvent.click(within(monitor()).getByRole('button', { name: '暂停监测' })); expect(s.cancel).toHaveBeenCalledOnce(); expect(mining.pause).not.toHaveBeenCalled();
 });
+
+it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and applies both to the chosen plan', () => {
+ const s=state();render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByRole('button',{name:'持仓监测条件'}));
+ fireEvent.change(screen.getByLabelText('持仓否决 1 指标'),{target:{value:'drop-1m'}});
+ fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'drop-5m'}});
+ for(const [i,value] of [[1,'2.5'],[2,'4']] as const){fireEvent.click(screen.getByLabelText(`启用持仓否决 ${i}`));fireEvent.change(screen.getByLabelText(`持仓否决 ${i} 阈值`),{target:{value}});expect(screen.getByLabelText(`持仓否决 ${i} 方向`)).toBeDisabled();}
+ expect(screen.getByTestId('quality-veto-risk-summary')).toHaveTextContent('1分钟内跌幅 ≥ 2.5%；5分钟内跌幅 ≥ 4%');
+ fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})]);
+});

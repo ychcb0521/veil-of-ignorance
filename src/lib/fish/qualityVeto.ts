@@ -3,17 +3,20 @@ import type { FishSnapshot } from './algorithm';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export type QualityOperator = '<' | '>' | '<=' | '>=';
 export interface QualityHoldingVeto {
-  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'indicator';
+  id: string; label: string; kind: 'static-drawdown' | 'dynamic-drawdown' | 'drop-1m' | 'drop-5m' | 'indicator';
   direction: QualityOperator; threshold: number; enabled: boolean;
   metric?: string; snapshot?: FishSnapshot;
 }
+export const holdingPriceLabels = { 'static-drawdown': '持仓过程静态最大回撤', 'dynamic-drawdown': '持仓过程动态最大回撤', 'drop-1m': '1分钟内跌幅', 'drop-5m': '5分钟内跌幅' } as const;
+export const isHoldingPriceChoice = (choice: string): choice is keyof typeof holdingPriceLabels => Object.prototype.hasOwnProperty.call(holdingPriceLabels, choice);
+export const minuteDropWindow = (kind: QualityHoldingVeto['kind']) => kind === 'drop-1m' ? 1 : kind === 'drop-5m' ? 5 : 0;
 export type QualityExitCause = Pick<QualityHoldingVeto,'id'|'label'|'kind'|'direction'|'threshold'>;
 export const activeHoldingVetoes = (conditions: readonly QualityHoldingVeto[] = []) => conditions.filter(v => v.enabled);
 export const qualityConditionMet = (value: number, direction: QualityOperator, threshold: number) => direction === '<' ? value < threshold : direction === '>' ? value > threshold : direction === '<=' ? value <= threshold : value >= threshold;
 export function validateHoldingVeto(v: QualityHoldingVeto) {
-  if (!['static-drawdown','dynamic-drawdown','indicator'].includes(v.kind))throw new Error('未知的持仓否决指标');
+  if (![...Object.keys(holdingPriceLabels),'indicator'].includes(v.kind))throw new Error('未知的持仓否决指标');
   if (!Number.isFinite(v.threshold) || !['<','>','<=','>='].includes(v.direction)) throw new Error('一票否决条件须设置有效方向和有限数字阈值');
-  if (v.kind !== 'indicator' && (!(v.threshold > 0 && v.threshold <= 100) || v.direction !== '>=')) throw new Error('回撤阈值须大于 0 且不超过 100%，达到（≥）即触发');
+  if (v.kind !== 'indicator' && (!(v.threshold > 0 && v.threshold <= 100) || v.direction !== '>=')) throw new Error('回撤或跌幅阈值须大于 0 且不超过 100%，达到（≥）即触发');
   if (v.kind === 'indicator' && (!v.snapshot || !v.metric)) throw new Error('一票否决指标缺少公式快照');
 }
 /** No conditions keeps old experiment keys byte-for-byte compatible. IDs/order do not change the outcome. */
@@ -42,7 +45,7 @@ export function qualityIntrabarStop(path: QualityHoldingPath, b: ResearchBar, ri
   const beforeLow = Math.max(path.peak, b.open);
   let best: QualityStopFill | undefined;
   for (const v of risk) {
-    if (v.kind === 'indicator') continue;
+    if (v.kind !== 'static-drawdown' && v.kind !== 'dynamic-drawdown') continue;
     const anchor = v.kind === 'static-drawdown' ? path.entry : beforeLow, level = anchor * (1 - v.threshold / 100);
     if (touched(b.low, level) && (!best || level > best.price)) best = { veto: v, price: level, peak: beforeLow, reading: v.threshold };
   }
@@ -54,4 +57,13 @@ export function qualityIntrabarStop(path: QualityHoldingPath, b: ResearchBar, ri
     if (touched(b.close, level) && (!best || level > best.price)) best = { veto: v, price: level, peak, reading: v.threshold };
   }
   return best;
+}
+
+/** Rolling closed-minute fall. Short holdings start at entry; no pre-entry price or missing minute is substituted. */
+export function minuteDropReading(bars: readonly ResearchBar[], minutes: number, entry: number, at: number): { reading: number; start: number } | undefined {
+  const start = Math.max(entry, at - minutes * 60_000), window = bars.filter(b => b.openTime >= start && b.openTime < at);
+  if (!window.length || window.length !== (at - start) / 60_000 || window.some((b, i) => b.openTime !== start + i * 60_000)) return;
+  const first = window[0].open, last = window.at(-1)!.close;
+  if (!(first > 0 && last > 0 && Number.isFinite(first) && Number.isFinite(last))) throw new Error('短时跌幅缺少有效价格');
+  return { reading: Math.max(0, (first - last) / first * 100), start };
 }

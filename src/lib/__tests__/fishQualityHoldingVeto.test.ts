@@ -162,3 +162,58 @@ it('marks synced plans as stop-price vetoes so old next-open trials stay separat
   // 没有回撤否决的方案，版本号不受影响
   expect(qualitySellKey({ ...group(), vetoFill: 'stop' })).toBe(qualitySellKey(group()));
 });
+
+it('confirms a 1-minute fall on close, ignores the wick, and executes only the next available open',async()=>{
+ const g={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto('drop-1m','>=',5)]};
+ const path=loader(t=>t===T?bar(t,100,101,80,96):t===T+M?bar(t,96,96,90,91.2):bar(t,90,10000,1,900));
+ const r=await run(g,path,T+4*M);
+ expect(r).toMatchObject({status:'closed',endTime:T+2*M,endPrice:90,exitReading:expect.closeTo(5),exitSnapshot:{cause:{kind:'drop-1m'},barOpenTime:T+M,observedAt:T+2*M,previous:{at:T+M,reading:expect.closeTo(4)}}});
+ // 触发分钟截止时还没有下一分钟开盘价：只登记待成交，不把它提前当作已卖出。
+ const pending=await run(g,path,T+2*M);expect(pending).toMatchObject({status:'open',pendingExit:{at:T+2*M,cause:{kind:'drop-1m'}}});
+ expect(await run(g,path,T+4*M,pending)).toEqual(r);
+ const changed=await run(g,loader(t=>t===T?bar(t,100,101,80,96):t===T+M?bar(t,96,96,90,91.2):bar(t,90,99999,.001,9999)),T+4*M);
+ expect(changed).toEqual(r);
+});
+it('uses a rolling five-minute window rather than fixed five-minute candles or lifetime drawdown',async()=>{
+ const g={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto('drop-5m','>=',4.5)]};
+ // 第五分钟后才开始回落：第 5～9 分钟从 120 跌到 114，而入场价 100 仍有浮盈。
+ const path=loader(t=>{const i=(t-T)/M;if(i<5)return bar(t,100+i*4,104+i*4,100+i*4,104+i*4);const open=120-(i-5)*1.2;return bar(t,open,open,open-1.2,open-1.2);});
+ const whole=await run(g,path,T+12*M);
+ expect(whole).toMatchObject({status:'closed',endTime:T+10*M,exitReading:expect.closeTo(5),exitSnapshot:{barOpenTime:T+5*M,cause:{kind:'drop-5m',threshold:4.5}}});
+ expect(whole.returnPct).toBeGreaterThan(0);
+ const prior=await run(g,path,T+8*M);expect(prior.status).toBe('open');
+ expect(await run(g,path,T+12*M,prior)).toEqual(whole);
+});
+it('starts short windows at entry, rejects gaps, and allows each minute fall independently',async()=>{
+ for(const kind of ['drop-1m','drop-5m'] as const) {
+  const g={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto(kind,'>=',3)]};
+  const s={...sample,enteredAt:T+2*M};
+  const stable=loader(t=>t<T+2*M?bar(t,1000,1000,1,50):bar(t));
+  expect((await evaluateQualitySample(s,g,0,T+6*M,stable,signal())).status).toBe('open');
+  const path=loader(t=>t===T?bar(t,100,100,96,96):bar(t,95));
+  expect(await run(g,path)).toMatchObject({endTime:T+M,exitSnapshot:{cause:{kind}}});
+  expect((await run({...g,holdingVetoes:[{...g.holdingVetoes[0],enabled:false}]},path)).status).toBe('waiting');
+  const missing:FishReconstructionLoader=async(...a)=>(await stable(...a)).filter(b=>a[3].step!==M||b.openTime!==T+3*M);
+  expect((await evaluateQualitySample(s,g,0,T+6*M,missing,signal())).status).toBe('error');
+  for(const threshold of [0,-1,101,NaN,Infinity])expect(()=>makeQualityHoldingVeto(kind,'>=',threshold)).toThrow();
+  expect(()=>makeQualityHoldingVeto(kind,'<',3)).toThrow();
+ }
+});
+it('keeps short-fall settings, result identities and campaign evidence distinct from drawdown settings',async()=>{
+ const {holdingVetoDraft,parseHoldingVetoDraft}=await import('@/lib/fish/qualityFilters');
+ const a=makeQualityHoldingVeto('drop-1m','>=',2.5),b=makeQualityHoldingVeto('drop-5m','>=',4);
+ expect(parseHoldingVetoDraft(holdingVetoDraft([a,b]))).toEqual([a,b]);
+ expect(qualityResultKey(sample,{...group(),holdingVetoes:[a]},0)).not.toBe(qualityResultKey(sample,{...group(),holdingVetoes:[b]},0));
+ expect(qualitySellKey({...group(),holdingVetoes:[a]})).not.toBe(qualitySellKey({...group(),holdingVetoes:[{...a,threshold:3}]}));
+ const g={...group(),holdingVetoes:[a]},result=await run(g,loader(t=>t===T?bar(t,100,100,97,97):bar(t,96)));
+ const data=buildQualityCampaignData('u',{sample,plan:g,result,detectors:[],observeHours:0,firstEvaluatedAt:T},'sell');
+ expect(data.campaign.comparison!.sellEvidence).toMatchObject({triggerCause:{kind:'drop-1m',threshold:2.5},holdingVetoes:[{kind:'drop-1m'}]});
+});
+
+it('honors an earlier ordinary exit or intraminute stop when minute falls are also enabled',async()=>{
+ const drop=makeQualityHoldingVeto('drop-5m','>=',20),g={...group(),rule:{metric:'raw',direction:'<' as const,threshold:99},holdingVetoes:[drop]};
+ const path=loader(t=>t===T?bar(t,100,100,97,98):bar(t,97));
+ expect(await run(g,path)).toMatchObject({endTime:T+M,exitSnapshot:{cause:undefined}});
+ const stop={...group(),rule:undefined,holdingVetoes:[makeQualityHoldingVeto('drop-1m','>=',3),makeQualityHoldingVeto('static-drawdown','>=',5)]};
+ expect(await run(stop,loader(t=>bar(t,100,100,90,94)))).toMatchObject({endTime:T,endPrice:95,exitSnapshot:{cause:{kind:'static-drawdown'}}});
+});

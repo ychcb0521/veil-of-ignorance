@@ -38,3 +38,9 @@ it('identifies a drawdown veto using its own threshold, rather than the unrelate
  render(<QualitySellTiming evidence={{...evidence,execution:'intrabar-1m',reading:12,triggerCause:{id:'v',kind:'static-drawdown',label:'持仓过程静态最大回撤',direction:'>=',threshold:10}}}/>);
  const text=screen.getByTestId('quality-sell-timing');expect(text).toHaveTextContent('一票否决 · 持仓过程静态最大回撤');expect(text).toHaveTextContent('12.0000000 >= 10%');expect(text).not.toHaveTextContent('12.0000000 < 0.5');
 });
+
+it('labels minute fall vetoes with their rolling price window instead of the ordinary indicator period',()=>{
+ render(<QualitySellTiming evidence={{...evidence,reading:4,triggerCause:{id:'fall',label:'5分钟内跌幅',kind:'drop-5m',direction:'>=',threshold:3},barOpenAt:Date.parse('2026-04-02T17:30:00+08:00')}}/>);
+ expect(screen.getByTestId('quality-sell-timing')).toHaveTextContent('5分钟内跌幅 · 分钟收盘确认');
+ expect(screen.getByTestId('quality-sell-timing')).toHaveTextContent('普通指标副图不用于核对这一跌幅读数');
+});

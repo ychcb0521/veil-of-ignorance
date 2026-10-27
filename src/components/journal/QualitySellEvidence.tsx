@@ -6,6 +6,12 @@ import { formatUTC8 } from '@/lib/timeFormat';
 type SellEvidence = NonNullable<TradeCampaign['comparison']>['sellEvidence'];
 export function QualitySellTiming({ evidence }: { evidence: SellEvidence }) {
   if (!evidence || evidence.confirmedAt == null || !Number.isFinite(evidence.confirmedAt) || evidence.reading == null || !Number.isFinite(evidence.reading)) return null;
+  const shortDrop = evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m';
+  if (shortDrop) return <aside className="mx-2 mb-2 space-y-1 rounded border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px]" data-testid="quality-sell-timing">
+    <b className="font-medium">一票否决 · {evidence.triggerCause!.label} · 分钟收盘确认</b>
+    <p className="font-mono">跌幅 {evidence.reading.toPrecision(9)}% ≥ {evidence.triggerCause!.threshold}% · 确认 {formatUTC8(evidence.confirmedAt)}</p>
+    <p className="text-muted-foreground">以滚动窗口起点开盘价为基准，按已收盘分钟计算；不足完整窗口时从买入时刻起算。{evidence.barOpenAt != null && `窗口起点 ${formatUTC8(evidence.barOpenAt)}。`}{evidence.executedAt != null ? `按 ${formatUTC8(evidence.executedAt)} 的分钟开盘价成交。` : '已触发，等待下一分钟开盘数据。'}普通指标副图不用于核对这一跌幅读数。</p>
+  </aside>;
   const period = /^([1-9]\d*)(m|h|d)$/.exec(evidence.interval);
   if (!period) return null;
   const step = Number(period[1]) * (period[2] === 'm' ? 60_000 : period[2] === 'h' ? 3_600_000 : 86_400_000);
@@ -45,7 +51,7 @@ export function QualitySellEvidence({ evidence, repair }: { evidence: NonNullabl
       {evidence.confirmedAt != null && <span>达标确认时刻 {formatUTC8(evidence.confirmedAt)}</span>}
       {evidence.executedAt != null && <span>成交时刻 {formatUTC8(evidence.executedAt)}</span>}
     </div>
-    <p className="text-muted-foreground">{evidence.triggerCause?.kind.endsWith('drawdown') ? (evidence.triggerAtOpen ? '本次开盘跳空已越过持仓回撤阈值，按该分钟开盘价触发并成交，未等待这一分钟收盘。' : '本次按持仓回撤一票否决卖出，以已完成分钟确认，按下一分钟开盘价成交；跳空可能使实际回撤超过阈值。') : evidence.execution === 'intrabar-1m' ? `按 1 分钟逐步复原 ${evidence.interval} 指标，首次达标后取紧接的分钟开盘价。下方副图显示原周期最终收盘读数，不能据此倒推盘中首次达标时间。` : `按 ${evidence.interval} K 线收盘确认卖出，成交价取确认时刻起的 1 分钟 K 线开盘价。图上指标点按 K 线开盘位置绘制，最终读数到收盘才确定。`}</p>
+    <p className="text-muted-foreground">{evidence.triggerCause?.kind === 'drop-1m' || evidence.triggerCause?.kind === 'drop-5m' ? '本次按滚动短时跌幅触发：窗口起点开盘价至最新分钟收盘价，买入后逐分钟检查；达到阈值后按下一分钟开盘价模拟成交。普通指标副图不用于核对这一跌幅读数。' : evidence.triggerCause?.kind.endsWith('drawdown') ? (evidence.triggerAtOpen ? '本次开盘跳空已越过持仓回撤阈值，按该分钟开盘价触发并成交，未等待这一分钟收盘。' : '本次按持仓回撤一票否决卖出，以已完成分钟确认，按下一分钟开盘价成交；跳空可能使实际回撤超过阈值。') : evidence.execution === 'intrabar-1m' ? `按 1 分钟逐步复原 ${evidence.interval} 指标，首次达标后取紧接的分钟开盘价。下方副图显示原周期最终收盘读数，不能据此倒推盘中首次达标时间。` : `按 ${evidence.interval} K 线收盘确认卖出，成交价取确认时刻起的 1 分钟 K 线开盘价。图上指标点按 K 线开盘位置绘制，最终读数到收盘才确定。`}</p>
     {repair?.status === 'verified' && repair.beforeReturnPct != null && <p className="text-muted-foreground">纠错前收益 {repair.beforeReturnPct.toFixed(2)}%{repair.beforeEndTime ? ` · 原卖出 / 估值时间 ${formatUTC8(repair.beforeEndTime)}` : ''}。原值已保留在纠错记录中。</p>}
     {repair && repair.status !== 'verified' && <p role="alert" className="text-destructive">{repair.status === 'pending' ? '此战役正在等待纠错，原结果暂不计入比较统计。' : `此战役纠错未通过：${repair.error}。原记录保留，暂不计入比较统计。`}</p>}
     {differs && <p role="status" className="text-amber-700 dark:text-amber-400">本战役公式与当前账号公式不同。下方通用指标图使用当前账号设置，不能用其读数核对这份历史结果；请回鱼质量重新运行，生成当前公式的比较结果。</p>}

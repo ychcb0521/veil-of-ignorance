@@ -7,7 +7,7 @@ import { compileFishProgram, type FishProgram } from './algorithm';
 import type { FishReconstructionLoader } from './reconstruction';
 import { fishDelay, validateFishBars } from './shared';
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
+import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
 const MINUTE = 60_000;
 export interface QualityTrigger {
@@ -61,7 +61,11 @@ export async function findQualityIntrabarExit(o: {
     streams.push({...c,start,history,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
   let holding=o.holding;
-  const risk=activeHoldingVetoes(o.vetoes).filter(v=>v.kind!=='indicator').sort((a,b)=>a.id.localeCompare(b.id));
+  const enabled = activeHoldingVetoes(o.vetoes);
+  const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
+  const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
+  const dropMinutes: ResearchBar[] = [], dropPrevious = new Map<string, { at: number; reading: number }>();
+  const maxDropWindow = Math.max(0, ...drops.map(v=>minuteDropWindow(v.kind)));
   if(risk.length&&!holding) throw new Error('持仓一票否决缺少买入价和回撤路径');
   const riskPrevious=new Map(risk.map(v=>[v.id,{at:o.since,reading:holdingVetoReading(holding!,v.kind as 'static-drawdown'|'dynamic-drawdown')}]));
   const checkFrom=o.resumed?o.since+MINUTE:o.entry;
@@ -73,9 +77,20 @@ export async function findQualityIntrabarExit(o: {
       riskPrevious.set(v.id,{at,reading});
     }
   };
+  const checkDrop=(at:number):QualityTrigger|undefined=>{
+    for(const v of drops) {
+      const value=minuteDropReading(dropMinutes,minuteDropWindow(v.kind),o.entry,at);
+      if(!value)continue;
+      const {reading,start}=value;
+      if(at>=checkFrom&&(reading>=v.threshold||Math.abs(reading-v.threshold)<=Number.EPSILON*32*Math.max(1,reading,v.threshold)))return {at,reading,barOpenTime:start,previous:dropPrevious.get(v.id),cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}};
+      dropPrevious.set(v.id,{at,reading});
+    }
+  };
   const check=(at:number):QualityTrigger|undefined=>{
+    const drop=checkDrop(at);
     if(at<(o.resumed?o.since:o.entry))return;
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
+    if(drop)return drop;
     let error:string|undefined;
     for(const s of streams) {
       const bars=s.partial?[...s.history,s.partial]:s.history;
@@ -88,7 +103,9 @@ export async function findQualityIntrabarExit(o: {
     }
     if(error)throw new Error(error);
   };
-  const start=streams.length?Math.min(...streams.map(s=>s.start)):o.since,prices:ResearchBar[]=[];
+  const replayStart=streams.length?Math.min(...streams.map(s=>s.start)):o.since;
+  // Re-read at most five past minutes on resume, solely to restore the rolling window and previous reading.
+  const start=maxDropWindow?Math.min(replayStart,Math.max(o.entry,o.since-maxDropWindow*MINUTE)):replayStart,prices:ResearchBar[]=[];
   if(start===(o.resumed?o.since:o.entry)) {
     const trigger=check(start);if(trigger)return {trigger,prices};
   }
@@ -119,6 +136,7 @@ export async function findQualityIntrabarExit(o: {
       }
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding)holding=advanceQualityHolding(holding,minute);}
+      if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
       const at=minute.openTime+MINUTE,trigger=check(at);
       if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices};}
       for(const s of streams)if(s.partial&&at%s.plan.step===0) {s.history.push(s.partial);s.partial=undefined;}
