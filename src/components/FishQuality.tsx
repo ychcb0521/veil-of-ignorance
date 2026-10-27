@@ -25,6 +25,8 @@ import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_Q
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-muted/50 px-2 text-[11px] outline-none hover:bg-muted focus-visible:border-ring/60';
 const button = 'inline-flex h-7 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40';
+/** 分组框里的按钮：比框矮一点，四周留出底色。 */
+const groupButton = button.replace('h-7', 'h-6').replace('hover:bg-muted', 'hover:bg-background');
 const heading = '-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted';
 const cell = 'px-2 py-1.5';
 const countSignals = (rows: readonly QualitySample[]) => new Set(rows.map(qualityTableSignalKey)).size;
@@ -313,20 +315,23 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
       <button type="button" className={button} disabled={!rows.length} onClick={exportRows} aria-label="导出鱼质量数据"><Download className="h-3 w-3"/>导出数据</button>
     </div>
     {open && <div id="fish-quality-content" className="mt-2 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-1.5">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${filtersOn ? 'text-foreground' : ''}`} aria-label="过滤与持仓否决" title={filtersOn ? plans.map(p => `${p.label}：${activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') || '不过滤'}`).join('\n') : '给每套卖出方案分别设置买入条件和持仓一票否决条件'}><Filter className="h-3 w-3"/>过滤{vetoCount > 0 && <span className="text-primary">· 否决 {vetoCount}</span>}{filterCount > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[10px] tabular-nums text-primary">{filterCount}</span>}</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+      {/* 【用户要求】2026-10-27「这个地方属于同一个模块，放在一起」「放在一起之后统称……卖出改成：监测」「把过滤独立出来，与监测并列」：过滤单独一块；更新 / 重新开始 / 暂停 / 设置同在「监测」分组里，两块并排靠左 */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="inline-flex min-h-8 items-center rounded-md bg-muted/40 px-1 py-0.5" data-testid="quality-filter-controls">
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}><PopoverTrigger asChild><button type="button" className={`${groupButton} ${filtersOn ? 'text-foreground' : ''}`} aria-label="过滤与持仓否决" title={filtersOn ? plans.map(p => `${p.label}：${activeBuyFilters(study, p).map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') || '不过滤'}`).join('\n') : '给每套卖出方案分别设置买入条件和持仓一票否决条件'}><Filter className="h-3 w-3"/>过滤{vetoCount > 0 && <span className="text-primary">· 否决 {vetoCount}</span>}{filterCount > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[10px] tabular-nums text-primary">{filterCount}</span>}</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
             {plans.length > 1 && <div role="tablist" aria-label="选择要设置过滤的卖出方案" className="mb-3 inline-flex h-7 items-center rounded-md bg-muted/60 p-0.5 text-[10.5px]">{plans.map(p => { const n = activeBuyFilters(study, p).length + activeHoldingVetoes(p.holdingVetoes).length; return <button type="button" role="tab" key={p.id} aria-selected={filterPlan?.id === p.id} onClick={() => setFilterPlanId(p.id)} className={`inline-flex h-6 items-center gap-1 rounded px-2.5 ${filterPlan?.id === p.id ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{p.label}{n > 0 && <span className="rounded bg-primary/15 px-1 font-mono text-[9.5px] tabular-nums text-primary">{n}</span>}</button>; })}</div>}
             {filterPlan && <BuyFilterEditor key={JSON.stringify([filterPlan.id, planBuyFilters(study, filterPlan), filterPlan.holdingVetoes ?? []])} state={state} plan={filterPlan} done={() => setFilterOpen(false)}/>}
           </PopoverContent></Popover>
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] text-muted-foreground">100 USDT · 1 倍</span>
-          <span className="inline-flex" title={running ? '后台更新中：按开始时的勾选和参数运行，切换选项或页面不会中断' : '只评估已勾选的信号；开始后在后台运行，切换选项或页面不会中断'}><button type="button" className={button} disabled={!ready || running || !selectedCount} onClick={() => void state.start()}><RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`}/>{running ? `${progress?.done ?? 0}/${progress?.total ?? 0}` : onlyQualityFilters(study) ? '运行过滤' : '更新收益'}</button></span>
-          <button type="button" className={button} disabled={!ready || !selectedCount} title="停止当前批次，按最新勾选、买入过滤、卖出条件和观察时长从头计算" onClick={() => void state.restart()}><RotateCcw className="h-3 w-3"/>重新开始</button>
-          {running && <button type="button" className={button} onClick={state.cancel}>暂停</button>}
-          <Popover><PopoverTrigger asChild><button type="button" className={button} aria-label="鱼质量观察设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；点「更新收益」计算已勾选信号。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
+        <div role="group" aria-label="监测：运行与设置" className="inline-flex min-h-8 max-w-full flex-wrap items-center gap-0.5 rounded-md bg-muted/40 px-1 py-0.5" data-testid="quality-run-controls">
+          <span className="px-1.5 text-[11px] font-medium text-foreground/85" data-testid="quality-mode" title="监测：运行、重新开始或暂停卖出与探测的评估，设置观察时长">监测</span>
+          <span aria-hidden className="mx-0.5 h-3.5 w-px bg-border"/>
+          <span className="inline-flex" title={running ? '后台更新中：按开始时的勾选和参数运行，切换选项或页面不会中断' : '只评估已勾选的信号；开始后在后台运行，切换选项或页面不会中断'}><button type="button" className={groupButton} disabled={!ready || running || !selectedCount} onClick={() => void state.start()}><RefreshCw className={`h-3 w-3 ${running ? 'animate-spin' : ''}`}/>{running ? `${progress?.done ?? 0}/${progress?.total ?? 0}` : onlyQualityFilters(study) ? '运行过滤' : '更新收益'}</button></span>
+          <button type="button" className={groupButton} disabled={!ready || !selectedCount} title="停止当前批次，按最新勾选、买入过滤、卖出条件和观察时长从头计算" onClick={() => void state.restart()}><RotateCcw className="h-3 w-3"/>重新开始</button>
+          {running && <button type="button" className={groupButton} onClick={state.cancel}>暂停</button>}
+          <Popover><PopoverTrigger asChild><button type="button" className={groupButton} aria-label="鱼质量观察设置"><Settings2 className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="end" className="w-72 space-y-3 text-[11px]"><label className="flex items-center gap-2">观察时长<input aria-label="鱼质量观察小时" type="number" min="0" max="8784" step="any" className={`${field} w-20`} value={hours ?? study.observeHours} onChange={e => setHours(e.target.value)} onBlur={applyHours} onKeyDown={e => { if (e.key === 'Enter') applyHours(); }}/>小时</label><p className="text-[10px] text-muted-foreground">0 = 持续至卖出；点「更新收益」计算已勾选信号。观察期结束仍持有，不强平。</p></PopoverContent></Popover>
         </div>
+        <span className="text-[10px] text-muted-foreground/80">100 USDT · 1 倍</span>
       </div>
       {mining && <FishMiningPanel mining={mining} sellFixed={!!study.sellPlans?.some(p => p.id === study.selectedSellId && hasQualityExit(p))} campaignHref="/journal/campaigns?section=quality"/>}
       <div className="flex flex-wrap items-center gap-1.5">

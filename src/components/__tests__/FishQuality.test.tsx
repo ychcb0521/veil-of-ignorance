@@ -386,7 +386,7 @@ it('opens with the remembered tab, filters and sort when coming back from a camp
   saveQualityReturn({ ui: { open: true, query: 'AAA', month: '', algorithm: '', origin: '', phase: 'detect', detectorExpanded: true, sort: 'symbol', ascending: true, tableTop: 0 }, scroll: [] });
   expect(armQualityReturn()).toBe(true);
   render(<FishQuality state={state()}/>);
-  expect(screen.queryByTestId('quality-mode')).toBeNull();
+  expect(screen.getByTestId('quality-mode')).toHaveTextContent('监测');
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('AAA');
   expect(screen.getByRole('columnheader', {name: /标的/})).toHaveAttribute('aria-sort', 'ascending');
   expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
@@ -507,8 +507,21 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   const mining = { state: { ...newMiningState(), rules: currentDefaultRules() }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn() };
   render(<FishQuality state={state()} mining={mining as never}/>);
   expect(screen.queryByRole('tab')).toBeNull();
-  expect(screen.queryByTestId('quality-mode')).toBeNull();
+  expect(screen.getByTestId('quality-mode')).toHaveTextContent('监测');
   expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
   expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
+});
+// 【用户要求】2026-10-27「这个地方属于同一个模块，放在一起」「卖出改成：监测」「把过滤独立出来，与监测并列」
+it('puts 过滤 in its own block beside the 监测 group of run controls, both on the left', () => {
+  const s = state(); s.running = true; s.progress = { done: 2333, total: 2360, current: '' };
+  render(<FishQuality state={s}/>);
+  const group = screen.getByRole('group', { name: /^监测：/ }), filter = screen.getByTestId('quality-filter-controls');
+  expect(within(group).getByTestId('quality-mode')).toHaveTextContent('监测');
+  for (const name of ['重新开始', '暂停', '鱼质量观察设置']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
+  expect(within(group).getByRole('button', { name: '2333/2360' })).toBeDisabled();
+  expect(within(group).queryByRole('button', { name: '过滤与持仓否决' })).toBeNull();
+  expect(within(filter).getByRole('button', { name: '过滤与持仓否决' })).toBeInTheDocument();
+  expect(filter.nextElementSibling).toBe(group);
+  expect(group.parentElement).not.toHaveClass('justify-between');
 });
