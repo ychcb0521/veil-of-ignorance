@@ -427,6 +427,8 @@ export interface QualityRunOptions {
   study: FishQualityStudy; signal: AbortSignal; onProgress: (p: QualityProgress) => void; onResult: (r: QualityResult) => void;
   /** Filter modes reuse saved trades; restart replays selected sell experiments from entry, including completed results. */
   mode?: 'filter' | 'filter-only' | 'restart';
+  /** Independent UI tasks; filtering never evaluates exits. Legacy callers retain automatic filter-only behavior. */
+  task?: 'filter' | 'monitor';
   /** 当前界面上的行顺序（看得见的在前）。每算完一条都重新读取，换筛选 / 排序 / 滚动后先算新露出来的行。 */
   priority?: () => readonly string[];
   /** 买入过滤的读数（每行每个条件算一次）。 */
@@ -446,7 +448,7 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
-  const filtersOnly = onlyQualityFilters(study);
+  const filtersOnly = options.task === 'filter' || options.task !== 'monitor' && onlyQualityFilters(study);
   const tasks = study.sellPlans
     ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);

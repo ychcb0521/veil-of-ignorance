@@ -185,25 +185,24 @@ it('applies buy edits in filter mode, preserves sell snapshots and only recalcul
   const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
   localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
   act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '<', .5)], [])); await flush(600);
-  expect(tasks.at(-1)!.mode).toBe('filter');
+  expect(tasks.at(-1)!.mode).toBe('filter-only');
   expect(tasks.at(-1)!.study.sellPlans!.map(p => p.snapshot)).toEqual(original!.map(p => p.snapshot));
   const disabled = { ...makeQualityHoldingVeto('static-drawdown', '>=', 10), enabled: false };
   act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [disabled])); await flush(600);
-  expect(tasks.at(-1)!.mode).toBe('filter');
+  expect(tasks.at(-1)!.mode).toBe('filter-only');
   expect(h.result.current.study.sellPlans![0].holdingVetoes).toEqual([disabled]);
   act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [{ ...disabled, enabled: true }])); await flush(600);
   expect(tasks.at(-1)!.mode).toBeUndefined();
 });
 
-it('finishes the active batch before applying a queued filter edit', async () => {
+it('does not queue monitoring or interrupt it when only filtering settings change', async () => {
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush(); chooseAndStart(h); await flush();
   act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [])); await flush(600);
   expect(tasks[0].signal.aborted).toBe(false); expect(tasks).toHaveLength(1);
   releases.shift()!(); await flush();
-  expect(tasks).toHaveLength(2); expect(tasks[1].mode).toBe('filter');
-  releases.shift()!(); await flush();
+  expect(tasks).toHaveLength(1);
 });
 
 it('filters fully cached trades without calling the runner, including after restoring saved results', async () => {
@@ -301,13 +300,14 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   expect(h.result.current.study.campaignRuns![0].result).toEqual(prior);
   expect(h.result.current.study.filterReadings?.some(r => r.key === 'late')).not.toBe(true);
   releases.shift()!(); await flush(1000);
-  expect(tasks).toHaveLength(2); expect(h.result.current.running).toBe(false);
-  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(3);
-  expect(tasks[2].mode).toBe('restart');
+  expect(tasks.filter(t => t.task === 'monitor')).toHaveLength(2); expect(h.result.current.running).toBe(false);
+  expect(tasks.filter(t => t.task === 'filter')).toHaveLength(1); expect(h.result.current.filterRunning).toBe(true);
+  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(4);
+  expect(tasks[3].mode).toBe('restart');
   const nextRow = qualityRunSamples(next.study)[0], nextPlan = next.study.sellPlans![0];
   act(() => next.onResult({ ...prior, key: qualityResultKey(nextRow, nextPlan, 12), sampleId: nextRow.id, returnPct: 999 }));
   expect(h.result.current.study.results.some(r => r.returnPct === 999)).toBe(false);
-  act(() => h.result.current.cancel()); releases.shift()!(); await flush();
+  act(() => { h.result.current.cancel(); h.result.current.cancelFilter(); }); releases.forEach(resolve => resolve()); await flush();
 });
 
 it('pause invalidates a pending settings run instead of restarting after the delay', async () => {
@@ -333,4 +333,68 @@ it('restarts at once with the new holding vetoes when they change during a runni
   expect(tasks).toHaveLength(2);
   expect(tasks[1].study.sellPlans!.find(p => p.id === id)!.holdingVetoes?.[0]).toMatchObject({ kind: 'dynamic-drawdown', threshold: 10 });
   act(() => h.result.current.cancel()); releases.forEach(r => r()); await flush();
+});
+
+it('runs filtering and monitoring concurrently with separate progress, cancellation and late-callback guards', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
+  await flush();
+  const f = makeQualityBuyFilter('state:state', '>', .7);
+  act(() => {
+    h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id));
+    h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [f], []);
+    void h.result.current.startFilter();
+    void h.result.current.start();
+  });
+  await flush(600);
+  expect(tasks).toHaveLength(2);
+  const filtering = tasks.find(t => t.task === 'filter')!, monitoring = tasks.find(t => t.task === 'monitor')!;
+  expect(h.result.current.filterRunning).toBe(true); expect(h.result.current.running).toBe(true);
+  act(() => { filtering.onProgress({ done: 1, total: 2, current: 'filter' }); monitoring.onProgress({ done: 0, total: 2, current: 'monitor' }); });
+  expect(h.result.current.filterProgress?.done).toBe(1); expect(h.result.current.progress?.done).toBe(0);
+  const row = qualityRunSamples(filtering.study)[0], plan = filtering.study.sellPlans![0], key = qualityFilterReadingKey(row, f);
+  act(() => {
+    filtering.onFilterReading?.({ key, value: .9 });
+    monitoring.onFilterReading?.({ key, error: 'temporary request error' });
+    filtering.onResult({ key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, status: 'closed', evaluatedAt: T, returnPct: 999 });
+  });
+  expect(h.result.current.study.filterReadings?.find(r => r.key === key)?.value).toBe(.9);
+  expect(h.result.current.study.results).toHaveLength(0);
+  act(() => h.result.current.cancelFilter());
+  expect(filtering.signal.aborted).toBe(true); expect(monitoring.signal.aborted).toBe(false);
+  act(() => { filtering.onProgress({ done: 999, total: 999, current: 'late' }); filtering.onFilterReading?.({ key: 'late', value: 999 }); });
+  expect(h.result.current.filterProgress?.done).toBe(1); expect(h.result.current.study.filterReadings?.some(r => r.key === 'late')).toBe(false);
+  // A second uncached condition makes another filter batch, while the old aborted runner is still pending.
+  act(() => { h.result.current.setFilters(plan.id, [f, makeQualityBuyFilter('cda:CDA', '>', 0)], []); void h.result.current.startFilter(); });
+  const next = tasks.at(-1)!; expect(next.task).toBe('filter'); expect(tasks).toHaveLength(3);
+  act(() => h.result.current.cancel());
+  expect(monitoring.signal.aborted).toBe(true); expect(next.signal.aborted).toBe(false); expect(h.result.current.filterRunning).toBe(true);
+  act(() => h.result.current.cancelFilter()); releases.forEach(resolve => resolve()); await flush(1000);
+  expect(tasks).toHaveLength(3); expect(h.result.current.filterRunning).toBe(false); expect(h.result.current.running).toBe(false);
+});
+
+it('aborts both independent tasks on account change and rejects their late writes', async () => {
+  const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
+  const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
+  const h = renderHook(({ owner, rows }) => useFishQuality(owner, rows, async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }), { initialProps: { owner: 'a', rows: [signal] } });
+  await flush();
+  act(() => {
+    h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id));
+    h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '>', .7)], []);
+    void h.result.current.startFilter(); void h.result.current.start();
+  });
+  h.rerender({ owner: 'b', rows: [] }); await flush();
+  expect(tasks).toHaveLength(2); expect(tasks.every(t => t.signal.aborted)).toBe(true);
+  act(() => { for (const t of tasks) t.onFilterReading?.({ key: 'old-account', value: 999 }); });
+  releases.forEach(resolve => resolve()); await flush(1000);
+  expect(h.result.current.study.filterReadings ?? []).toEqual([]); expect(h.result.current.running).toBe(false); expect(h.result.current.filterRunning).toBe(false);
+});
+
+it('imports mined rows without implicitly starting monitoring', async () => {
+  const run = vi.fn(async () => {});
+  const h = renderHook(({ rows }) => useFishQuality('a', rows, run), { initialProps: { rows: [] as TradeSignal[] } });
+  await flush(); h.rerender({ rows: [{ ...signal, mined: { anchorMs: T } }] }); await flush(1000);
+  expect(h.result.current.study.selectedRowIds?.length).toBeGreaterThan(0); expect(run).not.toHaveBeenCalled();
 });

@@ -53,3 +53,19 @@ it('keeps different entries in merged rows and distinguishes pending, errors, st
   study.sellPlans![0].buyFilters = [{ ...f, enabled: false }];
   expect(qualityFilterColumns(study)).toEqual([]);
 });
+
+it('keeps an explicit filtering task free of sell evaluation even with exits, and allows monitoring without a prior filter run', async () => {
+  const study = base(), f = filter(1), readings: QualityFilterReading[] = [];
+  study.sellPlans = study.sellPlans!.map(p => ({ ...p, buyFilters: [f], rule: { metric: p.metric, direction: '<' as const, threshold: .5 } }));
+  study.selectedRowIds = qualityComparisonRows(study).map(r => r.id);
+  const load: FishReconstructionLoader = vi.fn(async (_row, from, cut, plan) => Array.from({ length: (cut - from) / plan.step }, (_, i) => ({ openTime: from + i * plan.step, open: 8, close: 8, high: 9, low: 7, volume: 1, quoteVolume: 100, takerBuyQuoteVolume: 50, takerBuyVolume: .5 })));
+  const results = vi.fn();
+  await collectFishQuality({ study, task: 'filter', signal: new AbortController().signal, onResult: results, onProgress: vi.fn(), onFilterReading: r => readings.push(r) }, load, T + 30 * M);
+  expect(results).not.toHaveBeenCalled(); expect(readings).toHaveLength(2);
+  expect(vi.mocked(load).mock.calls.every(([, , , p]) => p.step === 5 * M)).toBe(true);
+  study.sellPlans = study.sellPlans.map(p => ({ ...p, rule: undefined })); study.filterReadings = readings;
+  vi.mocked(load).mockClear();
+  await collectFishQuality({ study, task: 'monitor', signal: new AbortController().signal, onResult: results, onProgress: vi.fn() }, load, T + 30 * M);
+  expect(results).toHaveBeenCalledTimes(4);
+  expect(vi.mocked(load).mock.calls.every(([, , , p]) => p.step === M)).toBe(true);
+});
