@@ -176,13 +176,14 @@ var whoami_default = defineTool5({
 // src/lib/mcp/index.ts
 var projectRef = "pyvndfzpbsgzinqxairn";
 var mcp_default = defineMcp({
-  name: "trading-journal-mcp",
-  title: "\u4EA4\u6613\u590D\u76D8\u4E2D\u5FC3 MCP",
+  name: "veil-of-ignorance",
+  title: "veil-of-ignorance",
   version: "0.1.0",
   instructions: "Tools for the trading journal / \u9519\u9898\u96C6 app. Every tool acts as the signed-in user via Supabase RLS. Use `whoami` to confirm identity, `list_recent_journals` and `get_journal` to review trade journals, `list_error_patterns` to inspect recurring mistake patterns, and `list_trading_rules` to see the user's active checklist.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
-    acceptedAudiences: "authenticated"
+    acceptedAudiences: "authenticated",
+    requireOAuthClientClaim: true
   }),
   tools: [whoami_default, list_recent_journals_default, get_journal_default, list_error_patterns_default, list_trading_rules_default]
 });
