@@ -109,6 +109,99 @@ export type Database = {
         }
         Relationships: []
       }
+      decision_emotion_diaries: {
+        Row: {
+          created_at: string
+          diary_date: string
+          event_text: string
+          hads_anxiety_score: number
+          hads_anxiety_scores: number[]
+          hads_depression_score: number
+          hads_depression_scores: number[]
+          id: string
+          measurement_version: string
+          panas_item_scores: number[] | null
+          panas_negative_score: number | null
+          panas_positive_score: number | null
+          pi_item_scores: number[] | null
+          pi_mean_score: number | null
+          pi_total_score: number | null
+          poms_anger_score: number | null
+          poms_confusion_score: number | null
+          poms_depression_score: number | null
+          poms_esteem_score: number | null
+          poms_fatigue_score: number | null
+          poms_item_scores: number[] | null
+          poms_tension_score: number | null
+          poms_total_mood_disturbance: number | null
+          poms_vigor_score: number | null
+          sam_arousal: number | null
+          sam_valence: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          diary_date: string
+          event_text: string
+          hads_anxiety_score: number
+          hads_anxiety_scores: number[]
+          hads_depression_score: number
+          hads_depression_scores: number[]
+          id?: string
+          measurement_version?: string
+          panas_item_scores?: number[] | null
+          panas_negative_score?: number | null
+          panas_positive_score?: number | null
+          pi_item_scores?: number[] | null
+          pi_mean_score?: number | null
+          pi_total_score?: number | null
+          poms_anger_score?: number | null
+          poms_confusion_score?: number | null
+          poms_depression_score?: number | null
+          poms_esteem_score?: number | null
+          poms_fatigue_score?: number | null
+          poms_item_scores?: number[] | null
+          poms_tension_score?: number | null
+          poms_total_mood_disturbance?: number | null
+          poms_vigor_score?: number | null
+          sam_arousal?: number | null
+          sam_valence?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          diary_date?: string
+          event_text?: string
+          hads_anxiety_score?: number
+          hads_anxiety_scores?: number[]
+          hads_depression_score?: number
+          hads_depression_scores?: number[]
+          id?: string
+          measurement_version?: string
+          panas_item_scores?: number[] | null
+          panas_negative_score?: number | null
+          panas_positive_score?: number | null
+          pi_item_scores?: number[] | null
+          pi_mean_score?: number | null
+          pi_total_score?: number | null
+          poms_anger_score?: number | null
+          poms_confusion_score?: number | null
+          poms_depression_score?: number | null
+          poms_esteem_score?: number | null
+          poms_fatigue_score?: number | null
+          poms_item_scores?: number[] | null
+          poms_tension_score?: number | null
+          poms_total_mood_disturbance?: number | null
+          poms_vigor_score?: number | null
+          sam_arousal?: number | null
+          sam_valence?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       error_tag_categories: {
         Row: {
           code: string
