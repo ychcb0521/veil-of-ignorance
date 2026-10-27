@@ -49,3 +49,38 @@ it('does not present returns as bought outcomes when frozen buy conditions faile
   render(<FishMonitorLibrary study={study}/>); fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
   const row = screen.getByTestId('monitor-library-row'); expect(row).toHaveTextContent('未买入'); expect(row).not.toHaveTextContent('+10.00%');
 });
+
+it('filters exact monitoring algorithms, resets paging, and sorts every data header before paging', () => {
+  const study = archived();
+  const prototypes = study.monitorLibrary!.records;
+  study.monitorLibrary!.records = Array.from({ length: 61 }, (_, i) => ({ ...prototypes[i % prototypes.length], id: `row-${i}`, source: { ...prototypes[0].source, symbol: `COIN${i}USDT` }, result: { ...prototypes[0].result!, returnPct: i } }));
+  render(<FishMonitorLibrary study={study}/>); fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  const select = screen.getByLabelText('监测库的监测算法');
+  const exact = within(select).getAllByRole('option').find(o => o.textContent?.includes('< 0.4')) as HTMLOptionElement;
+  fireEvent.change(select, { target: { value: exact.value } });
+  expect(screen.getAllByTestId('monitor-library-row').length).toBeLessThan(50);
+  expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
+  for (const r of screen.getAllByTestId('monitor-library-row')) expect(r).toHaveTextContent('< 0.4');
+  fireEvent.change(select, { target: { value: '' } });
+  fireEvent.click(screen.getByRole('button', { name: '监测库按收益率排序' }));
+  expect(within(screen.getAllByTestId('monitor-library-row')[0]).getByRole('button', { name: 'COIN60USDT' })).toBeInTheDocument();
+  expect(screen.getByRole('columnheader', { name: /收益率/ })).toHaveAttribute('aria-sort', 'descending');
+  fireEvent.click(screen.getByRole('button', { name: '监测库按收益率排序' }));
+  expect(within(screen.getAllByTestId('monitor-library-row')[0]).getByRole('button', { name: 'COIN0USDT' })).toBeInTheDocument();
+  for (const h of screen.getAllByRole('columnheader').filter(h => h.textContent !== '跳转')) expect(within(h).getByRole('button')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '导出监测库数据' })).toHaveTextContent('61');
+  fireEvent.change(screen.getByLabelText('搜索监测库'), { target: { value: 'no-such-symbol' } });
+  expect(screen.getByRole('button', { name: '导出监测库数据' })).toBeDisabled();
+});
+
+it('filters detector snapshots separately without changing the frozen records', () => {
+  const study = archived(), library = study.monitorLibrary!;
+  library.settings.forEach((s, i) => { s.detectorsKnown = true; s.detectors = [{ ...s.plan, label: '同名探测', snapshot: { ...s.plan.snapshot, threshold: i + 1 } }]; });
+  render(<FishMonitorLibrary study={study}/>); fireEvent.click(screen.getByRole('button', { name: '打开监测库' }));
+  const select = screen.getByLabelText('监测库的探测算法'), options = within(select).getAllByRole('option') as HTMLOptionElement[];
+  expect(options).toHaveLength(3);
+  fireEvent.change(select, { target: { value: options[1].value } });
+  expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(2);
+  expect(library.records).toHaveLength(4);
+});
