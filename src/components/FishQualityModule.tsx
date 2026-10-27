@@ -2,9 +2,15 @@ import { useId, useState, type ReactNode } from 'react';
 import { ChevronDown, CircleHelp, type LucideIcon } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
-const action = 'inline-flex h-7 w-[5.75rem] shrink-0 items-center justify-center gap-1.5 rounded-md px-3 text-[11px] transition-colors disabled:opacity-40';
-export const qualityPrimaryAction = `${action} bg-primary font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:shadow-none`;
-export const qualityPauseAction = `${action} border border-border/70 text-foreground hover:bg-muted`;
+// 【用户要求】2026-10-27「3 个黄色色块的大小要一致」：挖掘、过滤、监测三个主按钮同宽 6.75rem；
+// 「开始监测」带 ▾，拆成 5.5rem 主体 + 1.25rem 的 ▾，拼起来仍是 6.75rem。
+const shape = 'inline-flex h-7 shrink-0 items-center justify-center gap-1.5 px-3 text-[11px] transition-colors disabled:opacity-40';
+const primary = 'bg-primary font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:shadow-none';
+const pause = 'border border-border/70 text-foreground hover:bg-muted';
+export const qualityPrimaryAction = `${shape} w-[6.75rem] rounded-md ${primary}`;
+export const qualityPauseAction = `${shape} w-[6.75rem] rounded-md ${pause}`;
+export const qualitySplitPrimaryAction = `${shape} w-[5.5rem] rounded-l-md ${primary}`;
+export const qualitySplitPauseAction = `${shape} w-[5.5rem] rounded-l-md ${pause}`;
 
 export function FishQualityInfo({ label, children }: { label: string; children: ReactNode }) {
   return <Popover><PopoverTrigger asChild><button type="button" aria-label={label} title={label} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground/35 transition-colors hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"><CircleHelp aria-hidden strokeWidth={1.4} className="h-3 w-3"/></button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} aria-label={label} className="w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(80vh,var(--radix-popover-content-available-height))] space-y-2 overflow-y-auto overscroll-contain p-3 text-[11px] leading-relaxed">{children}</PopoverContent></Popover>;
