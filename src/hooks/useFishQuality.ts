@@ -175,7 +175,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
         },
         onResult: () => {},
       });
-      if (active()) { finishRound('complete'); setFilterProgress({ done: total, total, current: '' }); }
+      if (active()) {
+        const readings=new Map((current.current.filterReadings??[]).map(r=>[r.key,r]));
+        const missing=[...readingKeys].filter(key=>{const r=readings.get(key);return !r||r.error||!Number.isFinite(r.value);}).length;
+        if(missing){const message=`本轮 ${missing} 项过滤读数仍缺数据；已完成的读数已保存，可点击「重试缺数据」补算`;setFilterError(message);finishRound('failed',message);}
+        else finishRound('complete');
+        setFilterProgress({ done: total, total, current: '' });
+      }
     } catch (e) { if (active()) { setFilterError(e instanceof Error ? e.message : '过滤失败'); finishRound('failed', e instanceof Error ? e.message : '过滤失败'); } }
     finally { if (filterController.current === aborter) { filterController.current = null; if (epoch === generation.current) setFilterRunning(false); } }
   }, [acceptReading, change]);

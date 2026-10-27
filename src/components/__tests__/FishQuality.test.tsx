@@ -695,3 +695,13 @@ it('places run state second and bulk-selects only pending entries under the curr
   fireEvent.click(screen.getByRole('button',{name:'开始过滤'})); expect(s.startFilter).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'开始监测'})); expect(s.start).toHaveBeenCalledTimes(1);
 });
+
+it('explains unavailable filtering and provides a resume/retry action that reuses cached readings independently',async()=>{
+ const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
+ const s=state();s.study=separateQualityFilters(s.study);const h=render(<FishQuality state={s}/>);
+ expect(screen.getByRole('button',{name:'开始过滤'})).toBeDisabled();
+ fireEvent.click(screen.getByRole('button',{name:'未设置过滤条件 · 点此设置'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
+ cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByTestId('quality-filter-recovery')).toHaveTextContent('有效读数会复用');
+ cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
+});

@@ -68,7 +68,7 @@ export function acceptMinedAnchor(state: FishMiningState, found: readonly TradeS
     added.push({ ...signal, id: `${raw.id}|mine:${anchorMs}`, fishArchive: { id: `mine-${anchorMs}`, at: now }, caughtAt: now, mined: { anchorMs } });
   }
   return { added, state: { ...state, cursorMs: anchorMs + state.stepMs, mined: state.mined + added.length, anchorsDone: state.anchorsDone + 1,
-    minedKeys: [...state.minedKeys, ...added.map(fishCatchKey)], lastAnchorMs: anchorMs, lastRunAt: now, lastError: '' } };
+    minedKeys: [...state.minedKeys, ...added.map(fishCatchKey)], lastAnchorMs: anchorMs, lastRunAt: now, lastError: '', retryAt:null,retryCount:0,lastErrorAt:null,errorKind:undefined } };
 }
 /** 同一台电脑开着多个标签页时只让一个去挖。 */
 export function takeMiningLease(owner: string, now: number, ttlMs = 180_000): boolean {

@@ -504,3 +504,17 @@ it('freezes the selected entries for both tasks and rejects readings/results for
   act(()=>{h.result.current.cancel();h.result.current.cancelFilter();});releases.forEach(r=>r());await flush();
   act(()=>{h.result.current.setSelectedRows([]);void h.result.current.startFilter();void h.result.current.start();});await flush();expect(tasks).toHaveLength(2);
 });
+
+it('reports incomplete filter readings, preserves valid data, and closes a later retry as complete without monitoring',async()=>{
+ const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
+ const {qualityFilterReadingKey}=await import('@/lib/fish/quality');
+ const a=makeQualityBuyFilter('state:state','>',.7),b=makeQualityBuyFilter('cda:CDA','>',0);
+ const tasks:QualityRunOptions[]=[];const run=vi.fn(async(o:QualityRunOptions)=>{tasks.push(o);const row=qualityRunSamples(o.study)[0],f=tasks.length===1?a:b;o.onFilterReading?.({key:qualityFilterReadingKey(row,f),value:tasks.length===1?.9:5});});
+ const h=renderHook(()=>useFishQuality('a',[signal],run));await flush();
+ act(()=>{h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r=>r.id));h.result.current.setFilters([a,b]);void h.result.current.startFilter();});await flush();
+ expect(h.result.current.filterError).toContain('1 项');expect(h.result.current.study.filterLibrary?.rounds.at(-1)?.state).toBe('failed');
+ expect(h.result.current.study.results).toEqual([]);expect(h.result.current.study.filterReadings).toHaveLength(1);
+ act(()=>{void h.result.current.startFilter();});await flush();
+ expect(tasks[1].study.filterReadings).toHaveLength(1);expect(tasks.every(t=>t.task==='filter')).toBe(true);
+ expect(h.result.current.filterError).toBe('');expect(h.result.current.study.filterLibrary?.rounds.at(-1)?.state).toBe('complete');expect(h.result.current.study.filterReadings).toHaveLength(2);
+});

@@ -20,12 +20,15 @@ export interface FishMiningState {
   lastAnchorMs: number | null; lastRunAt: number | null; lastError: string;
   /** 最后一次保存的时刻：合并两份时，开关、目标等设置取较新的那份。 */
   savedAt?: number;
+  /** Persist recovery state so refresh cannot bypass a retry delay or hide its cause. */
+  retryAt?: number | null; retryCount?: number; lastErrorAt?: number | null;
+  errorKind?: 'configuration' | 'transient';
 }
 /** 云端同步用的逻辑键（实际存储键是 sim_<uid>_fish-mining.v1）。 */
 export const MINING_LOGICAL_KEY = 'fish-mining.v1';
 export const MINING_LEASE_LOGICAL_KEY = 'fish-mining-lease.v1';
 export const newMiningState = (): FishMiningState => ({ version: 1, enabled: false, startMs: MINING_START_MS, stepMs: MINING_STEP_MS, cursorMs: MINING_START_MS,
-  target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], lastAnchorMs: null, lastRunAt: null, lastError: '' });
+  target: MINING_DEFAULT_TARGET, mined: 0, anchorsDone: 0, minedKeys: [], rules: [], lastAnchorMs: null, lastRunAt: null, lastError: '', retryAt: null, retryCount: 0, lastErrorAt: null });
 /** 读进来的值不可信（旧版本、云端、坏数据）：不像挖掘状态就返回 null。 */
 export function normalizeMiningState(x: unknown): FishMiningState | null {
   const v = x as Partial<FishMiningState> | null;
@@ -33,7 +36,11 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
   const base = newMiningState();
   return { ...base, ...v, version: 1, enabled: !!v.enabled, target: Number.isInteger(v.target) && v.target! > 0 ? v.target! : base.target,
     minedKeys: v.minedKeys.filter((k): k is string => typeof k === 'string'),
-    rules: Array.isArray(v.rules) ? v.rules : [], lastError: typeof v.lastError === 'string' ? v.lastError : '' } as FishMiningState;
+    rules: Array.isArray(v.rules) ? v.rules : [], lastError: typeof v.lastError === 'string' ? v.lastError : '',
+    retryAt: Number.isFinite(v.retryAt) && v.retryAt! > 0 ? v.retryAt : null,
+    retryCount: Number.isInteger(v.retryCount) && v.retryCount! > 0 ? Math.min(v.retryCount!,100) : 0,
+    lastErrorAt: Number.isFinite(v.lastErrorAt) && v.lastErrorAt! > 0 ? v.lastErrorAt : null,
+    errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
 }
 /**
  * 两份挖掘状态合并（本机与云端、两台设备）：进度只进不退。
@@ -44,9 +51,18 @@ export function mergeMiningStates(localRaw: unknown, remoteRaw: unknown): FishMi
   if (!a || !b) return a ?? b ?? localRaw ?? remoteRaw;
   const settings = (b.savedAt ?? 0) > (a.savedAt ?? 0) ? b : a;
   const far = b.cursorMs > a.cursorMs ? b : a;
+  const failure = a.cursorMs === b.cursorMs ? settings : far;
   const minedKeys = [...new Set([...a.minedKeys, ...b.minedKeys])];
   return { ...settings, cursorMs: far.cursorMs, anchorsDone: Math.max(a.anchorsDone, b.anchorsDone), lastAnchorMs: far.lastAnchorMs,
-    lastRunAt: Math.max(a.lastRunAt ?? 0, b.lastRunAt ?? 0) || null, lastError: far.lastError,
+    lastRunAt: Math.max(a.lastRunAt ?? 0, b.lastRunAt ?? 0) || null, lastError: failure.lastError, retryAt: failure.retryAt, retryCount: failure.retryCount, lastErrorAt: failure.lastErrorAt, errorKind: failure.errorKind,
     rules: settings.rules.length ? settings.rules : far.rules, selection: settings.selection ?? far.selection,
     minedKeys, mined: Math.max(a.mined, b.mined, minedKeys.length), savedAt: Math.max(a.savedAt ?? 0, b.savedAt ?? 0) || undefined };
+}
+
+export const MINING_RETRY_MS = 2 * 60_000;
+export const MINING_STALL_MS = 5 * 60_000;
+export function miningFailureState(state: FishMiningState, message: string, at: number, kind: 'configuration' | 'transient'): FishMiningState {
+  const retryCount = (state.retryCount ?? 0) + 1;
+  return {...state,lastError:message,lastErrorAt:at,errorKind:kind,retryCount,
+    retryAt:kind==='configuration'?null:at+Math.min(15*60_000,MINING_RETRY_MS*2**Math.min(retryCount-1,4))};
 }
