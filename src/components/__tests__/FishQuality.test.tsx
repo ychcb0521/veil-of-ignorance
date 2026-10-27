@@ -486,9 +486,9 @@ it('picks one or several detectors straight from the detector header, keeps the 
   fireEvent.click(within(picker).getByRole('checkbox', { name: /> 3$/ }));
   const thresholds = () => screen.getAllByTestId('quality-detector-cell').map(c => c.textContent!.match(/> (\d)/)![1]).sort();
   expect(thresholds()).toEqual(['1', '3']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个');
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个水平');
   expect(screen.getByRole('button', { name: '在表头选择探测算法' })).toHaveTextContent('2');
-  expect(within(picker).getByText('已选 2 / 3')).toBeInTheDocument();
+  expect(within(picker).getByText('已选 2 / 3 个水平')).toBeInTheDocument();
   // 再点一次取消其中一个
   fireEvent.click(within(picker).getByRole('checkbox', { name: /> 1$/ }));
   expect(thresholds()).toEqual(['3']);
@@ -507,13 +507,14 @@ it('places independent filter results immediately after capture, runs without se
   s.study.selectedRowIds = qualityDisplayRows(s.study).map(r => r.id);
   s.study.filterReadings = qualityComparisonRows(s.study).filter(r => r.source.symbol !== 'PENDINGUSDT').map(r => ({ key: qualityFilterReadingKey(r, f), value: r.source.symbol === 'LOWUSDT' ? .5 : .9, at: T }));
   const view = render(<FishQuality state={s}/>);
-  const headers = screen.getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
+  const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
+  const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
   expect(headers[4]).toHaveTextContent('捕捞过程'); expect(headers[5]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
   expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
   const run = screen.getByRole('button', { name: '开始过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.startFilter).toHaveBeenCalledTimes(1);
   const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');
   expect(reading('LOWUSDT')).toHaveTextContent('0.5不满足'); expect(reading('HIGHUSDT')).toHaveTextContent('0.9满足'); expect(reading('PENDINGUSDT')).toHaveTextContent('—待计算');
-  const sorter = within(filterColumn).getByRole('button'); fireEvent.click(sorter);
+  const sorter = within(filterColumn).getByRole('button', { name: /读数排序/ }); fireEvent.click(sorter);
   expect(filterColumn).toHaveAttribute('aria-sort', 'descending'); expect(screen.getAllByTestId('quality-fish-row').at(-1)).toHaveTextContent('PENDINGUSDT');
   fireEvent.click(sorter); expect(filterColumn).toHaveAttribute('aria-sort', 'ascending'); expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('LOWUSDT');
   s.study = { ...s.study, sellPlans: s.study.sellPlans.map(p => ({ ...p, buyFilters: [{ ...f, threshold: .4 }] })) };
@@ -596,4 +597,39 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
  expect(screen.getByTestId('quality-veto-risk-summary')).toHaveTextContent('1分钟内跌幅 ≥ 2.5%；5分钟内跌幅 ≥ 4%');
  fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
  expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})]);
+});
+
+
+it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
+  const s = state(); render(<FishQuality state={s}/>);
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '8');
+  expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('1 个变量 · 3 个水平');
+  fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
+  expect(within(screen.getByTestId('quality-detector-picker')).getByText('3 个水平')).toBeInTheDocument();
+  expect(within(screen.getByTestId('quality-detector-picker')).getAllByRole('checkbox')).toHaveLength(3);
+  fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+  const launch = screen.getByRole('button', { name: '统计分析 · 全部卖出算法' });
+  expect(launch.className).toContain('text-muted-foreground/30'); fireEvent.click(launch);
+  const dialog = screen.getByTestId('quality-statistics-dialog');
+  expect(within(dialog).getByRole('heading', { name: '卖出算法 · 统计分析' })).toBeInTheDocument();
+  for (const n of [5, 8, 10]) expect(within(dialog).getByRole('region', { name: `静态回撤${n}%以内` })).toBeInTheDocument();
+  expect(s.setRule).not.toHaveBeenCalled(); expect(s.setSelectedRows).not.toHaveBeenCalled(); expect(s.start).not.toHaveBeenCalled();
+});
+
+it('statistics counts one actual entry across detector display rows and invalidates inference after level changes', async () => {
+  const s = state(), plan = s.study.sellPlans![0]; plan.rule = {metric: plan.metric,direction:'<',threshold:.5};
+  s.study.results = qualityComparisonRows(s.study).map(row => ({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',returnPct:4,adversePct:-5,heldHours:3}));
+  render(<FishQuality state={s}/>);
+  fireEvent.click(screen.getByRole('button',{name:'统计分析 · 全部卖出算法'}));
+  const dialog = screen.getByTestId('quality-statistics-dialog');
+  expect(within(dialog).getByRole('region',{name:'静态回撤5%以内'})).toHaveTextContent('已卖出 1 笔');
+  expect(within(within(dialog).getByRole('region',{name:'静态回撤5%以内'})).getByRole('img',{name:/盈利涨幅分布/})).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('tab',{name:'推断统计'}));
+  fireEvent.click(within(dialog).getByRole('button',{name:'运行推断统计'}));
+  expect(await within(dialog).findByText('参照水平 · 标的簇')).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('tab',{name:'统计结果'}));
+  expect(within(dialog).getByText(/有效已卖出 1 笔，胜率 100.00%/)).toBeInTheDocument();
+  fireEvent.change(within(dialog).getByLabelText('统计算法水平'),{target:{value:s.study.sellPlans![1].id}});
+  expect(within(dialog).getByText(/尚未运行当前范围/)).toBeInTheDocument();
+  expect(s.setFilters).not.toHaveBeenCalled(); expect(s.setHoldingVetoes).not.toHaveBeenCalled();
 });
