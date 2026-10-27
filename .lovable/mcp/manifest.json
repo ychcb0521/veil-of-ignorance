@@ -5,15 +5,16 @@
   "auth": {
     "type": "oauth",
     "issuer": "https://pyvndfzpbsgzinqxairn.supabase.co/auth/v1",
+    "require_oauth_client_claim": true,
     "accepted_audiences": [
       "authenticated"
     ]
   },
   "mcp": {
     "server": {
-      "name": "trading-journal-mcp",
+      "name": "veil-of-ignorance",
       "version": "0.1.0",
-      "title": "交易复盘中心 MCP"
+      "title": "veil-of-ignorance"
     },
     "tools": [
       {
