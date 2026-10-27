@@ -390,7 +390,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
             <PlanTabs plans={plans} active={monitorPlan?.id} count={p => activeHoldingVetoes(p.holdingVetoes).length} label="选择要设置持仓监测的卖出方案" onSelect={setMonitorPlanId}/>
             {monitorPlan && <HoldingMonitorEditor key={JSON.stringify([monitorPlan.id, monitorPlan.holdingVetoes ?? []])} state={state} plan={monitorPlan} done={() => setMonitorOpen(false)}/>}
           </PopoverContent></Popover>
-          <FishMonitorLibrary study={study} onJump={onJump} canJump={canJump}/>
+          <FishMonitorLibrary study={study} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn}/>
         </FishQualityModule>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">

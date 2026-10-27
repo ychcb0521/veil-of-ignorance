@@ -9,6 +9,8 @@ import type { QualityGroup } from './quality';
 import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { syncQualitySellDefinitions } from './qualityComparison';
+import { isMonitorCampaignId, monitorCampaignRecordId, qualityMonitorCampaignId, qualityMonitorCampaignRun } from './qualityMonitorCampaign';
+import type { QualityMonitorRecord, QualityMonitorSetting } from './qualityMonitorLibrary';
 
 /**
  * 【用户要求】2026-10-26「探测比较模块中要增加一个指标"探测信号类别"，用于后续的观察和统计」
@@ -22,8 +24,8 @@ export function qualityDetectorCategory(detectors: readonly QualityGroup[]): str
 export type QualityCampaignData = Awaited<ReturnType<typeof getCampaignFullData>>;
 const iso = (time: number) => new Date(time).toISOString();
 /** Adapt the frozen paper trade into the exact inputs of existing campaign charts/metrics/exports. */
-export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect'): QualityCampaignData {
-  const { sample, plan, result: r } = run, id = qualityCampaignId(r.key, section), closed = r.status === 'closed';
+export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string): QualityCampaignData {
+  const { sample, plan, result: r } = run, id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
   const legId = `${id}-main`, recordId = `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
@@ -91,17 +93,33 @@ export function qualityCampaignDataFromStudy(owner: string, study: FishQualitySt
   if (section === 'quality') {
     // 合并板块（卖出与探测）：卖出试验里买入的交易 + 固定卖出方案做探测的交易，同一场只列一次
     const sell = (run: QualityCampaignRun) => { const plan = study.sellPlans?.find(p => p.id === run.plan.id); return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass'; };
-    return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (detection(run) || sell(run)))
+    const rows = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (detection(run) || sell(run)))
       .map(run => buildQualityCampaignData(owner, run, detection(run) ? 'detect' : 'sell'));
+    return includeMonitorCampaigns(owner,study,rows);
   }
   const bought = (run: QualityCampaignRun) => {
     if (section !== 'sell') return true;
     const plan = study.sellPlans?.find(p => p.id === run.plan.id);
     return !activeBuyFilters(study, plan).length || qualityFilterStatus(study, run.sample, plan, readings).state === 'pass';
   };
-  return (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
+  const rows = (archiveQualityStudy(study).campaignRuns ?? []).filter(run => isCurrentQualityRun(run) && hasQualityExit(run.plan) && hasQualityCampaign(run.result) && (section === 'sell' || !!run.detectionAt && run.detectors.length > 0)
     && bought(run))
     .map(run => buildQualityCampaignData(owner, run, section));
+  return section==='sell'?includeMonitorCampaigns(owner,study,rows):rows;
+}
+
+/** Library-only history belongs in the campaign list too; do not duplicate the same archived trade. */
+function includeMonitorCampaigns(owner:string,study:FishQualityStudy,rows:QualityCampaignData[]):QualityCampaignData[] {
+  const identity=(run:QualityCampaignRun)=>JSON.stringify([run.result.key,run.sample.source.exchange??'binance',run.sample.source.market??'crypto',run.sample.source.symbol.toUpperCase(),run.result.entryTime,qualitySellKey(run.plan),run.plan.buyFilters??[],run.detectors.map(d=>[d.snapshot.featureId,d.metric,d.snapshot.definitionKey,d.snapshot.direction,d.snapshot.threshold])]);
+  const keys=new Set(rows.map(r=>r.campaign.comparison?.runKey));
+  const seen=new Set((archiveQualityStudy(study).campaignRuns??[]).filter(r=>keys.has(r.result.key)).map(identity));
+  const settings=new Map(study.monitorLibrary?.settings.map(s=>[s.id,s])??[]),next=[...rows];
+  for(const record of study.monitorLibrary?.records??[]) {
+    const setting=settings.get(record.settingId),run=setting&&qualityMonitorCampaignRun(record,setting);
+    if(!run||seen.has(identity(run)))continue;
+    seen.add(identity(run));next.push(buildMonitorCampaignData(owner,record,setting!));
+  }
+  return next;
 }
 export async function listQualityCampaignData(owner: string, section: 'sell' | 'detect' | 'quality' = 'quality') {
   const loaded = await loadQualityStudy(owner);
@@ -113,7 +131,9 @@ export async function listQualityCampaignData(owner: string, section: 'sell' | '
 export async function loadQualityCampaignData(owner: string, id: string): Promise<QualityCampaignData> {
   if (!isQualityCampaignId(id)) throw new Error('比较战役链接无效');
   const section = id.startsWith('fish-detect-') ? 'detect' : 'sell';
-  const loaded = await loadQualityStudy(owner), runs = archiveQualityStudy(loaded.study).campaignRuns ?? [];
+  const loaded = await loadQualityStudy(owner);
+  if (isMonitorCampaignId(id)) return qualityMonitorCampaignDataFromStudy(owner,loaded.study,id);
+  const runs = archiveQualityStudy(loaded.study).campaignRuns ?? [];
   let run = runs.find(row => qualityCampaignId(row.result.key,section) === id);
   const visited = new Set<string>();
   while (run?.supersededBy) {
@@ -123,4 +143,19 @@ export async function loadQualityCampaignData(owner: string, id: string): Promis
   if (!run) throw new Error('本账号未找到这场比较战役，请在保存鱼质量结果的浏览器中打开');
   if (!hasQualityEntry(run.result)) throw new Error(`此战役纠错未通过：${run.repair?.error ?? '缺少可靠成交数据'}。原记录仍保留，可在比较列表重试纠错。`);
   return buildQualityCampaignData(owner,run,section);
+}
+
+/** Resolve directly from the persisted library: current plans, selection and deleted samples cannot change history. */
+export function qualityMonitorCampaignDataFromStudy(owner:string, study:FishQualityStudy, id:string):QualityCampaignData {
+  const recordId=monitorCampaignRecordId(id),record=study.monitorLibrary?.records.find(r=>r.id===recordId);
+  const setting=record&&study.monitorLibrary?.settings.find(s=>s.id===record.settingId);
+  if(!record||!setting)throw new Error('本账号未找到这条监测记录，请在保存该监测库的账号中打开');
+  return buildMonitorCampaignData(owner,record,setting);
+}
+function buildMonitorCampaignData(owner:string,record:QualityMonitorRecord,setting:QualityMonitorSetting):QualityCampaignData {
+  const run=qualityMonitorCampaignRun(record,setting);
+  if(!run)throw new Error('这条监测记录尚未形成有效交易，不能生成交易战役');
+  const data=buildQualityCampaignData(owner,run,'sell',qualityMonitorCampaignId(record.id));
+  data.campaign.notes += `\n监测库历史快照 · ${setting.filtersKnown?'买前过滤：'+(setting.plan.buyFilters?.map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')||'无'):'历史买前条件未记录'}\n记录编号：${record.id}`;
+  return data;
 }

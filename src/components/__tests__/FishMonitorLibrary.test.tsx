@@ -68,7 +68,7 @@ it('filters exact monitoring algorithms, resets paging, and sorts every data hea
   expect(screen.getByRole('columnheader', { name: /收益率/ })).toHaveAttribute('aria-sort', 'descending');
   fireEvent.click(screen.getByRole('button', { name: '监测库按收益率排序' }));
   expect(within(screen.getAllByTestId('monitor-library-row')[0]).getByRole('button', { name: 'COIN0USDT' })).toBeInTheDocument();
-  for (const h of screen.getAllByRole('columnheader').filter(h => h.textContent !== '跳转')) expect(within(h).getByRole('button')).toBeInTheDocument();
+  for (const h of screen.getAllByRole('columnheader').filter(h => !['跳转','交易战役'].includes(h.textContent??''))) expect(within(h).getByRole('button')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '导出监测库数据' })).toHaveTextContent('61');
   fireEvent.change(screen.getByLabelText('搜索监测库'), { target: { value: 'no-such-symbol' } });
   expect(screen.getByRole('button', { name: '导出监测库数据' })).toBeDisabled();
@@ -111,4 +111,25 @@ it('backfills all existing resonance beyond the screenshot and automatically inc
   h.rerender(<FishMonitorLibrary study={next}/>);
   expect(screen.getAllByTestId('monitor-focus-signal')).toHaveLength(15);expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(5);
   expect(screen.getByRole('button',{name:'导出监测库数据'})).toHaveTextContent('5');
+});
+
+
+it('links every frozen trade, including other pages and focused signals, to its own campaign without requiring chart support',async()=>{
+ const {qualityMonitorCampaignPath}=await import('@/lib/fish/qualityMonitorCampaign');
+ const study=archived();
+ const opened=vi.fn();render(<FishMonitorLibrary study={study} canJump={()=>false} onOpenCampaign={opened}/>);
+ fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ const rows=screen.getAllByTestId('monitor-library-row');
+ for(const row of rows){
+   const link=within(row).getByRole('link',{name:/交易战役/});expect(link).toHaveAttribute('href',expect.stringContaining('/journal/campaigns/fish-sell-monitor-'));
+ }
+ const record=study.monitorLibrary!.records[0];
+ expect(screen.getAllByRole('link',{name:/交易战役/}).map(a=>a.getAttribute('href'))).toContain(qualityMonitorCampaignPath(record.id));
+ within(rows[0]).getByRole('link',{name:/交易战役/}).addEventListener('click',e=>e.preventDefault());fireEvent.click(within(rows[0]).getByRole('link',{name:/交易战役/}));expect(opened).toHaveBeenCalledOnce();
+});
+it('never links failed filters or missing entry data to a fictitious campaign',()=>{
+ const s=archived();const [a,b]=s.monitorLibrary!.records;
+ s.monitorLibrary!.records=[{...a,filterStatus:{state:'fail',detail:'未买入'}},{...b,result:{...b.result!,entryPrice:undefined}}];
+ render(<FishMonitorLibrary study={s}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+ expect(screen.queryByRole('link',{name:/交易战役/})).toBeNull();expect(screen.getByTitle('未买入，不生成交易战役')).toBeInTheDocument();
 });
