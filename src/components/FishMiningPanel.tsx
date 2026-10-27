@@ -37,13 +37,12 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref }: { mining: F
             <div className="space-y-1.5 border-t border-border/50 pt-2.5 text-muted-foreground">{!sellFixed && <p className="text-amber-700 dark:text-amber-400">还没固定卖出方案：挖到的鱼会入舱并加入评估，在卖出列的设置中固定一套方案后，才会按它比较各探测算法。</p>}<p>挖到的鱼直接进「鱼舱」（不算新鱼、不发邮件），同时加入鱼质量并自动勾选，按固定的卖出方案评估。</p><p>同一段持续的信号只记第一次能发现的那一档，按那一档的捕捞时刻买入。捕捞时挖掘自动让路，空闲后接着挖。</p><a href={campaignHref} className="inline-flex items-center gap-0.5 text-primary hover:underline">在交易战役查看<ArrowUpRight aria-hidden className="h-3 w-3"/></a></div>
           </div>
         </PopoverContent></Popover>
-      </>} progress={<div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-muted/60" role="progressbar" aria-label="挖掘进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已挖 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
+      </>} status={
         <span role="status" aria-label={status} title={status} className={`inline-flex min-w-0 flex-wrap items-center gap-1 text-[10px] ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}><span aria-hidden className={`h-1 w-1 shrink-0 rounded-full ${running ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>{statusLabel}{running && progress && progress.total > 0 && <span className="font-mono tabular-nums text-foreground/70" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>
-      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+      } progress={<div className="mt-1 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="挖掘进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已挖 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
         <label className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">目标<input aria-label="挖掘目标条数" type="number" min="1" step="100" value={target ?? s.target} onChange={e => setTarget(e.target.value)} onBlur={applyTarget} onKeyDown={e => { if (e.key === 'Enter') applyTarget(); }} className="h-7 w-16 rounded-md border border-transparent bg-muted/50 px-1.5 font-mono text-[11px] tabular-nums outline-none hover:bg-muted focus-visible:border-ring/60"/>条</label>
         {s.enabled
           ? <button type="button" onClick={mining.pause} className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 px-2.5 text-[11px] hover:bg-muted"><Pause className="h-3 w-3"/>暂停</button>
           : <button type="button" onClick={mining.start} className="inline-flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground hover:bg-primary/90"><Play className="h-3 w-3"/>{s.anchorsDone ? '继续挖掘' : '开始挖掘'}</button>}
-      </div>
   </FishQualityModule>;
 }

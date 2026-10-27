@@ -512,17 +512,24 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   expect(screen.getByRole('region', { name: '挖掘模块' })).toBeVisible();
   expect(screen.getByRole('region', { name: '过滤模块' })).toBeVisible();
   expect(screen.getByRole('region', { name: '监测模块' })).toBeVisible();
+  const modules = screen.getByTestId('quality-modules');
+  expect(Array.from(modules.children).map(el => el.getAttribute('aria-label'))).toEqual(['挖掘模块', '过滤模块', '监测模块']);
+  fireEvent.click(within(screen.getByRole('region', { name: '挖掘模块' })).getByRole('button', { name: '挖掘' }));
+  expect(screen.getByRole('region', { name: '挖掘模块' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /开始挖掘/ })).toBeNull();
+  fireEvent.click(within(screen.getByRole('region', { name: '挖掘模块' })).getByRole('button', { name: '挖掘' }));
   expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
 // 【用户要求】2026-10-27「这个地方属于同一个模块，放在一起」「卖出改成：监测」「把过滤独立出来，与监测并列」
-it('puts 过滤 in its own block beside the 监测 group of run controls, both on the left', () => {
+it('keeps filtering and monitoring in workflow order with controls on the left', () => {
   const s = state(); s.running = true; s.progress = { done: 2333, total: 2360, current: '' };
   render(<FishQuality state={s}/>);
   const group = screen.getByRole('region', { name: '监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('监测');
   for (const name of ['重新开始', '暂停', '鱼质量观察设置']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
-  expect(within(group).getByRole('button', { name: '2333/2360' })).toBeDisabled();
+  expect(within(group).getByRole('status')).toHaveTextContent('更新中2333 / 2360');
+  expect(within(group).queryByRole('button', { name: '更新收益' })).toBeNull();
   expect(within(group).queryByRole('button', { name: '过滤与持仓否决' })).toBeNull();
   expect(within(filter).getByRole('button', { name: '过滤与持仓否决' })).toBeInTheDocument();
   expect(filter.nextElementSibling).toBe(group);
