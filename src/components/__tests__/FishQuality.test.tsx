@@ -306,7 +306,7 @@ it('links only sold or held trades to their campaign; a registered buy waiting f
   render(<FishQuality state={s}/>);
   const first = screen.getAllByTestId('quality-fish-row')[0];
   expect(within(first).getByText('已卖出').closest('a')).not.toBeNull();
-  expect(within(first).getByText('待设门槛').closest('a')).toBeNull();
+  expect(within(first).getByText('待设卖出').closest('a')).toBeNull();
 });
 it('shows and independently sorts both drawdown columns next to each sell return, preserving zero and missing values',()=>{
  const s=state();s.study=importQualityLibrary(s.study,['HIGH','LOW','MISSING'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));

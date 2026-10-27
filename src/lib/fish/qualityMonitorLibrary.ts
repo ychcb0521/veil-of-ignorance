@@ -12,9 +12,60 @@ export interface QualityMonitorRecord {
   filterStatus: QualityFilterStatus; readings: QualityFilterReading[]; result?: QualityResult;
   firstSavedAt: number; updatedAt: number;
 }
+/**
+ * 一轮监测包含哪些记录。
+ * 【2026-10-27 审查】每轮都存全部记录编号会线性膨胀：1178 条信号 × 2 套方案每轮约 0.23 MB，
+ * 100 轮 24.5 MB，而监测中每 400 ms 就整份复制保存一次、账号同步也整份上传。
+ * 现在只存与上一轮的差异：base = 上一轮，added / removed = 这一轮多出 / 少了的记录；
+ * 没有 base 的轮（第一轮、历史快照、旧数据）照旧存完整的 recordIds。轮次一经开始就不再改动，差异链因此稳定。
+ */
 export interface QualityMonitorRound {
   id: string; startedAt: number; updatedAt: number; finishedAt?: number;
-  state: 'running' | 'complete' | 'paused' | 'failed'; recordIds: string[]; legacy?: boolean; error?: string;
+  state: 'running' | 'complete' | 'paused' | 'failed'; recordIds?: string[]; base?: string; added?: string[]; removed?: string[];
+  legacy?: boolean; error?: string;
+}
+/** 还原某一轮的完整记录编号（沿差异链回溯到存完整清单的那一轮）。基准缺失时只算本轮新增的部分。 */
+export function qualityMonitorRoundRecordIds(library: Pick<QualityMonitorLibrary, 'rounds'>, round: QualityMonitorRound, cache = new Map<string, string[]>()): string[] {
+  const byId = new Map(library.rounds.map(r => [r.id, r]));
+  const chain: QualityMonitorRound[] = [];
+  const seen = new Set<string>();
+  let cursor: QualityMonitorRound | undefined = round;
+  while (cursor && !cache.has(cursor.id) && !seen.has(cursor.id)) {
+    seen.add(cursor.id); chain.push(cursor);
+    cursor = cursor.recordIds || !cursor.base ? undefined : byId.get(cursor.base);
+  }
+  let ids = cursor && cache.has(cursor.id) ? cache.get(cursor.id)! : [];
+  for (const r of chain.reverse()) {
+    if (r.recordIds) ids = r.recordIds;
+    else { const removed = new Set(r.removed ?? []), next = ids.filter(id => !removed.has(id)), have = new Set(next); for (const id of r.added ?? []) if (!have.has(id)) { next.push(id); have.add(id); } ids = next; }
+    cache.set(r.id, ids);
+  }
+  return ids;
+}
+/** 新一轮相对上一轮（非历史快照、开始时间最晚的那轮）存差异；差异比完整清单还大时存完整清单。 */
+function encodeRound(library: QualityMonitorLibrary, ids: string[]): Pick<QualityMonitorRound, 'recordIds' | 'base' | 'added' | 'removed'> {
+  const previous = library.rounds.filter(r => !r.legacy).reduce<QualityMonitorRound | undefined>((latest, r) => !latest || r.startedAt >= latest.startedAt ? r : latest, undefined);
+  if (!previous) return { recordIds: ids };
+  const before = qualityMonitorRoundRecordIds(library, previous), prior = new Set(before), now = new Set(ids);
+  const added = ids.filter(id => !prior.has(id)), removed = before.filter(id => !now.has(id));
+  return added.length + removed.length >= ids.length ? { recordIds: ids } : { base: previous.id, added, removed };
+}
+/** 旧数据里每轮都存完整清单的，改存成差异（内容不变，轮次与时间戳不动）。 */
+export function compactQualityMonitorRounds(study: FishQualityStudy): FishQualityStudy {
+  const library = study.monitorLibrary;
+  if (!library || library.rounds.filter(r => !r.legacy && r.recordIds).length < 2) return study;
+  const cache = new Map<string, string[]>(), resolved = new Map(library.rounds.map(r => [r.id, qualityMonitorRoundRecordIds(library, r, cache)]));
+  const ordered = library.rounds.filter(r => !r.legacy).sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
+  const encoded = new Map<string, QualityMonitorRound>();
+  ordered.forEach((round, index) => {
+    const ids = resolved.get(round.id)!, previous = ordered[index - 1];
+    const { recordIds: _full, base: _base, added: _added, removed: _removed, ...rest } = round;
+    if (!previous) { encoded.set(round.id, { ...rest, recordIds: ids }); return; }
+    const prior = new Set(resolved.get(previous.id)), now = new Set(ids);
+    const added = ids.filter(id => !prior.has(id)), removed = resolved.get(previous.id)!.filter(id => !now.has(id));
+    encoded.set(round.id, added.length + removed.length >= ids.length ? { ...rest, recordIds: ids } : { ...rest, base: previous.id, added, removed });
+  });
+  return { ...study, monitorLibrary: { ...library, rounds: library.rounds.map(r => encoded.get(r.id) ?? r) } };
 }
 export interface QualityMonitorLibrary {
   version: 1; importedLegacy: boolean; settings: QualityMonitorSetting[]; records: QualityMonitorRecord[]; rounds: QualityMonitorRound[];
@@ -66,7 +117,7 @@ export function beginQualityMonitorRound(study: FishQualityStudy, frozen: FishQu
     records.set(task.id, recordFor(task, readings, results.get(task.resultKey), at, records.get(task.id)));
   }
   const roundId = `monitor-${at}-${++sequence}-${Math.random().toString(36).slice(2, 10)}`;
-  const round: QualityMonitorRound = { id: roundId, startedAt: at, updatedAt: at, state: 'running', recordIds: [...new Set([...tasks.values()].map(t => t.id))] };
+  const round: QualityMonitorRound = { id: roundId, startedAt: at, updatedAt: at, state: 'running', ...encodeRound(library, [...new Set([...tasks.values()].map(t => t.id))]) };
   return { study: { ...study, monitorLibrary: { ...library, settings: [...catalog.values()], records: [...records.values()], rounds: [...library.rounds, round] } }, capture: { roundId, tasks, readings, results } };
 }
 export function captureQualityMonitorResult(study: FishQualityStudy, capture: QualityMonitorCapture, result: QualityResult, at: number): FishQualityStudy {
@@ -103,8 +154,9 @@ export function adoptQualityMonitorHistory(study: FishQualityStudy): FishQuality
   const round: QualityMonitorRound | undefined = ids.size ? { id: 'monitor-legacy-history', startedAt: earliest, updatedAt: latest, finishedAt: latest, state: 'complete', recordIds: [...ids], legacy: true } : undefined;
   return { ...study, monitorLibrary: { ...library, importedLegacy: true, settings: [...catalog.values()], records: [...records.values()], rounds: round ? [...library.rounds, round] : library.rounds } };
 }
-/** A persisted batch cannot still be running in a newly mounted evaluator. Retain all partial rows. */
-export function recoverQualityMonitorRounds(study: FishQualityStudy, at = Date.now()): FishQualityStudy {
+/** A persisted batch cannot still be running in a newly mounted evaluator. Retain all partial rows. Old full-list rounds are compacted. */
+export function recoverQualityMonitorRounds(input: FishQualityStudy, at = Date.now()): FishQualityStudy {
+  const study = compactQualityMonitorRounds(input);
   const library = study.monitorLibrary; if (!library?.rounds.some(r => r.state === 'running')) return study;
   return { ...study, monitorLibrary: { ...library, rounds: library.rounds.map(r => r.state === 'running' ? { ...r, state: 'paused', updatedAt: at, finishedAt: at } : r) } };
 }

@@ -27,7 +27,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果
       if (f && f.state !== 'pass') return [f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null];
-      if (filters.length && !hasQualityExit(p)) return ['未设置卖出', null, null, null];
+      if (filters.length && !hasQualityExit(p)) return ['待设卖出', null, null, null];
       const held = r && (r.status === 'closed' || r.status === 'open') && Number.isFinite(r.heldHours) ? r.heldHours! : null;
       return [r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityDrawdownPct(r,'dynamic'),held]; }),
     row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${groups.get(row.detectorId)!.snapshot.direction ?? '>'} ${groups.get(row.detectorId)!.snapshot.threshold}` : '—', row.enteredAt ? formatUTC8(row.enteredAt) : null,
@@ -47,7 +47,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     return [run.sample.source.symbol, run.sample.origin === 'library' ? '信号库' : '鱼', formatUTC8(run.sample.source.timeMs),
       run.detectors.map(d => `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}`).join('；') || '—',
       run.plan.label, run.plan.rule?.metric ?? run.plan.metric, run.plan.rule?.direction ?? '', run.plan.rule?.threshold ?? null,
-      r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设门槛',
+      r.status === 'closed' ? '已卖出' : r.status === 'open' ? '持有（浮盈）' : '待设卖出',
       r.entryTime ? formatUTC8(r.entryTime) : null, r.entryPrice ?? null, r.endTime ? formatUTC8(r.endTime) : null, r.endPrice ?? null,
       r.returnPct ?? null, r.pnl ?? null, r.peakPct ?? null, r.adversePct ?? null, r.drawdownPct ?? null, r.uncapturedPct ?? null,
       r.heldHours ?? null, run.observeHours, 100, 1, `${r.key} · ${qualityRuleLabel(run.plan)}`,

@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { FishQualityInfo } from '@/components/FishQualityModule';
 import { qualityDefinition, qualityDrawdownPct, type FishQualityStudy, type QualityResult } from '@/lib/fish/quality';
 import { qualityRuleLabel } from '@/lib/fish/qualityCampaignArchive';
-import type { QualityMonitorRecord, QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
+import { qualityMonitorRoundRecordIds, type QualityMonitorRecord, type QualityMonitorSetting } from '@/lib/fish/qualityMonitorLibrary';
 import { activeHoldingVetoes } from '@/lib/fish/qualityVeto';
 import { formatUTC8 } from '@/lib/timeFormat';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -21,7 +21,7 @@ function status(record: QualityMonitorRecord, setting: QualityMonitorSetting): s
     if (record.filterStatus.state === 'error') return '过滤缺数据';
     if (record.filterStatus.state === 'pending') return '待过滤';
   }
-  return record.result?.status === 'closed' ? '已卖出' : record.result?.status === 'open' ? '持有中' : record.result?.status === 'error' ? '缺数据' : record.result?.entryPrice ? '待设门槛' : '待评估';
+  return record.result?.status === 'closed' ? '已卖出' : record.result?.status === 'open' ? '持有中' : record.result?.status === 'error' ? '缺数据' : record.result?.entryPrice ? '待设卖出' : '待评估';
 }
 function Formula({ label, snapshot }: { label: string; snapshot: QualityMonitorSetting['plan']['snapshot'] }) {
   let formula: string; try { formula = qualityDefinition(snapshot).formula; } catch { formula = snapshot.definitionKey; }
@@ -36,7 +36,7 @@ export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQual
   const selectedRound = rounds.find(r => r.id === roundId);
   const records = useMemo(() => {
     if (!open) return [];
-    const ids = selectedRound ? new Set(selectedRound.recordIds) : null, needle = query.trim().toUpperCase();
+    const ids = selectedRound && library ? new Set(qualityMonitorRoundRecordIds(library, selectedRound)) : null, needle = query.trim().toUpperCase();
     return [...(library?.records ?? [])].filter(r => settings.has(r.settingId) && (!ids || ids.has(r.id)) && (!needle || r.source.symbol.toUpperCase().includes(needle) || qualityRuleLabel(settings.get(r.settingId)!.plan).toUpperCase().includes(needle)))
       .sort((a, b) => b.updatedAt - a.updatedAt || b.source.timeMs - a.source.timeMs || a.source.symbol.localeCompare(b.source.symbol));
   }, [library?.records, selectedRound, query, settings, open]);
@@ -71,12 +71,12 @@ export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQual
           <tbody>{visible.map(record => { const setting = settings.get(record.settingId)!, result: QualityResult | undefined = resultVisible(record, setting) ? record.result : undefined; return <tr key={record.id} className="border-t border-border/40 hover:bg-muted/20" data-testid="monitor-library-row">
             <td className="px-3 py-2 font-mono"><button type="button" className="hover:text-primary hover:underline disabled:cursor-default disabled:no-underline disabled:hover:text-inherit" disabled={!onJump || !!canJump && !canJump(record.source)} onClick={() => { setOpen(false); onJump?.(record.source); }}>{record.source.symbol}</button></td>
             <td className="px-3 py-2 font-mono text-muted-foreground" title={`买入时刻：${date(record.enteredAt)}`}>{date(record.source.timeMs)}</td>
-            <td className="px-3 py-2"><button type="button" className="inline-flex max-w-72 items-center gap-1 text-primary hover:underline" aria-label={`查看 ${record.source.symbol} ${qualityRuleLabel(setting.plan)} 监测条件`} onClick={() => setDetailId(detailId === record.id ? '' : record.id)}><span className="truncate">{qualityRuleLabel(setting.plan)}</span><ChevronDown aria-hidden className="h-3 w-3 shrink-0"/></button></td>
-            <td className="max-w-60 truncate px-3 py-2 text-muted-foreground" title={buying(setting)}>{buying(setting)}</td>
+            <td className="px-3 py-2"><button type="button" className="inline-flex max-w-56 items-center gap-1 text-primary hover:underline" title={qualityRuleLabel(setting.plan)} aria-label={`查看 ${record.source.symbol} ${qualityRuleLabel(setting.plan)} 监测条件`} onClick={() => setDetailId(detailId === record.id ? '' : record.id)}><span className="truncate">{qualityRuleLabel(setting.plan)}</span><ChevronDown aria-hidden className="h-3 w-3 shrink-0"/></button></td>
+            <td className="max-w-52 truncate px-3 py-2 text-muted-foreground" title={buying(setting)}>{buying(setting)}</td>
             <td className="px-3 py-2 text-muted-foreground">{status(record, setting)}</td>
             <td className={`px-3 py-2 font-mono ${result?.returnPct! > 0 ? 'text-emerald-600' : result?.returnPct! < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>{pct(result?.returnPct)}</td>
             <td className="px-3 py-2 font-mono">{pct(qualityDrawdownPct(result, 'static')).replace(/^\+/, '')}</td><td className="px-3 py-2 font-mono">{pct(qualityDrawdownPct(result, 'dynamic')).replace(/^\+/, '')}</td>
-            <td className="px-3 py-2 font-mono text-muted-foreground">{date(record.updatedAt)}</td>
+            <td className="px-3 py-2 font-mono text-muted-foreground" title={date(record.updatedAt)}>{date(record.updatedAt).slice(5, 16)}</td>
           </tr>; })}</tbody>
         </table>
         {!records.length && <p className="px-4 py-8 text-center text-[11px] text-muted-foreground">{library?.records.length ? '没有匹配的监测记录。' : '暂无监测记录。开始持仓监测后，每轮会自动保存。'}</p>}
