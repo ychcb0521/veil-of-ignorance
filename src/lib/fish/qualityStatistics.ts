@@ -25,7 +25,7 @@ export function qualitySellType(result: QualityResult, plan: QualityGroup): stri
 /** Entering a filter level starts with its owning seller, including when another seller was previously fixed. */
 export function qualityStatisticsDefaultSell(study: FishQualityStudy, category: QualityStatisticsCategory, levelId?: string) {
   const plans = study.sellPlans ?? [], column = category === 'filter' && levelId ? qualityFilterColumns(study).find(c => c.id === levelId) : undefined;
-  const owners = column ? plans.filter(p => activeBuyFilters(study, p).some(f => qualityVariableKey(f.snapshot, f.metric) === qualityVariableKey(column.filter.snapshot, column.filter.metric) && f.direction === column.filter.direction && f.threshold === column.filter.threshold)) : plans;
+  const owners = column && !study.independentFilters ? plans.filter(p => activeBuyFilters(study, p).some(f => qualityVariableKey(f.snapshot, f.metric) === qualityVariableKey(column.filter.snapshot, column.filter.metric) && f.direction === column.filter.direction && f.threshold === column.filter.threshold)) : plans;
   return (owners.find(p => p.id === study.selectedSellId) ?? owners[0] ?? plans[0])?.id ?? '';
 }
 export function qualityStatisticsSeries(study: FishQualityStudy, rows: readonly QualitySample[], category: QualityStatisticsCategory, fixedSellId?: string): QualityStatisticSeries[] {
@@ -63,7 +63,7 @@ export function qualityStatisticsSeries(study: FishQualityStudy, rows: readonly 
   return qualityFilterColumns(study).map(column => {
     const filter = column.filter;
     const subset = rows.filter(row => { const value = qualityFilterValue(row, filter, readings); return value != null && (filter.direction === '>' ? value > filter.threshold : value < filter.threshold); });
-    const series = build(fixed, subset, { id: column.id, variableId: qualityVariableKey(filter.snapshot, filter.metric), variable: filter.label, level: qualityLevelText(filter), context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'}；按本条件满足的记录分组，仍遵守该卖出方案全部买入条件` });
+    const series = build(fixed, subset, { id: column.id, variableId: qualityVariableKey(filter.snapshot, filter.metric), variable: filter.label, level: qualityLevelText(filter), context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'}；按本条件满足的记录分组${study.independentFilters ? '，不限制独立监测' : '，仍遵守该卖出方案全部买入条件'}` });
     // Count filter exclusions by unique entry, not expanded detector rows.
     const unique = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
     const missing = unique.filter(row => qualityFilterValue(row, filter, readings) == null).length;

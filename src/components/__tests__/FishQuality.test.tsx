@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
-import { importQualityFish, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
+import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
@@ -238,31 +238,30 @@ it('hands the evaluator the on-screen rows first and updates that order after sc
 });
 
 // 【用户要求】2026-10-26 比较卖出时的买入过滤（条件由用户设）
-it('lets the user add, edit and apply buy conditions, then marks rows that were not bought', async () => {
+it('saves standalone conditions and shows their judgments without masking selling results', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state(); render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '买入过滤条件' }));
-  expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
+  expect(screen.getByText('未设置过滤条件')).toBeVisible();
   expect(screen.queryByTestId('quality-holding-veto-editor')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
   expect(screen.getByLabelText('买入条件 1 指标')).toHaveValue('state:state'); expect(screen.getByLabelText('买入条件 1 门槛')).toHaveValue(.7);
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '' } }); fireEvent.click(screen.getByRole('button', { name: '保存过滤条件' }));
   expect(screen.getByRole('alert')).toHaveTextContent('有限数字'); expect(s.setFilters).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: /^应用到「状态 S 原始值」筛选$/ }));
-  expect(s.setFilters).toHaveBeenCalledWith(s.study.sellPlans![0].id, [expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'), { target: { value: '0.65' } }); fireEvent.click(screen.getByRole('button', { name: '保存过滤条件' }));
+  expect(s.setFilters).toHaveBeenCalledWith([expect.objectContaining({ label: '状态 S 原始值', metric: 'state', direction: '>', threshold: .65, enabled: true })]);
   cleanup();
   const f = makeQualityBuyFilter('state:state', '>', .65), row = qualityComparisonRows(s.study)[0];
-  s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
+  s.study = separateQualityFilters({ ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] });
   render(<FishQuality state={s}/>);
   // 旧版本的全局过滤沿用到每套方案
-  expect(screen.queryByText('2 条买入条件')).toBeNull();
+  expect(screen.queryByText('1 条买入条件')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
-  expect(screen.getByText('2 条买入条件')).toBeVisible();
+  expect(screen.getByText('1 条买入条件')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: '买前过滤说明' }));
-  const notBought = within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入');
-  expect(notBought.length).toBeGreaterThanOrEqual(2);
-  expect(notBought[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
+  expect(within(screen.getAllByTestId('quality-fish-row')[0]).queryByText('未买入')).toBeNull();
+  expect(screen.getAllByTestId('quality-filter-cell')[0]).toHaveAttribute('data-filter-state','fail');
   // 【用户要求】2026-10-26 比较卖出与比较探测合并为一个视图：没有分页
   expect(screen.queryByRole('tab', { name: /比较探测/ })).toBeNull();
 });
@@ -406,7 +405,7 @@ it('opens with the remembered tab, filters and sort when coming back from a camp
   expect(screen.getByLabelText('筛选鱼质量信号')).toHaveValue('');
 });
 // 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定」「在每个卖出算法的动态最大回撤的后面，再增加一个持仓时间」
-it('edits buy filters per sell plan, marks not-bought only under the plan that filters, and shows a sortable holding time after each dynamic drawdown', async () => {
+it('edits standalone filters without masking sell outcomes, with sortable holding times', async () => {
   const { makeQualityBuyFilter } = await import('@/lib/fish/qualityFilters');
   const { qualityFilterReadingKey } = await import('@/lib/fish/quality');
   const s = state();
@@ -414,6 +413,7 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   const [sPlan, cPlan] = s.study.sellPlans!, f = makeQualityBuyFilter('state:state', '>', .7);
   for (const p of [sPlan, cPlan]) p.rule = { metric: p.metric, direction: '<', threshold: .5 };
   sPlan.buyFilters = [f]; cPlan.buyFilters = [];
+  s.study = separateQualityFilters(s.study);
   const rows = qualityComparisonRows(s.study), by = (sym: string) => rows.find(r => r.source.symbol === sym)!;
   s.study.filterReadings = [{ key: qualityFilterReadingKey(by('BBBUSDT'), f), value: .1 }, { key: qualityFilterReadingKey(by('CCCUSDT'), f), value: .9 }];
   s.study.results = ['BBBUSDT', 'CCCUSDT'].flatMap((sym, i) => [sPlan, cPlan].map(p => ({ key: qualityResultKey(by(sym), p, 0), sampleId: by(sym).id, groupId: p.id, evaluatedAt: T, status: 'closed' as const, entryTime: T, entryPrice: 100, endTime: T + 1, endPrice: 101, returnPct: 1, pnl: 1, heldHours: i ? 30 : .5 })));
@@ -421,9 +421,9 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   const row = (sym: string) => screen.getAllByTestId('quality-fish-row').find(r => r.textContent!.includes(sym))!;
   // BBB 在状态 S 方案下没买入（不满足 > 0.7），在 CDA 方案（不过滤）下照常有结果
   const held = (sym: string) => within(row(sym)).getAllByTestId('quality-held-time').map(c => c.textContent);
-  expect(held('BBBUSDT')).toEqual(['—', '30 分钟']);
+  expect(held('BBBUSDT')).toEqual(['30 分钟', '30 分钟']);
   expect(held('CCCUSDT')).toEqual(['30.0 小时', '30.0 小时']);
-  expect(within(row('BBBUSDT')).getAllByText('未买入')).toHaveLength(1);
+  expect(within(row('BBBUSDT')).queryByText('未买入')).toBeNull();
   // 持仓时间列紧跟动态最大回撤，并且能排序
   const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
   const dyn = headers.findIndex(h => h.startsWith('动态最大回撤'));
@@ -431,14 +431,14 @@ it('edits buy filters per sell plan, marks not-bought only under the plan that f
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
   expect(order().slice(0, 2)).toEqual(['CCCUSDT', 'BBBUSDT']);
-  // 表头的「不过滤」直接打开这套方案的过滤设置
-  expect(screen.getByRole('button', { name: '设置状态 S 原始值的买入过滤' })).toHaveTextContent('买入过滤 1 条');
-  fireEvent.click(screen.getByRole('button', { name: '设置CDA 原始值的买入过滤' }));
-  expect(await screen.findByRole('tab', { name: 'CDA 原始值' })).toHaveAttribute('aria-selected', 'true');
-  expect(screen.getByText('未设置条件：全部信号都买入')).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
-  fireEvent.click(screen.getByRole('button', { name: /^应用到「CDA 原始值」筛选$/ }));
-  expect(s.setFilters).toHaveBeenLastCalledWith(cPlan.id, [expect.objectContaining({ metric: 'state', threshold: .7 })]);
+  expect(screen.queryByRole('button',{name:'设置状态 S 原始值的买入过滤'})).toBeNull();
+  expect(screen.queryByTestId('quality-filter-owner')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));
+  expect(screen.queryByRole('tablist',{name:'选择要设置过滤的卖出方案'})).toBeNull();
+  fireEvent.change(screen.getByLabelText('买入条件 1 门槛'),{target:{value:'0.8'}});
+  fireEvent.click(screen.getByRole('button',{name:'保存过滤条件'}));
+  expect(s.setFilters).toHaveBeenLastCalledWith([expect.objectContaining({metric:'state',threshold:.8})]);
+  expect(s.start).not.toHaveBeenCalled(); expect(s.startFilter).not.toHaveBeenCalled();
 });
 
 // 【用户要求】2026-10-27 把「重新开始」做进「开始监测」：主按钮开始 / 暂停，▾ 里「从头重新计算」

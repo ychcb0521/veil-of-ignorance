@@ -1,16 +1,17 @@
 import { formatUTC8 } from '@/lib/timeFormat';
-import { activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
+import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualitySample } from './quality';
 import { qualityTableMembers, qualityTableRange, type QualityTableRow } from './qualityTableRows';
 
 export interface QualityFilterColumn { id: string; filter: QualityBuyFilter; plans: string[] }
 /** Equal conditions share a column, while different thresholds/formulas remain distinguishable. */
 export function qualityFilterColumns(study: FishQualityStudy): QualityFilterColumn[] {
   const columns = new Map<string, QualityFilterColumn>();
-  for (const plan of study.sellPlans ?? []) for (const filter of activeBuyFilters(study, plan)) {
+  const sources = study.independentFilters ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
+  for (const plan of sources) for (const filter of plan.filters) {
     const id = JSON.stringify([filter.snapshot.definitionKey, filter.metric, filter.snapshot.interval, filter.direction, filter.threshold]);
     const previous = columns.get(id);
-    if (previous) { if (!previous.plans.includes(plan.label)) previous.plans.push(plan.label); }
-    else columns.set(id, { id, filter, plans: [plan.label] });
+    if (previous) { if (plan.label && !previous.plans.includes(plan.label)) previous.plans.push(plan.label); }
+    else columns.set(id, { id, filter, plans: plan.label ? [plan.label] : [] });
   }
   return [...columns.values()];
 }

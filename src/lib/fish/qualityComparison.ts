@@ -87,7 +87,7 @@ export function qualityDistribution(results: readonly QualityResult[]) {
 export function qualityComparisonStats(study: FishQualityStudy, rows: QualitySample[], closedOnly: boolean) {
   const plans = study.sellPlans ?? [], results = qualityResultMap(study);
   // 买入过滤只作用于比较卖出，且每套卖出方案各自一套：不满足、缺数据、还没读数的信号不进这套方案的统计
-  const filterOn = anyBuyFilters(study), readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
+  const filterOn = !study.independentFilters && anyBuyFilters(study), readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const signals = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
   const planFilters = plans.map(plan => {
     const on = activeBuyFilters(study, plan).length > 0, states = on ? signals.map(row => qualityFilterStatus(study, row, plan, readings).state) : [];

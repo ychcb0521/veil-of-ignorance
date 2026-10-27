@@ -30,8 +30,8 @@ export function qualityReturnTrades(study: FishQualityStudy, rows: readonly Qual
     const plan = plans.get(series.id)!;
     const filters = activeBuyFilters(study, plan);
     const filter = {
-      variable: combination(filters.map(f => ({ id: qualityVariableKey(f.snapshot, f.metric), label: f.label })), '未设置过滤'),
-      level: combination(filters.map(f => ({ id: JSON.stringify([qualityVariableKey(f.snapshot, f.metric), f.direction, f.threshold]), label: `${f.label} ${qualityLevelText(f)}` })), '未设置过滤'),
+      variable: combination(filters.map(f => ({ id: qualityVariableKey(f.snapshot, f.metric), label: f.label })), study.independentFilters ? '独立过滤（未绑定卖出）' : '未设置过滤'),
+      level: combination(filters.map(f => ({ id: JSON.stringify([qualityVariableKey(f.snapshot, f.metric), f.direction, f.threshold]), label: `${f.label} ${qualityLevelText(f)}` })), study.independentFilters ? '独立过滤（未绑定卖出）' : '未设置过滤'),
     };
     for (const trade of series.trades) {
       const ids = original.get(trade.id)?.groups ?? [...(fallback.get(trade.id) ?? [])];

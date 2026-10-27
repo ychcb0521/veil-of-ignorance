@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
-import { activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
+import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
 import { enableQualityComparison, syncQualitySellDefinitions } from '@/lib/fish/qualityComparison';
 import { loadQualityStudy, saveQualityStudy } from '@/lib/fish/qualityStore';
 import { archiveQualityResult, archiveQualityStudy, markQualityDetection } from '@/lib/fish/qualityCampaignArchive';
@@ -55,7 +55,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
       if (!active || epoch !== generation.current) return;
       const archived = recoverQualityFilterRounds(recoverQualityMonitorRounds(adoptQualityMonitorHistory(archiveQualityStudy(enableQualityComparison(migrateQualityCaptureEntries(value.study))))));
       // 【用户要求】2026-10-26 盘面保持干净：卖出方案静默同步当前账号公式，不再显示同步提示
-      const migrated = syncQualitySellDefinitions(archived);
+      const migrated = separateQualityFilters(syncQualitySellDefinitions(archived));
       const savedSelection = new Set(Array.isArray(migrated.selectedRowIds) ? migrated.selectedRowIds : []);
       const restored = { ...migrated, selectedRowIds: qualityDisplayRows(migrated).filter(r => savedSelection.has(r.id) || savedSelection.has(r.signalId!)).map(r => r.id) };
       current.current = restored; setStudy(restored); setWarning(value.warning ?? ''); readyRef.current = true; loaded = true; setReady(true);
@@ -145,8 +145,8 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   const startFilter = useCallback(async () => {
     if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
     const revision = ++filterRevision.current;
-    const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length * (frozen.sellPlans?.length ?? 0);
-    const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => (frozen.sellPlans ?? []).flatMap(plan => activeBuyFilters(frozen, plan).map(f => qualityFilterReadingKey(row, f)))));
+    const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length;
+    const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => activeStandaloneBuyFilters(frozen).map(f => qualityFilterReadingKey(row, f))));
     frozen.filterReadings = frozen.filterReadings?.filter(r => !r.error && Number.isFinite(r.value));
     setFilterError('');
     // 【用户要求】2026-10-27 过滤有自己的库：每一轮冻结当时的条件与判断（只改门槛、读数可复用的也算一轮）
@@ -220,22 +220,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     const selected = new Set(ids);
     change(s => ({ ...s, selectedRowIds: qualityDisplayRows(s).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.id) }));
   }, [change]);
-  // 各方案独立过滤，买入条件只筛选已有结果；持仓否决变化才重新评估卖出。
-  // 【用户要求】2026-10-27 持仓否决归「持仓监测」的条件设置：买前过滤只改买入条件（vetoes 不传 = 保持原样）。
-  const setFilters = useCallback((planId: string, filters: QualityBuyFilter[], nextVetoes?: QualityHoldingVeto[]) => {
-    const plan = current.current.sellPlans?.find(p => p.id === planId);
-    if (!plan) return;
-    const vetoes = nextVetoes ?? plan.holdingVetoes ?? [];
-    const sellChanged = JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) !== JSON.stringify(holdingVetoIdentity(vetoes));
-    change(s => {
-      const saved = materializePlanBuyFilters(sellChanged ? archiveQualityStudy(s) : s);
-      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, buyFilters: structuredClone(filters), holdingVetoes: structuredClone(vetoes) } : p) };
-    });
-    // 否决条件变了，正在跑的旧批次结果已没用：立刻按新设置重新开始，不排在整批之后
-    if (sellChanged) defer(() => { if (controller.current) void restart(); else void start(); });
-    const epoch = generation.current, revision = filterRevision.current;
-    setTimeout(() => { if (readyRef.current && epoch === generation.current && revision === filterRevision.current) { cancelFilter(); void startFilter(); } }, 500);
-  }, [change, start, restart, defer, cancelFilter, startFilter]);
+  /** Filters have their own catalog and run button; editing never changes or restarts monitoring. */
+  const setFilters = useCallback((filters: QualityBuyFilter[]) => {
+    cancelFilter(); setFilterProgress(null); setFilterError('');
+    change(s => ({...s,buyFilters:structuredClone(filters)}));
+  }, [change,cancelFilter]);
   /** 只改某套卖出方案的持仓一票否决：买入条件和过滤读数不动；变了就立刻按新设置重算卖出（正在跑的旧批次直接作废）。 */
   const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[]) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);

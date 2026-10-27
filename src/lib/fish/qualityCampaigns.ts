@@ -6,7 +6,7 @@ import { loadQualityStudy } from './qualityStore';
 import { archiveQualityStudy, hasQualityCampaign, hasQualityEntry, isCurrentQualityRun, qualityRuleLabel, qualitySellKey, qualityFormulaVersion, qualityVersionedRuleLabel, type QualityCampaignRun } from './qualityCampaignArchive';
 import { FISH_DEFAULT_ALGORITHMS } from './cards';
 import type { QualityGroup } from './quality';
-import { QUALITY_NOTIONAL, hasQualityExit, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
+import { QUALITY_NOTIONAL, hasQualityExit, activeStandaloneBuyFilters, activeBuyFilters, anyBuyFilters, qualityFilterStatus, qualityDefinition, type FishQualityStudy } from './quality';
 import { activeHoldingVetoes } from './qualityVeto';
 import { syncQualitySellDefinitions } from './qualityComparison';
 
@@ -80,6 +80,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
 /** 各卖出方案的买入过滤，一行写完：「状态 S 原始值：状态 S 原始值 > 0.7；CDA 原始值：不过滤」。都没开过滤时为空。 */
 export function qualityBuyFilterSummary(study: FishQualityStudy): string {
   if (!anyBuyFilters(study)) return '';
+  if (study.independentFilters) return `独立过滤（不限制卖出监测）：${activeStandaloneBuyFilters(study).map(f=>`${f.label} ${f.direction} ${f.threshold}`).join(' 且 ')}`;
   return (study.sellPlans ?? []).map(plan => { const filters = activeBuyFilters(study, plan);
     return `${plan.label}：${filters.length ? filters.map(f => `${f.label} ${f.direction} ${f.threshold}`).join(' 且 ') : '不过滤'}`; }).join('；');
 }

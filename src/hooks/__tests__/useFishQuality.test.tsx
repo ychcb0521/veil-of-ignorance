@@ -161,8 +161,8 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  const result={key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed' as const,entryTime:T,entryPrice:100,endTime:T+60000,endPrice:110,returnPct:10,pnl:10};
  act(()=>old.onResult(result));expect(h.result.current.study.campaignRuns).toHaveLength(1);
  const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
- act(()=>h.result.current.setFilters(id,[], [veto]));await flush(600);
- // 【用户要求】2026-10-26 过滤与卖出算法绑定：只改这一套方案
+ act(()=>(() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [veto]); })());await flush(600);
+ // 持仓否决仍只归这一套卖出方案；买前过滤不参与。
  expect(tasks.at(-1)!.study.sellPlans!.map(p=>p.holdingVetoes?.[0]?.threshold)).toEqual([10,undefined]);
  expect(h.result.current.study.campaignRuns![0].plan.holdingVetoes).toBeUndefined();
  const latestPlan=tasks.at(-1)!.study.sellPlans![0];expect(qualityResultKey(row,latestPlan,0)).not.toBe(result.key);
@@ -170,36 +170,29 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  await flush(500);expect(storage.save).toHaveBeenLastCalledWith('a',expect.objectContaining({sellPlans:expect.arrayContaining([expect.objectContaining({holdingVetoes:[veto]})])}));
 });
 
-it('applies buy edits in filter mode, preserves sell snapshots and only recalculates when effective holding vetoes change', async () => {
-  const { makeQualityBuyFilter, makeQualityHoldingVeto } = await import('@/lib/fish/qualityFilters');
-  const tasks: QualityRunOptions[] = [];
-  const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); }));
-  await flush();
-  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
-  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '>', .7)], []));
-  await flush(600);
-  expect(tasks.at(-1)!.mode).toBe('filter-only');
-  await flush(60_000); expect(tasks).toHaveLength(1); // filtering before Run does not authorize evaluation
-  act(() => { void h.result.current.start(); }); await flush();
-  const original = tasks.at(-1)!.study.sellPlans;
-  const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
-  localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
-  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '<', .5)], [])); await flush(600);
-  expect(tasks.at(-1)!.mode).toBe('filter-only');
-  expect(tasks.at(-1)!.study.sellPlans!.map(p => p.snapshot)).toEqual(original!.map(p => p.snapshot));
-  const disabled = { ...makeQualityHoldingVeto('static-drawdown', '>=', 10), enabled: false };
-  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [disabled])); await flush(600);
-  expect(tasks.at(-1)!.mode).toBe('filter-only');
-  expect(h.result.current.study.sellPlans![0].holdingVetoes).toEqual([disabled]);
-  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [{ ...disabled, enabled: true }])); await flush(600);
-  expect(tasks.at(-1)!.mode).toBeUndefined();
+it('saves filters without running either task, runs only after Start Filter, and keeps seller settings separate',async()=>{
+ const {makeQualityBuyFilter,makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
+ const tasks:QualityRunOptions[]=[], h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
+ await flush();act(()=>h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r=>r.id)));
+ const f=makeQualityBuyFilter('state:state','>',.7), plans=structuredClone(h.result.current.study.sellPlans);
+ act(()=>h.result.current.setFilters([f]));await flush(600);
+ expect(tasks).toHaveLength(0);expect(h.result.current.study.sellPlans).toEqual(plans);
+ act(()=>{void h.result.current.startFilter();});await flush();
+ expect(tasks).toHaveLength(1);expect(tasks[0].task).toBe('filter');
+ act(()=>h.result.current.setFilters([{...f,threshold:.8}]));await flush(600);
+ expect(tasks).toHaveLength(1);expect(h.result.current.study.sellPlans).toEqual(plans);
+ const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
+ act(()=>h.result.current.setHoldingVetoes(plans![0].id,[veto]));await flush(600);
+ expect(tasks.at(-1)!.task).toBe('monitor');
+ expect(h.result.current.study.buyFilters).toEqual([{...f,threshold:.8}]);
+ expect(h.result.current.study.sellPlans![0].buyFilters).toBeUndefined();
 });
 
 it('does not queue monitoring or interrupt it when only filtering settings change', async () => {
   const tasks: QualityRunOptions[] = [], releases: (() => void)[] = [];
   const h = renderHook(() => useFishQuality('a', [signal], async o => { tasks.push(o); await new Promise<void>(resolve => releases.push(resolve)); }));
   await flush(); chooseAndStart(h); await flush();
-  act(() => h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [], [])); await flush(600);
+  act(() => h.result.current.setFilters([])); await flush(600);
   expect(tasks[0].signal.aborted).toBe(false); expect(tasks).toHaveLength(1);
   releases.shift()!(); await flush();
   expect(tasks).toHaveLength(1);
@@ -221,12 +214,12 @@ it('filters fully cached trades without calling the runner, including after rest
   storage.load.mockResolvedValue({study:initial});
   const h = renderHook(() => useFishQuality('a', [signal], run)); await flush(); chooseAndStart(h); await flush();
   const planId = h.result.current.study.sellPlans![0].id;
-  act(() => h.result.current.setFilters(planId, [f], [])); await flush(600);
+  act(() => h.result.current.setFilters([f])); await flush(600);
   expect(run).toHaveBeenCalledTimes(1);
   const saved = h.result.current.study; h.unmount();
   storage.load.mockResolvedValue({ study: saved });
   const restored = renderHook(() => useFishQuality('a', [], run)); await flush();
-  act(() => restored.result.current.setFilters(planId, [{ ...f, threshold: .8 }], [])); await flush(600);
+  act(() => restored.result.current.setFilters([{ ...f, threshold: .8 }])); await flush(600);
   expect(run).toHaveBeenCalledTimes(1);
   expect(restored.result.current.study.results).toEqual(saved.results);
 });
@@ -284,7 +277,7 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .4 }));
   act(() => h.result.current.setObserveHours(12));
   const f = makeQualityBuyFilter('state:state', '>', .8), veto = makeQualityHoldingVeto('static-drawdown', '>=', 5);
-  act(() => h.result.current.setFilters(id, [f], [veto]));
+  act(() => (() => { h.result.current.setFilters([f]); h.result.current.setHoldingVetoes(id, [veto]); })());
   act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).filter(r => r.source.symbol === 'BBBUSDT').map(r => r.id)));
   const def = { ...STATE_DEF, formula: STATE_DEF.formula.replace('wb = 1 ', 'wb = 3 ') };
   localStorage.setItem('sim_anon_' + FEATURES_KEY, JSON.stringify([def]));
@@ -294,7 +287,8 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   expect(next.mode).toBe('restart');
   expect(qualityRunSamples(next.study).map(r => r.source.symbol)).toEqual(['BBBUSDT']);
   expect(next.study.observeHours).toBe(12);
-  expect(next.study.sellPlans![0]).toMatchObject({ rule: { threshold: .4 }, buyFilters: [f], holdingVetoes: [veto] });
+  expect(next.study.sellPlans![0]).toMatchObject({rule:{threshold:.4},holdingVetoes:[veto]});
+  expect(next.study.buyFilters).toEqual([f]);expect(next.study.sellPlans![0].buyFilters).toBeUndefined();
   expect(next.study.sellPlans![0].snapshot.definitionKey).toBe(definitionKey({ ...def, interval: '5m' }));
   expect(h.result.current.progress).toEqual({ done: 0, total: 2, current: '' });
   expect(h.result.current.study.campaignRuns![0].result).toEqual(prior);
@@ -305,9 +299,9 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   expect(h.result.current.study.filterReadings?.some(r => r.key === 'late')).not.toBe(true);
   releases.shift()!(); await flush(1000);
   expect(tasks.filter(t => t.task === 'monitor')).toHaveLength(2); expect(h.result.current.running).toBe(false);
-  expect(tasks.filter(t => t.task === 'filter')).toHaveLength(1); expect(h.result.current.filterRunning).toBe(true);
-  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(4);
-  expect(tasks[3].mode).toBe('restart');
+  expect(tasks.filter(t => t.task === 'filter')).toHaveLength(0); expect(h.result.current.filterRunning).toBe(false);
+  act(() => { void h.result.current.restart(); }); expect(tasks).toHaveLength(3);
+  expect(tasks[2].mode).toBe('restart');
   const nextRow = qualityRunSamples(next.study)[0], nextPlan = next.study.sellPlans![0];
   act(() => next.onResult({ ...prior, key: qualityResultKey(nextRow, nextPlan, 12), sampleId: nextRow.id, returnPct: 999 }));
   expect(h.result.current.study.results.some(r => r.returnPct === 999)).toBe(false);
@@ -332,7 +326,7 @@ it('restarts at once with the new holding vetoes when they change during a runni
   const id = h.result.current.study.sellPlans![0].id;
   act(() => h.result.current.setRule(id, { metric: 'state', direction: '<', threshold: .5 })); await flush(600);
   expect(tasks).toHaveLength(1);
-  act(() => h.result.current.setFilters(id, [], [makeQualityHoldingVeto('dynamic-drawdown', '>=', 10)])); await flush(600);
+  act(() => (() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [makeQualityHoldingVeto('dynamic-drawdown', '>=', 10)]); })()); await flush(600);
   expect(tasks[0].signal.aborted).toBe(true);
   expect(tasks).toHaveLength(2);
   expect(tasks[1].study.sellPlans!.find(p => p.id === id)!.holdingVetoes?.[0]).toMatchObject({ kind: 'dynamic-drawdown', threshold: 10 });
@@ -348,7 +342,7 @@ it('runs filtering and monitoring concurrently with separate progress, cancellat
   const f = makeQualityBuyFilter('state:state', '>', .7);
   act(() => {
     h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id));
-    h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [f], []);
+    h.result.current.setFilters([f]);
     void h.result.current.startFilter();
     void h.result.current.start();
   });
@@ -371,7 +365,7 @@ it('runs filtering and monitoring concurrently with separate progress, cancellat
   act(() => { filtering.onProgress({ done: 999, total: 999, current: 'late' }); filtering.onFilterReading?.({ key: 'late', value: 999 }); });
   expect(h.result.current.filterProgress?.done).toBe(1); expect(h.result.current.study.filterReadings?.some(r => r.key === 'late')).toBe(false);
   // A second uncached condition makes another filter batch, while the old aborted runner is still pending.
-  act(() => { h.result.current.setFilters(plan.id, [f, makeQualityBuyFilter('cda:CDA', '>', 0)], []); void h.result.current.startFilter(); });
+  act(() => { h.result.current.setFilters([f, makeQualityBuyFilter('cda:CDA', '>', 0)]); void h.result.current.startFilter(); });
   const next = tasks.at(-1)!; expect(next.task).toBe('filter'); expect(tasks).toHaveLength(3);
   act(() => h.result.current.cancel());
   expect(monitoring.signal.aborted).toBe(true); expect(next.signal.aborted).toBe(false); expect(h.result.current.filterRunning).toBe(true);
@@ -386,7 +380,7 @@ it('aborts both independent tasks on account change and rejects their late write
   await flush();
   act(() => {
     h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id));
-    h.result.current.setFilters(h.result.current.study.sellPlans![0].id, [makeQualityBuyFilter('state:state', '>', .7)], []);
+    h.result.current.setFilters([makeQualityBuyFilter('state:state', '>', .7)]);
     void h.result.current.startFilter(); void h.result.current.start();
   });
   h.rerender({ owner: 'b', rows: [] }); await flush();
@@ -466,7 +460,7 @@ it('runs monitoring and filtering only on checked rows inside the current view, 
   expect(h.result.current.study.selectedRowIds).toHaveLength(2);
   // 买前过滤同样只处理范围内的
   const plan = h.result.current.study.sellPlans![0];
-  act(() => h.result.current.setFilters(plan.id, [makeQualityBuyFilter('state:state', '>', .7)])); await flush(600);
+  act(() => {h.result.current.setFilters([makeQualityBuyFilter('state:state', '>', .7)]);void h.result.current.startFilter();}); await flush(600);
   const filterTask = tasks.find(t => t.task === 'filter')!;
   expect(qualityRunSamples(filterTask.study).map(s => s.source.symbol)).toEqual(['BBBUSDT']);
   // 筛选范围内一条都没勾：不启动

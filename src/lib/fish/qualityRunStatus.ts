@@ -1,4 +1,4 @@
-import { activeBuyFilters, hasQualityExit, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualitySample } from './quality';
+import { activeStandaloneBuyFilters, activeBuyFilters, hasQualityExit, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualitySample } from './quality';
 import { qualityTableMembers, type QualityTableRow } from './qualityTableRows';
 
 export type QualityRunStage = 'filter' | 'monitor';
@@ -21,6 +21,13 @@ export function qualityRunStatusMap(study: FishQualityStudy, rows: readonly Qual
     const id = row.signalId ?? row.id;
     if (statuses.has(id)) continue;
     const filter = empty(), monitor = empty(), seen = new Set<string>();
+    if (study.independentFilters) for (const condition of activeStandaloneBuyFilters(study)) {
+      const key = qualityFilterReadingKey(row,condition), reading = readings.get(key);
+      if (seen.has(key)) continue;
+      seen.add(key); filter.total++;
+      if (reading && !reading.error && Number.isFinite(reading.value)) filter.finished++;
+      else if (reading) filter.errors++;
+    }
     for (const plan of plans) {
       const conditions = activeBuyFilters(study, plan);
       let known = true;

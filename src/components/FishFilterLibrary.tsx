@@ -29,10 +29,10 @@ export function FishFilterLibrary({ study }: { study: FishQualityStudy }) {
     return !needle || r.source.symbol.toUpperCase().includes(needle) || conditions(s).toUpperCase().includes(needle) || s.plans.some(p => p.toUpperCase().includes(needle));
   }, [roundIds, settings]);
   const settingCount = settings.size, recordCount = items.length;
-  return <FishLibraryDialog name="过滤库" roundLabel="轮次" rounds={options} placeholder="搜索标的、过滤条件或卖出方案…"
+  return <FishLibraryDialog name="过滤库" roundLabel="轮次" rounds={options} placeholder="搜索标的、过滤条件…"
     description={`${recordCount} 条记录 · ${settingCount} 组条件 · ${rounds.length} 轮过滤`}
-    info={<><p>每点一次「开始过滤」（改了条件后自动重跑的也算）记一轮，冻结当时每套卖出方案启用的买入条件，以及每条信号的读数和是否满足。</p><p>同一组条件下，同标的、同信号时间、同买入时刻的合并为一条，保留最新判断；每轮仍可单独查看。只改门槛、读数可直接复用的，也记为新的一轮。</p><p>读数取买入时刻之前最后一根已收盘的 5 分钟 K 线。随账号保存。</p></>}
-    headers={['标的', '信号时间', '买入时刻', '过滤条件', '用于卖出', '读数', '判断', '保存时间']}
+    info={<><p>每点一次「开始过滤」记一轮，独立保存当时启用的过滤条件、每条信号的读数及判断，不要求配置或运行卖出算法。历史绑定条件的记录按原样保留。</p><p>同一组条件下，同标的、同信号时间、同买入时刻的合并为一条，保留最新判断；每轮仍可单独查看。只改门槛、读数可直接复用的，也记为新的一轮。</p><p>读数取买入时刻之前最后一根已收盘的 5 分钟 K 线。随账号保存。</p></>}
+    headers={['标的', '信号时间', '买入时刻', '过滤条件', '关联方式', '读数', '判断', '保存时间']}
     items={items} match={match}
     empty={{ none: '暂无过滤记录。设置买入条件并开始过滤后，每轮会自动保存。', unmatched: '没有匹配的过滤记录。' }}
     row={r => {
@@ -44,7 +44,7 @@ export function FishFilterLibrary({ study }: { study: FishQualityStudy }) {
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.source.timeMs)}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`}>{date(r.enteredAt)}</td>
         <td className={`${libraryCell} max-w-64 truncate`} title={conditions(s)}>{conditions(s)}</td>
-        <td className={`${libraryCell} max-w-40 truncate text-muted-foreground`} title={s.plans.join('、')}>{s.plans.join('、')}</td>
+        <td className={`${libraryCell} max-w-40 truncate text-muted-foreground`} title={s.plans.join('、')}>{s.plans.length ? `历史绑定 · ${s.plans.join('、')}` : '独立过滤'}</td>
         <td className={`${libraryCell} font-mono tabular-nums`}>{readingText}</td>
         <td className={`${libraryCell} ${tone}`}>{label}</td>
         <td className={`${libraryCell} font-mono text-muted-foreground`} title={date(r.updatedAt)}>{date(r.updatedAt).slice(5, 16)}</td>

@@ -3,13 +3,13 @@
  * 【用户要求】2026-10-27「批量挖掘、买前过滤、持仓监测的逻辑和运行是独立的，因此需要有各自的数据库」。
  *
  * 以前只有读数缓存（study.filterReadings）：满足与否按「现在」的门槛现算，改了门槛就看不到上一轮的判断。
- * 现在每点一次「开始过滤」（含改条件后自动重跑）就记一轮：
- *   条件组（setting）= 某套卖出方案当时启用的全部买入条件（公式快照、方向、门槛），相同条件的多套方案共用一组；
+ * 现在每点一次「开始过滤」就记一轮：
+ *   条件组（setting）= 当时启用的独立过滤条件（公式快照、方向、门槛）；旧版绑定条件保持原样。
  *   记录（record）  = 条件组 × 信号（交易所、市场、标的、信号时间、买入时刻），同一条件下同一信号合并为一条、保留最新判断；
  *   轮次（round）   = 这一轮判断了哪些记录（只存与上一轮的差异，见 libraryRounds）。
  */
 import { shortFishHash } from './algorithm';
-import { activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
+import { activeStandaloneBuyFilters, activeBuyFilters, qualityFilterReadingKey, qualityFilterStatus, qualityRunSamples, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityFilterStatus, type QualitySample } from './quality';
 import { finishLibraryRound, librarySignalIdentity, mergeLibraryRecords, mergeLibraryRounds, newLibraryRound, recoverLibraryRounds, type LibraryRecordBase, type LibraryRound } from './libraryRounds';
 import type { TradeSignal } from '@/lib/signalLibrary';
 
@@ -31,13 +31,14 @@ export const qualityFilterSettingSignature = (filters: readonly QualityBuyFilter
 
 function tasksFor(study: FishQualityStudy, catalog: Map<string, QualityFilterSetting>): FilterTask[] {
   const tasks = new Map<string, FilterTask>();
-  for (const plan of study.sellPlans ?? []) {
-    const filters = activeBuyFilters(study, plan);
+  const sources = study.independentFilters ? [{label:'',filters:activeStandaloneBuyFilters(study)}] : (study.sellPlans ?? []).map(plan=>({label:plan.label,filters:activeBuyFilters(study,plan)}));
+  for (const plan of sources) {
+    const filters = plan.filters;
     if (!filters.length) continue;
-    const signature = qualityFilterSettingSignature(filters);
+    const signature = study.independentFilters ? JSON.stringify(['independent',qualityFilterSettingSignature(filters)]) : qualityFilterSettingSignature(filters);
     let setting = catalog.get(signature);
     if (!setting) { setting = { id: `filter-${shortFishHash(signature)}`, signature, filters: structuredClone(filters), plans: [] }; catalog.set(signature, setting); }
-    if (!setting.plans.includes(plan.label)) { setting = { ...setting, plans: [...setting.plans, plan.label] }; catalog.set(signature, setting); }
+    if (plan.label && !setting.plans.includes(plan.label)) { setting = { ...setting, plans: [...setting.plans, plan.label] }; catalog.set(signature, setting); }
     for (const sample of qualityRunSamples(study)) {
       const id = JSON.stringify([setting.id, ...librarySignalIdentity(sample.source), sample.enteredAt]);
       tasks.set(id, { id, setting: catalog.get(signature)!, sample });
@@ -62,7 +63,7 @@ function withRecords(library: QualityFilterLibrary, tasks: readonly FilterTask[]
 }
 
 let sequence = 0;
-/** 开始一轮：冻结当前每套方案的条件，先用已有读数写一遍（读数齐全的这一轮就已有结果）。没有任何启用条件时不记轮次。 */
+/** 开始一轮：冻结当前独立过滤条件（旧版保留绑定信息），先用已有读数写一遍（读数齐全的这一轮就已有结果）。没有任何启用条件时不记轮次。 */
 export function beginQualityFilterRound(study: FishQualityStudy, frozen: FishQualityStudy, at: number): { study: FishQualityStudy; capture: QualityFilterCapture } | null {
   const library = study.filterLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s]));
   const tasks = tasksFor(frozen, catalog);

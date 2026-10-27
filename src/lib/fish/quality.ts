@@ -29,8 +29,7 @@ export interface QualityGroup {
   /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
   vetoFill?: 'stop';
   /**
-   * 这套卖出方案自己的买入过滤（只作用于「比较卖出」）。缺省时沿用旧版本全局的 study.buyFilters。
-   * 【用户要求】2026-10-26「每一个过滤门槛与卖出算法绑定：每个卖出算法有特定的过滤标准，而不是公用一个过滤标准」
+   * 历史绑定条件，供旧试验还原；independentFilters 工作流不读取此字段。
    */
   buyFilters?: QualityBuyFilter[];
 }
@@ -87,6 +86,10 @@ export interface FishQualityStudy {
   filterLibrary?: QualityFilterLibrary;
   campaignRepair?: QualityRepairBatch;
   buyFilters?: QualityBuyFilter[]; filterReadings?: QualityFilterReading[];
+  /** New workflow: filters are standalone experiments and never gate sell monitoring. */
+  independentFilters?: true;
+  /** Exact pre-migration bindings retained for historical provenance, never executed. */
+  legacyFilterBindings?: { planId: string; filters: QualityBuyFilter[] }[];
   /** 已自动勾选过的挖掘信号（之后用户取消勾选就不再勾回来）。 */
   minedAutoSelected?: string[];
 }
@@ -239,7 +242,7 @@ export function expandQualityRows(rows: readonly QualitySample[]): QualitySample
 }
 export const qualityDisplayRows = (study: FishQualityStudy) => expandQualityRows(qualityComparisonRows(study));
 export function qualityRunSamples(study: FishQualityStudy): QualitySample[] {
-  if (!study.sellPlans) return study.samples;
+  if (!study.sellPlans && !study.independentFilters) return study.samples;
   const signals = qualityComparisonRows(study), selected = new Set(study.selectedRowIds ?? []);
   const selectedSignals = new Set(expandQualityRows(signals).filter(r => selected.has(r.id) || selected.has(r.signalId!)).map(r => r.signalId));
   return signals.filter(s => selectedSignals.has(s.id));
@@ -268,16 +271,35 @@ export function qualityExitSuggestions(group: QualityGroup): { label: string; ru
 
 export const qualityFilterReadingKey = (row: QualitySample, f: QualityBuyFilter) => shortFishHash(JSON.stringify(['buy-filter', row.signalId ?? row.id, row.enteredAt, f.snapshot.definitionKey, f.metric, f.snapshot.interval]));
 /** 某套卖出方案的买入过滤（含停用的）；方案没单独设过时沿用旧版本的全局过滤。 */
-export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
+export const planBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined): QualityBuyFilter[] => study.independentFilters ? [] : plan ? plan.buyFilters ?? study.buyFilters ?? [] : [];
 /** 某套卖出方案启用中的买入过滤。 */
 export const activeBuyFilters = (study: FishQualityStudy, plan: QualityGroup | undefined) => planBuyFilters(study, plan).filter(f => f.enabled && Number.isFinite(f.threshold));
 /** 任何一套卖出方案开着买入过滤。 */
-export const anyBuyFilters = (study: FishQualityStudy) => (study.sellPlans ?? []).some(plan => activeBuyFilters(study, plan).length > 0);
+export const anyBuyFilters = (study: FishQualityStudy) => study.independentFilters ? activeStandaloneBuyFilters(study).length > 0 : (study.sellPlans ?? []).some(plan => activeBuyFilters(study, plan).length > 0);
+/** Standalone catalog, also used to migrate all old plan-owned conditions without losing levels. */
+export function standaloneBuyFilters(study: FishQualityStudy): QualityBuyFilter[] {
+  if (study.independentFilters) return study.buyFilters ?? [];
+  const filters = new Map<string, QualityBuyFilter>();
+  for (const f of [...(study.buyFilters ?? []), ...(study.sellPlans ?? []).flatMap(p => p.buyFilters ?? [])]) {
+    const key = JSON.stringify([f.snapshot.definitionKey,f.snapshot.interval,f.metric,f.direction,f.threshold]);
+    const prior = filters.get(key);
+    if (!prior || !prior.enabled && f.enabled) filters.set(key, f);
+  }
+  return [...filters.values()];
+}
+export const activeStandaloneBuyFilters = (study: FishQualityStudy) => standaloneBuyFilters(study).filter(f => f.enabled && Number.isFinite(f.threshold));
+/** Call after archiving legacy trials. Re-running migration never overwrites later independent edits. */
+export function separateQualityFilters(study: FishQualityStudy): FishQualityStudy {
+  if (study.independentFilters) return study;
+  return { ...study, independentFilters: true, buyFilters: structuredClone(standaloneBuyFilters(study)),
+    legacyFilterBindings: (study.sellPlans ?? []).filter(p => p.buyFilters).map(p => ({planId:p.id,filters:structuredClone(p.buyFilters!)})),
+    sellPlans: study.sellPlans?.map(({buyFilters: _legacy, ...plan}) => plan) };
+}
 /** Filters can run independently; no entry-price or sell simulation is needed without an exit. */
 export const onlyQualityFilters = (study: FishQualityStudy) => anyBuyFilters(study) && !(study.sellPlans ?? []).some(hasQualityExit);
 /** 把旧版本的全局过滤落到每套方案上（之后各改各的），并去掉全局那份。 */
 export function materializePlanBuyFilters(study: FishQualityStudy): FishQualityStudy {
-  if (!study.buyFilters) return study;
+  if (study.independentFilters || !study.buyFilters) return study;
   const { buyFilters, ...rest } = study;
   return { ...rest, sellPlans: study.sellPlans?.map(plan => plan.buyFilters ? plan : { ...plan, buyFilters: structuredClone(buyFilters) }) };
 }
@@ -441,6 +463,10 @@ export interface QualityRunOptions {
 }
 /** A threshold/direction/toggle edit with cached readings and trades needs no runner or market requests. */
 export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' | 'filter-only'): boolean {
+  if (study.independentFilters && mode === 'filter-only') {
+    const readings = new Map((study.filterReadings ?? []).filter(r=>!r.error && Number.isFinite(r.value)).map(r=>[r.key,r]));
+    return qualityRunSamples(study).some(row=>activeStandaloneBuyFilters(study).some(f=>!readings.has(qualityFilterReadingKey(row,f))));
+  }
   const filtersOnly = onlyQualityFilters(study);
   const readings = new Map((study.filterReadings ?? []).map(r => [r.key, r]));
   const results = new Set(study.results.map(r => r.key));
@@ -452,6 +478,27 @@ export function qualityFilterNeedsData(study: FishQualityStudy, mode: 'filter' |
   return false;
 }
 export async function collectFishQuality(options: QualityRunOptions, load: FishReconstructionLoader, now: number): Promise<void> {
+  if (options.study.independentFilters && (options.task === 'filter' || options.mode === 'filter-only' || options.task !== 'monitor' && onlyQualityFilters(options.study))) {
+    const {study,signal} = options, filters = activeStandaloneBuyFilters(study);
+    const rows = new Map(qualityRunSamples(study).map(row => [row.id,row]));
+    const total = rows.size, readings = new Map((study.filterReadings ?? []).filter(r => !r.error && Number.isFinite(r.value)).map(r=>[r.key,r]));
+    let done = 0;
+    while (rows.size) {
+      abort(signal);
+      const id = options.priority?.().find(id=>rows.has(id)) ?? rows.keys().next().value!;
+      const row = rows.get(id)!; rows.delete(id);
+      options.onProgress({done,total,current:row.source.symbol});
+      for (const f of filters) {
+        const key = qualityFilterReadingKey(row,f);
+        if (readings.has(key)) continue;
+        const reading = await evaluateQualityFilter(row,f,now,load,signal);
+        abort(signal); readings.set(key,reading); options.onFilterReading?.(reading);
+      }
+      done++;
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+    options.onProgress({done,total,current:''}); return;
+  }
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
   const filtersOnly = options.task === 'filter' || options.task !== 'monitor' && onlyQualityFilters(study);
   const tasks = study.sellPlans

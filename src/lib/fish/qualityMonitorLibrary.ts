@@ -139,7 +139,7 @@ export function adoptQualityMonitorHistory(study: FishQualityStudy): FishQuality
   const library = study.monitorLibrary ?? empty(), catalog = new Map(library.settings.map(s => [s.signature, s])), records = new Map(library.records.map(r => [r.id, r]));
   const ids = new Set<string>(); let earliest = Infinity, latest = 0;
   const add = (sample: QualitySample, plan: QualityGroup, detectors: QualityGroup[], result: QualityResult, hours: number, known: boolean, detectorsKnown = true) => {
-    const frozen = { ...study, samples: [sample], groups: detectors, sellPlans: [plan], selectedRowIds: undefined, observeHours: hours, buyFilters: undefined };
+    const frozen = { ...study, samples: [sample], groups: detectors, sellPlans: [plan], selectedRowIds: undefined, observeHours: hours, buyFilters: undefined, independentFilters: undefined };
     const task = taskFor(frozen, sample, plan, catalog, known, detectorsKnown), at = result.evaluatedAt;
     const prior = records.get(task.id); if (!prior || prior.updatedAt < at) records.set(task.id, recordFor(task, new Map(), result, at, prior));
     ids.add(task.id); earliest = Math.min(earliest, at); latest = Math.max(latest, at);
