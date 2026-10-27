@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793082667280,
+      "tag": "0000_create_decision_emotion_diaries",
+      "breakpoints": true
+    }
+  ]
+}
