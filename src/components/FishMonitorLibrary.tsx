@@ -1,3 +1,4 @@
+import { focusSignalKey, qualityFocusSignals, focusSignalLabel } from '@/lib/fish/qualityFocusSignals';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ArrowRightCircle, ChevronDown, Database, Download } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -22,6 +23,9 @@ function Formula({ label, snapshot }: { label: string; snapshot: QualityMonitorS
 export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQualityStudy; onJump?: (s: TradeSignal) => void; canJump?: (s: TradeSignal) => boolean }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [roundId, setRoundId] = useState(''), [page, setPage] = useState(0), [detailId, setDetailId] = useState('');
   const [algorithm, setAlgorithm] = useState(''), [detector, setDetector] = useState(''), [sort, setSort] = useState<MonitorSortKey>('saved'), [ascending, setAscending] = useState(false), [exportError, setExportError] = useState('');
+  const [zone,setZone]=useState<'all'|'focus'>('all'),[focusKey,setFocusKey]=useState('');
+  const focusSignals=useMemo(()=>open?qualityFocusSignals(study):[],[open,study]);
+  const focusKeys=useMemo(()=>new Set(focusSignals.map(s=>s.key)),[focusSignals]);
   const library = study.monitorLibrary;
   const settings = useMemo(() => new Map((library?.settings ?? []).map(s => [s.id, s])), [library?.settings]);
   const rounds = useMemo(() => [...(library?.rounds ?? [])].reverse().sort((a, b) => b.startedAt - a.startedAt), [library?.rounds]);
@@ -30,8 +34,8 @@ export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQual
   const scoped = useMemo(() => {
     if (!open) return [];
     const ids = selectedRound && library ? new Set(qualityMonitorRoundRecordIds(library, selectedRound)) : null;
-    return (library?.records ?? []).filter(r => settings.has(r.settingId) && (!ids || ids.has(r.id)));
-  }, [library, selectedRound, settings, open]);
+    return (library?.records ?? []).filter(r => settings.has(r.settingId) && (!ids || ids.has(r.id)) && (zone==='all'||focusKeys.has(focusSignalKey(r.source))&&(!focusKey||focusSignalKey(r.source)===focusKey)));
+  }, [library, selectedRound, settings, open,zone,focusKey,focusKeys]);
   const algorithms = useMemo(() => {
     const choices = new Map<string, { label: string; count: number }>();
     for (const r of scoped) { const s = settings.get(r.settingId)!, key = monitorAlgorithmKey(s); const old = choices.get(key); choices.set(key, { label: qualityVersionedRuleLabel(s.plan), count: (old?.count ?? 0) + 1 }); }
@@ -63,6 +67,15 @@ export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQual
         <div className="flex flex-wrap items-center gap-1.5 pr-6"><DialogTitle className="text-sm">监测库</DialogTitle><FishQualityInfo label="监测库说明"><p>每轮冻结当时的算法、公式、门槛、买前过滤与持仓否决条件，随账号保存。</p><p>导出包含当前筛选下所有页的记录；各表头可排序，缺失数值始终排在最后。历史条件按保存时的快照展示。</p><p>同标的、同信号时间、同买入时点且条件相同的记录合并，保留最新结果；每轮仍可单独查看。旧快照缺少的条件标为未记录。</p></FishQualityInfo><button type="button" className={`${action} ml-auto`} aria-label="导出监测库数据" title="下载当前筛选下全部记录（包括其他页），顺序与表格一致；附算法、公式和过滤读数" disabled={!records.length} onClick={download}><Download aria-hidden className="h-3 w-3"/>导出数据 <span className="font-mono tabular-nums">{records.length}</span></button></div>
         <DialogDescription className="text-[11px]">{library?.records.length ?? 0} 条记录 · {roundNumbers.size} 轮监测{rounds.some(r => r.legacy) ? ' · 含历史快照' : ''}</DialogDescription>
       </DialogHeader>
+      <div className="flex shrink-0 items-center gap-1 rounded-lg bg-muted/50 p-1" role="tablist" aria-label="监测库分区">
+        {([['all','全部记录'],['focus','重点信号区']] as const).map(([id,label])=><button type="button" key={id} role="tab" aria-selected={zone===id} className={`rounded-md px-3 py-1.5 text-[11px] transition-colors ${zone===id?'bg-background text-foreground shadow-sm':'text-muted-foreground hover:text-foreground'}`} onClick={()=>{setZone(id);setRoundId('');setAlgorithm('');setDetector('');setFocusKey('');setQuery('');setDetailId('');setPage(0);}}>{label}{id==='focus'&&<span className="ml-1.5 font-mono text-primary">{focusSignals.length}</span>}</button>)}
+      </div>
+      {zone==='focus'&&<div className="shrink-0 space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3" data-testid="monitor-focus-zone">
+        <div className="flex flex-wrap items-center gap-2 text-[11px]"><span className="font-medium">重点信号区</span><span className="text-muted-foreground">{focusSignals.length} 次信号 · {focusSignals.filter(s=>s.resonance).length} 次已核实探测共振 · 截图指定 12 次</span></div>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">自动回溯全部已有记录，并持续收录同一交易所、同一标的、同一信号时间同时命中 avg_CBI2_2 与 avg_CBA_2 的事件；avg 不算 avg₂，过滤与卖出算法不参与归类。收益沿用监测库实际结果。</p>
+        <div className="max-h-32 overflow-auto rounded-md border border-border/40 bg-background"><table className="w-full text-left text-[10px]"><thead className="sticky top-0 bg-muted text-muted-foreground"><tr><th className="px-2 py-1 font-medium">重点信号</th><th className="px-2 py-1 font-medium">归入依据</th><th className="px-2 py-1 font-medium">监测记录</th></tr></thead><tbody>{focusSignals.map(event=><tr key={event.key} className="border-t border-border/30" data-testid="monitor-focus-signal"><td className="px-2 py-1"><button type="button" className={`text-left hover:underline ${focusKey===event.key?'text-primary':'text-foreground'}`} onClick={()=>{setFocusKey(focusKey===event.key?'':event.key);setQuery('');setAlgorithm('');setDetector('');setRoundId('');setPage(0);setDetailId('');}}>{focusSignalLabel(event)}</button></td><td className="px-2 py-1 text-muted-foreground">{event.specified?'截图指定':''}{event.specified&&event.resonance?' · ':''}{event.resonance?'探测共振':''}</td><td className="px-2 py-1 font-mono text-muted-foreground">{event.recordIds.length?`${event.recordIds.length} 条`:event.found?'待监测':'待匹配历史记录'}</td></tr>)}</tbody></table></div>
+        {focusKey&&<button type="button" className="text-[10px] text-primary hover:underline" onClick={()=>{setFocusKey('');setPage(0);}}>查看全部重点信号</button>}
+      </div>}
       <div className="flex shrink-0 flex-wrap gap-1.5">
         <input aria-label="搜索监测库" className={`${field} min-w-36 flex-1`} placeholder="搜索标的或算法…" value={query} onChange={e => { setQuery(e.target.value); setPage(0); setDetailId(''); }}/>
         <select aria-label="监测库轮次" className={`${field} max-w-full sm:max-w-80`} value={roundId} onChange={e => { setRoundId(e.target.value); setAlgorithm(''); setDetector(''); setPage(0); setDetailId(''); }}><option value="">全部轮次</option>{rounds.map(r => <option key={r.id} value={r.id}>{r.legacy ? '历史记录' : `第 ${roundNumbers.get(r.id)} 轮 · ${date(r.startedAt)}`} · {roundState[r.state]}</option>)}</select>
@@ -102,7 +115,7 @@ export function FishMonitorLibrary({ study, onJump, canJump }: { study: FishQual
             })}<td className={`${cell} border-t border-border/40`}><button type="button" aria-label={`跳转 ${record.source.symbol}`} className="text-primary disabled:opacity-30" disabled={jumpDisabled} onClick={jump}><ArrowRightCircle aria-hidden className="h-3.5 w-3.5"/></button></td></tr>;
           })}</tbody>
         </table>
-        {!records.length && <p className="px-4 py-8 text-center text-[11px] text-muted-foreground">{library?.records.length ? '没有匹配的监测记录。' : '暂无监测记录。开始持仓监测后，每轮会自动保存。'}</p>}
+        {!records.length && <p className="px-4 py-8 text-center text-[11px] text-muted-foreground">{zone==='focus'?'重点信号已收录；当前筛选下暂无监测结果，已有和新增结果会自动汇总到这里。':library?.records.length ? '没有匹配的监测记录。' : '暂无监测记录。开始持仓监测后，每轮会自动保存。'}</p>}
       </div>
       <div className="flex shrink-0 items-center justify-between gap-2 text-[10px] text-muted-foreground"><span>共 {records.length} 条 · {currentPage + 1} / {pages} 页<span className="ml-3 hidden sm:inline">横向滚动查看完整条件</span></span><div className="flex gap-1"><button type="button" className={action} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</button><button type="button" className={action} disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>下一页</button></div></div>
     </DialogContent>

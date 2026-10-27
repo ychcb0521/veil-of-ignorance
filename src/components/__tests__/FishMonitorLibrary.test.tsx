@@ -84,3 +84,31 @@ it('filters detector snapshots separately without changing the frozen records', 
   expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(2);
   expect(library.records).toHaveLength(4);
 });
+
+it('places the screenshot references in a dedicated zone, matches existing records without fabricating returns, and exports only the zone',async()=>{
+  const {FOCUS_SIGNAL_SEEDS}=await import('@/lib/fish/qualityFocusSignals');
+  const s=archived();s.monitorLibrary!.records[0]={...s.monitorLibrary!.records[0],source:FOCUS_SIGNAL_SEEDS[0]};
+  render(<FishMonitorLibrary study={s}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));
+  fireEvent.click(screen.getByRole('tab',{name:/重点信号区/}));
+  expect(screen.getByTestId('monitor-focus-zone')).toHaveTextContent('截图指定 12 次');
+  expect(screen.getAllByTestId('monitor-focus-signal')).toHaveLength(12);
+  expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(1);
+  expect(screen.getByTestId('monitor-library-row')).toHaveTextContent('MMTUSDT');
+  expect(screen.getByTestId('monitor-library-row')).toHaveTextContent('+10.00%');
+  expect(screen.getByRole('button',{name:'导出监测库数据'})).toHaveTextContent('1');
+  expect(screen.getAllByText('待匹配历史记录').length).toBe(11);
+  fireEvent.click(screen.getByRole('tab',{name:'全部记录'}));expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(4);
+});
+it('backfills all existing resonance beyond the screenshot and automatically includes later results while the zone stays open',()=>{
+  const s=archived(), snapshot=s.monitorLibrary!.settings[0].plan.snapshot;
+  for(const setting of s.monitorLibrary!.settings)setting.detectorsKnown=true,setting.detectors=[
+    {id:'detector-a',label:'CBI-2',metric:'avg_CBI2_2',snapshot:{...snapshot,featureId:'cbi2',statistic:'avg_CBI2_2'}},
+    {id:'detector-b',label:'CBA',metric:'avg_CBA_2',snapshot:{...snapshot,featureId:'cba',statistic:'avg_CBA_2'}},
+  ];
+  const h=render(<FishMonitorLibrary study={s}/>);fireEvent.click(screen.getByRole('button',{name:'打开监测库'}));fireEvent.click(screen.getByRole('tab',{name:/重点信号区/}));
+  expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(4);expect(screen.getAllByTestId('monitor-focus-signal')).toHaveLength(14);
+  const r=s.monitorLibrary!.records[0],next={...s,monitorLibrary:{...s.monitorLibrary!,records:[...s.monitorLibrary!.records,{...r,id:'new-focus',source:{...r.source,symbol:'NEWUSDT',timeMs:T+600000},updatedAt:T+900000}]}};
+  h.rerender(<FishMonitorLibrary study={next}/>);
+  expect(screen.getAllByTestId('monitor-focus-signal')).toHaveLength(15);expect(screen.getAllByTestId('monitor-library-row')).toHaveLength(5);
+  expect(screen.getByRole('button',{name:'导出监测库数据'})).toHaveTextContent('5');
+});
