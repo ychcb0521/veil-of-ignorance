@@ -26,28 +26,43 @@ it('records every new long close in the message list during quality work, withou
   expect(getNotificationSnapshot().entries).toHaveLength(2); expect(screen.queryByRole('dialog')).toBeNull();
   fireEvent.click(screen.getAllByTitle('补做这笔平仓评价')[0]); expect(await screen.findByTestId('review-sheet')).toBeVisible(); // explicit user action remains available
 });
-it('moves an already-open direct-trade reminder into history when quality work starts, and ordinary future reminders still work afterwards', async () => {
-  const old = trade('old'), recent = trade('a'), h = render(panel([old]));
-  h.rerender(panel([old, recent])); expect(await screen.findByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeVisible();
-  let end!: () => void; await act(async () => { end = beginHistoryOnlyNotifications(); });
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(getNotificationSnapshot().entries).toHaveLength(1);
-  await act(async () => { end(); }); expect(screen.queryByRole('dialog')).toBeNull();
-  h.rerender(panel([old, recent, trade('b')])); expect(await screen.findByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeVisible();
-});
-it('does not pop an automatic full review when an earlier journal lookup resolves after the quiet task has already finished', async () => {
-  state.mode = 'decision'; let resolve!: (j: TradeJournal) => void; state.lookup.mockImplementation(() => new Promise<TradeJournal>(r => { resolve = r; }));
-  const old = trade('old'), h = render(panel([old])); h.rerender(panel([old, trade('a')])); await waitFor(() => expect(state.lookup).toHaveBeenCalledTimes(1));
-  await act(async () => { const end = beginHistoryOnlyNotifications(); end(); });
-  await act(async () => { resolve({ id: 'journal-1' } as TradeJournal); });
-  expect(screen.queryByTestId('review-sheet')).toBeNull(); expect(getNotificationSnapshot().entries).toHaveLength(1);
-});
-// 【用户要求】2026-10-26 打开「渔」时不要平仓评价弹窗，只记进消息列表
-it('keeps the close-review dialog quiet while the fish panel is open, then pops again once it is closed', async () => {
-  const old = trade('old'), h = render(panel([old])); let end!: () => void;
-  await act(async () => { end = beginCloseReviewQuiet(); });
-  h.rerender(panel([old, trade('a')]));
-  await waitFor(() => expect(getNotificationSnapshot().entries).toHaveLength(1));
+it.each(['direct','decision'])('never opens a review automatically in %s mode, including deferred history hydration and refresh', async mode => {
+  state.mode = mode;
+  state.lookup.mockResolvedValue({id:'existing-journal'} as TradeJournal);
+  const old = trade('old'), recent = trade('a');
+  const h = render(panel([]));
+  h.rerender(panel([old]));
+  h.rerender(panel([old,recent]));
+  h.rerender(panel([old,recent,{...trade('liquidation'),action:'LIQUIDATION'}]));
+  await waitFor(()=>expect(getNotificationSnapshot().entries).toHaveLength(2));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByTestId('review-sheet')).toBeNull();
+  expect(state.lookup).not.toHaveBeenCalled();
+  expect(state.backfill).not.toHaveBeenCalled();
+  h.unmount();
+  const refreshed = render(panel([]));
+  refreshed.rerender(panel([old]));
+  refreshed.rerender(panel([old,recent]));
+  await act(async()=>{});
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByTestId('review-sheet')).toBeNull();
   expect(screen.queryByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeNull();
-  await act(async () => { end(); });
-  h.rerender(panel([old, trade('a'), trade('b')])); expect(await screen.findByText('刚平了一笔 — 要现在做平仓评价吗？')).toBeVisible();
+  expect(state.lookup).not.toHaveBeenCalled();
+  expect(state.backfill).not.toHaveBeenCalled();
+});
+
+it('stays silent after quality work and the fish panel close, with ordinary popup notifications enabled', async () => {
+  const old=trade('old'), h=render(panel([old]));
+  let endHistory!:()=>void, endFish!:()=>void;
+  await act(async()=>{endHistory=beginHistoryOnlyNotifications();endFish=beginCloseReviewQuiet();});
+  h.rerender(panel([old,trade('a')]));
+  await waitFor(()=>expect(getNotificationSnapshot().entries).toHaveLength(1));
+  await act(async()=>{endHistory();endFish();});
+  h.rerender(panel([old,trade('a'),trade('b')]));
+  await waitFor(()=>expect(getNotificationSnapshot().entries).toHaveLength(2));
+  expect(getNotificationSnapshot().popupsEnabled).toBe(true);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(screen.queryByTestId('review-sheet')).toBeNull();
+  expect(state.lookup).not.toHaveBeenCalled();
+  expect(state.backfill).not.toHaveBeenCalled();
 });
