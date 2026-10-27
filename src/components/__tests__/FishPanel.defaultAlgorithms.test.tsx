@@ -1,5 +1,3 @@
-// 2026-10-24 用户截图：默认规则与并集。
-// 【用户要求】2026-10-25 默认改为 CBI-2、avg_S、CBA、az、BSS 五条（最看重的 CBI-2、avg_S 在前）。
 import {beforeEach,it,expect,vi} from 'vitest';
 import {fireEvent,render,screen,cleanup} from '@testing-library/react';
 import {FishPanel,FISH_DEFAULT_ALGORITHMS} from '@/components/FishPanel';
@@ -11,41 +9,44 @@ const start=vi.fn();
 const panel=(extra:object={})=><FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={{exchanges:['binance'],includeDuplicates:false}} onSelectionChange={()=>{}} onStart={start} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()} {...extra}/>;
 const features=()=>[1,2,3,4,5,6].flatMap(i=>{const el=screen.queryByLabelText(i===1?'捕捞算法':`算法 ${i} 特征值`,{selector:'select'});return el?[(el as HTMLSelectElement).value]:[];});
 beforeEach(()=>{localStorage.clear();sessionStorage.clear();start.mockClear();defs.list=fishFeatureDefinitions([CBI2_DEF,CBI_DEF,CBA_DEF,DRIFT_SPEED_Z_DEF,CDA_DEF,BSS_DEF,STATE_DEF]);});
-it('默认五条规则全部勾选，开始捕捞使用默认阈值、序列和并集',async()=>{
+it('默认四条规则全部勾选，开始捕捞使用截图的阈值、序列和交集',async()=>{
  render(panel());
- expect(FISH_DEFAULT_ALGORITHMS).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
- expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
- for(const i of [1,2,3,4,5])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
- expect(screen.queryByLabelText('启用算法 6',{selector:'input'})).toBeNull();
- expect([screen.getByLabelText('捕捞阈值'),...[2,3,4,5].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','0.6','8','0.15','0.12']);
+ expect(FISH_DEFAULT_ALGORITHMS).toEqual(['cbi2','cba','cbi2','cba']);
+ expect(features()).toEqual(['cbi2','cba','cbi2','cba']);
+ for(const i of [1,2,3,4])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
+ expect(screen.queryByLabelText('启用算法 5',{selector:'input'})).toBeNull();
+ expect([screen.getByLabelText('捕捞阈值'),...[2,3,4].map(i=>screen.getByLabelText(`算法 ${i} 阈值`))].map(e=>(e as HTMLInputElement).value)).toEqual(['0.04','8','0.04','8']);
  expect(screen.queryByRole('alert')).toBeNull();
- expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_state');
- expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('S·avg');
+ expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('结果');
+ expect((screen.getByLabelText('算法 2 特征值') as HTMLSelectElement).selectedOptions[0].label).toBe('CBA·avg₂');
+ expect(screen.getByLabelText('算法 3 统计量')).toHaveValue('avg_CBI2');
+ expect(screen.getByLabelText('算法 4 统计量')).toHaveValue('avg_CBA');
  expect(screen.queryByTestId('fish-rule')).toBeNull();
- for(const i of [1,2,3,4,5])expect(screen.getByRole('button',{name:`算法 ${i} 说明`})).toBeVisible();
- expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
+ for(const i of [1,2,3,4])expect(screen.getByRole('button',{name:`算法 ${i} 说明`})).toBeVisible();
+ expect(screen.getByRole('radio',{name:'交集'})).toHaveAttribute('aria-checked','true');
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));
  await vi.waitFor(()=>expect(start).toHaveBeenCalled());
- expect(start.mock.calls[0][0].combination).toBe('or');
- expect(start.mock.calls[0][0].algorithms.map((a:{feature:DeepDigFeatureDef})=>a.feature.id)).toEqual(['cbi2','state','cba','drift-speed-z','bss']);
+ expect(start.mock.calls[0][0].combination).toBe('and');
+ expect(start.mock.calls[0][0].algorithms.map((a:{feature:DeepDigFeatureDef})=>a.feature.id)).toEqual(['cbi2','cba','cbi2','cba']);
 });
-it('重新打开恢复五条默认规则与顺序，保留新增规则和上次阈值',()=>{
+it('重新打开保留手动增删、勾选、阈值和组合',()=>{
  render(panel());
- fireEvent.change(screen.getByLabelText('算法 4 阈值'),{target:{value:'20'}});
- fireEvent.click(screen.getByLabelText('启用算法 3',{selector:'input'}));
- fireEvent.click(screen.getByRole('button',{name:'算法 5 的更多操作'}));fireEvent.click(screen.getByRole('button',{name:'删除算法 5'}));
+ fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'12'}});
+ fireEvent.click(screen.getByLabelText('启用算法 2',{selector:'input'}));
+ fireEvent.click(screen.getByRole('radio',{name:'并集'}));
+ fireEvent.click(screen.getByRole('button',{name:'算法 4 的更多操作'}));fireEvent.click(screen.getByRole('button',{name:'删除算法 4'}));
  fireEvent.click(screen.getByRole('button',{name:'+ 算法'}));
- expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','cbi2']);
  cleanup();render(panel());
- expect(features()).toEqual(['cbi2','state','cba','drift-speed-z','bss','cbi2']);
- for(const i of [1,2,3,4,5,6])expect(screen.getByLabelText(`启用算法 ${i}`,{selector:'input'})).toBeChecked();
- expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(20);expect(screen.getByLabelText('算法 5 阈值')).toHaveValue(.12);
+ expect(features()).toEqual(['cbi2','cba','cbi2','cbi2']);
+ expect(screen.getByLabelText('启用算法 2',{selector:'input'})).not.toBeChecked();
+ expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(12);
+ expect(screen.getByRole('radio',{name:'并集'})).toHaveAttribute('aria-checked','true');
 });
 it('Deep dig 里删掉的算法跳过；不传 defaultAlgorithms 时仍恢复上次保存的卡片',()=>{
- defs.list=defs.list.filter(d=>d.id!=='cba');render(panel());expect(features()).toEqual(['cbi2','state','drift-speed-z','bss']);
- cleanup();render(panel({defaultAlgorithms:undefined}));expect(features()).toEqual(['cbi2','state','drift-speed-z','bss']);
- fireEvent.click(screen.getByRole('button',{name:'算法 3 的更多操作'}));fireEvent.click(screen.getByRole('button',{name:'删除算法 3'}));
- cleanup();render(panel({defaultAlgorithms:undefined}));expect(features()).toEqual(['cbi2','state','bss']);
+ defs.list=defs.list.filter(d=>d.id!=='cba');render(panel());expect(features()).toEqual(['cbi2','cbi2']);
+ cleanup();render(panel({defaultAlgorithms:undefined}));expect(features()).toEqual(['cbi2','cbi2']);
+ fireEvent.click(screen.getByRole('button',{name:'算法 2 的更多操作'}));fireEvent.click(screen.getByRole('button',{name:'删除算法 2'}));
+ cleanup();render(panel({defaultAlgorithms:undefined}));expect(features()).toEqual(['cbi2']);
 });
 it('刷新后恢复上一轮：打开时不按默认卡重新合并（新鱼不变），用户改了勾选才重新合并',()=>{
  const recombine=vi.fn(()=>true);
@@ -55,12 +56,13 @@ it('刷新后恢复上一轮：打开时不按默认卡重新合并（新鱼不�
  expect(recombine).toHaveBeenCalledTimes(1);
 });
 
-it('avg_S 卡修改阈值后刷新仍保留，序列不变',()=>{
+it('CBA·avg₂ 卡修改阈值后刷新仍保留，avg 卡不受影响',()=>{
  render(panel());
- fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'0.65'}});
+ fireEvent.change(screen.getByLabelText('算法 2 阈值'),{target:{value:'12'}});
  cleanup();render(panel());
- expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('avg_state');
- expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(.65);
+ expect(screen.getByLabelText('算法 2 统计量')).toHaveValue('结果');
+ expect(screen.getByLabelText('算法 2 阈值')).toHaveValue(12);
+ expect(screen.getByLabelText('算法 4 阈值')).toHaveValue(8);
 });
 
 it('捕捞、鱼舱、鱼质量是三个同级模块，独立折叠', async () => {

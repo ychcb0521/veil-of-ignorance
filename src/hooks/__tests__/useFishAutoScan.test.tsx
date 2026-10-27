@@ -37,12 +37,12 @@ it('旧版手动设置升级到自动一次，保留间隔和上次时间；之�
  saveFishAuto({...old,mode:'manual'});
  expect(readFishAuto()).toEqual(old);
 });
-it('切到自动立刻捕第一次（时间 = 现在，五条默认规则），之后每隔所选时长一次，没到点不捕',async()=>{
+it('切到自动立刻捕第一次（时间 = 现在，四条默认规则），之后每隔所选时长一次，没到点不捕',async()=>{
  saveFishAuto({mode:'manual',hours:1,lastRunAt:null});
  const {start,view}=hook();
  act(()=>{view.result.current.setHours(2);});act(()=>{view.result.current.setMode('auto');});await flush();
  expect(start).toHaveBeenCalledTimes(1);
- const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','state','cba','drift-speed-z','bss']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:48,atrMultiple:3});
+ const s=start.mock.calls[0][0] as any;expect(s.anchorMs).toBeUndefined();expect(s.algorithms.map((a:any)=>a.feature.id)).toEqual(['cbi2','cba','cbi2','cba']);expect(s.turnoverFloors).toHaveLength(3);expect(s.downwardWick).toEqual({enabled:true,hours:48,atrMultiple:3});
  expect(readFishAuto()).toMatchObject({mode:'auto',hours:2,lastRunAt:Date.now()});
  await flush(2*HOUR-60_000);expect(start).toHaveBeenCalledTimes(1);
  await flush(90_000);expect(start).toHaveBeenCalledTimes(2);
@@ -78,7 +78,7 @@ it('自动捕捞与「开始捕捞」按钮拼出的设置逐项相同',async()=
  render(<FishPanel defaultAlgorithms={FISH_DEFAULT_ALGORITHMS} onRecombine={()=>true} signals={[]} progress={null} inputs={{time:'',threshold:''}} onInputsChange={()=>{}} selection={selection} onSelectionChange={()=>{}} onStart={onStart} onCancel={()=>{}} onJump={()=>{}} onDelete={()=>{}} onRate={()=>{}} jumpingSignalId={null} tradedDayIndex={new Set()} campaignDayIndex={new Set()}/>);
  fireEvent.click(screen.getByLabelText('启用算法 3',{selector:'input'}));
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await waitFor(()=>expect(onStart).toHaveBeenCalled());
- const built=buildFishScanSettings({cards:readFishCards(),defs:DEFS,combination:'or',selection,time:''});
+ const built=buildFishScanSettings({cards:readFishCards(),defs:DEFS,combination:'and',selection,time:''});
  expect(built.settings).toEqual(onStart.mock.calls[0][0]);
 });
 it('后台标签页里逐币让出不走计时器（不受浏览器节流），前台照旧',async()=>{

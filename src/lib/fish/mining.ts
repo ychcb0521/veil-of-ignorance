@@ -13,14 +13,14 @@ import type { TradeSignal } from '@/lib/signalLibrary';
 import { getUserId, getUserPrefix } from '@/lib/userStoragePrefix';
 import { queueSimStatePush } from '@/lib/simStateSync';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
-import { FISH_DEFAULT_RULES } from './cards';
+import { LEGACY_FISH_DEFAULT_RULES } from './cards';
 import { fishCatchKey } from './records';
 import { MINING_LEASE_LOGICAL_KEY, MINING_LOGICAL_KEY, normalizeMiningState, newMiningState, type FishMiningRule, type FishMiningState } from './miningState';
 export * from './miningState';
 
 export const miningKey = () => `${getUserPrefix()}${MINING_LOGICAL_KEY}`;
 const leaseKey = () => `${getUserPrefix()}${MINING_LEASE_LOGICAL_KEY}`;
-export const currentDefaultRules = (): FishMiningRule[] => FISH_DEFAULT_RULES.map(r => ({ id: r.id, featureId: r.featureId, statistic: r.statistic, threshold: r.threshold }));
+export const currentDefaultRules = (): FishMiningRule[] => LEGACY_FISH_DEFAULT_RULES.map(r => ({ id: r.id, featureId: r.featureId, statistic: r.statistic, threshold: r.threshold }));
 
 export function readMiningState(): FishMiningState {
   try { return normalizeMiningState(JSON.parse(readPersistedStateRaw(miningKey()) ?? 'null')) ?? newMiningState(); } catch { return newMiningState(); }
