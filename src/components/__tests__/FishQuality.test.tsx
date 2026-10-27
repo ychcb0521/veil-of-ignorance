@@ -250,7 +250,7 @@ it('lets the user add, edit and apply buy conditions, then marks rows that were 
   s.study = { ...s.study, buyFilters: [f], filterReadings: [{ key: qualityFilterReadingKey(row, f), value: .5 }] };
   render(<FishQuality state={s}/>);
   // 旧版本的全局过滤沿用到每套方案
-  expect(screen.getByRole('button', { name: '过滤与持仓否决' })).toHaveTextContent('2');
+  expect(screen.getByRole('region', { name: '过滤模块' })).toHaveTextContent('2 条买入条件');
   const notBought = within(screen.getAllByTestId('quality-fish-row')[0]).getAllByText('未买入');
   expect(notBought.length).toBeGreaterThanOrEqual(2);
   expect(notBought[0]).toHaveAttribute('title', expect.stringContaining('状态 S 原始值 0.5 不满足 > 0.65'));
@@ -509,6 +509,9 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
   expect(screen.queryByRole('tab')).toBeNull();
   expect(screen.getByTestId('quality-mode')).toHaveTextContent('监测');
   expect(screen.getByTestId('fish-mining-panel')).toBeVisible();
+  expect(screen.getByRole('region', { name: '挖掘模块' })).toBeVisible();
+  expect(screen.getByRole('region', { name: '过滤模块' })).toBeVisible();
+  expect(screen.getByRole('region', { name: '监测模块' })).toBeVisible();
   expect(screen.getByRole('button', { name: /开始挖掘/ })).toBeInTheDocument();
   expect(screen.queryByLabelText('固定卖出方案')).toBeNull();
 });
@@ -516,7 +519,7 @@ it('shows the continuous-mining panel right away in the merged 卖出与探测 v
 it('puts 过滤 in its own block beside the 监测 group of run controls, both on the left', () => {
   const s = state(); s.running = true; s.progress = { done: 2333, total: 2360, current: '' };
   render(<FishQuality state={s}/>);
-  const group = screen.getByRole('group', { name: /^监测：/ }), filter = screen.getByTestId('quality-filter-controls');
+  const group = screen.getByRole('region', { name: '监测模块' }), filter = screen.getByTestId('quality-filter-controls');
   expect(within(group).getByTestId('quality-mode')).toHaveTextContent('监测');
   for (const name of ['重新开始', '暂停', '鱼质量观察设置']) expect(within(group).getByRole('button', { name })).toBeInTheDocument();
   expect(within(group).getByRole('button', { name: '2333/2360' })).toBeDisabled();
