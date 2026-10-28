@@ -31,7 +31,7 @@ export function FishLibraryDialog<T>({ name, info, description, placeholder, rou
   const change = (next: boolean) => { setOpen(next); onOpenChange?.(next); };
   return <Dialog open={open} onOpenChange={change}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={`打开${name}`}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-6xl flex-col gap-3 overflow-hidden p-4 sm:p-5">
+    <DialogContent className="flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="flex items-center gap-1.5"><DialogTitle className="text-sm">{name}</DialogTitle><FishQualityInfo label={`${name}说明`}>{info}</FishQualityInfo></div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>

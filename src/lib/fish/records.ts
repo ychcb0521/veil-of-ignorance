@@ -62,7 +62,7 @@ function savedResultMetric(key: string): { name?: string; metric?: string } {
   savedResultMetrics.set(key, result);
   return result;
 }
-function savedFishMetric(a: Partial<FishSnapshot>): string | undefined {
+export function savedFishMetric(a: Partial<FishSnapshot>): string | undefined {
   const key = a.algorithmKey?.split('|');
   const selected = a.statistic ?? (key?.length === 6 ? key[1] : undefined);
   return selected && selected !== '结果' ? selected : savedResultMetric(a.definitionKey ?? 'null').metric;
