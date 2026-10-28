@@ -1,3 +1,4 @@
+import { mirrorWeightedReturn } from './qualityMirror';
 /** Rebuild derived comparison trades only. Original versions stay in the same account's archive. */
 import { BUILTIN_FEATURES, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { shortFishHash } from './algorithm';
@@ -57,9 +58,9 @@ export function prepareQualityRepair(study: FishQualityStudy, definitions: reado
     ? { ...run, repair: { ...run.repair, batchId: batch.id, status: 'pending' as const, error: undefined } } : run) };
   return { study: next, tasks: remaining, batch };
 }
-const outcomeFields = ['status','entryTime','entryPrice','endTime','endPrice','returnPct','pnl','peakPct','adversePct','drawdownPct','uncapturedPct','heldHours','exitReading','complete'] as const;
+const outcomeFields = ['status','entryTime','entryPrice','endTime','endPrice','returnPct','pnl','peakPct','adversePct','drawdownPct','uncapturedPct','heldHours','exitReading','complete','remainingFraction','realizedPnl'] as const;
 function outcomeChanged(a: QualityResult, b: QualityResult): boolean {
-  return outcomeFields.some(field => {
+  return JSON.stringify(a.mirrorFill) !== JSON.stringify(b.mirrorFill) || outcomeFields.some(field => {
     const x = a[field], y = b[field];
     return typeof x === 'number' && typeof y === 'number' ? Math.abs(x-y) > 1e-9 * Math.max(1,Math.abs(x),Math.abs(y)) : x !== y;
   });
@@ -67,7 +68,7 @@ function outcomeChanged(a: QualityResult, b: QualityResult): boolean {
 function reliable(result: QualityResult): boolean {
   const close = (a: number,b: number) => Math.abs(a-b) <= 1e-8 * Math.max(1,Math.abs(a),Math.abs(b));
   return hasQualityCampaign(result) && ['entryPrice','endPrice','returnPct','pnl','peakPct','adversePct','drawdownPct','uncapturedPct','heldHours'].every(k => Number.isFinite(result[k as keyof QualityResult]))
-    && result.endTime! >= result.entryTime! && close(result.returnPct!,(result.endPrice!/result.entryPrice!-1)*100)
+    && result.endTime! >= result.entryTime! && close(result.returnPct!,mirrorWeightedReturn(result.entryPrice!,result.endPrice!,result.mirrorFill))
     && close(result.pnl!,result.returnPct!) && close(result.heldHours!,(result.endTime!-result.entryTime!)/3600000)
     && close(result.uncapturedPct!,result.peakPct!-result.returnPct!);
 }

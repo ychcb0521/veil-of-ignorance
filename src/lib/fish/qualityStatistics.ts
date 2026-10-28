@@ -1,3 +1,4 @@
+import { mirrorLabel } from './qualityMirror';
 import { qualityTradeHours } from './qualityStatisticsMath';
 export { qualityTradeHours, qualityStatisticsEstimate, qualityStatisticsInference, type QualityInferenceMetric, type QualityInferenceRow } from './qualityStatisticsMath';
 import { activeHoldingVetoes } from './qualityVeto';
@@ -18,7 +19,7 @@ const finite = (n: number | undefined | null): n is number => n != null && Numbe
 const average = (values: readonly number[]) => values.length ? values.reduce((s, v) => s + v, 0) / values.length : null;
 export function qualitySellType(result: QualityResult, plan: QualityGroup): string {
   const cause = result.exitSnapshot?.cause;
-  if (cause) return ({ 'static-drawdown': '静态回撤止损', 'dynamic-drawdown': '动态回撤止损', 'drop-1m': '1分钟跌幅卖出', 'drop-5m': '5分钟跌幅卖出', indicator: `指标否决 · ${cause.label}` })[cause.kind] ?? '触发原因未记录';
+  if (cause) return ({ 'static-drawdown': '静态回撤止损', 'dynamic-drawdown': '动态回撤止损', 'drop-1m': '1分钟跌幅卖出', 'drop-5m': '5分钟跌幅卖出', 'mirror-take-profit':'镜像止盈', indicator: `指标否决 · ${cause.label}` })[cause.kind] ?? '触发原因未记录';
   // A recorded exit with no veto cause is an ordinary exit. Unrecorded legacy causes stay unknown.
   return result.exitSnapshot || !activeHoldingVetoes(plan.holdingVetoes).length ? '算法条件卖出' : '触发原因未记录';
 }
@@ -52,18 +53,18 @@ export function qualityStatisticsSeries(study: FishQualityStudy, rows: readonly 
   };
   if (category === 'sell') return plans.map(plan => build(plan, rows, {
     id: plan.id, variableId: qualityVariableKey(plan.snapshot, plan.metric), variable: plan.label,
-    level: plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : '仅持仓否决 / 未设条件',
-    context: `${plan.snapshot.interval ?? '5m'} · ${plan.execution === 'intrabar-1m' ? '盘中复原' : '收盘确认'} · 买入过滤 ${activeBuyFilters(study, plan).length} 条 · 持仓否决 ${activeHoldingVetoes(plan.holdingVetoes).length} 条`,
+    level: plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : plan.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅持仓否决 / 未设条件',
+    context: `${plan.snapshot.interval ?? '5m'} · ${plan.execution === 'intrabar-1m' ? '盘中复原' : '收盘确认'} · 买入过滤 ${activeBuyFilters(study, plan).length} 条 · 持仓否决 ${activeHoldingVetoes(plan.holdingVetoes).length} 条${mirrorLabel(plan.mirrorTakeProfit) ? ` · ${mirrorLabel(plan.mirrorTakeProfit)}` : ''}`,
   }));
   if (!fixed) return [];
   if (category === 'detect') return qualityVariables(study.groups).flatMap(variable => variable.levels.map(group => build(fixed, rows.filter(row => row.detectorId ? row.detectorId === group.id : row.groups.includes(group.id)), {
     id: group.id, variableId: variable.id, variable: variable.label, level: qualityLevelText(group),
-    context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'} · ${group.snapshot.interval ?? '5m'}${group.snapshot.constraints?.length ? ` · 附加约束 ${group.snapshot.constraints.length} 条` : ''}`,
+    context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'}${mirrorLabel(fixed.mirrorTakeProfit) ? ` · ${mirrorLabel(fixed.mirrorTakeProfit)}` : ''} · ${group.snapshot.interval ?? '5m'}${group.snapshot.constraints?.length ? ` · 附加约束 ${group.snapshot.constraints.length} 条` : ''}`,
   })));
   return qualityFilterColumns(study).map(column => {
     const filter = column.filter;
     const subset = rows.filter(row => { const value = qualityFilterValue(row, filter, readings); return value != null && (filter.direction === '>' ? value > filter.threshold : value < filter.threshold); });
-    const series = build(fixed, subset, { id: column.id, variableId: qualityVariableKey(filter.snapshot, filter.metric), variable: filter.label, level: qualityLevelText(filter), context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'}；按本条件满足的记录分组${study.independentFilters ? '，不限制独立监测' : '，仍遵守该卖出方案全部买入条件'}` });
+    const series = build(fixed, subset, { id: column.id, variableId: qualityVariableKey(filter.snapshot, filter.metric), variable: filter.label, level: qualityLevelText(filter), context: `固定卖出：${fixed.label} · ${fixed.rule ? qualityLevelText(fixed) : '仅持仓否决 / 未设条件'}${mirrorLabel(fixed.mirrorTakeProfit) ? ` · ${mirrorLabel(fixed.mirrorTakeProfit)}` : ''}；按本条件满足的记录分组${study.independentFilters ? '，不限制独立监测' : '，仍遵守该卖出方案全部买入条件'}` });
     // Count filter exclusions by unique entry, not expanded detector rows.
     const unique = [...new Map(rows.map(row => [row.signalId ?? row.id, row])).values()];
     const missing = unique.filter(row => qualityFilterValue(row, filter, readings) == null).length;

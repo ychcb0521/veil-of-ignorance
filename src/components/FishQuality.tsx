@@ -1,3 +1,5 @@
+import { FishQualityMirrorEditor, mirrorDraft, parseMirrorDraft } from '@/components/FishQualityMirrorEditor';
+import { defaultQualityMirror, mirrorIdentity, validateQualityMirror } from '@/lib/fish/qualityMirror';
 import { qualityRunStatusMap, qualityRowRunStatus, qualityRunStatusText, qualityRunStatusDetail, qualitySelectRunState, type QualityRunStage, type QualityRunStateFilter } from '@/lib/fish/qualityRunStatus';
 import { FishQualityStatistics, QualityStatisticsButton, type QualityStatisticsRequest } from '@/components/FishQualityStatistics';
 import { qualityVariables, qualityVariableKey } from '@/lib/fish/qualityVariables';
@@ -37,7 +39,7 @@ const countSignals = (rows: readonly QualitySample[]) => new Set(rows.map(qualit
 const pct = (v?: number | null) => v == null || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
 const signed = (v?: number | null) => v == null ? '' : v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-destructive' : '';
 const date = (v?: number | null) => v ? formatUTC8(v) : '—';
-const ruleText = (plan: QualityGroup) => plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : hasQualityExit(plan) ? '仅一票否决' : '设置门槛';
+const ruleText = (plan: QualityGroup) => plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : hasQualityExit(plan) ? plan.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅一票否决' : '设置门槛';
 const isLibrary = (row: QualitySample) => row.origin === 'library';
 const sourceOf = (row: QualitySample) => isLibrary(row) ? 'library' : row.source.mined ? 'mined' : 'fish';
 // 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：原来每页 50 条、框只有约 9 行高，要翻 16 页。
@@ -112,17 +114,21 @@ function BuyFilterEditor({ state, done }: { state: FishQualityState; done: () =>
  */
 function HoldingMonitorEditor({ state, plan, done }: { state: FishQualityState; plan: QualityGroup; done: () => void }) {
   const [vetoDraft, setVetoDraft] = useState(() => holdingVetoDraft(plan.holdingVetoes)), [error, setError] = useState('');
+  const [mirror, setMirror] = useState(() => mirrorDraft(plan.mirrorTakeProfit ?? defaultQualityMirror()));
+  const parsedMirror = parseMirrorDraft(mirror);
+  const mirrorChanged = JSON.stringify(mirrorIdentity(parsedMirror)) !== JSON.stringify(mirrorIdentity(plan.mirrorTakeProfit));
   let vetoChanged = false;
   try { vetoChanged = JSON.stringify(holdingVetoIdentity(parseHoldingVetoDraft(vetoDraft))) !== JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)); }
   catch { vetoChanged = true; }
   const apply = () => {
-    try { const vetoes = parseHoldingVetoDraft(vetoDraft); if (vetoChanged) state.setHoldingVetoes(plan.id, vetoes); setError(''); done(); }
+    try { const vetoes = parseHoldingVetoDraft(vetoDraft); validateQualityMirror(parsedMirror); if (vetoChanged || mirrorChanged) state.setHoldingVetoes(plan.id, vetoes, parsedMirror); setError(''); done(); }
     catch (e) { setError(e instanceof Error ? e.message : '条件无效'); }
   };
   return <div className="space-y-3" data-testid="quality-monitor-editor">
-    <div className="space-y-0.5"><p className="text-xs font-medium">持仓监测 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">买入之后何时提前卖出。持仓一票否决只作用于这套卖出方案；改动后立刻按新设置重新计算卖出，正在跑的旧批次直接作废。</p></div>
+    <div className="space-y-0.5"><p className="text-xs font-medium">持仓监测 · {plan.label}</p><p className="text-[10.5px] leading-relaxed text-muted-foreground">买入之后何时提前卖出。镜像止盈与持仓一票否决只作用于这套卖出方案；改动后立刻按新设置重新计算卖出，正在跑的旧批次直接作废。</p></div>
+    <FishQualityMirrorEditor draft={mirror} setDraft={setMirror}/>
     <FishQualityHoldingVetoEditor draft={vetoDraft} setDraft={setVetoDraft}/>
-    <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用到「{plan.label}」{vetoChanged ? '并重算' : ''}</button></div>
+    <div className="sticky bottom-0 -mx-4 flex justify-end border-t border-border/50 bg-popover px-4 py-2.5"><button type="button" disabled={!state.ready} onClick={apply} className="h-7 rounded-md bg-primary px-2.5 text-[11px] text-primary-foreground disabled:opacity-40">应用到「{plan.label}」{vetoChanged || mirrorChanged ? '并重算' : ''}</button></div>
     {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
   </div>;
 }
@@ -134,7 +140,7 @@ function PlanTabs({ plans, active, count, label, onSelect }: { plans: QualityGro
 const FILTER_TEXT: Record<QualityFilterStatus['state'], string> = { none: '', pass: '满足', fail: '未买入', pending: '待判断', error: '缺数据' };
 function ResultCell({ result, onClick, section, onOpenCampaign }: { result?: QualityResult; onClick: () => void; section: 'sell' | 'detect'; onOpenCampaign?: () => void }) {
   const router = useInRouterContext(), className = 'flex w-full items-center justify-between gap-2 text-left hover:underline';
-  const content = <><span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{resultText(result)}</span></>;
+  const content = <><span className={`font-mono tabular-nums ${signed(result?.returnPct)}`}>{pct(result?.returnPct)}</span><span className={`text-[9px] ${result?.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>{result?.status === 'open' && result.mirrorFill ? `余仓 ${+((result.remainingFraction ?? 1)*100).toPrecision(8)}%` : resultText(result)}</span></>;
   if (result && hasQualityCampaign(result)) {
     const href = qualityCampaignPath(result.key, section);
     return router ? <Link to={href} state={FROM_FISH_QUALITY} onClick={onOpenCampaign} className={className} title="打开该标的的交易战役">{content}</Link> : <a href={href} className={className} title="打开该标的的交易战役">{content}</a>;
@@ -161,6 +167,8 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
       ['状态', (r?: QualityResult) => `${resultText(r)}${r?.reason ? ` · ${r.reason}` : ''}`],
       ['买入时间', (r?: QualityResult) => date(r?.entryTime)], ['买入价', (r?: QualityResult) => r?.entryPrice?.toPrecision(7) ?? '—'],
       ['卖出 / 估值时间', (r?: QualityResult) => date(r?.endTime)], ['卖出 / 估值价', (r?: QualityResult) => r?.endPrice?.toPrecision(7) ?? '—'],
+      ['镜像止盈', (r?: QualityResult) => r?.mirrorFill ? `${date(r.mirrorFill.at)} · 价格 ${r.mirrorFill.price.toPrecision(7)} · 卖出初始币数 ${+(r.mirrorFill.fraction*100).toPrecision(8)}%` : '未触发'],
+      ['余仓 / 已兑现', (r?: QualityResult) => r?.mirrorFill ? `${+((r.remainingFraction ?? 0)*100).toPrecision(8)}% / ${r.realizedPnl?.toFixed(2)} USDT` : '—'],
       ['收益率', (r?: QualityResult) => pct(r?.returnPct)], ['盈亏 USDT', (r?: QualityResult) => r?.pnl?.toFixed(2) ?? '—'],
       ['最大涨幅', (r?: QualityResult) => pct(r?.peakPct)], ['最大不利涨跌', (r?: QualityResult) => pct(r?.adversePct)],
       ['静态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'static')).replace(/^\+/, '')], ['动态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'dynamic')).replace(/^\+/, '')], ['涨幅未兑现', (r?: QualityResult) => pct(r?.uncapturedPct).replace(/^\+/, '')],
@@ -233,7 +241,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const skippedBy = (plan: QualityGroup, row: QualitySample) => { const f = filterStatus.get(plan.id)?.get(row.signalId ?? row.id); return f && f.state !== 'pass' ? f : undefined; };
   const [monitorPlanId, setMonitorPlanId] = useState<string | null>(null);
   const monitorPlan = study.sellPlans?.find(p => p.id === monitorPlanId) ?? study.sellPlans?.[0];
-  const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length, 0);
+  const filterCount = activeStandaloneBuyFilters(study).length, vetoCount = (study.sellPlans ?? []).reduce((n, p) => n + activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0), 0);
   const plansForSort = study.sellPlans;
   const runStatuses = useMemo(() => qualityRunStatusMap(study, batch), [batch, study.results, study.filterReadings, study.sellPlans, study.buyFilters, study.observeHours, study.selectedSellId, study.independentFilters]); // eslint-disable-line react-hooks/exhaustive-deps
   const runScopeRows = useMemo(() => narrowed.filter(r => !month || signalMonthKey(r.source.timeMs) === month), [narrowed, month]);
@@ -386,9 +394,9 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
             <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !selectedCount} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">这一轮不沿用已算好的结果，按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。各轮不同算法和门槛下的结果都保留，同币种、同时间、同算法同门槛的合并为一条</span></button></PopoverContent></Popover>
           </div>
-          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条否决`).join('\n') : '给每套卖出方案分别设置持仓一票否决条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
-            <PlanTabs plans={plans} active={monitorPlan?.id} count={p => activeHoldingVetoes(p.holdingVetoes).length} label="选择要设置持仓监测的卖出方案" onSelect={setMonitorPlanId}/>
-            {monitorPlan && <HoldingMonitorEditor key={JSON.stringify([monitorPlan.id, monitorPlan.holdingVetoes ?? []])} state={state} plan={monitorPlan} done={() => setMonitorOpen(false)}/>}
+          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条否决${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '设置镜像止盈与持仓一票否决条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+            <PlanTabs plans={plans} active={monitorPlan?.id} count={p => activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0)} label="选择要设置持仓监测的卖出方案" onSelect={setMonitorPlanId}/>
+            {monitorPlan && <HoldingMonitorEditor key={JSON.stringify([monitorPlan.id, monitorPlan.holdingVetoes ?? [], monitorPlan.mirrorTakeProfit])} state={state} plan={monitorPlan} done={() => setMonitorOpen(false)}/>}
           </PopoverContent></Popover>
           <FishMonitorLibrary study={study} onJump={onJump} canJump={canJump} onOpenCampaign={rememberReturn}/>
         </FishQualityModule>

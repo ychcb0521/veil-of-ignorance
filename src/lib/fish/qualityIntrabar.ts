@@ -9,6 +9,8 @@ import { fishDelay, validateFishBars } from './shared';
 import { formatUTC8 } from '@/lib/timeFormat';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoReading, minuteDropReading, minuteDropWindow, qualityConditionMet, qualityIntrabarStop, type QualityExitCause, type QualityHoldingPath, type QualityHoldingVeto, type QualityOperator } from './qualityVeto';
 
+import type { QualityMirrorTakeProfit, QualityMirrorFill } from './qualityMirror';
+
 const MINUTE = 60_000;
 export interface QualityTrigger {
   at: number; reading: number; cause?: QualityExitCause; atOpen?:boolean;
@@ -45,8 +47,9 @@ export interface QualityIntrabarCondition {
 export async function findQualityIntrabarExit(o: {
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
+  mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
-}): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[] }> {
+}): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
@@ -60,7 +63,7 @@ export async function findQualityIntrabarExit(o: {
     validateFishBars(history,start,c.plan.warm,c.plan.step);
     streams.push({...c,start,history,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
-  let holding=o.holding;
+  let holding=o.holding, mirrorFill=o.mirrorFill;
   const enabled = activeHoldingVetoes(o.vetoes);
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
@@ -107,8 +110,18 @@ export async function findQualityIntrabarExit(o: {
   // Re-read at most five past minutes on resume, solely to restore the rolling window and previous reading.
   const start=maxDropWindow?Math.min(replayStart,Math.max(o.entry,o.since-maxDropWindow*MINUTE)):replayStart,prices:ResearchBar[]=[];
   if(start===(o.resumed?o.since:o.entry)) {
-    const trigger=check(start);if(trigger)return {trigger,prices};
+    const trigger=check(start);if(trigger)return {trigger,prices,mirrorFill};
   }
+  const mirrorAt=(minute:ResearchBar,openingOnly:boolean):QualityTrigger|undefined=>{
+    if(!o.mirror?.enabled || mirrorFill || !holding || minute.openTime<o.since)return;
+    const target=holding.entry*(1+o.mirror.gainPct/100),observed=openingOnly?minute.open:minute.high;
+    if (!Number.isFinite(target)) throw new Error('镜像止盈价格超出可计算范围，请降低涨幅阈值');
+    if(observed<target && Math.abs(observed-target)>target*1e-12)return;
+    const atOpen=minute.open>=target,price=atOpen?minute.open:target;
+    mirrorFill={at:minute.openTime,price,fraction:o.mirror.sellPct/100,gainPct:o.mirror.gainPct,atOpen};
+    if(mirrorFill.fraction===1)return {at:minute.openTime,reading:(price/holding.entry-1)*100,barOpenTime:minute.openTime,fillPrice:price,fillPeak:price,atOpen,
+      cause:{id:'mirror-take-profit',label:'镜像止盈',kind:'mirror-take-profit',direction:'>=',threshold:o.mirror.gainPct}};
+  };
   const transport=minuteTransport(o.plan);
   transport.usesTaker=streams.some(s=>s.plan.usesTaker);
   transport.compiled={...transport.compiled,usesBtc:streams.some(s=>s.plan.compiled.usesBtc),usesAmounts:streams.some(s=>s.plan.compiled.usesAmounts)};
@@ -119,26 +132,32 @@ export async function findQualityIntrabarExit(o: {
     for(let i=0;i<minutes.length;i++) {
       if(signal.aborted)throw new DOMException('已暂停','AbortError');
       const minute=minutes[i];
+      if(o.mirror?.enabled && minute.openTime>=o.since && ![holding?.entry,minute.open,minute.high,minute.low,minute.close].every(n=>Number.isFinite(n)&&n!>0)) throw new Error('镜像止盈缺少有效的分钟价格，不能越过缺失行情模拟成交');
       if(holding&&minute.openTime>=o.since) {
         // The open is already observable. A gap through a price veto must not
         // wait another minute, and none of this candle's future H/L/C is read.
         const opening=advanceQualityHolding(holding,{...minute,high:minute.open,low:minute.open,close:minute.open});
         const trigger=checkRisk(minute.openTime,opening);
-        if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices};}
+        if(trigger) {prices.push(minute);return {trigger:{...trigger,barOpenTime:minute.openTime,atOpen:true},prices,mirrorFill};}
+        const openProfit=mirrorAt(minute,true);
+        if(openProfit) {prices.push(minute);return {trigger:openProfit,prices,mirrorFill};}
         // 开盘没越线：盘中碰到回撤止损价就按止损价卖出，不等这一分钟收完
         const stop=qualityIntrabarStop(holding,minute,risk);
         if(stop) {
           prices.push(minute);
           const v=stop.veto;
           return {trigger:{at:minute.openTime,reading:stop.reading,barOpenTime:minute.openTime,previous:riskPrevious.get(v.id),fillPrice:stop.price,fillPeak:stop.peak,
-            cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}},prices};
+            cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}},prices,mirrorFill};
         }
       }
+      // A stop wins when high/low ordering is unknown; an observable opening fill is already settled.
+      const mirrorTrigger=mirrorAt(minute,false);
+      if(mirrorTrigger) {prices.push(minute);return {trigger:mirrorTrigger,prices,mirrorFill};}
       for(const s of streams)if(minute.openTime>=s.start)s.partial=aggregateQualityMinute(s.partial,minute,s.plan.step);
       if(minute.openTime>=o.since) {prices.push(minute);if(holding)holding=advanceQualityHolding(holding,minute);}
       if(drops.length&&minute.openTime>=o.entry) {dropMinutes.push(minute);while(dropMinutes.length>maxDropWindow)dropMinutes.shift();}
       const at=minute.openTime+MINUTE,trigger=check(at);
-      if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices};}
+      if(trigger) {if(minutes[i+1])prices.push(minutes[i+1]);return {trigger,prices,mirrorFill};}
       for(const s of streams)if(s.partial&&at%s.plan.step===0) {s.history.push(s.partial);s.partial=undefined;}
       if(i%20===19)await fishDelay(0,signal);
     }
@@ -146,5 +165,5 @@ export async function findQualityIntrabarExit(o: {
     for(const s of streams)if(s.history.length>s.plan.warm+500) {s.history=s.history.slice(-s.plan.warm);s.cache=createFormulaEvaluationCache();}
     await fishDelay(0,signal);
   }
-  return {prices};
+  return {prices,mirrorFill};
 }

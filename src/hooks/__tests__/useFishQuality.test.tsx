@@ -518,3 +518,15 @@ it('reports incomplete filter readings, preserves valid data, and closes a later
  expect(tasks[1].study.filterReadings).toHaveLength(1);expect(tasks.every(t=>t.task==='filter')).toBe(true);
  expect(h.result.current.filterError).toBe('');expect(h.result.current.study.filterLibrary?.rounds.at(-1)?.state).toBe('complete');expect(h.result.current.study.filterReadings).toHaveLength(2);
 });
+it('archives previous results and applies mirror and vetoes in one selected monitor run, without changing filters or other plans',async()=>{
+ const tasks:QualityRunOptions[]=[],h=renderHook(()=>useFishQuality('a',[signal],async o=>{tasks.push(o);}));
+ await flush();chooseAndStart(h);await flush();
+ const id=h.result.current.study.sellPlans![0].id;
+ const beforeFilters=structuredClone(h.result.current.study.buyFilters),other=structuredClone(h.result.current.study.sellPlans![1]);
+ const mirror={enabled:true,gainPct:8,sellPct:25};
+ act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);
+ expect(tasks.at(-1)!.task).toBe('monitor');expect(tasks.at(-1)!.study.sellPlans![0].mirrorTakeProfit).toEqual(mirror);
+ expect(h.result.current.study.sellPlans![1]).toEqual(other);expect(h.result.current.study.buyFilters).toEqual(beforeFilters);
+ const count=tasks.length;act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);expect(tasks).toHaveLength(count);
+ expect(()=>act(()=>h.result.current.setHoldingVetoes(id,[],{...mirror,sellPct:101}))).toThrow('100%');
+});

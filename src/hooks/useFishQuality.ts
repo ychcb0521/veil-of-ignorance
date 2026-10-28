@@ -1,3 +1,4 @@
+import { mirrorIdentity, validateQualityMirror, type QualityMirrorTakeProfit } from '@/lib/fish/qualityMirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { activeStandaloneBuyFilters, separateQualityFilters, activeBuyFilters, qualityFilterReadingKey, anyBuyFilters, importQualityFish, materializePlanBuyFilters, qualityFilterNeedsData, selectMinedRows, importQualityLibrary, newQualityStudy, migrateQualityCaptureEntries, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityComparisonRows, qualityDisplayRows, type FishQualityStudy, type QualityBuyFilter, type QualityFilterReading, type QualityExitRule, type QualityProgress, type QualityRunOptions } from '@/lib/fish/quality';
@@ -232,12 +233,13 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     change(s => ({...s,buyFilters:structuredClone(filters)}));
   }, [change,cancelFilter]);
   /** 只改某套卖出方案的持仓一票否决：买入条件和过滤读数不动；变了就立刻按新设置重算卖出（正在跑的旧批次直接作废）。 */
-  const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[]) => {
+  const setHoldingVetoes = useCallback((planId: string, vetoes: QualityHoldingVeto[], mirror?: QualityMirrorTakeProfit) => {
     const plan = current.current.sellPlans?.find(p => p.id === planId);
-    if (!plan || JSON.stringify(holdingVetoIdentity(plan.holdingVetoes)) === JSON.stringify(holdingVetoIdentity(vetoes))) return;
+    validateQualityMirror(mirror);
+    if (!plan || JSON.stringify([holdingVetoIdentity(plan.holdingVetoes),mirrorIdentity(plan.mirrorTakeProfit)]) === JSON.stringify([holdingVetoIdentity(vetoes),mirrorIdentity(mirror ?? plan.mirrorTakeProfit)])) return;
     change(s => {
       const saved = materializePlanBuyFilters(archiveQualityStudy(s));
-      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes) } : p) };
+      return { ...saved, sellPlans: saved.sellPlans?.map(p => p.id === planId ? { ...p, holdingVetoes: structuredClone(vetoes), ...(mirror ? {mirrorTakeProfit:structuredClone(mirror)} : {}) } : p) };
     });
     defer(() => { if (controller.current) void restart(); else void start(); });
   }, [change, start, restart, defer]);

@@ -1,3 +1,4 @@
+import { mirrorIdentity } from './qualityMirror';
 import { shortFishHash } from './algorithm';
 import { QUALITY_NOTIONAL, activeBuyFilters, qualityComparisonRows, qualityFilterReadingKey, qualityFilterStatus, qualityResultKey, qualityRunGroups, qualityRunSamples, qualityVetoVersion, type FishQualityStudy, type QualityFilterReading, type QualityFilterStatus, type QualityGroup, type QualityResult, type QualitySample } from './quality';
 import { activeHoldingVetoes, holdingVetoIdentity } from './qualityVeto';
@@ -84,7 +85,7 @@ function settingFor(study: FishQualityStudy, sample: QualitySample, plan: Qualit
   const signature = JSON.stringify([algorithm(plan), plan.rule ?? null, plan.execution ?? 'close', qualityVetoVersion(plan), holdingVetoIdentity(plan.holdingVetoes),
     ordered(activeHoldingVetoes(plan.holdingVetoes).map(v => [v.kind, v.direction, v.threshold, v.metric, v.snapshot?.scale, v.snapshot?.H])),
     ordered(filters.map(f => [f.snapshot.featureId, f.metric, f.snapshot.definitionKey, f.snapshot.interval, f.snapshot.scale, f.snapshot.H, f.direction, f.threshold])),
-    ordered(detectors.map(g => [algorithm(g), g.snapshot.direction, g.snapshot.threshold])), study.observeHours, study.entryMode, filtersKnown, detectorsKnown, QUALITY_NOTIONAL, 1]);
+    ordered(detectors.map(g => [algorithm(g), g.snapshot.direction, g.snapshot.threshold])), study.observeHours, study.entryMode, filtersKnown, detectorsKnown, QUALITY_NOTIONAL, 1, ...(mirrorIdentity(plan.mirrorTakeProfit).length ? [mirrorIdentity(plan.mirrorTakeProfit)] : [])]);
   const existing = catalog.get(signature); if (existing) return existing;
   const value: QualityMonitorSetting = { id: `setting-${shortFishHash(signature)}`, signature,
     plan: structuredClone({ ...plan, buyFilters: filters }), detectors: structuredClone(detectors),

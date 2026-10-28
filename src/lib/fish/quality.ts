@@ -16,6 +16,8 @@ import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '
 import { findQualityIntrabarExit, type QualityTrigger } from './qualityIntrabar';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
+import { mirrorIdentity, validateQualityMirror, mirrorWeightedReturn, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
+
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
 export interface QualityExitRule { metric: string; direction: '<' | '>'; threshold: number }
@@ -26,6 +28,7 @@ export interface QualityGroup {
   /** New sell runs freeze the account definition; unmarked older runs retain their original snapshot. */
   definitionSource?: 'account';
   holdingVetoes?: QualityHoldingVeto[];
+  mirrorTakeProfit?: QualityMirrorTakeProfit;
   /** 回撤否决的成交方式版本：'stop' = 盘中触及止损价即按止损价成交（2026-10-26 起）；缺省 = 旧版（下一分钟开盘价）。 */
   vetoFill?: 'stop';
   /**
@@ -34,7 +37,7 @@ export interface QualityGroup {
   buyFilters?: QualityBuyFilter[];
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
-export const hasQualityExit = (group: QualityGroup) => !!group.rule || activeHoldingVetoes(group.holdingVetoes).length > 0;
+export const hasQualityExit = (group: QualityGroup) => !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0;
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -51,6 +54,8 @@ export interface QualityResult {
   entryTime?: number; entryPrice?: number; endTime?: number; endPrice?: number;
   returnPct?: number; pnl?: number; peakPct?: number; adversePct?: number;
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
+  /** First and only mirror sale, as a fraction of original coin quantity. */
+  mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   exitReading?: number;
   pendingExit?: QualityTrigger;
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean };
@@ -211,6 +216,7 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
   // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
+  if (mirrorIdentity(g.mirrorTakeProfit).length) identity.push(mirrorIdentity(g.mirrorTakeProfit));
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -356,28 +362,30 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       validateFishBars(bars, entry + QUALITY_MINUTE, 1, QUALITY_MINUTE);
       return { ...base, status: 'waiting', entryTime: entry, entryPrice: bars[0].open, reason: '已登记买入，待选择卖出规则后评估收益' };
     }
+    validateQualityMirror(group.mirrorTakeProfit);
     const prior = previous?.key === key && previous.status === 'open' && previous.entryPrice! > 0 && previous.endTime! >= entry && previous.endTime! <= end ? previous : undefined;
     const since = prior?.endTime ?? entry;
     if (since >= end && !prior?.pendingExit) return { ...prior!, evaluatedAt: now };
     let trigger: QualityTrigger | undefined = prior?.pendingExit;
     let replayedPrices: ResearchBar[] | undefined;
+    let mirrorFill = prior?.mirrorFill;
     if (!trigger) {
       const rule = group.rule;
       if (rule && (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction))) throw new Error('卖出规则无效');
       const { plan, scale } = rule ? qualityMetricPlan(group.snapshot, rule.metric) : { plan: pp, scale: 1 };
       const vetoes=activeHoldingVetoes(group.holdingVetoes);
       vetoes.forEach(validateHoldingVeto);
-      if (group.execution === 'intrabar-1m' || vetoes.length) {
+      if (group.execution === 'intrabar-1m' || vetoes.length || group.mirrorTakeProfit?.enabled) {
         let holding;
-        if(vetoes.some(v=>v.kind!=='indicator')) {
+        if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled) {
           const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
           if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
           const entryPrice=prior?.entryPrice??initial![0].open;
           holding={entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
         const conditions=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding });
-        trigger = replay.trigger; replayedPrices = replay.prices;
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill });
+        trigger = replay.trigger; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (rule) {
         let cursor = Math.floor(since / plan.step) * plan.step;
         const stop = Math.floor(end / plan.step) * plan.step;
@@ -415,8 +423,9 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const held = prices.filter(b => b.openTime < finalTime);
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
-    const returnPct = (finalPrice / entryPrice - 1) * 100;
-    let peakPct = Math.max(prior?.peakPct ?? 0, returnPct);
+    const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
+    const returnPct = mirrorWeightedReturn(entryPrice, finalPrice, mirrorFill);
+    let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
     // The exit open itself is observable and belongs to the holding path; the rest of the exit candle does not.
     const previousPeak = entryPrice * (1 + (prior?.peakPct ?? 0) / 100);
@@ -437,13 +446,14 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     }
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
+      ...(mirrorFill ? {mirrorFill, remainingFraction: closed ? 0 : 1 - mirrorFill.fraction, realizedPnl: QUALITY_NOTIONAL * mirrorFill.fraction * (mirrorFill.price / entryPrice - 1) + (closed ? QUALITY_NOTIONAL * (1 - mirrorFill.fraction) * priceReturnPct / 100 : 0)} : {}),
       returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
       exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen} : undefined,
-      reason: closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      reason: closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };

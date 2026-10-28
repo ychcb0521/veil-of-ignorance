@@ -374,7 +374,7 @@ it('provides two unconfigured drawdown vetoes, validates the user threshold, and
  fireEvent.change(within(editor).getByLabelText('持仓否决 3 阈值'),{target:{value:'.4'}});fireEvent.click(within(editor).getByLabelText('启用持仓否决 3'));
  fireEvent.click(screen.getByRole('button',{name:/^应用到「状态 S 原始值」并重算$/}));
  expect(s.setFilters).not.toHaveBeenCalled();expect(s.setObserveHours).not.toHaveBeenCalled();
- expect(s.setHoldingVetoes).toHaveBeenCalledWith(s.study.sellPlans![0].id,[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})]);
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith(s.study.sellPlans![0].id,[expect.objectContaining({kind:'static-drawdown',threshold:12,enabled:true}),expect.objectContaining({kind:'indicator',metric:'state',direction:'<=',threshold:.4,enabled:true})],{enabled:true,gainPct:5,sellPct:50});
 });
 it('shows the effective decimal threshold for duplicate static vetoes without silently enabling a dynamic veto',async()=>{
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
@@ -386,7 +386,7 @@ it('shows the effective decimal threshold for duplicate static vetoes without si
  fireEvent.change(screen.getByLabelText('持仓否决 2 指标'),{target:{value:'dynamic-drawdown'}});
  expect(summary).toHaveTextContent('静态回撤 ≥ 7.7%；动态回撤 ≥ 30%');
  fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
- expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})]);
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'static-drawdown',threshold:7.7}),expect.objectContaining({kind:'dynamic-drawdown',threshold:30})],{enabled:true,gainPct:5,sellPct:50});
 });
 // 【用户要求】2026-10-26 从鱼质量点进交易战役，返回时回到鱼质量原来的位置
 it('opens with the remembered tab, filters and sort when coming back from a campaign', async () => {
@@ -596,7 +596,7 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
  for(const [i,value] of [[1,'2.5'],[2,'4']] as const){fireEvent.click(screen.getByLabelText(`启用持仓否决 ${i}`));fireEvent.change(screen.getByLabelText(`持仓否决 ${i} 阈值`),{target:{value}});expect(screen.getByLabelText(`持仓否决 ${i} 方向`)).toBeDisabled();}
  expect(screen.getByTestId('quality-veto-risk-summary')).toHaveTextContent('1分钟内跌幅 ≥ 2.5%；5分钟内跌幅 ≥ 4%');
  fireEvent.click(screen.getByRole('button',{name:'应用到「状态 S 原始值」并重算'}));
- expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})]);
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[expect.objectContaining({kind:'drop-1m',threshold:2.5,enabled:true}),expect.objectContaining({kind:'drop-5m',threshold:4,enabled:true})],{enabled:true,gainPct:5,sellPct:50});
 });
 
 
@@ -704,4 +704,19 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByTestId('quality-filter-recovery')).toHaveTextContent('有效读数会复用');
  cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
+});
+
+it('offers mirror defaults and applies custom percentages atomically with holding vetoes, rejecting invalid values',()=>{
+ const s=state();render(<FishQuality state={s}/>);
+ fireEvent.click(screen.getByLabelText('持仓监测条件'));
+ expect(screen.getByLabelText('启用镜像止盈策略')).toBeChecked();
+ expect(screen.getByLabelText('镜像止盈涨幅')).toHaveValue(5);
+ expect(screen.getByLabelText('镜像止盈卖出百分比')).toHaveValue(50);
+ fireEvent.change(screen.getByLabelText('镜像止盈卖出百分比'),{target:{value:'101'}});
+ fireEvent.click(screen.getByRole('button',{name:/应用到/}));
+ expect(screen.getByRole('alert')).toHaveTextContent('不超过 100%');expect(s.setHoldingVetoes).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('镜像止盈涨幅'),{target:{value:'8'}});
+ fireEvent.change(screen.getByLabelText('镜像止盈卖出百分比'),{target:{value:'25'}});
+ fireEvent.click(screen.getByRole('button',{name:/应用到/}));
+ expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[],{enabled:true,gainPct:8,sellPct:25});
 });

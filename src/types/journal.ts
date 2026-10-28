@@ -399,7 +399,9 @@ export interface TradeCampaign {
       execution?: 'intrabar-1m'; barOpenAt?: number; previousAt?: number; previousReading?: number;
       executedAt?: number;
       triggerAtOpen?:boolean;
-      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number };
+      mirrorTakeProfit?: {enabled:boolean;gainPct:number;sellPct:number};
+      mirrorFill?: {at:number;price:number;fraction:number;gainPct:number;atOpen:boolean};
+      triggerCause?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator'|'mirror-take-profit';direction:'<'|'>'|'<='|'>=';threshold:number };
       holdingVetoes?: { id:string;label:string;kind:'static-drawdown'|'dynamic-drawdown'|'drop-1m'|'drop-5m'|'indicator';direction:'<'|'>'|'<='|'>=';threshold:number;formula?:string }[];
     };
   };

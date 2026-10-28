@@ -27,23 +27,34 @@ const iso = (time: number) => new Date(time).toISOString();
 export function buildQualityCampaignData(owner: string, run: QualityCampaignRun, section: 'sell' | 'detect', campaignId?: string): QualityCampaignData {
   const { sample, plan, result: r } = run, id = campaignId ?? qualityCampaignId(r.key, section), closed = r.status === 'closed';
   const entry = r.entryTime!, price = r.entryPrice!, end = r.endTime ?? entry, pnl = closed ? r.pnl! : null;
-  const legId = `${id}-main`, recordId = `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
+  const legId = `${id}-main`, recordId = r.mirrorFill?.fraction === 1 ? `${id}-mirror-close` : `${id}-close`, label = qualityRuleLabel(plan), recorded = iso(run.firstEvaluatedAt);
   const detectorLabels = run.detectors.map(d => ({ id: d.id, label: `${d.label} ${d.snapshot.direction ?? '>'} ${d.snapshot.threshold}` }));
   const definition = qualityDefinition(plan.snapshot);
   const opening: CampaignEvent = {
     id: `${id}-entry`, timestamp: iso(entry), event_type: 'main_opened', leg_role: 'main_open', journal_id: legId,
-    trade_record_id: closed ? recordId : null, pending_order_id: null, price, size_usdt: QUALITY_NOTIONAL,
+    trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, pending_order_id: null, price, size_usdt: QUALITY_NOTIONAL,
     notes: `鱼质量模拟多单 · ${label}`, recorded_at: recorded, direction: 'long', leverage: 1, leg_sequence: 1, order_kind: 'main',
     open_time: iso(entry), entry_price: price,
   };
+  const mirror = r.mirrorFill, fraction=mirror?.fraction ?? 0;
+  const mirrorPnl=mirror ? QUALITY_NOTIONAL*fraction*(mirror.price/price-1) : 0;
+  const mirrorId=`${id}-mirror-close`;
+  const remaining=1-fraction;
+  const exits:CampaignEvent[] = [
+    ...(mirror ? [{...opening,id:`${id}-mirror`,timestamp:iso(mirror.at),event_type:fraction===1?'main_fully_closed' as const:'main_partial_closed' as const,
+      price:mirror.price,size_usdt:QUALITY_NOTIONAL*fraction,realized_pnl:mirrorPnl,trade_record_id:mirrorId,close_time:iso(mirror.at),exit_price:mirror.price,
+      notes:`镜像止盈：涨幅 ≥ ${mirror.gainPct}%，卖出初始币数 ${+(fraction*100).toPrecision(8)}%`,recorded_at:iso(r.evaluatedAt)}] : []),
+    ...(closed && remaining>0 ? [{...opening,id:`${id}-exit`,timestamp:iso(end),event_type:'main_fully_closed' as const,price:r.endPrice!,size_usdt:QUALITY_NOTIONAL*remaining,
+      realized_pnl:pnl!-mirrorPnl,close_time:iso(end),exit_price:r.endPrice!,recorded_at:iso(r.evaluatedAt)}] : [])
+  ];
   const campaign: TradeCampaign = {
     id, user_id: owner, campaign_code: `${section === 'sell' ? 'QS' : 'QD'}-${r.key}`, symbol: sample.source.symbol,
     direction: 'main_long', status: closed ? pnl! > 1e-8 ? 'closed_profit' : pnl! < -1e-8 ? 'closed_loss' : 'closed_breakeven' : 'active',
     strategy_template: 'main_only', title: `${sample.source.symbol} · ${label}`, opened_at: iso(entry), closed_at: closed ? iso(end) : null,
     initial_main_size_usdt: QUALITY_NOTIONAL, initial_leverage: 1, final_realized_pnl: pnl, final_r_multiple: null,
-    peak_unrealized_pnl: r.peakPct == null ? null : QUALITY_NOTIONAL * r.peakPct / 100, peak_drawdown: null,
+    peak_unrealized_pnl: mirror || r.peakPct == null ? null : QUALITY_NOTIONAL * r.peakPct / 100, peak_drawdown: null,
     importance_weight: 0, notes: `${sample.origin === 'library' ? '信号库' : '鱼舱'} · 信号 ${iso(sample.source.timeMs)}\n卖出：${label}\n探测：${detectorLabels.map(d => d.label).join('；') || '无'}\n100 USDT · 1 倍模拟多单；未扣手续费、资金费与滑点。`,
-    actual_evolution: [opening, ...(closed ? [{ ...opening, id: `${id}-exit`, timestamp: iso(end), event_type: 'main_fully_closed' as const, price: r.endPrice!, realized_pnl: pnl, close_time: iso(end), exit_price: r.endPrice!, recorded_at: iso(r.evaluatedAt) }] : [])],
+    actual_evolution: [opening, ...exits],
     deviation_notes: {}, deleted_at: null, created_at: recorded, updated_at: iso(r.evaluatedAt),
     comparison: { section, runKey: r.key, sellKey: JSON.stringify([qualitySellKey(plan), run.observeHours]), sellLabel: qualityVersionedRuleLabel(plan) + (run.observeHours ? ` · 观察 ${run.observeHours}h` : ''), detectors: detectorLabels, valuedAt: end, category: qualityDetectorCategory(run.detectors),
       sellEvidence: { formula: definition.formula, definitionKey: plan.snapshot.definitionKey!, featureId: plan.snapshot.featureId!,
@@ -54,13 +65,14 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
         execution: plan.execution,barOpenAt:r.exitSnapshot?.barOpenTime,
         executedAt:closed ? r.endTime : undefined,
         previousAt:r.exitSnapshot?.previous?.at,previousReading:r.exitSnapshot?.previous?.reading,
+        mirrorTakeProfit:plan.mirrorTakeProfit,mirrorFill:r.mirrorFill,
         triggerCause:r.exitSnapshot?.cause??r.pendingExit?.cause,triggerAtOpen:r.exitSnapshot?.atOpen,holdingVetoes:activeHoldingVetoes(plan.holdingVetoes).map(v=>({id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold,formula:v.snapshot?qualityDefinition(v.snapshot).formula:undefined})),
       },
       repair: run.repair,
     },
   };
   const leg: TradeJournal = {
-    id: legId, user_id: owner, trade_record_id: closed ? recordId : null, campaign_id: id, leg_role: 'main_open', leg_sequence: 1,
+    id: legId, user_id: owner, trade_record_id: r.mirrorFill ? `${id}-position` : closed ? recordId : null, campaign_id: id, leg_role: 'main_open', leg_sequence: 1,
     source: 'retroactive_from_record', symbol: sample.source.symbol, direction: 'long', leverage: 1, position_mode: 'isolated', order_kind: 'main',
     pre_simulated_time: iso(entry), pre_real_time: recorded, pre_entry_price: price, pre_planned_stop_loss: null, pre_planned_take_profit: null,
     pre_entry_reason: campaign.notes, pre_falsification_signal: label, pre_mental_state: 3, pre_mental_trigger: null, pre_risk_awareness: null, pre_risk_management: null,
@@ -71,11 +83,11 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     post_simulated_close_time: closed ? iso(end) : null, post_real_close_time: closed ? iso(r.evaluatedAt) : null,
     post_exit_price_snapshot: closed ? r.endPrice : null, created_at: recorded, updated_at: iso(r.evaluatedAt),
   };
-  const tradeRecords: TradeRecord[] = closed ? [{ id: recordId, symbol: sample.source.symbol, side: 'LONG', type: 'MARKET', action: 'CLOSE',
-    entryPrice: price, exitPrice: r.endPrice!, quantity: QUALITY_NOTIONAL / price, leverage: 1, settlementMode: 'usdt', settlementAsset: 'USDT',
-    pnl: pnl!, fee: 0, openFeeUsd: 0, openFeeRate: 0, closeFeeRate: 0, slippage: 0, openTime: entry, closeTime: end,
-    openedRealAt: run.firstEvaluatedAt, closedRealAt: r.evaluatedAt, exit_reason_text: r.exitSnapshot?.cause ? r.reason : label,
-  }] : [];
+  const closeRecord=(record:string,at:number,exit:number,part:number,profit:number,reason:string):TradeRecord=>({id:record,symbol:sample.source.symbol,side:'LONG',type:reason==='镜像止盈'?'LIMIT':'MARKET',action:'CLOSE',
+    entryPrice:price,exitPrice:exit,...(mirror?{positionId:`${id}-position`}:{}),quantity:QUALITY_NOTIONAL/price*part,leverage:1,settlementMode:'usdt',settlementAsset:'USDT',pnl:profit,
+    fee:0,openFeeUsd:0,openFeeRate:0,closeFeeRate:0,slippage:0,openTime:entry,closeTime:at,openedRealAt:run.firstEvaluatedAt,closedRealAt:r.evaluatedAt,exit_reason_text:reason});
+  const tradeRecords:TradeRecord[]=[...(mirror?[closeRecord(mirrorId,mirror.at,mirror.price,fraction,mirrorPnl,'镜像止盈')]:[]),
+    ...(closed&&remaining>0?[closeRecord(recordId,end,r.endPrice!,remaining,pnl!-mirrorPnl,r.exitSnapshot?.cause?r.reason??label:label)]:[])];
   return { campaign, legs: [leg], tradeRecords, pendingOrders: [], reverseHedgeOrders: [], foreignLiveOrders: [], unfilledOrderIds: [], legExitPriceCorrections: {},
     timelineDiagnostics: { mode: 'exact', timelineIds: [], anchorTimelineIds: [], unstampedAnchors: 0, missingAnchorNodes: [], verdicts: {}, disagreements: [] } };
 }

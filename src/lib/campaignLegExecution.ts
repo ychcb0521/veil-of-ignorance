@@ -300,9 +300,11 @@ export function resolveLegExecution(
 ): ResolvedLegExecution {
   const exitCorrection = exitCorrections[leg.id] ?? null;
   const openTime = record?.openTime ?? safeTimeMs(leg.pre_simulated_time);
-  const closeTime = record?.closeTime ?? journalSimulatedCloseTime(leg);
+  // A mirror fill settles a fraction, not the still-open paper position.
+  const openQualityMirror = isQualityCampaignId(leg.campaign_id ?? undefined) && record?.exit_reason_text === '镜像止盈' && !leg.post_simulated_close_time;
+  const closeTime = openQualityMirror ? null : record?.closeTime ?? journalSimulatedCloseTime(leg);
   const entryPrice = record?.entryPrice ?? leg.pre_entry_price ?? null;
-  const rawExitPrice = record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
+  const rawExitPrice = openQualityMirror ? null : record?.exitPrice ?? leg.post_exit_price_snapshot ?? null;
   /**
    * 强平记录不做平仓价替换：它的盈亏按交易所的强平结算（buildTradeRecordPnlCorrection 不重算），
    * 显示价若换成 K 线价，这一行的「开仓价 / 平仓价 / 涨跌幅」与「盈亏」就来自两对价——
@@ -310,7 +312,7 @@ export function resolveLegExecution(
    * 副本里的 cut.exit_price 也会落在一个交易所从未成交过的价上，改「仓位」一格就按它定价。
    * exitCorrection 照常返回：那一格仍标「强平异常」，K 线区间写在悬停说明里（警示，不改数）。
    */
-  const exitPrice = isLiquidationRecord(record) ? rawExitPrice : (exitCorrection?.exitPrice ?? rawExitPrice);
+  const exitPrice = openQualityMirror ? null : isLiquidationRecord(record) ? rawExitPrice : (exitCorrection?.exitPrice ?? rawExitPrice);
 
   return {
     record,
