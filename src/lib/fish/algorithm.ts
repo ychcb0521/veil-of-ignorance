@@ -1,5 +1,5 @@
 /** Fishing composes a program; all numerical evaluation stays in Deep dig's engine. */
-import { compileFeatureFormula, evaluateOnBars, featureWindowMs, intervalOf, halfLifeOf, avgHoursOf, definitionKey, SERIES_VARIABLES, PARAM_VARIABLES, type DeepDigFeatureDef, type CompiledFeature } from '@/lib/deepDig/features';
+import { compileFeatureFormula, evaluateOnBars, featureWindowMs, intervalOf, halfLifeOf, avgHoursOf, featureParams, definitionKey, SERIES_VARIABLES, PARAM_VARIABLES, type DeepDigFeatureDef, type CompiledFeature } from '@/lib/deepDig/features';
 import { parseFormula, programHistoryBars, evaluateProgram, type Program, type Value } from '@/lib/deepDig/formula';
 import { intervalMs } from '@/lib/deepRsa/marketData';
 import type { ResearchBar } from '@/lib/deepRsa/window';
@@ -80,6 +80,7 @@ function convergenceHistory(program: Program,params: Record<string,number>,minut
     else if(n.name==='retain')extra=hours(4,48)-1;
     else if(n.name==='ema')extra=32*hours(1);
     else if(n.name==='atr'){const size=arg(3);extra=size+(size===1?0:Math.ceil(32*-Math.LN2/Math.log1p(-1/size)));}
+    else if(n.name==='mbiz')extra=5*arg(1);
     if(!Number.isFinite(extra))throw new Error(`${n.name} 的窗口或平滑参数必须是固定的有限数字`);
     return inherited+Math.max(0,Math.ceil(extra));
   };
@@ -153,7 +154,7 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const program:Program={statements:[...statements,...tail.statements],inputs};
   const compiled={program,usesAmounts:[...inputs].some(n=>['Q','B','S','E'].includes(n)),usesBtc:inputs.has('CB')};
   evaluateOnBars([],compiled,frozen);
-  const params={hl:halfLifeOf(frozen),半衰期:halfLifeOf(frozen),avgh:avgHoursOf(frozen),平均时长:avgHoursOf(frozen)};
+  const params=featureParams(frozen);
   const windowDef=end<full.program.statements.length?{...frozen,formula:frozen.formula.split(/\r?\n/).slice(0,full.program.statements[end-1].line).join('\n')}:frozen;
   const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step),convergenceHistory(program,params,step/60000)+1);
   const N=warm+546, constraintKey=constraintFingerprint(texts);

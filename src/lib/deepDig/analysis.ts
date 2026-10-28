@@ -32,7 +32,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'>;
 
 export interface DeepDigRow {
   reason?: string;
@@ -111,7 +111,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(def.id === 'mbi' ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -191,11 +191,11 @@ export async function collectDeepDigRun(
 ): Promise<{ data: DeepDigData; series: DeepDigSeries }> {
   const startedAt = Date.now();
   // 带上 id：CBA-2 的观察窗（48 + avgh + 1 小时）与周期按 id 特判，缺了 id 曲线会按普通 48 小时截取，进场前的点全缺
-  const params = { id: def.id, formula: def.formula, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
+  const params = { ...def, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def) };
   const range = seriesRangeOf(def);
   const offsets = seriesOffsets(range);
   const { names, result } = formulaVariables(def.formula);
-  const byEvent: Record<string, Float32Array> = {};
+  const byEvent: DeepDigSeries['byEvent'] = {};
   const compiled = compileFeatureFormula(def.formula);
   const source = def.source ?? 'campaigns';
   const groups = compileGroups(def.positive, def.control, source);

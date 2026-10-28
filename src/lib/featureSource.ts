@@ -9,7 +9,9 @@
  */
 import { isChartComputationEnabled, requestChartComputation } from './chartComputeClient';
 import type { KLineData } from 'klinecharts';
-import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, halfLifeOf, avgHoursOf, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { BUILTIN_FEATURES, compileFeatureFormula, evaluateOnBars, halfLifeOf, avgHoursOf, featureParams, FEATURES_KEY, mergeFeatureDefs, type CompiledFeature, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { mbiNOf } from '@/lib/mbi';
+import { RESEARCH_INTERVALS, intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
 import { programHistoryBars, createFormulaEvaluationCache, type FormulaEvaluationCache, type Program } from '@/lib/deepDig/formula';
 import type { ResearchBar } from '@/lib/deepRsa/window';
 import { readPersistedStateRaw } from '@/lib/persistedStateStorage';
@@ -110,7 +112,7 @@ function compileFor(formula: string, constant: string | null, value: number | nu
 
 const historyBarsCache = new Map<string, number>();
 /** Include every nested rolling window plus a conservative EMA convergence buffer. */
-export function chartFeatureHistoryBars(featureId: string, period: number, formula: string): number {
+export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
   const binding = CHART_PARAM[featureId];
@@ -118,10 +120,13 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const program = compileFor(formula, constant, constant ? period : null).compiled.program;
   const hl = binding && 'param' in binding && binding.param === 'hl' ? period : halfLifeOf(def);
   const avgh = binding && 'param' in binding && binding.param === 'avgh' ? period : avgHoursOf(def);
-  const key = `${featureId}|${period}|${hl}|${avgh}|${formula}`;
+  const key = `${featureId}|${period}|${hl}|${avgh}|${formula}|${barMinutes}`;
   const cached = historyBarsCache.get(key);
   if (cached != null) return cached;
-  const bars = programHistoryBars(program, { hl, avgh, 半衰期: hl, 平均时长: avgh }, 5) + Math.ceil(32 * hl * 12) + 2;
+  const params = { ...featureParams(def), hl, avgh, 半衰期: hl, 平均时长: avgh, ...(featureId === 'mbi' ? { MBI_N: period } : {}) };
+  const bars = featureId === 'mbi'
+    ? Math.max(programHistoryBars(program, params, barMinutes) + 1, Math.ceil(48 * 60 / barMinutes) + Math.max(5 * period, programHistoryBars(program, params, barMinutes, true)))
+    : programHistoryBars(program, params, 5) + Math.ceil(32 * hl * 12) + 2;
   if (historyBarsCache.size >= 128) historyBarsCache.clear();
   historyBarsCache.set(key, bars);
   return bars;
@@ -153,12 +158,20 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
     interval: '5m' as const,
     halfLifeHours: binding && 'param' in binding && binding.param === 'hl' && has ? p : def.halfLifeHours,
     avgHours: binding && 'param' in binding && binding.param === 'avgh' && has ? p : def.avgHours,
+    ...(featureId === 'mbi' ? {
+      MBI_N: has ? p : mbiNOf(def), MBI_Z0: def.MBI_Z0,
+      // Other indicators keep their existing 5m convention. MBI uses actual candle units.
+      interval: (RESEARCH_INTERVALS.find(i => intervalMs(i) === (dataList.length > 1 ? dataList[1].timestamp - dataList[0].timestamp : 300000)) ?? def.interval ?? '5m') as ResearchInterval,
+    } : {}),
   };
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
-  const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}`;
-  const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}`;
-  if (options.variables && isChartComputationEnabled(dataList)) {
+  const mbiKey = featureId === 'mbi' ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : '';
+  const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
+  const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
+  // MBI is a cheap linear recurrence; evaluate here so the existing replay
+  // closed-candle flag can exclude forming prices before calculation.
+  if (featureId !== 'mbi' && options.variables && isChartComputationEnabled(dataList)) {
     try {
       const plan = compileFor(formula, constant, constant && has ? p : null);
       return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,
@@ -175,7 +188,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   try {
     let caches = evaluationCaches.get(dataList);
     if (!caches) { caches = new Map(); evaluationCaches.set(dataList, caches); }
-    const contextKey = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${formula}`;
+    const contextKey = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${formula}${mbiKey}`;
     let cache = caches.get(contextKey);
     if (!cache) { cache = createFormulaEvaluationCache(); if (caches.size >= 16) caches.clear(); caches.set(contextKey, cache); }
     bars = chartBarBuffers.get(cache) ?? [];
@@ -183,7 +196,8 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
     for (let i = 0; i < dataList.length; i++) {
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
-      b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low; b.close = d.close;
+      b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
+      b.close = featureId === 'mbi' && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
       b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
       b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;

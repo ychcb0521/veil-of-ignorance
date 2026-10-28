@@ -171,6 +171,7 @@ export function qualityDefinition(f: FishSnapshot): DeepDigFeatureDef {
     control: typeof saved[2] === 'string' ? saved[2] : '0', groupVars: 2,
     interval: (f.interval ?? extra.find(v => /^\d+[mhdwM]$/.test(v)) ?? '5m') as ResearchInterval,
     halfLifeHours: numeric('hl=', 6), avgHours: numeric('avgh=', 24),
+    ...(f.featureId === 'mbi' || /\bmbiz\s*\(/.test(saved[0]) ? { MBI_N: numeric('MBI_N=', 25), MBI_Z0: numeric('MBI_Z0=', 1.25) } : {}),
   };
 }
 export function qualityMetricPlan(f: FishSnapshot, metric = 'capture'): { plan: FishProgram; scale: number } {

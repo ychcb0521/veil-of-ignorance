@@ -48,6 +48,13 @@ export const DEFAULT_COMMANDS = [
   ...METHOD_PRESETS.filter(m => ['ttest', 'mannwhitney', 'spearman', 'quintiles'].includes(m.key)).map(m => m.line),
 ].join('\n');
 
+/** Same methods and labels, both named MBI outputs in a single report. */
+export const defaultFeatureCommands = (featureId: string) => featureId !== 'mbi' ? DEFAULT_COMMANDS : [
+  DEFAULT_COMMANDS,
+  '# avg_MBI_2 使用同一份样本、分组和检验方法；空值沿用现有排除规则',
+  ...METHOD_PRESETS.filter(m => ['ttest', 'mannwhitney', 'spearman', 'quintiles'].includes(m.key)).map(m => m.line.replace(/\bX\b/g, 'avg_MBI_2')),
+].join('\n');
+
 export const ROW_VARIABLES: readonly { name: string; label: string }[] = [
   { name: 'X', label: '因变量（上面选的；默认公式最后一句，按显示倍数）' },
   { name: 'vol', label: '观察窗波动率（%）' },

@@ -35,7 +35,7 @@ export interface DeepDigSeries {
   names: string[];
   result: string;
   /** 每个事件一条：names.length × offsets.length，按变量依次排；缺失为 NaN。 */
-  byEvent: Record<string, Float32Array>;
+  byEvent: Record<string, Float32Array | Float64Array>;
 }
 
 /**
@@ -67,10 +67,10 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string; formula?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
-): Float32Array | null {
+): Float32Array | Float64Array | null {
   const barMs = intervalMs(intervalOf(def));
   const range = seriesRangeOf(def);
   const start = anchorMs - featureWindowMs(def) - range.beforeMs;
@@ -88,7 +88,9 @@ export function computeEventSeries(
   }
   const closes = sel.map(b => b.openTime + barMs);
   const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
-  const result = new Float32Array(names.length * offsets.length).fill(Number.NaN);
+  // MBI storage remains double precision; preserve every existing feature's cache format.
+  const ArrayType = compiled.usesMbi ? Float64Array : Float32Array;
+  const result = new ArrayType(names.length * offsets.length).fill(Number.NaN);
   offsets.forEach((tau, k) => {
     const t = anchorMs + tau;
     // t 之前最后一根已收盘的；太久以前的（中间缺 K 线）不算

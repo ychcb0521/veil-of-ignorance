@@ -15,7 +15,8 @@ import {
 } from '@/lib/deepDig/features';
 import { MetricLetterTable } from '@/components/journal/MetricLetterTable';
 import { CAMPAIGN_METRIC_LETTERS, letterRanges } from '@/lib/campaignMetricLetters';
-import type { ResearchInterval } from '@/lib/deepRsa/marketData';
+import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
+import { mbiNOf, mbiZ0Of } from '@/lib/mbi';
 
 const BTN = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
 const INPUT = 'rounded-md border border-border bg-background px-2 py-1 text-[12px] outline-none focus:border-foreground/40';
@@ -384,13 +385,14 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   );
 }
 
-type ParamValue = { id?: string; interval: ResearchInterval; halfLifeHours: number; avgHours: number };
-const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ id: d.id, interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d) });
+type ParamValue = { id?: string; interval: ResearchInterval; halfLifeHours: number; avgHours: number; MBI_N?: number; MBI_Z0?: number };
+const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ id: d.id, interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d), ...(d.id === 'mbi' ? { MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) } : {}) });
 /** 默认值不写进定义（旧定义没有这几项）。 */
-const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> => ({
+const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> => ({
   interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval,
   halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours,
   avgHours: v.avgHours === DEFAULT_AVG_HOURS ? undefined : v.avgHours,
+  ...(v.id === 'mbi' ? { MBI_N: mbiNOf(v), MBI_Z0: mbiZ0Of(v) } : {}),
 });
 const fmtBars = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 const PARAM_LABEL = 'w-[52px] shrink-0 pt-[7px] leading-none text-muted-foreground';
@@ -467,22 +469,33 @@ export function KlineSettings({ value, onChange, uses, testId }: {
           ))}
         </div>
       </div>
-      <HoursPicker
+      {value.id === 'mbi' && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5" data-testid={`${testId}-mbi`}>
+        <label className="inline-flex items-center gap-2 text-muted-foreground">衰减周期 n
+          <input key={`n-${mbiNOf(value)}`} type="number" min="1" step="1" defaultValue={mbiNOf(value)} aria-label="MBI_N" className={cn(INPUT, 'w-20 font-mono')}
+            onBlur={e => { const n = Number(e.target.value); if (Number.isSafeInteger(n) && n > 0) onChange({ ...value, MBI_N: n }); else e.target.value = String(mbiNOf(value)); }} />根
+        </label>
+        <label className="inline-flex items-center gap-2 text-muted-foreground">饱和尺度 z₀
+          <input key={`z-${mbiZ0Of(value)}`} type="number" min="0.01" step="0.05" defaultValue={mbiZ0Of(value)} aria-label="MBI_Z0" className={cn(INPUT, 'w-20 font-mono')}
+            onBlur={e => { const z = Number(e.target.value); if (Number.isFinite(z) && z > 0) onChange({ ...value, MBI_Z0: z }); else e.target.value = String(mbiZ0Of(value)); }} />
+        </label>
+        <span className="text-[11px] text-muted-foreground">α = 1/{mbiNOf(value)} · 预热 {5 * mbiNOf(value)} 根 · κ = {(mbiNOf(value) / Math.sqrt(2 * mbiNOf(value) - 1)).toFixed(6)}</span>
+      </div>}
+      {value.id !== 'mbi' && <HoursPicker
         label="半衰期" ariaLabel="半衰期" presets={HALF_LIFE_PRESETS} value={value.halfLifeHours} testId={`${testId}-hl`}
         onChange={h => onChange({ ...value, halfLifeHours: h })}
         summary={<>hl = {fmtBars(barsPerHalfLife(value))} 根 {ivLabel} K 线</>}
         unused={uses && !uses.hl ? 'hl' : null}
-      />
+      />}
       <HoursPicker
-        label="平均时长" ariaLabel="平均时长" presets={AVG_HOURS_PRESETS} value={value.avgHours} testId={`${testId}-avg`}
+        label={value.id === 'mbi' ? '曲线范围' : '平均时长'} ariaLabel="平均时长" presets={AVG_HOURS_PRESETS} value={value.avgHours} testId={`${testId}-avg`}
         onChange={h => onChange({ ...value, avgHours: h })}
-        summary={<>avgh = {barsPerAvg(value)} 根</>}
-        unused={uses && !uses.avgh ? 'avgh' : null}
+        summary={value.id === 'mbi' ? <>锚点前后各 {value.avgHours} 小时；均值窗口在公式中设置</> : <>avgh = {barsPerAvg(value)} 根</>}
+        unused={value.id !== 'mbi' && uses && !uses.avgh ? 'avgh' : null}
       />
       <div className="flex items-start gap-x-2">
         <span className={PARAM_LABEL} />
         <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-summary`}>
-          观察窗：进场前 {windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}的已收盘 {ivLabel} K 线
+          {value.id === 'mbi' ? `取数：分析窗 + ${5 * mbiNOf(value)} 根预热，共 ${Math.round(featureWindowMs(value) / intervalMs(value.interval))} 根已收盘 ${ivLabel} K 线；预热值为空` : `观察窗：进场前 ${windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}的已收盘 ${ivLabel} K 线`}
         </span>
       </div>
     </div>

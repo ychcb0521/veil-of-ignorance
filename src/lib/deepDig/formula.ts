@@ -12,6 +12,8 @@
  *   - 算不出来（除以 0、ln 负数、序列开头没有前一根……）记为「空」：空参与运算结果还是空，nz() 可以把空换成 0。
  */
 
+import { computeMbi } from '@/lib/mbi';
+
 export type Value = number | Float64Array;
 
 export interface FunctionSpec {
@@ -32,6 +34,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'log', min: 1, max: 1, usage: 'log(x)', help: '同 ln' },
   { name: 'exp', min: 1, max: 1, usage: 'exp(x)', help: 'e 的 x 次方' },
   { name: 'tanh', min: 1, max: 1, usage: 'tanh(x)', help: '双曲正切：把任意数平滑压到 −1 ~ 1（0 → 0，±1 → ±0.76，±2 → ±0.96）' },
+  { name: 'mbiz', min: 2, max: 2, usage: 'mbiz(C, MBI_N)', help: 'MBI 的无趋势标准差偏离 z：α = 1/n，κ = 1/√(α·(2−α))；先用上一根 M、S 算 z 再更新。前 5n 根为空，只用正收盘价，不补零。MBI = tanh(z / MBI_Z0)' },
   { name: 'abs', min: 1, max: 1, usage: 'abs(x)', help: '绝对值' },
   { name: 'sqrt', min: 1, max: 1, usage: 'sqrt(x)', help: '平方根' },
   { name: 'sign', min: 1, max: 1, usage: 'sign(x)', help: '正 1、负 −1、零 0' },
@@ -137,7 +140,7 @@ export interface Program {
  * EMA从首个有效值起算；额外热身仍由featureWindowMs的半衰期规则控制。
  * 所有命名中间量都可被时间序列选择，因此取全部语句的最大依赖，而非只看最后一句。
  */
-export function programHistoryBars(program: Program, params: Record<string, number>, barMinutes: number): number {
+export function programHistoryBars(program: Program, params: Record<string, number>, barMinutes: number, mbiWarmupOnly = false): number {
   const constants = new Map(Object.entries(params));
   const history = new Map<string, number>();
   const scalar = (n: Node): number => {
@@ -162,7 +165,9 @@ export function programHistoryBars(program: Program, params: Record<string, numb
     else if (n.name === 'ago') extra = barsForHours(arg(1), barMinutes);
     else if (n.name === 'beta') extra = barsForHours(arg(2), barMinutes) - 1;
     else if (n.name === 'atr') extra = arg(3);
+    else if (n.name === 'mbiz') extra = 5 * arg(1);
     else if (n.name === 'retain') extra = barsForHours(arg(4, 48), barMinutes) - 1;
+    if (mbiWarmupOnly && n.name !== 'mbiz') extra = 0;
     return inherited + (Number.isFinite(extra) ? Math.max(0, extra) : 0);
   };
   let max = 0;
@@ -652,6 +657,11 @@ function call(name: string, args: Value[], line: number, barMinutes: number, res
     case 'exp': return map1(x, v => clean(Math.exp(v)), resume);
     case 'abs': return map1(x, Math.abs, resume);
     case 'tanh': return map1(x, v => clean(Math.tanh(v)), resume);
+    case 'mbiz': {
+      const n = scalarArg(y, 'mbiz', '衰减周期', line);
+      if (!Number.isSafeInteger(n) || n < 1) throw new FormulaError('MBI_N 必须是正整数（K 线根数）', line);
+      return isSeries(x) ? computeMbi(x, { MBI_N: n }).z : Number.NaN;
+    }
     case 'sqrt': return map1(x, v => clean(Math.sqrt(v)), resume);
     case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)), resume);
     case 'max': return map2(x, y, (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? Number.NaN : Math.max(a, b)), resume);

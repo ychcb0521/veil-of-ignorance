@@ -1,4 +1,7 @@
 import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
+import { MBI_N, MBI_Z0, MBI_TOOLTIP, mbiNOf, mbiZ0Of, validateMbiParams, type MbiParams } from '@/lib/mbi';
+import { appendResearchAverages } from '@/lib/researchAverageFormula';
+export { MBI_N, MBI_Z0 };
 /**
  * Deep dig 的特征值定义：名称、定义、公式、显示单位、分组标准——都可以由用户改，运行时照这里算。
  *
@@ -17,7 +20,7 @@ import { US_STOCK_UNSUPPORTED } from '@/lib/signalMarket';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { evaluateProgram, evaluateProgramVars, programHistoryBars, FormulaError, lastValue, parseFormula, programVariables, type Program, type FormulaEvaluationCache } from '@/lib/deepDig/formula';
 
-export interface DeepDigFeatureDef {
+export interface DeepDigFeatureDef extends MbiParams {
   /** 网址上的名字。 */
   id: string;
   name: string;
@@ -106,7 +109,9 @@ export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': 
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => d.id === 'cba-2' ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours'> & { id?: string; formula?: string };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> & { id?: string; formula?: string };
+export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
+export const featureParams = (d: ParamDef) => ({ hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d), MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) });
 
 /**
  * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
@@ -116,14 +121,18 @@ type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours
 export function featureWindowMs(d: ParamDef): number {
   const H = 3_600_000;
   let formulaHistory = 0;
+  let mbiWarmupMs = 0;
   if (d.formula) {
     try {
       const barMs = intervalMs(intervalOf(d));
-      const params = { hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d) };
-      formulaHistory = (programHistoryBars(compileFeatureFormula(d.formula).program, params, barMs / 60_000) + 2) * barMs;
+      const params = featureParams(d);
+      const program = compileFeatureFormula(d.formula).program;
+      formulaHistory = (programHistoryBars(program, params, barMs / 60_000) + 2) * barMs;
+      if (featureUsesMbi(d)) mbiWarmupMs = programHistoryBars(program, params, barMs / 60_000, true) * barMs;
     } catch { /* 编辑中的不完整公式由公式校验提示 */ }
   }
-  return Math.max(formulaHistory, d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  const window = Math.max(d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
 export const barsPerHalfLife = (d: ParamDef) => (halfLifeOf(d) * 3_600_000) / intervalMs(intervalOf(d));
@@ -133,6 +142,8 @@ export const barsPerAvg = (d: ParamDef) => Math.max(1, Math.round((avgHoursOf(d)
 export const PARAM_VARIABLES: readonly { name: string; alias: string; label: string }[] = [
   { name: 'hl', alias: '半衰期', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
   { name: 'avgh', alias: '平均时长', label: '平均时长（小时，上面选的；也可写「平均时长」），配 avg(x, avgh) 用' },
+  { name: 'MBI_N', alias: 'MBI_N', label: `MBI 衰减周期（K 线根数，默认 ${MBI_N}；α 严格等于 1/n）` },
+  { name: 'MBI_Z0', alias: 'MBI_Z0', label: `MBI 饱和尺度（默认 ${MBI_Z0}）` },
 ];
 const PARAM_NAMES = PARAM_VARIABLES.flatMap(p => [p.name, p.alias]);
 
@@ -497,6 +508,21 @@ export const CBI2_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
+export const MBI_FORMULA = appendResearchAverages([
+  '# MBI 只看已收盘价格；参数 MBI_N、MBI_Z0 在下方设置。',
+  '# x = ln(C)；α = 1/MBI_N；κ = 1/√(α·(2−α))。',
+  '# M、S 从序列首根递推；S 初值为前 n 个对数涨跌平方的平均。',
+  '# z 使用更新前的 M、S；前 5n 根为空，不参与均值、平滑或评估。',
+  'z = mbiz(C, MBI_N)',
+  'MBI = tanh(z / MBI_Z0)',
+].join('\n'), new Set(['z', 'MBI']), { core: 'MBI', avg: 'avg_MBI', avg2: 'avg_MBI_2' }) + '\nMBI = MBI';
+
+export const MBI_DEF: DeepDigFeatureDef = {
+  id: 'mbi', name: 'MBI 迈克尔买方优势', short: 'MBI', definition: MBI_TOOLTIP,
+  formula: MBI_FORMULA, MBI_N, MBI_Z0, scale: 1, unit: '',
+  positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, source: 'campaigns', groupVars: 2, builtin: true,
+};
+
 /** CBI-2 的卖方镜像：买卖互换、方向反转、恐慌回撤改为亢奋上冲；保留原窗口与系数。 */
 export const CDI2_FORMULA = sellerNegativeFormula([
   '# CDI2 买方失控程度（−1 ~ 1）：越低（越负）表示卖方优势越强、买方控制越弱；p 为模型映射分数，未经胜率校准',
@@ -744,7 +770,7 @@ export const CDA_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -812,7 +838,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -823,6 +849,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (intervalOf(d) !== DEFAULT_INTERVAL) key.push(intervalOf(d));
   if (halfLifeOf(d) !== DEFAULT_HALF_LIFE_HOURS) key.push(`hl=${halfLifeOf(d)}`);
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
+  if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   return JSON.stringify(key);
 };
 
@@ -833,6 +860,7 @@ export interface CompiledFeature {
   usesAmounts: boolean;
   /** 用到对照币 BTCUSDT 的收盘价（CB）：流水线另取同时段的 K 线。 */
   usesBtc?: boolean;
+  usesMbi?: boolean;
 }
 
 /** 公式里用到了哪些参数（界面上没用到的参数淡一点）；公式写错时返回 null。 */
@@ -847,7 +875,7 @@ export function formulaParamUse(formula: string): { hl: boolean; avgh: boolean }
 
 export function compileFeatureFormula(formula: string): CompiledFeature {
   const program = parseFormula(formula, new Set([...SERIES_VARIABLES.map(v => v.name), ...PARAM_NAMES]));
-  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB') };
+  return { program, usesAmounts: [...program.inputs].some(n => AMOUNT_VARIABLES.has(n)), usesBtc: program.inputs.has('CB'), usesMbi: featureUsesMbi({ formula }) };
 }
 
 /** 在观察窗上算一次：取最后一根的值；算不出来或成交额覆盖不足 → null。 */
@@ -885,6 +913,7 @@ export function computeFeatureValues(
 
 /** 在一串 K 线上逐根算公式：带回最后一句与每个起了名的变量的整条序列（会抛 FormulaError）。 */
 export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledFeature, params: ParamDef = {}, cache?: FormulaEvaluationCache) {
+  if (compiled.usesMbi || params.id === 'mbi') validateMbiParams(mbiNOf(params), mbiZ0Of(params));
   const keys = ['T','C','O','H','L','Q','B','S','E','CB'] as const;
   const input = (cache?.buffers ?? {}) as Record<typeof keys[number], Float64Array>;
   for (const key of keys) {
@@ -904,7 +933,7 @@ export function evaluateOnBars(bars: readonly ResearchBar[], compiled: CompiledF
   }
   return evaluateProgramVars(compiled.program, {
     ...input,
-    hl: halfLifeOf(params), 半衰期: halfLifeOf(params), avgh: avgHoursOf(params), 平均时长: avgHoursOf(params),
+    ...featureParams(params),
   }, { barMinutes: intervalMs(intervalOf(params)) / 60_000, cache });
 }
 
@@ -1059,12 +1088,12 @@ export interface DefinitionCheck {
 }
 
 /** 保存前检查：公式、分组标准能否解析，显示倍率是不是正数。 */
-export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source'>): DefinitionCheck {
+export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'scale' | 'source' | 'MBI_N' | 'MBI_Z0'>): DefinitionCheck {
   const msg = (f: () => unknown) => {
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
   return {
-    formula: msg(() => compileFeatureFormula(d.formula)),
+    formula: msg(() => { compileFeatureFormula(d.formula); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); }),
     groups: msg(() => compileGroups(d.positive, d.control, d.source ?? 'campaigns')),
     scale: Number.isFinite(d.scale) && d.scale > 0 ? null : '显示倍数要是正数',
   };

@@ -19,8 +19,10 @@ import { DefinitionPanel, GroupCriteria } from '@/components/journal/deepDig/Def
 import { CommandPanel, InferenceResults, targetText } from '@/components/journal/deepDig/InferenceView';
 import { SeriesChart } from '@/components/journal/deepDig/SeriesChart';
 import { PatternView } from '@/components/journal/deepDig/PatternView';
-import { dataAtOffset, formatSeriesOffset, seriesRangeOf, viewAtOffset, type DeepDigSeries } from '@/lib/deepDig/series';
+import { dataAtOffset, formatSeriesOffset, seriesRangeOf, viewAtOffset, valueAt, type DeepDigSeries } from '@/lib/deepDig/series';
 import { dataVariables, targetOf } from '@/lib/deepDig/commands';
+import { downloadDeepDigCsv, downloadDeepDigPng } from '@/lib/deepDig/export';
+import { MBI_TOOLTIP, mbiNOf, mbiZ0Of } from '@/lib/mbi';
 
 export type DeepDigTab = 'describe' | 'infer' | 'rules';
 export const DEEP_DIG_TABS: { key: DeepDigTab; label: string }[] = [
@@ -195,6 +197,8 @@ export function FeatureView(props: FeatureViewProps) {
             testId="deep-dig-describe-run" label="运行描述统计" hasResult={!!data} finishedAt={data?.finishedAt ?? null}
             status={props.describeStatus} progress={props.describeProgress} error={props.describeError}
             canRun={props.canDescribe} blockedReason={props.blockedReason} onRun={props.onDescribe} onCancel={props.onCancel} onDownload={data ? props.onDownload : undefined}
+            onCsv={inferData ? () => downloadDeepDigCsv(inferData) : undefined}
+            onPng={inferData ? () => { void downloadDeepDigPng(inferData); } : undefined}
             hint={`取币安公开 ${intervalOf(def)} K 线${intervalOf(def) === '5m' ? '' : '（24h 结果仍按 5m）'}、按上面的公式算特征值、按分组标准分组（1–3 分钟，只读）`}
           />
           {defStale && <Notice testId="deep-dig-stale">公式、周期、半衰期或分组标准改过了：下面是按旧定义算的数据，点「重新运行描述统计」按现在的定义重算。</Notice>}
@@ -322,7 +326,7 @@ const Notice = ({ children, testId }: { children: React.ReactNode; testId?: stri
 );
 const Empty = ({ children }: { children: React.ReactNode }) => <div className="text-[11.5px] text-muted-foreground" data-testid="deep-dig-empty">{children}</div>;
 
-function RunStrip({ testId, label, hint, hasResult, finishedAt, status, progress, error, canRun, blockedReason, onRun, onCancel, onDownload }: {
+function RunStrip({ testId, label, hint, hasResult, finishedAt, status, progress, error, canRun, blockedReason, onRun, onCancel, onDownload, onCsv, onPng }: {
   testId: string;
   label: string;
   hint: string;
@@ -336,6 +340,8 @@ function RunStrip({ testId, label, hint, hasResult, finishedAt, status, progress
   onRun: () => void;
   onCancel?: () => void;
   onDownload?: () => void;
+  onCsv?: () => void;
+  onPng?: () => void;
 }) {
   const running = status === 'running';
   const btn = 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2.5 text-[12px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
@@ -359,6 +365,8 @@ function RunStrip({ testId, label, hint, hasResult, finishedAt, status, progress
             {onDownload && (
               <button type="button" className={btn} onClick={onDownload} aria-label="下载结果 JSON" title="下载结果 JSON（描述 + 推断）"><Download className="h-3 w-3" />JSON</button>
             )}
+            {onCsv && <button type="button" className={btn} onClick={onCsv} aria-label="下载结果 CSV" title="下载当前保留的逐场数据，含全部公式变量和全精度读数"><Download className="h-3 w-3" />CSV</button>}
+            {onPng && <button type="button" className={btn} onClick={onPng} aria-label="下载统计图片 PNG" title="下载当前取样时点的分组统计图片"><Download className="h-3 w-3" />PNG</button>}
             {finishedAt != null && (
               <span className="text-muted-foreground">上次运行 <N className="text-muted-foreground">{formatBeijingTime(finishedAt).slice(0, 16)}</N></span>
             )}
@@ -477,7 +485,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
 
       <Block title="时间序列" aside={(
         <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-series-span">
-          各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= 平均时长）
+          各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {def.id === 'mbi' ? '曲线范围' : '平均时长'}）
         </span>
       )} testId="deep-dig-series-block">
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
@@ -511,7 +519,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
             <li key={g}><span className={GROUP_TONE[g]}>{groupLabel(g, def.source)}</span>：{groupNote(def, g)}</li>
           ))}
           <li>
-            {X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）
+            {def.id === 'mbi' ? <>{X} 只用已收盘 <N>{intervalOf(def)}</N> 价格，n = <N>{mbiNOf(def)}</N>、z₀ = <N>{mbiZ0Of(def)}</N>；48 小时分析窗之前另取 <N>{5 * mbiNOf(def)}</N> 根预热，预热读数为空。avg_MBI_2 与 CBI2 共用近到远 4∶3∶2∶1 分段加权；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</> : <>{X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</>}
             {c.failed > 0 && <>，K 线没取到的 <N>{c.failed}</N> 个</>}。
           </li>
           {at !== 0 && <li>现在看的是 <span className="text-[#C27C0E] dark:text-[#F59E0B]">{atText}</span> 那一刻的值：取那一刻之前最后一根已收盘 K 线上的读数（时间序列曲线上的点）{at > 0 ? '，用到了进场后的数据，用于事后分析' : ''}；后续推断统计也使用这个时点的数据。</li>}
@@ -548,6 +556,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
                 <th className={TH}>时间<span className="max-sm:hidden">（北京）</span></th>
                 <th className={TH}>标的</th>
                 <th className={TH}>{X}</th>
+                {def.id === 'mbi' && ['MBI', 'avg_MBI_2'].filter(name => name !== X).map(name => <th key={name} className={TH} title={MBI_TOOLTIP}>{name}</th>)}
                 <th className={TH}>24h 期末</th>
                 <th className={cn(TH, 'max-sm:hidden')}>24h 最大涨</th>
                 <th className="w-6" aria-label="删除" />
@@ -578,6 +587,10 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
                       </span>
                     </td>
                     <td className={cn(TD, 'font-mono tabular-nums', signTone(r.v))}>{bp(r.v)}</td>
+                    {def.id === 'mbi' && ['MBI', 'avg_MBI_2'].filter(name => name !== X).map(name => {
+                      const value = at === 0 ? r.vars?.[name] : liveSeries ? valueAt(liveSeries, r.id, name, at) : null;
+                      return <td key={name} className={cn(TD, 'font-mono tabular-nums', signTone(value))} title={MBI_TOOLTIP}>{fmtValue(def, value)}</td>;
+                    })}
                     <td className={cn(TD, 'font-mono tabular-nums', retTone(r.endRet))}>{pct(r.endRet)}</td>
                     <td className={cn(TD, 'font-mono tabular-nums text-muted-foreground max-sm:hidden')}>{pct(r.maxUp)}</td>
                     <td className="py-1">

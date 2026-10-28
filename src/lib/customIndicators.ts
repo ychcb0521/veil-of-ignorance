@@ -10,6 +10,7 @@ import { BSS_DEFAULTS, BSS_STRONG, BSS_WEAK, computeBss } from '@/lib/bss';
 import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
+import { MBI_N } from '@/lib/mbi';
 import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
@@ -315,6 +316,7 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }, { key: 'BSS#AVG2', kcName: 'BSS_AVG2_CUSTOM' }],
   CBA: [{ key: 'CBA#AVG', kcName: 'CBA_AVG_CUSTOM' }, { key: 'CBA#AVG2', kcName: 'CBA_AVG2_CUSTOM' }],
   CBI2: [{ key: 'CBI2#AVG', kcName: 'CBI2_AVG_CUSTOM' }, { key: 'CBI2#AVG2', kcName: 'CBI2_AVG2_CUSTOM' }],
+  MBI: [{ key: 'MBI#AVG', kcName: 'MBI_AVG_CUSTOM' }, { key: 'MBI#AVG2', kcName: 'MBI_AVG2_CUSTOM' }],
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
     { key: `${item.id}#AVG`, kcName: researchKcName(item.id, 1) },
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
@@ -1360,6 +1362,16 @@ export function registerCustomIndicators() {
 
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
   registerIndicator({
+    name: 'MBI_CUSTOM', shortName: 'MBI', calcParams: [MBI_N, 0, 0], precision: 2,
+    minValue: -1, maxValue: 1, draw: V_ZERO_LINE,
+    createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'MBI', calcParamsText: `(${indicator.calcParams[0]}根)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
+    figures: [{ key: 'mbi', title: 'MBI: ', type: 'line', styles: data => ({
+      color: vColor((data.next?.indicatorData as { mbi?: number } | undefined)?.mbi ?? (data.current.indicatorData as { mbi?: number } | undefined)?.mbi), size: 1.5,
+    }) }],
+    calc: (data, indicator) => buyerSeries(data, 'MBI', indicator.calcParams[0]).core.map(mbi => mbi == null ? {} : { mbi }),
+  });
+
+  registerIndicator({
     name: 'BSS_AVG_CUSTOM',
     shortName: 'avg_BSS',
     createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'avg_BSS', calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
@@ -1383,16 +1395,16 @@ export function registerCustomIndicators() {
     for (const level of [1, 2]) {
       if (level === 1 && ['DSP_VA', 'DSP_Z', 'BSS'].includes(item.id)) continue;
       if (item.id === 'DSP_Z') continue; // Registered as the independent Z alias below.
-      const key = item.id === 'DSP_VA' ? 'v' : item.id === 'BSS' ? 'bss' : item.id === 'CBI2' ? 'cbi2' : 'cba';
+      const key = item.id === 'DSP_VA' ? 'v' : item.id === 'BSS' ? 'bss' : item.id === 'CBI2' ? 'cbi2' : item.id === 'MBI' ? 'mbi' : 'cba';
       const label = `avg_${item.core}${level === 2 ? '_2' : ''}`;
       const template: IndicatorTemplate = {
-        name: researchKcName(item.id, level), shortName: label, calcParams: [item.period, 0, 0], precision: 8,
+        name: researchKcName(item.id, level), shortName: label, calcParams: [item.period, 0, 0], precision: item.id === 'MBI' ? 2 : 8,
         draw: item.id === 'BSS' ? avgBssLines : item.id === 'CBA' ? CBA_ACTION_LINE : item.id === 'CBI2' ? CBI2_ACTION_LINE : V_ZERO_LINE,
         createTooltipDataSource: ({ indicator, defaultStyles }) => {
           const selected = item.id === 'DSP_VA' && indicator.calcParams[1] === 1 ? BUYER_RESEARCH_INDICATORS.find(i => i.id === 'DSP_Z')! : item;
           const def = chartFeatureDef(selected.featureId);
           const names = def ? researchSeriesNames(selected, def.formula) : null;
-          return { name: (level === 1 ? names?.avg : names?.avg2) ?? label, calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never };
+          return { name: (level === 1 ? names?.avg : names?.avg2) ?? label, calcParamsText: `(${indicator.calcParams[0]}${item.id === 'MBI' ? '根' : 'h'})`, icons: defaultStyles.tooltip.icons, values: undefined as never };
         },
         figures: [{ key, title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as Record<string, number> | undefined)?.[key] ?? (data.current.indicatorData as Record<string, number> | undefined)?.[key];
@@ -1495,6 +1507,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   'CBA-2': 'CBA2_CUSTOM',
   CBI: 'CBI_CUSTOM',
   CBI2: 'CBI2_CUSTOM',
+  MBI: 'MBI_CUSTOM',
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, researchKcName(item.id)])),
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',

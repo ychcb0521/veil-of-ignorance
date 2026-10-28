@@ -22,7 +22,7 @@ import { useCampaignList } from '@/hooks/useCampaignList';
 import { forgetDeepDigResult, loadDeepDigResults, useDeepDigRun } from '@/hooks/useDeepDigRun';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { DEEP_DIG_GROUPS, type DeepDigData, type DeepDigInference, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
-import { DEFAULT_COMMANDS } from '@/lib/deepDig/commands';
+import { defaultFeatureCommands } from '@/lib/deepDig/commands';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
 import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
@@ -143,10 +143,10 @@ export default function JournalDeepDigPage() {
             signals={signals}
             note={notes[def.id] ?? null}
             excluded={excludedOf(def.id)}
-            commands={typeof commandsMap?.[def.id] === 'string' ? commandsMap[def.id] : DEFAULT_COMMANDS}
+            commands={typeof commandsMap?.[def.id] === 'string' ? commandsMap[def.id] : defaultFeatureCommands(def.id)}
             onCommandsChange={text => setCommandsMap(prev => {
               const copy = { ...prev };
-              if (text === DEFAULT_COMMANDS) delete copy[def.id]; else copy[def.id] = text;
+              if (text === defaultFeatureCommands(def.id)) delete copy[def.id]; else copy[def.id] = text;
               return copy;
             })}
             onExcludedChange={ids => setExcludedMap(prev => {

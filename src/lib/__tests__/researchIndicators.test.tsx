@@ -132,8 +132,10 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     fireEvent.change(screen.getByLabelText(item.short + ' 参数'), { target: { value: '12' } });
     expect(changed.mock.lastCall![0][0].period).toBe(12);
     fireEvent.click(screen.getByText(item.short)); expect(changed.mock.lastCall![0]).toEqual([]);
-    expect(mock.registered.get(researchKcName('STATE')).minValue).toBe(0);
-    expect(mock.registered.get(researchKcName('STATE')).maxValue).toBe(1);
+    // Existing registration uses the direction line as an axis anchor; visible
+    // values determine the final range (see customIndicators.actionLines.test).
+    expect(mock.registered.get(researchKcName('STATE')).minValue).toBe(0.6);
+    expect(mock.registered.get(researchKcName('STATE')).maxValue).toBe(0.6);
     const pixel = vi.fn(() => 40);
     const ctx = Object.fromEntries(['save', 'restore', 'setLineDash', 'beginPath', 'moveTo', 'lineTo', 'stroke', 'fillRect'].map(k => [k, vi.fn()]));
     for (const state of [true, false]) {

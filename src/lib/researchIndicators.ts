@@ -7,6 +7,8 @@ import { btcClosesAt, requestBtcReference, btcReferenceVersion } from '@/lib/btc
 import { inferIntervalMs, DSP_BASE_INTERVAL_MS } from '@/lib/dynamicSchellingPoint';
 import { enableChartComputation, isChartComputationEnabled, chartComputationVersion, resetChartComputationAlignment } from './chartComputeClient';
 import { displayAverage } from '@/lib/avgHighlight';
+import { appendResearchAverages } from '@/lib/researchAverageFormula';
+import { mbiNOf } from '@/lib/mbi';
 
 // avgRange：均值副图固定纵轴（有固定范围的指标）。【用户要求】2026-10-22「把有固定范围的指标的均值副图纵轴也固定住：状态 S 0–1，CDI2 和 DSS ±1，CDA ±100」
 export const RESEARCH_INDICATORS = [
@@ -23,6 +25,7 @@ export const BUYER_RESEARCH_INDICATORS = [
   { id: 'CBA', featureId: 'cba', core: 'CBA', short: 'CBA', name: '买方定价优势指数 CBA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
   { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', short: 'DSP·az', name: '买方推力漂移速度 DSP·az（波动率归一化）', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
   { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', short: 'CBI-2', name: '买方优势指数 CBI-2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, seller: false },
+  { id: 'MBI', featureId: 'mbi', core: 'MBI', short: 'MBI', name: 'MBI 迈克尔买方优势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, seller: false },
 ] as const;
 export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];
 export type ResearchIndicator = typeof CUSTOM_RESEARCH_INDICATORS[number];
@@ -71,7 +74,7 @@ export function invalidateResearchChartData(data: KLineData[], from = 0) {
   chartDataChanges.set(data, changes);
 }
 const chartDataCache = new WeakMap<KLineData[], { values: Float64Array; revision: number; generation?: number }>();
-const DATA_FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'takerBuyTurnover'] as const;
+const DATA_FIELDS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'takerBuyTurnover', 'cba2Closed'] as const;
 /** Compare mutable candles without allocating thousands of row arrays each frame. */
 function dataRevision(data: KLineData[]): number {
   const generation = chartDataGenerations.get(data), cached = chartDataCache.get(data);
@@ -87,7 +90,7 @@ function dataRevision(data: KLineData[]): number {
   const values = cached?.values.length === size ? cached.values : new Float64Array(size);
   let changed = !cached || values !== cached.values;
   for (let i = 0; i < data.length; i++) for (let j = 0; j < DATA_FIELDS.length; j++) {
-    const v = data[i][DATA_FIELDS[j]] ?? NaN, at = i * DATA_FIELDS.length + j;
+    const value = data[i][DATA_FIELDS[j]], v = typeof value === 'boolean' ? Number(value) : value ?? NaN, at = i * DATA_FIELDS.length + j;
     if (!Object.is(values[at], v)) changed = true;
     values[at] = v;
   }
@@ -100,14 +103,7 @@ function dataRevision(data: KLineData[]): number {
 export function researchChartFormula(item: ResearchIndicator, formula: string): string {
   const names = new Set(compileFeatureFormula(formula).program.statements.map(s => s.name));
   const series = researchSeriesNames(item, formula);
-  const extra: string[] = [];
-  if (!names.has(series.avg)) extra.push(`${series.avg} = avg(${series.core}, 24)`);
-  if (!names.has(series.avg2)) {
-    let helper = '_chart_m6';
-    while (names.has(helper)) helper += '_';
-    extra.push(`${helper} = avg(${series.core}, 6)`, `${series.avg2} = (4 * ${helper} + 3 * ago(${helper}, 6) + 2 * ago(${helper}, 12) + ago(${helper}, 18)) / 10`);
-  }
-  return [formula, ...extra].join('\n');
+  return appendResearchAverages(formula, names, series);
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
@@ -115,6 +111,7 @@ export function researchDefaultPeriod(item: ResearchIndicator): number {
   if (item.id === 'BSS' || item.id === 'DSS') return 12;
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
+  if (item.id === 'MBI') return mbiNOf(def);
   if (item.id === 'STATE' || item.id === 'STATE2' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
   return halfLifeOf(def);
 }
@@ -148,7 +145,9 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  for (const c of JSON.stringify([def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours])) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours];
+  if (item.id === 'MBI') values.push(def?.MBI_N, def?.MBI_Z0);
+  for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
 
@@ -205,7 +204,8 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   // Establish lineage even while the first worker request is still pending.
   if (continuous) displayHistory(data);
   if (generation == null) return finish(calculateChartSeries(data, item, period, options));
-  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}`;
+  const mbiKey = item.id === 'MBI' ? `|${def?.MBI_N}|${def?.MBI_Z0}` : '';
+  const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}${mbiKey}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
   // one native update. Background completion must also invalidate this result.
@@ -237,7 +237,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
-    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula), step) : EMPTY_HISTORY;
+    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, item.id === 'MBI' ? step / 60000 : 5), step) : EMPTY_HISTORY;
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
       const revision = dataRevision(data), cached = extendedData.get(data);
@@ -282,7 +282,12 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => { const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale; });
+  const mbiStep = item.id === 'MBI' ? chartInterval(data) : 0;
+  const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => {
+    // Live MBI never publishes a candle that has not closed yet.
+    if (item.id === 'MBI' && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
+    const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale;
+  });
   // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
     if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });

@@ -14,6 +14,7 @@ import { BSS_DEFINITION, BSS_STEPS } from '@/lib/bss';
 import { CBA_DEFINITION, CBA_STEPS } from '@/lib/cba';
 import { CBI_DEFINITION, CBI_STEPS } from '@/lib/cbi';
 import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
+import { MBI_N, MBI_TOOLTIP } from '@/lib/mbi';
 import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
 import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
 import { SELLER_CONTROL_DEF } from '@/lib/deepDig/features';
@@ -188,6 +189,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   { id: 'DSP_Z', nameZh: '买方推力漂移速度 DSP·az（波动率归一化）', nameEn: 'DSP · az · volatility normalized', isOverlay: false, defaultPeriod: 6, color: '#F0B90B', category: 'custom', periodHint: '半衰期 h（小时，按 5 分钟图计）；使用 Deep dig 的 DSP·a（Z 分数）定义。', periodUnit: 'h', description: DSP_VZ_DEFINITION },
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
   { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'custom', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
+  { id: 'MBI', nameZh: 'MBI 迈克尔买方优势', nameEn: 'Michael Buyer Advantage · MBI · avg_MBI · avg_MBI_2', isOverlay: false, defaultPeriod: MBI_N, color: '#0ECB81', category: 'custom', periodUnit: '根', periodHint: 'MBI_N：衰减周期（K 线根数），α = 1/n。MBI_Z0 在 Deep Dig 参数区设置，默认 1.25。前 5n 根为空；仅使用已收盘价格。', description: MBI_TOOLTIP, detail: MBI_TOOLTIP },
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
@@ -538,7 +540,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = CUSTOM_RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 ? n : null; }}
+              parse={v => { const n = CUSTOM_RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (item.id !== 'MBI' || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}
