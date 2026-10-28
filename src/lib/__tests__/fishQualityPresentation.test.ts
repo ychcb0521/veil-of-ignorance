@@ -15,8 +15,8 @@ it('distinguishes disabled, pending, missing, not-triggered and filled without m
  expect(halfMirrorSummary(rule,{status:'error',returnPct:999}).value).toBeNull();
  expect(halfMirrorSummary(rule,{status:'closed',returnPct:7.5}).state).toBe('untriggered');
  expect(halfMirrorSummary(rule,{status:'closed',returnPct:7.5}).value).toBeNull();
- expect(halfMirrorSummary(rule,result)).toMatchObject({state:'filled',label:'已卖 50%',value:7.5,text:'+7.50% · 已卖 50%'});
- expect(halfMirrorSummary({...rule,sellPct:25},{...result,returnPct:0,mirrorFill:{...result.mirrorFill!,fraction:.25}})).toMatchObject({label:'已卖 25%',value:0,text:'0.00% · 已卖 25%'});
+ expect(halfMirrorSummary(rule,result)).toMatchObject({state:'filled',label:'已卖 50%',value:expect.closeTo(5),text:'+5.00% · 已卖 50%'});
+ expect(halfMirrorSummary({...rule,sellPct:25},{...result,returnPct:0,mirrorFill:{...result.mirrorFill!,fraction:.25}})).toMatchObject({label:'已卖 25%',value:expect.closeTo(5),text:'+5.00% · 已卖 25%'});
 });
 it('treats peak gain as a measured price path, never as the weighted strategy return',()=>{
  expect(qualityPeakPct(result)).toBe(18);
@@ -34,7 +34,7 @@ it('uses identical frozen values in the table export and campaign, including leg
  const sheets=buildQualitySheets(study,[sample]),headers=sheets[0].columns.map(c=>c.header),row=sheets[0].rows[0];
  expect(row).toHaveLength(headers.length);
  expect(row[headers.indexOf(`${plan.label} · 峰值涨幅 %`)]).toBe(18);
- expect(row[headers.indexOf(`${plan.label} · 半仓镜像收益率 %`)]).toBe(7.5);
+ expect(row[headers.indexOf(`${plan.label} · 半仓镜像实际涨幅 %`)]).toBeCloseTo(5);
  expect(row[headers.indexOf(`${plan.label} · 半仓镜像状态`)]).toBe('已卖 50%');
  expect(headers.some(h=>h.includes('动态最大回撤'))).toBe(false);
  expect(campaignHalfMirror({comparison:undefined})).toBeUndefined();

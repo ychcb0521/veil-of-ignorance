@@ -320,7 +320,7 @@ it('replaces dynamic drawdown with peak gain and sorts each seller independently
  const missing=()=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('MISSING'))!;
  expect(within(high()).getAllByTestId('quality-static-drawdown').map(x=>x.textContent)).toEqual(['25.00%','2.00%']);
  expect(within(high()).getAllByTestId('quality-peak-gain').map(x=>x.textContent)).toEqual(['+35.00%','+6.00%']);
- expect(within(low()).getAllByTestId('quality-static-drawdown')[0]).toHaveTextContent('0.00%');
+ expect(within(low()).getAllByTestId('quality-static-drawdown')[0]).toHaveTextContent('+8.00%');
  expect(within(missing()).getAllByTestId('quality-static-drawdown').every(x=>x.textContent==='—')).toBe(true);
  for(const type of ['静态最大回撤','峰值涨幅']){
   fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('HIGH');
@@ -723,20 +723,20 @@ it('offers mirror defaults and applies custom percentages atomically with holdin
  expect(s.setHoldingVetoes).toHaveBeenCalledWith('sell-state-raw',[],{enabled:true,gainPct:8,sellPct:25});
 });
 
-it('shows half-mirror execution after each peak column and sorts actual returns while absent outcomes stay last',()=>{
+it('shows half-mirror execution after each peak column and sorts actual mirror price gains independently of final returns while absent fills stay last',()=>{
  const s=state();s.study=importQualityLibrary(s.study,['FILLED','ZERO','OFF'].map(symbol=>({id:symbol,symbol,timeMs:T,timeLabel:'',fallbackZone:''})));
  const [plan]=s.study.sellPlans!;plan.mirrorTakeProfit={enabled:true,gainPct:5,sellPct:50};
  for(const row of qualityComparisonRows(s.study).filter(r=>r.origin==='library')) {
   const filled=row.source.symbol!=='OFF',gain=row.source.symbol==='ZERO'?0:7.5;
-  s.study.results.push({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',entryPrice:100,returnPct:gain,peakPct:15,...(filled?{mirrorFill:{at:T,price:105,fraction:.5,gainPct:5,atOpen:false}}:{})});
+  s.study.results.push({key:qualityResultKey(row,plan,0),sampleId:row.id,groupId:plan.id,evaluatedAt:T,status:'closed',entryPrice:100,returnPct:gain,peakPct:15,...(filled?{mirrorFill:{at:T,price:row.source.symbol==='ZERO'?108:105,fraction:.5,gainPct:5,atOpen:false}}:{})});
  }
  render(<FishQuality state={s}/>);
  const row=(name:string)=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes(name))!;
- expect(within(row('FILLED')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('+7.50%');
+ expect(within(row('FILLED')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('+5.00%');
  expect(within(row('FILLED')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('已卖 50%');
- expect(within(row('ZERO')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('0.00%');
+ expect(within(row('ZERO')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('+8.00%');
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('未触发');
- fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像收益排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
- fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像收益排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
+ fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
+ fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
 });

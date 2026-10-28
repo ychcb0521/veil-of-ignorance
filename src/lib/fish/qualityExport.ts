@@ -20,7 +20,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${p.rule ? `${p.rule.direction} ${p.rule.threshold}` : hasQualityExit(p) ? '仅一票否决' : '未设置'}）收益率 %`, width: 34 },
-      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像收益率 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
+      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
@@ -44,7 +44,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
     ['峰值涨幅 %', 16], ['最大不利涨跌 %', 18], ['动态最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
     ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['阈值确认时间', 24], ['实际卖出公式', 60],
-    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['半仓镜像收益率 %',24],['半仓镜像状态',24],
+    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['半仓镜像实际涨幅 %',24],['半仓镜像状态',24],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const definition = qualityDefinition(run.plan.snapshot);

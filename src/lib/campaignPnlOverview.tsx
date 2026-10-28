@@ -901,7 +901,7 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
   if(metrics.halfMirror) {
     const mirror=metrics.halfMirror;
     built.push({key:'halfMirror',label:'半仓镜像',value:mirror.text,color:pnlExportColor(mirror.value),valueClassName:mirror.value==null?'text-muted-foreground':pnlColor(mirror.value),
-      help:<><p>{mirror.detail}</p><p>默认上涨 5% 卖出初始币数的 50%；若已自定义比例，以该轮实际保存的设置与成交为准。未启用、待评估、未触发和缺数据不填成零收益，也不根据峰值涨幅推断成交。</p></>});
+      help:<><p>{mirror.detail}</p><p>百分数为开仓至镜像成交的实际价格涨幅；整笔交易回报率另计。默认上涨 5% 卖出初始币数的 50%；若已自定义比例，以该轮实际保存的设置与成交为准。未启用、待评估、未触发和缺数据不填成零收益，也不根据峰值涨幅推断成交。</p></>});
   }
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [

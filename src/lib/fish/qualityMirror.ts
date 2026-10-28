@@ -9,6 +9,11 @@ export function validateQualityMirror(rule?: QualityMirrorTakeProfit): void {
   if (!Number.isFinite(rule.sellPct) || rule.sellPct <= 0 || rule.sellPct > 100) throw new Error('镜像止盈的卖出比例须大于 0 且不超过 100%');
 }
 export const mirrorLabel = (rule?: QualityMirrorTakeProfit) => rule?.enabled ? `镜像止盈：涨幅 ≥ ${rule.gainPct}% 卖出初始币数 ${rule.sellPct}%` : '';
+/** Actual price gain at the saved execution, independent of allocation and final ROI. */
+export function mirrorFillGainPct(entry: number | undefined, fill?: QualityMirrorFill): number | null {
+  return entry != null && Number.isFinite(entry) && entry > 0 && fill && Number.isFinite(fill.price) && fill.price > 0
+    ? (fill.price / entry - 1) * 100 : null;
+}
 export function mirrorWeightedReturn(entry: number, mark: number, fill?: QualityMirrorFill): number {
   const fraction = fill?.fraction ?? 0;
   return ((fill ? fraction * (fill.price / entry - 1) : 0) + (1 - fraction) * (mark / entry - 1)) * 100;

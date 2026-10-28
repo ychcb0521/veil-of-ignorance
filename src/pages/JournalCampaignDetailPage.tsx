@@ -1,4 +1,6 @@
 import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
+import { qualityMirrorChartArtifacts, mirrorPercentText } from '@/lib/fish/qualityMirrorBoard';
+import { QualityMirrorBoard } from '@/components/journal/QualityMirrorBoard';
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
@@ -608,18 +610,24 @@ function buildChartArtifacts(
         });
       }
       if (leg.leg_role === 'main_open' || leg.leg_role === 'reentry_main' || leg.leg_role?.startsWith('main_add_')) {
-        markers.push({
+        const mirrorFill = campaign.comparison?.sellEvidence?.mirrorFill;
+        if (!mirrorFill || mirrorFill.fraction < 1) markers.push({
           time: closeTime,
           price: exitPrice,
           shape: 'square',
           color: '#2B80FF',
-          label: 'M 全平',
+          label: mirrorFill ? `余仓 ${mirrorPercentText(1 - mirrorFill.fraction)}% · 卖出` : 'M 全平',
         });
       }
     }
 
     eventMap.get(leg.id);
   }
+
+  const mirror = qualityMirrorChartArtifacts(campaign);
+  markers.push(...mirror.markers);
+  timeBoundPriceLines.push(...mirror.timeBoundPriceLines);
+  verticalLines.push(...mirror.verticalLines);
 
   return { markers, timeBoundPriceLines, verticalLines, events };
 }
@@ -1014,6 +1022,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
   const campaignChartExportRef = useRef<HTMLDivElement | null>(null);
   const pageHeaderRef = useRef<HTMLElement | null>(null);
   const campaignChartPanelRef = useRef<HTMLDivElement | null>(null);
+  const [mirrorBoardHeight,setMirrorBoardHeight]=useState(0);
   // 盘面按可视区取最大高度：面板顶边贴在吸顶页眉下方时，工具栏、盘面到下方常驻图例整块露出、无内滚动；
   // 多出的高度全归主图（VOL / HV 副图固定 80px 不变）。点开的「管理」色块与「标记说明」不计入，往下推。
   // 批量导出模式下盘面是屏幕外固定 1440×480 的一块：不给面板，hook 就不绑定、不量视口，更不会改它的高度。
@@ -1022,7 +1031,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     stickyRef: pageHeaderRef,
     panelRef: batchExport ? detachedChartPanelRef : campaignChartPanelRef,
     targetRef: campaignChartExportRef,
-    minHeight: CAMPAIGN_CHART_MIN_HEIGHT,
+    minHeight: CAMPAIGN_CHART_MIN_HEIGHT + mirrorBoardHeight,
   });
   const [isOwner, setIsOwner] = useState(true);
   /** 「这场战役在回收站里」提示上的「恢复」正在写。 */
@@ -2698,7 +2707,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       error={batchKlinesError ? `K 线加载失败：${batchKlinesError}` : null}
       onComplete={batchExport.onComplete}
       onError={reportBatchError}
-    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <ReplayKlineChart
+    >{onReady => !chartKlinesLoading && chartKlines.length > 0 && !chartKlinesError ? <div className="flex h-full flex-col"><QualityMirrorBoard campaign={campaign}/><div className="min-h-0 flex-1"><ReplayKlineChart
       key={`${campaign.id}:${displayInterval}:${campaignKlineFromTime}:${campaignKlineToTime}`}
       klines={chartKlines}
       currentTime={chartCurrentTime}
@@ -2715,7 +2724,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       timezone={LOCAL_TIME_ZONE}
       onRenderReady={onReady}
       onRenderError={reportBatchError}
-    /> : null}</CampaignBatchBoardRenderer>;
+    /></div></div> : null}</CampaignBatchBoardRenderer>;
   }
 
   return (
@@ -3032,9 +3041,11 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
             <div
               ref={campaignChartExportRef}
               data-testid="campaign-chart-frame"
-              className="border border-border rounded overflow-hidden"
+              className="flex flex-col border border-border rounded overflow-hidden"
               style={{ height: campaignChartFitHeight ?? 480 }}
             >
+              <QualityMirrorBoard campaign={campaign} onHeightChange={setMirrorBoardHeight}/>
+              <div className="min-h-0 flex-1">
               {chartKlinesLoading ? (
                 <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground">加载 K 线…</div>
               ) : chartKlinesError ? (
@@ -3064,6 +3075,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
                   timezone={LOCAL_TIME_ZONE}
                 />
               )}
+              </div>
             </div>
             {/* 盘面与计算各拉一份时，计算那份失败盘面上看不出来：单独说一句，读数按已实现盈亏兜底 */}
             {!displaySharesComputeKlines && klinesError && (

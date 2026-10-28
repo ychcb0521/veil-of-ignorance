@@ -1,4 +1,5 @@
 import type { KlineData } from '@/hooks/useBinanceData';
+import { isQualityCampaignId } from '@/lib/campaignSections';
 import {
   INITIAL_HEDGE_SIZE_PCT,
   MAIN_ADD_ROLES,
@@ -1530,6 +1531,18 @@ export function buildCampaignEventStream(
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
 ): CampaignEvent[] {
+  // Paper mirror campaigns already contain every frozen partial/final fill.
+  // The generic position lookup collapses all fills to the last one: rebuilding
+  // from it drops the mirror sale and misclassifies the remaining sale as partial.
+  if (isQualityCampaignId(campaign.id) && campaign.comparison?.sellEvidence?.mirrorFill) {
+    const events = (campaign.actual_evolution ?? []).map(event => ({ ...event }));
+    if (campaign.closed_at && !events.some(event => event.event_type === 'campaign_closed')) events.push({
+      id: `synthetic-${campaign.id}-closed`, timestamp: campaign.closed_at, event_type: 'campaign_closed',
+      leg_role: null, journal_id: null, trade_record_id: null, pending_order_id: null, price: null, size_usdt: null,
+      notes: campaign.notes, recorded_at: campaign.closed_at,
+    });
+    return events.sort((a, b) => toMs(a.timestamp) - toMs(b.timestamp));
+  }
   const legByJournalId = new Map(legs.map(leg => [leg.id, leg]));
   const legByRecordId = new Map(
     legs
@@ -1636,7 +1649,8 @@ export function buildCampaignEventStream(
  */
 function campaignEndMs(campaign: TradeCampaign, tradeRecords: TradeRecord[]) {
   const latestRecord = tradeRecords.reduce((max, record) => Math.max(max, record.closeTime, record.openTime), 0);
-  return campaign.closed_at ? toMs(campaign.closed_at) : Math.max(latestRecord, toMs(campaign.opened_at));
+  const valuedAt = isQualityCampaignId(campaign.id) ? campaign.comparison?.valuedAt ?? 0 : 0;
+  return campaign.closed_at ? toMs(campaign.closed_at) : Math.max(latestRecord, toMs(campaign.opened_at), valuedAt);
 }
 
 export function deriveCampaignStates(
@@ -2051,7 +2065,17 @@ function buildActiveLegsUntil(
         placeholders.add(placeholder);
         return [placeholder];
       }
-      return recordActiveLegs(leg, record, claimed, endMs, exitPriceCorrections);
+      const slices = recordActiveLegs(leg, record, claimed, endMs, exitPriceCorrections);
+      // A still-open mirror campaign has settlement records for only the sold
+      // coins. Keep the unsold coins on the equity path until frozen valuation.
+      const fill = campaign.comparison?.sellEvidence?.mirrorFill;
+      if (isQualityCampaignId(campaign.id) && !campaign.closed_at && fill && fill.fraction < 1 && leg.leg_role === 'main_open'
+        && leg.pre_entry_price != null && leg.pre_entry_price > 0 && leg.pre_position_size != null) {
+        slices.push({ id: `${leg.id}-remaining`, journalId: leg.id, role: leg.leg_role, side: 'LONG',
+          quantity: leg.pre_position_size / leg.pre_entry_price * (1 - fill.fraction), entryPrice: leg.pre_entry_price,
+          startMs: toMs(leg.pre_simulated_time), endMs, realizedPnl: null, settlementMode: 'usdt', contractSizeUsd: null, contracts: null, endIsCampaignEnd: true });
+      }
+      return slices;
     }
 
     if (

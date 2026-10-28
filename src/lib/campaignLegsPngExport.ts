@@ -1366,8 +1366,42 @@ function captureCampaignChartCanvas(chartElement: HTMLElement | null): RenderedC
   }
 
   drawAnalysisLabels(ctx, chartElement, rect);
+  drawMirrorBoard(ctx, chartElement, rect);
   strokeRoundedRect(ctx, 0.5, 0.5, rect.width - 1, rect.height - 1, 6, '#E5E7EB', 1);
   return rendered;
+}
+
+/** The mirror strip is DOM text above native canvases; composite it into both PNG paths. */
+export function drawMirrorBoard(ctx: CanvasRenderingContext2D, chart: HTMLElement, chartRect: DOMRect) {
+  const board = chart.querySelector<HTMLElement>('[data-testid="quality-mirror-board"]');
+  if (!board) return;
+  const rect = board.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(rect.left - chartRect.left, rect.top - chartRect.top, rect.width, rect.height); ctx.clip();
+  ctx.fillStyle = '#FFFBF0'; ctx.fillRect(rect.left - chartRect.left, rect.top - chartRect.top, rect.width, rect.height);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const walker = document.createTreeWalker(board, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.textContent?.trim() || !node.parentElement) continue;
+    const style = window.getComputedStyle(node.parentElement);
+    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    // Range coordinates retain CSS wrapping, spacing and responsive columns.
+    const range = document.createRange();
+    const content = node.textContent;
+    for (let i = 0; i < content.length; i++) {
+      range.setStart(node, i); range.setEnd(node, i + 1);
+      const r = range.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      // PNG uses a light background regardless of the application's theme.
+      ctx.fillStyle = style.color.includes('246, 70, 93') ? '#F6465D'
+        : style.color.includes('11, 155, 102') ? '#0B9B66'
+        : style.color.includes('185, 133, 0') ? '#B98500' : '#586274';
+      ctx.fillText(content[i], r.left - chartRect.left, r.top - chartRect.top + r.height / 2);
+    }
+    range.detach();
+  }
+  ctx.restore();
 }
 
 async function canvasPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {

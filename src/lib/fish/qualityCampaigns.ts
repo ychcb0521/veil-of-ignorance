@@ -45,7 +45,7 @@ export function buildQualityCampaignData(owner: string, run: QualityCampaignRun,
     ...(mirror ? [{...opening,id:`${id}-mirror`,timestamp:iso(mirror.at),event_type:fraction===1?'main_fully_closed' as const:'main_partial_closed' as const,
       price:mirror.price,size_usdt:QUALITY_NOTIONAL*fraction,realized_pnl:mirrorPnl,trade_record_id:mirrorId,close_time:iso(mirror.at),exit_price:mirror.price,
       notes:`镜像止盈：涨幅 ≥ ${mirror.gainPct}%，卖出初始币数 ${+(fraction*100).toPrecision(8)}%`,recorded_at:iso(r.evaluatedAt)}] : []),
-    ...(closed && remaining>0 ? [{...opening,id:`${id}-exit`,timestamp:iso(end),event_type:'main_fully_closed' as const,price:r.endPrice!,size_usdt:QUALITY_NOTIONAL*remaining,
+    ...(closed && remaining>0 ? [{...opening,id:`${id}-exit`,trade_record_id:recordId,timestamp:iso(end),event_type:'main_fully_closed' as const,price:r.endPrice!,size_usdt:QUALITY_NOTIONAL*remaining,
       realized_pnl:pnl!-mirrorPnl,close_time:iso(end),exit_price:r.endPrice!,recorded_at:iso(r.evaluatedAt)}] : [])
   ];
   const campaign: TradeCampaign = {

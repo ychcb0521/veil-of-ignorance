@@ -197,7 +197,7 @@ function pnlFromEvents(campaign: Pick<TradeCampaign, 'actual_evolution'>): numbe
 }
 
 export function computeCampaignRealizedPnl(
-  campaign: Pick<TradeCampaign, 'final_realized_pnl' | 'actual_evolution'>,
+  campaign: Pick<TradeCampaign, 'final_realized_pnl' | 'actual_evolution' | 'comparison'>,
   legs: TradeJournal[],
   tradeRecords: TradeRecord[],
   exitPriceCorrections: LegExitPriceCorrections = {},
@@ -251,7 +251,8 @@ export function computeCampaignRealizedPnl(
     }
   }
 
-  const settled = legs.length > 0 && legs.every(leg => byLeg.get(leg.id) != null);
+  const settled = campaign.comparison?.holdingMetrics?.status !== 'open'
+    && legs.length > 0 && legs.every(leg => byLeg.get(leg.id) != null);
 
   return {
     total,
