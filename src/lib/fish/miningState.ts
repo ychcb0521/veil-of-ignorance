@@ -48,7 +48,7 @@ export function normalizeMiningState(x: unknown): FishMiningState | null {
     errorKind: v.errorKind === 'configuration' || v.errorKind === 'transient' ? v.errorKind : undefined } as FishMiningState;
   if (!upgrade) return normalized;
   return { ...normalized, presetRevision: MINING_PRESET_REVISION, rules: FISH_DEFAULT_RULES.map(rule=>({...rule})),
-    ruleRepairs: ['已替换为四项共振条件（交集），旧挖掘要求已废除；已有进度和历史结果保留'],
+    ruleRepairs: ['已替换为四项默认条件，旧挖掘要求已废除；已有进度和历史结果保留'],
     ...(normalized.errorKind === 'configuration' ? { lastError:'', errorKind:undefined, retryAt:null, retryCount:0, lastErrorAt:null } : {}) };
 }
 /**

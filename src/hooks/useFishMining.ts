@@ -14,6 +14,7 @@ import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
+import { MINING_COMBINATION } from '@/lib/fish/defaultRules';
 import { updateMiningLibrary } from '@/lib/fish/miningLibraryStore';
 import { acceptMinedAnchor, resolveMiningRuleAliases, currentDefaultRules, miningCards, miningDueAnchor, readMiningState, reconcileMiningWithFish, releaseMiningLease, saveMiningState, takeMiningLease, miningFailureState, MINING_STALL_MS, type FishMiningState } from '@/lib/fish/mining';
 
@@ -73,10 +74,10 @@ export function useFishMining(o: {
     const scope=(s.selection as FishScanSelection|undefined)??latest.current.selection;
     const unsupported=scope.exchanges.find(exchange=>!AUDITED_EXCHANGES.includes(exchange));
     const missing=s.rules.find(rule=>!latest.current.defs.some(def=>def.id===rule.featureId));
-    const built = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: 'and', selection: scope, time: '', lookbackHours:null });
+    const built = unsupported ? {error:`挖掘范围包含尚未核实的交易所 ${unsupported}，请更新捕捞范围后重新检查`} : missing ? {error:`挖掘算法 ${missing.featureId} 已不存在，请在 Deep Dig 恢复该定义后重新检查`} : buildFishScanSettings({ cards: miningCards(s.rules), defs: latest.current.defs, combination: MINING_COMBINATION, selection: scope, time: '', lookbackHours:null });
     if (built.error !== undefined) {
       const failed=miningFailureState(s,built.error,now,'configuration');setState(failed);setWaiting('配置需修正，修正后点「重新检查」');
-      void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now));
+      void updateMiningLibrary(account.current,library=>recordMiningError(library,failed,anchor,built.error,now,MINING_COMBINATION));
       releaseMiningLease(owner.current);return;
     }
     runningRef.current = true; runningStop.current=latest.current.stop; setRunning(true); setAnchorMs(anchor); setProgress(null); setWaiting('');
@@ -102,7 +103,7 @@ export function useFishMining(o: {
       setState(next); advanced = true;
       // 挖掘库：记下这一档扫到几条、新增哪些（独立于鱼舱，删了鱼也还在）
       const scanned = found.length, at = Date.now();
-      void updateMiningLibrary(who, library => recordMinedAnchor(library, next, anchor, scanned, added, at));
+      void updateMiningLibrary(who, library => recordMinedAnchor(library, next, anchor, scanned, added, at, MINING_COMBINATION));
       if (added.length) latest.current.onMined?.(added);
     } catch (e) {
       if(!active())return;
@@ -110,7 +111,7 @@ export function useFishMining(o: {
       if (e instanceof Error && e.message === '取数器正忙') return;
       const at=Date.now(),failed=miningFailureState(readMiningState(),e instanceof Error?e.message:String(e),at,'transient');
       setState(failed);
-      void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at));
+      void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at, MINING_COMBINATION));
     } finally {
       clearInterval(renew);if(watchdog)clearInterval(watchdog);if(cancelTask.current===cancelThis)cancelTask.current=null;
       if(active()){

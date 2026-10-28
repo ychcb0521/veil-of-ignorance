@@ -73,8 +73,8 @@ export function recordMinedAnchor(input: FishMiningLibrary, state: FishMiningSta
   return { ...library, anchors: [...library.anchors.filter(a => a.id !== id), anchor], records: mergeLibraryRecords(library.records, records) };
 }
 /** 一档出错：记下原因和重试次数；之后同一档扫成功会覆盖成正常结果（保留累计次数）。 */
-export function recordMiningError(input: FishMiningLibrary, state: FishMiningState, anchorMs: number, error: string, at: number): FishMiningLibrary {
-  const { library, run } = withRun(input, state, at);
+export function recordMiningError(input: FishMiningLibrary, state: FishMiningState, anchorMs: number, error: string, at: number, combination: 'and'|'or' = 'and'): FishMiningLibrary {
+  const { library, run } = withRun(input, state, at, combination);
   const id = anchorId(run.id, anchorMs), prior = library.anchors.find(a => a.id === id);
   if (prior && !prior.error) return library;
   const anchor: FishMiningAnchor = { id, runId: run.id, anchorMs, scannedAt: at, updatedAt: at, found: 0, added: 0, recordIds: prior?.recordIds ?? [], error, attempts: (prior?.attempts ?? 0) + 1 };
