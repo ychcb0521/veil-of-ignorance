@@ -30,6 +30,7 @@ import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/l
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
 import { rangeSelect } from '@/lib/listRangeSelect';
 import { collapseQualityTableRows, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
+import { fishMetricLabel } from '@/lib/fish/records';
 import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-muted/50 px-2 text-[11px] outline-none hover:bg-muted focus-visible:border-ring/60';
@@ -231,14 +232,22 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
 }
 
 const detectorText = (g: QualityGroup) => `${g.label} ${g.snapshot.direction ?? '>'} ${g.snapshot.threshold}`;
+// 下拉列表按用户截图置顶四个系列；用捕获时的实际序列识别，也兼容旧版「结果」快照。
+const PREFERRED_DETECTORS = [['cbi2', 'avg_CBI2'], ['cba', 'avg_CBA'], ['cbi2', 'avg_CBI2_2'], ['cba', 'avg_CBA_2']] as const;
 /**
  * 选探测算法：可以选一个，也可以选多个；不选 = 全部。表头和筛选栏共用。
  * 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
  */
 function DetectorPicker({ groups, counts, selected, onChange, children }: { groups: QualityGroup[]; counts: ReadonlyMap<string, number>; selected: readonly string[]; onChange: (ids: string[]) => void; children: ReactNode }) {
+  const variables = qualityVariables(groups).map((variable, index) => {
+    const snapshot = variable.levels[0].snapshot, metric = fishMetricLabel(snapshot);
+    const featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0];
+    const priority = PREFERRED_DETECTORS.findIndex(([id, series]) => (!featureId || featureId === id) && metric === series);
+    return { ...variable, index, priority: priority < 0 ? PREFERRED_DETECTORS.length : priority };
+  }).sort((a, b) => a.priority - b.priority || a.index - b.index);
   return <Popover><PopoverTrigger asChild>{children}</PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-80 max-h-[min(70vh,var(--radix-popover-content-available-height))] overflow-y-auto p-0 text-[11px]" data-testid="quality-detector-picker">
     <div className="sticky top-0 flex items-center justify-between border-b border-border/50 bg-popover px-3 py-2"><span className="font-medium">探测算法<span className="ml-1.5 font-normal text-muted-foreground">{selected.length ? `已选 ${selected.length} / ${groups.length} 个水平` : `${qualityVariables(groups).length} 个变量 · ${groups.length} 个水平`}</span></span><button type="button" className="text-primary hover:underline disabled:text-muted-foreground/50 disabled:no-underline" disabled={!selected.length} onClick={() => onChange([])}>全部</button></div>
-    <ul role="group" aria-label="选择探测算法" className="py-1">{qualityVariables(groups).map(variable => <li key={variable.id}><div className="flex items-center justify-between bg-muted/25 px-3 py-1.5"><span className="font-medium">{variable.label}</span><span className="text-[9px] text-muted-foreground">{variable.levels.length} 个水平</span></div><ul aria-label={`${variable.label}阈值水平`}>{variable.levels.map(g => { const on = selected.includes(g.id); return <li key={g.id} className="group/item flex items-center gap-2 px-3 py-1.5 hover:bg-muted/60">
+    <ul role="group" aria-label="选择探测算法" className="py-1">{variables.map(variable => <li key={variable.id}><div className="flex items-center justify-between bg-muted/25 px-3 py-1.5"><span className="font-medium">{variable.label}</span><span className="text-[9px] text-muted-foreground">{variable.levels.length} 个水平</span></div><ul aria-label={`${variable.label}阈值水平`}>{variable.levels.map(g => { const on = selected.includes(g.id); return <li key={g.id} className="group/item flex items-center gap-2 px-3 py-1.5 hover:bg-muted/60">
       <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2"><input type="checkbox" aria-label={`探测算法 ${detectorText(g)}`} checked={on} onChange={() => onChange(on ? selected.filter(id => id !== g.id) : [...selected, g.id])} className="h-3 w-3 shrink-0 accent-[hsl(var(--primary))]"/><span className="min-w-0 flex-1 truncate text-muted-foreground" title={g.snapshot.constraints?.join(" 且 ")}>阈值水平{g.snapshot.constraints?.length ? ` · 附加约束 ${g.snapshot.constraints.length} 条` : ''}</span><span className="shrink-0 font-mono text-muted-foreground/80">{g.snapshot.direction ?? '>'} {g.snapshot.threshold}</span></label>
       <button type="button" className="shrink-0 text-primary opacity-0 hover:underline focus-visible:opacity-100 group-hover/item:opacity-100" aria-label={`只看 ${detectorText(g)}`} onClick={() => onChange([g.id])}>仅此</button>
       <span className="w-8 shrink-0 text-right font-mono tabular-nums text-muted-foreground/60" title="条信号">{counts.get(g.id) ?? 0}</span>
