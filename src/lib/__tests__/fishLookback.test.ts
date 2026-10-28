@@ -21,10 +21,10 @@ async function scan(hours:number|undefined,multi=false,threshold=1){
  return {hits,p,round:round!};
 }
 beforeEach(()=>localStorage.clear());
-it('defaults to half a day, persists custom numeric hours per account, and rejects invalid input',()=>{
- expect(readFishLookback()).toBe(12);saveFishLookback('10');expect(readFishLookback()).toBe(10);
+it('defaults to one hour, persists custom numeric hours per account, and rejects invalid input',()=>{
+ expect(readFishLookback()).toBe(1);saveFishLookback('10');expect(readFishLookback()).toBe(10);
  for(const value of ['',0,-1,NaN,Infinity,8785])expect(()=>saveFishLookback(value)).toThrow('扫描覆盖时间');
- expect(readFishLookback()).toBe(10);const key=fishLookbackKey();localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'second'}}));expect(fishLookbackKey()).not.toBe(key);expect(readFishLookback()).toBe(12);
+ expect(readFishLookback()).toBe(10);const key=fishLookbackKey();localStorage.setItem('sb-test-auth-token',JSON.stringify({user:{id:'second'}}));expect(fishLookbackKey()).not.toBe(key);expect(readFishLookback()).toBe(1);
 });
 it('limits real scan results by exact signal start, includes the lower boundary and excludes already ended signals',async()=>{
  const one=await scan(1);expect(one.p.status).toBe('complete');expect(one.hits.map(s=>s.symbol)).toEqual(['RECENTUSDT','BOUNDARYUSDT']);expect(one.p.counts.outside).toBe(2);
@@ -54,4 +54,11 @@ it('uses saved capture hours in the shared builder, while mining can explicitly 
 });
 it('diagnoses out-of-window signals using the same gate as a scan',async()=>{
  const result=await makeScanner().diagnose({symbol:'OLDUSDT',feature,algorithm,anchorMs:T,lookbackHours:1,signal:new AbortController().signal});expect(result.outcome).toBe('outside');expect(result.lines.join(' ')).toContain('不在过去 1 小时内');
+});
+
+it('upgrades only the previous 12h default once and preserves other custom choices and later explicit 12h edits',()=>{
+ localStorage.setItem(fishLookbackKey(),'12');expect(readFishLookback()).toBe(1);
+ saveFishLookback(12);expect(readFishLookback()).toBe(12);
+ localStorage.clear();localStorage.setItem(fishLookbackKey(),'10');expect(readFishLookback()).toBe(10);
+ localStorage.clear();saveFishLookback(12);expect(readFishLookback()).toBe(12);
 });

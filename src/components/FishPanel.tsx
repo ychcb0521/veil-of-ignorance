@@ -250,7 +250,7 @@ export function FishPanel(p: FishPanelProps) {
         <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">流程</h4>
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
-            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 12 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
+            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 1 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（新鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
           </ol></section>

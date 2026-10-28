@@ -91,7 +91,7 @@ it('后台标签页里逐币让出不走计时器（不受浏览器节流），�
 
 it('coverage hours are independent from the automatic interval and refreshed from saved settings on each run',async()=>{
  const {saveFishLookback}=await import('@/lib/fish/lookback');const {start,view}=hook();await flush();
- expect((start.mock.calls[0][0] as any).lookbackHours).toBe(12);
+ expect((start.mock.calls[0][0] as any).lookbackHours).toBe(1);
  saveFishLookback(2);await flush(HOUR+1000);
  expect((start.mock.calls.at(-1)![0] as any).lookbackHours).toBe(2);expect(view.result.current.hours).toBe(1);
 });

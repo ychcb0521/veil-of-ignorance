@@ -3,15 +3,26 @@ import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedSt
 import type { FishProgram } from './algorithm';
 import type { FishMemberResult } from './intersection';
 import type { FishTurnoverFloor } from './shared';
-export const FISH_DEFAULT_LOOKBACK_HOURS=12;
+export const FISH_DEFAULT_LOOKBACK_HOURS=1;
 export const fishLookbackKey=()=>`${getUserPrefix()}fish-lookback-hours.v1`;
+const defaultVersionKey=()=>`${getUserPrefix()}fish-lookback-default.v2`;
 export function validateFishLookback(value:unknown):number {
  const n=typeof value==='number'?value:typeof value==='string'&&value.trim()?Number(value):NaN;
  if(!Number.isFinite(n)||n<=0||n>8784)throw new Error('扫描覆盖时间须大于 0 且不超过 8784 小时');
  return n;
 }
-export function readFishLookback():number {try{return validateFishLookback(readPersistedStateRaw(fishLookbackKey()));}catch{return FISH_DEFAULT_LOOKBACK_HOURS;}}
-export function saveFishLookback(value:unknown):number {const hours=validateFishLookback(value);writePersistedStateRaw(fishLookbackKey(),String(hours));return hours;}
+export function readFishLookback():number {
+ try{
+  // Upgrade the former 12h default once; other custom hours and subsequent explicit 12h edits survive.
+  if(readPersistedStateRaw(defaultVersionKey())!=='1'){
+   const previous=readPersistedStateRaw(fishLookbackKey());
+   if(previous!==null&&Number(previous)===12)writePersistedStateRaw(fishLookbackKey(),'1');
+   writePersistedStateRaw(defaultVersionKey(),'1');
+  }
+  return validateFishLookback(readPersistedStateRaw(fishLookbackKey()));
+ }catch{return FISH_DEFAULT_LOOKBACK_HOURS;}
+}
+export function saveFishLookback(value:unknown):number {const hours=validateFishLookback(value);writePersistedStateRaw(fishLookbackKey(),String(hours));writePersistedStateRaw(defaultVersionKey(),'1');return hours;}
 /** The coverage window never replaces formula warm-up or liquidity-gate history. */
 export function fishProgramForLookback(plan:FishProgram,hours?:number,floors?:readonly FishTurnoverFloor[]):FishProgram {
  if(hours===undefined)return plan;
