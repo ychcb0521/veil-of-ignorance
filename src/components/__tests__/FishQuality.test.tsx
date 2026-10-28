@@ -5,6 +5,7 @@ import { importQualityFish, separateQualityFilters, importQualityLibrary, newQua
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
 import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
+import { RouteLoadBoundary } from '@/components/RouteLoadBoundary';
 const T = Date.UTC(2026, 9, 20);
 function state(): FishQualityState {
   const signals = [1, 2, 3].map((threshold, i) => ({ id: String(i), symbol: 'AAAUSDT', timeMs: T, timeLabel: '', fallbackZone: '', fish: { featureId: 'bss', featureShort: 'BSS', definitionKey: definitionKey(BSS_DEF), statistic: 'BSS', cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1 } }));
@@ -13,6 +14,36 @@ function state(): FishQualityState {
   return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn() };
 }
 afterEach(cleanup);
+it('does not crash the route when monitoring starts and live results arrive in a scrolled table with rows of different measured heights',()=>{
+ const s=state();
+ s.study=importQualityLibrary(s.study,Array.from({length:350},(_,i)=>({id:`live-${i}`,symbol:`LIVE${String(i).padStart(3,'0')}USDT`,timeMs:T-(i+1)*3600000,timeLabel:'',fallbackZone:''})));
+ let monitorStarted=false;s.start=vi.fn(async()=>{monitorStarted=true;});
+ const log=vi.spyOn(console,'error').mockImplementation(()=>{});
+ const height=vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockImplementation(function(){
+  // At scrollTop=3300, a 33px estimate starts at row 88, while 40px starts at row 70.
+  // Measuring the first rendered row feeds a different estimate back into the window.
+  return (this as HTMLElement).matches('[data-testid="quality-fish-row"]') ? monitorStarted&&(this as HTMLElement).textContent?.includes('LIVE087USDT')?40:33 : 0;
+ });
+ const viewport=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(){return (this as HTMLElement).matches('[data-testid="quality-fish-table"]')?448:0;});
+ try {
+  const view=render(<RouteLoadBoundary><FishQuality state={s}/></RouteLoadBoundary>);
+  const box=screen.getByTestId('quality-fish-table');box.scrollTop=3300;fireEvent.scroll(box);
+  fireEvent.click(screen.getByRole('button',{name:'开始监测'}));expect(s.start).toHaveBeenCalledTimes(1);
+  s.running=true;s.progress={done:0,total:350,current:''};
+  s.study={...s.study,results:[...s.study.results]};
+  view.rerender(<RouteLoadBoundary><FishQuality state={s}/></RouteLoadBoundary>);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByTestId('quality-fish-table')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'暂停监测'})).toBeEnabled();
+  for(const row of screen.getAllByTestId('quality-fish-row'))expect(row).toHaveStyle({height:'40px'});
+  for(let done=1;done<=3;done++){
+   s.progress={done,total:350,current:''};s.study={...s.study,results:[...s.study.results]};
+   view.rerender(<RouteLoadBoundary><FishQuality state={s}/></RouteLoadBoundary>);
+  }
+  box.scrollTop=350*40;fireEvent.scroll(box);expect(screen.getByText('LIVE349USDT')).toBeInTheDocument();
+  expect(screen.queryByRole('alert')).toBeNull();expect(log).not.toHaveBeenCalled();
+ } finally {height.mockRestore();viewport.mockRestore();log.mockRestore();}
+});
 it('allows a veto-only sell plan to run and be fixed for detector comparison without an ordinary threshold',async()=>{
  const {makeQualityHoldingVeto}=await import('@/lib/fish/qualityFilters');
  const s=state(),plan=s.study.sellPlans![0];plan.holdingVetoes=[makeQualityHoldingVeto('static-drawdown','>=',5)];
