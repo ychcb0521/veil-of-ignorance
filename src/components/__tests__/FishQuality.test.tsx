@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { FishQuality } from '@/components/FishQuality';
 import { importQualityFish, separateQualityFilters, importQualityLibrary, newQualityStudy, qualityComparisonRows, qualityDisplayRows, qualityResultKey, qualityRunSamples } from '@/lib/fish/quality';
 import { enableQualityComparison } from '@/lib/fish/qualityComparison';
-import { BSS_DEF, definitionKey } from '@/lib/deepDig/features';
+import { BSS_DEF, CBA_DEF, CBI2_DEF, definitionKey } from '@/lib/deepDig/features';
 import type { FishQualityState } from '@/hooks/useFishQuality';
 import { RouteLoadBoundary } from '@/components/RouteLoadBoundary';
 const T = Date.UTC(2026, 9, 20);
@@ -12,6 +12,15 @@ function state(): FishQualityState {
   const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals));
   study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
   return { study, ready: true, running: false, progress: null, filterRunning: false, filterProgress: null, filterError: '', startFilter: vi.fn(), cancelFilter: vi.fn(), warning: '', error: '', start: vi.fn(), restart: vi.fn(), cancel: vi.fn(), setRule: vi.fn(), setCombo: vi.fn(), setObserveHours: vi.fn(), selectSell: vi.fn(), setSelectedRows: vi.fn(), setPriority: vi.fn(), setScope: vi.fn(), setFilters: vi.fn(), setHoldingVetoes: vi.fn() };
+}
+/** 三条默认规则（CBI-2·avg₂ / CBA·avg₂ / CBI-2·avg）+ 一条非默认的 CBI-2·avg > 0.06，各一条信号。 */
+function defaultDetectorState(): FishQualityState {
+  const s = state();
+  const fish = (def: typeof CBI2_DEF, statistic: string, threshold: number) => ({ featureId: def.id, featureShort: def.short, definitionKey: definitionKey({ ...def, interval: '5m' }), statistic, cutoffMs: T, threshold, average: 4, cbi2: 4, startAverage: 4, previousAverage: 0, direction: '>' as const, scale: 1, interval: '5m' });
+  const signals = [fish(CBI2_DEF, 'avg_CBI2_2', .04), fish(CBA_DEF, 'avg_CBA_2', 8), fish(CBI2_DEF, 'avg_CBI2', .04), fish(CBI2_DEF, 'avg_CBI2', .06)].map((f, i) => ({ id: `d${i}`, symbol: `D${i}USDT`, timeMs: T + i * 60000, timeLabel: '', fallbackZone: '', fish: f }));
+  const study = enableQualityComparison(importQualityFish(newQualityStudy(T + 1), signals as never));
+  study.selectedRowIds = qualityDisplayRows(study).map(r => r.id);
+  return { ...s, study };
 }
 afterEach(cleanup);
 it('does not crash the route when monitoring starts and live results arrive in a scrolled table with rows of different measured heights',()=>{
@@ -201,9 +210,6 @@ it('sorts the single detector column in both directions and filters to one exact
   const first = () => screen.getAllByTestId('quality-detector-cell')[0];
   expect(first()).toHaveTextContent('> 1');
   fireEvent.click(screen.getByRole('button', {name:'按探测算法排序'})); expect(first()).toHaveTextContent('> 3');
-  fireEvent.click(screen.getByRole('button', {name:'鱼质量的探测算法'}));
-  fireEvent.click(within(screen.getByTestId('quality-detector-picker')).getByRole('button', {name:/^只看 .* > 2$/}));
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(first()).toHaveTextContent('> 2');
 });
 
 // 【用户反馈】2026-10-26「表头显示 793，但表中完全没这么多」：不再分页，所有行在同一个滚动框里
@@ -509,26 +515,33 @@ it('keeps holding vetoes under 持仓监测, per sell plan', async () => {
 });
 // 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
 it('picks one or several detectors straight from the detector header, keeps the toolbar in sync and clears with 全部', () => {
-  const s = state(); render(<FishQuality state={s}/>);
+  // 【用户要求】2026-10-28 下拉只列捕捞 / 批量挖掘的默认算法与数值；打开时默认全选它们
+  const s = defaultDetectorState(); render(<FishQuality state={s}/>);
   fireEvent.click(screen.getByRole('button', { name: '展开探测算法明细' }));
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  const symbols = () => screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/D\dUSDT/)![0]).sort();
+  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT']);
   fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
   const picker = screen.getByTestId('quality-detector-picker');
-  expect(within(picker).getAllByRole('checkbox')).toHaveLength(3);
-  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 1$/ }));
-  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 3$/ }));
-  const thresholds = () => screen.getAllByTestId('quality-detector-cell').map(c => c.textContent!.match(/> (\d)/)![1]).sort();
-  expect(thresholds()).toEqual(['1', '3']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个水平');
-  expect(screen.getByRole('button', { name: '在表头选择探测算法' })).toHaveTextContent('2');
-  expect(within(picker).getByText('已选 2 / 3 个水平')).toBeInTheDocument();
-  // 再点一次取消其中一个
-  fireEvent.click(within(picker).getByRole('checkbox', { name: /> 1$/ }));
-  expect(thresholds()).toEqual(['3']);
-  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent(/> 3$/);
+  const boxes = () => within(picker).getAllByRole('checkbox') as HTMLInputElement[];
+  expect(boxes()).toHaveLength(3); expect(boxes().map(b => b.checked)).toEqual([true, true, true]);
+  expect(within(picker).queryByRole('checkbox', { name: /> 0\.06$/ })).toBeNull();
+  expect(within(picker).getByText('已选 3 / 3')).toBeInTheDocument();
   fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
-  expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+  expect(symbols()).toEqual(['D0USDT', 'D1USDT', 'D2USDT', 'D3USDT']);
   expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('全部探测算法');
+  fireEvent.click(boxes()[1]);
+  expect(symbols()).toEqual(['D1USDT']);
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent(/> 8$/);
+  fireEvent.click(boxes()[0]);
+  expect(symbols()).toEqual(['D0USDT', 'D1USDT']);
+  expect(screen.getByRole('button', { name: '鱼质量的探测算法' })).toHaveTextContent('探测算法 · 已选 2 个');
+  expect(screen.getByRole('button', { name: '在表头选择探测算法' })).toHaveTextContent('2');
+  expect(within(picker).getByText('已选 2 / 3')).toBeInTheDocument();
+  // 再点一次取消其中一个；「仅此」只看这一项
+  fireEvent.click(boxes()[1]);
+  expect(symbols()).toEqual(['D0USDT']);
+  fireEvent.click(within(picker).getAllByRole('button', { name: /^只看 / })[2]);
+  expect(symbols()).toEqual(['D2USDT']);
 });
 
 it('places independent filter results immediately after capture, runs without sell rules and sorts readings with missing values last', async () => {
@@ -637,10 +650,11 @@ it('groups detector thresholds as levels, spans all sellers with a parent header
   const s = state(); render(<FishQuality state={s}/>);
   expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '8');
   expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(0);
-  expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('3 个探测算法');
+  // BSS 不是默认探测算法：下拉里不列，表头不报数
+  expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('');
   fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
-  expect(within(screen.getByTestId('quality-detector-picker')).getByText('3 个水平')).toBeInTheDocument();
-  expect(within(screen.getByTestId('quality-detector-picker')).getAllByRole('checkbox')).toHaveLength(3);
+  expect(within(screen.getByTestId('quality-detector-picker')).getByText('当前数据里没有默认探测算法的信号')).toBeInTheDocument();
+  expect(within(screen.getByTestId('quality-detector-picker')).queryAllByRole('checkbox')).toHaveLength(0);
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   const launch = screen.getByRole('button', { name: '统计分析 · 全部卖出算法' });
   expect(launch.className).toContain('text-muted-foreground/30'); fireEvent.click(launch);

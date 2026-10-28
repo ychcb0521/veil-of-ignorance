@@ -1,36 +1,41 @@
+import { FISH_DEFAULT_RULES } from './defaultRules';
 import type { QualityGroup } from './quality';
 import { fishMetricLabel } from './records';
-import { qualityVariables } from './qualityVariables';
 
-/** The four checked detector levels in the user's screenshot, in its display order. */
-const PREFERRED_DETECTORS = [
-  { featureId: 'cbi2', series: 'avg_CBI2', threshold: .04 },
-  { featureId: 'cba', series: 'avg_CBA', threshold: 8 },
-  { featureId: 'cbi2', series: 'avg_CBI2_2', threshold: .04 },
-  { featureId: 'cba', series: 'avg_CBA_2', threshold: 8 },
-] as const;
+/**
+ * 【用户要求】2026-10-28「持仓监测这里的探测算法下拉菜单，绝大多数都是无用的干扰项。我只需要捕捞和批量挖掘中现在的默认算法和数值，
+ * 以后默认中如果有新增，就在这里增加，除此之外，其他多余的都删除」：
+ * 下拉只列默认规则（捕捞与批量挖掘共用的 FISH_DEFAULT_RULES），顺序同捕捞的算法卡；默认里新增一条，这里自动多一项。
+ * 同一条默认规则在历史数据里可能因公式版本不同存成几组（名字、门槛都一样），下拉里合成一项，勾它就勾上全部这些组。
+ */
+const DEFAULT_DETECTORS = FISH_DEFAULT_RULES.map(rule => ({ key: rule.id, featureId: rule.featureId, series: rule.statistic, threshold: Number(rule.threshold) }));
 
-function detectorPriority(group: QualityGroup): number {
-  const snapshot = group.snapshot, metric = fishMetricLabel(snapshot);
-  const featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0];
-  const index = PREFERRED_DETECTORS.findIndex(rule => (!featureId || featureId === rule.featureId) && metric === rule.series);
-  return index < 0 ? PREFERRED_DETECTORS.length : index;
+export interface QualityDetectorChoice {
+  key: string;
+  /** 例如「CBI-2·avg₂」。 */
+  label: string;
+  direction: '>';
+  threshold: number;
+  /** 数据里属于这条默认规则的探测组。 */
+  ids: string[];
 }
 
-/** Resolve defaults from saved evidence after async hydration; never fabricate absent levels. */
+function defaultIndex(group: QualityGroup): number {
+  const snapshot = group.snapshot;
+  if ((snapshot.direction ?? '>') !== '>' || snapshot.constraints?.length) return -1;
+  const metric = fishMetricLabel(snapshot), featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0];
+  return DEFAULT_DETECTORS.findIndex(rule => (!featureId || featureId === rule.featureId) && metric === rule.series && snapshot.threshold === rule.threshold);
+}
+
+/** 只含数据里出现过的默认规则；没有探测组的默认规则不列（不编造空项）。 */
+export function qualityDetectorChoices(groups: readonly QualityGroup[]): QualityDetectorChoice[] {
+  return DEFAULT_DETECTORS.flatMap((rule, index) => {
+    const matched = groups.filter(group => defaultIndex(group) === index);
+    return matched.length ? [{ key: rule.key, label: matched[0].label, direction: '>' as const, threshold: rule.threshold, ids: matched.map(group => group.id) }] : [];
+  });
+}
+
+/** 打开时默认勾上全部默认规则（按默认顺序）。 */
 export function defaultQualityDetectorIds(groups: readonly QualityGroup[]): string[] {
-  return groups.filter(group => {
-    const rule = PREFERRED_DETECTORS[detectorPriority(group)];
-    return rule && (group.snapshot.direction ?? '>') === '>' && group.snapshot.threshold === rule.threshold && !group.snapshot.constraints?.length;
-  }).map(group => group.id);
-}
-
-/** Keep variables intact; checked variables and checked levels come first, stably. */
-export function qualityDetectorVariables(groups: readonly QualityGroup[], selected: readonly string[]) {
-  const checked = new Set(selected);
-  return qualityVariables(groups).map((variable, index) => ({
-    ...variable, index, priority: detectorPriority(variable.levels[0]),
-    selected: variable.levels.some(group => checked.has(group.id)),
-    levels: variable.levels.map((group, order) => ({ group, order })).sort((a, b) => Number(checked.has(b.group.id)) - Number(checked.has(a.group.id)) || a.order - b.order).map(item => item.group),
-  })).sort((a, b) => Number(b.selected) - Number(a.selected) || a.priority - b.priority || a.index - b.index);
+  return qualityDetectorChoices(groups).flatMap(choice => choice.ids);
 }

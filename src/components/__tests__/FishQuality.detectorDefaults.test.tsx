@@ -29,21 +29,22 @@ it('checks the four photographed levels after async hydration and scopes the tab
   expect(s.setScope).toHaveBeenLastCalledWith(expect.arrayContaining(qualityDisplayRows(s.study).filter(row => !['COIN0USDT', 'COIN1USDT'].includes(row.source.symbol)).map(row => row.id)));
   expect(vi.mocked(s.setScope!).mock.calls.at(-1)![0]).toHaveLength(4);
   const picker = open(); expect(within(picker).getAllByRole('checkbox', { checked: true })).toHaveLength(4);
-  expect(within(picker).getByRole('checkbox', { name: '探测算法 CBI-2·avg > 0.06' })).not.toBeChecked();
-  expect(within(picker).getByRole('checkbox', { name: '探测算法 S·avg₂ > 0.6' })).not.toBeChecked();
+  // 【用户要求】2026-10-28 下拉只列默认算法与数值，非默认的（CBI-2·avg > 0.06、S·avg₂ > 0.6）不再出现
+  expect(within(picker).getAllByRole('checkbox')).toHaveLength(4);
+  expect(within(picker).queryByRole('checkbox', { name: '探测算法 CBI-2·avg > 0.06' })).toBeNull();
+  expect(within(picker).queryByRole('checkbox', { name: '探测算法 S·avg₂ > 0.6' })).toBeNull();
 });
 
-it('respects an explicit 全部 or manual choice during subsequent result updates and puts checked variables first', () => {
+it('respects an explicit 全部 or manual choice during subsequent result updates', () => {
   const s = state(), view = render(<FishQuality state={s}/>), picker = open();
   fireEvent.click(within(picker).getByRole('button', { name: '全部' }));
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(6);
   s.study = { ...s.study, groups: [...s.study.groups], results: [] }; view.rerender(<FishQuality state={s}/>);
   expect(within(picker).queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
-  fireEvent.click(within(picker).getByRole('checkbox', { name: '探测算法 S·avg₂ > 0.6' }));
-  expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('COIN0USDT');
-  expect(within(picker).getAllByRole('list')[0]).toHaveAttribute('aria-label', 'S·avg₂阈值水平');
+  fireEvent.click(within(picker).getByRole('checkbox', { name: '探测算法 CBA·avg > 8' }));
+  expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('COIN3USDT');
   s.study = { ...s.study, results: [] }; view.rerender(<FishQuality state={s}/>);
-  expect(within(picker).getByRole('checkbox', { name: '探测算法 S·avg₂ > 0.6' })).toBeChecked();
+  expect(within(picker).getByRole('checkbox', { name: '探测算法 CBA·avg > 8' })).toBeChecked();
   expect(within(picker).getAllByRole('checkbox', { checked: true })).toHaveLength(1);
 });
 
