@@ -1,3 +1,4 @@
+import { fishProgramForLookback } from './lookback';
 /**
  * Raw scan conclusions never go through the generic cloud state store (it mirrors into the ~5 MB localStorage).
  * 【用户要求】2026-10-27 扫描结果也跟账号走：经 accountBlobSync 压缩后存到账号（不进 localStorage），换电脑登录也能看到。
@@ -75,7 +76,7 @@ export async function loadFishSession(owner: string | undefined): Promise<FishSe
     const value=raw as StoredSession|undefined;
     if(!value||value.version!==1)return null;
     const data:FishCombinationRound={...value.data,
-      plans:value.data.plans.map(p=>compileFishProgram(p.def,p.settings)),
+      plans:value.data.plans.map(p=>fishProgramForLookback(compileFishProgram(p.def,p.settings),value.data.lookbackHours)),
       results:new Map(value.data.results.map(([id,members])=>[id,new Map(members)])),
     };
     const changed=data.plans.some((plan,i)=>{

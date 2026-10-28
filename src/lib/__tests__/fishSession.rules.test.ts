@@ -51,3 +51,9 @@ it('also rejects an explicit rule-key mismatch, while keeping legacy average sca
   delete average.data.plans[0].algorithmKey;
   expect((await loadFishSession('average'))?.needsRescan).toBeUndefined();
 });
+
+it('restores the exact frozen coverage window and extended history after refresh',async()=>{
+ const saved=session('结果');saved.data.lookbackHours=72;
+ await saveFishSession('window',saved);const loaded=await loadFishSession('window');
+ expect(loaded?.data.lookbackHours).toBe(72);expect(loaded?.needsRescan).toBeUndefined();expect(loaded!.data.plans[0].N).toBeGreaterThanOrEqual(saved.data.plans[0].N);
+});

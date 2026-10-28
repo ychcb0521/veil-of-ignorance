@@ -1,3 +1,4 @@
+import { readFishLookback, saveFishLookback, validateFishLookback, fishProgramForLookback } from '@/lib/fish/lookback';
 import { downloadFishCabin } from '@/lib/fish/export';
 import { toast } from 'sonner';
 import { readFishDownwardWick, saveFishDownwardWick, FISH_WICK_HOURS, FISH_WICK_ATR_MULTIPLES, type FishDownwardWick } from '@/lib/fish/downwardWick';
@@ -51,7 +52,7 @@ export interface FishPanelProps {
   /** 每次打开恢复指定算法的顺序与勾选；相同算法的不同序列分别保存。 */
   defaultAlgorithms?: readonly string[];
   /** 查单个币：与捕捞同一套取数与判定，说明命中 / 没命中的原因。 */
-  onDiagnose?: (options: { downwardWick?: FishDownwardWick; turnoverFloors?: readonly import('@/lib/fish/shared').FishTurnoverFloor[]; symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
+  onDiagnose?: (options: { lookbackHours?:number; downwardWick?: FishDownwardWick; turnoverFloors?: readonly import('@/lib/fish/shared').FishTurnoverFloor[]; symbol: string; exchange?: FishExchange; anchorMs?: number; feature?: DeepDigFeatureDef; algorithm?: FishAlgorithmSettings; algorithms?: import('@/lib/fish/intersection').FishAlgorithmInput[]; combination?: 'and'|'or'; signal: AbortSignal }) => Promise<FishDiagnosis>;
   librarySignals?: TradeSignal[];
   onSuggest?: (options:FishSuggestionOptions)=>Promise<FishSuggestion>;
   signals: TradeSignal[]; progress: FishProgress | null;
@@ -86,6 +87,9 @@ export function FishPanel(p: FishPanelProps) {
   });
 
   const owner=getUserPrefix();
+  const [lookbackHours,setLookbackHours]=useState(readFishLookback),[lookbackDraft,setLookbackDraft]=useState(()=>String(readFishLookback()));
+  useEffect(()=>{const h=readFishLookback();setLookbackHours(h);setLookbackDraft(String(h));},[owner]);
+  const applyLookback=()=>{try{const h=saveFishLookback(lookbackDraft);setLookbackHours(h);setError('');}catch(e){setError(e instanceof Error?e.message:'覆盖时间无效');}};
   const [downwardWick,setDownwardWick]=useState(readFishDownwardWick);
   const [wickChanged,setWickChanged]=useState(false);
   useEffect(()=>{setDownwardWick(readFishDownwardWick());setWickChanged(false);},[owner]);
@@ -149,10 +153,10 @@ export function FishPanel(p: FishPanelProps) {
   const runProbe=async()=>{
     if(!p.onDiagnose||!probe.symbol.trim()||running)return;
     let anchorMs:number|undefined;
-    try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
+    try{anchorMs=parseFishSettings(p.inputs.time,pref.threshold||'0').anchorMs;validateFishLookback(lookbackDraft);}catch(e){setProbe(v=>({...v,result:{outcome:'failed',lines:[e instanceof Error?e.message:String(e)]}}));return;}
     if(multiple.error){setProbe(v=>({...v,result:{outcome:'failed',lines:[multiple.error||'算法设置有误']}}));return;}
     setProbe(v=>({...v,busy:true,result:null}));
-    try{const result=await p.onDiagnose({downwardWick,turnoverFloors:FISH_TURNOVER_FLOORS,symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
+    try{const result=await p.onDiagnose({lookbackHours:validateFishLookback(lookbackDraft),downwardWick,turnoverFloors:FISH_TURNOVER_FLOORS,symbol:probe.symbol,exchange:probe.exchange,anchorMs,algorithms:algorithmInputs(),combination,signal:new AbortController().signal});setProbe(v=>({...v,busy:false,result}));}
     catch(e){setProbe(v=>({...v,busy:false,result:{outcome:'failed',lines:[e instanceof TypeError?'浏览器拦截（网络 / 跨域）':e instanceof Error?e.message:String(e)]}}));}
   };
   const suggestionCompiled=useMemo(()=>{try{if(!def)return null;return compileFishProgram(def,{statistic:pref.statistic??'结果',direction:pref.direction,threshold:pref.threshold.trim()?Number(pref.threshold):0,constraints:[]});}catch{return null;}},[def,pref]);
@@ -219,12 +223,13 @@ export function FishPanel(p: FishPanelProps) {
     if(fill!==null&&pref.lastSuggestion!==undefined&&mayFillFishThreshold(pref.threshold,pref.lastSuggestion)){const value=String(fill);update({...pref,direction,threshold:value,lastSuggestion:value});p.onInputsChange({...inputsRef.current,threshold:value});}
     else update({...pref,direction});
   };
-  const start=async()=>{try{const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
+  const start=async()=>{try{const hours=saveFishLookback(lookbackDraft);setLookbackHours(hours);const settings=parseFishSettings(p.inputs.time,String(multiple.plans[0]?.settings.threshold??0));if(!exchanges.length)throw new Error('请至少选择一家交易所');if(multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法'))throw new Error(multiple.error);if(p.onRecombine&&!pool.length)throw new Error('没有有效算法');setError('');
     // 后台的建议计算给捕捞让路：先停掉、等它收尾（共用同一个取数器），再开始
     const pending=suggestionRun.current;if(pending){suggestionController.current?.abort();await pending.done;}
     const plans=p.onRecombine?pool:multiple.plans;
+    for(const plan of plans){const checked=fishProgramForLookback(plan,hours,FISH_TURNOVER_FLOORS);if(checked.unavailable)throw new Error(checked.unavailable);}
     setWickChanged(false);
-    p.onStart({...settings,downwardWick,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
+    p.onStart({...settings,lookbackHours:hours,downwardWick,feature:plans[0].def,algorithm:plans[0].settings,algorithms:plans.map(p=>({feature:p.def,algorithm:p.settings})),retainMembers:!!p.onRecombine,displayAlgorithmKeys:p.onRecombine?selectionKeys:undefined,combination,exchanges:[...exchanges],includeDuplicates,includeUsStocks,turnoverFloors:FISH_TURNOVER_FLOORS});}catch(e){setError(e instanceof Error?e.message:String(e));}};
   const fresh = useMemo(() => p.signals.filter(s => s.freshCatch), [p.signals]);
   const old = useMemo(() => p.signals.filter(s => !s.freshCatch), [p.signals]);
   const x = p.progress;
@@ -245,7 +250,7 @@ export function FishPanel(p: FishPanelProps) {
         <section className="space-y-1"><h4 className="text-[11.5px] font-semibold text-foreground">流程</h4>
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground marker:text-muted-foreground/60">
             <li><b className="font-medium text-foreground">设算法</b>：每张卡选一个 Deep dig 特征值、方向与阈值（下方有信号库建议区间）；多张卡选交集（全部命中）或并集（任一命中）。</li>
-            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
+            <li><b className="font-medium text-foreground">捕捞</b>：手动点「开始捕捞」（时间留空 = 现在），或切到自动、每隔所选时长捕一次。覆盖时间默认过去 12 小时，可填写任意有效小时数；只收录在该范围内出现、截止时仍满足条件的信号，每个算法分别核验。指标预热与成交额回看不受此设置缩短。只看成交额达标的非稳定币：1h ≥ 100 万、12h ≥ 800 万、24h ≥ 1000 万 USDT，截止前与信号起点前都要满足。</li>
             <li><b className="font-medium text-foreground">看结果</b>：本轮捕到的进「新鱼」，上一轮的归入「鱼舱」；不手动删除就一直保留。交集 / 并集捕捞中也能随时切换；捕完调严阈值当场重算，不用重扫。</li>
             <li><b className="font-medium text-foreground">跟进</b>：点 → 跳到盘面，打星评分。「⋯」里有捕捞范围（交易所）、查单个币（为什么命中 / 没命中）、邮件提醒（新鱼有变化就发到邮箱）、复原（用历史信号评估算法）。</li>
           </ol></section>
@@ -265,6 +270,7 @@ export function FishPanel(p: FishPanelProps) {
           <input aria-label="捕捞时间（UTC+8）" autoComplete="off" spellCheck={false} placeholder="留空 = 现在" className="w-[9.5rem] min-w-0 bg-transparent pt-0.5 font-mono tabular-nums text-foreground outline-none placeholder:text-muted-foreground/50 disabled:opacity-60" value={p.inputs.time} disabled={running} onChange={e=>{setError('');p.onInputsChange({...p.inputs,time:e.target.value});}}/>
           <span className="shrink-0 text-[9px] text-muted-foreground/60">UTC+8</span>
         </label>
+        <label className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-muted/50 px-2 text-muted-foreground" title="只收录起点在所选时长内、截止时仍满足条件的信号。每个勾选算法分别按此范围判定；指标计算保留必要历史。自动捕捞间隔另行设置。">扫描过去<input aria-label="扫描覆盖时间（小时）" type="number" min="0.01" max="8784" step="any" disabled={running} value={lookbackDraft} onChange={e=>setLookbackDraft(e.target.value)} onBlur={applyLookback} onKeyDown={e=>{if(e.key==='Enter')applyLookback();}} className="h-6 w-12 rounded bg-transparent px-1 text-center font-mono tabular-nums text-foreground outline-none focus:bg-background disabled:opacity-40"/>小时</label>
         {running
           ?<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 font-medium text-foreground transition-colors hover:bg-muted" onClick={()=>p.reconstruction?.running?p.reconstruction.cancel():suggesting?suggestionController.current?.abort():p.onCancel()}><Square aria-hidden className="h-2.5 w-2.5 fill-current"/>取消</button>
           :<button type="button" className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-3 font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-40 disabled:shadow-none" disabled={running||probe.busy||!!multiple.error&&!(p.onRecombine&&multiple.error==='请启用至少一个算法')} onClick={()=>void start()}><Play aria-hidden className="h-2.5 w-2.5 fill-current"/>开始捕捞</button>}
@@ -297,7 +303,9 @@ export function FishPanel(p: FishPanelProps) {
           </>}
         </>}
       </div>
+      {x&&lookbackHours!==x.lookbackHours&&<p className="px-4 pb-2 text-[10.5px] text-muted-foreground" data-testid="fish-lookback-changed">覆盖时间已设为过去 {lookbackHours} 小时，下一轮生效；以下仍是上一轮结果。</p>}
       {x && <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-2.5 text-[11px]">
+        {x.lookbackHours!==undefined&&<span className="text-muted-foreground" data-testid="fish-lookback-used">本轮覆盖过去 {x.lookbackHours} 小时{x.counts.outside?` · ${x.counts.outside} 个起点超出范围`:''}</span>}
         <p role="status" aria-live="polite" className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5" data-testid="fish-status" title={[...(x.algorithmHits?.map((n,i)=>`算法 ${enabledCardNumbers[i]??i+1} 命中 ${n}`)??[]),...(x.wickSkipped?[`向下大插针已过滤 ${x.wickSkipped} 个`]:[]),...(x.thin?[`成交额不够（截止前或信号前 1h < 100 万、12h < 800 万或 24h < 1000 万）、跳过 ${x.thin} 个`]:[])].join('；')||undefined}>
           <span className="inline-flex items-center gap-1.5"><span aria-hidden className={`h-1.5 w-1.5 rounded-full ${scanning?'animate-pulse bg-primary':x.status==='complete'?'bg-primary/60':x.status==='aborted'?'bg-destructive':'bg-muted-foreground/50'}`}/>{STATUS[x.status]}</span>
           <span className="text-muted-foreground/40">·</span>

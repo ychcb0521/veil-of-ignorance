@@ -19,8 +19,8 @@ const stepOf = (fish: FishSnapshot) => { try { return intervalMs((fish.interval 
 const num = (v: number | undefined | null) => v == null || !Number.isFinite(v) ? '—' : Number(v.toPrecision(5)).toString();
 const t = (ms: number | undefined) => ms == null || !Number.isFinite(ms) ? '—' : formatUTC8(ms).slice(5, 16);
 const pct = (a: number, b: number) => b > 0 ? `${((a / b) * 100).toFixed(a / b < 0.01 ? 2 : 1)}%` : '—';
-const OUTCOME: Record<string, string> = { hit: '命中', wick: '出现向下大插针，已过滤', below: '截止时没达到门槛', unknown: '早已在门槛之上、找不到这一轮的起点（不入库）', blocked: '主条件满足但被附加约束挡下', readings: '截止读数不全', gap: 'K 线有缺口', history: '当时未上市 / 历史不足', failed: '请求失败', skipped: '交易所整家跳过' };
-const ORDER = ['wick', 'below', 'unknown', 'blocked', 'readings', 'gap', 'history', 'failed', 'skipped'];
+const OUTCOME: Record<string, string> = { outside: '信号起点超出本轮覆盖时间', hit: '命中', wick: '出现向下大插针，已过滤', below: '截止时没达到门槛', unknown: '早已在门槛之上、找不到这一轮的起点（不入库）', blocked: '主条件满足但被附加约束挡下', readings: '截止读数不全', gap: 'K 线有缺口', history: '当时未上市 / 历史不足', failed: '请求失败', skipped: '交易所整家跳过' };
+const ORDER = ['outside', 'wick', 'below', 'unknown', 'blocked', 'readings', 'gap', 'history', 'failed', 'skipped'];
 
 /** 读数轨迹：门槛虚线、起点竖线、截止点。 */
 function Trace({ fish }: { fish: FishSnapshot }) {

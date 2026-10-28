@@ -208,7 +208,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     selected.plans.forEach((p,j)=>{if(!round.data.plans.includes(p))saveFishMemberRound(selected,j);});
     const rule = selected.plans.map(p => fishRuleText(p.def, p.settings.direction, p.settings.threshold, p.texts.length, p.settings.statistic)).join(mode === 'or' ? ' 或 ' : ' 且 ');
     const previous=progressRef.current;
-    if(previous){const next={...previous,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0}};progressRef.current=next;setProgress(next);}
+    if(previous){const next={...previous,rule,algorithmHits:selected.memberHits,cutoffMs:selected.plans[0]?Math.floor(selected.anchorMs/selected.plans[0].step)*selected.plans[0].step:previous.cutoffMs,counts:{...previous.counts,hit:combined.length,unknown:counts.unknown??0,outside:counts.outside??0}};progressRef.current=next;setProgress(next);}
     persist();return true;
   }, [persist]);
   recombineRef.current=recombine;

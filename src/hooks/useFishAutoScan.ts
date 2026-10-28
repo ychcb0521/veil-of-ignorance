@@ -1,3 +1,4 @@
+import { readFishLookback } from '@/lib/fish/lookback';
 /**
  * 定时自动捕捞的调度：网站开着（哪怕在后台标签页）就按设定的间隔自动捕一次。
  * 【用户要求】2026-10-21「自动模式下可以设置多长时间自动捕捉一次，只要电脑联着网，就进行自动捕捉。手动模式下，与现在的保持一致。」
@@ -47,7 +48,7 @@ export function useFishAutoScan(o: { account?: string; selection: FishScanSelect
     const fresh = readFishAuto();
     if (fresh.mode !== 'auto' || (fishAutoNextAt(fresh) ?? Infinity) > now) { stateRef.current = fresh; setStateRaw(fresh); releaseFishAutoLease(owner.current); return; }
     const cards = loadFishCardsForScan(defsRef.current.map(d => d.id));
-    const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '' });
+    const built = buildFishScanSettings({ cards, defs: defsRef.current, combination: readFishCombination(), selection: latest.current.selection, time: '', lookbackHours:readFishLookback() });
     if (built.error !== undefined) { setError(`自动捕捞没开始：${built.error}`); retryAt.current = now + RETRY_MS; releaseFishAutoLease(owner.current); return; }
     setError(''); setWaiting(false); runningRef.current = true;
     setState({ ...fresh, lastRunAt: now });

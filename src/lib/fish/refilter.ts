@@ -85,7 +85,7 @@ export function tightenFishResult(result: FishMemberResult, target: FishProgram)
     return a !== undefined && Number.isFinite(a) && !(target.settings.direction === '>' ? a > t : a < t) ? { outcome: 'below', reading: a } : result;
   }
   // thin 且留了读数 = 截止前达标、只是信号前成交额不够：调严后起点可能挪到放量之后，照样重判
-  if (result.outcome !== 'hit' && result.outcome !== 'unknown' && !(result.outcome === 'thin' && result.tail)) return result;
+  if (result.outcome !== 'hit' && result.outcome !== 'unknown' && result.outcome !== 'outside' && !(result.outcome === 'thin' && result.tail)) return result;
   const tail = result.tail;
   if (!tail) return null;
   const { length, from, t0, step } = tail, end = length - 1, t = target.settings.threshold / target.scale, above = target.settings.direction === '>';

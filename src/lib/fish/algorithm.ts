@@ -168,6 +168,7 @@ export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgr
   return {value,average,main,constraints,condition};
 }
 export interface FishSnapshot {
+  lookbackHours?:number; lookbackAnchorMs?:number;
   stateHold?: { threshold: number; requiredHours: number; fromMs: number; verifiedHours: number; minimum: number };
   algorithms?: FishSnapshot[]; intersectionStart?: number; /** 多重算法的合并方式：and 交集（缺省）/ or 并集 */ combination?: 'and'|'or'; unionStart?: number; /** 并集里命中的算法序号（1 起） */ hitAlgorithms?: number[];
   /** 捕捞过程：起点前后到截止的读数轨迹（原值；t = t0 + i × dt，最后一点是截止那根）。 */
