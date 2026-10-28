@@ -210,6 +210,10 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
       b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
       b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
+      if (featureId === 'ctba' && !Number.isFinite(b.close)) {
+        // Components must also hide forming VWAP/flow, not only the final score.
+        b.volume = NaN; b.quoteVolume = null; b.takerBuyQuoteVolume = null;
+      }
       b.refClose = refClose?.[i] ?? null;
     }
     chartBarBuffers.set(cache, bars);

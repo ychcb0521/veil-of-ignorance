@@ -89,7 +89,8 @@ it('native chart matches the shared core, recovers after missing candles and mas
  const expected=evaluateOnBars(bars,compileFeatureFormula(CTBA_DEF.formula),CTBA_DEF).vars.get('CTBA') as Float64Array;
  expect(chartFeatureSeries(k,'ctba',CTBA_DEFAULTS.N)!.core.at(-1)).toBe(expected.at(-1));
  const gap=k.filter((_,i)=>i!==1);expect(chartFeatureSeries(gap,'ctba',CTBA_DEFAULTS.N)!.core.at(-1)).not.toBeNull();
- const forming=k.map((b,i)=>({...b,cba2Closed:i!==k.length-1}));expect(chartFeatureSeries(forming,'ctba',CTBA_DEFAULTS.N)!.core.at(-1)).toBeNull();
+ const forming=k.map((b,i)=>({...b,cba2Closed:i!==k.length-1})),live=chartFeatureSeries(forming,'ctba',CTBA_DEFAULTS.N)!;
+ expect(live.core.at(-1)).toBeNull();for(const name of ['T','M','F'])expect(live.vars.get(name)!.at(-1)).toBeNull();
  expect(chartFeatureSeries(k.map(b=>({...b,timestamp:b.timestamp*3})),'ctba',CTBA_DEFAULTS.N)).toBeNull();
 });
 
