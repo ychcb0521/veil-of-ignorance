@@ -1,3 +1,4 @@
+import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
 import { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
 /**
@@ -190,6 +191,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   // 【用户要求】2026-10-18 CBI-2 买方优势指数第 2 版（副图）：参数 = 基线回看小时（按 5 分钟图计）；窗口按笔记默认值、按根计；动量剔除 BTC（另取 BTCUSDT）
   { id: 'CBI2',   nameZh: '买方优势指数 CBI-2',        nameEn: 'Buyer Advantage Index v2 (CBI-2)', isOverlay: false, defaultPeriod: 24, color: '#0ECB81', category: 'custom', periodHint: '基线回看小时（按 5 分钟图计）：V̄、MAD、λ₀、s_e、ATR̄ 都取截至上一根的过去这么多小时（原文 20 天 / 14 天拿不到）。其余窗口按笔记默认值、按根计；动量剔除 BTC，另取同时段的 BTCUSDT', periodUnit: 'h', description: CBI2_DEFINITION, detail: CBI2_STEPS },
   { id: 'MBI', nameZh: 'MBI 迈克尔买方优势', nameEn: 'Michael Buyer Advantage · MBI · avg_MBI · avg_MBI_2', isOverlay: false, defaultPeriod: MBI_N, color: '#0ECB81', category: 'custom', periodUnit: '根', periodHint: 'MBI_N：衰减周期（K 线根数），α = 1/n。MBI_Z0 在 Deep Dig 参数区设置，默认 1.25。前 5n 根为空；仅使用已收盘价格。', description: MBI_TOOLTIP, detail: MBI_TOOLTIP },
+  { id:'CTBA',nameZh:'CTBA｜趋势买方优势',nameEn:'Covel Trend-Based Buyer Advantage',isOverlay:false,defaultPeriod:CTBA_DEFAULTS.N,color:'#0ECB81',category:'custom',periodUnit:'根',periodHint:'固定5m；N、f、s、m、λ、ε、α、β、γ 在 Deep Dig 公式开头集中配置',description:CTBA_DESCRIPTION },
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,

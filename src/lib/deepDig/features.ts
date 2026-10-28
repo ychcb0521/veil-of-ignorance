@@ -1,3 +1,4 @@
+import { ctbaFormula, CTBA_DESCRIPTION } from '@/lib/ctba';
 import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
 import { MBI_N, MBI_Z0, MBI_TOOLTIP, mbiNOf, mbiZ0Of, validateMbiParams, type MbiParams } from '@/lib/mbi';
 import { appendResearchAverages } from '@/lib/researchAverageFormula';
@@ -106,7 +107,7 @@ export const AVG_HOURS_PRESETS = [1, 4, 12, 24, 48, 72] as const;
 export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
-export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => d.id === 'cba-2' ? '5m' : d.interval ?? DEFAULT_INTERVAL;
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => (d.id === 'cba-2' || d.id === 'ctba') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
 type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> & { id?: string; formula?: string };
@@ -132,6 +133,7 @@ export function featureWindowMs(d: ParamDef): number {
     } catch { /* 编辑中的不完整公式由公式校验提示 */ }
   }
   const window = Math.max(d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  if(d.id==='ctba') return 48*H+formulaHistory;
   return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
@@ -770,7 +772,9 @@ export const CDA_DEF: DeepDigFeatureDef = {
   builtin: true,
 };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
+export const CTBA_DEF: DeepDigFeatureDef = { id:'ctba', name:'CTBA｜趋势买方优势', short:'CTBA', definition:CTBA_DESCRIPTION, formula:ctbaFormula(), scale:1, unit:'', positive:DEFAULT_POSITIVE, control:DEFAULT_CONTROL, source:'campaigns', groupVars:2, builtin:true, interval:'5m' };
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -1093,7 +1097,7 @@ export function checkDefinition(d: Pick<DeepDigFeatureDef, 'formula' | 'positive
     try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); }
   };
   return {
-    formula: msg(() => { compileFeatureFormula(d.formula); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); }),
+    formula: msg(() => { const compiled = compileFeatureFormula(d.formula); if (/\bctba\s*\(/.test(d.formula)) evaluateOnBars([],compiled,d); if (featureUsesMbi(d)) validateMbiParams(mbiNOf(d), mbiZ0Of(d)); }),
     groups: msg(() => compileGroups(d.positive, d.control, d.source ?? 'campaigns')),
     scale: Number.isFinite(d.scale) && d.scale > 0 ? null : '显示倍数要是正数',
   };

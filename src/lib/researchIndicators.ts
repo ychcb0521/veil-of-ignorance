@@ -1,3 +1,4 @@
+import { CTBA_DEFAULTS } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
 import { chartFeatureDef as accountFeatureDef, chartFeatureSeries, chartFeatureHistoryBars } from '@/lib/featureSource';
@@ -26,6 +27,7 @@ export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_Z', featureId: 'drift-speed-z', core: 'az', short: 'DSP·az', name: '买方推力漂移速度 DSP·az（波动率归一化）', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
   { id: 'CBI2', featureId: 'cbi2', core: 'CBI2', short: 'CBI-2', name: '买方优势指数 CBI-2', period: 24, parameter: '基线时长', neutral: 0, min: -1, max: 1, seller: false },
   { id: 'MBI', featureId: 'mbi', core: 'MBI', short: 'MBI', name: 'MBI 迈克尔买方优势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, seller: false },
+  { id:'CTBA', featureId:'ctba', core:'CTBA', short:'CTBA', name:'CTBA｜趋势买方优势', period:CTBA_DEFAULTS.N, parameter:'窗口根数', neutral:0, min:-100, max:100, seller:false },
 ] as const;
 export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];
 export type ResearchIndicator = typeof CUSTOM_RESEARCH_INDICATORS[number];
@@ -111,6 +113,7 @@ export function researchDefaultPeriod(item: ResearchIndicator): number {
   if (item.id === 'BSS' || item.id === 'DSS') return 12;
   const def = accountFeatureDef(item.featureId);
   if (!def) return item.period;
+  if (item.id === 'CTBA') { const m=/^N\s*=\s*([\d.]+)/m.exec(def.formula); return m?Number(m[1]):CTBA_DEFAULTS.N; }
   if (item.id === 'MBI') return mbiNOf(def);
   if (item.id === 'STATE' || item.id === 'STATE2' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
   return halfLifeOf(def);
@@ -282,10 +285,10 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const mbiStep = item.id === 'MBI' ? chartInterval(data) : 0;
+  const mbiStep = ['MBI','CTBA'].includes(item.id) ? chartInterval(data) : 0;
   const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => {
     // Live MBI never publishes a candle that has not closed yet.
-    if (item.id === 'MBI' && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
+    if (['MBI','CTBA'].includes(item.id) && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
     const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale;
   });
   // Do not use out.core: the last account expression may itself be the weighted average.

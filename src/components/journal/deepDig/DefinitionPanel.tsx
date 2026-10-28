@@ -463,7 +463,7 @@ export function KlineSettings({ value, onChange, uses, testId }: {
       <div className="flex items-start gap-x-2">
         <span className={PARAM_LABEL}>周期</span>
         <div className={SEGMENT} role="group" aria-label="K 线周期">
-          {(value.id === 'cba-2' ? ['5m'] as const : FEATURE_INTERVALS).map(iv => (
+          {(['cba-2','ctba'].includes(value.id??'') ? ['5m'] as const : FEATURE_INTERVALS).map(iv => (
             <button key={iv} type="button" aria-pressed={value.interval === iv} title={INTERVAL_LABEL[iv]} data-testid={`${testId}-interval-${iv}`}
               onClick={() => onChange({ ...value, interval: iv })} className={chip(value.interval === iv)}>{iv}</button>
           ))}

@@ -90,7 +90,7 @@ export const chartFeatureDef = (id: string): DeepDigFeatureDef | undefined => ac
 const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string }> = {
   'drift-speed': { param: 'hl' }, 'drift-speed-z': { param: 'hl' }, cba: { param: 'hl' }, 'cba-2': { param: 'hl' },
   state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
-  cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
+  ctba: { constant:'N' }, cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
 
 const compiledCache = new Map<string, { compiled: CompiledFeature; core: string | null }>();
@@ -150,6 +150,15 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   const def = chartFeatureDef(featureId);
   if (!def) return null;
   const formula = options.formula ?? def.formula;
+  if (featureId === 'ctba' && dataList.length > 1) {
+    // A missing first candle must not classify an otherwise 5m series as 10m.
+    let cadence = Infinity;
+    for (let i = 1; i < Math.min(dataList.length, 64); i++) {
+      const step = dataList[i].timestamp - dataList[i - 1].timestamp;
+      if (step > 0) cadence = Math.min(cadence, step);
+    }
+    if (cadence !== 300000) return null;
+  }
   const binding = CHART_PARAM[featureId];
   const p = Number(period);
   const has = Number.isFinite(p) && p > 0;
@@ -171,7 +180,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
   // MBI is a cheap linear recurrence; evaluate here so the existing replay
   // closed-candle flag can exclude forming prices before calculation.
-  if (featureId !== 'mbi' && options.variables && isChartComputationEnabled(dataList)) {
+  if (!['mbi','ctba'].includes(featureId) && options.variables && isChartComputationEnabled(dataList)) {
     try {
       const plan = compileFor(formula, constant, constant && has ? p : null);
       return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,
@@ -197,7 +206,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
       b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
-      b.close = featureId === 'mbi' && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
+      b.close = ['mbi','ctba'].includes(featureId) && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
       b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
       b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;

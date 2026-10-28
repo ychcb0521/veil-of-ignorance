@@ -1,3 +1,4 @@
+import { CTBA_DEFAULTS } from '@/lib/ctba';
 import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
 /**
  * Custom indicator registration for klinecharts using the `technicalindicators` NPM library.
@@ -316,6 +317,7 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
   BSS: [{ key: 'BSS#AVG', kcName: 'BSS_AVG_CUSTOM' }, { key: 'BSS#AVG2', kcName: 'BSS_AVG2_CUSTOM' }],
   CBA: [{ key: 'CBA#AVG', kcName: 'CBA_AVG_CUSTOM' }, { key: 'CBA#AVG2', kcName: 'CBA_AVG2_CUSTOM' }],
   CBI2: [{ key: 'CBI2#AVG', kcName: 'CBI2_AVG_CUSTOM' }, { key: 'CBI2#AVG2', kcName: 'CBI2_AVG2_CUSTOM' }],
+  CTBA: [{key:'CTBA#AVG',kcName:'CTBA_AVG_CUSTOM'},{key:'CTBA#AVG2',kcName:'CTBA_AVG2_CUSTOM'}],
   MBI: [{ key: 'MBI#AVG', kcName: 'MBI_AVG_CUSTOM' }, { key: 'MBI#AVG2', kcName: 'MBI_AVG2_CUSTOM' }],
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, [
     { key: `${item.id}#AVG`, kcName: researchKcName(item.id, 1) },
@@ -1362,6 +1364,11 @@ export function registerCustomIndicators() {
 
   // 【用户要求】avg_BSS = avg(BSS, N)：独立副图，紧挨在 BSS 副图下面。参数 [近期窗口 n, 均线时长 N]；参考线、着色与 BSS 副图相同
   registerIndicator({
+    name:'CTBA_CUSTOM',shortName:'CTBA',calcParams:[CTBA_DEFAULTS.N,0,0],precision:2,minValue:-100,maxValue:100,draw:V_ZERO_LINE,
+    figures:[{key:'ctba',title:'CTBA: ',type:'line',styles:data=>({color:vColor((data.current.indicatorData as {ctba?:number}|undefined)?.ctba),size:1.5})}],
+    calc:(data,indicator)=>buyerSeries(data,'CTBA',indicator.calcParams[0]).core.map(ctba=>ctba==null?{}:{ctba}),
+  });
+  registerIndicator({
     name: 'MBI_CUSTOM', shortName: 'MBI', calcParams: [MBI_N, 0, 0], precision: 2,
     minValue: -1, maxValue: 1, draw: V_ZERO_LINE,
     createTooltipDataSource: ({ indicator, defaultStyles }) => ({ name: 'MBI', calcParamsText: `(${indicator.calcParams[0]}根)`, icons: defaultStyles.tooltip.icons, values: undefined as never }),
@@ -1395,7 +1402,7 @@ export function registerCustomIndicators() {
     for (const level of [1, 2]) {
       if (level === 1 && ['DSP_VA', 'DSP_Z', 'BSS'].includes(item.id)) continue;
       if (item.id === 'DSP_Z') continue; // Registered as the independent Z alias below.
-      const key = item.id === 'DSP_VA' ? 'v' : item.id === 'BSS' ? 'bss' : item.id === 'CBI2' ? 'cbi2' : item.id === 'MBI' ? 'mbi' : 'cba';
+      const key = item.id === 'DSP_VA' ? 'v' : item.id === 'BSS' ? 'bss' : item.id === 'CBI2' ? 'cbi2' : item.id === 'MBI' ? 'mbi' : item.id === 'CTBA' ? 'ctba' : 'cba';
       const label = `avg_${item.core}${level === 2 ? '_2' : ''}`;
       const template: IndicatorTemplate = {
         name: researchKcName(item.id, level), shortName: label, calcParams: [item.period, 0, 0], precision: item.id === 'MBI' ? 2 : 8,
@@ -1508,6 +1515,7 @@ export const CUSTOM_INDICATOR_MAP: Record<string, string> = {
   CBI: 'CBI_CUSTOM',
   CBI2: 'CBI2_CUSTOM',
   MBI: 'MBI_CUSTOM',
+  CTBA:'CTBA_CUSTOM',
   ...Object.fromEntries(RESEARCH_INDICATORS.map(item => [item.id, researchKcName(item.id)])),
   CHOP: 'CHOP_CUSTOM',
   CMF: 'CMF_CUSTOM',

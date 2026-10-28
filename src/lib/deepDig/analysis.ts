@@ -16,7 +16,7 @@ import type { CampaignGroupReport } from '@/lib/deepRsa/report';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { WINDOW_MS } from '@/lib/deepRsa/grouping';
 import {
-  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
+  campaignSample, compileFeatureFormula, compileGroups, computeFeatureValues, evaluateOnBars, DEFAULT_INTERVAL, DRIFT_SPEED_DEF, featureWindowMs, formulaVariables, halfLifeOf, intervalOf, avgHoursOf, sampleEventRows, signalSample,
   type DeepDigFeatureDef,
 } from '@/lib/deepDig/features';
 
@@ -196,6 +196,7 @@ export async function collectDeepDigRun(
   const offsets = seriesOffsets(range);
   const { names, result } = formulaVariables(def.formula);
   const byEvent: DeepDigSeries['byEvent'] = {};
+  const anchorWindows: NonNullable<DeepDigSeries['anchorWindows']> = {};
   const compiled = compileFeatureFormula(def.formula);
   const source = def.source ?? 'campaigns';
   const groups = compileGroups(def.positive, def.control, source);
@@ -215,6 +216,17 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const { value, vars } = computeFeatureValues(window, compiled, params);
+      if(def.id==='ctba' && window){
+        const out=evaluateOnBars(window.bars,compiled,params);
+        const startMs=Math.floor(ctx.anchorMs/300000)*300000-48*3600000;
+        const selected=window.bars.map((bar,i)=>({bar,i})).filter(({bar})=>bar.openTime>=startMs);
+        const values=Object.fromEntries(['CTBA','T','M','F','no_trade','data_complete'].map(name=>{
+          const dense=new Float64Array(576).fill(NaN),source=out.vars.get(name);
+          if(source instanceof Float64Array)for(const {bar,i} of selected){const k=Math.round((bar.openTime-startMs)/300000);if(k>=0&&k<576)dense[k]=source[i];}
+          return [name,dense];
+        }));
+        anchorWindows[ctx.id]={startMs,stepMs:300000,values};
+      }
       if (ctx.bars) {
         const s = computeEventSeries(ctx.bars, ctx.anchorMs, compiled, params, names, offsets);
         if (s) byEvent[ctx.id] = s;
@@ -246,7 +258,7 @@ export async function collectDeepDigRun(
     rows: described.rows,
     groups: described.groups,
   };
-  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent } };
+  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(def.id==='ctba'?{anchorWindows}:{}) } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================

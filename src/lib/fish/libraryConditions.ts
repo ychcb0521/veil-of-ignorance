@@ -9,7 +9,7 @@ export interface LibraryCondition {
  key:string; label:string; metric:string; rule:string; text:string; context:string; snapshot:Partial<FishSnapshot>;
  formula?:string; halfLifeHours?:number; avgHours?:number; reading?:number; rawReading?:number; evidence:string;
 }
-const NAMES:Record<string,string>={cbi2:'CBI-2',mbi:'MBI',cbi:'CBI',cba:'CBA',state:'S',cda:'CDA',bss:'BSS','drift-speed-z':'az','drift-speed':'a','seller-control':'DSP·bc'};
+const NAMES:Record<string,string>={cbi2:'CBI-2',mbi:'MBI',ctba:'CTBA',cbi:'CBI',cba:'CBA',state:'S',cda:'CDA',bss:'BSS','drift-speed-z':'az','drift-speed':'a','seller-control':'DSP·bc'};
 const definitions=new Map<string,{formula:string;interval:string;halfLifeHours:number;avgHours:number}>();
 function capturedDefinition(s:Partial<FishSnapshot>){
  if(!s.definitionKey)return;

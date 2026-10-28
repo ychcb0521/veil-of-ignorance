@@ -25,6 +25,8 @@ export function formatSeriesOffset(ms: number): string {
 }
 
 export interface DeepDigSeries {
+  /** CTBA complete 48h closed-bar vectors, in the same IndexedDB record. */
+  anchorWindows?: Record<string,{startMs:number;stepMs:number;values:Record<string,Float64Array>}>;
   /** 每个曲线时点向前准备的公式预热历史长度。旧缓存没有。 */
   historyMs?: number;
   /** 对应哪一次描述统计（DeepDigData.finishedAt）。 */
@@ -89,7 +91,7 @@ export function computeEventSeries(
   const closes = sel.map(b => b.openTime + barMs);
   const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
   // MBI storage remains double precision; preserve every existing feature's cache format.
-  const ArrayType = compiled.usesMbi ? Float64Array : Float32Array;
+  const ArrayType = (compiled.usesMbi || def.id==='ctba') ? Float64Array : Float32Array;
   const result = new ArrayType(names.length * offsets.length).fill(Number.NaN);
   offsets.forEach((tau, k) => {
     const t = anchorMs + tau;

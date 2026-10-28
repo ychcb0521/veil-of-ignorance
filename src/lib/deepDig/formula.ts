@@ -12,6 +12,7 @@
  *   - 算不出来（除以 0、ln 负数、序列开头没有前一根……）记为「空」：空参与运算结果还是空，nz() 可以把空换成 0。
  */
 
+import { computeCtbaSeries, type CtbaParams } from '@/lib/ctba';
 import { computeMbi } from '@/lib/mbi';
 
 export type Value = number | Float64Array;
@@ -34,6 +35,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'log', min: 1, max: 1, usage: 'log(x)', help: '同 ln' },
   { name: 'exp', min: 1, max: 1, usage: 'exp(x)', help: 'e 的 x 次方' },
   { name: 'tanh', min: 1, max: 1, usage: 'tanh(x)', help: '双曲正切：把任意数平滑压到 −1 ~ 1（0 → 0，±1 → ±0.76，±2 → ±0.96）' },
+  { name: 'ctba', min:17, max:17, usage:'ctba(C,H,L,E,B,S,T,N,f,s,m,lambda,epsilon,alpha,beta,gamma,part)', help:'CTBA 共享核心：part 0/1/2/3/4/5 为 T/M/F/CTBA/无成交/完整性；仅5m，缺失不补零' },
   { name: 'mbiz', min: 2, max: 2, usage: 'mbiz(C, MBI_N)', help: 'MBI 的无趋势标准差偏离 z：α = 1/n，κ = 1/√(α·(2−α))；先用上一根 M、S 算 z 再更新。前 5n 根为空，只用正收盘价，不补零。MBI = tanh(z / MBI_Z0)' },
   { name: 'abs', min: 1, max: 1, usage: 'abs(x)', help: '绝对值' },
   { name: 'sqrt', min: 1, max: 1, usage: 'sqrt(x)', help: '平方根' },
@@ -165,6 +167,7 @@ export function programHistoryBars(program: Program, params: Record<string, numb
     else if (n.name === 'ago') extra = barsForHours(arg(1), barMinutes);
     else if (n.name === 'beta') extra = barsForHours(arg(2), barMinutes) - 1;
     else if (n.name === 'atr') extra = arg(3);
+    else if (n.name === 'ctba') extra = Math.max(arg(7), 5*arg(9),arg(10)) + 1;
     else if (n.name === 'mbiz') extra = 5 * arg(1);
     else if (n.name === 'retain') extra = barsForHours(arg(4, 48), barMinutes) - 1;
     if (mbiWarmupOnly && n.name !== 'mbiz') extra = 0;
@@ -657,6 +660,16 @@ function call(name: string, args: Value[], line: number, barMinutes: number, res
     case 'exp': return map1(x, v => clean(Math.exp(v)), resume);
     case 'abs': return map1(x, Math.abs, resume);
     case 'tanh': return map1(x, v => clean(Math.tanh(v)), resume);
+    case 'ctba': {
+      if (barMinutes !== 5) return isSeries(x)?new Float64Array(x.length).fill(NaN):NaN;
+      if (!args.slice(0,7).every(isSeries)) return NaN;
+      const values=args.slice(7).map(v=>scalarArg(v,'ctba','参数',line));
+      const [N,f,s,m,lambda,epsilon,alpha,beta,gamma,part]=values;
+      const p:CtbaParams={N,f,s,m,lambda,epsilon,alpha,beta,gamma};
+      const out=computeCtbaSeries({C:args[0] as Float64Array,H:args[1] as Float64Array,L:args[2] as Float64Array,E:args[3] as Float64Array,B:args[4] as Float64Array,S:args[5] as Float64Array,time:args[6] as Float64Array},p);
+      if(!Number.isInteger(part)||part<0||part>5)throw new FormulaError('CTBA 分量编号无效',line);
+      return [out.T,out.M,out.F,out.CTBA,out.noTrade,out.complete][part];
+    }
     case 'mbiz': {
       const n = scalarArg(y, 'mbiz', '衰减周期', line);
       if (!Number.isSafeInteger(n) || n < 1) throw new FormulaError('MBI_N 必须是正整数（K 线根数）', line);

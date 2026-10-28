@@ -193,9 +193,9 @@ export function useDeepDigRun(userId: string | undefined, def: DeepDigFeatureDef
   }, [userId, def.id, store]);
 
   const download = useCallback(() => {
-    const { data, inference } = store.state;
+    const { data, inference, series } = store.state;
     if (!data) return;
-    const blob = new Blob([JSON.stringify({ data, inference }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ data, inference, ...(data.definition.id==='ctba' ? { anchorWindows:series?.anchorWindows, series } : {}) }, (_key,v)=>v instanceof Float64Array||v instanceof Float32Array?Array.from(v):v, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
