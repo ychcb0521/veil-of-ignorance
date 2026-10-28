@@ -30,7 +30,7 @@ import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from '@/l
 import { downloadQualityComparison } from '@/lib/fish/qualityExport';
 import { rangeSelect } from '@/lib/listRangeSelect';
 import { collapseQualityTableRows, qualityTableMembers, qualityTableRange, qualityTableSignalKey, type QualityTableRow } from '@/lib/fish/qualityTableRows';
-import { fishMetricLabel } from '@/lib/fish/records';
+import { defaultQualityDetectorIds, qualityDetectorVariables } from '@/lib/fish/qualityDetectorSelection';
 import { ancestorScrolls, applyAncestorScrolls, finishQualityReturn, FROM_FISH_QUALITY, pendingQualityReturn, saveQualityReturn, type QualityReturnUi } from '@/lib/fish/qualityReturn';
 
 const field = 'h-7 min-w-0 rounded-md border border-transparent bg-muted/50 px-2 text-[11px] outline-none hover:bg-muted focus-visible:border-ring/60';
@@ -232,19 +232,12 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
 }
 
 const detectorText = (g: QualityGroup) => `${g.label} ${g.snapshot.direction ?? '>'} ${g.snapshot.threshold}`;
-// 下拉列表按用户截图置顶四个系列；用捕获时的实际序列识别，也兼容旧版「结果」快照。
-const PREFERRED_DETECTORS = [['cbi2', 'avg_CBI2'], ['cba', 'avg_CBA'], ['cbi2', 'avg_CBI2_2'], ['cba', 'avg_CBA_2']] as const;
 /**
  * 选探测算法：可以选一个，也可以选多个；不选 = 全部。表头和筛选栏共用。
  * 【用户要求】2026-10-26「比较探测中，我希望可以在列表中的表头直接选中对应的算法（可以选中一个，也可以选中多个）」
  */
 function DetectorPicker({ groups, counts, selected, onChange, children }: { groups: QualityGroup[]; counts: ReadonlyMap<string, number>; selected: readonly string[]; onChange: (ids: string[]) => void; children: ReactNode }) {
-  const variables = qualityVariables(groups).map((variable, index) => {
-    const snapshot = variable.levels[0].snapshot, metric = fishMetricLabel(snapshot);
-    const featureId = snapshot.featureId ?? snapshot.algorithmKey?.split('|')[0];
-    const priority = PREFERRED_DETECTORS.findIndex(([id, series]) => (!featureId || featureId === id) && metric === series);
-    return { ...variable, index, priority: priority < 0 ? PREFERRED_DETECTORS.length : priority };
-  }).sort((a, b) => a.priority - b.priority || a.index - b.index);
+  const variables = qualityDetectorVariables(groups, selected);
   return <Popover><PopoverTrigger asChild>{children}</PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-80 max-h-[min(70vh,var(--radix-popover-content-available-height))] overflow-y-auto p-0 text-[11px]" data-testid="quality-detector-picker">
     <div className="sticky top-0 flex items-center justify-between border-b border-border/50 bg-popover px-3 py-2"><span className="font-medium">探测算法<span className="ml-1.5 font-normal text-muted-foreground">{selected.length ? `已选 ${selected.length} / ${groups.length} 个水平` : `${qualityVariables(groups).length} 个变量 · ${groups.length} 个水平`}</span></span><button type="button" className="text-primary hover:underline disabled:text-muted-foreground/50 disabled:no-underline" disabled={!selected.length} onClick={() => onChange([])}>全部</button></div>
     <ul role="group" aria-label="选择探测算法" className="py-1">{variables.map(variable => <li key={variable.id}><div className="flex items-center justify-between bg-muted/25 px-3 py-1.5"><span className="font-medium">{variable.label}</span><span className="text-[9px] text-muted-foreground">{variable.levels.length} 个水平</span></div><ul aria-label={`${variable.label}阈值水平`}>{variable.levels.map(g => { const on = selected.includes(g.id); return <li key={g.id} className="group/item flex items-center gap-2 px-3 py-1.5 hover:bg-muted/60">
@@ -258,7 +251,8 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const { study, ready, running, progress } = state;
   // 从交易战役返回：按离开时记下的状态打开（见 lib/fish/qualityReturn）
   const [back] = useState(() => pendingQualityReturn()), ui = back?.ui;
-  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithms, setAlgorithmsState] = useState<string[]>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : [])), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
+  // null = screenshot defaults, resolved from the live groups; [] = the user's explicit “全部”.
+  const [open, setOpen] = useState(ui?.open ?? true), [query, setQuery] = useState(ui?.query ?? ''), [month, setMonth] = useState(ui?.month ?? ''), [algorithmChoice, setAlgorithmsState] = useState<string[] | null>(() => ui?.algorithms ?? (ui?.algorithm ? [ui.algorithm] : null)), [origin, setOrigin] = useState<QualityReturnUi['origin']>(ui?.origin ?? '');
   // 【用户要求】2026-10-26「比较卖出和比较探测没必要分开，合并到一起，统一叫做卖出与探测（控制变量法）」：只有一个视图
   const phase = 'sell' as const;
   const [detectorExpanded, setDetectorExpanded] = useState(ui?.detectorExpanded ?? false);
@@ -268,7 +262,7 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   const rootRef = useRef<HTMLElement>(null);
   /** 点进交易战役前记下界面状态与滚动位置，返回时原样恢复。 */
   const rememberReturn = () => saveQualityReturn({
-    ui: { open, query, month, algorithms, origin, detectorExpanded, runStage, runState, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
+    ui: { open, query, month, algorithms: activeAlgorithms, origin, detectorExpanded, runStage, runState, sort, ascending, tableTop: tableRef.current?.scrollTop ?? scrollTop },
     scroll: ancestorScrolls(rootRef.current),
   });
   const [error, setError] = useState(''), [detailId, setDetailId] = useState('');
@@ -279,7 +273,9 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
   // 月份条数跟随来源、探测算法、标的筛选；同一信号的多个探测行只计一次。
   // 选中的探测算法里已不在当前批次的不算（否则整表会空掉）
   const batchDetectors = useMemo(() => new Set(batch.map(r => r.detectorId).filter((id): id is string => !!id)), [batch]);
-  const activeAlgorithms = useMemo(() => algorithms.filter(id => batchDetectors.has(id)), [algorithms, batchDetectors]);
+  const algorithms = useMemo(() => algorithmChoice ?? defaultQualityDetectorIds(study.groups), [algorithmChoice, study.groups]);
+  // 信号库没有探测归属，主动切换该来源时不套用默认探测筛选；用户明确选择的筛选仍照常生效。
+  const activeAlgorithms = useMemo(() => origin === 'library' && algorithmChoice === null ? [] : algorithms.filter(id => batchDetectors.has(id)), [algorithms, batchDetectors, origin, algorithmChoice]);
   const searched = useMemo(() => batch.filter(r => (!query.trim() || r.source.symbol.toUpperCase().includes(query.trim().toUpperCase())) && (!origin || sourceOf(r) === origin)), [batch, query, origin]);
   const narrowed = useMemo(() => activeAlgorithms.length ? searched.filter(r => activeAlgorithms.includes(r.detectorId ?? '')) : searched, [searched, activeAlgorithms]);
   /** 各探测算法在当前来源 / 标的筛选下的信号条数（同一信号只计一次）。 */
