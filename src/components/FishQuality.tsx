@@ -216,6 +216,8 @@ function RowDetail({ row, state, close }: { row?: QualitySample; state: FishQual
       ['镜像止盈', (r?: QualityResult) => r?.mirrorFill ? `${date(r.mirrorFill.at)} · 价格 ${r.mirrorFill.price.toPrecision(7)} · 卖出初始币数 ${+(r.mirrorFill.fraction*100).toPrecision(8)}%` : '未触发'],
       ['余仓 / 已兑现', (r?: QualityResult) => r?.mirrorFill ? `${+((r.remainingFraction ?? 0)*100).toPrecision(8)}% / ${r.realizedPnl?.toFixed(2)} USDT` : '—'],
       ['收益率', (r?: QualityResult) => pct(r?.returnPct)], ['盈亏 USDT', (r?: QualityResult) => r?.pnl?.toFixed(2) ?? '—'],
+      ['镜像已兑现盈亏 USDT', (r?: QualityResult) => r?.mirrorRealizedPnl?.toFixed(2) ?? '—'],
+      ['余仓盈亏 USDT', (r?: QualityResult) => r?.remainingPnl?.toFixed(2) ?? '—'],
       ['峰值涨幅', (r?: QualityResult) => pct(r?.peakPct)], ['最大不利涨跌', (r?: QualityResult) => pct(r?.adversePct)],
       ['静态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'static')).replace(/^\+/, '')], ['动态最大回撤', (r?: QualityResult) => pct(qualityDrawdownPct(r,'dynamic')).replace(/^\+/, '')], ['涨幅未兑现', (r?: QualityResult) => pct(r?.uncapturedPct).replace(/^\+/, '')],
       ['持仓小时', (r?: QualityResult) => r?.heldHours?.toFixed(2) ?? '—'],

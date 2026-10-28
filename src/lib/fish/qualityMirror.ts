@@ -13,3 +13,15 @@ export function mirrorWeightedReturn(entry: number, mark: number, fill?: Quality
   const fraction = fill?.fraction ?? 0;
   return ((fill ? fraction * (fill.price / entry - 1) : 0) + (1 - fraction) * (mark / entry - 1)) * 100;
 }
+
+/** Only mirror-enabled legacy close-confirmation trials need a new cache identity. */
+export function mirrorExecutionIdentity(plan:{mirrorTakeProfit?:QualityMirrorTakeProfit;execution?:'intrabar-1m';holdingVetoes?:readonly {enabled:boolean}[];combo?:unknown}):unknown[] {
+ return plan.mirrorTakeProfit?.enabled && plan.execution!=='intrabar-1m' && !plan.holdingVetoes?.some(v=>v.enabled) && !plan.combo ? ['mirror-preserve-close-v2'] : [];
+}
+export function mirrorPnlBreakdown(notional:number,entry:number,mark:number,fill?:QualityMirrorFill) {
+ const fraction=fill?.fraction??0;
+ const mirrorPnl=fill?notional*fraction*(fill.price/entry-1):0;
+ const remainingPnl=notional*(1-fraction)*(mark/entry-1);
+ const returnPct=fill?(mirrorPnl+remainingPnl)/notional*100:(mark/entry-1)*100;
+ return {mirrorPnl,remainingPnl,totalPnl:fill?mirrorPnl+remainingPnl:notional*returnPct/100,returnPct};
+}

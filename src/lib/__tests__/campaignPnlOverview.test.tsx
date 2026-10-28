@@ -590,6 +590,6 @@ it('shows the actual half-mirror result after peak gain and shares its value wit
  const halfMirror=halfMirrorSummary({enabled:true,gainPct:5,sellPct:50},{status:'closed',entryPrice:100,returnPct:7.5,mirrorFill:{at:Date.UTC(2026,9,28),price:105,fraction:.5,gainPct:5,atOpen:false}});
  const items=buildCampaignPnlOverviewItems(winnerMetrics({halfMirror}));
  const index=items.findIndex(i=>i.key==='peakPriceChange');expect(items[index+1]).toMatchObject({key:'halfMirror',label:'半仓镜像',value:'+7.50% · 已卖 50%',column:2});
- const info=render(<>{items[index+1].help}</>).container;expect(info).toHaveTextContent('已兑现盈亏 + 剩余币数估值盈亏');
+ const info=render(<>{items[index+1].help}</>).container;expect(info).toHaveTextContent('总盈亏 = 镜像止盈已兑现盈亏 + 余仓盈亏');
  expect(buildCampaignPnlOverviewItems(winnerMetrics()).some(i=>i.key==='halfMirror')).toBe(false);
 });

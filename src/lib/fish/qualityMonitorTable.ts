@@ -66,7 +66,7 @@ export function buildMonitorSheets(records: readonly QualityMonitorRecord[], set
   const used = [...new Set(rows.map(r => r.settingId))].map(id => settings.get(id)!);
   return [{ name: '监测记录', columns: [
     ...monitorColumns.map(([key, header, width]) => ({ header: `${header}${['return', 'static', 'dynamic'].includes(key) ? ' %' : key === 'held' ? ' 小时' : ''}`, width })),
-    ...['交易所', '买入价', '卖出 / 估值时间', '卖出 / 估值价', '盈亏 USDT', '结果说明', '过滤判断', '过滤读数 JSON', '记录编号', '配置编号', '交易战役链接', '镜像止盈涨幅 %', '镜像卖出比例 %', '镜像成交时间', '镜像成交价', '镜像卖出币数', '剩余币数', '已兑现盈亏 USDT'].map(header => ({ header, width: header.includes('JSON') ? 70 : 28 })),
+    ...['交易所', '买入价', '卖出 / 估值时间', '卖出 / 估值价', '盈亏 USDT', '结果说明', '过滤判断', '过滤读数 JSON', '记录编号', '配置编号', '交易战役链接', '镜像止盈涨幅 %', '镜像卖出比例 %', '镜像成交时间', '镜像成交价', '镜像卖出币数', '剩余币数', '已兑现盈亏 USDT', '镜像已兑现盈亏 USDT', '余仓盈亏 USDT', '开仓总金额 USDT'].map(header => ({ header, width: header.includes('JSON') ? 70 : 28 })),
   ], rows: rows.map(r => {
     const s = settings.get(r.settingId)!, result = monitorResult(r, s), valued = result && ['closed', 'open'].includes(result.status) ? result : undefined;
     return [...monitorColumns.map(([key]): XlsxCell => ['time', 'entered', 'saved'].includes(key) ? date(monitorValue(r, s, key) as number | null) : monitorValue(r, s, key)),
@@ -75,7 +75,7 @@ export function buildMonitorSheets(records: readonly QualityMonitorRecord[], set
       monitorCampaignUnavailable(r,s)?null:new URL(qualityMonitorCampaignPath(r.id),window.location.origin).href,
       s.plan.mirrorTakeProfit?.enabled ? s.plan.mirrorTakeProfit.gainPct : null, s.plan.mirrorTakeProfit?.enabled ? s.plan.mirrorTakeProfit.sellPct : null,
       date(result?.mirrorFill?.at), result?.mirrorFill?.price ?? null, result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*result.mirrorFill.fraction : null,
-      result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*(result.remainingFraction ?? 0) : null, result?.realizedPnl ?? null];
+      result?.mirrorFill && result.entryPrice ? s.notional/result.entryPrice*(result.remainingFraction ?? 0) : null, result?.realizedPnl ?? null, result?.mirrorRealizedPnl ?? null, result?.remainingPnl ?? null, result?.initialNotional ?? s.notional];
   }) }, { name: '算法与公式', columns: ['配置编号', '监测算法', '买前过滤', '持仓否决', '探测算法', '观察小时（0=持续至卖出）', '本金 USDT', '杠杆', '类型', '算法', '公式', '原始快照 JSON'].map(header => ({ header, width: header.includes('公式') || header.includes('JSON') ? 80 : 35 })),
     rows: used.flatMap(s => {
       const snapshots = [{ type: '监测', label: qualityRuleLabel(s.plan), snapshot: s.plan.snapshot },

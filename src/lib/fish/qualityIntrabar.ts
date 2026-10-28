@@ -47,6 +47,7 @@ export interface QualityIntrabarCondition {
   plan: FishProgram; scale: number; rule: {direction:QualityOperator;threshold:number}; cause?:QualityExitCause;
   /** 组合卖出的分段：before 只在涨幅未过分水岭时生效，after 只在之后生效；缺省 = 全程（持仓否决）。 */
   stage?: 'before' | 'after';
+  closeOnly?: boolean;
 }
 export async function findQualityIntrabarExit(o: {
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
@@ -55,11 +56,13 @@ export async function findQualityIntrabarExit(o: {
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
   /** 组合卖出：主规则属于哪一段；switchPct = 分水岭（最高价比买入价高出的百分比）。 */
   ruleStage?: 'before' | 'after'; switchPct?: number;
+  /** Mirror reductions cannot change a legacy rule's original confirmation clock. */
+  ruleCloseOnly?: boolean;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
-  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule,stage:o.ruleStage}]:[])];
+  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule,stage:o.ruleStage,closeOnly:o.ruleCloseOnly}]:[])];
   const streams=[];
   for(const c of inputs) {
     if (!(c.plan.step>=MINUTE) || c.plan.step%MINUTE!==0) throw new Error('盘中复原要求指标周期为整数分钟');
@@ -110,6 +113,7 @@ export async function findQualityIntrabarExit(o: {
     const after=switched();
     for(const s of streams) {
       if(s.stage==='before'&&after||s.stage==='after'&&!after)continue;
+      if(s.closeOnly && (at<=o.entry || at%s.plan.step!==0))continue;
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;

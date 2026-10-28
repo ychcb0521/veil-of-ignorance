@@ -393,7 +393,7 @@ export interface TradeCampaign {
     /** 探测信号类别：命中的探测算法组合（如「CBI-2·avg₂ + CBA·avg₂」），用于分类观察与统计。 */
     category?: string;
     /** Frozen monitoring metrics shared with the fish-quality table. */
-    holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number};
+    holdingMetrics?: {status:'open'|'closed'|'waiting'|'error';peakPct:number|null;returnPct:number|null;entryPrice?:number;initialNotional?:number;mirrorRealizedPnl?:number;remainingPnl?:number};
     sellEvidence?: {
       formula: string; definitionKey: string; featureId: string; metric: string; version: string;
       interval: string; halfLifeHours: number; avgHours: number; source: 'account' | 'historical';

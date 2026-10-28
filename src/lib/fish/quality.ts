@@ -16,7 +16,7 @@ import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '
 import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
-import { mirrorIdentity, validateQualityMirror, mirrorWeightedReturn, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
+import { mirrorIdentity, mirrorExecutionIdentity, validateQualityMirror, mirrorPnlBreakdown, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
 
 export const QUALITY_NOTIONAL = 100, QUALITY_MINUTE = 60_000;
 export type QualityEntryMode = 'capture' | 'signal';
@@ -70,6 +70,7 @@ export interface QualityResult {
   drawdownPct?: number; uncapturedPct?: number; heldHours?: number; complete?: boolean;
   /** First and only mirror sale, as a fraction of original coin quantity. */
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
+  mirrorRealizedPnl?: number; remainingPnl?: number; initialNotional?: number;
   exitReading?: number;
   pendingExit?: QualityTrigger;
   exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after' };
@@ -232,6 +233,7 @@ export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: numbe
   // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
   if (mirrorIdentity(g.mirrorTakeProfit).length) identity.push(mirrorIdentity(g.mirrorTakeProfit));
+  if (mirrorExecutionIdentity(g).length) identity.push(mirrorExecutionIdentity(g));
   return shortFishHash(JSON.stringify(identity));
 };
 /** A fish occupies one row, even when several capture rules/rounds caught the same signal. */
@@ -403,7 +405,7 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
         }
         const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
         if (combo) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,ruleCloseOnly:group.execution!=='intrabar-1m' && !vetoes.length && !combo,
           ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (rule) {
@@ -444,7 +446,8 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     const klines = held.map(b => ({ time: b.openTime, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
     const args = { klines, startMs: since, endMs: finalTime - 1, barMs: QUALITY_MINUTE };
     const priceReturnPct = (finalPrice / entryPrice - 1) * 100;
-    const returnPct = mirrorWeightedReturn(entryPrice, finalPrice, mirrorFill);
+    const breakdown = mirrorPnlBreakdown(QUALITY_NOTIONAL, entryPrice, finalPrice, mirrorFill);
+    const returnPct = breakdown.returnPct;
     let peakPct = Math.max(prior?.peakPct ?? 0, priceReturnPct);
     for (let i = 0; i < klines.length; i += 5000) peakPct = Math.max(peakPct, computePeakPriceChangePct({ ...args, klines: klines.slice(i, i + 5000), side: 'long', entryPrice }) ?? 0);
     // The exit open itself is observable and belongs to the holding path; the rest of the exit candle does not.
@@ -466,8 +469,8 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     }
     const drawdownBars = prior ? [{ time: since - QUALITY_MINUTE, open: previousPeak, high: previousPeak, low: previousPeak, close: previousPeak, volume: 0 }, ...klines] : klines;
     return { ...base, status: closed ? 'closed' : 'open', entryTime: entry, entryPrice, endTime: finalTime, endPrice: finalPrice,
-      ...(mirrorFill ? {mirrorFill, remainingFraction: closed ? 0 : 1 - mirrorFill.fraction, realizedPnl: QUALITY_NOTIONAL * mirrorFill.fraction * (mirrorFill.price / entryPrice - 1) + (closed ? QUALITY_NOTIONAL * (1 - mirrorFill.fraction) * priceReturnPct / 100 : 0)} : {}),
-      returnPct, pnl: QUALITY_NOTIONAL * returnPct / 100, peakPct, adversePct: (low / entryPrice - 1) * 100,
+      ...(mirrorFill ? {mirrorFill,remainingFraction:closed?0:1-mirrorFill.fraction,mirrorRealizedPnl:breakdown.mirrorPnl,remainingPnl:breakdown.remainingPnl,initialNotional:QUALITY_NOTIONAL,realizedPnl:breakdown.mirrorPnl+(closed?breakdown.remainingPnl:0)} : {}),
+      returnPct, pnl: breakdown.totalPnl, peakPct, adversePct: (low / entryPrice - 1) * 100,
       drawdownPct: Math.max(prior?.drawdownPct ?? 0, exitDrawdown, vetoDynamic, computeHoldingDynamicMaxDrawdownPct({ ...args, klines: drawdownBars, startMs: prior ? since - QUALITY_MINUTE : since }) ?? 0), uncapturedPct: peakPct - returnPct,
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
