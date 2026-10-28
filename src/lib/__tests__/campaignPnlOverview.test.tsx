@@ -220,7 +220,7 @@ describe('buildCampaignPnlOverviewItems', () => {
     expect(byKey.unitProfit.value).toBe('500.00');
     expect(byKey.positionProfit.value).toBe('1,000.00（1,250.00）');
     expect(byKey.unitRise.valueClassName).toBe('text-[#0ECB81]');
-    expect(render(<>{byKey.unitRise.help}</>).container).toHaveTextContent('G = 150.0000 − 100.0000 ≈ 50.0000');
+    expect(render(<>{byKey.unitRise.help}</>).container).toHaveTextContent('ΔP = 150.0000 − 100.0000 ≈ 50.0000');
     expect(render(<>{byKey.unitProfit.help}</>).container).toHaveTextContent('U = 10 币 × 50.0000 ≈ 500.00 USDT');
     const w = render(<>{byKey.positionProfit.help}</>).container;
     expect(w).toHaveTextContent('W = 500.00 × 2.0000 ≈ 1,000.00 USDT');
@@ -371,10 +371,10 @@ describe('CampaignPnlOverviewPanel', () => {
     expect(buttons).toEqual(GOLDEN_LABELS.map(label => `${label}说明`));
     expect(container.firstElementChild).toHaveClass('[container-type:inline-size]');
     expect(container.querySelector('[data-testid="pnl-overview-three-columns"]')).toHaveClass('[@container(min-width:640px)]:grid-cols-2');
-    for (const [index, name] of ['left', 'middle', 'right'].entries()) {
+    for (const [index, name] of ['left', 'middle'].entries()) {
       const rows = [...container.querySelectorAll('[data-column="' + name + '"]')];
       // 【用户要求】三列 8 / 8 / 5：L_磨损、几何期望接在盈亏比后，单位涨幅 / 单位利润 / 仓位利润接在算术期望后
-      const [from, to] = [[0, 8], [8, 16], [16, 22]][index];
+      const [from, to] = [[0, 8], [8, 22]][index];
       expect(rows.map(node => node.firstElementChild?.textContent)).toEqual(GOLDEN_LABELS.slice(from, to));
       expect(rows).toHaveLength(to - from);
       for (const row of rows) expect(row).toHaveClass('min-h-5', 'gap-3');
@@ -583,4 +583,13 @@ describe('【用户要求】L_磨损：盈亏概览新增一项，并与盈亏�
     const zero = Object.fromEntries(buildCampaignPnlOverviewItems(winnerMetrics({ magicB: 2.5, executionWearR: 0.001, executionWearUsd: 0.1 })).map(item => [item.key, item]));
     expect(zero.payoffRatio.valueSuffix).toBeFalsy();
   });
+});
+
+it('shows the actual half-mirror result after peak gain and shares its value with PNG exports',async()=>{
+ const {halfMirrorSummary}=await import('@/lib/fish/qualityPresentation');
+ const halfMirror=halfMirrorSummary({enabled:true,gainPct:5,sellPct:50},{status:'closed',entryPrice:100,returnPct:7.5,mirrorFill:{at:Date.UTC(2026,9,28),price:105,fraction:.5,gainPct:5,atOpen:false}});
+ const items=buildCampaignPnlOverviewItems(winnerMetrics({halfMirror}));
+ const index=items.findIndex(i=>i.key==='peakPriceChange');expect(items[index+1]).toMatchObject({key:'halfMirror',label:'半仓镜像',value:'+7.50% · 已卖 50%',column:2});
+ const info=render(<>{items[index+1].help}</>).container;expect(info).toHaveTextContent('已兑现盈亏 + 剩余币数估值盈亏');
+ expect(buildCampaignPnlOverviewItems(winnerMetrics()).some(i=>i.key==='halfMirror')).toBe(false);
 });

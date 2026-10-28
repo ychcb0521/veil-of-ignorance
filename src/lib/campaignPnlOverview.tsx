@@ -1,3 +1,4 @@
+import type { HalfMirrorSummary } from '@/lib/fish/qualityPresentation';
 import type { ReactNode } from 'react';
 import { MagicBMethodFormulas } from '@/components/journal/MagicBMethodFormulas';
 import { computeSettlementPayoffRatio, resolveUnifiedMagicB } from '@/lib/campaignB';
@@ -99,6 +100,7 @@ export type CampaignPnlOverviewItemKey =
   | 'mainLeverage'
   | 'initialMainExposureNotional'
   | 'peakPriceChange'
+  | 'halfMirror'
   | 'unrealizedPriceChangePct'
   | 'dynamicMaxDrawdownPct'
   | 'staticMaxDrawdownPct'
@@ -169,6 +171,7 @@ export const PNL_OVERVIEW_THIRD_COLUMN: readonly CampaignPnlOverviewItemKey[] = 
   'mainPriceChange',
   'mainPriceEfficiency',
   'peakPriceChange',
+  'halfMirror',
   'unrealizedPriceChangePct',
   'dynamicMaxDrawdownPct',
   // 【用户要求】2026-10-26 静态最大回撤紧跟动态最大回撤
@@ -200,6 +203,8 @@ export interface CampaignPnlOverviewMetrics {
   peakUnrealizedPnl: number;
   /** 主力持有窗口内相对基准开仓价的最大有利价格涨幅；老反事实分支没有价格路径时为 null。 */
   peakPriceChangePct?: number | null;
+  /** Actual mirror execution, not a hypothetical half-position backtest. */
+  halfMirror?: HalfMirrorSummary;
   /** 持仓期间此前峰值到此后谷值的最大标准化回撤率。 */
   dynamicMaxDrawdownPct?: number | null;
   /** 持仓期间最不利价格离买入价的跌幅 ÷ 买入价（主多看最低价、主空看最高价）。 */
@@ -892,6 +897,11 @@ export function buildCampaignPnlOverviewItems(metrics: CampaignPnlOverviewMetric
         <p>{POSITION_PROFIT_RULE}</p>
         <p>{UNIT_METRICS_MISSING_RULE}</p></>,
     });
+  }
+  if(metrics.halfMirror) {
+    const mirror=metrics.halfMirror;
+    built.push({key:'halfMirror',label:'半仓镜像',value:mirror.text,color:pnlExportColor(mirror.value),valueClassName:mirror.value==null?'text-muted-foreground':pnlColor(mirror.value),
+      help:<><p>{mirror.detail}</p><p>默认上涨 5% 卖出初始币数的 50%；若已自定义比例，以该轮实际保存的设置与成交为准。未启用、待评估、未触发和缺数据不填成零收益，也不根据峰值涨幅推断成交。</p></>});
   }
   const byKey = new Map(built.map(item => [item.key, item]));
   const items: CampaignPnlOverviewItem[] = [

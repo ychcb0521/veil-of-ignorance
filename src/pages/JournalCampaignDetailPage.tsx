@@ -1,3 +1,4 @@
+import { campaignHalfMirror } from '@/lib/fish/qualityPresentation';
 import { isQualityCampaignId } from '@/lib/campaignSections';
 import { listQualityCampaignData } from '@/lib/fish/qualityCampaigns';
 import { CAMPAIGN_CHART_INTERVALS, CAMPAIGN_CHART_INTERVAL_LABELS } from '@/lib/campaignChartContentSpan';
@@ -1722,6 +1723,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
    * 主多取最高价、主空取最低价。K 线请求还带着图表前后文，因此必须再按战役 / 主力平仓窗口裁一次。
    */
   const peakPriceChangePct = useMemo(() => {
+    if(campaign?.comparison?.holdingMetrics) return campaign.comparison.holdingMetrics.peakPct;
     if (!campaign || actualPriceChange.entryPrice == null || actualPriceChange.side == null || klines.length === 0) return null;
     const entryLegOpenTime = actualPriceChange.entryLegId == null
       ? null
@@ -1780,6 +1782,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
       initialMainExposureNotional: computeInitialMainExposureNotional(campaign, legs, tradeRecords),
       peakUnrealizedPnl: accuracy.campaign_max_profit_real,
       peakPriceChangePct,
+      halfMirror:campaignHalfMirror(campaign),
       dynamicMaxDrawdownPct,
       staticMaxDrawdownPct,
       initialExpectedMaxLoss: accuracy.initial_expected_max_loss,
@@ -1814,7 +1817,7 @@ export default function JournalCampaignDetailPage({ batchExport }: { batchExport
     // 峰值涨幅和峰值浮盈都依赖 K 线。计算用 K 线还在路上时，峰值浮盈只是「至少取到已实现」的兜底值；
     // 盘面与计算各拉一份时盘面可能先画好，兜底值摆在旁边就像最终读数——这时显示加载态。
     if (!klinesLoading) return items;
-    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' || item.key === 'dynamicMaxDrawdownPct' || item.key === 'staticMaxDrawdownPct'
+    return items.map(item => (item.key === 'unrealizedPriceChangePct' || item.key === 'peakPriceChange' && !campaign.comparison?.holdingMetrics || item.key === 'dynamicMaxDrawdownPct' || item.key === 'staticMaxDrawdownPct'
       ? { ...item, value: '加载中…', color: '#848E9C', valueClassName: 'text-muted-foreground' }
       : item));
   }, [

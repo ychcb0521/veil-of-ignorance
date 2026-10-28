@@ -1,3 +1,4 @@
+import { qualityPeakPct, qualityHalfMirror } from './qualityPresentation';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from './qualityFilterColumns';
 import { activeHoldingVetoes } from './qualityVeto';
 import { buildXlsx, type XlsxSheet } from '@/lib/xlsxWorkbook';
@@ -19,7 +20,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${p.rule ? `${p.rule.direction} ${p.rule.threshold}` : hasQualityExit(p) ? '仅一票否决' : '未设置'}）收益率 %`, width: 34 },
-      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 动态最大回撤 %`,width:30},{header:`${p.label} · 持仓小时`,width:22}]),
+      {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像收益率 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
     { header: '探测算法 / 捕获阈值', width: 42 }, { header: '买入时间', width: 24 },
   ], rows: rows.map(row => [
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
@@ -29,10 +30,10 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果
-      if (f && f.state !== 'pass') return [f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null];
-      if (filters.length && !hasQualityExit(p)) return ['待设卖出', null, null, null];
+      if (f && f.state !== 'pass') return [f.state === 'fail' ? '未买入' : f.state === 'pending' ? '待判断（买入过滤）' : '买入过滤缺数据', null, null, null, null, null];
+      if (filters.length && !hasQualityExit(p)) return ['待设卖出', null, null, null, null, null];
       const held = r && (r.status === 'closed' || r.status === 'open') && Number.isFinite(r.heldHours) ? r.heldHours! : null;
-      return [r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityDrawdownPct(r,'dynamic'),held]; }),
+      return [r?.status === 'closed' ? r.returnPct ?? null : r?.status === 'open' ? `持有浮盈 ${r.returnPct?.toFixed(2) ?? '—'}%` : r?.status === 'error' ? '缺数据' : '待评估',qualityDrawdownPct(r,'static'),qualityPeakPct(r),qualityHalfMirror(p,r).value,qualityHalfMirror(p,r).label,held]; }),
     row.detectorId && groups.has(row.detectorId) ? `${groups.get(row.detectorId)!.label} ${groups.get(row.detectorId)!.snapshot.direction ?? '>'} ${groups.get(row.detectorId)!.snapshot.threshold}` : '—', row.enteredAt ? formatUTC8(row.enteredAt) : null,
   ]) }];
   const signals = new Set(rows.map(row => row.signalId ?? row.id));
@@ -41,9 +42,9 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   sheets.push({ name: '运行结果', columns: [
     ['标的', 24], ['来源', 10], ['信号时间', 24], ['探测算法 / 捕获阈值', 50], ['卖出算法', 24], ['具体指标', 18], ['卖出方向', 10], ['卖出门槛', 12],
     ['状态', 14], ['买入时间', 24], ['买入价', 18], ['卖出 / 估值时间', 24], ['卖出 / 估值价', 18], ['收益率 %', 15], ['盈亏 USDT', 15],
-    ['最大涨幅 %', 16], ['最大不利涨跌 %', 18], ['动态最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
+    ['峰值涨幅 %', 16], ['最大不利涨跌 %', 18], ['动态最大回撤 %', 16], ['涨幅未兑现 %', 18], ['持仓小时', 14], ['观察时长小时（0=持续至卖出）', 29], ['本金 USDT', 14], ['杠杆', 9], ['试验编号', 27],
     ['公式版本', 28], ['公式来源', 18], ['指标周期', 12], ['半衰期小时', 14], ['基线小时', 12], ['卖出触发读数', 20], ['阈值确认时间', 24], ['实际卖出公式', 60],
-    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],
+    ['卖出时机',22],['触发指标K线起点',24],['前次采样时间',24],['前次采样读数',20],['静态最大回撤 %',20],['持仓一票否决条件',70],['实际卖出触发原因',50],['半仓镜像收益率 %',24],['半仓镜像状态',24],
   ].map(([header, width]) => ({ header: String(header), width: Number(width) })), rows: runs.map(run => {
     const r = run.result;
     const definition = qualityDefinition(run.plan.snapshot);
@@ -58,7 +59,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
       run.plan.snapshot.interval ?? '5m', definition.halfLifeHours, definition.avgHours,
       r.exitReading ?? r.pendingExit?.reading ?? null, r.status === 'closed' && r.endTime ? formatUTC8(r.endTime) : r.pendingExit ? formatUTC8(r.pendingExit.at) : null, definition.formula,
       run.plan.execution === 'intrabar-1m' ? '盘中达标 · 1分钟复原' : '原周期收盘确认',r.exitSnapshot?.barOpenTime?formatUTC8(r.exitSnapshot.barOpenTime):null,
-      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null];
+      r.exitSnapshot?.previous?.at?formatUTC8(r.exitSnapshot.previous.at):null,r.exitSnapshot?.previous?.reading??null,qualityDrawdownPct(r,'static'),activeHoldingVetoes(run.plan.holdingVetoes).map(v=>`${v.label} ${v.direction} ${v.threshold}${v.kind==='indicator'?'':'%'}${v.snapshot?` · 公式 ${qualityDefinition(v.snapshot).formula}`:''}`).join('；')||'无',r.reason??null,qualityHalfMirror(run.plan,r).value,qualityHalfMirror(run.plan,r).label];
   }) });
   if (study.campaignRepair) {
     const byKey = new Map(allRuns.map(run => [run.result.key,run]));
