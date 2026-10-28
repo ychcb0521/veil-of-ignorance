@@ -320,7 +320,7 @@ it('replaces dynamic drawdown with peak gain and sorts each seller independently
  const missing=()=>screen.getAllByTestId('quality-fish-row').find(r=>r.textContent?.includes('MISSING'))!;
  expect(within(high()).getAllByTestId('quality-static-drawdown').map(x=>x.textContent)).toEqual(['25.00%','2.00%']);
  expect(within(high()).getAllByTestId('quality-peak-gain').map(x=>x.textContent)).toEqual(['+35.00%','+6.00%']);
- expect(within(low()).getAllByTestId('quality-static-drawdown')[0]).toHaveTextContent('+8.00%');
+ expect(within(low()).getAllByTestId('quality-static-drawdown')[0]).toHaveTextContent('0.00%');
  expect(within(missing()).getAllByTestId('quality-static-drawdown').every(x=>x.textContent==='—')).toBe(true);
  for(const type of ['静态最大回撤','峰值涨幅']){
   fireEvent.click(screen.getByRole('button',{name:`按状态 S 原始值${type}排序`}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('HIGH');
@@ -424,11 +424,11 @@ it('edits standalone filters without masking sell outcomes, with sortable holdin
   expect(held('BBBUSDT')).toEqual(['30 分钟', '30 分钟']);
   expect(held('CCCUSDT')).toEqual(['30.0 小时', '30.0 小时']);
   expect(within(row('BBBUSDT')).queryByText('未买入')).toBeNull();
-  // 新列顺序：峰值涨幅 → 半仓镜像 → 持仓时间
+  // 列顺序：峰值涨幅 → （开了镜像止盈才有的半仓镜像）→ 持仓时间；这里没开镜像，不出「未启用」整列
   const headers = screen.getAllByRole('columnheader').map(h => h.textContent ?? '');
   const peak = headers.findIndex(h => h.startsWith('峰值涨幅'));
-  expect(headers[peak + 1]).toMatch(/^半仓镜像/);
-  expect(headers[peak + 2]).toMatch(/^持仓时间/);
+  expect(headers[peak + 1]).toMatch(/^持仓时间/);
+  expect(headers.some(h=>h.startsWith('半仓镜像'))).toBe(false);
   expect(headers.some(h=>h.startsWith('动态最大回撤'))).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '按CDA 原始值持仓时间排序' }));
   const order = () => [...new Set(screen.getAllByTestId('quality-fish-row').map(r => r.textContent!.match(/[A-Z]{3}USDT/)![0]))];
@@ -604,8 +604,9 @@ it('offers 1-minute and 5-minute fall vetoes with user percentage thresholds and
 
 it('groups detector thresholds as levels, spans all sellers with a parent header and opens quiet statistics without sorting', () => {
   const s = state(); render(<FishQuality state={s}/>);
-  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '10');
-  expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('1 个变量 · 3 个水平');
+  expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', '8');
+  expect(screen.queryAllByTestId('quality-half-mirror')).toHaveLength(0);
+  expect(screen.getByRole('columnheader', { name: '探测变量数量' })).toHaveTextContent('3 个探测算法');
   fireEvent.click(screen.getByRole('button', { name: '在表头选择探测算法' }));
   expect(within(screen.getByTestId('quality-detector-picker')).getByText('3 个水平')).toBeInTheDocument();
   expect(within(screen.getByTestId('quality-detector-picker')).getAllByRole('checkbox')).toHaveLength(3);
@@ -683,7 +684,7 @@ it('places run state second and bulk-selects only pending entries under the curr
   const header = screen.getByTestId('quality-run-state-column');
   expect(header.parentElement!.children[1]).toBe(header);
   const aCell = within(screen.getAllByTestId('quality-fish-row').find(r=>r.textContent!.includes('AAAUSDT'))!).getByTestId('quality-run-state-cell');
-  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent('已经运行'); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent('尚未运行');
+  expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveAttribute('aria-label','已完成'); expect(aCell.querySelector('[data-run-stage="filter"]')).toHaveTextContent('✓'); expect(aCell.querySelector('[data-run-stage="monitor"]')).toHaveTextContent('未运行');
   fireEvent.click(screen.getByRole('button',{name:'运行状态筛选与批量选取'}));
   const picker = screen.getByTestId('quality-run-state-picker');
   fireEvent.change(within(picker).getByLabelText('运行状态的工作步骤'),{target:{value:'filter'}});
@@ -692,7 +693,7 @@ it('places run state second and bulk-selects only pending entries under the curr
   expect(ids).toEqual(qualityDisplayRows(s.study).filter(r=>r.source.symbol==='BBBUSDT').map(r=>r.id));
   s.study={...s.study,selectedRowIds:ids}; view.rerender(<FishQuality state={s}/>);
   expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1); expect(screen.getByTestId('quality-fish-row')).toHaveTextContent('BBBUSDT');
-  expect(screen.getByTestId('quality-selection-scope')).toHaveTextContent('已勾选 1 次入场');
+  fireEvent.keyDown(document.activeElement!,{key:'Escape'}); fireEvent.click(within(screen.getByTestId('quality-selection-scope')).getByRole('button',{name:'处理范围说明'})); expect(screen.getByRole('dialog',{name:'处理范围说明'})).toHaveTextContent('已勾选 1 次入场');
   fireEvent.keyDown(document.activeElement!,{key:'Escape'});
   fireEvent.click(screen.getByRole('button',{name:'开始过滤'})); expect(s.startFilter).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'开始监测'})); expect(s.start).toHaveBeenCalledTimes(1);
@@ -704,7 +705,7 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  expect(screen.getByRole('button',{name:'开始过滤'})).toBeDisabled();
  fireEvent.click(screen.getByRole('button',{name:'未设置过滤条件 · 点此设置'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
- render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByTestId('quality-filter-recovery')).toHaveTextContent('有效读数会复用');
+ render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
  cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
 });
 
@@ -736,6 +737,9 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  expect(within(row('FILLED')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('已卖 50%');
  expect(within(row('ZERO')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('+8.00%');
  expect(within(row('OFF')).getAllByTestId('quality-half-mirror')[0]).toHaveTextContent('未触发');
+ // 只有开了镜像止盈的方案才有这一列
+ expect(within(row('OFF')).getAllByTestId('quality-half-mirror')).toHaveLength(1);
+ expect(screen.getByRole('columnheader', { name: '卖出类别统计' })).toHaveAttribute('colspan', String(s.study.sellPlans!.length * 4 + 1));
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);

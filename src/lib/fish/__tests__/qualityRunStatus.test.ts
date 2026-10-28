@@ -19,7 +19,7 @@ it('tracks filtering and monitoring separately, shares indicator reads and never
   expect(statuses.get(id)?.monitor).toMatchObject({total:2,finished:0,complete:false});
   study.filterReadings = [{key:qualityFilterReadingKey(rows[0],filter),value:.9}];
   statuses = qualityRunStatusMap(study,rows);
-  expect(qualityRunStatusText(statuses.get(id)!.filter)).toBe('已经运行'); expect(qualityRunStatusText(statuses.get(id)!.monitor)).toBe('尚未运行');
+  expect(qualityRunStatusText(statuses.get(id)!.filter)).toBe('已完成'); expect(qualityRunStatusText(statuses.get(id)!.monitor)).toBe('未运行');
   study.results = study.sellPlans!.map(p => ({key:qualityResultKey(rows[0],p,0),sampleId:id,groupId:p.id,evaluatedAt:T,status:'closed',returnPct:1}));
   expect(qualityRunStatusMap(study,rows).get(id)?.monitor.complete).toBe(true);
   study.filterReadings[0] = {key:qualityFilterReadingKey(rows[0],filter),error:'missing'};
@@ -55,6 +55,13 @@ it('handles merged partially run entries without bulk-selecting their already ru
   expect(qualitySelectRunState([merged],statuses,'filter',false)).toEqual([displays[1].id]);
   expect(qualitySelectRunState([merged],statuses,'filter',true)).toEqual([displays[0].id]);
   expect(qualitySelectRunState([displays[0]],statuses,'filter',false)).toEqual([]);
+});
+// 跑过但行情缺失：与卖出格的「缺数据」一致，不能写成「未运行」
+it('labels attempted-but-missing-data steps as 缺数据 rather than 未运行', () => {
+  const base = { refreshable: 0, complete: false };
+  expect(qualityRunStatusText({ ...base, total: 2, finished: 1, errors: 1 })).toBe('缺数据');
+  expect(qualityRunStatusText({ ...base, total: 2, finished: 0, errors: 1 })).toBe('未运行');
+  expect(qualityRunStatusText({ ...base, total: 2, finished: 2, errors: 0, complete: true })).toBe('已完成');
 });
 it('marks unconfigured steps explicitly without treating them as successfully run', () => {
   const study = enableQualityComparison(newQualityStudy()), row = fixture().rows[0], status = qualityRunStatusMap(study,[row]).get(row.id)!;

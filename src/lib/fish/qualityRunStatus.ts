@@ -6,7 +6,8 @@ export type QualityRunStateFilter = '' | 'pending' | 'done';
 export interface QualityStageStatus { total: number; finished: number; errors: number; refreshable: number; complete: boolean }
 export type QualityEntryRunStatus = Record<QualityRunStage, QualityStageStatus>;
 const empty = (): QualityStageStatus => ({ total: 0, finished: 0, errors: 0, refreshable: 0, complete: false });
-export const qualityRunStatusText = (status: QualityStageStatus) => !status.total ? '未设置' : status.complete ? '已经运行' : '尚未运行';
+// 【2026-10-28 审查】跑过但行情缺失的不能写成「尚未运行」（卖出格已显示「缺数据」，两处矛盾）
+export const qualityRunStatusText = (status: QualityStageStatus) => !status.total ? '未设置' : status.complete ? '已完成' : status.errors && status.finished + status.errors >= status.total ? '缺数据' : '未运行';
 export const qualityRunStatusDetail = (status: QualityStageStatus) => !status.total ? '尚未配置本项运行条件' : [
   `当前条件下有效完成 ${status.finished}/${status.total} 项`,
   status.errors ? `${status.errors} 项缺数据，待补算` : '',
