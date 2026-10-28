@@ -1,7 +1,9 @@
 import type {SignalScrollPosition} from './SignalLibraryList';
 import {fishCaughtBy} from '@/lib/fish/records';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown, Database, Download, Search, Sparkles } from 'lucide-react';
+import { fishSectionHeading, fishSubHeading, FishCount } from './FishSection';
+import { FishQualityInfo } from './FishQualityModule';
 // 筛选行与「渔」的输入同一套：浅底无框、圆角、统一 28px 高
 const filterCls = 'h-7 w-full appearance-none rounded-md border border-transparent bg-muted/50 pl-2 pr-6 text-[11px] text-foreground outline-none transition-colors hover:bg-muted focus-visible:border-ring/60';
 import { normalizeSignalQuality, signalMonthKey, sortSignalsBy, type SignalSortKey } from '@/lib/signalLibrary';
@@ -21,6 +23,10 @@ interface Props extends Pick<SignalLibraryListProps, 'tradedDayIndex' | 'campaig
   emptyText?: string;
   /** 紧跟在上一个列表下面：不再画分隔线。 */
   bare?: boolean;
+  /** 标题层级：section = 渔的一级模块（鱼舱）；sub = 模块里的组成部分（捕捞下的新鱼）。 */
+  level?: 'section' | 'sub';
+  /** 标题旁 ⓘ 里的说明。 */
+  info?: ReactNode;
 }
 interface FishView { open?: boolean; algorithm?: string; query?: string; month?: string; sortKey?: SignalSortKey|'algorithm'; sortDir?: 'asc'|'desc'; scroll?: SignalScrollPosition; frozen?: {key:string;values:[string,number|null][]} }
 const viewKey=(key:string)=>`veil.fish.view.v1:${key}`;
@@ -109,11 +115,14 @@ export const FishLibrary = memo(function FishLibrary(p: Props) {
   };
   return <div className={'min-w-0'} data-testid={testId}>
     <div className="flex items-center justify-between gap-2">
-    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className="-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium text-foreground/80 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:bg-muted">
-      {p.title === '新鱼' ? <Sparkles className="h-3 w-3 text-primary/80" /> : <Database className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
-      <span className={`min-w-[1.25rem] rounded px-1 text-center font-mono text-[10px] tabular-nums ${p.signals.length?'bg-primary/15 text-primary':'bg-muted text-muted-foreground'}`}>{p.signals.length}</span>
-      <ChevronDown className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+    <span className="flex items-center gap-0.5">
+    <button type="button" aria-expanded={open} aria-controls={`${testId}-panel`} onClick={() => setOpen(o => !o)} className={p.level === 'sub' ? fishSubHeading : fishSectionHeading}>
+      {p.title === '新鱼' ? <Sparkles aria-hidden className="h-3 w-3 text-primary/80" /> : <Database aria-hidden className="h-3 w-3 text-muted-foreground" />}<span>{title}</span>
+      <FishCount n={p.signals.length}/>
+      <ChevronDown aria-hidden className={`h-3 w-3 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
     </button>
+    {p.info && <FishQualityInfo label={`关于${title}`}>{p.info}</FishQualityInfo>}
+    </span>
     {p.onExport && <button type="button" aria-label="导出鱼舱数据" title="导出全部鱼舱为 Excel：列表信息、具体指标和捕获阈值，不受当前筛选影响" disabled={!p.signals.length} onClick={p.onExport} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"><Download aria-hidden className="h-3 w-3"/>导出数据</button>}
     </div>
     {open && <div id={`${testId}-panel`} data-testid={`${testId}-panel`} className="mt-2">

@@ -15,13 +15,14 @@ async function scope(){fireEvent.click(screen.getByRole('button',{name:'更多'}
 it('scope defaults on, settings persist and manual/auto/single-coin receive identical rules',async()=>{
  const view=render(<FishPanel {...props}/>);await scope();expect(screen.getByLabelText('过滤向下大插针')).toBeChecked();
  expect(screen.getByLabelText('插针回看时长')).toHaveValue('48');expect(screen.getByLabelText('插针 ATR 倍数')).toHaveValue('3');
- expect(screen.getByText(/以开盘价减最低价计跌幅/)).toBeInTheDocument();
  fireEvent.change(screen.getByLabelText('插针回看时长'),{target:{value:'48'}});fireEvent.change(screen.getByLabelText('插针 ATR 倍数'),{target:{value:'1.5'}});
  expect(readFishDownwardWick()).toEqual({enabled:true,hours:48,atrMultiple:1.5});expect(screen.getByText(/过滤设置将在下次捕捞生效/)).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));await vi.waitFor(()=>expect(start).toHaveBeenCalled());
  const built=buildFishScanSettings({cards:readFishCards(),defs:[CBI2_DEF],combination:'and',selection:props.selection,time:''});expect(built.settings!.downwardWick).toEqual(start.mock.calls[0][0].downwardWick);
  fireEvent.click(screen.getByRole('button',{name:'更多'}));fireEvent.click(await screen.findByRole('button',{name:'查单个币'}));fireEvent.change(screen.getByLabelText('查单个币的标的'),{target:{value:'COIN'}});fireEvent.click(screen.getByRole('button',{name:/^查$/}));await vi.waitFor(()=>expect(diagnose).toHaveBeenCalled());expect(diagnose.mock.calls[0][0].downwardWick).toEqual(start.mock.calls[0][0].downwardWick);
  view.unmount();render(<FishPanel {...props}/>);expect(screen.getByLabelText('插针回看时长')).toHaveValue('48');expect(screen.getByLabelText('插针 ATR 倍数')).toHaveValue('1.5');
+ // 口径说明收进 ⓘ
+ fireEvent.click(screen.getByRole('button',{name:'插针过滤说明'}));expect(screen.getByText(/以开盘价减最低价计跌幅/)).toBeInTheDocument();
  fireEvent.click(screen.getByLabelText('过滤向下大插针'));expect(screen.getByLabelText('插针回看时长')).toBeDisabled();expect(readFishDownwardWick().enabled).toBe(false);
 });
 it('locked during scan; rejected count is visible',async()=>{

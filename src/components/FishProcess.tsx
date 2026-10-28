@@ -5,6 +5,7 @@
  * 避开噪音来自本轮摘要（只存本机）：其余币分别卡在哪一步、本币读数在本轮排第几、本币此前越线过几次。
  */
 import { useState } from 'react';
+import { ScrollText } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import type { FishSnapshot } from '@/lib/fish/algorithm';
@@ -127,7 +128,8 @@ export function FishProcessDetail({ signal, hideTitle = false }: { signal: Trade
 export function FishProcessButton({ signal }: { signal: TradeSignal }) {
   const [open, setOpen] = useState(false);
   return <>
-    <button type="button" className="min-w-0 truncate text-left text-[10px] text-muted-foreground hover:text-foreground hover:underline" data-testid="fish-process-open" onClick={() => setOpen(true)}>捕捞过程</button>
+    {/* 【用户要求】2026-10-28 精简：列头已写「捕捞过程」，每行只放一个淡色图标，不再逐行重复文字 */}
+    <button type="button" aria-label="捕捞过程" title={`查看 ${signal.symbol} 的捕捞过程`} className="-my-1 -ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-testid="fish-process-open" onClick={() => setOpen(true)}><ScrollText aria-hidden className="h-3.5 w-3.5"/></button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-xl flex-col gap-3 overflow-hidden p-0" data-testid="fish-process-dialog">
         <DialogHeader className="border-b border-border/60 px-5 pb-3 pt-5 text-left">

@@ -17,7 +17,7 @@ it('defaults to 1 hour, sends the custom hours to manual capture and restores th
 it('shows the frozen range of the previous round and prevents invalid or mid-run edits',()=>{
  const progress={...initialFishProgress(),lookbackHours:12,status:'complete' as const};const h=render(<FishPanel {...props} progress={progress}/>);
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'2'}});fireEvent.blur(screen.getByLabelText('扫描覆盖时间（小时）'));
- expect(screen.getByTestId('fish-lookback-used')).toHaveTextContent('本轮覆盖过去 12 小时');expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('下一轮生效');
+ expect(screen.getByTestId('fish-status')).toHaveAttribute('title',expect.stringContaining('本轮覆盖过去 12 小时'));expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('下一轮生效');expect(screen.getByTestId('fish-lookback-changed')).toHaveTextContent('过去 12 小时的结果');
  fireEvent.change(screen.getByLabelText('扫描覆盖时间（小时）'),{target:{value:'0'}});fireEvent.click(screen.getByRole('button',{name:'开始捕捞'}));expect(props.onStart).not.toHaveBeenCalled();expect(screen.getByText('扫描覆盖时间须大于 0 且不超过 8784 小时')).toBeInTheDocument();
  h.rerender(<FishPanel {...props} progress={{...progress,status:'running'}}/>);expect(screen.getByLabelText('扫描覆盖时间（小时）')).toBeDisabled();
 });
