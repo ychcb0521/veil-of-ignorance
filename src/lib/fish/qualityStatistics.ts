@@ -5,7 +5,7 @@ import { activeHoldingVetoes } from './qualityVeto';
 import { qualityResultMap, qualityRowResult } from './qualityComparison';
 import { qualityFilterColumns, qualityFilterValue } from './qualityFilterColumns';
 import { qualityVariables, qualityVariableKey, qualityLevelText } from './qualityVariables';
-import { activeBuyFilters, hasQualityExit, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+import { activeBuyFilters, hasQualityExit, qualityDrawdownPct, qualityFilterStatus, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample, qualityRuleText } from './quality';
 
 export type QualityStatisticsCategory = 'sell' | 'detect' | 'filter';
 export interface QualityStatisticTrade { id: string; cluster: string; result: QualityResult; sellType: string }
@@ -20,6 +20,8 @@ const average = (values: readonly number[]) => values.length ? values.reduce((s,
 export function qualitySellType(result: QualityResult, plan: QualityGroup): string {
   const cause = result.exitSnapshot?.cause;
   if (cause) return ({ 'static-drawdown': '静态回撤止损', 'dynamic-drawdown': '动态回撤止损', 'drop-1m': '1分钟跌幅卖出', 'drop-5m': '5分钟跌幅卖出', 'mirror-take-profit':'镜像止盈', indicator: `指标否决 · ${cause.label}` })[cause.kind] ?? '触发原因未记录';
+  // 组合卖出按触发的那一段区分
+  if (result.exitSnapshot?.stage && plan.combo) return result.exitSnapshot.stage === 'after' ? `组合后段（${plan.combo.after.label}）卖出` : `组合前段（${plan.combo.beforeLabel}）卖出`;
   // A recorded exit with no veto cause is an ordinary exit. Unrecorded legacy causes stay unknown.
   return result.exitSnapshot || !activeHoldingVetoes(plan.holdingVetoes).length ? '算法条件卖出' : '触发原因未记录';
 }
@@ -52,8 +54,9 @@ export function qualityStatisticsSeries(study: FishQualityStudy, rows: readonly 
     return series;
   };
   if (category === 'sell') return plans.map(plan => build(plan, rows, {
-    id: plan.id, variableId: qualityVariableKey(plan.snapshot, plan.metric), variable: plan.label,
-    level: plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : plan.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅持仓否决 / 未设条件',
+    // 组合卖出是独立的一类（主体指标与 CDA 相同，但不能并进 CDA）
+    id: plan.id, variableId: plan.combo ? `combo:${plan.id}` : qualityVariableKey(plan.snapshot, plan.metric), variable: plan.label,
+    level: plan.combo ? qualityRuleText(plan) : plan.rule ? `${plan.rule.direction} ${plan.rule.threshold}` : plan.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅持仓否决 / 未设条件',
     context: `${plan.snapshot.interval ?? '5m'} · ${plan.execution === 'intrabar-1m' ? '盘中复原' : '收盘确认'} · 买入过滤 ${activeBuyFilters(study, plan).length} 条 · 持仓否决 ${activeHoldingVetoes(plan.holdingVetoes).length} 条${mirrorLabel(plan.mirrorTakeProfit) ? ` · ${mirrorLabel(plan.mirrorTakeProfit)}` : ''}`,
   }));
   if (!fixed) return [];

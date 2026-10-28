@@ -13,7 +13,7 @@ import { signalDedupKey } from '@/lib/signalLibrary';
 import type { FishReconstructionLoader } from './reconstruction';
 import { validateFishBars } from './shared';
 import { computeHoldingDynamicMaxDrawdownPct, computePeakPriceChangePct } from '@/lib/campaignMainPriceChange';
-import { findQualityIntrabarExit, type QualityTrigger } from './qualityIntrabar';
+import { findQualityIntrabarExit, type QualityIntrabarCondition, type QualityTrigger } from './qualityIntrabar';
 import { activeHoldingVetoes, advanceQualityHolding, holdingVetoIdentity, validateHoldingVeto, type QualityHoldingVeto, type QualityExitCause } from './qualityVeto';
 
 import { mirrorIdentity, validateQualityMirror, mirrorWeightedReturn, type QualityMirrorTakeProfit, type QualityMirrorFill } from './qualityMirror';
@@ -35,9 +35,23 @@ export interface QualityGroup {
    * 历史绑定条件，供旧试验还原；independentFilters 工作流不读取此字段。
    */
   buyFilters?: QualityBuyFilter[];
+  /**
+   * 组合卖出（如「卖出算法组合1」）：前段按本方案自己的 snapshot / rule（CDA）判断卖出；
+   * 持仓中最高价首次比买入价高出 switchPct% 的那一分钟收盘起，改按 after（状态 S）判断。持仓否决两段都有效。
+   */
+  combo?: QualitySellCombo;
+}
+export interface QualitySellCombo { switchPct: number; beforeLabel: string; after: { label: string; metric: string; snapshot: FishSnapshot; rule: QualityExitRule } }
+/** 组合方案的身份（参与结果编号、监测库与存档的区分）；普通方案为 null，旧编号不变。 */
+export const qualityComboIdentity = (g: Pick<QualityGroup, 'combo'>) => g.combo ? ['combo-v1', g.combo.switchPct, g.combo.after.metric, g.combo.after.snapshot.featureId,
+  g.combo.after.snapshot.definitionKey, g.combo.after.snapshot.interval, g.combo.after.snapshot.scale, g.combo.after.rule.direction, g.combo.after.rule.threshold] : null;
+/** 卖出条件的显示文字：普通方案「< 0.5」；组合方案「CDA < 0.5 → 涨 5.1% 后 状态 S < 0.5」。 */
+export function qualityRuleText(g: QualityGroup): string {
+  if (g.combo && g.rule) return `${g.combo.beforeLabel} ${g.rule.direction} ${g.rule.threshold} → 涨 ${g.combo.switchPct}% 后 ${g.combo.after.label} ${g.combo.after.rule.direction} ${g.combo.after.rule.threshold}`;
+  return g.rule ? `${g.rule.direction} ${g.rule.threshold}` : hasQualityExit(g) ? g.mirrorTakeProfit?.enabled ? '镜像止盈' : '仅一票否决' : '设置门槛';
 }
 /** Holding vetoes are independent exits, even without an ordinary sell threshold. */
-export const hasQualityExit = (group: QualityGroup) => !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0;
+export const hasQualityExit = (group: QualityGroup) => group.combo ? !!group.rule : !!group.rule || !!group.mirrorTakeProfit?.enabled || activeHoldingVetoes(group.holdingVetoes).length > 0;
 export interface QualitySample {
   id: string; source: TradeSignal; groups: string[]; enteredAt: number | null;
   basis: 'capture' | 'detected' | 'signal' | 'missing'; importedAt: number;
@@ -58,7 +72,7 @@ export interface QualityResult {
   mirrorFill?: QualityMirrorFill; remainingFraction?: number; realizedPnl?: number;
   exitReading?: number;
   pendingExit?: QualityTrigger;
-  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean };
+  exitSnapshot?: { barOpenTime: number; observedAt: number; previous?: { at: number; reading: number }; cause?: QualityExitCause; atOpen?:boolean; stage?: 'before' | 'after' };
 }
 /** Drawdowns are nonnegative losses; an absent measurement is never a measured zero. */
 /** 持仓否决试验的版本号：同步过的方案为 v3（止损价成交），旧试验保持 v2。 */
@@ -214,6 +228,7 @@ export function importQualityLibrary(study: FishQualityStudy, signals: readonly 
 export const qualityResultKey = (s: QualitySample, g: QualityGroup, hours: number) => {
   const identity: unknown[] = [s.signalId ?? s.id, s.enteredAt, g.id, g.rule ?? null, hours, g.snapshot.definitionKey, g.snapshot.statistic, g.snapshot.interval, g.snapshot.scale, g.snapshot.H];
   if (g.execution === 'intrabar-1m') identity.push('intrabar-1m-v1');
+  const combo = qualityComboIdentity(g); if (combo) identity.push(combo);
   // v3：回撤止损改为盘中触及按止损价成交（2026-10-26），旧结果需要重算
   const vetoes=holdingVetoIdentity(g.holdingVetoes);if(vetoes.length)identity.push([qualityVetoVersion(g),vetoes]);
   if (mirrorIdentity(g.mirrorTakeProfit).length) identity.push(mirrorIdentity(g.mirrorTakeProfit));
@@ -265,7 +280,8 @@ export function selectMinedRows(study: FishQualityStudy): FishQualityStudy {
   fresh.forEach(r => selected.add(r.id));
   return { ...study, selectedRowIds: [...selected], minedAutoSelected: [...done, ...new Set(fresh.map(r => r.signalId!))] };
 }
-export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ?? study.groups;
+/** 参与运行的卖出方案；还没设前段门槛的组合方案不跑（否则只是重复登记 CDA 那套的买入）。 */
+export const qualityRunGroups = (study: FishQualityStudy) => study.sellPlans ? study.sellPlans.filter(p => !p.combo || !!p.rule) : study.groups;
 export function qualityExitSuggestions(group: QualityGroup): { label: string; rule: QualityExitRule }[] {
   const t = group.snapshot.threshold, direction: '<' | '>' = group.snapshot.direction === '<' ? '>' : '<';
   return [
@@ -370,21 +386,25 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
     let replayedPrices: ResearchBar[] | undefined;
     let mirrorFill = prior?.mirrorFill;
     if (!trigger) {
-      const rule = group.rule;
+      const rule = group.rule, combo = group.combo;
       if (rule && (!Number.isFinite(rule.threshold) || !['<', '>'].includes(rule.direction))) throw new Error('卖出规则无效');
+      if (combo && (!rule || !(combo.switchPct > 0) || !Number.isFinite(combo.after.rule.threshold) || !['<', '>'].includes(combo.after.rule.direction))) throw new Error('组合卖出规则无效：前段、后段门槛与分水岭都要设置');
       const { plan, scale } = rule ? qualityMetricPlan(group.snapshot, rule.metric) : { plan: pp, scale: 1 };
       const vetoes=activeHoldingVetoes(group.holdingVetoes);
       vetoes.forEach(validateHoldingVeto);
-      if (group.execution === 'intrabar-1m' || vetoes.length || group.mirrorTakeProfit?.enabled) {
+      if (group.execution === 'intrabar-1m' || vetoes.length || group.mirrorTakeProfit?.enabled || combo) {
         let holding;
-        if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled) {
+        // 组合卖出要跟踪最高价（判断是否已过分水岭），与回撤否决、镜像止盈共用同一条持仓路径
+        if(vetoes.some(v=>v.kind!=='indicator') || group.mirrorTakeProfit?.enabled || combo) {
           const initial=prior?.entryPrice ? undefined : await load(row,entry,entry+QUALITY_MINUTE,pp,signal);
           if(initial)validateFishBars(initial,entry+QUALITY_MINUTE,1,QUALITY_MINUTE);
           const entryPrice=prior?.entryPrice??initial![0].open;
           holding={entry:entryPrice,peak:entryPrice*(1+(prior?.peakPct??0)/100),minimum:entryPrice*(1+(prior?.adversePct??0)/100),dynamic:prior?.drawdownPct??0};
         }
-        const conditions=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
-        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill });
+        const conditions:QualityIntrabarCondition[]=vetoes.filter(v=>v.kind==='indicator').map(v=>({...qualityMetricPlan(v.snapshot!,v.metric),rule:{direction:v.direction,threshold:v.threshold},cause:{id:v.id,label:v.label,kind:v.kind,direction:v.direction,threshold:v.threshold}}));
+        if (combo) conditions.push({ ...qualityMetricPlan(combo.after.snapshot, combo.after.rule.metric), rule: { direction: combo.after.rule.direction, threshold: combo.after.rule.threshold }, stage: 'after' as const });
+        const replay = await findQualityIntrabarExit({ row,plan,scale,rule,entry,since,end,resumed:!!prior,load,signal,conditions,vetoes,holding,mirror:group.mirrorTakeProfit,mirrorFill,
+          ...(combo ? { ruleStage: 'before' as const, switchPct: combo.switchPct } : {}) });
         trigger = replay.trigger; replayedPrices = replay.prices; mirrorFill = replay.mirrorFill;
       } else if (rule) {
         let cursor = Math.floor(since / plan.step) * plan.step;
@@ -452,8 +472,11 @@ export async function evaluateQualitySample(sample: QualitySample, group: Qualit
       heldHours: (finalTime - entry) / 3_600_000, complete: closed || end >= limit && !trigger,
       exitReading: closed ? trigger!.reading : undefined,
       pendingExit: !closed ? trigger : undefined,
-      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen} : undefined,
-      reason: closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
+      exitSnapshot: trigger?.barOpenTime != null ? {barOpenTime:trigger.barOpenTime,observedAt:trigger.at,previous:trigger.previous,cause:trigger.cause,atOpen:trigger.atOpen,...(trigger.stage ? { stage: trigger.stage } : {})} : undefined,
+      reason: closed && trigger?.cause?.kind === 'mirror-take-profit' ? '镜像止盈：全部币数已按止盈价卖出' : closed && !trigger?.cause && trigger?.stage && group.combo ? (trigger.stage === 'after'
+        ? `组合卖出：涨幅已达 ${group.combo.switchPct}%，按 ${group.combo.after.label} ${group.combo.after.rule.direction} ${group.combo.after.rule.threshold} 盘中复原达标，下一分钟开盘卖出`
+        : `组合卖出：涨幅未达 ${group.combo.switchPct}%，按 ${group.combo.beforeLabel} ${group.rule!.direction} ${group.rule!.threshold} 盘中复原达标，下一分钟开盘卖出`)
+        : closed && trigger?.cause ? `一票否决：${trigger.cause.label} ${trigger.cause.direction} ${trigger.cause.threshold}${trigger.cause.kind==='indicator'?'':'%'}；${trigger.atOpen?'开盘跳空越线，按当分钟开盘价卖出':stopFill != null?'盘中触及止损价，按止损价卖出':'按下一分钟开盘价卖出'}` : closed ? group.execution === 'intrabar-1m' ? '盘中指标按已完成分钟复原，首次达标时按下一分钟开盘价卖出' : '指标收盘确认，下一分钟开盘卖出' : trigger ? '指标已触发，等待下一分钟开盘数据' : end < limit ? mirrorFill ? `镜像止盈已卖出初始币数 ${mirrorFill.fraction * 100}%，剩余 ${(1 - mirrorFill.fraction) * 100}% 持有中` : '持有中' : '观察期结束仍持有，记录期末浮盈' };
   } catch (error) {
     abort(signal);
     return { ...base, status: 'error', reason: error instanceof Error ? error.message : '行情读取失败' };
@@ -512,7 +535,7 @@ export async function collectFishQuality(options: QualityRunOptions, load: FishR
   const { study, signal } = options, previous = new Map<string, QualityResult>(options.mode === 'restart' ? [] : study.results.map(r => [r.key, r]));
   const filtersOnly = options.task === 'filter' || options.task !== 'monitor' && onlyQualityFilters(study);
   const tasks = study.sellPlans
-    ? qualityRunSamples(study).flatMap(s => study.sellPlans!.map(g => ({ s, g })))
+    ? qualityRunSamples(study).flatMap(s => qualityRunGroups(study).map(g => ({ s, g })))
     : study.samples.flatMap(s => s.groups.map(id => ({ s, g: study.groups.find(g => g.id === id)! }))).filter(v => v.g);
   // 【用户要求】2026-10-26「运行完的币种，结果要立即显示出来」：按界面顺序挑下一行，同一行的几条卖出规则连着算完
   const pending = new Map<string, { s: QualitySample; g: QualityGroup }[]>();

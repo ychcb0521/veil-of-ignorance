@@ -18,6 +18,8 @@ export interface QualityTrigger {
   fillPrice?: number; fillPeak?: number;
   /** Indicator candle being observed; its eventual close is never read. */
   barOpenTime?: number;
+  /** 组合卖出：触发的是前段（分水岭前）还是后段（分水岭后）的卖出条件。 */
+  stage?: 'before' | 'after';
   previous?: { at: number; reading: number };
 }
 const sum = (a: number | null | undefined,b: number | null | undefined) => a != null && b != null && Number.isFinite(a) && Number.isFinite(b) ? a + b : null;
@@ -43,17 +45,21 @@ function minuteTransport(plan: FishProgram): FishProgram {
 
 export interface QualityIntrabarCondition {
   plan: FishProgram; scale: number; rule: {direction:QualityOperator;threshold:number}; cause?:QualityExitCause;
+  /** 组合卖出的分段：before 只在涨幅未过分水岭时生效，after 只在之后生效；缺省 = 全程（持仓否决）。 */
+  stage?: 'before' | 'after';
 }
 export async function findQualityIntrabarExit(o: {
   row: TradeSignal; plan: FishProgram; scale: number; rule?: { direction:'<'|'>';threshold:number };
   entry: number; since: number; end: number; resumed: boolean; load: FishReconstructionLoader; signal: AbortSignal;
   mirror?: QualityMirrorTakeProfit; mirrorFill?: QualityMirrorFill;
   conditions?: QualityIntrabarCondition[]; vetoes?: readonly QualityHoldingVeto[]; holding?:QualityHoldingPath;
+  /** 组合卖出：主规则属于哪一段；switchPct = 分水岭（最高价比买入价高出的百分比）。 */
+  ruleStage?: 'before' | 'after'; switchPct?: number;
 }): Promise<{ trigger?: QualityTrigger; prices: ResearchBar[]; mirrorFill?: QualityMirrorFill }> {
   const {signal}=o;
   // Check all conditions on the SAME chronological observations. Never search one
   // condition to the end and accidentally overlook an earlier veto from another.
-  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule}]:[])];
+  const inputs:QualityIntrabarCondition[]=[...[...(o.conditions??[])].sort((a,b)=>(a.cause?.id??'').localeCompare(b.cause?.id??'')),...(o.rule?[{plan:o.plan,scale:o.scale,rule:o.rule,stage:o.ruleStage}]:[])];
   const streams=[];
   for(const c of inputs) {
     if (!(c.plan.step>=MINUTE) || c.plan.step%MINUTE!==0) throw new Error('盘中复原要求指标周期为整数分钟');
@@ -64,6 +70,12 @@ export async function findQualityIntrabarExit(o: {
     streams.push({...c,start,history,cache:createFormulaEvaluationCache(),partial:undefined as ResearchBar|undefined,previous:undefined as QualityTrigger['previous']});
   }
   let holding=o.holding, mirrorFill=o.mirrorFill;
+  if(o.switchPct!=null&&!holding) throw new Error('组合卖出缺少买入价和持仓路径');
+  /**
+   * 是否已过分水岭：持仓中（含当前这一分钟）最高价比买入价高出 switchPct%。
+   * 在每分钟收盘时判断，所以分水岭那一分钟的收盘起就按后段条件；续算时由已记下的最大涨幅还原。
+   */
+  const switched=()=>o.switchPct!=null&&!!holding&&holding.peak>=holding.entry*(1+o.switchPct/100)*(1-1e-12);
   const enabled = activeHoldingVetoes(o.vetoes);
   const risk=enabled.filter(v=>v.kind==='static-drawdown'||v.kind==='dynamic-drawdown').sort((a,b)=>a.id.localeCompare(b.id));
   const drops=enabled.filter(v=>minuteDropWindow(v.kind)>0).sort((a,b)=>a.id.localeCompare(b.id));
@@ -95,13 +107,15 @@ export async function findQualityIntrabarExit(o: {
     if(at>=checkFrom) {const trigger=checkRisk(at,holding);if(trigger)return trigger;}
     if(drop)return drop;
     let error:string|undefined;
+    const after=switched();
     for(const s of streams) {
+      if(s.stage==='before'&&after||s.stage==='after'&&!after)continue;
       const bars=s.partial?[...s.history,s.partial]:s.history;
       const out=evaluateOnBars(bars,s.plan.compiled,s.plan.def,s.cache).vars.get(s.plan.averageName);
       const reading=(typeof out==='number'?out:out?.[bars.length-1]??NaN)*s.scale;
       if(!Number.isFinite(reading)) {error??=`盘中指标存在缺失读数：${o.row.symbol}，入场 ${formatUTC8(o.entry)}，观测 ${formatUTC8(at)}；不能越过缺口判断成交`;continue;}
       // A confirmed veto closes immediately; later conditions need not also qualify or finish evaluating.
-      if(at>=checkFrom&&qualityConditionMet(reading,s.rule.direction,s.rule.threshold))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause};
+      if(at>=checkFrom&&qualityConditionMet(reading,s.rule.direction,s.rule.threshold))return {at,reading,barOpenTime:s.partial?.openTime??s.history.at(-1)!.openTime,previous:s.previous,cause:s.cause,...(s.stage?{stage:s.stage}:{})};
       s.previous={at,reading};
     }
     if(error)throw new Error(error);

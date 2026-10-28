@@ -17,10 +17,44 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
   }; });
   return { ...study, sellPlans };
 }
+/**
+ * 【用户要求】2026-10-27「卖出算法组合1」：状态 S 与 CDA 组合使用——前半段用 CDA，价格涨幅超过 5.1% 之后用状态 S。
+ * 打开鱼质量时补建一次（useFishQuality 的加载流程；新研究、已有研究都走这里）（之后可改门槛与分水岭、可设自己的买入过滤与持仓否决）：两段门槛沿用当时 S、CDA 两套方案的卖出门槛
+ * （CDA 没设过门槛时组合先不启用，持仓否决单独存在也不启用——组合必须有前段门槛才算），
+ * 买入过滤与持仓否决沿用 CDA 方案（前段指标）的，便于与它对照。
+ */
+export const QUALITY_SELL_COMBO_ID = 'sell-combo-1';
+export function ensureQualitySellCombo(study: FishQualityStudy): FishQualityStudy {
+  const plans = study.sellPlans;
+  if (!plans || plans.some(p => p.id === QUALITY_SELL_COMBO_ID)) return study;
+  const state = plans.find(p => p.snapshot.featureId === STATE_DEF.id && !p.combo), cda = plans.find(p => p.snapshot.featureId === CDA_DEF.id && !p.combo);
+  if (!state || !cda) return study;
+  const combo: QualityGroup = {
+    ...structuredClone(cda), id: QUALITY_SELL_COMBO_ID, label: '卖出算法组合1',
+    // CDA 方案设过门槛才沿用（直接可用）；没设过就先「设置门槛」，在组合的卖出设置里应用后才开始算
+    rule: cda.rule ? { ...cda.rule } : undefined,
+    combo: { switchPct: 5.1, beforeLabel: 'CDA', after: { label: '状态 S', metric: state.metric, snapshot: structuredClone(state.snapshot),
+      rule: state.rule ? { ...state.rule } : { metric: state.metric, direction: '<', threshold: state.snapshot.threshold } } },
+    buyFilters: cda.buyFilters ? structuredClone(cda.buyFilters) : study.buyFilters ? structuredClone(study.buyFilters) : undefined,
+    holdingVetoes: cda.holdingVetoes ? structuredClone(cda.holdingVetoes) : undefined,
+  };
+  return { ...study, sellPlans: [...plans, combo] };
+}
 /** Refresh only the active experiments. Callers archive existing results BEFORE changing definitions. */
 export function syncQualitySellDefinitions(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): FishQualityStudy {
   let changed = false;
-  const sellPlans = study.sellPlans?.map(plan => {
+  const syncAfter = (plan: QualityGroup): QualityGroup => {
+    // 组合方案后段（状态 S）同样跟当前账号公式
+    if (!plan.combo) return plan;
+    const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.combo!.after.snapshot.featureId);
+    if (!builtin) return plan;
+    const def = definitions.find(d => d.id === builtin.id) ?? builtin, key = definitionKey({ ...def, interval: '5m' });
+    const after = plan.combo.after;
+    if (after.snapshot.definitionKey === key && after.snapshot.interval === '5m') return plan;
+    changed = true;
+    return { ...plan, combo: { ...plan.combo, after: { ...after, snapshot: { ...after.snapshot, definitionKey: key, interval: '5m', scale: 1, statistic: after.metric, H: undefined, featureName: def.name, featureShort: def.short } } } };
+  };
+  const sellPlans = study.sellPlans?.map(syncAfter).map(plan => {
     // 回撤否决改为止损价成交（2026-10-26）：同步时给方案打上新版本，旧试验已在调用方先归档
     if (plan.vetoFill !== 'stop') { changed = true; plan = { ...plan, vetoFill: 'stop' as const }; }
     const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.snapshot.featureId);
@@ -37,7 +71,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
   });
   return changed ? { ...study, sellPlans } : study;
 }
-export const qualitySellSuggestions = (plan: QualityGroup) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
+export const qualitySellSuggestions = (plan: Pick<QualityGroup, 'snapshot'>) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
 export function qualityResultMap(study: FishQualityStudy) { return new Map(study.results.map(r => [r.key, r])); }
 export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours));
 export function qualityBatchRows(study: FishQualityStudy): QualitySample[] {

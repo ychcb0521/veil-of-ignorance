@@ -163,7 +163,7 @@ it('freezes old trials before applying holding vetoes, reruns selected rows and 
  const veto=makeQualityHoldingVeto('static-drawdown','>=',10);
  act(()=>(() => { h.result.current.setFilters([]); h.result.current.setHoldingVetoes(id, [veto]); })());await flush(600);
  // 持仓否决仍只归这一套卖出方案；买前过滤不参与。
- expect(tasks.at(-1)!.study.sellPlans!.map(p=>p.holdingVetoes?.[0]?.threshold)).toEqual([10,undefined]);
+ expect(tasks.at(-1)!.study.sellPlans!.filter(p=>!p.combo).map(p=>p.holdingVetoes?.[0]?.threshold)).toEqual([10,undefined]);
  expect(h.result.current.study.campaignRuns![0].plan.holdingVetoes).toBeUndefined();
  const latestPlan=tasks.at(-1)!.study.sellPlans![0];expect(qualityResultKey(row,latestPlan,0)).not.toBe(result.key);
  act(()=>old.onResult({...result,returnPct:999}));expect(h.result.current.study.results[0].returnPct).toBe(10);

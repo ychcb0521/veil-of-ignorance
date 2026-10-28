@@ -10,7 +10,8 @@ export interface QualityVariable<T> { id: string; label: string; levels: T[] }
 export function qualityVariables<T extends QualityGroup | QualityBuyFilter>(items: readonly T[]): QualityVariable<T>[] {
   const variables = new Map<string, QualityVariable<T>>();
   for (const item of items) {
-    const id = qualityVariableKey(item.snapshot, item.metric), found = variables.get(id);
+    // 组合卖出（前段指标与 CDA 相同）是独立的一套算法，不并进它前段指标的那一组
+    const id = 'combo' in item && item.combo ? `combo:${item.id}` : qualityVariableKey(item.snapshot, item.metric), found = variables.get(id);
     if (found) found.levels.push(item);
     else variables.set(id, { id, label: item.label, levels: [item] });
   }
