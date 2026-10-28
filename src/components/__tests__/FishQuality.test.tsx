@@ -734,7 +734,9 @@ it('explains unavailable filtering and provides a resume/retry action that reuse
  const {makeQualityBuyFilter}=await import('@/lib/fish/qualityFilters');
  const s=state();s.study=separateQualityFilters(s.study);const h=render(<FishQuality state={s}/>);
  expect(screen.getByRole('button',{name:'开始过滤'})).toBeDisabled();
- fireEvent.click(screen.getByRole('button',{name:'未设置过滤条件 · 点此设置'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
+ // 旁边已有「条件设置」，不再另写「未设置过滤条件 · 点此设置」；原因放在按钮悬停里
+ expect(screen.queryByText(/点此设置/)).toBeNull();expect(screen.getByRole('button',{name:'开始过滤'})).toHaveAttribute('title','先设置并启用买入过滤条件');
+ fireEvent.click(screen.getByRole('button',{name:'买入过滤条件'}));expect(screen.getByTestId('quality-buy-filter-editor')).toBeVisible();
  cleanup();s.study.buyFilters=[makeQualityBuyFilter('state:state','>',.7)];s.filterProgress={done:1857,total:2054,current:''};
  render(<FishQuality state={s}/>);fireEvent.click(screen.getByRole('button',{name:'继续过滤'}));expect(s.startFilter).toHaveBeenCalledOnce();expect(s.start).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'继续过滤'})).toHaveAttribute('title',expect.stringContaining('有效读数直接复用'));
  cleanup();render(<FishQuality state={{...s,filterError:'本轮还有 2 项缺数据'}}/>);expect(screen.getByRole('button',{name:'重试缺数据'})).toBeEnabled();expect(screen.getByRole('alert')).toHaveTextContent('2 项');
