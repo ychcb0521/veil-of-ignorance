@@ -12,9 +12,10 @@ const averages = (formula: string, core: string) => `${formula}\navg_${core} = a
 function bars(n=760): ResearchBar[] { let c=100, btc=50000; return Array.from({length:n},(_,i)=>{const open=c;c*=Math.exp(.002*Math.sin(i/9)-.0002);btc*=Math.exp(.0003*Math.cos(i/13));const q=10000*(1.5+.4*Math.sin(i/11));return {openTime:i*300000,open,close:c,high:Math.max(open,c)*1.001,low:Math.min(open,c)*.999,volume:q/c,quoteVolume:q,takerBuyVolume:null,takerBuyQuoteVolume:q*(.5+.3*Math.sin(i/7)),refClose:btc};}); }
 const arr=(x:unknown,n:number)=>typeof x==='number'?new Float64Array(n).fill(x):x as Float64Array;
 const pair=Object.entries(SELLER_FEATURE_CORES);
+const legacyPair=pair.filter(([id])=>!['mbi-bear','ctba-bear'].includes(id));
 
 describe('卖方负值口径',()=>{
- it.each(pair)('%s 原值、两种均值逐位取负，绝对值、缺值及全部中间测量保持不变；升级幂等', (id,core)=>{
+ it.each(legacyPair)('%s 原值、两种均值逐位取负，绝对值、缺值及全部中间测量保持不变；升级幂等', (id,core)=>{
   const builtin=BUILTIN_FEATURES.find(d=>d.id===id)!,data=bars(),formula=averages(plain(builtin.formula),core);
   const legacy={...builtin,sellerSignVersion:undefined,formula}, migrated=mergeFeatureDefs([legacy]).find(d=>d.id===id)!;
   const old=evaluateOnBars(data,compileFeatureFormula(formula)),out=evaluateOnBars(data,compileFeatureFormula(migrated.formula));
@@ -27,7 +28,7 @@ describe('卖方负值口径',()=>{
   const prefix=evaluateOnBars(data.slice(0,600),compileFeatureFormula(migrated.formula));
   for(const name of outputs)expect(arr(prefix.vars.get(name),600)).toEqual(arr(out.vars.get(name),data.length).slice(0,600));
  });
- it.each(pair)('%s：> T 与 < −T 的捕捞逐根条件、预热、起点一致', (id,core)=>{
+ it.each(legacyPair)('%s：> T 与 < −T 的捕捞逐根条件、预热、起点一致', (id,core)=>{
   const builtin=BUILTIN_FEATURES.find(d=>d.id===id)!,data=bars(),formula=averages(plain(builtin.formula),core);
   const oldDef={...builtin,sellerSignVersion:undefined,formula},newDef=mergeFeatureDefs([oldDef]).find(d=>d.id===id)!;
   for(const statistic of ['结果',core,`avg_${core}`,`avg_${core}_2`]){
@@ -39,7 +40,7 @@ describe('卖方负值口径',()=>{
    expect(cb.outcome).toBe(ca.outcome);expect(cb.signal?.timeMs).toBe(ca.signal?.timeMs);expect(cb.boundaryMs).toBe(ca.boundaryMs);
   }
  });
- it.each(pair)('%s：已知假到真的越线起点在原值和两种均值上精确保留', (id,core)=>{
+ it.each(legacyPair)('%s：已知假到真的越线起点在原值和两种均值上精确保留', (id,core)=>{
   const builtin=BUILTIN_FEATURES.find(d=>d.id===id)!;
   const data=bars(1000).map((b,i)=>{const close=i<970?1:2;return {...b,open:close,close,high:close+1,low:close/2}});
   const oldDef={...builtin,sellerSignVersion:undefined,formula:averages(`${core} = C`,core)},nextDef=mergeFeatureDefs([oldDef]).find(d=>d.id===id)!;
@@ -72,8 +73,12 @@ describe('卖方负值口径',()=>{
  });
  it.each(pair)('%s 新增卡默认使用负门槛和 <；买方定义与偏好不变',id=>{
   expect(readFishPreference(id).direction).toBe('<');
-  if (['seller-push', 'seller-control'].includes(id)) expect(readFishPreference(id).threshold).toBe('');
+  if (['seller-push', 'seller-control', 'mbi-bear', 'ctba-bear'].includes(id)) expect(readFishPreference(id).threshold).toBe('');
   else expect(Number(readFishPreference(id).threshold)).toBeLessThan(0);
   const buyer=BUILTIN_FEATURES.find(d=>d.id==='bss')!;expect(mergeFeatureDefs([buyer]).find(d=>d.id==='bss')!.formula).toBe(buyer.formula);
  });
+});
+
+it.each(['mbi-bear','ctba-bear'])('%s response v2 is already seller-negative and must not be sign-flipped on reload',id=>{
+ const builtin=BUILTIN_FEATURES.find(d=>d.id===id)!;expect(mergeFeatureDefs([{...builtin,sellerSignVersion:undefined}]).find(d=>d.id===id)!.formula).toBe(builtin.formula);
 });

@@ -14,6 +14,7 @@
 
 import { computeCtbaSeries, type CtbaParams } from '@/lib/ctba';
 import { computeMbi } from '@/lib/mbi';
+import { sellerResponse } from '@/lib/sellerResponse';
 
 export type Value = number | Float64Array;
 
@@ -37,6 +38,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'tanh', min: 1, max: 1, usage: 'tanh(x)', help: '双曲正切：把任意数平滑压到 −1 ~ 1（0 → 0，±1 → ±0.76，±2 → ±0.96）' },
   { name: 'ctba', min:17, max:17, usage:'ctba(C,H,L,E,B,S,T,N,f,s,m,lambda,epsilon,alpha,beta,gamma,part)', help:'CTBA 共享核心：part 0/1/2/3/4/5 为 T/M/F/CTBA/无成交/完整性；仅5m，缺失不补零' },
   { name: 'mbiz', min: 2, max: 2, usage: 'mbiz(C, MBI_N)', help: 'MBI 的无趋势标准差偏离 z：α = 1/n，κ = 1/√(α·(2−α))；先用上一根 M、S 算 z 再更新。前 5n 根为空，只用正收盘价，不补零。MBI = tanh(z / MBI_Z0)' },
+  { name: 'seller_response', min: 3, max: 3, usage: 'seller_response(x, gain, scale)', help: '负向响应：x≥0 原样保留；x<0 返回 scale·tanh(gain·atanh(x/scale))。gain>0、scale>0，缺失和越界保持缺失；0仍为平衡，不改变任何窗口，默认增益2。' },
   { name: 'abs', min: 1, max: 1, usage: 'abs(x)', help: '绝对值' },
   { name: 'sqrt', min: 1, max: 1, usage: 'sqrt(x)', help: '平方根' },
   { name: 'sign', min: 1, max: 1, usage: 'sign(x)', help: '正 1、负 −1、零 0' },
@@ -674,6 +676,11 @@ function call(name: string, args: Value[], line: number, barMinutes: number, res
       const n = scalarArg(y, 'mbiz', '衰减周期', line);
       if (!Number.isSafeInteger(n) || n < 1) throw new FormulaError('MBI_N 必须是正整数（K 线根数）', line);
       return isSeries(x) ? computeMbi(x, { MBI_N: n }).z : Number.NaN;
+    }
+    case 'seller_response': {
+      const gain=scalarArg(y,'seller_response','负向增益',line),scale=scalarArg(z,'seller_response','输出尺度',line);
+      if (!(gain>0) || !(scale>0) || !Number.isFinite(gain) || !Number.isFinite(scale)) throw new FormulaError('负向增益和输出尺度必须为有限正数',line);
+      return map1(x,v=>sellerResponse(v,gain,scale),resume);
     }
     case 'sqrt': return map1(x, v => clean(Math.sqrt(v)), resume);
     case 'sign': return map1(x, v => (Number.isNaN(v) ? Number.NaN : Math.sign(v)), resume);

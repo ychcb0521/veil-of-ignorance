@@ -71,12 +71,12 @@ describe('independent feature definitions and live consumers', () => {
     const copy = copyFeatureDefinition(source, BUILTIN_FEATURES, 404);
     localStorage.setItem(key, JSON.stringify([copy]));
     const item = researchIndicatorForFeature(copy);
-    expect(item).toMatchObject({ core: source.chartCore, seller: true, max: 0 });
-    expect(item.avgRange?.[1]).toBe(0);
+    expect(item).toMatchObject({ core: source.chartCore, seller: true }); expect(item.max).toBe(source.id==='mbi-bear'?1:100);
+    expect(item.avgRange?.[1]).toBe(item.max);
     const actual = researchChartSeries(candles(1900), item, item.period, { fetchReference: false });
     const expected = evaluateOnBars(bars(1900), compileFeatureFormula(copy.formula), copy).vars.get(source.chartCore!) as Float64Array;
     expect(actual.core.at(-1)).toBeCloseTo(expected.at(-1)!, 10);
-    expect(actual.core.filter(v => v != null).every(v => v! <= 0)).toBe(true);
+    expect(actual.core.some(v => v != null && v > 0)).toBe(true); expect(actual.core.some(v => v != null && v < 0)).toBe(true);
   });
   it('legacy CBI and CBA-2 chart selections reset saved parameters without duplicate menu entries', () => {
     const copies = BUILTIN_FEATURES.filter(d => ['cbi','cba-2'].includes(d.id)).map(d => ({ ...d, builtin: undefined, halfLifeHours: 3, formula: d.formula.replace(/^h\s*=\s*\d+/m,'h = 3') }));

@@ -29,7 +29,8 @@ export function computeCtbaSeries(b:CtbaInput, p:CtbaParams={...CTBA_DEFAULTS}) 
     if(gap){ef=es=NaN;emaCount=0;}
     const e=b.E[t], prior=t>0?b.E[t-1]:NaN;
     if(e>0&&Number.isFinite(e)){
-      const x=Math.log(e);ef=Number.isFinite(ef)?af*x+(1-af)*ef:x;es=Number.isFinite(es)?as*x+(1-as)*es:x;emaCount++;
+      // Equivalent EMA recurrence; a constant log price must not accumulate a fast/slow rounding spread.
+      const x=Math.log(e);ef=Number.isFinite(ef)?ef+af*(x-ef):x;es=Number.isFinite(es)?es+as*(x-es):x;emaCount++;
       if(!gap&&prior>0&&Number.isFinite(prior))returns[t]=Math.log(e/prior);
     }else{ef=es=NaN;emaCount=0;}
     if(t>=p.N-1 && missing===0 && b.time[t]-b.time[t-p.N+1]===(p.N-1)*300000){

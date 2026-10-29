@@ -65,7 +65,7 @@ export interface DeepDigFeatureDef extends MbiParams {
   createdAt?: number;
   /** Fixed chart semantics copied at creation; formulas and parameters never read the original feature. */
   chartTemplate?: string;
-  /** The independent raw series, including one-sided seller variants. */
+  /** The independent raw series, including seller-sensitive variants. */
   chartCore?: string;
 }
 
@@ -76,6 +76,7 @@ export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'C
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
 export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
 const SELLER_SIGN_MARK = '# seller-negative-v1';
+export const BEAR_RESPONSE_MARK = '# seller-response-v2';
 
 /** Flip the completed output arrays, never inputs or intermediate physics. */
 export function sellerNegativeFormula(formula: string, core: string): string {
@@ -98,6 +99,7 @@ export function sellerNegativeFormula(formula: string, core: string): string {
 }
 
 export function upgradeSellerSign<T extends { id: string; formula: string; sellerSignVersion?: 1 }>(def: T): T {
+  if (['mbi-bear','ctba-bear'].includes(def.id) && /\bseller_response\s*\(/.test(def.formula)) return def.sellerSignVersion === 1 ? def : { ...def, sellerSignVersion: 1 };
   if (!isSellerFeature(def.id) || def.sellerSignVersion === 1) return def;
   try { return { ...def, formula: sellerNegativeFormula(def.formula, SELLER_FEATURE_CORES[def.id]), sellerSignVersion: 1 }; }
   catch { return def; } // Keep invalid user formulas editable; do not replace them with a default.
@@ -783,22 +785,44 @@ export const CDA_DEF: DeepDigFeatureDef = {
 export const CTBA_DEF: DeepDigFeatureDef = { id:'ctba', name:'CTBA｜趋势买方优势', short:'CTBA', definition:CTBA_DESCRIPTION, formula:ctbaFormula(), scale:1, unit:'', positive:DEFAULT_POSITIVE, control:DEFAULT_CONTROL, source:'campaigns', groupVars:2, builtin:true, interval:'5m' };
 
 
-/** One-sided seller readings: positive buyer readings become zero; missing values stay missing. */
-function bearFeatureFormula(source: string, original: string, core: string): string {
-  const formula = source + '\n' + core + ' = min(' + original + ', 0)';
+/** Response changes amplitude only; original measurement, parameters, warm-up and averages stay intact. */
+function bearFeatureFormula(source: string, original: string, core: string, scale = 1, response = false): string {
+  const formula = source + '\n' + (response ? `${BEAR_RESPONSE_MARK}\nseller_gain = 2\n${core} = seller_response(${original}, seller_gain, ${scale})` : `${core} = min(${original}, 0)`);
   const names = new Set(compileFeatureFormula(formula).program.statements.flatMap(s => s.name ? [s.name] : []));
   return appendResearchAverages(formula, names, { core, avg: 'avg_' + core, avg2: 'avg_' + core + '_2' }) + '\n' + core + ' = ' + core;
 }
+export const LEGACY_MBI_BEAR_FORMULA = bearFeatureFormula(MBI_FORMULA, 'MBI', 'MBI_bear');
+export const LEGACY_CTBA_BEAR_FORMULA = bearFeatureFormula(CTBA_DEF.formula, 'CTBA', 'CTBA_bear');
+const LEGACY_MBI_BEAR_DEFINITION = 'MBI 空方趋势 = min(MBI, 0)，范围 −1～0。空方越强读数越负；原 MBI 为正时记 0，缺失值不补零。沿用 MBI 的收盘价格、衰减周期、饱和尺度及预热规则；各自保存公式和参数。';
+const LEGACY_CTBA_BEAR_DEFINITION = 'CTBA 空方趋势 = min(CTBA, 0)，范围 −100～0。空方趋势越强读数越负；原 CTBA 为正时记 0，缺失值不补零。沿用已收盘 5m 的趋势位置、VWAP 动能及主动成交金额；各自保存公式和参数。';
 export const MBI_BEAR_DEF: DeepDigFeatureDef = {
   ...MBI_DEF, id: 'mbi-bear', name: 'MBI 空方趋势', short: 'MBI·空方', chartTemplate: 'mbi', chartCore: 'MBI_bear', sellerSignVersion: 1,
-  definition: 'MBI 空方趋势 = min(MBI, 0)，范围 −1～0。空方越强读数越负；原 MBI 为正时记 0，缺失值不补零。沿用 MBI 的收盘价格、衰减周期、饱和尺度及预热规则；各自保存公式和参数。',
-  formula: bearFeatureFormula(MBI_FORMULA, 'MBI', 'MBI_bear'),
+  definition: 'MBI 空方趋势 v2：0 为多空平衡，卖方优势用负值、买方优势用正值，保留 −1～1 双向刻度。正值原样保留；负值在 tanh 压缩前施加 seller_gain（默认 2），增强弱卖方信号，保持零轴、衰减周期、饱和尺度、预热及均值窗口不变。MBI=−0.5 时空方读数为−0.8；缺失值不补零。增益可在公式中修改。',
+  formula: bearFeatureFormula(MBI_FORMULA, 'MBI', 'MBI_bear', 1, true),
 };
 export const CTBA_BEAR_DEF: DeepDigFeatureDef = {
   ...CTBA_DEF, id: 'ctba-bear', name: 'CTBA 空方趋势', short: 'CTBA·空方', chartTemplate: 'ctba', chartCore: 'CTBA_bear', sellerSignVersion: 1,
-  definition: 'CTBA 空方趋势 = min(CTBA, 0)，范围 −100～0。空方趋势越强读数越负；原 CTBA 为正时记 0，缺失值不补零。沿用已收盘 5m 的趋势位置、VWAP 动能及主动成交金额；各自保存公式和参数。',
-  formula: bearFeatureFormula(CTBA_DEF.formula, 'CTBA', 'CTBA_bear'),
+  definition: 'CTBA 空方趋势 v2：0 为趋势位置、VWAP 动能及主动成交金额的综合平衡，卖方优势为负、买方优势为正，保留 −100～100 双向刻度。正值原样保留；负值在外层 tanh 压缩前施加 seller_gain（默认 2）。CTBA=−50 时空方读数为−80。全部窗口、权重、5m 已收盘规则、预热和均值窗口保持不变，缺失值不补零；增益可在公式中修改。',
+  formula: bearFeatureFormula(CTBA_DEF.formula, 'CTBA', 'CTBA_bear', 100, true),
 };
+/** Upgrade just the retired clipping assignment on the two built-ins; edited parameters/averages and independent copies survive. */
+export function upgradeBearResponse(d: DeepDigFeatureDef): DeepDigFeatureDef {
+  const entry = d.id === 'mbi-bear' ? { original:'MBI', core:'MBI_bear', scale:1, target:MBI_BEAR_DEF, description:LEGACY_MBI_BEAR_DEFINITION }
+    : d.id === 'ctba-bear' ? { original:'CTBA', core:'CTBA_bear', scale:100, target:CTBA_BEAR_DEF, description:LEGACY_CTBA_BEAR_DEFINITION } : undefined;
+  if (!entry || /\bseller_response\s*\(/.test(d.formula)) return d;
+  try {
+    const names = new Set(compileFeatureFormula(d.formula).program.statements.flatMap(s=>s.name?[s.name]:[]));
+    let gain='seller_gain';while(names.has(gain))gain+='_';
+    const pattern = new RegExp('^\\s*'+entry.core+'\\s*=\\s*min\\(\\s*'+entry.original+'\\s*,\\s*0(?:\\.0*)?\\s*\\)\\s*(?:#.*)?$');
+    let changed=false;
+    const formula=d.formula.split('\n').map(line=>{
+      if(!pattern.test(line))return line;
+      const prefix=changed?'':`${BEAR_RESPONSE_MARK}\n${gain} = 2\n`;changed=true;
+      return `${prefix}${entry.core} = seller_response(${entry.original}, ${gain}, ${entry.scale})`;
+    }).join('\n');
+    return changed ? {...d,formula,sellerSignVersion:1,definition:d.definition===entry.description?entry.target.definition:d.definition} : d;
+  } catch { return d; }
+}
 
 export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF];
 
@@ -841,7 +865,7 @@ export function saveFeatureDefinition(saved: readonly DeepDigFeatureDef[], next:
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
   saved = saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility);
-  const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d))))]));
+  const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBearResponse(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d)))))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   // 历史内置名称随系统更新，用户自定义的名称保持原样。

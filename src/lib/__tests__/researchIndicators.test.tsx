@@ -58,7 +58,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
         if (['MBI_BEAR', 'CTBA_BEAR'].includes(item.id)) {
-          expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(0);
+          expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(item.max);
         } else { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
         expect(reg.precision).toBeGreaterThanOrEqual(8);
       }

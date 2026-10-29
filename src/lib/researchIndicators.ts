@@ -21,8 +21,8 @@ export const RESEARCH_INDICATORS = [
   { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', short: 'DSP·bc', name: '卖方控制力 DSP·bc', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
-  { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 0, avgRange: [-1, 0], seller: true },
-  { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 0, avgRange: [-100, 0], seller: true },
+  { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
+  { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 100, avgRange: [-100, 100], seller: true },
 ] as const;
 export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
@@ -68,7 +68,7 @@ export function accountResearchIndicators(definitions: readonly DeepDigFeatureDe
   return items;
 }
 /** Saved research changes reset the scalar once; later chart edits remain possible. */
-export function syncResearchIndicatorConfigs<T extends { type: string; period: number; featureDefinitionVersion?: number }>(configs: readonly T[], definitions: readonly DeepDigFeatureDef[]): T[] {
+export function syncResearchIndicatorConfigs<T extends { type: string; period: number; featureDefinitionVersion?: number; featureWindowPeriod?: number }>(configs: readonly T[], definitions: readonly DeepDigFeatureDef[]): T[] {
   const items = accountResearchIndicators(definitions);
   let changed = false;
   const next = configs.map(config => {
@@ -77,10 +77,12 @@ export function syncResearchIndicatorConfigs<T extends { type: string; period: n
     const item = items.find(item => item.id === config.type || config.type === 'DSP' && item.id === 'DSP_VA') ?? (legacyDef ? researchIndicatorForFeature(legacyDef) : undefined);
     if (!item) return config;
     const version = researchDefinitionVersion(item);
-    if (config.featureDefinitionVersion === version) return config;
+    const response = ['mbi-bear','ctba-bear'].includes(item.featureId) && /\bseller_response\s*\(/.test(definitions.find(d=>d.id===item.featureId)?.formula ?? '');
+    if (config.featureDefinitionVersion === version && (!response || config.featureWindowPeriod === item.period)) return config;
     changed = true;
-    const reset = config.featureDefinitionVersion != null || hasSavedFeatureDefinition(item.featureId);
-    return { ...config, period: reset ? researchDefaultPeriod(item) : config.period, ...(reset ? { avgHours: 24 } : {}), featureDefinitionVersion: version };
+    const preserveResponseWindow = response && (config.featureWindowPeriod == null || config.featureWindowPeriod === item.period);
+    const reset = !preserveResponseWindow && (config.featureDefinitionVersion != null || hasSavedFeatureDefinition(item.featureId));
+    return { ...config, period: reset ? researchDefaultPeriod(item) : config.period, ...(reset ? { avgHours: 24 } : {}), featureDefinitionVersion: version, ...(response ? {featureWindowPeriod:item.period} : {}) };
   });
   return changed ? next : configs as T[];
 }

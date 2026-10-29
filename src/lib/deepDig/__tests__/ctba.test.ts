@@ -31,7 +31,7 @@ it('EMA is span-based on true log VWAP; M uses sample standard deviation of m lo
  const b=input(),out=computeCtbaSeries(b,params);let fast=Math.log(b.E[0]),slow=fast;
  for(let i=1;i<b.E.length;i++){fast=2/(params.f+1)*Math.log(b.E[i])+(1-2/(params.f+1))*fast;slow=2/(params.s+1)*Math.log(b.E[i])+(1-2/(params.s+1))*slow;}
  const r=[47,48,49].map(i=>Math.log(b.E[i]/b.E[i-1])),mean=r.reduce((a,x)=>a+x,0)/3,sd=Math.sqrt(r.reduce((a,x)=>a+(x-mean)**2,0)/2);
- expect(out.M[49]).toBe((fast-slow)/(sd+params.epsilon));
+ expect(out.M[49]).toBeCloseTo((fast-slow)/(sd+params.epsilon),9);
  const old=out.M[49];b.C.fill(1);expect(computeCtbaSeries(b,params).M[49]).toBe(old);
  for(const direction of [1,-1]){const trend=input();trend.E=Float64Array.from(trend.E,(_,i)=>100*Math.exp(direction*.01*i));expect(Math.sign(computeCtbaSeries(trend,params).M[49])).toBe(direction);}
 });
@@ -103,4 +103,9 @@ it.skipIf(!process.env.CTBA_REAL_INPUT)('real historical signal sample',async()=
  const dense=Object.values(result.series.anchorWindows!)[0];expect(Array.from(dense.values.CTBA).every(Number.isFinite)).toBe(true);
  console.info('CTBA real',JSON.stringify({symbol:input.metadata.symbol,time:input.metadata.timeLabel,values:result.data.rows[0].vars}));
  if(process.env.CTBA_REAL_OUTPUT)writeFileSync(process.env.CTBA_REAL_OUTPUT,JSON.stringify({...result,metadata:input.metadata},(_k,v)=>v instanceof Float64Array||v instanceof Float32Array?Array.from(v):v,2));
+});
+
+it('has no artificial momentum at an exactly flat true VWAP, retaining every original window and weight',()=>{
+ const b=input(1900);b.C.fill(100);b.H.fill(101);b.L.fill(99);b.E.fill(100);b.B.fill(50);b.S.fill(50);
+ const out=computeCtbaSeries(b);expect(out.T.at(-1)).toBe(0);expect(out.M.at(-1)).toBe(0);expect(out.F.at(-1)).toBe(0);expect(out.CTBA.at(-1)).toBe(0);
 });
