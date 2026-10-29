@@ -1,5 +1,5 @@
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
-import { featureTemplateId, featureUsesMbi, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureUsesMbiFamily, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
@@ -23,7 +23,10 @@ export const RESEARCH_INDICATORS = [
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
   { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 100, avgRange: [-100, 100], seller: true },
+  { id:'MBI2',featureId:'mbi2',core:'MBI2',short:'MBI2',name:'MBI2 迈克尔买方优势（可调版）',period:25*5/60,parameter:'日历时长',parameterUnit:'h',neutral:0,min:-1,max:1,avgRange:[-1,1],components:['MBI2_state','MBI2_lead_h','MBI2_confirm_h'],seller:false },
   { id:'CTBA_12H',featureId:'ctba_12h',core:'CTBA',short:'CTBA-12H',name:'CTBA-12H｜趋势买方优势（12小时）',period:144,parameter:'窗口根数',parameterUnit:'根',neutral:0,neutralLabel:'0｜综合均衡基准',min:-CTBA_ABSOLUTE_BOUND,max:CTBA_ABSOLUTE_BOUND,avgRange:[-CTBA_ABSOLUTE_BOUND,CTBA_ABSOLUTE_BOUND],components:['T','M','F'],seller:false },
+  { id:'MBI2_BEAR',featureId:'mbi2-bear',core:'MBI2_bear',short:'MBI2·卖方',name:'MBI2 卖方趋势（可调版）',period:25*5/60,parameter:'日历时长',parameterUnit:'h',neutral:0,min:-1,max:1,avgRange:[-1,1],components:['MBI2_bear_state','MBI2_bear_lead_h','MBI2_bear_confirm_h'],seller:true },
+  { id:'CTBA_12H_BEAR',featureId:'ctba_12h-bear',core:'CTBA_12H_bear',short:'CTBA-12H·卖方',name:'CTBA-12H 卖方趋势（12小时）',period:144,parameter:'窗口根数',parameterUnit:'根',neutral:0,neutralLabel:'0｜综合均衡基准',min:-100,max:100,avgRange:[-100,100],components:['T','M','F'],seller:true },
 ] as const;
 export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
@@ -204,7 +207,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate];
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate, ...(def&&featureUsesMbi2(def)?[def.MBI2_T_HOURS,def.MBI2_Z0,def.MBI2_BAND,def.MBI2_CONFIRM]:[])];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
@@ -262,7 +265,7 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   // Establish lineage even while the first worker request is still pending.
   if (continuous) displayHistory(data);
   if (generation == null) return finish(calculateChartSeries(data, item, period, options));
-  const mbiKey = def && featureUsesMbi(def) ? `|${def?.MBI_N}|${def?.MBI_Z0}` : '';
+  const mbiKey = def && featureUsesMbi(def) ? `|${def?.MBI_N}|${def?.MBI_Z0}` : def&&featureUsesMbi2(def)?`|${def.MBI2_T_HOURS}|${def.MBI2_BAND}|${def.MBI2_CONFIRM}` : '';
   const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}${mbiKey}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
@@ -295,7 +298,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
-    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbi(def) ? step / 60000 : 5), step) : EMPTY_HISTORY;
+    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbiFamily(def) ? step / 60000 : 5), step,featureUsesMbi2(def)||item.featureId==='ctba_12h-bear'?item.featureId:undefined) : EMPTY_HISTORY;
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
       const revision = dataRevision(data), cached = extendedData.get(data);
@@ -340,10 +343,10 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const mbiStep = (featureUsesMbi(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
+  const mbiStep = (featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
   const scaled = (name: string, multiply = true) => Array.from({ length: visibleLength }, (_, i) => {
     // Live MBI never publishes a candle that has not closed yet.
-    if ((featureUsesMbi(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
+    if ((featureUsesMbiFamily(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
     const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * (multiply ? def.scale : 1);
   });
   const components=item.components?{components:Object.fromEntries(item.components.map(name=>[name,scaled(name,false)]))}:{};
@@ -355,4 +358,9 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2'),...components });
   }
   return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
+}
+
+/** Only an untouched MBI2 chart default follows the timeframe with n=25; manual hours stay calendar-fixed. */
+export function syncMbi2ChartHours<T extends {type:string;period:number;mbi2AutoHours?:boolean}>(configs:readonly T[],definitions:readonly DeepDigFeatureDef[],minutes:number):T[] {
+ return configs.map(c=>{const featureId=c.type==='MBI2'?'mbi2':c.type==='MBI2_BEAR'?'mbi2-bear':null;const def=definitions.find(d=>d.id===featureId);return featureId&&c.mbi2AutoHours&&def?.MBI2_T_HOURS==null&&c.period!==25*minutes/60?{...c,period:25*minutes/60}:c;});
 }

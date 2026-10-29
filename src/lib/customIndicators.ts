@@ -15,6 +15,7 @@ import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { MBI_N } from '@/lib/mbi';
+import { mbi2StateLabel } from '@/lib/mbi2';
 import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin, ctbaChartParameterText } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
@@ -1477,7 +1478,16 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
-          if(item.id==='CTBA_12H'){
+          if(item.id==='MBI2'||item.id==='MBI2_BEAR'){
+            const row=indicator.result[crosshair?.dataIndex??indicator.result.length-1] as Record<string,number>|undefined;
+            const fmt=(v:number|undefined)=>v==null||!Number.isFinite(v)?'—':v.toFixed(4);
+            return {name:label,calcParamsText:`(${indicator.calcParams[0]}h)`,icons:defaultStyles.tooltip.icons,values:[
+              {title:item.short+': ',value:{text:fmt(row?.value),color:vColor(row?.value)}},
+              {title:'状态: ',value:mbi2StateLabel(row?.[item.core+'_state'])},
+              {title:'本轮小时: ',value:fmt(row?.[item.core+'_lead_h'])},{title:'确认小时: ',value:fmt(row?.[item.core+'_confirm_h'])},
+            ]};
+          }
+          if(item.id==='CTBA_12H'||item.id==='CTBA_12H_BEAR'){
             const row=indicator.result[crosshair?.dataIndex ?? indicator.result.length-1] as Record<string,number|undefined>|undefined;
             const format=(value:number|undefined,digits:number)=>value==null||!Number.isFinite(value)?'—':(Math.abs(value)<.5*10**-digits?0:value).toFixed(digits);
             return {name:label,calcParamsText:ctbaChartParameterText(item.featureId,indicator.calcParams[0])+` · 参数版本 ${researchDefinitionVersion(item).toString(16)}`,icons:defaultStyles.tooltip.icons,
@@ -1497,7 +1507,7 @@ export function registerCustomIndicators() {
         calc: (dataList, indicator) => {
           const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
           const rows = indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
-          return item.id === 'CTBA_12H' ? rows.map((row, i) => ({ ...row,
+          return ('components' in item) ? rows.map((row, i) => ({ ...row,
             ...Object.fromEntries(item.components.map(name => [name, values.components?.[name]?.[i] ?? undefined])),
           })) : rows;
         },

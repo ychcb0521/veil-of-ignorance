@@ -1,4 +1,7 @@
-import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
+import { Mbi2EvaluationView } from './Mbi2EvaluationView';
+import { mbi2KeysOf, MBI2_LABELS, MBI2_TOOLTIP, mbi2NOf, mbi2StateLabel } from '@/lib/mbi2';
+import { intervalMs } from '@/lib/deepRsa/marketData';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
 /**
  * Deep dig · 一个特征值的页面：定义区（可编辑）+ 运行 + 描述统计 / 推断统计 / 规律提取（纯展示，不取数）。
  * 【用户要求】2026-10-16「描述统计包括：分组以及各组对应的数据，以及细节描述；推断统计包括基于不同统计方法的过程及结果；
@@ -445,6 +448,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
   const shown = expanded ? listed : listed.slice(0, ROWS_PREVIEW);
   return (
     <div className="space-y-6" data-testid="deep-dig-describe">
+      {featureUsesMbi2(def)&&raw.mbi2Evaluation&&<Mbi2EvaluationView report={raw.mbi2Evaluation}/>}
       <Block title="分组" aside={(
         <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-groups-var">
           按 <span className="font-mono text-foreground">{X}</span> 统计{varName ? `（公式里的变量）· 原值 × ${def.scale}` : def.unit ? ` · 单位 ${def.unit}` : ''} ·{' '}
@@ -486,7 +490,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
 
       <Block title="时间序列" aside={(
         <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-series-span">
-          {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘5m时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
+          {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘{intervalOf(def)}时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
         </span>
       )} testId="deep-dig-series-block">
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />
@@ -520,7 +524,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
             <li key={g}><span className={GROUP_TONE[g]}>{groupLabel(g, def.source)}</span>：{groupNote(def, g)}</li>
           ))}
           <li>
-            {featureUsesMbi(def) ? <>{X} 只用已收盘 <N>{intervalOf(def)}</N> 价格，n = <N>{mbiNOf(def)}</N>、z₀ = <N>{mbiZ0Of(def)}</N>；48 小时分析窗之前另取 <N>{5 * mbiNOf(def)}</N> 根预热，预热读数为空。avg_MBI_2 与 CBI2 共用近到远 4∶3∶2∶1 分段加权；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</> : <>{X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</>}
+            {featureUsesMbi2(def)?<>{def.short} 只用已收盘价格；n={mbi2NOf(def,intervalMs(intervalOf(def))/60000)}，z₀=1.25，分析窗48小时，另取5n根预热；状态在缓冲带内保持，确认只在穿过对侧缓冲带时撤销。</>:featureUsesMbi(def) ? <>{X} 只用已收盘 <N>{intervalOf(def)}</N> 价格，n = <N>{mbiNOf(def)}</N>、z₀ = <N>{mbiZ0Of(def)}</N>；48 小时分析窗之前另取 <N>{5 * mbiNOf(def)}</N> 根预热，预热读数为空。avg_MBI_2 与 CBI2 共用近到远 4∶3∶2∶1 分段加权；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</> : <>{X} 按上面的公式，在进场前 <N>{featureWindowMs(def) / 3_600_000}</N> 小时的已收盘 <N>{intervalOf(def)}</N> K 线上逐根算（半衰期 hl = <N>{halfLifeOf(def)}</N> 小时、平均时长 avgh = <N>{avgHoursOf(def)}</N> 小时）、取最后一根；算不出来的记缺失（<N>{c.featureMissing}</N> 个）</>}
             {c.failed > 0 && <>，K 线没取到的 <N>{c.failed}</N> 个</>}。
           </li>
           {at !== 0 && <li>现在看的是 <span className="text-[#C27C0E] dark:text-[#F59E0B]">{atText}</span> 那一刻的值：取那一刻之前最后一根已收盘 K 线上的读数（时间序列曲线上的点）{at > 0 ? '，用到了进场后的数据，用于事后分析' : ''}；后续推断统计也使用这个时点的数据。</li>}
@@ -556,8 +560,8 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
               <tr className="border-b border-border text-muted-foreground">
                 <th className={TH}>时间<span className="max-sm:hidden">（北京）</span></th>
                 <th className={TH}>标的</th>
-                <th className={TH}>{X}</th>
-                {featureUsesMbi(def) && [def.chartCore ?? 'MBI', 'avg_' + (def.chartCore ?? 'MBI') + '_2'].filter(name => name !== X).map(name => <th key={name} className={TH} title={MBI_TOOLTIP}>{name}</th>)}
+                <th className={TH}>{featureUsesMbi2(def)?MBI2_LABELS[X]??X:X}</th>
+                {(featureUsesMbi(def)||featureUsesMbi2(def)) && (featureUsesMbi2(def)?[...mbi2KeysOf(def)]:[def.chartCore ?? 'MBI', 'avg_' + (def.chartCore ?? 'MBI') + '_2']).filter(name => name !== X).map(name => <th key={name} className={TH} title={featureUsesMbi2(def)?MBI2_TOOLTIP:MBI_TOOLTIP}>{featureUsesMbi2(def)?MBI2_LABELS[name]??name:name}</th>)}
                 <th className={TH}>24h 期末</th>
                 <th className={cn(TH, 'max-sm:hidden')}>24h 最大涨</th>
                 <th className="w-6" aria-label="删除" />
@@ -588,9 +592,9 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
                       </span>
                     </td>
                     <td className={cn(TD, 'font-mono tabular-nums', signTone(r.v))}>{bp(r.v)}</td>
-                    {featureUsesMbi(def) && [def.chartCore ?? 'MBI', 'avg_' + (def.chartCore ?? 'MBI') + '_2'].filter(name => name !== X).map(name => {
+                    {(featureUsesMbi(def)||featureUsesMbi2(def)) && (featureUsesMbi2(def)?[...mbi2KeysOf(def)]:[def.chartCore ?? 'MBI', 'avg_' + (def.chartCore ?? 'MBI') + '_2']).filter(name => name !== X).map(name => {
                       const value = at === 0 ? r.vars?.[name] : liveSeries ? valueAt(liveSeries, r.id, name, at) : null;
-                      return <td key={name} className={cn(TD, 'font-mono tabular-nums', signTone(value))} title={MBI_TOOLTIP}>{fmtValue(def, value)}</td>;
+                      return <td key={name} className={cn(TD, 'font-mono tabular-nums', signTone(value))} title={featureUsesMbi2(def)?MBI2_TOOLTIP:MBI_TOOLTIP}>{featureUsesMbi2(def)&&name.endsWith('_state')?mbi2StateLabel(value):fmtValue(def, value)}</td>;
                     })}
                     <td className={cn(TD, 'font-mono tabular-nums', retTone(r.endRet))}>{pct(r.endRet)}</td>
                     <td className={cn(TD, 'font-mono tabular-nums text-muted-foreground max-sm:hidden')}>{pct(r.maxUp)}</td>

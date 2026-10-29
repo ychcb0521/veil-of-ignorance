@@ -14,7 +14,7 @@
 
 import { computeCtbaSeries, type CtbaParams } from '@/lib/ctba';
 import { computeMbi } from '@/lib/mbi';
-import { computeMbi2 } from '@/lib/mbi2';
+import { computeMbi2Core, mbi2States } from '@/lib/mbi2';
 import { sellerResponse } from '@/lib/sellerResponse';
 
 export type Value = number | Float64Array;
@@ -38,6 +38,7 @@ export const FUNCTIONS: readonly FunctionSpec[] = [
   { name: 'exp', min: 1, max: 1, usage: 'exp(x)', help: 'e 的 x 次方' },
   { name: 'tanh', min: 1, max: 1, usage: 'tanh(x)', help: '双曲正切：把任意数平滑压到 −1 ~ 1（0 → 0，±1 → ±0.76，±2 → ±0.96）' },
   { name: 'ctba', min:17, max:17, usage:'ctba(C,H,L,E,B,S,T,N,f,s,m,lambda,epsilon,alpha,beta,gamma,part)', help:'CTBA 共享核心：part 0/1/2/3/4/5 为 T/M/F/CTBA/无成交/完整性；仅5m，缺失不补零' },
+  { name:'mbi2state',min:5,max:5,usage:'mbi2state(MBI2,T,BAND,CONFIRM,part)',help:'MBI2 严格缓冲状态机：part 0/1/2/3/4 为状态/本轮小时/确认小时/买方试探开始/买方进入确认；缺失不补零' },
   { name: 'mbiz2', min:2, max:2, usage:'mbiz2(C, MBI2_N)', help:'MBI2 独立复制的价格偏离核心；前5n根保持缺失' },
   { name: 'mbiz', min: 2, max: 2, usage: 'mbiz(C, MBI_N)', help: 'MBI 的无趋势标准差偏离 z：α = 1/n，κ = 1/√(α·(2−α))；先用上一根 M、S 算 z 再更新。前 5n 根为空，只用正收盘价，不补零。MBI = tanh(z / MBI_Z0)' },
   { name: 'seller_response', min: 3, max: 3, usage: 'seller_response(x, gain, scale)', help: '负向响应：x≥0 原样保留；x<0 返回 scale·tanh(gain·atanh(x/scale))。gain>0、scale>0，缺失和越界保持缺失；0仍为平衡，不改变任何窗口，默认增益2。' },
@@ -674,9 +675,16 @@ function call(name: string, args: Value[], line: number, barMinutes: number, res
       if(!Number.isInteger(part)||part<0||part>5)throw new FormulaError('CTBA 分量编号无效',line);
       return [out.T,out.M,out.F,out.CTBA,out.noTrade,out.complete][part];
     }
+    case 'mbi2state': {
+      if(!isSeries(x)||!isSeries(y))return NaN;
+      const band=scalarArg(args[2],'mbi2state','BAND',line),confirm=scalarArg(args[3],'mbi2state','CONFIRM',line),part=scalarArg(args[4],'mbi2state','part',line);
+      if(!Number.isInteger(part)||part<0||part>4)throw new FormulaError('MBI2 状态分量编号无效',line);
+      const out=mbi2States(x,barMinutes,{MBI2_BAND:band,MBI2_CONFIRM:confirm},y);
+      return [out.state,out.lead,out.confirm,out.buyStarts,out.buyConfirms][part];
+    }
     case 'mbiz2': {
       const n = scalarArg(y, 'mbiz2', '衰减周期', line);
-      return isSeries(x) ? computeMbi2(x, { MBI2_N:n }).z : Number.NaN;
+      return isSeries(x) ? computeMbi2Core(x,n).z : Number.NaN;
     }
     case 'mbiz': {
       const n = scalarArg(y, 'mbiz', '衰减周期', line);

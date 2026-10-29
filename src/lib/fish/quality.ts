@@ -180,6 +180,7 @@ export function qualityDefinition(f: FishSnapshot): DeepDigFeatureDef {
     interval: (f.interval ?? extra.find(v => /^\d+[mhdwM]$/.test(v)) ?? '5m') as ResearchInterval,
     halfLifeHours: numeric('hl=', 6), avgHours: numeric('avgh=', 24),
     chartTemplate: extra.find(v => v.startsWith('chart='))?.slice(6),
+    ...(/\bmbiz2\s*\(/.test(saved[0])?{MBI2_T_HOURS:numeric('MBI2_T_HOURS=',25*5/60),MBI2_Z0:numeric('MBI2_Z0=',1.25),MBI2_BAND:numeric('MBI2_BAND=',.2),MBI2_CONFIRM:numeric('MBI2_CONFIRM=',.8)}:{}),
     ...(f.featureId === 'mbi' || /\bmbiz\s*\(/.test(saved[0]) ? { MBI_N: numeric('MBI_N=', 25), MBI_Z0: numeric('MBI_Z0=', 1.25) } : {}),
   };
 }

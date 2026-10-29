@@ -32,7 +32,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
   it.each(RESEARCH_INDICATORS)('$id 三条序列逐根等于账号的 Deep dig 公式，原值不被末尾加权结果替代，显示倍数只乘一次', item => {
     const k = klines(); const def = BUILTIN_FEATURES.find(d => d.id === item.featureId)!;
     const formula = accountFormula(def.formula, item.core); saved([{ ...def, formula }]);
-    const expected = evaluateOnBars(researchBars(k), compileFeatureFormula(formula));
+    const expected = evaluateOnBars(researchBars(k), compileFeatureFormula(formula),['MBI2','MBI2_BEAR'].includes(item.id)?def:undefined);
     const actual = researchChartSeries(k, item, item.period, { fetchReference: false });
     for (const [series, name] of [[actual.core, item.core], [actual.avg, `avg_${item.core}`], [actual.avg2, `avg_${item.core}_2`]] as const) {
       for (let i = 0; i < k.length; i++) {
@@ -57,7 +57,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
-        if (['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H'].includes(item.id)) {
+        if (['MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H','MBI2_BEAR','CTBA_12H_BEAR'].includes(item.id)) {
           expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(item.max);
         } else { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
         expect(reg.precision).toBeGreaterThanOrEqual(8);
@@ -98,7 +98,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
 
   it('添加时沿用已保存的基线、半衰期及公式常数', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576, 144]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576, 25*5/60, 144, 25*5/60, 144]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {
@@ -165,4 +165,17 @@ it('CTBA-12H fixes a symmetric zero axis, displays real T/M/F and preserves miss
   const convertToPixel=vi.fn(()=>50);
   reg.draw({ctx,bounding:{width:600,height:100},yAxis:{convertToPixel}});
   expect(convertToPixel).toHaveBeenCalledWith(0); expect(ctx.fillText).toHaveBeenCalledWith('0｜综合均衡基准',8,46.5);
+});
+
+it.each(['MBI2_BEAR','CTBA_12H_BEAR'])('%s registers raw/avg/avg2, a fixed zero and its own component tooltips',id=>{
+  const item=RESEARCH_INDICATORS.find(i=>i.id===id)!,k=klines(1500),series=researchChartSeries(k,item,item.period,{fetchReference:false});
+  if(!('components' in item))throw Error('Expected component metadata for '+id);
+  for(const level of [0,1,2]){
+    const reg=mock.registered.get(researchKcName(id,level));expect(reg.minValue).toBe(-reg.maxValue);
+    const result=reg.calc(k,{calcParams:[item.period,0,0]});
+    for(const name of item.components!)expect(result.at(-1)[name]).toBe(series.components![name].at(-1));
+    const before=structuredClone(result.at(-1)),tooltip=reg.createTooltipDataSource({indicator:{result,calcParams:[item.period,0,0]},defaultStyles:{tooltip:{icons:[]}},crosshair:{dataIndex:k.length-1}});
+    expect(tooltip.values).toHaveLength(4);expect(result.at(-1)).toEqual(before);
+    if(id==='CTBA_12H_BEAR')expect(tooltip.calcParamsText).toContain('EMA 8/24');
+  }
 });

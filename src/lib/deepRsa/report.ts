@@ -16,6 +16,8 @@ export interface CampaignGroupRow {
   campaignId: string;
   symbol: string;
   title: string;
+  endMs?:number|null;
+  direction?:string;
   anchorMs: number | null;
   theoreticalB: number | null;
   payoffRatio: number | null;
@@ -44,6 +46,7 @@ export function buildCampaignGroupReport(rows: readonly CardRow[], correctionsCo
       campaignId: row.campaign.id,
       symbol: row.campaign.symbol,
       title: row.campaign.title,
+      endMs:row.campaign.closed_at?Date.parse(row.campaign.closed_at):null,direction:row.campaign.direction,
       anchorMs: input.anchorMs,
       theoreticalB: input.theoreticalB,
       payoffRatio: input.payoffRatio,

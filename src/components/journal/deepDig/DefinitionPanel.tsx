@@ -1,4 +1,5 @@
-import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
+import { mbi2HoursOf, mbi2NOf, mbi2BandOf, mbi2ConfirmOf, type Mbi2Params } from '@/lib/mbi2';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
 /**
  * Deep dig 特征值的定义区：平时显示定义、公式、分组标准；点「编辑定义」就地改。
  * 【用户要求】2026-10-16「每个特征值的这里都可以人为输入定义概念、公式、分组标准，然后运行的时候，就按照这里的公式提取因变量，
@@ -386,13 +387,14 @@ export function FormulaEditor({ def, onSave }: { def: DeepDigFeatureDef; onSave:
   );
 }
 
-type ParamValue = { id?: string; formula?: string; chartTemplate?: string; interval: ResearchInterval; halfLifeHours: number; avgHours: number; MBI_N?: number; MBI_Z0?: number };
-const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ id: d.id, formula: d.formula, chartTemplate: d.chartTemplate, interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d), ...(featureUsesMbi(d) ? { MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) } : {}) });
+type ParamValue = Mbi2Params & { id?: string; formula?: string; chartTemplate?: string; interval: ResearchInterval; halfLifeHours: number; avgHours: number; MBI_N?: number; MBI_Z0?: number };
+const paramsOf = (d: DeepDigFeatureDef): ParamValue => ({ id: d.id, formula: d.formula, chartTemplate: d.chartTemplate, interval: intervalOf(d), halfLifeHours: halfLifeOf(d), avgHours: avgHoursOf(d), ...(featureUsesMbi2(d)?{MBI2_T_HOURS:d.MBI2_T_HOURS,MBI2_Z0:d.MBI2_Z0,MBI2_BAND:d.MBI2_BAND,MBI2_CONFIRM:d.MBI2_CONFIRM}:{}), ...(featureUsesMbi(d) ? { MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) } : {}) });
 /** 默认值不写进定义（旧定义没有这几项）。 */
-const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> => ({
+const paramPatch = (v: ParamValue): Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM'> => ({
   interval: v.interval === DEFAULT_INTERVAL ? undefined : v.interval,
   halfLifeHours: v.halfLifeHours === DEFAULT_HALF_LIFE_HOURS ? undefined : v.halfLifeHours,
   avgHours: v.avgHours === DEFAULT_AVG_HOURS ? undefined : v.avgHours,
+  ...(featureUsesMbi2(v)?{MBI2_T_HOURS:v.MBI2_T_HOURS,MBI2_Z0:1.25,MBI2_BAND:mbi2BandOf(v),MBI2_CONFIRM:mbi2ConfirmOf(v)}:{}),
   ...(featureUsesMbi(v) ? { MBI_N: mbiNOf(v), MBI_Z0: mbiZ0Of(v) } : {}),
 });
 const fmtBars = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
@@ -470,6 +472,13 @@ export function KlineSettings({ value, onChange, uses, testId }: {
           ))}
         </div>
       </div>
+      {featureUsesMbi2(value)&&<div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-border/70 bg-muted/30 px-2 py-2" data-testid={`${testId}-mbi2`}>
+        <label>日历时长 <input key={`hours-${mbi2HoursOf(value,intervalMs(value.interval)/60000)}`} aria-label="MBI2_T_HOURS" className={cn(INPUT,'w-24 font-mono')} type="number" min="0.0001" step="any" defaultValue={mbi2HoursOf(value,intervalMs(value.interval)/60000)}
+          onBlur={e=>{const h=Number(e.target.value);if(Number.isFinite(h)&&h>0)onChange({...value,MBI2_T_HOURS:h});else e.target.value=String(mbi2HoursOf(value,intervalMs(value.interval)/60000));}}/> 小时</label>
+        <output aria-label="MBI2_N">n = {mbi2NOf(value,intervalMs(value.interval)/60000)} 根（派生）</output>
+        {(['MBI2_BAND','MBI2_CONFIRM'] as const).map(key=><label key={key}>{key==='MBI2_BAND'?'缓冲带半宽':'确认阈值'} <input key={key+'-'+value[key]} aria-label={key} className={cn(INPUT,'w-20 font-mono')} type="number" min="0" max="0.9999" step="0.05" defaultValue={key==='MBI2_BAND'?mbi2BandOf(value):mbi2ConfirmOf(value)} onBlur={e=>{const n=Number(e.target.value),band=key==='MBI2_BAND'?n:mbi2BandOf(value),confirm=key==='MBI2_CONFIRM'?n:mbi2ConfirmOf(value);if(Number.isFinite(n)&&band>=0&&band<confirm&&confirm<1)onChange({...value,[key]:n});else e.target.value=String(key==='MBI2_BAND'?mbi2BandOf(value):mbi2ConfirmOf(value));}}/></label>)}
+        <span className="text-muted-foreground">MBI2_Z0 = 1.25 · 预热 {5*mbi2NOf(value,intervalMs(value.interval)/60000)} 根 · 分析窗48小时</span>
+      </div>}
       {featureUsesMbi(value) && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1.5" data-testid={`${testId}-mbi`}>
         <label className="inline-flex items-center gap-2 text-muted-foreground">衰减周期 n
           <input key={`n-${mbiNOf(value)}`} type="number" min="1" step="1" defaultValue={mbiNOf(value)} aria-label="MBI_N" className={cn(INPUT, 'w-20 font-mono')}
@@ -481,22 +490,22 @@ export function KlineSettings({ value, onChange, uses, testId }: {
         </label>
         <span className="text-[11px] text-muted-foreground">α = 1/{mbiNOf(value)} · 预热 {5 * mbiNOf(value)} 根 · κ = {(mbiNOf(value) / Math.sqrt(2 * mbiNOf(value) - 1)).toFixed(6)}</span>
       </div>}
-      {value.id !== 'mbi' && <HoursPicker
+      {value.id !== 'mbi' && !featureUsesMbi2(value) && <HoursPicker
         label="半衰期" ariaLabel="半衰期" presets={HALF_LIFE_PRESETS} value={value.halfLifeHours} testId={`${testId}-hl`}
         onChange={h => onChange({ ...value, halfLifeHours: h })}
         summary={<>hl = {fmtBars(barsPerHalfLife(value))} 根 {ivLabel} K 线</>}
         unused={uses && !uses.hl ? 'hl' : null}
       />}
-      <HoursPicker
+      {!featureUsesMbi2(value)&&<HoursPicker
         label={featureUsesMbi(value) ? '曲线范围' : '平均时长'} ariaLabel="平均时长" presets={AVG_HOURS_PRESETS} value={value.avgHours} testId={`${testId}-avg`}
         onChange={h => onChange({ ...value, avgHours: h })}
         summary={featureUsesMbi(value) ? <>锚点前后各 {value.avgHours} 小时；均值窗口在公式中设置</> : <>avgh = {barsPerAvg(value)} 根</>}
         unused={value.id !== 'mbi' && uses && !uses.avgh ? 'avgh' : null}
-      />
+      />}
       <div className="flex items-start gap-x-2">
         <span className={PARAM_LABEL} />
         <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-summary`}>
-          {featureUsesMbi(value) ? `取数：分析窗 + ${5 * mbiNOf(value)} 根预热，共 ${Math.round(featureWindowMs(value) / intervalMs(value.interval))} 根已收盘 ${ivLabel} K 线；预热值为空` : `观察窗：进场前 ${windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}的已收盘 ${ivLabel} K 线`}
+          {featureUsesMbi2(value)?`取数：48小时分析窗 + ${5*mbi2NOf(value,intervalMs(value.interval)/60000)} 根预热，共 ${Math.round(featureWindowMs(value)/intervalMs(value.interval))} 根已收盘 ${ivLabel} K线；只观察锚点及以前`:featureUsesMbi(value) ? `取数：分析窗 + ${5 * mbiNOf(value)} 根预热，共 ${Math.round(featureWindowMs(value) / intervalMs(value.interval))} 根已收盘 ${ivLabel} K 线；预热值为空` : `观察窗：进场前 ${windowH >= 48 && windowH % 24 === 0 ? `${windowH / 24} 天` : `${Math.round(windowH)} 小时`}的已收盘 ${ivLabel} K 线`}
         </span>
       </div>
     </div>

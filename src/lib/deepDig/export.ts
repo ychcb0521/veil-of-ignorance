@@ -1,4 +1,5 @@
-import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
+import { mbi2KeysOf } from '@/lib/mbi2';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2, featureParams } from '@/lib/deepDig/features';
 import { formulaVariables } from './features';
 import { DEEP_DIG_GROUPS, describeGroup, fmtValue, groupLabel, type DeepDigData } from './analysis';
 import { formatSeriesOffset } from './series';
@@ -11,13 +12,14 @@ const cell = (value: unknown) => {
 /** Raw doubles, never display-rounded values. Includes every named formula output. */
 export function deepDigCsv(data: DeepDigData): string {
   const { names } = formulaVariables(data.definition.formula);
-  const columns = [...new Set(names)];
-  const params = featureUsesMbi(data.definition) ? ['MBI_N', 'MBI_Z0'] as const : [];
+  const columns = [...new Set(featureUsesMbi2(data.definition)?[...mbi2KeysOf(data.definition),...names]:names)];
+  const params = featureUsesMbi2(data.definition)?['MBI2_T_HOURS','MBI2_N','MBI2_Z0','MBI2_BAND','MBI2_CONFIRM']:featureUsesMbi(data.definition) ? ['MBI_N', 'MBI_Z0'] : [];
+  const values=featureUsesMbi2(data.definition)?featureParams(data.definition):data.definition;
   const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params]];
   for (const row of data.rows) rows.push([
     row.id, row.symbol, new Date(row.anchorMs).toISOString(), (data.sampleOffsetMs ?? 0) / 3600000, groupLabel(row.group, data.definition.source), row.v,
     ...columns.map(name => row.vars?.[name]), row.endRet, row.maxUp, row.maxDown,
-    ...params.map(name => data.definition[name]),
+    ...params.map(name => (values as Record<string,unknown>)[name]),
   ]);
   return '\uFEFF' + rows.map(row => row.map(cell).join(',')).join('\r\n');
 }
@@ -25,9 +27,9 @@ export function deepDigCsv(data: DeepDigData): string {
 /** A compact image report shares exactly the same group summaries as the UI. */
 export function deepDigImageRows(data: DeepDigData) {
   const core = data.definition.chartCore ?? 'MBI';
-  const names = featureUsesMbi(data.definition) ? [core, 'avg_' + core + '_2'] : [formulaVariables(data.definition.formula).result];
+  const names = featureUsesMbi2(data.definition)?[...mbi2KeysOf(data.definition)]:featureUsesMbi(data.definition) ? [core, 'avg_' + core + '_2'] : [formulaVariables(data.definition.formula).result];
   return names.flatMap(name => DEEP_DIG_GROUPS.map(group => {
-    const values = data.rows.filter(r => r.group === group).map(r => featureUsesMbi(data.definition) ? r.vars?.[name] : r.v).filter((v): v is number => v != null && Number.isFinite(v));
+    const values = data.rows.filter(r => r.group === group).map(r => (featureUsesMbi(data.definition)||featureUsesMbi2(data.definition)) ? r.vars?.[name] : r.v).filter((v): v is number => v != null && Number.isFinite(v));
     return { name, ...describeGroup(group, values) };
   }));
 }

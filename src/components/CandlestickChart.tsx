@@ -1,6 +1,7 @@
+import { mbi2MinutesOf } from '@/lib/mbi2';
 import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
 import { registerAccountFeatureIndicators } from "@/lib/customIndicators";
-import { syncResearchIndicatorConfigs, accountResearchIndicators } from "@/lib/researchIndicators";
+import { syncResearchIndicatorConfigs, syncMbi2ChartHours, accountResearchIndicators } from "@/lib/researchIndicators";
 /**
  * KlineCharts v9 based candlestick chart with native drawing tools and indicators.
  * Uses applyNewData / updateData / applyMoreData for data feeding.
@@ -165,6 +166,7 @@ const OVERLAY_MAP: Record<string, string> = {
 };
 
 export interface IndicatorConfig {
+  mbi2AutoHours?:boolean;
   type: string;
   period: number;
   featureDefinitionVersion?: number;
@@ -590,7 +592,8 @@ function CandlestickChartComponent({
 
   const [savedIndicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
   const featureDefinitions = useFeatureDefinitions();
-  const indicators = useMemo(() => syncResearchIndicatorConfigs(migrateResearchIndicators(savedIndicators), featureDefinitions), [savedIndicators, featureDefinitions]);
+  const mbi2ChartMinutes=mbi2MinutesOf(data.slice(-65).map(b=>b.time));
+  const indicators = useMemo(() => syncMbi2ChartHours(syncResearchIndicatorConfigs(migrateResearchIndicators(savedIndicators), featureDefinitions),featureDefinitions,mbi2ChartMinutes), [savedIndicators, featureDefinitions,mbi2ChartMinutes]);
   useEffect(() => {
     registerAccountFeatureIndicators(featureDefinitions);
     Object.assign(COMPANION_KC_NAME, Object.fromEntries(Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName])));
@@ -2554,6 +2557,7 @@ function CandlestickChartComponent({
 
           <IndicatorMenu
             open={showIndicatorPanel}
+            mbi2ChartMinutes={mbi2ChartMinutes}
             onClose={() => setShowIndicatorPanel(false)}
             indicators={indicators}
             onIndicatorsChange={setIndicators}

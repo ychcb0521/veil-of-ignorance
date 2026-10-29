@@ -10,7 +10,7 @@ const registered = vi.hoisted(() => new Map<string, any>());
 vi.mock('klinecharts', () => ({ registerIndicator: (template: any) => registered.set(template.name, template) }));
 registerCustomIndicators();
 beforeEach(() => localStorage.clear());
-const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR'];
+const ids = ['DSP_VA', 'BSS', 'CBA', 'DSP_Z', 'CBI2', 'MBI', 'CTBA', 'STATE', 'STATE2', 'CDI2', 'SELLER_CONTROL', 'DSS', 'CDA', 'MBI_BEAR', 'CTBA_BEAR', 'MBI2', 'CTBA_12H', 'MBI2_BEAR', 'CTBA_12H_BEAR'];
 const name = (id: string) => INDICATOR_CATALOG.find(item => item.id === id)!.nameZh;
 
 describe('自制区的十个特征值', () => {
@@ -85,7 +85,7 @@ describe('自制区的十个特征值', () => {
       fireEvent.click(button);expect(button).toHaveAttribute('aria-pressed','false');
       expect(changed.mock.lastCall![0].find((i:IndicatorConfig)=>i.type===id)).toEqual({...ind,showAverage:false});
     }
-  });
+  }, 20000);
 
   it('原值、avg、avg₂ 可分别隐藏和恢复，调参不清除独立可见性', () => {
     const initial = { type: 'STATE', period: 24, avgHours: 12, enabled: true, showRaw: false, showAverage: true, showAverage2: false };

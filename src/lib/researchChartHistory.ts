@@ -10,12 +10,12 @@ export const researchHistoryVersion = () => version;
 export function subscribeResearchHistory(fn: () => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
 export function resetResearchHistory() { entries.clear(); version++; }
 
-export function chartPrehistory(data: KLineData[], bars: number, step: number): KLineData[] {
+export function chartPrehistory(data: KLineData[], bars: number, step: number, namespace?:string): KLineData[] {
   const symbol = data[0]?.researchSymbol;
   const interval = RESEARCH_INTERVALS.find(i => intervalMs(i) === step) as ResearchInterval | undefined;
   if (typeof symbol !== 'string' || !interval || !data.length || !Number.isFinite(bars) || bars <= 0) return [];
   const to = data[0].timestamp, from = Math.max(0, to - Math.ceil(bars) * step);
-  const key = `${symbol}|${interval}|${to}`;
+  const key = `${namespace?namespace+'|':''}${symbol}|${interval}|${to}`;
   let entry = entries.get(key);
   if (!entry) {
     entry = { from: to, bars: [], pending: false, retryAt: 0 };
@@ -39,5 +39,5 @@ export function chartPrehistory(data: KLineData[], bars: number, step: number): 
       for (const fn of listeners) fn();
     }).catch(() => { current.pending = false; current.retryAt = Date.now() + 30_000; });
   }
-  return entry.bars;
+  return namespace?entry.bars.filter(b=>b.timestamp>=from):entry.bars;
 }

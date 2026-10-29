@@ -198,7 +198,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
-    periodHint: `${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: ['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H'].includes(item.id) ? '根' : 'h',
+    periodHint: `${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: ['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) ? '根' : 'h',
     description: item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
@@ -233,13 +233,14 @@ const CATEGORY_LABELS: Record<string, string> = {
 export { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 
 interface Props {
+  mbi2ChartMinutes?:number;
   open: boolean;
   onClose: () => void;
   indicators: IndicatorConfig[];
   onIndicatorsChange: (indicators: IndicatorConfig[]) => void;
 }
 
-export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }: Props) {
+export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange, mbi2ChartMinutes=5 }: Props) {
   const definitions = useFeatureDefinitions();
   const researchItems = useMemo(() => accountResearchIndicators(definitions), [definitions]);
   const [search, setSearch] = useState('');
@@ -368,12 +369,14 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const zscore = item.id === 'DSP_Z' || (item.zHint != null && replaced?.zscore) ? true : undefined;
     const research = researchItems.find(r => r.id === item.id);
     const legacyDef = definitions.find(def => def.id === (item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : ''));
-    const defaultPeriod = research ? researchDefaultPeriod(research) : legacyDef ? chartFeaturePeriod(legacyDef, item.defaultPeriod) : item.defaultPeriod;
-    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
+    const mbi2Feature=item.id==='MBI2'?'mbi2':item.id==='MBI2_BEAR'?'mbi2-bear':null;
+    const mbi2Auto=!!mbi2Feature&&definitions.find(d=>d.id===mbi2Feature)?.MBI2_T_HOURS==null;
+    const defaultPeriod = mbi2Auto?25*mbi2ChartMinutes/60:research ? researchDefaultPeriod(research) : legacyDef ? chartFeaturePeriod(legacyDef, item.defaultPeriod) : item.defaultPeriod;
+    onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(['MBI2','MBI2_BEAR'].includes(item.id)?{mbi2AutoHours:mbi2Auto}:{}), ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
   };
 
   const updatePeriod = (id: string, period: number) => {
-    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, period } : i));
+    onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, period, ...(['MBI2','MBI2_BEAR'].includes(id)?{mbi2AutoHours:false}:{}) } : i));
   };
   const updateAvgHours = (id: string, avgHours: number) => {
     onIndicatorsChange(indicators.map(i => i.type === id ? { ...i, avgHours } : i));
@@ -565,7 +568,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
+              parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H', 'CTBA_12H_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}

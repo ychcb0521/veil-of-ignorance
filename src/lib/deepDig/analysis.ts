@@ -1,4 +1,8 @@
-import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
+import { scanMbi2, finishMbi2Evaluation, recommendMbi2Campaign, type Mbi2StudySample, type Mbi2Evaluation } from './mbi2Evaluation';
+import { extractWindow } from '@/lib/deepRsa/window';
+import { fetchResearchKlines, intervalMs } from '@/lib/deepRsa/marketData';
+import { mbi2NOf } from '@/lib/mbi2';
+import { featureTemplateId, featureUsesMbi, featureUsesMbi2 } from '@/lib/deepDig/features';
 /**
  * Deep dig · 一个特征值的整套统计：按定义里的公式在每个事件的观察窗上算出特征值，按定义里的分组标准分组，
  * 再做描述统计与推断统计；「规律提取」的默认文字也从这里按结果生成。
@@ -33,7 +37,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours' | 'MBI2_T_HOURS' | 'MBI2_Z0' | 'MBI2_BAND' | 'MBI2_CONFIRM'>;
 
 export interface DeepDigRow {
   reason?: string;
@@ -73,6 +77,7 @@ export interface DeepDigGroupStat {
  * 【用户要求】2026-10-16「描述统计和推断统计的运行要分开」：这一步要联网取 K 线（1–3 分钟）；推断统计只用这里的数据。
  */
 export interface DeepDigData {
+  mbi2Evaluation?:Mbi2Evaluation;
   /** 当前推断输入的相对进场取样时点；未指定 = 进场。 */
   sampleOffsetMs?: number;
   definition: DefinitionSnapshot;
@@ -112,7 +117,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi2(def)?{MBI2_T_HOURS:def.MBI2_T_HOURS,MBI2_Z0:def.MBI2_Z0,MBI2_BAND:def.MBI2_BAND,MBI2_CONFIRM:def.MBI2_CONFIRM}:{}), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -197,6 +202,9 @@ export async function collectDeepDigRun(
   const offsets = seriesOffsets(range);
   const { names, result } = formulaVariables(def.formula);
   const byEvent: DeepDigSeries['byEvent'] = {};
+  const mbi2Tuning=featureUsesMbi2(def)&&def.chartCore!=='MBI2_bear';
+  const mbi2Samples:Mbi2StudySample[]=[];
+  const scanHistory=mbi2Tuning?Math.max(featureWindowMs(def),48*3600000+5*mbi2NOf({MBI2_T_HOURS:48},intervalMs(intervalOf(def))/60000)*intervalMs(intervalOf(def))):featureWindowMs(def);
   const anchorWindows: NonNullable<DeepDigSeries['anchorWindows']> = {};
   const compiled = compileFeatureFormula(def.formula);
   const source = def.source ?? 'campaigns';
@@ -209,20 +217,22 @@ export async function collectDeepDigRun(
     // 信号不合簇：每条信号（有时间、有评级）都单独是一个事件，跟有没有交易战役无关
     cluster: source !== 'signals',
     // 【用户要求】周期、半衰期可选：不是默认（5m、48h 观察窗）时另取这个周期的 K 线算特征值
-    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: featureWindowMs(def) } } : {}),
+    ...(intervalOf(def) !== DEFAULT_INTERVAL || featureWindowMs(def) !== WINDOW_MS ? { featureKlines: { interval: intervalOf(def), windowMs: scanHistory } } : {}),
     seriesRange: range,
     // 【用户要求】公式用到 CB（同时段 BTCUSDT 收盘价，CBI-2 剔除 BTC 的动量）时另取 BTC 的 K 线
     ...(compiled.usesBtc ? { referenceSymbol: 'BTCUSDT' } : {}),
     // 只用得到波动率（推断统计的「控制波动」）：不算 Deep RSA 的整套表征
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
-      const { value, vars } = computeFeatureValues(window, compiled, params);
+      const ownWindow=featureUsesMbi2(def)&&window?extractWindow(window.bars,ctx.anchorMs,featureWindowMs(def),intervalMs(intervalOf(def))):window;
+      const { value, vars } = computeFeatureValues(ownWindow, compiled, params);
+      if(mbi2Tuning&&ctx.bars)mbi2Samples.push({id:ctx.id,anchorMs:ctx.anchorMs,group:'other',bars:ctx.bars.filter(b=>b.openTime+intervalMs(intervalOf(def))<=ctx.anchorMs)});
       if(featureTemplateId(def)==='ctba' && window){
         const out=evaluateOnBars(window.bars,compiled,params);
         const windowHours=def.researchWindowHours ?? 48, slots=Math.round(windowHours*12);
         const startMs=Math.floor(ctx.anchorMs/300000)*300000-windowHours*3600000;
         const selected=window.bars.map((bar,i)=>({bar,i})).filter(({bar})=>bar.openTime>=startMs);
-        const values=Object.fromEntries(['CTBA','T','M','F','no_trade','data_complete'].map(name=>{
+        const values=Object.fromEntries(['CTBA','T','M','F','no_trade','data_complete',...(def.id==='ctba_12h-bear'?['CTBA_12H_bear']:[])].map(name=>{
           const dense=new Float64Array(slots).fill(NaN),source=out.vars.get(name);
           if(source instanceof Float64Array)for(const {bar,i} of selected){const k=Math.round((bar.openTime-startMs)/300000);if(k>=0&&k<slots)dense[k]=source[i];}
           return [name,dense];
@@ -260,6 +270,19 @@ export async function collectDeepDigRun(
     rows: described.rows,
     groups: described.groups,
   };
+  if(mbi2Tuning){
+    const minutes=intervalMs(intervalOf(def))/60000,byId=new Map(data.rows.map(r=>[r.id,r.group]));
+    const scans=scanMbi2(mbi2Samples.map(s=>({...s,group:byId.get(s.id)??'other'})),data.definition,minutes);
+    const recommendations=[];
+    if(source==='campaigns')for(const row of report.rows.filter(r=>r.grouping.group==='positive')){
+      if(row.anchorMs==null||row.endMs==null||row.endMs<=row.anchorMs){recommendations.push({campaignId:row.campaignId,delta:null,nMin:null,ceilN:null,hours:null,reason:'missing' as const});continue;}
+      try{
+        const bars=await fetchResearchKlines(row.symbol,row.anchorMs,row.endMs,options.fetchFn,options.signal,intervalOf(def));
+        recommendations.push(recommendMbi2Campaign(row.campaignId,bars.filter(b=>b.openTime>=row.anchorMs!&&b.openTime+minutes*60000<=row.endMs!),minutes,row.direction==='main_short',def));
+      }catch(error){if(options.signal?.aborted)throw error;recommendations.push({campaignId:row.campaignId,delta:null,nMin:null,ceilN:null,hours:null,reason:'missing' as const});}
+    }
+    data.mbi2Evaluation=finishMbi2Evaluation(scans,recommendations,data.definition,minutes);
+  }
   return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
 }
 
