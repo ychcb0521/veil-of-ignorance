@@ -104,7 +104,7 @@ describe('computeMirrorTpReductionPct', () => {
         marginMode: 'cross',
         closeTime: 2,
       },
-    ] as TradeRecord[];
+    ] as unknown as TradeRecord[];
 
     expect(computeMirrorTpReductionPct(campaign(), mirror, [main, mirror], records))
       .toBeCloseTo(60, 8);

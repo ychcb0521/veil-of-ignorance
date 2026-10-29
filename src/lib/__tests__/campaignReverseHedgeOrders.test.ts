@@ -84,6 +84,9 @@ describe('getCampaignFullData reverse hedge order layer', () => {
     journals = [];
     campaign = {
       id: 'campaign-1',
+      campaign_code: 'C-TEST001',
+      importance_weight: 0,
+      deviation_notes: {},
       user_id: 'user-1',
       symbol: 'ASTERUSDT',
       direction: 'main_long',

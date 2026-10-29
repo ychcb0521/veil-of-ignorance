@@ -113,7 +113,9 @@ beforeEach(() => {
   clearPersistedStateMemoryForTests();
   localStorage.clear();
   campaign = {
-    id: 'paused-protection-campaign', user_id: OWNER, symbol: SYMBOL,
+    id: 'paused-protection-campaign', campaign_code: 'C-PAUSED001',
+    importance_weight: 0, deviation_notes: {},
+    user_id: OWNER, symbol: SYMBOL,
     direction: 'main_long', status: 'closed_profit', strategy_template: 'custom',
     title: 'Paused protection fixture', opened_at: iso(SIM), closed_at: iso(CLOSE_SIM),
     initial_main_size_usdt: 1_000, initial_leverage: 5,
