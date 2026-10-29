@@ -771,7 +771,7 @@ describe('campaign profit capture ratio', () => {
   it('recovers missing historical A/B prices from the earliest reverse-order snapshots', () => {
     const campaign = makeCampaign(500);
     const legs = [makeLeg('main', 'main_open', 100)];
-    const reverseOrders = [
+    const reverseOrders: CampaignReverseHedgeOrder[] = [
       { id: 'a', side: 'SHORT', price: 96, createdAt: 1, cancelledAt: 2, status: 'cancelled' as const },
       { id: 'b', side: 'SHORT', price: 90, createdAt: 2, cancelledAt: 3, status: 'cancelled' as const },
       { id: 'rolling', side: 'SHORT', price: 80, createdAt: 3, cancelledAt: 4, status: 'cancelled' as const },

@@ -19,6 +19,7 @@ const t = (iso: string) => Date.parse(iso);
 function campaign(overrides: Partial<TradeCampaign> = {}): TradeCampaign {
   return {
     id: 'campaign-1',
+    campaign_code: 'C-TEST001',
     user_id: 'user-1',
     symbol: 'BTCUSDT',
     direction: 'main_long',
