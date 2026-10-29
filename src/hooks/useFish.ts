@@ -179,7 +179,7 @@ export function useFish(userId: string | undefined, options: { onCaught?: (fish:
     const found: TradeSignal[] = [];
     const run = sc.scan({ ...settings, checkpoint: checkpoint.results, signal: mine.signal, onProgress: p => onProgress?.(p), onSignal: s => { found.push(s); } });
     minePromise.current = run;
-    try { const result = await run; if (mine.signal.aborted) throw new DOMException('已让路给捕捞', 'AbortError'); if (result.status === 'aborted') throw new Error(result.error || '这一档没扫完'); if (miningCheckpoint.current === checkpoint) miningCheckpoint.current = null; return found; }
+    try { const result = await run; if (mine.signal.aborted) throw new DOMException('已让路给捕捞', 'AbortError'); if (result.status === 'aborted' || Object.values(result.venues??{}).some(v=>v.status==='aborted')) throw new Error(result.error || Object.values(result.venues??{}).map(v=>v.error).filter(Boolean).join('；') || '这一档没扫完'); if (miningCheckpoint.current === checkpoint) miningCheckpoint.current = null; return found; }
     finally { if (mineController.current === mine) { mineController.current = null; minePromise.current = null; } }
   }, []);
   const stopMining = useCallback(() => mineController.current?.abort(), []);

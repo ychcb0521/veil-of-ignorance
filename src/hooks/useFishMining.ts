@@ -1,3 +1,5 @@
+import { readBinanceCooldown } from '@/lib/binanceRateLimit';
+import { formatUTC8 } from '@/lib/timeFormat';
 /**
  * 「比较探测」持续挖掘的调度（见 lib/fish/mining.ts）。网站开着就在后台一档一档往前挖：
  * - 取数器空闲才挖；手动 / 定时捕捞一开始就打断这一档（之后原地重扫），挖掘永远让路；
@@ -69,7 +71,9 @@ export function useFishMining(o: {
     if (anchor == null) { setWaiting(''); return; }
     if (navigator.onLine === false) {setWaiting('网络已断开，联网后从当前档自动继续');return;}
     if (s.errorKind==='configuration' && s.lastError) {setWaiting('配置需修正，修正后点「重新检查」');return;}
-    if (now < (s.retryAt ?? 0)) return;
+    const cooldown=readBinanceCooldown(now);
+    if(cooldown){setWaiting(`币安行情限频，等待至 ${formatUTC8(cooldown.until)}（UTC+8）后从当前档自动继续`);return;}
+    if (now < (s.retryAt ?? 0)) {setWaiting('');return;}
     if (latest.current.busy()) { setWaiting('取数器正忙（捕捞 / 复原中），空闲后接着挖'); return; }
     if (!takeMiningLease(owner.current, now)) { setWaiting('另一个标签页正在挖掘'); return; }
     const scope=(s.selection as FishScanSelection|undefined)??latest.current.selection;
@@ -110,7 +114,8 @@ export function useFishMining(o: {
       if(!active())return;
       if (e instanceof DOMException && e.name === 'AbortError') return; // 让路给捕捞，空闲后原地重扫
       if (e instanceof Error && e.message === '取数器正忙') return;
-      const at=Date.now(),failed=miningFailureState(readMiningState(),e instanceof Error?e.message:String(e),at,'transient');
+      const at=Date.now(),cooldown=readBinanceCooldown(at),failure=miningFailureState(readMiningState(),e instanceof Error?e.message:String(e),at,'transient');
+      const failed=cooldown?{...failure,retryAt:cooldown.until}:failure;
       setState(failed);
       void updateMiningLibrary(who, library => recordMiningError(library, { ...failed, rules: failed.rules.length ? failed.rules : s.rules }, anchor, failed.lastError, at, MINING_COMBINATION));
     } finally {

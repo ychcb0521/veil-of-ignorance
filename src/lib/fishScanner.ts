@@ -675,7 +675,7 @@ export class FishScanner {
                 memberResults.set(memberKey,new Map([[0,member]]));
                 reportResult(memberKey,member);
               }catch(error){
-                if(error instanceof FishError && error.kind==='banned'){fatal=error.message;local.abort();}
+                if(error instanceof FishError && (error.kind==='banned'||error.detail?.status===429)){fatal=error.message;local.abort();}
                 else if(!local.signal.aborted){
                   const kind=error instanceof FishError?error.kind:'failed';
                   roundRows.push({symbol:market.symbol,exchange,market:market.market,reading:NaN,outcome:kind});

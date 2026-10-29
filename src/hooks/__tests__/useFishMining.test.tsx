@@ -1,3 +1,4 @@
+import { noteBinanceRateLimit } from '@/lib/binanceRateLimit';
 // 持续挖掘的调度：一档接一档补历史；取数器忙时等待；被捕捞打断原地重扫；出错重试；到目标就停
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -164,4 +165,13 @@ it('replaces persisted old requirements before the first scan and sends exactly 
  expect(sent.algorithms.map((a:any)=>[a.feature.id,a.algorithm.statistic,a.algorithm.direction,a.algorithm.threshold])).toEqual([
    ['cbi2','avg_CBI2_2','>',.04],['cba','avg_CBA_2','>',8],['cbi2','avg_CBI2','>',.04],['cba','avg_CBA','>',8],
  ]);expect(readMiningState().mined).toBeGreaterThanOrEqual(220);
+});
+
+it('waits through a persisted Binance cooldown even after manual retry, then resumes the same saved anchor without losing progress',async()=>{
+ saveMiningState({...newMiningState(),enabled:true,cursorMs:MINING_START_MS+MINING_STEP_MS,anchorsDone:1,mined:105,lastError:'币安 time HTTP 429',retryCount:10});
+ noteBinanceRateLimit({status:429,headers:{get:()=>"180"}});
+ const {h,mine}=setup();await flush(10);expect(mine).not.toHaveBeenCalled();expect(h.result.current.waiting).toContain('限频');
+ act(()=>h.result.current.retry!());await flush(10);expect(mine).not.toHaveBeenCalled();
+ await flush(150000);expect(mine).not.toHaveBeenCalled();expect(readMiningState().mined).toBe(105);
+ await flush(60000);expect(mine.mock.calls[0][0].anchorMs).toBe(MINING_START_MS+MINING_STEP_MS);expect(readMiningState().mined).toBeGreaterThanOrEqual(105);expect(readMiningState().retryCount).toBe(0);
 });

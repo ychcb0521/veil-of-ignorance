@@ -1,3 +1,4 @@
+import { BINANCE_COOLDOWN_KEY, readBinanceCooldown } from '@/lib/binanceRateLimit';
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useBinanceData, intervalToMs } from "@/hooks/useBinanceData";
@@ -41,6 +42,7 @@ describe("intervalToMs", () => {
 
 describe("useBinanceData", () => {
   beforeEach(() => {
+    localStorage.removeItem(BINANCE_COOLDOWN_KEY);
     mockFetch.mockReset();
     // Default fallback for any unmocked fetch calls
     mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
@@ -131,8 +133,7 @@ describe("useBinanceData", () => {
   });
 
   it("handles API errors gracefully", async () => {
-    // Persistent 429 on every attempt: fetchBatch retries with backoff, and once
-    // the bounded retries are exhausted the error must still surface as "API 429".
+    // A rate response ends this batch and preserves the shared deadline.
     mockFetch.mockResolvedValue({
       ok: false,
       status: 429,
@@ -144,41 +145,32 @@ describe("useBinanceData", () => {
       await result.current.initLoad("BTCUSDT", "1m", Date.now());
     });
 
-    expect(result.current.error).toBe("API 429");
+    expect(result.current.error).toContain("HTTP 429");
+    expect(readBinanceCooldown()?.until).toBeGreaterThan(Date.now());
     expect(result.current.loading).toBe(false);
   });
 
-  it("retries a transient 429 and recovers", async () => {
-    const now = 1_700_000_000_000;
+  it("stops after a 429 and does not send another batch until the shared cooldown expires", async () => {
+    let now = 1_700_000_000_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const historyData = [[now - 60_000, "100", "110", "90", "105", "1000"]];
-
-    // Route by URL so the outcome never depends on history/future call ordering:
-    // the history endpoint is rate-limited once, then succeeds on the retry.
     let historyCalls = 0;
     mockFetch.mockImplementation((url: string) => {
-      if (typeof url === "string" && url.includes("startTime")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) }); // future batch
-      }
-      historyCalls += 1;
-      if (historyCalls === 1) {
-        return Promise.resolve({ ok: false, status: 429 }); // transient rate-limit
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(historyData) }); // retry succeeds
+      if (url.includes("startTime")) return Promise.resolve({ok:true,json:async()=>[]});
+      historyCalls++;
+      return Promise.resolve(historyCalls===1 ? {ok:false,status:429,headers:{get:()=>"180"},json:async()=>({})} : {ok:true,json:async()=>historyData});
     });
-
-    const { result } = renderHook(() => useBinanceData());
-
-    // Assert on the resolved value of initLoad (not a re-render race): it returns the
-    // merged candles only if the retry recovered.
-    let data: unknown[] = [];
-    await act(async () => {
-      data = await result.current.initLoad("BTCUSDT", "1m", now);
-    });
-
-    expect(data).toHaveLength(1);
-    expect(historyCalls).toBe(2); // initial 429 + exactly one successful retry
-    expect(result.current.error).toBeNull();
-    expect(result.current.loading).toBe(false);
+    try {
+      const {result}=renderHook(()=>useBinanceData());
+      await act(async()=>{await result.current.initLoad("BTCUSDT","1m",now);});
+      expect(result.current.error).toContain('HTTP 429');expect(historyCalls).toBe(1);
+      const sent=mockFetch.mock.calls.length;
+      await act(async()=>{await result.current.initLoad("BTCUSDT","1m",now);});
+      expect(mockFetch).toHaveBeenCalledTimes(sent);
+      now+=180001;
+      let data:unknown[]=[];await act(async()=>{data=await result.current.initLoad("BTCUSDT","1m",1_700_000_000_000);});
+      expect(data).toHaveLength(1);expect(historyCalls).toBe(2);expect(result.current.error).toBeNull();
+    } finally {clock.mockRestore();}
   });
 
   it("handles empty data response", async () => {

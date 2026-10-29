@@ -555,7 +555,7 @@ it('places independent filter results immediately after capture, runs without se
   const view = render(<FishQuality state={s}/>);
   const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
   const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
-  expect(headers[6]).toHaveTextContent('捕捞过程'); expect(headers[7]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
+  expect(headers[7]).toHaveTextContent('捕捞过程'); expect(headers[8]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
   expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
   const run = screen.getByRole('button', { name: '开始过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.startFilter).toHaveBeenCalledTimes(1);
   const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');

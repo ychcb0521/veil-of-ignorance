@@ -1,9 +1,10 @@
+import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 /**
  * Deep RSA：在用户自己的浏览器里取币安 U 本位永续行情（与主图同一个公开接口，不需要登录币安、不需要密钥）。
  *
  * - 5m K 线保留主动买入量列（parseBinanceKlineRow），分页 1500 根一次。
- * - 主域名失败（限流 / 网关 / 断网）换 www.binance.com 备用域名，与 useReplayKlines 同一套做法。
- * - 429 / 418 按 Retry-After 退避后重试；标的不存在（400）直接报「无此合约」，不重试。
+ * - 主域名网关 / 断网失败可换 www.binance.com 备用域名；限频不换域名，与 useReplayKlines 同一套做法。
+ * - 429 / 418 按 Retry-After 保存共享冷却，停止本批次，冷却后可重试；标的不存在（400）直接报「无此合约」，不重试。
  * - 资金费历史：/fapi/v1/fundingRate。
  * - 同一会话内按（标的, 起止）缓存，重跑不重复下载。
  * fetchFn 可注入，测试里不连网。
@@ -43,6 +44,7 @@ async function getJson(path: string, fetchFn: FetchFn, signal?: AbortSignal): Pr
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const host = HOSTS[attempt % HOSTS.length];
     if (signal?.aborted) throw new MarketDataError('已取消', 'aborted');
+    try { assertBinancePublicAllowed(); } catch(e) { throw new MarketDataError((e as Error).message,'rate_limit'); }
     let res: Awaited<ReturnType<FetchFn>>;
     try {
       res = await fetchFn(`${host}${path}`, { signal });
@@ -55,10 +57,8 @@ async function getJson(path: string, fetchFn: FetchFn, signal?: AbortSignal): Pr
     if (res.ok) return res.json();
     if (res.status === 400) throw new MarketDataError('币安没有这个永续合约', 'no_symbol');
     if (res.status === 429 || res.status === 418) {
-      const retryAfter = Number(res.headers?.get('Retry-After'));
-      lastError = new MarketDataError(`币安限流（${res.status}）`, 'rate_limit');
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 60) * 1000 : 2000 * 2 ** attempt, signal);
-      continue;
+      noteBinanceRateLimit(res);let body:unknown;try{body=await res.json();}catch{/* Headers still enforce cooldown. */}
+      throw new MarketDataError(new BinanceRateLimitError(noteBinanceRateLimit(res,body)).message,'rate_limit');
     }
     lastError = new MarketDataError(`币安返回 ${res.status}`, 'network');
     await sleep(300 * 2 ** attempt, signal);

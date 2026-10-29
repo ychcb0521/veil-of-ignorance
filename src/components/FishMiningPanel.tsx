@@ -50,11 +50,11 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
     : !s.enabled ? (hasStarted ? `已暂停 · 继续后从 ${short(s.cursorMs)} 这一档接着挖` : '还没开始')
     : reached ? '已达目标：调高目标可继续往后挖'
     : caughtUp ? `已追上现在，下一档 ${short(s.cursorMs)} 到点自动挖`
-    : waiting && /网络|正忙|标签页/.test(waiting) ? waiting
+    : waiting && /网络|正忙|标签页|限频/.test(waiting) ? waiting
     : s.lastError ? `出错：${s.lastError}（${retryText}）`
     : waiting || `排队中：下一档 ${short(s.cursorMs)}`;
   const statusLabel = running ? '挖掘中' : !s.enabled ? hasStarted ? '已暂停' : '未开始'
-    : reached ? '已达目标' : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : s.lastError ? '等待重试' : waiting ? '等待中' : '排队中';
+    : reached ? '已达目标' : caughtUp ? '已追上现在' : s.errorKind==='configuration' ? '配置需处理' : waiting ? (/限频/.test(waiting)?'限频等待':'等待中') : s.lastError ? '等待重试' : '排队中';
   const hasError = !!s.lastError && !running && !reached && !caughtUp;
   return <FishQualityModule title="批量挖掘" icon={Pickaxe} testId="fish-mining-panel" summary={<>
         <FishQualityInfo label="挖掘说明与进度">
@@ -65,7 +65,7 @@ export function FishMiningPanel({ mining, sellFixed, campaignHref, onJump, canJu
           </div>
         </FishQualityInfo>
       </>} status={(running || hasError || s.enabled || hasStarted) &&
-        <span role="status" aria-label={status} title={status} className={`inline-flex min-w-0 flex-wrap items-center gap-2 text-[10.5px] ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}><span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${running ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>{statusLabel}{hasError&&s.retryCount? <span>连续失败 {s.retryCount} 次{s.lastErrorAt?` · ${short(s.lastErrorAt)}`:''}</span>:null}<span className="font-mono text-muted-foreground">已挖 {s.mined}/{s.target} 条 · 已扫 {s.anchorsDone} 档</span>{!running&&(hasError?<span className="basis-full break-words">{status}{!status.includes(s.lastError)?`；上次失败：${s.lastError}`:''}</span>:!s.enabled&&hasStarted?<span className="text-muted-foreground/70">· 接着从 {short(s.cursorMs)} 挖</span>:null)}{running && progress && progress.total > 0 && <span className="font-mono tabular-nums text-foreground/70" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>
+        <span role="status" aria-label={status} title={status} className={`inline-flex min-w-0 flex-wrap items-center gap-2 text-[10.5px] ${hasError ? 'text-destructive' : 'text-muted-foreground'}`}><span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${running ? 'animate-pulse bg-primary' : hasError ? 'bg-destructive' : 'bg-muted-foreground/40'}`}/>{statusLabel}{hasError&&s.retryCount? <span>{waiting?'上次连续失败':'连续失败'} {s.retryCount} 次{s.lastErrorAt?` · ${short(s.lastErrorAt)}`:''}</span>:null}<span className="font-mono text-muted-foreground">已挖 {s.mined}/{s.target} 条 · 已扫 {s.anchorsDone} 档</span>{!running&&(hasError?<span className="basis-full break-words">{status}{!status.includes(s.lastError)?`；上次失败：${s.lastError}`:''}</span>:!s.enabled&&hasStarted?<span className="text-muted-foreground/70">· 接着从 {short(s.cursorMs)} 挖</span>:null)}{running && progress && progress.total > 0 && <span className="font-mono tabular-nums text-foreground/70" aria-label={`本档已扫 ${progress.done} / ${progress.total} 个标的`}>{progress.done}/{progress.total}</span>}</span>
       } progress={<div className="absolute inset-x-0 bottom-0 h-px overflow-hidden bg-border/60" role="progressbar" aria-label="挖掘进度" aria-valuemin={0} aria-valuemax={s.target} aria-valuenow={Math.min(s.mined, s.target)} aria-valuetext={`已挖 ${s.mined} 条，目标 ${s.target} 条`}><div className="h-full rounded-r-full bg-primary/70 transition-[width] duration-500" style={{ width: `${share * 100}%` }}/></div>}>
         {s.enabled
           ? <button type="button" onClick={mining.pause} className={qualityPauseAction}><Pause className="h-3 w-3"/>暂停</button>

@@ -1,3 +1,4 @@
+import { assertBinancePublicAllowed, noteBinanceRateLimit, publicRateLimitDeadline, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import {binanceStockMarket,bitgetStockMarket} from './stockMetadata';
 import {nativeFishInterval,fishBarLabel} from './periods';
 import { intervalMs, type ResearchInterval } from '@/lib/deepRsa/marketData';
@@ -236,12 +237,13 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
   };
   async function read(url:string,path:string,weight:number,signal:AbortSignal):Promise<unknown>{
     const result=await pool.run(async()=>{
-      abort(signal);const wait=budget.tryTake(weight);if(wait)return {wait};
+      abort(signal);if(exchange==='binance')assertBinancePublicAllowed();const wait=budget.tryTake(weight);if(wait)return {wait};
       return withFishRequestDeadline(async requestSignal => {
       const response=await fetcher.call(globalThis,url,{signal:requestSignal});
-      if(response.status===429){const retry=Number(response.headers.get('Retry-After')??60);budget.pauseUntil(Date.now()+(Number.isFinite(retry)?Math.max(60000,retry*1000):60000));}
+      if(response.status===429||response.status===418){budget.pauseUntil(publicRateLimitDeadline(response));if(exchange==='binance')noteBinanceRateLimit(response); }
       let body:unknown;
       try{body=await response.json();}catch{if(!response.ok)throw context(path,`HTTP ${response.status}：上游请求失败`,response.status);throw context(path,'HTTP 200：响应不是有效 JSON',response.status);}
+      if((response.status===429||response.status===418)&&exchange==='binance')noteBinanceRateLimit(response,body);
       if(!response.ok)throw context(path,`HTTP ${response.status}：${response.status===418?'访问受限，本交易所中止':response.status===429?'请求过于频繁，已暂停本交易所后续请求':explain(body)}`,response.status);
       const j=body as any;
       if((exchange==='okx'&&j?.code!==undefined&&j.code!=='0')||(exchange==='bitget'&&j?.code!==undefined&&j.code!=='00000')||(exchange==='gate'&&j?.label))throw context(path,`HTTP ${response.status}：${explain(j)}`,response.status);
@@ -259,6 +261,7 @@ export function fishTransport(exchange:FishExchange,fetcher:typeof fetch,budget:
     try{return await read(url,path,weight,signal);}
     catch(error){
       if(wasProxy&&proxyMissing(error))useProxy=false;
+      if(error instanceof BinanceRateLimitError)throw context(path,error.message,error.cooldown.status);
       if(signal.aborted||!(error instanceof TypeError))throw error;
       if(exchange==='binance'||wasProxy)throw context(path,'浏览器拦截（网络 / 跨域）'+(wasProxy?'；只读代理也未能连接，请检查是否已发布':''));
       useProxy=true;

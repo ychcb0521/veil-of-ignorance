@@ -1,7 +1,9 @@
 import {compileFishProgram} from '@/lib/fish/algorithm';
 import {CBI2_DEF} from '@/lib/deepDig/features';
 const DEFAULT_N=compileFishProgram(CBI2_DEF,{H:24,direction:'>',threshold:.3,constraints:[]}).N;
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { BINANCE_COOLDOWN_KEY } from '@/lib/binanceRateLimit';
+beforeEach(()=>localStorage.removeItem(BINANCE_COOLDOWN_KEY));
 import { parseFishSettings, FishScanner, FishWeightBudget, calculateFishReadings, classifyFishReadings, FISH_STEP, FISH_FIRST_USABLE, type FishProgress } from '@/lib/fishScanner';
 import { computeCbi2 } from '@/lib/cbi2';
 import { CBI2_FORMULA, compileFeatureFormula, evaluateOnBars } from '@/lib/deepDig/features';
@@ -141,6 +143,8 @@ describe('渔扫描取数、缓存、并发和取消', { timeout: 30000 }, () =>
     expect(result.done).toBe(9); expect(m.max()).toBeLessThanOrEqual(3);
     const blocked = market(['BTCUSDT','AAAUSDT','BBBUSDT','CCCUSDT','DDDUSDT']); blocked.ban('AAAUSDT');
     expect((await new FishScanner(blocked.fetcher, undefined, values).scan(options())).status).toBe('aborted');
+    // The cancellation fixture is an independent simulated IP, after the banned fixture.
+    localStorage.removeItem(BINANCE_COOLDOWN_KEY);
     const cancelled = market(); const controller = new AbortController();
     const p = options([], controller.signal);
     p.onProgress = (progress: FishProgress) => { if (progress.done >= 1) controller.abort(); };

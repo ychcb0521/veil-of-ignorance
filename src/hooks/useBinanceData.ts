@@ -1,3 +1,4 @@
+import { assertBinancePublicAllowed, noteBinanceRateLimit, BinanceRateLimitError } from '@/lib/binanceRateLimit';
 import { useState, useCallback, useRef } from "react";
 import { FETCH_HANG_TIMEOUT_MS, PREFETCH_BATCH_BARS } from "@/lib/streamingWindow";
 
@@ -58,8 +59,8 @@ export function intervalToMs(interval: string): number {
   return map[interval] || 60_000;
 }
 
-/** HTTP 状态码：可重试的「瞬时」错误（限流 429 / 418、网关与服务端抖动 5xx）。 */
-const RETRYABLE_STATUS = new Set([418, 429, 500, 502, 503, 504]);
+/** HTTP 状态码：短退避只用于网关与服务端抖动；429 / 418 统一遵守公开行情冷却。 */
+const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
 /** 单个批次取数的最大重试次数（不含首次）。 */
 const MAX_FETCH_RETRIES = 2;
 /** 重试退避基数（毫秒），按指数增长：250 → 500。 */
@@ -77,7 +78,7 @@ function sleep(ms: number): Promise<void> {
 /**
  * Fetch a single batch of klines from Binance fapi.
  *
- * 对 Binance REST 的瞬时限流（HTTP 429 / 418）与网关抖动（5xx）做有界指数退避重试：
+ * 对 Binance REST 的网关抖动（5xx）做有界指数退避重试；429 / 418 保存共享冷却并停止本批次：
  * 「信号库」批量跳转 + 「手动启动」可能在短时间内连续打多次 klines 请求，偶发 429
  * 不应直接冒泡成「数据获取失败」。重试用尽后仍失败才抛出 `API <status>`，交由上层处理。
  */
@@ -87,6 +88,7 @@ async function fetchBatch(
   params: { startTime?: number; endTime?: number; limit?: number },
   attempt = 0,
 ): Promise<KlineData[]> {
+  assertBinancePublicAllowed();
   const qs = new URLSearchParams({
     symbol,
     interval,
@@ -111,6 +113,10 @@ async function fetchBatch(
     clearTimeout(timeout);
   }
   if (!res.ok) {
+    if(res.status===429 || res.status===418){
+      noteBinanceRateLimit(res);let body:unknown;try{body=await res.json();}catch{/* Headers still enforce cooldown. */}
+      throw new BinanceRateLimitError(noteBinanceRateLimit(res,body));
+    }
     if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_FETCH_RETRIES) {
       await sleep(RETRY_BASE_MS * 2 ** attempt);
       return fetchBatch(symbol, interval, params, attempt + 1);
