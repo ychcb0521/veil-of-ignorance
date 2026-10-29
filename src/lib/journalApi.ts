@@ -173,7 +173,7 @@ function toCampaignEvent(row: unknown): CampaignEvent {
 
 function inferCampaignEventType(legRole: LegRole): CampaignEvent['event_type'] {
   if (legRole === 'standalone') return 'note';
-  if (legRole === 'main_open' || legRole === 'reentry_main' || MAIN_ADD_ROLES.includes(legRole)) return 'main_opened';
+  if (legRole === 'main_open' || legRole === 'reentry_main' || MAIN_ADD_ROLES.some(role => role === legRole)) return 'main_opened';
   if (legRole === 'mirror_tp') return 'mirror_tp_placed';
   return 'hedge_placed';
 }
@@ -3491,8 +3491,7 @@ export async function getCampaignFullData(
         cancelledAt: record?.closeTime && record.closeTime > order.filledAt ? record.closeTime : null,
         status: 'triggered' as const,
       };
-    })
-    .filter((order): order is CampaignReverseHedgeOrder => Boolean(order));
+    });
   const eventTimestamp = (event: CampaignEvent | undefined) => {
     if (!event) return null;
     const timestamp = new Date(event.timestamp).getTime();
@@ -4537,7 +4536,7 @@ export async function createCampaignFromJournals(input: {
     actual_evolution: [{
       id: crypto.randomUUID(),
       timestamp: derivedPatch.opened_at ?? mainOpen.pre_simulated_time,
-      event_type: 'historical_classification_created',
+      event_type: 'historical_classification_created' as const,
       leg_role: null,
       journal_id: null,
       trade_record_id: null,

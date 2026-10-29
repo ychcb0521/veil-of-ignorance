@@ -334,6 +334,7 @@ export interface CampaignEvent {
     | 'historical_classification_created'
     | 'historical_leg_attached'
     | 'main_opened'
+    | 'reentry_main_opened'
     | 'hedge_placed'
     | 'mirror_tp_placed'
     | 'hedge_cancelled'
