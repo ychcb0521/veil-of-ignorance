@@ -1,3 +1,5 @@
+import { replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
+import { useFeatureDefinitions } from './useFeatureDefinitions';
 import { mirrorIdentity, validateQualityMirror, type QualityMirrorTakeProfit } from '@/lib/fish/qualityMirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TradeSignal } from '@/lib/signalLibrary';
@@ -14,6 +16,7 @@ export type QualityRunner = (options: QualityRunOptions) => Promise<void>;
 /** Mounted above the collapsible fish panel so new catches are recorded while it is closed. */
 const NO_SIGNALS: readonly TradeSignal[] = [];
 export function useFishQuality(owner: string | undefined, signals: readonly TradeSignal[], run: QualityRunner, library: readonly TradeSignal[] = NO_SIGNALS) {
+  const definitions = useFeatureDefinitions();
   const [study, setStudy] = useState<FishQualityStudy>(newQualityStudy), [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false), [progress, setProgress] = useState<QualityProgress | null>(null);
   const [filterRunning, setFilterRunning] = useState(false), [filterProgress, setFilterProgress] = useState<QualityProgress | null>(null), [filterError, setFilterError] = useState('');
@@ -65,6 +68,11 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     window.addEventListener('pagehide', flush);
     return () => { void monitorFinalizer.current?.('paused', false); active = false; readyRef.current = false; controller.current?.abort(); controller.current = null; filterController.current?.abort(); filterController.current = null; if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } window.removeEventListener('pagehide', flush); flush(); };
   }, [owner]);
+  useEffect(() => {
+    if (!ready || !readyRef.current) return;
+    const next = syncQualitySellDefinitions(current.current, definitions);
+    if (next !== current.current) change(s => syncQualitySellDefinitions(archiveQualityStudy(s), definitions));
+  }, [definitions, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityFish(s, signals)); }, [signals, ready, change]);
   useEffect(() => { if (ready && readyRef.current) change(s => importQualityLibrary(s, library)); }, [library, ready, change]);
   useEffect(() => {
@@ -78,6 +86,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   }, [study, ready, owner]);
   const start = useCallback(async (automatic = false, mode?: QualityRunOptions['mode']) => {
     if (!readyRef.current || !qualityRunSamples(scoped(current.current)).length || automatic && !selectionApproved.current && !mode) return;
+    if (current.current.sellPlans && !current.current.sellPlans.length) return;
     if (!automatic) selectionApproved.current = true;
     if (controller.current) {
       // Settings can queue a follow-up; periodic ticks never prolong an active batch.
@@ -87,7 +96,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     if (mode && mode !== 'restart' && !qualityFilterNeedsData(scoped(current.current), mode)) { setProgress(null); setError(''); return; }
     // Deep dig edits must affect the next run, including a previously complete cached trade.
     // Archive first so refreshing the active formula never rewrites an older trial's provenance.
-    if (!mode || mode === 'restart') change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
+    change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const epoch = generation.current, revision = intentRevision.current, aborter = new AbortController(); controller.current = aborter;
     const frozen = structuredClone(scoped(current.current));
     const frozenSamples = new Map(qualityRunSamples(frozen).map(s => [s.id, s]));
@@ -145,6 +154,7 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
   /** Separate lifetime and cancellation: filtering never submits sell outcomes or controls monitoring. */
   const startFilter = useCallback(async () => {
     if (!readyRef.current || filterController.current || !anyBuyFilters(current.current) || !qualityRunSamples(scoped(current.current)).length) return;
+    change(s => syncQualitySellDefinitions(archiveQualityStudy(s)));
     const revision = ++filterRevision.current;
     const frozen = structuredClone(scoped(current.current)), total = qualityRunSamples(frozen).length;
     const readingKeys = new Set(qualityRunSamples(frozen).flatMap(row => activeStandaloneBuyFilters(frozen).map(f => qualityFilterReadingKey(row, f))));
@@ -248,6 +258,16 @@ export function useFishQuality(owner: string | undefined, signals: readonly Trad
     });
     defer(() => { if (controller.current) void restart(); else void start(); });
   }, [change, start, restart, defer]);
-  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes };
+  const setSellPlans = useCallback((plans: import('@/lib/fish/quality').QualityGroup[]) => {
+    if (!readyRef.current) return;
+    // Validate first, then finalize the old round before replacing its active configuration.
+    const checked = replaceQualitySellPlans(current.current, plans);
+    if (checked === current.current) return;
+    intentRevision.current++; rerun.current = false;
+    controller.current?.abort(); controller.current = null;
+    change(s => replaceQualitySellPlans(s, plans));
+    defer(() => void start(false, 'restart'));
+  }, [change, defer, start]);
+  return { study: readyRef.current ? study : newQualityStudy(), ready: ready && readyRef.current, running, progress, filterRunning, filterProgress, filterError, warning, error, start, restart, cancel, startFilter, cancelFilter, setRule, setCombo, setObserveHours, selectSell, setSelectedRows, setPriority, setScope, setFilters, setHoldingVetoes, setSellPlans };
 }
 export type FishQualityState = ReturnType<typeof useFishQuality>;

@@ -97,6 +97,8 @@ export interface FishQualityStudy {
   groups: QualityGroup[]; samples: QualitySample[]; results: QualityResult[];
   /** Shared sell experiments, independent of the detecting algorithm. Legacy group rules remain saved. */
   sellPlans?: QualityGroup[]; selectedSellId?: string; selectedRowIds?: string[];
+  /** Explicitly managed lists must never have deleted default plans recreated. */
+  sellPlansConfigured?: boolean;
   /** Legacy saved field; no longer restricts display or execution. */
   cohortIds?: string[];
   /** Frozen evaluated trades, including earlier sell thresholds, for comparison campaigns. */
@@ -171,6 +173,7 @@ export function qualityDefinition(f: FishSnapshot): DeepDigFeatureDef {
     control: typeof saved[2] === 'string' ? saved[2] : '0', groupVars: 2,
     interval: (f.interval ?? extra.find(v => /^\d+[mhdwM]$/.test(v)) ?? '5m') as ResearchInterval,
     halfLifeHours: numeric('hl=', 6), avgHours: numeric('avgh=', 24),
+    chartTemplate: extra.find(v => v.startsWith('chart='))?.slice(6),
     ...(f.featureId === 'mbi' || /\bmbiz\s*\(/.test(saved[0]) ? { MBI_N: numeric('MBI_N=', 25), MBI_Z0: numeric('MBI_Z0=', 1.25) } : {}),
   };
 }

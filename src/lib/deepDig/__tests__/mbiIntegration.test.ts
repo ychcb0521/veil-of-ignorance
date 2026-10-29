@@ -23,7 +23,7 @@ import { qualityDefinition } from '@/lib/fish/quality';
 describe('MBI integration and acceptance F', () => {
   it('every prior feature, all formula variables and averages are bit-for-bit unchanged', () => {
     const bars = mbiBars();
-    for (const def of BUILTIN_FEATURES.filter(d => d.id !== 'mbi' && d.id !== 'ctba')) {
+    for (const def of BUILTIN_FEATURES.filter(d => !['mbi','ctba','mbi-bear','ctba-bear'].includes(d.id))) {
       const program = compileFeatureFormula(def.formula).program;
       const named = new Set(program.statements.flatMap(s => s.name ? [s.name] : []));
       const core = program.statements.at(-1)!.name!;

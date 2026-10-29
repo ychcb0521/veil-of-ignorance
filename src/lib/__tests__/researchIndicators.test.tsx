@@ -57,7 +57,9 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
-        expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined();
+        if (['MBI_BEAR', 'CTBA_BEAR'].includes(item.id)) {
+          expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(0);
+        } else { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
         expect(reg.precision).toBeGreaterThanOrEqual(8);
       }
     }
@@ -94,9 +96,9 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     expect(researchChartSeries(k, item, 12, { fetchReference: false }).avg2.at(-1)).toBe(28);
   });
 
-  it('添加时沿用基线和半衰期的小数小时，DSS 按用户要求默认 12h', () => {
+  it('添加时沿用已保存的基线、半衰期及公式常数', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 12, 3.5]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {

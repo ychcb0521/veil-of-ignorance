@@ -1,3 +1,4 @@
+import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
 /**
  * Deep dig · 一个特征值的整套统计：按定义里的公式在每个事件的观察窗上算出特征值，按定义里的分组标准分组，
  * 再做描述统计与推断统计；「规律提取」的默认文字也从这里按结果生成。
@@ -32,7 +33,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore'>;
 
 export interface DeepDigRow {
   reason?: string;
@@ -111,7 +112,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(def.id === 'mbi' ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}) };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -216,7 +217,7 @@ export async function collectDeepDigRun(
     volatilityOnlyAt: DEEP_DIVE_PRIMARY_H,
     extraFeatures: (window, ctx) => {
       const { value, vars } = computeFeatureValues(window, compiled, params);
-      if(def.id==='ctba' && window){
+      if(featureTemplateId(def)==='ctba' && window){
         const out=evaluateOnBars(window.bars,compiled,params);
         const startMs=Math.floor(ctx.anchorMs/300000)*300000-48*3600000;
         const selected=window.bars.map((bar,i)=>({bar,i})).filter(({bar})=>bar.openTime>=startMs);
@@ -258,7 +259,7 @@ export async function collectDeepDigRun(
     rows: described.rows,
     groups: described.groups,
   };
-  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(def.id==='ctba'?{anchorWindows}:{}) } };
+  return { data, series: { finishedAt, historyMs: featureWindowMs(params), offsets, names, result, byEvent, ...(featureTemplateId(def)==='ctba'?{anchorWindows}:{}) } };
 }
 
 // ===================== 规律提取：按结果生成的默认文字 =====================

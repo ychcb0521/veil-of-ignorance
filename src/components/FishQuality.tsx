@@ -1,3 +1,5 @@
+import { FishQualitySellPlansEditor } from './FishQualitySellPlansEditor';
+import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { qualityPeakPct, qualityHalfMirror } from '@/lib/fish/qualityPresentation';
 import { FishQualityMirrorEditor, mirrorDraft, parseMirrorDraft } from '@/components/FishQualityMirrorEditor';
 import { defaultQualityMirror, mirrorIdentity, validateQualityMirror } from '@/lib/fish/qualityMirror';
@@ -129,7 +131,8 @@ function ComboSellEditor({ plan, state }: { plan: QualityGroup; state: FishQuali
 type FilterDraft = { choice: string; direction: '<' | '>'; threshold: string; enabled: boolean };
 /** Standalone buy-filter configuration, independent of sell algorithms. */
 function BuyFilterEditor({ state, done }: { state: FishQualityState; done: () => void }) {
-  const choices = useMemo(() => qualityFilterChoices(), []), groups = [...new Set(choices.map(c => c.group))];
+  const definitions = useFeatureDefinitions();
+  const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]), groups = [...new Set(choices.map(c => c.group))];
   const [draft, setDraft] = useState<FilterDraft[]>(() => standaloneBuyFilters(state.study).map(f => ({ choice: qualityFilterChoiceKey(f), direction: f.direction, threshold: String(f.threshold), enabled: f.enabled })));
   const [error, setError] = useState('');
   const patch = (i: number, p: Partial<FilterDraft>) => setDraft(draft.map((d, j) => j === i ? { ...d, ...p } : d));
@@ -458,11 +461,12 @@ export function FishQuality({ state, mining, onJump, canJump }: { state: FishQua
           <div role="group" aria-label="监测运行" className="inline-flex h-6 shrink-0 items-stretch">
             {running
               ? <button type="button" className={qualitySplitPauseAction} onClick={state.cancel}><Pause aria-hidden className="h-3 w-3"/>暂停监测</button>
-              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !selectedCount} title={selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用` : '当前筛选下没有已勾选的信号'} onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
-            <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !selectedCount} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
+              : <button type="button" className={qualitySplitPrimaryAction} disabled={!ready || !selectedCount || !plans.length} title={selectedCount ? `对当前筛选下已勾选的 ${selectedCount} 条信号在后台运行，切换选项或收起模块不会中断；已算完且条件没变的结果直接沿用` : '当前筛选下没有已勾选的信号'} onClick={() => void state.start()}><RefreshCw aria-hidden className="h-3 w-3"/>开始监测</button>}
+            <Popover open={runMenuOpen} onOpenChange={setRunMenuOpen}><PopoverTrigger asChild><button type="button" aria-label="开始监测的其他方式" disabled={!ready || !selectedCount || !plans.length} className={`${qualitySplitMenuAction} ${running ? 'border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground' : 'border-primary/25 bg-primary/10 text-primary hover:border-primary/45 hover:bg-primary/20'}`}><ChevronDown aria-hidden className="h-3 w-3"/></button></PopoverTrigger>
               <PopoverContent align="start" className="w-64 p-1"><button type="button" aria-label="从头重新计算" className="flex w-full flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onClick={() => { setRunMenuOpen(false); void state.restart(); }}><span className="inline-flex items-center gap-1.5 text-[11px] font-medium"><RotateCcw aria-hidden className="h-3 w-3"/>从头重新计算</span><span className="text-[10px] leading-relaxed text-muted-foreground">这一轮不沿用已算好的结果，按最新勾选和卖出条件全部重算{running ? '；先停止当前批次' : ''}。各轮不同算法和门槛下的结果都保留，同币种、同时间、同算法同门槛的合并为一条</span></button></PopoverContent></Popover>
           </div>
-          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条否决${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '设置镜像止盈与持仓一票否决条件'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+          <Popover open={monitorOpen} onOpenChange={setMonitorOpen}><PopoverTrigger asChild><button type="button" className={`${button} ${vetoCount > 0 ? 'text-foreground' : ''}`} aria-label="持仓监测条件" title={vetoCount ? plans.map(p => `${p.label}：${activeHoldingVetoes(p.holdingVetoes).length} 条否决${p.mirrorTakeProfit?.enabled ? ` · 镜像止盈 ${p.mirrorTakeProfit.gainPct}% / ${p.mirrorTakeProfit.sellPct}%` : ''}`).join('\n') : '选择和编辑卖出算法、镜像止盈与持仓否决'}><Settings2 className="h-3 w-3"/>条件设置</button></PopoverTrigger><PopoverContent align="start" collisionPadding={12} className="w-[34rem] max-w-[calc(100vw-2rem)] max-h-[min(85vh,var(--radix-popover-content-available-height))] overflow-y-auto overscroll-contain pb-0">
+            <FishQualitySellPlansEditor plans={plans} ready={ready} onSave={state.setSellPlans}/>
             <PlanTabs plans={plans} active={monitorPlan?.id} count={p => activeHoldingVetoes(p.holdingVetoes).length + (p.mirrorTakeProfit?.enabled ? 1 : 0)} label="选择要设置持仓监测的卖出方案" onSelect={setMonitorPlanId}/>
             {monitorPlan && <HoldingMonitorEditor key={JSON.stringify([monitorPlan.id, monitorPlan.holdingVetoes ?? [], monitorPlan.mirrorTakeProfit])} state={state} plan={monitorPlan} done={() => setMonitorOpen(false)}/>}
           </PopoverContent></Popover>

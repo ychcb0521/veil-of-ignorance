@@ -1,46 +1,74 @@
-/** Public read-only OKX market proxy. No arbitrary URL, method, headers or credentials can be forwarded. */
-export const fishProxyCors = { 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Methods':'GET, OPTIONS', 'Access-Control-Allow-Headers':'apikey, authorization, content-type' };
-export function okxPublicUrl(path: string): URL {
-  const input=new URL(path,'https://www.okx.com/api/v5/');
-  if(input.origin!=='https://www.okx.com'||input.hash||input.username||input.password) throw new Error('Invalid public path');
-  const routes:Record<string,readonly string[]>={
-    '/api/v5/public/instruments':['instType'],
-    '/api/v5/market/history-candles':['instId','bar','after','limit'],
-    '/api/v5/market/history-trades':['instId','type','after','limit'],
-  };
-  const allowed=routes[input.pathname];if(!allowed)throw new Error('Path not allowed');
-  for(const [key,value] of input.searchParams){
-    if(!allowed.includes(key)||input.searchParams.getAll(key).length!==1)throw new Error('Parameter not allowed');
-    if(key==='instId'&&!/^[A-Z0-9]{1,40}-USDT-SWAP$/.test(value))throw new Error('USDT SWAP only');
-    if(key==='instType'&&value!=='SWAP')throw new Error('SWAP only');
-    if(key==='bar'&&value!=='5m')throw new Error('5m only');
-    if(key==='type'&&!['1','2'].includes(value))throw new Error('Invalid pagination type');
-    if(key==='after'&&!/^\d{1,22}$/.test(value))throw new Error('Invalid cursor');
-    if(key==='limit'&&(!/^\d+$/.test(value)||Number(value)<1||Number(value)>100))throw new Error('Invalid limit');
+/** Fixed public GET routes only; no arbitrary host, write operation, caller headers or credentials. */
+export const fishProxyCors = { 'Access-Control-Allow-Origin':'*', 'Access-Control-Allow-Methods':'GET, OPTIONS', 'Access-Control-Allow-Headers':'apikey, authorization, content-type', 'Access-Control-Expose-Headers':'Retry-After' };
+type Venue = 'okx'|'bitget'|'gate';
+const barSeconds:Record<string,number>={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'12h':43200,'1d':86400};
+const labelSeconds:Record<string,number>={'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1H':3600,'2H':7200,'4H':14400,'6Hutc':21600,'12Hutc':43200,'1Dutc':86400};
+const fail=(message:string):never=>{throw new Error(message);};
+const integer=(s:string|null,max=Number.MAX_SAFE_INTEGER,min=0)=>s!==null&&/^\d+$/.test(s)&&Number.isSafeInteger(Number(s))&&Number(s)>=min&&Number(s)<=max;
+const routes:Record<Venue,Record<string,readonly string[]>>={
+  okx:{'public/instruments':['instType'],'market/history-candles':['instId','bar','after','limit'],'market/history-trades':['instId','type','after','limit']},
+  gate:{contracts:[],candlesticks:['contract','interval','from','to'],trades:['contract','from','to','limit','offset']},
+  bitget:{instruments:['category'],contracts:['productType'],'history-candles':['symbol','productType','granularity','endTime','limit'],'fills-history':['symbol','productType','startTime','endTime','limit','idLessThan']},
+};
+export function publicMarketUrl(exchange:string,path:string):URL {
+  if(!Object.prototype.hasOwnProperty.call(routes,exchange))fail('交易所不在白名单中');
+  if(!/^[a-z-]+(?:\/[a-z-]+)?(?:\?[^#]*)?$/.test(path))fail('公开接口路径无效');
+  const venue=exchange as Venue,base=venue==='okx'?'https://www.okx.com/api/v5/':venue==='gate'?'https://api.gateio.ws/api/v4/futures/usdt/':'https://api.bitget.com/api/v2/mix/market/';
+  const route=path.split('?')[0],allowed=routes[venue][route];if(!allowed)fail('接口不在白名单中');
+  const url=new URL(path,venue==='bitget'&&route==='instruments'?'https://api.bitget.com/api/v3/market/':base),q=url.searchParams;
+  for(const key of q.keys())if(!allowed.includes(key)||q.getAll(key).length!==1)fail('不允许的参数或重复参数');
+  const required=(key:string,value?:string)=>{if(!q.has(key)||(value!==undefined&&q.get(key)!==value))fail(`缺少或无效的 ${key} 参数`);};
+  const limit=(max:number)=>{if(q.has('limit')&&!integer(q.get('limit'),max,1))fail('每次数量超出上限');};
+  const cursor=(key:string)=>{if(q.has(key)&&!/^\d{1,22}$/.test(q.get(key)!))fail('分页游标无效');};
+  if(venue==='okx'){
+    limit(100);cursor('after');
+    if(route==='public/instruments')required('instType','SWAP');
+    else {if(!/^[A-Z0-9]{1,40}-USDT-SWAP$/.test(q.get('instId')??''))fail('只允许 USDT 永续');
+      if(route==='market/history-candles'&&!labelSeconds[q.get('bar')??''])fail('K线周期不在白名单内');
+      else {if(q.has('type')&&!['1','2'].includes(q.get('type')!))fail('分页类型无效');}
+    }
+  }else if(venue==='gate'){
+    if(route!=='contracts'){
+      if(!/^[A-Z0-9]{1,40}_USDT$/.test(q.get('contract')??''))fail('只允许 USDT 永续');
+      if(!integer(q.get('from'),8640000000000,1)||!integer(q.get('to'),8640000000000,1))fail('时间参数无效');
+      const from=Number(q.get('from')),to=Number(q.get('to'));if(to<from)fail('时间区间倒置');
+      if(route==='candlesticks'){
+        const interval=q.get('interval')??'',step=barSeconds[interval];if(!step||['3m','2h','6h','12h'].includes(interval))fail('Gate原生周期不在白名单内');
+        if(from%step||to%step||(to-from)/step+1>2000)fail('K线边界或根数超出上限');
+      }else {limit(1000);if(to-from>7*86400)fail('成交查询区间超过7天');if(q.has('offset')&&!integer(q.get('offset'),10000000))fail('分页偏移无效');}
+    }
+  }else {
+    if(route==='instruments')required('category','USDT-FUTURES'); else required('productType','USDT-FUTURES');
+    if(route!=='contracts'&&route!=='instruments'){
+      if(!/^[A-Z0-9]{1,40}USDT$/.test(q.get('symbol')??''))fail('只允许 USDT 永续');
+      if(!integer(q.get('endTime'),8640000000000000,1))fail('截止时间无效');
+      if(route==='history-candles'){const label=q.get('granularity')??'',step=labelSeconds[label];if(!step||label==='2H')fail('Bitget原生周期不在白名单内');limit(200);if(Number(q.get('endTime'))%(step*1000))fail('K线游标须对齐周期边界');}
+      else {limit(1000);cursor('idLessThan');if(!integer(q.get('startTime'),8640000000000000,1))fail('开始时间无效');const span=Number(q.get('endTime'))-Number(q.get('startTime'));if(span<0||span>7*86400000)fail('成交查询区间须在7天内');}
+    }
   }
-  if(input.pathname.endsWith('/instruments')&&input.searchParams.get('instType')!=='SWAP')throw new Error('Missing SWAP');
-  if(input.pathname.includes('/market/')&&!input.searchParams.has('instId'))throw new Error('Missing instrument');
-  if(input.pathname.endsWith('/history-candles')&&input.searchParams.get('bar')!=='5m')throw new Error('Missing 5m');
-  return input;
+  return url;
 }
+/** Backwards compatible with the already delivered OKX proxy URLs. */
+export const okxPublicUrl=(path:string)=>publicMarketUrl('okx',path);
 export async function handleFishProxy(request:Request,fetcher:typeof fetch=fetch):Promise<Response>{
   const headers={...fishProxyCors,'Content-Type':'application/json','Cache-Control':'no-store'};
+  const error=(message:string,status:number)=>new Response(JSON.stringify({error:message}),{status,headers});
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-  if(request.method!=='GET')return new Response('{"error":"GET only"}',{status:405,headers});
+  if(request.method!=='GET')return error('只允许只读 GET 请求',405);
   let upstream:URL;
   try{
     const input=new URL(request.url);
-    if([...input.searchParams.keys()].some(k=>k!=='path')||input.searchParams.getAll('path').length!==1)throw new Error('One path required');
-    upstream=okxPublicUrl(input.searchParams.get('path')??'');
-  }catch{return new Response('{"error":"Public market path not allowed"}',{status:400,headers});}
-  const controller=new AbortController(); const timeout=setTimeout(()=>controller.abort(),15000);
+    if([...input.searchParams.keys()].some(k=>!['path','exchange'].includes(k))||input.searchParams.getAll('path').length!==1||input.searchParams.getAll('exchange').length>1)throw new Error('参数无效');
+    upstream=publicMarketUrl(input.searchParams.get('exchange')??'okx',input.searchParams.get('path')??'');
+  }catch{return error('公开行情路径或参数不在白名单内',400);}
+  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),15000);
   try{
     const response=await fetcher.call(globalThis,upstream,{method:'GET',redirect:'error',signal:controller.signal,headers:{Accept:'application/json'}});
     const body=await response.text();
-    if(body.length>4_000_000)return new Response('{"error":"Upstream response too large"}',{status:502,headers});
-    try{JSON.parse(body);}catch{return new Response('{"error":"Invalid upstream JSON"}',{status:502,headers});}
+    if(body.length>4_000_000)return error('上游响应超出大小上限',502);
+    try{JSON.parse(body);}catch{return error('上游返回的不是有效 JSON',502);}
     const retry=response.headers.get('Retry-After');if(retry)Object.assign(headers,{'Retry-After':retry});
     return new Response(body,{status:response.status,headers});
-  }catch{return new Response('{"error":"Public market upstream unavailable"}',{status:502,headers});}
+  }catch{return error('公开行情上游不可用或请求超时',502);}
   finally{clearTimeout(timeout);}
 }

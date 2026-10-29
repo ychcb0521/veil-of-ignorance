@@ -102,7 +102,7 @@ async function inflateBytes(bytes: Uint8Array, format: CompressionFormatName): P
     throw new Error('当前浏览器不支持原生文档解压，无法解析该文件');
   }
 
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStreamCtor(format));
+  const stream = new Blob([new Uint8Array(bytes)]).stream().pipeThrough(new DecompressionStreamCtor(format));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

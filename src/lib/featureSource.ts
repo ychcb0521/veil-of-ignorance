@@ -1,3 +1,4 @@
+import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
 /**
  * 特征值的唯一来源：K 线图指标、渔、Deep dig 都读同一份定义（Deep dig 里账号保存的那份，没改过就是内置的）。
  * 【用户要求】2026-10-19「公式要统一。指标类标、捕鱼算法、dig 中的要保持一致。尤其是 avg，不能重复 avg」
@@ -62,16 +63,17 @@ export function coreProgram(program: Program): Program {
 
 // ===================== 账号里的定义（与 Deep dig 目录同一份） =====================
 
-let cache: { raw: string | null; defs: DeepDigFeatureDef[] } | null = null;
+let cache: { prefix: string; raw: string | null; defs: DeepDigFeatureDef[] } | null = null;
 /** Deep dig 目录的定义（改过的内置项 + 新增项，已移除的不列）。按原文缓存，Deep dig 一保存这里就跟着变。 */
 export function accountFeatureDefs(): DeepDigFeatureDef[] {
+  const prefix = getUserPrefix();
   let raw: string | null = null;
-  try { raw = readPersistedStateRaw(getUserPrefix() + FEATURES_KEY); } catch { raw = null; }
-  if (cache && cache.raw === raw) return cache.defs;
+  try { raw = readPersistedStateRaw(prefix + FEATURES_KEY); } catch { raw = null; }
+  if (cache && cache.prefix === prefix && cache.raw === raw) return cache.defs;
   let saved: DeepDigFeatureDef[] = [];
   try { const x = JSON.parse(raw ?? '[]'); if (Array.isArray(x)) saved = x; } catch { saved = []; }
   const defs = mergeFeatureDefs(saved).filter(d => !d.removed);
-  cache = { raw, defs };
+  cache = { prefix, raw, defs };
   return defs;
 }
 export const accountFeatureDef = (id: string) => accountFeatureDefs().find(d => d.id === id);
@@ -92,6 +94,39 @@ const CHART_PARAM: Record<string, { param: 'hl' | 'avgh' } | { constant: string 
   state: { param: 'avgh' }, state2: { param: 'avgh' }, cdi2: { param: 'avgh' }, 'seller-control': { param: 'hl' }, dss: { constant: 'n' }, cda: { param: 'hl' },
   ctba: { constant:'N' }, cbi2: { param: 'avgh' }, bss: { constant: 'n' }, cbi: { constant: 'h' },
 };
+
+
+export function hasSavedFeatureDefinition(id: string): boolean {
+  try { const saved = JSON.parse(readPersistedStateRaw(getUserPrefix() + FEATURES_KEY) ?? '[]'); return Array.isArray(saved) && saved.some(d => d.id === id); }
+  catch { return false; }
+}
+/** A scalar in the saved formula is authoritative until the chart is manually overridden. */
+export function chartFeaturePeriod(def: DeepDigFeatureDef, fallback = 6): number {
+  if (featureUsesMbi(def)) return mbiNOf(def);
+  const binding = CHART_PARAM[featureTemplateId(def) ?? ''];
+  if (binding && 'constant' in binding) {
+    try {
+      const statement = compileFeatureFormula(def.formula).program.statements.find(s => s.name === binding.constant && s.expr.k === 'num');
+      if (statement?.expr.k === 'num' && statement.expr.v > 0) return statement.expr.v;
+    } catch { /* The editor reports invalid formulas. */ }
+    return fallback;
+  }
+  return binding && 'param' in binding && binding.param === 'avgh' ? avgHoursOf(def) : halfLifeOf(def);
+}
+/** Name anonymous results for shared chart averages, without changing the saved text. */
+const namedChartFormulaCache = new Map<string, string>();
+export function namedChartFormula(formula: string): string {
+  const cached = namedChartFormulaCache.get(formula);
+  if (cached != null) return cached;
+  const save = (value: string) => { if (namedChartFormulaCache.size >= 64) namedChartFormulaCache.clear(); namedChartFormulaCache.set(formula, value); return value; };
+  const program = compileFeatureFormula(formula).program;
+  if (featureCoreName(program)) return save(formula);
+  const render = (n: Program['statements'][number]['expr']): string => n.k === 'num' ? String(n.v) : n.k === 'var' ? n.name
+    : n.k === 'un' ? '(' + n.op + ' ' + render(n.a) + ')' : n.k === 'bin' ? '(' + render(n.a) + ' ' + n.op + ' ' + render(n.b) + ')' : n.name + '(' + n.args.map(render).join(', ') + ')';
+  let name = '_feature_value';
+  while (program.inputs.has(name) || program.statements.some(s => s.name === name)) name += '_';
+  return save(formula + '\n' + name + ' = ' + render(program.statements.at(-1)!.expr));
+}
 
 const compiledCache = new Map<string, { compiled: CompiledFeature; core: string | null }>();
 function compileFor(formula: string, constant: string | null, value: number | null) {
@@ -115,7 +150,8 @@ const historyBarsCache = new Map<string, number>();
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {
   const def = chartFeatureDef(featureId);
   if (!def) return 0;
-  const binding = CHART_PARAM[featureId];
+  const usesMbi = featureUsesMbi(def);
+  const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];
   const constant = binding && 'constant' in binding ? binding.constant : null;
   const program = compileFor(formula, constant, constant ? period : null).compiled.program;
   const hl = binding && 'param' in binding && binding.param === 'hl' ? period : halfLifeOf(def);
@@ -123,8 +159,8 @@ export function chartFeatureHistoryBars(featureId: string, period: number, formu
   const key = `${featureId}|${period}|${hl}|${avgh}|${formula}|${barMinutes}`;
   const cached = historyBarsCache.get(key);
   if (cached != null) return cached;
-  const params = { ...featureParams(def), hl, avgh, 半衰期: hl, 平均时长: avgh, ...(featureId === 'mbi' ? { MBI_N: period } : {}) };
-  const bars = featureId === 'mbi'
+  const params = { ...featureParams(def), hl, avgh, 半衰期: hl, 平均时长: avgh, ...(usesMbi ? { MBI_N: period } : {}) };
+  const bars = usesMbi
     ? Math.max(programHistoryBars(program, params, barMinutes) + 1, Math.ceil(48 * 60 / barMinutes) + Math.max(5 * period, programHistoryBars(program, params, barMinutes, true)))
     : programHistoryBars(program, params, 5) + Math.ceil(32 * hl * 12) + 2;
   if (historyBarsCache.size >= 128) historyBarsCache.clear();
@@ -149,8 +185,9 @@ const seriesCache = new WeakMap<KLineData[], Map<string, { key: string; result: 
 export function chartFeatureSeries(dataList: KLineData[], featureId: string, period: number | undefined, refClose?: (number | null)[], options: { formula?: string; revision?: string; variables?: string[]; delta?: { revision:number; changes:readonly [number,number][]; referenceVersion:number } } = {}): ChartFeatureSeries | null {
   const def = chartFeatureDef(featureId);
   if (!def) return null;
+  const usesMbi = featureUsesMbi(def), templateId = featureTemplateId(def);
   const formula = options.formula ?? def.formula;
-  if (featureId === 'ctba' && dataList.length > 1) {
+  if (templateId === 'ctba' && dataList.length > 1) {
     // A missing first candle must not classify an otherwise 5m series as 10m.
     let cadence = Infinity;
     for (let i = 1; i < Math.min(dataList.length, 64); i++) {
@@ -159,7 +196,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
     }
     if (cadence !== 300000) return null;
   }
-  const binding = CHART_PARAM[featureId];
+  const binding = CHART_PARAM[featureTemplateId(def) ?? featureId];
   const p = Number(period);
   const has = Number.isFinite(p) && p > 0;
   const constant = binding && 'constant' in binding ? binding.constant : null;
@@ -167,7 +204,7 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
     interval: '5m' as const,
     halfLifeHours: binding && 'param' in binding && binding.param === 'hl' && has ? p : def.halfLifeHours,
     avgHours: binding && 'param' in binding && binding.param === 'avgh' && has ? p : def.avgHours,
-    ...(featureId === 'mbi' ? {
+    ...(usesMbi ? {
       MBI_N: has ? p : mbiNOf(def), MBI_Z0: def.MBI_Z0,
       // Other indicators keep their existing 5m convention. MBI uses actual candle units.
       interval: (RESEARCH_INTERVALS.find(i => intervalMs(i) === (dataList.length > 1 ? dataList[1].timestamp - dataList[0].timestamp : 300000)) ?? def.interval ?? '5m') as ResearchInterval,
@@ -175,12 +212,12 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
   };
   let refSig = '';
   if (refClose) { let n = 0, sum = 0; for (const r of refClose) if (r != null) { n++; sum += r; } refSig = `${n}:${sum}`; }
-  const mbiKey = featureId === 'mbi' ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : '';
+  const mbiKey = usesMbi ? `|${params.MBI_N}|${params.MBI_Z0}|${params.interval}` : '';
   const key = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${refSig}|${options.revision ?? ''}|${def.scale}|${def.unit}|${formula}${mbiKey}`;
   const context = `${featureId}|${p}|${params.halfLifeHours}|${params.avgHours}|${def.scale}|${def.unit}|${formula}|${options.variables?.join(',') ?? '*'}${mbiKey}`;
   // MBI is a cheap linear recurrence; evaluate here so the existing replay
   // closed-candle flag can exclude forming prices before calculation.
-  if (!['mbi','ctba'].includes(featureId) && options.variables && isChartComputationEnabled(dataList)) {
+  if (!(usesMbi || templateId === 'ctba') && options.variables && isChartComputationEnabled(dataList)) {
     try {
       const plan = compileFor(formula, constant, constant && has ? p : null);
       return requestChartComputation(context, { data:dataList, refs:refClose, signature:key, compiled:plan.compiled, params, delta:options.delta,
@@ -206,11 +243,11 @@ export function chartFeatureSeries(dataList: KLineData[], featureId: string, per
       const d = dataList[i];
       const b = bars[i] ?? (bars[i] = {} as ResearchBar);
       b.openTime = d.timestamp; b.open = d.open; b.high = d.high; b.low = d.low;
-      b.close = ['mbi','ctba'].includes(featureId) && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
+      b.close = (usesMbi || templateId === 'ctba') && (d.cba2Closed === false || d.timestamp + intervalMs(params.interval) > Date.now()) ? NaN : d.close;
       b.volume = typeof d.volume === 'number' ? d.volume : NaN; b.takerBuyVolume = null;
       b.quoteVolume = typeof d.turnover === 'number' ? d.turnover : null;
       b.takerBuyQuoteVolume = typeof d.takerBuyTurnover === 'number' ? d.takerBuyTurnover as number : null;
-      if (featureId === 'ctba' && !Number.isFinite(b.close)) {
+      if (templateId === 'ctba' && !Number.isFinite(b.close)) {
         // Components must also hide forming VWAP/flow, not only the final score.
         b.volume = NaN; b.quoteVolume = null; b.takerBuyQuoteVolume = null;
       }

@@ -1,3 +1,4 @@
+import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
 /**
  * Deep dig 描述统计的时间序列曲线：每个事件把公式里每个变量，从进场前一段到进场后一段逐点取值；画图时按组求平均。
  * 【用户要求】2026-10-17「描述统计那里能够画出各组的时间序列曲线（组内数据在时间序列上的平均），比如 V 的时间序列曲线，
@@ -91,7 +92,7 @@ export function computeEventSeries(
   const closes = sel.map(b => b.openTime + barMs);
   const values = names.map(n => (n === RESULT_VAR && !out.vars.has(n) ? out.last : out.vars.get(n) ?? Number.NaN));
   // MBI storage remains double precision; preserve every existing feature's cache format.
-  const ArrayType = (compiled.usesMbi || def.id==='ctba') ? Float64Array : Float32Array;
+  const ArrayType = (compiled.usesMbi || featureTemplateId(def)==='ctba') ? Float64Array : Float32Array;
   const result = new ArrayType(names.length * offsets.length).fill(Number.NaN);
   offsets.forEach((tau, k) => {
     const t = anchorMs + tau;

@@ -288,7 +288,7 @@ it('restarts immediately with the latest selection and settings, rejects late ol
   expect(qualityRunSamples(next.study).map(r => r.source.symbol)).toEqual(['BBBUSDT']);
   expect(next.study.observeHours).toBe(12);
   expect(next.study.sellPlans![0]).toMatchObject({rule:{threshold:.4},holdingVetoes:[veto]});
-  expect(next.study.buyFilters).toEqual([f]);expect(next.study.sellPlans![0].buyFilters).toBeUndefined();
+  expect(next.study.buyFilters).toEqual([makeQualityBuyFilter('state:state', '>', .8)]);expect(next.study.sellPlans![0].buyFilters).toBeUndefined();
   expect(next.study.sellPlans![0].snapshot.definitionKey).toBe(definitionKey({ ...def, interval: '5m' }));
   expect(h.result.current.progress).toEqual({ done: 0, total: 2, current: '' });
   expect(h.result.current.study.campaignRuns![0].result).toEqual(prior);
@@ -529,4 +529,41 @@ it('archives previous results and applies mirror and vetoes in one selected moni
  expect(h.result.current.study.sellPlans![1]).toEqual(other);expect(h.result.current.study.buyFilters).toEqual(beforeFilters);
  const count=tasks.length;act(()=>h.result.current.setHoldingVetoes(id,[],mirror));await flush(600);expect(tasks).toHaveLength(count);
  expect(()=>act(()=>h.result.current.setHoldingVetoes(id,[],{...mirror,sellPct:101}))).toThrow('100%');
+});
+
+
+it('adds and edits dynamic sell plans, aborts obsolete batches and preserves removal and history on reload', async () => {
+  const { makeQualitySellPlan } = await import('@/lib/fish/qualitySellPlans');
+  const { BUILTIN_FEATURES } = await import('@/lib/deepDig/features');
+  const tasks: QualityRunOptions[] = [];
+  const h = renderHook(() => useFishQuality('a', [signal], async task => {
+    tasks.push(task); await new Promise<void>(resolve => task.signal.addEventListener('abort', () => resolve()));
+  }));
+  await flush();
+  act(() => h.result.current.setSelectedRows(qualityDisplayRows(h.result.current.study).map(r => r.id)));
+  const added = makeQualitySellPlan('mbi-bear:MBI_bear', '<', -.5, BUILTIN_FEATURES, undefined, 'my-bear');
+  act(() => h.result.current.setSellPlans([...h.result.current.study.sellPlans!, added]));
+  await flush(600);
+  expect(tasks).toHaveLength(1);
+  const old = tasks[0], row = qualityRunSamples(old.study)[0], plan = old.study.sellPlans!.find(p => p.id === 'my-bear')!;
+  expect(plan).toMatchObject({ rule: { threshold: -.5 }, snapshot: { featureId: 'mbi-bear' } });
+  const prior = { key: qualityResultKey(row, plan, 0), sampleId: row.id, groupId: plan.id, evaluatedAt: T, status: 'closed' as const, complete: true, entryTime: T, entryPrice: 100, endTime: T + 60000, endPrice: 99, returnPct: -1, pnl: -1 };
+  act(() => old.onResult(prior));
+  const edited = makeQualitySellPlan('ctba-bear:CTBA_bear', '<', -20, BUILTIN_FEATURES, added);
+  act(() => h.result.current.setSellPlans([...h.result.current.study.sellPlans!.filter(p => p.id !== added.id), edited]));
+  expect(old.signal.aborted).toBe(true);
+  await flush(600);
+  expect(tasks[1].study.sellPlans!.find(p => p.id === added.id)).toMatchObject({ metric: 'CTBA_bear', rule: { threshold: -20 } });
+  expect(h.result.current.study.campaignRuns!.some(run => run.result.returnPct === -1)).toBe(true);
+  act(() => old.onResult({ ...prior, returnPct: 999 }));
+  expect(h.result.current.study.results.some(r => r.returnPct === 999)).toBe(false);
+  act(() => h.result.current.setSellPlans([]));
+  await flush(600);
+  expect(h.result.current.study.sellPlans).toEqual([]);
+  expect(h.result.current.study.sellPlansConfigured).toBe(true);
+  const saved = structuredClone(h.result.current.study);
+  h.unmount();
+  storage.load.mockResolvedValue({ study: saved });
+  const restored = renderHook(() => useFishQuality('a', [signal], vi.fn(async () => {})));
+  await flush(); expect(restored.result.current.study.sellPlans).toEqual([]); restored.unmount();
 });

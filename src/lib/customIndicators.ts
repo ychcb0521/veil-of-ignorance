@@ -1,3 +1,6 @@
+import { accountResearchIndicators, researchDefaultPeriod, type ResearchIndicator } from '@/lib/researchIndicators';
+import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { accountFeatureDefs } from '@/lib/featureSource';
 import { CTBA_DEFAULTS } from '@/lib/ctba';
 import { computeCba2, CBA2_DEFAULTS } from '@/lib/cba2';
 /**
@@ -324,6 +327,33 @@ export const INDICATOR_COMPANIONS: Record<string, { key: string; kcName: string 
     { key: `${item.id}#AVG2`, kcName: researchKcName(item.id, 2) },
   ]])),
 };
+
+const registeredAccountIndicators = new Set<string>();
+export function registerAccountFeatureIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()) {
+  for (const item of accountResearchIndicators(definitions).filter(item => item.id.startsWith('FEATURE_'))) {
+    CUSTOM_INDICATOR_MAP[item.id] = researchKcName(item.id);
+    INDICATOR_COMPANIONS[item.id] = [1, 2].map(level => ({ key: item.id + '#AVG' + (level === 2 ? '2' : ''), kcName: researchKcName(item.id, level) }));
+    if (registeredAccountIndicators.has(item.id)) continue;
+    for (const level of [0, 1, 2]) {
+      const label = level === 0 ? item.short : 'avg_' + item.core + (level === 2 ? '_2' : '');
+      registerIndicator({
+        name: researchKcName(item.id, level), shortName: label, calcParams: [researchDefaultPeriod(item), 0, 0], precision: 8,
+        ...(item.min < item.max ? { minValue: item.min, maxValue: item.max } : {}),
+        draw: zeroLine(ORANGE_DASH_LINE, item.neutral),
+        createTooltipDataSource: ({ defaultStyles }) => ({ name: chartFeatureDef(item.featureId)?.short ?? label, calcParamsText: '', icons: defaultStyles.tooltip.icons, values: undefined as never }),
+        figures: [{ key: 'value', title: label + ': ', type: 'line', styles: data => ({
+          color: vColor((data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value), size: 1.5,
+        }) }],
+        calc: (data, indicator) => {
+          const values = researchChartSeries(data, item, indicator.calcParams[0]);
+          return indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
+        },
+      });
+    }
+    registeredAccountIndicators.add(item.id);
+  }
+}
+
 export type CustomPaneVisibility = 'showRaw' | 'showAverage' | 'showAverage2';
 export function customIndicatorPane(name: string) {
   const item = researchIndicatorForKc(name);
@@ -356,6 +386,8 @@ export function indicatorCalcParams(kcName: string, ind: { type?: string; period
   if (kcName === 'DSP_V_AVG_CUSTOM') return [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS), z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (kcName === 'DSP_V_AVG2_CUSTOM') return [ind.period, z, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(dsp)];
   if (research) return [ind.period, btcReferenceVersion() + researchHistoryVersion(), researchDefinitionVersion(research)];
+  const legacyId = kcName === 'CBI_CUSTOM' ? 'cbi' : kcName === 'CBA2_CUSTOM' ? 'cba-2' : undefined;
+  if (legacyId) return [ind.period, researchDefinitionVersion({ featureId: legacyId } as ResearchIndicator)];
   return AVG_PARAM_INDICATORS.has(kcName) ? [ind.period, validHours(ind.avgHours, AVG_DEFAULT_HOURS)] : [ind.period];
 }
 
@@ -584,6 +616,7 @@ function dspATooltip(kind: 'a' | 'avg', adjustableAverage = false) {
 let registered = false;
 
 export function registerCustomIndicators() {
+  registerAccountFeatureIndicators();
   if (registered) return;
 
   try {
@@ -1443,7 +1476,7 @@ export function registerCustomIndicators() {
           return zeroLine(ORANGE_DASH_LINE, line)(args);
         },
         createTooltipDataSource: ({ indicator, defaultStyles }) => ({
-          name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: `(${indicator.calcParams[0]}h)`, icons: defaultStyles.tooltip.icons, values: undefined as never,
+          name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: '(' + indicator.calcParams[0] + (['MBI_BEAR','CTBA_BEAR'].includes(item.id) ? '根' : 'h') + ')', icons: defaultStyles.tooltip.icons, values: undefined as never,
         }),
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;

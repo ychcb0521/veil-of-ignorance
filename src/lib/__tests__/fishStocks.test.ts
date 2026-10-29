@@ -11,6 +11,7 @@ import {runInference} from '@/lib/deepDig/commands';
 import {collectDeepDigRun} from '@/lib/deepDig/analysis';
 import {buildCampaignGroupReport} from '@/lib/deepRsa/report';
 import {preflightSignalJumpIssues} from '@/lib/signalJumpDiagnostics';
+import {publicMarketUrl} from '../../../supabase/functions/fish-market-proxy/handler';
 const signal=new AbortController().signal,cut=Date.UTC(2026,9,19,3);
 const coin:TradeSignal={id:'coin',symbol:'COINUSDT',timeMs:Date.UTC(2026,9,19,2),timeLabel:'2026-10-19 10:00:00',fallbackZone:'1.2 ~ 3.4',quality:4};
 const stock:TradeSignal={...coin,id:'stock',market:'us_stock',underlying:'COIN',exchange:'binance'};
@@ -52,7 +53,8 @@ describe('美股元数据与身份',()=>{
 describe('美股取数边界和安全',()=>{
  it('Bitget v3元数据使用固定新路径；代理拒绝现货、错误地区/写接口和额外参数',async()=>{
   const fetcher=vi.fn(async(_url:RequestInfo|URL)=>new Response(JSON.stringify({code:'00000',data:[]}))),request=fishTransport('bitget',fetcher as typeof fetch,new FishWeightBudget());await request('instruments?category=USDT-FUTURES',1,signal);
-  expect(String(fetcher.mock.calls[0][0])).toBe('https://api.bitget.com/api/v3/market/instruments?category=USDT-FUTURES');
+  expect(String(fetcher.mock.calls[0][0])).toBe('https://api.bitget.com/api/v3/market/instruments?category=USDT-FUTURES');expect(publicMarketUrl('bitget','instruments?category=USDT-FUTURES').pathname).toBe('/api/v3/market/instruments');
+  for(const path of ['instruments?category=SPOT','instruments?category=USDT-FUTURES&marketRegion=US','instruments?category=USDT-FUTURES&category=USDT-FUTURES','orders?category=USDT-FUTURES'])expect(()=>publicMarketUrl('bitget',path)).toThrow();
  });
  it('Deep dig归其他并计数说明，不生成行情事件；仅美股样本完全不请求同名币',async()=>{
   const rows=[signalSample(stock),signalSample(coin)],groups=compileGroups('s > 3','s < 2','signals');expect(rows[0]).toMatchObject({excluded:true,unsupportedReason:'美股：暂不支持取行情'});expect(classifySample(rows[0],groups)).toEqual({group:'other',reason:'us_stock'});expect(previewGroups(rows,groups)).toMatchObject({positive:1,other:1});expect(sampleEventRows(rows,groups).map(r=>r.id)).toEqual(['coin']);

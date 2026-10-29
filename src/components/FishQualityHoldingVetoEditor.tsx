@@ -1,10 +1,12 @@
+import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { useMemo } from 'react';
 import { Plus, X } from 'lucide-react';
 import { qualityFilterChoices, type HoldingVetoDraft } from '@/lib/fish/qualityFilters';
 import { isHoldingPriceChoice, type QualityOperator } from '@/lib/fish/qualityVeto';
 const field='h-7 min-w-0 rounded-md bg-muted/50 px-2 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring';
 export function FishQualityHoldingVetoEditor({draft,setDraft}:{draft:HoldingVetoDraft[];setDraft:(draft:HoldingVetoDraft[])=>void}) {
-  const choices=useMemo(()=>qualityFilterChoices(),[]),groups=[...new Set(choices.map(c=>c.group))];
+  const definitions=useFeatureDefinitions();
+  const choices=useMemo(()=>qualityFilterChoices(definitions),[definitions]),groups=[...new Set(choices.map(c=>c.group))];
   const patch=(i:number,p:Partial<HoldingVetoDraft>)=>setDraft(draft.map((d,j)=>j===i?{...d,...p}:d));
   const riskSummary=([['static-drawdown','静态回撤'],['dynamic-drawdown','动态回撤'],['drop-1m','1分钟内跌幅'],['drop-5m','5分钟内跌幅']] as const).map(([kind,label])=>{
     const enabled=draft.filter(d=>d.enabled&&d.choice===kind);

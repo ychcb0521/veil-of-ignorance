@@ -1,0 +1,55 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { FishQualitySellPlansEditor } from '../FishQualitySellPlansEditor';
+import { enableQualityComparison, ensureQualitySellCombo } from '@/lib/fish/qualityComparison';
+import { newQualityStudy, type QualityGroup } from '@/lib/fish/quality';
+import { makeQualitySellPlan, replaceQualitySellPlans } from '@/lib/fish/qualitySellPlans';
+import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
+afterEach(() => { cleanup(); localStorage.clear(); });
+const initial = () => ensureQualitySellCombo(enableQualityComparison(newQualityStudy())).sellPlans!;
+it('adds either bearish feature or a custom series with editable direction/threshold while preserving existing plans', () => {
+  const save = vi.fn(), plans = initial();
+  render(<FishQualitySellPlansEditor plans={plans} ready onSave={save}/>);
+  fireEvent.click(screen.getByRole('button', { name: '新增卖出算法' }));
+  fireEvent.change(screen.getByLabelText('卖出算法 4 指标 特征值'), { target: { value: 'mbi-bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 4 指标'), { target: { value: 'mbi-bear:MBI_bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 4 门槛'), { target: { value: '-0.6' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  expect(save).toHaveBeenCalledOnce();
+  expect(save.mock.calls[0][0]).toHaveLength(4);
+  expect(save.mock.calls[0][0][3]).toMatchObject({ metric: 'MBI_bear', definitionSource: 'account', rule: { direction: '<', threshold: -.6 }, snapshot: { featureId: 'mbi-bear' } });
+  expect(plans).toHaveLength(3);
+});
+it('allows deleting every default and does not restore deleted defaults after loading again', () => {
+  const save = vi.fn();
+  render(<FishQualitySellPlansEditor plans={initial()} ready onSave={save}/>);
+  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByLabelText('删除卖出算法 1'));
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  expect(save).toHaveBeenCalledWith([]);
+  const saved = replaceQualitySellPlans(ensureQualitySellCombo(enableQualityComparison(newQualityStudy())), []);
+  expect(ensureQualitySellCombo(enableQualityComparison(structuredClone(saved))).sellPlans).toEqual([]);
+});
+it('edits both phases of a combination and keeps the plan identity and holding settings', () => {
+  const plans = initial(), old = plans[2], save = vi.fn();
+  old.holdingVetoes = [{ id: 'risk', kind: 'static-drawdown', direction: '>=', threshold: 2, enabled: true, label: '风险' }];
+  render(<FishQualitySellPlansEditor plans={plans} ready onSave={save}/>);
+  fireEvent.change(screen.getByLabelText('卖出算法 3 指标 特征值'), { target: { value: 'ctba-bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 指标'), { target: { value: 'ctba-bear:CTBA_bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 门槛'), { target: { value: '-10' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 后段指标 特征值'), { target: { value: 'mbi-bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 后段指标'), { target: { value: 'mbi-bear:MBI_bear' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 后段门槛'), { target: { value: '-0.5' } });
+  fireEvent.change(screen.getByLabelText('卖出算法 3 切换涨幅'), { target: { value: '4' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存卖出算法' }));
+  const next: QualityGroup = save.mock.calls[0][0][2];
+  expect(next.id).toBe(old.id); expect(next.holdingVetoes).toEqual(old.holdingVetoes);
+  expect(next).toMatchObject({ metric: 'CTBA_bear', rule: { threshold: -10 }, combo: { switchPct: 4, after: { metric: 'MBI_bear', rule: { threshold: -.5 } } } });
+});
+it('rejects invalid input and preserves an existing plan selection when its identity survives', () => {
+  const study = enableQualityComparison(newQualityStudy()), plans = study.sellPlans!;
+  study.selectedSellId = plans[0].id;
+  const plan = makeQualitySellPlan('mbi-bear:MBI_bear', '<', -.5, BUILTIN_FEATURES, plans[0]);
+  expect(replaceQualitySellPlans(study, [plan]).selectedSellId).toBe(plan.id);
+  expect(replaceQualitySellPlans(study, []).selectedSellId).toBeUndefined();
+  expect(() => replaceQualitySellPlans(study, [{ ...plan, rule: { metric: plan.metric, direction: '<', threshold: NaN } }])).toThrow('有限数字');
+});

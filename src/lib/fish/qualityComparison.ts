@@ -1,7 +1,22 @@
+import { researchChartFormula, researchIndicatorForFeature } from '@/lib/researchIndicators';
+import { compileFeatureFormula, BUILTIN_FEATURES } from '@/lib/deepDig/features';
+import type { FishSnapshot } from './algorithm';
+import type { QualityBuyFilter } from './quality';
+import type { QualityHoldingVeto } from './qualityVeto';
 /** Two-stage comparisons use one entry per fish and a common set of sell experiments. */
 import { STATE_DEF, CDA_DEF, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
 import { activeBuyFilters, anyBuyFilters, hasQualityExit, qualityComparisonRows, qualityFilterStatus, qualityResultKey, type FishQualityStudy, type QualityGroup, type QualityResult, type QualitySample } from './quality';
+
+/** Preserve generated named outputs when a saved formula has an anonymous result or omits averages. */
+function executableThresholdDef(def: DeepDigFeatureDef, metric: string, averages = false): DeepDigFeatureDef {
+  try {
+    if (averages || metric !== '结果' && !compileFeatureFormula(def.formula).program.statements.some(s => s.name === metric)) {
+      return { ...def, formula: researchChartFormula(researchIndicatorForFeature(def), def.formula) };
+    }
+  } catch { /* Invalid saved text stays invalid, so evaluation reports missing data. */ }
+  return def;
+}
 
 export function enableQualityComparison(study: FishQualityStudy, definitions = accountFeatureDefs()): FishQualityStudy {
   if (study.sellPlans) return study;
@@ -25,6 +40,7 @@ export function enableQualityComparison(study: FishQualityStudy, definitions = a
  */
 export const QUALITY_SELL_COMBO_ID = 'sell-combo-1';
 export function ensureQualitySellCombo(study: FishQualityStudy): FishQualityStudy {
+  if (study.sellPlansConfigured) return study;
   const plans = study.sellPlans;
   if (!plans || plans.some(p => p.id === QUALITY_SELL_COMBO_ID)) return study;
   const state = plans.find(p => p.snapshot.featureId === STATE_DEF.id && !p.combo), cda = plans.find(p => p.snapshot.featureId === CDA_DEF.id && !p.combo);
@@ -48,7 +64,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     if (!plan.combo) return plan;
     const builtin = [STATE_DEF, CDA_DEF].find(d => d.id === plan.combo!.after.snapshot.featureId);
     if (!builtin) return plan;
-    const def = definitions.find(d => d.id === builtin.id) ?? builtin, key = definitionKey({ ...def, interval: '5m' });
+    const def = definitions.find(d => d.id === builtin.id) ?? builtin, key = definitionKey({ ...executableThresholdDef(def, plan.combo.after.metric), interval: '5m' });
     const after = plan.combo.after;
     if (after.snapshot.definitionKey === key && after.snapshot.interval === '5m') return plan;
     changed = true;
@@ -61,7 +77,7 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
     if (!builtin) return plan;
     // Same fallback as charts: a hidden built-in still has its built-in definition.
     const def = definitions.find(d => d.id === builtin.id) ?? builtin;
-    const key = definitionKey({ ...def, interval: '5m' });
+    const key = definitionKey({ ...executableThresholdDef(def, plan.metric), interval: '5m' });
     if (plan.snapshot.definitionKey === key && plan.snapshot.interval === '5m' && plan.definitionSource === 'account' && plan.execution === 'intrabar-1m') return plan;
     changed = true;
     return { ...plan, definitionSource: 'account' as const, execution:'intrabar-1m' as const, snapshot: { ...plan.snapshot,
@@ -69,8 +85,42 @@ export function syncQualitySellDefinitions(study: FishQualityStudy, definitions:
       featureName: def.name, featureShort: def.short,
     } };
   });
-  return changed ? { ...study, sellPlans } : study;
+  return syncQualityThresholdDefinitions(changed ? { ...study, sellPlans } : study, definitions);
 }
+/** Update executable threshold references only; archived runs retain their frozen snapshots. */
+export function syncQualityThresholdDefinitions(study: FishQualityStudy, definitions: readonly DeepDigFeatureDef[]): FishQualityStudy {
+  let changed = false;
+  const snapshot = (old: FishSnapshot, metric: string, averages = false): FishSnapshot => {
+    const def = definitions.find(d => d.id === old.featureId) ?? BUILTIN_FEATURES.find(d => d.id === old.featureId);
+    if (!def) return old;
+    const key = definitionKey({ ...executableThresholdDef(def, metric, averages), interval: '5m' });
+    if (old.definitionKey === key && old.featureName === def.name && old.featureShort === def.short) return old;
+    changed = true;
+    return { ...old, definitionKey: key, featureName: def.name, featureShort: def.short, interval: '5m' };
+  };
+  const filters = (items: QualityBuyFilter[] | undefined) => {
+    if (!items) return items;
+    const next = items.map(f => { const s = snapshot(f.snapshot, f.metric, true); return s === f.snapshot ? f : { ...f, snapshot: s }; });
+    return next.some((v, i) => v !== items[i]) ? next : items;
+  };
+  const vetoes = (items: QualityHoldingVeto[] | undefined) => {
+    if (!items) return items;
+    const next = items.map(v => { if (v.kind !== 'indicator' || !v.snapshot) return v; const s = snapshot(v.snapshot, v.metric ?? '结果', true); return s === v.snapshot ? v : { ...v, snapshot: s }; });
+    return next.some((v, i) => v !== items[i]) ? next : items;
+  };
+  const plan = (p: QualityGroup, current: boolean) => {
+    const own = current && p.definitionSource === 'account' ? snapshot(p.snapshot, p.metric) : p.snapshot;
+    const buyFilters = filters(p.buyFilters), holdingVetoes = vetoes(p.holdingVetoes);
+    const after = p.combo ? snapshot(p.combo.after.snapshot, p.combo.after.metric) : undefined;
+    if (own === p.snapshot && buyFilters === p.buyFilters && holdingVetoes === p.holdingVetoes && (!p.combo || after === p.combo.after.snapshot)) return p;
+    return { ...p, snapshot: own, buyFilters, holdingVetoes, ...(p.combo ? { combo: { ...p.combo, after: { ...p.combo.after, snapshot: after! } } } : {}) };
+  };
+  const buyFilters = filters(study.buyFilters);
+  const sellPlans = study.sellPlans?.map(p => plan(p, true));
+  const groups = study.groups.map(p => plan(p, false));
+  return changed ? { ...study, buyFilters, sellPlans, groups: groups.some((p, i) => p !== study.groups[i]) ? groups : study.groups } : study;
+}
+
 export const qualitySellSuggestions = (plan: Pick<QualityGroup, 'snapshot'>) => plan.snapshot.featureId === 'state' ? [.5, .45, .4] : [0, -8, -15];
 export function qualityResultMap(study: FishQualityStudy) { return new Map(study.results.map(r => [r.key, r])); }
 export const qualityRowResult = (study: FishQualityStudy, row: QualitySample, plan: QualityGroup, results = qualityResultMap(study)) => results.get(qualityResultKey(row, plan, study.observeHours));

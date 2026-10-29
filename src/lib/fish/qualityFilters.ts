@@ -1,7 +1,7 @@
 /** Filter choices use the same account definitions as charts and Deep dig. */
 import { compileFeatureFormula, definitionKey, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { accountFeatureDefs } from '@/lib/featureSource';
-import { CUSTOM_RESEARCH_INDICATORS, researchChartFormula } from '@/lib/researchIndicators';
+import { researchIndicatorForFeature, researchChartFormula } from '@/lib/researchIndicators';
 import { shortFishHash } from './algorithm';
 import type { QualityBuyFilter } from './quality';
 import type { QualityHoldingVeto, QualityOperator } from './qualityVeto';
@@ -10,7 +10,7 @@ export interface QualityFilterChoice { key: string; featureId: string; metric: s
 function build(definitions: readonly DeepDigFeatureDef[]) {
   const choices: QualityFilterChoice[] = [], defs = new Map<string,DeepDigFeatureDef>();
   for (const def of definitions) {
-    const item = CUSTOM_RESEARCH_INDICATORS.find(i => i.featureId === def.id);
+    const item = researchIndicatorForFeature(def);
     try {
       const formula = item ? researchChartFormula(item,def.formula) : def.formula;
       const names = [...new Set(compileFeatureFormula(formula).program.statements.flatMap(s => s.name ? [s.name] : []))];

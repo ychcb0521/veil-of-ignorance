@@ -13,7 +13,7 @@ import { groupDeepDigFeatures } from '@/lib/customIndicatorGroups';
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Plus, X as XIcon } from 'lucide-react';
+import { ChevronRight, Copy, Plus, X as XIcon } from 'lucide-react';
 import { BackButton } from '@/components/journal/BackButton';
 import { DEEP_DIG_TABS, FeatureView, type DeepDigNote, type DeepDigTab } from '@/components/journal/deepDig/FeatureView';
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,7 +26,7 @@ import { defaultFeatureCommands } from '@/lib/deepDig/commands';
 import { campaignSample, signalSample, type SampleRow, type SampleSource } from '@/lib/deepDig/features';
 import { readCachedCampaignPricePath } from '@/hooks/useCampaignPricePaths';
 import { loadSignals, type TradeSignal } from '@/lib/signalLibrary';
-import { FEATURES_KEY, BUILTIN_FEATURES, mergeFeatureDefs, newFeatureTemplate, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { FEATURES_KEY, mergeFeatureDefs, newFeatureTemplate, copyFeatureDefinition, saveFeatureDefinition, removedBuiltins, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { buildCampaignGroupReport, type CampaignGroupReport } from '@/lib/deepRsa/report';
 
 const SCROLL_KEY_PREFIX = 'journal-deep-dig-scroll:';
@@ -103,15 +103,19 @@ export default function JournalDeepDigPage() {
     const current = list.find(d => d.id === id);
     if (!current) return list;
     const { removed: _removed, ...rest } = current;
-    const builtin = BUILTIN_FEATURES.find(b => b.id === id);
-    const same = builtin && (['name', 'short', 'definition', 'formula', 'scale', 'unit', 'positive', 'control'] as const).every(k => builtin[k] === rest[k]);
-    return same ? list.filter(d => d.id !== id) : list.map(d => (d.id === id ? rest : d));
+    return list.map(d => (d.id === id ? rest : d));
   });
 
   const addFeature = () => {
     const created = newFeatureTemplate(Date.now());
     setSavedDefs(prev => [...(Array.isArray(prev) ? prev : []), created]);
     nav(`/journal/deep-dig/${created.id}?edit=1`);
+  };
+
+  const copyFeature = (source: DeepDigFeatureDef) => {
+    const copied = copyFeatureDefinition(source, [...defs, ...(Array.isArray(savedDefs) ? savedDefs : [])]);
+    setSavedDefs(prev => saveFeatureDefinition(Array.isArray(prev) ? prev : [], copied));
+    nav('/journal/deep-dig/' + copied.id + '?edit=1');
   };
 
   if (slug && !def) return <Navigate to="/journal/deep-dig" replace />;
@@ -127,6 +131,7 @@ export default function JournalDeepDigPage() {
               {def ? def.name : '按特征值深挖'}<span className="max-sm:hidden"> · 描述统计 · 推断统计 · 规律提取</span>
             </p>
           </div>
+          {def && <button type="button" onClick={() => copyFeature(def)} aria-label="复制特征值" title="复制为独立的新特征值" className="ml-auto inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"><Copy className="h-3 w-3" />复制</button>}
         </div>
       </header>
       <main className="mx-auto max-w-[980px] px-4 py-5 sm:px-6">
@@ -159,13 +164,7 @@ export default function JournalDeepDigPage() {
               if (next) copy[def.id] = next; else delete copy[def.id];
               return copy;
             })}
-            onSaveDef={next => setSavedDefs(prev => {
-              const list = (Array.isArray(prev) ? prev : []).filter(d => d.id !== next.id);
-              const builtin = BUILTIN_FEATURES.find(b => b.id === next.id);
-              // 内置项改回与默认完全一样时不再存覆盖
-              const same = builtin && (['name', 'short', 'definition', 'formula', 'scale', 'unit', 'positive', 'control'] as const).every(k => builtin[k] === next[k]);
-              return same ? list : [...list, { ...next, builtin: undefined }];
-            })}
+            onSaveDef={next => setSavedDefs(prev => saveFeatureDefinition(Array.isArray(prev) ? prev : [], next))}
             onDeleteDef={def.builtin ? undefined : () => {
               deleteFeature(def);
               nav('/journal/deep-dig', { replace: true });
@@ -179,6 +178,7 @@ export default function JournalDeepDigPage() {
             notes={notes}
             onOpen={(s, t) => nav(`/journal/deep-dig/${s}${t === 'describe' ? '' : `?tab=${t}`}`)}
             onAdd={addFeature}
+            onCopy={copyFeature}
             onDelete={deleteFeature}
             removed={removedBuiltins(Array.isArray(savedDefs) ? savedDefs : [])}
             onRestore={restoreFeature}
@@ -285,8 +285,9 @@ function FeaturePage({ def, userId, report, samples, signals, blockedReason, not
   );
 }
 
-export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, onAdd, onDelete, removed = [], onRestore }: {
+export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, onAdd, onCopy, onDelete, removed = [], onRestore }: {
   onDelete?: (def: DeepDigFeatureDef) => void;
+  onCopy?: (def: DeepDigFeatureDef) => void;
   removed?: readonly DeepDigFeatureDef[];
   onRestore?: (id: string) => void;
   defs: readonly DeepDigFeatureDef[];
@@ -322,6 +323,8 @@ export function DeepDigDirectory({ defs, results, excluded = {}, notes, onOpen, 
                   {f.name}
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground" />
                 </button>
+                {onCopy && <button type="button" aria-label={'复制 ' + f.name} title="复制为独立的新特征值" data-testid={'deep-dig-copy-' + f.id} onClick={() => onCopy(f)}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/entry:opacity-100 max-sm:opacity-60"><Copy className="h-3 w-3" /></button>}
                 {/* 不常用：平时看不见，鼠标移到这一项上才淡淡出现；点了还要再确认一次 */}
                 {onDelete && (confirming === f.id ? (
                   <span className="inline-flex items-center gap-2 text-[11px]">

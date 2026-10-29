@@ -63,11 +63,15 @@ export interface DeepDigFeatureDef extends MbiParams {
   /** Visibility restoration revision; a later explicit hide retains this revision. */
   visibilityVersion?: number;
   createdAt?: number;
+  /** Fixed chart semantics copied at creation; formulas and parameters never read the original feature. */
+  chartTemplate?: string;
+  /** The independent raw series, including one-sided seller variants. */
+  chartCore?: string;
 }
 
 /** Deep dig 目录与渔共用的账号定义键。 */
 export const FEATURES_KEY = 'deep_dig_features_v1';
-export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA' };
+export const SELLER_FEATURE_CORES: Readonly<Record<string, string>> = { cdi2: 'CDI2', dss: 'DSS', 'seller-control': 'bc', cda: 'CDA', 'mbi-bear': 'MBI_bear', 'ctba-bear': 'CTBA_bear' };
 // Retired built-ins must not return as saved custom definitions. Historical results remain stored.
 export const isRetiredFeature = (id: string) => id === 'drift-speed-down-z' || id === 'seller-push';
 export const isSellerFeature = (id: string) => Object.prototype.hasOwnProperty.call(SELLER_FEATURE_CORES, id);
@@ -109,10 +113,11 @@ export const AVG_HOURS_PRESETS = [1, 4, 12, 24, 48, 72] as const;
 export const FEATURE_INTERVALS: readonly ResearchInterval[] = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
 export const INTERVAL_LABEL: Record<string, string> = { '1m': '1 分钟', '3m': '3 分钟', '5m': '5 分钟', '15m': '15 分钟', '30m': '30 分钟', '1h': '1 小时', '2h': '2 小时', '4h': '4 小时', '6h': '6 小时', '12h': '12 小时', '1d': '1 天' };
 
-export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval'> & { id?: string }): ResearchInterval => (d.id === 'cba-2' || d.id === 'ctba') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
+export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) => d.chartTemplate ?? d.id;
+export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => ['cba-2', 'ctba'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> & { id?: string; formula?: string };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate'> & { id?: string; formula?: string };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
 export const featureParams = (d: ParamDef) => ({ hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d), MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) });
 
@@ -134,8 +139,8 @@ export function featureWindowMs(d: ParamDef): number {
       if (featureUsesMbi(d)) mbiWarmupMs = programHistoryBars(program, params, barMs / 60_000, true) * barMs;
     } catch { /* 编辑中的不完整公式由公式校验提示 */ }
   }
-  const window = Math.max(d.id === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
-  if(d.id==='ctba') return 48*H+formulaHistory;
+  const window = Math.max(featureTemplateId(d) === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
+  if(featureTemplateId(d)==='ctba') return 48*H+formulaHistory;
   return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
@@ -777,7 +782,25 @@ export const CDA_DEF: DeepDigFeatureDef = {
 
 export const CTBA_DEF: DeepDigFeatureDef = { id:'ctba', name:'CTBA｜趋势买方优势', short:'CTBA', definition:CTBA_DESCRIPTION, formula:ctbaFormula(), scale:1, unit:'', positive:DEFAULT_POSITIVE, control:DEFAULT_CONTROL, source:'campaigns', groupVars:2, builtin:true, interval:'5m' };
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF];
+
+/** One-sided seller readings: positive buyer readings become zero; missing values stay missing. */
+function bearFeatureFormula(source: string, original: string, core: string): string {
+  const formula = source + '\n' + core + ' = min(' + original + ', 0)';
+  const names = new Set(compileFeatureFormula(formula).program.statements.flatMap(s => s.name ? [s.name] : []));
+  return appendResearchAverages(formula, names, { core, avg: 'avg_' + core, avg2: 'avg_' + core + '_2' }) + '\n' + core + ' = ' + core;
+}
+export const MBI_BEAR_DEF: DeepDigFeatureDef = {
+  ...MBI_DEF, id: 'mbi-bear', name: 'MBI 空方趋势', short: 'MBI·空方', chartTemplate: 'mbi', chartCore: 'MBI_bear', sellerSignVersion: 1,
+  definition: 'MBI 空方趋势 = min(MBI, 0)，范围 −1～0。空方越强读数越负；原 MBI 为正时记 0，缺失值不补零。沿用 MBI 的收盘价格、衰减周期、饱和尺度及预热规则；各自保存公式和参数。',
+  formula: bearFeatureFormula(MBI_FORMULA, 'MBI', 'MBI_bear'),
+};
+export const CTBA_BEAR_DEF: DeepDigFeatureDef = {
+  ...CTBA_DEF, id: 'ctba-bear', name: 'CTBA 空方趋势', short: 'CTBA·空方', chartTemplate: 'ctba', chartCore: 'CTBA_bear', sellerSignVersion: 1,
+  definition: 'CTBA 空方趋势 = min(CTBA, 0)，范围 −100～0。空方趋势越强读数越负；原 CTBA 为正时记 0，缺失值不补零。沿用已收盘 5m 的趋势位置、VWAP 动能及主动成交金额；各自保存公式和参数。',
+  formula: bearFeatureFormula(CTBA_DEF.formula, 'CTBA', 'CTBA_bear'),
+};
+
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -795,6 +818,24 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
     groupVars: 2,
     createdAt: now,
   };
+}
+
+
+/** Copy the effective definition, never the source's results or mutable research state. */
+export function copyFeatureDefinition(source: DeepDigFeatureDef, existing: readonly DeepDigFeatureDef[], now = Date.now()): DeepDigFeatureDef {
+  let id = newFeatureTemplate(now).id, serial = 1;
+  while (existing.some(d => d.id === id)) id = newFeatureTemplate(now).id + '-' + serial++;
+  let number = 1;
+  const name = () => source.name + '（副本' + (number === 1 ? '' : number) + '）';
+  while (existing.some(d => d.name === name())) number++;
+  const { builtin: _builtin, removed: _removed, visibilityVersion: _visibility, ...copy } = structuredClone(source);
+  return { ...copy, id, name: name(), short: source.short + '·副本' + (number === 1 ? '' : number),
+    chartTemplate: featureTemplateId(source), createdAt: now };
+}
+
+/** Always retain all saved parameters, even when the formula still equals a builtin. */
+export function saveFeatureDefinition(saved: readonly DeepDigFeatureDef[], next: DeepDigFeatureDef): DeepDigFeatureDef[] {
+  return [...saved.filter(d => d.id !== next.id), { ...next, builtin: undefined }];
 }
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
@@ -850,7 +891,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -862,6 +903,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (halfLifeOf(d) !== DEFAULT_HALF_LIFE_HOURS) key.push(`hl=${halfLifeOf(d)}`);
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
+  if (d.chartTemplate) key.push("chart=" + d.chartTemplate);
   return JSON.stringify(key);
 };
 

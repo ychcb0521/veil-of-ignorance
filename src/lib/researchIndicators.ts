@@ -1,3 +1,5 @@
+import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
+import { featureTemplateId, featureUsesMbi, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
 import { CTBA_DEFAULTS } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
@@ -19,6 +21,8 @@ export const RESEARCH_INDICATORS = [
   { id: 'SELLER_CONTROL', featureId: 'seller-control', core: 'bc', short: 'DSP·bc', name: '卖方控制力 DSP·bc', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: true },
   { id: 'DSS', featureId: 'dss', core: 'DSS', short: 'DSS', name: '买方状态恶化 DSS', period: 1, parameter: '近期窗口', neutral: 0, avgNeutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
+  { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 0, avgRange: [-1, 0], seller: true },
+  { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 0, avgRange: [-100, 0], seller: true },
 ] as const;
 export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
@@ -30,7 +34,57 @@ export const BUYER_RESEARCH_INDICATORS = [
   { id:'CTBA', featureId:'ctba', core:'CTBA', short:'CTBA', name:'CTBA｜趋势买方优势', period:CTBA_DEFAULTS.N, parameter:'窗口根数', neutral:0, min:-100, max:100, seller:false },
 ] as const;
 export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESEARCH_INDICATORS];
-export type ResearchIndicator = typeof CUSTOM_RESEARCH_INDICATORS[number];
+
+export interface ResearchIndicator {
+  id: string; featureId: string; core: string; short: string; name: string; period: number; parameter: string;
+  neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
+  templateId?: string;
+}
+export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
+export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
+  const builtin = BUILTIN_FEATURES.find(d => d.id === def.id);
+  const direct = CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === def.id);
+  const template = direct ?? CUSTOM_RESEARCH_INDICATORS.find(item => def.chartCore === item.core) ?? CUSTOM_RESEARCH_INDICATORS.find(item => item.featureId === featureTemplateId(def));
+  let core = def.chartCore ?? template?.core ?? '_feature_value';
+  try {
+    const program = compileFeatureFormula(namedChartFormula(def.formula)).program;
+    if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
+  } catch { /* Invalid formulas remain editable, with empty charts. */ }
+  return { id: direct?.id ?? accountIndicatorId(def.id), featureId: def.id, core, short: def.short === builtin?.short ? template?.short ?? def.short : def.short, name: def.name === builtin?.name ? template?.name ?? def.name : def.name,
+    period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
+    min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
+    ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
+    ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id };
+}
+const accountRegistryCache = new WeakMap<readonly DeepDigFeatureDef[], ResearchIndicator[]>();
+export function accountResearchIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): ResearchIndicator[] {
+  const cached = accountRegistryCache.get(definitions);
+  if (cached) return cached;
+  const items: ResearchIndicator[] = [...CUSTOM_RESEARCH_INDICATORS.map(item => {
+    const def = definitions.find(d => d.id === item.featureId);
+    return def ? researchIndicatorForFeature(def) : item;
+  }), ...definitions.filter(def => !BUILTIN_FEATURES.some(item => item.id === def.id)).map(researchIndicatorForFeature)];
+  accountRegistryCache.set(definitions, items);
+  return items;
+}
+/** Saved research changes reset the scalar once; later chart edits remain possible. */
+export function syncResearchIndicatorConfigs<T extends { type: string; period: number; featureDefinitionVersion?: number }>(configs: readonly T[], definitions: readonly DeepDigFeatureDef[]): T[] {
+  const items = accountResearchIndicators(definitions);
+  let changed = false;
+  const next = configs.map(config => {
+    const legacyId = config.type === 'CBI' ? 'cbi' : config.type === 'CBA-2' ? 'cba-2' : undefined;
+    const legacyDef = legacyId && definitions.find(d => d.id === legacyId);
+    const item = items.find(item => item.id === config.type || config.type === 'DSP' && item.id === 'DSP_VA') ?? (legacyDef ? researchIndicatorForFeature(legacyDef) : undefined);
+    if (!item) return config;
+    const version = researchDefinitionVersion(item);
+    if (config.featureDefinitionVersion === version) return config;
+    changed = true;
+    const reset = config.featureDefinitionVersion != null || hasSavedFeatureDefinition(item.featureId);
+    return { ...config, period: reset ? researchDefaultPeriod(item) : config.period, ...(reset ? { avgHours: 24 } : {}), featureDefinitionVersion: version };
+  });
+  return changed ? next : configs as T[];
+}
+
 
 /** Replace saved DSP·b chart selections; a separately configured seller-control selection wins. */
 export function migrateResearchIndicators<T extends { type: string }>(saved: readonly T[]): T[] {
@@ -49,12 +103,16 @@ export const researchKcName = (id: string, level = 0) => {
   return `${stem}${level === 1 ? '_AVG' : level === 2 ? '_AVG2' : ''}_CUSTOM`;
 };
 export function researchIndicatorForKc(name: string): ResearchIndicator | undefined {
-  return CUSTOM_RESEARCH_INDICATORS.find(item => [0, 1, 2].some(level => researchKcName(item.id, level) === name));
+  return accountResearchIndicators().find(item => [0, 1, 2].some(level => researchKcName(item.id, level) === name));
 }
 
 /** Some saved Z definitions call their output a, rather than the built-in az. */
 export function researchSeriesNames(item: ResearchIndicator, formula: string) {
   let core: string = item.core;
+  try {
+    const program = compileFeatureFormula(namedChartFormula(formula)).program;
+    if (!program.statements.some(s => s.name === core)) core = featureCoreName(program) ?? core;
+  } catch { /* Invalid definitions produce missing values. */ }
   if (item.id === 'DSP_Z') {
     try {
       const names = new Set(compileFeatureFormula(formula).program.statements.map(s => s.name));
@@ -103,20 +161,15 @@ function dataRevision(data: KLineData[]): number {
 
 /** Supply defaults only for missing series. Existing account expressions always win. */
 export function researchChartFormula(item: ResearchIndicator, formula: string): string {
-  const names = new Set(compileFeatureFormula(formula).program.statements.map(s => s.name));
-  const series = researchSeriesNames(item, formula);
-  return appendResearchAverages(formula, names, series);
+  const named = namedChartFormula(formula);
+  const names = new Set(compileFeatureFormula(named).program.statements.map(s => s.name));
+  const series = researchSeriesNames(item, named);
+  return appendResearchAverages(named, names, series);
 }
 
 export function researchDefaultPeriod(item: ResearchIndicator): number {
-  // 指标表的 BSS / DSS 默认近期窗口为 12 小时，图表计算仍允许手动覆盖。
-  if (item.id === 'BSS' || item.id === 'DSS') return 12;
   const def = accountFeatureDef(item.featureId);
-  if (!def) return item.period;
-  if (item.id === 'CTBA') { const m=/^N\s*=\s*([\d.]+)/m.exec(def.formula); return m?Number(m[1]):CTBA_DEFAULTS.N; }
-  if (item.id === 'MBI') return mbiNOf(def);
-  if (item.id === 'STATE' || item.id === 'STATE2' || item.id === 'CDI2' || item.id === 'CBI2') return avgHoursOf(def);
-  return halfLifeOf(def);
+  return def ? chartFeaturePeriod(def, item.period) : item.period;
 }
 
 function chartInterval(data: KLineData[]) {
@@ -148,8 +201,7 @@ function formulaPlan(item: ResearchIndicator, source: string) {
 export function researchDefinitionVersion(item: ResearchIndicator): number {
   const def = accountFeatureDef(item.featureId);
   let hash = 2166136261;
-  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours];
-  if (item.id === 'MBI') values.push(def?.MBI_N, def?.MBI_Z0);
+  const values = [def?.formula, def?.scale, def?.unit, def?.halfLifeHours, def?.avgHours, def?.interval, def?.MBI_N, def?.MBI_Z0, def?.chartTemplate];
   for (const c of JSON.stringify(values)) hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
   return hash >>> 0;
 }
@@ -207,7 +259,7 @@ export function researchChartSeries(data: KLineData[], item: ResearchIndicator, 
   // Establish lineage even while the first worker request is still pending.
   if (continuous) displayHistory(data);
   if (generation == null) return finish(calculateChartSeries(data, item, period, options));
-  const mbiKey = item.id === 'MBI' ? `|${def?.MBI_N}|${def?.MBI_Z0}` : '';
+  const mbiKey = def && featureUsesMbi(def) ? `|${def?.MBI_N}|${def?.MBI_Z0}` : '';
   const key = `${item.id}|${period}|${options.averageHours ?? 24}|${options.fetchReference !== false}|${def?.formula}|${def?.scale}|${def?.halfLifeHours}|${def?.avgHours}|${researchHistoryVersion()}|${btcReferenceVersion()}${mbiKey}`;
   let cache = liveSeriesCache.get(data);
   // Raw and 24h companion panes read the same immutable display result during
@@ -240,7 +292,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   const visibleLength = data.length, background = isChartComputationEnabled(data);
   if (data.length) {
     const step = chartInterval(data);
-    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, item.id === 'MBI' ? step / 60000 : 5), step) : EMPTY_HISTORY;
+    const fetched = options.fetchReference !== false ? chartPrehistory(data, chartFeatureHistoryBars(item.featureId, period, formula, featureUsesMbi(def) ? step / 60000 : 5), step) : EMPTY_HISTORY;
     const history = fetched.length ? fetched : EMPTY_HISTORY;
     if (history.length || background) {
       const revision = dataRevision(data), cached = extendedData.get(data);
@@ -285,10 +337,10 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     if (out) { if (!displays) { displays = new Map(); displaySeriesCache.set(out, displays); } displays.set(displayKey, result); }
     return result;
   };
-  const mbiStep = ['MBI','CTBA'].includes(item.id) ? chartInterval(data) : 0;
+  const mbiStep = (featureUsesMbi(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
   const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => {
     // Live MBI never publishes a candle that has not closed yet.
-    if (['MBI','CTBA'].includes(item.id) && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
+    if ((featureUsesMbi(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
     const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale;
   });
   // Do not use out.core: the last account expression may itself be the weighted average.

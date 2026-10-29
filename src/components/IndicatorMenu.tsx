@@ -1,3 +1,6 @@
+import { chartFeaturePeriod } from '@/lib/featureSource';
+import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
+import { accountResearchIndicators } from '@/lib/researchIndicators';
 import { CTBA_DEFAULTS, CTBA_DESCRIPTION } from '@/lib/ctba';
 import { CUSTOM_INDICATOR_GROUPS } from '@/lib/customIndicatorGroups';
 import { CBA2_DEFINITION, CBA2_STEPS } from '@/lib/cba2';
@@ -18,7 +21,7 @@ import { CBI2_DEFINITION, CBI2_STEPS } from '@/lib/cbi2';
 import { MBI_N, MBI_TOOLTIP } from '@/lib/mbi';
 import { RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchDefaultPeriod } from '@/lib/researchIndicators';
 import { AVG_HIGHLIGHT_SPECS } from '@/lib/avgHighlight';
-import { SELLER_CONTROL_DEF } from '@/lib/deepDig/features';
+import { SELLER_CONTROL_DEF, BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { BUILD_STAMP } from '@/lib/buildStamp';
 
 export interface IndicatorCatalogItem {
@@ -47,7 +50,7 @@ export interface IndicatorCatalogItem {
 
 // Determine support status dynamically: if we have a mapping, it's supported
 function isSupported(id: string): boolean {
-  return id in CUSTOM_INDICATOR_MAP;
+  return id in CUSTOM_INDICATOR_MAP || accountResearchIndicators().some(item => item.id === id);
 }
 
 /** 二选一的菜单项：动态谢林点「主图线 + 副图」与「只要副图」。 */
@@ -195,7 +198,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
-    periodHint: `${item.parameter}（小时，按5分钟图计，其他周期等比例缩放）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: 'h',
+    periodHint: `${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: ['MBI_BEAR', 'CTBA_BEAR'].includes(item.id) ? '根' : 'h',
     description: item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
@@ -237,6 +240,8 @@ interface Props {
 }
 
 export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }: Props) {
+  const definitions = useFeatureDefinitions();
+  const researchItems = useMemo(() => accountResearchIndicators(definitions), [definitions]);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string | null>('custom');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -320,7 +325,21 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
   }, [open]);
 
-  const availableCatalog = INDICATOR_CATALOG;
+
+  const availableCatalog = useMemo(() => [
+    ...INDICATOR_CATALOG.map(item => {
+      const spec = researchItems.find(spec => spec.id === item.id);
+      const legacyId = item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : undefined;
+      const def = definitions.find(def => def.id === (spec?.featureId ?? legacyId));
+      const builtin = def && BUILTIN_FEATURES.find(d => d.id === def.id);
+      return def ? { ...item, nameZh: def.short !== builtin?.short ? def.short : item.nameZh, fullName: def.name !== builtin?.name ? def.name : item.fullName, description: def.definition, detail: def.formula !== builtin?.formula ? def.definition : item.detail ?? def.definition } : item;
+    }),
+    ...researchItems.filter(item => item.id.startsWith('FEATURE_')).map(item => ({
+      id: item.id, nameZh: item.short, fullName: item.name, nameEn: item.name, isOverlay: false, defaultPeriod: researchDefaultPeriod(item),
+      color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const, periodHint: '使用 Deep Dig 保存的公式和参数；保存后同步更新', periodUnit: item.templateId === 'MBI' || item.templateId === 'CTBA' ? '根' : 'h',
+      description: definitions.find(def => def.id === item.featureId)?.definition,
+    })),
+  ], [definitions, researchItems]);
   const filtered = useMemo(() => {
     let items = availableCatalog;
     if (categoryFilter) {
@@ -347,8 +366,9 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     const kept = replaced ? indicators.filter(i => i.type !== rival) : indicators;
     const avgHours = item.avgDefault == null ? undefined : (replaced?.avgHours ?? item.avgDefault);
     const zscore = item.id === 'DSP_Z' || (item.zHint != null && replaced?.zscore) ? true : undefined;
-    const research = CUSTOM_RESEARCH_INDICATORS.find(r => r.id === item.id);
-    const defaultPeriod = research ? researchDefaultPeriod(research) : item.defaultPeriod;
+    const research = researchItems.find(r => r.id === item.id);
+    const legacyDef = definitions.find(def => def.id === (item.id === 'CBI' ? 'cbi' : item.id === 'CBA-2' ? 'cba-2' : ''));
+    const defaultPeriod = research ? researchDefaultPeriod(research) : legacyDef ? chartFeaturePeriod(legacyDef, item.defaultPeriod) : item.defaultPeriod;
     onIndicatorsChange([...kept, { type: item.id, period: replaced?.period ?? defaultPeriod, ...(avgHours == null ? {} : { avgHours }), ...(zscore ? { zscore } : {}), color: item.color, enabled: true }]);
   };
 
@@ -370,7 +390,10 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
 
   const overlays = filtered.filter(i => i.isOverlay);
   const oscillators = filtered.filter(i => !i.isOverlay);
-  const customGroups = categoryFilter === 'custom' ? CUSTOM_INDICATOR_GROUPS.map(group => ({ ...group, items: group.ids.flatMap(id => oscillators.filter(item => item.id === id)) })).filter(group => group.items.length > 0) : null;
+  const customGroups = categoryFilter === 'custom' ? [
+    ...CUSTOM_INDICATOR_GROUPS.map(group => ({ ...group, items: group.ids.flatMap(id => oscillators.filter(item => item.id === id)) })),
+    { key: 'account', title: '自定义与副本', note: '独立保存的特征值，公式和参数与 Deep Dig 同步。', items: oscillators.filter(item => item.id.startsWith('FEATURE_')) },
+  ].filter(group => group.items.length > 0) : null;
   const categories = ['custom', 'trend', 'momentum', 'volatility', 'volume', 'other'];
   const supportedCount = availableCatalog.filter(i => isSupported(i.id)).length;
 
@@ -542,7 +565,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = CUSTOM_RESEARCH_INDICATORS.some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (item.id !== 'MBI' || Number.isSafeInteger(n)) ? n : null; }}
+              parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}

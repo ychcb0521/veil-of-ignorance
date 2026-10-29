@@ -1,3 +1,6 @@
+import { useFeatureDefinitions } from "@/hooks/useFeatureDefinitions";
+import { registerAccountFeatureIndicators } from "@/lib/customIndicators";
+import { syncResearchIndicatorConfigs, accountResearchIndicators } from "@/lib/researchIndicators";
 /**
  * KlineCharts v9 based candlestick chart with native drawing tools and indicators.
  * Uses applyNewData / updateData / applyMoreData for data feeding.
@@ -61,7 +64,7 @@ import {
 } from "@/lib/analysisAutoFitBoundsIndicator";
 
 // Mapping from our indicator IDs to klinecharts indicator names (built-in + custom)
-const KLINE_INDICATOR_MAP: Record<string, string> = { ...CUSTOM_INDICATOR_MAP };
+const KLINE_INDICATOR_MAP: Record<string, string> = CUSTOM_INDICATOR_MAP;
 
 // Keep right-axis prices readable. KlineCharts otherwise folds consecutive
 // decimal zeros into notation such as `0.0{3}8`, which resembles corrupted text.
@@ -164,6 +167,7 @@ const OVERLAY_MAP: Record<string, string> = {
 export interface IndicatorConfig {
   type: string;
   period: number;
+  featureDefinitionVersion?: number;
   /** 【用户要求】副图均线 avg(·, N) 的时长 N（小时）：BSS、DSP 的 a 副图用；没写 = 24。 */
   avgHours?: number;
   /** 自制区副图独立可见性：原值与 avg2 默认显示，普通 avg 默认隐藏。 */
@@ -583,7 +587,13 @@ function CandlestickChartComponent({
   });
 
   const [savedIndicators, setIndicators] = usePersistedState<IndicatorConfig[]>("indicators", []);
-  const indicators = useMemo(() => migrateResearchIndicators(savedIndicators), [savedIndicators]);
+  const featureDefinitions = useFeatureDefinitions();
+  const indicators = useMemo(() => syncResearchIndicatorConfigs(migrateResearchIndicators(savedIndicators), featureDefinitions), [savedIndicators, featureDefinitions]);
+  useEffect(() => {
+    registerAccountFeatureIndicators(featureDefinitions);
+    Object.assign(COMPANION_KC_NAME, Object.fromEntries(Object.values(INDICATOR_COMPANIONS).flat().map(c => [c.key, c.kcName])));
+  }, [featureDefinitions]);
+  useEffect(() => { if (JSON.stringify(indicators) !== JSON.stringify(savedIndicators)) setIndicators(indicators); }, [indicators, savedIndicators, setIndicators]);
   const [showIndicatorPanel, setShowIndicatorPanel] = useState(false);
   const [showOrderLines, setShowOrderLines] = usePersistedState("show_order_lines", true);
   const [showTradeMarkers, setShowTradeMarkers] = usePersistedState("show_trade_markers", false);
@@ -2181,6 +2191,7 @@ function CandlestickChartComponent({
 
     for (const ind of indicators) {
       if (!ind.enabled) continue;
+      if (ind.type.startsWith('FEATURE_') && !accountResearchIndicators(featureDefinitions).some(item => item.id === ind.type)) continue;
       const rawVisible = !customIndicatorPane(KLINE_INDICATOR_MAP[ind.type]) || ind.showRaw !== false;
       if (rawVisible && !COMPANION_ONLY.has(ind.type)) currentActive.add(ind.type);
 
@@ -2255,7 +2266,7 @@ function CandlestickChartComponent({
       const pane = customIndicatorPane(name);
       const root = paneId ? chart.getDom?.(paneId, DomPosition.Main) : null;
       if (!pane || !root) continue;
-      const label = `${INDICATOR_CHIP_LABEL[pane.type] ?? pane.type} · ${pane.visibility === 'showRaw' ? '原值' : pane.visibility === 'showAverage' ? 'avg' : 'avg₂'}`;
+      const label = `${accountResearchIndicators(featureDefinitions).find(item => item.id === pane.type)?.short ?? INDICATOR_CHIP_LABEL[pane.type] ?? pane.type} · ${pane.visibility === 'showRaw' ? '原值' : pane.visibility === 'showAverage' ? 'avg' : 'avg₂'}`;
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = '×';
@@ -2272,7 +2283,7 @@ function CandlestickChartComponent({
       closeButtons.push(button);
     }
     return () => { closeButtons.forEach(button => button.remove()); };
-  }, [indicators, setIndicators, scheduleViewportReflow]);
+  }, [indicators, featureDefinitions, setIndicators, scheduleViewportReflow]);
 
   // Pane colors sampled from the supplied Binance light/dark references.
   // Neutral surfaces and clear gutters carry the hierarchy; charts keep their colors.
@@ -2527,7 +2538,7 @@ function CandlestickChartComponent({
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium whitespace-nowrap shrink-0"
                 style={{ background: `${ind.color}20`, color: ind.color }}
               >
-                {INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
+                {accountResearchIndicators(featureDefinitions).find(item => item.id === ind.type)?.short ?? INDICATOR_CHIP_LABEL[ind.type] ?? ind.type} {ind.period}{hasAvgParam(ind.type) ? ` · avg ${ind.avgHours ?? AVG_DEFAULT_HOURS}` : ""}{ind.zscore && Z_TOGGLE_TYPES.has(ind.type) ? " · Z" : ""}
                 <button
                   type="button"
                   onClick={() => setIndicators(indicators.filter((i) => i.type !== ind.type))}

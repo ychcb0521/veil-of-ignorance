@@ -47,3 +47,16 @@ it('shows the frozen formula, exact trigger and a distinct historical version in
   expect(run.plan.snapshot.definitionKey).toBe(definitionKey({...STATE_DEF,interval:'5m'}));
 });
 const planKey=()=>definitionKey({...STATE_DEF,interval:'5m'});
+
+it('keeps generated averages and anonymous outputs executable and syncing twice is a no-op', async () => {
+  const { makeQualitySellPlan } = await import('@/lib/fish/qualitySellPlans');
+  for (const formula of ['state = C', 'ln(C / prev(C))']) {
+    const def = { ...STATE_DEF, formula };
+    const metric = formula.startsWith('state') ? 'avg_state' : '_feature_value';
+    const plan = makeQualitySellPlan('state:' + metric, '<', .5, [def]);
+    const study = { ...newQualityStudy(), sellPlansConfigured: true, sellPlans: [plan] };
+    const next = syncQualitySellDefinitions(study, [def]);
+    expect(qualityDefinition(next.sellPlans![0].snapshot).formula).toContain(metric + ' =');
+    expect(syncQualitySellDefinitions(next, [def])).toBe(next);
+  }
+});

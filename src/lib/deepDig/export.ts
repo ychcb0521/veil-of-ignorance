@@ -1,3 +1,4 @@
+import { featureTemplateId, featureUsesMbi } from '@/lib/deepDig/features';
 import { formulaVariables } from './features';
 import { DEEP_DIG_GROUPS, describeGroup, fmtValue, groupLabel, type DeepDigData } from './analysis';
 import { formatSeriesOffset } from './series';
@@ -11,7 +12,7 @@ const cell = (value: unknown) => {
 export function deepDigCsv(data: DeepDigData): string {
   const { names } = formulaVariables(data.definition.formula);
   const columns = [...new Set(names)];
-  const params = data.definition.id === 'mbi' ? ['MBI_N', 'MBI_Z0'] as const : [];
+  const params = featureUsesMbi(data.definition) ? ['MBI_N', 'MBI_Z0'] as const : [];
   const rows: unknown[][] = [['事件ID', '标的', '锚点UTC', '取样偏移小时', '分组', '结果原值', ...columns, '24h期末收益', '24h最大涨幅', '24h最大跌幅', ...params]];
   for (const row of data.rows) rows.push([
     row.id, row.symbol, new Date(row.anchorMs).toISOString(), (data.sampleOffsetMs ?? 0) / 3600000, groupLabel(row.group, data.definition.source), row.v,
@@ -23,9 +24,10 @@ export function deepDigCsv(data: DeepDigData): string {
 
 /** A compact image report shares exactly the same group summaries as the UI. */
 export function deepDigImageRows(data: DeepDigData) {
-  const names = data.definition.id === 'mbi' ? ['MBI', 'avg_MBI_2'] : [formulaVariables(data.definition.formula).result];
+  const core = data.definition.chartCore ?? 'MBI';
+  const names = featureUsesMbi(data.definition) ? [core, 'avg_' + core + '_2'] : [formulaVariables(data.definition.formula).result];
   return names.flatMap(name => DEEP_DIG_GROUPS.map(group => {
-    const values = data.rows.filter(r => r.group === group).map(r => data.definition.id === 'mbi' ? r.vars?.[name] : r.v).filter((v): v is number => v != null && Number.isFinite(v));
+    const values = data.rows.filter(r => r.group === group).map(r => featureUsesMbi(data.definition) ? r.vars?.[name] : r.v).filter((v): v is number => v != null && Number.isFinite(v));
     return { name, ...describeGroup(group, values) };
   }));
 }
@@ -43,7 +45,7 @@ export async function downloadDeepDigPng(data: DeepDigData): Promise<void> {
   text(data.definition.name, 36, 76, '#17212f', 24);
   text(`描述统计 · ${formatSeriesOffset(data.sampleOffsetMs ?? 0)} · ${data.rows.length} 个样本`, 36, 104);
   text(`实验组：${data.definition.positive}`, 36, 133); text(`对照组：${data.definition.control}`, 36, 155);
-  if (data.definition.id === 'mbi') text(`MBI_N = ${data.definition.MBI_N ?? 25} · MBI_Z0 = ${data.definition.MBI_Z0 ?? 1.25} · 预热值为空`, 36, 180);
+  if (featureUsesMbi(data.definition)) text(`MBI_N = ${data.definition.MBI_N ?? 25} · MBI_Z0 = ${data.definition.MBI_Z0 ?? 1.25} · 预热值为空`, 36, 180);
   const columns = [36, 245, 415, 510, 635, 765, 895];
   ['变量', '分组', 'n', '均值', '标准差', '中位数', '> 0 占比'].forEach((label, i) => text(label, columns[i], 215));
   rows.forEach((row, i) => {

@@ -50,6 +50,7 @@ function isQuotaError(error: unknown): boolean {
 export function writePersistedStateRaw(fullKey: string, raw: string, origin: StateOrigin = { source: 'local' }): boolean {
   // Remember first: even a security exception must not leave readers on the old value.
   unpersisted.set(fullKey, { ...origin, raw });
+  notifyLocalStateChanged(fullKey);
   const write = () => {
     localStorage.setItem(fullKey, raw);
     unpersisted.delete(fullKey);
@@ -315,6 +316,16 @@ export function removePersistedStateRaw(fullKey: string): void {
     localStorage.removeItem(fullKey);
     unpersisted.delete(fullKey);
   } catch { /* A session tombstone keeps stale disk data from reappearing. */ }
+}
+
+const pendingLocalChanges = new Set<string>();
+function notifyLocalStateChanged(fullKey: string): void {
+  if (pendingLocalChanges.has(fullKey)) return;
+  pendingLocalChanges.add(fullKey);
+  queueMicrotask(() => {
+    pendingLocalChanges.delete(fullKey);
+    hydrationListeners.get(fullKey)?.forEach(listener => listener());
+  });
 }
 
 /** Adopted cloud values may arrive after the app's non-blocking startup timeout. */

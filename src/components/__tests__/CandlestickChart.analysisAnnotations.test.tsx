@@ -209,12 +209,12 @@ describe('CandlestickChart analysis annotations', () => {
       const names = RESEARCH_INDICATORS.flatMap(item => [0, 1, 2].map(level => researchKcName(item.id, level)));
       expect((mocks.chart.createIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
       fireEvent.click(screen.getByRole('button', { name: '指标' }));
-      fireEvent.change(screen.getByLabelText(RESEARCH_INDICATORS[0].name + ' 参数'), { target: { value: '12.5' } });
+      fireEvent.change(screen.getByLabelText(RESEARCH_INDICATORS[0].short + ' 参数'), { target: { value: '12.5' } });
       for (const name of names.slice(0, 3)) expect(overrideIndicator).toHaveBeenCalledWith(expect.objectContaining({ name, calcParams: expect.arrayContaining([12.5]) }));
       overrideIndicator.mockClear();
       act(() => ingestBtcBars(300000, [{ openTime: 300000, close: 60000 }]));
       expect((overrideIndicator.mock.calls as unknown as [{ name: string }][]).map(([arg]) => arg.name)).toEqual(names);
-      for (const item of RESEARCH_INDICATORS) fireEvent.click(screen.getByText(item.name));
+      for (const item of RESEARCH_INDICATORS) fireEvent.click(screen.getByText(item.short));
       expect((mocks.chart.removeIndicator.mock.calls as unknown as [string, string][]).map(([, name]) => name)).toEqual(names);
     } finally {
       view.unmount(); resetBtcReference();
@@ -276,7 +276,7 @@ describe('CandlestickChart analysis annotations', () => {
       fireEvent.click(screen.getByRole('button',{name:'指标'}));
       for (const [label, name] of [['avg_x_2','STATE_AVG2_CUSTOM'],['原值','STATE_CUSTOM'],['avg_x','STATE_AVG_CUSTOM']]) {
         mocks.chart.createIndicator.mockClear();
-        fireEvent.click(screen.getByRole('button',{name:RESEARCH_INDICATORS.find(item=>item.id==='STATE')!.name+' 显示 '+label}));
+        fireEvent.click(screen.getByRole('button',{name:RESEARCH_INDICATORS.find(item=>item.id==='STATE')!.short+' 显示 '+label}));
         expect(mocks.chart.createIndicator).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({name}),false,{height:80});
       }
     } finally {
