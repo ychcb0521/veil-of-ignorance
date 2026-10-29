@@ -1,6 +1,8 @@
 import type { ResearchBar } from '@/lib/deepRsa/window';
 export const FISH_STEP = 300_000;
 export const FISH_MAX_ALGORITHMS = 50;
+/** Covers the restored 24h DSP·a EMA's full 32-half-life warm-up; adapters paginate requests. */
+export const FISH_MAX_HISTORY_BARS = 12_000;
 export const FISH_BARS = 2000;
 export const FISH_FIRST_USABLE = 1454;
 export const FISH_THRESHOLD = 0.3;

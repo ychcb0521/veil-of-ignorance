@@ -11,6 +11,7 @@ import type { FishProgress, FishScanSettings } from '@/lib/fishScanner';
 import { fishStatistics } from '@/lib/fish/algorithm';
 import { AUDITED_EXCHANGES } from '@/lib/fish/exchanges';
 import type { DeepDigFeatureDef } from '@/lib/deepDig/features';
+import { CUSTOM_RESEARCH_INDICATORS } from '@/lib/researchIndicators';
 import { buildFishScanSettings, type FishScanSelection } from '@/lib/fish/scanPlan';
 import { fishCatchKey, fishVisibleCatchKey, mergeFishSignals } from '@/lib/fish/records';
 import { adoptMinedFish, recordMinedAnchor, recordMiningError } from '@/lib/fish/miningLibrary';
@@ -157,7 +158,7 @@ export function useFishMining(o: {
     setState({...s,rules:structuredClone(rules),enabled:true,retryAt:null,errorKind:undefined});
     setTimeout(()=>void tickRef.current(),0);
   },[setState]);
-  const ruleChoices=useMemo(()=>o.defs.map(def=>{try{return {featureId:def.id,label:def.short,statistics:fishStatistics(def)};}catch{return {featureId:def.id,label:def.short,statistics:[]};}}),[o.defs]);
+  const ruleChoices=useMemo(()=>o.defs.map(def=>{const label=CUSTOM_RESEARCH_INDICATORS.find(i=>i.featureId===def.id)?.short??def.short;try{return {featureId:def.id,label,statistics:fishStatistics(def)};}catch{return {featureId:def.id,label,statistics:[]};}}),[o.defs]);
   // 算法编号修过别名后同一条鱼的键会变：再按整行内容（标的、时间、命中算法）认一次
   const holdKeys = useCallback(() => new Set(latest.current.signalsRef.current.filter(s => s.mined).flatMap(s => [fishCatchKey(s), fishVisibleCatchKey(s)])), []);
   return { state, running, anchorMs, progress, waiting, start, pause, retry, useCurrentScope, resetConfiguration, configure, ruleChoices, setTarget, account: o.account, holdKeys };

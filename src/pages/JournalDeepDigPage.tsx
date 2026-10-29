@@ -88,7 +88,7 @@ export default function JournalDeepDigPage() {
       setSavedDefs(prev => {
         const list = Array.isArray(prev) ? prev : [];
         const current = list.find(d => d.id === target.id);
-        return [...list.filter(d => d.id !== target.id), { ...(current ?? { ...target, builtin: undefined }), removed: true }];
+        return [...list.filter(d => d.id !== target.id), { ...(current ?? { ...target, builtin: undefined }), removed: true, visibilityVersion: target.visibilityVersion }];
       });
       return;
     }

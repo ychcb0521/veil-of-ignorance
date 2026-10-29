@@ -3,7 +3,7 @@
  * 挖到的鱼入鱼舱、进鱼质量，按固定的卖出方案评估后生成「探测比较」交易战役。
  */
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Pause, Pickaxe, Play, Settings2 } from 'lucide-react';
+import { ArrowUpRight, Pause, Pickaxe, Play, Plus, Settings2, X } from 'lucide-react';
 import { FishQualityInfo, FishQualityModule, qualityPauseAction, qualityPrimaryAction } from '@/components/FishQualityModule';
 import type { FishMiningApi } from '@/hooks/useFishMining';
 import { Popover,PopoverContent,PopoverTrigger } from '@/components/ui/popover';
@@ -11,19 +11,29 @@ import { FishMiningLibrary } from '@/components/FishMiningLibrary';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { currentDefaultRules, type FishMiningRule } from '@/lib/fish/mining';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { FISH_MAX_ALGORITHMS } from '@/lib/fish/shared';
 
 const short = (t: number) => formatUTC8(t).slice(0, 16);
-const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed-z': 'az', bss: 'BSS' };
+const RULE_NAMES: Record<string, string> = { cbi2: 'CBI-2', state: 'S', cba: 'CBA', 'drift-speed': 'DSP·a', 'drift-speed-z': 'az', bss: 'BSS' };
 const ruleText = (r: FishMiningRule) => `${RULE_NAMES[r.featureId] ?? r.featureId}${r.statistic === '结果' ? '' : ` ${r.statistic.replace(/^avg_.*_2$/, 'avg₂').replace(/^avg_[^_]+$/, 'avg')}`} > ${r.threshold}`;
 function MiningRuleEditor({mining,close}:{mining:FishMiningApi;close:()=>void}){
   const [draft,setDraft]=useState(()=>structuredClone(mining.state.rules.length?mining.state.rules:currentDefaultRules())),[error,setError]=useState('');
+  const choices=(mining.ruleChoices??[]).filter(c=>c.statistics.length>0);
   const save=()=>{
+    if(!draft.length||draft.length>FISH_MAX_ALGORITHMS){setError(`请选择 1 至 ${FISH_MAX_ALGORITHMS} 个算法`);return;}
     const invalid=draft.findIndex(rule=>!rule.threshold.trim()||!Number.isFinite(Number(rule.threshold))||!mining.ruleChoices?.find(c=>c.featureId===rule.featureId)?.statistics.some(s=>s.name===rule.statistic));
     if(invalid>=0){setError(`算法 ${invalid+1}：请选择有效统计量，并填写有限数字门槛`);return;}
     mining.configure?.(draft);close();
   };
   return <div className="space-y-3 text-[11px]"><p className="font-medium">挖掘条件 · 并集（任一满足即挖到）</p><p className="text-[10px] leading-relaxed text-muted-foreground">修改后从当前档继续，已挖进度和历史结果保留。命名序列读取原值；「结果」使用显示倍率，切换统计量时请核对门槛。</p>
-    {draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic);return <div key={rule.id} className="flex items-center gap-2"><span className="w-14 shrink-0">{choice?.label??rule.featureId}</span><select aria-label={`挖掘算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value}:r))}>{!valid&&<option value={rule.statistic}>{rule.statistic}（已失效）</option>}{choice?.statistics.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><span>&gt;</span><input aria-label={`挖掘算法 ${i+1} 门槛`} className="h-7 w-20 rounded bg-muted px-2 font-mono" type="number" step="any" value={rule.threshold} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,threshold:e.target.value}:r))}/></div>;})}
+    {draft.map((rule,i)=>{const choice=mining.ruleChoices?.find(c=>c.featureId===rule.featureId),valid=choice?.statistics.some(s=>s.name===rule.statistic);return <div key={rule.id} className="flex flex-wrap items-center gap-1.5">
+      <select aria-label={`挖掘算法 ${i+1} 特征值`} className="h-7 w-28 min-w-0 rounded bg-muted px-2" value={rule.featureId} onChange={e=>{setError('');setDraft(draft.map((r,j)=>i===j?{...r,featureId:e.target.value,statistic:'结果',threshold:''}:r));}}>
+        {!choices.some(c=>c.featureId===rule.featureId)&&<option value={rule.featureId}>{rule.featureId}（已失效）</option>}{choices.map(c=><option key={c.featureId} value={c.featureId}>{c.label}</option>)}
+      </select>
+      <select aria-label={`挖掘算法 ${i+1} 统计量`} className="h-7 min-w-0 flex-1 rounded bg-muted px-2" value={rule.statistic} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,statistic:e.target.value}:r))}>{!valid&&<option value={rule.statistic}>{rule.statistic}（已失效）</option>}{choice?.statistics.map(s=><option key={s.name} value={s.name}>{s.label}</option>)}</select><span>&gt;</span><input aria-label={`挖掘算法 ${i+1} 门槛`} className="h-7 w-20 rounded bg-muted px-2 font-mono" type="number" step="any" value={rule.threshold} onChange={e=>setDraft(draft.map((r,j)=>i===j?{...r,threshold:e.target.value}:r))}/>
+      <button type="button" aria-label={`移除挖掘算法 ${i+1}`} disabled={draft.length<=1||mining.running} onClick={()=>setDraft(draft.filter((_,j)=>j!==i))} className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground disabled:opacity-30"><X aria-hidden className="h-3 w-3"/></button>
+    </div>;})}
+    <button type="button" disabled={draft.length>=FISH_MAX_ALGORITHMS||!choices.length||mining.running} onClick={()=>setDraft([...draft,{id:`mining-rule-${crypto.randomUUID()}`,featureId:choices[0].featureId,statistic:'结果',threshold:''}])} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"><Plus aria-hidden className="h-3 w-3"/>新增挖掘算法</button>
     {error&&<p role="alert" className="text-destructive">{error}</p>}<button type="button" disabled={mining.running} onClick={save} className={qualityPrimaryAction}>保存并重试</button>
   </div>;
 }

@@ -19,7 +19,7 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     render(<IndicatorMenu open indicators={[]} onClose={() => {}} onIndicatorsChange={changed} />);
     expect(screen.getByRole('button', { name: '自制区' })).toHaveAttribute('aria-pressed', 'true');
-    for (const id of ids.filter(id => id !== 'DSP_VA')) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
+    for (const id of ids) { expect(screen.getByText(name(id))).toBeInTheDocument(); expect(CUSTOM_INDICATOR_MAP[id]).toBeTruthy(); }
     expect(screen.queryByText('成交量加权平均价')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '成交量' }));
     for (const id of ids) expect(screen.queryByText(name(id))).not.toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('自制区的十个特征值', () => {
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it('隐藏普通 DSP·a，保留 Z 分数版的添加、调参和关闭', () => {
+  it('恢复普通 DSP·a 的添加、调参和关闭，与 Z 版分别可选', () => {
     const changed = vi.fn();
     function Menu() {
       const [items, setItems] = useState<IndicatorConfig[]>([]);
@@ -53,7 +53,12 @@ describe('自制区的十个特征值', () => {
     }
     render(<Menu />);
     fireEvent.click(screen.getByRole('button', { name: '自制区' }));
-    expect(screen.queryByText(name('DSP_VA'))).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(name('DSP_VA')));
+    expect(changed.mock.lastCall![0][0]).toMatchObject({type:'DSP_VA'});
+    fireEvent.change(screen.getByLabelText(name('DSP_VA')+' 参数'),{target:{value:'24'}});
+    expect(changed.mock.lastCall![0][0].period).toBe(24);
+    fireEvent.click(screen.getByText(name('DSP_VA')));
+    expect(changed.mock.lastCall![0]).toEqual([]);
     fireEvent.click(screen.getByText(name('DSP_Z')));
     expect(changed.mock.lastCall![0][0]).toMatchObject({ type: 'DSP_Z', zscore: true });
     fireEvent.change(screen.getByLabelText(name('DSP_Z') + ' 参数'), { target: { value: '12' } });
@@ -67,7 +72,7 @@ describe('自制区的十个特征值', () => {
     const changed = vi.fn();
     function Menu() { const [items,setItems] = useState<IndicatorConfig[]>(initial); return <IndicatorMenu open indicators={items} onClose={() => {}} onIndicatorsChange={next => {setItems(next);changed(next)}}/>; }
     render(<Menu />); fireEvent.click(screen.getByRole('button',{name:'自制区'}));
-    for(const id of ids.filter(id => id !== 'DSP_VA')){
+    for(const id of ids){
       const ind=initial.find(i=>i.type===id)!;
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG_CUSTOM'))).toBe(false);
       expect(visibleIndicatorCompanions(ind).some(c=>c.kcName.includes('_AVG2_CUSTOM'))).toBe(true);

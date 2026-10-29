@@ -6,6 +6,22 @@ import { MINING_START_MS, MINING_STEP_MS, newMiningState, currentDefaultRules } 
 afterEach(cleanup);
 const api = (patch: object = {}, state: object = {}) => ({ state: { ...newMiningState(), ...state }, running: false, anchorMs: null, progress: null, waiting: '', start: vi.fn(), pause: vi.fn(), setTarget: vi.fn(), ...patch });
 
+it('adds restored DSP·a as a selectable mining algorithm without replacing existing rules',()=>{
+ const configure=vi.fn(),base={id:'base',featureId:'cbi2',statistic:'avg_CBI2_2',threshold:'0.04'};
+ const m=api({configure,ruleChoices:[{featureId:'cbi2',label:'CBI-2',statistics:[{name:'结果',label:'结果'},{name:'avg_CBI2_2',label:'avg₂'}]},
+  {featureId:'drift-speed',label:'DSP·a',statistics:['结果','a','avg_a','avg_a_2'].map(name=>({name,label:name}))}]},{rules:[base],mined:220,anchorsDone:93});
+ render(<FishMiningPanel mining={m as never} sellFixed campaignHref="#"/>);
+ fireEvent.click(screen.getByRole('button',{name:'挖掘条件'}));fireEvent.click(screen.getByRole('button',{name:'新增挖掘算法'}));
+ fireEvent.change(screen.getByLabelText('挖掘算法 2 特征值'),{target:{value:'drift-speed'}});
+ expect(screen.getByLabelText('挖掘算法 2 统计量')).toHaveValue('结果');
+ for(const name of ['a','avg_a','avg_a_2'])expect(within(screen.getByLabelText('挖掘算法 2 统计量')).getByRole('option',{name})).toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText('挖掘算法 2 统计量'),{target:{value:'avg_a_2'}});
+ fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));expect(configure).not.toHaveBeenCalled();
+ fireEvent.change(screen.getByLabelText('挖掘算法 2 门槛'),{target:{value:'0.003'}});fireEvent.click(screen.getByRole('button',{name:'保存并重试'}));
+ expect(configure).toHaveBeenCalledWith([base,expect.objectContaining({featureId:'drift-speed',statistic:'avg_a_2',threshold:'0.003'})]);
+ expect(m.state.mined).toBe(220);expect(m.state.anchorsDone).toBe(93);
+});
+
 it('explains the plan, starts mining and edits the target', () => {
   const m = api(); render(<FishMiningPanel mining={m as never} sellFixed={false} campaignHref="/journal/campaigns?section=detect"/>);
   expect(screen.queryByText(/从 2026-04-01/)).toBeNull();

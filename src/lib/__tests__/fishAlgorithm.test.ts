@@ -37,8 +37,8 @@ it('显示倍率、严格下穿与未命名结果；X保留显示单位而同名
  expect(classifyFishProgram('A',bars,evaluateFishProgram(bars,plan),0,plan).signal?.timeMs).toBe(bars.at(-5)!.openTime+plan.step);
  const down=compileFishProgram(simple,config([],{direction:'<'}));bars.forEach((b,i)=>b.close=i<bars.length-5?100:99);expect(classifyFishProgram('A',bars,evaluateFishProgram(bars,down),0,down).outcome).toBe('hit');
 });
-it('完整程序的ago均值约束增加warm，所有定义参数都沿用Deep dig；超5000根给出原因',()=>{
- const base=compileFishProgram(simple,config([],{H:1/12})),long=compileFishProgram(simple,config(['avg(X,600) > ago(avg(X,600),600)'],{H:1/12}));expect(long.warm).toBeGreaterThan(base.warm);expect(long.unavailable).toContain('5000');
+it('完整程序的ago均值约束增加warm，所有定义参数都沿用Deep dig；超12000根给出原因',()=>{
+ const base=compileFishProgram(simple,config([],{H:1/12})),long=compileFishProgram(simple,config(['avg(X,600) > ago(avg(X,600),600)'],{H:1/12}));expect(long.warm).toBeGreaterThan(base.warm);expect(long.unavailable).toContain('12000');
  const withAgo=compileFishProgram({...simple,formula:'avg(C,48)'},config(['avg(X,3) > ago(avg(X,3),3)']));const plain=compileFishProgram({...simple,formula:'avg(C,48)'},config());expect(withAgo.warm).toBeGreaterThan(plain.warm);
  const def={...simple,interval:'15m' as const,halfLifeHours:3,avgHours:8,formula:'avg(C,avgh) + ema(C,hl)'};const plan=compileFishProgram(def,config()),bars=fishBars(plan.N);const own=evaluateFishProgram(bars,plan),native=evaluateOnBars(bars,compileFeatureFormula(def.formula),def).last as Float64Array;expect([...own.value]).toEqual([...native]);expect(plan.step).toBe(900000);
  expect(()=>compileFishProgram(simple,config([],{threshold:Infinity}))).toThrow();expect(()=>compileFishProgram(simple,config(['other_feature > 0']))).toThrow();expect(compileFishProgram(simple,config([],{H:0})).algorithmKey).toBe(compileFishProgram(simple,config([],{H:24})).algorithmKey);expect(compileFishProgram(simple,config([],{threshold:1234})).settings.threshold).toBe(1234);

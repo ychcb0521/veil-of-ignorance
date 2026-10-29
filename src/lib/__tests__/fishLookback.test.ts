@@ -44,13 +44,13 @@ it('preserves the window through intersection, changing combination and threshol
 it('expands history for longer coverage and validates capacity without shortening formula warm-up',()=>{
  const base=compileFishProgram(feature,algorithm),short=fishProgramForLookback(base,1),long=fishProgramForLookback(base,72,[{hours:24,min:1}]);
  expect(short.N).toBe(base.N);expect(short.warm).toBe(base.warm);expect(long.N).toBeGreaterThan(base.N);expect(long.N).toBeGreaterThanOrEqual(Math.ceil(96*H/step)+1);
- expect(fishProgramForLookback(base,8784).unavailable).toContain('5000');
+ expect(fishProgramForLookback(base,8784).unavailable).toContain('12000');
 });
 it('uses saved capture hours in the shared builder, while mining can explicitly preserve its own unbounded anchor logic',()=>{
  saveFishLookback(2);const cards=[{id:'first',featureId:feature.id,enabled:true,pref:{...algorithm,threshold:'1'}}];
  const input={cards,defs:[feature],combination:'and' as const,selection:{exchanges:['binance' as const],includeDuplicates:false},time:''};
  expect(buildFishScanSettings(input).settings?.lookbackHours).toBe(2);expect(buildFishScanSettings({...input,lookbackHours:null}).settings?.lookbackHours).toBeUndefined();
- expect(buildFishScanSettings({...input,lookbackHours:8784}).error).toContain('5000');
+ expect(buildFishScanSettings({...input,lookbackHours:8784}).error).toContain('12000');
 });
 it('diagnoses out-of-window signals using the same gate as a scan',async()=>{
  const result=await makeScanner().diagnose({symbol:'OLDUSDT',feature,algorithm,anchorMs:T,lookbackHours:1,signal:new AbortController().signal});expect(result.outcome).toBe('outside');expect(result.lines.join(' ')).toContain('不在过去 1 小时内');

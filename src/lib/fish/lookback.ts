@@ -2,7 +2,7 @@ import { getUserPrefix } from '@/lib/userStoragePrefix';
 import { readPersistedStateRaw, writePersistedStateRaw } from '@/lib/persistedStateStorage';
 import type { FishProgram } from './algorithm';
 import type { FishMemberResult } from './intersection';
-import type { FishTurnoverFloor } from './shared';
+import { FISH_MAX_HISTORY_BARS, type FishTurnoverFloor } from './shared';
 export const FISH_DEFAULT_LOOKBACK_HOURS=1;
 export const fishLookbackKey=()=>`${getUserPrefix()}fish-lookback-hours.v1`;
 const defaultVersionKey=()=>`${getUserPrefix()}fish-lookback-default.v2`;
@@ -29,7 +29,7 @@ export function fishProgramForLookback(plan:FishProgram,hours?:number,floors?:re
  const windowBars=Math.ceil(validateFishLookback(hours)*3600000/plan.step);
  const turnoverBars=Math.ceil(Math.max(0,...(floors??[]).map(f=>f.hours))*3600000/plan.step);
  const N=Math.max(plan.N,plan.warm+windowBars+1,windowBars+turnoverBars+1);
- return {...plan,N,unavailable:plan.unavailable??(N>5000?`扫描过去 ${hours} 小时需要 ${N} 根历史（含指标预热），超过 5000 根上限，请缩短覆盖时间`:undefined)};
+ return {...plan,N,unavailable:plan.unavailable??(N>FISH_MAX_HISTORY_BARS?`扫描过去 ${hours} 小时需要 ${N} 根历史（含指标预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，请缩短覆盖时间`:undefined)};
 }
 /** Each algorithm must independently produce a recent known start, preserving intersection/union consistency. */
 export function limitFishLookback(result:FishMemberResult,anchorMs:number,hours?:number):FishMemberResult {

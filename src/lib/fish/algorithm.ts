@@ -6,6 +6,7 @@ import type { ResearchBar } from '@/lib/deepRsa/window';
 import type { TradeSignal } from '@/lib/signalLibrary';
 import { coreProgram, featureCoreName } from '@/lib/featureSource';
 import { formatUTC8 } from '@/lib/timeFormat';
+import { FISH_MAX_HISTORY_BARS } from './shared';
 export interface FishConstraint { id: string; text: string; enabled: boolean }
 export const FISH_STATE_HOLD = { threshold: 0.55, hours: 6 } as const;
 export const FISH_STATE_HOLD_ROUTES = [FISH_STATE_HOLD, { threshold: 0.66, hours: 3 }] as const;
@@ -159,7 +160,7 @@ export function compileFishProgram(def: DeepDigFeatureDef,settings: FishAlgorith
   const windowDef=end<full.program.statements.length?{...frozen,formula:frozen.formula.split(/\r?\n/).slice(0,full.program.statements[end-1].line).join('\n')}:frozen;
   const warm=Math.max(programHistoryBars(program,params,step/60000)+1,Math.ceil(featureWindowMs(windowDef)/step),convergenceHistory(program,params,step/60000)+1);
   const N=warm+546, constraintKey=constraintFingerprint(texts);
-  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>5000?`需要 ${N} 根历史（含平滑收敛预热），超过 5000 根上限，暂不可扫`:undefined};
+  return {usesTaker:inputs.has('B')||inputs.has('S'),def:frozen,settings:config,compiled,resultName:result,statisticName,scale,unit,averageName,mainName,constraintNames,texts,constraintKey,algorithmKey:fishAlgorithmKey(frozen.id,undefined,settings.direction,settings.threshold,constraintKey,statistic),warm,N,step,stateHold,stateHoldAlternatives,unavailable:!Number.isFinite(N)||N>FISH_MAX_HISTORY_BARS?`需要 ${N} 根历史（含平滑收敛预热），超过 ${FISH_MAX_HISTORY_BARS} 根上限，暂不可扫`:undefined};
 }
 export interface FishValues { value: Float64Array; average: Float64Array; main: Float64Array; constraints: Float64Array[]; condition: Float64Array }
 export function evaluateFishProgram(bars: readonly ResearchBar[],plan: FishProgram): FishValues {

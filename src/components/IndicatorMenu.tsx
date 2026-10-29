@@ -320,7 +320,7 @@ export function IndicatorMenu({ open, onClose, indicators, onIndicatorsChange }:
     return () => { observer.disconnect(); window.removeEventListener('resize', fit); };
   }, [open]);
 
-  const availableCatalog = useMemo(() => INDICATOR_CATALOG.filter(item => item.id !== 'DSP_VA'), []);
+  const availableCatalog = INDICATOR_CATALOG;
   const filtered = useMemo(() => {
     let items = availableCatalog;
     if (categoryFilter) {

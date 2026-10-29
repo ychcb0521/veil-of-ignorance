@@ -60,6 +60,8 @@ export interface DeepDigFeatureDef extends MbiParams {
   builtin?: boolean;
   /** 内置项被用户从目录删掉（隐藏，可恢复）。 */
   removed?: boolean;
+  /** Visibility restoration revision; a later explicit hide retains this revision. */
+  visibilityVersion?: number;
   createdAt?: number;
 }
 
@@ -244,6 +246,7 @@ export const DRIFT_SPEED_FORMULA = LEGACY_A_DRIFT_SPEED_FORMULA
 
 export const DRIFT_SPEED_DEF: DeepDigFeatureDef = {
   id: 'drift-speed',
+  visibilityVersion: 1,
   name: '买方推力漂移速度 DSP·a',
   short: 'a',
   definition: '进场前最后一根 K 线上，动态谢林点（多空博弈的均衡价）每根往上（+）或往下（−）移动多少：净资金力量 × 买方优势权重 × 涨跌幅，按半衰期指数平滑（周期、半衰期见下）。',
@@ -796,7 +799,7 @@ export function newFeatureTemplate(now: number): DeepDigFeatureDef {
 
 /** 用户存的定义（改过的内置项 + 新增项）合到内置清单上：内置在前，新增按创建先后。 */
 export function mergeFeatureDefs(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  saved = saved.filter(d => !isRetiredFeature(d.id));
+  saved = saved.filter(d => !isRetiredFeature(d.id)).map(restoreFeatureVisibility);
   const byId = new Map(saved.map(d => [d.id, upgradeSellerSign(upgradeBssFormula(upgradeFormula(upgradeGroupVars(d))))]));
   const builtins = BUILTIN_FEATURES.filter(b => !byId.get(b.id)?.removed).map(b => ({ ...b, ...(byId.get(b.id) ?? {}), id: b.id, builtin: true }));
   const custom = saved.filter(d => !BUILTIN_FEATURES.some(b => b.id === d.id)).map(upgradeGroupVars).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
@@ -836,8 +839,13 @@ function upgradeFormula<T extends { formula?: string; definition?: string }>(d: 
 }
 
 /** 被删掉（隐藏）的内置项：目录底部给一个不起眼的「恢复」。 */
+function restoreFeatureVisibility(def: DeepDigFeatureDef): DeepDigFeatureDef {
+  // 2026-10-29: restore DSP·a across all readers, preserving the account formula and parameters.
+  return def.id === 'drift-speed' && (def.visibilityVersion ?? 0) < 1
+    ? { ...def, removed: false, visibilityVersion: 1 } : def;
+}
 export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFeatureDef[] {
-  const removed = new Set(saved.filter(d => d.removed).map(d => d.id));
+  const removed = new Set(saved.map(restoreFeatureVisibility).filter(d => d.removed).map(d => d.id));
   return BUILTIN_FEATURES.filter(b => removed.has(b.id));
 }
 
