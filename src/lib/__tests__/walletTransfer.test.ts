@@ -22,21 +22,21 @@ describe('validateTransfer', () => {
   it('来源与目标相同时拒绝', () => {
     const r = validateTransfer(wallets(1000), { from: 'spot', to: 'spot', amount: 10 });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('same-wallet');
+    if (r.ok === false) expect(r.reason).toBe('same-wallet');
   });
 
   it('金额非正或非有限数时拒绝', () => {
     for (const amount of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
       const r = validateTransfer(wallets(1000), { from: 'futures', to: 'spot', amount });
       expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.reason).toBe('invalid-amount');
+      if (r.ok === false) expect(r.reason).toBe('invalid-amount');
     }
   });
 
   it('超过可用余额时拒绝', () => {
     const r = validateTransfer(wallets(100), { from: 'futures', to: 'spot', amount: 100.01 });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('insufficient');
+    if (r.ok === false) expect(r.reason).toBe('insufficient');
   });
 
   it('恰好等于可用余额时放行——「最大」按钮必须能一键划空', () => {
