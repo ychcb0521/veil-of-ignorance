@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const auth = vi.hoisted(() => ({
   getSession: vi.fn(),
-  onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+  onAuthStateChange: vi.fn((_callback: (event: string, session: unknown) => void) => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
   signInWithPassword: vi.fn(),
   signUp: vi.fn(),
   signOut: vi.fn(),
@@ -23,6 +23,7 @@ vi.mock('@/lib/authBootRecovery', async (original) => ({
 
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { AUTH_BOOT_TIMEOUT_MS } from '@/lib/authBootRecovery';
+import { AUTH_ACTION_TIMEOUT_MS } from '@/lib/authTransport';
 import { AuthBootRecoveryScreen } from '@/components/AuthBootRecoveryScreen';
 
 type AuthValue = ReturnType<typeof useAuth>;
@@ -48,6 +49,23 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 
 describe('登录态恢复不再无限转圈', () => {
+  it('a successful auth event wins over a late stale startup session response',async()=>{
+    let finish!:(value:unknown)=>void;auth.getSession.mockReturnValue(new Promise(resolve=>{finish=resolve;}));
+    mount();await flush();
+    const callback=auth.onAuthStateChange.mock.calls[0][0] as unknown as (event:string,value:unknown)=>void;
+    act(()=>callback('SIGNED_IN',session));await flush();expect(latest.user?.id).toBe('user-1');expect(latest.loading).toBe(false);
+    finish({data:{session:null},error:null});await flush();expect(latest.user?.id).toBe('user-1');
+    await flush(AUTH_BOOT_TIMEOUT_MS);expect(latest.bootIssue).toBeNull();
+  });
+  it('a password login that never settles returns a reload path without touching trade records',async()=>{
+    auth.getSession.mockResolvedValue({data:{session:null},error:null});mount();await flush();
+    localStorage.setItem('sim_user-1_trade_history','[1]');
+    auth.signInWithPassword.mockReturnValue(new Promise(()=>{}));
+    const request=latest.signIn('a@b.c','pw');await flush(AUTH_ACTION_TIMEOUT_MS);
+    expect(await request).toEqual({error:expect.stringContaining('登录步骤未能结束'),requiresReload:true});
+    expect(localStorage.getItem('sim_user-1_trade_history')).toBe('[1]');
+    expect(reloadPage).not.toHaveBeenCalled();
+  });
   it('正常恢复：进入应用，没有任何提示', async () => {
     auth.getSession.mockResolvedValue({ data: { session }, error: null });
     const view = mount();

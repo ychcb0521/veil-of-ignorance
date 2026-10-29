@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/notificationCenter';
+import { boundedAuthAction } from '@/lib/authTransport';
+import { reloadPage } from '@/lib/authBootRecovery';
 
 type AuthStep = 'form' | 'verify';
 
@@ -27,16 +29,18 @@ export default function AuthPage() {
    * 只靠提示的话登录失败就是点了没反应，分不清是密码不对、网络不通还是本地存储写满。
    */
   const [formError, setFormError] = useState<string | null>(null);
+  const [requiresReload,setRequiresReload]=useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(loading||requiresReload)return;
     if (!email.trim() || !password.trim()) return;
     setLoading(true);
     setFormError(null);
 
-    if (isLogin) {
-      const { error } = await signIn(email, password);
-      setLoading(false);
+    try { if (isLogin) {
+      const { error,requiresReload:reload } = await signIn(email.trim(), password);
+      setRequiresReload(!!reload);
       if (error) {
         if (error.includes('Email not confirmed')) {
           toast.error('邮箱未验证', { description: '请先完成邮箱验证' });
@@ -47,8 +51,8 @@ export default function AuthPage() {
         }
       }
     } else {
-      const { error } = await signUp(email, password);
-      setLoading(false);
+      const { error,requiresReload:reload } = await signUp(email.trim(), password);
+      setRequiresReload(!!reload);
       if (error) {
         if (error.includes('already registered') || error.includes('already been registered')) {
           toast.error('该邮箱已被注册');
@@ -64,37 +68,40 @@ export default function AuthPage() {
         toast.success('注册成功', { description: '验证邮件已发送，请查收' });
         setStep('verify');
       }
-    }
+    } } catch(error) { setFormError(`${isLogin?'登录':'注册'}失败：${describeAuthError(error instanceof Error?error.message:String(error))}`); }
+    finally { setLoading(false); }
   };
 
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) return;
     setLoading(true);
-    const { error } = await supabase.auth.verifyOtp({
+    try { const { error } = await boundedAuthAction(()=>supabase.auth.verifyOtp({
       email,
       token: otp,
       type: 'signup',
-    });
-    setLoading(false);
+    }));
     if (error) {
       toast.error('验证码错误或已过期', { description: error.message });
+      setFormError(error.message);
     } else {
       toast.success('邮箱验证成功！');
-    }
+    } } catch(error) { setFormError(error instanceof Error?error.message:String(error)); }
+    finally { setLoading(false); }
   };
 
   const handleResend = async () => {
     setResending(true);
-    const { error } = await supabase.auth.resend({
+    try { const { error } = await boundedAuthAction(()=>supabase.auth.resend({
       type: 'signup',
       email,
-    });
-    setResending(false);
+    }));
     if (error) {
       toast.error('发送失败', { description: error.message });
+      setFormError(error.message);
     } else {
       toast.success('验证邮件已重新发送');
-    }
+    } } catch(error) { setFormError(error instanceof Error?error.message:String(error)); }
+    finally { setResending(false); }
   };
 
   // Verify email step
@@ -177,6 +184,7 @@ export default function AuthPage() {
             </div>
 
             <div className="border-t border-border pt-3">
+              {formError&&<p role="alert" className="mb-2 text-xs text-destructive">{formError}</p>}
               <button
                 onClick={() => { setStep('form'); setOtp(''); }}
                 className="text-xs text-muted-foreground hover:text-foreground w-full text-center"
@@ -245,7 +253,7 @@ export default function AuthPage() {
             </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading||requiresReload}
               className="w-full py-2.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
               style={{
                 background: 'hsl(var(--primary))',
@@ -259,6 +267,7 @@ export default function AuthPage() {
                 {formError}
               </p>
             )}
+            {requiresReload&&<button type="button" onClick={reloadPage} className="w-full rounded-lg border border-border py-2 text-sm text-primary">重新加载登录页</button>}
           </form>
 
           <p className="text-center text-[11px] text-muted-foreground">

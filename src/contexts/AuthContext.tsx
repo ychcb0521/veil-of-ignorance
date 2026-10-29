@@ -3,10 +3,11 @@
  * Provides user session, profile, and auth state to the entire app.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 import { setActiveSyncUser } from '@/lib/simStateSync';
+import { boundedAuthAction, AuthActionTimeout } from '@/lib/authTransport';
 import { ensureCriticalStorageHeadroom, restoreAuthStorageReserve, type StorageHeadroom } from '@/lib/persistedStateStorage';
 import {
   AUTH_BOOT_TIMEOUT_MS, authBootReason, claimAuthBootAutoReload, classifyAuthBootError,
@@ -28,8 +29,8 @@ interface AuthState {
   loading: boolean;
   /** 登录态没能恢复出来的原因；有值时 loading 可能一直为 true，界面不能只转圈。 */
   bootIssue: AuthBootIssue | null;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; requiresReload?: boolean }>;
+  signIn: (email: string, password: string) => Promise<{ error: string | null; requiresReload?: boolean }>;
   signOut: () => Promise<void>;
   initializeAccount: (capital: number) => Promise<boolean>;
   refreshProfile: () => Promise<void>;
@@ -49,6 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootIssue, setBootIssue] = useState<AuthBootIssue | null>(null);
+  const currentUser=useRef<string|null>(null);
 
   const fetchProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
@@ -57,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .eq('user_id', userId)
       .single();
 
-    if (data && !error) {
+    if (data && !error && currentUser.current===userId) {
       setProfile(data as Profile);
     }
   }, []);
@@ -68,8 +70,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Set up auth listener BEFORE getSession
   useEffect(() => {
+    let active=true,settled=false,authRevision=0;
+    const watchdog=setTimeout(()=>{if(!settled)void report('timeout');},AUTH_BOOT_TIMEOUT_MS);
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        if(!active)return;
+        authRevision++;settled=true;clearTimeout(watchdog);
+        currentUser.current=session?.user?.id??null;
+        setLoading(false);setBootIssue(null);
+        restoreAuthStorageReserve();
         setSession(session);
         setUser(session?.user ?? null);
 
@@ -86,22 +95,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
      * getSession() 不保证返回：登录锁被别的标签页抢走、本地存储写满时它直接报错，
      * 刷新令牌的请求卡住时它一直不返回。三种都不能表现为无限的「加载中...」。
      */
-    let active = true;
-    let settled = false;
     const report = async (kind: AuthBootIssueKind, error?: unknown, knownHeadroom?: StorageHeadroom) => {
       const { diagnostics, headroom } = await collectAuthBootDiagnostics(error, Date.now(), knownHeadroom);
       // 读现场要等一拍：这期间登录态可能已经恢复，迟到的超时提示不能再盖上去。
       if (!active || (kind === 'timeout' && settled)) return;
       setBootIssue({ kind, reason: authBootReason(kind, headroom), diagnostics });
     };
-    const watchdog = setTimeout(() => { if (!settled) void report('timeout'); }, AUTH_BOOT_TIMEOUT_MS);
 
     // Then get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if(!active||authRevision>0)return;
       settled = true;
       clearTimeout(watchdog);
       setBootIssue(null);
       setSession(session);
+      currentUser.current=session?.user?.id??null;
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
@@ -110,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 令牌已经落盘（或确认没有登录）：把给令牌留的位置占回去，赶在交易界面挂载、交易数据开始写入之前
       restoreAuthStorageReserve();
     }, (error: unknown) => {
+      if(!active||authRevision>0)return;
       settled = true;
       clearTimeout(watchdog);
       if (!active) return;
@@ -130,20 +139,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(watchdog);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchProfile]);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
+    try { const { error } = await boundedAuthAction(()=>supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
-    });
+    }));
     return { error: error?.message ?? null };
+    } catch(error) { return {error:error instanceof Error?error.message:String(error),...(error instanceof AuthActionTimeout?{requiresReload:true}:{})}; }
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const attempt = async () => {
-      const failure = (await supabase.auth.signInWithPassword({ email, password })).error?.message ?? null;
+      const failure = (await boundedAuthAction(()=>supabase.auth.signInWithPassword({ email:email.trim(), password }))).error?.message ?? null;
       // 登录成功、令牌已落盘：把给令牌留的位置占回去
       if (failure === null) restoreAuthStorageReserve();
       return failure;
@@ -154,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       return { error: await attempt() };
     } catch (error) {
+      if(error instanceof AuthActionTimeout)return {error:error.message,requiresReload:true};
       // 令牌签发了却存不进本地存储时登录库直接抛错：不接住的话登录按钮会一直转圈。
       if (classifyAuthBootError(error) !== 'storage-full') return { error: error instanceof Error ? error.message : String(error) };
       // 腾出多少算多少，一定再试一次：令牌只要约 3 KB，未必需要腾满
@@ -161,6 +172,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         return { error: await attempt() };
       } catch (again) {
+        if(again instanceof AuthActionTimeout)return {error:again.message,requiresReload:true};
         return { error: classifyAuthBootError(again) === 'storage-full' ? storageFull() : again instanceof Error ? again.message : String(again) };
       }
     }
@@ -174,6 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
      */
     setActiveSyncUser(null);
     await supabase.auth.signOut();
+    currentUser.current=null;
     setUser(null);
     setSession(null);
     setProfile(null);

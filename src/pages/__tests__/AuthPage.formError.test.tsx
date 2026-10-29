@@ -22,6 +22,15 @@ async function submit(view: ReturnType<typeof render>) {
  * 登录失败在页面上什么都看不到，分不清是密码不对还是本地存储写满。
  */
 describe('登录页直接写出失败原因', () => {
+  it('unexpected rejection still restores the button; an unresponsive SDK offers a safe reload instead of overlapping attempts',async()=>{
+    signIn.mockRejectedValueOnce(new Error('unexpected error'));
+    const view=render(<AuthPage/>);await submit(view);
+    expect(view.getByTestId('auth-form-error')).toHaveTextContent('unexpected error');
+    expect(view.container.querySelector('button[type="submit"]')).not.toBeDisabled();
+    signIn.mockResolvedValueOnce({error:'登录步骤未能结束',requiresReload:true});await submit(view);
+    expect(view.getByRole('button',{name:'重新加载登录页'})).toBeEnabled();
+    expect(view.container.querySelector('button[type="submit"]')).toBeDisabled();
+  });
   it('存储写满：原因与占用明细原样写在按钮下方，按钮恢复可点', async () => {
     signIn.mockResolvedValue({ error: '浏览器给本站的本地存储已写满，登录令牌存不进去。占用最大的是：成交历史 4.61 MB · 撤单快照 0.22 MB' });
     const view = render(<AuthPage />);
