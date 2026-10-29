@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Plus, X } from 'lucide-react';
 import { useFeatureDefinitions } from '@/hooks/useFeatureDefinitions';
 import { makeQualitySellPlan, newQualitySellPlanId } from '@/lib/fish/qualitySellPlans';
@@ -16,22 +16,31 @@ const draftOf = (plan: QualityGroup): Draft => ({ id: plan.id, original: plan, l
   afterChoice: plan.combo ? plan.combo.after.snapshot.featureId + ':' + plan.combo.after.metric : 'state:state',
   afterDirection: plan.combo?.after.rule.direction ?? '<', afterThreshold: plan.combo ? String(plan.combo.after.rule.threshold) : '', switchPct: String(plan.combo?.switchPct ?? 5.1) });
 
-export function FishQualitySellPlansEditor({ plans, ready, onSave }: { plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void }) {
+export interface SellPlansDraftView { plans: QualityGroup[]; dirty: boolean; algorithmsDirty: boolean; error: string; save: (after?: (plans: QualityGroup[]) => QualityGroup[]) => boolean }
+export function FishQualitySellPlansEditor({ plans, ready, onSave, prepare, extraDirty = false, renderHolding, onSelectPlan }: {
+  plans: readonly QualityGroup[]; ready: boolean; onSave: (plans: QualityGroup[]) => void;
+  onSelectPlan?: (id: string) => void; prepare?: (plans: QualityGroup[]) => QualityGroup[]; extraDirty?: boolean; renderHolding?: (view: SellPlansDraftView) => ReactNode;
+}) {
   const definitions = useFeatureDefinitions();
   const choices = useMemo(() => qualityFilterChoices(definitions), [definitions]);
   const [drafts, setDrafts] = useState(() => plans.map(draftOf)), [dirty, setDirty] = useState(false), [error, setError] = useState('');
   useEffect(() => { if (!dirty) setDrafts(plans.map(draftOf)); }, [plans, dirty]);
   const change = (next: Draft[]) => { setDrafts(next); setDirty(true); setError(''); };
-  const patch = (id: string, next: Partial<Draft>) => change(drafts.map(d => d.id === id ? { ...d, ...next } : d));
+  const patch = (id: string, next: Partial<Draft>) => { onSelectPlan?.(id); change(drafts.map(d => d.id === id ? { ...d, ...next } : d)); };
   const number = (value: string, optional = false) => {
     if (!value.trim() && optional) return undefined;
     if (!value.trim() || !Number.isFinite(Number(value))) throw new Error('门槛和切换涨幅须填写有限数字');
     return Number(value);
   };
-  const apply = () => {
+  const baseOf = (d: Draft) => plans.find(p => p.id === d.id) ?? d.original;
+  const algorithmFields = (d: Draft) => JSON.stringify([d.choice,d.direction,d.threshold,d.combo,...(d.combo?[d.afterChoice,d.afterDirection,d.afterThreshold,d.switchPct]:[])]);
+  const labelOf = (d: Draft, base?: QualityGroup) => d.original && d.label === d.original.label ? base?.label ?? d.label : d.label.trim() || choices.find(c=>c.key===d.choice)?.label || base?.label || '新卖出算法';
+  const apply = (after?: (plans: QualityGroup[]) => QualityGroup[]) => {
     try {
       const next = drafts.map(d => {
-        const plan = makeQualitySellPlan(d.choice, d.direction, number(d.threshold, true), definitions, d.original, d.id);
+        const base = baseOf(d);
+        if (base && d.original && algorithmFields(d) === algorithmFields(draftOf(d.original))) return { ...structuredClone(base), label: labelOf(d,base) };
+        const plan = makeQualitySellPlan(d.choice, d.direction, number(d.threshold, true), definitions, baseOf(d), d.id);
         plan.label = d.label.trim() || plan.label;
         if (d.combo) {
           const after = makeQualitySellPlan(d.afterChoice, d.afterDirection, number(d.afterThreshold), definitions);
@@ -42,9 +51,11 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave }: { plans: re
         } else delete plan.combo;
         return plan;
       });
-      onSave(next); setDirty(false); setError('');
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '卖出算法设置无效'); }
+      const prepared = prepare ? prepare(next) : next;
+      onSave(after ? after(prepared) : prepared); setDirty(false); setError(''); return true;
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '卖出算法设置无效'); return false; }
   };
+  const preview = drafts.map(d => ({ ...baseOf(d)!, id: d.id, label: labelOf(d,baseOf(d)) }));
   const select = (value: string, label: string, onChange: (value: string) => void) => {
     const featureId = choices.find(c => c.key === value)?.featureId ?? value.split(':')[0];
     const features = [...new Map(choices.map(c => [c.featureId, c.group])).entries()];
@@ -59,13 +70,13 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave }: { plans: re
       </select>
     </div>;
   };
-  return <section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid="quality-sell-plans-editor">
-    <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">卖出算法</h4>
-      <button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => change([...drafts, { id: newQualitySellPlanId(), label: '', choice: choices[0].key, direction: '<', threshold: '', combo: false, afterChoice: choices[0].key, afterDirection: '<', afterThreshold: '', switchPct: '5.1' }])}><Plus className="h-3 w-3" />新增卖出算法</button></div>
-    <p className="text-[10.5px] leading-relaxed text-muted-foreground">每套方案独立监测，可选特征值、公式变量、方向和门槛。保存后更新下方方案和表格，并按新设置重算已勾选信号；历史轮次保留。</p>
+  return <><section className="mb-3 space-y-2 border-b border-border/60 pb-3" data-testid="quality-sell-plans-editor">
+    <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-medium">卖出算法 <span className="text-muted-foreground" data-testid="sell-plan-draft-count">{drafts.length} 套</span></h4>
+      <button type="button" disabled={!ready || !choices.length} className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40" onClick={() => { const original = makeQualitySellPlan(choices[0].key, '<', undefined, definitions, undefined, newQualitySellPlanId()); change([...drafts, { ...draftOf(original), label: '', afterChoice: choices[0].key }]); onSelectPlan?.(original.id); }}><Plus className="h-3 w-3" />新增卖出算法</button></div>
+    <p className="text-[10.5px] leading-relaxed text-muted-foreground">每套方案独立监测，可选特征值、公式变量、方向和门槛。下方监测方案随增删、改名即时对应；全部保存后更新表格并重算已勾选信号，历史轮次保留。</p>
     {!drafts.length && <p className="rounded border border-dashed border-border p-3 text-center text-[11px] text-muted-foreground">暂无卖出算法，点击上方新增。</p>}
-    {drafts.map((d, i) => <div key={d.id} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
-      <div className="flex items-center gap-1.5"><input aria-label={'卖出算法 ' + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
+    {drafts.map((d, i) => <div key={d.id} data-plan-id={d.id} onFocusCapture={e => { if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) onSelectPlan?.(d.id); }} className="space-y-1.5 rounded-md border border-border/60 p-2" data-testid={'sell-plan-draft-' + i}>
+      <div className="flex items-center gap-1.5"><span className="text-[10px] tabular-nums text-muted-foreground">{i + 1}.</span><input aria-label={'卖出算法 ' + (i + 1) + ' 名称'} className={field + ' flex-1'} placeholder="名称（可选）" value={d.label} onChange={e => patch(d.id, { label: e.target.value })} />
         <select aria-label={'卖出算法 ' + (i + 1) + ' 类型'} className={field} value={d.combo ? 'combo' : 'single'} onChange={e => patch(d.id, { combo: e.target.value === 'combo' })}><option value="single">单一算法</option><option value="combo">分段组合</option></select>
         <button type="button" aria-label={'删除卖出算法 ' + (i + 1)} className="rounded p-1 text-muted-foreground hover:text-destructive" onClick={() => change(drafts.filter(x => x.id !== d.id))}><X className="h-3.5 w-3.5" /></button></div>
       <div className="grid grid-cols-[minmax(0,1fr)_3rem_5rem] gap-1.5">
@@ -79,8 +90,8 @@ export function FishQualitySellPlansEditor({ plans, ready, onSave }: { plans: re
           <input aria-label={'卖出算法 ' + (i + 1) + ' 后段门槛'} type="number" step="any" className={field + ' w-full'} value={d.afterThreshold} onChange={e => patch(d.id, { afterThreshold: e.target.value })} />
         </div></div>}
     </div>)}
-    <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !dirty} onClick={apply} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">保存卖出算法</button>
-      <span className="text-[10px] text-muted-foreground">未填普通门槛时，可单独使用该方案的镜像止盈或持仓否决。</span></div>
-    {error && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
-  </section>;
+    <div className="flex flex-wrap items-center gap-2"><button type="button" disabled={!ready || !(dirty || extraDirty)} onClick={() => apply()} className="h-7 rounded-md border border-primary/30 bg-primary/10 px-2.5 text-[11px] text-primary disabled:opacity-40">{renderHolding ? '保存全部方案' : '保存卖出算法'}</button>
+      <span className="text-[10px] text-muted-foreground">未填普通门槛时，可单独使用该方案的加仓、镜像止盈或持仓否决。</span></div>
+    {error && !renderHolding && <p role="alert" className="text-[11px] text-destructive">{error}</p>}
+  </section>{renderHolding?.({ plans: preview, dirty: dirty || extraDirty, algorithmsDirty: dirty, error, save: apply })}</>;
 }

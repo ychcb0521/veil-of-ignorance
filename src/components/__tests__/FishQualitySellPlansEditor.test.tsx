@@ -53,3 +53,20 @@ it('rejects invalid input and preserves an existing plan selection when its iden
   expect(replaceQualitySellPlans(study, []).selectedSellId).toBeUndefined();
   expect(() => replaceQualitySellPlans(study, [{ ...plan, rule: { metric: plan.metric, direction: '<', threshold: NaN } }])).toThrow('有限数字');
 });
+
+it('merges pending algorithm edits into the latest holding settings instead of restoring an old addition configuration',()=>{
+ const plans=initial().slice(0,2),save=vi.fn(),view=render(<FishQualitySellPlansEditor plans={plans} ready onSave={save}/>);
+ fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'保留最新加仓'}});
+ const addition={enabled:true,source:'detector' as const,stricterPct:10,amountMode:'fixed' as const,amountUsdt:75};
+ view.rerender(<FishQualitySellPlansEditor plans={[{...plans[0],addition},plans[1]]} ready onSave={save}/>);
+ fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ expect(save.mock.calls[0][0][0]).toMatchObject({id:plans[0].id,label:'保留最新加仓',addition});
+});
+
+it('preserves untouched execution timing and frozen formulas when saving holding settings or just a name',()=>{
+ const plans=initial().slice(0,2);delete plans[0].execution;delete plans[1].execution;delete plans[0].definitionSource;
+ const before=structuredClone(plans),save=vi.fn();
+ render(<FishQualitySellPlansEditor plans={plans} ready onSave={save} extraDirty prepare={next=>next.map((p,i)=>i===0?{...p,addition:{enabled:true,source:'detector',stricterPct:10,amountMode:'fixed',amountUsdt:75}}:p)}/>);
+ fireEvent.change(screen.getByLabelText('卖出算法 1 名称'),{target:{value:'只改名称和加仓'}});fireEvent.click(screen.getByRole('button',{name:'保存卖出算法'}));
+ const next:QualityGroup[]=save.mock.calls[0][0];expect(next[0].execution).toBeUndefined();expect(next[0].definitionSource).toBeUndefined();expect(next[0].snapshot).toEqual(before[0].snapshot);expect(next[0].label).toBe('只改名称和加仓');expect(next[1]).toEqual(before[1]);expect(plans).toEqual(before);
+});
