@@ -1089,8 +1089,13 @@ describe('CandlestickChart analysis annotations', () => {
         analysisAnnotations={makeAnnotations()}
       />,
     );
-    const matchingCalls = () => mocks.chart.createIndicator.mock.calls
-      .filter(([value]) => value.name === ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
+    const matchingCalls = () => (
+      mocks.chart.createIndicator.mock.calls as unknown as [
+        { name: string },
+        boolean,
+        { id: string },
+      ][]
+    ).filter(([value]) => value.name === ANALYSIS_AUTO_FIT_BOUNDS_INDICATOR);
 
     await waitFor(() => expect(matchingCalls()).toHaveLength(1));
     const [indicator, stack, paneOptions] = matchingCalls()[0];
