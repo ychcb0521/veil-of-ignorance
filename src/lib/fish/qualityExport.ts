@@ -1,3 +1,4 @@
+import { qualityDetectorReading } from './qualityDetectorReading';
 import { additionLabel } from './qualityAddition';
 import { qualityPeakPct, qualityHalfMirror } from './qualityPresentation';
 import { qualityFilterCell, qualityFilterColumns, qualityFilterValue } from './qualityFilterColumns';
@@ -18,7 +19,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
   const filters = qualityFilterColumns(study);
   const runStatuses = qualityRunStatusMap(study, rows);
   const sheets: XlsxSheet[] = [{ name: '鱼质量', columns: [
-    { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 },
+    { header: '标的', width: 25 }, { header: '运行状态（过滤 / 监测）', width: 42 }, { header: '来源', width: 10 }, { header: '信号时间', width: 24 }, { header: '市场', width: 10 }, { header: '评分', width: 8 }, { header: '探测值', width: 20 },
     ...filters.flatMap(({ filter }) => [{ header: `过滤 · ${filter.label}（${filter.direction} ${filter.threshold}）读数`, width: 32 }, { header: `${filter.label} · 过滤结果`, width: 24 }]),
     ...plans.flatMap(p => [{ header: `卖出 · ${p.label}（${hasQualityExit(p) ? qualityRuleText(p) : '未设置'}）收益率 %`, width: 34 },
       {header:`${p.label} · 静态最大回撤 %`,width:30},{header:`${p.label} · 峰值涨幅 %`,width:30},{header:`${p.label} · 半仓镜像实际涨幅 %`,width:30},{header:`${p.label} · 半仓镜像状态`,width:24},{header:`${p.label} · 持仓小时`,width:22}]),
@@ -27,7 +28,7 @@ export function buildQualitySheets(study: FishQualityStudy, rows: QualitySample[
     row.source.symbol + (row.source.exchange && row.source.exchange !== 'binance' ? `（${EXCHANGE_NAMES[row.source.exchange]}）` : ''),
     (() => { const status = runStatuses.get(row.signalId ?? row.id)!; return `过滤：${qualityRunStatusText(status.filter)}；监测：${qualityRunStatusText(status.monitor)}`; })(),
     row.origin === 'library' ? '信号库' : '鱼',
-    formatUTC8(row.source.timeMs), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null,
+    formatUTC8(row.source.timeMs), row.source.market === 'us_stock' ? '美股' : '', row.source.quality ?? null, qualityDetectorReading(row).value,
     ...filters.flatMap(({ filter }) => [qualityFilterValue(row, filter, readings), qualityFilterCell(row, filter, readings).status]),
     ...plans.flatMap(p => { const r = qualityRowResult(study, row, p, results), f = activeBuyFilters(study, p).length ? qualityFilterStatus(study, row, p, readings) : undefined;
       // 这套方案开着买入过滤而这一行没买入：与界面一致写原因，不列它的卖出结果

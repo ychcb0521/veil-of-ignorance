@@ -555,7 +555,7 @@ it('places independent filter results immediately after capture, runs without se
   const view = render(<FishQuality state={s}/>);
   const headerRows = screen.getByTestId('quality-fish-table').querySelectorAll('thead tr');
   const headers = within(headerRows[headerRows.length - 1] as HTMLElement).getAllByRole('columnheader'), filterColumn = screen.getByTestId('quality-filter-column');
-  expect(headers[5]).toHaveTextContent('捕捞过程'); expect(headers[6]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
+  expect(headers[6]).toHaveTextContent('捕捞过程'); expect(headers[7]).toBe(filterColumn); expect(filterColumn).toHaveTextContent('过滤 · 状态 S 原始值'); expect(filterColumn).toHaveTextContent('> 0.7');
   expect(screen.getAllByTestId('quality-filter-column')).toHaveLength(1);
   const run = screen.getByRole('button', { name: '开始过滤' }); expect(run).toBeEnabled(); fireEvent.click(run); expect(s.startFilter).toHaveBeenCalledTimes(1);
   const reading = (symbol: string) => within(screen.getAllByTestId('quality-fish-row').find(row => row.textContent!.includes(symbol))!).getByTestId('quality-filter-cell');
@@ -790,4 +790,20 @@ it('shows half-mirror execution after each peak column and sorts actual mirror p
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('ZERO');
  fireEvent.click(screen.getByRole('button',{name:'按状态 S 原始值半仓镜像实际涨幅排序'}));expect(screen.getAllByTestId('quality-fish-row')[0]).toHaveTextContent('FILLED');
  expect(screen.queryAllByTestId('quality-dynamic-drawdown')).toHaveLength(0);
+});
+
+it('places folded capture values after ratings, aligns each detector reading after expansion and sorts numerically without changing selection',()=>{
+ const s=state(),values=[.125,0,-.084];
+ const sources=s.study.samples.map((sample,i)=>({...sample.source,fish:{...sample.source.fish!,average:values[i],scale:100}}));
+ s.study=enableQualityComparison(importQualityFish(newQualityStudy(T),sources));s.study.selectedRowIds=qualityDisplayRows(s.study).map(r=>r.id);
+ render(<FishQuality state={s}/>);
+ const header=screen.getByTestId('quality-detector-value-column'),toggle=screen.getByRole('button',{name:'展开探测值明细'});
+ expect(header.previousElementSibling).toHaveTextContent('评分');expect(toggle).toHaveAttribute('aria-expanded','false');
+ expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(screen.getByTestId('quality-detector-value-cell')).toHaveTextContent('3 项');
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(3);
+ expect(screen.getByRole('button',{name:'展开探测算法明细'})).toHaveAttribute('aria-expanded','true');
+ for(const text of ['12.5','0','-8.4'])expect(within(screen.getByTestId('quality-fish-table')).getByText(text,{exact:true})).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^12.5/);
+ fireEvent.click(screen.getByRole('button',{name:'按探测值排序'}));expect(screen.getAllByTestId('quality-detector-value-cell')[0]).toHaveTextContent(/^-8.4/);
+ fireEvent.click(toggle);expect(screen.getAllByTestId('quality-fish-row')).toHaveLength(1);expect(s.setSelectedRows).not.toHaveBeenCalled();
 });
