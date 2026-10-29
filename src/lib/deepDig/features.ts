@@ -1,4 +1,4 @@
-import { ctbaFormula, CTBA_DESCRIPTION } from '@/lib/ctba';
+import { ctbaFormula, CTBA_DESCRIPTION, CTBA_12H_DEFAULTS } from '@/lib/ctba';
 import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
 import { MBI_N, MBI_Z0, MBI_TOOLTIP, mbiNOf, mbiZ0Of, validateMbiParams, type MbiParams } from '@/lib/mbi';
 import { appendResearchAverages } from '@/lib/researchAverageFormula';
@@ -67,6 +67,8 @@ export interface DeepDigFeatureDef extends MbiParams {
   chartTemplate?: string;
   /** The independent raw series, including seller-sensitive variants. */
   chartCore?: string;
+  /** Independent closed-bar research/display window; computation additionally loads formula prehistory. */
+  researchWindowHours?: number;
 }
 
 /** Deep dig 目录与渔共用的账号定义键。 */
@@ -119,7 +121,7 @@ export const featureTemplateId = (d: { id?: string; chartTemplate?: string }) =>
 export const intervalOf = (d: Pick<DeepDigFeatureDef, 'interval' | 'chartTemplate'> & { id?: string }): ResearchInterval => ['cba-2', 'ctba'].includes(featureTemplateId(d) ?? '') ? '5m' : d.interval ?? DEFAULT_INTERVAL;
 export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number => (d.halfLifeHours != null && d.halfLifeHours > 0 ? d.halfLifeHours : DEFAULT_HALF_LIFE_HOURS);
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
-type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate'> & { id?: string; formula?: string };
+type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours'> & { id?: string; formula?: string };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
 export const featureParams = (d: ParamDef) => ({ hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d), MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) });
 
@@ -142,7 +144,7 @@ export function featureWindowMs(d: ParamDef): number {
     } catch { /* 编辑中的不完整公式由公式校验提示 */ }
   }
   const window = Math.max(featureTemplateId(d) === 'cba-2' ? (48 + avgHoursOf(d) + 1) * H : 0, 48 * H, 8 * halfLifeOf(d) * H, (avgHoursOf(d) + 4 * halfLifeOf(d)) * H, 50 * intervalMs(intervalOf(d)));
-  if(featureTemplateId(d)==='ctba') return 48*H+formulaHistory;
+  if(featureTemplateId(d)==='ctba') return (d.researchWindowHours ?? 48)*H+formulaHistory;
   return Math.max(formulaHistory, featureUsesMbi(d) ? 48 * H + Math.max(mbiWarmupMs, 5 * mbiNOf(d) * intervalMs(intervalOf(d))) : window);
 }
 /** 「6 小时 = 72 根 5 分钟 K 线」这种换算，界面上用。 */
@@ -785,6 +787,16 @@ export const CDA_DEF: DeepDigFeatureDef = {
 export const CTBA_DEF: DeepDigFeatureDef = { id:'ctba', name:'CTBA｜趋势买方优势', short:'CTBA', definition:CTBA_DESCRIPTION, formula:ctbaFormula(), scale:1, unit:'', positive:DEFAULT_POSITIVE, control:DEFAULT_CONTROL, source:'campaigns', groupVars:2, builtin:true, interval:'5m' };
 
 
+/** First copy through the same independent-feature mechanism used by the editor; then configure only the copy. */
+const ctba12hCopy = copyFeatureDefinition(CTBA_DEF, [CTBA_DEF], Date.UTC(2026, 9, 29));
+export const CTBA_12H_DEF: DeepDigFeatureDef = {
+  ...ctba12hCopy, id:'ctba_12h', name:'CTBA-12H｜趋势买方优势（12小时）', short:'CTBA-12H', builtin:true,
+  chartTemplate:'ctba', chartCore:'CTBA', interval:'5m', halfLifeHours:2, researchWindowHours:12,
+  formula:'ctba_12h_version = 1\n' + ctbaFormula({...CTBA_12H_DEFAULTS}),
+  definition:'原 CTBA 的独立12小时副本：5m，N=144，EMA 8/24，波动窗口48根，主动买卖半衰期24根（2h），λ=ln(2)/24，ε=1e-12，权重0.35/0.40/0.25。100·tanh[0.35·tanh(T)+0.40·tanh(M)+0.25·F]；0是固定综合中性基准，正值偏买方、负值偏卖方。分量正负可抵消，0不单独证明主动买卖额相等。无平移、无样本重定心、无截负；保留缺失与全精度。研究展示入场前144根已收盘线，另取滚动与EMA预热；原CTBA独立保留。',
+};
+
+
 /** Response changes amplitude only; original measurement, parameters, warm-up and averages stay intact. */
 function bearFeatureFormula(source: string, original: string, core: string, scale = 1, response = false): string {
   const formula = source + '\n' + (response ? `${BEAR_RESPONSE_MARK}\nseller_gain = 2\n${core} = seller_response(${original}, seller_gain, ${scale})` : `${core} = min(${original}, 0)`);
@@ -824,7 +836,7 @@ export function upgradeBearResponse(d: DeepDigFeatureDef): DeepDigFeatureDef {
   } catch { return d; }
 }
 
-export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF];
+export const BUILTIN_FEATURES: readonly DeepDigFeatureDef[] = [DRIFT_SPEED_DEF, BSS_DEF, CBA_DEF, DRIFT_SPEED_Z_DEF, CBI_DEF, CBA2_DEF, CBI2_DEF, MBI_DEF, CTBA_DEF, CTBA_12H_DEF, STATE_DEF, STATE2_DEF, CDI2_DEF, SELLER_CONTROL_DEF, DSS_DEF, CDA_DEF, MBI_BEAR_DEF, CTBA_BEAR_DEF];
 
 /** 新增特征值的模板。 */
 export function newFeatureTemplate(now: number): DeepDigFeatureDef {
@@ -915,7 +927,7 @@ export function removedBuiltins(saved: readonly DeepDigFeatureDef[]): DeepDigFea
 }
 
 /** 影响运行结果的部分：改了这些，旧结果就不再对应当前定义。 */
-export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate'>) => {
+export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours'>) => {
   const g = upgradeGroupVars(d);
   // 写死 6 小时的那版与按 hl 平滑的那版在默认半衰期下结果一样（旧结果只会是默认半衰期）
   const raw = d.formula.trim() === LEGACY_DRIFT_SPEED_FORMULA ? EMA_DRIFT_SPEED_FORMULA : d.formula.trim();
@@ -928,6 +940,7 @@ export const definitionKey = (d: Pick<DeepDigFeatureDef, 'formula' | 'positive' 
   if (avgHoursOf(d) !== DEFAULT_AVG_HOURS) key.push(`avgh=${avgHoursOf(d)}`);
   if (featureUsesMbi(d)) key.push(`MBI_N=${mbiNOf(d)}`, `MBI_Z0=${mbiZ0Of(d)}`);
   if (d.chartTemplate) key.push("chart=" + d.chartTemplate);
+  if (d.researchWindowHours != null) key.push("researchHours=" + d.researchWindowHours);
   return JSON.stringify(key);
 };
 

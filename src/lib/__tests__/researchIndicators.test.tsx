@@ -57,7 +57,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
     for (const item of RESEARCH_INDICATORS) {
       for (const level of [1, 2]) {
         const reg = mock.registered.get(researchKcName(item.id, level));
-        if (['MBI_BEAR', 'CTBA_BEAR'].includes(item.id)) {
+        if (['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H'].includes(item.id)) {
           expect(reg.minValue).toBe(item.min); expect(reg.maxValue).toBe(item.max);
         } else { expect(reg.minValue).toBeUndefined(); expect(reg.maxValue).toBeUndefined(); }
         expect(reg.precision).toBeGreaterThanOrEqual(8);
@@ -98,7 +98,7 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
 
   it('添加时沿用已保存的基线、半衰期及公式常数', () => {
     saved(BUILTIN_FEATURES.map(def => ({ ...def, halfLifeHours: 3.5, avgHours: 18.5, ...(def.id === 'dss' ? { formula: 'n = 2.5\nDSS = n' } : {}) })));
-    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576]);
+    expect(RESEARCH_INDICATORS.map(researchDefaultPeriod)).toEqual([18.5, 18.5, 18.5, 3.5, 2.5, 3.5, 25, 576, 144]);
   });
 
   it('仅用到 CB 的定义请求本周期 BTC；BTC 版本进入原值和两个均值参数，并使三条序列重算', () => {
@@ -146,4 +146,23 @@ describe('五个 Deep dig 指标及 avg_x / avg_x_2', () => {
       expect(pixel).toHaveBeenLastCalledWith(state ? 0.6 : 0);
     }
   });
+});
+
+it('CTBA-12H fixes a symmetric zero axis, displays real T/M/F and preserves missing values and stored precision', () => {
+  const item = RESEARCH_INDICATORS.find(d => d.id === 'CTBA_12H')!, reg = mock.registered.get(researchKcName(item.id)), k = klines();
+  expect(reg.minValue).toBe(-reg.maxValue);
+  expect(reg.maxValue).toBeCloseTo(100*Math.tanh(1),12);
+  const series = researchChartSeries(k,item,144,{fetchReference:false});
+  const result = reg.calc(k,{calcParams:[144,0,0]});
+  for(const name of ['T','M','F']) expect(result.at(-1)[name]).toBe(series.components![name].at(-1));
+  const last = structuredClone(result.at(-1));
+  const tooltip = reg.createTooltipDataSource({indicator:{result,calcParams:[144,0,0]},defaultStyles:{tooltip:{icons:[]}},crosshair:{dataIndex:k.length-1}});
+  expect(tooltip.calcParamsText).toContain('EMA 8/24'); expect(tooltip.calcParamsText).toContain('参数版本');
+  expect(tooltip.values.map((v:any)=>v.title)).toEqual(['CTBA-12H: ','T: ','M: ','F: ']);
+  expect(result.at(-1)).toEqual(last);
+  expect(reg.createTooltipDataSource({indicator:{result,calcParams:[144,0,0]},defaultStyles:{tooltip:{icons:[]}},crosshair:{dataIndex:0}}).values[0].value.text).toBe('—');
+  const ctx=Object.fromEntries(['save','restore','setLineDash','beginPath','moveTo','lineTo','stroke','fillText'].map(key=>[key,vi.fn()]));
+  const convertToPixel=vi.fn(()=>50);
+  reg.draw({ctx,bounding:{width:600,height:100},yAxis:{convertToPixel}});
+  expect(convertToPixel).toHaveBeenCalledWith(0); expect(ctx.fillText).toHaveBeenCalledWith('0｜综合均衡基准',8,46.5);
 });

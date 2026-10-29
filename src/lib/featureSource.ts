@@ -145,6 +145,20 @@ function compileFor(formula: string, constant: string | null, value: number | nu
   return hit;
 }
 
+const ctbaParameterTextCache = new Map<string,string>();
+/** Parameter labels read the selected feature's own compiled assignments, including a chart N override. */
+export function ctbaChartParameterText(featureId:string,period:number):string {
+  const def=chartFeatureDef(featureId);if(!def)return '';
+  const key=featureId+'|'+period+'|'+def.formula,hit=ctbaParameterTextCache.get(key);if(hit)return hit;
+  try {
+    const vars=evaluateOnBars([],compileFor(def.formula,'N',period).compiled,def).vars;
+    const n=(key:string)=>{const v=vars.get(key);return typeof v==='number'&&Number.isFinite(v)?v:NaN;};
+    const fmt=(value:number)=>Number.isFinite(value)?String(Number(value.toPrecision(7))):'—';
+    const text=`5m · N=${fmt(n('N'))} · EMA ${fmt(n('f'))}/${fmt(n('s'))} · m=${fmt(n('m'))} · 半衰期${fmt(Math.LN2/n('lambda')/12)}h · λ=${fmt(n('lambda'))} · ε=${fmt(n('epsilon'))} · α/β/γ=${fmt(n('alpha'))}/${fmt(n('ctba_beta'))}/${fmt(n('gamma'))}`;
+    if(ctbaParameterTextCache.size>=64)ctbaParameterTextCache.clear();ctbaParameterTextCache.set(key,text);return text;
+  }catch{return '公式待修正';}
+}
+
 const historyBarsCache = new Map<string, number>();
 /** Include every nested rolling window plus a conservative EMA convergence buffer. */
 export function chartFeatureHistoryBars(featureId: string, period: number, formula: string, barMinutes = 5): number {

@@ -8,7 +8,7 @@
  * 在图里按下拖动、拖顶上的小标签，或聚焦后用 ← / → 一格一格移；上面的分组表、点阵图、逐场数据跟着按那一刻的值统计。
  * 进场处的橘黄虚线留着作参照。
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useId } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { groupLabel, type DeepDigData, type DeepDigRowGroup } from '@/lib/deepDig/analysis';
@@ -74,6 +74,7 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
   note?: React.ReactNode;
 }) {
   const def = data.definition;
+  const gradientId=useId().replace(/:/g,'');
   const lab = (g: DeepDigRowGroup) => labels?.[g] ?? groupLabel(g, def.source);
   const boxRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -94,6 +95,8 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
 
   const name = series ? (variable && series.names.includes(variable) ? variable : series.result) : null;
   const curves = useMemo(() => (series && name ? groupCurves(data.rows, series, name) : []), [data.rows, series, name]);
+  const fixedZero=def.researchWindowHours!=null && def.chartTemplate==='ctba' && (name==='CTBA'||name===series?.result);
+  const componentCurves=useMemo(()=>fixedZero&&series?Object.fromEntries(['T','M','F'].map(name=>[name,groupCurves(data.rows,series,name)])):{},[fixedZero,data.rows,series]);
 
   if (!series) {
     return <div className="text-[11.5px] text-muted-foreground" data-testid={`${tid}-empty`}>这份数据还没有时间序列曲线：重新运行描述统计后显示（曲线存在本机）。</div>;
@@ -115,10 +118,12 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
   });
   let lo = ys.length ? Math.min(...ys) : -1;
   let hi = ys.length ? Math.max(...ys) : 1;
+  if(fixedZero){const edge=Math.max(1,Math.abs(lo),Math.abs(hi));lo=-edge;hi=edge;}
   if (lo === hi) { lo -= 1; hi += 1; }
   const ticks = niceTicks(lo, hi);
   lo = Math.min(lo, ticks[0]);
   hi = Math.max(hi, ticks.at(-1)!);
+  if(fixedZero){const edge=Math.max(Math.abs(lo),Math.abs(hi));lo=-edge;hi=edge;}
   const tickStep = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
   const innerW = width - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
@@ -283,6 +288,7 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
         ) : (
           <>
             <svg width={width} height={H} role="img" aria-label={`${name} 在进场前后的平均`} className="block max-w-full overflow-visible" data-testid={`${tid}-chart`}>
+              {fixedZero&&<><defs><linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1={PAD.top} y2={PAD.top+innerH}><stop offset="50%" stopColor="#0ECB81"/><stop offset="50%" stopColor="#F6465D"/></linearGradient></defs><line x1={PAD.left} x2={PAD.left+innerW} y1={y(0)} y2={y(0)} stroke="#F59E0B" strokeDasharray="4 3" data-testid={`${tid}-fixed-zero`}/><text x={PAD.left+6} y={y(0)-5} className="fill-[#C27C0E] dark:fill-[#F59E0B] text-[10px]">0｜综合均衡基准</text></>}
               {ticks.map(t => (
                 <g key={t}>
                   <line x1={PAD.left} x2={PAD.left + innerW} y1={y(t)} y2={y(t)} className={t === 0 ? 'stroke-foreground/30' : 'stroke-border/60'} strokeWidth={1} />
@@ -295,8 +301,8 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
               {zeroK >= 0 && <line x1={x(zeroK)} x2={x(zeroK)} y1={PAD.top} y2={PAD.top + innerH} strokeDasharray="3 3" className="stroke-[#F59E0B]" strokeWidth={1} />}
               {shown.filter(c => BAND.has(c.group)).map(c => <path key={`b-${c.group}`} d={band(c)} className={LINE[c.group]} fill="currentColor" fillOpacity={0.12} stroke="none" />)}
               {shown.map(c => (
-                <path key={c.group} d={path(c, k => c.mean[k])} className={LINE[c.group]} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
-                  strokeDasharray={c.group === 'background' ? '4 3' : undefined} data-testid={`${tid}-line-${c.group}`} />
+                <path key={c.group} d={path(c, k => c.mean[k])} className={LINE[c.group]} fill="none" stroke={fixedZero?`url(#${gradientId})`:'currentColor'} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
+                  strokeDasharray={c.group === 'background' ? '4 3' : fixedZero && c.group!=='positive' ? (c.group==='control'?'7 3':'2 3') : undefined} data-testid={`${tid}-line-${c.group}`} />
               ))}
               {ends.map(e => (
                 <text key={e.g} x={PAD.left + innerW + 6} y={e.y} dy="0.32em" className="fill-foreground/80 text-[10.5px]">{lab(e.g)}</text>
@@ -356,6 +362,7 @@ export function SeriesChart({ data, series, variable, onVariable, at = 0, onAt, 
                     <span className="font-mono tabular-nums text-foreground">{finite(c.mean[hk]) ? (c.mean[hk]! * scale).toFixed(2) : '—'}<span className="ml-1 text-muted-foreground">n {c.count[hk]}</span></span>
                   </div>
                 ))}
+                {fixedZero&&shown.map(c=><div key={'components-'+c.group} className="mt-1 border-t border-border/40 pt-1 text-[10px] text-muted-foreground">{lab(c.group)}：{['T','M','F'].map((name,i)=>{const value=componentCurves[name]?.find(row=>row.group===c.group)?.mean[hk];return <span key={name}>{i?' · ':''}{name} {finite(value)?value.toFixed(5):'—'}</span>;})}</div>)}
               </div>
             )}
           </>

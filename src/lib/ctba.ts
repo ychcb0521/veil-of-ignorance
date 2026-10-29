@@ -1,5 +1,8 @@
 /** Covel-inspired extension, not a formula from the book. All periods are bars. */
 export const CTBA_DEFAULTS = { N:576, f:12, s:48, m:48, lambda:Math.LN2/144, epsilon:1e-12, alpha:.35, beta:.40, gamma:.25 } as const;
+/** Independent 12h configuration; the original CTBA defaults are retained verbatim. */
+export const CTBA_12H_DEFAULTS = Object.freeze({ N:144, f:8, s:24, m:48, lambda:Math.LN2/24, epsilon:1e-12, alpha:.35, beta:.40, gamma:.25 });
+export const CTBA_ABSOLUTE_BOUND = 100 * Math.tanh(1);
 export type CtbaParams = { [K in keyof typeof CTBA_DEFAULTS]: number };
 export const CTBA_DESCRIPTION = 'CTBA｜趋势买方优势：100·tanh[α·tanh(T)+β·tanh(M)+γ·F]。T 为不含当根的历史区间位置（不截断），M 为真实 VWAP 对数的快慢 EMA 差除以近期收益率标准差，F 为主动买卖成交金额的衰减加权差额。正负表示综合方向，不是上涨概率；这是趋势跟踪思想的扩展模型。';
 export function validateCtba(p: CtbaParams) {

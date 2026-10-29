@@ -26,7 +26,7 @@ export function formatSeriesOffset(ms: number): string {
 }
 
 export interface DeepDigSeries {
-  /** CTBA complete 48h closed-bar vectors, in the same IndexedDB record. */
+  /** Independent CTBA closed-bar vectors (original 48h; explicit copies use their research window), in the same IndexedDB record. */
   anchorWindows?: Record<string,{startMs:number;stepMs:number;values:Record<string,Float64Array>}>;
   /** 每个曲线时点向前准备的公式预热历史长度。旧缓存没有。 */
   historyMs?: number;
@@ -47,8 +47,9 @@ export interface DeepDigSeries {
  * 【用户要求】2026-10-18「平均时长要与这个时间序列图的时间段保持一致」：之前固定 24 小时，现在跟着平均时长走
  * （平均时长变了定义就变了，重跑描述统计后曲线按新范围算）。
  */
-export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval' | 'avgHours'>): { beforeMs: number; afterMs: number; stepMs: number } {
+export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval' | 'avgHours' | 'researchWindowHours'>): { beforeMs: number; afterMs: number; stepMs: number; excludeStart?: boolean } {
   const barMs = intervalMs(intervalOf(def));
+  if(def.researchWindowHours != null && def.researchWindowHours > 0) return {beforeMs:def.researchWindowHours*HOUR,afterMs:0,stepMs:barMs,excludeStart:true};
   const want = Math.max(avgHoursOf(def) * HOUR, 12 * barMs);
   const stepMs = barMs * Math.max(1, Math.round(want / 24 / barMs));
   // 范围取点距的整数倍：进场（τ = 0）一定是其中一点
@@ -56,9 +57,9 @@ export function seriesRangeOf(def: Pick<DeepDigFeatureDef, 'interval' | 'avgHour
   return { beforeMs: span, afterMs: span, stepMs };
 }
 
-export function seriesOffsets(range: { beforeMs: number; afterMs: number; stepMs: number }): number[] {
+export function seriesOffsets(range: { beforeMs: number; afterMs: number; stepMs: number; excludeStart?: boolean }): number[] {
   const out: number[] = [];
-  for (let t = -range.beforeMs; t <= range.afterMs + 1e-6; t += range.stepMs) out.push(t);
+  for (let t = -range.beforeMs + (range.excludeStart ? range.stepMs : 0); t <= range.afterMs + 1e-6; t += range.stepMs) out.push(t);
   return out;
 }
 
@@ -70,7 +71,7 @@ export function computeEventSeries(
   bars: readonly ResearchBar[],
   anchorMs: number,
   compiled: CompiledFeature,
-  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0'> & { id?: string; formula?: string },
+  def: Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'researchWindowHours' | 'chartTemplate'> & { id?: string; formula?: string },
   names: readonly string[],
   offsets: readonly number[],
 ): Float32Array | Float64Array | null {

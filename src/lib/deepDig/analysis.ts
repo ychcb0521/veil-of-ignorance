@@ -33,7 +33,7 @@ export const DEEP_DIG_GROUP_LABEL: Record<DeepDigRowGroup, string> = { positive:
 export const groupLabel = (g: DeepDigRowGroup, source?: 'campaigns' | 'signals') => (g === 'other' && source === 'signals' ? '其他信号' : DEEP_DIG_GROUP_LABEL[g]);
 
 /** 结果里留一份运行时用的定义：之后定义改了，界面能提示「这份结果按旧定义算」。 */
-export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore'>;
+export type DefinitionSnapshot = Pick<DeepDigFeatureDef, 'id' | 'name' | 'short' | 'formula' | 'scale' | 'unit' | 'positive' | 'control' | 'source' | 'groupVars' | 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'chartCore' | 'researchWindowHours'>;
 
 export interface DeepDigRow {
   reason?: string;
@@ -112,7 +112,7 @@ function quantile(sorted: readonly number[], q: number): number | null {
 
 export function snapshotOf(def: DeepDigFeatureDef): DefinitionSnapshot {
   const { id, name, short, formula, scale, unit, positive, control } = def;
-  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}) };
+  return { id, name, short, formula, scale, unit, positive, control, source: def.source ?? 'campaigns', groupVars: 2, interval: intervalOf(def), halfLifeHours: halfLifeOf(def), avgHours: avgHoursOf(def), ...(featureUsesMbi(def) ? { MBI_N: def.MBI_N, MBI_Z0: def.MBI_Z0 } : {}), ...(def.chartTemplate ? { chartTemplate: def.chartTemplate } : {}), ...(def.chartCore ? { chartCore: def.chartCore } : {}), ...(def.researchWindowHours != null ? {researchWindowHours:def.researchWindowHours} : {}) };
 }
 
 export function groupOf(e: Pick<RunEvent, 'kind' | 'label'>): DeepDigRowGroup {
@@ -219,11 +219,12 @@ export async function collectDeepDigRun(
       const { value, vars } = computeFeatureValues(window, compiled, params);
       if(featureTemplateId(def)==='ctba' && window){
         const out=evaluateOnBars(window.bars,compiled,params);
-        const startMs=Math.floor(ctx.anchorMs/300000)*300000-48*3600000;
+        const windowHours=def.researchWindowHours ?? 48, slots=Math.round(windowHours*12);
+        const startMs=Math.floor(ctx.anchorMs/300000)*300000-windowHours*3600000;
         const selected=window.bars.map((bar,i)=>({bar,i})).filter(({bar})=>bar.openTime>=startMs);
         const values=Object.fromEntries(['CTBA','T','M','F','no_trade','data_complete'].map(name=>{
-          const dense=new Float64Array(576).fill(NaN),source=out.vars.get(name);
-          if(source instanceof Float64Array)for(const {bar,i} of selected){const k=Math.round((bar.openTime-startMs)/300000);if(k>=0&&k<576)dense[k]=source[i];}
+          const dense=new Float64Array(slots).fill(NaN),source=out.vars.get(name);
+          if(source instanceof Float64Array)for(const {bar,i} of selected){const k=Math.round((bar.openTime-startMs)/300000);if(k>=0&&k<slots)dense[k]=source[i];}
           return [name,dense];
         }));
         anchorWindows[ctx.id]={startMs,stepMs:300000,values};

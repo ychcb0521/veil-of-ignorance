@@ -486,7 +486,7 @@ function DescribeTab({ def: liveDef, samples, onSaveDef, data: effectiveData, ra
 
       <Block title="时间序列" aside={(
         <span className="text-[11px] text-muted-foreground" data-testid="deep-dig-series-span">
-          各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）
+          {def.researchWindowHours != null ? <>各组平均 · 入场前 {formatHoursText(def.researchWindowHours)} · {liveSeries?.offsets.length ?? Math.round(def.researchWindowHours*12)} 个已收盘5m时间点</> : <>各组平均 · 进场前后各 {formatHoursText((liveSeries?.offsets.at(-1) ?? seriesRangeOf(def).afterMs) / 3_600_000)}（= {featureUsesMbi(def) ? '曲线范围' : '平均时长'}）</>}
         </span>
       )} testId="deep-dig-series-block">
         <SeriesChart data={result} series={liveSeries} variable={seriesVar} onVariable={setSeriesVar} at={at} onAt={setAt} />

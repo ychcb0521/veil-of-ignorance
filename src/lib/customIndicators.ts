@@ -15,7 +15,7 @@ import { CBA_DEFAULTS, computeCba } from '@/lib/cba';
 import { CBI_DEFAULTS, computeCbi } from '@/lib/cbi';
 import { CBI2_DEFAULTS, computeCbi2 } from '@/lib/cbi2';
 import { MBI_N } from '@/lib/mbi';
-import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin } from '@/lib/featureSource';
+import { chartFeatureSeries, accountFeatureDef, chartFeatureDef, sameCoreAsBuiltin, ctbaChartParameterText } from '@/lib/featureSource';
 import { RESEARCH_INDICATORS, BUYER_RESEARCH_INDICATORS, CUSTOM_RESEARCH_INDICATORS, researchKcName, researchIndicatorForKc, researchChartSeries, researchDefinitionVersion, researchSeriesNames } from '@/lib/researchIndicators';
 import { BUILTIN_FEATURES } from '@/lib/deepDig/features';
 import { researchHistoryVersion } from '@/lib/researchChartHistory';
@@ -425,7 +425,7 @@ type ZeroLineStyle = { color: string; width: number; dash: number[] };
  * 副图的 0 轴（多空平衡线）：直接画一条线，不当成数据系列（否则纵轴上会多一个 0 的标签）。
  * 先于 V / A 本身画，所以数据线压在它上面。
  */
-function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0) {
+function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0, label?: string) {
   return ({ ctx, bounding, yAxis }: { ctx: CanvasRenderingContext2D; bounding: { width: number; height: number }; yAxis: { convertToPixel: (v: number) => number } }): boolean => {
     const y = Math.round(yAxis.convertToPixel(level)) + (width % 2 ? 0.5 : 0);
     if (y >= 0 && y <= bounding.height) {
@@ -437,6 +437,7 @@ function zeroLine({ color, width, dash }: ZeroLineStyle, level = 0) {
       ctx.moveTo(0, y);
       ctx.lineTo(bounding.width, y);
       ctx.stroke();
+      if(label){ctx.font='11px system-ui';ctx.fillStyle=color;ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText(label,8,y-4);}
       ctx.restore();
     }
     return false;
@@ -1473,11 +1474,17 @@ export function registerCustomIndicators() {
         ...(level === 0 ? { minValue: item.min, maxValue: item.max } : 'avgRange' in item ? { minValue: item.avgRange[0], maxValue: item.avgRange[1] } : {}),
         draw: args => {
           if (item.seller) A_ZERO_LINE(args);
-          return zeroLine(ORANGE_DASH_LINE, line)(args);
+          return zeroLine(ORANGE_DASH_LINE, line, 'neutralLabel' in item ? item.neutralLabel : undefined)(args);
         },
-        createTooltipDataSource: ({ indicator, defaultStyles }) => ({
-          name: label + (chartFeatureDef(item.featureId)?.unit ? `(${chartFeatureDef(item.featureId)!.unit})` : ''), calcParamsText: '(' + indicator.calcParams[0] + (['MBI_BEAR','CTBA_BEAR'].includes(item.id) ? '根' : 'h') + ')', icons: defaultStyles.tooltip.icons, values: undefined as never,
-        }),
+        createTooltipDataSource: ({ indicator, defaultStyles, crosshair }) => {
+          if(item.id==='CTBA_12H'){
+            const row=indicator.result[crosshair?.dataIndex ?? indicator.result.length-1] as Record<string,number|undefined>|undefined;
+            const format=(value:number|undefined,digits:number)=>value==null||!Number.isFinite(value)?'—':(Math.abs(value)<.5*10**-digits?0:value).toFixed(digits);
+            return {name:label,calcParamsText:ctbaChartParameterText(item.featureId,indicator.calcParams[0])+` · 参数版本 ${researchDefinitionVersion(item).toString(16)}`,icons:defaultStyles.tooltip.icons,
+              values:[{title:label+': ',value:{text:format(row?.value,2),color:vColor(row?.value)}},...['T','M','F'].map(name=>({title:name+': ',value:{text:format(row?.[name],5),color:vColor(row?.[name])}}))]};
+          }
+          return {name:label+(chartFeatureDef(item.featureId)?.unit?`(${chartFeatureDef(item.featureId)!.unit})`:''),calcParamsText:'('+indicator.calcParams[0]+(['MBI_BEAR','CTBA_BEAR'].includes(item.id)?'根':'h')+')',icons:defaultStyles.tooltip.icons,values:undefined as never};
+        },
         figures: [{ key: 'value', title: `${label}: `, type: 'line', styles: data => {
           const value = (data.next?.indicatorData as { value?: number } | undefined)?.value ?? (data.current.indicatorData as { value?: number } | undefined)?.value;
           const colorLine = item.seller ? 0 : line;
@@ -1489,7 +1496,10 @@ export function registerCustomIndicators() {
         } }],
         calc: (dataList, indicator) => {
           const values = researchChartSeries(dataList, item, indicator.calcParams[0]);
-          return indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
+          const rows = indicatorRows(indicator, level === 0 ? values.core : level === 1 ? values.avg : values.avg2, 'value');
+          return item.id === 'CTBA_12H' ? rows.map((row, i) => ({ ...row,
+            ...Object.fromEntries(item.components.map(name => [name, values.components?.[name]?.[i] ?? undefined])),
+          })) : rows;
         },
       });
     }

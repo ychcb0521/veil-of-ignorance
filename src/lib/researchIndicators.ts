@@ -1,6 +1,6 @@
 import { accountFeatureDefs, chartFeaturePeriod, featureCoreName, namedChartFormula, hasSavedFeatureDefinition } from '@/lib/featureSource';
 import { featureTemplateId, featureUsesMbi, BUILTIN_FEATURES, type DeepDigFeatureDef } from '@/lib/deepDig/features';
-import { CTBA_DEFAULTS } from '@/lib/ctba';
+import { CTBA_DEFAULTS, CTBA_ABSOLUTE_BOUND } from '@/lib/ctba';
 /** Deep dig chart features: raw value and the two named averages share one formula. */
 import type { KLineData } from 'klinecharts';
 import { chartFeatureDef as accountFeatureDef, chartFeatureSeries, chartFeatureHistoryBars } from '@/lib/featureSource';
@@ -23,6 +23,7 @@ export const RESEARCH_INDICATORS = [
   { id: 'CDA', featureId: 'cda', core: 'CDA', short: 'CDA', name: '买方阻力 CDA', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, avgRange: [-100, 100], seller: true },
   { id: 'MBI_BEAR', featureId: 'mbi-bear', core: 'MBI_bear', short: 'MBI·空方', name: 'MBI 空方趋势', period: 25, parameter: '衰减根数', neutral: 0, min: -1, max: 1, avgRange: [-1, 1], seller: true },
   { id: 'CTBA_BEAR', featureId: 'ctba-bear', core: 'CTBA_bear', short: 'CTBA·空方', name: 'CTBA 空方趋势', period: CTBA_DEFAULTS.N, parameter: '窗口根数', neutral: 0, min: -100, max: 100, avgRange: [-100, 100], seller: true },
+  { id:'CTBA_12H',featureId:'ctba_12h',core:'CTBA',short:'CTBA-12H',name:'CTBA-12H｜趋势买方优势（12小时）',period:144,parameter:'窗口根数',parameterUnit:'根',neutral:0,neutralLabel:'0｜综合均衡基准',min:-CTBA_ABSOLUTE_BOUND,max:CTBA_ABSOLUTE_BOUND,avgRange:[-CTBA_ABSOLUTE_BOUND,CTBA_ABSOLUTE_BOUND],components:['T','M','F'],seller:false },
 ] as const;
 export const BUYER_RESEARCH_INDICATORS = [
   { id: 'DSP_VA', featureId: 'drift-speed', core: 'a', short: 'DSP·a', name: '买方推力漂移速度 DSP·a', period: 6, parameter: '半衰期', neutral: 0, min: 0, max: 0, seller: false },
@@ -38,7 +39,7 @@ export const CUSTOM_RESEARCH_INDICATORS = [...BUYER_RESEARCH_INDICATORS, ...RESE
 export interface ResearchIndicator {
   id: string; featureId: string; core: string; short: string; name: string; period: number; parameter: string;
   neutral: number; min: number; max: number; seller: boolean; avgNeutral?: number; avgRange?: readonly [number, number];
-  templateId?: string;
+  templateId?: string; neutralLabel?: string; components?: readonly string[]; parameterUnit?: string;
 }
 export const accountIndicatorId = (featureId: string) => 'FEATURE_' + featureId;
 export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchIndicator {
@@ -54,7 +55,7 @@ export function researchIndicatorForFeature(def: DeepDigFeatureDef): ResearchInd
     period: chartFeaturePeriod(def, template?.period ?? 6), parameter: template?.parameter ?? '半衰期', neutral: template?.neutral ?? 0,
     min: template?.min ?? 0, max: template?.max ?? 0, seller: template?.seller ?? false,
     ...('avgNeutral' in (template ?? {}) ? { avgNeutral: (template as ResearchIndicator).avgNeutral } : {}),
-    ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id };
+    ...('avgRange' in (template ?? {}) ? { avgRange: (template as ResearchIndicator).avgRange } : {}), templateId: template?.id, ...('neutralLabel' in (template ?? {})?{neutralLabel:(template as ResearchIndicator).neutralLabel}:{}), ...('components' in (template ?? {})?{components:(template as ResearchIndicator).components}:{}), ...('parameterUnit' in (template ?? {})?{parameterUnit:(template as ResearchIndicator).parameterUnit}:{}) };
 }
 const accountRegistryCache = new WeakMap<readonly DeepDigFeatureDef[], ResearchIndicator[]>();
 export function accountResearchIndicators(definitions: readonly DeepDigFeatureDef[] = accountFeatureDefs()): ResearchIndicator[] {
@@ -183,7 +184,7 @@ function chartInterval(data: KLineData[]) {
   gaps.sort((a,b)=>a-b);
   return gaps[Math.floor(gaps.length/2)] ?? DSP_BASE_INTERVAL_MS;
 }
-const displaySeriesCache = new WeakMap<object, Map<string, { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[] }>>();
+const displaySeriesCache = new WeakMap<object, Map<string, DisplaySeries>>();
 const extendedData = new WeakMap<KLineData[], { history: KLineData[]; revision: number; generation?: number; data: KLineData[] }>();
 const EMPTY_HISTORY: KLineData[] = [];
 const formulaPlans = new Map<string, { formula: string; usesBtc: boolean }>();
@@ -208,7 +209,7 @@ export function researchDefinitionVersion(item: ResearchIndicator): number {
   return hash >>> 0;
 }
 
-type DisplaySeries = { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[]; pending?: boolean };
+type DisplaySeries = { core: (number | null)[]; avg: (number | null)[]; avg2: (number | null)[]; pending?: boolean; components?: Record<string,(number|null)[]> };
 interface DisplaySnapshot { times: Map<number, number>; result: DisplaySeries }
 interface DisplayHistory { snapshots: Map<string, DisplaySnapshot> }
 const displayHistories = new WeakMap<KLineData[], DisplayHistory>();
@@ -325,7 +326,7 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
   }
   const names = researchSeriesNames(item, formula);
   const generation = chartDataGenerations.get(data);
-  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, variables: [names.core, names.avg, names.avg2], revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}`,
+  const out = chartFeatureSeries(data, item.featureId, period, ref, { formula, variables: [names.core, names.avg, names.avg2,...(item.components??[])], revision: `${dataRevision(data)}:${researchHistoryVersion()}:${usesBtc ? btcReferenceVersion() : 0}`,
     delta: generation == null ? undefined : { revision:generation, changes:chartDataChanges.get(data) ?? [], referenceVersion:usesBtc ? btcReferenceVersion() : 0 } });
   const displayKey = `${visibleLength}|${options.averageHours ?? 24}|${def.scale}|${names.core}`;
   let displays = out ? displaySeriesCache.get(out) : undefined;
@@ -340,17 +341,18 @@ function calculateChartSeries(data: KLineData[], item: ResearchIndicator, period
     return result;
   };
   const mbiStep = (featureUsesMbi(def) || featureTemplateId(def) === 'ctba') ? chartInterval(data) : 0;
-  const scaled = (name: string) => Array.from({ length: visibleLength }, (_, i) => {
+  const scaled = (name: string, multiply = true) => Array.from({ length: visibleLength }, (_, i) => {
     // Live MBI never publishes a candle that has not closed yet.
     if ((featureUsesMbi(def) || featureTemplateId(def) === 'ctba') && (data[visibleOffset + i].cba2Closed === false || data[visibleOffset + i].timestamp + mbiStep > Date.now())) return null;
-    const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * def.scale;
+    const v = out?.vars.get(name)?.[visibleOffset + i]; return v == null ? null : v * (multiply ? def.scale : 1);
   });
+  const components=item.components?{components:Object.fromEntries(item.components.map(name=>[name,scaled(name,false)]))}:{};
   // Do not use out.core: the last account expression may itself be the weighted average.
   if (options.averageHours != null) {
-    if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });
+    if (options.averageHours === 24) return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
     const core = out?.vars.get(names.core) ?? data.map(() => null);
     const average = (kind: 'avg' | 'avg2') => { const values = displayAverage(core, options.averageHours!, kind); return Array.from({ length: visibleLength }, (_, i) => { const v = values[visibleOffset + i]; return Number.isFinite(v) ? v * def.scale : null; }); };
-    return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2') });
+    return save({ core: scaled(names.core), avg: average('avg'), avg2: average('avg2'),...components });
   }
-  return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2) });
+  return save({ core: scaled(names.core), avg: scaled(names.avg), avg2: scaled(names.avg2),...components });
 }

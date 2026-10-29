@@ -198,7 +198,7 @@ export const INDICATOR_CATALOG: IndicatorCatalogItem[] = shortCustomNames([
   ...RESEARCH_INDICATORS.map(item => ({
     id: item.id, nameZh: item.name, nameEn: `${item.short} · avg_${item.core} · avg_${item.core}_2`,
     isOverlay: false, defaultPeriod: item.period, color: item.seller ? '#F6465D' : '#0ECB81', category: 'custom' as const,
-    periodHint: `${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: ['MBI_BEAR', 'CTBA_BEAR'].includes(item.id) ? '根' : 'h',
+    periodHint: `${item.parameter}（单位见参数框）。原值、均值和分段加权均值均读 Deep dig 当前公式。`, periodUnit: ['MBI_BEAR', 'CTBA_BEAR', 'CTBA_12H'].includes(item.id) ? '根' : 'h',
     description: item.id === 'SELLER_CONTROL' ? SELLER_CONTROL_DEF.definition : '原值、均值、近端加权均值，各一个副图。',
   })),
   { id: 'MFI',    nameZh: '资金流量指数',            nameEn: 'Money Flow Index (MFI)',       isOverlay: false, defaultPeriod: 14, color: '#22D3EE', category: 'volume' },
@@ -565,7 +565,7 @@ const IndicatorRow = forwardRef<HTMLDivElement, {
           <>
             <ParamInput
               value={active.period}
-              parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
+              parse={v => { const n = accountResearchIndicators().some(r => r.id === item.id) ? Number(v) : parseInt(v); return Number.isFinite(n) && n > 0 && (!['MBI','MBI_BEAR','CTBA','CTBA_BEAR','CTBA_12H'].includes(item.id) || Number.isSafeInteger(n)) ? n : null; }}
               onCommit={n => onUpdatePeriod(item.id, n)}
               title={item.periodHint}
               label={`${item.nameZh} 参数`}
