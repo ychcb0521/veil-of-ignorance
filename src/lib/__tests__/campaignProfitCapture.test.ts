@@ -868,6 +868,7 @@ describe('campaign profit capture ratio', () => {
       price: 130,
       createdAt: Date.parse(openedAt) + 2 * 60 * 60 * 1000,
       triggeredAt: Date.parse(openedAt) + 2.1 * 60 * 60 * 1000,
+      cancelledAt: null,
       status: 'triggered',
     }];
 

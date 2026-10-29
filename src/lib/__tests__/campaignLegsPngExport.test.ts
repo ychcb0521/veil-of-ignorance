@@ -32,7 +32,7 @@ const campaign = {
   initial_leverage: 6,
   final_realized_pnl: 3456.78,
   final_r_multiple: 2.4,
-} as TradeCampaign;
+} as unknown as TradeCampaign;
 
 const legs = [
   {
@@ -81,8 +81,14 @@ function input(): CampaignBoardExportInput {
     emotionDiary: {
       date: '2026-07-14',
       eventText: '盘前出现意外消息，但完整记录事实后再执行。',
-      valence: '4/9（中性附近）',
-      arousal: '7/9（高唤醒）',
+      pomsTotal: null,
+      pomsDimensions: null,
+      panasPositive: null,
+      panasNegative: null,
+      personalInitiativeTotal: null,
+      personalInitiativeMean: null,
+      legacyValence: '4/9（中性附近）',
+      legacyArousal: '7/9（高唤醒）',
       anxiety: '8/21（临界范围，8–10）',
       depression: '4/21（正常范围，0–7）',
     },
