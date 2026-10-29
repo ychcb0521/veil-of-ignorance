@@ -1,5 +1,6 @@
 import { ctbaFormula, CTBA_DESCRIPTION, CTBA_12H_DEFAULTS } from '@/lib/ctba';
 import { CBA2_DEFINITION, CBA2_FORMULA } from '@/lib/cba2';
+import { MBI2_N, MBI2_Z0 } from '@/lib/mbi2';
 import { MBI_N, MBI_Z0, MBI_TOOLTIP, mbiNOf, mbiZ0Of, validateMbiParams, type MbiParams } from '@/lib/mbi';
 import { appendResearchAverages } from '@/lib/researchAverageFormula';
 export { MBI_N, MBI_Z0 };
@@ -123,7 +124,7 @@ export const halfLifeOf = (d: Pick<DeepDigFeatureDef, 'halfLifeHours'>): number 
 export const avgHoursOf = (d: Pick<DeepDigFeatureDef, 'avgHours'>): number => (d.avgHours != null && d.avgHours > 0 ? d.avgHours : DEFAULT_AVG_HOURS);
 type ParamDef = Pick<DeepDigFeatureDef, 'interval' | 'halfLifeHours' | 'avgHours' | 'MBI_N' | 'MBI_Z0' | 'chartTemplate' | 'researchWindowHours'> & { id?: string; formula?: string };
 export const featureUsesMbi = (d: { id?: string; formula?: string }) => d.id === 'mbi' || /\bmbiz\s*\(/.test((d.formula ?? '').replace(/(#|\/\/).*$/gm, ''));
-export const featureParams = (d: ParamDef) => ({ hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d), MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d) });
+export const featureParams = (d: ParamDef) => ({ hl: halfLifeOf(d), 半衰期: halfLifeOf(d), avgh: avgHoursOf(d), 平均时长: avgHoursOf(d), MBI_N: mbiNOf(d), MBI_Z0: mbiZ0Of(d), MBI2_N: (d as {MBI2_N?:number}).MBI2_N ?? MBI2_N, MBI2_Z0: (d as {MBI2_Z0?:number}).MBI2_Z0 ?? MBI2_Z0 });
 
 /**
  * 观察窗长度：进场前多长时间的 K 线。至少 48 小时（与原研究一致）；半衰期长时放到 8 个半衰期，让平滑「热起来」；
@@ -155,6 +156,8 @@ export const barsPerAvg = (d: ParamDef) => Math.max(1, Math.round((avgHoursOf(d)
 export const PARAM_VARIABLES: readonly { name: string; alias: string; label: string }[] = [
   { name: 'hl', alias: '半衰期', label: '半衰期（小时，上面选的；也可写「半衰期」）' },
   { name: 'avgh', alias: '平均时长', label: '平均时长（小时，上面选的；也可写「平均时长」），配 avg(x, avgh) 用' },
+  { name: 'MBI2_N', alias: 'MBI2_N', label: 'MBI2 独立衰减周期' },
+  { name: 'MBI2_Z0', alias: 'MBI2_Z0', label: 'MBI2 独立饱和尺度' },
   { name: 'MBI_N', alias: 'MBI_N', label: `MBI 衰减周期（K 线根数，默认 ${MBI_N}；α 严格等于 1/n）` },
   { name: 'MBI_Z0', alias: 'MBI_Z0', label: `MBI 饱和尺度（默认 ${MBI_Z0}）` },
 ];
@@ -536,6 +539,9 @@ export const MBI_DEF: DeepDigFeatureDef = {
   formula: MBI_FORMULA, MBI_N, MBI_Z0, scale: 1, unit: '',
   positive: DEFAULT_POSITIVE, control: DEFAULT_CONTROL, source: 'campaigns', groupVars: 2, builtin: true,
 };
+
+/** Independent copy first: its own function, identifiers and parameter bindings. */
+export const MBI2_COPY_FORMULA = MBI_FORMULA.replace(/\bMBI_N\b/g,'MBI2_N').replace(/\bMBI_Z0\b/g,'MBI2_Z0').replace(/\bmbiz\b/g,'mbiz2').replace(/\bMBI\b/g,'MBI2').replace(/avg_MBI/g,'avg_MBI2');
 
 /** CBI-2 的卖方镜像：买卖互换、方向反转、恐慌回撤改为亢奋上冲；保留原窗口与系数。 */
 export const CDI2_FORMULA = sellerNegativeFormula([
