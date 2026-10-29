@@ -133,7 +133,7 @@ const { campaigns, detailsById } = vi.hoisted(() => {
       post_simulated_close_time: '2026-01-01T01:00:00.000Z',
       post_real_close_time: '2026-07-19T11:00:00.000Z',
       post_realized_pnl: null,
-    } as TradeJournal,
+    } as unknown as TradeJournal,
   ]);
 
   const rows = [
