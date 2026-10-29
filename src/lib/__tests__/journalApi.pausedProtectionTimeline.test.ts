@@ -43,7 +43,7 @@ const record = (id: string, closeTime: number, closedRealAt: number): TradeRecor
   openTime: SIM, closeTime, openedRealAt: REAL, closedRealAt,
   openedTimelineId: TIMELINE, closedTimelineId: TIMELINE,
   exit_method: 'manual',
-} as TradeRecord);
+} as unknown as TradeRecord);
 
 const attached = (id: string, role: 'main_open' | 'mirror_tp', closeTime: number, closedRealAt: number): CampaignEvent => ({
   id: `event-${id}`, timestamp: iso(SIM), event_type: 'historical_leg_attached',

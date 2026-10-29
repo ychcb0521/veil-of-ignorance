@@ -111,6 +111,9 @@ describe('守卫', () => {
       price: 0.075, priceAsOf: 0, nowSim: 10_000_000, toleranceMs: 60_000,
     });
     expect(stale.liquidate).toBe(false);
+    if (stale.liquidate !== false) {
+      throw new Error('Expected no liquidation for a stale price');
+    }
     expect(stale.reason).toBe('stale_price');
     expect(doomed.ok).toBe(false);          // 计划仍然拒绝
   });
