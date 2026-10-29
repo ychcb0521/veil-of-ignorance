@@ -394,7 +394,7 @@ export function CampaignWhatIfEditor({
       const color = leg.direction === 'long' ? SELECTED_LEG_LONG_LINE_COLOR : SELECTED_LEG_SHORT_LINE_COLOR;
       const openMs = validTimeMs(leg.open_time);
       const closeMs = validTimeMs(leg.close_time);
-      const labelPrefix = legRoleMarkerLabel(leg.leg_role);
+      const labelPrefix = legRoleMarkerLabel(leg.leg_role as LegRole);
       const selected = selectedManualLegId === leg.id;
       return [
         openMs == null ? null : {
