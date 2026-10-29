@@ -31,7 +31,7 @@ export function FishLibraryDialog<T>({ name, info, description, placeholder, rou
   const change = (next: boolean) => { setOpen(next); onOpenChange?.(next); };
   return <Dialog open={open} onOpenChange={change}>
     <DialogTrigger asChild><button type="button" className={action} aria-label={`打开${name}`}><Database aria-hidden className="h-3 w-3"/>{name}</button></DialogTrigger>
-    <DialogContent className="flex max-h-[85vh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
+    <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-[96vw] sm:max-w-[96vw] flex-col gap-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
       <DialogHeader className="shrink-0 space-y-1 text-left">
         <div className="flex items-center gap-1.5"><DialogTitle className="text-sm">{name}</DialogTitle><FishQualityInfo label={`${name}说明`}>{info}</FishQualityInfo></div>
         <DialogDescription className="text-[11px]">{description}</DialogDescription>
@@ -44,7 +44,7 @@ export function FishLibraryDialog<T>({ name, info, description, placeholder, rou
       </div>
       {round?.error && <p role="status" className="shrink-0 text-[11px] text-destructive">{round.error}</p>}
       {detail}
-      <div className="min-h-0 overflow-auto rounded-md border border-border/60" data-testid={`${name}-table`}>
+      <div className="max-h-[50dvh] min-h-32 shrink-0 overflow-auto rounded-md border border-border/60" data-testid={`${name}-table`}>
         <table className="w-full whitespace-nowrap text-left text-[11px]">
           <thead className="sticky top-0 bg-background text-[10px] text-muted-foreground"><tr className="bg-muted/40">{headers.map(h => <th key={h} className={`${libraryCell} font-medium`}>{h}</th>)}</tr></thead>
           <tbody>{visible.map(row)}</tbody>
