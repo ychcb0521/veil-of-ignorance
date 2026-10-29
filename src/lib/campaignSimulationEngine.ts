@@ -631,7 +631,7 @@ function buildSyntheticCampaignAndLegs(
   const syntheticLegs: TradeJournal[] = legs.map((leg, index) => ({
     id: `synthetic-leg-${index + 1}`,
     user_id: syntheticCampaign.user_id,
-    source: 'pre_snapshot',
+    source: 'live',
     trade_record_id: null,
     campaign_id: syntheticCampaign.id,
     leg_role: leg.role,

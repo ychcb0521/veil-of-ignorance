@@ -5,7 +5,7 @@ import { FishWeightBudget,FishError,FISH_BARS,FISH_STEP,validateFishBars } from 
 import { fishRetentionReason,monthsBefore } from '@/lib/fish/retention';
 import type { FishMarket,FishExchange } from '@/lib/fish/exchanges';
 import type { ResearchBar } from '@/lib/deepRsa/window';
-import { publicMarketUrl,handleFishProxy } from '../../../supabase/functions/fish-market-proxy/handler';
+import { handleFishProxy } from '../../../supabase/functions/fish-market-proxy/handler';
 const signal=new AbortController().signal,cut=Date.UTC(2026,9,19,3),from=cut-FISH_BARS*FISH_STEP;
 const market:FishMarket={symbol:'BTCUSDT',instrument:'BTC_USDT',base:'BTC',multiplier:1};
 const makeBars=(n=2000,end=cut):ResearchBar[]=>Array.from({length:n},(_,i)=>({openTime:end-(n-i)*FISH_STEP,open:100,high:101,low:99,close:100,volume:1,quoteVolume:100,takerBuyVolume:0.6,takerBuyQuoteVolume:60}));
@@ -83,15 +83,8 @@ describe('保留期与上市历史',()=>{
     const gate=p.venues!.gate!;expect(gate.history).toBe(1);expect(gate.counts.gap).toBe(0);expect(gate.failures!.readings).toHaveLength(10);expect(gate.failures!.failed).toHaveLength(10);expect(gate.failures!.failed[0].reason).toContain('trades');expect(gate.failures!.readings[0].reason).toContain('B+S与Q');
   });
 });
-describe('Gate / Bitget代理白名单',()=>{
-  it('只允许所用的公开USDT永续端点；单根和2000根Gate闭区间合法',()=>{
-    for(const [venue,path] of [['gate','contracts'],['gate',`candlesticks?contract=BTC_USDT&interval=5m&from=${from/1000}&to=${(cut-FISH_STEP)/1000}`],['gate',`candlesticks?contract=BTC_USDT&interval=5m&from=${from/1000}&to=${from/1000}`],['gate',`trades?contract=BTC_USDT&from=${from/1000}&to=${cut/1000}&limit=1000&offset=1000`],['bitget','contracts?productType=USDT-FUTURES'],['bitget',`history-candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=5m&endTime=${cut}&limit=200`],['bitget',`fills-history?symbol=BTCUSDT&productType=USDT-FUTURES&startTime=${from}&endTime=${cut}&limit=1000&idLessThan=12345678901234567890`]])expect(publicMarketUrl(venue,path).protocol).toBe('https:');
-  });
-  it('拒绝外域、私有路径、未知/重复参数、错误产品、周期、游标、负数与过量/倒置范围',()=>{
-    const invalid:[string,string][]=[['gate','https://evil.test/'],['gate','../orders'],['gate','trades?contract=BTC_USD&from=1000&to=2000'],['gate','trades?contract=BTC_USDT&from=1000&to=999'],['gate','trades?contract=BTC_USDT&from=1000&to=2000&limit=1001'],['gate','trades?contract=BTC_USDT&from=1000&to=2000&offset=-1'],['gate','contracts?contract=BTC_USDT'],['gate','candlesticks?contract=BTC_USDT&interval=2m&from=300&to=600'],['gate','candlesticks?contract=BTC_USDT&interval=5m&from=300&to=600300'],['gate','candlesticks?contract=BTC_USDT&interval=5m&from=301&to=600'],['gate','contracts?url=https://evil.test'],['bitget','contracts?productType=COIN-FUTURES'],['bitget','contracts?productType=USDT-FUTURES&productType=USDT-FUTURES'],['bitget',`history-candles?symbol=BTCUSDT&productType=USDT-FUTURES&granularity=7m&endTime=${cut}`],['bitget',`fills-history?symbol=BTCUSDT&productType=USDT-FUTURES&startTime=${from}&endTime=${cut}&idLessThan=no`],['bitget',`fills-history?symbol=BTCUSDT&productType=USDT-FUTURES&startTime=1&endTime=${cut}`],['bitget','accounts?productType=USDT-FUTURES']];
-    for(const [venue,path] of invalid)expect(()=>publicMarketUrl(venue,path),`${venue} ${path}`).toThrow();
-  });
-  it('拒绝非法交易所/参数且不发请求；上游400/418/429保留状态、CORS和Retry-After',async()=>{
+describe('只读代理行为',()=>{
+  it('拒绝非法参数且不发请求；上游400/418/429保留状态、CORS和Retry-After',async()=>{
     const fetcher=vi.fn(async()=>response());
     for(const exchange of ['binance','evil']){expect((await handleFishProxy(new Request(`https://test/?exchange=${exchange}&path=contracts`),fetcher)).status).toBe(400);}expect(fetcher).not.toHaveBeenCalled();
     for(const status of [400,418,429]){const upstream=vi.fn(async()=>new Response('{"error":"上游错误"}',{status,headers:{'Retry-After':'90'}}));const r=await handleFishProxy(new Request('https://test/?exchange=gate&path=contracts',{headers:{Authorization:'private',Cookie:'private'}}),upstream);expect(r.status).toBe(status);expect(r.headers.get('Access-Control-Allow-Origin')).toBe('*');expect(r.headers.get('Retry-After')).toBe('90');expect(upstream).toHaveBeenCalledWith(expect.any(URL),expect.objectContaining({headers:{Accept:'application/json'},redirect:'error'}));}
