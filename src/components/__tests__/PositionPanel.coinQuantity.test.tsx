@@ -23,7 +23,6 @@ vi.mock('@/lib/journalApi', () => ({
 const coinPosition = (over: Partial<Position> = {}): Position => ({
   id: 'p1',
   side: 'LONG',
-  symbol: 'RAVEUSD',
   quantity: 13_291,
   contracts: 13_291,
   entryPrice: 0.451043,
@@ -37,14 +36,14 @@ const coinPosition = (over: Partial<Position> = {}): Position => ({
   ...over,
 } as Position);
 
-function renderPanel(position: Position, price: number) {
+function renderPanel(position: Position, price: number, symbol = 'RAVEUSD') {
   return render(
     <PositionPanel
-      positionsMap={{ [position.symbol]: [position] }}
+      positionsMap={{ [symbol]: [position] }}
       ordersMap={{}}
       tradeHistory={[]}
-      priceMap={{ [position.symbol]: price }}
-      activeSymbol={position.symbol}
+      priceMap={{ [symbol]: price }}
+      activeSymbol={symbol}
       onClosePosition={vi.fn()}
       onCancelOrder={vi.fn()}
       activeTab="positions"
@@ -80,10 +79,10 @@ describe('币本位持仓的持币数量', () => {
 
   it('U 本位不受影响——它的数量本来就是币量，不该多出一个「张」', () => {
     const uPosition = coinPosition({
-      symbol: 'BTCUSDT', settlementMode: 'usdt', settlementAsset: undefined,
+      settlementMode: 'usdt', settlementAsset: undefined,
       contracts: undefined, contractSizeUsd: undefined, quantity: 1.5, entryPrice: 60_000,
     });
-    renderPanel(uPosition, 61_000);
+    renderPanel(uPosition, 61_000, 'BTCUSDT');
     expect(screen.getByText('1.5000')).toBeInTheDocument();
     expect(screen.queryByText(/张/)).not.toBeInTheDocument();
   });
